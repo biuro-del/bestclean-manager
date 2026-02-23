@@ -5,6 +5,7 @@ const http = require('node:http')
 const PORT = Number(process.env.PORT || 8080)
 const HOST = '0.0.0.0'
 const DIST_DIR = path.join(__dirname, 'web-app', 'dist')
+const APP_TARGET = String(process.env.APP_TARGET || '').trim().toLowerCase()
 
 const MIME_BY_EXT = {
   '.css': 'text/css; charset=utf-8',
@@ -19,13 +20,32 @@ const MIME_BY_EXT = {
   '.webp': 'image/webp',
 }
 
+function resolveSpaEntryFile() {
+  const candidates =
+    APP_TARGET === 'mobile'
+      ? ['index.html', 'mobile.html', path.join('apps', 'mobile-web', 'mobile.html')]
+      : ['index.html', path.join('apps', 'portal-web', 'index.html'), 'mobile.html', path.join('apps', 'mobile-web', 'mobile.html')]
+
+  for (const candidate of candidates) {
+    const fullPath = path.join(DIST_DIR, candidate)
+    if (fs.existsSync(fullPath)) {
+      return fullPath
+    }
+  }
+
+  return path.join(DIST_DIR, 'index.html')
+}
+
+const SPA_ENTRY_FILE = resolveSpaEntryFile()
+const SPA_ENTRY_RELATIVE = path.relative(DIST_DIR, SPA_ENTRY_FILE).split(path.sep).join('/')
+
 function safeResolveStaticPath(urlPathname) {
   const decoded = decodeURIComponent(urlPathname || '/')
   const normalized = path.posix.normalize(decoded).replace(/^(\.\.(\/|\\|$))+/, '')
-  const relative = normalized === '/' ? '/index.html' : normalized
+  const relative = normalized === '/' ? `/${SPA_ENTRY_RELATIVE}` : normalized
   const absolute = path.join(DIST_DIR, relative)
   if (!absolute.startsWith(DIST_DIR)) {
-    return path.join(DIST_DIR, 'index.html')
+    return SPA_ENTRY_FILE
   }
   return absolute
 }
@@ -68,7 +88,7 @@ const server = http.createServer((req, res) => {
   const wantsHtml = !path.extname(wantedFile)
 
   if (wantsHtml) {
-    sendFile(res, path.join(DIST_DIR, 'index.html'))
+    sendFile(res, SPA_ENTRY_FILE)
     return
   }
 
@@ -77,7 +97,7 @@ const server = http.createServer((req, res) => {
       sendFile(res, wantedFile)
       return
     }
-    sendFile(res, path.join(DIST_DIR, 'index.html'))
+    sendFile(res, SPA_ENTRY_FILE)
   })
 })
 
