@@ -1,0 +1,893 @@
+<script>
+(function(){
+  const $ = (sel, root=document) => root.querySelector(sel);
+
+  const state = {
+    token: "",
+    clients: [],
+    zones: [],
+    currentClient: "",
+    currentQr: "",
+    daily: [],
+    dailyHist: [],
+    extraOpen: [],
+    extraHist: [],
+    logs: []
+  };
+
+  function token(){
+    return (window.FIDO_AUTH && typeof window.FIDO_AUTH.getToken === "function")
+      ? window.FIDO_AUTH.getToken()
+      : "";
+  }
+
+  function esc(s){
+    return String(s ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
+  }
+  function norm(s){ return String(s ?? "").trim().toLowerCase(); }
+
+  function pad2(n){ return String(n).padStart(2,"0"); }
+
+  function getMonthRange(monthValue){
+    // monthValue: "YYYY-MM"
+    const mv = String(monthValue || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(mv)) return { fromDate:"", toDate:"" };
+    const [yStr, mStr] = mv.split("-");
+    const y = parseInt(yStr, 10);
+    const m = parseInt(mStr, 10);
+    if (!isFinite(y) || !isFinite(m) || m < 1 || m > 12) return { fromDate:"", toDate:"" };
+
+    const fromDate = `${yStr}-${mStr}-01`;
+    const lastDay = new Date(y, m, 0).getDate(); // day 0 of next month = last day of this month
+    const toDate = `${yStr}-${mStr}-${pad2(lastDay)}`;
+    return { fromDate, toDate };
+  }
+
+  function setDefaultMonth(){
+    const el = document.getElementById("logMonth");
+    if (!el) return;
+    if (el.value) return;
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = pad2(d.getMonth()+1);
+    el.value = `${y}-${m}`;
+  }
+
+
+  function setActiveTab(which){
+    const d = $("#chkTabDaily"), e = $("#chkTabExtra"), l = $("#chkTabLogs");
+    const pd = $("#chkPaneDaily"), pe = $("#chkPaneExtra"), pl = $("#chkPaneLogs");
+
+    if (pd) pd.style.display = (which === "daily") ? "" : "none";
+    if (pe) pe.style.display = (which === "extra") ? "" : "none";
+    if (pl) pl.style.display = (which === "logs") ? "" : "none";
+
+    // btn2 primary = aktywna
+    if (d) d.classList.toggle("primary", which === "daily");
+    if (e) e.classList.toggle("primary", which === "extra");
+    if (l) l.classList.toggle("primary", which === "logs");
+  }
+
+  function ensureDom(){
+    return !!document.getElementById("chkClientSelect");
+  }
+
+  function api(){
+    return google.script.run;
+  }
+
+  // ========= MODAL (normalne okno w portalu, bez prompt) =========
+  function modalEls(){
+    return {
+      overlay: document.getElementById("chkModalOverlay"),
+      title: document.getElementById("chkModalTitle"),
+      meta: document.getElementById("chkModalMeta"),
+      body: document.getElementById("chkModalBody"),
+      foot: document.getElementById("chkModalFoot"),
+      close: document.getElementById("chkModalClose")
+    };
+  }
+
+  function modalOpen({title, meta, bodyHtml, buttons}){
+    const m = modalEls();
+    if (!m.overlay) return;
+
+    m.title.textContent = title || "—";
+    if (m.meta) m.meta.textContent = meta || "";
+    if (m.body) m.body.innerHTML = bodyHtml || "";
+    if (m.foot){
+      m.foot.innerHTML = "";
+      (buttons || []).forEach(btn=>{
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = btn.className || "btn2";
+        b.textContent = btn.label || "OK";
+        b.onclick = () => btn.onClick && btn.onClick();
+        m.foot.appendChild(b);
+      });
+    }
+
+    m.overlay.style.display = "flex";
+    m.overlay.setAttribute("aria-hidden","false");
+  }
+
+  function modalClose(){
+    const m = modalEls();
+    if (!m.overlay) return;
+    m.overlay.style.display = "none";
+    m.overlay.setAttribute("aria-hidden","true");
+  }
+
+  function bindModal(){
+    const m = modalEls();
+    if (!m.overlay) return;
+
+    if (m.close) m.close.onclick = modalClose;
+
+    m.overlay.addEventListener("click", (e)=>{
+      if (e.target === m.overlay) modalClose();
+    });
+
+    document.addEventListener("keydown", (e)=>{
+      if (e.key === "Escape") modalClose();
+    });
+  }
+
+  // ---------- LOADERS ----------
+  function loadClients(){
+    const sel = $("#chkClientSelect");
+    const zoneSel = $("#chkZoneSelect");
+    if (!sel || !zoneSel) return;
+
+    sel.innerHTML = `<option value="">— wybierz —</option>`;
+    zoneSel.innerHTML = `<option value="">— wybierz —</option>`;
+
+    api()
+      .withSuccessHandler(res=>{
+        const items = (res && res.items) ? res.items : [];
+        state.clients = items;
+
+        items.forEach(c=>{
+          const nm = String(c.nazwa || "").trim();
+          if (!nm) return;
+          const opt = document.createElement("option");
+          opt.value = nm;
+          opt.textContent = nm;
+          sel.appendChild(opt);
+        });
+
+        if (state.currentClient) sel.value = state.currentClient;
+        onClientChange();
+      })
+      .withFailureHandler(err=>{
+        console.error("Checklisty: api_listClients error", err);
+        sel.innerHTML = `<option value="">Błąd pobierania klientów</option>`;
+      })
+      .api_listClients({ token: state.token });
+  }
+
+  function loadZonesForClient(clientName){
+    const zSel = $("#chkZoneSelect");
+    if (!zSel) return;
+
+    zSel.innerHTML = `<option value="">— wybierz —</option>`;
+
+    if (!clientName){
+      state.zones = [];
+      state.currentQr = "";
+      return;
+    }
+
+    api()
+      .withSuccessHandler(res=>{
+        const items = (res && res.items) ? res.items : [];
+        state.zones = items;
+
+        // label: Strefa (kol C), value: QrId (kol A)
+        const counts = {};
+        items.forEach(z=>{
+          const name = String(z.strefa || "").trim();
+          const k = norm(name);
+          if (!k) return;
+          counts[k] = (counts[k] || 0) + 1;
+        });
+
+        items.sort((a,b)=>{
+          const as = norm(a.strefa), bs = norm(b.strefa);
+          if (as === bs){
+            const aq = norm(a.qr), bq = norm(b.qr);
+            return aq < bq ? -1 : (aq > bq ? 1 : 0);
+          }
+          return as < bs ? -1 : 1;
+        });
+
+        items.forEach(z=>{
+          const qr = String(z.qr || "").trim();
+          const strefa = String(z.strefa || "").trim();
+          const lok = String(z.lokalizacja || "").trim();
+          if (!qr) return;
+
+          const key = norm(strefa);
+          let label = strefa || qr;
+
+          if (strefa && counts[key] > 1) label = `${strefa} • ${qr}`;
+          else if (strefa && lok) label = `${strefa} — ${lok}`;
+
+          const opt = document.createElement("option");
+          opt.value = qr;          // backend używa QrId
+          opt.textContent = label; // UI pokazuje strefę z C
+          zSel.appendChild(opt);
+        });
+
+        if (state.currentQr) zSel.value = state.currentQr;
+        onZoneChange();
+      })
+      .withFailureHandler(err=>{
+        console.error("Checklisty: api_listZones error", err);
+        zSel.innerHTML = `<option value="">Błąd pobierania stref</option>`;
+      })
+      .api_listZones({ token: state.token, klient: clientName, limit: 500 });
+  }
+
+  // ---------- RENDERS ----------
+  function setEmpty(tbodyId, colspan, msg){
+    const tb = document.getElementById(tbodyId);
+    if (!tb) return;
+    tb.innerHTML = `<tr><td colspan="${colspan}" class="chk-empty">${esc(msg)}</td></tr>`;
+  }
+
+  function renderDaily(){
+    const tb = document.getElementById("dailyTbody");
+    if (!tb) return;
+
+    tb.innerHTML = "";
+
+    if (!state.currentQr){
+      setEmpty("dailyTbody", 6, "Wybierz strefę.");
+      renderDailyHistory();
+      return;
+    }
+
+    if (!state.daily.length){
+      setEmpty("dailyTbody", 6, "Brak czynności (Aktywne=TAK).");
+    } else {
+      state.daily.forEach(it=>{
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${esc(it.Order ?? "")}</td>
+          <td title="${esc(it.TaskName)}" style="white-space:normal; max-width:540px;">${esc(it.TaskName)}</td>
+          <td>${esc(it.Required)}</td>
+          <td>${esc(it.Active)}</td>
+          <td class="muted">${esc(it.UpdatedAt || "")}</td>
+          <td style="text-align:right;">
+            <div class="chk-actions">
+              <button class="btn2" data-act="up">↑</button>
+              <button class="btn2" data-act="down">↓</button>
+              <button class="btn2" data-act="edit">Edytuj</button>
+              <button class="btn2 danger" data-act="del">Usuń</button>
+            </div>
+          </td>
+        `;
+
+        tr.querySelector('[data-act="up"]').onclick = ()=>{
+          api().withSuccessHandler(()=> refreshDaily()).withFailureHandler(console.error)
+            .api_checklists_daily_move({ token: state.token, qr: state.currentQr, taskId: it.TaskId, dir: "UP" });
+        };
+        tr.querySelector('[data-act="down"]').onclick = ()=>{
+          api().withSuccessHandler(()=> refreshDaily()).withFailureHandler(console.error)
+            .api_checklists_daily_move({ token: state.token, qr: state.currentQr, taskId: it.TaskId, dir: "DOWN" });
+        };
+        tr.querySelector('[data-act="edit"]').onclick = ()=> openDailyModal(it);
+        tr.querySelector('[data-act="del"]').onclick = ()=>{
+          if(!confirm("Ustawić Aktywne = NIE?")) return;
+          api().withSuccessHandler(()=> refreshDaily()).withFailureHandler(console.error)
+            .api_checklists_daily_softDelete({ token: state.token, taskId: it.TaskId });
+        };
+
+        tb.appendChild(tr);
+      });
+    }
+
+    renderDailyHistory();
+  }
+
+  function renderDailyHistory(){
+    const tbH = document.getElementById("dailyHistTbody");
+    if (!tbH) return;
+
+    tbH.innerHTML = "";
+
+    if (!state.currentQr){
+      setEmpty("dailyHistTbody", 5, "Wybierz strefę.");
+      return;
+    }
+
+    if (!state.dailyHist || !state.dailyHist.length){
+      setEmpty("dailyHistTbody", 5, "Brak historii (Aktywne=NIE).");
+      return;
+    }
+
+    state.dailyHist.forEach(it=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${esc(it.Order ?? "")}</td>
+        <td title="${esc(it.TaskName)}" style="white-space:normal; max-width:520px;">${esc(it.TaskName)}</td>
+        <td>${esc(it.Required)}</td>
+        <td class="muted">${esc(it.UpdatedAt || "")}</td>
+        <td class="muted">${esc(it.UpdatedBy || "")}</td>
+      `;
+      tbH.appendChild(tr);
+    });
+  }
+
+  function renderExtra(){
+    const tbO = document.getElementById("extraOpenTbody");
+    const tbH = document.getElementById("extraHistTbody");
+    if (!tbO || !tbH) return;
+
+    tbO.innerHTML = "";
+    tbH.innerHTML = "";
+
+    if (!state.currentQr){
+      setEmpty("extraOpenTbody", 6, "Wybierz strefę.");
+      setEmpty("extraHistTbody", 6, "Wybierz strefę.");
+      return;
+    }
+
+    if (!state.extraOpen.length){
+      setEmpty("extraOpenTbody", 6, "Brak pozycji OPEN.");
+    } else {
+      state.extraOpen.forEach(it=>{
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${esc(it.Priority ?? "")}</td>
+          <td title="${esc(it.TaskName)}" style="white-space:normal; max-width:520px;">${esc(it.TaskName)}</td>
+          <td>${esc(it.Required)}</td>
+          <td class="muted">${esc(it.CreatedAt || "")}</td>
+          <td class="muted">${esc(it.CreatedBy || "")}</td>
+          <td style="text-align:right;">
+            <div class="chk-actions">
+              <button class="btn2 danger" data-act="cancel">Anuluj</button>
+            </div>
+          </td>
+        `;
+        tr.querySelector('[data-act="cancel"]').onclick = ()=>{
+          if(!confirm("Ustawić Status = CANCELED?")) return;
+          api().withSuccessHandler(()=> refreshExtra()).withFailureHandler(console.error)
+            .api_checklists_extra_cancel({ token: state.token, extraId: it.ExtraId });
+        };
+        tbO.appendChild(tr);
+      });
+    }
+
+    if (!state.extraHist.length){
+      setEmpty("extraHistTbody", 6, "Brak historii.");
+    } else {
+      state.extraHist.forEach(it=>{
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><b>${esc(it.Status || "")}</b></td>
+          <td title="${esc(it.TaskName)}" style="white-space:normal; max-width:520px;">${esc(it.TaskName)}</td>
+          <td>${esc(it.Priority ?? "")}</td>
+          <td class="muted">${esc(it.ClosedAt || "")}</td>
+          <td class="muted">${esc(it.ClosedBy || "")}</td>
+          <td title="${esc(it.NotDoneReason || "")}" style="white-space:normal; max-width:520px;">${esc(it.NotDoneReason || "")}</td>
+        `;
+        tbH.appendChild(tr);
+      });
+    }
+  }
+
+  function renderLogs(){
+    const tb = document.getElementById("logsTbody");
+    if (!tb) return;
+
+    tb.innerHTML = "";
+
+    if (!state.currentQr) return setEmpty("logsTbody", 7, "Wybierz strefę.");
+    if (!state.logs.length) return setEmpty("logsTbody", 7, "Brak logów.");
+
+    state.logs.forEach(it=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${esc(it.Date || "")}</td>
+        <td title="${esc(it.Worker||"")}">${esc(it.Worker || "")}</td>
+        <td title="${esc(it.Object||"")}" style="white-space:normal; max-width:480px;">${esc(it.Object || "")}</td>
+        <td>${esc(it.QrId || "")}</td>
+        <td title="${esc(it.DailyStats||"")}">${esc(it.DailyStats || "")}</td>
+        <td title="${esc(it.ExtraStats||"")}">${esc(it.ExtraStats || "")}</td>
+        <td class="muted">${esc(it.SubmittedAt || "")}</td>
+      `;
+      tb.appendChild(tr);
+    });
+  }
+
+  
+
+  // ======= HISTORIA KLIENTA (bez wyboru strefy) =======
+  function renderDailyClient(){
+    const tb = document.getElementById("dailyClientTbody");
+    if (!tb) return;
+
+    tb.innerHTML = "";
+
+    if (!state.currentClient){
+      setEmpty("dailyClientTbody", 7, "Wybierz klienta.");
+      return;
+    }
+    if (!state.dailyClient || !state.dailyClient.length){
+      setEmpty("dailyClientTbody", 7, "Brak danych dla klienta.");
+      return;
+    }
+
+    state.dailyClient.forEach(it=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td title="${esc(it.Zone || "")}" style="white-space:normal;">${esc(it.Zone || "")}</td>
+        <td>${esc(it.QrId || "")}</td>
+        <td>${esc(it.Active || "")}</td>
+        <td title="${esc(it.TaskName)}" style="white-space:normal; max-width:520px;">${esc(it.TaskName)}</td>
+        <td>${esc(it.Required || "")}</td>
+        <td class="muted">${esc(it.UpdatedAt || "")}</td>
+        <td class="muted">${esc(it.UpdatedBy || "")}</td>
+      `;
+      tb.appendChild(tr);
+    });
+  }
+
+  function renderExtraClient(){
+    const tb = document.getElementById("extraClientTbody");
+    if (!tb) return;
+
+    tb.innerHTML = "";
+
+    if (!state.currentClient){
+      setEmpty("extraClientTbody", 10, "Wybierz klienta.");
+      return;
+    }
+    if (!state.extraClient || !state.extraClient.length){
+      setEmpty("extraClientTbody", 10, "Brak danych dla klienta.");
+      return;
+    }
+
+    state.extraClient.forEach(it=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td title="${esc(it.Zone || "")}" style="white-space:normal;">${esc(it.Zone || "")}</td>
+        <td>${esc(it.QrId || "")}</td>
+        <td><b>${esc(it.Status || "")}</b></td>
+        <td>${esc(it.Priority ?? "")}</td>
+        <td title="${esc(it.TaskName)}" style="white-space:normal; max-width:520px;">${esc(it.TaskName)}</td>
+        <td>${esc(it.Required || "")}</td>
+        <td class="muted">${esc(it.CreatedAt || "")}</td>
+        <td class="muted">${esc(it.CreatedBy || "")}</td>
+        <td class="muted">${esc(it.ClosedAt || "")}</td>
+        <td class="muted">${esc(it.ClosedBy || "")}</td>
+      `;
+      tb.appendChild(tr);
+    });
+  }
+
+  function renderLogsClient(){
+    const tb = document.getElementById("logsClientTbody");
+    if (!tb) return;
+
+    tb.innerHTML = "";
+
+    if (!state.currentClient){
+      setEmpty("logsClientTbody", 7, "Wybierz klienta.");
+      return;
+    }
+    if (!state.logsClient || !state.logsClient.length){
+      setEmpty("logsClientTbody", 7, "Brak logów dla klienta (w wybranym miesiącu).");
+      return;
+    }
+
+    state.logsClient.forEach(it=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${esc(it.Date || "")}</td>
+        <td title="${esc(it.Worker||"")}">${esc(it.Worker || "")}</td>
+        <td title="${esc(it.Object||"")}" style="white-space:normal; max-width:480px;">${esc(it.Object || "")}</td>
+        <td>${esc(it.QrId || "")}</td>
+        <td title="${esc(it.DailyStats||"")}">${esc(it.DailyStats || "")}</td>
+        <td title="${esc(it.ExtraStats||"")}">${esc(it.ExtraStats || "")}</td>
+        <td class="muted">${esc(it.SubmittedAt || "")}</td>
+      `;
+      tb.appendChild(tr);
+    });
+  }
+
+  function refreshClientDaily(){
+    if (!state.currentClient){
+      state.dailyClient = [];
+      return renderDailyClient();
+    }
+    api()
+      .withSuccessHandler(res=>{ state.dailyClient = (res && res.items) ? res.items : []; renderDailyClient(); })
+      .withFailureHandler(err=>{ console.error("Checklisty: daily_client error", err); state.dailyClient=[]; renderDailyClient(); })
+      .api_checklists_daily_listClient({ token: state.token, client: state.currentClient });
+  }
+
+  function refreshClientExtra(){
+    if (!state.currentClient){
+      state.extraClient = [];
+      return renderExtraClient();
+    }
+    api()
+      .withSuccessHandler(res=>{ state.extraClient = (res && res.items) ? res.items : []; renderExtraClient(); })
+      .withFailureHandler(err=>{ console.error("Checklisty: extra_client error", err); state.extraClient=[]; renderExtraClient(); })
+      .api_checklists_extra_listClient({ token: state.token, client: state.currentClient });
+  }
+
+  function refreshClientLogs(){
+    if (!state.currentClient){
+      state.logsClient = [];
+      return renderLogsClient();
+    }
+
+    setDefaultMonth();
+    const mv = (document.getElementById("logMonth").value || "").trim();
+    const rng = getMonthRange(mv);
+    const fromDate = rng.fromDate;
+    const toDate = rng.toDate;
+    const worker = (document.getElementById("logWorker").value || "").trim();
+
+    api()
+      .withSuccessHandler(res=>{ state.logsClient = (res && res.items) ? res.items : []; renderLogsClient(); })
+      .withFailureHandler(err=>{ console.error("Checklisty: logs_client error", err); state.logsClient=[]; renderLogsClient(); })
+      .api_checklists_logs_listClient({ token: state.token, client: state.currentClient, fromDate, toDate, worker });
+  }
+// ---------- REFRESH ----------
+  function refreshDaily(){
+    if (!state.currentQr){
+      state.daily = [];
+      state.dailyHist = [];
+      renderDaily();
+      return;
+    }
+
+    api()
+      .withSuccessHandler(res=>{ state.daily = (res && res.items) ? res.items : []; renderDaily(); })
+      .withFailureHandler(err=>{ console.error("Checklisty: daily_list error", err); state.daily=[]; renderDaily(); })
+      .api_checklists_daily_list({ token: state.token, qr: state.currentQr });
+
+    refreshDailyHistory();
+  }
+
+  function refreshDailyHistory(){
+    if (!state.currentQr) return renderDailyHistory();
+
+    api()
+      .withSuccessHandler(res=>{
+        state.dailyHist = (res && res.items) ? res.items : [];
+        renderDailyHistory();
+      })
+      .withFailureHandler(err=>{
+        console.error("Checklisty: daily_history error", err);
+        state.dailyHist = [];
+        renderDailyHistory();
+      })
+      .api_checklists_daily_listHistory({ token: state.token, qr: state.currentQr });
+  }
+
+  function refreshExtra(){
+    if (!state.currentQr) return renderExtra();
+
+    api()
+      .withSuccessHandler(res=>{ state.extraOpen = (res && res.items) ? res.items : []; renderExtra(); })
+      .withFailureHandler(err=>{ console.error("Checklisty: extra_open error", err); state.extraOpen=[]; renderExtra(); })
+      .api_checklists_extra_listOpen({ token: state.token, qr: state.currentQr });
+
+    api()
+      .withSuccessHandler(res=>{ state.extraHist = (res && res.items) ? res.items : []; renderExtra(); })
+      .withFailureHandler(err=>{ console.error("Checklisty: extra_hist error", err); state.extraHist=[]; renderExtra(); })
+      .api_checklists_extra_listHistory({ token: state.token, qr: state.currentQr });
+  }
+
+  function refreshLogs(){
+    if (!state.currentQr) return renderLogs();
+
+    setDefaultMonth();
+    const mv = (document.getElementById("logMonth").value || "").trim();
+    const rng = getMonthRange(mv);
+    const fromDate = rng.fromDate;
+    const toDate = rng.toDate;
+const worker = (document.getElementById("logWorker").value || "").trim();
+
+    api()
+      .withSuccessHandler(res=>{ state.logs = (res && res.items) ? res.items : []; renderLogs(); })
+      .withFailureHandler(err=>{ console.error("Checklisty: logs_list error", err); state.logs=[]; renderLogs(); })
+      .api_checklists_logs_list({ token: state.token, qr: state.currentQr, fromDate, toDate, worker });
+  }
+
+  function exportLogs(){
+    if (!state.currentQr) return;
+
+    setDefaultMonth();
+    const mv = (document.getElementById("logMonth").value || "").trim();
+    const rng = getMonthRange(mv);
+    const fromDate = rng.fromDate;
+    const toDate = rng.toDate;
+const worker = (document.getElementById("logWorker").value || "").trim();
+
+    api()
+      .withSuccessHandler(res=>{
+        const csv = (res && res.csv) ? res.csv : "";
+        const filename = (res && res.filename) ? res.filename : "Checklist_Log_export.csv";
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(()=> URL.revokeObjectURL(url), 5000);
+      })
+      .withFailureHandler(err=>{ console.error("Checklisty: export error", err); alert("Błąd eksportu CSV."); })
+      .api_checklists_logs_exportCsv({ token: state.token, qr: state.currentQr, fromDate, toDate, worker });
+  }
+
+  // ========= FORMY w MODALU =========
+  function dailyFormHtml(model){
+    model = model || {};
+    const isEdit = !!model.TaskId;
+    const required = model.Required || "TAK";
+    const active = model.Active || "TAK";
+    const order = (model.Order ?? "");
+    return `
+      <div class="form-grid">
+        <div class="form-field span-2">
+          <label>Nazwa zadania</label>
+          <input id="chkTaskName" type="text" placeholder="np. Umyj podłogę" value="${esc(model.TaskName || "")}">
+        </div>
+
+        <div class="form-field">
+          <label>Wymagane</label>
+          <select id="chkRequired">
+            <option ${required==="TAK"?"selected":""}>TAK</option>
+            <option ${required==="NIE"?"selected":""}>NIE</option>
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label>Kolejność</label>
+          <input id="chkOrder" type="number" placeholder="auto" value="${esc(order)}">
+        </div>
+
+        ${isEdit ? `
+        <div class="form-field">
+          <label>Aktywne</label>
+          <select id="chkActive">
+            <option ${active==="TAK"?"selected":""}>TAK</option>
+            <option ${active==="NIE"?"selected":""}>NIE</option>
+          </select>
+        </div>
+        ` : `
+        <div class="form-field">
+          <label>Aktywne</label>
+          <input type="text" value="TAK" disabled>
+        </div>
+        `}
+      </div>
+
+      <p class="muted" style="margin-top: 10px;">Pole <b>Aktywne</b> = NIE usuwa wpis z listy (soft delete).</p>
+    `;
+  }
+
+  function openDailyModal(model){
+    if (!state.currentQr) return alert("Najpierw wybierz strefę.");
+
+    const isEdit = !!(model && model.TaskId);
+    const title = isEdit ? "Edytuj czynność DAILY" : "Dodaj czynność DAILY";
+    const meta = `Strefa (QrId): ${state.currentQr}`;
+
+    modalOpen({
+      title,
+      meta,
+      bodyHtml: dailyFormHtml(model),
+      buttons: [
+        { label: "Anuluj", className: "btn2", onClick: modalClose },
+        { label: "Zapisz", className: "btn2 primary", onClick: ()=> saveDaily(model) }
+      ]
+    });
+  }
+
+  function saveDaily(model){
+    const taskName = (document.getElementById("chkTaskName").value || "").trim();
+    const required = (document.getElementById("chkRequired").value || "").trim();
+    const order = (document.getElementById("chkOrder").value || "").trim();
+    const activeEl = document.getElementById("chkActive");
+    const active = activeEl ? String(activeEl.value || "TAK").trim() : "TAK";
+
+    if (!taskName) return alert("Podaj nazwę zadania.");
+
+    if (model && model.TaskId){
+      api().withSuccessHandler(()=>{
+          modalClose();
+          refreshDaily();
+        })
+        .withFailureHandler(err=>{
+          console.error(err);
+          alert("Błąd zapisu.");
+        })
+        .api_checklists_daily_update({
+          token: state.token,
+          taskId: model.TaskId,
+          taskName,
+          required,
+          order,
+          active
+        });
+    } else {
+      api().withSuccessHandler(()=>{
+          modalClose();
+          refreshDaily();
+        })
+        .withFailureHandler(err=>{
+          console.error(err);
+          alert("Błąd zapisu.");
+        })
+        .api_checklists_daily_create({
+          token: state.token,
+          qr: state.currentQr,
+          taskName,
+          required,
+          order
+        });
+    }
+  }
+
+  function extraFormHtml(){
+    return `
+      <div class="form-grid">
+        <div class="form-field span-2">
+          <label>Nazwa zadania</label>
+          <input id="chkExtraTaskName" type="text" placeholder="np. Uzupełnij ręczniki papierowe">
+        </div>
+
+        <div class="form-field">
+          <label>Wymagane</label>
+          <select id="chkExtraRequired">
+            <option>TAK</option>
+            <option>NIE</option>
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label>Priorytet</label>
+          <select id="chkExtraPriority">
+            <option value="3">3 (wysoki)</option>
+            <option value="2" selected>2 (średni)</option>
+            <option value="1">1 (niski)</option>
+          </select>
+        </div>
+      </div>
+
+      <p class="muted" style="margin-top: 10px;">Nowe EXTRA zawsze zapisuje się jako <b>Status = OPEN</b>.</p>
+    `;
+  }
+
+  function openExtraModal(){
+    if (!state.currentQr) return alert("Najpierw wybierz strefę.");
+
+    modalOpen({
+      title: "Dodaj EXTRA",
+      meta: `Strefa (QrId): ${state.currentQr}`,
+      bodyHtml: extraFormHtml(),
+      buttons: [
+        { label: "Anuluj", className: "btn2", onClick: modalClose },
+        { label: "Zapisz", className: "btn2 primary", onClick: saveExtra }
+      ]
+    });
+  }
+
+  function saveExtra(){
+    const taskName = (document.getElementById("chkExtraTaskName").value || "").trim();
+    const required = (document.getElementById("chkExtraRequired").value || "").trim();
+    const priority = (document.getElementById("chkExtraPriority").value || "").trim();
+
+    if (!taskName) return alert("Podaj nazwę zadania.");
+
+    api().withSuccessHandler(()=>{
+        modalClose();
+        refreshExtra();
+      })
+      .withFailureHandler(err=>{
+        console.error(err);
+        alert("Błąd zapisu.");
+      })
+      .api_checklists_extra_create({
+        token: state.token,
+        qr: state.currentQr,
+        taskName,
+        required,
+        priority
+      });
+  }
+
+  function openDailyCopyModal(){
+    if (!state.currentQr) return;
+    const from = prompt("Podaj źródłowy QrId (from):", "");
+    if (!from) return;
+    const mode = prompt("Tryb: MERGE lub REPLACE", "MERGE");
+    if (!mode) return;
+
+    api()
+      .withSuccessHandler(res=>{
+        alert("Skopiowano: " + (res && res.copied ? res.copied : 0));
+        refreshDaily();
+      })
+      .withFailureHandler(err=>{
+        console.error(err);
+        alert("Błąd kopiowania.");
+      })
+      .api_checklists_daily_copy({ token: state.token, fromQr: String(from).trim(), toQr: state.currentQr, mode: String(mode).trim() });
+  }
+
+  // ---------- EVENTS ----------
+  function onClientChange(){
+    const sel = $("#chkClientSelect");
+    state.currentClient = (sel && sel.value) ? String(sel.value).trim() : "";
+    state.currentQr = "";
+    const zSel = $("#chkZoneSelect");
+    if (zSel) zSel.value = "";
+    loadZonesForClient(state.currentClient);
+    // Historia klienta ładuje się od razu po wyborze klienta
+    refreshClientDaily();
+    refreshClientExtra();
+    refreshClientLogs();
+  }
+
+  function onZoneChange(){
+    const sel = $("#chkZoneSelect");
+    state.currentQr = (sel && sel.value) ? String(sel.value).trim() : "";
+    refreshAll();
+  }
+
+  function refreshAll(){
+    refreshDaily();
+    refreshExtra();
+    refreshLogs(); refreshClientLogs();
+  }
+
+  function bind(){
+    bindModal();
+
+    $("#chkClientSelect").addEventListener("change", onClientChange);
+    $("#chkZoneSelect").addEventListener("change", onZoneChange);
+    $("#chkRefreshBtn").addEventListener("click", refreshAll);
+
+    $("#chkTabDaily").addEventListener("click", ()=> setActiveTab("daily"));
+    $("#chkTabExtra").addEventListener("click", ()=> setActiveTab("extra"));
+    $("#chkTabLogs").addEventListener("click", ()=> { setActiveTab("logs"); setDefaultMonth(); refreshLogs(); refreshClientLogs(); });
+
+    $("#dailyAddBtn").addEventListener("click", ()=> openDailyModal(null));
+    $("#dailyCopyBtn").addEventListener("click", openDailyCopyModal);
+
+    $("#extraAddBtn").addEventListener("click", openExtraModal);
+
+    $("#logsSearchBtn").addEventListener("click", refreshLogs);
+    $("#logsExportBtn").addEventListener("click", exportLogs);
+    const lm = document.getElementById("logMonth");
+    if (lm) lm.addEventListener("change", ()=>{ refreshLogs(); refreshClientLogs(); refreshClientLogs(); });
+  }
+
+  window.ChecklistsModule = {
+    init: function(){
+      if (!ensureDom()) return;
+      state.token = token();
+      bind();
+      setDefaultMonth();
+      setActiveTab("daily");
+      loadClients();
+    }
+  };
+})();
+</script>

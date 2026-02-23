@@ -1,0 +1,199 @@
+/**
+ * ChecklistRepo — Sheets access for checklist definitions, extra tasks and logs.
+ *
+ * Sheets (in CONFIG.SPREADSHEET_ID):
+ *  - Checklist_Def   (daily tasks)
+ *  - Checklist_Extra (extra tasks opened by audits/portal)
+ *  - Checklist_Log   (worker submissions)
+ *
+ * QrId is the unique ID from Strefy!A (ID).
+ */
+
+const CHECKLIST_SHEETS = {
+  DEF: 'Checklist_Def',
+  EXTRA: 'Checklist_Extra',
+  LOG: 'Checklist_Log',
+};
+
+const CHECKLIST_HEADERS = {
+  DEF: ['Client','Object','QrId','TaskId','TaskName','Required','Order','Active','UpdatedAt','UpdatedBy'],
+  EXTRA: ['ExtraId','Client','Object','QrId','TaskName','Required','Priority','Status','CreatedAt','CreatedBy','ClosedAt','ClosedBy','NotDoneReason'],
+  LOG: ['LogId','Date','Worker','WorkdayId','CycleId','Client','Object','QrId','DailyStats','ExtraStats','NotDoneReasons','SubmittedAt'],
+};
+
+function ChecklistRepo_ensureSheets_() {
+  Sheets_getOrCreateByName_(CHECKLIST_SHEETS.DEF, CHECKLIST_HEADERS.DEF);
+  Sheets_getOrCreateByName_(CHECKLIST_SHEETS.EXTRA, CHECKLIST_HEADERS.EXTRA);
+  Sheets_getOrCreateByName_(CHECKLIST_SHEETS.LOG, CHECKLIST_HEADERS.LOG);
+}
+
+function ChecklistRepo_zoneMetaByQrId_(qrId) {
+  const q = String(qrId || '').trim();
+  if (!q) return { client: '', object: '' };
+
+  const sh = Sheets_getBySheetId_(CONFIG.SHEET_ID_ZONES);
+  if (!sh) return { client: '', object: '' };
+  const hm = Sheets_headerMap_(sh);
+  const colId = hm['ID'] || 1;
+  const row = Sheets_findRowIndexByValue_(sh, colId, q);
+  if (!row) return { client: '', object: '' };
+
+  const colClient = hm['Klient'] || 2;
+  const colZone = hm['Strefa'] || 3;
+
+  const client = String(sh.getRange(row, colClient).getValue() || '').trim();
+  const object = String(sh.getRange(row, colZone).getValue() || '').trim(); // store Strefa as Object label
+  return { client, object };
+}
+
+function ChecklistRepo_listDaily_(qrId) {
+  ChecklistRepo_ensureSheets_();
+  const q = String(qrId || '').trim();
+  if (!q) return [];
+
+  const sh = Sheets_getByName_(CHECKLIST_SHEETS.DEF);
+  const hm = Sheets_headerMap_(sh);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  const lastCol = sh.getLastColumn();
+  const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+
+  const cQr = hm['QrId'] || 3;
+  const cTaskId = hm['TaskId'] || 4;
+  const cName = hm['TaskName'] || 5;
+  const cReq = hm['Required'] || 6;
+  const cOrder = hm['Order'] || 7;
+  const cActive = hm['Active'] || 8;
+
+  const out = [];
+  rows.forEach(r => {
+    const rid = String(r[cQr - 1] || '').trim();
+    if (rid !== q) return;
+
+    const active = String(r[cActive - 1] || '').trim().toUpperCase();
+    if (active && active !== 'TAK' && active !== 'TRUE' && active !== '1') return;
+
+    out.push({
+      taskId: String(r[cTaskId - 1] || '').trim(),
+      taskName: String(r[cName - 1] || '').trim(),
+      required: String(r[cReq - 1] || '').trim(),
+      order: Number(r[cOrder - 1] || 0),
+    });
+  });
+
+  out.sort((a,b) => (a.order||0) - (b.order||0));
+  return out;
+}
+
+function ChecklistRepo_listExtraOpen_(qrId) {
+  ChecklistRepo_ensureSheets_();
+  const q = String(qrId || '').trim();
+  if (!q) return [];
+
+  const sh = Sheets_getByName_(CHECKLIST_SHEETS.EXTRA);
+  const hm = Sheets_headerMap_(sh);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  const lastCol = sh.getLastColumn();
+  const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+
+  const cQr = hm['QrId'] || 4;
+  const cId = hm['ExtraId'] || 1;
+  const cName = hm['TaskName'] || 5;
+  const cReq = hm['Required'] || 6;
+  const cPri = hm['Priority'] || 7;
+  const cStatus = hm['Status'] || 8;
+
+  const out = [];
+  rows.forEach(r => {
+    const rid = String(r[cQr - 1] || '').trim();
+    if (rid !== q) return;
+
+    const st = String(r[cStatus - 1] || '').trim().toUpperCase();
+    if (st !== 'OPEN') return;
+
+    out.push({
+      extraId: String(r[cId - 1] || '').trim(),
+      taskName: String(r[cName - 1] || '').trim(),
+      required: String(r[cReq - 1] || '').trim(),
+      priority: Number(r[cPri - 1] || 0),
+    });
+  });
+
+  out.sort((a,b) => (b.priority||0) - (a.priority||0));
+  return out;
+}
+
+function ChecklistRepo_logExistsByCycleId_(cycleId) {
+  ChecklistRepo_ensureSheets_();
+  const cid = String(cycleId || '').trim();
+  if (!cid) return false;
+
+  const sh = Sheets_getByName_(CHECKLIST_SHEETS.LOG);
+  const hm = Sheets_headerMap_(sh);
+  const cCycle = hm['CycleId'] || 5;
+  const row = Sheets_findRowIndexByValue_(sh, cCycle, cid);
+  return !!row;
+}
+
+function ChecklistRepo_appendLog_(rec) {
+  ChecklistRepo_ensureSheets_();
+  const sh = Sheets_getByName_(CHECKLIST_SHEETS.LOG);
+  const hm = Sheets_headerMap_(sh);
+
+  const row = new Array(sh.getLastColumn()).fill('');
+  const put = (colName, val) => {
+    const c = hm[colName];
+    if (!c) return;
+    row[c - 1] = val;
+  };
+
+  put('LogId', rec.logId || uuid_());
+  put('Date', rec.date || '');
+  put('Worker', rec.worker || '');
+  put('WorkdayId', rec.workdayId || '');
+  put('CycleId', rec.cycleId || '');
+  put('Client', rec.client || '');
+  put('Object', rec.object || '');
+  put('QrId', rec.qrId || '');
+  put('DailyStats', rec.dailyStats || '');
+  put('ExtraStats', rec.extraStats || '');
+  put('NotDoneReasons', rec.notDoneReasons || '');
+  put('SubmittedAt', rec.submittedAt || nowIso_());
+
+  sh.appendRow(row);
+}
+
+function ChecklistRepo_updateExtraStatuses_(updates, workerLabel) {
+  ChecklistRepo_ensureSheets_();
+  const sh = Sheets_getByName_(CHECKLIST_SHEETS.EXTRA);
+  const hm = Sheets_headerMap_(sh);
+
+  const cId = hm['ExtraId'] || 1;
+  const cStatus = hm['Status'] || 8;
+  const cClosedAt = hm['ClosedAt'] || 11;
+  const cClosedBy = hm['ClosedBy'] || 12;
+  const cReason = hm['NotDoneReason'] || 13;
+
+  (updates || []).forEach(u => {
+    const extraId = String(u.extraId || '').trim();
+    if (!extraId) return;
+    const row = Sheets_findRowIndexByValue_(sh, cId, extraId);
+    if (!row) return;
+
+    const status = String(u.status || '').trim().toUpperCase();
+    if (!status || status === 'OPEN') return;
+
+    sh.getRange(row, cStatus).setValue(status);
+    sh.getRange(row, cClosedAt).setValue(nowIso_());
+    sh.getRange(row, cClosedBy).setValue(String(workerLabel || '').trim());
+
+    if (status === 'NOT_DONE') {
+      sh.getRange(row, cReason).setValue(String(u.reason || '').trim());
+    } else {
+      sh.getRange(row, cReason).setValue('');
+    }
+  });
+}

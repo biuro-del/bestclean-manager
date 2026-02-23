@@ -1,0 +1,127 @@
+/**
+ * Sheets helpers: open by spreadsheet ID, get sheets by gid (sheetId), map headers.
+ *
+ * Performance notes:
+ * - SpreadsheetApp.openById(...) is relatively expensive; cache it for the current execution.
+ * - Header row reads are also expensive; cache header maps per sheetId + lastCol.
+ */
+
+var __SHEETS_CTX = null;
+
+function Sheets_ctx_() {
+  if (__SHEETS_CTX) return __SHEETS_CTX;
+  __SHEETS_CTX = {
+    ss: SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID),
+    sheetsById: {},
+    sheetsByName: {},
+    headerMaps: {}, // { [sheetId]: { lastCol:number, map:Object } }
+  };
+  return __SHEETS_CTX;
+}
+
+function Sheets_open_() {
+  return Sheets_ctx_().ss;
+}
+
+function Sheets_getBySheetId_(sheetId) {
+  const ctx = Sheets_ctx_();
+  const key = String(sheetId);
+  if (ctx.sheetsById[key]) return ctx.sheetsById[key];
+
+  // Lookup once and cache.
+  const sheets = ctx.ss.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    const sh = sheets[i];
+    if (sh.getSheetId && sh.getSheetId() === sheetId) {
+      ctx.sheetsById[key] = sh;
+      try { ctx.sheetsByName[String(sh.getName())] = sh; } catch (_) {}
+      return sh;
+    }
+  }
+  throw new Error('Sheet with id ' + sheetId + ' not found.');
+}
+
+function Sheets_getByName_(name) {
+  const ctx = Sheets_ctx_();
+  const key = String(name);
+  if (ctx.sheetsByName[key]) return ctx.sheetsByName[key];
+  const sh = ctx.ss.getSheetByName(key);
+  if (sh) {
+    ctx.sheetsByName[key] = sh;
+    try { ctx.sheetsById[String(sh.getSheetId())] = sh; } catch (_) {}
+  }
+  return sh || null;
+}
+function Sheets_getOrCreateByName_(name, headers) {
+  const ctx = Sheets_ctx_();
+  const ss = ctx.ss;
+  let sh = ctx.sheetsByName[String(name)] || ss.getSheetByName(name);
+  if (!sh) sh = ss.insertSheet(name);
+  try {
+    ctx.sheetsByName[String(name)] = sh;
+    ctx.sheetsById[String(sh.getSheetId())] = sh;
+  } catch (_) {}
+  // Ensure headers in row 1 if empty
+  if (sh.getLastRow() === 0 && headers && headers.length) {
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sh.setFrozenRows(1);
+    Sheets_invalidateHeaderMap_(sh);
+  } else if (sh.getLastRow() >= 1 && headers && headers.length) {
+    // If row 1 empty, set headers
+    const existing = sh.getRange(1, 1, 1, Math.max(headers.length, sh.getLastColumn())).getValues()[0];
+    const hasAny = existing.some(v => String(v || '').trim() !== '');
+    if (!hasAny) {
+      sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sh.setFrozenRows(1);
+      Sheets_invalidateHeaderMap_(sh);
+    }
+  }
+  return sh;
+}
+function Sheets_headerMap_(sheet) {
+  const ctx = Sheets_ctx_();
+  const sid = sheet.getSheetId ? String(sheet.getSheetId()) : String(sheet.getName());
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 1) throw new Error('Sheet "' + sheet.getName() + '" is empty.');
+
+  const cached = ctx.headerMaps[sid];
+  if (cached && cached.lastCol === lastCol && cached.map) return cached.map;
+
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h || '').trim());
+  const map = {};
+  headers.forEach((h, idx) => {
+    if (h) map[h] = idx + 1; // 1-based col
+  });
+
+  ctx.headerMaps[sid] = { lastCol: lastCol, map: map };
+  return map;
+}
+
+function Sheets_invalidateHeaderMap_(sheet) {
+  try {
+    const ctx = Sheets_ctx_();
+    const sid = sheet.getSheetId ? String(sheet.getSheetId()) : String(sheet.getName());
+    delete ctx.headerMaps[sid];
+  } catch (_) {}
+}
+function Sheets_findRowIndexByValue_(sheet, colIndex, value) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+
+  // Fast path: TextFinder runs server-side and avoids pulling an entire column into JS.
+  try {
+    const finder = sheet
+      .getRange(2, colIndex, lastRow - 1, 1)
+      .createTextFinder(String(value))
+      .matchEntireCell(true);
+    const found = finder.findNext();
+    return found ? found.getRow() : null;
+  } catch (_) {
+    // Fallback: old scan
+    const range = sheet.getRange(2, colIndex, lastRow - 1, 1).getValues();
+    for (let i = 0; i < range.length; i++) {
+      if (String(range[i][0]) === String(value)) return i + 2; // actual row index
+    }
+    return null;
+  }
+}

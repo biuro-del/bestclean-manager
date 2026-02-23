@@ -1,0 +1,30 @@
+<h1 class="welcome">Czas pracy pracownika</h1>
+<p class="subwelcome">Lista pracowników. Kliknij „Pokaż”, aby przejść do szczegółów.</p>
+
+<div class="toolbar" aria-label="Filtry pracowników">
+  <div class="tool" style="min-width:260px">
+    <label for="wtQ">Szukaj</label>
+    <input id="wtQ" type="text" placeholder="np. Rafał / Marta" />
+  </div>
+
+  <div class="tool" style="min-width:220px">
+    <label for="wtType">Typ</label>
+    <input id="wtType" type="text" placeholder="np. Kierownik" />
+  </div>
+
+  <div class="tool-actions">
+    <button class="btn2" id="wtRefreshBtn" type="button">Odśwież</button>
+    <button class="btn2 primary" id="wtSearchBtn" type="button">Szukaj</button>
+  </div>
+</div>
+
+<div class="events-table" aria-label="Tabela pracowników">
+  <div class="events-head" style="grid-template-columns: 140px 260px 220px 140px;">
+    <div>ID</div>
+    <div>Imię i nazwisko</div>
+    <div>Typ</div>
+    <div></div>
+  </div>
+
+  <div id="wtRows"></div>
+</div>

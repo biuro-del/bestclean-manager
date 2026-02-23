@@ -1,0 +1,249 @@
+/**
+ * Workday pauses repository (Workday_Pauza).
+ * Supports multiple pauses per workday.
+ */
+
+
+function Pauses_headers_() {
+  // Prefer CONFIG.HEADERS.PAUSES if available; fallback to hardcoded header names.
+  try {
+    if (CONFIG && CONFIG.HEADERS && CONFIG.HEADERS.PAUSES) return CONFIG.HEADERS.PAUSES;
+  } catch (_) {}
+  return {
+    PAUSE_ID: 'PauseID',
+    WORKDAY_ID: 'WorkdayID',
+    WORKER_LOGIN: 'WorkerLogin',
+    WORKER_NAME: 'WorkerName',
+    START_AT: 'StartAt',
+    STOP_AT: 'StopAt',
+    DURATION_SEC: 'DurationSec',
+    STATUS: 'Status',
+    DEVICE_ID: 'DeviceId',
+    PAUSE_EVENT_ID: 'PauseEventId',
+    CREATED_AT: 'CreatedAt',
+    UPDATED_AT: 'UpdatedAt',
+  };
+}
+
+function Pauses_sheetId_() {
+  try { if (CONFIG && CONFIG.SHEET_ID_PAUSES) return CONFIG.SHEET_ID_PAUSES; } catch (_) {}
+  // Default to Workday_Pauza gid provided by user
+  return 1327240604;
+}
+
+function Pauses_ensureSheet_() {
+  const sh = Sheets_getBySheetId_(Pauses_sheetId_());
+  const H = Pauses_headers_();
+  const headers = [
+    H.PAUSE_ID, H.WORKDAY_ID, H.WORKER_LOGIN, H.WORKER_NAME,
+    H.START_AT, H.STOP_AT, H.DURATION_SEC, H.STATUS,
+    H.DEVICE_ID, H.PAUSE_EVENT_ID, H.CREATED_AT, H.UPDATED_AT,
+  ];
+
+  const lastCol = Math.max(headers.length, sh.getLastColumn());
+  const row1 = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(v => String(v || '').trim());
+  const hasAny = row1.some(v => v !== '');
+
+  if (!hasAny) {
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+
+  const existing = new Set(row1.filter(Boolean));
+  const missing = headers.filter(h => !existing.has(String(h)));
+  if (missing.length) {
+    sh.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+  }
+  return sh;
+}
+
+function Pauses_sheet_() {
+  return Pauses_ensureSheet_();
+}
+function Pauses_toIso_(v) {
+  if (!v) return '';
+  try { if (v instanceof Date) return v.toISOString(); } catch (_) {}
+  return String(v || '').trim();
+}
+
+/**
+ * Find an OPEN pause for a given workdayId (at most one should exist).
+ * Returns { pauseId, startAt, rowIndex } or null.
+ */
+function Pauses_findOpenForWorkday_(workdayId) {
+  const wid = String(workdayId || '').trim();
+  if (!wid) return null;
+
+  const sh = Pauses_sheet_();
+  const h = Sheets_headerMap_(sh);
+  const H = Pauses_headers_();
+
+  const colWorkday = h[H.WORKDAY_ID];
+  const colStatus = h[H.STATUS];
+  const colStopAt = h[H.STOP_AT];
+  const colPauseId = h[H.PAUSE_ID];
+  const colStartAt = h[H.START_AT];
+
+  if (!colWorkday || !colStatus || !colPauseId || !colStartAt) return null;
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+
+  const CHUNK = 2000;
+  for (let endRow = lastRow; endRow >= 2; endRow -= CHUNK) {
+    const startRow = Math.max(2, endRow - CHUNK + 1);
+    const n = endRow - startRow + 1;
+
+    const wids = sh.getRange(startRow, colWorkday, n, 1).getValues();
+    const stats = sh.getRange(startRow, colStatus, n, 1).getValues();
+    const stops = colStopAt ? sh.getRange(startRow, colStopAt, n, 1).getValues() : null;
+    const ids = sh.getRange(startRow, colPauseId, n, 1).getValues();
+    const starts = sh.getRange(startRow, colStartAt, n, 1).getValues();
+
+    for (let i = n - 1; i >= 0; i--) {
+      if (String(wids[i][0] || '').trim() !== wid) continue;
+      const st = String(stats[i][0] || '').trim().toUpperCase();
+      const stopAt = stops ? Pauses_toIso_(stops[i][0]) : '';
+      const isOpen = (st === 'OPEN') && !stopAt;
+      if (!isOpen) continue;
+
+      const pauseId = String(ids[i][0] || '').trim();
+      const startAt = Pauses_toIso_(starts[i][0]);
+      return { pauseId, startAt, rowIndex: startRow + i };
+    }
+  }
+  return null;
+}
+
+/**
+ * Stop currently OPEN pause for workdayId (if exists). Returns durationSec (0 if none).
+ */
+function Pauses_stopOpenForWorkday_(workdayId, opts) {
+  const o = opts || {};
+  const wid = String(workdayId || '').trim();
+  if (!wid) return 0;
+
+  const open = Pauses_findOpenForWorkday_(wid);
+  if (!open || !open.pauseId) return 0;
+
+  const stopAt = String(o.stopAt || nowIso_());
+  return Pauses_stop_(open.pauseId, { stopAt: stopAt });
+}
+
+/**
+ * Sum total pause seconds for a workdayId.
+ * Includes OPEN pause by counting it up to endAtIso.
+ */
+function Pauses_sumTotalSecForWorkday_(workdayId, endAtIso) {
+  const wid = String(workdayId || '').trim();
+  if (!wid) return 0;
+
+  const sh = Pauses_sheet_();
+  const H = Pauses_headers_();
+
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return 0;
+
+  const values = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(x => String(x || '').trim());
+
+  const idx = (name) => headers.indexOf(name);
+  const iWid = idx(H.WORKDAY_ID);
+  const iStart = idx(H.START_AT);
+  const iStop = idx(H.STOP_AT);
+  const iDur = idx(H.DURATION_SEC);
+  const iStatus = idx(H.STATUS);
+
+  const endIso = String(endAtIso || nowIso_());
+  let total = 0;
+
+  for (let i = 0; i < values.length; i++) {
+    const r = values[i] || [];
+    if (String(r[iWid] || '').trim() !== wid) continue;
+
+    const startIso = Pauses_toIso_(r[iStart]);
+    if (!startIso) continue;
+
+    const stopIsoRaw = (iStop >= 0) ? Pauses_toIso_(r[iStop]) : '';
+    const status = (iStatus >= 0) ? String(r[iStatus] || '').trim().toUpperCase() : '';
+
+    const durVal = (iDur >= 0) ? Number(r[iDur] || 0) : 0;
+    if (durVal > 0 && status === 'CLOSED') { total += durVal; continue; }
+
+    const stopIso = stopIsoRaw || endIso;
+    let sec = 0;
+    try { sec = secondsBetweenIso_(startIso, stopIso); } catch (_) { sec = 0; }
+    if (sec > 0) total += sec;
+  }
+
+  return Math.max(0, Math.round(total));
+}
+
+
+function Pauses_findRowByPauseId_(pauseId) {
+  if (!pauseId) return null;
+  const sh = Pauses_sheet_();
+  const h = Sheets_headerMap_(sh);
+  const col = h[CONFIG.HEADERS.PAUSES.PAUSE_ID] || 1;
+  return Sheets_findRowIndexByValue_(sh, col, pauseId);
+}
+
+function Pauses_start_(wd, worker, { deviceId, pauseEventId, startAt }) {
+  const sh = Pauses_sheet_();
+  const h = Sheets_headerMap_(sh);
+  const H = Pauses_headers_();
+
+  const nowIso = startAt || nowIso_();
+  const pauseId = uuid_();
+
+  const record = {};
+  record[H.PAUSE_ID] = pauseId;
+  record[H.WORKDAY_ID] = wd.workdayId;
+  record[H.WORKER_LOGIN] = worker.login;
+  record[H.WORKER_NAME] = worker.name || '';
+  record[H.START_AT] = nowIso;
+  record[H.STOP_AT] = '';
+  record[H.DURATION_SEC] = '';
+  record[H.STATUS] = 'OPEN';
+  record[H.DEVICE_ID] = deviceId || '';
+  record[H.PAUSE_EVENT_ID] = pauseEventId || '';
+  record[H.CREATED_AT] = nowIso;
+  record[H.UPDATED_AT] = nowIso;
+
+  const lastCol = sh.getLastColumn();
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(x => String(x || '').trim());
+  const row = headers.map(name => (record[name] !== undefined ? record[name] : ''));
+  sh.appendRow(row);
+
+  return pauseId;
+}
+
+function Pauses_stop_(pauseId, { stopAt }) {
+  const sh = Pauses_sheet_();
+  const H = Pauses_headers_();
+  const rowIndex = Pauses_findRowByPauseId_(pauseId);
+  if (!rowIndex) throw new Error('Pause not found: ' + pauseId);
+
+  const h = Sheets_headerMap_(sh);
+  const colStart = h[H.START_AT];
+  const colStop = h[H.STOP_AT];
+  const colDur = h[H.DURATION_SEC];
+  const colStatus = h[H.STATUS];
+  const colUpdated = h[H.UPDATED_AT];
+
+  const startIso = colStart ? String(sh.getRange(rowIndex, colStart).getValue() || '') : '';
+  const endIso = stopAt || nowIso_();
+
+  let durationSec = 0;
+  try { durationSec = secondsBetweenIso_(startIso, endIso); } catch (_) { durationSec = 0; }
+  durationSec = Math.max(0, Number(durationSec || 0));
+
+  if (colStop) sh.getRange(rowIndex, colStop).setValue(endIso);
+  if (colDur) sh.getRange(rowIndex, colDur).setValue(durationSec);
+  if (colStatus) sh.getRange(rowIndex, colStatus).setValue('CLOSED');
+  if (colUpdated) sh.getRange(rowIndex, colUpdated).setValue(endIso);
+
+  return durationSec;
+}

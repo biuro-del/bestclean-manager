@@ -1,0 +1,80 @@
+/**
+ * API — minimalny szkielet.
+ * Zasada: każda funkcja publiczna zwraca obiekt:
+ * { ok: true, ... } lub { ok: false, error: "..." }
+ */
+
+function apiPing() {
+  return sanitizeForClient_(ok_({
+    app: CFG.APP_NAME,
+    version: CFG.VERSION,
+    serverNow: nowInScriptTz_(),
+    tz: Session.getScriptTimeZone()
+  }));
+}
+
+/**
+ * Bootstrap: klient pyta o podstawowe info i ewentualnie stan sesji.
+ * TODO: po podpięciu logowania zwracać: { session, openDay, activeCycle ... }
+ */
+function apiBootstrap() {
+  return sanitizeForClient_(ok_({
+    app: CFG.APP_NAME,
+    version: CFG.VERSION,
+    serverNow: nowInScriptTz_(),
+    tz: Session.getScriptTimeZone(),
+    note: "Szkielet: brak logiki biznesowej (jeszcze)."
+  }));
+}
+
+/**
+ * TEST/placeholder logowania — na razie zawsze odrzuca.
+ * TODO: implementacja w AuthService_.
+ */
+function apiLogin(login, password) {
+  try {
+    const res = Auth_login_(login, password);
+    return sanitizeForClient_(res);
+  } catch (err) {
+    return sanitizeForClient_(fail_(err && err.message ? err.message : String(err)));
+  }
+}
+
+function apiLogout() {
+  return sanitizeForClient_(ok_({}));
+}
+
+/**
+ * Placeholder: klient pyta o stan "czy jest otwarty dzień/cykl".
+ * TODO: implementacja w DayService_/CycleService_.
+ */
+function apiGetOpenState(workerLogin) {
+  return sanitizeForClient_(ok_({
+    workerLogin: trimStr_(workerLogin),
+    openDay: null,
+    activeCycle: null
+  }));
+}
+
+/**
+ * Placeholder: klient wysyła zdarzenia (START/STOP itp).
+ * TODO: walidacje i zapis do arkuszy.
+ */
+function apiSyncBatch(events) {
+  return sanitizeForClient_(ok_({
+    received: Array.isArray(events) ? events.length : 0,
+    results: []
+  }));
+}
+
+/**
+ * Resolve worker by QR (column G in workers sheet).
+ */
+function apiResolveWorkerQr(qrText) {
+  try {
+    const res = Auth_resolveByWorkerQr_(qrText);
+    return sanitizeForClient_(res);
+  } catch (err) {
+    return sanitizeForClient_(fail_(err && err.message ? err.message : String(err)));
+  }
+}

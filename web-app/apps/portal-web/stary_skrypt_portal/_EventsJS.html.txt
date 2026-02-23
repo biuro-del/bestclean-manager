@@ -1,0 +1,853 @@
+<script>
+(function(){
+  const $ = (sel)=>document.querySelector(sel);
+
+  const state = {
+    total: 0,
+    page: 1,
+    pageSize: 50,
+    totalPages: 1,
+    current: null,
+    calcMode: null, // "times" | "duration" | null
+    isCreate: false,
+
+    // picklisty do modala "Dodaj/Edytuj"
+    workers: [],
+    clients: [],
+    _workersLoaded: false,
+    _clientsLoaded: false,
+    _picklistsLoading: false,
+
+    // strefy (z bazy Strefy) wg klienta
+    zonesByClient: {},
+    _zonesLoading: {},
+
+  };
+
+  function token(){
+    return (window.FIDO_AUTH && window.FIDO_AUTH.getToken) ? window.FIDO_AUTH.getToken() : "";
+  }
+
+
+  
+  function uniqSorted(arr){
+    return Array.from(new Set((arr||[]).map(s=>String(s||"").trim()).filter(Boolean)))
+      .sort((a,b)=>a.localeCompare(b, "pl", {sensitivity:"base"}));
+  }
+
+  function selectSetOptions(selectEl, items){
+    if (!selectEl) return;
+    const keepFirst = selectEl.querySelector("option[value='']") ? 1 : 0;
+    while (selectEl.options.length > keepFirst) selectEl.remove(keepFirst);
+    (items||[]).forEach(v=>{
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v;
+      selectEl.appendChild(opt);
+    });
+  }
+
+  function selectEnsureValue(selectEl, value){
+    if (!selectEl) return;
+    const v = String(value||"").trim();
+    if (!v){ selectEl.value = ""; return; }
+    const exists = Array.from(selectEl.options).some(o=>String(o.value)===v);
+    if (!exists){
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v + " (spoza listy)";
+      // wstaw po placeholderze
+      const placeholder = selectEl.querySelector("option[value='']");
+      if (placeholder && placeholder.nextSibling){
+        selectEl.insertBefore(opt, placeholder.nextSibling);
+      } else {
+        selectEl.appendChild(opt);
+      }
+    }
+    selectEl.value = v;
+  }
+
+  
+  function loadPicklists(cb){
+    if (state._workersLoaded && state._clientsLoaded){ if (cb) cb(); return; }
+    if (state._picklistsLoading){ if (cb) setTimeout(cb, 200); return; }
+    state._picklistsLoading = true;
+
+    // Pokaż "Ładowanie..." w selectach od razu
+    try{
+      const wSel = $("#evEditWorker");
+      const cSel = $("#evEditPom");
+      if (wSel) selectSetOptions(wSel, ["Ładowanie..."]);
+      if (cSel) selectSetOptions(cSel, ["Ładowanie..."]);
+    }catch(e){}
+
+    const done = ()=>{
+      if (state._workersLoaded && state._clientsLoaded){
+        state._picklistsLoading = false;
+        if (cb) cb();
+      }
+    };
+
+    function fetchPaged(apiFnName, mapFn, onFinish){
+      const all = [];
+      const pageSize = 500; // backend max 500
+      let page = 1;
+
+      const next = ()=>{
+        google.script.run
+          .withSuccessHandler((res)=>{
+            const items = (res && res.items) ? res.items : [];
+            items.forEach(it => { const v = mapFn(it); if (v) all.push(v); });
+
+            const total = (res && typeof res.total === "number") ? res.total : null;
+
+            const hasMoreByTotal = (total !== null) ? (page * pageSize < total) : false;
+            const hasMoreBySize = (total === null) ? (items.length === pageSize) : false;
+
+            if (items.length > 0 && (hasMoreByTotal || hasMoreBySize)){
+              page += 1;
+              next();
+              return;
+            }
+
+            onFinish(all);
+          })
+          .withFailureHandler((_err)=>{
+            onFinish([]);
+          })[apiFnName]({ token: token(), page, pageSize });
+      };
+
+      next();
+    }
+
+    // Pracownicy (kolumna B: "Imię i nazwisko")
+    try{
+      fetchPaged(
+        "api_listWorkers",
+        (x)=> (x && (x.name || x.fullName || x.imieNazwisko)) ? String(x.name || x.fullName || x.imieNazwisko).trim() : "",
+        (arr)=>{
+          state.workers = uniqSorted(arr);
+          state._workersLoaded = true;
+          done();
+        }
+      );
+    } catch(e){
+      state.workers = [];
+      state._workersLoaded = true;
+      done();
+    }
+
+    // Klienci
+    try{
+      google.script.run
+        .withSuccessHandler((res)=>{
+          const items = (res && res.items) ? res.items : [];
+          state.clients = uniqSorted(items.map(x=>x && (x.nazwa || x.name) ? String(x.nazwa || x.name).trim() : ""));
+          state._clientsLoaded = true;
+          done();
+        })
+        .withFailureHandler((_err)=>{
+          state.clients = [];
+          state._clientsLoaded = true;
+          done();
+        })
+        .api_listClients({ token: token() });
+    } catch(e){
+      state.clients = [];
+      state._clientsLoaded = true;
+      done();
+    }
+  }
+
+  function loadStrefyForClient(clientName, cb){
+    const c = String(clientName||"").trim();
+    if (!c){ cb && cb([]); return; }
+
+    if (state.zonesByClient[c]){
+      cb && cb(state.zonesByClient[c]);
+      return;
+    }
+
+    if (state._zonesLoading[c]){
+      cb && setTimeout(()=>loadStrefyForClient(c, cb), 200);
+      return;
+    }
+    state._zonesLoading[c] = true;
+
+    google.script.run
+      .withSuccessHandler((res)=>{
+        const items = (res && res.items) ? res.items : [];
+        const arr = uniqSorted(items.map(x=>{
+          if (typeof x === "string") return x;
+          return (x && (x.strefa || x.zone)) ? String(x.strefa || x.zone).trim() : "";
+        }));
+        state.zonesByClient[c] = arr;
+        delete state._zonesLoading[c];
+        cb && cb(arr);
+      })
+      .withFailureHandler((_err)=>{
+        delete state._zonesLoading[c];
+        cb && cb([]);
+      })
+      .api_listZonesByClient({ token: token(), client: c });
+  }
+
+  function applyStrefyPicklistToEditor(clientValue, strefaValue){
+    const sSel = $("#evEditStrefa");
+    if (!sSel) return;
+
+    // jeśli nie ma klienta -> czyść listę
+    const c = String(clientValue||"").trim();
+    if (!c){
+      selectSetOptions(sSel, []);
+      selectEnsureValue(sSel, strefaValue);
+      return;
+    }
+
+    // pokaż loading
+    selectSetOptions(sSel, ["Ładowanie..."]);
+    loadStrefyForClient(c, (arr)=>{
+      selectSetOptions(sSel, arr);
+      selectEnsureValue(sSel, strefaValue);
+    });
+  }
+
+  function applyPicklistsToEditor(workerValue, clientValue, strefaValue){
+    const wSel = $("#evEditWorker");
+    const cSel = $("#evEditPom");
+    if (wSel) selectSetOptions(wSel, state.workers);
+    if (cSel) selectSetOptions(cSel, state.clients);
+    if (wSel) selectEnsureValue(wSel, workerValue);
+    if (cSel) selectEnsureValue(cSel, clientValue);
+
+    // strefy zależne od klienta
+    applyStrefyPicklistToEditor(clientValue, strefaValue);
+  }
+function canWrite(){
+    try{
+      if (!window.FIDO_AUTH) return false;
+      const role = (typeof window.FIDO_AUTH.getUserRole === "function") ? window.FIDO_AUTH.getUserRole() : "";
+      const lvl = (typeof window.FIDO_AUTH.roleLevel === "function") ? window.FIDO_AUTH.roleLevel(role) : 0;
+      return lvl >= 2;
+    } catch(e){
+      return false;
+    }
+  }
+
+
+  function escapeHtml(s){
+    return String(s ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
+  }
+
+  function pad2(n){ return String(n).padStart(2,"0"); }
+
+  function isoDateLocal(d){
+    return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  }
+
+  function setDefaultDatesIfEmpty(){
+    const fromEl = $("#evFrom");
+    const toEl = $("#evTo");
+    if (!fromEl || !toEl) return;
+
+    const fromV = (fromEl.value || "").trim();
+    const toV = (toEl.value || "").trim();
+    if (fromV || toV) return;
+
+    const today = new Date();
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    fromEl.value = isoDateLocal(firstDay);
+    toEl.value = isoDateLocal(today);
+  }
+
+  function resetFiltersToDefault(){
+    const today = new Date();
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    $("#evFrom").value = isoDateLocal(firstDay);
+    $("#evTo").value = isoDateLocal(today);
+
+    $("#evWorker").value = "";
+    $("#evStrefa").value = "";
+    $("#evPom").value = "";
+    $("#evRoomId").value = "";
+    $("#evStatus").value = "";
+    $("#evQ").value = "";
+  }
+
+  function fmtLocalDate(iso){
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (!isFinite(d.getTime())) return "—";
+    return `${pad2(d.getDate())}.${pad2(d.getMonth()+1)}.${d.getFullYear()}`;
+  }
+
+  function fmtLocalTime(iso){
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (!isFinite(d.getTime())) return "—";
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  }
+
+  function secToHMS(sec){
+    sec = Number(sec || 0);
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    const h = Math.floor(sec/3600);
+    const m = Math.floor((sec%3600)/60);
+    const s = Math.floor(sec%60);
+    return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+  }
+
+  function hmsToSec(hms){
+    const mensure = String(hms || "").trim().match(/^(\d{1,3}):([0-5]\d):([0-5]\d)$/);
+    if (!mensure) return 0;
+    const h = parseInt(mensure[1],10) || 0;
+    const m = parseInt(mensure[2],10) || 0;
+    const s = parseInt(mensure[3],10) || 0;
+    return Math.max(0, (h*3600) + (m*60) + s);
+  }
+
+  function isoToLocalDateTimeInput(iso){
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (!isFinite(d.getTime())) return "";
+    return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
+
+  function localDateTimeInputToIso(val){
+    const v = String(val || "").trim();
+    if (!v) return "";
+    const d = new Date(v); // lokalnie
+    if (!isFinite(d.getTime())) return "";
+    return d.toISOString();
+  }
+
+  function readFilters(){
+    return {
+      token: token(),
+      fromIso: ($("#evFrom").value || "").trim(),
+      toIso: ($("#evTo").value || "").trim(),
+      worker: ($("#evWorker").value || "").trim(),
+      strefa: ($("#evStrefa").value || "").trim(),
+      pomieszczenie: ($("#evPom").value || "").trim(),
+      roomId: ($("#evRoomId").value || "").trim(),
+      status: ($("#evStatus").value || "").trim(),
+      q: ($("#evQ").value || "").trim(),
+      page: state.page,
+      pageSize: state.pageSize
+    };
+  }
+
+  function updatePagerUI(shown){
+    const total = state.total || 0;
+    const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
+    state.totalPages = totalPages;
+
+    if (state.page > totalPages) state.page = totalPages;
+    if (state.page < 1) state.page = 1;
+
+    const pageLabel = $("#evPageLabel");
+    if (pageLabel) pageLabel.textContent = `Strona ${state.page} / ${totalPages}`;
+
+    const shownLabel = $("#evShownLabel");
+    if (shownLabel){
+      shownLabel.textContent = `Wyświetlono: ${shown} · Wszystkie: ${total} · Na stronę: ${state.pageSize}`;
+    }
+
+    const prevBtn = $("#evPrevBtn");
+    const nextBtn = $("#evNextBtn");
+    if (prevBtn) prevBtn.disabled = (state.page <= 1);
+    if (nextBtn) nextBtn.disabled = (state.page >= totalPages);
+  }
+
+  function renderRows(items){
+    const root = $("#evRows");
+    if (!root) return;
+    root.innerHTML = "";
+
+    if (!items || items.length === 0){
+      const empty = document.createElement("div");
+      empty.className = "events-row";
+      empty.innerHTML = "<div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>";
+      root.appendChild(empty);
+      return;
+    }
+
+    for (const it of items){
+      const row = document.createElement("div");
+      row.className = "events-row";
+
+      const dateStr = fmtLocalDate(it.startAt);
+      const startStr = fmtLocalTime(it.startAt);
+      const stopStr = fmtLocalTime(it.endAt);
+
+      const comment = String(it.comment || "").trim();
+      const hasComment = !!comment;
+
+      const commentHtml = hasComment
+        ? `<div class="comment-cell">
+             <button class="comment-btn" type="button" title="Pokaż komentarz">💬</button>
+           </div>`
+        : "—";
+
+      row.innerHTML = `
+        <div>${escapeHtml(it.workerName || "—")}</div>
+        <div>${escapeHtml(it.strefa || "—")}</div>
+        <div>${escapeHtml((it.klient || it.pomieszczenie) || "—")}</div>
+        <div>${escapeHtml(it.lokalizacja || "—")}</div>
+        <div class="mono">${escapeHtml(dateStr)}</div>
+        <div class="mono time-start">${escapeHtml(startStr)}</div>
+        <div class="mono time-stop">${escapeHtml(stopStr)}</div>
+        <div class="mono">${escapeHtml(secToHMS(it.durationSec))}</div>
+        <div>${commentHtml}</div>
+        <div>${escapeHtml(it.editedBy || "—")}</div>
+        <div><button class="btn2" type="button">Edytuj</button></div>
+      `;
+
+      const editBtn = row.querySelector(".btn2");
+      editBtn && editBtn.addEventListener("click", ()=>openEditor(it));
+
+      const cbtn = row.querySelector(".comment-btn");
+      if (cbtn){
+        cbtn.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); openCommentModal(comment); });
+      }
+
+      root.appendChild(row);
+    }
+  }
+
+  function fetchEvents(){
+    const params = readFilters();
+    google.script.run
+      .withSuccessHandler((res)=>{
+        const items = (res && res.items) ? res.items : [];
+        state.total = (res && typeof res.total === "number") ? res.total : items.length;
+
+        renderRows(items);
+        updatePagerUI(items.length);
+      })
+      .withFailureHandler((err)=>{
+        const msg = (err && err.message) ? err.message : String(err || "Błąd");
+        alert("Błąd pobierania zdarzeń: " + msg);
+      })
+      .api_listEvents(params);
+  }
+
+  // -------- Komentarz (modal) --------
+  function ensureCommentModal(){
+    if (document.getElementById("commentModalOverlay")) return;
+
+    const ov = document.createElement("div");
+    ov.className = "comment-modal-overlay";
+    ov.id = "commentModalOverlay";
+    ov.innerHTML = `
+      <div class="comment-modal" role="dialog" aria-label="Komentarz" aria-modal="true">
+        <div class="comment-modal-head">
+          <div class="comment-modal-title">Komentarz (możesz zaznaczyć i skopiować)</div>
+          <button class="comment-modal-close" type="button" id="commentModalClose">×</button>
+        </div>
+        <div class="comment-modal-body" id="commentModalBody"></div>
+      </div>
+    `;
+    document.body.appendChild(ov);
+
+    ov.addEventListener("click", (e)=>{
+      if (e.target && e.target.id === "commentModalOverlay") closeCommentModal();
+    });
+    $("#commentModalClose").addEventListener("click", closeCommentModal);
+  }
+
+  function openCommentModal(text){
+    ensureCommentModal();
+    $("#commentModalBody").textContent = text || "";
+    $("#commentModalOverlay").style.display = "flex";
+  }
+
+  function closeCommentModal(){
+    const ov = document.getElementById("commentModalOverlay");
+    if (ov) ov.style.display = "none";
+  }
+
+  // -------- Editor --------
+
+
+
+  function setEditorTitle_(isCreate){
+    const h = $("#evEditorTitle");
+    if (h) h.textContent = isCreate ? "Dodaj zdarzenie" : "Edytuj zdarzenie";
+  }
+
+  function openCreateEditor(){
+    const ov = $("#evEditorOverlay");
+    if (!ov) return;
+
+    state.current = null;
+    state.isCreate = true;
+    state.calcMode = null;
+
+    setEditorTitle_(true);
+
+    const delBtn = $("#evDeleteBtn");
+    if (delBtn) delBtn.style.display = "none";
+
+    const cyc = $("#evCycleId");
+    const rn = $("#evRowNumber");
+    const eb = $("#evEditedBy");
+    if (cyc) cyc.textContent = "—";
+    if (rn) rn.textContent = "—";
+    if (eb) eb.textContent = (window.FIDO_AUTH && typeof window.FIDO_AUTH.getUserName === "function") ? window.FIDO_AUTH.getUserName() : "—";
+
+    // domyślnie: Start = teraz (lokalnie), Stop pusty, status RUNNING
+    const nowIso = new Date().toISOString();
+    const _w = "";
+    $("#evEditRoomId").value = "";
+    $("#evEditStrefa").value = "";
+    const _k = "";
+    loadPicklists(()=>applyPicklistsToEditor(_w, _k, _strefa));
+    $("#evEditStart").value = isoToLocalDateTimeInput(nowIso);
+    $("#evEditStop").value = "";
+    $("#evEditDuration").value = "00:00:00";
+    $("#evEditStatus").value = "RUNNING";
+    const cmt = $("#evEditComment");
+    if (cmt) cmt.value = "";
+    applyEditStatusColor();
+
+    ov.style.display = "flex";
+  }
+
+  function applyEditStatusColor(){
+    const el = $("#evEditStatus");
+    if (!el) return;
+    const raw = (el.value || "").trim().toUpperCase();
+
+    // Reset
+    el.style.backgroundColor = "";
+    el.style.color = "";
+
+    if (raw === "CLOSED"){
+      el.style.backgroundColor = "#ffe5e5"; // czerwone tło
+      el.style.color = "#7a0000";
+      return;
+    }
+    if (raw === "RUNNING" || raw === "OPEN"){
+      el.style.backgroundColor = "#e6ffe6"; // zielone tło
+      el.style.color = "#0b4f0b";
+      return;
+    }
+  }
+
+  function openEditor(it, opts){
+    const ov = $("#evEditorOverlay");
+    if (!ov) return;
+
+    state.current = it || null;
+    state.calcMode = null;
+
+    state.isCreate = false;
+
+    setEditorTitle_(false);
+    const cyc = $("#evCycleId");
+    const rn = $("#evRowNumber");
+    const eb = $("#evEditedBy");
+    if (cyc) cyc.textContent = it && it.cycleId ? String(it.cycleId) : "—";
+    if (rn) rn.textContent = it && it.rowNumber ? String(it.rowNumber) : "—";
+    if (eb) eb.textContent = it && it.editedBy ? String(it.editedBy) : "—";
+
+    const _w = (it && it.workerName) ? String(it.workerName) : "";
+    $("#evEditRoomId").value = (it && it.roomId) ? String(it.roomId) : "";
+    const _strefa = (it && it.strefa) ? String(it.strefa) : "";
+    const _k = (it && (it.klient || it.pomieszczenie)) ? String(it.klient || it.pomieszczenie) : "";
+
+    loadPicklists(()=>applyPicklistsToEditor(_w, _k, _strefa));
+
+    $("#evEditStart").value = isoToLocalDateTimeInput(it && it.startAt ? it.startAt : "");
+    $("#evEditStop").value = isoToLocalDateTimeInput(it && it.endAt ? it.endAt : "");
+
+    $("#evEditDuration").value = secToHMS(it && it.durationSec ? it.durationSec : 0);
+    const _st = (it && it.status) ? String(it.status) : "";
+    $("#evEditStatus").value = (_st.toUpperCase() === "OPEN") ? "RUNNING" : _st;
+    applyEditStatusColor();
+
+
+    const cmt = $("#evEditComment");
+    if (cmt) cmt.value = (it && it.comment) ? String(it.comment) : "";
+
+    // Pokaż/ukryj przycisk usuwania
+    const delBtn = $("#evDeleteBtn");
+    if (delBtn){
+      delBtn.style.display = (canWrite() && !state.isCreate) ? "" : "none";
+    }
+
+    ov.style.display = "flex";
+
+    // jeśli otwieramy z "dymka" komentarza – ustaw fokus na komentarz
+    if (opts && opts.focusComment){
+      setTimeout(()=>{
+        const el = $("#evEditComment");
+        el && el.focus && el.focus();
+      }, 50);
+    }
+  }
+
+  function closeEditor(){
+    const ov = $("#evEditorOverlay");
+    if (ov) ov.style.display = "none";
+    state.current = null;
+    state.calcMode = null;
+    state.isCreate = false;
+  }
+
+
+  // Podgląd komentarza (klik w dymek 💬 w tabeli)
+  function openCommentModal(text){
+    const ov = $("#evCommentOverlay");
+    const box = $("#evCommentText");
+    if (!ov || !box) return;
+    const v = String(text || "").trim();
+    box.textContent = v ? v : "—";
+    ov.style.display = "flex";
+  }
+
+  function closeCommentModal(){
+    const ov = $("#evCommentOverlay");
+    const box = $("#evCommentText");
+    if (ov) ov.style.display = "none";
+    if (box) box.textContent = "—";
+  }
+
+
+  function calcDurationFromTimes(){
+    const startIso = localDateTimeInputToIso($("#evEditStart").value);
+    const endIso = localDateTimeInputToIso($("#evEditStop").value);
+    if (!startIso || !endIso){
+      alert("Uzupełnij Start i Stop.");
+      return;
+    }
+    const s = new Date(startIso).getTime();
+    const e = new Date(endIso).getTime();
+    const sec = Math.max(0, Math.round((e - s) / 1000));
+    $("#evEditDuration").value = secToHMS(sec);
+  }
+
+  function calcStopFromDuration(){
+    const startIso = localDateTimeInputToIso($("#evEditStart").value);
+    if (!startIso){
+      alert("Uzupełnij Start.");
+      return;
+    }
+    const sec = hmsToSec($("#evEditDuration").value);
+    const end = new Date(new Date(startIso).getTime() + (sec * 1000)).toISOString();
+    $("#evEditStop").value = isoToLocalDateTimeInput(end);
+  }
+
+  function stopNow(){
+    const now = new Date().toISOString();
+    $("#evEditStop").value = isoToLocalDateTimeInput(now);
+  }
+
+  function saveEditor(){
+    const isCreate = !!state.isCreate;
+    if (!isCreate && (!state.current || !state.current.cycleId)){
+      alert("Brak CycleID — nie mogę zapisać.");
+      return;
+    }
+
+    const editorName = (window.FIDO_AUTH && typeof window.FIDO_AUTH.getUserName === "function")
+      ? window.FIDO_AUTH.getUserName()
+      : "Użytkownik";
+
+    const startIso = localDateTimeInputToIso($("#evEditStart").value);
+    let endIso = localDateTimeInputToIso($("#evEditStop").value);
+    let durationSec = hmsToSec($("#evEditDuration").value);
+
+    if (startIso && endIso){
+      durationSec = Math.max(0, Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 1000));
+    } else if (startIso && durationSec && !endIso) {
+      endIso = new Date(new Date(startIso).getTime() + (durationSec * 1000)).toISOString();
+    }
+
+    
+    const payload = {
+      token: token(),
+      editorName,
+      cycleId: isCreate ? "" : String(state.current.cycleId),
+      workerName: ($("#evEditWorker").value || "").trim(),
+      roomId: ($("#evEditRoomId").value || "").trim(),
+      strefa: ($("#evEditStrefa").value || "").trim(),
+      pomieszczenie: ($("#evEditPom").value || "").trim(),
+      comment: ($("#evEditComment") ? ($("#evEditComment").value || "").trim() : ""),
+      startAt: startIso,
+      endAt: endIso,
+      durationSec: durationSec,
+      status: ($("#evEditStatus").value || "").trim() || (endIso ? "CLOSED" : "RUNNING")
+    };
+
+    const btn = $("#evSaveBtn");
+    if (btn){
+      btn.disabled = true;
+      btn.textContent = "Zapisywanie...";
+    }
+
+    const runner = google.script.run
+      .withSuccessHandler(()=>{
+        if (btn){
+          btn.disabled = false;
+          btn.textContent = "Zapisz";
+        }
+        closeEditor();
+        fetchEvents();
+      })
+      .withFailureHandler((err)=>{
+        if (btn){
+          btn.disabled = false;
+          btn.textContent = "Zapisz";
+        }
+        const msg = (err && err.message) ? err.message : String(err || "Błąd");
+        alert("Błąd zapisu: " + msg);
+      });
+
+    if (isCreate){
+      runner.api_createEvent(payload);
+    } else {
+      runner.api_updateEvent(payload);
+    }
+
+  }
+
+  
+  function deleteCurrent(){
+    if (!canWrite()){
+      alert("Brak uprawnień do usuwania.");
+      return;
+    }
+    if (!state.current || !state.current.cycleId){
+      alert("Brak CycleID.");
+      return;
+    }
+    const cyc = String(state.current.cycleId);
+    const ok = confirm("Usunąć ten rekord?\nCycleID: " + cyc);
+    if (!ok) return;
+
+    const btn = $("#evDeleteBtn");
+    if (btn){
+      btn.disabled = true;
+      btn.textContent = "Usuwanie...";
+    }
+
+    google.script.run
+      .withSuccessHandler(()=>{
+        if (btn){
+          btn.disabled = false;
+          btn.textContent = "Usuń";
+        }
+        closeEditor();
+        fetchEvents();
+      })
+      .withFailureHandler((err)=>{
+        if (btn){
+          btn.disabled = false;
+          btn.textContent = "Usuń";
+        }
+        const msg = (err && err.message) ? err.message : String(err || "Błąd");
+        alert("Błąd usuwania: " + msg);
+      })
+      .api_deleteEvent({ token: token(), cycleId: cyc });
+  }
+
+function goPrev(){
+    if (state.page <= 1) return;
+    state.page -= 1;
+    fetchEvents();
+  }
+  function goNext(){
+    const maxP = Math.max(1, state.totalPages || 1);
+    if (state.page >= maxP) return;
+    state.page += 1;
+    fetchEvents();
+  }
+
+  function bind(){
+    $("#evSearchBtn") && $("#evSearchBtn").addEventListener("click", ()=>{
+      state.page = 1;
+      fetchEvents();
+    });
+    $("#evResetBtn") && $("#evResetBtn").addEventListener("click", ()=>{
+      resetFiltersToDefault();
+      state.page = 1;
+      fetchEvents();
+    });
+
+
+    $("#evAddBtn") && $("#evAddBtn").addEventListener("click", ()=>openCreateEditor());
+    $("#evPrevBtn") && $("#evPrevBtn").addEventListener("click", goPrev);
+    $("#evNextBtn") && $("#evNextBtn").addEventListener("click", goNext);
+
+    $("#evEditorOverlay") && $("#evEditorOverlay").addEventListener("click", (e)=>{
+      if (e.target && e.target.id === "evEditorOverlay") closeEditor();
+    });
+    $("#evCommentOverlay") && $("#evCommentOverlay").addEventListener("click", (e)=>{
+      if (e.target && e.target.id === "evCommentOverlay") closeCommentModal();
+    });
+    $("#evCommentCloseBtn") && $("#evCommentCloseBtn").addEventListener("click", closeCommentModal);
+    $("#evCancelBtn") && $("#evCancelBtn").addEventListener("click", closeEditor);
+    $("#evDeleteBtn") && $("#evDeleteBtn").addEventListener("click", deleteCurrent);
+
+    $("#evCalcFromTimesBtn") && $("#evCalcFromTimesBtn").addEventListener("click", calcDurationFromTimes);
+    $("#evCalcFromDurationBtn") && $("#evCalcFromDurationBtn").addEventListener("click", calcStopFromDuration);
+    $("#evStopNowBtn") && $("#evStopNowBtn").addEventListener("click", stopNow);
+    $("#evSaveBtn") && $("#evSaveBtn").addEventListener("click", saveEditor);
+
+    ["#evFrom","#evTo","#evWorker","#evStrefa","#evPom","#evRoomId","#evQ"].forEach(sel=>{
+      const el = $(sel);
+      el && el.addEventListener("keydown", (e)=>{
+        if (e.key === "Enter"){
+          state.page = 1;
+          fetchEvents();
+        }
+      });
+    });
+    $("#evEditStatus") && $("#evEditStatus").addEventListener("change", applyEditStatusColor);
+
+    // Po wyborze klienta -> wczytaj strefy z bazy (Strefy)
+    $("#evEditPom") && $("#evEditPom").addEventListener("change", ()=>{
+      const c = ($("#evEditPom").value || "").trim();
+      applyStrefyPicklistToEditor(c, "");
+    });
+
+    $("#evStatus") && $("#evStatus").addEventListener("change", ()=>{
+      state.page = 1;
+      fetchEvents();
+    });
+  }
+
+  function init(){
+    if (window.__FIDO_EVENTS_INIT__) return;
+    window.__FIDO_EVENTS_INIT__ = true;
+
+    const logo = $("#evLogo");
+    if (logo && window.FIDO_CONFIG && window.FIDO_CONFIG.logoUrl){
+      logo.src = window.FIDO_CONFIG.logoUrl;
+    }
+
+
+    const addBtn = $("#evAddBtn");
+    if (addBtn){
+      addBtn.style.display = canWrite() ? "" : "none";
+    }
+    const delBtn0 = $("#evDeleteBtn");
+    if (delBtn0) delBtn0.style.display = "none";
+    setDefaultDatesIfEmpty();
+    loadPicklists();
+    bind();
+    fetchEvents();
+  }
+
+  window.EventsModule = { init };
+})();
+</script>

@@ -1,0 +1,47 @@
+/**
+ * WorkdayEventsService — buduje strukturę dni i zdarzeń (START/STOP) dla UI "Lista zdarzeń".
+ *
+ * Zwraca:
+ * {
+ *   year, month,
+ *   days: [
+ *     { dateKey: 'YYYY-MM-DD', events: [ {type:'STOP'|'START', at:'ISO'}, ... ] },
+ *     ...
+ *   ]
+ * }
+ *
+ * Sortowanie:
+ * - dni malejąco po dateKey
+ * - zdarzenia w dniu malejąco po at
+ */
+
+function WorkdayEvents_getMonthDaysForWorker_(worker, year, month1to12, clientNow, tzOffsetMinutes) {
+  const login = String(worker && worker.login || '').trim();
+  const y = Number(year || 0);
+  const m = Number(month1to12 || 0);
+  const off = Number(tzOffsetMinutes || 0);
+  if (!login || !y || !m) return { year: y, month: m, days: [] };
+
+  const rows = WorkdayEventsRepo_listMonthForWorker_(login, y, m, off);
+
+  const map = {}; // dateKey -> events[]
+  rows.forEach(r => {
+    const dk = String(r.dateKey || '').trim();
+    if (!dk) return;
+    if (!map[dk]) map[dk] = [];
+    if (r.stopAt) map[dk].push({ type: 'STOP', at: String(r.stopAt) });
+    if (r.startAt) map[dk].push({ type: 'START', at: String(r.startAt) });
+  });
+
+  const days = Object.keys(map)
+    .sort()
+    .reverse()
+    .map(dk => {
+      const evs = (map[dk] || [])
+        .filter(e => e && e.at)
+        .sort((a, b) => String(b.at).localeCompare(String(a.at)));
+      return { dateKey: dk, events: evs };
+    });
+
+  return { year: y, month: m, days: days };
+}

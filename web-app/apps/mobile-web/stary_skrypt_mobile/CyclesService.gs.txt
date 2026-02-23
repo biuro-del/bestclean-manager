@@ -1,0 +1,402 @@
+/**
+ * Cycles (cleaning sessions): start/stop.
+ * One active cycle per worker at a time.
+ * Stop is done ONLY by scanning the SAME QR again (front-end enforces).
+ */
+function Cycles_findActiveForWorker_(workerLogin) {
+  const login = String(workerLogin || '').trim();
+  if (!login) return null;
+
+  // Fast path: cache active cycle per worker.
+  // Store both cycleId (long TTL) and normalized object (shorter TTL).
+  const cache = CacheService.getScriptCache();
+  const keyId = Cycles_cacheKeyId_(login);
+  const keyObj = Cycles_cacheKeyObj_(login);
+
+  const cachedObj = cache.get(keyObj);
+  if (cachedObj !== null && cachedObj !== undefined) {
+    try {
+      const c = JSON.parse(cachedObj);
+      const st = String((c && c.status) || '').toUpperCase();
+      const isActive = (st === 'RUNNING') || (!String((c && c.endAt) || '') && !st);
+      if (c && c.cycleId && isActive) {
+        try { cache.put(keyId, String(c.cycleId), CONFIG.SESSION_TTL_SECONDS); } catch (_) {}
+        return c;
+      }
+    } catch (_) {}
+  }
+
+  const cachedId = cache.get(keyId);
+  if (cachedId) {
+    try {
+      const c = Cycles_getById_(String(cachedId));
+      const st = String((c && c.status) || '').toUpperCase();
+      const isActive = (st === 'RUNNING') || (!String((c && c.endAt) || '') && !st);
+      if (c && c.cycleId && isActive) {
+        try { cache.put(keyObj, JSON.stringify(c), 600); } catch (_) {}
+        return c;
+      }
+    } catch (_) {}
+    try { cache.remove(keyId); cache.remove(keyObj); } catch (_) {}
+  }
+
+  const sheet = Sheets_getBySheetId_(CONFIG.SHEET_ID_BACKUP_LOG);
+  const h = Sheets_headerMap_(sheet);
+  const H = CONFIG.HEADERS.BACKUP_LOG;
+
+  const colLogin = h[H.WORKER_LOGIN];
+  const colStatus = h[H.STATUS];
+  const colEndAt = h[H.END_AT];
+  const colCycleId = h[H.CYCLE_ID];
+  if (!colLogin || !colCycleId) return null;
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(x => String(x || '').trim());
+
+  // Chunk-scan from bottom to avoid loading the whole log on every scan.
+  const CHUNK = 2000;
+  for (let endRow = lastRow; endRow >= 2; endRow -= CHUNK) {
+    const startRow = Math.max(2, endRow - CHUNK + 1);
+    const n = endRow - startRow + 1;
+
+    const logins = sheet.getRange(startRow, colLogin, n, 1).getValues();
+    const statuses = colStatus ? sheet.getRange(startRow, colStatus, n, 1).getValues() : null;
+    const endAts = colEndAt ? sheet.getRange(startRow, colEndAt, n, 1).getValues() : null;
+
+    for (let i = n - 1; i >= 0; i--) {
+      if (String(logins[i][0]) !== login) continue;
+      const status = statuses ? String(statuses[i][0] || '') : '';
+      const endAt = endAts ? String(endAts[i][0] || '') : '';
+      const st = String(status || '').trim().toUpperCase();
+      const isRunning = (st === 'RUNNING') || (!endAt && !st);
+      if (!isRunning) continue;
+
+      const rowIndex = startRow + i;
+      const row = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+      const obj = {};
+      headers.forEach((name, idx) => obj[name] = row[idx]);
+      const cycle = normalizeCycle_(obj);
+      try {
+        cache.put(keyId, String(cycle.cycleId), CONFIG.SESSION_TTL_SECONDS);
+        cache.put(keyObj, JSON.stringify(cycle), 600);
+      } catch (_) {}
+      return cycle;
+    }
+  }
+
+  try { cache.remove(keyId); cache.remove(keyObj); } catch (_) {}
+  return null;
+}
+
+function Cycles_getById_(cycleId) {
+  if (!cycleId) return null;
+  const obj = BackupLog_getByCycleId_(cycleId);
+  return obj ? normalizeCycle_(obj) : null;
+}
+
+
+/**
+ * Active cycle for TODAY (device local date).
+ * If a cycle is still RUNNING from a previous day, we treat it as "stale" and IGNORE it
+ * (it will be corrected manually by office).
+ */
+function Cycles_findActiveForWorkerForClient_(workerLogin, clientNow, tzOffsetMinutes) {
+  const c = Cycles_findActiveForWorker_(workerLogin);
+  if (!c || !c.cycleId) return null;
+
+  const nowIso = String(clientNow || nowIso_());
+  const offMin = Number(tzOffsetMinutes || 0);
+
+  if (isSameLocalDay_(String(c.startAt || ''), nowIso, offMin)) return c;
+  return null;
+}
+
+function Cycles_start_(worker, { roomId, deviceId, startEventId, clientNow, tzOffsetMinutes }) {
+  if (!roomId) throw new Error('Missing roomId.');
+  if (!deviceId) throw new Error('Missing deviceId.');
+
+
+// Require active workday for TODAY (device local date).
+const check = Workday_getActiveForTodayForClient_(worker.login, clientNow || nowIso_(), tzOffsetMinutes || 0);
+const wd = check && check.todayWorkday ? check.todayWorkday : null;
+if (!wd || String(wd.status || '').toUpperCase() !== 'RUNNING') {
+  if (check && check.staleOpen) {
+    throw new Error('Wykryto błędy w twoim czasie pracy - skanuj START aby kontynuować pracę a koordynator uzupełni braki. Ty masz to już z głowy.');
+  }
+  throw new Error('Brak aktywnego dnia pracy. Zeskanuj najpierw QR START (lub QR zlecenia indywidualnego).');
+}
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const active = Cycles_findActiveForWorkerForClient_(worker.login, clientNow || nowIso_(), tzOffsetMinutes || 0);
+    if (active) return { alreadyRunning: true, cycle: active };
+
+    const zone = QrResolver_resolveRoom_(roomId);
+    if (zone && (zone.func === 'START' || String(zone.func || '').toUpperCase().indexOf('STOP') === 0)) {
+      throw new Error('Zeskanowano kod START. Można rozpocząć sprzątanie.');
+    }
+
+    const record = {
+      cycleId: uuid_(),
+      workerLogin: worker.login,
+      workerName: worker.name,
+      roomId: zone.roomId,
+      zone: zone.zone,
+      room: zone.room,
+      location: String(zone.location || ''),
+      func: zone.func, // not stored in sheet; used by UI
+      startAt: nowIso_(),
+      status: 'RUNNING',
+      deviceId: deviceId,
+      startEventId: startEventId || uuid_(),
+      createdAt: nowIso_(),
+    };
+
+    BackupLog_appendStart_(record);
+    try { Cycles_cacheSetActive_(record); } catch (_) {}
+    return { alreadyRunning: false, cycle: record };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function Cycles_stop_(worker, { cycleId, deviceId, reason, comment, endEventId }) {
+  if (!cycleId) throw new Error('Missing cycleId.');
+  if (!deviceId) throw new Error('Missing deviceId.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const existing = Cycles_getById_(cycleId);
+    if (!existing) throw new Error('Cycle not found.');
+    if (String(existing.workerLogin) !== String(worker.login)) throw new Error('Forbidden.');
+
+    const startAt = new Date(existing.startAt);
+    const endAt = new Date();
+    const durationSec = Math.max(0, Math.round((endAt.getTime() - startAt.getTime()) / 1000));
+
+    const updates = {
+      endAt: endAt.toISOString(),
+      durationSec,
+      endReason: reason || 'QR_SAME',
+      comment: comment || '',
+      status: 'CLOSED',
+      closeMarkedAt: nowIso_(),
+      endEventId: endEventId || uuid_(),
+    };
+
+    BackupLog_updateStop_(cycleId, updates);
+    // Closed => clear active cycle cache
+    try { Cycles_cacheClearActive_(worker.login); } catch (_) {}
+    return { cycleId, updates };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function normalizeCycle_(rowObj) {
+  const H = CONFIG.HEADERS.BACKUP_LOG;
+  const get = (k) => rowObj[k] !== undefined ? rowObj[k] : '';
+
+  return {
+    cycleId: String(get(H.CYCLE_ID)),
+    workerLogin: String(get(H.WORKER_LOGIN)),
+    workerName: String(get(H.WORKER_NAME)),
+    roomId: String(get(H.ROOM_ID)),
+    zone: String(get(H.ZONE)),
+    room: String(get(H.ROOM)),
+    startAt: String(get(H.START_AT)),
+    endAt: String(get(H.END_AT)),
+    durationSec: get(H.DURATION_SEC) === '' ? '' : Number(get(H.DURATION_SEC)),
+    status: String(get(H.STATUS)),
+    deviceId: String(get(H.DEVICE_ID)),
+    startEventId: String(get(H.START_EVENT_ID)),
+    endEventId: String(get(H.END_EVENT_ID)),
+    createdAt: String(get(H.CREATED_AT)),
+  };
+}
+/**
+ * Find a cycle by StartEventId (for idempotency).
+ * Scans from the bottom and checks up to the last 5000 rows for performance.
+ */
+function Cycles_findByStartEventId_(startEventId) {
+  if (!startEventId) return null;
+
+  const sheet = Sheets_getBySheetId_(CONFIG.SHEET_ID_BACKUP_LOG);
+  const h = Sheets_headerMap_(sheet);
+  const H = CONFIG.HEADERS.BACKUP_LOG;
+
+  const colStartEventId = h[H.START_EVENT_ID];
+  if (!colStartEventId) return null;
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+
+  const lastCol = sheet.getLastColumn();
+  const totalRows = lastRow - 1;
+
+  // Scan only last N rows (sufficient for retries; keeps runtime stable).
+  const N = Math.min(5000, totalRows);
+  const startRow = lastRow - N + 1; // inclusive (data starts at row 2)
+  const data = sheet.getRange(startRow, 1, N, lastCol).getValues();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(x => String(x || '').trim());
+
+  for (let i = data.length - 1; i >= 0; i--) {
+    const row = data[i];
+    const v = String(row[colStartEventId - 1] || '').trim();
+    if (v && v === String(startEventId)) {
+      const obj = {};
+      for (let c = 0; c < headers.length; c++) obj[headers[c]] = row[c];
+      return normalizeCycle_(obj);
+    }
+  }
+  return null;
+}
+
+/**
+ * Atomic: stop current cycle and immediately start a new one (switching zones).
+ * Idempotent via opEventId (derives :stop and :start event IDs).
+ */
+function Cycles_stopAndStart_(worker, { cycleId, nextRoomId, deviceId, comment, opEventId, reason }) {
+  if (!cycleId) throw new Error('Missing cycleId.');
+  if (!nextRoomId) throw new Error('Missing nextRoomId.');
+  if (!deviceId) throw new Error('Missing deviceId.');
+
+  const opId = opEventId || uuid_();
+  const endEventId = opId + ':stop';
+  const startEventId = opId + ':start';
+  const safeComment = String(comment || '').trim().slice(0, 300);
+  const safeReason = String(reason || '').trim().slice(0, 40) || 'QR_SWITCH';
+
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'op:cycles:stopAndStart:' + opId;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (_) {}
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    // If already started with this op, return the started cycle (idempotent).
+    const alreadyStarted = Cycles_findByStartEventId_(startEventId);
+    if (alreadyStarted) {
+      const res = { opEventId: opId, idempotent: true, cycle: alreadyStarted };
+      cache.put(cacheKey, JSON.stringify(res), 21600);
+      return res;
+    }
+
+    // Validate existing cycle ownership and state.
+    const existing = Cycles_getById_(cycleId);
+    if (!existing) throw new Error('Cycle not found.');
+    if (String(existing.workerLogin) !== String(worker.login)) throw new Error('Forbidden.');
+
+    // Validate active workday BEFORE stopping (avoids partial "stop" without "start").
+    const wd = Workday_findActiveForWorker_(worker.login);
+    if (!wd || String(wd.status || '').toUpperCase() !== 'RUNNING') {
+      throw new Error('Brak aktywnego dnia pracy. Zeskanuj najpierw QR START (lub QR zlecenia indywidualnego).');
+    }
+
+    // Validate new room exists.
+    const zone = QrResolver_resolveRoom_(nextRoomId);
+    if (zone && (zone.func === 'START' || String(zone.func || '').toUpperCase().indexOf('STOP') === 0)) {
+      throw new Error('To jest kod START/STOP. Nie można rozpocząć sprzątania.');
+    }
+
+    // Stop existing if still running (idempotent).
+    const existingClosed = (String(existing.status || '').toUpperCase() === 'CLOSED') || !!existing.endAt;
+    let stopResult = { alreadyClosed: true, cycleId: existing.cycleId };
+    if (!existingClosed) {
+      const startAt = new Date(existing.startAt);
+      const endAt = new Date();
+      const durationSec = Math.max(0, Math.round((endAt.getTime() - startAt.getTime()) / 1000));
+
+      const updates = {
+        endAt: nowIso_(),
+        durationSec,
+        endReason: safeReason,
+        comment: safeComment,
+        status: 'CLOSED',
+        closeMarkedAt: nowIso_(),
+        endEventId: endEventId,
+      };
+      BackupLog_updateStop_(cycleId, updates);
+      stopResult = { cycleId, updates };
+    }
+
+    // Start new cycle (no nested locks).
+    const record = {
+      cycleId: uuid_(),
+      workerLogin: worker.login,
+      workerName: worker.name || '',
+      roomId: nextRoomId,
+      zone: zone.zone,
+      room: zone.room,
+      location: String(zone.location || ''),
+      func: zone.func, // not stored in sheet; used by UI
+      startAt: nowIso_(),
+      status: 'RUNNING',
+      deviceId: deviceId,
+      startEventId: startEventId,
+      createdAt: nowIso_(),
+    };
+    BackupLog_appendStart_(record);
+
+    // New running cycle => update cache
+    try { Cycles_cacheSetActive_(record); } catch (_) {}
+
+    const res = {
+      opEventId: opId,
+      stop: stopResult,
+      start: { alreadyRunning: false, cycle: record },
+      cycle: record, // convenience for front-end
+    };
+    cache.put(cacheKey, JSON.stringify(res), 21600);
+    return res;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+// --- Active cycle cache helpers (performance) ---
+
+function Cycles_cacheKeyId_(login) {
+  return 'cycle:activeId:v1:' + String(login || '').trim();
+}
+
+function Cycles_cacheKeyObj_(login) {
+  return 'cycle:activeObj:v1:' + String(login || '').trim();
+}
+
+function Cycles_cacheClearActive_(login) {
+  const li = String(login || '').trim();
+  if (!li) return;
+  try {
+    const cache = CacheService.getScriptCache();
+    cache.remove(Cycles_cacheKeyId_(li));
+    cache.remove(Cycles_cacheKeyObj_(li));
+  } catch (_) {}
+}
+
+function Cycles_cacheSetActive_(cycle) {
+  if (!cycle || !cycle.cycleId || !cycle.workerLogin) return;
+  const st = String(cycle.status || '').toUpperCase();
+  const isActive = (st === 'RUNNING') || (!String(cycle.endAt || '') && !st);
+  try {
+    const cache = CacheService.getScriptCache();
+    const kId = Cycles_cacheKeyId_(cycle.workerLogin);
+    const kObj = Cycles_cacheKeyObj_(cycle.workerLogin);
+    if (isActive) {
+      cache.put(kId, String(cycle.cycleId), CONFIG.SESSION_TTL_SECONDS);
+      cache.put(kObj, JSON.stringify(cycle), 600);
+    } else {
+      cache.remove(kId);
+      cache.remove(kObj);
+    }
+  } catch (_) {}
+}

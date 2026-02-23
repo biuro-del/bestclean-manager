@@ -1,0 +1,84 @@
+/**
+ * SessionsRepo — single-device session state stored in Sheets.
+ *
+ * Purpose: enforce rule "1 user = 1 device".
+ * If a worker logs in on a new device, the old device's token becomes invalid.
+ */
+
+const SESSIONS = {
+  SHEET_NAME: 'WEB_Sessions',
+  HEADERS: {
+    LOGIN: 'Login',
+    ACTIVE_TOKEN: 'ActiveToken',
+    ACTIVE_DEVICE_ID: 'ActiveDeviceId',
+    UPDATED_AT: 'UpdatedAt'
+  }
+};
+
+function Sessions_getSheet_() {
+  const headers = [
+    SESSIONS.HEADERS.LOGIN,
+    SESSIONS.HEADERS.ACTIVE_TOKEN,
+    SESSIONS.HEADERS.ACTIVE_DEVICE_ID,
+    SESSIONS.HEADERS.UPDATED_AT,
+  ];
+  return Sheets_getOrCreateByName_(SESSIONS.SHEET_NAME, headers);
+}
+
+function Sessions_getActiveByLogin_(login) {
+  const sh = Sessions_getSheet_();
+  const map = Sheets_headerMap_(sh);
+  const colLogin = map[SESSIONS.HEADERS.LOGIN];
+  if (!colLogin) throw new Error('WEB_Sessions missing header: ' + SESSIONS.HEADERS.LOGIN);
+
+  const rowIndex = Sheets_findRowIndexByValue_(sh, colLogin, String(login || ''));
+  if (!rowIndex) return null;
+
+  const row = sh.getRange(rowIndex, 1, 1, sh.getLastColumn()).getValues()[0];
+  return {
+    rowIndex,
+    login: String(row[colLogin - 1] || ''),
+    activeToken: String(row[(map[SESSIONS.HEADERS.ACTIVE_TOKEN] || 0) - 1] || ''),
+    activeDeviceId: String(row[(map[SESSIONS.HEADERS.ACTIVE_DEVICE_ID] || 0) - 1] || ''),
+    updatedAt: String(row[(map[SESSIONS.HEADERS.UPDATED_AT] || 0) - 1] || ''),
+  };
+}
+
+function Sessions_upsertActive_(login, activeToken, activeDeviceId) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(8000);
+  try {
+    const sh = Sessions_getSheet_();
+    const map = Sheets_headerMap_(sh);
+    const colLogin = map[SESSIONS.HEADERS.LOGIN];
+    const colToken = map[SESSIONS.HEADERS.ACTIVE_TOKEN];
+    const colDevice = map[SESSIONS.HEADERS.ACTIVE_DEVICE_ID];
+    const colUpdated = map[SESSIONS.HEADERS.UPDATED_AT];
+    if (!colLogin || !colToken || !colDevice || !colUpdated) {
+      throw new Error('WEB_Sessions has missing headers.');
+    }
+
+    const li = String(login || '');
+    const rowIndex = Sheets_findRowIndexByValue_(sh, colLogin, li);
+    const values = [
+      li,
+      String(activeToken || ''),
+      String(activeDeviceId || ''),
+      nowIso_(),
+    ];
+
+    if (rowIndex) {
+      // write only our 4 columns (assumed in the first 4 cols from headers)
+      // if sheet has extra columns, we still update the mapped columns.
+      sh.getRange(rowIndex, colToken).setValue(values[1]);
+      sh.getRange(rowIndex, colDevice).setValue(values[2]);
+      sh.getRange(rowIndex, colUpdated).setValue(values[3]);
+    } else {
+      sh.appendRow(values);
+    }
+
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
+}

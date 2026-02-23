@@ -1,0 +1,1609 @@
+<script>
+  // Hydrate hidden views from inert <template> blocks.
+  // This prevents malformed HTML in a hidden view from breaking the whole layout at parse time.
+  (function () {
+    function hydrateViewsFromTemplates() {
+      document.querySelectorAll('template[id^="tpl-view-"]').forEach(function (tpl) {
+        var sid = tpl.id.replace(/^tpl-/, '');
+        var section = document.getElementById(sid);
+        if (!section) return;
+        if (section.children && section.children.length > 0) return;
+        section.appendChild(tpl.content.cloneNode(true));
+      });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', hydrateViewsFromTemplates);
+    } else {
+      hydrateViewsFromTemplates();
+    }
+  })();
+</script>
+
+<script>
+// --- Global helper: safe ISO date (used by some modules) ---
+  // Returns 'YYYY-MM-DD' or ''.
+  window._iso_ = window._iso_ || function(v){
+    try{
+      if(!v) return '';
+      var d = (v instanceof Date) ? v : new Date(v);
+      if (isNaN(d.getTime())) return String(v).trim();
+      var y = d.getFullYear();
+      var m = String(d.getMonth()+1).padStart(2,'0');
+      var day = String(d.getDate()).padStart(2,'0');
+      return y + '-' + m + '-' + day;
+    }catch(e){
+      try{ return String(v).trim(); }catch(_e){ return ''; }
+    }
+  };
+(function(){
+  const $ = (sel, root=document) => root.querySelector(sel);
+  const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+  function getAuth(){
+    try {
+      var raw = sessionStorage.getItem("fido_auth");
+      var rawLS = null;
+      try { rawLS = localStorage.getItem("fido_auth"); } catch(e) { rawLS = null; }
+      // migracja: jeśli jest tylko w sessionStorage, skopiuj do localStorage
+      if (raw && !rawLS) { try { localStorage.setItem("fido_auth", raw); } catch(e){} }
+      if (!raw) raw = rawLS;
+      return JSON.parse(raw || "null");
+    } catch(e){ return null; }
+  }
+  function setAuth(auth){
+    var v = JSON.stringify(auth || {});
+    try { sessionStorage.setItem("fido_auth", v); } catch(e){}
+    try { localStorage.setItem("fido_auth", v); } catch(e){}
+  }
+  function clearAuth(){
+    try { sessionStorage.removeItem("fido_auth"); } catch(e){}
+    try { localStorage.removeItem("fido_auth"); } catch(e){}
+  }
+  function getToken(){
+    const a = getAuth();
+    return a && a.token ? String(a.token) : "";
+  }
+  function getUserName(){
+    const a = getAuth();
+    return (a && (a.name || a.login)) ? String(a.name || a.login) : "—";
+  }
+  function getUserRole(){
+    const a = getAuth();
+    return (a && a.role) ? String(a.role) : "";
+  }
+
+
+  // expose helpers globally (inne moduły działają poza tym closure)
+  window.getAuth = getAuth;
+  window.setAuth = setAuth;
+  window.clearAuth = clearAuth;
+  window.getToken = getToken;
+  window.getUserName = getUserName;
+  window.getUserRole = getUserRole;
+
+  function normalizeRole(role){
+    const r = String(role || "").trim().toLowerCase();
+    if (!r) return "";
+    if (r === "admin") return "Admin";
+    if (r === "kierownik") return "Kierownik";
+    if (r === "koordynator") return "Koordynator";
+    if (r === "stażysta" || r === "stazysta") return "Stażysta";
+    if (r === "pracownik") return "Pracownik";
+
+    // typy pracownika (jak Pracownik = brak dostępu do portalu)
+    if (r === "stały personel na obiekcie" || r === "staly personel na obiekcie") return "Stały personel na obiekcie";
+    if (r === "zespół mobilny" || r === "zespol mobilny") return "Zespół mobilny";
+
+    return role;
+  }
+
+  function roleLevel(role){
+    const rr = normalizeRole(role);
+    if (rr === "Admin") return 3;
+    if (rr === "Kierownik") return 2;
+    if (rr === "Koordynator") return 1;
+    if (rr === "Stażysta") return 1;
+    return 0;
+  }
+
+  function hasPortalAccess(){
+    const lvl = roleLevel(getUserRole());
+    return !!getToken() && lvl >= 1;
+  }
+
+  function showLogin(){
+    if (window.AUTO_LOGOUT && window.AUTO_LOGOUT.deactivate) window.AUTO_LOGOUT.deactivate();
+    const ls = $("#loginScreen");
+    const pr = $("#portalRoot");
+    if (pr) pr.style.display = "none";
+    if (ls) ls.style.display = "flex";
+
+    const err = $("#loginErr");
+    if (err) { err.style.display = "none"; err.textContent = ""; }
+    const pass = $("#loginPass");
+    if (pass) pass.value = "";
+    const login = $("#loginLogin");
+    if (login) setTimeout(()=>login.focus(), 50);
+  }
+
+  function showPortal(){
+    const ls = $("#loginScreen");
+    const pr = $("#portalRoot");
+    if (ls) ls.style.display = "none";
+    if (pr) pr.style.display = "";
+    updateUserUI();
+      if (window.AUTO_LOGOUT && window.AUTO_LOGOUT.activate) window.AUTO_LOGOUT.activate();
+}
+
+  function updateUserUI(){
+    const userName = $("#userName");
+    if (userName) userName.textContent = getUserName();
+    const dot = $("#userDot");
+    if (dot) dot.style.opacity = getToken() ? "1" : "0.25";
+  }
+
+  // ===========================
+  // AUTO_LOGOUT (bezczynność)
+  // 5 min bez interakcji -> pokazuje licznik 15:00
+  // brak interakcji do zera -> auto wylogowanie
+  // ===========================
+  const AUTO_LOGOUT = (function(){
+    const IDLE_BEFORE_COUNTDOWN_MS = 5 * 60 * 1000;   // 5 minut
+    const COUNTDOWN_TOTAL_SEC = 15 * 60;             // 15:00
+
+    let idleTimer = null;
+    let countdownTimer = null;
+    let remainingSec = 0;
+    let countdownActive = false;
+    let listenersAdded = false;
+    let lastTouch = 0;
+
+    function timerEl(){
+      return $("#idleTimer");
+    }
+
+    function fmt(sec){
+      const s = Math.max(0, Math.floor(sec));
+      const mm = Math.floor(s / 60);
+      const ss = s % 60;
+      const mmStr = (mm < 10 ? "0" : "") + mm;
+      const ssStr = (ss < 10 ? "0" : "") + ss;
+      return mmStr + ":" + ssStr;
+    }
+
+    function showTimer(){
+      const el = timerEl();
+      if (!el) return;
+      el.textContent = fmt(remainingSec);
+      el.style.display = "inline-flex";
+    }
+
+    function hideTimer(){
+      const el = timerEl();
+      if (!el) return;
+      el.style.display = "none";
+    }
+
+    function clearIdle(){
+      if (idleTimer){
+        clearTimeout(idleTimer);
+        idleTimer = null;
+      }
+    }
+
+    function clearCountdown(){
+      if (countdownTimer){
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
+      countdownActive = false;
+      remainingSec = 0;
+      hideTimer();
+    }
+
+    function scheduleIdle(){
+      clearIdle();
+      if (!getToken()) return;
+      idleTimer = setTimeout(beginCountdown, IDLE_BEFORE_COUNTDOWN_MS);
+    }
+
+    function beginCountdown(){
+      if (!getToken()) return;
+      clearCountdown();
+      remainingSec = COUNTDOWN_TOTAL_SEC;
+      countdownActive = true;
+      showTimer();
+
+      countdownTimer = setInterval(()=>{
+        // jeżeli user został wylogowany gdzieś indziej
+        if (!getToken()){
+          clearCountdown();
+          return;
+        }
+        remainingSec -= 1;
+        showTimer();
+
+        if (remainingSec <= 0){
+          clearCountdown();
+          // wyloguj
+          doLogout();
+        }
+      }, 1000);
+    }
+
+    function onUserActivity(){
+      // lekki throttling, żeby nie resetować 1000x na sekundę (mousemove)
+      const now = Date.now();
+      if (now - lastTouch < 800) return;
+      lastTouch = now;
+
+      if (!getToken()) return;
+
+      if (countdownActive){
+        clearCountdown();
+      }
+      scheduleIdle();
+    }
+
+    function addListeners(){
+      if (listenersAdded) return;
+      listenersAdded = true;
+
+      const opts = { passive: true };
+      ["mousemove","mousedown","keydown","wheel","scroll","touchstart","touchmove","click"].forEach(ev=>{
+        window.addEventListener(ev, onUserActivity, opts);
+      });
+      document.addEventListener("visibilitychange", ()=>{
+        // jak wraca na kartę, potraktuj jak aktywność
+        if (!document.hidden) onUserActivity();
+      });
+    }
+
+    function activate(){
+      addListeners();
+      clearCountdown();
+      scheduleIdle();
+    }
+
+    function deactivate(){
+      clearIdle();
+      clearCountdown();
+    }
+
+    return { activate, deactivate, _debug: { beginCountdown } };
+  })();
+  window.AUTO_LOGOUT = AUTO_LOGOUT;
+
+
+
+  function setLoginError(msg){
+    const el = $("#loginErr");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.style.display = msg ? "block" : "none";
+  }
+
+  function doLogin(){
+    const btn = $("#loginBtn");
+    const login = ($("#loginLogin").value || "").trim();
+    const password = ($("#loginPass").value || "").trim();
+    if (!login || !password){
+      setLoginError("Podaj login i hasło.");
+      return;
+    }
+
+    setLoginError("");
+    if (btn){
+      btn.disabled = true;
+      btn.textContent = "Logowanie...";
+    }
+
+    google.script.run
+      .withSuccessHandler((res)=>{
+        if (btn){
+          btn.disabled = false;
+          btn.textContent = "Zaloguj";
+        }
+
+    
+
+        if (!res || !res.ok || !res.user || !res.user.token){
+          setLoginError("Błąd logowania.");
+          return;
+        }
+
+        const userRole = normalizeRole(res.user.role || "");
+        const lvl = roleLevel(userRole);
+        if (lvl < 1){
+          clearAuth();
+          setLoginError("Brak dostępu do portalu dla tego typu konta.");
+          return;
+        }
+
+        res.user.role = userRole;
+
+        setAuth(res.user);
+        showPortal();
+        go("dashboard");
+      })
+      .withFailureHandler((err)=>{
+        if (btn){
+          btn.disabled = false;
+          btn.textContent = "Zaloguj";
+        }
+        const msg = (err && err.message) ? err.message : "Błąd logowania.";
+        setLoginError(msg);
+      })
+      .api_login({ login, password });
+  }
+
+  function doLogout(){
+    clearAuth();
+    showLogin();
+  }
+
+  window.FIDO_AUTH = {
+    getAuth,
+    getToken,
+    getUserName,
+    getUserRole,
+    roleLevel,
+    normalizeRole,
+    logout: doLogout,
+    ensureValid: () => hasPortalAccess()
+  };
+  window.FIDO_APP = {
+    forceLogout: doLogout,
+    showLogin,
+    showPortal
+  };
+
+  function hideAllViews(){
+    ["#view-dashboard","#view-events","#view-zones","#view-workerProfile", "#view-clientsList","#view-audits","#view-individualOrders","#view-clientProfile","#view-workerTime","#view-workerTimeDetail","#view-checklists","#view-reports","#view-placeholder"].forEach(sel=>{
+      const el = $(sel);
+      if (el) el.style.display = "none";
+      if (el) el.style.setProperty("display", "none", "important");
+    });
+  }
+
+  function setActiveRoute(route){
+    $$(".menu-item, .submenu-item, .mini-link").forEach(btn=>{
+      btn.classList.toggle("active", btn.dataset.route === route);
+    });
+  }
+
+  function showPlaceholder(title){
+    $("#phTitle").textContent = title || "W budowie";
+    $("#phText").textContent = "Ten moduł dodamy w kolejnym etapie.";
+    hideAllViews();
+        try{ _dashStopAutoRefresh_(); }catch(e){}
+    $("#view-placeholder").style.display = "";
+    setActiveRoute(null);
+  }
+
+  
+  // -------- Dashboard: latest events (Nowe zdarzenia) --------
+  function _dashToken_(){
+    return (window.FIDO_AUTH && typeof window.FIDO_AUTH.getToken === "function") ? window.FIDO_AUTH.getToken() : "";
+  }
+
+  function _dashPad2_(n){ return String(n).padStart(2,"0"); }
+
+  function _dashTimeAgo_(iso){
+    if(!iso) return "—";
+    const t = new Date(iso).getTime();
+    if(!isFinite(t)) return "—";
+    const diff = Date.now() - t;
+    const sec = Math.max(0, Math.round(diff/1000));
+    if (sec < 60) return sec + "s temu";
+    const min = Math.round(sec/60);
+    if (min < 60) return min + "m temu";
+    const h = Math.round(min/60);
+    if (h < 24) return h + "h temu";
+    const d = Math.round(h/24);
+    return d + "d temu";
+  }
+
+  function _dashEscape_(s){
+    return String(s ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
+  }
+
+  function _dashRenderLatestEvents_(items){
+    const listEl = document.getElementById("dashEventsList");
+    const pillEl = document.getElementById("dashEventsPill");
+    if(!listEl) return;
+
+    const arr = Array.isArray(items) ? items.slice(0,5) : [];
+    if (pillEl) pillEl.textContent = String(arr.length || 0);
+
+    function fmtDate(iso){
+      if(!iso) return "—";
+      const d = new Date(iso);
+      if(!isFinite(d.getTime())) return "—";
+      return _dashPad2_(d.getDate()) + "." + _dashPad2_(d.getMonth()+1) + "." + d.getFullYear();
+    }
+    function fmtTime(iso){
+      if(!iso) return "—";
+      const d = new Date(iso);
+      if(!isFinite(d.getTime())) return "—";
+      return _dashPad2_(d.getHours()) + ":" + _dashPad2_(d.getMinutes()) + ":" + _dashPad2_(d.getSeconds());
+    }
+    function fmtDur(sec){
+      if(sec == null || sec === "") return "—";
+      const s = Math.max(0, Math.floor(Number(sec)||0));
+      const hh = Math.floor(s/3600);
+      const mm = Math.floor((s%3600)/60);
+      const ss = s%60;
+      return _dashPad2_(hh) + ":" + _dashPad2_(mm) + ":" + _dashPad2_(ss);
+    }
+
+    if (arr.length === 0){
+      listEl.innerHTML = '<div class="list-row dash-events-row"><div class="muted">Brak nowych zdarzeń</div><div></div><div></div><div></div><div></div><div></div><div class="ta-right muted">—</div></div>';
+      return;
+    }
+
+    listEl.innerHTML = arr.map(it=>{
+      const name = _dashEscape_(it?.workerName || "—");
+      const strefa = _dashEscape_(it?.strefa || "—");
+      const klient = _dashEscape_(it?.klient || "—");
+      const date = _dashEscape_(fmtDate(it?.startAt));
+      const start = _dashEscape_(fmtTime(it?.startAt));
+      const stopIso = it?.stopAt || it?.endAt || "";
+      const stopTxt = stopIso ? fmtTime(stopIso) : "-";
+      const stopClass = stopIso ? "dash-stop" : "dash-stop dash-stop--missing";
+      const dur = _dashEscape_(fmtDur(it?.durationSec ?? it?.durationSeconds ?? it?.duration ?? ""));
+      return `<div class="list-row dash-events-row">
+        <div>${name}</div>
+        <div>${strefa}</div>
+        <div>${klient}</div>
+        <div>${date}</div>
+        <div class="dash-start">${start}</div>
+        <div class="${stopClass}">${_dashEscape_(stopTxt)}</div>
+        <div class="dash-dur ta-right">${dur}</div>
+      </div>`;
+    }).join("");
+  }
+
+  function _dashFetchLatestEvents_(){
+    const listEl = document.getElementById("dashEventsList");
+        const pillEl = document.getElementById("dashEventsPill");
+    if(!listEl) return;
+
+    // UI: loading
+        if (pillEl) pillEl.textContent = "…";
+
+    const params = { token: _dashToken_(), page: 1, pageSize: 50 };
+    google.script.run
+      .withSuccessHandler((res)=>{
+        const items = (res && res.items) ? res.items : [];
+        _dashRenderLatestEvents_(items);
+      })
+      .withFailureHandler((err)=>{
+        const msg = (err && err.message) ? err.message : String(err || "Błąd");
+                if (pillEl) pillEl.textContent = "0";
+      })
+      .api_listEvents(params);
+  }
+
+  // --- Dashboard: Podsumowanie ---
+  let _dashSummaryCache_ = { openNoStop: {count:0, workers:[]}, over9h: {count:0, workers:[]} };
+
+  function _dashRenderSummary_(){
+    const openCountEl = document.getElementById("sumOpenCount");
+    const openNamesEl = document.getElementById("sumOpenNames");
+    const overCountEl = document.getElementById("sumOver9Count");
+    const overNamesEl = document.getElementById("sumOver9Names");
+
+    const openArr = _dashSummaryCache_?.openNoStop?.workers || [];
+    const overArr = _dashSummaryCache_?.over9h?.workers || [];
+
+    if (openCountEl) openCountEl.textContent = String(_dashSummaryCache_?.openNoStop?.count ?? openArr.length ?? 0);
+    if (overCountEl) overCountEl.textContent = String(_dashSummaryCache_?.over9h?.count ?? overArr.length ?? 0);
+
+    function shortList(arr){
+      const names = arr.map(x=>x.workerName).filter(Boolean);
+      const take = names.slice(0,6);
+      const more = names.length - take.length;
+      return take.join(", ") + (more>0 ? (" +"+more) : "");
+    }
+    if (openNamesEl) openNamesEl.textContent = openArr.length ? shortList(openArr) : "—";
+    if (overNamesEl) overNamesEl.textContent = overArr.length ? shortList(overArr) : "—";
+  }
+
+  function _dashFetchSummary_(){
+    const openCountEl = document.getElementById("sumOpenCount");
+    const overCountEl = document.getElementById("sumOver9Count");
+    if (openCountEl) openCountEl.textContent = "…";
+    if (overCountEl) overCountEl.textContent = "…";
+
+    google.script.run
+      .withSuccessHandler((res)=>{
+        if (!res || !res.ok){
+          _dashSummaryCache_ = { openNoStop: {count:0, workers:[]}, over9h: {count:0, workers:[]} };
+          _dashRenderSummary_();
+          return;
+        }
+        _dashSummaryCache_ = res.data || { openNoStop: {count:0, workers:[]}, over9h: {count:0, workers:[]} };
+        _dashRenderSummary_();
+      })
+      .withFailureHandler((_err)=>{
+        _dashSummaryCache_ = { openNoStop: {count:0, workers:[]}, over9h: {count:0, workers:[]} };
+        _dashRenderSummary_();
+      })
+      .api_getDashboardSummary({ token: _dashToken_() });
+  }
+
+  function _dashOpenSummaryModal_(mode){
+    const overlay = document.getElementById("dashSummaryOverlay");
+    const titleEl = document.getElementById("dashSummaryTitle");
+    const metaEl = document.getElementById("dashSummaryMeta");
+    const listEl = document.getElementById("dashSummaryList");
+    if(!overlay || !listEl) return;
+
+    const isOpen = (mode === "open");
+    const pack = isOpen ? (_dashSummaryCache_?.openNoStop || {}) : (_dashSummaryCache_?.over9h || {});
+    const arr = Array.isArray(pack.workers) ? pack.workers : [];
+
+    try{ overlay.dataset.mode = isOpen ? 'open' : 'over9'; }catch(e){}
+
+
+    if (titleEl) titleEl.textContent = isOpen ? "Otwarte zdarzenia (brak STOP)" : "Przekroczone 9h (zakończone dni)";
+    if (metaEl) metaEl.textContent = "Liczba pracowników: " + String(pack.count ?? arr.length ?? 0) + (isOpen ? " • kliknij pracownika, aby przejść do zdarzeń" : " • kliknij pracownika, aby przejść do czasu pracy pracownika");
+
+    if (!arr.length){
+      listEl.innerHTML = '<div class="list-row"><div class="muted">Brak wyników</div></div>';
+    } else {
+      function pad2(x){ return String(x).padStart(2,"0"); }
+      function fmtDay(val){
+        // Prefer startAt ISO; fallback to explicit date fields if present
+        const raw = val || "";
+        let d = raw ? new Date(raw) : null;
+        if (d && isFinite(d.getTime())){
+          return pad2(d.getDate())+"."+pad2(d.getMonth()+1)+"."+d.getFullYear();
+        }
+        // try strings like YYYY-MM-DD or DD.MM.YYYY
+        if (typeof raw === "string" && /^\d{4}-\d{2}-\d{2}/.test(raw)){
+          const y = raw.slice(0,4), m = raw.slice(5,7), da = raw.slice(8,10);
+          return da+"."+m+"."+y;
+        }
+        if (typeof raw === "string" && /^\d{2}\.\d{2}\.\d{4}/.test(raw)){
+          return raw.slice(0,10);
+        }
+        return "—";
+      }
+
+      listEl.innerHTML = arr.map((w, i)=>{
+        const nm = _dashEscape_(w.workerName || "—");
+        const wid = _dashEscape_(w.workerId || "");
+        const day = _dashEscape_(fmtDay(w.dateKey || w.workdayDate || w.date || w.day || w.startAt));
+        return `<div class="list-row" data-i="${i}" data-worker="${wid}">
+          <div style="display:flex; align-items:center; justify-content:space-between; width:100%; gap:12px;">
+            <div style="font-weight:900;">${nm}</div>
+            <div class="muted dash-day">${day}</div>
+          </div>
+        </div>`;
+      }).join("");
+    }
+
+    overlay.style.display = "flex";
+    overlay.setAttribute("aria-hidden","false");
+  }
+
+  function _dashCloseSummaryModal_(){
+    const overlay = document.getElementById("dashSummaryOverlay");
+    if(!overlay) return;
+    overlay.style.display = "none";
+    overlay.setAttribute("aria-hidden","true");
+  }
+
+  function _dashBindSummaryUI_(){
+    const openBtn = document.getElementById("sumOpenBlock");
+    const overBtn = document.getElementById("sumOver9Block");
+    const close1 = document.getElementById("dashSummaryClose");
+    const close2 = document.getElementById("dashSummaryClose2");
+    const overlay = document.getElementById("dashSummaryOverlay");
+    const list = document.getElementById("dashSummaryList");
+
+    if (openBtn && !openBtn._bound){
+      openBtn._bound = true;
+      openBtn.addEventListener("click", ()=>_dashOpenSummaryModal_("open"));
+    }
+    if (overBtn && !overBtn._bound){
+      overBtn._bound = true;
+      overBtn.addEventListener("click", ()=>_dashOpenSummaryModal_("over9"));
+    }
+    if (close1 && !close1._bound){
+      close1._bound = true;
+      close1.addEventListener("click", _dashCloseSummaryModal_);
+    }
+    if (close2 && !close2._bound){
+      close2._bound = true;
+      close2.addEventListener("click", _dashCloseSummaryModal_);
+    }
+    if (overlay && !overlay._bound){
+      overlay._bound = true;
+      overlay.addEventListener("click", (e)=>{ if (e.target === overlay) _dashCloseSummaryModal_(); });
+      document.addEventListener("keydown", (e)=>{ if (e.key === "Escape") _dashCloseSummaryModal_(); });
+    }
+    if (list && !list._bound){
+      list._bound = true;
+      list.addEventListener("click", (e)=>{
+        const row = e.target.closest(".list-row");
+        if(!row) return;
+        const i = Number(row.dataset.i);
+        const mode = (document.getElementById("dashSummaryOverlay")?.dataset?.mode || "open");
+        const isOpen = (mode === "open");
+        const arr = isOpen ? (_dashSummaryCache_?.openNoStop?.workers || []) : (_dashSummaryCache_?.over9h?.workers || []);
+        const w = arr[i];
+        if(!w) return;
+        _dashCloseSummaryModal_();
+        if (isOpen) _dashGotoEvents_(w); else _dashGotoWorkerTime_(w);
+      });
+    }
+  }
+
+
+  function _dashGotoEvents_(w){
+    // Prefill for Events module
+    try{
+      window.__EV_PREFILL__ = { workerId: w.workerId || "", workerName: w.workerName || "" };
+    }catch(e){}
+
+    // Go to events
+    if (typeof window.go === "function") window.go("events");
+
+    // Try to apply worker filter in Events view (best-effort)
+    setTimeout(()=>{
+      const p = window.__EV_PREFILL__ || {};
+      const name = (p.workerName || "").trim();
+      const id = (p.workerId || "").trim();
+
+      // 1) If module exposes a method
+      try{
+        const M = window.EventsModule || {};
+        const candidates = ["setWorker","selectWorker","filterByWorker","openForWorker","prefillWorker","setWorkerFilter"];
+        for (const fn of candidates){
+          if (typeof M[fn] === "function"){
+            M[fn](id || name);
+            return;
+          }
+        }
+      }catch(e){}
+
+      // 2) Heuristic: find a select/input in #view-events and set value
+      const root = document.getElementById("view-events");
+      if(!root) return;
+
+      // Try selects first (options matching name)
+      const selects = Array.from(root.querySelectorAll("select"));
+      for (const sel of selects){
+        const opts = Array.from(sel.options || []);
+        const hit = opts.find(o => (o.value && String(o.value).trim() === id) || (o.text && String(o.text).trim() === name));
+        if (hit){
+          sel.value = hit.value;
+          sel.dispatchEvent(new Event("change", {bubbles:true}));
+          return;
+        }
+        // fallback: contains name
+        const hit2 = opts.find(o => (o.text && String(o.text).toLowerCase().includes(name.toLowerCase())));
+        if (hit2 && name){
+          sel.value = hit2.value;
+          sel.dispatchEvent(new Event("change", {bubbles:true}));
+          return;
+        }
+      }
+
+      // Try text inputs (search)
+      const inputs = Array.from(root.querySelectorAll('input[type="text"], input:not([type])'));
+      for (const inp of inputs){
+        const ph = (inp.getAttribute("placeholder") || "").toLowerCase();
+        const nm = (inp.getAttribute("name") || "").toLowerCase();
+        const idAttr = (inp.id || "").toLowerCase();
+        if (ph.includes("prac") || nm.includes("prac") || idAttr.includes("prac") || ph.includes("worker") || nm.includes("worker")){
+          inp.value = name || id;
+          inp.dispatchEvent(new Event("input", {bubbles:true}));
+          inp.dispatchEvent(new Event("change", {bubbles:true}));
+          return;
+        }
+      }
+    }, 250);
+  }
+
+  function _dashGotoWorkerTime_(w){
+    try{
+      window.__WT_PREFILL__ = { workerId: w.workerId || "", workerName: w.workerName || "" };
+    }catch(e){}
+
+    // Przejdź do czasu pracy
+    if (typeof window.go === "function") window.go("workerTime");
+
+    // Spróbuj ustawić pracownika w module (jeśli jest API) lub heurystycznie w DOM
+    setTimeout(()=>{
+      const p = window.__WT_PREFILL__ || {};
+      const name = p.workerName || "";
+      const id = p.workerId || "";
+
+      // 1) jeśli moduł udostępnia metodę
+      try{
+        const M = window.WorkerTimeModule || {};
+        const candidates = ["setWorker","selectWorker","openForWorker","prefillWorker"];
+        for (const fn of candidates){
+          if (typeof M[fn] === "function"){
+            M[fn](id || name);
+            return;
+          }
+        }
+      }catch(e){}
+
+      // 2) heurystyka: znajdź select w view-workerTime i ustaw opcję pasującą
+      const root = document.getElementById("view-workerTime");
+      if(!root) return;
+
+      const selects = Array.from(root.querySelectorAll("select"));
+      for (const sel of selects){
+        const opts = Array.from(sel.options || []);
+        // exact match on text
+        let opt = opts.find(o => String(o.textContent||"").trim() === name);
+        if (!opt && id) opt = opts.find(o => String(o.value||"").trim() === id);
+        if (opt){
+          sel.value = opt.value;
+          sel.dispatchEvent(new Event("change", {bubbles:true}));
+          return;
+        }
+      }
+
+      // 3) heurystyka: input search
+      const inp = root.querySelector('input[type="search"], input[placeholder*="prac"], input[placeholder*="Prac"], input[name*="worker"], input[id*="worker"]');
+      if (inp && name){
+        inp.value = name;
+        inp.dispatchEvent(new Event("input", {bubbles:true}));
+      }
+    }, 60);
+  }
+
+
+  // --- Dashboard auto-refresh (Pulpit) ---
+  // Refreshes "Nowe zdarzenia" + "Podsumowanie" while user is on dashboard.
+  let _dashAutoTimer_ = null;
+  const _dashAutoMs_ = 30000; // 30s
+
+  function _dashStopAutoRefresh_(){
+    if (_dashAutoTimer_){
+      try { clearInterval(_dashAutoTimer_); } catch(e){}
+      _dashAutoTimer_ = null;
+    }
+  }
+
+  function _dashStartAutoRefresh_(){
+    _dashStopAutoRefresh_();
+    // fire immediately
+    try{ _dashFetchLatestEvents_(); }catch(e){}
+    try{ _dashFetchSummary_(); }catch(e){}
+    _dashAutoTimer_ = setInterval(()=>{
+      try{
+        const v = document.getElementById("view-dashboard");
+        if (!v || v.style.display === "none") return;
+        if (document.hidden) return;
+      }catch(_e){}
+      try{ _dashFetchLatestEvents_(); }catch(e){}
+      try{ _dashFetchSummary_(); }catch(e){}
+    }, _dashAutoMs_);
+  }
+
+  // refresh once when user returns to the tab
+  document.addEventListener("visibilitychange", ()=>{
+    try{
+      if (document.hidden) return;
+      const v = document.getElementById("view-dashboard");
+      if (!v || v.style.display === "none") return;
+      _dashFetchLatestEvents_();
+      _dashFetchSummary_();
+    }catch(e){}
+  });
+
+
+function go(route){
+        if (!route) route = "dashboard";
+
+        if (!hasPortalAccess()){
+          showLogin();
+          return;
+        }
+
+        hideAllViews();
+        try{ _dashStopAutoRefresh_(); }catch(e){}
+        setActiveRoute(route);
+
+        // --- LOGIKA WYBORU WIDOKU ---
+        
+        if (route === "dashboard"){
+          $("#view-dashboard").style.display = "";
+          _dashStartAutoRefresh_();
+          // (auto-refresh will call fetches)
+          try{ _dashBindSummaryUI_(); }catch(e){}
+          return;
+        }
+
+        if (route === "events"){
+          $("#view-events").style.display = "";
+          if (window.EventsModule) window.EventsModule.init();
+          return;
+        }
+
+        if (route === "zones"){
+          $("#view-zones").style.display = "";
+          if (window.ZonesModule) window.ZonesModule.init();
+          return;
+        }
+
+        if (route === "workerProfile"){
+          $("#view-workerProfile").style.display = "";
+          if (window.WorkerProfileModule) window.WorkerProfileModule.init();
+          return;
+        }
+
+        // TO JEST NOWY FRAGMENT:
+        if (route === "clientsList") {
+          $("#view-clientsList").style.display = "block";
+          if (window.ClientsModule) window.ClientsModule.init();
+          return;
+        }
+
+
+        if (route === "audits") {
+          const v = document.getElementById("view-audits");
+          if (v) v.style.setProperty("display", "block", "important");
+          if (window.AuditsModule && window.AuditsModule.init) window.AuditsModule.init();
+          return;
+        }
+
+
+        if (route === "individualOrders") {
+          const v = document.getElementById("view-individualOrders");
+          if (v) v.style.setProperty("display", "block", "important");
+          if (window.IndividualOrdersModule && window.IndividualOrdersModule.init) window.IndividualOrdersModule.init();
+          return;
+        }
+
+        if (route === "clientProfile") {
+          const view = $("#view-clientProfile");
+          if (view) view.style.setProperty("display", "block", "important"); // Pokazuje sekcję
+          if (window.ClientProfileModule) window.ClientProfileModule.init(); // Uruchamia logikę
+          return;
+
+        }
+
+
+        if (route === "checklists") {
+          const v = document.getElementById("view-checklists");
+          if (v) v.style.setProperty("display", "block", "important");
+          if (window.ChecklistsModule && window.ChecklistsModule.init) window.ChecklistsModule.init();
+          return;
+        }
+
+
+        
+
+        if (route === "workerTime"){
+          const v = document.getElementById("view-workerTime");
+          if (v) v.style.setProperty("display", "block", "important");
+          if (window.WorkerTimeModule && window.WorkerTimeModule.init) window.WorkerTimeModule.init();
+
+          // SORTOWANIE: przycisk obok pola Typ (Alfabetycznie / Alerty)
+          try{ _wtEnsureSortUI_(); }catch(e){}
+          try{ _wtApplySortMode_(); }catch(e){}
+
+          // ALERTY: jeśli pracownik ma jakiekolwiek przekroczenie normy w miesiącu → wiersz czerwony
+          try{ scheduleWorkerTimeListAlerts(); } catch(e){}
+
+          return;
+        }
+
+        if (route === "workerTimeDetail"){
+          const v = document.getElementById("view-workerTimeDetail");
+          if (v) v.style.setProperty("display", "block", "important");
+          if (window.WorkerTimeDetailModule && window.WorkerTimeDetailModule.init) window.WorkerTimeDetailModule.init();
+          return;
+        }
+
+        
+        if (route === "reports"){
+          const v = document.getElementById("view-reports");
+          if (v) v.style.setProperty("display", "block", "important");
+          if (window.ReportsModule && window.ReportsModule.init) window.ReportsModule.init();
+          return;
+        }
+
+// Jeśli nie dopasowano żadnej trasy powyżej, pokazuje "W budowie"
+        const mapTitle = {
+          schedule: "Grafik pracy",
+          reports: "Zestawienia",
+          coordinator: "Koordynator",
+          settings: "Ustawienia"
+        };
+        showPlaceholder(mapTitle[route] || "W budowie");
+      }
+
+  // Umożliwia wywołanie nawigacji z innych modułów (np. Czas pracy pracownika)
+  window.go = go;
+
+  function bindMenu(){
+    $$(".menu-item, .submenu-item").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const route = btn.dataset.route;
+        go(route);
+      });
+    });
+
+    $$(".menu-section").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const key = btn.dataset.toggle;
+        const panel = $("#submenu-" + key);
+        if (!panel) return;
+        panel.classList.toggle("open");
+        btn.classList.toggle("open");
+      });
+    });
+  }
+
+  function bindLogin(){
+    const btn = $("#loginBtn");
+    if (btn) btn.addEventListener("click", doLogin);
+
+    const pass = $("#loginPass");
+    const login = $("#loginLogin");
+    pass && pass.addEventListener("keydown", (e)=>{ if (e.key === "Enter") doLogin(); });
+    login && login.addEventListener("keydown", (e)=>{ if (e.key === "Enter") doLogin(); });
+  }
+
+  function bindLogout(){
+    const btn = $("#logoutBtn");
+    if (!btn) return;
+    btn.addEventListener("click", doLogout);
+  }
+
+  // =========================
+  // Globalny przycisk "Wróć" (w nagłówku)
+  // - widoczny tylko tam, gdzie ma sens (np. workerTimeDetail)
+  // - klik: wraca do pełnej listy pracowników (workerTime)
+  // =========================
+  function ensureGlobalBackBtn(){
+    let btn = $("#globalBackBtn");
+    if (btn) return btn;
+
+    const headerRight = document.querySelector(".header-right");
+    if (!headerRight) return null;
+
+    btn = document.createElement("button");
+    btn.id = "globalBackBtn";
+    btn.type = "button";
+    btn.className = "btn2 back";
+    btn.textContent = "Wróć";
+    btn.title = "Wróć do listy";
+
+    // domyślnie ukryty (pokażemy go w zależności od route)
+    btn.style.display = "none";
+
+    const logoutBtn = $("#logoutBtn");
+    if (logoutBtn && logoutBtn.parentNode === headerRight){
+      headerRight.insertBefore(btn, logoutBtn);
+    } else {
+      headerRight.appendChild(btn);
+    }
+
+    btn.addEventListener("click", ()=>{
+      try{
+        // Wymóg: z podglądu czasu pracy pracownika wraca do pełnej listy pracowników
+        go("workerTime");
+      }catch(e){}
+    });
+
+    return btn;
+  }
+
+  function updateGlobalBackBtn(route){
+    const btn = ensureGlobalBackBtn();
+    if (!btn) return;
+
+    // Na razie pokazujemy tylko w szczegółach czasu pracy pracownika.
+    const shouldShow = (route === "workerTimeDetail");
+    btn.style.display = shouldShow ? "" : "none";
+    btn.disabled = !shouldShow;
+  }
+
+
+
+  
+  // =========================
+  // WorkerTime (lista pracowników) — podświetlenie wierszy na czerwono,
+  // jeśli pracownik ma JAKIKOLWIEK alert (>9h lub >10h) w wybranym miesiącu.
+  // Backend: api_wt_workersAlertMap({ token, month, workerNames })
+  // =========================
+
+  function _ymNow_(){
+    const d = new Date();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return String(d.getFullYear()) + "-" + mm;
+  }
+
+  function _pickMonthFromView_(view){
+    // jeśli kiedyś dodasz select miesiąca na liście, automatycznie go wykorzystamy
+    const sel = view ? view.querySelector("select") : null;
+    if (!sel) return "";
+    const v = String(sel.value || "").trim();
+    return (/^\d{4}-\d{2}$/.test(v)) ? v : "";
+  }
+
+  function _isIdLike_(t){
+    const s = String(t || "").trim();
+    // przykłady: w001, W010, BC0001, OBJ0001
+    if (/^[a-zA-Z]{1,4}\d{3,}$/i.test(s)) return true;
+    return false;
+  }
+
+  function _findRowFromButton_(btn, view){
+    if (!btn) return null;
+
+    // 1) typowe przypadki
+    let row = btn.closest(".workers-row") || btn.closest("tr") || btn.closest("[role='row']");
+    if (row) return row;
+
+    // 2) heurystyka: idź w górę po rodzicach i szukaj elementu,
+    // który wygląda jak wiersz (ma kilka dzieci, pierwsze przypomina ID)
+    let el = btn;
+    for (let i = 0; i < 10; i++){
+      el = el.parentElement;
+      if (!el) break;
+      if (el === view) break;
+
+      const kids = Array.from(el.children || []).filter(n => n && n.nodeType === 1);
+      if (kids.length >= 3){
+        const t0 = String(kids[0].textContent || "").trim();
+        // nagłówek tabeli ma zwykle tekst "ID" — pomijamy
+        if (t0.toLowerCase() === "id") continue;
+        if (_isIdLike_(t0)) return el;
+      }
+    }
+
+    return null;
+  }
+
+  function _extractWorkerNameFromRow_(rowEl){
+    if (!rowEl) return "";
+
+    // tabela
+    if (rowEl.tagName && rowEl.tagName.toLowerCase() === "tr"){
+      const tds = Array.from(rowEl.querySelectorAll("td"));
+      if (tds.length >= 2){
+        const name = String(tds[1].textContent || "").trim();
+        return name;
+      }
+    }
+
+    // div/grid: dzieci = komórki
+    const kids = Array.from(rowEl.children || []).filter(n => n && n.nodeType === 1);
+    if (kids.length >= 2){
+      // zakładamy: 0 = ID, 1 = Imię i nazwisko
+      const name = String(kids[1].textContent || "").trim();
+      if (name) return name;
+    }
+
+    // fallback: szukaj najdłuższego tekstu niebędącego ID / typem / "Pokaż"
+    const texts = [];
+    const elems = rowEl.querySelectorAll("*");
+    elems.forEach(e=>{
+      const t = String(e.textContent || "").trim();
+      if (!t) return;
+      const tl = t.toLowerCase();
+      if (tl === "pokaż" || tl === "pokaz") return;
+      if (tl === "admin" || tl === "kierownik" || tl === "koordynator") return;
+      if (_isIdLike_(t)) return;
+      texts.push(t);
+    });
+    texts.sort((a,b)=>b.length-a.length);
+    return texts[0] || "";
+  }
+
+  function _getWorkerRowsFromView_(view){
+    if (!view) return [];
+
+    const btns = Array.from(view.querySelectorAll("button"));
+    const pokaBtns = btns.filter(b=>{
+      const t = String(b.textContent || "").trim().toLowerCase();
+      return t === "pokaż" || t === "pokaz";
+    });
+
+    const rows = [];
+    for (const b of pokaBtns){
+      const r = _findRowFromButton_(b, view);
+      if (r && !rows.includes(r)) rows.push(r);
+    }
+
+    // fallback: jeśli jest tabela, bierz wszystkie TR oprócz nagłówka
+    if (!rows.length){
+      const trs = Array.from(view.querySelectorAll("tr"));
+      trs.forEach(tr=>{
+        const t0 = String((tr.children && tr.children[0] ? tr.children[0].textContent : "") || "").trim();
+        if (t0.toLowerCase() === "id") return;
+        if (_isIdLike_(t0)) rows.push(tr);
+      });
+    }
+
+    return rows;
+  }
+
+  
+  function _normNameKey_(s){
+    const v = String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+    // usuń diakrytyki (np. Rafał -> rafal)
+    try{
+      return v.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    } catch(e){
+      return v;
+    }
+  }
+
+  
+  // =========================
+  // WorkerTime — Sortowanie (Alfabetycznie / Alerty)
+  // UI: przycisk "Sortowanie" obok pola "Typ"
+  // - Alfabetycznie: A→Z po "Imię i nazwisko"
+  // - Alerty: pokazuje tylko wiersze z podświetleniem (.wt-worker-alert)
+  // =========================
+
+  function _wtGetSortMode_(){
+    try{ return String(sessionStorage.getItem("wt_sort_mode") || "").trim(); }catch(e){ return ""; }
+  }
+  function _wtSetSortMode_(m){
+    try{ sessionStorage.setItem("wt_sort_mode", String(m || "")); }catch(e){}
+  }
+
+  function _wtFindTypTool_(view){
+    if (!view) return null;
+    // szukamy labela "Typ" i jego .tool
+    const labels = Array.from(view.querySelectorAll(".tool label, label"));
+    const lab = labels.find(l => String(l.textContent||"").trim().toLowerCase() === "typ");
+    if (lab){
+      return lab.closest(".tool") || lab.parentElement || null;
+    }
+    // fallback: select/input z placeholderem "np. Kierownik"
+    const inp = view.querySelector('input[placeholder*="Kierownik"], input[placeholder*="kierownik"], select[name*="type"], select[id*="type"]');
+    if (inp) return inp.closest(".tool") || inp.parentElement || null;
+    return null;
+  }
+
+  function _wtEnsureSortUI_(){
+    const view = document.getElementById("view-workerTime");
+    if (!view) return;
+
+    // już istnieje
+    if (view.querySelector("#wtSortBtn")) return;
+
+    const typTool = _wtFindTypTool_(view);
+    if (!typTool) return;
+
+    const tool = document.createElement("div");
+    tool.className = "tool wt-sort-tool";
+    tool.innerHTML = '<label>Sortowanie</label><button type="button" class="btn2 wt-sort-btn" id="wtSortBtn">Sortowanie</button>';
+
+    typTool.insertAdjacentElement("afterend", tool);
+
+    const btn = tool.querySelector("#wtSortBtn");
+
+    // menu w body (żeby nie było ucinane przez overflow)
+    let menu = document.getElementById("wtSortMenu");
+    if (!menu){
+      menu = document.createElement("div");
+      menu.id = "wtSortMenu";
+      menu.className = "wt-sort-menu hidden";
+      menu.innerHTML =
+        '<button type="button" class="wt-sort-item" data-mode="alpha">Alfabetycznie</button>' +
+        '<button type="button" class="wt-sort-item" data-mode="alerts">Alerty</button>';
+      document.body.appendChild(menu);
+
+      // klik poza → zamknij
+      document.addEventListener("click", (e)=>{
+        if (menu.classList.contains("hidden")) return;
+        const t = e.target;
+        if (t === btn || (btn && btn.contains(t))) return;
+        if (t === menu || (menu && menu.contains(t))) return;
+        _wtCloseSortMenu_();
+      });
+      window.addEventListener("resize", _wtCloseSortMenu_);
+      window.addEventListener("scroll", _wtCloseSortMenu_, true);
+    }
+
+    btn.addEventListener("click", (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      if (!menu.classList.contains("hidden")){
+        _wtCloseSortMenu_();
+        return;
+      }
+      _wtOpenSortMenu_(btn, menu);
+    });
+
+    menu.addEventListener("click", (e)=>{
+      const it = e.target.closest(".wt-sort-item");
+      if (!it) return;
+      const mode = String(it.dataset.mode || "");
+      _wtSetSortMode_(mode);
+      _wtRefreshSortBtn_();
+      _wtApplySortMode_();
+      _wtCloseSortMenu_();
+    });
+
+    // observer: po przebudowie listy (szukaj/odśwież) — re-inject i re-apply
+    try{
+      if (!view.__wtSortObs){
+        const obs = new MutationObserver(()=>{
+          clearTimeout(view.__wtSortObsT);
+          view.__wtSortObsT = setTimeout(()=>{
+            try{ _wtEnsureSortUI_(); }catch(e){}
+            try{ _wtApplySortMode_(); }catch(e){}
+          }, 120);
+        });
+        obs.observe(view, { childList:true, subtree:true });
+        view.__wtSortObs = obs;
+      }
+    }catch(e){}
+
+    _wtRefreshSortBtn_();
+  }
+
+  function _wtRefreshSortBtn_(){
+    const view = document.getElementById("view-workerTime");
+    if (!view) return;
+    const btn = view.querySelector("#wtSortBtn");
+    if (!btn) return;
+    const mode = _wtGetSortMode_();
+    if (mode === "alpha") btn.textContent = "Alfabetycznie";
+    else if (mode === "alerts") btn.textContent = "Alerty";
+    else btn.textContent = "Sortowanie";
+    // aktywne elementy menu
+    const menu = document.getElementById("wtSortMenu");
+    if (menu){
+      Array.from(menu.querySelectorAll(".wt-sort-item")).forEach(x=>{
+        x.classList.toggle("active", String(x.dataset.mode||"") === mode);
+      });
+    }
+  }
+
+  function _wtOpenSortMenu_(btn, menu){
+    if (!btn || !menu) return;
+    const r = btn.getBoundingClientRect();
+    const top = r.bottom + 8 + window.scrollY;
+    const left = Math.min((r.left + window.scrollX), (window.scrollX + document.documentElement.clientWidth - 240));
+    menu.style.top = top + "px";
+    menu.style.left = left + "px";
+    menu.classList.remove("hidden");
+    _wtRefreshSortBtn_();
+  }
+
+  function _wtCloseSortMenu_(){
+    const menu = document.getElementById("wtSortMenu");
+    if (!menu) return;
+    menu.classList.add("hidden");
+  }
+
+  function _wtHasAlert_(row){
+    if (!row) return false;
+    if (row.classList && row.classList.contains("wt-worker-alert")) return true;
+    // fallback: jeśli klasa była na komórce
+    try{
+      if (row.querySelector && row.querySelector(".wt-worker-alert")) return true;
+    }catch(e){}
+    return false;
+  }
+
+  function _wtApplySortMode_(){
+    const view = document.getElementById("view-workerTime");
+    if (!view) return;
+
+    // tylko gdy widok jest widoczny
+    try{
+      const disp = window.getComputedStyle(view).display;
+      if (disp === "none") return;
+    }catch(e){}
+
+    const mode = _wtGetSortMode_();
+    if (!mode) return;
+
+    const rows = _getWorkerRowsFromView_(view);
+    if (!rows || !rows.length) return;
+
+    // reset display
+    rows.forEach(r=>{ try{ r.style.display = ""; }catch(e){} });
+
+    // sort key
+    function keyOf(row){
+      const nm = _extractWorkerNameFromRow_(row);
+      return _normNameKey_(nm || "");
+    }
+
+    let list = rows.slice();
+
+    if (mode === "alerts"){
+      list = list.filter(_wtHasAlert_);
+    }
+
+    list.sort((a,b)=>{
+      const ka = keyOf(a);
+      const kb = keyOf(b);
+      if (ka < kb) return -1;
+      if (ka > kb) return 1;
+      return 0;
+    });
+
+    // ukryj niepasujące (alerts)
+    if (mode === "alerts"){
+      rows.forEach(r=>{
+        if (!_wtHasAlert_(r)){
+          try{ r.style.display = "none"; }catch(e){}
+        }
+      });
+    }
+
+    // re-order in DOM
+    const first = rows[0];
+    const parent = first ? first.parentElement : null;
+    if (!parent) return;
+
+    // div/grid: keep header on top
+    const head = parent.querySelector && parent.querySelector(".workers-head");
+    if (head && head.parentElement === parent){
+      // upewnij się że head jest pierwszy
+      try{ parent.insertBefore(head, parent.firstChild); }catch(e){}
+    }
+
+    // przenieś tylko widoczne (list)
+    list.forEach(r=>{
+      try{ parent.appendChild(r); }catch(e){}
+    });
+  }
+
+
+function _ensureWorkersAlertMap_(token, month, cb){
+    if (window.__wtWorkersAlertMap && window.__wtWorkersAlertMapMonth === month){
+      cb(window.__wtWorkersAlertMap);
+      return;
+    }
+
+    google.script.run
+      .withSuccessHandler((res)=>{
+        const rawMap = (res && res.map) ? res.map : {};
+        const normMap = {};
+        Object.keys(rawMap).forEach(k=>{
+          const nk = _normNameKey_(k);
+          if (!nk) return;
+          const lvl = Number(rawMap[k] || 0);
+          if (!normMap[nk] || lvl > normMap[nk]) normMap[nk] = lvl;
+        });
+
+        window.__wtWorkersAlertMap = normMap;
+        window.__wtWorkersAlertMapMonth = month;
+
+        cb(normMap);
+      })
+      .withFailureHandler((err)=>{
+        try{ console.log("api_wt_workersAlertMap error", err); }catch(e){}
+        if (!window.__wtWorkersAlertMapWarned){
+          window.__wtWorkersAlertMapWarned = true;
+          try{ alert("Nie mogę pobrać mapy alertów czasu pracy (sprawdź Console)."); }catch(e){}
+        }
+        cb({});
+      })
+      .api_wt_workersAlertMap({ token: token, month: month });
+  }
+
+  function applyWorkerTimeListAlerts(){
+    try{
+      const view = document.getElementById("view-workerTime");
+      if (!view) return;
+
+      const disp = window.getComputedStyle(view).display;
+      if (disp === "none") return;
+
+      const token = getToken();
+      if (!token) return;
+
+      const month = _pickMonthFromView_(view) || _ymNow_();
+
+      const rows = _getWorkerRowsFromView_(view);
+      if (!rows.length) return;
+
+      _ensureWorkersAlertMap_(token, month, (map)=>{
+        // wyczyść stare
+        rows.forEach(r=>{
+          if (!r) return;
+          if (r.classList) r.classList.remove("wt-worker-alert");
+          // usuń ewentualne style z poprzednich wersji (gdy kiedyś były ustawiane inline)
+          try{ r.style.backgroundColor = ""; }catch(e){}
+          Array.from(r.children||[]).forEach(c=>{
+            if (!c) return;
+            if (c.classList) c.classList.remove("wt-worker-alert");
+            try{ c.style.backgroundColor = ""; }catch(e){}
+          });
+        });
+
+        // ustaw nowe
+        rows.forEach(r=>{
+          const n = _extractWorkerNameFromRow_(r);
+          if (!n) return;
+          const nk = _normNameKey_(n);
+          const lvl = map[nk] || 0;
+
+          if (lvl > 0){
+            // wymaganie: na liście pracowników zawsze CZERWONY, jeśli jest jakikolwiek alert
+            if (r.classList) r.classList.add("wt-worker-alert");
+          }
+        });
+
+        // po odświeżeniu alertów — ponownie zastosuj sortowanie / filtrowanie
+        try{ _wtRefreshSortBtn_(); }catch(e){}
+        try{ _wtApplySortMode_(); }catch(e){}
+      });
+
+    } catch(e){
+      try{ console.log("applyWorkerTimeListAlerts error", e); }catch(_){}
+    }
+  }
+
+  function scheduleWorkerTimeListAlerts(){
+    // kilka prób czasowych
+    setTimeout(applyWorkerTimeListAlerts, 200);
+    setTimeout(applyWorkerTimeListAlerts, 700);
+    setTimeout(applyWorkerTimeListAlerts, 1400);
+    setTimeout(applyWorkerTimeListAlerts, 2400);
+
+    // obserwator zmian DOM (np. po filtrach / odśwież)
+    try{
+      const view = document.getElementById("view-workerTime");
+      if (view && !view.__wtObs){
+        const obs = new MutationObserver(()=>{
+          clearTimeout(view.__wtObsT);
+          view.__wtObsT = setTimeout(applyWorkerTimeListAlerts, 120);
+        });
+        obs.observe(view, { childList:true, subtree:true });
+        view.__wtObs = obs;
+      }
+    } catch(e){}
+  }
+
+
+
+  document.addEventListener("DOMContentLoaded", ()=>{
+    bindMenu();
+    bindLogin();
+    bindLogout();
+
+    if (hasPortalAccess()){
+      showPortal();
+      try{
+        const u = new URL(window.location.href);
+        const r = (u.searchParams.get('route') || '').trim();
+        go(r || "dashboard");
+      } catch(e){
+        go("dashboard");
+      }
+    } else {
+      showLogin();
+    }
+  });
+})();
+  window.AUTO_LOGOUT = AUTO_LOGOUT;
+
+
+
+// Dashboard quick links (delegated)
+document.addEventListener('click', (e)=>{
+  const btn = e.target.closest && e.target.closest('[data-route]');
+  if(!btn) return;
+  const r = btn.getAttribute('data-route');
+  if(!r) return;
+  if (typeof window.go === "function") window.go(r);
+});
+
+/* BC_LOADING_PATCH: global loading + auto wrapper for google.script.run */
+(function(){
+  var el = null;
+  var pending = 0;
+
+  function getEl(){
+    if (el) return el;
+    el = document.getElementById("bcGlobalLoading");
+    return el;
+  }
+
+  // Do not show global loading overlay when user is on Dashboard (Pulpit)
+  function shouldShowOnThisView(){
+    try{
+      var dash = document.getElementById("view-dashboard");
+      if (!dash) return true;
+      var cs = window.getComputedStyle ? getComputedStyle(dash) : null;
+      var visible = cs ? (cs.display !== "none" && cs.visibility !== "hidden" && cs.opacity !== "0") : (dash.style.display !== "none");
+      if (visible) return false; // dashboard active -> suppress loading overlay
+    }catch(e){}
+    return true;
+  }
+
+  function show(){
+    if (!shouldShowOnThisView()) return;
+    var e = getEl();
+    if (!e) return;
+    pending++;
+    e.classList.remove("hidden");
+    e.setAttribute("aria-hidden","false");
+  }
+
+  function hide(){
+    var e = getEl();
+    if (!e) return;
+    pending = Math.max(0, pending - 1);
+    if (pending === 0){
+      e.classList.add("hidden");
+      e.setAttribute("aria-hidden","true");
+    }
+  }
+
+  window.BCLoading = window.BCLoading || { show: show, hide: hide };
+
+  function patchGAS(){
+    try{
+      if (!window.google || !google.script || !google.script.run) return;
+      if (google.script.run.__bc_patched) return;
+
+      function wrapRunner(runner){
+        return new Proxy(runner, {
+          get: function(target, prop){
+            var v = target[prop];
+
+            if (prop === "withSuccessHandler"){
+              return function(fn){
+                return wrapRunner(target.withSuccessHandler(function(res){
+                  try{ fn && fn(res); } finally { hide(); }
+                }));
+              };
+            }
+            if (prop === "withFailureHandler"){
+              return function(fn){
+                return wrapRunner(target.withFailureHandler(function(err){
+                  try{ fn && fn(err); } finally { hide(); }
+                }));
+              };
+            }
+
+            if (typeof v === "function"){
+              return function(){
+                show();
+                return v.apply(target, arguments);
+              };
+            }
+
+            return v;
+          }
+        });
+      }
+
+      var proxied = wrapRunner(google.script.run);
+      proxied.__bc_patched = true;
+      google.script.run = proxied;
+      google.script.run.__bc_patched = true;
+    }catch(e){}
+  }
+
+  if (document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", patchGAS);
+  } else {
+    patchGAS();
+  }
+})();
+  window.AUTO_LOGOUT = AUTO_LOGOUT;
+
+</script>

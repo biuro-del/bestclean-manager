@@ -1,0 +1,933 @@
+/**
+ * Workday Service
+ */
+
+/**
+ * Returns { todayWorkday: wd|null, staleOpen: boolean, staleStartAt: string }
+ * Uses device local date from clientNow + tzOffsetMinutes.
+ */
+function Workday_getActiveForTodayForClient_(workerLogin, clientNow, tzOffsetMinutes) {
+  const wd = Workday_getActiveOrCloseDueForWorker_(workerLogin);
+  if (!wd || !wd.workdayId) return { todayWorkday: null, staleOpen: false, staleStartAt: '' };
+
+  const status = String(wd.status || '').toUpperCase();
+  const isOpen = (status === 'RUNNING' || status === 'ENDING');
+  if (!isOpen) return { todayWorkday: null, staleOpen: false, staleStartAt: '' };
+
+  const nowIso = String(clientNow || nowIso_());
+  const offMin = Number(tzOffsetMinutes || 0);
+  const isToday = isSameLocalDay_(wd.startAt, nowIso, offMin);
+
+  if (isToday) return { todayWorkday: wd, staleOpen: false, staleStartAt: '' };
+  return { todayWorkday: null, staleOpen: true, staleStartAt: String(wd.startAt || '') };
+}
+
+function Workday_findActiveForWorker_(workerLogin) {
+  return Workday_findActiveForWorkerRepo_(workerLogin);
+}
+
+function Workday_getActiveOrCloseDueForWorker_(workerLogin) {
+  const wd = Workday_findActiveForWorker_(workerLogin);
+  if (!wd) return null;
+
+  const status = String(wd.status || '').toUpperCase();
+  if (status === 'ENDING' && wd.autoCloseAt) {
+    const due = new Date(wd.autoCloseAt).getTime() <= new Date(nowIso_()).getTime();
+    if (due) {
+      Workday_close_(wd, nowIso_());
+      return null;
+    }
+  }
+  return wd;
+}
+
+
+function Workday_pauseTotalSec_(wd, endAtIso) {
+  // Multi-pause: sum pauses from Workday_Pauza by WorkdayID (source of truth).
+  try {
+    const wid = String(wd && wd.workdayId || '').trim();
+    if (wid && typeof Pauses_sumTotalSecForWorkday_ === 'function') {
+      const endIso = String(endAtIso || nowIso_());
+      const sec = Number(Pauses_sumTotalSecForWorkday_(wid, endIso) || 0);
+      if (Number.isFinite(sec)) return Math.max(0, Math.round(sec));
+    }
+  } catch (_) {}
+
+  // Fallback (legacy): single pause stored in Workday_Log (pause1StartAt/pause1StopAt).
+  try {
+    const pStart = String((wd && wd.pause1StartAt) || '');
+    if (!pStart) return 0;
+    const pStop = String((wd && wd.pause1StopAt) || '') || String(endAtIso || '');
+    if (!pStop) return 0;
+    const a = new Date(pStart).getTime();
+    const b = new Date(pStop).getTime();
+    if (isNaN(a) || isNaN(b)) return 0;
+    return Math.max(0, Math.round((b - a) / 1000));
+  } catch (_) {
+    return 0;
+  }
+}
+
+/**
+ * Przerwy: zawsze odejmowane w 100% od czasu pracy (bez płatnych 15 minut).
+ */
+
+function Workday_computePaidDurationSec_(startAtIso, endAtIso, totalPauseSec) {
+  let sess = 0;
+  try { sess = secondsBetweenIso_(String(startAtIso || ''), String(endAtIso || '')); } catch (_) { sess = 0; }
+  if (!Number.isFinite(sess)) sess = 0;
+
+  let pause = Math.max(0, Number(totalPauseSec || 0));
+  if (!Number.isFinite(pause)) pause = 0;
+
+  const durationSec = Math.max(0, Math.round(sess - pause));
+
+  // Brak płatnej przerwy: przerwy zawsze odejmują się w 100%.
+  return { sessionSec: sess, totalPauseSec: pause, paidBreakSec: 0, durationSec: durationSec };
+}
+
+
+
+function Workday_start_(worker, { roomId, deviceId, startEventId, clientNow, tzOffsetMinutes }) {
+  // START can be triggered either by:
+  //  - QR with Funkcja=START (office START)
+  //  - QR with Funkcja=sprzatanie_indywidualne (scenario S2: start day at client)
+
+  const startRoomId = Zones_getStartRoomId_();
+  if (!startRoomId) throw new Error('Brak skonfigurowanego QR START (arkusz Strefy, kolumna Funkcja = START).');
+
+    const func = QrResolver_getFuncForRoomId_(roomId);
+
+  const isStart = (func === 'START');
+  const isIndividual = (func === 'SPRZATANIE_INDYWIDUALNE');
+
+  if (!isStart && !isIndividual) {
+    if (String(func || '').toUpperCase().indexOf('STOP') === 0) {
+      throw new Error('To jest kod STOP. Nie można nim rozpocząć dnia pracy.');
+    }
+    throw new Error('Aby rozpocząć dzień pracy, zeskanuj QR START lub QR zlecenia indywidualnego.');
+  }
+
+  if (!deviceId) throw new Error('Missing deviceId.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+
+const existing = Workday_getActiveOrCloseDueForWorker_(worker.login);
+if (existing) {
+  // Allow starting a NEW day after midnight on the device:
+  // If existing startAt is not from today's local date (device tz) -> treat as stale open and DO NOT block.
+  const nowIso = String(clientNow || nowIso_());
+  const offMin = Number(tzOffsetMinutes || 0);
+  const isToday = isSameLocalDay_(existing.startAt, nowIso, offMin);
+  if (isToday) return { alreadyRunning: true, workday: existing };
+  // else: stale open workday from previous day -> leave it open for office verification.
+}
+    const H = CONFIG.HEADERS.WORKDAY_LOG;
+    const startAt = nowIso_();
+
+    const record = {};
+    record[H.WORKDAY_ID] = uuid_();
+    record[H.WORKER_LOGIN] = worker.login;
+    record[H.WORKER_NAME] = worker.name;
+    // For compatibility we keep the field name UtilityRoomId.
+    // It now stores the QR code that started the workday (START or individual order).
+    record[H.UTILITY_ROOM_ID] = String(roomId || '').trim();
+    record[H.START_AT] = startAt;
+    record[H.STATUS] = 'RUNNING';
+    record[H.DEVICE_ID] = deviceId;
+    record[H.START_EVENT_ID] = startEventId || uuid_();
+    record[H.CREATED_AT] = startAt;
+    record[H.UPDATED_AT] = startAt;
+
+    Workday_append_(record);
+
+    // NEW: For QR with Funkcja=START, also create a long-running "WORKDAY" entry in Backup_Log.
+    // This entry does NOT represent an active cleaning cycle (it is ignored by Cycles_findActiveForWorker_).
+    if (isStart) {
+      try {
+        const clientName = Zones_getClientForRoomId_(roomId);
+        const now = startAt;
+        BackupLog_appendStart_({
+          cycleId: uuid_(),
+          workerLogin: worker.login,
+          workerName: worker.name,
+          roomId: String(roomId || '').trim(),
+          zone: String(clientName || '').trim(),
+          room: 'START',
+          startAt: now,
+          status: 'WORKDAY',
+          deviceId: deviceId,
+          startEventId: record[H.START_EVENT_ID],
+          createdAt: now,
+        });
+      } catch (err) {
+        // Never block starting a workday if Backup_Log write fails.
+      }
+    }
+
+    const wdNew = Workday_getById_(record[H.WORKDAY_ID]);
+    try { Workday_cacheSetActive_(wdNew); } catch (_) {}
+    return { alreadyRunning: false, workday: wdNew };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function Workday_closeNowNoLock_(wd, { endEventId, clientAt, deviceId }) {
+  const H = CONFIG.HEADERS.WORKDAY_LOG;
+  const nowIso = nowIso_();
+
+  let endAt = nowIso;
+  if (clientAt) {
+    try {
+      const d = new Date(String(clientAt));
+      if (!isNaN(d.getTime())) endAt = d.toISOString();
+    } catch (_) {}
+  }
+
+  const pauseSec = Workday_pauseTotalSec_(wd, endAt);
+  const calc = Workday_computePaidDurationSec_(wd.startAt, endAt, pauseSec);
+  const durationSec = calc.durationSec;
+
+  Workday_update_(wd.workdayId, {
+    [H.END_AT]: endAt,
+    [H.DURATION_SEC]: durationSec,
+    [H.STATUS]: 'CLOSED',
+    [H.UPDATED_AT]: nowIso,
+    [H.END_EVENT_ID]: endEventId || wd.endEventId || '',
+    [H.AUTO_CLOSE_AT]: '',
+    [H.END_SCAN_AT]: nowIso,
+    [H.DEVICE_ID]: deviceId || wd.deviceId || '',
+  });
+
+  // Workday is closed => invalidate cache
+  try { Workday_cacheClearActive_(wd.workerLogin); } catch (_) {}
+}
+
+function Workday_beginEnding_(worker, { roomId, deviceId, endEventId, clientNow, tzOffsetMinutes }) {
+  const stopRules = Zones_getStopRules_();
+  if (!stopRules || !stopRules.length) {
+    throw new Error('Brak skonfigurowanych QR STOP (arkusz Strefy, kolumna Funkcja = STOP0/STOP5/STOP10/STOP15).');
+  }
+  if (!deviceId) throw new Error('Missing deviceId.');
+
+  const graceMin = Zones_getStopGraceMinForRoomId_(roomId);
+  if (graceMin === null) {
+    throw new Error('To nie jest kod STOP. Użyj kodu z funkcją STOP0/STOP5/STOP10/STOP15.');
+  }
+
+  // NEW: Close the special WORKDAY entry in Backup_Log (created on START) on first STOP scan.
+  // Applies to STOP0/5/10/15.
+  try {
+    BackupLog_closeOpenWorkdayCycleForWorker_(worker.login, {
+      endAt: nowIso_(),
+      endReason: 'WORKDAY_STOP',
+      endEventId: endEventId || uuid_(),
+      requireToday: true,
+      clientNow: String(clientNow || ''),
+      tzOffsetMinutes: Number(tzOffsetMinutes || 0),
+    });
+  } catch (_) {}
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const wd = Workday_findActiveForWorker_(worker.login);
+    if (!wd) throw new Error('Brak aktywnego dnia pracy.');
+
+    const status = String(wd.status || '').toUpperCase();
+
+    // If STOP+0min -> close immediately (even if already ENDING)
+    if (Number(graceMin) === 0) {
+      if (status === 'CLOSED') return { workday: wd };
+      Workday_closeNowNoLock_(wd, { endEventId: endEventId || uuid_(), deviceId: deviceId });
+      return { workday: Workday_getById_(wd.workdayId), closedNow: true };
+    }
+
+    // If already ENDING and STOP is scanned again, update the grace window
+    // (e.g. worker decides to end sooner/later)
+    if (status === 'ENDING') {
+    const H = CONFIG.HEADERS.WORKDAY_LOG;
+      const endScanAt = nowIso_();
+      const autoCloseAt = addMinutesIso_(endScanAt, Number(graceMin));
+      Workday_update_(wd.workdayId, {
+        [H.END_SCAN_AT]: endScanAt,
+        [H.AUTO_CLOSE_AT]: autoCloseAt,
+        [H.STATUS]: 'ENDING',
+        [H.END_EVENT_ID]: endEventId || wd.endEventId || uuid_(),
+        [H.DEVICE_ID]: deviceId,
+        [H.UPDATED_AT]: nowIso_(),
+      });
+      const wdUpd = Workday_getById_(wd.workdayId);
+      try { Workday_cacheSetActive_(wdUpd); } catch (_) {}
+      return { workday: wdUpd, updatedEnding: true };
+    }
+    const H = CONFIG.HEADERS.WORKDAY_LOG;
+    const endScanAt = nowIso_();
+    const autoCloseAt = addMinutesIso_(endScanAt, Number(graceMin));
+
+    Workday_update_(wd.workdayId, {
+      [H.END_SCAN_AT]: endScanAt,
+      [H.AUTO_CLOSE_AT]: autoCloseAt,
+      [H.STATUS]: 'ENDING',
+      [H.END_EVENT_ID]: endEventId || uuid_(),
+      [H.DEVICE_ID]: deviceId,
+      [H.UPDATED_AT]: nowIso_(),
+    });
+
+    const wdUpd = Workday_getById_(wd.workdayId);
+    try { Workday_cacheSetActive_(wdUpd); } catch (_) {}
+    return { workday: wdUpd };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function Workday_cancelEnding_(worker, { deviceId }) {
+  if (!deviceId) throw new Error('Missing deviceId.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const wd = Workday_findActiveForWorker_(worker.login);
+    if (!wd) throw new Error('Brak aktywnego dnia pracy.');
+    if (String(wd.status || '').toUpperCase() !== 'ENDING') return { workday: wd };
+    const H = CONFIG.HEADERS.WORKDAY_LOG;
+    Workday_update_(wd.workdayId, {
+      [H.END_SCAN_AT]: '',
+      [H.AUTO_CLOSE_AT]: '',
+      [H.END_EVENT_ID]: '',
+      [H.STATUS]: 'RUNNING',
+      [H.DEVICE_ID]: deviceId,
+      [H.UPDATED_AT]: nowIso_(),
+    });
+
+    const wdUpd = Workday_getById_(wd.workdayId);
+    try { Workday_cacheSetActive_(wdUpd); } catch (_) {}
+    return { workday: wdUpd };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/**
+ * Atomic utility scan during cleaning:
+ * - closes an active cycle (Backup_Log)
+ * - switches Workday to ENDING (Workday_Log)
+ * Done in ONE lock to keep sheets consistent.
+ */
+function Workday_stopCycleAndBeginEnding_(worker, { cycleId, roomId, deviceId, reason, comment, endEventId, workdayEndEventId, clientNow, tzOffsetMinutes }) {
+  const stopRules = Zones_getStopRules_();
+  if (!stopRules || !stopRules.length) {
+    throw new Error('Brak skonfigurowanych QR STOP (arkusz Strefy, kolumna Funkcja = STOP0/STOP5/STOP10/STOP15).');
+  }
+  if (!deviceId) throw new Error('Missing deviceId.');
+  if (!cycleId) throw new Error('Missing cycleId.');
+
+  const graceMin = Zones_getStopGraceMinForRoomId_(roomId);
+  if (graceMin === null) {
+    throw new Error('To nie jest kod STOP. Użyj kodu z funkcją STOP0/STOP5/STOP10/STOP15.');
+  }
+
+  // NEW: Close the special WORKDAY entry in Backup_Log (created on START) on first STOP scan.
+  // Applies to STOP0/5/10/15.
+  try {
+    BackupLog_closeOpenWorkdayCycleForWorker_(worker.login, {
+      endAt: nowIso_(),
+      endReason: 'WORKDAY_STOP',
+      endEventId: endEventId || uuid_(),
+      requireToday: true,
+      clientNow: String(clientNow || ''),
+      tzOffsetMinutes: Number(tzOffsetMinutes || 0),
+    });
+  } catch (_) {}
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    // 1) Close cycle (if not already closed)
+    const existing = Cycles_getById_(cycleId);
+    if (!existing) throw new Error('Cycle not found.');
+    if (String(existing.workerLogin) !== String(worker.login)) throw new Error('Forbidden.');
+
+    const cycleStatus = String(existing.status || '').toUpperCase();
+    if (cycleStatus !== 'CLOSED') {
+      const startAt = new Date(existing.startAt);
+      const endAt = new Date();
+      const durationSec = Math.max(0, Math.round((endAt.getTime() - startAt.getTime()) / 1000));
+
+      const updates = {
+        endAt: endAt.toISOString(),
+        durationSec,
+        endReason: reason || 'STOP_END_DAY',
+        comment: String(comment || '').slice(0, 300),
+        status: 'CLOSED',
+        closeMarkedAt: nowIso_(),
+        endEventId: endEventId || uuid_(),
+      };
+
+      BackupLog_updateStop_(cycleId, updates);
+    }
+
+    // Cycle is closed (or already closed) => clear active cycle cache
+    try { Cycles_cacheClearActive_(worker.login); } catch (_) {}
+
+    // 2) Begin ENDING on workday
+    const wd = Workday_findActiveForWorker_(worker.login);
+    if (!wd) throw new Error('Brak aktywnego dnia pracy.');
+
+    const status = String(wd.status || '').toUpperCase();
+
+    // STOP + 0 min => close day immediately (no ENDING window)
+    if (Number(graceMin) === 0) {
+      if (status !== 'CLOSED') {
+        // Close NOW inside the same lock (no nested locks)
+        Workday_closeNowNoLock_(wd, { endEventId: workdayEndEventId || uuid_(), deviceId: deviceId });
+      }
+      const wdClosed = Workday_getById_(wd.workdayId);
+      try { Workday_cacheSetActive_(wdClosed); } catch (_) {}
+      return { workday: wdClosed, closedNow: true };
+    }
+
+    // graceMin > 0 => enter or update ENDING
+    const H = CONFIG.HEADERS.WORKDAY_LOG;
+    const endScanAt = nowIso_();
+    const autoCloseAt = addMinutesIso_(endScanAt, Number(graceMin));
+    Workday_update_(wd.workdayId, {
+      [H.END_SCAN_AT]: endScanAt,
+      [H.AUTO_CLOSE_AT]: autoCloseAt,
+      [H.STATUS]: 'ENDING',
+      [H.END_EVENT_ID]: workdayEndEventId || uuid_(),
+      [H.DEVICE_ID]: deviceId,
+      [H.UPDATED_AT]: nowIso_(),
+    });
+
+    const wdUpd = Workday_getById_(wd.workdayId);
+    try { Workday_cacheSetActive_(wdUpd); } catch (_) {}
+    return { workday: wdUpd, graceMin: Number(graceMin) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Atomic: cancel ENDING + start a new cycle in one call.
+ * Used when user scans a zone while Workday is ENDING.
+ */
+function Workday_cancelEndingAndStartCycle_(worker, { roomId, deviceId, startEventId, clientNow, tzOffsetMinutes }) {
+  if (!roomId) throw new Error('Missing roomId.');
+  if (!deviceId) throw new Error('Missing deviceId.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const wd = Workday_findActiveForWorker_(worker.login);
+    if (!wd) throw new Error('Brak aktywnego dnia pracy.');
+
+    const status = String(wd.status || '').toUpperCase();
+    if (status !== 'ENDING' && status !== 'RUNNING') throw new Error('Dzień nie jest aktywny.');
+
+    // 1) Cancel ENDING if needed
+    if (status === 'ENDING') {
+    const H = CONFIG.HEADERS.WORKDAY_LOG;
+      Workday_update_(wd.workdayId, {
+        [H.END_SCAN_AT]: '',
+        [H.AUTO_CLOSE_AT]: '',
+        [H.END_EVENT_ID]: '',
+        [H.STATUS]: 'RUNNING',
+        [H.DEVICE_ID]: deviceId,
+        [H.UPDATED_AT]: nowIso_(),
+      });
+    }
+
+    // 2) Start cycle (if none active) — TODAY only
+    const __cn = String(clientNow || nowIso_());
+    const __off = Number(tzOffsetMinutes || 0);
+    const active = Cycles_findActiveForWorkerForClient_(worker.login, __cn, __off);
+    if (active) {
+      const wdNow = Workday_getById_(wd.workdayId);
+      try { Workday_cacheSetActive_(wdNow); } catch (_) {}
+      try { Cycles_cacheSetActive_(active); } catch (_) {}
+      return { workday: wdNow, alreadyRunning: true, cycle: active };
+    }
+
+    const zone = QrResolver_resolveRoom_(roomId);
+    if (zone && (zone.func === 'START' || String(zone.func || '').toUpperCase().indexOf('STOP') === 0)) {
+      throw new Error('To jest kod START/STOP. Zeskanuj kod sprzątanej strefy.');
+    }
+    const now = nowIso_();
+
+    const record = {
+      cycleId: uuid_(),
+      workerLogin: worker.login,
+      workerName: worker.name,
+      roomId: zone.roomId,
+      zone: zone.zone,
+      room: zone.room,
+      func: zone.func, // not stored in sheet; used by UI
+      startAt: now,
+      status: 'RUNNING',
+      deviceId: deviceId,
+      startEventId: startEventId || uuid_(),
+      createdAt: now,
+    };
+
+    BackupLog_appendStart_(record);
+    try { Cycles_cacheSetActive_(record); } catch (_) {}
+    const wdNow = Workday_getById_(wd.workdayId);
+    try { Workday_cacheSetActive_(wdNow); } catch (_) {}
+    return { workday: wdNow, alreadyRunning: false, cycle: record };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Time trigger handler — closes due ENDING workdays.
+ * Install with Setup_installWorkdayTrigger()
+ */
+
+function Workday_pauseStart_(worker, { deviceId, pauseEventId, clientNow, tzOffsetMinutes }) {
+  if (!deviceId) throw new Error('Missing deviceId.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    // TODAY only (device local date)
+    const chk = Workday_getActiveForTodayForClient_(worker.login, String(clientNow || nowIso_()), Number(tzOffsetMinutes || 0));
+    const wd = (chk && chk.todayWorkday) ? chk.todayWorkday : null;
+    if (!wd) throw new Error('Brak START w dniu dzisiejszym. Zeskanuj QR START, aby rozpocząć dzień pracy.');
+
+    const status = String(wd.status || '').toUpperCase();
+    if (status !== 'RUNNING') throw new Error('Nie można rozpocząć przerwy w tym stanie dnia.');
+
+    // No pause during active cleaning (TODAY only)
+    const __cn = String(clientNow || nowIso_());
+    const __off = Number(tzOffsetMinutes || 0);
+    const active = Cycles_findActiveForWorkerForClient_(worker.login, __cn, __off);
+    if (active) throw new Error('Nie można rozpocząć przerwy podczas sprzątania.');
+
+    // Only one OPEN pause at a time (but multiple pauses per day are allowed)
+    const openPause = (typeof Pauses_findOpenForWorkday_ === 'function') ? Pauses_findOpenForWorkday_(wd.workdayId) : null;
+    if (openPause && openPause.pauseId) throw new Error('Masz już rozpoczętą przerwę.');
+
+    const H = CONFIG.HEADERS.WORKDAY_LOG;
+    const nowIso = String(clientNow || nowIso_());
+
+    // Create pause record (best-effort; never block worker if sheet write fails)
+    let pauseId = '';
+    try {
+      if (typeof Pauses_start_ === 'function') {
+        pauseId = Pauses_start_(wd, worker, { deviceId, pauseEventId, startAt: nowIso });
+      }
+    } catch (_) {
+      pauseId = '';
+    }
+
+    // Update legacy pause fields for UI timer
+    Workday_update_(wd.workdayId, {
+      [H.PAUSE1_STATUS]: 'PAUZA_START',
+      [H.PAUSE1_START_AT]: nowIso,
+      [H.PAUSE1_STOP_AT]: '',
+      [H.UPDATED_AT]: nowIso,
+      [H.DEVICE_ID]: deviceId,
+    });
+
+    const wdUpd = Workday_getById_(wd.workdayId);
+    try { Workday_cacheSetActive_(wdUpd); } catch (_) {}
+    return { workday: wdUpd, pauseStarted: true, pauseId: pauseId, pauseEventId: pauseEventId || '' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function Workday_pauseStopAndStartCycle_(worker, { roomId, deviceId, startEventId, clientNow, tzOffsetMinutes }) {
+  if (!roomId) throw new Error('Missing roomId.');
+  if (!deviceId) throw new Error('Missing deviceId.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    // TODAY only (device local date)
+    const chk = Workday_getActiveForTodayForClient_(worker.login, String(clientNow || nowIso_()), Number(tzOffsetMinutes || 0));
+    const wd = (chk && chk.todayWorkday) ? chk.todayWorkday : null;
+    if (!wd) throw new Error('Brak START w dniu dzisiejszym. Zeskanuj QR START, aby rozpocząć dzień pracy.');
+
+    const status = String(wd.status || '').toUpperCase();
+    if (status !== 'RUNNING') throw new Error('Dzień nie jest w trybie pracy.');
+
+    // Must have an OPEN pause (multi-pause)
+    const openPause = (typeof Pauses_findOpenForWorkday_ === 'function') ? Pauses_findOpenForWorkday_(wd.workdayId) : null;
+    if (!openPause || !openPause.pauseId) throw new Error('Brak aktywnej przerwy.');
+
+    // Disallow START/STOP codes here (pause ends only by scanning a cleaning zone)
+    if (Zones_isStartRoomId_(roomId)) throw new Error('To jest kod START. Zeskanuj kod strefy.');
+    if (Zones_isStopRoomId_(roomId)) throw new Error('To jest kod STOP. Zeskanuj kod strefy.');
+
+    // Ensure no active cycle (TODAY only)
+    const __cn = String(clientNow || nowIso_());
+    const __off = Number(tzOffsetMinutes || 0);
+    const active = Cycles_findActiveForWorkerForClient_(worker.login, __cn, __off);
+    if (active) throw new Error('Wykryto aktywne sprzątanie.');
+
+    const H = CONFIG.HEADERS.WORKDAY_LOG;
+    const nowIso = String(clientNow || nowIso_());
+
+    // 1) stop pause record (best-effort)
+    try { if (typeof Pauses_stop_ === 'function') Pauses_stop_(openPause.pauseId, { stopAt: nowIso }); } catch (_) {}
+
+    // Update legacy pause fields
+    Workday_update_(wd.workdayId, {
+      [H.PAUSE1_STATUS]: 'PAUZA_STOP',
+      [H.PAUSE1_STOP_AT]: nowIso,
+      [H.UPDATED_AT]: nowIso,
+      [H.DEVICE_ID]: deviceId,
+    });
+
+    // 2) start cycle
+    const zone = QrResolver_resolveRoom_(roomId);
+    if (zone && (zone.func === 'START' || String(zone.func || '').toUpperCase().indexOf('STOP') === 0)) {
+      throw new Error('To jest kod START/STOP. Zeskanuj kod sprzątanej strefy.');
+    }
+
+    const record = {
+      cycleId: uuid_(),
+      workerLogin: worker.login,
+      workerName: worker.name,
+      roomId: zone.roomId,
+      zone: zone.zone,
+      room: zone.room,
+      func: zone.func,
+      startAt: nowIso,
+      status: 'RUNNING',
+      deviceId: deviceId,
+      startEventId: startEventId || uuid_(),
+      createdAt: nowIso,
+    };
+
+    BackupLog_appendStart_(record);
+    try { Cycles_cacheSetActive_(record); } catch (_) {}
+
+    const wdUpd = Workday_getById_(wd.workdayId);
+    try { Workday_cacheSetActive_(wdUpd); } catch (_) {}
+    return { workday: wdUpd, cycle: record };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * STOP during PAUZA:
+ * - stop pause (Pause1StopAt)
+ * - begin ENDING (or close now for 0 min)
+ */
+function Workday_pauseStopAndBeginEnding_(worker, { stopRoomId, deviceId, endEventId, clientNow, tzOffsetMinutes }) {
+  if (!stopRoomId) throw new Error('Missing stopRoomId.');
+  if (!deviceId) throw new Error('Missing deviceId.');
+
+  const graceMin = Zones_getStopGraceMinForRoomId_(stopRoomId);
+  if (graceMin === null) throw new Error('Nieprawidłowy kod STOP.');
+
+  // Close today's special WORKDAY entry in Backup_Log (if exists). Older leftovers stay for office.
+  try {
+    BackupLog_closeOpenWorkdayCycleForWorker_(worker.login, {
+      endAt: nowIso_(),
+      endReason: 'WORKDAY_STOP',
+      endEventId: endEventId || uuid_(),
+      requireToday: true,
+      clientNow: String(clientNow || ''),
+      tzOffsetMinutes: Number(tzOffsetMinutes || 0),
+    });
+  } catch (_) {}
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    // TODAY only
+    const chk = Workday_getActiveForTodayForClient_(worker.login, String(clientNow || nowIso_()), Number(tzOffsetMinutes || 0));
+    let wd = (chk && chk.todayWorkday) ? chk.todayWorkday : null;
+    if (!wd) throw new Error('Brak START w dniu dzisiejszym. Zeskanuj QR START, aby rozpocząć dzień pracy.');
+
+    const status = String(wd.status || '').toUpperCase();
+    if (status !== 'RUNNING' && status !== 'ENDING') throw new Error('Dzień nie jest aktywny.');
+
+    const H = CONFIG.HEADERS.WORKDAY_LOG;
+    const nowIso = String(clientNow || nowIso_());
+
+    // stop OPEN pause record (if any) + update legacy fields for UI
+    try { if (typeof Pauses_stopOpenForWorkday_ === 'function') Pauses_stopOpenForWorkday_(wd.workdayId, { stopAt: nowIso }); } catch (_) {}
+    if (wd.pause1StartAt && !wd.pause1StopAt) {
+      Workday_update_(wd.workdayId, {
+        [H.PAUSE1_STATUS]: 'PAUZA_STOP',
+        [H.PAUSE1_STOP_AT]: nowIso,
+        [H.UPDATED_AT]: nowIso,
+        [H.DEVICE_ID]: deviceId,
+      });
+      wd = Workday_getById_(wd.workdayId);
+    }
+
+    // If STOP+0 => close now
+    if (Number(graceMin) === 0) {
+      const fresh = Workday_findActiveForWorker_(worker.login);
+      if (fresh && String(fresh.status || '').toUpperCase() !== 'CLOSED') {
+        Workday_closeNowNoLock_(fresh, { endEventId: endEventId || uuid_(), deviceId: deviceId });
+      }
+      const wdClosed = Workday_getById_(fresh.workdayId);
+      try { Workday_cacheSetActive_(wdClosed); } catch (_) {}
+      return { workday: wdClosed, closedNow: true };
+    }
+
+    // Begin or update ENDING
+    const endScanAt = nowIso_();
+    const autoCloseAt = addMinutesIso_(endScanAt, Number(graceMin));
+    Workday_update_(wd.workdayId, {
+      [H.END_SCAN_AT]: endScanAt,
+      [H.AUTO_CLOSE_AT]: autoCloseAt,
+      [H.STATUS]: 'ENDING',
+      [H.END_EVENT_ID]: endEventId || wd.endEventId || uuid_(),
+      [H.DEVICE_ID]: deviceId,
+      [H.UPDATED_AT]: nowIso_(),
+    });
+
+    const wdUpd = Workday_getById_(wd.workdayId);
+    try { Workday_cacheSetActive_(wdUpd); } catch (_) {}
+    return { workday: wdUpd, graceMin: Number(graceMin) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function Workday_closeNow_(worker, { deviceId, endEventId, clientAt }) {
+  if (!deviceId) throw new Error('Missing deviceId.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const wd = Workday_findActiveForWorker_(worker.login);
+    if (!wd) throw new Error('Brak aktywnego dnia pracy.');
+    const status = String(wd.status || '').toUpperCase();
+    if (status !== 'ENDING' && status !== 'RUNNING') throw new Error('Dzień nie jest aktywny.');
+
+    // Device time is passed as clientAt (ISO). If missing/invalid, fall back to server time.
+    const serverNowIso = nowIso_();
+    let endAt = serverNowIso;
+    if (clientAt) {
+      try {
+        const d = new Date(String(clientAt));
+        if (!isNaN(d.getTime())) endAt = d.toISOString();
+      } catch (_) {}
+    }
+
+    // Use device time for UpdatedAt when available.
+    const nowIso = endAt;
+
+    const H = CONFIG.HEADERS.WORKDAY_LOG;
+    const pauseSec = Workday_pauseTotalSec_(wd, endAt);
+    const calc = Workday_computePaidDurationSec_(wd.startAt, endAt, pauseSec);
+    const durationSec = calc.durationSec;
+
+    Workday_update_(wd.workdayId, {
+      [H.END_AT]: endAt,
+      [H.DURATION_SEC]: durationSec,
+      [H.STATUS]: 'CLOSED',
+      [H.UPDATED_AT]: nowIso,
+      [H.END_EVENT_ID]: endEventId || wd.endEventId || '',
+      [H.AUTO_CLOSE_AT]: '',
+    });
+
+    // Closed => clear cache
+    try { Workday_cacheClearActive_(worker.login); } catch (_) {}
+    return { workday: Workday_getById_(wd.workdayId) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function Workday_closeDueTrigger_() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return;
+
+  try {
+    const now = nowIso_();
+    const due = Workday_listEndingDue_(now);
+    due.forEach((wd) => {
+      try { Workday_close_(wd, now); } catch (_) {}
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function Workday_close_(wd, nowIso) {
+  const H = CONFIG.HEADERS.WORKDAY_LOG;
+
+  // End timestamp = moment of auto-close (or now)
+  const endAt = wd.autoCloseAt || nowIso;
+
+  // IMPORTANT: The 15 minutes after the utility STOP scan ARE counted as work time.
+  // Work time is counted from StartAt to EndAt (auto-close moment).
+  try { if (typeof Pauses_stopOpenForWorkday_ === 'function') Pauses_stopOpenForWorkday_(wd.workdayId, { stopAt: endAt }); } catch (_) {}
+
+  const pauseSec = Workday_pauseTotalSec_(wd, endAt);
+  const calc = Workday_computePaidDurationSec_(wd.startAt, endAt, pauseSec);
+  const durationSec = calc.durationSec;
+
+  Workday_update_(wd.workdayId, {
+    [H.END_AT]: endAt,
+    [H.DURATION_SEC]: durationSec,
+    [H.STATUS]: 'CLOSED',
+    [H.UPDATED_AT]: nowIso_(),
+  });
+
+  // Closed => clear cache
+  try { Workday_cacheClearActive_(wd.workerLogin); } catch (_) {}
+}
+
+
+/**
+ * Summaries for menu tiles
+ */
+function Workday_getTodaySummary_(worker) {
+  const login = String(worker && worker.login || '').trim();
+  if (!login) return { date: '', status: 'NONE', totalSec: 0 };
+
+  const now = new Date();
+  const tz = Session.getScriptTimeZone ? Session.getScriptTimeZone() : 'Europe/Warsaw';
+  const yyyy = Utilities.formatDate(now, tz, 'yyyy');
+  const mm = Utilities.formatDate(now, tz, 'MM');
+  const dd = Utilities.formatDate(now, tz, 'dd');
+  const dateKey = `${yyyy}-${mm}-${dd}`;
+
+  const start = new Date(`${dateKey}T00:00:00`);
+  const end = new Date(start.getTime() + 24 * 3600 * 1000);
+
+  const rows = Workday_listByWorkerAndStartRange_(login, start, end);
+  if (!rows.length) return { date: dateKey, status: 'NONE', totalSec: 0 };
+
+  // Usually there is 1 row per day; if more, sum.
+  let total = 0;
+  let status = 'CLOSED';
+  let startAt = '';
+  rows.forEach(r => {
+    const st = String(r.status || '').toUpperCase();
+    if (!startAt && r.startAt) startAt = r.startAt;
+    if (st === 'RUNNING' || st === 'ENDING') status = st;
+    total += Workday_calcTotalSec_(r, now);
+  });
+
+  return { date: dateKey, status, totalSec: total, startAt };
+}
+
+function Workday_getMonthSummary_(worker, opts) {
+  const login = String(worker && worker.login || '').trim();
+  if (!login) return { months: [] };
+
+  const monthsBack = Math.max(0, Math.min(12, Number(opts && opts.monthsBack) || 0));
+  const tz = Session.getScriptTimeZone ? Session.getScriptTimeZone() : 'Europe/Warsaw';
+
+  const now = new Date();
+  const baseY = Number(Utilities.formatDate(now, tz, 'yyyy'));
+  const baseM = Number(Utilities.formatDate(now, tz, 'MM')); // 1-12
+
+  const months = [];
+  for (let i = 0; i <= monthsBack; i++) {
+    const ym = Workday_shiftYm_(baseY, baseM, -i);
+    const y = ym.y, m = ym.m;
+    const from = new Date(`${y}-${String(m).padStart(2,'0')}-01T00:00:00`);
+    const to = (m === 12) ? new Date(`${y+1}-01-01T00:00:00`) : new Date(`${y}-${String(m+1).padStart(2,'0')}-01T00:00:00`);
+
+    const rows = Workday_listByWorkerAndStartRange_(login, from, to);
+    let total = 0;
+    rows.forEach(r => { total += Workday_calcTotalSec_(r, now); });
+
+    months.push({
+      ym: `${y}-${String(m).padStart(2,'0')}`,
+      label: Utilities.formatDate(from, tz, 'LLLL yyyy'),
+      totalSec: total
+    });
+  }
+
+  return { months };
+}
+
+function Workday_shiftYm_(y, m, delta) {
+  // m: 1..12
+  let yy = Number(y), mm = Number(m) + Number(delta);
+  while (mm <= 0) { mm += 12; yy -= 1; }
+  while (mm > 12) { mm -= 12; yy += 1; }
+  return { y: yy, m: mm };
+}
+
+function Workday_calcTotalSec_(row, now) {
+  const st = String(row.status || '').toUpperCase();
+  const pauseSec = Workday_pauseSec_(row);
+  if (st === 'CLOSED') {
+    const dur = Number(row.durationSec) || 0;
+    return Math.max(0, dur - pauseSec);
+  }
+  // RUNNING / ENDING: count to now
+  const startMs = row.startAt ? new Date(row.startAt).getTime() : NaN;
+  if (!isFinite(startMs)) return 0;
+  const total = Math.floor((now.getTime() - startMs) / 1000);
+  return Math.max(0, total - pauseSec);
+}
+
+function Workday_pauseSec_(row) {
+  const s = row.pause1StartAt ? new Date(row.pause1StartAt).getTime() : NaN;
+  const e = row.pause1StopAt ? new Date(row.pause1StopAt).getTime() : NaN;
+  if (isFinite(s) && isFinite(e) && e > s) return Math.floor((e - s) / 1000);
+  return 0;
+}
+
+/**
+ * Helper: list workday rows by worker login and startAt range.
+ */
+function Workday_listByWorkerAndStartRange_(workerLogin, fromDate, toDate) {
+  const sh = Workday_sheet_();
+  const h = Sheets_headerMap_(sh);
+  const H = CONFIG.HEADERS.WORKDAY_LOG;
+
+  const colLogin = h[H.WORKER_LOGIN];
+  const colStartAt = h[H.START_AT];
+  if (!colLogin || !colStartAt) return [];
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  const values = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
+  const headers = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+
+  const idx = (name) => headers.indexOf(name);
+  const iLogin = idx(H.WORKER_LOGIN);
+  const iStart = idx(H.START_AT);
+  const iStatus = idx(H.STATUS);
+  const iDur = idx(H.DURATION_SEC);
+  const iPauseStart = idx(H.PAUSE1_START_AT);
+  const iPauseStop = idx(H.PAUSE1_STOP_AT);
+
+  const out = [];
+  const fromMs = fromDate.getTime();
+  const toMs = toDate.getTime();
+
+  values.forEach(r => {
+    if (String(r[iLogin] || '').trim() !== String(workerLogin).trim()) return;
+    const stVal = r[iStart];
+    const start = (stVal instanceof Date) ? stVal : new Date(stVal);
+    const ms = start.getTime();
+    if (!isFinite(ms) || ms < fromMs || ms >= toMs) return;
+
+    out.push({
+      startAt: (stVal instanceof Date) ? stVal.toISOString() : String(stVal || ''),
+      status: r[iStatus] || '',
+      durationSec: r[iDur] || 0,
+      pause1StartAt: r[iPauseStart] ? (r[iPauseStart] instanceof Date ? r[iPauseStart].toISOString() : String(r[iPauseStart])) : '',
+      pause1StopAt: r[iPauseStop] ? (r[iPauseStop] instanceof Date ? r[iPauseStop].toISOString() : String(r[iPauseStop])) : '',
+    });
+  });
+
+  return out;
+}
+

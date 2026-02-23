@@ -1,0 +1,435 @@
+<script>
+(function(){
+  const $ = (sel)=>document.querySelector(sel);
+
+  const state = {
+    total: 0,
+    limit: 50,
+    mode: "view",
+    current: null,
+    wired: false
+  };
+
+  function esc(s){
+    return String(s ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
+  }
+
+
+  function updateActiveSelectVisual(){
+    const sel = $("#wkEditActive");
+    if (!sel) return;
+    sel.classList.remove("is-true","is-false");
+    const v = String(sel.value || "").toUpperCase();
+    if (v === "TRUE" || v === "1") sel.classList.add("is-true");
+    if (v === "FALSE" || v === "0") sel.classList.add("is-false");
+  }
+
+  function roleLevel(){
+    return (window.FIDO_AUTH && typeof window.FIDO_AUTH.roleLevel === "function")
+      ? window.FIDO_AUTH.roleLevel(window.FIDO_AUTH.getUserRole ? window.FIDO_AUTH.getUserRole() : "")
+      : 0;
+  }
+  function canWrite(){ return roleLevel() >= 2; }   // Admin/Kierownik
+  function canDelete(){ return roleLevel() >= 3; }  // Admin
+  function token(){
+    return (window.FIDO_AUTH && window.FIDO_AUTH.getToken) ? window.FIDO_AUTH.getToken() : "";
+  }
+  function editorName(){
+    return (window.FIDO_AUTH && window.FIDO_AUTH.getUserName) ? window.FIDO_AUTH.getUserName() : "Użytkownik";
+  }
+
+  function setShownLabel(shown, total, limit){
+    const el = $("#wkShownLabel");
+    if (!el) return;
+    const lim = limit || state.limit || 500;
+    el.textContent = `Wyświetlono: ${shown} (max ${lim}) · Wszystkie: ${total}`;
+  }
+
+  function normalizeActive(v){
+    const s = String(v ?? "").trim().toUpperCase();
+    if (v === true || v === 1) return true;
+    if (v === false || v === 0) return false;
+    if (s === "TRUE" || s === "1" || s === "TAK" || s === "AKTYWNY") return true;
+    if (s === "FALSE" || s === "0" || s === "NIE" || s === "NIEAKTYWNY" || s === "") return false;
+    return false;
+  }
+
+  function activeLabel(v){ return normalizeActive(v) ? "TRUE" : "FALSE"; }
+  function onlineLabel(v){ return v ? "TAK" : "NIE"; }
+
+  function readFilters(){
+    return {
+      token: token(),
+      q: ($("#wkQ").value || "").trim(),
+      type: ($("#wkType").value || "").trim(),
+      active: ($("#wkActive").value || "").trim(),
+      online: ($("#wkOnline").value || "").trim(),
+      page: 1,
+      pageSize: 50
+    };
+  }
+
+  function resetFilters(){
+    $("#wkQ").value = "";
+    $("#wkType").value = "";
+    $("#wkActive").value = "";
+    $("#wkOnline").value = "";
+  }
+
+  function renderRows(items){
+    const root = $("#wkRows");
+    if (!root) return;
+    root.innerHTML = "";
+
+    if (!items || items.length === 0){
+      const empty = document.createElement("div");
+      empty.className = "workers-row";
+      empty.innerHTML = "<div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>";
+      root.appendChild(empty);
+      return;
+    }
+
+    for (const it of items){
+      const row = document.createElement("div");
+      row.className = "workers-row";
+
+      const act = normalizeActive(it.active);
+      const onl = !!it.online;
+
+      const btnLabel = canWrite() ? "Edytuj" : "Podgląd";
+
+      row.innerHTML = `
+        <div class="mono">${esc(it.workerId || "—")}</div>
+        <div>${esc(it.name || "—")}</div>
+        <div class="mono">${esc(it.login || "—")}</div>
+        <div>${esc(it.type || "—")}</div>
+        <div><span class="pill ${act ? "pill-true" : "pill-false"}">${activeLabel(act)}</span></div>
+        <div><span class="pill ${onl ? "pill-yes" : "pill-no"}">${onlineLabel(onl)}</span></div>
+        <div>${esc(it.phone || "—")}</div>
+        <div title="${esc(it.email || "")}">${esc(it.email || "—")}</div>
+        <div class="workers-actions">
+          <button class="btn2" type="button">${btnLabel}</button>
+        </div>
+      `;
+
+      const btn = row.querySelector(".btn2");
+      btn && btn.addEventListener("click", ()=>openEditor(it));
+
+      root.appendChild(row);
+    }
+  }
+
+  function fetchWorkers(){
+    const params = readFilters();
+    google.script.run
+      .withSuccessHandler((res)=>{
+        const items = (res && res.items) ? res.items : [];
+        state.total = (res && typeof res.total === "number") ? res.total : items.length;
+        state.limit = (res && typeof res.pageSize === "number") ? res.pageSize : 500;
+        renderRows(items);
+        setShownLabel(items.length, state.total, state.limit);
+
+        const addBtn = $("#wkAddBtn");
+        if (addBtn) addBtn.style.display = canWrite() ? "" : "none";
+      })
+      .withFailureHandler((err)=>{
+        const msg = (err && err.message) ? err.message : String(err || "Błąd");
+        alert("Błąd pobierania pracowników: " + msg);
+      })
+      .api_listWorkers(params);
+  }
+
+  function setModalReadOnly(isReadOnly){
+    const hint = $("#wkReadOnlyHint");
+    if (hint) hint.style.display = isReadOnly ? "block" : "none";
+
+    const ids = ["wkEditName","wkEditLogin","wkEditType","wkEditActive","wkEditEmail","wkEditPhone","wkEditQr","wkNewPass","wkNewPass2"];
+    ids.forEach(id=>{
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.disabled = isReadOnly;
+    });
+
+    const saveBtn = $("#wkSaveBtn");
+    if (saveBtn) saveBtn.style.display = isReadOnly ? "none" : "";
+
+    const fillBtn = $("#wkFillQrBtn");
+    if (fillBtn) fillBtn.style.display = isReadOnly ? "none" : "";
+  }
+
+  function openEditor(it){
+    state.current = it || null;
+    state.mode = it ? (canWrite() ? "edit" : "view") : "add";
+
+    const ov = $("#wkEditorOverlay");
+    if (!ov) return;
+    // pokaż overlay jak najszybciej (żeby błąd w DOM nie blokował otwarcia)
+    ov.style.display = "flex";
+
+    try {
+
+    const logo = $("#wkLogo");
+    if (logo && window.FIDO_CONFIG && window.FIDO_CONFIG.logoUrl){
+      logo.src = window.FIDO_CONFIG.logoUrl;
+    }
+
+    $("#wkModalTitle").textContent =
+      (state.mode === "add") ? "Dodaj pracownika" :
+      (canWrite() ? "Edytuj pracownika" : "Podgląd pracownika");
+
+    const idVal = it && it.workerId ? String(it.workerId) : "AUTO";
+    $("#wkIdLabel").textContent = idVal;
+    $("#wkEditId").value = idVal;
+
+    $("#wkAddedAt").textContent = (it && it.addedAt) ? String(it.addedAt) : "—";
+    $("#wkEditedAt").textContent = (it && it.editedAt) ? String(it.editedAt) : "—";
+    $("#wkEditedBy").textContent = (it && it.editedBy) ? String(it.editedBy) : "—";
+
+    $("#wkEditName").value = (it && it.name) ? String(it.name) : "";
+    $("#wkEditLogin").value = (it && it.login) ? String(it.login) : "";
+    $("#wkEditType").value = (it && it.type) ? String(it.type) : "Pracownik";
+
+    $("#wkEditActive").value = normalizeActive(it && it.active) ? "1" : "0";
+    updateActiveSelectVisual();
+    $("#wkOnlineNow").value =
+      (it && typeof it.onlineRaw === "string") ? it.onlineRaw :
+      (it && it.online ? "TAK" : "NIE");
+
+    $("#wkEditEmail").value = (it && it.email) ? String(it.email) : "";
+    $("#wkEditPhone").value = (it && it.phone) ? String(it.phone) : "";
+    $("#wkEditQr").value = (it && it.qrText) ? String(it.qrText) : "";
+
+    $("#wkNewPass").value = "";
+    $("#wkNewPass2").value = "";
+
+    // Obecne hasło (tylko Admin/Kierownik)
+    const passWrap = $("#wkCurrentPassWrap");
+    const passInp = $("#wkCurrentPass");
+    const showBtn = $("#wkShowPassBtn");
+    if (passWrap){
+      const canSee = canWrite() && (state.mode !== "add") && it && it.workerId;
+      passWrap.style.display = canSee ? "" : "none";
+      if (passInp) {
+        passInp.type = "password";
+        passInp.value = canSee ? "••••••••" : "";
+      }
+      if (showBtn) showBtn.textContent = "Pokaż";
+
+      if (canSee && passInp){
+        google.script.run
+          .withSuccessHandler((res)=>{
+            if (!passInp) return;
+            const pw = (res && typeof res.password === "string") ? res.password : "";
+            passInp.value = pw || "";
+          })
+          .withFailureHandler((err)=>{
+            const msg = (err && err.message) ? err.message : String(err || "Błąd");
+            // Nie blokujemy edycji — tylko informacja
+            if (passInp) passInp.value = "";
+            console.warn("Błąd pobierania hasła:", msg);
+          })
+          .api_getWorkerPassword({ token: token(), workerId: String(it.workerId) });
+      }
+    }
+
+    const delBtn = $("#wkDeleteBtn");
+    if (delBtn){
+      const show = (state.mode !== "add") && canDelete();
+      delBtn.style.display = show ? "" : "none";
+    }
+    setModalReadOnly(!canWrite() && state.mode !== "add");
+  }
+    catch(err){
+      console.error(err);
+      if (typeof showToast === "function") showToast("Błąd otwierania edycji. Odśwież stronę lub sprawdź konsolę.", "error");
+    }
+  }
+
+  function closeEditor(){
+    const ov = $("#wkEditorOverlay");
+    if (ov) ov.style.display = "none";
+    state.current = null;
+    state.mode = "view";
+  }
+
+  function fillQr(){
+    const login = ($("#wkEditLogin").value || "").trim();
+    const pass = ($("#wkNewPass").value || "").trim();
+    if (!login || !pass){
+      alert("Wpisz Login i Nowe hasło, żeby wstawić do QR.");
+      return;
+    }
+    $("#wkEditQr").value = `login=${login};hasło=${pass}`;
+  }
+
+  function saveEditor(){
+    if (!canWrite()){
+      alert("Brak uprawnień do zapisu.");
+      return;
+    }
+
+    const name = ($("#wkEditName").value || "").trim();
+    const login = ($("#wkEditLogin").value || "").trim();
+    const type = ($("#wkEditType").value || "").trim();
+    const activeVal = ($("#wkEditActive").value || "").trim().toUpperCase();
+    const active = (activeVal === "TRUE" || activeVal === "1");
+    const email = ($("#wkEditEmail").value || "").trim();
+    const phone = ($("#wkEditPhone").value || "").trim();
+    const qrText = ($("#wkEditQr").value || "").trim();
+
+    const np = ($("#wkNewPass").value || "").trim();
+    const np2 = ($("#wkNewPass2").value || "").trim();
+    if (state.mode === "add" && !np){
+      alert("Przy dodawaniu hasło jest wymagane.");
+      return;
+    }
+    if (np || np2){
+      if (np !== np2){
+        alert("Hasła nie są takie same.");
+        return;
+      }
+      if (np.length < 4){
+        alert("Hasło jest zbyt krótkie (min 4 znaki).");
+        return;
+      }
+    }
+
+    const payload = {
+      token: token(),
+      editorName: editorName(),
+      workerId: (state.mode === "add") ? "" : String(state.current && state.current.workerId ? state.current.workerId : ""),
+      name, login, type, active, email, phone, qrText,
+      newPassword: np
+    };
+
+    const btn = $("#wkSaveBtn");
+    const oldTxt = btn ? btn.textContent : "";
+    if (btn){ btn.disabled = true; btn.textContent = "Zapisywanie..."; }
+
+    const call = (state.mode === "add") ? "api_createWorker" : "api_updateWorker";
+
+    google.script.run
+      .withSuccessHandler((res)=>{
+        if (btn){ btn.disabled = false; btn.textContent = oldTxt || "Zapisz"; }
+        closeEditor();
+        fetchWorkers();
+        if (state.mode === "add" && res && res.workerId){
+          alert("Dodano pracownika: " + res.workerId);
+        }
+      })
+      .withFailureHandler((err)=>{
+        if (btn){ btn.disabled = false; btn.textContent = oldTxt || "Zapisz"; }
+        const msg = (err && err.message) ? err.message : String(err || "Błąd");
+        alert("Błąd zapisu: " + msg);
+      })[call](payload);
+  }
+
+  function deleteWorker(){
+    if (!canDelete()){
+      alert("Brak uprawnień do usuwania.");
+      return;
+    }
+    if (!state.current || !state.current.workerId){
+      alert("Brak ID.");
+      return;
+    }
+
+    const label = `${state.current.workerId} · ${state.current.name || ""} · ${state.current.login || ""}`.trim();
+    const ok = confirm(`Na pewno usunąć pracownika?\n${label}\n\nTa operacja jest nieodwracalna.`);
+    if (!ok) return;
+
+    const btn = $("#wkDeleteBtn");
+    const oldTxt = btn ? btn.textContent : "";
+    if (btn){ btn.disabled = true; btn.textContent = "Usuwanie..."; }
+
+    google.script.run
+      .withSuccessHandler(()=>{
+        if (btn){ btn.disabled = false; btn.textContent = oldTxt || "Usuń"; }
+        closeEditor();
+        fetchWorkers();
+      })
+      .withFailureHandler((err)=>{
+        if (btn){ btn.disabled = false; btn.textContent = oldTxt || "Usuń"; }
+        alert("Błąd usuwania: " + (err && err.message ? err.message : String(err || "")));
+      })
+      .api_deleteWorker({ token: token(), workerId: String(state.current.workerId || ""), rowNumber: state.current && state.current.rowNumber ? Number(state.current.rowNumber) : 0 });
+  }
+
+  function openAdd(){
+    if (!canWrite()){
+      alert("Brak uprawnień do dodawania.");
+      return;
+    }
+    openEditor(null);
+  }
+
+  function bind(){
+    $("#wkAddBtn") && $("#wkAddBtn").addEventListener("click", openAdd);
+    $("#wkSearchBtn") && $("#wkSearchBtn").addEventListener("click", fetchWorkers);
+    $("#wkResetBtn") && $("#wkResetBtn").addEventListener("click", ()=>{ resetFilters(); fetchWorkers(); });
+
+    ["#wkQ","#wkType","#wkActive","#wkOnline"].forEach(sel=>{
+      const el = $(sel);
+      el && el.addEventListener("keydown", (e)=>{ if (e.key === "Enter") fetchWorkers(); });
+    });
+
+    $("#wkType") && $("#wkType").addEventListener("change", fetchWorkers);
+    $("#wkActive") && $("#wkActive").addEventListener("change", fetchWorkers);
+    $("#wkOnline") && $("#wkOnline").addEventListener("change", fetchWorkers);
+
+    $("#wkEditorOverlay") && $("#wkEditorOverlay").addEventListener("click", (e)=>{
+      if (e.target && e.target.id === "wkEditorOverlay") closeEditor();
+    });
+    $("#wkCancelBtn") && $("#wkCancelBtn").addEventListener("click", closeEditor);
+    $("#wkSaveBtn") && $("#wkSaveBtn").addEventListener("click", saveEditor);
+    $("#wkDeleteBtn") && $("#wkDeleteBtn").addEventListener("click", deleteWorker);
+    $("#wkFillQrBtn") && $("#wkFillQrBtn").addEventListener("click", fillQr);
+    $("#wkEditActive") && $("#wkEditActive").addEventListener("change", updateActiveSelectVisual);
+    $("#wkShowPassBtn") && $("#wkShowPassBtn").addEventListener("click", ()=>{
+      const inp = $("#wkCurrentPass");
+      const btn = $("#wkShowPassBtn");
+      if (!inp || !btn) return;
+      const isHidden = (inp.type === "password");
+      inp.type = isHidden ? "text" : "password";
+      btn.textContent = isHidden ? "Ukryj" : "Pokaż";
+    });
+    $("#wkCopyPassBtn") && $("#wkCopyPassBtn").addEventListener("click", async ()=>{
+      const inp = $("#wkCurrentPass");
+      if (!inp) return;
+      const val = String(inp.value || "");
+      if (!val) { alert("Brak hasła do skopiowania."); return; }
+      try{
+        await navigator.clipboard.writeText(val);
+        alert("Skopiowano hasło do schowka.");
+      }catch(e){
+        // fallback
+        try{
+          inp.select(); inp.setSelectionRange(0, 99999);
+          document.execCommand("copy");
+          alert("Skopiowano hasło do schowka.");
+        }catch(e2){
+          alert("Nie udało się skopiować (blokada przeglądarki).");
+        }
+      }
+    });
+
+  }
+
+  function init(){
+    if (state.wired) {
+      fetchWorkers();
+      return;
+    }
+    state.wired = true;
+    bind();
+    fetchWorkers();
+  }
+
+  window.WorkerProfileModule = { init };
+})();
+</script>

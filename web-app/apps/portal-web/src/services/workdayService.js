@@ -1,0 +1,1080 @@
+import {
+  backupCyclesForOrg,
+  deleteWorkdayForOrg,
+  insertWorkdayForOrg,
+  updateWorkdayForOrg,
+  workdaysForOrg,
+  workerWorkdaysForOrg,
+} from '@dataconnect/generated'
+import { executeMutation, executeQuery, mutationRef, queryRef } from 'firebase/data-connect'
+import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
+import { getClients } from './clientService'
+import { getZones } from './zoneService'
+import { getWorkers } from './workerService'
+
+const NINE_HOURS_SECONDS = 9 * 60 * 60
+const DEPLOY_HINT =
+  'Brak wdrożonej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean-room.'
+
+function pad2(value) {
+  return String(value).padStart(2, '0')
+}
+
+function toIso(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) {
+    return ''
+  }
+
+  const date = new Date(raw)
+  if (!Number.isFinite(date.getTime())) {
+    return ''
+  }
+
+  return date.toISOString()
+}
+
+function toNullableIso(value) {
+  const iso = toIso(value)
+  return iso || null
+}
+
+function toNullableText(value) {
+  const raw = String(value ?? '').trim()
+  return raw || null
+}
+
+function messageFromError(error) {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return String(error ?? '')
+}
+
+function withOperationNotFoundHint(error, operationName) {
+  const message = messageFromError(error)
+  if (message.includes(`operation "${operationName}" not found`)) {
+    return new Error(`${DEPLOY_HINT} Brak operacji: ${operationName}.`)
+  }
+
+  return error instanceof Error ? error : new Error(message || DEPLOY_HINT)
+}
+
+function toDayKey(isoValue) {
+  const iso = toIso(isoValue)
+  return iso ? iso.slice(0, 10) : ''
+}
+
+function formatDatePl(isoValue) {
+  const iso = toIso(isoValue)
+  if (!iso) {
+    return '-'
+  }
+
+  const date = new Date(iso)
+  return `${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}.${date.getFullYear()}`
+}
+
+function formatTime(isoValue) {
+  const iso = toIso(isoValue)
+  if (!iso) {
+    return '-'
+  }
+
+  const date = new Date(iso)
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
+}
+
+function durationToHms(secondsValue) {
+  const seconds = Number(secondsValue ?? 0)
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return '-'
+  }
+
+  const rounded = Math.floor(seconds)
+  const hours = Math.floor(rounded / 3600)
+  const minutes = Math.floor((rounded % 3600) / 60)
+  const secondsRemainder = rounded % 60
+
+  return `${pad2(hours)}:${pad2(minutes)}:${pad2(secondsRemainder)}`
+}
+
+function normalizeStatus(status, hasStop) {
+  const normalized = String(status ?? '').trim().toUpperCase()
+  if (normalized === 'CLOSED') {
+    return 'CLOSED'
+  }
+
+  if (normalized === 'OPEN' || normalized === 'RUNNING') {
+    return 'RUNNING'
+  }
+
+  return hasStop ? 'CLOSED' : 'RUNNING'
+}
+
+function calculateDuration(row) {
+  const directDuration = Number(row?.durationSec)
+  if (Number.isFinite(directDuration) && directDuration >= 0) {
+    return Math.floor(directDuration)
+  }
+
+  const startIso = toIso(row?.startAt)
+  const endIso = toIso(row?.endAt)
+  if (!startIso || !endIso) {
+    return 0
+  }
+
+  const startMs = new Date(startIso).getTime()
+  const endMs = new Date(endIso).getTime()
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return 0
+  }
+
+  return Math.floor((endMs - startMs) / 1000)
+}
+
+function normalizeFilterDate(rawDate) {
+  const trimmed = String(rawDate ?? '').trim()
+  if (!trimmed) {
+    return ''
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed
+  }
+
+  const iso = toIso(trimmed)
+  return iso ? iso.slice(0, 10) : ''
+}
+
+function normalizeHaystack(values) {
+  return values
+    .map((value) => String(value ?? '').trim().toLowerCase())
+    .filter(Boolean)
+    .join(' ')
+}
+
+function normalizeLookupKey(value) {
+  return String(value ?? '').trim().toLowerCase()
+}
+
+function normalizePersonName(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) {
+    return ''
+  }
+
+  try {
+    return raw
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim()
+  } catch {
+    return raw.toLowerCase().replace(/\s+/g, ' ').trim()
+  }
+}
+
+function pickFirstText(...values) {
+  for (const value of values) {
+    const text = String(value ?? '').trim()
+    if (text) {
+      return text
+    }
+  }
+
+  return ''
+}
+
+function mergeZoneData(primary, secondary) {
+  if (!primary && !secondary) {
+    return null
+  }
+
+  return {
+    id: pickFirstText(primary?.id, secondary?.id),
+    clientId: pickFirstText(primary?.clientId, secondary?.clientId),
+    name: pickFirstText(primary?.name, secondary?.name),
+    zone: pickFirstText(primary?.zone, secondary?.zone),
+    location: pickFirstText(primary?.location, secondary?.location),
+    workerLogin: pickFirstText(primary?.workerLogin, secondary?.workerLogin),
+    workerName: pickFirstText(primary?.workerName, secondary?.workerName),
+  }
+}
+
+function getDataConnectInstance() {
+  const firebase = ensureFirebase()
+  const dataConnect = firebase?.dataConnect
+  if (!dataConnect) {
+    throw new Error('Nie udało się zainicjalizować Data Connect.')
+  }
+
+  return dataConnect
+}
+
+async function runQueryOperation(operationName, variables) {
+  try {
+    return await executeQuery(queryRef(getDataConnectInstance(), operationName, variables))
+  } catch (error) {
+    throw withOperationNotFoundHint(error, operationName)
+  }
+}
+
+async function runMutationOperation(operationName, variables) {
+  try {
+    return await executeMutation(mutationRef(getDataConnectInstance(), operationName, variables))
+  } catch (error) {
+    throw withOperationNotFoundHint(error, operationName)
+  }
+}
+
+function applyWorkdayFilters(items, filters = {}) {
+  const fromDay = normalizeFilterDate(filters.fromIso)
+  const toDay = normalizeFilterDate(filters.toIso)
+  const workerFilter = String(filters.worker ?? '').trim().toLowerCase()
+  const workerLoginFilter = normalizeLookupKey(filters.workerLogin)
+  const zoneFilter = String(filters.strefa ?? '').trim().toLowerCase()
+  const zoneIdFilter = normalizeLookupKey(filters.zoneId ?? filters.utilityRoomId)
+  const clientFilter = String(filters.pomieszczenie ?? '').trim().toLowerCase()
+  const clientIdFilter = normalizeLookupKey(filters.clientId)
+  const roomFilter = String(filters.roomId ?? '').trim().toLowerCase()
+  const rawStatusFilter = String(filters.status ?? '').trim().toUpperCase()
+  const statusFilter = rawStatusFilter === 'OPEN' ? 'RUNNING' : rawStatusFilter
+  const q = String(filters.q ?? '').trim().toLowerCase()
+
+  return items.filter((item) => {
+    const dayKey = item.dayKey
+    if (fromDay && dayKey && dayKey < fromDay) {
+      return false
+    }
+
+    if (toDay && dayKey && dayKey > toDay) {
+      return false
+    }
+
+    if (workerFilter && !String(item.workerName ?? '').toLowerCase().includes(workerFilter)) {
+      return false
+    }
+
+    if (workerLoginFilter && normalizeLookupKey(item.workerLogin) !== workerLoginFilter) {
+      return false
+    }
+
+    if (zoneFilter && !String(item.strefa ?? '').toLowerCase().includes(zoneFilter)) {
+      return false
+    }
+
+    if (zoneIdFilter && normalizeLookupKey(item.zoneId ?? item.utilityRoomId ?? item.roomId) !== zoneIdFilter) {
+      return false
+    }
+
+    if (clientFilter && !String(item.klient ?? '').toLowerCase().includes(clientFilter)) {
+      return false
+    }
+
+    if (clientIdFilter && normalizeLookupKey(item.clientId) !== clientIdFilter) {
+      return false
+    }
+
+    if (roomFilter && !String(item.roomId ?? '').toLowerCase().includes(roomFilter)) {
+      return false
+    }
+
+    if (statusFilter) {
+      const normalizedStatus = normalizeStatus(item.status, Boolean(item.endAt))
+      if (normalizedStatus !== statusFilter) {
+        return false
+      }
+    }
+
+    if (!q) {
+      return true
+    }
+
+    const haystack = normalizeHaystack([
+      item.workdayId,
+      item.workerName,
+      item.workerLogin,
+      item.roomId,
+      item.strefa,
+      item.klient,
+      item.lokalizacja,
+      item.status,
+      item.comment,
+      item.editedBy,
+    ])
+
+    return haystack.includes(q)
+  })
+}
+
+function paginate(items, pageValue, pageSizeValue) {
+  const pageSize = Number(pageSizeValue) > 0 ? Number(pageSizeValue) : 50
+  const total = items.length
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const page = Math.min(Math.max(Number(pageValue) || 1, 1), totalPages)
+  const offset = (page - 1) * pageSize
+
+  return {
+    items: items.slice(offset, offset + pageSize),
+    page,
+    pageSize,
+    total,
+    totalPages,
+  }
+}
+
+function sortByLatest(items) {
+  return [...items].sort((left, right) => {
+    const leftTs = new Date(toIso(left.startAt) || toIso(left.updatedAt) || 0).getTime()
+    const rightTs = new Date(toIso(right.startAt) || toIso(right.updatedAt) || 0).getTime()
+    return rightTs - leftTs
+  })
+}
+
+function buildLookupMaps(clients, zones, workers, workdayRows = []) {
+  const clientById = new Map(clients.map((client) => [String(client.id), client]))
+  const clientByNormalizedId = new Map(clients.map((client) => [normalizeLookupKey(client.id), client]))
+  const clientByNormalizedName = new Map(clients.map((client) => [normalizeLookupKey(client.name), client]))
+  const zoneById = new Map(zones.map((zone) => [String(zone.id), zone]))
+  const zoneByNormalizedId = new Map(zones.map((zone) => [normalizeLookupKey(zone.id), zone]))
+  const zoneByNormalizedName = new Map(
+    zones
+      .map((zone) => [normalizeLookupKey(zone.name ?? zone.zone), zone])
+      .filter((pair) => Boolean(pair[0])),
+  )
+  const workerByLogin = new Map(
+    workers.map((worker) => {
+      const login = String(worker.login ?? worker.id ?? '')
+      return [login, worker]
+    }),
+  )
+  const workerByNormalizedLogin = new Map(
+    workers
+      .map((worker) => {
+        const login = normalizeLookupKey(worker.login ?? worker.id ?? '')
+        if (!login) {
+          return null
+        }
+        return [login, worker]
+      })
+      .filter(Boolean),
+  )
+  const workerByNormalizedName = new Map(
+    workers
+      .map((worker) => {
+        const normalizedName = normalizePersonName(worker.name ?? worker.fullName ?? '')
+        if (!normalizedName) {
+          return null
+        }
+
+        return [normalizedName, worker]
+      })
+      .filter(Boolean),
+  )
+  const workdayById = new Map(
+    workdayRows
+      .map((row) => {
+        const workdayId = String(row?.workdayId ?? '').trim()
+        if (!workdayId) {
+          return null
+        }
+
+        return [
+          workdayId,
+          {
+            workdayId,
+            workerLogin: String(row?.workerLogin ?? '').trim(),
+            workerName: String(row?.workerName ?? '').trim(),
+          },
+        ]
+      })
+      .filter(Boolean),
+  )
+  const workdaysByRoomDay = new Map()
+  const workdaysByRoom = new Map()
+  const workdaysByDay = new Map()
+
+  workdayRows.forEach((row) => {
+    const roomId = String(row?.utilityRoomId ?? row?.roomId ?? '').trim()
+    const normalizedRoomId = normalizeLookupKey(roomId)
+    const workerLogin = String(row?.workerLogin ?? '').trim()
+    if (!normalizedRoomId || !workerLogin) {
+      return
+    }
+
+    const startAt = toIso(row?.startAt)
+    const endAt = toIso(row?.endAt)
+    const updatedAt = toIso(row?.updatedAt)
+    const dayKey = toDayKey(startAt || endAt)
+    const candidate = {
+      workerLogin,
+      workerName: String(row?.workerName ?? '').trim(),
+      startAt,
+      endAt,
+      updatedAt,
+    }
+
+    if (dayKey) {
+      const roomDayKey = `${normalizedRoomId}|${dayKey}`
+      const list = workdaysByRoomDay.get(roomDayKey) ?? []
+      list.push(candidate)
+      workdaysByRoomDay.set(roomDayKey, list)
+
+      const dayList = workdaysByDay.get(dayKey) ?? []
+      dayList.push(candidate)
+      workdaysByDay.set(dayKey, dayList)
+    }
+
+    const roomList = workdaysByRoom.get(normalizedRoomId) ?? []
+    roomList.push(candidate)
+    workdaysByRoom.set(normalizedRoomId, roomList)
+  })
+
+  const byLatest = (left, right) => {
+    const leftTs = new Date(left.startAt || left.updatedAt || 0).getTime()
+    const rightTs = new Date(right.startAt || right.updatedAt || 0).getTime()
+    return rightTs - leftTs
+  }
+  workdaysByRoomDay.forEach((list, key) => {
+    workdaysByRoomDay.set(key, [...list].sort(byLatest))
+  })
+  workdaysByRoom.forEach((list, key) => {
+    workdaysByRoom.set(key, [...list].sort(byLatest))
+  })
+  workdaysByDay.forEach((list, key) => {
+    workdaysByDay.set(key, [...list].sort(byLatest))
+  })
+
+  return {
+    clientById,
+    clientByNormalizedId,
+    clientByNormalizedName,
+    zoneById,
+    zoneByNormalizedId,
+    zoneByNormalizedName,
+    workerByLogin,
+    workerByNormalizedLogin,
+    workerByNormalizedName,
+    workdayById,
+    workdaysByRoomDay,
+    workdaysByRoom,
+    workdaysByDay,
+  }
+}
+
+function pickClosestWorkerCandidate(candidates, eventStartAt) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return null
+  }
+
+  const startTs = new Date(toIso(eventStartAt) || 0).getTime()
+  if (!Number.isFinite(startTs) || startTs <= 0) {
+    return candidates[0] ?? null
+  }
+
+  let best = null
+  let bestDistance = Number.POSITIVE_INFINITY
+  candidates.forEach((candidate) => {
+    const candidateTs = new Date(toIso(candidate?.startAt) || 0).getTime()
+    if (!Number.isFinite(candidateTs) || candidateTs <= 0) {
+      return
+    }
+    const distance = Math.abs(candidateTs - startTs)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = candidate
+    }
+  })
+
+  return best ?? candidates[0] ?? null
+}
+
+function mapWorkday(orgId, row, lookupMaps) {
+  const rawEventId = String(row.eventId ?? row.cycleId ?? '').trim()
+  const rawWorkdayId = String(row.workdayId ?? '').trim()
+  const workdayId = rawWorkdayId || rawEventId
+  const eventId = rawEventId || workdayId
+  const linkedWorkday = lookupMaps.workdayById.get(rawWorkdayId) ?? null
+  const workerLoginCandidate = String(
+    row.workerLogin ?? row.worker?.login ?? row.workday?.workerLogin ?? linkedWorkday?.workerLogin ?? '',
+  ).trim()
+  const roomId = String(row.zoneId ?? row.utilityRoomId ?? row.roomId ?? '').trim()
+  const normalizedRoomId = normalizeLookupKey(roomId)
+  const startAt = toIso(row.startAt)
+  const endAt = toIso(row.endAt)
+  const durationSec = calculateDuration(row)
+  const zoneFromRow = row?.zone
+    ? {
+        id: String(row.zone.ZoneId ?? row.zone.zoneId ?? row.zoneId ?? roomId).trim(),
+        clientId: String(row.zone.client?.clientId ?? row.clientId ?? '').trim(),
+        name: String(row.zone.zone ?? '').trim(),
+        zone: String(row.zone.zone ?? '').trim(),
+        location: String(row.zone.location ?? '').trim(),
+        workerLogin: String(row.zone.workerLogin ?? '').trim(),
+        workerName: String(row.zone.worker?.fullName ?? '').trim(),
+      }
+    : null
+
+  const zoneFromLookup =
+    lookupMaps.zoneById.get(roomId) ||
+    lookupMaps.zoneByNormalizedId.get(normalizedRoomId) ||
+    lookupMaps.zoneByNormalizedName.get(normalizedRoomId) ||
+    null
+  const zone = mergeZoneData(zoneFromRow, zoneFromLookup)
+
+  const zoneClientId = String(zone?.clientId ?? row.clientId ?? '').trim()
+  const normalizedZoneClientId = normalizeLookupKey(zoneClientId)
+  const clientFromEvent = row?.client
+    ? {
+        id: String(row.client.clientId ?? row.clientId ?? '').trim(),
+        name: String(row.client.name ?? '').trim(),
+      }
+    : row?.zone?.client
+      ? {
+          id: String(row.zone.client.clientId ?? '').trim(),
+          name: String(row.zone.client.name ?? '').trim(),
+        }
+      : null
+
+  const clientFromZone =
+    lookupMaps.clientById.get(zoneClientId) ||
+    lookupMaps.clientByNormalizedId.get(normalizedZoneClientId) ||
+    lookupMaps.clientByNormalizedName.get(normalizedZoneClientId) ||
+    null
+
+  const clientFromRoomId =
+    lookupMaps.clientById.get(roomId) ||
+    lookupMaps.clientByNormalizedId.get(normalizedRoomId) ||
+    lookupMaps.clientByNormalizedName.get(normalizedRoomId) ||
+    null
+
+  const client = clientFromEvent || clientFromZone || clientFromRoomId || null
+  const resolvedClientId = String(row.clientId ?? zone?.clientId ?? clientFromRoomId?.id ?? '').trim()
+  const eventDayKey = toDayKey(startAt || endAt)
+  const roomDayKey = normalizedRoomId && eventDayKey ? `${normalizedRoomId}|${eventDayKey}` : ''
+  const inferredFromRoomDay = roomDayKey
+    ? pickClosestWorkerCandidate(lookupMaps.workdaysByRoomDay.get(roomDayKey), startAt)
+    : null
+  const inferredFromRoom = pickClosestWorkerCandidate(lookupMaps.workdaysByRoom.get(normalizedRoomId), startAt)
+  const inferredFromDay = pickClosestWorkerCandidate(lookupMaps.workdaysByDay.get(eventDayKey), startAt)
+  const inferredWorker = inferredFromRoomDay || inferredFromRoom || inferredFromDay || null
+
+  const rawWorkerName = pickFirstText(
+    row.worker?.fullName,
+    row.workerName,
+    row.workday?.workerName,
+    zone?.workerName,
+    inferredWorker?.workerName,
+    linkedWorkday?.workerName,
+  )
+  const workerFromName =
+    lookupMaps.workerByNormalizedName.get(normalizePersonName(rawWorkerName)) || null
+
+  const resolvedWorkerLogin = pickFirstText(
+    workerLoginCandidate,
+    zone?.workerLogin,
+    inferredWorker?.workerLogin,
+    workerFromName?.login,
+  )
+  const worker =
+    lookupMaps.workerByLogin.get(resolvedWorkerLogin) ||
+    lookupMaps.workerByNormalizedLogin.get(normalizeLookupKey(resolvedWorkerLogin)) ||
+    null
+  const status = normalizeStatus(row.status, Boolean(endAt))
+  const workerNameFromWorker = pickFirstText(worker?.name, workerFromName?.name)
+  const workerNameValue = pickFirstText(workerNameFromWorker, rawWorkerName, resolvedWorkerLogin)
+
+  return {
+    id: eventId || workdayId,
+    eventId: eventId || workdayId,
+    workdayId: workdayId || eventId,
+    linkedWorkdayId: rawWorkdayId,
+    orgId,
+    workerLogin: resolvedWorkerLogin,
+    workerName: workerNameValue,
+    workerType: String(worker?.type ?? worker?.role ?? ''),
+    roomId,
+    utilityRoomId: roomId,
+    zoneId: roomId,
+    strefa: String(zone?.name ?? zone?.zone ?? ''),
+    zoneName: String(zone?.name ?? zone?.zone ?? ''),
+    clientId: resolvedClientId,
+    klient: String((client?.name ?? resolvedClientId) || '-'),
+    clientName: String((client?.name ?? resolvedClientId) || '-'),
+    lokalizacja: String(zone?.location ?? '-'),
+    startAt,
+    endAt,
+    date: formatDatePl(startAt || endAt),
+    start: formatTime(startAt),
+    stop: formatTime(endAt),
+    durationSec,
+    duration: durationToHms(durationSec),
+    status,
+    closeMarkedAt: toIso(row.closeMarkedAt),
+    endReason: String(row.endReason ?? ''),
+    comment: String(row.comment ?? ''),
+    pauseId: String(row.pauseId ?? '').trim(),
+    clientIndId: String(row.clientIndId ?? '').trim(),
+    clientStatus: String(row.clientStatus ?? '').trim(),
+    deviceId: String(row.deviceId ?? '').trim(),
+    startEventId: String(row.startEventId ?? '').trim(),
+    endEventId: String(row.endEventId ?? '').trim(),
+    editedBy: String(row.updatedBy ?? ''),
+    updatedAt: toIso(row.updatedAt),
+    dayKey: toDayKey(startAt || endAt),
+  }
+}
+
+function normalizeDurationSeconds(value, startAt, endAt) {
+  const parsed = Number(value)
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return Math.floor(parsed)
+  }
+
+  const startIso = toIso(startAt)
+  const endIso = toIso(endAt)
+  if (!startIso || !endIso) {
+    return 0
+  }
+
+  const diff = Math.floor((new Date(endIso).getTime() - new Date(startIso).getTime()) / 1000)
+  return Number.isFinite(diff) && diff > 0 ? diff : 0
+}
+
+function buildEventMutationPayload(payload = {}) {
+  const zoneId = toNullableText(payload.zoneId ?? payload.utilityRoomId ?? payload.roomId)
+  const clientId = toNullableText(payload.clientId)
+  const startAt = toNullableIso(payload.startAt)
+  const endAt = toNullableIso(payload.endAt)
+  const durationSec = normalizeDurationSeconds(payload.durationSec, startAt, endAt)
+  const normalizedStatus = normalizeStatus(payload.status, Boolean(endAt))
+  const closeMarkedAt = toNullableIso(payload.closeMarkedAt) ?? (normalizedStatus === 'CLOSED' ? endAt : null)
+
+  return {
+    zoneId,
+    clientId,
+    workdayId: toNullableText(payload.workdayId ?? payload.linkedWorkdayId),
+    workerLogin: toNullableText(payload.workerLogin),
+    pauseId: toNullableText(payload.pauseId),
+    clientIndId: toNullableText(payload.clientIndId),
+    clientStatus: toNullableText(payload.clientStatus ?? (clientId ? 'CLIENT' : null)),
+    startAt,
+    endAt,
+    durationSec,
+    status: normalizedStatus || null,
+    closeMarkedAt,
+    endReason: toNullableText(payload.endReason),
+    comment: toNullableText(payload.comment),
+    deviceId: toNullableText(payload.deviceId),
+    startEventId: toNullableText(payload.startEventId),
+    endEventId: toNullableText(payload.endEventId),
+  }
+}
+
+async function fetchLookupMaps(orgId, options = {}) {
+  const includeWorkdays = Boolean(options.includeWorkdays)
+  const [clients, zones, workers, workdayRows] = await Promise.all([
+    getClients(orgId),
+    getZones(orgId),
+    getWorkers(orgId),
+    includeWorkdays
+      ? workdaysForOrg({ orgId })
+          .then((response) => response?.data?.workdays ?? [])
+          .catch(() => [])
+      : Promise.resolve([]),
+  ])
+  return buildLookupMaps(clients, zones, workers, workdayRows)
+}
+
+async function fetchMappedWorkdays(orgId, rowsPromise, operationName) {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  }
+
+  ensureFirebase()
+  let response
+  try {
+    response = await rowsPromise
+  } catch (error) {
+    throw withOperationNotFoundHint(error, operationName)
+  }
+
+  const lookupMaps = await fetchLookupMaps(orgId)
+  const rows = response?.data?.workdays ?? []
+  return rows.map((row) => mapWorkday(orgId, row, lookupMaps))
+}
+
+async function fetchMappedBackupCycles(orgId) {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. UzupeĹ‚nij web-app/.env.')
+  }
+
+  ensureFirebase()
+  let response
+  try {
+    response = await backupCyclesForOrg({ orgId })
+  } catch (error) {
+    throw withOperationNotFoundHint(error, 'BackupCyclesForOrg')
+  }
+
+  const lookupMaps = await fetchLookupMaps(orgId)
+  const rows = response?.data?.backupCycles ?? []
+  return rows.map((row) => mapWorkday(orgId, row, lookupMaps))
+}
+
+async function fetchMappedEvents(orgId) {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  }
+
+  ensureFirebase()
+  const response = await runQueryOperation('EventsForOrg', { orgId })
+  const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
+  const rows = response?.data?.events ?? []
+  return rows.map((row) => mapWorkday(orgId, row, lookupMaps))
+}
+
+export async function getWorkdays(orgId, filters = {}) {
+  const source = String(filters.source ?? '').trim().toLowerCase()
+  let mapped
+  if (source === 'events' || source === 'event') {
+    mapped = await fetchMappedEvents(orgId)
+  } else if (source === 'backupcycle' || source === 'backup_cycle') {
+    mapped = await fetchMappedBackupCycles(orgId)
+  } else {
+    mapped = await fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg')
+  }
+
+  const sorted = sortByLatest(mapped)
+  const filtered = applyWorkdayFilters(sorted, filters)
+  const paged = paginate(filtered, filters.page, filters.pageSize)
+
+  return {
+    orgId,
+    filters,
+    ...paged,
+  }
+}
+
+export async function getWorkerTime(orgId, workerId, range = {}) {
+  const workerLogin = String(workerId ?? range.workerLogin ?? '').trim()
+  if (!workerLogin) {
+    return {
+      orgId,
+      workerId,
+      range,
+      items: [],
+      page: 1,
+      pageSize: Number(range.pageSize) || 50,
+      total: 0,
+      totalPages: 1,
+    }
+  }
+
+  const mapped = await fetchMappedWorkdays(
+    orgId,
+    workerWorkdaysForOrg({ orgId, workerLogin }),
+    'WorkerWorkdaysForOrg',
+  )
+  const sorted = sortByLatest(mapped)
+  const filtered = applyWorkdayFilters(sorted, range)
+  const paged = paginate(filtered, range.page, range.pageSize)
+
+  return {
+    orgId,
+    workerId: workerLogin,
+    range,
+    ...paged,
+  }
+}
+
+export async function getRecentEvents(orgId, limit = 5) {
+  const pageSize = Math.max(Number(limit) || 5, 1)
+  const response = await getWorkdays(orgId, { page: 1, pageSize })
+
+  return response.items.map((item) => ({
+    id: item.workdayId,
+    workerName: item.workerName || '-',
+    zoneName: item.zoneName || '-',
+    clientName: item.clientName || '-',
+    date: item.date || '-',
+    start: item.start || '-',
+    stop: item.stop || '-',
+    duration: item.duration || '-',
+  }))
+}
+
+export async function getDashboardSummary(orgId) {
+  const response = await getWorkdays(orgId, { page: 1, pageSize: 5000 })
+  const items = response.items
+
+  const openWorkers = new Set(
+    items
+      .filter((item) => !item.endAt && normalizeStatus(item.status, Boolean(item.endAt)) !== 'CLOSED')
+      .map((item) => item.workerName || item.workerLogin)
+      .filter(Boolean),
+  )
+
+  const over9Workers = new Set(
+    items
+      .filter((item) => Boolean(item.endAt) && Number(item.durationSec) > NINE_HOURS_SECONDS)
+      .map((item) => item.workerName || item.workerLogin)
+      .filter(Boolean),
+  )
+
+  return {
+    orgId,
+    openNoStop: {
+      count: openWorkers.size,
+      workers: [...openWorkers].sort((left, right) => left.localeCompare(right, 'pl', { sensitivity: 'base' })),
+    },
+    over9h: {
+      count: over9Workers.size,
+      workers: [...over9Workers].sort((left, right) => left.localeCompare(right, 'pl', { sensitivity: 'base' })),
+    },
+  }
+}
+
+export async function createEvent(orgId, payload = {}) {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  }
+
+  const eventId = String(payload.eventId ?? payload.id ?? `EV-${Date.now()}`).trim()
+  if (!eventId) {
+    throw new Error('Pole eventId jest wymagane dla createEvent(orgId).')
+  }
+
+  ensureFirebase()
+  const mutationPayload = buildEventMutationPayload(payload)
+  const eventPayload = {
+    zoneId: mutationPayload.zoneId,
+    workerLogin: mutationPayload.workerLogin,
+    startAt: mutationPayload.startAt,
+    endAt: mutationPayload.endAt,
+    durationSec: mutationPayload.durationSec,
+    status: mutationPayload.status,
+    closeMarkedAt: mutationPayload.closeMarkedAt,
+    endReason: mutationPayload.endReason,
+    comment: mutationPayload.comment,
+    deviceId: mutationPayload.deviceId,
+    startEventId: mutationPayload.startEventId,
+    endEventId: mutationPayload.endEventId,
+  }
+  await runMutationOperation('InsertEventForOrg', {
+    orgId,
+    eventId,
+    ...eventPayload,
+  })
+
+  return {
+    id: eventId,
+    eventId,
+    orgId,
+    workerLogin: String(payload.workerLogin ?? '').trim(),
+    workerName: String(payload.workerName ?? '').trim(),
+    roomId: String(mutationPayload.zoneId ?? ''),
+    utilityRoomId: String(mutationPayload.zoneId ?? ''),
+    zoneId: String(mutationPayload.zoneId ?? ''),
+    clientId: String(mutationPayload.clientId ?? ''),
+    startAt: mutationPayload.startAt,
+    endAt: mutationPayload.endAt,
+    durationSec: mutationPayload.durationSec,
+    status: String(mutationPayload.status ?? ''),
+    comment: String(mutationPayload.comment ?? ''),
+  }
+}
+
+export async function updateEvent(orgId, eventId, payload = {}) {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  }
+
+  const normalizedEventId = String(eventId ?? payload.eventId ?? payload.workdayId ?? '').trim()
+  if (!normalizedEventId) {
+    throw new Error('Pole eventId jest wymagane dla updateEvent(orgId, eventId).')
+  }
+
+  ensureFirebase()
+  const mutationPayload = buildEventMutationPayload(payload)
+  const eventPayload = {
+    zoneId: mutationPayload.zoneId,
+    workerLogin: mutationPayload.workerLogin,
+    startAt: mutationPayload.startAt,
+    endAt: mutationPayload.endAt,
+    durationSec: mutationPayload.durationSec,
+    status: mutationPayload.status,
+    closeMarkedAt: mutationPayload.closeMarkedAt,
+    endReason: mutationPayload.endReason,
+    comment: mutationPayload.comment,
+    deviceId: mutationPayload.deviceId,
+    startEventId: mutationPayload.startEventId,
+    endEventId: mutationPayload.endEventId,
+  }
+  await runMutationOperation('UpdateEventForOrg', {
+    orgId,
+    eventId: normalizedEventId,
+    ...eventPayload,
+  })
+
+  return {
+    id: normalizedEventId,
+    eventId: normalizedEventId,
+    orgId,
+    workerLogin: String(payload.workerLogin ?? '').trim(),
+    workerName: String(payload.workerName ?? '').trim(),
+    roomId: String(mutationPayload.zoneId ?? ''),
+    utilityRoomId: String(mutationPayload.zoneId ?? ''),
+    zoneId: String(mutationPayload.zoneId ?? ''),
+    clientId: String(mutationPayload.clientId ?? ''),
+    startAt: mutationPayload.startAt,
+    endAt: mutationPayload.endAt,
+    durationSec: mutationPayload.durationSec,
+    status: String(mutationPayload.status ?? ''),
+    comment: String(mutationPayload.comment ?? ''),
+  }
+}
+
+export async function deleteEvent(orgId, eventId) {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  }
+
+  const normalizedEventId = String(eventId ?? '').trim()
+  if (!normalizedEventId) {
+    throw new Error('Pole eventId jest wymagane dla deleteEvent(orgId, eventId).')
+  }
+
+  ensureFirebase()
+  await runMutationOperation('DeleteEventForOrg', {
+    orgId,
+    eventId: normalizedEventId,
+  })
+
+  return {
+    success: true,
+    orgId,
+    eventId: normalizedEventId,
+  }
+}
+
+export async function createWorkday(orgId, payload = {}) {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  }
+
+  const workdayId = String(payload.workdayId ?? payload.id ?? `WD-${Date.now()}`)
+  const workerLogin = String(payload.workerLogin ?? '').trim()
+
+  if (!workerLogin) {
+    throw new Error('Pole workerLogin jest wymagane dla createWorkday(orgId).')
+  }
+
+  const startAt = toNullableIso(payload.startAt)
+  const endAt = toNullableIso(payload.endAt)
+  const durationSec = normalizeDurationSeconds(payload.durationSec, startAt, endAt)
+
+  ensureFirebase()
+  await insertWorkdayForOrg({
+    orgId,
+    workdayId,
+    workerLogin,
+    workerName: payload.workerName ?? null,
+    utilityRoomId: payload.utilityRoomId ?? payload.roomId ?? null,
+    startAt,
+    endAt,
+    durationSec,
+    status: payload.status ?? null,
+    comment: payload.comment ?? null,
+    updatedBy: payload.updatedBy ?? null,
+  })
+
+  return {
+    workdayId,
+    orgId,
+    workerLogin,
+    workerName: String(payload.workerName ?? ''),
+    utilityRoomId: String(payload.utilityRoomId ?? payload.roomId ?? ''),
+    startAt,
+    endAt,
+    durationSec,
+    status: String(payload.status ?? ''),
+    comment: String(payload.comment ?? ''),
+    editedBy: String(payload.updatedBy ?? ''),
+  }
+}
+
+export async function updateWorkday(orgId, workdayId, payload = {}) {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  }
+
+  const normalizedWorkdayId = String(workdayId ?? payload.workdayId ?? '').trim()
+  if (!normalizedWorkdayId) {
+    throw new Error('Pole workdayId jest wymagane dla updateWorkday(orgId, workdayId).')
+  }
+
+  const workerLogin = String(payload.workerLogin ?? '').trim()
+  if (!workerLogin) {
+    throw new Error('Pole workerLogin jest wymagane dla updateWorkday(orgId, workdayId).')
+  }
+
+  const startAt = toNullableIso(payload.startAt)
+  const endAt = toNullableIso(payload.endAt)
+  const durationSec = normalizeDurationSeconds(payload.durationSec, startAt, endAt)
+
+  ensureFirebase()
+  await updateWorkdayForOrg({
+    orgId,
+    workdayId: normalizedWorkdayId,
+    workerLogin,
+    workerName: payload.workerName ?? null,
+    utilityRoomId: payload.utilityRoomId ?? payload.roomId ?? null,
+    startAt,
+    endAt,
+    durationSec,
+    status: payload.status ?? null,
+    comment: payload.comment ?? null,
+    updatedBy: payload.updatedBy ?? null,
+  })
+
+  return {
+    workdayId: normalizedWorkdayId,
+    orgId,
+    workerLogin,
+    workerName: String(payload.workerName ?? ''),
+    utilityRoomId: String(payload.utilityRoomId ?? payload.roomId ?? ''),
+    startAt,
+    endAt,
+    durationSec,
+    status: String(payload.status ?? ''),
+    comment: String(payload.comment ?? ''),
+    editedBy: String(payload.updatedBy ?? ''),
+  }
+}
+
+export async function deleteWorkday(orgId, workdayId) {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  }
+
+  const normalizedWorkdayId = String(workdayId ?? '').trim()
+  if (!normalizedWorkdayId) {
+    throw new Error('Pole workdayId jest wymagane dla deleteWorkday(orgId, workdayId).')
+  }
+
+  ensureFirebase()
+  await deleteWorkdayForOrg({
+    orgId,
+    workdayId: normalizedWorkdayId,
+  })
+
+  return {
+    success: true,
+    orgId,
+    workdayId: normalizedWorkdayId,
+  }
+}

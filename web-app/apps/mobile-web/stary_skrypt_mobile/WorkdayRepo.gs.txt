@@ -1,0 +1,362 @@
+/**
+ * Workday_Log repository. Sheet is created automatically if missing.
+ */
+function Workday_ensureSheet_() {
+  const H = CONFIG.HEADERS.WORKDAY_LOG;
+  const headers = [
+    H.WORKDAY_ID, H.WORKER_LOGIN, H.WORKER_NAME, H.UTILITY_ROOM_ID,
+    H.START_AT, H.END_SCAN_AT, H.AUTO_CLOSE_AT, H.END_AT,
+    H.DURATION_SEC, H.STATUS, H.DEVICE_ID, H.START_EVENT_ID,
+    H.END_EVENT_ID, H.PAUSE1_STATUS, H.PAUSE1_START_AT, H.PAUSE1_STOP_AT, H.CREATED_AT, H.UPDATED_AT
+  ];
+  const sh = Sheets_getOrCreateByName_(CONFIG.SHEET_NAME_WORKDAY_LOG, headers);
+  Workday_migrateHeaders_(sh);
+  return sh;
+}
+
+function Workday_sheet_() {
+  return Workday_ensureSheet_();
+}
+
+
+function Workday_migrateHeaders_(sheet) {
+  const H = CONFIG.HEADERS.WORKDAY_LOG;
+  const required = [
+    H.WORKDAY_ID, H.WORKER_LOGIN, H.WORKER_NAME, H.UTILITY_ROOM_ID,
+    H.START_AT, H.END_SCAN_AT, H.AUTO_CLOSE_AT, H.END_AT,
+    H.DURATION_SEC, H.STATUS, H.DEVICE_ID, H.START_EVENT_ID,
+    H.END_EVENT_ID, H.PAUSE1_STATUS, H.PAUSE1_START_AT, H.PAUSE1_STOP_AT,
+    H.CREATED_AT, H.UPDATED_AT
+  ];
+
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 1) return;
+
+  const row1 = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(x => String(x || '').trim());
+  const existing = new Set(row1.filter(Boolean));
+  const missing = required.filter(h => !existing.has(String(h)));
+
+  if (!missing.length) return;
+
+  const startCol = lastCol + 1;
+  sheet.getRange(1, startCol, 1, missing.length).setValues([missing]);
+}
+
+
+function Workday_findRowByStartEventId_(startEventId) {
+  if (!startEventId) return null;
+  const sheet = Workday_sheet_();
+  const h = Sheets_headerMap_(sheet);
+  const H = CONFIG.HEADERS.WORKDAY_LOG;
+  const col = h[H.START_EVENT_ID];
+  if (!col) return null;
+  return Sheets_findRowIndexByValue_(sheet, col, startEventId);
+}
+
+function Workday_getByStartEventId_(startEventId) {
+  const sheet = Workday_sheet_();
+  const rowIndex = Workday_findRowByStartEventId_(startEventId);
+  if (!rowIndex) return null;
+
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(x => String(x || '').trim());
+  const values = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+
+  const obj = {};
+  headers.forEach((name, i) => obj[name] = values[i]);
+  return Workday_normalize_(obj);
+}
+
+function Workday_findRowByEndEventId_(endEventId) {
+  if (!endEventId) return null;
+  const sheet = Workday_sheet_();
+  const h = Sheets_headerMap_(sheet);
+  const H = CONFIG.HEADERS.WORKDAY_LOG;
+  const col = h[H.END_EVENT_ID];
+  if (!col) return null;
+  return Sheets_findRowIndexByValue_(sheet, col, endEventId);
+}
+
+function Workday_getByEndEventId_(endEventId) {
+  const sheet = Workday_sheet_();
+  const rowIndex = Workday_findRowByEndEventId_(endEventId);
+  if (!rowIndex) return null;
+
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(x => String(x || '').trim());
+  const values = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+
+  const obj = {};
+  headers.forEach((name, i) => obj[name] = values[i]);
+  return Workday_normalize_(obj);
+}
+
+
+function Workday_findRowByWorkdayId_(workdayId) {
+  const sh = Workday_sheet_();
+  const h = Sheets_headerMap_(sh);
+  const col = h[CONFIG.HEADERS.WORKDAY_LOG.WORKDAY_ID];
+  if (!col) throw new Error('Workday_Log missing header: WorkdayID');
+  return Sheets_findRowIndexByValue_(sh, col, workdayId);
+}
+
+function Workday_getById_(workdayId) {
+  if (!workdayId) return null;
+  const sh = Workday_sheet_();
+  const rowIndex = Workday_findRowByWorkdayId_(workdayId);
+  if (!rowIndex) return null;
+
+  const lastCol = sh.getLastColumn();
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(x => String(x || '').trim());
+  const values = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+  const obj = {};
+  headers.forEach((name, i) => obj[name] = values[i]);
+  return Workday_normalize_(obj);
+}
+
+function Workday_append_(record) {
+  const sh = Workday_sheet_();
+  const lastCol = sh.getLastColumn();
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(x => String(x || '').trim());
+  const row = headers.map(h => (record[h] !== undefined ? record[h] : ''));
+  sh.appendRow(row);
+}
+
+function Workday_update_(workdayId, updates) {
+  const sh = Workday_sheet_();
+  const h = Sheets_headerMap_(sh);
+  const rowIndex = Workday_findRowByWorkdayId_(workdayId);
+  if (!rowIndex) throw new Error('Workday not found: ' + workdayId);
+
+  // Write row in one call (faster than many setValue calls)
+  const lastCol = sh.getLastColumn();
+  const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+
+  let changed = false;
+  Object.keys(updates || {}).forEach((headerName) => {
+    const col = h[headerName];
+    if (!col) return;
+    row[col - 1] = updates[headerName];
+    changed = true;
+  });
+
+  if (changed) {
+    sh.getRange(rowIndex, 1, 1, lastCol).setValues([row]);
+  }
+}
+
+function Workday_findActiveForWorkerRepo_(workerLogin) {
+  const login = String(workerLogin || '').trim();
+  if (!login) return null;
+
+  // Fast path: cache active workday per worker.
+  // We store both the WorkdayID (long TTL) and the normalized object (shorter TTL).
+  const cache = CacheService.getScriptCache();
+  const keyId = 'workday:activeId:v1:' + login;
+  const keyObj = 'workday:activeObj:v1:' + login;
+
+  const cachedObj = cache.get(keyObj);
+  if (cachedObj !== null && cachedObj !== undefined) {
+    try {
+      const wd = JSON.parse(cachedObj);
+      const st = String((wd && wd.status) || '').toUpperCase();
+      if (wd && wd.workdayId && (st === 'RUNNING' || st === 'ENDING')) {
+        // Also refresh ID cache silently.
+        try { cache.put(keyId, String(wd.workdayId), CONFIG.SESSION_TTL_SECONDS); } catch (_) {}
+        return wd;
+      }
+    } catch (_) {}
+  }
+
+  const cachedId = cache.get(keyId);
+  if (cachedId) {
+    try {
+      const wd = Workday_getById_(String(cachedId));
+      const st = String((wd && wd.status) || '').toUpperCase();
+      if (wd && wd.workdayId && (st === 'RUNNING' || st === 'ENDING')) {
+        try { cache.put(keyObj, JSON.stringify(wd), 600); } catch (_) {}
+        return wd;
+      }
+    } catch (_) {}
+    // Stale cache (closed or missing)
+    try { cache.remove(keyId); cache.remove(keyObj); } catch (_) {}
+  }
+
+  const sh = Workday_sheet_();
+  const h = Sheets_headerMap_(sh);
+  const H = CONFIG.HEADERS.WORKDAY_LOG;
+
+  const colLogin = h[H.WORKER_LOGIN];
+  const colStatus = h[H.STATUS];
+  if (!colLogin || !colStatus) return null;
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+
+  const colId = h[H.WORKDAY_ID];
+  if (!colId) return null;
+
+  // Chunk-scan from bottom to find the most recent active row.
+  // This avoids pulling the entire log into memory for every scan.
+  const lastCol = sh.getLastColumn();
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(x => String(x || '').trim());
+  const CHUNK = 1500;
+
+  for (let endRow = lastRow; endRow >= 2; endRow -= CHUNK) {
+    const startRow = Math.max(2, endRow - CHUNK + 1);
+    const n = endRow - startRow + 1;
+
+    const logins = sh.getRange(startRow, colLogin, n, 1).getValues();
+    const statuses = sh.getRange(startRow, colStatus, n, 1).getValues();
+    const ids = sh.getRange(startRow, colId, n, 1).getValues();
+
+    for (let i = n - 1; i >= 0; i--) {
+      if (String(logins[i][0]) !== login) continue;
+      const status = String(statuses[i][0] || '').toUpperCase();
+      if (status === 'RUNNING' || status === 'ENDING') {
+        const rowIndex = startRow + i;
+        const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+        const obj = {};
+        headers.forEach((name, idx) => obj[name] = row[idx]);
+        const wd = Workday_normalize_(obj);
+        try {
+          cache.put(keyId, String(wd.workdayId), CONFIG.SESSION_TTL_SECONDS);
+          cache.put(keyObj, JSON.stringify(wd), 600);
+        } catch (_) {}
+        return wd;
+      }
+    }
+  }
+
+  try { cache.remove(keyId); cache.remove(keyObj); } catch (_) {}
+  return null;
+}
+
+function Workday_listEndingDue_(nowIso) {
+  const sh = Workday_sheet_();
+  const h = Sheets_headerMap_(sh);
+  const H = CONFIG.HEADERS.WORKDAY_LOG;
+
+  // Read only columns we need for the trigger (fast for large logs).
+  const colId = h[H.WORKDAY_ID];
+  const colLogin = h[H.WORKER_LOGIN];
+  const colStartAt = h[H.START_AT];
+  const colAutoClose = h[H.AUTO_CLOSE_AT];
+  const colStatus = h[H.STATUS];
+  const colPauseStart = h[H.PAUSE1_START_AT];
+  const colPauseStop = h[H.PAUSE1_STOP_AT];
+  if (!colId || !colLogin || !colStartAt || !colAutoClose || !colStatus) return [];
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  const cols = [colId, colLogin, colStartAt, colAutoClose, colStatus, colPauseStart || 0, colPauseStop || 0].filter(c => c > 0);
+  const minCol = Math.min.apply(null, cols);
+  const maxCol = Math.max.apply(null, cols);
+  const width = maxCol - minCol + 1;
+
+  const numRows = lastRow - 1;
+  const data = sh.getRange(2, minCol, numRows, width).getValues();
+  const off = (col) => col ? (col - minCol) : null;
+
+  const oId = off(colId);
+  const oLogin = off(colLogin);
+  const oStartAt = off(colStartAt);
+  const oAuto = off(colAutoClose);
+  const oStatus = off(colStatus);
+  const oPauseStart = colPauseStart ? off(colPauseStart) : null;
+  const oPauseStop = colPauseStop ? off(colPauseStop) : null;
+
+  const nowMs = new Date(nowIso).getTime();
+  const due = [];
+
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    const status = String(row[oStatus] || '').toUpperCase();
+    if (status !== 'ENDING') continue;
+
+    const autoIso = String(row[oAuto] || '');
+    if (!autoIso) continue;
+
+    const autoMs = new Date(autoIso).getTime();
+    if (autoMs > nowMs) continue;
+
+    const obj = {};
+    obj[H.WORKDAY_ID] = row[oId];
+    obj[H.WORKER_LOGIN] = row[oLogin];
+    obj[H.START_AT] = row[oStartAt];
+    obj[H.AUTO_CLOSE_AT] = row[oAuto];
+    obj[H.STATUS] = row[oStatus];
+    if (oPauseStart !== null) obj[H.PAUSE1_START_AT] = row[oPauseStart];
+    if (oPauseStop !== null) obj[H.PAUSE1_STOP_AT] = row[oPauseStop];
+
+    due.push(Workday_normalize_(obj));
+  }
+  return due;
+}
+
+function Workday_normalize_(rowObj) {
+  const H = CONFIG.HEADERS.WORKDAY_LOG;
+  const get = (k) => rowObj[k] !== undefined ? rowObj[k] : '';
+
+  return {
+    workdayId: String(get(H.WORKDAY_ID)),
+    workerLogin: String(get(H.WORKER_LOGIN)),
+    workerName: String(get(H.WORKER_NAME)),
+    utilityRoomId: String(get(H.UTILITY_ROOM_ID)),
+    startAt: String(get(H.START_AT)),
+    endScanAt: String(get(H.END_SCAN_AT)),
+    autoCloseAt: String(get(H.AUTO_CLOSE_AT)),
+    endAt: String(get(H.END_AT)),
+    durationSec: get(H.DURATION_SEC) === '' ? '' : Number(get(H.DURATION_SEC)),
+    status: String(get(H.STATUS)),
+    deviceId: String(get(H.DEVICE_ID)),
+    startEventId: String(get(H.START_EVENT_ID)),
+    endEventId: String(get(H.END_EVENT_ID)),
+    pause1Status: String(get(H.PAUSE1_STATUS)),
+    pause1StartAt: String(get(H.PAUSE1_START_AT)),
+    pause1StopAt: String(get(H.PAUSE1_STOP_AT)),
+    createdAt: String(get(H.CREATED_AT)),
+    updatedAt: String(get(H.UPDATED_AT)),
+  };
+}
+
+
+// --- Active workday cache helpers (performance) ---
+
+function Workday_cacheKeyId_(login) {
+  return 'workday:activeId:v1:' + String(login || '').trim();
+}
+
+function Workday_cacheKeyObj_(login) {
+  return 'workday:activeObj:v1:' + String(login || '').trim();
+}
+
+function Workday_cacheClearActive_(login) {
+  const li = String(login || '').trim();
+  if (!li) return;
+  try {
+    const cache = CacheService.getScriptCache();
+    cache.remove(Workday_cacheKeyId_(li));
+    cache.remove(Workday_cacheKeyObj_(li));
+  } catch (_) {}
+}
+
+function Workday_cacheSetActive_(wd) {
+  if (!wd || !wd.workdayId || !wd.workerLogin) return;
+  const st = String(wd.status || '').toUpperCase();
+  try {
+    const cache = CacheService.getScriptCache();
+    const kId = Workday_cacheKeyId_(wd.workerLogin);
+    const kObj = Workday_cacheKeyObj_(wd.workerLogin);
+
+    if (st === 'RUNNING' || st === 'ENDING') {
+      cache.put(kId, String(wd.workdayId), CONFIG.SESSION_TTL_SECONDS);
+      // Object is cached shorter to reduce the chance of stale state.
+      cache.put(kObj, JSON.stringify(wd), 600);
+    } else {
+      cache.remove(kId);
+      cache.remove(kObj);
+    }
+  } catch (_) {}
+}

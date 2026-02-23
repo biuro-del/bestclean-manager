@@ -1,0 +1,973 @@
+<script>
+(function(){
+  const $ = (sel)=>document.querySelector(sel);
+
+  const sumState = { total:0, page:1, pageSize:50, totalPages:1, current:null, lastByDate:{} };
+  let ctx = { worker:null, canEdit:false, portalRole:"" };
+
+  function token(){
+    return (window.FIDO_AUTH && window.FIDO_AUTH.getToken) ? window.FIDO_AUTH.getToken() : "";
+  }
+
+  
+  function sanitizeFilePart(s){
+    const v = String(s || "").trim();
+    if (!v) return "";
+    try{
+      return v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w]+/g, "_").replace(/^_+|_+$/g, "");
+    } catch(e){
+      return v.replace(/[^\w]+/g, "_").replace(/^_+|_+$/g, "");
+    }
+  }
+
+  
+  function setEwidencjaBtnState(isBusy){
+    const btn = $("#wtdDownloadEwidencjaBtn");
+    if (!btn) return;
+
+    // zapamiętaj ustawienia domyślne przy pierwszym użyciu
+    if (!btn.dataset || !btn.dataset._origText){
+      btn.dataset._origText = btn.textContent || "Pobierz ewidencję pracy";
+      btn.dataset._origBg = btn.style.backgroundColor || "";
+      btn.dataset._origColor = btn.style.color || "";
+      btn.dataset._origBorder = btn.style.borderColor || "";
+    }
+
+    if (isBusy){
+      btn.disabled = true;
+      btn.textContent = "Pobieranie...";
+      btn.style.backgroundColor = "#16a34a";
+      btn.style.borderColor = "#16a34a";
+      btn.style.color = "#ffffff";
+    } else {
+      btn.disabled = false;
+      btn.textContent = btn.dataset._origText || "Pobierz ewidencję pracy";
+      btn.style.backgroundColor = btn.dataset._origBg || "";
+      btn.style.borderColor = btn.dataset._origBorder || "";
+      btn.style.color = btn.dataset._origColor || "";
+    }
+  }
+
+function downloadEwidencjaPdf(){
+    setEwidencjaBtnState(true);
+
+    const month = String((($("#wtdMonthPick")||{}).value) || "").trim();
+    const workerName = String((ctx.worker && ctx.worker.name) ? ctx.worker.name : (getRoute().workerName || "")).trim();
+    const workerType = String((ctx.worker && ctx.worker.type) ? ctx.worker.type : "").trim();
+
+    google.script.run
+      .withSuccessHandler((res)=>{
+        try{
+          const b64 = (res && res.b64) ? String(res.b64) : "";
+          let fileName = (res && res.fileName) ? String(res.fileName) : "";
+          if (!fileName){
+            const m = month || "";
+            let mmYyyy = "";
+            if (/^\d{4}-\d{2}$/.test(m)) mmYyyy = m.slice(5,7) + "_" + m.slice(0,4);
+            else mmYyyy = sanitizeFilePart(m || "miesiac");
+            fileName = "Ewidencja_pracy_" + mmYyyy + "_" + sanitizeFilePart(workerName) + ".pdf";
+          }
+          if (!b64) throw new Error("Brak danych PDF.");
+
+          const bin = atob(b64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+
+          const blob = new Blob([bytes], {type:"application/pdf"});
+          const url = URL.createObjectURL(blob);
+
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = fileName;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+
+          setTimeout(()=>URL.revokeObjectURL(url), 1500);
+        } catch(e){
+          alert("Błąd pobierania PDF: " + (e && e.message ? e.message : String(e)));
+        } finally{
+          setEwidencjaBtnState(false);
+        }
+      })
+      .withFailureHandler((err)=>{
+        const msg = (err && err.message) ? err.message : String(err || "Błąd");
+        alert("Błąd generowania PDF: " + msg);
+        setEwidencjaBtnState(false);
+      })
+      .api_wt_exportEwidencjaPdf({
+        token: token(),
+        workerName: workerName,
+        workerType: workerType,
+        month: month
+      });
+  }
+
+function getRoute(){
+    try{
+      const u = new URL(window.location.href);
+      return (u.searchParams.get('route') || '').trim();
+    } catch(e){
+      return '';
+    }
+  }
+
+  function forceShowRoute(route){
+    const targetId = 'view-' + route;
+    const target = document.getElementById(targetId);
+    if (!target) return;
+
+    const main = document.querySelector('main.main');
+    if (!main) return;
+
+    const sections = main.querySelectorAll('section[id^="view-"]');
+    sections.forEach(sec => {
+      if (sec.id === targetId) sec.style.display = '';
+      else if (sec.id !== 'view-placeholder') sec.style.display = 'none';
+    });
+  }
+
+  function userName(){
+    return (window.FIDO_AUTH && typeof window.FIDO_AUTH.getUserName === "function")
+      ? window.FIDO_AUTH.getUserName()
+      : "Użytkownik";
+  }
+
+  function escapeHtml(s){
+    return String(s ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
+  }
+
+  function pad2(n){ return String(n).padStart(2,"0"); }
+
+  // Bezpieczne formatowanie yyyy-mm-dd -> dd.mm.yyyy
+  function fmtYmd(ymd){
+    const s = String(ymd || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "—";
+    return `${s.slice(8,10)}.${s.slice(5,7)}.${s.slice(0,4)}`;
+  }
+
+  function isoDateLocal(d){
+    return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  }
+
+  function fmtLocalDate(iso){
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (!isFinite(d.getTime())) return "—";
+    return `${pad2(d.getDate())}.${pad2(d.getMonth()+1)}.${d.getFullYear()}`;
+  }
+
+  function fmtLocalTime(iso){
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (!isFinite(d.getTime())) return "—";
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  }
+
+  function secToHMS(sec){
+    sec = Number(sec || 0);
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    const h = Math.floor(sec/3600);
+    const m = Math.floor((sec%3600)/60);
+    const s = Math.floor(sec%60);
+    return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+  }
+
+  function hmsToSec(hms){
+    const m = String(hms || "").trim().match(/^(\d{1,3}):([0-5]\d):([0-5]\d)$/);
+    if (!m) return 0;
+    const h = parseInt(m[1],10) || 0;
+    const mi = parseInt(m[2],10) || 0;
+    const s = parseInt(m[3],10) || 0;
+    return Math.max(0, (h*3600) + (mi*60) + s);
+  }
+
+  function isoToLocalDateTimeInput(iso){
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (!isFinite(d.getTime())) return "";
+    return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  }
+
+  function localDateTimeInputToIso(val){
+    const v = String(val || "").trim();
+    if (!v) return "";
+    const d = new Date(v);
+    if (!isFinite(d.getTime())) return "";
+    return d.toISOString();
+  }
+
+  function isoToDateInput(iso){
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (!isFinite(d.getTime())) return "";
+    return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  }
+
+  function isoToTimeInput(iso){
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (!isFinite(d.getTime())) return "";
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  }
+
+  function localDateAndTimeToIso(dateRaw, timeRaw){
+    // Akceptuje: data yyyy-mm-dd lub dd.mm.yyyy (także z odstępami)
+    // Akceptuje: czas HH:MM lub HH:MM:SS (także z odstępami)
+    let d = String(dateRaw || "").trim();
+    let t = String(timeRaw || "").trim();
+
+    // data: usuń spacje
+    d = d.replace(/\s+/g, "");
+    // dd.mm.yyyy / dd-mm-yyyy / dd/mm/yyyy -> yyyy-mm-dd
+    const m = d.match(/^(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})$/);
+    if (m){
+      const dd = String(m[1]).padStart(2,"0");
+      const mm = String(m[2]).padStart(2,"0");
+      const yy = String(m[3]);
+      d = `${yy}-${mm}-${dd}`;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return "";
+
+    // czas: usuń spacje
+    t = t.replace(/\s+/g, "");
+    // HH:MM -> HH:MM:00
+    if (/^\d{2}:\d{2}$/.test(t)) t = t + ":00";
+    // HH:MM:SS(.sss) -> HH:MM:SS
+    const mt = t.match(/^(\d{2}):(\d{2}):(\d{2})/);
+    if (mt) t = `${mt[1]}:${mt[2]}:${mt[3]}`;
+    if (!/^\d{2}:\d{2}:\d{2}$/.test(t)) return "";
+
+    const dt = new Date(`${d}T${t}`);
+    if (!isFinite(dt.getTime())) return "";
+    return dt.toISOString();
+  }
+
+
+  function getParams(){
+    const sp = new URLSearchParams(window.location.search || "");
+    return {
+      route: sp.get("route") || "",
+      workerId: sp.get("workerId") || "",
+      workerName: sp.get("workerName") || ""
+    };
+  }
+
+  function setDefaultDatesIfEmpty(){
+    const fromEl = $("#wtdFrom");
+    const toEl = $("#wtdTo");
+    if (!fromEl || !toEl) return;
+
+    // Nie nadpisuj, jeśli user już coś ustawił
+    if ((fromEl.value || "").trim() || (toEl.value || "").trim()) return;
+
+    const today = new Date();
+    const first = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    fromEl.value = isoDateLocal(first);   // 1 dzień bieżącego miesiąca
+    toEl.value = isoDateLocal(today);     // dzisiejszy dzień
+  }
+
+  function updatePagerUI(prefix, state, shown){
+    const total = state.total || 0;
+    const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
+    state.totalPages = totalPages;
+
+    if (state.page > totalPages) state.page = totalPages;
+    if (state.page < 1) state.page = 1;
+
+    const pageLabel = $("#" + prefix + "PageLabel");
+    if (pageLabel) pageLabel.textContent = `Strona ${state.page} / ${totalPages}`;
+
+    const shownLabel = $("#" + prefix + "ShownLabel");
+    if (shownLabel){
+      shownLabel.textContent = `Wyświetlono: ${shown} · Wszystkie: ${total} · Na stronę: ${state.pageSize}`;
+    }
+
+    const prevBtn = $("#" + prefix + "PrevBtn");
+    const nextBtn = $("#" + prefix + "NextBtn");
+    if (prevBtn) prevBtn.disabled = (state.page <= 1);
+    if (nextBtn) nextBtn.disabled = (state.page >= totalPages);
+  }
+
+  function readDayFilters(){
+    return {
+      token: token(),
+      workerName: (ctx.worker && ctx.worker.name) ? ctx.worker.name : "",
+      fromIso: ($("#wtdFrom").value || "").trim(),
+      toIso: ($("#wtdTo").value || "").trim(),
+      page: sumState.page,
+      pageSize: sumState.pageSize
+    };
+  }
+
+  // ------------------- Month picker (Suma miesiąca) -------------------
+  const MONTH_NAMES_PL = [
+    "styczeń","luty","marzec","kwiecień","maj","czerwiec",
+    "lipiec","sierpień","wrzesień","październik","listopad","grudzień"
+  ];
+
+  function _monthKey_(y, m){
+    return `${y}-${pad2(m)}`; // m: 1..12
+  }
+
+  function _monthRange_(ym){
+    // ym = YYYY-MM
+    const y = parseInt(String(ym || '').slice(0,4), 10);
+    const m = parseInt(String(ym || '').slice(5,7), 10);
+    if (!isFinite(y) || !isFinite(m) || m < 1 || m > 12) return { from: "", to: "" };
+
+    const from = `${_monthKey_(y, m)}-01`;
+
+    const today = new Date();
+    const isCurrent = (today.getFullYear() === y) && ((today.getMonth()+1) === m);
+
+    let to = "";
+    if (isCurrent){
+      // Bieżący miesiąc: zakres do dzisiejszego dnia
+      to = `${_monthKey_(y, m)}-${pad2(today.getDate())}`;
+    } else {
+      // Inne miesiące: pełny miesiąc
+      const last = new Date(y, m, 0); // ostatni dzień miesiąca
+      to = `${_monthKey_(y, m)}-${pad2(last.getDate())}`;
+    }
+
+    return { from, to };
+  }
+
+  function _ymFromYmd_(ymd){
+    const s = String(ymd || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
+    return s.slice(0,7);
+  }
+
+  function fillMonthPick(){
+    const sel = $("#wtdMonthPick");
+    if (!sel) return;
+
+    const toVal = (($("#wtdTo")||{}).value || "").trim();
+    const ym0 = _ymFromYmd_(toVal);
+    const base = ym0 ? new Date(`${ym0}-01T00:00:00`) : new Date();
+    const y = base.getFullYear();
+
+    sel.innerHTML = "";
+    for (let m = 1; m <= 12; m++){
+      const ym = _monthKey_(y, m);
+      const opt = document.createElement('option');
+      opt.value = ym;
+      opt.textContent = `${MONTH_NAMES_PL[m-1]} ${y}`;
+      sel.appendChild(opt);
+    }
+
+    // ustaw selektor na miesiąc z "Do" albo na bieżący
+    const ymNow = _monthKey_(new Date().getFullYear(), new Date().getMonth()+1);
+    sel.value = ym0 || ymNow;
+  }
+
+  function applyMonthPick(ym){
+    const selVal = String(ym || '').trim();
+    if (!/^[0-9]{4}-[0-9]{2}$/.test(selVal)) return;
+    const r = _monthRange_(selVal);
+    if (!r.from || !r.to) return;
+
+    const fromEl = $("#wtdFrom");
+    const toEl = $("#wtdTo");
+    if (fromEl) fromEl.value = r.from;
+    if (toEl) toEl.value = r.to;
+
+    sumState.page = 1;
+    fetchDays();
+  }
+
+  function updateMonthSummary(res){
+    if (!res) return;
+
+    const monthLabel = res.monthLabel || "";
+    const monthFrom = res.monthFrom || "";
+    const monthTo = res.monthTo || "";
+    const work = Number(res.monthWorkSec || 0);
+    const brk = Number(res.monthBreakSec || 0);
+    const net = (typeof res.monthNetSec === "number") ? Number(res.monthNetSec) : Math.max(0, work - brk);
+
+    const elLabel = $("#wtdMonthLabel");
+    const elRange = $("#wtdMonthRange");
+    const elWork = $("#wtdMonthWork");
+    const elBreak = $("#wtdMonthBreak");
+    const elNet = $("#wtdMonthNet");
+
+    if (elLabel) elLabel.textContent = monthLabel || "—";
+    if (elRange){
+      if (monthFrom && monthTo) elRange.textContent = `${fmtYmd(monthFrom)} – ${fmtYmd(monthTo)}`;
+      else elRange.textContent = "—";
+    }
+    if (elWork) elWork.textContent = secToHMS(work);
+    if (elBreak) elBreak.textContent = secToHMS(brk);
+    if (elNet) elNet.textContent = secToHMS(net);
+
+    // zsynchronizuj select (jeśli backend zwraca monthLabel = YYYY-MM)
+    const sel = $("#wtdMonthPick");
+    if (sel && monthLabel && sel.value !== monthLabel) {
+      try { sel.value = monthLabel; } catch(e){}
+    }
+  }
+
+  // ------------------- Context (worker + permissions) -------------------
+  function loadContext(){
+    const p = getParams();
+    if (!p.workerId && !p.workerName){
+      $("#wtdSub").textContent = "Brak parametrów pracownika w URL.";
+      return;
+    }
+
+    google.script.run
+      .withSuccessHandler((res)=>{
+        ctx = res || ctx;
+        const w = ctx.worker || null;
+        const canEdit = !!ctx.canEdit;
+
+        $("#wtdTitle").textContent = w ? `Czas pracy — ${w.name}` : "Czas pracy — pracownik";
+
+        const typ = w ? (w.type || "—") : "—";
+        const role = ctx.portalRole || "";
+        $("#wtdSub").textContent = `Typ pracownika: ${typ} · Uprawnienia portalu: ${role} · Edycja: ${canEdit ? "TAK" : "NIE"}`;
+
+        
+        // przycisk "Dodaj zdarzenie" tylko dla ADMIN/Kierownik
+        const addBtn = $("#wtdAddDayBtn");
+        if (addBtn) addBtn.style.display = canEdit ? "" : "none";
+setDefaultDatesIfEmpty();
+        fetchDays();
+      })
+      .withFailureHandler((err)=>{
+        const msg = (err && err.message) ? err.message : String(err || "Błąd");
+        $("#wtdSub").textContent = "Błąd ładowania pracownika: " + msg;
+      })
+      .api_getWorkerTimeWorkerInfo({
+        token: token(),
+        workerId: p.workerId,
+        workerName: p.workerName
+      });
+  }
+
+  // ------------------- Days (Workday_Log) -------------------
+  function applyAlertClassToRow(rowEl, it){
+    if (!rowEl || !it) return;
+    rowEl.classList.remove('wt-alert-level-1','wt-alert-level-2');
+    const lvl = Number(it.alertLevel || 0);
+    const ack = !!it.alertAck;
+    if (ack) return;
+    if (lvl === 2) rowEl.classList.add('wt-alert-level-2');
+    else if (lvl === 1) rowEl.classList.add('wt-alert-level-1');
+  }
+
+  function renderDayRows(items){
+    const root = $("#wtdSumRows");
+    if (!root) return;
+    root.innerHTML = "";
+
+
+    // Ustal grid kolumn z CSS custom property, żeby nagłówek i wiersze zawsze były idealnie pod sobą
+    const table = document.querySelector("#view-workerTimeDetail .events-table");
+    const gridFromCss = table ? getComputedStyle(table).getPropertyValue("--wtd-grid").trim() : "";
+    const grid = gridFromCss || "var(--wtd-grid)";
+
+    // Dopnij to samo do nagłówka (czasem CSS ogólny nadpisuje kolumny dla .events-head)
+    const head = table ? table.querySelector(".events-head") : null;
+    if (head) head.style.gridTemplateColumns = grid;
+    if (!items || items.length === 0){
+      const empty = document.createElement("div");
+      empty.className = "events-row";
+      empty.style.gridTemplateColumns = grid;
+      empty.innerHTML = "<div>Brak wyników</div>" + "<div></div>".repeat(9);
+      root.appendChild(empty);
+      return;
+    }
+
+    for (const it of items){
+      const row = document.createElement("div");
+      row.className = "events-row";
+      row.style.gridTemplateColumns = grid;
+
+      applyAlertClassToRow(row, it);
+
+      // Data: preferuj dateKey z backendu (yyyy-mm-dd)
+      const dateText = it.dateKey ? fmtYmd(it.dateKey) : fmtLocalDate(it.startAt || it.endAt || "");
+
+      const canEdit = !!ctx.canEdit;
+      const btnHtml = canEdit ? '<button class="btn2" type="button">Edytuj</button>' : '<span class="muted">—</span>';
+
+      row.innerHTML = `
+        <div class="mono">${escapeHtml(dateText)}</div>
+        <div>${escapeHtml(it.workerName || (ctx.worker && ctx.worker.name) || "—")}</div>
+        <div>${escapeHtml((ctx.worker && ctx.worker.type) ? ctx.worker.type : (it.workerType || "—"))}</div>
+        <div class="mono time-start">${escapeHtml(fmtLocalTime(it.startAt))}</div>
+        <div class="mono time-stop">${escapeHtml(fmtLocalTime(it.endAt))}</div>
+        <div class="mono work-brutto">${escapeHtml(secToHMS(it.workSec || 0))}</div>
+        <div class="mono work-bold">${escapeHtml(secToHMS(it.netSec || 0))}</div>
+        <div class="mono time-break">${escapeHtml(secToHMS(it.breakSec || 0))}</div>
+        <div>${escapeHtml(it.updatedBy || "—")}</div>
+        <div>${btnHtml}</div>
+      `;
+
+      const editBtn = row.querySelector('.btn2');
+      if (editBtn) editBtn.addEventListener('click', ()=>openDayEditor(it));
+
+      root.appendChild(row);
+    }
+  }
+
+  function fetchDays(){
+    if (!ctx.worker) return;
+    const params = readDayFilters();
+
+    google.script.run
+      .withSuccessHandler((res)=>{
+        updateMonthSummary(res);
+
+        const items = (res && res.items) ? res.items : [];
+
+        // mapa: dateKey -> item (do auto-uzupełniania WorkdayID przy dodawaniu zdarzenia)
+        try{
+          const map = {};
+          items.forEach(it=>{ if (it && it.dateKey) map[String(it.dateKey)] = it; });
+          sumState.lastByDate = map;
+        }catch(e){ sumState.lastByDate = {}; }
+
+        sumState.total = (res && typeof res.total === "number") ? res.total : items.length;
+
+        renderDayRows(items);
+        updatePagerUI("wtdSum", sumState, items.length);
+      })
+      .withFailureHandler((err)=>{
+        const msg = (err && err.message) ? err.message : String(err || "Błąd");
+        alert("Błąd pobierania dni pracy: " + msg);
+      })
+      .api_wt_listDays(params);
+  }
+
+  // ------------------- Day editor -------------------
+  function openDayEditor(it){
+    if (!ctx.canEdit){
+      alert("Brak uprawnień do edycji (tylko ADMIN/Kierownik).");
+      return;
+    }
+
+    // logo w modalu (żeby nie było "broken image")
+    const logo = $("#wtdLogo");
+    if (logo && window.CONFIG && window.CONFIG.logoUrl) logo.src = window.CONFIG.logoUrl;
+
+    sumState.current = it;
+    // Edycja: data + start(czas) + koniec(czas)
+    const startIso0 = String(it.startAt || "");
+    const endIso0 = String(it.endAt || "");
+    const date0 = (it.dateKey && /^\d{4}-\d{2}-\d{2}$/.test(it.dateKey))
+      ? it.dateKey
+      : (isoToDateInput(startIso0) || isoToDateInput(endIso0));
+
+    const st0 = isoToTimeInput(startIso0);
+    const en0 = isoToTimeInput(endIso0);
+
+    const dateEl = $("#wtdDayDateInput");
+    const stEl = $("#wtdDayStartTime");
+    const enEl = $("#wtdDayEndTime");
+
+    if (dateEl) dateEl.value = date0 || "";
+    if (stEl) stEl.value = st0 || "";
+    if (enEl) enEl.value = en0 || "";
+
+    // ACK przy przekroczeniu normy
+    const ackBtn = $('#wtdDayAckBtn');
+    if (ackBtn){
+      const lvl = Number(it.alertLevel || 0);
+      const ack = !!it.alertAck;
+      ackBtn.style.display = (lvl > 0 && !ack) ? 'inline-flex' : 'none';
+      ackBtn.disabled = false;
+      ackBtn.textContent = 'Zatwierdź przekroczenie normy';
+    }
+
+    $("#wtdDayWork").value = secToHMS(it.workSec || 0);
+    $("#wtdDayComment") && ($("#wtdDayComment").value = String(it.comment || ""));
+    $("#wtdDayTitle") && ($("#wtdDayTitle").textContent = "Edycja dnia pracy");
+
+    try{ updateWorkPreviewFromInputs(); }catch(e){}
+
+    const ov = $("#wtdDayEditorOverlay");
+    if (ov) ov.style.display = "flex";
+  }
+
+
+  function openDayEditorNew(){
+    if (!ctx.canEdit){
+      alert("Brak uprawnień do edycji (tylko ADMIN/Kierownik).");
+      return;
+    }
+
+    const logo = $("#wtdLogo");
+    if (logo && window.CONFIG && window.CONFIG.logoUrl) logo.src = window.CONFIG.logoUrl;
+
+    // tryb dodawania — brak workdayId
+    sumState.current = { workdayId:"" };
+
+    $("#wtdDayTitle") && ($("#wtdDayTitle").textContent = "Dodaj dzień pracy");
+
+    // domyślna data: z filtra "Do" albo dziś
+    const today = new Date();
+    const d0 = (($("#wtdTo")||{}).value || isoDateLocal(today));
+    const dateEl = $("#wtdDayDateInput");
+    const stEl = $("#wtdDayStartTime");
+    const enEl = $("#wtdDayEndTime");
+
+    if (dateEl) dateEl.value = d0 || "";
+    if (stEl) stEl.value = "";
+    if (enEl) enEl.value = "";
+
+    $("#wtdDayWork").value = "00:00:00";
+    $("#wtdDayComment") && ($("#wtdDayComment").value = "");
+
+    // ACK nie dotyczy przy dodawaniu
+    const ackBtn = $('#wtdDayAckBtn');
+    if (ackBtn) ackBtn.style.display = 'none';
+
+    const ov = $("#wtdDayEditorOverlay");
+    if (ov) ov.style.display = "flex";
+  }
+
+  function closeDayEditor(){
+    const ov = $("#wtdDayEditorOverlay");
+    if (ov) ov.style.display = "none";
+    sumState.current = null;
+  }
+
+  function updateWorkPreviewFromInputs(){
+    const dateRaw = (($("#wtdDayDateInput")||{}).value || "").trim();
+    const stRaw = (($("#wtdDayStartTime")||{}).value || "").trim();
+    const enRaw = (($("#wtdDayEndTime")||{}).value || "").trim();
+    const startIso = localDateAndTimeToIso(dateRaw, stRaw);
+    const endIso = localDateAndTimeToIso(dateRaw, enRaw);
+    if (!startIso || !endIso){
+      $("#wtdDayWork").value = "00:00:00";
+      return;
+    }
+    const s = new Date(startIso).getTime();
+    const e = new Date(endIso).getTime();
+    const sec = Math.max(0, Math.round((e - s) / 1000));
+    $("#wtdDayWork").value = secToHMS(sec);
+  }
+
+  function ackCurrentAlert(){
+    if (!sumState.current || !sumState.current.workdayId){
+      alert('Brak WorkdayID — nie mogę zatwierdzić.');
+      return;
+    }
+    const btn = $('#wtdDayAckBtn');
+    if (btn){ btn.disabled = true; btn.textContent = 'Zatwierdzanie...'; }
+    google.script.run
+      .withSuccessHandler(()=>{
+        if (btn){ btn.disabled = false; btn.textContent = 'Zatwierdź przekroczenie normy'; btn.style.display='none'; }
+        fetchDays();
+      })
+      .withFailureHandler((err)=>{
+        if (btn){ btn.disabled = false; btn.textContent = 'Zatwierdź przekroczenie normy'; }
+        const msg = (err && err.message) ? err.message : String(err || 'Błąd');
+        alert('Błąd zatwierdzania: ' + msg);
+      })
+      .api_wt_ackAlert({ token: token(), workdayId: String(sumState.current.workdayId) });
+  }
+
+
+  function saveDayEditor(){
+    const dateRaw = (($("#wtdDayDateInput")||{}).value || "").trim();
+    const stRaw = (($("#wtdDayStartTime")||{}).value || "").trim();
+    const enRaw = (($("#wtdDayEndTime")||{}).value || "").trim();
+    const comment = String((($("#wtdDayComment")||{}).value) || "").trim();
+
+    if (!dateRaw || !stRaw || !enRaw){
+      alert("Uzupełnij Datę, Start i Koniec.");
+      return;
+    }
+
+    const startIso = localDateAndTimeToIso(dateRaw, stRaw);
+    const endIso = localDateAndTimeToIso(dateRaw, enRaw);
+    if (!startIso || !endIso){
+      alert("Niepoprawna Data/Start/Koniec.");
+      return;
+    }
+
+    const btn = $("#wtdDaySaveBtn");
+    if (btn){ btn.disabled = true; btn.textContent = "Zapisywanie..."; }
+
+    const isUpdate = !!(sumState.current && String(sumState.current.workdayId || "").trim());
+    const common = { token: token(), editorName: userName(), startAt: startIso, endAt: endIso, comment: comment };
+
+    if (isUpdate){
+      const payload = Object.assign({}, common, { workdayId: String(sumState.current.workdayId) });
+
+      google.script.run
+        .withSuccessHandler(()=>{
+          if (btn){ btn.disabled = false; btn.textContent = "Zapisz"; }
+          closeDayEditor();
+          fetchDays();
+        })
+        .withFailureHandler((err)=>{
+          if (btn){ btn.disabled = false; btn.textContent = "Zapisz"; }
+          const msg = (err && err.message) ? err.message : String(err || "Błąd");
+          alert("Błąd zapisu dnia pracy: " + msg);
+        })
+        .api_wt_updateDay(payload);
+
+    } else {
+      const workerName = (ctx && ctx.worker && ctx.worker.name) ? String(ctx.worker.name).trim() : "";
+      if (!workerName){
+        if (btn){ btn.disabled = false; btn.textContent = "Zapisz"; }
+        alert("Brak workerName w kontekście — odśwież stronę.");
+        return;
+      }
+
+      const payload = Object.assign({}, common, { workerName: workerName });
+
+      google.script.run
+        .withSuccessHandler(()=>{
+          if (btn){ btn.disabled = false; btn.textContent = "Zapisz"; }
+          closeDayEditor();
+          fetchDays();
+        })
+        .withFailureHandler((err)=>{
+          if (btn){ btn.disabled = false; btn.textContent = "Zapisz"; }
+          const msg = (err && err.message) ? err.message : String(err || "Błąd");
+          alert("Błąd dodawania dnia pracy: " + msg);
+        })
+        .api_wt_createDay(payload);
+    }
+  }
+
+
+
+  
+  // ------------------- Event (Zdarzenie) — add -------------------
+  function _setEventStatusStyle_(){
+    const sel = $("#wtdEvStatus");
+    if (!sel) return;
+    const v = String(sel.value || "").trim().toUpperCase();
+    // zgodnie z ustaleniem: CLOSED = czerwone tło, RUNNING = zielone tło
+    if (v === "CLOSED"){
+      sel.style.backgroundColor = "rgba(220,38,38,0.14)";
+      sel.style.borderColor = "rgba(220,38,38,0.35)";
+      sel.style.color = "#7f1d1d";
+      sel.style.fontWeight = "900";
+    } else {
+      sel.style.backgroundColor = "rgba(22,163,74,0.14)";
+      sel.style.borderColor = "rgba(22,163,74,0.35)";
+      sel.style.color = "#065f46";
+      sel.style.fontWeight = "900";
+    }
+  }
+
+  function openEventEditor(pref){
+    if (!ctx.canEdit){
+      alert("Brak uprawnień do dodawania zdarzeń (tylko ADMIN/Kierownik).");
+      return;
+    }
+
+    // logo w modalu
+    const logo = $("#wtdEvLogo");
+    if (logo && window.CONFIG && window.CONFIG.logoUrl) logo.src = window.CONFIG.logoUrl;
+
+    // meta
+    const wName = (ctx.worker && ctx.worker.name) ? ctx.worker.name : "";
+    $("#wtdEvMeta").textContent = wName ? ("Pracownik: " + wName) : "—";
+
+    // pref: { dateKey, workdayId }
+    const today = new Date();
+    const d0 = (pref && pref.dateKey) ? String(pref.dateKey) : (($("#wtdTo")||{}).value || isoDateLocal(today));
+    const dateEl = $("#wtdEvDate");
+    if (dateEl) dateEl.value = d0;
+
+    // workdayId: z preferencji / z mapy po dacie / puste
+    let wd = (pref && pref.workdayId) ? String(pref.workdayId) : "";
+    if (!wd){
+      const it = sumState.lastByDate && sumState.lastByDate[d0] ? sumState.lastByDate[d0] : null;
+      if (it && it.workdayId) wd = String(it.workdayId);
+    }
+    $("#wtdEvWorkdayId").value = wd || "";
+
+    // czasy / status
+    $("#wtdEvStart").value = "";
+    $("#wtdEvEnd").value = "";
+    $("#wtdEvStatus").value = "RUNNING";
+    _setEventStatusStyle_();
+
+    // pola tekstowe
+    $("#wtdEvRoomId").value = "";
+    $("#wtdEvZone").value = "";
+    $("#wtdEvRoomName").value = "";
+    $("#wtdEvComment").value = "";
+
+    const ov = $("#wtdEventEditorOverlay");
+    if (ov) ov.style.display = "flex";
+  }
+
+  function closeEventEditor(){
+    const ov = $("#wtdEventEditorOverlay");
+    if (ov) ov.style.display = "none";
+  }
+
+  function saveEventEditor(){
+    const dateRaw = (($("#wtdEvDate")||{}).value || "").trim();
+    const stRaw = (($("#wtdEvStart")||{}).value || "").trim();
+    const enRaw = (($("#wtdEvEnd")||{}).value || "").trim();
+    const status = String((($("#wtdEvStatus")||{}).value) || "").trim().toUpperCase() || "RUNNING";
+
+    const roomId = String((($("#wtdEvRoomId")||{}).value) || "").trim();
+    const strefa = String((($("#wtdEvZone")||{}).value) || "").trim();
+    const pomieszczenie = String((($("#wtdEvRoomName")||{}).value) || "").trim();
+    const comment = String((($("#wtdEvComment")||{}).value) || "").trim();
+    const workdayId = String((($("#wtdEvWorkdayId")||{}).value) || "").trim();
+
+    if (!dateRaw || !stRaw){
+      alert("Uzupełnij datę i start.");
+      return;
+    }
+
+    const startIso = localDateAndTimeToIso(dateRaw, stRaw);
+    if (!startIso){
+      alert("Niepoprawna data/start.");
+      return;
+    }
+
+    let endIso = "";
+    if (enRaw){
+      endIso = localDateAndTimeToIso(dateRaw, enRaw);
+      if (!endIso){
+        alert("Niepoprawny stop.");
+        return;
+      }
+    }
+
+    if (status === "CLOSED" && !endIso){
+      alert("Dla statusu CLOSED musisz podać stop.");
+      return;
+    }
+
+    const payload = {
+      token: token(),
+      editorName: userName(),
+      workerName: (ctx.worker && ctx.worker.name) ? ctx.worker.name : "",
+      workdayId: workdayId,
+      roomId: roomId,
+      strefa: strefa,
+      pomieszczenie: pomieszczenie,
+      startAt: startIso,
+      endAt: endIso,
+      status: status,
+      comment: comment
+    };
+
+    const btn = $("#wtdEvSaveBtn");
+    if (btn){ btn.disabled = true; btn.textContent = "Zapisywanie..."; }
+
+    google.script.run
+      .withSuccessHandler((res)=>{
+        if (btn){ btn.disabled = false; btn.textContent = "Zapisz zdarzenie"; }
+        closeEventEditor();
+        alert("Zdarzenie dodane.");
+      })
+      .withFailureHandler((err)=>{
+        if (btn){ btn.disabled = false; btn.textContent = "Zapisz zdarzenie"; }
+        const msg = (err && err.message) ? err.message : String(err || "Błąd");
+        alert("Błąd dodawania zdarzenia: " + msg);
+      })
+      .api_createEvent(payload);
+  }
+
+// ------------------- Wiring / Module -------------------
+  let _bound = false;
+
+  function bindOnce(){
+    if (_bound) return;
+    if (!$("#wtdTitle")) return;
+
+    $("#wtdRefreshBtn") && $("#wtdRefreshBtn").addEventListener("click", ()=>{
+      sumState.page = 1;
+      fetchDays();
+    });
+
+    $("#wtdSearchBtn") && $("#wtdSearchBtn").addEventListener("click", ()=>{
+      sumState.page = 1;
+      fetchDays();
+    });
+
+    $("#wtdDownloadEwidencjaBtn") && $("#wtdDownloadEwidencjaBtn").addEventListener("click", downloadEwidencjaPdf);
+
+    $("#wtdAddDayBtn") && $("#wtdAddDayBtn").addEventListener("click", ()=>openDayEditorNew());
+
+
+
+    // wybór miesiąca (ustawia zakres dat + odświeża)
+    $("#wtdMonthPick") && $("#wtdMonthPick").addEventListener("change", (e)=>{
+      const v = (e && e.target) ? String(e.target.value || "").trim() : "";
+      applyMonthPick(v);
+    });
+
+    $("#wtdSumPrevBtn") && $("#wtdSumPrevBtn").addEventListener("click", ()=>{
+      sumState.page = Math.max(1, sumState.page - 1);
+      fetchDays();
+    });
+
+    $("#wtdSumNextBtn") && $("#wtdSumNextBtn").addEventListener("click", ()=>{
+      sumState.page = sumState.page + 1;
+      fetchDays();
+    });
+
+    $("#wtdDayEditorOverlay") && $("#wtdDayEditorOverlay").addEventListener("click", (e)=>{
+      if (e.target && e.target.id === "wtdDayEditorOverlay") closeDayEditor();
+    });
+
+    $("#wtdDayEditorClose") && $("#wtdDayEditorClose").addEventListener("click", closeDayEditor);
+    $("#wtdDayCancelBtn") && $("#wtdDayCancelBtn").addEventListener("click", closeDayEditor);
+    $('#wtdDayAckBtn') && $('#wtdDayAckBtn').addEventListener('click', ackCurrentAlert);
+    $("#wtdDaySaveBtn") && $("#wtdDaySaveBtn").addEventListener("click", saveDayEditor);
+
+    // Podgląd czasu pracy (bez przycisków)
+    const _bindPreview = (id)=>{
+      const el = $(id);
+      if (!el) return;
+      ["input","change","keyup"].forEach(ev=>el.addEventListener(ev, updateWorkPreviewFromInputs));
+    };
+    _bindPreview("#wtdDayDateInput");
+    _bindPreview("#wtdDayStartTime");
+    _bindPreview("#wtdDayEndTime");
+    _bound = true;
+  }
+
+  function init(){
+    bindOnce();
+
+    const r = getRoute();
+    if (r === "workerTimeDetail") forceShowRoute(r);
+
+    sumState.page = 1;
+    setDefaultDatesIfEmpty();
+    fillMonthPick();
+    loadContext();
+  }
+
+  window.WorkerTimeDetailModule = window.WorkerTimeDetailModule || {};
+  window.WorkerTimeDetailModule.init = init;
+
+  if (document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", ()=>{
+      const r = getRoute();
+      if (r === "workerTimeDetail") init();
+    });
+  } else {
+    const r = getRoute();
+    if (r === "workerTimeDetail") init();
+  }
+})();
+
+</script>

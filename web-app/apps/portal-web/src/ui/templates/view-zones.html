@@ -1,0 +1,133 @@
+<h1 class="welcome">Strefy</h1>
+<p class="subwelcome">Etap 3: podglÄ…d + edycja (Bâ€“E) + dodawanie nowej strefy z automatycznym numerem QR (A).</p>
+
+<div class="toolbar" aria-label="Filtry stref">
+  <div class="tool">
+    <label for="znQr">Numer QR</label>
+    <input id="znQr" type="text" placeholder="np. BC0001 lub 123" />
+  </div>
+
+  <div class="tool">
+    <label for="znClient">Klient</label>
+    <input id="znClient" type="text" placeholder="np. TS" />
+  </div>
+
+  <div class="tool">
+    <label for="znStrefa">Strefa</label>
+    <input id="znStrefa" type="text" placeholder="np. biuro" />
+  </div>
+
+  <div class="tool">
+    <label for="znLoc">Lokalizacja</label>
+    <input id="znLoc" type="text" placeholder="np. Biurowiec" />
+  </div>
+
+  <div class="tool">
+    <label for="znFunkcja">Funkcja</label>
+    <input id="znFunkcja" type="text" placeholder="np. Clean / START" />
+  </div>
+
+  <div class="tool">
+    <label for="znEditedBy">EdytowaĹ‚</label>
+    <input id="znEditedBy" type="text" placeholder="np. RafaĹ‚" />
+  </div>
+
+  <div class="tool" style="min-width:220px">
+    <label for="znQ">Szukaj</label>
+    <input id="znQ" type="text" placeholder="szukaj po tekĹ›cie..." />
+  </div>
+
+  <div class="tool-actions">
+    <button class="btn2" id="znAddBtn" type="button">Dodaj strefÄ™</button>
+    <button class="btn2" id="znResetBtn" type="button">OdĹ›wieĹĽ</button>
+    <button class="btn2 primary" id="znSearchBtn" type="button">Szukaj</button>
+  </div>
+</div>
+
+<div class="zones-table" aria-label="Tabela stref">
+  <div class="zones-head">
+    <div>QR</div>
+    <div>Klient</div>
+    <div>Strefa</div>
+    <div>Lokalizacja</div>
+    <div>Funkcja</div>
+    <div>Data</div>
+    <div>EdytowaĹ‚</div>
+    <div></div>
+  </div>
+
+  <div id="znRows"></div>
+
+    <div class="pager">
+    <div class="pager-left">
+      <span class="pager-label" id="znPageLabel">Strona 1 / 1</span>
+      <span id="znShownLabel">Wyświetlono: —</span>
+    </div>
+    <div class="pager-right">
+      <button class="btn2 pager-btn" id="znPrevBtn" type="button">←</button>
+      <button class="btn2 pager-btn" id="znNextBtn" type="button">→</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="znEditorOverlay" aria-label="Edytuj strefÄ™" role="dialog" aria-modal="true">
+  <div class="modal">
+    <div class="logo-block" style="display:inline-flex">
+      <img id="znLogo" alt="FIDO iClean" style="height:42px;width:auto;" />
+    </div>
+
+    <h3>Edytuj / dodaj strefÄ™</h3>
+    <p class="meta">
+      QR: <span class="mono" id="znQrLabel">â€”</span>
+      â€˘ Wiersz: <span class="mono" id="znRowNumberLabel">â€”</span>
+    </p>
+
+    <div class="grid">
+      <div class="field">
+        <label for="znEditQr">Numer QR (A) â€” blokada</label>
+        <input id="znEditQr" type="text" disabled />
+      </div>
+
+      <div class="field">
+        <label for="znEditClient">Klient (B)</label>
+        <input id="znEditClient" type="text" maxlength="200" />
+      </div>
+
+      <div class="field">
+        <label for="znEditStrefa">Strefa (C)</label>
+        <input id="znEditStrefa" type="text" maxlength="300" />
+      </div>
+
+      <div class="field">
+        <label for="znEditLoc">Lokalizacja (G)</label>
+        <input id="znEditLoc" type="text" maxlength="300" />
+      </div>
+
+      <div class="field">
+        <label for="znEditFunkcja">Funkcja (D)</label>
+        <input id="znEditFunkcja" type="text" maxlength="150" />
+      </div>
+
+      <div class="field">
+        <label for="znEditData">Data (F) â€” AUTO</label>
+        <input id="znEditData" type="text" disabled />
+      </div>
+
+      <div class="field">
+        <label for="znEditEdytowal">EdytowaĹ‚ (E) â€” AUTO</label>
+        <input id="znEditEdytowal" type="text" disabled />
+      </div>
+    </div>
+
+    <div class="row-actions">
+      <div class="left">
+        <button class="btn2 danger" id="znDeleteBtn" type="button" style="display:none;">UsuĹ„</button>
+      </div>
+      <div class="right">
+        <button class="btn2" id="znCancelBtn" type="button">Zamknij</button>
+        <button class="btn2 primary" id="znSaveBtn" type="button">Zapisz</button>
+      </div>
+    </div>
+  </div>
+</div>
+

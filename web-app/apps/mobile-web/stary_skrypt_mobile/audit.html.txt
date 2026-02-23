@@ -1,0 +1,235 @@
+<script>
+window.BC = window.BC || {};
+
+/**
+ * Audit (Coordinator) — logs ONLY to Coordinator_Log.
+ * Main worktime sheet (gid=629711994) remains CLEAN-only.
+ */
+BC.Audit = (function() {
+  const LS = { lastZone: 'bc_audit_last_zone' };
+
+  function nowIso(){ return new Date().toISOString(); }
+  function tzOff(){ return new Date().getTimezoneOffset(); }
+
+  function authPayload_(){
+    const token = (BC.Store && BC.Store.getToken) ? BC.Store.getToken() : '';
+    const deviceId = (BC.Store && BC.Store.getDeviceId) ? BC.Store.getDeviceId() : '';
+    return { token, deviceId };
+  }
+
+  async function api_(path, data, opts){
+    const o = opts || {};
+    try { if (o.loading && BC.UI && BC.UI.setLoading) BC.UI.setLoading(true, o.loadingText || 'Czekaj...'); } catch(_){}
+    try { return await BC.ApiClient.post(path, Object.assign({}, data||{}, authPayload_())); }
+    finally { try { if (o.loading && BC.UI && BC.UI.setLoading) BC.UI.setLoading(false); } catch(_){} }
+  }
+
+  function setTopBack_(fn){
+    try { if (BC.UI && BC.UI.setTopBackHandler) BC.UI.setTopBackHandler(fn); } catch(_){}
+    const b = document.getElementById('btnBack');
+    if (b) b.onclick = (typeof fn === 'function') ? fn : (()=>{});
+  }
+
+  function esc(s){ return String(s||'').replace(/[&<>"']/g, (c)=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;' }[c])); }
+
+  function storeSet(k,v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(_){} }
+  function storeGet(k){ try { return JSON.parse(localStorage.getItem(k)||'null'); } catch(_){ return null; } }
+  function storeDel(k){ try { localStorage.removeItem(k); } catch(_){} }
+
+  async function openScanner_(onResult){
+    return new Promise((resolve)=>{
+      if (!BC.QRScanner || typeof BC.QRScanner.open !== 'function') return resolve();
+      BC.QRScanner.open(async (code)=>{
+        try { await onResult(String(code||'').trim()); } catch(_){}
+        resolve();
+      }, { allowManual:false });
+    });
+  }
+
+  async function ensureWorkdayRunningToday_(){
+    const res = await api_('workday/active', Object.assign({}, authPayload_(), {
+      clientNow: nowIso(),
+      tzOffsetMinutes: tzOff()
+    }), { loading:true, loadingText:'Sprawdzam START...' });
+
+    const wd = res && res.workday ? res.workday : null;
+    const stale = !!(res && res.staleOpen);
+    const ok = !!(wd && String(wd.status||'').toUpperCase() === 'RUNNING');
+    return { ok, stale };
+  }
+
+  async function startWorkdayByScanStart_(){
+    await openScanner_(async (roomId)=>{
+      if (!roomId) return;
+      try{
+        const zr = await api_('zones/resolve', Object.assign({}, authPayload_(), { roomId }), { loading:true, loadingText:'Sprawdzam START...' });
+        const func = String((zr && zr.zone && zr.zone.func) || '').toUpperCase();
+        if (func !== 'START') {
+          await BC.UI.alert('To nie jest kod START obiektu.', { title:'Wykonaj audyt' });
+          return;
+        }
+
+        const out = await api_('workday/start', Object.assign({}, authPayload_(), {
+          roomId,
+          deviceId: (BC.Store && BC.Store.getDeviceId) ? BC.Store.getDeviceId() : '',
+          clientNow: nowIso(),
+          tzOffsetMinutes: tzOff(),
+          startEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
+        }), { loading:true, loadingText:'Rozpoczynam...' });
+
+        if (out && out.workday && BC.Store && BC.Store.setActiveWorkday) BC.Store.setActiveWorkday(out.workday);
+      }catch(e){
+        await BC.UI.alert(e.message || 'Nie udało się rozpocząć dnia pracy.', { title:'Wykonaj audyt' });
+      }
+    });
+  }
+
+  async function logZone_(zoneId, cleanVal, comment){
+    const meta = {
+      schema: 'BC.AUDIT.ZONE.v2',
+      zone: { qr: String(zoneId||'') },
+      answer: { clean: cleanVal },
+      comment: String(comment||'').slice(0,300),
+      deviceAt: nowIso()
+    };
+
+    await api_('coordinator/audit/log', Object.assign({}, authPayload_(), {
+      record: {
+        module: 'AUDIT',
+        functionName: 'ZONE_AUDIT',
+        sessionId: '',
+        startAt: '',
+        stopAt: nowIso(),
+        durationSec: 0,
+        auditDeductSec: 0,
+        note: String(comment||'').slice(0,300),
+        metaJson: JSON.stringify(meta)
+      }
+    }), { loading:true, loadingText:'Zapisuję...' });
+  }
+
+  function render1_(onBack){
+    const el = document.getElementById('viewCoordinator');
+    if (!el) return;
+    el.classList.remove('hidden');
+
+    el.innerHTML = `
+      <div class="col">
+        <div class="title">Wykonaj audyt</div>
+        <div class="box">
+          <div class="subtitle" style="margin:0 0 8px 0;font-weight:1000">Start audytu</div>
+          <div class="muted">Audyt jest dostępny tylko, gdy czas pracy jest RUNNING dzisiaj.</div>
+        </div>
+        <button id="btnAuditCheck" class="btn primary">Dalej</button>
+        <button id="btnAuditBack" class="btn secondary">Wróć</button>
+      </div>
+    `;
+
+    setTopBack_(onBack);
+    document.getElementById('btnAuditBack').onclick = onBack || (()=>{});
+
+    document.getElementById('btnAuditCheck').onclick = async () => {
+      const st = await ensureWorkdayRunningToday_();
+      if (st.ok) return render2_(onBack);
+
+      const msg = st.stale
+        ? 'Masz otwarty dzień z poprzedniego dnia. Zeskanuj START dzisiaj, aby rozpocząć pracę.'
+        : 'Brak START dzisiaj. Zeskanuj START obiektu, aby rozpocząć pracę.';
+      await BC.UI.alert(msg, { title:'Wykonaj audyt' });
+
+      await startWorkdayByScanStart_();
+      const st2 = await ensureWorkdayRunningToday_();
+      if (st2.ok) return render2_(onBack);
+      await BC.UI.alert('Nie wykryto RUNNING dzisiaj.', { title:'Wykonaj audyt' });
+    };
+  }
+
+  function render2_(onBack){
+    const el = document.getElementById('viewCoordinator');
+    if (!el) return;
+
+    el.innerHTML = `
+      <div class="col">
+        <div class="title">Wykonaj audyt</div>
+
+        <div class="box">
+          <div class="muted">Ekran 2</div>
+          <div style="font-weight:1000;margin-top:6px">Skanuj audytowaną strefę</div>
+        </div>
+
+        <button id="btnAuditScanZone" class="btn primary">Skanuj QR</button>
+        <button id="btnAuditEnd" class="btn secondary">Zakończ audyt</button>
+      </div>
+    `;
+
+    setTopBack_(onBack);
+
+    document.getElementById('btnAuditEnd').onclick = () => {
+      storeDel(LS.lastZone);
+      if (typeof onBack === 'function') onBack();
+    };
+
+    document.getElementById('btnAuditScanZone').onclick = async () => {
+      await openScanner_(async (zoneId)=>{
+        if (!zoneId) return;
+        storeSet(LS.lastZone, { zoneId });
+        render3_(onBack);
+      });
+    };
+  }
+
+  function render3_(onBack){
+    const el = document.getElementById('viewCoordinator');
+    if (!el) return;
+
+    const z = storeGet(LS.lastZone) || {};
+    const zoneId = String(z.zoneId||'');
+
+    el.innerHTML = `
+      <div class="col">
+        <div class="title">Audyt strefy</div>
+        <div class="muted">QR: <b>${esc(zoneId)}</b></div>
+
+        <div class="box">
+          <div style="font-weight:1000;margin-bottom:8px">Czy jest tu czysto?</div>
+          <div class="row" style="gap:10px;flex-wrap:wrap">
+            <button id="btnYes" class="btn secondary" style="flex:1;min-width:120px">TAK</button>
+            <button id="btnNo" class="btn secondary" style="flex:1;min-width:120px">NIE</button>
+          </div>
+        </div>
+
+        <div class="box">
+          <div class="muted" style="font-weight:900;margin-bottom:6px">Komentarz</div>
+          <textarea id="inpComment" class="textarea" maxlength="300" placeholder="Dodaj komentarz (opcjonalnie)..."></textarea>
+        </div>
+
+        <button id="btnSend" class="btn primary">Wyślij audyt</button>
+        <button id="btnBack3" class="btn secondary">Wróć</button>
+      </div>
+    `;
+
+    let cleanVal = null;
+    document.getElementById('btnYes').onclick = () => { cleanVal = 1; };
+    document.getElementById('btnNo').onclick = () => { cleanVal = 0; };
+
+    document.getElementById('btnBack3').onclick = () => render2_(onBack);
+
+    document.getElementById('btnSend').onclick = async () => {
+      if (cleanVal !== 0 && cleanVal !== 1) {
+        await BC.UI.alert('Wybierz TAK lub NIE.', { title:'Audyt strefy' });
+        return;
+      }
+      const comment = String((document.getElementById('inpComment')||{}).value || '').slice(0,300);
+      await logZone_(zoneId, cleanVal, comment);
+      storeDel(LS.lastZone);
+      render2_(onBack);
+    };
+  }
+
+  async function enter(onBack){
+    render1_(onBack);
+  }
+
+  return { enter };
+})();
+</script>

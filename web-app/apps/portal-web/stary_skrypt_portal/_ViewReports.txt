@@ -1,0 +1,167 @@
+<div class="reports-wrap">
+  <h1 class="welcome">Zestawienia</h1>
+  <p class="subwelcome">Wybierz moduł, a potem porównaj A vs B (tylko dane zakończone).</p>
+
+  <!-- HOME: 4 kafelki -->
+  <div id="repHome">
+    <div class="reports-grid">
+      <button class="report-tile" type="button" data-rep-open="clients">
+        <div class="rt-title">Klienci</div>
+        <div class="rt-sub">Porównania danych klientów (wkrótce).</div>
+      </button>
+
+      <button class="report-tile" type="button" data-rep-open="audits">
+        <div class="rt-title">Audyty</div>
+        <div class="rt-sub">Porównania audytów (wkrótce).</div>
+      </button>
+
+      <button class="report-tile" type="button" data-rep-open="workerTime">
+        <div class="rt-title">Czasy pracowników</div>
+        <div class="rt-sub">Porównania czasu pracy (wkrótce).</div>
+      </button>
+
+      <button class="report-tile" type="button" data-rep-open="events">
+        <div class="rt-title">Zdarzenia</div>
+        <div class="rt-sub">Porównaj klientów i strefy; czas liczony z zakończonych zdarzeń.</div>
+      </button>
+    </div>
+  </div>
+
+  <!-- BUILDER -->
+  <div id="repBuilder" style="display:none;">
+    <div class="reports-topbar">
+      <button class="reports-back" type="button" id="repBack">← Wróć</button>
+      <div>
+        <div class="welcome" style="margin:0" id="repTitle">Zestawienie</div>
+        <div class="subwelcome" style="margin:2px 0 0" id="repSubtitle">—</div>
+      </div>
+    </div>
+
+    <!-- EVENTS BUILDER -->
+    <div id="repEvents" style="display:none;">
+      <div class="rep-compare">
+        <div class="rep-panel">
+          <h3>Panel A</h3>
+
+          <div class="rep-row">
+            <label>Klient</label>
+            <select id="repA_client"></select>
+          </div>
+
+          <div class="rep-row">
+            <label>Strefa</label>
+            <select id="repA_zone"></select>
+          </div>
+
+          <div class="rep-row">
+            <label>Pracownik (opcjonalnie)</label>
+            <select id="repA_worker"></select>
+          </div>
+
+          <div class="rep-row">
+            <label>Zakres dat</label>
+            <div style="display:flex; gap:10px;">
+              <input id="repA_from" type="date" />
+              <input id="repA_to" type="date" />
+            </div>
+          </div>
+
+          <div class="rep-note">Czas liczony z <b>zakończonych</b> zdarzeń w wybranej strefie.</div>
+        </div>
+
+        <div class="rep-panel">
+          <h3>Panel B</h3>
+
+          <div class="rep-row">
+            <label>Klient</label>
+            <select id="repB_client"></select>
+          </div>
+
+          <div class="rep-row">
+            <label>Strefa</label>
+            <select id="repB_zone"></select>
+          </div>
+
+          <div class="rep-row">
+            <label>Pracownik (opcjonalnie)</label>
+            <select id="repB_worker"></select>
+          </div>
+
+          <div class="rep-row">
+            <label>Zakres dat</label>
+            <div style="display:flex; gap:10px;">
+              <input id="repB_from" type="date" />
+              <input id="repB_to" type="date" />
+            </div>
+          </div>
+
+          <div class="rep-note">Porównujesz A vs B niezależnie (inny klient / strefa / zakres).</div>
+        </div>
+      </div>
+
+      <div class="rep-tools">
+        <div class="rep-chip">
+          <input type="radio" name="repMode" id="repMode_single" value="single" checked />
+          <label for="repMode_single">Pojedyncze zdarzenia</label>
+        </div>
+        <div class="rep-chip">
+          <input type="radio" name="repMode" id="repMode_day" value="day" />
+          <label for="repMode_day">Łączone: dzień do dnia</label>
+        </div>
+      </div>
+
+      <div class="rep-tools">
+        <div class="rep-chip">
+          <input type="checkbox" id="repChk_time" checked />
+          <label for="repChk_time">Łączny czas</label>
+        </div>
+        <div class="rep-chip">
+          <input type="checkbox" id="repChk_count" checked />
+          <label for="repChk_count">Liczba zdarzeń</label>
+        </div>
+        <div class="rep-chip">
+          <input type="checkbox" id="repChk_avg" />
+          <label for="repChk_avg">Średni czas</label>
+        </div>
+        <div class="rep-chip">
+          <input type="checkbox" id="repChk_minmax" />
+          <label for="repChk_minmax">Min/Max</label>
+        </div>
+      </div>
+
+      <div class="rep-actions">
+        <button class="rep-btn primary" type="button" id="repRun">Porównaj</button>
+        <button class="rep-btn" type="button" id="repDownloadCsv" disabled>Pobierz CSV</button>
+      </div>
+
+      <div id="repStatus" class="rep-note" style="margin-top:2px;"></div>
+
+      <div id="repSummary" class="rep-summary" style="display:none;"></div>
+
+      <div id="repTableAWrap" class="rep-tablewrap" style="display:none; margin-top: 10px;">
+  <div class="rep-tabletitle">Tabela A</div>
+  <table class="rep-table" id="repTableA"></table>
+</div>
+
+<div id="repTableBWrap" class="rep-tablewrap" style="display:none; margin-top: 14px;">
+  <div class="rep-tabletitle">Tabela B</div>
+  <table class="rep-table" id="repTableB"></table>
+</div>
+
+<div id="repDiffWrap" class="rep-tablewrap" style="display:none; margin-top: 14px;">
+  <div class="rep-tabletitle">Różnice (B − A)</div>
+  <table class="rep-table" id="repTableDiff"></table>
+</div>
+    </div>
+
+    <!-- PLACEHOLDERS for other reports -->
+    <div id="repSoon" style="display:none;">
+      <div class="card">
+        <div class="card-body">
+          <h3 class="card-title">Wkrótce</h3>
+          <p class="card-text">Ten typ zestawienia dodamy w kolejnym kroku.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
