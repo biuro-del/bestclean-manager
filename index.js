@@ -20,15 +20,31 @@ const MIME_BY_EXT = {
   '.webp': 'image/webp',
 }
 
-function resolveSpaEntryFile() {
+function fileExists(filePath) {
+  try {
+    return fs.existsSync(filePath)
+  } catch {
+    return false
+  }
+}
+
+function normalizeTarget(value) {
+  const raw = String(value || '').trim().toLowerCase()
+  if (raw.startsWith('mobile')) return 'mobile'
+  if (raw.startsWith('portal')) return 'portal'
+  return ''
+}
+
+function resolveSpaEntryFile(target) {
+  const normalized = normalizeTarget(target)
   const candidates =
-    APP_TARGET === 'mobile'
-      ? ['index.html', 'mobile.html', path.join('apps', 'mobile-web', 'mobile.html')]
-      : ['index.html', path.join('apps', 'portal-web', 'index.html'), 'mobile.html', path.join('apps', 'mobile-web', 'mobile.html')]
+    normalized === 'mobile'
+      ? ['mobile.html', 'index.html', path.join('apps', 'mobile-web', 'mobile.html')]
+      : ['index.html', 'mobile.html', path.join('apps', 'portal-web', 'index.html')]
 
   for (const candidate of candidates) {
     const fullPath = path.join(DIST_DIR, candidate)
-    if (fs.existsSync(fullPath)) {
+    if (fileExists(fullPath)) {
       return fullPath
     }
   }
@@ -36,16 +52,28 @@ function resolveSpaEntryFile() {
   return path.join(DIST_DIR, 'index.html')
 }
 
-const SPA_ENTRY_FILE = resolveSpaEntryFile()
-const SPA_ENTRY_RELATIVE = path.relative(DIST_DIR, SPA_ENTRY_FILE).split(path.sep).join('/')
+function detectRequestTarget(requestUrl, hostHeader) {
+  const envTarget = normalizeTarget(APP_TARGET)
+  if (envTarget) return envTarget
 
-function safeResolveStaticPath(urlPathname) {
+  const pathname = String(requestUrl?.pathname || '').toLowerCase()
+  if (pathname.startsWith('/mobile')) return 'mobile'
+  if (pathname.startsWith('/portal')) return 'portal'
+
+  const host = String(hostHeader || '').toLowerCase()
+  if (host.includes('mobile')) return 'mobile'
+  if (host.includes('portal')) return 'portal'
+
+  return 'portal'
+}
+
+function safeResolveStaticPath(urlPathname, spaEntryRelative) {
   const decoded = decodeURIComponent(urlPathname || '/')
   const normalized = path.posix.normalize(decoded).replace(/^(\.\.(\/|\\|$))+/, '')
-  const relative = normalized === '/' ? `/${SPA_ENTRY_RELATIVE}` : normalized
+  const relative = normalized === '/' ? `/${spaEntryRelative}` : normalized
   const absolute = path.join(DIST_DIR, relative)
   if (!absolute.startsWith(DIST_DIR)) {
-    return SPA_ENTRY_FILE
+    return path.join(DIST_DIR, spaEntryRelative)
   }
   return absolute
 }
@@ -84,11 +112,14 @@ const server = http.createServer((req, res) => {
   }
 
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
-  const wantedFile = safeResolveStaticPath(requestUrl.pathname)
+  const requestTarget = detectRequestTarget(requestUrl, req.headers.host)
+  const spaEntryFile = resolveSpaEntryFile(requestTarget)
+  const spaEntryRelative = path.relative(DIST_DIR, spaEntryFile).split(path.sep).join('/')
+  const wantedFile = safeResolveStaticPath(requestUrl.pathname, spaEntryRelative)
   const wantsHtml = !path.extname(wantedFile)
 
   if (wantsHtml) {
-    sendFile(res, SPA_ENTRY_FILE)
+    sendFile(res, spaEntryFile)
     return
   }
 
@@ -97,7 +128,7 @@ const server = http.createServer((req, res) => {
       sendFile(res, wantedFile)
       return
     }
-    sendFile(res, SPA_ENTRY_FILE)
+    sendFile(res, spaEntryFile)
   })
 })
 

@@ -4,14 +4,26 @@ import react from '@vitejs/plugin-react'
 
 function normalizeTarget(value) {
   const raw = String(value || '').trim().toLowerCase()
+  if (raw.startsWith('both') || raw === 'all') return 'both'
   return raw.startsWith('mobile') ? 'mobile' : 'portal'
 }
 
-function resolveInputHtml(target) {
+function resolveInputHtmlMap(target) {
+  const portalInput = resolve(__dirname, 'index.html')
+  const mobileInput = resolve(__dirname, 'apps/mobile-web/mobile.html')
+
   if (target === 'mobile') {
-    return resolve(__dirname, 'apps/mobile-web/mobile.html')
+    return { mobile: mobileInput }
   }
-  return resolve(__dirname, 'index.html')
+
+  if (target === 'portal') {
+    return { portal: portalInput }
+  }
+
+  return {
+    portal: portalInput,
+    mobile: mobileInput,
+  }
 }
 
 export default defineConfig(({ mode }) => {
@@ -23,7 +35,7 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       emptyOutDir: true,
       rollupOptions: {
-        input: resolveInputHtml(target),
+        input: resolveInputHtmlMap(target),
       },
     },
   }

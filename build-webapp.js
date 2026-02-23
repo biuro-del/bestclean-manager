@@ -2,6 +2,7 @@ const { spawnSync } = require('node:child_process')
 
 function normalizeTarget(value) {
   const raw = String(value || '').trim().toLowerCase()
+  if (raw.startsWith('both') || raw === 'all') return 'both'
   return raw.startsWith('mobile') ? 'mobile' : 'portal'
 }
 
@@ -15,7 +16,7 @@ function run(command, args) {
   }
 }
 
-const target = normalizeTarget(process.env.APP_TARGET || 'portal')
+const target = normalizeTarget(process.env.APP_TARGET || process.env.VITE_APP_TARGET || 'both')
 const buildScript = `build:${target}`
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 
