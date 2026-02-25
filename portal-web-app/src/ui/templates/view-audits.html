@@ -1,0 +1,29 @@
+<div>
+  <h1 class="welcome">Audyty</h1>
+  <p class="subwelcome">Wyszukiwanie i filtrowanie audytów (tabela wyników w kolejnym etapie).</p>
+
+  <div class="toolbar" style="margin-top: 16px;">
+    <div class="tool" style="min-width: 360px;">
+      <label>WYSZUKIWANIE</label>
+      <input id="auditSearch" type="text" placeholder="ID audytu, klient, obiekt, koordynator..." />
+    </div>
+
+    <div class="tool" style="min-width: 220px;">
+      <label>STATUS</label>
+      <select id="auditStatus">
+        <option value="">Wszystkie</option>
+        <option value="OPEN">OPEN</option>
+        <option value="CLOSED">CLOSED</option>
+      </select>
+    </div>
+
+    <div class="tool-actions">
+      <button class="btn2" id="auditRefresh" type="button">Odśwież</button>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 14px;">
+    <div class="kpi-label">Wyniki</div>
+    <div class="kpi-note" id="auditHint">Na razie dodaliśmy tylko UI. W kolejnym etapie podepniemy pobieranie listy audytów z Google Sheets.</div>
+  </div>
+</div>

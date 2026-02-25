@@ -1,0 +1,185 @@
+<h1 class="welcome">Profil pracownika</h1>
+<p class="subwelcome">Lista + podglÄ…d/edycja + dodawanie. Usuwanie: tylko Admin (twarde deleteRow).</p>
+
+<div class="toolbar" aria-label="Filtry pracownikĂłw">
+  <div class="tool" style="min-width:260px">
+    <label for="wkQ">Szukaj</label>
+    <input id="wkQ" type="text" placeholder="imiÄ™, login, email, tel, QR..." />
+  </div>
+
+  <div class="tool">
+    <label for="wkType">Typ (K)</label>
+    <select id="wkType">
+      <option value="">(wszystkie)</option>
+      <option value="Admin">Admin</option>
+      <option value="Kierownik">Kierownik</option>
+      <option value="Koordynator">Koordynator</option>
+      <option value="StaĹĽysta">StaĹĽysta</option>
+      <option value="StaĹ‚y personel na obiekcie">StaĹ‚y personel na obiekcie</option>
+      <option value="ZespĂłĹ‚ mobilny">ZespĂłĹ‚ mobilny</option>
+      <option value="Pracownik">Pracownik</option>
+    </select>
+  </div>
+
+  <div class="tool">
+    <label for="wkActive">Aktywny (H)</label>
+    <select id="wkActive">
+      <option value="">(wszyscy)</option>
+      <option value="1">TRUE</option>
+      <option value="0">FALSE</option>
+    </select>
+  </div>
+
+  <div class="tool">
+    <label for="wkOnline">Zalogowany teraz (F)</label>
+    <select id="wkOnline">
+      <option value="">(wszyscy)</option>
+      <option value="1">TAK</option>
+      <option value="0">NIE</option>
+    </select>
+  </div>
+
+  <div class="tool-actions">
+    <button class="btn2" id="wkAddBtn" type="button">Dodaj pracownika</button>
+    <button class="btn2" id="wkResetBtn" type="button">OdĹ›wieĹĽ</button>
+    <button class="btn2 primary" id="wkSearchBtn" type="button">Szukaj</button>
+  </div>
+</div>
+
+<div class="workers-table" aria-label="Tabela pracownikĂłw">
+  <div class="workers-head">
+    <div>ID</div>
+    <div>ImiÄ™ i nazwisko</div>
+    <div>Login</div>
+    <div>Typ</div>
+    <div>Aktywny</div>
+    <div>Zalogowany</div>
+    <div>Telefon</div>
+    <div>Email</div>
+    <div></div>
+  </div>
+
+  <div id="wkRows"></div>
+
+    <div class="pager">
+    <div class="pager-left">
+      <span class="pager-label" id="wkPageLabel">Strona 1 / 1</span>
+      <span id="wkShownLabel">Wyświetlono: —</span>
+    </div>
+    <div class="pager-right">
+      <button class="btn2 pager-btn" id="wkPrevBtn" type="button">←</button>
+      <button class="btn2 pager-btn" id="wkNextBtn" type="button">→</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="wkEditorOverlay" aria-label="Profil pracownika" role="dialog" aria-modal="true">
+  <div class="modal">
+    <div class="logo-block" style="display:inline-flex">
+      <img id="wkLogo" alt="FIDO iClean" style="height:42px;width:auto;" />
+    </div>
+
+    <h3 id="wkModalTitle">Profil pracownika</h3>
+    <p class="meta">
+      ID: <span class="mono" id="wkIdLabel">â€”</span>
+      â€˘ Dodano: <span class="mono" id="wkAddedAt">â€”</span>
+      â€˘ Edycja: <span class="mono" id="wkEditedAt">â€”</span>
+      â€˘ Ostatnio edytowaĹ‚: <b id="wkEditedBy">â€”</b>
+    </p>
+
+    <div class="grid">
+      <div class="field">
+        <label for="wkEditId">ID (A) â€” blokada</label>
+        <input id="wkEditId" type="text" disabled />
+      </div>
+
+      <div class="field">
+        <label for="wkEditName">ImiÄ™ i nazwisko (B)</label>
+        <input id="wkEditName" type="text" maxlength="200" />
+      </div>
+
+      <div class="field">
+        <label for="wkEditLogin">Login (C)</label>
+        <input id="wkEditLogin" type="text" maxlength="120" />
+      </div>
+
+      <div class="field">
+        <label for="wkEditType">Typ (K)</label>
+        <select id="wkEditType">
+          <option value="Admin">Admin</option>
+          <option value="Kierownik">Kierownik</option>
+          <option value="Koordynator">Koordynator</option>
+          <option value="StaĹĽysta">StaĹĽysta</option>
+          <option value="StaĹ‚y personel na obiekcie">StaĹ‚y personel na obiekcie</option>
+          <option value="ZespĂłĹ‚ mobilny">ZespĂłĹ‚ mobilny</option>
+          <option value="Pracownik">Pracownik</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="wkEditActive">Aktywny (H)</label>
+        <select id="wkEditActive" class="active-flag">
+          <option value="1">TRUE</option>
+          <option value="0">FALSE</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="wkOnlineNow">Zalogowany teraz (F) â€” podglÄ…d</label>
+        <input id="wkOnlineNow" type="text" disabled />
+      </div>
+
+      <div class="field">
+        <label for="wkEditEmail">Email (I)</label>
+        <input id="wkEditEmail" type="email" maxlength="200" />
+      </div>
+
+      <div class="field">
+        <label for="wkEditPhone">Telefon (J)</label>
+        <input id="wkEditPhone" type="text" maxlength="80" />
+      </div>
+
+      <div class="field" style="grid-column: 1 / -1;">
+        <label for="wkEditQr">QR tekst (G)</label>
+        <textarea id="wkEditQr" rows="3" maxlength="2000" placeholder="login + hasĹ‚o (tekst)"></textarea>
+      </div>
+
+      <div class="field" id="wkCurrentPassWrap" style="grid-column: 1 / -1; display:none;">
+        <label for="wkCurrentPass">Obecne hasĹ‚o (D) â€” tylko Admin/Kierownik</label>
+        <div class="pass-inline">
+          <input id="wkCurrentPass" type="password" readonly />
+          <button class="btn2" id="wkShowPassBtn" type="button">PokaĹĽ</button>
+          <button class="btn2" id="wkCopyPassBtn" type="button">Kopiuj</button>
+        </div>
+        <div class="muted" style="margin-top:6px;">HasĹ‚o jest pobierane z bazy tylko dla Admin/Kierownik.</div>
+      </div>
+
+
+      <div class="field">
+        <label for="wkNewPass">Nowe hasĹ‚o (E) â€” wpisz, jeĹ›li zmieniasz</label>
+        <input id="wkNewPass" type="password" maxlength="120" />
+      </div>
+
+      <div class="field">
+        <label for="wkNewPass2">PowtĂłrz hasĹ‚o</label>
+        <input id="wkNewPass2" type="password" maxlength="120" />
+      </div>
+    </div>
+
+    <div class="hint" id="wkReadOnlyHint" style="display:none;">
+      Ten uĹĽytkownik ma uprawnienia tylko do podglÄ…du (Koordynator/StaĹĽysta).
+    </div>
+
+    <div class="row-actions">
+      <div class="left">
+        <button class="btn2" id="wkFillQrBtn" type="button" title="Wstaw do QR: login + nowe hasĹ‚o">Wstaw do QR</button>
+      </div>
+      <div class="right">
+        <button class="btn2 danger" id="wkCancelBtn" type="button">Zamknij</button>
+        <button class="btn2 danger" id="wkDeleteBtn" type="button" style="display:none;">UsuĹ„</button>
+        <button class="btn2 primary" id="wkSaveBtn" type="button">Zapisz</button>
+      </div>
+    </div>
+  </div>
+</div>
+
