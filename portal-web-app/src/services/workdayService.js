@@ -215,6 +215,7 @@ function extractLoginLocalPart(value) {
 function collectWorkerLookupValues(worker) {
   const primaryValues = [
     worker?.login,
+    worker?.workerLogin,
     worker?.id,
     worker?.workerId,
     worker?.email,
@@ -501,7 +502,7 @@ function buildLookupMaps(clients, zones, workers, workdayRows = []) {
   const workerByNormalizedName = new Map(
     workers
       .map((worker) => {
-        const normalizedName = normalizePersonName(worker.name ?? worker.fullName ?? '')
+        const normalizedName = normalizePersonName(worker.name ?? worker.workerName ?? worker.fullName ?? '')
         if (!normalizedName) {
           return null
         }
@@ -643,14 +644,14 @@ function mapWorkday(orgId, row, lookupMaps) {
   const endAt = toIso(row.endAt)
   const durationSec = calculateDuration(row)
   const zoneFromRow = row?.zone
-    ? {
+      ? {
         id: sanitizeTextValue(row.zone.ZoneId ?? row.zone.zoneId ?? row.zoneId ?? roomId),
         clientId: sanitizeTextValue(row.zone.client?.clientId ?? row.clientId),
         name: sanitizeTextValue(row.zone.zone),
         zone: sanitizeTextValue(row.zone.zone),
         location: sanitizeTextValue(row.zone.location),
         workerLogin: sanitizeTextValue(row.zone.workerLogin),
-        workerName: sanitizeTextValue(row.zone.worker?.fullName),
+        workerName: sanitizeTextValue(row.zone.worker?.workerName ?? row.zone.worker?.fullName),
       }
     : null
 
@@ -699,6 +700,7 @@ function mapWorkday(orgId, row, lookupMaps) {
   const inferredWorker = inferredFromRoomDay || inferredFromRoom || inferredFromDay || null
 
   const rawWorkerName = pickFirstText(
+    row.worker?.workerName,
     row.worker?.fullName,
     row.workerName,
     row.workday?.workerName,
@@ -737,7 +739,13 @@ function mapWorkday(orgId, row, lookupMaps) {
       linkedWorkday?.workerLogin,
     ) || null
   const status = normalizeStatus(row.status, Boolean(endAt))
-  const workerNameFromWorker = pickFirstText(worker?.name, worker?.fullName, workerFromName?.name)
+  const workerNameFromWorker = pickFirstText(
+    worker?.workerName,
+    worker?.name,
+    worker?.fullName,
+    workerFromName?.workerName,
+    workerFromName?.name,
+  )
   const workerNameValue = sanitizeTextValue(
     pickFirstText(workerNameFromWorker, rawWorkerName, resolvedWorkerLogin),
   )

@@ -21,7 +21,7 @@ function mapZone(orgId, row) {
     function: toText(row?.function),
     location: toText(row?.location),
     workerLogin,
-    workerName: toText(row?.worker?.fullName),
+    workerName: toText(row?.worker?.workerName ?? row?.worker?.fullName),
     editedBy: toText(row?.editedBy),
     date: toText(row?.date),
   }

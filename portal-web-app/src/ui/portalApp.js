@@ -1466,6 +1466,49 @@ function renderEventsRows(rows) {
     return
   }
 
+  const normalizeLookup = (value) => String(value ?? '').trim().toLowerCase()
+  const toLoginLocalPart = (value) => {
+    const text = String(value ?? '').trim()
+    const atIndex = text.indexOf('@')
+    return atIndex > 0 ? text.slice(0, atIndex).trim() : ''
+  }
+  const resolveWorkerNameFromWorkers = (workerLoginCandidate, workerNameCandidate) => {
+    const directName = String(workerNameCandidate ?? '').trim()
+    if (directName) {
+      return directName
+    }
+
+    const loginText = String(workerLoginCandidate ?? '').trim()
+    if (!loginText) {
+      return ''
+    }
+
+    const variants = [normalizeLookup(loginText), normalizeLookup(toLoginLocalPart(loginText))].filter(Boolean)
+    if (!variants.length) {
+      return ''
+    }
+
+    const matchedWorker = appState.workers.find((worker) => {
+      const workerKeys = [
+        worker?.login,
+        worker?.workerLogin,
+        worker?.id,
+        worker?.workerId,
+        worker?.email,
+        worker?.loginEmail,
+      ]
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)
+      const normalizedKeys = new Set([
+        ...workerKeys.map((value) => normalizeLookup(value)),
+        ...workerKeys.map((value) => normalizeLookup(toLoginLocalPart(value))),
+      ])
+      return variants.some((variant) => normalizedKeys.has(variant))
+    })
+
+    return String(matchedWorker?.workerName ?? matchedWorker?.name ?? matchedWorker?.fullName ?? '').trim()
+  }
+
   const isErrorLikeCell = (value) => {
     const text = String(value ?? '').trim().toLowerCase()
     if (!text) {
@@ -1513,7 +1556,7 @@ function renderEventsRows(rows) {
         ? `<button class="btn2" type="button" data-event-comment="${index}" title="Pokaż komentarz">💬</button>`
         : '—'
       const workerLogin = String(row.workerLogin ?? '').trim()
-      const workerName = String(row.workerName ?? '').trim()
+      const workerName = resolveWorkerNameFromWorkers(workerLogin, row.workerName)
       const workerPrimary = workerName || workerLogin || '-'
       const workerSecondary =
         workerLogin && workerName && workerLogin !== workerName ? workerLogin : ''
