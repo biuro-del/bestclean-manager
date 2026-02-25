@@ -198,6 +198,69 @@ function normalizeLookupKey(value) {
   return String(value ?? '').trim().toLowerCase()
 }
 
+function extractLoginLocalPart(value) {
+  const text = String(value ?? '').trim()
+  if (!text) {
+    return ''
+  }
+
+  const atIndex = text.indexOf('@')
+  if (atIndex <= 0) {
+    return ''
+  }
+
+  return text.slice(0, atIndex).trim()
+}
+
+function collectWorkerLookupValues(worker) {
+  const primaryValues = [
+    worker?.login,
+    worker?.id,
+    worker?.workerId,
+    worker?.email,
+    worker?.loginEmail,
+  ]
+
+  const values = new Set()
+  primaryValues.forEach((value) => {
+    const text = String(value ?? '').trim()
+    if (text) {
+      values.add(text)
+    }
+
+    const localPart = extractLoginLocalPart(text)
+    if (localPart) {
+      values.add(localPart)
+    }
+  })
+
+  return [...values]
+}
+
+function resolveWorkerByLogin(lookupMaps, ...candidateValues) {
+  for (const value of candidateValues) {
+    const text = String(value ?? '').trim()
+    if (!text) {
+      continue
+    }
+
+    const variants = [text, extractLoginLocalPart(text)].filter(Boolean)
+    for (const variant of variants) {
+      const directMatch = lookupMaps.workerByLogin.get(variant)
+      if (directMatch) {
+        return directMatch
+      }
+
+      const normalizedMatch = lookupMaps.workerByNormalizedLogin.get(normalizeLookupKey(variant))
+      if (normalizedMatch) {
+        return normalizedMatch
+      }
+    }
+  }
+
+  return null
+}
+
 function normalizePersonName(value) {
   const raw = String(value ?? '').trim()
   if (!raw) {
@@ -420,23 +483,21 @@ function buildLookupMaps(clients, zones, workers, workdayRows = []) {
       .map((zone) => [normalizeLookupKey(zone.name ?? zone.zone), zone])
       .filter((pair) => Boolean(pair[0])),
   )
-  const workerByLogin = new Map(
-    workers.map((worker) => {
-      const login = String(worker.login ?? worker.id ?? '')
-      return [login, worker]
-    }),
-  )
-  const workerByNormalizedLogin = new Map(
-    workers
-      .map((worker) => {
-        const login = normalizeLookupKey(worker.login ?? worker.id ?? '')
-        if (!login) {
-          return null
-        }
-        return [login, worker]
-      })
-      .filter(Boolean),
-  )
+  const workerByLogin = new Map()
+  const workerByNormalizedLogin = new Map()
+  workers.forEach((worker) => {
+    const keys = collectWorkerLookupValues(worker)
+    keys.forEach((key) => {
+      if (!workerByLogin.has(key)) {
+        workerByLogin.set(key, worker)
+      }
+
+      const normalizedKey = normalizeLookupKey(key)
+      if (normalizedKey && !workerByNormalizedLogin.has(normalizedKey)) {
+        workerByNormalizedLogin.set(normalizedKey, worker)
+      }
+    })
+  })
   const workerByNormalizedName = new Map(
     workers
       .map((worker) => {
@@ -649,17 +710,34 @@ function mapWorkday(orgId, row, lookupMaps) {
     lookupMaps.workerByNormalizedName.get(normalizePersonName(rawWorkerName)) || null
 
   const resolvedWorkerLogin = pickFirstText(
+    resolveWorkerByLogin(
+      lookupMaps,
+      workerLoginCandidate,
+      row.workerLogin,
+      row.workday?.workerLogin,
+      zone?.workerLogin,
+      inferredWorker?.workerLogin,
+      linkedWorkday?.workerLogin,
+    )?.login,
     workerLoginCandidate,
+    extractLoginLocalPart(workerLoginCandidate),
     zone?.workerLogin,
     inferredWorker?.workerLogin,
     workerFromName?.login,
   )
   const worker =
-    lookupMaps.workerByLogin.get(resolvedWorkerLogin) ||
-    lookupMaps.workerByNormalizedLogin.get(normalizeLookupKey(resolvedWorkerLogin)) ||
-    null
+    resolveWorkerByLogin(
+      lookupMaps,
+      resolvedWorkerLogin,
+      workerLoginCandidate,
+      row.workerLogin,
+      row.workday?.workerLogin,
+      zone?.workerLogin,
+      inferredWorker?.workerLogin,
+      linkedWorkday?.workerLogin,
+    ) || null
   const status = normalizeStatus(row.status, Boolean(endAt))
-  const workerNameFromWorker = pickFirstText(worker?.name, workerFromName?.name)
+  const workerNameFromWorker = pickFirstText(worker?.name, worker?.fullName, workerFromName?.name)
   const workerNameValue = sanitizeTextValue(
     pickFirstText(workerNameFromWorker, rawWorkerName, resolvedWorkerLogin),
   )

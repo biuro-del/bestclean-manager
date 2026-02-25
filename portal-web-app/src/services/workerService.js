@@ -2,10 +2,11 @@ import { insertWorkerForOrg, workersForOrg } from '@dataconnect/generated'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
 function mapWorker(orgId, row) {
-  const login = String(row.login ?? '').trim()
+  const login = String(row.login ?? row.workerId ?? '').trim()
   const workerId = String(row.workerId ?? login).trim() || login
   const fullName = String(row.fullName ?? login).trim()
   const workerType = String(row.workerType ?? 'Pracownik').trim()
+  const loginEmail = String(row.loginEmail ?? row.email ?? '').trim()
 
   return {
     id: workerId,
@@ -16,7 +17,7 @@ function mapWorker(orgId, row) {
     role: workerType,
     type: workerType,
     active: Boolean(row.active ?? true),
-    email: String(row.email ?? '').trim(),
+    email: loginEmail,
     phone: String(row.phone ?? '').trim(),
     editedBy: String(row.edit ?? '').trim(),
     addedAt: String(row.createdAt ?? '').trim(),
