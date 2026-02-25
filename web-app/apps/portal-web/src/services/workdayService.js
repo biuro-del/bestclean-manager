@@ -60,6 +60,13 @@ function withOperationNotFoundHint(error, operationName) {
 
   return error instanceof Error ? error : new Error(message || DEPLOY_HINT)
 }
+function isOperationNotFoundError(error, operationName) {
+  const message = messageFromError(error)
+  return (
+    message.includes(`operation "${operationName}" not found`) ||
+    message.includes(`Brak operacji: ${operationName}.`)
+  )
+}
 
 function toDayKey(isoValue) {
   const iso = toIso(isoValue)
@@ -780,12 +787,21 @@ async function fetchMappedEvents(orgId) {
   }
 
   ensureFirebase()
-  const response = await runQueryOperation('EventsForOrg', { orgId })
-  const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
-  const rows = response?.data?.events ?? []
-  return rows
-    .map((row) => mapWorkday(orgId, row, lookupMaps))
-    .filter((item) => isDisplayableMappedItem(item))
+  try {
+    const response = await runQueryOperation('EventsForOrg', { orgId })
+    const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
+    const rows = response?.data?.events ?? []
+    return rows
+      .map((row) => mapWorkday(orgId, row, lookupMaps))
+      .filter((item) => isDisplayableMappedItem(item))
+  } catch (error) {
+    if (!isOperationNotFoundError(error, 'EventsForOrg')) {
+      throw error
+    }
+
+    // Fallback when EventsForOrg query is not deployed in current Data Connect environment.
+    return fetchMappedBackupCycles(orgId)
+  }
 }
 
 export async function getWorkdays(orgId, filters = {}) {
