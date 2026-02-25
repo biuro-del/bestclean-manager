@@ -638,7 +638,9 @@ function mapWorkday(orgId, row, lookupMaps) {
   const workerLoginCandidate = sanitizeTextValue(
     row.workerLogin ?? row.worker?.login ?? row.workday?.workerLogin ?? linkedWorkday?.workerLogin ?? '',
   )
-  const roomId = sanitizeTextValue(row.zoneId ?? row.utilityRoomId ?? row.roomId)
+  const roomId = sanitizeTextValue(
+    row.zoneId ?? row.utilityRoomId ?? row.roomId ?? row.zone?.ZoneId ?? row.zone?.zoneId,
+  )
   const normalizedRoomId = normalizeLookupKey(roomId)
   const startAt = toIso(row.startAt)
   const endAt = toIso(row.endAt)
@@ -906,7 +908,7 @@ async function fetchMappedBackupCycles(orgId) {
     throw withOperationNotFoundHint(error, 'BackupCyclesForOrg')
   }
 
-  const lookupMaps = await fetchLookupMaps(orgId)
+  const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
   const rows = response?.data?.backupCycles ?? []
   return rows
     .map((row) => mapWorkday(orgId, row, lookupMaps))
