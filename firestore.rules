@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasRole(role) {
+      return isSignedIn()
+        && request.auth.token.roles is list
+        && role in request.auth.token.roles;
+    }
+
+    function isAdmin() {
+      return hasRole('admin');
+    }
+
+    function isCoordinator() {
+      return hasRole('koordynator') || hasRole('audytor') || hasRole('kierownik');
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      allow read: if isSelf(uid) || isAdmin() || isCoordinator();
+      allow write: if false;
+    }
+
+    match /sessions/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow create, update: if isSelf(uid)
+        && request.resource.data.keys().hasOnly([
+          "uid",
+          "email",
+          "activeSessionId",
+          "deviceId",
+          "updatedAt",
+          "updatedAtIso"
+        ])
+        && request.resource.data.uid == uid
+        && request.resource.data.activeSessionId is string
+        && request.resource.data.activeSessionId.size() >= 8
+        && request.resource.data.deviceId is string
+        && request.resource.data.deviceId.size() >= 8
+        && request.resource.data.updatedAtIso is string;
+      allow delete: if isSelf(uid) || isAdmin();
+    }
+
+    match /workdays/{workdayId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /cycles/{cycleId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /pauses/{pauseId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /zones/{zoneId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /coordinatorLogs/{logId} {
+      allow read: if isCoordinator() || isAdmin();
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

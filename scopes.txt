@@ -1,0 +1,8 @@
+cd "C:\Users\rafal\Desktop\app to react"
+(
+echo openid
+echo https://www.googleapis.com/auth/userinfo.email
+echo https://www.googleapis.com/auth/cloud-platform
+echo https://www.googleapis.com/auth/spreadsheets.readonly
+echo https://www.googleapis.com/auth/drive.readonly
+) > scopes.txt

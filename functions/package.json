@@ -1,0 +1,21 @@
+{
+  "name": "iclean-functions",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "serve": "firebase emulators:start --only functions,firestore,hosting",
+    "lint": "node --check src/index.js && node --check src/auth.js && node --check src/workday.js && node --check src/cycles.js && node --check src/zones.js && node --check src/utils.js && node --check scripts/migrateWorkersToFirebase.mjs",
+    "deploy": "firebase deploy --only functions",
+    "migrate:workers:dry-run": "node scripts/migrateWorkersToFirebase.mjs --dry-run",
+    "migrate:workers:apply": "node scripts/migrateWorkersToFirebase.mjs --apply"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^5.0.0",
+    "googleapis": "^144.0.0"
+  }
+}
