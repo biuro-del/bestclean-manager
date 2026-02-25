@@ -1466,9 +1466,38 @@ function renderEventsRows(rows) {
     return
   }
 
-  appState.eventRows = rows
+  const isErrorLikeCell = (value) => {
+    const text = String(value ?? '').trim().toLowerCase()
+    if (!text) {
+      return false
+    }
 
-  if (!rows.length) {
+    return (
+      (text.includes('"error"') && text.includes('"code"')) ||
+      (text.includes('operation "') && text.includes('not found')) ||
+      text.includes('"status":"not_found"') ||
+      text.includes('"code":404')
+    )
+  }
+
+  const safeRows = (rows || []).filter((row) => {
+    const candidates = [
+      row?.workerLogin,
+      row?.workerName,
+      row?.klient,
+      row?.clientName,
+      row?.strefa,
+      row?.zoneName,
+      row?.lokalizacja,
+      row?.roomId,
+      row?.zoneId,
+    ]
+    return !candidates.some((value) => isErrorLikeCell(value))
+  })
+
+  appState.eventRows = safeRows
+
+  if (!safeRows.length) {
     root.innerHTML = `
       <div class="events-row">
         <div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
@@ -1477,7 +1506,7 @@ function renderEventsRows(rows) {
     return
   }
 
-  root.innerHTML = rows
+  root.innerHTML = safeRows
     .map((row, index) => {
       const comment = String(row.comment ?? '').trim()
       const commentCell = comment

@@ -197,7 +197,21 @@ function pickFirstText(...values) {
 
 function looksLikeSerializedError(value) {
   const text = String(value ?? '').trim()
-  if (!text || !text.startsWith('{')) {
+  if (!text) {
+    return false
+  }
+
+  const lowered = text.toLowerCase()
+  if (
+    (lowered.includes('"error"') && lowered.includes('"code"')) ||
+    (lowered.includes('operation "') && lowered.includes('not found')) ||
+    lowered.includes('"status":"not_found"') ||
+    lowered.includes('"code":404')
+  ) {
+    return true
+  }
+
+  if (!text.startsWith('{')) {
     return false
   }
 
