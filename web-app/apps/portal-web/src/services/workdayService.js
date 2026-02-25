@@ -880,7 +880,7 @@ async function fetchMappedWorkdays(orgId, rowsPromise, operationName) {
     throw withOperationNotFoundHint(error, operationName)
   }
 
-  const lookupMaps = await fetchLookupMaps(orgId)
+  const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
   const rows = response?.data?.workdays ?? []
   return rows.map((row) => mapWorkday(orgId, row, lookupMaps))
 }

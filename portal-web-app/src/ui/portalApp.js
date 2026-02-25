@@ -1514,10 +1514,13 @@ function renderEventsRows(rows) {
         : '—'
       const workerLogin = String(row.workerLogin ?? '').trim()
       const workerName = String(row.workerName ?? '').trim()
+      const workerPrimary = workerName || workerLogin || '-'
+      const workerSecondary =
+        workerLogin && workerName && workerLogin !== workerName ? workerLogin : ''
       const workerCell = `
         <div class="events-worker-cell">
-          <div class="events-worker-login mono">${escapeHtml(workerLogin || '-')}</div>
-          <div class="events-worker-name">${escapeHtml(workerName || '-')}</div>
+          <div class="events-worker-name">${escapeHtml(workerPrimary)}</div>
+          <div class="events-worker-login mono">${escapeHtml(workerSecondary || '')}</div>
         </div>
       `
 
