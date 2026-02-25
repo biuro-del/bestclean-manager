@@ -1,0 +1,31 @@
+/**
+ * Run these from Apps Script editor (Run ▶) during setup:
+ * 1) Setup_authorize() — asks for permissions and creates Workday_Log if missing
+ * 2) Setup_installWorkdayTrigger() — creates a time-based trigger to auto-close workdays
+ */
+function Setup_authorize() {
+  SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+
+  Sheets_getBySheetId_(CONFIG.SHEET_ID_WORKERS).getName();
+  Sheets_getBySheetId_(CONFIG.SHEET_ID_ZONES).getName();
+  Sheets_getBySheetId_(CONFIG.SHEET_ID_BACKUP_LOG).getName();
+
+  Workday_ensureSheet_();
+  return 'OK';
+}
+
+function Setup_installWorkdayTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(t => {
+    if (t.getHandlerFunction && t.getHandlerFunction() === 'Workday_closeDueTrigger_') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+
+  ScriptApp.newTrigger('Workday_closeDueTrigger_')
+    .timeBased()
+    .everyMinutes(CONFIG.WORKDAY_TRIGGER_EVERY_MINUTES)
+    .create();
+
+  return 'Trigger installed: Workday_closeDueTrigger_';
+}

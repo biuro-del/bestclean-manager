@@ -1,0 +1,78 @@
+/**
+ * WorkdayEventsRepo — miesiąc zdarzeń START/STOP dnia pracy (Workday_Log) dla pracownika.
+ *
+ * Zasady:
+ * - Lista dla wybranego miesiąca wg CZASU URZĄDZENIA (tzOffsetMinutes = Date.getTimezoneOffset()).
+ * - STOP wybieramy wg priorytetu:
+ *   1) AUTO_CLOSE_AT jeśli niepuste
+ *   2) END_SCAN_AT jeśli niepuste
+ *   3) END_AT jako fallback (manualne domknięcie)
+ *
+ * Zwraca rekordy z dateKey (YYYY-MM-DD) policzonym wg START_AT + tzOffsetMinutes.
+ */
+
+function WorkdayEventsRepo_listMonthForWorker_(workerLogin, year, month1to12, tzOffsetMinutes) {
+  const login = String(workerLogin || '').trim();
+  const y = Number(year || 0);
+  const m = Number(month1to12 || 0);
+  if (!login || !y || !m) return [];
+
+  const monthKey = String(y) + '-' + String(m).padStart(2, '0');
+
+  const sheet = Workday_sheet_(); // from WorkdayRepo.gs (ensures sheet exists)
+  const h = Sheets_headerMap_(sheet);
+  const H = CONFIG.HEADERS.WORKDAY_LOG;
+
+  const colLogin = h[H.WORKER_LOGIN];
+  const colStart = h[H.START_AT];
+  const colEndScan = h[H.END_SCAN_AT];
+  const colAutoClose = h[H.AUTO_CLOSE_AT];
+  const colEndAt = h[H.END_AT];
+  const colId = h[H.WORKDAY_ID];
+
+  if (!colLogin || !colStart) return [];
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 2) return [];
+
+  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+
+  const out = [];
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i] || [];
+    const rLogin = String(row[colLogin - 1] || '').trim();
+    if (rLogin !== login) continue;
+
+    const startAt = String(row[colStart - 1] || '').trim();
+    if (!startAt) continue;
+
+    const dateKey = localDateKey_(startAt, tzOffsetMinutes);
+    if (!dateKey || dateKey.slice(0, 7) !== monthKey) continue;
+
+    const autoCloseAt = colAutoClose ? String(row[colAutoClose - 1] || '').trim() : '';
+    const endScanAt = colEndScan ? String(row[colEndScan - 1] || '').trim() : '';
+    const endAt = colEndAt ? String(row[colEndAt - 1] || '').trim() : '';
+
+    const stopAt = WorkdayEventsRepo_pickStopAt_(autoCloseAt, endScanAt, endAt);
+
+    out.push({
+      dateKey: dateKey,
+      workdayId: colId ? String(row[colId - 1] || '').trim() : '',
+      startAt: startAt,
+      stopAt: stopAt
+    });
+  }
+
+  return out;
+}
+
+function WorkdayEventsRepo_pickStopAt_(autoCloseAt, endScanAt, endAt) {
+  const a = String(autoCloseAt || '').trim();
+  if (a) return a;
+  const s = String(endScanAt || '').trim();
+  if (s) return s;
+  const e = String(endAt || '').trim();
+  if (e) return e;
+  return '';
+}

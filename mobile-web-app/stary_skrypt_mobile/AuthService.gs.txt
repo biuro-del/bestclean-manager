@@ -1,0 +1,84 @@
+/**
+ * Auth: login using Workers sheet (Password column only).
+ */
+function Auth_login_(payload) {
+  const login = String(payload.login || '').trim();
+  const password = String(payload.password || '');
+  const deviceId = String(payload.deviceId || '').trim();
+  if (!login || !password) throw new Error('Login and password are required.');
+  if (!deviceId) throw new Error('Missing deviceId.');
+
+  const worker = Workers_findByLogin_(login);
+  if (!worker) throw new Error('Invalid login or password.');
+
+  const expectedPass = String(worker.password || '');
+  if (password !== expectedPass) throw new Error('Invalid login or password.');
+
+  if (worker.active !== undefined && worker.active !== '' && worker.active !== null) {
+    const isActive = String(worker.active).toLowerCase() === 'true' || String(worker.active) === '1';
+    if (!isActive) throw new Error('Account is inactive.');
+  }
+
+  const token = uuid_();
+  const session = {
+    workerId: String(worker.workerId || ''),
+    login: String(worker.login || ''),
+    name: String(worker.name || ''),
+    type: String(worker.type || ''),
+    deviceId,
+    createdAt: nowIso_(),
+  };
+
+  // Store in cache (fast) + sheet (source of truth for "single device" rule)
+  CacheService.getScriptCache().put('sess:' + token, JSON.stringify(session), CONFIG.SESSION_TTL_SECONDS);
+  Sessions_upsertActive_(session.login, token, deviceId);
+
+  return { token, worker: session };
+}
+
+function Auth_requireWorker_(token, requestDeviceId) {
+  if (!token) {
+    const e = new Error('Missing token.');
+    e.code = 'AUTH_MISSING_TOKEN';
+    throw e;
+  }
+
+  const raw = CacheService.getScriptCache().get('sess:' + token);
+  if (!raw) {
+    const e = new Error('Session expired. Please login again.');
+    e.code = 'SESSION_EXPIRED';
+    throw e;
+  }
+
+  let session;
+  try { session = JSON.parse(raw); }
+  catch (_) {
+    const e = new Error('Invalid session data.');
+    e.code = 'SESSION_EXPIRED';
+    throw e;
+  }
+
+  const dev = String(requestDeviceId || session.deviceId || '').trim();
+
+  // Enforce single-device session (sheet is source of truth)
+  const active = Sessions_getActiveByLogin_(session.login);
+  if (active) {
+    if (active.activeToken && active.activeToken !== token) {
+      const e = new Error('Twoje konto zostało zalogowane na innym urządzeniu. Zaloguj się ponownie.');
+      e.code = 'SESSION_REVOKED';
+      throw e;
+    }
+    if (active.activeDeviceId && dev && active.activeDeviceId !== dev) {
+      const e = new Error('Twoje konto zostało zalogowane na innym urządzeniu. Zaloguj się ponownie.');
+      e.code = 'SESSION_REVOKED';
+      throw e;
+    }
+  } else {
+    // If for some reason the sheet row is missing, re-create it.
+    Sessions_upsertActive_(session.login, token, dev || session.deviceId || '');
+  }
+
+  // Persist deviceId in session for back-compat.
+  if (!session.deviceId && dev) session.deviceId = dev;
+  return session;
+}

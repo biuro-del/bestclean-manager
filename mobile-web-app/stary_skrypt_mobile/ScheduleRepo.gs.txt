@@ -1,0 +1,62 @@
+/**
+ * Schedule repository — reads weekly table from external spreadsheet.
+ * Expected layout (rows):
+ *  Row 1: dates for Mon..Sun in columns C..I
+ *  Row 2: headers: ID | PRACOWNIK | PONIEDZIAŁEK | ... | NIEDZIELA
+ *  Worker rows: morning row has WorkerID in col A. Afternoon row is the next row (col A may be blank).
+ */
+function Schedule_getMyWeek_(workerId) {
+  if (!workerId) throw new Error('Missing workerId.');
+
+  const ss = SpreadsheetApp.openById(CONFIG.SCHEDULE_SPREADSHEET_ID);
+  const sh = ss.getSheetById(CONFIG.SCHEDULE_SHEET_ID);
+  if (!sh) throw new Error('Schedule sheet not found.');
+
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 3) return { week: null };
+
+  // Read full used range (small table, OK).
+  const values = sh.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+
+  const rowDates = values[0] || [];
+  const rowHeaders = values[1] || [];
+
+  // Detect day columns by header names (robust to column shifts).
+  const DAY_NAMES = ['PONIEDZIAŁEK','WTOREK','ŚRODA','CZWARTEK','PIĄTEK','SOBOTA','NIEDZIELA'];
+  const dayCols = DAY_NAMES.map(name => rowHeaders.findIndex(h => String(h || '').trim().toUpperCase() === name));
+  if (dayCols.some(i => i < 0)) {
+    throw new Error('Schedule headers not found (PONIEDZIAŁEK…NIEDZIELA).');
+  }
+
+  // Find worker morning row by WorkerID in column A (index 0).
+  let rMorning = -1;
+  for (let r = 2; r < values.length; r++) { // from row 3 in sheet
+    if (String(values[r][0] || '').trim() === String(workerId).trim()) { rMorning = r; break; }
+  }
+  if (rMorning < 0) {
+    return { week: { workerId: workerId, found: false, days: [] } };
+  }
+  const rAfternoon = Math.min(rMorning + 1, values.length - 1);
+
+  const dates = dayCols.map(ci => String(rowDates[ci] || '').trim());
+  const days = DAY_NAMES.map((dn, idx) => {
+    const ci = dayCols[idx];
+    return {
+      dayName: dn,
+      date: dates[idx] || '',
+      morning: String(values[rMorning][ci] || '').trim(),
+      afternoon: String(values[rAfternoon][ci] || '').trim(),
+    };
+  });
+
+  const workerName = String(values[rMorning][1] || '').trim(); // column B = PRACOWNIK
+  return {
+    week: {
+      workerId: workerId,
+      workerName: workerName,
+      found: true,
+      days: days,
+    }
+  };
+}

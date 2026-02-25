@@ -1,0 +1,60 @@
+/**
+ * IndOrdersService — mapowanie zlecenia indywidualnego (BCIxxxx) na obiekt "strefy" używany w logice (zone/room/func).
+ *
+ * Wymagania:
+ * - Strefa = C (nazwa klienta)
+ * - Pomieszczenie = E+F+G+H (ładne formatowanie, bez pustych segmentów)
+ * - func = SPRZATANIE_INDYWIDUALNE
+ * - Jeśli QR BCIxxxx nie istnieje w arkuszu -> błąd: "Nieznany kod zlecenia: ..."
+ */
+
+function IndOrdersService_resolveRoomByQr_(qrId) {
+  const codeRaw = String(qrId || '').trim();
+  const code = codeRaw.toUpperCase();
+
+  // Format BCI + 4 digits
+  if (!/^BCI\d{4}$/.test(code)) throw new Error('Nieprawidłowy kod zlecenia: ' + String(codeRaw || ''));
+
+  const rec = IndOrdersRepo_getByQrId_(code);
+  if (!rec || !rec.qrId) throw new Error('Nieznany kod zlecenia: ' + code);
+
+  const zone = IndOrdersService_sanitizeInline_(rec.clientName);
+  const room = IndOrdersService_formatRoom_(rec.city, rec.address, rec.contact, rec.details);
+
+  return {
+    roomId: code,
+    zone: zone,
+    room: room,
+    func: 'SPRZATANIE_INDYWIDUALNE',
+    client: zone,
+    _order: rec,
+  };
+}
+
+function IndOrdersService_formatRoom_(city, address, contact, details) {
+  const c = IndOrdersService_sanitizeInline_(city);
+  const a = IndOrdersService_sanitizeInline_(address);
+  const k = IndOrdersService_sanitizeInline_(contact);
+  const d = IndOrdersService_sanitizeInline_(details);
+
+  const parts = [];
+
+  // Lokalizacja
+  const loc = [c, a].filter(Boolean).join(', ');
+  if (loc) parts.push(loc);
+
+  // Kontakt
+  if (k) parts.push('Kontakt: ' + k);
+
+  // Opis / najważniejsze dane
+  if (d) parts.push(d);
+
+  const out = parts.join(' | ').trim();
+  return out || 'Zlecenie indywidualne';
+}
+
+function IndOrdersService_sanitizeInline_(v) {
+  return String(v || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}

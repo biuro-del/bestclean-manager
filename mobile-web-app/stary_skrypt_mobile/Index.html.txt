@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top" />
+    <?!= include('styles'); ?>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="header">
+        <div class="header-left header-left--nav">
+
+          <button id="navHome" class="top-nav-btn" type="button" aria-label="Strona główna" title="Strona główna">
+            <span class="top-nav-ico" aria-hidden="true">🏠</span>
+          </button>
+        </div>
+
+        <div class="header-center">
+          <img class="header-logo header-logo--bestclean" src="https://static.wixstatic.com/media/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png/v1/fill/w_698,h_238,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png" alt="Best Clean" />
+        </div>
+
+        <div class="header-right header-right--nav">
+          <button id="navSettings" class="top-nav-btn" type="button" aria-label="Ustawienia" title="Ustawienia">
+            <span class="top-nav-ico" aria-hidden="true">⚙️</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="main">
+        <section id="viewLogin" class="card hidden"></section>
+        <section id="viewMenu" class="card hidden"></section>
+        <section id="viewWorklog" class="card hidden"></section>
+        <section id="viewWorkSummary" class="card hidden"></section>
+        <section id="viewWorkSummaryDetails" class="card hidden"></section>
+        <section id="viewStartDay" class="card hidden"></section>
+        <section id="viewScanRoom" class="card hidden"></section>
+        <section id="viewPause" class="card hidden"></section>
+        <section id="viewCleaning" class="card hidden"></section>
+        <section id="viewEndDay" class="card hidden"></section>
+        <section id="viewCoordinator" class="card hidden"></section>
+      </main>
+
+<!-- Global settings modal (opened from header gear) -->
+      <div id="settingsModalHome" class="modal hidden" role="dialog" aria-modal="true" aria-label="Ustawienia">
+        <div class="modal-content settings-sheet">
+          <div class="modal-header">
+            <div class="modal-title">Ustawienia</div>
+            <button id="btnSettingsClose" class="link-btn" style="font-weight:1000" aria-label="Zamknij">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="settings-list">
+              <button id="btnLang" class="settings-item" type="button">
+                Zmień język
+                <small>Wkrótce (PL/EN/ES triggering)</small>
+              </button>
+              <button id="btnLogoutSettings" class="settings-item" type="button" style="border-color: rgba(220,38,38,0.35); background: rgba(220,38,38,0.16);">
+                Wyloguj
+                <small>Wylogowanie z tego urządzenia</small>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+</div>
+      </div>
+
+      <!-- Scan modal -->
+      <div id="scanModal" class="modal hidden" role="dialog" aria-modal="true">
+        <div class="modal-content">
+          <div class="modal-header">
+            <div class="modal-title">Skanuj QR</div>
+            <div class="row" style="align-items:center;gap:10px">
+              <button id="btnTorch" class="btn secondary" style="width:auto;padding:12px 14px;font-size:18px">Latarka: OFF</button>
+              <button id="btnCloseScan" class="btn secondary" style="width:auto;padding:12px 14px;font-size:18px">Wróć</button>
+            </div>
+          </div>
+
+          <div class="modal-body">
+            <video id="scanVideo" playsinline></video>
+            <div id="scanStatus" class="muted"></div>
+
+            <div id="manualFallback" class="box hidden" style="margin-top:10px">
+              <div class="muted" style="font-weight:900;margin-bottom:6px">Wklej lub wpisz ID (z łapy)</div>
+<input id="manualRoomId" class="input" placeholder="Wklej tekst z QR (ID)..." />
+              <button id="btnManualSubmit" class="btn primary" style="margin-top:10px">Użyj wklejonego ID</button>
+</div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- Dialog modal -->
+      <div id="dialogModal" class="modal hidden" role="dialog" aria-modal="true">
+        <div class="modal-content">
+          <div class="modal-header">
+            <div id="dialogTitle" class="modal-title">Informacja</div>
+          </div>
+          <div class="modal-body">
+            <div id="dialogMessage" class="dialog-message"></div>
+            <div class="row">
+              <button id="btnDialogCancel" class="btn secondary">Anuluj</button>
+              <button id="btnDialogOk" class="btn primary">OK</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Comment modal -->
+      <div id="commentModal" class="modal hidden" role="dialog" aria-modal="true">
+        <div class="modal-content">
+          <div class="modal-header">
+            <div id="commentTitle" class="modal-title">Uwagi (opcjonalnie)</div>
+          </div>
+          <div class="modal-body">
+            <div class="muted">Dodaj krótki komentarz (max <span class="commentMax">200</span> znaków).</div>
+            <textarea id="commentInput" class="textarea" maxlength="200" placeholder="Np. brak papieru, zalana podłoga..."></textarea>
+            <div class="char-counter"><span id="commentCounter">0</span>/<span class="commentMax">200</span></div>
+            <div class="row">
+              <button id="btnCommentSkip" class="btn secondary">Pomiń</button>
+              <button id="btnCommentSave" class="btn primary">Zapisz</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Small in-app overlay (for short ops) -->
+      <div id="loadingOverlay" class="overlay hidden" role="status" aria-live="polite">
+        <div class="overlay-card">
+          <div class="spinner" aria-hidden="true"></div>
+          <div id="loadingText" class="overlay-text">Czekaj...</div>
+        </div>
+      </div>
+
+      <!-- Boot overlay (first load / resume) -->
+      <div id="bootOverlay" class="boot-overlay">
+        <div class="boot-card">
+          <div class="spinner" aria-hidden="true"></div>
+          <div class="boot-title">Ładowanie aplikacji…</div>
+          <div class="boot-sub muted">Sprawdzam ostatni etap pracy</div>
+        </div>
+      </div>
+
+    </div>
+<?!= include('apiClient'); ?>
+    <?!= include('sessionStore'); ?>
+    <?!= include('timePolicy'); ?>
+    <?!= include('lifecycle'); ?>
+    <?!= include('ui'); ?>
+    <?!= include('qrScanner'); ?>
+    <?!= include('audit'); ?>
+    <?!= include('bootstrap'); ?>
+    <?!= include('app'); ?>
+  </body>
+</html>

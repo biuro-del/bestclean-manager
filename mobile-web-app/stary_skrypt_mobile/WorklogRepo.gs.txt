@@ -1,0 +1,124 @@
+/**
+ * Worklog repository (CLEAN-only monthly lists) using sheetId=629711994.
+ * Filters only Status=CLOSED for the current worker login.
+ *
+ * Output groups by local date (script timezone).
+ */
+const WORKLOG = {
+  SHEET_ID: 629711994,
+  HEADERS: {
+    LOGIN: 'WorkerLogin',
+    START_AT: 'StartAt',
+    END_AT: 'EndAt',
+    DURATION_SEC: 'DurationSec',
+    STATUS: 'Status',
+  }
+};
+
+function Worklog_sheet_() {
+  return Sheets_getBySheetId_(WORKLOG.SHEET_ID);
+}
+
+function Worklog_pickCols_(sh) {
+  const map = Sheets_headerMap_(sh);
+  const H = WORKLOG.HEADERS;
+  return {
+    colLogin: map[H.LOGIN] || 2,
+    colStart: map[H.START_AT] || 5,
+    colEnd: map[H.END_AT] || 8,
+    colDur: map[H.DURATION_SEC] || 9,
+    colStatus: map[H.STATUS] || 10,
+  };
+}
+
+function Worklog_monthRange_(year, month1to12) {
+  const y = Number(year);
+  const m = Number(month1to12);
+  const from = new Date(`${y}-${String(m).padStart(2,'0')}-01T00:00:00`);
+  const to = (m === 12)
+    ? new Date(`${y+1}-01-01T00:00:00`)
+    : new Date(`${y}-${String(m+1).padStart(2,'0')}-01T00:00:00`);
+  return { from, to };
+}
+
+function Worklog_dateKey_(d, tz) {
+  return Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+}
+
+function Worklog_timeHM_(d, tz) {
+  return Utilities.formatDate(d, tz, 'HH:mm');
+}
+
+function Worklog_parseDate_(v) {
+  if (!v) return null;
+  if (v instanceof Date) return v;
+  const s = String(v).trim();
+  if (!s) return null;
+  const d = new Date(s);
+  return isFinite(d.getTime()) ? d : null;
+}
+
+/**
+ * Returns grouped days for month: [{ dateKey, startHm, endHm, totalSec }]
+ * Only CLOSED rows are included.
+ */
+function Worklog_listMonthDaysClosed_(workerLogin, year, month1to12) {
+  const login = String(workerLogin || '').trim();
+  if (!login) return [];
+
+  const tz = Session.getScriptTimeZone ? Session.getScriptTimeZone() : 'Europe/Warsaw';
+  const sh = Worklog_sheet_();
+  const cols = Worklog_pickCols_(sh);
+
+  const rng = Worklog_monthRange_(year, month1to12);
+  const fromMs = rng.from.getTime();
+  const toMs = rng.to.getTime();
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  const width = Math.max(cols.colLogin, cols.colStart, cols.colEnd, cols.colDur, cols.colStatus);
+  const values = sh.getRange(2, 1, lastRow - 1, width).getValues();
+
+  const byDay = {};
+  values.forEach(row => {
+    const li = String(row[cols.colLogin - 1] || '').trim();
+    if (li !== login) return;
+
+    const status = String(row[cols.colStatus - 1] || '').trim().toUpperCase();
+    if (status !== 'CLOSED') return;
+
+    const dStart = Worklog_parseDate_(row[cols.colStart - 1]);
+    const dEnd = Worklog_parseDate_(row[cols.colEnd - 1]);
+    if (!dStart || !dEnd) return;
+
+    const ms = dStart.getTime();
+    if (!isFinite(ms) || ms < fromMs || ms >= toMs) return;
+
+    const key = Worklog_dateKey_(dStart, tz);
+    const dur = Number(row[cols.colDur - 1] || 0) || 0;
+
+    const a = byDay[key] || { dateKey: key, startAt: dStart, endAt: dEnd, totalSec: 0 };
+    if (dStart.getTime() < a.startAt.getTime()) a.startAt = dStart;
+    if (dEnd.getTime() > a.endAt.getTime()) a.endAt = dEnd;
+    a.totalSec += Math.max(0, Math.floor(dur));
+    byDay[key] = a;
+  });
+
+  return Object.keys(byDay).sort().map(k => {
+    const a = byDay[k];
+    return {
+      dateKey: a.dateKey,
+      startHm: Worklog_timeHM_(a.startAt, tz),
+      endHm: Worklog_timeHM_(a.endAt, tz),
+      totalSec: a.totalSec
+    };
+  });
+}
+
+function Worklog_sumMonthClosed_(workerLogin, year, month1to12) {
+  const days = Worklog_listMonthDaysClosed_(workerLogin, year, month1to12);
+  let total = 0;
+  days.forEach(d => total += Number(d.totalSec || 0));
+  return total;
+}

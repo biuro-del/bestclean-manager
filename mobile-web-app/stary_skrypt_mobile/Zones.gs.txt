@@ -1,0 +1,225 @@
+/**
+ * Zones repository (reads from "Strefy" sheet).
+ *
+ * QR code content = value from column "ID".
+ * QR function is taken from column "Funkcja" (CONFIG.HEADERS.ZONES.FUNC).
+ *
+ * Supported functions (case-insensitive):
+ *  - START
+ *  - STOP0 / STOP5 / STOP10 / STOP15
+ *  - Clean (or empty) => normal cleaning zone
+ * *
+ * NOTE: Empty Funkcja is treated as Clean.
+ */
+
+function Zones_normalizeFunc_(raw) {
+  const v0 = String(raw || '').trim();
+  if (!v0) return 'CLEAN';
+
+  // Compact for easier matching (ignore spaces/underscores)
+  const compact = v0
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/_/g, '');
+
+  if (compact === 'START') return 'START';
+
+  // Clean aliases
+  if (compact === 'CLEAN' || compact === 'SPRZATANIE' || compact === 'SPRZĄTANIE') return 'CLEAN';
+
+  // Individual cleaning aliases
+  if (compact === 'SPRZATANIEINDYWIDUALNE' || compact === 'SPRZĄTANIEINDYWIDUALNE' || compact === 'ZLECENIEINDYWIDUALNE') {
+    return 'CLEAN';
+  }
+
+  // STOPx
+  if (/^STOP(0|5|10|15)$/.test(compact)) return compact;
+
+  // Unknown values => treat as CLEAN (backward/forward compatible)
+  return 'CLEAN';
+}
+
+function Zones_resolveRoom_(roomId) {
+  if (!roomId) throw new Error('Missing roomId.');
+
+  // Cache resolved zones by QR (roomId). Strefy rarely changes and this is called very often.
+  const rid = String(roomId || '').trim();
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'zones:resolve:v1:' + rid;
+  const cached = cache.get(cacheKey);
+  if (cached !== null && cached !== undefined) {
+    try {
+      const obj = JSON.parse(cached);
+      if (obj && obj.roomId && obj.func) return obj;
+    } catch (_) {}
+  }
+  const sheet = Sheets_getBySheetId_(CONFIG.SHEET_ID_ZONES);
+  const h = Sheets_headerMap_(sheet);
+
+  const H = CONFIG.HEADERS.ZONES;
+  const idCol = h[H.ROOM_ID];
+  if (!idCol) throw new Error('Zones sheet missing header: ' + H.ROOM_ID);
+
+  const rowIndex = Sheets_findRowIndexByValue_(sheet, idCol, roomId);
+  if (!rowIndex) throw new Error('Unknown QR / RoomID: ' + roomId);
+
+  const lastCol = sheet.getLastColumn();
+  const row = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+
+  const get = (headerName) => {
+    const col = h[headerName];
+    return col ? row[col - 1] : '';
+  };
+
+  const funcRaw = get(H.FUNC);
+  const func = Zones_normalizeFunc_(funcRaw);
+
+  const resolved = {
+    roomId: String(get(H.ROOM_ID)),
+    zone: String(get(H.ZONE)),
+    room: String(get(H.ROOM)),
+    func: func,
+    client: String(get(H.CLIENT)),
+    location: String(get('Lokalizacja')),
+  };
+
+  try { cache.put(cacheKey, JSON.stringify(resolved), 300); } catch (_) {}
+  return resolved;
+}
+
+function Zones_getFuncForRoomId_(roomId) {
+  const z = Zones_resolveRoom_(roomId);
+  return String(z.func || 'CLEAN');
+}
+
+function Zones_getClientForRoomId_(roomId) {
+  const z = Zones_resolveRoom_(roomId);
+  // Column B "Klient" is used as a label for special START/STOP logging.
+  // If empty, fall back to zone/room or the roomId itself (never return empty).
+  const client = String((z && z.client) || '').trim();
+  if (client) return client;
+  const zone = String((z && z.zone) || '').trim();
+  const room = String((z && z.room) || '').trim();
+  if (zone) return zone;
+  if (room) return room;
+  return String(roomId || '').trim();
+}
+
+function Zones_isStartRoomId_(roomId) {
+  try {
+    return Zones_getFuncForRoomId_(roomId) === 'START';
+  } catch (_) {
+    return false;
+  }
+}
+
+function Zones_isIndividualRoomId_(roomId) {
+  try {
+    return Zones_getFuncForRoomId_(roomId) === 'SPRZATANIE_INDYWIDUALNE';
+  } catch (_) {
+    return false;
+  }
+}
+
+function Zones_getStopGraceMinForRoomId_(roomId) {
+  try {
+    const func = Zones_getFuncForRoomId_(roomId);
+    const m = String(func || '').toUpperCase().match(/^STOP(0|5|10|15)$/);
+    if (!m) return null;
+    return Number(m[1]);
+  } catch (_) {
+    return null;
+  }
+}
+
+function Zones_isStopRoomId_(roomId) {
+  return Zones_getStopGraceMinForRoomId_(roomId) !== null;
+}
+
+/**
+ * START QR: first row where Funkcja == START.
+ * Returns roomId (column ID).
+ */
+function Zones_getStartRoomId_() {
+  // Cache startRoomId for a short time (Strefy changes rarely)
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'zones:startRoomId:v1';
+  const cached = cache.get(cacheKey);
+  if (cached !== null && cached !== undefined) return String(cached);
+
+  const sheet = Sheets_getBySheetId_(CONFIG.SHEET_ID_ZONES);
+  const h = Sheets_headerMap_(sheet);
+  const H = CONFIG.HEADERS.ZONES;
+
+  const idCol = h[H.ROOM_ID];
+  const funcCol = h[H.FUNC];
+  if (!idCol) throw new Error('Zones sheet missing header: ' + H.ROOM_ID);
+  if (!funcCol) throw new Error('Zones sheet missing header: ' + H.FUNC);
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return '';
+
+  const ids = sheet.getRange(2, idCol, lastRow - 1, 1).getValues();
+  const funcs = sheet.getRange(2, funcCol, lastRow - 1, 1).getValues();
+
+  for (let i = 0; i < ids.length; i++) {
+    const id = String(ids[i][0] || '').trim();
+    if (!id) continue;
+    const f = Zones_normalizeFunc_(funcs[i][0]);
+    if (f === 'START') {
+      try { cache.put(cacheKey, id, 300); } catch (_) {}
+      return id;
+    }
+  }
+  try { cache.put(cacheKey, '', 300); } catch (_) {}
+  return '';
+}
+
+/**
+ * STOP rules: all rows where Funkcja == STOP0/STOP5/STOP10/STOP15.
+ * Returns array of { roomId, graceMin }.
+ */
+function Zones_getStopRules_() {
+  // Cache STOP rules for a short time (Strefy changes rarely)
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'zones:stopRules:v1';
+  const cached = cache.get(cacheKey);
+  if (cached !== null && cached !== undefined) {
+    try { return JSON.parse(cached) || []; } catch (_) { return []; }
+  }
+
+  const sheet = Sheets_getBySheetId_(CONFIG.SHEET_ID_ZONES);
+  const h = Sheets_headerMap_(sheet);
+  const H = CONFIG.HEADERS.ZONES;
+
+  const idCol = h[H.ROOM_ID];
+  const funcCol = h[H.FUNC];
+  if (!idCol) throw new Error('Zones sheet missing header: ' + H.ROOM_ID);
+  if (!funcCol) throw new Error('Zones sheet missing header: ' + H.FUNC);
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  const ids = sheet.getRange(2, idCol, lastRow - 1, 1).getValues();
+  const funcs = sheet.getRange(2, funcCol, lastRow - 1, 1).getValues();
+
+  const out = [];
+  for (let i = 0; i < ids.length; i++) {
+    const id = String(ids[i][0] || '').trim();
+    if (!id) continue;
+    const f = Zones_normalizeFunc_(funcs[i][0]);
+    const m = String(f || '').match(/^STOP(0|5|10|15)$/);
+    if (m) out.push({ roomId: id, graceMin: Number(m[1]) });
+  }
+
+  try { cache.put(cacheKey, JSON.stringify(out), 300); } catch (_) {}
+  return out;
+}
+
+/**
+ * Backward compatibility: historically START was "utility".
+ */
+function Zones_getUtilityRoomId_() {
+  return Zones_getStartRoomId_();
+}
+

@@ -1,0 +1,37 @@
+/**
+ * Workers repository (reads from Workers sheet).
+ */
+function Workers_findByLogin_(login) {
+  const sheet = Sheets_getBySheetId_(CONFIG.SHEET_ID_WORKERS);
+  const h = Sheets_headerMap_(sheet);
+
+  const H = CONFIG.HEADERS.WORKERS;
+  const loginCol = h[H.LOGIN];
+  if (!loginCol) throw new Error('Workers sheet missing header: ' + H.LOGIN);
+
+  const rowIndex = Sheets_findRowIndexByValue_(sheet, loginCol, login);
+  if (!rowIndex) return null;
+
+  const lastCol = sheet.getLastColumn();
+  const row = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+
+  const get = (headerName) => {
+    const col = h[headerName];
+    return col ? row[col - 1] : undefined;
+  };
+
+  return {
+    workerId: get(H.WORKER_ID),
+    name: get(H.NAME),
+    login: get(H.LOGIN),
+    password: get(H.PASSWORD),
+    active: get(H.ACTIVE),
+    type: get(H.TYPE),
+  };
+}
+
+
+function Workers_getTypeByLogin_(login) {
+  const w = Workers_findByLogin_(login);
+  return w ? String(w.type || '').trim() : '';
+}

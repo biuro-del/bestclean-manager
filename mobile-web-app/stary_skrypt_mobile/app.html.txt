@@ -1,0 +1,2230 @@
+<script>
+window.BC = window.BC || {};
+BC.App = (function() {
+
+  function bootShow(msg) {
+    const el = document.getElementById('bootOverlay');
+    if (!el) return;
+    el.classList.remove('hidden');
+    if (msg) {
+      const sub = el.querySelector('.boot-sub');
+      if (sub) sub.textContent = msg;
+    }
+  }
+  function bootHide() {
+    const el = document.getElementById('bootOverlay');
+    if (!el) return;
+    el.classList.add('hidden');
+  }
+  // ===== Idle auto-logout DISABLED =====
+  // Usunięto licznik i automatyczne wylogowanie po bezczynności.
+  function idleSetUi_() {}
+  function idleReset_() {}
+  function idlePause_() {}
+  function idleResume_() {}
+  function bindIdleActivity_() {}
+
+  let timerHandle = null;
+  let menuTimerHandle = null;
+  let menuEndingHandle = null;
+  let leftHandle = null;
+  let pauseHandle = null;
+
+  // Navigation state
+  let currentScreen = 'login'; // login | menu | workflow | coordinator
+  let __staleWorkdayMsg = '';
+
+  // ===== Global bottom nav (always visible) =====
+  function setNavActive_(screen) {
+    const bHome = document.getElementById('navHome');
+    const bChat = document.getElementById('navChat');
+    const bSet = document.getElementById('navSettings');
+
+    const s = String(screen || '').toLowerCase();
+    const isLogin = (s === 'login');
+
+    // Simple rule: highlight HOME everywhere except login
+    try { if (bHome) bHome.classList.toggle('is-active', !isLogin); } catch (_) {}
+    try { if (bChat) bChat.classList.remove('is-active'); } catch (_) {}
+    try { if (bSet) bSet.classList.remove('is-active'); } catch (_) {}
+  }
+
+  function bindGlobalNav_() {
+    const navHome = document.getElementById('navHome');
+    const navChat = document.getElementById('navChat');
+    const navSettings = document.getElementById('navSettings');
+
+    if (navHome) navHome.onclick = () => { try { goHome_(); } catch (_) {} };
+
+    if (navChat) navChat.onclick = () => {
+      try { if (window.BC && BC.UI && typeof BC.UI.alert === 'function') BC.UI.alert('Wkrótce: czat AI 🤖', { title: 'CZAT' }); } catch (_) {}
+    };
+
+    // Settings modal (global)
+    const settingsModal = document.getElementById('settingsModalHome');
+    const btnSettingsClose = document.getElementById('btnSettingsClose');
+    const btnLang = document.getElementById('btnLang');
+    const btnLogout = document.getElementById('btnLogoutSettings');
+
+    const showSettings = () => { try { if (settingsModal) settingsModal.classList.remove('hidden'); } catch (_) {} };
+    const hideSettings = () => { try { if (settingsModal) settingsModal.classList.add('hidden'); } catch (_) {} };
+
+    if (navSettings) navSettings.onclick = () => showSettings();
+
+    if (btnSettingsClose) btnSettingsClose.onclick = () => hideSettings();
+    if (settingsModal) settingsModal.onclick = (e) => { if (e && e.target === settingsModal) hideSettings(); };
+
+    if (btnLang) btnLang.onclick = () => {
+      try { if (window.BC && BC.UI && typeof BC.UI.alert === 'function') BC.UI.alert('Wkrótce: wybór języka (PL/EN/ES…).', { title:'Język' }); } catch (_) {}
+    };
+
+    if (btnLogout) {
+      btnLogout.onclick = async () => {
+        try {
+          const ok = (window.BC && BC.UI && typeof BC.UI.confirm === 'function')
+            ? await BC.UI.confirm('Wylogować z tego urządzenia?', { title: 'Wyloguj', okText: 'Wyloguj', cancelText: 'Anuluj' })
+            : confirm('Wylogować?');
+          if (!ok) return;
+          try { if (window.BC && BC.Store && typeof BC.Store.logout === 'function') BC.Store.logout(); } catch (_) {}
+          try { location.reload(); } catch (_) {}
+        } catch (_) {}
+      };
+    }
+  }
+
+
+  function setHeaderFor_(screen) {
+    const btnLogout = document.getElementById('btnLogout');
+    const btnBack = document.getElementById('btnBack');
+
+    if (btnLogout) btnLogout.classList.toggle('hidden', screen === 'login');
+    if (btnBack) btnBack.classList.toggle('hidden', !((screen === 'workflow' || screen === 'coordinator' || screen === 'coordinatorAudit' || screen === 'worklog' || screen === 'worksummary' || screen === 'worksummaryDetails')));
+  }
+
+  function setScreen_(screen, { historyMode, state } = {}) {
+    currentScreen = String(screen || 'menu');
+    setHeaderFor_(currentScreen);
+    try { setNavActive_(currentScreen); } catch (_) {}
+    try { idleSetUi_(); } catch (_) {}
+
+    // Keep browser history in sync so that the phone "back" button works.
+    if (historyMode) {
+      try {
+        const st = Object.assign({ screen: currentScreen }, (state || {}));
+        if (historyMode === 'push') history.pushState(st, '');
+        if (historyMode === 'replace') history.replaceState(st, '');
+      } catch (_) {}
+    }
+  }
+
+  function formatHMS(totalSec) {
+    const s = Math.max(0, Math.floor(totalSec));
+    const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+    const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    return `${hh}:${mm}:${ss}`;
+  }
+
+  function formatMMSS(sec) {
+    const s = Math.max(0, Math.floor(sec || 0));
+    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    return mm + ':' + ss;
+  }
+
+  function getEndingLeftSec(autoCloseAtIso) {
+    try {
+      const leftMs = new Date(autoCloseAtIso).getTime() - Date.now();
+      return Math.max(0, Math.round(leftMs / 1000));
+    } catch (_) {
+      return 0;
+    }
+  }
+
+    function isPaused(wd) {
+    return !!(wd && wd.pause1StartAt && !wd.pause1StopAt);
+  }
+
+function buildEndingNote(workday) {
+    try {
+      const endScanAt = new Date(workday.endScanAt || '').getTime();
+      const autoCloseAt = new Date(workday.autoCloseAt || '').getTime();
+      const graceMin = Math.max(0, Math.round((autoCloseAt - endScanAt) / 60000));
+      if (graceMin <= 0) return 'Dzień zostanie zakończony natychmiast.';
+      return 'Masz ' + graceMin + ' minut do auto-zamknięcia (ten czas wlicza się do pracy). Jeśli chcesz kontynuować, zeskanuj QR sprzątanego pomieszczenia.';
+    } catch (_) {
+      return 'Jeśli chcesz kontynuować, zeskanuj QR sprzątanego pomieszczenia.';
+    }
+  }
+
+
+  
+  function extractRoomIdFromCode(raw) {
+    const code = String(raw || '').trim();
+    if (!code) return '';
+    return code;
+  }
+
+function clientNowIso() {
+    try {
+      if (window.BC && BC.TimePolicy && typeof BC.TimePolicy.clientNowIso === 'function') {
+        return BC.TimePolicy.clientNowIso();
+      }
+    } catch (_) {}
+    return new Date().toISOString();
+  }
+
+
+  function tzOffsetMinutes() {
+    try {
+      if (window.BC && BC.TimePolicy && typeof BC.TimePolicy.tzOffsetMinutes === 'function') {
+        return BC.TimePolicy.tzOffsetMinutes();
+      }
+    } catch (_) {}
+    return new Date().getTimezoneOffset();
+  }
+
+  function formatMS(totalSec) {
+    const s = Math.max(0, Math.floor(totalSec));
+    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    return `${mm}:${ss}`;
+  }
+
+  function getElapsedSec(startIso) {
+    const start = new Date(startIso).getTime();
+    const now = Date.now();
+    return Math.max(0, Math.round((now - start) / 1000));
+  }
+
+  function stopTimers() {
+    if (timerHandle) { clearInterval(timerHandle); timerHandle = null; }
+    if (leftHandle) { clearInterval(leftHandle); leftHandle = null; }
+    if (pauseHandle) { clearInterval(pauseHandle); pauseHandle = null; }
+    if (menuTimerHandle) { clearInterval(menuTimerHandle); menuTimerHandle = null; }
+  }
+
+  function startCleaningTimer(startAtIso) {
+    stopTimers();
+    BC.UI.setElapsedText(formatHMS(getElapsedSec(startAtIso)));
+    timerHandle = setInterval(() => {
+      BC.UI.setElapsedText(formatHMS(getElapsedSec(startAtIso)));
+    }, 1000);
+  }
+
+  
+  function startPauseTimer(pauseStartAtIso) {
+    stopTimers();
+    BC.UI.setPauseElapsedText(formatHMS(getElapsedSec(pauseStartAtIso)));
+    pauseHandle = setInterval(() => {
+      BC.UI.setPauseElapsedText(formatHMS(getElapsedSec(pauseStartAtIso)));
+    }, 1000);
+  }
+
+function startEndingCountdown(autoCloseAtIso) {
+    stopTimers();
+    function tick() {
+      const leftSec = Math.max(0, Math.round((new Date(autoCloseAtIso).getTime() - Date.now()) / 1000));
+      BC.UI.setLeftText(formatMS(leftSec));
+      if (leftSec <= 0) {
+        stopTimers();
+        
+      BC.Store.setActiveCycle(null);
+      BC.Store.setActiveWorkday(null);
+
+      // After CLOSE NOW confirmation from backend: log out the user
+      return logoutToLogin_('Dzień pracy zakończony. Zaloguj się ponownie.');
+}
+    }
+    tick();
+    leftHandle = setInterval(tick, 1000);
+  }
+
+  async function api(path, data, opts) {
+    const o = opts || {};
+    if (o.loading) BC.UI.setLoading(true, o.loadingText || 'Czekaj...');
+    try {
+      return await BC.ApiClient.post(path, data);
+    } finally {
+      if (o.loading) BC.UI.setLoading(false);
+    }
+  }
+
+  function authPayload() {
+    const token = BC.Store.getToken();
+    return token ? { token } : null;
+  }
+
+  async function askOptionalComment_(opts) {
+    const o = opts || {};
+    let comment = '';
+    try {
+      if (window.BC && BC.UI && typeof BC.UI.commentPrompt === 'function') {
+        const v = await BC.UI.commentPrompt({
+          title: o.title || 'Komentarz (opcjonalnie)',
+          maxLen: Number(o.maxLen || 300),
+          placeholder: o.placeholder || 'Max 300 znaków...'
+        });
+        comment = String(v || '').slice(0, Number(o.maxLen || 300));
+      }
+    } catch (_) {
+      comment = '';
+    }
+    return String(comment || '').trim();
+  }
+
+
+  function logoutToLogin_(msg) {
+    // Hard logout: clear token + worker and force login screen
+    try { if (window.BC && BC.Store && typeof BC.Store.logout === 'function') BC.Store.logout(); } catch (_) {}
+    try { stopTimers(); } catch (_) {}
+    try { if (window.BC && BC.UI && typeof BC.UI.setLoading === 'function') BC.UI.setLoading(false); } catch (_) {}
+    try { return showLogin(msg || 'Dzień pracy zakończony. Zaloguj się ponownie.'); } catch (_) {}
+    try { location.reload(); } catch (_) {}
+  }
+
+
+  async function showLogin(errorMsg) {
+    stopTimers();
+    setScreen_('login', { historyMode: 'replace' });
+    BC.UI.renderLogin({
+      errorMsg,
+      onSubmit: async ({ login, password }) => {
+        BC.UI.setLoading(true, 'Logowanie...');
+        try {
+          const res = await api('auth/login', { login, password, deviceId: BC.Store.getDeviceId() });
+          BC.Store.setToken(res.token);
+          BC.Store.setWorker(res.worker);
+          const br = (window.BC && BC.Bootstrap && typeof BC.Bootstrap.run === 'function')
+            ? await BC.Bootstrap.run({ timeoutMs: 8000 })
+            : { ok: false, needLogin: true, message: 'Wymagane ponowne logowanie.' };
+
+          if (br && br.needLogin) return showLogin(br.message || 'Wymagane ponowne logowanie.');
+      
+
+    // Ensure only menu is visible (prevents screens stacked under menu)
+    try { if (window.BC && BC.UI && typeof BC.UI.hideAllPublic === 'function') BC.UI.hideAllPublic(); } catch (_) {}
+
+    showMenu();
+        } catch (err) {
+          showLogin(err.message || 'Błąd logowania');
+        } finally {
+          BC.UI.setLoading(false);
+        }
+      }
+    });
+  }
+
+  async function bootstrapAfterLogin() {
+    try {
+      const me = await api('auth/me', authPayload());
+      BC.Store.setWorker(me.worker);
+    } catch (_) {
+      BC.Store.logout();
+      return showLogin('Sesja wygasła. Zaloguj się ponownie.');
+    }
+
+    // Perf: hydrate the rest in parallel (fewer round-trips after login)
+    const settled = await Promise.allSettled([
+      api('workday/utilityId', authPayload()),
+      api('workday/active', Object.assign({}, authPayload(), { clientNow: clientNowIso(), tzOffsetMinutes: tzOffsetMinutes() })),
+      api('cycles/active', Object.assign({}, authPayload(), { clientNow: clientNowIso(), tzOffsetMinutes: tzOffsetMinutes() }))
+    ]);
+
+    const uRes = settled[0];
+    const wdRes = settled[1];
+    const cycleRes = settled[2];
+
+    if (uRes.status === 'fulfilled') {
+      const u = uRes.value || {};
+      BC.Store.setUtilityRoomId(u.startRoomId || u.utilityRoomId || '');
+      if (BC.Store && typeof BC.Store.setStopRules === 'function') BC.Store.setStopRules(u.stopRules || []);
+    } else {
+      BC.Store.setUtilityRoomId('');
+      if (BC.Store && typeof BC.Store.setStopRules === 'function') BC.Store.setStopRules([]);
+    }
+
+
+if (wdRes.status === 'fulfilled') {
+  const wv = wdRes.value || {};
+  BC.Store.setActiveWorkday((wv && wv.workday) || null);
+  if (!wv.workday && wv.staleOpen) {
+    __staleWorkdayMsg = 'Wykryto błędy w twoim czasie pracy - skanuj START aby kontynuować pracę a koordynator uzupełni braki. Ty masz to już z głowy.';
+  }
+}
+
+    if (cycleRes.status === 'fulfilled') {
+      BC.Store.setActiveCycle((cycleRes.value && cycleRes.value.cycle) || null);
+    }
+    // Hydrate cycle.func for an already running cycle (reload scenario)
+    try {
+      const c = BC.Store.getActiveCycle();
+      if (c && c.cycleId && c.roomId && !c.func) {
+        const zr = await api('zones/resolve', Object.assign({}, authPayload(), { roomId: c.roomId }));
+        if (zr && zr.zone && zr.zone.func) {
+          c.func = zr.zone.func;
+          BC.Store.setActiveCycle(c);
+        }
+      }
+    } catch (_) {}
+    // Navigation is handled by MENU (always after login)
+  }
+
+  
+
+  async function refreshStopRules_(opts) {
+    const o = opts || {};
+    try {
+      const res = await api('workday/utilityId', authPayload(), { loading: !!o.loading, loadingText: o.loadingText || 'Czekaj...' });
+      if (res) {
+        BC.Store.setUtilityRoomId(res.startRoomId || res.utilityRoomId || '');
+        if (BC.Store && typeof BC.Store.setStopRules === 'function') BC.Store.setStopRules(res.stopRules || []);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+
+  // =========================
+  // Checklist helpers (DAILY + EXTRA)
+  // =========================
+  async function Checklist_hydrateForCycle_(cycle) {
+    const c = cycle || {};
+    const cid = String(c.cycleId || '').trim();
+    const qrId = String(c.roomId || '').trim();
+    if (!cid || !qrId) return;
+
+    try {
+      const wrap = document.getElementById('checklistWrap');
+      if (wrap) wrap.innerHTML = '<div class="muted">Wczytuję checklistę…</div>';
+    } catch (_) {}
+
+    try {
+      const res = await api('checklist/forQr', Object.assign({}, authPayload(), {
+        deviceId: BC.Store.getDeviceId(),
+        qrId: qrId
+      }), { loading: false });
+
+      const daily = (res && res.dailyTasks) ? res.dailyTasks : [];
+      const extra = (res && res.extraTasks) ? res.extraTasks : [];
+
+      try { if (window.BC && BC.UI && typeof BC.UI.checklistSetData === 'function') BC.UI.checklistSetData({ cycleId: cid, qrId, dailyTasks: daily, extraTasks: extra }); } catch (_) {}
+    } catch (_) {
+      try { if (window.BC && BC.UI && typeof BC.UI.checklistSetData === 'function') BC.UI.checklistSetData({ cycleId: cid, qrId, dailyTasks: [], extraTasks: [] }); } catch (_) {}
+    }
+  }
+
+  async function Checklist_validateAndSubmitBeforeClose_(cycle) {
+    const c = cycle || {};
+    const cid = String(c.cycleId || '').trim();
+    const qrId = String(c.roomId || '').trim();
+    if (!cid || !qrId) return true;
+
+    // Validate required items
+    try {
+      if (window.BC && BC.UI && typeof BC.UI.checklistValidate === 'function') {
+        const v = BC.UI.checklistValidate(cid);
+        if (v && v.ok === false) {
+          await BC.UI.alert(v.message || 'Uzupełnij checklistę.', { title: 'Checklista' });
+          return false;
+        }
+      }
+    } catch (_) {}
+
+    // Submit only when there are tasks (idempotent by CycleId)
+    try {
+      if (!(window.BC && BC.UI && typeof BC.UI.checklistGetSubmission === 'function')) return true;
+      const sub = BC.UI.checklistGetSubmission(cid);
+      if (!sub) {
+        await BC.UI.alert('Czekaj… wczytuję checklistę.', { title: 'Checklista' });
+        return false;
+      }
+
+      const daily = Array.isArray(sub.daily) ? sub.daily : [];
+      const extra = Array.isArray(sub.extra) ? sub.extra : [];
+      const hasAny = (daily.length + extra.length) > 0;
+      if (!hasAny) return true;
+
+      const wd = (BC.Store && typeof BC.Store.getActiveWorkday === 'function') ? (BC.Store.getActiveWorkday() || {}) : {};
+
+      await api('checklist/submit', Object.assign({}, authPayload(), {
+        deviceId: BC.Store.getDeviceId(),
+        qrId: qrId,
+        cycleId: cid,
+        workdayId: String(wd.workdayId || ''),
+        clientNow: clientNowIso(),
+        tzOffsetMinutes: tzOffsetMinutes(),
+        daily: daily,
+        extra: extra
+      }), { loading: true, loadingText: 'Zapisuję checklistę…' });
+
+      try { if (window.BC && BC.UI && typeof BC.UI.checklistClear === 'function') BC.UI.checklistClear(cid); } catch (_) {}
+      return true;
+    } catch (err) {
+      await BC.UI.alert((err && err.message) ? String(err.message) : 'Nie udało się zapisać checklisty.', { title: 'Checklista' });
+      return false;
+    }
+  }
+
+
+  function routeToWorkflow() {
+    const wd = BC.Store.getActiveWorkday();
+    const status = String(wd.status || '').toUpperCase();
+    if (!wd.workdayId) return showStartDay();
+
+    if (status === 'ENDING') return showEndDay(wd);
+
+    const cycle = BC.Store.getActiveCycle();
+    if (cycle && cycle.cycleId) return showCleaning(cycle);
+
+    if (isPaused(wd)) return showPause(wd);
+
+    return showScanRoom();
+  }
+
+  function showMenu() {
+    stopTimers();
+    setScreen_('menu', { historyMode: 'replace' });
+
+    // Auto-refresh STOP rules (so new STOP codes work without relogin)
+    try { refreshStopRules_({ loading: false }); } catch (_) {}
+
+// Menu badge: START status from CLEAN (Workday RUNNING/ENDING) + only TODAY is OK
+const wd0 = (BC.Store && typeof BC.Store.getActiveWorkday === 'function') ? (BC.Store.getActiveWorkday() || {}) : {};
+const wdStatus0 = String(wd0.status || '').toUpperCase();
+const hasOpen0 = !!(wd0.workdayId && (wdStatus0 === 'RUNNING' || wdStatus0 === 'ENDING'));
+const startText0 = (hasOpen0 && wd0.startAt) ? formatLocalHM_(wd0.startAt) : '';
+
+let isToday0 = false;
+try {
+  if (hasOpen0 && wd0.startAt) {
+    const d = new Date(String(wd0.startAt));
+    const now = new Date();
+    isToday0 = (d.getFullYear() === now.getFullYear()) && (d.getMonth() === now.getMonth()) && (d.getDate() === now.getDate());
+  }
+} catch (_) { isToday0 = false; }
+
+const state0 = { active: !!(hasOpen0 && isToday0), startText: startText0, staleOpen: !!(hasOpen0 && !isToday0) };
+
+        BC.UI.renderMenu({
+      workTodayState: state0,      onCleaning: () => openCleaningFromHome_(),
+      onSchedule: showSchedule_,
+      onCoordinator: () => enterCoordinator_(),
+      onWarehouse: async () => { try { await BC.UI.alert('W przygotowaniu', { title: 'Magazyn' }); } catch (_) {} },
+      onStartDay: () => openStartScannerFromMenu_(),
+      onEndDay: () => openStopScannerFromMenu_(),
+      onPause: () => pauseFromAnywhere_(),
+      onWorklogList: () => showWorklogList_(),
+      onWorklogSummary: () => showWorklogSummary_()
+    });
+
+    // Update "Twój czas pracy" counter on MENU when RUNNING
+    try {
+      if (menuTimerHandle) { clearInterval(menuTimerHandle); menuTimerHandle = null; }
+      const wd = BC.Store.getActiveWorkday() || {};
+      const st = String(wd.status || '').toUpperCase();
+      const isRunning = !!(wd.workdayId && st === 'RUNNING');
+      const startAtIso = String(wd.startAt || '');
+      const startHm = startAtIso ? formatLocalHM_(startAtIso) : '';
+
+      function tickMenu_() {
+        const el = document.getElementById('timeRegTime');
+        const sub = document.getElementById('timeRegSub');
+        if (!el || !sub) return;
+        if (!isRunning || !startAtIso) { el.textContent = ''; return; }
+        const sec = getElapsedSec(startAtIso);
+        el.textContent = formatHMS(sec);
+        sub.innerHTML = 'Twój czas pracy <span class="pill" style="padding:6px 8px;font-size:12px;margin-left:8px">▶ ' + (startHm || '') + '</span>';
+      }
+
+      if (isRunning && startAtIso) {
+        tickMenu_();
+        menuTimerHandle = setInterval(tickMenu_, 1000);
+      }
+
+      // If day is ENDING with autoCloseAt, refresh state when due so UI switches back to START.
+      try {
+        if (menuEndingHandle) { clearTimeout(menuEndingHandle); menuEndingHandle = null; }
+        const isEnding = !!(wd.workdayId && st === 'ENDING');
+        const autoCloseAtIso = String(wd.autoCloseAt || '').trim();
+        if (isEnding && autoCloseAtIso) {
+          const dueMs = new Date(autoCloseAtIso).getTime();
+          if (isFinite(dueMs)) {
+            const delayMs = Math.max(0, dueMs - Date.now() + 1500);
+            menuEndingHandle = setTimeout(() => {
+              (async () => {
+                try {
+                  if (window.BC && BC.Bootstrap && typeof BC.Bootstrap.run === 'function') {
+                    await BC.Bootstrap.run({ timeoutMs: 8000 });
+                  }
+                } catch (_) {}
+                try { showMenu(); } catch (_) {}
+              })();
+            }, delayMs);
+          }
+        }
+      } catch (_) {}
+    } catch (_) {}
+
+  }
+
+  
+
+function isAdmin_() {
+  try {
+    const w = (BC.Store && typeof BC.Store.getWorker === 'function') ? (BC.Store.getWorker() || {}) : {};
+    const role = normalizeRole_(w.type || w.role || w.typ || '');
+    return role === 'admin';
+  } catch (_) {
+    return false;
+  }
+}
+
+  function normalizeRole_(v) {
+    return String(v || '').trim().toLowerCase();
+  }
+
+  function hasCoordinatorAccess_() {
+    const w = (BC.Store && typeof BC.Store.getWorker === 'function') ? BC.Store.getWorker() : {};
+    const role = normalizeRole_(w.type || w.role || w.typ || '');
+    // Allowed: Koordynator, Audytor, Kierownik, Admin
+    return ['koordynator', 'audytor', 'kierownik', 'admin'].includes(role);
+  }
+
+  function showCoordinatorHome_() {
+    stopTimers();
+    // screen already set by caller
+    
+    BC.UI.renderCoordinatorHome({
+      onCurrentAudit: async () => { await BC.UI.alert('Wkrótce.', { title: 'Czas aktualnego audytu' }); },
+      onAuditMonths: async () => { await BC.UI.alert('Wkrótce.', { title: 'Czas audytów' }); },
+      onDoAudit: async () => { await enterCoordinatorAudit_(); },
+      onEditQr: async () => { await enterCoordinatorEditQr_(); },
+      onBack: () => showMenu()
+    });
+  }
+
+async function enterCoordinatorEditQr_() {
+  if (!hasCoordinatorAccess_()) {
+    await BC.UI.alert('Nie masz dostępu do modułu.', { title: 'Strefa koordynatora' });
+    return;
+  }
+
+  setScreen_('coordinator', { historyMode: 'push' });
+
+  let clients = [];
+  try {
+    const res = await api('qr/clients', authPayload(), { loading: true, loadingText: 'Wczytuję klientów...' });
+    clients = (res && res.clients) ? res.clients : [];
+  } catch (err) {
+    clients = [];
+    await BC.UI.alert((err && err.message) ? err.message : 'Nie udało się wczytać listy klientów.', { title: 'Edycja QR strefy' });
+  }
+
+  BC.UI.renderCoordinatorEditQr({
+    qrId: '',
+    functionName: 'Sprzątanie',
+    clientName: '',
+    placeName: '',
+    location: '',
+    clients,
+    onScan: async () => {
+      await openScanner(async (val) => {
+        const qrId = String(val || '').trim();
+        try {
+          const el = document.getElementById('inpQrId');
+          if (el) el.value = qrId;
+        } catch (_) {}
+
+        // After scan: load existing data (if any) and prefill the form.
+        try {
+          const got = await api('qr/get', Object.assign({}, authPayload(), { qrId }), { loading: true, loadingText: 'Odczytuję dane...' });
+          const rec = got && got.record ? got.record : null;
+          if (rec) {
+            const selFn = document.getElementById('selFn');
+            const selClient = document.getElementById('selClient');
+            const selPlace = document.getElementById('selPlace');
+            const inpLocation = document.getElementById('inpLocation');
+
+            if (selFn && rec.functionName !== undefined) selFn.value = String(rec.functionName || '').trim() || selFn.value;
+            if (selClient && rec.clientName !== undefined) selClient.value = String(rec.clientName || '').trim();
+            if (selPlace && rec.placeName !== undefined) selPlace.value = String(rec.placeName || '').trim();
+            if (inpLocation) {
+              const loc = (got && got.location !== undefined) ? got.location : (rec.location !== undefined ? rec.location : '');
+              inpLocation.value = String(loc || '').trim();
+            }
+          } else {
+            // Not found => keep selections, but clear client/place to avoid confusion
+            const selClient = document.getElementById('selClient');
+            const selPlace = document.getElementById('selPlace');
+            const inpLocation = document.getElementById('inpLocation');
+            if (selClient) selClient.value = '';
+            if (selPlace) selPlace.value = '';
+            if (inpLocation) inpLocation.value = '';
+          }
+        } catch (err) {
+          await BC.UI.alert((err && err.message) ? err.message : 'Nie udało się odczytać danych.', { title: 'Edycja QR strefy' });
+        }
+      });
+    },
+    onSave: async (payload) => {
+      const qrId = String(payload && payload.qrId || '').trim();
+      if (!qrId) {
+        await BC.UI.alert('Uzupełnij ID z kodu QR (kol. A).', { title: 'Edycja QR strefy' });
+        return;
+      }
+      try {
+        await api('qr/upsert', Object.assign({}, authPayload(), { record: payload }), { loading: true, loadingText: 'Zapisuję...' });
+        await BC.UI.alert('Zapisano.', { title: 'Edycja QR strefy' });
+      } catch (err) {
+        await BC.UI.alert((err && err.message) ? err.message : 'Błąd zapisu.', { title: 'Edycja QR strefy' });
+      }
+    },
+    onBack: () => {
+      setScreen_('coordinator', { historyMode: 'replace' });
+      showCoordinatorHome_();
+    }
+  });
+}
+
+
+  
+    // ===== Coordinator: Audit (moved to audit.html) =====
+
+function enterCoordinator_() {
+    if (!hasCoordinatorAccess_()) {
+      BC.UI.alert('Nie masz dostępu do modułu.', { title: 'Strefa koordynatora' });
+      return;
+    }
+    setScreen_('coordinator', { historyMode: 'push' });
+    showCoordinatorHome_();
+  }
+
+
+function openCleaningFromHome_() {
+    // Two scenarios:
+    // 1) No active zone -> open scanner immediately (no intermediate screen).
+    // 2) Active zone -> show the zone screen.
+    try {
+      const cycle = (BC.Store && typeof BC.Store.getActiveCycle === 'function') ? (BC.Store.getActiveCycle() || {}) : {};
+      if (cycle && cycle.cycleId) {
+        // Push workflow state so phone back returns to MENU
+        setScreen_('workflow', { historyMode: 'push' });
+        return showCleaning(cycle);
+      }
+    } catch (_) {}
+
+    // If day is not started, route to START screen
+    try {
+      const wd = (BC.Store && typeof BC.Store.getActiveWorkday === 'function') ? (BC.Store.getActiveWorkday() || {}) : {};
+      const st = String(wd.status || '').toUpperCase();
+      if (!wd.workdayId || st === 'NONE' || st === 'CLOSED') {
+        return showStartDay('Zeskanuj QR START, aby rozpocząć dzień.');
+      }
+      if (st === 'ENDING') {
+        return showEndDay(wd, 'STOP');
+      }
+      if (isPaused(wd)) {
+        setScreen_('workflow', { historyMode: 'push' });
+        return showPause(wd);
+      }
+    } catch (_) {}
+
+    // Default: open scanner on top of HOME (no scan screen)
+    return openScanner(handleScanInScanRoom);
+  }
+
+
+function enterWorkflow_() {
+    // From MENU we want a new history entry so that phone back button returns to MENU.
+    setScreen_('workflow', { historyMode: 'push' });
+    routeToWorkflow();
+  }
+
+
+  async function openStopScanner_(sourceLabel, opts) {
+    opts = opts || {};
+    let __stopClosedOnce = false;
+    const fireStopClosed_ = () => {
+      if (__stopClosedOnce) return;
+      __stopClosedOnce = true;
+      try { if (typeof opts.onClosed === 'function') opts.onClosed(); } catch (_) {}
+    };
+    // Ensure STOP rules are fresh (no relogin needed)
+    try { await refreshStopRules_({ loading: false }); } catch (_) {}
+    // Open QR scanner but accept ONLY STOP codes.
+    const wd = BC.Store.getActiveWorkday() || {};
+    const st = String(wd.status || '').toUpperCase();
+
+    if (!wd.workdayId || st === 'CLOSED' || st === 'NONE') {
+      BC.UI.alert('Brak rozpoczętego dnia pracy. Najpierw zeskanuj START.', { title: 'Zakończ dzień pracy' });
+      try { fireStopClosed_(); } catch (_) {}
+      return;
+    }
+
+    // If already ending, route to ENDING screen.
+    if (st === 'ENDING') {
+      try { fireStopClosed_(); } catch (_) {}
+      return showEndDay(wd, 'STOP');
+    }
+
+    const utility = BC.Store.getUtilityRoomId();
+
+    openScanner(async (code) => {
+      const stopGrace = (BC.Store && typeof BC.Store.getStopGraceMin === 'function') ? BC.Store.getStopGraceMin(code) : null;
+
+      if (code === utility) {
+        await BC.UI.alert('To jest kod START. Aby zakończyć dzień, zeskanuj kod STOP.', { title: 'Zakończ dzień pracy' });
+        return;
+      }
+
+      if (stopGrace === null) {
+        await BC.UI.alert('To nie jest kod STOP. Zeskanuj kod STOP0/STOP5/STOP10/STOP15.', { title: 'Zakończ dzień pracy' });
+        return;
+      }
+
+      // Delegate to normal STOP handling (begin ENDING / closeNow).
+      return handleScanInScanRoom(code);
+    }, { onClosed: fireStopClosed_ });
+  }
+
+  function setMenuStopBusy_(busy) {
+    const btn = document.getElementById('btnTimeRegAction');
+    if (!btn) return;
+    try {
+      if (busy) {
+        btn.classList.add('is-busy');
+        btn.setAttribute('aria-busy', 'true');
+        btn.disabled = true;
+      } else {
+        btn.classList.remove('is-busy');
+        btn.removeAttribute('aria-busy');
+        btn.disabled = false;
+      }
+    } catch (_) {}
+  }
+
+  async function openStopScannerFromMenu_() {
+    // From MENU we keep the user on MENU and just open the scanner modal.
+    // Show a spinner on the red STOP circle to prevent multi-clicks.
+    try { setMenuStopBusy_(true); } catch (_) {}
+    return openStopScanner_('menu', { onClosed: () => { try { setMenuStopBusy_(false); } catch (_) {} } });
+  }
+
+
+  function openStartScannerFromMenu_() {
+    // Smart START scanner:
+    // - If workday is RUNNING: scanning BC*/BCI* starts cleaning and routes to Cleaning.
+    // - If no workday: START QR starts workday; BCIxxxx starts workday and immediately starts cleaning.
+    openScanner(async (code) => {
+      const roomId = String(code || '').trim();
+      if (!roomId) return;
+
+      const wd = (BC.Store && typeof BC.Store.getActiveWorkday === 'function') ? (BC.Store.getActiveWorkday() || {}) : {};
+      const st = String(wd.status || '').toUpperCase();
+      const hasRunningDay = !!(wd.workdayId && st === 'RUNNING');
+
+      const upper = roomId.toUpperCase();
+      const isBci = /^BCI\d{4}$/.test(upper);
+      const isBc = upper.startsWith('BC');
+      const stopGrace = (BC.Store && typeof BC.Store.getStopGraceMin === 'function') ? BC.Store.getStopGraceMin(roomId) : null;
+      const utility = BC.Store.getUtilityRoomId();
+
+      // If day is RUNNING, START button acts as "start cleaning" for BC/BCI codes
+      if (hasRunningDay) {
+        if (utility && roomId === utility) {
+          await BC.UI.alert('Dzień pracy jest już rozpoczęty. Zeskanuj QR strefy (BC...) lub zlecenia (BCI...), aby rozpocząć sprzątanie.', { title: 'Sprzątanie' });
+          return;
+        }
+
+        if (stopGrace !== null) {
+          await BC.UI.alert('To jest kod STOP. Aby zakończyć dzień, użyj przycisku STOP.', { title: 'Sprzątanie' });
+          return;
+        }
+
+        if (!isBc) {
+          await BC.UI.alert('Zeskanuj QR strefy (BC...) lub zlecenia (BCI...).', { title: 'Sprzątanie' });
+          return;
+        }
+
+        try {
+          const res = await api('cycles/start', Object.assign({}, authPayload(), {
+            roomId,
+            deviceId: BC.Store.getDeviceId(),
+            clientNow: clientNowIso(),
+            tzOffsetMinutes: tzOffsetMinutes(),
+            startEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
+          }), { loading: true, loadingText: 'Rozpoczynam sprzątanie...' });
+
+          BC.Store.setActiveCycle(res.cycle);
+          showCleaning(res.cycle);
+        } catch (err) {
+          await BC.UI.alert((err && err.message) ? err.message : 'Nie udało się rozpocząć sprzątania.', { title: 'Sprzątanie' });
+        }
+        return;
+      }
+
+      // No RUNNING day:
+      if (isBci) {
+        // Start day from BCI and immediately start cleaning
+        try {
+          const res = await api('workday/start', Object.assign({}, authPayload(), {
+            roomId,
+            deviceId: BC.Store.getDeviceId(),
+            clientNow: clientNowIso(),
+            tzOffsetMinutes: tzOffsetMinutes(),
+            startEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
+          }), { loading: true, loadingText: 'Rozpoczynam dzień...' });
+
+          if (res && res.workday) BC.Store.setActiveWorkday(res.workday);
+
+          if (res && res.alreadyRunning) {
+            return routeToWorkflow();
+          }
+
+          try {
+            const start = await api('cycles/start', Object.assign({}, authPayload(), {
+              roomId,
+              deviceId: BC.Store.getDeviceId(),
+              clientNow: clientNowIso(),
+              tzOffsetMinutes: tzOffsetMinutes(),
+              startEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
+            }), { loading: true, loadingText: 'Rozpoczynam sprzątanie...' });
+
+            BC.Store.setActiveCycle(start.cycle);
+            return showCleaning(start.cycle);
+          } catch (err2) {
+            await BC.UI.alert((err2 && err2.message) ? err2.message : 'Dzień rozpoczęty, ale nie udało się rozpocząć sprzątania.', { title: 'Sprzątanie' });
+            return showMenu();
+          }
+        } catch (err) {
+          await BC.UI.alert((err && err.message) ? err.message : 'Nie udało się rozpocząć dnia pracy.', { title: 'Rozpocznij pracę' });
+        }
+        return;
+      }
+
+      // Otherwise validate START QR (by resolving zone function)
+      try {
+        const zr = await api('zones/resolve', Object.assign({}, authPayload(), { roomId }), { loading: true, loadingText: 'Sprawdzam START...' });
+        const func = String((zr && zr.zone && zr.zone.func) || '').toUpperCase();
+        if (func !== 'START') {
+          await BC.UI.alert('To nie jest kod START. Zeskanuj właściwy kod START obiektu.', { title: 'Rozpocznij pracę' });
+          return;
+        }
+      } catch (err) {
+        await BC.UI.alert((err && err.message) ? err.message : 'Nie udało się zweryfikować kodu START.', { title: 'Rozpocznij pracę' });
+        return;
+      }
+
+      // Start workday (START QR)
+      try {
+        const res = await api('workday/start', Object.assign({}, authPayload(), {
+          roomId,
+          deviceId: BC.Store.getDeviceId(),
+          clientNow: clientNowIso(),
+          tzOffsetMinutes: tzOffsetMinutes(),
+          startEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
+        }), { loading: true, loadingText: 'Rozpoczynam...' });
+
+        if (res && res.workday) BC.Store.setActiveWorkday(res.workday);
+        showMenu();
+      } catch (err) {
+        await BC.UI.alert((err && err.message) ? err.message : 'Nie udało się rozpocząć dnia pracy.', { title: 'Rozpocznij pracę' });
+      }
+    });
+  }
+
+  function openStopScannerFromWorkflow_() {
+    // From workflow screens we also just open scanner modal.
+    openStopScanner_('workflow');
+  }
+
+
+
+  // ===== Workday actions from anywhere (used by HOME + Sprzątanie screens) =====
+  async function pauseFromAnywhere_() {
+    const wd = BC.Store.getActiveWorkday() || {};
+    const st = String(wd.status || '').toUpperCase();
+
+    if (!wd.workdayId || st !== 'RUNNING') {
+      if (st === 'ENDING' && wd.workdayId) {
+        await BC.UI.alert('Dzień jest w trakcie kończenia. Jeśli chcesz kontynuować, zeskanuj QR strefy.', { title: 'Pauza' });
+        return;
+      }
+      return showStartDay('Zeskanuj QR START, aby rozpocząć dzień.');
+    }
+
+    // Already paused
+    if (isPaused(wd)) {
+      await BC.UI.alert('Przerwa już trwa.', { title: 'Pauza' });
+      return showPause(wd);
+    }
+
+    // If a cycle is running, we do not auto-stop it (safe behavior)
+    const c = BC.Store.getActiveCycle() || {};
+    if (c && c.cycleId) {
+      await BC.UI.alert('Zakończ sprzątanie strefy aby rozpocząć przerwę.', { title: 'Pauza' });
+      return;
+    }
+
+    try {
+      const res = await api('workday/pauseStart', Object.assign({}, authPayload(), {
+        deviceId: BC.Store.getDeviceId(),
+        pauseEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '_pause',
+        clientNow: clientNowIso(),
+        tzOffsetMinutes: tzOffsetMinutes(),
+      }), { loading: true, loadingText: 'Czekaj...' });
+
+      BC.Store.setActiveWorkday(res.workday);
+      showPause(res.workday);
+    } catch (err) {
+      await BC.UI.alert((err && err.message) ? err.message : 'Nie udało się rozpocząć przerwy.', { title: 'Pauza' });
+    }
+  }
+
+  function openStopScannerSmartFromWorkflow_() {
+    // Ensures STOP works correctly even when cleaning or paused (stops cycle/pause if needed)
+    (async () => {
+      try { await refreshStopRules_({ loading: false }); } catch (_) {}
+
+      const wd = BC.Store.getActiveWorkday() || {};
+      const st = String(wd.status || '').toUpperCase();
+
+      if (!wd.workdayId || st === 'CLOSED' || st === 'NONE') {
+        await BC.UI.alert('Brak rozpoczętego dnia pracy. Najpierw zeskanuj START.', { title: 'Zakończ dzień pracy' });
+        return;
+      }
+
+      // If already ending, route to ENDING screen.
+      if (st === 'ENDING') {
+        return showEndDay(wd, 'STOP');
+      }
+
+      const utility = BC.Store.getUtilityRoomId();
+
+      openScanner(async (code) => {
+        const stopGrace = (BC.Store && typeof BC.Store.getStopGraceMin === 'function') ? BC.Store.getStopGraceMin(code) : null;
+
+        if (code === utility) {
+          await BC.UI.alert('To jest kod START. Aby zakończyć dzień, zeskanuj kod STOP.', { title: 'Zakończ dzień pracy' });
+          return;
+        }
+
+        if (stopGrace === null) {
+          await BC.UI.alert('To nie jest kod STOP. Zeskanuj kod STOP0/STOP5/STOP10/STOP15.', { title: 'Zakończ dzień pracy' });
+          return;
+        }
+
+        // Decide based on current state
+        const c = BC.Store.getActiveCycle();
+        const w = BC.Store.getActiveWorkday() || wd;
+
+        if (c && c.cycleId) return handleScanInCleaning(code, c);
+        if (isPaused(w)) return handleScanInPause(code, w);
+        return handleScanInScanRoom(code);
+      });
+    })();
+  }
+
+
+
+
+async function showSchedule_() {
+  try {
+    const res = await api('schedule/myWeek', authPayload(), { loading: true, loadingText: 'Wczytuję grafik...' });
+    const week = res && res.week ? res.week : null;
+    if (!week || !week.found) {
+      return BC.UI.alert('Grafik', 'Nie znaleziono grafiku dla Twojego ID (sprawdź, czy masz wpis w TABLICA).');
+    }
+
+    const days = Array.isArray(week.days) ? week.days : [];
+    const title = `Grafik — ${String(week.workerName || '').trim() || 'Twój tydzień'}`;
+    const html = buildScheduleHtml_(days);
+
+    // Reuse dialog modal with HTML content
+    return BC.UI.dialogHtml(title, html, 'Zamknij');
+  } catch (err) {
+    console.error(err);
+    return BC.UI.alert('Błąd', (err && err.message) ? String(err.message) : 'Nie udało się wczytać grafiku.');
+  }
+}
+
+function buildScheduleHtml_(days) {
+  const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const cols = days.map(d => {
+    const dn = esc(d.dayName || '');
+    const dt = esc(d.date || '');
+    return `<th class="sch-th"><div class="sch-day">${dn}</div><div class="sch-date">${dt}</div></th>`;
+  }).join('');
+
+  const row = (label, key) => {
+    const tds = days.map(d => `<td class="sch-td">${esc(d[key] || '')}</td>`).join('');
+    return `<tr><th class="sch-rowhdr">${esc(label)}</th>${tds}</tr>`;
+  };
+
+  return `
+    <div class="sch-wrap">
+      <div class="sch-note">Tydzień: poniedziałek – niedziela (wg arkusza TABLICA)</div>
+      <div class="sch-scroll">
+        <table class="sch-table">
+          <thead>
+            <tr>
+              <th class="sch-corner"></th>
+              ${cols}
+            </tr>
+          </thead>
+          <tbody>
+            ${row('Rano', 'morning')}
+            ${row('Popołudnie', 'afternoon')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+  function formatLocalHM_(iso) {
+    if (!iso) return '';
+    try {
+      return new Date(String(iso)).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+    } catch (_) {
+      return String(iso);
+    }
+  }
+
+
+  function formatHMS_(sec) {
+    const s = Math.max(0, Math.floor(sec||0));
+    const hh = String(Math.floor(s/3600)).padStart(2,'0');
+    const mm = String(Math.floor((s%3600)/60)).padStart(2,'0');
+    const ss = String(s%60).padStart(2,'0');
+    return `${hh}:${mm}:${ss}`;
+  }
+
+  async function showWorklogList_(opts) {
+    const o = opts || {};
+    let year = Number(o.year || 0);
+    let month = Number(o.month || 0);
+    const scrollToToday = !!o.scrollToToday;
+    const fromPop = !!o.fromPop;
+
+    // Default to current device month
+    if (!year || !month) {
+      const now = new Date();
+      year = now.getFullYear();
+      month = now.getMonth() + 1;
+    }
+
+    // Clamp month
+    if (month <= 0) { month = 12; year = year - 1; }
+    if (month >= 13) { month = 1; year = year + 1; }
+
+    try {
+      const clientNow = clientNowIso();
+      const tzOff = tzOffsetMinutes();
+
+      const res = await api('workday/eventsMonth', Object.assign({}, authPayload(), {
+        year,
+        month,
+        clientNow,
+        tzOffsetMinutes: tzOff
+      }), { loading: true, loadingText: 'Wczytuję...' });
+
+      const days = (res && res.days) ? res.days : [];
+
+      // Determine scroll target (today) if requested
+      let scrollKey = '';
+      if (scrollToToday) {
+        const now = new Date();
+        const yy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        if (yy === year && Number(mm) === month) {
+          scrollKey = yy + '-' + mm + '-' + dd;
+        }
+      }
+
+      BC.UI.renderWorklogList({
+        title: 'Lista zdarzeń',
+        year,
+        month,
+        days,
+        onToday: () => goWorklogToday_(),
+        onPrevMonth: () => moveWorklogMonth_(-1),
+        onNextMonth: () => moveWorklogMonth_(+1),
+        scrollToDateKey: scrollKey
+      });
+
+      // Update screen + history (so back button returns to menu)
+      setScreen_('worklog', { historyMode: fromPop ? 'replace' : 'push', state: { year, month } });
+
+      // If requested and month differs, goToday loads month first; else just scroll within current month
+      if (scrollToToday && !scrollKey) {
+        goWorklogToday_();
+      }
+    } catch (err) {
+      await BC.UI.alert((err && err.message) ? err.message : 'Nie udało się wczytać listy.', { title: 'Lista zdarzeń' });
+    }
+  }
+
+  function moveWorklogMonth_(delta) {
+    try {
+      const st = (history && history.state) ? history.state : null;
+      const y = Number((st && st.year) || 0);
+      const m = Number((st && st.month) || 0);
+      let year = y, month = m;
+      if (!year || !month) {
+        const now = new Date();
+        year = now.getFullYear();
+        month = now.getMonth() + 1;
+      }
+      month = month + Number(delta || 0);
+      if (month <= 0) { month = 12; year = year - 1; }
+      if (month >= 13) { month = 1; year = year + 1; }
+      showWorklogList_({ year, month, fromPop: true });
+    } catch (_) {}
+  }
+
+  function goWorklogToday_() {
+    try {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth() + 1;
+      showWorklogList_({ year, month, scrollToToday: true, fromPop: true });
+    } catch (_) {}
+  }
+
+
+  async function showWorklogSummary_(opts) {
+    const o = opts || {};
+    let year = Number(o.year || 0);
+    let month = Number(o.month || 0);
+    const fromPop = !!o.fromPop;
+
+    if (!year || !month) {
+      const now = new Date();
+      year = now.getFullYear();
+      month = now.getMonth() + 1;
+    }
+
+    // Clamp month
+    if (month <= 0) { month = 12; year = year - 1; }
+    if (month >= 13) { month = 1; year = year + 1; }
+
+    try {
+      const tzOff = tzOffsetMinutes();
+      const clientNow = clientNowIso();
+
+      const res = await api('workday/summaryMonth', Object.assign({}, authPayload(), {
+        year,
+        month,
+        tzOffsetMinutes: tzOff,
+        clientNow
+      }), { loading: true, loadingText: 'Wczytuję...' });
+
+      const totalSec = Number((res && res.totalSec) || 0);
+
+      BC.UI.renderWorkSummary({
+        year,
+        month,
+        workSec: totalSec,
+        onToday: () => goWorkSummaryToday_(),
+        onPrevMonth: () => moveWorkSummaryMonth_(-1),
+        onNextMonth: () => moveWorkSummaryMonth_(+1),
+        onDetails: () => showWorkSummaryDetails_({ year, month })
+      });
+
+      setScreen_('worksummary', { historyMode: fromPop ? 'replace' : 'push', state: { year, month } });
+    } catch (err) {
+      await BC.UI.alert((err && err.message) ? err.message : 'Nie udało się wczytać podsumowania.', { title: 'Podsumowanie czasu pracy' });
+    }
+  }
+
+  function moveWorkSummaryMonth_(delta) {
+    try {
+      const st = (history && history.state) ? history.state : null;
+      const y = Number((st && st.year) || 0);
+      const m = Number((st && st.month) || 0);
+      let year = y, month = m;
+      if (!year || !month) {
+        const now = new Date();
+        year = now.getFullYear();
+        month = now.getMonth() + 1;
+      }
+      month = month + Number(delta || 0);
+      if (month <= 0) { month = 12; year = year - 1; }
+      if (month >= 13) { month = 1; year = year + 1; }
+      showWorklogSummary_({ year, month, fromPop: true });
+    } catch (_) {}
+  }
+
+  function goWorkSummaryToday_() {
+    try {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth() + 1;
+      showWorklogSummary_({ year, month, fromPop: true });
+    } catch (_) {}
+  }
+
+  
+
+  async function showWorkSummaryDetails_(opts) {
+    const o = opts || {};
+    let year = Number(o.year || 0);
+    let month = Number(o.month || 0);
+    const fromPop = !!o.fromPop;
+    const scrollToToday = !!o.scrollToToday;
+
+    if (!year || !month) {
+      const now = new Date();
+      year = now.getFullYear();
+      month = now.getMonth() + 1;
+    }
+
+    if (month <= 0) { month = 12; year -= 1; }
+    if (month >= 13) { month = 1; year += 1; }
+
+    try {
+      const tzOff = tzOffsetMinutes();
+
+      const res = await api('workday/summaryMonthDays', Object.assign({}, authPayload(), {
+        year,
+        month,
+        tzOffsetMinutes: tzOff
+      }), { loading: true, loadingText: 'Wczytuję...' });
+
+      const days = (res && res.days) ? res.days : [];
+
+      let scrollKey = '';
+      if (scrollToToday) {
+        const now = new Date();
+        const yy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        if (yy === year && Number(mm) === month) scrollKey = yy + '-' + mm + '-' + dd;
+      }
+
+      BC.UI.renderWorkSummaryDetails({
+        year,
+        month,
+        days,
+        onBack: () => { try { history.back(); } catch (_) {} },
+        onToday: () => goWorkSummaryDetailsToday_(),
+        onPrevMonth: () => moveWorkSummaryDetailsMonth_(-1),
+        onNextMonth: () => moveWorkSummaryDetailsMonth_(+1),
+        scrollToDateKey: scrollKey
+      });
+
+      setScreen_('worksummaryDetails', { historyMode: fromPop ? 'replace' : 'push', state: { year, month } });
+
+      if (scrollToToday && !scrollKey) goWorkSummaryDetailsToday_();
+    } catch (err) {
+      await BC.UI.alert((err && err.message) ? err.message : 'Nie udało się wczytać szczegółów.', { title: 'Szczegóły' });
+    }
+  }
+
+  function moveWorkSummaryDetailsMonth_(delta) {
+    try {
+      const st = (history && history.state) ? history.state : null;
+      let year = Number((st && st.year) || 0);
+      let month = Number((st && st.month) || 0);
+      if (!year || !month) {
+        const now = new Date();
+        year = now.getFullYear();
+        month = now.getMonth() + 1;
+      }
+      month = month + Number(delta || 0);
+      if (month <= 0) { month = 12; year -= 1; }
+      if (month >= 13) { month = 1; year += 1; }
+      showWorkSummaryDetails_({ year, month, fromPop: true });
+    } catch (_) {}
+  }
+
+  function goWorkSummaryDetailsToday_() {
+    try {
+      const now = new Date();
+      showWorkSummaryDetails_({ year: now.getFullYear(), month: now.getMonth() + 1, scrollToToday: true, fromPop: true });
+    } catch (_) {}
+  }
+
+
+async function showWorkToday_() {
+    try {
+      const res = await api('workday/todaySummary', authPayload(), { loading: true, loadingText: 'Czekaj...' });
+      const total = formatHMS(Number(res && res.totalSec) || 0);
+      const status = String((res && res.status) || 'NONE').toUpperCase();
+      const dateKey = String((res && res.date) || '').trim();
+      const startAt = res && res.startAt ? formatLocalHM_(res.startAt) : '';
+      const endAt = res && res.endAt ? formatLocalHM_(res.endAt) : '';
+
+      let msg = '';
+      if (dateKey) msg += `Data: ${dateKey}\n`;
+      msg += `Czas pracy: ${total}\n`;
+      if (status && status !== 'NONE') msg += `Status: ${status}\n`;
+      if (startAt) msg += `Start: ${startAt}\n`;
+      if (endAt) msg += `Koniec: ${endAt}\n`;
+      if (status === 'NONE') msg = 'Brak danych o czasie pracy na dzisiaj.';
+
+      await BC.UI.alert(msg.trim(), { title: 'Dzisiejszy czas pracy' });
+    } catch (err) {
+      await BC.UI.alert(err.message || 'Nie udało się pobrać czasu pracy.');
+    }
+  }
+
+  async function showWorkMonths_() {
+    try {
+      const res = await api('workday/monthSummary', authPayload(), { loading: true, loadingText: 'Czekaj...' });
+      const months = (res && res.months) ? res.months : [];
+      if (!months.length) {
+        await BC.UI.alert('Brak danych o czasie pracy dla wybranych miesięcy.', { title: 'Czas pracy' });
+        return;
+      }
+
+      const lines = months.map((m) => {
+        const label = String((m && m.label) || (m && m.key) || '').trim();
+        const sec = Number(m && m.totalSec) || 0;
+        return `${label}: ${formatHMS(sec)}`;
+      });
+
+      await BC.UI.alert(lines.join('\n'), { title: 'Czas pracy – miesiące' });
+    } catch (err) {
+      await BC.UI.alert(err.message || 'Nie udało się pobrać czasu pracy.');
+    }
+  }
+  function showStartDay(infoMsg) {
+    stopTimers();
+    setScreen_('workflow', { historyMode: 'replace' });
+    const cycle = (BC.Store && typeof BC.Store.getActiveCycle === 'function') ? (BC.Store.getActiveCycle() || {}) : {};
+    const startCode = BC.Store.getUtilityRoomId() || '(brak)';
+    // One-time message for stale open workday
+    const __msg = (infoMsg || __staleWorkdayMsg || '');
+    __staleWorkdayMsg = '';
+    BC.UI.renderStartDay({
+      requiredCode: startCode,
+      infoMsg: __msg,
+      onPause: () => pauseFromAnywhere_(),
+      // STOP (only on this screen): scan QR to end the CURRENT ZONE and go to HOME (workday stays RUNNING)
+      onEndDay: () => {
+        const c = (BC.Store && BC.Store.getActiveCycle ? (BC.Store.getActiveCycle() || {}) : {});
+        const expected = String(c.roomId || '').trim();
+        if (!expected) return showMenu();
+
+        // Require scanning the SAME zone QR (prevents accidentally ending the day)
+        openScanner(async (code) => {
+          const scanned = String(code || '').trim();
+          if (!scanned) return;
+
+          if (scanned !== expected) {
+            await BC.UI.alert('Zeskanuj ten sam QR tej strefy, aby zakończyć sprzątanie.', { title: 'Zakończ strefę' });
+            return;
+          }
+
+          // Checklist must be completed before closing the zone
+          try {
+            if (!(await Checklist_validateAndSubmitBeforeClose_(c))) return;
+          } catch (_) {}
+
+          let zComment = '';
+          try { zComment = await askOptionalComment_({ title: 'Komentarz do strefy (opcjonalnie)', maxLen: 300 }); } catch (_) { zComment = ''; }
+
+          try {
+            await api('cycles/stop', Object.assign({}, authPayload(), {
+              cycleId: String(c.cycleId || '').trim(),
+              deviceId: BC.Store.getDeviceId(),
+              reason: 'BTN_STOP_ZONE',
+              comment: String(zComment || '').slice(0, 300),
+              endEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '_stopZone'
+            }), { loading: true, loadingText: 'Kończę strefę…' });
+
+            BC.Store.setActiveCycle(null);
+            showMenu();
+          } catch (err) {
+            await BC.UI.alert((err && err.message) ? err.message : 'Nie udało się zakończyć strefy.', { title: 'Zakończ strefę' });
+          }
+        });
+      },
+      cycleId: cycle.cycleId,
+      qrId: cycle.roomId,
+      location: cycle.location || '',
+      onScan: () => openScanner(async (code) => {
+        try {
+          const res = await api('workday/start', Object.assign({}, authPayload(), {
+            roomId: code,
+            deviceId: BC.Store.getDeviceId(),
+            clientNow: clientNowIso(),
+            tzOffsetMinutes: tzOffsetMinutes(),
+            startEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
+          }), { loading: true, loadingText: 'Czekaj...' });
+
+          BC.Store.setActiveWorkday(res.workday);
+
+          // If day already exists (e.g. refresh), just route.
+          if (res && res.alreadyRunning) {
+            return routeToWorkflow();
+          }
+
+          // Scenario S2: workday started from QR zlecenia indywidualnego (BCIxxxx) => start cleaning automatically.
+          const scannedRoomId = String(code || '').trim();
+          const isBci = /^BCI\d{4}$/i.test(scannedRoomId);
+          if (isBci) {
+            try {
+              const start = await api('cycles/start', Object.assign({}, authPayload(), {
+                roomId: scannedRoomId,
+                deviceId: BC.Store.getDeviceId(),
+                clientNow: clientNowIso(),
+                tzOffsetMinutes: tzOffsetMinutes(),
+                startEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
+              }), { loading: true, loadingText: 'Czekaj...' });
+
+              BC.Store.setActiveCycle(start.cycle);
+              return showCleaning(start.cycle);
+            } catch (err) {
+              await BC.UI.alert(err.message || 'Nie udało się rozpocząć sprzątania.');
+              return showScanRoom();
+            }
+          }
+
+          // Normal path: START QR
+          showScanRoom();
+        } catch (err) {
+          await BC.UI.alert(err.message || 'Błąd rozpoczęcia dnia.');
+        }
+      })
+    });
+  }
+
+  function showScanRoom(hint) {
+    // This intermediate screen is intentionally disabled.
+    // After closing a zone, return to HOME (no auto-open scanner).
+    try { showMenu(); } catch (_) {}
+  }
+
+  
+  function showPause(workday) {
+    stopTimers();
+    setScreen_('workflow', { historyMode: 'replace' });
+    const worker = BC.Store.getWorker();
+    BC.UI.renderPause({
+      workerName: worker.name || worker.login || '',
+      elapsedText: formatHMS(getElapsedSec(workday.pause1StartAt)),
+      onPause: () => pauseFromAnywhere_(),
+      onEndDay: () => openStopScannerSmartFromWorkflow_(),
+      onScan: () => openScanner((code) => handleScanInPause(code, workday))
+    });
+    startPauseTimer(workday.pause1StartAt);
+  }
+
+function showCleaning(cycle) {
+    stopTimers();
+    setScreen_('workflow', { historyMode: 'replace' });
+    BC.UI.renderCleaning({
+      zone: cycle.zone,
+      room: cycle.room,
+      elapsedText: formatHMS(getElapsedSec(cycle.startAt)),
+      statusMsg: 'Status: wysłano',
+      onPause: () => pauseFromAnywhere_(),
+      onEndDay: () => openStopScannerSmartFromWorkflow_(),
+      cycleId: cycle.cycleId,
+      qrId: cycle.roomId,
+      location: cycle.location || '',
+      onScan: () => openScanner((code) => handleScanInCleaning(code, cycle))
+    });
+    startCleaningTimer(cycle.startAt);
+    try { Checklist_hydrateForCycle_(cycle); } catch (_) {}
+
+    // Hydrate location from Strefy (col. G = Lokalizacja) via zones/resolve
+    try {
+      (async () => {
+        try {
+          const rid = String(cycle && cycle.roomId || '').trim();
+          if (!rid) return;
+
+          // If we already have location on the client, reflect it immediately.
+          try { if (cycle.location && window.BC && BC.UI && typeof BC.UI.setCleaningLocation === 'function') BC.UI.setCleaningLocation(cycle.location); } catch (_) {}
+
+          const zr = await api('zones/resolve', Object.assign({}, authPayload(), { roomId: rid }));
+          const z = (zr && zr.zone) ? zr.zone : null;
+          const loc = z && (z.location !== undefined) ? String(z.location || '').trim() : '';
+
+          try {
+            cycle.location = loc;
+            if (window.BC && BC.Store && typeof BC.Store.setActiveCycle === 'function') BC.Store.setActiveCycle(cycle);
+          } catch (_) {}
+
+          try { if (window.BC && BC.UI && typeof BC.UI.setCleaningLocation === 'function') BC.UI.setCleaningLocation(loc); } catch (_) {}
+        } catch (_) {}
+      })();
+    } catch (_) {}
+  }
+
+  function showEndDay(workday, scannedStopCode) {
+    stopTimers();
+    setScreen_('workflow', { historyMode: 'replace' });
+    BC.UI.renderEndDay({
+      scannedCode: scannedStopCode || 'STOP',
+      leftText: formatMMSS(getEndingLeftSec(workday.autoCloseAt)),
+      note: buildEndingNote(workday),
+      onPause: () => pauseFromAnywhere_(),
+      onEndDay: () => openStopScannerSmartFromWorkflow_(),
+      onScan: () => openScanner((code) => handleScanInEndDay(code)),
+      onCloseNow: () => handleCloseDayNow()
+    });
+    startEndingCountdown(workday.autoCloseAt);
+  }
+
+  
+  async function handleCloseDayNow() {
+    const wd = BC.Store.getActiveWorkday();
+    if (!wd || !wd.workdayId) return showStartDay();
+
+    try {
+      stopTimers();
+      const clientAt = clientNowIso(); // device time
+      await api('workday/closeNow', Object.assign({}, authPayload(), {
+        deviceId: BC.Store.getDeviceId(),
+        endEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '_closeNow',
+        clientAt: clientAt
+      }), { loading: true, loadingText: 'Czekaj...' });
+
+      BC.Store.setActiveCycle(null);
+      BC.Store.setActiveWorkday(null);
+      return logoutToLogin_('Dzień pracy zakończony. Zaloguj się ponownie.');
+    } catch (err) {
+      await BC.UI.alert(err.message || 'Nie udało się zakończyć dnia.');
+      // restart countdown if still ending
+      if (wd && wd.autoCloseAt) startEndingCountdown(wd.autoCloseAt);
+    }
+  }
+
+  function openScanner(onResult, opts) {
+    opts = opts || {};
+    let __closedOnce = false;
+    const fireClosed_ = () => {
+      if (__closedOnce) return;
+      __closedOnce = true;
+      try { if (typeof opts.onClosed === 'function') opts.onClosed(); } catch (_) {}
+    };
+    // Add a history entry so the phone "back" button closes the scanner
+    // (instead of navigating away from the app).
+    try { history.pushState({ screen: currentScreen, modal: 'scan' }, ''); } catch (_) {}
+
+    try { idlePause_(); } catch (_) {}
+
+    BC.QRScanner.open(async (code) => {
+      try { fireClosed_(); } catch (_) {}
+      // Scanner closes itself before calling this callback.
+      try { history.back(); } catch (_) {}
+      try { idleResume_(); } catch (_) {}
+      const c = extractRoomIdFromCode(code);
+      if (!c) return;
+      await onResult(c);
+    }, { allowManual: isAdmin_() });
+
+    // Override the close button to also pop the modal history state.
+    const btnClose = document.getElementById('btnCloseScan');
+    if (btnClose) {
+      btnClose.onclick = () => {
+        try { BC.QRScanner.close(); } catch (_) {}
+        try { fireClosed_(); } catch (_) {}
+        try { history.back(); } catch (_) {}
+        try { idleResume_(); } catch (_) {}
+      };
+    }
+  }
+
+  async function handleScanInScanRoom(code) {
+    const utility = BC.Store.getUtilityRoomId();
+    const wd = BC.Store.getActiveWorkday();
+    const wdStatus = String(wd.status || '').toUpperCase();
+    if (!wd.workdayId || wdStatus !== 'RUNNING') {
+      return showStartDay('Zeskanuj QR START, aby rozpocząć dzień.');
+    }
+
+    const stopGrace = (BC.Store && typeof BC.Store.getStopGraceMin === 'function') ? BC.Store.getStopGraceMin(code) : null;
+
+    // START QR (A2) does NOT stop the day anymore
+    if (code === utility) {
+      console.log('[PAUSE] branch: UTILITY');
+      await BC.UI.alert('To jest kod START. Aby zakończyć dzień, zeskanuj kod STOP.');
+      return;
+    }
+
+    // STOP QR (A3-A6) -> begin ENDING or close NOW (0 min)
+    if (stopGrace !== null) {
+      console.log('[PAUSE] branch: STOP', stopGrace);
+      let stopComment = '';
+      try { stopComment = await askOptionalComment_({ title: 'Komentarz do zakończenia dnia (opcjonalnie)', maxLen: 300 }); } catch (_) { stopComment = ''; }
+      try {
+        const res = await api('workday/beginEnding', Object.assign({}, authPayload(), {
+          roomId: code,
+          deviceId: BC.Store.getDeviceId(),
+          endEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '_end',
+          comment: stopComment,
+          clientNow: clientNowIso(),
+          tzOffsetMinutes: tzOffsetMinutes()
+        }), { loading: true, loadingText: 'Czekaj...' });
+
+        console.log('[PAUSE] api ok keys:', Object.keys(res||{}));
+      BC.Store.setActiveWorkday(res.workday);
+
+        const st = String((res.workday && res.workday.status) || '').toUpperCase();
+        if (st === 'CLOSED') {
+          try { BC.Store.setActiveCycle(null); } catch (_) {}
+          BC.Store.setActiveWorkday(null);
+          return logoutToLogin_('Dzień pracy zakończony. Zaloguj się ponownie.');
+        }
+
+        // ENDING (STOP5/10/15): show countdown, logout only after timer expires
+        return showEndDay(res.workday, code);
+      } catch (err) {
+        await BC.UI.alert(err.message || 'Nie udało się zakończyć dnia.');
+        return;
+      }
+    }
+
+    try {
+      const res = await api('cycles/start', Object.assign({}, authPayload(), {
+        roomId: code,
+        deviceId: BC.Store.getDeviceId(),
+        clientNow: clientNowIso(),
+        tzOffsetMinutes: tzOffsetMinutes(),
+        startEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
+      }), { loading: true, loadingText: 'Czekaj...' });
+      BC.Store.setActiveCycle(res.cycle);
+      showCleaning(res.cycle);
+    } catch (err) {
+      await BC.UI.alert(err.message || 'Błąd START.');
+    }
+  }
+
+  async function handleScanInCleaning(code, cycle) {
+    const utility = BC.Store.getUtilityRoomId();
+    const stopGrace = (BC.Store && typeof BC.Store.getStopGraceMin === 'function') ? BC.Store.getStopGraceMin(code) : null;
+
+    // Helper: always close the current cycle first
+    async function stopCycle_(reason, comment) {
+      await api('cycles/stop', Object.assign({}, authPayload(), {
+        cycleId: cycle.cycleId,
+        deviceId: BC.Store.getDeviceId(),
+        reason: reason || 'QR_SAME',
+        comment: String(comment || '').slice(0, 300),
+        endEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '_end'
+      }), { loading: true, loadingText: 'Czekaj...' });
+      BC.Store.setActiveCycle(null);
+    }
+
+
+    // 1) Same room QR -> stop only (or special flow for zlecenie indywidualne)
+    if (code === cycle.roomId) {
+      if (!(await Checklist_validateAndSubmitBeforeClose_(cycle))) return;
+      // Try to detect function for the current cycle
+      let func = String(cycle.func || '').toUpperCase();
+      if (!func) {
+        try {
+          const zr = await api('zones/resolve', Object.assign({}, authPayload(), { roomId: cycle.roomId }));
+          func = String((zr && zr.zone && zr.zone.func) || '').toUpperCase();
+          if (func) {
+            cycle.func = func;
+            BC.Store.setActiveCycle(cycle);
+          }
+        } catch (_) {}
+      }
+
+      const isIndividual = (func === 'SPRZATANIE_INDYWIDUALNE');
+
+      if (isIndividual) {
+        // Individual order finish:
+        // - ask optional comment (<=300)
+        // - ask if end workday now (STOP0 semantics)
+        let comment = '';
+        try {
+          comment = await BC.UI.commentPrompt({
+            title: 'Komentarz do zlecenia (opcjonalnie)',
+            maxLen: 300,
+            placeholder: 'Max 300 znaków...'
+          });
+          comment = String(comment || '').slice(0, 300);
+        } catch (_) {
+          comment = '';
+        }
+
+        const endDay = await BC.UI.confirm('Czy zakończyć dzień pracy?', {
+          title: 'Koniec zlecenia',
+          okText: 'Tak',
+          cancelText: 'Nie'
+        });
+
+        try {
+          await api('cycles/stop', Object.assign({}, authPayload(), {
+            cycleId: cycle.cycleId,
+            deviceId: BC.Store.getDeviceId(),
+            reason: 'INDIVIDUAL_DONE',
+            comment: comment,
+            endEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '_end'
+          }), { loading: true, loadingText: 'Czekaj...' });
+          BC.Store.setActiveCycle(null);
+        } catch (err) {
+          await BC.UI.alert(err.message || 'Błąd zakończenia zlecenia.');
+          return;
+        }
+
+        if (endDay) {
+          // Close workday immediately (STOP0)
+          try {
+            await api('workday/closeNow', Object.assign({}, authPayload(), {
+              deviceId: BC.Store.getDeviceId(),
+              endEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '_closeNow',
+              clientAt: clientNowIso()
+            }), { loading: true, loadingText: 'Czekaj...' });
+
+            BC.Store.setActiveWorkday(null);
+            return showStartDay('Dzień zakończony.');
+          } catch (err) {
+            await BC.UI.alert(err.message || 'Nie udało się zakończyć dnia.');
+            // Day still running
+            return showScanRoom();
+          }
+        }
+
+        // Continue working (time is still counting)
+        return showScanRoom();
+      }
+
+      // Default: standard cleaning zone
+      try {
+        let zComment = '';
+        try { zComment = await askOptionalComment_({ title: 'Komentarz do strefy (opcjonalnie)', maxLen: 300 }); } catch (_) { zComment = ''; }
+        await stopCycle_('QR_SAME', zComment);
+        return showScanRoom();
+      } catch (err) {
+        await BC.UI.alert(err.message || 'Błąd STOP.');
+        return;
+      }
+    }
+
+    // 2) STOP QR during cleaning -> STOP + ENDING (or CLOSE NOW for 0 min) atomically
+    if (stopGrace !== null) {
+      console.log('[PAUSE] branch: STOP', stopGrace);
+      // Comment is optional here. If your build has BC.UI.commentPrompt(), it will be used.
+      let comment = '';
+      try {
+        const promptFn = (BC.UI && (BC.UI.commentPrompt || BC.UI.promptComment));
+        if (typeof promptFn === 'function') {
+          const v = await promptFn({ title: 'Komentarz do zakończenia dnia (opcjonalnie)', maxLen: 300, placeholder: 'Max 300 znaków...' });
+          // If user cancelled, do nothing.
+          if (v === null) return;
+          comment = String(v || '').slice(0, 300);
+        }
+      } catch (_) {
+        comment = '';
+      }
+
+      try {
+        const res = await api('workday/stopCycleAndBeginEnding', Object.assign({}, authPayload(), {
+          cycleId: cycle.cycleId,
+          roomId: code,
+          deviceId: BC.Store.getDeviceId(),
+          reason: 'STOP_END_DAY',
+          comment: comment,
+          endEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '_end',
+          workdayEndEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '_endday',
+          clientNow: clientNowIso(),
+          tzOffsetMinutes: tzOffsetMinutes()
+        }), { loading: true, loadingText: 'Czekaj...' });
+
+        BC.Store.setActiveCycle(null);
+        console.log('[PAUSE] api ok keys:', Object.keys(res||{}));
+      BC.Store.setActiveWorkday(res.workday);
+        const st = String((res.workday && res.workday.status) || '').toUpperCase();
+        if (st === 'CLOSED') {
+          try { BC.Store.setActiveCycle(null); } catch (_) {}
+          BC.Store.setActiveWorkday(null);
+          return logoutToLogin_('Dzień pracy zakończony. Zaloguj się ponownie.');
+        }
+
+        // Still ENDING -> refresh countdown window
+        return showEndDay(res.workday, code);
+      } catch (err) {
+        await BC.UI.alert(err.message || 'Błąd końca dnia.');
+        return showScanRoom();
+      }
+    }
+
+    // 3) START QR is not a zone
+    if (code === utility) {
+      console.log('[PAUSE] branch: UTILITY');
+      await BC.UI.alert('To jest kod START. Aby zakończyć dzień, zeskanuj kod STOP.');
+      return;
+    }
+
+    // 3) New room QR during cleaning -> stop+start atomically (faster + consistent)
+    if (!(await Checklist_validateAndSubmitBeforeClose_(cycle))) return;
+
+    try {
+      const res = await api('cycles/stopAndStart', Object.assign({}, authPayload(), {
+        cycleId: cycle.cycleId,
+        nextRoomId: code,
+        deviceId: BC.Store.getDeviceId(),
+        reason: 'QR_NEW',
+        comment: '',
+        opEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
+      }), { loading: true, loadingText: 'Czekaj...' });
+
+      const newCycle = res.cycle || (res.start && res.start.cycle);
+      BC.Store.setActiveCycle(newCycle);
+      showCleaning(newCycle);
+    } catch (err) {
+      await BC.UI.alert(err.message || 'Błąd zmiany strefy.');
+      showScanRoom();
+    }
+  }
+
+  
+  async function handleScanInPause(code, workday) {
+    console.log('[PAUSE] scanned:', code);
+    // DEBUG (temporary): show branch decisions
+    // await BC.UI.alert('DEBUG PAUSE SCAN: ' + code);
+    const utility = BC.Store.getUtilityRoomId();
+    const stopGrace = (BC.Store && typeof BC.Store.getStopGraceMin === 'function') ? BC.Store.getStopGraceMin(code) : null;
+
+    if (code === utility) {
+      console.log('[PAUSE] branch: UTILITY');
+      await BC.UI.alert('Aby zakończyć przerwę, zeskanuj QR sprzątanej strefy.');
+      return;
+    }
+
+    // STOP during pause: stop pause + begin ending
+    if (stopGrace !== null) {
+      console.log('[PAUSE] branch: STOP', stopGrace);
+      let stopComment = '';
+      try { stopComment = await askOptionalComment_({ title: 'Komentarz do zakończenia dnia (opcjonalnie)', maxLen: 300 }); } catch (_) { stopComment = ''; }
+      try {
+        const res = await api('workday/pauseStopAndBeginEnding', Object.assign({}, authPayload(), {
+          stopRoomId: code,
+          deviceId: BC.Store.getDeviceId(),
+          endEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '_end',
+          comment: stopComment,
+          clientNow: clientNowIso(),
+          tzOffsetMinutes: tzOffsetMinutes()
+        }), { loading: true, loadingText: 'Czekaj...' });
+
+        console.log('[PAUSE] api ok keys:', Object.keys(res||{}));
+      BC.Store.setActiveWorkday(res.workday);
+        BC.Store.setActiveCycle(null);
+
+        const st = String((res.workday && res.workday.status) || '').toUpperCase();
+        if (st === 'CLOSED') {
+          try { BC.Store.setActiveCycle(null); } catch (_) {}
+          BC.Store.setActiveWorkday(null);
+          return logoutToLogin_('Dzień pracy zakończony. Zaloguj się ponownie.');
+        }
+
+        // Still ENDING -> refresh countdown window
+        return showEndDay(res.workday, code);
+      } catch (err) {
+        await BC.UI.alert(err.message || 'Nie udało się zakończyć dnia.');
+        return showPause(BC.Store.getActiveWorkday());
+      }
+    }
+
+    console.log('[PAUSE] branch: ZONE');
+
+    // Zone QR: stop pause + start cycle
+    try {
+      const res = await api('workday/pauseStopAndStartCycle', Object.assign({}, authPayload(), {
+        roomId: code,
+        deviceId: BC.Store.getDeviceId(),
+        startEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+        clientNow: clientNowIso(),
+        tzOffsetMinutes: tzOffsetMinutes(),
+      }), { loading: true, loadingText: 'Czekaj...' });
+
+      console.log('[PAUSE] api ok keys:', Object.keys(res||{}));
+      BC.Store.setActiveWorkday(res.workday);
+      BC.Store.setActiveCycle(res.cycle);
+      showCleaning(res.cycle);
+    } catch (err) {
+      await BC.UI.alert(err.message || 'Nie udało się zakończyć przerwy.');
+      showPause(BC.Store.getActiveWorkday());
+    }
+  }
+
+async function handleScanInEndDay(code) {
+    const utility = BC.Store.getUtilityRoomId();
+
+    const stopGrace = (BC.Store && typeof BC.Store.getStopGraceMin === 'function') ? BC.Store.getStopGraceMin(code) : null;
+
+    if (code === utility) {
+      console.log('[PAUSE] branch: UTILITY');
+      await BC.UI.alert('Dzień jest w trakcie kończenia. Jeśli chcesz kontynuować, zeskanuj QR sprzątanego pomieszczenia.');
+      return;
+    }
+
+    
+    // STOP QR scanned again in ENDING -> update grace window or close now (0 min)
+    if (stopGrace !== null) {
+      console.log('[PAUSE] branch: STOP', stopGrace);
+      let stopComment = '';
+      try { stopComment = await askOptionalComment_({ title: 'Komentarz do zakończenia dnia (opcjonalnie)', maxLen: 300 }); } catch (_) { stopComment = ''; }
+      try {
+        const res = await api('workday/beginEnding', Object.assign({}, authPayload(), {
+          roomId: code,
+          deviceId: BC.Store.getDeviceId(),
+          endEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '_end',
+          comment: stopComment,
+          clientNow: clientNowIso(),
+          tzOffsetMinutes: tzOffsetMinutes()
+        }), { loading: true, loadingText: 'Czekaj...' });
+
+        console.log('[PAUSE] api ok keys:', Object.keys(res||{}));
+      BC.Store.setActiveWorkday(res.workday);
+
+        const st = String((res.workday && res.workday.status) || '').toUpperCase();
+        if (st === 'CLOSED') {
+          try { BC.Store.setActiveCycle(null); } catch (_) {}
+          BC.Store.setActiveWorkday(null);
+          return logoutToLogin_('Dzień pracy zakończony. Zaloguj się ponownie.');
+        }
+
+        // Still ENDING -> refresh countdown window
+        return showEndDay(res.workday, code);
+      } catch (err) {
+        await BC.UI.alert(err.message || 'Nie udało się zakończyć dnia.');
+        return;
+      }
+    }
+
+    try {
+      const res = await api('workday/cancelEndingAndStartCycle', Object.assign({}, authPayload(), {
+        roomId: code,
+        deviceId: BC.Store.getDeviceId(),
+        startEventId: (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+        clientNow: clientNowIso(),
+        tzOffsetMinutes: tzOffsetMinutes(),
+      }), { loading: true, loadingText: 'Czekaj...' });
+
+      console.log('[PAUSE] api ok keys:', Object.keys(res||{}));
+      BC.Store.setActiveWorkday(res.workday);
+      BC.Store.setActiveCycle(res.cycle);
+      showCleaning(res.cycle);
+    } catch (err) {
+      await BC.UI.alert(err.message || 'Nie udało się wrócić do pracy.');
+      showScanRoom();
+    }
+
+  }
+
+  function bindLogout() {
+    const btn = document.getElementById('btnLogout');
+    if (!btn) return;
+    btn.onclick = async () => {
+      if (await BC.UI.confirm('Wylogować?')) {
+        BC.Store.logout();
+        try { idleSetUi_(); } catch (_) {}
+        showLogin();
+      }
+    };
+  }
+
+  function bindBack() {
+    const btn = document.getElementById('btnBack');
+    if (!btn) return;
+    btn.onclick = () => { try { goHome_(); } catch (_) {} };
+  }
+
+
+  
+  function goHome_() {
+    // Close dialog/confirm modal (np. Grafik / alert / confirm)
+    try {
+      const dlg = document.getElementById('dialogModal');
+      if (dlg && !dlg.classList.contains('hidden')) {
+        // Backdrop click closes as "cancel" (bez potwierdzania akcji)
+        try { dlg.click(); } catch (_) { try { dlg.classList.add('hidden'); } catch (_) {} }
+      }
+    } catch (_) {}
+
+    // Close settings modal if open
+    try {
+      const settingsModal = document.getElementById('settingsModalHome');
+      if (settingsModal && !settingsModal.classList.contains('hidden')) {
+        try { settingsModal.classList.add('hidden'); } catch (_) {}
+      }
+    } catch (_) {}
+
+    // Close scanner modal if open
+    try {
+      const scanModal = document.getElementById('scanModal');
+      if (scanModal && !scanModal.classList.contains('hidden')) {
+        try { if (window.BC && BC.QRScanner) BC.QRScanner.close(); } catch (_) {}
+        try { scanModal.classList.add('hidden'); } catch (_) {}
+      }
+    } catch (_) {}
+
+    // Go to main screen (menu if logged, otherwise login)
+    try {
+      const token = (BC.Store && typeof BC.Store.getToken === 'function') ? BC.Store.getToken() : '';
+      if (!token) return showLogin();
+    } catch (_) { return showLogin(); }
+
+    showMenu();
+  }
+
+
+function bindLogoHome_() {
+    const el = document.querySelector('.header-logo--bestclean');
+    if (!el) return;
+    try { el.style.cursor = 'pointer'; } catch (_) {}
+    el.onclick = () => { try { goHome_(); } catch (_) {} };
+  }
+
+
+  function bindPopState() {
+    window.addEventListener('popstate', (e) => {
+      // If scanner modal is open, close it first ("back" should close the modal).
+      const scanModal = document.getElementById('scanModal');
+      if (scanModal && !scanModal.classList.contains('hidden')) {
+        try { BC.QRScanner.close(); } catch (_) {}
+        try { idleResume_(); } catch (_) {}
+        return;
+      }
+
+      const st = (e && e.state) ? e.state : null;
+      if (!st || !st.screen) return;
+
+      const next = String(st.screen || '').trim();
+      if (!next || next === currentScreen) return;
+
+      if (next === 'menu') return showMenu();
+      if (next === 'workflow') return routeToWorkflow();
+      if (next === 'coordinator') return showCoordinatorHome_();
+      if (next === 'worklog') return showWorklogList_({ year: Number(st.year||0), month: Number(st.month||0), fromPop: true });
+      if (next === 'worksummary') return showWorklogSummary_({ year: Number(st.year||0), month: Number(st.month||0), fromPop: true });
+      if (next === 'worksummaryDetails') return showWorkSummaryDetails_({ year: Number(st.year||0), month: Number(st.month||0), fromPop: true });
+      if (next === 'login') return showLogin();
+    });
+  }
+
+  let __refreshing = false;
+  async function refreshNow_() {
+    if (__refreshing) return;
+    const token = BC.Store.getToken();
+    if (!token) return;
+    __refreshing = true;
+    try {
+      BC.UI.setLoading(true, 'Odświeżam...');
+
+      const res = (window.BC && BC.Bootstrap && typeof BC.Bootstrap.run === 'function')
+        ? await BC.Bootstrap.run({ timeoutMs: 8000 })
+        : { ok: false, needLogin: true, message: 'Wymagane ponowne logowanie.' };
+
+      if (res && res.needLogin) return showLogin(res.message || 'Wymagane ponowne logowanie.');
+
+      if (currentScreen === 'menu') return showMenu();
+      if (currentScreen === 'workflow') return routeToWorkflow();
+      if (currentScreen === 'worklog') {
+        const st = (history && history.state) ? history.state : null;
+        const y = Number((st && st.year) || 0);
+        const m = Number((st && st.month) || 0);
+        return showWorklogList_({ year: y, month: m, fromPop: true });
+      }
+      if (currentScreen === 'worksummary') {
+        const st2 = (history && history.state) ? history.state : null;
+        const y2 = Number((st2 && st2.year) || 0);
+        const m2 = Number((st2 && st2.month) || 0);
+        return showWorklogSummary_({ year: y2, month: m2, fromPop: true });
+      }
+      if (currentScreen === 'worksummaryDetails') {
+        const st3 = (history && history.state) ? history.state : null;
+        const y3 = Number((st3 && st3.year) || 0);
+        const m3 = Number((st3 && st3.month) || 0);
+        return showWorkSummaryDetails_({ year: y3, month: m3, fromPop: true });
+      }
+    } catch (_) {
+      // non-fatal
+    } finally {
+      BC.UI.setLoading(false);
+      __refreshing = false;
+    }
+  }
+
+
+
+
+function bindPullToRefresh() {
+    let startY = null;
+    let triggered = false;
+    const THRESHOLD_PX = 90;
+
+    const canStart = () => {
+      if (!BC.Store.getToken()) return false;
+      if (currentScreen === 'login') return false;
+
+      const scanModal = document.getElementById('scanModal');
+      if (scanModal && !scanModal.classList.contains('hidden')) return false;
+
+      // Only when at top.
+      const main = document.querySelector('.main');
+      const y = main ? (main.scrollTop || 0) : (window.scrollY || document.documentElement.scrollTop || 0);
+      return y <= 0;
+    };
+
+    window.addEventListener('touchstart', (e) => {
+      if (!canStart()) return;
+      if (!e || !e.touches || e.touches.length !== 1) return;
+      startY = e.touches[0].clientY;
+      triggered = false;
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      if (startY === null) return;
+      if (!e || !e.touches || e.touches.length !== 1) return;
+      const dy = e.touches[0].clientY - startY;
+      if (!triggered && dy > THRESHOLD_PX) {
+        triggered = true;
+        refreshNow_();
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchend', () => {
+      startY = null;
+      triggered = false;
+    }, { passive: true });
+  }
+
+  async function init() {
+    bootShow('Sprawdzam ostatni etap pracy');
+    bindLogout();
+    bindBack();
+    bindLogoHome_();
+    bindPopState();
+    bindPullToRefresh();
+    try { bindGlobalNav_(); } catch (_) {}
+
+    try {
+      const token = BC.Store.getToken();
+      if (!token) return showLogin();
+
+      const res = (window.BC && BC.Bootstrap && typeof BC.Bootstrap.run === 'function')
+        ? await BC.Bootstrap.run({ timeoutMs: 8000 })
+        : { ok: false, needLogin: true, message: 'Wymagane ponowne logowanie.' };
+
+      if (res && res.needLogin) return showLogin(res.message || 'Wymagane ponowne logowanie.');
+
+      showMenu();
+    } catch (_) {
+      try { if (BC.Store && typeof BC.Store.logout === 'function') BC.Store.logout(); } catch (e) {}
+      return showLogin('Wymagane ponowne logowanie.');
+    } finally {
+      bootHide();
+    }
+  }
+
+  return { init, goHome: goHome_ };
+})();
+
+window.addEventListener('load', () => { BC.App.init(); });
+</script>

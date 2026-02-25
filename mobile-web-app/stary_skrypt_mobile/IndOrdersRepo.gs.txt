@@ -1,0 +1,56 @@
+/**
+ * IndOrdersRepo — odczyt zleceń indywidualnych (BCIxxxx) z arkusza w tym samym skoroszycie.
+ *
+ * Skoroszyt: CONFIG.SPREADSHEET_ID (1aDllEIg...)
+ * Arkusz: sheetId = 957832581
+ *
+ * Kolumny (wg opisu):
+ *  B (2)  - Data zlecenia
+ *  C (3)  - Nazwa klienta
+ *  E (5)  - Miasto klienta
+ *  F (6)  - Adres klienta
+ *  G (7)  - Kontakt do klienta
+ *  H (8)  - Najważniejsze dane dot. zlecenia
+ *  I (9)  - Kod QR zlecenia (np. BCI0001)
+ */
+
+const IND_ORDERS_CFG = {
+  SHEET_ID: 957832581,
+  COL_DATE: 2,
+  COL_CLIENT: 3,
+  COL_CITY: 5,
+  COL_ADDRESS: 6,
+  COL_CONTACT: 7,
+  COL_DETAILS: 8,
+  COL_QR: 9,
+};
+
+function IndOrdersRepo_getByQrId_(qrId) {
+  const code = String(qrId || '').trim();
+  if (!code) return null;
+
+  const sheet = Sheets_getBySheetId_(IND_ORDERS_CFG.SHEET_ID);
+
+  // Search by col I (QR), rows starting from 2.
+  const rowIndex = Sheets_findRowIndexByValue_(sheet, IND_ORDERS_CFG.COL_QR, code);
+  if (!rowIndex) return null;
+
+  const lastCol = Math.max(sheet.getLastColumn(), IND_ORDERS_CFG.COL_QR);
+  const row = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0] || [];
+
+  const get = (col) => {
+    const v = row[col - 1];
+    return (v === null || v === undefined) ? '' : v;
+  };
+
+  return {
+    qrId: String(get(IND_ORDERS_CFG.COL_QR) || '').trim(),
+    date: String(get(IND_ORDERS_CFG.COL_DATE) || '').trim(),
+    clientName: String(get(IND_ORDERS_CFG.COL_CLIENT) || '').trim(),
+    city: String(get(IND_ORDERS_CFG.COL_CITY) || '').trim(),
+    address: String(get(IND_ORDERS_CFG.COL_ADDRESS) || '').trim(),
+    contact: String(get(IND_ORDERS_CFG.COL_CONTACT) || '').trim(),
+    details: String(get(IND_ORDERS_CFG.COL_DETAILS) || '').trim(),
+    _rowIndex: rowIndex,
+  };
+}
