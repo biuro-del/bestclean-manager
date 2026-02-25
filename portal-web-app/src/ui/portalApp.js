@@ -1467,46 +1467,102 @@ function renderEventsRows(rows) {
   }
 
   const normalizeLookup = (value) => String(value ?? '').trim().toLowerCase()
+  const normalizePersonValue = (value) => {
+    const raw = String(value ?? '').trim()
+    if (!raw) {
+      return ''
+    }
+    try {
+      return raw
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim()
+    } catch {
+      return raw.toLowerCase().replace(/\s+/g, ' ').trim()
+    }
+  }
   const toLoginLocalPart = (value) => {
     const text = String(value ?? '').trim()
     const atIndex = text.indexOf('@')
     return atIndex > 0 ? text.slice(0, atIndex).trim() : ''
   }
-  const resolveWorkerNameFromWorkers = (workerLoginCandidate, workerNameCandidate) => {
-    const directName = String(workerNameCandidate ?? '').trim()
-    if (directName) {
-      return directName
-    }
-
-    const loginText = String(workerLoginCandidate ?? '').trim()
-    if (!loginText) {
-      return ''
-    }
-
+  const workerDisplayName = (worker) =>
+    String(worker?.workerName ?? worker?.name ?? worker?.fullName ?? '').trim()
+  const findWorkerByLogin = (loginText) => {
     const variants = [normalizeLookup(loginText), normalizeLookup(toLoginLocalPart(loginText))].filter(Boolean)
     if (!variants.length) {
-      return ''
+      return null
     }
 
-    const matchedWorker = appState.workers.find((worker) => {
-      const workerKeys = [
-        worker?.login,
-        worker?.workerLogin,
-        worker?.id,
-        worker?.workerId,
-        worker?.email,
-        worker?.loginEmail,
-      ]
-        .map((value) => String(value ?? '').trim())
-        .filter(Boolean)
-      const normalizedKeys = new Set([
-        ...workerKeys.map((value) => normalizeLookup(value)),
-        ...workerKeys.map((value) => normalizeLookup(toLoginLocalPart(value))),
-      ])
-      return variants.some((variant) => normalizedKeys.has(variant))
-    })
+    return (
+      appState.workers.find((worker) => {
+        const workerKeys = [
+          worker?.login,
+          worker?.workerLogin,
+          worker?.id,
+          worker?.workerId,
+          worker?.email,
+          worker?.loginEmail,
+        ]
+          .map((value) => String(value ?? '').trim())
+          .filter(Boolean)
+        const normalizedKeys = new Set([
+          ...workerKeys.map((value) => normalizeLookup(value)),
+          ...workerKeys.map((value) => normalizeLookup(toLoginLocalPart(value))),
+        ])
+        return variants.some((variant) => normalizedKeys.has(variant))
+      }) ?? null
+    )
+  }
+  const findWorkerByName = (nameText) => {
+    const normalized = normalizePersonValue(nameText)
+    if (!normalized) {
+      return null
+    }
 
-    return String(matchedWorker?.workerName ?? matchedWorker?.name ?? matchedWorker?.fullName ?? '').trim()
+    const parts = normalized.split(' ').filter(Boolean)
+    if (!parts.length) {
+      return null
+    }
+
+    const exactMatch =
+      appState.workers.find((worker) => normalizePersonValue(workerDisplayName(worker)) === normalized) ?? null
+    if (exactMatch) {
+      return exactMatch
+    }
+
+    const surname = parts[parts.length - 1]
+    const surnameMatches = appState.workers.filter((worker) => {
+      const workerParts = normalizePersonValue(workerDisplayName(worker)).split(' ').filter(Boolean)
+      if (!workerParts.length) {
+        return false
+      }
+      return workerParts[workerParts.length - 1] === surname
+    })
+    return surnameMatches.length === 1 ? surnameMatches[0] : null
+  }
+  const resolveWorkerNameFromWorkers = (workerLoginCandidate, workerNameCandidate) => {
+    const loginText = String(workerLoginCandidate ?? '').trim()
+    const directName = String(workerNameCandidate ?? '').trim()
+
+    const workerByLogin = loginText ? findWorkerByLogin(loginText) : null
+    if (workerByLogin) {
+      const resolved = workerDisplayName(workerByLogin)
+      if (resolved) {
+        return resolved
+      }
+    }
+
+    const workerByName = directName ? findWorkerByName(directName) : null
+    if (workerByName) {
+      const resolved = workerDisplayName(workerByName)
+      if (resolved) {
+        return resolved
+      }
+    }
+    return directName || loginText || ''
   }
 
   const isErrorLikeCell = (value) => {
