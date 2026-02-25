@@ -52,9 +52,44 @@ function messageFromError(error) {
   return String(error ?? '')
 }
 
+function extractNestedErrorMessage(rawMessage) {
+  const message = String(rawMessage ?? '').trim()
+  if (!message || !message.startsWith('{')) {
+    return ''
+  }
+
+  try {
+    const parsed = JSON.parse(message)
+    return String(parsed?.error?.message ?? parsed?.message ?? '').trim()
+  } catch {
+    return ''
+  }
+}
+
+function isOperationNotFoundMessage(rawMessage, operationName) {
+  const message = String(rawMessage ?? '')
+  const nested = extractNestedErrorMessage(message)
+  const fullMessage = `${message} ${nested}`.toLowerCase()
+  const operation = String(operationName ?? '').trim().toLowerCase()
+  if (!operation) {
+    return false
+  }
+
+  return (
+    fullMessage.includes(`operation "${operation}" not found`) ||
+    fullMessage.includes(`operation \\"${operation}\\" not found`) ||
+    fullMessage.includes(`operation '${operation}' not found`) ||
+    (fullMessage.includes('operation') && fullMessage.includes('not found') && fullMessage.includes(operation)) ||
+    ((fullMessage.includes('"status":"not_found"') ||
+      fullMessage.includes('"code":404') ||
+      fullMessage.includes('"code":"404"')) &&
+      fullMessage.includes(operation))
+  )
+}
+
 function withOperationNotFoundHint(error, operationName) {
   const message = messageFromError(error)
-  if (message.includes(`operation "${operationName}" not found`)) {
+  if (isOperationNotFoundMessage(message, operationName)) {
     return new Error(`${DEPLOY_HINT} Brak operacji: ${operationName}.`)
   }
 
@@ -62,10 +97,7 @@ function withOperationNotFoundHint(error, operationName) {
 }
 function isOperationNotFoundError(error, operationName) {
   const message = messageFromError(error)
-  return (
-    message.includes(`operation "${operationName}" not found`) ||
-    message.includes(`Brak operacji: ${operationName}.`)
-  )
+  return isOperationNotFoundMessage(message, operationName) || message.includes(`Brak operacji: ${operationName}.`)
 }
 
 function toDayKey(isoValue) {
@@ -812,10 +844,19 @@ async function fetchMappedEvents(orgId) {
     if (!isOperationNotFoundError(error, 'EventsForOrg')) {
       throw error
     }
-
-    // Fallback when EventsForOrg query is not deployed in current Data Connect environment.
-    return fetchMappedBackupCycles(orgId)
   }
+
+  // Fallback when EventsForOrg query is not deployed in current Data Connect environment.
+  try {
+    return await fetchMappedBackupCycles(orgId)
+  } catch (error) {
+    if (!isOperationNotFoundError(error, 'BackupCyclesForOrg')) {
+      throw error
+    }
+  }
+
+  // Last fallback: use workdays query so events section still renders data.
+  return fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg')
 }
 
 export async function getWorkdays(orgId, filters = {}) {
