@@ -1223,8 +1223,6 @@ export default function App() {
             <button className="tile" type="button" onClick={() => setView(VIEW.SCHEDULE)}><span className="tile-icon"><CalendarIcon /></span><span className="tile-label">Grafik</span><span className="tile-sub">Tydzien</span></button>
             <button className="tile" type="button" onClick={() => setView(VIEW.SUMMARY)}><span className="tile-icon"><ClockIcon /></span><span className="tile-label">Czas pracy</span><span className="tile-sub">Podsumowanie</span></button>
             <button className="tile" type="button" onClick={openCoordinatorPanel}><span className="tile-icon"><UserIcon /></span><span className="tile-label">Koordynator</span><span className="tile-sub">Audyt / QR</span></button>
-            <button className="tile tile--placeholder" type="button" onClick={() => setView(VIEW.WORKLOG)}><span className="tile-icon"><ClockIcon /></span><span className="tile-label">Lista zdarzen</span><span className="tile-sub">Start / Stop</span></button>
-            <button className="tile tile--placeholder" type="button" onClick={() => setNotice('Modul magazynu bedzie migrowany w kolejnym kroku.')}><span className="tile-icon"><EditIcon /></span><span className="tile-label">Magazyn</span><span className="tile-sub">W przygotowaniu</span></button>
           </div>
         </section>
       )
