@@ -1390,7 +1390,11 @@ export default function App() {
     <div className="app-shell">
       <header className="header">
         <div className="header-left"><button className="top-nav-btn top-nav-btn--icon" type="button" aria-label="Strona glowna" onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}><span className="top-nav-ico"><HomeIcon /></span></button></div>
-        <div className="header-center"><img className="header-logo header-logo--bestclean" src="https://static.wixstatic.com/media/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png/v1/fill/w_698,h_238,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png" alt="Best Clean" /></div>
+        <div className="header-center">
+          <button className="logo-home-btn" type="button" aria-label="Best Clean - ekran glowny" onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}>
+            <img className="header-logo header-logo--bestclean" src="https://static.wixstatic.com/media/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png/v1/fill/w_698,h_238,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png" alt="Best Clean" />
+          </button>
+        </div>
         <div className="header-right"><button className="top-nav-btn top-nav-btn--icon" type="button" aria-label="Ustawienia" disabled={!session?.token} onClick={() => setSettingsOpen(true)}><span className="top-nav-ico"><SettingsIcon /></span></button></div>
       </header>
       <main className="main">
