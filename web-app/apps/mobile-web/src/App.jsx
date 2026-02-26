@@ -619,19 +619,11 @@ function ScanModal({ scanState, onClose, onSubmit }) {
   )
 }
 
-function CoordinatorHome({ onCurrentAudit, onAuditMonths, onDoAudit, onEditQr, onBack }) {
+function CoordinatorHome({ onDoAudit, onEditQr }) {
   return (
     <section className="card col">
       <div className="title-small">Strefa koordynatora</div>
       <div className="tile-grid">
-        <button className="tile" type="button" onClick={onCurrentAudit}>
-          <span className="tile-icon"><ClockIcon /></span>
-          <span className="tile-label">Czas aktualnego audytu</span>
-        </button>
-        <button className="tile" type="button" onClick={onAuditMonths}>
-          <span className="tile-icon"><CalendarIcon /></span>
-          <span className="tile-label">Czas audytow (3 miesiace)</span>
-        </button>
         <button className="tile tile--success" type="button" onClick={onDoAudit}>
           <span className="tile-icon"><AuditPlusIcon /></span>
           <span className="tile-label">Wykonaj audyt</span>
@@ -641,9 +633,6 @@ function CoordinatorHome({ onCurrentAudit, onAuditMonths, onDoAudit, onEditQr, o
           <span className="tile-label">Edycja QR strefy</span>
         </button>
       </div>
-      <button className="btn secondary" type="button" onClick={onBack}>
-        Wroc
-      </button>
     </section>
   )
 }
@@ -1345,11 +1334,8 @@ export default function App() {
 
       return (
         <CoordinatorHome
-          onCurrentAudit={() => setNotice('Wkrotce.')}
-          onAuditMonths={() => setNotice('Wkrotce.')}
           onDoAudit={openCoordinatorAuditStart}
           onEditQr={openCoordinatorEdit}
-          onBack={() => setView(VIEW.MENU)}
         />
       )
     }
