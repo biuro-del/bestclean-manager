@@ -313,9 +313,24 @@ function parseQr(value) {
   return toText(value).replace(/\s+/g, '')
 }
 
+function compactQrKey(value) {
+  return toText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+}
+
 function findZoneByQr(zones, qrCode) {
   const key = normalizeKey(qrCode)
-  return zones.find((zone) => normalizeKey(zone.id) === key) ?? null
+  const compactKey = compactQrKey(qrCode)
+  return (
+    zones.find((zone) => {
+      const zoneId = toText(zone?.id || zone?.zoneId)
+      if (!zoneId) {
+        return false
+      }
+      return normalizeKey(zoneId) === key || compactQrKey(zoneId) === compactKey
+    }) ?? null
+  )
 }
 
 function assertConfigured() {
@@ -509,7 +524,7 @@ async function fetchBaseData(orgId) {
 function normalizeZones(zoneRows, clientRows) {
   const clientMap = new Map(clientRows.map((row) => [toText(row.clientId), toText(row.name)]))
   return zoneRows.map((row) => {
-    const id = toText(row.ZoneId)
+    const id = toText(row.ZoneId || row.zoneId || row.zoneID || row.id)
     const functionName = toText(row.function)
     const kindData = classifyZone(functionName)
     return {

@@ -137,7 +137,8 @@ function makeId(prefix) {
 
 function normalizeZones(zoneRows, clientsMap) {
   return (zoneRows || []).map((row) => ({
-    zoneId: toText(row.ZoneId),
+    zoneId: toText(row.ZoneId || row.zoneId || row.zoneID || row.id),
+    id: toText(row.ZoneId || row.zoneId || row.zoneID || row.id),
     clientId: toText(row.clientId),
     clientName: clientsMap.get(toText(row.clientId)) || '',
     placeName: toText(row.zone),
@@ -182,8 +183,16 @@ export async function loadCoordinatorContext(session) {
 
 export function findZoneByQrId(zones, qrId) {
   const key = toLower(qrId)
+  const compactKey = key.replace(/[^a-z0-9]+/g, '')
   if (!key) return null
-  return (zones || []).find((row) => toLower(row.zoneId) === key) ?? null
+  return (
+    (zones || []).find((row) => {
+      const zoneId = toLower(row.zoneId || row.id)
+      if (!zoneId) return false
+      const compactZoneId = zoneId.replace(/[^a-z0-9]+/g, '')
+      return zoneId === key || compactZoneId === compactKey
+    }) ?? null
+  )
 }
 
 export async function saveZoneAssignment(session, context, payload) {
