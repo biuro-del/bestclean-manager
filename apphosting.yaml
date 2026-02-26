@@ -1,0 +1,6 @@
+env:
+  - variable: APP_TARGET
+    value: mobile
+    availability:
+      - BUILD
+      - RUNTIME
