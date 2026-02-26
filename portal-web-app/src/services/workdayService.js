@@ -1134,11 +1134,35 @@ export async function updateEvent(orgId, eventId, payload = {}) {
     startEventId: mutationPayload.startEventId,
     endEventId: mutationPayload.endEventId,
   }
-  await runMutationOperation('UpdateEventForOrg', {
-    orgId,
-    eventId: normalizedEventId,
-    ...eventPayload,
-  })
+  const fallbackWorkdayId = String(payload.workdayId ?? payload.linkedWorkdayId ?? normalizedEventId).trim()
+
+  try {
+    await runMutationOperation('UpdateEventForOrg', {
+      orgId,
+      eventId: normalizedEventId,
+      ...eventPayload,
+    })
+  } catch (error) {
+    if (!isOperationNotFoundError(error, 'UpdateEventForOrg')) {
+      throw error
+    }
+
+    if (!fallbackWorkdayId) {
+      throw error
+    }
+
+    await updateWorkday(orgId, fallbackWorkdayId, {
+      workerLogin: mutationPayload.workerLogin ?? payload.workerLogin ?? null,
+      workerName: payload.workerName ?? null,
+      utilityRoomId: mutationPayload.zoneId ?? payload.utilityRoomId ?? payload.roomId ?? null,
+      startAt: mutationPayload.startAt,
+      endAt: mutationPayload.endAt,
+      durationSec: mutationPayload.durationSec,
+      status: mutationPayload.status,
+      comment: mutationPayload.comment,
+      updatedBy: payload.updatedBy ?? payload.editedBy ?? null,
+    })
+  }
 
   return {
     id: normalizedEventId,
