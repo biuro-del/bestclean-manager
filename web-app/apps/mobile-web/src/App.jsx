@@ -105,6 +105,14 @@ function StopIcon() {
   )
 }
 
+function PlayIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M8 6v12l10-6z" />
+    </svg>
+  )
+}
+
 function CleaningIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -418,7 +426,7 @@ function LoginView({ pending, error, onSubmit }) {
   )
 }
 
-function WorkHud({ workerName, timer, onPause, onStop, startLabel }) {
+function WorkHud({ workerName, timer, onPause, onStop, startLabel, topActionIsStart }) {
   return (
     <div className="home-hero">
       <div className="home-hero__top">
@@ -430,8 +438,13 @@ function WorkHud({ workerName, timer, onPause, onStop, startLabel }) {
           <button className="home-action home-action--pause" type="button" onClick={onPause} aria-label="Pauza">
             <PauseIcon />
           </button>
-          <button className="home-action home-action--stop" type="button" onClick={onStop} aria-label="Stop">
-            <StopIcon />
+          <button
+            className={`home-action ${topActionIsStart ? 'home-action--play' : 'home-action--stop'}`}
+            type="button"
+            onClick={onStop}
+            aria-label={topActionIsStart ? 'Start' : 'Stop'}
+          >
+            {topActionIsStart ? <PlayIcon /> : <StopIcon />}
           </button>
         </div>
       </div>
@@ -885,6 +898,7 @@ export default function App() {
   const nowIso = useMemo(() => new Date(tick).toISOString(), [tick])
   const activeWorkday = snapshot?.activeWorkday
   const activeCycle = snapshot?.activeCycle
+  const topActionIsStart = !isWorkdayOpen(activeWorkday)
   const workdayTimer = useMemo(() => (isWorkdayOpen(activeWorkday) ? hms(secBetween(activeWorkday?.startAt, nowIso)) : '--:--:--'), [activeWorkday, nowIso])
   const cycleTimer = useMemo(() => (isCycleOpen(activeCycle) ? hms(secBetween(activeCycle?.startAt, nowIso)) : '--:--:--'), [activeCycle, nowIso])
   const startLabel = useMemo(() => (txt(activeWorkday?.startAt) ? `START ${formatTime(activeWorkday.startAt)}` : ''), [activeWorkday?.startAt])
@@ -1195,7 +1209,14 @@ export default function App() {
     if (view === VIEW.MENU) {
       return (
         <section className="card col">
-          <WorkHud workerName={snapshot?.worker?.name} timer={workdayTimer} startLabel={startLabel} onPause={doPause} onStop={doTopAction} />
+          <WorkHud
+            workerName={snapshot?.worker?.name}
+            timer={workdayTimer}
+            startLabel={startLabel}
+            onPause={doPause}
+            onStop={doTopAction}
+            topActionIsStart={topActionIsStart}
+          />
           <div className="tile-grid--home">
             <button className="tile tile--success" type="button" onClick={() => setView(resolveWorkflowView(snapshot))}><span className="tile-icon"><CleaningIcon /></span><span className="tile-label">Sprzatanie</span><span className="tile-sub">Skanuj strefy</span></button>
             <button className="tile" type="button" onClick={() => setView(VIEW.SCHEDULE)}><span className="tile-icon"><CalendarIcon /></span><span className="tile-label">Grafik</span><span className="tile-sub">Tydzien</span></button>
@@ -1337,7 +1358,14 @@ export default function App() {
     if (view === VIEW.PAUSE) {
       return (
         <section className="card col">
-          <WorkHud workerName={snapshot?.worker?.name} timer={workdayTimer} startLabel={startLabel} onPause={() => setView(resolveWorkflowView(snapshot))} onStop={doTopAction} />
+          <WorkHud
+            workerName={snapshot?.worker?.name}
+            timer={workdayTimer}
+            startLabel={startLabel}
+            onPause={() => setView(resolveWorkflowView(snapshot))}
+            onStop={doTopAction}
+            topActionIsStart={topActionIsStart}
+          />
           <div className="scan-glass">
             <div className="scan-title">Pauza</div>
             <div className="scan-sub">Tryb pauzy bedzie aktywowany po migracji logiki backend.</div>
@@ -1350,7 +1378,14 @@ export default function App() {
     if (view === VIEW.START || view === VIEW.SCAN || view === VIEW.CLEAN || view === VIEW.END) {
       return (
         <section className="card col">
-          <WorkHud workerName={snapshot?.worker?.name} timer={workdayTimer} startLabel={startLabel} onPause={doPause} onStop={doTopAction} />
+          <WorkHud
+            workerName={snapshot?.worker?.name}
+            timer={workdayTimer}
+            startLabel={startLabel}
+            onPause={doPause}
+            onStop={doTopAction}
+            topActionIsStart={topActionIsStart}
+          />
           <button className="btn action btn-xl" type="button" onClick={() => openScan('workflow', 'Skanuj QR', 'Wpisz kod QR / roomId.')}>Skanuj QR</button>
           <div className="scan-glass checklist-wrap">
             <div className="scan-title">{view === VIEW.START ? 'Rozpocznij prace' : view === VIEW.SCAN ? 'Skanuj strefe' : view === VIEW.CLEAN ? 'W trakcie sprzatania' : 'Konczenie dnia'}</div>

@@ -297,6 +297,11 @@ body {
   background: linear-gradient(180deg, #ef4444, #dc2626);
 }
 
+.home-action--play {
+  color: #fff;
+  background: linear-gradient(180deg, #32d74b, #18b83f);
+}
+
 .home-hero__meta {
   margin-top: 10px;
   display: flex;
