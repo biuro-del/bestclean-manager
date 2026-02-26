@@ -291,6 +291,20 @@ function pickFirstText(...values) {
   return ''
 }
 
+function pickWorkerNameValue(worker) {
+  if (!worker) {
+    return ''
+  }
+
+  return pickFirstText(
+    worker.workerName,
+    worker.workername,
+    worker.worker_name,
+    worker.name,
+    worker.fullName,
+  )
+}
+
 function looksLikeSerializedError(value) {
   const text = String(value ?? '').trim()
   if (!text) {
@@ -502,7 +516,7 @@ function buildLookupMaps(clients, zones, workers, workdayRows = []) {
   const workerByNormalizedName = new Map(
     workers
       .map((worker) => {
-        const normalizedName = normalizePersonName(worker.name ?? worker.workerName ?? worker.fullName ?? '')
+        const normalizedName = normalizePersonName(pickWorkerNameValue(worker))
         if (!normalizedName) {
           return null
         }
@@ -653,7 +667,7 @@ function mapWorkday(orgId, row, lookupMaps) {
         zone: sanitizeTextValue(row.zone.zone),
         location: sanitizeTextValue(row.zone.location),
         workerLogin: sanitizeTextValue(row.zone.workerLogin),
-        workerName: sanitizeTextValue(row.zone.worker?.workerName ?? row.zone.worker?.fullName),
+        workerName: sanitizeTextValue(pickWorkerNameValue(row.zone.worker)),
       }
     : null
 
@@ -702,8 +716,7 @@ function mapWorkday(orgId, row, lookupMaps) {
   const inferredWorker = inferredFromRoomDay || inferredFromRoom || inferredFromDay || null
 
   const rawWorkerName = pickFirstText(
-    row.worker?.workerName,
-    row.worker?.fullName,
+    pickWorkerNameValue(row.worker),
     row.workerName,
     row.workday?.workerName,
     zone?.workerName,
@@ -742,11 +755,8 @@ function mapWorkday(orgId, row, lookupMaps) {
     ) || null
   const status = normalizeStatus(row.status, Boolean(endAt))
   const workerNameFromWorker = pickFirstText(
-    worker?.workerName,
-    worker?.name,
-    worker?.fullName,
-    workerFromName?.workerName,
-    workerFromName?.name,
+    pickWorkerNameValue(worker),
+    pickWorkerNameValue(workerFromName),
   )
   const workerNameValue = sanitizeTextValue(
     pickFirstText(workerNameFromWorker, rawWorkerName, resolvedWorkerLogin),

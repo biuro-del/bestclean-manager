@@ -1489,7 +1489,15 @@ function renderEventsRows(rows) {
     return atIndex > 0 ? text.slice(0, atIndex).trim() : ''
   }
   const workerDisplayName = (worker) =>
-    String(worker?.workerName ?? worker?.name ?? worker?.fullName ?? '').trim()
+    String(
+      worker?.workerName ??
+        worker?.workername ??
+        worker?.worker_name ??
+        worker?.name ??
+        worker?.displayName ??
+        worker?.fullName ??
+        '',
+    ).trim()
   const findWorkerByLogin = (loginText) => {
     const variants = [normalizeLookup(loginText), normalizeLookup(toLoginLocalPart(loginText))].filter(Boolean)
     if (!variants.length) {

@@ -4,7 +4,9 @@ import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient
 function mapWorker(orgId, row) {
   const login = String(row.login ?? row.workerLogin ?? row.workerId ?? '').trim()
   const workerId = String(row.workerId ?? login).trim() || login
-  const workerName = String(row.workerName ?? row.fullName ?? login).trim()
+  const workerName = String(
+    row.workerName ?? row.workername ?? row.worker_name ?? row.name ?? row.displayName ?? row.fullName ?? login,
+  ).trim()
   const workerType = String(row.workerType ?? 'Pracownik').trim()
   const loginEmail = String(row.loginEmail ?? row.email ?? '').trim()
 
