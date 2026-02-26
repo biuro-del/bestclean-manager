@@ -613,13 +613,22 @@ body {
 }
 
 @media (max-width: 540px) {
-  .tile-grid,
-  .tile-grid--home {
+  .tile-grid {
     grid-template-columns: 1fr;
+  }
+
+  .tile-grid--home {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .row-inline {
     flex-direction: column;
     align-items: stretch;
+  }
+}
+
+@media (max-width: 340px) {
+  .tile-grid--home {
+    grid-template-columns: 1fr;
   }
 }
