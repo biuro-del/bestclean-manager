@@ -11,6 +11,8 @@ import { executeMutation, executeQuery, mutationRef, queryRef } from 'firebase/d
 import { ensureFirebase, isFirebaseConfigured, waitForFirebaseAuthReady } from '../firebase/firebaseClient'
 let eventsForOrgUnavailable = false
 let backupCyclesForOrgUnavailable = false
+let insertEventForOrgUnavailable = false
+let updateEventForOrgUnavailable = false
 
 function toText(value) {
   return String(value ?? '').trim()
@@ -137,7 +139,22 @@ function pickBestWorker(workers, session) {
   const byEmail = workers.find((worker) => toText(worker.email).toLowerCase() === email)
   if (byEmail) return byEmail
 
-  return workers[0] ?? null
+  return null
+}
+
+function buildSessionWorkerFallback(session) {
+  const email = toText(session?.email).toLowerCase()
+  const emailLogin = email.includes('@') ? email.split('@')[0] : ''
+  const rawLogin = toText(session?.workerLogin || session?.login || emailLogin).toLowerCase()
+  const login = rawLogin.includes('@') ? rawLogin.split('@')[0] : rawLogin
+  const safeLogin = login || emailLogin || 'worker'
+  const name = toText(session?.workerName || safeLogin)
+  return {
+    login: safeLogin,
+    fullName: name || safeLogin,
+    workerType: toText(session?.role || 'Pracownik'),
+    email,
+  }
 }
 
 function normalizeWorkday(row) {
@@ -243,6 +260,44 @@ function pickActiveCycle(events, activeWorkdayId) {
   }
 
   return sorted.find((event) => isEventOpen(event)) ?? null
+}
+
+function fallbackActiveCycleFromWorkday(activeWorkday, zones) {
+  if (!isWorkdayOpen(activeWorkday)) {
+    return null
+  }
+
+  const zoneId = toText(activeWorkday?.utilityRoomId)
+  if (!zoneId) {
+    return null
+  }
+
+  const zone =
+    (zones || []).find((row) => normalizeKey(row?.id) === normalizeKey(zoneId)) ??
+    null
+  const zoneKind = zone?.kind || classifyZone(zone?.functionName).kind
+  if (zoneKind !== 'CLEAN' && zoneKind !== 'INDIVIDUAL') {
+    return null
+  }
+
+  return {
+    eventId: `WD-${toText(activeWorkday?.workdayId) || zoneId}`,
+    zoneId,
+    zoneName: toText(zone?.name || zoneId),
+    zoneKind,
+    location: toText(zone?.location),
+    clientId: toText(zone?.clientId),
+    clientName: toText(zone?.clientName),
+    workerLogin: toText(activeWorkday?.workerLogin),
+    workerName: toText(activeWorkday?.workerName),
+    workdayId: toText(activeWorkday?.workdayId),
+    startAt: parseIso(activeWorkday?.updatedAt || activeWorkday?.startAt),
+    endAt: null,
+    status: 'RUNNING',
+    durationSec: 0,
+    comment: toText(activeWorkday?.comment),
+    endReason: '',
+  }
 }
 
 function buildWorkdayEventFeed(workdays) {
@@ -632,8 +687,9 @@ export async function getMobileSnapshot(session) {
     workerType: toText(row.workerType || 'Pracownik'),
     email: toText(row.loginEmail || row.email),
   }))
-  const worker = pickBestWorker(workers, session)
-  const workerLogin = resolveWorkerLogin(worker, session, workers)
+  const fallbackWorker = buildSessionWorkerFallback(session)
+  const worker = pickBestWorker(workers, session) || fallbackWorker
+  const workerLogin = toText(resolveWorkerLogin(worker, session, workers) || fallbackWorker.login)
   const workerName = toText(worker?.fullName || session?.workerName || workerLogin)
 
   const zones = normalizeZones(data.zoneRows, data.clientRows)
@@ -647,7 +703,7 @@ export async function getMobileSnapshot(session) {
   }
 
   const events = selectWorkerScopedEvents(data.eventRows, workerLogin, zoneById, workerWorkdayIds)
-  const activeCycle = pickActiveCycle(events, activeWorkday?.workdayId)
+  const activeCycle = pickActiveCycle(events, activeWorkday?.workdayId) || fallbackActiveCycleFromWorkday(activeWorkday, zones)
   const summary = summaryFromWorkdays(workdays, activeWorkday)
 
   return {
@@ -756,62 +812,105 @@ async function setWorkdayRunning(snapshot, workday) {
   })
 }
 
-async function startCycle(snapshot, zone) {
+async function startCycle(snapshot, zone, workdayIdHint = '') {
   const eventId = makeId('EV')
-  try {
-    await runMutationOperation('InsertEventForOrg', {
-      orgId: snapshot.orgId,
-      eventId,
-      zoneId: zone.id || null,
-      workerLogin: snapshot.worker.login || null,
-      startAt: nowIso(),
-      endAt: null,
-      durationSec: null,
-      status: 'RUNNING',
-      closeMarkedAt: null,
-      endReason: null,
-      comment: null,
-      deviceId: null,
-      startEventId: null,
-      endEventId: null,
-    })
-  } catch (error) {
-    if (!operationMissing(error, 'InsertEventForOrg')) {
-      throw error
+  if (!insertEventForOrgUnavailable) {
+    try {
+      await runMutationOperation('InsertEventForOrg', {
+        orgId: snapshot.orgId,
+        eventId,
+        zoneId: zone.id || null,
+        workerLogin: snapshot.worker.login || null,
+        startAt: nowIso(),
+        endAt: null,
+        durationSec: null,
+        status: 'RUNNING',
+        closeMarkedAt: null,
+        endReason: null,
+        comment: null,
+        deviceId: null,
+        startEventId: null,
+        endEventId: null,
+      })
+      return
+    } catch (error) {
+      if (!operationMissing(error, 'InsertEventForOrg')) {
+        throw error
+      }
+      insertEventForOrgUnavailable = true
     }
-
-    throw new Error('Brak operacji InsertEventForOrg w Data Connect. Wdroz dataconnect (firebase deploy --only dataconnect).')
   }
+
+  const targetWorkdayId = toText(workdayIdHint || snapshot?.activeWorkday?.workdayId)
+  if (!targetWorkdayId) {
+    throw new Error('Brak aktywnego dnia pracy do oznaczenia strefy CLEAN.')
+  }
+
+  const activeWorkday = snapshot?.activeWorkday || {}
+  await updateWorkdayForOrg({
+    orgId: snapshot.orgId,
+    workdayId: targetWorkdayId,
+    workerLogin: toText(activeWorkday.workerLogin || snapshot?.worker?.login) || null,
+    workerName: toText(activeWorkday.workerName || snapshot?.worker?.name) || null,
+    utilityRoomId: toText(zone?.id) || null,
+    startAt: activeWorkday.startAt || null,
+    endAt: null,
+    durationSec: null,
+    status: 'RUNNING',
+    comment: toText(activeWorkday.comment) || null,
+    updatedBy: toText(snapshot?.worker?.login) || null,
+  })
 }
 
 async function stopCycle(snapshot, cycle, reason, commentValue) {
   const endAt = nowIso()
   const durationSec = elapsedSec(cycle.startAt, endAt)
-
-  try {
-    await runMutationOperation('UpdateEventForOrg', {
-      orgId: snapshot.orgId,
-      eventId: cycle.eventId,
-      zoneId: cycle.zoneId || null,
-      workerLogin: cycle.workerLogin || snapshot.worker.login || null,
-      startAt: cycle.startAt || null,
-      endAt,
-      durationSec,
-      status: 'CLOSED',
-      closeMarkedAt: endAt,
-      endReason: reason || 'CYCLE_STOP',
-      comment: toText(commentValue || cycle.comment) || null,
-      deviceId: null,
-      startEventId: null,
-      endEventId: null,
-    })
-  } catch (error) {
-    if (!operationMissing(error, 'UpdateEventForOrg')) {
-      throw error
+  if (!updateEventForOrgUnavailable) {
+    try {
+      await runMutationOperation('UpdateEventForOrg', {
+        orgId: snapshot.orgId,
+        eventId: cycle.eventId,
+        zoneId: cycle.zoneId || null,
+        workerLogin: cycle.workerLogin || snapshot.worker.login || null,
+        startAt: cycle.startAt || null,
+        endAt,
+        durationSec,
+        status: 'CLOSED',
+        closeMarkedAt: endAt,
+        endReason: reason || 'CYCLE_STOP',
+        comment: toText(commentValue || cycle.comment) || null,
+        deviceId: null,
+        startEventId: null,
+        endEventId: null,
+      })
+      return
+    } catch (error) {
+      if (!operationMissing(error, 'UpdateEventForOrg')) {
+        throw error
+      }
+      updateEventForOrgUnavailable = true
     }
-
-    throw new Error('Brak operacji UpdateEventForOrg w Data Connect. Wdroz dataconnect (firebase deploy --only dataconnect).')
   }
+
+  const workdayId = toText(cycle?.workdayId || snapshot?.activeWorkday?.workdayId)
+  if (!workdayId) {
+    return
+  }
+
+  const activeWorkday = snapshot?.activeWorkday || {}
+  await updateWorkdayForOrg({
+    orgId: snapshot.orgId,
+    workdayId,
+    workerLogin: toText(activeWorkday.workerLogin || snapshot?.worker?.login || cycle?.workerLogin) || null,
+    workerName: toText(activeWorkday.workerName || snapshot?.worker?.name || cycle?.workerName) || null,
+    utilityRoomId: null,
+    startAt: activeWorkday.startAt || cycle?.startAt || null,
+    endAt: null,
+    durationSec: null,
+    status: 'RUNNING',
+    comment: toText(commentValue || cycle?.comment || activeWorkday.comment) || null,
+    updatedBy: toText(snapshot?.worker?.login) || null,
+  })
 }
 
 export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
@@ -864,8 +963,8 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
 
   if (!workdayOpen) {
     if (zone.kind === 'INDIVIDUAL') {
-      await createWorkdayForScan(snapshot, zone)
-      await startCycle(snapshot, zone)
+      const created = await createWorkdayForScan(snapshot, zone)
+      await startCycle(snapshot, zone, created.workdayId)
       return {
         message: 'Rozpoczeto dzien i zlecenie indywidualne.',
         snapshot: await getMobileSnapshot(session),
