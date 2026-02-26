@@ -898,7 +898,8 @@ export default function App() {
   const nowIso = useMemo(() => new Date(tick).toISOString(), [tick])
   const activeWorkday = snapshot?.activeWorkday
   const activeCycle = snapshot?.activeCycle
-  const topActionIsStart = !isWorkdayOpen(activeWorkday)
+  const hasWorkdayStart = Boolean(txt(activeWorkday?.startAt))
+  const topActionIsStart = !hasWorkdayStart || !isWorkdayOpen(activeWorkday)
   const workdayTimer = useMemo(() => (isWorkdayOpen(activeWorkday) ? hms(secBetween(activeWorkday?.startAt, nowIso)) : '--:--:--'), [activeWorkday, nowIso])
   const cycleTimer = useMemo(() => (isCycleOpen(activeCycle) ? hms(secBetween(activeCycle?.startAt, nowIso)) : '--:--:--'), [activeCycle, nowIso])
   const startLabel = useMemo(() => (txt(activeWorkday?.startAt) ? `START ${formatTime(activeWorkday.startAt)}` : ''), [activeWorkday?.startAt])
