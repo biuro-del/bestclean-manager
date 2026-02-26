@@ -9,6 +9,8 @@ import {
 } from '@dataconnect/generated'
 import { executeMutation, executeQuery, mutationRef, queryRef } from 'firebase/data-connect'
 import { ensureFirebase, isFirebaseConfigured, waitForFirebaseAuthReady } from '../firebase/firebaseClient'
+let eventsForOrgUnavailable = false
+let backupCyclesForOrgUnavailable = false
 
 function toText(value) {
   return String(value ?? '').trim()
@@ -323,7 +325,34 @@ function assertConfigured() {
 }
 
 function operationMissing(error, operationName) {
-  return toText(error?.message).includes(`operation "${operationName}" not found`)
+  const operation = toText(operationName)
+  if (!operation) {
+    return false
+  }
+
+  const message = toText(error?.message)
+  let nestedMessage = ''
+  try {
+    if (message.startsWith('{')) {
+      const parsed = JSON.parse(message)
+      nestedMessage = toText(parsed?.error?.message || parsed?.message)
+    }
+  } catch {
+    // Keep best-effort parsing only.
+  }
+
+  const full = `${message} ${nestedMessage}`.toLowerCase()
+  const op = operation.toLowerCase()
+  return (
+    full.includes(`operation "${op}" not found`) ||
+    full.includes(`operation \\"${op}\\" not found`) ||
+    full.includes(`operation '${op}' not found`) ||
+    (full.includes('operation') && full.includes('not found') && full.includes(op)) ||
+    ((full.includes('"status":"not_found"') ||
+      full.includes('"code":404') ||
+      full.includes('"code":"404"')) &&
+      full.includes(op))
+  )
 }
 
 function workersPathMissing(error) {
@@ -368,18 +397,32 @@ function mapBackupCycleToEventRow(row) {
 }
 
 async function fetchEventRows(orgId) {
-  try {
-    const eventsResponse = await runQueryOperation('EventsForOrg', { orgId })
-    return eventsResponse?.data?.events ?? []
-  } catch (error) {
-    if (!operationMissing(error, 'EventsForOrg')) {
-      throw error
+  if (!backupCyclesForOrgUnavailable) {
+    try {
+      const fallback = await backupCyclesForOrg({ orgId })
+      const rows = fallback?.data?.backupCycles ?? []
+      return rows.map(mapBackupCycleToEventRow)
+    } catch (error) {
+      if (!operationMissing(error, 'BackupCyclesForOrg')) {
+        throw error
+      }
+      backupCyclesForOrgUnavailable = true
     }
-
-    const fallback = await backupCyclesForOrg({ orgId })
-    const rows = fallback?.data?.backupCycles ?? []
-    return rows.map(mapBackupCycleToEventRow)
   }
+
+  if (!eventsForOrgUnavailable) {
+    try {
+      const eventsResponse = await runQueryOperation('EventsForOrg', { orgId })
+      return eventsResponse?.data?.events ?? []
+    } catch (error) {
+      if (!operationMissing(error, 'EventsForOrg')) {
+        throw error
+      }
+      eventsForOrgUnavailable = true
+    }
+  }
+
+  return []
 }
 
 function fallbackWorkersFromWorkdays(workdayRows) {
