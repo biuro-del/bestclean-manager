@@ -3566,3 +3566,42 @@ textarea:focus{
     grid-template-columns: 1fr;
   }
 }
+
+.portal-notice{
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 9999;
+  min-width: 220px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  color: #1e3a8a;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  transition: opacity .2s ease, transform .2s ease;
+}
+
+.portal-notice.show{
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.portal-notice.success{
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.portal-notice.error{
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+}

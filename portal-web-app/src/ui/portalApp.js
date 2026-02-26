@@ -86,6 +86,33 @@ const appState = {
   clientProfileEditMode: false,
   reportLastCsv: '',
 }
+let portalNoticeTimer = null
+
+function showTransientNotice(message, type = 'success') {
+  const text = String(message ?? '').trim()
+  if (!text) {
+    return
+  }
+
+  let notice = document.getElementById('portalNotice')
+  if (!notice) {
+    notice = document.createElement('div')
+    notice.id = 'portalNotice'
+    notice.className = 'portal-notice'
+    document.body.appendChild(notice)
+  }
+
+  notice.textContent = text
+  notice.className = `portal-notice show ${type === 'error' ? 'error' : 'success'}`
+
+  if (portalNoticeTimer) {
+    window.clearTimeout(portalNoticeTimer)
+  }
+
+  portalNoticeTimer = window.setTimeout(() => {
+    notice?.classList.remove('show')
+  }, 3000)
+}
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -2153,6 +2180,7 @@ async function saveEventEditor() {
     closeEventEditor()
     await fetchEventsForCurrentSession({ resetPage: false })
     await refreshDashboardWidgets()
+    showTransientNotice('Zmiany zostały zapisane.')
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Błąd zapisu zdarzenia.'
     alert(message)
@@ -5950,6 +5978,12 @@ export function mountPortalApp() {
         // No-op cleanup safety for dev remounts.
       }
     })
+
+    if (portalNoticeTimer) {
+      window.clearTimeout(portalNoticeTimer)
+      portalNoticeTimer = null
+    }
+    document.getElementById('portalNotice')?.remove()
 
     host.innerHTML = ''
     delete window.go

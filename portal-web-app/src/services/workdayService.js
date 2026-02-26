@@ -13,6 +13,7 @@ import { getZones } from './zoneService'
 import { getWorkers } from './workerService'
 
 const NINE_HOURS_SECONDS = 9 * 60 * 60
+let eventsForOrgUnavailable = false
 const DEPLOY_HINT =
   'Brak wdrożonej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean-room.'
 
@@ -931,30 +932,34 @@ async function fetchMappedEvents(orgId) {
   }
 
   ensureFirebase()
+  if (!eventsForOrgUnavailable) {
+    try {
+      const response = await runQueryOperation('EventsForOrg', { orgId })
+      const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
+      const rows = response?.data?.events ?? []
+      return rows
+        .map((row) => mapWorkday(orgId, row, lookupMaps))
+        .filter((item) => isDisplayableMappedItem(item))
+    } catch (error) {
+      if (!isOperationNotFoundError(error, 'EventsForOrg')) {
+        throw error
+      }
+
+      eventsForOrgUnavailable = true
+    }
+  }
+
+  // First fallback: workdays so event edits stay visible when EventsForOrg is unavailable.
   try {
-    const response = await runQueryOperation('EventsForOrg', { orgId })
-    const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
-    const rows = response?.data?.events ?? []
-    return rows
-      .map((row) => mapWorkday(orgId, row, lookupMaps))
-      .filter((item) => isDisplayableMappedItem(item))
+    return await fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg')
   } catch (error) {
-    if (!isOperationNotFoundError(error, 'EventsForOrg')) {
+    if (!isOperationNotFoundError(error, 'WorkdaysForOrg')) {
       throw error
     }
   }
 
-  // Fallback when EventsForOrg query is not deployed in current Data Connect environment.
-  try {
-    return await fetchMappedBackupCycles(orgId)
-  } catch (error) {
-    if (!isOperationNotFoundError(error, 'BackupCyclesForOrg')) {
-      throw error
-    }
-  }
-
-  // Last fallback: use workdays query so events section still renders data.
-  return fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg')
+  // Last fallback for older environments.
+  return fetchMappedBackupCycles(orgId)
 }
 
 export async function getWorkdays(orgId, filters = {}) {
