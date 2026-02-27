@@ -232,7 +232,6 @@ export async function saveZoneAssignment(session, context, payload) {
     editedBy: editedBy || null,
     date,
     location: location || null,
-    workerLogin: zone.workerLogin || null,
   })
 
   return {

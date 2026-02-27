@@ -67,7 +67,6 @@ export async function createZone(orgId, payload) {
     zone: payload?.name ?? payload?.zone ?? null,
     function: payload?.function ?? null,
     location: payload?.location ?? null,
-    workerLogin: payload?.workerLogin ?? null,
     editedBy: payload?.editedBy ?? null,
     date: payload?.date ?? null,
   })
@@ -106,7 +105,6 @@ export async function updateZone(orgId, zoneId, payload) {
     zone: payload?.name ?? payload?.zone ?? null,
     function: payload?.function ?? null,
     location: payload?.location ?? null,
-    workerLogin: payload?.workerLogin ?? null,
     editedBy: payload?.editedBy ?? null,
     date: payload?.date ?? null,
   })
