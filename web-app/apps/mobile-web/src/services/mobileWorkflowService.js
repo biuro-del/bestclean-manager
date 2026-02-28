@@ -11,8 +11,11 @@ import { executeMutation, executeQuery, mutationRef, queryRef } from 'firebase/d
 import { ensureFirebase, isFirebaseConfigured, waitForFirebaseAuthReady } from '../firebase/firebaseClient'
 let eventsForOrgUnavailable = false
 let backupCyclesForOrgUnavailable = false
-let insertEventForOrgUnavailable = false
-let updateEventForOrgUnavailable = false
+const eventMutationsEnabled = String(import.meta.env.VITE_MOBILE_EVENT_MUTATIONS ?? '')
+  .trim()
+  .toLowerCase() === 'true'
+let insertEventForOrgUnavailable = !eventMutationsEnabled
+let updateEventForOrgUnavailable = !eventMutationsEnabled
 
 function toText(value) {
   return String(value ?? '').trim()
