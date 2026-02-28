@@ -1,4 +1,4 @@
-import { clientsForOrg, myOrganizations } from '@dataconnect/generated'
+import { clientsForOrg, myOrganizations, workersForOrg } from '@dataconnect/generated'
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 import {
@@ -36,6 +36,120 @@ function mapRole(roleValue) {
   if (role === 'MANAGER') return 'Kierownik'
   if (role === 'WORKER') return 'Pracownik'
   return 'Koordynator'
+}
+
+function emailPrefix(value) {
+  const email = toText(value).toLowerCase()
+  if (!email || !email.includes('@')) {
+    return ''
+  }
+  return email.split('@')[0]
+}
+
+function loginTokens(value) {
+  const text = toText(value).toLowerCase()
+  if (!text) {
+    return []
+  }
+
+  const local = text.includes('@') ? text.split('@')[0] : text
+  return [...new Set(local.split(/[^a-z0-9]+/).filter(Boolean))]
+}
+
+function normalizePersonName(value) {
+  const raw = toText(value)
+  if (!raw) {
+    return ''
+  }
+
+  try {
+    return raw
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim()
+  } catch {
+    return raw.toLowerCase().replace(/\s+/g, ' ').trim()
+  }
+}
+
+function resolveCanonicalWorkerLogin(workerRows, emailValue, loginFromEmail, displayNameValue = '') {
+  const email = toText(emailValue).toLowerCase()
+  const login = toText(loginFromEmail).toLowerCase()
+  const displayName = normalizePersonName(displayNameValue)
+  const emailLogin = emailPrefix(email)
+  const loginTokenList = [...new Set([...loginTokens(login), ...loginTokens(emailLogin)])]
+  const primaryLoginToken = loginTokenList[0] || ''
+  const workers = Array.isArray(workerRows) ? workerRows : []
+
+  if (login) {
+    const byLogin = workers.find((row) => toText(row?.login).toLowerCase() === login)
+    if (byLogin) {
+      return toText(byLogin.login)
+    }
+  }
+
+  if (email) {
+    const byEmail = workers.find(
+      (row) => toText(row?.email).toLowerCase() === email || toText(row?.loginEmail).toLowerCase() === email,
+    )
+    if (byEmail) {
+      return toText(byEmail.login)
+    }
+  }
+
+  if (login) {
+    const byPrefix = workers.find((row) => {
+      const loginEmailPrefix = emailPrefix(row?.loginEmail)
+      const emailFieldPrefix = emailPrefix(row?.email)
+      return loginEmailPrefix === login || emailFieldPrefix === login
+    })
+    if (byPrefix) {
+      return toText(byPrefix.login)
+    }
+  }
+
+  if (displayName) {
+    const byDisplayName = workers.find((row) => normalizePersonName(row?.fullName) === displayName)
+    if (byDisplayName) {
+      return toText(byDisplayName.login)
+    }
+  }
+
+  if (loginTokenList.length > 1) {
+    const byNameTokens = workers.find((row) => {
+      const normalizedName = normalizePersonName(row?.fullName)
+      return normalizedName && loginTokenList.every((token) => normalizedName.includes(token))
+    })
+    if (byNameTokens) {
+      return toText(byNameTokens.login)
+    }
+  }
+
+  if (primaryLoginToken) {
+    const byPrimaryToken = workers.find((row) => toText(row?.login).toLowerCase() === primaryLoginToken)
+    if (byPrimaryToken) {
+      return toText(byPrimaryToken.login)
+    }
+  }
+
+  return toText(loginFromEmail)
+}
+
+async function resolveWorkerLoginForSession(orgId, emailValue, loginFromEmail, displayNameValue = '') {
+  const normalizedOrgId = toText(orgId)
+  if (!normalizedOrgId) {
+    return toText(loginFromEmail)
+  }
+
+  try {
+    const response = await workersForOrg({ orgId: normalizedOrgId })
+    const workerRows = response?.data?.workers ?? []
+    return resolveCanonicalWorkerLogin(workerRows, emailValue, loginFromEmail, displayNameValue)
+  } catch {
+    return toText(loginFromEmail)
+  }
 }
 
 function extractOrgFromEmail(emailValue) {
@@ -247,6 +361,12 @@ export async function loginMobile({ login, password }) {
     const email = toText(credential.user.email || normalizedEmail).toLowerCase()
     const context = await resolveOrganizationContext(email, credential.user)
     const loginFromEmail = toText(email.split('@')[0]).toLowerCase()
+    const workerLogin = await resolveWorkerLoginForSession(
+      context.orgId,
+      email,
+      loginFromEmail,
+      credential.user.displayName,
+    )
 
     const session = writeMobileSession({
       token: `firebase-${credential.user.uid}`,
@@ -256,8 +376,8 @@ export async function loginMobile({ login, password }) {
       orgId: toText(context.orgId),
       orgName: context.orgName,
       role: toText(context.role) || 'Pracownik',
-      workerLogin: loginFromEmail,
-      workerName: toText(credential.user.displayName) || loginFromEmail,
+      workerLogin,
+      workerName: toText(credential.user.displayName) || workerLogin || loginFromEmail,
       source: 'firebase',
     })
 

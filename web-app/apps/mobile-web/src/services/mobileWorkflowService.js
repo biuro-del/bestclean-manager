@@ -26,6 +26,33 @@ function normalizeKey(value) {
   return toText(value).toLowerCase()
 }
 
+function normalizePersonName(value) {
+  const raw = toText(value)
+  if (!raw) return ''
+  return removeDiacritics(raw).toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function loginCandidates(value) {
+  const text = toText(value).toLowerCase()
+  if (!text) {
+    return []
+  }
+
+  const local = text.includes('@') ? text.split('@')[0] : text
+  const parts = local.split(/[^a-z0-9]+/).filter(Boolean)
+  return [...new Set([local, ...parts])]
+}
+
+function primaryLoginCandidate(value) {
+  const text = toText(value).toLowerCase()
+  if (!text) {
+    return ''
+  }
+  const local = text.includes('@') ? text.split('@')[0] : text
+  const token = local.split(/[^a-z0-9]+/).filter(Boolean)[0]
+  return token || local
+}
+
 function removeDiacritics(value) {
   const raw = toText(value)
   if (!raw) return ''
@@ -131,10 +158,21 @@ function pickBestWorker(workers, session) {
   const email = toText(session?.email).toLowerCase()
   const emailLogin = email.includes('@') ? email.split('@')[0] : ''
   const sessionLogin = toText(session?.workerLogin).toLowerCase()
-  const loginSet = new Set([sessionLogin, emailLogin].filter(Boolean))
+  const loginSet = new Set([
+    ...loginCandidates(sessionLogin),
+    ...loginCandidates(emailLogin),
+    ...loginCandidates(session?.login),
+    ...loginCandidates(email),
+  ])
 
   const direct = workers.find((worker) => loginSet.has(toText(worker.login).toLowerCase()))
   if (direct) return direct
+
+  const sessionWorkerName = normalizePersonName(session?.workerName)
+  if (sessionWorkerName) {
+    const byName = workers.find((worker) => normalizePersonName(worker?.fullName) === sessionWorkerName)
+    if (byName) return byName
+  }
 
   const byEmail = workers.find((worker) => toText(worker.email).toLowerCase() === email)
   if (byEmail) return byEmail
@@ -147,7 +185,7 @@ function buildSessionWorkerFallback(session) {
   const emailLogin = email.includes('@') ? email.split('@')[0] : ''
   const rawLogin = toText(session?.workerLogin || session?.login || emailLogin).toLowerCase()
   const login = rawLogin.includes('@') ? rawLogin.split('@')[0] : rawLogin
-  const safeLogin = login || emailLogin || 'worker'
+  const safeLogin = primaryLoginCandidate(login) || primaryLoginCandidate(emailLogin) || login || emailLogin || 'worker'
   const name = toText(session?.workerName || safeLogin)
   return {
     login: safeLogin,
@@ -603,15 +641,34 @@ function resolveWorkerLogin(worker, session, workers) {
     return direct
   }
 
+  const byKey = new Map((workers || []).map((item) => [normalizeKey(item?.login), toText(item?.login)]))
+  const byName = new Map(
+    (workers || [])
+      .map((item) => [normalizePersonName(item?.fullName), toText(item?.login)])
+      .filter(([name, login]) => Boolean(name && login)),
+  )
+
+  const candidateValues = [session?.workerLogin, session?.login, session?.email]
+  for (const value of candidateValues) {
+    for (const candidate of loginCandidates(value)) {
+      const canonical = byKey.get(normalizeKey(candidate))
+      if (canonical) {
+        return canonical
+      }
+    }
+  }
+
+  const sessionName = normalizePersonName(session?.workerName)
+  if (sessionName) {
+    const canonicalByName = byName.get(sessionName)
+    if (canonicalByName) {
+      return canonicalByName
+    }
+  }
+
   const fromSession = toText(session?.workerLogin)
   const fromEmail = toText(session?.email).split('@')[0] || ''
-  const byKey = new Map((workers || []).map((item) => [normalizeKey(item?.login), toText(item?.login)]))
-  const canonical =
-    byKey.get(normalizeKey(fromSession)) ||
-    byKey.get(normalizeKey(fromEmail)) ||
-    byKey.get(normalizeKey(toText(session?.login)))
-
-  return toText(canonical || fromSession || fromEmail)
+  return toText(primaryLoginCandidate(fromSession) || primaryLoginCandidate(fromEmail) || fromSession || fromEmail)
 }
 
 function selectWorkerScopedWorkdays(workdayRows, workerLogin) {
@@ -734,19 +791,61 @@ export async function getMobileSnapshot(session) {
 async function createWorkdayForScan(snapshot, startZone) {
   const startAt = nowIso()
   const workdayId = makeId('WD')
-  await insertWorkdayForOrg({
-    orgId: snapshot.orgId,
-    workdayId,
-    workerLogin: snapshot.worker.login,
-    workerName: snapshot.worker.name || null,
-    utilityRoomId: startZone?.id || null,
-    startAt,
-    endAt: null,
-    durationSec: null,
-    status: 'RUNNING',
-    comment: null,
-    updatedBy: snapshot.worker.login || null,
-  })
+  const initialLogin = toText(snapshot?.worker?.login)
+  const fallbackLogin = primaryLoginCandidate(initialLogin)
+  const fallbackFromName = primaryLoginCandidate(snapshot?.worker?.name)
+  const workerLoginCandidates = [...new Set([initialLogin, fallbackLogin, fallbackFromName].filter(Boolean))]
+
+  if (!workerLoginCandidates.length) {
+    throw new Error('Brak loginu pracownika w sesji. Zaloguj sie ponownie.')
+  }
+
+  let lastError = null
+  for (const workerLogin of workerLoginCandidates) {
+    try {
+      await insertWorkdayForOrg({
+        orgId: snapshot.orgId,
+        workdayId,
+        workerLogin,
+        workerName: snapshot.worker.name || null,
+        utilityRoomId: startZone?.id || null,
+        startAt,
+        endAt: null,
+        durationSec: null,
+        status: 'RUNNING',
+        comment: null,
+        updatedBy: workerLogin || null,
+      })
+
+      if (snapshot?.worker) {
+        snapshot.worker.login = workerLogin
+      }
+
+      return {
+        message: 'Rozpoczeto dzien pracy.',
+        workdayId,
+      }
+    } catch (error) {
+      lastError = error
+      const message = toText(error?.message).toLowerCase()
+      const isWorkerLoginFk =
+        message.includes('workday_org_id_worker_login_fkey') ||
+        (message.includes('foreign key constraint') && message.includes('worker') && message.includes('login'))
+
+      if (!isWorkerLoginFk || workerLogin === workerLoginCandidates[workerLoginCandidates.length - 1]) {
+        if (isWorkerLoginFk) {
+          throw new Error(
+            'Brak powiazania konta z tabela pracownikow (worker.login). Popros administratora o dopasowanie loginu pracownika.',
+          )
+        }
+        throw error
+      }
+    }
+  }
+
+  if (lastError) {
+    throw lastError
+  }
 
   return {
     message: 'Rozpoczeto dzien pracy.',
