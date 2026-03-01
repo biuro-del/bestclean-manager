@@ -2275,9 +2275,10 @@ export default function App() {
       ) : null}
       {versionPopupOpen ? (
         <div className="modal" role="dialog" aria-modal="true">
-          <div className="modal-content">
-            <div className="title-small">Nowa wersja</div>
-            <div className="muted">Wersja nowa wersja aplikacji V.1.0</div>
+          <div className="modal-content version-popup">
+            <div className="version-popup__badge">Best Clean</div>
+            <div className="version-popup__title">Nowa wersja aplikacji</div>
+            <div className="version-popup__text">Korzystasz z wersji V.1.0.</div>
             <button className="btn action" type="button" onClick={() => setVersionPopupOpen(false)}>
               OK
             </button>

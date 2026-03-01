@@ -598,6 +598,41 @@ body {
   overflow: hidden;
 }
 
+.version-popup {
+  width: min(360px, 100%);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.version-popup__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  border: 1px solid rgba(37, 99, 235, 0.26);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+}
+
+.version-popup__title {
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1.06;
+  letter-spacing: -0.02em;
+}
+
+.version-popup__text {
+  color: #475569;
+  font-size: 15px;
+  line-height: 1.4;
+  margin-bottom: 2px;
+}
+
 .scan-modal-content {
   width: min(430px, 100%);
   max-height: 78vh;
