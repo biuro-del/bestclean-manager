@@ -132,6 +132,15 @@ body {
   gap: 12px;
 }
 
+.app-footer {
+  width: 100%;
+  padding: 10px 12px 14px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
 .card {
   border: 1px solid var(--bc-border);
   border-radius: 20px;

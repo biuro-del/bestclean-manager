@@ -1121,6 +1121,7 @@ export default function App() {
   })
   const [scheduleDayIndex, setScheduleDayIndex] = useState(0)
   const [scheduleUpdatedPopupOpen, setScheduleUpdatedPopupOpen] = useState(false)
+  const [versionPopupOpen, setVersionPopupOpen] = useState(false)
   const [checklistLoading, setChecklistLoading] = useState(false)
   const [checklistError, setChecklistError] = useState('')
   const [checklistErrorKind, setChecklistErrorKind] = useState('')
@@ -1190,6 +1191,7 @@ export default function App() {
     })
     setScheduleDayIndex(0)
     setScheduleUpdatedPopupOpen(false)
+    setVersionPopupOpen(false)
     setChecklistLoading(false)
     setChecklistError('')
     setChecklistErrorKind('')
@@ -1668,6 +1670,7 @@ export default function App() {
       const nextSession = await loginMobile({ login, password })
       setSession(nextSession)
       setView(VIEW.MENU)
+      setVersionPopupOpen(true)
       setWorklogMonth(monthNow())
       setSummaryMonth(monthNow())
       await refresh(nextSession)
@@ -1686,6 +1689,7 @@ export default function App() {
       setSnapshot(null)
       setView(VIEW.LOGIN)
       setSettingsOpen(false)
+      setVersionPopupOpen(false)
       closeScan()
       setCoordView(COORD.HOME)
       setCoordClients([])
@@ -2243,6 +2247,7 @@ export default function App() {
         {refreshPending ? <div className="notice-box notice-muted">Synchronizacja danych...</div> : null}
         {renderMain()}
       </main>
+      <footer className="app-footer">Best Clean V.1.0</footer>
       <SettingsModal open={settingsOpen} session={session} onClose={() => setSettingsOpen(false)} onLogout={doLogout} />
       <ScanModal key={scanState.nonce} scanState={scanState} onClose={closeScan} onSubmit={doScan} />
       <CloseCycleModal
@@ -2263,6 +2268,17 @@ export default function App() {
             <div className="title-small">Grafik zaktualizowany</div>
             <div className="muted">Wykryto zmiane w twoim grafiku. Widok zostal odswiezony.</div>
             <button className="btn action" type="button" onClick={() => setScheduleUpdatedPopupOpen(false)}>
+              OK
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {versionPopupOpen ? (
+        <div className="modal" role="dialog" aria-modal="true">
+          <div className="modal-content">
+            <div className="title-small">Nowa wersja</div>
+            <div className="muted">Wersja nowa wersja aplikacji V.1.0</div>
+            <button className="btn action" type="button" onClick={() => setVersionPopupOpen(false)}>
               OK
             </button>
           </div>
