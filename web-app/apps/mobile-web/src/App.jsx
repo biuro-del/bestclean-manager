@@ -10,6 +10,7 @@ import {
   saveZoneAssignment,
 } from './services/mobileCoordinatorService'
 import { MobileQrScanner, normalizeQrValue } from './services/mobileQrScannerService'
+import { fetchMobileSchedule } from './services/mobileScheduleService'
 import { getMobileSnapshot, scanMobileQr } from './services/mobileWorkflowService'
 import { writeMobileSession } from './state/sessionStore'
 
@@ -35,6 +36,9 @@ const COORD = {
   AUDIT_FORM: 'audit-form',
   EDIT_QR: 'edit-qr',
 }
+
+const SCHEDULE_SYNC_MS = 15 * 60 * 1000
+const SCHEDULE_SWIPE_THRESHOLD_PX = 45
 
 const QR_FUNCTION_OPTIONS = [
   'Sprzatanie',
@@ -637,6 +641,27 @@ function CoordinatorHome({ onDoAudit, onEditQr }) {
   )
 }
 
+function clamp(value, min, max) {
+  if (max < min) return min
+  return Math.min(max, Math.max(min, value))
+}
+
+function formatDateTime(value) {
+  const iso = parseIso(value)
+  if (!iso) return '--'
+  try {
+    return new Date(iso).toLocaleString('pl-PL')
+  } catch {
+    return iso
+  }
+}
+
+function scheduleShiftLabel(index) {
+  if (index === 0) return 'Rano'
+  if (index === 1) return 'Popoludnie'
+  return `Zmiana ${index + 1}`
+}
+
 function CoordinatorAuditStart({ onNext, onBack }) {
   return (
     <section className="card col">
@@ -809,6 +834,19 @@ export default function App() {
     placeName: '',
     location: '',
   })
+  const [schedulePending, setSchedulePending] = useState(false)
+  const [scheduleError, setScheduleError] = useState('')
+  const [schedulePayload, setSchedulePayload] = useState({
+    matched: false,
+    worker: { workerId: '', login: '', email: '', name: '' },
+    sync: { fetchedAtIso: '', cacheExpiresAtIso: '', cacheTtlMinutes: 15 },
+    schedule: { days: [], fingerprint: '' },
+  })
+  const [scheduleDayIndex, setScheduleDayIndex] = useState(0)
+  const [scheduleUpdatedPopupOpen, setScheduleUpdatedPopupOpen] = useState(false)
+
+  const scheduleFingerprintRef = useRef('')
+  const scheduleTouchStartRef = useRef(null)
 
   const resetCoordinatorAuditState = useCallback(() => {
     setCoordAuditZoneId('')
@@ -828,8 +866,46 @@ export default function App() {
     setCoordZones([])
     setCoordBusy(false)
     resetCoordinatorAuditState()
+    setSchedulePending(false)
+    setScheduleError('')
+    setSchedulePayload({
+      matched: false,
+      worker: { workerId: '', login: '', email: '', name: '' },
+      sync: { fetchedAtIso: '', cacheExpiresAtIso: '', cacheTtlMinutes: 15 },
+      schedule: { days: [], fingerprint: '' },
+    })
+    setScheduleDayIndex(0)
+    setScheduleUpdatedPopupOpen(false)
+    scheduleFingerprintRef.current = ''
     setNotice(txt(message) || 'Sesja wygasla. Zaloguj sie ponownie.')
   }, [resetCoordinatorAuditState])
+
+  const applySchedulePayload = useCallback((nextPayload, options = {}) => {
+    const safePayload = nextPayload || {
+      matched: false,
+      worker: { workerId: '', login: '', email: '', name: '' },
+      sync: { fetchedAtIso: '', cacheExpiresAtIso: '', cacheTtlMinutes: 15 },
+      schedule: { days: [], fingerprint: '' },
+    }
+
+    setSchedulePayload(safePayload)
+    const daysCount = Array.isArray(safePayload.schedule?.days) ? safePayload.schedule.days.length : 0
+    setScheduleDayIndex((prev) => clamp(prev, 0, Math.max(0, daysCount - 1)))
+
+    const fingerprint = txt(safePayload.schedule?.fingerprint)
+    if (
+      options.fromAutoSync &&
+      scheduleFingerprintRef.current &&
+      fingerprint &&
+      scheduleFingerprintRef.current !== fingerprint
+    ) {
+      setScheduleUpdatedPopupOpen(true)
+    }
+
+    if (fingerprint) {
+      scheduleFingerprintRef.current = fingerprint
+    }
+  }, [])
 
   const refresh = useCallback(async (activeSession, options = {}) => {
     if (!activeSession?.token) return
@@ -848,6 +924,24 @@ export default function App() {
       if (!options.silent) setRefreshPending(false)
     }
   }, [])
+
+  const refreshSchedule = useCallback(async (activeSession, options = {}) => {
+    if (!activeSession?.token) return
+    if (!options.silent) setSchedulePending(true)
+    setScheduleError('')
+    try {
+      const next = await fetchMobileSchedule(activeSession)
+      applySchedulePayload(next, { fromAutoSync: Boolean(options.fromAutoSync) })
+    } catch (error) {
+      if (isUnauthenticatedError(error)) {
+        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        return
+      }
+      setScheduleError(parseErrorMessage(error, 'Nie udalo sie pobrac grafiku.'))
+    } finally {
+      if (!options.silent) setSchedulePending(false)
+    }
+  }, [applySchedulePayload, forceLoginWithMessage])
 
   useEffect(() => {
     ensureFirebaseAnalytics().catch(() => null)
@@ -884,6 +978,20 @@ export default function App() {
     return () => clearInterval(timer)
   }, [forceLoginWithMessage, refresh, session])
 
+  useEffect(() => {
+    if (!session?.token || view !== VIEW.SCHEDULE) return
+    refreshSchedule(session, { silent: false, fromAutoSync: false })
+  }, [refreshSchedule, session, view])
+
+  useEffect(() => {
+    if (!session?.token || view !== VIEW.SCHEDULE) return
+    const timer = setInterval(
+      () => refreshSchedule(session, { silent: true, fromAutoSync: true }),
+      SCHEDULE_SYNC_MS,
+    )
+    return () => clearInterval(timer)
+  }, [refreshSchedule, session, view])
+
   const nowIso = useMemo(() => new Date(tick).toISOString(), [tick])
   const activeWorkday = snapshot?.activeWorkday
   const activeCycle = snapshot?.activeCycle
@@ -914,10 +1022,56 @@ export default function App() {
     () => (coordAuditStartedAt ? hms(secBetween(coordAuditStartedAt, nowIso)) : '00:00:00'),
     [coordAuditStartedAt, nowIso],
   )
+  const scheduleDays = useMemo(
+    () => (Array.isArray(schedulePayload.schedule?.days) ? schedulePayload.schedule.days : []),
+    [schedulePayload.schedule?.days],
+  )
+  const scheduleSelectedDay = useMemo(() => {
+    if (!scheduleDays.length) return null
+    return scheduleDays[clamp(scheduleDayIndex, 0, scheduleDays.length - 1)] || null
+  }, [scheduleDayIndex, scheduleDays])
+  const scheduleCanPrev = scheduleDayIndex > 0
+  const scheduleCanNext = scheduleDayIndex < scheduleDays.length - 1
+  const scheduleVisibleShiftIndexes = useMemo(() => {
+    if (!scheduleSelectedDay) return [0, 1]
+    const extra = Array.from(
+      new Set(
+        (Array.isArray(scheduleSelectedDay.shifts) ? scheduleSelectedDay.shifts : [])
+          .map((shift) => Number(shift?.slotIndex))
+          .filter((value) => Number.isFinite(value) && value >= 2),
+      ),
+    ).sort((left, right) => left - right)
+    return [0, 1, ...extra]
+  }, [scheduleSelectedDay])
 
   const openScan = (intent, title, subtitle) => {
     setScanState((prev) => ({ open: true, title, subtitle, pending: false, error: '', intent, nonce: prev.nonce + 1 }))
   }
+
+  const goSchedulePrev = useCallback(() => {
+    setScheduleDayIndex((prev) => clamp(prev - 1, 0, scheduleDays.length - 1))
+  }, [scheduleDays.length])
+
+  const goScheduleNext = useCallback(() => {
+    setScheduleDayIndex((prev) => clamp(prev + 1, 0, scheduleDays.length - 1))
+  }, [scheduleDays.length])
+
+  const onScheduleTouchStart = useCallback((event) => {
+    const x = event.changedTouches?.[0]?.clientX
+    scheduleTouchStartRef.current = Number.isFinite(x) ? x : null
+  }, [])
+
+  const onScheduleTouchEnd = useCallback((event) => {
+    const startX = scheduleTouchStartRef.current
+    scheduleTouchStartRef.current = null
+    if (!Number.isFinite(startX)) return
+    const endX = event.changedTouches?.[0]?.clientX
+    if (!Number.isFinite(endX)) return
+    const delta = endX - startX
+    if (Math.abs(delta) < SCHEDULE_SWIPE_THRESHOLD_PX) return
+    if (delta > 0) goSchedulePrev()
+    if (delta < 0) goScheduleNext()
+  }, [goScheduleNext, goSchedulePrev])
 
   const closeScan = useCallback(() => {
     setScanState((prev) => ({ ...prev, open: false, pending: false, error: '' }))
@@ -1262,7 +1416,91 @@ export default function App() {
     }
 
     if (view === VIEW.SCHEDULE) {
-      return <section className="card"><div className="title-small">Grafik pracy</div><div className="muted">Modul grafiku jest aktualnie w przebudowie.</div></section>
+      return (
+        <section className="card col">
+          <div className="list-month-header">
+            <button className="link-btn" type="button" onClick={() => setView(VIEW.MENU)}>
+              Wroc
+            </button>
+            <strong>Grafik pracy</strong>
+            <button
+              className="link-btn"
+              type="button"
+              onClick={() => refreshSchedule(session, { silent: false, fromAutoSync: false })}
+              disabled={schedulePending}
+            >
+              {schedulePending ? 'Odswiezanie...' : 'Odswiez'}
+            </button>
+          </div>
+
+          <div className="muted">Tylko podglad twojego grafiku. Synchronizacja danych co 15 minut.</div>
+          {scheduleError ? <div className="error-inline">{scheduleError}</div> : null}
+
+          <div className="summary-row">
+            <span>Pracownik</span>
+            <span className="summary-value">{txt(schedulePayload.worker?.name || schedulePayload.worker?.login || session?.workerName || session?.workerLogin || '-')}</span>
+          </div>
+          {txt(schedulePayload.worker?.workerId) ? (
+            <div className="summary-row">
+              <span>ID</span>
+              <span className="summary-value">{txt(schedulePayload.worker?.workerId)}</span>
+            </div>
+          ) : null}
+          <div className="summary-row">
+            <span>Ostatnia synchronizacja</span>
+            <span className="summary-value">{formatDateTime(schedulePayload.sync?.fetchedAtIso)}</span>
+          </div>
+
+          {!schedulePending && !scheduleError && !schedulePayload.matched ? (
+            <div className="muted">Nie znaleziono wpisow grafiku dla tego konta.</div>
+          ) : null}
+
+          {!schedulePending && !scheduleError && schedulePayload.matched && !scheduleSelectedDay ? (
+            <div className="muted">Brak dni grafiku do wyswietlenia.</div>
+          ) : null}
+
+          {scheduleSelectedDay ? (
+            <>
+              <div className="list-month-header">
+                <button className="link-btn" type="button" onClick={goSchedulePrev} disabled={!scheduleCanPrev}>
+                  {'<'}
+                </button>
+                <div style={{ textAlign: 'center', flex: 1 }}>
+                  <strong style={{ display: 'block' }}>{txt(scheduleSelectedDay.weekdayLabel) || '-'}</strong>
+                  <span>{txt(scheduleSelectedDay.dateLabel || scheduleSelectedDay.date) || '-'}</span>
+                </div>
+                <button className="link-btn" type="button" onClick={goScheduleNext} disabled={!scheduleCanNext}>
+                  {'>'}
+                </button>
+              </div>
+
+              <div
+                className="scan-glass"
+                onTouchStart={onScheduleTouchStart}
+                onTouchEnd={onScheduleTouchEnd}
+                style={{ display: 'grid', gap: 8 }}
+              >
+                <div className="muted">Status</div>
+                <div style={{ fontSize: 22, fontWeight: 900 }}>{txt(scheduleSelectedDay.statusLabel) || '-'}</div>
+                {scheduleVisibleShiftIndexes.map((shiftIndex) => {
+                  const shift = (Array.isArray(scheduleSelectedDay.shifts) ? scheduleSelectedDay.shifts : []).find(
+                    (item) => Number(item?.slotIndex) === shiftIndex,
+                  )
+                  return (
+                    <div key={`shift-${shiftIndex}`} className="summary-row" style={{ alignItems: 'flex-start', flexDirection: 'column' }}>
+                      <span className="muted">{scheduleShiftLabel(shiftIndex)}</span>
+                      <strong>{txt(shift?.primaryText) || 'Brak zmiany'}</strong>
+                      {txt(shift?.secondaryText) ? <span>{txt(shift?.secondaryText)}</span> : null}
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="muted">Przesun palcem w lewo lub prawo, aby zmienic dzien.</div>
+            </>
+          ) : null}
+        </section>
+      )
     }
 
     if (view === VIEW.COORDINATOR) {
@@ -1404,6 +1642,17 @@ export default function App() {
       </main>
       <SettingsModal open={settingsOpen} session={session} onClose={() => setSettingsOpen(false)} onLogout={doLogout} />
       <ScanModal key={scanState.nonce} scanState={scanState} onClose={closeScan} onSubmit={doScan} />
+      {scheduleUpdatedPopupOpen ? (
+        <div className="modal" role="dialog" aria-modal="true">
+          <div className="modal-content">
+            <div className="title-small">Grafik zaktualizowany</div>
+            <div className="muted">Wykryto zmiane w twoim grafiku. Widok zostal odswiezony.</div>
+            <button className="btn action" type="button" onClick={() => setScheduleUpdatedPopupOpen(false)}>
+              OK
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
