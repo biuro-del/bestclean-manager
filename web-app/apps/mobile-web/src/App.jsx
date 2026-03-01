@@ -39,6 +39,7 @@ const COORD = {
 
 const SCHEDULE_SYNC_MS = 15 * 60 * 1000
 const SCHEDULE_SWIPE_THRESHOLD_PX = 45
+const MAX_REASONABLE_WORKDAY_SEC = 20 * 60 * 60
 
 const QR_FUNCTION_OPTIONS = [
   'Sprzatanie',
@@ -232,6 +233,19 @@ function secBetween(startValue, endValue = new Date().toISOString()) {
   return Math.floor((endMs - startMs) / 1000)
 }
 
+function sanitizeClosedWorkdaySeconds(seconds, startIso, endIso) {
+  const value = Math.max(0, Math.floor(Number(seconds || 0)))
+  if (value <= MAX_REASONABLE_WORKDAY_SEC) {
+    return value
+  }
+
+  const range = secBetween(startIso, endIso)
+  if (range > 0 && range <= MAX_REASONABLE_WORKDAY_SEC) {
+    return range
+  }
+  return 0
+}
+
 function formatTime(value) {
   const iso = parseIso(value)
   if (!iso) return '--:--'
@@ -349,19 +363,31 @@ function resolveWorkflowView(snapshot) {
 }
 
 function getWorkdaySeconds(row, nowIso) {
+  const startIso = parseIso(row?.startAt)
+  const endIso = parseIso(row?.endAt)
   const status = up(row?.status)
+  const direct = Number(row?.durationSec)
+  const hasDirect = Number.isFinite(direct) && direct >= 0
+
   if (status === 'CLOSED') {
-    const direct = Number(row?.durationSec)
-    if (Number.isFinite(direct) && direct >= 0) return Math.floor(direct)
-    return secBetween(row?.startAt, row?.endAt)
+    if (hasDirect) return sanitizeClosedWorkdaySeconds(direct, startIso, endIso)
+    return sanitizeClosedWorkdaySeconds(secBetween(startIso, endIso), startIso, endIso)
   }
+
   if (status === 'ENDING') {
-    const endIso = parseIso(row?.endAt)
     if (!endIso) return secBetween(row?.startAt, nowIso)
     const minIso = new Date(endIso).getTime() < new Date(nowIso).getTime() ? endIso : nowIso
-    return secBetween(row?.startAt, minIso)
+    return secBetween(startIso, minIso)
   }
-  return secBetween(row?.startAt, nowIso)
+
+  // For historical RUNNING rows (e.g. imported history), do not accumulate until "now".
+  if (!isSameLocalDay(startIso, nowIso)) {
+    if (endIso) return secBetween(startIso, endIso)
+    if (hasDirect) return Math.floor(direct)
+    return 0
+  }
+
+  return secBetween(startIso, nowIso)
 }
 
 function inMonth(isoValue, state) {

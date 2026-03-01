@@ -3,6 +3,7 @@ import {
   clientsForOrg,
   insertWorkdayForOrg,
   updateWorkdayForOrg,
+  workerWorkdaysForOrg,
   workdaysForOrg,
   workersForOrg,
   zonesForOrg,
@@ -16,6 +17,7 @@ let backupCyclesForOrgUnavailable = false
 const eventMutationsEnabled = false
 let insertEventForOrgUnavailable = !eventMutationsEnabled
 let updateEventForOrgUnavailable = !eventMutationsEnabled
+const MAX_REASONABLE_WORKDAY_SEC = 20 * 60 * 60
 
 function toText(value) {
   return String(value ?? '').trim()
@@ -27,6 +29,35 @@ function toUpper(value) {
 
 function normalizeKey(value) {
   return toText(value).toLowerCase()
+}
+
+function loginMatchKeys(value) {
+  const raw = normalizeKey(value)
+  const keys = new Set()
+  if (!raw) {
+    return keys
+  }
+
+  keys.add(raw)
+  if (raw.includes('@')) {
+    keys.add(raw.split('@')[0])
+  }
+  return keys
+}
+
+function appendLoginMatchKeys(targetSet, value) {
+  for (const key of loginMatchKeys(value)) {
+    targetSet.add(key)
+  }
+}
+
+function hasLoginIntersection(leftKeys, rightKeys) {
+  for (const key of leftKeys) {
+    if (rightKeys.has(key)) {
+      return true
+    }
+  }
+  return false
 }
 
 function normalizePersonName(value) {
@@ -109,6 +140,19 @@ function elapsedSec(fromIso, toIsoValue = nowIso()) {
   const to = new Date(parseIso(toIsoValue) || 0).getTime()
   if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return 0
   return Math.floor((to - from) / 1000)
+}
+
+function sanitizeClosedWorkdayDuration(seconds, startIso, endIso) {
+  const value = Math.max(0, Math.floor(Number(seconds || 0)))
+  if (value <= MAX_REASONABLE_WORKDAY_SEC) {
+    return value
+  }
+
+  const range = elapsedSec(startIso, endIso)
+  if (range > 0 && range <= MAX_REASONABLE_WORKDAY_SEC) {
+    return range
+  }
+  return 0
 }
 
 function formatTime(value) {
@@ -268,21 +312,37 @@ function isEventOpen(eventRow) {
 
 function getWorkdayDuration(workday, nowValue = nowIso()) {
   if (!workday) return 0
+  const startAt = parseIso(workday.startAt)
+  const endAt = parseIso(workday.endAt)
   const status = toUpper(workday.status)
+  const directDurationRaw = Number(workday.durationSec)
+  const hasDirectDuration = Number.isFinite(directDurationRaw) && directDurationRaw >= 0
+
   if (status === 'CLOSED') {
-    if (Number.isFinite(workday.durationSec) && workday.durationSec > 0) {
-      return workday.durationSec
+    if (hasDirectDuration) {
+      return sanitizeClosedWorkdayDuration(directDurationRaw, startAt, endAt)
     }
-    return elapsedSec(workday.startAt, workday.endAt)
+    return sanitizeClosedWorkdayDuration(elapsedSec(startAt, endAt), startAt, endAt)
   }
 
   if (status === 'ENDING') {
-    const plannedEnd = parseIso(workday.endAt) || nowValue
+    const plannedEnd = endAt || nowValue
     const endForCalc = new Date(plannedEnd).getTime() > new Date(nowValue).getTime() ? nowValue : plannedEnd
-    return elapsedSec(workday.startAt, endForCalc)
+    return elapsedSec(startAt, endForCalc)
   }
 
-  return elapsedSec(workday.startAt, nowValue)
+  // Historical RUNNING rows should not inflate totals up to current time.
+  if (!isTodayIso(startAt)) {
+    if (endAt) {
+      return elapsedSec(startAt, endAt)
+    }
+    if (hasDirectDuration) {
+      return Math.floor(directDurationRaw)
+    }
+    return 0
+  }
+
+  return elapsedSec(startAt, nowValue)
 }
 
 function pickActiveWorkday(rows) {
@@ -617,6 +677,39 @@ async function fetchBaseData(orgId) {
   }
 }
 
+async function fetchWorkerWorkdayRows(orgId, workerLogin) {
+  const login = toText(workerLogin)
+  if (!login) {
+    return []
+  }
+
+  try {
+    const response = await workerWorkdaysForOrg({ orgId, workerLogin: login })
+    const rows = response?.data?.workdays ?? []
+    if (Array.isArray(rows)) {
+      return rows
+    }
+  } catch (error) {
+    if (!operationMissing(error, 'WorkerWorkdaysForOrg')) {
+      return []
+    }
+  }
+
+  try {
+    const response = await runQueryOperation('WorkerWorkdaysForOrg', { orgId, workerLogin: login })
+    const rows = response?.data?.workdays ?? []
+    if (Array.isArray(rows)) {
+      return rows
+    }
+  } catch (error) {
+    if (!operationMissing(error, 'WorkerWorkdaysForOrg')) {
+      return []
+    }
+  }
+
+  return []
+}
+
 function normalizeZones(zoneRows, clientRows) {
   const clientMap = new Map(clientRows.map((row) => [toText(row.clientId), toText(row.name)]))
   return zoneRows.map((row) => {
@@ -674,21 +767,58 @@ function resolveWorkerLogin(worker, session, workers) {
   return toText(primaryLoginCandidate(fromSession) || primaryLoginCandidate(fromEmail) || fromSession || fromEmail)
 }
 
-function selectWorkerScopedWorkdays(workdayRows, workerLogin) {
-  const key = normalizeKey(workerLogin)
+function selectWorkerScopedWorkdays(workdayRows, workerLogin, workerName = '', session = null) {
+  const loginKeys = new Set()
+  appendLoginMatchKeys(loginKeys, workerLogin)
+  appendLoginMatchKeys(loginKeys, session?.workerLogin)
+  appendLoginMatchKeys(loginKeys, session?.login)
+  appendLoginMatchKeys(loginKeys, session?.email)
+
+  const nameKeys = new Set()
+  const canonicalName = normalizePersonName(workerName)
+  const sessionName = normalizePersonName(session?.workerName)
+  if (canonicalName) {
+    nameKeys.add(canonicalName)
+  }
+  if (sessionName) {
+    nameKeys.add(sessionName)
+  }
+
   return workdayRows
     .map((row) => normalizeWorkday(row))
-    .filter((row) => normalizeKey(row.workerLogin) === key)
+    .filter((row) => {
+      const byLogin = hasLoginIntersection(loginMatchKeys(row.workerLogin), loginKeys)
+      const rowName = normalizePersonName(row.workerName)
+      const byName = Boolean(rowName && nameKeys.has(rowName))
+      return byLogin || byName
+    })
 }
 
-function selectWorkerScopedEvents(eventRows, workerLogin, zoneById, workerWorkdayIds = new Set()) {
-  const key = normalizeKey(workerLogin)
+function selectWorkerScopedEvents(eventRows, workerLogin, zoneById, workerWorkdayIds = new Set(), workerName = '', session = null) {
+  const loginKeys = new Set()
+  appendLoginMatchKeys(loginKeys, workerLogin)
+  appendLoginMatchKeys(loginKeys, session?.workerLogin)
+  appendLoginMatchKeys(loginKeys, session?.login)
+  appendLoginMatchKeys(loginKeys, session?.email)
+
+  const nameKeys = new Set()
+  const canonicalName = normalizePersonName(workerName)
+  const sessionName = normalizePersonName(session?.workerName)
+  if (canonicalName) {
+    nameKeys.add(canonicalName)
+  }
+  if (sessionName) {
+    nameKeys.add(sessionName)
+  }
+
   return eventRows
     .map((row) => normalizeEvent(row, zoneById))
     .filter((row) => {
-      const byWorkerLogin = key && normalizeKey(row.workerLogin) === key
+      const byWorkerLogin = hasLoginIntersection(loginMatchKeys(row.workerLogin), loginKeys)
+      const rowName = normalizePersonName(row.workerName)
+      const byWorkerName = Boolean(rowName && nameKeys.has(rowName))
       const byWorkday = toText(row.workdayId) && workerWorkdayIds.has(toText(row.workdayId))
-      return Boolean(byWorkerLogin || byWorkday)
+      return Boolean(byWorkerLogin || byWorkerName || byWorkday)
     })
 }
 
@@ -754,7 +884,9 @@ export async function getMobileSnapshot(session) {
 
   const zones = normalizeZones(data.zoneRows, data.clientRows)
   const zoneById = new Map(zones.map((zone) => [zone.id, zone]))
-  const workdays = selectWorkerScopedWorkdays(data.workdayRows, workerLogin)
+  const workerScopedRows = await fetchWorkerWorkdayRows(orgId, workerLogin)
+  const workdaySourceRows = workerScopedRows.length ? workerScopedRows : data.workdayRows
+  const workdays = selectWorkerScopedWorkdays(workdaySourceRows, workerLogin, workerName, session)
   const workerWorkdayIds = new Set(workdays.map((row) => toText(row.workdayId)).filter(Boolean))
   let activeWorkday = pickActiveWorkday(workdays)
 
@@ -762,7 +894,7 @@ export async function getMobileSnapshot(session) {
     activeWorkday = await closeEndingIfDue({ ...session, orgId }, activeWorkday)
   }
 
-  const events = selectWorkerScopedEvents(data.eventRows, workerLogin, zoneById, workerWorkdayIds)
+  const events = selectWorkerScopedEvents(data.eventRows, workerLogin, zoneById, workerWorkdayIds, workerName, session)
   const activeCycle = pickActiveCycle(events, activeWorkday?.workdayId) || fallbackActiveCycleFromWorkday(activeWorkday, zones)
   const summary = summaryFromWorkdays(workdays, activeWorkday)
 
