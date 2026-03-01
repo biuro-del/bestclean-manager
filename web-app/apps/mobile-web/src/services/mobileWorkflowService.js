@@ -183,6 +183,75 @@ function makeId(prefix) {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`
 }
 
+function appendComment(base, addition) {
+  const left = toText(base)
+  const right = toText(addition)
+  if (!right) return left || null
+  return left ? `${left} | ${right}` : right
+}
+
+function geolocationErrorMessage(error, actionLabel) {
+  const action = toText(actionLabel) || 'operacje'
+  const code = Number(error?.code || 0)
+  if (code === 1) {
+    return `Aby wykonac ${action}, wlacz GPS i zezwol na lokalizacje dla tej strony.`
+  }
+  if (code === 2) {
+    return `Nie mozna odczytac GPS dla ${action}. Sprawdz uslugi lokalizacji i sprobuj ponownie.`
+  }
+  if (code === 3) {
+    return `Przekroczono czas oczekiwania na GPS dla ${action}. Sprobuj ponownie.`
+  }
+  return `Nie udalo sie pobrac GPS dla ${action}.`
+}
+
+function readCurrentPosition(options = {}) {
+  if (typeof navigator === 'undefined' || !navigator?.geolocation?.getCurrentPosition) {
+    const err = new Error('Ta przegladarka nie obsluguje GPS.')
+    err.code = 'GEO_UNSUPPORTED'
+    throw err
+  }
+
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: Number(options.timeoutMs || 12000),
+      maximumAge: 0,
+    })
+  })
+}
+
+async function captureGpsForAction(actionLabel) {
+  try {
+    const position = await readCurrentPosition()
+    const coords = position?.coords || {}
+    return {
+      action: toText(actionLabel),
+      lat: Number.isFinite(Number(coords.latitude)) ? Number(coords.latitude) : null,
+      lon: Number.isFinite(Number(coords.longitude)) ? Number(coords.longitude) : null,
+      accM: Number.isFinite(Number(coords.accuracy)) ? Math.round(Number(coords.accuracy)) : null,
+      atIso: new Date(position?.timestamp || Date.now()).toISOString(),
+      tzOffsetMin: new Date().getTimezoneOffset() * -1,
+    }
+  } catch (error) {
+    throw new Error(geolocationErrorMessage(error, actionLabel))
+  }
+}
+
+function gpsCommentTag(gpsData) {
+  if (!gpsData) return ''
+  const data = gpsData || {}
+  const action = toText(data.action).toUpperCase() || 'GPS'
+  const lat = Number.isFinite(Number(data.lat)) ? Number(data.lat).toFixed(6) : 'NA'
+  const lon = Number.isFinite(Number(data.lon)) ? Number(data.lon).toFixed(6) : 'NA'
+  const acc = Number.isFinite(Number(data.accM)) ? `${Math.round(Number(data.accM))}m` : 'NA'
+  const at = toText(data.atIso) || nowIso()
+  const tz = Number.isFinite(Number(data.tzOffsetMin))
+    ? `UTC${Number(data.tzOffsetMin) >= 0 ? '+' : ''}${Number(data.tzOffsetMin) / 60}`
+    : 'UTC?'
+  return `${action}_GPS lat=${lat} lon=${lon} acc=${acc} at=${at} tz=${tz}`
+}
+
 function classifyZone(functionLabel) {
   const token = functionToken(functionLabel)
   if (token === 'START' || token === 'STARTCZASPRACY') {
@@ -926,7 +995,7 @@ export async function getMobileSnapshot(session) {
   }
 }
 
-async function createWorkdayForScan(snapshot, startZone) {
+async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
   const startAt = nowIso()
   const workdayId = makeId('WD')
   const initialLogin = toText(snapshot?.worker?.login)
@@ -951,7 +1020,7 @@ async function createWorkdayForScan(snapshot, startZone) {
         endAt: null,
         durationSec: null,
         status: 'RUNNING',
-        comment: null,
+        comment: appendComment(null, gpsCommentTag(gpsData)),
         updatedBy: workerLogin || null,
       })
 
@@ -991,9 +1060,12 @@ async function createWorkdayForScan(snapshot, startZone) {
   }
 }
 
-async function closeWorkdayNow(snapshot, workday, stopZone) {
+async function closeWorkdayNow(snapshot, workday, stopZone, gpsData = null) {
   const endAt = nowIso()
   const graceMin = Number(stopZone?.stopGraceMin ?? 0)
+  const gpsComment = gpsCommentTag(gpsData)
+  const stopComment = appendComment(workday.comment, `STOP ${stopZone.id}`)
+  const fullComment = appendComment(stopComment, gpsComment)
 
   if (graceMin > 0) {
     const plannedEndAt = new Date(Date.now() + graceMin * 60_000).toISOString()
@@ -1008,7 +1080,7 @@ async function closeWorkdayNow(snapshot, workday, stopZone) {
       endAt: plannedEndAt,
       durationSec,
       status: 'ENDING',
-      comment: toText(workday.comment || `STOP ${stopZone.id}`) || null,
+      comment: fullComment,
       updatedBy: snapshot.worker.login || null,
     })
 
@@ -1026,7 +1098,7 @@ async function closeWorkdayNow(snapshot, workday, stopZone) {
     endAt,
     durationSec,
     status: 'CLOSED',
-    comment: toText(workday.comment || `STOP ${stopZone.id}`) || null,
+    comment: fullComment,
     updatedBy: snapshot.worker.login || null,
   })
 
@@ -1170,6 +1242,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
   const effectiveWorkdayOpen = workdayOpen && !staleWorkdayOpen
 
   if (zone.kind === 'START') {
+    const startGps = await captureGpsForAction('START')
     if (effectiveWorkdayOpen) {
       return {
         message: 'Dzien pracy jest juz aktywny.',
@@ -1177,7 +1250,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
       }
     }
 
-    await createWorkdayForScan(snapshot, zone)
+    await createWorkdayForScan(snapshot, zone, startGps)
     return {
       message: 'Rozpoczeto dzien pracy (START).',
       snapshot: await getMobileSnapshot(session),
@@ -1185,6 +1258,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
   }
 
   if (zone.kind === 'STOP') {
+    const stopGps = await captureGpsForAction('STOP')
     if (!effectiveWorkdayOpen) {
       throw new Error('Brak aktywnego dnia. Najpierw zeskanuj START.')
     }
@@ -1193,7 +1267,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
       await stopCycle(snapshot, activeCycle, 'STOP_END_DAY', comment)
     }
 
-    const stopMessage = await closeWorkdayNow(snapshot, activeWorkday, zone)
+    const stopMessage = await closeWorkdayNow(snapshot, activeWorkday, zone, stopGps)
     return {
       message: stopMessage,
       snapshot: await getMobileSnapshot(session),
