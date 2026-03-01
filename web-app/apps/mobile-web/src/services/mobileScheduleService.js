@@ -1,6 +1,6 @@
 import { waitForFirebaseAuthReady } from '../firebase/firebaseClient'
 
-const DEFAULT_SCHEDULE_API_BASE = 'https://iclean-room.web.app/api'
+const DEFAULT_SCHEDULE_API_BASE = 'https://europe-central2-iclean-room.cloudfunctions.net/api'
 
 function toText(value) {
   return String(value ?? '').trim()
@@ -26,6 +26,9 @@ function parseErrorMessage(error, fallback) {
     toText(fallback)
 
   if (!direct) return toText(fallback)
+  if (direct.toLowerCase().includes('failed to fetch')) {
+    return 'Brak polaczenia z serwisem grafiku.'
+  }
   if (!direct.startsWith('{')) return direct
 
   try {
@@ -51,30 +54,44 @@ export async function fetchMobileSchedule(session) {
 
   const idToken = await user.getIdToken(true)
   const apiBase = pickApiBase()
-  const response = await fetch(`${apiBase}/schedule/mobile`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      idToken,
-      worker: {
-        workerId: toText(session?.workerId),
-        login: toText(session?.workerLogin || session?.login),
-        email: toText(session?.email),
-        name: toText(session?.workerName),
-      },
-    }),
-  })
+  let response
+  try {
+    response = await fetch(`${apiBase}/schedule/mobile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        idToken,
+        worker: {
+          workerId: toText(session?.workerId),
+          login: toText(session?.workerLogin || session?.login),
+          email: toText(session?.email),
+          name: toText(session?.workerName),
+        },
+      }),
+    })
+  } catch {
+    throw new Error('Brak polaczenia z serwisem grafiku.')
+  }
+
+  let rawText = ''
+  try {
+    rawText = await response.text()
+  } catch {
+    rawText = ''
+  }
 
   let body = null
-  try {
-    body = await response.json()
-  } catch {
-    body = null
+  if (rawText) {
+    try {
+      body = JSON.parse(rawText)
+    } catch {
+      body = null
+    }
   }
 
   if (!response.ok || body?.ok === false) {
     const err = new Error(
-      parseErrorMessage(body || { message: response.statusText }, 'Nie udalo sie pobrac grafiku.'),
+      parseErrorMessage(body || { message: rawText || response.statusText }, 'Nie udalo sie pobrac grafiku.'),
     )
     if (response.status === 401 || response.status === 403) {
       err.code = 'UNAUTHENTICATED'
