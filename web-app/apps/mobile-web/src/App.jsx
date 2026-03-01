@@ -9,6 +9,7 @@ import {
   logAuditZone,
   saveZoneAssignment,
 } from './services/mobileCoordinatorService'
+import { fetchZoneChecklistDefinition, saveZoneChecklistResult } from './services/mobileChecklistService'
 import { MobileQrScanner, normalizeQrValue } from './services/mobileQrScannerService'
 import { fetchMobileSchedule } from './services/mobileScheduleService'
 import { getMobileSnapshot, scanMobileQr } from './services/mobileWorkflowService'
@@ -40,6 +41,8 @@ const COORD = {
 const SCHEDULE_SYNC_MS = 15 * 60 * 1000
 const SCHEDULE_SWIPE_THRESHOLD_PX = 45
 const MAX_REASONABLE_WORKDAY_SEC = 20 * 60 * 60
+const CHECKLIST_REASON_MAX_LEN = 300
+const MAX_CLOSE_PHOTO_DATA_URL_LEN = 1_600_000
 
 const QR_FUNCTION_OPTIONS = [
   'Sprzatanie',
@@ -180,6 +183,10 @@ function txt(value) {
 
 function up(value) {
   return txt(value).toUpperCase()
+}
+
+function normalizeKey(value) {
+  return txt(value).toLowerCase()
 }
 
 function parseIso(value) {
@@ -365,6 +372,76 @@ function resolveWorkflowView(snapshot, nowIsoValue = new Date().toISOString()) {
   if (up(snapshot?.activeWorkday?.status) === 'ENDING') return VIEW.END
   if (isCycleOpen(snapshot?.activeCycle)) return VIEW.CLEAN
   return VIEW.SCAN
+}
+
+function resolveCycleCloseReason(activeCycle, scannedZone) {
+  if (!isCycleOpen(activeCycle)) return ''
+  const kind = up(scannedZone?.kind)
+  if (!kind) return ''
+  if (kind === 'STOP') return 'STOP_END_DAY'
+  if (kind === 'CLEAN' || kind === 'INDIVIDUAL') {
+    if (normalizeKey(activeCycle?.zoneId) === normalizeKey(scannedZone?.id)) {
+      return 'QR_SAME'
+    }
+    return 'QR_SWITCH'
+  }
+  return ''
+}
+
+function unresolvedChecklistItems(items) {
+  return (items || []).filter((item) => !item?.checked && !txt(item?.reason))
+}
+
+function splitChecklistItems(items) {
+  const list = Array.isArray(items) ? items : []
+  return {
+    additional: list.filter((item) => normalizeKey(item?.section) === 'additional'),
+    standard: list.filter((item) => normalizeKey(item?.section) === 'standard'),
+  }
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('Nie udalo sie odczytac pliku.'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function compressImageToDataUrl(file, options = {}) {
+  const maxSide = Number(options.maxSide || 1280)
+  const quality = Number(options.quality || 0.72)
+  const fallback = await readFileAsDataUrl(file)
+
+  const image = await new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('Nie udalo sie przetworzyc zdjecia.'))
+    img.src = fallback
+  }).catch(() => null)
+
+  if (!image) return fallback
+  const width = Number(image.width || 0)
+  const height = Number(image.height || 0)
+  if (!width || !height) return fallback
+
+  const scale = Math.min(1, maxSide / Math.max(width, height))
+  const targetWidth = Math.max(1, Math.round(width * scale))
+  const targetHeight = Math.max(1, Math.round(height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = targetWidth
+  canvas.height = targetHeight
+
+  const context = canvas.getContext('2d')
+  if (!context) return fallback
+  context.drawImage(image, 0, 0, targetWidth, targetHeight)
+
+  try {
+    return canvas.toDataURL('image/jpeg', quality)
+  } catch {
+    return fallback
+  }
 }
 
 function getWorkdaySeconds(row, nowIso) {
@@ -654,6 +731,142 @@ function ScanModal({ scanState, onClose, onSubmit }) {
   )
 }
 
+function ChecklistSection({ title, items, onToggle }) {
+  if (!items.length) {
+    return (
+      <div className="box">
+        <div className="tile-label">{title}</div>
+        <div className="muted">Brak zadan.</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="box col">
+      <div className="tile-label">{title}</div>
+      {items.map((item) => (
+        <label className="checklist-item" key={item.key}>
+          <input
+            type="checkbox"
+            checked={Boolean(item.checked)}
+            onChange={(event) => onToggle(item.key, event.target.checked)}
+          />
+          <span>{item.taskName}</span>
+        </label>
+      ))}
+    </div>
+  )
+}
+
+function CloseCycleModal({
+  open,
+  state,
+  checklistItems,
+  onToggleTask,
+  onReasonChange,
+  onCommentChange,
+  onPhotoPick,
+  onPhotoClear,
+  onCancel,
+  onConfirm,
+}) {
+  if (!open) return null
+  const unresolved = (checklistItems || []).filter((item) => !item.checked)
+
+  return (
+    <div className="modal" onClick={state.pending ? undefined : onCancel}>
+      <div className="modal-content close-zone-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">Zamknij strefe</div>
+          <button className="link-btn" type="button" onClick={onCancel} disabled={state.pending}>
+            Wroc
+          </button>
+        </div>
+        <div className="modal-body col close-zone-body">
+          <div className="muted">
+            Zamykana: {txt(state?.activeCycle?.zoneName) || '-'}
+            <br />
+            Nastepna akcja: {txt(state?.targetZone?.name || state?.targetZone?.id) || '-'}
+          </div>
+
+          {checklistItems.length ? (
+            <div className="box col">
+              <div className="tile-label">Checklista strefy</div>
+              {checklistItems.map((item) => (
+                <div className="checklist-close-row" key={item.key}>
+                  <label className="checklist-item">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(item.checked)}
+                      onChange={(event) => onToggleTask(item.key, event.target.checked)}
+                      disabled={state.pending}
+                    />
+                    <span>{item.taskName}</span>
+                  </label>
+                  {!item.checked ? (
+                    <input
+                      className="input"
+                      value={item.reason || ''}
+                      maxLength={CHECKLIST_REASON_MAX_LEN}
+                      onChange={(event) => onReasonChange(item.key, event.target.value)}
+                      placeholder="Przyczyna niewykonania (wymagana)"
+                      disabled={state.pending}
+                    />
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {unresolved.length ? (
+            <div className="muted">
+              Zadania nieoznaczone jako OK wymagaja podania przyczyny.
+            </div>
+          ) : null}
+
+          <div className="box col">
+            <label className="muted">Komentarz zamkniecia strefy (opcjonalnie)</label>
+            <textarea
+              className="textarea"
+              value={state.closeComment}
+              maxLength={CHECKLIST_REASON_MAX_LEN}
+              onChange={(event) => onCommentChange(event.target.value)}
+              placeholder="Dodaj komentarz..."
+              disabled={state.pending}
+            />
+          </div>
+
+          <div className="box col">
+            <label className="muted">Zdjecie zamkniecia strefy (opcjonalnie)</label>
+            <input
+              className="input"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={onPhotoPick}
+              disabled={state.pending}
+            />
+            {txt(state.closePhotoDataUrl) ? (
+              <>
+                <img className="close-zone-photo-preview" src={state.closePhotoDataUrl} alt="Podglad zdjecia strefy" />
+                <button className="btn secondary" type="button" onClick={onPhotoClear} disabled={state.pending}>
+                  Usun zdjecie
+                </button>
+              </>
+            ) : null}
+          </div>
+
+          {state.error ? <div className="error-inline">{state.error}</div> : null}
+
+          <button className="btn primary" type="button" onClick={onConfirm} disabled={state.pending}>
+            {state.pending ? 'Zapisywanie...' : 'Potwierdz zamkniecie'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CoordinatorHome({ onDoAudit, onEditQr }) {
   return (
     <section className="card col">
@@ -875,9 +1088,45 @@ export default function App() {
   })
   const [scheduleDayIndex, setScheduleDayIndex] = useState(0)
   const [scheduleUpdatedPopupOpen, setScheduleUpdatedPopupOpen] = useState(false)
+  const [checklistLoading, setChecklistLoading] = useState(false)
+  const [checklistError, setChecklistError] = useState('')
+  const [checklistMeta, setChecklistMeta] = useState({
+    zoneId: '',
+    zoneName: '',
+    clientName: '',
+    location: '',
+  })
+  const [checklistItems, setChecklistItems] = useState([])
+  const [closeCycleState, setCloseCycleState] = useState({
+    open: false,
+    pending: false,
+    error: '',
+    intent: 'workflow',
+    code: '',
+    closeReason: '',
+    closeComment: '',
+    closePhotoDataUrl: '',
+    targetZone: null,
+    activeCycle: null,
+  })
 
   const scheduleFingerprintRef = useRef('')
   const scheduleTouchStartRef = useRef(null)
+
+  const resetCloseCycleState = useCallback(() => {
+    setCloseCycleState({
+      open: false,
+      pending: false,
+      error: '',
+      intent: 'workflow',
+      code: '',
+      closeReason: '',
+      closeComment: '',
+      closePhotoDataUrl: '',
+      targetZone: null,
+      activeCycle: null,
+    })
+  }, [])
 
   const resetCoordinatorAuditState = useCallback(() => {
     setCoordAuditZoneId('')
@@ -907,6 +1156,22 @@ export default function App() {
     })
     setScheduleDayIndex(0)
     setScheduleUpdatedPopupOpen(false)
+    setChecklistLoading(false)
+    setChecklistError('')
+    setChecklistMeta({ zoneId: '', zoneName: '', clientName: '', location: '' })
+    setChecklistItems([])
+    setCloseCycleState({
+      open: false,
+      pending: false,
+      error: '',
+      intent: 'workflow',
+      code: '',
+      closeReason: '',
+      closeComment: '',
+      closePhotoDataUrl: '',
+      targetZone: null,
+      activeCycle: null,
+    })
     scheduleFingerprintRef.current = ''
     setNotice(txt(message) || 'Sesja wygasla. Zaloguj sie ponownie.')
   }, [resetCoordinatorAuditState])
@@ -1026,6 +1291,18 @@ export default function App() {
   const nowIso = useMemo(() => new Date(tick).toISOString(), [tick])
   const activeWorkday = snapshot?.activeWorkday
   const activeCycle = snapshot?.activeCycle
+  const activeCycleZoneId = txt(activeCycle?.zoneId)
+  const activeCycleZoneName = txt(activeCycle?.zoneName)
+  const activeCycleClientName = txt(activeCycle?.clientName)
+  const activeCycleLocation = txt(activeCycle?.location)
+  const activeCycleOpen = useMemo(
+    () => isCycleOpen(activeCycle),
+    [activeCycle?.status, activeCycle?.endAt, activeCycle?.startAt, activeCycle?.eventId, activeCycle?.zoneId],
+  )
+  const activeCycleKey = useMemo(
+    () => `${txt(activeCycle?.eventId || activeCycle?.cycleId)}:${activeCycleZoneId}`,
+    [activeCycle?.eventId, activeCycle?.cycleId, activeCycleZoneId],
+  )
   const liveWorkdayOpen = useMemo(() => isLiveWorkday(activeWorkday, nowIso), [activeWorkday, nowIso])
   const hasWorkdayStart = liveWorkdayOpen
   const topActionIsStart = !liveWorkdayOpen
@@ -1075,6 +1352,79 @@ export default function App() {
     ).sort((left, right) => left - right)
     return [0, 1, ...extra]
   }, [scheduleSelectedDay])
+  const checklistSplit = useMemo(() => splitChecklistItems(checklistItems), [checklistItems])
+
+  useEffect(() => {
+    if (!session?.token || !txt(session?.orgId)) {
+      setChecklistLoading(false)
+      setChecklistError('')
+      setChecklistMeta({ zoneId: '', zoneName: '', clientName: '', location: '' })
+      setChecklistItems([])
+      return
+    }
+
+    if (!activeCycleOpen || !activeCycleZoneId) {
+      setChecklistLoading(false)
+      setChecklistError('')
+      setChecklistMeta({
+        zoneId: '',
+        zoneName: activeCycleZoneName,
+        clientName: activeCycleClientName,
+        location: activeCycleLocation,
+      })
+      setChecklistItems([])
+      return
+    }
+
+    let cancelled = false
+    setChecklistLoading(true)
+    setChecklistError('')
+
+    const zoneRef = {
+      id: activeCycleZoneId,
+      zoneName: activeCycleZoneName,
+      clientName: activeCycleClientName,
+      location: activeCycleLocation,
+    }
+
+    fetchZoneChecklistDefinition(session, zoneRef)
+      .then((definition) => {
+        if (cancelled) return
+        const list = [...(definition.additionalTasks || []), ...(definition.standardTasks || [])]
+        setChecklistMeta({
+          zoneId: txt(definition.zoneId || zoneRef.id),
+          zoneName: txt(definition.zoneName || zoneRef.zoneName),
+          clientName: txt(definition.clientName || zoneRef.clientName),
+          location: txt(definition.location || zoneRef.location),
+        })
+        setChecklistItems(list)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setChecklistError(parseErrorMessage(error, 'Nie udalo sie pobrac checklisty strefy.'))
+        setChecklistMeta(zoneRef)
+        setChecklistItems([])
+      })
+      .finally(() => {
+        if (!cancelled) setChecklistLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeCycleClientName, activeCycleKey, activeCycleLocation, activeCycleOpen, activeCycleZoneId, activeCycleZoneName, session?.orgId, session?.token])
+
+  useEffect(() => {
+    if (!closeCycleState.open) return
+    if (!activeCycleOpen) {
+      resetCloseCycleState()
+      return
+    }
+    const modalCycleKey = `${txt(closeCycleState.activeCycle?.eventId || closeCycleState.activeCycle?.cycleId)}:${txt(closeCycleState.activeCycle?.zoneId)}`
+    if (modalCycleKey && modalCycleKey !== activeCycleKey) {
+      resetCloseCycleState()
+    }
+  }, [activeCycleKey, activeCycleOpen, closeCycleState.activeCycle?.cycleId, closeCycleState.activeCycle?.eventId, closeCycleState.activeCycle?.zoneId, closeCycleState.open, resetCloseCycleState])
 
   const openScan = (intent, title, subtitle) => {
     setScanState((prev) => ({ open: true, title, subtitle, pending: false, error: '', intent, nonce: prev.nonce + 1 }))
@@ -1104,6 +1454,26 @@ export default function App() {
     if (delta > 0) goSchedulePrev()
     if (delta < 0) goScheduleNext()
   }, [goScheduleNext, goSchedulePrev])
+
+  const setChecklistItemChecked = useCallback((taskKey, checkedValue) => {
+    setChecklistItems((prev) =>
+      prev.map((item) => {
+        if (item.key !== taskKey) return item
+        return {
+          ...item,
+          checked: Boolean(checkedValue),
+          reason: checkedValue ? '' : item.reason,
+        }
+      }),
+    )
+  }, [])
+
+  const setChecklistItemReason = useCallback((taskKey, reasonValue) => {
+    const normalized = txt(reasonValue).slice(0, CHECKLIST_REASON_MAX_LEN)
+    setChecklistItems((prev) =>
+      prev.map((item) => (item.key === taskKey ? { ...item, reason: normalized } : item)),
+    )
+  }, [])
 
   const closeScan = useCallback(() => {
     setScanState((prev) => ({ ...prev, open: false, pending: false, error: '' }))
@@ -1282,9 +1652,148 @@ export default function App() {
       setCoordZones([])
       setCoordBusy(false)
       resetCoordinatorAuditState()
+      setChecklistLoading(false)
+      setChecklistError('')
+      setChecklistMeta({ zoneId: '', zoneName: '', clientName: '', location: '' })
+      setChecklistItems([])
+      setCloseCycleState({
+        open: false,
+        pending: false,
+        error: '',
+        intent: 'workflow',
+        code: '',
+        closeReason: '',
+        closeComment: '',
+        closePhotoDataUrl: '',
+        targetZone: null,
+        activeCycle: null,
+      })
       setNotice('')
     }
   }
+
+  const processWorkflowScan = useCallback(async ({ code, comment, intent, closeMeta }) => {
+    const normalizedCode = txt(code)
+    if (!normalizedCode) {
+      throw new Error('Wpisz kod QR lub roomId.')
+    }
+
+    const scannedZone = (snapshot?.zones || []).find((zone) => normalizeKey(zone?.id) === normalizeKey(normalizedCode))
+    if (!scannedZone) {
+      throw new Error('Nie znaleziono kodu QR w bazie stref.')
+    }
+
+    const closeReason = resolveCycleCloseReason(activeCycle, scannedZone)
+    const closeConfirmed = Boolean(closeMeta?.confirmed)
+    if (closeReason && !closeConfirmed) {
+      closeScan()
+      setCloseCycleState({
+        open: true,
+        pending: false,
+        error: '',
+        intent,
+        code: normalizedCode,
+        closeReason,
+        closeComment: txt(comment),
+        closePhotoDataUrl: '',
+        targetZone: scannedZone,
+        activeCycle,
+      })
+      return { deferred: true }
+    }
+
+    if (closeReason && closeConfirmed) {
+      const itemsForSave = Array.isArray(closeMeta?.checklistItems) ? closeMeta.checklistItems : checklistItems
+      try {
+        await saveZoneChecklistResult({
+          session,
+          activeCycle,
+          zone: {
+            id: txt(activeCycle?.zoneId || scannedZone?.id),
+            zoneName: txt(activeCycle?.zoneName || checklistMeta?.zoneName),
+            clientName: txt(activeCycle?.clientName || checklistMeta?.clientName),
+            location: txt(activeCycle?.location || checklistMeta?.location),
+          },
+          closeReason: txt(closeMeta?.closeReason || closeReason),
+          closeComment: txt(closeMeta?.closeComment || comment),
+          closePhotoDataUrl: txt(closeMeta?.closePhotoDataUrl),
+          checklistItems: itemsForSave,
+        })
+      } catch (error) {
+        setNotice(`Uwaga: nie zapisano checklisty strefy (${parseErrorMessage(error, 'blad zapisu')}).`)
+      }
+    }
+
+    const result = await scanMobileQr({ session, snapshot, qrCode: normalizedCode, comment: txt(comment) })
+    setSnapshot(result.snapshot)
+    setNotice(txt(result.message))
+    const nextView = intent === 'menu' ? VIEW.MENU : resolveWorkflowView(result.snapshot)
+    setView(nextView)
+    closeScan()
+    return { deferred: false }
+  }, [activeCycle, checklistItems, checklistMeta?.clientName, checklistMeta?.location, checklistMeta?.zoneName, closeScan, session, snapshot])
+
+  const onCloseCyclePhotoPick = useCallback(async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setCloseCycleState((prev) => ({ ...prev, error: '' }))
+    try {
+      const dataUrl = await compressImageToDataUrl(file, { maxSide: 1280, quality: 0.72 })
+      if (!dataUrl) {
+        throw new Error('Nie udalo sie przygotowac zdjecia.')
+      }
+      if (dataUrl.length > MAX_CLOSE_PHOTO_DATA_URL_LEN) {
+        throw new Error('Zdjecie jest zbyt duze. Zrob je ponownie z mniejsza rozdzielczoscia.')
+      }
+      setCloseCycleState((prev) => ({ ...prev, closePhotoDataUrl: dataUrl }))
+    } catch (error) {
+      setCloseCycleState((prev) => ({ ...prev, error: parseErrorMessage(error, 'Nie udalo sie dodac zdjecia.') }))
+    } finally {
+      event.target.value = ''
+    }
+  }, [])
+
+  const onCloseCycleCancel = useCallback(() => {
+    if (closeCycleState.pending) return
+    resetCloseCycleState()
+  }, [closeCycleState.pending, resetCloseCycleState])
+
+  const onCloseCycleConfirm = useCallback(async () => {
+    const missingReasons = unresolvedChecklistItems(checklistItems)
+    if (missingReasons.length) {
+      setCloseCycleState((prev) => ({
+        ...prev,
+        error: 'Uzupelnij przyczyne niewykonania dla wszystkich nieodhaczonych zadan.',
+      }))
+      return
+    }
+
+    setCloseCycleState((prev) => ({ ...prev, pending: true, error: '' }))
+    try {
+      const result = await processWorkflowScan({
+        code: closeCycleState.code,
+        comment: closeCycleState.closeComment,
+        intent: closeCycleState.intent || 'workflow',
+        closeMeta: {
+          confirmed: true,
+          closeReason: closeCycleState.closeReason,
+          closeComment: closeCycleState.closeComment,
+          closePhotoDataUrl: closeCycleState.closePhotoDataUrl,
+          checklistItems,
+        },
+      })
+
+      if (!result?.deferred) {
+        resetCloseCycleState()
+      }
+    } catch (error) {
+      if (isUnauthenticatedError(error)) {
+        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        return
+      }
+      setCloseCycleState((prev) => ({ ...prev, pending: false, error: parseErrorMessage(error, 'Nie udalo sie zamknac strefy.') }))
+    }
+  }, [checklistItems, closeCycleState, forceLoginWithMessage, processWorkflowScan, resetCloseCycleState])
 
   const doScan = async ({ code, comment }) => {
     if (!session?.token || !snapshot) return
@@ -1343,12 +1852,7 @@ export default function App() {
         return
       }
 
-      const result = await scanMobileQr({ session, snapshot, qrCode: code, comment })
-      setSnapshot(result.snapshot)
-      setNotice(txt(result.message))
-      const nextView = intent === 'menu' ? VIEW.MENU : resolveWorkflowView(result.snapshot)
-      setView(nextView)
-      closeScan()
+      await processWorkflowScan({ code, comment, intent })
     } catch (error) {
       if (isUnauthenticatedError(error)) {
         forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
@@ -1634,10 +2138,41 @@ export default function App() {
           <button className="btn action btn-xl" type="button" onClick={() => openScan('workflow', 'Skanuj QR', 'Wpisz kod QR / roomId.')}>Skanuj QR</button>
           <div className="scan-glass checklist-wrap">
             <div className="scan-title">{view === VIEW.START ? 'Rozpocznij prace' : view === VIEW.SCAN ? 'Skanuj strefe' : view === VIEW.CLEAN ? 'W trakcie sprzatania' : 'Konczenie dnia'}</div>
-            {view === VIEW.CLEAN ? <div className="scan-sub">Strefa: {[txt(activeCycle?.zoneName), txt(activeCycle?.clientName)].filter(Boolean).join(' / ') || '-'}<br />Lokalizacja: {txt(activeCycle?.location) || '-'}<br />Czas strefy: {cycleTimer}</div> : null}
+            {view === VIEW.CLEAN ? (
+              <div className="scan-sub">
+                Klient: {txt(activeCycle?.clientName || checklistMeta?.clientName) || '-'}
+                <br />
+                Strefa: {txt(activeCycle?.zoneName || checklistMeta?.zoneName) || '-'}
+                <br />
+                Lokalizacja: {txt(activeCycle?.location || checklistMeta?.location) || '-'}
+                <br />
+                Czas strefy: {cycleTimer}
+              </div>
+            ) : null}
             {view === VIEW.END ? <div className="scan-sub">Auto-zamkniecie za: {endingLeft}</div> : null}
             {(view === VIEW.START || view === VIEW.SCAN) ? <div className="scan-sub">Skanuj kod QR, aby przejsc dalej.</div> : null}
           </div>
+          {view === VIEW.CLEAN ? (
+            <div className="scan-glass checklist-wrap">
+              <div className="scan-title">Checklista strefy</div>
+              {checklistLoading ? <div className="muted">Wczytywanie zadan...</div> : null}
+              {checklistError ? <div className="error-inline">{checklistError}</div> : null}
+              {!checklistLoading && !checklistError ? (
+                <>
+                  <ChecklistSection
+                    title="Czynnosci dodatkowe"
+                    items={checklistSplit.additional}
+                    onToggle={setChecklistItemChecked}
+                  />
+                  <ChecklistSection
+                    title="Czynnosci standardowe (QR)"
+                    items={checklistSplit.standard}
+                    onToggle={setChecklistItemChecked}
+                  />
+                </>
+              ) : null}
+            </div>
+          ) : null}
           {view === VIEW.END ? <button className="btn secondary btn-xl" type="button" onClick={() => openScan('workflow', 'Zakoncz dzien', 'Zeskanuj STOP0, aby zamknac od razu.')}>Zakoncz teraz</button> : null}
         </section>
       )
@@ -1664,6 +2199,18 @@ export default function App() {
       </main>
       <SettingsModal open={settingsOpen} session={session} onClose={() => setSettingsOpen(false)} onLogout={doLogout} />
       <ScanModal key={scanState.nonce} scanState={scanState} onClose={closeScan} onSubmit={doScan} />
+      <CloseCycleModal
+        open={closeCycleState.open}
+        state={closeCycleState}
+        checklistItems={checklistItems}
+        onToggleTask={setChecklistItemChecked}
+        onReasonChange={setChecklistItemReason}
+        onCommentChange={(value) => setCloseCycleState((prev) => ({ ...prev, closeComment: txt(value).slice(0, CHECKLIST_REASON_MAX_LEN), error: '' }))}
+        onPhotoPick={onCloseCyclePhotoPick}
+        onPhotoClear={() => setCloseCycleState((prev) => ({ ...prev, closePhotoDataUrl: '' }))}
+        onCancel={onCloseCycleCancel}
+        onConfirm={onCloseCycleConfirm}
+      />
       {scheduleUpdatedPopupOpen ? (
         <div className="modal" role="dialog" aria-modal="true">
           <div className="modal-content">

@@ -2,6 +2,7 @@ import { getApp, getApps, initializeApp } from 'firebase/app'
 import { getAnalytics, isSupported } from 'firebase/analytics'
 import { getAuth, onAuthStateChanged } from 'firebase/auth'
 import { connectDataConnectEmulator, getDataConnect } from 'firebase/data-connect'
+import { getFirestore } from 'firebase/firestore'
 import { connectorConfig } from '@dataconnect/generated'
 
 const firebaseConfig = {
@@ -74,6 +75,7 @@ export function ensureFirebase() {
   }
 
   const auth = getAuth(app)
+  const db = getFirestore(app)
   const dataConnect = getDataConnect(connectorConfig)
   const emulatorHost = import.meta.env.VITE_DATACONNECT_EMULATOR_HOST
   const emulatorPort = Number(import.meta.env.VITE_DATACONNECT_EMULATOR_PORT ?? 9399)
@@ -87,6 +89,7 @@ export function ensureFirebase() {
   return {
     app,
     auth,
+    db,
     dataConnect,
   }
 }
