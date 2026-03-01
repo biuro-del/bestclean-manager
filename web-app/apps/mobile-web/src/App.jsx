@@ -1433,23 +1433,13 @@ export default function App() {
             </button>
           </div>
 
-          <div className="muted">Tylko podglad twojego grafiku. Synchronizacja danych co 15 minut.</div>
           {scheduleError ? <div className="error-inline">{scheduleError}</div> : null}
 
           <div className="summary-row">
             <span>Pracownik</span>
             <span className="summary-value">{txt(schedulePayload.worker?.name || schedulePayload.worker?.login || session?.workerName || session?.workerLogin || '-')}</span>
           </div>
-          {txt(schedulePayload.worker?.workerId) ? (
-            <div className="summary-row">
-              <span>ID</span>
-              <span className="summary-value">{txt(schedulePayload.worker?.workerId)}</span>
-            </div>
-          ) : null}
-          <div className="summary-row">
-            <span>Ostatnia synchronizacja</span>
-            <span className="summary-value">{formatDateTime(schedulePayload.sync?.fetchedAtIso)}</span>
-          </div>
+          <div className="schedule-sync-meta">Ostatnia synchronizacja: {formatDateTime(schedulePayload.sync?.fetchedAtIso)}</div>
 
           {!schedulePending && !scheduleError && !schedulePayload.matched ? (
             <div className="muted">Nie znaleziono wpisow grafiku dla tego konta.</div>

@@ -496,6 +496,13 @@ body {
   padding: 6px 10px;
 }
 
+.schedule-sync-meta {
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--bc-muted);
+  margin-top: -2px;
+}
+
 .row-inline {
   display: flex;
   align-items: center;
