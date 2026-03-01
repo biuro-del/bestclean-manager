@@ -1,6 +1,6 @@
 import { waitForFirebaseAuthReady } from '../firebase/firebaseClient'
 
-const DEFAULT_SCHEDULE_API_BASE = 'https://europe-central2-iclean-room.cloudfunctions.net/api'
+const DEFAULT_SCHEDULE_API_BASE = '/api'
 
 function toText(value) {
   return String(value ?? '').trim()
@@ -9,13 +9,18 @@ function toText(value) {
 function normalizeApiBase(value) {
   const raw = toText(value)
   if (!raw) return DEFAULT_SCHEDULE_API_BASE
+  if (raw.startsWith('/')) {
+    const withoutTrailing = raw.replace(/\/+$/, '')
+    if (withoutTrailing.endsWith('/api')) return withoutTrailing
+    return `${withoutTrailing}/api`
+  }
   const withoutTrailing = raw.replace(/\/+$/, '')
   if (withoutTrailing.endsWith('/api')) return withoutTrailing
   return `${withoutTrailing}/api`
 }
 
 function pickApiBase() {
-  return normalizeApiBase(import.meta.env.VITE_SCHEDULE_API_BASE || import.meta.env.VITE_PUBLIC_API_BASE)
+  return normalizeApiBase(import.meta.env.VITE_SCHEDULE_API_BASE)
 }
 
 function parseErrorMessage(error, fallback) {

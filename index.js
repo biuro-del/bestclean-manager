@@ -6,6 +6,9 @@ const PORT = Number(process.env.PORT || 8080)
 const HOST = '0.0.0.0'
 const DIST_DIR = path.join(__dirname, 'web-app', 'dist')
 const APP_TARGET = String(process.env.APP_TARGET || '').trim().toLowerCase()
+const API_PROXY_TARGET = String(process.env.API_PROXY_TARGET || 'https://europe-central2-iclean-room.cloudfunctions.net').trim().replace(/\/+$/, '')
+const API_PROXY_FORWARDED_HOST = String(process.env.API_PROXY_FORWARDED_HOST || 'iclean-room.web.app').trim()
+const API_PROXY_TIMEOUT_MS = Number(process.env.API_PROXY_TIMEOUT_MS || 15000)
 
 const MIME_BY_EXT = {
   '.css': 'text/css; charset=utf-8',
@@ -97,6 +100,69 @@ function sendJson(res, statusCode, payload) {
   res.end(JSON.stringify(payload))
 }
 
+function readRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    req.on('data', (chunk) => chunks.push(chunk))
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}
+
+function isApiMethodWithBody(method) {
+  const upper = String(method || '').toUpperCase()
+  return upper !== 'GET' && upper !== 'HEAD'
+}
+
+async function proxyApiRequest(req, res, requestUrl) {
+  const targetUrl = new URL(`${requestUrl.pathname}${requestUrl.search || ''}`, `${API_PROXY_TARGET}/`)
+  const method = String(req.method || 'GET').toUpperCase()
+  const requestBody = isApiMethodWithBody(method) ? await readRequestBody(req) : Buffer.alloc(0)
+
+  const headers = {
+    'x-forwarded-host': API_PROXY_FORWARDED_HOST,
+    'x-forwarded-proto': 'https',
+  }
+  if (req.headers['content-type']) headers['content-type'] = req.headers['content-type']
+  if (req.headers.authorization) headers.authorization = req.headers.authorization
+  if (req.headers.accept) headers.accept = req.headers.accept
+  if (req.headers['x-firebase-appcheck']) headers['x-firebase-appcheck'] = req.headers['x-firebase-appcheck']
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), API_PROXY_TIMEOUT_MS)
+
+  let upstream
+  try {
+    upstream = await fetch(targetUrl.toString(), {
+      method,
+      headers,
+      body: requestBody.length ? requestBody : undefined,
+      redirect: 'manual',
+      signal: controller.signal,
+    })
+  } catch (error) {
+    clearTimeout(timeout)
+    sendJson(res, 502, {
+      ok: false,
+      error: {
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: error?.name === 'AbortError' ? 'Upstream timeout.' : 'Upstream request failed.',
+      },
+    })
+    return
+  }
+  clearTimeout(timeout)
+
+  const raw = Buffer.from(await upstream.arrayBuffer())
+  const responseHeaders = {
+    'Content-Type': upstream.headers.get('content-type') || 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  }
+
+  res.writeHead(upstream.status, responseHeaders)
+  res.end(raw)
+}
+
 const server = http.createServer((req, res) => {
   if (req.url === '/healthz') {
     sendJson(res, 200, { ok: true })
@@ -112,6 +178,18 @@ const server = http.createServer((req, res) => {
   }
 
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+  if (requestUrl.pathname.startsWith('/api/')) {
+    proxyApiRequest(req, res, requestUrl).catch((error) => {
+      sendJson(res, 500, {
+        ok: false,
+        error: {
+          code: 'API_PROXY_ERROR',
+          message: error?.message || 'Unexpected API proxy error.',
+        },
+      })
+    })
+    return
+  }
   const requestTarget = detectRequestTarget(requestUrl, req.headers.host)
   const spaEntryFile = resolveSpaEntryFile(requestTarget)
   const spaEntryRelative = path.relative(DIST_DIR, spaEntryFile).split(path.sep).join('/')
