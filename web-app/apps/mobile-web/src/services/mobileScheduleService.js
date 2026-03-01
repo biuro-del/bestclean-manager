@@ -44,6 +44,18 @@ function parseErrorMessage(error, fallback) {
   }
 }
 
+function looksUnauthenticatedMessage(value) {
+  const message = toText(value).toLowerCase()
+  if (!message) return false
+  return (
+    message.includes('unauth') ||
+    message.includes('missing idtoken') ||
+    message.includes('invalid id token') ||
+    message.includes('token expired') ||
+    message.includes('sesja wygasla')
+  )
+}
+
 export async function fetchMobileSchedule(session) {
   const user = await waitForFirebaseAuthReady()
   if (!user) {
@@ -90,10 +102,14 @@ export async function fetchMobileSchedule(session) {
   }
 
   if (!response.ok || body?.ok === false) {
-    const err = new Error(
-      parseErrorMessage(body || { message: rawText || response.statusText }, 'Nie udalo sie pobrac grafiku.'),
+    const errorMessage = parseErrorMessage(
+      body || { message: rawText || response.statusText },
+      'Nie udalo sie pobrac grafiku.',
     )
-    if (response.status === 401 || response.status === 403) {
+    const err = new Error(
+      errorMessage,
+    )
+    if (response.status === 401 || looksUnauthenticatedMessage(errorMessage)) {
       err.code = 'UNAUTHENTICATED'
     }
     throw err
