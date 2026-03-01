@@ -305,6 +305,39 @@ function parseErrorMessage(error, fallback) {
   }
 }
 
+function isPermissionDeniedError(error) {
+  const message = parseErrorMessage(error, '').toLowerCase()
+  const code = txt(error?.code || error?.status || error?.error?.status || error?.error?.code).toUpperCase()
+  const raw = (() => {
+    try {
+      return JSON.stringify(error).toLowerCase()
+    } catch {
+      return ''
+    }
+  })()
+
+  return (
+    code.includes('PERMISSION_DENIED') ||
+    message.includes('missing or insufficient permissions') ||
+    message.includes('permission denied') ||
+    raw.includes('permission_denied') ||
+    raw.includes('insufficient permissions')
+  )
+}
+
+function parseChecklistLoadError(error) {
+  if (isPermissionDeniedError(error)) {
+    return {
+      kind: 'permission',
+      message: 'Brak uprawnien do checklisty tej strefy.',
+    }
+  }
+  return {
+    kind: 'general',
+    message: parseErrorMessage(error, 'Nie udalo sie pobrac checklisty strefy.'),
+  }
+}
+
 function isUnauthenticatedError(error) {
   const message = parseErrorMessage(error, '').toLowerCase()
   const code = txt(error?.code || error?.status || error?.error?.status).toUpperCase()
@@ -1090,6 +1123,7 @@ export default function App() {
   const [scheduleUpdatedPopupOpen, setScheduleUpdatedPopupOpen] = useState(false)
   const [checklistLoading, setChecklistLoading] = useState(false)
   const [checklistError, setChecklistError] = useState('')
+  const [checklistErrorKind, setChecklistErrorKind] = useState('')
   const [checklistMeta, setChecklistMeta] = useState({
     zoneId: '',
     zoneName: '',
@@ -1158,6 +1192,7 @@ export default function App() {
     setScheduleUpdatedPopupOpen(false)
     setChecklistLoading(false)
     setChecklistError('')
+    setChecklistErrorKind('')
     setChecklistMeta({ zoneId: '', zoneName: '', clientName: '', location: '' })
     setChecklistItems([])
     setCloseCycleState({
@@ -1358,6 +1393,7 @@ export default function App() {
     if (!session?.token || !txt(session?.orgId)) {
       setChecklistLoading(false)
       setChecklistError('')
+      setChecklistErrorKind('')
       setChecklistMeta({ zoneId: '', zoneName: '', clientName: '', location: '' })
       setChecklistItems([])
       return
@@ -1366,6 +1402,7 @@ export default function App() {
     if (!activeCycleOpen || !activeCycleZoneId) {
       setChecklistLoading(false)
       setChecklistError('')
+      setChecklistErrorKind('')
       setChecklistMeta({
         zoneId: '',
         zoneName: activeCycleZoneName,
@@ -1379,6 +1416,7 @@ export default function App() {
     let cancelled = false
     setChecklistLoading(true)
     setChecklistError('')
+    setChecklistErrorKind('')
 
     const zoneRef = {
       id: activeCycleZoneId,
@@ -1401,7 +1439,9 @@ export default function App() {
       })
       .catch((error) => {
         if (cancelled) return
-        setChecklistError(parseErrorMessage(error, 'Nie udalo sie pobrac checklisty strefy.'))
+        const parsed = parseChecklistLoadError(error)
+        setChecklistError(parsed.message)
+        setChecklistErrorKind(parsed.kind)
         setChecklistMeta(zoneRef)
         setChecklistItems([])
       })
@@ -1654,6 +1694,7 @@ export default function App() {
       resetCoordinatorAuditState()
       setChecklistLoading(false)
       setChecklistError('')
+      setChecklistErrorKind('')
       setChecklistMeta({ zoneId: '', zoneName: '', clientName: '', location: '' })
       setChecklistItems([])
       setCloseCycleState({
@@ -1720,7 +1761,10 @@ export default function App() {
           checklistItems: itemsForSave,
         })
       } catch (error) {
-        setNotice(`Uwaga: nie zapisano checklisty strefy (${parseErrorMessage(error, 'blad zapisu')}).`)
+        const saveMessage = isPermissionDeniedError(error)
+          ? 'brak uprawnien do zapisu checklisty'
+          : parseErrorMessage(error, 'blad zapisu')
+        setNotice(`Uwaga: nie zapisano checklisty strefy (${saveMessage}).`)
       }
     }
 
@@ -2156,7 +2200,9 @@ export default function App() {
             <div className="scan-glass checklist-wrap">
               <div className="scan-title">Checklista strefy</div>
               {checklistLoading ? <div className="muted">Wczytywanie zadan...</div> : null}
-              {checklistError ? <div className="error-inline">{checklistError}</div> : null}
+              {checklistError ? (
+                <div className={checklistErrorKind === 'permission' ? 'muted' : 'error-inline'}>{checklistError}</div>
+              ) : null}
               {!checklistLoading && !checklistError ? (
                 <>
                   <ChecklistSection
