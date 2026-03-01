@@ -348,6 +348,11 @@ function isWorkdayOpen(workday) {
   return !txt(workday.endAt)
 }
 
+function isLiveWorkday(workday, nowIsoValue = new Date().toISOString()) {
+  if (!isWorkdayOpen(workday)) return false
+  return isSameLocalDay(workday?.startAt, nowIsoValue)
+}
+
 function isCycleOpen(cycle) {
   if (!cycle) return false
   const status = up(cycle.status)
@@ -355,8 +360,8 @@ function isCycleOpen(cycle) {
   return !txt(cycle.endAt)
 }
 
-function resolveWorkflowView(snapshot) {
-  if (!isWorkdayOpen(snapshot?.activeWorkday)) return VIEW.START
+function resolveWorkflowView(snapshot, nowIsoValue = new Date().toISOString()) {
+  if (!isLiveWorkday(snapshot?.activeWorkday, nowIsoValue)) return VIEW.START
   if (up(snapshot?.activeWorkday?.status) === 'ENDING') return VIEW.END
   if (isCycleOpen(snapshot?.activeCycle)) return VIEW.CLEAN
   return VIEW.SCAN
@@ -1021,11 +1026,12 @@ export default function App() {
   const nowIso = useMemo(() => new Date(tick).toISOString(), [tick])
   const activeWorkday = snapshot?.activeWorkday
   const activeCycle = snapshot?.activeCycle
-  const hasWorkdayStart = Boolean(txt(activeWorkday?.startAt))
-  const topActionIsStart = !hasWorkdayStart || !isWorkdayOpen(activeWorkday)
-  const workdayTimer = useMemo(() => (isWorkdayOpen(activeWorkday) ? hms(secBetween(activeWorkday?.startAt, nowIso)) : '--:--:--'), [activeWorkday, nowIso])
+  const liveWorkdayOpen = useMemo(() => isLiveWorkday(activeWorkday, nowIso), [activeWorkday, nowIso])
+  const hasWorkdayStart = liveWorkdayOpen
+  const topActionIsStart = !liveWorkdayOpen
+  const workdayTimer = useMemo(() => (liveWorkdayOpen ? hms(secBetween(activeWorkday?.startAt, nowIso)) : '--:--:--'), [activeWorkday, nowIso, liveWorkdayOpen])
   const cycleTimer = useMemo(() => (isCycleOpen(activeCycle) ? hms(secBetween(activeCycle?.startAt, nowIso)) : '--:--:--'), [activeCycle, nowIso])
-  const startLabel = useMemo(() => (txt(activeWorkday?.startAt) ? `START ${formatTime(activeWorkday.startAt)}` : ''), [activeWorkday?.startAt])
+  const startLabel = useMemo(() => (liveWorkdayOpen ? `START ${formatTime(activeWorkday?.startAt)}` : ''), [activeWorkday?.startAt, liveWorkdayOpen])
   const endingLeft = useMemo(() => {
     if (up(activeWorkday?.status) !== 'ENDING') return '00:00'
     const endIso = parseIso(activeWorkday?.endAt)
@@ -1041,8 +1047,8 @@ export default function App() {
     [session?.role, snapshot?.worker?.type],
   )
   const coordObjectCounter = useMemo(
-    () => (isWorkdayOpen(activeWorkday) ? hms(secBetween(activeWorkday?.startAt, nowIso)) : '00:00:00'),
-    [activeWorkday, nowIso],
+    () => (liveWorkdayOpen ? hms(secBetween(activeWorkday?.startAt, nowIso)) : '00:00:00'),
+    [activeWorkday, nowIso, liveWorkdayOpen],
   )
   const coordAuditCounter = useMemo(
     () => (coordAuditStartedAt ? hms(secBetween(coordAuditStartedAt, nowIso)) : '00:00:00'),

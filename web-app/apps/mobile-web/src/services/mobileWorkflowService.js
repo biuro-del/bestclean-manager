@@ -347,7 +347,10 @@ function getWorkdayDuration(workday, nowValue = nowIso()) {
 
 function pickActiveWorkday(rows) {
   const sorted = [...rows].sort((a, b) => new Date(b.startAt || b.updatedAt || 0).getTime() - new Date(a.startAt || a.updatedAt || 0).getTime())
-  return sorted.find((row) => isWorkdayOpen(row)) ?? null
+  const openRows = sorted.filter((row) => isWorkdayOpen(row))
+  const todayOpen = openRows.find((row) => isTodayIso(row?.startAt))
+  if (todayOpen) return todayOpen
+  return openRows[0] ?? null
 }
 
 function pickActiveCycle(events, activeWorkdayId) {
@@ -1163,9 +1166,11 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
   const activeWorkday = snapshot.activeWorkday
   const activeCycle = snapshot.activeCycle
   const workdayOpen = isWorkdayOpen(activeWorkday)
+  const staleWorkdayOpen = workdayOpen && !isTodayIso(activeWorkday?.startAt)
+  const effectiveWorkdayOpen = workdayOpen && !staleWorkdayOpen
 
   if (zone.kind === 'START') {
-    if (workdayOpen) {
+    if (effectiveWorkdayOpen) {
       return {
         message: 'Dzien pracy jest juz aktywny.',
         snapshot: await getMobileSnapshot(session),
@@ -1180,7 +1185,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
   }
 
   if (zone.kind === 'STOP') {
-    if (!workdayOpen) {
+    if (!effectiveWorkdayOpen) {
       throw new Error('Brak aktywnego dnia. Najpierw zeskanuj START.')
     }
 
@@ -1195,7 +1200,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
     }
   }
 
-  if (!workdayOpen) {
+  if (!effectiveWorkdayOpen) {
     if (zone.kind === 'INDIVIDUAL') {
       const created = await createWorkdayForScan(snapshot, zone)
       await startCycle(snapshot, zone, created.workdayId)
