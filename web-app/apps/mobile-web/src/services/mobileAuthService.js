@@ -12,30 +12,79 @@ function toText(value) {
   return String(value ?? '').trim()
 }
 
-function normalizeLoginInput(loginValue) {
+const LOGIN_EMAIL_ALIASES_BY_ORG = {
+  bestclean: {
+    rafal: ['dudek2@bestclean.pl'],
+    sabina: ['sabina.dudek@bestclean.pl'],
+    szymon: ['kustos@bestclean.pl'],
+    smolka: ['justynasmolka@bestclean.pl'],
+  },
+}
+
+function getPreferredOrgIdForLogin() {
+  return (toText(import.meta.env.VITE_DEFAULT_ORG_ID) || readPreferredOrgId() || 'bestclean').toLowerCase()
+}
+
+function buildLoginEmailCandidates(loginValue) {
   const login = toText(loginValue).toLowerCase()
   if (!login) {
-    return ''
+    return []
   }
 
   if (login.includes('@')) {
-    return login
+    return [login]
   }
 
-  const preferredOrgId = toText(import.meta.env.VITE_DEFAULT_ORG_ID) || readPreferredOrgId()
-  if (!preferredOrgId) {
-    return ''
-  }
-
-  return `${login}@${preferredOrgId}.pl`
+  const orgId = getPreferredOrgIdForLogin()
+  const aliases = LOGIN_EMAIL_ALIASES_BY_ORG[orgId]?.[login] || []
+  const fallback = `${login}@${orgId}.pl`
+  return [...new Set([fallback, ...aliases.map((value) => toText(value).toLowerCase()).filter(Boolean)])]
 }
 
-function mapRole(roleValue) {
+function isInvalidCredentialsError(error) {
+  const code = toText(error?.code).toLowerCase()
+  const providerMessage = toText(error?.customData?._tokenResponse?.error?.message).toUpperCase()
+  return (
+    code === 'auth/invalid-credential' ||
+    code === 'auth/wrong-password' ||
+    code === 'auth/user-not-found' ||
+    providerMessage === 'INVALID_LOGIN_CREDENTIALS' ||
+    providerMessage === 'EMAIL_NOT_FOUND' ||
+    providerMessage === 'INVALID_PASSWORD'
+  )
+}
+
+async function signInWithLoginCandidates(auth, emailCandidates, password) {
+  let lastError = null
+  for (const emailCandidate of emailCandidates) {
+    try {
+      const credential = await signInWithEmailAndPassword(auth, emailCandidate, password)
+      return {
+        credential,
+        emailUsed: emailCandidate,
+      }
+    } catch (error) {
+      if (!isInvalidCredentialsError(error)) {
+        throw error
+      }
+      lastError = error
+    }
+  }
+
+  if (lastError) {
+    throw lastError
+  }
+  throw new Error('Nie udalo sie zalogowac do Firebase Auth.')
+}
+
+function normalizeRoleToken(roleValue) {
   const role = toText(roleValue).toUpperCase()
-  if (role === 'ADMIN') return 'Admin'
-  if (role === 'MANAGER') return 'Kierownik'
-  if (role === 'WORKER') return 'Pracownik'
-  return 'Koordynator'
+  if (!role) return ''
+  if (role === 'ADMIN' || role === 'ADMINISTRATOR') return 'ADMIN'
+  if (role === 'MANAGER' || role === 'KIEROWNIK') return 'MANAGER'
+  if (role === 'COORDINATOR' || role === 'KOORDYNATOR') return 'COORDINATOR'
+  if (role === 'WORKER' || role === 'PRACOWNIK') return 'WORKER'
+  return ''
 }
 
 function emailPrefix(value) {
@@ -140,15 +189,28 @@ function resolveCanonicalWorkerLogin(workerRows, emailValue, loginFromEmail, dis
 async function resolveWorkerLoginForSession(orgId, emailValue, loginFromEmail, displayNameValue = '') {
   const normalizedOrgId = toText(orgId)
   if (!normalizedOrgId) {
-    return toText(loginFromEmail)
+    return {
+      workerLogin: toText(loginFromEmail),
+      workerRole: '',
+    }
   }
 
   try {
     const response = await workersForOrg({ orgId: normalizedOrgId })
     const workerRows = response?.data?.workers ?? []
-    return resolveCanonicalWorkerLogin(workerRows, emailValue, loginFromEmail, displayNameValue)
+    const workerLogin = resolveCanonicalWorkerLogin(workerRows, emailValue, loginFromEmail, displayNameValue)
+    const workerRole = normalizeRoleToken(
+      workerRows.find((row) => toText(row?.login).toLowerCase() === toText(workerLogin).toLowerCase())?.role,
+    )
+    return {
+      workerLogin,
+      workerRole,
+    }
   } catch {
-    return toText(loginFromEmail)
+    return {
+      workerLogin: toText(loginFromEmail),
+      workerRole: '',
+    }
   }
 }
 
@@ -282,7 +344,7 @@ async function resolveOrganizationContext(emailValue, firebaseUser = null) {
       return {
         orgId: toText(byEmail.orgId),
         orgName: toText(byEmail.organization?.name || byEmail.orgId),
-        role: mapRole(byEmail.role),
+        membershipRole: normalizeRoleToken(byEmail.role),
       }
     }
 
@@ -296,7 +358,7 @@ async function resolveOrganizationContext(emailValue, firebaseUser = null) {
       return {
         orgId: toText(preferred.orgId),
         orgName: toText(preferred.organization?.name || preferred.orgId),
-        role: mapRole(preferred.role),
+        membershipRole: normalizeRoleToken(preferred.role),
       }
     }
   }
@@ -313,7 +375,7 @@ async function resolveOrganizationContext(emailValue, firebaseUser = null) {
         return {
           orgId,
           orgName: toText(membership.organization?.name || orgId),
-          role: mapRole(membership.role),
+          membershipRole: normalizeRoleToken(membership.role),
         }
       }
     } catch {
@@ -325,7 +387,7 @@ async function resolveOrganizationContext(emailValue, firebaseUser = null) {
   return {
     orgId: toText(first.orgId),
     orgName: toText(first.organization?.name || first.orgId),
-    role: mapRole(first.role),
+    membershipRole: normalizeRoleToken(first.role),
   }
 }
 
@@ -338,11 +400,11 @@ export async function loginMobile({ login, password }) {
     throw new Error('Brak konfiguracji Firebase dla mobile-web.')
   }
 
-  const normalizedEmail = normalizeLoginInput(login)
+  const emailCandidates = buildLoginEmailCandidates(login)
   const normalizedPassword = toText(password)
 
-  if (!normalizedEmail || !normalizedPassword) {
-    throw new Error('Podaj login (email np. login@bestclean.pl) i haslo.')
+  if (!emailCandidates.length || !normalizedPassword) {
+    throw new Error('Podaj login i haslo.')
   }
 
   const firebase = ensureFirebase()
@@ -351,22 +413,30 @@ export async function loginMobile({ login, password }) {
   }
 
   let credential
+  let emailUsed = ''
   try {
-    credential = await signInWithEmailAndPassword(firebase.auth, normalizedEmail, normalizedPassword)
+    const result = await signInWithLoginCandidates(firebase.auth, emailCandidates, normalizedPassword)
+    credential = result.credential
+    emailUsed = toText(result.emailUsed).toLowerCase()
   } catch (error) {
     throw new Error(mapFirebaseLoginError(error))
   }
 
   try {
-    const email = toText(credential.user.email || normalizedEmail).toLowerCase()
+    const email = toText(credential.user.email || emailUsed || emailCandidates[0]).toLowerCase()
     const context = await resolveOrganizationContext(email, credential.user)
     const loginFromEmail = toText(email.split('@')[0]).toLowerCase()
-    const workerLogin = await resolveWorkerLoginForSession(
+    const workerContext = await resolveWorkerLoginForSession(
       context.orgId,
       email,
       loginFromEmail,
       credential.user.displayName,
     )
+    const workerLogin = toText(workerContext.workerLogin || loginFromEmail)
+    const effectiveRole =
+      normalizeRoleToken(workerContext.workerRole) ||
+      normalizeRoleToken(context.membershipRole) ||
+      'WORKER'
 
     const session = writeMobileSession({
       token: `firebase-${credential.user.uid}`,
@@ -375,7 +445,7 @@ export async function loginMobile({ login, password }) {
       login: email,
       orgId: toText(context.orgId),
       orgName: context.orgName,
-      role: toText(context.role) || 'Pracownik',
+      role: effectiveRole,
       workerLogin,
       workerName: toText(credential.user.displayName) || workerLogin || loginFromEmail,
       source: 'firebase',
