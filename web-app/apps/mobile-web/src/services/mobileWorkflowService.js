@@ -1055,11 +1055,14 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
       try {
         await insertWorkdayForOrg(payload)
       } catch (error) {
-        if (!insertBlockedByEventPermission(error)) {
-          throw error
+        if (insertBlockedByEventPermission(error)) {
+          const denied = new Error(
+            'Brak uprawnien do dodawania zdarzen dla tego konta. Skontaktuj sie z administratorem.',
+          )
+          denied.code = 'PERMISSION_DENIED'
+          throw denied
         }
-        // Fallback: direct table insert without event-level permission gate.
-        await runMutationOperation('workday_insert', { data: payload })
+        throw error
       }
 
       if (snapshot?.worker) {
