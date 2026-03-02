@@ -2333,8 +2333,8 @@ export default function App() {
             <div className="version-popup__title">Nowa wersja aplikacji</div>
             <div className="version-popup__text">Korzystasz z wersji V.1.0.</div>
             <div className="version-popup__hint">
-              <div><strong>Login:</strong> Nazwisko</div>
-              <div><strong>Haslo:</strong> 6 cyfr, np. 120187 (dzien, miesiac, rok)</div>
+              <div><strong>Login:</strong> Twoje nazwisko</div>
+              <div><strong>Haslo:</strong> Twoja data urodzenia. 6 cyfr, np. 120187 (dzien, miesiac, rok)</div>
             </div>
             <button className="btn action" type="button" onClick={() => setVersionPopupOpen(false)}>
               OK
