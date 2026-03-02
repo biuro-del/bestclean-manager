@@ -1717,16 +1717,43 @@ export default function App() {
     }
   }
 
+  const findZoneInSnapshot = useCallback((targetSnapshot, scannedCode) => {
+    const normalizedCode = txt(scannedCode)
+    if (!normalizedCode) {
+      return null
+    }
+
+    const zones = Array.isArray(targetSnapshot?.zones) ? targetSnapshot.zones : []
+    return (
+      findZoneByQrId(zones, normalizedCode) ||
+      zones.find((zone) => normalizeKey(zone?.id) === normalizeKey(normalizedCode)) ||
+      null
+    )
+  }, [])
+
   const processWorkflowScan = useCallback(async ({ code, comment, intent, closeMeta }) => {
     const normalizedCode = txt(code)
     if (!normalizedCode) {
       throw new Error('Wpisz kod QR lub roomId.')
     }
 
-    const scannedZone =
-      findZoneByQrId(snapshot?.zones || [], normalizedCode) ||
-      (snapshot?.zones || []).find((zone) => normalizeKey(zone?.id) === normalizeKey(normalizedCode))
+    let snapshotForScan = snapshot
+    let scannedZone = findZoneInSnapshot(snapshotForScan, normalizedCode)
     if (!scannedZone) {
+      try {
+        const refreshedSnapshot = await getMobileSnapshot(session)
+        snapshotForScan = refreshedSnapshot
+        setSnapshot(refreshedSnapshot)
+        scannedZone = findZoneInSnapshot(refreshedSnapshot, normalizedCode)
+      } catch {
+        // Keep original snapshot and fallback to generic error below.
+      }
+    }
+
+    if (!scannedZone) {
+      if (!(snapshotForScan?.zones || []).length) {
+        throw new Error('Brak listy stref dla tej sesji. Odswiez dane lub zaloguj sie ponownie.')
+      }
       throw new Error('Nie znaleziono kodu QR w bazie stref.')
     }
 
@@ -1774,14 +1801,14 @@ export default function App() {
       }
     }
 
-    const result = await scanMobileQr({ session, snapshot, qrCode: normalizedCode, comment: txt(comment) })
+    const result = await scanMobileQr({ session, snapshot: snapshotForScan, qrCode: normalizedCode, comment: txt(comment) })
     setSnapshot(result.snapshot)
     setNotice(txt(result.message))
     const nextView = intent === 'menu' ? VIEW.MENU : resolveWorkflowView(result.snapshot)
     setView(nextView)
     closeScan()
     return { deferred: false }
-  }, [activeCycle, checklistItems, checklistMeta?.clientName, checklistMeta?.location, checklistMeta?.zoneName, closeScan, session, snapshot])
+  }, [activeCycle, checklistItems, checklistMeta?.clientName, checklistMeta?.location, checklistMeta?.zoneName, closeScan, findZoneInSnapshot, session, snapshot])
 
   const onCloseCyclePhotoPick = useCallback(async (event) => {
     const file = event.target.files?.[0]
@@ -1851,7 +1878,7 @@ export default function App() {
     setScanState((prev) => ({ ...prev, pending: true, error: '' }))
     try {
       if (intent === 'coordinator-audit-start') {
-        const scannedZone = (snapshot.zones || []).find((zone) => txt(zone.id).toLowerCase() === txt(code).toLowerCase())
+        const scannedZone = findZoneInSnapshot(snapshot, code)
         if (!scannedZone) {
           throw new Error('Nie znaleziono kodu QR w bazie stref.')
         }
@@ -1873,7 +1900,7 @@ export default function App() {
       }
 
       if (intent === 'coordinator-audit-zone') {
-        const scannedZone = (snapshot.zones || []).find((zone) => txt(zone.id).toLowerCase() === txt(code).toLowerCase())
+        const scannedZone = findZoneInSnapshot(snapshot, code)
         if (!scannedZone) {
           throw new Error('Nie znaleziono strefy dla podanego kodu QR.')
         }
