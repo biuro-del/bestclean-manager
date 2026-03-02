@@ -358,13 +358,23 @@ function isUnauthenticatedError(error) {
 }
 
 function normalizeRole(value) {
-  return txt(value).toLowerCase()
+  const role = txt(value).toUpperCase()
+  if (!role) return ''
+  if (role === 'ADMIN' || role === 'ADMINISTRATOR') return 'ADMIN'
+  if (role === 'MANAGER' || role === 'KIEROWNIK') return 'MANAGER'
+  if (role === 'COORDINATOR' || role === 'KOORDYNATOR') return 'COORDINATOR'
+  if (role === 'WORKER' || role === 'PRACOWNIK') return 'WORKER'
+  return role
 }
 
-function hasCoordinatorAccess(workerTypeValue, sessionRoleValue) {
-  const role = normalizeRole(workerTypeValue || sessionRoleValue)
-  if (!role) return true
-  return true
+function hasCoordinatorAccess(workerRoleValue, sessionRoleValue) {
+  const role = normalizeRole(workerRoleValue || sessionRoleValue)
+  return role === 'ADMIN' || role === 'MANAGER' || role === 'COORDINATOR'
+}
+
+function hasManualQrAccess(workerRoleValue, sessionRoleValue) {
+  const role = normalizeRole(workerRoleValue || sessionRoleValue)
+  return role === 'ADMIN'
 }
 
 function isSameLocalDay(leftIso, rightIso = new Date().toISOString()) {
@@ -631,7 +641,7 @@ function SettingsModal({ open, session, onClose, onLogout }) {
   )
 }
 
-function ScanModal({ scanState, onClose, onSubmit }) {
+function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
   const [code, setCode] = useState('')
   const [comment, setComment] = useState('')
   const [status, setStatus] = useState('')
@@ -662,7 +672,9 @@ function ScanModal({ scanState, onClose, onSubmit }) {
       onTorchState: (nextState) => setTorchState(nextState || { supported: false, enabled: false }),
       onError: (error) => {
         setCameraError(txt(error?.message || 'Nie udalo sie uruchomic kamery.'))
-        setManualOpen(true)
+        if (allowManualEntry) {
+          setManualOpen(true)
+        }
       },
       onDecode: (decodedValue) => {
         const normalized = normalizeQrValue(decodedValue)
@@ -676,7 +688,9 @@ function ScanModal({ scanState, onClose, onSubmit }) {
     scannerRef.current = scanner
     scanner.start().catch((error) => {
       setCameraError(txt(error?.message || 'Nie udalo sie uruchomic kamery.'))
-      setManualOpen(true)
+      if (allowManualEntry) {
+        setManualOpen(true)
+      }
     })
 
     return () => {
@@ -687,7 +701,7 @@ function ScanModal({ scanState, onClose, onSubmit }) {
       }
       scannerRef.current = null
     }
-  }, [scanState.open, scanState.nonce])
+  }, [allowManualEntry, scanState.open, scanState.nonce])
 
   const closeWithStop = () => {
     try {
@@ -743,11 +757,13 @@ function ScanModal({ scanState, onClose, onSubmit }) {
             >
               {torchState.supported ? `Latarka: ${torchState.enabled ? 'ON' : 'OFF'}` : 'Latarka niedostepna'}
             </button>
-            <button className="btn secondary" type="button" onClick={() => setManualOpen((prev) => !prev)}>
-              {manualOpen ? 'Ukryj wpisywanie' : 'Wpisz recznie'}
-            </button>
+            {allowManualEntry ? (
+              <button className="btn secondary" type="button" onClick={() => setManualOpen((prev) => !prev)}>
+                {manualOpen ? 'Ukryj wpisywanie' : 'Wpisz recznie'}
+              </button>
+            ) : null}
           </div>
-          {manualOpen ? (
+          {allowManualEntry && manualOpen ? (
             <div className="box col scan-manual">
               <div className="muted">Wpisz lub wklej kod QR / roomId.</div>
               <input className="input" value={code} onChange={(event) => setCode(event.target.value)} placeholder="Kod QR / roomId" />
@@ -1121,7 +1137,7 @@ export default function App() {
   })
   const [scheduleDayIndex, setScheduleDayIndex] = useState(0)
   const [scheduleUpdatedPopupOpen, setScheduleUpdatedPopupOpen] = useState(false)
-  const [versionPopupOpen, setVersionPopupOpen] = useState(false)
+  const [versionPopupOpen, setVersionPopupOpen] = useState(() => !getMobileSession()?.token)
   const [checklistLoading, setChecklistLoading] = useState(false)
   const [checklistError, setChecklistError] = useState('')
   const [checklistErrorKind, setChecklistErrorKind] = useState('')
@@ -1191,7 +1207,7 @@ export default function App() {
     })
     setScheduleDayIndex(0)
     setScheduleUpdatedPopupOpen(false)
-    setVersionPopupOpen(false)
+    setVersionPopupOpen(true)
     setChecklistLoading(false)
     setChecklistError('')
     setChecklistErrorKind('')
@@ -1341,7 +1357,6 @@ export default function App() {
     [activeCycle?.eventId, activeCycle?.cycleId, activeCycleZoneId],
   )
   const liveWorkdayOpen = useMemo(() => isLiveWorkday(activeWorkday, nowIso), [activeWorkday, nowIso])
-  const hasWorkdayStart = liveWorkdayOpen
   const topActionIsStart = !liveWorkdayOpen
   const workdayTimer = useMemo(() => (liveWorkdayOpen ? hms(secBetween(activeWorkday?.startAt, nowIso)) : '--:--:--'), [activeWorkday, nowIso, liveWorkdayOpen])
   const cycleTimer = useMemo(() => (isCycleOpen(activeCycle) ? hms(secBetween(activeCycle?.startAt, nowIso)) : '--:--:--'), [activeCycle, nowIso])
@@ -1357,8 +1372,12 @@ export default function App() {
   const worklogDays = useMemo(() => groupWorklog(snapshot?.workdayEvents || [], worklogMonth), [snapshot?.workdayEvents, worklogMonth])
   const summaryData = useMemo(() => buildSummary(snapshot?.workdays || [], summaryMonth, nowIso), [snapshot?.workdays, summaryMonth, nowIso])
   const coordinatorAccess = useMemo(
-    () => hasCoordinatorAccess(snapshot?.worker?.type, session?.role),
-    [session?.role, snapshot?.worker?.type],
+    () => hasCoordinatorAccess(snapshot?.worker?.role, session?.role),
+    [session?.role, snapshot?.worker?.role],
+  )
+  const manualQrAccess = useMemo(
+    () => hasManualQrAccess(snapshot?.worker?.role, session?.role),
+    [session?.role, snapshot?.worker?.role],
   )
   const coordObjectCounter = useMemo(
     () => (liveWorkdayOpen ? hms(secBetween(activeWorkday?.startAt, nowIso)) : '00:00:00'),
@@ -1670,7 +1689,6 @@ export default function App() {
       const nextSession = await loginMobile({ login, password })
       setSession(nextSession)
       setView(VIEW.MENU)
-      setVersionPopupOpen(true)
       setWorklogMonth(monthNow())
       setSummaryMonth(monthNow())
       await refresh(nextSession)
@@ -1689,7 +1707,7 @@ export default function App() {
       setSnapshot(null)
       setView(VIEW.LOGIN)
       setSettingsOpen(false)
-      setVersionPopupOpen(false)
+      setVersionPopupOpen(true)
       closeScan()
       setCoordView(COORD.HOME)
       setCoordClients([])
@@ -2278,7 +2296,13 @@ export default function App() {
       </main>
       <footer className="app-footer">Best Clean V.1.0</footer>
       <SettingsModal open={settingsOpen} session={session} onClose={() => setSettingsOpen(false)} onLogout={doLogout} />
-      <ScanModal key={scanState.nonce} scanState={scanState} onClose={closeScan} onSubmit={doScan} />
+      <ScanModal
+        key={scanState.nonce}
+        scanState={scanState}
+        onClose={closeScan}
+        onSubmit={doScan}
+        allowManualEntry={manualQrAccess}
+      />
       <CloseCycleModal
         open={closeCycleState.open}
         state={closeCycleState}
@@ -2302,12 +2326,16 @@ export default function App() {
           </div>
         </div>
       ) : null}
-      {versionPopupOpen ? (
+      {view === VIEW.LOGIN && versionPopupOpen ? (
         <div className="modal" role="dialog" aria-modal="true">
           <div className="modal-content version-popup">
             <div className="version-popup__badge">Best Clean</div>
             <div className="version-popup__title">Nowa wersja aplikacji</div>
             <div className="version-popup__text">Korzystasz z wersji V.1.0.</div>
+            <div className="version-popup__hint">
+              <div><strong>Login:</strong> Nazwisko</div>
+              <div><strong>Haslo:</strong> 6 cyfr, np. 120187 (dzien, miesiac, rok)</div>
+            </div>
             <button className="btn action" type="button" onClick={() => setVersionPopupOpen(false)}>
               OK
             </button>
