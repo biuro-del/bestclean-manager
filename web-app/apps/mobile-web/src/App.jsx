@@ -1723,7 +1723,9 @@ export default function App() {
       throw new Error('Wpisz kod QR lub roomId.')
     }
 
-    const scannedZone = (snapshot?.zones || []).find((zone) => normalizeKey(zone?.id) === normalizeKey(normalizedCode))
+    const scannedZone =
+      findZoneByQrId(snapshot?.zones || [], normalizedCode) ||
+      (snapshot?.zones || []).find((zone) => normalizeKey(zone?.id) === normalizeKey(normalizedCode))
     if (!scannedZone) {
       throw new Error('Nie znaleziono kodu QR w bazie stref.')
     }
