@@ -27,6 +27,16 @@ function toUpper(value) {
   return toText(value).toUpperCase()
 }
 
+function normalizeRoleToken(value) {
+  const role = toUpper(value)
+  if (!role) return ''
+  if (role === 'ADMIN' || role === 'ADMINISTRATOR') return 'ADMIN'
+  if (role === 'MANAGER' || role === 'KIEROWNIK') return 'MANAGER'
+  if (role === 'COORDINATOR' || role === 'KOORDYNATOR') return 'COORDINATOR'
+  if (role === 'WORKER' || role === 'PRACOWNIK') return 'WORKER'
+  return ''
+}
+
 function normalizeKey(value) {
   return toText(value).toLowerCase()
 }
@@ -238,7 +248,7 @@ async function captureGpsForAction(actionLabel) {
   }
 }
 
-function gpsCommentTag(gpsData) {
+function gpsColumnValue(gpsData) {
   if (!gpsData) return ''
   const data = gpsData || {}
   const action = toText(data.action).toUpperCase() || 'GPS'
@@ -306,7 +316,8 @@ function buildSessionWorkerFallback(session) {
   return {
     login: safeLogin,
     fullName: name || safeLogin,
-    workerType: toText(session?.role || 'Pracownik'),
+    workerType: toText(session?.role || 'WORKER'),
+    role: normalizeRoleToken(session?.role) || 'WORKER',
     email,
   }
 }
@@ -328,6 +339,7 @@ function normalizeWorkday(row) {
     status,
     durationSec,
     comment: toText(row?.comment),
+    gps: toText(row?.gps),
     updatedAt: parseIso(row?.updatedAt),
   }
 }
@@ -707,7 +719,8 @@ function fallbackWorkersFromWorkdays(workdayRows) {
     byLogin.set(login, {
       login,
       fullName: toText(row?.workerName || login),
-      workerType: 'Pracownik',
+      workerType: 'WORKER',
+      role: 'WORKER',
       email: '',
     })
   }
@@ -974,7 +987,8 @@ export async function getMobileSnapshot(session) {
   const workers = data.workerRows.map((row) => ({
     login: toText(row.login),
     fullName: toText(row.fullName || row.login),
-    workerType: toText(row.workerType || 'Pracownik'),
+    workerType: toText(row.workerType || 'WORKER'),
+    role: normalizeRoleToken(row.role || row.workerType) || 'WORKER',
     email: toText(row.loginEmail || row.email),
   }))
   const fallbackWorker = buildSessionWorkerFallback(session)
@@ -1003,7 +1017,8 @@ export async function getMobileSnapshot(session) {
     worker: {
       login: workerLogin,
       name: workerName,
-      type: toText(worker?.workerType || 'Pracownik'),
+      type: toText(worker?.workerType || 'WORKER'),
+      role: normalizeRoleToken(worker?.role || worker?.workerType || session?.role) || 'WORKER',
     },
     zones,
     stopRules: zones.filter((zone) => zone.kind === 'STOP').map((zone) => ({
@@ -1047,7 +1062,8 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
       endAt: null,
       durationSec: null,
       status: 'RUNNING',
-      comment: appendComment(null, gpsCommentTag(gpsData)),
+      comment: null,
+      gps: gpsColumnValue(gpsData) || null,
       updatedBy: workerLogin || null,
     }
 
@@ -1104,9 +1120,10 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
 async function closeWorkdayNow(snapshot, workday, stopZone, gpsData = null) {
   const endAt = nowIso()
   const graceMin = Number(stopZone?.stopGraceMin ?? 0)
-  const gpsComment = gpsCommentTag(gpsData)
+  const gpsValue = gpsColumnValue(gpsData)
+  const fullGps = appendComment(workday?.gps, gpsValue) || null
   const stopComment = appendComment(workday.comment, `STOP ${stopZone.id}`)
-  const fullComment = appendComment(stopComment, gpsComment)
+  const fullComment = stopComment
 
   if (graceMin > 0) {
     const plannedEndAt = new Date(Date.now() + graceMin * 60_000).toISOString()
@@ -1122,6 +1139,7 @@ async function closeWorkdayNow(snapshot, workday, stopZone, gpsData = null) {
       durationSec,
       status: 'ENDING',
       comment: fullComment,
+      gps: fullGps,
       updatedBy: snapshot.worker.login || null,
     })
 
@@ -1140,6 +1158,7 @@ async function closeWorkdayNow(snapshot, workday, stopZone, gpsData = null) {
     durationSec,
     status: 'CLOSED',
     comment: fullComment,
+    gps: fullGps,
     updatedBy: snapshot.worker.login || null,
   })
 
