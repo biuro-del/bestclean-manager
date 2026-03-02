@@ -598,6 +598,34 @@ function operationMissing(error, operationName) {
   )
 }
 
+function normalizeErrorText(error) {
+  const direct = toText(error?.message)
+  let nested = ''
+  try {
+    const parsed = JSON.parse(direct)
+    if (Array.isArray(parsed)) {
+      nested = parsed
+        .map((item) => toText(item?.message))
+        .filter(Boolean)
+        .join(' ')
+    } else if (parsed && typeof parsed === 'object') {
+      nested = toText(parsed?.error?.message || parsed?.message)
+    }
+  } catch {
+    // Best effort only.
+  }
+
+  return removeDiacritics(`${direct} ${nested}`).toLowerCase()
+}
+
+function insertBlockedByEventPermission(error) {
+  const message = normalizeErrorText(error)
+  return (
+    message.includes('brak uprawnien do dodawania zdarzen') ||
+    (message.includes('permission_denied') && message.includes('workday_insert'))
+  )
+}
+
 function workersPathMissing(error) {
   const message = toText(error?.message).toLowerCase()
   return message.includes('is missing') && message.includes('workers')
@@ -1009,20 +1037,30 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
 
   let lastError = null
   for (const workerLogin of workerLoginCandidates) {
+    const payload = {
+      orgId: snapshot.orgId,
+      workdayId,
+      workerLogin,
+      workerName: snapshot.worker.name || null,
+      utilityRoomId: startZone?.id || null,
+      startAt,
+      endAt: null,
+      durationSec: null,
+      status: 'RUNNING',
+      comment: appendComment(null, gpsCommentTag(gpsData)),
+      updatedBy: workerLogin || null,
+    }
+
     try {
-      await insertWorkdayForOrg({
-        orgId: snapshot.orgId,
-        workdayId,
-        workerLogin,
-        workerName: snapshot.worker.name || null,
-        utilityRoomId: startZone?.id || null,
-        startAt,
-        endAt: null,
-        durationSec: null,
-        status: 'RUNNING',
-        comment: appendComment(null, gpsCommentTag(gpsData)),
-        updatedBy: workerLogin || null,
-      })
+      try {
+        await insertWorkdayForOrg(payload)
+      } catch (error) {
+        if (!insertBlockedByEventPermission(error)) {
+          throw error
+        }
+        // Fallback: direct table insert without event-level permission gate.
+        await runMutationOperation('workday_insert', { data: payload })
+      }
 
       if (snapshot?.worker) {
         snapshot.worker.login = workerLogin
