@@ -1615,7 +1615,10 @@ export default function App() {
   )
   const liveWorkdayOpen = useMemo(() => isLiveWorkday(activeWorkday, nowIso), [activeWorkday, nowIso])
   const topActionIsStart = !liveWorkdayOpen
-  const workdayTimer = useMemo(() => (liveWorkdayOpen ? hms(secBetween(activeWorkday?.startAt, nowIso)) : '--:--:--'), [activeWorkday, nowIso, liveWorkdayOpen])
+  const workdayTimer = useMemo(
+    () => (liveWorkdayOpen ? hms(getWorkdaySeconds(activeWorkday, nowIso)) : '--:--:--'),
+    [activeWorkday, nowIso, liveWorkdayOpen],
+  )
   const cycleTimer = useMemo(() => (isCycleOpen(activeCycle) ? hms(secBetween(activeCycle?.startAt, nowIso)) : '--:--:--'), [activeCycle, nowIso])
   const startLabel = useMemo(() => (liveWorkdayOpen ? `START ${formatTime(activeWorkday?.startAt)}` : ''), [activeWorkday?.startAt, liveWorkdayOpen])
   const endingLeft = useMemo(() => {
@@ -1625,6 +1628,29 @@ export default function App() {
     const left = Math.max(0, Math.floor((new Date(endIso).getTime() - tick) / 1000))
     return `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`
   }, [activeWorkday?.status, activeWorkday?.endAt, tick])
+
+  useEffect(() => {
+    if (!session?.token) return
+    if (up(activeWorkday?.status) !== 'ENDING') return
+    const endIso = parseIso(activeWorkday?.endAt)
+    if (!endIso) return
+
+    const refreshEndingState = () =>
+      refresh(session, { silent: true }).catch((error) => {
+        if (isUnauthenticatedError(error)) {
+          forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        }
+      })
+
+    const delayMs = new Date(endIso).getTime() - Date.now()
+    if (!Number.isFinite(delayMs) || delayMs <= 0) {
+      refreshEndingState()
+      return
+    }
+
+    const timer = setTimeout(refreshEndingState, delayMs + 500)
+    return () => clearTimeout(timer)
+  }, [activeWorkday?.status, activeWorkday?.endAt, forceLoginWithMessage, refresh, session])
 
   const worklogDays = useMemo(() => groupWorklog(snapshot?.workdayEvents || [], worklogMonth), [snapshot?.workdayEvents, worklogMonth])
   const summaryData = useMemo(() => buildSummary(snapshot?.workdays || [], summaryMonth, nowIso), [snapshot?.workdays, summaryMonth, nowIso])
