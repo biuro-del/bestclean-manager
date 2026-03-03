@@ -865,6 +865,8 @@ function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
   const streamRef = useRef(null)
   const [cameraError, setCameraError] = useState('')
   const [cameraReady, setCameraReady] = useState(false)
+  const [capturedBlob, setCapturedBlob] = useState(null)
+  const [capturedPreviewUrl, setCapturedPreviewUrl] = useState('')
 
   useEffect(() => {
     if (!open) return undefined
@@ -874,6 +876,8 @@ function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
     const startCamera = async () => {
       setCameraError('')
       setCameraReady(false)
+      setCapturedBlob(null)
+      setCapturedPreviewUrl('')
       if (!navigator?.mediaDevices?.getUserMedia) {
         const message = 'Ta przegladarka nie obsluguje aparatu.'
         setCameraError(message)
@@ -958,13 +962,33 @@ function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
       return
     }
 
+    const previewUrl = await blobToDataUrl(blob).catch(() => '')
+    if (!previewUrl) {
+      const message = 'Nie udalo sie przygotowac podgladu zdjecia.'
+      setCameraError(message)
+      onError?.(message)
+      return
+    }
+    setCapturedBlob(blob)
+    setCapturedPreviewUrl(previewUrl)
+  }
+
+  const handleAttach = async () => {
+    if (pending || !(capturedBlob instanceof Blob)) return
     try {
-      await onCapture?.(blob)
+      await onCapture?.(capturedBlob)
     } catch (error) {
       const message = parseErrorMessage(error, 'Nie udalo sie zapisac zdjecia.')
       setCameraError(message)
       onError?.(message)
     }
+  }
+
+  const handleDiscard = () => {
+    if (pending) return
+    setCapturedBlob(null)
+    setCapturedPreviewUrl('')
+    setCameraError('')
   }
 
   if (!open) return null
@@ -978,12 +1002,30 @@ function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
           </button>
         </div>
         <div className="modal-body col close-camera-body">
-          <video ref={videoRef} className="close-camera-video" playsInline muted />
+          {capturedPreviewUrl ? (
+            <img className="close-camera-preview" src={capturedPreviewUrl} alt="Podglad wykonanego zdjecia" />
+          ) : (
+            <video ref={videoRef} className="close-camera-video" playsInline muted />
+          )}
           {cameraError ? <div className="error-inline">{cameraError}</div> : null}
-          {!cameraError ? <div className="muted">{cameraReady ? 'Ustaw kadr i zrob zdjecie.' : 'Uruchamianie kamery...'}</div> : null}
-          <button className="btn primary" type="button" onClick={handleCapture} disabled={pending || !cameraReady}>
-            {pending ? 'Przetwarzanie...' : 'Zrob zdjecie'}
-          </button>
+          {!cameraError && !capturedPreviewUrl ? <div className="muted">{cameraReady ? 'Ustaw kadr i zrob zdjecie.' : 'Uruchamianie kamery...'}</div> : null}
+          {capturedPreviewUrl ? (
+            <>
+              <div className="muted">Czy zdjecie jest OK? Zalaczyc?</div>
+              <div className="close-camera-actions">
+                <button className="btn secondary" type="button" onClick={handleDiscard} disabled={pending}>
+                  Nie
+                </button>
+                <button className="btn primary" type="button" onClick={handleAttach} disabled={pending}>
+                  {pending ? 'Dodawanie...' : 'Tak, zalacz'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <button className="btn primary" type="button" onClick={handleCapture} disabled={pending || !cameraReady}>
+              {pending ? 'Przetwarzanie...' : 'Zrob zdjecie'}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1132,7 +1174,7 @@ function CloseCycleModal({
                       onClick={() => onAttachmentRemove(attachment.id)}
                       disabled={state.pending}
                     >
-                      Usun
+                      Skasuj zdjecie
                     </button>
                   </div>
                 ))}
