@@ -580,7 +580,10 @@ function getWorkdaySeconds(row, nowIso) {
   }
 
   if (status === 'ENDING') {
-    if (!endIso) return secBetween(row?.startAt, nowIso)
+    if (!endIso) {
+      if (hasDirect) return Math.floor(direct)
+      return 0
+    }
     const minIso = new Date(endIso).getTime() < new Date(nowIso).getTime() ? endIso : nowIso
     return secBetween(startIso, minIso)
   }

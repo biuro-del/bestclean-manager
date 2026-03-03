@@ -268,9 +268,16 @@ function classifyZone(functionLabel) {
     return { kind: 'START', stopGraceMin: null }
   }
 
-  const stopMatch = token.match(/^STOP(0|5|10|15)$/)
-  if (stopMatch) {
-    return { kind: 'STOP', stopGraceMin: Number(stopMatch[1]) }
+  if (token.startsWith('STOP')) {
+    const explicitGrace = token.match(/STOP(?:CZASPRACY)?(15|10|5|0)/)
+    if (explicitGrace) {
+      return { kind: 'STOP', stopGraceMin: Number(explicitGrace[1]) }
+    }
+
+    // Backward compatibility for legacy labels like "STOP" or "STOP (czas pracy)".
+    if (token === 'STOP' || token === 'STOPCZASPRACY') {
+      return { kind: 'STOP', stopGraceMin: 0 }
+    }
   }
 
   if (token === 'SPRZATANIEINDYWIDUALNE' || token === 'ZLECENIEINDYWIDUALNE') {
@@ -943,7 +950,28 @@ async function closeEndingIfDue(session, workday) {
 
   const endAt = parseIso(workday?.endAt)
   if (!endAt) {
-    return workday
+    const fallbackEndAt = nowIso()
+    const durationSec = elapsedSec(workday.startAt, fallbackEndAt)
+    await updateWorkdayForOrg({
+      orgId: session.orgId,
+      workdayId: workday.workdayId,
+      workerLogin: workday.workerLogin,
+      workerName: workday.workerName || null,
+      utilityRoomId: workday.utilityRoomId || null,
+      startAt: workday.startAt || null,
+      endAt: fallbackEndAt,
+      durationSec,
+      status: 'CLOSED',
+      comment: workday.comment || null,
+      updatedBy: workday.workerLogin || null,
+    })
+
+    return {
+      ...workday,
+      status: 'CLOSED',
+      endAt: fallbackEndAt,
+      durationSec,
+    }
   }
 
   const nowMs = Date.now()
@@ -1117,8 +1145,8 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
   }
 }
 
-async function closeWorkdayNow(snapshot, workday, stopZone, gpsData = null) {
-  const endAt = nowIso()
+async function applyStopToWorkday(snapshot, workday, stopZone, gpsData = null, endAtOverride = '') {
+  const endAt = parseIso(endAtOverride) || nowIso()
   const graceMin = Number(stopZone?.stopGraceMin ?? 0)
   const gpsValue = gpsColumnValue(gpsData)
   const fullGps = appendComment(workday?.gps, gpsValue) || null
@@ -1126,7 +1154,7 @@ async function closeWorkdayNow(snapshot, workday, stopZone, gpsData = null) {
   const fullComment = stopComment
 
   if (graceMin > 0) {
-    const plannedEndAt = new Date(Date.now() + graceMin * 60_000).toISOString()
+    const plannedEndAt = parseIso(endAtOverride) || new Date(Date.now() + graceMin * 60_000).toISOString()
     const durationSec = elapsedSec(workday.startAt, plannedEndAt)
     await updateWorkdayForOrg({
       orgId: snapshot.orgId,
@@ -1163,6 +1191,53 @@ async function closeWorkdayNow(snapshot, workday, stopZone, gpsData = null) {
   })
 
   return 'Zakonczono dzien pracy.'
+}
+
+async function closeWorkdayNow(snapshot, workday, stopZone, gpsData = null) {
+  return applyStopToWorkday(snapshot, workday, stopZone, gpsData)
+}
+
+async function closeAdditionalOpenWorkdays(snapshot, activeWorkday, stopZone, gpsData = null) {
+  const workerLogin = toText(activeWorkday?.workerLogin || snapshot?.worker?.login)
+  const orgId = toText(snapshot?.orgId)
+  const activeWorkdayId = toText(activeWorkday?.workdayId)
+  if (!workerLogin || !orgId || !activeWorkdayId) {
+    return 0
+  }
+
+  const dayKey = toDateKey(activeWorkday?.startAt) || toDateKey(nowIso())
+  const stopAt = nowIso()
+  let rows = []
+  try {
+    rows = await fetchWorkerWorkdayRows(orgId, workerLogin)
+  } catch {
+    return 0
+  }
+
+  const candidates = (rows || [])
+    .map((row) => normalizeWorkday(row))
+    .filter((row) => {
+      const rowId = toText(row?.workdayId)
+      if (!rowId || rowId === activeWorkdayId) return false
+      if (!isWorkdayOpen(row)) return false
+      if (dayKey && toDateKey(row?.startAt) !== dayKey) return false
+      return true
+    })
+
+  if (!candidates.length) {
+    return 0
+  }
+
+  let closedCount = 0
+  for (const row of candidates) {
+    try {
+      await applyStopToWorkday(snapshot, row, stopZone, gpsData, stopAt)
+      closedCount += 1
+    } catch {
+      // Best effort to avoid blocking the main STOP flow.
+    }
+  }
+  return closedCount
 }
 
 async function setWorkdayRunning(snapshot, workday) {
@@ -1328,8 +1403,12 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
     }
 
     const stopMessage = await closeWorkdayNow(snapshot, activeWorkday, zone, stopGps)
+    const additionallyClosed = await closeAdditionalOpenWorkdays(snapshot, activeWorkday, zone, stopGps)
+    const messageSuffix = additionallyClosed > 0
+      ? ` Dodatkowo zamknieto ${additionallyClosed} zaleglych wpisow dnia.`
+      : ''
     return {
-      message: stopMessage,
+      message: `${stopMessage}${messageSuffix}`.trim(),
       snapshot: await getMobileSnapshot(session),
     }
   }
