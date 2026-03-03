@@ -1146,34 +1146,15 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
 }
 
 async function applyStopToWorkday(snapshot, workday, stopZone, gpsData = null, endAtOverride = '') {
-  const endAt = parseIso(endAtOverride) || nowIso()
+  const scannedAt = parseIso(endAtOverride) || nowIso()
   const graceMin = Number(stopZone?.stopGraceMin ?? 0)
   const gpsValue = gpsColumnValue(gpsData)
   const fullGps = appendComment(workday?.gps, gpsValue) || null
   const stopComment = appendComment(workday.comment, `STOP ${stopZone.id}`)
   const fullComment = stopComment
-
-  if (graceMin > 0) {
-    const plannedEndAt = parseIso(endAtOverride) || new Date(Date.now() + graceMin * 60_000).toISOString()
-    const durationSec = elapsedSec(workday.startAt, plannedEndAt)
-    await updateWorkdayForOrg({
-      orgId: snapshot.orgId,
-      workdayId: workday.workdayId,
-      workerLogin: workday.workerLogin,
-      workerName: workday.workerName || null,
-      utilityRoomId: workday.utilityRoomId || null,
-      startAt: workday.startAt || null,
-      endAt: plannedEndAt,
-      durationSec,
-      status: 'ENDING',
-      comment: fullComment,
-      gps: fullGps,
-      updatedBy: snapshot.worker.login || null,
-    })
-
-    return `Zeskanowano STOP${graceMin}. Dzien przechodzi w ENDING na ${graceMin} min.`
-  }
-
+  const endAt = graceMin > 0
+    ? new Date(new Date(scannedAt).getTime() + graceMin * 60_000).toISOString()
+    : scannedAt
   const durationSec = elapsedSec(workday.startAt, endAt)
   await updateWorkdayForOrg({
     orgId: snapshot.orgId,
@@ -1189,7 +1170,9 @@ async function applyStopToWorkday(snapshot, workday, stopZone, gpsData = null, e
     gps: fullGps,
     updatedBy: snapshot.worker.login || null,
   })
-
+  if (graceMin > 0) {
+    return `Zakonczono dzien pracy. Doliczono ${graceMin} min (STOP${graceMin}).`
+  }
   return 'Zakonczono dzien pracy.'
 }
 

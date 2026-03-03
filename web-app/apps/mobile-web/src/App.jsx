@@ -10,7 +10,6 @@ import {
   saveZoneAssignment,
 } from './services/mobileCoordinatorService'
 import { fetchZoneChecklistDefinition, saveWorkdayCloseResult, saveZoneChecklistResult } from './services/mobileChecklistService'
-import { uploadClosureAttachments } from './services/mobileAttachmentService'
 import { MobileQrScanner, normalizeQrValue } from './services/mobileQrScannerService'
 import { fetchMobileSchedule } from './services/mobileScheduleService'
 import { getMobileSnapshot, scanMobileQr } from './services/mobileWorkflowService'
@@ -43,8 +42,6 @@ const SCHEDULE_SYNC_MS = 15 * 60 * 1000
 const SCHEDULE_SWIPE_THRESHOLD_PX = 45
 const MAX_REASONABLE_WORKDAY_SEC = 20 * 60 * 60
 const CHECKLIST_REASON_MAX_LEN = 300
-const CLOSE_ATTACHMENTS_LIMIT = 5
-const CLOSE_ATTACHMENT_TARGET_BYTES = 250 * 1024
 
 const QR_FUNCTION_OPTIONS = [
   'Sprzatanie',
@@ -445,110 +442,6 @@ function splitChecklistItems(items) {
   }
 }
 
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error('Nie udalo sie odczytac danych zdjecia.'))
-    reader.readAsDataURL(blob)
-  })
-}
-
-function canvasToBlob(canvas, mimeType = 'image/jpeg', quality = 0.72) {
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => {
-      resolve(blob || null)
-    }, mimeType, quality)
-  })
-}
-
-async function loadImageFromBlob(blob) {
-  const objectUrl = URL.createObjectURL(blob)
-  try {
-    return await new Promise((resolve, reject) => {
-      const image = new Image()
-      image.onload = () => resolve(image)
-      image.onerror = () => reject(new Error('Nie udalo sie przetworzyc zdjecia.'))
-      image.src = objectUrl
-    })
-  } finally {
-    URL.revokeObjectURL(objectUrl)
-  }
-}
-
-async function compressImageToAttachment(sourceBlob, options = {}) {
-  if (!(sourceBlob instanceof Blob)) {
-    throw new Error('Brak danych zdjecia do kompresji.')
-  }
-
-  const targetMaxBytes = Number(options.targetMaxBytes || CLOSE_ATTACHMENT_TARGET_BYTES)
-  const maxSideSteps = Array.isArray(options.maxSideSteps) && options.maxSideSteps.length
-    ? options.maxSideSteps
-    : [1600, 1280, 1024]
-  const qualitySteps = Array.isArray(options.qualitySteps) && options.qualitySteps.length
-    ? options.qualitySteps
-    : [0.72, 0.66, 0.6, 0.55, 0.5]
-
-  const image = await loadImageFromBlob(sourceBlob)
-  const sourceWidth = Number(image.width || 0)
-  const sourceHeight = Number(image.height || 0)
-  if (!sourceWidth || !sourceHeight) {
-    throw new Error('Nieprawidlowy rozmiar zdjecia.')
-  }
-
-  let best = null
-  for (const maxSide of maxSideSteps) {
-    const scale = Math.min(1, Number(maxSide) / Math.max(sourceWidth, sourceHeight))
-    const width = Math.max(1, Math.round(sourceWidth * scale))
-    const height = Math.max(1, Math.round(sourceHeight * scale))
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-    const context = canvas.getContext('2d')
-    if (!context) continue
-    context.drawImage(image, 0, 0, width, height)
-
-    for (const quality of qualitySteps) {
-      const blob = await canvasToBlob(canvas, 'image/jpeg', Number(quality))
-      if (!blob) continue
-      const candidate = {
-        blob,
-        mimeType: blob.type || 'image/jpeg',
-        sizeBytes: blob.size,
-        width,
-        height,
-      }
-      if (!best || candidate.sizeBytes < best.sizeBytes) {
-        best = candidate
-      }
-      if (candidate.sizeBytes <= targetMaxBytes) {
-        best = candidate
-        break
-      }
-    }
-
-    if (best && best.sizeBytes <= targetMaxBytes) {
-      break
-    }
-  }
-
-  if (!best) {
-    throw new Error('Nie udalo sie skompresowac zdjecia.')
-  }
-
-  return {
-    ...best,
-    dataUrl: await blobToDataUrl(best.blob),
-  }
-}
-
-function generateAttachmentId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `att-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-}
-
 function createCloseCycleState(overrides = {}) {
   return {
     open: false,
@@ -558,7 +451,6 @@ function createCloseCycleState(overrides = {}) {
     code: '',
     closeReason: '',
     closeComment: '',
-    closeAttachments: [],
     targetZone: null,
     activeCycle: null,
     mode: 'zone-close',
@@ -863,183 +755,6 @@ function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
   )
 }
 
-function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
-  const videoRef = useRef(null)
-  const streamRef = useRef(null)
-  const onErrorRef = useRef(onError)
-  const [cameraError, setCameraError] = useState('')
-  const [cameraReady, setCameraReady] = useState(false)
-  const [capturedBlob, setCapturedBlob] = useState(null)
-  const [capturedPreviewUrl, setCapturedPreviewUrl] = useState('')
-
-  useEffect(() => {
-    onErrorRef.current = onError
-  }, [onError])
-
-  useEffect(() => {
-    if (!open) return undefined
-
-    let disposed = false
-    const videoElement = videoRef.current
-    const startCamera = async () => {
-      setCameraError('')
-      setCameraReady(false)
-      setCapturedBlob(null)
-      setCapturedPreviewUrl('')
-      if (!navigator?.mediaDevices?.getUserMedia) {
-        const message = 'Ta przegladarka nie obsluguje aparatu.'
-        setCameraError(message)
-        onErrorRef.current?.(message)
-        return
-      }
-
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: 'environment' },
-          },
-          audio: false,
-        })
-
-        if (disposed) {
-          stream.getTracks().forEach((track) => track.stop())
-          return
-        }
-
-        streamRef.current = stream
-        if (!videoElement) return
-        videoElement.srcObject = stream
-        await videoElement.play().catch(() => {})
-        setCameraReady(true)
-      } catch (error) {
-        const message = parseErrorMessage(error, 'Brak dostepu do aparatu. Zezwol na kamere i sprobuj ponownie.')
-        setCameraError(message)
-        onErrorRef.current?.(message)
-      }
-    }
-
-    startCamera()
-    return () => {
-      disposed = true
-      const stream = streamRef.current
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop())
-      }
-      streamRef.current = null
-      if (videoElement) {
-        videoElement.srcObject = null
-      }
-    }
-  }, [open])
-
-  const handleCapture = async () => {
-    if (pending) return
-    const video = videoRef.current
-    if (!video || !cameraReady) {
-      const message = 'Kamera nie jest gotowa. Poczekaj chwile i sprobuj ponownie.'
-      setCameraError(message)
-      onErrorRef.current?.(message)
-      return
-    }
-
-    const width = Number(video.videoWidth || 0)
-    const height = Number(video.videoHeight || 0)
-    if (!width || !height) {
-      const message = 'Nie udalo sie pobrac obrazu z kamery.'
-      setCameraError(message)
-      onErrorRef.current?.(message)
-      return
-    }
-
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-    const context = canvas.getContext('2d')
-    if (!context) {
-      const message = 'Nie udalo sie uruchomic bufora obrazu.'
-      setCameraError(message)
-      onErrorRef.current?.(message)
-      return
-    }
-    context.drawImage(video, 0, 0, width, height)
-    const blob = await canvasToBlob(canvas, 'image/jpeg', 0.92)
-    if (!blob) {
-      const message = 'Nie udalo sie zapisac zdjecia.'
-      setCameraError(message)
-      onErrorRef.current?.(message)
-      return
-    }
-
-    const previewUrl = await blobToDataUrl(blob).catch(() => '')
-    if (!previewUrl) {
-      const message = 'Nie udalo sie przygotowac podgladu zdjecia.'
-      setCameraError(message)
-      onErrorRef.current?.(message)
-      return
-    }
-    setCapturedBlob(blob)
-    setCapturedPreviewUrl(previewUrl)
-  }
-
-  const handleAttach = async () => {
-    if (pending || !(capturedBlob instanceof Blob)) return
-    try {
-      await onCapture?.(capturedBlob)
-    } catch (error) {
-      const message = parseErrorMessage(error, 'Nie udalo sie zapisac zdjecia.')
-      setCameraError(message)
-      onErrorRef.current?.(message)
-    }
-  }
-
-  const handleDiscard = () => {
-    if (pending) return
-    setCapturedBlob(null)
-    setCapturedPreviewUrl('')
-    setCameraError('')
-  }
-
-  if (!open) return null
-  return (
-    <div className="modal" onClick={pending ? undefined : onCancel}>
-      <div className="modal-content close-camera-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-title">Zrob zdjecie</div>
-          <button className="link-btn" type="button" onClick={onCancel} disabled={pending}>
-            Wroc
-          </button>
-        </div>
-        <div className="modal-body col close-camera-body">
-          {capturedPreviewUrl ? (
-            <img className="close-camera-preview" src={capturedPreviewUrl} alt="Podglad wykonanego zdjecia" />
-          ) : (
-            <video ref={videoRef} className="close-camera-video" playsInline muted />
-          )}
-          {cameraError ? <div className="error-inline">{cameraError}</div> : null}
-          {!cameraError && !capturedPreviewUrl ? <div className="muted">{cameraReady ? 'Ustaw kadr i zrob zdjecie.' : 'Uruchamianie kamery...'}</div> : null}
-          {capturedPreviewUrl ? (
-            <>
-              <div className="muted">Czy zdjecie jest OK? Zalaczyc?</div>
-              <div className="close-camera-actions">
-                <button className="btn secondary" type="button" onClick={handleDiscard} disabled={pending}>
-                  Nie
-                </button>
-                <button className="btn primary" type="button" onClick={handleAttach} disabled={pending}>
-                  {pending ? 'Dodawanie...' : 'Tak, zalacz'}
-                </button>
-              </div>
-            </>
-          ) : (
-            <button className="btn primary" type="button" onClick={handleCapture} disabled={pending || !cameraReady}>
-              {pending ? 'Przetwarzanie...' : 'Zrob zdjecie'}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function ChecklistSection({ title, items, onToggle }) {
   if (!items.length) {
     return (
@@ -1074,15 +789,12 @@ function CloseCycleModal({
   onToggleTask,
   onReasonChange,
   onCommentChange,
-  onOpenCamera,
-  onAttachmentRemove,
   onCancel,
   onConfirm,
 }) {
   if (!open) return null
   const showChecklist = Boolean(state.showChecklist)
   const unresolved = showChecklist ? (checklistItems || []).filter((item) => !item.checked) : []
-  const attachments = Array.isArray(state.closeAttachments) ? state.closeAttachments : []
   const mode = txt(state.mode) === 'workday-close' ? 'workday-close' : 'zone-close'
   const isWorkdayClose = mode === 'workday-close'
   const title = isWorkdayClose ? 'Zakoncz dzien' : 'Zamknij strefe'
@@ -1155,41 +867,6 @@ function CloseCycleModal({
               placeholder="Dodaj komentarz..."
               disabled={state.pending}
             />
-          </div>
-
-          <div className="box col">
-            <div className="row-between">
-              <label className="muted">
-                {isWorkdayClose ? 'Zalaczniki konca dnia' : 'Zalaczniki zamkniecia strefy'} ({attachments.length}/{CLOSE_ATTACHMENTS_LIMIT})
-              </label>
-              <button
-                className="btn secondary"
-                type="button"
-                onClick={onOpenCamera}
-                disabled={state.pending || attachments.length >= CLOSE_ATTACHMENTS_LIMIT}
-              >
-                Zrob zdjecie
-              </button>
-            </div>
-            {attachments.length ? (
-              <div className="close-zone-attachments">
-                {attachments.map((attachment) => (
-                  <div className="close-zone-attachment" key={attachment.id}>
-                    <img className="close-zone-photo-preview" src={attachment.dataUrl} alt="Podglad zalacznika" />
-                    <button
-                      className="btn secondary btn-sm"
-                      type="button"
-                      onClick={() => onAttachmentRemove(attachment.id)}
-                      disabled={state.pending}
-                    >
-                      Skasuj zdjecie
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="muted">Brak zalacznikow.</div>
-            )}
           </div>
 
           {state.error ? <div className="error-inline">{state.error}</div> : null}
@@ -1436,16 +1113,12 @@ export default function App() {
   })
   const [checklistItems, setChecklistItems] = useState([])
   const [closeCycleState, setCloseCycleState] = useState(() => createCloseCycleState())
-  const [closeCameraOpen, setCloseCameraOpen] = useState(false)
-  const [closeCameraPending, setCloseCameraPending] = useState(false)
 
   const scheduleFingerprintRef = useRef('')
   const scheduleTouchStartRef = useRef(null)
 
   const resetCloseCycleState = useCallback(() => {
     setCloseCycleState(createCloseCycleState())
-    setCloseCameraOpen(false)
-    setCloseCameraPending(false)
   }, [])
 
   const resetCoordinatorAuditState = useCallback(() => {
@@ -1483,8 +1156,6 @@ export default function App() {
     setChecklistMeta({ zoneId: '', zoneName: '', clientName: '', location: '' })
     setChecklistItems([])
     setCloseCycleState(createCloseCycleState())
-    setCloseCameraOpen(false)
-    setCloseCameraPending(false)
     scheduleFingerprintRef.current = ''
     setNotice(txt(message) || 'Sesja wygasla. Zaloguj sie ponownie.')
   }, [resetCoordinatorAuditState])
@@ -2006,8 +1677,6 @@ export default function App() {
       setChecklistMeta({ zoneId: '', zoneName: '', clientName: '', location: '' })
       setChecklistItems([])
       setCloseCycleState(createCloseCycleState())
-      setCloseCameraOpen(false)
-      setCloseCameraPending(false)
       setNotice('')
     }
   }
@@ -2059,7 +1728,6 @@ export default function App() {
     const closeConfirmed = Boolean(closeMeta?.confirmed)
     if ((closeReason || isStopScan) && !closeConfirmed) {
       closeScan()
-      setCloseCameraOpen(false)
       const mode = closeReason ? 'zone-close' : 'workday-close'
       setCloseCycleState(createCloseCycleState({
         open: true,
@@ -2067,7 +1735,6 @@ export default function App() {
         code: normalizedCode,
         closeReason: txt(closeReason || 'STOP_END_DAY'),
         closeComment: txt(comment),
-        closeAttachments: [],
         targetZone: scannedZone,
         activeCycle: activeCycleForScan,
         mode,
@@ -2076,31 +1743,11 @@ export default function App() {
       return { deferred: true }
     }
 
-    const warnings = []
+  const warnings = []
     if (closeConfirmed) {
       const closeMode = txt(closeMeta?.mode) === 'workday-close' ? 'workday-close' : 'zone-close'
       const itemsForSave = Array.isArray(closeMeta?.checklistItems) ? closeMeta.checklistItems : checklistItems
-      const attachmentDrafts = Array.isArray(closeMeta?.closeAttachments) ? closeMeta.closeAttachments : []
-
-      let uploadedAttachments = []
-      if (attachmentDrafts.length) {
-        try {
-          const uploadResult = await uploadClosureAttachments({
-            session,
-            scope: closeMode,
-            workdayId: activeWorkdayForScan?.workdayId,
-            cycleId: activeCycleForScan?.eventId,
-            workerLogin: session?.workerLogin || snapshotForScan?.worker?.login,
-            attachments: attachmentDrafts,
-          })
-          uploadedAttachments = uploadResult.uploaded
-          if (uploadResult.failed.length) {
-            warnings.push('Nie zapisano wszystkich zdjec, ale zamkniecie wykonano.')
-          }
-        } catch (error) {
-          warnings.push(parseErrorMessage(error, 'Nie zapisano zdjec, ale zamkniecie wykonano.'))
-        }
-      }
+      const uploadedAttachments = []
 
       if (closeMode === 'zone-close') {
         try {
@@ -2151,73 +1798,6 @@ export default function App() {
     return { deferred: false }
   }, [activeCycle, checklistItems, checklistMeta?.clientName, checklistMeta?.location, checklistMeta?.zoneName, closeScan, findZoneInSnapshot, session, snapshot])
 
-  const onCloseCycleCameraOpen = useCallback(() => {
-    if (closeCycleState.pending) return
-    if (closeCycleState.closeAttachments.length >= CLOSE_ATTACHMENTS_LIMIT) {
-      setCloseCycleState((prev) => ({ ...prev, error: `Mozna dodac maksymalnie ${CLOSE_ATTACHMENTS_LIMIT} zdjec.` }))
-      return
-    }
-    setCloseCycleState((prev) => ({ ...prev, error: '' }))
-    setCloseCameraOpen(true)
-  }, [closeCycleState.closeAttachments.length, closeCycleState.pending])
-
-  const onCloseCycleCameraCancel = useCallback(() => {
-    if (closeCameraPending) return
-    setCloseCameraOpen(false)
-  }, [closeCameraPending])
-
-  const onCloseCycleCameraCapture = useCallback(async (rawBlob) => {
-    if (!(rawBlob instanceof Blob)) {
-      setCloseCycleState((prev) => ({ ...prev, error: 'Brak zdjecia do dodania.' }))
-      return
-    }
-
-    setCloseCameraPending(true)
-    try {
-      const prepared = await compressImageToAttachment(rawBlob, {
-        targetMaxBytes: CLOSE_ATTACHMENT_TARGET_BYTES,
-        maxSideSteps: [1600, 1280, 1024],
-        qualitySteps: [0.72, 0.66, 0.6, 0.55, 0.5],
-      })
-      const attachment = {
-        id: generateAttachmentId(),
-        dataUrl: prepared.dataUrl,
-        blob: prepared.blob,
-        mimeType: prepared.mimeType,
-        sizeBytes: prepared.sizeBytes,
-        width: prepared.width,
-        height: prepared.height,
-        capturedAtIso: new Date().toISOString(),
-      }
-
-      setCloseCycleState((prev) => {
-        if ((prev.closeAttachments || []).length >= CLOSE_ATTACHMENTS_LIMIT) {
-          return { ...prev, error: `Mozna dodac maksymalnie ${CLOSE_ATTACHMENTS_LIMIT} zdjec.` }
-        }
-        return {
-          ...prev,
-          error: '',
-          closeAttachments: [...(prev.closeAttachments || []), attachment],
-        }
-      })
-      setCloseCameraOpen(false)
-    } catch (error) {
-      setCloseCycleState((prev) => ({ ...prev, error: parseErrorMessage(error, 'Nie udalo sie dodac zdjecia.') }))
-    } finally {
-      setCloseCameraPending(false)
-    }
-  }, [])
-
-  const onCloseCycleAttachmentRemove = useCallback((attachmentId) => {
-    const key = txt(attachmentId)
-    if (!key) return
-    setCloseCycleState((prev) => ({
-      ...prev,
-      error: '',
-      closeAttachments: (prev.closeAttachments || []).filter((item) => txt(item?.id) !== key),
-    }))
-  }, [])
-
   const onCloseCycleCancel = useCallback(() => {
     if (closeCycleState.pending) return
     resetCloseCycleState()
@@ -2245,7 +1825,6 @@ export default function App() {
           mode: closeCycleState.mode,
           closeReason: closeCycleState.closeReason,
           closeComment: closeCycleState.closeComment,
-          closeAttachments: closeCycleState.closeAttachments,
           checklistItems: checklistEnabled ? checklistItems : [],
         },
       })
@@ -2685,17 +2264,8 @@ export default function App() {
         onToggleTask={setChecklistItemChecked}
         onReasonChange={setChecklistItemReason}
         onCommentChange={(value) => setCloseCycleState((prev) => ({ ...prev, closeComment: txt(value).slice(0, CHECKLIST_REASON_MAX_LEN), error: '' }))}
-        onOpenCamera={onCloseCycleCameraOpen}
-        onAttachmentRemove={onCloseCycleAttachmentRemove}
         onCancel={onCloseCycleCancel}
         onConfirm={onCloseCycleConfirm}
-      />
-      <CameraCaptureModal
-        open={closeCameraOpen}
-        pending={closeCameraPending}
-        onCancel={onCloseCycleCameraCancel}
-        onCapture={onCloseCycleCameraCapture}
-        onError={(message) => setCloseCycleState((prev) => ({ ...prev, error: txt(message) }))}
       />
       {scheduleUpdatedPopupOpen ? (
         <div className="modal" role="dialog" aria-modal="true">
