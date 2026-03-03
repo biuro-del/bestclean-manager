@@ -3,6 +3,7 @@ import { getAnalytics, isSupported } from 'firebase/analytics'
 import { getAuth, onAuthStateChanged } from 'firebase/auth'
 import { connectDataConnectEmulator, getDataConnect } from 'firebase/data-connect'
 import { getFirestore } from 'firebase/firestore'
+import { getStorage } from 'firebase/storage'
 import { connectorConfig } from '@dataconnect/generated'
 
 const firebaseConfig = {
@@ -76,6 +77,7 @@ export function ensureFirebase() {
 
   const auth = getAuth(app)
   const db = getFirestore(app)
+  const storage = getStorage(app)
   const dataConnect = getDataConnect(connectorConfig)
   const emulatorHost = import.meta.env.VITE_DATACONNECT_EMULATOR_HOST
   const emulatorPort = Number(import.meta.env.VITE_DATACONNECT_EMULATOR_PORT ?? 9399)
@@ -90,6 +92,7 @@ export function ensureFirebase() {
     app,
     auth,
     db,
+    storage,
     dataConnect,
   }
 }

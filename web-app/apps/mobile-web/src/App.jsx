@@ -9,7 +9,8 @@ import {
   logAuditZone,
   saveZoneAssignment,
 } from './services/mobileCoordinatorService'
-import { fetchZoneChecklistDefinition, saveZoneChecklistResult } from './services/mobileChecklistService'
+import { fetchZoneChecklistDefinition, saveWorkdayCloseResult, saveZoneChecklistResult } from './services/mobileChecklistService'
+import { uploadClosureAttachments } from './services/mobileAttachmentService'
 import { MobileQrScanner, normalizeQrValue } from './services/mobileQrScannerService'
 import { fetchMobileSchedule } from './services/mobileScheduleService'
 import { getMobileSnapshot, scanMobileQr } from './services/mobileWorkflowService'
@@ -42,7 +43,8 @@ const SCHEDULE_SYNC_MS = 15 * 60 * 1000
 const SCHEDULE_SWIPE_THRESHOLD_PX = 45
 const MAX_REASONABLE_WORKDAY_SEC = 20 * 60 * 60
 const CHECKLIST_REASON_MAX_LEN = 300
-const MAX_CLOSE_PHOTO_DATA_URL_LEN = 1_600_000
+const CLOSE_ATTACHMENTS_LIMIT = 5
+const CLOSE_ATTACHMENT_TARGET_BYTES = 250 * 1024
 
 const QR_FUNCTION_OPTIONS = [
   'Sprzatanie',
@@ -443,47 +445,125 @@ function splitChecklistItems(items) {
   }
 }
 
-function readFileAsDataUrl(file) {
+function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error('Nie udalo sie odczytac pliku.'))
-    reader.readAsDataURL(file)
+    reader.onerror = () => reject(new Error('Nie udalo sie odczytac danych zdjecia.'))
+    reader.readAsDataURL(blob)
   })
 }
 
-async function compressImageToDataUrl(file, options = {}) {
-  const maxSide = Number(options.maxSide || 1280)
-  const quality = Number(options.quality || 0.72)
-  const fallback = await readFileAsDataUrl(file)
+function canvasToBlob(canvas, mimeType = 'image/jpeg', quality = 0.72) {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      resolve(blob || null)
+    }, mimeType, quality)
+  })
+}
 
-  const image = await new Promise((resolve, reject) => {
-    const img = new Image()
-    img.onload = () => resolve(img)
-    img.onerror = () => reject(new Error('Nie udalo sie przetworzyc zdjecia.'))
-    img.src = fallback
-  }).catch(() => null)
-
-  if (!image) return fallback
-  const width = Number(image.width || 0)
-  const height = Number(image.height || 0)
-  if (!width || !height) return fallback
-
-  const scale = Math.min(1, maxSide / Math.max(width, height))
-  const targetWidth = Math.max(1, Math.round(width * scale))
-  const targetHeight = Math.max(1, Math.round(height * scale))
-  const canvas = document.createElement('canvas')
-  canvas.width = targetWidth
-  canvas.height = targetHeight
-
-  const context = canvas.getContext('2d')
-  if (!context) return fallback
-  context.drawImage(image, 0, 0, targetWidth, targetHeight)
-
+async function loadImageFromBlob(blob) {
+  const objectUrl = URL.createObjectURL(blob)
   try {
-    return canvas.toDataURL('image/jpeg', quality)
-  } catch {
-    return fallback
+    return await new Promise((resolve, reject) => {
+      const image = new Image()
+      image.onload = () => resolve(image)
+      image.onerror = () => reject(new Error('Nie udalo sie przetworzyc zdjecia.'))
+      image.src = objectUrl
+    })
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+async function compressImageToAttachment(sourceBlob, options = {}) {
+  if (!(sourceBlob instanceof Blob)) {
+    throw new Error('Brak danych zdjecia do kompresji.')
+  }
+
+  const targetMaxBytes = Number(options.targetMaxBytes || CLOSE_ATTACHMENT_TARGET_BYTES)
+  const maxSideSteps = Array.isArray(options.maxSideSteps) && options.maxSideSteps.length
+    ? options.maxSideSteps
+    : [1600, 1280, 1024]
+  const qualitySteps = Array.isArray(options.qualitySteps) && options.qualitySteps.length
+    ? options.qualitySteps
+    : [0.72, 0.66, 0.6, 0.55, 0.5]
+
+  const image = await loadImageFromBlob(sourceBlob)
+  const sourceWidth = Number(image.width || 0)
+  const sourceHeight = Number(image.height || 0)
+  if (!sourceWidth || !sourceHeight) {
+    throw new Error('Nieprawidlowy rozmiar zdjecia.')
+  }
+
+  let best = null
+  for (const maxSide of maxSideSteps) {
+    const scale = Math.min(1, Number(maxSide) / Math.max(sourceWidth, sourceHeight))
+    const width = Math.max(1, Math.round(sourceWidth * scale))
+    const height = Math.max(1, Math.round(sourceHeight * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const context = canvas.getContext('2d')
+    if (!context) continue
+    context.drawImage(image, 0, 0, width, height)
+
+    for (const quality of qualitySteps) {
+      const blob = await canvasToBlob(canvas, 'image/jpeg', Number(quality))
+      if (!blob) continue
+      const candidate = {
+        blob,
+        mimeType: blob.type || 'image/jpeg',
+        sizeBytes: blob.size,
+        width,
+        height,
+      }
+      if (!best || candidate.sizeBytes < best.sizeBytes) {
+        best = candidate
+      }
+      if (candidate.sizeBytes <= targetMaxBytes) {
+        best = candidate
+        break
+      }
+    }
+
+    if (best && best.sizeBytes <= targetMaxBytes) {
+      break
+    }
+  }
+
+  if (!best) {
+    throw new Error('Nie udalo sie skompresowac zdjecia.')
+  }
+
+  return {
+    ...best,
+    dataUrl: await blobToDataUrl(best.blob),
+  }
+}
+
+function generateAttachmentId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `att-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function createCloseCycleState(overrides = {}) {
+  return {
+    open: false,
+    pending: false,
+    error: '',
+    intent: 'workflow',
+    code: '',
+    closeReason: '',
+    closeComment: '',
+    closeAttachments: [],
+    targetZone: null,
+    activeCycle: null,
+    mode: 'zone-close',
+    showChecklist: true,
+    ...overrides,
   }
 }
 
@@ -780,6 +860,136 @@ function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
   )
 }
 
+function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
+  const videoRef = useRef(null)
+  const streamRef = useRef(null)
+  const [cameraError, setCameraError] = useState('')
+  const [cameraReady, setCameraReady] = useState(false)
+
+  useEffect(() => {
+    if (!open) return undefined
+
+    let disposed = false
+    const videoElement = videoRef.current
+    const startCamera = async () => {
+      setCameraError('')
+      setCameraReady(false)
+      if (!navigator?.mediaDevices?.getUserMedia) {
+        const message = 'Ta przegladarka nie obsluguje aparatu.'
+        setCameraError(message)
+        onError?.(message)
+        return
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+          },
+          audio: false,
+        })
+
+        if (disposed) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+
+        streamRef.current = stream
+        if (!videoElement) return
+        videoElement.srcObject = stream
+        await videoElement.play().catch(() => {})
+        setCameraReady(true)
+      } catch (error) {
+        const message = parseErrorMessage(error, 'Brak dostepu do aparatu. Zezwol na kamere i sprobuj ponownie.')
+        setCameraError(message)
+        onError?.(message)
+      }
+    }
+
+    startCamera()
+    return () => {
+      disposed = true
+      const stream = streamRef.current
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop())
+      }
+      streamRef.current = null
+      if (videoElement) {
+        videoElement.srcObject = null
+      }
+    }
+  }, [onError, open])
+
+  const handleCapture = async () => {
+    if (pending) return
+    const video = videoRef.current
+    if (!video || !cameraReady) {
+      const message = 'Kamera nie jest gotowa. Poczekaj chwile i sprobuj ponownie.'
+      setCameraError(message)
+      onError?.(message)
+      return
+    }
+
+    const width = Number(video.videoWidth || 0)
+    const height = Number(video.videoHeight || 0)
+    if (!width || !height) {
+      const message = 'Nie udalo sie pobrac obrazu z kamery.'
+      setCameraError(message)
+      onError?.(message)
+      return
+    }
+
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const context = canvas.getContext('2d')
+    if (!context) {
+      const message = 'Nie udalo sie uruchomic bufora obrazu.'
+      setCameraError(message)
+      onError?.(message)
+      return
+    }
+    context.drawImage(video, 0, 0, width, height)
+    const blob = await canvasToBlob(canvas, 'image/jpeg', 0.92)
+    if (!blob) {
+      const message = 'Nie udalo sie zapisac zdjecia.'
+      setCameraError(message)
+      onError?.(message)
+      return
+    }
+
+    try {
+      await onCapture?.(blob)
+    } catch (error) {
+      const message = parseErrorMessage(error, 'Nie udalo sie zapisac zdjecia.')
+      setCameraError(message)
+      onError?.(message)
+    }
+  }
+
+  if (!open) return null
+  return (
+    <div className="modal" onClick={pending ? undefined : onCancel}>
+      <div className="modal-content close-camera-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">Zrob zdjecie</div>
+          <button className="link-btn" type="button" onClick={onCancel} disabled={pending}>
+            Wroc
+          </button>
+        </div>
+        <div className="modal-body col close-camera-body">
+          <video ref={videoRef} className="close-camera-video" playsInline muted />
+          {cameraError ? <div className="error-inline">{cameraError}</div> : null}
+          {!cameraError ? <div className="muted">{cameraReady ? 'Ustaw kadr i zrob zdjecie.' : 'Uruchamianie kamery...'}</div> : null}
+          <button className="btn primary" type="button" onClick={handleCapture} disabled={pending || !cameraReady}>
+            {pending ? 'Przetwarzanie...' : 'Zrob zdjecie'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ChecklistSection({ title, items, onToggle }) {
   if (!items.length) {
     return (
@@ -814,31 +1024,41 @@ function CloseCycleModal({
   onToggleTask,
   onReasonChange,
   onCommentChange,
-  onPhotoPick,
-  onPhotoClear,
+  onOpenCamera,
+  onAttachmentRemove,
   onCancel,
   onConfirm,
 }) {
   if (!open) return null
-  const unresolved = (checklistItems || []).filter((item) => !item.checked)
+  const showChecklist = Boolean(state.showChecklist)
+  const unresolved = showChecklist ? (checklistItems || []).filter((item) => !item.checked) : []
+  const attachments = Array.isArray(state.closeAttachments) ? state.closeAttachments : []
+  const mode = txt(state.mode) === 'workday-close' ? 'workday-close' : 'zone-close'
+  const isWorkdayClose = mode === 'workday-close'
+  const title = isWorkdayClose ? 'Zakoncz dzien' : 'Zamknij strefe'
+  const stopLabel = txt(state?.targetZone?.name || state?.targetZone?.id) || '-'
 
   return (
     <div className="modal" onClick={state.pending ? undefined : onCancel}>
       <div className="modal-content close-zone-modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">Zamknij strefe</div>
+          <div className="modal-title">{title}</div>
           <button className="link-btn" type="button" onClick={onCancel} disabled={state.pending}>
             Wroc
           </button>
         </div>
         <div className="modal-body col close-zone-body">
-          <div className="muted">
-            Zamykana: {txt(state?.activeCycle?.zoneName) || '-'}
-            <br />
-            Nastepna akcja: {txt(state?.targetZone?.name || state?.targetZone?.id) || '-'}
-          </div>
+          {isWorkdayClose ? (
+            <div className="muted">Zeskanowano STOP: {stopLabel}</div>
+          ) : (
+            <div className="muted">
+              Zamykana: {txt(state?.activeCycle?.zoneName) || '-'}
+              <br />
+              Nastepna akcja: {txt(state?.targetZone?.name || state?.targetZone?.id) || '-'}
+            </div>
+          )}
 
-          {checklistItems.length ? (
+          {showChecklist && checklistItems.length ? (
             <div className="box col">
               <div className="tile-label">Checklista strefy</div>
               {checklistItems.map((item) => (
@@ -867,14 +1087,16 @@ function CloseCycleModal({
             </div>
           ) : null}
 
-          {unresolved.length ? (
+          {showChecklist && unresolved.length ? (
             <div className="muted">
               Zadania nieoznaczone jako OK wymagaja podania przyczyny.
             </div>
           ) : null}
 
           <div className="box col">
-            <label className="muted">Komentarz zamkniecia strefy (opcjonalnie)</label>
+            <label className="muted">
+              {isWorkdayClose ? 'Komentarz zakonczenia dnia (opcjonalnie)' : 'Komentarz zamkniecia strefy (opcjonalnie)'}
+            </label>
             <textarea
               className="textarea"
               value={state.closeComment}
@@ -886,29 +1108,44 @@ function CloseCycleModal({
           </div>
 
           <div className="box col">
-            <label className="muted">Zdjecie zamkniecia strefy (opcjonalnie)</label>
-            <input
-              className="input"
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={onPhotoPick}
-              disabled={state.pending}
-            />
-            {txt(state.closePhotoDataUrl) ? (
-              <>
-                <img className="close-zone-photo-preview" src={state.closePhotoDataUrl} alt="Podglad zdjecia strefy" />
-                <button className="btn secondary" type="button" onClick={onPhotoClear} disabled={state.pending}>
-                  Usun zdjecie
-                </button>
-              </>
-            ) : null}
+            <div className="row-between">
+              <label className="muted">
+                {isWorkdayClose ? 'Zalaczniki konca dnia' : 'Zalaczniki zamkniecia strefy'} ({attachments.length}/{CLOSE_ATTACHMENTS_LIMIT})
+              </label>
+              <button
+                className="btn secondary"
+                type="button"
+                onClick={onOpenCamera}
+                disabled={state.pending || attachments.length >= CLOSE_ATTACHMENTS_LIMIT}
+              >
+                Zrob zdjecie
+              </button>
+            </div>
+            {attachments.length ? (
+              <div className="close-zone-attachments">
+                {attachments.map((attachment) => (
+                  <div className="close-zone-attachment" key={attachment.id}>
+                    <img className="close-zone-photo-preview" src={attachment.dataUrl} alt="Podglad zalacznika" />
+                    <button
+                      className="btn secondary btn-sm"
+                      type="button"
+                      onClick={() => onAttachmentRemove(attachment.id)}
+                      disabled={state.pending}
+                    >
+                      Usun
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="muted">Brak zalacznikow.</div>
+            )}
           </div>
 
           {state.error ? <div className="error-inline">{state.error}</div> : null}
 
           <button className="btn primary" type="button" onClick={onConfirm} disabled={state.pending}>
-            {state.pending ? 'Zapisywanie...' : 'Potwierdz zamkniecie'}
+            {state.pending ? 'Zapisywanie...' : isWorkdayClose ? 'Potwierdz zakonczenie dnia' : 'Potwierdz zamkniecie'}
           </button>
         </div>
       </div>
@@ -1148,35 +1385,17 @@ export default function App() {
     location: '',
   })
   const [checklistItems, setChecklistItems] = useState([])
-  const [closeCycleState, setCloseCycleState] = useState({
-    open: false,
-    pending: false,
-    error: '',
-    intent: 'workflow',
-    code: '',
-    closeReason: '',
-    closeComment: '',
-    closePhotoDataUrl: '',
-    targetZone: null,
-    activeCycle: null,
-  })
+  const [closeCycleState, setCloseCycleState] = useState(() => createCloseCycleState())
+  const [closeCameraOpen, setCloseCameraOpen] = useState(false)
+  const [closeCameraPending, setCloseCameraPending] = useState(false)
 
   const scheduleFingerprintRef = useRef('')
   const scheduleTouchStartRef = useRef(null)
 
   const resetCloseCycleState = useCallback(() => {
-    setCloseCycleState({
-      open: false,
-      pending: false,
-      error: '',
-      intent: 'workflow',
-      code: '',
-      closeReason: '',
-      closeComment: '',
-      closePhotoDataUrl: '',
-      targetZone: null,
-      activeCycle: null,
-    })
+    setCloseCycleState(createCloseCycleState())
+    setCloseCameraOpen(false)
+    setCloseCameraPending(false)
   }, [])
 
   const resetCoordinatorAuditState = useCallback(() => {
@@ -1213,18 +1432,9 @@ export default function App() {
     setChecklistErrorKind('')
     setChecklistMeta({ zoneId: '', zoneName: '', clientName: '', location: '' })
     setChecklistItems([])
-    setCloseCycleState({
-      open: false,
-      pending: false,
-      error: '',
-      intent: 'workflow',
-      code: '',
-      closeReason: '',
-      closeComment: '',
-      closePhotoDataUrl: '',
-      targetZone: null,
-      activeCycle: null,
-    })
+    setCloseCycleState(createCloseCycleState())
+    setCloseCameraOpen(false)
+    setCloseCameraPending(false)
     scheduleFingerprintRef.current = ''
     setNotice(txt(message) || 'Sesja wygasla. Zaloguj sie ponownie.')
   }, [resetCoordinatorAuditState])
@@ -1719,18 +1929,9 @@ export default function App() {
       setChecklistErrorKind('')
       setChecklistMeta({ zoneId: '', zoneName: '', clientName: '', location: '' })
       setChecklistItems([])
-      setCloseCycleState({
-        open: false,
-        pending: false,
-        error: '',
-        intent: 'workflow',
-        code: '',
-        closeReason: '',
-        closeComment: '',
-        closePhotoDataUrl: '',
-        targetZone: null,
-        activeCycle: null,
-      })
+      setCloseCycleState(createCloseCycleState())
+      setCloseCameraOpen(false)
+      setCloseCameraPending(false)
       setNotice('')
     }
   }
@@ -1775,77 +1976,170 @@ export default function App() {
       throw new Error('Nie znaleziono kodu QR w bazie stref.')
     }
 
-    const closeReason = resolveCycleCloseReason(activeCycle, scannedZone)
+    const activeCycleForScan = snapshotForScan?.activeCycle || activeCycle
+    const activeWorkdayForScan = snapshotForScan?.activeWorkday || snapshot?.activeWorkday
+    const closeReason = resolveCycleCloseReason(activeCycleForScan, scannedZone)
+    const isStopScan = up(scannedZone?.kind) === 'STOP'
     const closeConfirmed = Boolean(closeMeta?.confirmed)
-    if (closeReason && !closeConfirmed) {
+    if ((closeReason || isStopScan) && !closeConfirmed) {
       closeScan()
-      setCloseCycleState({
+      setCloseCameraOpen(false)
+      const mode = closeReason ? 'zone-close' : 'workday-close'
+      setCloseCycleState(createCloseCycleState({
         open: true,
-        pending: false,
-        error: '',
         intent,
         code: normalizedCode,
-        closeReason,
+        closeReason: txt(closeReason || 'STOP_END_DAY'),
         closeComment: txt(comment),
-        closePhotoDataUrl: '',
+        closeAttachments: [],
         targetZone: scannedZone,
-        activeCycle,
-      })
+        activeCycle: activeCycleForScan,
+        mode,
+        showChecklist: mode === 'zone-close',
+      }))
       return { deferred: true }
     }
 
-    if (closeReason && closeConfirmed) {
+    const warnings = []
+    if (closeConfirmed) {
+      const closeMode = txt(closeMeta?.mode) === 'workday-close' ? 'workday-close' : 'zone-close'
       const itemsForSave = Array.isArray(closeMeta?.checklistItems) ? closeMeta.checklistItems : checklistItems
-      try {
-        await saveZoneChecklistResult({
-          session,
-          activeCycle,
-          zone: {
-            id: txt(activeCycle?.zoneId || scannedZone?.id),
-            zoneName: txt(activeCycle?.zoneName || checklistMeta?.zoneName),
-            clientName: txt(activeCycle?.clientName || checklistMeta?.clientName),
-            location: txt(activeCycle?.location || checklistMeta?.location),
-          },
-          closeReason: txt(closeMeta?.closeReason || closeReason),
-          closeComment: txt(closeMeta?.closeComment || comment),
-          closePhotoDataUrl: txt(closeMeta?.closePhotoDataUrl),
-          checklistItems: itemsForSave,
-        })
-      } catch (error) {
-        const saveMessage = isPermissionDeniedError(error)
-          ? 'brak uprawnien do zapisu checklisty'
-          : parseErrorMessage(error, 'blad zapisu')
-        setNotice(`Uwaga: nie zapisano checklisty strefy (${saveMessage}).`)
+      const attachmentDrafts = Array.isArray(closeMeta?.closeAttachments) ? closeMeta.closeAttachments : []
+
+      let uploadedAttachments = []
+      if (attachmentDrafts.length) {
+        try {
+          const uploadResult = await uploadClosureAttachments({
+            session,
+            scope: closeMode,
+            workdayId: activeWorkdayForScan?.workdayId,
+            cycleId: activeCycleForScan?.eventId,
+            workerLogin: session?.workerLogin || snapshotForScan?.worker?.login,
+            attachments: attachmentDrafts,
+          })
+          uploadedAttachments = uploadResult.uploaded
+          if (uploadResult.failed.length) {
+            warnings.push('Nie zapisano wszystkich zdjec, ale zamkniecie wykonano.')
+          }
+        } catch (error) {
+          warnings.push(parseErrorMessage(error, 'Nie zapisano zdjec, ale zamkniecie wykonano.'))
+        }
+      }
+
+      if (closeMode === 'zone-close') {
+        try {
+          await saveZoneChecklistResult({
+            session,
+            activeCycle: activeCycleForScan,
+            zone: {
+              id: txt(activeCycleForScan?.zoneId || scannedZone?.id),
+              zoneName: txt(activeCycleForScan?.zoneName || checklistMeta?.zoneName),
+              clientName: txt(activeCycleForScan?.clientName || checklistMeta?.clientName),
+              location: txt(activeCycleForScan?.location || checklistMeta?.location),
+            },
+            closeReason: txt(closeMeta?.closeReason || closeReason),
+            closeComment: txt(closeMeta?.closeComment || comment),
+            closeAttachmentsMeta: uploadedAttachments,
+            checklistItems: itemsForSave,
+          })
+        } catch (error) {
+          const saveMessage = isPermissionDeniedError(error)
+            ? 'Brak uprawnien do zapisu checklisty strefy.'
+            : parseErrorMessage(error, 'Nie zapisano checklisty strefy.')
+          warnings.push(saveMessage)
+        }
+      }
+
+      if (isStopScan) {
+        try {
+          await saveWorkdayCloseResult({
+            session,
+            workday: activeWorkdayForScan,
+            stopZone: scannedZone,
+            closeComment: txt(closeMeta?.closeComment || comment),
+            closeAttachmentsMeta: uploadedAttachments,
+          })
+        } catch (error) {
+          warnings.push(parseErrorMessage(error, 'Nie zapisano metadanych zamkniecia dnia.'))
+        }
       }
     }
 
     const result = await scanMobileQr({ session, snapshot: snapshotForScan, qrCode: normalizedCode, comment: txt(comment) })
     setSnapshot(result.snapshot)
-    setNotice(txt(result.message))
+    const warningText = warnings.length ? ` ${warnings.map((message) => `Uwaga: ${message}`).join(' ')}` : ''
+    setNotice(`${txt(result.message)}${warningText}`.trim())
     const nextView = intent === 'menu' ? VIEW.MENU : resolveWorkflowView(result.snapshot)
     setView(nextView)
     closeScan()
     return { deferred: false }
   }, [activeCycle, checklistItems, checklistMeta?.clientName, checklistMeta?.location, checklistMeta?.zoneName, closeScan, findZoneInSnapshot, session, snapshot])
 
-  const onCloseCyclePhotoPick = useCallback(async (event) => {
-    const file = event.target.files?.[0]
-    if (!file) return
+  const onCloseCycleCameraOpen = useCallback(() => {
+    if (closeCycleState.pending) return
+    if (closeCycleState.closeAttachments.length >= CLOSE_ATTACHMENTS_LIMIT) {
+      setCloseCycleState((prev) => ({ ...prev, error: `Mozna dodac maksymalnie ${CLOSE_ATTACHMENTS_LIMIT} zdjec.` }))
+      return
+    }
     setCloseCycleState((prev) => ({ ...prev, error: '' }))
+    setCloseCameraOpen(true)
+  }, [closeCycleState.closeAttachments.length, closeCycleState.pending])
+
+  const onCloseCycleCameraCancel = useCallback(() => {
+    if (closeCameraPending) return
+    setCloseCameraOpen(false)
+  }, [closeCameraPending])
+
+  const onCloseCycleCameraCapture = useCallback(async (rawBlob) => {
+    if (!(rawBlob instanceof Blob)) {
+      setCloseCycleState((prev) => ({ ...prev, error: 'Brak zdjecia do dodania.' }))
+      return
+    }
+
+    setCloseCameraPending(true)
     try {
-      const dataUrl = await compressImageToDataUrl(file, { maxSide: 1280, quality: 0.72 })
-      if (!dataUrl) {
-        throw new Error('Nie udalo sie przygotowac zdjecia.')
+      const prepared = await compressImageToAttachment(rawBlob, {
+        targetMaxBytes: CLOSE_ATTACHMENT_TARGET_BYTES,
+        maxSideSteps: [1600, 1280, 1024],
+        qualitySteps: [0.72, 0.66, 0.6, 0.55, 0.5],
+      })
+      const attachment = {
+        id: generateAttachmentId(),
+        dataUrl: prepared.dataUrl,
+        blob: prepared.blob,
+        mimeType: prepared.mimeType,
+        sizeBytes: prepared.sizeBytes,
+        width: prepared.width,
+        height: prepared.height,
+        capturedAtIso: new Date().toISOString(),
       }
-      if (dataUrl.length > MAX_CLOSE_PHOTO_DATA_URL_LEN) {
-        throw new Error('Zdjecie jest zbyt duze. Zrob je ponownie z mniejsza rozdzielczoscia.')
-      }
-      setCloseCycleState((prev) => ({ ...prev, closePhotoDataUrl: dataUrl }))
+
+      setCloseCycleState((prev) => {
+        if ((prev.closeAttachments || []).length >= CLOSE_ATTACHMENTS_LIMIT) {
+          return { ...prev, error: `Mozna dodac maksymalnie ${CLOSE_ATTACHMENTS_LIMIT} zdjec.` }
+        }
+        return {
+          ...prev,
+          error: '',
+          closeAttachments: [...(prev.closeAttachments || []), attachment],
+        }
+      })
+      setCloseCameraOpen(false)
     } catch (error) {
       setCloseCycleState((prev) => ({ ...prev, error: parseErrorMessage(error, 'Nie udalo sie dodac zdjecia.') }))
     } finally {
-      event.target.value = ''
+      setCloseCameraPending(false)
     }
+  }, [])
+
+  const onCloseCycleAttachmentRemove = useCallback((attachmentId) => {
+    const key = txt(attachmentId)
+    if (!key) return
+    setCloseCycleState((prev) => ({
+      ...prev,
+      error: '',
+      closeAttachments: (prev.closeAttachments || []).filter((item) => txt(item?.id) !== key),
+    }))
   }, [])
 
   const onCloseCycleCancel = useCallback(() => {
@@ -1854,8 +2148,9 @@ export default function App() {
   }, [closeCycleState.pending, resetCloseCycleState])
 
   const onCloseCycleConfirm = useCallback(async () => {
-    const missingReasons = unresolvedChecklistItems(checklistItems)
-    if (missingReasons.length) {
+    const checklistEnabled = Boolean(closeCycleState.showChecklist)
+    const missingReasons = checklistEnabled ? unresolvedChecklistItems(checklistItems) : []
+    if (checklistEnabled && missingReasons.length) {
       setCloseCycleState((prev) => ({
         ...prev,
         error: 'Uzupelnij przyczyne niewykonania dla wszystkich nieodhaczonych zadan.',
@@ -1871,10 +2166,11 @@ export default function App() {
         intent: closeCycleState.intent || 'workflow',
         closeMeta: {
           confirmed: true,
+          mode: closeCycleState.mode,
           closeReason: closeCycleState.closeReason,
           closeComment: closeCycleState.closeComment,
-          closePhotoDataUrl: closeCycleState.closePhotoDataUrl,
-          checklistItems,
+          closeAttachments: closeCycleState.closeAttachments,
+          checklistItems: checklistEnabled ? checklistItems : [],
         },
       })
 
@@ -1886,7 +2182,10 @@ export default function App() {
         forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
         return
       }
-      setCloseCycleState((prev) => ({ ...prev, pending: false, error: parseErrorMessage(error, 'Nie udalo sie zamknac strefy.') }))
+      const fallback = closeCycleState.mode === 'workday-close'
+        ? 'Nie udalo sie zakonczyc dnia.'
+        : 'Nie udalo sie zamknac strefy.'
+      setCloseCycleState((prev) => ({ ...prev, pending: false, error: parseErrorMessage(error, fallback) }))
     }
   }, [checklistItems, closeCycleState, forceLoginWithMessage, processWorkflowScan, resetCloseCycleState])
 
@@ -2310,10 +2609,17 @@ export default function App() {
         onToggleTask={setChecklistItemChecked}
         onReasonChange={setChecklistItemReason}
         onCommentChange={(value) => setCloseCycleState((prev) => ({ ...prev, closeComment: txt(value).slice(0, CHECKLIST_REASON_MAX_LEN), error: '' }))}
-        onPhotoPick={onCloseCyclePhotoPick}
-        onPhotoClear={() => setCloseCycleState((prev) => ({ ...prev, closePhotoDataUrl: '' }))}
+        onOpenCamera={onCloseCycleCameraOpen}
+        onAttachmentRemove={onCloseCycleAttachmentRemove}
         onCancel={onCloseCycleCancel}
         onConfirm={onCloseCycleConfirm}
+      />
+      <CameraCaptureModal
+        open={closeCameraOpen}
+        pending={closeCameraPending}
+        onCancel={onCloseCycleCameraCancel}
+        onCapture={onCloseCycleCameraCapture}
+        onError={(message) => setCloseCycleState((prev) => ({ ...prev, error: txt(message) }))}
       />
       {scheduleUpdatedPopupOpen ? (
         <div className="modal" role="dialog" aria-modal="true">

@@ -118,7 +118,7 @@ export async function saveZoneChecklistResult({
   zone,
   closeReason,
   closeComment,
-  closePhotoDataUrl,
+  closeAttachmentsMeta,
   checklistItems,
 }) {
   const firebase = ensureFirebase()
@@ -138,6 +138,7 @@ export async function saveZoneChecklistResult({
   const standardAnswers = answers.filter((row) => row.section === 'standard')
   const doneCount = answers.filter((row) => row.checked).length
   const notDoneCount = answers.length - doneCount
+  const closeAttachments = Array.isArray(closeAttachmentsMeta) ? closeAttachmentsMeta : []
 
   const payload = {
     orgId,
@@ -152,8 +153,9 @@ export async function saveZoneChecklistResult({
     workerName: toText(session?.workerName || activeCycle?.workerName) || null,
     closedByReason: toText(closeReason || 'QR_CYCLE_CLOSE'),
     closeComment: toText(closeComment) || null,
-    closePhotoDataUrl: toText(closePhotoDataUrl) || null,
-    closePhotoProvided: Boolean(toText(closePhotoDataUrl)),
+    closeAttachments,
+    closeAttachmentsCount: closeAttachments.length,
+    closePhotoProvided: closeAttachments.length > 0,
     cycleStartedAt: toText(activeCycle?.startAt) || null,
     closedAtClientIso: new Date().toISOString(),
     checklistSummary: {
@@ -171,3 +173,40 @@ export async function saveZoneChecklistResult({
   await addDoc(collection(firebase.db, 'orgs', orgId, 'zoneChecklistResults'), payload)
 }
 
+export async function saveWorkdayCloseResult({
+  session,
+  workday,
+  stopZone,
+  closeComment,
+  closeAttachmentsMeta,
+}) {
+  const firebase = ensureFirebase()
+  if (!firebase?.db) {
+    throw new Error('Brak dostepu do Firestore (db).')
+  }
+
+  await waitForFirebaseAuthReady()
+  const orgId = toText(session?.orgId || workday?.orgId)
+  if (!orgId) {
+    throw new Error('Brak orgId do zapisu zamkniecia dnia.')
+  }
+
+  const closeAttachments = Array.isArray(closeAttachmentsMeta) ? closeAttachmentsMeta : []
+  const payload = {
+    orgId,
+    workdayId: toText(workday?.workdayId) || null,
+    stopZoneId: toText(stopZone?.id) || null,
+    stopZoneName: toText(stopZone?.name) || null,
+    workerLogin: toText(workday?.workerLogin || session?.workerLogin || session?.login || session?.email) || null,
+    workerName: toText(workday?.workerName || session?.workerName || session?.login) || null,
+    closeComment: toText(closeComment) || null,
+    closeAttachments,
+    closeAttachmentsCount: closeAttachments.length,
+    closePhotoProvided: closeAttachments.length > 0,
+    createdAtClientIso: new Date().toISOString(),
+    createdAt: serverTimestamp(),
+    source: 'mobile-web',
+  }
+
+  await addDoc(collection(firebase.db, 'orgs', orgId, 'workdayCloseResults'), payload)
+}
