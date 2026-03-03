@@ -863,10 +863,15 @@ function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
 function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
   const videoRef = useRef(null)
   const streamRef = useRef(null)
+  const onErrorRef = useRef(onError)
   const [cameraError, setCameraError] = useState('')
   const [cameraReady, setCameraReady] = useState(false)
   const [capturedBlob, setCapturedBlob] = useState(null)
   const [capturedPreviewUrl, setCapturedPreviewUrl] = useState('')
+
+  useEffect(() => {
+    onErrorRef.current = onError
+  }, [onError])
 
   useEffect(() => {
     if (!open) return undefined
@@ -881,7 +886,7 @@ function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
       if (!navigator?.mediaDevices?.getUserMedia) {
         const message = 'Ta przegladarka nie obsluguje aparatu.'
         setCameraError(message)
-        onError?.(message)
+        onErrorRef.current?.(message)
         return
       }
 
@@ -906,7 +911,7 @@ function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
       } catch (error) {
         const message = parseErrorMessage(error, 'Brak dostepu do aparatu. Zezwol na kamere i sprobuj ponownie.')
         setCameraError(message)
-        onError?.(message)
+        onErrorRef.current?.(message)
       }
     }
 
@@ -922,7 +927,7 @@ function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
         videoElement.srcObject = null
       }
     }
-  }, [onError, open])
+  }, [open])
 
   const handleCapture = async () => {
     if (pending) return
@@ -930,7 +935,7 @@ function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
     if (!video || !cameraReady) {
       const message = 'Kamera nie jest gotowa. Poczekaj chwile i sprobuj ponownie.'
       setCameraError(message)
-      onError?.(message)
+      onErrorRef.current?.(message)
       return
     }
 
@@ -939,7 +944,7 @@ function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
     if (!width || !height) {
       const message = 'Nie udalo sie pobrac obrazu z kamery.'
       setCameraError(message)
-      onError?.(message)
+      onErrorRef.current?.(message)
       return
     }
 
@@ -950,7 +955,7 @@ function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
     if (!context) {
       const message = 'Nie udalo sie uruchomic bufora obrazu.'
       setCameraError(message)
-      onError?.(message)
+      onErrorRef.current?.(message)
       return
     }
     context.drawImage(video, 0, 0, width, height)
@@ -958,7 +963,7 @@ function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
     if (!blob) {
       const message = 'Nie udalo sie zapisac zdjecia.'
       setCameraError(message)
-      onError?.(message)
+      onErrorRef.current?.(message)
       return
     }
 
@@ -966,7 +971,7 @@ function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
     if (!previewUrl) {
       const message = 'Nie udalo sie przygotowac podgladu zdjecia.'
       setCameraError(message)
-      onError?.(message)
+      onErrorRef.current?.(message)
       return
     }
     setCapturedBlob(blob)
@@ -980,7 +985,7 @@ function CameraCaptureModal({ open, pending, onCancel, onCapture, onError }) {
     } catch (error) {
       const message = parseErrorMessage(error, 'Nie udalo sie zapisac zdjecia.')
       setCameraError(message)
-      onError?.(message)
+      onErrorRef.current?.(message)
     }
   }
 
