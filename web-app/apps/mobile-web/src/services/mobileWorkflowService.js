@@ -18,6 +18,7 @@ const eventMutationsEnabled = false
 let insertEventForOrgUnavailable = !eventMutationsEnabled
 let updateEventForOrgUnavailable = !eventMutationsEnabled
 const MAX_REASONABLE_WORKDAY_SEC = 20 * 60 * 60
+const GPS_COLUMN_MAX_LEN = 255
 
 function toText(value) {
   return String(value ?? '').trim()
@@ -260,6 +261,24 @@ function gpsColumnValue(gpsData) {
     ? `UTC${Number(data.tzOffsetMin) >= 0 ? '+' : ''}${Number(data.tzOffsetMin) / 60}`
     : 'UTC?'
   return `${action}_GPS lat=${lat} lon=${lon} acc=${acc} at=${at} tz=${tz}`
+}
+
+function fitGpsColumn(value) {
+  const text = toText(value)
+  if (!text) return null
+  if (text.length <= GPS_COLUMN_MAX_LEN) return text
+  return text.slice(0, GPS_COLUMN_MAX_LEN)
+}
+
+function mergeGpsColumn(base, latest) {
+  const merged = appendComment(base, latest)
+  if (!merged) return null
+  if (merged.length <= GPS_COLUMN_MAX_LEN) return merged
+  const latestText = toText(latest)
+  if (latestText) {
+    return fitGpsColumn(latestText)
+  }
+  return fitGpsColumn(merged)
 }
 
 function classifyZone(functionLabel) {
@@ -1137,7 +1156,7 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
       durationSec: null,
       status: 'RUNNING',
       comment: null,
-      gps: gpsColumnValue(gpsData) || null,
+      gps: fitGpsColumn(gpsColumnValue(gpsData)),
       updatedBy: workerLogin || null,
     }
 
@@ -1197,7 +1216,7 @@ async function applyStopToWorkday(snapshot, workday, stopZone, gpsData = null, e
   const scannedAt = parseIso(endAtOverride) || nowIso()
   const graceMin = Number(stopZone?.stopGraceMin ?? 0)
   const gpsValue = gpsColumnValue(gpsData)
-  const fullGps = appendComment(workday?.gps, gpsValue) || null
+  const fullGps = mergeGpsColumn(workday?.gps, gpsValue)
   const stopComment = appendComment(workday.comment, `STOP ${stopZone.id}`)
   const fullComment = stopComment
   const endAt = graceMin > 0
@@ -1323,7 +1342,7 @@ async function startCycle(snapshot, zone, workdayIdHint = '', gpsData = null, wo
 
   const activeWorkday = snapshot?.activeWorkday || {}
   const targetStartAt = parseIso(workdayStartAtHint) || activeWorkday.startAt || null
-  const fullGps = appendComment(activeWorkday.gps, gpsColumnValue(gpsData)) || null
+  const fullGps = mergeGpsColumn(activeWorkday.gps, gpsColumnValue(gpsData))
   await updateWorkdayForOrg({
     orgId: snapshot.orgId,
     workdayId: targetWorkdayId,
@@ -1376,7 +1395,7 @@ async function stopCycle(snapshot, cycle, reason, commentValue, gpsData = null) 
   }
 
   const activeWorkday = snapshot?.activeWorkday || {}
-  const fullGps = appendComment(activeWorkday.gps, gpsColumnValue(gpsData)) || null
+  const fullGps = mergeGpsColumn(activeWorkday.gps, gpsColumnValue(gpsData))
   await updateWorkdayForOrg({
     orgId: snapshot.orgId,
     workdayId,
