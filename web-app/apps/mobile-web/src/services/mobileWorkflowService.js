@@ -1162,6 +1162,7 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
       return {
         message: 'Rozpoczeto dzien pracy.',
         workdayId,
+        startAt,
       }
     } catch (error) {
       lastError = error
@@ -1188,6 +1189,7 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
   return {
     message: 'Rozpoczeto dzien pracy.',
     workdayId,
+    startAt,
   }
 }
 
@@ -1285,7 +1287,7 @@ async function setWorkdayRunning(snapshot, workday) {
   })
 }
 
-async function startCycle(snapshot, zone, workdayIdHint = '', gpsData = null) {
+async function startCycle(snapshot, zone, workdayIdHint = '', gpsData = null, workdayStartAtHint = '') {
   const eventId = makeId('EV')
   if (!insertEventForOrgUnavailable) {
     try {
@@ -1320,6 +1322,7 @@ async function startCycle(snapshot, zone, workdayIdHint = '', gpsData = null) {
   }
 
   const activeWorkday = snapshot?.activeWorkday || {}
+  const targetStartAt = parseIso(workdayStartAtHint) || activeWorkday.startAt || null
   const fullGps = appendComment(activeWorkday.gps, gpsColumnValue(gpsData)) || null
   await updateWorkdayForOrg({
     orgId: snapshot.orgId,
@@ -1327,7 +1330,7 @@ async function startCycle(snapshot, zone, workdayIdHint = '', gpsData = null) {
     workerLogin: toText(activeWorkday.workerLogin || snapshot?.worker?.login) || null,
     workerName: toText(activeWorkday.workerName || snapshot?.worker?.name) || null,
     utilityRoomId: toText(zone?.id) || null,
-    startAt: activeWorkday.startAt || null,
+    startAt: targetStartAt,
     endAt: null,
     durationSec: null,
     status: 'RUNNING',
@@ -1450,7 +1453,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
     if (isAutoStartCleanZone(zone)) {
       const startGps = await captureGpsForAction('START')
       const created = await createWorkdayForScan(snapshot, snapshot?.startZone || zone, startGps)
-      await startCycle(snapshot, zone, created.workdayId, cloneGpsWithAction(startGps, 'CLEAN_START'))
+      await startCycle(snapshot, zone, created.workdayId, cloneGpsWithAction(startGps, 'CLEAN_START'), created.startAt)
       return {
         message: 'Rozpoczeto dzien i sprzatanie strefy.',
         snapshot: await getMobileSnapshot(session),
