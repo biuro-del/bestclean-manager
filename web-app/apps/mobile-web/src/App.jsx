@@ -1538,15 +1538,19 @@ export default function App() {
 
   useEffect(() => {
     if (!closeCycleState.open) return
-    if (!activeCycleOpen) {
+    const closeMode = txt(closeCycleState.mode) === 'workday-close' ? 'workday-close' : 'zone-close'
+    if (closeMode === 'zone-close' && !activeCycleOpen) {
       resetCloseCycleState()
+      return
+    }
+    if (closeMode === 'workday-close') {
       return
     }
     const modalCycleKey = `${txt(closeCycleState.activeCycle?.eventId || closeCycleState.activeCycle?.cycleId)}:${txt(closeCycleState.activeCycle?.zoneId)}`
     if (modalCycleKey && modalCycleKey !== activeCycleKey) {
       resetCloseCycleState()
     }
-  }, [activeCycleKey, activeCycleOpen, closeCycleState.activeCycle?.cycleId, closeCycleState.activeCycle?.eventId, closeCycleState.activeCycle?.zoneId, closeCycleState.open, resetCloseCycleState])
+  }, [activeCycleKey, activeCycleOpen, closeCycleState.activeCycle?.cycleId, closeCycleState.activeCycle?.eventId, closeCycleState.activeCycle?.zoneId, closeCycleState.mode, closeCycleState.open, resetCloseCycleState])
 
   const openScan = (intent, title, subtitle) => {
     setScanState((prev) => ({ open: true, title, subtitle, pending: false, error: '', intent, nonce: prev.nonce + 1 }))
