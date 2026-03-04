@@ -12,7 +12,7 @@ import {
 import { fetchZoneChecklistDefinition, saveWorkdayCloseResult, saveZoneChecklistResult } from './services/mobileChecklistService'
 import { MobileQrScanner, normalizeQrValue } from './services/mobileQrScannerService'
 import { fetchMobileSchedule } from './services/mobileScheduleService'
-import { getMobileSnapshot, scanMobileQr } from './services/mobileWorkflowService'
+import { closeMobileWorkdayImmediately, getMobileSnapshot, scanMobileQr } from './services/mobileWorkflowService'
 import { writeMobileSession } from './state/sessionStore'
 
 const VIEW = {
@@ -42,6 +42,7 @@ const SCHEDULE_SYNC_MS = 15 * 60 * 1000
 const SCHEDULE_SWIPE_THRESHOLD_PX = 45
 const MAX_REASONABLE_WORKDAY_SEC = 20 * 60 * 60
 const CHECKLIST_REASON_MAX_LEN = 300
+const CHECKLIST_ENABLED = false
 
 const QR_FUNCTION_OPTIONS = [
   'Sprzatanie',
@@ -471,7 +472,7 @@ function createCloseCycleState(overrides = {}) {
     targetZone: null,
     activeCycle: null,
     mode: 'zone-close',
-    showChecklist: true,
+    showChecklist: CHECKLIST_ENABLED,
     offerWorkdayClose: false,
     ...overrides,
   }
@@ -1130,6 +1131,7 @@ export default function App() {
   const [tick, setTick] = useState(Date.now())
   const [refreshPending, setRefreshPending] = useState(false)
   const [loginPending, setLoginPending] = useState(false)
+  const [operationPending, setOperationPending] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [worklogMonth, setWorklogMonth] = useState(() => monthNow())
@@ -1431,8 +1433,45 @@ export default function App() {
     return [0, 1, ...extra]
   }, [scheduleSelectedDay])
   const checklistSplit = useMemo(() => splitChecklistItems(checklistItems), [checklistItems])
+  const globalPending = useMemo(
+    () =>
+      Boolean(
+        operationPending ||
+          loginPending ||
+          refreshPending ||
+          schedulePending ||
+          scanState.pending ||
+          closeCycleState.pending ||
+          workdayClosePromptState.pending ||
+          coordBusy,
+      ),
+    [
+      closeCycleState.pending,
+      coordBusy,
+      loginPending,
+      operationPending,
+      refreshPending,
+      scanState.pending,
+      schedulePending,
+      workdayClosePromptState.pending,
+    ],
+  )
 
   useEffect(() => {
+    if (!CHECKLIST_ENABLED) {
+      setChecklistLoading(false)
+      setChecklistError('')
+      setChecklistErrorKind('')
+      setChecklistMeta({
+        zoneId: '',
+        zoneName: activeCycleZoneName,
+        clientName: activeCycleClientName,
+        location: activeCycleLocation,
+      })
+      setChecklistItems([])
+      return
+    }
+
     if (!session?.token || !txt(session?.orgId)) {
       setChecklistLoading(false)
       setChecklistError('')
@@ -1794,7 +1833,7 @@ export default function App() {
     const closeConfirmed = Boolean(closeMeta?.confirmed)
     if ((closeReason || isStopScan) && !closeConfirmed) {
       closeScan()
-      const mode = closeReason ? 'zone-close' : 'workday-close'
+      const mode = isStopScan ? 'workday-close' : closeReason ? 'zone-close' : 'workday-close'
       setCloseCycleState(createCloseCycleState({
         open: true,
         intent,
@@ -1804,7 +1843,7 @@ export default function App() {
         targetZone: scannedZone,
         activeCycle: activeCycleForScan,
         mode,
-        showChecklist: mode === 'zone-close',
+        showChecklist: CHECKLIST_ENABLED && mode === 'zone-close',
         offerWorkdayClose: mode === 'zone-close' && offerWorkdayClose,
       }))
       return { deferred: true }
@@ -1816,7 +1855,7 @@ export default function App() {
       const itemsForSave = Array.isArray(closeMeta?.checklistItems) ? closeMeta.checklistItems : checklistItems
       const uploadedAttachments = []
 
-      if (closeMode === 'zone-close') {
+      if (CHECKLIST_ENABLED && closeMode === 'zone-close') {
         try {
           await saveZoneChecklistResult({
             session,
@@ -1877,7 +1916,7 @@ export default function App() {
   }, [closeCycleState.pending, resetCloseCycleState])
 
   const onCloseCycleConfirm = useCallback(async () => {
-    const checklistEnabled = Boolean(closeCycleState.showChecklist)
+    const checklistEnabled = CHECKLIST_ENABLED && Boolean(closeCycleState.showChecklist)
     const missingReasons = checklistEnabled ? unresolvedChecklistItems(checklistItems) : []
     if (checklistEnabled && missingReasons.length) {
       setCloseCycleState((prev) => ({
@@ -2048,9 +2087,34 @@ export default function App() {
       openScan('workflow', 'Rozpocznij prace', 'Zeskanuj kod START lub zlecenia indywidualnego.')
       return
     }
-    setView(VIEW.END)
+    if (up(activeWorkday?.status) === 'ENDING') {
+      setView(VIEW.END)
+      return
+    }
     openScan('workflow', 'Koniec dnia', 'Zeskanuj STOP0, STOP5, STOP10 lub STOP15.')
   }
+
+  const doCloseWorkdayNow = useCallback(async () => {
+    if (!session?.token || !snapshot) return
+    setOperationPending(true)
+    try {
+      const result = await closeMobileWorkdayImmediately({
+        session,
+        snapshot,
+      })
+      setSnapshot(result.snapshot)
+      setNotice(txt(result.message))
+      setView(resolveWorkflowView(result.snapshot))
+    } catch (error) {
+      if (isUnauthenticatedError(error)) {
+        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        return
+      }
+      setNotice(parseErrorMessage(error, 'Nie udalo sie zakonczyc dnia pracy.'))
+    } finally {
+      setOperationPending(false)
+    }
+  }, [forceLoginWithMessage, session, snapshot])
 
   const renderMain = () => {
     if (view === VIEW.LOGIN) {
@@ -2327,7 +2391,7 @@ export default function App() {
             {view === VIEW.END ? <div className="scan-sub">Auto-zamkniecie za: {endingLeft}</div> : null}
             {(view === VIEW.START || view === VIEW.SCAN) ? <div className="scan-sub">Skanuj kod QR, aby przejsc dalej.</div> : null}
           </div>
-          {view === VIEW.CLEAN ? (
+          {CHECKLIST_ENABLED && view === VIEW.CLEAN ? (
             <div className="scan-glass checklist-wrap">
               <div className="scan-title">Checklista strefy</div>
               {checklistLoading ? <div className="muted">Wczytywanie zadan...</div> : null}
@@ -2350,7 +2414,11 @@ export default function App() {
               ) : null}
             </div>
           ) : null}
-          {view === VIEW.END ? <button className="btn secondary btn-xl" type="button" onClick={() => openScan('workflow', 'Zakoncz dzien', 'Zeskanuj STOP0, aby zamknac od razu.')}>Zakoncz teraz</button> : null}
+          {view === VIEW.END ? (
+            <button className="btn secondary btn-xl" type="button" onClick={doCloseWorkdayNow} disabled={globalPending}>
+              {operationPending ? 'Trwa zamykanie...' : 'Zakoncz teraz'}
+            </button>
+          ) : null}
         </section>
       )
     }
@@ -2400,6 +2468,12 @@ export default function App() {
         onChoose={onWorkdayClosePromptChoose}
         onCancel={onWorkdayClosePromptCancel}
       />
+      {globalPending ? (
+        <div className="global-busy-overlay" role="status" aria-live="polite" aria-label="Trwa operacja">
+          <div className="global-busy-spinner" />
+          <div className="global-busy-text">Trwa operacja. Czekaj na odpowiedz serwera...</div>
+        </div>
+      ) : null}
       {scheduleUpdatedPopupOpen ? (
         <div className="modal" role="dialog" aria-modal="true">
           <div className="modal-content">

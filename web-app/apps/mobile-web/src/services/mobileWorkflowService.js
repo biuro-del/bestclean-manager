@@ -1243,6 +1243,38 @@ async function applyStopToWorkday(snapshot, workday, stopZone, gpsData = null, e
   return 'Zakonczono dzien pracy.'
 }
 
+async function startWorkdayEnding(snapshot, workday, stopZone, gpsData = null, endAtOverride = '') {
+  const scannedAt = parseIso(endAtOverride) || nowIso()
+  const graceMin = Number(stopZone?.stopGraceMin ?? 0)
+  const gpsValue = gpsColumnValue(gpsData)
+  const fullGps = mergeGpsColumn(workday?.gps, gpsValue)
+  const stopComment = appendComment(workday.comment, `STOP ${stopZone.id}`)
+  const endAt = graceMin > 0
+    ? new Date(new Date(scannedAt).getTime() + graceMin * 60_000).toISOString()
+    : scannedAt
+  const durationSec = elapsedSec(workday.startAt, endAt)
+
+  await updateWorkdayForOrg({
+    orgId: snapshot.orgId,
+    workdayId: workday.workdayId,
+    workerLogin: workday.workerLogin,
+    workerName: workday.workerName || null,
+    utilityRoomId: workday.utilityRoomId || null,
+    startAt: workday.startAt || null,
+    endAt,
+    durationSec,
+    status: 'ENDING',
+    comment: stopComment,
+    gps: fullGps,
+    updatedBy: snapshot.worker.login || null,
+  })
+
+  if (graceMin > 0) {
+    return `Rozpoczeto konczenie dnia. Doliczono ${graceMin} min (STOP${graceMin}).`
+  }
+  return 'Rozpoczeto konczenie dnia.'
+}
+
 async function closeWorkdayNow(snapshot, workday, stopZone, gpsData = null) {
   return applyStopToWorkday(snapshot, workday, stopZone, gpsData)
 }
@@ -1457,6 +1489,14 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
       await stopCycle(snapshot, activeCycle, 'STOP_END_DAY', comment, cloneGpsWithAction(stopGps, 'CLEAN_STOP'))
     }
 
+    if (Number(zone.stopGraceMin || 0) > 0) {
+      const stopMessage = await startWorkdayEnding(snapshot, activeWorkday, zone, stopGps)
+      return {
+        message: stopMessage,
+        snapshot: await getMobileSnapshot(session),
+      }
+    }
+
     const stopMessage = await closeWorkdayNow(snapshot, activeWorkday, zone, stopGps)
     const additionallyClosed = await closeAdditionalOpenWorkdays(snapshot, activeWorkday, zone, stopGps)
     const messageSuffix = additionallyClosed > 0
@@ -1517,6 +1557,38 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
   await startCycle(snapshot, zone, '', cleanStartGps)
   return {
     message: `Rozpoczeto sprzatanie: ${zone.name || zone.id}.`,
+    snapshot: await getMobileSnapshot(session),
+  }
+}
+
+export async function closeMobileWorkdayImmediately({ session, snapshot, comment = '' }) {
+  assertConfigured()
+  await assertSignedInUser()
+
+  const nextSnapshot = snapshot || (await getMobileSnapshot(session))
+  const activeWorkday = nextSnapshot?.activeWorkday
+  if (!isWorkdayOpen(activeWorkday)) {
+    return {
+      message: 'Brak aktywnego dnia pracy.',
+      snapshot: await getMobileSnapshot(session),
+    }
+  }
+
+  const stopGps = await captureGpsForAction('STOP')
+  const activeCycle = nextSnapshot?.activeCycle
+  if (activeCycle && isEventOpen(activeCycle)) {
+    await stopCycle(nextSnapshot, activeCycle, 'STOP_END_DAY', comment, cloneGpsWithAction(stopGps, 'CLEAN_STOP'))
+  }
+
+  const stopZone = resolveAutoStopZone(nextSnapshot)
+  const stopMessage = await closeWorkdayNow(nextSnapshot, activeWorkday, stopZone, stopGps)
+  const additionallyClosed = await closeAdditionalOpenWorkdays(nextSnapshot, activeWorkday, stopZone, stopGps)
+  const messageSuffix = additionallyClosed > 0
+    ? ` Dodatkowo zamknieto ${additionallyClosed} zaleglych wpisow dnia.`
+    : ''
+
+  return {
+    message: `${stopMessage}${messageSuffix}`.trim(),
     snapshot: await getMobileSnapshot(session),
   }
 }
