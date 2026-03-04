@@ -2476,7 +2476,11 @@ export default function App() {
         <div className="global-busy-overlay" role="status" aria-live="polite" aria-label="Trwa operacja">
           <div className="global-busy-content">
             <div className="global-busy-spinner" />
-            <div className="global-busy-text">Trwa operacja. Czekaj na odpowiedz serwera...</div>
+            <div className="global-busy-text">
+              Trwa operacja.
+              <br />
+              Czekaj na odpowiedz serwera...
+            </div>
           </div>
         </div>
       ) : null}
