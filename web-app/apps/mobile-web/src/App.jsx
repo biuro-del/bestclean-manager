@@ -188,6 +188,23 @@ function normalizeKey(value) {
   return txt(value).toLowerCase()
 }
 
+function normalizeFunctionToken(value) {
+  const raw = txt(value)
+  if (!raw) return ''
+  let normalized = raw
+  try {
+    normalized = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  } catch {
+    // Best effort only.
+  }
+  return normalized.toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function isSpecialOrIndividualCleanFunction(functionName) {
+  const token = normalizeFunctionToken(functionName)
+  return token === 'zlecenieindywidualne' || token === 'sprzatanieindywidualne' || token === 'strefaspecjalna'
+}
+
 function parseIso(value) {
   const raw = txt(value)
   if (!raw) return ''
@@ -455,6 +472,8 @@ function createCloseCycleState(overrides = {}) {
     activeCycle: null,
     mode: 'zone-close',
     showChecklist: true,
+    offerWorkdayClose: false,
+    closeWorkdayNow: false,
     ...overrides,
   }
 }
@@ -789,6 +808,7 @@ function CloseCycleModal({
   onToggleTask,
   onReasonChange,
   onCommentChange,
+  onCloseWorkdayNowChange,
   onCancel,
   onConfirm,
 }) {
@@ -868,6 +888,30 @@ function CloseCycleModal({
               disabled={state.pending}
             />
           </div>
+
+          {state.offerWorkdayClose ? (
+            <div className="box col">
+              <div className="tile-label">Czy zakonczyc dzien pracy teraz?</div>
+              <div className="row-inline">
+                <button
+                  className={`btn ${state.closeWorkdayNow ? 'primary' : 'secondary'}`}
+                  type="button"
+                  disabled={state.pending}
+                  onClick={() => onCloseWorkdayNowChange(true)}
+                >
+                  Tak
+                </button>
+                <button
+                  className={`btn ${!state.closeWorkdayNow ? 'primary' : 'secondary'}`}
+                  type="button"
+                  disabled={state.pending}
+                  onClick={() => onCloseWorkdayNowChange(false)}
+                >
+                  Nie
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {state.error ? <div className="error-inline">{state.error}</div> : null}
 
@@ -1725,6 +1769,7 @@ export default function App() {
     const activeWorkdayForScan = snapshotForScan?.activeWorkday || snapshot?.activeWorkday
     const closeReason = resolveCycleCloseReason(activeCycleForScan, scannedZone)
     const isStopScan = up(scannedZone?.kind) === 'STOP'
+    const offerWorkdayClose = txt(closeReason) === 'QR_SAME' && isSpecialOrIndividualCleanFunction(scannedZone?.functionName)
     const closeConfirmed = Boolean(closeMeta?.confirmed)
     if ((closeReason || isStopScan) && !closeConfirmed) {
       closeScan()
@@ -1739,11 +1784,13 @@ export default function App() {
         activeCycle: activeCycleForScan,
         mode,
         showChecklist: mode === 'zone-close',
+        offerWorkdayClose: mode === 'zone-close' && offerWorkdayClose,
+        closeWorkdayNow: false,
       }))
       return { deferred: true }
     }
 
-  const warnings = []
+    const warnings = []
     if (closeConfirmed) {
       const closeMode = txt(closeMeta?.mode) === 'workday-close' ? 'workday-close' : 'zone-close'
       const itemsForSave = Array.isArray(closeMeta?.checklistItems) ? closeMeta.checklistItems : checklistItems
@@ -1788,7 +1835,13 @@ export default function App() {
       }
     }
 
-    const result = await scanMobileQr({ session, snapshot: snapshotForScan, qrCode: normalizedCode, comment: txt(comment) })
+    const result = await scanMobileQr({
+      session,
+      snapshot: snapshotForScan,
+      qrCode: normalizedCode,
+      comment: txt(comment),
+      closeWorkdayImmediately: Boolean(closeMeta?.closeWorkdayNow),
+    })
     setSnapshot(result.snapshot)
     const warningText = warnings.length ? ` ${warnings.map((message) => `Uwaga: ${message}`).join(' ')}` : ''
     setNotice(`${txt(result.message)}${warningText}`.trim())
@@ -1825,6 +1878,7 @@ export default function App() {
           mode: closeCycleState.mode,
           closeReason: closeCycleState.closeReason,
           closeComment: closeCycleState.closeComment,
+          closeWorkdayNow: Boolean(closeCycleState.closeWorkdayNow),
           checklistItems: checklistEnabled ? checklistItems : [],
         },
       })
@@ -2264,6 +2318,7 @@ export default function App() {
         onToggleTask={setChecklistItemChecked}
         onReasonChange={setChecklistItemReason}
         onCommentChange={(value) => setCloseCycleState((prev) => ({ ...prev, closeComment: txt(value).slice(0, CHECKLIST_REASON_MAX_LEN), error: '' }))}
+        onCloseWorkdayNowChange={(value) => setCloseCycleState((prev) => ({ ...prev, closeWorkdayNow: Boolean(value), error: '' }))}
         onCancel={onCloseCycleCancel}
         onConfirm={onCloseCycleConfirm}
       />

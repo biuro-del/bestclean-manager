@@ -287,6 +287,52 @@ function classifyZone(functionLabel) {
   return { kind: 'CLEAN', stopGraceMin: null }
 }
 
+function isIndividualCleanToken(token) {
+  return token === 'SPRZATANIEINDYWIDUALNE' || token === 'ZLECENIEINDYWIDUALNE'
+}
+
+function isSpecialCleanToken(token) {
+  return token === 'STREFASPECJALNA'
+}
+
+function isAutoStartCleanZone(zone) {
+  const kind = toUpper(zone?.kind)
+  if (kind === 'INDIVIDUAL') return true
+  const token = functionToken(zone?.functionName)
+  return isIndividualCleanToken(token) || isSpecialCleanToken(token)
+}
+
+function cloneGpsWithAction(gpsData, actionLabel) {
+  if (!gpsData) return null
+  return {
+    ...gpsData,
+    action: toText(actionLabel) || gpsData.action,
+  }
+}
+
+function resolveAutoStopZone(snapshot, fallbackZone = null) {
+  const stopRules = Array.isArray(snapshot?.stopRules) ? snapshot.stopRules : []
+  const zeroRule = stopRules.find((rule) => Number(rule?.graceMin) === 0)
+  if (zeroRule) {
+    return {
+      id: toText(zeroRule.roomId || zeroRule.id || 'STOP0'),
+      stopGraceMin: 0,
+    }
+  }
+
+  if (toUpper(fallbackZone?.kind) === 'STOP') {
+    return {
+      id: toText(fallbackZone?.id || 'STOP0'),
+      stopGraceMin: Number(fallbackZone?.stopGraceMin ?? 0),
+    }
+  }
+
+  return {
+    id: 'STOP0_AUTO',
+    stopGraceMin: 0,
+  }
+}
+
 function pickBestWorker(workers, session) {
   const email = toText(session?.email).toLowerCase()
   const emailLogin = email.includes('@') ? email.split('@')[0] : ''
@@ -1239,7 +1285,7 @@ async function setWorkdayRunning(snapshot, workday) {
   })
 }
 
-async function startCycle(snapshot, zone, workdayIdHint = '') {
+async function startCycle(snapshot, zone, workdayIdHint = '', gpsData = null) {
   const eventId = makeId('EV')
   if (!insertEventForOrgUnavailable) {
     try {
@@ -1274,6 +1320,7 @@ async function startCycle(snapshot, zone, workdayIdHint = '') {
   }
 
   const activeWorkday = snapshot?.activeWorkday || {}
+  const fullGps = appendComment(activeWorkday.gps, gpsColumnValue(gpsData)) || null
   await updateWorkdayForOrg({
     orgId: snapshot.orgId,
     workdayId: targetWorkdayId,
@@ -1285,11 +1332,12 @@ async function startCycle(snapshot, zone, workdayIdHint = '') {
     durationSec: null,
     status: 'RUNNING',
     comment: toText(activeWorkday.comment) || null,
+    gps: fullGps,
     updatedBy: toText(snapshot?.worker?.login) || null,
   })
 }
 
-async function stopCycle(snapshot, cycle, reason, commentValue) {
+async function stopCycle(snapshot, cycle, reason, commentValue, gpsData = null) {
   const endAt = nowIso()
   const durationSec = elapsedSec(cycle.startAt, endAt)
   if (!updateEventForOrgUnavailable) {
@@ -1325,6 +1373,7 @@ async function stopCycle(snapshot, cycle, reason, commentValue) {
   }
 
   const activeWorkday = snapshot?.activeWorkday || {}
+  const fullGps = appendComment(activeWorkday.gps, gpsColumnValue(gpsData)) || null
   await updateWorkdayForOrg({
     orgId: snapshot.orgId,
     workdayId,
@@ -1336,11 +1385,12 @@ async function stopCycle(snapshot, cycle, reason, commentValue) {
     durationSec: null,
     status: 'RUNNING',
     comment: toText(commentValue || cycle?.comment || activeWorkday.comment) || null,
+    gps: fullGps,
     updatedBy: toText(snapshot?.worker?.login) || null,
   })
 }
 
-export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
+export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWorkdayImmediately = false }) {
   assertConfigured()
   await assertSignedInUser()
   const code = parseQr(qrCode)
@@ -1382,7 +1432,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
     }
 
     if (activeCycle && isEventOpen(activeCycle)) {
-      await stopCycle(snapshot, activeCycle, 'STOP_END_DAY', comment)
+      await stopCycle(snapshot, activeCycle, 'STOP_END_DAY', comment, cloneGpsWithAction(stopGps, 'CLEAN_STOP'))
     }
 
     const stopMessage = await closeWorkdayNow(snapshot, activeWorkday, zone, stopGps)
@@ -1397,16 +1447,17 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
   }
 
   if (!effectiveWorkdayOpen) {
-    if (zone.kind === 'INDIVIDUAL') {
-      const created = await createWorkdayForScan(snapshot, zone)
-      await startCycle(snapshot, zone, created.workdayId)
+    if (isAutoStartCleanZone(zone)) {
+      const startGps = await captureGpsForAction('START')
+      const created = await createWorkdayForScan(snapshot, snapshot?.startZone || zone, startGps)
+      await startCycle(snapshot, zone, created.workdayId, cloneGpsWithAction(startGps, 'CLEAN_START'))
       return {
-        message: 'Rozpoczeto dzien i zlecenie indywidualne.',
+        message: 'Rozpoczeto dzien i sprzatanie strefy.',
         snapshot: await getMobileSnapshot(session),
       }
     }
 
-    throw new Error('Brak aktywnego dnia. Zeskanuj START lub kod indywidualny.')
+    throw new Error('Brak aktywnego dnia. Zeskanuj START lub kod strefy/zlecenia.')
   }
 
   if (toUpper(activeWorkday?.status) === 'ENDING') {
@@ -1415,22 +1466,33 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment }) {
 
   if (activeCycle && isEventOpen(activeCycle)) {
     if (normalizeKey(activeCycle.zoneId) === normalizeKey(zone.id)) {
-      await stopCycle(snapshot, activeCycle, 'QR_SAME', comment)
+      const closeGps = await captureGpsForAction('CLEAN_STOP')
+      await stopCycle(snapshot, activeCycle, 'QR_SAME', comment, closeGps)
+      if (closeWorkdayImmediately) {
+        const autoStopZone = resolveAutoStopZone(snapshot, zone)
+        const stopMessage = await closeWorkdayNow(snapshot, activeWorkday, autoStopZone, cloneGpsWithAction(closeGps, 'STOP'))
+        return {
+          message: `Zakonczono sprzatanie tej strefy. ${stopMessage}`.trim(),
+          snapshot: await getMobileSnapshot(session),
+        }
+      }
       return {
         message: 'Zakonczono sprzatanie tej strefy.',
         snapshot: await getMobileSnapshot(session),
       }
     }
 
-    await stopCycle(snapshot, activeCycle, 'QR_SWITCH', comment)
-    await startCycle(snapshot, zone)
+    const switchGps = await captureGpsForAction('CLEAN')
+    await stopCycle(snapshot, activeCycle, 'QR_SWITCH', comment, cloneGpsWithAction(switchGps, 'CLEAN_STOP'))
+    await startCycle(snapshot, zone, '', cloneGpsWithAction(switchGps, 'CLEAN_START'))
     return {
       message: `Zmiana strefy na: ${zone.name || zone.id}.`,
       snapshot: await getMobileSnapshot(session),
     }
   }
 
-  await startCycle(snapshot, zone)
+  const cleanStartGps = await captureGpsForAction('CLEAN_START')
+  await startCycle(snapshot, zone, '', cleanStartGps)
   return {
     message: `Rozpoczeto sprzatanie: ${zone.name || zone.id}.`,
     snapshot: await getMobileSnapshot(session),
