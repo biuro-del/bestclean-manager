@@ -2446,7 +2446,7 @@ export default function App() {
         {refreshPending ? <div className="notice-box notice-muted">Synchronizacja danych...</div> : null}
         {renderMain()}
       </main>
-      <footer className="app-footer">Best Clean V.1.0</footer>
+      <footer className="app-footer">Best Clean V.1.1</footer>
       <SettingsModal open={settingsOpen} session={session} onClose={() => setSettingsOpen(false)} onLogout={doLogout} />
       <ScanModal
         key={scanState.nonce}
@@ -2500,7 +2500,7 @@ export default function App() {
           <div className="modal-content version-popup">
             <div className="version-popup__badge">Best Clean</div>
             <div className="version-popup__title">Nowa wersja aplikacji</div>
-            <div className="version-popup__text">Korzystasz z wersji V.1.0.</div>
+            <div className="version-popup__text">Korzystasz z wersji V.1.1.</div>
             <div className="version-popup__hint">
               <div><strong>Login:</strong> Twoje nazwisko</div>
               <div><strong>Haslo:</strong> Twoja data urodzenia. 6 cyfr, np. 120187 (dzien, miesiac, rok)</div>
