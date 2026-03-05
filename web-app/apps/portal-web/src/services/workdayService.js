@@ -14,7 +14,7 @@ import { getWorkers } from './workerService'
 
 const NINE_HOURS_SECONDS = 9 * 60 * 60
 const DEPLOY_HINT =
-  'Brak wdrożonej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean-room.'
+  'Brak wdrożonej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean2-2e798.'
 
 function pad2(value) {
   return String(value).padStart(2, '0')

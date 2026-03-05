@@ -2,7 +2,7 @@ const { queryRef, executeQuery, mutationRef, executeMutation, validateArgs } = r
 
 const connectorConfig = {
   connector: 'example',
-  service: 'iclean-room-service',
+  service: 'iclean2--service',
   location: 'europe-west3'
 };
 exports.connectorConfig = connectorConfig;

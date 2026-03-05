@@ -4,10 +4,10 @@ import { connectDataConnectEmulator, getDataConnect } from 'firebase/data-connec
 import { connectorConfig } from '@dataconnect/generated'
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCdRVjbPWm6MueCHOwsmmbdkEKZoO6Dy-k',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'iclean-room.firebaseapp.com',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'iclean-room',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:1080573912983:web:d8ef39327b91708488c6d2',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCq2sF92ezbmMc4cvmEKy672r9Y9PEXtYw',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'iclean2-2e798.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'iclean2-2e798',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:841744028239:web:79d2d50ca545e62006503a',
 }
 
 const requiredConfigKeys = ['apiKey', 'authDomain', 'projectId', 'appId']

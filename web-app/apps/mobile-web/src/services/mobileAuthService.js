@@ -274,7 +274,7 @@ function getBootstrapMembershipEndpoint() {
     return endpointFromEnv
   }
 
-  const projectId = toText(import.meta.env.VITE_FIREBASE_PROJECT_ID) || 'iclean-room'
+  const projectId = toText(import.meta.env.VITE_FIREBASE_PROJECT_ID) || 'iclean2-2e798'
   const host = toText(import.meta.env.VITE_FUNCTIONS_EMULATOR_HOST)
   const port = Number(import.meta.env.VITE_FUNCTIONS_EMULATOR_PORT ?? 5001)
   if (useEmulators && host) {

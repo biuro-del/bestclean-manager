@@ -2,7 +2,7 @@ import { queryRef, executeQuery, mutationRef, executeMutation, validateArgs } fr
 
 export const connectorConfig = {
   connector: 'example',
-  service: 'iclean-room-service',
+  service: 'iclean2--service',
   location: 'europe-west3'
 };
 
