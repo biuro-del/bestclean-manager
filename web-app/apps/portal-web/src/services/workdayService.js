@@ -95,11 +95,6 @@ function withOperationNotFoundHint(error, operationName) {
 
   return error instanceof Error ? error : new Error(message || DEPLOY_HINT)
 }
-function isOperationNotFoundError(error, operationName) {
-  const message = messageFromError(error)
-  return isOperationNotFoundMessage(message, operationName) || message.includes(`Brak operacji: ${operationName}.`)
-}
-
 function toDayKey(isoValue) {
   const iso = toIso(isoValue)
   return iso ? iso.slice(0, 10) : ''
@@ -628,11 +623,18 @@ function pickClosestWorkerCandidate(candidates, eventStartAt) {
   return best ?? candidates[0] ?? null
 }
 
-function mapWorkday(orgId, row, lookupMaps) {
+function mapTimelineRow(orgId, row, lookupMaps, options = {}) {
+  const requestedSourceType = String(options.sourceType ?? '').trim().toUpperCase()
+  const sourceType = requestedSourceType === 'WORKDAY' ? 'WORKDAY' : 'EVENT'
   const rawEventId = sanitizeTextValue(row.eventId ?? row.cycleId)
   const rawWorkdayId = sanitizeTextValue(row.workdayId)
-  const workdayId = rawWorkdayId || rawEventId
-  const eventId = rawEventId || workdayId
+  const sourceId =
+    sourceType === 'WORKDAY' ? rawWorkdayId || rawEventId : rawEventId || rawWorkdayId
+  const sourceKey = sourceId
+    ? `${sourceType}:${sourceId}`
+    : `${sourceType}:${toIso(row.startAt) || toIso(row.updatedAt) || Date.now()}`
+  const workdayId = sourceType === 'WORKDAY' ? sourceId : rawWorkdayId || null
+  const eventId = sourceType === 'EVENT' ? sourceId : null
   const linkedWorkday = lookupMaps.workdayById.get(rawWorkdayId) ?? null
   const workerLoginCandidate = sanitizeTextValue(
     row.workerLogin ?? row.worker?.login ?? row.workday?.workerLogin ?? linkedWorkday?.workerLogin ?? '',
@@ -743,9 +745,12 @@ function mapWorkday(orgId, row, lookupMaps) {
   )
 
   return {
-    id: eventId || workdayId,
-    eventId: eventId || workdayId,
-    workdayId: workdayId || eventId,
+    id: sourceKey,
+    sourceType,
+    sourceId: sourceId || null,
+    sourceKey,
+    eventId,
+    workdayId,
     linkedWorkdayId: rawWorkdayId,
     orgId,
     workerLogin: resolvedWorkerLogin,
@@ -783,8 +788,16 @@ function mapWorkday(orgId, row, lookupMaps) {
   }
 }
 
+function mapEventRow(orgId, row, lookupMaps) {
+  return mapTimelineRow(orgId, row, lookupMaps, { sourceType: 'EVENT' })
+}
+
+function mapWorkdayRow(orgId, row, lookupMaps) {
+  return mapTimelineRow(orgId, row, lookupMaps, { sourceType: 'WORKDAY' })
+}
+
 function isDisplayableMappedItem(item) {
-  const eventId = String(item?.eventId ?? item?.workdayId ?? '').trim()
+  const eventId = String(item?.sourceId ?? item?.eventId ?? item?.workdayId ?? '').trim()
   const workerLogin = String(item?.workerLogin ?? '').trim()
   const workerName = String(item?.workerName ?? '').trim()
   const zoneId = String(item?.zoneId ?? item?.roomId ?? '').trim()
@@ -852,19 +865,19 @@ function buildEventMutationPayload(payload = {}) {
   }
 }
 
+async function fetchLookupMapsFromRows(orgId, workdayRows = []) {
+  const [clients, zones, workers] = await Promise.all([getClients(orgId), getZones(orgId), getWorkers(orgId)])
+  return buildLookupMaps(clients, zones, workers, workdayRows)
+}
+
 async function fetchLookupMaps(orgId, options = {}) {
   const includeWorkdays = Boolean(options.includeWorkdays)
-  const [clients, zones, workers, workdayRows] = await Promise.all([
-    getClients(orgId),
-    getZones(orgId),
-    getWorkers(orgId),
-    includeWorkdays
-      ? workdaysForOrg({ orgId })
-          .then((response) => response?.data?.workdays ?? [])
-          .catch(() => [])
-      : Promise.resolve([]),
-  ])
-  return buildLookupMaps(clients, zones, workers, workdayRows)
+  const workdayRows = includeWorkdays
+    ? await workdaysForOrg({ orgId })
+        .then((response) => response?.data?.workdays ?? [])
+        .catch(() => [])
+    : []
+  return fetchLookupMapsFromRows(orgId, workdayRows)
 }
 
 async function fetchMappedWorkdays(orgId, rowsPromise, operationName) {
@@ -882,7 +895,7 @@ async function fetchMappedWorkdays(orgId, rowsPromise, operationName) {
 
   const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
   const rows = response?.data?.workdays ?? []
-  return rows.map((row) => mapWorkday(orgId, row, lookupMaps))
+  return rows.map((row) => mapWorkdayRow(orgId, row, lookupMaps))
 }
 
 async function fetchMappedBackupCycles(orgId) {
@@ -901,8 +914,31 @@ async function fetchMappedBackupCycles(orgId) {
   const lookupMaps = await fetchLookupMaps(orgId)
   const rows = response?.data?.backupCycles ?? []
   return rows
-    .map((row) => mapWorkday(orgId, row, lookupMaps))
+    .map((row) => mapEventRow(orgId, row, lookupMaps))
     .filter((item) => isDisplayableMappedItem(item))
+}
+
+function mergeMappedTimelineRows(items = []) {
+  const merged = new Map()
+  items.forEach((item) => {
+    const key = String(item?.sourceKey ?? `${item?.sourceType ?? 'EVENT'}:${item?.sourceId ?? ''}`).trim()
+    if (!key) {
+      return
+    }
+
+    const existing = merged.get(key)
+    if (!existing) {
+      merged.set(key, item)
+      return
+    }
+
+    const existingTs = new Date(toIso(existing.startAt) || toIso(existing.updatedAt) || 0).getTime()
+    const itemTs = new Date(toIso(item.startAt) || toIso(item.updatedAt) || 0).getTime()
+    if (itemTs >= existingTs) {
+      merged.set(key, item)
+    }
+  })
+  return [...merged.values()]
 }
 
 async function fetchMappedEvents(orgId) {
@@ -911,30 +947,22 @@ async function fetchMappedEvents(orgId) {
   }
 
   ensureFirebase()
-  try {
-    const response = await runQueryOperation('EventsForOrg', { orgId })
-    const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
-    const rows = response?.data?.events ?? []
-    return rows
-      .map((row) => mapWorkday(orgId, row, lookupMaps))
-      .filter((item) => isDisplayableMappedItem(item))
-  } catch (error) {
-    if (!isOperationNotFoundError(error, 'EventsForOrg')) {
-      throw error
-    }
-  }
+  const [eventsResponse, workdaysResponse] = await Promise.all([
+    runQueryOperation('EventsForOrg', { orgId }),
+    workdaysForOrg({ orgId }).catch((error) => {
+      throw withOperationNotFoundHint(error, 'WorkdaysForOrg')
+    }),
+  ])
 
-  // Fallback when EventsForOrg query is not deployed in current Data Connect environment.
-  try {
-    return await fetchMappedBackupCycles(orgId)
-  } catch (error) {
-    if (!isOperationNotFoundError(error, 'BackupCyclesForOrg')) {
-      throw error
-    }
-  }
+  const workdayRows = workdaysResponse?.data?.workdays ?? []
+  const lookupMaps = await fetchLookupMapsFromRows(orgId, workdayRows)
+  const eventRows = eventsResponse?.data?.events ?? []
+  const mappedEvents = eventRows.map((row) => mapEventRow(orgId, row, lookupMaps))
+  const mappedWorkdays = workdayRows.map((row) => mapWorkdayRow(orgId, row, lookupMaps))
 
-  // Last fallback: use workdays query so events section still renders data.
-  return fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg')
+  return mergeMappedTimelineRows([...mappedEvents, ...mappedWorkdays]).filter((item) =>
+    isDisplayableMappedItem(item),
+  )
 }
 
 export async function getWorkdays(orgId, filters = {}) {
@@ -996,7 +1024,7 @@ export async function getRecentEvents(orgId, limit = 5) {
   const response = await getWorkdays(orgId, { source: 'events', page: 1, pageSize })
 
   return response.items.map((item) => ({
-    id: item.workdayId,
+    id: item.sourceKey || item.eventId || item.workdayId || item.id,
     workerName: item.workerName || '-',
     zoneName: item.zoneName || '-',
     clientName: item.clientName || '-',

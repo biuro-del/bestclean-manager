@@ -1845,11 +1845,13 @@ async function openEventEditor(item) {
   const zone = getZoneById(item.roomId || item.utilityRoomId)
   const selectedClientId = zone?.clientId ?? item.clientId
   const selectedZoneId = zone?.id ?? item.roomId ?? item.utilityRoomId
+  const sourceType = String(item.sourceType ?? 'EVENT').trim().toUpperCase()
+  const sourceId = String(item.sourceId ?? item.eventId ?? item.workdayId ?? '').trim()
 
   populateEventEditorOptions(item.workerLogin, selectedClientId, selectedZoneId)
 
   if (title) title.textContent = 'Edytuj zdarzenie'
-  if (cycleId) cycleId.textContent = String(item.eventId ?? item.workdayId ?? '-')
+  if (cycleId) cycleId.textContent = `${sourceType === 'WORKDAY' ? 'WORKDAY' : 'EVENT'}:${sourceId || '-'}`
   if (rowNumber) rowNumber.textContent = '-'
   if (editedBy) editedBy.textContent = item.editedBy || appState.session?.name || '-'
   if (roomInput) roomInput.value = String(item.roomId ?? item.utilityRoomId ?? '')
@@ -2032,15 +2034,36 @@ async function saveEventEditor() {
         ...payload,
       })
     } else {
-      const eventId = String(appState.eventEditorItem?.eventId ?? appState.eventEditorItem?.workdayId ?? '').trim()
-      if (!eventId) {
-        throw new Error('Brak eventId dla edycji zdarzenia.')
-      }
+      const sourceType = String(appState.eventEditorItem?.sourceType ?? 'EVENT')
+        .trim()
+        .toUpperCase()
+      if (sourceType === 'WORKDAY') {
+        const workdayId = String(appState.eventEditorItem?.workdayId ?? appState.eventEditorItem?.sourceId ?? '').trim()
+        if (!workdayId) {
+          throw new Error('Brak workdayId dla edycji wpisu dnia pracy.')
+        }
 
-      await updateEvent(appState.session.orgId, eventId, {
-        ...appState.eventEditorItem,
-        ...payload,
-      })
+        await updateWorkday(appState.session.orgId, workdayId, {
+          ...appState.eventEditorItem,
+          ...payload,
+          utilityRoomId:
+            payload.utilityRoomId ??
+            payload.zoneId ??
+            payload.roomId ??
+            appState.eventEditorItem?.utilityRoomId ??
+            null,
+        })
+      } else {
+        const eventId = String(appState.eventEditorItem?.eventId ?? appState.eventEditorItem?.sourceId ?? '').trim()
+        if (!eventId) {
+          throw new Error('Brak eventId dla edycji zdarzenia.')
+        }
+
+        await updateEvent(appState.session.orgId, eventId, {
+          ...appState.eventEditorItem,
+          ...payload,
+        })
+      }
     }
 
     closeEventEditor()
@@ -2067,12 +2090,23 @@ async function deleteEventEditorItem() {
     return
   }
 
-  const eventId = String(appState.eventEditorItem?.eventId ?? appState.eventEditorItem?.workdayId ?? '').trim()
-  if (!eventId) {
+  const sourceType = String(appState.eventEditorItem?.sourceType ?? 'EVENT')
+    .trim()
+    .toUpperCase()
+  const sourceId = String(
+    sourceType === 'WORKDAY'
+      ? appState.eventEditorItem?.workdayId ?? appState.eventEditorItem?.sourceId
+      : appState.eventEditorItem?.eventId ?? appState.eventEditorItem?.sourceId,
+  ).trim()
+  if (!sourceId) {
     return
   }
 
-  const confirmed = window.confirm(`Usunąć zdarzenie ${eventId}?`)
+  const confirmed = window.confirm(
+    sourceType === 'WORKDAY'
+      ? `Usunąć wpis dnia pracy ${sourceId}?`
+      : `Usunąć zdarzenie ${sourceId}?`,
+  )
   if (!confirmed) {
     return
   }
@@ -2084,7 +2118,11 @@ async function deleteEventEditorItem() {
   }
 
   try {
-    await deleteEvent(appState.session.orgId, eventId)
+    if (sourceType === 'WORKDAY') {
+      await deleteWorkday(appState.session.orgId, sourceId)
+    } else {
+      await deleteEvent(appState.session.orgId, sourceId)
+    }
     closeEventEditor()
     await fetchEventsForCurrentSession({ resetPage: false })
     await refreshDashboardWidgets()
