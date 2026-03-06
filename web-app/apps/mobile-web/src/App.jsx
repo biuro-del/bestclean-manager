@@ -1910,12 +1910,16 @@ export default function App() {
     })
     const warningText = warnings.length ? ` ${warnings.map((message) => `Uwaga: ${message}`).join(' ')}` : ''
     const resultMessage = `${txt(result.message)}${warningText}`.trim()
+    const autoLogoutAfterWorkdayClose = Boolean(closeMeta?.closeWorkdayNow)
 
-    if (isStopScan) {
+    if (isStopScan || autoLogoutAfterWorkdayClose) {
       closeScan()
+      const logoutReason = isStopScan
+        ? 'Wylogowano automatycznie po zeskanowaniu kodu STOPx.'
+        : 'Wylogowano automatycznie po zakonczeniu dnia pracy.'
       await doLogout({
         showVersionPopup: false,
-        notice: `${resultMessage} Wylogowano automatycznie po zeskanowaniu kodu STOPx.`.trim(),
+        notice: `${resultMessage} ${logoutReason}`.trim(),
       })
       return { deferred: false }
     }
