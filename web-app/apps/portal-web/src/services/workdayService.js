@@ -993,7 +993,7 @@ export async function getWorkerTime(orgId, workerId, range = {}) {
 
 export async function getRecentEvents(orgId, limit = 5) {
   const pageSize = Math.max(Number(limit) || 5, 1)
-  const response = await getWorkdays(orgId, { page: 1, pageSize })
+  const response = await getWorkdays(orgId, { source: 'events', page: 1, pageSize })
 
   return response.items.map((item) => ({
     id: item.workdayId,

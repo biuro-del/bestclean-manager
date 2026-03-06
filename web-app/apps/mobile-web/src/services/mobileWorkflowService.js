@@ -12,13 +12,26 @@ import { executeMutation, executeQuery, mutationRef, queryRef } from 'firebase/d
 import { ensureFirebase, isFirebaseConfigured, waitForFirebaseAuthReady } from '../firebase/firebaseClient'
 let eventsForOrgUnavailable = false
 let backupCyclesForOrgUnavailable = false
-// Temporarily force fallback path for cycles until Data Connect operations
-// InsertEventForOrg / UpdateEventForOrg are deployed on production connector.
-const eventMutationsEnabled = false
+let insertBackupCycleForOrgUnavailable = false
+let updateBackupCycleForOrgUnavailable = false
+const eventMutationsEnabled = envFlag('VITE_MOBILE_EVENT_MUTATIONS', true)
+const backupCycleDualWriteEnabled = envFlag('VITE_MOBILE_DUAL_WRITE_BACKUP_CYCLE', true)
+const cycleFallbackFromWorkdayEnabled = envFlag('VITE_MOBILE_CYCLE_WORKDAY_FALLBACK', false)
 let insertEventForOrgUnavailable = !eventMutationsEnabled
 let updateEventForOrgUnavailable = !eventMutationsEnabled
 const MAX_REASONABLE_WORKDAY_SEC = 20 * 60 * 60
 const GPS_COLUMN_MAX_LEN = 255
+
+function envFlag(name, defaultValue = false) {
+  try {
+    const raw = typeof import.meta !== 'undefined' ? import.meta?.env?.[name] : undefined
+    const text = String(raw ?? '').trim().toLowerCase()
+    if (!text) return Boolean(defaultValue)
+    return ['1', 'true', 'yes', 'on'].includes(text)
+  } catch {
+    return Boolean(defaultValue)
+  }
+}
 
 function toText(value) {
   return String(value ?? '').trim()
@@ -557,6 +570,60 @@ function fallbackActiveCycleFromWorkday(activeWorkday, zones) {
   }
 }
 
+function getCycleZone(snapshot, cycle, fallbackZone = null) {
+  const cycleZoneId = normalizeKey(cycle?.zoneId)
+  const byCycle = (snapshot?.zones || []).find((zone) => normalizeKey(zone?.id) === cycleZoneId)
+  if (byCycle) {
+    return byCycle
+  }
+
+  if (fallbackZone && toText(fallbackZone?.id)) {
+    return fallbackZone
+  }
+
+  return null
+}
+
+async function insertBackupCycle(snapshot, payload) {
+  if (insertBackupCycleForOrgUnavailable) {
+    return false
+  }
+
+  try {
+    await runMutationOperation('InsertBackupCycleForOrg', {
+      ...payload,
+      orgId: snapshot.orgId,
+    })
+    return true
+  } catch (error) {
+    if (operationMissing(error, 'InsertBackupCycleForOrg')) {
+      insertBackupCycleForOrgUnavailable = true
+      return false
+    }
+    throw error
+  }
+}
+
+async function updateBackupCycle(snapshot, payload) {
+  if (updateBackupCycleForOrgUnavailable) {
+    return false
+  }
+
+  try {
+    await runMutationOperation('UpdateBackupCycleForOrg', {
+      ...payload,
+      orgId: snapshot.orgId,
+    })
+    return true
+  } catch (error) {
+    if (operationMissing(error, 'UpdateBackupCycleForOrg')) {
+      updateBackupCycleForOrgUnavailable = true
+      return false
+    }
+    throw error
+  }
+}
+
 function buildWorkdayEventFeed(workdays) {
   return workdays
     .flatMap((row) => {
@@ -735,6 +802,7 @@ async function runMutationOperation(operationName, variables) {
 function mapBackupCycleToEventRow(row) {
   return {
     eventId: toText(row?.eventId || row?.workdayId || row?.cycleId),
+    workdayId: toText(row?.workdayId || row?.startEventId),
     zoneId: toText(row?.zoneId || row?.utilityRoomId || row?.roomId),
     workerLogin: toText(row?.workerLogin),
     workerName: toText(row?.workerName),
@@ -752,6 +820,18 @@ function mapBackupCycleToEventRow(row) {
 }
 
 async function fetchEventRows(orgId) {
+  if (!eventsForOrgUnavailable) {
+    try {
+      const eventsResponse = await runQueryOperation('EventsForOrg', { orgId })
+      return eventsResponse?.data?.events ?? []
+    } catch (error) {
+      if (!operationMissing(error, 'EventsForOrg')) {
+        throw error
+      }
+      eventsForOrgUnavailable = true
+    }
+  }
+
   if (!backupCyclesForOrgUnavailable) {
     try {
       const fallback = await backupCyclesForOrg({ orgId })
@@ -762,18 +842,6 @@ async function fetchEventRows(orgId) {
         throw error
       }
       backupCyclesForOrgUnavailable = true
-    }
-  }
-
-  if (!eventsForOrgUnavailable) {
-    try {
-      const eventsResponse = await runQueryOperation('EventsForOrg', { orgId })
-      return eventsResponse?.data?.events ?? []
-    } catch (error) {
-      if (!operationMissing(error, 'EventsForOrg')) {
-        throw error
-      }
-      eventsForOrgUnavailable = true
     }
   }
 
@@ -1102,7 +1170,8 @@ export async function getMobileSnapshot(session) {
   }
 
   const events = selectWorkerScopedEvents(data.eventRows, workerLogin, zoneById, workerWorkdayIds, workerName, session)
-  const activeCycle = pickActiveCycle(events, activeWorkday?.workdayId) || fallbackActiveCycleFromWorkday(activeWorkday, zones)
+  const fallbackCycle = cycleFallbackFromWorkdayEnabled ? fallbackActiveCycleFromWorkday(activeWorkday, zones) : null
+  const activeCycle = pickActiveCycle(events, activeWorkday?.workdayId) || fallbackCycle
   const summary = summaryFromWorkdays(workdays, activeWorkday)
 
   return {
@@ -1340,25 +1409,39 @@ async function setWorkdayRunning(snapshot, workday) {
 
 async function startCycle(snapshot, zone, workdayIdHint = '', gpsData = null, workdayStartAtHint = '') {
   const eventId = makeId('EV')
+  const targetWorkdayId = toText(workdayIdHint || snapshot?.activeWorkday?.workdayId)
+  if (!targetWorkdayId) {
+    throw new Error('Brak aktywnego dnia pracy do rozpoczecia strefy CLEAN.')
+  }
+
+  const startAt = nowIso()
+  const workerLogin = toText(snapshot?.worker?.login || snapshot?.activeWorkday?.workerLogin) || null
+  const workerName = toText(snapshot?.worker?.name || snapshot?.activeWorkday?.workerName) || null
+  const workdayMarker = toText(targetWorkdayId || workdayStartAtHint) || null
+  const gpsNote = fitGpsColumn(gpsColumnValue(gpsData))
+
+  let eventSaved = false
   if (!insertEventForOrgUnavailable) {
     try {
       await runMutationOperation('InsertEventForOrg', {
         orgId: snapshot.orgId,
         eventId,
+        workdayId: targetWorkdayId,
         zoneId: zone.id || null,
-        workerLogin: snapshot.worker.login || null,
-        startAt: nowIso(),
+        workerLogin,
+        workerName,
+        startAt,
         endAt: null,
         durationSec: null,
         status: 'RUNNING',
         closeMarkedAt: null,
         endReason: null,
-        comment: null,
+        comment: gpsNote,
         deviceId: null,
-        startEventId: null,
+        startEventId: workdayMarker,
         endEventId: null,
       })
-      return
+      eventSaved = true
     } catch (error) {
       if (!operationMissing(error, 'InsertEventForOrg')) {
         throw error
@@ -1367,52 +1450,93 @@ async function startCycle(snapshot, zone, workdayIdHint = '', gpsData = null, wo
     }
   }
 
-  const targetWorkdayId = toText(workdayIdHint || snapshot?.activeWorkday?.workdayId)
-  if (!targetWorkdayId) {
-    throw new Error('Brak aktywnego dnia pracy do oznaczenia strefy CLEAN.')
+  if (!eventSaved) {
+    const insertedToBackup = await insertBackupCycle(snapshot, {
+      cycleId: eventId,
+      workerLogin,
+      workerName,
+      roomId: toText(zone?.id) || null,
+      strefa: toText(zone?.name) || null,
+      pomieszczenie: toText(zone?.location) || null,
+      startAt,
+      endAt: null,
+      durationSec: null,
+      status: 'RUNNING',
+      closeMarkedAt: null,
+      endReason: null,
+      comment: gpsNote,
+      deviceId: null,
+      startEventId: workdayMarker,
+      endEventId: null,
+    })
+    if (!insertedToBackup) {
+      throw new Error('Brak wdrozonej operacji InsertEventForOrg/InsertBackupCycleForOrg.')
+    }
+  } else if (backupCycleDualWriteEnabled) {
+    try {
+      await insertBackupCycle(snapshot, {
+        cycleId: eventId,
+        workerLogin,
+        workerName,
+        roomId: toText(zone?.id) || null,
+        strefa: toText(zone?.name) || null,
+        pomieszczenie: toText(zone?.location) || null,
+        startAt,
+        endAt: null,
+        durationSec: null,
+        status: 'RUNNING',
+        closeMarkedAt: null,
+        endReason: null,
+        comment: gpsNote,
+        deviceId: null,
+        startEventId: workdayMarker,
+        endEventId: null,
+      })
+    } catch {
+      // Dual-write is best effort and should not block CLEAN flow.
+    }
   }
-
-  const activeWorkday = snapshot?.activeWorkday || {}
-  const targetStartAt = parseIso(workdayStartAtHint) || activeWorkday.startAt || null
-  const fullGps = mergeGpsColumn(activeWorkday.gps, gpsColumnValue(gpsData))
-  await updateWorkdayForOrg({
-    orgId: snapshot.orgId,
-    workdayId: targetWorkdayId,
-    workerLogin: toText(activeWorkday.workerLogin || snapshot?.worker?.login) || null,
-    workerName: toText(activeWorkday.workerName || snapshot?.worker?.name) || null,
-    utilityRoomId: toText(zone?.id) || null,
-    startAt: targetStartAt,
-    endAt: null,
-    durationSec: null,
-    status: 'RUNNING',
-    comment: toText(activeWorkday.comment) || null,
-    gps: fullGps,
-    updatedBy: toText(snapshot?.worker?.login) || null,
-  })
 }
 
 async function stopCycle(snapshot, cycle, reason, commentValue, gpsData = null) {
   const endAt = nowIso()
   const durationSec = elapsedSec(cycle.startAt, endAt)
+  const cycleId = toText(cycle?.eventId)
+  if (!cycleId) {
+    throw new Error('Brak eventId aktywnej strefy CLEAN.')
+  }
+
+  const workdayId = toText(cycle?.workdayId || snapshot?.activeWorkday?.workdayId) || null
+  const workerLogin = toText(cycle?.workerLogin || snapshot?.worker?.login || snapshot?.activeWorkday?.workerLogin) || null
+  const workerName = toText(cycle?.workerName || snapshot?.worker?.name || snapshot?.activeWorkday?.workerName) || null
+  const zone = getCycleZone(snapshot, cycle)
+  const gpsNote = gpsColumnValue(gpsData)
+  const cycleComment = appendComment(toText(commentValue || cycle.comment) || null, gpsNote)
+
+  const updatePayload = {
+    orgId: snapshot.orgId,
+    eventId: cycleId,
+    workdayId,
+    zoneId: cycle.zoneId || null,
+    workerLogin,
+    workerName,
+    startAt: cycle.startAt || null,
+    endAt,
+    durationSec,
+    status: 'CLOSED',
+    closeMarkedAt: endAt,
+    endReason: reason || 'CYCLE_STOP',
+    comment: cycleComment,
+    deviceId: null,
+    startEventId: workdayId,
+    endEventId: null,
+  }
+
+  let eventUpdated = false
   if (!updateEventForOrgUnavailable) {
     try {
-      await runMutationOperation('UpdateEventForOrg', {
-        orgId: snapshot.orgId,
-        eventId: cycle.eventId,
-        zoneId: cycle.zoneId || null,
-        workerLogin: cycle.workerLogin || snapshot.worker.login || null,
-        startAt: cycle.startAt || null,
-        endAt,
-        durationSec,
-        status: 'CLOSED',
-        closeMarkedAt: endAt,
-        endReason: reason || 'CYCLE_STOP',
-        comment: toText(commentValue || cycle.comment) || null,
-        deviceId: null,
-        startEventId: null,
-        endEventId: null,
-      })
-      return
+      await runMutationOperation('UpdateEventForOrg', updatePayload)
+      eventUpdated = true
     } catch (error) {
       if (!operationMissing(error, 'UpdateEventForOrg')) {
         throw error
@@ -1421,27 +1545,52 @@ async function stopCycle(snapshot, cycle, reason, commentValue, gpsData = null) 
     }
   }
 
-  const workdayId = toText(cycle?.workdayId || snapshot?.activeWorkday?.workdayId)
-  if (!workdayId) {
-    return
+  if (!eventUpdated) {
+    const updatedToBackup = await updateBackupCycle(snapshot, {
+      cycleId,
+      workerLogin,
+      workerName,
+      roomId: toText(cycle?.zoneId || zone?.id) || null,
+      strefa: toText(cycle?.zoneName || zone?.name) || null,
+      pomieszczenie: toText(cycle?.location || zone?.location) || null,
+      startAt: cycle.startAt || null,
+      endAt,
+      durationSec,
+      status: 'CLOSED',
+      closeMarkedAt: endAt,
+      endReason: reason || 'CYCLE_STOP',
+      comment: cycleComment,
+      deviceId: null,
+      startEventId: workdayId,
+      endEventId: null,
+    })
+    if (!updatedToBackup) {
+      throw new Error('Brak wdrozonej operacji UpdateEventForOrg/UpdateBackupCycleForOrg.')
+    }
+  } else if (backupCycleDualWriteEnabled) {
+    try {
+      await updateBackupCycle(snapshot, {
+        cycleId,
+        workerLogin,
+        workerName,
+        roomId: toText(cycle?.zoneId || zone?.id) || null,
+        strefa: toText(cycle?.zoneName || zone?.name) || null,
+        pomieszczenie: toText(cycle?.location || zone?.location) || null,
+        startAt: cycle.startAt || null,
+        endAt,
+        durationSec,
+        status: 'CLOSED',
+        closeMarkedAt: endAt,
+        endReason: reason || 'CYCLE_STOP',
+        comment: cycleComment,
+        deviceId: null,
+        startEventId: workdayId,
+        endEventId: null,
+      })
+    } catch {
+      // Dual-write is best effort and should not block CLEAN flow.
+    }
   }
-
-  const activeWorkday = snapshot?.activeWorkday || {}
-  const fullGps = mergeGpsColumn(activeWorkday.gps, gpsColumnValue(gpsData))
-  await updateWorkdayForOrg({
-    orgId: snapshot.orgId,
-    workdayId,
-    workerLogin: toText(activeWorkday.workerLogin || snapshot?.worker?.login || cycle?.workerLogin) || null,
-    workerName: toText(activeWorkday.workerName || snapshot?.worker?.name || cycle?.workerName) || null,
-    utilityRoomId: null,
-    startAt: activeWorkday.startAt || cycle?.startAt || null,
-    endAt: null,
-    durationSec: null,
-    status: 'RUNNING',
-    comment: toText(commentValue || cycle?.comment || activeWorkday.comment) || null,
-    gps: fullGps,
-    updatedBy: toText(snapshot?.worker?.login) || null,
-  })
 }
 
 export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWorkdayImmediately = false }) {
