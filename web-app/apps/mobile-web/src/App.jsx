@@ -1764,7 +1764,9 @@ export default function App() {
     }
   }
 
-  const doLogout = async () => {
+  const doLogout = async (options = {}) => {
+    const showVersionPopup = options?.showVersionPopup !== false
+    const logoutNotice = txt(options?.notice)
     try {
       await logoutMobile()
     } finally {
@@ -1772,7 +1774,7 @@ export default function App() {
       setSnapshot(null)
       setView(VIEW.LOGIN)
       setSettingsOpen(false)
-      setVersionPopupOpen(true)
+      setVersionPopupOpen(showVersionPopup)
       closeScan()
       setCoordView(COORD.HOME)
       setCoordClients([])
@@ -1785,7 +1787,8 @@ export default function App() {
       setChecklistMeta({ zoneId: '', zoneName: '', clientName: '', location: '' })
       setChecklistItems([])
       setCloseCycleState(createCloseCycleState())
-      setNotice('')
+      setWorkdayClosePromptState(createWorkdayClosePromptState())
+      setNotice(logoutNotice)
     }
   }
 
@@ -1905,14 +1908,25 @@ export default function App() {
       comment: txt(comment),
       closeWorkdayImmediately: Boolean(closeMeta?.closeWorkdayNow),
     })
-    setSnapshot(result.snapshot)
     const warningText = warnings.length ? ` ${warnings.map((message) => `Uwaga: ${message}`).join(' ')}` : ''
-    setNotice(`${txt(result.message)}${warningText}`.trim())
+    const resultMessage = `${txt(result.message)}${warningText}`.trim()
+
+    if (isStopScan) {
+      closeScan()
+      await doLogout({
+        showVersionPopup: false,
+        notice: `${resultMessage} Wylogowano automatycznie po zeskanowaniu kodu STOPx.`.trim(),
+      })
+      return { deferred: false }
+    }
+
+    setSnapshot(result.snapshot)
+    setNotice(resultMessage)
     const nextView = intent === 'menu' ? VIEW.MENU : resolveWorkflowView(result.snapshot)
     setView(nextView)
     closeScan()
     return { deferred: false }
-  }, [activeCycle, checklistItems, checklistMeta?.clientName, checklistMeta?.location, checklistMeta?.zoneName, closeScan, findZoneInSnapshot, session, snapshot])
+  }, [activeCycle, checklistItems, checklistMeta?.clientName, checklistMeta?.location, checklistMeta?.zoneName, closeScan, doLogout, findZoneInSnapshot, session, snapshot])
 
   const onCloseCycleCancel = useCallback(() => {
     if (closeCycleState.pending) return
