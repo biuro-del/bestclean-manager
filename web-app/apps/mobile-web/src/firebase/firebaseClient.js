@@ -7,12 +7,12 @@ import { getStorage } from 'firebase/storage'
 import { connectorConfig } from '@dataconnect/generated'
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCq2sF92ezbmMc4cvmEKy672r9Y9PEXtYw',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'iclean2-2e798.firebaseapp.com',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'iclean2-2e798',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'iclean2-2e798.firebasestorage.app',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '841744028239',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:841744028239:web:79d2d50ca545e62006503a',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCdRVjbPWm6MueCHOwsmmbdkEKZoO6Dy-k',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'iclean-room.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'iclean-room',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'iclean-room.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '1080573912983',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:1080573912983:web:1804804661c8f8a088c6d2',
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || 'G-QX1P8GGH2Y',
 }
 
