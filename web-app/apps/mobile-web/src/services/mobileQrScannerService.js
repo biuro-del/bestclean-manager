@@ -7,7 +7,7 @@ function loadScript(src) {
       node.src = src
       node.async = true
       node.onload = () => resolve(true)
-      node.onerror = () => reject(new Error(`Nie udalo sie zaladowac skryptu: ${src}`))
+      node.onerror = () => reject(new Error(`Nie udało się załadować skryptu: ${src}`))
       document.head.appendChild(node)
     } catch (error) {
       reject(error)
@@ -29,7 +29,7 @@ async function ensureJsQr() {
 
   await jsQrLoadPromise
   if (typeof window.jsQR !== 'function') {
-    throw new Error('Twoja przegladarka nie obsluguje skanowania QR.')
+    throw new Error('Twoja przeglądarka nie obsługuje skanowania QR.')
   }
   return true
 }
@@ -121,7 +121,7 @@ export class MobileQrScanner {
 
   async getStream() {
     if (!navigator?.mediaDevices?.getUserMedia) {
-      throw new Error('Przegladarka nie obsluguje kamery.')
+      throw new Error('Przeglądarka nie obsługuje kamery.')
     }
 
     const attempts = [
@@ -139,7 +139,7 @@ export class MobileQrScanner {
       }
     }
 
-    throw lastError || new Error('Nie udalo sie uruchomic kamery.')
+    throw lastError || new Error('Nie udało się uruchomić kamery.')
   }
 
   async detectTorchSupport() {
@@ -186,7 +186,7 @@ export class MobileQrScanner {
 
   async toggleTorch() {
     if (!this.track || !this.torchCapable) {
-      this.emitStatus('Latarka niedostepna na tym urzadzeniu.')
+      this.emitStatus('Latarka niedostępna na tym urządzeniu.')
       return
     }
 
@@ -195,12 +195,12 @@ export class MobileQrScanner {
       await this.track.applyConstraints({ advanced: [{ torch: nextState }] })
       this.torchOn = nextState
       this.emitTorchState()
-      this.emitStatus(this.torchOn ? 'Latarka wlaczona.' : 'Latarka wylaczona.')
+      this.emitStatus(this.torchOn ? 'Latarka włączona.' : 'Latarka wyłączona.')
     } catch {
       this.torchOn = false
       this.torchCapable = false
       this.emitTorchState()
-      this.emitStatus('Latarka niedostepna na tym urzadzeniu.')
+      this.emitStatus('Latarka niedostępna na tym urządzeniu.')
     }
   }
 
@@ -208,7 +208,7 @@ export class MobileQrScanner {
     if (this.running) return
     if (!this.video) throw new Error('Brak elementu video dla skanera.')
 
-    this.emitStatus('Uruchamiam kamere...')
+    this.emitStatus('Uruchamiam kamerę...')
     this.running = true
 
     try {
@@ -226,7 +226,7 @@ export class MobileQrScanner {
     } catch (error) {
       this.stop()
       this.emitError(error)
-      this.emitStatus('Nie udalo sie uruchomic kamery. Sprawdz uprawnienia do aparatu.')
+      this.emitStatus('Nie udało się uruchomić kamery. Sprawdź uprawnienia do aparatu.')
     }
   }
 

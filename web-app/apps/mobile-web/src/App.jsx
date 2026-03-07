@@ -48,17 +48,18 @@ const SCHEDULE_SWIPE_THRESHOLD_PX = 45
 const MAX_REASONABLE_WORKDAY_SEC = 20 * 60 * 60
 const CHECKLIST_REASON_MAX_LEN = 300
 const CHECKLIST_ENABLED = false
+const NOTICE_AUTO_HIDE_MS = 5000
 
 const QR_FUNCTION_OPTIONS = [
-  'Sprzatanie',
+  'Sprzątanie',
   'START (czas pracy)',
   'STOP0 (czas pracy + 0 min)',
   'STOP5 (czas pracy + 5 min)',
   'STOP10 (czas pracy + 10 min)',
   'STOP15 (czas pracy + 15 min)',
-  'Podajnik: mydlo',
+  'Podajnik: mydło',
   'Podajnik: papier toaletowy',
-  'Podajnik: reczniki papierowe',
+  'Podajnik: ręczniki papierowe',
   'Podajnik: inne',
   'Indeks - Produkt',
   'Magazyn - lokalizacja magazynowa',
@@ -69,16 +70,16 @@ const QR_PLACE_OPTIONS = [
   'Aneks kuchenny',
   'WC / Prysznic',
   'Szatnia',
-  'Ciag komunikacyjny',
+  'Ciąg komunikacyjny',
   'Sala konferencyjna',
   'Recepcja',
   'Pomieszczenie gospodarcze',
   'Showroom',
-  'Pokoj odpoczynku',
+  'Pokój odpoczynku',
   'Piwnica',
   'Magazyn',
   'Serwerownia',
-  'Kotlownia',
+  'Kotłownia',
   'Archiwum',
   'Inne',
 ]
@@ -351,12 +352,12 @@ function parseChecklistLoadError(error) {
   if (isPermissionDeniedError(error)) {
     return {
       kind: 'permission',
-      message: 'Brak uprawnien do checklisty tej strefy.',
+      message: 'Brak uprawnień do checklisty tej strefy.',
     }
   }
   return {
     kind: 'general',
-    message: parseErrorMessage(error, 'Nie udalo sie pobrac checklisty strefy.'),
+    message: parseErrorMessage(error, 'Nie udało się pobrać checklisty strefy.'),
   }
 }
 
@@ -400,16 +401,19 @@ function hasManualQrAccess(workerRoleValue, sessionRoleValue) {
 }
 
 function isSameLocalDay(leftIso, rightIso = new Date().toISOString()) {
-  const left = parseIso(leftIso)
-  const right = parseIso(rightIso)
-  if (!left || !right) return false
-  const leftDate = new Date(left)
-  const rightDate = new Date(right)
-  return (
-    leftDate.getFullYear() === rightDate.getFullYear() &&
-    leftDate.getMonth() === rightDate.getMonth() &&
-    leftDate.getDate() === rightDate.getDate()
-  )
+  const leftKey = localDayKey(leftIso)
+  const rightKey = localDayKey(rightIso)
+  return Boolean(leftKey && rightKey && leftKey === rightKey)
+}
+
+function localDayKey(value = new Date().toISOString()) {
+  const iso = parseIso(value)
+  if (!iso) return ''
+  const date = new Date(iso)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function isWorkdayOpen(workday) {
@@ -627,7 +631,7 @@ function LoginView({ pending, error, onSubmit }) {
       <div className="box col">
         <label className="muted">Login</label>
         <input className="input" value={login} onChange={(event) => setLogin(event.target.value)} />
-        <label className="muted">Haslo</label>
+        <label className="muted">Hasło</label>
         <input className="input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
         {error ? <div className="error-inline">{error}</div> : null}
         <button className="btn primary" type="button" disabled={pending} onClick={() => onSubmit({ login, password })}>
@@ -728,7 +732,7 @@ function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
       onStatus: (message) => setStatus(String(message || '')),
       onTorchState: (nextState) => setTorchState(nextState || { supported: false, enabled: false }),
       onError: (error) => {
-        setCameraError(txt(error?.message || 'Nie udalo sie uruchomic kamery.'))
+        setCameraError(txt(error?.message || 'Nie udało się uruchomić kamery.'))
         if (allowManualEntry) {
           setManualOpen(true)
         }
@@ -744,7 +748,7 @@ function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
 
     scannerRef.current = scanner
     scanner.start().catch((error) => {
-      setCameraError(txt(error?.message || 'Nie udalo sie uruchomic kamery.'))
+      setCameraError(txt(error?.message || 'Nie udało się uruchomić kamery.'))
       if (allowManualEntry) {
         setManualOpen(true)
       }
@@ -798,7 +802,7 @@ function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
         <div className="modal-header">
           <div className="modal-title">{scanState.title || 'Skanuj QR'}</div>
           <button className="link-btn" type="button" onClick={closeWithStop}>
-            Wroc
+            Wróć
           </button>
         </div>
         <div className="modal-body col scan-modal-body">
@@ -812,7 +816,7 @@ function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
               onClick={handleTorchToggle}
               disabled={!torchState.supported}
             >
-              {torchState.supported ? `Latarka: ${torchState.enabled ? 'ON' : 'OFF'}` : 'Latarka niedostepna'}
+              {torchState.supported ? `Latarka: ${torchState.enabled ? 'ON' : 'OFF'}` : 'Latarka niedostępna'}
             </button>
             {allowManualEntry ? (
               <button className="btn secondary" type="button" onClick={() => setManualOpen((prev) => !prev)}>
@@ -842,7 +846,7 @@ function ChecklistSection({ title, items, onToggle }) {
     return (
       <div className="box">
         <div className="tile-label">{title}</div>
-        <div className="muted">Brak zadan.</div>
+        <div className="muted">Brak zadań.</div>
       </div>
     )
   }
@@ -879,7 +883,7 @@ function CloseCycleModal({
   const unresolved = showChecklist ? (checklistItems || []).filter((item) => !item.checked) : []
   const mode = txt(state.mode) === 'workday-close' ? 'workday-close' : 'zone-close'
   const isWorkdayClose = mode === 'workday-close'
-  const title = isWorkdayClose ? 'Zakoncz dzien' : 'Zamknij strefe'
+  const title = isWorkdayClose ? 'Zakończ dzień' : 'Zamknij strefę'
   const stopLabel = txt(state?.targetZone?.name || state?.targetZone?.id) || '-'
 
   return (
@@ -888,7 +892,7 @@ function CloseCycleModal({
         <div className="modal-header">
           <div className="modal-title">{title}</div>
           <button className="link-btn" type="button" onClick={onCancel} disabled={state.pending}>
-            Wroc
+            Wróć
           </button>
         </div>
         <div className="modal-body col close-zone-body">
@@ -939,7 +943,7 @@ function CloseCycleModal({
 
           <div className="box col">
             <label className="muted">
-              {isWorkdayClose ? 'Komentarz zakonczenia dnia (opcjonalnie)' : 'Komentarz zamkniecia strefy (opcjonalnie)'}
+              {isWorkdayClose ? 'Komentarz zakończenia dnia (opcjonalnie)' : 'Komentarz zamknięcia strefy (opcjonalnie)'}
             </label>
             <textarea
               className="textarea"
@@ -954,7 +958,7 @@ function CloseCycleModal({
           {state.error ? <div className="error-inline">{state.error}</div> : null}
 
           <button className="btn primary" type="button" onClick={onConfirm} disabled={state.pending}>
-            {state.pending ? 'Zapisywanie...' : isWorkdayClose ? 'Potwierdz zakonczenie dnia' : 'Potwierdz zamkniecie'}
+            {state.pending ? 'Zapisywanie...' : isWorkdayClose ? 'Potwierdź zakończenie dnia' : 'Potwierdź zamknięcie'}
           </button>
         </div>
       </div>
@@ -970,11 +974,11 @@ function WorkdayClosePromptModal({ open, pending, error, onChoose, onCancel }) {
         <div className="modal-header">
           <div className="modal-title">Zakonczenie dnia</div>
           <button className="link-btn" type="button" onClick={onCancel} disabled={pending}>
-            Wroc
+            Wróć
           </button>
         </div>
         <div className="modal-body col">
-          <div className="muted">Czy zakonczyc dzien pracy teraz?</div>
+          <div className="muted">Czy zakończyć dzień pracy teraz?</div>
           <button className="btn primary" type="button" onClick={() => onChoose(true)} disabled={pending}>
             Tak
           </button>
@@ -1033,13 +1037,13 @@ function CoordinatorAuditStart({ onNext, onBack }) {
       <div className="title-small">Wykonaj audyt</div>
       <div className="box">
         <div className="tile-label">Start audytu</div>
-        <div className="muted">Audyt jest dostepny tylko, gdy czas pracy ma status RUNNING dzisiaj.</div>
+        <div className="muted">Audyt jest dostępny tylko, gdy czas pracy ma status RUNNING dzisiaj.</div>
       </div>
       <button className="btn primary" type="button" onClick={onNext}>
         Dalej
       </button>
       <button className="btn secondary" type="button" onClick={onBack}>
-        Wroc
+        Wróć
       </button>
     </section>
   )
@@ -1050,7 +1054,7 @@ function CoordinatorAuditScan({ objectTimerText, auditTimerText, onScanZone, onE
     <section className="card col">
       <div className="title-small">Wykonaj audyt</div>
       <div className="box">
-        <div className="tile-label">Skanuj audytowana strefe</div>
+        <div className="tile-label">Skanuj audytowaną strefę</div>
       </div>
       <button className="btn primary" type="button" onClick={onScanZone}>
         Skanuj QR strefy
@@ -1066,7 +1070,7 @@ function CoordinatorAuditScan({ objectTimerText, auditTimerText, onScanZone, onE
         </div>
       </div>
       <button className="btn secondary" type="button" onClick={onBack}>
-        Wroc
+        Wróć
       </button>
       <button className="btn secondary" type="button" onClick={onEnd}>
         Zakoncz audyt
@@ -1099,7 +1103,7 @@ function CoordinatorAuditForm({ zoneId, cleanValue, comment, onPick, onComment, 
         Wyslij audyt
       </button>
       <button className="btn secondary" type="button" onClick={onBack}>
-        Wroc
+        Wróć
       </button>
     </section>
   )
@@ -1161,11 +1165,11 @@ function CoordinatorEditQr({
         </select>
 
         <label className="muted">Lokalizacja strefy</label>
-        <input className="input" value={form.location} onChange={(event) => onFormChange('location', event.target.value)} placeholder="Wpisz lokalizacje..." disabled={loading} />
+        <input className="input" value={form.location} onChange={(event) => onFormChange('location', event.target.value)} placeholder="Wpisz lokalizację..." disabled={loading} />
       </div>
 
       <button className="btn secondary" type="button" onClick={onBack}>
-        Wroc
+        Wróć
       </button>
     </section>
   )
@@ -1227,6 +1231,15 @@ export default function App() {
 
   const scheduleFingerprintRef = useRef('')
   const scheduleTouchStartRef = useRef(null)
+  const lastUserActivityMsRef = useRef(Date.now())
+  const lastUserActivityDayRef = useRef(localDayKey(new Date().toISOString()))
+  const inactivityMidnightHandledRef = useRef(false)
+
+  const markUserActivity = useCallback(() => {
+    lastUserActivityMsRef.current = Date.now()
+    lastUserActivityDayRef.current = localDayKey(new Date().toISOString())
+    inactivityMidnightHandledRef.current = false
+  }, [])
 
   const resetCloseCycleState = useCallback(() => {
     setCloseCycleState(createCloseCycleState())
@@ -1273,7 +1286,7 @@ export default function App() {
     setCloseCycleState(createCloseCycleState())
     setWorkdayClosePromptState(createWorkdayClosePromptState())
     scheduleFingerprintRef.current = ''
-    setNotice(txt(message) || 'Sesja wygasla. Zaloguj sie ponownie.')
+    setNotice(txt(message) || 'Sesja wygasła. Zaloguj się ponownie.')
   }, [resetCoordinatorAuditState])
 
   const applySchedulePayload = useCallback((nextPayload, options = {}) => {
@@ -1330,10 +1343,10 @@ export default function App() {
       applySchedulePayload(next, { fromAutoSync: Boolean(options.fromAutoSync) })
     } catch (error) {
       if (isUnauthenticatedError(error)) {
-        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        forceLoginWithMessage('Sesja wygasła. Zaloguj się ponownie.')
         return
       }
-      setScheduleError(parseErrorMessage(error, 'Nie udalo sie pobrac grafiku.'))
+      setScheduleError(parseErrorMessage(error, 'Nie udało się pobrać grafiku.'))
     } finally {
       if (!options.silent) setSchedulePending(false)
     }
@@ -1347,12 +1360,32 @@ export default function App() {
     if (!session?.token) return
     refresh(session).catch((error) => {
       if (isUnauthenticatedError(error)) {
-        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        forceLoginWithMessage('Sesja wygasła. Zaloguj się ponownie.')
         return
       }
-      setNotice(parseErrorMessage(error, 'Nie udalo sie pobrac danych.'))
+      setNotice(parseErrorMessage(error, 'Nie udało się pobrać danych.'))
     })
   }, [forceLoginWithMessage, refresh, session])
+
+  useEffect(() => {
+    if (!session?.token) {
+      inactivityMidnightHandledRef.current = false
+      return
+    }
+    markUserActivity()
+    const onUserActivity = () => markUserActivity()
+    const passiveOptions = { passive: true }
+    window.addEventListener('pointerdown', onUserActivity, passiveOptions)
+    window.addEventListener('touchstart', onUserActivity, passiveOptions)
+    window.addEventListener('keydown', onUserActivity)
+    window.addEventListener('focus', onUserActivity)
+    return () => {
+      window.removeEventListener('pointerdown', onUserActivity, passiveOptions)
+      window.removeEventListener('touchstart', onUserActivity, passiveOptions)
+      window.removeEventListener('keydown', onUserActivity)
+      window.removeEventListener('focus', onUserActivity)
+    }
+  }, [markUserActivity, session?.token])
 
   useEffect(() => {
     if (!session?.token) return
@@ -1366,7 +1399,7 @@ export default function App() {
       () =>
         refresh(session, { silent: true }).catch((error) => {
           if (isUnauthenticatedError(error)) {
-            forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+            forceLoginWithMessage('Sesja wygasła. Zaloguj się ponownie.')
           }
         }),
       30000,
@@ -1391,6 +1424,18 @@ export default function App() {
   useEffect(() => {
     if (!refreshPending) setRefreshNoticeHidden(false)
   }, [refreshPending])
+
+  useEffect(() => {
+    if (!notice) return
+    const timer = setTimeout(() => setNotice(''), NOTICE_AUTO_HIDE_MS)
+    return () => clearTimeout(timer)
+  }, [notice])
+
+  useEffect(() => {
+    if (!refreshPending || refreshNoticeHidden) return
+    const timer = setTimeout(() => setRefreshNoticeHidden(true), NOTICE_AUTO_HIDE_MS)
+    return () => clearTimeout(timer)
+  }, [refreshNoticeHidden, refreshPending])
 
   const nowIso = useMemo(() => new Date(tick).toISOString(), [tick])
   const activeWorkday = snapshot?.activeWorkday
@@ -1444,7 +1489,7 @@ export default function App() {
     const refreshEndingState = () =>
       refresh(session, { silent: true }).catch((error) => {
         if (isUnauthenticatedError(error)) {
-          forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+          forceLoginWithMessage('Sesja wygasła. Zaloguj się ponownie.')
         }
       })
 
@@ -1672,7 +1717,7 @@ export default function App() {
 
   const openCoordinatorPanel = useCallback(() => {
     if (!coordinatorAccess) {
-      setNotice('Nie masz dostepu do modulu koordynatora.')
+      setNotice('Nie masz dostępu do modułu koordynatora.')
       return
     }
     setCoordView(COORD.HOME)
@@ -1704,7 +1749,7 @@ export default function App() {
       setCoordZones(context.zones)
     } catch (error) {
       if (isUnauthenticatedError(error)) {
-        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        forceLoginWithMessage('Sesja wygasła. Zaloguj się ponownie.')
         return
       }
       throw error
@@ -1715,7 +1760,7 @@ export default function App() {
 
   const openCoordinatorEdit = useCallback(async () => {
     if (!coordinatorAccess) {
-      setNotice('Nie masz dostepu do modulu koordynatora.')
+      setNotice('Nie masz dostępu do modułu koordynatora.')
       return
     }
     setCoordView(COORD.EDIT_QR)
@@ -1729,13 +1774,13 @@ export default function App() {
     try {
       await ensureCoordinatorEditContext()
     } catch (error) {
-      setNotice(parseErrorMessage(error, 'Nie udalo sie wczytac danych koordynatora.'))
+      setNotice(parseErrorMessage(error, 'Nie udało się wczytać danych koordynatora.'))
     }
   }, [coordinatorAccess, ensureCoordinatorEditContext])
 
   const openCoordinatorAuditStart = useCallback(() => {
     if (!coordinatorAccess) {
-      setNotice('Nie masz dostepu do modulu koordynatora.')
+      setNotice('Nie masz dostępu do modułu koordynatora.')
       return
     }
     resetCoordinatorAuditState()
@@ -1751,8 +1796,8 @@ export default function App() {
     }
 
     const message = state.stale
-      ? 'Masz otwarty dzien z poprzedniego dnia. Zeskanuj START dzisiaj, aby rozpoczac prace.'
-      : 'Brak START dzisiaj. Zeskanuj START obiektu, aby rozpoczac prace.'
+      ? 'Masz otwarty dzień z poprzedniego dnia. Zeskanuj START dzisiaj, aby rozpocząć pracę.'
+      : 'Brak START dzisiaj. Zeskanuj START obiektu, aby rozpocząć pracę.'
     setNotice(message)
     openScan('coordinator-audit-start', 'START obiektu (audyt)', 'Zeskanuj kod START obiektu.')
   }, [coordAuditStartedAt, ensureRunningToday, nowIso])
@@ -1777,10 +1822,10 @@ export default function App() {
       setNotice('Zapisano audyt strefy.')
     } catch (error) {
       if (isUnauthenticatedError(error)) {
-        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        forceLoginWithMessage('Sesja wygasła. Zaloguj się ponownie.')
         return
       }
-      setNotice(parseErrorMessage(error, 'Nie udalo sie zapisac audytu.'))
+      setNotice(parseErrorMessage(error, 'Nie udało się zapisać audytu.'))
     } finally {
       setCoordBusy(false)
     }
@@ -1802,10 +1847,10 @@ export default function App() {
       setNotice('Zapisano.')
     } catch (error) {
       if (isUnauthenticatedError(error)) {
-        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        forceLoginWithMessage('Sesja wygasła. Zaloguj się ponownie.')
         return
       }
-      setNotice(parseErrorMessage(error, 'Blad zapisu strefy.'))
+      setNotice(parseErrorMessage(error, 'Błąd zapisu strefy.'))
     } finally {
       setCoordBusy(false)
     }
@@ -1823,7 +1868,7 @@ export default function App() {
       setSummaryMonth(monthNow())
       await refresh(nextSession)
     } catch (error) {
-      setLoginError(parseErrorMessage(error, 'Blad logowania.'))
+      setLoginError(parseErrorMessage(error, 'Błąd logowania.'))
     } finally {
       setLoginPending(false)
     }
@@ -1856,6 +1901,23 @@ export default function App() {
       setNotice(logoutNotice)
     }
   }
+
+  useEffect(() => {
+    if (!session?.token) return
+    const nowDayKey = localDayKey(new Date(tick).toISOString())
+    const lastActivityDayKey = txt(lastUserActivityDayRef.current)
+    if (!nowDayKey || !lastActivityDayKey || nowDayKey === lastActivityDayKey) return
+    if (inactivityMidnightHandledRef.current) return
+
+    const inactiveMs = Date.now() - Number(lastUserActivityMsRef.current || Date.now())
+    if (!Number.isFinite(inactiveMs) || inactiveMs < 1000) return
+
+    inactivityMidnightHandledRef.current = true
+    doLogout({
+      showVersionPopup: false,
+      notice: 'Wylogowano automatycznie o północy z powodu braku aktywności.',
+    }).catch(() => null)
+  }, [doLogout, session?.token, tick])
 
   const findZoneInSnapshot = useCallback((targetSnapshot, scannedCode) => {
     const normalizedCode = txt(scannedCode)
@@ -1892,7 +1954,7 @@ export default function App() {
 
     if (!scannedZone) {
       if (!(snapshotForScan?.zones || []).length) {
-        throw new Error('Brak listy stref dla tej sesji. Odswiez dane lub zaloguj sie ponownie.')
+        throw new Error('Brak listy stref dla tej sesji. Odśwież dane lub zaloguj się ponownie.')
       }
       throw new Error('Nie znaleziono kodu QR w bazie stref.')
     }
@@ -1945,7 +2007,7 @@ export default function App() {
           })
         } catch (error) {
           const saveMessage = isPermissionDeniedError(error)
-            ? 'Brak uprawnien do zapisu checklisty strefy.'
+            ? 'Brak uprawnień do zapisu checklisty strefy.'
             : parseErrorMessage(error, 'Nie zapisano checklisty strefy.')
           warnings.push(saveMessage)
         }
@@ -1961,7 +2023,7 @@ export default function App() {
             closeAttachmentsMeta: uploadedAttachments,
           })
         } catch (error) {
-          warnings.push(parseErrorMessage(error, 'Nie zapisano metadanych zamkniecia dnia.'))
+          warnings.push(parseErrorMessage(error, 'Nie zapisano metadanych zamknięcia dnia.'))
         }
       }
     }
@@ -1981,7 +2043,7 @@ export default function App() {
       closeScan()
       const logoutReason = isStopScan
         ? 'Wylogowano automatycznie po zeskanowaniu kodu STOPx.'
-        : 'Wylogowano automatycznie po zakonczeniu dnia pracy.'
+        : 'Wylogowano automatycznie po zakończeniu dnia pracy.'
       await doLogout({
         showVersionPopup: false,
         notice: `${resultMessage} ${logoutReason}`.trim(),
@@ -2008,7 +2070,7 @@ export default function App() {
     if (checklistEnabled && missingReasons.length) {
       setCloseCycleState((prev) => ({
         ...prev,
-        error: 'Uzupelnij przyczyne niewykonania dla wszystkich nieodhaczonych zadan.',
+        error: 'Uzupełnij przyczynę niewykonania dla wszystkich nieodhaczonych zadań.',
       }))
       return
     }
@@ -2048,12 +2110,12 @@ export default function App() {
       }
     } catch (error) {
       if (isUnauthenticatedError(error)) {
-        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        forceLoginWithMessage('Sesja wygasła. Zaloguj się ponownie.')
         return
       }
       const fallback = closeCycleState.mode === 'workday-close'
-        ? 'Nie udalo sie zakonczyc dnia.'
-        : 'Nie udalo sie zamknac strefy.'
+        ? 'Nie udało się zakończyć dnia.'
+        : 'Nie udało się zamknąć strefy.'
       setCloseCycleState((prev) => ({ ...prev, pending: false, error: parseErrorMessage(error, fallback) }))
     }
   }, [checklistItems, closeCycleState, forceLoginWithMessage, processWorkflowScan, resetCloseCycleState])
@@ -2085,13 +2147,13 @@ export default function App() {
       }
     } catch (error) {
       if (isUnauthenticatedError(error)) {
-        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        forceLoginWithMessage('Sesja wygasła. Zaloguj się ponownie.')
         return
       }
       setWorkdayClosePromptState((prev) => ({
         ...prev,
         pending: false,
-        error: parseErrorMessage(error, 'Nie udalo sie zamknac dnia.'),
+        error: parseErrorMessage(error, 'Nie udało się zamknąć dnia.'),
       }))
     }
   }, [forceLoginWithMessage, processWorkflowScan, resetWorkdayClosePromptState, workdayClosePromptState])
@@ -2156,10 +2218,10 @@ export default function App() {
       await processWorkflowScan({ code, comment, intent })
     } catch (error) {
       if (isUnauthenticatedError(error)) {
-        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        forceLoginWithMessage('Sesja wygasła. Zaloguj się ponownie.')
         return
       }
-      setScanState((prev) => ({ ...prev, pending: false, error: parseErrorMessage(error, 'Nie udalo sie przetworzyc skanu.') }))
+      setScanState((prev) => ({ ...prev, pending: false, error: parseErrorMessage(error, 'Nie udało się przetworzyć skanu.') }))
     }
   }
 
@@ -2178,7 +2240,7 @@ export default function App() {
     }
 
     if (up(activeWorkday?.status) !== 'RUNNING') {
-      setNotice('Pauza jest dostepna tylko podczas aktywnego dnia (RUNNING).')
+      setNotice('Pauza jest dostępna tylko podczas aktywnego dnia (RUNNING).')
       return
     }
 
@@ -2190,10 +2252,10 @@ export default function App() {
       setView(VIEW.PAUSE)
     } catch (error) {
       if (isUnauthenticatedError(error)) {
-        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        forceLoginWithMessage('Sesja wygasła. Zaloguj się ponownie.')
         return
       }
-      setNotice(parseErrorMessage(error, 'Nie udalo sie rozpoczac przerwy.'))
+      setNotice(parseErrorMessage(error, 'Nie udało się rozpocząć przerwy.'))
     } finally {
       setOperationPending(false)
     }
@@ -2201,13 +2263,13 @@ export default function App() {
 
   const doResumeFromPause = useCallback(() => {
     if (!session?.token || !snapshot) return
-    openScan('workflow', 'Wroc do pracy', 'Zeskanuj QR CLEAN, zlecenia indywidualnego lub strefy specjalnej.')
+    openScan('workflow', 'Wróć do pracy', 'Zeskanuj QR CLEAN, zlecenia indywidualnego lub strefy specjalnej.')
   }, [session?.token, snapshot, openScan])
 
   const doTopAction = () => {
     if (!isWorkdayOpen(activeWorkday)) {
       setView(VIEW.START)
-      openScan('workflow', 'Rozpocznij prace', 'Zeskanuj kod START lub zlecenia indywidualnego.')
+      openScan('workflow', 'Rozpocznij pracę', 'Zeskanuj kod START lub zlecenia indywidualnego.')
       return
     }
     if (up(activeWorkday?.status) === 'ENDING') {
@@ -2230,10 +2292,10 @@ export default function App() {
       setView(resolveWorkflowView(result.snapshot))
     } catch (error) {
       if (isUnauthenticatedError(error)) {
-        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        forceLoginWithMessage('Sesja wygasła. Zaloguj się ponownie.')
         return
       }
-      setNotice(parseErrorMessage(error, 'Nie udalo sie zakonczyc dnia pracy.'))
+      setNotice(parseErrorMessage(error, 'Nie udało się zakończyć dnia pracy.'))
     } finally {
       setOperationPending(false)
     }
@@ -2260,8 +2322,8 @@ export default function App() {
             topActionIsStart={topActionIsStart}
           />
           <div className="tile-grid--home">
-            <button className="tile tile--success" type="button" onClick={() => setView(resolveWorkflowView(snapshot))}><span className="tile-icon"><CleaningIcon /></span><span className="tile-label">Sprzatanie</span><span className="tile-sub">Skanuj strefy</span></button>
-            <button className="tile" type="button" onClick={() => setView(VIEW.SCHEDULE)}><span className="tile-icon"><CalendarIcon /></span><span className="tile-label">Grafik</span><span className="tile-sub">Tydzien</span></button>
+            <button className="tile tile--success" type="button" onClick={() => setView(resolveWorkflowView(snapshot))}><span className="tile-icon"><CleaningIcon /></span><span className="tile-label">Sprzątanie</span><span className="tile-sub">Skanuj strefy</span></button>
+            <button className="tile" type="button" onClick={() => setView(VIEW.SCHEDULE)}><span className="tile-icon"><CalendarIcon /></span><span className="tile-label">Grafik</span><span className="tile-sub">Tydzień</span></button>
             <button className="tile" type="button" onClick={() => setView(VIEW.SUMMARY)}><span className="tile-icon"><ClockIcon /></span><span className="tile-label">Czas pracy</span><span className="tile-sub">Podsumowanie</span></button>
             <button className="tile" type="button" onClick={openCoordinatorPanel}><span className="tile-icon"><UserIcon /></span><span className="tile-label">Koordynator</span><span className="tile-sub">Audyt / QR</span></button>
           </div>
@@ -2272,8 +2334,8 @@ export default function App() {
     if (view === VIEW.WORKLOG) {
       return (
         <section className="card col">
-          <div className="list-month-header"><button className="link-btn" type="button" onClick={() => setView(VIEW.MENU)}>Wroc</button><strong>Lista zdarzen</strong><button className="link-btn" type="button" onClick={() => setWorklogMonth(monthNow())}>Dzisiaj</button></div>
-          <div className="list-month-header"><button className="link-btn" type="button" onClick={() => setWorklogMonth((prev) => shiftMonth(prev, -1))}>Poprzedni</button><span>{monthLabel(worklogMonth)}</span><button className="link-btn" type="button" onClick={() => setWorklogMonth((prev) => shiftMonth(prev, 1))}>Nastepny</button></div>
+          <div className="list-month-header"><button className="link-btn" type="button" onClick={() => setView(VIEW.MENU)}>Wróć</button><strong>Lista zdarzeń</strong><button className="link-btn" type="button" onClick={() => setWorklogMonth(monthNow())}>Dzisiaj</button></div>
+          <div className="list-month-header"><button className="link-btn" type="button" onClick={() => setWorklogMonth((prev) => shiftMonth(prev, -1))}>Poprzedni</button><span>{monthLabel(worklogMonth)}</span><button className="link-btn" type="button" onClick={() => setWorklogMonth((prev) => shiftMonth(prev, 1))}>Następny</button></div>
           {worklogDays.length ? worklogDays.map((day) => (
             <div key={day.dateKey} className="day-group">
               <div className="day-title"><span className="day-number">{datePart(day.dateKey)}</span><span className="day-week">{weekdayLabel(day.dateKey)}</span></div>
@@ -2282,7 +2344,7 @@ export default function App() {
                 return <div className={`event-card ${isStop ? 'event-card--stop' : 'event-card--start'}`} key={eventRow.id}><span className="event-badge">{isStop ? 'Stop' : 'Start'}</span><span>{formatTime(eventRow.at)}</span></div>
               })}
             </div>
-          )) : <div className="muted">Brak zdarzen w tym miesiacu.</div>}
+          )) : <div className="muted">Brak zdarzeń w tym miesiącu.</div>}
         </section>
       )
     }
@@ -2290,13 +2352,13 @@ export default function App() {
     if (view === VIEW.SUMMARY) {
       return (
         <section className="card col">
-          <div className="list-month-header"><button className="link-btn" type="button" onClick={() => setView(VIEW.MENU)}>Wroc</button><strong>Podsumowanie czasu pracy</strong><button className="link-btn" type="button" onClick={() => setSummaryMonth(monthNow())}>Dzisiaj</button></div>
-          <div className="list-month-header"><button className="link-btn" type="button" onClick={() => setSummaryMonth((prev) => shiftMonth(prev, -1))}>Poprzedni</button><span>{monthLabel(summaryMonth)}</span><button className="link-btn" type="button" onClick={() => setSummaryMonth((prev) => shiftMonth(prev, 1))}>Nastepny</button></div>
+          <div className="list-month-header"><button className="link-btn" type="button" onClick={() => setView(VIEW.MENU)}>Wróć</button><strong>Podsumowanie czasu pracy</strong><button className="link-btn" type="button" onClick={() => setSummaryMonth(monthNow())}>Dzisiaj</button></div>
+          <div className="list-month-header"><button className="link-btn" type="button" onClick={() => setSummaryMonth((prev) => shiftMonth(prev, -1))}>Poprzedni</button><span>{monthLabel(summaryMonth)}</span><button className="link-btn" type="button" onClick={() => setSummaryMonth((prev) => shiftMonth(prev, 1))}>Następny</button></div>
           <div className="summary-row"><span>Zaplanowany czas pracy</span><span className="summary-value">0h 00m</span></div>
           <div className="summary-row"><span>Czas pracy</span><span className="summary-value">{hm(summaryData.monthSeconds)}</span></div>
           <div className="summary-row"><span>Nadgodziny</span><span className="summary-value">0h 00m</span></div>
           <div className="summary-row"><span>Czas nocny</span><span className="summary-value">0h 00m</span></div>
-          <button className="btn secondary" type="button" onClick={() => setView(VIEW.SUMMARY_DETAILS)}>Szczegoly dzienne</button>
+          <button className="btn secondary" type="button" onClick={() => setView(VIEW.SUMMARY_DETAILS)}>Szczegóły dzienne</button>
         </section>
       )
     }
@@ -2304,11 +2366,11 @@ export default function App() {
     if (view === VIEW.SUMMARY_DETAILS) {
       return (
         <section className="card col">
-          <div className="list-month-header"><button className="link-btn" type="button" onClick={() => setView(VIEW.SUMMARY)}>Wroc</button><strong>Szczegoly dzienne</strong><button className="link-btn" type="button" onClick={() => setSummaryMonth(monthNow())}>Dzisiaj</button></div>
-          <div className="list-month-header"><button className="link-btn" type="button" onClick={() => setSummaryMonth((prev) => shiftMonth(prev, -1))}>Poprzedni</button><span>{monthLabel(summaryMonth)}</span><button className="link-btn" type="button" onClick={() => setSummaryMonth((prev) => shiftMonth(prev, 1))}>Nastepny</button></div>
+          <div className="list-month-header"><button className="link-btn" type="button" onClick={() => setView(VIEW.SUMMARY)}>Wróć</button><strong>Szczegóły dzienne</strong><button className="link-btn" type="button" onClick={() => setSummaryMonth(monthNow())}>Dzisiaj</button></div>
+          <div className="list-month-header"><button className="link-btn" type="button" onClick={() => setSummaryMonth((prev) => shiftMonth(prev, -1))}>Poprzedni</button><span>{monthLabel(summaryMonth)}</span><button className="link-btn" type="button" onClick={() => setSummaryMonth((prev) => shiftMonth(prev, 1))}>Następny</button></div>
           {summaryData.days.length ? summaryData.days.map((day) => (
             <div className="summary-row" key={day.dateKey}><span>{datePart(day.dateKey)} {weekdayLabel(day.dateKey)}</span><span className="summary-value">{hm(day.totalSec)}</span></div>
-          )) : <div className="muted">Brak danych dla wybranego miesiaca.</div>}
+          )) : <div className="muted">Brak danych dla wybranego miesiąca.</div>}
         </section>
       )
     }
@@ -2318,7 +2380,7 @@ export default function App() {
         <section className="card col">
           <div className="list-month-header">
             <button className="link-btn" type="button" onClick={() => setView(VIEW.MENU)}>
-              Wroc
+              Wróć
             </button>
             <strong>Grafik pracy</strong>
             <button
@@ -2327,7 +2389,7 @@ export default function App() {
               onClick={() => refreshSchedule(session, { silent: false, fromAutoSync: false })}
               disabled={schedulePending}
             >
-              {schedulePending ? 'Odswiezanie...' : 'Odswiez'}
+              {schedulePending ? 'Odświeżanie...' : 'Odśwież'}
             </button>
           </div>
 
@@ -2340,11 +2402,11 @@ export default function App() {
           <div className="schedule-sync-meta">Ostatnia synchronizacja: {formatDateTime(schedulePayload.sync?.fetchedAtIso)}</div>
 
           {!schedulePending && !scheduleError && !schedulePayload.matched ? (
-            <div className="muted">Nie znaleziono wpisow grafiku dla tego konta.</div>
+            <div className="muted">Nie znaleziono wpisów grafiku dla tego konta.</div>
           ) : null}
 
           {!schedulePending && !scheduleError && schedulePayload.matched && !scheduleSelectedDay ? (
-            <div className="muted">Brak dni grafiku do wyswietlenia.</div>
+            <div className="muted">Brak dni grafiku do wyświetlenia.</div>
           ) : null}
 
           {scheduleSelectedDay ? (
@@ -2384,7 +2446,7 @@ export default function App() {
                 })}
               </div>
 
-              <div className="muted">Przesun palcem w lewo lub prawo, aby zmienic dzien.</div>
+              <div className="muted">Przesuń palcem w lewo lub prawo, aby zmienić dzień.</div>
             </>
           ) : null}
         </section>
@@ -2396,9 +2458,9 @@ export default function App() {
         return (
           <section className="card col">
             <div className="title-small">Strefa koordynatora</div>
-            <div className="muted">Nie masz dostepu do modulu.</div>
+            <div className="muted">Nie masz dostępu do modułu.</div>
             <button className="btn secondary" type="button" onClick={() => setView(VIEW.MENU)}>
-              Wroc
+              Wróć
             </button>
           </section>
         )
@@ -2418,7 +2480,7 @@ export default function App() {
           <CoordinatorAuditScan
             objectTimerText={coordObjectCounter}
             auditTimerText={coordAuditCounter}
-            onScanZone={() => openScan('coordinator-audit-zone', 'Skanuj strefe audytu', 'Zeskanuj kod QR strefy do audytu.')}
+            onScanZone={() => openScan('coordinator-audit-zone', 'Skanuj strefę audytu', 'Zeskanuj kod QR strefy do audytu.')}
             onEnd={() => {
               resetCoordinatorAuditState()
               setCoordView(COORD.HOME)
@@ -2481,7 +2543,7 @@ export default function App() {
             <div className="scan-title">Pauza</div>
             {pauseOpen ? (
               <div className="scan-sub">
-                Trwajaca przerwa: <strong>{pauseTimer}</strong>
+                Trwająca przerwa: <strong>{pauseTimer}</strong>
                 <br />
                 Czas netto dnia: <strong>{workdayTimer}</strong>
               </div>
@@ -2491,11 +2553,11 @@ export default function App() {
           </div>
           {pauseOpen ? (
             <button className="btn secondary btn-xl" type="button" onClick={doResumeFromPause} disabled={globalPending}>
-              Skanuj QR, aby wrocic do pracy
+              Skanuj QR, aby wrócić do pracy
             </button>
           ) : (
             <button className="btn secondary btn-xl" type="button" onClick={() => setView(resolveWorkflowView(snapshot))}>
-              Wroc do pracy
+              Wróć do pracy
             </button>
           )}
         </section>
@@ -2515,7 +2577,7 @@ export default function App() {
           />
           <button className="btn action btn-xl" type="button" onClick={() => openScan('workflow', 'Skanuj QR', 'Wpisz kod QR / roomId.')}>Skanuj QR</button>
           <div className="scan-glass checklist-wrap">
-            <div className="scan-title">{view === VIEW.START ? 'Rozpocznij prace' : view === VIEW.SCAN ? 'Skanuj strefe' : view === VIEW.CLEAN ? 'W trakcie sprzatania' : 'Konczenie dnia'}</div>
+            <div className="scan-title">{view === VIEW.START ? 'Rozpocznij pracę' : view === VIEW.SCAN ? 'Skanuj strefę' : view === VIEW.CLEAN ? 'W trakcie sprzątania' : 'Kończenie dnia'}</div>
             {view === VIEW.CLEAN ? (
               <div className="scan-sub">
                 Klient: {txt(activeCycle?.clientName || checklistMeta?.clientName) || '-'}
@@ -2527,25 +2589,25 @@ export default function App() {
                 Czas strefy: {cycleTimer}
               </div>
             ) : null}
-            {view === VIEW.END ? <div className="scan-sub">Auto-zamkniecie za: {endingLeft}</div> : null}
-            {(view === VIEW.START || view === VIEW.SCAN) ? <div className="scan-sub">Skanuj kod QR, aby przejsc dalej.</div> : null}
+            {view === VIEW.END ? <div className="scan-sub">Auto-zamknięcie za: {endingLeft}</div> : null}
+            {(view === VIEW.START || view === VIEW.SCAN) ? <div className="scan-sub">Skanuj kod QR, aby przejść dalej.</div> : null}
           </div>
           {CHECKLIST_ENABLED && view === VIEW.CLEAN ? (
             <div className="scan-glass checklist-wrap">
               <div className="scan-title">Checklista strefy</div>
-              {checklistLoading ? <div className="muted">Wczytywanie zadan...</div> : null}
+              {checklistLoading ? <div className="muted">Wczytywanie zadań...</div> : null}
               {checklistError ? (
                 <div className={checklistErrorKind === 'permission' ? 'muted' : 'error-inline'}>{checklistError}</div>
               ) : null}
               {!checklistLoading && !checklistError ? (
                 <>
                   <ChecklistSection
-                    title="Czynnosci dodatkowe"
+                    title="Czynności dodatkowe"
                     items={checklistSplit.additional}
                     onToggle={setChecklistItemChecked}
                   />
                   <ChecklistSection
-                    title="Czynnosci standardowe (QR)"
+                    title="Czynności standardowe (QR)"
                     items={checklistSplit.standard}
                     onToggle={setChecklistItemChecked}
                   />
@@ -2555,7 +2617,7 @@ export default function App() {
           ) : null}
           {view === VIEW.END ? (
             <button className="btn secondary btn-xl" type="button" onClick={doCloseWorkdayNow} disabled={globalPending}>
-              {operationPending ? 'Trwa zamykanie...' : 'Zakoncz teraz'}
+              {operationPending ? 'Trwa zamykanie...' : 'Zakończ teraz'}
             </button>
           ) : null}
         </section>
@@ -2568,9 +2630,9 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="header">
-        <div className="header-left"><button className="top-nav-btn top-nav-btn--icon" type="button" aria-label="Strona glowna" onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}><span className="top-nav-ico"><HomeIcon /></span></button></div>
+        <div className="header-left"><button className="top-nav-btn top-nav-btn--icon" type="button" aria-label="Strona główna" onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}><span className="top-nav-ico"><HomeIcon /></span></button></div>
         <div className="header-center">
-          <button className="logo-home-btn" type="button" aria-label="Best Clean - ekran glowny" onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}>
+          <button className="logo-home-btn" type="button" aria-label="Best Clean - ekran główny" onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}>
             <img className="header-logo header-logo--bestclean" src="https://static.wixstatic.com/media/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png/v1/fill/w_698,h_238,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png" alt="Best Clean" />
           </button>
         </div>
@@ -2579,7 +2641,7 @@ export default function App() {
       <main className="main">
         {renderMain()}
       </main>
-      <footer className="app-footer">Best Clean V.1.1</footer>
+      <footer className="app-footer">Best Clean V1.2</footer>
       <div className="notice-bottom-stack" aria-live="polite">
         {notice ? (
           <div className="notice-box notice-box--bottom" role="status">
@@ -2630,7 +2692,7 @@ export default function App() {
             <div className="global-busy-text">
               Trwa operacja.
               <br />
-              Czekaj na odpowiedz serwera...
+              Czekaj na odpowiedź serwera...
             </div>
           </div>
         </div>
@@ -2639,7 +2701,7 @@ export default function App() {
         <div className="modal" role="dialog" aria-modal="true">
           <div className="modal-content">
             <div className="title-small">Grafik zaktualizowany</div>
-            <div className="muted">Wykryto zmiane w twoim grafiku. Widok zostal odswiezony.</div>
+            <div className="muted">Wykryto zmianę w twoim grafiku. Widok został odświeżony.</div>
             <button className="btn action" type="button" onClick={() => setScheduleUpdatedPopupOpen(false)}>
               OK
             </button>
@@ -2651,10 +2713,10 @@ export default function App() {
           <div className="modal-content version-popup">
             <div className="version-popup__badge">Best Clean</div>
             <div className="version-popup__title">Nowa wersja aplikacji</div>
-            <div className="version-popup__text">Korzystasz z wersji V.1.1.</div>
+            <div className="version-popup__text">Korzystasz z wersji V1.2.</div>
             <div className="version-popup__hint">
               <div><strong>Login:</strong> Twoje nazwisko</div>
-              <div><strong>Haslo:</strong> Twoja data urodzenia. 6 cyfr, np. 120187 (dzien, miesiac, rok)</div>
+              <div><strong>Hasło:</strong> Twoja data urodzenia. 6 cyfr, np. 120187 (dzień, miesiąc, rok)</div>
             </div>
             <button className="btn action" type="button" onClick={() => setVersionPopupOpen(false)}>
               OK
@@ -2665,3 +2727,5 @@ export default function App() {
     </div>
   )
 }
+
+

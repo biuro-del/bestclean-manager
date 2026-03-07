@@ -1,10 +1,10 @@
 <h1 class="welcome">Profil pracownika</h1>
-<p class="subwelcome">Lista + podglÄ…d/edycja + dodawanie. Usuwanie: tylko Admin (twarde deleteRow).</p>
+<p class="subwelcome">Lista + podgląd/edycja + dodawanie. Usuwanie: tylko Admin (twarde deleteRow).</p>
 
-<div class="toolbar" aria-label="Filtry pracownikĂłw">
+<div class="toolbar" aria-label="Filtry pracowników">
   <div class="tool" style="min-width:260px">
     <label for="wkQ">Szukaj</label>
-    <input id="wkQ" type="text" placeholder="imiÄ™, login, email, tel, QR..." />
+    <input id="wkQ" type="text" placeholder="imię, login, email, tel, QR..." />
   </div>
 
   <div class="tool">
@@ -14,9 +14,9 @@
       <option value="Admin">Admin</option>
       <option value="Kierownik">Kierownik</option>
       <option value="Koordynator">Koordynator</option>
-      <option value="StaĹĽysta">StaĹĽysta</option>
-      <option value="StaĹ‚y personel na obiekcie">StaĹ‚y personel na obiekcie</option>
-      <option value="ZespĂłĹ‚ mobilny">ZespĂłĹ‚ mobilny</option>
+      <option value="Stażysta">Stażysta</option>
+      <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
+      <option value="Zespół mobilny">Zespół mobilny</option>
       <option value="Pracownik">Pracownik</option>
     </select>
   </div>
@@ -41,15 +41,15 @@
 
   <div class="tool-actions">
     <button class="btn2" id="wkAddBtn" type="button">Dodaj pracownika</button>
-    <button class="btn2" id="wkResetBtn" type="button">OdĹ›wieĹĽ</button>
+    <button class="btn2" id="wkResetBtn" type="button">Odśwież</button>
     <button class="btn2 primary" id="wkSearchBtn" type="button">Szukaj</button>
   </div>
 </div>
 
-<div class="workers-table" aria-label="Tabela pracownikĂłw">
+<div class="workers-table" aria-label="Tabela pracowników">
   <div class="workers-head">
     <div>ID</div>
-    <div>ImiÄ™ i nazwisko</div>
+    <div>Imię i nazwisko</div>
     <div>Login</div>
     <div>Typ</div>
     <div>Aktywny</div>
@@ -81,20 +81,20 @@
 
     <h3 id="wkModalTitle">Profil pracownika</h3>
     <p class="meta">
-      ID: <span class="mono" id="wkIdLabel">â€”</span>
-      â€˘ Dodano: <span class="mono" id="wkAddedAt">â€”</span>
-      â€˘ Edycja: <span class="mono" id="wkEditedAt">â€”</span>
-      â€˘ Ostatnio edytowaĹ‚: <b id="wkEditedBy">â€”</b>
+      ID: <span class="mono" id="wkIdLabel">—</span>
+      • Dodano: <span class="mono" id="wkAddedAt">—</span>
+      • Edycja: <span class="mono" id="wkEditedAt">—</span>
+      • Ostatnio edytował: <b id="wkEditedBy">—</b>
     </p>
 
     <div class="grid">
       <div class="field">
-        <label for="wkEditId">ID (A) â€” blokada</label>
+        <label for="wkEditId">ID (A) — blokada</label>
         <input id="wkEditId" type="text" disabled />
       </div>
 
       <div class="field">
-        <label for="wkEditName">ImiÄ™ i nazwisko (B)</label>
+        <label for="wkEditName">Imię i nazwisko (B)</label>
         <input id="wkEditName" type="text" maxlength="200" />
       </div>
 
@@ -109,9 +109,9 @@
           <option value="Admin">Admin</option>
           <option value="Kierownik">Kierownik</option>
           <option value="Koordynator">Koordynator</option>
-          <option value="StaĹĽysta">StaĹĽysta</option>
-          <option value="StaĹ‚y personel na obiekcie">StaĹ‚y personel na obiekcie</option>
-          <option value="ZespĂłĹ‚ mobilny">ZespĂłĹ‚ mobilny</option>
+          <option value="Stażysta">Stażysta</option>
+          <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
+          <option value="Zespół mobilny">Zespół mobilny</option>
           <option value="Pracownik">Pracownik</option>
         </select>
       </div>
@@ -125,7 +125,7 @@
       </div>
 
       <div class="field">
-        <label for="wkOnlineNow">Zalogowany teraz (F) â€” podglÄ…d</label>
+        <label for="wkOnlineNow">Zalogowany teraz (F) — podgląd</label>
         <input id="wkOnlineNow" type="text" disabled />
       </div>
 
@@ -141,42 +141,42 @@
 
       <div class="field" style="grid-column: 1 / -1;">
         <label for="wkEditQr">QR tekst (G)</label>
-        <textarea id="wkEditQr" rows="3" maxlength="2000" placeholder="login + hasĹ‚o (tekst)"></textarea>
+        <textarea id="wkEditQr" rows="3" maxlength="2000" placeholder="login + hasło (tekst)"></textarea>
       </div>
 
       <div class="field" id="wkCurrentPassWrap" style="grid-column: 1 / -1; display:none;">
-        <label for="wkCurrentPass">Obecne hasĹ‚o (D) â€” tylko Admin/Kierownik</label>
+        <label for="wkCurrentPass">Obecne hasło (D) — tylko Admin/Kierownik</label>
         <div class="pass-inline">
           <input id="wkCurrentPass" type="password" readonly />
-          <button class="btn2" id="wkShowPassBtn" type="button">PokaĹĽ</button>
+          <button class="btn2" id="wkShowPassBtn" type="button">Pokaż</button>
           <button class="btn2" id="wkCopyPassBtn" type="button">Kopiuj</button>
         </div>
-        <div class="muted" style="margin-top:6px;">HasĹ‚o jest pobierane z bazy tylko dla Admin/Kierownik.</div>
+        <div class="muted" style="margin-top:6px;">Hasło jest pobierane z bazy tylko dla Admin/Kierownik.</div>
       </div>
 
 
       <div class="field">
-        <label for="wkNewPass">Nowe hasĹ‚o (E) â€” wpisz, jeĹ›li zmieniasz</label>
+        <label for="wkNewPass">Nowe hasło (E) — wpisz, jeśli zmieniasz</label>
         <input id="wkNewPass" type="password" maxlength="120" />
       </div>
 
       <div class="field">
-        <label for="wkNewPass2">PowtĂłrz hasĹ‚o</label>
+        <label for="wkNewPass2">Powtórz hasło</label>
         <input id="wkNewPass2" type="password" maxlength="120" />
       </div>
     </div>
 
     <div class="hint" id="wkReadOnlyHint" style="display:none;">
-      Ten uĹĽytkownik ma uprawnienia tylko do podglÄ…du (Koordynator/StaĹĽysta).
+      Ten użytkownik ma uprawnienia tylko do podglądu (Koordynator/Stażysta).
     </div>
 
     <div class="row-actions">
       <div class="left">
-        <button class="btn2" id="wkFillQrBtn" type="button" title="Wstaw do QR: login + nowe hasĹ‚o">Wstaw do QR</button>
+        <button class="btn2" id="wkFillQrBtn" type="button" title="Wstaw do QR: login + nowe hasło">Wstaw do QR</button>
       </div>
       <div class="right">
         <button class="btn2 danger" id="wkCancelBtn" type="button">Zamknij</button>
-        <button class="btn2 danger" id="wkDeleteBtn" type="button" style="display:none;">UsuĹ„</button>
+        <button class="btn2 danger" id="wkDeleteBtn" type="button" style="display:none;">Usuń</button>
         <button class="btn2 primary" id="wkSaveBtn" type="button">Zapisz</button>
       </div>
     </div>

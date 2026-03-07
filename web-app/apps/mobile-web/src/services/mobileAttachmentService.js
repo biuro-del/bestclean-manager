@@ -30,15 +30,15 @@ function uploadErrorMessage(error) {
   const code = toText(error?.code).toLowerCase()
   const message = toText(error?.message)
   if (code.includes('storage/unauthorized')) {
-    return 'Brak uprawnien do zapisu zdjec w Storage.'
+    return 'Brak uprawnień do zapisu zdjęć w Storage.'
   }
   if (code.includes('storage/retry-limit-exceeded')) {
-    return 'Przekroczono limit ponowien uploadu zdjec.'
+    return 'Przekroczono limit ponowień uploadu zdjęć.'
   }
   if (code.includes('storage/canceled')) {
-    return 'Upload zdjecia zostal anulowany.'
+    return 'Upload zdjęcia został anulowany.'
   }
-  return message || 'Nie udalo sie zapisac zdjecia.'
+  return message || 'Nie udało się zapisać zdjęcia.'
 }
 
 export async function uploadClosureAttachments({
@@ -51,14 +51,14 @@ export async function uploadClosureAttachments({
 }) {
   const firebase = ensureFirebase()
   if (!firebase?.storage) {
-    throw new Error('Brak dostepu do Firebase Storage.')
+    throw new Error('Brak dostępu do Firebase Storage.')
   }
 
   await waitForFirebaseAuthReady()
 
   const orgId = toText(session?.orgId)
   if (!orgId) {
-    throw new Error('Brak orgId do zapisu zalacznikow.')
+    throw new Error('Brak orgId do zapisu załączników.')
   }
 
   const attachmentList = Array.isArray(attachments) ? attachments : []

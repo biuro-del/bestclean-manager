@@ -123,7 +123,7 @@ export async function saveZoneChecklistResult({
 }) {
   const firebase = ensureFirebase()
   if (!firebase?.db) {
-    throw new Error('Brak dostepu do Firestore (db).')
+    throw new Error('Brak dostępu do Firestore (db).')
   }
 
   await waitForFirebaseAuthReady()
@@ -182,7 +182,7 @@ export async function saveWorkdayCloseResult({
 }) {
   const firebase = ensureFirebase()
   if (!firebase?.db) {
-    throw new Error('Brak dostepu do Firestore (db).')
+    throw new Error('Brak dostępu do Firestore (db).')
   }
 
   await waitForFirebaseAuthReady()

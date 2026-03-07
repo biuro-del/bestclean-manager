@@ -38,7 +38,7 @@ function getDataConnectInstance() {
   const firebase = ensureFirebase()
   const dataConnect = firebase?.dataConnect
   if (!dataConnect) {
-    throw new Error('Nie udalo sie zainicjalizowac Data Connect.')
+    throw new Error('Nie udało się zainicjalizować Data Connect.')
   }
   return dataConnect
 }
@@ -50,7 +50,7 @@ async function runMutationOperation(operationName, variables) {
 async function assertSignedInUser() {
   const user = await waitForFirebaseAuthReady()
   if (!user) {
-    const error = new Error('Sesja wygasla. Zaloguj sie ponownie.')
+    const error = new Error('Sesja wygasła. Zaloguj się ponownie.')
     error.code = 'UNAUTHENTICATED'
     throw error
   }
@@ -108,15 +108,15 @@ function mapFunctionToCanonical(value) {
 function mapFunctionToUiLabel(value) {
   const canonical = mapFunctionToCanonical(value)
   const labels = {
-    clean: 'Sprzatanie',
+    clean: 'Sprzątanie',
     START: 'START (czas pracy)',
     STOP0: 'STOP0 (czas pracy + 0 min)',
     STOP5: 'STOP5 (czas pracy + 5 min)',
     STOP10: 'STOP10 (czas pracy + 10 min)',
     STOP15: 'STOP15 (czas pracy + 15 min)',
-    podajnik_mydlo: 'Podajnik: mydlo',
+    podajnik_mydlo: 'Podajnik: mydło',
     podajnik_papier_toaletowy: 'Podajnik: papier toaletowy',
-    podajnik_reczniki_papierowe: 'Podajnik: reczniki papierowe',
+    podajnik_reczniki_papierowe: 'Podajnik: ręczniki papierowe',
     podajnik_inne: 'Podajnik: inne',
     Indeks: 'Indeks - Produkt',
     magazyn_lokalizacja: 'Magazyn - lokalizacja magazynowa',
@@ -202,7 +202,7 @@ export async function saveZoneAssignment(session, context, payload) {
 
   const qrId = toText(payload?.qrId)
   if (!qrId) {
-    throw new Error('Uzupelnij ID z kodu QR.')
+    throw new Error('Uzupełnij ID z kodu QR.')
   }
 
   const zone = findZoneByQrId(context?.zones || [], qrId)
@@ -263,7 +263,7 @@ export async function logAuditZone(session, snapshot, params) {
 
   const cleanValue = Number(params?.cleanValue)
   if (cleanValue !== 0 && cleanValue !== 1) {
-    throw new Error('Wybierz odpowiedz TAK lub NIE.')
+    throw new Error('Wybierz odpowiedź TAK lub NIE.')
   }
 
   const comment = toText(params?.comment).slice(0, 300)
@@ -317,3 +317,4 @@ export function isStartZoneFunction(functionValue) {
 export function defaultQrFunctionLabel() {
   return 'Sprzatanie'
 }
+

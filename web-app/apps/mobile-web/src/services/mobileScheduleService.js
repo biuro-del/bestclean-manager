@@ -32,7 +32,7 @@ function parseErrorMessage(error, fallback) {
 
   if (!direct) return toText(fallback)
   if (direct.toLowerCase().includes('failed to fetch')) {
-    return 'Brak polaczenia z serwisem grafiku.'
+    return 'Brak połączenia z serwisem grafiku.'
   }
   if (!direct.startsWith('{')) return direct
 
@@ -57,6 +57,7 @@ function looksUnauthenticatedMessage(value) {
     message.includes('missing idtoken') ||
     message.includes('invalid id token') ||
     message.includes('token expired') ||
+    message.includes('sesja wygasła') ||
     message.includes('sesja wygasla')
   )
 }
@@ -64,7 +65,7 @@ function looksUnauthenticatedMessage(value) {
 export async function fetchMobileSchedule(session) {
   const user = await waitForFirebaseAuthReady()
   if (!user) {
-    const error = new Error('Sesja wygasla. Zaloguj sie ponownie.')
+    const error = new Error('Sesja wygasła. Zaloguj się ponownie.')
     error.code = 'UNAUTHENTICATED'
     throw error
   }
@@ -87,7 +88,7 @@ export async function fetchMobileSchedule(session) {
       }),
     })
   } catch {
-    throw new Error('Brak polaczenia z serwisem grafiku.')
+    throw new Error('Brak połączenia z serwisem grafiku.')
   }
 
   let rawText = ''
@@ -109,7 +110,7 @@ export async function fetchMobileSchedule(session) {
   if (!response.ok || body?.ok === false) {
     const errorMessage = parseErrorMessage(
       body || { message: rawText || response.statusText },
-      'Nie udalo sie pobrac grafiku.',
+      'Nie udało się pobrać grafiku.',
     )
     const err = new Error(
       errorMessage,
@@ -122,3 +123,4 @@ export async function fetchMobileSchedule(session) {
 
   return body?.data || {}
 }
+

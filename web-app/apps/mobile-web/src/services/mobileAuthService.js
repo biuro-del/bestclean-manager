@@ -74,7 +74,7 @@ async function signInWithLoginCandidates(auth, emailCandidates, password) {
   if (lastError) {
     throw lastError
   }
-  throw new Error('Nie udalo sie zalogowac do Firebase Auth.')
+  throw new Error('Nie udało się zalogować do Firebase Auth.')
 }
 
 function normalizeRoleToken(roleValue) {
@@ -245,26 +245,26 @@ function mapFirebaseLoginError(error) {
     providerMessage === 'EMAIL_NOT_FOUND' ||
     providerMessage === 'INVALID_PASSWORD'
   ) {
-    return 'Niepoprawny login lub haslo.'
+    return 'Niepoprawny login lub hasło.'
   }
 
   if (code === 'auth/invalid-email') {
-    return 'Niepoprawny format email (uzyj np. login@bestclean.pl).'
+    return 'Niepoprawny format email (użyj np. login@bestclean.pl).'
   }
 
   if (code === 'auth/operation-not-allowed' || providerMessage === 'OPERATION_NOT_ALLOWED') {
-    return 'W Firebase Auth jest wylaczony provider Email/Password.'
+    return 'W Firebase Auth jest wyłączony provider Email/Password.'
   }
 
   if (code === 'auth/too-many-requests') {
-    return 'Za duzo prob logowania. Sprobuj ponownie za chwile.'
+    return 'Za dużo prób logowania. Spróbuj ponownie za chwilę.'
   }
 
   if (code === 'auth/network-request-failed') {
-    return 'Brak polaczenia z Firebase Auth.'
+    return 'Brak połączenia z Firebase Auth.'
   }
 
-  return toText(error?.message) || 'Nie udalo sie zalogowac do Firebase Auth.'
+  return toText(error?.message) || 'Nie udało się zalogować do Firebase Auth.'
 }
 
 function getBootstrapMembershipEndpoint() {
@@ -314,7 +314,7 @@ async function bootstrapMembershipIfNeeded(firebaseUser, orgIdHint) {
     } catch {
       message = ''
     }
-    throw new Error(message || 'Nie udalo sie przypisac organizacji do konta Firebase.')
+    throw new Error(message || 'Nie udało się przypisać organizacji do konta Firebase.')
   }
 
   return true
@@ -348,7 +348,7 @@ async function resolveOrganizationContext(emailValue, firebaseUser = null) {
       }
     }
 
-    throw new Error(`Uzytkownik ${emailValue} nie ma dostepu do orgId ${fromEmail}.`)
+    throw new Error(`Użytkownik ${emailValue} nie ma dostępu do orgId ${fromEmail}.`)
   }
 
   const preferredOrgFromConfig = toText(import.meta.env.VITE_DEFAULT_ORG_ID) || readPreferredOrgId()
@@ -404,12 +404,12 @@ export async function loginMobile({ login, password }) {
   const normalizedPassword = toText(password)
 
   if (!emailCandidates.length || !normalizedPassword) {
-    throw new Error('Podaj login i haslo.')
+    throw new Error('Podaj login i hasło.')
   }
 
   const firebase = ensureFirebase()
   if (!firebase?.auth) {
-    throw new Error('Nie udalo sie zainicjalizowac Firebase Auth.')
+    throw new Error('Nie udało się zainicjalizować Firebase Auth.')
   }
 
   let credential
@@ -465,3 +465,4 @@ export async function logoutMobile() {
   }
   clearMobileSession()
 }
+

@@ -1053,7 +1053,7 @@ async function fetchMappedWorkdays(orgId, rowsPromise, operationName, options = 
 
 async function fetchMappedBackupCycles(orgId) {
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. UzupeĹ‚nij web-app/.env.')
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
   ensureFirebase()

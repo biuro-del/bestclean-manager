@@ -457,20 +457,20 @@ function geolocationErrorMessage(error, actionLabel) {
   const action = toText(actionLabel) || 'operacje'
   const code = Number(error?.code || 0)
   if (code === 1) {
-    return `Aby wykonac ${action}, wlacz GPS i zezwol na lokalizacje dla tej strony.`
+    return `Aby wykonać ${action}, włącz GPS i zezwól na lokalizację dla tej strony.`
   }
   if (code === 2) {
-    return `Nie mozna odczytac GPS dla ${action}. Sprawdz uslugi lokalizacji i sprobuj ponownie.`
+    return `Nie można odczytać GPS dla ${action}. Sprawdź usługi lokalizacji i spróbuj ponownie.`
   }
   if (code === 3) {
-    return `Przekroczono czas oczekiwania na GPS dla ${action}. Sprobuj ponownie.`
+    return `Przekroczono czas oczekiwania na GPS dla ${action}. Spróbuj ponownie.`
   }
-  return `Nie udalo sie pobrac GPS dla ${action}.`
+  return `Nie udało się pobrać GPS dla ${action}.`
 }
 
 function readCurrentPosition(options = {}) {
   if (typeof navigator === 'undefined' || !navigator?.geolocation?.getCurrentPosition) {
-    const err = new Error('Ta przegladarka nie obsluguje GPS.')
+    const err = new Error('Ta przeglądarka nie obsługuje GPS.')
     err.code = 'GEO_UNSUPPORTED'
     throw err
   }
@@ -588,12 +588,13 @@ function withPauseClosedPrefix(message, pauseClosedByScan) {
     return body
   }
   if (!body) {
-    return 'Przerwa zakonczona.'
+    return 'Przerwa zakończona.'
   }
-  if (body.toLowerCase().startsWith('przerwa zakonczona')) {
+  const normalizedBody = body.toLowerCase()
+  if (normalizedBody.startsWith('przerwa zakończona') || normalizedBody.startsWith('przerwa zakonczona')) {
     return body
   }
-  return `Przerwa zakonczona. ${body}`
+  return `Przerwa zakończona. ${body}`
 }
 
 function isAutoStartCleanZone(zone) {
@@ -1053,7 +1054,7 @@ function normalizeErrorText(error) {
 function insertBlockedByEventPermission(error) {
   const message = normalizeErrorText(error)
   return (
-    message.includes('brak uprawnien do dodawania zdarzen') ||
+    message.includes('brak uprawnień do dodawania zdarzeń') ||
     (message.includes('permission_denied') && message.includes('workday_insert'))
   )
 }
@@ -1067,7 +1068,7 @@ function getDataConnectInstance() {
   const firebase = ensureFirebase()
   const dataConnect = firebase?.dataConnect
   if (!dataConnect) {
-    throw new Error('Nie udalo sie zainicjalizowac Data Connect.')
+    throw new Error('Nie udało się zainicjalizować Data Connect.')
   }
   return dataConnect
 }
@@ -1180,7 +1181,7 @@ async function fetchWorkerRows(orgId, fallbackWorkdayRows = []) {
 async function assertSignedInUser() {
   const user = await waitForFirebaseAuthReady()
   if (!user) {
-    const error = new Error('Sesja wygasla. Zaloguj sie ponownie.')
+    const error = new Error('Sesja wygasła. Zaloguj się ponownie.')
     error.code = 'UNAUTHENTICATED'
     throw error
   }
@@ -1408,7 +1409,7 @@ async function stopWorkdayPauseRecord(snapshot, pause) {
   const pauseId = toText(pause?.pauseId)
   const workdayId = toText(pause?.workdayId)
   if (!pauseId) {
-    throw new Error('Brak aktywnej pauzy do zakonczenia.')
+    throw new Error('Brak aktywnej pauzy do zakończenia.')
   }
   const nowValue = nowIso()
   const durationSec = pauseDurationSec(
@@ -1832,7 +1833,7 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
       } catch (error) {
         if (insertBlockedByEventPermission(error)) {
           const denied = new Error(
-            'Brak uprawnien do dodawania zdarzen dla tego konta. Skontaktuj sie z administratorem.',
+            'Brak uprawnień do dodawania zdarzeń dla tego konta. Skontaktuj się z administratorem.',
           )
           denied.code = 'PERMISSION_DENIED'
           throw denied
@@ -1845,7 +1846,7 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
       }
 
       return {
-        message: 'Rozpoczeto dzien pracy.',
+        message: 'Rozpoczęto dzień pracy.',
         workdayId,
         startAt,
       }
@@ -1872,7 +1873,7 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
   }
 
   return {
-    message: 'Rozpoczeto dzien pracy.',
+    message: 'Rozpoczęto dzień pracy.',
     workdayId,
     startAt,
   }
@@ -1904,9 +1905,9 @@ async function applyStopToWorkday(snapshot, workday, stopZone, gpsData = null, e
     updatedBy: snapshot.worker.login || null,
   })
   if (graceMin > 0) {
-    return `Zakonczono dzien pracy. Doliczono ${graceMin} min (STOP${graceMin}).`
+    return `Zakończono dzień pracy. Doliczono ${graceMin} min (STOP${graceMin}).`
   }
-  return 'Zakonczono dzien pracy.'
+  return 'Zakończono dzień pracy.'
 }
 
 async function startWorkdayEnding(snapshot, workday, stopZone, gpsData = null, endAtOverride = '') {
@@ -1936,9 +1937,9 @@ async function startWorkdayEnding(snapshot, workday, stopZone, gpsData = null, e
   })
 
   if (graceMin > 0) {
-    return `Rozpoczeto konczenie dnia. Doliczono ${graceMin} min (STOP${graceMin}).`
+    return `Rozpoczęto kończenie dnia. Doliczono ${graceMin} min (STOP${graceMin}).`
   }
-  return 'Rozpoczeto konczenie dnia.'
+  return 'Rozpoczęto kończenie dnia.'
 }
 
 async function closeWorkdayNow(snapshot, workday, stopZone, gpsData = null) {
@@ -2202,11 +2203,11 @@ export async function startMobilePause({ session, snapshot }) {
     throw new Error('Brak aktywnego dnia pracy. Najpierw zeskanuj START.')
   }
   if (toUpper(activeWorkday?.status) !== 'RUNNING') {
-    throw new Error('Pauza jest dostepna tylko podczas aktywnego dnia (RUNNING).')
+    throw new Error('Pauza jest dostępna tylko podczas aktywnego dnia (RUNNING).')
   }
   if (isPauseOpen(activePause)) {
     return {
-      message: 'Masz juz aktywna przerwe.',
+      message: 'Masz już aktywną przerwę.',
       snapshot: await getMobileSnapshot(session),
     }
   }
@@ -2229,7 +2230,7 @@ export async function startMobilePause({ session, snapshot }) {
   }
 
   return {
-    message: 'Rozpoczeto przerwe.',
+    message: 'Rozpoczęto przerwę.',
     snapshot: await getMobileSnapshot(session),
   }
 }
@@ -2250,7 +2251,7 @@ export async function stopMobilePause({ session, snapshot }) {
   await stopWorkdayPauseRecord(nextSnapshot, activePause)
 
   return {
-    message: 'Przerwa zakonczona. Wroc do skanowania stref.',
+    message: 'Przerwa zakończona. Wróć do skanowania stref.',
     snapshot: await getMobileSnapshot(session),
   }
 }
@@ -2280,14 +2281,14 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
     const startGps = await captureGpsForAction('START')
     if (effectiveWorkdayOpen) {
       return {
-        message: 'Dzien pracy jest juz aktywny.',
+        message: 'Dzień pracy jest już aktywny.',
         snapshot: await getMobileSnapshot(session),
       }
     }
 
     await createWorkdayForScan(snapshot, zone, startGps)
     return {
-      message: 'Rozpoczeto dzien pracy (START).',
+      message: 'Rozpoczęto dzień pracy (START).',
       snapshot: await getMobileSnapshot(session),
     }
   }
@@ -2317,7 +2318,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
     const stopMessage = await closeWorkdayNow(snapshot, activeWorkday, zone, stopGps)
     const additionallyClosed = await closeAdditionalOpenWorkdays(snapshot, activeWorkday, zone, stopGps)
     const messageSuffix = additionallyClosed > 0
-      ? ` Dodatkowo zamknieto ${additionallyClosed} zaleglych wpisow dnia.`
+      ? ` Dodatkowo zamknięto ${additionallyClosed} zaległych wpisów dnia.`
       : ''
     return {
       message: `${stopMessage}${messageSuffix}`.trim(),
@@ -2330,7 +2331,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
       throw new Error('Brak aktywnego dnia. Najpierw zeskanuj START.')
     }
     if (!isPauseResumeZone(zone)) {
-      throw new Error('Aktywna pauza. Aby wrocic do pracy, zeskanuj QR CLEAN, zlecenia indywidualnego lub strefy specjalnej.')
+      throw new Error('Aktywna pauza. Aby wrócić do pracy, zeskanuj QR CLEAN, zlecenia indywidualnego lub strefy specjalnej.')
     }
     await stopWorkdayPauseRecord(snapshot, activePause)
     pauseClosedByScan = true
@@ -2342,7 +2343,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
       const created = await createWorkdayForScan(snapshot, snapshot?.startZone || zone, startGps)
       await startCycle(snapshot, zone, created.workdayId, cloneGpsWithAction(startGps, 'CLEAN_START'), created.startAt)
       return {
-        message: withPauseClosedPrefix('Rozpoczeto dzien i sprzatanie strefy.', pauseClosedByScan),
+        message: withPauseClosedPrefix('Rozpoczęto dzień i sprzątanie strefy.', pauseClosedByScan),
         snapshot: await getMobileSnapshot(session),
       }
     }
@@ -2362,12 +2363,12 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
         const autoStopZone = resolveAutoStopZone(snapshot, zone)
         const stopMessage = await closeWorkdayNow(snapshot, activeWorkday, autoStopZone, cloneGpsWithAction(closeGps, 'STOP'))
         return {
-          message: withPauseClosedPrefix(`Zakonczono sprzatanie tej strefy. ${stopMessage}`.trim(), pauseClosedByScan),
+          message: withPauseClosedPrefix(`Zakończono sprzątanie tej strefy. ${stopMessage}`.trim(), pauseClosedByScan),
           snapshot: await getMobileSnapshot(session),
         }
       }
       return {
-        message: withPauseClosedPrefix('Zakonczono sprzatanie tej strefy.', pauseClosedByScan),
+        message: withPauseClosedPrefix('Zakończono sprzątanie tej strefy.', pauseClosedByScan),
         snapshot: await getMobileSnapshot(session),
       }
     }
@@ -2384,7 +2385,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
   const cleanStartGps = await captureGpsForAction('CLEAN_START')
   await startCycle(snapshot, zone, '', cleanStartGps)
   return {
-    message: withPauseClosedPrefix(`Rozpoczeto sprzatanie: ${zone.name || zone.id}.`, pauseClosedByScan),
+    message: withPauseClosedPrefix(`Rozpoczęto sprzątanie: ${zone.name || zone.id}.`, pauseClosedByScan),
     snapshot: await getMobileSnapshot(session),
   }
 }
@@ -2415,7 +2416,7 @@ export async function closeMobileWorkdayImmediately({ session, snapshot, comment
   const stopMessage = await closeWorkdayNow(nextSnapshot, activeWorkday, stopZone, stopGps)
   const additionallyClosed = await closeAdditionalOpenWorkdays(nextSnapshot, activeWorkday, stopZone, stopGps)
   const messageSuffix = additionallyClosed > 0
-    ? ` Dodatkowo zamknieto ${additionallyClosed} zaleglych wpisow dnia.`
+    ? ` Dodatkowo zamknięto ${additionallyClosed} zaległych wpisów dnia.`
     : ''
 
   return {
@@ -2423,3 +2424,4 @@ export async function closeMobileWorkdayImmediately({ session, snapshot, comment
     snapshot: await getMobileSnapshot(session),
   }
 }
+
