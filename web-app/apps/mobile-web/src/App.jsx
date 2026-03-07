@@ -2607,7 +2607,7 @@ export default function App() {
 	          </button>
           <div className="today-tasks-progress" aria-hidden="true">
             <div className="today-tasks-progress__top">
-              <span>Postęp dzisiaj (nieaktywne)</span>
+              <span>Postęp dzisiejszej pracy</span>
               <strong>{todayTasksProgressPct}%</strong>
             </div>
             <div className="today-tasks-progress__track">
@@ -2779,4 +2779,3 @@ export default function App() {
     </div>
   )
 }
-
