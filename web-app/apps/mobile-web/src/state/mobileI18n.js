@@ -146,7 +146,7 @@ const TEXTS = {
     'header.homeAria': 'Strona głowno',
     'header.settingsAria': 'Sztelōngi',
     'header.logoAria': 'Best Clean - głowny ekran',
-    'login.title': 'Wchod',
+    'login.title': 'Kto żeś je?',
     'login.loginLabel': 'Login',
     'login.passwordLabel': 'Hasło',
     'login.submit': 'Zaonacz',
