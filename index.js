@@ -6,8 +6,8 @@ const PORT = Number(process.env.PORT || 8080)
 const HOST = '0.0.0.0'
 const DIST_DIR = path.join(__dirname, 'web-app', 'dist')
 const APP_TARGET = String(process.env.APP_TARGET || '').trim().toLowerCase()
-const API_PROXY_TARGET = String(process.env.API_PROXY_TARGET || 'https://europe-central2-iclean2-2e798.cloudfunctions.net').trim().replace(/\/+$/, '')
-const API_PROXY_FORWARDED_HOST = String(process.env.API_PROXY_FORWARDED_HOST || 'mobile-web--iclean-room.europe-west4.hosted.app').trim()
+const API_PROXY_TARGET = String(process.env.API_PROXY_TARGET || 'https://europe-central2-iclean-room.cloudfunctions.net').trim().replace(/\/+$/, '')
+const API_PROXY_FORWARDED_HOST = String(process.env.API_PROXY_FORWARDED_HOST || 'iclean-room.web.app').trim()
 const API_PROXY_TIMEOUT_MS = Number(process.env.API_PROXY_TIMEOUT_MS || 15000)
 
 const MIME_BY_EXT = {

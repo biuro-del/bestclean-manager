@@ -4,3 +4,11 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  - variable: API_PROXY_TARGET
+    value: https://europe-central2-iclean-room.cloudfunctions.net
+    availability:
+      - RUNTIME
+  - variable: API_PROXY_FORWARDED_HOST
+    value: iclean-room.web.app
+    availability:
+      - RUNTIME
