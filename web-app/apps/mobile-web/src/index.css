@@ -141,6 +141,29 @@ body {
   color: #64748b;
 }
 
+.header--login {
+  padding: 8px 12px;
+}
+
+.header--login .top-nav-btn--icon {
+  width: 40px;
+  min-height: 40px;
+}
+
+.header--login .header-logo {
+  height: clamp(24px, 6vw, 34px);
+}
+
+.main--login {
+  padding: 8px 12px;
+  gap: 8px;
+}
+
+.app-footer--login {
+  padding: 6px 12px 10px;
+  font-size: 11px;
+}
+
 .card {
   border: 1px solid var(--bc-border);
   border-radius: 20px;
@@ -242,13 +265,13 @@ body {
 }
 
 .login-language__list {
-  margin-top: 6px;
+  margin-top: 4px;
   border: 1px solid rgba(15, 23, 42, 0.14);
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.9);
-  padding: 3px;
-  display: flex;
-  flex-direction: column;
+  padding: 2px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 2px;
 }
 
@@ -259,6 +282,7 @@ body {
   color: #64748b;
   letter-spacing: 0.02em;
   line-height: 1.25;
+  text-align: center;
 }
 
 .login-language__item {
@@ -266,12 +290,12 @@ body {
   border: 1px solid transparent;
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.04);
-  padding: 5px 8px;
+  padding: 4px 8px;
   text-align: left;
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 26px;
+  min-height: 20px;
   cursor: pointer;
 }
 
@@ -286,17 +310,60 @@ body {
 }
 
 .login-language__code {
-  min-width: 26px;
+  min-width: 24px;
   font-size: 10px;
   font-weight: 900;
   color: #334155;
 }
 
 .login-language__name {
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.2;
   font-weight: 700;
   color: #0f172a;
+  white-space: nowrap;
+}
+
+.login-card {
+  border-radius: 16px;
+  padding: 10px;
+}
+
+.login-card .title {
+  margin: 0 0 6px 0;
+  font-size: clamp(20px, 8vw, 32px);
+  line-height: 1.06;
+}
+
+.login-box {
+  border-radius: 14px;
+  padding: 10px;
+}
+
+.login-box.col {
+  gap: 8px;
+}
+
+.login-card .muted {
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.login-card .input {
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 15px;
+}
+
+.login-card .btn {
+  border-radius: 14px;
+  padding: 12px;
+  font-size: 16px;
+}
+
+.login-card .login-language__trigger {
+  padding: 8px 10px;
+  font-size: 13px;
 }
 
 .today-tasks-progress {

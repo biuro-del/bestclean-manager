@@ -88,14 +88,14 @@ const QR_PLACE_OPTIONS = [
 
 const LOGIN_LANGUAGE_OPTIONS = [
   { code: 'EN', nativeName: 'English', enabled: false },
-  { code: 'FR', nativeName: 'Français', enabled: false },
-  { code: 'IT', nativeName: 'Italiano', enabled: false },
-  { code: 'D', nativeName: 'Deutsch', enabled: false },
   { code: 'ES', nativeName: 'Español', enabled: false },
   { code: 'PL', nativeName: 'Polski', enabled: true },
+  { code: 'Si', nativeName: 'Śląski', enabled: false },
+  { code: 'D', nativeName: 'Deutsch', enabled: false },
+  { code: 'FR', nativeName: 'Français', enabled: false },
+  { code: 'IT', nativeName: 'Italiano', enabled: false },
   { code: 'UA', nativeName: 'Українська', enabled: false },
   { code: 'RU', nativeName: 'Русский', enabled: false },
-  { code: 'ŚL', nativeName: 'Ślōnski', enabled: false },
 ]
 
 function HomeIcon() {
@@ -646,9 +646,9 @@ function LoginView({ pending, error, onSubmit }) {
   )
 
   return (
-    <section className="card">
+    <section className="card login-card">
       <div className="title">Logowanie</div>
-      <div className="box col">
+      <div className="box col login-box">
         <label className="muted">Login</label>
         <input className="input" value={login} onChange={(event) => setLogin(event.target.value)} />
         <label className="muted">Hasło</label>
@@ -2739,9 +2739,11 @@ export default function App() {
     return null
   }
 
+  const isLoginView = view === VIEW.LOGIN
+
   return (
-    <div className="app-shell">
-      <header className="header">
+    <div className={`app-shell${isLoginView ? ' app-shell--login' : ''}`}>
+      <header className={`header${isLoginView ? ' header--login' : ''}`}>
         <div className="header-left"><button className="top-nav-btn top-nav-btn--icon" type="button" aria-label="Strona główna" onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}><span className="top-nav-ico"><HomeIcon /></span></button></div>
         <div className="header-center">
           <button className="logo-home-btn" type="button" aria-label="Best Clean - ekran główny" onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}>
@@ -2750,10 +2752,10 @@ export default function App() {
         </div>
         <div className="header-right"><button className="top-nav-btn top-nav-btn--icon" type="button" aria-label="Ustawienia" disabled={!session?.token} onClick={() => setSettingsOpen(true)}><span className="top-nav-ico"><SettingsIcon /></span></button></div>
       </header>
-      <main className="main">
+      <main className={`main${isLoginView ? ' main--login' : ''}`}>
         {renderMain()}
       </main>
-      <footer className="app-footer">Best Clean V1.2</footer>
+      <footer className={`app-footer${isLoginView ? ' app-footer--login' : ''}`}>Best Clean V1.2</footer>
       <div className="notice-bottom-stack" aria-live="polite">
         {notice ? (
           <div className="notice-box notice-box--bottom" role="status">
