@@ -541,17 +541,19 @@ function getWorkdaySeconds(row, nowIso) {
 function getPauseSeconds(row, nowIso) {
   if (!row) return 0
   const direct = Number(row.durationSec)
-  if (Number.isFinite(direct) && direct >= 0) {
-    return Math.floor(direct)
+  const hasDirect = Number.isFinite(direct) && direct >= 0
+  const status = up(row?.status)
+  const stopIso = parseIso(row.stopAt)
+  if (stopIso || status === 'CLOSED' || status === 'STOPPED') {
+    if (hasDirect) return Math.floor(direct)
+    return secBetween(row?.startAt, stopIso)
   }
 
-  const stopIso = parseIso(row.stopAt)
-  if (stopIso) {
-    return secBetween(row.startAt, stopIso)
+  const startIso = parseIso(row?.startAt)
+  if (startIso) {
+    return secBetween(startIso, nowIso)
   }
-  if (isPauseOpen(row)) {
-    return secBetween(row.startAt, nowIso)
-  }
+  if (hasDirect) return Math.floor(direct)
   return 0
 }
 
@@ -1412,15 +1414,12 @@ export default function App() {
   const liveWorkdayOpen = useMemo(() => isLiveWorkday(activeWorkday, nowIso), [activeWorkday, nowIso])
   const pauseTotalSec = useMemo(() => {
     const snapshotValue = Number(snapshot?.pauseTotalSec)
-    if (Number.isFinite(snapshotValue) && snapshotValue >= 0) {
-      return Math.floor(snapshotValue)
-    }
-
+    const snapshotTotal = Number.isFinite(snapshotValue) && snapshotValue >= 0 ? Math.floor(snapshotValue) : 0
     let total = getWorkdayPauseSeconds(activeWorkday, nowIso)
     if (pauseOpen && !parseIso(activeWorkday?.pauseOpenAt)) {
       total += getPauseSeconds(activePause, nowIso)
     }
-    return Math.max(0, total)
+    return Math.max(0, Math.max(snapshotTotal, total))
   }, [activePause, activeWorkday, nowIso, pauseOpen, snapshot?.pauseTotalSec])
   const topActionIsStart = !liveWorkdayOpen
   const workdayTimer = useMemo(
