@@ -15,6 +15,7 @@ import { getWorkers } from './workerService'
 const NINE_HOURS_SECONDS = 9 * 60 * 60
 const DEPLOY_HINT =
   'Brak wdrożonej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean2-2e798.'
+let workdayPausesForOrgUnavailable = false
 
 function pad2(value) {
   return String(value).padStart(2, '0')
@@ -361,6 +362,155 @@ async function runMutationOperation(operationName, variables) {
   } catch (error) {
     throw withOperationNotFoundHint(error, operationName)
   }
+}
+
+function nonNegativeInt(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return 0
+  }
+  return Math.floor(numeric)
+}
+
+function pauseDurationSec(row, nowIsoValue = new Date().toISOString()) {
+  const direct = nonNegativeInt(row?.durationSec)
+  if (direct > 0) {
+    return direct
+  }
+  const startIso = toIso(row?.startAt)
+  if (!startIso) {
+    return 0
+  }
+  const stopIso = toIso(row?.stopAt)
+  const endIso = stopIso || nowIsoValue
+  const startMs = new Date(startIso).getTime()
+  const endMs = new Date(endIso).getTime()
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return 0
+  }
+  return Math.floor((endMs - startMs) / 1000)
+}
+
+function extractPauseRowsFromData(data) {
+  if (!data || typeof data !== 'object') {
+    return []
+  }
+
+  const directCandidates = [
+    data.workdayPauses,
+    data.pauses,
+    data.pauseRows,
+  ]
+  for (const candidate of directCandidates) {
+    if (Array.isArray(candidate)) {
+      return candidate
+    }
+  }
+
+  for (const value of Object.values(data)) {
+    if (!Array.isArray(value) || !value.length) {
+      continue
+    }
+    const sample = value[0] || {}
+    if (String(sample?.pauseId ?? '').trim() || String(sample?.workdayId ?? '').trim()) {
+      return value
+    }
+  }
+
+  return []
+}
+
+function variableMismatchError(error) {
+  const message = String(messageFromError(error) ?? '').toLowerCase()
+  return (
+    message.includes('variable') ||
+    (message.includes('required') && message.includes('argument')) ||
+    message.includes('unknown argument') ||
+    message.includes('invalid value')
+  )
+}
+
+function operationUnavailable(error, operationName) {
+  const message = String(messageFromError(error) ?? '')
+  return (
+    isOperationNotFoundMessage(message, operationName) ||
+    message.includes(`Brak operacji: ${operationName}`) ||
+    message.includes(`Brak operacji: ${String(operationName).toLowerCase()}`)
+  )
+}
+
+async function fetchWorkdayPauseRows(orgId, workerLogin = '') {
+  const org = String(orgId ?? '').trim()
+  if (!org || workdayPausesForOrgUnavailable) {
+    return []
+  }
+
+  const variants = workerLogin
+    ? [{ orgId: org, workerLogin: String(workerLogin).trim() }, { orgId: org }]
+    : [{ orgId: org }]
+
+  for (const variables of variants) {
+    try {
+      const response = await runQueryOperation('WorkdayPausesForOrg', variables)
+      return extractPauseRowsFromData(response?.data)
+    } catch (error) {
+      if (operationUnavailable(error, 'WorkdayPausesForOrg')) {
+        workdayPausesForOrgUnavailable = true
+        return []
+      }
+      if (variableMismatchError(error)) {
+        continue
+      }
+      return []
+    }
+  }
+
+  return []
+}
+
+function buildPauseTotalsByWorkday(pauseRows, nowIsoValue = new Date().toISOString()) {
+  const totals = new Map()
+  ;(pauseRows || []).forEach((row) => {
+    const workdayId = String(row?.workdayId ?? '').trim()
+    if (!workdayId) {
+      return
+    }
+    const current = totals.get(workdayId) || 0
+    totals.set(workdayId, current + pauseDurationSec(row, nowIsoValue))
+  })
+  return totals
+}
+
+function timelineItemDurationSec(item) {
+  const direct = nonNegativeInt(item?.durationSec)
+  if (direct > 0) {
+    return direct
+  }
+  const startIso = toIso(item?.startAt)
+  const endIso = toIso(item?.endAt)
+  if (!startIso || !endIso) {
+    return 0
+  }
+  return nonNegativeInt((new Date(endIso).getTime() - new Date(startIso).getTime()) / 1000)
+}
+
+function applyPauseMetrics(items = [], pauseTotalsByWorkday = new Map()) {
+  return items.map((item) => {
+    const sourceType = String(item?.sourceType ?? '').trim().toUpperCase()
+    const workdayId = String(item?.workdayId ?? '').trim()
+    const breakSec = sourceType === 'WORKDAY' && workdayId
+      ? nonNegativeInt(pauseTotalsByWorkday.get(workdayId))
+      : 0
+    const workSec = timelineItemDurationSec(item)
+    const netSec = Math.max(0, workSec - breakSec)
+
+    return {
+      ...item,
+      breakSec,
+      pauseTotalSec: breakSec,
+      netSec,
+    }
+  })
 }
 
 function applyWorkdayFilters(items, filters = {}) {
@@ -880,7 +1030,7 @@ async function fetchLookupMaps(orgId, options = {}) {
   return fetchLookupMapsFromRows(orgId, workdayRows)
 }
 
-async function fetchMappedWorkdays(orgId, rowsPromise, operationName) {
+async function fetchMappedWorkdays(orgId, rowsPromise, operationName, options = {}) {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
@@ -895,7 +1045,10 @@ async function fetchMappedWorkdays(orgId, rowsPromise, operationName) {
 
   const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
   const rows = response?.data?.workdays ?? []
-  return rows.map((row) => mapWorkdayRow(orgId, row, lookupMaps))
+  const mappedRows = rows.map((row) => mapWorkdayRow(orgId, row, lookupMaps))
+  const pauseRows = await fetchWorkdayPauseRows(orgId, options.workerLogin)
+  const pauseTotalsByWorkday = buildPauseTotalsByWorkday(pauseRows)
+  return applyPauseMetrics(mappedRows, pauseTotalsByWorkday)
 }
 
 async function fetchMappedBackupCycles(orgId) {
@@ -959,8 +1112,10 @@ async function fetchMappedEvents(orgId) {
   const eventRows = eventsResponse?.data?.events ?? []
   const mappedEvents = eventRows.map((row) => mapEventRow(orgId, row, lookupMaps))
   const mappedWorkdays = workdayRows.map((row) => mapWorkdayRow(orgId, row, lookupMaps))
+  const pauseRows = await fetchWorkdayPauseRows(orgId)
+  const pauseTotalsByWorkday = buildPauseTotalsByWorkday(pauseRows)
 
-  return mergeMappedTimelineRows([...mappedEvents, ...mappedWorkdays]).filter((item) =>
+  return applyPauseMetrics(mergeMappedTimelineRows([...mappedEvents, ...mappedWorkdays]), pauseTotalsByWorkday).filter((item) =>
     isDisplayableMappedItem(item),
   )
 }
@@ -973,7 +1128,9 @@ export async function getWorkdays(orgId, filters = {}) {
   } else if (source === 'backupcycle' || source === 'backup_cycle') {
     mapped = await fetchMappedBackupCycles(orgId)
   } else {
-    mapped = await fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg')
+    mapped = await fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg', {
+      workerLogin: String(filters.workerLogin ?? '').trim(),
+    })
   }
 
   const sorted = sortByLatest(mapped)
@@ -1006,6 +1163,7 @@ export async function getWorkerTime(orgId, workerId, range = {}) {
     orgId,
     workerWorkdaysForOrg({ orgId, workerLogin }),
     'WorkerWorkdaysForOrg',
+    { workerLogin },
   )
   const sorted = sortByLatest(mapped)
   const filtered = applyWorkdayFilters(sorted, range)

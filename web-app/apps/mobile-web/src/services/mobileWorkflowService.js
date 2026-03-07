@@ -14,6 +14,10 @@ let eventsForOrgUnavailable = false
 let backupCyclesForOrgUnavailable = false
 let insertBackupCycleForOrgUnavailable = false
 let updateBackupCycleForOrgUnavailable = false
+let workdayPausesForOrgUnavailable = false
+let activeWorkdayPauseForWorkerUnavailable = false
+let startWorkdayPauseUnavailable = false
+let stopWorkdayPauseUnavailable = false
 const eventMutationsEnabled = envFlag('VITE_MOBILE_EVENT_MUTATIONS', true)
 const backupCycleDualWriteEnabled = envFlag('VITE_MOBILE_DUAL_WRITE_BACKUP_CYCLE', true)
 const cycleFallbackFromWorkdayEnabled = envFlag('VITE_MOBILE_CYCLE_WORKDAY_FALLBACK', false)
@@ -164,6 +168,241 @@ function elapsedSec(fromIso, toIsoValue = nowIso()) {
   const to = new Date(parseIso(toIsoValue) || 0).getTime()
   if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return 0
   return Math.floor((to - from) / 1000)
+}
+
+function nonNegativeInt(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric < 0) return 0
+  return Math.floor(numeric)
+}
+
+function isPauseOpen(pause) {
+  if (!pause) return false
+  if (toUpper(pause?.status) === 'CLOSED' || toUpper(pause?.status) === 'STOPPED') return false
+  return !toText(pause?.stopAt)
+}
+
+function normalizePause(row) {
+  const startAt = parseIso(row?.startAt)
+  const stopAt = parseIso(row?.stopAt)
+  const statusRaw = toUpper(row?.status)
+  const status = statusRaw || (stopAt ? 'CLOSED' : 'RUNNING')
+  return {
+    pauseId: toText(row?.pauseId),
+    workdayId: toText(row?.workdayId),
+    workerLogin: toText(row?.workerLogin),
+    workerName: toText(row?.workerName),
+    startAt,
+    stopAt,
+    durationSec: nonNegativeInt(row?.durationSec),
+    status,
+    pauseEventId: toText(row?.pauseEventId),
+    deviceId: toText(row?.deviceId),
+    createdAt: parseIso(row?.createdAt),
+    updatedAt: parseIso(row?.updatedAt),
+  }
+}
+
+function pauseDurationSec(row, nowValue = nowIso()) {
+  if (!row) return 0
+  const storedDuration = nonNegativeInt(row?.durationSec)
+  if (storedDuration > 0) {
+    return storedDuration
+  }
+  const stopAt = parseIso(row?.stopAt)
+  if (stopAt) {
+    return elapsedSec(row?.startAt, stopAt)
+  }
+  if (isPauseOpen(row)) {
+    return elapsedSec(row?.startAt, nowValue)
+  }
+  return 0
+}
+
+function extractPauseRowsFromData(data) {
+  if (!data || typeof data !== 'object') {
+    return []
+  }
+
+  const directCandidates = [
+    data.workdayPauses,
+    data.pauses,
+    data.pauseRows,
+  ]
+  for (const candidate of directCandidates) {
+    if (Array.isArray(candidate)) {
+      return candidate
+    }
+  }
+
+  for (const value of Object.values(data)) {
+    if (!Array.isArray(value)) {
+      continue
+    }
+    if (!value.length) {
+      continue
+    }
+    const sample = value[0] || {}
+    if (toText(sample?.pauseId) || toText(sample?.workdayId) || parseIso(sample?.startAt)) {
+      return value
+    }
+  }
+
+  return []
+}
+
+function extractPauseFromData(data) {
+  if (!data || typeof data !== 'object') {
+    return null
+  }
+
+  const directCandidates = [
+    data.activeWorkdayPause,
+    data.activePause,
+    data.workdayPause,
+    data.pause,
+  ]
+  for (const candidate of directCandidates) {
+    if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+      return candidate
+    }
+  }
+
+  const rows = extractPauseRowsFromData(data)
+  if (rows.length) {
+    return rows[0]
+  }
+  return null
+}
+
+function variableShapeMismatch(error) {
+  const text = normalizeErrorText(error)
+  return (
+    text.includes('variable') ||
+    text.includes('required type') ||
+    text.includes('not provided') ||
+    text.includes('unknown argument') ||
+    (text.includes('argument') && text.includes('required'))
+  )
+}
+
+function pickLatestOpenPause(rows, workerLogin = '', workdayId = '') {
+  const targetWorker = normalizeKey(workerLogin)
+  const targetWorkday = toText(workdayId)
+  const openRows = (rows || [])
+    .map((row) => normalizePause(row))
+    .filter((row) => isPauseOpen(row))
+    .filter((row) => {
+      if (targetWorker && normalizeKey(row.workerLogin) !== targetWorker) return false
+      if (targetWorkday && toText(row.workdayId) !== targetWorkday) return false
+      return true
+    })
+    .sort((a, b) => new Date(b.startAt || b.updatedAt || 0).getTime() - new Date(a.startAt || a.updatedAt || 0).getTime())
+  return openRows[0] ?? null
+}
+
+function buildPauseRowsByWorkday(pauseRows = []) {
+  const map = new Map()
+  pauseRows.forEach((row) => {
+    const normalized = normalizePause(row)
+    const workdayId = toText(normalized?.workdayId)
+    if (!workdayId) return
+    const list = map.get(workdayId) || []
+    list.push(normalized)
+    map.set(workdayId, list)
+  })
+
+  for (const [key, list] of map.entries()) {
+    map.set(
+      key,
+      [...list].sort((a, b) => new Date(a.startAt || a.updatedAt || 0).getTime() - new Date(b.startAt || b.updatedAt || 0).getTime()),
+    )
+  }
+  return map
+}
+
+function workdayPauseTotalFromLegacy(workday, nowValue = nowIso()) {
+  let total = nonNegativeInt(workday?.pauseTotalSec)
+  const pauseOpenAt = parseIso(workday?.pauseOpenAt)
+  if (pauseOpenAt && isWorkdayOpen(workday)) {
+    total += elapsedSec(pauseOpenAt, nowValue)
+  }
+  return total
+}
+
+function workdayPauseTotalFromRows(workday, pauseRowsByWorkday, nowValue = nowIso(), activePause = null) {
+  const workdayId = toText(workday?.workdayId)
+  if (!workdayId) {
+    return workdayPauseTotalFromLegacy(workday, nowValue)
+  }
+
+  const rows = pauseRowsByWorkday?.get(workdayId) || []
+  if (!rows.length) {
+    const legacy = workdayPauseTotalFromLegacy(workday, nowValue)
+    if (isPauseOpen(activePause) && toText(activePause?.workdayId) === workdayId) {
+      return Math.max(legacy, pauseDurationSec(activePause, nowValue) + nonNegativeInt(workday?.pauseTotalSec))
+    }
+    return legacy
+  }
+
+  const ids = new Set(rows.map((row) => toText(row.pauseId)).filter(Boolean))
+  let total = rows.reduce((acc, row) => acc + pauseDurationSec(row, nowValue), 0)
+  if (
+    isPauseOpen(activePause) &&
+    toText(activePause?.workdayId) === workdayId &&
+    toText(activePause?.pauseId) &&
+    !ids.has(toText(activePause.pauseId))
+  ) {
+    total += pauseDurationSec(activePause, nowValue)
+  }
+  return Math.max(0, Math.floor(total))
+}
+
+async function runOperationWithVariants({
+  kind,
+  operationNames,
+  variableVariants = [],
+  unavailableRef = null,
+}) {
+  const names = (operationNames || []).map((name) => toText(name)).filter(Boolean)
+  const variants = Array.isArray(variableVariants) && variableVariants.length ? variableVariants : [{}]
+  const run = kind === 'mutation' ? runMutationOperation : runQueryOperation
+
+  if (!names.length) {
+    const error = new Error('Brak nazwy operacji Data Connect.')
+    error.code = 'OPERATION_UNAVAILABLE'
+    throw error
+  }
+
+  let validationError = null
+  for (const operationName of names) {
+    for (const variables of variants) {
+      try {
+        return await run(operationName, variables || {})
+      } catch (error) {
+        if (operationMissing(error, operationName)) {
+          continue
+        }
+        if (variableShapeMismatch(error)) {
+          validationError = error
+          continue
+        }
+        throw error
+      }
+    }
+  }
+
+  if (typeof unavailableRef === 'function') {
+    unavailableRef()
+  }
+
+  if (validationError) {
+    throw validationError
+  }
+
+  const error = new Error(`Brak wdrozonej operacji Data Connect (${names.join(', ')}).`)
+  error.code = 'OPERATION_UNAVAILABLE'
+  throw error
 }
 
 function sanitizeClosedWorkdayDuration(seconds, startIso, endIso) {
@@ -423,6 +662,9 @@ function normalizeWorkday(row) {
     endAt,
     status,
     durationSec,
+    pauseTotalSec: nonNegativeInt(row?.pauseTotalSec),
+    pauseOpenId: toText(row?.pauseOpenId),
+    pauseOpenAt: parseIso(row?.pauseOpenAt),
     comment: toText(row?.comment),
     gps: toText(row?.gps),
     updatedAt: parseIso(row?.updatedAt),
@@ -509,6 +751,14 @@ function getWorkdayDuration(workday, nowValue = nowIso()) {
   }
 
   return elapsedSec(startAt, nowValue)
+}
+
+function getWorkdayNetDuration(workday, nowValue = nowIso(), pauseRowsByWorkday = null, activePause = null) {
+  const gross = getWorkdayDuration(workday, nowValue)
+  const pauseTotal = pauseRowsByWorkday
+    ? workdayPauseTotalFromRows(workday, pauseRowsByWorkday, nowValue, activePause)
+    : workdayPauseTotalFromLegacy(workday, nowValue)
+  return Math.max(0, gross - pauseTotal)
 }
 
 function pickActiveWorkday(rows) {
@@ -668,13 +918,14 @@ function buildCycleHistory(events) {
     }))
 }
 
-function summaryFromWorkdays(workdays, activeWorkday) {
+function summaryFromWorkdays(workdays, activeWorkday, pauseRowsByWorkday = null, activePause = null) {
+  const nowValue = nowIso()
   const monthSeconds = workdays
     .filter((row) => isThisMonthIso(row.startAt))
-    .reduce((acc, row) => acc + getWorkdayDuration(row), 0)
+    .reduce((acc, row) => acc + getWorkdayNetDuration(row, nowValue, pauseRowsByWorkday, activePause), 0)
 
   const todayRows = workdays.filter((row) => isTodayIso(row.startAt))
-  const todaySeconds = todayRows.reduce((acc, row) => acc + getWorkdayDuration(row), 0)
+  const todaySeconds = todayRows.reduce((acc, row) => acc + getWorkdayNetDuration(row, nowValue, pauseRowsByWorkday, activePause), 0)
   const latestToday = [...todayRows].sort(
     (a, b) => new Date(b.startAt || 0).getTime() - new Date(a.startAt || 0).getTime(),
   )[0]
@@ -684,7 +935,7 @@ function summaryFromWorkdays(workdays, activeWorkday) {
     todaySeconds,
     todayStart: latestToday?.startAt ? formatTime(latestToday.startAt) : '--:--',
     todayStop: latestToday?.endAt ? formatTime(latestToday.endAt) : '--:--',
-    activeSeconds: getWorkdayDuration(activeWorkday),
+    activeSeconds: getWorkdayNetDuration(activeWorkday, nowValue, pauseRowsByWorkday, activePause),
   }
 }
 
@@ -963,6 +1214,232 @@ async function fetchWorkerWorkdayRows(orgId, workerLogin) {
   return []
 }
 
+async function fetchWorkdayPauseRows(orgId, workerLogin = '') {
+  const org = toText(orgId)
+  if (!org || workdayPausesForOrgUnavailable) {
+    return []
+  }
+
+  try {
+    const response = await runOperationWithVariants({
+      kind: 'query',
+      operationNames: ['WorkdayPausesForOrg', 'workdayPausesForOrg'],
+      variableVariants: [
+        { orgId: org, workerLogin: toText(workerLogin) || null },
+        { orgId: org },
+      ],
+      unavailableRef: () => {
+        workdayPausesForOrgUnavailable = true
+      },
+    })
+    return extractPauseRowsFromData(response?.data).map((row) => normalizePause(row))
+  } catch (error) {
+    if (toText(error?.code) === 'OPERATION_UNAVAILABLE' || variableShapeMismatch(error) || operationMissing(error, 'WorkdayPausesForOrg')) {
+      workdayPausesForOrgUnavailable = true
+      return []
+    }
+    return []
+  }
+}
+
+async function fetchActivePauseForWorker(orgId, workerLogin, activeWorkdayId = '', fallbackRows = []) {
+  const org = toText(orgId)
+  const login = toText(workerLogin)
+  if (!org || !login) {
+    return pickLatestOpenPause(fallbackRows, login, activeWorkdayId)
+  }
+
+  if (activeWorkdayPauseForWorkerUnavailable) {
+    return pickLatestOpenPause(fallbackRows, login, activeWorkdayId)
+  }
+
+  try {
+    const response = await runOperationWithVariants({
+      kind: 'query',
+      operationNames: ['ActiveWorkdayPauseForWorker', 'activeWorkdayPauseForWorker'],
+      variableVariants: [
+        { orgId: org, workerLogin: login },
+        { orgId: org, login },
+        { workerLogin: login },
+        { orgId: org },
+      ],
+      unavailableRef: () => {
+        activeWorkdayPauseForWorkerUnavailable = true
+      },
+    })
+    const row = extractPauseFromData(response?.data)
+    if (!row) {
+      return pickLatestOpenPause(fallbackRows, login, activeWorkdayId)
+    }
+    const pause = normalizePause(row)
+    if (!isPauseOpen(pause)) {
+      return null
+    }
+    if (toText(activeWorkdayId) && toText(pause?.workdayId) && toText(pause?.workdayId) !== toText(activeWorkdayId)) {
+      const fallbackScoped = pickLatestOpenPause(fallbackRows, login, activeWorkdayId)
+      if (fallbackScoped) {
+        return fallbackScoped
+      }
+    }
+    return pause
+  } catch (error) {
+    if (toText(error?.code) === 'OPERATION_UNAVAILABLE' || variableShapeMismatch(error) || operationMissing(error, 'ActiveWorkdayPauseForWorker')) {
+      activeWorkdayPauseForWorkerUnavailable = true
+      return pickLatestOpenPause(fallbackRows, login, activeWorkdayId)
+    }
+    return pickLatestOpenPause(fallbackRows, login, activeWorkdayId)
+  }
+}
+
+async function startWorkdayPauseRecord(snapshot, workday) {
+  if (startWorkdayPauseUnavailable) {
+    const error = new Error('Tryb pauzy nie jest jeszcze wdrozony w backendzie.')
+    error.code = 'OPERATION_UNAVAILABLE'
+    throw error
+  }
+
+  const pauseId = makeId('PAUSE')
+  const nowValue = nowIso()
+  const workerLogin = toText(snapshot?.worker?.login || workday?.workerLogin)
+  const workerName = toText(snapshot?.worker?.name || workday?.workerName)
+  const workdayId = toText(workday?.workdayId)
+
+  const variableVariants = [
+    {
+      orgId: snapshot.orgId,
+      pauseId,
+      workdayId,
+      workerLogin,
+      workerName: workerName || null,
+      startAt: nowValue,
+      stopAt: null,
+      durationSec: null,
+      status: 'RUNNING',
+      pauseEventId: pauseId,
+      deviceId: null,
+    },
+    {
+      orgId: snapshot.orgId,
+      pauseId,
+      workdayId,
+      workerLogin,
+      startAt: nowValue,
+      status: 'RUNNING',
+    },
+    {
+      orgId: snapshot.orgId,
+      workdayId,
+      workerLogin,
+      startAt: nowValue,
+    },
+    {
+      orgId: snapshot.orgId,
+      workdayId,
+    },
+  ]
+
+  try {
+    await runOperationWithVariants({
+      kind: 'mutation',
+      operationNames: ['StartWorkdayPause', 'startWorkdayPause'],
+      variableVariants,
+      unavailableRef: () => {
+        startWorkdayPauseUnavailable = true
+      },
+    })
+  } catch (error) {
+    if (toText(error?.code) === 'OPERATION_UNAVAILABLE' || operationMissing(error, 'StartWorkdayPause')) {
+      startWorkdayPauseUnavailable = true
+      const unavailable = new Error('Tryb pauzy nie jest jeszcze wdrozony w backendzie.')
+      unavailable.code = 'OPERATION_UNAVAILABLE'
+      throw unavailable
+    }
+    throw error
+  }
+
+  return {
+    pauseId,
+    workdayId,
+    workerLogin,
+    workerName,
+    startAt: nowValue,
+    stopAt: '',
+    status: 'RUNNING',
+  }
+}
+
+async function stopWorkdayPauseRecord(snapshot, pause) {
+  if (stopWorkdayPauseUnavailable) {
+    const error = new Error('Tryb pauzy nie jest jeszcze wdrozony w backendzie.')
+    error.code = 'OPERATION_UNAVAILABLE'
+    throw error
+  }
+
+  const pauseId = toText(pause?.pauseId)
+  if (!pauseId) {
+    throw new Error('Brak aktywnej pauzy do zakonczenia.')
+  }
+  const nowValue = nowIso()
+  const durationSec = pauseDurationSec(
+    {
+      ...pause,
+      stopAt: nowValue,
+    },
+    nowValue,
+  )
+
+  const variableVariants = [
+    {
+      orgId: snapshot.orgId,
+      pauseId,
+      stopAt: nowValue,
+      durationSec,
+      status: 'CLOSED',
+    },
+    {
+      orgId: snapshot.orgId,
+      pauseId,
+      stopAt: nowValue,
+      status: 'CLOSED',
+    },
+    {
+      orgId: snapshot.orgId,
+      pauseId,
+      stopAt: nowValue,
+    },
+    {
+      pauseId,
+      stopAt: nowValue,
+    },
+  ]
+
+  try {
+    await runOperationWithVariants({
+      kind: 'mutation',
+      operationNames: ['StopWorkdayPause', 'stopWorkdayPause'],
+      variableVariants,
+      unavailableRef: () => {
+        stopWorkdayPauseUnavailable = true
+      },
+    })
+  } catch (error) {
+    if (toText(error?.code) === 'OPERATION_UNAVAILABLE' || operationMissing(error, 'StopWorkdayPause')) {
+      stopWorkdayPauseUnavailable = true
+      const unavailable = new Error('Tryb pauzy nie jest jeszcze wdrozony w backendzie.')
+      unavailable.code = 'OPERATION_UNAVAILABLE'
+      throw unavailable
+    }
+    throw error
+  }
+
+  return {
+    ...pause,
+    stopAt: nowValue,
+    durationSec,
+    status: 'CLOSED',
+  }
+}
+
 function normalizeZones(zoneRows, clientRows) {
   const clientMap = new Map(clientRows.map((row) => [toText(row.clientId), toText(row.name)]))
   return zoneRows.map((row) => {
@@ -1161,18 +1638,102 @@ export async function getMobileSnapshot(session) {
   const zoneById = new Map(zones.map((zone) => [zone.id, zone]))
   const workerScopedRows = await fetchWorkerWorkdayRows(orgId, workerLogin)
   const workdaySourceRows = workerScopedRows.length ? workerScopedRows : data.workdayRows
-  const workdays = selectWorkerScopedWorkdays(workdaySourceRows, workerLogin, workerName, session)
-  const workerWorkdayIds = new Set(workdays.map((row) => toText(row.workdayId)).filter(Boolean))
+  const scopedWorkdays = selectWorkerScopedWorkdays(workdaySourceRows, workerLogin, workerName, session)
+  const workerWorkdayIds = new Set(scopedWorkdays.map((row) => toText(row.workdayId)).filter(Boolean))
+  const pauseRowsRaw = await fetchWorkdayPauseRows(orgId, workerLogin)
+  const pauseRowsScoped = pauseRowsRaw.filter((row) => {
+    const pauseWorkdayId = toText(row?.workdayId)
+    if (pauseWorkdayId && workerWorkdayIds.has(pauseWorkdayId)) {
+      return true
+    }
+    if (!pauseWorkdayId) {
+      return normalizeKey(row?.workerLogin) === normalizeKey(workerLogin)
+    }
+    return false
+  })
+  const pauseRowsByWorkday = buildPauseRowsByWorkday(pauseRowsScoped)
+  const snapshotNow = nowIso()
+
+  let workdays = scopedWorkdays.map((row) => {
+    const workdayId = toText(row?.workdayId)
+    const openPause = pickLatestOpenPause(pauseRowsByWorkday.get(workdayId) || [], workerLogin, workdayId)
+    const pauseTotalSec = workdayPauseTotalFromRows(row, pauseRowsByWorkday, snapshotNow, openPause)
+    return {
+      ...row,
+      pauseTotalSec,
+      pauseOpenId: toText(openPause?.pauseId || row?.pauseOpenId),
+      pauseOpenAt: parseIso(openPause?.startAt || row?.pauseOpenAt),
+    }
+  })
+
   let activeWorkday = pickActiveWorkday(workdays)
+  let activePause = await fetchActivePauseForWorker(orgId, workerLogin, activeWorkday?.workdayId, pauseRowsScoped)
 
   if (activeWorkday) {
     activeWorkday = await closeEndingIfDue({ ...session, orgId }, activeWorkday)
   }
 
+  if (!isPauseOpen(activePause) && activeWorkday) {
+    const openFromRows = pickLatestOpenPause(
+      pauseRowsByWorkday.get(toText(activeWorkday?.workdayId)) || [],
+      workerLogin,
+      activeWorkday?.workdayId,
+    )
+    if (openFromRows) {
+      activePause = openFromRows
+    } else if (parseIso(activeWorkday?.pauseOpenAt)) {
+      activePause = normalizePause({
+        pauseId: toText(activeWorkday?.pauseOpenId) || `PAUSE-${toText(activeWorkday?.workdayId)}`,
+        workdayId: toText(activeWorkday?.workdayId),
+        workerLogin,
+        workerName,
+        startAt: activeWorkday.pauseOpenAt,
+        stopAt: '',
+        status: 'RUNNING',
+      })
+    }
+  }
+
+  if (isPauseOpen(activePause)) {
+    const activeWorkdayId = toText(activeWorkday?.workdayId)
+    if (!activeWorkdayId || toText(activePause?.workdayId) !== activeWorkdayId || !isWorkdayOpen(activeWorkday)) {
+      activePause = null
+    }
+  } else {
+    activePause = null
+  }
+
+  const activePauseForWorkday = activePause && toText(activePause?.workdayId) === toText(activeWorkday?.workdayId)
+    ? activePause
+    : null
+  const activePauseTotalSec = activeWorkday
+    ? workdayPauseTotalFromRows(activeWorkday, pauseRowsByWorkday, snapshotNow, activePauseForWorkday)
+    : 0
+  if (activeWorkday) {
+    activeWorkday = {
+      ...activeWorkday,
+      pauseTotalSec: activePauseTotalSec,
+      pauseOpenId: toText(activePauseForWorkday?.pauseId),
+      pauseOpenAt: parseIso(activePauseForWorkday?.startAt),
+    }
+  }
+
+  workdays = workdays.map((row) => {
+    if (toText(row?.workdayId) !== toText(activeWorkday?.workdayId)) {
+      return row
+    }
+    return {
+      ...row,
+      pauseTotalSec: activePauseTotalSec,
+      pauseOpenId: toText(activePauseForWorkday?.pauseId),
+      pauseOpenAt: parseIso(activePauseForWorkday?.startAt),
+    }
+  })
+
   const events = selectWorkerScopedEvents(data.eventRows, workerLogin, zoneById, workerWorkdayIds, workerName, session)
   const fallbackCycle = cycleFallbackFromWorkdayEnabled ? fallbackActiveCycleFromWorkday(activeWorkday, zones) : null
   const activeCycle = pickActiveCycle(events, activeWorkday?.workdayId) || fallbackCycle
-  const summary = summaryFromWorkdays(workdays, activeWorkday)
+  const summary = summaryFromWorkdays(workdays, activeWorkday, pauseRowsByWorkday, activePauseForWorkday)
 
   return {
     orgId,
@@ -1190,6 +1751,8 @@ export async function getMobileSnapshot(session) {
     })),
     startZone: zones.find((zone) => zone.kind === 'START') ?? null,
     activeWorkday,
+    activePause: activePauseForWorkday,
+    pauseTotalSec: activePauseTotalSec,
     activeCycle,
     summary,
     workdayEvents: buildWorkdayEventFeed(workdays),
@@ -1593,6 +2156,71 @@ async function stopCycle(snapshot, cycle, reason, commentValue, gpsData = null) 
   }
 }
 
+export async function startMobilePause({ session, snapshot }) {
+  assertConfigured()
+  await assertSignedInUser()
+
+  const nextSnapshot = snapshot || (await getMobileSnapshot(session))
+  const activeWorkday = nextSnapshot?.activeWorkday
+  const activePause = nextSnapshot?.activePause
+
+  if (!isWorkdayOpen(activeWorkday)) {
+    throw new Error('Brak aktywnego dnia pracy. Najpierw zeskanuj START.')
+  }
+  if (toUpper(activeWorkday?.status) !== 'RUNNING') {
+    throw new Error('Pauza jest dostepna tylko podczas aktywnego dnia (RUNNING).')
+  }
+  if (isPauseOpen(activePause)) {
+    return {
+      message: 'Masz juz aktywna przerwe.',
+      snapshot: await getMobileSnapshot(session),
+    }
+  }
+
+  await startWorkdayPauseRecord(nextSnapshot, activeWorkday)
+
+  let pauseGps = null
+  try {
+    pauseGps = await captureGpsForAction('PAUSE_START')
+  } catch {
+    pauseGps = null
+  }
+  const activeCycle = nextSnapshot?.activeCycle
+  if (activeCycle && isEventOpen(activeCycle)) {
+    try {
+      await stopCycle(nextSnapshot, activeCycle, 'PAUSE_START', '', cloneGpsWithAction(pauseGps, 'CLEAN_STOP'))
+    } catch {
+      // Pause should remain active even if cycle close fails transiently.
+    }
+  }
+
+  return {
+    message: 'Rozpoczeto przerwe.',
+    snapshot: await getMobileSnapshot(session),
+  }
+}
+
+export async function stopMobilePause({ session, snapshot }) {
+  assertConfigured()
+  await assertSignedInUser()
+
+  const nextSnapshot = snapshot || (await getMobileSnapshot(session))
+  const activePause = nextSnapshot?.activePause
+  if (!isPauseOpen(activePause)) {
+    return {
+      message: 'Brak aktywnej przerwy.',
+      snapshot: await getMobileSnapshot(session),
+    }
+  }
+
+  await stopWorkdayPauseRecord(nextSnapshot, activePause)
+
+  return {
+    message: 'Przerwa zakonczona. Wroc do skanowania stref.',
+    snapshot: await getMobileSnapshot(session),
+  }
+}
+
 export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWorkdayImmediately = false }) {
   assertConfigured()
   await assertSignedInUser()
@@ -1608,6 +2236,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
 
   const activeWorkday = snapshot.activeWorkday
   const activeCycle = snapshot.activeCycle
+  const activePause = snapshot.activePause
   const workdayOpen = isWorkdayOpen(activeWorkday)
   const staleWorkdayOpen = workdayOpen && !isTodayIso(activeWorkday?.startAt)
   const effectiveWorkdayOpen = workdayOpen && !staleWorkdayOpen
@@ -1634,6 +2263,10 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
       throw new Error('Brak aktywnego dnia. Najpierw zeskanuj START.')
     }
 
+    if (isPauseOpen(activePause)) {
+      await stopWorkdayPauseRecord(snapshot, activePause)
+    }
+
     if (activeCycle && isEventOpen(activeCycle)) {
       await stopCycle(snapshot, activeCycle, 'STOP_END_DAY', comment, cloneGpsWithAction(stopGps, 'CLEAN_STOP'))
     }
@@ -1655,6 +2288,10 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
       message: `${stopMessage}${messageSuffix}`.trim(),
       snapshot: await getMobileSnapshot(session),
     }
+  }
+
+  if (isPauseOpen(activePause)) {
+    throw new Error('Masz aktywna przerwe. Kliknij "Wroc do pracy", aby ja zakonczyc.')
   }
 
   if (!effectiveWorkdayOpen) {
@@ -1724,6 +2361,9 @@ export async function closeMobileWorkdayImmediately({ session, snapshot, comment
   }
 
   const stopGps = await captureGpsForAction('STOP')
+  if (isPauseOpen(nextSnapshot?.activePause)) {
+    await stopWorkdayPauseRecord(nextSnapshot, nextSnapshot.activePause)
+  }
   const activeCycle = nextSnapshot?.activeCycle
   if (activeCycle && isEventOpen(activeCycle)) {
     await stopCycle(nextSnapshot, activeCycle, 'STOP_END_DAY', comment, cloneGpsWithAction(stopGps, 'CLEAN_STOP'))

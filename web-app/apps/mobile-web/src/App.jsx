@@ -12,7 +12,13 @@ import {
 import { fetchZoneChecklistDefinition, saveWorkdayCloseResult, saveZoneChecklistResult } from './services/mobileChecklistService'
 import { MobileQrScanner, normalizeQrValue } from './services/mobileQrScannerService'
 import { fetchMobileSchedule } from './services/mobileScheduleService'
-import { closeMobileWorkdayImmediately, getMobileSnapshot, scanMobileQr } from './services/mobileWorkflowService'
+import {
+  closeMobileWorkdayImmediately,
+  getMobileSnapshot,
+  scanMobileQr,
+  startMobilePause,
+  stopMobilePause,
+} from './services/mobileWorkflowService'
 import { writeMobileSession } from './state/sessionStore'
 
 const VIEW = {
@@ -427,9 +433,17 @@ function isCycleOpen(cycle) {
   return !txt(cycle.endAt)
 }
 
+function isPauseOpen(pause) {
+  if (!pause) return false
+  const status = up(pause.status)
+  if (status === 'CLOSED' || status === 'STOPPED') return false
+  return !txt(pause.stopAt)
+}
+
 function resolveWorkflowView(snapshot, nowIsoValue = new Date().toISOString()) {
   if (!isLiveWorkday(snapshot?.activeWorkday, nowIsoValue)) return VIEW.START
   if (up(snapshot?.activeWorkday?.status) === 'ENDING') return VIEW.END
+  if (isPauseOpen(snapshot?.activePause)) return VIEW.PAUSE
   if (isCycleOpen(snapshot?.activeCycle)) return VIEW.CLEAN
   return VIEW.SCAN
 }
@@ -524,6 +538,39 @@ function getWorkdaySeconds(row, nowIso) {
   return secBetween(startIso, nowIso)
 }
 
+function getPauseSeconds(row, nowIso) {
+  if (!row) return 0
+  const direct = Number(row.durationSec)
+  if (Number.isFinite(direct) && direct >= 0) {
+    return Math.floor(direct)
+  }
+
+  const stopIso = parseIso(row.stopAt)
+  if (stopIso) {
+    return secBetween(row.startAt, stopIso)
+  }
+  if (isPauseOpen(row)) {
+    return secBetween(row.startAt, nowIso)
+  }
+  return 0
+}
+
+function getWorkdayPauseSeconds(row, nowIso) {
+  const direct = Number(row?.pauseTotalSec)
+  let total = Number.isFinite(direct) && direct >= 0 ? Math.floor(direct) : 0
+  const openAt = parseIso(row?.pauseOpenAt)
+  if (openAt && isWorkdayOpen(row)) {
+    total += secBetween(openAt, nowIso)
+  }
+  return Math.max(0, total)
+}
+
+function getWorkdayNetSeconds(row, nowIso) {
+  const gross = getWorkdaySeconds(row, nowIso)
+  const pause = getWorkdayPauseSeconds(row, nowIso)
+  return Math.max(0, gross - pause)
+}
+
 function inMonth(isoValue, state) {
   const iso = parseIso(isoValue)
   if (!iso) return false
@@ -552,14 +599,14 @@ function groupWorklog(events, state) {
 
 function buildSummary(workdays, state, nowIso) {
   const monthRows = (workdays || []).filter((row) => inMonth(row.startAt, state))
-  const monthSeconds = monthRows.reduce((acc, row) => acc + getWorkdaySeconds(row, nowIso), 0)
+  const monthSeconds = monthRows.reduce((acc, row) => acc + getWorkdayNetSeconds(row, nowIso), 0)
   const byDay = new Map()
 
   monthRows.forEach((row) => {
     const key = dateKey(row.startAt)
     if (!key) return
     const sum = byDay.get(key) || 0
-    byDay.set(key, sum + getWorkdaySeconds(row, nowIso))
+    byDay.set(key, sum + getWorkdayNetSeconds(row, nowIso))
   })
 
   const days = [...byDay.entries()]
@@ -1346,24 +1393,39 @@ export default function App() {
 
   const nowIso = useMemo(() => new Date(tick).toISOString(), [tick])
   const activeWorkday = snapshot?.activeWorkday
+  const activePause = snapshot?.activePause
   const activeCycle = snapshot?.activeCycle
   const activeCycleZoneId = txt(activeCycle?.zoneId)
   const activeCycleZoneName = txt(activeCycle?.zoneName)
   const activeCycleClientName = txt(activeCycle?.clientName)
   const activeCycleLocation = txt(activeCycle?.location)
-  const activeCycleOpen = useMemo(
-    () => isCycleOpen(activeCycle),
-    [activeCycle?.status, activeCycle?.endAt, activeCycle?.startAt, activeCycle?.eventId, activeCycle?.zoneId],
+  const pauseOpen = useMemo(() => isPauseOpen(activePause), [activePause])
+  const pauseTimer = useMemo(
+    () => (pauseOpen ? hms(getPauseSeconds(activePause, nowIso)) : '00:00:00'),
+    [activePause, nowIso, pauseOpen],
   )
+  const activeCycleOpen = useMemo(() => isCycleOpen(activeCycle), [activeCycle])
   const activeCycleKey = useMemo(
     () => `${txt(activeCycle?.eventId || activeCycle?.cycleId)}:${activeCycleZoneId}`,
     [activeCycle?.eventId, activeCycle?.cycleId, activeCycleZoneId],
   )
   const liveWorkdayOpen = useMemo(() => isLiveWorkday(activeWorkday, nowIso), [activeWorkday, nowIso])
+  const pauseTotalSec = useMemo(() => {
+    const snapshotValue = Number(snapshot?.pauseTotalSec)
+    if (Number.isFinite(snapshotValue) && snapshotValue >= 0) {
+      return Math.floor(snapshotValue)
+    }
+
+    let total = getWorkdayPauseSeconds(activeWorkday, nowIso)
+    if (pauseOpen && !parseIso(activeWorkday?.pauseOpenAt)) {
+      total += getPauseSeconds(activePause, nowIso)
+    }
+    return Math.max(0, total)
+  }, [activePause, activeWorkday, nowIso, pauseOpen, snapshot?.pauseTotalSec])
   const topActionIsStart = !liveWorkdayOpen
   const workdayTimer = useMemo(
-    () => (liveWorkdayOpen ? hms(getWorkdaySeconds(activeWorkday, nowIso)) : '--:--:--'),
-    [activeWorkday, nowIso, liveWorkdayOpen],
+    () => (liveWorkdayOpen ? hms(Math.max(0, getWorkdaySeconds(activeWorkday, nowIso) - pauseTotalSec)) : '--:--:--'),
+    [activeWorkday, nowIso, liveWorkdayOpen, pauseTotalSec],
   )
   const cycleTimer = useMemo(() => (isCycleOpen(activeCycle) ? hms(secBetween(activeCycle?.startAt, nowIso)) : '--:--:--'), [activeCycle, nowIso])
   const startLabel = useMemo(() => (liveWorkdayOpen ? `START ${formatTime(activeWorkday?.startAt)}` : ''), [activeWorkday?.startAt, liveWorkdayOpen])
@@ -2103,10 +2165,60 @@ export default function App() {
     }
   }
 
-  const doPause = () => {
-    setView(VIEW.PAUSE)
-    setNotice('Logika pauzy zostanie dopieta po migracji backendu.')
-  }
+  const doPause = useCallback(async () => {
+    if (!session?.token || !snapshot) return
+
+    if (pauseOpen) {
+      setView(VIEW.PAUSE)
+      return
+    }
+
+    if (!isWorkdayOpen(activeWorkday)) {
+      setNotice('Brak aktywnego dnia pracy. Najpierw zeskanuj START.')
+      setView(VIEW.START)
+      return
+    }
+
+    if (up(activeWorkday?.status) !== 'RUNNING') {
+      setNotice('Pauza jest dostepna tylko podczas aktywnego dnia (RUNNING).')
+      return
+    }
+
+    setOperationPending(true)
+    try {
+      const result = await startMobilePause({ session, snapshot })
+      setSnapshot(result.snapshot)
+      setNotice(txt(result.message))
+      setView(VIEW.PAUSE)
+    } catch (error) {
+      if (isUnauthenticatedError(error)) {
+        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        return
+      }
+      setNotice(parseErrorMessage(error, 'Nie udalo sie rozpoczac przerwy.'))
+    } finally {
+      setOperationPending(false)
+    }
+  }, [activeWorkday, forceLoginWithMessage, pauseOpen, session, snapshot])
+
+  const doResumeFromPause = useCallback(async () => {
+    if (!session?.token || !snapshot) return
+    setOperationPending(true)
+    try {
+      const result = await stopMobilePause({ session, snapshot })
+      setSnapshot(result.snapshot)
+      setNotice(txt(result.message))
+      setView(resolveWorkflowView(result.snapshot))
+    } catch (error) {
+      if (isUnauthenticatedError(error)) {
+        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
+        return
+      }
+      setNotice(parseErrorMessage(error, 'Nie udalo sie zakonczyc przerwy.'))
+    } finally {
+      setOperationPending(false)
+    }
+  }, [forceLoginWithMessage, session, snapshot])
 
   const doTopAction = () => {
     if (!isWorkdayOpen(activeWorkday)) {
@@ -2377,15 +2489,31 @@ export default function App() {
             workerName={snapshot?.worker?.name}
             timer={workdayTimer}
             startLabel={startLabel}
-            onPause={() => setView(resolveWorkflowView(snapshot))}
+            onPause={() => setView(VIEW.PAUSE)}
             onStop={doTopAction}
             topActionIsStart={topActionIsStart}
           />
           <div className="scan-glass">
             <div className="scan-title">Pauza</div>
-            <div className="scan-sub">Tryb pauzy bedzie aktywowany po migracji logiki backend.</div>
+            {pauseOpen ? (
+              <div className="scan-sub">
+                Trwajaca przerwa: <strong>{pauseTimer}</strong>
+                <br />
+                Czas netto dnia: <strong>{workdayTimer}</strong>
+              </div>
+            ) : (
+              <div className="scan-sub">Brak aktywnej przerwy.</div>
+            )}
           </div>
-          <button className="btn secondary btn-xl" type="button" onClick={() => setView(resolveWorkflowView(snapshot))}>Wroc do pracy</button>
+          {pauseOpen ? (
+            <button className="btn secondary btn-xl" type="button" onClick={doResumeFromPause} disabled={globalPending}>
+              {operationPending ? 'Konczenie przerwy...' : 'Wroc do pracy'}
+            </button>
+          ) : (
+            <button className="btn secondary btn-xl" type="button" onClick={() => setView(resolveWorkflowView(snapshot))}>
+              Wroc do pracy
+            </button>
+          )}
         </section>
       )
     }
