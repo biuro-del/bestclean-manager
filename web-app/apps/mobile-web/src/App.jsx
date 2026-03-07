@@ -86,6 +86,18 @@ const QR_PLACE_OPTIONS = [
   'Inne',
 ]
 
+const LOGIN_LANGUAGE_OPTIONS = [
+  { code: 'EN', nativeName: 'English', enabled: false },
+  { code: 'FR', nativeName: 'Français', enabled: false },
+  { code: 'IT', nativeName: 'Italiano', enabled: false },
+  { code: 'D', nativeName: 'Deutsch', enabled: false },
+  { code: 'ES', nativeName: 'Español', enabled: false },
+  { code: 'PL', nativeName: 'Polski', enabled: true },
+  { code: 'UA', nativeName: 'Українська', enabled: false },
+  { code: 'RU', nativeName: 'Русский', enabled: false },
+  { code: 'ŚL', nativeName: 'Ślōnski', enabled: false },
+]
+
 function HomeIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -626,10 +638,55 @@ function buildSummary(workdays, state, nowIso) {
 function LoginView({ pending, error, onSubmit }) {
   const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
+  const [languageMenuOpen, setLanguageMenuOpen] = useState(false)
+  const [languageCode, setLanguageCode] = useState('PL')
+  const activeLanguage = useMemo(
+    () => LOGIN_LANGUAGE_OPTIONS.find((option) => option.code === languageCode) || LOGIN_LANGUAGE_OPTIONS[0],
+    [languageCode],
+  )
 
   return (
     <section className="card">
       <div className="title">Logowanie</div>
+      <div className="login-language">
+        <button
+          className="btn secondary login-language__trigger"
+          type="button"
+          onClick={() => setLanguageMenuOpen((prev) => !prev)}
+          aria-expanded={languageMenuOpen}
+          aria-controls="login-language-list"
+        >
+          <span>Zmień język</span>
+          <strong>{activeLanguage.code}</strong>
+        </button>
+        {languageMenuOpen ? (
+          <div id="login-language-list" className="login-language__list" role="listbox" aria-label="Wybór języka">
+            {LOGIN_LANGUAGE_OPTIONS.map((option) => {
+              const selected = option.code === languageCode
+              const disabled = option.enabled !== true
+              return (
+                <button
+                  key={option.code}
+                  className={`login-language__item${selected ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`}
+                  type="button"
+                  disabled={disabled}
+                  aria-disabled={disabled}
+                  onClick={() => {
+                    if (disabled) return
+                    setLanguageCode(option.code)
+                    setLanguageMenuOpen(false)
+                  }}
+                  role="option"
+                  aria-selected={selected}
+                >
+                  <span className="login-language__code">{option.code}</span>
+                  <span className="login-language__name">{option.nativeName}</span>
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
+      </div>
       <div className="box col">
         <label className="muted">Login</label>
         <input className="input" value={login} onChange={(event) => setLogin(event.target.value)} />

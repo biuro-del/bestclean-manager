@@ -223,6 +223,73 @@ body {
   cursor: not-allowed;
 }
 
+.login-language {
+  margin-bottom: 10px;
+}
+
+.login-language__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  font-size: 15px;
+}
+
+.login-language__trigger strong {
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.login-language__list {
+  margin-top: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.login-language__item {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.04);
+  padding: 10px 12px;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.login-language__item.is-active {
+  border-color: rgba(37, 99, 235, 0.4);
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.login-language__item.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.login-language__code {
+  min-width: 34px;
+  font-size: 12px;
+  font-weight: 900;
+  color: #334155;
+}
+
+.login-language__name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
 .today-tasks-progress {
   border: 1px solid rgba(15, 23, 42, 0.14);
   border-radius: 14px;
