@@ -2590,7 +2590,16 @@ export default function App() {
               </div>
             ) : null}
             {view === VIEW.END ? <div className="scan-sub">Auto-zamknięcie za: {endingLeft}</div> : null}
-            {(view === VIEW.START || view === VIEW.SCAN) ? <div className="scan-sub">Skanuj kod QR, aby przejść dalej.</div> : null}
+            {view === VIEW.START ? <div className="scan-sub">Skanuj kod QR, aby przejść dalej.</div> : null}
+            {view === VIEW.SCAN ? (
+              <div className="scan-sub">
+                Dzień pracy już trwa - czas nalicza się automatycznie.
+                <br />
+                Kliknij „Skanuj QR” i zeskanuj kod strefy przed rozpoczęciem sprzątania.
+                <br />
+                Każda kolejna strefa wymaga nowego skanu QR.
+              </div>
+            ) : null}
           </div>
           {CHECKLIST_ENABLED && view === VIEW.CLEAN ? (
             <div className="scan-glass checklist-wrap">
