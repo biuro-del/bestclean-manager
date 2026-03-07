@@ -197,7 +197,7 @@ const TEXTS = {
     'pause.scanToResume': 'Zaōnacz QR, coby wrōcić do roboty',
     'pause.returnToWork': 'Wroć do roboty',
     'workflow.scanQrButton': 'Zaōnacz QR',
-    'workflow.todayTasksButton': 'Dzisiejsze zadania',
+    'workflow.todayTasksButton': 'Robota na dzisiej',
     'workflow.progressLabel': 'Postymp dzisiejszyj roboty',
     'workflow.startTitle': 'Zacznij robota',
     'workflow.scanTitle': 'Zaōnacz strefa',
