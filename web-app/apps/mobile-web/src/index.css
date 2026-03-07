@@ -224,46 +224,45 @@ body {
 }
 
 .login-language {
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .login-language__trigger {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 12px 14px;
-  font-size: 15px;
+  gap: 8px;
+  padding: 9px 10px;
+  font-size: 14px;
 }
 
 .login-language__trigger strong {
-  font-size: 13px;
+  font-size: 11px;
   letter-spacing: 0.04em;
 }
 
 .login-language__list {
-  margin-top: 8px;
+  margin-top: 6px;
   border: 1px solid rgba(15, 23, 42, 0.14);
-  border-radius: 14px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.9);
-  padding: 6px;
+  padding: 3px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: 260px;
-  overflow: auto;
+  gap: 2px;
 }
 
 .login-language__item {
   width: 100%;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(15, 23, 42, 0.04);
-  padding: 10px 12px;
+  padding: 5px 8px;
   text-align: left;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
+  min-height: 26px;
   cursor: pointer;
 }
 
@@ -278,14 +277,15 @@ body {
 }
 
 .login-language__code {
-  min-width: 34px;
-  font-size: 12px;
+  min-width: 26px;
+  font-size: 10px;
   font-weight: 900;
   color: #334155;
 }
 
 .login-language__name {
-  font-size: 14px;
+  font-size: 12px;
+  line-height: 1.2;
   font-weight: 700;
   color: #0f172a;
 }
