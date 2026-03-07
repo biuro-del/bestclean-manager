@@ -1341,6 +1341,25 @@ export default function App() {
     setLanguageCode(normalized)
   }, [session])
 
+  const reloadApp = useCallback(() => {
+    if (typeof window === 'undefined' || !window.location?.reload) {
+      return false
+    }
+    const guardKey = 'iclean_mobile_reload_guard_v1'
+    const now = Date.now()
+    try {
+      const prev = Number(sessionStorage.getItem(guardKey) || 0)
+      if (Number.isFinite(prev) && now - prev < 3000) {
+        return false
+      }
+      sessionStorage.setItem(guardKey, String(now))
+    } catch {
+      // Ignore storage errors and try reload anyway.
+    }
+    window.location.reload()
+    return true
+  }, [])
+
   const tr = useCallback((key, vars) => i18nT(languageCode, key, vars), [languageCode])
   const trRuntime = useCallback((message) => translateRuntimeMessage(languageCode, message), [languageCode])
 
@@ -1965,6 +1984,9 @@ export default function App() {
       const nextSession = await loginMobile({ login, password })
       const preferredLanguage = readMobileLanguage(nextSession)
       const normalizedLanguage = writeMobileLanguage(preferredLanguage, nextSession)
+      if (reloadApp()) {
+        return
+      }
       setSession(nextSession)
       setLanguageCode(normalizedLanguage)
       setView(VIEW.MENU)
@@ -2172,6 +2194,7 @@ export default function App() {
         showVersionPopup: false,
         notice: `${resultMessage} ${logoutReason}`.trim(),
       })
+      reloadApp()
       return { deferred: false }
     }
 
@@ -2181,7 +2204,7 @@ export default function App() {
     setView(nextView)
     closeScan()
     return { deferred: false }
-  }, [activeCycle, checklistItems, checklistMeta?.clientName, checklistMeta?.location, checklistMeta?.zoneName, closeScan, doLogout, findZoneInSnapshot, session, snapshot])
+  }, [activeCycle, checklistItems, checklistMeta?.clientName, checklistMeta?.location, checklistMeta?.zoneName, closeScan, doLogout, findZoneInSnapshot, reloadApp, session, snapshot])
 
   const onCloseCycleCancel = useCallback(() => {
     if (closeCycleState.pending) return
