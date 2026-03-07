@@ -2574,10 +2574,13 @@ export default function App() {
             onPause={doPause}
             onStop={doTopAction}
             topActionIsStart={topActionIsStart}
-          />
-          <button className="btn action btn-xl" type="button" onClick={() => openScan('workflow', 'Skanuj QR', 'Wpisz kod QR / roomId.')}>Skanuj QR</button>
-          <div className="scan-glass checklist-wrap">
-            <div className="scan-title">{view === VIEW.START ? 'Rozpocznij pracę' : view === VIEW.SCAN ? 'Skanuj strefę' : view === VIEW.CLEAN ? 'W trakcie sprzątania' : 'Kończenie dnia'}</div>
+	          />
+	          <button className="btn action btn-xl" type="button" onClick={() => openScan('workflow', 'Skanuj QR', 'Wpisz kod QR / roomId.')}>Skanuj QR</button>
+	          <button className="btn secondary btn-xl btn--coming-soon" type="button" disabled aria-disabled="true" title="Wkrótce">
+	            Dzisiejsze zadania
+	          </button>
+	          <div className="scan-glass checklist-wrap">
+	            <div className="scan-title">{view === VIEW.START ? 'Rozpocznij pracę' : view === VIEW.SCAN ? 'Skanuj strefę' : view === VIEW.CLEAN ? 'W trakcie sprzątania' : 'Kończenie dnia'}</div>
             {view === VIEW.CLEAN ? (
               <div className="scan-sub">
                 Klient: {txt(activeCycle?.clientName || checklistMeta?.clientName) || '-'}

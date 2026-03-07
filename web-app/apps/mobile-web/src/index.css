@@ -218,6 +218,11 @@ body {
   background: rgba(15, 23, 42, 0.06);
 }
 
+.btn--coming-soon {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
 .btn-xl {
   padding: 16px;
 }
