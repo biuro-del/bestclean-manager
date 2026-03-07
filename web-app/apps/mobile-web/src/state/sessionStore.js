@@ -1,18 +1,48 @@
 const SESSION_KEY = 'iclean_mobile_session_v1'
 const LAST_ORG_KEY = 'iclean_mobile_last_org_v1'
 const LANGUAGE_KEY = 'iclean_mobile_lang_v1'
-const DEFAULT_LANGUAGE = 'PL'
+const LANGUAGE_USER_KEY_PREFIX = 'iclean_mobile_lang_user_v1'
+const DEFAULT_LANGUAGE = 'Si'
 
 function toText(value) {
   return String(value ?? '').trim()
 }
 
-function normalizeLanguageCode(value) {
+function parseLanguageCode(value) {
   const code = toText(value)
   if (code === 'PL' || code === 'Si') {
     return code
   }
-  return DEFAULT_LANGUAGE
+  return ''
+}
+
+function normalizeLanguageCode(value) {
+  return parseLanguageCode(value) || DEFAULT_LANGUAGE
+}
+
+function normalizeIdentityPart(value) {
+  return toText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '')
+}
+
+function languageKeyForUser(sessionOrIdentity) {
+  const orgId = normalizeIdentityPart(sessionOrIdentity?.orgId) || 'default'
+  const userIdentity =
+    normalizeIdentityPart(sessionOrIdentity?.workerLogin) ||
+    normalizeIdentityPart(sessionOrIdentity?.login) ||
+    normalizeIdentityPart(sessionOrIdentity?.email)
+  if (!userIdentity) {
+    return ''
+  }
+  return `${LANGUAGE_USER_KEY_PREFIX}_${orgId}_${userIdentity}`
+}
+
+function readStoredLanguage(storageKey) {
+  if (!storageKey) {
+    return ''
+  }
+  return parseLanguageCode(localStorage.getItem(storageKey))
 }
 
 export function readMobileSession() {
@@ -60,16 +90,25 @@ export function readPreferredOrgId() {
   return toText(localStorage.getItem(LAST_ORG_KEY))
 }
 
-export function readMobileLanguage() {
+export function readMobileLanguage(sessionOrIdentity = null) {
   try {
+    const userLanguageKey = languageKeyForUser(sessionOrIdentity)
+    const userLanguage = readStoredLanguage(userLanguageKey)
+    if (userLanguage) {
+      return userLanguage
+    }
     return normalizeLanguageCode(localStorage.getItem(LANGUAGE_KEY))
   } catch {
     return DEFAULT_LANGUAGE
   }
 }
 
-export function writeMobileLanguage(languageCode) {
+export function writeMobileLanguage(languageCode, sessionOrIdentity = null) {
   const normalized = normalizeLanguageCode(languageCode)
   localStorage.setItem(LANGUAGE_KEY, normalized)
+  const userLanguageKey = languageKeyForUser(sessionOrIdentity)
+  if (userLanguageKey) {
+    localStorage.setItem(userLanguageKey, normalized)
+  }
   return normalized
 }

@@ -1267,7 +1267,7 @@ export default function App() {
   const [session, setSession] = useState(() => getMobileSession())
   const [snapshot, setSnapshot] = useState(null)
   const [view, setView] = useState(() => (getMobileSession()?.token ? VIEW.MENU : VIEW.LOGIN))
-  const [languageCode, setLanguageCode] = useState(() => readMobileLanguage())
+  const [languageCode, setLanguageCode] = useState(() => readMobileLanguage(getMobileSession()))
   const [notice, setNotice] = useState('')
   const [tick, setTick] = useState(Date.now())
   const [refreshPending, setRefreshPending] = useState(false)
@@ -1337,9 +1337,9 @@ export default function App() {
   }, [])
 
   const setAppLanguage = useCallback((nextLanguageCode) => {
-    const normalized = writeMobileLanguage(nextLanguageCode)
+    const normalized = writeMobileLanguage(nextLanguageCode, session)
     setLanguageCode(normalized)
-  }, [])
+  }, [session])
 
   const tr = useCallback((key, vars) => i18nT(languageCode, key, vars), [languageCode])
   const trRuntime = useCallback((message) => translateRuntimeMessage(languageCode, message), [languageCode])
@@ -1963,7 +1963,10 @@ export default function App() {
     setNotice('')
     try {
       const nextSession = await loginMobile({ login, password })
+      const preferredLanguage = readMobileLanguage(nextSession)
+      const normalizedLanguage = writeMobileLanguage(preferredLanguage, nextSession)
       setSession(nextSession)
+      setLanguageCode(normalizedLanguage)
       setView(VIEW.MENU)
       setWorklogMonth(monthNow())
       setSummaryMonth(monthNow())
