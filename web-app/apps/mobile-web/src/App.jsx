@@ -648,45 +648,6 @@ function LoginView({ pending, error, onSubmit }) {
   return (
     <section className="card">
       <div className="title">Logowanie</div>
-      <div className="login-language">
-        <button
-          className="btn secondary login-language__trigger"
-          type="button"
-          onClick={() => setLanguageMenuOpen((prev) => !prev)}
-          aria-expanded={languageMenuOpen}
-          aria-controls="login-language-list"
-        >
-          <span>Zmień język</span>
-          <strong>{activeLanguage.code}</strong>
-        </button>
-        {languageMenuOpen ? (
-          <div id="login-language-list" className="login-language__list" role="listbox" aria-label="Wybór języka">
-            {LOGIN_LANGUAGE_OPTIONS.map((option) => {
-              const selected = option.code === languageCode
-              const disabled = option.enabled !== true
-              return (
-                <button
-                  key={option.code}
-                  className={`login-language__item${selected ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`}
-                  type="button"
-                  disabled={disabled}
-                  aria-disabled={disabled}
-                  onClick={() => {
-                    if (disabled) return
-                    setLanguageCode(option.code)
-                    setLanguageMenuOpen(false)
-                  }}
-                  role="option"
-                  aria-selected={selected}
-                >
-                  <span className="login-language__code">{option.code}</span>
-                  <span className="login-language__name">{option.nativeName}</span>
-                </button>
-              )
-            })}
-          </div>
-        ) : null}
-      </div>
       <div className="box col">
         <label className="muted">Login</label>
         <input className="input" value={login} onChange={(event) => setLogin(event.target.value)} />
@@ -696,6 +657,48 @@ function LoginView({ pending, error, onSubmit }) {
         <button className="btn primary" type="button" disabled={pending} onClick={() => onSubmit({ login, password })}>
           {pending ? 'Logowanie...' : 'Zaloguj'}
         </button>
+        <div className="login-language">
+          <button
+            className="btn secondary login-language__trigger"
+            type="button"
+            onClick={() => setLanguageMenuOpen((prev) => !prev)}
+            aria-expanded={languageMenuOpen}
+            aria-controls="login-language-list"
+          >
+            <span>Zmień język</span>
+            <strong>{activeLanguage.code}</strong>
+          </button>
+          <div className="login-language__codes" aria-hidden="true">
+            {LOGIN_LANGUAGE_OPTIONS.map((option) => option.code).join(' · ')}
+          </div>
+          {languageMenuOpen ? (
+            <div id="login-language-list" className="login-language__list" role="listbox" aria-label="Wybór języka">
+              {LOGIN_LANGUAGE_OPTIONS.map((option) => {
+                const selected = option.code === languageCode
+                const disabled = option.enabled !== true
+                return (
+                  <button
+                    key={option.code}
+                    className={`login-language__item${selected ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`}
+                    type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
+                    onClick={() => {
+                      if (disabled) return
+                      setLanguageCode(option.code)
+                      setLanguageMenuOpen(false)
+                    }}
+                    role="option"
+                    aria-selected={selected}
+                  >
+                    <span className="login-language__code">{option.code}</span>
+                    <span className="login-language__name">{option.nativeName}</span>
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
+        </div>
       </div>
     </section>
   )

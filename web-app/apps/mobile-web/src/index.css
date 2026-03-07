@@ -224,7 +224,7 @@ body {
 }
 
 .login-language {
-  margin-bottom: 6px;
+  margin-top: 2px;
 }
 
 .login-language__trigger {
@@ -250,6 +250,15 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.login-language__codes {
+  margin-top: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  color: #64748b;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
 }
 
 .login-language__item {
