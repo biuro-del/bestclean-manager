@@ -475,6 +475,37 @@ body {
   line-height: 1.45;
 }
 
+.scan-sub--steps {
+  color: #0f172a;
+  background: rgba(34, 197, 94, 0.14);
+  border: 1px solid rgba(22, 163, 74, 0.32);
+  border-radius: 12px;
+  padding: 10px 12px;
+  line-height: 1.35;
+}
+
+.scan-sub__important {
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 900;
+  color: #166534;
+}
+
+.scan-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.scan-steps li::marker {
+  color: #166534;
+  font-weight: 900;
+}
+
 .checklist-wrap {
   gap: 8px;
 }

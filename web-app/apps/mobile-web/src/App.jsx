@@ -2592,12 +2592,13 @@ export default function App() {
             {view === VIEW.END ? <div className="scan-sub">Auto-zamknięcie za: {endingLeft}</div> : null}
             {view === VIEW.START ? <div className="scan-sub">Skanuj kod QR, aby przejść dalej.</div> : null}
             {view === VIEW.SCAN ? (
-              <div className="scan-sub">
-                Dzień pracy już trwa - czas nalicza się automatycznie.
-                <br />
-                Kliknij „Skanuj QR” i zeskanuj kod strefy przed rozpoczęciem sprzątania.
-                <br />
-                Każda kolejna strefa wymaga nowego skanu QR.
+              <div className="scan-sub scan-sub--steps">
+                <div className="scan-sub__important">WAŻNE: czas pracy już się nalicza.</div>
+                <ol className="scan-steps">
+                  <li>Kliknij „Skanuj QR”.</li>
+                  <li>Zeskanuj kod strefy przed rozpoczęciem sprzątania.</li>
+                  <li>Przy każdej zmianie strefy zeskanuj nowy kod QR.</li>
+                </ol>
               </div>
             ) : null}
           </div>
