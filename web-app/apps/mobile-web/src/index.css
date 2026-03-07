@@ -1059,6 +1059,19 @@ body {
   background: rgba(220, 38, 38, 0.12);
 }
 
+.settings-language {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-language__trigger {
+  width: 100%;
+}
+
+.settings-language__list {
+  margin-top: 0;
+}
+
 .global-busy-overlay {
   position: fixed;
   inset: 0;

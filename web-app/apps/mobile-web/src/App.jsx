@@ -18,7 +18,8 @@ import {
   scanMobileQr,
   startMobilePause,
 } from './services/mobileWorkflowService'
-import { writeMobileSession } from './state/sessionStore'
+import { readMobileLanguage, writeMobileLanguage, writeMobileSession } from './state/sessionStore'
+import { LOGIN_LANGUAGE_OPTIONS, t as i18nT, translateRuntimeMessage } from './state/mobileI18n'
 
 const VIEW = {
   LOGIN: 'login',
@@ -84,18 +85,6 @@ const QR_PLACE_OPTIONS = [
   'Kotłownia',
   'Archiwum',
   'Inne',
-]
-
-const LOGIN_LANGUAGE_OPTIONS = [
-  { code: 'EN', nativeName: 'English', enabled: false },
-  { code: 'ES', nativeName: 'Español', enabled: false },
-  { code: 'PL', nativeName: 'Polski', enabled: true },
-  { code: 'Si', nativeName: 'Śląski', enabled: false },
-  { code: 'D', nativeName: 'Deutsch', enabled: false },
-  { code: 'FR', nativeName: 'Français', enabled: false },
-  { code: 'IT', nativeName: 'Italiano', enabled: false },
-  { code: 'UA', nativeName: 'Українська', enabled: false },
-  { code: 'RU', nativeName: 'Русский', enabled: false },
 ]
 
 function HomeIcon() {
@@ -635,11 +624,10 @@ function buildSummary(workdays, state, nowIso) {
   return { monthSeconds, days }
 }
 
-function LoginView({ pending, error, onSubmit }) {
+function LoginView({ pending, error, onSubmit, languageCode, onLanguageChange, t }) {
   const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false)
-  const [languageCode, setLanguageCode] = useState('PL')
   const activeLanguage = useMemo(
     () => LOGIN_LANGUAGE_OPTIONS.find((option) => option.code === languageCode) || LOGIN_LANGUAGE_OPTIONS[0],
     [languageCode],
@@ -647,15 +635,15 @@ function LoginView({ pending, error, onSubmit }) {
 
   return (
     <section className="card login-card">
-      <div className="title">Logowanie</div>
+      <div className="title">{t('login.title')}</div>
       <div className="box col login-box">
-        <label className="muted">Login</label>
+        <label className="muted">{t('login.loginLabel')}</label>
         <input className="input" value={login} onChange={(event) => setLogin(event.target.value)} />
-        <label className="muted">Hasło</label>
+        <label className="muted">{t('login.passwordLabel')}</label>
         <input className="input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
         {error ? <div className="error-inline">{error}</div> : null}
         <button className="btn primary" type="button" disabled={pending} onClick={() => onSubmit({ login, password })}>
-          {pending ? 'Logowanie...' : 'Zaloguj'}
+          {pending ? t('login.submitPending') : t('login.submit')}
         </button>
         <div className="login-language">
           <button
@@ -665,14 +653,14 @@ function LoginView({ pending, error, onSubmit }) {
             aria-expanded={languageMenuOpen}
             aria-controls="login-language-list"
           >
-            <span>Zmień język</span>
+            <span>{t('login.changeLanguage')}</span>
             <strong>{activeLanguage.code}</strong>
           </button>
           <div className="login-language__codes" aria-hidden="true">
             {LOGIN_LANGUAGE_OPTIONS.map((option) => option.code).join(' · ')}
           </div>
           {languageMenuOpen ? (
-            <div id="login-language-list" className="login-language__list" role="listbox" aria-label="Wybór języka">
+            <div id="login-language-list" className="login-language__list" role="listbox" aria-label={t('login.languageSelectAria')}>
               {LOGIN_LANGUAGE_OPTIONS.map((option) => {
                 const selected = option.code === languageCode
                 const disabled = option.enabled !== true
@@ -685,7 +673,7 @@ function LoginView({ pending, error, onSubmit }) {
                     aria-disabled={disabled}
                     onClick={() => {
                       if (disabled) return
-                      setLanguageCode(option.code)
+                      onLanguageChange(option.code)
                       setLanguageMenuOpen(false)
                     }}
                     role="option"
@@ -704,23 +692,23 @@ function LoginView({ pending, error, onSubmit }) {
   )
 }
 
-function WorkHud({ workerName, timer, onPause, onStop, startLabel, topActionIsStart }) {
+function WorkHud({ workerName, timer, onPause, onStop, startLabel, topActionIsStart, t }) {
   return (
     <div className="home-hero">
       <div className="home-hero__top">
         <div>
-          <div className="home-hero__label">Twoj czas pracy</div>
+          <div className="home-hero__label">{t('hud.workTime')}</div>
           <div className="home-hero__time">{timer}</div>
         </div>
         <div className="home-actions">
-          <button className="home-action home-action--pause" type="button" onClick={onPause} aria-label="Pauza">
+          <button className="home-action home-action--pause" type="button" onClick={onPause} aria-label={t('hud.pauseAria')}>
             <PauseIcon />
           </button>
           <button
             className={`home-action ${topActionIsStart ? 'home-action--play' : 'home-action--stop'}`}
             type="button"
             onClick={onStop}
-            aria-label={topActionIsStart ? 'Start' : 'Stop'}
+            aria-label={topActionIsStart ? t('hud.startAria') : t('hud.stopAria')}
           >
             {topActionIsStart ? <PlayIcon /> : <StopIcon />}
           </button>
@@ -728,35 +716,70 @@ function WorkHud({ workerName, timer, onPause, onStop, startLabel, topActionIsSt
       </div>
       <div className="home-hero__meta">
         <span className="pill-dark">{txt(workerName).split(/\s+/)[0] || '-'}</span>
-        <span className={`pill-dark ${startLabel ? '' : 'pill-dark--alert'}`}>{startLabel || 'BRAK START'}</span>
+        <span className={`pill-dark ${startLabel ? '' : 'pill-dark--alert'}`}>{startLabel || t('hud.noStart')}</span>
       </div>
     </div>
   )
 }
 
-function SettingsModal({ open, session, onClose, onLogout }) {
+function SettingsModal({ open, session, onClose, onLogout, languageCode, onLanguageChange, t }) {
+  const [languageMenuOpen, setLanguageMenuOpen] = useState(false)
+  const activeLanguage = useMemo(
+    () => LOGIN_LANGUAGE_OPTIONS.find((option) => option.code === languageCode) || LOGIN_LANGUAGE_OPTIONS[0],
+    [languageCode],
+  )
+
   if (!open) return null
   return (
     <div className="modal" onClick={onClose}>
       <div className="modal-content settings-sheet" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">Ustawienia</div>
+          <div className="modal-title">{t('settings.title')}</div>
           <button className="link-btn" type="button" onClick={onClose}>
-            Zamknij
+            {t('common.close')}
           </button>
         </div>
         <div className="modal-body">
           <div className="settings-item">
-            Zalogowano: {txt(session?.email) || '-'}
-            <small>Organizacja: {txt(session?.orgId) || '-'}</small>
+            {t('settings.loggedInAs')}: {txt(session?.email) || '-'}
+            <small>{t('settings.organization')}: {txt(session?.orgId) || '-'}</small>
           </div>
-          <button className="settings-item" type="button">
-            Zmien jezyk
-            <small>Wkrotce</small>
-          </button>
+          <div className="settings-language">
+            <button className="settings-item settings-language__trigger" type="button" onClick={() => setLanguageMenuOpen((prev) => !prev)}>
+              {t('settings.language')}
+              <small>{activeLanguage.nativeName} ({activeLanguage.code})</small>
+            </button>
+            {languageMenuOpen ? (
+              <div className="login-language__list settings-language__list" role="listbox" aria-label={t('login.languageSelectAria')}>
+                {LOGIN_LANGUAGE_OPTIONS.map((option) => {
+                  const selected = option.code === languageCode
+                  const disabled = option.enabled !== true
+                  return (
+                    <button
+                      key={option.code}
+                      className={`login-language__item${selected ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`}
+                      type="button"
+                      disabled={disabled}
+                      aria-disabled={disabled}
+                      role="option"
+                      aria-selected={selected}
+                      onClick={() => {
+                        if (disabled) return
+                        onLanguageChange(option.code)
+                        setLanguageMenuOpen(false)
+                      }}
+                    >
+                      <span className="login-language__code">{option.code}</span>
+                      <span className="login-language__name">{option.nativeName}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : null}
+          </div>
           <button className="settings-item settings-item--danger" type="button" onClick={onLogout}>
-            Wyloguj
-            <small>Wylogowanie z urzadzenia</small>
+            {t('settings.logout')}
+            <small>{t('settings.logoutHint')}</small>
           </button>
         </div>
       </div>
@@ -764,7 +787,7 @@ function SettingsModal({ open, session, onClose, onLogout }) {
   )
 }
 
-function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
+function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false, t, trRuntime }) {
   const [code, setCode] = useState('')
   const [comment, setComment] = useState('')
   const [status, setStatus] = useState('')
@@ -794,7 +817,7 @@ function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
       onStatus: (message) => setStatus(String(message || '')),
       onTorchState: (nextState) => setTorchState(nextState || { supported: false, enabled: false }),
       onError: (error) => {
-        setCameraError(txt(error?.message || 'Nie udało się uruchomić kamery.'))
+        setCameraError(txt(error?.message || t('scan.cameraFail')))
         if (allowManualEntry) {
           setManualOpen(true)
         }
@@ -803,14 +826,14 @@ function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
         const normalized = normalizeQrValue(decodedValue)
         if (!normalized) return
         setCode(normalized)
-        setStatus(`Odczytano kod: ${normalized}`)
+        setStatus(t('scan.status.codeRead', { code: normalized }))
         submitRef.current({ code: normalized, comment: commentRef.current })
       },
     })
 
     scannerRef.current = scanner
     scanner.start().catch((error) => {
-      setCameraError(txt(error?.message || 'Nie udało się uruchomić kamery.'))
+      setCameraError(txt(error?.message || t('scan.cameraFail')))
       if (allowManualEntry) {
         setManualOpen(true)
       }
@@ -824,7 +847,7 @@ function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
       }
       scannerRef.current = null
     }
-  }, [allowManualEntry, scanState.open, scanState.nonce])
+  }, [allowManualEntry, scanState.open, scanState.nonce, t])
 
   const closeWithStop = () => {
     try {
@@ -846,7 +869,7 @@ function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
   const handleManualSubmit = () => {
     const normalized = normalizeQrValue(code)
     if (!normalized) {
-      setStatus('Wpisz kod QR lub roomId.')
+      setStatus(t('scan.status.enterCode'))
       return
     }
     try {
@@ -858,19 +881,22 @@ function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
   }
 
   if (!scanState.open) return null
+  const modalStatus = trRuntime(cameraError || status) || t('scan.status.scanning')
+  const modalTitle = trRuntime(scanState.title) || t('scan.titleDefault')
+  const modalSubtitle = trRuntime(scanState.subtitle) || t('scan.subtitleDefault')
   return (
     <div className="modal" onClick={closeWithStop}>
       <div className="modal-content scan-modal-content" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">{scanState.title || 'Skanuj QR'}</div>
+          <div className="modal-title">{modalTitle}</div>
           <button className="link-btn" type="button" onClick={closeWithStop}>
-            Wróć
+            {t('common.back')}
           </button>
         </div>
         <div className="modal-body col scan-modal-body">
-          <div className="muted">{scanState.subtitle || 'Wpisz kod QR lub roomId.'}</div>
+          <div className="muted">{modalSubtitle}</div>
           <video ref={videoRef} className="scan-video" playsInline muted />
-          <div className="scan-status">{cameraError || status || 'Skanuje...'}</div>
+          <div className="scan-status">{modalStatus}</div>
           <div className="row-inline">
             <button
               className="btn secondary"
@@ -878,24 +904,24 @@ function ScanModal({ scanState, onClose, onSubmit, allowManualEntry = false }) {
               onClick={handleTorchToggle}
               disabled={!torchState.supported}
             >
-              {torchState.supported ? `Latarka: ${torchState.enabled ? 'ON' : 'OFF'}` : 'Latarka niedostępna'}
+              {torchState.supported ? (torchState.enabled ? t('scan.flashlightOn') : t('scan.flashlightOff')) : t('scan.flashlightUnavailable')}
             </button>
             {allowManualEntry ? (
               <button className="btn secondary" type="button" onClick={() => setManualOpen((prev) => !prev)}>
-                {manualOpen ? 'Ukryj wpisywanie' : 'Wpisz recznie'}
+                {manualOpen ? t('scan.manualHide') : t('scan.manualShow')}
               </button>
             ) : null}
           </div>
           {allowManualEntry && manualOpen ? (
             <div className="box col scan-manual">
-              <div className="muted">Wpisz lub wklej kod QR / roomId.</div>
-              <input className="input" value={code} onChange={(event) => setCode(event.target.value)} placeholder="Kod QR / roomId" />
+              <div className="muted">{t('scan.manualPrompt')}</div>
+              <input className="input" value={code} onChange={(event) => setCode(event.target.value)} placeholder={t('scan.inputPlaceholder')} />
             </div>
           ) : null}
-          <input className="input" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Komentarz (opcjonalnie)" />
-          {scanState.error ? <div className="error-inline">{scanState.error}</div> : null}
+          <input className="input" value={comment} onChange={(event) => setComment(event.target.value)} placeholder={t('scan.commentPlaceholder')} />
+          {scanState.error ? <div className="error-inline">{trRuntime(scanState.error)}</div> : null}
           <button className="btn primary" type="button" disabled={scanState.pending} onClick={handleManualSubmit}>
-            {scanState.pending ? 'Przetwarzanie...' : 'Zatwierdz'}
+            {scanState.pending ? t('scan.submitPending') : t('scan.submit')}
           </button>
         </div>
       </div>
@@ -1241,6 +1267,7 @@ export default function App() {
   const [session, setSession] = useState(() => getMobileSession())
   const [snapshot, setSnapshot] = useState(null)
   const [view, setView] = useState(() => (getMobileSession()?.token ? VIEW.MENU : VIEW.LOGIN))
+  const [languageCode, setLanguageCode] = useState(() => readMobileLanguage())
   const [notice, setNotice] = useState('')
   const [tick, setTick] = useState(Date.now())
   const [refreshPending, setRefreshPending] = useState(false)
@@ -1308,6 +1335,14 @@ export default function App() {
   const resetCloseCycleState = useCallback(() => {
     setCloseCycleState(createCloseCycleState())
   }, [])
+
+  const setAppLanguage = useCallback((nextLanguageCode) => {
+    const normalized = writeMobileLanguage(nextLanguageCode)
+    setLanguageCode(normalized)
+  }, [])
+
+  const tr = useCallback((key, vars) => i18nT(languageCode, key, vars), [languageCode])
+  const trRuntime = useCallback((message) => translateRuntimeMessage(languageCode, message), [languageCode])
 
   const resetWorkdayClosePromptState = useCallback(() => {
     setWorkdayClosePromptState(createWorkdayClosePromptState())
@@ -2349,20 +2384,20 @@ export default function App() {
 
   const doResumeFromPause = useCallback(() => {
     if (!session?.token || !snapshot) return
-    openScan('workflow', 'Wróć do pracy', 'Zeskanuj QR CLEAN, zlecenia indywidualnego lub strefy specjalnej.')
-  }, [session?.token, snapshot, openScan])
+    openScan('workflow', tr('pause.returnToWork'), tr('runtime.pauseResumeByCleanQr'))
+  }, [session?.token, snapshot, openScan, tr])
 
   const doTopAction = () => {
     if (!isWorkdayOpen(activeWorkday)) {
       setView(VIEW.START)
-      openScan('workflow', 'Rozpocznij pracę', 'Zeskanuj kod START lub zlecenia indywidualnego.')
+      openScan('workflow', tr('workflow.startTitle'), tr('workflow.startHelp'))
       return
     }
     if (up(activeWorkday?.status) === 'ENDING') {
       setView(VIEW.END)
       return
     }
-    openScan('workflow', 'Koniec dnia', 'Zeskanuj STOP0, STOP5, STOP10 lub STOP15.')
+    openScan('workflow', tr('workflow.endTitle'), tr('workflow.endHelp'))
   }
 
   const doCloseWorkdayNow = useCallback(async () => {
@@ -2389,11 +2424,20 @@ export default function App() {
 
   const renderMain = () => {
     if (view === VIEW.LOGIN) {
-      return <LoginView pending={loginPending} error={loginError} onSubmit={doLogin} />
+      return (
+        <LoginView
+          pending={loginPending}
+          error={trRuntime(loginError)}
+          onSubmit={doLogin}
+          languageCode={languageCode}
+          onLanguageChange={setAppLanguage}
+          t={tr}
+        />
+      )
     }
 
     if (!snapshot) {
-      return <section className="card"><div className="muted">Wczytywanie danych...</div></section>
+      return <section className="card"><div className="muted">{tr('common.loadingData')}</div></section>
     }
 
     if (view === VIEW.MENU) {
@@ -2406,12 +2450,13 @@ export default function App() {
             onPause={doPause}
             onStop={doTopAction}
             topActionIsStart={topActionIsStart}
+            t={tr}
           />
           <div className="tile-grid--home">
-            <button className="tile tile--success" type="button" onClick={() => setView(resolveWorkflowView(snapshot))}><span className="tile-icon"><CleaningIcon /></span><span className="tile-label">Sprzątanie</span><span className="tile-sub">Skanuj strefy</span></button>
-            <button className="tile" type="button" onClick={() => setView(VIEW.SCHEDULE)}><span className="tile-icon"><CalendarIcon /></span><span className="tile-label">Grafik</span><span className="tile-sub">Tydzień</span></button>
-            <button className="tile" type="button" onClick={() => setView(VIEW.SUMMARY)}><span className="tile-icon"><ClockIcon /></span><span className="tile-label">Czas pracy</span><span className="tile-sub">Podsumowanie</span></button>
-            <button className="tile" type="button" onClick={openCoordinatorPanel}><span className="tile-icon"><UserIcon /></span><span className="tile-label">Koordynator</span><span className="tile-sub">Audyt / QR</span></button>
+            <button className="tile tile--success" type="button" onClick={() => setView(resolveWorkflowView(snapshot))}><span className="tile-icon"><CleaningIcon /></span><span className="tile-label">{tr('menu.cleaningTitle')}</span><span className="tile-sub">{tr('menu.cleaningSub')}</span></button>
+            <button className="tile" type="button" onClick={() => setView(VIEW.SCHEDULE)}><span className="tile-icon"><CalendarIcon /></span><span className="tile-label">{tr('menu.scheduleTitle')}</span><span className="tile-sub">{tr('menu.scheduleSub')}</span></button>
+            <button className="tile" type="button" onClick={() => setView(VIEW.SUMMARY)}><span className="tile-icon"><ClockIcon /></span><span className="tile-label">{tr('menu.workTimeTitle')}</span><span className="tile-sub">{tr('menu.workTimeSub')}</span></button>
+            <button className="tile" type="button" onClick={openCoordinatorPanel}><span className="tile-icon"><UserIcon /></span><span className="tile-label">{tr('menu.coordinatorTitle')}</span><span className="tile-sub">{tr('menu.coordinatorSub')}</span></button>
           </div>
         </section>
       )
@@ -2468,7 +2513,7 @@ export default function App() {
             <button className="link-btn" type="button" onClick={() => setView(VIEW.MENU)}>
               Wróć
             </button>
-            <strong>Grafik pracy</strong>
+            <strong>{tr('schedule.title')}</strong>
             <button
               className="link-btn"
               type="button"
@@ -2624,26 +2669,27 @@ export default function App() {
             onPause={() => setView(VIEW.PAUSE)}
             onStop={doTopAction}
             topActionIsStart={topActionIsStart}
+            t={tr}
           />
           <div className="scan-glass">
-            <div className="scan-title">Pauza</div>
+            <div className="scan-title">{tr('pause.title')}</div>
             {pauseOpen ? (
               <div className="scan-sub">
-                Trwająca przerwa: <strong>{pauseTimer}</strong>
+                {tr('pause.activeBreak')}: <strong>{pauseTimer}</strong>
                 <br />
-                Czas netto dnia: <strong>{workdayTimer}</strong>
+                {tr('pause.netDayTime')}: <strong>{workdayTimer}</strong>
               </div>
             ) : (
-              <div className="scan-sub">Brak aktywnej przerwy.</div>
+              <div className="scan-sub">{tr('pause.noActive')}</div>
             )}
           </div>
           {pauseOpen ? (
             <button className="btn secondary btn-xl" type="button" onClick={doResumeFromPause} disabled={globalPending}>
-              Skanuj QR, aby wrócić do pracy
+              {tr('pause.scanToResume')}
             </button>
           ) : (
             <button className="btn secondary btn-xl" type="button" onClick={() => setView(resolveWorkflowView(snapshot))}>
-              Wróć do pracy
+              {tr('pause.returnToWork')}
             </button>
           )}
         </section>
@@ -2660,14 +2706,15 @@ export default function App() {
             onPause={doPause}
             onStop={doTopAction}
             topActionIsStart={topActionIsStart}
+            t={tr}
 	          />
-	          <button className="btn action btn-xl" type="button" onClick={() => openScan('workflow', 'Skanuj QR', 'Wpisz kod QR / roomId.')}>Skanuj QR</button>
+	          <button className="btn action btn-xl" type="button" onClick={() => openScan('workflow', tr('scan.titleDefault'), tr('scan.subtitleDefault'))}>{tr('workflow.scanQrButton')}</button>
 	          <button className="btn secondary btn-xl btn--coming-soon" type="button" disabled aria-disabled="true" title="Wkrótce">
-	            Dzisiejsze zadania
+	            {tr('workflow.todayTasksButton')}
 	          </button>
           <div className="today-tasks-progress" aria-hidden="true">
             <div className="today-tasks-progress__top">
-              <span>Postęp dzisiejszej pracy</span>
+              <span>{tr('workflow.progressLabel')}</span>
               <strong>{todayTasksProgressPct}%</strong>
             </div>
             <div className="today-tasks-progress__track">
@@ -2679,27 +2726,27 @@ export default function App() {
             </div>
           </div>
 	          <div className="scan-glass checklist-wrap">
-	            <div className="scan-title">{view === VIEW.START ? 'Rozpocznij pracę' : view === VIEW.SCAN ? 'Skanuj strefę' : view === VIEW.CLEAN ? 'W trakcie sprzątania' : 'Kończenie dnia'}</div>
+	            <div className="scan-title">{view === VIEW.START ? tr('workflow.startTitle') : view === VIEW.SCAN ? tr('workflow.scanTitle') : view === VIEW.CLEAN ? tr('workflow.cleanTitle') : tr('workflow.endTitle')}</div>
             {view === VIEW.CLEAN ? (
               <div className="scan-sub">
-                Klient: {txt(activeCycle?.clientName || checklistMeta?.clientName) || '-'}
+                {tr('workflow.clientLabel')}: {txt(activeCycle?.clientName || checklistMeta?.clientName) || '-'}
                 <br />
-                Strefa: {txt(activeCycle?.zoneName || checklistMeta?.zoneName) || '-'}
+                {tr('workflow.zoneLabel')}: {txt(activeCycle?.zoneName || checklistMeta?.zoneName) || '-'}
                 <br />
-                Lokalizacja: {txt(activeCycle?.location || checklistMeta?.location) || '-'}
+                {tr('workflow.locationLabel')}: {txt(activeCycle?.location || checklistMeta?.location) || '-'}
                 <br />
-                Czas strefy: {cycleTimer}
+                {tr('workflow.zoneTimeLabel')}: {cycleTimer}
               </div>
             ) : null}
-            {view === VIEW.END ? <div className="scan-sub">Auto-zamknięcie za: {endingLeft}</div> : null}
-            {view === VIEW.START ? <div className="scan-sub">Skanuj kod QR, aby przejść dalej.</div> : null}
+            {view === VIEW.END ? <div className="scan-sub">{tr('workflow.autoCloseIn')}: {endingLeft}</div> : null}
+            {view === VIEW.START ? <div className="scan-sub">{tr('workflow.startHelp')}</div> : null}
             {view === VIEW.SCAN ? (
               <div className="scan-sub scan-sub--steps">
-                <div className="scan-sub__important">WAŻNE: czas pracy już się nalicza.</div>
+                <div className="scan-sub__important">{tr('workflow.scanImportant')}</div>
                 <ol className="scan-steps">
-                  <li>Kliknij „Skanuj QR”.</li>
-                  <li>Zeskanuj kod strefy przed rozpoczęciem sprzątania.</li>
-                  <li>Przy każdej zmianie strefy zeskanuj nowy kod QR.</li>
+                  <li>{tr('workflow.scanStep1')}</li>
+                  <li>{tr('workflow.scanStep2')}</li>
+                  <li>{tr('workflow.scanStep3')}</li>
                 </ol>
               </div>
             ) : null}
@@ -2729,7 +2776,7 @@ export default function App() {
           ) : null}
           {view === VIEW.END ? (
             <button className="btn secondary btn-xl" type="button" onClick={doCloseWorkdayNow} disabled={globalPending}>
-              {operationPending ? 'Trwa zamykanie...' : 'Zakończ teraz'}
+              {operationPending ? tr('workflow.endNowPending') : tr('workflow.endNow')}
             </button>
           ) : null}
         </section>
@@ -2744,13 +2791,13 @@ export default function App() {
   return (
     <div className={`app-shell${isLoginView ? ' app-shell--login' : ''}`}>
       <header className={`header${isLoginView ? ' header--login' : ''}`}>
-        <div className="header-left"><button className="top-nav-btn top-nav-btn--icon" type="button" aria-label="Strona główna" onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}><span className="top-nav-ico"><HomeIcon /></span></button></div>
+        <div className="header-left"><button className="top-nav-btn top-nav-btn--icon" type="button" aria-label={tr('header.homeAria')} onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}><span className="top-nav-ico"><HomeIcon /></span></button></div>
         <div className="header-center">
-          <button className="logo-home-btn" type="button" aria-label="Best Clean - ekran główny" onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}>
+          <button className="logo-home-btn" type="button" aria-label={tr('header.logoAria')} onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}>
             <img className="header-logo header-logo--bestclean" src="https://static.wixstatic.com/media/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png/v1/fill/w_698,h_238,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png" alt="Best Clean" />
           </button>
         </div>
-        <div className="header-right"><button className="top-nav-btn top-nav-btn--icon" type="button" aria-label="Ustawienia" disabled={!session?.token} onClick={() => setSettingsOpen(true)}><span className="top-nav-ico"><SettingsIcon /></span></button></div>
+        <div className="header-right"><button className="top-nav-btn top-nav-btn--icon" type="button" aria-label={tr('header.settingsAria')} disabled={!session?.token} onClick={() => setSettingsOpen(true)}><span className="top-nav-ico"><SettingsIcon /></span></button></div>
       </header>
       <main className={`main${isLoginView ? ' main--login' : ''}`}>
         {renderMain()}
@@ -2759,28 +2806,38 @@ export default function App() {
       <div className="notice-bottom-stack" aria-live="polite">
         {notice ? (
           <div className="notice-box notice-box--bottom" role="status">
-            <span className="notice-box__text">{notice}</span>
-            <button className="notice-ok-btn" type="button" onClick={() => setNotice('')} aria-label="Zamknij komunikat">
-              OK
+            <span className="notice-box__text">{trRuntime(notice)}</span>
+            <button className="notice-ok-btn" type="button" onClick={() => setNotice('')} aria-label={tr('common.close')}>
+              {tr('common.ok')}
             </button>
           </div>
         ) : null}
         {refreshPending && !refreshNoticeHidden ? (
           <div className="notice-box notice-box--bottom notice-muted" role="status">
-            <span className="notice-box__text">Synchronizacja danych...</span>
-            <button className="notice-ok-btn" type="button" onClick={() => setRefreshNoticeHidden(true)} aria-label="Ukryj komunikat synchronizacji">
-              OK
+            <span className="notice-box__text">{tr('common.syncingData')}</span>
+            <button className="notice-ok-btn" type="button" onClick={() => setRefreshNoticeHidden(true)} aria-label={tr('common.close')}>
+              {tr('common.ok')}
             </button>
           </div>
         ) : null}
       </div>
-      <SettingsModal open={settingsOpen} session={session} onClose={() => setSettingsOpen(false)} onLogout={doLogout} />
+      <SettingsModal
+        open={settingsOpen}
+        session={session}
+        onClose={() => setSettingsOpen(false)}
+        onLogout={doLogout}
+        languageCode={languageCode}
+        onLanguageChange={setAppLanguage}
+        t={tr}
+      />
       <ScanModal
         key={scanState.nonce}
         scanState={scanState}
         onClose={closeScan}
         onSubmit={doScan}
         allowManualEntry={manualQrAccess}
+        t={tr}
+        trRuntime={trRuntime}
       />
       <CloseCycleModal
         open={closeCycleState.open}
@@ -2804,9 +2861,9 @@ export default function App() {
           <div className="global-busy-content">
             <div className="global-busy-spinner" />
             <div className="global-busy-text">
-              Trwa operacja.
+              {tr('common.operationInProgress')}
               <br />
-              Czekaj na odpowiedź serwera...
+              {tr('common.waitServer')}
             </div>
           </div>
         </div>
@@ -2814,7 +2871,7 @@ export default function App() {
       {scheduleUpdatedPopupOpen ? (
         <div className="modal" role="dialog" aria-modal="true">
           <div className="modal-content">
-            <div className="title-small">Grafik zaktualizowany</div>
+            <div className="title-small">{tr('schedule.updatedTitle')}</div>
             <div className="muted">Wykryto zmianę w twoim grafiku. Widok został odświeżony.</div>
             <button className="btn action" type="button" onClick={() => setScheduleUpdatedPopupOpen(false)}>
               OK
