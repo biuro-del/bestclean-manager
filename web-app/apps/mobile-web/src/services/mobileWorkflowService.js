@@ -1376,6 +1376,7 @@ async function stopWorkdayPauseRecord(snapshot, pause) {
   }
 
   const pauseId = toText(pause?.pauseId)
+  const workdayId = toText(pause?.workdayId)
   if (!pauseId) {
     throw new Error('Brak aktywnej pauzy do zakonczenia.')
   }
@@ -1392,6 +1393,7 @@ async function stopWorkdayPauseRecord(snapshot, pause) {
     {
       orgId: snapshot.orgId,
       pauseId,
+      workdayId,
       stopAt: nowValue,
       durationSec,
       status: 'CLOSED',
@@ -1399,12 +1401,14 @@ async function stopWorkdayPauseRecord(snapshot, pause) {
     {
       orgId: snapshot.orgId,
       pauseId,
+      workdayId,
       stopAt: nowValue,
       status: 'CLOSED',
     },
     {
       orgId: snapshot.orgId,
       pauseId,
+      workdayId,
       stopAt: nowValue,
     },
     {
