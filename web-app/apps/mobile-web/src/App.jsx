@@ -1484,6 +1484,7 @@ export default function App() {
     const left = Math.max(0, Math.floor((new Date(endIso).getTime() - tick) / 1000))
     return `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`
   }, [activeWorkday?.status, activeWorkday?.endAt, tick])
+  const todayTasksProgressPct = 0
 
   useEffect(() => {
     if (!session?.token) return
@@ -2604,6 +2605,19 @@ export default function App() {
 	          <button className="btn secondary btn-xl btn--coming-soon" type="button" disabled aria-disabled="true" title="Wkrótce">
 	            Dzisiejsze zadania
 	          </button>
+          <div className="today-tasks-progress" aria-hidden="true">
+            <div className="today-tasks-progress__top">
+              <span>Postęp dzisiaj (nieaktywne)</span>
+              <strong>{todayTasksProgressPct}%</strong>
+            </div>
+            <div className="today-tasks-progress__track">
+              <div className="today-tasks-progress__fill" style={{ width: `${todayTasksProgressPct}%` }} />
+            </div>
+            <div className="today-tasks-progress__scale">
+              <span>0%</span>
+              <span>100%</span>
+            </div>
+          </div>
 	          <div className="scan-glass checklist-wrap">
 	            <div className="scan-title">{view === VIEW.START ? 'Rozpocznij pracę' : view === VIEW.SCAN ? 'Skanuj strefę' : view === VIEW.CLEAN ? 'W trakcie sprzątania' : 'Kończenie dnia'}</div>
             {view === VIEW.CLEAN ? (
@@ -2765,5 +2779,4 @@ export default function App() {
     </div>
   )
 }
-
 

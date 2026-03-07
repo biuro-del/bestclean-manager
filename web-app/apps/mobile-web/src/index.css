@@ -223,6 +223,53 @@ body {
   cursor: not-allowed;
 }
 
+.today-tasks-progress {
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.05);
+  padding: 10px 12px;
+  opacity: 0.82;
+}
+
+.today-tasks-progress__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #475569;
+}
+
+.today-tasks-progress__top strong {
+  color: #1e293b;
+}
+
+.today-tasks-progress__track {
+  margin-top: 8px;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(148, 163, 184, 0.4);
+}
+
+.today-tasks-progress__fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+  transition: width 0.25s ease;
+}
+
+.today-tasks-progress__scale {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
 .btn-xl {
   padding: 16px;
 }
