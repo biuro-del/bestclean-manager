@@ -1130,6 +1130,7 @@ export default function App() {
   const [notice, setNotice] = useState('')
   const [tick, setTick] = useState(Date.now())
   const [refreshPending, setRefreshPending] = useState(false)
+  const [refreshNoticeHidden, setRefreshNoticeHidden] = useState(false)
   const [loginPending, setLoginPending] = useState(false)
   const [operationPending, setOperationPending] = useState(false)
   const [loginError, setLoginError] = useState('')
@@ -1338,6 +1339,10 @@ export default function App() {
     )
     return () => clearInterval(timer)
   }, [refreshSchedule, session, view])
+
+  useEffect(() => {
+    if (!refreshPending) setRefreshNoticeHidden(false)
+  }, [refreshPending])
 
   const nowIso = useMemo(() => new Date(tick).toISOString(), [tick])
   const activeWorkday = snapshot?.activeWorkday
@@ -2460,11 +2465,27 @@ export default function App() {
         <div className="header-right"><button className="top-nav-btn top-nav-btn--icon" type="button" aria-label="Ustawienia" disabled={!session?.token} onClick={() => setSettingsOpen(true)}><span className="top-nav-ico"><SettingsIcon /></span></button></div>
       </header>
       <main className="main">
-        {notice ? <div className="notice-box">{notice}</div> : null}
-        {refreshPending ? <div className="notice-box notice-muted">Synchronizacja danych...</div> : null}
         {renderMain()}
       </main>
       <footer className="app-footer">Best Clean V.1.1</footer>
+      <div className="notice-bottom-stack" aria-live="polite">
+        {notice ? (
+          <div className="notice-box notice-box--bottom" role="status">
+            <span className="notice-box__text">{notice}</span>
+            <button className="notice-ok-btn" type="button" onClick={() => setNotice('')} aria-label="Zamknij komunikat">
+              OK
+            </button>
+          </div>
+        ) : null}
+        {refreshPending && !refreshNoticeHidden ? (
+          <div className="notice-box notice-box--bottom notice-muted" role="status">
+            <span className="notice-box__text">Synchronizacja danych...</span>
+            <button className="notice-ok-btn" type="button" onClick={() => setRefreshNoticeHidden(true)} aria-label="Ukryj komunikat synchronizacji">
+              OK
+            </button>
+          </div>
+        ) : null}
+      </div>
       <SettingsModal open={settingsOpen} session={session} onClose={() => setSettingsOpen(false)} onLogout={doLogout} />
       <ScanModal
         key={scanState.nonce}
