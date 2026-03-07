@@ -49,6 +49,8 @@ const MAX_REASONABLE_WORKDAY_SEC = 20 * 60 * 60
 const CHECKLIST_REASON_MAX_LEN = 300
 const CHECKLIST_ENABLED = false
 const NOTICE_AUTO_HIDE_MS = 5000
+const INACTIVITY_AUTO_LOGOUT_MS = 60 * 60 * 1000
+const INACTIVITY_CHECK_MS = 15000
 
 const QR_FUNCTION_OPTIONS = [
   'Sprzątanie',
@@ -1234,11 +1236,13 @@ export default function App() {
   const lastUserActivityMsRef = useRef(Date.now())
   const lastUserActivityDayRef = useRef(localDayKey(new Date().toISOString()))
   const inactivityMidnightHandledRef = useRef(false)
+  const inactivityAutoLogoutHandledRef = useRef(false)
 
   const markUserActivity = useCallback(() => {
     lastUserActivityMsRef.current = Date.now()
     lastUserActivityDayRef.current = localDayKey(new Date().toISOString())
     inactivityMidnightHandledRef.current = false
+    inactivityAutoLogoutHandledRef.current = false
   }, [])
 
   const resetCloseCycleState = useCallback(() => {
@@ -1370,6 +1374,7 @@ export default function App() {
   useEffect(() => {
     if (!session?.token) {
       inactivityMidnightHandledRef.current = false
+      inactivityAutoLogoutHandledRef.current = false
       return
     }
     markUserActivity()
@@ -1901,6 +1906,26 @@ export default function App() {
       setNotice(logoutNotice)
     }
   }
+
+  useEffect(() => {
+    if (!session?.token) return
+    if (inactivityAutoLogoutHandledRef.current) return
+
+    const maybeAutoLogoutForInactivity = () => {
+      const inactiveMs = Date.now() - Number(lastUserActivityMsRef.current || Date.now())
+      if (!Number.isFinite(inactiveMs) || inactiveMs < INACTIVITY_AUTO_LOGOUT_MS) return
+      if (inactivityAutoLogoutHandledRef.current) return
+      inactivityAutoLogoutHandledRef.current = true
+      doLogout({
+        showVersionPopup: false,
+        notice: '',
+      }).catch(() => null)
+    }
+
+    maybeAutoLogoutForInactivity()
+    const timer = setInterval(maybeAutoLogoutForInactivity, INACTIVITY_CHECK_MS)
+    return () => clearInterval(timer)
+  }, [doLogout, session?.token])
 
   useEffect(() => {
     if (!session?.token) return
