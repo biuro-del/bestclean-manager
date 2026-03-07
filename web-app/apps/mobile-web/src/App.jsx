@@ -17,7 +17,6 @@ import {
   getMobileSnapshot,
   scanMobileQr,
   startMobilePause,
-  stopMobilePause,
 } from './services/mobileWorkflowService'
 import { writeMobileSession } from './state/sessionStore'
 
@@ -2200,24 +2199,10 @@ export default function App() {
     }
   }, [activeWorkday, forceLoginWithMessage, pauseOpen, session, snapshot])
 
-  const doResumeFromPause = useCallback(async () => {
+  const doResumeFromPause = useCallback(() => {
     if (!session?.token || !snapshot) return
-    setOperationPending(true)
-    try {
-      const result = await stopMobilePause({ session, snapshot })
-      setSnapshot(result.snapshot)
-      setNotice(txt(result.message))
-      setView(resolveWorkflowView(result.snapshot))
-    } catch (error) {
-      if (isUnauthenticatedError(error)) {
-        forceLoginWithMessage('Sesja wygasla. Zaloguj sie ponownie.')
-        return
-      }
-      setNotice(parseErrorMessage(error, 'Nie udalo sie zakonczyc przerwy.'))
-    } finally {
-      setOperationPending(false)
-    }
-  }, [forceLoginWithMessage, session, snapshot])
+    openScan('workflow', 'Wroc do pracy', 'Zeskanuj QR CLEAN, zlecenia indywidualnego lub strefy specjalnej.')
+  }, [session?.token, snapshot, openScan])
 
   const doTopAction = () => {
     if (!isWorkdayOpen(activeWorkday)) {
@@ -2506,7 +2491,7 @@ export default function App() {
           </div>
           {pauseOpen ? (
             <button className="btn secondary btn-xl" type="button" onClick={doResumeFromPause} disabled={globalPending}>
-              {operationPending ? 'Konczenie przerwy...' : 'Wroc do pracy'}
+              Skanuj QR, aby wrocic do pracy
             </button>
           ) : (
             <button className="btn secondary btn-xl" type="button" onClick={() => setView(resolveWorkflowView(snapshot))}>

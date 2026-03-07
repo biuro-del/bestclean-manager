@@ -566,6 +566,36 @@ function isSpecialCleanToken(token) {
   return token === 'STREFASPECJALNA'
 }
 
+function isPauseResumeZone(zone) {
+  const kind = toUpper(zone?.kind)
+  if (kind === 'INDIVIDUAL') {
+    return true
+  }
+  if (kind !== 'CLEAN') {
+    return false
+  }
+
+  const token = functionToken(zone?.functionName)
+  if (!token) {
+    return false
+  }
+  return token === 'SPRZATANIE' || token === 'CLEAN' || isSpecialCleanToken(token)
+}
+
+function withPauseClosedPrefix(message, pauseClosedByScan) {
+  const body = toText(message)
+  if (!pauseClosedByScan) {
+    return body
+  }
+  if (!body) {
+    return 'Przerwa zakonczona.'
+  }
+  if (body.toLowerCase().startsWith('przerwa zakonczona')) {
+    return body
+  }
+  return `Przerwa zakonczona. ${body}`
+}
+
 function isAutoStartCleanZone(zone) {
   const kind = toUpper(zone?.kind)
   if (kind === 'INDIVIDUAL') return true
@@ -2244,6 +2274,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
   const workdayOpen = isWorkdayOpen(activeWorkday)
   const staleWorkdayOpen = workdayOpen && !isTodayIso(activeWorkday?.startAt)
   const effectiveWorkdayOpen = workdayOpen && !staleWorkdayOpen
+  let pauseClosedByScan = false
 
   if (zone.kind === 'START') {
     const startGps = await captureGpsForAction('START')
@@ -2295,7 +2326,14 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
   }
 
   if (isPauseOpen(activePause)) {
-    throw new Error('Masz aktywna przerwe. Kliknij "Wroc do pracy", aby ja zakonczyc.')
+    if (!effectiveWorkdayOpen) {
+      throw new Error('Brak aktywnego dnia. Najpierw zeskanuj START.')
+    }
+    if (!isPauseResumeZone(zone)) {
+      throw new Error('Aktywna pauza. Aby wrocic do pracy, zeskanuj QR CLEAN, zlecenia indywidualnego lub strefy specjalnej.')
+    }
+    await stopWorkdayPauseRecord(snapshot, activePause)
+    pauseClosedByScan = true
   }
 
   if (!effectiveWorkdayOpen) {
@@ -2304,7 +2342,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
       const created = await createWorkdayForScan(snapshot, snapshot?.startZone || zone, startGps)
       await startCycle(snapshot, zone, created.workdayId, cloneGpsWithAction(startGps, 'CLEAN_START'), created.startAt)
       return {
-        message: 'Rozpoczeto dzien i sprzatanie strefy.',
+        message: withPauseClosedPrefix('Rozpoczeto dzien i sprzatanie strefy.', pauseClosedByScan),
         snapshot: await getMobileSnapshot(session),
       }
     }
@@ -2324,12 +2362,12 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
         const autoStopZone = resolveAutoStopZone(snapshot, zone)
         const stopMessage = await closeWorkdayNow(snapshot, activeWorkday, autoStopZone, cloneGpsWithAction(closeGps, 'STOP'))
         return {
-          message: `Zakonczono sprzatanie tej strefy. ${stopMessage}`.trim(),
+          message: withPauseClosedPrefix(`Zakonczono sprzatanie tej strefy. ${stopMessage}`.trim(), pauseClosedByScan),
           snapshot: await getMobileSnapshot(session),
         }
       }
       return {
-        message: 'Zakonczono sprzatanie tej strefy.',
+        message: withPauseClosedPrefix('Zakonczono sprzatanie tej strefy.', pauseClosedByScan),
         snapshot: await getMobileSnapshot(session),
       }
     }
@@ -2338,7 +2376,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
     await stopCycle(snapshot, activeCycle, 'QR_SWITCH', comment, cloneGpsWithAction(switchGps, 'CLEAN_STOP'))
     await startCycle(snapshot, zone, '', cloneGpsWithAction(switchGps, 'CLEAN_START'))
     return {
-      message: `Zmiana strefy na: ${zone.name || zone.id}.`,
+      message: withPauseClosedPrefix(`Zmiana strefy na: ${zone.name || zone.id}.`, pauseClosedByScan),
       snapshot: await getMobileSnapshot(session),
     }
   }
@@ -2346,7 +2384,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
   const cleanStartGps = await captureGpsForAction('CLEAN_START')
   await startCycle(snapshot, zone, '', cleanStartGps)
   return {
-    message: `Rozpoczeto sprzatanie: ${zone.name || zone.id}.`,
+    message: withPauseClosedPrefix(`Rozpoczeto sprzatanie: ${zone.name || zone.id}.`, pauseClosedByScan),
     snapshot: await getMobileSnapshot(session),
   }
 }
