@@ -2828,7 +2828,7 @@ export default function App() {
       <main className={`main${isLoginView ? ' main--login' : ''}`}>
         {renderMain()}
       </main>
-      <footer className={`app-footer${isLoginView ? ' app-footer--login' : ''}`}>Best Clean V1.2</footer>
+      <footer className={`app-footer${isLoginView ? ' app-footer--login' : ''}`}>Best Clean V.1.3</footer>
       <div className="notice-bottom-stack" aria-live="polite">
         {notice ? (
           <div className="notice-box notice-box--bottom" role="status">
@@ -2910,7 +2910,7 @@ export default function App() {
           <div className="modal-content version-popup">
             <div className="version-popup__badge">Best Clean</div>
             <div className="version-popup__title">Nowa wersja aplikacji</div>
-            <div className="version-popup__text">Korzystasz z wersji V1.2.</div>
+            <div className="version-popup__text">Korzystasz z wersji V.1.3.</div>
             <div className="version-popup__hint">
               <div><strong>Login:</strong> Twoje nazwisko</div>
               <div><strong>Hasło:</strong> Twoja data urodzenia. 6 cyfr, np. 120187 (dzień, miesiąc, rok)</div>
