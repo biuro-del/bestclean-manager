@@ -1,6 +1,6 @@
 env:
   - variable: APP_TARGET
-    value: mobile
+    value: portal
     availability:
       - BUILD
       - RUNTIME
