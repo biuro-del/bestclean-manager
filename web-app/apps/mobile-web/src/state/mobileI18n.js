@@ -294,6 +294,12 @@ const DIRECT_RUNTIME_TEXT_TO_KEY = {
   'Nie udało się uruchomić kamery. Sprawdź uprawnienia do aparatu.': 'runtime.cameraPermissionHint',
 }
 
+const LANGUAGE_TEXT_OVERRIDES = {
+  Si: {
+    'login.title': 'Kto \u017ce\u015b Ty je?',
+  },
+}
+
 function toText(value) {
   return String(value ?? '').trim()
 }
@@ -319,9 +325,10 @@ export function normalizeMobileLanguageCode(value) {
 
 export function t(languageCode, key, vars) {
   const lang = normalizeLanguageCode(languageCode)
+  const fromOverride = LANGUAGE_TEXT_OVERRIDES[lang]?.[key]
   const fromCurrent = TEXTS[lang]?.[key]
   const fromDefault = TEXTS[DEFAULT_LANGUAGE_CODE]?.[key]
-  const template = fromCurrent ?? fromDefault ?? key
+  const template = fromOverride ?? fromCurrent ?? fromDefault ?? key
   return replaceTemplate(String(template), vars)
 }
 
