@@ -3,24 +3,25 @@
   <div class="login-card" role="dialog" aria-label="Logowanie">
     <div class="login-brand">
       <div class="login-logo">
-        <img src="/vite.svg" alt="FIDO iClean" />
+        <img src="https://static.wixstatic.com/media/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png/v1/fill/w_698,h_238,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png" alt="Best Clean" />
       </div>
-      <div class="login-title">PORTAL</div>
+      <div class="login-title">Panel WWW</div>
+      <div class="login-subtitle">Zaloguj się do panelu zarządzania</div>
     </div>
 
     <div class="login-field">
       <label for="loginLogin">Login</label>
-      <input id="loginLogin" type="text" autocomplete="username" />
+      <input id="loginLogin" type="text" autocomplete="username" placeholder="login@bestclean.pl" />
     </div>
 
     <div class="login-field">
       <label for="loginPass">Hasło</label>
-      <input id="loginPass" type="password" autocomplete="current-password" />
+      <input id="loginPass" type="password" autocomplete="current-password" placeholder="Wpisz hasło" />
     </div>
 
     <div class="login-error" id="loginErr" style="display:none;"></div>
 
-    <button class="btn primary" id="loginBtn" type="button">Zaloguj</button>
+    <button class="btn primary login-submit" id="loginBtn" type="button">Zaloguj</button>
   </div>
 </div>
 
