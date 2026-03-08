@@ -64,7 +64,7 @@ function getBootstrapMembershipEndpoint() {
     return fromEnv
   }
 
-  const projectId = String(import.meta.env.VITE_FIREBASE_PROJECT_ID ?? 'iclean2-2e798').trim() || 'iclean2-2e798'
+  const projectId = String(import.meta.env.VITE_FIREBASE_PROJECT_ID ?? 'iclean-room').trim() || 'iclean-room'
 
   return `https://europe-west3-${projectId}.cloudfunctions.net/authBootstrapMembership`
 }

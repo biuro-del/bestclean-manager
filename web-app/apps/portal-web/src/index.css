@@ -250,8 +250,8 @@
     position: fixed;
     inset: 0;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    align-items: flex-end;
+    justify-content: flex-start;
     padding: clamp(16px, 3vw, 36px);
     background:
       linear-gradient(145deg, rgba(9, 22, 44, 0.32) 0%, rgba(6, 28, 17, 0.2) 100%),
