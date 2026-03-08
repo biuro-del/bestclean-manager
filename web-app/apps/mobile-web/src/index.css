@@ -142,35 +142,35 @@ body {
 }
 
 .app-shell--login {
-  background-color: #040915;
+  background-color: #dfeaf5;
   background-image:
-    linear-gradient(168deg, rgba(4, 10, 24, 0.58) 0%, rgba(4, 10, 24, 0.84) 50%, rgba(4, 10, 24, 0.96) 100%),
-    url('https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=1320&q=80');
+    linear-gradient(164deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.04) 48%, rgba(30, 64, 128, 0.16) 100%),
+    url('https://images.pexels.com/photos/4440627/pexels-photo-4440627.jpeg?auto=compress&cs=tinysrgb&w=1600');
   background-size: cover;
-  background-position: center;
+  background-position: center 24%;
 }
 
 .header--login {
   padding: clamp(8px, 2.2vh, 14px) 12px clamp(4px, 1.2vh, 10px);
   border-bottom: 0;
-  background: linear-gradient(180deg, rgba(4, 10, 24, 0.68), rgba(4, 10, 24, 0.12));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.24));
   backdrop-filter: none;
 }
 
 .header--login .top-nav-btn--icon {
   width: 40px;
   min-height: 40px;
-  border-color: rgba(230, 238, 255, 0.36);
-  background: rgba(4, 10, 24, 0.4);
+  border-color: rgba(15, 23, 42, 0.16);
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .header--login .top-nav-ico {
-  color: #ecf3ff;
+  color: #1e293b;
 }
 
 .header--login .header-logo {
   height: clamp(24px, 6vw, 34px);
-  filter: drop-shadow(0 2px 8px rgba(2, 6, 18, 0.45));
+  filter: drop-shadow(0 1px 3px rgba(2, 6, 18, 0.28));
 }
 
 .main--login {
@@ -183,8 +183,8 @@ body {
 .app-footer--login {
   padding: 6px 12px 10px;
   font-size: 11px;
-  color: rgba(236, 243, 255, 0.84);
-  text-shadow: 0 1px 1px rgba(2, 6, 18, 0.45);
+  color: rgba(15, 23, 42, 0.66);
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.55);
 }
 
 .card {
@@ -289,9 +289,9 @@ body {
 
 .login-language__list {
   margin-top: 6px;
-  border: 1px solid rgba(140, 173, 255, 0.34);
+  border: 1px solid rgba(30, 64, 128, 0.14);
   border-radius: 10px;
-  background: rgba(4, 10, 24, 0.94);
+  background: rgba(255, 255, 255, 0.92);
   padding: 4px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -304,7 +304,7 @@ body {
   margin-top: 4px;
   font-size: 10px;
   font-weight: 800;
-  color: rgba(205, 220, 247, 0.72);
+  color: rgba(15, 23, 42, 0.62);
   letter-spacing: 0.02em;
   line-height: 1.25;
   text-align: center;
@@ -312,9 +312,9 @@ body {
 
 .login-language__item {
   width: 100%;
-  border: 1px solid rgba(161, 189, 255, 0.16);
+  border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 8px;
-  background: rgba(142, 164, 211, 0.08);
+  background: rgba(241, 245, 249, 0.9);
   padding: 5px 8px;
   text-align: left;
   display: flex;
@@ -325,8 +325,8 @@ body {
 }
 
 .login-language__item.is-active {
-  border-color: rgba(101, 146, 255, 0.62);
-  background: rgba(46, 91, 255, 0.26);
+  border-color: rgba(59, 130, 246, 0.58);
+  background: rgba(59, 130, 246, 0.14);
 }
 
 .login-language__item.is-disabled {
@@ -338,24 +338,24 @@ body {
   min-width: 24px;
   font-size: 10px;
   font-weight: 900;
-  color: rgba(198, 216, 255, 0.98);
+  color: #1f2937;
 }
 
 .login-language__name {
   font-size: 11px;
   line-height: 1.2;
   font-weight: 700;
-  color: #f3f7ff;
+  color: #0f172a;
   white-space: nowrap;
 }
 
 .login-card {
   width: min(420px, 100%);
   margin: 0 auto;
-  border: 1px solid rgba(118, 157, 255, 0.38);
+  border: 1px solid rgba(59, 130, 246, 0.34);
   border-radius: 18px;
-  background: linear-gradient(180deg, rgba(8, 14, 30, 0.9), rgba(4, 9, 22, 0.95));
-  box-shadow: 0 18px 36px rgba(2, 6, 18, 0.5);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 251, 255, 0.9));
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.24);
   padding: 12px;
 }
 
@@ -363,8 +363,8 @@ body {
   margin: 0 0 8px 0;
   font-size: clamp(26px, 9vw, 34px);
   line-height: 1.04;
-  color: #f5f9ff;
-  text-shadow: 0 1px 1px rgba(2, 6, 18, 0.45);
+  color: #0f172a;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 
 .login-box {
@@ -381,20 +381,20 @@ body {
 .login-card .muted {
   font-size: 13px;
   line-height: 1.25;
-  color: rgba(216, 229, 250, 0.86);
+  color: rgba(15, 23, 42, 0.72);
 }
 
 .login-card .input {
   border-radius: 10px;
-  border: 1px solid rgba(119, 158, 255, 0.34);
-  background: rgba(7, 14, 30, 0.9);
-  color: #f8fbff;
+  border: 1px solid rgba(30, 64, 128, 0.2);
+  background: rgba(255, 255, 255, 0.92);
+  color: #0f172a;
   padding: 10px 12px;
   font-size: 15px;
 }
 
 .login-card .input::placeholder {
-  color: rgba(188, 207, 244, 0.72);
+  color: rgba(71, 85, 105, 0.58);
 }
 
 .login-card .input:focus {
@@ -415,9 +415,9 @@ body {
 .login-card .login-language__trigger {
   padding: 8px 10px;
   font-size: 13px;
-  color: #eaf2ff;
-  border-color: rgba(130, 168, 255, 0.36);
-  background: rgba(15, 25, 48, 0.65);
+  color: #0f172a;
+  border-color: rgba(30, 64, 128, 0.2);
+  background: rgba(255, 255, 255, 0.88);
 }
 
 .today-tasks-progress {
