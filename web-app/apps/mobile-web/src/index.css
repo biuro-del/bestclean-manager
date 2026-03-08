@@ -1177,6 +1177,255 @@ body {
   }
 }
 
+/* Pastel theme for all screens except login (login keeps photo background). */
+.app-shell:not(.app-shell--login) {
+  --bc-bg: #eaf7f0;
+  --bc-card: rgba(255, 255, 255, 0.92);
+  --bc-text: #1a4b3d;
+  --bc-muted: #638a7d;
+  --bc-border: rgba(89, 166, 139, 0.26);
+  --bc-primary: #47cc9d;
+  --bc-success: #42c991;
+  --bc-danger: #f26a6a;
+  --bc-shadow: 0 16px 34px rgba(63, 122, 102, 0.14);
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(132, 224, 189, 0.38), transparent 62%),
+    radial-gradient(120% 90% at 100% 100%, rgba(170, 235, 210, 0.34), transparent 64%),
+    linear-gradient(180deg, #eaf7f0 0%, #eefaf4 56%, #e7f5ed 100%);
+}
+
+.app-shell:not(.app-shell--login)::before,
+.app-shell:not(.app-shell--login)::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: 999px;
+}
+
+.app-shell:not(.app-shell--login)::before {
+  width: 280px;
+  height: 280px;
+  left: -96px;
+  top: 80px;
+  background: radial-gradient(circle at 40% 40%, rgba(116, 212, 176, 0.28), rgba(116, 212, 176, 0));
+}
+
+.app-shell:not(.app-shell--login)::after {
+  width: 330px;
+  height: 330px;
+  right: -130px;
+  bottom: 110px;
+  background: radial-gradient(circle at 50% 50%, rgba(123, 218, 183, 0.24), rgba(123, 218, 183, 0));
+}
+
+.app-shell:not(.app-shell--login) > * {
+  position: relative;
+  z-index: 1;
+}
+
+.app-shell:not(.app-shell--login) .header {
+  border-bottom: 1px solid rgba(88, 164, 137, 0.26);
+  background: rgba(239, 251, 245, 0.82);
+  backdrop-filter: blur(10px);
+}
+
+.app-shell:not(.app-shell--login) .top-nav-btn {
+  border-color: rgba(86, 158, 132, 0.28);
+  background: rgba(255, 255, 255, 0.86);
+  color: #1f5b49;
+}
+
+.app-shell:not(.app-shell--login) .top-nav-ico {
+  color: #2f7f65;
+}
+
+.app-shell:not(.app-shell--login) .main {
+  gap: 14px;
+  padding-top: 14px;
+}
+
+.app-shell:not(.app-shell--login) .app-footer {
+  color: #2f7f65;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.app-shell:not(.app-shell--login) .card {
+  border-radius: 24px;
+  border-color: rgba(89, 166, 139, 0.26);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(243, 253, 248, 0.9));
+  box-shadow: 0 14px 28px rgba(55, 120, 98, 0.14);
+}
+
+.app-shell:not(.app-shell--login) .home-hero,
+.app-shell:not(.app-shell--login) .scan-glass {
+  border-radius: 22px;
+  border-color: rgba(92, 168, 141, 0.24);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(244, 253, 249, 0.9));
+  box-shadow: 0 10px 22px rgba(60, 122, 101, 0.12);
+}
+
+.app-shell:not(.app-shell--login) .btn {
+  border-radius: 18px;
+  border: 1px solid transparent;
+  box-shadow: 0 8px 16px rgba(67, 151, 123, 0.2);
+}
+
+.app-shell:not(.app-shell--login) .btn.primary,
+.app-shell:not(.app-shell--login) .btn.action {
+  color: #073022;
+  background: linear-gradient(180deg, #71dcb2, #48c996);
+}
+
+.app-shell:not(.app-shell--login) .btn.secondary {
+  color: #1f5f4c;
+  border-color: rgba(89, 166, 139, 0.32);
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: none;
+}
+
+.app-shell:not(.app-shell--login) .today-tasks-progress {
+  border-color: rgba(89, 166, 139, 0.28);
+  background: rgba(235, 250, 243, 0.88);
+}
+
+.app-shell:not(.app-shell--login) .today-tasks-progress__top {
+  color: #4f796d;
+}
+
+.app-shell:not(.app-shell--login) .today-tasks-progress__top strong {
+  color: #1f5f4c;
+}
+
+.app-shell:not(.app-shell--login) .today-tasks-progress__track {
+  background: rgba(124, 198, 170, 0.36);
+}
+
+.app-shell:not(.app-shell--login) .today-tasks-progress__fill {
+  background: linear-gradient(90deg, #8de5bf, #56cfa0);
+}
+
+.app-shell:not(.app-shell--login) .today-tasks-progress__scale {
+  color: #62867b;
+}
+
+.app-shell:not(.app-shell--login) .pill-dark {
+  color: #1f5948;
+  border-color: rgba(91, 164, 137, 0.28);
+  background: rgba(236, 250, 244, 0.9);
+}
+
+.app-shell:not(.app-shell--login) .pill-dark--alert {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(252, 236, 196, 0.68);
+}
+
+.app-shell:not(.app-shell--login) .tile {
+  border-radius: 20px;
+  border-color: rgba(92, 168, 141, 0.24);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(239, 251, 245, 0.9));
+  box-shadow: 0 10px 18px rgba(61, 124, 102, 0.1);
+}
+
+.app-shell:not(.app-shell--login) .tile-icon {
+  background: rgba(87, 169, 141, 0.14);
+  color: #20634f;
+}
+
+.app-shell:not(.app-shell--login) .tile--success {
+  border-color: rgba(84, 178, 145, 0.42);
+  color: #0f4535;
+  background: linear-gradient(180deg, rgba(126, 225, 191, 0.95), rgba(78, 202, 154, 0.95));
+}
+
+.app-shell:not(.app-shell--login) .tile--success .tile-icon {
+  background: rgba(255, 255, 255, 0.38);
+  color: #0f4535;
+}
+
+.app-shell:not(.app-shell--login) .tile--placeholder {
+  color: #5e8076;
+  border-color: rgba(94, 162, 138, 0.24);
+  background: rgba(245, 253, 249, 0.8);
+}
+
+.app-shell:not(.app-shell--login) .scan-sub--steps {
+  color: #174f3f;
+  border-color: rgba(86, 170, 139, 0.36);
+  background: rgba(224, 247, 236, 0.8);
+}
+
+.app-shell:not(.app-shell--login) .scan-sub__important {
+  color: #1c624d;
+}
+
+.app-shell:not(.app-shell--login) .scan-steps,
+.app-shell:not(.app-shell--login) .scan-sub {
+  color: #466d62;
+}
+
+.app-shell:not(.app-shell--login) .scan-steps li::marker {
+  color: #2c7c62;
+}
+
+.app-shell:not(.app-shell--login) .notice-box {
+  color: #1f5f4c;
+  border-color: rgba(76, 155, 128, 0.34);
+  background: rgba(222, 246, 235, 0.88);
+}
+
+.app-shell:not(.app-shell--login) .notice-muted {
+  color: #3f6b5f;
+  border-color: rgba(94, 146, 129, 0.26);
+  background: rgba(228, 244, 237, 0.88);
+}
+
+.app-shell:not(.app-shell--login) .notice-ok-btn {
+  border-color: rgba(76, 143, 120, 0.32);
+  background: rgba(255, 255, 255, 0.92);
+  color: #1e614d;
+}
+
+.app-shell:not(.app-shell--login) .link-btn {
+  color: #2a725c;
+}
+
+.app-shell:not(.app-shell--login) .event-card--start {
+  background: rgba(147, 229, 197, 0.4);
+}
+
+.app-shell:not(.app-shell--login) .event-card--stop {
+  background: rgba(247, 175, 175, 0.34);
+}
+
+.app-shell:not(.app-shell--login) .summary-row {
+  border-color: rgba(95, 168, 140, 0.24);
+  background: rgba(248, 255, 252, 0.86);
+}
+
+.app-shell:not(.app-shell--login) .summary-value {
+  border-color: rgba(95, 168, 140, 0.26);
+  background: rgba(255, 255, 255, 0.94);
+  color: #1f5f4c;
+}
+
+.app-shell:not(.app-shell--login) .modal {
+  background: rgba(20, 55, 43, 0.38);
+}
+
+.app-shell:not(.app-shell--login) .modal-content {
+  border-color: rgba(96, 164, 139, 0.3);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(253, 255, 254, 0.98), rgba(241, 252, 247, 0.96));
+}
+
+.app-shell:not(.app-shell--login) .settings-item {
+  border-color: rgba(96, 164, 139, 0.26);
+  background: rgba(248, 255, 252, 0.9);
+}
+
 @media (max-height: 760px) {
   .header--login {
     padding-top: 8px;
