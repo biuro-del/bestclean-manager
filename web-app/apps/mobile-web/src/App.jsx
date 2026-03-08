@@ -28,7 +28,6 @@ const VIEW = {
   SUMMARY: 'summary',
   SUMMARY_DETAILS: 'summary-details',
   START: 'start',
-  SCAN: 'scan',
   PAUSE: 'pause',
   CLEAN: 'clean',
   END: 'end',
@@ -451,7 +450,7 @@ function resolveWorkflowView(snapshot, nowIsoValue = new Date().toISOString()) {
   if (up(snapshot?.activeWorkday?.status) === 'ENDING') return VIEW.END
   if (isPauseOpen(snapshot?.activePause)) return VIEW.PAUSE
   if (isCycleOpen(snapshot?.activeCycle)) return VIEW.CLEAN
-  return VIEW.SCAN
+  return VIEW.START
 }
 
 function resolveCycleCloseReason(activeCycle, scannedZone) {
@@ -1598,6 +1597,7 @@ export default function App() {
     const left = Math.max(0, Math.floor((new Date(endIso).getTime() - tick) / 1000))
     return `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`
   }, [activeWorkday?.status, activeWorkday?.endAt, tick])
+  const showWorkflowScanHelp = liveWorkdayOpen && !pauseOpen && !activeCycleOpen && up(activeWorkday?.status) !== 'ENDING'
   const todayTasksProgressPct = 0
 
   useEffect(() => {
@@ -2722,7 +2722,7 @@ export default function App() {
       )
     }
 
-    if (view === VIEW.START || view === VIEW.SCAN || view === VIEW.CLEAN || view === VIEW.END) {
+    if (view === VIEW.START || view === VIEW.CLEAN || view === VIEW.END) {
       return (
         <section className="card col">
           <WorkHud
@@ -2752,7 +2752,7 @@ export default function App() {
             </div>
           </div>
 	          <div className="scan-glass checklist-wrap">
-	            <div className="scan-title">{view === VIEW.START ? tr('workflow.startTitle') : view === VIEW.SCAN ? tr('workflow.scanTitle') : view === VIEW.CLEAN ? tr('workflow.cleanTitle') : tr('workflow.endTitle')}</div>
+	            <div className="scan-title">{view === VIEW.END ? tr('workflow.endTitle') : view === VIEW.CLEAN ? tr('workflow.cleanTitle') : showWorkflowScanHelp ? tr('workflow.scanTitle') : tr('workflow.startTitle')}</div>
             {view === VIEW.CLEAN ? (
               <div className="scan-sub">
                 {tr('workflow.clientLabel')}: {txt(activeCycle?.clientName || checklistMeta?.clientName) || '-'}
@@ -2765,8 +2765,8 @@ export default function App() {
               </div>
             ) : null}
             {view === VIEW.END ? <div className="scan-sub">{tr('workflow.autoCloseIn')}: {endingLeft}</div> : null}
-            {view === VIEW.START ? <div className="scan-sub">{tr('workflow.startHelp')}</div> : null}
-            {view === VIEW.SCAN ? (
+            {view === VIEW.START && !showWorkflowScanHelp ? <div className="scan-sub">{tr('workflow.startHelp')}</div> : null}
+            {showWorkflowScanHelp ? (
               <div className="scan-sub scan-sub--steps">
                 <div className="scan-sub__important">{tr('workflow.scanImportant')}</div>
                 <ol className="scan-steps">
