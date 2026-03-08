@@ -257,8 +257,9 @@
       linear-gradient(145deg, rgba(9, 22, 44, 0.32) 0%, rgba(6, 28, 17, 0.2) 100%),
       radial-gradient(80% 65% at 15% 15%, rgba(37, 99, 235, 0.14) 0%, rgba(37, 99, 235, 0) 70%),
       url('https://images.pexels.com/photos/4440627/pexels-photo-4440627.jpeg?auto=compress&cs=tinysrgb&w=2000');
-    background-size: cover;
-    background-position: center 22%;
+    background-size: cover, cover, 86% auto;
+    background-position: center, center, center 18%;
+    background-repeat: no-repeat;
     z-index: 9999;
   }
   .login-card{
