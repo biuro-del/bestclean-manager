@@ -306,6 +306,129 @@ function pickWorkerNameValue(worker) {
   )
 }
 
+function createUniqueNameTracker() {
+  return {
+    name: '',
+    count: 0,
+  }
+}
+
+function registerTrackedName(trackerMap, key, fullName) {
+  const normalizedKey = normalizePersonName(key)
+  const normalizedName = String(fullName ?? '').trim()
+  if (!normalizedKey || !normalizedName) {
+    return
+  }
+
+  const existing = trackerMap.get(normalizedKey) ?? createUniqueNameTracker()
+  if (!existing.name) {
+    existing.name = normalizedName
+    existing.count = 1
+    trackerMap.set(normalizedKey, existing)
+    return
+  }
+
+  if (existing.name !== normalizedName) {
+    existing.count += 1
+    trackerMap.set(normalizedKey, existing)
+  }
+}
+
+function readTrackedUniqueName(trackerMap, key) {
+  const normalizedKey = normalizePersonName(key)
+  if (!normalizedKey) {
+    return ''
+  }
+
+  const entry = trackerMap.get(normalizedKey)
+  if (!entry || entry.count !== 1) {
+    return ''
+  }
+
+  return String(entry.name ?? '').trim()
+}
+
+function createWorkerDisplayNameResolver(workers = []) {
+  const aliasToFullName = new Map()
+  const normalizedNameMap = new Map()
+  const firstNameMap = new Map()
+  const surnameMap = new Map()
+
+  workers.forEach((worker) => {
+    const fullName = pickWorkerNameValue(worker).trim()
+    if (!fullName) {
+      return
+    }
+
+    const normalizedFullName = normalizePersonName(fullName)
+    if (normalizedFullName && !normalizedNameMap.has(normalizedFullName)) {
+      normalizedNameMap.set(normalizedFullName, fullName)
+    }
+
+    const aliases = collectWorkerLookupValues(worker)
+    aliases.forEach((aliasValue) => {
+      const alias = normalizeLookupKey(aliasValue)
+      if (alias && !aliasToFullName.has(alias)) {
+        aliasToFullName.set(alias, fullName)
+      }
+
+      const localPart = normalizeLookupKey(extractLoginLocalPart(aliasValue))
+      if (localPart && !aliasToFullName.has(localPart)) {
+        aliasToFullName.set(localPart, fullName)
+      }
+    })
+
+    const parts = normalizedFullName.split(' ').filter(Boolean)
+    if (!parts.length) {
+      return
+    }
+
+    registerTrackedName(firstNameMap, parts[0], fullName)
+    registerTrackedName(surnameMap, parts[parts.length - 1], fullName)
+  })
+
+  return (workerLogin, workerName) => {
+    const aliases = [workerLogin, extractLoginLocalPart(workerLogin), workerName]
+      .map((value) => normalizeLookupKey(value))
+      .filter(Boolean)
+
+    for (const alias of aliases) {
+      const fullName = aliasToFullName.get(alias)
+      if (fullName) {
+        return fullName
+      }
+    }
+
+    const normalizedWorkerName = normalizePersonName(workerName)
+    if (normalizedWorkerName) {
+      const byExactName = normalizedNameMap.get(normalizedWorkerName)
+      if (byExactName) {
+        return byExactName
+      }
+
+      const nameParts = normalizedWorkerName.split(' ').filter(Boolean)
+      if (nameParts.length === 1) {
+        const bySurname = readTrackedUniqueName(surnameMap, nameParts[0])
+        if (bySurname) {
+          return bySurname
+        }
+
+        const byFirstName = readTrackedUniqueName(firstNameMap, nameParts[0])
+        if (byFirstName) {
+          return byFirstName
+        }
+      } else {
+        const byLastToken = readTrackedUniqueName(surnameMap, nameParts[nameParts.length - 1])
+        if (byLastToken) {
+          return byLastToken
+        }
+      }
+    }
+
+    return pickFirstText(workerName, workerLogin)
+  }
+}
+
 function looksLikeSerializedError(value) {
   const text = String(value ?? '').trim()
   if (!text) {
@@ -1141,55 +1264,7 @@ export async function getTodayActiveWorkers(orgId) {
   const nowTs = Date.now()
   const workers = new Map()
   const workerAliases = new Map()
-  const workerDisplayNames = new Map()
-
-  workerDirectory.forEach((worker) => {
-    const fullName = pickFirstText(
-      worker?.name,
-      worker?.fullName,
-      worker?.workerName,
-      worker?.worker_name,
-    ).trim()
-    if (!fullName) {
-      return
-    }
-
-    const aliases = [
-      worker?.login,
-      worker?.workerLogin,
-      worker?.id,
-      worker?.workerId,
-      worker?.email,
-      worker?.loginEmail,
-    ]
-
-    aliases.forEach((aliasValue) => {
-      const normalizedAlias = normalizeLookupKey(aliasValue)
-      if (normalizedAlias && !workerDisplayNames.has(normalizedAlias)) {
-        workerDisplayNames.set(normalizedAlias, fullName)
-      }
-
-      const localPart = normalizeLookupKey(extractLoginLocalPart(aliasValue))
-      if (localPart && !workerDisplayNames.has(localPart)) {
-        workerDisplayNames.set(localPart, fullName)
-      }
-    })
-  })
-
-  const resolveDisplayName = (workerLogin, workerName) => {
-    const aliases = [workerLogin, extractLoginLocalPart(workerLogin), workerName]
-      .map((value) => normalizeLookupKey(value))
-      .filter(Boolean)
-
-    for (const alias of aliases) {
-      const fullName = workerDisplayNames.get(alias)
-      if (fullName) {
-        return fullName
-      }
-    }
-
-    return workerName || workerLogin
-  }
+  const resolveDisplayName = createWorkerDisplayNameResolver(workerDirectory)
 
   const shouldReplaceDisplayName = (currentName, candidateName, workerLogin) => {
     const current = String(currentName ?? '').trim()
@@ -1239,6 +1314,7 @@ export async function getTodayActiveWorkers(orgId) {
         workerName: primaryLabel,
         entriesCount: 0,
         fallbackEntriesCount: 0,
+        activeClient: '-',
         activeZone: '-',
         activeLocation: '-',
         activeSortTs: 0,
@@ -1279,6 +1355,7 @@ export async function getTodayActiveWorkers(orgId) {
       updateBucketDayStop(bucket, item.dayEndAt || item.endAt, item.dayEndAt ? 2 : 1)
 
       const status = normalizeStatus(item.status, Boolean(item.endAt))
+      const clientLabel = String(item.clientName ?? item.klient ?? item.clientId ?? '').trim() || '-'
       const zoneLabel = String(item.zoneName ?? item.strefa ?? '').trim() || '-'
       const locationLabel = String(item.lokalizacja ?? item.location ?? '').trim() || '-'
       const startTs = toTimestamp(item.startAt || item.updatedAt)
@@ -1286,6 +1363,7 @@ export async function getTodayActiveWorkers(orgId) {
       const isActiveClean = status === 'RUNNING' && zoneLabel !== '-'
       if (isActiveClean && startTs >= bucket.activeSortTs) {
         bucket.activeSortTs = startTs
+        bucket.activeClient = clientLabel
         bucket.activeZone = zoneLabel
         bucket.activeLocation = locationLabel
       }
@@ -1304,6 +1382,7 @@ export async function getTodayActiveWorkers(orgId) {
       updateBucketDayStop(bucket, item.dayEndAt || item.endAt, item.dayEndAt ? 2 : 1)
 
       const status = normalizeStatus(item.status, Boolean(item.endAt))
+      const clientLabel = String(item.clientName ?? item.klient ?? item.clientId ?? '').trim() || '-'
       const zoneLabel = String(item.zoneName ?? item.strefa ?? '').trim() || '-'
       const locationLabel = String(item.lokalizacja ?? item.location ?? '').trim() || '-'
       const startTs = toTimestamp(item.startAt || item.updatedAt)
@@ -1311,6 +1390,7 @@ export async function getTodayActiveWorkers(orgId) {
       const isActiveClean = status === 'RUNNING' && zoneLabel !== '-'
       if (isActiveClean && startTs >= bucket.activeSortTs) {
         bucket.activeSortTs = startTs
+        bucket.activeClient = clientLabel
         bucket.activeZone = zoneLabel
         bucket.activeLocation = locationLabel
       }
@@ -1329,6 +1409,7 @@ export async function getTodayActiveWorkers(orgId) {
         id: bucket.id,
         workerName: bucket.workerName,
         entriesCount: bucket.entriesCount > 0 ? bucket.entriesCount : bucket.fallbackEntriesCount,
+        activeClient: bucket.activeClient,
         activeZone: bucket.activeZone,
         activeLocation: bucket.activeLocation,
         qrStart: formatTime(bucket.dayStartIso),
@@ -1359,20 +1440,24 @@ export async function getTodayActiveWorkers(orgId) {
 }
 
 export async function getDashboardSummary(orgId) {
-  const response = await getWorkdays(orgId, { page: 1, pageSize: 5000 })
+  const [response, workerDirectory] = await Promise.all([
+    getWorkdays(orgId, { page: 1, pageSize: 5000 }),
+    getWorkers(orgId).catch(() => []),
+  ])
+  const resolveDisplayName = createWorkerDisplayNameResolver(workerDirectory)
   const items = response.items
 
   const openWorkers = new Set(
     items
       .filter((item) => !item.endAt && normalizeStatus(item.status, Boolean(item.endAt)) !== 'CLOSED')
-      .map((item) => item.workerName || item.workerLogin)
+      .map((item) => resolveDisplayName(item.workerLogin, item.workerName))
       .filter(Boolean),
   )
 
   const over9Workers = new Set(
     items
       .filter((item) => Boolean(item.endAt) && Number(item.durationSec) > NINE_HOURS_SECONDS)
-      .map((item) => item.workerName || item.workerLogin)
+      .map((item) => resolveDisplayName(item.workerLogin, item.workerName))
       .filter(Boolean),
   )
 

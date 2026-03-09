@@ -379,6 +379,7 @@ function renderDashboardEvents(rows) {
         <div class="muted">-</div>
         <div class="muted">-</div>
         <div class="muted">-</div>
+        <div class="muted">-</div>
         <div class="muted ta-right">-</div>
       </div>
     `
@@ -391,6 +392,7 @@ function renderDashboardEvents(rows) {
       <div class="list-row dash-events-row">
         <div>${escapeHtml(row.workerName || '-')}</div>
         <div>${escapeHtml(String(row.entriesCount ?? 0))}</div>
+        <div>${escapeHtml(row.activeClient || '-')}</div>
         <div>${escapeHtml(row.activeZone || '-')}</div>
         <div>${escapeHtml(row.activeLocation || '-')}</div>
         <div class="ta-right">

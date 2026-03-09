@@ -1266,7 +1266,7 @@
 .dash-events{width:100%;}
 .dash-events-head{
   display:grid;
-  grid-template-columns: 1.2fr .6fr 1fr 1.2fr .9fr;
+  grid-template-columns: 1.2fr .6fr 1fr 1fr 1.2fr .9fr;
   gap: 10px;
   align-items:center;
   font-size:12px;
@@ -1278,7 +1278,7 @@
 }
 .dash-events-row{
   display:grid;
-  grid-template-columns: 1.2fr .6fr 1fr 1.2fr .9fr;
+  grid-template-columns: 1.2fr .6fr 1fr 1fr 1.2fr .9fr;
   gap: 10px;
   align-items:center;
   font-size:14px;
@@ -1311,9 +1311,10 @@
   }
   .dash-events-row > div:nth-child(1)::before{content:"Osoba: "; color:var(--muted2); font-weight:800;}
   .dash-events-row > div:nth-child(2)::before{content:"Wpisy: "; color:var(--muted2); font-weight:800;}
-  .dash-events-row > div:nth-child(3)::before{content:"Aktywna strefa: "; color:var(--muted2); font-weight:800;}
-  .dash-events-row > div:nth-child(4)::before{content:"Lokalizacja strefy: "; color:var(--muted2); font-weight:800;}
-  .dash-events-row > div:nth-child(5)::before{content:"Czas: "; color:var(--muted2); font-weight:800;}
+  .dash-events-row > div:nth-child(3)::before{content:"Klient: "; color:var(--muted2); font-weight:800;}
+  .dash-events-row > div:nth-child(4)::before{content:"Aktywna strefa: "; color:var(--muted2); font-weight:800;}
+  .dash-events-row > div:nth-child(5)::before{content:"Lokalizacja strefy: "; color:var(--muted2); font-weight:800;}
+  .dash-events-row > div:nth-child(6)::before{content:"Czas: "; color:var(--muted2); font-weight:800;}
   .ta-right{text-align:left;}
   .dash-time-stack{align-items:flex-start;}
 }
