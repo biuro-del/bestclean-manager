@@ -222,6 +222,7 @@
                 <div class="dash-events-head">
                   <div>Osoba</div>
                   <div>Wpisy</div>
+                  <div>Klient</div>
                   <div>Aktywna strefa</div>
                   <div>Lokalizacja strefy</div>
                   <div class="ta-right">Czas</div>
@@ -230,7 +231,7 @@
                 <div class="list dash-events-list" id="dashEventsList">
                   <div class="list-row dash-events-row">
                     <div class="muted">-</div><div class="muted">-</div><div class="muted">-</div>
-                    <div class="muted">-</div>
+                    <div class="muted">-</div><div class="muted">-</div>
                     <div class="muted ta-right">-</div>
                   </div>
                 </div>

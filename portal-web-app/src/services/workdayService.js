@@ -306,6 +306,181 @@ function pickWorkerNameValue(worker) {
   )
 }
 
+function createUniqueNameTracker() {
+  return {
+    name: '',
+    count: 0,
+  }
+}
+
+function formatPersonToken(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) {
+    return ''
+  }
+
+  const lowered = raw.toLocaleLowerCase('pl')
+  return lowered.charAt(0).toLocaleUpperCase('pl') + lowered.slice(1)
+}
+
+function extractPersonTokensFromLogin(workerLogin) {
+  const source = extractLoginLocalPart(workerLogin) || String(workerLogin ?? '').trim()
+  if (!source) {
+    return []
+  }
+
+  return source
+    .split(/[._+\-\s]+/)
+    .map((token) => token.trim())
+    .filter((token) => token && !/^\d+$/.test(token))
+}
+
+function composeDisplayNameFromLoginAndName(workerLogin, workerName) {
+  const name = String(workerName ?? '').trim()
+  const login = String(workerLogin ?? '').trim()
+  const nameParts = normalizePersonName(name).split(' ').filter(Boolean)
+  const loginTokens = extractPersonTokensFromLogin(login)
+  const loginTokensNormalized = loginTokens.map((token) => normalizePersonName(token)).filter(Boolean)
+
+  if (loginTokens.length >= 2 && nameParts.length < 2) {
+    return loginTokens.map((token) => formatPersonToken(token)).join(' ')
+  }
+
+  if (loginTokens.length === 1 && nameParts.length === 1) {
+    const loginPart = loginTokensNormalized[0]
+    const surnamePart = nameParts[0]
+    if (loginPart && surnamePart && loginPart !== surnamePart) {
+      return `${formatPersonToken(loginTokens[0])} ${name}`
+    }
+  }
+
+  if (name) {
+    return name
+  }
+
+  if (loginTokens.length) {
+    return loginTokens.map((token) => formatPersonToken(token)).join(' ')
+  }
+
+  return login
+}
+
+function registerTrackedName(trackerMap, key, fullName) {
+  const normalizedKey = normalizePersonName(key)
+  const normalizedName = String(fullName ?? '').trim()
+  if (!normalizedKey || !normalizedName) {
+    return
+  }
+
+  const existing = trackerMap.get(normalizedKey) ?? createUniqueNameTracker()
+  if (!existing.name) {
+    existing.name = normalizedName
+    existing.count = 1
+    trackerMap.set(normalizedKey, existing)
+    return
+  }
+
+  if (existing.name !== normalizedName) {
+    existing.count += 1
+    trackerMap.set(normalizedKey, existing)
+  }
+}
+
+function readTrackedUniqueName(trackerMap, key) {
+  const normalizedKey = normalizePersonName(key)
+  if (!normalizedKey) {
+    return ''
+  }
+
+  const entry = trackerMap.get(normalizedKey)
+  if (!entry || entry.count !== 1) {
+    return ''
+  }
+
+  return String(entry.name ?? '').trim()
+}
+
+function createWorkerDisplayNameResolver(workers = []) {
+  const aliasToFullName = new Map()
+  const normalizedNameMap = new Map()
+  const firstNameMap = new Map()
+  const surnameMap = new Map()
+
+  workers.forEach((worker) => {
+    const fullName = pickWorkerNameValue(worker).trim()
+    if (!fullName) {
+      return
+    }
+
+    const normalizedFullName = normalizePersonName(fullName)
+    if (normalizedFullName && !normalizedNameMap.has(normalizedFullName)) {
+      normalizedNameMap.set(normalizedFullName, fullName)
+    }
+
+    const aliases = collectWorkerLookupValues(worker)
+    aliases.forEach((aliasValue) => {
+      const alias = normalizeLookupKey(aliasValue)
+      if (alias && !aliasToFullName.has(alias)) {
+        aliasToFullName.set(alias, fullName)
+      }
+
+      const localPart = normalizeLookupKey(extractLoginLocalPart(aliasValue))
+      if (localPart && !aliasToFullName.has(localPart)) {
+        aliasToFullName.set(localPart, fullName)
+      }
+    })
+
+    const parts = normalizedFullName.split(' ').filter(Boolean)
+    if (!parts.length) {
+      return
+    }
+
+    registerTrackedName(firstNameMap, parts[0], fullName)
+    registerTrackedName(surnameMap, parts[parts.length - 1], fullName)
+  })
+
+  return (workerLogin, workerName) => {
+    const aliases = [workerLogin, extractLoginLocalPart(workerLogin), workerName]
+      .map((value) => normalizeLookupKey(value))
+      .filter(Boolean)
+
+    for (const alias of aliases) {
+      const fullName = aliasToFullName.get(alias)
+      if (fullName) {
+        return fullName
+      }
+    }
+
+    const normalizedWorkerName = normalizePersonName(workerName)
+    if (normalizedWorkerName) {
+      const byExactName = normalizedNameMap.get(normalizedWorkerName)
+      if (byExactName) {
+        return byExactName
+      }
+
+      const nameParts = normalizedWorkerName.split(' ').filter(Boolean)
+      if (nameParts.length === 1) {
+        const bySurname = readTrackedUniqueName(surnameMap, nameParts[0])
+        if (bySurname) {
+          return bySurname
+        }
+
+        const byFirstName = readTrackedUniqueName(firstNameMap, nameParts[0])
+        if (byFirstName) {
+          return byFirstName
+        }
+      } else {
+        const byLastToken = readTrackedUniqueName(surnameMap, nameParts[nameParts.length - 1])
+        if (byLastToken) {
+          return byLastToken
+        }
+      }
+    }
+
+    return composeDisplayNameFromLoginAndName(workerLogin, workerName)
+  }
+}
+
 function looksLikeSerializedError(value) {
   const text = String(value ?? '').trim()
   if (!text) {
@@ -1086,78 +1261,337 @@ function toLocalDayKey(value) {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
 }
 
+function isItemFromLocalDay(item, dayKey) {
+  const keys = [
+    toLocalDayKey(item?.startAt),
+    toLocalDayKey(item?.endAt),
+    toLocalDayKey(item?.dayStartAt),
+    toLocalDayKey(item?.dayEndAt),
+    toLocalDayKey(item?.workday?.startAt),
+    toLocalDayKey(item?.workday?.endAt),
+    String(item?.dayKey ?? '').trim(),
+  ].filter(Boolean)
+
+  return keys.includes(dayKey)
+}
+
+function updateBucketDayStart(bucket, isoValue, quality) {
+  const iso = toIso(isoValue)
+  const ts = toTimestamp(iso)
+  if (!iso || ts <= 0) {
+    return
+  }
+
+  const score = Number(quality) > 1 ? 2 : 1
+  if (
+    score > bucket.dayStartQuality ||
+    (score === bucket.dayStartQuality && (bucket.dayStartTs <= 0 || ts < bucket.dayStartTs))
+  ) {
+    bucket.dayStartIso = iso
+    bucket.dayStartTs = ts
+    bucket.dayStartQuality = score
+  }
+}
+
+function updateBucketDayStop(bucket, isoValue, quality) {
+  const iso = toIso(isoValue)
+  const ts = toTimestamp(iso)
+  if (!iso || ts <= 0) {
+    return
+  }
+
+  const score = Number(quality) > 1 ? 2 : 1
+  if (score > bucket.dayStopQuality || (score === bucket.dayStopQuality && ts > bucket.dayStopTs)) {
+    bucket.dayStopIso = iso
+    bucket.dayStopTs = ts
+    bucket.dayStopQuality = score
+  }
+}
+
+function extractRawRecordId(item, fallback = '') {
+  return String(
+    item?.eventId ??
+      item?.workdayId ??
+      item?.id ??
+      item?.cycleId ??
+      item?.backupCycleId ??
+      item?.workday?.workdayId ??
+      fallback,
+  ).trim()
+}
+
+function extractRawRecordStampTs(item) {
+  const candidates = [
+    item?.updatedAt,
+    item?.createdAt,
+    item?.closeMarkedAt,
+    item?.endAt,
+    item?.startAt,
+    item?.workday?.updatedAt,
+    item?.workday?.createdAt,
+    item?.workday?.endAt,
+    item?.workday?.startAt,
+  ]
+
+  let bestTs = 0
+  candidates.forEach((value) => {
+    const ts = toTimestamp(value)
+    if (ts > bestTs) {
+      bestTs = ts
+    }
+  })
+
+  return bestTs
+}
+
+function upsertTodayFingerprintRecord(recordsMap, item, dayKey, fallbackId) {
+  if (!isItemFromLocalDay(item, dayKey)) {
+    return
+  }
+
+  const id = extractRawRecordId(item, fallbackId) || fallbackId
+  const stampTs = extractRawRecordStampTs(item)
+  const status = normalizeStatus(item?.status ?? item?.workday?.status, Boolean(item?.endAt ?? item?.workday?.endAt))
+  const existing = recordsMap.get(id)
+
+  if (!existing) {
+    recordsMap.set(id, { id, stampTs, status })
+    return
+  }
+
+  if (stampTs > existing.stampTs) {
+    recordsMap.set(id, { id, stampTs, status })
+    return
+  }
+
+  if (stampTs === existing.stampTs && existing.status !== status) {
+    recordsMap.set(id, { id, stampTs, status })
+  }
+}
+
+function buildTodayFingerprint(dayKey, recordsMap) {
+  const records = [...recordsMap.values()]
+  const total = records.length
+  const runningCount = records.filter((row) => row.status === 'RUNNING').length
+
+  let latestTs = 0
+  let latestId = ''
+  records.forEach((row) => {
+    if (row.stampTs > latestTs) {
+      latestTs = row.stampTs
+      latestId = row.id
+      return
+    }
+
+    if (row.stampTs === latestTs && row.id > latestId) {
+      latestId = row.id
+    }
+  })
+
+  return {
+    day: dayKey,
+    total,
+    runningCount,
+    latestTs,
+    latestId,
+    token: `${dayKey}|${total}|${runningCount}|${latestTs}|${latestId}`,
+  }
+}
+
+export async function getTodayWorktimeFingerprint(orgId) {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. UzupeĹ‚nij web-app/.env.')
+  }
+
+  ensureFirebase()
+  const day = currentDayYmd()
+
+  let workdayRows = []
+  try {
+    const workdayResponse = await workdaysForOrg({ orgId })
+    workdayRows = workdayResponse?.data?.workdays ?? []
+  } catch (error) {
+    throw withOperationNotFoundHint(error, 'WorkdaysForOrg')
+  }
+
+  let eventRows = []
+  if (!eventsForOrgUnavailable) {
+    try {
+      const eventsResponse = await runQueryOperation('EventsForOrg', { orgId })
+      eventRows = eventsResponse?.data?.events ?? []
+    } catch (error) {
+      if (!isOperationNotFoundError(error, 'EventsForOrg')) {
+        throw error
+      }
+
+      eventsForOrgUnavailable = true
+    }
+  }
+
+  const recordsMap = new Map()
+  workdayRows.forEach((row, index) => {
+    upsertTodayFingerprintRecord(recordsMap, row, day, `workday-${index}`)
+  })
+  eventRows.forEach((row, index) => {
+    upsertTodayFingerprintRecord(recordsMap, row, day, `event-${index}`)
+  })
+
+  return {
+    orgId,
+    ...buildTodayFingerprint(day, recordsMap),
+  }
+}
+
 export async function getTodayActiveWorkers(orgId) {
   const day = currentDayYmd()
-  const response = await getWorkdays(orgId, { source: 'events', page: 1, pageSize: 5000 })
+  const [workdayResponse, eventsResponse, workerDirectory] = await Promise.all([
+    getWorkdays(orgId, { page: 1, pageSize: 100000 }),
+    getWorkdays(orgId, { source: 'events', page: 1, pageSize: 100000 }).catch(() => ({ items: [] })),
+    getWorkers(orgId).catch(() => []),
+  ])
   const nowTs = Date.now()
   const workers = new Map()
+  const workerAliases = new Map()
+  const resolveDisplayName = createWorkerDisplayNameResolver(workerDirectory)
 
-  response.items
-    .filter((item) => {
-      const keys = [
-        toLocalDayKey(item?.startAt),
-        toLocalDayKey(item?.endAt),
-        toLocalDayKey(item?.dayStartAt),
-        toLocalDayKey(item?.dayEndAt),
-        String(item?.dayKey ?? '').trim(),
-      ]
+  const shouldReplaceDisplayName = (currentName, candidateName, workerLogin) => {
+    const current = String(currentName ?? '').trim()
+    const candidate = String(candidateName ?? '').trim()
+    if (!candidate) {
+      return false
+    }
+    if (!current) {
+      return true
+    }
 
-      return keys.includes(day)
+    const currentParts = current.split(/\s+/).filter(Boolean).length
+    const candidateParts = candidate.split(/\s+/).filter(Boolean).length
+    if (candidateParts > currentParts) {
+      return true
+    }
+
+    const loginNormalized = normalizeLookupKey(workerLogin)
+    const currentNormalized = normalizeLookupKey(current)
+    const candidateNormalized = normalizeLookupKey(candidate)
+    if (loginNormalized && currentNormalized === loginNormalized && candidateNormalized !== loginNormalized) {
+      return true
+    }
+
+    return false
+  }
+
+  const resolveBucket = (item) => {
+    const workerLogin = String(item?.workerLogin ?? '').trim()
+    const workerName = String(item?.workerName ?? '').trim()
+    const primaryLabel = resolveDisplayName(workerLogin, workerName)
+    const aliases = [workerLogin, extractLoginLocalPart(workerLogin), workerName]
+      .map((value) => normalizeLookupKey(value))
+      .filter(Boolean)
+
+    let key = aliases.map((alias) => workerAliases.get(alias)).find(Boolean)
+    if (!key) {
+      key = aliases[0] || ''
+    }
+    if (!key) {
+      return null
+    }
+
+    if (!workers.has(key)) {
+      workers.set(key, {
+        id: workerLogin || workerName || key,
+        workerLogin: workerLogin || '',
+        workerName: primaryLabel,
+        entriesCount: 0,
+        fallbackEntriesCount: 0,
+        activeClient: '-',
+        activeZone: '-',
+        activeLocation: '-',
+        activeSortTs: 0,
+        latestEventTs: 0,
+        dayStartIso: '',
+        dayStopIso: '',
+        dayStartTs: 0,
+        dayStopTs: 0,
+        dayStartQuality: 0,
+        dayStopQuality: 0,
+      })
+    }
+
+    const bucket = workers.get(key)
+    if (workerLogin && !String(bucket.id ?? '').trim()) {
+      bucket.id = workerLogin
+    }
+    if (workerLogin && !String(bucket.workerLogin ?? '').trim()) {
+      bucket.workerLogin = workerLogin
+    }
+    if (shouldReplaceDisplayName(bucket.workerName, primaryLabel, workerLogin)) {
+      bucket.workerName = primaryLabel
+    }
+
+    aliases.forEach((alias) => {
+      workerAliases.set(alias, key)
     })
+
+    return bucket
+  }
+
+  workdayResponse.items
+    .filter((item) => isItemFromLocalDay(item, day))
     .forEach((item) => {
-      const workerLogin = String(item.workerLogin ?? '').trim()
-      const workerNameRaw = String(item.workerName ?? '').trim()
-      const workerSource = workerLogin || workerNameRaw
-      if (!workerSource) {
+      const bucket = resolveBucket(item)
+      if (!bucket) {
         return
       }
 
-      const workerLabel = workerNameRaw || workerLogin
-      const workerKey = normalizeLookupKey(workerSource)
-      if (!workerKey) {
-        return
-      }
-
-      if (!workers.has(workerKey)) {
-        workers.set(workerKey, {
-          id: workerLogin || workerNameRaw || workerKey,
-          workerName: workerLabel,
-          entriesCount: 0,
-          activeZone: '-',
-          activeLocation: '-',
-          activeSortTs: 0,
-          dayStartIso: '',
-          dayStopIso: '',
-          dayStartTs: 0,
-          dayStopTs: 0,
-        })
-      }
-
-      const bucket = workers.get(workerKey)
       bucket.entriesCount += 1
-
-      const dayStartIso = toIso(item.dayStartAt || item.startAt || item.endAt)
-      const dayStartTs = toTimestamp(dayStartIso)
-      if (dayStartTs > 0 && (bucket.dayStartTs <= 0 || dayStartTs < bucket.dayStartTs)) {
-        bucket.dayStartIso = dayStartIso
-        bucket.dayStartTs = dayStartTs
-      }
-
-      const dayStopIso = toIso(item.dayEndAt)
-      const dayStopTs = toTimestamp(dayStopIso)
-      if (dayStopTs > bucket.dayStopTs) {
-        bucket.dayStopIso = dayStopIso
-        bucket.dayStopTs = dayStopTs
-      }
+      updateBucketDayStart(bucket, item.dayStartAt || item.startAt || item.endAt, item.dayStartAt ? 2 : 1)
+      updateBucketDayStop(bucket, item.dayEndAt || item.endAt, item.dayEndAt ? 2 : 1)
 
       const status = normalizeStatus(item.status, Boolean(item.endAt))
+      const clientLabel = String(item.clientName ?? item.klient ?? item.clientId ?? '').trim() || '-'
       const zoneLabel = String(item.zoneName ?? item.strefa ?? '').trim() || '-'
       const locationLabel = String(item.lokalizacja ?? item.location ?? '').trim() || '-'
       const startTs = toTimestamp(item.startAt || item.updatedAt)
+      const eventTs = toTimestamp(item.updatedAt || item.createdAt || item.dayEndAt || item.endAt || item.dayStartAt || item.startAt)
+      if (eventTs > bucket.latestEventTs) {
+        bucket.latestEventTs = eventTs
+      }
 
       const isActiveClean = status === 'RUNNING' && zoneLabel !== '-'
       if (isActiveClean && startTs >= bucket.activeSortTs) {
         bucket.activeSortTs = startTs
+        bucket.activeClient = clientLabel
+        bucket.activeZone = zoneLabel
+        bucket.activeLocation = locationLabel
+      }
+    })
+
+  eventsResponse.items
+    .filter((item) => isItemFromLocalDay(item, day))
+    .forEach((item) => {
+      const bucket = resolveBucket(item)
+      if (!bucket) {
+        return
+      }
+
+      bucket.fallbackEntriesCount += 1
+      updateBucketDayStart(bucket, item.dayStartAt || item.startAt || item.endAt, item.dayStartAt ? 2 : 1)
+      updateBucketDayStop(bucket, item.dayEndAt || item.endAt, item.dayEndAt ? 2 : 1)
+
+      const status = normalizeStatus(item.status, Boolean(item.endAt))
+      const clientLabel = String(item.clientName ?? item.klient ?? item.clientId ?? '').trim() || '-'
+      const zoneLabel = String(item.zoneName ?? item.strefa ?? '').trim() || '-'
+      const locationLabel = String(item.lokalizacja ?? item.location ?? '').trim() || '-'
+      const startTs = toTimestamp(item.startAt || item.updatedAt)
+      const eventTs = toTimestamp(item.updatedAt || item.createdAt || item.dayEndAt || item.endAt || item.dayStartAt || item.startAt)
+      if (eventTs > bucket.latestEventTs) {
+        bucket.latestEventTs = eventTs
+      }
+
+      const isActiveClean = status === 'RUNNING' && zoneLabel !== '-'
+      if (isActiveClean && startTs >= bucket.activeSortTs) {
+        bucket.activeSortTs = startTs
+        bucket.activeClient = clientLabel
         bucket.activeZone = zoneLabel
         bucket.activeLocation = locationLabel
       }
@@ -1174,20 +1608,26 @@ export async function getTodayActiveWorkers(orgId) {
 
       return {
         id: bucket.id,
+        workerLogin: bucket.workerLogin || bucket.id,
         workerName: bucket.workerName,
-        entriesCount: bucket.entriesCount,
+        entriesCount: bucket.entriesCount > 0 ? bucket.entriesCount : bucket.fallbackEntriesCount,
+        activeClient: bucket.activeClient,
         activeZone: bucket.activeZone,
         activeLocation: bucket.activeLocation,
         qrStart: formatTime(bucket.dayStartIso),
         qrStop: bucket.dayStopTs > 0 ? formatTime(bucket.dayStopIso) : '-',
         duration,
         activeSortTs: bucket.activeSortTs,
+        latestEventTs: bucket.latestEventTs,
       }
     })
     .sort((left, right) => {
-      const activeDiff = Number(right.activeSortTs > 0) - Number(left.activeSortTs > 0)
-      if (activeDiff !== 0) {
-        return activeDiff
+      if (right.latestEventTs !== left.latestEventTs) {
+        return right.latestEventTs - left.latestEventTs
+      }
+
+      if (right.activeSortTs !== left.activeSortTs) {
+        return right.activeSortTs - left.activeSortTs
       }
 
       if (right.entriesCount !== left.entriesCount) {
@@ -1196,7 +1636,7 @@ export async function getTodayActiveWorkers(orgId) {
 
       return left.workerName.localeCompare(right.workerName, 'pl', { sensitivity: 'base' })
     })
-    .map(({ activeSortTs, ...item }) => item)
+    .map(({ activeSortTs, latestEventTs, ...item }) => item)
 
   return {
     orgId,
@@ -1206,20 +1646,24 @@ export async function getTodayActiveWorkers(orgId) {
 }
 
 export async function getDashboardSummary(orgId) {
-  const response = await getWorkdays(orgId, { page: 1, pageSize: 5000 })
+  const [response, workerDirectory] = await Promise.all([
+    getWorkdays(orgId, { page: 1, pageSize: 5000 }),
+    getWorkers(orgId).catch(() => []),
+  ])
+  const resolveDisplayName = createWorkerDisplayNameResolver(workerDirectory)
   const items = response.items
 
   const openWorkers = new Set(
     items
       .filter((item) => !item.endAt && normalizeStatus(item.status, Boolean(item.endAt)) !== 'CLOSED')
-      .map((item) => item.workerName || item.workerLogin)
+      .map((item) => resolveDisplayName(item.workerLogin, item.workerName))
       .filter(Boolean),
   )
 
   const over9Workers = new Set(
     items
       .filter((item) => Boolean(item.endAt) && Number(item.durationSec) > NINE_HOURS_SECONDS)
-      .map((item) => item.workerName || item.workerLogin)
+      .map((item) => resolveDisplayName(item.workerLogin, item.workerName))
       .filter(Boolean),
   )
 

@@ -25,6 +25,9 @@ let insertEventForOrgUnavailable = !eventMutationsEnabled
 let updateEventForOrgUnavailable = !eventMutationsEnabled
 const MAX_REASONABLE_WORKDAY_SEC = 20 * 60 * 60
 const GPS_COLUMN_MAX_LEN = 255
+const GPS_PRIMARY_TIMEOUT_MS = 3000
+const GPS_SECONDARY_TIMEOUT_MS = 6000
+const GPS_TARGET_ACCURACY_M = 25
 
 function envFlag(name, defaultValue = false) {
   try {
@@ -133,11 +136,17 @@ function nowIso() {
   return new Date().toISOString()
 }
 
-function parseIso(value) {
+function parseDate(value) {
   const raw = toText(value)
-  if (!raw) return ''
+  if (!raw) return null
   const date = new Date(raw)
-  if (!Number.isFinite(date.getTime())) return ''
+  if (!Number.isFinite(date.getTime())) return null
+  return date
+}
+
+function parseIso(value) {
+  const date = parseDate(value)
+  if (!date) return ''
   return date.toISOString()
 }
 
@@ -148,17 +157,19 @@ function toDateKey(value) {
 }
 
 function isTodayIso(value) {
-  const key = toDateKey(value)
-  if (!key) return false
+  const date = parseDate(value)
+  if (!date) return false
   const now = new Date()
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-  return key === today
+  return (
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  )
 }
 
 function isThisMonthIso(value) {
-  const iso = parseIso(value)
-  if (!iso) return false
-  const date = new Date(iso)
+  const date = parseDate(value)
+  if (!date) return false
   const now = new Date()
   return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()
 }
@@ -478,15 +489,67 @@ function readCurrentPosition(options = {}) {
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(resolve, reject, {
       enableHighAccuracy: true,
-      timeout: Number(options.timeoutMs || 12000),
+      timeout: Number(options.timeoutMs || GPS_PRIMARY_TIMEOUT_MS),
       maximumAge: 0,
     })
   })
 }
 
+function positionAccuracyM(position) {
+  const accuracy = Number(position?.coords?.accuracy)
+  if (!Number.isFinite(accuracy) || accuracy <= 0) {
+    return Number.POSITIVE_INFINITY
+  }
+  return accuracy
+}
+
+async function readBestCurrentPosition(options = {}) {
+  const primaryTimeoutMs = Math.max(Number(options.primaryTimeoutMs || GPS_PRIMARY_TIMEOUT_MS) || GPS_PRIMARY_TIMEOUT_MS, 1000)
+  const secondaryTimeoutMs = Math.max(
+    Number(options.secondaryTimeoutMs || GPS_SECONDARY_TIMEOUT_MS) || GPS_SECONDARY_TIMEOUT_MS,
+    primaryTimeoutMs,
+  )
+  const desiredAccuracyM = Math.max(Number(options.desiredAccuracyM || GPS_TARGET_ACCURACY_M) || GPS_TARGET_ACCURACY_M, 1)
+  const attempts = [primaryTimeoutMs, secondaryTimeoutMs]
+
+  let bestPosition = null
+  let bestAccuracy = Number.POSITIVE_INFINITY
+  let lastError = null
+
+  for (const timeoutMs of attempts) {
+    try {
+      const position = await readCurrentPosition({ timeoutMs })
+      const accuracy = positionAccuracyM(position)
+      if (!bestPosition || accuracy < bestAccuracy) {
+        bestPosition = position
+        bestAccuracy = accuracy
+      }
+      if (bestAccuracy <= desiredAccuracyM) {
+        break
+      }
+    } catch (error) {
+      lastError = error
+      if (bestPosition) {
+        break
+      }
+    }
+  }
+
+  if (bestPosition) {
+    return bestPosition
+  }
+  if (lastError) {
+    throw lastError
+  }
+  throw new Error('Nie udalo sie pobrac GPS.')
+}
 async function captureGpsForAction(actionLabel) {
   try {
-    const position = await readCurrentPosition()
+    const position = await readBestCurrentPosition({
+      primaryTimeoutMs: GPS_PRIMARY_TIMEOUT_MS,
+      secondaryTimeoutMs: GPS_SECONDARY_TIMEOUT_MS,
+      desiredAccuracyM: GPS_TARGET_ACCURACY_M,
+    })
     const coords = position?.coords || {}
     return {
       action: toText(actionLabel),
@@ -808,6 +871,7 @@ function pickActiveCycle(events, activeWorkdayId) {
   if (activeWorkdayId) {
     const scoped = sorted.find((event) => isEventOpen(event) && event.workdayId === activeWorkdayId)
     if (scoped) return scoped
+    return null
   }
 
   return sorted.find((event) => isEventOpen(event)) ?? null
@@ -1766,8 +1830,13 @@ export async function getMobileSnapshot(session) {
   })
 
   const events = selectWorkerScopedEvents(data.eventRows, workerLogin, zoneById, workerWorkdayIds, workerName, session)
-  const fallbackCycle = cycleFallbackFromWorkdayEnabled ? fallbackActiveCycleFromWorkday(activeWorkday, zones) : null
-  const activeCycle = pickActiveCycle(events, activeWorkday?.workdayId) || fallbackCycle
+  const activeWorkdayId = toText(activeWorkday?.workdayId)
+  const hasCycleHistoryForActiveWorkday = Boolean(activeWorkdayId) && events.some((row) => toText(row?.workdayId) === activeWorkdayId)
+  const fallbackCycle =
+    cycleFallbackFromWorkdayEnabled && !hasCycleHistoryForActiveWorkday
+      ? fallbackActiveCycleFromWorkday(activeWorkday, zones)
+      : null
+  const activeCycle = pickActiveCycle(events, activeWorkdayId) || fallbackCycle
   const summary = summaryFromWorkdays(workdays, activeWorkday, pauseRowsByWorkday, activePauseForWorkday)
 
   return {
@@ -2295,7 +2364,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
 
   if (zone.kind === 'STOP') {
     const stopGps = await captureGpsForAction('STOP')
-    if (!effectiveWorkdayOpen) {
+    if (!workdayOpen) {
       throw new Error('Brak aktywnego dnia. Najpierw zeskanuj START.')
     }
 
@@ -2337,21 +2406,7 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
     pauseClosedByScan = true
   }
 
-  if (!effectiveWorkdayOpen) {
-    if (isAutoStartCleanZone(zone)) {
-      const startGps = await captureGpsForAction('START')
-      const created = await createWorkdayForScan(snapshot, snapshot?.startZone || zone, startGps)
-      await startCycle(snapshot, zone, created.workdayId, cloneGpsWithAction(startGps, 'CLEAN_START'), created.startAt)
-      return {
-        message: withPauseClosedPrefix('Rozpoczęto dzień i sprzątanie strefy.', pauseClosedByScan),
-        snapshot: await getMobileSnapshot(session),
-      }
-    }
-
-    throw new Error('Brak aktywnego dnia. Zeskanuj START lub kod strefy/zlecenia.')
-  }
-
-  if (toUpper(activeWorkday?.status) === 'ENDING') {
+  if (effectiveWorkdayOpen && toUpper(activeWorkday?.status) === 'ENDING') {
     await setWorkdayRunning(snapshot, activeWorkday)
   }
 
@@ -2380,6 +2435,20 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
       message: withPauseClosedPrefix(`Zmiana strefy na: ${zone.name || zone.id}.`, pauseClosedByScan),
       snapshot: await getMobileSnapshot(session),
     }
+  }
+
+  if (!effectiveWorkdayOpen) {
+    if (isAutoStartCleanZone(zone)) {
+      const startGps = await captureGpsForAction('START')
+      const created = await createWorkdayForScan(snapshot, snapshot?.startZone || zone, startGps)
+      await startCycle(snapshot, zone, created.workdayId, cloneGpsWithAction(startGps, 'CLEAN_START'), created.startAt)
+      return {
+        message: withPauseClosedPrefix('Rozpoczęto dzień i sprzątanie strefy.', pauseClosedByScan),
+        snapshot: await getMobileSnapshot(session),
+      }
+    }
+
+    throw new Error('Brak aktywnego dnia. Zeskanuj START lub kod strefy/zlecenia.')
   }
 
   const cleanStartGps = await captureGpsForAction('CLEAN_START')

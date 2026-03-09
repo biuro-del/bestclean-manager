@@ -16,6 +16,7 @@ import {
   deleteWorkday,
   getDashboardSummary,
   getTodayActiveWorkers,
+  getTodayWorktimeFingerprint,
   getWorkdays,
   getWorkerTime,
   updateEvent,
@@ -95,6 +96,8 @@ const appState = {
 }
 let portalNoticeTimer = null
 let dashboardRefreshTimer = null
+let dashboardLastWorktimeToken = ''
+let reportsViewInitPromise = null
 let reportGeoPreviewHideTimer = null
 const reportGeoModalState = {
   lat: '',
@@ -388,22 +391,44 @@ function renderDashboardEvents(rows) {
 
   eventsList.innerHTML = rows
     .map(
-      (row) => `
+      (row) => {
+        const startValue = row.qrStart && row.qrStart !== '-' ? row.qrStart : '-:-:-'
+        const stopValue = row.qrStop && row.qrStop !== '-' ? row.qrStop : '--:--:--'
+        const workValue = row.duration && row.duration !== '-' ? row.duration : '-:-:-'
+        const workerName = String(row.workerName ?? '').trim() || '-'
+        const workerLogin = String(row.workerLogin ?? row.id ?? '').trim()
+        const workerCell = workerName === '-'
+          ? `<span>${escapeHtml(workerName)}</span>`
+          : `<button class="dash-worker-link" type="button" data-dash-worker-login="${escapeHtml(workerLogin)}" data-dash-worker-name="${escapeHtml(workerName)}">${escapeHtml(workerName)}</button>`
+        return `
       <div class="list-row dash-events-row">
-        <div>${escapeHtml(row.workerName || '-')}</div>
+        <div>${workerCell}</div>
         <div>${escapeHtml(String(row.entriesCount ?? 0))}</div>
         <div>${escapeHtml(row.activeClient || '-')}</div>
         <div>${escapeHtml(row.activeZone || '-')}</div>
         <div>${escapeHtml(row.activeLocation || '-')}</div>
         <div class="ta-right">
           <div class="dash-time-stack">
-            <div class="dash-start">${escapeHtml(`QR START: ${row.qrStart || '-'}`)}</div>
-            ${row.qrStop && row.qrStop !== '-' ? `<div class="dash-stop">${escapeHtml(`QR STOP: ${row.qrStop}`)}</div>` : ''}
-            <div class="dash-dur time-duration">${escapeHtml(row.duration || '-')}</div>
+            <div class="dash-time-line dash-time-line--start">
+              <span class="dash-time-label">Godzina START</span>
+              <span class="dash-time-colon">:</span>
+              <span class="dash-time-value">${escapeHtml(startValue)}</span>
+            </div>
+            <div class="dash-time-line dash-time-line--stop">
+              <span class="dash-time-label">Godzina STOP</span>
+              <span class="dash-time-colon">:</span>
+              <span class="dash-time-value">${escapeHtml(stopValue)}</span>
+            </div>
+            <div class="dash-time-line dash-time-line--work">
+              <span class="dash-time-label">Czas pracy</span>
+              <span class="dash-time-colon">:</span>
+              <span class="dash-time-value time-duration">${escapeHtml(workValue)}</span>
+            </div>
           </div>
         </div>
       </div>
-    `,
+    `
+      },
     )
     .join('')
 }
@@ -2172,7 +2197,7 @@ function readEventEditorPayload() {
   }
 }
 
-async function refreshDashboardWidgets() {
+async function refreshDashboardWidgets(options = {}) {
   if (!appState.session?.orgId) {
     return
   }
@@ -2183,6 +2208,24 @@ async function refreshDashboardWidgets() {
   ])
   renderDashboardEvents(todayActive.items ?? [])
   renderDashboardSummary(summary)
+
+  const explicitToken = String(options.worktimeToken ?? '').trim()
+  if (explicitToken) {
+    dashboardLastWorktimeToken = explicitToken
+  }
+
+  if (options.syncWorktimeToken) {
+    try {
+      const fingerprint = await getTodayWorktimeFingerprint(appState.session.orgId)
+      const token = String(fingerprint?.token ?? '').trim()
+      if (token) {
+        dashboardLastWorktimeToken = token
+      }
+    } catch {
+      // Keep previous token when probe fails; next interval will try again.
+    }
+  }
+
   setDashboardLastRefresh(new Date())
 }
 
@@ -2222,6 +2265,25 @@ function triggerDashboardRefreshIfAllowed() {
   void refreshDashboardWidgets().catch(() => {})
 }
 
+async function autoRefreshDashboardIfNewRecords() {
+  if (!canAutoRefreshDashboard()) {
+    return
+  }
+
+  const orgId = appState.session?.orgId
+  if (!orgId) {
+    return
+  }
+
+  const fingerprint = await getTodayWorktimeFingerprint(orgId)
+  const nextToken = String(fingerprint?.token ?? '').trim()
+  if (!nextToken || nextToken === dashboardLastWorktimeToken) {
+    return
+  }
+
+  await refreshDashboardWidgets({ worktimeToken: nextToken })
+}
+
 function stopDashboardAutoRefresh() {
   if (dashboardRefreshTimer) {
     window.clearInterval(dashboardRefreshTimer)
@@ -2232,7 +2294,7 @@ function stopDashboardAutoRefresh() {
 function startDashboardAutoRefresh() {
   stopDashboardAutoRefresh()
   dashboardRefreshTimer = window.setInterval(() => {
-    triggerDashboardRefreshIfAllowed()
+    void autoRefreshDashboardIfNewRecords().catch(() => {})
   }, DASHBOARD_REFRESH_INTERVAL_MS)
 }
 
@@ -2278,7 +2340,7 @@ async function saveEventEditor() {
 
     closeEventEditor()
     await fetchEventsForCurrentSession({ resetPage: false })
-    await refreshDashboardWidgets()
+    await refreshDashboardWidgets({ syncWorktimeToken: true })
     showTransientNotice('Zmiany zostały zapisane.')
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Błąd zapisu zdarzenia.'
@@ -2321,7 +2383,7 @@ async function deleteEventEditorItem() {
     await deleteEvent(appState.session.orgId, eventId)
     closeEventEditor()
     await fetchEventsForCurrentSession({ resetPage: false })
-    await refreshDashboardWidgets()
+    await refreshDashboardWidgets({ syncWorktimeToken: true })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Błąd usuwania zdarzenia.'
     alert(message)
@@ -5146,8 +5208,8 @@ function reportHistoryExtractGpsCoords(source, phase) {
     }
   }
 
-  if (entries[0]?.lat && entries[0]?.lon) {
-    return `${entries[0].lat}, ${entries[0].lon}`
+  if (entries.length) {
+    return ''
   }
 
   const fallback = raw.match(/lat\s*=\s*(-?\d+(?:\.\d+)?)\s*lon\s*=\s*(-?\d+(?:\.\d+)?)/i)
@@ -5174,12 +5236,16 @@ function reportHistoryResolveDayQrCode(item, phase) {
   }
 
   const roomCode = reportHistoryNormalizeQrCode(item?.workdayUtilityRoomId)
-  if (roomCode) {
+  if (normalizedPhase === 'start' && roomCode) {
     return roomCode
   }
 
   const zoneCode = reportHistoryNormalizeQrCode(item?.zoneId ?? item?.utilityRoomId ?? item?.roomId)
-  return zoneCode || '-'
+  if (zoneCode) {
+    return zoneCode
+  }
+
+  return '-'
 }
 
 function reportHistoryResolveDayQrCandidate(item, phase) {
@@ -5198,7 +5264,7 @@ function reportHistoryResolveDayQrCandidate(item, phase) {
   }
 
   const roomCode = reportHistoryNormalizeQrCode(item?.workdayUtilityRoomId)
-  if (roomCode) {
+  if (normalizedPhase === 'start' && roomCode) {
     return { code: roomCode, score: 2 }
   }
 
@@ -5234,13 +5300,15 @@ function reportHistoryResolveClientByZoneCode(zoneCode, fallback = '-') {
 
 function reportHistoryResolveDayGpsCoords(item, phase) {
   const normalizedPhase = String(phase ?? '').trim().toLowerCase() === 'start' ? 'start' : 'stop'
-  const fromGps = reportHistoryExtractGpsCoords(item?.dayGps ?? item?.gps, normalizedPhase)
-  if (fromGps) {
-    return fromGps
+  const sources = [item?.dayGps, item?.gps, item?.dayComment, item?.comment]
+  for (const source of sources) {
+    const resolved = reportHistoryExtractGpsCoords(source, normalizedPhase)
+    if (resolved) {
+      return resolved
+    }
   }
 
-  const fromComment = reportHistoryExtractGpsCoords(item?.dayComment ?? item?.comment, normalizedPhase)
-  return fromComment || '-'
+  return '-'
 }
 
 function reportHistoryParseGeoPair(value) {
@@ -5714,6 +5782,103 @@ async function runReportHistory() {
   }
 }
 
+function reportHistoryFindWorkerOption(workerLogin, workerName) {
+  const normalizedLogin = String(workerLogin ?? '').trim()
+  const normalizedName = String(workerName ?? '').trim()
+
+  if (!Array.isArray(appState.reportHistoryWorkerOptions) || !appState.reportHistoryWorkerOptions.length) {
+    return null
+  }
+
+  if (normalizedLogin) {
+    const byLogin = appState.reportHistoryWorkerOptions.find((option) => String(option.value ?? '').trim() === normalizedLogin)
+    if (byLogin) {
+      return byLogin
+    }
+  }
+
+  const normalizedNameKey = normalizeSearchText(normalizedName)
+  if (normalizedNameKey) {
+    const exact = appState.reportHistoryWorkerOptions.find((option) => normalizeSearchText(option.label) === normalizedNameKey)
+    if (exact) {
+      return exact
+    }
+
+    const partial = appState.reportHistoryWorkerOptions.find((option) => normalizeSearchText(option.label).includes(normalizedNameKey))
+    if (partial) {
+      return partial
+    }
+  }
+
+  const loginLocalPart = normalizedLogin ? normalizeSearchText(normalizedLogin.split('@')[0]) : ''
+  if (loginLocalPart) {
+    return (
+      appState.reportHistoryWorkerOptions.find((option) => normalizeSearchText(option.label).includes(loginLocalPart)) ?? null
+    )
+  }
+
+  return null
+}
+
+function reportHistorySelectWorker(workerLogin, workerName) {
+  const selectNode = document.getElementById('repHistoryWorker')
+  const searchNode = document.getElementById('repHistoryWorkerSearch')
+  if (!(selectNode instanceof HTMLSelectElement) || !(searchNode instanceof HTMLInputElement)) {
+    return false
+  }
+
+  const option = reportHistoryFindWorkerOption(workerLogin, workerName)
+  if (!option) {
+    return false
+  }
+
+  ensureSelectValue(selectNode, option.value, option.label)
+  searchNode.value = String(option.label ?? '').trim()
+  reportHistoryApplySelectFilter('worker', { expandOnEmpty: false })
+  reportHistoryCollapseSelect('worker')
+  return true
+}
+
+async function openDashboardWorkerHistory(workerLogin, workerName) {
+  if (!appState.session?.orgId) {
+    return
+  }
+
+  const go = typeof window.go === 'function' ? window.go : null
+  if (!go) {
+    return
+  }
+
+  go('reports')
+  await ensureReportsViewReady()
+  openReportBuilder('history')
+  reportHistorySetTab('workers')
+
+  const today = todayYmd()
+  const fromInput = document.getElementById('repHistoryFrom')
+  const toInput = document.getElementById('repHistoryTo')
+  if (fromInput instanceof HTMLInputElement) {
+    fromInput.value = today
+  }
+  if (toInput instanceof HTMLInputElement) {
+    toInput.value = today
+  }
+
+  const selected = reportHistorySelectWorker(workerLogin, workerName)
+  if (!selected) {
+    const label = String(workerName ?? workerLogin ?? '').trim() || 'wybrana osoba'
+    reportHistorySetStatus(`Nie znaleziono osoby "${label}" na liscie historii.`, true)
+    return
+  }
+
+  await runReportHistory()
+  const todayRow = appState.reportHistoryRows.find((row) => String(row.dayKey ?? '').trim() === today)
+  if (todayRow?.dayKey) {
+    appState.reportHistoryExpanded = { [todayRow.dayKey]: true }
+    reportHistoryRenderTable()
+  }
+}
+
 function reportHistoryToggle(dayKey) {
   const key = String(dayKey ?? '').trim()
   if (!key) {
@@ -5829,6 +5994,53 @@ function reportNormalizeText(value) {
     .toLowerCase()
 }
 
+function reportMatchesWorkerSelection(item, workerLogin) {
+  const selectedLoginRaw = String(workerLogin ?? '').trim()
+  if (!selectedLoginRaw) {
+    return true
+  }
+
+  const itemLoginRaw = String(item?.workerLogin ?? '').trim()
+  if (itemLoginRaw && itemLoginRaw === selectedLoginRaw) {
+    return true
+  }
+
+  const selectedLoginNormalized = normalizeSearchText(selectedLoginRaw)
+  const itemLoginNormalized = normalizeSearchText(itemLoginRaw)
+  if (selectedLoginNormalized && itemLoginNormalized && selectedLoginNormalized === itemLoginNormalized) {
+    return true
+  }
+
+  const selectedLoginLocal = normalizeSearchText(selectedLoginRaw.split('@')[0])
+  const itemLoginLocal = normalizeSearchText(itemLoginRaw.split('@')[0])
+  if (selectedLoginLocal && itemLoginLocal && selectedLoginLocal === itemLoginLocal) {
+    return true
+  }
+
+  const selectedWorker = appState.workers.find(
+    (worker) => String(worker.login ?? worker.id ?? '').trim() === selectedLoginRaw,
+  )
+  const selectedWorkerName = normalizeSearchText(selectedWorker?.name)
+  const itemWorkerName = normalizeSearchText(item?.workerName)
+
+  if (selectedWorkerName && itemWorkerName) {
+    if (itemWorkerName === selectedWorkerName) {
+      return true
+    }
+    if (itemWorkerName.includes(selectedWorkerName) || selectedWorkerName.includes(itemWorkerName)) {
+      return true
+    }
+  }
+
+  if (selectedLoginLocal && itemWorkerName) {
+    if (itemWorkerName.includes(selectedLoginLocal) || selectedLoginLocal.includes(itemWorkerName)) {
+      return true
+    }
+  }
+
+  return false
+}
+
 function reportMatchesPanelSelection(item, panel) {
   if (panel.clientId) {
     const itemClientId = String(item.clientId ?? '').trim()
@@ -5859,18 +6071,8 @@ function reportMatchesPanelSelection(item, panel) {
   }
 
   if (panel.workerLogin) {
-    const itemWorkerLogin = String(item.workerLogin ?? '').trim()
-    if (itemWorkerLogin === panel.workerLogin) {
-      // pass
-    } else {
-      const selectedWorker = appState.workers.find(
-        (worker) => String(worker.login ?? worker.id ?? '').trim() === panel.workerLogin,
-      )
-      const selectedWorkerName = reportNormalizeText(selectedWorker?.name)
-      const itemWorkerName = reportNormalizeText(item.workerName)
-      if (!selectedWorkerName || !itemWorkerName || itemWorkerName !== selectedWorkerName) {
-        return false
-      }
+    if (!reportMatchesWorkerSelection(item, panel.workerLogin)) {
+      return false
     }
   }
 
@@ -6250,6 +6452,20 @@ async function initializeReportsView() {
   closeReportBuilder()
 }
 
+async function ensureReportsViewReady() {
+  if (!reportsViewInitPromise) {
+    reportsViewInitPromise = (async () => {
+      try {
+        await initializeReportsView()
+      } finally {
+        reportsViewInitPromise = null
+      }
+    })()
+  }
+
+  await reportsViewInitPromise
+}
+
 function bindClientsViewFunctions() {
   const binding = createBindingHelpers()
   syncClientsPermissions()
@@ -6461,7 +6677,7 @@ function bindDashboardViewFunctions() {
       button.textContent = 'Odświeżam...'
 
       try {
-        await refreshDashboardWidgets()
+        await refreshDashboardWidgets({ syncWorktimeToken: true })
         showTransientNotice('Lista aktywnych została odświeżona.')
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Nie udało się odświeżyć listy.'
@@ -6471,6 +6687,21 @@ function bindDashboardViewFunctions() {
         button.textContent = defaultLabel
       }
     })()
+  })
+
+  binding.add(document.getElementById('dashEventsList'), 'click', (event) => {
+    const button = event.target.closest('[data-dash-worker-login], [data-dash-worker-name]')
+    if (!button) {
+      return
+    }
+
+    const workerLogin = String(button.getAttribute('data-dash-worker-login') ?? '').trim()
+    const workerName = String(button.getAttribute('data-dash-worker-name') ?? '').trim()
+    if (!workerLogin && !workerName) {
+      return
+    }
+
+    void openDashboardWorkerHistory(workerLogin, workerName)
   })
 
   return binding.done
@@ -7140,12 +7371,13 @@ function bindReportsViewFunctions() {
 }
 
 async function hydrateSections(orgId) {
-  const [clients, workers, zones, todayActive, summary] = await Promise.all([
+  const [clients, workers, zones, todayActive, summary, worktimeFingerprint] = await Promise.all([
     getClients(orgId),
     getWorkers(orgId),
     getZones(orgId),
     getTodayActiveWorkers(orgId),
     getDashboardSummary(orgId),
+    getTodayWorktimeFingerprint(orgId).catch(() => null),
   ])
 
   appState.clients = clients
@@ -7157,6 +7389,7 @@ async function hydrateSections(orgId) {
 
   renderDashboardEvents(todayActive.items ?? [])
   renderDashboardSummary(summary)
+  dashboardLastWorktimeToken = String(worktimeFingerprint?.token ?? '').trim()
   filterClientsTable()
   filterZonesTable()
   fillClientProfileCoordinatorOptions()
@@ -7265,6 +7498,7 @@ function bindLogout() {
 
   const handleLogout = () => {
     stopDashboardAutoRefresh()
+    dashboardLastWorktimeToken = ''
     appState.currentRoute = ''
     appState.session = null
     appState.clients = []
@@ -7374,7 +7608,7 @@ export function mountPortalApp() {
     }
 
     if (route === 'reports') {
-      void initializeReportsView()
+      void ensureReportsViewReady()
     }
   })
 
@@ -7470,6 +7704,7 @@ export function mountPortalApp() {
     router.go('dashboard')
   } else {
     stopDashboardAutoRefresh()
+    dashboardLastWorktimeToken = ''
     appState.currentRoute = ''
     showLoginScreen()
     setUserChip(null)
@@ -7479,6 +7714,7 @@ export function mountPortalApp() {
 
   return () => {
     stopDashboardAutoRefresh()
+    dashboardLastWorktimeToken = ''
     cleanups.forEach((cleanup) => {
       try {
         cleanup()

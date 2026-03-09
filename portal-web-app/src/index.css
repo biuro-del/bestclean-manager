@@ -1266,7 +1266,7 @@
 .dash-events{width:100%;}
 .dash-events-head{
   display:grid;
-  grid-template-columns: 1.2fr .6fr 1fr 1.2fr .9fr;
+  grid-template-columns: 1.2fr .6fr 1fr 1fr 1.2fr .9fr;
   gap: 10px;
   align-items:center;
   font-size:12px;
@@ -1278,12 +1278,29 @@
 }
 .dash-events-row{
   display:grid;
-  grid-template-columns: 1.2fr .6fr 1fr 1.2fr .9fr;
+  grid-template-columns: 1.2fr .6fr 1fr 1fr 1.2fr .9fr;
   gap: 10px;
   align-items:center;
   font-size:14px;
 }
 .dash-events-list{display:flex; flex-direction:column; gap:10px;}
+.dash-worker-link{
+  border:0;
+  background:transparent;
+  padding:0;
+  margin:0;
+  color:inherit;
+  font:inherit;
+  font-weight:700;
+  text-align:left;
+  cursor:pointer;
+}
+.dash-worker-link:hover{ color:#1d4ed8; text-decoration:underline; }
+.dash-worker-link:focus-visible{
+  outline:2px solid rgba(59,130,246,.5);
+  outline-offset:2px;
+  border-radius:6px;
+}
 .ta-right{text-align:right;}
 .muted{color:var(--muted2);}
 .dash-time-stack{
@@ -1291,13 +1308,57 @@
   flex-direction:column;
   gap:2px;
   align-items:flex-end;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 4px 8px;
+  background: rgba(255,255,255,.55);
+  min-width: 190px;
+}
+
+.dash-time-line{
+  display:grid;
+  grid-template-columns: 124px 10px max-content;
+  column-gap: 6px;
+  align-items:baseline;
+  justify-content:center;
+  font-size: 14px;
+  line-height: 1.15;
+}
+
+.dash-time-label{
+  font-weight: 800;
+  text-align: right;
+}
+
+.dash-time-colon{
+  font-weight: 800;
+  text-align: center;
+}
+
+.dash-time-value{
+  display:inline-block;
+  font-variant-numeric: tabular-nums;
+  font-family: Consolas, "Courier New", monospace;
+  letter-spacing: 0;
+  text-align: left;
 }
 
 /* Colors requested */
-.dash-start{color:#22c55e; font-weight:400;}
-.dash-stop{color:#ef4444; font-weight:700;}
-.dash-stop--missing{color:#ef4444; font-weight:800;}
-.dash-dur{color:#3b82f6; font-weight:700;}
+.dash-time-line--start .dash-time-label,
+.dash-time-line--start .dash-time-value{ color:#16a34a; }
+
+.dash-time-line--stop .dash-time-label,
+.dash-time-line--stop .dash-time-value{ color:#dc2626; }
+.dash-time-line--stop{
+  margin-left: 4px;
+}
+.dash-time-line--stop .dash-time-value{
+  width: 8ch;
+  padding-left: 0;
+}
+
+.dash-time-line--work .dash-time-label,
+.dash-time-line--work .dash-time-value{ color:#2563eb; }
 
 @media (max-width: 640px){
   .dash-events-head{display:none;}
@@ -1311,11 +1372,15 @@
   }
   .dash-events-row > div:nth-child(1)::before{content:"Osoba: "; color:var(--muted2); font-weight:800;}
   .dash-events-row > div:nth-child(2)::before{content:"Wpisy: "; color:var(--muted2); font-weight:800;}
-  .dash-events-row > div:nth-child(3)::before{content:"Aktywna strefa: "; color:var(--muted2); font-weight:800;}
-  .dash-events-row > div:nth-child(4)::before{content:"Lokalizacja strefy: "; color:var(--muted2); font-weight:800;}
-  .dash-events-row > div:nth-child(5)::before{content:"Czas: "; color:var(--muted2); font-weight:800;}
+  .dash-events-row > div:nth-child(3)::before{content:"Klient: "; color:var(--muted2); font-weight:800;}
+  .dash-events-row > div:nth-child(4)::before{content:"Aktywna strefa: "; color:var(--muted2); font-weight:800;}
+  .dash-events-row > div:nth-child(5)::before{content:"Lokalizacja strefy: "; color:var(--muted2); font-weight:800;}
+  .dash-events-row > div:nth-child(6)::before{content:"Czas: "; color:var(--muted2); font-weight:800;}
   .ta-right{text-align:left;}
   .dash-time-stack{align-items:flex-start;}
+  .dash-time-line{
+    justify-content:center;
+  }
 }
 
 
@@ -3662,6 +3727,19 @@ textarea:focus{
 
 #view-reports #repHistoryTable > tbody > tr.rep-history-main-row > td.ta-right{
   text-align: center !important;
+}
+
+#view-reports #repHistoryTable > tbody > tr.rep-history-main-row > td.rep-history-day-info-cell{
+  text-align: center !important;
+}
+
+#view-reports .rep-history-day-info{
+  display: flex;
+  justify-content: center;
+}
+
+#view-reports .rep-history-day-info .dash-time-stack{
+  margin: 0 auto;
 }
 
 #view-reports #repHistoryTable > tbody > tr.rep-history-main-row > td:first-child{

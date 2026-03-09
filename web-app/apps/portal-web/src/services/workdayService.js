@@ -313,6 +313,58 @@ function createUniqueNameTracker() {
   }
 }
 
+function formatPersonToken(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) {
+    return ''
+  }
+
+  const lowered = raw.toLocaleLowerCase('pl')
+  return lowered.charAt(0).toLocaleUpperCase('pl') + lowered.slice(1)
+}
+
+function extractPersonTokensFromLogin(workerLogin) {
+  const source = extractLoginLocalPart(workerLogin) || String(workerLogin ?? '').trim()
+  if (!source) {
+    return []
+  }
+
+  return source
+    .split(/[._+\-\s]+/)
+    .map((token) => token.trim())
+    .filter((token) => token && !/^\d+$/.test(token))
+}
+
+function composeDisplayNameFromLoginAndName(workerLogin, workerName) {
+  const name = String(workerName ?? '').trim()
+  const login = String(workerLogin ?? '').trim()
+  const nameParts = normalizePersonName(name).split(' ').filter(Boolean)
+  const loginTokens = extractPersonTokensFromLogin(login)
+  const loginTokensNormalized = loginTokens.map((token) => normalizePersonName(token)).filter(Boolean)
+
+  if (loginTokens.length >= 2 && nameParts.length < 2) {
+    return loginTokens.map((token) => formatPersonToken(token)).join(' ')
+  }
+
+  if (loginTokens.length === 1 && nameParts.length === 1) {
+    const loginPart = loginTokensNormalized[0]
+    const surnamePart = nameParts[0]
+    if (loginPart && surnamePart && loginPart !== surnamePart) {
+      return `${formatPersonToken(loginTokens[0])} ${name}`
+    }
+  }
+
+  if (name) {
+    return name
+  }
+
+  if (loginTokens.length) {
+    return loginTokens.map((token) => formatPersonToken(token)).join(' ')
+  }
+
+  return login
+}
+
 function registerTrackedName(trackerMap, key, fullName) {
   const normalizedKey = normalizePersonName(key)
   const normalizedName = String(fullName ?? '').trim()
@@ -425,7 +477,7 @@ function createWorkerDisplayNameResolver(workers = []) {
       }
     }
 
-    return pickFirstText(workerName, workerLogin)
+    return composeDisplayNameFromLoginAndName(workerLogin, workerName)
   }
 }
 
@@ -1215,6 +1267,8 @@ function isItemFromLocalDay(item, dayKey) {
     toLocalDayKey(item?.endAt),
     toLocalDayKey(item?.dayStartAt),
     toLocalDayKey(item?.dayEndAt),
+    toLocalDayKey(item?.workday?.startAt),
+    toLocalDayKey(item?.workday?.endAt),
     String(item?.dayKey ?? '').trim(),
   ].filter(Boolean)
 
@@ -1251,6 +1305,140 @@ function updateBucketDayStop(bucket, isoValue, quality) {
     bucket.dayStopIso = iso
     bucket.dayStopTs = ts
     bucket.dayStopQuality = score
+  }
+}
+
+function extractRawRecordId(item, fallback = '') {
+  return String(
+    item?.eventId ??
+      item?.workdayId ??
+      item?.id ??
+      item?.cycleId ??
+      item?.backupCycleId ??
+      item?.workday?.workdayId ??
+      fallback,
+  ).trim()
+}
+
+function extractRawRecordStampTs(item) {
+  const candidates = [
+    item?.updatedAt,
+    item?.createdAt,
+    item?.closeMarkedAt,
+    item?.endAt,
+    item?.startAt,
+    item?.workday?.updatedAt,
+    item?.workday?.createdAt,
+    item?.workday?.endAt,
+    item?.workday?.startAt,
+  ]
+
+  let bestTs = 0
+  candidates.forEach((value) => {
+    const ts = toTimestamp(value)
+    if (ts > bestTs) {
+      bestTs = ts
+    }
+  })
+
+  return bestTs
+}
+
+function upsertTodayFingerprintRecord(recordsMap, item, dayKey, fallbackId) {
+  if (!isItemFromLocalDay(item, dayKey)) {
+    return
+  }
+
+  const id = extractRawRecordId(item, fallbackId) || fallbackId
+  const stampTs = extractRawRecordStampTs(item)
+  const status = normalizeStatus(item?.status ?? item?.workday?.status, Boolean(item?.endAt ?? item?.workday?.endAt))
+  const existing = recordsMap.get(id)
+
+  if (!existing) {
+    recordsMap.set(id, { id, stampTs, status })
+    return
+  }
+
+  if (stampTs > existing.stampTs) {
+    recordsMap.set(id, { id, stampTs, status })
+    return
+  }
+
+  if (stampTs === existing.stampTs && existing.status !== status) {
+    recordsMap.set(id, { id, stampTs, status })
+  }
+}
+
+function buildTodayFingerprint(dayKey, recordsMap) {
+  const records = [...recordsMap.values()]
+  const total = records.length
+  const runningCount = records.filter((row) => row.status === 'RUNNING').length
+
+  let latestTs = 0
+  let latestId = ''
+  records.forEach((row) => {
+    if (row.stampTs > latestTs) {
+      latestTs = row.stampTs
+      latestId = row.id
+      return
+    }
+
+    if (row.stampTs === latestTs && row.id > latestId) {
+      latestId = row.id
+    }
+  })
+
+  return {
+    day: dayKey,
+    total,
+    runningCount,
+    latestTs,
+    latestId,
+    token: `${dayKey}|${total}|${runningCount}|${latestTs}|${latestId}`,
+  }
+}
+
+export async function getTodayWorktimeFingerprint(orgId) {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. UzupeĹ‚nij web-app/.env.')
+  }
+
+  ensureFirebase()
+  const day = currentDayYmd()
+
+  let workdayRows = []
+  try {
+    const workdayResponse = await workdaysForOrg({ orgId })
+    workdayRows = workdayResponse?.data?.workdays ?? []
+  } catch (error) {
+    throw withOperationNotFoundHint(error, 'WorkdaysForOrg')
+  }
+
+  let eventRows = []
+  if (!eventsForOrgUnavailable) {
+    try {
+      const eventsResponse = await runQueryOperation('EventsForOrg', { orgId })
+      eventRows = eventsResponse?.data?.events ?? []
+    } catch (error) {
+      if (!isOperationNotFoundError(error, 'EventsForOrg')) {
+        throw error
+      }
+
+      eventsForOrgUnavailable = true
+    }
+  }
+
+  const recordsMap = new Map()
+  workdayRows.forEach((row, index) => {
+    upsertTodayFingerprintRecord(recordsMap, row, day, `workday-${index}`)
+  })
+  eventRows.forEach((row, index) => {
+    upsertTodayFingerprintRecord(recordsMap, row, day, `event-${index}`)
+  })
+
+  return {
+    orgId,
+    ...buildTodayFingerprint(day, recordsMap),
   }
 }
 
@@ -1311,6 +1499,7 @@ export async function getTodayActiveWorkers(orgId) {
     if (!workers.has(key)) {
       workers.set(key, {
         id: workerLogin || workerName || key,
+        workerLogin: workerLogin || '',
         workerName: primaryLabel,
         entriesCount: 0,
         fallbackEntriesCount: 0,
@@ -1318,6 +1507,7 @@ export async function getTodayActiveWorkers(orgId) {
         activeZone: '-',
         activeLocation: '-',
         activeSortTs: 0,
+        latestEventTs: 0,
         dayStartIso: '',
         dayStopIso: '',
         dayStartTs: 0,
@@ -1330,6 +1520,9 @@ export async function getTodayActiveWorkers(orgId) {
     const bucket = workers.get(key)
     if (workerLogin && !String(bucket.id ?? '').trim()) {
       bucket.id = workerLogin
+    }
+    if (workerLogin && !String(bucket.workerLogin ?? '').trim()) {
+      bucket.workerLogin = workerLogin
     }
     if (shouldReplaceDisplayName(bucket.workerName, primaryLabel, workerLogin)) {
       bucket.workerName = primaryLabel
@@ -1359,6 +1552,10 @@ export async function getTodayActiveWorkers(orgId) {
       const zoneLabel = String(item.zoneName ?? item.strefa ?? '').trim() || '-'
       const locationLabel = String(item.lokalizacja ?? item.location ?? '').trim() || '-'
       const startTs = toTimestamp(item.startAt || item.updatedAt)
+      const eventTs = toTimestamp(item.updatedAt || item.createdAt || item.dayEndAt || item.endAt || item.dayStartAt || item.startAt)
+      if (eventTs > bucket.latestEventTs) {
+        bucket.latestEventTs = eventTs
+      }
 
       const isActiveClean = status === 'RUNNING' && zoneLabel !== '-'
       if (isActiveClean && startTs >= bucket.activeSortTs) {
@@ -1386,6 +1583,10 @@ export async function getTodayActiveWorkers(orgId) {
       const zoneLabel = String(item.zoneName ?? item.strefa ?? '').trim() || '-'
       const locationLabel = String(item.lokalizacja ?? item.location ?? '').trim() || '-'
       const startTs = toTimestamp(item.startAt || item.updatedAt)
+      const eventTs = toTimestamp(item.updatedAt || item.createdAt || item.dayEndAt || item.endAt || item.dayStartAt || item.startAt)
+      if (eventTs > bucket.latestEventTs) {
+        bucket.latestEventTs = eventTs
+      }
 
       const isActiveClean = status === 'RUNNING' && zoneLabel !== '-'
       if (isActiveClean && startTs >= bucket.activeSortTs) {
@@ -1407,6 +1608,7 @@ export async function getTodayActiveWorkers(orgId) {
 
       return {
         id: bucket.id,
+        workerLogin: bucket.workerLogin || bucket.id,
         workerName: bucket.workerName,
         entriesCount: bucket.entriesCount > 0 ? bucket.entriesCount : bucket.fallbackEntriesCount,
         activeClient: bucket.activeClient,
@@ -1416,12 +1618,16 @@ export async function getTodayActiveWorkers(orgId) {
         qrStop: bucket.dayStopTs > 0 ? formatTime(bucket.dayStopIso) : '-',
         duration,
         activeSortTs: bucket.activeSortTs,
+        latestEventTs: bucket.latestEventTs,
       }
     })
     .sort((left, right) => {
-      const activeDiff = Number(right.activeSortTs > 0) - Number(left.activeSortTs > 0)
-      if (activeDiff !== 0) {
-        return activeDiff
+      if (right.latestEventTs !== left.latestEventTs) {
+        return right.latestEventTs - left.latestEventTs
+      }
+
+      if (right.activeSortTs !== left.activeSortTs) {
+        return right.activeSortTs - left.activeSortTs
       }
 
       if (right.entriesCount !== left.entriesCount) {
@@ -1430,7 +1636,7 @@ export async function getTodayActiveWorkers(orgId) {
 
       return left.workerName.localeCompare(right.workerName, 'pl', { sensitivity: 'base' })
     })
-    .map(({ activeSortTs, ...item }) => item)
+    .map(({ activeSortTs, latestEventTs, ...item }) => item)
 
   return {
     orgId,

@@ -1221,7 +1221,9 @@ body {
   background: radial-gradient(circle at 50% 50%, rgba(123, 218, 183, 0.24), rgba(123, 218, 183, 0));
 }
 
-.app-shell:not(.app-shell--login) > * {
+.app-shell:not(.app-shell--login) > .header,
+.app-shell:not(.app-shell--login) > .main,
+.app-shell:not(.app-shell--login) > .app-footer {
   position: relative;
   z-index: 1;
 }
