@@ -3,24 +3,25 @@
   <div class="login-card" role="dialog" aria-label="Logowanie">
     <div class="login-brand">
       <div class="login-logo">
-        <img src="/vite.svg" alt="FIDO iClean" />
+        <img src="/logotyp.jpg" alt="Best Clean" />
       </div>
-      <div class="login-title">PORTAL</div>
+      <div class="login-title">Panel WWW</div>
+      <div class="login-subtitle">Zaloguj się do panelu zarządzania</div>
     </div>
 
     <div class="login-field">
       <label for="loginLogin">Login</label>
-      <input id="loginLogin" type="text" autocomplete="username" />
+      <input id="loginLogin" type="text" autocomplete="username" placeholder="login@bestclean.pl" />
     </div>
 
     <div class="login-field">
       <label for="loginPass">Hasło</label>
-      <input id="loginPass" type="password" autocomplete="current-password" />
+      <input id="loginPass" type="password" autocomplete="current-password" placeholder="Wpisz hasło" />
     </div>
 
     <div class="login-error" id="loginErr" style="display:none;"></div>
 
-    <button class="btn primary" id="loginBtn" type="button">Zaloguj</button>
+    <button class="btn primary login-submit" id="loginBtn" type="button">Zaloguj</button>
   </div>
 </div>
 
@@ -29,7 +30,7 @@
     <header class="header">
       <div class="header-left">
         <div class="logo-block" aria-label="Logo">
-          <img src="/vite.svg" alt="FIDO iClean" />
+          <img src="/logotyp.jpg" alt="Best Clean" />
         </div>
         <div class="brand">
           <div class="brand-title">PORTAL @SK</div>
