@@ -1133,18 +1133,94 @@ function updateBucketDayStop(bucket, isoValue, quality) {
 
 export async function getTodayActiveWorkers(orgId) {
   const day = currentDayYmd()
-  const [workdayResponse, eventsResponse] = await Promise.all([
+  const [workdayResponse, eventsResponse, workerDirectory] = await Promise.all([
     getWorkdays(orgId, { page: 1, pageSize: 100000 }),
     getWorkdays(orgId, { source: 'events', page: 1, pageSize: 100000 }).catch(() => ({ items: [] })),
+    getWorkers(orgId).catch(() => []),
   ])
   const nowTs = Date.now()
   const workers = new Map()
   const workerAliases = new Map()
+  const workerDisplayNames = new Map()
+
+  workerDirectory.forEach((worker) => {
+    const fullName = pickFirstText(
+      worker?.name,
+      worker?.fullName,
+      worker?.workerName,
+      worker?.worker_name,
+    ).trim()
+    if (!fullName) {
+      return
+    }
+
+    const aliases = [
+      worker?.login,
+      worker?.workerLogin,
+      worker?.id,
+      worker?.workerId,
+      worker?.email,
+      worker?.loginEmail,
+    ]
+
+    aliases.forEach((aliasValue) => {
+      const normalizedAlias = normalizeLookupKey(aliasValue)
+      if (normalizedAlias && !workerDisplayNames.has(normalizedAlias)) {
+        workerDisplayNames.set(normalizedAlias, fullName)
+      }
+
+      const localPart = normalizeLookupKey(extractLoginLocalPart(aliasValue))
+      if (localPart && !workerDisplayNames.has(localPart)) {
+        workerDisplayNames.set(localPart, fullName)
+      }
+    })
+  })
+
+  const resolveDisplayName = (workerLogin, workerName) => {
+    const aliases = [workerLogin, extractLoginLocalPart(workerLogin), workerName]
+      .map((value) => normalizeLookupKey(value))
+      .filter(Boolean)
+
+    for (const alias of aliases) {
+      const fullName = workerDisplayNames.get(alias)
+      if (fullName) {
+        return fullName
+      }
+    }
+
+    return workerName || workerLogin
+  }
+
+  const shouldReplaceDisplayName = (currentName, candidateName, workerLogin) => {
+    const current = String(currentName ?? '').trim()
+    const candidate = String(candidateName ?? '').trim()
+    if (!candidate) {
+      return false
+    }
+    if (!current) {
+      return true
+    }
+
+    const currentParts = current.split(/\s+/).filter(Boolean).length
+    const candidateParts = candidate.split(/\s+/).filter(Boolean).length
+    if (candidateParts > currentParts) {
+      return true
+    }
+
+    const loginNormalized = normalizeLookupKey(workerLogin)
+    const currentNormalized = normalizeLookupKey(current)
+    const candidateNormalized = normalizeLookupKey(candidate)
+    if (loginNormalized && currentNormalized === loginNormalized && candidateNormalized !== loginNormalized) {
+      return true
+    }
+
+    return false
+  }
 
   const resolveBucket = (item) => {
     const workerLogin = String(item?.workerLogin ?? '').trim()
     const workerName = String(item?.workerName ?? '').trim()
-    const primaryLabel = workerName || workerLogin
+    const primaryLabel = resolveDisplayName(workerLogin, workerName)
     const aliases = [workerLogin, extractLoginLocalPart(workerLogin), workerName]
       .map((value) => normalizeLookupKey(value))
       .filter(Boolean)
@@ -1179,8 +1255,8 @@ export async function getTodayActiveWorkers(orgId) {
     if (workerLogin && !String(bucket.id ?? '').trim()) {
       bucket.id = workerLogin
     }
-    if (workerName && bucket.workerName !== workerName && bucket.workerName === bucket.id) {
-      bucket.workerName = workerName
+    if (shouldReplaceDisplayName(bucket.workerName, primaryLabel, workerLogin)) {
+      bucket.workerName = primaryLabel
     }
 
     aliases.forEach((alias) => {
