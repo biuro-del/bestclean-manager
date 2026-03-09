@@ -540,6 +540,15 @@ function buildLookupMaps(clients, zones, workers, workdayRows = []) {
             workdayId,
             workerLogin: String(row?.workerLogin ?? '').trim(),
             workerName: String(row?.workerName ?? '').trim(),
+            startAt: toIso(row?.startAt),
+            endAt: toIso(row?.endAt),
+            status: normalizeStatus(row?.status, Boolean(row?.endAt)),
+            utilityRoomId: String(row?.utilityRoomId ?? row?.roomId ?? '').trim(),
+            gps: String(row?.gps ?? '').trim(),
+            startObject: String(row?.startObject ?? '').trim(),
+            stopObject: String(row?.stopObject ?? '').trim(),
+            endScanAt: toIso(row?.endScanAt),
+            comment: String(row?.comment ?? '').trim(),
           },
         ]
       })
@@ -659,6 +668,15 @@ function mapWorkday(orgId, row, lookupMaps) {
   const normalizedRoomId = normalizeLookupKey(roomId)
   const startAt = toIso(row.startAt)
   const endAt = toIso(row.endAt)
+  const dayStartAt = toIso(row?.workday?.startAt ?? linkedWorkday?.startAt)
+  const dayEndAt = toIso(row?.workday?.endAt ?? linkedWorkday?.endAt)
+  const dayGps = sanitizeTextValue(row?.workday?.gps ?? linkedWorkday?.gps ?? row?.gps)
+  const dayStartObject = sanitizeTextValue(row?.workday?.startObject ?? linkedWorkday?.startObject ?? row?.startObject)
+  const dayStopObject = sanitizeTextValue(row?.workday?.stopObject ?? linkedWorkday?.stopObject ?? row?.stopObject)
+  const workdayUtilityRoomId = sanitizeTextValue(
+    row?.workday?.utilityRoomId ?? linkedWorkday?.utilityRoomId ?? row?.utilityRoomId ?? row?.roomId,
+  )
+  const dayComment = sanitizeTextValue(row?.workday?.comment ?? linkedWorkday?.comment ?? row?.comment)
   const durationSec = calculateDuration(row)
   const zoneFromRow = row?.zone
       ? {
@@ -783,6 +801,13 @@ function mapWorkday(orgId, row, lookupMaps) {
     lokalizacja: sanitizeTextValue(zone?.location ?? '-'),
     startAt,
     endAt,
+    dayStartAt,
+    dayEndAt,
+    dayGps,
+    dayStartObject,
+    dayStopObject,
+    workdayUtilityRoomId,
+    dayComment,
     date: formatDatePl(startAt || endAt),
     start: formatTime(startAt),
     stop: formatTime(endAt),
@@ -1030,6 +1055,154 @@ export async function getRecentEvents(orgId, limit = 5) {
     stop: item.stop || '-',
     duration: item.duration || '-',
   }))
+}
+
+function currentDayYmd() {
+  const now = new Date()
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
+}
+
+function toTimestamp(value) {
+  const iso = toIso(value)
+  if (!iso) {
+    return 0
+  }
+
+  const ts = new Date(iso).getTime()
+  return Number.isFinite(ts) ? ts : 0
+}
+
+function toLocalDayKey(value) {
+  const iso = toIso(value)
+  if (!iso) {
+    return ''
+  }
+
+  const date = new Date(iso)
+  if (!Number.isFinite(date.getTime())) {
+    return ''
+  }
+
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+}
+
+export async function getTodayActiveWorkers(orgId) {
+  const day = currentDayYmd()
+  const response = await getWorkdays(orgId, { source: 'events', page: 1, pageSize: 5000 })
+  const nowTs = Date.now()
+  const workers = new Map()
+
+  response.items
+    .filter((item) => {
+      const keys = [
+        toLocalDayKey(item?.startAt),
+        toLocalDayKey(item?.endAt),
+        toLocalDayKey(item?.dayStartAt),
+        toLocalDayKey(item?.dayEndAt),
+        String(item?.dayKey ?? '').trim(),
+      ]
+
+      return keys.includes(day)
+    })
+    .forEach((item) => {
+      const workerLogin = String(item.workerLogin ?? '').trim()
+      const workerNameRaw = String(item.workerName ?? '').trim()
+      const workerSource = workerLogin || workerNameRaw
+      if (!workerSource) {
+        return
+      }
+
+      const workerLabel = workerNameRaw || workerLogin
+      const workerKey = normalizeLookupKey(workerSource)
+      if (!workerKey) {
+        return
+      }
+
+      if (!workers.has(workerKey)) {
+        workers.set(workerKey, {
+          id: workerLogin || workerNameRaw || workerKey,
+          workerName: workerLabel,
+          entriesCount: 0,
+          activeZone: '-',
+          activeLocation: '-',
+          activeSortTs: 0,
+          dayStartIso: '',
+          dayStopIso: '',
+          dayStartTs: 0,
+          dayStopTs: 0,
+        })
+      }
+
+      const bucket = workers.get(workerKey)
+      bucket.entriesCount += 1
+
+      const dayStartIso = toIso(item.dayStartAt || item.startAt || item.endAt)
+      const dayStartTs = toTimestamp(dayStartIso)
+      if (dayStartTs > 0 && (bucket.dayStartTs <= 0 || dayStartTs < bucket.dayStartTs)) {
+        bucket.dayStartIso = dayStartIso
+        bucket.dayStartTs = dayStartTs
+      }
+
+      const dayStopIso = toIso(item.dayEndAt)
+      const dayStopTs = toTimestamp(dayStopIso)
+      if (dayStopTs > bucket.dayStopTs) {
+        bucket.dayStopIso = dayStopIso
+        bucket.dayStopTs = dayStopTs
+      }
+
+      const status = normalizeStatus(item.status, Boolean(item.endAt))
+      const zoneLabel = String(item.zoneName ?? item.strefa ?? '').trim() || '-'
+      const locationLabel = String(item.lokalizacja ?? item.location ?? '').trim() || '-'
+      const startTs = toTimestamp(item.startAt || item.updatedAt)
+
+      const isActiveClean = status === 'RUNNING' && zoneLabel !== '-'
+      if (isActiveClean && startTs >= bucket.activeSortTs) {
+        bucket.activeSortTs = startTs
+        bucket.activeZone = zoneLabel
+        bucket.activeLocation = locationLabel
+      }
+    })
+
+  const items = [...workers.values()]
+    .map((bucket) => {
+      let duration = '-'
+      if (bucket.dayStartTs > 0) {
+        const endTs = bucket.dayStopTs > 0 ? bucket.dayStopTs : nowTs
+        const seconds = Math.max(0, Math.floor((endTs - bucket.dayStartTs) / 1000))
+        duration = seconds > 0 ? durationToHms(seconds) : '00:00:00'
+      }
+
+      return {
+        id: bucket.id,
+        workerName: bucket.workerName,
+        entriesCount: bucket.entriesCount,
+        activeZone: bucket.activeZone,
+        activeLocation: bucket.activeLocation,
+        qrStart: formatTime(bucket.dayStartIso),
+        qrStop: bucket.dayStopTs > 0 ? formatTime(bucket.dayStopIso) : '-',
+        duration,
+        activeSortTs: bucket.activeSortTs,
+      }
+    })
+    .sort((left, right) => {
+      const activeDiff = Number(right.activeSortTs > 0) - Number(left.activeSortTs > 0)
+      if (activeDiff !== 0) {
+        return activeDiff
+      }
+
+      if (right.entriesCount !== left.entriesCount) {
+        return right.entriesCount - left.entriesCount
+      }
+
+      return left.workerName.localeCompare(right.workerName, 'pl', { sensitivity: 'base' })
+    })
+    .map(({ activeSortTs, ...item }) => item)
+
+  return {
+    orgId,
+    day,
+    items,
+  }
 }
 
 export async function getDashboardSummary(orgId) {

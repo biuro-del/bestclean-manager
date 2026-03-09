@@ -210,25 +210,27 @@
 
             <div class="card dash-feedback dash-activity-panel">
               <div class="card-title-row">
-                <div class="card-title">Nowe zdarzenia</div>
-                <span class="pill" id="dashEventsPill">0</span>
+                <div class="card-title">Aktywni w dniu dzisiejszym</div>
+                <div class="dash-activity-actions">
+                  <button class="btn2 secondary dash-refresh-btn" id="dashRefreshBtn" type="button">Odśwież</button>
+                  <span class="pill" id="dashEventsPill">0</span>
+                </div>
               </div>
+              <div class="dash-last-refresh" id="dashLastRefresh">Ostatnie odświeżenie: - (autoodświeżenie co 15 min)</div>
 
               <div class="dash-events">
                 <div class="dash-events-head">
-                  <div>Imię</div>
-                  <div>Strefa</div>
-                  <div>Klient</div>
-                  <div>Data</div>
-                  <div>Start</div>
-                  <div>Stop</div>
+                  <div>Osoba</div>
+                  <div>Wpisy</div>
+                  <div>Aktywna strefa</div>
+                  <div>Lokalizacja strefy</div>
                   <div class="ta-right">Czas</div>
                 </div>
 
                 <div class="list dash-events-list" id="dashEventsList">
                   <div class="list-row dash-events-row">
                     <div class="muted">-</div><div class="muted">-</div><div class="muted">-</div>
-                    <div class="muted">-</div><div class="muted">-</div><div class="muted">-</div>
+                    <div class="muted">-</div>
                     <div class="muted ta-right">-</div>
                   </div>
                 </div>
