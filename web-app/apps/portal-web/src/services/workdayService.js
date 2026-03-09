@@ -1086,69 +1086,146 @@ function toLocalDayKey(value) {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
 }
 
+function isItemFromLocalDay(item, dayKey) {
+  const keys = [
+    toLocalDayKey(item?.startAt),
+    toLocalDayKey(item?.endAt),
+    toLocalDayKey(item?.dayStartAt),
+    toLocalDayKey(item?.dayEndAt),
+    String(item?.dayKey ?? '').trim(),
+  ].filter(Boolean)
+
+  return keys.includes(dayKey)
+}
+
+function updateBucketDayStart(bucket, isoValue, quality) {
+  const iso = toIso(isoValue)
+  const ts = toTimestamp(iso)
+  if (!iso || ts <= 0) {
+    return
+  }
+
+  const score = Number(quality) > 1 ? 2 : 1
+  if (
+    score > bucket.dayStartQuality ||
+    (score === bucket.dayStartQuality && (bucket.dayStartTs <= 0 || ts < bucket.dayStartTs))
+  ) {
+    bucket.dayStartIso = iso
+    bucket.dayStartTs = ts
+    bucket.dayStartQuality = score
+  }
+}
+
+function updateBucketDayStop(bucket, isoValue, quality) {
+  const iso = toIso(isoValue)
+  const ts = toTimestamp(iso)
+  if (!iso || ts <= 0) {
+    return
+  }
+
+  const score = Number(quality) > 1 ? 2 : 1
+  if (score > bucket.dayStopQuality || (score === bucket.dayStopQuality && ts > bucket.dayStopTs)) {
+    bucket.dayStopIso = iso
+    bucket.dayStopTs = ts
+    bucket.dayStopQuality = score
+  }
+}
+
 export async function getTodayActiveWorkers(orgId) {
   const day = currentDayYmd()
-  const response = await getWorkdays(orgId, { source: 'events', page: 1, pageSize: 5000 })
+  const [workdayResponse, eventsResponse] = await Promise.all([
+    getWorkdays(orgId, { page: 1, pageSize: 100000 }),
+    getWorkdays(orgId, { source: 'events', page: 1, pageSize: 100000 }).catch(() => ({ items: [] })),
+  ])
   const nowTs = Date.now()
   const workers = new Map()
+  const workerAliases = new Map()
 
-  response.items
-    .filter((item) => {
-      const keys = [
-        toLocalDayKey(item?.startAt),
-        toLocalDayKey(item?.endAt),
-        toLocalDayKey(item?.dayStartAt),
-        toLocalDayKey(item?.dayEndAt),
-        String(item?.dayKey ?? '').trim(),
-      ]
+  const resolveBucket = (item) => {
+    const workerLogin = String(item?.workerLogin ?? '').trim()
+    const workerName = String(item?.workerName ?? '').trim()
+    const primaryLabel = workerName || workerLogin
+    const aliases = [workerLogin, extractLoginLocalPart(workerLogin), workerName]
+      .map((value) => normalizeLookupKey(value))
+      .filter(Boolean)
 
-      return keys.includes(day)
+    let key = aliases.map((alias) => workerAliases.get(alias)).find(Boolean)
+    if (!key) {
+      key = aliases[0] || ''
+    }
+    if (!key) {
+      return null
+    }
+
+    if (!workers.has(key)) {
+      workers.set(key, {
+        id: workerLogin || workerName || key,
+        workerName: primaryLabel,
+        entriesCount: 0,
+        fallbackEntriesCount: 0,
+        activeZone: '-',
+        activeLocation: '-',
+        activeSortTs: 0,
+        dayStartIso: '',
+        dayStopIso: '',
+        dayStartTs: 0,
+        dayStopTs: 0,
+        dayStartQuality: 0,
+        dayStopQuality: 0,
+      })
+    }
+
+    const bucket = workers.get(key)
+    if (workerLogin && !String(bucket.id ?? '').trim()) {
+      bucket.id = workerLogin
+    }
+    if (workerName && bucket.workerName !== workerName && bucket.workerName === bucket.id) {
+      bucket.workerName = workerName
+    }
+
+    aliases.forEach((alias) => {
+      workerAliases.set(alias, key)
     })
+
+    return bucket
+  }
+
+  workdayResponse.items
+    .filter((item) => isItemFromLocalDay(item, day))
     .forEach((item) => {
-      const workerLogin = String(item.workerLogin ?? '').trim()
-      const workerNameRaw = String(item.workerName ?? '').trim()
-      const workerSource = workerLogin || workerNameRaw
-      if (!workerSource) {
+      const bucket = resolveBucket(item)
+      if (!bucket) {
         return
       }
 
-      const workerLabel = workerNameRaw || workerLogin
-      const workerKey = normalizeLookupKey(workerSource)
-      if (!workerKey) {
-        return
-      }
-
-      if (!workers.has(workerKey)) {
-        workers.set(workerKey, {
-          id: workerLogin || workerNameRaw || workerKey,
-          workerName: workerLabel,
-          entriesCount: 0,
-          activeZone: '-',
-          activeLocation: '-',
-          activeSortTs: 0,
-          dayStartIso: '',
-          dayStopIso: '',
-          dayStartTs: 0,
-          dayStopTs: 0,
-        })
-      }
-
-      const bucket = workers.get(workerKey)
       bucket.entriesCount += 1
+      updateBucketDayStart(bucket, item.dayStartAt || item.startAt || item.endAt, item.dayStartAt ? 2 : 1)
+      updateBucketDayStop(bucket, item.dayEndAt || item.endAt, item.dayEndAt ? 2 : 1)
 
-      const dayStartIso = toIso(item.dayStartAt || item.startAt || item.endAt)
-      const dayStartTs = toTimestamp(dayStartIso)
-      if (dayStartTs > 0 && (bucket.dayStartTs <= 0 || dayStartTs < bucket.dayStartTs)) {
-        bucket.dayStartIso = dayStartIso
-        bucket.dayStartTs = dayStartTs
+      const status = normalizeStatus(item.status, Boolean(item.endAt))
+      const zoneLabel = String(item.zoneName ?? item.strefa ?? '').trim() || '-'
+      const locationLabel = String(item.lokalizacja ?? item.location ?? '').trim() || '-'
+      const startTs = toTimestamp(item.startAt || item.updatedAt)
+
+      const isActiveClean = status === 'RUNNING' && zoneLabel !== '-'
+      if (isActiveClean && startTs >= bucket.activeSortTs) {
+        bucket.activeSortTs = startTs
+        bucket.activeZone = zoneLabel
+        bucket.activeLocation = locationLabel
+      }
+    })
+
+  eventsResponse.items
+    .filter((item) => isItemFromLocalDay(item, day))
+    .forEach((item) => {
+      const bucket = resolveBucket(item)
+      if (!bucket) {
+        return
       }
 
-      const dayStopIso = toIso(item.dayEndAt)
-      const dayStopTs = toTimestamp(dayStopIso)
-      if (dayStopTs > bucket.dayStopTs) {
-        bucket.dayStopIso = dayStopIso
-        bucket.dayStopTs = dayStopTs
-      }
+      bucket.fallbackEntriesCount += 1
+      updateBucketDayStart(bucket, item.dayStartAt || item.startAt || item.endAt, item.dayStartAt ? 2 : 1)
+      updateBucketDayStop(bucket, item.dayEndAt || item.endAt, item.dayEndAt ? 2 : 1)
 
       const status = normalizeStatus(item.status, Boolean(item.endAt))
       const zoneLabel = String(item.zoneName ?? item.strefa ?? '').trim() || '-'
@@ -1175,7 +1252,7 @@ export async function getTodayActiveWorkers(orgId) {
       return {
         id: bucket.id,
         workerName: bucket.workerName,
-        entriesCount: bucket.entriesCount,
+        entriesCount: bucket.entriesCount > 0 ? bucket.entriesCount : bucket.fallbackEntriesCount,
         activeZone: bucket.activeZone,
         activeLocation: bucket.activeLocation,
         qrStart: formatTime(bucket.dayStartIso),
