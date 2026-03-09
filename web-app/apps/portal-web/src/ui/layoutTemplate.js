@@ -3,25 +3,24 @@
   <div class="login-card" role="dialog" aria-label="Logowanie">
     <div class="login-brand">
       <div class="login-logo">
-        <img src="https://static.wixstatic.com/media/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png/v1/fill/w_698,h_238,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png" alt="Best Clean" />
+        <img src="/vite.svg" alt="FIDO iClean" />
       </div>
-      <div class="login-title">Panel WWW</div>
-      <div class="login-subtitle">Zaloguj się do panelu zarządzania</div>
+      <div class="login-title">PORTAL</div>
     </div>
 
     <div class="login-field">
       <label for="loginLogin">Login</label>
-      <input id="loginLogin" type="text" autocomplete="username" placeholder="login@bestclean.pl" />
+      <input id="loginLogin" type="text" autocomplete="username" />
     </div>
 
     <div class="login-field">
       <label for="loginPass">Hasło</label>
-      <input id="loginPass" type="password" autocomplete="current-password" placeholder="Wpisz hasło" />
+      <input id="loginPass" type="password" autocomplete="current-password" />
     </div>
 
     <div class="login-error" id="loginErr" style="display:none;"></div>
 
-    <button class="btn primary login-submit" id="loginBtn" type="button">Zaloguj</button>
+    <button class="btn primary" id="loginBtn" type="button">Zaloguj</button>
   </div>
 </div>
 
@@ -211,25 +210,27 @@
 
             <div class="card dash-feedback dash-activity-panel">
               <div class="card-title-row">
-                <div class="card-title">Nowe zdarzenia</div>
-                <span class="pill" id="dashEventsPill">0</span>
+                <div class="card-title">Aktywni w dniu dzisiejszym</div>
+                <div class="dash-activity-actions">
+                  <button class="btn2 secondary dash-refresh-btn" id="dashRefreshBtn" type="button">Odśwież</button>
+                  <span class="pill" id="dashEventsPill">0</span>
+                </div>
               </div>
+              <div class="dash-last-refresh" id="dashLastRefresh">Ostatnie odświeżenie: - (autoodświeżenie co 15 min)</div>
 
               <div class="dash-events">
                 <div class="dash-events-head">
-                  <div>Imię</div>
-                  <div>Strefa</div>
-                  <div>Klient</div>
-                  <div>Data</div>
-                  <div>Start</div>
-                  <div>Stop</div>
+                  <div>Osoba</div>
+                  <div>Wpisy</div>
+                  <div>Aktywna strefa</div>
+                  <div>Lokalizacja strefy</div>
                   <div class="ta-right">Czas</div>
                 </div>
 
                 <div class="list dash-events-list" id="dashEventsList">
                   <div class="list-row dash-events-row">
                     <div class="muted">-</div><div class="muted">-</div><div class="muted">-</div>
-                    <div class="muted">-</div><div class="muted">-</div><div class="muted">-</div>
+                    <div class="muted">-</div>
                     <div class="muted ta-right">-</div>
                   </div>
                 </div>

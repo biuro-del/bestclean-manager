@@ -15,7 +15,7 @@ import {
   deleteEvent,
   deleteWorkday,
   getDashboardSummary,
-  getRecentEvents,
+  getTodayActiveWorkers,
   getWorkdays,
   getWorkerTime,
   updateEvent,
@@ -85,6 +85,48 @@ const appState = {
   clientProfileCurrent: null,
   clientProfileEditMode: false,
   reportLastCsv: '',
+  reportHistoryTab: 'objects',
+  reportHistoryRows: [],
+  reportHistoryExpanded: {},
+  reportHistoryClientOptions: [],
+  reportHistoryWorkerOptions: [],
+  reportHistoryZoneOptions: [],
+  currentRoute: '',
+}
+let portalNoticeTimer = null
+let dashboardRefreshTimer = null
+let reportGeoPreviewHideTimer = null
+const reportGeoModalState = {
+  lat: '',
+  lon: '',
+  zoom: 18,
+}
+const DASHBOARD_REFRESH_INTERVAL_MS = 15 * 60 * 1000
+
+function showTransientNotice(message, type = 'success') {
+  const text = String(message ?? '').trim()
+  if (!text) {
+    return
+  }
+
+  let notice = document.getElementById('portalNotice')
+  if (!notice) {
+    notice = document.createElement('div')
+    notice.id = 'portalNotice'
+    notice.className = 'portal-notice'
+    document.body.appendChild(notice)
+  }
+
+  notice.textContent = text
+  notice.className = `portal-notice show ${type === 'error' ? 'error' : 'success'}`
+
+  if (portalNoticeTimer) {
+    window.clearTimeout(portalNoticeTimer)
+  }
+
+  portalNoticeTimer = window.setTimeout(() => {
+    notice?.classList.remove('show')
+  }, 3000)
 }
 
 function escapeHtml(value) {
@@ -148,6 +190,16 @@ function formatDatePl(isoValue) {
   return `${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}.${date.getFullYear()}`
 }
 
+function formatTime(value) {
+  const iso = toIso(value)
+  if (!iso) {
+    return '-'
+  }
+
+  const date = new Date(iso)
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
+}
+
 function todayYmd() {
   const now = new Date()
   return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
@@ -156,6 +208,15 @@ function todayYmd() {
 function firstDayOfCurrentMonthYmd() {
   const now = new Date()
   return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-01`
+}
+
+function daysAgoYmd(days) {
+  const offset = Number(days)
+  const normalized = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0
+  const date = new Date()
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() - normalized)
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
 }
 
 function ymdToIsoRangeStart(ymd) {
@@ -312,7 +373,15 @@ function renderDashboardEvents(rows) {
   }
 
   if (!rows.length) {
-    eventsList.innerHTML = '<div class="list-row dash-events-row"><div class="muted">Brak danych</div></div>'
+    eventsList.innerHTML = `
+      <div class="list-row dash-events-row">
+        <div class="muted">Brak danych</div>
+        <div class="muted">-</div>
+        <div class="muted">-</div>
+        <div class="muted">-</div>
+        <div class="muted ta-right">-</div>
+      </div>
+    `
     return
   }
 
@@ -320,13 +389,17 @@ function renderDashboardEvents(rows) {
     .map(
       (row) => `
       <div class="list-row dash-events-row">
-        <div>${escapeHtml(row.workerName)}</div>
-        <div>${escapeHtml(row.zoneName)}</div>
-        <div>${escapeHtml(row.clientName)}</div>
-        <div>${escapeHtml(row.date)}</div>
-        <div class="dash-start">${escapeHtml(row.start)}</div>
-        <div class="dash-stop">${escapeHtml(row.stop)}</div>
-        <div class="ta-right dash-dur time-duration">${escapeHtml(row.duration)}</div>
+        <div>${escapeHtml(row.workerName || '-')}</div>
+        <div>${escapeHtml(String(row.entriesCount ?? 0))}</div>
+        <div>${escapeHtml(row.activeZone || '-')}</div>
+        <div>${escapeHtml(row.activeLocation || '-')}</div>
+        <div class="ta-right">
+          <div class="dash-time-stack">
+            <div class="dash-start">${escapeHtml(`QR START: ${row.qrStart || '-'}`)}</div>
+            ${row.qrStop && row.qrStop !== '-' ? `<div class="dash-stop">${escapeHtml(`QR STOP: ${row.qrStop}`)}</div>` : ''}
+            <div class="dash-dur time-duration">${escapeHtml(row.duration || '-')}</div>
+          </div>
+        </div>
       </div>
     `,
     )
@@ -1466,6 +1539,113 @@ function renderEventsRows(rows) {
     return
   }
 
+  const normalizeLookup = (value) => String(value ?? '').trim().toLowerCase()
+  const normalizePersonValue = (value) => {
+    const raw = String(value ?? '').trim()
+    if (!raw) {
+      return ''
+    }
+    try {
+      return raw
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim()
+    } catch {
+      return raw.toLowerCase().replace(/\s+/g, ' ').trim()
+    }
+  }
+  const toLoginLocalPart = (value) => {
+    const text = String(value ?? '').trim()
+    const atIndex = text.indexOf('@')
+    return atIndex > 0 ? text.slice(0, atIndex).trim() : ''
+  }
+  const workerDisplayName = (worker) =>
+    String(
+      worker?.workerName ??
+        worker?.workername ??
+        worker?.worker_name ??
+        worker?.name ??
+        worker?.displayName ??
+        worker?.fullName ??
+        '',
+    ).trim()
+  const findWorkerByLogin = (loginText) => {
+    const variants = [normalizeLookup(loginText), normalizeLookup(toLoginLocalPart(loginText))].filter(Boolean)
+    if (!variants.length) {
+      return null
+    }
+
+    return (
+      appState.workers.find((worker) => {
+        const workerKeys = [
+          worker?.login,
+          worker?.workerLogin,
+          worker?.id,
+          worker?.workerId,
+          worker?.email,
+          worker?.loginEmail,
+        ]
+          .map((value) => String(value ?? '').trim())
+          .filter(Boolean)
+        const normalizedKeys = new Set([
+          ...workerKeys.map((value) => normalizeLookup(value)),
+          ...workerKeys.map((value) => normalizeLookup(toLoginLocalPart(value))),
+        ])
+        return variants.some((variant) => normalizedKeys.has(variant))
+      }) ?? null
+    )
+  }
+  const findWorkerByName = (nameText) => {
+    const normalized = normalizePersonValue(nameText)
+    if (!normalized) {
+      return null
+    }
+
+    const parts = normalized.split(' ').filter(Boolean)
+    if (!parts.length) {
+      return null
+    }
+
+    const exactMatch =
+      appState.workers.find((worker) => normalizePersonValue(workerDisplayName(worker)) === normalized) ?? null
+    if (exactMatch) {
+      return exactMatch
+    }
+
+    const surname = parts[parts.length - 1]
+    const surnameMatches = appState.workers.filter((worker) => {
+      const workerParts = normalizePersonValue(workerDisplayName(worker)).split(' ').filter(Boolean)
+      if (!workerParts.length) {
+        return false
+      }
+      return workerParts[workerParts.length - 1] === surname
+    })
+    return surnameMatches.length === 1 ? surnameMatches[0] : null
+  }
+  const resolveWorkerNameFromWorkers = (workerLoginCandidate, workerNameCandidate) => {
+    const loginText = String(workerLoginCandidate ?? '').trim()
+    const directName = String(workerNameCandidate ?? '').trim()
+
+    const workerByLogin = loginText ? findWorkerByLogin(loginText) : null
+    if (workerByLogin) {
+      const resolved = workerDisplayName(workerByLogin)
+      if (resolved) {
+        return resolved
+      }
+    }
+
+    const workerByName = directName ? findWorkerByName(directName) : null
+    if (workerByName) {
+      const resolved = workerDisplayName(workerByName)
+      if (resolved) {
+        return resolved
+      }
+    }
+    return directName || loginText || ''
+  }
+
   const isErrorLikeCell = (value) => {
     const text = String(value ?? '').trim().toLowerCase()
     if (!text) {
@@ -1513,7 +1693,7 @@ function renderEventsRows(rows) {
         ? `<button class="btn2" type="button" data-event-comment="${index}" title="Pokaż komentarz">💬</button>`
         : '—'
       const workerLogin = String(row.workerLogin ?? '').trim()
-      const workerName = String(row.workerName ?? '').trim()
+      const workerName = resolveWorkerNameFromWorkers(workerLogin, row.workerName)
       const workerPrimary = workerName || workerLogin || '-'
       const workerSecondary =
         workerLogin && workerName && workerLogin !== workerName ? workerLogin : ''
@@ -1845,13 +2025,11 @@ async function openEventEditor(item) {
   const zone = getZoneById(item.roomId || item.utilityRoomId)
   const selectedClientId = zone?.clientId ?? item.clientId
   const selectedZoneId = zone?.id ?? item.roomId ?? item.utilityRoomId
-  const sourceType = String(item.sourceType ?? 'EVENT').trim().toUpperCase()
-  const sourceId = String(item.sourceId ?? item.eventId ?? item.workdayId ?? '').trim()
 
   populateEventEditorOptions(item.workerLogin, selectedClientId, selectedZoneId)
 
   if (title) title.textContent = 'Edytuj zdarzenie'
-  if (cycleId) cycleId.textContent = `${sourceType === 'WORKDAY' ? 'WORKDAY' : 'EVENT'}:${sourceId || '-'}`
+  if (cycleId) cycleId.textContent = String(item.eventId ?? item.workdayId ?? '-')
   if (rowNumber) rowNumber.textContent = '-'
   if (editedBy) editedBy.textContent = item.editedBy || appState.session?.name || '-'
   if (roomInput) roomInput.value = String(item.roomId ?? item.utilityRoomId ?? '')
@@ -1997,12 +2175,63 @@ async function refreshDashboardWidgets() {
     return
   }
 
-  const [events, summary] = await Promise.all([
-    getRecentEvents(appState.session.orgId, 5),
+  const [todayActive, summary] = await Promise.all([
+    getTodayActiveWorkers(appState.session.orgId),
     getDashboardSummary(appState.session.orgId),
   ])
-  renderDashboardEvents(events)
+  renderDashboardEvents(todayActive.items ?? [])
   renderDashboardSummary(summary)
+  setDashboardLastRefresh(new Date())
+}
+
+function setDashboardLastRefresh(dateValue) {
+  const node = document.getElementById('dashLastRefresh')
+  if (!node) {
+    return
+  }
+  const autoRefreshLabel = ' (autoodświeżenie co 15 min)'
+
+  const iso = toIso(dateValue)
+  if (!iso) {
+    node.textContent = `Ostatnie odświeżenie: -${autoRefreshLabel}`
+    return
+  }
+
+  node.textContent = `Ostatnie odświeżenie: ${formatDatePl(iso)} ${formatTime(iso)}${autoRefreshLabel}`
+}
+
+function canAutoRefreshDashboard() {
+  if (!appState.session?.orgId) {
+    return false
+  }
+
+  if (document.visibilityState !== 'visible') {
+    return false
+  }
+
+  return appState.currentRoute === 'dashboard'
+}
+
+function triggerDashboardRefreshIfAllowed() {
+  if (!canAutoRefreshDashboard()) {
+    return
+  }
+
+  void refreshDashboardWidgets().catch(() => {})
+}
+
+function stopDashboardAutoRefresh() {
+  if (dashboardRefreshTimer) {
+    window.clearInterval(dashboardRefreshTimer)
+    dashboardRefreshTimer = null
+  }
+}
+
+function startDashboardAutoRefresh() {
+  stopDashboardAutoRefresh()
+  dashboardRefreshTimer = window.setInterval(() => {
+    triggerDashboardRefreshIfAllowed()
+  }, DASHBOARD_REFRESH_INTERVAL_MS)
 }
 
 async function saveEventEditor() {
@@ -2034,41 +2263,21 @@ async function saveEventEditor() {
         ...payload,
       })
     } else {
-      const sourceType = String(appState.eventEditorItem?.sourceType ?? 'EVENT')
-        .trim()
-        .toUpperCase()
-      if (sourceType === 'WORKDAY') {
-        const workdayId = String(appState.eventEditorItem?.workdayId ?? appState.eventEditorItem?.sourceId ?? '').trim()
-        if (!workdayId) {
-          throw new Error('Brak workdayId dla edycji wpisu dnia pracy.')
-        }
-
-        await updateWorkday(appState.session.orgId, workdayId, {
-          ...appState.eventEditorItem,
-          ...payload,
-          utilityRoomId:
-            payload.utilityRoomId ??
-            payload.zoneId ??
-            payload.roomId ??
-            appState.eventEditorItem?.utilityRoomId ??
-            null,
-        })
-      } else {
-        const eventId = String(appState.eventEditorItem?.eventId ?? appState.eventEditorItem?.sourceId ?? '').trim()
-        if (!eventId) {
-          throw new Error('Brak eventId dla edycji zdarzenia.')
-        }
-
-        await updateEvent(appState.session.orgId, eventId, {
-          ...appState.eventEditorItem,
-          ...payload,
-        })
+      const eventId = String(appState.eventEditorItem?.eventId ?? appState.eventEditorItem?.workdayId ?? '').trim()
+      if (!eventId) {
+        throw new Error('Brak eventId dla edycji zdarzenia.')
       }
+
+      await updateEvent(appState.session.orgId, eventId, {
+        ...appState.eventEditorItem,
+        ...payload,
+      })
     }
 
     closeEventEditor()
     await fetchEventsForCurrentSession({ resetPage: false })
     await refreshDashboardWidgets()
+    showTransientNotice('Zmiany zostały zapisane.')
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Błąd zapisu zdarzenia.'
     alert(message)
@@ -2090,23 +2299,12 @@ async function deleteEventEditorItem() {
     return
   }
 
-  const sourceType = String(appState.eventEditorItem?.sourceType ?? 'EVENT')
-    .trim()
-    .toUpperCase()
-  const sourceId = String(
-    sourceType === 'WORKDAY'
-      ? appState.eventEditorItem?.workdayId ?? appState.eventEditorItem?.sourceId
-      : appState.eventEditorItem?.eventId ?? appState.eventEditorItem?.sourceId,
-  ).trim()
-  if (!sourceId) {
+  const eventId = String(appState.eventEditorItem?.eventId ?? appState.eventEditorItem?.workdayId ?? '').trim()
+  if (!eventId) {
     return
   }
 
-  const confirmed = window.confirm(
-    sourceType === 'WORKDAY'
-      ? `Usunąć wpis dnia pracy ${sourceId}?`
-      : `Usunąć zdarzenie ${sourceId}?`,
-  )
+  const confirmed = window.confirm(`Usunąć zdarzenie ${eventId}?`)
   if (!confirmed) {
     return
   }
@@ -2118,11 +2316,7 @@ async function deleteEventEditorItem() {
   }
 
   try {
-    if (sourceType === 'WORKDAY') {
-      await deleteWorkday(appState.session.orgId, sourceId)
-    } else {
-      await deleteEvent(appState.session.orgId, sourceId)
-    }
+    await deleteEvent(appState.session.orgId, eventId)
     closeEventEditor()
     await fetchEventsForCurrentSession({ resetPage: false })
     await refreshDashboardWidgets()
@@ -4188,6 +4382,125 @@ function reportSetSelectOptions(selectId, options, placeholderLabel) {
   setSelectOptions(select, options, placeholderLabel)
 }
 
+function normalizeSearchText(value) {
+  const lowered = String(value ?? '')
+    .trim()
+    .toLocaleLowerCase('pl')
+  const normalized = typeof lowered.normalize === 'function' ? lowered.normalize('NFD') : lowered
+  return normalized.replace(/[\u0300-\u036f]/g, '')
+}
+
+function reportHistoryFilterOptions(options, query) {
+  const normalizedQuery = normalizeSearchText(query)
+  if (!normalizedQuery) {
+    return [...options]
+  }
+
+  return options.filter((option) => {
+    const label = normalizeSearchText(option.label)
+    const value = normalizeSearchText(option.value)
+    return label.includes(normalizedQuery) || value.includes(normalizedQuery)
+  })
+}
+
+function reportHistoryGetSelectConfig(kind) {
+  const normalizedKind = String(kind ?? '').trim().toLowerCase()
+  if (normalizedKind === 'worker' || normalizedKind === 'workers') {
+    return {
+      inputId: 'repHistoryWorkerSearch',
+      selectId: 'repHistoryWorker',
+      placeholderLabel: '(wybierz osobe)',
+      options: appState.reportHistoryWorkerOptions,
+    }
+  }
+
+  if (normalizedKind === 'zone' || normalizedKind === 'zones') {
+    return {
+      inputId: 'repHistoryZoneSearch',
+      selectId: 'repHistoryZone',
+      placeholderLabel: '(wybierz strefe)',
+      options: appState.reportHistoryZoneOptions,
+    }
+  }
+
+  return {
+    inputId: 'repHistoryClientSearch',
+    selectId: 'repHistoryClient',
+    placeholderLabel: '(wybierz obiekt)',
+    options: appState.reportHistoryClientOptions,
+  }
+}
+
+function reportHistorySetSelectExpanded(config, expanded, optionCount = 0) {
+  const select = document.getElementById(config.selectId)
+  if (!select) {
+    return
+  }
+
+  if (!expanded) {
+    select.size = 1
+    select.classList.remove('is-expanded')
+    return
+  }
+
+  const rows = Math.min(Math.max(Number(optionCount || 0) + 1, 2), 8)
+  select.size = rows
+  select.classList.add('is-expanded')
+}
+
+function reportHistoryCollapseSelect(kind) {
+  reportHistorySetSelectExpanded(reportHistoryGetSelectConfig(kind), false, 0)
+}
+
+function reportHistoryCollapseAllSelects() {
+  reportHistoryCollapseSelect('client')
+  reportHistoryCollapseSelect('worker')
+  reportHistoryCollapseSelect('zone')
+}
+
+function reportHistoryMaybeCollapseSelect(kind) {
+  const config = reportHistoryGetSelectConfig(kind)
+  const activeId = String(document.activeElement?.id ?? '').trim()
+  if (activeId === config.inputId || activeId === config.selectId) {
+    return
+  }
+
+  reportHistorySetSelectExpanded(config, false, 0)
+}
+
+function reportHistoryApplySelectFilter(kind, { expandOnEmpty = false } = {}) {
+  const config = reportHistoryGetSelectConfig(kind)
+
+  const select = document.getElementById(config.selectId)
+  if (!select) {
+    return
+  }
+
+  const currentValue = String(select.value ?? '').trim()
+  const query = String(document.getElementById(config.inputId)?.value ?? '').trim()
+  const filteredOptions = reportHistoryFilterOptions(config.options, query)
+  const placeholderLabel = query && !filteredOptions.length ? '(brak dopasowan)' : config.placeholderLabel
+
+  reportSetSelectOptions(config.selectId, filteredOptions, placeholderLabel)
+  const placeholderOption = select.options[0]
+  if (placeholderOption) {
+    const hasMatches = filteredOptions.length > 0
+    placeholderOption.hidden = hasMatches
+    placeholderOption.disabled = hasMatches
+  }
+  reportHistorySetSelectExpanded(config, Boolean(query) || expandOnEmpty, filteredOptions.length)
+
+  if (currentValue && filteredOptions.some((option) => option.value === currentValue)) {
+    select.value = currentValue
+  }
+}
+
+function reportHistoryApplyAllSelectFilters() {
+  reportHistoryApplySelectFilter('client')
+  reportHistoryApplySelectFilter('worker')
+  reportHistoryApplySelectFilter('zone')
+}
+
 function reportDefaultDates() {
   ;['repA_from', 'repB_from'].forEach((id) => {
     const input = document.getElementById(id)
@@ -4346,17 +4659,1070 @@ async function prepareReportsView() {
     label: worker.name || worker.login || worker.id,
   }))
   workerOptions.sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
+  const zoneOptions = appState.zones
+    .map((zone) => ({
+      value: String(zone.id ?? ''),
+      label: zone.name || zone.zone || zone.id,
+    }))
+    .filter((zone) => zone.value)
+    .sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
 
   reportSetSelectOptions('repA_client', clientOptions, '(wybierz klienta)')
   reportSetSelectOptions('repB_client', clientOptions, '(wybierz klienta)')
   reportSetSelectOptions('repA_worker', workerOptions, '(wszyscy pracownicy)')
   reportSetSelectOptions('repB_worker', workerOptions, '(wszyscy pracownicy)')
+  appState.reportHistoryClientOptions = [...clientOptions]
+  appState.reportHistoryWorkerOptions = [...workerOptions]
+  appState.reportHistoryZoneOptions = [...zoneOptions]
+  reportHistoryApplyAllSelectFilters()
   reportRefreshZoneOptions('A')
   reportRefreshZoneOptions('B')
   reportDefaultDates()
+  reportHistorySetTab(appState.reportHistoryTab)
+  reportHistoryApplyRangeMode(reportHistoryReadRangeMode(), { force: false })
+  reportHistoryResetResults({ clearStatus: true })
+  reportHistorySetStatus('Wybierz filtr i kliknij "Pokaz historie".')
   reportSetKpiValues()
   reportResetCharts()
   reportSetStatus('Wybierz klienta w panelu A i B, a nastepnie uruchom porownanie.')
+}
+
+function reportHistoryNormalizeTab(value) {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (normalized === 'workers' || normalized === 'zones') {
+    return normalized
+  }
+
+  return 'objects'
+}
+
+function reportHistoryReadRangeMode() {
+  return document.getElementById('repHistoryRangeWeek')?.checked ? 'week' : 'month'
+}
+
+function reportHistoryApplyRangeMode(mode, { force = false } = {}) {
+  const normalized = String(mode ?? '').trim().toLowerCase() === 'week' ? 'week' : 'month'
+  const monthRadio = document.getElementById('repHistoryRangeMonth')
+  const weekRadio = document.getElementById('repHistoryRangeWeek')
+  const fromInput = document.getElementById('repHistoryFrom')
+  const toInput = document.getElementById('repHistoryTo')
+
+  if (monthRadio) {
+    monthRadio.checked = normalized === 'month'
+  }
+  if (weekRadio) {
+    weekRadio.checked = normalized === 'week'
+  }
+
+  if (!fromInput || !toInput) {
+    return
+  }
+
+  if (!force && String(fromInput.value ?? '').trim() && String(toInput.value ?? '').trim()) {
+    return
+  }
+
+  if (normalized === 'week') {
+    fromInput.value = daysAgoYmd(6)
+    toInput.value = todayYmd()
+    return
+  }
+
+  fromInput.value = firstDayOfCurrentMonthYmd()
+  toInput.value = todayYmd()
+}
+
+function reportHistorySetStatus(message = '', isError = false) {
+  const node = document.getElementById('repHistoryStatus')
+  if (!node) {
+    return
+  }
+
+  node.textContent = message
+  node.style.color = isError ? '#b91c1c' : ''
+}
+
+function reportHistorySetTab(tab) {
+  const normalized = reportHistoryNormalizeTab(tab)
+  const previous = reportHistoryNormalizeTab(appState.reportHistoryTab)
+
+  appState.reportHistoryTab = normalized
+  reportGeoHidePreview()
+  reportGeoCloseModal()
+  reportHistoryCollapseAllSelects()
+  document.querySelectorAll('[data-rep-history-tab]').forEach((button) => {
+    button.classList.toggle('active', button.getAttribute('data-rep-history-tab') === normalized)
+  })
+
+  reportSetVisible('repHistoryClientWrap', normalized === 'objects')
+  reportSetVisible('repHistoryWorkerWrap', normalized === 'workers')
+  reportSetVisible('repHistoryZoneWrap', normalized === 'zones')
+
+  if (previous !== normalized) {
+    reportHistoryResetResults({ clearStatus: false })
+  }
+}
+
+function reportHistorySetSummaryRows(rows = []) {
+  const summary = document.getElementById('repHistorySummary')
+  if (!summary) {
+    return
+  }
+
+  if (!rows.length) {
+    summary.innerHTML = ''
+    reportSetVisible('repHistorySummary', false)
+    return
+  }
+
+  const days = rows.length
+  const events = rows.reduce((sum, row) => sum + Number(row.countAll ?? 0), 0)
+  const running = rows.reduce((sum, row) => sum + Number(row.runningCount ?? 0), 0)
+  const closedSec = rows.reduce((sum, row) => sum + Number(row.closedSec ?? 0), 0)
+  const isWorkersTab = reportHistoryNormalizeTab(appState.reportHistoryTab) === 'workers'
+  const selectedWorkerLabel = String(
+    document.getElementById('repHistoryWorker')?.selectedOptions?.[0]?.textContent ??
+      document.getElementById('repHistoryWorkerSearch')?.value ??
+      '',
+  ).trim()
+  const workerLine = isWorkersTab ? `<div><b>Osoba:</b> ${escapeHtml(selectedWorkerLabel || '-')}</div>` : ''
+
+  summary.innerHTML = `
+    <div class="rep-summary-card">
+      ${workerLine}
+      <div><b>Dni:</b> ${days}</div>
+      <div><b>Wpisy:</b> ${events} · <b>RUNNING:</b> ${running}</div>
+      <div><b>Czas CLOSED:</b> ${durationSecondsToHms(closedSec)}</div>
+    </div>
+  `
+  reportSetVisible('repHistorySummary', true)
+}
+
+function reportHistoryRenderDetails(row, tab) {
+  const details = Array.isArray(row.details) ? row.details : []
+  if (!details.length) {
+    return '<div class="rep-history-empty">Brak szczegolow.</div>'
+  }
+
+  if (tab === 'zones') {
+    const body = details
+      .map(
+        (detail) => `
+          <tr>
+            <td>${escapeHtml(detail.zoneLabel || '-')}</td>
+            <td>${escapeHtml(detail.locationLabel || '-')}</td>
+            <td>${escapeHtml(detail.workerLabel || '-')}</td>
+            <td class="time-start">${escapeHtml(detail.startLabel || '-')}</td>
+            <td class="time-stop">${escapeHtml(detail.stopLabel || '-')}</td>
+            <td class="ta-right">${escapeHtml(detail.durationLabel || '-')}</td>
+            <td class="ta-right">${escapeHtml(detail.statusLabel || '-')}</td>
+          </tr>
+        `,
+      )
+      .join('')
+
+    return `
+      <div class="rep-history-detail">
+        <table class="rep-history-detail-table">
+          <thead>
+            <tr><th>Strefa</th><th>Lokalizacja strefy</th><th>Osoba</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th></tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    `
+  }
+
+  if (tab === 'workers') {
+    const detailsBody = details
+      .map(
+        (detail) => `
+          <tr>
+            <td>${escapeHtml(detail.clientLabel || '-')}</td>
+            <td>${escapeHtml(detail.zoneLabel || '-')}</td>
+            <td>${escapeHtml(detail.locationLabel || '-')}</td>
+            <td class="time-start">${escapeHtml(detail.startLabel || '-')}</td>
+            <td class="time-stop">${escapeHtml(detail.stopLabel || '-')}</td>
+            <td class="ta-right">${escapeHtml(detail.durationLabel || '-')}</td>
+            <td class="ta-right">${escapeHtml(detail.statusLabel || '-')}</td>
+          </tr>
+        `,
+      )
+      .join('')
+    const qrStartRow = `
+      <tr class="rep-history-marker-row">
+        <td>${escapeHtml(row.qrStartClientLabel || '-')}</td>
+        <td>${escapeHtml(row.qrStartZoneCode || '-')}</td>
+        <td>${reportHistoryGeoCellHtml(row.qrStartGeoLabel || '-')}</td>
+        <td class="time-start">${escapeHtml(row.qrStartLabel || '-')}</td>
+        <td class="time-stop">-</td>
+        <td class="ta-right">-</td>
+        <td class="ta-right">QR START</td>
+      </tr>
+    `
+    const qrStopRow = `
+      <tr class="rep-history-marker-row">
+        <td>${escapeHtml(row.qrStopClientLabel || '-')}</td>
+        <td>${escapeHtml(row.qrStopZoneCode || '-')}</td>
+        <td>${reportHistoryGeoCellHtml(row.qrStopGeoLabel || '-')}</td>
+        <td class="time-start">-</td>
+        <td class="time-stop">${escapeHtml(row.qrStopLabel || '-')}</td>
+        <td class="ta-right">-</td>
+        <td class="ta-right">QR STOP</td>
+      </tr>
+    `
+    const body = `${qrStopRow}${detailsBody}${qrStartRow}`
+
+    return `
+      <div class="rep-history-detail">
+        <table class="rep-history-detail-table">
+          <thead>
+            <tr><th>Klient</th><th>Strefa</th><th>Lokalizacja strefy</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th></tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    `
+  }
+
+  const body = details
+    .map(
+      (detail) => `
+        <tr>
+          <td>${escapeHtml(detail.zoneLabel || '-')}</td>
+          <td>${escapeHtml(detail.locationLabel || '-')}</td>
+          <td>${escapeHtml(detail.workerLabel || '-')}</td>
+          <td class="time-start">${escapeHtml(detail.startLabel || '-')}</td>
+          <td class="time-stop">${escapeHtml(detail.stopLabel || '-')}</td>
+          <td class="ta-right">${escapeHtml(detail.durationLabel || '-')}</td>
+          <td class="ta-right">${escapeHtml(detail.statusLabel || '-')}</td>
+        </tr>
+      `,
+    )
+    .join('')
+
+  return `
+    <div class="rep-history-detail">
+      <table class="rep-history-detail-table">
+        <thead>
+          <tr><th>Strefa</th><th>Lokalizacja strefy</th><th>Osoba</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th></tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+  `
+}
+
+function reportHistoryRenderTable() {
+  const table = document.getElementById('repHistoryTable')
+  if (!table) {
+    return
+  }
+
+  const tab = reportHistoryNormalizeTab(appState.reportHistoryTab)
+  const rows = Array.isArray(appState.reportHistoryRows) ? appState.reportHistoryRows : []
+  const detailLabel = 'Szczegoly'
+  const headHtml = `
+    <thead>
+      <tr>
+        <th></th>
+        <th>Data</th>
+        <th class="ta-right">Wpisy</th>
+        <th class="ta-right">Czas CLOSED</th>
+        <th class="ta-right">RUNNING</th>
+        <th class="ta-right">${detailLabel}</th>
+      </tr>
+    </thead>
+  `
+
+  if (!rows.length) {
+    table.innerHTML = `${headHtml}<tbody><tr><td colspan="6" style="text-align:center; padding:18px;">Brak danych</td></tr></tbody>`
+    return
+  }
+
+  const bodyHtml = rows
+    .map((row) => {
+      const dayKey = String(row.dayKey ?? '').trim()
+      const expanded = Boolean(appState.reportHistoryExpanded?.[dayKey])
+      const actionLabel = expanded ? 'Zwin' : 'Rozwin'
+      const dayLabel = formatDatePl(`${dayKey}T00:00:00.000Z`)
+      const detailHtml = reportHistoryRenderDetails(row, tab)
+
+      return `
+        <tr class="rep-history-main-row">
+          <td><button class="btn2 rep-history-toggle" type="button" data-rep-history-toggle="${escapeHtml(dayKey)}">${actionLabel}</button></td>
+          <td>${escapeHtml(dayLabel)}</td>
+          <td class="ta-right">${escapeHtml(String(row.countAll ?? 0))}</td>
+          <td class="ta-right">${escapeHtml(durationSecondsToHms(row.closedSec || 0))}</td>
+          <td class="ta-right">${escapeHtml(String(row.runningCount ?? 0))}</td>
+          <td class="ta-right">${escapeHtml(String((row.details || []).length))}</td>
+        </tr>
+        <tr class="rep-history-detail-row"${expanded ? '' : ' style="display:none;"'}>
+          <td colspan="6">${detailHtml}</td>
+        </tr>
+      `
+    })
+    .join('')
+
+  table.innerHTML = `${headHtml}<tbody>${bodyHtml}</tbody>`
+}
+
+function reportHistoryResetResults({ clearStatus = true } = {}) {
+  appState.reportHistoryRows = []
+  appState.reportHistoryExpanded = {}
+  reportHistorySetSummaryRows([])
+  reportHistoryRenderTable()
+
+  if (clearStatus) {
+    reportHistorySetStatus('')
+  }
+}
+
+function reportHistoryResolveStatus(item) {
+  const normalized = String(item?.status ?? '')
+    .trim()
+    .toUpperCase()
+
+  if (normalized === 'CLOSED' || item?.endAt) {
+    return 'CLOSED'
+  }
+
+  if (normalized === 'OPEN' || normalized === 'RUNNING') {
+    return 'RUNNING'
+  }
+
+  return normalized || 'RUNNING'
+}
+
+function reportHistoryClosedDurationSec(item) {
+  if (reportHistoryResolveStatus(item) !== 'CLOSED') {
+    return 0
+  }
+
+  const direct = Number(item?.durationSec ?? 0)
+  if (Number.isFinite(direct) && direct > 0) {
+    return Math.floor(direct)
+  }
+
+  const startAt = toIso(item?.startAt)
+  const endAt = toIso(item?.endAt)
+  if (!startAt || !endAt) {
+    return 0
+  }
+
+  const diff = Math.floor((new Date(endAt).getTime() - new Date(startAt).getTime()) / 1000)
+  return Number.isFinite(diff) && diff > 0 ? diff : 0
+}
+
+function reportHistoryDurationLabel(item) {
+  const status = reportHistoryResolveStatus(item)
+  if (status !== 'CLOSED') {
+    return 'W toku'
+  }
+
+  return durationSecondsToHms(reportHistoryClosedDurationSec(item))
+}
+
+function reportHistoryLocalDayKey(value) {
+  const iso = toIso(value)
+  if (!iso) {
+    return ''
+  }
+
+  const date = new Date(iso)
+  if (!Number.isFinite(date.getTime())) {
+    return ''
+  }
+
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+}
+
+function reportHistoryDayKey(item) {
+  const fromStart = reportHistoryLocalDayKey(item?.startAt)
+  if (fromStart) {
+    return fromStart
+  }
+
+  const fromEnd = reportHistoryLocalDayKey(item?.endAt)
+  if (fromEnd) {
+    return fromEnd
+  }
+
+  const fromDayStart = reportHistoryLocalDayKey(item?.dayStartAt)
+  if (fromDayStart) {
+    return fromDayStart
+  }
+
+  const fromDayEnd = reportHistoryLocalDayKey(item?.dayEndAt)
+  if (fromDayEnd) {
+    return fromDayEnd
+  }
+
+  const dayKey = String(item?.dayKey ?? '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+    return dayKey
+  }
+
+  return ''
+}
+
+function reportHistoryToTimestamp(value) {
+  const iso = toIso(value)
+  if (!iso) {
+    return 0
+  }
+
+  const timestamp = new Date(iso).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function reportHistoryNormalizeQrCode(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw === '-') {
+    return ''
+  }
+
+  if (/^[A-Za-z0-9-]{3,}$/.test(raw) && !raw.includes(':')) {
+    return raw.toUpperCase()
+  }
+
+  const codeMatch = raw.match(/\b([A-Z]{1,6}\d{2,}[A-Z0-9-]*)\b/i)
+  if (codeMatch?.[1]) {
+    return codeMatch[1].toUpperCase()
+  }
+
+  return ''
+}
+
+function reportHistoryExtractQrFromComment(comment, phase) {
+  const raw = String(comment ?? '').trim()
+  if (!raw) {
+    return ''
+  }
+
+  const normalizedPhase = String(phase ?? '').trim().toLowerCase() === 'start' ? 'start' : 'stop'
+  const phaseRegex =
+    normalizedPhase === 'start'
+      ? /(START|QR\s*START|START_QR)\s*[:=-]?\s*([A-Z0-9-]{3,})/i
+      : /(STOP|QR\s*STOP|STOP_QR)\s*[:=-]?\s*([A-Z0-9-]{3,})/i
+  const phaseMatch = raw.match(phaseRegex)
+  if (phaseMatch?.[2]) {
+    return reportHistoryNormalizeQrCode(phaseMatch[2])
+  }
+
+  return ''
+}
+
+function reportHistoryExtractGpsCoords(source, phase) {
+  const raw = String(source ?? '').trim()
+  if (!raw) {
+    return ''
+  }
+
+  const entries = []
+  const regex = /(CLEAN_START_GPS|CLEAN_STOP_GPS|START_GPS|STOP_GPS)[^|]*?lat\s*=\s*(-?\d+(?:\.\d+)?)\s*lon\s*=\s*(-?\d+(?:\.\d+)?)/gi
+  let match = regex.exec(raw)
+  while (match) {
+    entries.push({
+      label: String(match[1] ?? '').toUpperCase(),
+      lat: String(match[2] ?? '').trim(),
+      lon: String(match[3] ?? '').trim(),
+    })
+    match = regex.exec(raw)
+  }
+
+  const normalizedPhase = String(phase ?? '').trim().toLowerCase() === 'start' ? 'start' : 'stop'
+  const preferredLabels =
+    normalizedPhase === 'start'
+      ? ['START_GPS', 'CLEAN_START_GPS']
+      : ['STOP_GPS', 'CLEAN_STOP_GPS']
+
+  for (const label of preferredLabels) {
+    const entry = entries.find((item) => item.label === label)
+    if (entry?.lat && entry?.lon) {
+      return `${entry.lat}, ${entry.lon}`
+    }
+  }
+
+  if (entries[0]?.lat && entries[0]?.lon) {
+    return `${entries[0].lat}, ${entries[0].lon}`
+  }
+
+  const fallback = raw.match(/lat\s*=\s*(-?\d+(?:\.\d+)?)\s*lon\s*=\s*(-?\d+(?:\.\d+)?)/i)
+  if (fallback?.[1] && fallback?.[2]) {
+    return `${fallback[1]}, ${fallback[2]}`
+  }
+
+  return ''
+}
+
+function reportHistoryResolveDayQrCode(item, phase) {
+  const normalizedPhase = String(phase ?? '').trim().toLowerCase() === 'start' ? 'start' : 'stop'
+  const directCode =
+    normalizedPhase === 'start'
+      ? reportHistoryNormalizeQrCode(item?.dayStartObject ?? item?.startObject)
+      : reportHistoryNormalizeQrCode(item?.dayStopObject ?? item?.stopObject)
+  if (directCode) {
+    return directCode
+  }
+
+  const fromComment = reportHistoryExtractQrFromComment(item?.dayComment ?? item?.comment, normalizedPhase)
+  if (fromComment) {
+    return fromComment
+  }
+
+  const roomCode = reportHistoryNormalizeQrCode(item?.workdayUtilityRoomId)
+  if (roomCode) {
+    return roomCode
+  }
+
+  const zoneCode = reportHistoryNormalizeQrCode(item?.zoneId ?? item?.utilityRoomId ?? item?.roomId)
+  return zoneCode || '-'
+}
+
+function reportHistoryResolveDayQrCandidate(item, phase) {
+  const normalizedPhase = String(phase ?? '').trim().toLowerCase() === 'start' ? 'start' : 'stop'
+  const directCode =
+    normalizedPhase === 'start'
+      ? reportHistoryNormalizeQrCode(item?.dayStartObject ?? item?.startObject)
+      : reportHistoryNormalizeQrCode(item?.dayStopObject ?? item?.stopObject)
+  if (directCode) {
+    return { code: directCode, score: 4 }
+  }
+
+  const fromComment = reportHistoryExtractQrFromComment(item?.dayComment ?? item?.comment, normalizedPhase)
+  if (fromComment) {
+    return { code: fromComment, score: 3 }
+  }
+
+  const roomCode = reportHistoryNormalizeQrCode(item?.workdayUtilityRoomId)
+  if (roomCode) {
+    return { code: roomCode, score: 2 }
+  }
+
+  const zoneCode = reportHistoryNormalizeQrCode(item?.zoneId ?? item?.utilityRoomId ?? item?.roomId)
+  if (zoneCode) {
+    return { code: zoneCode, score: 1 }
+  }
+
+  return { code: '-', score: 0 }
+}
+
+function reportHistoryResolveClientByZoneCode(zoneCode, fallback = '-') {
+  const code = String(zoneCode ?? '').trim().toUpperCase()
+  const fallbackLabel = String(fallback ?? '').trim() || '-'
+  if (!code || code === '-') {
+    return fallbackLabel
+  }
+
+  const zone = appState.zones.find((item) => String(item.id ?? item.zoneId ?? '').trim().toUpperCase() === code)
+  if (!zone) {
+    return fallbackLabel
+  }
+
+  const clientId = String(zone.clientId ?? '').trim()
+  if (!clientId) {
+    return fallbackLabel
+  }
+
+  const client = appState.clients.find((item) => String(item.id ?? item.clientId ?? '').trim() === clientId)
+  const clientLabel = String(client?.name ?? clientId).trim()
+  return clientLabel || fallbackLabel
+}
+
+function reportHistoryResolveDayGpsCoords(item, phase) {
+  const normalizedPhase = String(phase ?? '').trim().toLowerCase() === 'start' ? 'start' : 'stop'
+  const fromGps = reportHistoryExtractGpsCoords(item?.dayGps ?? item?.gps, normalizedPhase)
+  if (fromGps) {
+    return fromGps
+  }
+
+  const fromComment = reportHistoryExtractGpsCoords(item?.dayComment ?? item?.comment, normalizedPhase)
+  return fromComment || '-'
+}
+
+function reportHistoryParseGeoPair(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw === '-') {
+    return null
+  }
+
+  const match = raw.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/)
+  if (!match?.[1] || !match?.[2]) {
+    return null
+  }
+
+  const lat = Number(match[1])
+  const lon = Number(match[2])
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return null
+  }
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    return null
+  }
+
+  return {
+    lat: String(Math.round(lat * 1000000) / 1000000),
+    lon: String(Math.round(lon * 1000000) / 1000000),
+  }
+}
+
+function reportHistoryGeoCellHtml(value) {
+  const parsed = reportHistoryParseGeoPair(value)
+  if (!parsed) {
+    return escapeHtml(String(value ?? '').trim() || '-')
+  }
+
+  const label = `${parsed.lat}, ${parsed.lon}`
+  return `<button class="rep-geo-link" type="button" data-rep-geo-lat="${escapeHtml(parsed.lat)}" data-rep-geo-lon="${escapeHtml(parsed.lon)}" title="Podglad satelitarny">${escapeHtml(label)}</button>`
+}
+
+function reportGeoMapEmbedUrl(lat, lon, zoom = 18) {
+  const normalizedZoom = Math.min(Math.max(Number(zoom) || 18, 3), 21)
+  const query = `${lat},${lon}`
+  return `https://maps.google.com/maps?q=${encodeURIComponent(query)}&t=k&z=${normalizedZoom}&hl=pl&output=embed`
+}
+
+function ensureReportGeoUi() {
+  let preview = document.getElementById('repGeoPreview')
+  if (!preview) {
+    preview = document.createElement('div')
+    preview.id = 'repGeoPreview'
+    preview.className = 'rep-geo-preview'
+    preview.style.display = 'none'
+    preview.innerHTML = '<iframe id="repGeoPreviewFrame" title="Podglad satelitarny" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>'
+    document.body.appendChild(preview)
+  }
+
+  let overlay = document.getElementById('repGeoOverlay')
+  if (!overlay) {
+    overlay = document.createElement('div')
+    overlay.id = 'repGeoOverlay'
+    overlay.className = 'rep-geo-overlay'
+    overlay.style.display = 'none'
+    overlay.innerHTML = `
+      <div class="rep-geo-modal">
+        <div class="rep-geo-head">
+          <div class="rep-geo-title">Widok satelitarny</div>
+          <div class="rep-geo-tools">
+            <button id="repGeoZoomOut" class="btn2" type="button">-</button>
+            <button id="repGeoZoomIn" class="btn2" type="button">+</button>
+            <button id="repGeoClose" class="btn2" type="button">Zamknij</button>
+          </div>
+        </div>
+        <div id="repGeoCoords" class="rep-geo-coords">-</div>
+        <iframe id="repGeoFrame" title="Mapa satelitarna" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+      </div>
+    `
+    document.body.appendChild(overlay)
+  }
+}
+
+function reportGeoReadCoordsFromNode(node) {
+  const lat = String(node?.getAttribute('data-rep-geo-lat') ?? '').trim()
+  const lon = String(node?.getAttribute('data-rep-geo-lon') ?? '').trim()
+  const parsed = reportHistoryParseGeoPair(`${lat},${lon}`)
+  return parsed
+}
+
+function reportGeoHidePreview() {
+  if (reportGeoPreviewHideTimer) {
+    window.clearTimeout(reportGeoPreviewHideTimer)
+    reportGeoPreviewHideTimer = null
+  }
+
+  const preview = document.getElementById('repGeoPreview')
+  if (!preview) {
+    return
+  }
+
+  preview.style.display = 'none'
+}
+
+function reportGeoHidePreviewSoon() {
+  if (reportGeoPreviewHideTimer) {
+    window.clearTimeout(reportGeoPreviewHideTimer)
+  }
+
+  reportGeoPreviewHideTimer = window.setTimeout(() => {
+    reportGeoHidePreview()
+  }, 120)
+}
+
+function reportGeoShowPreview(anchorNode, lat, lon) {
+  ensureReportGeoUi()
+  if (reportGeoPreviewHideTimer) {
+    window.clearTimeout(reportGeoPreviewHideTimer)
+    reportGeoPreviewHideTimer = null
+  }
+
+  const preview = document.getElementById('repGeoPreview')
+  const frame = document.getElementById('repGeoPreviewFrame')
+  if (!preview || !frame || !anchorNode) {
+    return
+  }
+
+  const src = reportGeoMapEmbedUrl(lat, lon, 18)
+  if (frame.getAttribute('src') !== src) {
+    frame.setAttribute('src', src)
+  }
+
+  const rect = anchorNode.getBoundingClientRect()
+  const margin = 10
+  const width = 320
+  const height = 220
+  let left = window.scrollX + rect.left
+  let top = window.scrollY + rect.bottom + 8
+  if (window.innerHeight - rect.bottom < height + 20) {
+    top = window.scrollY + rect.top - height - 8
+  }
+  left = Math.max(window.scrollX + margin, Math.min(left, window.scrollX + window.innerWidth - width - margin))
+  top = Math.max(window.scrollY + margin, top)
+
+  preview.style.left = `${left}px`
+  preview.style.top = `${top}px`
+  preview.style.display = 'block'
+}
+
+function reportGeoRenderModal() {
+  const overlay = document.getElementById('repGeoOverlay')
+  const coords = document.getElementById('repGeoCoords')
+  const frame = document.getElementById('repGeoFrame')
+  if (!overlay || !coords || !frame) {
+    return
+  }
+
+  const lat = String(reportGeoModalState.lat ?? '').trim()
+  const lon = String(reportGeoModalState.lon ?? '').trim()
+  if (!lat || !lon) {
+    return
+  }
+
+  coords.textContent = `${lat}, ${lon} · zoom ${reportGeoModalState.zoom}`
+  const src = reportGeoMapEmbedUrl(lat, lon, reportGeoModalState.zoom)
+  if (frame.getAttribute('src') !== src) {
+    frame.setAttribute('src', src)
+  }
+}
+
+function reportGeoOpenModal(lat, lon) {
+  ensureReportGeoUi()
+  reportGeoHidePreview()
+
+  reportGeoModalState.lat = String(lat ?? '').trim()
+  reportGeoModalState.lon = String(lon ?? '').trim()
+  reportGeoModalState.zoom = 18
+  reportGeoRenderModal()
+
+  const overlay = document.getElementById('repGeoOverlay')
+  if (overlay) {
+    overlay.style.display = 'flex'
+  }
+}
+
+function reportGeoChangeZoom(step) {
+  const delta = Number(step) || 0
+  if (!delta) {
+    return
+  }
+
+  reportGeoModalState.zoom = Math.min(Math.max((Number(reportGeoModalState.zoom) || 18) + delta, 3), 21)
+  reportGeoRenderModal()
+}
+
+function reportGeoCloseModal() {
+  const overlay = document.getElementById('repGeoOverlay')
+  if (overlay) {
+    overlay.style.display = 'none'
+  }
+}
+
+function reportHistoryDetailSortKey(detail) {
+  return [
+    detail?.clientLabel || '',
+    detail?.zoneLabel || '',
+    detail?.locationLabel || '',
+    detail?.workerLabel || '',
+    detail?.statusLabel || '',
+  ].join('|')
+}
+
+function reportHistoryCompareDetailsByEndToStart(left, right) {
+  const leftEnd = Number(left?.sortEndTs ?? 0)
+  const rightEnd = Number(right?.sortEndTs ?? 0)
+  if (rightEnd !== leftEnd) {
+    return rightEnd - leftEnd
+  }
+
+  const leftStart = Number(left?.sortStartTs ?? 0)
+  const rightStart = Number(right?.sortStartTs ?? 0)
+  if (rightStart !== leftStart) {
+    return rightStart - leftStart
+  }
+
+  return reportHistoryDetailSortKey(left).localeCompare(reportHistoryDetailSortKey(right), 'pl', {
+    sensitivity: 'base',
+  })
+}
+
+function reportHistoryBuildRows(items, tab) {
+  const normalizedTab = reportHistoryNormalizeTab(tab)
+  const groups = new Map()
+
+  items.forEach((item) => {
+    const dayKey = reportHistoryDayKey(item)
+    if (!dayKey) {
+      return
+    }
+
+    if (!groups.has(dayKey)) {
+      groups.set(dayKey, {
+        dayKey,
+        countAll: 0,
+        runningCount: 0,
+        closedSec: 0,
+        dayStartIso: '',
+        dayEndIso: '',
+        dayStartTs: 0,
+        dayEndTs: 0,
+        dayStartClientLabel: '-',
+        dayEndClientLabel: '-',
+        dayStartZoneCode: '-',
+        dayEndZoneCode: '-',
+        dayStartGeoLabel: '-',
+        dayEndGeoLabel: '-',
+        dayStartQrScore: 0,
+        dayEndQrScore: 0,
+        dayStartEventTs: 0,
+        dayEndEventTs: 0,
+        details: [],
+      })
+    }
+
+    const bucket = groups.get(dayKey)
+    const status = reportHistoryResolveStatus(item)
+    const closedSec = reportHistoryClosedDurationSec(item)
+    const startIso = toIso(item?.startAt)
+    const endIso = toIso(item?.endAt)
+    const sortStartTs = reportHistoryToTimestamp(startIso)
+    const sortEndTs = reportHistoryToTimestamp(endIso) || sortStartTs
+    const dayStartIso = toIso(item?.dayStartAt) || startIso || endIso
+    const dayEndIso = toIso(item?.dayEndAt) || endIso
+    const dayStartTs = reportHistoryToTimestamp(dayStartIso)
+    const dayEndTs = reportHistoryToTimestamp(dayEndIso)
+    const clientLabel = String(item.clientName ?? item.klient ?? '-').trim() || '-'
+    const qrStartCandidate = reportHistoryResolveDayQrCandidate(item, 'start')
+    const qrStopCandidate = reportHistoryResolveDayQrCandidate(item, 'stop')
+    const qrStartZoneCode = qrStartCandidate.code
+    const qrStopZoneCode = qrStopCandidate.code
+    const qrStartClientLabel = reportHistoryResolveClientByZoneCode(qrStartZoneCode, clientLabel)
+    const qrStopClientLabel = reportHistoryResolveClientByZoneCode(qrStopZoneCode, clientLabel)
+    const qrStartGeoLabel = reportHistoryResolveDayGpsCoords(item, 'start')
+    const qrStopGeoLabel = reportHistoryResolveDayGpsCoords(item, 'stop')
+
+    bucket.countAll += 1
+    bucket.closedSec += closedSec
+    if (status === 'RUNNING') {
+      bucket.runningCount += 1
+    }
+    if (dayStartTs && (!bucket.dayStartTs || dayStartTs < bucket.dayStartTs)) {
+      bucket.dayStartTs = dayStartTs
+      bucket.dayStartIso = dayStartIso
+      bucket.dayStartClientLabel = qrStartClientLabel
+      bucket.dayStartZoneCode = qrStartZoneCode
+      bucket.dayStartGeoLabel = qrStartGeoLabel
+      bucket.dayStartQrScore = qrStartCandidate.score
+      bucket.dayStartEventTs = sortStartTs
+    } else if (dayStartTs && dayStartTs === bucket.dayStartTs) {
+      const replaceByScore = qrStartCandidate.score > Number(bucket.dayStartQrScore ?? 0)
+      const replaceByEventTs =
+        qrStartCandidate.score === Number(bucket.dayStartQrScore ?? 0) &&
+        sortStartTs > 0 &&
+        (Number(bucket.dayStartEventTs ?? 0) <= 0 || sortStartTs < Number(bucket.dayStartEventTs ?? 0))
+      const replaceByMissing = (bucket.dayStartZoneCode === '-' || !bucket.dayStartZoneCode) && qrStartZoneCode !== '-'
+      if (replaceByScore || replaceByEventTs || replaceByMissing) {
+        bucket.dayStartZoneCode = qrStartZoneCode
+        bucket.dayStartClientLabel = qrStartClientLabel
+        bucket.dayStartQrScore = qrStartCandidate.score
+        bucket.dayStartEventTs = sortStartTs
+      }
+      if ((bucket.dayStartGeoLabel === '-' || !bucket.dayStartGeoLabel) && qrStartGeoLabel !== '-') {
+        bucket.dayStartGeoLabel = qrStartGeoLabel
+      }
+    }
+    if (dayEndTs && dayEndTs > bucket.dayEndTs) {
+      bucket.dayEndTs = dayEndTs
+      bucket.dayEndIso = dayEndIso
+      bucket.dayEndClientLabel = qrStopClientLabel
+      bucket.dayEndZoneCode = qrStopZoneCode
+      bucket.dayEndGeoLabel = qrStopGeoLabel
+      bucket.dayEndQrScore = qrStopCandidate.score
+      bucket.dayEndEventTs = sortEndTs
+    } else if (dayEndTs && dayEndTs === bucket.dayEndTs) {
+      const replaceByScore = qrStopCandidate.score > Number(bucket.dayEndQrScore ?? 0)
+      const replaceByEventTs =
+        qrStopCandidate.score === Number(bucket.dayEndQrScore ?? 0) &&
+        sortEndTs > 0 &&
+        (Number(bucket.dayEndEventTs ?? 0) <= 0 || sortEndTs > Number(bucket.dayEndEventTs ?? 0))
+      const replaceByMissing = (bucket.dayEndZoneCode === '-' || !bucket.dayEndZoneCode) && qrStopZoneCode !== '-'
+      if (replaceByScore || replaceByEventTs || replaceByMissing) {
+        bucket.dayEndZoneCode = qrStopZoneCode
+        bucket.dayEndClientLabel = qrStopClientLabel
+        bucket.dayEndQrScore = qrStopCandidate.score
+        bucket.dayEndEventTs = sortEndTs
+      }
+      if ((bucket.dayEndGeoLabel === '-' || !bucket.dayEndGeoLabel) && qrStopGeoLabel !== '-') {
+        bucket.dayEndGeoLabel = qrStopGeoLabel
+      }
+    }
+
+    if (normalizedTab === 'workers') {
+      bucket.details.push({
+        clientLabel: String(item.clientName ?? item.klient ?? '-').trim() || '-',
+        zoneLabel: String(item.zoneName ?? item.strefa ?? '-').trim() || '-',
+        locationLabel: String(item.lokalizacja ?? item.location ?? '-').trim() || '-',
+        startLabel: formatTime(startIso),
+        stopLabel: status === 'RUNNING' ? '-' : formatTime(endIso),
+        durationLabel: reportHistoryDurationLabel(item),
+        statusLabel: status,
+        sortStartTs,
+        sortEndTs,
+      })
+      return
+    }
+
+    bucket.details.push({
+      zoneLabel: String(item.zoneName ?? item.strefa ?? '-').trim() || '-',
+      locationLabel: String(item.lokalizacja ?? item.location ?? '-').trim() || '-',
+      workerLabel: String(item.workerName ?? item.workerLogin ?? '-').trim() || '-',
+      startLabel: formatTime(startIso),
+      stopLabel: status === 'RUNNING' ? '-' : formatTime(endIso),
+      durationLabel: reportHistoryDurationLabel(item),
+      statusLabel: status,
+      sortStartTs,
+      sortEndTs,
+    })
+  })
+
+  return [...groups.values()]
+    .map((bucket) => {
+      const dayRangeSec =
+        bucket.dayStartTs && bucket.dayEndTs && bucket.dayEndTs > bucket.dayStartTs
+          ? Math.floor((bucket.dayEndTs - bucket.dayStartTs) / 1000)
+          : 0
+      return {
+        ...bucket,
+        closedSec: normalizedTab === 'workers' ? dayRangeSec : bucket.closedSec,
+        qrStartLabel: formatTime(bucket.dayStartIso),
+        qrStopLabel: formatTime(bucket.dayEndIso),
+        qrStartClientLabel: bucket.dayStartClientLabel || '-',
+        qrStopClientLabel: bucket.dayEndClientLabel || '-',
+        qrStartZoneCode: bucket.dayStartZoneCode || '-',
+        qrStopZoneCode: bucket.dayEndZoneCode || '-',
+        qrStartGeoLabel: bucket.dayStartGeoLabel || '-',
+        qrStopGeoLabel: bucket.dayEndGeoLabel || '-',
+        details: [...bucket.details].sort(reportHistoryCompareDetailsByEndToStart),
+      }
+    })
+    .sort((left, right) => (left.dayKey < right.dayKey ? 1 : -1))
+}
+
+function reportHistoryReadFilters() {
+  return {
+    tab: reportHistoryNormalizeTab(appState.reportHistoryTab),
+    clientId: String(document.getElementById('repHistoryClient')?.value ?? '').trim(),
+    workerLogin: String(document.getElementById('repHistoryWorker')?.value ?? '').trim(),
+    zoneId: String(document.getElementById('repHistoryZone')?.value ?? '').trim(),
+    from: String(document.getElementById('repHistoryFrom')?.value ?? '').trim(),
+    to: String(document.getElementById('repHistoryTo')?.value ?? '').trim(),
+  }
+}
+
+async function runReportHistory() {
+  if (!appState.session?.orgId) {
+    return
+  }
+
+  const filters = reportHistoryReadFilters()
+  if (!filters.from || !filters.to) {
+    reportHistorySetStatus('Ustaw zakres dat od-do.', true)
+    return
+  }
+
+  if (filters.from > filters.to) {
+    reportHistorySetStatus('Data "od" nie moze byc wieksza niz "do".', true)
+    return
+  }
+
+  if (filters.tab === 'objects' && !filters.clientId) {
+    reportHistorySetStatus('Wybierz obiekt (klienta).', true)
+    return
+  }
+
+  if (filters.tab === 'workers' && !filters.workerLogin) {
+    reportHistorySetStatus('Wybierz osobe.', true)
+    return
+  }
+
+  if (filters.tab === 'zones' && !filters.zoneId) {
+    reportHistorySetStatus('Wybierz strefe.', true)
+    return
+  }
+
+  reportHistoryResetResults({ clearStatus: false })
+  reportHistorySetStatus('Ladowanie historii...')
+
+  try {
+    const items = await reportFetchEventsPaged(appState.session.orgId, {
+      source: 'events',
+      fromIso: ymdToIsoRangeStart(filters.from),
+      toIso: ymdToIsoRangeEnd(filters.to),
+    })
+
+    let filtered = items
+    if (filters.tab === 'objects') {
+      filtered = items.filter((item) =>
+        reportMatchesPanelSelection(item, { clientId: filters.clientId, zoneId: '', workerLogin: '' }),
+      )
+    } else if (filters.tab === 'workers') {
+      filtered = items.filter((item) =>
+        reportMatchesPanelSelection(item, { clientId: '', zoneId: '', workerLogin: filters.workerLogin }),
+      )
+    } else if (filters.tab === 'zones') {
+      filtered = items.filter((item) =>
+        reportMatchesPanelSelection(item, { clientId: '', zoneId: filters.zoneId, workerLogin: '' }),
+      )
+    }
+
+    appState.reportHistoryRows = reportHistoryBuildRows(filtered, filters.tab)
+    appState.reportHistoryExpanded = {}
+    reportHistorySetSummaryRows(appState.reportHistoryRows)
+    reportHistoryRenderTable()
+
+    if (!appState.reportHistoryRows.length) {
+      reportHistorySetStatus('Brak danych dla wybranych filtrow.')
+      return
+    }
+
+    const rowsCount = appState.reportHistoryRows.length
+    const eventsCount = appState.reportHistoryRows.reduce((sum, row) => sum + Number(row.countAll ?? 0), 0)
+    reportHistorySetStatus(`Historia gotowa. Dni: ${rowsCount} · wpisy: ${eventsCount}.`)
+  } catch (error) {
+    reportHistorySetStatus(error instanceof Error ? error.message : 'Blad pobierania historii.', true)
+  }
+}
+
+function reportHistoryToggle(dayKey) {
+  const key = String(dayKey ?? '').trim()
+  if (!key) {
+    return
+  }
+
+  appState.reportHistoryExpanded = {
+    ...appState.reportHistoryExpanded,
+    [key]: !appState.reportHistoryExpanded?.[key],
+  }
+  reportHistoryRenderTable()
 }
 
 function openReportBuilder(kind) {
@@ -4370,14 +5736,30 @@ function openReportBuilder(kind) {
     if (title) title.textContent = 'Zestawienie zdarzeń'
     if (subtitle) subtitle.textContent = 'Porównanie panelu A i B dla zamkniętych zdarzeń (strefa i pracownik opcjonalne).'
     reportSetVisible('repEvents', true)
+    reportSetVisible('repHistory', false)
     reportSetVisible('repSoon', false)
     reportSetStatus('Wybierz klienta w panelu A i B, strefa i pracownik sa opcjonalne.')
+    return
+  }
+
+  if (kind === 'history') {
+    if (title) title.textContent = 'Historia'
+    if (subtitle) subtitle.textContent = 'Historia dnia dla obiektu, osoby lub strefy.'
+    reportSetVisible('repEvents', false)
+    reportSetVisible('repHistory', true)
+    reportSetVisible('repSoon', false)
+    reportHistoryApplyAllSelectFilters()
+    reportHistorySetTab(appState.reportHistoryTab)
+    reportHistoryApplyRangeMode(reportHistoryReadRangeMode(), { force: false })
+    reportHistoryResetResults({ clearStatus: false })
+    reportHistorySetStatus('Wybierz filtr i kliknij "Pokaz historie".')
     return
   }
 
   if (title) title.textContent = 'Wkrótce'
   if (subtitle) subtitle.textContent = 'Ten typ zestawienia dodamy w kolejnym etapie.'
   reportSetVisible('repEvents', false)
+  reportSetVisible('repHistory', false)
   reportSetVisible('repSoon', true)
 }
 
@@ -4385,30 +5767,21 @@ function closeReportBuilder() {
   reportSetVisible('repBuilder', false)
   reportSetVisible('repHome', true)
   reportSetVisible('repEvents', false)
+  reportSetVisible('repHistory', false)
   reportSetVisible('repSoon', false)
+  reportGeoHidePreview()
+  reportGeoCloseModal()
   reportResetResults()
 }
 
-function reportReadPanel(panel) {
-  return {
-    clientId: String(document.getElementById(`rep${panel}_client`)?.value ?? '').trim(),
-    zoneId: String(document.getElementById(`rep${panel}_zone`)?.value ?? '').trim(),
-    workerLogin: String(document.getElementById(`rep${panel}_worker`)?.value ?? '').trim(),
-    from: String(document.getElementById(`rep${panel}_from`)?.value ?? '').trim(),
-    to: String(document.getElementById(`rep${panel}_to`)?.value ?? '').trim(),
-  }
-}
-
-async function reportFetchEventsForPanel(orgId, panel) {
-  const pageSize = 1000
-  const maxPages = 200
+async function reportFetchEventsPaged(orgId, filters = {}) {
+  const pageSize = Math.max(Number(filters.pageSize ?? 1000) || 1000, 1)
+  const maxPages = Math.max(Number(filters.maxPages ?? 200) || 200, 1)
   const baseFilters = {
-    source: 'events',
-    status: 'CLOSED',
-    fromIso: ymdToIsoRangeStart(panel.from),
-    toIso: ymdToIsoRangeEnd(panel.to),
+    ...filters,
     pageSize,
   }
+  delete baseFilters.maxPages
 
   const items = []
   let page = 1
@@ -4427,6 +5800,25 @@ async function reportFetchEventsForPanel(orgId, panel) {
   }
 
   return items
+}
+
+function reportReadPanel(panel) {
+  return {
+    clientId: String(document.getElementById(`rep${panel}_client`)?.value ?? '').trim(),
+    zoneId: String(document.getElementById(`rep${panel}_zone`)?.value ?? '').trim(),
+    workerLogin: String(document.getElementById(`rep${panel}_worker`)?.value ?? '').trim(),
+    from: String(document.getElementById(`rep${panel}_from`)?.value ?? '').trim(),
+    to: String(document.getElementById(`rep${panel}_to`)?.value ?? '').trim(),
+  }
+}
+
+async function reportFetchEventsForPanel(orgId, panel) {
+  return reportFetchEventsPaged(orgId, {
+    source: 'events',
+    status: 'CLOSED',
+    fromIso: ymdToIsoRangeStart(panel.from),
+    toIso: ymdToIsoRangeEnd(panel.to),
+  })
 }
 
 function reportNormalizeText(value) {
@@ -5047,6 +6439,41 @@ function createBindingHelpers() {
   return { add, done: () => cleanups.forEach((cleanup) => cleanup()) }
 }
 
+function bindDashboardViewFunctions() {
+  const binding = createBindingHelpers()
+
+  binding.add(document.getElementById('dashRefreshBtn'), 'click', (event) => {
+    void (async () => {
+      if (!appState.session?.orgId) {
+        return
+      }
+
+      const button =
+        event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : document.getElementById('dashRefreshBtn')
+      if (!button || button.disabled) {
+        return
+      }
+
+      const defaultLabel = 'Odśwież'
+      button.disabled = true
+      button.textContent = 'Odświeżam...'
+
+      try {
+        await refreshDashboardWidgets()
+        showTransientNotice('Lista aktywnych została odświeżona.')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Nie udało się odświeżyć listy.'
+        showTransientNotice(message, 'error')
+      } finally {
+        button.disabled = false
+        button.textContent = defaultLabel
+      }
+    })()
+  })
+
+  return binding.done
+}
+
 function bindIndividualOrdersViewFunctions() {
   const binding = createBindingHelpers()
   individualOrdersSyncPermissions()
@@ -5550,8 +6977,38 @@ function bindWorkerProfileViewFunctions() {
 
 function bindReportsViewFunctions() {
   const binding = createBindingHelpers()
+  const reportsRoot = document.getElementById('view-reports')
 
-  binding.add(document.getElementById('view-reports'), 'click', (event) => {
+  binding.add(reportsRoot, 'click', (event) => {
+    const geoButton = event.target.closest('[data-rep-geo-lat][data-rep-geo-lon]')
+    if (geoButton) {
+      event.preventDefault()
+      const coords = reportGeoReadCoordsFromNode(geoButton)
+      if (coords) {
+        reportGeoOpenModal(coords.lat, coords.lon)
+      }
+      return
+    }
+
+    const historyTabButton = event.target.closest('[data-rep-history-tab]')
+    if (historyTabButton) {
+      const tab = String(historyTabButton.getAttribute('data-rep-history-tab') ?? '').trim()
+      if (tab) {
+        reportHistorySetTab(tab)
+        reportHistorySetStatus('Wybierz filtr i kliknij "Pokaz historie".')
+      }
+      return
+    }
+
+    const historyToggleButton = event.target.closest('[data-rep-history-toggle]')
+    if (historyToggleButton) {
+      const dayKey = String(historyToggleButton.getAttribute('data-rep-history-toggle') ?? '').trim()
+      if (dayKey) {
+        reportHistoryToggle(dayKey)
+      }
+      return
+    }
+
     const tile = event.target.closest('[data-rep-open]')
     if (!tile) {
       return
@@ -5564,6 +7021,54 @@ function bindReportsViewFunctions() {
 
     openReportBuilder(kind)
   })
+  binding.add(reportsRoot, 'mouseover', (event) => {
+    const geoButton = event.target.closest('[data-rep-geo-lat][data-rep-geo-lon]')
+    if (!geoButton) {
+      return
+    }
+
+    const coords = reportGeoReadCoordsFromNode(geoButton)
+    if (!coords) {
+      return
+    }
+
+    reportGeoShowPreview(geoButton, coords.lat, coords.lon)
+  })
+  binding.add(reportsRoot, 'mouseout', (event) => {
+    const geoButton = event.target.closest('[data-rep-geo-lat][data-rep-geo-lon]')
+    if (!geoButton) {
+      return
+    }
+
+    const related = event.relatedTarget
+    if (related && geoButton.contains(related)) {
+      return
+    }
+
+    reportGeoHidePreviewSoon()
+  })
+  binding.add(document, 'click', (event) => {
+    const target = event.target
+    if (!(target instanceof Element)) {
+      return
+    }
+
+    if (target.id === 'repGeoOverlay') {
+      reportGeoCloseModal()
+      return
+    }
+    if (target.closest('#repGeoClose')) {
+      reportGeoCloseModal()
+      return
+    }
+    if (target.closest('#repGeoZoomIn')) {
+      reportGeoChangeZoom(1)
+      return
+    }
+    if (target.closest('#repGeoZoomOut')) {
+      reportGeoChangeZoom(-1)
+    }
+  })
 
   binding.add(document.getElementById('repBack'), 'click', closeReportBuilder)
   binding.add(document.getElementById('repRun'), 'click', () => {
@@ -5572,16 +7077,72 @@ function bindReportsViewFunctions() {
   binding.add(document.getElementById('repDownloadCsv'), 'click', reportDownloadCsv)
   binding.add(document.getElementById('repA_client'), 'change', () => reportRefreshZoneOptions('A'))
   binding.add(document.getElementById('repB_client'), 'change', () => reportRefreshZoneOptions('B'))
+  binding.add(document.getElementById('repHistoryRun'), 'click', () => {
+    void runReportHistory()
+  })
+  ;[
+    { inputId: 'repHistoryClientSearch', selectId: 'repHistoryClient', kind: 'client' },
+    { inputId: 'repHistoryWorkerSearch', selectId: 'repHistoryWorker', kind: 'worker' },
+    { inputId: 'repHistoryZoneSearch', selectId: 'repHistoryZone', kind: 'zone' },
+  ].forEach(({ inputId, selectId, kind }) => {
+    binding.add(document.getElementById(inputId), 'input', () => {
+      reportHistoryApplySelectFilter(kind, { expandOnEmpty: true })
+    })
+    binding.add(document.getElementById(inputId), 'focus', () => {
+      reportHistoryApplySelectFilter(kind, { expandOnEmpty: true })
+    })
+    binding.add(document.getElementById(inputId), 'blur', () => {
+      window.setTimeout(() => {
+        reportHistoryMaybeCollapseSelect(kind)
+      }, 120)
+    })
+    binding.add(document.getElementById(inputId), 'keydown', (event) => {
+      if (event.key !== 'Enter') {
+        return
+      }
+
+      void runReportHistory()
+    })
+    binding.add(document.getElementById(selectId), 'change', () => {
+      const select = document.getElementById(selectId)
+      const searchInput = document.getElementById(inputId)
+      const selectedOption = select?.selectedOptions?.[0]
+      if (searchInput && select?.value) {
+        searchInput.value = String(selectedOption?.textContent ?? '').trim()
+      }
+      reportHistoryCollapseSelect(kind)
+    })
+    binding.add(document.getElementById(selectId), 'blur', () => {
+      window.setTimeout(() => {
+        reportHistoryMaybeCollapseSelect(kind)
+      }, 120)
+    })
+  })
+  binding.add(document.getElementById('repHistoryRangeMonth'), 'change', () => {
+    reportHistoryApplyRangeMode('month', { force: true })
+  })
+  binding.add(document.getElementById('repHistoryRangeWeek'), 'change', () => {
+    reportHistoryApplyRangeMode('week', { force: true })
+  })
+  ;['repHistoryFrom', 'repHistoryTo'].forEach((id) => {
+    binding.add(document.getElementById(id), 'keydown', (event) => {
+      if (event.key !== 'Enter') {
+        return
+      }
+
+      void runReportHistory()
+    })
+  })
 
   return binding.done
 }
 
 async function hydrateSections(orgId) {
-  const [clients, workers, zones, events, summary] = await Promise.all([
+  const [clients, workers, zones, todayActive, summary] = await Promise.all([
     getClients(orgId),
     getWorkers(orgId),
     getZones(orgId),
-    getRecentEvents(orgId, 5),
+    getTodayActiveWorkers(orgId),
     getDashboardSummary(orgId),
   ])
 
@@ -5592,7 +7153,7 @@ async function hydrateSections(orgId) {
   appState.zones = zones
   appState.zonesLoaded = true
 
-  renderDashboardEvents(events)
+  renderDashboardEvents(todayActive.items ?? [])
   renderDashboardSummary(summary)
   filterClientsTable()
   filterZonesTable()
@@ -5615,6 +7176,7 @@ function bindLogin(router) {
   }
 
   const handleLogin = async () => {
+    stopDashboardAutoRefresh()
     loginButton.disabled = true
     loginButton.textContent = 'Logowanie...'
     setLoginError('')
@@ -5658,10 +7220,17 @@ function bindLogin(router) {
       appState.selectedWorkerLogin = ''
       appState.selectedWorkerName = ''
       appState.reportLastCsv = ''
+      appState.reportHistoryTab = 'objects'
+      appState.reportHistoryRows = []
+      appState.reportHistoryExpanded = {}
+      appState.reportHistoryClientOptions = []
+      appState.reportHistoryWorkerOptions = []
+      appState.reportHistoryZoneOptions = []
 
       showPortal()
       setUserChip(normalizedSession)
       await hydrateSections(normalizedSession.orgId)
+      startDashboardAutoRefresh()
       router.go('dashboard')
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Błąd logowania.')
@@ -5693,6 +7262,8 @@ function bindLogout() {
   }
 
   const handleLogout = () => {
+    stopDashboardAutoRefresh()
+    appState.currentRoute = ''
     appState.session = null
     appState.clients = []
     appState.clientsLoaded = false
@@ -5725,6 +7296,12 @@ function bindLogout() {
     appState.selectedWorkerLogin = ''
     appState.selectedWorkerName = ''
     appState.reportLastCsv = ''
+    appState.reportHistoryTab = 'objects'
+    appState.reportHistoryRows = []
+    appState.reportHistoryExpanded = {}
+    appState.reportHistoryClientOptions = []
+    appState.reportHistoryWorkerOptions = []
+    appState.reportHistoryZoneOptions = []
 
     logout()
     setUserChip(null)
@@ -5748,6 +7325,12 @@ export function mountPortalApp() {
   mountViewsFromTemplates()
 
   const router = createRouter((route) => {
+    appState.currentRoute = String(route ?? '').trim()
+
+    if (appState.currentRoute === 'dashboard') {
+      triggerDashboardRefreshIfAllowed()
+    }
+
     if (route === 'clientsList') {
       void fetchClientsForCurrentSession(false)
       return
@@ -5793,9 +7376,15 @@ export function mountPortalApp() {
     }
   })
 
+  const handleVisibilityChange = () => {
+    triggerDashboardRefreshIfAllowed()
+  }
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+
   const cleanups = [
     bindSubmenuToggles(),
     bindRouteButtons(router),
+    bindDashboardViewFunctions(),
     bindLogin(router),
     bindLogout(),
     bindClientsViewFunctions(),
@@ -5807,6 +7396,7 @@ export function mountPortalApp() {
     bindWorkerTimeDetailViewFunctions(),
     bindWorkerProfileViewFunctions(),
     bindReportsViewFunctions(),
+    () => document.removeEventListener('visibilitychange', handleVisibilityChange),
   ]
 
   const session = requireAuth() ?? getSession()
@@ -5827,9 +7417,12 @@ export function mountPortalApp() {
         appState.session = normalizedSession
         setUserChip(normalizedSession)
         await hydrateSections(normalizedSession.orgId)
+        startDashboardAutoRefresh()
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Błąd inicjalizacji sesji.'
         console.error(message)
+        stopDashboardAutoRefresh()
+        appState.currentRoute = ''
         logout()
         appState.session = null
         appState.clients = []
@@ -5859,6 +7452,13 @@ export function mountPortalApp() {
         appState.individualOrderModalMode = 'add'
         appState.individualOrderCurrentId = ''
         appState.individualOrderQrCurrent = ''
+        appState.reportLastCsv = ''
+        appState.reportHistoryTab = 'objects'
+        appState.reportHistoryRows = []
+        appState.reportHistoryExpanded = {}
+        appState.reportHistoryClientOptions = []
+        appState.reportHistoryWorkerOptions = []
+        appState.reportHistoryZoneOptions = []
         showLoginScreen()
         setUserChip(null)
         setLoginError(message)
@@ -5867,6 +7467,8 @@ export function mountPortalApp() {
 
     router.go('dashboard')
   } else {
+    stopDashboardAutoRefresh()
+    appState.currentRoute = ''
     showLoginScreen()
     setUserChip(null)
   }
@@ -5874,6 +7476,7 @@ export function mountPortalApp() {
   window.go = router.go
 
   return () => {
+    stopDashboardAutoRefresh()
     cleanups.forEach((cleanup) => {
       try {
         cleanup()
@@ -5881,6 +7484,12 @@ export function mountPortalApp() {
         // No-op cleanup safety for dev remounts.
       }
     })
+
+    if (portalNoticeTimer) {
+      window.clearTimeout(portalNoticeTimer)
+      portalNoticeTimer = null
+    }
+    document.getElementById('portalNotice')?.remove()
 
     host.innerHTML = ''
     delete window.go

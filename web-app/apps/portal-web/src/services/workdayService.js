@@ -13,9 +13,9 @@ import { getZones } from './zoneService'
 import { getWorkers } from './workerService'
 
 const NINE_HOURS_SECONDS = 9 * 60 * 60
+let eventsForOrgUnavailable = false
 const DEPLOY_HINT =
-  'Brak wdrożonej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean2-2e798.'
-let workdayPausesForOrgUnavailable = false
+  'Brak wdrożonej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean-room.'
 
 function pad2(value) {
   return String(value).padStart(2, '0')
@@ -96,6 +96,11 @@ function withOperationNotFoundHint(error, operationName) {
 
   return error instanceof Error ? error : new Error(message || DEPLOY_HINT)
 }
+function isOperationNotFoundError(error, operationName) {
+  const message = messageFromError(error)
+  return isOperationNotFoundMessage(message, operationName) || message.includes(`Brak operacji: ${operationName}.`)
+}
+
 function toDayKey(isoValue) {
   const iso = toIso(isoValue)
   return iso ? iso.slice(0, 10) : ''
@@ -211,6 +216,7 @@ function extractLoginLocalPart(value) {
 function collectWorkerLookupValues(worker) {
   const primaryValues = [
     worker?.login,
+    worker?.workerLogin,
     worker?.id,
     worker?.workerId,
     worker?.email,
@@ -284,6 +290,20 @@ function pickFirstText(...values) {
   }
 
   return ''
+}
+
+function pickWorkerNameValue(worker) {
+  if (!worker) {
+    return ''
+  }
+
+  return pickFirstText(
+    worker.workerName,
+    worker.workername,
+    worker.worker_name,
+    worker.name,
+    worker.fullName,
+  )
 }
 
 function looksLikeSerializedError(value) {
@@ -362,155 +382,6 @@ async function runMutationOperation(operationName, variables) {
   } catch (error) {
     throw withOperationNotFoundHint(error, operationName)
   }
-}
-
-function nonNegativeInt(value) {
-  const numeric = Number(value)
-  if (!Number.isFinite(numeric) || numeric < 0) {
-    return 0
-  }
-  return Math.floor(numeric)
-}
-
-function pauseDurationSec(row, nowIsoValue = new Date().toISOString()) {
-  const direct = nonNegativeInt(row?.durationSec)
-  if (direct > 0) {
-    return direct
-  }
-  const startIso = toIso(row?.startAt)
-  if (!startIso) {
-    return 0
-  }
-  const stopIso = toIso(row?.stopAt)
-  const endIso = stopIso || nowIsoValue
-  const startMs = new Date(startIso).getTime()
-  const endMs = new Date(endIso).getTime()
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
-    return 0
-  }
-  return Math.floor((endMs - startMs) / 1000)
-}
-
-function extractPauseRowsFromData(data) {
-  if (!data || typeof data !== 'object') {
-    return []
-  }
-
-  const directCandidates = [
-    data.workdayPauses,
-    data.pauses,
-    data.pauseRows,
-  ]
-  for (const candidate of directCandidates) {
-    if (Array.isArray(candidate)) {
-      return candidate
-    }
-  }
-
-  for (const value of Object.values(data)) {
-    if (!Array.isArray(value) || !value.length) {
-      continue
-    }
-    const sample = value[0] || {}
-    if (String(sample?.pauseId ?? '').trim() || String(sample?.workdayId ?? '').trim()) {
-      return value
-    }
-  }
-
-  return []
-}
-
-function variableMismatchError(error) {
-  const message = String(messageFromError(error) ?? '').toLowerCase()
-  return (
-    message.includes('variable') ||
-    (message.includes('required') && message.includes('argument')) ||
-    message.includes('unknown argument') ||
-    message.includes('invalid value')
-  )
-}
-
-function operationUnavailable(error, operationName) {
-  const message = String(messageFromError(error) ?? '')
-  return (
-    isOperationNotFoundMessage(message, operationName) ||
-    message.includes(`Brak operacji: ${operationName}`) ||
-    message.includes(`Brak operacji: ${String(operationName).toLowerCase()}`)
-  )
-}
-
-async function fetchWorkdayPauseRows(orgId, workerLogin = '') {
-  const org = String(orgId ?? '').trim()
-  if (!org || workdayPausesForOrgUnavailable) {
-    return []
-  }
-
-  const variants = workerLogin
-    ? [{ orgId: org, workerLogin: String(workerLogin).trim() }, { orgId: org }]
-    : [{ orgId: org }]
-
-  for (const variables of variants) {
-    try {
-      const response = await runQueryOperation('WorkdayPausesForOrg', variables)
-      return extractPauseRowsFromData(response?.data)
-    } catch (error) {
-      if (operationUnavailable(error, 'WorkdayPausesForOrg')) {
-        workdayPausesForOrgUnavailable = true
-        return []
-      }
-      if (variableMismatchError(error)) {
-        continue
-      }
-      return []
-    }
-  }
-
-  return []
-}
-
-function buildPauseTotalsByWorkday(pauseRows, nowIsoValue = new Date().toISOString()) {
-  const totals = new Map()
-  ;(pauseRows || []).forEach((row) => {
-    const workdayId = String(row?.workdayId ?? '').trim()
-    if (!workdayId) {
-      return
-    }
-    const current = totals.get(workdayId) || 0
-    totals.set(workdayId, current + pauseDurationSec(row, nowIsoValue))
-  })
-  return totals
-}
-
-function timelineItemDurationSec(item) {
-  const direct = nonNegativeInt(item?.durationSec)
-  if (direct > 0) {
-    return direct
-  }
-  const startIso = toIso(item?.startAt)
-  const endIso = toIso(item?.endAt)
-  if (!startIso || !endIso) {
-    return 0
-  }
-  return nonNegativeInt((new Date(endIso).getTime() - new Date(startIso).getTime()) / 1000)
-}
-
-function applyPauseMetrics(items = [], pauseTotalsByWorkday = new Map()) {
-  return items.map((item) => {
-    const sourceType = String(item?.sourceType ?? '').trim().toUpperCase()
-    const workdayId = String(item?.workdayId ?? '').trim()
-    const breakSec = sourceType === 'WORKDAY' && workdayId
-      ? nonNegativeInt(pauseTotalsByWorkday.get(workdayId))
-      : 0
-    const workSec = timelineItemDurationSec(item)
-    const netSec = Math.max(0, workSec - breakSec)
-
-    return {
-      ...item,
-      breakSec,
-      pauseTotalSec: breakSec,
-      netSec,
-    }
-  })
 }
 
 function applyWorkdayFilters(items, filters = {}) {
@@ -646,7 +517,7 @@ function buildLookupMaps(clients, zones, workers, workdayRows = []) {
   const workerByNormalizedName = new Map(
     workers
       .map((worker) => {
-        const normalizedName = normalizePersonName(worker.name ?? worker.fullName ?? '')
+        const normalizedName = normalizePersonName(pickWorkerNameValue(worker))
         if (!normalizedName) {
           return null
         }
@@ -669,6 +540,15 @@ function buildLookupMaps(clients, zones, workers, workdayRows = []) {
             workdayId,
             workerLogin: String(row?.workerLogin ?? '').trim(),
             workerName: String(row?.workerName ?? '').trim(),
+            startAt: toIso(row?.startAt),
+            endAt: toIso(row?.endAt),
+            status: normalizeStatus(row?.status, Boolean(row?.endAt)),
+            utilityRoomId: String(row?.utilityRoomId ?? row?.roomId ?? '').trim(),
+            gps: String(row?.gps ?? '').trim(),
+            startObject: String(row?.startObject ?? '').trim(),
+            stopObject: String(row?.stopObject ?? '').trim(),
+            endScanAt: toIso(row?.endScanAt),
+            comment: String(row?.comment ?? '').trim(),
           },
         ]
       })
@@ -773,36 +653,40 @@ function pickClosestWorkerCandidate(candidates, eventStartAt) {
   return best ?? candidates[0] ?? null
 }
 
-function mapTimelineRow(orgId, row, lookupMaps, options = {}) {
-  const requestedSourceType = String(options.sourceType ?? '').trim().toUpperCase()
-  const sourceType = requestedSourceType === 'WORKDAY' ? 'WORKDAY' : 'EVENT'
+function mapWorkday(orgId, row, lookupMaps) {
   const rawEventId = sanitizeTextValue(row.eventId ?? row.cycleId)
   const rawWorkdayId = sanitizeTextValue(row.workdayId)
-  const sourceId =
-    sourceType === 'WORKDAY' ? rawWorkdayId || rawEventId : rawEventId || rawWorkdayId
-  const sourceKey = sourceId
-    ? `${sourceType}:${sourceId}`
-    : `${sourceType}:${toIso(row.startAt) || toIso(row.updatedAt) || Date.now()}`
-  const workdayId = sourceType === 'WORKDAY' ? sourceId : rawWorkdayId || null
-  const eventId = sourceType === 'EVENT' ? sourceId : null
+  const workdayId = rawWorkdayId || rawEventId
+  const eventId = rawEventId || workdayId
   const linkedWorkday = lookupMaps.workdayById.get(rawWorkdayId) ?? null
   const workerLoginCandidate = sanitizeTextValue(
     row.workerLogin ?? row.worker?.login ?? row.workday?.workerLogin ?? linkedWorkday?.workerLogin ?? '',
   )
-  const roomId = sanitizeTextValue(row.zoneId ?? row.utilityRoomId ?? row.roomId)
+  const roomId = sanitizeTextValue(
+    row.zoneId ?? row.utilityRoomId ?? row.roomId ?? row.zone?.ZoneId ?? row.zone?.zoneId,
+  )
   const normalizedRoomId = normalizeLookupKey(roomId)
   const startAt = toIso(row.startAt)
   const endAt = toIso(row.endAt)
+  const dayStartAt = toIso(row?.workday?.startAt ?? linkedWorkday?.startAt)
+  const dayEndAt = toIso(row?.workday?.endAt ?? linkedWorkday?.endAt)
+  const dayGps = sanitizeTextValue(row?.workday?.gps ?? linkedWorkday?.gps ?? row?.gps)
+  const dayStartObject = sanitizeTextValue(row?.workday?.startObject ?? linkedWorkday?.startObject ?? row?.startObject)
+  const dayStopObject = sanitizeTextValue(row?.workday?.stopObject ?? linkedWorkday?.stopObject ?? row?.stopObject)
+  const workdayUtilityRoomId = sanitizeTextValue(
+    row?.workday?.utilityRoomId ?? linkedWorkday?.utilityRoomId ?? row?.utilityRoomId ?? row?.roomId,
+  )
+  const dayComment = sanitizeTextValue(row?.workday?.comment ?? linkedWorkday?.comment ?? row?.comment)
   const durationSec = calculateDuration(row)
   const zoneFromRow = row?.zone
-    ? {
+      ? {
         id: sanitizeTextValue(row.zone.ZoneId ?? row.zone.zoneId ?? row.zoneId ?? roomId),
         clientId: sanitizeTextValue(row.zone.client?.clientId ?? row.clientId),
         name: sanitizeTextValue(row.zone.zone),
         zone: sanitizeTextValue(row.zone.zone),
         location: sanitizeTextValue(row.zone.location),
         workerLogin: sanitizeTextValue(row.zone.workerLogin),
-        workerName: sanitizeTextValue(row.zone.worker?.fullName),
+        workerName: sanitizeTextValue(pickWorkerNameValue(row.zone.worker)),
       }
     : null
 
@@ -851,7 +735,7 @@ function mapTimelineRow(orgId, row, lookupMaps, options = {}) {
   const inferredWorker = inferredFromRoomDay || inferredFromRoom || inferredFromDay || null
 
   const rawWorkerName = pickFirstText(
-    row.worker?.fullName,
+    pickWorkerNameValue(row.worker),
     row.workerName,
     row.workday?.workerName,
     zone?.workerName,
@@ -889,18 +773,18 @@ function mapTimelineRow(orgId, row, lookupMaps, options = {}) {
       linkedWorkday?.workerLogin,
     ) || null
   const status = normalizeStatus(row.status, Boolean(endAt))
-  const workerNameFromWorker = pickFirstText(worker?.name, worker?.fullName, workerFromName?.name)
+  const workerNameFromWorker = pickFirstText(
+    pickWorkerNameValue(worker),
+    pickWorkerNameValue(workerFromName),
+  )
   const workerNameValue = sanitizeTextValue(
     pickFirstText(workerNameFromWorker, rawWorkerName, resolvedWorkerLogin),
   )
 
   return {
-    id: sourceKey,
-    sourceType,
-    sourceId: sourceId || null,
-    sourceKey,
-    eventId,
-    workdayId,
+    id: eventId || workdayId,
+    eventId: eventId || workdayId,
+    workdayId: workdayId || eventId,
     linkedWorkdayId: rawWorkdayId,
     orgId,
     workerLogin: resolvedWorkerLogin,
@@ -917,6 +801,13 @@ function mapTimelineRow(orgId, row, lookupMaps, options = {}) {
     lokalizacja: sanitizeTextValue(zone?.location ?? '-'),
     startAt,
     endAt,
+    dayStartAt,
+    dayEndAt,
+    dayGps,
+    dayStartObject,
+    dayStopObject,
+    workdayUtilityRoomId,
+    dayComment,
     date: formatDatePl(startAt || endAt),
     start: formatTime(startAt),
     stop: formatTime(endAt),
@@ -938,16 +829,8 @@ function mapTimelineRow(orgId, row, lookupMaps, options = {}) {
   }
 }
 
-function mapEventRow(orgId, row, lookupMaps) {
-  return mapTimelineRow(orgId, row, lookupMaps, { sourceType: 'EVENT' })
-}
-
-function mapWorkdayRow(orgId, row, lookupMaps) {
-  return mapTimelineRow(orgId, row, lookupMaps, { sourceType: 'WORKDAY' })
-}
-
 function isDisplayableMappedItem(item) {
-  const eventId = String(item?.sourceId ?? item?.eventId ?? item?.workdayId ?? '').trim()
+  const eventId = String(item?.eventId ?? item?.workdayId ?? '').trim()
   const workerLogin = String(item?.workerLogin ?? '').trim()
   const workerName = String(item?.workerName ?? '').trim()
   const zoneId = String(item?.zoneId ?? item?.roomId ?? '').trim()
@@ -1015,22 +898,22 @@ function buildEventMutationPayload(payload = {}) {
   }
 }
 
-async function fetchLookupMapsFromRows(orgId, workdayRows = []) {
-  const [clients, zones, workers] = await Promise.all([getClients(orgId), getZones(orgId), getWorkers(orgId)])
+async function fetchLookupMaps(orgId, options = {}) {
+  const includeWorkdays = Boolean(options.includeWorkdays)
+  const [clients, zones, workers, workdayRows] = await Promise.all([
+    getClients(orgId),
+    getZones(orgId),
+    getWorkers(orgId),
+    includeWorkdays
+      ? workdaysForOrg({ orgId })
+          .then((response) => response?.data?.workdays ?? [])
+          .catch(() => [])
+      : Promise.resolve([]),
+  ])
   return buildLookupMaps(clients, zones, workers, workdayRows)
 }
 
-async function fetchLookupMaps(orgId, options = {}) {
-  const includeWorkdays = Boolean(options.includeWorkdays)
-  const workdayRows = includeWorkdays
-    ? await workdaysForOrg({ orgId })
-        .then((response) => response?.data?.workdays ?? [])
-        .catch(() => [])
-    : []
-  return fetchLookupMapsFromRows(orgId, workdayRows)
-}
-
-async function fetchMappedWorkdays(orgId, rowsPromise, operationName, options = {}) {
+async function fetchMappedWorkdays(orgId, rowsPromise, operationName) {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
@@ -1045,15 +928,12 @@ async function fetchMappedWorkdays(orgId, rowsPromise, operationName, options = 
 
   const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
   const rows = response?.data?.workdays ?? []
-  const mappedRows = rows.map((row) => mapWorkdayRow(orgId, row, lookupMaps))
-  const pauseRows = await fetchWorkdayPauseRows(orgId, options.workerLogin)
-  const pauseTotalsByWorkday = buildPauseTotalsByWorkday(pauseRows)
-  return applyPauseMetrics(mappedRows, pauseTotalsByWorkday)
+  return rows.map((row) => mapWorkday(orgId, row, lookupMaps))
 }
 
 async function fetchMappedBackupCycles(orgId) {
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+    throw new Error('Brak konfiguracji Firebase. UzupeĹ‚nij web-app/.env.')
   }
 
   ensureFirebase()
@@ -1064,34 +944,11 @@ async function fetchMappedBackupCycles(orgId) {
     throw withOperationNotFoundHint(error, 'BackupCyclesForOrg')
   }
 
-  const lookupMaps = await fetchLookupMaps(orgId)
+  const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
   const rows = response?.data?.backupCycles ?? []
   return rows
-    .map((row) => mapEventRow(orgId, row, lookupMaps))
+    .map((row) => mapWorkday(orgId, row, lookupMaps))
     .filter((item) => isDisplayableMappedItem(item))
-}
-
-function mergeMappedTimelineRows(items = []) {
-  const merged = new Map()
-  items.forEach((item) => {
-    const key = String(item?.sourceKey ?? `${item?.sourceType ?? 'EVENT'}:${item?.sourceId ?? ''}`).trim()
-    if (!key) {
-      return
-    }
-
-    const existing = merged.get(key)
-    if (!existing) {
-      merged.set(key, item)
-      return
-    }
-
-    const existingTs = new Date(toIso(existing.startAt) || toIso(existing.updatedAt) || 0).getTime()
-    const itemTs = new Date(toIso(item.startAt) || toIso(item.updatedAt) || 0).getTime()
-    if (itemTs >= existingTs) {
-      merged.set(key, item)
-    }
-  })
-  return [...merged.values()]
 }
 
 async function fetchMappedEvents(orgId) {
@@ -1100,24 +957,34 @@ async function fetchMappedEvents(orgId) {
   }
 
   ensureFirebase()
-  const [eventsResponse, workdaysResponse] = await Promise.all([
-    runQueryOperation('EventsForOrg', { orgId }),
-    workdaysForOrg({ orgId }).catch((error) => {
-      throw withOperationNotFoundHint(error, 'WorkdaysForOrg')
-    }),
-  ])
+  if (!eventsForOrgUnavailable) {
+    try {
+      const response = await runQueryOperation('EventsForOrg', { orgId })
+      const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
+      const rows = response?.data?.events ?? []
+      return rows
+        .map((row) => mapWorkday(orgId, row, lookupMaps))
+        .filter((item) => isDisplayableMappedItem(item))
+    } catch (error) {
+      if (!isOperationNotFoundError(error, 'EventsForOrg')) {
+        throw error
+      }
 
-  const workdayRows = workdaysResponse?.data?.workdays ?? []
-  const lookupMaps = await fetchLookupMapsFromRows(orgId, workdayRows)
-  const eventRows = eventsResponse?.data?.events ?? []
-  const mappedEvents = eventRows.map((row) => mapEventRow(orgId, row, lookupMaps))
-  const mappedWorkdays = workdayRows.map((row) => mapWorkdayRow(orgId, row, lookupMaps))
-  const pauseRows = await fetchWorkdayPauseRows(orgId)
-  const pauseTotalsByWorkday = buildPauseTotalsByWorkday(pauseRows)
+      eventsForOrgUnavailable = true
+    }
+  }
 
-  return applyPauseMetrics(mergeMappedTimelineRows([...mappedEvents, ...mappedWorkdays]), pauseTotalsByWorkday).filter((item) =>
-    isDisplayableMappedItem(item),
-  )
+  // First fallback: workdays so event edits stay visible when EventsForOrg is unavailable.
+  try {
+    return await fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg')
+  } catch (error) {
+    if (!isOperationNotFoundError(error, 'WorkdaysForOrg')) {
+      throw error
+    }
+  }
+
+  // Last fallback for older environments.
+  return fetchMappedBackupCycles(orgId)
 }
 
 export async function getWorkdays(orgId, filters = {}) {
@@ -1128,9 +995,7 @@ export async function getWorkdays(orgId, filters = {}) {
   } else if (source === 'backupcycle' || source === 'backup_cycle') {
     mapped = await fetchMappedBackupCycles(orgId)
   } else {
-    mapped = await fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg', {
-      workerLogin: String(filters.workerLogin ?? '').trim(),
-    })
+    mapped = await fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg')
   }
 
   const sorted = sortByLatest(mapped)
@@ -1163,7 +1028,6 @@ export async function getWorkerTime(orgId, workerId, range = {}) {
     orgId,
     workerWorkdaysForOrg({ orgId, workerLogin }),
     'WorkerWorkdaysForOrg',
-    { workerLogin },
   )
   const sorted = sortByLatest(mapped)
   const filtered = applyWorkdayFilters(sorted, range)
@@ -1179,10 +1043,10 @@ export async function getWorkerTime(orgId, workerId, range = {}) {
 
 export async function getRecentEvents(orgId, limit = 5) {
   const pageSize = Math.max(Number(limit) || 5, 1)
-  const response = await getWorkdays(orgId, { source: 'events', page: 1, pageSize })
+  const response = await getWorkdays(orgId, { page: 1, pageSize })
 
   return response.items.map((item) => ({
-    id: item.sourceKey || item.eventId || item.workdayId || item.id,
+    id: item.workdayId,
     workerName: item.workerName || '-',
     zoneName: item.zoneName || '-',
     clientName: item.clientName || '-',
@@ -1191,6 +1055,154 @@ export async function getRecentEvents(orgId, limit = 5) {
     stop: item.stop || '-',
     duration: item.duration || '-',
   }))
+}
+
+function currentDayYmd() {
+  const now = new Date()
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
+}
+
+function toTimestamp(value) {
+  const iso = toIso(value)
+  if (!iso) {
+    return 0
+  }
+
+  const ts = new Date(iso).getTime()
+  return Number.isFinite(ts) ? ts : 0
+}
+
+function toLocalDayKey(value) {
+  const iso = toIso(value)
+  if (!iso) {
+    return ''
+  }
+
+  const date = new Date(iso)
+  if (!Number.isFinite(date.getTime())) {
+    return ''
+  }
+
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+}
+
+export async function getTodayActiveWorkers(orgId) {
+  const day = currentDayYmd()
+  const response = await getWorkdays(orgId, { source: 'events', page: 1, pageSize: 5000 })
+  const nowTs = Date.now()
+  const workers = new Map()
+
+  response.items
+    .filter((item) => {
+      const keys = [
+        toLocalDayKey(item?.startAt),
+        toLocalDayKey(item?.endAt),
+        toLocalDayKey(item?.dayStartAt),
+        toLocalDayKey(item?.dayEndAt),
+        String(item?.dayKey ?? '').trim(),
+      ]
+
+      return keys.includes(day)
+    })
+    .forEach((item) => {
+      const workerLogin = String(item.workerLogin ?? '').trim()
+      const workerNameRaw = String(item.workerName ?? '').trim()
+      const workerSource = workerLogin || workerNameRaw
+      if (!workerSource) {
+        return
+      }
+
+      const workerLabel = workerNameRaw || workerLogin
+      const workerKey = normalizeLookupKey(workerSource)
+      if (!workerKey) {
+        return
+      }
+
+      if (!workers.has(workerKey)) {
+        workers.set(workerKey, {
+          id: workerLogin || workerNameRaw || workerKey,
+          workerName: workerLabel,
+          entriesCount: 0,
+          activeZone: '-',
+          activeLocation: '-',
+          activeSortTs: 0,
+          dayStartIso: '',
+          dayStopIso: '',
+          dayStartTs: 0,
+          dayStopTs: 0,
+        })
+      }
+
+      const bucket = workers.get(workerKey)
+      bucket.entriesCount += 1
+
+      const dayStartIso = toIso(item.dayStartAt || item.startAt || item.endAt)
+      const dayStartTs = toTimestamp(dayStartIso)
+      if (dayStartTs > 0 && (bucket.dayStartTs <= 0 || dayStartTs < bucket.dayStartTs)) {
+        bucket.dayStartIso = dayStartIso
+        bucket.dayStartTs = dayStartTs
+      }
+
+      const dayStopIso = toIso(item.dayEndAt)
+      const dayStopTs = toTimestamp(dayStopIso)
+      if (dayStopTs > bucket.dayStopTs) {
+        bucket.dayStopIso = dayStopIso
+        bucket.dayStopTs = dayStopTs
+      }
+
+      const status = normalizeStatus(item.status, Boolean(item.endAt))
+      const zoneLabel = String(item.zoneName ?? item.strefa ?? '').trim() || '-'
+      const locationLabel = String(item.lokalizacja ?? item.location ?? '').trim() || '-'
+      const startTs = toTimestamp(item.startAt || item.updatedAt)
+
+      const isActiveClean = status === 'RUNNING' && zoneLabel !== '-'
+      if (isActiveClean && startTs >= bucket.activeSortTs) {
+        bucket.activeSortTs = startTs
+        bucket.activeZone = zoneLabel
+        bucket.activeLocation = locationLabel
+      }
+    })
+
+  const items = [...workers.values()]
+    .map((bucket) => {
+      let duration = '-'
+      if (bucket.dayStartTs > 0) {
+        const endTs = bucket.dayStopTs > 0 ? bucket.dayStopTs : nowTs
+        const seconds = Math.max(0, Math.floor((endTs - bucket.dayStartTs) / 1000))
+        duration = seconds > 0 ? durationToHms(seconds) : '00:00:00'
+      }
+
+      return {
+        id: bucket.id,
+        workerName: bucket.workerName,
+        entriesCount: bucket.entriesCount,
+        activeZone: bucket.activeZone,
+        activeLocation: bucket.activeLocation,
+        qrStart: formatTime(bucket.dayStartIso),
+        qrStop: bucket.dayStopTs > 0 ? formatTime(bucket.dayStopIso) : '-',
+        duration,
+        activeSortTs: bucket.activeSortTs,
+      }
+    })
+    .sort((left, right) => {
+      const activeDiff = Number(right.activeSortTs > 0) - Number(left.activeSortTs > 0)
+      if (activeDiff !== 0) {
+        return activeDiff
+      }
+
+      if (right.entriesCount !== left.entriesCount) {
+        return right.entriesCount - left.entriesCount
+      }
+
+      return left.workerName.localeCompare(right.workerName, 'pl', { sensitivity: 'base' })
+    })
+    .map(({ activeSortTs, ...item }) => item)
+
+  return {
+    orgId,
+    day,
+    items,
+  }
 }
 
 export async function getDashboardSummary(orgId) {
@@ -1300,11 +1312,35 @@ export async function updateEvent(orgId, eventId, payload = {}) {
     startEventId: mutationPayload.startEventId,
     endEventId: mutationPayload.endEventId,
   }
-  await runMutationOperation('UpdateEventForOrg', {
-    orgId,
-    eventId: normalizedEventId,
-    ...eventPayload,
-  })
+  const fallbackWorkdayId = String(payload.workdayId ?? payload.linkedWorkdayId ?? normalizedEventId).trim()
+
+  try {
+    await runMutationOperation('UpdateEventForOrg', {
+      orgId,
+      eventId: normalizedEventId,
+      ...eventPayload,
+    })
+  } catch (error) {
+    if (!isOperationNotFoundError(error, 'UpdateEventForOrg')) {
+      throw error
+    }
+
+    if (!fallbackWorkdayId) {
+      throw error
+    }
+
+    await updateWorkday(orgId, fallbackWorkdayId, {
+      workerLogin: mutationPayload.workerLogin ?? payload.workerLogin ?? null,
+      workerName: payload.workerName ?? null,
+      utilityRoomId: mutationPayload.zoneId ?? payload.utilityRoomId ?? payload.roomId ?? null,
+      startAt: mutationPayload.startAt,
+      endAt: mutationPayload.endAt,
+      durationSec: mutationPayload.durationSec,
+      status: mutationPayload.status,
+      comment: mutationPayload.comment,
+      updatedBy: payload.updatedBy ?? payload.editedBy ?? null,
+    })
+  }
 
   return {
     id: normalizedEventId,
