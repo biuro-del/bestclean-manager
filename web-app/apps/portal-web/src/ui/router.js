@@ -15,9 +15,9 @@
 
 const routeGroups = {
   clientsList: 'clients',
-  events: 'clients',
-  zones: 'clients',
-  audits: 'clients',
+  zones: 'objects',
+  audits: 'reports',
+  coordinator: 'reports',
   individualOrders: 'clients',
   clientProfile: 'clients',
   checklists: 'clients',

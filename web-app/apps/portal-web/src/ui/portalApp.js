@@ -44,6 +44,7 @@ const appState = {
   zonesTotalPages: 1,
   workers: [],
   workersLoaded: false,
+  workerTimeRows: [],
   workersPage: 1,
   workersPageSize: 50,
   workersTotal: 0,
@@ -52,6 +53,8 @@ const appState = {
   eventsPageSize: 50,
   eventsTotal: 0,
   eventsTotalPages: 1,
+  eventsFilters: null,
+  eventsSelectedKeys: new Set(),
   eventRows: [],
   workerDetailPage: 1,
   workerDetailPageSize: 50,
@@ -105,6 +108,107 @@ const reportGeoModalState = {
   zoom: 18,
 }
 const DASHBOARD_REFRESH_INTERVAL_MS = 15 * 60 * 1000
+const SIDEBAR_COLLAPSE_STORAGE_KEY = 'portal.sidebarCollapsed'
+
+function readStoredSidebarCollapsed() {
+  try {
+    const raw = window.sessionStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY)
+    if (raw === '1') {
+      return true
+    }
+    if (raw === '0') {
+      return false
+    }
+  } catch {
+    // Ignore storage read errors in locked/private contexts.
+  }
+  return null
+}
+
+function sidebarIsTabletViewport() {
+  const width = Number(window.innerWidth || document.documentElement?.clientWidth || 0)
+  return width >= 761 && width <= 1180
+}
+
+function applySidebarRouteTitles() {
+  document.querySelectorAll('#portalSidebar [data-route], #portalSidebar [data-toggle]').forEach((button) => {
+    const label = String(button.querySelector('.mi-label')?.textContent ?? '').trim()
+    if (!label) {
+      return
+    }
+    button.setAttribute('title', label)
+  })
+}
+
+function setSidebarCollapsed(collapsed, { persist = true } = {}) {
+  const root = document.getElementById('portalRoot')
+  if (!root) {
+    return
+  }
+
+  const nextCollapsed = Boolean(collapsed)
+  root.classList.toggle('sidebar-collapsed', nextCollapsed)
+  root.dataset.sidebarCollapsed = nextCollapsed ? '1' : '0'
+
+  const toggleButton = document.getElementById('sidebarToggleBtn')
+  if (toggleButton instanceof HTMLButtonElement) {
+    const label = nextCollapsed ? 'Rozwin menu' : 'Zwin menu'
+    toggleButton.setAttribute('aria-label', label)
+    toggleButton.setAttribute('title', label)
+    toggleButton.setAttribute('aria-pressed', nextCollapsed ? 'true' : 'false')
+  }
+
+  if (nextCollapsed) {
+    document.querySelectorAll('#portalSidebar .submenu.open').forEach((submenu) => {
+      submenu.classList.remove('open')
+    })
+  }
+
+  if (!persist) {
+    return
+  }
+
+  try {
+    window.sessionStorage.setItem(SIDEBAR_COLLAPSE_STORAGE_KEY, nextCollapsed ? '1' : '0')
+  } catch {
+    // Ignore storage write errors.
+  }
+}
+
+function bindSidebarCollapseToggle() {
+  const toggleButton = document.getElementById('sidebarToggleBtn')
+  applySidebarRouteTitles()
+
+  const stored = readStoredSidebarCollapsed()
+  const defaultCollapsed = stored == null ? sidebarIsTabletViewport() : stored
+  setSidebarCollapsed(defaultCollapsed, { persist: false })
+
+  if (!(toggleButton instanceof HTMLButtonElement)) {
+    return () => {}
+  }
+
+  const handleClick = () => {
+    const root = document.getElementById('portalRoot')
+    const isCollapsed = Boolean(root?.classList.contains('sidebar-collapsed'))
+    setSidebarCollapsed(!isCollapsed)
+  }
+
+  const handleResize = () => {
+    if (readStoredSidebarCollapsed() != null) {
+      return
+    }
+
+    setSidebarCollapsed(sidebarIsTabletViewport(), { persist: false })
+  }
+
+  toggleButton.addEventListener('click', handleClick)
+  window.addEventListener('resize', handleResize)
+
+  return () => {
+    toggleButton.removeEventListener('click', handleClick)
+    window.removeEventListener('resize', handleResize)
+  }
+}
 
 function showTransientNotice(message, type = 'success') {
   const text = String(message ?? '').trim()
@@ -263,19 +367,37 @@ function roleLevel(role) {
     .trim()
     .toLowerCase()
 
-  if (normalized === 'admin') {
+  if (!normalized) {
+    return 0
+  }
+
+  if (normalized === 'admin' || normalized === 'administrator' || normalized === 'owner' || normalized === 'superadmin') {
     return 3
   }
 
-  if (normalized === 'kierownik' || normalized === 'manager') {
+  if (
+    normalized.includes('kierownik') ||
+    normalized.includes('manager') ||
+    normalized.includes('menedzer') ||
+    normalized.includes('menedżer')
+  ) {
     return 2
   }
 
-  if (normalized === 'pracownik' || normalized === 'worker') {
+  if (
+    normalized.includes('pracownik') ||
+    normalized.includes('worker') ||
+    normalized.includes('koordynator') ||
+    normalized.includes('coordinator') ||
+    normalized.includes('stażysta') ||
+    normalized.includes('stazysta') ||
+    normalized.includes('intern') ||
+    normalized.includes('member')
+  ) {
     return 1
   }
 
-  return 0
+  return 1
 }
 
 function canManageWorkers() {
@@ -1560,6 +1682,173 @@ async function downloadCurrentIndividualOrderQrPdf() {
   }
 }
 
+function eventSelectionKey(row, index) {
+  const key = String(row?.eventId ?? row?.workdayId ?? row?.id ?? '').trim()
+  return key || `row-${index}`
+}
+
+function splitEventCommentParts(value) {
+  return String(value ?? '')
+    .split(/\s*\|\s*|\r?\n+/)
+    .map((part) => String(part ?? '').trim())
+    .filter(Boolean)
+}
+
+function isSystemGeneratedEventCommentToken(value) {
+  const token = String(value ?? '').trim()
+  if (!token) {
+    return true
+  }
+
+  const normalized = token.toUpperCase()
+  const qrCodePattern = '(?=[A-Z0-9_-]*\\d)[A-Z0-9_-]+'
+
+  if (/^\[EDITEDBY:[^\]]+\]$/.test(normalized)) {
+    return true
+  }
+  if (new RegExp(`^(?:QR[_\\s]+)?(?:START|STOP)\\s+${qrCodePattern}$`).test(normalized)) {
+    return true
+  }
+  if (/^(?:CLEAN_)?(?:START_GPS|STOP_GPS)\b/.test(normalized)) {
+    return true
+  }
+
+  return false
+}
+
+function isSystemGeneratedEventComment(value) {
+  const parts = splitEventCommentParts(value)
+  if (!parts.length) {
+    return false
+  }
+  return parts.every((part) => isSystemGeneratedEventCommentToken(part))
+}
+
+function normalizeVisibleEventComment(value) {
+  const comment = String(value ?? '').trim()
+  if (!comment) {
+    return ''
+  }
+
+  if (isSystemGeneratedEventComment(comment)) {
+    return ''
+  }
+
+  const parts = splitEventCommentParts(comment)
+  const visibleParts = parts.filter((part) => !isSystemGeneratedEventCommentToken(part))
+  if (!visibleParts.length) {
+    return ''
+  }
+
+  return visibleParts.join(' | ')
+}
+
+function eventDeletionCandidateIds(row) {
+  const candidates = [
+    row?.eventId,
+    row?.workdayId,
+    row?.id,
+    row?.linkedWorkdayId,
+  ]
+  return [...new Set(candidates.map((value) => String(value ?? '').trim()).filter(Boolean))]
+}
+
+function eventRowFingerprintKey(row) {
+  const normalize = (value) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+  const startAt = toIso(row?.startAt)
+  const endAt = toIso(row?.endAt)
+  const durationRaw = Number(row?.durationSec)
+  const durationSec = Number.isFinite(durationRaw) && durationRaw > 0 ? Math.floor(durationRaw) : 0
+  const status = normalizeEventStatus(row?.status, Boolean(row?.endAt))
+  const workerKey = normalize(row?.workerLogin || row?.workerName)
+  const zoneKey = normalize(row?.zoneId ?? row?.roomId ?? row?.utilityRoomId ?? row?.strefa ?? row?.zoneName)
+  const clientKey = normalize(row?.clientId ?? row?.klient ?? row?.clientName)
+  const endReason = normalize(row?.endReason)
+  return [workerKey, startAt, endAt, zoneKey, clientKey, durationSec, status, endReason].join('|')
+}
+
+async function deleteEventByCandidateIds(orgId, row) {
+  const candidateIds = eventDeletionCandidateIds(row)
+  if (!candidateIds.length) {
+    throw new Error('Brak identyfikatora zdarzenia do usuniecia.')
+  }
+
+  const errors = []
+  let deletedAny = false
+  for (const id of candidateIds) {
+    try {
+      await deleteEvent(orgId, id)
+      deletedAny = true
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+
+  if (!deletedAny) {
+    const firstError = errors[0]
+    throw firstError instanceof Error ? firstError : new Error('Blad usuwania zdarzenia.')
+  }
+
+  return candidateIds
+}
+
+function eventTypeInfo(row) {
+  const endReason = String(row?.endReason ?? '').trim().toUpperCase()
+  const clientIndId = String(row?.clientIndId ?? '').trim()
+  const status = normalizeEventStatus(row?.status, Boolean(row?.endAt))
+  const startIso = toIso(row?.startAt)
+  const endIso = toIso(row?.endAt)
+  const durationSec = Number(row?.durationSec ?? 0)
+  const stopOnlyByTiming =
+    Boolean(startIso && endIso) &&
+    Number.isFinite(new Date(endIso).getTime() - new Date(startIso).getTime()) &&
+    Math.abs(new Date(endIso).getTime() - new Date(startIso).getTime()) <= 1000 &&
+    (!Number.isFinite(durationSec) || durationSec <= 0)
+  const specialHaystack = [row?.strefa, row?.zoneName, row?.roomId, row?.clientStatus]
+    .map((value) => String(value ?? '').toLowerCase())
+    .join(' ')
+  const isSpecial = specialHaystack.includes('specjal') || specialHaystack.includes('special')
+
+  if (clientIndId || endReason === 'INDIVIDUAL_DONE') {
+    return { label: 'Zlecenie ind.', className: 'event-type-badge--individual' }
+  }
+  if (status === 'RUNNING' && !row?.endAt) {
+    return { label: 'QR START', className: 'event-type-badge--start' }
+  }
+  if (endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY' || stopOnlyByTiming) {
+    return { label: 'QR STOP', className: 'event-type-badge--stop' }
+  }
+  if (endReason === 'QR_START_STOP') {
+    return { label: 'QR START + STOP', className: 'event-type-badge--clean' }
+  }
+  if (isSpecial) {
+    return { label: 'Strefa spec.', className: 'event-type-badge--special' }
+  }
+  if (endReason === 'QR_NEW' || endReason === 'QR_SAME' || row?.endAt) {
+    return { label: 'CLEAN', className: 'event-type-badge--clean' }
+  }
+  return { label: 'Inne QR', className: 'event-type-badge--other' }
+}
+
+function syncEventsSelectionUi() {
+  const selectAll = document.getElementById('evSelectAll')
+  const deleteButton = document.getElementById('evDeleteSelectedBtn')
+  const selectionEnabled = canManageEvents()
+  const rowKeys = appState.eventRows.map((row, index) => eventSelectionKey(row, index))
+  const selectedCount = rowKeys.filter((key) => appState.eventsSelectedKeys.has(key)).length
+
+  if (selectAll instanceof HTMLInputElement) {
+    selectAll.disabled = !selectionEnabled || rowKeys.length === 0
+    selectAll.indeterminate = selectionEnabled && selectedCount > 0 && selectedCount < rowKeys.length
+    selectAll.checked = selectionEnabled && rowKeys.length > 0 && selectedCount === rowKeys.length
+  }
+
+  if (deleteButton instanceof HTMLButtonElement) {
+    deleteButton.style.display = selectionEnabled ? '' : 'none'
+    deleteButton.disabled = !selectionEnabled || selectedCount <= 0
+  }
+}
+
 function renderEventsRows(rows) {
   const root = document.getElementById('evRows')
   if (!root) {
@@ -1704,64 +1993,87 @@ function renderEventsRows(rows) {
 
   appState.eventRows = safeRows
 
+  const visibleKeys = new Set(safeRows.map((row, index) => eventSelectionKey(row, index)))
+  appState.eventsSelectedKeys = new Set([...appState.eventsSelectedKeys].filter((key) => visibleKeys.has(key)))
+
   if (!safeRows.length) {
     root.innerHTML = `
       <div class="events-row">
-        <div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+        <div></div><div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
       </div>
     `
+    syncEventsSelectionUi()
     return
   }
 
   root.innerHTML = safeRows
     .map((row, index) => {
-      const comment = String(row.comment ?? '').trim()
+      const rowKey = eventSelectionKey(row, index)
+      const isSelected = appState.eventsSelectedKeys.has(rowKey)
+      const canSelect = canManageEvents()
+      const comment = normalizeVisibleEventComment(row.comment)
       const commentCell = comment
-        ? `<button class="btn2" type="button" data-event-comment="${index}" title="Pokaż komentarz">💬</button>`
-        : '—'
+        ? `<button class="btn2" type="button" data-event-comment="${index}" title="Pokaz komentarz">💬</button>`
+        : ''
+      const typeInfo = eventTypeInfo(row)
+      const typeBadge = `<span class="event-type-badge ${escapeHtml(typeInfo.className)}">${escapeHtml(typeInfo.label)}</span>`
       const workerLogin = String(row.workerLogin ?? '').trim()
       const workerName = resolveWorkerNameFromWorkers(workerLogin, row.workerName)
       const workerPrimary = workerName || workerLogin || '-'
-      const workerSecondary =
-        workerLogin && workerName && workerLogin !== workerName ? workerLogin : ''
-      const workerCell = `
+      const workerSecondary = workerLogin && workerName && workerLogin !== workerName ? workerLogin : ''
+      const workerCard = `
         <div class="events-worker-cell">
           <div class="events-worker-name">${escapeHtml(workerPrimary)}</div>
           <div class="events-worker-login mono">${escapeHtml(workerSecondary || '')}</div>
         </div>
       `
+      const workerCell =
+        workerPrimary === '-'
+          ? workerCard
+          : `<button class="events-cell-link" type="button" data-event-history-worker="${index}" title="Pokaz historie osoby">${workerCard}</button>`
+
+      const clientLabel = String(row.klient || '-').trim() || '-'
+      const clientCell =
+        clientLabel === '-'
+          ? '-'
+          : `<button class="events-cell-link" type="button" data-event-history-client="${index}" title="Pokaz historie klienta">${escapeHtml(clientLabel)}</button>`
+
+      const zoneLabel = String(row.strefa || '-').trim() || '-'
+      const zoneCell =
+        zoneLabel === '-'
+          ? '-'
+          : `<button class="events-cell-link" type="button" data-event-history-zone="${index}" title="Pokaz historie strefy">${escapeHtml(zoneLabel)}</button>`
 
       return `
-        <div class="events-row">
+        <div class="events-row${isSelected ? ' is-selected' : ''}">
+          <div class="events-select-col">
+            <input type="checkbox" data-event-select-index="${index}" aria-label="Zaznacz zdarzenie" ${isSelected ? 'checked' : ''} ${canSelect ? '' : 'disabled'} />
+          </div>
           <div>${workerCell}</div>
-          <div>${escapeHtml(row.klient || '-')}</div>
-          <div>${escapeHtml(row.strefa || '-')}</div>
+          <div>${clientCell}</div>
+          <div>${zoneCell}</div>
           <div>${escapeHtml(row.lokalizacja || '-')}</div>
           <div class="mono">${escapeHtml(row.date || '-')}</div>
           <div class="mono time-start">${escapeHtml(row.start || '-')}</div>
           <div class="mono time-stop">${escapeHtml(row.stop || '-')}</div>
           <div class="mono time-duration">${escapeHtml(row.duration || '-')}</div>
+          <div>${typeBadge}</div>
           <div>${commentCell}</div>
           <div>${escapeHtml(row.editedBy || '-')}</div>
-          <div><button class="btn2" type="button" data-event-edit="${index}">Edytuj</button></div>
+          <div>
+            <button class="event-edit-icon-btn" type="button" data-event-edit="${index}" aria-label="Edytuj zdarzenie" title="Edytuj zdarzenie">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 20h4l10-10-4-4L4 16v4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                <path d="M13 7l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
         </div>
       `
     })
     .join('')
-}
 
-function parseDurationHms(value) {
-  const match = String(value ?? '')
-    .trim()
-    .match(/^(\d{1,3}):([0-5]\d):([0-5]\d)$/)
-  if (!match) {
-    return 0
-  }
-
-  const hours = Number(match[1]) || 0
-  const minutes = Number(match[2]) || 0
-  const seconds = Number(match[3]) || 0
-  return hours * 3600 + minutes * 60 + seconds
+  syncEventsSelectionUi()
 }
 
 function durationSecondsToHms(value) {
@@ -1826,27 +2138,6 @@ function normalizeEventStatus(value, hasEndAt = false) {
   }
 
   return hasEndAt ? 'CLOSED' : 'RUNNING'
-}
-
-function applyEventStatusColor() {
-  const statusSelect = document.getElementById('evEditStatus')
-  if (!statusSelect) {
-    return
-  }
-
-  const status = normalizeEventStatus(statusSelect.value)
-
-  statusSelect.style.backgroundColor = ''
-  statusSelect.style.color = ''
-
-  if (status === 'CLOSED') {
-    statusSelect.style.backgroundColor = '#ffe5e5'
-    statusSelect.style.color = '#7a0000'
-    return
-  }
-
-  statusSelect.style.backgroundColor = '#e6ffe6'
-  statusSelect.style.color = '#0b4f0b'
 }
 
 function syncEventModalLogo() {
@@ -1959,34 +2250,6 @@ function fillEventsClientFilterDatalist() {
   })
 }
 
-function recalcEventDurationFromTimes() {
-  const startAt = localDateTimeInputToIso(document.getElementById('evEditStart')?.value)
-  const endAt = localDateTimeInputToIso(document.getElementById('evEditStop')?.value)
-  const durationInput = document.getElementById('evEditDuration')
-
-  if (!durationInput || !startAt || !endAt) {
-    alert('Uzupełnij Start i Stop.')
-    return
-  }
-
-  const durationSec = Math.max(0, Math.floor((new Date(endAt).getTime() - new Date(startAt).getTime()) / 1000))
-  durationInput.value = durationSecondsToHms(durationSec)
-}
-
-function recalcEventStopFromDuration() {
-  const startAt = localDateTimeInputToIso(document.getElementById('evEditStart')?.value)
-  const durationSec = parseDurationHms(document.getElementById('evEditDuration')?.value)
-  const endInput = document.getElementById('evEditStop')
-
-  if (!endInput || !startAt || durationSec <= 0) {
-    alert('Uzupełnij Start i poprawny Czas (HH:MM:SS).')
-    return
-  }
-
-  const endAt = new Date(new Date(startAt).getTime() + durationSec * 1000).toISOString()
-  endInput.value = isoToLocalDateTimeInput(endAt)
-}
-
 function setEventStopNow() {
   const endInput = document.getElementById('evEditStop')
   if (!endInput) {
@@ -1998,7 +2261,6 @@ function setEventStopNow() {
 
 function syncEventRoomAndClientFromZone() {
   const zoneSelect = document.getElementById('evEditStrefa')
-  const roomInput = document.getElementById('evEditRoomId')
   const clientSelect = document.getElementById('evEditPom')
   if (!zoneSelect) {
     return
@@ -2007,10 +2269,6 @@ function syncEventRoomAndClientFromZone() {
   const zone = getZoneById(zoneSelect.value)
   if (!zone) {
     return
-  }
-
-  if (roomInput) {
-    roomInput.value = String(zone.id)
   }
 
   if (clientSelect) {
@@ -2040,11 +2298,9 @@ async function openEventEditor(item) {
   const cycleId = document.getElementById('evCycleId')
   const rowNumber = document.getElementById('evRowNumber')
   const editedBy = document.getElementById('evEditedBy')
-  const roomInput = document.getElementById('evEditRoomId')
   const startInput = document.getElementById('evEditStart')
   const stopInput = document.getElementById('evEditStop')
-  const durationInput = document.getElementById('evEditDuration')
-  const statusInput = document.getElementById('evEditStatus')
+  const stopNowButton = document.getElementById('evStopNowBtn')
   const commentInput = document.getElementById('evEditComment')
   const deleteButton = document.getElementById('evDeleteBtn')
   const saveButton = document.getElementById('evSaveBtn')
@@ -2059,12 +2315,15 @@ async function openEventEditor(item) {
   if (cycleId) cycleId.textContent = String(item.eventId ?? item.workdayId ?? '-')
   if (rowNumber) rowNumber.textContent = '-'
   if (editedBy) editedBy.textContent = item.editedBy || appState.session?.name || '-'
-  if (roomInput) roomInput.value = String(item.roomId ?? item.utilityRoomId ?? '')
   if (startInput) startInput.value = isoToLocalDateTimeInput(item.startAt)
   if (stopInput) stopInput.value = isoToLocalDateTimeInput(item.endAt)
-  if (durationInput) durationInput.value = durationSecondsToHms(item.durationSec)
-  if (statusInput) statusInput.value = normalizeEventStatus(item.status, Boolean(item.endAt))
-  if (commentInput) commentInput.value = String(item.comment ?? '')
+  if (stopNowButton instanceof HTMLButtonElement) stopNowButton.disabled = false
+  if (startInput) startInput.disabled = false
+  if (stopInput) stopInput.disabled = false
+  if (commentInput) {
+    commentInput.readOnly = true
+    commentInput.value = normalizeVisibleEventComment(item.comment)
+  }
   if (saveButton) {
     saveButton.disabled = false
     saveButton.textContent = 'Zapisz'
@@ -2074,8 +2333,6 @@ async function openEventEditor(item) {
     deleteButton.disabled = false
     deleteButton.textContent = 'Usuń'
   }
-
-  applyEventStatusColor()
 
   overlay.style.display = 'flex'
 }
@@ -2101,11 +2358,8 @@ async function openCreateEventEditor() {
   const cycleId = document.getElementById('evCycleId')
   const rowNumber = document.getElementById('evRowNumber')
   const editedBy = document.getElementById('evEditedBy')
-  const roomInput = document.getElementById('evEditRoomId')
   const startInput = document.getElementById('evEditStart')
   const stopInput = document.getElementById('evEditStop')
-  const durationInput = document.getElementById('evEditDuration')
-  const statusInput = document.getElementById('evEditStatus')
   const commentInput = document.getElementById('evEditComment')
   const deleteButton = document.getElementById('evDeleteBtn')
   const saveButton = document.getElementById('evSaveBtn')
@@ -2116,12 +2370,12 @@ async function openCreateEventEditor() {
   if (cycleId) cycleId.textContent = '-'
   if (rowNumber) rowNumber.textContent = '-'
   if (editedBy) editedBy.textContent = appState.session?.name || '-'
-  if (roomInput) roomInput.value = ''
-  if (startInput) startInput.value = isoToLocalDateTimeInput(new Date().toISOString())
+  if (startInput) startInput.value = ''
   if (stopInput) stopInput.value = ''
-  if (durationInput) durationInput.value = '00:00:00'
-  if (statusInput) statusInput.value = 'RUNNING'
-  if (commentInput) commentInput.value = ''
+  if (commentInput) {
+    commentInput.readOnly = true
+    commentInput.value = ''
+  }
   if (saveButton) {
     saveButton.disabled = false
     saveButton.textContent = 'Zapisz'
@@ -2131,8 +2385,6 @@ async function openCreateEventEditor() {
     deleteButton.disabled = false
     deleteButton.textContent = 'Usuń'
   }
-
-  applyEventStatusColor()
 
   overlay.style.display = 'flex'
 }
@@ -2147,39 +2399,45 @@ function closeEventEditor() {
   appState.eventEditorItem = null
 }
 
+function resolveEventKindFromTimes(startAt, endAt) {
+  if (startAt && endAt) {
+    return 'start_stop'
+  }
+  if (startAt) {
+    return 'start'
+  }
+  if (endAt) {
+    return 'stop'
+  }
+  return 'none'
+}
+
 function readEventEditorPayload() {
   const workerSelect = document.getElementById('evEditWorker')
-  const roomInput = document.getElementById('evEditRoomId')
   const clientSelect = document.getElementById('evEditPom')
   const zoneSelect = document.getElementById('evEditStrefa')
   const startInput = document.getElementById('evEditStart')
   const stopInput = document.getElementById('evEditStop')
-  const durationInput = document.getElementById('evEditDuration')
-  const statusInput = document.getElementById('evEditStatus')
   const commentInput = document.getElementById('evEditComment')
 
   const workerLogin = String(workerSelect?.value ?? '').trim()
   const workerName = workerSelect?.selectedOptions?.[0]?.textContent?.trim() || workerLogin
   const clientId = String(clientSelect?.value ?? '').trim()
   const zoneId = String(zoneSelect?.value ?? '').trim()
-  const utilityRoomId = zoneId || String(roomInput?.value ?? '').trim()
+  const utilityRoomId = zoneId
   const startAt = localDateTimeInputToIso(startInput?.value)
-  let endAt = localDateTimeInputToIso(stopInput?.value)
-  let status = String(statusInput?.value ?? 'RUNNING').trim().toUpperCase()
+  const endAt = localDateTimeInputToIso(stopInput?.value)
   const comment = String(commentInput?.value ?? '').trim()
+  const eventKind = resolveEventKindFromTimes(startAt, endAt)
 
-  let durationSec = parseDurationHms(durationInput?.value)
-  if ((!durationSec || durationSec <= 0) && startAt && endAt) {
+  let durationSec = 0
+  if (startAt && endAt) {
     durationSec = Math.max(0, Math.floor((new Date(endAt).getTime() - new Date(startAt).getTime()) / 1000))
   }
-
-  if (startAt && durationSec > 0 && !endAt) {
-    endAt = new Date(new Date(startAt).getTime() + durationSec * 1000).toISOString()
-  }
-
-  status = normalizeEventStatus(status, Boolean(endAt))
+  const status = eventKind === 'start' ? 'RUNNING' : 'CLOSED'
 
   return {
+    eventKind,
     workerLogin,
     workerName,
     clientId: clientId || null,
@@ -2189,8 +2447,8 @@ function readEventEditorPayload() {
     startAt: startAt || null,
     endAt: endAt || null,
     durationSec,
-    status: status || 'RUNNING',
-    closeMarkedAt: status === 'CLOSED' ? endAt || null : null,
+    status,
+    closeMarkedAt: eventKind === 'start' ? null : endAt || null,
     clientStatus: clientId ? 'CLIENT' : null,
     comment,
     updatedBy: appState.session?.name ?? null,
@@ -2298,6 +2556,16 @@ function startDashboardAutoRefresh() {
   }, DASHBOARD_REFRESH_INTERVAL_MS)
 }
 
+function eventEndReasonFromKind(eventKind) {
+  if (eventKind === 'stop') {
+    return 'WORKDAY_STOP'
+  }
+  if (eventKind === 'start_stop') {
+    return 'QR_START_STOP'
+  }
+  return null
+}
+
 async function saveEventEditor() {
   if (!appState.session?.orgId) {
     return
@@ -2309,9 +2577,22 @@ async function saveEventEditor() {
   }
 
   const payload = readEventEditorPayload()
+  const eventPayload = { ...payload }
+  delete eventPayload.eventKind
   if (!payload.workerLogin) {
     alert('Wybierz pracownika.')
     return
+  }
+  if (payload.eventKind === 'none') {
+    alert('Podaj Start, Stop albo oba pola jednoczesnie.')
+    return
+  }
+  if (payload.startAt && payload.endAt) {
+    const diffMs = new Date(payload.endAt).getTime() - new Date(payload.startAt).getTime()
+    if (!Number.isFinite(diffMs) || diffMs < 0) {
+      alert('Godzina STOP musi byc pozniejsza niz START.')
+      return
+    }
   }
 
   const saveButton = document.getElementById('evSaveBtn')
@@ -2321,10 +2602,24 @@ async function saveEventEditor() {
   }
 
   try {
+    let savedItem = null
+    const derivedEndAt = payload.eventKind === 'start' ? null : payload.endAt
+    const derivedStartAt = payload.eventKind === 'stop' ? derivedEndAt : payload.startAt
+    const derivedDurationSec = payload.eventKind === 'start_stop' ? Number(payload.durationSec ?? 0) : 0
+    const derivedStatus = payload.eventKind === 'start' ? 'RUNNING' : 'CLOSED'
+    const derivedCloseMarkedAt = payload.eventKind === 'start' ? null : derivedEndAt || null
+    const derivedEndReason = eventEndReasonFromKind(payload.eventKind)
+
     if (appState.eventEditorMode === 'add') {
-      await createEvent(appState.session.orgId, {
+      savedItem = await createEvent(appState.session.orgId, {
         eventId: `EV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        ...payload,
+        ...eventPayload,
+        startAt: derivedStartAt,
+        endAt: derivedEndAt,
+        durationSec: derivedDurationSec,
+        status: derivedStatus,
+        closeMarkedAt: derivedCloseMarkedAt,
+        endReason: derivedEndReason,
       })
     } else {
       const eventId = String(appState.eventEditorItem?.eventId ?? appState.eventEditorItem?.workdayId ?? '').trim()
@@ -2332,9 +2627,15 @@ async function saveEventEditor() {
         throw new Error('Brak eventId dla edycji zdarzenia.')
       }
 
-      await updateEvent(appState.session.orgId, eventId, {
+      savedItem = await updateEvent(appState.session.orgId, eventId, {
         ...appState.eventEditorItem,
-        ...payload,
+        ...eventPayload,
+        startAt: derivedStartAt,
+        endAt: derivedEndAt,
+        durationSec: derivedDurationSec,
+        status: derivedStatus,
+        closeMarkedAt: derivedCloseMarkedAt,
+        endReason: derivedEndReason,
       })
     }
 
@@ -2363,12 +2664,15 @@ async function deleteEventEditorItem() {
     return
   }
 
-  const eventId = String(appState.eventEditorItem?.eventId ?? appState.eventEditorItem?.workdayId ?? '').trim()
-  if (!eventId) {
+  const editedRow = appState.eventEditorItem ?? null
+  if (!editedRow) {
     return
   }
+  const eventId = String(editedRow?.eventId ?? editedRow?.workdayId ?? '').trim()
+  const targetFingerprint = eventRowFingerprintKey(editedRow)
+  const targetDisplayId = eventId || eventDeletionCandidateIds(editedRow)[0] || '-'
 
-  const confirmed = window.confirm(`Usunąć zdarzenie ${eventId}?`)
+  const confirmed = window.confirm(`Usunąć zdarzenie ${targetDisplayId}?`)
   if (!confirmed) {
     return
   }
@@ -2380,10 +2684,25 @@ async function deleteEventEditorItem() {
   }
 
   try {
-    await deleteEvent(appState.session.orgId, eventId)
+    await deleteEventByCandidateIds(appState.session.orgId, editedRow)
     closeEventEditor()
     await fetchEventsForCurrentSession({ resetPage: false })
     await refreshDashboardWidgets({ syncWorktimeToken: true })
+    let stillVisible = appState.eventRows.some((row) => eventRowFingerprintKey(row) === targetFingerprint)
+    if (stillVisible) {
+      const duplicates = appState.eventRows.filter((row) => eventRowFingerprintKey(row) === targetFingerprint)
+      for (const duplicate of duplicates) {
+        await deleteEventByCandidateIds(appState.session.orgId, duplicate)
+      }
+      await fetchEventsForCurrentSession({ resetPage: false })
+      await refreshDashboardWidgets({ syncWorktimeToken: true })
+      stillVisible = appState.eventRows.some((row) => eventRowFingerprintKey(row) === targetFingerprint)
+    }
+    if (stillVisible) {
+      showTransientNotice('Usunieto tylko czesc danych. Wpis nadal widoczny na liscie.', 'error')
+    } else {
+      showTransientNotice('Zdarzenie zostalo usuniete.')
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Błąd usuwania zdarzenia.'
     alert(message)
@@ -2395,6 +2714,87 @@ async function deleteEventEditorItem() {
   }
 }
 
+async function deleteSelectedEvents() {
+  if (!appState.session?.orgId) {
+    return
+  }
+
+  if (!canManageEvents()) {
+    alert('Brak uprawnien do usuwania zdarzen.')
+    return
+  }
+
+  const selectedRows = appState.eventRows.filter((row, index) => appState.eventsSelectedKeys.has(eventSelectionKey(row, index)))
+  if (!selectedRows.length) {
+    return
+  }
+  const selectedFingerprintKeys = new Set(selectedRows.map((row) => eventRowFingerprintKey(row)).filter(Boolean))
+  const selectedIds = new Set(selectedRows.flatMap((row) => eventDeletionCandidateIds(row)))
+
+  const confirmed = window.confirm(
+    `Czy na pewno chcesz usunac ${selectedRows.length} rekord(y)? Ta zmiana jest nieodwracalna.`,
+  )
+  if (!confirmed) {
+    return
+  }
+
+  const deleteButton = document.getElementById('evDeleteSelectedBtn')
+  const defaultLabel = 'Usun'
+  if (deleteButton instanceof HTMLButtonElement) {
+    deleteButton.disabled = true
+    deleteButton.textContent = 'Usuwanie...'
+  }
+
+  try {
+    for (const row of selectedRows) {
+      await deleteEventByCandidateIds(appState.session.orgId, row)
+    }
+
+    appState.eventsSelectedKeys = new Set()
+    await fetchEventsForCurrentSession({ resetPage: false })
+    await refreshDashboardWidgets({ syncWorktimeToken: true })
+    let stillVisibleRows = appState.eventRows.filter((row) => {
+      const fingerprint = eventRowFingerprintKey(row)
+      if (fingerprint && selectedFingerprintKeys.has(fingerprint)) {
+        return true
+      }
+      const rowIds = eventDeletionCandidateIds(row)
+      return rowIds.some((id) => selectedIds.has(id))
+    })
+
+    if (stillVisibleRows.length) {
+      for (const row of stillVisibleRows) {
+        await deleteEventByCandidateIds(appState.session.orgId, row)
+      }
+      await fetchEventsForCurrentSession({ resetPage: false })
+      await refreshDashboardWidgets({ syncWorktimeToken: true })
+      stillVisibleRows = appState.eventRows.filter((row) => {
+        const fingerprint = eventRowFingerprintKey(row)
+        if (fingerprint && selectedFingerprintKeys.has(fingerprint)) {
+          return true
+        }
+        const rowIds = eventDeletionCandidateIds(row)
+        return rowIds.some((id) => selectedIds.has(id))
+      })
+    }
+
+    if (stillVisibleRows.length) {
+      showTransientNotice(`Nie wszystko usuniete. Nadal widoczne: ${stillVisibleRows.length}.`, 'error')
+    } else {
+      showTransientNotice('Wybrane zdarzenia zostaly usuniete.')
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Blad usuwania zaznaczonych zdarzen.'
+    alert(message)
+  } finally {
+    if (deleteButton instanceof HTMLButtonElement) {
+      deleteButton.disabled = false
+      deleteButton.textContent = defaultLabel
+    }
+    syncEventsSelectionUi()
+  }
+}
+
 function openEventCommentModal(message) {
   const overlay = document.getElementById('evCommentOverlay')
   const text = document.getElementById('evCommentText')
@@ -2403,7 +2803,7 @@ function openEventCommentModal(message) {
     return
   }
 
-  text.textContent = String(message ?? '').trim() || '-'
+  text.textContent = normalizeVisibleEventComment(message) || '-'
   overlay.style.display = 'flex'
 }
 
@@ -2425,6 +2825,7 @@ function syncEventsActionPermissions() {
   if (addButton) {
     addButton.style.display = canManageEvents() ? '' : 'none'
   }
+  syncEventsSelectionUi()
 }
 
 function ensureEventsDefaultDates() {
@@ -2443,27 +2844,7 @@ function ensureEventsDefaultDates() {
   }
 }
 
-function resetEventsFilters() {
-  const from = document.getElementById('evFrom')
-  const to = document.getElementById('evTo')
-  const worker = document.getElementById('evWorker')
-  const zone = document.getElementById('evStrefa')
-  const client = document.getElementById('evPom')
-  const room = document.getElementById('evRoomId')
-  const status = document.getElementById('evStatus')
-  const q = document.getElementById('evQ')
-
-  if (from) from.value = firstDayOfCurrentMonthYmd()
-  if (to) to.value = todayYmd()
-  if (worker) worker.value = ''
-  if (zone) zone.value = ''
-  if (client) client.value = ''
-  if (room) room.value = ''
-  if (status) status.value = ''
-  if (q) q.value = ''
-}
-
-function readEventsFilters() {
+function readEventsFilterInputs() {
   const from = document.getElementById('evFrom')
   const to = document.getElementById('evTo')
   const worker = document.getElementById('evWorker')
@@ -2474,15 +2855,50 @@ function readEventsFilters() {
   const q = document.getElementById('evQ')
 
   return {
-    source: 'events',
-    fromIso: ymdToIsoRangeStart(from?.value),
-    toIso: ymdToIsoRangeEnd(to?.value),
+    from: String(from?.value ?? '').trim(),
+    to: String(to?.value ?? '').trim(),
     worker: String(worker?.value ?? '').trim(),
     strefa: String(zone?.value ?? '').trim(),
     pomieszczenie: String(client?.value ?? '').trim(),
     roomId: String(room?.value ?? '').trim(),
     status: String(status?.value ?? '').trim(),
     q: String(q?.value ?? '').trim(),
+  }
+}
+
+function applyEventsFilterInputs(filters = {}) {
+  const from = document.getElementById('evFrom')
+  const to = document.getElementById('evTo')
+  const worker = document.getElementById('evWorker')
+  const zone = document.getElementById('evStrefa')
+  const client = document.getElementById('evPom')
+  const room = document.getElementById('evRoomId')
+  const status = document.getElementById('evStatus')
+  const q = document.getElementById('evQ')
+
+  if (from) from.value = String(filters.from ?? '')
+  if (to) to.value = String(filters.to ?? '')
+  if (worker) worker.value = String(filters.worker ?? '')
+  if (zone) zone.value = String(filters.strefa ?? '')
+  if (client) client.value = String(filters.pomieszczenie ?? '')
+  if (room) room.value = String(filters.roomId ?? '')
+  if (status) status.value = String(filters.status ?? '')
+  if (q) q.value = String(filters.q ?? '')
+}
+
+function readEventsFilters() {
+  const raw = readEventsFilterInputs()
+
+  return {
+    source: 'events',
+    fromIso: ymdToIsoRangeStart(raw.from),
+    toIso: ymdToIsoRangeEnd(raw.to),
+    worker: raw.worker,
+    strefa: raw.strefa,
+    pomieszczenie: raw.pomieszczenie,
+    roomId: raw.roomId,
+    status: raw.status,
+    q: raw.q,
     page: appState.eventsPage,
     pageSize: appState.eventsPageSize,
   }
@@ -2511,21 +2927,31 @@ function updateEventsPager(shown) {
   }
 }
 
-async function fetchEventsForCurrentSession({ resetPage = false } = {}) {
+async function fetchEventsForCurrentSession({ resetPage = false, applyStoredFilters = false } = {}) {
   const root = document.getElementById('evRows')
 
   if (!appState.session?.orgId) {
+    appState.eventsSelectedKeys = new Set()
     if (root) {
       root.innerHTML = `
         <div class="events-row">
-          <div>Brak aktywnej sesji.</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+          <div></div><div>Brak aktywnej sesji.</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
         </div>
       `
     }
+    syncEventsSelectionUi()
     return
   }
 
-  ensureEventsDefaultDates()
+  if (applyStoredFilters && appState.eventsFilters) {
+    applyEventsFilterInputs(appState.eventsFilters)
+  }
+
+  if (!appState.eventsFilters) {
+    ensureEventsDefaultDates()
+  }
+
+  appState.eventsFilters = readEventsFilterInputs()
   syncEventsActionPermissions()
 
   if (resetPage) {
@@ -2535,7 +2961,7 @@ async function fetchEventsForCurrentSession({ resetPage = false } = {}) {
   if (root) {
     root.innerHTML = `
       <div class="events-row">
-        <div>Ładowanie danych...</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+        <div></div><div>Ladowanie danych...</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
       </div>
     `
   }
@@ -2555,13 +2981,16 @@ async function fetchEventsForCurrentSession({ resetPage = false } = {}) {
     setSubwelcomeMetric('#view-events .subwelcome', response.total)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Błąd pobierania zdarzeń.'
+    appState.eventRows = []
+    appState.eventsSelectedKeys = new Set()
     if (root) {
       root.innerHTML = `
         <div class="events-row">
-          <div style="color:#ef4444;">${escapeHtml(message)}</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+          <div></div><div style="color:#ef4444;">${escapeHtml(message)}</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
         </div>
       `
     }
+    syncEventsSelectionUi()
   }
 }
 
@@ -3039,19 +3468,13 @@ function updateWorkerProfilePager(paged) {
 }
 
 function getFilteredWorkerProfiles() {
-  const q = String(document.getElementById('wkQ')?.value ?? '')
-    .trim()
-    .toLowerCase()
-  const typeFilter = String(document.getElementById('wkType')?.value ?? '')
-    .trim()
-    .toLowerCase()
+  const q = normalizeSearchText(document.getElementById('wkQ')?.value)
+  const typeFilter = normalizeSearchText(document.getElementById('wkType')?.value)
   const activeFilter = workerBooleanValue(document.getElementById('wkActive')?.value)
   const onlineFilter = workerBooleanValue(document.getElementById('wkOnline')?.value)
 
   return appState.workerProfileRows.filter((worker) => {
-    const workerType = String(worker.type ?? worker.role ?? '')
-      .trim()
-      .toLowerCase()
+    const workerType = normalizeSearchText(worker.type ?? worker.role)
     if (typeFilter && !workerType.includes(typeFilter)) {
       return false
     }
@@ -3080,7 +3503,7 @@ function getFilteredWorkerProfiles() {
       worker.email,
       worker.qrText,
     ]
-      .map((value) => String(value ?? '').toLowerCase())
+      .map((value) => normalizeSearchText(value))
       .join(' ')
 
     return haystack.includes(q)
@@ -3152,6 +3575,41 @@ function setWorkerProfileModalReadOnly(readOnly) {
   }
 }
 
+function syncWorkerProfileAddButtonState() {
+  const addButton = document.getElementById('wkAddBtn')
+  if (!(addButton instanceof HTMLButtonElement)) {
+    return
+  }
+
+  const allowed = canManageWorkers()
+  addButton.style.display = ''
+  addButton.disabled = !allowed
+  addButton.title = allowed ? 'Dodaj nowego pracownika' : 'Brak uprawnień do dodawania pracowników.'
+}
+
+function getNextWorkerProfileIdPreview() {
+  let maxNumber = 0
+  let padWidth = 3
+
+  appState.workerProfileRows.forEach((worker) => {
+    const raw = String(worker?.workerId ?? worker?.id ?? '')
+      .trim()
+      .toUpperCase()
+    const match = /^W(\d+)$/.exec(raw)
+    if (!match) {
+      return
+    }
+
+    const numeric = Number.parseInt(match[1], 10)
+    if (Number.isFinite(numeric) && numeric > maxNumber) {
+      maxNumber = numeric
+    }
+    padWidth = Math.max(padWidth, match[1].length)
+  })
+
+  return `W${String(maxNumber + 1).padStart(padWidth, '0')}`
+}
+
 function openWorkerProfileModal(worker = null, mode = 'view') {
   const overlay = document.getElementById('wkEditorOverlay')
   if (!overlay) {
@@ -3181,6 +3639,7 @@ function openWorkerProfileModal(worker = null, mode = 'view') {
   const passWrap = document.getElementById('wkCurrentPassWrap')
   const currentPass = document.getElementById('wkCurrentPass')
   const showPassButton = document.getElementById('wkShowPassBtn')
+  const saveButton = document.getElementById('wkSaveBtn')
 
   const headerLogo = document.querySelector('.header .logo-block img')
   const modalLogo = document.getElementById('wkLogo')
@@ -3189,12 +3648,14 @@ function openWorkerProfileModal(worker = null, mode = 'view') {
   }
 
   if (mode === 'add') {
+    const nextWorkerId = getNextWorkerProfileIdPreview()
     if (modalTitle) modalTitle.textContent = 'Dodaj pracownika'
-    if (idLabel) idLabel.textContent = 'AUTO'
+    if (saveButton) saveButton.textContent = 'Dodaj pracownika'
+    if (idLabel) idLabel.textContent = nextWorkerId
     if (addedAtLabel) addedAtLabel.textContent = '-'
     if (editedAtLabel) editedAtLabel.textContent = '-'
     if (editedByLabel) editedByLabel.textContent = appState.session?.name ?? '-'
-    if (idInput) idInput.value = 'AUTO'
+    if (idInput) idInput.value = nextWorkerId
     if (nameInput) nameInput.value = ''
     if (loginInput) loginInput.value = ''
     if (typeInput) typeInput.value = 'Pracownik'
@@ -3205,6 +3666,7 @@ function openWorkerProfileModal(worker = null, mode = 'view') {
     if (qrInput) qrInput.value = ''
   } else {
     if (modalTitle) modalTitle.textContent = canManageWorkers() ? 'Edytuj pracownika' : 'Podgląd pracownika'
+    if (saveButton) saveButton.textContent = 'Zapisz'
     if (idLabel) idLabel.textContent = worker?.workerId || worker?.id || '-'
     if (addedAtLabel) addedAtLabel.textContent = worker?.addedAt || '-'
     if (editedAtLabel) editedAtLabel.textContent = worker?.editedAt || '-'
@@ -3293,6 +3755,8 @@ function filterWorkerProfileTable({ resetPage = true } = {}) {
 }
 
 async function fetchWorkerProfilesForCurrentSession(force = false) {
+  syncWorkerProfileAddButtonState()
+
   const root = document.getElementById('wkRows')
 
   if (!appState.session?.orgId) {
@@ -3320,10 +3784,7 @@ async function fetchWorkerProfilesForCurrentSession(force = false) {
   }
 
   try {
-    const workers = await getWorkers(appState.session.orgId, {
-      q: String(document.getElementById('wkQ')?.value ?? '').trim(),
-      type: String(document.getElementById('wkType')?.value ?? '').trim(),
-    })
+    const workers = await getWorkers(appState.session.orgId)
 
     appState.workerProfileRows = workers.map((worker) => ({
       ...worker,
@@ -3333,7 +3794,7 @@ async function fetchWorkerProfilesForCurrentSession(force = false) {
       qrText: String(worker.qrText ?? ''),
     }))
 
-    appState.workers = appState.workerProfileRows
+    appState.workers = workers
     appState.workersLoaded = true
     filterWorkerProfileTable({ resetPage: true })
     setSubwelcomeMetric('#view-workerProfile .subwelcome', appState.workerProfileRows.length)
@@ -3386,6 +3847,7 @@ async function saveWorkerProfileData() {
   try {
     if (appState.workerProfileModalMode === 'add') {
       await createWorker(appState.session.orgId, payload)
+      showTransientNotice('Pracownik został dodany.')
     } else {
       alert('Edycja pracownika będzie podpięta po dodaniu operacji UpdateWorkerForOrg w Data Connect.')
       return
@@ -3503,8 +3965,7 @@ async function fetchWorkersForCurrentSession() {
     }
 
     const workers = await getWorkers(appState.session.orgId, filters)
-    appState.workers = workers
-    appState.workersLoaded = true
+    appState.workerTimeRows = workers
     renderWorkersPaged(workers, { resetPage: true })
     setSubwelcomeMetric('#view-workerTime .subwelcome', workers.length)
   } catch (error) {
@@ -4712,13 +5173,16 @@ async function prepareReportsView() {
   }
 
   await ensureReportsReferenceDataLoaded()
+  const workerDirectory = await getWorkers(appState.session.orgId)
+  appState.workers = workerDirectory
+  appState.workersLoaded = true
 
   const clientOptions = appState.clients.map((client) => ({
     value: String(client.id ?? ''),
     label: client.name ? `${client.name} (${client.id})` : String(client.id ?? ''),
   }))
   clientOptions.sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
-  const workerOptions = appState.workers.map((worker) => ({
+  const workerOptions = workerDirectory.map((worker) => ({
     value: String(worker.login ?? worker.id ?? ''),
     label: worker.name || worker.login || worker.id,
   }))
@@ -4856,7 +5320,7 @@ function reportHistorySetSummaryRows(rows = []) {
       ${workerLine}
       <div><b>Dni:</b> ${days}</div>
       <div><b>Wpisy:</b> ${events} · <b>RUNNING:</b> ${running}</div>
-      <div><b>Czas CLOSED:</b> ${durationSecondsToHms(closedSec)}</div>
+      <div><b>Czas pracy razem:</b> ${durationSecondsToHms(closedSec)}</div>
     </div>
   `
   reportSetVisible('repHistorySummary', true)
@@ -4864,7 +5328,7 @@ function reportHistorySetSummaryRows(rows = []) {
 
 function reportHistoryRenderDetails(row, tab) {
   const details = Array.isArray(row.details) ? row.details : []
-  if (!details.length) {
+  if (!details.length && tab !== 'workers') {
     return '<div class="rep-history-empty">Brak szczegolow.</div>'
   }
 
@@ -4873,6 +5337,7 @@ function reportHistoryRenderDetails(row, tab) {
       .map(
         (detail) => `
           <tr>
+            <td>${escapeHtml(detail.clientLabel || '-')}</td>
             <td>${escapeHtml(detail.zoneLabel || '-')}</td>
             <td>${escapeHtml(detail.locationLabel || '-')}</td>
             <td>${escapeHtml(detail.workerLabel || '-')}</td>
@@ -4889,7 +5354,7 @@ function reportHistoryRenderDetails(row, tab) {
       <div class="rep-history-detail">
         <table class="rep-history-detail-table">
           <thead>
-            <tr><th>Strefa</th><th>Lokalizacja strefy</th><th>Osoba</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th></tr>
+            <tr><th>Klient</th><th>Strefa</th><th>Lokalizacja strefy</th><th>Osoba</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th></tr>
           </thead>
           <tbody>${body}</tbody>
         </table>
@@ -4977,6 +5442,34 @@ function reportHistoryRenderDetails(row, tab) {
   `
 }
 
+function reportHistoryDayInfoHtml(row) {
+  const startValue = String(row?.qrStartLabel ?? '').trim() || '--:--:--'
+  const stopValue = String(row?.qrStopLabel ?? '').trim() || '--:--:--'
+  const workValue = durationSecondsToHms(Number(row?.closedSec ?? 0))
+
+  return `
+    <div class="rep-history-day-info">
+      <div class="dash-time-stack">
+        <div class="dash-time-line dash-time-line--start">
+          <span class="dash-time-label">Godzina START</span>
+          <span class="dash-time-colon">:</span>
+          <span class="dash-time-value">${escapeHtml(startValue)}</span>
+        </div>
+        <div class="dash-time-line dash-time-line--stop">
+          <span class="dash-time-label">Godzina STOP</span>
+          <span class="dash-time-colon">:</span>
+          <span class="dash-time-value">${escapeHtml(stopValue)}</span>
+        </div>
+        <div class="dash-time-line dash-time-line--work">
+          <span class="dash-time-label">Czas pracy</span>
+          <span class="dash-time-colon">:</span>
+          <span class="dash-time-value time-duration">${escapeHtml(workValue)}</span>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 function reportHistoryRenderTable() {
   const table = document.getElementById('repHistoryTable')
   if (!table) {
@@ -4985,14 +5478,16 @@ function reportHistoryRenderTable() {
 
   const tab = reportHistoryNormalizeTab(appState.reportHistoryTab)
   const rows = Array.isArray(appState.reportHistoryRows) ? appState.reportHistoryRows : []
-  const detailLabel = 'Szczegoly'
+  const isWorkersTab = tab === 'workers'
+  const detailLabel = isWorkersTab ? 'Info dnia' : 'Szczegoly'
+  const closedLabel = 'Czas pracy razem'
   const headHtml = `
     <thead>
       <tr>
         <th></th>
         <th>Data</th>
         <th class="ta-right">Wpisy</th>
-        <th class="ta-right">Czas CLOSED</th>
+        <th class="ta-right">${closedLabel}</th>
         <th class="ta-right">RUNNING</th>
         <th class="ta-right">${detailLabel}</th>
       </tr>
@@ -5011,6 +5506,9 @@ function reportHistoryRenderTable() {
       const actionLabel = expanded ? 'Zwin' : 'Rozwin'
       const dayLabel = formatDatePl(`${dayKey}T00:00:00.000Z`)
       const detailHtml = reportHistoryRenderDetails(row, tab)
+      const detailValue = isWorkersTab
+        ? reportHistoryDayInfoHtml(row)
+        : escapeHtml(String((row.details || []).length))
 
       return `
         <tr class="rep-history-main-row">
@@ -5019,7 +5517,7 @@ function reportHistoryRenderTable() {
           <td class="ta-right">${escapeHtml(String(row.countAll ?? 0))}</td>
           <td class="ta-right">${escapeHtml(durationSecondsToHms(row.closedSec || 0))}</td>
           <td class="ta-right">${escapeHtml(String(row.runningCount ?? 0))}</td>
-          <td class="ta-right">${escapeHtml(String((row.details || []).length))}</td>
+          <td class="${isWorkersTab ? 'rep-history-day-info-cell' : 'ta-right'}">${detailValue}</td>
         </tr>
         <tr class="rep-history-detail-row"${expanded ? '' : ' style="display:none;"'}>
           <td colspan="6">${detailHtml}</td>
@@ -5572,6 +6070,7 @@ function reportHistoryBuildRows(items, tab) {
     const bucket = groups.get(dayKey)
     const status = reportHistoryResolveStatus(item)
     const closedSec = reportHistoryClosedDurationSec(item)
+    const isMarkerOnly = Boolean(item?.historyMarkerOnly)
     const startIso = toIso(item?.startAt)
     const endIso = toIso(item?.endAt)
     const sortStartTs = reportHistoryToTimestamp(startIso)
@@ -5590,10 +6089,12 @@ function reportHistoryBuildRows(items, tab) {
     const qrStartGeoLabel = reportHistoryResolveDayGpsCoords(item, 'start')
     const qrStopGeoLabel = reportHistoryResolveDayGpsCoords(item, 'stop')
 
-    bucket.countAll += 1
-    bucket.closedSec += closedSec
-    if (status === 'RUNNING') {
-      bucket.runningCount += 1
+    if (!isMarkerOnly) {
+      bucket.countAll += 1
+      bucket.closedSec += closedSec
+      if (status === 'RUNNING') {
+        bucket.runningCount += 1
+      }
     }
     if (dayStartTs && (!bucket.dayStartTs || dayStartTs < bucket.dayStartTs)) {
       bucket.dayStartTs = dayStartTs
@@ -5646,6 +6147,10 @@ function reportHistoryBuildRows(items, tab) {
       }
     }
 
+    if (isMarkerOnly) {
+      return
+    }
+
     if (normalizedTab === 'workers') {
       bucket.details.push({
         clientLabel: String(item.clientName ?? item.klient ?? '-').trim() || '-',
@@ -5662,6 +6167,7 @@ function reportHistoryBuildRows(items, tab) {
     }
 
     bucket.details.push({
+      clientLabel: String(item.clientName ?? item.klient ?? '-').trim() || '-',
       zoneLabel: String(item.zoneName ?? item.strefa ?? '-').trim() || '-',
       locationLabel: String(item.lokalizacja ?? item.location ?? '-').trim() || '-',
       workerLabel: String(item.workerName ?? item.workerLogin ?? '-').trim() || '-',
@@ -5755,9 +6261,34 @@ async function runReportHistory() {
         reportMatchesPanelSelection(item, { clientId: filters.clientId, zoneId: '', workerLogin: '' }),
       )
     } else if (filters.tab === 'workers') {
-      filtered = items.filter((item) =>
+      const filteredEvents = items.filter((item) =>
         reportMatchesPanelSelection(item, { clientId: '', zoneId: '', workerLogin: filters.workerLogin }),
       )
+
+      let markerRows = []
+      try {
+        const workerDayItems = await reportFetchEventsPaged(appState.session.orgId, {
+          source: 'workdays',
+          workerLogin: filters.workerLogin,
+          fromIso: ymdToIsoRangeStart(filters.from),
+          toIso: ymdToIsoRangeEnd(filters.to),
+        })
+
+        markerRows = workerDayItems
+          .filter((item) =>
+            reportMatchesPanelSelection(item, { clientId: '', zoneId: '', workerLogin: filters.workerLogin }),
+          )
+          .map((item) => ({
+            ...item,
+            historyMarkerOnly: true,
+            dayStartAt: toIso(item?.dayStartAt ?? item?.startAt),
+            dayEndAt: toIso(item?.dayEndAt ?? item?.endAt),
+          }))
+      } catch {
+        markerRows = []
+      }
+
+      filtered = markerRows.length ? [...filteredEvents, ...markerRows] : filteredEvents
     } else if (filters.tab === 'zones') {
       filtered = items.filter((item) =>
         reportMatchesPanelSelection(item, { clientId: '', zoneId: filters.zoneId, workerLogin: '' }),
@@ -5837,6 +6368,188 @@ function reportHistorySelectWorker(workerLogin, workerName) {
   reportHistoryApplySelectFilter('worker', { expandOnEmpty: false })
   reportHistoryCollapseSelect('worker')
   return true
+}
+
+function reportHistoryFindClientOption(clientId, clientName) {
+  const normalizedId = String(clientId ?? '').trim()
+  const normalizedName = normalizeSearchText(clientName)
+  if (!Array.isArray(appState.reportHistoryClientOptions) || !appState.reportHistoryClientOptions.length) {
+    return null
+  }
+
+  if (normalizedId) {
+    const byId = appState.reportHistoryClientOptions.find((option) => String(option.value ?? '').trim() === normalizedId)
+    if (byId) {
+      return byId
+    }
+  }
+
+  if (normalizedName) {
+    const exact = appState.reportHistoryClientOptions.find((option) => normalizeSearchText(option.label) === normalizedName)
+    if (exact) {
+      return exact
+    }
+
+    const partial = appState.reportHistoryClientOptions.find((option) => normalizeSearchText(option.label).includes(normalizedName))
+    if (partial) {
+      return partial
+    }
+  }
+
+  return null
+}
+
+function reportHistorySelectClient(clientId, clientName) {
+  const selectNode = document.getElementById('repHistoryClient')
+  const searchNode = document.getElementById('repHistoryClientSearch')
+  if (!(selectNode instanceof HTMLSelectElement) || !(searchNode instanceof HTMLInputElement)) {
+    return false
+  }
+
+  const option = reportHistoryFindClientOption(clientId, clientName)
+  if (!option) {
+    return false
+  }
+
+  ensureSelectValue(selectNode, option.value, option.label)
+  searchNode.value = String(option.label ?? '').trim()
+  reportHistoryApplySelectFilter('client', { expandOnEmpty: false })
+  reportHistoryCollapseSelect('client')
+  return true
+}
+
+function reportHistoryFindZoneOption(zoneId, zoneName) {
+  const normalizedId = String(zoneId ?? '').trim()
+  const normalizedName = normalizeSearchText(zoneName)
+  if (!Array.isArray(appState.reportHistoryZoneOptions) || !appState.reportHistoryZoneOptions.length) {
+    return null
+  }
+
+  if (normalizedId) {
+    const byId = appState.reportHistoryZoneOptions.find((option) => String(option.value ?? '').trim() === normalizedId)
+    if (byId) {
+      return byId
+    }
+  }
+
+  if (normalizedName) {
+    const exact = appState.reportHistoryZoneOptions.find((option) => normalizeSearchText(option.label) === normalizedName)
+    if (exact) {
+      return exact
+    }
+
+    const partial = appState.reportHistoryZoneOptions.find((option) => normalizeSearchText(option.label).includes(normalizedName))
+    if (partial) {
+      return partial
+    }
+  }
+
+  return null
+}
+
+function reportHistorySelectZone(zoneId, zoneName) {
+  const selectNode = document.getElementById('repHistoryZone')
+  const searchNode = document.getElementById('repHistoryZoneSearch')
+  if (!(selectNode instanceof HTMLSelectElement) || !(searchNode instanceof HTMLInputElement)) {
+    return false
+  }
+
+  const option = reportHistoryFindZoneOption(zoneId, zoneName)
+  if (!option) {
+    return false
+  }
+
+  ensureSelectValue(selectNode, option.value, option.label)
+  searchNode.value = String(option.label ?? '').trim()
+  reportHistoryApplySelectFilter('zone', { expandOnEmpty: false })
+  reportHistoryCollapseSelect('zone')
+  return true
+}
+
+function eventHistoryDayKey(row) {
+  const fromRow = String(row?.dayKey ?? '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fromRow)) {
+    return fromRow
+  }
+
+  const fromStart = toIso(row?.startAt)
+  if (fromStart) {
+    return fromStart.slice(0, 10)
+  }
+
+  const fromEnd = toIso(row?.endAt)
+  if (fromEnd) {
+    return fromEnd.slice(0, 10)
+  }
+
+  return todayYmd()
+}
+
+function eventHistoryMonthRange(dayKey) {
+  const match = String(dayKey ?? '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) {
+    const today = todayYmd()
+    return { day: today, from: firstDayOfCurrentMonthYmd(), to: today }
+  }
+
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const lastDay = new Date(year, month, 0).getDate()
+  return {
+    day: `${match[1]}-${match[2]}-${match[3]}`,
+    from: `${match[1]}-${match[2]}-01`,
+    to: `${match[1]}-${match[2]}-${pad2(lastDay)}`,
+  }
+}
+
+async function openEventHistoryFromRow(row, tab) {
+  if (!appState.session?.orgId) {
+    return
+  }
+
+  const go = typeof window.go === 'function' ? window.go : null
+  if (!go) {
+    return
+  }
+
+  const normalizedTab = reportHistoryNormalizeTab(tab)
+  const range = eventHistoryMonthRange(eventHistoryDayKey(row))
+
+  go('reports')
+  await ensureReportsViewReady()
+  openReportBuilder('history')
+  reportHistorySetTab(normalizedTab)
+
+  const fromInput = document.getElementById('repHistoryFrom')
+  const toInput = document.getElementById('repHistoryTo')
+  if (fromInput instanceof HTMLInputElement) {
+    fromInput.value = range.from
+  }
+  if (toInput instanceof HTMLInputElement) {
+    toInput.value = range.to
+  }
+
+  let selected = false
+  if (normalizedTab === 'workers') {
+    selected = reportHistorySelectWorker(row?.workerLogin, row?.workerName)
+  } else if (normalizedTab === 'zones') {
+    selected = reportHistorySelectZone(row?.zoneId ?? row?.roomId, row?.strefa ?? row?.zoneName)
+  } else {
+    selected = reportHistorySelectClient(row?.clientId, row?.klient ?? row?.clientName)
+  }
+
+  if (!selected) {
+    reportHistorySetStatus('Nie znaleziono rekordu na liscie historii.', true)
+    return
+  }
+
+  await runReportHistory()
+  const focusedDay = String(range.day ?? '').trim()
+  const dayRow = appState.reportHistoryRows.find((item) => String(item.dayKey ?? '').trim() === focusedDay)
+  if (dayRow?.dayKey) {
+    appState.reportHistoryExpanded = { [dayRow.dayKey]: true }
+    reportHistoryRenderTable()
+  }
 }
 
 async function openDashboardWorkerHistory(workerLogin, workerName) {
@@ -6611,6 +7324,11 @@ function bindSubmenuToggles() {
 
   document.querySelectorAll('[data-toggle]').forEach((button) => {
     const handleClick = () => {
+      const root = document.getElementById('portalRoot')
+      if (root?.classList.contains('sidebar-collapsed')) {
+        setSidebarCollapsed(false)
+      }
+
       const key = button.dataset.toggle
       const submenu = document.getElementById(`submenu-${key}`)
       if (submenu) {
@@ -6819,13 +7537,11 @@ function bindEventsViewFunctions() {
 
   binding.add(document.getElementById('evSearchBtn'), 'click', () => {
     appState.eventsPage = 1
-    void fetchEventsForCurrentSession()
+    void fetchEventsForCurrentSession({ resetPage: false })
   })
 
   binding.add(document.getElementById('evResetBtn'), 'click', () => {
-    resetEventsFilters()
-    appState.eventsPage = 1
-    void fetchEventsForCurrentSession()
+    void fetchEventsForCurrentSession({ resetPage: false })
   })
 
   binding.add(document.getElementById('evPrevBtn'), 'click', () => {
@@ -6842,22 +7558,101 @@ function bindEventsViewFunctions() {
 
   binding.add(document.getElementById('evStatus'), 'change', () => {
     appState.eventsPage = 1
-    void fetchEventsForCurrentSession()
+    void fetchEventsForCurrentSession({ resetPage: false })
   })
 
   binding.add(document.getElementById('evAddBtn'), 'click', () => {
     void openCreateEventEditor()
+  })
+  binding.add(document.getElementById('evDeleteSelectedBtn'), 'click', () => {
+    void deleteSelectedEvents()
+  })
+  binding.add(document.getElementById('evSelectAll'), 'change', (event) => {
+    const input = event.target
+    if (!(input instanceof HTMLInputElement)) {
+      return
+    }
+    if (!canManageEvents()) {
+      input.checked = false
+      input.indeterminate = false
+      return
+    }
+
+    if (input.checked) {
+      appState.eventRows.forEach((row, index) => {
+        appState.eventsSelectedKeys.add(eventSelectionKey(row, index))
+      })
+    } else {
+      appState.eventRows.forEach((row, index) => {
+        appState.eventsSelectedKeys.delete(eventSelectionKey(row, index))
+      })
+    }
+    renderEventsRows(appState.eventRows)
   })
 
   ;['evFrom', 'evTo', 'evWorker', 'evStrefa', 'evPom', 'evRoomId', 'evQ'].forEach((id) => {
     binding.add(document.getElementById(id), 'keydown', (event) => {
       if (event.key !== 'Enter') return
       appState.eventsPage = 1
-      void fetchEventsForCurrentSession()
+      void fetchEventsForCurrentSession({ resetPage: false })
     })
   })
 
+  binding.add(document.getElementById('evRows'), 'change', (event) => {
+    const input = event.target?.closest?.('[data-event-select-index]')
+    if (!(input instanceof HTMLInputElement)) {
+      return
+    }
+    if (!canManageEvents()) {
+      input.checked = false
+      return
+    }
+
+    const index = Number(input.getAttribute('data-event-select-index'))
+    const row = Number.isInteger(index) ? appState.eventRows[index] : null
+    if (!row) {
+      return
+    }
+    const rowKey = eventSelectionKey(row, index)
+    if (input.checked) {
+      appState.eventsSelectedKeys.add(rowKey)
+    } else {
+      appState.eventsSelectedKeys.delete(rowKey)
+    }
+    renderEventsRows(appState.eventRows)
+  })
+
   binding.add(document.getElementById('evRows'), 'click', (event) => {
+    const workerHistoryButton = event.target.closest('[data-event-history-worker]')
+    if (workerHistoryButton) {
+      const index = Number(workerHistoryButton.getAttribute('data-event-history-worker'))
+      const row = Number.isInteger(index) ? appState.eventRows[index] : null
+      if (row) {
+        void openEventHistoryFromRow(row, 'workers')
+      }
+      return
+    }
+
+    const clientHistoryButton = event.target.closest('[data-event-history-client]')
+    if (clientHistoryButton) {
+      const index = Number(clientHistoryButton.getAttribute('data-event-history-client'))
+      const row = Number.isInteger(index) ? appState.eventRows[index] : null
+      if (row) {
+        void openEventHistoryFromRow(row, 'objects')
+      }
+      return
+    }
+
+    const zoneHistoryButton = event.target.closest('[data-event-history-zone]')
+    if (zoneHistoryButton) {
+      const index = Number(zoneHistoryButton.getAttribute('data-event-history-zone'))
+      const row = Number.isInteger(index) ? appState.eventRows[index] : null
+      if (row) {
+        void openEventHistoryFromRow(row, 'zones')
+      }
+      return
+    }
+
     const commentButton = event.target.closest('[data-event-comment]')
     if (commentButton) {
       const index = Number(commentButton.getAttribute('data-event-comment'))
@@ -6896,10 +7691,7 @@ function bindEventsViewFunctions() {
   binding.add(document.getElementById('evDeleteBtn'), 'click', () => {
     void deleteEventEditorItem()
   })
-  binding.add(document.getElementById('evCalcFromTimesBtn'), 'click', recalcEventDurationFromTimes)
-  binding.add(document.getElementById('evCalcFromDurationBtn'), 'click', recalcEventStopFromDuration)
   binding.add(document.getElementById('evStopNowBtn'), 'click', setEventStopNow)
-  binding.add(document.getElementById('evEditStatus'), 'change', applyEventStatusColor)
   binding.add(document.getElementById('evEditPom'), 'change', refreshEventZoneOptionsForClient)
   binding.add(document.getElementById('evEditStrefa'), 'change', syncEventRoomAndClientFromZone)
 
@@ -6982,13 +7774,13 @@ function bindWorkerTimeViewFunctions(router) {
   binding.add(document.getElementById('wtPrevBtn'), 'click', () => {
     if (appState.workersPage <= 1) return
     appState.workersPage -= 1
-    renderWorkersPaged(appState.workers, { resetPage: false })
+    renderWorkersPaged(appState.workerTimeRows, { resetPage: false })
   })
 
   binding.add(document.getElementById('wtNextBtn'), 'click', () => {
     if (appState.workersPage >= appState.workersTotalPages) return
     appState.workersPage += 1
-    renderWorkersPaged(appState.workers, { resetPage: false })
+    renderWorkersPaged(appState.workerTimeRows, { resetPage: false })
   })
 
   binding.add(document.getElementById('wtRows'), 'click', (event) => {
@@ -7104,10 +7896,7 @@ function bindWorkerTimeDetailViewFunctions() {
 function bindWorkerProfileViewFunctions() {
   const binding = createBindingHelpers()
 
-  const addButton = document.getElementById('wkAddBtn')
-  if (addButton) {
-    addButton.style.display = canManageWorkers() ? '' : 'none'
-  }
+  syncWorkerProfileAddButtonState()
 
   binding.add(document.getElementById('wkSearchBtn'), 'click', () => {
     void fetchWorkerProfilesForCurrentSession(true)
@@ -7384,6 +8173,7 @@ async function hydrateSections(orgId) {
   appState.clientsLoaded = true
   appState.workers = workers
   appState.workersLoaded = true
+  appState.workerTimeRows = workers
   appState.zones = zones
   appState.zonesLoaded = true
 
@@ -7432,7 +8222,9 @@ function bindLogin(router) {
       appState.clientModalMode = 'add'
       appState.clientModalClientId = ''
       appState.zonesLoaded = false
+      appState.workers = []
       appState.workersLoaded = false
+      appState.workerTimeRows = []
       appState.workerProfileRows = []
       appState.workerProfileViewRows = []
       appState.workerProfileCurrent = null
@@ -7440,6 +8232,9 @@ function bindLogin(router) {
       appState.clientProfileRows = []
       appState.clientProfileCurrent = null
       appState.clientProfileEditMode = false
+      appState.eventsFilters = null
+      appState.eventsSelectedKeys = new Set()
+      appState.eventRows = []
       appState.workerDetailRows = []
       appState.workerDetailSourceRows = []
       appState.workerDetailViewRows = []
@@ -7509,6 +8304,7 @@ function bindLogout() {
     appState.zonesLoaded = false
     appState.workers = []
     appState.workersLoaded = false
+    appState.workerTimeRows = []
     appState.workerProfileRows = []
     appState.workerProfileViewRows = []
     appState.workerProfileCurrent = null
@@ -7516,6 +8312,8 @@ function bindLogout() {
     appState.clientProfileRows = []
     appState.clientProfileCurrent = null
     appState.clientProfileEditMode = false
+    appState.eventsFilters = null
+    appState.eventsSelectedKeys = new Set()
     appState.eventRows = []
     appState.workerDetailRows = []
     appState.workerDetailSourceRows = []
@@ -7573,7 +8371,7 @@ export function mountPortalApp() {
     }
 
     if (route === 'events') {
-      void fetchEventsForCurrentSession()
+      void fetchEventsForCurrentSession({ applyStoredFilters: true })
       return
     }
 
@@ -7618,6 +8416,7 @@ export function mountPortalApp() {
   document.addEventListener('visibilitychange', handleVisibilityChange)
 
   const cleanups = [
+    bindSidebarCollapseToggle(),
     bindSubmenuToggles(),
     bindRouteButtons(router),
     bindDashboardViewFunctions(),
@@ -7658,6 +8457,7 @@ export function mountPortalApp() {
         const message = error instanceof Error ? error.message : 'Błąd inicjalizacji sesji.'
         console.error(message)
         stopDashboardAutoRefresh()
+        dashboardLastWorktimeToken = ''
         appState.currentRoute = ''
         logout()
         appState.session = null
@@ -7669,6 +8469,7 @@ export function mountPortalApp() {
         appState.zonesLoaded = false
         appState.workers = []
         appState.workersLoaded = false
+        appState.workerTimeRows = []
         appState.workerProfileRows = []
         appState.workerProfileViewRows = []
         appState.workerProfileCurrent = null
@@ -7676,6 +8477,9 @@ export function mountPortalApp() {
         appState.clientProfileRows = []
         appState.clientProfileCurrent = null
         appState.clientProfileEditMode = false
+        appState.eventsFilters = null
+        appState.eventsSelectedKeys = new Set()
+        appState.eventRows = []
         appState.workerDetailRows = []
         appState.workerDetailSourceRows = []
         appState.workerDetailViewRows = []

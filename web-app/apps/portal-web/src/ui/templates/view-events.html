@@ -50,6 +50,7 @@
 
   <div class="tool-actions">
     <button class="btn2 secondary" id="evAddBtn" type="button">Dodaj zdarzenie</button>
+    <button class="btn2 danger" id="evDeleteSelectedBtn" type="button" disabled>Usun</button>
     <button class="btn2" id="evResetBtn" type="button">Odswiez</button>
     <button class="btn2 primary" id="evSearchBtn" type="button">Szukaj</button>
   </div>
@@ -57,6 +58,7 @@
 
 <div class="events-table" aria-label="Tabela zdarzen">
   <div class="events-head">
+    <div class="events-select-col"><input id="evSelectAll" type="checkbox" aria-label="Zaznacz wszystko na stronie" /></div>
     <div>Pracownik</div>
     <div>Klient</div>
     <div>Strefa</div>
@@ -65,7 +67,8 @@
     <div>Start</div>
     <div>Stop</div>
     <div>Czas</div>
-    <div title="Komentarz">đź’¬</div>
+    <div>Typ</div>
+    <div title="Komentarz">Komentarz</div>
     <div>Edytowal</div>
     <div></div>
   </div>
@@ -105,11 +108,6 @@
         </select>
       </div>
 
-      <div class="field">
-        <label for="evEditRoomId">Kod QR</label>
-        <input id="evEditRoomId" type="text" maxlength="120" />
-      </div>
-
             <div class="field">
         <label for="evEditPom">Klient</label>
         <select id="evEditPom" aria-label="Klient">
@@ -133,29 +131,14 @@
         <label for="evEditStop">Stop (lokalnie)</label>
         <input id="evEditStop" type="datetime-local" />
       </div>
-
-      <div class="field">
-        <label for="evEditDuration">Czas w strefie (HH:MM:SS)</label>
-        <input id="evEditDuration" type="text" placeholder="00:00:00" />
-      </div>
-
-      <div class="field">
-        <label for="evEditStatus">Status</label>
-        <select id="evEditStatus" aria-label="Status">
-          <option value="CLOSED">CLOSED</option>
-          <option value="RUNNING">RUNNING</option>
-        </select>
-      </div>
       <div class="field" style="grid-column:1 / -1;">
-        <label for="evEditComment">Komentarz</label>
-        <textarea id="evEditComment" rows="3" maxlength="500" placeholder="opcjonalnie..."></textarea>
+        <label for="evEditComment">Komentarz pracownika</label>
+        <textarea id="evEditComment" rows="3" maxlength="500" placeholder="tylko podglad komentarza od pracownika" readonly></textarea>
       </div>
 
     </div>
   <div class="row-actions">
       <div class="left">
-        <button class="btn2" id="evCalcFromTimesBtn" type="button" title="Start/Stop â†’ przelicz Czas">Przelicz czas</button>
-        <button class="btn2" id="evCalcFromDurationBtn" type="button" title="Start + Czas â†’ przelicz Stop">Przelicz stop</button>
         <button class="btn2" id="evStopNowBtn" type="button" title="Ustaw Stop = teraz">Stop = teraz</button>
       </div>
 

@@ -1,11 +1,34 @@
 import { insertWorkerForOrg, workersForOrg } from '@dataconnect/generated'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
+function resolveNextWorkerId(rows = []) {
+  let maxNumber = 0
+  let padWidth = 3
+
+  rows.forEach((row) => {
+    const raw = String(row?.workerId ?? '').trim().toUpperCase()
+    const match = /^W(\d+)$/.exec(raw)
+    if (!match) {
+      return
+    }
+
+    const numeric = Number.parseInt(match[1], 10)
+    if (Number.isFinite(numeric) && numeric > maxNumber) {
+      maxNumber = numeric
+    }
+    padWidth = Math.max(padWidth, match[1].length)
+  })
+
+  return `W${String(maxNumber + 1).padStart(padWidth, '0')}`
+}
+
 function mapWorker(orgId, row) {
-  const login = String(row.login ?? row.workerId ?? '').trim()
+  const login = String(row.login ?? row.workerLogin ?? row.workerId ?? '').trim()
   const workerId = String(row.workerId ?? login).trim() || login
-  const fullName = String(row.fullName ?? login).trim()
-  const workerType = String(row.workerType ?? 'Pracownik').trim()
+  const workerName = String(
+    row.workerName ?? row.workername ?? row.worker_name ?? row.name ?? row.displayName ?? row.fullName ?? login,
+  ).trim()
+  const workerType = String(row.workerType ?? row.role ?? 'Pracownik').trim()
   const loginEmail = String(row.loginEmail ?? row.email ?? '').trim()
 
   return {
@@ -13,13 +36,16 @@ function mapWorker(orgId, row) {
     workerId,
     orgId,
     login,
-    name: fullName,
+    workerLogin: login,
+    workerName,
+    fullName: workerName,
+    name: workerName,
     role: workerType,
     type: workerType,
     active: Boolean(row.active ?? true),
     email: loginEmail,
     phone: String(row.phone ?? '').trim(),
-    editedBy: String(row.edit ?? '').trim(),
+    editedBy: String(row.updatedBy ?? row.edit ?? '').trim(),
     addedAt: String(row.createdAt ?? '').trim(),
     editedAt: String(row.updatedAt ?? '').trim(),
   }
@@ -60,26 +86,48 @@ export async function getWorkerById(orgId, workerId) {
 }
 
 export async function createWorker(orgId, payload) {
-  const login = String(payload?.login ?? payload?.email ?? `worker-${Date.now()}`)
+  const login = String(payload?.login ?? payload?.email ?? `worker-${Date.now()}`).trim()
+  if (!login) {
+    throw new Error('Pole login jest wymagane.')
+  }
 
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
+  const workerName = String(payload?.workerName ?? payload?.name ?? payload?.fullName ?? '').trim() || null
+  const workerType = String(payload?.role ?? payload?.workerType ?? '').trim() || null
+  const loginEmail = String(payload?.loginEmail ?? payload?.email ?? '').trim() || null
+  const phone = String(payload?.phone ?? '').trim() || null
   ensureFirebase()
+  const existingResponse = await workersForOrg({ orgId })
+  const existingRows = existingResponse?.data?.workers ?? []
+  const workerId = resolveNextWorkerId(existingRows)
+
   await insertWorkerForOrg({
     orgId,
     login,
-    fullName: payload?.name ?? payload?.fullName ?? null,
+    workerName,
+    loginEmail,
+    role: workerType,
     active: payload?.active ?? true,
-    email: payload?.email ?? null,
-    phone: payload?.phone ?? null,
-    workerType: payload?.role ?? payload?.workerType ?? null,
+    email: loginEmail,
+    phone,
+    workerType,
+    workerId,
   })
 
   return {
-    id: login,
+    id: workerId,
+    workerId,
     orgId,
+    login,
+    name: workerName ?? login,
+    role: workerType ?? 'Pracownik',
+    type: workerType ?? 'Pracownik',
+    active: payload?.active ?? true,
+    email: loginEmail ?? '',
+    phone: phone ?? '',
     ...payload,
   }
 }

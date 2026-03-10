@@ -142,6 +142,10 @@ function durationToHms(secondsValue) {
 
 function normalizeStatus(status, hasStop) {
   const normalized = String(status ?? '').trim().toUpperCase()
+  if (hasStop) {
+    return 'CLOSED'
+  }
+
   if (normalized === 'CLOSED') {
     return 'CLOSED'
   }
@@ -303,6 +307,21 @@ function pickWorkerNameValue(worker) {
     worker.worker_name,
     worker.name,
     worker.fullName,
+  )
+}
+
+function pickWorkerLoginValue(worker) {
+  if (!worker) {
+    return ''
+  }
+
+  return pickFirstText(
+    worker.login,
+    worker.workerLogin,
+    worker.id,
+    worker.workerId,
+    extractLoginLocalPart(worker.loginEmail),
+    extractLoginLocalPart(worker.email),
   )
 }
 
@@ -583,8 +602,12 @@ function applyWorkdayFilters(items, filters = {}) {
       return false
     }
 
-    if (workerFilter && !String(item.workerName ?? '').toLowerCase().includes(workerFilter)) {
-      return false
+    if (workerFilter) {
+      const workerName = String(item.workerName ?? '').toLowerCase()
+      const workerLogin = String(item.workerLogin ?? '').toLowerCase()
+      if (!workerName.includes(workerFilter) && !workerLogin.includes(workerFilter)) {
+        return false
+      }
     }
 
     if (workerLoginFilter && normalizeLookupKey(item.workerLogin) !== workerLoginFilter) {
@@ -657,8 +680,8 @@ function paginate(items, pageValue, pageSizeValue) {
 
 function sortByLatest(items) {
   return [...items].sort((left, right) => {
-    const leftTs = new Date(toIso(left.startAt) || toIso(left.updatedAt) || 0).getTime()
-    const rightTs = new Date(toIso(right.startAt) || toIso(right.updatedAt) || 0).getTime()
+    const leftTs = new Date(toIso(left.startAt) || toIso(left.endAt) || toIso(left.updatedAt) || 0).getTime()
+    const rightTs = new Date(toIso(right.startAt) || toIso(right.endAt) || toIso(right.updatedAt) || 0).getTime()
     return rightTs - leftTs
   })
 }
@@ -744,7 +767,7 @@ function buildLookupMaps(clients, zones, workers, workdayRows = []) {
     const startAt = toIso(row?.startAt)
     const endAt = toIso(row?.endAt)
     const updatedAt = toIso(row?.updatedAt)
-    const dayKey = toDayKey(startAt || endAt)
+    const dayKey = toLocalDayKey(startAt || endAt)
     const candidate = {
       workerLogin,
       workerName: String(row?.workerName ?? '').trim(),
@@ -770,8 +793,8 @@ function buildLookupMaps(clients, zones, workers, workdayRows = []) {
   })
 
   const byLatest = (left, right) => {
-    const leftTs = new Date(left.startAt || left.updatedAt || 0).getTime()
-    const rightTs = new Date(right.startAt || right.updatedAt || 0).getTime()
+    const leftTs = new Date(left.startAt || left.endAt || left.updatedAt || 0).getTime()
+    const rightTs = new Date(right.startAt || right.endAt || right.updatedAt || 0).getTime()
     return rightTs - leftTs
   }
   workdaysByRoomDay.forEach((list, key) => {
@@ -837,8 +860,17 @@ function mapWorkday(orgId, row, lookupMaps) {
   const workerLoginCandidate = sanitizeTextValue(
     row.workerLogin ?? row.worker?.login ?? row.workday?.workerLogin ?? linkedWorkday?.workerLogin ?? '',
   )
+  const workdayUtilityRoomId = sanitizeTextValue(
+    row?.workday?.utilityRoomId ??
+      linkedWorkday?.utilityRoomId ??
+      row?.utilityRoomId ??
+      row?.roomId ??
+      row?.zoneId ??
+      row?.zone?.ZoneId ??
+      row?.zone?.zoneId,
+  )
   const roomId = sanitizeTextValue(
-    row.zoneId ?? row.utilityRoomId ?? row.roomId ?? row.zone?.ZoneId ?? row.zone?.zoneId,
+    row.zoneId ?? row.utilityRoomId ?? row.roomId ?? workdayUtilityRoomId ?? row.zone?.ZoneId ?? row.zone?.zoneId,
   )
   const normalizedRoomId = normalizeLookupKey(roomId)
   const startAt = toIso(row.startAt)
@@ -848,9 +880,6 @@ function mapWorkday(orgId, row, lookupMaps) {
   const dayGps = sanitizeTextValue(row?.workday?.gps ?? linkedWorkday?.gps ?? row?.gps)
   const dayStartObject = sanitizeTextValue(row?.workday?.startObject ?? linkedWorkday?.startObject ?? row?.startObject)
   const dayStopObject = sanitizeTextValue(row?.workday?.stopObject ?? linkedWorkday?.stopObject ?? row?.stopObject)
-  const workdayUtilityRoomId = sanitizeTextValue(
-    row?.workday?.utilityRoomId ?? linkedWorkday?.utilityRoomId ?? row?.utilityRoomId ?? row?.roomId,
-  )
   const dayComment = sanitizeTextValue(row?.workday?.comment ?? linkedWorkday?.comment ?? row?.comment)
   const durationSec = calculateDuration(row)
   const zoneFromRow = row?.zone
@@ -900,7 +929,7 @@ function mapWorkday(orgId, row, lookupMaps) {
 
   const client = clientFromEvent || clientFromZone || clientFromRoomId || null
   const resolvedClientId = sanitizeTextValue(row.clientId ?? zone?.clientId ?? clientFromRoomId?.id)
-  const eventDayKey = toDayKey(startAt || endAt)
+  const eventDayKey = toLocalDayKey(startAt || endAt)
   const roomDayKey = normalizedRoomId && eventDayKey ? `${normalizedRoomId}|${eventDayKey}` : ''
   const inferredFromRoomDay = roomDayKey
     ? pickClosestWorkerCandidate(lookupMaps.workdaysByRoomDay.get(roomDayKey), startAt)
@@ -1000,7 +1029,7 @@ function mapWorkday(orgId, row, lookupMaps) {
     endEventId: sanitizeTextValue(row.endEventId),
     editedBy: sanitizeTextValue(row.updatedBy),
     updatedAt: toIso(row.updatedAt),
-    dayKey: toDayKey(startAt || endAt),
+    dayKey: toLocalDayKey(startAt || endAt),
   }
 }
 
@@ -1126,18 +1155,160 @@ async function fetchMappedBackupCycles(orgId) {
     .filter((item) => isDisplayableMappedItem(item))
 }
 
+function mappedItemIdentity(item, fallback = '') {
+  return String(item?.workdayId ?? item?.eventId ?? item?.id ?? fallback).trim()
+}
+
+function mappedItemHasValue(value) {
+  if (value == null) {
+    return false
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value !== 0
+  }
+  if (typeof value === 'boolean') {
+    return true
+  }
+  const text = String(value).trim()
+  return Boolean(text) && text !== '-'
+}
+
+function mappedItemScore(item) {
+  const fields = [
+    'workdayId',
+    'eventId',
+    'workerLogin',
+    'workerName',
+    'roomId',
+    'zoneId',
+    'strefa',
+    'klient',
+    'clientName',
+    'startAt',
+    'endAt',
+    'status',
+    'comment',
+    'updatedAt',
+  ]
+
+  return fields.reduce((score, field) => score + (mappedItemHasValue(item?.[field]) ? 1 : 0), 0)
+}
+
+function mappedItemStamp(item) {
+  const candidates = [item?.updatedAt, item?.closeMarkedAt, item?.endAt, item?.startAt]
+  let bestTs = 0
+  candidates.forEach((value) => {
+    const ts = toTimestamp(value)
+    if (ts > bestTs) {
+      bestTs = ts
+    }
+  })
+  return bestTs
+}
+
+function delayMs(durationMs) {
+  const ms = Number(durationMs)
+  const normalized = Number.isFinite(ms) && ms > 0 ? Math.floor(ms) : 0
+  if (!normalized) {
+    return Promise.resolve()
+  }
+
+  return new Promise((resolve) => {
+    setTimeout(resolve, normalized)
+  })
+}
+
+async function assertWorkdayVisibleAfterSave(orgId, workdayId, options = {}) {
+  const targetId = String(workdayId ?? '').trim()
+  if (!targetId) {
+    return
+  }
+
+  const attempts = Math.max(Number(options.attempts) || 4, 1)
+  const waitMs = Math.max(Number(options.waitMs) || 200, 0)
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await getWorkdays(orgId, {
+      source: 'events',
+      q: targetId,
+      page: 1,
+      pageSize: 20,
+    })
+    const found = (response.items ?? []).some((item) => {
+      const candidate = String(item?.workdayId ?? item?.eventId ?? item?.id ?? '').trim()
+      return candidate === targetId
+    })
+    if (found) {
+      return
+    }
+
+    if (attempt < attempts - 1 && waitMs > 0) {
+      await delayMs(waitMs)
+    }
+  }
+
+  throw new Error(
+    `Zdarzenie ${targetId} nie zostalo potwierdzone w bazie po zapisie. Sprobuj ponownie lub odswiez liste.`,
+  )
+}
+
+function mergeMappedEventCollections(primaryItems, secondaryItems) {
+  const mergedById = new Map()
+
+  const mergeTwoItems = (left, right) => {
+    const leftScore = mappedItemScore(left)
+    const rightScore = mappedItemScore(right)
+    const leftStamp = mappedItemStamp(left)
+    const rightStamp = mappedItemStamp(right)
+
+    const preferRight = rightScore > leftScore || (rightScore === leftScore && rightStamp > leftStamp)
+    const preferred = preferRight ? right : left
+    const fallback = preferRight ? left : right
+    const merged = { ...fallback, ...preferred }
+    const identity = mappedItemIdentity(merged)
+
+    if (identity && !mappedItemHasValue(merged.id)) {
+      merged.id = identity
+    }
+    if (!mappedItemHasValue(merged.eventId) && mappedItemHasValue(merged.workdayId)) {
+      merged.eventId = merged.workdayId
+    }
+    if (!mappedItemHasValue(merged.workdayId) && mappedItemHasValue(merged.eventId)) {
+      merged.workdayId = merged.eventId
+    }
+
+    return merged
+  }
+
+  const upsert = (item, index, prefix) => {
+    const identity = mappedItemIdentity(item, `${prefix}-${index}`)
+    const existing = mergedById.get(identity)
+    if (!existing) {
+      mergedById.set(identity, item)
+      return
+    }
+    mergedById.set(identity, mergeTwoItems(existing, item))
+  }
+
+  primaryItems.forEach((item, index) => upsert(item, index, 'event'))
+  secondaryItems.forEach((item, index) => upsert(item, index, 'workday'))
+
+  return [...mergedById.values()]
+}
+
 async function fetchMappedEvents(orgId) {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
   ensureFirebase()
+  let mappedEvents = []
   if (!eventsForOrgUnavailable) {
     try {
       const response = await runQueryOperation('EventsForOrg', { orgId })
       const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
       const rows = response?.data?.events ?? []
-      return rows
+      mappedEvents = rows
         .map((row) => mapWorkday(orgId, row, lookupMaps))
         .filter((item) => isDisplayableMappedItem(item))
     } catch (error) {
@@ -1149,17 +1320,77 @@ async function fetchMappedEvents(orgId) {
     }
   }
 
-  // First fallback: workdays so event edits stay visible when EventsForOrg is unavailable.
+  // Always include workdays - new edits are written there and can appear earlier than EventsForOrg.
   try {
-    return await fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg')
+    const mappedWorkdays = await fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg')
+    if (mappedEvents.length && mappedWorkdays.length) {
+      return mergeMappedEventCollections(mappedEvents, mappedWorkdays)
+        .filter((item) => isDisplayableMappedItem(item))
+    }
+    if (mappedWorkdays.length) {
+      return mappedWorkdays
+    }
   } catch (error) {
     if (!isOperationNotFoundError(error, 'WorkdaysForOrg')) {
       throw error
     }
   }
 
+  if (mappedEvents.length) {
+    return mappedEvents
+  }
+
   // Last fallback for older environments.
   return fetchMappedBackupCycles(orgId)
+}
+
+async function resolveWorkerLoginHint(orgId, filters = {}) {
+  const explicitLogin = String(filters.workerLogin ?? '').trim()
+  if (explicitLogin) {
+    return explicitLogin
+  }
+
+  const workerFilter = String(filters.worker ?? '').trim()
+  if (!workerFilter) {
+    return ''
+  }
+
+  const normalizedFilter = normalizeLookupKey(workerFilter)
+  const normalizedNameFilter = normalizePersonName(workerFilter)
+  const workers = await getWorkers(orgId).catch(() => [])
+  if (!workers.length) {
+    return ''
+  }
+
+  const exactByLogin =
+    workers.find((worker) => {
+      const aliases = collectWorkerLookupValues(worker)
+      return aliases.some((alias) => normalizeLookupKey(alias) === normalizedFilter)
+    }) ?? null
+  if (exactByLogin) {
+    return pickWorkerLoginValue(exactByLogin)
+  }
+
+  const exactByName = workers.filter(
+    (worker) => normalizePersonName(pickWorkerNameValue(worker)) === normalizedNameFilter,
+  )
+  if (exactByName.length === 1) {
+    return pickWorkerLoginValue(exactByName[0])
+  }
+
+  const partialMatches = workers.filter((worker) => {
+    const login = normalizeLookupKey(pickWorkerLoginValue(worker))
+    const name = normalizePersonName(pickWorkerNameValue(worker))
+    return (
+      (normalizedFilter && login.includes(normalizedFilter)) ||
+      (normalizedNameFilter && name.includes(normalizedNameFilter))
+    )
+  })
+  if (partialMatches.length === 1) {
+    return pickWorkerLoginValue(partialMatches[0])
+  }
+
+  return ''
 }
 
 export async function getWorkdays(orgId, filters = {}) {
@@ -1167,6 +1398,24 @@ export async function getWorkdays(orgId, filters = {}) {
   let mapped
   if (source === 'events' || source === 'event') {
     mapped = await fetchMappedEvents(orgId)
+    const workerLoginHint = await resolveWorkerLoginHint(orgId, filters)
+    if (workerLoginHint) {
+      try {
+        const mappedWorkerRows = await fetchMappedWorkdays(
+          orgId,
+          workerWorkdaysForOrg({ orgId, workerLogin: workerLoginHint }),
+          'WorkerWorkdaysForOrg',
+        )
+        if (mappedWorkerRows.length) {
+          mapped = mergeMappedEventCollections(mapped, mappedWorkerRows)
+            .filter((item) => isDisplayableMappedItem(item))
+        }
+      } catch (error) {
+        if (!isOperationNotFoundError(error, 'WorkerWorkdaysForOrg')) {
+          throw error
+        }
+      }
+    }
   } else if (source === 'backupcycle' || source === 'backup_cycle') {
     mapped = await fetchMappedBackupCycles(orgId)
   } else {
@@ -1273,39 +1522,6 @@ function isItemFromLocalDay(item, dayKey) {
   ].filter(Boolean)
 
   return keys.includes(dayKey)
-}
-
-function updateBucketDayStart(bucket, isoValue, quality) {
-  const iso = toIso(isoValue)
-  const ts = toTimestamp(iso)
-  if (!iso || ts <= 0) {
-    return
-  }
-
-  const score = Number(quality) > 1 ? 2 : 1
-  if (
-    score > bucket.dayStartQuality ||
-    (score === bucket.dayStartQuality && (bucket.dayStartTs <= 0 || ts < bucket.dayStartTs))
-  ) {
-    bucket.dayStartIso = iso
-    bucket.dayStartTs = ts
-    bucket.dayStartQuality = score
-  }
-}
-
-function updateBucketDayStop(bucket, isoValue, quality) {
-  const iso = toIso(isoValue)
-  const ts = toTimestamp(iso)
-  if (!iso || ts <= 0) {
-    return
-  }
-
-  const score = Number(quality) > 1 ? 2 : 1
-  if (score > bucket.dayStopQuality || (score === bucket.dayStopQuality && ts > bucket.dayStopTs)) {
-    bucket.dayStopIso = iso
-    bucket.dayStopTs = ts
-    bucket.dayStopQuality = score
-  }
 }
 
 function extractRawRecordId(item, fallback = '') {
@@ -1453,6 +1669,10 @@ export async function getTodayActiveWorkers(orgId) {
   const workers = new Map()
   const workerAliases = new Map()
   const resolveDisplayName = createWorkerDisplayNameResolver(workerDirectory)
+  const hasReadableLabel = (value) => {
+    const text = String(value ?? '').trim()
+    return Boolean(text) && text !== '-'
+  }
 
   const shouldReplaceDisplayName = (currentName, candidateName, workerLogin) => {
     const current = String(currentName ?? '').trim()
@@ -1502,18 +1722,22 @@ export async function getTodayActiveWorkers(orgId) {
         workerLogin: workerLogin || '',
         workerName: primaryLabel,
         entriesCount: 0,
-        fallbackEntriesCount: 0,
         activeClient: '-',
         activeZone: '-',
         activeLocation: '-',
         activeSortTs: 0,
         latestEventTs: 0,
-        dayStartIso: '',
-        dayStopIso: '',
-        dayStartTs: 0,
-        dayStopTs: 0,
-        dayStartQuality: 0,
-        dayStopQuality: 0,
+        firstStartIso: '',
+        firstStartTs: 0,
+        firstStartClient: '-',
+        firstStartZone: '-',
+        firstStartLocation: '-',
+        latestStopIso: '',
+        latestStopTs: 0,
+        latestDayStopIso: '',
+        latestDayStopTs: 0,
+        closedSec: 0,
+        runningCandidates: [],
       })
     }
 
@@ -1535,7 +1759,15 @@ export async function getTodayActiveWorkers(orgId) {
     return bucket
   }
 
-  workdayResponse.items
+  const uniqueRows = new Map()
+  ;[...(eventsResponse.items ?? []), ...(workdayResponse.items ?? [])].forEach((item, index) => {
+    const rowId = String(item?.eventId ?? item?.workdayId ?? item?.id ?? `row-${index}`).trim() || `row-${index}`
+    if (!uniqueRows.has(rowId)) {
+      uniqueRows.set(rowId, item)
+    }
+  })
+
+  ;[...uniqueRows.values()]
     .filter((item) => isItemFromLocalDay(item, day))
     .forEach((item) => {
       const bucket = resolveBucket(item)
@@ -1544,80 +1776,131 @@ export async function getTodayActiveWorkers(orgId) {
       }
 
       bucket.entriesCount += 1
-      updateBucketDayStart(bucket, item.dayStartAt || item.startAt || item.endAt, item.dayStartAt ? 2 : 1)
-      updateBucketDayStop(bucket, item.dayEndAt || item.endAt, item.dayEndAt ? 2 : 1)
-
-      const status = normalizeStatus(item.status, Boolean(item.endAt))
-      const clientLabel = String(item.clientName ?? item.klient ?? item.clientId ?? '').trim() || '-'
-      const zoneLabel = String(item.zoneName ?? item.strefa ?? '').trim() || '-'
-      const locationLabel = String(item.lokalizacja ?? item.location ?? '').trim() || '-'
-      const startTs = toTimestamp(item.startAt || item.updatedAt)
-      const eventTs = toTimestamp(item.updatedAt || item.createdAt || item.dayEndAt || item.endAt || item.dayStartAt || item.startAt)
+      const startIso = toIso(item.startAt || item.dayStartAt)
+      const endIso = toIso(item.endAt || item.dayEndAt)
+      const startTs = toTimestamp(startIso)
+      const endTs = toTimestamp(endIso)
+      const hasStop = endTs > 0
+      const status = normalizeStatus(item.status, hasStop)
+      const rawStatus = String(item.status ?? '').trim().toUpperCase()
+      const endReason = String(item.endReason ?? '').trim().toUpperCase()
+      const startObjectLabel = String(item.dayStartObject ?? '').trim()
+      const clientLabelRaw = String(item.clientName ?? item.klient ?? item.clientId ?? '').trim()
+      const zoneLabelRaw = String(item.zoneName ?? item.strefa ?? '').trim()
+      const locationLabelRaw = String(item.lokalizacja ?? item.location ?? '').trim()
+      const clientLabel = hasReadableLabel(clientLabelRaw)
+        ? clientLabelRaw
+        : hasReadableLabel(startObjectLabel)
+          ? startObjectLabel
+          : '-'
+      const zoneLabel = hasReadableLabel(zoneLabelRaw) ? zoneLabelRaw : '-'
+      const locationLabel = hasReadableLabel(locationLabelRaw) ? locationLabelRaw : '-'
+      const eventTs = toTimestamp(item.updatedAt || item.createdAt || endIso || startIso)
       if (eventTs > bucket.latestEventTs) {
         bucket.latestEventTs = eventTs
       }
 
-      const isActiveClean = status === 'RUNNING' && zoneLabel !== '-'
-      if (isActiveClean && startTs >= bucket.activeSortTs) {
-        bucket.activeSortTs = startTs
-        bucket.activeClient = clientLabel
-        bucket.activeZone = zoneLabel
-        bucket.activeLocation = locationLabel
+      if (startTs > 0 && (bucket.firstStartTs <= 0 || startTs < bucket.firstStartTs)) {
+        bucket.firstStartTs = startTs
+        bucket.firstStartIso = startIso
+        bucket.firstStartClient = clientLabel
+        bucket.firstStartZone = zoneLabel
+        bucket.firstStartLocation = locationLabel
+      } else if (startTs > 0 && startTs === bucket.firstStartTs) {
+        if (!hasReadableLabel(bucket.firstStartClient) && hasReadableLabel(clientLabel)) {
+          bucket.firstStartClient = clientLabel
+        }
+        if (!hasReadableLabel(bucket.firstStartZone) && hasReadableLabel(zoneLabel)) {
+          bucket.firstStartZone = zoneLabel
+        }
+        if (!hasReadableLabel(bucket.firstStartLocation) && hasReadableLabel(locationLabel)) {
+          bucket.firstStartLocation = locationLabel
+        }
       }
-    })
+      if (endTs > bucket.latestStopTs) {
+        bucket.latestStopTs = endTs
+        bucket.latestStopIso = endIso
+      }
 
-  eventsResponse.items
-    .filter((item) => isItemFromLocalDay(item, day))
-    .forEach((item) => {
-      const bucket = resolveBucket(item)
-      if (!bucket) {
+      const isDayStopMarker =
+        endTs > 0 && (endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY' || rawStatus === 'WORKDAY_CLOSED')
+      if (isDayStopMarker && endTs > bucket.latestDayStopTs) {
+        bucket.latestDayStopTs = endTs
+        bucket.latestDayStopIso = endIso
+      }
+
+      if (status === 'RUNNING' && startTs > 0) {
+        bucket.runningCandidates.push({
+          startTs,
+          startIso,
+          clientLabel,
+          zoneLabel,
+          locationLabel,
+        })
         return
       }
 
-      bucket.fallbackEntriesCount += 1
-      updateBucketDayStart(bucket, item.dayStartAt || item.startAt || item.endAt, item.dayStartAt ? 2 : 1)
-      updateBucketDayStop(bucket, item.dayEndAt || item.endAt, item.dayEndAt ? 2 : 1)
-
-      const status = normalizeStatus(item.status, Boolean(item.endAt))
-      const clientLabel = String(item.clientName ?? item.klient ?? item.clientId ?? '').trim() || '-'
-      const zoneLabel = String(item.zoneName ?? item.strefa ?? '').trim() || '-'
-      const locationLabel = String(item.lokalizacja ?? item.location ?? '').trim() || '-'
-      const startTs = toTimestamp(item.startAt || item.updatedAt)
-      const eventTs = toTimestamp(item.updatedAt || item.createdAt || item.dayEndAt || item.endAt || item.dayStartAt || item.startAt)
-      if (eventTs > bucket.latestEventTs) {
-        bucket.latestEventTs = eventTs
-      }
-
-      const isActiveClean = status === 'RUNNING' && zoneLabel !== '-'
-      if (isActiveClean && startTs >= bucket.activeSortTs) {
-        bucket.activeSortTs = startTs
-        bucket.activeClient = clientLabel
-        bucket.activeZone = zoneLabel
-        bucket.activeLocation = locationLabel
+      if (status === 'CLOSED' && startTs > 0 && endTs > startTs) {
+        bucket.closedSec += Math.floor((endTs - startTs) / 1000)
       }
     })
 
   const items = [...workers.values()]
     .map((bucket) => {
-      let duration = '-'
-      if (bucket.dayStartTs > 0) {
-        const endTs = bucket.dayStopTs > 0 ? bucket.dayStopTs : nowTs
-        const seconds = Math.max(0, Math.floor((endTs - bucket.dayStartTs) / 1000))
-        duration = seconds > 0 ? durationToHms(seconds) : '00:00:00'
+      const activeCandidates = bucket.runningCandidates
+        .filter((candidate) => candidate.startTs > bucket.latestStopTs)
+        .sort((left, right) => right.startTs - left.startTs)
+      const activeCandidate = activeCandidates[0] ?? null
+      const runningSec = activeCandidates.reduce(
+        (sum, candidate) => sum + Math.max(0, Math.floor((nowTs - candidate.startTs) / 1000)),
+        0,
+      )
+      const fallbackMarkerSec = (() => {
+        if (bucket.latestStopTs <= 0 || !bucket.runningCandidates.length) {
+          return 0
+        }
+
+        const latestStartBeforeStop = bucket.runningCandidates
+          .filter((candidate) => candidate.startTs > 0 && candidate.startTs <= bucket.latestStopTs)
+          .sort((left, right) => right.startTs - left.startTs)[0]
+        if (!latestStartBeforeStop) {
+          return 0
+        }
+
+        return Math.max(0, Math.floor((bucket.latestStopTs - latestStartBeforeStop.startTs) / 1000))
+      })()
+      const totalSec = Math.max(0, Math.floor(Math.max(bucket.closedSec, fallbackMarkerSec) + runningSec))
+      const isRunning = Boolean(activeCandidate)
+      const startIso = isRunning ? activeCandidate.startIso : bucket.firstStartIso
+      const stopIso = !isRunning && bucket.latestStopTs > 0 ? bucket.latestStopIso : ''
+      let duration = durationToHms(totalSec)
+      if (duration === '-' && (isRunning || bucket.firstStartTs > 0)) {
+        duration = '00:00:00'
       }
+
+      const resolvedClient = isRunning
+        ? activeCandidate?.clientLabel ?? bucket.firstStartClient ?? '-'
+        : bucket.firstStartClient ?? '-'
+      const resolvedZone = isRunning
+        ? activeCandidate?.zoneLabel ?? bucket.firstStartZone ?? '-'
+        : bucket.firstStartZone ?? '-'
+      const resolvedLocation = isRunning
+        ? activeCandidate?.locationLabel ?? bucket.firstStartLocation ?? '-'
+        : bucket.firstStartLocation ?? '-'
 
       return {
         id: bucket.id,
         workerLogin: bucket.workerLogin || bucket.id,
         workerName: bucket.workerName,
-        entriesCount: bucket.entriesCount > 0 ? bucket.entriesCount : bucket.fallbackEntriesCount,
-        activeClient: bucket.activeClient,
-        activeZone: bucket.activeZone,
-        activeLocation: bucket.activeLocation,
-        qrStart: formatTime(bucket.dayStartIso),
-        qrStop: bucket.dayStopTs > 0 ? formatTime(bucket.dayStopIso) : '-',
+        entriesCount: bucket.entriesCount,
+        activeClient: hasReadableLabel(resolvedClient) ? resolvedClient : '-',
+        activeZone: hasReadableLabel(resolvedZone) ? resolvedZone : '-',
+        activeLocation: hasReadableLabel(resolvedLocation) ? resolvedLocation : '-',
+        qrStart: formatTime(startIso),
+        qrStop: stopIso ? formatTime(stopIso) : '-',
         duration,
-        activeSortTs: bucket.activeSortTs,
+        isRunning,
+        activeSortTs: isRunning ? activeCandidate?.startTs ?? 0 : 0,
         latestEventTs: bucket.latestEventTs,
       }
     })
@@ -1682,7 +1965,7 @@ export async function getDashboardSummary(orgId) {
 
 export async function createEvent(orgId, payload = {}) {
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+    throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
   }
 
   const eventId = String(payload.eventId ?? payload.id ?? `EV-${Date.now()}`).trim()
@@ -1692,7 +1975,8 @@ export async function createEvent(orgId, payload = {}) {
 
   ensureFirebase()
   const mutationPayload = buildEventMutationPayload(payload)
-  const eventPayload = {
+  const canonicalWorkdayId = String(payload.workdayId ?? payload.linkedWorkdayId ?? eventId).trim() || eventId
+  const eventMutationPayload = {
     zoneId: mutationPayload.zoneId,
     workerLogin: mutationPayload.workerLogin,
     startAt: mutationPayload.startAt,
@@ -1706,15 +1990,60 @@ export async function createEvent(orgId, payload = {}) {
     startEventId: mutationPayload.startEventId,
     endEventId: mutationPayload.endEventId,
   }
-  await runMutationOperation('InsertEventForOrg', {
-    orgId,
-    eventId,
-    ...eventPayload,
-  })
+  const writeErrors = []
+  let eventSaved = false
+  let workdaySaved = false
+
+  try {
+    await runMutationOperation('InsertEventForOrg', {
+      orgId,
+      eventId: canonicalWorkdayId,
+      ...eventMutationPayload,
+    })
+    eventSaved = true
+  } catch (error) {
+    if (!isOperationNotFoundError(error, 'InsertEventForOrg')) {
+      writeErrors.push(error)
+    }
+  }
+
+  try {
+    await createWorkday(orgId, {
+      workdayId: canonicalWorkdayId,
+      workerLogin: mutationPayload.workerLogin ?? payload.workerLogin ?? null,
+      workerName: payload.workerName ?? null,
+      utilityRoomId: mutationPayload.zoneId ?? payload.utilityRoomId ?? payload.roomId ?? null,
+      startAt: mutationPayload.startAt,
+      endAt: mutationPayload.endAt,
+      durationSec: mutationPayload.durationSec,
+      status: mutationPayload.status,
+      comment: mutationPayload.comment,
+      updatedBy: payload.updatedBy ?? payload.editedBy ?? null,
+    })
+    workdaySaved = true
+  } catch (error) {
+    writeErrors.push(error)
+  }
+
+  if (!eventSaved && !workdaySaved) {
+    const firstError = writeErrors[0]
+    throw firstError instanceof Error ? firstError : new Error('Nie udalo sie zapisac zdarzenia.')
+  }
+
+  try {
+    await assertWorkdayVisibleAfterSave(orgId, canonicalWorkdayId)
+  } catch (error) {
+    // Best-effort visibility probe: mutation already succeeded, eventual consistency may delay query results.
+    console.warn('[workdayService] visibility probe after createEvent failed', {
+      orgId,
+      workdayId: canonicalWorkdayId,
+      message: error instanceof Error ? error.message : String(error ?? ''),
+    })
+  }
 
   return {
-    id: eventId,
-    eventId,
+    id: canonicalWorkdayId,
+    eventId: canonicalWorkdayId,
     orgId,
     workerLogin: String(payload.workerLogin ?? '').trim(),
     workerName: String(payload.workerName ?? '').trim(),
@@ -1732,7 +2061,7 @@ export async function createEvent(orgId, payload = {}) {
 
 export async function updateEvent(orgId, eventId, payload = {}) {
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+    throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
   }
 
   const normalizedEventId = String(eventId ?? payload.eventId ?? payload.workdayId ?? '').trim()
@@ -1742,7 +2071,8 @@ export async function updateEvent(orgId, eventId, payload = {}) {
 
   ensureFirebase()
   const mutationPayload = buildEventMutationPayload(payload)
-  const eventPayload = {
+  const canonicalWorkdayId = String(payload.workdayId ?? payload.linkedWorkdayId ?? normalizedEventId).trim() || normalizedEventId
+  const eventMutationPayload = {
     zoneId: mutationPayload.zoneId,
     workerLogin: mutationPayload.workerLogin,
     startAt: mutationPayload.startAt,
@@ -1756,24 +2086,12 @@ export async function updateEvent(orgId, eventId, payload = {}) {
     startEventId: mutationPayload.startEventId,
     endEventId: mutationPayload.endEventId,
   }
-  const fallbackWorkdayId = String(payload.workdayId ?? payload.linkedWorkdayId ?? normalizedEventId).trim()
+  const updateErrors = []
+  let workdayUpdated = false
+  let eventUpdated = false
 
   try {
-    await runMutationOperation('UpdateEventForOrg', {
-      orgId,
-      eventId: normalizedEventId,
-      ...eventPayload,
-    })
-  } catch (error) {
-    if (!isOperationNotFoundError(error, 'UpdateEventForOrg')) {
-      throw error
-    }
-
-    if (!fallbackWorkdayId) {
-      throw error
-    }
-
-    await updateWorkday(orgId, fallbackWorkdayId, {
+    await updateWorkday(orgId, canonicalWorkdayId, {
       workerLogin: mutationPayload.workerLogin ?? payload.workerLogin ?? null,
       workerName: payload.workerName ?? null,
       utilityRoomId: mutationPayload.zoneId ?? payload.utilityRoomId ?? payload.roomId ?? null,
@@ -1784,11 +2102,32 @@ export async function updateEvent(orgId, eventId, payload = {}) {
       comment: mutationPayload.comment,
       updatedBy: payload.updatedBy ?? payload.editedBy ?? null,
     })
+    workdayUpdated = true
+  } catch (error) {
+    updateErrors.push(error)
+  }
+
+  try {
+    await runMutationOperation('UpdateEventForOrg', {
+      orgId,
+      eventId: normalizedEventId,
+      ...eventMutationPayload,
+    })
+    eventUpdated = true
+  } catch (error) {
+    if (!isOperationNotFoundError(error, 'UpdateEventForOrg')) {
+      updateErrors.push(error)
+    }
+  }
+
+  if (!workdayUpdated && !eventUpdated) {
+    const firstError = updateErrors[0]
+    throw firstError instanceof Error ? firstError : new Error('Nie udalo sie zaktualizowac zdarzenia.')
   }
 
   return {
-    id: normalizedEventId,
-    eventId: normalizedEventId,
+    id: canonicalWorkdayId,
+    eventId: canonicalWorkdayId,
     orgId,
     workerLogin: String(payload.workerLogin ?? '').trim(),
     workerName: String(payload.workerName ?? '').trim(),
@@ -1806,7 +2145,7 @@ export async function updateEvent(orgId, eventId, payload = {}) {
 
 export async function deleteEvent(orgId, eventId) {
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+    throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
   }
 
   const normalizedEventId = String(eventId ?? '').trim()
@@ -1815,10 +2154,33 @@ export async function deleteEvent(orgId, eventId) {
   }
 
   ensureFirebase()
-  await runMutationOperation('DeleteEventForOrg', {
-    orgId,
-    eventId: normalizedEventId,
-  })
+  const deleteErrors = []
+  let workdayDeleted = false
+  let eventDeleted = false
+
+  try {
+    await deleteWorkday(orgId, normalizedEventId)
+    workdayDeleted = true
+  } catch (error) {
+    deleteErrors.push(error)
+  }
+
+  try {
+    await runMutationOperation('DeleteEventForOrg', {
+      orgId,
+      eventId: normalizedEventId,
+    })
+    eventDeleted = true
+  } catch (error) {
+    if (!isOperationNotFoundError(error, 'DeleteEventForOrg')) {
+      deleteErrors.push(error)
+    }
+  }
+
+  if (!workdayDeleted && !eventDeleted) {
+    const firstError = deleteErrors[0]
+    throw firstError instanceof Error ? firstError : new Error('Nie udalo sie usunac zdarzenia.')
+  }
 
   return {
     success: true,
@@ -1844,7 +2206,7 @@ export async function createWorkday(orgId, payload = {}) {
   const durationSec = normalizeDurationSeconds(payload.durationSec, startAt, endAt)
 
   ensureFirebase()
-  await insertWorkdayForOrg({
+  const mutationResult = await insertWorkdayForOrg({
     orgId,
     workdayId,
     workerLogin,
@@ -1857,6 +2219,10 @@ export async function createWorkday(orgId, payload = {}) {
     comment: payload.comment ?? null,
     updatedBy: payload.updatedBy ?? null,
   })
+  const insertedWorkdayId = String(mutationResult?.data?.workday_insert?.workdayId ?? '').trim()
+  if (!insertedWorkdayId) {
+    throw new Error('Data Connect nie potwierdzil zapisu nowego zdarzenia.')
+  }
 
   return {
     workdayId,
