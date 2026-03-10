@@ -622,8 +622,16 @@ function applyWorkdayFilters(items, filters = {}) {
       return false
     }
 
-    if (clientFilter && !String(item.klient ?? '').toLowerCase().includes(clientFilter)) {
-      return false
+    if (clientFilter) {
+      const clientHaystack = normalizeHaystack([
+        item.klient,
+        item.clientName,
+        item.dayStartObject,
+        item.dayStopObject,
+      ])
+      if (!clientHaystack.includes(clientFilter)) {
+        return false
+      }
     }
 
     if (clientIdFilter && normalizeLookupKey(item.clientId) !== clientIdFilter) {
@@ -824,6 +832,45 @@ function buildLookupMaps(clients, zones, workers, workdayRows = []) {
   }
 }
 
+function findClientByTextHints(lookupMaps, hints = []) {
+  if (!lookupMaps || !Array.isArray(hints) || !hints.length) {
+    return null
+  }
+
+  const clientEntries = [...(lookupMaps.clientByNormalizedName?.entries?.() ?? [])]
+
+  for (const rawHint of hints) {
+    const text = sanitizeTextValue(rawHint)
+    if (!text) {
+      continue
+    }
+
+    const normalized = normalizeLookupKey(text)
+    if (!normalized) {
+      continue
+    }
+
+    const exact =
+      lookupMaps.clientByNormalizedId.get(normalized) ||
+      lookupMaps.clientByNormalizedName.get(normalized) ||
+      null
+    if (exact) {
+      return exact
+    }
+
+    const partial = clientEntries.find(
+      ([nameKey]) =>
+        Boolean(nameKey) &&
+        (nameKey.includes(normalized) || normalized.includes(nameKey)),
+    )
+    if (partial?.[1]) {
+      return partial[1]
+    }
+  }
+
+  return null
+}
+
 function pickClosestWorkerCandidate(candidates, eventStartAt) {
   if (!Array.isArray(candidates) || candidates.length === 0) {
     return null
@@ -875,11 +922,13 @@ function mapWorkday(orgId, row, lookupMaps) {
   const normalizedRoomId = normalizeLookupKey(roomId)
   const startAt = toIso(row.startAt)
   const endAt = toIso(row.endAt)
+  const rawStartObject = sanitizeTextValue(row?.startObject)
+  const rawStopObject = sanitizeTextValue(row?.stopObject)
   const dayStartAt = toIso(row?.workday?.startAt ?? linkedWorkday?.startAt)
   const dayEndAt = toIso(row?.workday?.endAt ?? linkedWorkday?.endAt)
   const dayGps = sanitizeTextValue(row?.workday?.gps ?? linkedWorkday?.gps ?? row?.gps)
-  const dayStartObject = sanitizeTextValue(row?.workday?.startObject ?? linkedWorkday?.startObject ?? row?.startObject)
-  const dayStopObject = sanitizeTextValue(row?.workday?.stopObject ?? linkedWorkday?.stopObject ?? row?.stopObject)
+  const dayStartObject = sanitizeTextValue(row?.workday?.startObject ?? linkedWorkday?.startObject ?? rawStartObject)
+  const dayStopObject = sanitizeTextValue(row?.workday?.stopObject ?? linkedWorkday?.stopObject ?? rawStopObject)
   const dayComment = sanitizeTextValue(row?.workday?.comment ?? linkedWorkday?.comment ?? row?.comment)
   const durationSec = calculateDuration(row)
   const zoneFromRow = row?.zone
@@ -927,8 +976,18 @@ function mapWorkday(orgId, row, lookupMaps) {
     lookupMaps.clientByNormalizedName.get(normalizedRoomId) ||
     null
 
-  const client = clientFromEvent || clientFromZone || clientFromRoomId || null
-  const resolvedClientId = sanitizeTextValue(row.clientId ?? zone?.clientId ?? clientFromRoomId?.id)
+  const clientFromObjectHints = findClientByTextHints(lookupMaps, [
+    dayStartObject,
+    dayStopObject,
+    rawStartObject,
+    rawStopObject,
+  ])
+
+  const client = clientFromEvent || clientFromZone || clientFromRoomId || clientFromObjectHints || null
+  const resolvedClientId = sanitizeTextValue(
+    row.clientId ?? zone?.clientId ?? clientFromRoomId?.id ?? clientFromObjectHints?.id,
+  )
+  const resolvedClientName = sanitizeTextValue(client?.name ?? clientFromObjectHints?.name ?? resolvedClientId)
   const eventDayKey = toLocalDayKey(startAt || endAt)
   const roomDayKey = normalizedRoomId && eventDayKey ? `${normalizedRoomId}|${eventDayKey}` : ''
   const inferredFromRoomDay = roomDayKey
@@ -1000,8 +1059,8 @@ function mapWorkday(orgId, row, lookupMaps) {
     strefa: sanitizeTextValue(zone?.name ?? zone?.zone),
     zoneName: sanitizeTextValue(zone?.name ?? zone?.zone),
     clientId: resolvedClientId,
-    klient: sanitizeTextValue((client?.name ?? resolvedClientId) || '-'),
-    clientName: sanitizeTextValue((client?.name ?? resolvedClientId) || '-'),
+    klient: sanitizeTextValue(resolvedClientName || '-'),
+    clientName: sanitizeTextValue(resolvedClientName || '-'),
     lokalizacja: sanitizeTextValue(zone?.location ?? '-'),
     startAt,
     endAt,
