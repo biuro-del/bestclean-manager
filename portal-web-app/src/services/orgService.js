@@ -2,17 +2,28 @@ import { myOrganizations } from '@dataconnect/generated'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
 function mapRole(dcRole) {
-  const normalized = String(dcRole ?? '').toUpperCase()
-  if (normalized === 'ADMIN') {
+  const normalized = String(dcRole ?? '')
+    .trim()
+    .toUpperCase()
+
+  if (normalized === 'ADMIN' || normalized === 'OWNER' || normalized === 'SUPERADMIN') {
     return 'Admin'
   }
 
-  if (normalized === 'MANAGER') {
+  if (normalized === 'MANAGER' || normalized === 'KIEROWNIK') {
     return 'Kierownik'
   }
 
-  if (normalized === 'WORKER') {
+  if (normalized === 'WORKER' || normalized === 'PRACOWNIK') {
     return 'Pracownik'
+  }
+
+  if (normalized === 'COORDINATOR' || normalized === 'KOORDYNATOR' || normalized === 'MEMBER') {
+    return 'Koordynator'
+  }
+
+  if (normalized === 'INTERN' || normalized === 'STAZYSTA' || normalized === 'STAŻYSTA') {
+    return 'Stazysta'
   }
 
   return 'Koordynator'
@@ -20,7 +31,7 @@ function mapRole(dcRole) {
 
 export async function getOrganizations() {
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+    throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
   }
 
   ensureFirebase()

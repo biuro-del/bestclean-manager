@@ -46,8 +46,22 @@
     </header>
 
     <div class="app-body">
-      <aside class="sidebar">
-        <div class="sidebar-title">Menu</div>
+      <aside class="sidebar" id="portalSidebar">
+        <div class="sidebar-head">
+          <div class="sidebar-title">Menu</div>
+          <button
+            class="sidebar-toggle-btn"
+            id="sidebarToggleBtn"
+            type="button"
+            aria-label="Zwin menu"
+            aria-pressed="false"
+            title="Zwin menu"
+          >
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
 
         <div class="menu">
           <button class="menu-item active" data-route="dashboard" type="button">
@@ -55,6 +69,12 @@
               <svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5v8a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-8z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </span>
             <span class="mi-label">Pulpit</span>
+          </button>
+          <button class="menu-item" data-route="events" type="button">
+            <span class="mi-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            <span class="mi-label">Zdarzenia</span>
           </button>
           <button class="menu-item" data-route="schedule" type="button">
             <span class="mi-ico" aria-hidden="true">
@@ -75,12 +95,6 @@
                 <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M7 9h10M7 13h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
               </span>
               <span class="mi-label">Lista klientów</span>
-            </button>
-            <button class="submenu-item" data-route="events" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </span>
-              <span class="mi-label">Zdarzenia</span>
             </button>
             <button class="submenu-item" data-route="individualOrders" type="button">
               <span class="mi-ico" aria-hidden="true">
