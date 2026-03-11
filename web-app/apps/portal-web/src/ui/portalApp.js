@@ -6249,10 +6249,17 @@ async function runReportHistory() {
   reportHistorySetStatus('Ladowanie historii...')
 
   try {
-    const items = await reportFetchEventsPaged(appState.session.orgId, {
+    const fetchFilters = {
       source: 'events',
       fromIso: ymdToIsoRangeStart(filters.from),
       toIso: ymdToIsoRangeEnd(filters.to),
+    }
+    if (filters.tab === 'workers' && filters.workerLogin) {
+      fetchFilters.worker = filters.workerLogin
+    }
+
+    const items = await reportFetchEventsPaged(appState.session.orgId, {
+      ...fetchFilters,
     })
 
     let filtered = items
@@ -6269,7 +6276,7 @@ async function runReportHistory() {
       try {
         const workerDayItems = await reportFetchEventsPaged(appState.session.orgId, {
           source: 'workdays',
-          workerLogin: filters.workerLogin,
+          worker: filters.workerLogin,
           fromIso: ymdToIsoRangeStart(filters.from),
           toIso: ymdToIsoRangeEnd(filters.to),
         })
@@ -6654,15 +6661,90 @@ function closeReportBuilder() {
   reportResetResults()
 }
 
-async function reportFetchEventsPaged(orgId, filters = {}) {
-  const pageSize = Math.max(Number(filters.pageSize ?? 1000) || 1000, 1)
-  const maxPages = Math.max(Number(filters.maxPages ?? 200) || 200, 1)
-  const baseFilters = {
-    ...filters,
-    pageSize,
+function reportHasValue(value) {
+  if (value == null) {
+    return false
   }
-  delete baseFilters.maxPages
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value !== 0
+  }
+  if (typeof value === 'boolean') {
+    return true
+  }
+  const text = String(value).trim()
+  return Boolean(text) && text !== '-'
+}
 
+function reportHistoryMergeKey(item, index, prefix) {
+  const id = String(item?.eventId ?? item?.workdayId ?? item?.id ?? '').trim()
+  const startAt = toIso(item?.startAt)
+  const endAt = toIso(item?.endAt)
+  const status = String(item?.status ?? '').trim().toUpperCase()
+  const endReason = String(item?.endReason ?? '').trim().toUpperCase()
+  const worker = String(item?.workerLogin ?? item?.workerName ?? '').trim().toLowerCase()
+  const zone = String(item?.zoneId ?? item?.utilityRoomId ?? item?.roomId ?? item?.strefa ?? item?.zoneName ?? '')
+    .trim()
+    .toLowerCase()
+  const marker = [startAt, endAt, status, endReason, worker, zone].join('|')
+  return id ? `${id}|${marker}` : `${prefix}-${index}|${marker}`
+}
+
+function reportHistoryMergeScore(item) {
+  const fields = [
+    item?.eventId,
+    item?.workdayId,
+    item?.workerLogin,
+    item?.workerName,
+    item?.zoneId,
+    item?.strefa,
+    item?.zoneName,
+    item?.clientId,
+    item?.clientName,
+    item?.klient,
+    item?.lokalizacja,
+    item?.startAt,
+    item?.endAt,
+    item?.durationSec,
+    item?.status,
+    item?.endReason,
+    item?.dayStartObject,
+    item?.dayStopObject,
+    item?.comment,
+    item?.updatedAt,
+  ]
+  return fields.reduce((score, value) => score + (reportHasValue(value) ? 1 : 0), 0)
+}
+
+function reportMergeHistorySourceItems(...collections) {
+  const merged = new Map()
+
+  collections.forEach((items, collectionIndex) => {
+    if (!Array.isArray(items) || !items.length) {
+      return
+    }
+
+    const prefix = collectionIndex === 0 ? 'primary' : `secondary-${collectionIndex}`
+    items.forEach((item, itemIndex) => {
+      const key = reportHistoryMergeKey(item, itemIndex, prefix)
+      const existing = merged.get(key)
+      if (!existing) {
+        merged.set(key, item)
+        return
+      }
+
+      const existingScore = reportHistoryMergeScore(existing)
+      const incomingScore = reportHistoryMergeScore(item)
+      const preferIncoming = incomingScore > existingScore
+      const preferred = preferIncoming ? item : existing
+      const fallback = preferIncoming ? existing : item
+      merged.set(key, { ...fallback, ...preferred })
+    })
+  })
+
+  return [...merged.values()]
+}
+
+async function reportFetchEventsSourcePaged(orgId, baseFilters, maxPages) {
   const items = []
   let page = 1
   let totalPages = 1
@@ -6680,6 +6762,40 @@ async function reportFetchEventsPaged(orgId, filters = {}) {
   }
 
   return items
+}
+
+async function reportFetchEventsPaged(orgId, filters = {}) {
+  const pageSize = Math.max(Number(filters.pageSize ?? 1000) || 1000, 1)
+  const maxPages = Math.max(Number(filters.maxPages ?? 200) || 200, 1)
+  const baseFilters = {
+    ...filters,
+    pageSize,
+  }
+  delete baseFilters.maxPages
+
+  const source = String(baseFilters.source ?? '').trim().toLowerCase()
+  const primaryItems = await reportFetchEventsSourcePaged(orgId, baseFilters, maxPages)
+
+  if (source !== 'events' && source !== 'event') {
+    return primaryItems
+  }
+
+  if (primaryItems.length) {
+    return primaryItems
+  }
+
+  let backupItems = []
+  try {
+    backupItems = await reportFetchEventsSourcePaged(orgId, { ...baseFilters, source: 'backupcycle' }, maxPages)
+  } catch {
+    backupItems = []
+  }
+
+  if (!backupItems.length) {
+    return primaryItems
+  }
+
+  return reportMergeHistorySourceItems(primaryItems, backupItems)
 }
 
 function reportReadPanel(panel) {
@@ -6762,8 +6878,14 @@ function reportMatchesPanelSelection(item, panel) {
     } else {
       const selectedClient = appState.clients.find((client) => String(client.id ?? '').trim() === panel.clientId)
       const selectedClientName = reportNormalizeText(selectedClient?.name)
-      const itemClientName = reportNormalizeText(item.clientName ?? item.klient)
-      if (!selectedClientName || !itemClientName || itemClientName !== selectedClientName) {
+      const itemClientName = reportNormalizeText(item.clientName ?? item.klient ?? item.clientId)
+      const matchesByName =
+        Boolean(selectedClientName) &&
+        Boolean(itemClientName) &&
+        (itemClientName === selectedClientName ||
+          itemClientName.includes(selectedClientName) ||
+          selectedClientName.includes(itemClientName))
+      if (!matchesByName) {
         return false
       }
     }

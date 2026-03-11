@@ -583,6 +583,8 @@ function applyWorkdayFilters(items, filters = {}) {
   const toDay = normalizeFilterDate(filters.toIso)
   const workerFilter = String(filters.worker ?? '').trim().toLowerCase()
   const workerLoginFilter = normalizeLookupKey(filters.workerLogin)
+  const workerLoginFilterLocal = normalizeLookupKey(extractLoginLocalPart(workerLoginFilter))
+  const workerLoginNameFilter = normalizePersonName(filters.workerLogin)
   const zoneFilter = String(filters.strefa ?? '').trim().toLowerCase()
   const zoneIdFilter = normalizeLookupKey(filters.zoneId ?? filters.utilityRoomId)
   const clientFilter = String(filters.pomieszczenie ?? '').trim().toLowerCase()
@@ -610,8 +612,24 @@ function applyWorkdayFilters(items, filters = {}) {
       }
     }
 
-    if (workerLoginFilter && normalizeLookupKey(item.workerLogin) !== workerLoginFilter) {
-      return false
+    if (workerLoginFilter) {
+      const itemLoginRaw = String(item.workerLogin ?? '').trim()
+      const itemLogin = normalizeLookupKey(itemLoginRaw)
+      const itemLoginLocal = normalizeLookupKey(extractLoginLocalPart(itemLoginRaw))
+      const itemName = normalizePersonName(item.workerName)
+      const matchesLogin =
+        itemLogin === workerLoginFilter ||
+        (workerLoginFilterLocal && itemLogin === workerLoginFilterLocal) ||
+        (itemLoginLocal && itemLoginLocal === workerLoginFilter) ||
+        (workerLoginFilterLocal && itemLoginLocal && itemLoginLocal === workerLoginFilterLocal)
+      const matchesName =
+        Boolean(workerLoginNameFilter) && Boolean(itemName) &&
+        (itemName === workerLoginNameFilter ||
+          itemName.includes(workerLoginNameFilter) ||
+          workerLoginNameFilter.includes(itemName))
+      if (!matchesLogin && !matchesName) {
+        return false
+      }
     }
 
     if (zoneFilter && !String(item.strefa ?? '').toLowerCase().includes(zoneFilter)) {
@@ -626,8 +644,10 @@ function applyWorkdayFilters(items, filters = {}) {
       const clientHaystack = normalizeHaystack([
         item.klient,
         item.clientName,
+        item.clientId,
         item.dayStartObject,
         item.dayStopObject,
+        item.dayComment,
       ])
       if (!clientHaystack.includes(clientFilter)) {
         return false
@@ -643,7 +663,7 @@ function applyWorkdayFilters(items, filters = {}) {
     }
 
     if (statusFilter) {
-      const normalizedStatus = normalizeStatus(item.status, Boolean(item.endAt))
+      const normalizedStatus = normalizeStatus(item.status, Boolean(item.endAt || item.dayEndAt))
       if (normalizedStatus !== statusFilter) {
         return false
       }
@@ -660,6 +680,7 @@ function applyWorkdayFilters(items, filters = {}) {
       item.roomId,
       item.strefa,
       item.klient,
+      item.clientId,
       item.lokalizacja,
       item.status,
       item.comment,
@@ -688,8 +709,12 @@ function paginate(items, pageValue, pageSizeValue) {
 
 function sortByLatest(items) {
   return [...items].sort((left, right) => {
-    const leftTs = new Date(toIso(left.startAt) || toIso(left.endAt) || toIso(left.updatedAt) || 0).getTime()
-    const rightTs = new Date(toIso(right.startAt) || toIso(right.endAt) || toIso(right.updatedAt) || 0).getTime()
+    const leftTs = new Date(
+      toIso(left.startAt) || toIso(left.endAt) || toIso(left.dayStartAt) || toIso(left.dayEndAt) || toIso(left.updatedAt) || 0,
+    ).getTime()
+    const rightTs = new Date(
+      toIso(right.startAt) || toIso(right.endAt) || toIso(right.dayStartAt) || toIso(right.dayEndAt) || toIso(right.updatedAt) || 0,
+    ).getTime()
     return rightTs - leftTs
   })
 }
@@ -871,6 +896,100 @@ function findClientByTextHints(lookupMaps, hints = []) {
   return null
 }
 
+function extractQrCodesFromText(value) {
+  const text = sanitizeTextValue(value)
+  if (!text) {
+    return []
+  }
+
+  const codes = []
+  const regex = /\b([A-Z]{1,6}\d{2,}[A-Z0-9-]*)\b/gi
+  let match = regex.exec(text)
+  while (match) {
+    const code = String(match?.[1] ?? '')
+      .trim()
+      .toUpperCase()
+    if (code && !codes.includes(code)) {
+      codes.push(code)
+    }
+    match = regex.exec(text)
+  }
+
+  return codes
+}
+
+function extractQrCodeByPhase(value, phase) {
+  const text = sanitizeTextValue(value)
+  if (!text) {
+    return ''
+  }
+
+  const normalizedPhase = String(phase ?? '').trim().toLowerCase() === 'start' ? 'start' : 'stop'
+  const regex =
+    normalizedPhase === 'start'
+      ? /(START|QR\s*START|START_QR)\s*[:=-]?\s*([A-Z0-9-]{3,})/i
+      : /(STOP|QR\s*STOP|STOP_QR)\s*[:=-]?\s*([A-Z0-9-]{3,})/i
+  const match = text.match(regex)
+  if (match?.[2]) {
+    return String(match[2]).trim().toUpperCase()
+  }
+
+  return ''
+}
+
+function findZoneByCode(lookupMaps, code) {
+  const text = sanitizeTextValue(code)
+  if (!lookupMaps || !text) {
+    return null
+  }
+
+  const normalized = normalizeLookupKey(text)
+  return (
+    lookupMaps.zoneById.get(text) ||
+    lookupMaps.zoneByNormalizedId.get(normalized) ||
+    lookupMaps.zoneByNormalizedName.get(normalized) ||
+    null
+  )
+}
+
+function resolveClientFromZone(lookupMaps, zone) {
+  const zoneClientId = sanitizeTextValue(zone?.clientId)
+  if (!lookupMaps || !zoneClientId) {
+    return null
+  }
+
+  const normalizedClientId = normalizeLookupKey(zoneClientId)
+  return (
+    lookupMaps.clientById.get(zoneClientId) ||
+    lookupMaps.clientByNormalizedId.get(normalizedClientId) ||
+    lookupMaps.clientByNormalizedName.get(normalizedClientId) ||
+    null
+  )
+}
+
+function resolveClientFromQrHints(lookupMaps, hints = []) {
+  if (!lookupMaps || !Array.isArray(hints) || !hints.length) {
+    return null
+  }
+
+  for (const hint of hints) {
+    const directCode = sanitizeTextValue(hint)
+    const codes = directCode ? [directCode, ...extractQrCodesFromText(directCode)] : []
+    for (const code of codes) {
+      const zone = findZoneByCode(lookupMaps, code)
+      if (!zone) {
+        continue
+      }
+      const client = resolveClientFromZone(lookupMaps, zone)
+      if (client) {
+        return client
+      }
+    }
+  }
+
+  return null
+}
+
 function pickClosestWorkerCandidate(candidates, eventStartAt) {
   if (!Array.isArray(candidates) || candidates.length === 0) {
     return null
@@ -916,31 +1035,53 @@ function mapWorkday(orgId, row, lookupMaps) {
       row?.zone?.ZoneId ??
       row?.zone?.zoneId,
   )
-  const roomId = sanitizeTextValue(
+  let roomId = sanitizeTextValue(
     row.zoneId ?? row.utilityRoomId ?? row.roomId ?? workdayUtilityRoomId ?? row.zone?.ZoneId ?? row.zone?.zoneId,
   )
-  const normalizedRoomId = normalizeLookupKey(roomId)
+  let normalizedRoomId = normalizeLookupKey(roomId)
   const startAt = toIso(row.startAt)
   const endAt = toIso(row.endAt)
   const rawStartObject = sanitizeTextValue(row?.startObject)
   const rawStopObject = sanitizeTextValue(row?.stopObject)
-  const dayStartAt = toIso(row?.workday?.startAt ?? linkedWorkday?.startAt)
-  const dayEndAt = toIso(row?.workday?.endAt ?? linkedWorkday?.endAt)
+  const dayStartAt = toIso(row?.workday?.startAt ?? linkedWorkday?.startAt ?? row?.startAt)
+  const dayEndScanAt = toIso(row?.workday?.endScanAt ?? linkedWorkday?.endScanAt ?? row?.endScanAt)
+  const dayEndAt = toIso(row?.workday?.endAt ?? linkedWorkday?.endAt ?? row?.endAt ?? dayEndScanAt)
   const dayGps = sanitizeTextValue(row?.workday?.gps ?? linkedWorkday?.gps ?? row?.gps)
-  const dayStartObject = sanitizeTextValue(row?.workday?.startObject ?? linkedWorkday?.startObject ?? rawStartObject)
-  const dayStopObject = sanitizeTextValue(row?.workday?.stopObject ?? linkedWorkday?.stopObject ?? rawStopObject)
+  const dayStartObjectRaw = sanitizeTextValue(
+    row?.workday?.startObject ?? linkedWorkday?.startObject ?? rawStartObject,
+  )
+  const dayStopObjectRaw = sanitizeTextValue(row?.workday?.stopObject ?? linkedWorkday?.stopObject ?? rawStopObject)
   const dayComment = sanitizeTextValue(row?.workday?.comment ?? linkedWorkday?.comment ?? row?.comment)
+  const dayStartQrFromComment = extractQrCodeByPhase(dayComment, 'start')
+  const dayStopQrFromComment = extractQrCodeByPhase(dayComment, 'stop')
+  const commentQrHints = extractQrCodesFromText(dayComment)
+  const dayStartObject = sanitizeTextValue(
+    pickFirstText(dayStartObjectRaw, dayStartQrFromComment, commentQrHints[0]),
+  )
+  const dayStopObject = sanitizeTextValue(pickFirstText(dayStopObjectRaw, dayStopQrFromComment, commentQrHints[0]))
+  roomId = sanitizeTextValue(pickFirstText(roomId, dayStartObject, dayStopObject, commentQrHints[0]))
+  normalizedRoomId = normalizeLookupKey(roomId)
   const durationSec = calculateDuration(row)
-  const zoneFromRow = row?.zone
-      ? {
-        id: sanitizeTextValue(row.zone.ZoneId ?? row.zone.zoneId ?? row.zoneId ?? roomId),
-        clientId: sanitizeTextValue(row.zone.client?.clientId ?? row.clientId),
-        name: sanitizeTextValue(row.zone.zone),
-        zone: sanitizeTextValue(row.zone.zone),
-        location: sanitizeTextValue(row.zone.location),
-        workerLogin: sanitizeTextValue(row.zone.workerLogin),
-        workerName: sanitizeTextValue(pickWorkerNameValue(row.zone.worker)),
-      }
+  const fallbackZoneNameFromRow = sanitizeTextValue(
+    pickFirstText(row?.strefa, row?.zoneName, row?.zoneLabel, row?.zone?.zone, row?.zone?.name),
+  )
+  const fallbackZoneLocationFromRow = sanitizeTextValue(
+    pickFirstText(row?.lokalizacja, row?.location, row?.zone?.location),
+  )
+  const fallbackClientNameFromRow = sanitizeTextValue(
+    pickFirstText(row?.pomieszczenie, row?.clientName, row?.klient, row?.client?.name, row?.zone?.client?.name),
+  )
+  const zoneFromRowRaw = {
+    id: sanitizeTextValue(row?.zone?.ZoneId ?? row?.zone?.zoneId ?? row?.zoneId ?? roomId),
+    clientId: sanitizeTextValue(row?.zone?.client?.clientId ?? row?.clientId),
+    name: sanitizeTextValue(pickFirstText(row?.zone?.zone, row?.zone?.name, fallbackZoneNameFromRow)),
+    zone: sanitizeTextValue(pickFirstText(row?.zone?.zone, row?.zone?.name, fallbackZoneNameFromRow)),
+    location: sanitizeTextValue(pickFirstText(row?.zone?.location, fallbackZoneLocationFromRow)),
+    workerLogin: sanitizeTextValue(row?.zone?.workerLogin),
+    workerName: sanitizeTextValue(pickWorkerNameValue(row?.zone?.worker)),
+  }
+  const zoneFromRow = Object.values(zoneFromRowRaw).some((value) => mappedItemHasValue(value))
+    ? zoneFromRowRaw
     : null
 
   const zoneFromLookup =
@@ -962,6 +1103,11 @@ function mapWorkday(orgId, row, lookupMaps) {
           id: sanitizeTextValue(row.zone.client.clientId),
           name: sanitizeTextValue(row.zone.client.name),
         }
+      : fallbackClientNameFromRow
+        ? {
+            id: sanitizeTextValue(row.clientId),
+            name: fallbackClientNameFromRow,
+          }
       : null
 
   const clientFromZone =
@@ -981,13 +1127,42 @@ function mapWorkday(orgId, row, lookupMaps) {
     dayStopObject,
     rawStartObject,
     rawStopObject,
+    dayComment,
+    row?.comment,
+  ])
+  const clientFromQrHints = resolveClientFromQrHints(lookupMaps, [
+    dayStartObject,
+    dayStopObject,
+    ...commentQrHints,
+    roomId,
+    workdayUtilityRoomId,
+    rawStartObject,
+    rawStopObject,
   ])
 
-  const client = clientFromEvent || clientFromZone || clientFromRoomId || clientFromObjectHints || null
+  const client =
+    clientFromEvent || clientFromZone || clientFromRoomId || clientFromQrHints || clientFromObjectHints || null
   const resolvedClientId = sanitizeTextValue(
-    row.clientId ?? zone?.clientId ?? clientFromRoomId?.id ?? clientFromObjectHints?.id,
+    pickFirstText(
+      row.clientId,
+      zone?.clientId,
+      client?.id,
+      clientFromRoomId?.id,
+      clientFromQrHints?.id,
+      clientFromObjectHints?.id,
+    ),
   )
-  const resolvedClientName = sanitizeTextValue(client?.name ?? clientFromObjectHints?.name ?? resolvedClientId)
+  const resolvedClientName = sanitizeTextValue(
+    pickFirstText(
+      client?.name,
+      fallbackClientNameFromRow,
+      clientFromQrHints?.name,
+      clientFromObjectHints?.name,
+      resolvedClientId,
+    ),
+  )
+  const resolvedZoneName = sanitizeTextValue(pickFirstText(zone?.name, zone?.zone, fallbackZoneNameFromRow))
+  const resolvedZoneLocation = sanitizeTextValue(pickFirstText(zone?.location, fallbackZoneLocationFromRow))
   const eventDayKey = toLocalDayKey(startAt || endAt)
   const roomDayKey = normalizedRoomId && eventDayKey ? `${normalizedRoomId}|${eventDayKey}` : ''
   const inferredFromRoomDay = roomDayKey
@@ -1035,7 +1210,9 @@ function mapWorkday(orgId, row, lookupMaps) {
       inferredWorker?.workerLogin,
       linkedWorkday?.workerLogin,
     ) || null
-  const status = normalizeStatus(row.status, Boolean(endAt))
+  const hasStop = Boolean(endAt || (!rawEventId && dayEndAt))
+  const status = normalizeStatus(row.status, hasStop)
+  const stopIsoForView = endAt || (!rawEventId ? dayEndAt : '')
   const workerNameFromWorker = pickFirstText(
     pickWorkerNameValue(worker),
     pickWorkerNameValue(workerFromName),
@@ -1056,16 +1233,17 @@ function mapWorkday(orgId, row, lookupMaps) {
     roomId,
     utilityRoomId: roomId,
     zoneId: roomId,
-    strefa: sanitizeTextValue(zone?.name ?? zone?.zone),
-    zoneName: sanitizeTextValue(zone?.name ?? zone?.zone),
+    strefa: sanitizeTextValue(resolvedZoneName || '-'),
+    zoneName: sanitizeTextValue(resolvedZoneName || '-'),
     clientId: resolvedClientId,
     klient: sanitizeTextValue(resolvedClientName || '-'),
     clientName: sanitizeTextValue(resolvedClientName || '-'),
-    lokalizacja: sanitizeTextValue(zone?.location ?? '-'),
+    lokalizacja: sanitizeTextValue(resolvedZoneLocation || '-'),
     startAt,
     endAt,
     dayStartAt,
     dayEndAt,
+    dayEndScanAt,
     dayGps,
     dayStartObject,
     dayStopObject,
@@ -1073,7 +1251,7 @@ function mapWorkday(orgId, row, lookupMaps) {
     dayComment,
     date: formatDatePl(startAt || endAt),
     start: formatTime(startAt),
-    stop: formatTime(endAt),
+    stop: formatTime(stopIsoForView),
     durationSec,
     duration: durationToHms(durationSec),
     status,
@@ -1088,7 +1266,7 @@ function mapWorkday(orgId, row, lookupMaps) {
     endEventId: sanitizeTextValue(row.endEventId),
     editedBy: sanitizeTextValue(row.updatedBy),
     updatedAt: toIso(row.updatedAt),
-    dayKey: toLocalDayKey(startAt || endAt),
+    dayKey: toLocalDayKey(startAt || endAt || dayStartAt || dayEndAt),
   }
 }
 
@@ -1099,7 +1277,7 @@ function isDisplayableMappedItem(item) {
   const zoneId = String(item?.zoneId ?? item?.roomId ?? '').trim()
   const zoneName = String(item?.zoneName ?? item?.strefa ?? '').trim()
   const clientName = String(item?.clientName ?? item?.klient ?? '').trim()
-  const hasTime = Boolean(item?.startAt || item?.endAt || Number(item?.durationSec) > 0)
+  const hasTime = Boolean(item?.startAt || item?.endAt || item?.dayStartAt || item?.dayEndAt || Number(item?.durationSec) > 0)
   const hasContext = Boolean(zoneId || zoneName || clientName)
   const hasWorker = Boolean(workerLogin || workerName)
   const hasErrorPayload = looksLikeSerializedError(workerLogin) || looksLikeSerializedError(workerName)
@@ -1215,7 +1393,16 @@ async function fetchMappedBackupCycles(orgId) {
 }
 
 function mappedItemIdentity(item, fallback = '') {
-  return String(item?.workdayId ?? item?.eventId ?? item?.id ?? fallback).trim()
+  const baseId = String(item?.workdayId ?? item?.eventId ?? item?.id ?? fallback).trim()
+  if (!baseId) {
+    return ''
+  }
+
+  const startAt = toIso(item?.startAt)
+  const endAt = toIso(item?.endAt)
+  const role = startAt && !endAt ? 'start' : !startAt && endAt ? 'stop' : 'cycle'
+
+  return `${baseId}|${role}|${startAt || ''}|${endAt || ''}`
 }
 
 function mappedItemHasValue(value) {
@@ -1362,6 +1549,8 @@ async function fetchMappedEvents(orgId) {
 
   ensureFirebase()
   let mappedEvents = []
+  let mappedWorkdays = []
+  let mappedBackupCycles = []
   if (!eventsForOrgUnavailable) {
     try {
       const response = await runQueryOperation('EventsForOrg', { orgId })
@@ -1381,26 +1570,42 @@ async function fetchMappedEvents(orgId) {
 
   // Always include workdays - new edits are written there and can appear earlier than EventsForOrg.
   try {
-    const mappedWorkdays = await fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg')
-    if (mappedEvents.length && mappedWorkdays.length) {
-      return mergeMappedEventCollections(mappedEvents, mappedWorkdays)
-        .filter((item) => isDisplayableMappedItem(item))
-    }
-    if (mappedWorkdays.length) {
-      return mappedWorkdays
-    }
+    mappedWorkdays = await fetchMappedWorkdays(orgId, workdaysForOrg({ orgId }), 'WorkdaysForOrg')
   } catch (error) {
     if (!isOperationNotFoundError(error, 'WorkdaysForOrg')) {
       throw error
     }
   }
 
-  if (mappedEvents.length) {
-    return mappedEvents
+  // Fallback to backup cycles only when events source is unavailable/empty.
+  const shouldUseBackupFallback = eventsForOrgUnavailable || !mappedEvents.length
+  if (shouldUseBackupFallback) {
+    try {
+      mappedBackupCycles = await fetchMappedBackupCycles(orgId)
+    } catch (error) {
+      if (!isOperationNotFoundError(error, 'BackupCyclesForOrg')) {
+        throw error
+      }
+    }
   }
 
-  // Last fallback for older environments.
-  return fetchMappedBackupCycles(orgId)
+  const collections = [mappedEvents, mappedWorkdays]
+  if (!mappedEvents.length && mappedBackupCycles.length) {
+    collections.push(mappedBackupCycles)
+  }
+  const nonEmptyCollections = collections.filter((items) => Array.isArray(items) && items.length)
+  if (!nonEmptyCollections.length) {
+    return []
+  }
+
+  const merged = nonEmptyCollections.reduce((acc, items) => {
+    if (!acc.length) {
+      return items
+    }
+    return mergeMappedEventCollections(acc, items)
+  }, [])
+
+  return merged.filter((item) => isDisplayableMappedItem(item))
 }
 
 async function resolveWorkerLoginHint(orgId, filters = {}) {
@@ -1826,7 +2031,45 @@ export async function getTodayActiveWorkers(orgId) {
     }
   })
 
-  ;[...uniqueRows.values()]
+  const mergedRows = [...uniqueRows.values()]
+  const rowsById = new Map()
+  mergedRows.forEach((row) => {
+    const rowId = String(row?.eventId ?? row?.workdayId ?? row?.id ?? '').trim()
+    if (rowId) {
+      rowsById.set(rowId, row)
+    }
+  })
+  const enrichedRows = mergedRows.map((row) => {
+    const workerLogin = String(row?.workerLogin ?? '').trim()
+    const workerName = String(row?.workerName ?? '').trim()
+    if (workerLogin || workerName) {
+      return row
+    }
+
+    const linkedEventId = String(row?.startEventId ?? row?.endEventId ?? '').trim()
+    if (!linkedEventId) {
+      return row
+    }
+
+    const linked = rowsById.get(linkedEventId)
+    if (!linked) {
+      return row
+    }
+
+    const linkedLogin = String(linked?.workerLogin ?? '').trim()
+    const linkedName = String(linked?.workerName ?? '').trim()
+    if (!linkedLogin && !linkedName) {
+      return row
+    }
+
+    return {
+      ...row,
+      workerLogin: workerLogin || linkedLogin,
+      workerName: workerName || linkedName,
+    }
+  })
+
+  ;enrichedRows
     .filter((item) => isItemFromLocalDay(item, day))
     .forEach((item) => {
       const bucket = resolveBucket(item)
@@ -1997,14 +2240,14 @@ export async function getDashboardSummary(orgId) {
 
   const openWorkers = new Set(
     items
-      .filter((item) => !item.endAt && normalizeStatus(item.status, Boolean(item.endAt)) !== 'CLOSED')
+      .filter((item) => !item.endAt && !item.dayEndAt && normalizeStatus(item.status, Boolean(item.endAt || item.dayEndAt)) !== 'CLOSED')
       .map((item) => resolveDisplayName(item.workerLogin, item.workerName))
       .filter(Boolean),
   )
 
   const over9Workers = new Set(
     items
-      .filter((item) => Boolean(item.endAt) && Number(item.durationSec) > NINE_HOURS_SECONDS)
+      .filter((item) => Boolean(item.endAt || item.dayEndAt) && Number(item.durationSec) > NINE_HOURS_SECONDS)
       .map((item) => resolveDisplayName(item.workerLogin, item.workerName))
       .filter(Boolean),
   )
