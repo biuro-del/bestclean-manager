@@ -25,6 +25,8 @@ const routeGroups = {
   workerTimeDetail: 'workers',
   workerProfile: 'workers',
   reports: 'reports',
+  settingsStyles: 'settings',
+  settingsBackup: 'settings',
 }
 
 function setActiveRoute(route) {

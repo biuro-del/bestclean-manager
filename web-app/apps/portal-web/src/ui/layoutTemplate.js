@@ -186,11 +186,17 @@
             <span class="mi-label">Ustawienia</span><span class="chev">▼</span>
           </button>
           <div class="submenu" id="submenu-settings">
-            <button class="submenu-item" data-route="settings" type="button">
+            <button class="submenu-item" data-route="settingsStyles" type="button">
               <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h10M4 17h16M14 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM8 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l2.3 4.7 5.2.8-3.8 3.7.9 5.2L12 15.8l-4.6 2.5.9-5.2-3.8-3.7 5.2-.8L12 3z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
               </span>
-              <span class="mi-label">Ustawienia</span>
+              <span class="mi-label">Style</span>
+            </button>
+            <button class="submenu-item" data-route="settingsBackup" type="button">
+              <span class="mi-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 7a2 2 0 0 1 2-2h9l5 5v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 5v5h5M8 14h8M8 17h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </span>
+              <span class="mi-label">Kopia zapasowa</span>
             </button>
           </div>
         </div>
@@ -198,9 +204,6 @@
 
       <main class="main">
         <section id="view-dashboard">
-          <h1 class="welcome">Pulpit</h1>
-          <p class="subwelcome">Widok startowy portalu.</p>
-
           <div class="dash-grid">
             <div class="card dash-pulse dash-overview-panel">
               <div class="card-title-row">
@@ -252,29 +255,38 @@
               </div>
             </div>
 
-            <aside class="card dash-goals dash-side-panel">
+            <aside class="card dash-goals dash-side-panel dash-schedule-panel">
               <div class="card-title-row">
-                <div class="card-title">Szybkie przejścia</div>
+                <div class="card-title">Grafik dnia</div>
+                <button
+                  class="btn2 secondary dash-refresh-btn dash-refresh-btn--icon"
+                  id="dashScheduleRefreshBtn"
+                  type="button"
+                  aria-label="Odśwież grafik dnia"
+                  title="Odśwież grafik dnia"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M20 6v6h-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M4 18v-6h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M7.5 9a7 7 0 0 1 11-2.5L20 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M16.5 15a7 7 0 0 1-11 2.5L4 16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
               </div>
 
-              <div class="dash-side-group">
-                <div class="mini-actions">
-                  <button class="mini-link" type="button" data-route="events">Zdarzenia</button>
-                  <button class="mini-link" type="button" data-route="schedule">Grafik pracy</button>
-                  <button class="mini-link" type="button" data-route="workerTime">Czas pracy</button>
+              <div class="dash-schedule-sync" id="dashScheduleSync">Ostatnia synchronizacja: -</div>
+
+              <div class="dash-schedule-daybar">
+                <button class="btn2 dash-schedule-nav" id="dashSchedulePrevBtn" type="button" aria-label="Poprzedni dzień">&lt;</button>
+                <div class="dash-schedule-dayinfo">
+                  <div class="dash-schedule-dayname" id="dashScheduleDayName">-</div>
+                  <div class="dash-schedule-daydate" id="dashScheduleDayDate">-</div>
                 </div>
+                <button class="btn2 dash-schedule-nav" id="dashScheduleNextBtn" type="button" aria-label="Następny dzień">&gt;</button>
               </div>
 
-              <div class="dash-side-group">
-                <div class="card-title-row">
-                  <div class="card-title">Najczęściej używane</div>
-                </div>
-                <div class="mini-actions">
-                  <button class="mini-link" type="button" data-route="clientsList">Lista klientów</button>
-                  <button class="mini-link" type="button" data-route="zones">Strefy</button>
-                  <button class="mini-link" type="button" data-route="reports">Zestawienia</button>
-                </div>
-                <p class="dash-side-note">Układ paneli jest zoptymalizowany pod duże ekrany i responsywny na mniejszych.</p>
+              <div class="dash-schedule-cards" id="dashScheduleCards">
+                <div class="dash-schedule-empty">Wczytywanie grafiku...</div>
               </div>
             </aside>
           </div>
