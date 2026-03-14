@@ -1,5 +1,6 @@
 ﻿const routeToViewId = {
   dashboard: 'view-dashboard',
+  schedule: 'view-schedule',
   events: 'view-events',
   zones: 'view-zones',
   workerProfile: 'view-workerProfile',
@@ -11,6 +12,9 @@
   clientProfile: 'view-clientProfile',
   checklists: 'view-checklists',
   reports: 'view-reports',
+  settings: 'view-settings',
+  settingsStyles: 'view-settings',
+  settingsBackup: 'view-settings',
 }
 
 const routeGroups = {
@@ -25,6 +29,9 @@ const routeGroups = {
   workerTimeDetail: 'workers',
   workerProfile: 'workers',
   reports: 'reports',
+  settings: 'settings',
+  settingsStyles: 'settings',
+  settingsBackup: 'settings',
 }
 
 function setActiveRoute(route) {

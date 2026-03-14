@@ -186,11 +186,17 @@
             <span class="mi-label">Ustawienia</span><span class="chev">▼</span>
           </button>
           <div class="submenu" id="submenu-settings">
-            <button class="submenu-item" data-route="settings" type="button">
+            <button class="submenu-item" data-route="settingsStyles" type="button">
               <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h10M4 17h16M14 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM8 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l2.3 4.7 5.2.8-3.8 3.7.9 5.2L12 15.8l-4.6 2.5.9-5.2-3.8-3.7 5.2-.8L12 3z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
               </span>
-              <span class="mi-label">Ustawienia</span>
+              <span class="mi-label">Style</span>
+            </button>
+            <button class="submenu-item" data-route="settingsBackup" type="button">
+              <span class="mi-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 7a2 2 0 0 1 2-2h9l5 5v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 5v5h5M8 14h8M8 17h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </span>
+              <span class="mi-label">Kopia zapasowa</span>
             </button>
           </div>
         </div>
@@ -198,27 +204,48 @@
 
       <main class="main">
         <section id="view-dashboard">
-          <h1 class="welcome">Pulpit</h1>
-          <p class="subwelcome">Widok startowy portalu.</p>
-
           <div class="dash-grid">
             <div class="card dash-pulse dash-overview-panel">
               <div class="card-title-row">
                 <div class="card-title">Przegląd</div>
               </div>
 
-              <div class="dash-summary">
-                <button class="sum-block" id="sumOpenBlock" type="button">
-                  <div class="sum-num" id="sumOpenCount">-</div>
-                  <div class="sum-label">Otwarte zdarzenia (brak STOP)</div>
-                  <div class="sum-sub" id="sumOpenNames"></div>
-                </button>
+              <div class="dash-summary" id="dashSummaryTables">
+                <div class="dash-summary-table" aria-label="Tabela 1">
+                  <div class="dash-summary-table-title">Dzień dzisiejszy</div>
+                  <div class="dash-summary-table-rows">
+                    <button class="dash-summary-row" type="button" data-dash-metric="activeNow">
+                      <span class="dash-summary-row-label">Aktywni teraz</span>
+                      <span class="dash-summary-row-value" id="sumActiveNowCount">0</span>
+                    </button>
+                    <button class="dash-summary-row" type="button" data-dash-metric="finishedToday">
+                      <span class="dash-summary-row-label">Zakończone (START + STOP)</span>
+                      <span class="dash-summary-row-value" id="sumFinishedTodayCount">0</span>
+                    </button>
+                    <div class="dash-summary-row dash-summary-row--static">
+                      <span class="dash-summary-row-label">Suma godzin</span>
+                      <span class="dash-summary-row-value" id="sumTotalHoursToday">00:00</span>
+                    </div>
+                  </div>
+                </div>
 
-                <button class="sum-block" id="sumOver9Block" type="button">
-                  <div class="sum-num" id="sumOver9Count">-</div>
-                  <div class="sum-label">Przekroczone 9h (zakończone dni)</div>
-                  <div class="sum-sub" id="sumOver9Names"></div>
-                </button>
+                <div class="dash-summary-table" aria-label="Tabela 2">
+                  <div class="dash-summary-table-title">Błędy w systemie</div>
+                  <div class="dash-summary-table-rows">
+                    <button class="dash-summary-row" type="button" data-dash-metric="openStartStopYesterday">
+                      <span class="dash-summary-row-label">Nie zamknięte START-STOP (do wczoraj)</span>
+                      <span class="dash-summary-row-value" id="sumOpenStartStopYesterdayCount">0</span>
+                    </button>
+                    <button class="dash-summary-row" type="button" data-dash-metric="openCleanYesterday">
+                      <span class="dash-summary-row-label">Nie zamknięte CLEAN (do wczoraj)</span>
+                      <span class="dash-summary-row-value" id="sumOpenCleanYesterdayCount">0</span>
+                    </button>
+                    <button class="dash-summary-row" type="button" data-dash-metric="cleanTooLong">
+                      <span class="dash-summary-row-label">CLEAN &gt; 1,5h (wczoraj + dziś)</span>
+                      <span class="dash-summary-row-value" id="sumCleanTooLongCount">0</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -226,7 +253,20 @@
               <div class="card-title-row">
                 <div class="card-title">Aktywni w dniu dzisiejszym</div>
                 <div class="dash-activity-actions">
-                  <button class="btn2 secondary dash-refresh-btn" id="dashRefreshBtn" type="button">Odśwież</button>
+                  <button
+                    class="btn2 secondary dash-refresh-btn dash-refresh-btn--icon"
+                    id="dashRefreshBtn"
+                    type="button"
+                    aria-label="Odśwież pulpit"
+                    title="Odśwież pulpit"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M20 6v6h-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M4 18v-6h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M7.5 9a7 7 0 0 1 11-2.5L20 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M16.5 15a7 7 0 0 1-11 2.5L4 16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </button>
                   <span class="pill" id="dashEventsPill">0</span>
                 </div>
               </div>
@@ -238,48 +278,67 @@
                   <div>Wpisy</div>
                   <div>Klient</div>
                   <div>Aktywna strefa</div>
-                  <div>Lokalizacja strefy</div>
                   <div class="ta-right">Czas</div>
                 </div>
 
                 <div class="list dash-events-list" id="dashEventsList">
                   <div class="list-row dash-events-row">
                     <div class="muted">-</div><div class="muted">-</div><div class="muted">-</div>
-                    <div class="muted">-</div><div class="muted">-</div>
+                    <div class="muted">-</div>
                     <div class="muted ta-right">-</div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <aside class="card dash-goals dash-side-panel">
+            <aside class="card dash-goals dash-side-panel dash-schedule-panel">
               <div class="card-title-row">
-                <div class="card-title">Szybkie przejścia</div>
+                <div class="card-title">Grafik dnia</div>
+                <button
+                  class="btn2 secondary dash-refresh-btn dash-refresh-btn--icon"
+                  id="dashScheduleRefreshBtn"
+                  type="button"
+                  aria-label="Odśwież grafik dnia"
+                  title="Odśwież grafik dnia"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M20 6v6h-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M4 18v-6h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M7.5 9a7 7 0 0 1 11-2.5L20 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M16.5 15a7 7 0 0 1-11 2.5L4 16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
               </div>
 
-              <div class="dash-side-group">
-                <div class="mini-actions">
-                  <button class="mini-link" type="button" data-route="events">Zdarzenia</button>
-                  <button class="mini-link" type="button" data-route="schedule">Grafik pracy</button>
-                  <button class="mini-link" type="button" data-route="workerTime">Czas pracy</button>
-                </div>
+              <div class="dash-schedule-sync" id="dashScheduleSync">Ostatnia synchronizacja: -</div>
+              <div class="dash-schedule-legend" aria-label="Legenda kolorów grafiku">
+                <span class="dash-schedule-legend-item is-missing-start">Czerwony: brak START</span>
+                <span class="dash-schedule-legend-item is-upcoming">Niebieski: start do 1h</span>
+                <span class="dash-schedule-legend-item is-started">Zielony: QR START</span>
               </div>
 
-              <div class="dash-side-group">
-                <div class="card-title-row">
-                  <div class="card-title">Najczęściej używane</div>
+              <div class="dash-schedule-daybar">
+                <button class="btn2 dash-schedule-nav" id="dashSchedulePrevBtn" type="button" aria-label="Poprzedni dzień">&lt;</button>
+                <div class="dash-schedule-dayinfo">
+                  <div class="dash-schedule-dayname" id="dashScheduleDayName">-</div>
+                  <div class="dash-schedule-daydate" id="dashScheduleDayDate">-</div>
                 </div>
-                <div class="mini-actions">
-                  <button class="mini-link" type="button" data-route="clientsList">Lista klientów</button>
-                  <button class="mini-link" type="button" data-route="zones">Strefy</button>
-                  <button class="mini-link" type="button" data-route="reports">Zestawienia</button>
-                </div>
-                <p class="dash-side-note">Układ paneli jest zoptymalizowany pod duże ekrany i responsywny na mniejszych.</p>
+                <button class="btn2 dash-schedule-nav" id="dashScheduleNextBtn" type="button" aria-label="Następny dzień">&gt;</button>
+              </div>
+
+              <div class="dash-schedule-cards" id="dashScheduleCards">
+                <div class="dash-schedule-empty">Wczytywanie grafiku...</div>
               </div>
             </aside>
           </div>
+
+          <div class="dash-metric-popover" id="dashMetricPopover" style="display:none;" role="dialog" aria-live="polite">
+            <div class="dash-metric-popover-title" id="dashMetricPopoverTitle">Szczegóły</div>
+            <div class="dash-metric-popover-list" id="dashMetricPopoverList"></div>
+          </div>
         </section>
 
+        <section id="view-schedule" style="display:none;"></section>
         <section id="view-events" style="display:none;"></section>
         <section id="view-zones" style="display:none;"></section>
         <section id="view-workerProfile" style="display:none;"></section>
@@ -291,6 +350,7 @@
         <section id="view-clientProfile" style="display:none;"></section>
         <section id="view-checklists" style="display:none;"></section>
         <section id="view-reports" style="display:none;"></section>
+        <section id="view-settings" style="display:none;"></section>
 
         <section id="view-placeholder" style="display:none !important;">
           <h1 class="welcome" id="phTitle">W budowie</h1>
