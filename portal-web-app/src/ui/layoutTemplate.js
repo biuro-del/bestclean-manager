@@ -5,7 +5,7 @@
       <div class="login-logo">
         <img src="/vite.svg" alt="FIDO iClean" />
       </div>
-      <div class="login-title">PORTAL</div>
+      <div class="login-title">iClean - PORTAL</div>
     </div>
 
     <div class="login-field">
@@ -32,7 +32,7 @@
           <img src="/vite.svg" alt="FIDO iClean" />
         </div>
         <div class="brand">
-          <div class="brand-title">PORTAL @SK</div>
+          <div class="brand-title">iClean - PORTAL</div>
         </div>
       </div>
 

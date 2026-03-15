@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Sora:wght@700;800&display=swap');
+
 :root{
     /* Theme: blue + green */
     --bg:#f3f7ff;
@@ -73,8 +75,10 @@
 
   .brand{ min-width: 0; }
   .brand-title{
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 800;
+    font-family: "Sora", "Trebuchet MS", "Segoe UI", sans-serif;
+    letter-spacing: .25px;
     line-height: 1.1;
     margin: 0;
     white-space: nowrap;
@@ -283,7 +287,13 @@
     width: 100%;
   }
   .login-logo img{ height: 46px; width: auto; display:block; }
-  .login-title{ font-size: 18px; font-weight: 900; letter-spacing: .2px; }
+  .login-title{
+    font-size: 20px;
+    font-weight: 800;
+    font-family: "Sora", "Trebuchet MS", "Segoe UI", sans-serif;
+    letter-spacing: .25px;
+    color: #0f254e;
+  }
 
   .login-field{ display:flex; flex-direction: column; gap: 6px; margin-top: 10px; }
   .login-field label{ font-size: 12px; color: var(--muted2); font-weight: 800; }
@@ -6172,5 +6182,6 @@ textarea:focus{
   }
 
 }
+
 
 
