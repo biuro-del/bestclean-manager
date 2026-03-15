@@ -4577,7 +4577,7 @@ function renderEventsRows(rows) {
   if (!safeRows.length) {
     root.innerHTML = `
       <div class="events-row">
-        <div></div><div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+        <div></div><div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
       </div>
     `
     syncEventsSelectionUi()
@@ -4593,8 +4593,6 @@ function renderEventsRows(rows) {
       const commentCell = comment
         ? `<button class="btn2" type="button" data-event-comment="${index}" title="Pokaz komentarz">💬</button>`
         : ''
-      const typeInfo = eventTypeInfo(row)
-      const typeBadge = `<span class="event-type-badge ${escapeHtml(typeInfo.className)}">${escapeHtml(typeInfo.label)}</span>`
       const workerLogin = String(row.workerLogin ?? '').trim()
       const workerName = resolveWorkerNameFromWorkers(workerLogin, row.workerName)
       const workerPrimary = workerName || workerLogin || '-'
@@ -4628,6 +4626,9 @@ function renderEventsRows(rows) {
         zoneLabel === '-'
           ? '-'
           : `<button class="events-cell-link" type="button" data-event-history-zone="${index}" title="Pokaz historie strefy">${escapeHtml(zoneLabel)}</button>`
+      const startLabel = dashboardClockLabelToHm(row.start, '-')
+      const stopLabel = dashboardClockLabelToHm(row.stop, '-')
+      const durationLabel = dashboardDurationLabelToHm(row.duration, '00:00')
 
       return `
         <div class="events-row${isSelected ? ' is-selected' : ''}">
@@ -4639,10 +4640,9 @@ function renderEventsRows(rows) {
           <div>${zoneCell}</div>
           <div>${escapeHtml(row.lokalizacja || '-')}</div>
           <div class="mono">${escapeHtml(row.date || '-')}</div>
-          <div class="mono time-start">${escapeHtml(row.start || '-')}</div>
-          <div class="mono time-stop">${escapeHtml(row.stop || '-')}</div>
-          <div class="mono time-duration">${escapeHtml(row.duration || '-')}</div>
-          <div>${typeBadge}</div>
+          <div class="mono time-start">${escapeHtml(startLabel)}</div>
+          <div class="mono time-stop">${escapeHtml(stopLabel)}</div>
+          <div class="mono time-duration">${escapeHtml(durationLabel)}</div>
           <div>${commentCell}</div>
           <div>${escapeHtml(row.editedBy || '-')}</div>
           <div>
@@ -5585,7 +5585,7 @@ async function fetchEventsForCurrentSession({ resetPage = false, applyStoredFilt
     if (root) {
       root.innerHTML = `
         <div class="events-row">
-          <div></div><div>Brak aktywnej sesji.</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+          <div></div><div>Brak aktywnej sesji.</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
         </div>
       `
     }
@@ -5611,7 +5611,7 @@ async function fetchEventsForCurrentSession({ resetPage = false, applyStoredFilt
   if (root) {
     root.innerHTML = `
       <div class="events-row">
-        <div></div><div>Ładowanie danych...</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+        <div></div><div>Ładowanie danych...</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
       </div>
     `
   }
@@ -5636,7 +5636,7 @@ async function fetchEventsForCurrentSession({ resetPage = false, applyStoredFilt
     if (root) {
       root.innerHTML = `
         <div class="events-row">
-          <div></div><div style="color:#ef4444;">${escapeHtml(message)}</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+          <div></div><div style="color:#ef4444;">${escapeHtml(message)}</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
         </div>
       `
     }
@@ -12020,9 +12020,11 @@ function bindEventsViewFunctions() {
     headSelector: '#view-events .events-head',
     cssVarName: '--events-grid',
     storageKey: 'portal.grid.events',
-    defaultWidths: [36, 170, 180, 160, 160, 106, 92, 92, 104, 128, 90, 120, 56],
-    minWidths: [34, 120, 120, 110, 120, 86, 78, 78, 86, 92, 82, 96, 48],
-    nonResizableIndexes: [12],
+    defaultWidths: [36, 162, 146, 146, 154, 96, 82, 82, 92, 92, 108, 52],
+    minWidths: [34, 110, 110, 108, 118, 84, 72, 72, 80, 82, 92, 46],
+    nonResizableIndexes: [11],
+    autoFitToViewport: true,
+    enforceFullWidth: true,
     maxWidth: 680,
   })
   syncEventsActionPermissions()
