@@ -1,20 +1,19 @@
 ﻿import { ensureSessionContext, login, logout, getSession, requireAuth } from '../auth/authService'
 import { getDataSourceLabel } from '../firebase/firebaseClient'
-import { createClient, deleteClient, getClients, updateClient } from '../services/clientService'
+import { createClient, getClients, updateClient } from '../services/clientService'
 import {
   createIndividualOrder,
   deleteIndividualOrder,
   getIndividualOrders,
   updateIndividualOrder,
 } from '../services/individualOrderService'
-import { createWorker, getWorkers } from '../services/workerService'
+import { createWorker, getWorkers, updateWorker } from '../services/workerService'
 import { createZone, deleteZone, getZones, updateZone } from '../services/zoneService'
 import {
   createEvent,
   createWorkday,
   deleteEvent,
   deleteWorkday,
-  getDashboardSummary,
   getTodayActiveWorkers,
   getTodayWorktimeFingerprint,
   getWorkdays,
@@ -23,6 +22,25 @@ import {
   updateWorkday,
 } from '../services/workdayService'
 import { getScheduleBoard } from '../services/scheduleService'
+import {
+  createBackup,
+  deleteBackup,
+  ensureBackupAutomation,
+  getBackupDownload,
+  inspectBackupFile,
+  listBackups,
+  restoreBackupById,
+  restoreBackupFromFile,
+  restoreLatestPreRestore,
+} from '../services/backupService'
+import {
+  STYLE_FALLBACK_ID,
+  clearUserStyle,
+  getEffectiveStyle,
+  listAvailableStyles,
+  setOrgDefaultStyle,
+  setUserStyle,
+} from '../services/styleService'
 import { portalLayoutTemplate } from './layoutTemplate'
 import { createRouter } from './router'
 import { viewTemplates } from './viewTemplates'
@@ -46,6 +64,9 @@ const appState = {
   workers: [],
   workersLoaded: false,
   workerTimeRows: [],
+  workerTimeViewRows: [],
+  workerTimeSelectedKeys: new Set(),
+  workerTimeCurrentPageKeys: [],
   workersPage: 1,
   workersPageSize: 50,
   workersTotal: 0,
@@ -62,8 +83,12 @@ const appState = {
   workerDetailRows: [],
   workerDetailSourceRows: [],
   workerDetailViewRows: [],
+  workerDetailSelectedKeys: new Set(),
+  workerDetailCurrentPageKeys: [],
   workerDetailDayEditorItem: null,
   workerDetailAckMap: {},
+  workerDetailColumnWidthsLoaded: false,
+  workerDetailColumnWidths: [],
   workerProfilePage: 1,
   workerProfilePageSize: 50,
   workerProfileTotal: 0,
@@ -93,26 +118,475 @@ const appState = {
   reportHistoryTab: 'objects',
   reportHistoryRows: [],
   reportHistoryExpanded: {},
+  reportHistoryEditableMap: {},
+  reportHistoryClosingDayKey: '',
   reportHistoryClientOptions: [],
   reportHistoryWorkerOptions: [],
   reportHistoryZoneOptions: [],
+  dashboardMetricDetails: {},
+  dashboardMetricValues: {},
+  dashboardTodayRows: [],
   dashboardScheduleDays: [],
   dashboardScheduleSelectedDay: '',
   dashboardScheduleFetchedAt: '',
+  dashboardScheduleSourceRows: [],
+  dashboardScheduleAlertSnoozeUntil: 0,
+  dashboardScheduleAlertMuted: false,
+  dashboardScheduleAlertLastKey: '',
+  settingsActiveTab: 'styles',
+  settingsEffectiveStyleId: STYLE_FALLBACK_ID,
+  settingsEffectiveStyleSource: 'fallback',
+  settingsOrgStyleId: '',
+  settingsUserStyleId: '',
+  settingsBackups: [],
+  settingsImportInspection: null,
+  settingsAutomationDayKey: '',
   currentRoute: '',
 }
 let portalNoticeTimer = null
 let dashboardRefreshTimer = null
 let dashboardLastWorktimeToken = ''
+let dashboardMetricPopoverHideTimer = null
+let dashboardScheduleLimitRaf = 0
+let dashboardScheduleLimitTimerA = 0
+let dashboardScheduleLimitTimerB = 0
 let reportsViewInitPromise = null
 let reportGeoPreviewHideTimer = null
+let reportHistoryScopedFilter = null
 const reportGeoModalState = {
   lat: '',
   lon: '',
   zoom: 18,
 }
 const DASHBOARD_REFRESH_INTERVAL_MS = 15 * 60 * 1000
+const DASHBOARD_SCHEDULE_SOON_WINDOW_MINUTES = 60
+const DASHBOARD_SCHEDULE_VISIBLE_WORKERS = 10
+const DASHBOARD_LONG_CLEAN_SECONDS = 90 * 60
+const REPORT_HISTORY_SYSTEM_CLIENT_LABEL = 'Best Clean biuro'
+const REPORT_HISTORY_SYSTEM_ZONE_LABEL = 'SYSTEM'
+const BACKUP_TYPE_LABELS = {
+  full: 'Pelna kopia',
+  workers: 'Pracownicy',
+  objects: 'Obiekty',
+}
+const BACKUP_SOURCE_LABELS = {
+  manual: 'Reczny',
+  'auto-daily': 'Auto dzienny',
+  'auto-monthly': 'Auto miesieczny',
+  'pre-restore': 'Pre-restore',
+  'imported-file': 'Import ZIP',
+}
+const BACKUP_INTEGRITY_LABELS = {
+  ok: 'OK',
+  warning: 'Ostrzezenie',
+  error: 'Blad',
+  unknown: 'Nieznana',
+}
+const SETTINGS_TAB_STYLES = 'styles'
+const SETTINGS_TAB_BACKUP = 'backup'
+const SETTINGS_TAB_STORAGE_KEY = 'portal.settings.activeTab'
+const STYLE_SOURCE_LABELS = {
+  user: 'nadpisanie uzytkownika',
+  org: 'domyslny styl organizacji',
+  fallback: 'domyslny fallback',
+}
 const SIDEBAR_COLLAPSE_STORAGE_KEY = 'portal.sidebarCollapsed'
+const WORKER_DETAIL_COLUMN_WIDTHS_STORAGE_KEY = 'portal.workerDetailColumnWidths'
+const WORKER_DETAIL_COLUMN_DEFAULT_WIDTHS = [42, 88, 168, 138, 108, 108, 112, 138, 102, 126, 90]
+const WORKER_DETAIL_COLUMN_MIN_WIDTHS = [34, 76, 120, 108, 92, 92, 96, 116, 88, 104, 72]
+const WORKER_DETAIL_COLUMN_MAX_WIDTH = 520
+const WORKER_DETAIL_RESIZABLE_COLUMN_INDEXES = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+const GRID_COLUMN_RESIZE_CLASS = 'grid-col-resize-active'
+const GRID_COLUMN_RESIZE_ATTR = 'data-grid-col-resizer'
+const GRID_COLUMN_MAX_WIDTH = 780
+
+let workerDetailColumnDragState = null
+const WORKER_DETAIL_COLUMN_RESIZE_CLASS = 'wtd-col-resize-active'
+
+function parseGridPixelWidths(rawValue) {
+  const raw = String(rawValue ?? '')
+  const matches = raw.match(/-?\d+(?:\.\d+)?px/g)
+  if (!matches?.length) {
+    return []
+  }
+
+  return matches
+    .map((item) => Math.round(Number.parseFloat(item)))
+    .filter((value) => Number.isFinite(value) && value > 0)
+}
+
+function clampGridWidth(value, min, max, fallback) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    return fallback
+  }
+  if (numeric < min) {
+    return min
+  }
+  if (numeric > max) {
+    return max
+  }
+  return Math.round(numeric)
+}
+
+function readStoredGridColumnWidths(storageKey) {
+  const key = String(storageKey ?? '').trim()
+  if (!key) {
+    return []
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(key)
+    if (!raw) {
+      return []
+    }
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function normalizeGridColumnWidths(rawWidths, defaults, options = {}) {
+  const source = Array.isArray(rawWidths) ? rawWidths : []
+  const fallback = Array.isArray(defaults) ? defaults : []
+  const count = Number(options.columnCount ?? fallback.length ?? source.length) || 0
+  const minColumnWidth = Number(options.minColumnWidth ?? 64)
+  const minWidths = Array.isArray(options.minWidths) ? options.minWidths : []
+  const maxWidth = Number(options.maxWidth ?? GRID_COLUMN_MAX_WIDTH)
+
+  return Array.from({ length: count }, (_, colIndex) => {
+    const fallbackWidth = clampGridWidth(fallback[colIndex], 40, maxWidth, 120)
+    const minWidthValue = Number(minWidths[colIndex])
+    const minWidth =
+      Number.isFinite(minWidthValue) && minWidthValue > 20 ? minWidthValue : Number.isFinite(minColumnWidth) ? minColumnWidth : 64
+    return clampGridWidth(source[colIndex], minWidth, maxWidth, fallbackWidth)
+  })
+}
+
+function buildGridTemplateFromWidths(widths = []) {
+  return widths
+    .map((width) => `${Math.max(24, Math.round(Number(width) || 0))}px`)
+    .join(' ')
+}
+
+function inferGridDefaultWidths(tableNode, headNode, cssVarName, expectedColumns, explicitDefaults) {
+  const expected = Number(expectedColumns) || 0
+  if (expected <= 0) {
+    return []
+  }
+
+  const defaults = Array.isArray(explicitDefaults) ? explicitDefaults.filter((value) => Number.isFinite(Number(value))) : []
+  if (defaults.length === expected) {
+    return defaults.map((value) => Math.round(Number(value)))
+  }
+
+  const cssVar = String(cssVarName ?? '').trim()
+  if (cssVar) {
+    const inlineVarWidths = parseGridPixelWidths(tableNode?.style?.getPropertyValue(cssVar))
+    if (inlineVarWidths.length === expected) {
+      return inlineVarWidths
+    }
+
+    const computedVarWidths = parseGridPixelWidths(window.getComputedStyle(tableNode).getPropertyValue(cssVar))
+    if (computedVarWidths.length === expected) {
+      return computedVarWidths
+    }
+  }
+
+  const computedHeadWidths = parseGridPixelWidths(window.getComputedStyle(headNode).gridTemplateColumns)
+  if (computedHeadWidths.length === expected) {
+    return computedHeadWidths
+  }
+
+  return Array.from({ length: expected }, (_, index) => {
+    const fromDefaults = Number(defaults[index])
+    return Number.isFinite(fromDefaults) && fromDefaults > 0 ? Math.round(fromDefaults) : 120
+  })
+}
+
+function setupResizableGridTable(options = {}) {
+  const tableSelector = String(options.tableSelector ?? '').trim()
+  const headSelector = String(options.headSelector ?? '').trim()
+  const cssVarName = String(options.cssVarName ?? '').trim()
+  const storageKey = String(options.storageKey ?? '').trim()
+
+  if (!tableSelector || !headSelector || !cssVarName) {
+    return () => {}
+  }
+
+  const tableNode = document.querySelector(tableSelector)
+  const headNode = document.querySelector(headSelector)
+  if (!(tableNode instanceof HTMLElement) || !(headNode instanceof HTMLElement)) {
+    return () => {}
+  }
+
+  const headCells = [...headNode.children].filter((node) => node instanceof HTMLElement)
+  const columnCount = headCells.length
+  if (!columnCount) {
+    return () => {}
+  }
+
+  const nonResizable = new Set(
+    (Array.isArray(options.nonResizableIndexes) ? options.nonResizableIndexes : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value >= 0),
+  )
+  const maxWidth = Number(options.maxWidth ?? GRID_COLUMN_MAX_WIDTH)
+  const autoFitToViewport = Boolean(options.autoFitToViewport)
+  const enforceFullWidth = Boolean(options.enforceFullWidth)
+  const defaultWidths = inferGridDefaultWidths(
+    tableNode,
+    headNode,
+    cssVarName,
+    columnCount,
+    Array.isArray(options.defaultWidths) ? options.defaultWidths : [],
+  )
+  const storedWidths = readStoredGridColumnWidths(storageKey)
+  let userCustomizedWidths = storedWidths.length > 0
+  const widths = normalizeGridColumnWidths(storedWidths.length ? storedWidths : defaultWidths, defaultWidths, {
+    columnCount,
+    minColumnWidth: options.minColumnWidth,
+    minWidths: options.minWidths,
+    maxWidth,
+  })
+  const minWidths = normalizeGridColumnWidths([], defaultWidths, {
+    columnCount,
+    minColumnWidth: options.minColumnWidth,
+    minWidths: options.minWidths,
+    maxWidth,
+  })
+
+  const persistWidths = () => {
+    if (!storageKey) {
+      return
+    }
+    try {
+      window.sessionStorage.setItem(storageKey, JSON.stringify(widths))
+    } catch {
+      // Ignore storage write errors.
+    }
+  }
+
+  const applyWidths = () => {
+    tableNode.style.setProperty(cssVarName, buildGridTemplateFromWidths(widths))
+    tableNode.classList.add('resizable-grid-table')
+    headNode.classList.add('grid-resizable-head')
+  }
+
+  const fitWidthsToViewport = ({ persist = false } = {}) => {
+    if (!autoFitToViewport) {
+      return false
+    }
+
+    const tableWidth = Math.floor(tableNode.getBoundingClientRect().width || tableNode.clientWidth || 0)
+    if (tableWidth <= 0) {
+      return false
+    }
+
+    const computedHead = window.getComputedStyle(headNode)
+    const columnGapPx = Math.max(0, Number.parseFloat(computedHead.columnGap || '0') || 0)
+    const budget = Math.max(0, Math.floor(tableWidth - columnGapPx * Math.max(0, columnCount - 1)))
+    if (budget <= 0) {
+      return false
+    }
+
+    const indexes = Array.from({ length: columnCount }, (_, colIndex) => colIndex).filter(
+      (colIndex) => !nonResizable.has(colIndex),
+    )
+    if (!indexes.length) {
+      return false
+    }
+
+    const fixedSum = widths
+      .map((value, colIndex) => (nonResizable.has(colIndex) ? Math.max(0, Number(value) || 0) : 0))
+      .reduce((sum, value) => sum + value, 0)
+    const targetAdjustableBudget = Math.max(0, budget - fixedSum)
+    const currentAdjustable = indexes
+      .map((colIndex) => Math.max(0, Number(widths[colIndex]) || 0))
+      .reduce((sum, value) => sum + value, 0)
+    if (currentAdjustable <= 0) {
+      return false
+    }
+
+    const scaled = [...widths]
+    const scale = targetAdjustableBudget / currentAdjustable
+    indexes.forEach((colIndex) => {
+      const rawWidth = Number(widths[colIndex]) || 0
+      const minWidth = Math.max(24, Math.round(Number(minWidths[colIndex]) || 24))
+      scaled[colIndex] = clampGridWidth(Math.round(rawWidth * scale), minWidth, maxWidth, rawWidth)
+    })
+
+    const sumScaledAdjustable = indexes.reduce((sum, colIndex) => sum + Math.max(0, Number(scaled[colIndex]) || 0), 0)
+    let diff = targetAdjustableBudget - sumScaledAdjustable
+    let guard = 0
+    while (diff !== 0 && guard < 20000) {
+      let changedInPass = false
+      for (const colIndex of indexes) {
+        if (diff === 0) {
+          break
+        }
+
+        const minWidth = Math.max(24, Math.round(Number(minWidths[colIndex]) || 24))
+        const currentWidth = Math.round(Number(scaled[colIndex]) || 0)
+        if (diff > 0) {
+          if (currentWidth >= maxWidth) {
+            continue
+          }
+          scaled[colIndex] = currentWidth + 1
+          diff -= 1
+          changedInPass = true
+          continue
+        }
+
+        if (currentWidth <= minWidth) {
+          continue
+        }
+        scaled[colIndex] = currentWidth - 1
+        diff += 1
+        changedInPass = true
+      }
+      if (!changedInPass) {
+        break
+      }
+      guard += 1
+    }
+
+    const changed = indexes.some((colIndex) => Math.round(Number(widths[colIndex]) || 0) !== Math.round(Number(scaled[colIndex]) || 0))
+    if (!changed) {
+      return false
+    }
+
+    indexes.forEach((colIndex) => {
+      widths[colIndex] = Math.round(Number(scaled[colIndex]) || 0)
+    })
+
+    if (changed) {
+      applyWidths()
+      if (persist) {
+        persistWidths()
+      }
+    }
+
+    return changed
+  }
+
+  applyWidths()
+  if (enforceFullWidth || !userCustomizedWidths) {
+    fitWidthsToViewport({ persist: false })
+  }
+
+  headCells.forEach((cell, colIndex) => {
+    cell.classList.add('grid-resizable-head-cell')
+    if (colIndex >= columnCount - 1 || nonResizable.has(colIndex)) {
+      return
+    }
+    if (cell.querySelector(`[${GRID_COLUMN_RESIZE_ATTR}]`)) {
+      return
+    }
+
+    const handle = document.createElement('span')
+    handle.className = 'grid-col-resizer'
+    handle.setAttribute(GRID_COLUMN_RESIZE_ATTR, String(colIndex))
+    handle.setAttribute('role', 'separator')
+    handle.setAttribute('aria-orientation', 'vertical')
+    handle.setAttribute('aria-label', 'Zmień szerokość kolumny')
+    cell.appendChild(handle)
+  })
+
+  let dragState = null
+  const stopDrag = ({ persist = true } = {}) => {
+    if (!dragState) {
+      return
+    }
+
+    window.removeEventListener('mousemove', dragState.onMove)
+    window.removeEventListener('mouseup', dragState.onUp)
+    document.body.classList.remove(GRID_COLUMN_RESIZE_CLASS)
+    dragState = null
+    if (persist) {
+      persistWidths()
+    }
+  }
+
+  const startDrag = (colIndex, startClientX) => {
+    stopDrag({ persist: false })
+
+    const index = Number(colIndex)
+    if (!Number.isInteger(index) || index < 0 || index >= widths.length || nonResizable.has(index)) {
+      return
+    }
+
+    const startWidth = Number(widths[index]) || defaultWidths[index] || 120
+    const minWidth = normalizeGridColumnWidths([], defaultWidths, {
+      columnCount,
+      minColumnWidth: options.minColumnWidth,
+      minWidths: options.minWidths,
+      maxWidth,
+    })[index]
+
+    const onMove = (event) => {
+      const delta = Number(event.clientX) - Number(startClientX)
+      const nextWidth = clampGridWidth(startWidth + delta, minWidth, maxWidth, startWidth)
+      if (widths[index] === nextWidth) {
+        return
+      }
+      widths[index] = nextWidth
+      applyWidths()
+    }
+
+    const onUp = () => {
+      userCustomizedWidths = true
+      if (enforceFullWidth) {
+        fitWidthsToViewport({ persist: false })
+      }
+      stopDrag({ persist: true })
+    }
+
+    dragState = { onMove, onUp }
+    document.body.classList.add(GRID_COLUMN_RESIZE_CLASS)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  const onMouseDown = (event) => {
+    const handle = event.target?.closest?.(`[${GRID_COLUMN_RESIZE_ATTR}]`)
+    if (!(handle instanceof HTMLElement)) {
+      return
+    }
+
+    const colIndex = Number(handle.getAttribute(GRID_COLUMN_RESIZE_ATTR))
+    if (!Number.isInteger(colIndex)) {
+      return
+    }
+
+    event.preventDefault()
+    startDrag(colIndex, event.clientX)
+  }
+
+  tableNode.addEventListener('mousedown', onMouseDown)
+  const onWindowResize = () => {
+    if (enforceFullWidth || !userCustomizedWidths) {
+      fitWidthsToViewport({ persist: false })
+    }
+  }
+  window.addEventListener('resize', onWindowResize)
+
+  return () => {
+    tableNode.removeEventListener('mousedown', onMouseDown)
+    window.removeEventListener('resize', onWindowResize)
+    stopDrag({ persist: true })
+  }
+}
+
+function workerDetailDefaultColumnWidths() {
+  return [...WORKER_DETAIL_COLUMN_DEFAULT_WIDTHS]
+}
+
+function workerDetailColumnMinWidth(colIndex) {
+  const value = Number(WORKER_DETAIL_COLUMN_MIN_WIDTHS[colIndex])
+  return Number.isFinite(value) ? value : 72
+}
 
 function readStoredSidebarCollapsed() {
   try {
@@ -330,20 +804,6 @@ function ymdToDayTimestamp(value) {
   return Number.isFinite(ts) ? ts : 0
 }
 
-function ymdToWeekday(value) {
-  const raw = String(value ?? '').trim()
-  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (!match) {
-    return -1
-  }
-
-  const year = Number(match[1])
-  const month = Number(match[2]) - 1
-  const day = Number(match[3])
-  const weekday = new Date(year, month, day).getDay()
-  return Number.isFinite(weekday) ? weekday : -1
-}
-
 function dashboardPickNearestScheduleDayKey(days = [], targetDayKey = todayYmd()) {
   const source = Array.isArray(days) ? days : []
   if (!source.length) {
@@ -351,7 +811,6 @@ function dashboardPickNearestScheduleDayKey(days = [], targetDayKey = todayYmd()
   }
 
   const targetTs = ymdToDayTimestamp(targetDayKey)
-  const targetWeekday = ymdToWeekday(targetDayKey)
   if (!targetTs) {
     return String(source[0]?.key ?? '')
   }
@@ -363,15 +822,7 @@ function dashboardPickNearestScheduleDayKey(days = [], targetDayKey = todayYmd()
       if (!key || !ts) {
         return null
       }
-      const entries = Array.isArray(day?.entries) ? day.entries : []
-      const hasShiftData = entries.some((entry) => {
-        const morningStart = String(entry?.morningStart ?? '').trim()
-        const morningTask = String(entry?.morningTask ?? '').trim()
-        const afternoonStart = String(entry?.afternoonStart ?? '').trim()
-        const afternoonTask = String(entry?.afternoonTask ?? '').trim()
-        return Boolean(morningStart || morningTask || afternoonStart || afternoonTask)
-      })
-      return { key, ts, index, hasShiftData, weekday: ymdToWeekday(key) }
+      return { key, ts, index }
     })
     .filter(Boolean)
 
@@ -379,64 +830,30 @@ function dashboardPickNearestScheduleDayKey(days = [], targetDayKey = todayYmd()
     return String(source[0]?.key ?? '')
   }
 
-  const sortByDistanceThenFuture = (left, right) => {
-    const leftDiff = Math.abs(left.ts - targetTs)
-    const rightDiff = Math.abs(right.ts - targetTs)
-    if (leftDiff !== rightDiff) {
-      return leftDiff - rightDiff
-    }
-    const leftFuture = left.ts >= targetTs ? 0 : 1
-    const rightFuture = right.ts >= targetTs ? 0 : 1
-    if (leftFuture !== rightFuture) {
-      return leftFuture - rightFuture
+  const byFutureThenDateAsc = (left, right) => {
+    if (left.ts !== right.ts) {
+      return left.ts - right.ts
     }
     return left.index - right.index
   }
 
-  if (targetWeekday >= 0) {
-    const sameWeekday = candidates.filter((candidate) => candidate.weekday === targetWeekday)
-    const sameWeekdayWithData = sameWeekday
-      .filter((candidate) => candidate.hasShiftData)
-      .sort(sortByDistanceThenFuture)
-    if (sameWeekdayWithData.length) {
-      return String(sameWeekdayWithData[0]?.key ?? source[0]?.key ?? '')
+  const byPastThenDateDesc = (left, right) => {
+    if (left.ts !== right.ts) {
+      return right.ts - left.ts
     }
-
-    sameWeekday.sort(sortByDistanceThenFuture)
-    if (sameWeekday.length) {
-      return String(sameWeekday[0]?.key ?? source[0]?.key ?? '')
-    }
+    return left.index - right.index
   }
 
   const future = candidates
     .filter((candidate) => candidate.ts >= targetTs)
-    .sort((left, right) => {
-      if (left.ts !== right.ts) {
-        return left.ts - right.ts
-      }
-      return left.index - right.index
-    })
-  const futureWithData = future.filter((candidate) => candidate.hasShiftData)
-  if (futureWithData.length) {
-    return String(futureWithData[0]?.key ?? source[0]?.key ?? '')
-  }
+    .sort(byFutureThenDateAsc)
   if (future.length) {
     return String(future[0]?.key ?? source[0]?.key ?? '')
   }
 
   const past = candidates
     .filter((candidate) => candidate.ts < targetTs)
-    .sort((left, right) => {
-      if (left.ts !== right.ts) {
-        return right.ts - left.ts
-      }
-      return left.index - right.index
-    })
-
-  const pastWithData = past.filter((candidate) => candidate.hasShiftData)
-  if (pastWithData.length) {
-    return String(pastWithData[0]?.key ?? source[0]?.key ?? '')
-  }
+    .sort(byPastThenDateDesc)
 
   return String(past[0]?.key ?? source[0]?.key ?? '')
 }
@@ -553,6 +970,861 @@ function canManageIndividualOrders() {
   return roleLevel(appState.session?.role) >= 2
 }
 
+function canManageBackupSettings() {
+  return roleLevel(appState.session?.role) >= 3
+}
+
+function normalizeSettingsTab(value) {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (normalized === SETTINGS_TAB_BACKUP) {
+    return SETTINGS_TAB_BACKUP
+  }
+  return SETTINGS_TAB_STYLES
+}
+
+function readStoredSettingsTab() {
+  try {
+    return normalizeSettingsTab(window.sessionStorage.getItem(SETTINGS_TAB_STORAGE_KEY))
+  } catch {
+    return SETTINGS_TAB_STYLES
+  }
+}
+
+function persistSettingsTab(tab) {
+  try {
+    window.sessionStorage.setItem(SETTINGS_TAB_STORAGE_KEY, normalizeSettingsTab(tab))
+  } catch {
+    // Ignore storage failures in private mode.
+  }
+}
+
+function resolveStyleMeta(styleId) {
+  const normalized = String(styleId ?? '').trim()
+  const styles = listAvailableStyles()
+  return styles.find((item) => String(item?.id ?? '').trim() === normalized) ?? null
+}
+
+function applyPortalTheme(styleId) {
+  const root = document.getElementById('portalRoot')
+  if (!(root instanceof HTMLElement)) {
+    return
+  }
+
+  const normalized = resolveStyleMeta(styleId)?.id ?? STYLE_FALLBACK_ID
+  root.setAttribute('data-theme', normalized)
+}
+
+function settingsStyleSourceLabel(source) {
+  const key = String(source ?? '').trim().toLowerCase()
+  return STYLE_SOURCE_LABELS[key] ?? STYLE_SOURCE_LABELS.fallback
+}
+
+function settingsRenderStyleStatus() {
+  const statusNode = document.getElementById('settingsStyleStatus')
+  if (!(statusNode instanceof HTMLElement)) {
+    return
+  }
+
+  const effectiveId = String(appState.settingsEffectiveStyleId ?? '').trim() || STYLE_FALLBACK_ID
+  const effectiveMeta = resolveStyleMeta(effectiveId)
+  const effectiveName = String(effectiveMeta?.name ?? 'Classic Blue')
+  const sourceLabel = settingsStyleSourceLabel(appState.settingsEffectiveStyleSource)
+  const orgMeta = resolveStyleMeta(appState.settingsOrgStyleId)
+  const userMeta = resolveStyleMeta(appState.settingsUserStyleId)
+
+  statusNode.innerHTML = `
+    <div class="settings-style-status-top">
+      <div class="settings-style-status-label">Aktywny styl efektywny</div>
+      <div class="settings-style-status-badge">${escapeHtml(effectiveName)}</div>
+    </div>
+    <div class="settings-style-status-meta">Zrodlo: <strong>${escapeHtml(sourceLabel)}</strong></div>
+    <div class="settings-style-status-hint">
+      Domyslny org: <strong>${escapeHtml(orgMeta?.name ?? '-')}</strong>
+      <span class="settings-style-status-dot">•</span>
+      Moj wybor: <strong>${escapeHtml(userMeta?.name ?? '-')}</strong>
+    </div>
+  `
+}
+
+function settingsRenderStyleCards() {
+  const root = document.getElementById('settingsStyleCards')
+  if (!(root instanceof HTMLElement)) {
+    return
+  }
+
+  const styles = listAvailableStyles()
+  const canSetOrg = canManageBackupSettings()
+  const effectiveId = String(appState.settingsEffectiveStyleId ?? '').trim() || STYLE_FALLBACK_ID
+  const userStyleId = String(appState.settingsUserStyleId ?? '').trim()
+  const orgStyleId = String(appState.settingsOrgStyleId ?? '').trim()
+  const hasUserOverride = Boolean(userStyleId)
+
+  root.innerHTML = styles
+    .map((style) => {
+      const styleId = String(style?.id ?? '').trim()
+      const isEffective = styleId === effectiveId
+      const isUser = styleId === userStyleId
+      const isOrg = styleId === orgStyleId
+
+      return `
+        <article class="fido-card settings-style-card${isEffective ? ' is-effective' : ''}" data-style-id="${escapeHtml(styleId)}">
+          <div class="settings-style-card-header">
+            <h3>${escapeHtml(String(style?.name ?? styleId))}</h3>
+            <div class="settings-style-badges">
+              ${isEffective ? '<span class="settings-style-pill is-effective">Aktywny</span>' : ''}
+              ${isUser ? '<span class="settings-style-pill is-user">Moj styl</span>' : ''}
+              ${isOrg ? '<span class="settings-style-pill is-org">Domyslny org</span>' : ''}
+            </div>
+          </div>
+          <p>${escapeHtml(String(style?.description ?? ''))}</p>
+          <div class="settings-style-preview settings-style-preview--${escapeHtml(styleId)}">
+            <span></span><span></span><span></span>
+          </div>
+          <div class="settings-style-actions">
+            <button class="btn2 primary" type="button" data-style-action="set-user" data-style-id="${escapeHtml(styleId)}">
+              Ustaw jako moj styl
+            </button>
+            <button class="btn2" type="button" data-style-action="clear-user" data-style-id="${escapeHtml(styleId)}"${
+              hasUserOverride ? '' : ' disabled'
+            }>
+              Uzyj domyslnego
+            </button>
+            ${
+              canSetOrg
+                ? `<button class="btn2" type="button" data-style-action="set-org" data-style-id="${escapeHtml(styleId)}">Ustaw jako domyslny organizacji</button>`
+                : ''
+            }
+          </div>
+        </article>
+      `
+    })
+    .join('')
+}
+
+function settingsSetActiveTab(tab, { persist = true } = {}) {
+  const requested = normalizeSettingsTab(tab)
+  const canBackup = canManageBackupSettings()
+  const effectiveTab = requested === SETTINGS_TAB_BACKUP && !canBackup ? SETTINGS_TAB_STYLES : requested
+  appState.settingsActiveTab = effectiveTab
+
+  const tabButtons = document.querySelectorAll('#settingsTabs [data-settings-tab]')
+  tabButtons.forEach((button) => {
+    if (!(button instanceof HTMLElement)) {
+      return
+    }
+    const tabId = normalizeSettingsTab(button.getAttribute('data-settings-tab'))
+    const active = tabId === effectiveTab
+    button.classList.toggle('active', active)
+    button.setAttribute('aria-selected', active ? 'true' : 'false')
+  })
+
+  const panels = document.querySelectorAll('#view-settings [data-settings-panel]')
+  panels.forEach((panel) => {
+    if (!(panel instanceof HTMLElement)) {
+      return
+    }
+    const panelId = normalizeSettingsTab(panel.getAttribute('data-settings-panel'))
+    panel.style.display = panelId === effectiveTab ? '' : 'none'
+  })
+
+  if (persist) {
+    persistSettingsTab(effectiveTab)
+  }
+}
+
+async function settingsRefreshStyleState({ silent = false } = {}) {
+  const orgId = settingsCurrentOrgId()
+  const uid = String(appState.session?.uid ?? '').trim() || String(appState.session?.login ?? '').trim()
+  if (!orgId) {
+    appState.settingsEffectiveStyleId = STYLE_FALLBACK_ID
+    appState.settingsEffectiveStyleSource = 'fallback'
+    appState.settingsOrgStyleId = ''
+    appState.settingsUserStyleId = ''
+    applyPortalTheme(STYLE_FALLBACK_ID)
+    settingsRenderStyleStatus()
+    settingsRenderStyleCards()
+    return
+  }
+
+  try {
+    const effective = await getEffectiveStyle(orgId, uid)
+    const effectiveId = resolveStyleMeta(effective?.styleId)?.id ?? STYLE_FALLBACK_ID
+    appState.settingsEffectiveStyleId = effectiveId
+    appState.settingsEffectiveStyleSource = String(effective?.source ?? 'fallback')
+    appState.settingsOrgStyleId = resolveStyleMeta(effective?.orgStyleId)?.id ?? ''
+    appState.settingsUserStyleId = resolveStyleMeta(effective?.userStyleId)?.id ?? ''
+    applyPortalTheme(effectiveId)
+  } catch (error) {
+    appState.settingsEffectiveStyleId = STYLE_FALLBACK_ID
+    appState.settingsEffectiveStyleSource = 'fallback'
+    appState.settingsOrgStyleId = ''
+    appState.settingsUserStyleId = ''
+    applyPortalTheme(STYLE_FALLBACK_ID)
+    if (!silent) {
+      const message = error instanceof Error ? error.message : 'Nie udalo sie odczytac stylu.'
+      showTransientNotice(message, 'error')
+    }
+  }
+
+  settingsRenderStyleStatus()
+  settingsRenderStyleCards()
+}
+
+async function settingsApplyUserStyle(styleId) {
+  const orgId = settingsCurrentOrgId()
+  const uid = String(appState.session?.uid ?? '').trim() || String(appState.session?.login ?? '').trim()
+  if (!orgId || !uid) {
+    showTransientNotice('Brak aktywnej sesji do zapisu stylu.', 'error')
+    return
+  }
+
+  const previous = {
+    effectiveId: appState.settingsEffectiveStyleId,
+    effectiveSource: appState.settingsEffectiveStyleSource,
+    orgId: appState.settingsOrgStyleId,
+    userId: appState.settingsUserStyleId,
+  }
+
+  const meta = resolveStyleMeta(styleId)
+  if (!meta) {
+    showTransientNotice('Wybrano nieznany styl.', 'error')
+    return
+  }
+
+  appState.settingsEffectiveStyleId = meta.id
+  appState.settingsEffectiveStyleSource = 'user'
+  appState.settingsUserStyleId = meta.id
+  applyPortalTheme(meta.id)
+  settingsRenderStyleStatus()
+  settingsRenderStyleCards()
+
+  try {
+    await setUserStyle(orgId, uid, meta.id, settingsCurrentActor())
+    showTransientNotice(`Ustawiono styl: ${meta.name}.`)
+    await settingsRefreshStyleState({ silent: true })
+  } catch (error) {
+    appState.settingsEffectiveStyleId = previous.effectiveId
+    appState.settingsEffectiveStyleSource = previous.effectiveSource
+    appState.settingsOrgStyleId = previous.orgId
+    appState.settingsUserStyleId = previous.userId
+    applyPortalTheme(previous.effectiveId || STYLE_FALLBACK_ID)
+    settingsRenderStyleStatus()
+    settingsRenderStyleCards()
+    const message = error instanceof Error ? error.message : 'Nie udalo sie zapisac stylu.'
+    showTransientNotice(message, 'error')
+  }
+}
+
+async function settingsClearUserStyle() {
+  const orgId = settingsCurrentOrgId()
+  const uid = String(appState.session?.uid ?? '').trim() || String(appState.session?.login ?? '').trim()
+  if (!orgId || !uid) {
+    showTransientNotice('Brak aktywnej sesji do zapisu stylu.', 'error')
+    return
+  }
+
+  try {
+    await clearUserStyle(orgId, uid)
+    await settingsRefreshStyleState({ silent: true })
+    showTransientNotice('Wyczyszczono nadpisanie stylu uzytkownika.')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udalo sie wyczyscic stylu.'
+    showTransientNotice(message, 'error')
+  }
+}
+
+async function settingsApplyOrgDefaultStyle(styleId) {
+  if (!canManageBackupSettings()) {
+    showTransientNotice('Brak uprawnien do zmiany domyslnego stylu organizacji.', 'error')
+    return
+  }
+
+  const orgId = settingsCurrentOrgId()
+  if (!orgId) {
+    showTransientNotice('Brak orgId w sesji.', 'error')
+    return
+  }
+
+  const meta = resolveStyleMeta(styleId)
+  if (!meta) {
+    showTransientNotice('Wybrano nieznany styl.', 'error')
+    return
+  }
+
+  try {
+    await setOrgDefaultStyle(orgId, meta.id, settingsCurrentActor())
+    await settingsRefreshStyleState({ silent: true })
+    showTransientNotice(`Ustawiono domyslny styl organizacji: ${meta.name}.`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udalo sie ustawic stylu domyslnego organizacji.'
+    showTransientNotice(message, 'error')
+  }
+}
+
+function backupTypeLabel(type) {
+  const normalized = String(type ?? '').trim().toLowerCase()
+  return BACKUP_TYPE_LABELS[normalized] ?? BACKUP_TYPE_LABELS.full
+}
+
+function backupSourceLabel(source) {
+  const normalized = String(source ?? '').trim().toLowerCase()
+  return BACKUP_SOURCE_LABELS[normalized] ?? 'Reczny'
+}
+
+function backupIntegrityLabel(status) {
+  const normalized = String(status ?? '').trim().toLowerCase()
+  return BACKUP_INTEGRITY_LABELS[normalized] ?? BACKUP_INTEGRITY_LABELS.unknown
+}
+
+function backupIntegrityClass(status) {
+  const normalized = String(status ?? '').trim().toLowerCase()
+  if (normalized === 'ok') {
+    return 'is-ok'
+  }
+  if (normalized === 'warning') {
+    return 'is-warning'
+  }
+  if (normalized === 'error') {
+    return 'is-error'
+  }
+  return 'is-unknown'
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes)
+  if (!Number.isFinite(value) || value <= 0) {
+    return '-'
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let number = value
+  let unitIndex = 0
+  while (number >= 1024 && unitIndex < units.length - 1) {
+    number /= 1024
+    unitIndex += 1
+  }
+
+  const precision = number >= 100 || unitIndex === 0 ? 0 : 1
+  return `${number.toFixed(precision)} ${units[unitIndex]}`
+}
+
+function settingsCurrentOrgId() {
+  return String(appState.session?.orgId ?? '').trim()
+}
+
+function settingsCurrentActor() {
+  return (
+    String(appState.session?.name ?? '').trim() ||
+    String(appState.session?.login ?? '').trim() ||
+    String(appState.session?.email ?? '').trim() ||
+    '-'
+  )
+}
+
+function settingsSetCreateNote(message = '', type = 'info') {
+  const note = document.getElementById('bkCreateNote')
+  if (!note) {
+    return
+  }
+
+  const text = String(message ?? '').trim()
+  note.className = 'backup-create-note'
+  note.textContent = text
+
+  if (!text) {
+    return
+  }
+
+  if (type === 'success') {
+    note.classList.add('is-success')
+    return
+  }
+  if (type === 'error') {
+    note.classList.add('is-error')
+    return
+  }
+  note.classList.add('is-info')
+}
+
+function settingsSetAccessState() {
+  const canManage = canManageBackupSettings()
+  const backupTabButton = document.getElementById('settingsTabBackup')
+  const backupSection = document.getElementById('settingsBackupSection')
+  const backupMenuItem = document.querySelector('[data-route="settingsBackup"]')
+  const styleMenuItem = document.querySelector('[data-route="settingsStyles"]')
+  const denied = document.getElementById('backupAccessDenied')
+  const panel = document.getElementById('backupAdminPanel')
+
+  if (backupTabButton instanceof HTMLElement) {
+    backupTabButton.style.display = canManage ? '' : 'none'
+  }
+  if (backupMenuItem instanceof HTMLElement) {
+    backupMenuItem.style.display = canManage ? '' : 'none'
+  }
+  if (styleMenuItem instanceof HTMLElement) {
+    styleMenuItem.style.display = ''
+  }
+
+  if (backupSection instanceof HTMLElement && appState.settingsActiveTab === SETTINGS_TAB_BACKUP && !canManage) {
+    settingsSetActiveTab(SETTINGS_TAB_STYLES, { persist: false })
+  }
+
+  if (denied) {
+    denied.style.display = canManage ? 'none' : ''
+  }
+  if (panel) {
+    panel.style.display = canManage ? '' : 'none'
+  }
+}
+
+function syncSettingsPermissions() {
+  const settingsToggle = document.querySelector('[data-toggle="settings"]')
+  const settingsSubmenu = document.getElementById('submenu-settings')
+  const stylesItem = document.querySelector('[data-route="settingsStyles"]')
+  const backupItem = document.querySelector('[data-route="settingsBackup"]')
+
+  if (settingsToggle instanceof HTMLElement) {
+    settingsToggle.style.display = ''
+  }
+  if (settingsSubmenu instanceof HTMLElement) {
+    settingsSubmenu.style.display = ''
+  }
+  if (stylesItem instanceof HTMLElement) {
+    stylesItem.style.display = ''
+  }
+  if (backupItem instanceof HTMLElement) {
+    backupItem.style.display = ''
+  }
+
+  settingsSetAccessState()
+}
+
+function settingsResetImportState({ clearFile = true } = {}) {
+  appState.settingsImportInspection = null
+  if (clearFile) {
+    const fileInput = document.getElementById('bkImportFile')
+    if (fileInput instanceof HTMLInputElement) {
+      fileInput.value = ''
+    }
+  }
+}
+
+function settingsRenderImportSummary() {
+  const summaryNode = document.getElementById('bkImportSummary')
+  const restoreButton = document.getElementById('bkImportRestoreBtn')
+  if (!summaryNode) {
+    return
+  }
+
+  const inspection = appState.settingsImportInspection
+  const summary = inspection?.summary
+  if (!summary) {
+    summaryNode.textContent = 'Wybierz plik ZIP, aby zobaczyc podsumowanie i zakres nadpisania.'
+    if (restoreButton instanceof HTMLButtonElement) {
+      restoreButton.disabled = true
+    }
+    return
+  }
+
+  const modules = Array.isArray(summary.modules) ? summary.modules : []
+  const modulesHtml = modules.length
+    ? modules
+        .map((moduleInfo) => {
+          const moduleLabel = String(moduleInfo?.label ?? moduleInfo?.id ?? '-').trim() || '-'
+          const records = Number(moduleInfo?.records ?? 0) || 0
+          return `<li><strong>${escapeHtml(moduleLabel)}</strong> <span>${records}</span></li>`
+        })
+        .join('')
+    : '<li><strong>Brak modulow</strong> <span>0</span></li>'
+
+  const authUsers = Number(summary.authUsers ?? 0) || 0
+  const schemaVersion = String(summary.schemaVersion ?? '').trim() || '-'
+
+  summaryNode.innerHTML = `
+    <div class="backup-import-card">
+      <div class="backup-import-grid">
+        <div><span>Tytul</span><strong>${escapeHtml(String(summary.title ?? '-'))}</strong></div>
+        <div><span>Typ</span><strong>${escapeHtml(String(summary.typeLabel ?? backupTypeLabel(summary.type)))}</strong></div>
+        <div><span>Data</span><strong>${escapeHtml(String(summary.createdAtLabel ?? '-'))}</strong></div>
+        <div><span>Autor</span><strong>${escapeHtml(String(summary.createdBy ?? '-'))}</strong></div>
+        <div><span>OrgId</span><strong>${escapeHtml(String(summary.orgId ?? '-'))}</strong></div>
+        <div><span>Schema</span><strong>${escapeHtml(schemaVersion)}</strong></div>
+      </div>
+      <div class="backup-import-modules">
+        <div class="backup-import-modules-title">Zakres nadpisania</div>
+        <ul>${modulesHtml}</ul>
+      </div>
+      <div class="backup-import-auth">Auth snapshot (pelna kopia): <strong>${authUsers}</strong></div>
+    </div>
+  `
+
+  if (restoreButton instanceof HTMLButtonElement) {
+    restoreButton.disabled = false
+  }
+}
+
+function settingsRenderBackupRows(rows = appState.settingsBackups) {
+  const tbody = document.getElementById('bkRows')
+  if (!tbody) {
+    return
+  }
+
+  const list = Array.isArray(rows) ? rows : []
+  if (!list.length) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" class="muted">Brak kopii zapasowych dla tej organizacji.</td>
+      </tr>
+    `
+    return
+  }
+
+  tbody.innerHTML = list
+    .map((item) => {
+      const id = String(item?.id ?? '').trim()
+      const integrityStatus = String(item?.integrityStatus ?? 'unknown')
+      const integrityClass = backupIntegrityClass(integrityStatus)
+      const integrityLabel = backupIntegrityLabel(integrityStatus)
+      const integrityMessage = String(item?.integrityMessage ?? '').trim()
+      const title = String(item?.title ?? '').trim() || backupTypeLabel(item?.type)
+
+      return `
+        <tr>
+          <td>${escapeHtml(String(item?.createdAtLabel ?? '-'))}</td>
+          <td>${escapeHtml(backupTypeLabel(item?.type))}</td>
+          <td>${escapeHtml(title)}</td>
+          <td>${escapeHtml(formatBytes(item?.sizeBytes))}</td>
+          <td>${escapeHtml(String(item?.createdBy ?? '-'))}</td>
+          <td>
+            <span class="backup-integrity ${integrityClass}" title="${escapeHtml(integrityMessage || integrityLabel)}">
+              ${escapeHtml(integrityLabel)}
+            </span>
+          </td>
+          <td>${escapeHtml(backupSourceLabel(item?.source))}</td>
+          <td>
+            <div class="backup-row-actions">
+              <button class="btn2" type="button" data-bk-action="download" data-bk-id="${escapeHtml(id)}">Pobierz</button>
+              <button class="btn2" type="button" data-bk-action="restore" data-bk-id="${escapeHtml(id)}">Przywroc</button>
+              <button class="btn2 danger" type="button" data-bk-action="delete" data-bk-id="${escapeHtml(id)}">Usun</button>
+            </div>
+          </td>
+        </tr>
+      `
+    })
+    .join('')
+}
+
+async function settingsEnsureAutomation() {
+  if (!canManageBackupSettings()) {
+    return
+  }
+
+  const orgId = settingsCurrentOrgId()
+  if (!orgId) {
+    return
+  }
+
+  const dayKey = `${orgId}:${todayYmd()}`
+  if (appState.settingsAutomationDayKey === dayKey) {
+    return
+  }
+
+  await ensureBackupAutomation({
+    orgId,
+    createdBy: settingsCurrentActor() || 'system',
+  })
+  appState.settingsAutomationDayKey = dayKey
+}
+
+async function settingsLoadBackups({ runAutomation = true } = {}) {
+  const tbody = document.getElementById('bkRows')
+  if (tbody) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" class="muted">Ladowanie listy backupow...</td>
+      </tr>
+    `
+  }
+
+  settingsSetAccessState()
+  if (!canManageBackupSettings()) {
+    appState.settingsBackups = []
+    settingsRenderBackupRows([])
+    return
+  }
+
+  const orgId = settingsCurrentOrgId()
+  if (!orgId) {
+    appState.settingsBackups = []
+    settingsRenderBackupRows([])
+    return
+  }
+
+  if (runAutomation) {
+    await settingsEnsureAutomation()
+  }
+
+  const rows = await listBackups(orgId)
+  appState.settingsBackups = rows
+  settingsRenderBackupRows(rows)
+}
+
+async function settingsCreateBackup() {
+  if (!canManageBackupSettings()) {
+    showTransientNotice('Brak uprawnien do tworzenia backupu.', 'error')
+    return
+  }
+
+  const orgId = settingsCurrentOrgId()
+  if (!orgId) {
+    showTransientNotice('Brak orgId w sesji.', 'error')
+    return
+  }
+
+  const titleInput = document.getElementById('bkTitle')
+  const typeInput = document.getElementById('bkType')
+  const createButton = document.getElementById('bkCreateBtn')
+  const title = String(titleInput?.value ?? '').trim()
+  const type = String(typeInput?.value ?? 'full').trim().toLowerCase()
+
+  if (!title) {
+    showTransientNotice('Wpisz tytul kopii.', 'error')
+    titleInput?.focus?.()
+    return
+  }
+
+  if (createButton instanceof HTMLButtonElement) {
+    createButton.disabled = true
+    createButton.textContent = 'Tworzenie...'
+  }
+  settingsSetCreateNote('Tworzenie backupu w toku...', 'info')
+
+  try {
+    const created = await createBackup({
+      orgId,
+      type,
+      title,
+      createdBy: settingsCurrentActor(),
+      source: 'manual',
+    })
+    settingsSetCreateNote(`Utworzono: ${created.fileName} (${formatBytes(created.sizeBytes)}).`, 'success')
+    showTransientNotice('Backup ZIP zostal utworzony.')
+    await settingsLoadBackups({ runAutomation: false })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udalo sie utworzyc backupu.'
+    settingsSetCreateNote(message, 'error')
+    showTransientNotice(message, 'error')
+  } finally {
+    if (createButton instanceof HTMLButtonElement) {
+      createButton.disabled = false
+      createButton.textContent = 'Utworz backup ZIP'
+    }
+  }
+}
+
+async function settingsInspectImportFile() {
+  if (!canManageBackupSettings()) {
+    showTransientNotice('Brak uprawnien do importu backupu.', 'error')
+    return
+  }
+
+  const input = document.getElementById('bkImportFile')
+  const inspectButton = document.getElementById('bkInspectBtn')
+  const file = input instanceof HTMLInputElement ? input.files?.[0] : null
+  if (!file) {
+    showTransientNotice('Wybierz plik ZIP do sprawdzenia.', 'error')
+    return
+  }
+
+  if (inspectButton instanceof HTMLButtonElement) {
+    inspectButton.disabled = true
+    inspectButton.textContent = 'Sprawdzanie...'
+  }
+
+  try {
+    const inspection = await inspectBackupFile(file)
+    appState.settingsImportInspection = inspection
+    settingsRenderImportSummary()
+    showTransientNotice('Plik backupu jest poprawny.')
+  } catch (error) {
+    appState.settingsImportInspection = null
+    settingsRenderImportSummary()
+    const message = error instanceof Error ? error.message : 'Niepoprawny plik backupu.'
+    showTransientNotice(message, 'error')
+  } finally {
+    if (inspectButton instanceof HTMLButtonElement) {
+      inspectButton.disabled = false
+      inspectButton.textContent = 'Sprawdz plik'
+    }
+  }
+}
+
+async function settingsRestoreFromFile() {
+  if (!canManageBackupSettings()) {
+    showTransientNotice('Brak uprawnien do przywracania backupu.', 'error')
+    return
+  }
+
+  const orgId = settingsCurrentOrgId()
+  if (!orgId) {
+    showTransientNotice('Brak orgId w sesji.', 'error')
+    return
+  }
+
+  const input = document.getElementById('bkImportFile')
+  const restoreButton = document.getElementById('bkImportRestoreBtn')
+  const file = input instanceof HTMLInputElement ? input.files?.[0] : null
+  if (!file) {
+    showTransientNotice('Wybierz plik ZIP do przywrocenia.', 'error')
+    return
+  }
+
+  if (!appState.settingsImportInspection) {
+    await settingsInspectImportFile()
+  }
+
+  const summary = appState.settingsImportInspection?.summary
+  if (!summary) {
+    showTransientNotice('Najpierw sprawdz plik ZIP.', 'error')
+    return
+  }
+
+  const confirmRestore = window.confirm(
+    `Przywrocic backup "${summary.title}" (${summary.typeLabel})?\n` +
+      'Zakres zostanie nadpisany.\n' +
+      'System utworzy automatyczny punkt pre-restore przed operacja.',
+  )
+  if (!confirmRestore) {
+    return
+  }
+
+  if (restoreButton instanceof HTMLButtonElement) {
+    restoreButton.disabled = true
+    restoreButton.textContent = 'Przywracanie...'
+  }
+
+  try {
+    const restored = await restoreBackupFromFile({
+      orgId,
+      file,
+      restoredBy: settingsCurrentActor(),
+    })
+    settingsResetImportState()
+    settingsRenderImportSummary()
+    await settingsLoadBackups({ runAutomation: false })
+
+    const modulesCount = Array.isArray(restored?.moduleResults) ? restored.moduleResults.length : 0
+    showTransientNotice(`Przywracanie zakonczone. Moduly: ${modulesCount}.`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udalo sie przywrocic backupu.'
+    showTransientNotice(message, 'error')
+  } finally {
+    if (restoreButton instanceof HTMLButtonElement) {
+      restoreButton.disabled = false
+      restoreButton.textContent = 'Przywroc z pliku'
+    }
+  }
+}
+
+async function settingsDownloadBackup(backupId) {
+  const orgId = settingsCurrentOrgId()
+  if (!orgId) {
+    return
+  }
+
+  const payload = await getBackupDownload({ orgId, backupId })
+  const objectUrl = URL.createObjectURL(payload.blob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = String(payload.fileName ?? 'backup.zip')
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.setTimeout(() => {
+    URL.revokeObjectURL(objectUrl)
+  }, 1500)
+}
+
+async function settingsRestoreBackup(backupId) {
+  if (!canManageBackupSettings()) {
+    showTransientNotice('Brak uprawnien do przywracania backupu.', 'error')
+    return
+  }
+
+  const orgId = settingsCurrentOrgId()
+  if (!orgId) {
+    showTransientNotice('Brak orgId w sesji.', 'error')
+    return
+  }
+
+  const item = appState.settingsBackups.find((row) => String(row?.id ?? '') === String(backupId ?? ''))
+  const label = String(item?.title ?? '').trim() || backupId
+  const confirmed = window.confirm(
+    `Przywrocic backup "${label}"?\n` + 'Zakres danych zostanie nadpisany.\nSystem utworzy pre-restore przed operacja.',
+  )
+  if (!confirmed) {
+    return
+  }
+
+  await restoreBackupById({
+    orgId,
+    backupId,
+    restoredBy: settingsCurrentActor(),
+  })
+  await settingsLoadBackups({ runAutomation: false })
+  showTransientNotice('Backup zostal przywrocony.')
+}
+
+async function settingsDeleteBackup(backupId) {
+  if (!canManageBackupSettings()) {
+    showTransientNotice('Brak uprawnien do usuwania backupow.', 'error')
+    return
+  }
+
+  const orgId = settingsCurrentOrgId()
+  if (!orgId) {
+    showTransientNotice('Brak orgId w sesji.', 'error')
+    return
+  }
+
+  const item = appState.settingsBackups.find((row) => String(row?.id ?? '') === String(backupId ?? ''))
+  const label = String(item?.title ?? '').trim() || backupId
+  const confirmed = window.confirm(`Usunac backup "${label}"? Operacja jest nieodwracalna.`)
+  if (!confirmed) {
+    return
+  }
+
+  await deleteBackup({ orgId, backupId })
+  appState.settingsBackups = appState.settingsBackups.filter((row) => String(row?.id ?? '') !== String(backupId ?? ''))
+  settingsRenderBackupRows(appState.settingsBackups)
+  showTransientNotice('Backup zostal usuniety.')
+}
+
+async function settingsRollbackToPreRestore() {
+  if (!canManageBackupSettings()) {
+    showTransientNotice('Brak uprawnien do rollbacku.', 'error')
+    return
+  }
+
+  const orgId = settingsCurrentOrgId()
+  if (!orgId) {
+    showTransientNotice('Brak orgId w sesji.', 'error')
+    return
+  }
+
+  const confirmed = window.confirm('Przywrocic ostatni punkt pre-restore?')
+  if (!confirmed) {
+    return
+  }
+
+  await restoreLatestPreRestore({
+    orgId,
+    restoredBy: settingsCurrentActor(),
+  })
+  await settingsLoadBackups({ runAutomation: false })
+  showTransientNotice('Przywrocono poprzednia wersje (pre-restore).')
+}
+
 function mountViewsFromTemplates() {
   Object.entries(viewTemplates).forEach(([route, html]) => {
     const viewId = route === 'clientsList' ? 'view-clientsList' : `view-${route}`
@@ -614,9 +1886,55 @@ function setLoginError(message = '') {
   errorNode.style.display = message ? 'block' : 'none'
 }
 
+function dashboardClockLabelToHm(value, fallback = '--:--') {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw === '-' || raw === '--:--:--' || raw === '-:-:-' || raw === '--:--') {
+    return fallback
+  }
+
+  const direct = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/)
+  if (direct) {
+    const hour = pad2(Number(direct[1]))
+    const minute = direct[2]
+    return `${hour}:${minute}`
+  }
+
+  const iso = toIso(raw)
+  if (iso) {
+    const date = new Date(iso)
+    return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+  }
+
+  const parts = raw.split(':')
+  if (parts.length >= 2) {
+    const hour = Number(parts[0])
+    const minute = Number(parts[1])
+    if (Number.isFinite(hour) && Number.isFinite(minute)) {
+      return `${pad2(hour)}:${pad2(minute)}`
+    }
+  }
+
+  return fallback
+}
+
+function dashboardDurationLabelToHm(value, fallback = '00:00') {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw === '-') {
+    return fallback
+  }
+
+  const seconds = dashboardParseDurationLabelToSeconds(raw)
+  if (seconds <= 0) {
+    return raw === '00:00' || raw === '00:00:00' ? '00:00' : fallback
+  }
+
+  return durationSecondsToHm(seconds)
+}
+
 function renderDashboardEvents(rows) {
   const eventsList = document.getElementById('dashEventsList')
   const eventsPill = document.getElementById('dashEventsPill')
+  appState.dashboardTodayRows = Array.isArray(rows) ? [...rows] : []
 
   if (!eventsList) {
     return
@@ -633,31 +1951,41 @@ function renderDashboardEvents(rows) {
         <div class="muted">-</div>
         <div class="muted">-</div>
         <div class="muted">-</div>
-        <div class="muted">-</div>
         <div class="muted ta-right">-</div>
       </div>
     `
+    eventsList.scrollTop = 0
+    window.requestAnimationFrame(() => {
+      eventsList.scrollTop = 0
+    })
     return
   }
 
   eventsList.innerHTML = rows
     .map(
-      (row) => {
-        const startValue = row.qrStart && row.qrStart !== '-' ? row.qrStart : '-:-:-'
-        const stopValue = row.qrStop && row.qrStop !== '-' ? row.qrStop : '--:--:--'
-        const workValue = row.duration && row.duration !== '-' ? row.duration : '-:-:-'
+      (row, rowIndex) => {
+        const startValue = dashboardClockLabelToHm(row.qrStart, '--:--')
+        const stopValue = row?.isRunning ? '--:--' : dashboardClockLabelToHm(row.qrStop, '--:--')
+        const workValue = dashboardDurationLabelToHm(row.duration, '00:00')
         const workerName = String(row.workerName ?? '').trim() || '-'
         const workerLogin = String(row.workerLogin ?? row.id ?? '').trim()
+        const clientLabel = dashboardResolveClientLabel(row)
+        const zoneLabel = String(row.activeZone ?? '').trim() || '-'
         const workerCell = workerName === '-'
           ? `<span>${escapeHtml(workerName)}</span>`
           : `<button class="dash-worker-link" type="button" data-dash-worker-login="${escapeHtml(workerLogin)}" data-dash-worker-name="${escapeHtml(workerName)}">${escapeHtml(workerName)}</button>`
+        const clientCell = clientLabel === '-'
+          ? '<span class="muted">-</span>'
+          : `<button class="dash-entity-link" type="button" data-dash-history-kind="objects" data-dash-row-index="${rowIndex}">${escapeHtml(clientLabel)}</button>`
+        const zoneCell = zoneLabel === '-'
+          ? '<span class="muted">-</span>'
+          : `<button class="dash-entity-link" type="button" data-dash-history-kind="zones" data-dash-row-index="${rowIndex}">${escapeHtml(zoneLabel)}</button>`
         return `
       <div class="list-row dash-events-row">
         <div>${workerCell}</div>
         <div>${escapeHtml(String(row.entriesCount ?? 0))}</div>
-        <div>${escapeHtml(row.activeClient || '-')}</div>
-        <div>${escapeHtml(row.activeZone || '-')}</div>
-        <div>${escapeHtml(row.activeLocation || '-')}</div>
+        <div>${clientCell}</div>
+        <div>${zoneCell}</div>
         <div class="ta-right">
           <div class="dash-time-stack">
             <div class="dash-time-line dash-time-line--start">
@@ -682,20 +2010,29 @@ function renderDashboardEvents(rows) {
       },
     )
     .join('')
+  eventsList.scrollTop = 0
+  window.requestAnimationFrame(() => {
+    eventsList.scrollTop = 0
+  })
 }
 
 function dashboardScheduleDayDisplayName(dayName) {
-  const normalized = String(dayName ?? '').trim().toUpperCase()
+  const normalized = String(dayName ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toUpperCase()
+    .replace(/[^A-Z]/g, '')
   const map = {
-    PONIEDZIAŁEK: 'Poniedziałek',
+    PONIEDZIALEK: 'Poniedziałek',
     WTOREK: 'Wtorek',
-    'ŚRODA': 'Środa',
+    SRODA: 'Środa',
     CZWARTEK: 'Czwartek',
-    PIĄTEK: 'Piątek',
+    PIATEK: 'Piątek',
     SOBOTA: 'Sobota',
     NIEDZIELA: 'Niedziela',
   }
-  return map[normalized] || dayName || '-'
+  return map[normalized] || String(dayName ?? '').trim() || '-'
 }
 
 function dashboardScheduleShiftText(startRaw, taskRaw) {
@@ -746,19 +2083,339 @@ function dashboardScheduleWorkerDisplayName(value) {
     .replace(/(^|[\s-])\p{L}/gu, (fragment) => fragment.toLocaleUpperCase('pl'))
 }
 
+function dashboardResolveScheduleDayKey(dayBucket) {
+  const direct = String(dayBucket?.key ?? '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) {
+    return direct
+  }
+
+  const dateLabel = String(dayBucket?.dateLabel ?? '').trim()
+  const match = dateLabel.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
+  if (match) {
+    return `${match[3]}-${match[2]}-${match[1]}`
+  }
+
+  return ''
+}
+
+function dashboardScheduleTimeToMinutes(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw === '-') {
+    return -1
+  }
+
+  const match = raw.match(/(\d{1,2})[.:](\d{2})/)
+  if (!match) {
+    return -1
+  }
+
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return -1
+  }
+
+  return hour * 60 + minute
+}
+
+function dashboardScheduleStartTimestamp(dayKey, startMinutes) {
+  const normalizedDayKey = String(dayKey ?? '').trim()
+  const minutes = Number(startMinutes)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey) || !Number.isFinite(minutes) || minutes < 0) {
+    return 0
+  }
+
+  const dayStart = new Date(`${normalizedDayKey}T00:00:00`)
+  const dayStartMs = dayStart.getTime()
+  if (!Number.isFinite(dayStartMs)) {
+    return 0
+  }
+
+  return dayStartMs + Math.floor(minutes) * 60 * 1000
+}
+
+function dashboardWorkerAliasKeys(workerName, workerLogin = '', workerId = '') {
+  const keys = new Set()
+  const addNameKeys = (value) => {
+    const normalizedName = normalizeSearchText(value).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!normalizedName) {
+      return
+    }
+
+    keys.add(`n:${normalizedName}`)
+    const tokens = normalizedName.split(' ').filter(Boolean)
+    if (!tokens.length) {
+      return
+    }
+
+    keys.add(`f:${tokens[0]}`)
+    if (tokens.length > 1 && tokens[1]) {
+      keys.add(`fi:${tokens[0]}|${tokens[1].charAt(0)}`)
+    }
+  }
+
+  addNameKeys(workerName)
+
+  const rawLogin = String(workerLogin ?? '').trim()
+  const normalizedLogin = normalizeSearchText(rawLogin)
+  if (normalizedLogin) {
+    keys.add(`l:${normalizedLogin}`)
+  }
+
+  const loginLocalPart = String(rawLogin.split('@')[0] ?? '').trim()
+  const normalizedLocalPart = normalizeSearchText(loginLocalPart)
+  if (normalizedLocalPart) {
+    keys.add(`l:${normalizedLocalPart}`)
+    addNameKeys(loginLocalPart)
+  }
+
+  const normalizedId = normalizeSearchText(workerId)
+  if (normalizedId) {
+    keys.add(`id:${normalizedId}`)
+  }
+
+  return keys
+}
+
+function dashboardCollectStartedWorkerKeysForDay(dayKey) {
+  const normalizedDayKey = String(dayKey ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey)) {
+    return new Set()
+  }
+
+  const sourceRows = Array.isArray(appState.dashboardScheduleSourceRows) ? appState.dashboardScheduleSourceRows : []
+  if (!sourceRows.length) {
+    return new Set()
+  }
+
+  const startedKeys = new Set()
+  sourceRows.forEach((row) => {
+    if (dashboardResolveDayKey(row) !== normalizedDayKey) {
+      return
+    }
+
+    const startIso = toIso(row?.startAt ?? row?.dayStartAt)
+    if (!startIso) {
+      return
+    }
+
+    const keys = dashboardWorkerAliasKeys(
+      row?.workerName ?? row?.name,
+      row?.workerLogin ?? row?.login ?? row?.workerId ?? row?.id,
+      row?.workerId ?? row?.id,
+    )
+    keys.forEach((key) => startedKeys.add(key))
+  })
+
+  return startedKeys
+}
+
+function dashboardHideScheduleMissingStartAlert() {
+  const node = document.getElementById('dashScheduleMissingAlert')
+  if (node) {
+    node.remove()
+  }
+}
+
+function dashboardShowScheduleMissingStartAlert(dayKey, missingEntries = []) {
+  const normalizedDayKey = String(dayKey ?? '').trim()
+  const entries = Array.isArray(missingEntries) ? missingEntries : []
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey) ||
+    !entries.length ||
+    appState.currentRoute !== 'dashboard' ||
+    document.visibilityState !== 'visible'
+  ) {
+    dashboardHideScheduleMissingStartAlert()
+    if (!entries.length) {
+      appState.dashboardScheduleAlertLastKey = ''
+    }
+    return
+  }
+
+  if (appState.dashboardScheduleAlertMuted) {
+    return
+  }
+
+  const now = Date.now()
+  if (Number(appState.dashboardScheduleAlertSnoozeUntil ?? 0) > now) {
+    return
+  }
+
+  const signature = entries
+    .map((entry) => normalizeSearchText(entry?.workerName))
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right, 'pl', { sensitivity: 'base' }))
+    .join('|')
+  if (!signature) {
+    dashboardHideScheduleMissingStartAlert()
+    return
+  }
+
+  appState.dashboardScheduleAlertLastKey = signature
+
+  let node = document.getElementById('dashScheduleMissingAlert')
+  if (!node) {
+    node = document.createElement('div')
+    node.id = 'dashScheduleMissingAlert'
+    node.className = 'dash-schedule-alert'
+    node.innerHTML = `
+      <div class="dash-schedule-alert-signal" aria-hidden="true">UWAGA</div>
+      <div class="dash-schedule-alert-title">Brak QR START</div>
+      <div class="dash-schedule-alert-text" id="dashScheduleMissingAlertText"></div>
+      <div class="dash-schedule-alert-list-wrap">
+        <div class="dash-schedule-alert-list-title">Lista osób:</div>
+        <ul class="dash-schedule-alert-list" id="dashScheduleMissingAlertList"></ul>
+      </div>
+      <div class="dash-schedule-alert-actions">
+        <button type="button" class="btn2 secondary" data-alert-action="snooze">Za 15 min</button>
+        <button type="button" class="btn2 danger" data-alert-action="mute">Nie pokazuj</button>
+      </div>
+    `
+    document.body.appendChild(node)
+    node.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-alert-action]')
+      if (!button) {
+        return
+      }
+
+      const action = String(button.getAttribute('data-alert-action') ?? '').trim()
+      if (action === 'snooze') {
+        appState.dashboardScheduleAlertSnoozeUntil = Date.now() + DASHBOARD_REFRESH_INTERVAL_MS
+        dashboardHideScheduleMissingStartAlert()
+        return
+      }
+
+      if (action === 'mute') {
+        appState.dashboardScheduleAlertMuted = true
+        dashboardHideScheduleMissingStartAlert()
+      }
+    })
+  }
+
+  const textNode = node.querySelector('#dashScheduleMissingAlertText')
+  if (textNode) {
+    textNode.textContent =
+      entries.length === 1
+        ? '1 osoba nie rozpoczęła pracy (brak QR START).'
+        : `${entries.length} osób nie rozpoczęło pracy (brak QR START).`
+  }
+
+  const listNode = node.querySelector('#dashScheduleMissingAlertList')
+  if (listNode) {
+    const normalized = [...entries]
+      .filter((entry) => String(entry?.workerName ?? '').trim())
+      .sort((left, right) => {
+        const leftStart = Number.isFinite(left?.startMinutes) ? Number(left.startMinutes) : Number.POSITIVE_INFINITY
+        const rightStart = Number.isFinite(right?.startMinutes) ? Number(right.startMinutes) : Number.POSITIVE_INFINITY
+        if (leftStart !== rightStart) {
+          return leftStart - rightStart
+        }
+        return String(left?.workerName ?? '').localeCompare(String(right?.workerName ?? ''), 'pl', {
+          sensitivity: 'base',
+        })
+      })
+
+    const seen = new Set()
+    listNode.innerHTML = normalized
+      .filter((entry) => {
+        const key = `${normalizeSearchText(entry?.workerName)}|${String(entry?.startTime ?? '').trim()}`
+        if (!key || seen.has(key)) {
+          return false
+        }
+        seen.add(key)
+        return true
+      })
+      .map((entry) => {
+        const name = escapeHtml(String(entry.workerName ?? '-'))
+        const start = String(entry.startTime ?? '').trim()
+        const startLabel = start && start !== '-' ? ` • START: ${escapeHtml(start)}` : ''
+        return `<li>${name}${startLabel}</li>`
+      })
+      .join('')
+  }
+}
+
+function dashboardApplyScheduleVisibleLimit() {
+  const cardsRoot = document.getElementById('dashScheduleCards')
+  if (!(cardsRoot instanceof HTMLElement)) {
+    return
+  }
+
+  const cards = [...cardsRoot.querySelectorAll('.dash-schedule-card')].filter((node) => node instanceof HTMLElement)
+  if (!cards.length) {
+    cardsRoot.style.removeProperty('max-height')
+    return
+  }
+
+  const visibleCount = Math.min(DASHBOARD_SCHEDULE_VISIBLE_WORKERS, cards.length)
+  const styles = window.getComputedStyle(cardsRoot)
+  const rowGap = Math.max(0, Number.parseFloat(styles.rowGap || styles.gap || '0') || 0)
+
+  let height = 0
+  for (let index = 0; index < visibleCount; index += 1) {
+    const card = cards[index]
+    const cardHeight = Math.max(0, Math.ceil(card.getBoundingClientRect().height || card.offsetHeight || 0))
+    height += cardHeight
+    if (index > 0) {
+      height += rowGap
+    }
+  }
+
+  cardsRoot.style.maxHeight = `${Math.max(120, Math.ceil(height) + 2)}px`
+}
+
+function dashboardQueueScheduleVisibleLimit() {
+  if (dashboardScheduleLimitRaf) {
+    window.cancelAnimationFrame(dashboardScheduleLimitRaf)
+    dashboardScheduleLimitRaf = 0
+  }
+  if (dashboardScheduleLimitTimerA) {
+    window.clearTimeout(dashboardScheduleLimitTimerA)
+    dashboardScheduleLimitTimerA = 0
+  }
+  if (dashboardScheduleLimitTimerB) {
+    window.clearTimeout(dashboardScheduleLimitTimerB)
+    dashboardScheduleLimitTimerB = 0
+  }
+
+  dashboardScheduleLimitRaf = window.requestAnimationFrame(() => {
+    dashboardScheduleLimitRaf = 0
+    dashboardApplyScheduleVisibleLimit()
+  })
+  dashboardScheduleLimitTimerA = window.setTimeout(() => {
+    dashboardScheduleLimitTimerA = 0
+    dashboardApplyScheduleVisibleLimit()
+  }, 90)
+  dashboardScheduleLimitTimerB = window.setTimeout(() => {
+    dashboardScheduleLimitTimerB = 0
+    dashboardApplyScheduleVisibleLimit()
+  }, 260)
+}
+
 function dashboardRenderScheduleCards(dayBucket) {
   const cardsRoot = document.getElementById('dashScheduleCards')
   if (!cardsRoot) {
     return
   }
 
+  const dayKey = dashboardResolveScheduleDayKey(dayBucket)
   const entries = Array.isArray(dayBucket?.entries) ? dayBucket.entries : []
   if (!entries.length) {
     cardsRoot.innerHTML = '<div class="dash-schedule-empty">Brak danych grafiku dla wybranego dnia.</div>'
+    cardsRoot.style.removeProperty('max-height')
+    cardsRoot.scrollTop = 0
+    window.requestAnimationFrame(() => {
+      cardsRoot.scrollTop = 0
+    })
+    dashboardShowScheduleMissingStartAlert(dayKey, [])
     return
   }
 
-  cardsRoot.innerHTML = entries
+  const nowTs = Date.now()
+  const startedWorkerKeys = dashboardCollectStartedWorkerKeysForDay(dayKey)
+
+  const enrichedEntries = entries
     .map((entry) => {
       const workerName = dashboardScheduleWorkerDisplayName(entry?.workerName)
       const status = String(entry?.status ?? '').trim() || 'Brak zmiany'
@@ -766,31 +2423,104 @@ function dashboardRenderScheduleCards(dayBucket) {
       const afternoonText = dashboardScheduleShiftText(entry?.afternoonStart, entry?.afternoonTask)
       const startTime = dashboardScheduleStartTime(entry)
       const statusClass = status === 'Praca' ? 'is-work' : 'is-off'
+      const startMinutes = dashboardScheduleTimeToMinutes(startTime)
+      const startTs = dashboardScheduleStartTimestamp(dayKey, startMinutes)
+      const hasScheduleStart = startTs > 0
+      const workerKeys = dashboardWorkerAliasKeys(
+        entry?.workerName,
+        entry?.workerLogin ?? entry?.workerId ?? '',
+        entry?.workerId ?? '',
+      )
+      const hasQrStart = hasScheduleStart && [...workerKeys].some((key) => startedWorkerKeys.has(key))
+      const minutesToStart = hasScheduleStart ? Math.floor((startTs - nowTs) / (60 * 1000)) : null
+      const isUpcomingSoon =
+        !hasQrStart &&
+        status === 'Praca' &&
+        hasScheduleStart &&
+        Number.isFinite(minutesToStart) &&
+        minutesToStart >= 0 &&
+        minutesToStart <= DASHBOARD_SCHEDULE_SOON_WINDOW_MINUTES
+      const isMissingStart =
+        !hasQrStart &&
+        status === 'Praca' &&
+        hasScheduleStart &&
+        Number.isFinite(minutesToStart) &&
+        minutesToStart < 0
 
+      // Priorytet kart: czerwony > niebieski > zielony > reszta.
+      const priority = isMissingStart ? 0 : isUpcomingSoon ? 1 : hasQrStart ? 2 : hasScheduleStart ? 3 : 4
+      let toneClass = ''
+      if (isMissingStart) {
+        toneClass = 'is-missing-start'
+      } else if (isUpcomingSoon) {
+        toneClass = 'is-upcoming'
+      } else if (hasQrStart) {
+        toneClass = 'is-started'
+      }
+
+      return {
+        workerName,
+        status,
+        morningText,
+        afternoonText,
+        startTime,
+        statusClass,
+        startMinutes,
+        hasScheduleStart,
+        isMissingStart,
+        priority,
+        toneClass,
+      }
+    })
+    .sort((left, right) => {
+      if (left.priority !== right.priority) {
+        return left.priority - right.priority
+      }
+
+      const leftStart = left.hasScheduleStart ? left.startMinutes : Number.POSITIVE_INFINITY
+      const rightStart = right.hasScheduleStart ? right.startMinutes : Number.POSITIVE_INFINITY
+      if (leftStart !== rightStart) {
+        return leftStart - rightStart
+      }
+
+      return left.workerName.localeCompare(right.workerName, 'pl', { sensitivity: 'base' })
+    })
+
+  cardsRoot.innerHTML = enrichedEntries
+    .map((entry) => {
+      const cardClass = entry.toneClass ? `dash-schedule-card ${entry.toneClass}` : 'dash-schedule-card'
       return `
-        <article class="dash-schedule-card">
+        <article class="${cardClass}">
           <div class="dash-schedule-top">
-            <span class="dash-schedule-worker-name" title="${escapeHtml(workerName)}">${escapeHtml(workerName)}</span>
-            <span class="dash-schedule-status-badge ${statusClass}">${escapeHtml(status)}</span>
+            <span class="dash-schedule-worker-name" title="${escapeHtml(entry.workerName)}">${escapeHtml(entry.workerName)}</span>
+            <span class="dash-schedule-status-badge ${entry.statusClass}">${escapeHtml(entry.status)}</span>
           </div>
           <div class="dash-schedule-startline">
             <div class="dash-schedule-line-label">Godz. START</div>
-            <div class="dash-schedule-start-value" title="${escapeHtml(startTime)}">${escapeHtml(startTime)}</div>
+            <div class="dash-schedule-start-value" title="${escapeHtml(entry.startTime)}">${escapeHtml(entry.startTime)}</div>
           </div>
           <div class="dash-schedule-shifts">
             <div class="dash-schedule-line">
               <div class="dash-schedule-line-label">Rano</div>
-              <div class="dash-schedule-line-text" title="${escapeHtml(morningText)}">${escapeHtml(morningText)}</div>
+              <div class="dash-schedule-line-text" title="${escapeHtml(entry.morningText)}">${escapeHtml(entry.morningText)}</div>
             </div>
             <div class="dash-schedule-line">
               <div class="dash-schedule-line-label">Popołudnie</div>
-              <div class="dash-schedule-line-text" title="${escapeHtml(afternoonText)}">${escapeHtml(afternoonText)}</div>
+              <div class="dash-schedule-line-text" title="${escapeHtml(entry.afternoonText)}">${escapeHtml(entry.afternoonText)}</div>
             </div>
           </div>
         </article>
       `
     })
     .join('')
+  cardsRoot.scrollTop = 0
+  window.requestAnimationFrame(() => {
+    cardsRoot.scrollTop = 0
+  })
+
+  dashboardQueueScheduleVisibleLimit()
+  const missingStartEntries = enrichedEntries.filter((entry) => entry.isMissingStart)
+  dashboardShowScheduleMissingStartAlert(dayKey, missingStartEntries)
 }
 
 function renderDashboardSchedulePanel() {
@@ -878,31 +2608,580 @@ function syncDashboardSidePanelHeight() {
   }
 
   const bottomGap = 14
-  const targetHeight = Math.max(640, Math.floor(viewportHeight - rectTop - bottomGap))
+  const viewportTarget = Math.max(640, Math.floor(viewportHeight - rectTop - bottomGap))
+  let targetHeight = viewportTarget
+  const activityPanel = document.querySelector('#view-dashboard .dash-activity-panel')
+  if (activityPanel instanceof HTMLElement) {
+    const activityBottom = activityPanel.getBoundingClientRect().bottom
+    const columnTarget = Math.floor(activityBottom - rectTop)
+    if (Number.isFinite(columnTarget) && columnTarget > 520) {
+      targetHeight = Math.max(640, Math.min(1400, columnTarget))
+    }
+  }
   panel.style.setProperty('--dash-side-target-height', `${targetHeight}px`)
+  dashboardQueueScheduleVisibleLimit()
+}
+
+function dashboardParseDurationLabelToSeconds(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw === '-' || raw === '--:--:--' || raw === '-:-:-') {
+    return 0
+  }
+
+  const parts = raw.split(':').map((part) => Number(part))
+  if (parts.length === 2 && parts.every((part) => Number.isFinite(part) && part >= 0)) {
+    return Math.floor(parts[0] * 3600 + parts[1] * 60)
+  }
+  if (parts.length === 3 && parts.every((part) => Number.isFinite(part) && part >= 0)) {
+    return Math.floor(parts[0] * 3600 + parts[1] * 60 + parts[2])
+  }
+  return 0
+}
+
+function dashboardResolveDayKey(row, fallback = '') {
+  const direct = String(row?.dayKey ?? '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) {
+    return direct
+  }
+
+  const candidates = [row?.startAt, row?.endAt, row?.dayStartAt, row?.dayEndAt]
+  for (const candidate of candidates) {
+    const iso = toIso(candidate)
+    if (iso) {
+      return iso.slice(0, 10)
+    }
+  }
+
+  const normalizedFallback = String(fallback ?? '').trim()
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalizedFallback) ? normalizedFallback : ''
+}
+
+function dashboardResolveWorkerIdentityKeys(row) {
+  const keys = []
+  const login = normalizeSearchText(row?.workerLogin ?? row?.login ?? row?.workerId ?? row?.id)
+  const name = normalizeSearchText(row?.workerName ?? row?.name)
+  if (login) {
+    keys.push(`l:${login}`)
+  }
+  if (name) {
+    keys.push(`n:${name}`)
+  }
+  return [...new Set(keys)]
+}
+
+function dashboardPickEarliestIso(currentIso, candidateIso) {
+  const current = toIso(currentIso)
+  const candidate = toIso(candidateIso)
+  if (!candidate) {
+    return current || ''
+  }
+  if (!current) {
+    return candidate
+  }
+  return new Date(candidate).getTime() < new Date(current).getTime() ? candidate : current
+}
+
+function dashboardResolveEarliestStartForKeys(keys = [], markerMap = new Map(), anyMap = new Map()) {
+  let firstMarker = ''
+  let firstAny = ''
+  keys.forEach((key) => {
+    firstMarker = dashboardPickEarliestIso(firstMarker, markerMap.get(key))
+    firstAny = dashboardPickEarliestIso(firstAny, anyMap.get(key))
+  })
+  return firstMarker || firstAny || ''
+}
+
+function dashboardApplyFirstQrStartToday(todayRows = [], eventRows = []) {
+  const rows = Array.isArray(todayRows) ? todayRows : []
+  const sourceEvents = Array.isArray(eventRows) ? eventRows : []
+  if (!rows.length || !sourceEvents.length) {
+    return rows
+  }
+
+  const todayKey = todayYmd()
+  const firstMarkerByWorker = new Map()
+  const firstAnyStartByWorker = new Map()
+
+  sourceEvents.forEach((row) => {
+    if (dashboardResolveDayKey(row) !== todayKey) {
+      return
+    }
+
+    const startIso = toIso(row?.startAt ?? row?.dayStartAt)
+    if (!startIso) {
+      return
+    }
+
+    const workerKeys = dashboardResolveWorkerIdentityKeys(row)
+    if (!workerKeys.length) {
+      return
+    }
+
+    const typeLabel = eventTypeInfo(row).label
+    const isQrStartMarker = typeLabel === 'QR START' || typeLabel === 'QR START + STOP'
+
+    workerKeys.forEach((key) => {
+      const anyIso = firstAnyStartByWorker.get(key)
+      firstAnyStartByWorker.set(key, dashboardPickEarliestIso(anyIso, startIso))
+      if (isQrStartMarker) {
+        const markerIso = firstMarkerByWorker.get(key)
+        firstMarkerByWorker.set(key, dashboardPickEarliestIso(markerIso, startIso))
+      }
+    })
+  })
+
+  return rows.map((row) => {
+    const workerKeys = dashboardResolveWorkerIdentityKeys(row)
+    if (!workerKeys.length) {
+      return row
+    }
+
+    const firstStartIso = dashboardResolveEarliestStartForKeys(
+      workerKeys,
+      firstMarkerByWorker,
+      firstAnyStartByWorker,
+    )
+    if (!firstStartIso) {
+      return row
+    }
+
+    const firstStartLabel = workerDetailIsoToTime(firstStartIso)
+    if (!firstStartLabel || firstStartLabel === '-') {
+      return row
+    }
+
+    return {
+      ...row,
+      qrStart: firstStartLabel,
+    }
+  })
+}
+
+function dashboardEventDurationSec(row) {
+  const direct = Number(row?.durationSec ?? 0)
+  if (Number.isFinite(direct) && direct > 0) {
+    return Math.floor(direct)
+  }
+
+  const startIso = toIso(row?.startAt)
+  const endIso = toIso(row?.endAt)
+  if (!startIso || !endIso) {
+    return 0
+  }
+
+  const diff = Math.floor((new Date(endIso).getTime() - new Date(startIso).getTime()) / 1000)
+  return Number.isFinite(diff) && diff > 0 ? diff : 0
+}
+
+function dashboardIsQrCodeLike(value) {
+  const normalized = String(value ?? '').trim().toUpperCase()
+  if (!normalized || normalized === '-') {
+    return false
+  }
+  return /^(?=[A-Z0-9-]*\d)[A-Z0-9-]{3,}$/.test(normalized)
+}
+
+function dashboardRowIsIndividual(row) {
+  const clientIndId = String(row?.clientIndId ?? '').trim()
+  if (clientIndId) {
+    return true
+  }
+  const haystack = [row?.clientStatus, row?.comment, row?.dayComment, row?.endReason]
+    .map((value) => String(value ?? '').toLowerCase())
+    .join(' ')
+  return haystack.includes('indywid') || haystack.includes('individual')
+}
+
+function dashboardRowIsSpecial(row) {
+  const haystack = [row?.strefa, row?.zoneName, row?.roomId, row?.zoneId, row?.clientStatus, row?.comment, row?.dayComment]
+    .map((value) => String(value ?? '').toLowerCase())
+    .join(' ')
+  return haystack.includes('specjal') || haystack.includes('special')
+}
+
+function dashboardRowLooksLikeMarker(row) {
+  const type = eventTypeInfo(row).label
+  if (type === 'QR START' || type === 'QR STOP') {
+    return true
+  }
+
+  const candidates = [row?.zoneId, row?.roomId, row?.utilityRoomId, row?.strefa, row?.zoneName, row?.dayStartObject, row?.dayStopObject]
+  return candidates.some((value) => dashboardIsQrCodeLike(value))
+}
+
+function dashboardResolveWorkerLabel(row) {
+  return String(row?.workerName ?? row?.workerLogin ?? '').trim() || 'Nieznany pracownik'
+}
+
+function resolveClientLabelWithQrFallback(clientLabel, qrCandidate) {
+  const rawLabel = String(clientLabel ?? '').trim()
+  const normalizedLabel = normalizeSearchText(rawLabel)
+  const qrCode = reportHistoryNormalizeQrCode(qrCandidate)
+  const unnamedLabels = new Set(['unassigned', 'brak klienta', 'nieprzypisany', 'unknown', 'none'])
+  const isUnnamedClient = !rawLabel || rawLabel === '-' || unnamedLabels.has(normalizedLabel)
+  if (!isUnnamedClient) {
+    return rawLabel
+  }
+  return qrCode || '-'
+}
+
+function dashboardResolveClientLabel(row) {
+  const rawClientLabel = String(row?.clientName ?? row?.klient ?? row?.activeClient ?? '').trim()
+  const qrCandidate = String(
+    row?.zoneId ??
+      row?.roomId ??
+      row?.utilityRoomId ??
+      row?.dayStartObject ??
+      row?.dayStopObject ??
+      row?.strefa ??
+      row?.zoneName ??
+      '',
+  ).trim()
+  return resolveClientLabelWithQrFallback(rawClientLabel, qrCandidate)
+}
+
+function dashboardResolveZoneLabel(row) {
+  return String(row?.zoneName ?? row?.strefa ?? row?.activeZone ?? '').trim() || '-'
+}
+
+function dashboardBuildHistoryRow(row, dayFallback) {
+  const dayKey = dashboardResolveDayKey(row, dayFallback)
+  const zoneId = String(row?.activeZoneId ?? row?.zoneId ?? row?.roomId ?? row?.utilityRoomId ?? '').trim()
+  const zoneLabel = dashboardResolveZoneLabel(row)
+  return {
+    workerLogin: String(row?.workerLogin ?? '').trim(),
+    workerName: dashboardResolveWorkerLabel(row),
+    clientId: String(row?.clientId ?? '').trim(),
+    clientName: dashboardResolveClientLabel(row),
+    klient: dashboardResolveClientLabel(row),
+    zoneId,
+    roomId: zoneId,
+    utilityRoomId: zoneId,
+    zoneName: zoneLabel,
+    strefa: zoneLabel,
+    dayKey,
+    startAt: toIso(row?.startAt),
+    endAt: toIso(row?.endAt),
+  }
+}
+
+function dashboardMetricDetailsOrEmpty(metricKey) {
+  const details = appState.dashboardMetricDetails?.[metricKey]
+  return Array.isArray(details) ? details : []
+}
+
+function dashboardBuildSummary(todayRows = [], eventRows = []) {
+  const today = todayYmd()
+  const yesterday = daysAgoYmd(1)
+  const normalizedTodayRows = Array.isArray(todayRows) ? todayRows : []
+  const normalizedEventRows = Array.isArray(eventRows) ? eventRows : []
+
+  const activeNowRows = normalizedTodayRows.filter((row) => Boolean(row?.isRunning))
+  const finishedRows = normalizedTodayRows.filter((row) => {
+    const stopValue = String(row?.qrStop ?? '').trim()
+    const hasStop = Boolean(stopValue) && stopValue !== '--:--:--' && stopValue !== '-:-:-' && stopValue !== '-'
+    return !row?.isRunning && hasStop
+  })
+  const totalTodaySec = normalizedTodayRows.reduce((sum, row) => sum + dashboardParseDurationLabelToSeconds(row?.duration), 0)
+
+  const table1Details = {
+    activeNow: activeNowRows.map((row) => ({
+      title: dashboardResolveWorkerLabel(row),
+      subtitle: `START: ${dashboardClockLabelToHm(row?.qrStart, '--:--')} · Klient: ${dashboardResolveClientLabel(row)} · Strefa: ${dashboardResolveZoneLabel(row)}`,
+      tab: 'workers',
+      row: dashboardBuildHistoryRow(row, today),
+    })),
+    finishedToday: finishedRows.map((row) => ({
+      title: dashboardResolveWorkerLabel(row),
+      subtitle: `START: ${dashboardClockLabelToHm(row?.qrStart, '--:--')} · STOP: ${dashboardClockLabelToHm(row?.qrStop, '--:--')} · Czas: ${dashboardDurationLabelToHm(row?.duration, '00:00')}`,
+      tab: 'workers',
+      row: dashboardBuildHistoryRow(row, today),
+    })),
+    totalHoursToday: normalizedTodayRows
+      .map((row) => {
+        const seconds = dashboardParseDurationLabelToSeconds(row?.duration)
+        return { row, seconds }
+      })
+      .filter((item) => item.seconds > 0)
+      .sort((left, right) => right.seconds - left.seconds)
+      .map((item) => ({
+        title: dashboardResolveWorkerLabel(item.row),
+        subtitle: `Czas: ${durationSecondsToHm(item.seconds)} · Klient: ${dashboardResolveClientLabel(item.row)} · Strefa: ${dashboardResolveZoneLabel(item.row)}`,
+        tab: 'workers',
+        row: dashboardBuildHistoryRow(item.row, today),
+      })),
+  }
+
+  const historicalRows = normalizedEventRows.filter((row) => {
+    const dayKey = dashboardResolveDayKey(row)
+    return Boolean(dayKey) && dayKey < today
+  })
+  const historicalWorkerDayGroups = new Map()
+  historicalRows.forEach((row) => {
+    const dayKey = dashboardResolveDayKey(row)
+    if (!dayKey) {
+      return
+    }
+    const keySource = String(row?.workerLogin ?? row?.workerName ?? '').trim()
+    const workerKey = normalizeSearchText(keySource) || 'unknown'
+    const groupKey = `${dayKey}::${workerKey}`
+    if (!historicalWorkerDayGroups.has(groupKey)) {
+      historicalWorkerDayGroups.set(groupKey, {
+        dayKey,
+        workerLogin: String(row?.workerLogin ?? '').trim(),
+        workerName: dashboardResolveWorkerLabel(row),
+        rows: [],
+      })
+    }
+    const bucket = historicalWorkerDayGroups.get(groupKey)
+    if (String(row?.workerLogin ?? '').trim() && !bucket.workerLogin) {
+      bucket.workerLogin = String(row.workerLogin).trim()
+    }
+    const candidateName = dashboardResolveWorkerLabel(row)
+    if (candidateName.split(/\s+/).length > String(bucket.workerName ?? '').split(/\s+/).length) {
+      bucket.workerName = candidateName
+    }
+    bucket.rows.push(row)
+  })
+  const historicalBuckets = [...historicalWorkerDayGroups.values()].sort((left, right) => {
+    if (left.dayKey !== right.dayKey) {
+      return left.dayKey < right.dayKey ? 1 : -1
+    }
+    return String(left.workerName ?? '').localeCompare(String(right.workerName ?? ''), 'pl', {
+      sensitivity: 'base',
+    })
+  })
+
+  const openStartStopYesterdayIssues = []
+  const openCleanYesterdayIssues = []
+  historicalBuckets.forEach((bucket) => {
+    const rows = Array.isArray(bucket.rows) ? bucket.rows : []
+    const hasQrStop = rows.some((row) => {
+      const endReason = String(row?.endReason ?? '').trim().toUpperCase()
+      const status = String(row?.status ?? '').trim().toUpperCase()
+      return eventTypeInfo(row).label === 'QR STOP' || endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY' || status === 'WORKDAY_CLOSED'
+    })
+    const runningRows = rows.filter(
+      (row) =>
+        normalizeEventStatus(row?.status, Boolean(toIso(row?.endAt) || toIso(row?.dayEndAt))) === 'RUNNING' &&
+        !toIso(row?.endAt) &&
+        !toIso(row?.dayEndAt),
+    )
+    if (!runningRows.length) {
+      return
+    }
+
+    if (!hasQrStop) {
+      const probe = runningRows[0]
+      openStartStopYesterdayIssues.push({
+        title: bucket.workerName || dashboardResolveWorkerLabel(probe),
+        subtitle: `Data: ${formatDatePl(`${bucket.dayKey}T00:00:00.000Z`)} · Klient: ${dashboardResolveClientLabel(probe)} · Strefa: ${dashboardResolveZoneLabel(probe)}`,
+        tab: 'workers',
+        row: dashboardBuildHistoryRow(
+          {
+            ...probe,
+            workerLogin: bucket.workerLogin || probe?.workerLogin,
+            workerName: bucket.workerName || probe?.workerName,
+          },
+          bucket.dayKey,
+        ),
+      })
+      return
+    }
+
+    const openCleanRow = runningRows.find((row) => {
+      if (dashboardRowIsIndividual(row) || dashboardRowIsSpecial(row)) {
+        return false
+      }
+      return !dashboardRowLooksLikeMarker(row)
+    })
+    if (openCleanRow) {
+      openCleanYesterdayIssues.push({
+        title: bucket.workerName || dashboardResolveWorkerLabel(openCleanRow),
+        subtitle: `Data: ${formatDatePl(`${bucket.dayKey}T00:00:00.000Z`)} · Klient: ${dashboardResolveClientLabel(openCleanRow)} · Strefa: ${dashboardResolveZoneLabel(openCleanRow)}`,
+        tab: 'workers',
+        row: dashboardBuildHistoryRow(
+          {
+            ...openCleanRow,
+            workerLogin: bucket.workerLogin || openCleanRow?.workerLogin,
+            workerName: bucket.workerName || openCleanRow?.workerName,
+          },
+          bucket.dayKey,
+        ),
+      })
+    }
+  })
+
+  const trackedDays = new Set([today, yesterday])
+  const cleanTooLongRows = normalizedEventRows
+    .filter((row) => trackedDays.has(dashboardResolveDayKey(row)))
+    .filter((row) => !dashboardRowIsIndividual(row))
+    .filter((row) => !dashboardRowIsSpecial(row))
+    .filter((row) => normalizeEventStatus(row?.status, Boolean(toIso(row?.endAt) || toIso(row?.dayEndAt))) === 'CLOSED')
+    .filter((row) => !dashboardRowLooksLikeMarker(row))
+    .map((row) => ({ row, seconds: dashboardEventDurationSec(row) }))
+    .filter((entry) => entry.seconds > DASHBOARD_LONG_CLEAN_SECONDS)
+    .sort((left, right) => right.seconds - left.seconds)
+
+  const cleanTooLongDetails = cleanTooLongRows.map((entry) => {
+    const row = entry.row
+    const dayKey = dashboardResolveDayKey(row)
+    return {
+      title: dashboardResolveWorkerLabel(row),
+      subtitle: `Data: ${formatDatePl(`${dayKey}T00:00:00.000Z`)} · ${dashboardResolveClientLabel(row)} / ${dashboardResolveZoneLabel(row)} · Czas: ${durationSecondsToHm(entry.seconds)}`,
+      tab: 'workers',
+      row: dashboardBuildHistoryRow(row, dayKey),
+    }
+  })
+
+  return {
+    values: {
+      activeNow: activeNowRows.length,
+      finishedToday: finishedRows.length,
+      totalHoursToday: durationSecondsToHm(totalTodaySec),
+      openStartStopYesterday: openStartStopYesterdayIssues.length,
+      openCleanYesterday: openCleanYesterdayIssues.length,
+      cleanTooLong: cleanTooLongDetails.length,
+    },
+    details: {
+      activeNow: table1Details.activeNow,
+      finishedToday: table1Details.finishedToday,
+      totalHoursToday: table1Details.totalHoursToday,
+      openStartStopYesterday: openStartStopYesterdayIssues,
+      openCleanYesterday: openCleanYesterdayIssues,
+      cleanTooLong: cleanTooLongDetails,
+    },
+  }
 }
 
 function renderDashboardSummary(summary) {
-  const openCount = document.getElementById('sumOpenCount')
-  const openNames = document.getElementById('sumOpenNames')
-  const over9Count = document.getElementById('sumOver9Count')
-  const over9Names = document.getElementById('sumOver9Names')
+  const values = summary?.values ?? {}
+  appState.dashboardMetricDetails = summary?.details ?? {}
+  appState.dashboardMetricValues = values
 
-  if (openCount) {
-    openCount.textContent = String(summary.openNoStop.count)
+  const setValue = (id, value) => {
+    const node = document.getElementById(id)
+    if (node) {
+      node.textContent = String(value ?? '0')
+    }
   }
 
-  if (openNames) {
-    openNames.textContent = summary.openNoStop.workers.join(', ') || '-'
+  setValue('sumActiveNowCount', values.activeNow ?? 0)
+  setValue('sumFinishedTodayCount', values.finishedToday ?? 0)
+  setValue('sumTotalHoursToday', values.totalHoursToday ?? '00:00')
+  setValue('sumOpenStartStopYesterdayCount', values.openStartStopYesterday ?? 0)
+  setValue('sumOpenCleanYesterdayCount', values.openCleanYesterday ?? 0)
+  setValue('sumCleanTooLongCount', values.cleanTooLong ?? 0)
+}
+
+function dashboardHideMetricPopover() {
+  if (dashboardMetricPopoverHideTimer) {
+    window.clearTimeout(dashboardMetricPopoverHideTimer)
+    dashboardMetricPopoverHideTimer = null
   }
 
-  if (over9Count) {
-    over9Count.textContent = String(summary.over9h.count)
+  const popover = document.getElementById('dashMetricPopover')
+  if (!popover) {
+    return
   }
 
-  if (over9Names) {
-    over9Names.textContent = summary.over9h.workers.join(', ') || '-'
+  popover.style.display = 'none'
+  popover.removeAttribute('data-metric')
+}
+
+function dashboardScheduleMetricPopoverHide() {
+  if (dashboardMetricPopoverHideTimer) {
+    window.clearTimeout(dashboardMetricPopoverHideTimer)
   }
+  dashboardMetricPopoverHideTimer = window.setTimeout(() => {
+    dashboardHideMetricPopover()
+  }, 120)
+}
+
+function dashboardCancelMetricPopoverHide() {
+  if (dashboardMetricPopoverHideTimer) {
+    window.clearTimeout(dashboardMetricPopoverHideTimer)
+    dashboardMetricPopoverHideTimer = null
+  }
+}
+
+function dashboardMetricTitle(metricKey) {
+  const button = document.querySelector(`[data-dash-metric="${metricKey}"]`)
+  const label = String(button?.querySelector('.dash-summary-row-label')?.textContent ?? '').trim()
+  return label || 'Szczegóły'
+}
+
+function dashboardShowMetricPopover(metricKey, anchorButton) {
+  const popover = document.getElementById('dashMetricPopover')
+  const titleNode = document.getElementById('dashMetricPopoverTitle')
+  const listNode = document.getElementById('dashMetricPopoverList')
+  if (!popover || !titleNode || !listNode || !(anchorButton instanceof HTMLElement)) {
+    return
+  }
+
+  dashboardCancelMetricPopoverHide()
+  const details = dashboardMetricDetailsOrEmpty(metricKey)
+  const maxRows = 24
+  const visibleRows = details.slice(0, maxRows)
+  const hiddenCount = Math.max(0, details.length - visibleRows.length)
+
+  titleNode.textContent = dashboardMetricTitle(metricKey)
+  listNode.innerHTML = visibleRows.length
+    ? `
+      ${visibleRows
+        .map(
+          (detail, index) => `
+            <button
+              class="dash-metric-popover-item"
+              type="button"
+              data-dash-metric-detail="${index}"
+              data-dash-metric-key="${escapeHtml(String(metricKey ?? ''))}"
+              title="Przejdz do rekordu"
+            >
+              <span class="dash-metric-popover-item-title">${escapeHtml(detail?.title ?? '-')}</span>
+              <span class="dash-metric-popover-item-subtitle">${escapeHtml(detail?.subtitle ?? '-')}</span>
+            </button>
+          `,
+        )
+        .join('')}
+      ${
+        hiddenCount > 0
+          ? `<div class="dash-metric-popover-more">+${hiddenCount} kolejnych rekordów...</div>`
+          : ''
+      }
+    `
+    : '<div class="dash-metric-popover-empty">Brak szczegółów.</div>'
+
+  popover.style.display = 'block'
+  popover.style.visibility = 'hidden'
+  popover.setAttribute('data-metric', String(metricKey ?? ''))
+
+  const anchorRect = anchorButton.getBoundingClientRect()
+  const popoverRect = popover.getBoundingClientRect()
+  let left = anchorRect.left + (anchorRect.width - popoverRect.width) / 2
+  left = Math.max(10, Math.min(left, window.innerWidth - popoverRect.width - 10))
+
+  let top = anchorRect.bottom + 8
+  if (top + popoverRect.height > window.innerHeight - 10) {
+    top = Math.max(10, anchorRect.top - popoverRect.height - 8)
+  }
+
+  popover.style.left = `${Math.round(left)}px`
+  popover.style.top = `${Math.round(top)}px`
+  popover.style.visibility = 'visible'
+}
+
+async function openDashboardMetricDetail(metricKey, detailIndex) {
+  const details = dashboardMetricDetailsOrEmpty(metricKey)
+  const detail = details[Number(detailIndex)]
+  if (!detail) {
+    return
+  }
+
+  dashboardHideMetricPopover()
+  const row = detail?.row ?? {}
+  const tab = String(detail?.tab ?? '').trim() || 'workers'
+  await openEventHistoryFromRow(row, tab)
 }
 
 function setSubwelcomeMetric(selector, count) {
@@ -941,12 +3220,10 @@ function renderClientsTable(rows) {
       const city = client.city ?? '-'
       const coordinator = client.coordinator ?? '-'
       const canManage = canManageClients()
-      const canDelete = canDeleteClients()
 
       const actions = canManage
         ? `
             <button class="btn2" type="button" data-client-action="edit" data-client-id="${escapeHtml(client.id)}">Edytuj</button>
-            ${canDelete ? `<button class="btn-danger" type="button" style="margin-left:10px;" data-client-action="delete" data-client-id="${escapeHtml(client.id)}">Usuń</button>` : ''}
           `
         : `<button class="btn2" type="button" data-client-action="view" data-client-id="${escapeHtml(client.id)}">Podgląd</button>`
 
@@ -1012,6 +3289,8 @@ function updateClientsPager(paged) {
   if (nextBtn) {
     nextBtn.disabled = paged.page >= paged.totalPages
   }
+
+  workerTimeSyncSelectionUi()
 }
 
 function filterClientsTable({ resetPage = true } = {}) {
@@ -1246,36 +3525,8 @@ async function saveClientData() {
 }
 
 async function deleteClientData(clientId) {
-  if (!appState.session?.orgId) {
-    return
-  }
-
-  if (!canDeleteClients()) {
-    alert('Brak uprawnień do usuwania klientów.')
-    return
-  }
-
-  const normalizedId = String(clientId ?? '').trim()
-  if (!normalizedId) {
-    return
-  }
-
-  const current = getClientByIdFromState(normalizedId)
-  const label = current?.name ? ` (${current.name})` : ''
-  const approved = confirm(`Czy na pewno chcesz usunąć klienta ${normalizedId}${label}?`)
-  if (!approved) {
-    return
-  }
-
-  try {
-    await deleteClient(appState.session.orgId, normalizedId)
-    appState.clients = appState.clients.filter((client) => String(client.id) !== normalizedId)
-    filterClientsTable({ resetPage: false })
-    await fetchClientsForCurrentSession(true)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Błąd usuwania klienta.'
-    alert(message)
-  }
+  void clientId
+  showTransientNotice('Usuwanie klientów jest wyłączone.', 'error')
 }
 
 function profileFieldValue(value, fallback = '-') {
@@ -2359,7 +4610,14 @@ function renderEventsRows(rows) {
           ? workerCard
           : `<button class="events-cell-link" type="button" data-event-history-worker="${index}" title="Pokaz historie osoby">${workerCard}</button>`
 
-      const clientLabel = String(row.klient || '-').trim() || '-'
+      const clientQrCandidate =
+        row?.zoneId ??
+        row?.roomId ??
+        row?.utilityRoomId ??
+        row?.dayStartObject ??
+        row?.dayStopObject ??
+        row?.strefa
+      const clientLabel = resolveClientLabelWithQrFallback(String(row?.clientName ?? row?.klient ?? '-').trim() || '-', clientQrCandidate)
       const clientCell =
         clientLabel === '-'
           ? '-'
@@ -2410,6 +4668,14 @@ function durationSecondsToHms(value) {
   const minutes = Math.floor((normalized % 3600) / 60)
   const secondsRemainder = normalized % 60
   return `${pad2(hours)}:${pad2(minutes)}:${pad2(secondsRemainder)}`
+}
+
+function durationSecondsToHm(value) {
+  const seconds = Number(value ?? 0)
+  const normalized = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0
+  const hours = Math.floor(normalized / 3600)
+  const minutes = Math.floor((normalized % 3600) / 60)
+  return `${pad2(hours)}:${pad2(minutes)}`
 }
 
 function setSelectOptions(selectNode, options, placeholderLabel = '(wybierz)') {
@@ -2609,7 +4875,33 @@ function refreshEventZoneOptionsForClient() {
   populateEventEditorOptions(selectedWorker, clientId, '')
 }
 
+function ensureSingleOverlayInBody(id) {
+  const nodes = [...document.querySelectorAll(`#${id}`)]
+  if (!nodes.length) {
+    return null
+  }
+
+  const preferred = nodes[nodes.length - 1]
+  nodes.forEach((node) => {
+    if (node !== preferred) {
+      node.remove()
+    }
+  })
+
+  if (preferred.parentElement !== document.body) {
+    document.body.appendChild(preferred)
+  }
+
+  return preferred
+}
+
+function ensureEventOverlaysMountedToBody() {
+  ensureSingleOverlayInBody('evEditorOverlay')
+  ensureSingleOverlayInBody('evCommentOverlay')
+}
+
 async function openEventEditor(item) {
+  ensureEventOverlaysMountedToBody()
   const overlay = document.getElementById('evEditorOverlay')
   if (!overlay) {
     return
@@ -2665,6 +4957,7 @@ async function openEventEditor(item) {
 }
 
 async function openCreateEventEditor() {
+  ensureEventOverlaysMountedToBody()
   const overlay = document.getElementById('evEditorOverlay')
   if (!overlay) {
     return
@@ -2787,21 +5080,45 @@ async function refreshDashboardWidgets(options = {}) {
     return
   }
 
-  const [todayActive, summary, scheduleBoard] = await Promise.all([
+  const rangeFrom = firstDayOfCurrentMonthYmd()
+  const rangeTo = todayYmd()
+  const [todayActive, recentEvents, todayWorkdays, scheduleBoard] = await Promise.all([
     getTodayActiveWorkers(appState.session.orgId),
-    getDashboardSummary(appState.session.orgId),
+    getWorkdays(appState.session.orgId, {
+      source: 'events',
+      fromIso: rangeFrom,
+      toIso: rangeTo,
+      page: 1,
+      pageSize: 100000,
+    }).catch(() => ({ items: [] })),
+    getWorkdays(appState.session.orgId, {
+      source: 'workdays',
+      fromIso: rangeTo,
+      toIso: rangeTo,
+      page: 1,
+      pageSize: 100000,
+    }).catch(() => ({ items: [] })),
     getScheduleBoard().catch(() => null),
   ])
-  renderDashboardEvents(todayActive.items ?? [])
+  const todayStartSourceRows = [...(recentEvents.items ?? []), ...(todayWorkdays.items ?? [])]
+  appState.dashboardScheduleSourceRows = todayStartSourceRows
+  const todayRows = dashboardApplyFirstQrStartToday(todayActive.items ?? [], todayStartSourceRows)
+  const summary = dashboardBuildSummary(todayRows, recentEvents.items ?? [])
+  renderDashboardEvents(todayRows)
   renderDashboardSummary(summary)
   if (scheduleBoard && Array.isArray(scheduleBoard.days)) {
     appState.dashboardScheduleDays = scheduleBoard.days
     appState.dashboardScheduleFetchedAt = String(scheduleBoard.fetchedAtIso ?? '')
-    if (!appState.dashboardScheduleSelectedDay || !scheduleBoard.days.some((day) => day.key === appState.dashboardScheduleSelectedDay)) {
-      const preferredToday = String(scheduleBoard.todayKey ?? '').trim()
-      const todayMatch = scheduleBoard.days.find((day) => day.key === preferredToday)
+    const preferredToday = String(scheduleBoard.todayKey ?? '').trim()
+    const selectedExists = scheduleBoard.days.some((day) => day.key === appState.dashboardScheduleSelectedDay)
+    const todayMatch = scheduleBoard.days.find((day) => day.key === preferredToday)
+    if (todayMatch?.key) {
+      if (!appState.dashboardScheduleSelectedDay || !selectedExists) {
+        appState.dashboardScheduleSelectedDay = String(todayMatch.key)
+      }
+    } else {
       appState.dashboardScheduleSelectedDay = String(
-        todayMatch?.key ?? dashboardPickNearestScheduleDayKey(scheduleBoard.days, preferredToday),
+        dashboardPickNearestScheduleDayKey(scheduleBoard.days, preferredToday),
       )
     }
   } else if (!appState.dashboardScheduleDays.length) {
@@ -2871,18 +5188,7 @@ async function autoRefreshDashboardIfNewRecords() {
     return
   }
 
-  const orgId = appState.session?.orgId
-  if (!orgId) {
-    return
-  }
-
-  const fingerprint = await getTodayWorktimeFingerprint(orgId)
-  const nextToken = String(fingerprint?.token ?? '').trim()
-  if (!nextToken || nextToken === dashboardLastWorktimeToken) {
-    return
-  }
-
-  await refreshDashboardWidgets({ worktimeToken: nextToken })
+  await refreshDashboardWidgets({ syncWorktimeToken: true })
 }
 
 function stopDashboardAutoRefresh() {
@@ -3139,6 +5445,7 @@ async function deleteSelectedEvents() {
 }
 
 function openEventCommentModal(message) {
+  ensureEventOverlaysMountedToBody()
   const overlay = document.getElementById('evCommentOverlay')
   const text = document.getElementById('evCommentText')
 
@@ -3870,7 +6177,7 @@ function renderWorkerProfileRows(rows) {
     return
   }
 
-  const actionLabel = 'Podgląd'
+  const actionLabel = canManageWorkers() ? 'Edytuj' : 'Podgląd'
   root.innerHTML = rows
     .map(
       (worker, index) => `
@@ -4192,8 +6499,24 @@ async function saveWorkerProfileData() {
       await createWorker(appState.session.orgId, payload)
       showTransientNotice('Pracownik został dodany.')
     } else {
-      alert('Edycja pracownika będzie podpięta po dodaniu operacji UpdateWorkerForOrg w Data Connect.')
-      return
+      const currentLogin = String(appState.workerProfileCurrent?.login ?? '').trim()
+      if (!currentLogin) {
+        throw new Error('Brak loginu pracownika do edycji.')
+      }
+
+      await updateWorker(appState.session.orgId, currentLogin, {
+        workerId: String(document.getElementById('wkEditId')?.value ?? appState.workerProfileCurrent?.workerId ?? appState.workerProfileCurrent?.id ?? '').trim(),
+        name: payload.name,
+        login: payload.login,
+        role: payload.role,
+        workerType: payload.role,
+        active: payload.active,
+        email: payload.email,
+        loginEmail: payload.email,
+        phone: payload.phone,
+        editedBy: String(appState.session?.name ?? '').trim(),
+      })
+      showTransientNotice('Zmiany pracownika zostały zapisane.')
     }
 
     closeWorkerProfileModal()
@@ -4213,33 +6536,134 @@ async function deleteWorkerProfileData() {
   alert('Usuwanie pracownika będzie podpięte po dodaniu operacji DeleteWorkerForOrg w Data Connect.')
 }
 
+function workerTimeSelectionKey(worker) {
+  return String(worker?.login ?? worker?.workerId ?? worker?.id ?? '').trim()
+}
+
+function workerTimeIsSelected(key) {
+  const normalized = String(key ?? '').trim()
+  if (!normalized) {
+    return false
+  }
+  return appState.workerTimeSelectedKeys.has(normalized)
+}
+
+function workerTimeSetSelected(key, selected) {
+  const normalized = String(key ?? '').trim()
+  if (!normalized) {
+    return
+  }
+
+  if (selected) {
+    appState.workerTimeSelectedKeys.add(normalized)
+  } else {
+    appState.workerTimeSelectedKeys.delete(normalized)
+  }
+}
+
+function workerTimeResetSelection() {
+  appState.workerTimeSelectedKeys = new Set()
+  appState.workerTimeCurrentPageKeys = []
+}
+
+function workerTimeSyncSelectionUi() {
+  const selectAll = document.getElementById('wtSelectAll')
+  if (!(selectAll instanceof HTMLInputElement)) {
+    return
+  }
+
+  const pageKeys = appState.workerTimeCurrentPageKeys
+  if (!pageKeys.length) {
+    selectAll.checked = false
+    selectAll.indeterminate = false
+    return
+  }
+
+  const selectedOnPage = pageKeys.filter((key) => workerTimeIsSelected(key)).length
+  selectAll.checked = selectedOnPage > 0 && selectedOnPage === pageKeys.length
+  selectAll.indeterminate = selectedOnPage > 0 && selectedOnPage < pageKeys.length
+}
+
+function workerTimeToggleSelectAllOnPage(checked) {
+  appState.workerTimeCurrentPageKeys.forEach((key) => workerTimeSetSelected(key, checked))
+  workerTimeSyncSelectionUi()
+}
+
+function getFilteredWorkerTimeRows(rows = appState.workerTimeRows) {
+  const q = normalizeSearchText(document.getElementById('wtQ')?.value)
+  const typeFilter = normalizeSearchText(document.getElementById('wtType')?.value)
+  const idFilter = normalizeSearchText(document.getElementById('wtWorkerId')?.value)
+  const activeFilter = workerBooleanValue(document.getElementById('wtActive')?.value)
+
+  return rows.filter((worker) => {
+    if (typeFilter) {
+      const workerType = normalizeSearchText(worker.type ?? worker.role)
+      if (!workerType.includes(typeFilter)) {
+        return false
+      }
+    }
+
+    if (idFilter) {
+      const workerIds = [worker.workerId, worker.id, worker.login]
+        .map((value) => normalizeSearchText(value))
+        .join(' ')
+      if (!workerIds.includes(idFilter)) {
+        return false
+      }
+    }
+
+    if (activeFilter !== null && Boolean(worker.active) !== activeFilter) {
+      return false
+    }
+
+    if (!q) {
+      return true
+    }
+
+    const haystack = [worker.workerId, worker.id, worker.name, worker.login, worker.type, worker.role, worker.phone, worker.email]
+      .map((value) => normalizeSearchText(value))
+      .join(' ')
+    return haystack.includes(q)
+  })
+}
+
 function renderWorkerRows(rows) {
   const root = document.getElementById('wtRows')
   if (!root) {
     return
   }
 
+  appState.workerTimeViewRows = rows
+
   if (!rows.length) {
+    appState.workerTimeCurrentPageKeys = []
     root.innerHTML = `
-      <div class="events-row" style="grid-template-columns: 140px 260px 220px 140px;">
-        <div>Brak wyników</div><div></div><div></div><div></div>
+      <div class="events-row">
+        <div class="events-select-col"></div><div>Brak wyników</div><div></div><div></div><div></div><div></div>
       </div>
     `
+    workerTimeSyncSelectionUi()
     return
   }
+
+  appState.workerTimeCurrentPageKeys = rows.map((worker) => workerTimeSelectionKey(worker)).filter(Boolean)
 
   root.innerHTML = rows
     .map(
       (worker) => `
-      <div class="events-row" style="grid-template-columns: 140px 260px 220px 140px;">
+      <div class="events-row${workerTimeIsSelected(workerTimeSelectionKey(worker)) ? ' is-selected' : ''}">
+        <div class="events-select-col"><input type="checkbox" data-wt-select="${escapeHtml(workerTimeSelectionKey(worker))}" ${workerTimeIsSelected(workerTimeSelectionKey(worker)) ? 'checked' : ''} aria-label="Zaznacz pracownika ${escapeHtml(worker.name || worker.login || worker.id || '')}" /></div>
         <div class="mono">${escapeHtml(worker.workerId || worker.id || '-')}</div>
         <div>${escapeHtml(worker.name || '-')}</div>
         <div>${escapeHtml(worker.type || '-')}</div>
+        <div><span class="pill ${worker.active ? 'pill-true' : 'pill-false'}">${escapeHtml(worker.active ? 'TRUE' : 'FALSE')}</span></div>
         <div><button class="btn2" type="button" data-worker-login="${escapeHtml(worker.login || worker.id || '')}" data-worker-name="${escapeHtml(worker.name || '')}">Pokaż</button></div>
       </div>
     `,
     )
     .join('')
+
+  workerTimeSyncSelectionUi()
 }
 
 function updateWorkersPager(paged) {
@@ -4279,14 +6703,486 @@ function renderWorkersPaged(rows, { resetPage = true } = {}) {
   updateWorkersPager(paged)
 }
 
+function filterWorkerTimeTable({ resetPage = true } = {}) {
+  const filteredRows = getFilteredWorkerTimeRows(appState.workerTimeRows)
+  renderWorkersPaged(filteredRows, { resetPage })
+  setSubwelcomeMetric('#view-workerTime .subwelcome', filteredRows.length)
+}
+
+function workerTimeResolveExportWorkers() {
+  const selectedWorkers = appState.workerTimeRows.filter((worker) =>
+    workerTimeIsSelected(workerTimeSelectionKey(worker)),
+  )
+  if (selectedWorkers.length) {
+    return selectedWorkers
+  }
+
+  if (Array.isArray(appState.workerTimeViewRows) && appState.workerTimeViewRows.length) {
+    return [...appState.workerTimeViewRows]
+  }
+
+  return getFilteredWorkerTimeRows(appState.workerTimeRows)
+}
+
+function workerTimeResolveRowDayKey(row) {
+  const direct = String(row?.dayKey ?? '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) {
+    return direct
+  }
+  return workerDetailDateKeyFromIso(row?.startAt || row?.endAt)
+}
+
+const WORKER_TIME_EXPORT_COLUMNS = [
+  {
+    id: 'date',
+    label: 'Data',
+    weight: 1.0,
+    getValue: (row) => workerDetailDateKeyToLabel(row.dayKey),
+  },
+  {
+    id: 'worker',
+    label: 'Pracownik',
+    weight: 1.8,
+    getValue: (row) => row.workerName || '-',
+  },
+  {
+    id: 'workerId',
+    label: 'ID pracownika',
+    weight: 1.1,
+    getValue: (row) => row.workerId || '-',
+  },
+  {
+    id: 'login',
+    label: 'Login',
+    weight: 1.3,
+    getValue: (row) => row.workerLogin || '-',
+  },
+  {
+    id: 'type',
+    label: 'Typ',
+    weight: 1.6,
+    getValue: (row) => row.workerType || '-',
+  },
+  {
+    id: 'start',
+    label: 'Start pracy',
+    weight: 1.0,
+    getValue: (row) => workerDetailIsoToHm(row.startIso),
+  },
+  {
+    id: 'stop',
+    label: 'Koniec pracy',
+    weight: 1.0,
+    getValue: (row) => workerDetailIsoToHm(row.endIso),
+  },
+  {
+    id: 'work',
+    label: 'Czas pracy',
+    weight: 1.1,
+    getValue: (row) => durationSecondsToHm(row.durationSec),
+  },
+  {
+    id: 'net',
+    label: 'Realny czas pracy',
+    weight: 1.2,
+    getValue: (row) => durationSecondsToHm(row.netSec),
+  },
+  {
+    id: 'break',
+    label: 'Przerwa',
+    weight: 1.0,
+    getValue: (row) => durationSecondsToHm(row.breakSec),
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    weight: 1.0,
+    getValue: (row) => row.status || '-',
+  },
+]
+
+function workerTimeResetExportOptions() {
+  document.querySelectorAll('[data-wt-export-col]').forEach((checkbox) => {
+    checkbox.checked = checkbox.defaultChecked
+  })
+
+  const portrait = document.querySelector('input[name="wtExportOrientation"][value="p"]')
+  if (portrait) {
+    portrait.checked = true
+  }
+
+  const fromInput = document.getElementById('wtExportFrom')
+  const toInput = document.getElementById('wtExportTo')
+  if (fromInput) {
+    fromInput.value = firstDayOfCurrentMonthYmd()
+  }
+  if (toInput) {
+    toInput.value = todayYmd()
+  }
+}
+
+function workerTimeReadExportOptions() {
+  const selectedIds = new Set(
+    [...document.querySelectorAll('[data-wt-export-col]')]
+      .filter((checkbox) => checkbox.checked)
+      .map((checkbox) => String(checkbox.value ?? '').trim()),
+  )
+
+  const columns = WORKER_TIME_EXPORT_COLUMNS.filter((column) => selectedIds.has(column.id))
+  const orientationRaw = String(
+    document.querySelector('input[name="wtExportOrientation"]:checked')?.value ?? 'p',
+  ).trim()
+  const orientation = orientationRaw === 'l' ? 'l' : 'p'
+  const fromYmd = String(document.getElementById('wtExportFrom')?.value ?? '').trim()
+  const toYmd = String(document.getElementById('wtExportTo')?.value ?? '').trim()
+  const ymdRegex = /^\d{4}-\d{2}-\d{2}$/
+
+  if (!ymdRegex.test(fromYmd) || !ymdRegex.test(toYmd)) {
+    alert('Wybierz poprawny zakres dat (OD i DO).')
+    return null
+  }
+
+  if (fromYmd > toYmd) {
+    alert('Data "Od" nie moze byc pozniejsza niz "Do".')
+    return null
+  }
+
+  return { columns, orientation, fromYmd, toYmd }
+}
+
+function openWorkerTimeExportModal() {
+  if (!workerTimeResolveExportWorkers().length) {
+    alert('Brak pracownikow do eksportu.')
+    return
+  }
+
+  workerTimeResetExportOptions()
+  const overlay = document.getElementById('wtExportOverlay')
+  if (overlay) {
+    overlay.style.display = 'flex'
+  }
+}
+
+function closeWorkerTimeExportModal() {
+  const overlay = document.getElementById('wtExportOverlay')
+  if (overlay) {
+    overlay.style.display = 'none'
+  }
+}
+
+async function workerTimeBuildExportRowsForWorkers(
+  workers = [],
+  { fromYmd = firstDayOfCurrentMonthYmd(), toYmd = todayYmd() } = {},
+) {
+  const selectedLogins = new Set(
+    workers
+      .map((worker) => String(worker?.login ?? worker?.workerId ?? worker?.id ?? '').trim())
+      .filter(Boolean)
+      .map((value) => normalizeSearchText(value)),
+  )
+  const selectedNames = new Set(
+    workers
+      .map((worker) => String(worker?.name ?? '').trim())
+      .filter(Boolean)
+      .map((value) => normalizeSearchText(value)),
+  )
+
+  const workerLookupByLogin = new Map()
+  const workerLookupByName = new Map()
+  appState.workerTimeRows.forEach((worker) => {
+    const login = String(worker?.login ?? worker?.workerId ?? worker?.id ?? '').trim()
+    const name = String(worker?.name ?? '').trim()
+    const workerId = String(worker?.workerId ?? worker?.id ?? login).trim() || login || '-'
+    const workerType = String(worker?.type ?? worker?.role ?? '').trim() || '-'
+    const workerName = name || login || '-'
+    const entry = { workerId, workerName, workerLogin: login || '-', workerType }
+    if (login) {
+      workerLookupByLogin.set(normalizeSearchText(login), entry)
+    }
+    if (name) {
+      workerLookupByName.set(normalizeSearchText(name), entry)
+    }
+  })
+
+  const response = await getWorkdays(appState.session.orgId, {
+    source: 'workdays',
+    fromIso: ymdToIsoRangeStart(fromYmd),
+    toIso: ymdToIsoRangeEnd(toYmd),
+    page: 1,
+    pageSize: 100000,
+  })
+
+  return (response?.items ?? [])
+    .filter((item) => {
+      if (!selectedLogins.size && !selectedNames.size) {
+        return true
+      }
+      const loginKey = normalizeSearchText(item?.workerLogin)
+      const nameKey = normalizeSearchText(item?.workerName)
+      return selectedLogins.has(loginKey) || selectedNames.has(nameKey)
+    })
+    .map((item) => {
+      const loginKey = normalizeSearchText(item?.workerLogin)
+      const nameKey = normalizeSearchText(item?.workerName)
+      const resolvedWorker = workerLookupByLogin.get(loginKey) || workerLookupByName.get(nameKey) || null
+      const dayKey = workerTimeResolveRowDayKey(item)
+      const startIso = toIso(item?.startAt)
+      const endIso = toIso(item?.endAt)
+      const durationRaw = Number(item?.durationSec)
+      const computedSec =
+        Number.isFinite(durationRaw) && durationRaw >= 0
+          ? Math.floor(durationRaw)
+          : workerDetailComputeRangeSeconds(startIso, endIso)
+      const breakSec = Math.max(0, Number(item?.breakSec ?? item?.pauseTotalSec ?? 0) || 0)
+      return {
+        workerId:
+          String(resolvedWorker?.workerId ?? item?.workerId ?? item?.id ?? item?.workerLogin ?? '').trim() ||
+          '-',
+        workerName:
+          String(resolvedWorker?.workerName ?? item?.workerName ?? item?.workerLogin ?? '').trim() || '-',
+        workerLogin:
+          String(resolvedWorker?.workerLogin ?? item?.workerLogin ?? item?.workerId ?? '').trim() || '-',
+        workerType: String(resolvedWorker?.workerType ?? item?.workerType ?? item?.role ?? '').trim() || '-',
+        dayKey,
+        startIso,
+        endIso,
+        durationSec: Math.max(0, computedSec),
+        breakSec,
+        netSec: Math.max(0, computedSec - breakSec),
+        status: String(item?.status ?? '').trim() || '-',
+      }
+    })
+    .sort((left, right) => {
+      const byName = normalizeSearchText(left.workerName).localeCompare(
+        normalizeSearchText(right.workerName),
+        'pl',
+        { sensitivity: 'base' },
+      )
+      if (byName !== 0) {
+        return byName
+      }
+      if (left.dayKey !== right.dayKey) {
+        return left.dayKey < right.dayKey ? -1 : 1
+      }
+      const leftStart = new Date(toIso(left.startIso) || 0).getTime()
+      const rightStart = new Date(toIso(right.startIso) || 0).getTime()
+      return leftStart - rightStart
+    })
+}
+
+async function downloadWorkerTimeEwidencjaPdf(options) {
+  if (!appState.session?.orgId) {
+    return
+  }
+
+  const exportButton = document.getElementById('wtExportPdfBtn')
+  const openButton = document.getElementById('wtDownloadEwidencjaBtn')
+  if (exportButton instanceof HTMLButtonElement) {
+    exportButton.disabled = true
+    exportButton.textContent = 'Generowanie PDF...'
+  }
+  if (openButton instanceof HTMLButtonElement) {
+    openButton.disabled = true
+  }
+
+  try {
+    const exportOptions = options ?? workerTimeReadExportOptions()
+    if (!exportOptions) {
+      return
+    }
+    if (!exportOptions.columns.length) {
+      alert('Wybierz co najmniej jedna kolumne do eksportu.')
+      return
+    }
+
+    const workers = workerTimeResolveExportWorkers()
+    if (!workers.length) {
+      alert('Brak pracownikow do eksportu.')
+      return
+    }
+
+    const exportRows = await workerTimeBuildExportRowsForWorkers(workers, {
+      fromYmd: exportOptions.fromYmd,
+      toYmd: exportOptions.toYmd,
+    })
+    if (!exportRows.length) {
+      alert('Brak danych ewidencji pracy dla wybranego zakresu.')
+      return
+    }
+
+    const groups = new Map()
+    exportRows.forEach((row) => {
+      const groupKey = `${normalizeSearchText(row.workerLogin)}::${normalizeSearchText(row.workerName)}`
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          workerId: row.workerId || '-',
+          workerName: row.workerName || '-',
+          workerLogin: row.workerLogin || '-',
+          workerType: row.workerType || '-',
+          rows: [],
+          totalWorkSec: 0,
+          totalBreakSec: 0,
+          totalNetSec: 0,
+        })
+      }
+
+      const bucket = groups.get(groupKey)
+      bucket.rows.push(row)
+      bucket.totalWorkSec += Math.max(0, Number(row.durationSec ?? 0) || 0)
+      bucket.totalBreakSec += Math.max(0, Number(row.breakSec ?? 0) || 0)
+      bucket.totalNetSec += Math.max(0, Number(row.netSec ?? 0) || 0)
+    })
+
+    const groupedRows = [...groups.values()].sort((left, right) =>
+      normalizeSearchText(left.workerName).localeCompare(normalizeSearchText(right.workerName), 'pl', {
+        sensitivity: 'base',
+      }),
+    )
+
+    const fromYmd = exportOptions.fromYmd
+    const toYmd = exportOptions.toYmd
+    const fromLabel = workerDetailDateKeyToLabel(fromYmd)
+    const toLabel = workerDetailDateKeyToLabel(toYmd)
+
+    const JsPdf = await ensureJsPdfLoaded()
+    const pdf = new JsPdf({ orientation: exportOptions.orientation, unit: 'mm', format: 'a4' })
+    const pageWidth = pdf.internal.pageSize.getWidth()
+    const pageHeight = pdf.internal.pageSize.getHeight()
+    const left = 10
+    const right = pageWidth - 10
+    const availableWidth = right - left
+    const totalWeight =
+      exportOptions.columns.reduce((sum, column) => sum + (Number(column.weight) || 1), 0) || 1
+    const columns = exportOptions.columns.map((column) => ({
+      ...column,
+      width: Math.max(10, (availableWidth * (Number(column.weight) || 1)) / totalWeight),
+    }))
+
+    const fitCell = (value, width) => {
+      const text = String(value ?? '')
+      const maxWidth = Math.max(6, width - 1.5)
+      if (pdf.getTextWidth(text) <= maxWidth) {
+        return text
+      }
+      let reduced = text
+      while (reduced.length > 1 && pdf.getTextWidth(`${reduced}…`) > maxWidth) {
+        reduced = reduced.slice(0, -1)
+      }
+      return `${reduced}…`
+    }
+
+    const drawTableHeader = (topY) => {
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(8.5)
+      let x = left
+      columns.forEach((column) => {
+        pdf.text(column.label, x, topY)
+        x += column.width
+      })
+      pdf.line(left, topY + 1.2, right, topY + 1.2)
+    }
+
+    groupedRows.forEach((group, groupIndex) => {
+      if (groupIndex > 0) {
+        pdf.addPage()
+      }
+
+      const workerTitle = `${group.workerName} (${group.workerId})`
+      const subtitle = `Login: ${group.workerLogin} | Typ: ${group.workerType} | Zakres: ${fromLabel} - ${toLabel}`
+      const summaryLine = `Wpisy: ${group.rows.length} | Czas pracy: ${durationSecondsToHm(group.totalWorkSec)} | Przerwy: ${durationSecondsToHm(group.totalBreakSec)} | Realny: ${durationSecondsToHm(group.totalNetSec)}`
+
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(12)
+      pdf.text('Ewidencja pracy pracownika', left, 12)
+      pdf.setFontSize(11)
+      pdf.text(workerTitle, left, 18)
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(9)
+      pdf.text(subtitle, left, 23)
+      pdf.text(summaryLine, left, 28)
+
+      let y = 35
+      drawTableHeader(y)
+      y += 6
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(8.2)
+
+      group.rows.forEach((row, rowIndex) => {
+        if (y > pageHeight - 10) {
+          pdf.addPage()
+          pdf.setFont('helvetica', 'bold')
+          pdf.setFontSize(10)
+          pdf.text(`Ewidencja pracy - ${workerTitle} (cd.)`, left, 12)
+          pdf.setFont('helvetica', 'normal')
+          pdf.setFontSize(8.5)
+          pdf.text(`${fromLabel} - ${toLabel}`, left, 17)
+          y = 24
+          drawTableHeader(y)
+          y += 6
+          pdf.setFont('helvetica', 'normal')
+          pdf.setFontSize(8.2)
+        }
+
+        let x = left
+        columns.forEach((column) => {
+          pdf.text(fitCell(column.getValue(row), column.width), x, y)
+          x += column.width
+        })
+
+        if (rowIndex < group.rows.length - 1) {
+          pdf.setDrawColor(226, 232, 240)
+          pdf.line(left, y + 1.4, right, y + 1.4)
+          pdf.setDrawColor(0, 0, 0)
+        }
+        y += 5
+      })
+    })
+
+    const filename = `ewidencja-pracy-pracownicy-${fromYmd}_${toYmd}.pdf`
+    pdf.save(filename)
+    showTransientNotice(`Pobrano PDF ewidencji. Osoby: ${groupedRows.length}, wpisy: ${exportRows.length}.`)
+  } catch (error) {
+    const rawMessage = error instanceof Error ? error.message : 'Nie udalo sie pobrac ewidencji pracy.'
+    const upper = rawMessage.toUpperCase()
+    const message =
+      upper.includes('TOO MANY CONNECTIONS') || upper.includes('RESOURCE_EXHAUSTED')
+        ? 'Baza danych jest chwilowo przeciazona. Sprobuj ponownie za chwile.'
+        : rawMessage
+    alert(message)
+  } finally {
+    if (exportButton instanceof HTMLButtonElement) {
+      exportButton.disabled = false
+      exportButton.textContent = 'Pobierz PDF'
+    }
+    if (openButton instanceof HTMLButtonElement) {
+      openButton.disabled = false
+    }
+  }
+}
+
+async function downloadWorkerTimeEwidencja() {
+  const exportOptions = workerTimeReadExportOptions()
+  if (!exportOptions) {
+    return
+  }
+  if (!exportOptions.columns.length) {
+    alert('Wybierz co najmniej jedna kolumne do eksportu.')
+    return
+  }
+
+  closeWorkerTimeExportModal()
+  await downloadWorkerTimeEwidencjaPdf(exportOptions)
+}
+
 async function fetchWorkersForCurrentSession() {
   const root = document.getElementById('wtRows')
 
   if (!appState.session?.orgId) {
+    workerTimeResetSelection()
     if (root) {
       root.innerHTML = `
-        <div class="events-row" style="grid-template-columns: 140px 260px 220px 140px;">
-          <div style="color:#ef4444;">Brak aktywnej sesji.</div><div></div><div></div><div></div>
+        <div class="events-row">
+          <div class="events-select-col"></div><div style="color:#ef4444;">Brak aktywnej sesji.</div><div></div><div></div><div></div><div></div>
         </div>
       `
     }
@@ -4295,28 +7191,26 @@ async function fetchWorkersForCurrentSession() {
 
   if (root) {
     root.innerHTML = `
-      <div class="events-row" style="grid-template-columns: 140px 260px 220px 140px;">
-        <div>Ładowanie danych...</div><div></div><div></div><div></div>
+      <div class="events-row">
+        <div class="events-select-col"></div><div>Ładowanie danych...</div><div></div><div></div><div></div><div></div>
       </div>
     `
   }
 
   try {
-    const filters = {
-      q: String(document.getElementById('wtQ')?.value ?? '').trim(),
-      type: String(document.getElementById('wtType')?.value ?? '').trim(),
-    }
-
-    const workers = await getWorkers(appState.session.orgId, filters)
+    const workers = await getWorkers(appState.session.orgId)
     appState.workerTimeRows = workers
-    renderWorkersPaged(workers, { resetPage: true })
-    setSubwelcomeMetric('#view-workerTime .subwelcome', workers.length)
+    workerTimeResetSelection()
+    filterWorkerTimeTable({ resetPage: true })
   } catch (error) {
+    workerTimeResetSelection()
+    appState.workerTimeRows = []
+    appState.workerTimeViewRows = []
     const message = error instanceof Error ? error.message : 'Błąd pobierania pracowników.'
     if (root) {
       root.innerHTML = `
-        <div class="events-row" style="grid-template-columns: 140px 260px 220px 140px;">
-          <div style="color:#ef4444;">${escapeHtml(message)}</div><div></div><div></div><div></div>
+        <div class="events-row">
+          <div class="events-select-col"></div><div style="color:#ef4444;">${escapeHtml(message)}</div><div></div><div></div><div></div><div></div>
         </div>
       `
     }
@@ -4366,6 +7260,16 @@ function workerDetailIsoToTime(isoValue) {
   return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
 }
 
+function workerDetailIsoToHm(isoValue) {
+  const iso = toIso(isoValue)
+  if (!iso) {
+    return '-'
+  }
+
+  const date = new Date(iso)
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
 function workerDetailIsoToDateInput(isoValue) {
   const iso = toIso(isoValue)
   if (!iso) {
@@ -4382,7 +7286,7 @@ function workerDetailIsoToTimeInput(isoValue) {
   }
 
   const date = new Date(iso)
-  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
 }
 
 function workerDetailLocalDateAndTimeToIso(dateValue, timeValue) {
@@ -4516,9 +7420,9 @@ function setWorkerDetailMonthCard(items) {
 
   if (monthLabel) monthLabel.textContent = pickedOption || fallbackMonth
   if (monthRange) monthRange.textContent = from && to ? `${workerDetailDateKeyToLabel(from)} - ${workerDetailDateKeyToLabel(to)}` : '—'
-  if (monthWork) monthWork.textContent = durationSecondsToHms(totalWorkSec)
-  if (monthBreak) monthBreak.textContent = durationSecondsToHms(totalBreakSec)
-  if (monthNet) monthNet.textContent = durationSecondsToHms(totalNetSec)
+  if (monthWork) monthWork.textContent = durationSecondsToHm(totalWorkSec)
+  if (monthBreak) monthBreak.textContent = durationSecondsToHm(totalBreakSec)
+  if (monthNet) monthNet.textContent = durationSecondsToHm(totalNetSec)
 }
 
 function workerDetailAggregateRows(rows) {
@@ -4619,6 +7523,216 @@ function workerDetailAggregateRows(rows) {
     })
 }
 
+function workerDetailSelectionKey(row) {
+  return String(row?.dayKey ?? row?.workdayId ?? '').trim()
+}
+
+function workerDetailIsSelectedKey(key) {
+  const normalized = String(key ?? '').trim()
+  if (!normalized) {
+    return false
+  }
+
+  return appState.workerDetailSelectedKeys.has(normalized)
+}
+
+function workerDetailSetSelectedKey(key, selected) {
+  const normalized = String(key ?? '').trim()
+  if (!normalized) {
+    return
+  }
+
+  if (selected) {
+    appState.workerDetailSelectedKeys.add(normalized)
+  } else {
+    appState.workerDetailSelectedKeys.delete(normalized)
+  }
+}
+
+function workerDetailResetSelection() {
+  appState.workerDetailSelectedKeys = new Set()
+  appState.workerDetailCurrentPageKeys = []
+}
+
+function workerDetailToggleSelectAllOnPage(checked) {
+  appState.workerDetailCurrentPageKeys.forEach((key) => {
+    workerDetailSetSelectedKey(key, checked)
+  })
+  syncWorkerDetailSelectionUi()
+}
+
+function syncWorkerDetailSelectionUi() {
+  const selectAll = document.getElementById('wtdSelectAll')
+  if (!(selectAll instanceof HTMLInputElement)) {
+    return
+  }
+
+  const pageKeys = appState.workerDetailCurrentPageKeys
+  if (!pageKeys.length) {
+    selectAll.checked = false
+    selectAll.indeterminate = false
+    return
+  }
+
+  const selectedOnPage = pageKeys.filter((key) => workerDetailIsSelectedKey(key)).length
+  selectAll.checked = selectedOnPage > 0 && selectedOnPage === pageKeys.length
+  selectAll.indeterminate = selectedOnPage > 0 && selectedOnPage < pageKeys.length
+}
+
+function workerDetailClampNumber(value, min, max, fallback) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    return fallback
+  }
+  if (numeric < min) {
+    return min
+  }
+  if (numeric > max) {
+    return max
+  }
+  return Math.round(numeric)
+}
+
+function workerDetailNormalizeColumnWidths(rawValue) {
+  const rawList = Array.isArray(rawValue) ? rawValue : []
+  return workerDetailDefaultColumnWidths().map((defaultWidth, colIndex) =>
+    workerDetailClampNumber(
+      rawList[colIndex],
+      workerDetailColumnMinWidth(colIndex),
+      WORKER_DETAIL_COLUMN_MAX_WIDTH,
+      defaultWidth,
+    ),
+  )
+}
+
+function workerDetailReadStoredColumnWidths() {
+  try {
+    const raw = window.sessionStorage.getItem(WORKER_DETAIL_COLUMN_WIDTHS_STORAGE_KEY)
+    if (!raw) {
+      return workerDetailNormalizeColumnWidths()
+    }
+    return workerDetailNormalizeColumnWidths(JSON.parse(raw))
+  } catch {
+    return workerDetailNormalizeColumnWidths()
+  }
+}
+
+function workerDetailEnsureColumnWidthsLoaded() {
+  if (appState.workerDetailColumnWidthsLoaded) {
+    return
+  }
+  appState.workerDetailColumnWidths = workerDetailReadStoredColumnWidths()
+  appState.workerDetailColumnWidthsLoaded = true
+}
+
+function workerDetailPersistColumnWidths() {
+  const payload = workerDetailNormalizeColumnWidths(appState.workerDetailColumnWidths)
+  appState.workerDetailColumnWidths = payload
+  try {
+    window.sessionStorage.setItem(WORKER_DETAIL_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(payload))
+  } catch {
+    // Ignore storage errors in private/locked contexts.
+  }
+}
+
+function workerDetailBuildGridTemplateFromWidths(widths = []) {
+  return workerDetailNormalizeColumnWidths(widths)
+    .map((width) => `${width}px`)
+    .join(' ')
+}
+
+function applyWorkerDetailColumnWidths() {
+  workerDetailEnsureColumnWidthsLoaded()
+  const table = document.getElementById('wtdEventsTable')
+  if (table) {
+    table.style.setProperty('--wtd-grid', workerDetailBuildGridTemplateFromWidths(appState.workerDetailColumnWidths))
+  }
+}
+
+function workerDetailStopColumnDrag({ persist = true } = {}) {
+  if (!workerDetailColumnDragState) {
+    return
+  }
+
+  const { onMove, onUp } = workerDetailColumnDragState
+  window.removeEventListener('mousemove', onMove)
+  window.removeEventListener('mouseup', onUp)
+  document.body.classList.remove(WORKER_DETAIL_COLUMN_RESIZE_CLASS)
+  workerDetailColumnDragState = null
+
+  if (persist) {
+    workerDetailPersistColumnWidths()
+  }
+}
+
+function workerDetailStartColumnDrag(colIndex, startClientX) {
+  workerDetailEnsureColumnWidthsLoaded()
+  workerDetailStopColumnDrag({ persist: false })
+
+  const normalizedIndex = Number(colIndex)
+  if (!Number.isInteger(normalizedIndex) || normalizedIndex < 0) {
+    return
+  }
+  if (!WORKER_DETAIL_RESIZABLE_COLUMN_INDEXES.has(normalizedIndex)) {
+    return
+  }
+
+  const currentWidth = Number(appState.workerDetailColumnWidths[normalizedIndex])
+  const startWidth = Number.isFinite(currentWidth)
+    ? currentWidth
+    : workerDetailDefaultColumnWidths()[normalizedIndex] ?? 90
+  const minWidth = workerDetailColumnMinWidth(normalizedIndex)
+
+  const onMove = (event) => {
+    const delta = Number(event.clientX) - Number(startClientX)
+    const nextWidth = workerDetailClampNumber(startWidth + delta, minWidth, WORKER_DETAIL_COLUMN_MAX_WIDTH, startWidth)
+    if (appState.workerDetailColumnWidths[normalizedIndex] === nextWidth) {
+      return
+    }
+    appState.workerDetailColumnWidths[normalizedIndex] = nextWidth
+    applyWorkerDetailColumnWidths()
+  }
+
+  const onUp = () => {
+    workerDetailStopColumnDrag({ persist: true })
+  }
+
+  workerDetailColumnDragState = { onMove, onUp }
+  document.body.classList.add(WORKER_DETAIL_COLUMN_RESIZE_CLASS)
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
+function workerDetailAttachColumnResizers() {
+  const head = document.querySelector('#wtdEventsTable .events-head')
+  if (!head) {
+    return
+  }
+
+  const cells = [...head.children]
+  cells.forEach((cell, colIndex) => {
+    if (!(cell instanceof HTMLElement)) {
+      return
+    }
+    cell.classList.add('wtd-head-cell')
+
+    if (colIndex >= cells.length - 1 || !WORKER_DETAIL_RESIZABLE_COLUMN_INDEXES.has(colIndex)) {
+      return
+    }
+    if (cell.querySelector('[data-wtd-col-resizer]')) {
+      return
+    }
+
+    const handle = document.createElement('span')
+    handle.className = 'wtd-col-resizer'
+    handle.setAttribute('data-wtd-col-resizer', String(colIndex))
+    handle.setAttribute('role', 'separator')
+    handle.setAttribute('aria-orientation', 'vertical')
+    handle.setAttribute('aria-label', 'Zmień szerokość kolumny')
+    cell.appendChild(handle)
+  })
+}
+
 function renderWorkerDetailRows(rows) {
   const root = document.getElementById('wtdSumRows')
   if (!root) {
@@ -4626,39 +7740,47 @@ function renderWorkerDetailRows(rows) {
   }
 
   if (!rows.length) {
+    appState.workerDetailCurrentPageKeys = []
     root.innerHTML = `
       <div class="events-row">
-        <div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+        <div class="events-select-col"></div><div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
       </div>
     `
+    syncWorkerDetailSelectionUi()
     return
   }
 
   const canEdit = workerDetailCanEdit()
+  appState.workerDetailCurrentPageKeys = rows.map((row) => workerDetailSelectionKey(row)).filter(Boolean)
 
   root.innerHTML = rows
     .map((row) => {
+      const rowKey = workerDetailSelectionKey(row)
+      const isSelected = workerDetailIsSelectedKey(rowKey)
       const alertClass = !row.alertAck && row.alertLevel === 2 ? ' wt-alert-level-2' : !row.alertAck && row.alertLevel === 1 ? ' wt-alert-level-1' : ''
       const actionCell = canEdit
-        ? `<button class="btn2" type="button" data-worker-detail-edit="${escapeHtml(row.dayKey)}">Edytuj</button>`
+        ? `<button class="btn2 wtd-edit-btn" type="button" data-worker-detail-edit="${escapeHtml(row.dayKey)}">Edytuj</button>`
         : '<span class="muted">—</span>'
 
       return `
-        <div class="events-row${alertClass}">
+        <div class="events-row${alertClass}${isSelected ? ' is-selected' : ''}">
+          <div class="events-select-col"><input type="checkbox" data-worker-detail-select="${escapeHtml(rowKey)}" ${isSelected ? 'checked' : ''} aria-label="Zaznacz rekord dnia ${escapeHtml(workerDetailDateKeyToLabel(row.dayKey))}" /></div>
           <div class="mono">${escapeHtml(workerDetailDateKeyToLabel(row.dayKey))}</div>
           <div>${escapeHtml(row.workerName || appState.selectedWorkerName || appState.selectedWorkerLogin || '-')}</div>
           <div>${escapeHtml(row.workerType || '-')}</div>
-          <div class="mono time-start">${escapeHtml(workerDetailIsoToTime(row.startAt))}</div>
-          <div class="mono time-stop">${escapeHtml(workerDetailIsoToTime(row.endAt))}</div>
-          <div class="mono work-brutto time-duration">${escapeHtml(durationSecondsToHms(row.workSec))}</div>
-          <div class="mono work-bold time-duration">${escapeHtml(durationSecondsToHms(row.netSec))}</div>
-          <div class="mono time-break">${escapeHtml(durationSecondsToHms(row.breakSec))}</div>
+          <div class="mono time-start">${escapeHtml(workerDetailIsoToHm(row.startAt))}</div>
+          <div class="mono time-stop">${escapeHtml(workerDetailIsoToHm(row.endAt))}</div>
+          <div class="mono work-brutto time-duration">${escapeHtml(durationSecondsToHm(row.workSec))}</div>
+          <div class="mono work-bold time-duration">${escapeHtml(durationSecondsToHm(row.netSec))}</div>
+          <div class="mono time-break">${escapeHtml(durationSecondsToHm(row.breakSec))}</div>
           <div>${escapeHtml(row.updatedBy || '-')}</div>
           <div>${actionCell}</div>
         </div>
       `
     })
     .join('')
+
+  syncWorkerDetailSelectionUi()
 }
 
 function renderWorkerDetailCurrentPage() {
@@ -4694,6 +7816,7 @@ function updateWorkerDetailPager(paged) {
   if (shownLabel) shownLabel.textContent = `Wyświetlono: ${paged.items.length} · Wszystkie: ${paged.total} · Na stronę: ${paged.pageSize}`
   if (prevBtn) prevBtn.disabled = paged.page <= 1
   if (nextBtn) nextBtn.disabled = paged.page >= paged.totalPages
+  syncWorkerDetailSelectionUi()
 }
 
 function fillWorkerDetailMonthPickForYear(year, selectedValue) {
@@ -4860,7 +7983,7 @@ function updateWorkerDetailDayPreview() {
   const endAt = workerDetailLocalDateAndTimeToIso(dateValue, endValue)
   const seconds = workerDetailComputeRangeSeconds(startAt, endAt)
 
-  workInput.value = durationSecondsToHms(seconds)
+  workInput.value = durationSecondsToHm(seconds)
 }
 
 async function saveWorkerDetailDayEditor() {
@@ -5002,6 +8125,81 @@ function workerDetailToCsvLine(values) {
     .join(',')
 }
 
+const WORKER_DETAIL_EXPORT_COLUMNS = [
+  {
+    id: 'date',
+    label: 'Data',
+    weight: 1.1,
+    getValue: (row) => workerDetailDateKeyToLabel(row.dayKey),
+  },
+  {
+    id: 'worker',
+    label: 'Pracownik',
+    weight: 1.8,
+    getValue: (row) => row.workerName || '-',
+  },
+  {
+    id: 'type',
+    label: 'Typ',
+    weight: 1.0,
+    getValue: (row) => row.workerType || '-',
+  },
+  {
+    id: 'start',
+    label: 'Start pracy',
+    weight: 1.0,
+    getValue: (row) => workerDetailIsoToHm(row.startAt),
+  },
+  {
+    id: 'stop',
+    label: 'Koniec pracy',
+    weight: 1.0,
+    getValue: (row) => workerDetailIsoToHm(row.endAt),
+  },
+  {
+    id: 'work',
+    label: 'Czas pracy',
+    weight: 1.1,
+    getValue: (row) => durationSecondsToHm(row.workSec),
+  },
+  {
+    id: 'net',
+    label: 'Realny czas pracy',
+    weight: 1.2,
+    getValue: (row) => durationSecondsToHm(row.netSec),
+  },
+  {
+    id: 'break',
+    label: 'Przerwa',
+    weight: 1.0,
+    getValue: (row) => durationSecondsToHm(row.breakSec),
+  },
+  {
+    id: 'editedBy',
+    label: 'Edytował',
+    weight: 1.3,
+    getValue: (row) => row.updatedBy || '-',
+  },
+  {
+    id: 'comment',
+    label: 'Komentarz',
+    weight: 2.2,
+    getValue: (row) => row.comment || '',
+  },
+  {
+    id: 'alert',
+    label: 'Alert',
+    weight: 0.8,
+    getValue: (row) => row.alertLevel || 0,
+  },
+  {
+    id: 'ack',
+    label: 'ACK',
+    weight: 0.7,
+    getValue: (row) => (row.alertAck ? 'TAK' : 'NIE'),
+  },
+]
+
 function workerDetailSanitizeFilename(value) {
   return String(value ?? '')
     .trim()
@@ -5012,64 +8210,220 @@ function workerDetailSanitizeFilename(value) {
     .replaceAll(/^-+|-+$/g, '')
 }
 
-function downloadWorkerDetailEwidencja() {
+function workerDetailExportRows() {
+  const selectedRows = appState.workerDetailRows.filter((row) => workerDetailIsSelectedKey(workerDetailSelectionKey(row)))
+  const rows = selectedRows.length ? selectedRows : appState.workerDetailRows
+  return [...rows].sort((left, right) => (left.dayKey > right.dayKey ? 1 : -1))
+}
+
+function workerDetailExportFilenameBase() {
+  const month = String(document.getElementById('wtdMonthPick')?.value ?? todayYmd().slice(0, 7)).trim()
+  const workerLabel = workerDetailSanitizeFilename(appState.selectedWorkerName || appState.selectedWorkerLogin || 'pracownik')
+  return `ewidencja-pracy-${month}-${workerLabel || 'pracownik'}`
+}
+
+function workerDetailResetExportOptions() {
+  document.querySelectorAll('[data-wtd-export-col]').forEach((checkbox) => {
+    checkbox.checked = true
+  })
+
+  const portrait = document.querySelector('input[name="wtdExportOrientation"][value="p"]')
+  if (portrait) {
+    portrait.checked = true
+  }
+}
+
+function workerDetailReadExportOptions() {
+  const selectedIds = new Set(
+    [...document.querySelectorAll('[data-wtd-export-col]')]
+      .filter((checkbox) => checkbox.checked)
+      .map((checkbox) => String(checkbox.value ?? '').trim()),
+  )
+
+  const columns = WORKER_DETAIL_EXPORT_COLUMNS.filter((column) => selectedIds.has(column.id))
+  const orientationRaw = String(
+    document.querySelector('input[name="wtdExportOrientation"]:checked')?.value ?? 'p',
+  ).trim()
+  const orientation = orientationRaw === 'l' ? 'l' : 'p'
+
+  return { columns, orientation }
+}
+
+function workerDetailExportCsvContent(rows, columns) {
+  const lines = []
+  lines.push(workerDetailToCsvLine(columns.map((column) => column.label)))
+
+  rows.forEach((row) => {
+    lines.push(workerDetailToCsvLine(columns.map((column) => column.getValue(row))))
+  })
+
+  return lines.join('\n')
+}
+
+function downloadWorkerDetailEwidencjaCsv(options) {
   if (!appState.workerDetailRows.length) {
     alert('Brak danych do eksportu.')
     return
   }
 
-  const lines = []
-  lines.push(
-    workerDetailToCsvLine([
-      'Data',
-      'Pracownik',
-      'Typ',
-      'Start pracy',
-      'Koniec pracy',
-      'Czas pracy',
-      'Realny czas pracy',
-      'Przerwa',
-      'Edytował',
-      'Komentarz',
-      'Alert',
-      'ACK',
-    ]),
-  )
+  const exportOptions = options ?? workerDetailReadExportOptions()
+  if (!exportOptions.columns.length) {
+    alert('Wybierz co najmniej jedna kolumne do eksportu.')
+    return
+  }
 
-  ;[...appState.workerDetailRows]
-    .sort((left, right) => (left.dayKey > right.dayKey ? 1 : -1))
-    .forEach((row) => {
-      lines.push(
-        workerDetailToCsvLine([
-          workerDetailDateKeyToLabel(row.dayKey),
-          row.workerName || '-',
-          row.workerType || '-',
-          workerDetailIsoToTime(row.startAt),
-          workerDetailIsoToTime(row.endAt),
-          durationSecondsToHms(row.workSec),
-          durationSecondsToHms(row.netSec),
-          durationSecondsToHms(row.breakSec),
-          row.updatedBy || '-',
-          row.comment || '',
-          row.alertLevel || 0,
-          row.alertAck ? 'TAK' : 'NIE',
-        ]),
-      )
-    })
-
-  const csv = lines.join('\n')
+  const rows = workerDetailExportRows()
+  const csv = workerDetailExportCsvContent(rows, exportOptions.columns)
   const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
-  const month = String(document.getElementById('wtdMonthPick')?.value ?? todayYmd().slice(0, 7)).trim()
-  const workerLabel = workerDetailSanitizeFilename(appState.selectedWorkerName || appState.selectedWorkerLogin || 'pracownik')
+  const filenameBase = workerDetailExportFilenameBase()
 
   link.href = url
-  link.download = `ewidencja-pracy-${month}-${workerLabel || 'pracownik'}.csv`
+  link.download = `${filenameBase}.csv`
   document.body.appendChild(link)
   link.click()
   link.remove()
   URL.revokeObjectURL(url)
+}
+
+async function downloadWorkerDetailEwidencjaPdf(options) {
+  if (!appState.workerDetailRows.length) {
+    alert('Brak danych do eksportu.')
+    return
+  }
+
+  const exportOptions = options ?? workerDetailReadExportOptions()
+  if (!exportOptions.columns.length) {
+    alert('Wybierz co najmniej jedna kolumne do eksportu.')
+    return
+  }
+
+  const rows = workerDetailExportRows()
+  const JsPdf = await ensureJsPdfLoaded()
+  const pdf = new JsPdf({ orientation: exportOptions.orientation, unit: 'mm', format: 'a4' })
+  const pageWidth = pdf.internal.pageSize.getWidth()
+  const pageHeight = pdf.internal.pageSize.getHeight()
+  const left = 10
+  const right = pageWidth - 10
+  const availableWidth = right - left
+  const totalWeight = exportOptions.columns.reduce((sum, column) => sum + (Number(column.weight) || 1), 0) || 1
+  const headerColumns = exportOptions.columns.map((column) => ({
+    ...column,
+    width: Math.max(10, (availableWidth * (Number(column.weight) || 1)) / totalWeight),
+  }))
+
+  const fitCell = (value, width) => {
+    const text = String(value ?? '')
+    const maxWidth = Math.max(6, width - 1)
+    if (pdf.getTextWidth(text) <= maxWidth) {
+      return text
+    }
+
+    let reduced = text
+    while (reduced.length > 1 && pdf.getTextWidth(`${reduced}…`) > maxWidth) {
+      reduced = reduced.slice(0, -1)
+    }
+    return `${reduced}…`
+  }
+
+  const drawHeader = (title, subtitle) => {
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(12)
+    pdf.text(title, left, 12)
+    pdf.setFont('helvetica', 'normal')
+    pdf.setFontSize(9)
+    pdf.text(subtitle, left, 18)
+  }
+
+  const drawTableHead = (topY) => {
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(8.5)
+    let x = left
+    headerColumns.forEach((col) => {
+      pdf.text(col.label, x, topY)
+      x += col.width
+    })
+    pdf.line(left, topY + 1, right, topY + 1)
+  }
+
+  const month = String(document.getElementById('wtdMonthPick')?.value ?? todayYmd().slice(0, 7)).trim()
+  const workerLabel = String(appState.selectedWorkerName || appState.selectedWorkerLogin || 'pracownik').trim()
+  drawHeader('Ewidencja pracy', `${workerLabel} | miesiac: ${month} | rekordy: ${rows.length}`)
+
+  let y = 26
+  drawTableHead(y)
+  y += 6
+  pdf.setFont('helvetica', 'normal')
+  pdf.setFontSize(8.2)
+
+  rows.forEach((row, index) => {
+    if (y > pageHeight - 10) {
+      pdf.addPage()
+      drawHeader('Ewidencja pracy', `${workerLabel} | miesiac: ${month} | strona kontynuacja`)
+      y = 26
+      drawTableHead(y)
+      y += 6
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(8.2)
+    }
+    let x = left
+    headerColumns.forEach((col) => {
+      pdf.text(fitCell(col.getValue(row), col.width), x, y)
+      x += col.width
+    })
+
+    if (index < rows.length - 1) {
+      pdf.setDrawColor(226, 232, 240)
+      pdf.line(left, y + 1.4, right, y + 1.4)
+      pdf.setDrawColor(0, 0, 0)
+    }
+    y += 5
+  })
+
+  const filenameBase = workerDetailExportFilenameBase()
+  pdf.save(`${filenameBase}.pdf`)
+}
+
+function openWorkerDetailExportModal() {
+  if (!appState.workerDetailRows.length) {
+    alert('Brak danych do eksportu.')
+    return
+  }
+
+  workerDetailResetExportOptions()
+  const overlay = document.getElementById('wtdExportOverlay')
+  if (overlay) {
+    overlay.style.display = 'flex'
+  }
+}
+
+function closeWorkerDetailExportModal() {
+  const overlay = document.getElementById('wtdExportOverlay')
+  if (overlay) {
+    overlay.style.display = 'none'
+  }
+}
+
+async function downloadWorkerDetailEwidencja(format = 'csv') {
+  const exportOptions = workerDetailReadExportOptions()
+  if (!exportOptions.columns.length) {
+    alert('Wybierz co najmniej jedna kolumne do eksportu.')
+    return
+  }
+
+  closeWorkerDetailExportModal()
+  try {
+    if (format === 'pdf') {
+      await downloadWorkerDetailEwidencjaPdf(exportOptions)
+      return
+    }
+
+    downloadWorkerDetailEwidencjaCsv(exportOptions)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udalo sie pobrac ewidencji pracy.'
+    alert(message)
+  }
 }
 
 async function fetchWorkerDetailForCurrentSession({ resetPage = false } = {}) {
@@ -5077,10 +8431,11 @@ async function fetchWorkerDetailForCurrentSession({ resetPage = false } = {}) {
   setWorkerDetailHeadings()
 
   if (!appState.session?.orgId || !appState.selectedWorkerLogin) {
+    workerDetailResetSelection()
     if (root) {
       root.innerHTML = `
         <div class="events-row">
-          <div>Wybierz pracownika na widoku Czas pracy pracownika.</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+          <div class="events-select-col"></div><div>Wybierz pracownika na widoku Czas pracy pracownika.</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
         </div>
       `
     }
@@ -5093,7 +8448,7 @@ async function fetchWorkerDetailForCurrentSession({ resetPage = false } = {}) {
   if (root) {
     root.innerHTML = `
       <div class="events-row">
-        <div>Ładowanie danych...</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+        <div class="events-select-col"></div><div>Ładowanie danych...</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
       </div>
     `
   }
@@ -5109,6 +8464,7 @@ async function fetchWorkerDetailForCurrentSession({ resetPage = false } = {}) {
     appState.workerDetailSourceRows = response.items ?? []
     appState.workerDetailViewRows = workerDetailAggregateRows(appState.workerDetailSourceRows)
     appState.workerDetailRows = appState.workerDetailViewRows
+    workerDetailResetSelection()
 
     renderWorkerDetailCurrentPage()
     setWorkerDetailMonthCard(appState.workerDetailRows)
@@ -5116,11 +8472,12 @@ async function fetchWorkerDetailForCurrentSession({ resetPage = false } = {}) {
     appState.workerDetailSourceRows = []
     appState.workerDetailViewRows = []
     appState.workerDetailRows = []
+    workerDetailResetSelection()
     const message = error instanceof Error ? error.message : 'Błąd pobierania czasu pracy.'
     if (root) {
       root.innerHTML = `
         <div class="events-row">
-          <div style="color:#ef4444;">${escapeHtml(message)}</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+          <div class="events-select-col"></div><div style="color:#ef4444;">${escapeHtml(message)}</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
         </div>
       `
     }
@@ -5669,7 +9026,90 @@ function reportHistorySetSummaryRows(rows = []) {
   reportSetVisible('repHistorySummary', true)
 }
 
-function reportHistoryRenderDetails(row, tab) {
+function reportHistoryResolveEditableEvent(detail) {
+  const source = detail?.sourceItem
+  if (!source || typeof source !== 'object') {
+    return null
+  }
+
+  const eventId = String(source.eventId ?? source.workdayId ?? source.id ?? '').trim()
+  if (!eventId) {
+    return null
+  }
+
+  const editable = { ...source }
+  editable.eventId = eventId
+  editable.workdayId = String(source.workdayId ?? source.eventId ?? source.id ?? '').trim() || eventId
+  editable.workerLogin = String(source.workerLogin ?? source.workerId ?? source.login ?? '').trim()
+  editable.workerName =
+    String(source.workerName ?? source.name ?? detail?.workerLabel ?? editable.workerLogin ?? '').trim() || '-'
+  editable.startAt = toIso(source.startAt ?? source.dayStartAt) || null
+  editable.endAt = toIso(source.endAt ?? source.dayEndAt) || null
+  editable.comment = String(source.comment ?? source.dayComment ?? '').trim()
+  editable.editedBy = String(source.editedBy ?? source.updatedBy ?? appState.session?.name ?? '').trim() || '-'
+
+  const zoneId = String(source.roomId ?? source.utilityRoomId ?? source.zoneId ?? source.workdayUtilityRoomId ?? '').trim()
+  if (zoneId) {
+    editable.zoneId = zoneId
+    editable.roomId = zoneId
+    editable.utilityRoomId = zoneId
+  }
+
+  const clientId = String(source.clientId ?? '').trim()
+  editable.clientId = clientId || null
+  return editable
+}
+
+function reportHistoryStoreEditableDetail(dayKey, detailIndex, detail) {
+  const editable = reportHistoryResolveEditableEvent(detail)
+  if (!editable) {
+    return ''
+  }
+
+  const key = `${String(dayKey ?? '').trim()}::${Number(detailIndex)}`
+  appState.reportHistoryEditableMap = {
+    ...(appState.reportHistoryEditableMap || {}),
+    [key]: editable,
+  }
+  return key
+}
+
+function reportHistoryStoreEditableSource(dayKey, suffix, sourceItem) {
+  const editable = reportHistoryResolveEditableEvent({ sourceItem })
+  if (!editable) {
+    return ''
+  }
+
+  const key = `${String(dayKey ?? '').trim()}::${String(suffix ?? '').trim() || 'marker'}`
+  appState.reportHistoryEditableMap = {
+    ...(appState.reportHistoryEditableMap || {}),
+    [key]: editable,
+  }
+  return key
+}
+
+function reportHistoryEditButtonHtml(editKey) {
+  if (!canManageEvents() || !editKey) {
+    return '-'
+  }
+
+  return `
+    <button
+      class="event-edit-icon-btn rep-history-edit-btn"
+      type="button"
+      data-rep-history-edit="${escapeHtml(editKey)}"
+      aria-label="Edytuj zdarzenie"
+      title="Edytuj zdarzenie"
+    >
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4 20h4l10-10-4-4L4 16v4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+        <path d="M13 7l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    </button>
+  `
+}
+
+function reportHistoryRenderDetails(row, tab, dayKey = '') {
   const details = Array.isArray(row.details) ? row.details : []
   if (!details.length && tab !== 'workers') {
     return '<div class="rep-history-empty">Brak szczegółów.</div>'
@@ -5678,9 +9118,12 @@ function reportHistoryRenderDetails(row, tab) {
   if (tab === 'zones') {
     const body = details
       .map(
-        (detail) => `
+        (detail, detailIndex) => {
+          const resolvedClient = resolveClientLabelWithQrFallback(detail.clientLabel || '-', detail.zoneLabel || '-')
+          const editKey = reportHistoryStoreEditableDetail(dayKey, detailIndex, detail)
+          return `
           <tr>
-            <td>${escapeHtml(detail.clientLabel || '-')}</td>
+            <td>${escapeHtml(resolvedClient)}</td>
             <td>${escapeHtml(detail.zoneLabel || '-')}</td>
             <td>${escapeHtml(detail.locationLabel || '-')}</td>
             <td>${escapeHtml(detail.workerLabel || '-')}</td>
@@ -5688,8 +9131,10 @@ function reportHistoryRenderDetails(row, tab) {
             <td class="time-stop">${escapeHtml(detail.stopLabel || '-')}</td>
             <td class="ta-right">${escapeHtml(detail.durationLabel || '-')}</td>
             <td class="ta-right">${escapeHtml(detail.statusLabel || '-')}</td>
+            <td class="ta-right rep-history-edit-cell">${reportHistoryEditButtonHtml(editKey)}</td>
           </tr>
-        `,
+        `
+        },
       )
       .join('')
 
@@ -5697,7 +9142,7 @@ function reportHistoryRenderDetails(row, tab) {
       <div class="rep-history-detail">
         <table class="rep-history-detail-table">
           <thead>
-            <tr><th>Klient</th><th>Strefa</th><th>Lokalizacja strefy</th><th>Osoba</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th></tr>
+            <tr><th>Klient</th><th>Strefa</th><th>Lokalizacja strefy</th><th>Osoba</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th><th class="ta-right">Edytuj</th></tr>
           </thead>
           <tbody>${body}</tbody>
         </table>
@@ -5706,50 +9151,72 @@ function reportHistoryRenderDetails(row, tab) {
   }
 
   if (tab === 'workers') {
+    const hasRunning = Number(row?.runningCount ?? 0) > 0
+    const qrStartEditKey = reportHistoryStoreEditableSource(dayKey, 'marker-start', row?.qrStartSourceItem)
+    const qrStopEditKey = reportHistoryStoreEditableSource(dayKey, 'marker-stop', row?.qrStopSourceItem)
+    const qrStartIsSystem = reportHistoryIsSystemEntrySource(row?.qrStartSourceItem)
+    const qrStopIsSystem = reportHistoryIsSystemEntrySource(row?.qrStopSourceItem)
     const detailsBody = details
       .map(
-        (detail) => `
+        (detail, detailIndex) => {
+          const resolvedClient = resolveClientLabelWithQrFallback(detail.clientLabel || '-', detail.zoneLabel || '-')
+          const editKey = reportHistoryStoreEditableDetail(dayKey, detailIndex, detail)
+          return `
           <tr>
-            <td>${escapeHtml(detail.clientLabel || '-')}</td>
+            <td>${escapeHtml(resolvedClient)}</td>
             <td>${escapeHtml(detail.zoneLabel || '-')}</td>
             <td>${escapeHtml(detail.locationLabel || '-')}</td>
             <td class="time-start">${escapeHtml(detail.startLabel || '-')}</td>
             <td class="time-stop">${escapeHtml(detail.stopLabel || '-')}</td>
             <td class="ta-right">${escapeHtml(detail.durationLabel || '-')}</td>
             <td class="ta-right">${escapeHtml(detail.statusLabel || '-')}</td>
+            <td class="ta-right rep-history-edit-cell">${reportHistoryEditButtonHtml(editKey)}</td>
           </tr>
-        `,
+        `
+        },
       )
       .join('')
+    const qrStartClient = qrStartIsSystem
+      ? REPORT_HISTORY_SYSTEM_CLIENT_LABEL
+      : resolveClientLabelWithQrFallback(row.qrStartClientLabel || '-', row.qrStartZoneCode || '-')
+    const qrStopClient = qrStopIsSystem
+      ? REPORT_HISTORY_SYSTEM_CLIENT_LABEL
+      : resolveClientLabelWithQrFallback(row.qrStopClientLabel || '-', row.qrStopZoneCode || '-')
+    const qrStartZoneLabel = qrStartIsSystem ? REPORT_HISTORY_SYSTEM_ZONE_LABEL : String(row.qrStartZoneCode || '-')
+    const qrStopZoneLabel = qrStopIsSystem ? REPORT_HISTORY_SYSTEM_ZONE_LABEL : String(row.qrStopZoneCode || '-')
+    const qrStartLocationLabel = qrStartIsSystem ? REPORT_HISTORY_SYSTEM_ZONE_LABEL : String(row.qrStartGeoLabel || '-')
+    const qrStopLocationLabel = qrStopIsSystem ? REPORT_HISTORY_SYSTEM_ZONE_LABEL : String(row.qrStopGeoLabel || '-')
     const qrStartRow = `
       <tr class="rep-history-marker-row">
-        <td>${escapeHtml(row.qrStartClientLabel || '-')}</td>
-        <td>${escapeHtml(row.qrStartZoneCode || '-')}</td>
-        <td>${reportHistoryGeoCellHtml(row.qrStartGeoLabel || '-')}</td>
+        <td>${escapeHtml(qrStartClient)}</td>
+        <td>${escapeHtml(qrStartZoneLabel)}</td>
+        <td>${reportHistoryGeoCellHtml(qrStartLocationLabel)}</td>
         <td class="time-start">${escapeHtml(row.qrStartLabel || '-')}</td>
         <td class="time-stop">-</td>
         <td class="ta-right">-</td>
         <td class="ta-right">QR START</td>
+        <td class="ta-right rep-history-edit-cell">${reportHistoryEditButtonHtml(qrStartEditKey)}</td>
       </tr>
     `
     const qrStopRow = `
       <tr class="rep-history-marker-row">
-        <td>${escapeHtml(row.qrStopClientLabel || '-')}</td>
-        <td>${escapeHtml(row.qrStopZoneCode || '-')}</td>
-        <td>${reportHistoryGeoCellHtml(row.qrStopGeoLabel || '-')}</td>
+        <td>${escapeHtml(qrStopClient)}</td>
+        <td>${escapeHtml(qrStopZoneLabel)}</td>
+        <td>${reportHistoryGeoCellHtml(qrStopLocationLabel)}</td>
         <td class="time-start">-</td>
         <td class="time-stop">${escapeHtml(row.qrStopLabel || '-')}</td>
         <td class="ta-right">-</td>
         <td class="ta-right">QR STOP</td>
+        <td class="ta-right rep-history-edit-cell">${reportHistoryEditButtonHtml(qrStopEditKey)}</td>
       </tr>
     `
-    const body = `${qrStopRow}${detailsBody}${qrStartRow}`
+    const body = `${hasRunning ? '' : qrStopRow}${detailsBody}${qrStartRow}`
 
     return `
       <div class="rep-history-detail">
         <table class="rep-history-detail-table">
           <thead>
-            <tr><th>Klient</th><th>Strefa</th><th>Lokalizacja strefy</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th></tr>
+            <tr><th>Klient</th><th>Strefa</th><th>Lokalizacja strefy</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th><th class="ta-right">Edytuj</th></tr>
           </thead>
           <tbody>${body}</tbody>
         </table>
@@ -5759,7 +9226,9 @@ function reportHistoryRenderDetails(row, tab) {
 
   const body = details
     .map(
-      (detail) => `
+      (detail, detailIndex) => {
+        const editKey = reportHistoryStoreEditableDetail(dayKey, detailIndex, detail)
+        return `
         <tr>
           <td>${escapeHtml(detail.zoneLabel || '-')}</td>
           <td>${escapeHtml(detail.locationLabel || '-')}</td>
@@ -5768,8 +9237,10 @@ function reportHistoryRenderDetails(row, tab) {
           <td class="time-stop">${escapeHtml(detail.stopLabel || '-')}</td>
           <td class="ta-right">${escapeHtml(detail.durationLabel || '-')}</td>
           <td class="ta-right">${escapeHtml(detail.statusLabel || '-')}</td>
+          <td class="ta-right rep-history-edit-cell">${reportHistoryEditButtonHtml(editKey)}</td>
         </tr>
-      `,
+      `
+      },
     )
     .join('')
 
@@ -5777,7 +9248,7 @@ function reportHistoryRenderDetails(row, tab) {
     <div class="rep-history-detail">
       <table class="rep-history-detail-table">
         <thead>
-          <tr><th>Strefa</th><th>Lokalizacja strefy</th><th>Osoba</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th></tr>
+          <tr><th>Strefa</th><th>Lokalizacja strefy</th><th>Osoba</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th><th class="ta-right">Edytuj</th></tr>
         </thead>
         <tbody>${body}</tbody>
       </table>
@@ -5787,8 +9258,24 @@ function reportHistoryRenderDetails(row, tab) {
 
 function reportHistoryDayInfoHtml(row) {
   const startValue = String(row?.qrStartLabel ?? '').trim() || '--:--:--'
-  const stopValue = String(row?.qrStopLabel ?? '').trim() || '--:--:--'
+  const hasRunning = Number(row?.runningCount ?? 0) > 0
+  const stopValue = hasRunning ? '--:--:--' : String(row?.qrStopLabel ?? '').trim() || '--:--:--'
   const workValue = durationSecondsToHms(Number(row?.closedSec ?? 0))
+  const dayKey = String(row?.dayKey ?? '').trim()
+  const canStopDay = hasRunning && Boolean(dayKey) && canManageEvents()
+  const stopDayBusy = canStopDay && appState.reportHistoryClosingDayKey === dayKey
+  const stopDayButton = canStopDay
+    ? `
+      <button
+        class="btn2 rep-history-stopday-btn"
+        type="button"
+        data-rep-history-stop-day="${escapeHtml(dayKey)}"
+        ${stopDayBusy ? 'disabled' : ''}
+      >
+        ${stopDayBusy ? 'Zamykanie...' : 'Zakończ dzień (QR STOP)'}
+      </button>
+    `
+    : ''
 
   return `
     <div class="rep-history-day-info">
@@ -5809,8 +9296,249 @@ function reportHistoryDayInfoHtml(row) {
           <span class="dash-time-value time-duration">${escapeHtml(workValue)}</span>
         </div>
       </div>
+      ${stopDayButton}
     </div>
   `
+}
+
+function reportHistoryPromptStopDateTime({ dayLabel = '-', workerName = '-', defaultIso = '' } = {}) {
+  const fallbackIso = defaultIso || new Date().toISOString()
+  const defaultValue = isoToLocalDateTimeInput(fallbackIso)
+
+  return new Promise((resolve) => {
+    const existingOverlay = document.getElementById('repHistoryStopDayOverlay')
+    if (existingOverlay) {
+      existingOverlay.remove()
+    }
+
+    const overlay = document.createElement('div')
+    overlay.id = 'repHistoryStopDayOverlay'
+    overlay.className = 'overlay rep-history-stopday-overlay'
+    overlay.setAttribute('role', 'dialog')
+    overlay.setAttribute('aria-modal', 'true')
+    overlay.innerHTML = `
+      <div class="modal modal-sm rep-history-stopday-modal" role="document">
+        <div class="modal-header">
+          <div>
+            <div class="modal-title">Zakończ dzień</div>
+            <div class="modal-subtitle">${escapeHtml(workerName)} · ${escapeHtml(dayLabel)}</div>
+          </div>
+          <button class="icon-btn" type="button" data-rep-history-stop-close aria-label="Zamknij">x</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="form-field span-2">
+              <label for="repHistoryStopDayInput">Data i godzina zakończenia</label>
+              <input
+                id="repHistoryStopDayInput"
+                type="datetime-local"
+                step="60"
+                value="${escapeHtml(defaultValue)}"
+              />
+              <div class="field-hint">Wybierz moment, który ma zostać zapisany jako QR STOP.</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn2" type="button" data-rep-history-stop-cancel>Anuluj</button>
+          <button class="btn" type="button" data-rep-history-stop-confirm>Zakończ dzień</button>
+        </div>
+      </div>
+    `
+
+    const cleanup = () => {
+      overlay.remove()
+      document.removeEventListener('keydown', onKeyDown)
+    }
+
+    const closeWith = (isoValue) => {
+      cleanup()
+      resolve(String(isoValue ?? '').trim())
+    }
+
+    const input = overlay.querySelector('#repHistoryStopDayInput')
+    const cancelButton = overlay.querySelector('[data-rep-history-stop-cancel]')
+    const closeButton = overlay.querySelector('[data-rep-history-stop-close]')
+    const confirmButton = overlay.querySelector('[data-rep-history-stop-confirm]')
+
+    const submit = () => {
+      const iso = localDateTimeInputToIso(input?.value)
+      if (!iso) {
+        alert('Podaj poprawną datę i godzinę zakończenia.')
+        input?.focus()
+        return
+      }
+
+      closeWith(iso)
+    }
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeWith('')
+        return
+      }
+
+      if (event.key === 'Enter') {
+        const target = event.target
+        if (target instanceof HTMLInputElement) {
+          event.preventDefault()
+          submit()
+        }
+      }
+    }
+
+    cancelButton?.addEventListener('click', () => closeWith(''))
+    closeButton?.addEventListener('click', () => closeWith(''))
+    confirmButton?.addEventListener('click', submit)
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) {
+        closeWith('')
+      }
+    })
+    document.addEventListener('keydown', onKeyDown)
+
+    document.body.appendChild(overlay)
+    overlay.style.display = 'flex'
+    window.setTimeout(() => {
+      input?.focus()
+      input?.select?.()
+    }, 0)
+  })
+}
+
+async function reportHistoryCloseWorkerDay(dayKey) {
+  if (!appState.session?.orgId) {
+    return
+  }
+
+  if (!canManageEvents()) {
+    alert('Brak uprawnień do zakończenia dnia.')
+    return
+  }
+
+  const normalizedDayKey = String(dayKey ?? '').trim()
+  if (!normalizedDayKey) {
+    return
+  }
+
+  const currentTab = reportHistoryNormalizeTab(appState.reportHistoryTab)
+  if (currentTab !== 'workers') {
+    alert('Zakończenie dnia jest dostępne tylko w zakładce Osoby.')
+    return
+  }
+
+  const row = (Array.isArray(appState.reportHistoryRows) ? appState.reportHistoryRows : []).find(
+    (item) => String(item?.dayKey ?? '').trim() === normalizedDayKey,
+  )
+  if (!row) {
+    alert('Nie znaleziono dnia do zamknięcia. Odśwież historię.')
+    return
+  }
+
+  const runningDetails = (Array.isArray(row.details) ? row.details : []).filter((detail) => {
+    const status = String(detail?.statusLabel ?? '').trim().toUpperCase()
+    return status === 'RUNNING' && detail?.sourceItem
+  })
+  if (!runningDetails.length) {
+    alert('Brak aktywnych wpisów RUNNING do zamknięcia.')
+    return
+  }
+
+  const workerSelect = document.getElementById('repHistoryWorker')
+  const workerSearch = document.getElementById('repHistoryWorkerSearch')
+  const workerLogin = String(workerSelect?.value ?? '').trim()
+  const workerName = String(workerSelect?.selectedOptions?.[0]?.textContent ?? workerSearch?.value ?? '').trim() || 'pracownika'
+  const dayLabel = formatDatePl(`${normalizedDayKey}T00:00:00.000Z`)
+  const selectedEndIso = await reportHistoryPromptStopDateTime({
+    dayLabel,
+    workerName,
+    defaultIso: new Date().toISOString(),
+  })
+  if (!selectedEndIso) {
+    return
+  }
+
+  const selectedEndTs = new Date(selectedEndIso).getTime()
+  const latestStartTs = runningDetails.reduce((maxTs, detail) => {
+    const startIso = toIso(detail?.sourceItem?.startAt ?? detail?.sourceItem?.dayStartAt)
+    const startTs = startIso ? new Date(startIso).getTime() : 0
+    return Number.isFinite(startTs) && startTs > maxTs ? startTs : maxTs
+  }, 0)
+  if (Number.isFinite(selectedEndTs) && Number.isFinite(latestStartTs) && latestStartTs > 0 && selectedEndTs < latestStartTs) {
+    alert('Podana godzina STOP jest wcześniejsza niż start aktywnego wpisu. Wybierz późniejszą godzinę.')
+    return
+  }
+
+  appState.reportHistoryClosingDayKey = normalizedDayKey
+  reportHistoryRenderTable()
+  reportHistorySetStatus('Zamykanie dnia...')
+
+  try {
+    const nowIso = selectedEndIso
+    let updatedCount = 0
+
+    for (const detail of runningDetails) {
+      const source = detail.sourceItem ?? {}
+      const eventId = String(source?.eventId ?? source?.workdayId ?? source?.id ?? '').trim()
+      if (!eventId) {
+        continue
+      }
+
+      const sourceWorkerLogin = String(source?.workerLogin ?? source?.workerId ?? workerLogin).trim()
+      if (!sourceWorkerLogin) {
+        continue
+      }
+
+      const sourceWorkerName = String(source?.workerName ?? source?.name ?? workerName).trim() || workerName
+      const sourceStartAt = toIso(source?.startAt ?? source?.dayStartAt) || nowIso
+      const startMs = new Date(sourceStartAt).getTime()
+      const nowMs = new Date(nowIso).getTime()
+      const safeEndAt = Number.isFinite(startMs) && Number.isFinite(nowMs) && nowMs < startMs ? sourceStartAt : nowIso
+      const endMs = new Date(safeEndAt).getTime()
+      const durationSec =
+        Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs ? Math.floor((endMs - startMs) / 1000) : 0
+
+      const zoneId = String(source?.roomId ?? source?.utilityRoomId ?? source?.zoneId ?? '').trim()
+      const clientId = String(source?.clientId ?? '').trim()
+
+      await updateEvent(appState.session.orgId, eventId, {
+        ...source,
+        eventId,
+        workdayId: String(source?.workdayId ?? eventId).trim() || eventId,
+        workerLogin: sourceWorkerLogin,
+        workerName: sourceWorkerName,
+        zoneId: zoneId || null,
+        roomId: zoneId || null,
+        utilityRoomId: zoneId || null,
+        clientId: clientId || null,
+        startAt: sourceStartAt,
+        endAt: safeEndAt,
+        durationSec,
+        status: 'CLOSED',
+        closeMarkedAt: safeEndAt,
+        endReason: 'WORKDAY_STOP',
+        comment: String(source?.comment ?? '').trim(),
+        updatedBy: appState.session?.name ?? null,
+      })
+      updatedCount += 1
+    }
+
+    if (!updatedCount) {
+      throw new Error('Nie udało się zamknąć żadnego aktywnego wpisu.')
+    }
+
+    await runReportHistory()
+    await fetchEventsForCurrentSession({ resetPage: false })
+    await refreshDashboardWidgets({ syncWorktimeToken: true })
+    showTransientNotice(`Dzień zakończony. Zamknięto ${updatedCount} aktywne wpisy.`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udało się zakończyć dnia.'
+    alert(message)
+  } finally {
+    appState.reportHistoryClosingDayKey = ''
+    reportHistoryRenderTable()
+  }
 }
 
 function reportHistoryRenderTable() {
@@ -5818,6 +9546,8 @@ function reportHistoryRenderTable() {
   if (!table) {
     return
   }
+
+  appState.reportHistoryEditableMap = {}
 
   const tab = reportHistoryNormalizeTab(appState.reportHistoryTab)
   const rows = Array.isArray(appState.reportHistoryRows) ? appState.reportHistoryRows : []
@@ -5848,7 +9578,7 @@ function reportHistoryRenderTable() {
       const expanded = Boolean(appState.reportHistoryExpanded?.[dayKey])
       const actionLabel = expanded ? 'Zwin' : 'Rozwin'
       const dayLabel = formatDatePl(`${dayKey}T00:00:00.000Z`)
-      const detailHtml = reportHistoryRenderDetails(row, tab)
+      const detailHtml = reportHistoryRenderDetails(row, tab, dayKey)
       const detailValue = isWorkersTab
         ? reportHistoryDayInfoHtml(row)
         : escapeHtml(String((row.details || []).length))
@@ -5875,6 +9605,8 @@ function reportHistoryRenderTable() {
 function reportHistoryResetResults({ clearStatus = true } = {}) {
   appState.reportHistoryRows = []
   appState.reportHistoryExpanded = {}
+  appState.reportHistoryEditableMap = {}
+  appState.reportHistoryClosingDayKey = ''
   reportHistorySetSummaryRows([])
   reportHistoryRenderTable()
 
@@ -6119,7 +9851,7 @@ function reportHistoryResolveDayQrCandidate(item, phase) {
 
 function reportHistoryResolveClientByZoneCode(zoneCode, fallback = '-') {
   const code = String(zoneCode ?? '').trim().toUpperCase()
-  const fallbackLabel = String(fallback ?? '').trim() || '-'
+  const fallbackLabel = resolveClientLabelWithQrFallback(fallback, code)
   if (!code || code === '-') {
     return fallbackLabel
   }
@@ -6136,7 +9868,29 @@ function reportHistoryResolveClientByZoneCode(zoneCode, fallback = '-') {
 
   const client = appState.clients.find((item) => String(item.id ?? item.clientId ?? '').trim() === clientId)
   const clientLabel = String(client?.name ?? clientId).trim()
-  return clientLabel || fallbackLabel
+  return resolveClientLabelWithQrFallback(clientLabel || fallbackLabel, code)
+}
+
+function reportHistoryIsSystemEntrySource(item) {
+  if (!item || typeof item !== 'object') {
+    return false
+  }
+
+  if (Boolean(item?.historyMarkerOnly)) {
+    return true
+  }
+
+  const endReason = String(item?.endReason ?? '').trim().toUpperCase()
+  if (endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY') {
+    return true
+  }
+
+  const clientStatus = String(item?.clientStatus ?? '').trim().toUpperCase()
+  if (clientStatus === 'SYSTEM') {
+    return true
+  }
+
+  return false
 }
 
 function reportHistoryResolveDayGpsCoords(item, phase) {
@@ -6406,6 +10160,8 @@ function reportHistoryBuildRows(items, tab) {
         dayEndQrScore: 0,
         dayStartEventTs: 0,
         dayEndEventTs: 0,
+        dayStartSourceItem: null,
+        dayEndSourceItem: null,
         details: [],
       })
     }
@@ -6422,7 +10178,13 @@ function reportHistoryBuildRows(items, tab) {
     const dayEndIso = toIso(item?.dayEndAt) || endIso
     const dayStartTs = reportHistoryToTimestamp(dayStartIso)
     const dayEndTs = reportHistoryToTimestamp(dayEndIso)
-    const clientLabel = String(item.clientName ?? item.klient ?? '-').trim() || '-'
+    const clientQrCandidate =
+      item?.zoneId ??
+      item?.utilityRoomId ??
+      item?.roomId ??
+      reportHistoryResolveDayQrCode(item, 'start') ??
+      reportHistoryResolveDayQrCode(item, 'stop')
+    const clientLabel = resolveClientLabelWithQrFallback(String(item.clientName ?? item.klient ?? '-').trim() || '-', clientQrCandidate)
     const qrStartCandidate = reportHistoryResolveDayQrCandidate(item, 'start')
     const qrStopCandidate = reportHistoryResolveDayQrCandidate(item, 'stop')
     const qrStartZoneCode = qrStartCandidate.code
@@ -6447,6 +10209,7 @@ function reportHistoryBuildRows(items, tab) {
       bucket.dayStartGeoLabel = qrStartGeoLabel
       bucket.dayStartQrScore = qrStartCandidate.score
       bucket.dayStartEventTs = sortStartTs
+      bucket.dayStartSourceItem = item
     } else if (dayStartTs && dayStartTs === bucket.dayStartTs) {
       const replaceByScore = qrStartCandidate.score > Number(bucket.dayStartQrScore ?? 0)
       const replaceByEventTs =
@@ -6459,6 +10222,7 @@ function reportHistoryBuildRows(items, tab) {
         bucket.dayStartClientLabel = qrStartClientLabel
         bucket.dayStartQrScore = qrStartCandidate.score
         bucket.dayStartEventTs = sortStartTs
+        bucket.dayStartSourceItem = item
       }
       if ((bucket.dayStartGeoLabel === '-' || !bucket.dayStartGeoLabel) && qrStartGeoLabel !== '-') {
         bucket.dayStartGeoLabel = qrStartGeoLabel
@@ -6472,6 +10236,7 @@ function reportHistoryBuildRows(items, tab) {
       bucket.dayEndGeoLabel = qrStopGeoLabel
       bucket.dayEndQrScore = qrStopCandidate.score
       bucket.dayEndEventTs = sortEndTs
+      bucket.dayEndSourceItem = item
     } else if (dayEndTs && dayEndTs === bucket.dayEndTs) {
       const replaceByScore = qrStopCandidate.score > Number(bucket.dayEndQrScore ?? 0)
       const replaceByEventTs =
@@ -6484,6 +10249,7 @@ function reportHistoryBuildRows(items, tab) {
         bucket.dayEndClientLabel = qrStopClientLabel
         bucket.dayEndQrScore = qrStopCandidate.score
         bucket.dayEndEventTs = sortEndTs
+        bucket.dayEndSourceItem = item
       }
       if ((bucket.dayEndGeoLabel === '-' || !bucket.dayEndGeoLabel) && qrStopGeoLabel !== '-') {
         bucket.dayEndGeoLabel = qrStopGeoLabel
@@ -6496,7 +10262,7 @@ function reportHistoryBuildRows(items, tab) {
 
     if (normalizedTab === 'workers') {
       bucket.details.push({
-        clientLabel: String(item.clientName ?? item.klient ?? '-').trim() || '-',
+        clientLabel,
         zoneLabel: String(item.zoneName ?? item.strefa ?? '-').trim() || '-',
         locationLabel: String(item.lokalizacja ?? item.location ?? '-').trim() || '-',
         startLabel: formatTime(startIso),
@@ -6505,12 +10271,13 @@ function reportHistoryBuildRows(items, tab) {
         statusLabel: status,
         sortStartTs,
         sortEndTs,
+        sourceItem: item,
       })
       return
     }
 
     bucket.details.push({
-      clientLabel: String(item.clientName ?? item.klient ?? '-').trim() || '-',
+      clientLabel,
       zoneLabel: String(item.zoneName ?? item.strefa ?? '-').trim() || '-',
       locationLabel: String(item.lokalizacja ?? item.location ?? '-').trim() || '-',
       workerLabel: String(item.workerName ?? item.workerLogin ?? '-').trim() || '-',
@@ -6520,14 +10287,19 @@ function reportHistoryBuildRows(items, tab) {
       statusLabel: status,
       sortStartTs,
       sortEndTs,
+      sourceItem: item,
     })
   })
 
   return [...groups.values()]
     .map((bucket) => {
+      const hasRunning = Number(bucket.runningCount ?? 0) > 0
+      const todayKey = todayYmd()
+      const isTodayBucket = String(bucket.dayKey ?? '').trim() === todayKey
+      const dayEndForWorkers = hasRunning && isTodayBucket ? Date.now() : bucket.dayEndTs
       const dayRangeSec =
-        bucket.dayStartTs && bucket.dayEndTs && bucket.dayEndTs > bucket.dayStartTs
-          ? Math.floor((bucket.dayEndTs - bucket.dayStartTs) / 1000)
+        bucket.dayStartTs && dayEndForWorkers && dayEndForWorkers > bucket.dayStartTs
+          ? Math.floor((dayEndForWorkers - bucket.dayStartTs) / 1000)
           : 0
       return {
         ...bucket,
@@ -6540,6 +10312,8 @@ function reportHistoryBuildRows(items, tab) {
         qrStopZoneCode: bucket.dayEndZoneCode || '-',
         qrStartGeoLabel: bucket.dayStartGeoLabel || '-',
         qrStopGeoLabel: bucket.dayEndGeoLabel || '-',
+        qrStartSourceItem: bucket.dayStartSourceItem || null,
+        qrStopSourceItem: bucket.dayEndSourceItem || null,
         details: [...bucket.details].sort(reportHistoryCompareDetailsByEndToStart),
       }
     })
@@ -6561,6 +10335,9 @@ async function runReportHistory() {
   if (!appState.session?.orgId) {
     return
   }
+
+  const scopedFilter = reportHistoryScopedFilter
+  reportHistoryScopedFilter = null
 
   const filters = reportHistoryReadFilters()
   if (!filters.from || !filters.to) {
@@ -6598,7 +10375,7 @@ async function runReportHistory() {
       toIso: ymdToIsoRangeEnd(filters.to),
     }
     if (filters.tab === 'workers' && filters.workerLogin) {
-      fetchFilters.worker = filters.workerLogin
+      fetchFilters.workerLogin = filters.workerLogin
     }
 
     const items = await reportFetchEventsPaged(appState.session.orgId, {
@@ -6619,7 +10396,7 @@ async function runReportHistory() {
       try {
         const workerDayItems = await reportFetchEventsPaged(appState.session.orgId, {
           source: 'workdays',
-          worker: filters.workerLogin,
+          workerLogin: filters.workerLogin,
           fromIso: ymdToIsoRangeStart(filters.from),
           toIso: ymdToIsoRangeEnd(filters.to),
         })
@@ -6645,8 +10422,26 @@ async function runReportHistory() {
       )
     }
 
+    if (scopedFilter && (scopedFilter.zoneId || scopedFilter.workerLogin)) {
+      const scopedZoneCode = reportHistoryNormalizeQrCode(scopedFilter.zoneId)
+      const scopedWorkerLogin = String(scopedFilter.workerLogin ?? '').trim()
+      filtered = filtered.filter((item) => {
+        if (scopedZoneCode) {
+          const itemZoneCode = reportHistoryNormalizeQrCode(item?.zoneId ?? item?.utilityRoomId ?? item?.roomId)
+          if (!itemZoneCode || itemZoneCode !== scopedZoneCode) {
+            return false
+          }
+        }
+        if (scopedWorkerLogin && !reportMatchesWorkerSelection(item, scopedWorkerLogin)) {
+          return false
+        }
+        return true
+      })
+    }
+
     appState.reportHistoryRows = reportHistoryBuildRows(filtered, filters.tab)
     appState.reportHistoryExpanded = {}
+    appState.reportHistoryEditableMap = {}
     reportHistorySetSummaryRows(appState.reportHistoryRows)
     reportHistoryRenderTable()
 
@@ -6768,7 +10563,8 @@ function reportHistorySelectClient(clientId, clientName) {
   return true
 }
 
-function reportHistoryFindZoneOption(zoneId, zoneName) {
+function reportHistoryFindZoneOption(zoneId, zoneName, options = {}) {
+  const strictId = Boolean(options?.strictId)
   const normalizedId = String(zoneId ?? '').trim()
   const normalizedName = normalizeSearchText(zoneName)
   if (!Array.isArray(appState.reportHistoryZoneOptions) || !appState.reportHistoryZoneOptions.length) {
@@ -6779,6 +10575,9 @@ function reportHistoryFindZoneOption(zoneId, zoneName) {
     const byId = appState.reportHistoryZoneOptions.find((option) => String(option.value ?? '').trim() === normalizedId)
     if (byId) {
       return byId
+    }
+    if (strictId) {
+      return null
     }
   }
 
@@ -6797,14 +10596,23 @@ function reportHistoryFindZoneOption(zoneId, zoneName) {
   return null
 }
 
-function reportHistorySelectZone(zoneId, zoneName) {
+function reportHistorySelectZone(zoneId, zoneName, options = {}) {
   const selectNode = document.getElementById('repHistoryZone')
   const searchNode = document.getElementById('repHistoryZoneSearch')
   if (!(selectNode instanceof HTMLSelectElement) || !(searchNode instanceof HTMLInputElement)) {
     return false
   }
 
-  const option = reportHistoryFindZoneOption(zoneId, zoneName)
+  const normalizedZoneId = String(zoneId ?? '').trim()
+  const strictId = Boolean(options?.strictId)
+  const option = reportHistoryFindZoneOption(zoneId, zoneName, { strictId })
+  if (!option && strictId && normalizedZoneId) {
+    ensureSelectValue(selectNode, normalizedZoneId, normalizedZoneId)
+    searchNode.value = String(zoneName ?? normalizedZoneId).trim() || normalizedZoneId
+    reportHistoryApplySelectFilter('zone', { expandOnEmpty: false })
+    reportHistoryCollapseSelect('zone')
+    return true
+  }
   if (!option) {
     return false
   }
@@ -6852,18 +10660,21 @@ function eventHistoryMonthRange(dayKey) {
   }
 }
 
-async function openEventHistoryFromRow(row, tab) {
+async function openEventHistoryFromRow(row, tab, options = {}) {
   if (!appState.session?.orgId) {
-    return
+    return false
   }
 
   const go = typeof window.go === 'function' ? window.go : null
   if (!go) {
-    return
+    return false
   }
 
   const normalizedTab = reportHistoryNormalizeTab(tab)
   const range = eventHistoryMonthRange(eventHistoryDayKey(row))
+  const strictZoneId = Boolean(options?.strictZoneId)
+  const scopeFilter = options?.scopeFilter && typeof options.scopeFilter === 'object' ? options.scopeFilter : null
+  reportHistoryScopedFilter = scopeFilter
 
   go('reports')
   await ensureReportsViewReady()
@@ -6883,14 +10694,18 @@ async function openEventHistoryFromRow(row, tab) {
   if (normalizedTab === 'workers') {
     selected = reportHistorySelectWorker(row?.workerLogin, row?.workerName)
   } else if (normalizedTab === 'zones') {
-    selected = reportHistorySelectZone(row?.zoneId ?? row?.roomId, row?.strefa ?? row?.zoneName)
+    const zoneIdCandidate = String(row?.zoneId ?? row?.roomId ?? row?.utilityRoomId ?? '').trim()
+    selected = reportHistorySelectZone(zoneIdCandidate, row?.strefa ?? row?.zoneName, {
+      strictId: strictZoneId || Boolean(reportHistoryNormalizeQrCode(zoneIdCandidate)),
+    })
   } else {
     selected = reportHistorySelectClient(row?.clientId, row?.klient ?? row?.clientName)
   }
 
   if (!selected) {
+    reportHistoryScopedFilter = null
     reportHistorySetStatus('Nie znaleziono rekordu na liscie historii.', true)
-    return
+    return false
   }
 
   await runReportHistory()
@@ -6900,6 +10715,39 @@ async function openEventHistoryFromRow(row, tab) {
     appState.reportHistoryExpanded = { [dayRow.dayKey]: true }
     reportHistoryRenderTable()
   }
+  return true
+}
+
+async function openDashboardEntityHistory(row, sourceKind = 'zones') {
+  const prepared = dashboardBuildHistoryRow(row, todayYmd())
+  const zoneLabel = dashboardResolveZoneLabel(row)
+  const zoneId = String(prepared.zoneId ?? prepared.roomId ?? prepared.utilityRoomId ?? '').trim()
+  const hasZone = Boolean(zoneId || (zoneLabel && zoneLabel !== '-'))
+
+  if (hasZone) {
+    prepared.strefa = zoneLabel && zoneLabel !== '-' ? zoneLabel : zoneId
+    prepared.zoneName = zoneLabel && zoneLabel !== '-' ? zoneLabel : zoneId
+    const openedZone = await openEventHistoryFromRow(prepared, 'zones', {
+      strictZoneId: Boolean(reportHistoryNormalizeQrCode(zoneId)),
+      scopeFilter:
+        sourceKind === 'zones'
+          ? {
+              zoneId,
+              workerLogin: String(prepared.workerLogin ?? '').trim(),
+            }
+          : null,
+    })
+    if (openedZone) {
+      return
+    }
+  }
+
+  if (sourceKind === 'objects') {
+    await openEventHistoryFromRow(prepared, 'objects')
+    return
+  }
+
+  await openEventHistoryFromRow(prepared, 'workers')
 }
 
 async function openDashboardWorkerHistory(workerLogin, workerName) {
@@ -7235,11 +11083,18 @@ function reportMatchesPanelSelection(item, panel) {
   }
 
   if (panel.zoneId) {
-    const itemZoneId = String(item.zoneId ?? item.utilityRoomId ?? item.roomId ?? '').trim()
-    if (itemZoneId === panel.zoneId) {
+    const selectedZoneRaw = String(panel.zoneId ?? '').trim()
+    const selectedZoneCode = reportHistoryNormalizeQrCode(selectedZoneRaw)
+    const itemZoneRaw = String(item.zoneId ?? item.utilityRoomId ?? item.roomId ?? '').trim()
+    const itemZoneCode = reportHistoryNormalizeQrCode(itemZoneRaw)
+    if (selectedZoneCode) {
+      if (!itemZoneCode || itemZoneCode !== selectedZoneCode) {
+        return false
+      }
+    } else if (itemZoneRaw === selectedZoneRaw) {
       // pass
     } else {
-      const selectedZone = appState.zones.find((zone) => String(zone.id ?? '').trim() === panel.zoneId)
+      const selectedZone = appState.zones.find((zone) => String(zone.id ?? '').trim() === selectedZoneRaw)
       const selectedZoneName = reportNormalizeText(selectedZone?.name ?? selectedZone?.zone)
       const itemZoneName = reportNormalizeText(item.zoneName ?? item.strefa)
       if (!selectedZoneName || !itemZoneName || itemZoneName !== selectedZoneName) {
@@ -7557,14 +11412,20 @@ async function runEventsReportComparison() {
       const mappedA = rowsA.map((row) => ({
         date: row.date || formatDatePl(row.startAt),
         worker: row.workerName || row.workerLogin || '-',
-        client: row.clientName || row.klient || '-',
+        client: resolveClientLabelWithQrFallback(
+          String(row.clientName || row.klient || '-'),
+          row.zoneId || row.roomId || row.utilityRoomId || row.strefa || row.zoneName || '-',
+        ),
         zone: row.zoneName || row.strefa || '-',
         duration: durationSecondsToHms(Number(row.durationSec ?? 0)),
       }))
       const mappedB = rowsB.map((row) => ({
         date: row.date || formatDatePl(row.startAt),
         worker: row.workerName || row.workerLogin || '-',
-        client: row.clientName || row.klient || '-',
+        client: resolveClientLabelWithQrFallback(
+          String(row.clientName || row.klient || '-'),
+          row.zoneId || row.roomId || row.utilityRoomId || row.strefa || row.zoneName || '-',
+        ),
         zone: row.zoneName || row.strefa || '-',
         duration: durationSecondsToHms(Number(row.durationSec ?? 0)),
       }))
@@ -7660,9 +11521,6 @@ function bindClientsViewFunctions() {
   window.saveClientData = () => {
     void saveClientData()
   }
-  window.deleteClientData = (clientId) => {
-    void deleteClientData(clientId)
-  }
 
   binding.add(document.getElementById('clSearchInput'), 'input', () => {
     filterClientsTable({ resetPage: true })
@@ -7701,7 +11559,7 @@ function bindClientsViewFunctions() {
     }
 
     if (action === 'delete') {
-      void deleteClientData(clientId)
+      showTransientNotice('Usuwanie klientów jest wyłączone.', 'error')
       return
     }
 
@@ -7726,7 +11584,6 @@ function bindClientsViewFunctions() {
     delete window.openClientEditModal
     delete window.closeClModal
     delete window.saveClientData
-    delete window.deleteClientData
     binding.done()
   }
 }
@@ -7842,6 +11699,20 @@ function createBindingHelpers() {
 
 function bindDashboardViewFunctions() {
   const binding = createBindingHelpers()
+  const cleanupDashboardTableResize = () => {}
+
+  // Dashboard active list uses fixed responsive layout, not column drag-resize.
+  const dashboardEventsRoot = document.querySelector('#view-dashboard .dash-events')
+  const dashboardEventsHead = document.querySelector('#view-dashboard .dash-events-head')
+  if (dashboardEventsRoot instanceof HTMLElement) {
+    dashboardEventsRoot.classList.remove('resizable-grid-table')
+    dashboardEventsRoot.style.removeProperty('--dash-events-grid')
+  }
+  if (dashboardEventsHead instanceof HTMLElement) {
+    dashboardEventsHead.classList.remove('grid-resizable-head')
+    dashboardEventsHead.querySelectorAll('.grid-resize-handle').forEach((node) => node.remove())
+  }
+
   syncDashboardSidePanelHeight()
   requestAnimationFrame(() => syncDashboardSidePanelHeight())
 
@@ -7857,19 +11728,20 @@ function bindDashboardViewFunctions() {
         return
       }
 
-      const defaultLabel = 'Odśwież'
       button.disabled = true
-      button.textContent = 'Odświeżam...'
+      button.classList.add('is-loading')
+      button.setAttribute('aria-busy', 'true')
 
       try {
         await refreshDashboardWidgets({ syncWorktimeToken: true })
-        showTransientNotice('Lista aktywnych została odświeżona.')
+        showTransientNotice('Pulpit został odświeżony.')
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Nie udało się odświeżyć listy.'
+        const message = error instanceof Error ? error.message : 'Nie udało się odświeżyć pulpitu.'
         showTransientNotice(message, 'error')
       } finally {
         button.disabled = false
-        button.textContent = defaultLabel
+        button.classList.remove('is-loading')
+        button.setAttribute('aria-busy', 'false')
       }
     })()
   })
@@ -7914,7 +11786,94 @@ function bindDashboardViewFunctions() {
     })()
   })
 
+  const metricButtons = [...document.querySelectorAll('[data-dash-metric]')]
+  metricButtons.forEach((button) => {
+    const metricKey = String(button.getAttribute('data-dash-metric') ?? '').trim()
+    if (!metricKey) {
+      return
+    }
+
+    binding.add(button, 'mouseenter', () => {
+      dashboardShowMetricPopover(metricKey, button)
+    })
+
+    binding.add(button, 'focus', () => {
+      dashboardShowMetricPopover(metricKey, button)
+    })
+
+    binding.add(button, 'mouseleave', (event) => {
+      const related = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null
+      const popover = document.getElementById('dashMetricPopover')
+      if (related && (button.contains(related) || popover?.contains(related))) {
+        return
+      }
+      dashboardScheduleMetricPopoverHide()
+    })
+
+    binding.add(button, 'blur', () => {
+      dashboardScheduleMetricPopoverHide()
+    })
+
+    binding.add(button, 'click', () => {
+      const details = dashboardMetricDetailsOrEmpty(metricKey)
+      if (!details.length) {
+        return
+      }
+      void openDashboardMetricDetail(metricKey, 0).catch((error) => {
+        showTransientNotice(error instanceof Error ? error.message : 'Nie udało się otworzyć rekordu.', 'error')
+      })
+    })
+  })
+
+  binding.add(document.getElementById('dashMetricPopover'), 'mouseenter', () => {
+    dashboardCancelMetricPopoverHide()
+  })
+
+  binding.add(document.getElementById('dashMetricPopover'), 'mouseleave', (event) => {
+    const related = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null
+    if (related?.closest?.('[data-dash-metric]')) {
+      return
+    }
+    dashboardScheduleMetricPopoverHide()
+  })
+
+  binding.add(document.getElementById('dashMetricPopover'), 'click', (event) => {
+    const button = event.target?.closest?.('[data-dash-metric-detail][data-dash-metric-key]')
+    if (!button) {
+      return
+    }
+
+    const metricKey = String(button.getAttribute('data-dash-metric-key') ?? '').trim()
+    const detailIndex = Number(button.getAttribute('data-dash-metric-detail'))
+    if (!metricKey || !Number.isInteger(detailIndex)) {
+      return
+    }
+
+    void openDashboardMetricDetail(metricKey, detailIndex).catch((error) => {
+      showTransientNotice(error instanceof Error ? error.message : 'Nie udało się otworzyć rekordu.', 'error')
+    })
+  })
+
+  binding.add(window, 'resize', () => {
+    dashboardHideMetricPopover()
+    syncDashboardSidePanelHeight()
+  })
+  binding.add(window, 'scroll', () => {
+    dashboardHideMetricPopover()
+  })
+
   binding.add(document.getElementById('dashEventsList'), 'click', (event) => {
+    const historyButton = event.target.closest('[data-dash-history-kind][data-dash-row-index]')
+    if (historyButton) {
+      const historyKind = String(historyButton.getAttribute('data-dash-history-kind') ?? '').trim()
+      const rowIndex = Number(historyButton.getAttribute('data-dash-row-index'))
+      const row = Number.isInteger(rowIndex) ? appState.dashboardTodayRows[rowIndex] : null
+      if (row && (historyKind === 'objects' || historyKind === 'zones')) {
+        void openDashboardEntityHistory(row, historyKind)
+      }
+      return
+    }
+
     const button = event.target.closest('[data-dash-worker-login], [data-dash-worker-name]')
     if (!button) {
       return
@@ -7929,15 +11888,25 @@ function bindDashboardViewFunctions() {
     void openDashboardWorkerHistory(workerLogin, workerName)
   })
 
-  binding.add(window, 'resize', () => {
-    syncDashboardSidePanelHeight()
-  })
-
-  return binding.done
+  return () => {
+    dashboardHideMetricPopover()
+    cleanupDashboardTableResize()
+    binding.done()
+  }
 }
 
 function bindIndividualOrdersViewFunctions() {
   const binding = createBindingHelpers()
+  const cleanupIndividualOrdersTableResize = setupResizableGridTable({
+    tableSelector: '#view-individualOrders .io-table',
+    headSelector: '#view-individualOrders .io-head',
+    cssVarName: '--io-grid',
+    storageKey: 'portal.grid.individualOrders',
+    defaultWidths: [120, 110, 290, 120, 140, 220, 160, 260, 130, 170],
+    minWidths: [96, 90, 180, 90, 110, 140, 110, 170, 108, 140],
+    nonResizableIndexes: [9],
+    maxWidth: 780,
+  })
   individualOrdersSyncPermissions()
 
   binding.add(document.getElementById('ioRefresh'), 'click', () => {
@@ -8038,12 +12007,24 @@ function bindIndividualOrdersViewFunctions() {
       individualOrdersSearchDebounceHandle = null
     }
 
+    cleanupIndividualOrdersTableResize()
     binding.done()
   }
 }
 
 function bindEventsViewFunctions() {
   const binding = createBindingHelpers()
+  ensureEventOverlaysMountedToBody()
+  const cleanupEventsTableResize = setupResizableGridTable({
+    tableSelector: '#view-events .events-table',
+    headSelector: '#view-events .events-head',
+    cssVarName: '--events-grid',
+    storageKey: 'portal.grid.events',
+    defaultWidths: [36, 170, 180, 160, 160, 106, 92, 92, 104, 128, 90, 120, 56],
+    minWidths: [34, 120, 120, 110, 120, 86, 78, 78, 86, 92, 82, 96, 48],
+    nonResizableIndexes: [12],
+    maxWidth: 680,
+  })
   syncEventsActionPermissions()
 
   binding.add(document.getElementById('evSearchBtn'), 'click', () => {
@@ -8206,11 +12187,24 @@ function bindEventsViewFunctions() {
   binding.add(document.getElementById('evEditPom'), 'change', refreshEventZoneOptionsForClient)
   binding.add(document.getElementById('evEditStrefa'), 'change', syncEventRoomAndClientFromZone)
 
-  return binding.done
+  return () => {
+    cleanupEventsTableResize()
+    binding.done()
+  }
 }
 
 function bindZonesViewFunctions() {
   const binding = createBindingHelpers()
+  const cleanupZonesTableResize = setupResizableGridTable({
+    tableSelector: '#view-zones .zones-table',
+    headSelector: '#view-zones .zones-head',
+    cssVarName: '--zones-grid',
+    storageKey: 'portal.grid.zones',
+    defaultWidths: [110, 150, 220, 180, 130, 132, 140, 120],
+    minWidths: [84, 110, 140, 130, 100, 110, 110, 96],
+    nonResizableIndexes: [7],
+    maxWidth: 740,
+  })
 
   binding.add(document.getElementById('znSearchBtn'), 'click', () => {
     filterZonesTable({ resetPage: true })
@@ -8261,6 +12255,34 @@ function bindZonesViewFunctions() {
 }
 function bindWorkerTimeViewFunctions(router) {
   const binding = createBindingHelpers()
+  const cleanupWorkerTimeTableResize = setupResizableGridTable({
+    tableSelector: '#view-workerTime .events-table',
+    headSelector: '#view-workerTime .events-head',
+    cssVarName: '--events-grid',
+    storageKey: 'portal.grid.workerTime',
+    defaultWidths: [42, 120, 220, 180, 100, 140],
+    minWidths: [34, 90, 150, 120, 82, 100],
+    nonResizableIndexes: [5],
+    maxWidth: 680,
+  })
+
+  const downloadButton = document.getElementById('wtDownloadEwidencjaBtn')
+  if (downloadButton) {
+    downloadButton.disabled = false
+    downloadButton.title = 'Eksport ewidencji pracy (PDF).'
+  }
+
+  binding.add(downloadButton, 'click', openWorkerTimeExportModal)
+  binding.add(document.getElementById('wtExportOverlay'), 'click', (event) => {
+    if (event.target?.id === 'wtExportOverlay') {
+      closeWorkerTimeExportModal()
+    }
+  })
+  binding.add(document.getElementById('wtExportCloseBtn'), 'click', closeWorkerTimeExportModal)
+  binding.add(document.getElementById('wtExportCancelBtn'), 'click', closeWorkerTimeExportModal)
+  binding.add(document.getElementById('wtExportPdfBtn'), 'click', () => {
+    void downloadWorkerTimeEwidencja()
+  })
 
   binding.add(document.getElementById('wtSearchBtn'), 'click', () => {
     void fetchWorkersForCurrentSession()
@@ -8269,29 +12291,58 @@ function bindWorkerTimeViewFunctions(router) {
   binding.add(document.getElementById('wtRefreshBtn'), 'click', () => {
     const qInput = document.getElementById('wtQ')
     const typeInput = document.getElementById('wtType')
+    const workerIdInput = document.getElementById('wtWorkerId')
+    const activeInput = document.getElementById('wtActive')
     if (qInput) qInput.value = ''
     if (typeInput) typeInput.value = ''
+    if (workerIdInput) workerIdInput.value = ''
+    if (activeInput) activeInput.value = ''
     void fetchWorkersForCurrentSession()
   })
 
-  binding.add(document.getElementById('wtQ'), 'keydown', (event) => {
-    if (event.key === 'Enter') void fetchWorkersForCurrentSession()
+  ;['wtQ', 'wtType', 'wtWorkerId'].forEach((id) => {
+    binding.add(document.getElementById(id), 'keydown', (event) => {
+      if (event.key === 'Enter') {
+        filterWorkerTimeTable({ resetPage: true })
+      }
+    })
   })
-
-  binding.add(document.getElementById('wtType'), 'keydown', (event) => {
-    if (event.key === 'Enter') void fetchWorkersForCurrentSession()
+  binding.add(document.getElementById('wtActive'), 'change', () => {
+    filterWorkerTimeTable({ resetPage: true })
   })
 
   binding.add(document.getElementById('wtPrevBtn'), 'click', () => {
     if (appState.workersPage <= 1) return
     appState.workersPage -= 1
-    renderWorkersPaged(appState.workerTimeRows, { resetPage: false })
+    filterWorkerTimeTable({ resetPage: false })
   })
 
   binding.add(document.getElementById('wtNextBtn'), 'click', () => {
     if (appState.workersPage >= appState.workersTotalPages) return
     appState.workersPage += 1
-    renderWorkersPaged(appState.workerTimeRows, { resetPage: false })
+    filterWorkerTimeTable({ resetPage: false })
+  })
+
+  binding.add(document.getElementById('wtSelectAll'), 'change', (event) => {
+    const checked = Boolean(event.target?.checked)
+    workerTimeToggleSelectAllOnPage(checked)
+    renderWorkersPaged(appState.workerTimeViewRows, { resetPage: false })
+  })
+
+  binding.add(document.getElementById('wtRows'), 'change', (event) => {
+    const checkbox = event.target.closest('[data-wt-select]')
+    if (!(checkbox instanceof HTMLInputElement)) {
+      return
+    }
+
+    const key = String(checkbox.getAttribute('data-wt-select') ?? '').trim()
+    if (!key) {
+      return
+    }
+
+    workerTimeSetSelected(key, checkbox.checked)
+    workerTimeSyncSelectionUi()
+    renderWorkersPaged(appState.workerTimeViewRows, { resetPage: false })
   })
 
   binding.add(document.getElementById('wtRows'), 'click', (event) => {
@@ -8304,7 +12355,10 @@ function bindWorkerTimeViewFunctions(router) {
     router.go('workerTimeDetail')
   })
 
-  return binding.done
+  return () => {
+    cleanupWorkerTimeTableResize()
+    binding.done()
+  }
 }
 
 function bindWorkerTimeDetailViewFunctions() {
@@ -8318,8 +12372,26 @@ function bindWorkerTimeDetailViewFunctions() {
   const downloadButton = document.getElementById('wtdDownloadEwidencjaBtn')
   if (downloadButton) {
     downloadButton.disabled = false
-    downloadButton.title = 'Eksport CSV ewidencji pracy.'
+    downloadButton.title = 'Eksport ewidencji pracy (CSV/PDF).'
   }
+
+  applyWorkerDetailColumnWidths()
+  workerDetailAttachColumnResizers()
+
+  binding.add(document.getElementById('wtdEventsTable'), 'mousedown', (event) => {
+    const handle = event.target.closest('[data-wtd-col-resizer]')
+    if (!handle) {
+      return
+    }
+
+    const colIndex = Number(handle.getAttribute('data-wtd-col-resizer'))
+    if (!Number.isInteger(colIndex)) {
+      return
+    }
+
+    event.preventDefault()
+    workerDetailStartColumnDrag(colIndex, event.clientX)
+  })
 
   binding.add(document.getElementById('wtdRefreshBtn'), 'click', () => {
     appState.workerDetailPage = 1
@@ -8362,7 +12434,42 @@ function bindWorkerTimeDetailViewFunctions() {
     openWorkerDetailDayEditorNew()
   })
 
-  binding.add(document.getElementById('wtdDownloadEwidencjaBtn'), 'click', downloadWorkerDetailEwidencja)
+  binding.add(document.getElementById('wtdSelectAll'), 'change', (event) => {
+    const checked = Boolean(event.target?.checked)
+    workerDetailToggleSelectAllOnPage(checked)
+    renderWorkerDetailCurrentPage()
+  })
+
+  binding.add(document.getElementById('wtdDownloadEwidencjaBtn'), 'click', openWorkerDetailExportModal)
+  binding.add(document.getElementById('wtdExportOverlay'), 'click', (event) => {
+    if (event.target?.id === 'wtdExportOverlay') {
+      closeWorkerDetailExportModal()
+    }
+  })
+  binding.add(document.getElementById('wtdExportCloseBtn'), 'click', closeWorkerDetailExportModal)
+  binding.add(document.getElementById('wtdExportCancelBtn'), 'click', closeWorkerDetailExportModal)
+  binding.add(document.getElementById('wtdExportCsvBtn'), 'click', () => {
+    void downloadWorkerDetailEwidencja('csv')
+  })
+  binding.add(document.getElementById('wtdExportPdfBtn'), 'click', () => {
+    void downloadWorkerDetailEwidencja('pdf')
+  })
+
+  binding.add(document.getElementById('wtdSumRows'), 'change', (event) => {
+    const checkbox = event.target.closest('[data-worker-detail-select]')
+    if (!(checkbox instanceof HTMLInputElement)) {
+      return
+    }
+
+    const key = String(checkbox.getAttribute('data-worker-detail-select') ?? '').trim()
+    if (!key) {
+      return
+    }
+
+    workerDetailSetSelectedKey(key, checkbox.checked)
+    syncWorkerDetailSelectionUi()
+    renderWorkerDetailCurrentPage()
+  })
 
   binding.add(document.getElementById('wtdSumRows'), 'click', (event) => {
     const button = event.target.closest('[data-worker-detail-edit]')
@@ -8401,11 +12508,24 @@ function bindWorkerTimeDetailViewFunctions() {
     })
   })
 
-  return binding.done
+  return () => {
+    workerDetailStopColumnDrag({ persist: true })
+    binding.done()
+  }
 }
 
 function bindWorkerProfileViewFunctions() {
   const binding = createBindingHelpers()
+  const cleanupWorkerProfileTableResize = setupResizableGridTable({
+    tableSelector: '#view-workerProfile .workers-table',
+    headSelector: '#view-workerProfile .workers-head',
+    cssVarName: '--workers-grid',
+    storageKey: 'portal.grid.workerProfile',
+    defaultWidths: [90, 220, 150, 180, 110, 120, 130, 240, 110],
+    minWidths: [72, 140, 110, 120, 88, 92, 100, 150, 92],
+    nonResizableIndexes: [8],
+    maxWidth: 760,
+  })
 
   syncWorkerProfileAddButtonState()
 
@@ -8463,7 +12583,7 @@ function bindWorkerProfileViewFunctions() {
       return
     }
 
-    openWorkerProfileModal(worker, 'view')
+    openWorkerProfileModal(worker, canManageWorkers() ? 'edit' : 'view')
   })
 
   binding.add(document.getElementById('wkEditorOverlay'), 'click', (event) => {
@@ -8505,7 +12625,10 @@ function bindWorkerProfileViewFunctions() {
     }
   })
 
-  return binding.done
+  return () => {
+    cleanupWorkerProfileTableResize()
+    binding.done()
+  }
 }
 
 function bindReportsViewFunctions() {
@@ -8519,6 +12642,33 @@ function bindReportsViewFunctions() {
       const coords = reportGeoReadCoordsFromNode(geoButton)
       if (coords) {
         reportGeoOpenModal(coords.lat, coords.lon)
+      }
+      return
+    }
+
+    const historyEditButton = event.target.closest('[data-rep-history-edit]')
+    if (historyEditButton) {
+      if (!canManageEvents()) {
+        alert('Brak uprawnień do edycji zdarzeń.')
+        return
+      }
+
+      const editKey = String(historyEditButton.getAttribute('data-rep-history-edit') ?? '').trim()
+      const row = appState.reportHistoryEditableMap?.[editKey]
+      if (!row) {
+        alert('Nie znaleziono rekordu do edycji. Odśwież historię.')
+        return
+      }
+
+      void openEventEditor(row)
+      return
+    }
+
+    const historyStopDayButton = event.target.closest('[data-rep-history-stop-day]')
+    if (historyStopDayButton) {
+      const dayKey = String(historyStopDayButton.getAttribute('data-rep-history-stop-day') ?? '').trim()
+      if (dayKey) {
+        void reportHistoryCloseWorkerDay(dayKey)
       }
       return
     }
@@ -8667,18 +12817,169 @@ function bindReportsViewFunctions() {
     })
   })
 
+  return () => {
+    binding.done()
+  }
+}
+
+function bindSettingsViewFunctions() {
+  const binding = createBindingHelpers()
+
+  appState.settingsActiveTab = readStoredSettingsTab()
+  settingsRenderStyleStatus()
+  settingsRenderStyleCards()
+  syncSettingsPermissions()
+  settingsSetActiveTab(appState.settingsActiveTab, { persist: false })
+  settingsSetCreateNote('')
+  settingsRenderImportSummary()
+  settingsRenderBackupRows(appState.settingsBackups)
+  void settingsRefreshStyleState({ silent: true })
+
+  binding.add(document.getElementById('settingsTabs'), 'click', (event) => {
+    const button = event.target.closest('[data-settings-tab]')
+    if (!(button instanceof HTMLElement)) {
+      return
+    }
+
+    const tab = normalizeSettingsTab(button.getAttribute('data-settings-tab'))
+    settingsSetActiveTab(tab, { persist: true })
+
+    if (tab === SETTINGS_TAB_BACKUP && canManageBackupSettings()) {
+      void settingsLoadBackups({ runAutomation: true }).catch((error) => {
+        const message = error instanceof Error ? error.message : 'Nie udalo sie zaladowac kopii zapasowych.'
+        showTransientNotice(message, 'error')
+      })
+    }
+  })
+
+  binding.add(document.getElementById('settingsStyleCards'), 'click', (event) => {
+    const button = event.target.closest('[data-style-action][data-style-id]')
+    if (!(button instanceof HTMLElement)) {
+      return
+    }
+
+    const action = String(button.getAttribute('data-style-action') ?? '').trim()
+    const styleId = String(button.getAttribute('data-style-id') ?? '').trim()
+    if (!action) {
+      return
+    }
+
+    if (action === 'set-user') {
+      void settingsApplyUserStyle(styleId)
+      return
+    }
+
+    if (action === 'clear-user') {
+      void settingsClearUserStyle()
+      return
+    }
+
+    if (action === 'set-org') {
+      void settingsApplyOrgDefaultStyle(styleId)
+    }
+  })
+
+  binding.add(document.getElementById('bkCreateBtn'), 'click', () => {
+    void settingsCreateBackup()
+  })
+  binding.add(document.getElementById('bkInspectBtn'), 'click', () => {
+    void settingsInspectImportFile()
+  })
+  binding.add(document.getElementById('bkImportRestoreBtn'), 'click', () => {
+    void settingsRestoreFromFile()
+  })
+  binding.add(document.getElementById('bkRefreshBtn'), 'click', () => {
+    void settingsLoadBackups({ runAutomation: true }).catch((error) => {
+      const message = error instanceof Error ? error.message : 'Nie udalo sie odswiezyc listy backupow.'
+      showTransientNotice(message, 'error')
+    })
+  })
+  binding.add(document.getElementById('bkRollbackBtn'), 'click', () => {
+    void settingsRollbackToPreRestore().catch((error) => {
+      const message = error instanceof Error ? error.message : 'Nie udalo sie wykonac rollbacku.'
+      showTransientNotice(message, 'error')
+    })
+  })
+
+  binding.add(document.getElementById('bkImportFile'), 'change', (event) => {
+    settingsResetImportState({ clearFile: false })
+    settingsRenderImportSummary()
+
+    const input = event.currentTarget
+    const file = input instanceof HTMLInputElement ? input.files?.[0] : null
+    const summaryNode = document.getElementById('bkImportSummary')
+    if (summaryNode && file) {
+      summaryNode.textContent = `Wybrano plik: ${file.name}. Kliknij "Sprawdz plik".`
+    }
+  })
+
+  binding.add(document.getElementById('bkRows'), 'click', (event) => {
+    const button = event.target?.closest?.('[data-bk-action][data-bk-id]')
+    if (!button) {
+      return
+    }
+
+    const action = String(button.getAttribute('data-bk-action') ?? '').trim()
+    const backupId = String(button.getAttribute('data-bk-id') ?? '').trim()
+    if (!action || !backupId) {
+      return
+    }
+
+    if (action === 'download') {
+      void settingsDownloadBackup(backupId).catch((error) => {
+        const message = error instanceof Error ? error.message : 'Nie udalo sie pobrac backupu.'
+        showTransientNotice(message, 'error')
+      })
+      return
+    }
+
+    if (action === 'restore') {
+      void settingsRestoreBackup(backupId).catch((error) => {
+        const message = error instanceof Error ? error.message : 'Nie udalo sie przywrocic backupu.'
+        showTransientNotice(message, 'error')
+      })
+      return
+    }
+
+    if (action === 'delete') {
+      void settingsDeleteBackup(backupId).catch((error) => {
+        const message = error instanceof Error ? error.message : 'Nie udalo sie usunac backupu.'
+        showTransientNotice(message, 'error')
+      })
+    }
+  })
+
   return binding.done
 }
 
 async function hydrateSections(orgId) {
-  const [clients, workers, zones, todayActive, summary, worktimeFingerprint] = await Promise.all([
+  const rangeFrom = firstDayOfCurrentMonthYmd()
+  const rangeTo = todayYmd()
+  const [clients, workers, zones, todayActive, recentEvents, todayWorkdays, worktimeFingerprint] =
+    await Promise.all([
     getClients(orgId),
     getWorkers(orgId),
     getZones(orgId),
     getTodayActiveWorkers(orgId),
-    getDashboardSummary(orgId),
+    getWorkdays(orgId, {
+      source: 'events',
+      fromIso: rangeFrom,
+      toIso: rangeTo,
+      page: 1,
+      pageSize: 100000,
+    }).catch(() => ({ items: [] })),
+    getWorkdays(orgId, {
+      source: 'workdays',
+      fromIso: rangeTo,
+      toIso: rangeTo,
+      page: 1,
+      pageSize: 100000,
+    }).catch(() => ({ items: [] })),
     getTodayWorktimeFingerprint(orgId).catch(() => null),
   ])
+  const todayStartSourceRows = [...(recentEvents.items ?? []), ...(todayWorkdays.items ?? [])]
+  const todayRows = dashboardApplyFirstQrStartToday(todayActive.items ?? [], todayStartSourceRows)
+  const summary = dashboardBuildSummary(todayRows, recentEvents.items ?? [])
 
   appState.clients = clients
   appState.clientsLoaded = true
@@ -8688,7 +12989,7 @@ async function hydrateSections(orgId) {
   appState.zones = zones
   appState.zonesLoaded = true
 
-  renderDashboardEvents(todayActive.items ?? [])
+  renderDashboardEvents(todayRows)
   renderDashboardSummary(summary)
   dashboardLastWorktimeToken = String(worktimeFingerprint?.token ?? '').trim()
   filterClientsTable()
@@ -8736,6 +13037,9 @@ function bindLogin(router) {
       appState.workers = []
       appState.workersLoaded = false
       appState.workerTimeRows = []
+      appState.workerTimeViewRows = []
+      appState.workerTimeSelectedKeys = new Set()
+      appState.workerTimeCurrentPageKeys = []
       appState.workerProfileRows = []
       appState.workerProfileViewRows = []
       appState.workerProfileCurrent = null
@@ -8749,6 +13053,8 @@ function bindLogin(router) {
       appState.workerDetailRows = []
       appState.workerDetailSourceRows = []
       appState.workerDetailViewRows = []
+      appState.workerDetailSelectedKeys = new Set()
+      appState.workerDetailCurrentPageKeys = []
       appState.workerDetailDayEditorItem = null
       appState.workerDetailAckMap = {}
       appState.individualOrdersRows = []
@@ -8764,12 +13070,31 @@ function bindLogin(router) {
       appState.reportHistoryTab = 'objects'
       appState.reportHistoryRows = []
       appState.reportHistoryExpanded = {}
+      appState.reportHistoryEditableMap = {}
       appState.reportHistoryClientOptions = []
       appState.reportHistoryWorkerOptions = []
       appState.reportHistoryZoneOptions = []
+      appState.dashboardMetricDetails = {}
+      appState.dashboardMetricValues = {}
+      appState.dashboardTodayRows = []
+      appState.dashboardScheduleSourceRows = []
+      appState.dashboardScheduleAlertSnoozeUntil = 0
+      appState.dashboardScheduleAlertMuted = false
+      appState.dashboardScheduleAlertLastKey = ''
+      appState.settingsActiveTab = readStoredSettingsTab()
+      appState.settingsEffectiveStyleId = STYLE_FALLBACK_ID
+      appState.settingsEffectiveStyleSource = 'fallback'
+      appState.settingsOrgStyleId = ''
+      appState.settingsUserStyleId = ''
+      appState.settingsBackups = []
+      appState.settingsImportInspection = null
+      appState.settingsAutomationDayKey = ''
+      dashboardHideScheduleMissingStartAlert()
 
       showPortal()
       setUserChip(normalizedSession)
+      syncSettingsPermissions()
+      await settingsRefreshStyleState({ silent: true })
       await hydrateSections(normalizedSession.orgId)
       startDashboardAutoRefresh()
       router.go('dashboard')
@@ -8804,6 +13129,7 @@ function bindLogout() {
 
   const handleLogout = () => {
     stopDashboardAutoRefresh()
+    dashboardHideMetricPopover()
     dashboardLastWorktimeToken = ''
     appState.currentRoute = ''
     appState.session = null
@@ -8816,6 +13142,9 @@ function bindLogout() {
     appState.workers = []
     appState.workersLoaded = false
     appState.workerTimeRows = []
+    appState.workerTimeViewRows = []
+    appState.workerTimeSelectedKeys = new Set()
+    appState.workerTimeCurrentPageKeys = []
     appState.workerProfileRows = []
     appState.workerProfileViewRows = []
     appState.workerProfileCurrent = null
@@ -8829,6 +13158,8 @@ function bindLogout() {
     appState.workerDetailRows = []
     appState.workerDetailSourceRows = []
     appState.workerDetailViewRows = []
+    appState.workerDetailSelectedKeys = new Set()
+    appState.workerDetailCurrentPageKeys = []
     appState.workerDetailDayEditorItem = null
     appState.workerDetailAckMap = {}
     appState.individualOrdersRows = []
@@ -8844,12 +13175,31 @@ function bindLogout() {
     appState.reportHistoryTab = 'objects'
     appState.reportHistoryRows = []
     appState.reportHistoryExpanded = {}
+    appState.reportHistoryEditableMap = {}
     appState.reportHistoryClientOptions = []
     appState.reportHistoryWorkerOptions = []
     appState.reportHistoryZoneOptions = []
+    appState.dashboardMetricDetails = {}
+    appState.dashboardMetricValues = {}
+    appState.dashboardTodayRows = []
+    appState.dashboardScheduleSourceRows = []
+    appState.dashboardScheduleAlertSnoozeUntil = 0
+    appState.dashboardScheduleAlertMuted = false
+    appState.dashboardScheduleAlertLastKey = ''
+    appState.settingsActiveTab = readStoredSettingsTab()
+    appState.settingsEffectiveStyleId = STYLE_FALLBACK_ID
+    appState.settingsEffectiveStyleSource = 'fallback'
+    appState.settingsOrgStyleId = ''
+    appState.settingsUserStyleId = ''
+    appState.settingsBackups = []
+    appState.settingsImportInspection = null
+    appState.settingsAutomationDayKey = ''
+    dashboardHideScheduleMissingStartAlert()
 
     logout()
     setUserChip(null)
+    syncSettingsPermissions()
+    applyPortalTheme(STYLE_FALLBACK_ID)
     showLoginScreen()
   }
 
@@ -8868,9 +13218,15 @@ export function mountPortalApp() {
 
   host.innerHTML = portalLayoutTemplate
   mountViewsFromTemplates()
+  applyPortalTheme(STYLE_FALLBACK_ID)
+  syncSettingsPermissions()
 
   const router = createRouter((route) => {
     appState.currentRoute = String(route ?? '').trim()
+    if (appState.currentRoute !== 'dashboard') {
+      dashboardHideMetricPopover()
+      dashboardHideScheduleMissingStartAlert()
+    }
 
     if (appState.currentRoute === 'dashboard') {
       triggerDashboardRefreshIfAllowed()
@@ -8918,10 +13274,37 @@ export function mountPortalApp() {
 
     if (route === 'reports') {
       void ensureReportsViewReady()
+      return
+    }
+
+    if (route === 'settings' || route === 'settingsStyles' || route === 'settingsBackup') {
+      const requestedTab =
+        route === 'settingsStyles'
+          ? SETTINGS_TAB_STYLES
+          : route === 'settingsBackup'
+            ? SETTINGS_TAB_BACKUP
+            : normalizeSettingsTab(appState.settingsActiveTab || readStoredSettingsTab())
+      settingsSetAccessState()
+      if (requestedTab === SETTINGS_TAB_BACKUP && !canManageBackupSettings()) {
+        settingsSetActiveTab(SETTINGS_TAB_STYLES, { persist: false })
+      } else {
+        settingsSetActiveTab(requestedTab, { persist: false })
+      }
+      void settingsRefreshStyleState({ silent: true })
+      if (appState.settingsActiveTab === SETTINGS_TAB_BACKUP && canManageBackupSettings()) {
+        void settingsLoadBackups({ runAutomation: true }).catch((error) => {
+          const message = error instanceof Error ? error.message : 'Nie udalo sie zaladowac kopii zapasowych.'
+          showTransientNotice(message, 'error')
+        })
+      }
     }
   })
 
   const handleVisibilityChange = () => {
+    if (document.visibilityState !== 'visible') {
+      dashboardHideScheduleMissingStartAlert()
+      return
+    }
     triggerDashboardRefreshIfAllowed()
   }
   document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -8942,6 +13325,7 @@ export function mountPortalApp() {
     bindWorkerTimeDetailViewFunctions(),
     bindWorkerProfileViewFunctions(),
     bindReportsViewFunctions(),
+    bindSettingsViewFunctions(),
     () => document.removeEventListener('visibilitychange', handleVisibilityChange),
   ]
 
@@ -8952,6 +13336,7 @@ export function mountPortalApp() {
 
     showPortal()
     setUserChip(session)
+    syncSettingsPermissions()
 
     void (async () => {
       try {
@@ -8962,6 +13347,8 @@ export function mountPortalApp() {
 
         appState.session = normalizedSession
         setUserChip(normalizedSession)
+        syncSettingsPermissions()
+        await settingsRefreshStyleState({ silent: true })
         await hydrateSections(normalizedSession.orgId)
         startDashboardAutoRefresh()
       } catch (error) {
@@ -8981,6 +13368,9 @@ export function mountPortalApp() {
         appState.workers = []
         appState.workersLoaded = false
         appState.workerTimeRows = []
+        appState.workerTimeViewRows = []
+        appState.workerTimeSelectedKeys = new Set()
+        appState.workerTimeCurrentPageKeys = []
         appState.workerProfileRows = []
         appState.workerProfileViewRows = []
         appState.workerProfileCurrent = null
@@ -8994,6 +13384,8 @@ export function mountPortalApp() {
         appState.workerDetailRows = []
         appState.workerDetailSourceRows = []
         appState.workerDetailViewRows = []
+        appState.workerDetailSelectedKeys = new Set()
+        appState.workerDetailCurrentPageKeys = []
         appState.workerDetailDayEditorItem = null
         appState.workerDetailAckMap = {}
         appState.individualOrdersRows = []
@@ -9007,11 +13399,30 @@ export function mountPortalApp() {
         appState.reportHistoryTab = 'objects'
         appState.reportHistoryRows = []
         appState.reportHistoryExpanded = {}
+        appState.reportHistoryEditableMap = {}
         appState.reportHistoryClientOptions = []
         appState.reportHistoryWorkerOptions = []
         appState.reportHistoryZoneOptions = []
+        appState.dashboardMetricDetails = {}
+        appState.dashboardMetricValues = {}
+        appState.dashboardTodayRows = []
+        appState.dashboardScheduleSourceRows = []
+        appState.dashboardScheduleAlertSnoozeUntil = 0
+        appState.dashboardScheduleAlertMuted = false
+        appState.dashboardScheduleAlertLastKey = ''
+        appState.settingsActiveTab = readStoredSettingsTab()
+        appState.settingsEffectiveStyleId = STYLE_FALLBACK_ID
+        appState.settingsEffectiveStyleSource = 'fallback'
+        appState.settingsOrgStyleId = ''
+        appState.settingsUserStyleId = ''
+        appState.settingsBackups = []
+        appState.settingsImportInspection = null
+        appState.settingsAutomationDayKey = ''
+        dashboardHideScheduleMissingStartAlert()
         showLoginScreen()
         setUserChip(null)
+        applyPortalTheme(STYLE_FALLBACK_ID)
+        syncSettingsPermissions()
         setLoginError(message)
       }
     })()
@@ -9021,8 +13432,16 @@ export function mountPortalApp() {
     stopDashboardAutoRefresh()
     dashboardLastWorktimeToken = ''
     appState.currentRoute = ''
+    appState.settingsActiveTab = readStoredSettingsTab()
+    appState.settingsEffectiveStyleId = STYLE_FALLBACK_ID
+    appState.settingsEffectiveStyleSource = 'fallback'
+    appState.settingsOrgStyleId = ''
+    appState.settingsUserStyleId = ''
+    dashboardHideScheduleMissingStartAlert()
     showLoginScreen()
     setUserChip(null)
+    applyPortalTheme(STYLE_FALLBACK_ID)
+    syncSettingsPermissions()
   }
 
   window.go = router.go
@@ -9030,6 +13449,7 @@ export function mountPortalApp() {
   return () => {
     stopDashboardAutoRefresh()
     dashboardLastWorktimeToken = ''
+    dashboardHideScheduleMissingStartAlert()
     cleanups.forEach((cleanup) => {
       try {
         cleanup()
@@ -9048,3 +13468,4 @@ export function mountPortalApp() {
     delete window.go
   }
 }
+

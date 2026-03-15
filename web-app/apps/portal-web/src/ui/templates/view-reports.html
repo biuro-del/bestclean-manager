@@ -1,35 +1,35 @@
-<div class="reports-wrap reports-modern">
+﻿<div class="reports-wrap reports-modern">
   <h1 class="welcome">Zestawienia</h1>
-  <p class="subwelcome">Wybierz modul zestawien i historii zdarzen.</p>
+  <p class="subwelcome">Wybierz moduł zestawień i historii zdarzeń.</p>
 
   <div id="repHome">
     <div class="reports-grid reports-grid--dashboard">
       <button class="report-tile" type="button" data-rep-open="events">
         <div class="rt-title">Zdarzenia</div>
-        <div class="rt-sub">Porownanie klientow i stref z wykresem czasu per lokalizacja.</div>
+        <div class="rt-sub">Porównanie klientów i stref z wykresem czasu per lokalizacja.</div>
       </button>
       <button class="report-tile" type="button" data-rep-open="history">
         <div class="rt-title">Historia</div>
-        <div class="rt-sub">Historia dnia dla obiektu, osoby lub strefy z tygodnia albo miesiaca.</div>
+        <div class="rt-sub">Historia dnia dla obiektu, osoby lub strefy z tygodnia albo miesiąca.</div>
       </button>
       <button class="report-tile" type="button" data-rep-open="workerTime">
-        <div class="rt-title">Czasy pracownikow</div>
-        <div class="rt-sub">Analiza czasu pracy pracownikow (w kolejnym kroku).</div>
+        <div class="rt-title">Czasy pracowników</div>
+        <div class="rt-sub">Analiza czasu pracy pracowników (w kolejnym kroku).</div>
       </button>
       <button class="report-tile" type="button" data-rep-open="clients">
         <div class="rt-title">Klienci</div>
-        <div class="rt-sub">Przekrojowe porownania klientow (w kolejnym kroku).</div>
+        <div class="rt-sub">Przekrojowe porównania klientów (w kolejnym kroku).</div>
       </button>
       <button class="report-tile" type="button" data-rep-open="audits">
         <div class="rt-title">Audyty</div>
-        <div class="rt-sub">Raporty kontrolne i porownania audytow (w kolejnym kroku).</div>
+        <div class="rt-sub">Raporty kontrolne i porównania audytów (w kolejnym kroku).</div>
       </button>
     </div>
   </div>
 
   <div id="repBuilder" style="display:none;">
     <div class="reports-topbar">
-      <button class="reports-back" type="button" id="repBack"><- Wroc</button>
+      <button class="reports-back" type="button" id="repBack"><- Wróć</button>
       <div>
         <div class="welcome" style="margin:0" id="repTitle">Zestawienie</div>
         <div class="subwelcome" style="margin:2px 0 0" id="repSubtitle">-</div>
@@ -61,7 +61,7 @@
                   <input id="repA_to" type="date" />
                 </div>
               </div>
-              <div class="rep-note">Najpierw wybierz klienta, potem opcjonalnie strefe przypisana do klienta.</div>
+              <div class="rep-note">Najpierw wybierz klienta, potem opcjonalnie strefę przypisaną do klienta.</div>
             </div>
 
             <div class="rep-panel">
@@ -85,7 +85,7 @@
                   <input id="repB_to" type="date" />
                 </div>
               </div>
-              <div class="rep-note">Pola strefa i pracownik nie sa wymagane do utworzenia zestawienia.</div>
+              <div class="rep-note">Pola strefa i pracownik nie są wymagane do utworzenia zestawienia.</div>
             </div>
           </div>
 
@@ -96,22 +96,22 @@
             </div>
             <div class="rep-chip">
               <input type="radio" name="repMode" id="repMode_day" value="day" />
-              <label for="repMode_day">Laczone: dzien do dnia</label>
+              <label for="repMode_day">Łączone: dzień do dnia</label>
             </div>
           </div>
 
           <div class="rep-tools">
             <div class="rep-chip">
               <input type="checkbox" id="repChk_time" checked />
-              <label for="repChk_time">Laczny czas</label>
+              <label for="repChk_time">Łączny czas</label>
             </div>
             <div class="rep-chip">
               <input type="checkbox" id="repChk_count" checked />
-              <label for="repChk_count">Liczba zdarzen</label>
+              <label for="repChk_count">Liczba zdarzeń</label>
             </div>
             <div class="rep-chip">
               <input type="checkbox" id="repChk_avg" />
-              <label for="repChk_avg">Sredni czas</label>
+              <label for="repChk_avg">Średni czas</label>
             </div>
             <div class="rep-chip">
               <input type="checkbox" id="repChk_minmax" />
@@ -120,7 +120,7 @@
           </div>
 
           <div class="rep-actions">
-            <button class="rep-btn primary" type="button" id="repRun">Porownaj</button>
+            <button class="rep-btn primary" type="button" id="repRun">Porównaj</button>
             <button class="rep-btn" type="button" id="repDownloadCsv" disabled>Pobierz CSV</button>
           </div>
           <div id="repStatus" class="rep-note" style="margin-top:2px;"></div>
@@ -149,7 +149,7 @@
           <div class="rep-chart-panel">
             <div class="rep-chart-head">
               <h3>Czas per lokalizacja</h3>
-              <p class="rep-note">Wykres slupkowy czasu pracy zakonczonych zdarzen.</p>
+              <p class="rep-note">Wykres słupkowy czasu pracy zakończonych zdarzeń.</p>
             </div>
             <div class="rep-chart-grid">
               <div class="rep-chart-card">
@@ -178,7 +178,7 @@
       </div>
 
       <div id="repDiffWrap" class="rep-tablewrap" style="display:none; margin-top: 14px;">
-        <div class="rep-tabletitle">Roznice (B - A)</div>
+        <div class="rep-tabletitle">Różnice (B - A)</div>
         <table class="rep-table" id="repTableDiff"></table>
       </div>
     </div>
@@ -194,11 +194,11 @@
           <div class="rep-history-range">
             <label class="rep-chip">
               <input type="radio" name="repHistoryRange" id="repHistoryRangeMonth" value="month" checked />
-              <span>Miesiac</span>
+              <span>Miesiąc</span>
             </label>
             <label class="rep-chip">
               <input type="radio" name="repHistoryRange" id="repHistoryRangeWeek" value="week" />
-              <span>Tydzien</span>
+              <span>Tydzień</span>
             </label>
           </div>
         </div>
@@ -207,21 +207,21 @@
           <div class="rep-row" id="repHistoryClientWrap">
             <label>Obiekt (klient)</label>
             <div class="rep-history-picker">
-              <input id="repHistoryClientSearch" type="text" placeholder="Wpisz nazwe obiektu..." autocomplete="off" />
+              <input id="repHistoryClientSearch" type="text" placeholder="Wpisz nazwę obiektu..." autocomplete="off" />
               <select id="repHistoryClient" class="rep-history-picker-list"></select>
             </div>
           </div>
           <div class="rep-row" id="repHistoryWorkerWrap" style="display:none;">
             <label>Osoba</label>
             <div class="rep-history-picker">
-              <input id="repHistoryWorkerSearch" type="text" placeholder="Wpisz nazwe osoby..." autocomplete="off" />
+              <input id="repHistoryWorkerSearch" type="text" placeholder="Wpisz nazwę osoby..." autocomplete="off" />
               <select id="repHistoryWorker" class="rep-history-picker-list"></select>
             </div>
           </div>
           <div class="rep-row" id="repHistoryZoneWrap" style="display:none;">
             <label>Strefa</label>
             <div class="rep-history-picker">
-              <input id="repHistoryZoneSearch" type="text" placeholder="Wpisz nazwe strefy..." autocomplete="off" />
+              <input id="repHistoryZoneSearch" type="text" placeholder="Wpisz nazwę strefy..." autocomplete="off" />
               <select id="repHistoryZone" class="rep-history-picker-list"></select>
             </div>
           </div>
@@ -233,7 +233,7 @@
             </div>
           </div>
           <div class="rep-actions">
-            <button class="rep-btn primary" type="button" id="repHistoryRun">Pokaz historie</button>
+            <button class="rep-btn primary" type="button" id="repHistoryRun">Pokaż historię</button>
           </div>
           <div id="repHistoryStatus" class="rep-note"></div>
         </div>
@@ -249,10 +249,11 @@
     <div id="repSoon" style="display:none;">
       <div class="card">
         <div class="card-body">
-          <h3 class="card-title">Wkrotce</h3>
+          <h3 class="card-title">Wkrótce</h3>
           <p class="card-text">Ten typ zestawienia dodamy w kolejnym kroku.</p>
         </div>
       </div>
     </div>
   </div>
 </div>
+

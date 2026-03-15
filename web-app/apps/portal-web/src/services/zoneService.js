@@ -8,6 +8,9 @@ function toText(value) {
 function mapZone(orgId, row) {
   const zoneId = toText(row?.ZoneId ?? row?.zoneId ?? row?.id)
   const workerLogin = toText(row?.workerLogin)
+  const workerName = toText(
+    row?.worker?.workerName ?? row?.worker?.workername ?? row?.worker?.worker_name ?? row?.worker?.name ?? row?.worker?.fullName,
+  )
 
   return {
     id: zoneId,
@@ -21,7 +24,7 @@ function mapZone(orgId, row) {
     function: toText(row?.function),
     location: toText(row?.location),
     workerLogin,
-    workerName: toText(row?.worker?.fullName),
+    workerName,
     editedBy: toText(row?.editedBy),
     date: toText(row?.date),
   }
@@ -67,6 +70,7 @@ export async function createZone(orgId, payload) {
     zone: payload?.name ?? payload?.zone ?? null,
     function: payload?.function ?? null,
     location: payload?.location ?? null,
+    workerLogin: payload?.workerLogin ?? null,
     editedBy: payload?.editedBy ?? null,
     date: payload?.date ?? null,
   })
@@ -105,6 +109,7 @@ export async function updateZone(orgId, zoneId, payload) {
     zone: payload?.name ?? payload?.zone ?? null,
     function: payload?.function ?? null,
     location: payload?.location ?? null,
+    workerLogin: payload?.workerLogin ?? null,
     editedBy: payload?.editedBy ?? null,
     date: payload?.date ?? null,
   })

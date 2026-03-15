@@ -1,0 +1,122 @@
+<h1 class="welcome">Ustawienia</h1>
+<p class="subwelcome">Style interfejsu i kopie zapasowe organizacji.</p>
+
+<div class="settings-tabs" id="settingsTabs" role="tablist" aria-label="Zakladki ustawien">
+  <button class="settings-tab active" id="settingsTabStyles" data-settings-tab="styles" role="tab" aria-selected="true" type="button">
+    Style
+  </button>
+  <button class="settings-tab" id="settingsTabBackup" data-settings-tab="backup" role="tab" aria-selected="false" type="button">
+    Kopia zapasowa
+  </button>
+</div>
+
+<section id="settingsStylesSection" class="settings-section" data-settings-panel="styles" role="tabpanel">
+  <div class="fido-card settings-style-status" id="settingsStyleStatus">
+    <div class="settings-style-status-label">Aktywny styl</div>
+    <div class="settings-style-status-value">Classic Blue</div>
+    <div class="settings-style-status-meta">Zrodlo: fallback</div>
+  </div>
+
+  <div class="settings-style-grid" id="settingsStyleCards">
+    <div class="fido-card settings-style-card">
+      <div class="settings-style-card-header">
+        <h3>Classic Blue</h3>
+      </div>
+      <p>Aktualny wyglad portalu: neutralny, znany i bezpieczny.</p>
+    </div>
+  </div>
+</section>
+
+<section id="settingsBackupSection" class="settings-section" data-settings-panel="backup" role="tabpanel" style="display:none;">
+  <div id="backupAccessDenied" class="fido-card backup-access-denied" style="display:none;">
+    <h3>Brak dostepu</h3>
+    <p>Ten modul jest dostepny wylacznie dla roli Admin.</p>
+  </div>
+
+  <div id="backupAdminPanel">
+    <div class="backup-layout">
+      <section class="fido-card backup-panel">
+        <h3>Eksport ZIP</h3>
+        <p class="backup-panel-hint">Utworz kopie i zapisz ja na liscie backupow.</p>
+
+        <div class="toolbar backup-toolbar">
+          <div class="tool" style="min-width:280px;">
+            <label for="bkTitle">Czego to kopia?</label>
+            <input id="bkTitle" type="text" maxlength="120" placeholder="np. Przed aktualizacja marzec" />
+          </div>
+
+          <div class="tool">
+            <label for="bkType">Typ kopii</label>
+            <select id="bkType">
+              <option value="full">Pelna kopia</option>
+              <option value="workers">Pracownicy</option>
+              <option value="objects">Obiekty</option>
+            </select>
+          </div>
+
+          <div class="tool-actions">
+            <button class="btn2 primary" id="bkCreateBtn" type="button">Utworz backup ZIP</button>
+          </div>
+        </div>
+
+        <div class="backup-create-note" id="bkCreateNote"></div>
+      </section>
+
+      <section class="fido-card backup-panel">
+        <h3>Import / Przywrocenie</h3>
+        <p class="backup-panel-hint">Wgraj plik ZIP, sprawdz zakres i uruchom przywracanie.</p>
+
+        <div class="toolbar backup-toolbar">
+          <div class="tool" style="min-width:340px;">
+            <label for="bkImportFile">Plik ZIP</label>
+            <input id="bkImportFile" type="file" accept=".zip,application/zip" />
+          </div>
+
+          <div class="tool-actions">
+            <button class="btn2" id="bkInspectBtn" type="button">Sprawdz plik</button>
+            <button class="btn2 primary" id="bkImportRestoreBtn" type="button" disabled>Przywroc z pliku</button>
+          </div>
+        </div>
+
+        <div class="backup-import-summary" id="bkImportSummary">
+          Wybierz plik ZIP, aby zobaczyc podsumowanie i zakres nadpisania.
+        </div>
+      </section>
+    </div>
+
+    <section class="fido-card backup-list-panel">
+      <div class="backup-list-header">
+        <div>
+          <h3>Lista kopii</h3>
+          <p class="backup-panel-hint">Pobierz, przywroc, usun lub wroc do poprzedniej wersji.</p>
+        </div>
+        <div class="backup-list-actions">
+          <button class="btn2" id="bkRollbackBtn" type="button">Wroc do poprzedniej wersji</button>
+          <button class="btn2" id="bkRefreshBtn" type="button">Odswiez liste</button>
+        </div>
+      </div>
+
+      <div class="backup-table-wrap">
+        <table class="fido-table backup-table" aria-label="Lista backupow">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Typ</th>
+              <th>Tytul</th>
+              <th>Rozmiar</th>
+              <th>Autor</th>
+              <th>Integralnosc</th>
+              <th>Zrodlo</th>
+              <th>Akcje</th>
+            </tr>
+          </thead>
+          <tbody id="bkRows">
+            <tr>
+              <td colspan="8" class="muted">Brak danych</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</section>

@@ -1,24 +1,126 @@
-<style>
+﻿<style>
   /* WorkerTimeDetail: kolory i czytelność */
   .time-start{ color:#198754 !important; }
   .time-stop{ color:#dc3545 !important; }
-  .work-brutto{ font-weight:400; color:#0d6efd !important; } /* Czas pracy: niebieski */
-  .work-bold{ font-weight:400; color:#0d6efd !important; } /* Realny czas pracy (netto): niebieski */
+  .work-brutto{ font-weight:400; color:#0d6efd !important; }
+  .work-bold{ font-weight:400; color:#0d6efd !important; }
   .time-break{ color:#d4a000 !important; font-weight:700; }
 
+  #view-workerTimeDetail{
+    font-size: clamp(12px, 0.35vw + 11px, 16px);
+  }
+
+  #view-workerTimeDetail .toolbar,
+  #view-workerTimeDetail #wtdMonthCard,
+  #view-workerTimeDetail .events-table{
+    width: 100%;
+  }
+
+  #view-workerTimeDetail .events-table{
+    overflow-x: auto;
+  }
+
+  #view-workerTimeDetail .events-head,
+  #view-workerTimeDetail .events-row{
+    grid-template-columns: var(--wtd-grid);
+    align-items: center;
+    column-gap: clamp(6px, 0.8vw, 12px);
+    row-gap: 6px;
+    padding: clamp(10px, 0.9vw, 14px);
+    font-size: 0.95em !important;
+    width: max-content;
+    min-width: 100%;
+  }
+
+  #view-workerTimeDetail .events-head > div,
+  #view-workerTimeDetail .events-row > div{
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #view-workerTimeDetail .events-head .events-select-col,
+  #view-workerTimeDetail .events-row .events-select-col{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #view-workerTimeDetail .events-head .events-select-col input,
+  #view-workerTimeDetail .events-row .events-select-col input{
+    width: 16px;
+    height: 16px;
+    margin: 0;
+  }
+
+  #view-workerTimeDetail .wtd-edit-btn{
+    width: 100%;
+  }
+
+  #view-workerTimeDetail .events-head > .wtd-head-cell{
+    position: relative;
+    overflow: visible;
+    padding-right: 10px;
+  }
+
+  #view-workerTimeDetail .wtd-col-resizer{
+    position: absolute;
+    top: 3px;
+    right: -7px;
+    width: 14px;
+    height: calc(100% - 6px);
+    cursor: col-resize;
+    z-index: 5;
+  }
+
+  #view-workerTimeDetail .wtd-col-resizer::before{
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 6px;
+    width: 2px;
+    border-radius: 2px;
+    background: rgba(120, 147, 188, .22);
+    transition: background-color .16s ease;
+  }
+
+  #view-workerTimeDetail .wtd-col-resizer:hover::before{
+    background: rgba(37, 99, 235, .55);
+  }
+
+  body.wtd-col-resize-active,
+  body.wtd-col-resize-active *{
+    cursor: col-resize !important;
+    user-select: none !important;
+  }
+
   /* Karta sumy miesiąca */
-  #wtdMonthCard{ min-height: unset; padding: 14px; }
+  #wtdMonthCard{ min-height: unset; padding: 14px; overflow-x:auto; overflow-y:hidden; }
   #wtdMonthCard .wtd-month-title{ font-weight: 900; font-size: 12px; color: var(--muted2); letter-spacing: .2px; text-transform: uppercase; }
   #wtdMonthCard .wtd-month-label{ font-weight: 900; font-size: 18px; margin-top: 4px; }
   #wtdMonthCard .wtd-month-range{ margin-top: 2px; font-size: 12px; color: var(--muted2); }
 
-  #wtdMonthCard .wtd-month-row{ display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:nowrap; }
-  #wtdMonthCard .wtd-month-kpis{ margin-top:0; display:flex; gap:18px; flex-wrap:nowrap; align-items:flex-start; justify-content:center; flex:1; }
+  #wtdMonthCard .wtd-month-row{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:14px;
+    flex-wrap:nowrap;
+    width:max-content;
+    min-width:100%;
+  }
+  #wtdMonthCard .wtd-month-meta{ min-width:220px; display:flex; flex-direction:column; gap:4px; flex:0 0 220px; }
+  #wtdMonthCard .wtd-month-download{ margin-top:8px; }
+  #wtdMonthCard .wtd-month-download .btn2{ white-space: nowrap; }
+
+  #wtdMonthCard .wtd-month-kpis{ margin-top:0; display:flex; gap:18px; flex-wrap:nowrap; align-items:flex-start; justify-content:flex-start; flex:0 0 auto; }
   #wtdMonthCard .wtd-month-kpis .wtd-kpi{ min-width:150px; }
 
   #wtdMonthCard .wtd-kpi{ display:flex; flex-direction: column; gap: 2px; text-align:center; min-width: 150px; }
-  #wtdMonthCard .wtd-kpi .lbl{ font-size: 12px; color: var(--muted2); font-weight: 900; }
-  #wtdMonthCard .wtd-kpi .val{ font-size: 20px; font-weight: 900; }
+  #wtdMonthCard .wtd-kpi .lbl{ font-size: clamp(11px, 0.55vw, 13px); color: var(--muted2); font-weight: 900; white-space:nowrap; }
+  #wtdMonthCard .wtd-kpi .val{ font-size: clamp(16px, 1.8vw, 20px); font-weight: 900; white-space:nowrap; }
 
   #wtdMonthCard .wtd-month-pick{
     min-width: 220px;
@@ -36,11 +138,90 @@
     background: #fff;
   }
 
-  /* ALERTY czasu pracy (Workday_Log) */
+  /* Alerty czasu pracy (Workday_Log) */
   .wt-alert-level-1{ background: rgba(255,165,0,0.18) !important; }
   .wt-alert-level-2{ background: rgba(255,0,0,0.14) !important; }
   .wt-alert-level-1:hover{ background: rgba(255,165,0,0.26) !important; }
   .wt-alert-level-2:hover{ background: rgba(255,0,0,0.20) !important; }
+
+  #wtdExportOverlay .modal{
+    width: min(680px, 96vw);
+  }
+  .wtd-export-grid{
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    gap: 12px;
+  }
+  .wtd-export-block{
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #f8fafc;
+    padding: 10px 12px;
+  }
+  .wtd-export-title{
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--muted2);
+    text-transform: uppercase;
+  }
+  .wtd-export-check,
+  .wtd-export-radio{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 5px 0;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .wtd-export-check input,
+  .wtd-export-radio input{
+    margin: 0;
+  }
+  .wtd-export-hint{
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--muted2);
+    line-height: 1.35;
+  }
+
+  @media (max-width: 1180px){
+    #wtdMonthCard .wtd-month-row{
+      min-width: 920px;
+    }
+    #wtdMonthCard .wtd-month-meta{
+      min-width: 200px;
+      flex-basis: 200px;
+    }
+    #wtdMonthCard .wtd-month-pick{
+      min-width: 180px;
+    }
+    #wtdMonthCard .wtd-month-kpis .wtd-kpi{
+      min-width: 130px;
+    }
+    #wtdMonthCard .wtd-kpi .val{
+      font-size: clamp(17px, 1.4vw, 19px);
+    }
+  }
+
+  @media (max-width: 980px){
+    #view-workerTimeDetail{
+      font-size: clamp(12px, 0.6vw + 10px, 14px);
+    }
+    #view-workerTimeDetail .events-head,
+    #view-workerTimeDetail .events-row{
+      min-width: 1180px;
+    }
+  }
+
+  @media (max-width: 760px){
+    #wtdMonthCard .wtd-month-row{
+      min-width: 760px;
+    }
+    .wtd-export-grid{
+      grid-template-columns: 1fr;
+    }
+  }
 </style>
 
 <h1 class="welcome" id="wtdTitle">Czas pracy - pracownik</h1>
@@ -64,45 +245,42 @@
   </div>
 </div>
 
-<!-- Suma miesięczna (brutto / przerwy / netto) + wybór miesiąca -->
 <div class="card" id="wtdMonthCard" aria-label="Suma miesi&#261;ca" style="margin-top:14px;">
   <div class="wtd-month-row">
-    <div>
+    <div class="wtd-month-meta">
       <div class="wtd-month-title">Suma miesi&#261;ca</div>
       <div class="wtd-month-label mono" id="wtdMonthLabel">-</div>
       <div class="wtd-month-range" id="wtdMonthRange">-</div>
+      <div class="wtd-month-download">
+        <button class="btn2" id="wtdDownloadEwidencjaBtn" type="button">Pobierz ewidencj&#281; pracy</button>
+      </div>
     </div>
 
-    <div class="wtd-month-kpis"><div class="wtd-month-pick">
-      <label for="wtdMonthPick">Wybierz miesi&#261;c</label>
-      <select id="wtdMonthPick"></select>
-    </div>
+    <div class="wtd-month-kpis">
+      <div class="wtd-month-pick">
+        <label for="wtdMonthPick">Wybierz miesi&#261;c</label>
+        <select id="wtdMonthPick"></select>
+      </div>
 
-    
       <div class="wtd-kpi">
         <div class="lbl">Czas pracy</div>
-        <div class="val mono work-bold" id="wtdMonthWork">00:00:00</div>
+        <div class="val mono work-bold" id="wtdMonthWork">00:00</div>
       </div>
       <div class="wtd-kpi">
         <div class="lbl">Przerwy</div>
-        <div class="val mono time-break" id="wtdMonthBreak">00:00:00</div>
+        <div class="val mono time-break" id="wtdMonthBreak">00:00</div>
       </div>
       <div class="wtd-kpi">
         <div class="lbl">Realny czas pracy</div>
-        <div class="val mono work-bold" id="wtdMonthNet">00:00:00</div>
-      </div>
-
-      <div class="wtd-kpi wtd-kpi-download">
-        <div class="lbl">&nbsp;</div>
-        <button class="btn2" id="wtdDownloadEwidencjaBtn" type="button">Pobierz ewidencj&#281; pracy</button>
+        <div class="val mono work-bold" id="wtdMonthNet">00:00</div>
       </div>
     </div>
   </div>
 </div>
 
-<div class="events-table" aria-label="Czas pracy - podsumowanie dzienne" style="--wtd-grid: 110px minmax(160px,1.6fr) 110px 100px 100px 110px 130px 110px minmax(120px,1fr) 92px;">
-  <!-- UWAGA: brak kolumny Klient; grid musi pasować do wierszy w JS -->
+<div class="events-table" id="wtdEventsTable" aria-label="Czas pracy - podsumowanie dzienne" style="--wtd-grid: 42px 88px 168px 138px 108px 108px 112px 138px 102px 126px 90px;">
   <div class="events-head">
+    <div class="events-select-col"><input id="wtdSelectAll" type="checkbox" aria-label="Zaznacz wszystkie rekordy na stronie" /></div>
     <div>Data</div>
     <div>Imi&#281;</div>
     <div>Typ</div>
@@ -119,16 +297,15 @@
 
 <div class="pager" style="margin-top:12px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
   <div class="pager-left" style="display:flex; align-items:center; gap:10px;">
-    <button class="btn2" id="wtdSumPrevBtn" type="button">&#8249; Poprzednia</button>
-    <button class="btn2" id="wtdSumNextBtn" type="button">Nast&#281;pna &#8250;</button>
-<span class="muted" id="wtdSumPageLabel">Strona 1 / 1</span>
+    <button class="btn2" id="wtdSumPrevBtn" type="button">&#8592; Poprzednia</button>
+    <button class="btn2" id="wtdSumNextBtn" type="button">Nast&#281;pna &#8594;</button>
+    <span class="muted" id="wtdSumPageLabel">Strona 1 / 1</span>
   </div>
   <div class="pager-right">
     <span class="muted" id="wtdSumShownLabel">Wy&#347;wietlono: 0 &#183; Wszystkie: 0 &#183; Na stron&#281;: 50</span>
   </div>
 </div>
 
-<!-- Modal: dodaj/edytuj dzień pracy -->
 <div class="overlay" id="wtdDayEditorOverlay" aria-label="Dzie&#324; pracy" role="dialog" aria-modal="true">
   <div class="modal" style="position:relative;">
     <div class="logo-block" style="display:inline-flex">
@@ -145,17 +322,17 @@
 
       <div class="field">
         <label for="wtdDayStartTime">Start pracy (czas)</label>
-        <input id="wtdDayStartTime" type="time" step="1" />
+        <input id="wtdDayStartTime" type="time" step="60" />
       </div>
 
       <div class="field">
         <label for="wtdDayEndTime">Koniec pracy (czas)</label>
-        <input id="wtdDayEndTime" type="time" step="1" />
+        <input id="wtdDayEndTime" type="time" step="60" />
       </div>
 
       <div class="field" style="grid-column: 1 / -1;">
-        <label for="wtdDayWork">Przepracowano (HH:MM:SS)</label>
-        <input id="wtdDayWork" type="text" inputmode="numeric" placeholder="00:00:00" readonly />
+        <label for="wtdDayWork">Przepracowano (HH:MM)</label>
+        <input id="wtdDayWork" type="text" inputmode="numeric" placeholder="00:00" readonly />
       </div>
 
       <div class="field" style="grid-column: 1 / -1;">
@@ -172,6 +349,51 @@
       </div>
     </div>
 
-    <button class="btn2" id="wtdDayEditorClose" type="button" style="position:absolute; top:18px; right:18px; padding:6px 10px; border-radius:14px;">&#215;</button>
+    <button class="btn2" id="wtdDayEditorClose" type="button" style="position:absolute; top:18px; right:18px; padding:6px 10px; border-radius:14px;">X</button>
+  </div>
+</div>
+
+<div class="overlay" id="wtdExportOverlay" aria-label="Pobierz ewidencj&#281; pracy" role="dialog" aria-modal="true">
+  <div class="modal modal-sm" style="position:relative;">
+    <h3>Pobierz ewidencj&#281; pracy</h3>
+    <p class="meta">Wybierz kolumny i format pliku do pobrania.</p>
+
+    <div class="wtd-export-grid">
+      <div class="wtd-export-block">
+        <div class="wtd-export-title">Kolumny</div>
+        <label class="wtd-export-check"><input type="checkbox" data-wtd-export-col value="date" checked /> Data</label>
+        <label class="wtd-export-check"><input type="checkbox" data-wtd-export-col value="worker" checked /> Pracownik</label>
+        <label class="wtd-export-check"><input type="checkbox" data-wtd-export-col value="type" checked /> Typ</label>
+        <label class="wtd-export-check"><input type="checkbox" data-wtd-export-col value="start" checked /> Start pracy</label>
+        <label class="wtd-export-check"><input type="checkbox" data-wtd-export-col value="stop" checked /> Koniec pracy</label>
+        <label class="wtd-export-check"><input type="checkbox" data-wtd-export-col value="work" checked /> Czas pracy</label>
+        <label class="wtd-export-check"><input type="checkbox" data-wtd-export-col value="net" checked /> Realny czas pracy</label>
+        <label class="wtd-export-check"><input type="checkbox" data-wtd-export-col value="break" checked /> Przerwa</label>
+        <label class="wtd-export-check"><input type="checkbox" data-wtd-export-col value="editedBy" checked /> Edytowa&#322;</label>
+        <label class="wtd-export-check"><input type="checkbox" data-wtd-export-col value="comment" checked /> Komentarz</label>
+        <label class="wtd-export-check"><input type="checkbox" data-wtd-export-col value="alert" checked /> Alert</label>
+        <label class="wtd-export-check"><input type="checkbox" data-wtd-export-col value="ack" checked /> ACK</label>
+      </div>
+
+      <div class="wtd-export-block">
+        <div class="wtd-export-title">Orientacja PDF</div>
+        <label class="wtd-export-radio"><input type="radio" name="wtdExportOrientation" value="p" checked /> Pion</label>
+        <label class="wtd-export-radio"><input type="radio" name="wtdExportOrientation" value="l" /> Poziom</label>
+        <p class="wtd-export-hint">Domy&#347;lnie: pion. Opcja dotyczy tylko pliku PDF.</p>
+      </div>
+    </div>
+
+    <div class="row-actions" style="margin-top: 4px;">
+      <div class="left" style="display:flex; gap:10px;">
+        <button class="btn2 primary" id="wtdExportCsvBtn" type="button">Pobierz CSV</button>
+        <button class="btn2" id="wtdExportPdfBtn" type="button">Pobierz PDF</button>
+      </div>
+
+      <div class="right" style="margin-left:auto;">
+        <button class="btn2 danger" id="wtdExportCancelBtn" type="button">Anuluj</button>
+      </div>
+    </div>
+
+    <button class="btn2" id="wtdExportCloseBtn" type="button" style="position:absolute; top:18px; right:18px; padding:6px 10px; border-radius:14px;">X</button>
   </div>
 </div>

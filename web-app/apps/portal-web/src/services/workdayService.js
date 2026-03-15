@@ -1,4 +1,4 @@
-import {
+﻿import {
   backupCyclesForOrg,
   deleteWorkdayForOrg,
   insertWorkdayForOrg,
@@ -15,7 +15,7 @@ import { getWorkers } from './workerService'
 const NINE_HOURS_SECONDS = 9 * 60 * 60
 let eventsForOrgUnavailable = false
 const DEPLOY_HINT =
-  'Brak wdrożonej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean-room.'
+  'Brak wdro\u017conej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean-room.'
 
 function pad2(value) {
   return String(value).padStart(2, '0')
@@ -556,7 +556,7 @@ function getDataConnectInstance() {
   const firebase = ensureFirebase()
   const dataConnect = firebase?.dataConnect
   if (!dataConnect) {
-    throw new Error('Nie udało się zainicjalizować Data Connect.')
+    throw new Error('Nie uda\u0142o si\u0119 zainicjalizowa\u0107 Data Connect.')
   }
 
   return dataConnect
@@ -1937,6 +1937,40 @@ export async function getTodayActiveWorkers(orgId) {
     const text = String(value ?? '').trim()
     return Boolean(text) && text !== '-'
   }
+  const hasReadableClientLabel = (value) => {
+    const text = String(value ?? '').trim()
+    if (!text || text === '-') {
+      return false
+    }
+    const normalized = normalizeLookupKey(text)
+    return normalized !== 'unassigned' && normalized !== 'brakklienta' && normalized !== 'nieprzypisany'
+  }
+  const isQrZoneCodeLike = (value) => {
+    const text = String(value ?? '').trim().toUpperCase()
+    if (!text || text === '-') {
+      return false
+    }
+    return /^[A-Z]{1,8}\d{2,}[A-Z0-9-]*$/.test(text)
+  }
+  const resolveZoneCode = (item) => {
+    const candidates = [
+      item?.zoneId,
+      item?.utilityRoomId,
+      item?.roomId,
+      item?.workdayUtilityRoomId,
+      item?.dayStartObject,
+      item?.dayStopObject,
+    ]
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean)
+
+    const qrCode = candidates.find((value) => isQrZoneCodeLike(value))
+    if (qrCode) {
+      return qrCode
+    }
+
+    return candidates[0] || ''
+  }
 
   const shouldReplaceDisplayName = (currentName, candidateName, workerLogin) => {
     const current = String(currentName ?? '').trim()
@@ -1995,13 +2029,18 @@ export async function getTodayActiveWorkers(orgId) {
         firstStartTs: 0,
         firstStartClient: '-',
         firstStartZone: '-',
+        firstStartZoneId: '',
         firstStartLocation: '-',
         latestStopIso: '',
         latestStopTs: 0,
+        latestRelevantStopIso: '',
+        latestRelevantStopTs: 0,
         latestDayStopIso: '',
         latestDayStopTs: 0,
         closedSec: 0,
+        closedIntervals: new Set(),
         runningCandidates: [],
+        runningCandidateKeys: new Set(),
       })
     }
 
@@ -2069,9 +2108,69 @@ export async function getTodayActiveWorkers(orgId) {
     }
   })
 
-  ;enrichedRows
+  const dedupeRowKey = (item) => {
+    const workerKey = normalizeLookupKey(item?.workerLogin ?? item?.workerName)
+    const startIso = toIso(item?.startAt || item?.dayStartAt)
+    const endIso = toIso(item?.endAt || item?.dayEndAt)
+    const hasStop = toTimestamp(endIso) > 0
+    const status = normalizeStatus(item?.status, hasStop)
+    const durationSec = calculateDuration(item)
+    const endReason = String(item?.endReason ?? '').trim().toUpperCase()
+    const zoneKey = normalizeLookupKey(item?.zoneId ?? item?.utilityRoomId ?? item?.roomId ?? item?.strefa ?? item?.zoneName)
+    const clientKey = normalizeLookupKey(item?.clientId ?? item?.clientName ?? item?.klient)
+    const dayStartObject = normalizeLookupKey(item?.dayStartObject)
+    const dayStopObject = normalizeLookupKey(item?.dayStopObject)
+
+    return [
+      workerKey,
+      startIso,
+      endIso,
+      status,
+      durationSec,
+      endReason,
+      zoneKey,
+      clientKey,
+      dayStartObject,
+      dayStopObject,
+    ].join('|')
+  }
+
+  const dedupeRowScore = (item) => {
+    let score = 0
+    if (String(item?.workerLogin ?? '').trim()) score += 8
+    if (String(item?.workerName ?? '').trim()) score += 4
+    if (String(item?.clientName ?? item?.klient ?? item?.clientId ?? '').trim()) score += 4
+    if (String(item?.zoneName ?? item?.strefa ?? item?.zoneId ?? item?.utilityRoomId ?? item?.roomId ?? '').trim()) score += 4
+    if (String(item?.lokalizacja ?? item?.location ?? '').trim()) score += 2
+    if (String(item?.dayStartObject ?? item?.dayStopObject ?? '').trim()) score += 2
+    if (String(item?.eventId ?? item?.id ?? '').trim()) score += 1
+    if (String(item?.workdayId ?? '').trim()) score += 1
+    const ts = toTimestamp(item?.updatedAt || item?.createdAt || item?.endAt || item?.startAt)
+    return { score, ts }
+  }
+
+  const dedupedRowsMap = new Map()
+  enrichedRows
     .filter((item) => isItemFromLocalDay(item, day))
-    .forEach((item) => {
+    .forEach((item, index) => {
+      const key = dedupeRowKey(item) || `row-${index}`
+      const existing = dedupedRowsMap.get(key)
+      if (!existing) {
+        dedupedRowsMap.set(key, item)
+        return
+      }
+
+      const existingScore = dedupeRowScore(existing)
+      const incomingScore = dedupeRowScore(item)
+      if (
+        incomingScore.score > existingScore.score ||
+        (incomingScore.score === existingScore.score && incomingScore.ts > existingScore.ts)
+      ) {
+        dedupedRowsMap.set(key, item)
+      }
+    })
+
+  ;[...dedupedRowsMap.values()].forEach((item) => {
       const bucket = resolveBucket(item)
       if (!bucket) {
         return
@@ -2086,11 +2185,22 @@ export async function getTodayActiveWorkers(orgId) {
       const status = normalizeStatus(item.status, hasStop)
       const rawStatus = String(item.status ?? '').trim().toUpperCase()
       const endReason = String(item.endReason ?? '').trim().toUpperCase()
+      const specialHaystack = [item?.strefa, item?.zoneName, item?.roomId, item?.clientStatus]
+        .map((value) => String(value ?? '').toLowerCase())
+        .join(' ')
+      const isSpecial = specialHaystack.includes('specjal') || specialHaystack.includes('special')
+      const isIndividual = Boolean(String(item?.clientIndId ?? '').trim()) || endReason === 'INDIVIDUAL_DONE'
+      const isClean = endReason === 'QR_NEW' || endReason === 'QR_SAME' || endReason === 'QR_START_STOP'
+      const isDayStopMarker =
+        endTs > 0 && (endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY' || rawStatus === 'WORKDAY_CLOSED')
+      const isDayStartMarker = status === 'RUNNING' && startTs > 0 && !hasStop
+      const isDurationRelevant = isIndividual || isSpecial || isDayStartMarker || isDayStopMarker || (hasStop && !isClean)
       const startObjectLabel = String(item.dayStartObject ?? '').trim()
+      const zoneCode = resolveZoneCode(item)
       const clientLabelRaw = String(item.clientName ?? item.klient ?? item.clientId ?? '').trim()
       const zoneLabelRaw = String(item.zoneName ?? item.strefa ?? '').trim()
       const locationLabelRaw = String(item.lokalizacja ?? item.location ?? '').trim()
-      const clientLabel = hasReadableLabel(clientLabelRaw)
+      const clientLabel = hasReadableClientLabel(clientLabelRaw)
         ? clientLabelRaw
         : hasReadableLabel(startObjectLabel)
           ? startObjectLabel
@@ -2102,18 +2212,22 @@ export async function getTodayActiveWorkers(orgId) {
         bucket.latestEventTs = eventTs
       }
 
-      if (startTs > 0 && (bucket.firstStartTs <= 0 || startTs < bucket.firstStartTs)) {
+      if (isDurationRelevant && startTs > 0 && (bucket.firstStartTs <= 0 || startTs < bucket.firstStartTs)) {
         bucket.firstStartTs = startTs
         bucket.firstStartIso = startIso
         bucket.firstStartClient = clientLabel
         bucket.firstStartZone = zoneLabel
+        bucket.firstStartZoneId = zoneCode
         bucket.firstStartLocation = locationLabel
-      } else if (startTs > 0 && startTs === bucket.firstStartTs) {
-        if (!hasReadableLabel(bucket.firstStartClient) && hasReadableLabel(clientLabel)) {
+      } else if (isDurationRelevant && startTs > 0 && startTs === bucket.firstStartTs) {
+        if (!hasReadableClientLabel(bucket.firstStartClient) && hasReadableClientLabel(clientLabel)) {
           bucket.firstStartClient = clientLabel
         }
         if (!hasReadableLabel(bucket.firstStartZone) && hasReadableLabel(zoneLabel)) {
           bucket.firstStartZone = zoneLabel
+        }
+        if (!String(bucket.firstStartZoneId ?? '').trim() && zoneCode) {
+          bucket.firstStartZoneId = zoneCode
         }
         if (!hasReadableLabel(bucket.firstStartLocation) && hasReadableLabel(locationLabel)) {
           bucket.firstStartLocation = locationLabel
@@ -2124,57 +2238,58 @@ export async function getTodayActiveWorkers(orgId) {
         bucket.latestStopIso = endIso
       }
 
-      const isDayStopMarker =
-        endTs > 0 && (endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY' || rawStatus === 'WORKDAY_CLOSED')
+      if (isDurationRelevant && endTs > bucket.latestRelevantStopTs) {
+        bucket.latestRelevantStopTs = endTs
+        bucket.latestRelevantStopIso = endIso
+      }
+
       if (isDayStopMarker && endTs > bucket.latestDayStopTs) {
         bucket.latestDayStopTs = endTs
         bucket.latestDayStopIso = endIso
       }
 
       if (status === 'RUNNING' && startTs > 0) {
-        bucket.runningCandidates.push({
-          startTs,
-          startIso,
-          clientLabel,
-          zoneLabel,
-          locationLabel,
-        })
+        const runningKey = `${startTs}|${startIso}`
+        if (!bucket.runningCandidateKeys.has(runningKey)) {
+          bucket.runningCandidateKeys.add(runningKey)
+          bucket.runningCandidates.push({
+            startTs,
+            startIso,
+            clientLabel,
+            zoneLabel,
+            zoneId: zoneCode,
+            locationLabel,
+          })
+        }
         return
       }
 
       if (status === 'CLOSED' && startTs > 0 && endTs > startTs) {
-        bucket.closedSec += Math.floor((endTs - startTs) / 1000)
+        const intervalKey = `${startTs}|${endTs}`
+        if (!bucket.closedIntervals.has(intervalKey)) {
+          bucket.closedIntervals.add(intervalKey)
+          bucket.closedSec += Math.floor((endTs - startTs) / 1000)
+        }
       }
     })
 
   const items = [...workers.values()]
     .map((bucket) => {
       const activeCandidates = bucket.runningCandidates
-        .filter((candidate) => candidate.startTs > bucket.latestStopTs)
+        .filter((candidate) => candidate.startTs > bucket.latestDayStopTs)
         .sort((left, right) => right.startTs - left.startTs)
       const activeCandidate = activeCandidates[0] ?? null
-      const runningSec = activeCandidates.reduce(
-        (sum, candidate) => sum + Math.max(0, Math.floor((nowTs - candidate.startTs) / 1000)),
-        0,
-      )
-      const fallbackMarkerSec = (() => {
-        if (bucket.latestStopTs <= 0 || !bucket.runningCandidates.length) {
-          return 0
-        }
-
-        const latestStartBeforeStop = bucket.runningCandidates
-          .filter((candidate) => candidate.startTs > 0 && candidate.startTs <= bucket.latestStopTs)
-          .sort((left, right) => right.startTs - left.startTs)[0]
-        if (!latestStartBeforeStop) {
-          return 0
-        }
-
-        return Math.max(0, Math.floor((bucket.latestStopTs - latestStartBeforeStop.startTs) / 1000))
-      })()
-      const totalSec = Math.max(0, Math.floor(Math.max(bucket.closedSec, fallbackMarkerSec) + runningSec))
       const isRunning = Boolean(activeCandidate)
-      const startIso = isRunning ? activeCandidate.startIso : bucket.firstStartIso
-      const stopIso = !isRunning && bucket.latestStopTs > 0 ? bucket.latestStopIso : ''
+      const stopReferenceTs = isRunning
+        ? nowTs
+        : bucket.latestDayStopTs || bucket.latestRelevantStopTs || bucket.latestStopTs || 0
+      const totalSec =
+        bucket.firstStartTs > 0 && stopReferenceTs > bucket.firstStartTs
+          ? Math.max(0, Math.floor((stopReferenceTs - bucket.firstStartTs) / 1000))
+          : 0
+      // Dashboard rule: always show the first QR START from the current day.
+      const startIso = bucket.firstStartIso || (isRunning ? activeCandidate?.startIso : '')
+      const stopIso = !isRunning ? bucket.latestDayStopIso || bucket.latestRelevantStopIso || '' : ''
       let duration = durationToHms(totalSec)
       if (duration === '-' && (isRunning || bucket.firstStartTs > 0)) {
         duration = '00:00:00'
@@ -2186,6 +2301,9 @@ export async function getTodayActiveWorkers(orgId) {
       const resolvedZone = isRunning
         ? activeCandidate?.zoneLabel ?? bucket.firstStartZone ?? '-'
         : bucket.firstStartZone ?? '-'
+      const resolvedZoneId = String(
+        isRunning ? activeCandidate?.zoneId ?? bucket.firstStartZoneId ?? '' : bucket.firstStartZoneId ?? '',
+      ).trim()
       const resolvedLocation = isRunning
         ? activeCandidate?.locationLabel ?? bucket.firstStartLocation ?? '-'
         : bucket.firstStartLocation ?? '-'
@@ -2195,8 +2313,12 @@ export async function getTodayActiveWorkers(orgId) {
         workerLogin: bucket.workerLogin || bucket.id,
         workerName: bucket.workerName,
         entriesCount: bucket.entriesCount,
-        activeClient: hasReadableLabel(resolvedClient) ? resolvedClient : '-',
+        activeClient: hasReadableClientLabel(resolvedClient) ? resolvedClient : '-',
         activeZone: hasReadableLabel(resolvedZone) ? resolvedZone : '-',
+        activeZoneId: resolvedZoneId,
+        zoneId: resolvedZoneId,
+        roomId: resolvedZoneId,
+        utilityRoomId: resolvedZoneId,
         activeLocation: hasReadableLabel(resolvedLocation) ? resolvedLocation : '-',
         qrStart: formatTime(startIso),
         qrStop: stopIso ? formatTime(stopIso) : '-',
@@ -2221,7 +2343,7 @@ export async function getTodayActiveWorkers(orgId) {
 
       return left.workerName.localeCompare(right.workerName, 'pl', { sensitivity: 'base' })
     })
-    .map(({ activeSortTs, latestEventTs, ...item }) => item)
+    .map(({ activeSortTs, latestEventTs, closedIntervals, runningCandidateKeys, ...item }) => item)
 
   return {
     orgId,
@@ -2612,3 +2734,4 @@ export async function deleteWorkday(orgId, workdayId) {
     workdayId: normalizedWorkdayId,
   }
 }
+

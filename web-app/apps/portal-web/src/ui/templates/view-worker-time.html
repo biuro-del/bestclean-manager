@@ -1,8 +1,8 @@
-<h1 class="welcome">Czas pracy pracownika</h1>
+﻿<h1 class="welcome">Czas pracy pracownika</h1>
 <p class="subwelcome">Lista pracownik&#243;w. Kliknij &bdquo;Poka&#380;&rdquo;, aby przej&#347;&#263; do szczeg&#243;&#322;&#243;w.</p>
 
 <div class="toolbar" aria-label="Filtry pracownik&#243;w">
-  <div class="tool" style="min-width:260px">
+  <div class="tool" style="min-width:250px">
     <label for="wtQ">Szukaj</label>
     <input id="wtQ" type="text" placeholder="np. Rafa&#322; / Marta" />
   </div>
@@ -12,17 +12,34 @@
     <input id="wtType" type="text" placeholder="np. Kierownik" />
   </div>
 
+  <div class="tool" style="min-width:160px">
+    <label for="wtWorkerId">ID pracownika</label>
+    <input id="wtWorkerId" type="text" placeholder="np. W051" />
+  </div>
+
+  <div class="tool" style="min-width:170px">
+    <label for="wtActive">Aktywny</label>
+    <select id="wtActive">
+      <option value="">(wszyscy)</option>
+      <option value="1">TRUE</option>
+      <option value="0">FALSE</option>
+    </select>
+  </div>
+
   <div class="tool-actions">
+    <button class="btn2" id="wtDownloadEwidencjaBtn" type="button">Pobierz ewidencj&#281; pracy</button>
     <button class="btn2" id="wtRefreshBtn" type="button">Od&#347;wie&#380;</button>
     <button class="btn2 primary" id="wtSearchBtn" type="button">Szukaj</button>
   </div>
 </div>
 
-<div class="events-table" aria-label="Tabela pracownik&#243;w">
-  <div class="events-head" style="grid-template-columns: 140px 260px 220px 140px;">
+<div class="events-table" aria-label="Tabela pracownik&#243;w" style="--events-grid: 42px 120px 220px 180px 100px 140px;">
+  <div class="events-head">
+    <div class="events-select-col"><input id="wtSelectAll" type="checkbox" aria-label="Zaznacz wszystkich pracownik&#243;w na stronie" /></div>
     <div>ID</div>
     <div>Imi&#281; i nazwisko</div>
     <div>Typ</div>
+    <div>Aktywny</div>
     <div></div>
   </div>
 
@@ -34,8 +51,62 @@
       <span id="wtShownLabel">Wy&#347;wietlono: -</span>
     </div>
     <div class="pager-right">
-      <button class="btn2 pager-btn" id="wtPrevBtn" type="button">&#8592;</button>
-      <button class="btn2 pager-btn" id="wtNextBtn" type="button">&#8594;</button>
+      <button class="btn2 pager-btn" id="wtPrevBtn" type="button"><-</button>
+      <button class="btn2 pager-btn" id="wtNextBtn" type="button">-></button>
     </div>
+  </div>
+</div>
+
+<div class="overlay" id="wtExportOverlay" aria-label="Pobierz ewidencj&#281; pracy" role="dialog" aria-modal="true">
+  <div class="modal modal-sm" style="position:relative;">
+    <h3>Pobierz ewidencj&#281; pracy</h3>
+    <p class="meta">Wybierz zakres dat, kolumny i format pliku do pobrania.</p>
+
+    <div class="wt-export-range">
+      <label>
+        Od (data)
+        <input id="wtExportFrom" type="date" />
+      </label>
+      <label>
+        Do (data)
+        <input id="wtExportTo" type="date" />
+      </label>
+    </div>
+
+    <div class="wt-export-grid">
+      <div class="wt-export-block">
+        <div class="wt-export-title">Kolumny</div>
+        <label class="wt-export-check"><input type="checkbox" data-wt-export-col value="date" checked /> Data</label>
+        <label class="wt-export-check"><input type="checkbox" data-wt-export-col value="worker" checked /> Pracownik</label>
+        <label class="wt-export-check"><input type="checkbox" data-wt-export-col value="type" checked /> Typ</label>
+        <label class="wt-export-check"><input type="checkbox" data-wt-export-col value="start" checked /> Start pracy</label>
+        <label class="wt-export-check"><input type="checkbox" data-wt-export-col value="stop" checked /> Koniec pracy</label>
+        <label class="wt-export-check"><input type="checkbox" data-wt-export-col value="work" checked /> Czas pracy</label>
+        <label class="wt-export-check"><input type="checkbox" data-wt-export-col value="net" checked /> Realny czas pracy</label>
+        <label class="wt-export-check"><input type="checkbox" data-wt-export-col value="break" checked /> Przerwa</label>
+        <label class="wt-export-check"><input type="checkbox" data-wt-export-col value="status" checked /> Status</label>
+        <label class="wt-export-check"><input type="checkbox" data-wt-export-col value="workerId" /> ID pracownika</label>
+        <label class="wt-export-check"><input type="checkbox" data-wt-export-col value="login" /> Login</label>
+      </div>
+
+      <div class="wt-export-block">
+        <div class="wt-export-title">Orientacja PDF</div>
+        <label class="wt-export-radio"><input type="radio" name="wtExportOrientation" value="p" checked /> Pion</label>
+        <label class="wt-export-radio"><input type="radio" name="wtExportOrientation" value="l" /> Poziom</label>
+        <p class="wt-export-hint">Domy&#347;lnie: pion. Ka&#380;da osoba b&#281;dzie na osobnej stronie A4.</p>
+      </div>
+    </div>
+
+    <div class="row-actions" style="margin-top: 4px;">
+      <div class="left" style="display:flex; gap:10px;">
+        <button class="btn2 primary" id="wtExportPdfBtn" type="button">Pobierz PDF</button>
+      </div>
+
+      <div class="right" style="margin-left:auto;">
+        <button class="btn2 danger" id="wtExportCancelBtn" type="button">Anuluj</button>
+      </div>
+    </div>
+
+    <button class="btn2" id="wtExportCloseBtn" type="button" style="position:absolute; top:18px; right:18px; padding:6px 10px; border-radius:14px;">X</button>
   </div>
 </div>

@@ -26,8 +26,22 @@ function pad2(value) {
 }
 
 function normalizeDayName(value) {
+  const polishMap = {
+    Ą: 'A',
+    Ć: 'C',
+    Ę: 'E',
+    Ł: 'L',
+    Ń: 'N',
+    Ó: 'O',
+    Ś: 'S',
+    Ź: 'Z',
+    Ż: 'Z',
+  }
+
   return String(value ?? '')
     .trim()
+    .toUpperCase()
+    .replace(/[ĄĆĘŁŃÓŚŹŻ]/g, (char) => polishMap[char] || char)
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
     .toUpperCase()
