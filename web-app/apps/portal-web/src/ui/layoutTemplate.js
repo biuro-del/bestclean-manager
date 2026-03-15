@@ -3,7 +3,7 @@
   <div class="login-card" role="dialog" aria-label="Logowanie">
     <div class="login-brand">
       <div class="login-logo">
-        <img src="/vite.svg" alt="FIDO iClean" />
+        <img src="/logotyp.jpg" alt="Best Clean" />
       </div>
       <div class="login-title">iClean - PORTAL</div>
     </div>
@@ -29,7 +29,7 @@
     <header class="header">
       <div class="header-left">
         <div class="logo-block" aria-label="Logo">
-          <img src="/vite.svg" alt="FIDO iClean" />
+          <img src="/logotyp.jpg" alt="Best Clean" />
         </div>
         <div class="brand">
           <div class="brand-title">iClean - PORTAL</div>
