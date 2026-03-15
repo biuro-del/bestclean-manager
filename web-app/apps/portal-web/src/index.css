@@ -983,6 +983,67 @@
 
 
 
+/* =========================================================
+   Login: mobile readability hard override
+   ========================================================= */
+@media (max-width: 760px){
+  .login-screen{
+    align-items: flex-end !important;
+    justify-content: flex-start !important;
+    padding: clamp(12px, 3.8vw, 22px) !important;
+    background-position: center center !important;
+    background-size: cover !important;
+  }
+
+  .login-card{
+    width: min(92vw, 380px) !important;
+    min-width: min(92vw, 300px) !important;
+    padding: 14px !important;
+    border-radius: 14px !important;
+  }
+
+  .login-logo{
+    padding: 10px 12px !important;
+    border-radius: 12px !important;
+  }
+
+  .login-logo img{
+    height: clamp(28px, 6vw, 36px) !important;
+  }
+
+  .login-title{
+    font-size: clamp(18px, 4.8vw, 24px) !important;
+  }
+
+  .login-field{
+    margin-top: 12px !important;
+    gap: 7px !important;
+  }
+
+  .login-field label{
+    font-size: 13px !important;
+  }
+
+  .login-field input{
+    padding: 11px 12px !important;
+    font-size: 16px !important;
+    border-radius: 12px !important;
+  }
+
+  .login-card .btn{
+    margin-top: 12px !important;
+    padding: 12px !important;
+    font-size: 16px !important;
+    border-radius: 12px !important;
+  }
+}
+
+@media (max-width: 420px){
+  .login-card{
+    width: calc(100vw - 20px) !important;
+    min-width: 0 !important;
+  }
+}
   /* Zalogowany (TAK/NIE) */
   .pill.pill-yes{
     background: #dcfce7;          /* zielone tło */
