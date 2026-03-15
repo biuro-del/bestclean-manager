@@ -1374,7 +1374,7 @@ async function fetchMappedWorkdays(orgId, rowsPromise, operationName) {
 
 async function fetchMappedBackupCycles(orgId) {
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. UzupeĹ‚nij web-app/.env.')
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
   ensureFirebase()
@@ -1880,7 +1880,7 @@ function buildTodayFingerprint(dayKey, recordsMap) {
 
 export async function getTodayWorktimeFingerprint(orgId) {
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. UzupeĹ‚nij web-app/.env.')
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
   ensureFirebase()
@@ -2267,7 +2267,7 @@ export async function getDashboardSummary(orgId) {
 
 export async function createEvent(orgId, payload = {}) {
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
   const eventId = String(payload.eventId ?? payload.id ?? `EV-${Date.now()}`).trim()
@@ -2363,7 +2363,7 @@ export async function createEvent(orgId, payload = {}) {
 
 export async function updateEvent(orgId, eventId, payload = {}) {
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
   const normalizedEventId = String(eventId ?? payload.eventId ?? payload.workdayId ?? '').trim()
@@ -2447,7 +2447,7 @@ export async function updateEvent(orgId, eventId, payload = {}) {
 
 export async function deleteEvent(orgId, eventId) {
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
   const normalizedEventId = String(eventId ?? '').trim()

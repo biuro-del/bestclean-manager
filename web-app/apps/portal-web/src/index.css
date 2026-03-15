@@ -3310,18 +3310,18 @@ textarea:focus{
 
 #view-dashboard .dash-grid{
   display: grid !important;
-  grid-template-columns: minmax(0, 2.15fr) minmax(160px, 0.5fr) !important;
+  grid-template-columns: minmax(0, 2.05fr) minmax(240px, 0.76fr) !important;
   grid-template-areas:
     "overview side"
     "activity side";
-  gap: 18px !important;
-  align-items: stretch;
+  gap: 16px !important;
+  align-items: start;
 }
 
 #view-dashboard .dash-overview-panel{
   grid-area: overview;
   padding: 18px !important;
-  min-height: 220px;
+  min-height: 110px;
 }
 
 #view-dashboard .dash-activity-panel{
@@ -3334,8 +3334,11 @@ textarea:focus{
   grid-area: side;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px !important;
+  gap: 10px;
+  align-self: start;
+  height: var(--dash-side-target-height, clamp(680px, calc(100dvh - 128px), 1100px));
+  overflow: hidden;
+  padding: 14px !important;
 }
 
 #view-dashboard .dash-side-group{
@@ -3350,6 +3353,230 @@ textarea:focus{
   font-size: 12px;
   line-height: 1.4;
   color: var(--ui-muted);
+}
+
+#view-dashboard .dash-schedule-panel{
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 10px;
+  min-height: 0;
+  min-width: 0;
+  padding: 14px !important;
+}
+
+#view-dashboard .dash-schedule-sync{
+  font-size: 11px;
+  line-height: 1.35;
+  color: #5f78a4;
+}
+
+#view-dashboard .dash-schedule-daybar{
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 0;
+}
+
+#view-dashboard .dash-schedule-nav{
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+#view-dashboard .dash-schedule-dayinfo{
+  text-align: center;
+  min-width: 0;
+}
+
+#view-dashboard .dash-schedule-dayname{
+  font-size: clamp(16px, 3.9cqi, 22px);
+  font-weight: 900;
+  color: #1d3259;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#view-dashboard .dash-schedule-daydate{
+  margin-top: 0;
+  font-size: 12px;
+  color: #5a7098;
+  font-weight: 600;
+}
+
+#view-dashboard .dash-schedule-cards{
+  display: grid;
+  grid-template-columns: 1fr;
+  margin-top: 8px;
+  flex: 1 1 auto;
+  gap: 6px;
+  align-content: start;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+
+#view-dashboard .dash-schedule-card{
+  border: 1px solid #dce8fb;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+#view-dashboard .dash-schedule-top{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+#view-dashboard .dash-schedule-worker-name{
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.15;
+  color: #1d2e4f;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#view-dashboard .dash-schedule-status-badge{
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid #d4deed;
+  background: #eef2f8;
+  color: #475569;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+#view-dashboard .dash-schedule-status-badge.is-work{
+  border-color: #b6dfc7;
+  background: #eaf7ef;
+  color: #166534;
+}
+
+#view-dashboard .dash-schedule-status-badge.is-off{
+  border-color: #d6deec;
+  background: #eff3f8;
+  color: #475569;
+}
+
+#view-dashboard .dash-schedule-line{
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+}
+
+#view-dashboard .dash-schedule-shifts{
+  display: grid;
+  gap: 4px;
+}
+
+#view-dashboard .dash-schedule-startline{
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  border-bottom: 1px dashed #dce6f7;
+  padding-bottom: 4px;
+}
+
+#view-dashboard .dash-schedule-start-value{
+  font-size: 12px;
+  color: #1d4fa8;
+  font-weight: 800;
+  line-height: 1.1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#view-dashboard .dash-schedule-shifts .dash-schedule-line + .dash-schedule-line{
+  border-top: 1px dashed #dce6f7;
+  padding-top: 4px;
+}
+
+#view-dashboard .dash-schedule-line-label{
+  font-size: 10px;
+  color: #6b84ab;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+#view-dashboard .dash-schedule-line-text{
+  font-size: 12px;
+  color: #1e293b;
+  font-weight: 500;
+  line-height: 1.2;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#view-dashboard .dash-schedule-empty{
+  border: 1px dashed #bfd3f7;
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: 12px;
+  color: #5f78a4;
+  font-weight: 700;
+  text-align: center;
+}
+
+@container (min-width: 540px){
+  #view-dashboard .dash-schedule-cards{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 1040px){
+  #view-dashboard .dash-schedule-cards{
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 380px){
+  #view-dashboard .dash-schedule-dayname{
+    font-size: 15px;
+  }
+
+  #view-dashboard .dash-schedule-card{
+    padding: 7px;
+  }
+
+  #view-dashboard .dash-schedule-worker-name{
+    font-size: 12px;
+  }
+
+  #view-dashboard .dash-schedule-line{
+    grid-template-columns: 68px minmax(0, 1fr);
+  }
+
+  #view-dashboard .dash-schedule-line-text{
+    font-size: 11px;
+  }
 }
 
 #view-dashboard .dash-summary{
@@ -3398,6 +3625,25 @@ textarea:focus{
   padding: 4px 10px !important;
 }
 
+#view-dashboard .dash-refresh-btn--icon{
+  width: 30px;
+  min-width: 30px !important;
+  min-height: 30px !important;
+  padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#view-dashboard .dash-refresh-btn--icon svg{
+  width: 16px;
+  height: 16px;
+}
+
+#view-dashboard .dash-refresh-btn--icon.is-loading svg{
+  animation: dash-refresh-spin 0.9s linear infinite;
+}
+
 #view-dashboard .dash-events-head{
   padding: 4px 8px 8px !important;
 }
@@ -3435,6 +3681,8 @@ textarea:focus{
   }
 
   #view-dashboard .dash-side-panel{
+    height: auto;
+    overflow: visible;
     padding: 14px !important;
   }
 }
@@ -3447,6 +3695,11 @@ textarea:focus{
   #view-dashboard .sum-block{
     min-height: 108px;
   }
+}
+
+@keyframes dash-refresh-spin{
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* =========================================================
@@ -4045,24 +4298,24 @@ textarea:focus{
 }
 
 /* =========================================================
-   Dashboard active list: aligned columns + 10-row viewport
+   Dashboard active list: aligned columns + 7-row viewport
    ========================================================= */
 #view-dashboard .dash-events-head,
 #view-dashboard .dash-events-row{
   display: grid;
   grid-template-columns:
-    minmax(170px, 1.15fr)
-    62px
+    minmax(130px, 1.1fr)
+    48px
+    minmax(80px, 0.75fr)
     minmax(90px, 0.8fr)
-    minmax(110px, 0.9fr)
-    minmax(130px, 1fr)
-    minmax(240px, 1.25fr);
-  column-gap: 12px;
+    minmax(100px, 0.9fr)
+    minmax(170px, 1fr);
+  column-gap: 8px;
   align-items: center;
 }
 
 #view-dashboard .dash-events-head{
-  padding: 4px 10px 8px !important;
+  padding: 3px 8px 6px !important;
 }
 
 #view-dashboard .dash-events-head > div{
@@ -4078,19 +4331,71 @@ textarea:focus{
 }
 
 #view-dashboard .dash-events-list{
-  --dash-row-gap: 8px;
-  --dash-row-height: 84px;
+  --dash-row-gap: 6px;
+  --dash-row-height: 66px;
   display: flex;
   flex-direction: column;
   gap: var(--dash-row-gap) !important;
-  max-height: min(78vh, calc((var(--dash-row-height) * 10) + (var(--dash-row-gap) * 9)));
+  max-height: min(78vh, calc((var(--dash-row-height) * 7) + (var(--dash-row-gap) * 6)));
   overflow-y: auto;
   overflow-x: hidden;
-  padding-right: 6px;
+  padding-right: 3px;
 }
 
 #view-dashboard .dash-events-row{
   min-height: var(--dash-row-height);
+  padding: 5px 8px !important;
+  border-radius: 10px;
+}
+
+#view-dashboard .dash-events-row > div{
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#view-dashboard .dash-worker-link{
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#view-dashboard .dash-entity-link{
+  display: inline-block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#view-dashboard .dash-time-stack{
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+
+#view-dashboard .dash-time-line{
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 5ch);
+  column-gap: 4px;
+  font-size: 10px;
+  line-height: 1;
+}
+
+#view-dashboard .dash-time-label,
+#view-dashboard .dash-time-value{
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
 }
 
 #view-dashboard .dash-events-list::-webkit-scrollbar{
@@ -4112,12 +4417,12 @@ textarea:focus{
   #view-dashboard .dash-events-head,
   #view-dashboard .dash-events-row{
     grid-template-columns:
-      minmax(150px, 1.1fr)
-      54px
-      minmax(80px, 0.75fr)
-      minmax(95px, 0.85fr)
-      minmax(115px, 0.95fr)
-      minmax(220px, 1.15fr);
+      minmax(120px, 1.05fr)
+      44px
+      minmax(72px, 0.7fr)
+      minmax(82px, 0.78fr)
+      minmax(90px, 0.86fr)
+      minmax(156px, 0.95fr);
     column-gap: 10px;
   }
 }

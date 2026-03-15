@@ -22,6 +22,7 @@ import {
   updateEvent,
   updateWorkday,
 } from '../services/workdayService'
+import { getScheduleBoard } from '../services/scheduleService'
 import { portalLayoutTemplate } from './layoutTemplate'
 import { createRouter } from './router'
 import { viewTemplates } from './viewTemplates'
@@ -95,6 +96,9 @@ const appState = {
   reportHistoryClientOptions: [],
   reportHistoryWorkerOptions: [],
   reportHistoryZoneOptions: [],
+  dashboardScheduleDays: [],
+  dashboardScheduleSelectedDay: '',
+  dashboardScheduleFetchedAt: '',
   currentRoute: '',
 }
 let portalNoticeTimer = null
@@ -310,6 +314,131 @@ function formatTime(value) {
 function todayYmd() {
   const now = new Date()
   return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
+}
+
+function ymdToDayTimestamp(value) {
+  const raw = String(value ?? '').trim()
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) {
+    return 0
+  }
+
+  const year = Number(match[1])
+  const month = Number(match[2]) - 1
+  const day = Number(match[3])
+  const ts = new Date(year, month, day).getTime()
+  return Number.isFinite(ts) ? ts : 0
+}
+
+function ymdToWeekday(value) {
+  const raw = String(value ?? '').trim()
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) {
+    return -1
+  }
+
+  const year = Number(match[1])
+  const month = Number(match[2]) - 1
+  const day = Number(match[3])
+  const weekday = new Date(year, month, day).getDay()
+  return Number.isFinite(weekday) ? weekday : -1
+}
+
+function dashboardPickNearestScheduleDayKey(days = [], targetDayKey = todayYmd()) {
+  const source = Array.isArray(days) ? days : []
+  if (!source.length) {
+    return ''
+  }
+
+  const targetTs = ymdToDayTimestamp(targetDayKey)
+  const targetWeekday = ymdToWeekday(targetDayKey)
+  if (!targetTs) {
+    return String(source[0]?.key ?? '')
+  }
+
+  const candidates = source
+    .map((day, index) => {
+      const key = String(day?.key ?? '').trim()
+      const ts = ymdToDayTimestamp(key)
+      if (!key || !ts) {
+        return null
+      }
+      const entries = Array.isArray(day?.entries) ? day.entries : []
+      const hasShiftData = entries.some((entry) => {
+        const morningStart = String(entry?.morningStart ?? '').trim()
+        const morningTask = String(entry?.morningTask ?? '').trim()
+        const afternoonStart = String(entry?.afternoonStart ?? '').trim()
+        const afternoonTask = String(entry?.afternoonTask ?? '').trim()
+        return Boolean(morningStart || morningTask || afternoonStart || afternoonTask)
+      })
+      return { key, ts, index, hasShiftData, weekday: ymdToWeekday(key) }
+    })
+    .filter(Boolean)
+
+  if (!candidates.length) {
+    return String(source[0]?.key ?? '')
+  }
+
+  const sortByDistanceThenFuture = (left, right) => {
+    const leftDiff = Math.abs(left.ts - targetTs)
+    const rightDiff = Math.abs(right.ts - targetTs)
+    if (leftDiff !== rightDiff) {
+      return leftDiff - rightDiff
+    }
+    const leftFuture = left.ts >= targetTs ? 0 : 1
+    const rightFuture = right.ts >= targetTs ? 0 : 1
+    if (leftFuture !== rightFuture) {
+      return leftFuture - rightFuture
+    }
+    return left.index - right.index
+  }
+
+  if (targetWeekday >= 0) {
+    const sameWeekday = candidates.filter((candidate) => candidate.weekday === targetWeekday)
+    const sameWeekdayWithData = sameWeekday
+      .filter((candidate) => candidate.hasShiftData)
+      .sort(sortByDistanceThenFuture)
+    if (sameWeekdayWithData.length) {
+      return String(sameWeekdayWithData[0]?.key ?? source[0]?.key ?? '')
+    }
+
+    sameWeekday.sort(sortByDistanceThenFuture)
+    if (sameWeekday.length) {
+      return String(sameWeekday[0]?.key ?? source[0]?.key ?? '')
+    }
+  }
+
+  const future = candidates
+    .filter((candidate) => candidate.ts >= targetTs)
+    .sort((left, right) => {
+      if (left.ts !== right.ts) {
+        return left.ts - right.ts
+      }
+      return left.index - right.index
+    })
+  const futureWithData = future.filter((candidate) => candidate.hasShiftData)
+  if (futureWithData.length) {
+    return String(futureWithData[0]?.key ?? source[0]?.key ?? '')
+  }
+  if (future.length) {
+    return String(future[0]?.key ?? source[0]?.key ?? '')
+  }
+
+  const past = candidates
+    .filter((candidate) => candidate.ts < targetTs)
+    .sort((left, right) => {
+      if (left.ts !== right.ts) {
+        return right.ts - left.ts
+      }
+      return left.index - right.index
+    })
+
+  const pastWithData = past.filter((candidate) => candidate.hasShiftData)
+  if (pastWithData.length) {
+    return String(pastWithData[0]?.key ?? source[0]?.key ?? '')
+  }
+
+  return String(past[0]?.key ?? source[0]?.key ?? '')
 }
 
 function firstDayOfCurrentMonthYmd() {
@@ -553,6 +682,204 @@ function renderDashboardEvents(rows) {
       },
     )
     .join('')
+}
+
+function dashboardScheduleDayDisplayName(dayName) {
+  const normalized = String(dayName ?? '').trim().toUpperCase()
+  const map = {
+    PONIEDZIAŁEK: 'Poniedziałek',
+    WTOREK: 'Wtorek',
+    'ŚRODA': 'Środa',
+    CZWARTEK: 'Czwartek',
+    PIĄTEK: 'Piątek',
+    SOBOTA: 'Sobota',
+    NIEDZIELA: 'Niedziela',
+  }
+  return map[normalized] || dayName || '-'
+}
+
+function dashboardScheduleShiftText(startRaw, taskRaw) {
+  const start = String(startRaw ?? '').trim()
+  const task = String(taskRaw ?? '').trim()
+  if (start && task) {
+    return `${start} ${task}`
+  }
+  if (start) {
+    return start
+  }
+  if (task) {
+    return task
+  }
+  return 'Brak zmiany'
+}
+
+function dashboardScheduleStartTime(entry) {
+  const morningStart = String(entry?.morningStart ?? '').trim()
+  if (morningStart) {
+    return morningStart
+  }
+
+  const afternoonStart = String(entry?.afternoonStart ?? '').trim()
+  if (afternoonStart) {
+    return afternoonStart
+  }
+
+  return '-'
+}
+
+function dashboardScheduleWorkerDisplayName(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) {
+    return '-'
+  }
+
+  const normalized = raw.replace(/\s+/g, ' ')
+  const letterMatches = normalized.match(/\p{L}/gu) || []
+  const upperMatches = normalized.match(/\p{Lu}/gu) || []
+  const isMostlyUpper = letterMatches.length > 2 && upperMatches.length / letterMatches.length > 0.75
+  if (!isMostlyUpper) {
+    return normalized
+  }
+
+  return normalized
+    .toLocaleLowerCase('pl')
+    .replace(/(^|[\s-])\p{L}/gu, (fragment) => fragment.toLocaleUpperCase('pl'))
+}
+
+function dashboardRenderScheduleCards(dayBucket) {
+  const cardsRoot = document.getElementById('dashScheduleCards')
+  if (!cardsRoot) {
+    return
+  }
+
+  const entries = Array.isArray(dayBucket?.entries) ? dayBucket.entries : []
+  if (!entries.length) {
+    cardsRoot.innerHTML = '<div class="dash-schedule-empty">Brak danych grafiku dla wybranego dnia.</div>'
+    return
+  }
+
+  cardsRoot.innerHTML = entries
+    .map((entry) => {
+      const workerName = dashboardScheduleWorkerDisplayName(entry?.workerName)
+      const status = String(entry?.status ?? '').trim() || 'Brak zmiany'
+      const morningText = dashboardScheduleShiftText(entry?.morningStart, entry?.morningTask)
+      const afternoonText = dashboardScheduleShiftText(entry?.afternoonStart, entry?.afternoonTask)
+      const startTime = dashboardScheduleStartTime(entry)
+      const statusClass = status === 'Praca' ? 'is-work' : 'is-off'
+
+      return `
+        <article class="dash-schedule-card">
+          <div class="dash-schedule-top">
+            <span class="dash-schedule-worker-name" title="${escapeHtml(workerName)}">${escapeHtml(workerName)}</span>
+            <span class="dash-schedule-status-badge ${statusClass}">${escapeHtml(status)}</span>
+          </div>
+          <div class="dash-schedule-startline">
+            <div class="dash-schedule-line-label">Godz. START</div>
+            <div class="dash-schedule-start-value" title="${escapeHtml(startTime)}">${escapeHtml(startTime)}</div>
+          </div>
+          <div class="dash-schedule-shifts">
+            <div class="dash-schedule-line">
+              <div class="dash-schedule-line-label">Rano</div>
+              <div class="dash-schedule-line-text" title="${escapeHtml(morningText)}">${escapeHtml(morningText)}</div>
+            </div>
+            <div class="dash-schedule-line">
+              <div class="dash-schedule-line-label">Popołudnie</div>
+              <div class="dash-schedule-line-text" title="${escapeHtml(afternoonText)}">${escapeHtml(afternoonText)}</div>
+            </div>
+          </div>
+        </article>
+      `
+    })
+    .join('')
+}
+
+function renderDashboardSchedulePanel() {
+  const dayNameNode = document.getElementById('dashScheduleDayName')
+  const dayDateNode = document.getElementById('dashScheduleDayDate')
+  const syncNode = document.getElementById('dashScheduleSync')
+  const prevButton = document.getElementById('dashSchedulePrevBtn')
+  const nextButton = document.getElementById('dashScheduleNextBtn')
+
+  const days = Array.isArray(appState.dashboardScheduleDays) ? appState.dashboardScheduleDays : []
+  if (!days.length) {
+    if (dayNameNode) dayNameNode.textContent = 'Brak danych'
+    if (dayDateNode) dayDateNode.textContent = '-'
+    if (syncNode) syncNode.textContent = 'Ostatnia synchronizacja: -'
+    if (prevButton) prevButton.disabled = true
+    if (nextButton) nextButton.disabled = true
+    dashboardRenderScheduleCards(null)
+    return
+  }
+
+  const todayKey = todayYmd()
+  const selectedExists = days.some((day) => day.key === appState.dashboardScheduleSelectedDay)
+  if (!selectedExists) {
+    const todayBucket = days.find((day) => day.key === todayKey)
+    appState.dashboardScheduleSelectedDay = String(todayBucket?.key ?? dashboardPickNearestScheduleDayKey(days, todayKey))
+  }
+
+  const currentIndex = Math.max(
+    0,
+    days.findIndex((day) => day.key === appState.dashboardScheduleSelectedDay),
+  )
+  const bucket = days[currentIndex] ?? days[0]
+  appState.dashboardScheduleSelectedDay = String(bucket?.key ?? '')
+
+  if (dayNameNode) {
+    dayNameNode.textContent = dashboardScheduleDayDisplayName(bucket?.dayName || '')
+  }
+  if (dayDateNode) {
+    dayDateNode.textContent = String(bucket?.dateLabel ?? '-')
+  }
+
+  const fetchedAtIso = toIso(appState.dashboardScheduleFetchedAt)
+  if (syncNode) {
+    syncNode.textContent = fetchedAtIso
+      ? `Ostatnia synchronizacja: ${formatDatePl(fetchedAtIso)} ${formatTime(fetchedAtIso)}`
+      : 'Ostatnia synchronizacja: -'
+  }
+
+  if (prevButton) prevButton.disabled = currentIndex <= 0
+  if (nextButton) nextButton.disabled = currentIndex >= days.length - 1
+
+  dashboardRenderScheduleCards(bucket)
+}
+
+function dashboardMoveScheduleDay(offset = 0) {
+  const days = Array.isArray(appState.dashboardScheduleDays) ? appState.dashboardScheduleDays : []
+  if (!days.length) {
+    return
+  }
+
+  const currentIndex = Math.max(
+    0,
+    days.findIndex((day) => day.key === appState.dashboardScheduleSelectedDay),
+  )
+  const nextIndex = Math.min(days.length - 1, Math.max(0, currentIndex + Number(offset || 0)))
+  appState.dashboardScheduleSelectedDay = String(days[nextIndex]?.key ?? appState.dashboardScheduleSelectedDay)
+  renderDashboardSchedulePanel()
+}
+
+function syncDashboardSidePanelHeight() {
+  const panel = document.querySelector('#view-dashboard .dash-side-panel')
+  if (!(panel instanceof HTMLElement)) {
+    return
+  }
+
+  if (window.matchMedia('(max-width: 1240px)').matches) {
+    panel.style.removeProperty('--dash-side-target-height')
+    return
+  }
+
+  const rectTop = panel.getBoundingClientRect().top
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+  if (!(viewportHeight > 0)) {
+    return
+  }
+
+  const bottomGap = 14
+  const targetHeight = Math.max(640, Math.floor(viewportHeight - rectTop - bottomGap))
+  panel.style.setProperty('--dash-side-target-height', `${targetHeight}px`)
 }
 
 function renderDashboardSummary(summary) {
@@ -2460,12 +2787,28 @@ async function refreshDashboardWidgets(options = {}) {
     return
   }
 
-  const [todayActive, summary] = await Promise.all([
+  const [todayActive, summary, scheduleBoard] = await Promise.all([
     getTodayActiveWorkers(appState.session.orgId),
     getDashboardSummary(appState.session.orgId),
+    getScheduleBoard().catch(() => null),
   ])
   renderDashboardEvents(todayActive.items ?? [])
   renderDashboardSummary(summary)
+  if (scheduleBoard && Array.isArray(scheduleBoard.days)) {
+    appState.dashboardScheduleDays = scheduleBoard.days
+    appState.dashboardScheduleFetchedAt = String(scheduleBoard.fetchedAtIso ?? '')
+    if (!appState.dashboardScheduleSelectedDay || !scheduleBoard.days.some((day) => day.key === appState.dashboardScheduleSelectedDay)) {
+      const preferredToday = String(scheduleBoard.todayKey ?? '').trim()
+      const todayMatch = scheduleBoard.days.find((day) => day.key === preferredToday)
+      appState.dashboardScheduleSelectedDay = String(
+        todayMatch?.key ?? dashboardPickNearestScheduleDayKey(scheduleBoard.days, preferredToday),
+      )
+    }
+  } else if (!appState.dashboardScheduleDays.length) {
+    appState.dashboardScheduleDays = []
+    appState.dashboardScheduleFetchedAt = ''
+  }
+  renderDashboardSchedulePanel()
 
   const explicitToken = String(options.worktimeToken ?? '').trim()
   if (explicitToken) {
@@ -2961,7 +3304,7 @@ async function fetchEventsForCurrentSession({ resetPage = false, applyStoredFilt
   if (root) {
     root.innerHTML = `
       <div class="events-row">
-        <div></div><div>Ladowanie danych...</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+        <div></div><div>Ładowanie danych...</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
       </div>
     `
   }
@@ -5212,7 +5555,7 @@ async function prepareReportsView() {
   reportHistorySetStatus('Wybierz filtr i kliknij "Pokaz historie".')
   reportSetKpiValues()
   reportResetCharts()
-  reportSetStatus('Wybierz klienta w panelu A i B, a nastepnie uruchom porownanie.')
+  reportSetStatus('Wybierz klienta w panelu A i B, a następnie uruchom porównanie.')
 }
 
 function reportHistoryNormalizeTab(value) {
@@ -5329,7 +5672,7 @@ function reportHistorySetSummaryRows(rows = []) {
 function reportHistoryRenderDetails(row, tab) {
   const details = Array.isArray(row.details) ? row.details : []
   if (!details.length && tab !== 'workers') {
-    return '<div class="rep-history-empty">Brak szczegolow.</div>'
+    return '<div class="rep-history-empty">Brak szczegółów.</div>'
   }
 
   if (tab === 'zones') {
@@ -6246,7 +6589,7 @@ async function runReportHistory() {
   }
 
   reportHistoryResetResults({ clearStatus: false })
-  reportHistorySetStatus('Ladowanie historii...')
+  reportHistorySetStatus('Ładowanie historii...')
 
   try {
     const fetchFilters = {
@@ -7499,6 +7842,8 @@ function createBindingHelpers() {
 
 function bindDashboardViewFunctions() {
   const binding = createBindingHelpers()
+  syncDashboardSidePanelHeight()
+  requestAnimationFrame(() => syncDashboardSidePanelHeight())
 
   binding.add(document.getElementById('dashRefreshBtn'), 'click', (event) => {
     void (async () => {
@@ -7529,6 +7874,46 @@ function bindDashboardViewFunctions() {
     })()
   })
 
+  binding.add(document.getElementById('dashSchedulePrevBtn'), 'click', () => {
+    dashboardMoveScheduleDay(-1)
+  })
+
+  binding.add(document.getElementById('dashScheduleNextBtn'), 'click', () => {
+    dashboardMoveScheduleDay(1)
+  })
+
+  binding.add(document.getElementById('dashScheduleRefreshBtn'), 'click', (event) => {
+    void (async () => {
+      if (!appState.session?.orgId) {
+        return
+      }
+
+      const button =
+        event.currentTarget instanceof HTMLButtonElement
+          ? event.currentTarget
+          : document.getElementById('dashScheduleRefreshBtn')
+      if (!button || button.disabled) {
+        return
+      }
+
+      button.disabled = true
+      button.classList.add('is-loading')
+      button.setAttribute('aria-busy', 'true')
+
+      try {
+        await refreshDashboardWidgets({ syncWorktimeToken: true })
+        showTransientNotice('Grafik dnia został odświeżony.')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Nie udało się odświeżyć grafiku dnia.'
+        showTransientNotice(message, 'error')
+      } finally {
+        button.disabled = false
+        button.classList.remove('is-loading')
+        button.setAttribute('aria-busy', 'false')
+      }
+    })()
+  })
+
   binding.add(document.getElementById('dashEventsList'), 'click', (event) => {
     const button = event.target.closest('[data-dash-worker-login], [data-dash-worker-name]')
     if (!button) {
@@ -7542,6 +7927,10 @@ function bindDashboardViewFunctions() {
     }
 
     void openDashboardWorkerHistory(workerLogin, workerName)
+  })
+
+  binding.add(window, 'resize', () => {
+    syncDashboardSidePanelHeight()
   })
 
   return binding.done
