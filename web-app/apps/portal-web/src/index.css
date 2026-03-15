@@ -255,11 +255,9 @@
     inset: 0;
     display: flex;
     align-items: flex-end;
-    justify-content: flex-start;
+    justify-content: flex-end;
     padding: clamp(16px, 2.4vw, 32px);
-    background:
-      linear-gradient(115deg, rgba(255,255,255,.58) 0%, rgba(243,248,255,.68) 42%, rgba(231,240,252,.84) 100%),
-      url('/login-bg-cleaning.png') right center / cover no-repeat;
+    background: url('/login-bg-cleaning.png') center center / cover no-repeat;
     z-index: 9999;
   }
   .login-card{
@@ -269,7 +267,6 @@
     border: 1px solid var(--line);
     box-shadow: var(--shadow);
     padding: 14px;
-    backdrop-filter: blur(2px);
   }
   .login-brand{
     display:flex;
