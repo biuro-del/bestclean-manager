@@ -2438,8 +2438,22 @@ function dashboardBuildTodayWorkerStateById(dayKey) {
   }
 
   const rows = Array.isArray(appState.dashboardTodayRows) ? appState.dashboardTodayRows : []
+  const sourceRows = Array.isArray(appState.dashboardScheduleSourceRows) ? appState.dashboardScheduleSourceRows : []
   const workersPool = Array.isArray(appState.workers) ? appState.workers : []
   const stateMap = new Map()
+  const isoToMinutes = (isoValue) => {
+    const iso = toIso(isoValue)
+    if (!iso) {
+      return -1
+    }
+
+    const date = new Date(iso)
+    if (!Number.isFinite(date.getTime())) {
+      return -1
+    }
+
+    return date.getHours() * 60 + date.getMinutes()
+  }
 
   const upsertState = (key, row) => {
     if (!key) {
@@ -2480,6 +2494,40 @@ function dashboardBuildTodayWorkerStateById(dayKey) {
       upsertState(`idn:${idDigits}`, row)
     }
   })
+
+  // Fallback for schedule colors: include all today's source rows (events/workdays),
+  // so workers who already started and then closed are still recognized as "started today".
+  sourceRows.forEach((row) => {
+    if (dashboardResolveDayKey(row) !== normalizedDayKey) {
+      return
+    }
+
+    const resolvedWorkerId = dashboardResolveWorkerIdValue(row, workersPool)
+    if (!resolvedWorkerId) {
+      return
+    }
+
+    const rowStartMinutes = isoToMinutes(row?.startAt ?? row?.dayStartAt)
+    const status = String(row?.status ?? '').trim().toUpperCase()
+    const hasEnd = Boolean(toIso(row?.endAt ?? row?.dayEndAt))
+    const rowLike = {
+      qrStart:
+        rowStartMinutes >= 0
+          ? `${pad2(Math.floor(rowStartMinutes / 60))}:${pad2(rowStartMinutes % 60)}:00`
+          : '',
+      isRunning: !hasEnd && (status === 'RUNNING' || status === 'OPEN'),
+    }
+
+    const workerIdKey = normalizeSearchText(resolvedWorkerId)
+    if (workerIdKey) {
+      upsertState(`id:${workerIdKey}`, rowLike)
+    }
+    const idDigits = dashboardNormalizeWorkerIdDigits(resolvedWorkerId)
+    if (idDigits) {
+      upsertState(`idn:${idDigits}`, rowLike)
+    }
+  })
+
   return stateMap
 }
 
