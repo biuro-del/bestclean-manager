@@ -313,8 +313,9 @@
               <div class="dash-schedule-sync" id="dashScheduleSync">Ostatnia synchronizacja: -</div>
               <div class="dash-schedule-legend" aria-label="Legenda kolorów grafiku">
                 <span class="dash-schedule-legend-item is-missing-start">Czerwony: brak START</span>
-                <span class="dash-schedule-legend-item is-upcoming">Niebieski: start do 1h</span>
+                <span class="dash-schedule-legend-item is-upcoming">Pomarańczowy: start do 1h</span>
                 <span class="dash-schedule-legend-item is-started">Zielony: QR START</span>
+                <span class="dash-schedule-legend-item">Domyślny: start &gt; 1h</span>
               </div>
 
               <div class="dash-schedule-daybar">

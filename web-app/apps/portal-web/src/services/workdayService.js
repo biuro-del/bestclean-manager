@@ -243,6 +243,19 @@ function collectWorkerLookupValues(worker) {
   return [...values]
 }
 
+function canonicalWorkerId(value) {
+  const raw = String(value ?? '').trim().toUpperCase()
+  return /^W\d+$/.test(raw) ? raw : ''
+}
+
+function canonicalWorkerDigits(value) {
+  const canonical = canonicalWorkerId(value)
+  if (!canonical) {
+    return ''
+  }
+  return canonical.replace(/[^0-9]/g, '').replace(/^0+/, '')
+}
+
 function resolveWorkerByLogin(lookupMaps, ...candidateValues) {
   for (const value of candidateValues) {
     const text = String(value ?? '').trim()
@@ -1933,6 +1946,70 @@ export async function getTodayActiveWorkers(orgId) {
   const workers = new Map()
   const workerAliases = new Map()
   const resolveDisplayName = createWorkerDisplayNameResolver(workerDirectory)
+  const workerLookupMaps = buildLookupMaps([], [], workerDirectory, [])
+  const workerByCanonicalId = new Map()
+  const workerByCanonicalDigits = new Map()
+  const workerByNormalizedName = new Map()
+  workerDirectory.forEach((worker) => {
+    const workerId = canonicalWorkerId(worker?.workerId ?? worker?.id)
+    if (workerId && !workerByCanonicalId.has(workerId)) {
+      workerByCanonicalId.set(workerId, worker)
+    }
+
+    const workerDigits = canonicalWorkerDigits(workerId)
+    if (workerDigits && !workerByCanonicalDigits.has(workerDigits)) {
+      workerByCanonicalDigits.set(workerDigits, worker)
+    }
+
+    const workerNameKey = normalizePersonName(pickWorkerNameValue(worker))
+    if (!workerNameKey) {
+      return
+    }
+
+    if (!workerByNormalizedName.has(workerNameKey)) {
+      workerByNormalizedName.set(workerNameKey, worker)
+      return
+    }
+
+    // Ambiguous names are cleared so we do not map wrong person.
+    workerByNormalizedName.set(workerNameKey, null)
+  })
+
+  const resolveWorkerDirectoryEntry = (item) => {
+    const directWorkerId = canonicalWorkerId(item?.workerId ?? item?.id)
+    if (directWorkerId) {
+      const directWorker = workerByCanonicalId.get(directWorkerId)
+      if (directWorker) {
+        return directWorker
+      }
+    }
+
+    const byLogin = resolveWorkerByLogin(
+      workerLookupMaps,
+      item?.workerLogin,
+      item?.login,
+      item?.workerId,
+      item?.id,
+    )
+    if (byLogin) {
+      return byLogin
+    }
+
+    const workerIdDigits = canonicalWorkerDigits(item?.workerId ?? item?.id)
+    if (workerIdDigits) {
+      const byDigits = workerByCanonicalDigits.get(workerIdDigits)
+      if (byDigits) {
+        return byDigits
+      }
+    }
+
+    const workerNameKey = normalizePersonName(item?.workerName ?? item?.name)
+    if (workerNameKey && workerByNormalizedName.has(workerNameKey)) {
+      return workerByNormalizedName.get(workerNameKey) || null
+    }
+
+    return null
+  }
   const hasReadableLabel = (value) => {
     const text = String(value ?? '').trim()
     return Boolean(text) && text !== '-'
@@ -1999,16 +2076,33 @@ export async function getTodayActiveWorkers(orgId) {
   }
 
   const resolveBucket = (item) => {
-    const workerLogin = String(item?.workerLogin ?? '').trim()
-    const workerName = String(item?.workerName ?? '').trim()
+    const linkedWorker = resolveWorkerDirectoryEntry(item)
+    const resolvedWorkerId = canonicalWorkerId(
+      linkedWorker?.workerId ?? linkedWorker?.id ?? item?.workerId ?? item?.id,
+    )
+    const resolvedWorkerLogin = String(
+      linkedWorker?.login ?? linkedWorker?.workerLogin ?? item?.workerLogin ?? item?.login ?? '',
+    ).trim()
+    const resolvedWorkerName = String(
+      pickWorkerNameValue(linkedWorker) || item?.workerName || item?.name || '',
+    ).trim()
+    const workerLogin = resolvedWorkerLogin
+    const workerName = resolvedWorkerName
     const primaryLabel = resolveDisplayName(workerLogin, workerName)
-    const aliases = [workerLogin, extractLoginLocalPart(workerLogin), workerName]
+    const idDigits = canonicalWorkerDigits(resolvedWorkerId)
+    const aliases = [
+      resolvedWorkerId ? `id:${normalizeLookupKey(resolvedWorkerId)}` : '',
+      idDigits ? `idn:${idDigits}` : '',
+      workerLogin,
+      extractLoginLocalPart(workerLogin),
+      workerName,
+    ]
       .map((value) => normalizeLookupKey(value))
       .filter(Boolean)
 
     let key = aliases.map((alias) => workerAliases.get(alias)).find(Boolean)
     if (!key) {
-      key = aliases[0] || ''
+      key = aliases[0] || (resolvedWorkerId ? `id:${normalizeLookupKey(resolvedWorkerId)}` : '')
     }
     if (!key) {
       return null
@@ -2016,7 +2110,8 @@ export async function getTodayActiveWorkers(orgId) {
 
     if (!workers.has(key)) {
       workers.set(key, {
-        id: workerLogin || workerName || key,
+        id: resolvedWorkerId || workerLogin || workerName || key,
+        workerId: resolvedWorkerId || '',
         workerLogin: workerLogin || '',
         workerName: primaryLabel,
         entriesCount: 0,
@@ -2045,11 +2140,16 @@ export async function getTodayActiveWorkers(orgId) {
     }
 
     const bucket = workers.get(key)
-    if (workerLogin && !String(bucket.id ?? '').trim()) {
-      bucket.id = workerLogin
+    if (resolvedWorkerId && !String(bucket.workerId ?? '').trim()) {
+      bucket.workerId = resolvedWorkerId
     }
     if (workerLogin && !String(bucket.workerLogin ?? '').trim()) {
       bucket.workerLogin = workerLogin
+    }
+    if (resolvedWorkerId && !String(bucket.id ?? '').trim()) {
+      bucket.id = resolvedWorkerId
+    } else if (workerLogin && !String(bucket.id ?? '').trim()) {
+      bucket.id = workerLogin
     }
     if (shouldReplaceDisplayName(bucket.workerName, primaryLabel, workerLogin)) {
       bucket.workerName = primaryLabel
@@ -2309,8 +2409,9 @@ export async function getTodayActiveWorkers(orgId) {
         : bucket.firstStartLocation ?? '-'
 
       return {
-        id: bucket.id,
-        workerLogin: bucket.workerLogin || bucket.id,
+        id: bucket.workerId || bucket.id,
+        workerId: bucket.workerId || '',
+        workerLogin: bucket.workerLogin || bucket.workerId || bucket.id,
         workerName: bucket.workerName,
         entriesCount: bucket.entriesCount,
         activeClient: hasReadableClientLabel(resolvedClient) ? resolvedClient : '-',

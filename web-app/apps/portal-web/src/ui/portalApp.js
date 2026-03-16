@@ -133,6 +133,8 @@ const appState = {
   dashboardScheduleAlertSnoozeUntil: 0,
   dashboardScheduleAlertMuted: false,
   dashboardScheduleAlertLastKey: '',
+  dashboardScheduleLateShownKeys: new Set(),
+  dashboardScheduleLatePendingKeys: [],
   settingsActiveTab: 'styles',
   settingsEffectiveStyleId: STYLE_FALLBACK_ID,
   settingsEffectiveStyleSource: 'fallback',
@@ -1967,6 +1969,8 @@ function renderDashboardEvents(rows) {
         const startValue = dashboardClockLabelToHm(row.qrStart, '--:--')
         const stopValue = row?.isRunning ? '--:--' : dashboardClockLabelToHm(row.qrStop, '--:--')
         const workValue = dashboardDurationLabelToHm(row.duration, '00:00')
+        const lateMinutes = Number(row?.lateMinutes ?? 0)
+        const lateValue = dashboardLateMinutesToHm(lateMinutes)
         const workerName = String(row.workerName ?? '').trim() || '-'
         const workerLogin = String(row.workerLogin ?? row.id ?? '').trim()
         const clientLabel = dashboardResolveClientLabel(row)
@@ -1980,14 +1984,15 @@ function renderDashboardEvents(rows) {
         const zoneCell = zoneLabel === '-'
           ? '<span class="muted">-</span>'
           : `<button class="dash-entity-link" type="button" data-dash-history-kind="zones" data-dash-row-index="${rowIndex}">${escapeHtml(zoneLabel)}</button>`
+        const rowClass = lateMinutes > 0 ? 'list-row dash-events-row dash-events-row--has-late' : 'list-row dash-events-row'
         return `
-      <div class="list-row dash-events-row">
+      <div class="${rowClass}">
         <div>${workerCell}</div>
         <div>${escapeHtml(String(row.entriesCount ?? 0))}</div>
         <div>${clientCell}</div>
         <div>${zoneCell}</div>
         <div class="ta-right">
-          <div class="dash-time-stack">
+          <div class="dash-time-stack${lateMinutes > 0 ? ' dash-time-stack--has-late' : ''}">
             <div class="dash-time-line dash-time-line--start">
               <span class="dash-time-label">Godzina START</span>
               <span class="dash-time-colon">:</span>
@@ -2003,6 +2008,17 @@ function renderDashboardEvents(rows) {
               <span class="dash-time-colon">:</span>
               <span class="dash-time-value time-duration">${escapeHtml(workValue)}</span>
             </div>
+            ${
+              lateMinutes > 0
+                ? `
+            <div class="dash-time-line dash-time-line--late">
+              <span class="dash-time-label">Spóźnienie</span>
+              <span class="dash-time-colon">:</span>
+              <span class="dash-time-value">${escapeHtml(lateValue)}</span>
+            </div>
+            `
+                : ''
+            }
           </div>
         </div>
       </div>
@@ -2083,6 +2099,42 @@ function dashboardScheduleWorkerDisplayName(value) {
     .replace(/(^|[\s-])\p{L}/gu, (fragment) => fragment.toLocaleUpperCase('pl'))
 }
 
+function dashboardResolveWorkerById(workerId, workers = []) {
+  const pool = Array.isArray(workers) ? workers : []
+  if (!pool.length) {
+    return null
+  }
+
+  const normalizedId = normalizeSearchText(workerId)
+  if (!normalizedId) {
+    return null
+  }
+
+  const directMatch = pool.find((worker) => {
+    const workerIdKey = normalizeSearchText(worker?.workerId ?? worker?.id)
+    return Boolean(workerIdKey) && workerIdKey === normalizedId
+  })
+  if (directMatch) {
+    return directMatch
+  }
+
+  const scheduleIdDigits = normalizedId.replace(/[^0-9]/g, '').replace(/^0+/, '')
+  if (!scheduleIdDigits) {
+    return null
+  }
+
+  return (
+    pool.find((worker) => {
+      const workerIdKey = normalizeSearchText(worker?.workerId ?? worker?.id)
+      if (!workerIdKey) {
+        return false
+      }
+      const workerDigits = workerIdKey.replace(/[^0-9]/g, '').replace(/^0+/, '')
+      return Boolean(workerDigits) && workerDigits === scheduleIdDigits
+    }) ?? null
+  )
+}
+
 function dashboardResolveScheduleDayKey(dayBucket) {
   const direct = String(dayBucket?.key ?? '').trim()
   if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) {
@@ -2134,8 +2186,9 @@ function dashboardScheduleStartTimestamp(dayKey, startMinutes) {
   return dayStartMs + Math.floor(minutes) * 60 * 1000
 }
 
-function dashboardWorkerAliasKeys(workerName, workerLogin = '', workerId = '') {
+function dashboardWorkerAliasKeys(workerName, workerLogin = '', workerId = '', options = {}) {
   const keys = new Set()
+  const includeLooseNameKeys = options?.includeLooseNameKeys !== false
   const addNameKeys = (value) => {
     const normalizedName = normalizeSearchText(value).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
     if (!normalizedName) {
@@ -2148,9 +2201,29 @@ function dashboardWorkerAliasKeys(workerName, workerLogin = '', workerId = '') {
       return
     }
 
-    keys.add(`f:${tokens[0]}`)
+    if (includeLooseNameKeys || tokens.length === 1) {
+      keys.add(`f:${tokens[0]}`)
+    }
     if (tokens.length > 1 && tokens[1]) {
-      keys.add(`fi:${tokens[0]}|${tokens[1].charAt(0)}`)
+      const first = tokens[0]
+      const second = tokens[1]
+      const firstInitial = first.charAt(0)
+      const secondInitial = second.charAt(0)
+      keys.add(`fi:${first}|${secondInitial}`)
+      // Pair of initials helps matching sheet aliases like "Iza P." <-> "Izabela Pluta".
+      if (firstInitial && secondInitial) {
+        keys.add(`ii:${firstInitial}|${secondInitial}`)
+      }
+      if (second.length >= 2) {
+        keys.add(`fp2:${first}|${second.slice(0, 2)}`)
+      }
+      if (second.length >= 3) {
+        keys.add(`fp3:${first}|${second.slice(0, 3)}`)
+      }
+      const firstStem = first.slice(0, 4)
+      if (firstStem.length >= 4) {
+        keys.add(`fsi:${firstStem}|${secondInitial}`)
+      }
     }
   }
 
@@ -2177,18 +2250,100 @@ function dashboardWorkerAliasKeys(workerName, workerLogin = '', workerId = '') {
   return keys
 }
 
-function dashboardCollectStartedWorkerKeysForDay(dayKey) {
+function dashboardResolveWorkerByScheduleAlias(entry, workers = []) {
+  const pool = Array.isArray(workers) ? workers : []
+  if (!pool.length) {
+    return null
+  }
+
+  const entryName = normalizeSearchText(entry?.workerName).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!entryName) {
+    return null
+  }
+
+  const entryTokens = entryName.split(' ').filter(Boolean)
+  if (!entryTokens.length) {
+    return null
+  }
+
+  const exact = pool.find((worker) => {
+    const workerName = normalizeSearchText(worker?.workerName ?? worker?.name)
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    return workerName && workerName === entryName
+  })
+  if (exact) {
+    return exact
+  }
+
+  const firstEntry = entryTokens[0]
+  const secondEntry = entryTokens[1] ?? ''
+  const firstInitial = firstEntry.charAt(0)
+  const secondInitial = secondEntry.charAt(0)
+
+  const initialsCandidates = pool.filter((worker) => {
+    const workerName = normalizeSearchText(worker?.workerName ?? worker?.name)
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    const workerTokens = workerName.split(' ').filter(Boolean)
+    if (!workerTokens.length) {
+      return false
+    }
+    const workerFirst = workerTokens[0]
+    const workerSecond = workerTokens[1] ?? ''
+    if (!workerFirst || !workerSecond) {
+      return false
+    }
+    return workerFirst.charAt(0) === firstInitial && workerSecond.charAt(0) === secondInitial
+  })
+
+  if (initialsCandidates.length === 1) {
+    return initialsCandidates[0]
+  }
+
+  if (initialsCandidates.length > 1) {
+    const narrowed = initialsCandidates.filter((worker) => {
+      const workerName = normalizeSearchText(worker?.workerName ?? worker?.name)
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+      const workerTokens = workerName.split(' ').filter(Boolean)
+      const workerFirst = workerTokens[0] ?? ''
+      if (!workerFirst) {
+        return false
+      }
+
+      if (workerFirst.startsWith(firstEntry)) {
+        return true
+      }
+
+      const entryStem = firstEntry.slice(0, 3)
+      const workerStem = workerFirst.slice(0, 3)
+      return entryStem.length >= 3 && workerStem.length >= 3 && entryStem === workerStem
+    })
+
+    if (narrowed.length === 1) {
+      return narrowed[0]
+    }
+  }
+
+  return null
+}
+
+function dashboardCollectStartedWorkerStartsForDay(dayKey) {
   const normalizedDayKey = String(dayKey ?? '').trim()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey)) {
-    return new Set()
+    return new Map()
   }
 
   const sourceRows = Array.isArray(appState.dashboardScheduleSourceRows) ? appState.dashboardScheduleSourceRows : []
   if (!sourceRows.length) {
-    return new Set()
+    return new Map()
   }
 
-  const startedKeys = new Set()
+  const startedMap = new Map()
   sourceRows.forEach((row) => {
     if (dashboardResolveDayKey(row) !== normalizedDayKey) {
       return
@@ -2198,22 +2353,367 @@ function dashboardCollectStartedWorkerKeysForDay(dayKey) {
     if (!startIso) {
       return
     }
+    const startTs = new Date(startIso).getTime()
+    if (!Number.isFinite(startTs) || startTs <= 0) {
+      return
+    }
 
     const keys = dashboardWorkerAliasKeys(
       row?.workerName ?? row?.name,
       row?.workerLogin ?? row?.login ?? row?.workerId ?? row?.id,
       row?.workerId ?? row?.id,
     )
-    keys.forEach((key) => startedKeys.add(key))
+    keys.forEach((key) => {
+      const prevTs = Number(startedMap.get(key) ?? 0)
+      if (!prevTs || startTs < prevTs) {
+        startedMap.set(key, startTs)
+      }
+    })
   })
 
-  return startedKeys
+  return startedMap
+}
+
+function dashboardNormalizeWorkerIdDigits(value) {
+  const normalized = normalizeSearchText(value)
+  if (!normalized) {
+    return ''
+  }
+  return normalized.replace(/[^0-9]/g, '').replace(/^0+/, '')
+}
+
+function dashboardCanonicalWorkerId(value) {
+  const raw = String(value ?? '').trim().toUpperCase()
+  return /^W\d+$/.test(raw) ? raw : ''
+}
+
+function dashboardResolveWorkerIdValue(row, workersPool = []) {
+  const direct = dashboardCanonicalWorkerId(row?.workerId ?? row?.id)
+  if (direct) {
+    return direct
+  }
+
+  const workers = Array.isArray(workersPool) ? workersPool : []
+  if (!workers.length) {
+    return ''
+  }
+
+  const rowLoginKey = normalizeSearchText(row?.workerLogin ?? row?.login)
+  if (rowLoginKey) {
+    const matchByLogin = workers.find((worker) => {
+      const workerLoginKey = normalizeSearchText(worker?.workerLogin ?? worker?.login ?? worker?.id)
+      return Boolean(workerLoginKey) && workerLoginKey === rowLoginKey
+    })
+    const byLoginId = dashboardCanonicalWorkerId(matchByLogin?.workerId ?? matchByLogin?.id)
+    if (byLoginId) {
+      return byLoginId
+    }
+  }
+
+  const rowNameKey = normalizeSearchText(row?.workerName ?? row?.name)
+  if (rowNameKey) {
+    const matchesByName = workers.filter((worker) => {
+      const workerNameKey = normalizeSearchText(worker?.workerName ?? worker?.name)
+      return Boolean(workerNameKey) && workerNameKey === rowNameKey
+    })
+    if (matchesByName.length === 1) {
+      const byNameId = dashboardCanonicalWorkerId(matchesByName[0]?.workerId ?? matchesByName[0]?.id)
+      if (byNameId) {
+        return byNameId
+      }
+    }
+  }
+
+  return ''
+}
+
+function dashboardBuildTodayWorkerStateById(dayKey) {
+  const normalizedDayKey = String(dayKey ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey)) {
+    return new Map()
+  }
+
+  if (normalizedDayKey !== todayYmd()) {
+    return new Map()
+  }
+
+  const rows = Array.isArray(appState.dashboardTodayRows) ? appState.dashboardTodayRows : []
+  const sourceRows = Array.isArray(appState.dashboardScheduleSourceRows) ? appState.dashboardScheduleSourceRows : []
+  const workersPool = Array.isArray(appState.workers) ? appState.workers : []
+  const stateMap = new Map()
+  const isoToMinutes = (isoValue) => {
+    const iso = toIso(isoValue)
+    if (!iso) {
+      return -1
+    }
+
+    const date = new Date(iso)
+    if (!Number.isFinite(date.getTime())) {
+      return -1
+    }
+
+    return date.getHours() * 60 + date.getMinutes()
+  }
+
+  const upsertState = (key, row) => {
+    if (!key) {
+      return
+    }
+
+    const existing = stateMap.get(key) || {
+      hasStart: false,
+      isRunning: false,
+      startMinutes: -1,
+    }
+
+    const rowStartMinutes = dashboardScheduleTimeToMinutes(row?.qrStart)
+    const hasStart = Number.isFinite(rowStartMinutes) && rowStartMinutes >= 0
+    const merged = {
+      hasStart: existing.hasStart || hasStart,
+      isRunning: existing.isRunning || Boolean(row?.isRunning),
+      startMinutes:
+        existing.startMinutes >= 0 && rowStartMinutes >= 0
+          ? Math.min(existing.startMinutes, rowStartMinutes)
+          : existing.startMinutes >= 0
+            ? existing.startMinutes
+            : rowStartMinutes >= 0
+              ? rowStartMinutes
+              : -1,
+    }
+    stateMap.set(key, merged)
+  }
+
+  rows.forEach((row) => {
+    const resolvedWorkerId = dashboardResolveWorkerIdValue(row, workersPool)
+    const workerIdKey = normalizeSearchText(resolvedWorkerId)
+    if (workerIdKey) {
+      upsertState(`id:${workerIdKey}`, row)
+    }
+    const idDigits = dashboardNormalizeWorkerIdDigits(resolvedWorkerId)
+    if (idDigits) {
+      upsertState(`idn:${idDigits}`, row)
+    }
+  })
+
+  // Fallback for schedule colors: include all today's source rows (events/workdays),
+  // so workers who already started and then closed are still recognized as "started today".
+  sourceRows.forEach((row) => {
+    if (dashboardResolveDayKey(row) !== normalizedDayKey) {
+      return
+    }
+
+    const resolvedWorkerId = dashboardResolveWorkerIdValue(row, workersPool)
+    if (!resolvedWorkerId) {
+      return
+    }
+
+    const rowStartMinutes = isoToMinutes(row?.startAt ?? row?.dayStartAt)
+    const status = String(row?.status ?? '').trim().toUpperCase()
+    const hasEnd = Boolean(toIso(row?.endAt ?? row?.dayEndAt))
+    const rowLike = {
+      qrStart:
+        rowStartMinutes >= 0
+          ? `${pad2(Math.floor(rowStartMinutes / 60))}:${pad2(rowStartMinutes % 60)}:00`
+          : '',
+      isRunning: !hasEnd && (status === 'RUNNING' || status === 'OPEN'),
+    }
+
+    const workerIdKey = normalizeSearchText(resolvedWorkerId)
+    if (workerIdKey) {
+      upsertState(`id:${workerIdKey}`, rowLike)
+    }
+    const idDigits = dashboardNormalizeWorkerIdDigits(resolvedWorkerId)
+    if (idDigits) {
+      upsertState(`idn:${idDigits}`, rowLike)
+    }
+  })
+
+  return stateMap
+}
+
+function dashboardResolveScheduleWorkerAliasKeys(entry) {
+  const keySet = new Set()
+  const addKeys = (keys) => {
+    if (!(keys instanceof Set)) {
+      return
+    }
+    keys.forEach((key) => {
+      if (key) {
+        keySet.add(String(key))
+      }
+    })
+  }
+
+  addKeys(
+    dashboardWorkerAliasKeys(
+      entry?.workerName,
+      entry?.workerLogin ?? entry?.workerId ?? '',
+      entry?.workerId ?? '',
+      { includeLooseNameKeys: false },
+    ),
+  )
+
+  const workers = Array.isArray(appState.workers) ? appState.workers : []
+  if (!workers.length) {
+    return keySet
+  }
+
+  const linkedWorker =
+    dashboardResolveWorkerById(entry?.workerId, workers) ?? dashboardResolveWorkerByScheduleAlias(entry, workers)
+  if (!linkedWorker) {
+    return keySet
+  }
+
+  addKeys(
+    dashboardWorkerAliasKeys(
+      linkedWorker?.workerName ?? linkedWorker?.name,
+      linkedWorker?.workerLogin ?? linkedWorker?.login ?? linkedWorker?.id,
+      linkedWorker?.workerId ?? linkedWorker?.id,
+      { includeLooseNameKeys: false },
+    ),
+  )
+
+  return keySet
 }
 
 function dashboardHideScheduleMissingStartAlert() {
   const node = document.getElementById('dashScheduleMissingAlert')
   if (node) {
     node.remove()
+  }
+}
+
+function dashboardHideScheduleLateStartAlert() {
+  const node = document.getElementById('dashScheduleLateAlert')
+  if (node) {
+    node.remove()
+  }
+}
+
+function dashboardLateStartEntryKey(dayKey, entry) {
+  const day = String(dayKey ?? '').trim()
+  const worker = normalizeSearchText(entry?.workerName)
+  const start = String(entry?.startTime ?? '').trim()
+  const late = Number(entry?.lateMinutes ?? 0)
+  return `${day}|${worker}|${start}|${late}`
+}
+
+function dashboardShowScheduleLateStartAlert(dayKey, lateEntries = []) {
+  const normalizedDayKey = String(dayKey ?? '').trim()
+  const entries = Array.isArray(lateEntries) ? lateEntries : []
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey) ||
+    !entries.length ||
+    appState.currentRoute !== 'dashboard' ||
+    document.visibilityState !== 'visible'
+  ) {
+    appState.dashboardScheduleLatePendingKeys = []
+    dashboardHideScheduleLateStartAlert()
+    return
+  }
+
+  if (!(appState.dashboardScheduleLateShownKeys instanceof Set)) {
+    appState.dashboardScheduleLateShownKeys = new Set()
+  }
+
+  const seen = appState.dashboardScheduleLateShownKeys
+  const dedupMap = new Map()
+  entries.forEach((entry) => {
+    const alertKey = dashboardLateStartEntryKey(normalizedDayKey, entry)
+    if (!alertKey || seen.has(alertKey) || dedupMap.has(alertKey)) {
+      return
+    }
+    dedupMap.set(alertKey, {
+      ...entry,
+      alertKey,
+    })
+  })
+
+  const unseenEntries = [...dedupMap.values()]
+  if (!unseenEntries.length) {
+    appState.dashboardScheduleLatePendingKeys = []
+    dashboardHideScheduleLateStartAlert()
+    return
+  }
+
+  // Priorytet: najpierw popup o braku START, dopiero potem popup informacyjny o spóźnieniu.
+  if (document.getElementById('dashScheduleMissingAlert')) {
+    dashboardHideScheduleLateStartAlert()
+    return
+  }
+
+  appState.dashboardScheduleLatePendingKeys = unseenEntries.map((entry) => entry.alertKey)
+
+  let node = document.getElementById('dashScheduleLateAlert')
+  if (!node) {
+    node = document.createElement('div')
+    node.id = 'dashScheduleLateAlert'
+    node.className = 'dash-schedule-alert dash-schedule-alert--late'
+    node.innerHTML = `
+      <div class="dash-schedule-alert-signal" aria-hidden="true">INFO</div>
+      <div class="dash-schedule-alert-title">Pracownicy pojawili się po czasie</div>
+      <div class="dash-schedule-alert-text" id="dashScheduleLateAlertText"></div>
+      <div class="dash-schedule-alert-list-wrap">
+        <div class="dash-schedule-alert-list-title">Lista osób:</div>
+        <ul class="dash-schedule-alert-list" id="dashScheduleLateAlertList"></ul>
+      </div>
+      <div class="dash-schedule-alert-actions">
+        <button type="button" class="btn2 primary" data-alert-action="ok">OK</button>
+      </div>
+    `
+    document.body.appendChild(node)
+    node.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-alert-action]')
+      if (!button) {
+        return
+      }
+
+      const action = String(button.getAttribute('data-alert-action') ?? '').trim()
+      if (action === 'ok') {
+        if (!(appState.dashboardScheduleLateShownKeys instanceof Set)) {
+          appState.dashboardScheduleLateShownKeys = new Set()
+        }
+        appState.dashboardScheduleLatePendingKeys.forEach((key) => {
+          if (key) {
+            appState.dashboardScheduleLateShownKeys.add(String(key))
+          }
+        })
+        appState.dashboardScheduleLatePendingKeys = []
+        dashboardHideScheduleLateStartAlert()
+      }
+    })
+  }
+
+  const textNode = node.querySelector('#dashScheduleLateAlertText')
+  if (textNode) {
+    textNode.textContent =
+      unseenEntries.length === 1
+        ? '1 osoba rozpoczęła pracę z opóźnieniem.'
+        : `${unseenEntries.length} osób rozpoczęło pracę z opóźnieniem.`
+  }
+
+  const listNode = node.querySelector('#dashScheduleLateAlertList')
+  if (listNode) {
+    const normalized = [...unseenEntries].sort((left, right) => {
+      const leftLate = Number(left?.lateMinutes ?? 0)
+      const rightLate = Number(right?.lateMinutes ?? 0)
+      if (leftLate !== rightLate) {
+        return rightLate - leftLate
+      }
+      return String(left?.workerName ?? '').localeCompare(String(right?.workerName ?? ''), 'pl', {
+        sensitivity: 'base',
+      })
+    })
+
+    listNode.innerHTML = normalized
+      .map((entry) => {
+        const name = escapeHtml(String(entry.workerName ?? '-'))
+        const lateLabel = dashboardLateMinutesToHm(entry?.lateMinutes)
+        const start = String(entry?.startTime ?? '').trim()
+        const startLabel = start && start !== '-' ? ` • START: ${escapeHtml(start)}` : ''
+        return `<li>${name}${startLabel} • Spóźnienie: ${lateLabel}</li>`
+      })
+      .join('')
   }
 }
 
@@ -2413,11 +2913,19 @@ function dashboardRenderScheduleCards(dayBucket) {
   }
 
   const nowTs = Date.now()
-  const startedWorkerKeys = dashboardCollectStartedWorkerKeysForDay(dayKey)
+  const todayWorkerStateMap = dashboardBuildTodayWorkerStateById(dayKey)
+  const workersPool = Array.isArray(appState.workers) ? appState.workers : []
 
   const enrichedEntries = entries
     .map((entry) => {
-      const workerName = dashboardScheduleWorkerDisplayName(entry?.workerName)
+      const linkedWorkerById = dashboardResolveWorkerById(entry?.workerId, workersPool)
+      const linkedWorkerForLabel = linkedWorkerById ?? dashboardResolveWorkerByScheduleAlias(entry, workersPool)
+      const workerName = dashboardScheduleWorkerDisplayName(
+        linkedWorkerForLabel?.workerName ?? linkedWorkerForLabel?.name ?? entry?.workerName ?? entry?.workerId,
+      )
+      const workerLogin = String(entry?.workerLogin ?? linkedWorkerForLabel?.workerLogin ?? linkedWorkerForLabel?.login ?? '').trim()
+      const workerHistoryName =
+        String(linkedWorkerForLabel?.workerName ?? linkedWorkerForLabel?.name ?? workerName).trim() || workerName
       const status = String(entry?.status ?? '').trim() || 'Brak zmiany'
       const morningText = dashboardScheduleShiftText(entry?.morningStart, entry?.morningTask)
       const afternoonText = dashboardScheduleShiftText(entry?.afternoonStart, entry?.afternoonTask)
@@ -2426,45 +2934,81 @@ function dashboardRenderScheduleCards(dayBucket) {
       const startMinutes = dashboardScheduleTimeToMinutes(startTime)
       const startTs = dashboardScheduleStartTimestamp(dayKey, startMinutes)
       const hasScheduleStart = startTs > 0
-      const workerKeys = dashboardWorkerAliasKeys(
-        entry?.workerName,
-        entry?.workerLogin ?? entry?.workerId ?? '',
-        entry?.workerId ?? '',
-      )
-      const hasQrStart = hasScheduleStart && [...workerKeys].some((key) => startedWorkerKeys.has(key))
+      const activeIdSource =
+        dashboardResolveWorkerIdValue(
+          {
+            workerId: entry?.workerId,
+            workerLogin:
+              workerLogin || linkedWorkerForLabel?.workerLogin || linkedWorkerForLabel?.login || entry?.workerLogin,
+            workerName: workerName || entry?.workerName,
+          },
+          workersPool,
+        ) ||
+        dashboardResolveWorkerIdValue(linkedWorkerForLabel, workersPool) ||
+        ''
+      const activeIdKey = normalizeSearchText(activeIdSource)
+      const activeIdDigits = dashboardNormalizeWorkerIdDigits(activeIdSource)
+      const todayState =
+        (activeIdKey ? todayWorkerStateMap.get(`id:${activeIdKey}`) : null) ||
+        (activeIdDigits ? todayWorkerStateMap.get(`idn:${activeIdDigits}`) : null) ||
+        null
+
+      const actualStartMinutes = Number(todayState?.startMinutes ?? -1)
+      const hasQrStartAny = Boolean(todayState?.hasStart) && actualStartMinutes >= 0
+      const hasQrStartActive = hasQrStartAny
+      const lateMinutes =
+        hasQrStartAny && hasScheduleStart && actualStartMinutes > startMinutes
+          ? Math.max(1, actualStartMinutes - startMinutes)
+          : 0
       const minutesToStart = hasScheduleStart ? Math.floor((startTs - nowTs) / (60 * 1000)) : null
       const isUpcomingSoon =
-        !hasQrStart &&
+        !hasQrStartAny &&
         status === 'Praca' &&
         hasScheduleStart &&
         Number.isFinite(minutesToStart) &&
         minutesToStart >= 0 &&
         minutesToStart <= DASHBOARD_SCHEDULE_SOON_WINDOW_MINUTES
       const isMissingStart =
-        !hasQrStart &&
+        !hasQrStartAny &&
         status === 'Praca' &&
         hasScheduleStart &&
         Number.isFinite(minutesToStart) &&
         minutesToStart < 0
+      const isLaterToday =
+        !hasQrStartAny &&
+        status === 'Praca' &&
+        hasScheduleStart &&
+        Number.isFinite(minutesToStart) &&
+        minutesToStart > DASHBOARD_SCHEDULE_SOON_WINDOW_MINUTES
 
-      // Priorytet kart: czerwony > niebieski > zielony > reszta.
-      const priority = isMissingStart ? 0 : isUpcomingSoon ? 1 : hasQrStart ? 2 : hasScheduleStart ? 3 : 4
+      // Priorytet kart:
+      // 0) czerwony: brak START (po czasie)
+      // 1) pomarańczowy: start do 1h
+      // 2) zielony: już rozpoczął (QR START)
+      // 3) domyślny: start dziś, ale za >1h
+      // 4) pozostałe
+      const priority = isMissingStart ? 0 : isUpcomingSoon ? 1 : hasQrStartActive ? 2 : isLaterToday ? 3 : 4
       let toneClass = ''
       if (isMissingStart) {
         toneClass = 'is-missing-start'
       } else if (isUpcomingSoon) {
         toneClass = 'is-upcoming'
-      } else if (hasQrStart) {
+      } else if (hasQrStartActive) {
         toneClass = 'is-started'
       }
 
       return {
         workerName,
+        workerLogin,
+        workerHistoryName,
         status,
         morningText,
         afternoonText,
         startTime,
         statusClass,
+        hasQrStartAny,
+        hasQrStartActive,
+        lateMinutes,
         startMinutes,
         hasScheduleStart,
         isMissingStart,
@@ -2489,16 +3033,29 @@ function dashboardRenderScheduleCards(dayBucket) {
   cardsRoot.innerHTML = enrichedEntries
     .map((entry) => {
       const cardClass = entry.toneClass ? `dash-schedule-card ${entry.toneClass}` : 'dash-schedule-card'
+      const workerButton = `
+        <button
+          type="button"
+          class="dash-schedule-worker-name dash-schedule-worker-link"
+          title="Pokaż historię czasu: ${escapeHtml(entry.workerHistoryName)}"
+          data-dash-worker-login="${escapeHtml(entry.workerLogin)}"
+          data-dash-worker-name="${escapeHtml(entry.workerHistoryName)}"
+        >${escapeHtml(entry.workerName)}</button>
+      `
       return `
         <article class="${cardClass}">
           <div class="dash-schedule-top">
-            <span class="dash-schedule-worker-name" title="${escapeHtml(entry.workerName)}">${escapeHtml(entry.workerName)}</span>
+            <span class="dash-schedule-worker-meta">
+              ${workerButton}
+              ${entry.hasQrStartActive ? '<span class="dash-schedule-start-icon" title="Pracownik rozpoczął dzień (QR START)" aria-label="Pracownik rozpoczął dzień (QR START)">✓</span>' : ''}
+            </span>
             <span class="dash-schedule-status-badge ${entry.statusClass}">${escapeHtml(entry.status)}</span>
           </div>
           <div class="dash-schedule-startline">
             <div class="dash-schedule-line-label">Godz. START</div>
             <div class="dash-schedule-start-value" title="${escapeHtml(entry.startTime)}">${escapeHtml(entry.startTime)}</div>
           </div>
+          ${entry.lateMinutes > 0 ? `<div class="dash-schedule-late">Spóźnienie - ${escapeHtml(dashboardLateMinutesToHm(entry.lateMinutes))}</div>` : ''}
           <div class="dash-schedule-shifts">
             <div class="dash-schedule-line">
               <div class="dash-schedule-line-label">Rano</div>
@@ -2521,6 +3078,8 @@ function dashboardRenderScheduleCards(dayBucket) {
   dashboardQueueScheduleVisibleLimit()
   const missingStartEntries = enrichedEntries.filter((entry) => entry.isMissingStart)
   dashboardShowScheduleMissingStartAlert(dayKey, missingStartEntries)
+  const lateStartedEntries = enrichedEntries.filter((entry) => entry.hasQrStartAny && Number(entry.lateMinutes) > 0)
+  dashboardShowScheduleLateStartAlert(dayKey, lateStartedEntries)
 }
 
 function renderDashboardSchedulePanel() {
@@ -2691,14 +3250,129 @@ function dashboardResolveEarliestStartForKeys(keys = [], markerMap = new Map(), 
   return firstMarker || firstAny || ''
 }
 
-function dashboardApplyFirstQrStartToday(todayRows = [], eventRows = []) {
+function dashboardBuildScheduleStartMinutesMapForDay(scheduleDays = [], dayKey = '') {
+  const normalizedDayKey = String(dayKey ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey)) {
+    return new Map()
+  }
+
+  const buckets = Array.isArray(scheduleDays) ? scheduleDays : []
+  const dayBucket = buckets.find((bucket) => String(bucket?.key ?? '').trim() === normalizedDayKey)
+  const entries = Array.isArray(dayBucket?.entries) ? dayBucket.entries : []
+  if (!entries.length) {
+    return new Map()
+  }
+
+  const startByWorker = new Map()
+  entries.forEach((entry) => {
+    const status = String(entry?.status ?? '').trim()
+    if (status && status !== 'Praca') {
+      return
+    }
+
+    const startTime = dashboardScheduleStartTime(entry)
+    const startMinutes = dashboardScheduleTimeToMinutes(startTime)
+    if (!Number.isFinite(startMinutes) || startMinutes < 0) {
+      return
+    }
+
+    const keys = dashboardResolveScheduleWorkerAliasKeys(entry)
+    keys.forEach((key) => {
+      const previous = Number(startByWorker.get(key) ?? Number.POSITIVE_INFINITY)
+      if (!Number.isFinite(previous) || startMinutes < previous) {
+        startByWorker.set(key, startMinutes)
+      }
+    })
+  })
+
+  return startByWorker
+}
+
+function dashboardResolveTodayRowAliasKeys(row) {
+  const keys = dashboardWorkerAliasKeys(
+    row?.workerName ?? row?.name,
+    row?.workerLogin ?? row?.login ?? row?.workerId ?? row?.id,
+    row?.workerId ?? row?.id,
+    { includeLooseNameKeys: false },
+  )
+
+  const workers = Array.isArray(appState.workers) ? appState.workers : []
+  if (!workers.length) {
+    return keys
+  }
+
+  const rowLoginKey = normalizeSearchText(row?.workerLogin ?? row?.login ?? row?.id)
+  const rowIdKey = normalizeSearchText(row?.workerId ?? row?.id)
+  const rowNameKey = normalizeSearchText(row?.workerName ?? row?.name)
+  const linkedWorker = workers.find((worker) => {
+    const workerLoginKey = normalizeSearchText(worker?.workerLogin ?? worker?.login ?? worker?.id)
+    const workerIdKey = normalizeSearchText(worker?.workerId ?? worker?.id)
+    const workerNameKey = normalizeSearchText(worker?.workerName ?? worker?.name)
+    return (
+      (rowLoginKey && workerLoginKey && rowLoginKey === workerLoginKey) ||
+      (rowIdKey && workerIdKey && rowIdKey === workerIdKey) ||
+      (rowNameKey && workerNameKey && rowNameKey === workerNameKey)
+    )
+  })
+
+  if (linkedWorker) {
+    dashboardWorkerAliasKeys(
+      linkedWorker?.workerName ?? linkedWorker?.name,
+      linkedWorker?.workerLogin ?? linkedWorker?.login ?? linkedWorker?.id,
+      linkedWorker?.workerId ?? linkedWorker?.id,
+      { includeLooseNameKeys: false },
+    ).forEach((key) => {
+      if (key) {
+        keys.add(String(key))
+      }
+    })
+  }
+
+  return keys
+}
+
+function dashboardResolveLateMinutesForTodayRow(row, scheduleStartMap) {
+  if (!(scheduleStartMap instanceof Map) || !scheduleStartMap.size) {
+    return 0
+  }
+
+  const rowKeys = dashboardResolveTodayRowAliasKeys(row)
+  if (!(rowKeys instanceof Set) || !rowKeys.size) {
+    return 0
+  }
+
+  let plannedStartMinutes = Number.POSITIVE_INFINITY
+  rowKeys.forEach((key) => {
+    const candidate = Number(scheduleStartMap.get(key) ?? Number.POSITIVE_INFINITY)
+    if (Number.isFinite(candidate) && candidate >= 0 && candidate < plannedStartMinutes) {
+      plannedStartMinutes = candidate
+    }
+  })
+  if (!Number.isFinite(plannedStartMinutes) || plannedStartMinutes === Number.POSITIVE_INFINITY) {
+    return 0
+  }
+
+  const actualStartMinutes = dashboardScheduleTimeToMinutes(row?.qrStart)
+  if (!Number.isFinite(actualStartMinutes) || actualStartMinutes < 0) {
+    return 0
+  }
+
+  if (actualStartMinutes <= plannedStartMinutes) {
+    return 0
+  }
+
+  return Math.max(1, actualStartMinutes - plannedStartMinutes)
+}
+
+function dashboardApplyFirstQrStartToday(todayRows = [], eventRows = [], scheduleDays = appState.dashboardScheduleDays) {
   const rows = Array.isArray(todayRows) ? todayRows : []
   const sourceEvents = Array.isArray(eventRows) ? eventRows : []
-  if (!rows.length || !sourceEvents.length) {
+  if (!rows.length) {
     return rows
   }
 
   const todayKey = todayYmd()
+  const scheduleStartMap = dashboardBuildScheduleStartMinutesMapForDay(scheduleDays, todayKey)
   const firstMarkerByWorker = new Map()
   const firstAnyStartByWorker = new Map()
 
@@ -2741,18 +3415,26 @@ function dashboardApplyFirstQrStartToday(todayRows = [], eventRows = []) {
       firstMarkerByWorker,
       firstAnyStartByWorker,
     )
-    if (!firstStartIso) {
-      return row
+    let qrStart = String(row?.qrStart ?? '').trim()
+    if (firstStartIso) {
+      const firstStartLabel = workerDetailIsoToTime(firstStartIso)
+      if (firstStartLabel && firstStartLabel !== '-') {
+        qrStart = firstStartLabel
+      }
     }
 
-    const firstStartLabel = workerDetailIsoToTime(firstStartIso)
-    if (!firstStartLabel || firstStartLabel === '-') {
-      return row
-    }
+    const rowWithStart = qrStart
+      ? {
+          ...row,
+          qrStart,
+        }
+      : row
+
+    const lateMinutes = dashboardResolveLateMinutesForTodayRow(rowWithStart, scheduleStartMap)
 
     return {
-      ...row,
-      qrStart: firstStartLabel,
+      ...rowWithStart,
+      lateMinutes,
     }
   })
 }
@@ -4678,6 +5360,12 @@ function durationSecondsToHm(value) {
   return `${pad2(hours)}:${pad2(minutes)}`
 }
 
+function dashboardLateMinutesToHm(value) {
+  const minutes = Number(value ?? 0)
+  const normalizedMinutes = Number.isFinite(minutes) && minutes > 0 ? Math.floor(minutes) : 0
+  return durationSecondsToHm(normalizedMinutes * 60)
+}
+
 function setSelectOptions(selectNode, options, placeholderLabel = '(wybierz)') {
   if (!selectNode) {
     return
@@ -5102,7 +5790,11 @@ async function refreshDashboardWidgets(options = {}) {
   ])
   const todayStartSourceRows = [...(recentEvents.items ?? []), ...(todayWorkdays.items ?? [])]
   appState.dashboardScheduleSourceRows = todayStartSourceRows
-  const todayRows = dashboardApplyFirstQrStartToday(todayActive.items ?? [], todayStartSourceRows)
+  const todayRows = dashboardApplyFirstQrStartToday(
+    todayActive.items ?? [],
+    todayStartSourceRows,
+    scheduleBoard?.days ?? appState.dashboardScheduleDays,
+  )
   const summary = dashboardBuildSummary(todayRows, recentEvents.items ?? [])
   renderDashboardEvents(todayRows)
   renderDashboardSummary(summary)
@@ -11888,6 +12580,21 @@ function bindDashboardViewFunctions() {
     void openDashboardWorkerHistory(workerLogin, workerName)
   })
 
+  binding.add(document.getElementById('dashScheduleCards'), 'click', (event) => {
+    const button = event.target.closest('[data-dash-worker-login], [data-dash-worker-name]')
+    if (!button) {
+      return
+    }
+
+    const workerLogin = String(button.getAttribute('data-dash-worker-login') ?? '').trim()
+    const workerName = String(button.getAttribute('data-dash-worker-name') ?? '').trim()
+    if (!workerLogin && !workerName) {
+      return
+    }
+
+    void openDashboardWorkerHistory(workerLogin, workerName)
+  })
+
   return () => {
     dashboardHideMetricPopover()
     cleanupDashboardTableResize()
@@ -12019,9 +12726,9 @@ function bindEventsViewFunctions() {
     tableSelector: '#view-events .events-table',
     headSelector: '#view-events .events-head',
     cssVarName: '--events-grid',
-    storageKey: 'portal.grid.events.v2',
-    defaultWidths: [36, 138, 124, 126, 132, 96, 82, 82, 92, 92, 108, 52],
-    minWidths: [34, 96, 94, 92, 100, 84, 72, 72, 80, 82, 92, 46],
+    storageKey: 'portal.grid.events',
+    defaultWidths: [36, 162, 146, 146, 154, 96, 82, 82, 92, 92, 108, 52],
+    minWidths: [34, 110, 110, 108, 118, 84, 72, 72, 80, 82, 92, 46],
     nonResizableIndexes: [11],
     autoFitToViewport: true,
     enforceFullWidth: true,
@@ -12980,7 +13687,11 @@ async function hydrateSections(orgId) {
     getTodayWorktimeFingerprint(orgId).catch(() => null),
   ])
   const todayStartSourceRows = [...(recentEvents.items ?? []), ...(todayWorkdays.items ?? [])]
-  const todayRows = dashboardApplyFirstQrStartToday(todayActive.items ?? [], todayStartSourceRows)
+  const todayRows = dashboardApplyFirstQrStartToday(
+    todayActive.items ?? [],
+    todayStartSourceRows,
+    appState.dashboardScheduleDays,
+  )
   const summary = dashboardBuildSummary(todayRows, recentEvents.items ?? [])
 
   appState.clients = clients
@@ -13083,6 +13794,8 @@ function bindLogin(router) {
       appState.dashboardScheduleAlertSnoozeUntil = 0
       appState.dashboardScheduleAlertMuted = false
       appState.dashboardScheduleAlertLastKey = ''
+      appState.dashboardScheduleLateShownKeys = new Set()
+      appState.dashboardScheduleLatePendingKeys = []
       appState.settingsActiveTab = readStoredSettingsTab()
       appState.settingsEffectiveStyleId = STYLE_FALLBACK_ID
       appState.settingsEffectiveStyleSource = 'fallback'
@@ -13092,6 +13805,7 @@ function bindLogin(router) {
       appState.settingsImportInspection = null
       appState.settingsAutomationDayKey = ''
       dashboardHideScheduleMissingStartAlert()
+      dashboardHideScheduleLateStartAlert()
 
       showPortal()
       setUserChip(normalizedSession)
@@ -13188,6 +13902,8 @@ function bindLogout() {
     appState.dashboardScheduleAlertSnoozeUntil = 0
     appState.dashboardScheduleAlertMuted = false
     appState.dashboardScheduleAlertLastKey = ''
+    appState.dashboardScheduleLateShownKeys = new Set()
+    appState.dashboardScheduleLatePendingKeys = []
     appState.settingsActiveTab = readStoredSettingsTab()
     appState.settingsEffectiveStyleId = STYLE_FALLBACK_ID
     appState.settingsEffectiveStyleSource = 'fallback'
@@ -13197,6 +13913,7 @@ function bindLogout() {
     appState.settingsImportInspection = null
     appState.settingsAutomationDayKey = ''
     dashboardHideScheduleMissingStartAlert()
+    dashboardHideScheduleLateStartAlert()
 
     logout()
     setUserChip(null)
@@ -13228,6 +13945,7 @@ export function mountPortalApp() {
     if (appState.currentRoute !== 'dashboard') {
       dashboardHideMetricPopover()
       dashboardHideScheduleMissingStartAlert()
+      dashboardHideScheduleLateStartAlert()
     }
 
     if (appState.currentRoute === 'dashboard') {
@@ -13305,6 +14023,7 @@ export function mountPortalApp() {
   const handleVisibilityChange = () => {
     if (document.visibilityState !== 'visible') {
       dashboardHideScheduleMissingStartAlert()
+      dashboardHideScheduleLateStartAlert()
       return
     }
     triggerDashboardRefreshIfAllowed()
@@ -13412,6 +14131,8 @@ export function mountPortalApp() {
         appState.dashboardScheduleAlertSnoozeUntil = 0
         appState.dashboardScheduleAlertMuted = false
         appState.dashboardScheduleAlertLastKey = ''
+        appState.dashboardScheduleLateShownKeys = new Set()
+        appState.dashboardScheduleLatePendingKeys = []
         appState.settingsActiveTab = readStoredSettingsTab()
         appState.settingsEffectiveStyleId = STYLE_FALLBACK_ID
         appState.settingsEffectiveStyleSource = 'fallback'
@@ -13421,6 +14142,7 @@ export function mountPortalApp() {
         appState.settingsImportInspection = null
         appState.settingsAutomationDayKey = ''
         dashboardHideScheduleMissingStartAlert()
+        dashboardHideScheduleLateStartAlert()
         showLoginScreen()
         setUserChip(null)
         applyPortalTheme(STYLE_FALLBACK_ID)
@@ -13440,6 +14162,7 @@ export function mountPortalApp() {
     appState.settingsOrgStyleId = ''
     appState.settingsUserStyleId = ''
     dashboardHideScheduleMissingStartAlert()
+    dashboardHideScheduleLateStartAlert()
     showLoginScreen()
     setUserChip(null)
     applyPortalTheme(STYLE_FALLBACK_ID)
@@ -13452,6 +14175,7 @@ export function mountPortalApp() {
     stopDashboardAutoRefresh()
     dashboardLastWorktimeToken = ''
     dashboardHideScheduleMissingStartAlert()
+    dashboardHideScheduleLateStartAlert()
     cleanups.forEach((cleanup) => {
       try {
         cleanup()
