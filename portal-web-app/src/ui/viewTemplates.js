@@ -5,12 +5,16 @@ import clientsListView from './templates/view-clients-list.html?raw'
 import eventsView from './templates/view-events.html?raw'
 import individualOrdersView from './templates/view-individual-orders.html?raw'
 import reportsView from './templates/view-reports.html?raw'
+import scheduleView from './templates/view-schedule.html?raw'
+import settingsBackupView from './templates/view-settings-backup.html?raw'
 import workerProfileView from './templates/view-worker-profile.html?raw'
 import workerTimeView from './templates/view-worker-time.html?raw'
 import workerTimeDetailView from './templates/view-worker-time-detail.html?raw'
 import zonesView from './templates/view-zones.html?raw'
 
 export const viewTemplates = {
+  schedule: scheduleView,
+  settings: settingsBackupView,
   events: eventsView,
   zones: zonesView,
   workerProfile: workerProfileView,

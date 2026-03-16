@@ -1,9 +1,13 @@
-import { clientsForOrg, myOrganizations } from '@dataconnect/generated'
+import { clientsForOrg, myOrganizations, workersForOrg } from '@dataconnect/generated'
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
 const AUTH_STORAGE_KEY = 'iclean.portal.auth'
 const LAST_ORG_STORAGE_KEY = 'iclean.portal.lastOrgId'
+
+function toText(value) {
+  return String(value ?? '').trim()
+}
 
 function parseSession(raw) {
   if (!raw) {
@@ -55,6 +59,101 @@ function extractOrgIdFromEmail(email) {
   const domain = parts[1]
   const domainMain = domain.split('.')[0] ?? ''
   return domainMain.replace(/[^a-z0-9_-]/g, '')
+}
+
+function emailPrefix(value) {
+  const normalized = toText(value).toLowerCase()
+  if (!normalized || !normalized.includes('@')) {
+    return ''
+  }
+  return normalized.split('@')[0]
+}
+
+function normalizePersonName(value) {
+  const raw = toText(value)
+  if (!raw) {
+    return ''
+  }
+
+  try {
+    return raw
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim()
+  } catch {
+    return raw.toLowerCase().replace(/\s+/g, ' ').trim()
+  }
+}
+
+function isWorkerActiveValue(value) {
+  if (typeof value === 'boolean') {
+    return value
+  }
+
+  const normalized = toText(value).toLowerCase()
+  if (!normalized) {
+    return true
+  }
+
+  return !['false', '0', 'no', 'nie'].includes(normalized)
+}
+
+function resolveWorkerRowForUser(workerRows, firebaseUser) {
+  const rows = Array.isArray(workerRows) ? workerRows : []
+  const email = toText(firebaseUser?.email).toLowerCase()
+  const loginFromEmail = emailPrefix(email)
+  const displayName = normalizePersonName(firebaseUser?.displayName)
+
+  if (loginFromEmail) {
+    const byLogin = rows.find((row) => toText(row?.login).toLowerCase() === loginFromEmail)
+    if (byLogin) {
+      return byLogin
+    }
+  }
+
+  if (email) {
+    const byEmail = rows.find((row) => {
+      const workerEmail = toText(row?.email).toLowerCase()
+      const workerLoginEmail = toText(row?.loginEmail).toLowerCase()
+      return workerEmail === email || workerLoginEmail === email
+    })
+    if (byEmail) {
+      return byEmail
+    }
+  }
+
+  if (displayName) {
+    const byName = rows.find((row) => {
+      const workerName = normalizePersonName(row?.workerName ?? row?.fullName ?? row?.name)
+      return workerName && workerName === displayName
+    })
+    if (byName) {
+      return byName
+    }
+  }
+
+  return null
+}
+
+async function assertWorkerIsActive(orgId, firebaseUser) {
+  const normalizedOrgId = toText(orgId)
+  if (!normalizedOrgId || !firebaseUser) {
+    return
+  }
+
+  const response = await workersForOrg({ orgId: normalizedOrgId })
+  const workerRows = response?.data?.workers ?? []
+  const workerRow = resolveWorkerRowForUser(workerRows, firebaseUser)
+
+  if (!workerRow) {
+    return
+  }
+
+  if (!isWorkerActiveValue(workerRow.active)) {
+    throw new Error('Konto pracownika jest nieaktywne. Skontaktuj sie z administratorem.')
+  }
 }
 
 function isTrue(value) {
@@ -255,10 +354,17 @@ export async function ensureSessionContext(session) {
     return null
   }
 
-  const orgContext = await resolveOrganizationContext(currentUser.email, currentUser)
-  const normalizedSession = buildSessionFromFirebase(currentUser, orgContext)
-  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(normalizedSession))
-  return normalizedSession
+  try {
+    const orgContext = await resolveOrganizationContext(currentUser.email, currentUser)
+    await assertWorkerIsActive(orgContext.orgId, currentUser)
+    const normalizedSession = buildSessionFromFirebase(currentUser, orgContext)
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(normalizedSession))
+    return normalizedSession
+  } catch (error) {
+    await signOut(firebase.auth)
+    localStorage.removeItem(AUTH_STORAGE_KEY)
+    throw error
+  }
 }
 
 export function saveSession(session) {
@@ -286,6 +392,7 @@ export async function login({ login: loginValue, password }) {
 
   try {
     const orgContext = await resolveOrganizationContext(credential.user.email ?? normalizedLogin, credential.user)
+    await assertWorkerIsActive(orgContext.orgId, credential.user)
     const session = buildSessionFromFirebase(credential.user, orgContext)
     saveSession(session)
     return session

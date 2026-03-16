@@ -1,5 +1,5 @@
 ﻿<h1 class="welcome">Zdarzenia</h1>
-<p class="subwelcome">Lista + edycja wiersza. Domyslnie: od 1. dnia miesiaca do dzis. 50 rekordow na strone.</p>
+<p class="subwelcome">Lista + edycja wiersza. Domyślnie: od 1. dnia miesiąca do dziś. 50 rekordów na stronę.</p>
 
 <div class="toolbar" aria-label="Filtry">
   <div class="tool">
@@ -24,7 +24,7 @@
 
   <div class="tool">
     <label for="evPom">Klient</label>
-    <input id="evPom" type="text" list="evPomList" placeholder="np. PSP Raciborz" />
+    <input id="evPom" type="text" list="evPomList" placeholder="np. PSP Racibórz" />
     <datalist id="evPomList"></datalist>
   </div>
 
@@ -45,18 +45,18 @@
 
   <div class="tool" style="min-width:240px">
     <label for="evQ">Szukaj</label>
-    <input id="evQ" type="text" placeholder="szukaj po tekscie..." />
+    <input id="evQ" type="text" placeholder="szukaj po tekście..." />
   </div>
 
   <div class="tool-actions">
     <button class="btn2 secondary" id="evAddBtn" type="button">Dodaj zdarzenie</button>
-    <button class="btn2 danger" id="evDeleteSelectedBtn" type="button" disabled>Usun</button>
-    <button class="btn2" id="evResetBtn" type="button">Odswiez</button>
+    <button class="btn2 danger" id="evDeleteSelectedBtn" type="button" disabled>Usuń</button>
+    <button class="btn2" id="evResetBtn" type="button">Odśwież</button>
     <button class="btn2 primary" id="evSearchBtn" type="button">Szukaj</button>
   </div>
 </div>
 
-<div class="events-table" aria-label="Tabela zdarzen">
+<div class="events-table" aria-label="Tabela zdarzeń">
   <div class="events-head">
     <div class="events-select-col"><input id="evSelectAll" type="checkbox" aria-label="Zaznacz wszystko na stronie" /></div>
     <div>Pracownik</div>
@@ -67,9 +67,8 @@
     <div>Start</div>
     <div>Stop</div>
     <div>Czas</div>
-    <div>Typ</div>
     <div title="Komentarz">Komentarz</div>
-    <div>Edytowal</div>
+    <div>Edytował</div>
     <div></div>
   </div>
 
@@ -78,7 +77,7 @@
   <div class="pager">
     <div class="pager-left">
       <span class="pager-label" id="evPageLabel">Strona 1 / 1</span>
-      <span id="evShownLabel">Wyswietlono: -</span>
+      <span id="evShownLabel">Wyświetlono: -</span>
     </div>
     <div class="pager-right">
       <button class="btn2 pager-btn" id="evPrevBtn" type="button"><-</button>
@@ -108,7 +107,7 @@
         </select>
       </div>
 
-            <div class="field">
+      <div class="field">
         <label for="evEditPom">Klient</label>
         <select id="evEditPom" aria-label="Klient">
           <option value="">(wybierz)</option>
@@ -133,7 +132,7 @@
       </div>
       <div class="field" style="grid-column:1 / -1;">
         <label for="evEditComment">Komentarz pracownika</label>
-        <textarea id="evEditComment" rows="3" maxlength="500" placeholder="tylko podglad komentarza od pracownika" readonly></textarea>
+        <textarea id="evEditComment" rows="3" maxlength="500" placeholder="tylko podgląd komentarza od pracownika" readonly></textarea>
       </div>
 
     </div>
@@ -144,7 +143,7 @@
 
       <div class="right">
         <button class="btn2 danger" id="evCancelBtn" type="button">Anuluj</button>
-        <button class="btn2 danger" id="evDeleteBtn" type="button">Usun</button>
+        <button class="btn2 danger" id="evDeleteBtn" type="button">Usuń</button>
         <button class="btn2 primary" id="evSaveBtn" type="button">Zapisz</button>
       </div>
     </div>
@@ -155,11 +154,10 @@
     <div class="modal-header">
       <div>
         <div class="modal-title">Komentarz</div>
-        <div class="modal-subtitle">Podglad</div>
+        <div class="modal-subtitle">Podgląd</div>
       </div>
       <button class="icon-btn" type="button" id="evCommentCloseBtn" aria-label="Zamknij">X</button>
     </div>
     <div class="comment-popup-body" id="evCommentText">-</div>
   </div>
 </div>
-

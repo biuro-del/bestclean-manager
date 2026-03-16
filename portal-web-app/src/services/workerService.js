@@ -1,4 +1,5 @@
 import { insertWorkerForOrg, workersForOrg } from '@dataconnect/generated'
+import { executeMutation, mutationRef } from 'firebase/data-connect'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
 function resolveNextWorkerId(rows = []) {
@@ -20,6 +21,76 @@ function resolveNextWorkerId(rows = []) {
   })
 
   return `W${String(maxNumber + 1).padStart(padWidth, '0')}`
+}
+
+const DEPLOY_HINT =
+  'Brak wdrozonej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean-room.'
+
+function extractNestedErrorMessage(rawMessage) {
+  const text = String(rawMessage ?? '')
+  if (!text) {
+    return ''
+  }
+
+  try {
+    const parsed = JSON.parse(text)
+    const topMessage = String(parsed?.error?.message ?? '').trim()
+    if (topMessage) {
+      return topMessage
+    }
+  } catch {
+    // ignore
+  }
+
+  return ''
+}
+
+function isOperationNotFoundMessage(rawMessage, operationName) {
+  const message = String(rawMessage ?? '')
+  const nested = extractNestedErrorMessage(message)
+  const fullMessage = `${message} ${nested}`.toLowerCase()
+  const operation = String(operationName ?? '').trim().toLowerCase()
+  if (!operation) {
+    return false
+  }
+
+  return (
+    fullMessage.includes(`operation "${operation}" not found`) ||
+    fullMessage.includes(`operation \\"${operation}\\" not found`) ||
+    fullMessage.includes(`operation '${operation}' not found`) ||
+    (fullMessage.includes('operation') && fullMessage.includes('not found') && fullMessage.includes(operation)) ||
+    ((fullMessage.includes('"status":"not_found"') ||
+      fullMessage.includes('"code":404') ||
+      fullMessage.includes('"code":"404"')) &&
+      fullMessage.includes(operation))
+  )
+}
+
+function withOperationNotFoundHint(error, operationName) {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  if (isOperationNotFoundMessage(message, operationName)) {
+    return new Error(`${DEPLOY_HINT} Brak operacji: ${operationName}.`)
+  }
+
+  return error instanceof Error ? error : new Error(message || DEPLOY_HINT)
+}
+
+function asNullableText(value) {
+  const raw = String(value ?? '').trim()
+  return raw ? raw : null
+}
+
+function getDataConnectOrThrow() {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  }
+
+  const firebase = ensureFirebase()
+  if (!firebase?.dataConnect) {
+    throw new Error('Nie udało się zainicjalizować Data Connect.')
+  }
+
+  return firebase.dataConnect
 }
 
 function mapWorker(orgId, row) {
@@ -133,9 +204,38 @@ export async function createWorker(orgId, payload) {
 }
 
 export async function updateWorker(orgId, workerId, payload) {
+  const login = String(workerId ?? payload?.login ?? '').trim()
+  if (!login) {
+    throw new Error('Brak loginu pracownika do aktualizacji.')
+  }
+
+  const dataConnect = getDataConnectOrThrow()
+
+  try {
+    await executeMutation(
+      mutationRef(dataConnect, 'UpdateWorkerForOrg', {
+        orgId,
+        login,
+        workerName: asNullableText(payload?.workerName ?? payload?.name ?? payload?.fullName),
+        loginEmail: asNullableText(payload?.loginEmail ?? payload?.email),
+        role: asNullableText(payload?.role ?? payload?.workerType) ?? 'Worker',
+        active: payload?.active ?? true,
+        email: asNullableText(payload?.email ?? payload?.loginEmail),
+        phone: asNullableText(payload?.phone),
+        workerType: asNullableText(payload?.workerType ?? payload?.role),
+        workerId: asNullableText(payload?.workerId ?? payload?.id) ?? login,
+        edit: asNullableText(payload?.edit ?? payload?.editedBy),
+      }),
+    )
+  } catch (error) {
+    throw withOperationNotFoundHint(error, 'UpdateWorkerForOrg')
+  }
+
   return {
-    id: workerId,
+    id: String(payload?.workerId ?? payload?.id ?? login).trim() || login,
+    workerId: String(payload?.workerId ?? payload?.id ?? login).trim() || login,
     orgId,
+    login,
     ...payload,
   }
 }

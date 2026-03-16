@@ -1,5 +1,5 @@
-<h1 class="welcome">Strefy</h1>
-<p class="subwelcome">Etap 3: podglÄ…d + edycja (Bâ€“E) + dodawanie nowej strefy z automatycznym numerem QR (A).</p>
+﻿<h1 class="welcome">Strefy</h1>
+<p class="subwelcome">Etap 3: podgląd + edycja (B–E) + dodawanie nowej strefy z automatycznym numerem QR (A).</p>
 
 <div class="toolbar" aria-label="Filtry stref">
   <div class="tool">
@@ -24,22 +24,22 @@
 
   <div class="tool">
     <label for="znFunkcja">Funkcja</label>
-    <input id="znFunkcja" type="text" placeholder="np. Clean / START" />
+    <input id="znFunkcja" type="text" placeholder="np. CLEAN / START" />
   </div>
 
   <div class="tool">
-    <label for="znEditedBy">EdytowaĹ‚</label>
-    <input id="znEditedBy" type="text" placeholder="np. RafaĹ‚" />
+    <label for="znEditedBy">Edytował</label>
+    <input id="znEditedBy" type="text" placeholder="np. Rafał" />
   </div>
 
   <div class="tool" style="min-width:220px">
     <label for="znQ">Szukaj</label>
-    <input id="znQ" type="text" placeholder="szukaj po tekĹ›cie..." />
+    <input id="znQ" type="text" placeholder="szukaj po tekście..." />
   </div>
 
   <div class="tool-actions">
-    <button class="btn2" id="znAddBtn" type="button">Dodaj strefÄ™</button>
-    <button class="btn2" id="znResetBtn" type="button">OdĹ›wieĹĽ</button>
+    <button class="btn2" id="znAddBtn" type="button">Dodaj strefę</button>
+    <button class="btn2" id="znResetBtn" type="button">Odśwież</button>
     <button class="btn2 primary" id="znSearchBtn" type="button">Szukaj</button>
   </div>
 </div>
@@ -52,13 +52,13 @@
     <div>Lokalizacja</div>
     <div>Funkcja</div>
     <div>Data</div>
-    <div>EdytowaĹ‚</div>
+    <div>Edytował</div>
     <div></div>
   </div>
 
   <div id="znRows"></div>
 
-    <div class="pager">
+  <div class="pager">
     <div class="pager-left">
       <span class="pager-label" id="znPageLabel">Strona 1 / 1</span>
       <span id="znShownLabel">Wyświetlono: —</span>
@@ -70,21 +70,21 @@
   </div>
 </div>
 
-<div class="overlay" id="znEditorOverlay" aria-label="Edytuj strefÄ™" role="dialog" aria-modal="true">
+<div class="overlay" id="znEditorOverlay" aria-label="Edytuj strefę" role="dialog" aria-modal="true">
   <div class="modal">
     <div class="logo-block" style="display:inline-flex">
       <img id="znLogo" alt="FIDO iClean" style="height:42px;width:auto;" />
     </div>
 
-    <h3>Edytuj / dodaj strefÄ™</h3>
+    <h3>Edytuj / dodaj strefę</h3>
     <p class="meta">
-      QR: <span class="mono" id="znQrLabel">â€”</span>
-      â€˘ Wiersz: <span class="mono" id="znRowNumberLabel">â€”</span>
+      QR: <span class="mono" id="znQrLabel">—</span>
+      • Wiersz: <span class="mono" id="znRowNumberLabel">—</span>
     </p>
 
     <div class="grid">
       <div class="field">
-        <label for="znEditQr">Numer QR (A) â€” blokada</label>
+        <label for="znEditQr">Numer QR (A) — blokada</label>
         <input id="znEditQr" type="text" disabled />
       </div>
 
@@ -109,19 +109,19 @@
       </div>
 
       <div class="field">
-        <label for="znEditData">Data (F) â€” AUTO</label>
+        <label for="znEditData">Data (F) — AUTO</label>
         <input id="znEditData" type="text" disabled />
       </div>
 
       <div class="field">
-        <label for="znEditEdytowal">EdytowaĹ‚ (E) â€” AUTO</label>
+        <label for="znEditEdytowal">Edytował (E) — AUTO</label>
         <input id="znEditEdytowal" type="text" disabled />
       </div>
     </div>
 
     <div class="row-actions">
       <div class="left">
-        <button class="btn2 danger" id="znDeleteBtn" type="button" style="display:none;">UsuĹ„</button>
+        <button class="btn2 danger" id="znDeleteBtn" type="button" style="display:none;">Usuń</button>
       </div>
       <div class="right">
         <button class="btn2" id="znCancelBtn" type="button">Zamknij</button>
@@ -130,4 +130,3 @@
     </div>
   </div>
 </div>
-
