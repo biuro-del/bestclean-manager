@@ -20,7 +20,7 @@
 const routeGroups = {
   clientsList: 'clients',
   zones: 'objects',
-  audits: 'reports',
+  audits: 'objects',
   coordinator: 'reports',
   individualOrders: 'clients',
   clientProfile: 'clients',

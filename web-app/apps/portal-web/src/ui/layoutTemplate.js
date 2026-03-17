@@ -129,6 +129,12 @@
               </span>
               <span class="mi-label">Strefy</span>
             </button>
+            <button class="submenu-item" data-route="audits" type="button">
+              <span class="mi-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v6c0 4.8-3 7.8-7 9-4-1.2-7-4.2-7-9V6l7-3z" stroke="currentColor" stroke-width="1.8"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="mi-label">Audyty</span>
+            </button>
           </div>
 
           <button class="menu-section" type="button" data-toggle="workers">
@@ -164,12 +170,6 @@
                 <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 10h8M8 14h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
               </span>
               <span class="mi-label">Zestawienia</span>
-            </button>
-            <button class="submenu-item" data-route="audits" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v6c0 4.8-3 7.8-7 9-4-1.2-7-4.2-7-9V6l7-3z" stroke="currentColor" stroke-width="1.8"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </span>
-              <span class="mi-label">Audyty</span>
             </button>
             <button class="submenu-item" data-route="coordinator" type="button">
               <span class="mi-ico" aria-hidden="true">
