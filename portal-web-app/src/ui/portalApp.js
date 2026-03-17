@@ -78,6 +78,12 @@ const appState = {
   eventsFilters: null,
   eventsSelectedKeys: new Set(),
   eventRows: [],
+  auditsPage: 1,
+  auditsPageSize: 50,
+  auditsTotal: 0,
+  auditsTotalPages: 1,
+  auditsFilters: null,
+  auditRows: [],
   workerDetailPage: 1,
   workerDetailPageSize: 50,
   workerDetailRows: [],
@@ -99,6 +105,9 @@ const appState = {
   zoneModalZoneId: '',
   eventEditorMode: 'add',
   eventEditorItem: null,
+  eventEditorWorkerOptions: [],
+  eventEditorClientOptions: [],
+  eventEditorZoneOptions: [],
   workerProfileRows: [],
   workerProfileViewRows: [],
   workerProfileModalMode: 'view',
@@ -5437,6 +5446,132 @@ function getZoneById(zoneId) {
   return appState.zones.find((zone) => String(zone.id) === id) ?? null
 }
 
+function eventEditorGetPickerConfig(kind) {
+  const normalizedKind = String(kind ?? '').trim().toLowerCase()
+  if (normalizedKind === 'worker' || normalizedKind === 'workers') {
+    return {
+      inputId: 'evEditWorkerSearch',
+      selectId: 'evEditWorker',
+      placeholderLabel: '(wybierz pracownika)',
+      options: appState.eventEditorWorkerOptions,
+    }
+  }
+
+  if (normalizedKind === 'zone' || normalizedKind === 'zones') {
+    return {
+      inputId: 'evEditStrefaSearch',
+      selectId: 'evEditStrefa',
+      placeholderLabel: '(wybierz strefe)',
+      options: appState.eventEditorZoneOptions,
+    }
+  }
+
+  return {
+    inputId: 'evEditPomSearch',
+    selectId: 'evEditPom',
+    placeholderLabel: '(wybierz klienta)',
+    options: appState.eventEditorClientOptions,
+  }
+}
+
+function eventEditorSetPickerExpanded(config, expanded, optionCount = 0) {
+  const select = document.getElementById(config.selectId)
+  if (!select) {
+    return
+  }
+
+  if (!expanded) {
+    select.size = 1
+    select.classList.remove('is-expanded')
+    return
+  }
+
+  const rows = Math.min(Math.max(Number(optionCount || 0) + 1, 2), 8)
+  select.size = rows
+  select.classList.add('is-expanded')
+}
+
+function eventEditorCollapsePicker(kind) {
+  eventEditorSetPickerExpanded(eventEditorGetPickerConfig(kind), false, 0)
+}
+
+function eventEditorMaybeCollapsePicker(kind) {
+  const config = eventEditorGetPickerConfig(kind)
+  const activeId = String(document.activeElement?.id ?? '').trim()
+  if (activeId === config.inputId || activeId === config.selectId) {
+    return
+  }
+
+  eventEditorSetPickerExpanded(config, false, 0)
+}
+
+function eventEditorSyncSearchInput(kind) {
+  const config = eventEditorGetPickerConfig(kind)
+  const select = document.getElementById(config.selectId)
+  const input = document.getElementById(config.inputId)
+  if (!select || !input) {
+    return
+  }
+
+  const selectedOption = select.selectedOptions?.[0]
+  input.value = select.value ? String(selectedOption?.textContent ?? '').trim() : ''
+}
+
+function eventEditorApplyPickerFilter(kind, { expandOnEmpty = false } = {}) {
+  const config = eventEditorGetPickerConfig(kind)
+  const select = document.getElementById(config.selectId)
+  if (!select) {
+    return
+  }
+
+  const currentValue = String(select.value ?? '').trim()
+  const query = String(document.getElementById(config.inputId)?.value ?? '').trim()
+  const filteredOptions = reportHistoryFilterOptions(config.options, query)
+  const placeholderLabel = query && !filteredOptions.length ? '(brak dopasowan)' : config.placeholderLabel
+
+  setSelectOptions(select, filteredOptions, placeholderLabel)
+  const placeholderOption = select.options[0]
+  if (placeholderOption) {
+    const hasMatches = filteredOptions.length > 0
+    placeholderOption.hidden = hasMatches
+    placeholderOption.disabled = hasMatches
+  }
+
+  eventEditorSetPickerExpanded(config, Boolean(query) || expandOnEmpty, filteredOptions.length)
+  if (currentValue && filteredOptions.some((option) => option.value === currentValue)) {
+    select.value = currentValue
+  }
+}
+
+function eventEditorApplyAllPickerFilters() {
+  eventEditorApplyPickerFilter('worker')
+  eventEditorApplyPickerFilter('client')
+  eventEditorApplyPickerFilter('zone')
+}
+
+function eventEditorEnsureOption(options, value, fallbackLabel) {
+  const normalizedValue = String(value ?? '').trim()
+  if (!normalizedValue) {
+    return [...options]
+  }
+
+  if (options.some((option) => String(option.value ?? '').trim() === normalizedValue)) {
+    return [...options]
+  }
+
+  const label = fallbackLabel ? `${fallbackLabel} (spoza listy)` : `${normalizedValue} (spoza listy)`
+  return [...options, { value: normalizedValue, label }]
+}
+
+function eventEditorResetSearchInputs() {
+  ;['evEditWorkerSearch', 'evEditPomSearch', 'evEditStrefaSearch'].forEach((id) => {
+    const input = document.getElementById(id)
+    if (input) {
+      input.value = ''
+    }
+  })
+}
+
 function populateEventEditorOptions(selectedWorkerLogin, selectedClientId, selectedZoneId) {
   const workerSelect = document.getElementById('evEditWorker')
   const clientSelect = document.getElementById('evEditPom')
@@ -5466,13 +5601,7 @@ function populateEventEditorOptions(selectedWorkerLogin, selectedClientId, selec
   }))
   clientOptions.sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
 
-  setSelectOptions(workerSelect, workerOptions)
-  setSelectOptions(clientSelect, clientOptions)
-
   const normalizedClientId = String(selectedClientId ?? '').trim()
-  if (normalizedClientId) {
-    clientSelect.value = normalizedClientId
-  }
 
   const availableZones = normalizedClientId
     ? appState.zones.filter((zone) => String(zone.clientId ?? '').trim() === normalizedClientId)
@@ -5492,8 +5621,6 @@ function populateEventEditorOptions(selectedWorkerLogin, selectedClientId, selec
     })
     .filter(Boolean)
 
-  setSelectOptions(zoneSelect, zoneOptions)
-
   const normalizedWorkerLogin = String(selectedWorkerLogin ?? '').trim()
   const normalizedZoneId = String(selectedZoneId ?? '').trim()
   const fallbackWorkerLabel =
@@ -5504,9 +5631,17 @@ function populateEventEditorOptions(selectedWorkerLogin, selectedClientId, selec
   const fallbackZoneLabel =
     appState.zones.find((zone) => String(zone.id ?? '').trim() === normalizedZoneId)?.name ?? normalizedZoneId
 
+  appState.eventEditorWorkerOptions = eventEditorEnsureOption(workerOptions, normalizedWorkerLogin, fallbackWorkerLabel)
+  appState.eventEditorClientOptions = eventEditorEnsureOption(clientOptions, normalizedClientId, fallbackClientLabel)
+  appState.eventEditorZoneOptions = eventEditorEnsureOption(zoneOptions, normalizedZoneId, fallbackZoneLabel)
+
+  eventEditorApplyAllPickerFilters()
   ensureSelectValue(workerSelect, normalizedWorkerLogin, fallbackWorkerLabel)
   ensureSelectValue(clientSelect, normalizedClientId, fallbackClientLabel)
   ensureSelectValue(zoneSelect, normalizedZoneId, fallbackZoneLabel)
+  eventEditorSyncSearchInput('worker')
+  eventEditorSyncSearchInput('client')
+  eventEditorSyncSearchInput('zone')
 }
 
 function fillEventsClientFilterDatalist() {
@@ -5616,6 +5751,7 @@ async function openEventEditor(item) {
   const selectedClientId = zone?.clientId ?? item.clientId
   const selectedZoneId = zone?.id ?? item.roomId ?? item.utilityRoomId
 
+  eventEditorResetSearchInputs()
   populateEventEditorOptions(item.workerLogin, selectedClientId, selectedZoneId)
 
   if (title) title.textContent = 'Edytuj zdarzenie'
@@ -5672,6 +5808,7 @@ async function openCreateEventEditor() {
   const deleteButton = document.getElementById('evDeleteBtn')
   const saveButton = document.getElementById('evSaveBtn')
 
+  eventEditorResetSearchInputs()
   populateEventEditorOptions('', '', '')
 
   if (title) title.textContent = 'Dodaj zdarzenie'
@@ -5703,6 +5840,9 @@ function closeEventEditor() {
     overlay.style.display = 'none'
   }
 
+  eventEditorCollapsePicker('worker')
+  eventEditorCollapsePicker('client')
+  eventEditorCollapsePicker('zone')
   appState.eventEditorMode = 'add'
   appState.eventEditorItem = null
 }
@@ -6334,6 +6474,251 @@ async function fetchEventsForCurrentSession({ resetPage = false, applyStoredFilt
     }
     syncEventsSelectionUi()
   }
+}
+
+function ensureAuditsDefaultDates() {
+  const from = document.getElementById('auFrom')
+  const to = document.getElementById('auTo')
+  if (!from || !to) {
+    return
+  }
+
+  if (!String(from.value ?? '').trim()) {
+    from.value = firstDayOfCurrentMonthYmd()
+  }
+
+  if (!String(to.value ?? '').trim()) {
+    to.value = todayYmd()
+  }
+}
+
+function readAuditsFilterInputs() {
+  const from = document.getElementById('auFrom')
+  const to = document.getElementById('auTo')
+  const worker = document.getElementById('auWorker')
+  const zone = document.getElementById('auZone')
+  const client = document.getElementById('auClient')
+  const status = document.getElementById('auStatus')
+  const q = document.getElementById('auQ')
+
+  return {
+    from: String(from?.value ?? '').trim(),
+    to: String(to?.value ?? '').trim(),
+    worker: String(worker?.value ?? '').trim(),
+    strefa: String(zone?.value ?? '').trim(),
+    pomieszczenie: String(client?.value ?? '').trim(),
+    status: String(status?.value ?? '').trim(),
+    q: String(q?.value ?? '').trim(),
+  }
+}
+
+function applyAuditsFilterInputs(filters = {}) {
+  const from = document.getElementById('auFrom')
+  const to = document.getElementById('auTo')
+  const worker = document.getElementById('auWorker')
+  const zone = document.getElementById('auZone')
+  const client = document.getElementById('auClient')
+  const status = document.getElementById('auStatus')
+  const q = document.getElementById('auQ')
+
+  if (from) from.value = String(filters.from ?? '')
+  if (to) to.value = String(filters.to ?? '')
+  if (worker) worker.value = String(filters.worker ?? '')
+  if (zone) zone.value = String(filters.strefa ?? '')
+  if (client) client.value = String(filters.pomieszczenie ?? '')
+  if (status) status.value = String(filters.status ?? '')
+  if (q) q.value = String(filters.q ?? '')
+}
+
+function fillAuditsClientFilterDatalist() {
+  const list = document.getElementById('auClientList')
+  if (!list) {
+    return
+  }
+
+  const uniqueNames = [
+    ...new Set(
+      appState.clients
+        .map((client) => String(client.name ?? '').trim())
+        .filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right, 'pl', { sensitivity: 'base' }))
+
+  list.innerHTML = ''
+  uniqueNames.forEach((name) => {
+    const option = document.createElement('option')
+    option.value = name
+    list.appendChild(option)
+  })
+}
+
+function readAuditsFilters() {
+  const raw = readAuditsFilterInputs()
+
+  return {
+    source: 'events',
+    fromIso: ymdToIsoRangeStart(raw.from),
+    toIso: ymdToIsoRangeEnd(raw.to),
+    worker: raw.worker,
+    strefa: raw.strefa,
+    pomieszczenie: raw.pomieszczenie,
+    status: raw.status,
+    q: raw.q,
+    page: appState.auditsPage,
+    pageSize: appState.auditsPageSize,
+  }
+}
+
+function updateAuditsPager(shown) {
+  const pageLabel = document.getElementById('auPageLabel')
+  const shownLabel = document.getElementById('auShownLabel')
+  const prevBtn = document.getElementById('auPrevBtn')
+  const nextBtn = document.getElementById('auNextBtn')
+
+  if (pageLabel) {
+    pageLabel.textContent = `Strona ${appState.auditsPage} / ${appState.auditsTotalPages}`
+  }
+
+  if (shownLabel) {
+    shownLabel.textContent = `Wyświetlono: ${shown} · Wszystkie: ${appState.auditsTotal} · Na stronę: ${appState.auditsPageSize}`
+  }
+
+  if (prevBtn) {
+    prevBtn.disabled = appState.auditsPage <= 1
+  }
+
+  if (nextBtn) {
+    nextBtn.disabled = appState.auditsPage >= appState.auditsTotalPages
+  }
+}
+
+function renderAuditsRows(rows) {
+  const root = document.getElementById('auRows')
+  if (!root) {
+    return
+  }
+
+  const safeRows = (rows || []).filter(Boolean)
+  appState.auditRows = safeRows
+
+  if (!safeRows.length) {
+    root.innerHTML = `
+      <div class="events-row">
+        <div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+      </div>
+    `
+    return
+  }
+
+  root.innerHTML = safeRows
+    .map((row, index) => {
+      const workerLogin = String(row.workerLogin ?? '').trim()
+      const workerName = String(row.workerName ?? '').trim()
+      const workerPrimary = workerName || workerLogin || '-'
+      const workerSecondary = workerLogin && workerName && workerLogin !== workerName ? workerLogin : ''
+      const workerCard = `
+        <div class="events-worker-cell">
+          <div class="events-worker-name">${escapeHtml(workerPrimary)}</div>
+          <div class="events-worker-login mono">${escapeHtml(workerSecondary || '')}</div>
+        </div>
+      `
+      const workerCell =
+        workerPrimary === '-'
+          ? workerCard
+          : `<button class="events-cell-link" type="button" data-audit-history-worker="${index}" title="Pokaz historie osoby">${workerCard}</button>`
+
+      const clientQrCandidate =
+        row?.zoneId ??
+        row?.roomId ??
+        row?.utilityRoomId ??
+        row?.dayStartObject ??
+        row?.dayStopObject ??
+        row?.strefa
+      const clientLabel = resolveClientLabelWithQrFallback(
+        String(row?.clientName ?? row?.klient ?? '-').trim() || '-',
+        clientQrCandidate,
+      )
+      const clientCell =
+        clientLabel === '-'
+          ? '-'
+          : `<button class="events-cell-link" type="button" data-audit-history-client="${index}" title="Pokaz historie klienta">${escapeHtml(clientLabel)}</button>`
+
+      const zoneLabel = String(row.strefa || row.zoneName || '-').trim() || '-'
+      const zoneCell =
+        zoneLabel === '-'
+          ? '-'
+          : `<button class="events-cell-link" type="button" data-audit-history-zone="${index}" title="Pokaz historie strefy">${escapeHtml(zoneLabel)}</button>`
+
+      const startLabel = dashboardClockLabelToHm(row.start, '-')
+      const stopLabel = dashboardClockLabelToHm(row.stop, '-')
+      const durationLabel = dashboardDurationLabelToHm(row.duration, '00:00')
+      const statusLabel = normalizeEventStatus(row.status, Boolean(toIso(row?.endAt)))
+      const editCell = canManageEvents()
+        ? `
+            <button class="event-edit-icon-btn" type="button" data-audit-edit="${index}" aria-label="Edytuj zdarzenie" title="Edytuj zdarzenie">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 20h4l10-10-4-4L4 16v4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                <path d="M13 7l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              </svg>
+            </button>
+          `
+        : '-'
+
+      return `
+        <div class="events-row">
+          <div>${workerCell}</div>
+          <div>${clientCell}</div>
+          <div>${zoneCell}</div>
+          <div>${escapeHtml(row.lokalizacja || '-')}</div>
+          <div class="mono">${escapeHtml(row.date || '-')}</div>
+          <div class="mono time-start">${escapeHtml(startLabel)}</div>
+          <div class="mono time-stop">${escapeHtml(stopLabel)}</div>
+          <div class="mono time-duration">${escapeHtml(durationLabel)}</div>
+          <div>${escapeHtml(statusLabel)}</div>
+          <div>${escapeHtml(row.editedBy || '-')}</div>
+          <div>${editCell}</div>
+        </div>
+      `
+    })
+    .join('')
+}
+
+async function fetchAuditsForCurrentSession({ resetPage = false, applyStoredFilters = false } = {}) {
+  const root = document.getElementById('auRows')
+
+  if (!appState.session?.orgId) {
+    appState.auditRows = []
+    if (root) {
+      root.innerHTML = `
+        <div class="events-row">
+          <div>Brak aktywnej sesji.</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+        </div>
+      `
+    }
+    return
+  }
+
+  if (resetPage) {
+    appState.auditsPage = 1
+  }
+
+  if (applyStoredFilters && appState.auditsFilters) {
+    applyAuditsFilterInputs(appState.auditsFilters)
+  }
+
+  if (!appState.auditsFilters) {
+    ensureAuditsDefaultDates()
+  }
+
+  appState.auditsFilters = readAuditsFilterInputs()
+  appState.auditRows = []
+  appState.auditsTotal = 0
+  appState.auditsTotalPages = 1
+  appState.auditsPage = 1
+
+  renderAuditsRows([])
+  updateAuditsPager(0)
+  setSubwelcomeMetric('#view-audits .subwelcome', 0)
 }
 
 async function ensureEventReferenceDataLoaded() {
@@ -12895,9 +13280,165 @@ function bindEventsViewFunctions() {
   binding.add(document.getElementById('evStopNowBtn'), 'click', setEventStopNow)
   binding.add(document.getElementById('evEditPom'), 'change', refreshEventZoneOptionsForClient)
   binding.add(document.getElementById('evEditStrefa'), 'change', syncEventRoomAndClientFromZone)
+  ;[
+    { inputId: 'evEditWorkerSearch', selectId: 'evEditWorker', kind: 'worker' },
+    { inputId: 'evEditPomSearch', selectId: 'evEditPom', kind: 'client' },
+    { inputId: 'evEditStrefaSearch', selectId: 'evEditStrefa', kind: 'zone' },
+  ].forEach(({ inputId, selectId, kind }) => {
+    binding.add(document.getElementById(inputId), 'input', () => {
+      eventEditorApplyPickerFilter(kind, { expandOnEmpty: true })
+    })
+    binding.add(document.getElementById(inputId), 'focus', () => {
+      eventEditorApplyPickerFilter(kind, { expandOnEmpty: true })
+    })
+    binding.add(document.getElementById(inputId), 'blur', () => {
+      window.setTimeout(() => {
+        eventEditorMaybeCollapsePicker(kind)
+      }, 120)
+    })
+    binding.add(document.getElementById(inputId), 'keydown', (event) => {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        const select = document.getElementById(selectId)
+        if (select) {
+          select.focus()
+        }
+        return
+      }
+
+      if (event.key !== 'Enter') {
+        return
+      }
+
+      const select = document.getElementById(selectId)
+      if (select && select.options.length > 1) {
+        const firstMatch = select.options[1]
+        select.value = String(firstMatch?.value ?? '')
+      }
+      eventEditorSyncSearchInput(kind)
+      eventEditorCollapsePicker(kind)
+    })
+    binding.add(document.getElementById(selectId), 'focus', () => {
+      eventEditorApplyPickerFilter(kind, { expandOnEmpty: true })
+    })
+    binding.add(document.getElementById(selectId), 'change', () => {
+      eventEditorSyncSearchInput(kind)
+      eventEditorCollapsePicker(kind)
+    })
+    binding.add(document.getElementById(selectId), 'blur', () => {
+      window.setTimeout(() => {
+        eventEditorMaybeCollapsePicker(kind)
+      }, 120)
+    })
+  })
 
   return () => {
     cleanupEventsTableResize()
+    binding.done()
+  }
+}
+
+function bindAuditsViewFunctions() {
+  const binding = createBindingHelpers()
+  const cleanupAuditsTableResize = setupResizableGridTable({
+    tableSelector: '#view-audits .events-table',
+    headSelector: '#view-audits .events-head',
+    cssVarName: '--events-grid',
+    storageKey: 'portal.grid.audits',
+    defaultWidths: [172, 150, 146, 154, 96, 82, 82, 92, 96, 108, 52],
+    minWidths: [120, 110, 108, 118, 84, 72, 72, 80, 84, 92, 46],
+    nonResizableIndexes: [10],
+    autoFitToViewport: true,
+    enforceFullWidth: true,
+    maxWidth: 680,
+  })
+
+  binding.add(document.getElementById('auSearchBtn'), 'click', () => {
+    appState.auditsPage = 1
+    void fetchAuditsForCurrentSession({ resetPage: false })
+  })
+
+  binding.add(document.getElementById('auRefreshBtn'), 'click', () => {
+    void fetchAuditsForCurrentSession({ resetPage: false })
+  })
+
+  binding.add(document.getElementById('auPrevBtn'), 'click', () => {
+    if (appState.auditsPage <= 1) return
+    appState.auditsPage -= 1
+    void fetchAuditsForCurrentSession()
+  })
+
+  binding.add(document.getElementById('auNextBtn'), 'click', () => {
+    if (appState.auditsPage >= appState.auditsTotalPages) return
+    appState.auditsPage += 1
+    void fetchAuditsForCurrentSession()
+  })
+
+  binding.add(document.getElementById('auStatus'), 'change', () => {
+    appState.auditsPage = 1
+    void fetchAuditsForCurrentSession({ resetPage: false })
+  })
+
+  ;['auFrom', 'auTo', 'auWorker', 'auZone', 'auClient', 'auQ'].forEach((id) => {
+    binding.add(document.getElementById(id), 'keydown', (event) => {
+      if (event.key !== 'Enter') return
+      appState.auditsPage = 1
+      void fetchAuditsForCurrentSession({ resetPage: false })
+    })
+  })
+
+  binding.add(document.getElementById('auRows'), 'click', (event) => {
+    const workerHistoryButton = event.target.closest('[data-audit-history-worker]')
+    if (workerHistoryButton) {
+      const index = Number(workerHistoryButton.getAttribute('data-audit-history-worker'))
+      const row = Number.isInteger(index) ? appState.auditRows[index] : null
+      if (row) {
+        void openEventHistoryFromRow(row, 'workers')
+      }
+      return
+    }
+
+    const clientHistoryButton = event.target.closest('[data-audit-history-client]')
+    if (clientHistoryButton) {
+      const index = Number(clientHistoryButton.getAttribute('data-audit-history-client'))
+      const row = Number.isInteger(index) ? appState.auditRows[index] : null
+      if (row) {
+        void openEventHistoryFromRow(row, 'objects')
+      }
+      return
+    }
+
+    const zoneHistoryButton = event.target.closest('[data-audit-history-zone]')
+    if (zoneHistoryButton) {
+      const index = Number(zoneHistoryButton.getAttribute('data-audit-history-zone'))
+      const row = Number.isInteger(index) ? appState.auditRows[index] : null
+      if (row) {
+        void openEventHistoryFromRow(row, 'zones')
+      }
+      return
+    }
+
+    const editButton = event.target.closest('[data-audit-edit]')
+    if (!editButton) {
+      return
+    }
+
+    if (!canManageEvents()) {
+      alert('Brak uprawnień do edycji zdarzeń.')
+      return
+    }
+
+    const index = Number(editButton.getAttribute('data-audit-edit'))
+    const row = Number.isInteger(index) ? appState.auditRows[index] : null
+    if (!row) {
+      return
+    }
+
+    void openEventEditor(row)
+  })
+
+  return () => {
+    cleanupAuditsTableResize()
     binding.done()
   }
 }
@@ -13763,6 +14304,11 @@ function bindLogin(router) {
       appState.eventsFilters = null
       appState.eventsSelectedKeys = new Set()
       appState.eventRows = []
+      appState.auditsFilters = null
+      appState.auditRows = []
+      appState.auditsPage = 1
+      appState.auditsTotal = 0
+      appState.auditsTotalPages = 1
       appState.workerDetailRows = []
       appState.workerDetailSourceRows = []
       appState.workerDetailViewRows = []
@@ -13871,6 +14417,11 @@ function bindLogout() {
     appState.eventsFilters = null
     appState.eventsSelectedKeys = new Set()
     appState.eventRows = []
+    appState.auditsFilters = null
+    appState.auditRows = []
+    appState.auditsPage = 1
+    appState.auditsTotal = 0
+    appState.auditsTotalPages = 1
     appState.workerDetailRows = []
     appState.workerDetailSourceRows = []
     appState.workerDetailViewRows = []
@@ -13962,6 +14513,11 @@ export function mountPortalApp() {
       return
     }
 
+    if (route === 'audits') {
+      void fetchAuditsForCurrentSession({ applyStoredFilters: true })
+      return
+    }
+
     if (route === 'zones') {
       void fetchZonesForCurrentSession(false)
       return
@@ -14041,6 +14597,7 @@ export function mountPortalApp() {
     bindClientProfileViewFunctions(),
     bindIndividualOrdersViewFunctions(),
     bindEventsViewFunctions(),
+    bindAuditsViewFunctions(),
     bindZonesViewFunctions(),
     bindWorkerTimeViewFunctions(router),
     bindWorkerTimeDetailViewFunctions(),
@@ -14102,6 +14659,11 @@ export function mountPortalApp() {
         appState.eventsFilters = null
         appState.eventsSelectedKeys = new Set()
         appState.eventRows = []
+        appState.auditsFilters = null
+        appState.auditRows = []
+        appState.auditsPage = 1
+        appState.auditsTotal = 0
+        appState.auditsTotalPages = 1
         appState.workerDetailRows = []
         appState.workerDetailSourceRows = []
         appState.workerDetailViewRows = []
