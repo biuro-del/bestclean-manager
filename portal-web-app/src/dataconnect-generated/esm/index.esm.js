@@ -2,7 +2,7 @@ import { queryRef, executeQuery, mutationRef, executeMutation, validateArgs } fr
 
 export const connectorConfig = {
   connector: 'example',
-  service: 'iclean-room-service',
+  service: 'iclean2--service',
   location: 'europe-west3'
 };
 
@@ -15,6 +15,83 @@ insertWorkerForOrgRef.operationName = 'InsertWorkerForOrg';
 
 export function insertWorkerForOrg(dcOrVars, vars) {
   return executeMutation(insertWorkerForOrgRef(dcOrVars, vars));
+}
+
+export const updateWorkerForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'UpdateWorkerForOrg', inputVars);
+}
+updateWorkerForOrgRef.operationName = 'UpdateWorkerForOrg';
+
+export function updateWorkerForOrg(dcOrVars, vars) {
+  return executeMutation(updateWorkerForOrgRef(dcOrVars, vars));
+}
+
+export const upsertOrgUiStyleForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'UpsertOrgUiStyleForOrg', inputVars);
+}
+upsertOrgUiStyleForOrgRef.operationName = 'UpsertOrgUiStyleForOrg';
+
+export function upsertOrgUiStyleForOrg(dcOrVars, vars) {
+  return executeMutation(upsertOrgUiStyleForOrgRef(dcOrVars, vars));
+}
+
+export const deleteOrgUiStyleForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'DeleteOrgUiStyleForOrg', inputVars);
+}
+deleteOrgUiStyleForOrgRef.operationName = 'DeleteOrgUiStyleForOrg';
+
+export function deleteOrgUiStyleForOrg(dcOrVars, vars) {
+  return executeMutation(deleteOrgUiStyleForOrgRef(dcOrVars, vars));
+}
+
+export const upsertMyUiStylePreferenceRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'UpsertMyUiStylePreference', inputVars);
+}
+upsertMyUiStylePreferenceRef.operationName = 'UpsertMyUiStylePreference';
+
+export function upsertMyUiStylePreference(dcOrVars, vars) {
+  return executeMutation(upsertMyUiStylePreferenceRef(dcOrVars, vars));
+}
+
+export const deleteMyUiStylePreferenceRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'DeleteMyUiStylePreference', inputVars);
+}
+deleteMyUiStylePreferenceRef.operationName = 'DeleteMyUiStylePreference';
+
+export function deleteMyUiStylePreference(dcOrVars, vars) {
+  return executeMutation(deleteMyUiStylePreferenceRef(dcOrVars, vars));
+}
+
+export const upsertUserUiStylePreferenceForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'UpsertUserUiStylePreferenceForOrg', inputVars);
+}
+upsertUserUiStylePreferenceForOrgRef.operationName = 'UpsertUserUiStylePreferenceForOrg';
+
+export function upsertUserUiStylePreferenceForOrg(dcOrVars, vars) {
+  return executeMutation(upsertUserUiStylePreferenceForOrgRef(dcOrVars, vars));
+}
+
+export const deleteUserUiStylePreferenceForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'DeleteUserUiStylePreferenceForOrg', inputVars);
+}
+deleteUserUiStylePreferenceForOrgRef.operationName = 'DeleteUserUiStylePreferenceForOrg';
+
+export function deleteUserUiStylePreferenceForOrg(dcOrVars, vars) {
+  return executeMutation(deleteUserUiStylePreferenceForOrgRef(dcOrVars, vars));
 }
 
 export const insertClientForOrgRef = (dcOrVars, vars) => {
@@ -182,6 +259,116 @@ export function deleteEventForOrg(dcOrVars, vars) {
   return executeMutation(deleteEventForOrgRef(dcOrVars, vars));
 }
 
+export const insertBackupCycleForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'InsertBackupCycleForOrg', inputVars);
+}
+insertBackupCycleForOrgRef.operationName = 'InsertBackupCycleForOrg';
+
+export function insertBackupCycleForOrg(dcOrVars, vars) {
+  return executeMutation(insertBackupCycleForOrgRef(dcOrVars, vars));
+}
+
+export const updateBackupCycleForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'UpdateBackupCycleForOrg', inputVars);
+}
+updateBackupCycleForOrgRef.operationName = 'UpdateBackupCycleForOrg';
+
+export function updateBackupCycleForOrg(dcOrVars, vars) {
+  return executeMutation(updateBackupCycleForOrgRef(dcOrVars, vars));
+}
+
+export const insertStorageForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'InsertStorageForOrg', inputVars);
+}
+insertStorageForOrgRef.operationName = 'InsertStorageForOrg';
+
+export function insertStorageForOrg(dcOrVars, vars) {
+  return executeMutation(insertStorageForOrgRef(dcOrVars, vars));
+}
+
+export const updateStorageForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'UpdateStorageForOrg', inputVars);
+}
+updateStorageForOrgRef.operationName = 'UpdateStorageForOrg';
+
+export function updateStorageForOrg(dcOrVars, vars) {
+  return executeMutation(updateStorageForOrgRef(dcOrVars, vars));
+}
+
+export const deleteStorageForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'DeleteStorageForOrg', inputVars);
+}
+deleteStorageForOrgRef.operationName = 'DeleteStorageForOrg';
+
+export function deleteStorageForOrg(dcOrVars, vars) {
+  return executeMutation(deleteStorageForOrgRef(dcOrVars, vars));
+}
+
+export const insertClientStorageForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'InsertClientStorageForOrg', inputVars);
+}
+insertClientStorageForOrgRef.operationName = 'InsertClientStorageForOrg';
+
+export function insertClientStorageForOrg(dcOrVars, vars) {
+  return executeMutation(insertClientStorageForOrgRef(dcOrVars, vars));
+}
+
+export const updateClientStorageForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'UpdateClientStorageForOrg', inputVars);
+}
+updateClientStorageForOrgRef.operationName = 'UpdateClientStorageForOrg';
+
+export function updateClientStorageForOrg(dcOrVars, vars) {
+  return executeMutation(updateClientStorageForOrgRef(dcOrVars, vars));
+}
+
+export const deleteClientStorageForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'DeleteClientStorageForOrg', inputVars);
+}
+deleteClientStorageForOrgRef.operationName = 'DeleteClientStorageForOrg';
+
+export function deleteClientStorageForOrg(dcOrVars, vars) {
+  return executeMutation(deleteClientStorageForOrgRef(dcOrVars, vars));
+}
+
+export const startWorkdayPauseRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'StartWorkdayPause', inputVars);
+}
+startWorkdayPauseRef.operationName = 'StartWorkdayPause';
+
+export function startWorkdayPause(dcOrVars, vars) {
+  return executeMutation(startWorkdayPauseRef(dcOrVars, vars));
+}
+
+export const stopWorkdayPauseRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'StopWorkdayPause', inputVars);
+}
+stopWorkdayPauseRef.operationName = 'StopWorkdayPause';
+
+export function stopWorkdayPause(dcOrVars, vars) {
+  return executeMutation(stopWorkdayPauseRef(dcOrVars, vars));
+}
+
 export const myOrganizationsRef = (dc) => {
   const { dc: dcInstance} = validateArgs(connectorConfig, dc, undefined);
   dcInstance._useGeneratedSdk();
@@ -191,6 +378,39 @@ myOrganizationsRef.operationName = 'MyOrganizations';
 
 export function myOrganizations(dc) {
   return executeQuery(myOrganizationsRef(dc));
+}
+
+export const orgUiStyleForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'OrgUiStyleForOrg', inputVars);
+}
+orgUiStyleForOrgRef.operationName = 'OrgUiStyleForOrg';
+
+export function orgUiStyleForOrg(dcOrVars, vars) {
+  return executeQuery(orgUiStyleForOrgRef(dcOrVars, vars));
+}
+
+export const myUiStylePreferenceRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'MyUiStylePreference', inputVars);
+}
+myUiStylePreferenceRef.operationName = 'MyUiStylePreference';
+
+export function myUiStylePreference(dcOrVars, vars) {
+  return executeQuery(myUiStylePreferenceRef(dcOrVars, vars));
+}
+
+export const userUiStylePreferencesForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'UserUiStylePreferencesForOrg', inputVars);
+}
+userUiStylePreferencesForOrgRef.operationName = 'UserUiStylePreferencesForOrg';
+
+export function userUiStylePreferencesForOrg(dcOrVars, vars) {
+  return executeQuery(userUiStylePreferencesForOrgRef(dcOrVars, vars));
 }
 
 export const workersForOrgRef = (dcOrVars, vars) => {
@@ -279,5 +499,60 @@ workerWorkdaysForOrgRef.operationName = 'WorkerWorkdaysForOrg';
 
 export function workerWorkdaysForOrg(dcOrVars, vars) {
   return executeQuery(workerWorkdaysForOrgRef(dcOrVars, vars));
+}
+
+export const storageForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'StorageForOrg', inputVars);
+}
+storageForOrgRef.operationName = 'StorageForOrg';
+
+export function storageForOrg(dcOrVars, vars) {
+  return executeQuery(storageForOrgRef(dcOrVars, vars));
+}
+
+export const clientStorageForClientRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'ClientStorageForClient', inputVars);
+}
+clientStorageForClientRef.operationName = 'ClientStorageForClient';
+
+export function clientStorageForClient(dcOrVars, vars) {
+  return executeQuery(clientStorageForClientRef(dcOrVars, vars));
+}
+
+export const clientStorageForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'ClientStorageForOrg', inputVars);
+}
+clientStorageForOrgRef.operationName = 'ClientStorageForOrg';
+
+export function clientStorageForOrg(dcOrVars, vars) {
+  return executeQuery(clientStorageForOrgRef(dcOrVars, vars));
+}
+
+export const workdayPausesForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'WorkdayPausesForOrg', inputVars);
+}
+workdayPausesForOrgRef.operationName = 'WorkdayPausesForOrg';
+
+export function workdayPausesForOrg(dcOrVars, vars) {
+  return executeQuery(workdayPausesForOrgRef(dcOrVars, vars));
+}
+
+export const activeWorkdayPauseForWorkerRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'ActiveWorkdayPauseForWorker', inputVars);
+}
+activeWorkdayPauseForWorkerRef.operationName = 'ActiveWorkdayPauseForWorker';
+
+export function activeWorkdayPauseForWorker(dcOrVars, vars) {
+  return executeQuery(activeWorkdayPauseForWorkerRef(dcOrVars, vars));
 }
 

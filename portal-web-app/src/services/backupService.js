@@ -779,7 +779,7 @@ function normalizeWorkerInsertVars(orgId, row) {
   return {
     orgId,
     login,
-    fullName: toNullableText(row?.fullName ?? row?.workerName),
+    workerName: toNullableText(row?.fullName ?? row?.workerName),
     loginEmail: toNullableText(row?.loginEmail ?? row?.email),
     role: toNullableText(row?.role),
     active: toBoolean(row?.active, true),

@@ -12,28 +12,28 @@ For each operation, there is a wrapper hook that can be used to call the operati
 
 Here are all of the hooks that get generated:
 ```ts
-import { useInsertWorkerForOrg, useInsertClientForOrg, useUpdateClientForOrg, useDeleteClientForOrg, useInsertIndividualJobForOrg, useUpdateIndividualJobForOrg, useDeleteIndividualJobForOrg, useInsertZoneForOrg, useUpdateZoneForOrg, useDeleteZoneForOrg } from '@dataconnect/generated/react';
+import { useInsertWorkerForOrg, useUpdateWorkerForOrg, useUpsertOrgUiStyleForOrg, useDeleteOrgUiStyleForOrg, useUpsertMyUiStylePreference, useDeleteMyUiStylePreference, useUpsertUserUiStylePreferenceForOrg, useDeleteUserUiStylePreferenceForOrg, useInsertClientForOrg, useUpdateClientForOrg } from '@dataconnect/generated/react';
 // The types of these hooks are available in react/index.d.ts
 
 const { data, isPending, isSuccess, isError, error } = useInsertWorkerForOrg(insertWorkerForOrgVars);
 
+const { data, isPending, isSuccess, isError, error } = useUpdateWorkerForOrg(updateWorkerForOrgVars);
+
+const { data, isPending, isSuccess, isError, error } = useUpsertOrgUiStyleForOrg(upsertOrgUiStyleForOrgVars);
+
+const { data, isPending, isSuccess, isError, error } = useDeleteOrgUiStyleForOrg(deleteOrgUiStyleForOrgVars);
+
+const { data, isPending, isSuccess, isError, error } = useUpsertMyUiStylePreference(upsertMyUiStylePreferenceVars);
+
+const { data, isPending, isSuccess, isError, error } = useDeleteMyUiStylePreference(deleteMyUiStylePreferenceVars);
+
+const { data, isPending, isSuccess, isError, error } = useUpsertUserUiStylePreferenceForOrg(upsertUserUiStylePreferenceForOrgVars);
+
+const { data, isPending, isSuccess, isError, error } = useDeleteUserUiStylePreferenceForOrg(deleteUserUiStylePreferenceForOrgVars);
+
 const { data, isPending, isSuccess, isError, error } = useInsertClientForOrg(insertClientForOrgVars);
 
 const { data, isPending, isSuccess, isError, error } = useUpdateClientForOrg(updateClientForOrgVars);
-
-const { data, isPending, isSuccess, isError, error } = useDeleteClientForOrg(deleteClientForOrgVars);
-
-const { data, isPending, isSuccess, isError, error } = useInsertIndividualJobForOrg(insertIndividualJobForOrgVars);
-
-const { data, isPending, isSuccess, isError, error } = useUpdateIndividualJobForOrg(updateIndividualJobForOrgVars);
-
-const { data, isPending, isSuccess, isError, error } = useDeleteIndividualJobForOrg(deleteIndividualJobForOrgVars);
-
-const { data, isPending, isSuccess, isError, error } = useInsertZoneForOrg(insertZoneForOrgVars);
-
-const { data, isPending, isSuccess, isError, error } = useUpdateZoneForOrg(updateZoneForOrgVars);
-
-const { data, isPending, isSuccess, isError, error } = useDeleteZoneForOrg(deleteZoneForOrgVars);
 
 ```
 
@@ -72,38 +72,38 @@ If a user is not using a supported framework, they can use the generated SDK dir
 Here's an example of how to use it with the first 5 operations:
 
 ```js
-import { insertWorkerForOrg, insertClientForOrg, updateClientForOrg, deleteClientForOrg, insertIndividualJobForOrg, updateIndividualJobForOrg, deleteIndividualJobForOrg, insertZoneForOrg, updateZoneForOrg, deleteZoneForOrg } from '@dataconnect/generated';
+import { insertWorkerForOrg, updateWorkerForOrg, upsertOrgUiStyleForOrg, deleteOrgUiStyleForOrg, upsertMyUiStylePreference, deleteMyUiStylePreference, upsertUserUiStylePreferenceForOrg, deleteUserUiStylePreferenceForOrg, insertClientForOrg, updateClientForOrg } from '@dataconnect/generated';
 
 
 // Operation InsertWorkerForOrg:  For variables, look at type InsertWorkerForOrgVars in ../index.d.ts
 const { data } = await InsertWorkerForOrg(dataConnect, insertWorkerForOrgVars);
+
+// Operation UpdateWorkerForOrg:  For variables, look at type UpdateWorkerForOrgVars in ../index.d.ts
+const { data } = await UpdateWorkerForOrg(dataConnect, updateWorkerForOrgVars);
+
+// Operation UpsertOrgUiStyleForOrg:  For variables, look at type UpsertOrgUiStyleForOrgVars in ../index.d.ts
+const { data } = await UpsertOrgUiStyleForOrg(dataConnect, upsertOrgUiStyleForOrgVars);
+
+// Operation DeleteOrgUiStyleForOrg:  For variables, look at type DeleteOrgUiStyleForOrgVars in ../index.d.ts
+const { data } = await DeleteOrgUiStyleForOrg(dataConnect, deleteOrgUiStyleForOrgVars);
+
+// Operation UpsertMyUiStylePreference:  For variables, look at type UpsertMyUiStylePreferenceVars in ../index.d.ts
+const { data } = await UpsertMyUiStylePreference(dataConnect, upsertMyUiStylePreferenceVars);
+
+// Operation DeleteMyUiStylePreference:  For variables, look at type DeleteMyUiStylePreferenceVars in ../index.d.ts
+const { data } = await DeleteMyUiStylePreference(dataConnect, deleteMyUiStylePreferenceVars);
+
+// Operation UpsertUserUiStylePreferenceForOrg:  For variables, look at type UpsertUserUiStylePreferenceForOrgVars in ../index.d.ts
+const { data } = await UpsertUserUiStylePreferenceForOrg(dataConnect, upsertUserUiStylePreferenceForOrgVars);
+
+// Operation DeleteUserUiStylePreferenceForOrg:  For variables, look at type DeleteUserUiStylePreferenceForOrgVars in ../index.d.ts
+const { data } = await DeleteUserUiStylePreferenceForOrg(dataConnect, deleteUserUiStylePreferenceForOrgVars);
 
 // Operation InsertClientForOrg:  For variables, look at type InsertClientForOrgVars in ../index.d.ts
 const { data } = await InsertClientForOrg(dataConnect, insertClientForOrgVars);
 
 // Operation UpdateClientForOrg:  For variables, look at type UpdateClientForOrgVars in ../index.d.ts
 const { data } = await UpdateClientForOrg(dataConnect, updateClientForOrgVars);
-
-// Operation DeleteClientForOrg:  For variables, look at type DeleteClientForOrgVars in ../index.d.ts
-const { data } = await DeleteClientForOrg(dataConnect, deleteClientForOrgVars);
-
-// Operation InsertIndividualJobForOrg:  For variables, look at type InsertIndividualJobForOrgVars in ../index.d.ts
-const { data } = await InsertIndividualJobForOrg(dataConnect, insertIndividualJobForOrgVars);
-
-// Operation UpdateIndividualJobForOrg:  For variables, look at type UpdateIndividualJobForOrgVars in ../index.d.ts
-const { data } = await UpdateIndividualJobForOrg(dataConnect, updateIndividualJobForOrgVars);
-
-// Operation DeleteIndividualJobForOrg:  For variables, look at type DeleteIndividualJobForOrgVars in ../index.d.ts
-const { data } = await DeleteIndividualJobForOrg(dataConnect, deleteIndividualJobForOrgVars);
-
-// Operation InsertZoneForOrg:  For variables, look at type InsertZoneForOrgVars in ../index.d.ts
-const { data } = await InsertZoneForOrg(dataConnect, insertZoneForOrgVars);
-
-// Operation UpdateZoneForOrg:  For variables, look at type UpdateZoneForOrgVars in ../index.d.ts
-const { data } = await UpdateZoneForOrg(dataConnect, updateZoneForOrgVars);
-
-// Operation DeleteZoneForOrg:  For variables, look at type DeleteZoneForOrgVars in ../index.d.ts
-const { data } = await DeleteZoneForOrg(dataConnect, deleteZoneForOrgVars);
 
 
 ```

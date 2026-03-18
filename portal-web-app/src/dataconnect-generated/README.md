@@ -11,6 +11,9 @@ This README will guide you through the process of using the generated JavaScript
   - [*Connecting to the local Emulator*](#connecting-to-the-local-emulator)
 - [**Queries**](#queries)
   - [*MyOrganizations*](#myorganizations)
+  - [*OrgUiStyleForOrg*](#orguistylefororg)
+  - [*MyUiStylePreference*](#myuistylepreference)
+  - [*UserUiStylePreferencesForOrg*](#useruistylepreferencesfororg)
   - [*WorkersForOrg*](#workersfororg)
   - [*ClientsForOrg*](#clientsfororg)
   - [*IndividualJobsForOrg*](#individualjobsfororg)
@@ -19,8 +22,20 @@ This README will guide you through the process of using the generated JavaScript
   - [*BackupCyclesForOrg*](#backupcyclesfororg)
   - [*EventsForOrg*](#eventsfororg)
   - [*WorkerWorkdaysForOrg*](#workerworkdaysfororg)
+  - [*StorageForOrg*](#storagefororg)
+  - [*ClientStorageForClient*](#clientstorageforclient)
+  - [*ClientStorageForOrg*](#clientstoragefororg)
+  - [*WorkdayPausesForOrg*](#workdaypausesfororg)
+  - [*ActiveWorkdayPauseForWorker*](#activeworkdaypauseforworker)
 - [**Mutations**](#mutations)
   - [*InsertWorkerForOrg*](#insertworkerfororg)
+  - [*UpdateWorkerForOrg*](#updateworkerfororg)
+  - [*UpsertOrgUiStyleForOrg*](#upsertorguistylefororg)
+  - [*DeleteOrgUiStyleForOrg*](#deleteorguistylefororg)
+  - [*UpsertMyUiStylePreference*](#upsertmyuistylepreference)
+  - [*DeleteMyUiStylePreference*](#deletemyuistylepreference)
+  - [*UpsertUserUiStylePreferenceForOrg*](#upsertuseruistylepreferencefororg)
+  - [*DeleteUserUiStylePreferenceForOrg*](#deleteuseruistylepreferencefororg)
   - [*InsertClientForOrg*](#insertclientfororg)
   - [*UpdateClientForOrg*](#updateclientfororg)
   - [*DeleteClientForOrg*](#deleteclientfororg)
@@ -36,6 +51,16 @@ This README will guide you through the process of using the generated JavaScript
   - [*InsertEventForOrg*](#inserteventfororg)
   - [*UpdateEventForOrg*](#updateeventfororg)
   - [*DeleteEventForOrg*](#deleteeventfororg)
+  - [*InsertBackupCycleForOrg*](#insertbackupcyclefororg)
+  - [*UpdateBackupCycleForOrg*](#updatebackupcyclefororg)
+  - [*InsertStorageForOrg*](#insertstoragefororg)
+  - [*UpdateStorageForOrg*](#updatestoragefororg)
+  - [*DeleteStorageForOrg*](#deletestoragefororg)
+  - [*InsertClientStorageForOrg*](#insertclientstoragefororg)
+  - [*UpdateClientStorageForOrg*](#updateclientstoragefororg)
+  - [*DeleteClientStorageForOrg*](#deleteclientstoragefororg)
+  - [*StartWorkdayPause*](#startworkdaypause)
+  - [*StopWorkdayPause*](#stopworkdaypause)
 
 # Accessing the connector
 A connector is a collection of Queries and Mutations. One SDK is generated for each connector - this SDK is generated for the connector `example`. You can find more information about connectors in the [Data Connect documentation](https://firebase.google.com/docs/data-connect#how-does).
@@ -181,6 +206,350 @@ executeQuery(ref).then((response) => {
 });
 ```
 
+## OrgUiStyleForOrg
+You can execute the `OrgUiStyleForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+orgUiStyleForOrg(vars: OrgUiStyleForOrgVariables): QueryPromise<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
+
+interface OrgUiStyleForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: OrgUiStyleForOrgVariables): QueryRef<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
+}
+export const orgUiStyleForOrgRef: OrgUiStyleForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+orgUiStyleForOrg(dc: DataConnect, vars: OrgUiStyleForOrgVariables): QueryPromise<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
+
+interface OrgUiStyleForOrgRef {
+  ...
+  (dc: DataConnect, vars: OrgUiStyleForOrgVariables): QueryRef<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
+}
+export const orgUiStyleForOrgRef: OrgUiStyleForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the orgUiStyleForOrgRef:
+```typescript
+const name = orgUiStyleForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `OrgUiStyleForOrg` query requires an argument of type `OrgUiStyleForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface OrgUiStyleForOrgVariables {
+  orgId: string;
+}
+```
+### Return Type
+Recall that executing the `OrgUiStyleForOrg` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `OrgUiStyleForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface OrgUiStyleForOrgData {
+  orgUiStyle?: {
+    orgId: string;
+    defaultStyleId: string;
+    updatedAt: TimestampString;
+    updatedBy?: string | null;
+  } & OrgUiStyle_Key;
+}
+```
+### Using `OrgUiStyleForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, orgUiStyleForOrg, OrgUiStyleForOrgVariables } from '@dataconnect/generated';
+
+// The `OrgUiStyleForOrg` query requires an argument of type `OrgUiStyleForOrgVariables`:
+const orgUiStyleForOrgVars: OrgUiStyleForOrgVariables = {
+  orgId: ..., 
+};
+
+// Call the `orgUiStyleForOrg()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await orgUiStyleForOrg(orgUiStyleForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await orgUiStyleForOrg({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await orgUiStyleForOrg(dataConnect, orgUiStyleForOrgVars);
+
+console.log(data.orgUiStyle);
+
+// Or, you can use the `Promise` API.
+orgUiStyleForOrg(orgUiStyleForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.orgUiStyle);
+});
+```
+
+### Using `OrgUiStyleForOrg`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, orgUiStyleForOrgRef, OrgUiStyleForOrgVariables } from '@dataconnect/generated';
+
+// The `OrgUiStyleForOrg` query requires an argument of type `OrgUiStyleForOrgVariables`:
+const orgUiStyleForOrgVars: OrgUiStyleForOrgVariables = {
+  orgId: ..., 
+};
+
+// Call the `orgUiStyleForOrgRef()` function to get a reference to the query.
+const ref = orgUiStyleForOrgRef(orgUiStyleForOrgVars);
+// Variables can be defined inline as well.
+const ref = orgUiStyleForOrgRef({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = orgUiStyleForOrgRef(dataConnect, orgUiStyleForOrgVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.orgUiStyle);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.orgUiStyle);
+});
+```
+
+## MyUiStylePreference
+You can execute the `MyUiStylePreference` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+myUiStylePreference(vars: MyUiStylePreferenceVariables): QueryPromise<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
+
+interface MyUiStylePreferenceRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: MyUiStylePreferenceVariables): QueryRef<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
+}
+export const myUiStylePreferenceRef: MyUiStylePreferenceRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+myUiStylePreference(dc: DataConnect, vars: MyUiStylePreferenceVariables): QueryPromise<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
+
+interface MyUiStylePreferenceRef {
+  ...
+  (dc: DataConnect, vars: MyUiStylePreferenceVariables): QueryRef<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
+}
+export const myUiStylePreferenceRef: MyUiStylePreferenceRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the myUiStylePreferenceRef:
+```typescript
+const name = myUiStylePreferenceRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `MyUiStylePreference` query requires an argument of type `MyUiStylePreferenceVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface MyUiStylePreferenceVariables {
+  orgId: string;
+}
+```
+### Return Type
+Recall that executing the `MyUiStylePreference` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `MyUiStylePreferenceData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface MyUiStylePreferenceData {
+  userUiStylePreference?: {
+    orgId: string;
+    uid: string;
+    styleId: string;
+    updatedAt: TimestampString;
+    updatedBy?: string | null;
+  } & UserUiStylePreference_Key;
+}
+```
+### Using `MyUiStylePreference`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, myUiStylePreference, MyUiStylePreferenceVariables } from '@dataconnect/generated';
+
+// The `MyUiStylePreference` query requires an argument of type `MyUiStylePreferenceVariables`:
+const myUiStylePreferenceVars: MyUiStylePreferenceVariables = {
+  orgId: ..., 
+};
+
+// Call the `myUiStylePreference()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await myUiStylePreference(myUiStylePreferenceVars);
+// Variables can be defined inline as well.
+const { data } = await myUiStylePreference({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await myUiStylePreference(dataConnect, myUiStylePreferenceVars);
+
+console.log(data.userUiStylePreference);
+
+// Or, you can use the `Promise` API.
+myUiStylePreference(myUiStylePreferenceVars).then((response) => {
+  const data = response.data;
+  console.log(data.userUiStylePreference);
+});
+```
+
+### Using `MyUiStylePreference`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, myUiStylePreferenceRef, MyUiStylePreferenceVariables } from '@dataconnect/generated';
+
+// The `MyUiStylePreference` query requires an argument of type `MyUiStylePreferenceVariables`:
+const myUiStylePreferenceVars: MyUiStylePreferenceVariables = {
+  orgId: ..., 
+};
+
+// Call the `myUiStylePreferenceRef()` function to get a reference to the query.
+const ref = myUiStylePreferenceRef(myUiStylePreferenceVars);
+// Variables can be defined inline as well.
+const ref = myUiStylePreferenceRef({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = myUiStylePreferenceRef(dataConnect, myUiStylePreferenceVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.userUiStylePreference);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.userUiStylePreference);
+});
+```
+
+## UserUiStylePreferencesForOrg
+You can execute the `UserUiStylePreferencesForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+userUiStylePreferencesForOrg(vars: UserUiStylePreferencesForOrgVariables): QueryPromise<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
+
+interface UserUiStylePreferencesForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UserUiStylePreferencesForOrgVariables): QueryRef<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
+}
+export const userUiStylePreferencesForOrgRef: UserUiStylePreferencesForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+userUiStylePreferencesForOrg(dc: DataConnect, vars: UserUiStylePreferencesForOrgVariables): QueryPromise<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
+
+interface UserUiStylePreferencesForOrgRef {
+  ...
+  (dc: DataConnect, vars: UserUiStylePreferencesForOrgVariables): QueryRef<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
+}
+export const userUiStylePreferencesForOrgRef: UserUiStylePreferencesForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the userUiStylePreferencesForOrgRef:
+```typescript
+const name = userUiStylePreferencesForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `UserUiStylePreferencesForOrg` query requires an argument of type `UserUiStylePreferencesForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface UserUiStylePreferencesForOrgVariables {
+  orgId: string;
+}
+```
+### Return Type
+Recall that executing the `UserUiStylePreferencesForOrg` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `UserUiStylePreferencesForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface UserUiStylePreferencesForOrgData {
+  userUiStylePreferences: ({
+    orgId: string;
+    uid: string;
+    styleId: string;
+    updatedAt: TimestampString;
+    updatedBy?: string | null;
+  } & UserUiStylePreference_Key)[];
+}
+```
+### Using `UserUiStylePreferencesForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, userUiStylePreferencesForOrg, UserUiStylePreferencesForOrgVariables } from '@dataconnect/generated';
+
+// The `UserUiStylePreferencesForOrg` query requires an argument of type `UserUiStylePreferencesForOrgVariables`:
+const userUiStylePreferencesForOrgVars: UserUiStylePreferencesForOrgVariables = {
+  orgId: ..., 
+};
+
+// Call the `userUiStylePreferencesForOrg()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await userUiStylePreferencesForOrg(userUiStylePreferencesForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await userUiStylePreferencesForOrg({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await userUiStylePreferencesForOrg(dataConnect, userUiStylePreferencesForOrgVars);
+
+console.log(data.userUiStylePreferences);
+
+// Or, you can use the `Promise` API.
+userUiStylePreferencesForOrg(userUiStylePreferencesForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.userUiStylePreferences);
+});
+```
+
+### Using `UserUiStylePreferencesForOrg`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, userUiStylePreferencesForOrgRef, UserUiStylePreferencesForOrgVariables } from '@dataconnect/generated';
+
+// The `UserUiStylePreferencesForOrg` query requires an argument of type `UserUiStylePreferencesForOrgVariables`:
+const userUiStylePreferencesForOrgVars: UserUiStylePreferencesForOrgVariables = {
+  orgId: ..., 
+};
+
+// Call the `userUiStylePreferencesForOrgRef()` function to get a reference to the query.
+const ref = userUiStylePreferencesForOrgRef(userUiStylePreferencesForOrgVars);
+// Variables can be defined inline as well.
+const ref = userUiStylePreferencesForOrgRef({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = userUiStylePreferencesForOrgRef(dataConnect, userUiStylePreferencesForOrgVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.userUiStylePreferences);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.userUiStylePreferences);
+});
+```
+
 ## WorkersForOrg
 You can execute the `WorkersForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
@@ -226,11 +595,17 @@ The `data` property is an object of type `WorkersForOrgData`, which is defined i
 export interface WorkersForOrgData {
   workers: ({
     login: string;
-    fullName?: string | null;
+    workerId?: string | null;
+    workerName?: string | null;
     loginEmail?: string | null;
     role?: string | null;
     active?: boolean | null;
+    email?: string | null;
+    phone?: string | null;
     workerType?: string | null;
+    edit?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
   })[];
 }
 ```
@@ -705,9 +1080,17 @@ export interface WorkdaysForOrgData {
     workerName?: string | null;
     utilityRoomId?: string | null;
     startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
     endAt?: TimestampString | null;
     durationSec?: number | null;
     status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
     comment?: string | null;
     updatedBy?: string | null;
     updatedAt?: TimestampString | null;
@@ -944,6 +1327,7 @@ The `data` property is an object of type `EventsForOrgData`, which is defined in
 export interface EventsForOrgData {
   events: ({
     eventId: string;
+    workdayId?: string | null;
     zoneId?: string | null;
     workerLogin?: string | null;
     workerName?: string | null;
@@ -957,8 +1341,18 @@ export interface EventsForOrgData {
     deviceId?: string | null;
     startEventId?: string | null;
     endEventId?: string | null;
-    updatedAt?: TimestampString | null;
     createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
   })[];
 }
 ```
@@ -1075,9 +1469,17 @@ export interface WorkerWorkdaysForOrgData {
     workerName?: string | null;
     utilityRoomId?: string | null;
     startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
     endAt?: TimestampString | null;
     durationSec?: number | null;
     status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
     comment?: string | null;
     updatedBy?: string | null;
     updatedAt?: TimestampString | null;
@@ -1149,6 +1551,642 @@ executeQuery(ref).then((response) => {
 });
 ```
 
+## StorageForOrg
+You can execute the `StorageForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+storageForOrg(vars: StorageForOrgVariables): QueryPromise<StorageForOrgData, StorageForOrgVariables>;
+
+interface StorageForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: StorageForOrgVariables): QueryRef<StorageForOrgData, StorageForOrgVariables>;
+}
+export const storageForOrgRef: StorageForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+storageForOrg(dc: DataConnect, vars: StorageForOrgVariables): QueryPromise<StorageForOrgData, StorageForOrgVariables>;
+
+interface StorageForOrgRef {
+  ...
+  (dc: DataConnect, vars: StorageForOrgVariables): QueryRef<StorageForOrgData, StorageForOrgVariables>;
+}
+export const storageForOrgRef: StorageForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the storageForOrgRef:
+```typescript
+const name = storageForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `StorageForOrg` query requires an argument of type `StorageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface StorageForOrgVariables {
+  orgId: string;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that executing the `StorageForOrg` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `StorageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface StorageForOrgData {
+  storages: ({
+    orgId: string;
+    productIndex: string;
+    productId: string;
+    name: string;
+    productType: string;
+    quantity: number;
+    quantityMin: number;
+    quantityMax?: number | null;
+    description?: string | null;
+    qrCode?: string | null;
+  } & Storage_Key)[];
+}
+```
+### Using `StorageForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, storageForOrg, StorageForOrgVariables } from '@dataconnect/generated';
+
+// The `StorageForOrg` query requires an argument of type `StorageForOrgVariables`:
+const storageForOrgVars: StorageForOrgVariables = {
+  orgId: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `storageForOrg()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await storageForOrg(storageForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await storageForOrg({ orgId: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await storageForOrg(dataConnect, storageForOrgVars);
+
+console.log(data.storages);
+
+// Or, you can use the `Promise` API.
+storageForOrg(storageForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.storages);
+});
+```
+
+### Using `StorageForOrg`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, storageForOrgRef, StorageForOrgVariables } from '@dataconnect/generated';
+
+// The `StorageForOrg` query requires an argument of type `StorageForOrgVariables`:
+const storageForOrgVars: StorageForOrgVariables = {
+  orgId: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `storageForOrgRef()` function to get a reference to the query.
+const ref = storageForOrgRef(storageForOrgVars);
+// Variables can be defined inline as well.
+const ref = storageForOrgRef({ orgId: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = storageForOrgRef(dataConnect, storageForOrgVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.storages);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.storages);
+});
+```
+
+## ClientStorageForClient
+You can execute the `ClientStorageForClient` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+clientStorageForClient(vars: ClientStorageForClientVariables): QueryPromise<ClientStorageForClientData, ClientStorageForClientVariables>;
+
+interface ClientStorageForClientRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: ClientStorageForClientVariables): QueryRef<ClientStorageForClientData, ClientStorageForClientVariables>;
+}
+export const clientStorageForClientRef: ClientStorageForClientRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+clientStorageForClient(dc: DataConnect, vars: ClientStorageForClientVariables): QueryPromise<ClientStorageForClientData, ClientStorageForClientVariables>;
+
+interface ClientStorageForClientRef {
+  ...
+  (dc: DataConnect, vars: ClientStorageForClientVariables): QueryRef<ClientStorageForClientData, ClientStorageForClientVariables>;
+}
+export const clientStorageForClientRef: ClientStorageForClientRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the clientStorageForClientRef:
+```typescript
+const name = clientStorageForClientRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `ClientStorageForClient` query requires an argument of type `ClientStorageForClientVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface ClientStorageForClientVariables {
+  orgId: string;
+  clientId: string;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that executing the `ClientStorageForClient` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `ClientStorageForClientData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface ClientStorageForClientData {
+  clientStorages: ({
+    orgId: string;
+    clientId: string;
+    productIndex: string;
+    name: string;
+    productType: string;
+    quantity: number;
+    quantityMin: number;
+    quantityMax?: number | null;
+    qrCode?: string | null;
+    storage: {
+      productId: string;
+      quantity: number;
+      quantityMin: number;
+      quantityMax?: number | null;
+    };
+      client: {
+        name?: string | null;
+        status?: string | null;
+      };
+  } & ClientStorage_Key)[];
+}
+```
+### Using `ClientStorageForClient`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, clientStorageForClient, ClientStorageForClientVariables } from '@dataconnect/generated';
+
+// The `ClientStorageForClient` query requires an argument of type `ClientStorageForClientVariables`:
+const clientStorageForClientVars: ClientStorageForClientVariables = {
+  orgId: ..., 
+  clientId: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `clientStorageForClient()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await clientStorageForClient(clientStorageForClientVars);
+// Variables can be defined inline as well.
+const { data } = await clientStorageForClient({ orgId: ..., clientId: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await clientStorageForClient(dataConnect, clientStorageForClientVars);
+
+console.log(data.clientStorages);
+
+// Or, you can use the `Promise` API.
+clientStorageForClient(clientStorageForClientVars).then((response) => {
+  const data = response.data;
+  console.log(data.clientStorages);
+});
+```
+
+### Using `ClientStorageForClient`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, clientStorageForClientRef, ClientStorageForClientVariables } from '@dataconnect/generated';
+
+// The `ClientStorageForClient` query requires an argument of type `ClientStorageForClientVariables`:
+const clientStorageForClientVars: ClientStorageForClientVariables = {
+  orgId: ..., 
+  clientId: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `clientStorageForClientRef()` function to get a reference to the query.
+const ref = clientStorageForClientRef(clientStorageForClientVars);
+// Variables can be defined inline as well.
+const ref = clientStorageForClientRef({ orgId: ..., clientId: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = clientStorageForClientRef(dataConnect, clientStorageForClientVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.clientStorages);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.clientStorages);
+});
+```
+
+## ClientStorageForOrg
+You can execute the `ClientStorageForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+clientStorageForOrg(vars: ClientStorageForOrgVariables): QueryPromise<ClientStorageForOrgData, ClientStorageForOrgVariables>;
+
+interface ClientStorageForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: ClientStorageForOrgVariables): QueryRef<ClientStorageForOrgData, ClientStorageForOrgVariables>;
+}
+export const clientStorageForOrgRef: ClientStorageForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+clientStorageForOrg(dc: DataConnect, vars: ClientStorageForOrgVariables): QueryPromise<ClientStorageForOrgData, ClientStorageForOrgVariables>;
+
+interface ClientStorageForOrgRef {
+  ...
+  (dc: DataConnect, vars: ClientStorageForOrgVariables): QueryRef<ClientStorageForOrgData, ClientStorageForOrgVariables>;
+}
+export const clientStorageForOrgRef: ClientStorageForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the clientStorageForOrgRef:
+```typescript
+const name = clientStorageForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `ClientStorageForOrg` query requires an argument of type `ClientStorageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface ClientStorageForOrgVariables {
+  orgId: string;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that executing the `ClientStorageForOrg` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `ClientStorageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface ClientStorageForOrgData {
+  clientStorages: ({
+    orgId: string;
+    clientId: string;
+    productIndex: string;
+    name: string;
+    productType: string;
+    quantity: number;
+    quantityMin: number;
+    quantityMax?: number | null;
+    qrCode?: string | null;
+  } & ClientStorage_Key)[];
+}
+```
+### Using `ClientStorageForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, clientStorageForOrg, ClientStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `ClientStorageForOrg` query requires an argument of type `ClientStorageForOrgVariables`:
+const clientStorageForOrgVars: ClientStorageForOrgVariables = {
+  orgId: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `clientStorageForOrg()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await clientStorageForOrg(clientStorageForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await clientStorageForOrg({ orgId: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await clientStorageForOrg(dataConnect, clientStorageForOrgVars);
+
+console.log(data.clientStorages);
+
+// Or, you can use the `Promise` API.
+clientStorageForOrg(clientStorageForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.clientStorages);
+});
+```
+
+### Using `ClientStorageForOrg`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, clientStorageForOrgRef, ClientStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `ClientStorageForOrg` query requires an argument of type `ClientStorageForOrgVariables`:
+const clientStorageForOrgVars: ClientStorageForOrgVariables = {
+  orgId: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `clientStorageForOrgRef()` function to get a reference to the query.
+const ref = clientStorageForOrgRef(clientStorageForOrgVars);
+// Variables can be defined inline as well.
+const ref = clientStorageForOrgRef({ orgId: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = clientStorageForOrgRef(dataConnect, clientStorageForOrgVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.clientStorages);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.clientStorages);
+});
+```
+
+## WorkdayPausesForOrg
+You can execute the `WorkdayPausesForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+workdayPausesForOrg(vars: WorkdayPausesForOrgVariables): QueryPromise<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
+
+interface WorkdayPausesForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: WorkdayPausesForOrgVariables): QueryRef<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
+}
+export const workdayPausesForOrgRef: WorkdayPausesForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+workdayPausesForOrg(dc: DataConnect, vars: WorkdayPausesForOrgVariables): QueryPromise<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
+
+interface WorkdayPausesForOrgRef {
+  ...
+  (dc: DataConnect, vars: WorkdayPausesForOrgVariables): QueryRef<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
+}
+export const workdayPausesForOrgRef: WorkdayPausesForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the workdayPausesForOrgRef:
+```typescript
+const name = workdayPausesForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `WorkdayPausesForOrg` query requires an argument of type `WorkdayPausesForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface WorkdayPausesForOrgVariables {
+  orgId: string;
+}
+```
+### Return Type
+Recall that executing the `WorkdayPausesForOrg` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `WorkdayPausesForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface WorkdayPausesForOrgData {
+  workdayPauses: ({
+    pauseId: string;
+    workdayId: string;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    deviceId?: string | null;
+    pauseEventId?: string | null;
+    startAt?: TimestampString | null;
+    stopAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+### Using `WorkdayPausesForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, workdayPausesForOrg, WorkdayPausesForOrgVariables } from '@dataconnect/generated';
+
+// The `WorkdayPausesForOrg` query requires an argument of type `WorkdayPausesForOrgVariables`:
+const workdayPausesForOrgVars: WorkdayPausesForOrgVariables = {
+  orgId: ..., 
+};
+
+// Call the `workdayPausesForOrg()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await workdayPausesForOrg(workdayPausesForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await workdayPausesForOrg({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await workdayPausesForOrg(dataConnect, workdayPausesForOrgVars);
+
+console.log(data.workdayPauses);
+
+// Or, you can use the `Promise` API.
+workdayPausesForOrg(workdayPausesForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.workdayPauses);
+});
+```
+
+### Using `WorkdayPausesForOrg`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, workdayPausesForOrgRef, WorkdayPausesForOrgVariables } from '@dataconnect/generated';
+
+// The `WorkdayPausesForOrg` query requires an argument of type `WorkdayPausesForOrgVariables`:
+const workdayPausesForOrgVars: WorkdayPausesForOrgVariables = {
+  orgId: ..., 
+};
+
+// Call the `workdayPausesForOrgRef()` function to get a reference to the query.
+const ref = workdayPausesForOrgRef(workdayPausesForOrgVars);
+// Variables can be defined inline as well.
+const ref = workdayPausesForOrgRef({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = workdayPausesForOrgRef(dataConnect, workdayPausesForOrgVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.workdayPauses);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.workdayPauses);
+});
+```
+
+## ActiveWorkdayPauseForWorker
+You can execute the `ActiveWorkdayPauseForWorker` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+activeWorkdayPauseForWorker(vars: ActiveWorkdayPauseForWorkerVariables): QueryPromise<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
+
+interface ActiveWorkdayPauseForWorkerRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: ActiveWorkdayPauseForWorkerVariables): QueryRef<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
+}
+export const activeWorkdayPauseForWorkerRef: ActiveWorkdayPauseForWorkerRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+activeWorkdayPauseForWorker(dc: DataConnect, vars: ActiveWorkdayPauseForWorkerVariables): QueryPromise<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
+
+interface ActiveWorkdayPauseForWorkerRef {
+  ...
+  (dc: DataConnect, vars: ActiveWorkdayPauseForWorkerVariables): QueryRef<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
+}
+export const activeWorkdayPauseForWorkerRef: ActiveWorkdayPauseForWorkerRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the activeWorkdayPauseForWorkerRef:
+```typescript
+const name = activeWorkdayPauseForWorkerRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `ActiveWorkdayPauseForWorker` query requires an argument of type `ActiveWorkdayPauseForWorkerVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface ActiveWorkdayPauseForWorkerVariables {
+  orgId: string;
+  workerLogin: string;
+}
+```
+### Return Type
+Recall that executing the `ActiveWorkdayPauseForWorker` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `ActiveWorkdayPauseForWorkerData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface ActiveWorkdayPauseForWorkerData {
+  workdayPauses: ({
+    pauseId: string;
+    workdayId: string;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    deviceId?: string | null;
+    pauseEventId?: string | null;
+    startAt?: TimestampString | null;
+    stopAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+### Using `ActiveWorkdayPauseForWorker`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, activeWorkdayPauseForWorker, ActiveWorkdayPauseForWorkerVariables } from '@dataconnect/generated';
+
+// The `ActiveWorkdayPauseForWorker` query requires an argument of type `ActiveWorkdayPauseForWorkerVariables`:
+const activeWorkdayPauseForWorkerVars: ActiveWorkdayPauseForWorkerVariables = {
+  orgId: ..., 
+  workerLogin: ..., 
+};
+
+// Call the `activeWorkdayPauseForWorker()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await activeWorkdayPauseForWorker(activeWorkdayPauseForWorkerVars);
+// Variables can be defined inline as well.
+const { data } = await activeWorkdayPauseForWorker({ orgId: ..., workerLogin: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await activeWorkdayPauseForWorker(dataConnect, activeWorkdayPauseForWorkerVars);
+
+console.log(data.workdayPauses);
+
+// Or, you can use the `Promise` API.
+activeWorkdayPauseForWorker(activeWorkdayPauseForWorkerVars).then((response) => {
+  const data = response.data;
+  console.log(data.workdayPauses);
+});
+```
+
+### Using `ActiveWorkdayPauseForWorker`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, activeWorkdayPauseForWorkerRef, ActiveWorkdayPauseForWorkerVariables } from '@dataconnect/generated';
+
+// The `ActiveWorkdayPauseForWorker` query requires an argument of type `ActiveWorkdayPauseForWorkerVariables`:
+const activeWorkdayPauseForWorkerVars: ActiveWorkdayPauseForWorkerVariables = {
+  orgId: ..., 
+  workerLogin: ..., 
+};
+
+// Call the `activeWorkdayPauseForWorkerRef()` function to get a reference to the query.
+const ref = activeWorkdayPauseForWorkerRef(activeWorkdayPauseForWorkerVars);
+// Variables can be defined inline as well.
+const ref = activeWorkdayPauseForWorkerRef({ orgId: ..., workerLogin: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = activeWorkdayPauseForWorkerRef(dataConnect, activeWorkdayPauseForWorkerVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.workdayPauses);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.workdayPauses);
+});
+```
+
 # Mutations
 
 There are two ways to execute a Data Connect Mutation using the generated Web SDK:
@@ -1200,7 +2238,7 @@ The `InsertWorkerForOrg` mutation requires an argument of type `InsertWorkerForO
 export interface InsertWorkerForOrgVariables {
   orgId: string;
   login: string;
-  fullName?: string | null;
+  workerName?: string | null;
   loginEmail?: string | null;
   role?: string | null;
   active?: boolean | null;
@@ -1229,7 +2267,7 @@ import { connectorConfig, insertWorkerForOrg, InsertWorkerForOrgVariables } from
 const insertWorkerForOrgVars: InsertWorkerForOrgVariables = {
   orgId: ..., 
   login: ..., 
-  fullName: ..., // optional
+  workerName: ..., // optional
   loginEmail: ..., // optional
   role: ..., // optional
   active: ..., // optional
@@ -1243,7 +2281,7 @@ const insertWorkerForOrgVars: InsertWorkerForOrgVariables = {
 // You can use the `await` keyword to wait for the promise to resolve.
 const { data } = await insertWorkerForOrg(insertWorkerForOrgVars);
 // Variables can be defined inline as well.
-const { data } = await insertWorkerForOrg({ orgId: ..., login: ..., fullName: ..., loginEmail: ..., role: ..., active: ..., email: ..., phone: ..., workerType: ..., workerId: ..., });
+const { data } = await insertWorkerForOrg({ orgId: ..., login: ..., workerName: ..., loginEmail: ..., role: ..., active: ..., email: ..., phone: ..., workerType: ..., workerId: ..., });
 
 // You can also pass in a `DataConnect` instance to the action shortcut function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -1268,7 +2306,7 @@ import { connectorConfig, insertWorkerForOrgRef, InsertWorkerForOrgVariables } f
 const insertWorkerForOrgVars: InsertWorkerForOrgVariables = {
   orgId: ..., 
   login: ..., 
-  fullName: ..., // optional
+  workerName: ..., // optional
   loginEmail: ..., // optional
   role: ..., // optional
   active: ..., // optional
@@ -1281,7 +2319,7 @@ const insertWorkerForOrgVars: InsertWorkerForOrgVariables = {
 // Call the `insertWorkerForOrgRef()` function to get a reference to the mutation.
 const ref = insertWorkerForOrgRef(insertWorkerForOrgVars);
 // Variables can be defined inline as well.
-const ref = insertWorkerForOrgRef({ orgId: ..., login: ..., fullName: ..., loginEmail: ..., role: ..., active: ..., email: ..., phone: ..., workerType: ..., workerId: ..., });
+const ref = insertWorkerForOrgRef({ orgId: ..., login: ..., workerName: ..., loginEmail: ..., role: ..., active: ..., email: ..., phone: ..., workerType: ..., workerId: ..., });
 
 // You can also pass in a `DataConnect` instance to the `MutationRef` function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -1297,6 +2335,823 @@ console.log(data.worker_insert);
 executeMutation(ref).then((response) => {
   const data = response.data;
   console.log(data.worker_insert);
+});
+```
+
+## UpdateWorkerForOrg
+You can execute the `UpdateWorkerForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+updateWorkerForOrg(vars: UpdateWorkerForOrgVariables): MutationPromise<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
+
+interface UpdateWorkerForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateWorkerForOrgVariables): MutationRef<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
+}
+export const updateWorkerForOrgRef: UpdateWorkerForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+updateWorkerForOrg(dc: DataConnect, vars: UpdateWorkerForOrgVariables): MutationPromise<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
+
+interface UpdateWorkerForOrgRef {
+  ...
+  (dc: DataConnect, vars: UpdateWorkerForOrgVariables): MutationRef<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
+}
+export const updateWorkerForOrgRef: UpdateWorkerForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the updateWorkerForOrgRef:
+```typescript
+const name = updateWorkerForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `UpdateWorkerForOrg` mutation requires an argument of type `UpdateWorkerForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface UpdateWorkerForOrgVariables {
+  orgId: string;
+  login: string;
+  workerName?: string | null;
+  loginEmail?: string | null;
+  role?: string | null;
+  active?: boolean | null;
+  email?: string | null;
+  phone?: string | null;
+  workerType?: string | null;
+  workerId?: string | null;
+  edit?: string | null;
+}
+```
+### Return Type
+Recall that executing the `UpdateWorkerForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `UpdateWorkerForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface UpdateWorkerForOrgData {
+  worker_update?: Worker_Key | null;
+}
+```
+### Using `UpdateWorkerForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, updateWorkerForOrg, UpdateWorkerForOrgVariables } from '@dataconnect/generated';
+
+// The `UpdateWorkerForOrg` mutation requires an argument of type `UpdateWorkerForOrgVariables`:
+const updateWorkerForOrgVars: UpdateWorkerForOrgVariables = {
+  orgId: ..., 
+  login: ..., 
+  workerName: ..., // optional
+  loginEmail: ..., // optional
+  role: ..., // optional
+  active: ..., // optional
+  email: ..., // optional
+  phone: ..., // optional
+  workerType: ..., // optional
+  workerId: ..., // optional
+  edit: ..., // optional
+};
+
+// Call the `updateWorkerForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await updateWorkerForOrg(updateWorkerForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await updateWorkerForOrg({ orgId: ..., login: ..., workerName: ..., loginEmail: ..., role: ..., active: ..., email: ..., phone: ..., workerType: ..., workerId: ..., edit: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await updateWorkerForOrg(dataConnect, updateWorkerForOrgVars);
+
+console.log(data.worker_update);
+
+// Or, you can use the `Promise` API.
+updateWorkerForOrg(updateWorkerForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.worker_update);
+});
+```
+
+### Using `UpdateWorkerForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, updateWorkerForOrgRef, UpdateWorkerForOrgVariables } from '@dataconnect/generated';
+
+// The `UpdateWorkerForOrg` mutation requires an argument of type `UpdateWorkerForOrgVariables`:
+const updateWorkerForOrgVars: UpdateWorkerForOrgVariables = {
+  orgId: ..., 
+  login: ..., 
+  workerName: ..., // optional
+  loginEmail: ..., // optional
+  role: ..., // optional
+  active: ..., // optional
+  email: ..., // optional
+  phone: ..., // optional
+  workerType: ..., // optional
+  workerId: ..., // optional
+  edit: ..., // optional
+};
+
+// Call the `updateWorkerForOrgRef()` function to get a reference to the mutation.
+const ref = updateWorkerForOrgRef(updateWorkerForOrgVars);
+// Variables can be defined inline as well.
+const ref = updateWorkerForOrgRef({ orgId: ..., login: ..., workerName: ..., loginEmail: ..., role: ..., active: ..., email: ..., phone: ..., workerType: ..., workerId: ..., edit: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = updateWorkerForOrgRef(dataConnect, updateWorkerForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.worker_update);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.worker_update);
+});
+```
+
+## UpsertOrgUiStyleForOrg
+You can execute the `UpsertOrgUiStyleForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+upsertOrgUiStyleForOrg(vars: UpsertOrgUiStyleForOrgVariables): MutationPromise<UpsertOrgUiStyleForOrgData, UpsertOrgUiStyleForOrgVariables>;
+
+interface UpsertOrgUiStyleForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpsertOrgUiStyleForOrgVariables): MutationRef<UpsertOrgUiStyleForOrgData, UpsertOrgUiStyleForOrgVariables>;
+}
+export const upsertOrgUiStyleForOrgRef: UpsertOrgUiStyleForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+upsertOrgUiStyleForOrg(dc: DataConnect, vars: UpsertOrgUiStyleForOrgVariables): MutationPromise<UpsertOrgUiStyleForOrgData, UpsertOrgUiStyleForOrgVariables>;
+
+interface UpsertOrgUiStyleForOrgRef {
+  ...
+  (dc: DataConnect, vars: UpsertOrgUiStyleForOrgVariables): MutationRef<UpsertOrgUiStyleForOrgData, UpsertOrgUiStyleForOrgVariables>;
+}
+export const upsertOrgUiStyleForOrgRef: UpsertOrgUiStyleForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the upsertOrgUiStyleForOrgRef:
+```typescript
+const name = upsertOrgUiStyleForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `UpsertOrgUiStyleForOrg` mutation requires an argument of type `UpsertOrgUiStyleForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface UpsertOrgUiStyleForOrgVariables {
+  orgId: string;
+  styleId: string;
+  updatedBy?: string | null;
+}
+```
+### Return Type
+Recall that executing the `UpsertOrgUiStyleForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `UpsertOrgUiStyleForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface UpsertOrgUiStyleForOrgData {
+  orgUiStyle_upsert: OrgUiStyle_Key;
+}
+```
+### Using `UpsertOrgUiStyleForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, upsertOrgUiStyleForOrg, UpsertOrgUiStyleForOrgVariables } from '@dataconnect/generated';
+
+// The `UpsertOrgUiStyleForOrg` mutation requires an argument of type `UpsertOrgUiStyleForOrgVariables`:
+const upsertOrgUiStyleForOrgVars: UpsertOrgUiStyleForOrgVariables = {
+  orgId: ..., 
+  styleId: ..., 
+  updatedBy: ..., // optional
+};
+
+// Call the `upsertOrgUiStyleForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await upsertOrgUiStyleForOrg(upsertOrgUiStyleForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await upsertOrgUiStyleForOrg({ orgId: ..., styleId: ..., updatedBy: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await upsertOrgUiStyleForOrg(dataConnect, upsertOrgUiStyleForOrgVars);
+
+console.log(data.orgUiStyle_upsert);
+
+// Or, you can use the `Promise` API.
+upsertOrgUiStyleForOrg(upsertOrgUiStyleForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.orgUiStyle_upsert);
+});
+```
+
+### Using `UpsertOrgUiStyleForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, upsertOrgUiStyleForOrgRef, UpsertOrgUiStyleForOrgVariables } from '@dataconnect/generated';
+
+// The `UpsertOrgUiStyleForOrg` mutation requires an argument of type `UpsertOrgUiStyleForOrgVariables`:
+const upsertOrgUiStyleForOrgVars: UpsertOrgUiStyleForOrgVariables = {
+  orgId: ..., 
+  styleId: ..., 
+  updatedBy: ..., // optional
+};
+
+// Call the `upsertOrgUiStyleForOrgRef()` function to get a reference to the mutation.
+const ref = upsertOrgUiStyleForOrgRef(upsertOrgUiStyleForOrgVars);
+// Variables can be defined inline as well.
+const ref = upsertOrgUiStyleForOrgRef({ orgId: ..., styleId: ..., updatedBy: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = upsertOrgUiStyleForOrgRef(dataConnect, upsertOrgUiStyleForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.orgUiStyle_upsert);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.orgUiStyle_upsert);
+});
+```
+
+## DeleteOrgUiStyleForOrg
+You can execute the `DeleteOrgUiStyleForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+deleteOrgUiStyleForOrg(vars: DeleteOrgUiStyleForOrgVariables): MutationPromise<DeleteOrgUiStyleForOrgData, DeleteOrgUiStyleForOrgVariables>;
+
+interface DeleteOrgUiStyleForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteOrgUiStyleForOrgVariables): MutationRef<DeleteOrgUiStyleForOrgData, DeleteOrgUiStyleForOrgVariables>;
+}
+export const deleteOrgUiStyleForOrgRef: DeleteOrgUiStyleForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+deleteOrgUiStyleForOrg(dc: DataConnect, vars: DeleteOrgUiStyleForOrgVariables): MutationPromise<DeleteOrgUiStyleForOrgData, DeleteOrgUiStyleForOrgVariables>;
+
+interface DeleteOrgUiStyleForOrgRef {
+  ...
+  (dc: DataConnect, vars: DeleteOrgUiStyleForOrgVariables): MutationRef<DeleteOrgUiStyleForOrgData, DeleteOrgUiStyleForOrgVariables>;
+}
+export const deleteOrgUiStyleForOrgRef: DeleteOrgUiStyleForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the deleteOrgUiStyleForOrgRef:
+```typescript
+const name = deleteOrgUiStyleForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `DeleteOrgUiStyleForOrg` mutation requires an argument of type `DeleteOrgUiStyleForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface DeleteOrgUiStyleForOrgVariables {
+  orgId: string;
+}
+```
+### Return Type
+Recall that executing the `DeleteOrgUiStyleForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `DeleteOrgUiStyleForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface DeleteOrgUiStyleForOrgData {
+  orgUiStyle_delete?: OrgUiStyle_Key | null;
+}
+```
+### Using `DeleteOrgUiStyleForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, deleteOrgUiStyleForOrg, DeleteOrgUiStyleForOrgVariables } from '@dataconnect/generated';
+
+// The `DeleteOrgUiStyleForOrg` mutation requires an argument of type `DeleteOrgUiStyleForOrgVariables`:
+const deleteOrgUiStyleForOrgVars: DeleteOrgUiStyleForOrgVariables = {
+  orgId: ..., 
+};
+
+// Call the `deleteOrgUiStyleForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await deleteOrgUiStyleForOrg(deleteOrgUiStyleForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await deleteOrgUiStyleForOrg({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await deleteOrgUiStyleForOrg(dataConnect, deleteOrgUiStyleForOrgVars);
+
+console.log(data.orgUiStyle_delete);
+
+// Or, you can use the `Promise` API.
+deleteOrgUiStyleForOrg(deleteOrgUiStyleForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.orgUiStyle_delete);
+});
+```
+
+### Using `DeleteOrgUiStyleForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, deleteOrgUiStyleForOrgRef, DeleteOrgUiStyleForOrgVariables } from '@dataconnect/generated';
+
+// The `DeleteOrgUiStyleForOrg` mutation requires an argument of type `DeleteOrgUiStyleForOrgVariables`:
+const deleteOrgUiStyleForOrgVars: DeleteOrgUiStyleForOrgVariables = {
+  orgId: ..., 
+};
+
+// Call the `deleteOrgUiStyleForOrgRef()` function to get a reference to the mutation.
+const ref = deleteOrgUiStyleForOrgRef(deleteOrgUiStyleForOrgVars);
+// Variables can be defined inline as well.
+const ref = deleteOrgUiStyleForOrgRef({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = deleteOrgUiStyleForOrgRef(dataConnect, deleteOrgUiStyleForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.orgUiStyle_delete);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.orgUiStyle_delete);
+});
+```
+
+## UpsertMyUiStylePreference
+You can execute the `UpsertMyUiStylePreference` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+upsertMyUiStylePreference(vars: UpsertMyUiStylePreferenceVariables): MutationPromise<UpsertMyUiStylePreferenceData, UpsertMyUiStylePreferenceVariables>;
+
+interface UpsertMyUiStylePreferenceRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpsertMyUiStylePreferenceVariables): MutationRef<UpsertMyUiStylePreferenceData, UpsertMyUiStylePreferenceVariables>;
+}
+export const upsertMyUiStylePreferenceRef: UpsertMyUiStylePreferenceRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+upsertMyUiStylePreference(dc: DataConnect, vars: UpsertMyUiStylePreferenceVariables): MutationPromise<UpsertMyUiStylePreferenceData, UpsertMyUiStylePreferenceVariables>;
+
+interface UpsertMyUiStylePreferenceRef {
+  ...
+  (dc: DataConnect, vars: UpsertMyUiStylePreferenceVariables): MutationRef<UpsertMyUiStylePreferenceData, UpsertMyUiStylePreferenceVariables>;
+}
+export const upsertMyUiStylePreferenceRef: UpsertMyUiStylePreferenceRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the upsertMyUiStylePreferenceRef:
+```typescript
+const name = upsertMyUiStylePreferenceRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `UpsertMyUiStylePreference` mutation requires an argument of type `UpsertMyUiStylePreferenceVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface UpsertMyUiStylePreferenceVariables {
+  orgId: string;
+  styleId: string;
+  updatedBy?: string | null;
+}
+```
+### Return Type
+Recall that executing the `UpsertMyUiStylePreference` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `UpsertMyUiStylePreferenceData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface UpsertMyUiStylePreferenceData {
+  userUiStylePreference_upsert: UserUiStylePreference_Key;
+}
+```
+### Using `UpsertMyUiStylePreference`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, upsertMyUiStylePreference, UpsertMyUiStylePreferenceVariables } from '@dataconnect/generated';
+
+// The `UpsertMyUiStylePreference` mutation requires an argument of type `UpsertMyUiStylePreferenceVariables`:
+const upsertMyUiStylePreferenceVars: UpsertMyUiStylePreferenceVariables = {
+  orgId: ..., 
+  styleId: ..., 
+  updatedBy: ..., // optional
+};
+
+// Call the `upsertMyUiStylePreference()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await upsertMyUiStylePreference(upsertMyUiStylePreferenceVars);
+// Variables can be defined inline as well.
+const { data } = await upsertMyUiStylePreference({ orgId: ..., styleId: ..., updatedBy: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await upsertMyUiStylePreference(dataConnect, upsertMyUiStylePreferenceVars);
+
+console.log(data.userUiStylePreference_upsert);
+
+// Or, you can use the `Promise` API.
+upsertMyUiStylePreference(upsertMyUiStylePreferenceVars).then((response) => {
+  const data = response.data;
+  console.log(data.userUiStylePreference_upsert);
+});
+```
+
+### Using `UpsertMyUiStylePreference`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, upsertMyUiStylePreferenceRef, UpsertMyUiStylePreferenceVariables } from '@dataconnect/generated';
+
+// The `UpsertMyUiStylePreference` mutation requires an argument of type `UpsertMyUiStylePreferenceVariables`:
+const upsertMyUiStylePreferenceVars: UpsertMyUiStylePreferenceVariables = {
+  orgId: ..., 
+  styleId: ..., 
+  updatedBy: ..., // optional
+};
+
+// Call the `upsertMyUiStylePreferenceRef()` function to get a reference to the mutation.
+const ref = upsertMyUiStylePreferenceRef(upsertMyUiStylePreferenceVars);
+// Variables can be defined inline as well.
+const ref = upsertMyUiStylePreferenceRef({ orgId: ..., styleId: ..., updatedBy: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = upsertMyUiStylePreferenceRef(dataConnect, upsertMyUiStylePreferenceVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.userUiStylePreference_upsert);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.userUiStylePreference_upsert);
+});
+```
+
+## DeleteMyUiStylePreference
+You can execute the `DeleteMyUiStylePreference` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+deleteMyUiStylePreference(vars: DeleteMyUiStylePreferenceVariables): MutationPromise<DeleteMyUiStylePreferenceData, DeleteMyUiStylePreferenceVariables>;
+
+interface DeleteMyUiStylePreferenceRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteMyUiStylePreferenceVariables): MutationRef<DeleteMyUiStylePreferenceData, DeleteMyUiStylePreferenceVariables>;
+}
+export const deleteMyUiStylePreferenceRef: DeleteMyUiStylePreferenceRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+deleteMyUiStylePreference(dc: DataConnect, vars: DeleteMyUiStylePreferenceVariables): MutationPromise<DeleteMyUiStylePreferenceData, DeleteMyUiStylePreferenceVariables>;
+
+interface DeleteMyUiStylePreferenceRef {
+  ...
+  (dc: DataConnect, vars: DeleteMyUiStylePreferenceVariables): MutationRef<DeleteMyUiStylePreferenceData, DeleteMyUiStylePreferenceVariables>;
+}
+export const deleteMyUiStylePreferenceRef: DeleteMyUiStylePreferenceRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the deleteMyUiStylePreferenceRef:
+```typescript
+const name = deleteMyUiStylePreferenceRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `DeleteMyUiStylePreference` mutation requires an argument of type `DeleteMyUiStylePreferenceVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface DeleteMyUiStylePreferenceVariables {
+  orgId: string;
+}
+```
+### Return Type
+Recall that executing the `DeleteMyUiStylePreference` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `DeleteMyUiStylePreferenceData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface DeleteMyUiStylePreferenceData {
+  userUiStylePreference_delete?: UserUiStylePreference_Key | null;
+}
+```
+### Using `DeleteMyUiStylePreference`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, deleteMyUiStylePreference, DeleteMyUiStylePreferenceVariables } from '@dataconnect/generated';
+
+// The `DeleteMyUiStylePreference` mutation requires an argument of type `DeleteMyUiStylePreferenceVariables`:
+const deleteMyUiStylePreferenceVars: DeleteMyUiStylePreferenceVariables = {
+  orgId: ..., 
+};
+
+// Call the `deleteMyUiStylePreference()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await deleteMyUiStylePreference(deleteMyUiStylePreferenceVars);
+// Variables can be defined inline as well.
+const { data } = await deleteMyUiStylePreference({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await deleteMyUiStylePreference(dataConnect, deleteMyUiStylePreferenceVars);
+
+console.log(data.userUiStylePreference_delete);
+
+// Or, you can use the `Promise` API.
+deleteMyUiStylePreference(deleteMyUiStylePreferenceVars).then((response) => {
+  const data = response.data;
+  console.log(data.userUiStylePreference_delete);
+});
+```
+
+### Using `DeleteMyUiStylePreference`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, deleteMyUiStylePreferenceRef, DeleteMyUiStylePreferenceVariables } from '@dataconnect/generated';
+
+// The `DeleteMyUiStylePreference` mutation requires an argument of type `DeleteMyUiStylePreferenceVariables`:
+const deleteMyUiStylePreferenceVars: DeleteMyUiStylePreferenceVariables = {
+  orgId: ..., 
+};
+
+// Call the `deleteMyUiStylePreferenceRef()` function to get a reference to the mutation.
+const ref = deleteMyUiStylePreferenceRef(deleteMyUiStylePreferenceVars);
+// Variables can be defined inline as well.
+const ref = deleteMyUiStylePreferenceRef({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = deleteMyUiStylePreferenceRef(dataConnect, deleteMyUiStylePreferenceVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.userUiStylePreference_delete);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.userUiStylePreference_delete);
+});
+```
+
+## UpsertUserUiStylePreferenceForOrg
+You can execute the `UpsertUserUiStylePreferenceForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+upsertUserUiStylePreferenceForOrg(vars: UpsertUserUiStylePreferenceForOrgVariables): MutationPromise<UpsertUserUiStylePreferenceForOrgData, UpsertUserUiStylePreferenceForOrgVariables>;
+
+interface UpsertUserUiStylePreferenceForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpsertUserUiStylePreferenceForOrgVariables): MutationRef<UpsertUserUiStylePreferenceForOrgData, UpsertUserUiStylePreferenceForOrgVariables>;
+}
+export const upsertUserUiStylePreferenceForOrgRef: UpsertUserUiStylePreferenceForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+upsertUserUiStylePreferenceForOrg(dc: DataConnect, vars: UpsertUserUiStylePreferenceForOrgVariables): MutationPromise<UpsertUserUiStylePreferenceForOrgData, UpsertUserUiStylePreferenceForOrgVariables>;
+
+interface UpsertUserUiStylePreferenceForOrgRef {
+  ...
+  (dc: DataConnect, vars: UpsertUserUiStylePreferenceForOrgVariables): MutationRef<UpsertUserUiStylePreferenceForOrgData, UpsertUserUiStylePreferenceForOrgVariables>;
+}
+export const upsertUserUiStylePreferenceForOrgRef: UpsertUserUiStylePreferenceForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the upsertUserUiStylePreferenceForOrgRef:
+```typescript
+const name = upsertUserUiStylePreferenceForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `UpsertUserUiStylePreferenceForOrg` mutation requires an argument of type `UpsertUserUiStylePreferenceForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface UpsertUserUiStylePreferenceForOrgVariables {
+  orgId: string;
+  uid: string;
+  styleId: string;
+  updatedBy?: string | null;
+}
+```
+### Return Type
+Recall that executing the `UpsertUserUiStylePreferenceForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `UpsertUserUiStylePreferenceForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface UpsertUserUiStylePreferenceForOrgData {
+  userUiStylePreference_upsert: UserUiStylePreference_Key;
+}
+```
+### Using `UpsertUserUiStylePreferenceForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, upsertUserUiStylePreferenceForOrg, UpsertUserUiStylePreferenceForOrgVariables } from '@dataconnect/generated';
+
+// The `UpsertUserUiStylePreferenceForOrg` mutation requires an argument of type `UpsertUserUiStylePreferenceForOrgVariables`:
+const upsertUserUiStylePreferenceForOrgVars: UpsertUserUiStylePreferenceForOrgVariables = {
+  orgId: ..., 
+  uid: ..., 
+  styleId: ..., 
+  updatedBy: ..., // optional
+};
+
+// Call the `upsertUserUiStylePreferenceForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await upsertUserUiStylePreferenceForOrg(upsertUserUiStylePreferenceForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await upsertUserUiStylePreferenceForOrg({ orgId: ..., uid: ..., styleId: ..., updatedBy: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await upsertUserUiStylePreferenceForOrg(dataConnect, upsertUserUiStylePreferenceForOrgVars);
+
+console.log(data.userUiStylePreference_upsert);
+
+// Or, you can use the `Promise` API.
+upsertUserUiStylePreferenceForOrg(upsertUserUiStylePreferenceForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.userUiStylePreference_upsert);
+});
+```
+
+### Using `UpsertUserUiStylePreferenceForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, upsertUserUiStylePreferenceForOrgRef, UpsertUserUiStylePreferenceForOrgVariables } from '@dataconnect/generated';
+
+// The `UpsertUserUiStylePreferenceForOrg` mutation requires an argument of type `UpsertUserUiStylePreferenceForOrgVariables`:
+const upsertUserUiStylePreferenceForOrgVars: UpsertUserUiStylePreferenceForOrgVariables = {
+  orgId: ..., 
+  uid: ..., 
+  styleId: ..., 
+  updatedBy: ..., // optional
+};
+
+// Call the `upsertUserUiStylePreferenceForOrgRef()` function to get a reference to the mutation.
+const ref = upsertUserUiStylePreferenceForOrgRef(upsertUserUiStylePreferenceForOrgVars);
+// Variables can be defined inline as well.
+const ref = upsertUserUiStylePreferenceForOrgRef({ orgId: ..., uid: ..., styleId: ..., updatedBy: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = upsertUserUiStylePreferenceForOrgRef(dataConnect, upsertUserUiStylePreferenceForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.userUiStylePreference_upsert);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.userUiStylePreference_upsert);
+});
+```
+
+## DeleteUserUiStylePreferenceForOrg
+You can execute the `DeleteUserUiStylePreferenceForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+deleteUserUiStylePreferenceForOrg(vars: DeleteUserUiStylePreferenceForOrgVariables): MutationPromise<DeleteUserUiStylePreferenceForOrgData, DeleteUserUiStylePreferenceForOrgVariables>;
+
+interface DeleteUserUiStylePreferenceForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteUserUiStylePreferenceForOrgVariables): MutationRef<DeleteUserUiStylePreferenceForOrgData, DeleteUserUiStylePreferenceForOrgVariables>;
+}
+export const deleteUserUiStylePreferenceForOrgRef: DeleteUserUiStylePreferenceForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+deleteUserUiStylePreferenceForOrg(dc: DataConnect, vars: DeleteUserUiStylePreferenceForOrgVariables): MutationPromise<DeleteUserUiStylePreferenceForOrgData, DeleteUserUiStylePreferenceForOrgVariables>;
+
+interface DeleteUserUiStylePreferenceForOrgRef {
+  ...
+  (dc: DataConnect, vars: DeleteUserUiStylePreferenceForOrgVariables): MutationRef<DeleteUserUiStylePreferenceForOrgData, DeleteUserUiStylePreferenceForOrgVariables>;
+}
+export const deleteUserUiStylePreferenceForOrgRef: DeleteUserUiStylePreferenceForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the deleteUserUiStylePreferenceForOrgRef:
+```typescript
+const name = deleteUserUiStylePreferenceForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `DeleteUserUiStylePreferenceForOrg` mutation requires an argument of type `DeleteUserUiStylePreferenceForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface DeleteUserUiStylePreferenceForOrgVariables {
+  orgId: string;
+  uid: string;
+}
+```
+### Return Type
+Recall that executing the `DeleteUserUiStylePreferenceForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `DeleteUserUiStylePreferenceForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface DeleteUserUiStylePreferenceForOrgData {
+  userUiStylePreference_delete?: UserUiStylePreference_Key | null;
+}
+```
+### Using `DeleteUserUiStylePreferenceForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, deleteUserUiStylePreferenceForOrg, DeleteUserUiStylePreferenceForOrgVariables } from '@dataconnect/generated';
+
+// The `DeleteUserUiStylePreferenceForOrg` mutation requires an argument of type `DeleteUserUiStylePreferenceForOrgVariables`:
+const deleteUserUiStylePreferenceForOrgVars: DeleteUserUiStylePreferenceForOrgVariables = {
+  orgId: ..., 
+  uid: ..., 
+};
+
+// Call the `deleteUserUiStylePreferenceForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await deleteUserUiStylePreferenceForOrg(deleteUserUiStylePreferenceForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await deleteUserUiStylePreferenceForOrg({ orgId: ..., uid: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await deleteUserUiStylePreferenceForOrg(dataConnect, deleteUserUiStylePreferenceForOrgVars);
+
+console.log(data.userUiStylePreference_delete);
+
+// Or, you can use the `Promise` API.
+deleteUserUiStylePreferenceForOrg(deleteUserUiStylePreferenceForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.userUiStylePreference_delete);
+});
+```
+
+### Using `DeleteUserUiStylePreferenceForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, deleteUserUiStylePreferenceForOrgRef, DeleteUserUiStylePreferenceForOrgVariables } from '@dataconnect/generated';
+
+// The `DeleteUserUiStylePreferenceForOrg` mutation requires an argument of type `DeleteUserUiStylePreferenceForOrgVariables`:
+const deleteUserUiStylePreferenceForOrgVars: DeleteUserUiStylePreferenceForOrgVariables = {
+  orgId: ..., 
+  uid: ..., 
+};
+
+// Call the `deleteUserUiStylePreferenceForOrgRef()` function to get a reference to the mutation.
+const ref = deleteUserUiStylePreferenceForOrgRef(deleteUserUiStylePreferenceForOrgVars);
+// Variables can be defined inline as well.
+const ref = deleteUserUiStylePreferenceForOrgRef({ orgId: ..., uid: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = deleteUserUiStylePreferenceForOrgRef(dataConnect, deleteUserUiStylePreferenceForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.userUiStylePreference_delete);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.userUiStylePreference_delete);
 });
 ```
 
@@ -2507,6 +4362,7 @@ export interface InsertWorkdayForOrgVariables {
   endAt?: TimestampString | null;
   durationSec?: number | null;
   status?: string | null;
+  gps?: string | null;
   comment?: string | null;
   updatedBy?: string | null;
 }
@@ -2537,6 +4393,7 @@ const insertWorkdayForOrgVars: InsertWorkdayForOrgVariables = {
   endAt: ..., // optional
   durationSec: ..., // optional
   status: ..., // optional
+  gps: ..., // optional
   comment: ..., // optional
   updatedBy: ..., // optional
 };
@@ -2545,7 +4402,7 @@ const insertWorkdayForOrgVars: InsertWorkdayForOrgVariables = {
 // You can use the `await` keyword to wait for the promise to resolve.
 const { data } = await insertWorkdayForOrg(insertWorkdayForOrgVars);
 // Variables can be defined inline as well.
-const { data } = await insertWorkdayForOrg({ orgId: ..., workdayId: ..., workerLogin: ..., workerName: ..., utilityRoomId: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., comment: ..., updatedBy: ..., });
+const { data } = await insertWorkdayForOrg({ orgId: ..., workdayId: ..., workerLogin: ..., workerName: ..., utilityRoomId: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., gps: ..., comment: ..., updatedBy: ..., });
 
 // You can also pass in a `DataConnect` instance to the action shortcut function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -2577,6 +4434,7 @@ const insertWorkdayForOrgVars: InsertWorkdayForOrgVariables = {
   endAt: ..., // optional
   durationSec: ..., // optional
   status: ..., // optional
+  gps: ..., // optional
   comment: ..., // optional
   updatedBy: ..., // optional
 };
@@ -2584,7 +4442,7 @@ const insertWorkdayForOrgVars: InsertWorkdayForOrgVariables = {
 // Call the `insertWorkdayForOrgRef()` function to get a reference to the mutation.
 const ref = insertWorkdayForOrgRef(insertWorkdayForOrgVars);
 // Variables can be defined inline as well.
-const ref = insertWorkdayForOrgRef({ orgId: ..., workdayId: ..., workerLogin: ..., workerName: ..., utilityRoomId: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., comment: ..., updatedBy: ..., });
+const ref = insertWorkdayForOrgRef({ orgId: ..., workdayId: ..., workerLogin: ..., workerName: ..., utilityRoomId: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., gps: ..., comment: ..., updatedBy: ..., });
 
 // You can also pass in a `DataConnect` instance to the `MutationRef` function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -2646,6 +4504,7 @@ export interface UpdateWorkdayForOrgVariables {
   endAt?: TimestampString | null;
   durationSec?: number | null;
   status?: string | null;
+  gps?: string | null;
   comment?: string | null;
   updatedBy?: string | null;
 }
@@ -2676,6 +4535,7 @@ const updateWorkdayForOrgVars: UpdateWorkdayForOrgVariables = {
   endAt: ..., // optional
   durationSec: ..., // optional
   status: ..., // optional
+  gps: ..., // optional
   comment: ..., // optional
   updatedBy: ..., // optional
 };
@@ -2684,7 +4544,7 @@ const updateWorkdayForOrgVars: UpdateWorkdayForOrgVariables = {
 // You can use the `await` keyword to wait for the promise to resolve.
 const { data } = await updateWorkdayForOrg(updateWorkdayForOrgVars);
 // Variables can be defined inline as well.
-const { data } = await updateWorkdayForOrg({ orgId: ..., workdayId: ..., workerLogin: ..., workerName: ..., utilityRoomId: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., comment: ..., updatedBy: ..., });
+const { data } = await updateWorkdayForOrg({ orgId: ..., workdayId: ..., workerLogin: ..., workerName: ..., utilityRoomId: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., gps: ..., comment: ..., updatedBy: ..., });
 
 // You can also pass in a `DataConnect` instance to the action shortcut function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -2716,6 +4576,7 @@ const updateWorkdayForOrgVars: UpdateWorkdayForOrgVariables = {
   endAt: ..., // optional
   durationSec: ..., // optional
   status: ..., // optional
+  gps: ..., // optional
   comment: ..., // optional
   updatedBy: ..., // optional
 };
@@ -2723,7 +4584,7 @@ const updateWorkdayForOrgVars: UpdateWorkdayForOrgVariables = {
 // Call the `updateWorkdayForOrgRef()` function to get a reference to the mutation.
 const ref = updateWorkdayForOrgRef(updateWorkdayForOrgVars);
 // Variables can be defined inline as well.
-const ref = updateWorkdayForOrgRef({ orgId: ..., workdayId: ..., workerLogin: ..., workerName: ..., utilityRoomId: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., comment: ..., updatedBy: ..., });
+const ref = updateWorkdayForOrgRef({ orgId: ..., workdayId: ..., workerLogin: ..., workerName: ..., utilityRoomId: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., gps: ..., comment: ..., updatedBy: ..., });
 
 // You can also pass in a `DataConnect` instance to the `MutationRef` function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -2890,8 +4751,10 @@ The `InsertEventForOrg` mutation requires an argument of type `InsertEventForOrg
 export interface InsertEventForOrgVariables {
   orgId: string;
   eventId: string;
+  workdayId?: string | null;
   zoneId?: string | null;
   workerLogin?: string | null;
+  workerName?: string | null;
   startAt?: TimestampString | null;
   endAt?: TimestampString | null;
   durationSec?: number | null;
@@ -2910,7 +4773,7 @@ Recall that executing the `InsertEventForOrg` mutation returns a `MutationPromis
 The `data` property is an object of type `InsertEventForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
 ```typescript
 export interface InsertEventForOrgData {
-  event_insert: BackupCycle_Key;
+  event_insert: Event_Key;
 }
 ```
 ### Using `InsertEventForOrg`'s action shortcut function
@@ -2923,8 +4786,10 @@ import { connectorConfig, insertEventForOrg, InsertEventForOrgVariables } from '
 const insertEventForOrgVars: InsertEventForOrgVariables = {
   orgId: ..., 
   eventId: ..., 
+  workdayId: ..., // optional
   zoneId: ..., // optional
   workerLogin: ..., // optional
+  workerName: ..., // optional
   startAt: ..., // optional
   endAt: ..., // optional
   durationSec: ..., // optional
@@ -2941,7 +4806,7 @@ const insertEventForOrgVars: InsertEventForOrgVariables = {
 // You can use the `await` keyword to wait for the promise to resolve.
 const { data } = await insertEventForOrg(insertEventForOrgVars);
 // Variables can be defined inline as well.
-const { data } = await insertEventForOrg({ orgId: ..., eventId: ..., zoneId: ..., workerLogin: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
+const { data } = await insertEventForOrg({ orgId: ..., eventId: ..., workdayId: ..., zoneId: ..., workerLogin: ..., workerName: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
 
 // You can also pass in a `DataConnect` instance to the action shortcut function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -2966,8 +4831,10 @@ import { connectorConfig, insertEventForOrgRef, InsertEventForOrgVariables } fro
 const insertEventForOrgVars: InsertEventForOrgVariables = {
   orgId: ..., 
   eventId: ..., 
+  workdayId: ..., // optional
   zoneId: ..., // optional
   workerLogin: ..., // optional
+  workerName: ..., // optional
   startAt: ..., // optional
   endAt: ..., // optional
   durationSec: ..., // optional
@@ -2983,7 +4850,7 @@ const insertEventForOrgVars: InsertEventForOrgVariables = {
 // Call the `insertEventForOrgRef()` function to get a reference to the mutation.
 const ref = insertEventForOrgRef(insertEventForOrgVars);
 // Variables can be defined inline as well.
-const ref = insertEventForOrgRef({ orgId: ..., eventId: ..., zoneId: ..., workerLogin: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
+const ref = insertEventForOrgRef({ orgId: ..., eventId: ..., workdayId: ..., zoneId: ..., workerLogin: ..., workerName: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
 
 // You can also pass in a `DataConnect` instance to the `MutationRef` function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -3038,8 +4905,10 @@ The `UpdateEventForOrg` mutation requires an argument of type `UpdateEventForOrg
 export interface UpdateEventForOrgVariables {
   orgId: string;
   eventId: string;
+  workdayId?: string | null;
   zoneId?: string | null;
   workerLogin?: string | null;
+  workerName?: string | null;
   startAt?: TimestampString | null;
   endAt?: TimestampString | null;
   durationSec?: number | null;
@@ -3058,7 +4927,7 @@ Recall that executing the `UpdateEventForOrg` mutation returns a `MutationPromis
 The `data` property is an object of type `UpdateEventForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
 ```typescript
 export interface UpdateEventForOrgData {
-  event_update?: BackupCycle_Key | null;
+  event_update?: Event_Key | null;
 }
 ```
 ### Using `UpdateEventForOrg`'s action shortcut function
@@ -3071,8 +4940,10 @@ import { connectorConfig, updateEventForOrg, UpdateEventForOrgVariables } from '
 const updateEventForOrgVars: UpdateEventForOrgVariables = {
   orgId: ..., 
   eventId: ..., 
+  workdayId: ..., // optional
   zoneId: ..., // optional
   workerLogin: ..., // optional
+  workerName: ..., // optional
   startAt: ..., // optional
   endAt: ..., // optional
   durationSec: ..., // optional
@@ -3089,7 +4960,7 @@ const updateEventForOrgVars: UpdateEventForOrgVariables = {
 // You can use the `await` keyword to wait for the promise to resolve.
 const { data } = await updateEventForOrg(updateEventForOrgVars);
 // Variables can be defined inline as well.
-const { data } = await updateEventForOrg({ orgId: ..., eventId: ..., zoneId: ..., workerLogin: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
+const { data } = await updateEventForOrg({ orgId: ..., eventId: ..., workdayId: ..., zoneId: ..., workerLogin: ..., workerName: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
 
 // You can also pass in a `DataConnect` instance to the action shortcut function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -3114,8 +4985,10 @@ import { connectorConfig, updateEventForOrgRef, UpdateEventForOrgVariables } fro
 const updateEventForOrgVars: UpdateEventForOrgVariables = {
   orgId: ..., 
   eventId: ..., 
+  workdayId: ..., // optional
   zoneId: ..., // optional
   workerLogin: ..., // optional
+  workerName: ..., // optional
   startAt: ..., // optional
   endAt: ..., // optional
   durationSec: ..., // optional
@@ -3131,7 +5004,7 @@ const updateEventForOrgVars: UpdateEventForOrgVariables = {
 // Call the `updateEventForOrgRef()` function to get a reference to the mutation.
 const ref = updateEventForOrgRef(updateEventForOrgVars);
 // Variables can be defined inline as well.
-const ref = updateEventForOrgRef({ orgId: ..., eventId: ..., zoneId: ..., workerLogin: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
+const ref = updateEventForOrgRef({ orgId: ..., eventId: ..., workdayId: ..., zoneId: ..., workerLogin: ..., workerName: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
 
 // You can also pass in a `DataConnect` instance to the `MutationRef` function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -3194,7 +5067,7 @@ Recall that executing the `DeleteEventForOrg` mutation returns a `MutationPromis
 The `data` property is an object of type `DeleteEventForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
 ```typescript
 export interface DeleteEventForOrgData {
-  event_delete?: BackupCycle_Key | null;
+  event_delete?: Event_Key | null;
 }
 ```
 ### Using `DeleteEventForOrg`'s action shortcut function
@@ -3259,6 +5132,1358 @@ console.log(data.event_delete);
 executeMutation(ref).then((response) => {
   const data = response.data;
   console.log(data.event_delete);
+});
+```
+
+## InsertBackupCycleForOrg
+You can execute the `InsertBackupCycleForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+insertBackupCycleForOrg(vars: InsertBackupCycleForOrgVariables): MutationPromise<InsertBackupCycleForOrgData, InsertBackupCycleForOrgVariables>;
+
+interface InsertBackupCycleForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: InsertBackupCycleForOrgVariables): MutationRef<InsertBackupCycleForOrgData, InsertBackupCycleForOrgVariables>;
+}
+export const insertBackupCycleForOrgRef: InsertBackupCycleForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+insertBackupCycleForOrg(dc: DataConnect, vars: InsertBackupCycleForOrgVariables): MutationPromise<InsertBackupCycleForOrgData, InsertBackupCycleForOrgVariables>;
+
+interface InsertBackupCycleForOrgRef {
+  ...
+  (dc: DataConnect, vars: InsertBackupCycleForOrgVariables): MutationRef<InsertBackupCycleForOrgData, InsertBackupCycleForOrgVariables>;
+}
+export const insertBackupCycleForOrgRef: InsertBackupCycleForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the insertBackupCycleForOrgRef:
+```typescript
+const name = insertBackupCycleForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `InsertBackupCycleForOrg` mutation requires an argument of type `InsertBackupCycleForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface InsertBackupCycleForOrgVariables {
+  orgId: string;
+  cycleId: string;
+  workerLogin?: string | null;
+  workerName?: string | null;
+  roomId?: string | null;
+  strefa?: string | null;
+  pomieszczenie?: string | null;
+  startAt?: TimestampString | null;
+  endAt?: TimestampString | null;
+  durationSec?: number | null;
+  endReason?: string | null;
+  comment?: string | null;
+  status?: string | null;
+  closeMarkedAt?: TimestampString | null;
+  deviceId?: string | null;
+  startEventId?: string | null;
+  endEventId?: string | null;
+}
+```
+### Return Type
+Recall that executing the `InsertBackupCycleForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `InsertBackupCycleForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface InsertBackupCycleForOrgData {
+  backupCycle_insert: BackupCycle_Key;
+}
+```
+### Using `InsertBackupCycleForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, insertBackupCycleForOrg, InsertBackupCycleForOrgVariables } from '@dataconnect/generated';
+
+// The `InsertBackupCycleForOrg` mutation requires an argument of type `InsertBackupCycleForOrgVariables`:
+const insertBackupCycleForOrgVars: InsertBackupCycleForOrgVariables = {
+  orgId: ..., 
+  cycleId: ..., 
+  workerLogin: ..., // optional
+  workerName: ..., // optional
+  roomId: ..., // optional
+  strefa: ..., // optional
+  pomieszczenie: ..., // optional
+  startAt: ..., // optional
+  endAt: ..., // optional
+  durationSec: ..., // optional
+  endReason: ..., // optional
+  comment: ..., // optional
+  status: ..., // optional
+  closeMarkedAt: ..., // optional
+  deviceId: ..., // optional
+  startEventId: ..., // optional
+  endEventId: ..., // optional
+};
+
+// Call the `insertBackupCycleForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await insertBackupCycleForOrg(insertBackupCycleForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await insertBackupCycleForOrg({ orgId: ..., cycleId: ..., workerLogin: ..., workerName: ..., roomId: ..., strefa: ..., pomieszczenie: ..., startAt: ..., endAt: ..., durationSec: ..., endReason: ..., comment: ..., status: ..., closeMarkedAt: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await insertBackupCycleForOrg(dataConnect, insertBackupCycleForOrgVars);
+
+console.log(data.backupCycle_insert);
+
+// Or, you can use the `Promise` API.
+insertBackupCycleForOrg(insertBackupCycleForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.backupCycle_insert);
+});
+```
+
+### Using `InsertBackupCycleForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, insertBackupCycleForOrgRef, InsertBackupCycleForOrgVariables } from '@dataconnect/generated';
+
+// The `InsertBackupCycleForOrg` mutation requires an argument of type `InsertBackupCycleForOrgVariables`:
+const insertBackupCycleForOrgVars: InsertBackupCycleForOrgVariables = {
+  orgId: ..., 
+  cycleId: ..., 
+  workerLogin: ..., // optional
+  workerName: ..., // optional
+  roomId: ..., // optional
+  strefa: ..., // optional
+  pomieszczenie: ..., // optional
+  startAt: ..., // optional
+  endAt: ..., // optional
+  durationSec: ..., // optional
+  endReason: ..., // optional
+  comment: ..., // optional
+  status: ..., // optional
+  closeMarkedAt: ..., // optional
+  deviceId: ..., // optional
+  startEventId: ..., // optional
+  endEventId: ..., // optional
+};
+
+// Call the `insertBackupCycleForOrgRef()` function to get a reference to the mutation.
+const ref = insertBackupCycleForOrgRef(insertBackupCycleForOrgVars);
+// Variables can be defined inline as well.
+const ref = insertBackupCycleForOrgRef({ orgId: ..., cycleId: ..., workerLogin: ..., workerName: ..., roomId: ..., strefa: ..., pomieszczenie: ..., startAt: ..., endAt: ..., durationSec: ..., endReason: ..., comment: ..., status: ..., closeMarkedAt: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = insertBackupCycleForOrgRef(dataConnect, insertBackupCycleForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.backupCycle_insert);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.backupCycle_insert);
+});
+```
+
+## UpdateBackupCycleForOrg
+You can execute the `UpdateBackupCycleForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+updateBackupCycleForOrg(vars: UpdateBackupCycleForOrgVariables): MutationPromise<UpdateBackupCycleForOrgData, UpdateBackupCycleForOrgVariables>;
+
+interface UpdateBackupCycleForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateBackupCycleForOrgVariables): MutationRef<UpdateBackupCycleForOrgData, UpdateBackupCycleForOrgVariables>;
+}
+export const updateBackupCycleForOrgRef: UpdateBackupCycleForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+updateBackupCycleForOrg(dc: DataConnect, vars: UpdateBackupCycleForOrgVariables): MutationPromise<UpdateBackupCycleForOrgData, UpdateBackupCycleForOrgVariables>;
+
+interface UpdateBackupCycleForOrgRef {
+  ...
+  (dc: DataConnect, vars: UpdateBackupCycleForOrgVariables): MutationRef<UpdateBackupCycleForOrgData, UpdateBackupCycleForOrgVariables>;
+}
+export const updateBackupCycleForOrgRef: UpdateBackupCycleForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the updateBackupCycleForOrgRef:
+```typescript
+const name = updateBackupCycleForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `UpdateBackupCycleForOrg` mutation requires an argument of type `UpdateBackupCycleForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface UpdateBackupCycleForOrgVariables {
+  orgId: string;
+  cycleId: string;
+  workerLogin?: string | null;
+  workerName?: string | null;
+  roomId?: string | null;
+  strefa?: string | null;
+  pomieszczenie?: string | null;
+  startAt?: TimestampString | null;
+  endAt?: TimestampString | null;
+  durationSec?: number | null;
+  endReason?: string | null;
+  comment?: string | null;
+  status?: string | null;
+  closeMarkedAt?: TimestampString | null;
+  deviceId?: string | null;
+  startEventId?: string | null;
+  endEventId?: string | null;
+}
+```
+### Return Type
+Recall that executing the `UpdateBackupCycleForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `UpdateBackupCycleForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface UpdateBackupCycleForOrgData {
+  backupCycle_update?: BackupCycle_Key | null;
+}
+```
+### Using `UpdateBackupCycleForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, updateBackupCycleForOrg, UpdateBackupCycleForOrgVariables } from '@dataconnect/generated';
+
+// The `UpdateBackupCycleForOrg` mutation requires an argument of type `UpdateBackupCycleForOrgVariables`:
+const updateBackupCycleForOrgVars: UpdateBackupCycleForOrgVariables = {
+  orgId: ..., 
+  cycleId: ..., 
+  workerLogin: ..., // optional
+  workerName: ..., // optional
+  roomId: ..., // optional
+  strefa: ..., // optional
+  pomieszczenie: ..., // optional
+  startAt: ..., // optional
+  endAt: ..., // optional
+  durationSec: ..., // optional
+  endReason: ..., // optional
+  comment: ..., // optional
+  status: ..., // optional
+  closeMarkedAt: ..., // optional
+  deviceId: ..., // optional
+  startEventId: ..., // optional
+  endEventId: ..., // optional
+};
+
+// Call the `updateBackupCycleForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await updateBackupCycleForOrg(updateBackupCycleForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await updateBackupCycleForOrg({ orgId: ..., cycleId: ..., workerLogin: ..., workerName: ..., roomId: ..., strefa: ..., pomieszczenie: ..., startAt: ..., endAt: ..., durationSec: ..., endReason: ..., comment: ..., status: ..., closeMarkedAt: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await updateBackupCycleForOrg(dataConnect, updateBackupCycleForOrgVars);
+
+console.log(data.backupCycle_update);
+
+// Or, you can use the `Promise` API.
+updateBackupCycleForOrg(updateBackupCycleForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.backupCycle_update);
+});
+```
+
+### Using `UpdateBackupCycleForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, updateBackupCycleForOrgRef, UpdateBackupCycleForOrgVariables } from '@dataconnect/generated';
+
+// The `UpdateBackupCycleForOrg` mutation requires an argument of type `UpdateBackupCycleForOrgVariables`:
+const updateBackupCycleForOrgVars: UpdateBackupCycleForOrgVariables = {
+  orgId: ..., 
+  cycleId: ..., 
+  workerLogin: ..., // optional
+  workerName: ..., // optional
+  roomId: ..., // optional
+  strefa: ..., // optional
+  pomieszczenie: ..., // optional
+  startAt: ..., // optional
+  endAt: ..., // optional
+  durationSec: ..., // optional
+  endReason: ..., // optional
+  comment: ..., // optional
+  status: ..., // optional
+  closeMarkedAt: ..., // optional
+  deviceId: ..., // optional
+  startEventId: ..., // optional
+  endEventId: ..., // optional
+};
+
+// Call the `updateBackupCycleForOrgRef()` function to get a reference to the mutation.
+const ref = updateBackupCycleForOrgRef(updateBackupCycleForOrgVars);
+// Variables can be defined inline as well.
+const ref = updateBackupCycleForOrgRef({ orgId: ..., cycleId: ..., workerLogin: ..., workerName: ..., roomId: ..., strefa: ..., pomieszczenie: ..., startAt: ..., endAt: ..., durationSec: ..., endReason: ..., comment: ..., status: ..., closeMarkedAt: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = updateBackupCycleForOrgRef(dataConnect, updateBackupCycleForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.backupCycle_update);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.backupCycle_update);
+});
+```
+
+## InsertStorageForOrg
+You can execute the `InsertStorageForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+insertStorageForOrg(vars: InsertStorageForOrgVariables): MutationPromise<InsertStorageForOrgData, InsertStorageForOrgVariables>;
+
+interface InsertStorageForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: InsertStorageForOrgVariables): MutationRef<InsertStorageForOrgData, InsertStorageForOrgVariables>;
+}
+export const insertStorageForOrgRef: InsertStorageForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+insertStorageForOrg(dc: DataConnect, vars: InsertStorageForOrgVariables): MutationPromise<InsertStorageForOrgData, InsertStorageForOrgVariables>;
+
+interface InsertStorageForOrgRef {
+  ...
+  (dc: DataConnect, vars: InsertStorageForOrgVariables): MutationRef<InsertStorageForOrgData, InsertStorageForOrgVariables>;
+}
+export const insertStorageForOrgRef: InsertStorageForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the insertStorageForOrgRef:
+```typescript
+const name = insertStorageForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `InsertStorageForOrg` mutation requires an argument of type `InsertStorageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface InsertStorageForOrgVariables {
+  orgId: string;
+  productIndex: string;
+  productId: string;
+  name: string;
+  productType: string;
+  quantity?: number | null;
+  quantityMin?: number | null;
+  quantityMax?: number | null;
+  description?: string | null;
+  qrCode?: string | null;
+}
+```
+### Return Type
+Recall that executing the `InsertStorageForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `InsertStorageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface InsertStorageForOrgData {
+  storage_insert: Storage_Key;
+}
+```
+### Using `InsertStorageForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, insertStorageForOrg, InsertStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `InsertStorageForOrg` mutation requires an argument of type `InsertStorageForOrgVariables`:
+const insertStorageForOrgVars: InsertStorageForOrgVariables = {
+  orgId: ..., 
+  productIndex: ..., 
+  productId: ..., 
+  name: ..., 
+  productType: ..., 
+  quantity: ..., // optional
+  quantityMin: ..., // optional
+  quantityMax: ..., // optional
+  description: ..., // optional
+  qrCode: ..., // optional
+};
+
+// Call the `insertStorageForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await insertStorageForOrg(insertStorageForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await insertStorageForOrg({ orgId: ..., productIndex: ..., productId: ..., name: ..., productType: ..., quantity: ..., quantityMin: ..., quantityMax: ..., description: ..., qrCode: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await insertStorageForOrg(dataConnect, insertStorageForOrgVars);
+
+console.log(data.storage_insert);
+
+// Or, you can use the `Promise` API.
+insertStorageForOrg(insertStorageForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.storage_insert);
+});
+```
+
+### Using `InsertStorageForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, insertStorageForOrgRef, InsertStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `InsertStorageForOrg` mutation requires an argument of type `InsertStorageForOrgVariables`:
+const insertStorageForOrgVars: InsertStorageForOrgVariables = {
+  orgId: ..., 
+  productIndex: ..., 
+  productId: ..., 
+  name: ..., 
+  productType: ..., 
+  quantity: ..., // optional
+  quantityMin: ..., // optional
+  quantityMax: ..., // optional
+  description: ..., // optional
+  qrCode: ..., // optional
+};
+
+// Call the `insertStorageForOrgRef()` function to get a reference to the mutation.
+const ref = insertStorageForOrgRef(insertStorageForOrgVars);
+// Variables can be defined inline as well.
+const ref = insertStorageForOrgRef({ orgId: ..., productIndex: ..., productId: ..., name: ..., productType: ..., quantity: ..., quantityMin: ..., quantityMax: ..., description: ..., qrCode: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = insertStorageForOrgRef(dataConnect, insertStorageForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.storage_insert);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.storage_insert);
+});
+```
+
+## UpdateStorageForOrg
+You can execute the `UpdateStorageForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+updateStorageForOrg(vars: UpdateStorageForOrgVariables): MutationPromise<UpdateStorageForOrgData, UpdateStorageForOrgVariables>;
+
+interface UpdateStorageForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateStorageForOrgVariables): MutationRef<UpdateStorageForOrgData, UpdateStorageForOrgVariables>;
+}
+export const updateStorageForOrgRef: UpdateStorageForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+updateStorageForOrg(dc: DataConnect, vars: UpdateStorageForOrgVariables): MutationPromise<UpdateStorageForOrgData, UpdateStorageForOrgVariables>;
+
+interface UpdateStorageForOrgRef {
+  ...
+  (dc: DataConnect, vars: UpdateStorageForOrgVariables): MutationRef<UpdateStorageForOrgData, UpdateStorageForOrgVariables>;
+}
+export const updateStorageForOrgRef: UpdateStorageForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the updateStorageForOrgRef:
+```typescript
+const name = updateStorageForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `UpdateStorageForOrg` mutation requires an argument of type `UpdateStorageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface UpdateStorageForOrgVariables {
+  orgId: string;
+  productIndex: string;
+  productId?: string | null;
+  name?: string | null;
+  productType?: string | null;
+  quantity?: number | null;
+  quantityMin?: number | null;
+  quantityMax?: number | null;
+  description?: string | null;
+  qrCode?: string | null;
+}
+```
+### Return Type
+Recall that executing the `UpdateStorageForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `UpdateStorageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface UpdateStorageForOrgData {
+  storage_update?: Storage_Key | null;
+}
+```
+### Using `UpdateStorageForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, updateStorageForOrg, UpdateStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `UpdateStorageForOrg` mutation requires an argument of type `UpdateStorageForOrgVariables`:
+const updateStorageForOrgVars: UpdateStorageForOrgVariables = {
+  orgId: ..., 
+  productIndex: ..., 
+  productId: ..., // optional
+  name: ..., // optional
+  productType: ..., // optional
+  quantity: ..., // optional
+  quantityMin: ..., // optional
+  quantityMax: ..., // optional
+  description: ..., // optional
+  qrCode: ..., // optional
+};
+
+// Call the `updateStorageForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await updateStorageForOrg(updateStorageForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await updateStorageForOrg({ orgId: ..., productIndex: ..., productId: ..., name: ..., productType: ..., quantity: ..., quantityMin: ..., quantityMax: ..., description: ..., qrCode: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await updateStorageForOrg(dataConnect, updateStorageForOrgVars);
+
+console.log(data.storage_update);
+
+// Or, you can use the `Promise` API.
+updateStorageForOrg(updateStorageForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.storage_update);
+});
+```
+
+### Using `UpdateStorageForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, updateStorageForOrgRef, UpdateStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `UpdateStorageForOrg` mutation requires an argument of type `UpdateStorageForOrgVariables`:
+const updateStorageForOrgVars: UpdateStorageForOrgVariables = {
+  orgId: ..., 
+  productIndex: ..., 
+  productId: ..., // optional
+  name: ..., // optional
+  productType: ..., // optional
+  quantity: ..., // optional
+  quantityMin: ..., // optional
+  quantityMax: ..., // optional
+  description: ..., // optional
+  qrCode: ..., // optional
+};
+
+// Call the `updateStorageForOrgRef()` function to get a reference to the mutation.
+const ref = updateStorageForOrgRef(updateStorageForOrgVars);
+// Variables can be defined inline as well.
+const ref = updateStorageForOrgRef({ orgId: ..., productIndex: ..., productId: ..., name: ..., productType: ..., quantity: ..., quantityMin: ..., quantityMax: ..., description: ..., qrCode: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = updateStorageForOrgRef(dataConnect, updateStorageForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.storage_update);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.storage_update);
+});
+```
+
+## DeleteStorageForOrg
+You can execute the `DeleteStorageForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+deleteStorageForOrg(vars: DeleteStorageForOrgVariables): MutationPromise<DeleteStorageForOrgData, DeleteStorageForOrgVariables>;
+
+interface DeleteStorageForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteStorageForOrgVariables): MutationRef<DeleteStorageForOrgData, DeleteStorageForOrgVariables>;
+}
+export const deleteStorageForOrgRef: DeleteStorageForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+deleteStorageForOrg(dc: DataConnect, vars: DeleteStorageForOrgVariables): MutationPromise<DeleteStorageForOrgData, DeleteStorageForOrgVariables>;
+
+interface DeleteStorageForOrgRef {
+  ...
+  (dc: DataConnect, vars: DeleteStorageForOrgVariables): MutationRef<DeleteStorageForOrgData, DeleteStorageForOrgVariables>;
+}
+export const deleteStorageForOrgRef: DeleteStorageForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the deleteStorageForOrgRef:
+```typescript
+const name = deleteStorageForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `DeleteStorageForOrg` mutation requires an argument of type `DeleteStorageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface DeleteStorageForOrgVariables {
+  orgId: string;
+  productIndex: string;
+}
+```
+### Return Type
+Recall that executing the `DeleteStorageForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `DeleteStorageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface DeleteStorageForOrgData {
+  storage_delete?: Storage_Key | null;
+}
+```
+### Using `DeleteStorageForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, deleteStorageForOrg, DeleteStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `DeleteStorageForOrg` mutation requires an argument of type `DeleteStorageForOrgVariables`:
+const deleteStorageForOrgVars: DeleteStorageForOrgVariables = {
+  orgId: ..., 
+  productIndex: ..., 
+};
+
+// Call the `deleteStorageForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await deleteStorageForOrg(deleteStorageForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await deleteStorageForOrg({ orgId: ..., productIndex: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await deleteStorageForOrg(dataConnect, deleteStorageForOrgVars);
+
+console.log(data.storage_delete);
+
+// Or, you can use the `Promise` API.
+deleteStorageForOrg(deleteStorageForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.storage_delete);
+});
+```
+
+### Using `DeleteStorageForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, deleteStorageForOrgRef, DeleteStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `DeleteStorageForOrg` mutation requires an argument of type `DeleteStorageForOrgVariables`:
+const deleteStorageForOrgVars: DeleteStorageForOrgVariables = {
+  orgId: ..., 
+  productIndex: ..., 
+};
+
+// Call the `deleteStorageForOrgRef()` function to get a reference to the mutation.
+const ref = deleteStorageForOrgRef(deleteStorageForOrgVars);
+// Variables can be defined inline as well.
+const ref = deleteStorageForOrgRef({ orgId: ..., productIndex: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = deleteStorageForOrgRef(dataConnect, deleteStorageForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.storage_delete);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.storage_delete);
+});
+```
+
+## InsertClientStorageForOrg
+You can execute the `InsertClientStorageForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+insertClientStorageForOrg(vars: InsertClientStorageForOrgVariables): MutationPromise<InsertClientStorageForOrgData, InsertClientStorageForOrgVariables>;
+
+interface InsertClientStorageForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: InsertClientStorageForOrgVariables): MutationRef<InsertClientStorageForOrgData, InsertClientStorageForOrgVariables>;
+}
+export const insertClientStorageForOrgRef: InsertClientStorageForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+insertClientStorageForOrg(dc: DataConnect, vars: InsertClientStorageForOrgVariables): MutationPromise<InsertClientStorageForOrgData, InsertClientStorageForOrgVariables>;
+
+interface InsertClientStorageForOrgRef {
+  ...
+  (dc: DataConnect, vars: InsertClientStorageForOrgVariables): MutationRef<InsertClientStorageForOrgData, InsertClientStorageForOrgVariables>;
+}
+export const insertClientStorageForOrgRef: InsertClientStorageForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the insertClientStorageForOrgRef:
+```typescript
+const name = insertClientStorageForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `InsertClientStorageForOrg` mutation requires an argument of type `InsertClientStorageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface InsertClientStorageForOrgVariables {
+  orgId: string;
+  clientId: string;
+  productIndex: string;
+  name: string;
+  productType: string;
+  quantity?: number | null;
+  quantityMin?: number | null;
+  quantityMax?: number | null;
+  qrCode?: string | null;
+}
+```
+### Return Type
+Recall that executing the `InsertClientStorageForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `InsertClientStorageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface InsertClientStorageForOrgData {
+  clientStorage_insert: ClientStorage_Key;
+}
+```
+### Using `InsertClientStorageForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, insertClientStorageForOrg, InsertClientStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `InsertClientStorageForOrg` mutation requires an argument of type `InsertClientStorageForOrgVariables`:
+const insertClientStorageForOrgVars: InsertClientStorageForOrgVariables = {
+  orgId: ..., 
+  clientId: ..., 
+  productIndex: ..., 
+  name: ..., 
+  productType: ..., 
+  quantity: ..., // optional
+  quantityMin: ..., // optional
+  quantityMax: ..., // optional
+  qrCode: ..., // optional
+};
+
+// Call the `insertClientStorageForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await insertClientStorageForOrg(insertClientStorageForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await insertClientStorageForOrg({ orgId: ..., clientId: ..., productIndex: ..., name: ..., productType: ..., quantity: ..., quantityMin: ..., quantityMax: ..., qrCode: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await insertClientStorageForOrg(dataConnect, insertClientStorageForOrgVars);
+
+console.log(data.clientStorage_insert);
+
+// Or, you can use the `Promise` API.
+insertClientStorageForOrg(insertClientStorageForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.clientStorage_insert);
+});
+```
+
+### Using `InsertClientStorageForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, insertClientStorageForOrgRef, InsertClientStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `InsertClientStorageForOrg` mutation requires an argument of type `InsertClientStorageForOrgVariables`:
+const insertClientStorageForOrgVars: InsertClientStorageForOrgVariables = {
+  orgId: ..., 
+  clientId: ..., 
+  productIndex: ..., 
+  name: ..., 
+  productType: ..., 
+  quantity: ..., // optional
+  quantityMin: ..., // optional
+  quantityMax: ..., // optional
+  qrCode: ..., // optional
+};
+
+// Call the `insertClientStorageForOrgRef()` function to get a reference to the mutation.
+const ref = insertClientStorageForOrgRef(insertClientStorageForOrgVars);
+// Variables can be defined inline as well.
+const ref = insertClientStorageForOrgRef({ orgId: ..., clientId: ..., productIndex: ..., name: ..., productType: ..., quantity: ..., quantityMin: ..., quantityMax: ..., qrCode: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = insertClientStorageForOrgRef(dataConnect, insertClientStorageForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.clientStorage_insert);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.clientStorage_insert);
+});
+```
+
+## UpdateClientStorageForOrg
+You can execute the `UpdateClientStorageForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+updateClientStorageForOrg(vars: UpdateClientStorageForOrgVariables): MutationPromise<UpdateClientStorageForOrgData, UpdateClientStorageForOrgVariables>;
+
+interface UpdateClientStorageForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateClientStorageForOrgVariables): MutationRef<UpdateClientStorageForOrgData, UpdateClientStorageForOrgVariables>;
+}
+export const updateClientStorageForOrgRef: UpdateClientStorageForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+updateClientStorageForOrg(dc: DataConnect, vars: UpdateClientStorageForOrgVariables): MutationPromise<UpdateClientStorageForOrgData, UpdateClientStorageForOrgVariables>;
+
+interface UpdateClientStorageForOrgRef {
+  ...
+  (dc: DataConnect, vars: UpdateClientStorageForOrgVariables): MutationRef<UpdateClientStorageForOrgData, UpdateClientStorageForOrgVariables>;
+}
+export const updateClientStorageForOrgRef: UpdateClientStorageForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the updateClientStorageForOrgRef:
+```typescript
+const name = updateClientStorageForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `UpdateClientStorageForOrg` mutation requires an argument of type `UpdateClientStorageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface UpdateClientStorageForOrgVariables {
+  orgId: string;
+  clientId: string;
+  productIndex: string;
+  name?: string | null;
+  productType?: string | null;
+  quantity?: number | null;
+  quantityMin?: number | null;
+  quantityMax?: number | null;
+  qrCode?: string | null;
+}
+```
+### Return Type
+Recall that executing the `UpdateClientStorageForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `UpdateClientStorageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface UpdateClientStorageForOrgData {
+  clientStorage_update?: ClientStorage_Key | null;
+}
+```
+### Using `UpdateClientStorageForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, updateClientStorageForOrg, UpdateClientStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `UpdateClientStorageForOrg` mutation requires an argument of type `UpdateClientStorageForOrgVariables`:
+const updateClientStorageForOrgVars: UpdateClientStorageForOrgVariables = {
+  orgId: ..., 
+  clientId: ..., 
+  productIndex: ..., 
+  name: ..., // optional
+  productType: ..., // optional
+  quantity: ..., // optional
+  quantityMin: ..., // optional
+  quantityMax: ..., // optional
+  qrCode: ..., // optional
+};
+
+// Call the `updateClientStorageForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await updateClientStorageForOrg(updateClientStorageForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await updateClientStorageForOrg({ orgId: ..., clientId: ..., productIndex: ..., name: ..., productType: ..., quantity: ..., quantityMin: ..., quantityMax: ..., qrCode: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await updateClientStorageForOrg(dataConnect, updateClientStorageForOrgVars);
+
+console.log(data.clientStorage_update);
+
+// Or, you can use the `Promise` API.
+updateClientStorageForOrg(updateClientStorageForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.clientStorage_update);
+});
+```
+
+### Using `UpdateClientStorageForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, updateClientStorageForOrgRef, UpdateClientStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `UpdateClientStorageForOrg` mutation requires an argument of type `UpdateClientStorageForOrgVariables`:
+const updateClientStorageForOrgVars: UpdateClientStorageForOrgVariables = {
+  orgId: ..., 
+  clientId: ..., 
+  productIndex: ..., 
+  name: ..., // optional
+  productType: ..., // optional
+  quantity: ..., // optional
+  quantityMin: ..., // optional
+  quantityMax: ..., // optional
+  qrCode: ..., // optional
+};
+
+// Call the `updateClientStorageForOrgRef()` function to get a reference to the mutation.
+const ref = updateClientStorageForOrgRef(updateClientStorageForOrgVars);
+// Variables can be defined inline as well.
+const ref = updateClientStorageForOrgRef({ orgId: ..., clientId: ..., productIndex: ..., name: ..., productType: ..., quantity: ..., quantityMin: ..., quantityMax: ..., qrCode: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = updateClientStorageForOrgRef(dataConnect, updateClientStorageForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.clientStorage_update);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.clientStorage_update);
+});
+```
+
+## DeleteClientStorageForOrg
+You can execute the `DeleteClientStorageForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+deleteClientStorageForOrg(vars: DeleteClientStorageForOrgVariables): MutationPromise<DeleteClientStorageForOrgData, DeleteClientStorageForOrgVariables>;
+
+interface DeleteClientStorageForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteClientStorageForOrgVariables): MutationRef<DeleteClientStorageForOrgData, DeleteClientStorageForOrgVariables>;
+}
+export const deleteClientStorageForOrgRef: DeleteClientStorageForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+deleteClientStorageForOrg(dc: DataConnect, vars: DeleteClientStorageForOrgVariables): MutationPromise<DeleteClientStorageForOrgData, DeleteClientStorageForOrgVariables>;
+
+interface DeleteClientStorageForOrgRef {
+  ...
+  (dc: DataConnect, vars: DeleteClientStorageForOrgVariables): MutationRef<DeleteClientStorageForOrgData, DeleteClientStorageForOrgVariables>;
+}
+export const deleteClientStorageForOrgRef: DeleteClientStorageForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the deleteClientStorageForOrgRef:
+```typescript
+const name = deleteClientStorageForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `DeleteClientStorageForOrg` mutation requires an argument of type `DeleteClientStorageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface DeleteClientStorageForOrgVariables {
+  orgId: string;
+  clientId: string;
+  productIndex: string;
+}
+```
+### Return Type
+Recall that executing the `DeleteClientStorageForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `DeleteClientStorageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface DeleteClientStorageForOrgData {
+  clientStorage_delete?: ClientStorage_Key | null;
+}
+```
+### Using `DeleteClientStorageForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, deleteClientStorageForOrg, DeleteClientStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `DeleteClientStorageForOrg` mutation requires an argument of type `DeleteClientStorageForOrgVariables`:
+const deleteClientStorageForOrgVars: DeleteClientStorageForOrgVariables = {
+  orgId: ..., 
+  clientId: ..., 
+  productIndex: ..., 
+};
+
+// Call the `deleteClientStorageForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await deleteClientStorageForOrg(deleteClientStorageForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await deleteClientStorageForOrg({ orgId: ..., clientId: ..., productIndex: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await deleteClientStorageForOrg(dataConnect, deleteClientStorageForOrgVars);
+
+console.log(data.clientStorage_delete);
+
+// Or, you can use the `Promise` API.
+deleteClientStorageForOrg(deleteClientStorageForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.clientStorage_delete);
+});
+```
+
+### Using `DeleteClientStorageForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, deleteClientStorageForOrgRef, DeleteClientStorageForOrgVariables } from '@dataconnect/generated';
+
+// The `DeleteClientStorageForOrg` mutation requires an argument of type `DeleteClientStorageForOrgVariables`:
+const deleteClientStorageForOrgVars: DeleteClientStorageForOrgVariables = {
+  orgId: ..., 
+  clientId: ..., 
+  productIndex: ..., 
+};
+
+// Call the `deleteClientStorageForOrgRef()` function to get a reference to the mutation.
+const ref = deleteClientStorageForOrgRef(deleteClientStorageForOrgVars);
+// Variables can be defined inline as well.
+const ref = deleteClientStorageForOrgRef({ orgId: ..., clientId: ..., productIndex: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = deleteClientStorageForOrgRef(dataConnect, deleteClientStorageForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.clientStorage_delete);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.clientStorage_delete);
+});
+```
+
+## StartWorkdayPause
+You can execute the `StartWorkdayPause` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+startWorkdayPause(vars: StartWorkdayPauseVariables): MutationPromise<StartWorkdayPauseData, StartWorkdayPauseVariables>;
+
+interface StartWorkdayPauseRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: StartWorkdayPauseVariables): MutationRef<StartWorkdayPauseData, StartWorkdayPauseVariables>;
+}
+export const startWorkdayPauseRef: StartWorkdayPauseRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+startWorkdayPause(dc: DataConnect, vars: StartWorkdayPauseVariables): MutationPromise<StartWorkdayPauseData, StartWorkdayPauseVariables>;
+
+interface StartWorkdayPauseRef {
+  ...
+  (dc: DataConnect, vars: StartWorkdayPauseVariables): MutationRef<StartWorkdayPauseData, StartWorkdayPauseVariables>;
+}
+export const startWorkdayPauseRef: StartWorkdayPauseRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the startWorkdayPauseRef:
+```typescript
+const name = startWorkdayPauseRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `StartWorkdayPause` mutation requires an argument of type `StartWorkdayPauseVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface StartWorkdayPauseVariables {
+  orgId: string;
+  pauseId: string;
+  workdayId: string;
+  workerLogin: string;
+  workerName?: string | null;
+  startAt?: TimestampString | null;
+  stopAt?: TimestampString | null;
+  durationSec?: number | null;
+  status?: string | null;
+  pauseEventId?: string | null;
+  deviceId?: string | null;
+}
+```
+### Return Type
+Recall that executing the `StartWorkdayPause` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `StartWorkdayPauseData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface StartWorkdayPauseData {
+  workdayPause_insert: WorkdayPause_Key;
+  workday_update?: Workday_Key | null;
+}
+```
+### Using `StartWorkdayPause`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, startWorkdayPause, StartWorkdayPauseVariables } from '@dataconnect/generated';
+
+// The `StartWorkdayPause` mutation requires an argument of type `StartWorkdayPauseVariables`:
+const startWorkdayPauseVars: StartWorkdayPauseVariables = {
+  orgId: ..., 
+  pauseId: ..., 
+  workdayId: ..., 
+  workerLogin: ..., 
+  workerName: ..., // optional
+  startAt: ..., // optional
+  stopAt: ..., // optional
+  durationSec: ..., // optional
+  status: ..., // optional
+  pauseEventId: ..., // optional
+  deviceId: ..., // optional
+};
+
+// Call the `startWorkdayPause()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await startWorkdayPause(startWorkdayPauseVars);
+// Variables can be defined inline as well.
+const { data } = await startWorkdayPause({ orgId: ..., pauseId: ..., workdayId: ..., workerLogin: ..., workerName: ..., startAt: ..., stopAt: ..., durationSec: ..., status: ..., pauseEventId: ..., deviceId: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await startWorkdayPause(dataConnect, startWorkdayPauseVars);
+
+console.log(data.workdayPause_insert);
+console.log(data.workday_update);
+
+// Or, you can use the `Promise` API.
+startWorkdayPause(startWorkdayPauseVars).then((response) => {
+  const data = response.data;
+  console.log(data.workdayPause_insert);
+  console.log(data.workday_update);
+});
+```
+
+### Using `StartWorkdayPause`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, startWorkdayPauseRef, StartWorkdayPauseVariables } from '@dataconnect/generated';
+
+// The `StartWorkdayPause` mutation requires an argument of type `StartWorkdayPauseVariables`:
+const startWorkdayPauseVars: StartWorkdayPauseVariables = {
+  orgId: ..., 
+  pauseId: ..., 
+  workdayId: ..., 
+  workerLogin: ..., 
+  workerName: ..., // optional
+  startAt: ..., // optional
+  stopAt: ..., // optional
+  durationSec: ..., // optional
+  status: ..., // optional
+  pauseEventId: ..., // optional
+  deviceId: ..., // optional
+};
+
+// Call the `startWorkdayPauseRef()` function to get a reference to the mutation.
+const ref = startWorkdayPauseRef(startWorkdayPauseVars);
+// Variables can be defined inline as well.
+const ref = startWorkdayPauseRef({ orgId: ..., pauseId: ..., workdayId: ..., workerLogin: ..., workerName: ..., startAt: ..., stopAt: ..., durationSec: ..., status: ..., pauseEventId: ..., deviceId: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = startWorkdayPauseRef(dataConnect, startWorkdayPauseVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.workdayPause_insert);
+console.log(data.workday_update);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.workdayPause_insert);
+  console.log(data.workday_update);
+});
+```
+
+## StopWorkdayPause
+You can execute the `StopWorkdayPause` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+stopWorkdayPause(vars: StopWorkdayPauseVariables): MutationPromise<StopWorkdayPauseData, StopWorkdayPauseVariables>;
+
+interface StopWorkdayPauseRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: StopWorkdayPauseVariables): MutationRef<StopWorkdayPauseData, StopWorkdayPauseVariables>;
+}
+export const stopWorkdayPauseRef: StopWorkdayPauseRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+stopWorkdayPause(dc: DataConnect, vars: StopWorkdayPauseVariables): MutationPromise<StopWorkdayPauseData, StopWorkdayPauseVariables>;
+
+interface StopWorkdayPauseRef {
+  ...
+  (dc: DataConnect, vars: StopWorkdayPauseVariables): MutationRef<StopWorkdayPauseData, StopWorkdayPauseVariables>;
+}
+export const stopWorkdayPauseRef: StopWorkdayPauseRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the stopWorkdayPauseRef:
+```typescript
+const name = stopWorkdayPauseRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `StopWorkdayPause` mutation requires an argument of type `StopWorkdayPauseVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface StopWorkdayPauseVariables {
+  orgId: string;
+  pauseId: string;
+  workdayId: string;
+  stopAt?: TimestampString | null;
+  durationSec?: number | null;
+  status?: string | null;
+}
+```
+### Return Type
+Recall that executing the `StopWorkdayPause` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `StopWorkdayPauseData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface StopWorkdayPauseData {
+  workdayPause_update?: WorkdayPause_Key | null;
+  workday_update?: Workday_Key | null;
+}
+```
+### Using `StopWorkdayPause`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, stopWorkdayPause, StopWorkdayPauseVariables } from '@dataconnect/generated';
+
+// The `StopWorkdayPause` mutation requires an argument of type `StopWorkdayPauseVariables`:
+const stopWorkdayPauseVars: StopWorkdayPauseVariables = {
+  orgId: ..., 
+  pauseId: ..., 
+  workdayId: ..., 
+  stopAt: ..., // optional
+  durationSec: ..., // optional
+  status: ..., // optional
+};
+
+// Call the `stopWorkdayPause()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await stopWorkdayPause(stopWorkdayPauseVars);
+// Variables can be defined inline as well.
+const { data } = await stopWorkdayPause({ orgId: ..., pauseId: ..., workdayId: ..., stopAt: ..., durationSec: ..., status: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await stopWorkdayPause(dataConnect, stopWorkdayPauseVars);
+
+console.log(data.workdayPause_update);
+console.log(data.workday_update);
+
+// Or, you can use the `Promise` API.
+stopWorkdayPause(stopWorkdayPauseVars).then((response) => {
+  const data = response.data;
+  console.log(data.workdayPause_update);
+  console.log(data.workday_update);
+});
+```
+
+### Using `StopWorkdayPause`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, stopWorkdayPauseRef, StopWorkdayPauseVariables } from '@dataconnect/generated';
+
+// The `StopWorkdayPause` mutation requires an argument of type `StopWorkdayPauseVariables`:
+const stopWorkdayPauseVars: StopWorkdayPauseVariables = {
+  orgId: ..., 
+  pauseId: ..., 
+  workdayId: ..., 
+  stopAt: ..., // optional
+  durationSec: ..., // optional
+  status: ..., // optional
+};
+
+// Call the `stopWorkdayPauseRef()` function to get a reference to the mutation.
+const ref = stopWorkdayPauseRef(stopWorkdayPauseVars);
+// Variables can be defined inline as well.
+const ref = stopWorkdayPauseRef({ orgId: ..., pauseId: ..., workdayId: ..., stopAt: ..., durationSec: ..., status: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = stopWorkdayPauseRef(dataConnect, stopWorkdayPauseVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.workdayPause_update);
+console.log(data.workday_update);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.workdayPause_update);
+  console.log(data.workday_update);
 });
 ```
 
