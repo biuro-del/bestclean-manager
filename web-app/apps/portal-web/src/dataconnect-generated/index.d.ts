@@ -10,6 +10,28 @@ export type DateString = string;
 
 
 
+export interface ActiveWorkdayPauseForWorkerData {
+  workdayPauses: ({
+    pauseId: string;
+    workdayId: string;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    deviceId?: string | null;
+    pauseEventId?: string | null;
+    startAt?: TimestampString | null;
+    stopAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+
+export interface ActiveWorkdayPauseForWorkerVariables {
+  orgId: string;
+  workerLogin: string;
+}
+
 export interface BackupCycle_Key {
   orgId: string;
   cycleId: string;
@@ -64,6 +86,64 @@ export interface ClientInd_Key {
   __typename?: 'ClientInd_Key';
 }
 
+export interface ClientStorageForClientData {
+  clientStorages: ({
+    orgId: string;
+    clientId: string;
+    productIndex: string;
+    name: string;
+    productType: string;
+    quantity: number;
+    quantityMin: number;
+    quantityMax?: number | null;
+    qrCode?: string | null;
+    storage: {
+      productId: string;
+      quantity: number;
+      quantityMin: number;
+      quantityMax?: number | null;
+    };
+      client: {
+        name?: string | null;
+        status?: string | null;
+      };
+  } & ClientStorage_Key)[];
+}
+
+export interface ClientStorageForClientVariables {
+  orgId: string;
+  clientId: string;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ClientStorageForOrgData {
+  clientStorages: ({
+    orgId: string;
+    clientId: string;
+    productIndex: string;
+    name: string;
+    productType: string;
+    quantity: number;
+    quantityMin: number;
+    quantityMax?: number | null;
+    qrCode?: string | null;
+  } & ClientStorage_Key)[];
+}
+
+export interface ClientStorageForOrgVariables {
+  orgId: string;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ClientStorage_Key {
+  orgId: string;
+  clientId: string;
+  productIndex: string;
+  __typename?: 'ClientStorage_Key';
+}
+
 export interface Client_Key {
   orgId: string;
   clientId: string;
@@ -101,8 +181,18 @@ export interface DeleteClientForOrgVariables {
   clientId: string;
 }
 
+export interface DeleteClientStorageForOrgData {
+  clientStorage_delete?: ClientStorage_Key | null;
+}
+
+export interface DeleteClientStorageForOrgVariables {
+  orgId: string;
+  clientId: string;
+  productIndex: string;
+}
+
 export interface DeleteEventForOrgData {
-  event_delete?: BackupCycle_Key | null;
+  event_delete?: Event_Key | null;
 }
 
 export interface DeleteEventForOrgVariables {
@@ -117,6 +207,40 @@ export interface DeleteIndividualJobForOrgData {
 export interface DeleteIndividualJobForOrgVariables {
   orgId: string;
   clientIndId: string;
+}
+
+export interface DeleteMyUiStylePreferenceData {
+  userUiStylePreference_delete?: UserUiStylePreference_Key | null;
+}
+
+export interface DeleteMyUiStylePreferenceVariables {
+  orgId: string;
+}
+
+export interface DeleteOrgUiStyleForOrgData {
+  orgUiStyle_delete?: OrgUiStyle_Key | null;
+}
+
+export interface DeleteOrgUiStyleForOrgVariables {
+  orgId: string;
+}
+
+export interface DeleteStorageForOrgData {
+  storage_delete?: Storage_Key | null;
+}
+
+export interface DeleteStorageForOrgVariables {
+  orgId: string;
+  productIndex: string;
+}
+
+export interface DeleteUserUiStylePreferenceForOrgData {
+  userUiStylePreference_delete?: UserUiStylePreference_Key | null;
+}
+
+export interface DeleteUserUiStylePreferenceForOrgVariables {
+  orgId: string;
+  uid: string;
 }
 
 export interface DeleteWorkdayForOrgData {
@@ -137,9 +261,16 @@ export interface DeleteZoneForOrgVariables {
   zoneId: string;
 }
 
+export interface Event_Key {
+  orgId: string;
+  eventId: string;
+  __typename?: 'Event_Key';
+}
+
 export interface EventsForOrgData {
   events: ({
     eventId: string;
+    workdayId?: string | null;
     zoneId?: string | null;
     workerLogin?: string | null;
     workerName?: string | null;
@@ -153,8 +284,18 @@ export interface EventsForOrgData {
     deviceId?: string | null;
     startEventId?: string | null;
     endEventId?: string | null;
-    updatedAt?: TimestampString | null;
     createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
   })[];
 }
 
@@ -186,6 +327,30 @@ export interface IndividualJobsForOrgVariables {
   orgId: string;
 }
 
+export interface InsertBackupCycleForOrgData {
+  backupCycle_insert: BackupCycle_Key;
+}
+
+export interface InsertBackupCycleForOrgVariables {
+  orgId: string;
+  cycleId: string;
+  workerLogin?: string | null;
+  workerName?: string | null;
+  roomId?: string | null;
+  strefa?: string | null;
+  pomieszczenie?: string | null;
+  startAt?: TimestampString | null;
+  endAt?: TimestampString | null;
+  durationSec?: number | null;
+  endReason?: string | null;
+  comment?: string | null;
+  status?: string | null;
+  closeMarkedAt?: TimestampString | null;
+  deviceId?: string | null;
+  startEventId?: string | null;
+  endEventId?: string | null;
+}
+
 export interface InsertClientForOrgData {
   client_insert: Client_Key;
 }
@@ -207,15 +372,33 @@ export interface InsertClientForOrgVariables {
   clientInfo?: string | null;
 }
 
+export interface InsertClientStorageForOrgData {
+  clientStorage_insert: ClientStorage_Key;
+}
+
+export interface InsertClientStorageForOrgVariables {
+  orgId: string;
+  clientId: string;
+  productIndex: string;
+  name: string;
+  productType: string;
+  quantity?: number | null;
+  quantityMin?: number | null;
+  quantityMax?: number | null;
+  qrCode?: string | null;
+}
+
 export interface InsertEventForOrgData {
-  event_insert: BackupCycle_Key;
+  event_insert: Event_Key;
 }
 
 export interface InsertEventForOrgVariables {
   orgId: string;
   eventId: string;
+  workdayId?: string | null;
   zoneId?: string | null;
   workerLogin?: string | null;
+  workerName?: string | null;
   startAt?: TimestampString | null;
   endAt?: TimestampString | null;
   durationSec?: number | null;
@@ -245,6 +428,23 @@ export interface InsertIndividualJobForOrgVariables {
   qrCode?: string | null;
 }
 
+export interface InsertStorageForOrgData {
+  storage_insert: Storage_Key;
+}
+
+export interface InsertStorageForOrgVariables {
+  orgId: string;
+  productIndex: string;
+  productId: string;
+  name: string;
+  productType: string;
+  quantity?: number | null;
+  quantityMin?: number | null;
+  quantityMax?: number | null;
+  description?: string | null;
+  qrCode?: string | null;
+}
+
 export interface InsertWorkdayForOrgData {
   workday_insert: Workday_Key;
 }
@@ -259,6 +459,7 @@ export interface InsertWorkdayForOrgVariables {
   endAt?: TimestampString | null;
   durationSec?: number | null;
   status?: string | null;
+  gps?: string | null;
   comment?: string | null;
   updatedBy?: string | null;
 }
@@ -270,7 +471,7 @@ export interface InsertWorkerForOrgData {
 export interface InsertWorkerForOrgVariables {
   orgId: string;
   login: string;
-  fullName?: string | null;
+  workerName?: string | null;
   loginEmail?: string | null;
   role?: string | null;
   active?: boolean | null;
@@ -307,6 +508,38 @@ export interface MyOrganizationsData {
   })[];
 }
 
+export interface MyUiStylePreferenceData {
+  userUiStylePreference?: {
+    orgId: string;
+    uid: string;
+    styleId: string;
+    updatedAt: TimestampString;
+    updatedBy?: string | null;
+  } & UserUiStylePreference_Key;
+}
+
+export interface MyUiStylePreferenceVariables {
+  orgId: string;
+}
+
+export interface OrgUiStyleForOrgData {
+  orgUiStyle?: {
+    orgId: string;
+    defaultStyleId: string;
+    updatedAt: TimestampString;
+    updatedBy?: string | null;
+  } & OrgUiStyle_Key;
+}
+
+export interface OrgUiStyleForOrgVariables {
+  orgId: string;
+}
+
+export interface OrgUiStyle_Key {
+  orgId: string;
+  __typename?: 'OrgUiStyle_Key';
+}
+
 export interface OrganizationMember_Key {
   orgId: string;
   uid: string;
@@ -316,6 +549,90 @@ export interface OrganizationMember_Key {
 export interface Organization_Key {
   orgId: string;
   __typename?: 'Organization_Key';
+}
+
+export interface StartWorkdayPauseData {
+  workdayPause_insert: WorkdayPause_Key;
+  workday_update?: Workday_Key | null;
+}
+
+export interface StartWorkdayPauseVariables {
+  orgId: string;
+  pauseId: string;
+  workdayId: string;
+  workerLogin: string;
+  workerName?: string | null;
+  startAt?: TimestampString | null;
+  stopAt?: TimestampString | null;
+  durationSec?: number | null;
+  status?: string | null;
+  pauseEventId?: string | null;
+  deviceId?: string | null;
+}
+
+export interface StopWorkdayPauseData {
+  workdayPause_update?: WorkdayPause_Key | null;
+  workday_update?: Workday_Key | null;
+}
+
+export interface StopWorkdayPauseVariables {
+  orgId: string;
+  pauseId: string;
+  workdayId: string;
+  stopAt?: TimestampString | null;
+  durationSec?: number | null;
+  status?: string | null;
+}
+
+export interface StorageForOrgData {
+  storages: ({
+    orgId: string;
+    productIndex: string;
+    productId: string;
+    name: string;
+    productType: string;
+    quantity: number;
+    quantityMin: number;
+    quantityMax?: number | null;
+    description?: string | null;
+    qrCode?: string | null;
+  } & Storage_Key)[];
+}
+
+export interface StorageForOrgVariables {
+  orgId: string;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface Storage_Key {
+  orgId: string;
+  productIndex: string;
+  __typename?: 'Storage_Key';
+}
+
+export interface UpdateBackupCycleForOrgData {
+  backupCycle_update?: BackupCycle_Key | null;
+}
+
+export interface UpdateBackupCycleForOrgVariables {
+  orgId: string;
+  cycleId: string;
+  workerLogin?: string | null;
+  workerName?: string | null;
+  roomId?: string | null;
+  strefa?: string | null;
+  pomieszczenie?: string | null;
+  startAt?: TimestampString | null;
+  endAt?: TimestampString | null;
+  durationSec?: number | null;
+  endReason?: string | null;
+  comment?: string | null;
+  status?: string | null;
+  closeMarkedAt?: TimestampString | null;
+  deviceId?: string | null;
+  startEventId?: string | null;
+  endEventId?: string | null;
 }
 
 export interface UpdateClientForOrgData {
@@ -339,15 +656,33 @@ export interface UpdateClientForOrgVariables {
   clientInfo?: string | null;
 }
 
+export interface UpdateClientStorageForOrgData {
+  clientStorage_update?: ClientStorage_Key | null;
+}
+
+export interface UpdateClientStorageForOrgVariables {
+  orgId: string;
+  clientId: string;
+  productIndex: string;
+  name?: string | null;
+  productType?: string | null;
+  quantity?: number | null;
+  quantityMin?: number | null;
+  quantityMax?: number | null;
+  qrCode?: string | null;
+}
+
 export interface UpdateEventForOrgData {
-  event_update?: BackupCycle_Key | null;
+  event_update?: Event_Key | null;
 }
 
 export interface UpdateEventForOrgVariables {
   orgId: string;
   eventId: string;
+  workdayId?: string | null;
   zoneId?: string | null;
   workerLogin?: string | null;
+  workerName?: string | null;
   startAt?: TimestampString | null;
   endAt?: TimestampString | null;
   durationSec?: number | null;
@@ -377,6 +712,23 @@ export interface UpdateIndividualJobForOrgVariables {
   qrCode?: string | null;
 }
 
+export interface UpdateStorageForOrgData {
+  storage_update?: Storage_Key | null;
+}
+
+export interface UpdateStorageForOrgVariables {
+  orgId: string;
+  productIndex: string;
+  productId?: string | null;
+  name?: string | null;
+  productType?: string | null;
+  quantity?: number | null;
+  quantityMin?: number | null;
+  quantityMax?: number | null;
+  description?: string | null;
+  qrCode?: string | null;
+}
+
 export interface UpdateWorkdayForOrgData {
   workday_update?: Workday_Key | null;
 }
@@ -391,8 +743,27 @@ export interface UpdateWorkdayForOrgVariables {
   endAt?: TimestampString | null;
   durationSec?: number | null;
   status?: string | null;
+  gps?: string | null;
   comment?: string | null;
   updatedBy?: string | null;
+}
+
+export interface UpdateWorkerForOrgData {
+  worker_update?: Worker_Key | null;
+}
+
+export interface UpdateWorkerForOrgVariables {
+  orgId: string;
+  login: string;
+  workerName?: string | null;
+  loginEmail?: string | null;
+  role?: string | null;
+  active?: boolean | null;
+  email?: string | null;
+  phone?: string | null;
+  workerType?: string | null;
+  workerId?: string | null;
+  edit?: string | null;
 }
 
 export interface UpdateZoneForOrgData {
@@ -410,10 +781,82 @@ export interface UpdateZoneForOrgVariables {
   location?: string | null;
 }
 
+export interface UpsertMyUiStylePreferenceData {
+  userUiStylePreference_upsert: UserUiStylePreference_Key;
+}
+
+export interface UpsertMyUiStylePreferenceVariables {
+  orgId: string;
+  styleId: string;
+  updatedBy?: string | null;
+}
+
+export interface UpsertOrgUiStyleForOrgData {
+  orgUiStyle_upsert: OrgUiStyle_Key;
+}
+
+export interface UpsertOrgUiStyleForOrgVariables {
+  orgId: string;
+  styleId: string;
+  updatedBy?: string | null;
+}
+
+export interface UpsertUserUiStylePreferenceForOrgData {
+  userUiStylePreference_upsert: UserUiStylePreference_Key;
+}
+
+export interface UpsertUserUiStylePreferenceForOrgVariables {
+  orgId: string;
+  uid: string;
+  styleId: string;
+  updatedBy?: string | null;
+}
+
+export interface UserUiStylePreference_Key {
+  orgId: string;
+  uid: string;
+  __typename?: 'UserUiStylePreference_Key';
+}
+
+export interface UserUiStylePreferencesForOrgData {
+  userUiStylePreferences: ({
+    orgId: string;
+    uid: string;
+    styleId: string;
+    updatedAt: TimestampString;
+    updatedBy?: string | null;
+  } & UserUiStylePreference_Key)[];
+}
+
+export interface UserUiStylePreferencesForOrgVariables {
+  orgId: string;
+}
+
 export interface WorkdayPause_Key {
   orgId: string;
   pauseId: string;
   __typename?: 'WorkdayPause_Key';
+}
+
+export interface WorkdayPausesForOrgData {
+  workdayPauses: ({
+    pauseId: string;
+    workdayId: string;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    deviceId?: string | null;
+    pauseEventId?: string | null;
+    startAt?: TimestampString | null;
+    stopAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+
+export interface WorkdayPausesForOrgVariables {
+  orgId: string;
 }
 
 export interface Workday_Key {
@@ -429,9 +872,17 @@ export interface WorkdaysForOrgData {
     workerName?: string | null;
     utilityRoomId?: string | null;
     startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
     endAt?: TimestampString | null;
     durationSec?: number | null;
     status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
     comment?: string | null;
     updatedBy?: string | null;
     updatedAt?: TimestampString | null;
@@ -449,9 +900,17 @@ export interface WorkerWorkdaysForOrgData {
     workerName?: string | null;
     utilityRoomId?: string | null;
     startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
     endAt?: TimestampString | null;
     durationSec?: number | null;
     status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
     comment?: string | null;
     updatedBy?: string | null;
     updatedAt?: TimestampString | null;
@@ -472,11 +931,17 @@ export interface Worker_Key {
 export interface WorkersForOrgData {
   workers: ({
     login: string;
-    fullName?: string | null;
+    workerId?: string | null;
+    workerName?: string | null;
     loginEmail?: string | null;
     role?: string | null;
     active?: boolean | null;
+    email?: string | null;
+    phone?: string | null;
     workerType?: string | null;
+    edit?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
   })[];
 }
 
@@ -517,6 +982,90 @@ export const insertWorkerForOrgRef: InsertWorkerForOrgRef;
 
 export function insertWorkerForOrg(vars: InsertWorkerForOrgVariables): MutationPromise<InsertWorkerForOrgData, InsertWorkerForOrgVariables>;
 export function insertWorkerForOrg(dc: DataConnect, vars: InsertWorkerForOrgVariables): MutationPromise<InsertWorkerForOrgData, InsertWorkerForOrgVariables>;
+
+interface UpdateWorkerForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateWorkerForOrgVariables): MutationRef<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateWorkerForOrgVariables): MutationRef<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
+  operationName: string;
+}
+export const updateWorkerForOrgRef: UpdateWorkerForOrgRef;
+
+export function updateWorkerForOrg(vars: UpdateWorkerForOrgVariables): MutationPromise<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
+export function updateWorkerForOrg(dc: DataConnect, vars: UpdateWorkerForOrgVariables): MutationPromise<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
+
+interface UpsertOrgUiStyleForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpsertOrgUiStyleForOrgVariables): MutationRef<UpsertOrgUiStyleForOrgData, UpsertOrgUiStyleForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpsertOrgUiStyleForOrgVariables): MutationRef<UpsertOrgUiStyleForOrgData, UpsertOrgUiStyleForOrgVariables>;
+  operationName: string;
+}
+export const upsertOrgUiStyleForOrgRef: UpsertOrgUiStyleForOrgRef;
+
+export function upsertOrgUiStyleForOrg(vars: UpsertOrgUiStyleForOrgVariables): MutationPromise<UpsertOrgUiStyleForOrgData, UpsertOrgUiStyleForOrgVariables>;
+export function upsertOrgUiStyleForOrg(dc: DataConnect, vars: UpsertOrgUiStyleForOrgVariables): MutationPromise<UpsertOrgUiStyleForOrgData, UpsertOrgUiStyleForOrgVariables>;
+
+interface DeleteOrgUiStyleForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteOrgUiStyleForOrgVariables): MutationRef<DeleteOrgUiStyleForOrgData, DeleteOrgUiStyleForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteOrgUiStyleForOrgVariables): MutationRef<DeleteOrgUiStyleForOrgData, DeleteOrgUiStyleForOrgVariables>;
+  operationName: string;
+}
+export const deleteOrgUiStyleForOrgRef: DeleteOrgUiStyleForOrgRef;
+
+export function deleteOrgUiStyleForOrg(vars: DeleteOrgUiStyleForOrgVariables): MutationPromise<DeleteOrgUiStyleForOrgData, DeleteOrgUiStyleForOrgVariables>;
+export function deleteOrgUiStyleForOrg(dc: DataConnect, vars: DeleteOrgUiStyleForOrgVariables): MutationPromise<DeleteOrgUiStyleForOrgData, DeleteOrgUiStyleForOrgVariables>;
+
+interface UpsertMyUiStylePreferenceRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpsertMyUiStylePreferenceVariables): MutationRef<UpsertMyUiStylePreferenceData, UpsertMyUiStylePreferenceVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpsertMyUiStylePreferenceVariables): MutationRef<UpsertMyUiStylePreferenceData, UpsertMyUiStylePreferenceVariables>;
+  operationName: string;
+}
+export const upsertMyUiStylePreferenceRef: UpsertMyUiStylePreferenceRef;
+
+export function upsertMyUiStylePreference(vars: UpsertMyUiStylePreferenceVariables): MutationPromise<UpsertMyUiStylePreferenceData, UpsertMyUiStylePreferenceVariables>;
+export function upsertMyUiStylePreference(dc: DataConnect, vars: UpsertMyUiStylePreferenceVariables): MutationPromise<UpsertMyUiStylePreferenceData, UpsertMyUiStylePreferenceVariables>;
+
+interface DeleteMyUiStylePreferenceRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteMyUiStylePreferenceVariables): MutationRef<DeleteMyUiStylePreferenceData, DeleteMyUiStylePreferenceVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteMyUiStylePreferenceVariables): MutationRef<DeleteMyUiStylePreferenceData, DeleteMyUiStylePreferenceVariables>;
+  operationName: string;
+}
+export const deleteMyUiStylePreferenceRef: DeleteMyUiStylePreferenceRef;
+
+export function deleteMyUiStylePreference(vars: DeleteMyUiStylePreferenceVariables): MutationPromise<DeleteMyUiStylePreferenceData, DeleteMyUiStylePreferenceVariables>;
+export function deleteMyUiStylePreference(dc: DataConnect, vars: DeleteMyUiStylePreferenceVariables): MutationPromise<DeleteMyUiStylePreferenceData, DeleteMyUiStylePreferenceVariables>;
+
+interface UpsertUserUiStylePreferenceForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpsertUserUiStylePreferenceForOrgVariables): MutationRef<UpsertUserUiStylePreferenceForOrgData, UpsertUserUiStylePreferenceForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpsertUserUiStylePreferenceForOrgVariables): MutationRef<UpsertUserUiStylePreferenceForOrgData, UpsertUserUiStylePreferenceForOrgVariables>;
+  operationName: string;
+}
+export const upsertUserUiStylePreferenceForOrgRef: UpsertUserUiStylePreferenceForOrgRef;
+
+export function upsertUserUiStylePreferenceForOrg(vars: UpsertUserUiStylePreferenceForOrgVariables): MutationPromise<UpsertUserUiStylePreferenceForOrgData, UpsertUserUiStylePreferenceForOrgVariables>;
+export function upsertUserUiStylePreferenceForOrg(dc: DataConnect, vars: UpsertUserUiStylePreferenceForOrgVariables): MutationPromise<UpsertUserUiStylePreferenceForOrgData, UpsertUserUiStylePreferenceForOrgVariables>;
+
+interface DeleteUserUiStylePreferenceForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteUserUiStylePreferenceForOrgVariables): MutationRef<DeleteUserUiStylePreferenceForOrgData, DeleteUserUiStylePreferenceForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteUserUiStylePreferenceForOrgVariables): MutationRef<DeleteUserUiStylePreferenceForOrgData, DeleteUserUiStylePreferenceForOrgVariables>;
+  operationName: string;
+}
+export const deleteUserUiStylePreferenceForOrgRef: DeleteUserUiStylePreferenceForOrgRef;
+
+export function deleteUserUiStylePreferenceForOrg(vars: DeleteUserUiStylePreferenceForOrgVariables): MutationPromise<DeleteUserUiStylePreferenceForOrgData, DeleteUserUiStylePreferenceForOrgVariables>;
+export function deleteUserUiStylePreferenceForOrg(dc: DataConnect, vars: DeleteUserUiStylePreferenceForOrgVariables): MutationPromise<DeleteUserUiStylePreferenceForOrgData, DeleteUserUiStylePreferenceForOrgVariables>;
 
 interface InsertClientForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -698,6 +1247,126 @@ export const deleteEventForOrgRef: DeleteEventForOrgRef;
 export function deleteEventForOrg(vars: DeleteEventForOrgVariables): MutationPromise<DeleteEventForOrgData, DeleteEventForOrgVariables>;
 export function deleteEventForOrg(dc: DataConnect, vars: DeleteEventForOrgVariables): MutationPromise<DeleteEventForOrgData, DeleteEventForOrgVariables>;
 
+interface InsertBackupCycleForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: InsertBackupCycleForOrgVariables): MutationRef<InsertBackupCycleForOrgData, InsertBackupCycleForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: InsertBackupCycleForOrgVariables): MutationRef<InsertBackupCycleForOrgData, InsertBackupCycleForOrgVariables>;
+  operationName: string;
+}
+export const insertBackupCycleForOrgRef: InsertBackupCycleForOrgRef;
+
+export function insertBackupCycleForOrg(vars: InsertBackupCycleForOrgVariables): MutationPromise<InsertBackupCycleForOrgData, InsertBackupCycleForOrgVariables>;
+export function insertBackupCycleForOrg(dc: DataConnect, vars: InsertBackupCycleForOrgVariables): MutationPromise<InsertBackupCycleForOrgData, InsertBackupCycleForOrgVariables>;
+
+interface UpdateBackupCycleForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateBackupCycleForOrgVariables): MutationRef<UpdateBackupCycleForOrgData, UpdateBackupCycleForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateBackupCycleForOrgVariables): MutationRef<UpdateBackupCycleForOrgData, UpdateBackupCycleForOrgVariables>;
+  operationName: string;
+}
+export const updateBackupCycleForOrgRef: UpdateBackupCycleForOrgRef;
+
+export function updateBackupCycleForOrg(vars: UpdateBackupCycleForOrgVariables): MutationPromise<UpdateBackupCycleForOrgData, UpdateBackupCycleForOrgVariables>;
+export function updateBackupCycleForOrg(dc: DataConnect, vars: UpdateBackupCycleForOrgVariables): MutationPromise<UpdateBackupCycleForOrgData, UpdateBackupCycleForOrgVariables>;
+
+interface InsertStorageForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: InsertStorageForOrgVariables): MutationRef<InsertStorageForOrgData, InsertStorageForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: InsertStorageForOrgVariables): MutationRef<InsertStorageForOrgData, InsertStorageForOrgVariables>;
+  operationName: string;
+}
+export const insertStorageForOrgRef: InsertStorageForOrgRef;
+
+export function insertStorageForOrg(vars: InsertStorageForOrgVariables): MutationPromise<InsertStorageForOrgData, InsertStorageForOrgVariables>;
+export function insertStorageForOrg(dc: DataConnect, vars: InsertStorageForOrgVariables): MutationPromise<InsertStorageForOrgData, InsertStorageForOrgVariables>;
+
+interface UpdateStorageForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateStorageForOrgVariables): MutationRef<UpdateStorageForOrgData, UpdateStorageForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateStorageForOrgVariables): MutationRef<UpdateStorageForOrgData, UpdateStorageForOrgVariables>;
+  operationName: string;
+}
+export const updateStorageForOrgRef: UpdateStorageForOrgRef;
+
+export function updateStorageForOrg(vars: UpdateStorageForOrgVariables): MutationPromise<UpdateStorageForOrgData, UpdateStorageForOrgVariables>;
+export function updateStorageForOrg(dc: DataConnect, vars: UpdateStorageForOrgVariables): MutationPromise<UpdateStorageForOrgData, UpdateStorageForOrgVariables>;
+
+interface DeleteStorageForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteStorageForOrgVariables): MutationRef<DeleteStorageForOrgData, DeleteStorageForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteStorageForOrgVariables): MutationRef<DeleteStorageForOrgData, DeleteStorageForOrgVariables>;
+  operationName: string;
+}
+export const deleteStorageForOrgRef: DeleteStorageForOrgRef;
+
+export function deleteStorageForOrg(vars: DeleteStorageForOrgVariables): MutationPromise<DeleteStorageForOrgData, DeleteStorageForOrgVariables>;
+export function deleteStorageForOrg(dc: DataConnect, vars: DeleteStorageForOrgVariables): MutationPromise<DeleteStorageForOrgData, DeleteStorageForOrgVariables>;
+
+interface InsertClientStorageForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: InsertClientStorageForOrgVariables): MutationRef<InsertClientStorageForOrgData, InsertClientStorageForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: InsertClientStorageForOrgVariables): MutationRef<InsertClientStorageForOrgData, InsertClientStorageForOrgVariables>;
+  operationName: string;
+}
+export const insertClientStorageForOrgRef: InsertClientStorageForOrgRef;
+
+export function insertClientStorageForOrg(vars: InsertClientStorageForOrgVariables): MutationPromise<InsertClientStorageForOrgData, InsertClientStorageForOrgVariables>;
+export function insertClientStorageForOrg(dc: DataConnect, vars: InsertClientStorageForOrgVariables): MutationPromise<InsertClientStorageForOrgData, InsertClientStorageForOrgVariables>;
+
+interface UpdateClientStorageForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateClientStorageForOrgVariables): MutationRef<UpdateClientStorageForOrgData, UpdateClientStorageForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateClientStorageForOrgVariables): MutationRef<UpdateClientStorageForOrgData, UpdateClientStorageForOrgVariables>;
+  operationName: string;
+}
+export const updateClientStorageForOrgRef: UpdateClientStorageForOrgRef;
+
+export function updateClientStorageForOrg(vars: UpdateClientStorageForOrgVariables): MutationPromise<UpdateClientStorageForOrgData, UpdateClientStorageForOrgVariables>;
+export function updateClientStorageForOrg(dc: DataConnect, vars: UpdateClientStorageForOrgVariables): MutationPromise<UpdateClientStorageForOrgData, UpdateClientStorageForOrgVariables>;
+
+interface DeleteClientStorageForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteClientStorageForOrgVariables): MutationRef<DeleteClientStorageForOrgData, DeleteClientStorageForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteClientStorageForOrgVariables): MutationRef<DeleteClientStorageForOrgData, DeleteClientStorageForOrgVariables>;
+  operationName: string;
+}
+export const deleteClientStorageForOrgRef: DeleteClientStorageForOrgRef;
+
+export function deleteClientStorageForOrg(vars: DeleteClientStorageForOrgVariables): MutationPromise<DeleteClientStorageForOrgData, DeleteClientStorageForOrgVariables>;
+export function deleteClientStorageForOrg(dc: DataConnect, vars: DeleteClientStorageForOrgVariables): MutationPromise<DeleteClientStorageForOrgData, DeleteClientStorageForOrgVariables>;
+
+interface StartWorkdayPauseRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: StartWorkdayPauseVariables): MutationRef<StartWorkdayPauseData, StartWorkdayPauseVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: StartWorkdayPauseVariables): MutationRef<StartWorkdayPauseData, StartWorkdayPauseVariables>;
+  operationName: string;
+}
+export const startWorkdayPauseRef: StartWorkdayPauseRef;
+
+export function startWorkdayPause(vars: StartWorkdayPauseVariables): MutationPromise<StartWorkdayPauseData, StartWorkdayPauseVariables>;
+export function startWorkdayPause(dc: DataConnect, vars: StartWorkdayPauseVariables): MutationPromise<StartWorkdayPauseData, StartWorkdayPauseVariables>;
+
+interface StopWorkdayPauseRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: StopWorkdayPauseVariables): MutationRef<StopWorkdayPauseData, StopWorkdayPauseVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: StopWorkdayPauseVariables): MutationRef<StopWorkdayPauseData, StopWorkdayPauseVariables>;
+  operationName: string;
+}
+export const stopWorkdayPauseRef: StopWorkdayPauseRef;
+
+export function stopWorkdayPause(vars: StopWorkdayPauseVariables): MutationPromise<StopWorkdayPauseData, StopWorkdayPauseVariables>;
+export function stopWorkdayPause(dc: DataConnect, vars: StopWorkdayPauseVariables): MutationPromise<StopWorkdayPauseData, StopWorkdayPauseVariables>;
+
 interface MyOrganizationsRef {
   /* Allow users to create refs without passing in DataConnect */
   (): QueryRef<MyOrganizationsData, undefined>;
@@ -709,6 +1378,42 @@ export const myOrganizationsRef: MyOrganizationsRef;
 
 export function myOrganizations(): QueryPromise<MyOrganizationsData, undefined>;
 export function myOrganizations(dc: DataConnect): QueryPromise<MyOrganizationsData, undefined>;
+
+interface OrgUiStyleForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: OrgUiStyleForOrgVariables): QueryRef<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: OrgUiStyleForOrgVariables): QueryRef<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
+  operationName: string;
+}
+export const orgUiStyleForOrgRef: OrgUiStyleForOrgRef;
+
+export function orgUiStyleForOrg(vars: OrgUiStyleForOrgVariables): QueryPromise<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
+export function orgUiStyleForOrg(dc: DataConnect, vars: OrgUiStyleForOrgVariables): QueryPromise<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
+
+interface MyUiStylePreferenceRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: MyUiStylePreferenceVariables): QueryRef<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: MyUiStylePreferenceVariables): QueryRef<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
+  operationName: string;
+}
+export const myUiStylePreferenceRef: MyUiStylePreferenceRef;
+
+export function myUiStylePreference(vars: MyUiStylePreferenceVariables): QueryPromise<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
+export function myUiStylePreference(dc: DataConnect, vars: MyUiStylePreferenceVariables): QueryPromise<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
+
+interface UserUiStylePreferencesForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UserUiStylePreferencesForOrgVariables): QueryRef<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UserUiStylePreferencesForOrgVariables): QueryRef<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
+  operationName: string;
+}
+export const userUiStylePreferencesForOrgRef: UserUiStylePreferencesForOrgRef;
+
+export function userUiStylePreferencesForOrg(vars: UserUiStylePreferencesForOrgVariables): QueryPromise<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
+export function userUiStylePreferencesForOrg(dc: DataConnect, vars: UserUiStylePreferencesForOrgVariables): QueryPromise<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
 
 interface WorkersForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -805,4 +1510,64 @@ export const workerWorkdaysForOrgRef: WorkerWorkdaysForOrgRef;
 
 export function workerWorkdaysForOrg(vars: WorkerWorkdaysForOrgVariables): QueryPromise<WorkerWorkdaysForOrgData, WorkerWorkdaysForOrgVariables>;
 export function workerWorkdaysForOrg(dc: DataConnect, vars: WorkerWorkdaysForOrgVariables): QueryPromise<WorkerWorkdaysForOrgData, WorkerWorkdaysForOrgVariables>;
+
+interface StorageForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: StorageForOrgVariables): QueryRef<StorageForOrgData, StorageForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: StorageForOrgVariables): QueryRef<StorageForOrgData, StorageForOrgVariables>;
+  operationName: string;
+}
+export const storageForOrgRef: StorageForOrgRef;
+
+export function storageForOrg(vars: StorageForOrgVariables): QueryPromise<StorageForOrgData, StorageForOrgVariables>;
+export function storageForOrg(dc: DataConnect, vars: StorageForOrgVariables): QueryPromise<StorageForOrgData, StorageForOrgVariables>;
+
+interface ClientStorageForClientRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: ClientStorageForClientVariables): QueryRef<ClientStorageForClientData, ClientStorageForClientVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: ClientStorageForClientVariables): QueryRef<ClientStorageForClientData, ClientStorageForClientVariables>;
+  operationName: string;
+}
+export const clientStorageForClientRef: ClientStorageForClientRef;
+
+export function clientStorageForClient(vars: ClientStorageForClientVariables): QueryPromise<ClientStorageForClientData, ClientStorageForClientVariables>;
+export function clientStorageForClient(dc: DataConnect, vars: ClientStorageForClientVariables): QueryPromise<ClientStorageForClientData, ClientStorageForClientVariables>;
+
+interface ClientStorageForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: ClientStorageForOrgVariables): QueryRef<ClientStorageForOrgData, ClientStorageForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: ClientStorageForOrgVariables): QueryRef<ClientStorageForOrgData, ClientStorageForOrgVariables>;
+  operationName: string;
+}
+export const clientStorageForOrgRef: ClientStorageForOrgRef;
+
+export function clientStorageForOrg(vars: ClientStorageForOrgVariables): QueryPromise<ClientStorageForOrgData, ClientStorageForOrgVariables>;
+export function clientStorageForOrg(dc: DataConnect, vars: ClientStorageForOrgVariables): QueryPromise<ClientStorageForOrgData, ClientStorageForOrgVariables>;
+
+interface WorkdayPausesForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: WorkdayPausesForOrgVariables): QueryRef<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: WorkdayPausesForOrgVariables): QueryRef<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
+  operationName: string;
+}
+export const workdayPausesForOrgRef: WorkdayPausesForOrgRef;
+
+export function workdayPausesForOrg(vars: WorkdayPausesForOrgVariables): QueryPromise<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
+export function workdayPausesForOrg(dc: DataConnect, vars: WorkdayPausesForOrgVariables): QueryPromise<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
+
+interface ActiveWorkdayPauseForWorkerRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: ActiveWorkdayPauseForWorkerVariables): QueryRef<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: ActiveWorkdayPauseForWorkerVariables): QueryRef<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
+  operationName: string;
+}
+export const activeWorkdayPauseForWorkerRef: ActiveWorkdayPauseForWorkerRef;
+
+export function activeWorkdayPauseForWorker(vars: ActiveWorkdayPauseForWorkerVariables): QueryPromise<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
+export function activeWorkdayPauseForWorker(dc: DataConnect, vars: ActiveWorkdayPauseForWorkerVariables): QueryPromise<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
 
