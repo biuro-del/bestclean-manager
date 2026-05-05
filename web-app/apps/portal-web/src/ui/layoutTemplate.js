@@ -34,11 +34,13 @@
         aria-label="Przejdź do strony głównej"
         title="Strona główna"
       >
-        <div class="logo-block logo-block--bestclean" aria-label="Logo Best Clean">
-          <img src="/logotyp.jpg" alt="Best Clean" />
-        </div>
-        <div class="brand">
-          <div class="brand-claim">Sprz&#261;tanie z nami to czysta przyjemno&#347;&#263;.</div>
+        <div class="header-logo-pair" aria-label="Logo Cleanzi i Best Clean">
+          <div class="logo-block logo-block--cleanzi">
+            <img src="/cleanzi-logo.svg" alt="Cleanzi" />
+          </div>
+          <div class="logo-block logo-block--bestclean">
+            <img src="/logotyp.jpg" alt="Best Clean" />
+          </div>
         </div>
       </button>
 
