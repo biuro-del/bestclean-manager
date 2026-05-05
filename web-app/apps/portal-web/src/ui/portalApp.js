@@ -7126,10 +7126,10 @@ function calendarTimelineRowAllowsOverlap(rowIndex, resources = calendarTimeline
 function ordersReadSelectedWorkerRows() {
   const checklist = document.getElementById('ordersEditWorkerChecklist')
   const primaryRow = Number(ordersReadInputValue('ordersEditWorker'))
-  const rows = Number.isInteger(primaryRow) && primaryRow >= 0 ? [primaryRow] : []
   if (!checklist) {
-    return rows
+    return Number.isInteger(primaryRow) && primaryRow >= 0 ? [primaryRow] : [0]
   }
+  const rows = []
   ;[...checklist.querySelectorAll('[data-orders-worker-row]:checked')]
     .map((input) => Number(input.getAttribute('data-orders-worker-row')))
     .forEach((row) => {
@@ -7137,7 +7137,7 @@ function ordersReadSelectedWorkerRows() {
         rows.push(row)
       }
     })
-  return rows
+  return rows.length ? rows : [0]
 }
 
 function ordersWorkerAssignmentsFromRows(rows = [], resources = calendarTimelineResources()) {
@@ -7175,6 +7175,68 @@ function ordersWorkerChecklistHtml(order = {}) {
     .join('')
 }
 
+function ordersWorkerRowLabel(rowIndex, resources = calendarTimelineResources()) {
+  const row = Number(rowIndex)
+  return String(resources[row]?.name ?? `Wiersz ${row + 1}`).trim()
+}
+
+function ordersWorkerSelectionLabel(rows = [], resources = calendarTimelineResources()) {
+  const normalizedRows = (Array.isArray(rows) ? rows : [])
+    .map((row) => Number(row))
+    .filter((row, index, list) => Number.isInteger(row) && row >= 0 && row < resources.length && list.indexOf(row) === index)
+  const safeRows = normalizedRows.length ? normalizedRows : [0]
+  const names = safeRows.map((row) => ordersWorkerRowLabel(row, resources)).filter(Boolean)
+  if (safeRows.length === 1) {
+    return names[0] || 'BUFOR'
+  }
+  return `${safeRows.length} osoby: ${names.join(', ')}`
+}
+
+function ordersSyncWorkerPickerLabel(rows = ordersReadSelectedWorkerRows()) {
+  const resources = calendarTimelineResources()
+  const selectedRows = (Array.isArray(rows) && rows.length ? rows : [0])
+    .map((row) => Number(row))
+    .filter((row, index, list) => Number.isInteger(row) && row >= 0 && row < resources.length && list.indexOf(row) === index)
+  const safeRows = selectedRows.length ? selectedRows : [0]
+  const label = ordersWorkerSelectionLabel(safeRows, resources)
+  const summary = document.getElementById('ordersEditWorkerSummary')
+  const text = document.getElementById('ordersEditWorkerSummaryText')
+  if (text) {
+    text.textContent = label
+  }
+  if (summary) {
+    summary.setAttribute('title', label)
+  }
+  ordersSetInputValue('ordersEditWorker', safeRows[0] ?? 0)
+}
+
+function ordersNormalizeWorkerPickerSelection(changedInput = null) {
+  const checklist = document.getElementById('ordersEditWorkerChecklist')
+  if (!checklist) {
+    return [0]
+  }
+  const boxes = [...checklist.querySelectorAll('[data-orders-worker-row]')].filter((input) => input instanceof HTMLInputElement)
+  const bufferBox = boxes.find((input) => calendarTimelineRowAllowsOverlap(Number(input.getAttribute('data-orders-worker-row'))))
+  const changedRow = Number(changedInput?.getAttribute?.('data-orders-worker-row'))
+  const changedIsBuffer = changedInput instanceof HTMLInputElement && calendarTimelineRowAllowsOverlap(changedRow)
+
+  if (changedInput instanceof HTMLInputElement && changedInput.checked) {
+    if (changedIsBuffer) {
+      boxes.forEach((input) => {
+        if (input !== changedInput) input.checked = false
+      })
+    } else if (bufferBox) {
+      bufferBox.checked = false
+    }
+  }
+
+  if (!boxes.some((input) => input.checked) && bufferBox) {
+    bufferBox.checked = true
+  }
+
+  return ordersReadSelectedWorkerRows()
+}
+
 function ordersRenderWorkerChecklist(order = {}) {
   const checklist = document.getElementById('ordersEditWorkerChecklist')
   if (checklist) {
@@ -7182,6 +7244,7 @@ function ordersRenderWorkerChecklist(order = {}) {
   }
   const selected = ordersNormalizeOrderRows(order)
   ordersSetInputValue('ordersEditWorker', selected[0] ?? 0)
+  ordersSyncWorkerPickerLabel(selected)
 }
 
 function ordersClientDisplayName(client = {}) {
@@ -8809,8 +8872,11 @@ function bindOrdersViewFunctions() {
     }
     if (event.target?.hasAttribute?.('data-orders-worker-row')) {
       const order = ordersFindTimelineOrder(appState.ordersEditingId)
+      const rows = ordersNormalizeWorkerPickerSelection(event.target)
+      ordersSyncWorkerPickerLabel(rows)
       if (order) {
-        order.assignedRows = ordersReadSelectedWorkerRows()
+        order.row = rows[0] ?? 0
+        order.assignedRows = rows
       }
       return
     }

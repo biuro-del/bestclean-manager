@@ -129,9 +129,11 @@
 
             <div class="orders-field orders-worker-field">
               <span>Pracownik terenowy *</span>
-              <select id="ordersEditWorker"></select>
-              <details class="orders-worker-extra">
-                <summary>Przypisz wi&#281;cej pracownik&#243;w</summary>
+              <select id="ordersEditWorker" hidden aria-hidden="true"></select>
+              <details class="orders-worker-picker" id="ordersEditWorkerPicker">
+                <summary id="ordersEditWorkerSummary">
+                  <span id="ordersEditWorkerSummaryText">BUFOR</span>
+                </summary>
                 <div class="orders-worker-checklist" id="ordersEditWorkerChecklist"></div>
               </details>
             </div>
