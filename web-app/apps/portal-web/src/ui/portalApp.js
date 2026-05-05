@@ -22354,7 +22354,7 @@ function calendarTimelinePrototypeHtml() {
     .map((_, rowIndex) => {
       const laneCount = Number(plannedLaneCounts.get(rowIndex) || 0)
       const trackCount = Number(realTrackCounts.get(rowIndex) || 0)
-      return `${Math.max(38, 8 + Math.max(1, trackCount + laneCount) * 24)}px`
+      return `${Math.max(38, 8 + Math.max(1, trackCount, laneCount) * 24)}px`
     })
     .join(' ')
   const dayHeaders = days
@@ -22412,7 +22412,7 @@ function calendarTimelinePrototypeHtml() {
       }
       const realTrackIndex = Number(bar.realTrackIndex ?? 0)
       const realTrackCount = Number(realTrackCounts.get(bar.row) || 0)
-      const plannedOffsetBase = realTrackCount > 0 ? 7 + realTrackCount * 24 : 7
+      const plannedOffsetBase = 7
       const stackStyle = bar.isRealEvent
         ? `--fw-bar-height:20px;--fw-bar-offset:${4 + Math.max(0, Math.floor(realTrackIndex)) * 24}px;--fw-bar-z:${8 + Math.max(0, Math.floor(realTrackIndex))};`
         : laneCount > 1
