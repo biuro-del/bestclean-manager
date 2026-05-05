@@ -17832,28 +17832,6 @@ body{
   z-index:60;
 }
 
-#portalRoot #view-orders .orders-worker-extra{
-  background:#fff;
-  border:1px solid #d8e2f2;
-  border-radius:8px;
-  overflow:hidden;
-}
-
-#portalRoot #view-orders .orders-worker-extra summary{
-  align-items:center;
-  color:#1d4ed8;
-  cursor:pointer;
-  display:flex;
-  font:800 12px/1.2 "Manrope", "Segoe UI", Arial, sans-serif;
-  gap:8px;
-  min-height:34px;
-  padding:8px 10px;
-}
-
-#portalRoot #view-orders .orders-worker-extra summary::marker{
-  color:#2f63e6;
-}
-
 #portalRoot #view-orders .orders-worker-checklist{
   border-top:1px solid #e4ebf7;
   display:grid;
