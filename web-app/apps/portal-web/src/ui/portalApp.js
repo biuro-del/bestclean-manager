@@ -22114,6 +22114,31 @@ function calendarTimelineRealDurationLabel(startTs = 0, endTs = 0) {
   return `${durationSecondsToHm(Math.floor((end - start) / 1000))}h`
 }
 
+function calendarTimelineStatusDurationSeconds(row = {}) {
+  const raw = String(row?.duration ?? row?.czas ?? row?.time ?? '').trim()
+  if (!raw || raw === '-') {
+    return 0
+  }
+
+  const parts = raw.match(/\d+/g)
+  if (!parts?.length) {
+    return 0
+  }
+
+  const numbers = parts.map((part) => Number(part)).filter((value) => Number.isFinite(value) && value >= 0)
+  if (!numbers.length) {
+    return 0
+  }
+
+  if (numbers.length >= 3) {
+    return numbers[0] * 3600 + numbers[1] * 60 + numbers[2]
+  }
+  if (numbers.length === 2) {
+    return numbers[0] * 3600 + numbers[1] * 60
+  }
+  return numbers[0] * 60
+}
+
 function calendarTimelineReadableClientLabel(value = '') {
   const label = String(value ?? '').trim()
   const normalized = normalizeSearchText(label)
@@ -22241,12 +22266,116 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
     .filter(Boolean)
 }
 
-function calendarTimelineRealEventOrders(resources = [], days = [], plannedOrders = []) {
-  if (!calendarTimelineSourceRowsCoverDays(days)) {
+function calendarTimelineStatusRowsForRealOrders(days = []) {
+  const visibleDays = new Set((Array.isArray(days) ? days : []).map((day) => String(day ?? '').trim()).filter(Boolean))
+  const today = todayYmd()
+  if (!visibleDays.has(today)) {
     return []
   }
+
+  const rows = Array.isArray(appState.calendarTimelineCurrentWorkerStatusRows) && appState.calendarTimelineCurrentWorkerStatusRows.length
+    ? appState.calendarTimelineCurrentWorkerStatusRows
+    : Array.isArray(appState.dashboardTodayRows)
+      ? appState.dashboardTodayRows
+      : []
+
+  return rows.map((row) => ({ row, dayKey: today }))
+}
+
+function calendarTimelineRealStatusOrders(resources = [], days = [], existingOrders = []) {
+  const existingKeys = new Set(
+    (Array.isArray(existingOrders) ? existingOrders : [])
+      .filter((order) => order?.realTrack === 'workday')
+      .map((order) => `${Number(order?.row)}|${String(order?.dateYmd ?? '').trim()}`),
+  )
+
+  return calendarTimelineStatusRowsForRealOrders(days)
+    .map(({ row, dayKey }, index) => {
+      const startMinutes = dashboardScheduleTimeToMinutes(row?.qrStart)
+      if (!Number.isFinite(startMinutes) || startMinutes < 0) {
+        return null
+      }
+
+      const rowIndex = calendarTimelineRowForRealEvent(row, resources)
+      if (rowIndex < 0) {
+        return null
+      }
+
+      const key = `${rowIndex}|${dayKey}`
+      if (existingKeys.has(key)) {
+        return null
+      }
+
+      const startTs = calendarTimelineTimestampFromDayMinutes(dayKey, startMinutes)
+      if (!startTs) {
+        return null
+      }
+
+      const stopMinutes = dashboardScheduleTimeToMinutes(row?.qrStop)
+      const durationSec = calendarTimelineStatusDurationSeconds(row)
+      const now = Date.now()
+      let endTs = 0
+      if (Number.isFinite(stopMinutes) && stopMinutes >= 0) {
+        endTs = calendarTimelineTimestampFromDayMinutes(dayKey, stopMinutes)
+        if (endTs <= startTs) {
+          endTs = calendarTimelineTimestampFromDayMinutes(calendarAddDays(dayKey, 1), stopMinutes)
+        }
+      } else if (row?.isRunning) {
+        endTs = Math.max(now, startTs + 15 * 60 * 1000)
+      } else if (durationSec > 0) {
+        endTs = startTs + durationSec * 1000
+      }
+
+      if (!endTs || endTs <= startTs) {
+        return null
+      }
+
+      const startIso = new Date(startTs).toISOString()
+      const endIso = new Date(endTs).toISOString()
+      const start = calendarTimelineIsoToDayTime(startIso)
+      const end = calendarTimelineIsoToDayTime(endIso)
+      if (!start || !end) {
+        return null
+      }
+
+      const durationLabel = calendarTimelineRealDurationLabel(start.timestamp, end.timestamp)
+      const titleLabel =
+        calendarTimelineReadableClientLabel(dashboardResolveClientLabel(row)) ||
+        calendarTimelineRealStartObjectLabel(row) ||
+        'QR START'
+
+      return {
+        id: `real-status-${rowIndex}-${dayKey}-${index}`,
+        row: rowIndex,
+        assignedRows: [rowIndex],
+        workerAssignments: ordersWorkerAssignmentsFromRows([rowIndex], resources),
+        dateYmd: start.day,
+        startTime: start.time,
+        endDateYmd: end.day,
+        endTime: end.time,
+        validUntil: end.day,
+        nextDate: start.day,
+        title: `${titleLabel} · ${durationLabel}`,
+        clientLabel: dashboardResolveClientLabel(row),
+        addressLabel: String(row?.activeLocation ?? row?.lokalizacja ?? row?.location ?? '').trim(),
+        type: 'other',
+        tone: 'steel',
+        actualStartAt: startIso,
+        sourceStartAt: startIso,
+        actualEndAt: row?.isRunning ? '' : endIso,
+        status: row?.isRunning ? 'RUNNING' : 'CLOSED',
+        completed: !row?.isRunning,
+        isRealEvent: true,
+        realTrack: 'workday',
+        realTrackIndex: 0,
+      }
+    })
+    .filter(Boolean)
+}
+
+function calendarTimelineRealEventOrders(resources = [], days = [], plannedOrders = []) {
   const visibleDays = new Set((Array.isArray(days) ? days : []).map((day) => String(day ?? '').trim()).filter(Boolean))
-  const sourceRows = Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
+  const sourceRows = calendarTimelineSourceRowsCoverDays(days) && Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
     ? appState.calendarTimelineWorkerStateSourceRows
     : []
   const plannedEventKeys = new Set(
@@ -22257,6 +22386,7 @@ function calendarTimelineRealEventOrders(resources = [], days = [], plannedOrder
   const seen = new Set()
 
   const workdayOrders = calendarTimelineRealWorkdayOrders(resources, days, sourceRows)
+  const statusFallbackOrders = calendarTimelineRealStatusOrders(resources, days, workdayOrders)
   const eventOrders = sourceRows
     .map((row, index) => ({ row, index }))
     .map(({ row, index }) => ({ row, index, track: calendarTimelineRealEventTrack(row) }))
@@ -22313,7 +22443,7 @@ function calendarTimelineRealEventOrders(resources = [], days = [], plannedOrder
       }
     })
     .filter(Boolean)
-  return [...workdayOrders, ...eventOrders]
+  return [...workdayOrders, ...statusFallbackOrders, ...eventOrders]
 }
 
 function calendarTimelinePrototypeHtml() {
