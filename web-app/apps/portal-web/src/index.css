@@ -18646,6 +18646,139 @@ body{
   width:100%;
 }
 
+/* Compact dashboard day schedule */
+#view-dashboard .dash-schedule-panel{
+  gap:4px !important;
+  padding:8px !important;
+}
+
+#view-dashboard .dash-schedule-panel .card-title{
+  font-size:14px !important;
+  line-height:1.1 !important;
+}
+
+#view-dashboard .dash-schedule-panel .card-title-row{
+  margin-bottom:2px !important;
+}
+
+#view-dashboard .dash-refresh-btn--icon{
+  min-height:22px !important;
+  min-width:22px !important;
+  width:22px !important;
+  height:22px !important;
+  padding:0 !important;
+}
+
+#view-dashboard .dash-refresh-btn--icon svg{
+  width:13px !important;
+  height:13px !important;
+}
+
+#view-dashboard .dash-schedule-sync{
+  font-size:8px !important;
+  line-height:1.1 !important;
+}
+
+#view-dashboard .dash-schedule-legend{
+  display:none !important;
+}
+
+#view-dashboard .dash-schedule-daybar{
+  grid-template-columns:22px minmax(0, 1fr) 22px !important;
+  gap:4px !important;
+}
+
+#view-dashboard .dash-schedule-nav{
+  width:22px !important;
+  min-width:22px !important;
+  height:22px !important;
+  min-height:22px !important;
+  border-radius:6px !important;
+  font-size:10px !important;
+}
+
+#view-dashboard .dash-schedule-dayname{
+  font-size:13px !important;
+  line-height:1 !important;
+}
+
+#view-dashboard .dash-schedule-daydate{
+  font-size:8px !important;
+  line-height:1 !important;
+}
+
+#view-dashboard .dash-schedule-cards{
+  gap:3px !important;
+  margin-top:2px !important;
+  padding:3px 5px 3px 3px !important;
+  border-radius:8px !important;
+}
+
+#view-dashboard .dash-schedule-card{
+  gap:2px !important;
+  border-left-width:2px !important;
+  border-radius:6px !important;
+  padding:4px 6px !important;
+}
+
+#view-dashboard .dash-schedule-top{
+  gap:4px !important;
+}
+
+#view-dashboard .dash-schedule-worker-meta{
+  gap:4px !important;
+}
+
+#view-dashboard .dash-schedule-worker-name{
+  font-size:11px !important;
+  line-height:1.05 !important;
+}
+
+#view-dashboard .dash-schedule-start-icon{
+  width:13px !important;
+  height:13px !important;
+  font-size:9px !important;
+}
+
+#view-dashboard .dash-schedule-status-badge{
+  padding:2px 5px !important;
+  font-size:8px !important;
+}
+
+#view-dashboard .dash-schedule-startline,
+#view-dashboard .dash-schedule-line{
+  grid-template-columns:58px minmax(0, 1fr) !important;
+  column-gap:6px !important;
+}
+
+#view-dashboard .dash-schedule-startline{
+  padding:1px 0 2px !important;
+}
+
+#view-dashboard .dash-schedule-shifts .dash-schedule-line + .dash-schedule-line{
+  margin-top:2px !important;
+  padding-top:2px !important;
+}
+
+#view-dashboard .dash-schedule-line-label{
+  font-size:8px !important;
+  line-height:1.05 !important;
+}
+
+#view-dashboard .dash-schedule-start-value,
+#view-dashboard .dash-schedule-line-text{
+  font-size:9px !important;
+  line-height:1.05 !important;
+}
+
+#view-dashboard .dash-schedule-late{
+  border-radius:5px !important;
+  font-size:8px !important;
+  line-height:1.05 !important;
+  margin-top:2px !important;
+  padding:2px 5px !important;
+}
+
 #portalRoot #view-ordersMap .orders-map-shell{
   display:flex;
   flex-direction:column;
