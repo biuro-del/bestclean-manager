@@ -20553,7 +20553,7 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
     keys.forEach((key) => {
       upsertState(key, {
         hasStart,
-        isRunning: Boolean(row?.isRunning) || (hasStart && !hasStop),
+        isRunning: hasStart && !hasStop,
         startMinutes,
       })
     })
@@ -20573,14 +20573,13 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
         startMinutes: -1,
         latestStartTs: 0,
         latestStopTs: 0,
-        explicitRunning: false,
       })
     }
     return sourceBuckets.get(key)
   }
 
   sourceRows.forEach((row) => {
-    if (dashboardResolveDayKey(row) !== normalizedDayKey) {
+    if ((dashboardResolveDayKey(row) || calendarTimelineRealEventRowDay(row)) !== normalizedDayKey) {
       return
     }
     const keys = dashboardResolveTodayRowAliasKeys(row)
@@ -20591,7 +20590,6 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
     const startTs = calendarTimelineEventsRowStartTimestamp(row) || calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
     const stopTs = calendarTimelineSourceRowDayStopTimestamp(row)
     const startMinutes = calendarTimelineSourceRowStartMinutes(row)
-    const status = String(row?.status ?? '').trim().toUpperCase()
 
     keys.forEach((key) => {
       const bucket = ensureBucket(key)
@@ -20606,17 +20604,29 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
       if (stopTs > 0) {
         bucket.latestStopTs = Math.max(bucket.latestStopTs, stopTs)
       }
-      if (startTs > 0 && (calendarTimelineEventsRowIsRunning(row) || status === 'RUNNING' || status === 'OPEN' || Boolean(row?.isRunning))) {
-        bucket.explicitRunning = true
-      }
     })
   })
 
   sourceBuckets.forEach((bucket, key) => {
-    upsertState(key, {
-      hasStart: bucket.hasStart,
-      isRunning: bucket.explicitRunning || (bucket.latestStartTs > 0 && bucket.latestStartTs > bucket.latestStopTs),
-      startMinutes: bucket.startMinutes,
+    const existing = stateMap.get(key) || {
+      hasStart: false,
+      isRunning: false,
+      startMinutes: -1,
+    }
+    const existingStartMinutes = Number(existing.startMinutes ?? -1)
+    const sourceStartMinutes = Number(bucket.startMinutes ?? -1)
+    const sourceRunning = bucket.latestStartTs > 0 && bucket.latestStartTs > bucket.latestStopTs
+    stateMap.set(key, {
+      hasStart: existing.hasStart || bucket.hasStart,
+      isRunning: sourceRunning,
+      startMinutes:
+        existingStartMinutes >= 0 && sourceStartMinutes >= 0
+          ? Math.min(existingStartMinutes, sourceStartMinutes)
+          : existingStartMinutes >= 0
+            ? existingStartMinutes
+            : sourceStartMinutes >= 0
+              ? sourceStartMinutes
+              : -1,
     })
   })
 
@@ -23697,8 +23707,12 @@ function calendarTimelineRealStartObjectLabel(row = {}) {
 
   const client = calendarTimelineReadableClientLabel(dashboardResolveClientLabel(row))
   const qr = String(row?.dayStartObject ?? row?.startObject ?? zoneQrCodeFromRow(row) ?? '').trim()
+  const qrClient = calendarTimelineReadableClientLabel(reportHistoryResolveClientByZoneCode(qr, ''))
   if (client) {
     return client
+  }
+  if (qrClient && !dashboardIsQrCodeLike(qrClient)) {
+    return qrClient
   }
   return qr && qr !== '-' ? `QR ${qr}` : 'QR START'
 }
@@ -23938,7 +23952,7 @@ function calendarTimelineStatusRowIsRunning(row = {}) {
     calendarTimelineRowStopMinutes(row) >= 0 ||
     Boolean(stopLabel && stopLabel !== '-' && stopLabel !== '--:--' && stopLabel !== '--:--:--')
   const hasStart = calendarTimelineRowStartMinutes(row) >= 0
-  return Boolean(row?.isRunning) || (hasStart && !hasStop)
+  return hasStart && !hasStop
 }
 
 function calendarTimelineStatusFallbackRow(resource = {}, startMinutes = -1, sourceRow = null) {
