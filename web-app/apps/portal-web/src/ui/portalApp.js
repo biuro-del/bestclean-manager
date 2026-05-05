@@ -20668,6 +20668,100 @@ function calendarTimelineMarkerMetaLabel(row = {}, markerType = '') {
   return parts.join(' / ')
 }
 
+function calendarTimelineEventLocationLabel(row = {}) {
+  const markerType = calendarTimelineEventMarkerType(row)
+  const markerCandidates =
+    markerType === 'QR STOP'
+      ? [
+          row?.dayStopObject,
+          row?.stopObject,
+          reportHistoryExtractQrFromComment(row?.dayComment ?? row?.comment, 'stop'),
+        ]
+      : markerType
+        ? [
+            row?.dayStartObject,
+            row?.startObject,
+            reportHistoryExtractQrFromComment(row?.dayComment ?? row?.comment, 'start'),
+          ]
+        : []
+  for (const candidate of markerCandidates) {
+    const zone = resolveZoneByQrCandidate(candidate)
+    const location = String(zone?.location ?? zone?.lokalizacja ?? '').trim()
+    if (location && location !== '-') {
+      return location
+    }
+  }
+
+  const direct = [
+    row?.lokalizacja,
+    row?.location,
+    row?.zone?.location,
+  ]
+    .map((value) => String(value ?? '').trim())
+    .find((value) => value && value !== '-')
+  if (direct) {
+    return direct
+  }
+
+  const candidates = [
+    row?.activeZoneId,
+    row?.zoneId,
+    row?.roomId,
+    row?.utilityRoomId,
+    row?.workdayUtilityRoomId,
+    row?.qr,
+    row?.qrCode,
+    row?.dayStartObject,
+    row?.dayStopObject,
+    row?.startObject,
+    row?.stopObject,
+  ]
+  for (const candidate of candidates) {
+    const zone = resolveZoneByQrCandidate(candidate)
+    const location = String(zone?.location ?? zone?.lokalizacja ?? '').trim()
+    if (location && location !== '-') {
+      return location
+    }
+  }
+
+  return ''
+}
+
+function calendarTimelineEventGpsCoords(row = {}, markerType = '') {
+  const normalizedMarker = String(markerType ?? calendarTimelineEventMarkerType(row) ?? '').trim().toUpperCase()
+  const typeLabel = eventTypeInfo(row).label
+  let phase = ''
+  if (normalizedMarker === 'QR START' || normalizedMarker === 'QR START + STOP') {
+    phase = 'start'
+  } else if (normalizedMarker === 'QR STOP') {
+    phase = 'stop'
+  } else if (typeLabel === 'Strefa spec.') {
+    phase = 'start'
+  } else {
+    return null
+  }
+
+  const dayCoords = normalizedMarker
+    ? reportHistoryResolveDayGpsCoords(row, phase)
+    : ''
+  const sources = [
+    dayCoords,
+    row?.gps,
+    row?.comment,
+    row?.dayGps,
+    row?.dayComment,
+  ]
+  for (const source of sources) {
+    const extracted = reportHistoryExtractGpsCoords(source, phase) || source
+    const parsed = reportHistoryParseGeoPair(extracted)
+    if (parsed) {
+      return parsed
+    }
+  }
+
+  return null
+}
+
 function calendarTimelineEventStatusLabel(status = '') {
   const normalized = String(status ?? '').trim().toUpperCase()
   if (normalized === 'CLOSED') {
@@ -20842,18 +20936,32 @@ function calendarTimelineEventDisplayParts(row = {}) {
   const duration = `${durationSecondsToHm(calendarTimelineEventDurationFromRow(row))}h`
   const status = calendarTimelineEventStatusLabel(normalizeEventStatus(row?.status, Boolean(row?.endAt ?? row?.dayEndAt)))
   const meta = markerType ? markerMeta || status : `${type} · ${duration} · ${status}`
-  return { type, place, duration, status, meta, isSystemStatus, markerType }
+  const location = calendarTimelineEventLocationLabel(row)
+  const gps = calendarTimelineEventGpsCoords(row, markerType)
+  return { type, place, duration, status, meta, isSystemStatus, markerType, location, gps }
 }
 
 function calendarTimelineEventRowHtml(row = {}, index = 0) {
   const parts = calendarTimelineEventDisplayParts(row)
+  const locationHtml = parts.location
+    ? `<span class="calendar-events-popup-location">Lokalizacja: ${escapeHtml(parts.location)}</span>`
+    : ''
+  const gpsHtml = parts.gps
+    ? `
+      <button class="calendar-events-popup-geo" type="button" data-calendar-event-geo data-rep-geo-lat="${escapeHtml(parts.gps.lat)}" data-rep-geo-lon="${escapeHtml(parts.gps.lon)}" title="Pokaż mapę GPS">
+        Mapa GPS
+      </button>
+    `
+    : ''
   return `
     <li class="calendar-events-popup-row">
-      <button type="button" data-calendar-event-popup-edit="${index}" title="Edytuj zdarzenie">
+      <button class="calendar-events-popup-edit" type="button" data-calendar-event-popup-edit="${index}" title="Edytuj zdarzenie">
         <span class="calendar-events-popup-time">${escapeHtml(calendarTimelineEventTimeRangeLabel(row))}</span>
         <span class="calendar-events-popup-main">${escapeHtml(parts.place)}</span>
         <span class="calendar-events-popup-meta">${escapeHtml(parts.meta)}</span>
+        ${locationHtml}
       </button>
+      ${gpsHtml}
     </li>
   `
 }
@@ -21198,7 +21306,7 @@ function calendarTimelineSizeEventsPopup(node, rowCount = 0, options = {}) {
   const summaryHeight = summary?.scrollHeight || summary?.getBoundingClientRect?.().height || 0
   const popupChrome = Math.ceil(headHeight + graphHeight + 2)
   const viewportBudget = Math.max(180, window.innerHeight - 24 - popupChrome)
-  const listHeight = visibleRows * 48 + 12
+  const listHeight = visibleRows * 64 + 12
   const desiredBodyHeight = Math.max(listHeight, summaryHeight)
   node.style.setProperty('--calendar-events-body-max-height', `${Math.floor(Math.min(desiredBodyHeight, viewportBudget))}px`)
 }
@@ -21279,6 +21387,16 @@ async function calendarTimelineShowWorkerDayEventsPopup(bar) {
       calendarTimelineHideEventsPopup()
       return
     }
+    const geoButton = event.target?.closest?.('[data-calendar-event-geo][data-rep-geo-lat][data-rep-geo-lon]')
+    if (geoButton) {
+      event.preventDefault()
+      event.stopPropagation()
+      const coords = reportGeoReadCoordsFromNode(geoButton)
+      if (coords) {
+        reportGeoOpenModal(coords.lat, coords.lon)
+      }
+      return
+    }
     const editButton = event.target?.closest?.('[data-calendar-event-popup-edit]')
     if (editButton) {
       const index = Number(editButton.getAttribute('data-calendar-event-popup-edit'))
@@ -21290,12 +21408,23 @@ async function calendarTimelineShowWorkerDayEventsPopup(bar) {
     }
   })
   node.addEventListener('mouseover', (event) => {
+    const geoButton = event.target?.closest?.('[data-calendar-event-geo][data-rep-geo-lat][data-rep-geo-lon]')
+    if (geoButton instanceof HTMLElement) {
+      const coords = reportGeoReadCoordsFromNode(geoButton)
+      if (coords) {
+        reportGeoShowPreview(geoButton, coords.lat, coords.lon)
+      }
+    }
     const row = event.target?.closest?.('[data-calendar-pie-highlight]')
     if (row instanceof HTMLElement) {
       calendarTimelineSetPieHighlight(row, true)
     }
   })
   node.addEventListener('mouseout', (event) => {
+    const geoButton = event.target?.closest?.('[data-calendar-event-geo][data-rep-geo-lat][data-rep-geo-lon]')
+    if (geoButton instanceof HTMLElement && !geoButton.contains(event.relatedTarget)) {
+      reportGeoHidePreviewSoon()
+    }
     const row = event.target?.closest?.('[data-calendar-pie-highlight]')
     if (row instanceof HTMLElement && !row.contains(event.relatedTarget)) {
       calendarTimelineSetPieHighlight(row, false)

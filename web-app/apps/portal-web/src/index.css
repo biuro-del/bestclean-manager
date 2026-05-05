@@ -16933,7 +16933,14 @@ body{
   white-space:nowrap;
 }
 
-.calendar-events-popup-row button{
+.calendar-events-popup-row{
+  align-items:stretch;
+  display:grid;
+  gap:6px;
+  grid-template-columns:minmax(0, 1fr) auto;
+}
+
+.calendar-events-popup-edit{
   background:#fff;
   border:0;
   border-bottom:1px solid #edf1f8;
@@ -16948,14 +16955,14 @@ body{
   width:100%;
 }
 
-.calendar-events-popup-row button:hover{
+.calendar-events-popup-edit:hover{
   background:#eef4ff;
 }
 
 .calendar-events-popup-time{
   color:#4056b4;
   font:800 12px/1.25 "Manrope", "Segoe UI", Arial, sans-serif;
-  grid-row:1 / span 2;
+  grid-row:1 / span 3;
   white-space:nowrap;
 }
 
@@ -16975,6 +16982,32 @@ body{
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
+}
+
+.calendar-events-popup-location{
+  color:#50617f;
+  font:700 11px/1.25 "Manrope", "Segoe UI", Arial, sans-serif;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.calendar-events-popup-geo{
+  align-self:center;
+  background:#eef6ff;
+  border:1px solid #bfd4ff;
+  border-radius:6px;
+  color:#2454c6;
+  cursor:pointer;
+  font:800 10px/1.1 "Manrope", "Segoe UI", Arial, sans-serif;
+  padding:7px 8px;
+  white-space:nowrap;
+}
+
+.calendar-events-popup-geo:hover{
+  background:#dfeaff;
+  border-color:#92b4ff;
 }
 
 .calendar-events-popup-empty{
