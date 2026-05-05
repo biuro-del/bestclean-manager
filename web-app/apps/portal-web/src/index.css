@@ -16719,6 +16719,7 @@ body{
   background:conic-gradient(var(--pie, #e2e8f0 0% 100%));
   border-radius:999px;
   box-shadow:inset 0 0 0 1px rgba(15,23,42,.08), 0 8px 18px rgba(15,23,42,.08);
+  cursor:pointer;
   display:flex;
   height:126px;
   justify-content:center;
@@ -16772,7 +16773,7 @@ body{
 .calendar-events-pie-legend li{
   align-items:center;
   border-radius:5px;
-  cursor:default;
+  cursor:pointer;
   display:grid;
   gap:6px;
   grid-template-columns:10px minmax(0, 1fr) auto auto;
@@ -16827,6 +16828,93 @@ body{
   font-style:normal;
   min-width:44px;
   text-align:right;
+}
+
+.calendar-events-pie-detail-popup{
+  background:#fff;
+  border:1px solid #cbd7ee;
+  border-radius:8px;
+  box-shadow:0 20px 48px rgba(15,23,42,.28);
+  color:#17233a;
+  overflow:hidden;
+  position:fixed;
+  z-index:12020;
+}
+
+.calendar-events-pie-detail-head{
+  align-items:center;
+  background:#f7f9ff;
+  border-bottom:1px solid #e2e8f5;
+  display:flex;
+  gap:10px;
+  justify-content:space-between;
+  padding:9px 10px 9px 12px;
+}
+
+.calendar-events-pie-detail-head strong{
+  color:#17233a;
+  display:block;
+  font:800 13px/1.2 "Manrope", "Segoe UI", Arial, sans-serif;
+}
+
+.calendar-events-pie-detail-head span{
+  color:#77849a;
+  display:block;
+  font:700 10px/1.2 "Manrope", "Segoe UI", Arial, sans-serif;
+  margin-top:2px;
+}
+
+.calendar-events-pie-detail-head button{
+  align-items:center;
+  background:#fff;
+  border:1px solid #d7e0ef;
+  border-radius:6px;
+  color:#40516f;
+  cursor:pointer;
+  display:flex;
+  flex:0 0 auto;
+  font:800 17px/1 "Manrope", "Segoe UI", Arial, sans-serif;
+  height:26px;
+  justify-content:center;
+  width:26px;
+}
+
+.calendar-events-pie-detail-body{
+  display:grid;
+  gap:12px;
+  grid-template-columns:112px minmax(0, 1fr);
+  padding:12px;
+}
+
+.calendar-events-pie--small{
+  cursor:default;
+  height:104px;
+  width:104px;
+}
+
+.calendar-events-pie--small::before{
+  inset:24px;
+}
+
+.calendar-events-pie--small strong{
+  font-size:16px;
+}
+
+.calendar-events-pie-detail-list{
+  align-content:start;
+  max-height:190px;
+  overflow:hidden auto;
+}
+
+.calendar-events-pie-detail-list li{
+  cursor:default;
+}
+
+.calendar-events-pie-detail-empty{
+  color:#77849a;
+  display:block !important;
+  font:700 12px/1.35 "Manrope", "Segoe UI", Arial, sans-serif;
+  padding:10px 4px;
 }
 
 .calendar-events-graph{
@@ -17546,6 +17634,184 @@ body{
   font:800 12px/1 "Manrope", "Segoe UI", Arial, sans-serif;
 }
 
+#portalRoot #view-orders .orders-device-notes{
+  display:grid;
+  gap:6px;
+  margin-top:8px;
+}
+
+#portalRoot #view-orders .orders-device-notes[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-device-note-row{
+  align-items:start;
+  background:#f8fbff;
+  border:1px solid #dbe6f5;
+  border-radius:6px;
+  display:grid;
+  gap:8px;
+  grid-template-columns:46px minmax(0, 1fr);
+  padding:7px;
+}
+
+#portalRoot #view-orders .orders-device-note-thumb{
+  align-items:center;
+  background:#eef4ff;
+  border:1px solid #d4e0f2;
+  border-radius:5px;
+  color:#72829a;
+  display:flex;
+  font:800 10px/1.15 "Manrope", "Segoe UI", Arial, sans-serif;
+  height:46px;
+  justify-content:center;
+  overflow:hidden;
+  text-align:center;
+  text-decoration:none;
+  width:46px;
+}
+
+#portalRoot #view-orders .orders-device-note-thumb img{
+  height:100%;
+  object-fit:cover;
+  width:100%;
+}
+
+#portalRoot #view-orders .orders-device-note-copy{
+  min-width:0;
+}
+
+#portalRoot #view-orders .orders-device-note-copy strong,
+#portalRoot #view-orders .orders-device-note-copy p,
+#portalRoot #view-orders .orders-device-note-copy small{
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+#portalRoot #view-orders .orders-device-note-copy strong{
+  color:#182a45;
+  font:800 12px/1.25 "Manrope", "Segoe UI", Arial, sans-serif;
+  white-space:nowrap;
+}
+
+#portalRoot #view-orders .orders-device-note-copy p{
+  color:#43536b;
+  font:700 12px/1.35 "Manrope", "Segoe UI", Arial, sans-serif;
+  margin:3px 0 0;
+}
+
+#portalRoot #view-orders .orders-device-note-copy small{
+  color:#7b8798;
+  font:700 10px/1.25 "Manrope", "Segoe UI", Arial, sans-serif;
+  margin-top:4px;
+  white-space:nowrap;
+}
+
+#portalRoot #view-orders .orders-device-note-overlay{
+  align-items:center;
+  background:rgba(15, 23, 42, .42);
+  display:flex;
+  inset:0;
+  justify-content:center;
+  padding:24px;
+  position:fixed;
+  z-index:95;
+}
+
+#portalRoot #view-orders .orders-device-note-overlay[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-device-note-modal{
+  background:#fff;
+  border:1px solid #cfd8e8;
+  border-radius:8px;
+  box-shadow:0 24px 70px rgba(15, 23, 42, .26);
+  overflow:hidden;
+  width:min(540px, calc(100vw - 32px));
+}
+
+#portalRoot #view-orders .orders-device-note-head{
+  align-items:center;
+  background:#5877d2;
+  color:#fff;
+  display:flex;
+  justify-content:space-between;
+  min-height:42px;
+  padding:0 12px 0 14px;
+}
+
+#portalRoot #view-orders .orders-device-note-head h3{
+  font:800 15px/1.2 "Manrope", "Segoe UI", Arial, sans-serif;
+  margin:0;
+}
+
+#portalRoot #view-orders .orders-device-note-head button{
+  align-items:center;
+  background:rgba(255,255,255,.15);
+  border:1px solid rgba(255,255,255,.35);
+  border-radius:6px;
+  color:#fff;
+  cursor:pointer;
+  display:flex;
+  font:900 19px/1 "Manrope", "Segoe UI", Arial, sans-serif;
+  height:30px;
+  justify-content:center;
+  width:30px;
+}
+
+#portalRoot #view-orders .orders-device-note-body{
+  padding:14px;
+}
+
+#portalRoot #view-orders .orders-device-note-body .orders-field textarea{
+  min-height:96px;
+}
+
+#portalRoot #view-orders .orders-device-photo-preview{
+  align-items:center;
+  background:#f8fbff;
+  border:1px dashed #c6d4eb;
+  border-radius:7px;
+  color:#687892;
+  display:grid;
+  font:700 12px/1.35 "Manrope", "Segoe UI", Arial, sans-serif;
+  gap:8px;
+  min-height:52px;
+  padding:9px;
+}
+
+#portalRoot #view-orders .orders-device-photo-preview img{
+  border-radius:6px;
+  max-height:150px;
+  max-width:100%;
+  object-fit:contain;
+}
+
+#portalRoot #view-orders .orders-device-note-actions{
+  align-items:center;
+  border-top:1px solid #e1e7f1;
+  display:flex;
+  gap:10px;
+  justify-content:flex-end;
+  padding:12px 14px;
+}
+
+#portalRoot #view-orders .orders-device-note-actions button{
+  border-radius:6px;
+  cursor:pointer;
+  font:800 12px/1 "Manrope", "Segoe UI", Arial, sans-serif;
+  min-height:36px;
+  padding:0 14px;
+}
+
+#portalRoot #view-orders .orders-device-note-actions button:not(.orders-save-btn){
+  background:#fff;
+  border:1px solid #cfd8e8;
+  color:#41516b;
+}
+
 #portalRoot #view-orders .orders-editor-actions{
   display:flex;
   justify-content:flex-end;
@@ -17878,6 +18144,12 @@ body{
   min-width:0;
 }
 
+#portalRoot #view-orders .orders-field-hint{
+  color:#6b7a90;
+  font:700 11px/1.35 "Manrope", "Segoe UI", Arial, sans-serif;
+  margin:4px 0 0;
+}
+
 #portalRoot #view-orders .orders-location-combo{
   min-width:0;
   position:relative;
@@ -18057,6 +18329,66 @@ body{
   padding:10px;
 }
 
+#portalRoot #view-orders .orders-schedule-first{
+  background:#fff;
+  border:1px solid #d8e2f2;
+  border-radius:8px;
+  display:grid;
+  gap:10px;
+  margin:0 0 12px;
+  padding:10px;
+}
+
+#portalRoot #view-orders .orders-schedule-section-title{
+  align-items:center;
+  color:#25354d;
+  display:flex;
+  font:800 12px/1.2 "Manrope", "Segoe UI", Arial, sans-serif;
+  justify-content:space-between;
+}
+
+#portalRoot #view-orders .orders-schedule-section-title button{
+  align-items:center;
+  background:#eef4ff;
+  border:1px solid #c7d8f4;
+  border-radius:7px;
+  color:#2f63e6;
+  cursor:pointer;
+  display:flex;
+  font:900 16px/1 "Manrope", "Segoe UI", Arial, sans-serif;
+  height:30px;
+  justify-content:center;
+  width:34px;
+}
+
+#portalRoot #view-orders .orders-schedule-section-title button.is-active{
+  background:#dbeafe;
+  border-color:#9db9ee;
+}
+
+#portalRoot #view-orders .orders-schedule-date-grid,
+#portalRoot #view-orders .orders-schedule-time-grid{
+  display:grid;
+  gap:8px;
+  grid-template-columns:1fr 1fr;
+}
+
+#portalRoot #view-orders .orders-schedule-time-grid[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-schedule-repeat.is-disabled{
+  background:#f5f7fb;
+  border-style:dashed;
+  opacity:.58;
+}
+
+#portalRoot #view-orders .orders-schedule-repeat.is-disabled label,
+#portalRoot #view-orders .orders-schedule-repeat.is-disabled span{
+  color:#8793a6;
+  cursor:not-allowed;
+}
+
 #portalRoot #view-orders .orders-weekday-grid{
   display:grid;
   gap:6px;
@@ -18094,6 +18426,14 @@ body{
   grid-template-columns:auto 76px minmax(0, 1fr);
 }
 
+#portalRoot #view-orders .orders-schedule-weekdays{
+  color:#334155;
+  display:grid;
+  font:800 12px/1.2 "Manrope", "Segoe UI", Arial, sans-serif;
+  gap:7px;
+}
+
+#portalRoot #view-orders .orders-schedule-custom input,
 #portalRoot #view-orders .orders-schedule-custom select{
   background:#fff;
   border:1px solid #cfd8e8;
@@ -18136,6 +18476,12 @@ body{
   font:800 11px/1 "Manrope", "Segoe UI", Arial, sans-serif;
   margin-top:10px;
   padding:7px 10px;
+}
+
+#portalRoot #view-orders .orders-schedule-preview-note.is-muted{
+  background:#f1f5f9;
+  border-color:#d8e2f2;
+  color:#64748b;
 }
 
 #portalRoot #view-orders .orders-description{

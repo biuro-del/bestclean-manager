@@ -2548,7 +2548,6 @@ export async function getTodayActiveWorkers(orgId) {
     })
     .map((item) => {
       const visibleItem = { ...item }
-      delete visibleItem.activeSortTs
       delete visibleItem.latestEventTs
       return visibleItem
     })

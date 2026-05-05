@@ -166,31 +166,38 @@
             </label>
 
             <div class="orders-field orders-location-field">
-              <label for="ordersEditLocation">Lokalizacje</label>
+              <label for="ordersEditLocation">Adres wykonania zlecenia</label>
               <div class="orders-location-combo">
-                <input id="ordersEditLocation" type="text" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-controls="ordersLocationSuggestions" />
+                <input id="ordersEditLocation" type="text" autocomplete="off" placeholder="Wpisz tylko, jeśli adres jest inny niż domyślny klienta" aria-autocomplete="list" aria-expanded="false" aria-controls="ordersLocationSuggestions" aria-describedby="ordersEditLocationHint" />
                 <div class="orders-location-suggestions" id="ordersLocationSuggestions" hidden></div>
                 <input id="ordersEditLocationPlaceId" type="hidden" />
                 <input id="ordersEditLocationLat" type="hidden" />
                 <input id="ordersEditLocationLng" type="hidden" />
                 <input id="ordersEditLocationMapUrl" type="hidden" />
               </div>
+              <p class="orders-field-hint" id="ordersEditLocationHint">Puste pole oznacza adres siedziby firmy.</p>
             </div>
 
             <div class="orders-field orders-editor-inline-add">
               <span>Urządzenia</span>
               <div>
                 <select id="ordersEditDevice">
-                  <option>Nothing selected</option>
+                  <option value="">Wybierz</option>
+                  <option>Opis / uwaga</option>
+                  <option>Uszkodzenie</option>
+                  <option>Brak dostÄ™pu</option>
+                  <option>ZdjÄ™cie kontrolne</option>
+                  <option>Inne</option>
                 </select>
-                <button type="button">Dodaj</button>
+                <button id="ordersDeviceNoteAdd" type="button">Dodaj</button>
               </div>
+              <div class="orders-device-notes" id="ordersDeviceNotesRows" hidden></div>
             </div>
 
             <label class="orders-field">
               <span>Rodzaj zlecenia</span>
               <select id="ordersEditType">
-                <option value="individual">Zlecenie indywidualne</option>
+                <option value="individual">Zlecenie jednorazowe</option>
                 <option value="cyclic">Zlecenie cykliczne</option>
                 <option value="renovation">Zlecenie poremontowe</option>
                 <option value="windows">Mycie okien</option>
@@ -211,9 +218,9 @@
               <label class="orders-field">
                 <span>Płatność</span>
                 <select id="ordersEditPayment">
-                  <option>Transfer</option>
+                  <option>Karta płatnicza</option>
                   <option>Gotówka</option>
-                  <option>Przelew odroczony</option>
+                  <option>Przelew</option>
                 </select>
               </label>
               <label class="orders-field">
@@ -228,13 +235,14 @@
             </label>
 
             <label class="orders-field">
-              <span>Telefon *</span>
+              <span>Telefon do osoby kontaktowej w czasie zlecenia *</span>
               <input id="ordersEditPhone" type="tel" autocomplete="off" />
             </label>
 
             <div class="orders-checks" aria-label="Powiadomienia">
               <strong>Powiadomienia</strong>
               <label><input type="checkbox" /> Wystaw i wyślij FV</label>
+              <label><input type="checkbox" /> Wystaw i wyślij paragon</label>
               <label><input type="checkbox" /> Wyślij mailem raport końcowy</label>
               <label><input type="checkbox" /> SMS</label>
             </div>
@@ -252,15 +260,72 @@
                 <label><input type="radio" name="ordersScheduleMode" value="once" checked /> Jednorazowe</label>
                 <label><input type="radio" name="ordersScheduleMode" value="repeat" /> Cykliczne</label>
               </div>
-              <div class="orders-schedule-repeat">
+              <div class="orders-schedule-first">
+                <div class="orders-schedule-section-title">
+                  <span>Pierwsze zlecenie</span>
+                  <button id="ordersScheduleTimeToggle" type="button" title="Dodaj godziny" aria-pressed="true">◷</button>
+                </div>
+                <div class="orders-schedule-date-grid">
+                  <label class="orders-field">
+                    <span>Data rozpoczęcia</span>
+                    <input id="ordersScheduleStartDate" type="date" />
+                  </label>
+                  <label class="orders-field">
+                    <span>Data zakończenia</span>
+                    <input id="ordersScheduleEndDate" type="date" />
+                  </label>
+                </div>
+                <div class="orders-schedule-time-grid" id="ordersScheduleTimeGrid">
+                  <label class="orders-field">
+                    <span>Godzina START</span>
+                    <input id="ordersScheduleStartTime" type="time" />
+                  </label>
+                  <label class="orders-field">
+                    <span>Godzina STOP</span>
+                    <input id="ordersScheduleEndTime" type="time" />
+                  </label>
+                </div>
+              </div>
+              <div class="orders-schedule-repeat" id="ordersScheduleRepeatPanel">
+                <label class="orders-field">
+                  <span>Powtarza się</span>
+                  <select id="ordersEditRepeatPreset">
+                    <option value="day">Codziennie</option>
+                    <option value="week">Co tydzień</option>
+                    <option value="month">Co miesiąc</option>
+                    <option value="year">Co rok</option>
+                    <option value="interval">Okresowo</option>
+                    <option value="custom">Wybór niestandardowy</option>
+                  </select>
+                </label>
+                <div class="orders-schedule-custom">
+                  <span>Co</span>
+                  <input id="ordersEditRepeatEvery" type="number" min="1" step="1" />
+                  <select id="ordersEditRepeatUnit">
+                    <option value="day">Dzień</option>
+                    <option value="week">Tydzień</option>
+                    <option value="month">Miesiąc</option>
+                    <option value="year">Rok</option>
+                  </select>
+                </div>
+                <div class="orders-schedule-weekdays">
+                  <span>W następujące dni:</span>
+                  <div class="orders-weekday-grid">
+                    <label><input type="checkbox" data-orders-repeat-weekday="1" /> P</label>
+                    <label><input type="checkbox" data-orders-repeat-weekday="2" /> W</label>
+                    <label><input type="checkbox" data-orders-repeat-weekday="3" /> Ś</label>
+                    <label><input type="checkbox" data-orders-repeat-weekday="4" /> C</label>
+                    <label><input type="checkbox" data-orders-repeat-weekday="5" /> P</label>
+                    <label><input type="checkbox" data-orders-repeat-weekday="6" /> S</label>
+                    <label><input type="checkbox" data-orders-repeat-weekday="0" /> N</label>
+                  </div>
+                </div>
                 <div class="orders-field orders-editor-repeat">
-                  <span>Powtarzaj co</span>
+                  <span>Liczba dni po ukończeniu</span>
                   <div>
-                    <input id="ordersEditRepeatEvery" type="number" min="1" step="1" />
-                    <select id="ordersEditRepeatUnit">
-                      <option value="day">Dzień</option>
-                      <option value="week">Tydzień</option>
-                      <option value="month">Miesiąc</option>
+                    <input id="ordersEditRepeatAfterDays" type="number" min="0" step="1" value="0" />
+                    <select id="ordersEditRepeatAfterUnit">
+                      <option value="day">Dni</option>
                     </select>
                   </div>
                 </div>
@@ -280,15 +345,6 @@
                 <span>Dodatkowe informacje</span>
                 <button type="button" title="Informacje">?</button>
               </div>
-              <label class="orders-check-line"><input type="checkbox" /> Rezerwacja terminu</label>
-              <label class="orders-field">
-                <span>Numer zewnętrzny</span>
-                <input id="ordersEditExternalNumber" type="text" autocomplete="off" />
-              </label>
-              <label class="orders-field">
-                <span>Wyprzedzenie</span>
-                <input id="ordersEditAdvance" type="number" min="0" step="1" />
-              </label>
             </section>
 
             <section class="orders-side-panel">
@@ -364,6 +420,34 @@
             <div class="orders-coworker-rows" id="ordersCoworkerRows"></div>
           </section>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="orders-device-note-overlay" id="ordersDeviceNoteOverlay" hidden aria-label="Dodaj opis do zlecenia">
+    <div class="orders-device-note-modal" role="dialog" aria-modal="true" aria-labelledby="ordersDeviceNoteTitle">
+      <div class="orders-device-note-head">
+        <h3 id="ordersDeviceNoteTitle">Dodaj opis</h3>
+        <button type="button" data-orders-device-note-close aria-label="Zamknij">Ă—</button>
+      </div>
+      <div class="orders-device-note-body">
+        <label class="orders-field">
+          <span>Typ / temat</span>
+          <input id="ordersDeviceNoteSubject" type="text" maxlength="80" autocomplete="off" />
+        </label>
+        <label class="orders-field">
+          <span>KrĂłtki opis</span>
+          <textarea id="ordersDeviceNoteDescription" maxlength="500" placeholder="Napisz krĂłtko, o co chodzi."></textarea>
+        </label>
+        <label class="orders-field orders-device-photo-field">
+          <span>ZdjÄ™cie</span>
+          <input id="ordersDeviceNotePhoto" type="file" accept="image/*" />
+        </label>
+        <div class="orders-device-photo-preview" id="ordersDeviceNotePhotoPreview">Nie wybrano zdjÄ™cia.</div>
+      </div>
+      <div class="orders-device-note-actions">
+        <button type="button" data-orders-device-note-close>Anuluj</button>
+        <button class="orders-save-btn" id="ordersDeviceNoteSave" type="button">Dodaj</button>
       </div>
     </div>
   </section>

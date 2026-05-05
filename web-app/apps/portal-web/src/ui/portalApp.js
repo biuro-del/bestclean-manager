@@ -117,6 +117,7 @@ const appState = {
   calendarTimelineDragConflictKey: '',
   calendarTimelineDragConflictValue: false,
   calendarTimelineWorkerStateLoading: false,
+  calendarTimelineWorkerStateRefreshQueued: false,
   calendarTimelineWorkerStateFetchedAt: 0,
   calendarTimelineWorkerStateDayKey: '',
   calendarTimelineWorkerStateRangeStart: '',
@@ -3693,7 +3694,7 @@ function dashboardBuildTodayWorkerStateById(dayKey) {
   // Fallback for schedule colors: include all today's source rows (events/workdays),
   // so workers who already started and then closed are still recognized as "started today".
   sourceRows.forEach((row) => {
-    if (dashboardResolveDayKey(row) !== normalizedDayKey) {
+    if ((dashboardResolveDayKey(row) || calendarTimelineRealEventRowDay(row)) !== normalizedDayKey) {
       return
     }
 
@@ -7054,6 +7055,20 @@ function ordersTimelineAddressLabel(order = {}) {
   return '-'
 }
 
+function ordersExplicitExecutionAddressLabel(order = {}, defaultAddress = '') {
+  const explicit = ordersFirstClientText(order?.executionAddressLabel, order?.customAddressLabel, order?.addressOverride)
+  if (explicit) {
+    return explicit
+  }
+
+  const direct = ordersFirstClientText(order?.addressLabel, order?.address, order?.location)
+  const defaultLabel = ordersFirstClientText(defaultAddress)
+  if (!direct || (defaultLabel && normalizeSearchText(direct) === normalizeSearchText(defaultLabel))) {
+    return ''
+  }
+  return direct
+}
+
 function ordersFindTimelineOrder(orderId) {
   const id = String(orderId ?? '').trim()
   if (!id) {
@@ -7323,7 +7338,7 @@ function ordersSetClientFieldsFromData(data = {}) {
   ordersSetInputValue('ordersEditEmail', data.email || '')
   const addressLabel = ordersClientAddressLabel(data)
   if (addressLabel) {
-    ordersSetInputValue('ordersEditLocation', addressLabel)
+    ordersSetInputValue('ordersEditLocation', '')
     ordersSetLocationGeoFields({
       placeId: '',
       lat: '',
@@ -7411,16 +7426,17 @@ function ordersCreateDraftOrder() {
     title: 'Nowe zlecenie',
     clientLabel: '',
     addressLabel: '',
-    type: 'cyclic',
-    tone: ordersTimelineToneForType('cyclic'),
+    type: 'individual',
+    tone: ordersTimelineToneForType('individual'),
     priority: 'Normalny',
     repeatEvery: 7,
     repeatUnit: 'day',
-    advanceDays: 4,
+    advanceDays: 0,
     price: 0,
     description: '',
     coworkers: [],
     tasks: [],
+    deviceNotes: [],
     isDraft: true,
   }
 }
@@ -8134,6 +8150,160 @@ function ordersRenderEditorTabs() {
   })
 }
 
+function ordersScheduleModeForOrder(order = {}) {
+  return String(order?.type ?? '').trim() === 'cyclic' || String(order?.scheduleMode ?? '').trim() === 'repeat' ? 'repeat' : 'once'
+}
+
+function ordersSetScheduleModeValue(mode = 'once') {
+  const normalized = mode === 'repeat' ? 'repeat' : 'once'
+  document.querySelectorAll('#ordersEditorPanel input[name="ordersScheduleMode"]').forEach((input) => {
+    if (input instanceof HTMLInputElement) {
+      input.checked = input.value === normalized
+    }
+  })
+}
+
+function ordersSetScheduleRepeatDisabled(disabled = true) {
+  const panel = document.getElementById('ordersScheduleRepeatPanel')
+  if (!panel) {
+    return
+  }
+  panel.classList.toggle('is-disabled', Boolean(disabled))
+  panel.querySelectorAll('input, select, button').forEach((node) => {
+    if (node instanceof HTMLInputElement || node instanceof HTMLSelectElement || node instanceof HTMLButtonElement) {
+      node.disabled = Boolean(disabled)
+    }
+  })
+}
+
+function ordersSetScheduleTimeVisible(visible = true) {
+  const grid = document.getElementById('ordersScheduleTimeGrid')
+  const button = document.getElementById('ordersScheduleTimeToggle')
+  if (grid) {
+    grid.hidden = !visible
+  }
+  if (button) {
+    button.setAttribute('aria-pressed', visible ? 'true' : 'false')
+    button.classList.toggle('is-active', Boolean(visible))
+  }
+}
+
+function ordersRepeatUnitLabel(unit = 'day', every = 1) {
+  const amount = Math.max(1, Math.floor(Number(every) || 1))
+  const normalized = String(unit ?? 'day')
+  if (normalized === 'week') return amount === 1 ? 'Co tydzień' : `Co ${amount} tyg.`
+  if (normalized === 'month') return amount === 1 ? 'Co miesiąc' : `Co ${amount} mies.`
+  if (normalized === 'year') return amount === 1 ? 'Co rok' : `Co ${amount} lata`
+  return amount === 1 ? 'Codziennie' : `Co ${amount} dni`
+}
+
+function ordersRepeatPresetFromOrder(order = {}) {
+  const preset = String(order?.repeatPreset ?? '').trim()
+  if (['day', 'week', 'month', 'year', 'interval', 'custom'].includes(preset)) {
+    return preset
+  }
+  const every = Math.max(1, Math.floor(Number(order?.repeatEvery) || 1))
+  const unit = String(order?.repeatUnit ?? 'day').trim()
+  if (every === 1 && ['day', 'week', 'month', 'year'].includes(unit)) {
+    return unit
+  }
+  return 'custom'
+}
+
+function ordersWeekdayFromDateKey(dayKey = todayYmd()) {
+  const raw = ordersNormalizeDateField(dayKey, todayYmd())
+  const date = new Date(`${raw}T12:00:00`)
+  const day = date.getDay()
+  return Number.isInteger(day) ? day : 1
+}
+
+function ordersRepeatWeekdaysFromOrder(order = {}) {
+  const source = Array.isArray(order?.repeatWeekdays) ? order.repeatWeekdays : []
+  const weekdays = source
+    .map((value) => Number(value))
+    .filter((value, index, list) => Number.isInteger(value) && value >= 0 && value <= 6 && list.indexOf(value) === index)
+  return weekdays.length ? weekdays : [ordersWeekdayFromDateKey(order?.dateYmd)]
+}
+
+function ordersSetRepeatWeekdayChecks(weekdays = []) {
+  const selected = new Set((Array.isArray(weekdays) ? weekdays : []).map((value) => Number(value)))
+  document.querySelectorAll('#ordersEditorPanel [data-orders-repeat-weekday]').forEach((input) => {
+    if (input instanceof HTMLInputElement) {
+      input.checked = selected.has(Number(input.getAttribute('data-orders-repeat-weekday')))
+    }
+  })
+}
+
+function ordersReadRepeatWeekdays() {
+  return [...document.querySelectorAll('#ordersEditorPanel [data-orders-repeat-weekday]:checked')]
+    .map((input) => Number(input.getAttribute('data-orders-repeat-weekday')))
+    .filter((value, index, list) => Number.isInteger(value) && value >= 0 && value <= 6 && list.indexOf(value) === index)
+}
+
+function ordersSyncScheduleMirrorFields(order = {}) {
+  ordersSetInputValue('ordersScheduleStartDate', ordersNormalizeDateField(order.dateYmd, todayYmd()))
+  ordersSetInputValue('ordersScheduleEndDate', ordersNormalizeDateField(order.endDateYmd || order.validUntil || order.dateYmd, order.dateYmd || todayYmd()))
+  ordersSetInputValue('ordersScheduleStartTime', ordersNormalizeTimeField(order.startTime, '08:00'))
+  ordersSetInputValue('ordersScheduleEndTime', ordersNormalizeTimeField(order.endTime, ordersDefaultEndTime(order.startTime)))
+}
+
+function ordersSyncScheduleControls(order = {}) {
+  const mode = ordersScheduleModeForOrder(order)
+  ordersSetScheduleModeValue(mode)
+  ordersSetScheduleRepeatDisabled(mode !== 'repeat')
+  ordersSetScheduleTimeVisible(true)
+  ordersSyncScheduleMirrorFields(order)
+  ordersSetInputValue('ordersEditRepeatPreset', ordersRepeatPresetFromOrder(order))
+  ordersSetInputValue('ordersEditRepeatEvery', order.repeatEvery || 1)
+  ordersSetInputValue('ordersEditRepeatUnit', order.repeatUnit || 'week')
+  ordersSetInputValue('ordersEditRepeatAfterDays', order.repeatAfterDays || 0)
+  ordersSetRepeatWeekdayChecks(ordersRepeatWeekdaysFromOrder(order))
+}
+
+function ordersApplyRepeatPresetToControls(preset = '') {
+  const normalized = String(preset ?? '').trim()
+  if (['day', 'week', 'month', 'year'].includes(normalized)) {
+    ordersSetInputValue('ordersEditRepeatEvery', 1)
+    ordersSetInputValue('ordersEditRepeatUnit', normalized)
+  }
+}
+
+function ordersSyncMainScheduleFromMirror(targetId = '') {
+  const pairs = {
+    ordersScheduleStartDate: 'ordersEditStart',
+    ordersScheduleEndDate: 'ordersEditEnd',
+    ordersScheduleStartTime: 'ordersEditTime',
+    ordersScheduleEndTime: 'ordersEditEndTime',
+    ordersEditStart: 'ordersScheduleStartDate',
+    ordersEditEnd: 'ordersScheduleEndDate',
+    ordersEditTime: 'ordersScheduleStartTime',
+    ordersEditEndTime: 'ordersScheduleEndTime',
+  }
+  const pairedId = pairs[targetId]
+  if (pairedId) {
+    ordersSetInputValue(pairedId, ordersReadInputValue(targetId))
+  }
+}
+
+function ordersUpdateOrderScheduleFromControls(order = {}) {
+  const mode = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat' ? 'repeat' : 'once'
+  const selectedType = ordersReadInputValue('ordersEditType') || order.type || 'individual'
+  order.scheduleMode = mode
+  order.type = mode === 'repeat' ? 'cyclic' : selectedType === 'cyclic' ? 'individual' : selectedType
+  order.dateYmd = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), order.dateYmd || todayYmd())
+  order.endDateYmd = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), order.endDateYmd || order.dateYmd)
+  order.validUntil = order.endDateYmd
+  order.startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), order.startTime || '08:00')
+  order.endTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(order.startTime))
+  order.repeatPreset = mode === 'repeat' ? ordersReadInputValue('ordersEditRepeatPreset') || ordersRepeatPresetFromOrder(order) : 'none'
+  order.repeatEvery = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || 1))
+  order.repeatUnit = ordersReadInputValue('ordersEditRepeatUnit') || 'week'
+  order.repeatAfterDays = Math.max(0, Math.floor(Number(ordersReadInputValue('ordersEditRepeatAfterDays')) || 0))
+  order.repeatWeekdays = ordersReadRepeatWeekdays()
+  ordersSetInputValue('ordersEditType', order.type)
+  ordersSetScheduleRepeatDisabled(mode !== 'repeat')
+}
+
 function ordersRenderSchedulePreview(order = {}) {
   const preview = document.getElementById('ordersSchedulePreview')
   if (!preview) {
@@ -8142,17 +8312,194 @@ function ordersRenderSchedulePreview(order = {}) {
 
   const client = ordersTimelineClientLabel(order)
   const start = ordersNormalizeDateField(order.dateYmd, todayYmd())
-  const end = ordersNormalizeDateField(order.validUntil || order.endDateYmd || start, start)
+  const end = ordersNormalizeDateField(order.endDateYmd || order.validUntil || start, start)
+  const startTime = ordersNormalizeTimeField(order.startTime, '08:00')
+  const endTime = ordersNormalizeTimeField(order.endTime, ordersDefaultEndTime(startTime))
+  const isRepeat = ordersScheduleModeForOrder(order) === 'repeat'
   preview.innerHTML = `
     <div class="orders-schedule-preview-row">
       <strong>${escapeHtml(client || '-')}</strong>
-      <span>${escapeHtml(start)}</span>
-      <span>${escapeHtml(end)}</span>
+      <span>${escapeHtml(`${start} ${startTime}`)}</span>
+      <span>${escapeHtml(`${end} ${endTime}`)}</span>
     </div>
-    <div class="orders-schedule-preview-note">
-      ${String(order.repeatUnit || 'day') === 'day' ? `Co ${escapeHtml(order.repeatEvery || 1)} dni` : `Powtarzanie: ${escapeHtml(order.repeatUnit || 'day')}`}
+    <div class="orders-schedule-preview-note${isRepeat ? '' : ' is-muted'}">
+      ${isRepeat ? escapeHtml(ordersRepeatUnitLabel(order.repeatUnit, order.repeatEvery)) : 'Jednorazowe - bez powtarzania'}
     </div>
   `
+}
+
+function ordersDeviceNotes(order = {}) {
+  const source = Array.isArray(order?.deviceNotes)
+    ? order.deviceNotes
+    : Array.isArray(order?.deviceMessages)
+      ? order.deviceMessages
+      : []
+  return source
+    .map((note, index) => ({
+      id: String(note?.id ?? `note-${index}`).trim() || `note-${index}`,
+      subject: String(note?.subject ?? note?.title ?? note?.deviceLabel ?? '').trim(),
+      description: String(note?.description ?? note?.message ?? note?.text ?? '').trim(),
+      createdAt: String(note?.createdAt ?? '').trim(),
+      createdBy: String(note?.createdBy ?? '').trim(),
+      photo: note?.photo && typeof note.photo === 'object' ? note.photo : null,
+    }))
+    .filter((note) => note.subject || note.description || note.photo?.dataUrl)
+}
+
+function ordersDeviceNoteAuthorLabel() {
+  return (
+    String(appState.session?.name ?? '').trim() ||
+    String(appState.session?.login ?? '').trim() ||
+    String(appState.session?.email ?? '').trim() ||
+    'System'
+  )
+}
+
+function ordersDeviceNoteTimestampLabel(value = '') {
+  const iso = String(value ?? '').trim()
+  return iso ? `${formatDatePl(iso)} ${formatTime(iso)}` : ''
+}
+
+function ordersRenderDeviceNotes(order = {}) {
+  const box = document.getElementById('ordersDeviceNotesRows')
+  if (!box) {
+    return
+  }
+  const notes = ordersDeviceNotes(order)
+  box.hidden = !notes.length
+  box.innerHTML = notes
+    .map((note) => {
+      const photoUrl = String(note.photo?.dataUrl ?? '').trim()
+      const photoName = String(note.photo?.name ?? 'Zdjęcie').trim()
+      const thumb = photoUrl
+        ? `<a class="orders-device-note-thumb" href="${escapeHtml(photoUrl)}" target="_blank" rel="noopener noreferrer" title="Otwórz zdjęcie"><img src="${escapeHtml(photoUrl)}" alt="${escapeHtml(photoName)}" /></a>`
+        : '<div class="orders-device-note-thumb orders-device-note-thumb--empty">Brak zdjęcia</div>'
+      const meta = [ordersDeviceNoteTimestampLabel(note.createdAt), note.createdBy].filter(Boolean).join(' · ')
+      return `
+        <article class="orders-device-note-row">
+          ${thumb}
+          <div class="orders-device-note-copy">
+            <strong>${escapeHtml(note.subject || 'Opis')}</strong>
+            ${note.description ? `<p>${escapeHtml(note.description)}</p>` : ''}
+            ${meta ? `<small>${escapeHtml(meta)}</small>` : ''}
+          </div>
+        </article>
+      `
+    })
+    .join('')
+}
+
+function ordersResetDeviceNoteForm(subject = '') {
+  ordersSetInputValue('ordersDeviceNoteSubject', subject)
+  ordersSetInputValue('ordersDeviceNoteDescription', '')
+  const photo = document.getElementById('ordersDeviceNotePhoto')
+  if (photo instanceof HTMLInputElement) {
+    photo.value = ''
+  }
+  ordersRenderDeviceNotePhotoPreview()
+}
+
+function ordersOpenDeviceNoteModal() {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  if (!order) {
+    showTransientNotice('Najpierw otwórz zlecenie.', 'error')
+    return
+  }
+  const subject = ordersReadInputValue('ordersEditDevice') || 'Opis / uwaga'
+  ordersResetDeviceNoteForm(subject)
+  const overlay = document.getElementById('ordersDeviceNoteOverlay')
+  if (overlay) {
+    overlay.hidden = false
+  }
+  document.getElementById('ordersDeviceNoteDescription')?.focus()
+}
+
+function ordersCloseDeviceNoteModal() {
+  const overlay = document.getElementById('ordersDeviceNoteOverlay')
+  if (overlay) {
+    overlay.hidden = true
+  }
+}
+
+function ordersDeviceNotePhotoFile() {
+  const input = document.getElementById('ordersDeviceNotePhoto')
+  return input instanceof HTMLInputElement ? input.files?.[0] ?? null : null
+}
+
+function ordersRenderDeviceNotePhotoPreview() {
+  const preview = document.getElementById('ordersDeviceNotePhotoPreview')
+  if (!preview) {
+    return
+  }
+  const file = ordersDeviceNotePhotoFile()
+  if (!file) {
+    preview.textContent = 'Nie wybrano zdjęcia.'
+    return
+  }
+  if (!String(file.type ?? '').startsWith('image/')) {
+    preview.textContent = 'Wybierz plik graficzny.'
+    return
+  }
+  preview.innerHTML = `
+    <img src="${escapeHtml(URL.createObjectURL(file))}" alt="${escapeHtml(file.name)}" />
+    <span>${escapeHtml(file.name)} · ${escapeHtml(formatBytes(file.size))}</span>
+  `
+}
+
+function ordersReadImageFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error ?? new Error('Nie udało się odczytać zdjęcia.'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function ordersSaveDeviceNoteFromModal() {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  if (!order) {
+    showTransientNotice('Nie znaleziono zlecenia do zapisania opisu.', 'error')
+    ordersCloseDeviceNoteModal()
+    return
+  }
+
+  const subject = ordersReadInputValue('ordersDeviceNoteSubject') || 'Opis / uwaga'
+  const description = ordersReadInputValue('ordersDeviceNoteDescription')
+  const file = ordersDeviceNotePhotoFile()
+  if (!description && !file) {
+    showTransientNotice('Dodaj krótki opis albo zdjęcie.', 'error')
+    return
+  }
+  if (file && !String(file.type ?? '').startsWith('image/')) {
+    showTransientNotice('Zdjęcie musi być plikiem graficznym.', 'error')
+    return
+  }
+  if (file && file.size > 6 * 1024 * 1024) {
+    showTransientNotice('Zdjęcie jest za duże. Wybierz plik do 6 MB.', 'error')
+    return
+  }
+
+  const photo = file
+    ? {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        dataUrl: await ordersReadImageFileAsDataUrl(file),
+      }
+    : null
+  const note = {
+    id: `device-note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    subject,
+    description,
+    photo,
+    createdAt: new Date().toISOString(),
+    createdBy: ordersDeviceNoteAuthorLabel(),
+  }
+  order.deviceNotes = [...ordersDeviceNotes(order), note]
+  order.deviceMessages = order.deviceNotes
+  ordersRenderDeviceNotes(order)
+  ordersCloseDeviceNoteModal()
+  showTransientNotice('Dodano opis do zlecenia.')
 }
 
 function ordersRenderEditor(order = {}) {
@@ -8190,6 +8537,10 @@ function ordersRenderEditor(order = {}) {
   const orderClientLabel = ordersTimelineClientLabel(order)
   const selectedClient = ordersFindClientBySelection(order.clientId || order.clientLabel || orderClientLabel)
   const selectedClientData = selectedClient ? ordersClientFormData(selectedClient) : {}
+  const defaultClientAddress = ordersClientAddressLabel(selectedClientData)
+  const explicitExecutionAddress = ordersExplicitExecutionAddressLabel(order, defaultClientAddress)
+  const timelineAddress = ordersTimelineAddressLabel(order)
+  const mapAddress = explicitExecutionAddress || defaultClientAddress || (timelineAddress === '-' ? '' : timelineAddress)
 
   ordersSetInputValue('ordersEditName', order.title || '')
   ordersSetInputValue('ordersEditClient', orderClientLabel)
@@ -8199,17 +8550,17 @@ function ordersRenderEditor(order = {}) {
   ordersSetInputValue('ordersEditEnd', validUntil)
   ordersSetInputValue('ordersEditEndTime', ordersNormalizeTimeField(order.endTime, ordersDefaultEndTime(order.startTime)))
   ordersSetInputValue('ordersEditDurationHours', duration)
-  ordersSetInputValue('ordersEditLocation', ordersTimelineAddressLabel(order))
+  ordersSetInputValue('ordersEditLocation', explicitExecutionAddress)
   ordersSetLocationGeoFields({
     placeId: order.placeId || order.googlePlaceId || '',
     lat: order.lat || order.latitude || '',
     lng: order.lng || order.longitude || '',
-    mapUrl: order.mapUrl || order.googleMapsUrl || ordersGoogleMapsSearchUrl(ordersTimelineAddressLabel(order)),
+    mapUrl: order.mapUrl || order.googleMapsUrl || ordersGoogleMapsSearchUrl(mapAddress),
   })
   ordersSetInputValue('ordersEditRepeatEvery', order.repeatEvery || 7)
   ordersSetInputValue('ordersEditRepeatUnit', order.repeatUnit || 'day')
   ordersSetInputValue('ordersEditPriority', order.priority || 'Normalny')
-  ordersSetInputValue('ordersEditAdvance', order.advanceDays || 4)
+  ordersSetInputValue('ordersEditAdvance', order.advanceDays || 0)
   ordersSetInputValue('ordersEditType', ['individual', 'cyclic', 'renovation', 'windows', 'other'].includes(type) ? type : 'other')
   ordersSetInputValue('ordersEditPrice', order.price || 0)
   ordersSetInputValue('ordersEditTaskName', order.taskName || '')
@@ -8226,6 +8577,8 @@ function ordersRenderEditor(order = {}) {
   ordersSetInputValue('ordersEditCountry', order.country || order.clientCountry || selectedClientData.country || '')
   ordersSetInputValue('ordersEditEmail', order.email || order.clientEmail || selectedClientData.email || '')
   ordersRenderWorkerChecklist(order)
+  ordersRenderDeviceNotes(order)
+  ordersSyncScheduleControls(order)
   ordersRenderSchedulePreview(order)
   ordersRenderCoworkerRows(order)
   ordersRenderEditorTabs()
@@ -8263,6 +8616,7 @@ function ordersOpenEditorFromCalendar(orderId) {
 }
 
 function ordersShowList() {
+  ordersCloseDeviceNoteModal()
   ordersDiscardDraftIfNeeded()
   appState.ordersEditingId = ''
   appState.ordersEditorMode = 'edit'
@@ -8288,6 +8642,10 @@ function ordersSaveEditor() {
   const totalEndMinutes = startMinutes + durationHours * 60
   let endDateYmd = explicitEndTime ? explicitEndDate : calendarAddDays(dateYmd, Math.floor(totalEndMinutes / 1440))
   let endTime = explicitEndTime || calendarMinutesToTime(totalEndMinutes % 1440) || '23:59'
+  if (explicitEndDate < dateYmd) {
+    showTransientNotice('Data zakończenia pierwszego zlecenia nie może być wcześniejsza niż data rozpoczęcia.', 'error')
+    return
+  }
   if (endDateYmd === dateYmd && calendarTimelineTimeMinutes(endTime, startMinutes + 60) <= startMinutes) {
     showTransientNotice('Godzina STOP musi być późniejsza niż godzina START.', 'error')
     return
@@ -8295,7 +8653,9 @@ function ordersSaveEditor() {
   const selectedRows = ordersReadSelectedWorkerRows()
   const row = Number(ordersReadInputValue('ordersEditWorker'))
   const safeRow = selectedRows[0] ?? (Number.isInteger(row) && row >= 0 ? row : Number(order.row ?? 0))
-  const type = String(ordersReadInputValue('ordersEditType') || order.type || 'other').trim()
+  const selectedType = String(ordersReadInputValue('ordersEditType') || order.type || 'individual').trim()
+  const scheduleMode = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat' || selectedType === 'cyclic' ? 'repeat' : 'once'
+  const type = scheduleMode === 'repeat' ? 'cyclic' : selectedType === 'cyclic' ? 'individual' : selectedType
   const clientLabel = ordersReadInputValue('ordersEditClient') || ordersReadInputValue('ordersEditClientName')
   const selectedClient = ordersFindClientBySelection(clientLabel)
   const selectedClientData = selectedClient ? ordersClientFormData(selectedClient) : {}
@@ -8303,11 +8663,13 @@ function ordersSaveEditor() {
   const clientStreet = ordersReadInputValue('ordersEditStreet') || selectedClientData.street
   const clientCity = ordersReadInputValue('ordersEditCity') || selectedClientData.city
   const clientPostCode = ordersReadInputValue('ordersEditPostCode') || selectedClientData.postCode
-  const clientAddressLabel = ordersReadInputValue('ordersEditLocation') || ordersClientAddressLabel({
+  const executionAddressLabel = ordersReadInputValue('ordersEditLocation')
+  const defaultClientAddressLabel = ordersClientAddressLabel({
     street: clientStreet,
     city: clientCity,
     postCode: clientPostCode,
   })
+  const clientAddressLabel = executionAddressLabel || defaultClientAddressLabel
 
   const nextOrder = {
     ...order,
@@ -8320,6 +8682,7 @@ function ordersSaveEditor() {
     endDateYmd,
     endTime,
     validUntil: explicitEndDate,
+    scheduleMode,
     nextDate: ordersNormalizeDateField(ordersReadInputValue('ordersEditNext'), dateYmd),
     title: ordersReadInputValue('ordersEditName') || order.title || 'Zlecenie',
     clientId: selectedClientData.clientId || order.clientId || '',
@@ -8339,16 +8702,23 @@ function ordersSaveEditor() {
     email: ordersReadInputValue('ordersEditEmail') || selectedClientData.email,
     contact: ordersReadInputValue('ordersEditEmail') || selectedClientData.contact,
     addressLabel: clientAddressLabel,
+    executionAddressLabel,
+    customAddressLabel: executionAddressLabel,
     googlePlaceId: ordersReadInputValue('ordersEditLocationPlaceId'),
     placeId: ordersReadInputValue('ordersEditLocationPlaceId'),
     lat: ordersReadInputValue('ordersEditLocationLat'),
     lng: ordersReadInputValue('ordersEditLocationLng'),
     mapUrl: ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(clientAddressLabel),
     googleMapsUrl: ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(clientAddressLabel),
+    repeatPreset: scheduleMode === 'repeat' ? ordersReadInputValue('ordersEditRepeatPreset') || 'custom' : 'none',
     repeatEvery: Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || 1)),
     repeatUnit: ordersReadInputValue('ordersEditRepeatUnit') || 'day',
+    repeatAfterDays: Math.max(0, Math.floor(Number(ordersReadInputValue('ordersEditRepeatAfterDays')) || 0)),
+    repeatWeekdays: ordersReadRepeatWeekdays(),
     priority: ordersReadInputValue('ordersEditPriority') || 'Normalny',
-    advanceDays: Math.max(0, Math.floor(Number(ordersReadInputValue('ordersEditAdvance')) || 0)),
+    advanceDays: document.getElementById('ordersEditAdvance')
+      ? Math.max(0, Math.floor(Number(ordersReadInputValue('ordersEditAdvance')) || 0))
+      : Math.max(0, Math.floor(Number(order.advanceDays) || 0)),
     type: ['individual', 'cyclic', 'renovation', 'windows', 'other'].includes(type) ? type : 'other',
     tone: ordersTimelineToneForType(type),
     price: Math.max(0, Number(ordersReadInputValue('ordersEditPrice')) || 0),
@@ -8357,6 +8727,8 @@ function ordersSaveEditor() {
     smsTime: ordersReadInputValue('ordersEditSmsTime'),
     phone: ordersReadInputValue('ordersEditPhone'),
     description: ordersReadInputValue('ordersEditDescription'),
+    deviceNotes: ordersDeviceNotes(order),
+    deviceMessages: ordersDeviceNotes(order),
   }
 
   const conflict = calendarTimelineFindOrderConflict(nextOrder, ordersListSourceOrders(), calendarTimelineResources())
@@ -8835,6 +9207,72 @@ function bindOrdersViewFunctions() {
   })
 
   binding.add(root, 'change', (event) => {
+    if (event.target?.id === 'ordersDeviceNotePhoto') {
+      ordersRenderDeviceNotePhotoPreview()
+      return
+    }
+
+    if (event.target?.name === 'ordersScheduleMode') {
+      const order = ordersFindTimelineOrder(appState.ordersEditingId)
+      if (order) {
+        ordersUpdateOrderScheduleFromControls(order)
+        ordersSyncScheduleControls(order)
+        ordersRenderSchedulePreview(order)
+      } else {
+        ordersSetScheduleRepeatDisabled(event.target?.value !== 'repeat')
+      }
+      return
+    }
+
+    if (event.target?.id === 'ordersEditType') {
+      const order = ordersFindTimelineOrder(appState.ordersEditingId)
+      if (order) {
+        const selectedType = ordersReadInputValue('ordersEditType') || 'individual'
+        order.type = selectedType
+        order.scheduleMode = selectedType === 'cyclic' ? 'repeat' : 'once'
+        ordersSyncScheduleControls(order)
+        ordersRenderSchedulePreview(order)
+      }
+      return
+    }
+
+    if (event.target?.id === 'ordersEditRepeatPreset') {
+      ordersApplyRepeatPresetToControls(ordersReadInputValue('ordersEditRepeatPreset'))
+    }
+
+    if (
+      [
+        'ordersScheduleStartDate',
+        'ordersScheduleEndDate',
+        'ordersScheduleStartTime',
+        'ordersScheduleEndTime',
+        'ordersEditStart',
+        'ordersEditEnd',
+        'ordersEditTime',
+        'ordersEditEndTime',
+        'ordersEditRepeatPreset',
+        'ordersEditRepeatEvery',
+        'ordersEditRepeatUnit',
+        'ordersEditRepeatAfterDays',
+      ].includes(String(event.target?.id ?? '')) ||
+      event.target?.hasAttribute?.('data-orders-repeat-weekday')
+    ) {
+      const targetId = String(event.target?.id ?? '')
+      ordersSyncMainScheduleFromMirror(targetId)
+      const order = ordersFindTimelineOrder(appState.ordersEditingId)
+      if (order) {
+        ordersUpdateOrderScheduleFromControls(order)
+        if (targetId === 'ordersEditStart' || targetId === 'ordersScheduleStartDate') {
+          const checkedWeekdays = ordersReadRepeatWeekdays()
+          if (!checkedWeekdays.length) {
+            order.repeatWeekdays = [ordersWeekdayFromDateKey(order.dateYmd)]
+          }
+        }
+        ordersRenderSchedulePreview(order)
+      }
+      return
+    }
+
     if (event.target?.id === 'ordersEditClient') {
       const order = ordersFindTimelineOrder(appState.ordersEditingId)
       const selection = ordersReadInputValue('ordersEditClient')
@@ -8854,6 +9292,8 @@ function bindOrdersViewFunctions() {
         order.email = data.email || ''
         order.contact = data.contact || ''
         order.addressLabel = ordersReadInputValue('ordersEditLocation') || ordersClientAddressLabel(data)
+        order.executionAddressLabel = ordersReadInputValue('ordersEditLocation')
+        order.customAddressLabel = order.executionAddressLabel
         order.mapUrl = ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(order.addressLabel)
         order.googleMapsUrl = order.mapUrl
         ordersRenderSchedulePreview(order)
@@ -8879,16 +9319,6 @@ function bindOrdersViewFunctions() {
         order.assignedRows = rows
       }
       return
-    }
-    if (['ordersEditStart', 'ordersEditEnd', 'ordersEditRepeatEvery', 'ordersEditRepeatUnit'].includes(String(event.target?.id ?? ''))) {
-      const order = ordersFindTimelineOrder(appState.ordersEditingId)
-      if (order) {
-        order.dateYmd = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), order.dateYmd || todayYmd())
-        order.validUntil = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), order.validUntil || order.dateYmd || todayYmd())
-        order.repeatEvery = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || 1))
-        order.repeatUnit = ordersReadInputValue('ordersEditRepeatUnit') || 'day'
-        ordersRenderSchedulePreview(order)
-      }
     }
   })
 
@@ -8947,6 +9377,35 @@ function bindOrdersViewFunctions() {
       return
     }
 
+    const timeToggle = eventTargetClosest(event, '#ordersScheduleTimeToggle')
+    if (timeToggle) {
+      event.preventDefault()
+      const grid = document.getElementById('ordersScheduleTimeGrid')
+      ordersSetScheduleTimeVisible(Boolean(grid?.hidden))
+      return
+    }
+
+    const addDeviceNote = eventTargetClosest(event, '#ordersDeviceNoteAdd')
+    if (addDeviceNote) {
+      event.preventDefault()
+      ordersOpenDeviceNoteModal()
+      return
+    }
+
+    const closeDeviceNote = eventTargetClosest(event, '[data-orders-device-note-close]')
+    if (closeDeviceNote || event.target?.id === 'ordersDeviceNoteOverlay') {
+      event.preventDefault()
+      ordersCloseDeviceNoteModal()
+      return
+    }
+
+    const saveDeviceNote = eventTargetClosest(event, '#ordersDeviceNoteSave')
+    if (saveDeviceNote) {
+      event.preventDefault()
+      void ordersSaveDeviceNoteFromModal()
+      return
+    }
+
     const addCoworker = eventTargetClosest(event, '#ordersCoworkerAdd')
     if (addCoworker) {
       event.preventDefault()
@@ -9002,6 +9461,10 @@ function bindOrdersViewFunctions() {
   })
 
   binding.add(root, 'keydown', (event) => {
+    if (event.key === 'Escape' && !document.getElementById('ordersDeviceNoteOverlay')?.hidden) {
+      ordersCloseDeviceNoteModal()
+      return
+    }
     if (event.target?.id === 'ordersEditLocation' && event.key === 'Escape') {
       ordersHideLocationSuggestions()
     }
@@ -9674,7 +10137,7 @@ function eventTypeInfo(row) {
   const isSpecial = specialHaystack.includes('specjal') || specialHaystack.includes('special')
 
   if (clientIndId || endReason === 'INDIVIDUAL_DONE') {
-    return { label: 'Zlecenie ind.', className: 'event-type-badge--individual' }
+    return { label: 'Zlecenie jed.', className: 'event-type-badge--individual' }
   }
   if (endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY' || stopOnlyByTiming) {
     return { label: 'QR STOP', className: 'event-type-badge--stop' }
@@ -15785,7 +16248,7 @@ function reportEventsTypeOptions() {
     { value: 'QR START + STOP', label: 'QR START + STOP' },
     { value: 'CLEAN', label: 'CLEAN' },
     { value: 'Strefa spec.', label: 'Strefa specjalna' },
-    { value: 'Zlecenie ind.', label: 'Zlecenie indywidualne' },
+    { value: 'Zlecenie ind.', label: 'Zlecenie jednorazowe' },
     { value: 'Inne QR', label: 'Inne QR' },
   ]
 }
@@ -19387,7 +19850,7 @@ function calendarTimelineDayMonthLabel(dayKey) {
 
 function calendarTimelineTypeOptions() {
   return [
-    { value: 'individual', label: 'Zlecenia indywidualne' },
+    { value: 'individual', label: 'Zlecenia jednorazowe' },
     { value: 'cyclic', label: 'Zlecenie cykliczne' },
     { value: 'renovation', label: 'Zlecenie poremontowe' },
     { value: 'windows', label: 'Mycie okien' },
@@ -19433,7 +19896,15 @@ function calendarTimelineStatusDayKey() {
 }
 
 async function calendarEnsureTimelineWorkerState(options = {}) {
-  if (!appState.session?.orgId || appState.calendarTimelineWorkerStateLoading) {
+  if (!appState.session?.orgId) {
+    return
+  }
+  const forceRequested = options?.force === true
+  if (appState.calendarTimelineWorkerStateLoading) {
+    if (forceRequested) {
+      appState.calendarTimelineWorkerStateRefreshQueued = true
+      appState.calendarTimelineWorkerStateFetchedAt = 0
+    }
     return
   }
   const dayKey = String(options?.dayKey || calendarTimelineStatusDayKey()).trim()
@@ -19441,7 +19912,8 @@ async function calendarEnsureTimelineWorkerState(options = {}) {
     return
   }
   const rangeEndDay = calendarAddDays(dayKey, 2)
-  const force = options?.force === true
+  const force = forceRequested || appState.calendarTimelineWorkerStateRefreshQueued === true
+  appState.calendarTimelineWorkerStateRefreshQueued = false
   const fetchedAt = Number(appState.calendarTimelineWorkerStateFetchedAt || 0)
   const isFresh = fetchedAt > 0 && Date.now() - fetchedAt < CALENDAR_TIMELINE_STATUS_REFRESH_MS
   if (
@@ -19507,6 +19979,23 @@ async function calendarEnsureTimelineWorkerState(options = {}) {
     // Status kropek pozostaje czerwony, jeśli nie uda się pobrać aktywnych startów.
   } finally {
     appState.calendarTimelineWorkerStateLoading = false
+    if (appState.calendarTimelineWorkerStateRefreshQueued === true) {
+      const queuedDayKey = calendarTimelineStatusDayKey()
+      appState.calendarTimelineWorkerStateRefreshQueued = false
+      void calendarEnsureTimelineWorkerState({ dayKey: queuedDayKey, force: true }).catch(() => {})
+    }
+  }
+}
+
+async function calendarTimelineRefreshBars(options = {}) {
+  appState.calendarTimelineWorkerStateFetchedAt = 0
+  const dayKey = calendarTimelineStatusDayKey()
+  await calendarEnsureTimelineWorkerState({ dayKey, force: true })
+  if (appState.currentRoute === 'calendar' && calendarTimelineStatusDayKey() === dayKey) {
+    renderCalendarView()
+  }
+  if (options?.notice === true) {
+    showTransientNotice('Paski w kalendarzu odświeżone.')
   }
 }
 
@@ -19566,7 +20055,118 @@ function calendarTimelineWorkerAliasKeys(worker = {}) {
   return keys
 }
 
+function calendarTimelineNormalizeWorkerIdentity(value = '') {
+  return normalizeSearchText(value)
+    .replace(/[^a-z0-9@._\-\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function calendarTimelineWorkerNameSignatures(value = '') {
+  const normalized = calendarTimelineNormalizeWorkerIdentity(value).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!normalized) {
+    return new Set()
+  }
+
+  const signatures = new Set([`name:${normalized}`])
+  const parts = normalized.split(' ').filter(Boolean)
+  if (parts.length > 1) {
+    signatures.add(`name:${parts.slice().reverse().join(' ')}`)
+    const first = parts[0]
+    const last = parts[parts.length - 1]
+    if (first && last) {
+      signatures.add(`sig:${first.charAt(0)}|${last}`)
+      signatures.add(`sig:${last.charAt(0)}|${first}`)
+    }
+  }
+  return signatures
+}
+
+function calendarTimelineWorkerIdentity(values = []) {
+  const identity = {
+    ids: new Set(),
+    logins: new Set(),
+    names: new Set(),
+  }
+
+  ;(Array.isArray(values) ? values : [values]).forEach((value) => {
+    const raw = String(value ?? '').trim()
+    const normalized = calendarTimelineNormalizeWorkerIdentity(raw)
+    if (!normalized) {
+      return
+    }
+
+    if (/^w\d+$/i.test(normalized) || /^\d{2,}$/.test(normalized)) {
+      identity.ids.add(normalized)
+    }
+
+    if (raw.includes('@') || normalized.includes('@') || /^[a-z0-9._-]+$/.test(normalized)) {
+      identity.logins.add(normalized)
+      const localPart = normalized.split('@')[0]?.trim()
+      if (localPart) {
+        identity.logins.add(localPart)
+      }
+    }
+
+    calendarTimelineWorkerNameSignatures(raw).forEach((key) => identity.names.add(key))
+  })
+
+  return identity
+}
+
+function calendarTimelineSetsIntersect(left = new Set(), right = new Set()) {
+  if (!(left instanceof Set) || !(right instanceof Set) || !left.size || !right.size) {
+    return false
+  }
+  return [...left].some((key) => right.has(key))
+}
+
+function calendarTimelineResourceWorkerIdentity(resource = {}) {
+  const worker = resource?.worker ?? {}
+  return calendarTimelineWorkerIdentity([
+    resource?.name,
+    worker?.workerName,
+    worker?.fullName,
+    worker?.displayName,
+    worker?.name,
+    worker?.workerLogin,
+    worker?.login,
+    worker?.loginEmail,
+    worker?.email,
+    worker?.workerId,
+    worker?.id,
+  ])
+}
+
+function calendarTimelineSourceRowWorkerIdentity(row = {}) {
+  const useRowIdAsWorkerId = !String(row?.eventId ?? row?.workdayId ?? row?.linkedWorkdayId ?? '').trim()
+  return calendarTimelineWorkerIdentity([
+    row?.workerName,
+    row?.fullName,
+    row?.displayName,
+    row?.name,
+    row?.workerLogin,
+    row?.login,
+    row?.loginEmail,
+    row?.email,
+    row?.workerId,
+    useRowIdAsWorkerId ? row?.id : '',
+  ])
+}
+
 function calendarTimelineEventTimestamp(value) {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return value > 100000000000 ? Math.floor(value) : Math.floor(value * 1000)
+  }
+
+  const raw = String(value ?? '').trim()
+  if (/^\d{10,13}$/.test(raw)) {
+    const numeric = Number(raw)
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric > 100000000000 ? Math.floor(numeric) : Math.floor(numeric * 1000)
+    }
+  }
+
   const iso = toIso(value)
   if (!iso) {
     return 0
@@ -19575,8 +20175,139 @@ function calendarTimelineEventTimestamp(value) {
   return Number.isFinite(timestamp) ? timestamp : 0
 }
 
+function calendarTimelineSourceRowHasExplicitDayStop(row = {}) {
+  if (!row || typeof row !== 'object') {
+    return false
+  }
+
+  const endReason = String(row?.endReason ?? '').trim().toUpperCase()
+  const status = String(row?.status ?? '').trim().toUpperCase()
+  if (endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY' || status === 'WORKDAY_CLOSED') {
+    return true
+  }
+
+  if (calendarTimelineEventMarkerType(row) === 'QR STOP') {
+    return true
+  }
+
+  const sourceKind = String(row?.historySourceKind ?? '').trim().toLowerCase()
+  const hasDayStopQr = Boolean(reportHistoryNormalizeQrCode(row?.dayStopObject))
+  const hasDayStopComment = Boolean(reportHistoryExtractQrFromComment(row?.dayComment ?? row?.comment, 'stop'))
+  return Boolean((sourceKind === 'workday' && (hasDayStopQr || hasDayStopComment)) || hasDayStopComment)
+}
+
+function calendarTimelineSourceRowIsSystemOnly(row = {}) {
+  if (!row || typeof row !== 'object') {
+    return false
+  }
+
+  if (calendarTimelineIsSystemAddedEntry(row)) {
+    return true
+  }
+
+  const clientStatus = String(row?.clientStatus ?? '').trim().toUpperCase()
+  if (clientStatus !== 'SYSTEM') {
+    return false
+  }
+
+  const scannedObject = eventEditorFirstScannedQr([
+    row?.dayStartObject,
+    row?.dayStopObject,
+    row?.startObject,
+    row?.stopObject,
+    row?.dayComment,
+    row?.comment,
+  ])
+  return !scannedObject
+}
+
+function calendarTimelineSourceRowDayStopTimestamp(row = {}) {
+  if (!calendarTimelineSourceRowHasExplicitDayStop(row)) {
+    return 0
+  }
+  return calendarTimelineEventTimestamp(row?.dayEndAt ?? row?.endAt ?? row?.closeMarkedAt ?? row?.startAt)
+}
+
+function calendarTimelineSourceRowWorkdayStartTimestamp(row = {}) {
+  if (calendarTimelineSourceRowIsSystemOnly(row)) {
+    return 0
+  }
+
+  const markerType = calendarTimelineEventMarkerType(row)
+  const dayStartTs = calendarTimelineEventTimestamp(row?.dayStartAt)
+  if (markerType === 'QR START' || markerType === 'QR START + STOP') {
+    return dayStartTs || calendarTimelineEventsRowStartTimestamp(row) || calendarTimelineEventTimestamp(row?.startAt)
+  }
+
+  const sourceKind = String(row?.historySourceKind ?? '').trim().toLowerCase()
+  const hasDayStartHint = [
+    row?.dayStartAt,
+    row?.dayStartObject,
+    row?.workdayUtilityRoomId,
+    reportHistoryExtractQrFromComment(row?.dayComment ?? row?.comment, 'start'),
+  ].some((value) => String(value ?? '').trim())
+  if (dayStartTs > 0 && (sourceKind === 'workday' || hasDayStartHint)) {
+    return dayStartTs
+  }
+
+  const status = String(row?.status ?? '').trim().toUpperCase()
+  const startTs = calendarTimelineEventsRowStartTimestamp(row) || calendarTimelineEventTimestamp(row?.startAt)
+  if (startTs > 0 && !toIso(row?.endAt) && (status === 'RUNNING' || status === 'OPEN' || row?.isRunning)) {
+    return startTs
+  }
+
+  return 0
+}
+
+function calendarTimelineSourceRowHasWorkdayStart(row = {}) {
+  return calendarTimelineSourceRowWorkdayStartTimestamp(row) > 0
+}
+
+function calendarTimelineRowsDayKey(rows = []) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => dashboardResolveDayKey(row) || calendarTimelineRealEventRowDay(row))
+    .find((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(String(dayKey ?? '').trim())) || ''
+}
+
+function calendarTimelineRowsShouldExtendToNow(rows = []) {
+  const dayKey = calendarTimelineRowsDayKey(rows)
+  if (dayKey !== todayYmd()) {
+    return false
+  }
+
+  const sourceRows = Array.isArray(rows) ? rows : []
+  const hasStart = sourceRows.some((row) => calendarTimelineSourceRowHasWorkdayStart(row))
+  const hasExplicitStop = sourceRows.some((row) => calendarTimelineSourceRowHasExplicitDayStop(row))
+  return Boolean(hasStart && !hasExplicitStop)
+}
+
+function calendarTimelineWorkerResourceIsRunningOnDay(resource = {}, dayKey = '') {
+  if (resource?.type !== 'worker') {
+    return false
+  }
+  const stateMap = calendarTimelineBuildWorkerStateMap(dayKey)
+  const workerKeys = calendarTimelineWorkerAliasKeys(resource.worker)
+  return [...workerKeys].some((key) => Boolean(stateMap.get(key)?.isRunning))
+}
+
 function calendarTimelineSourceRowStartMinutes(row) {
-  const iso = toIso(row?.startAt ?? row?.dayStartAt)
+  const fromEventsStart = dashboardScheduleTimeToMinutes(row?.start)
+  if (Number.isFinite(fromEventsStart) && fromEventsStart >= 0) {
+    return fromEventsStart
+  }
+
+  const iso = toIso(
+    row?.activeSortTs ??
+      row?.qrStartAt ??
+      row?.qrStartIso ??
+      row?.dayStartIso ??
+      row?.firstStartIso ??
+      row?.startIso ??
+      row?.startAt ??
+      row?.dayStartAt ??
+      row?.qrStartSourceItem?.startAt ??
+      row?.qrStartSourceItem?.dayStartAt,
+  )
   if (!iso) {
     return -1
   }
@@ -19585,6 +20316,186 @@ function calendarTimelineSourceRowStartMinutes(row) {
     return -1
   }
   return date.getHours() * 60 + date.getMinutes()
+}
+
+function calendarTimelineEventsRowStartTimestamp(row = {}) {
+  const direct = calendarTimelineEventTimestamp(
+    row?.activeSortTs ??
+      row?.qrStartAt ??
+      row?.qrStartIso ??
+      row?.dayStartIso ??
+      row?.firstStartIso ??
+      row?.startIso ??
+      row?.startAt ??
+      row?.dayStartAt ??
+      row?.qrStartSourceItem?.startAt ??
+      row?.qrStartSourceItem?.dayStartAt,
+  )
+  if (direct > 0) {
+    return direct
+  }
+
+  const dayKey = dashboardResolveDayKey(row) || calendarTimelineRealEventRowDay(row)
+  const minutes = dashboardScheduleTimeToMinutes(row?.start)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dayKey) && minutes >= 0) {
+    return calendarTimelineTimestampFromDayMinutes(dayKey, minutes)
+  }
+  return 0
+}
+
+function calendarTimelineEventsRowStopTimestamp(row = {}) {
+  const direct = calendarTimelineEventTimestamp(
+    row?.qrStopAt ??
+      row?.qrStopIso ??
+      row?.dayEndIso ??
+      row?.stopIso ??
+      row?.endAt ??
+      row?.dayEndAt ??
+      row?.qrStopSourceItem?.endAt ??
+      row?.qrStopSourceItem?.dayEndAt,
+  )
+  if (direct > 0) {
+    return direct
+  }
+
+  const dayKey = dashboardResolveDayKey(row) || calendarTimelineRealEventRowDay(row)
+  const minutes = dashboardScheduleTimeToMinutes(row?.stop)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dayKey) && minutes >= 0) {
+    return calendarTimelineTimestampFromDayMinutes(dayKey, minutes)
+  }
+  return 0
+}
+
+function calendarTimelineEventsRowIsRunning(row = {}) {
+  const startTs = calendarTimelineEventsRowStartTimestamp(row)
+  if (startTs <= 0) {
+    return false
+  }
+  const normalizedStatus = normalizeEventStatus(row?.status, Boolean(row?.endAt))
+  if (normalizedStatus === 'RUNNING') {
+    return true
+  }
+  const stopLabel = String(row?.stop ?? '').trim()
+  const hasStop = calendarTimelineEventsRowStopTimestamp(row) > 0 || (stopLabel && stopLabel !== '-')
+  return !hasStop
+}
+
+function calendarTimelineTimestampToMinutes(value) {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    const timestamp = value > 100000000000 ? value : value * 1000
+    const date = new Date(timestamp)
+    return Number.isFinite(date.getTime()) ? date.getHours() * 60 + date.getMinutes() : -1
+  }
+
+  const raw = String(value ?? '').trim()
+  if (/^\d{10,13}$/.test(raw)) {
+    const numeric = Number(raw)
+    if (Number.isFinite(numeric) && numeric > 0) {
+      const timestamp = numeric > 100000000000 ? numeric : numeric * 1000
+      const date = new Date(timestamp)
+      return Number.isFinite(date.getTime()) ? date.getHours() * 60 + date.getMinutes() : -1
+    }
+  }
+
+  const iso = toIso(value)
+  if (!iso) {
+    return -1
+  }
+  const date = new Date(iso)
+  if (!Number.isFinite(date.getTime())) {
+    return -1
+  }
+  return date.getHours() * 60 + date.getMinutes()
+}
+
+function calendarTimelineRowStartMinutes(row = {}) {
+  if (row?.isRunning) {
+    const activeSortMinutes = calendarTimelineTimestampToMinutes(row?.activeSortTs)
+    if (activeSortMinutes >= 0) {
+      return activeSortMinutes
+    }
+  }
+
+  const timeCandidates = [
+    row?.qrStart,
+    row?.qrStartLabel,
+    row?.start,
+    row?.startLabel,
+    row?.startTime,
+    row?.actualStartTime,
+    row?.realStartTime,
+  ]
+  for (const candidate of timeCandidates) {
+    const minutes = dashboardScheduleTimeToMinutes(candidate)
+    if (Number.isFinite(minutes) && minutes >= 0) {
+      return minutes
+    }
+  }
+
+  const isoCandidates = [
+    row?.activeSortTs,
+    row?.qrStartAt,
+    row?.qrStartIso,
+    row?.dayStartIso,
+    row?.firstStartIso,
+    row?.startIso,
+    row?.actualStartAt,
+    row?.realStartAt,
+    row?.startedAt,
+    row?.startAt,
+    row?.dayStartAt,
+    row?.qrStartSourceItem?.startAt,
+    row?.qrStartSourceItem?.dayStartAt,
+  ]
+  for (const candidate of isoCandidates) {
+    const minutes = calendarTimelineTimestampToMinutes(candidate)
+    if (minutes >= 0) {
+      return minutes
+    }
+  }
+
+  return -1
+}
+
+function calendarTimelineRowStopMinutes(row = {}) {
+  const timeCandidates = [
+    row?.qrStop,
+    row?.qrStopLabel,
+    row?.stop,
+    row?.stopLabel,
+    row?.endTime,
+    row?.actualStopTime,
+    row?.realEndTime,
+  ]
+  for (const candidate of timeCandidates) {
+    const minutes = dashboardScheduleTimeToMinutes(candidate)
+    if (Number.isFinite(minutes) && minutes >= 0) {
+      return minutes
+    }
+  }
+
+  const isoCandidates = [
+    row?.qrStopAt,
+    row?.qrStopIso,
+    row?.dayEndIso,
+    row?.stopIso,
+    row?.actualEndAt,
+    row?.actualStopAt,
+    row?.realEndAt,
+    row?.finishedAt,
+    row?.endAt,
+    row?.dayEndAt,
+    row?.qrStopSourceItem?.endAt,
+    row?.qrStopSourceItem?.dayEndAt,
+  ]
+  for (const candidate of isoCandidates) {
+    const minutes = calendarTimelineTimestampToMinutes(candidate)
+    if (minutes >= 0) {
+      return minutes
+    }
+  }
+
+  return -1
 }
 
 function calendarTimelineBuildWorkerStateMap(dayKey) {
@@ -19632,10 +20543,12 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
           : []
         : []
   rows.forEach((row) => {
-    const startMinutes = dashboardScheduleTimeToMinutes(row?.qrStart)
+    const startMinutes = calendarTimelineRowStartMinutes(row)
     const hasStart = Number.isFinite(startMinutes) && startMinutes >= 0
     const stopLabel = String(row?.qrStop ?? '').trim()
-    const hasStop = Boolean(stopLabel && stopLabel !== '-' && stopLabel !== '--:--' && stopLabel !== '--:--:--')
+    const hasStop =
+      calendarTimelineRowStopMinutes(row) >= 0 ||
+      Boolean(stopLabel && stopLabel !== '-' && stopLabel !== '--:--' && stopLabel !== '--:--:--')
     const keys = dashboardResolveTodayRowAliasKeys(row)
     keys.forEach((key) => {
       upsertState(key, {
@@ -19675,8 +20588,8 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
       return
     }
 
-    const startTs = calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
-    const stopTs = calendarTimelineEventTimestamp(row?.endAt ?? row?.dayEndAt)
+    const startTs = calendarTimelineEventsRowStartTimestamp(row) || calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
+    const stopTs = calendarTimelineSourceRowDayStopTimestamp(row)
     const startMinutes = calendarTimelineSourceRowStartMinutes(row)
     const status = String(row?.status ?? '').trim().toUpperCase()
 
@@ -19693,7 +20606,7 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
       if (stopTs > 0) {
         bucket.latestStopTs = Math.max(bucket.latestStopTs, stopTs)
       }
-      if (startTs > 0 && !stopTs && (status === 'RUNNING' || status === 'OPEN' || Boolean(row?.isRunning))) {
+      if (startTs > 0 && (calendarTimelineEventsRowIsRunning(row) || status === 'RUNNING' || status === 'OPEN' || Boolean(row?.isRunning))) {
         bucket.explicitRunning = true
       }
     })
@@ -19902,7 +20815,7 @@ function calendarTimelineOrderPosition(order, days = [], hours = []) {
 function calendarTimelineLayoutEventBars(bars = [], days = [], hours = [], resources = [], selectedTypes = calendarTimelineSelectedTypes()) {
   const items = bars
     .filter((bar) => bar.row < resources.length)
-    .filter((bar) => selectedTypes.has(bar.type || 'other'))
+    .filter((bar) => bar?.isRealEvent && bar?.realTrack === 'workday' ? true : selectedTypes.has(bar.type || 'other'))
     .filter((bar) => appState.calendarTimelineShowCompleted !== false || !bar.completed)
     .map((bar) => {
       const position = calendarTimelineOrderPosition(bar, days, hours)
@@ -20295,10 +21208,23 @@ function calendarTimelineResourceMatchesSourceRow(resource = {}, row = {}) {
   }
   const resourceKeys = calendarTimelineWorkerAliasKeys(resource.worker)
   const rowKeys = dashboardResolveTodayRowAliasKeys(row)
-  if (!(resourceKeys instanceof Set) || !(rowKeys instanceof Set) || !resourceKeys.size || !rowKeys.size) {
-    return false
+  if (
+    resourceKeys instanceof Set &&
+    rowKeys instanceof Set &&
+    resourceKeys.size &&
+    rowKeys.size &&
+    [...resourceKeys].some((key) => rowKeys.has(key))
+  ) {
+    return true
   }
-  return [...resourceKeys].some((key) => rowKeys.has(key))
+
+  const resourceIdentity = calendarTimelineResourceWorkerIdentity(resource)
+  const rowIdentity = calendarTimelineSourceRowWorkerIdentity(row)
+  return (
+    calendarTimelineSetsIntersect(resourceIdentity.ids, rowIdentity.ids) ||
+    calendarTimelineSetsIntersect(resourceIdentity.logins, rowIdentity.logins) ||
+    calendarTimelineSetsIntersect(resourceIdentity.names, rowIdentity.names)
+  )
 }
 
 function calendarTimelineSourceRowMatchesOrder(row = {}, order = {}, planned = null) {
@@ -20534,6 +21460,7 @@ function calendarTimelineHideEventsPopup() {
     window.clearTimeout(calendarTimelineBarClickTimer)
     calendarTimelineBarClickTimer = 0
   }
+  calendarTimelineHidePieDetailPopup()
   calendarTimelineStopEventsPopupTracking()
   const node = document.getElementById('calendarTimelineEventsPopup')
   if (node) {
@@ -20562,6 +21489,7 @@ function calendarTimelineScheduleEventsPopupPosition() {
       return
     }
     calendarTimelinePositionEventsPopup(currentNode, currentAnchor)
+    calendarTimelinePositionPieDetailPopup()
   })
 }
 
@@ -20702,7 +21630,7 @@ function calendarTimelineDayStartMarkerFromRows(rows = [], dayKey = '') {
 function calendarTimelineRowsWithDayStartMarker(rows = [], dayKey = '') {
   const sourceRows = Array.isArray(rows) ? rows : []
   const startMarker = calendarTimelineDayStartMarkerFromRows(sourceRows, dayKey)
-  const result = startMarker ? [startMarker, ...sourceRows] : [...sourceRows]
+  const result = calendarTimelineDeduplicatePopupMarkerRows(startMarker ? [startMarker, ...sourceRows] : [...sourceRows])
 
   return result.sort((left, right) => {
     const timeDiff = calendarTimelinePopupEventSortTime(left) - calendarTimelinePopupEventSortTime(right)
@@ -20715,6 +21643,67 @@ function calendarTimelineRowsWithDayStartMarker(rows = [], dayKey = '') {
     }
     return calendarTimelineEventIdentityValues(left).join('|').localeCompare(calendarTimelineEventIdentityValues(right).join('|'))
   })
+}
+
+function calendarTimelinePopupMarkerDedupeKey(row = {}) {
+  const markerType = calendarTimelineEventMarkerType(row)
+  if (markerType !== 'QR START' && markerType !== 'QR STOP' && markerType !== 'QR START + STOP') {
+    return ''
+  }
+
+  const isStop = markerType === 'QR STOP'
+  const phase = isStop ? 'stop' : 'start'
+  const timestamp = calendarTimelineEventTimestamp(
+    isStop
+      ? row?.dayEndAt ?? row?.endAt ?? row?.closeMarkedAt ?? row?.startAt
+      : row?.dayStartAt ?? row?.startAt ?? row?.endAt,
+  )
+  const minuteKey = timestamp > 0 ? Math.round(timestamp / 60000) : 0
+  if (minuteKey > 0) {
+    return [markerType, minuteKey].join('|')
+  }
+  const qr = reportHistoryResolveDayQrCode(row, phase) || zoneQrCodeFromRow(row)
+  const client = calendarTimelineReadableClientLabel(dashboardResolveClientLabel(row))
+  return [
+    markerType,
+    minuteKey,
+    normalizeSearchText(qr) || '-',
+    normalizeSearchText(client) || '-',
+  ].join('|')
+}
+
+function calendarTimelinePopupMarkerRowScore(row = {}) {
+  let score = 0
+  if (calendarTimelineEventLocationLabel(row)) score += 10
+  if (calendarTimelineEventGpsCoords(row, calendarTimelineEventMarkerType(row))) score += 6
+  if (reportHistoryResolveDayQrCode(row, calendarTimelineEventMarkerType(row) === 'QR STOP' ? 'stop' : 'start')) score += 3
+  if (!row?.calendarTimelinePopupSyntheticMarker) score += 1
+  return score
+}
+
+function calendarTimelineDeduplicatePopupMarkerRows(rows = []) {
+  const result = []
+  const markerIndexByKey = new Map()
+  ;(Array.isArray(rows) ? rows : []).forEach((row) => {
+    const key = calendarTimelinePopupMarkerDedupeKey(row)
+    if (!key) {
+      result.push(row)
+      return
+    }
+
+    const existingIndex = markerIndexByKey.get(key)
+    if (!Number.isInteger(existingIndex)) {
+      markerIndexByKey.set(key, result.length)
+      result.push(row)
+      return
+    }
+
+    const existing = result[existingIndex]
+    if (calendarTimelinePopupMarkerRowScore(row) > calendarTimelinePopupMarkerRowScore(existing)) {
+      result[existingIndex] = row
+    }
+  })
+  return result
 }
 
 async function calendarTimelineFetchWorkerDayEvents(resource = {}, dayKey = '') {
@@ -21303,7 +22292,10 @@ function calendarTimelineEventsGraphData(rows = []) {
   }
 
   const rangeStart = Math.min(...items.map((item) => item.startTs))
-  const rangeEnd = Math.max(...items.map((item) => item.endTs))
+  let rangeEnd = Math.max(...items.map((item) => item.endTs))
+  if (calendarTimelineRowsShouldExtendToNow(rows)) {
+    rangeEnd = Math.max(rangeEnd, Date.now())
+  }
   const rangeMs = Math.max(60 * 1000, rangeEnd - rangeStart)
   const detailItems = items.filter((item) => {
     if (item.parts.markerType) {
@@ -21437,15 +22429,28 @@ function calendarTimelinePiePercentLabel(value = 0) {
   return `${percent.toFixed(1).replace('.', ',')}%`
 }
 
-function calendarTimelineEventsPieHtml(rows = []) {
+function calendarTimelineConcreteZoneLabel(row = {}) {
+  const zone = String(calendarTimelineGraphZoneLabel(row) || '').trim()
+  const location = String(calendarTimelineEventLocationLabel(row) || '').trim()
+  const qr = String(zoneQrCodeFromRow(row) || '').trim()
+  const parts = [zone]
+  if (location && location !== '-' && normalizeSearchText(location) !== normalizeSearchText(zone)) {
+    parts.push(location)
+  } else if (qr && qr !== '-') {
+    parts.push(`QR ${qr}`)
+  }
+  return parts.filter(Boolean).join(' / ') || zone || '-'
+}
+
+function calendarTimelinePieData(rows = []) {
   const graphData = calendarTimelineEventsGraphData(rows)
   if (!graphData) {
-    return ''
+    return null
   }
 
   const { zoneItems, inactiveItems, totalSeconds } = graphData
   const segmentsByKey = new Map()
-  const addSegment = (key, label, seconds, color) => {
+  const addSegment = (key, label, seconds, color, item = null) => {
     const normalizedKey = String(key ?? '').trim()
     const normalizedLabel = String(label ?? '').trim()
     const duration = Number(seconds)
@@ -21453,24 +22458,29 @@ function calendarTimelineEventsPieHtml(rows = []) {
       return
     }
     const current = segmentsByKey.get(normalizedKey) || {
+      key: normalizedKey,
       label: normalizedLabel,
       seconds: 0,
       color,
+      items: [],
     }
     current.seconds += duration
     current.color = current.color || color
+    if (item) {
+      current.items.push(item)
+    }
     segmentsByKey.set(normalizedKey, current)
   }
 
   zoneItems.forEach((item) => {
     const label = calendarTimelineGraphZoneLabel(item.row)
     const duration = Math.max(0, Math.floor((item.endTs - item.startTs) / 1000))
-    addSegment(`zone:${normalizeSearchText(label) || label.toLowerCase()}`, label, duration, calendarTimelineGraphColorForKey(label).bg)
+    addSegment(`zone:${normalizeSearchText(label) || label.toLowerCase()}`, label, duration, calendarTimelineGraphColorForKey(label).bg, item)
   })
 
   inactiveItems.forEach((item) => {
     const duration = Math.max(0, Math.floor((item.endTs - item.startTs) / 1000))
-    addSegment('inactive', 'Brak aktywności', duration, '#cbd5e1')
+    addSegment('inactive', 'Brak aktywności', duration, '#cbd5e1', item)
   })
 
   const segments = Array.from(segmentsByKey.values())
@@ -21482,7 +22492,7 @@ function calendarTimelineEventsPieHtml(rows = []) {
     })
 
   if (!segments.length) {
-    return ''
+    return null
   }
 
   let cursor = 0
@@ -21498,6 +22508,22 @@ function calendarTimelineEventsPieHtml(rows = []) {
   if (cursor < 100) {
     gradientParts.push(`#eef2f7 ${cursor.toFixed(3)}% 100%`)
   }
+
+  return {
+    graphData,
+    segments,
+    gradientParts,
+    totalSeconds,
+  }
+}
+
+function calendarTimelineEventsPieHtml(rows = []) {
+  const pieData = calendarTimelinePieData(rows)
+  if (!pieData) {
+    return ''
+  }
+
+  const { segments, gradientParts, totalSeconds } = pieData
 
   const highlightGradientFor = (segment) => {
     const parts = []
@@ -21516,7 +22542,7 @@ function calendarTimelineEventsPieHtml(rows = []) {
     const duration = `${durationSecondsToHm(segment.seconds)}h`
     const highlightGradient = highlightGradientFor(segment)
     return `
-      <li tabindex="0" data-calendar-pie-highlight="${escapeHtml(highlightGradient)}">
+      <li tabindex="0" data-calendar-pie-highlight="${escapeHtml(highlightGradient)}" data-calendar-pie-key="${escapeHtml(segment.key)}">
         <span class="calendar-events-pie-dot" style="--pie-dot:${escapeHtml(segment.color)};"></span>
         <span class="calendar-events-pie-name">${escapeHtml(segment.label)}</span>
         <strong>${escapeHtml(calendarTimelinePiePercentLabel(percent))}</strong>
@@ -21524,17 +22550,221 @@ function calendarTimelineEventsPieHtml(rows = []) {
       </li>
     `
   }).join('')
+  const chartSegments = segments.map((segment) => ({
+    key: segment.key,
+    label: segment.label,
+    start: segment.startPercent,
+    end: segment.endPercent,
+  }))
 
   return `
     <aside class="calendar-events-popup-summary" aria-label="Udział stref i braku aktywności">
       <div class="calendar-events-pie-wrap">
-        <div class="calendar-events-pie" data-calendar-pie-chart style="--pie:${escapeHtml(gradientParts.join(', '))};">
+        <div class="calendar-events-pie" data-calendar-pie-chart data-calendar-pie-segments="${escapeHtml(JSON.stringify(chartSegments))}" style="--pie:${escapeHtml(gradientParts.join(', '))};">
           <span><strong>100%</strong><em>Dzień</em></span>
         </div>
       </div>
       <ul class="calendar-events-pie-legend">${legendHtml}</ul>
     </aside>
   `
+}
+
+function calendarTimelinePieSegmentDetails(rows = [], segmentKey = '') {
+  const key = String(segmentKey ?? '').trim()
+  if (!key) {
+    return null
+  }
+  const pieData = calendarTimelinePieData(rows)
+  const segment = pieData?.segments?.find((item) => item.key === key)
+  if (!pieData || !segment) {
+    return null
+  }
+
+  const groups = new Map()
+  ;(Array.isArray(segment.items) ? segment.items : []).forEach((item, index) => {
+    const startTs = Number(item?.startTs || 0)
+    const endTs = Number(item?.endTs || 0)
+    const seconds = Math.max(0, Math.floor((endTs - startTs) / 1000))
+    if (!seconds) {
+      return
+    }
+    const label = key === 'inactive'
+      ? `Brak aktywności ${calendarTimelineShortTimeLabel(new Date(startTs).toISOString())} - ${calendarTimelineShortTimeLabel(new Date(endTs).toISOString())}`
+      : calendarTimelineConcreteZoneLabel(item.row)
+    const groupKey = key === 'inactive' ? `inactive:${index}` : normalizeSearchText(label) || label.toLowerCase()
+    const current = groups.get(groupKey) || {
+      key: groupKey,
+      label,
+      seconds: 0,
+      color: calendarTimelineGraphColorForKey(label).bg,
+      ranges: [],
+    }
+    current.seconds += seconds
+    current.ranges.push({
+      startTs,
+      endTs,
+      label: `${calendarTimelineShortTimeLabel(new Date(startTs).toISOString())} - ${calendarTimelineShortTimeLabel(new Date(endTs).toISOString())}`,
+    })
+    groups.set(groupKey, current)
+  })
+
+  const detailSegments = Array.from(groups.values()).sort((left, right) => right.seconds - left.seconds)
+  return {
+    segment,
+    detailSegments,
+    totalSeconds: Math.max(1, segment.seconds),
+    dayTotalSeconds: pieData.totalSeconds,
+  }
+}
+
+function calendarTimelinePieDetailGradient(segments = [], totalSeconds = 1) {
+  let cursor = 0
+  const parts = (Array.isArray(segments) ? segments : []).map((segment) => {
+    const percent = Math.max(0, (Number(segment?.seconds) / Math.max(1, Number(totalSeconds) || 1)) * 100)
+    const start = Math.min(100, cursor)
+    const end = Math.min(100, cursor + percent)
+    cursor += percent
+    return `${segment.color || '#cbd5e1'} ${start.toFixed(3)}% ${Math.max(start, end).toFixed(3)}%`
+  })
+  if (cursor < 100) {
+    parts.push(`#eef2f7 ${cursor.toFixed(3)}% 100%`)
+  }
+  return parts.join(', ')
+}
+
+function calendarTimelinePieDetailHtml(details = {}) {
+  const segment = details?.segment ?? {}
+  const detailSegments = Array.isArray(details?.detailSegments) ? details.detailSegments : []
+  const totalSeconds = Math.max(1, Number(details?.totalSeconds) || 1)
+  const dayTotalSeconds = Math.max(1, Number(details?.dayTotalSeconds) || totalSeconds)
+  const selectedDayPercent = calendarTimelinePiePercentLabel((totalSeconds / dayTotalSeconds) * 100)
+  const gradient = calendarTimelinePieDetailGradient(detailSegments, totalSeconds)
+  const listHtml = detailSegments.length
+    ? detailSegments.map((item) => {
+        const percent = calendarTimelinePiePercentLabel((item.seconds / totalSeconds) * 100)
+        const duration = `${durationSecondsToHm(item.seconds)}h`
+        const ranges = item.ranges?.map((range) => range.label).join(', ') || ''
+        return `
+          <li>
+            <span class="calendar-events-pie-dot" style="--pie-dot:${escapeHtml(item.color)};"></span>
+            <span class="calendar-events-pie-name" title="${escapeHtml(ranges)}">${escapeHtml(item.label)}</span>
+            <strong>${escapeHtml(percent)}</strong>
+            <em>${escapeHtml(duration)}</em>
+          </li>
+        `
+      }).join('')
+    : '<li class="calendar-events-pie-detail-empty">Brak szczegółów dla tej części wykresu.</li>'
+
+  return `
+    <div class="calendar-events-pie-detail-head">
+      <div>
+        <strong>${escapeHtml(segment.label || 'Szczegóły')}</strong>
+        <span>Udział dnia: ${escapeHtml(selectedDayPercent)} · ${escapeHtml(durationSecondsToHm(totalSeconds))}h</span>
+      </div>
+      <button type="button" data-calendar-pie-detail-close aria-label="Zamknij">×</button>
+    </div>
+    <div class="calendar-events-pie-detail-body">
+      <div class="calendar-events-pie calendar-events-pie--small" style="--pie:${escapeHtml(gradient)};">
+        <span><strong>100%</strong><em>wybór</em></span>
+      </div>
+      <ul class="calendar-events-pie-legend calendar-events-pie-detail-list">${listHtml}</ul>
+    </div>
+  `
+}
+
+function calendarTimelineHidePieDetailPopup() {
+  const node = document.getElementById('calendarTimelinePieDetailPopup')
+  if (node) {
+    node.remove()
+  }
+}
+
+function calendarTimelinePositionPieDetailPopup(anchor = null) {
+  const node = document.getElementById('calendarTimelinePieDetailPopup')
+  if (!(node instanceof HTMLElement)) {
+    return
+  }
+  const parent = document.getElementById('calendarTimelineEventsPopup')
+  const anchorNode = anchor instanceof HTMLElement ? anchor : node.calendarPieDetailAnchor
+  const rect = (anchorNode instanceof HTMLElement ? anchorNode : parent)?.getBoundingClientRect?.()
+  const parentRect = parent?.getBoundingClientRect?.()
+  if (!rect) {
+    return
+  }
+
+  const width = Math.min(430, Math.max(300, window.innerWidth - 24))
+  node.style.width = `${width}px`
+  const preferredLeft = rect.right - width
+  const left = Math.max(12, Math.min(window.innerWidth - width - 12, preferredLeft))
+  const height = node.getBoundingClientRect().height || node.scrollHeight || 180
+  const preferredTop = (parentRect?.top ?? rect.top) - height - 8
+  const fallbackTop = rect.bottom + 8
+  const top = preferredTop >= 12
+    ? preferredTop
+    : Math.max(12, Math.min(window.innerHeight - height - 12, fallbackTop))
+  node.style.left = `${left}px`
+  node.style.top = `${top}px`
+}
+
+function calendarTimelineShowPieDetailPopup(segmentKey = '', anchor = null) {
+  const rows = Array.isArray(appState.calendarTimelinePopupEventRows) ? appState.calendarTimelinePopupEventRows : []
+  const details = calendarTimelinePieSegmentDetails(rows, segmentKey)
+  if (!details) {
+    return
+  }
+
+  let node = document.getElementById('calendarTimelinePieDetailPopup')
+  if (!node) {
+    node = document.createElement('div')
+    node.id = 'calendarTimelinePieDetailPopup'
+    node.className = 'calendar-events-pie-detail-popup'
+    node.setAttribute('role', 'dialog')
+    node.setAttribute('aria-label', 'Szczegóły wybranej części wykresu')
+    document.body.appendChild(node)
+  }
+  node.calendarPieDetailAnchor = anchor instanceof HTMLElement ? anchor : null
+  node.innerHTML = calendarTimelinePieDetailHtml(details)
+  node.onclick = (event) => {
+    const closeButton = event.target?.closest?.('[data-calendar-pie-detail-close]')
+    if (closeButton) {
+      event.preventDefault()
+      calendarTimelineHidePieDetailPopup()
+    }
+  }
+  calendarTimelinePositionPieDetailPopup(anchor)
+}
+
+function calendarTimelinePieKeyFromChartClick(chart, event) {
+  if (!(chart instanceof HTMLElement)) {
+    return ''
+  }
+  const raw = String(chart.getAttribute('data-calendar-pie-segments') ?? '').trim()
+  if (!raw) {
+    return ''
+  }
+  let segments = []
+  try {
+    segments = JSON.parse(raw)
+  } catch {
+    return ''
+  }
+  if (!Array.isArray(segments) || !segments.length) {
+    return ''
+  }
+
+  const rect = chart.getBoundingClientRect()
+  const centerX = rect.left + rect.width / 2
+  const centerY = rect.top + rect.height / 2
+  const dx = Number(event.clientX) - centerX
+  const dy = Number(event.clientY) - centerY
+  const distance = Math.sqrt(dx * dx + dy * dy)
+  if (distance < rect.width * 0.22 || distance > rect.width * 0.56) {
+    return ''
+  }
+  const angle = (Math.atan2(dy, dx) * 180) / Math.PI
+  const percent = ((angle + 90 + 360) % 360) / 360 * 100
+  const segment = segments.find((item) => percent >= Number(item.start) && percent <= Number(item.end)) || segments[segments.length - 1]
+  return String(segment?.key ?? '').trim()
 }
 
 function calendarTimelinePositionEventsPopup(node, anchor) {
@@ -21649,9 +22879,38 @@ async function calendarTimelineShowWorkerDayEventsPopup(bar) {
   calendarTimelinePositionEventsPopup(node, context.bar)
 
   node.addEventListener('click', (event) => {
+    const detailCloseButton = event.target?.closest?.('[data-calendar-pie-detail-close]')
+    if (detailCloseButton) {
+      event.preventDefault()
+      calendarTimelineHidePieDetailPopup()
+      return
+    }
     const closeButton = event.target?.closest?.('[data-calendar-events-popup-close]')
     if (closeButton) {
       calendarTimelineHideEventsPopup()
+      return
+    }
+    const pieLegendRow = event.target?.closest?.('[data-calendar-pie-key]')
+    if (pieLegendRow instanceof HTMLElement) {
+      event.preventDefault()
+      event.stopPropagation()
+      calendarTimelineSetPieHighlight(pieLegendRow, true)
+      calendarTimelineShowPieDetailPopup(pieLegendRow.getAttribute('data-calendar-pie-key'), pieLegendRow)
+      return
+    }
+    const pieChart = event.target?.closest?.('[data-calendar-pie-chart]')
+    if (pieChart instanceof HTMLElement) {
+      event.preventDefault()
+      event.stopPropagation()
+      const key = calendarTimelinePieKeyFromChartClick(pieChart, event)
+      if (key) {
+        const row = [...node.querySelectorAll('[data-calendar-pie-key]')]
+          .find((item) => item instanceof HTMLElement && item.getAttribute('data-calendar-pie-key') === key)
+        if (row instanceof HTMLElement) {
+          calendarTimelineSetPieHighlight(row, true)
+        }
+        calendarTimelineShowPieDetailPopup(key, pieChart)
+      }
       return
     }
     const geoButton = event.target?.closest?.('[data-calendar-event-geo][data-rep-geo-lat][data-rep-geo-lon]')
@@ -21707,6 +22966,16 @@ async function calendarTimelineShowWorkerDayEventsPopup(bar) {
     const row = event.target?.closest?.('[data-calendar-pie-highlight]')
     if (row instanceof HTMLElement && !row.contains(event.relatedTarget)) {
       calendarTimelineSetPieHighlight(row, false)
+    }
+  })
+  node.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return
+    }
+    const pieLegendRow = event.target?.closest?.('[data-calendar-pie-key]')
+    if (pieLegendRow instanceof HTMLElement) {
+      event.preventDefault()
+      calendarTimelineShowPieDetailPopup(pieLegendRow.getAttribute('data-calendar-pie-key'), pieLegendRow)
     }
   })
 
@@ -22436,7 +23705,88 @@ function calendarTimelineRealStartObjectLabel(row = {}) {
 
 function calendarTimelineRealEventRowDay(row = {}) {
   const iso = toIso(row?.startAt ?? row?.dayStartAt ?? row?.endAt ?? row?.dayEndAt)
-  return iso ? calendarDateToYmd(iso) : ''
+  if (iso) {
+    return calendarDateToYmd(iso)
+  }
+  return dashboardResolveDayKey(row)
+}
+
+function calendarTimelineCurrentStatusRowForResource(resource = {}, dayKey = '') {
+  const normalizedDay = String(dayKey ?? '').trim()
+  if (resource?.type !== 'worker' || normalizedDay !== todayYmd()) {
+    return null
+  }
+
+  const rows = Array.isArray(appState.calendarTimelineCurrentWorkerStatusRows) && appState.calendarTimelineCurrentWorkerStatusRows.length
+    ? appState.calendarTimelineCurrentWorkerStatusRows
+    : Array.isArray(appState.dashboardTodayRows)
+      ? appState.dashboardTodayRows
+      : []
+  return rows.find((row) => calendarTimelineResourceMatchesSourceRow(resource, row) && calendarTimelineStatusRowIsRunning(row)) || null
+}
+
+function calendarTimelineActiveWorkerStartMinutes(resource = {}, dayKey = '') {
+  const normalizedDay = String(dayKey ?? '').trim()
+  if (resource?.type !== 'worker' || normalizedDay !== todayYmd()) {
+    return -1
+  }
+
+  const candidates = []
+  const statusRows = Array.isArray(appState.calendarTimelineCurrentWorkerStatusRows) && appState.calendarTimelineCurrentWorkerStatusRows.length
+    ? appState.calendarTimelineCurrentWorkerStatusRows
+    : Array.isArray(appState.dashboardTodayRows)
+      ? appState.dashboardTodayRows
+      : []
+  statusRows
+    .filter((row) => calendarTimelineResourceMatchesSourceRow(resource, row))
+    .filter((row) => calendarTimelineStatusRowIsRunning(row))
+    .forEach((row) => {
+      const minutes = calendarTimelineRowStartMinutes(row)
+      if (minutes >= 0) {
+        candidates.push(minutes)
+      }
+    })
+
+  const sourceRows =
+    appState.calendarTimelineWorkerStateDayKey === normalizedDay
+      ? Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
+        ? appState.calendarTimelineWorkerStateSourceRows
+        : []
+      : []
+  let latestStartTs = 0
+  let latestStopTs = 0
+  sourceRows
+    .filter((row) => (dashboardResolveDayKey(row) || calendarTimelineRealEventRowDay(row)) === normalizedDay)
+    .filter((row) => calendarTimelineResourceMatchesSourceRow(resource, row))
+    .forEach((row) => {
+      const startTs = calendarTimelineEventsRowIsRunning(row)
+        ? calendarTimelineEventsRowStartTimestamp(row)
+        : calendarTimelineSourceRowWorkdayStartTimestamp(row)
+      if (startTs > 0) {
+        latestStartTs = Math.max(latestStartTs, startTs)
+      }
+      const stopTs = calendarTimelineSourceRowDayStopTimestamp(row)
+      if (stopTs > 0) {
+        latestStopTs = Math.max(latestStopTs, stopTs)
+      }
+    })
+  if (latestStartTs > 0 && latestStartTs > latestStopTs) {
+    const minutes = calendarTimelineTimestampToMinutes(new Date(latestStartTs).toISOString())
+    if (minutes >= 0) {
+      candidates.push(minutes)
+    }
+  }
+
+  const stateMap = calendarTimelineBuildWorkerStateMap(normalizedDay)
+  ;[...calendarTimelineWorkerAliasKeys(resource.worker)].forEach((key) => {
+    const state = stateMap.get(key)
+    const minutes = Number(state?.startMinutes ?? -1)
+    if (state?.isRunning && Number.isFinite(minutes) && minutes >= 0) {
+      candidates.push(minutes)
+    }
+  })
+
+  return candidates.length ? Math.max(...candidates) : -1
 }
 
 function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows = []) {
@@ -22450,8 +23800,9 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
       return
     }
 
-    const startTs = calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
-    const endTs = calendarTimelineEventTimestamp(row?.endAt ?? row?.dayEndAt)
+    const startTs = calendarTimelineEventsRowStartTimestamp(row) || calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
+    const workdayStartTs = calendarTimelineSourceRowWorkdayStartTimestamp(row)
+    const endTs = calendarTimelineEventsRowStopTimestamp(row) || calendarTimelineEventTimestamp(row?.endAt ?? row?.dayEndAt)
     if (!startTs && !endTs) {
       return
     }
@@ -22462,7 +23813,8 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         dayKey,
         rowIndex,
         firstStartTs: 0,
-        latestEndTs: 0,
+        latestActivityEndTs: 0,
+        latestDayStopTs: 0,
         hasRunning: false,
         startObjectLabel: '',
         sourceEventId: '',
@@ -22471,17 +23823,21 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
       })
     }
     const bucket = buckets.get(key)
-    if (startTs > 0) {
-      if (!bucket.firstStartTs || startTs < bucket.firstStartTs) {
-        bucket.firstStartTs = startTs
+    if (workdayStartTs > 0) {
+      if (!bucket.firstStartTs || workdayStartTs < bucket.firstStartTs) {
+        bucket.firstStartTs = workdayStartTs
         bucket.startObjectLabel = calendarTimelineRealStartObjectLabel(row)
         bucket.sourceEventId = String(row?.eventId ?? '').trim()
         bucket.workdayId = String(row?.workdayId ?? row?.id ?? '').trim()
-        bucket.sourceStartAt = toIso(row?.startAt ?? row?.dayStartAt)
+        bucket.sourceStartAt = new Date(workdayStartTs).toISOString()
       }
     }
     if (endTs > 0) {
-      bucket.latestEndTs = Math.max(bucket.latestEndTs, endTs)
+      bucket.latestActivityEndTs = Math.max(bucket.latestActivityEndTs, endTs)
+    }
+    const dayStopTs = calendarTimelineSourceRowDayStopTimestamp(row)
+    if (dayStopTs > 0) {
+      bucket.latestDayStopTs = Math.max(bucket.latestDayStopTs, dayStopTs)
     }
     const status = normalizeEventStatus(row?.status, Boolean(row?.endAt ?? row?.dayEndAt))
     if (startTs > 0 && !endTs && status === 'RUNNING') {
@@ -22491,14 +23847,31 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
 
   return [...buckets.values()]
     .map((bucket) => {
-      const startTs = bucket.firstStartTs || bucket.latestEndTs
+      const now = Date.now()
+      const resource = resources[bucket.rowIndex] ?? null
+      const statusRow = calendarTimelineCurrentStatusRowForResource(resource, bucket.dayKey)
+      const activeStartMinutes = calendarTimelineActiveWorkerStartMinutes(resource, bucket.dayKey)
+      const statusStartMinutes = activeStartMinutes >= 0 ? activeStartMinutes : calendarTimelineRowStartMinutes(statusRow)
+      const statusStartTs = Number.isFinite(statusStartMinutes) && statusStartMinutes >= 0
+        ? calendarTimelineTimestampFromDayMinutes(bucket.dayKey, statusStartMinutes)
+        : 0
+      const stateRunning = calendarTimelineWorkerResourceIsRunningOnDay(resource, bucket.dayKey)
+      const hasExplicitDayStop = bucket.latestDayStopTs > 0
+      const startTs = !hasExplicitDayStop && statusStartTs > 0
+        ? statusStartTs
+        : bucket.firstStartTs || bucket.latestDayStopTs || bucket.latestActivityEndTs
       if (!startTs) {
         return null
       }
-      const now = Date.now()
+      const shouldRunToNow =
+        !hasExplicitDayStop &&
+        bucket.dayKey === todayYmd() &&
+        (bucket.hasRunning || stateRunning || bucket.firstStartTs > 0 || statusStartTs > 0)
       const endTs =
-        bucket.latestEndTs ||
-        (bucket.hasRunning && bucket.dayKey === todayYmd() ? Math.max(now, startTs + 15 * 60 * 1000) : startTs + 60 * 60 * 1000)
+        bucket.latestDayStopTs ||
+        (shouldRunToNow
+          ? Math.max(now, startTs + 15 * 60 * 1000)
+          : bucket.latestActivityEndTs || startTs + 60 * 60 * 1000)
       const startIso = new Date(startTs).toISOString()
       const endIso = new Date(Math.max(endTs, startTs + 15 * 60 * 1000)).toISOString()
       const start = calendarTimelineIsoToDayTime(startIso)
@@ -22507,7 +23880,10 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         return null
       }
       const durationLabel = calendarTimelineRealDurationLabel(start.timestamp, end.timestamp)
-      const titleParts = [bucket.startObjectLabel || 'QR START', durationLabel]
+      const statusTitle = statusRow
+        ? calendarTimelineReadableClientLabel(dashboardResolveClientLabel(statusRow)) || calendarTimelineRealStartObjectLabel(statusRow)
+        : ''
+      const titleParts = [(!hasExplicitDayStop && statusTitle) || bucket.startObjectLabel || 'QR START', durationLabel]
       const title = titleParts.join(' · ')
       return {
         id: `real-workday-${bucket.rowIndex}-${bucket.dayKey}`,
@@ -22529,9 +23905,9 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         tone: 'steel',
         actualStartAt: startIso,
         sourceStartAt: bucket.sourceStartAt || startIso,
-        actualEndAt: bucket.latestEndTs ? endIso : '',
-        status: bucket.latestEndTs ? 'CLOSED' : 'RUNNING',
-        completed: Boolean(bucket.latestEndTs),
+        actualEndAt: hasExplicitDayStop ? endIso : '',
+        status: hasExplicitDayStop ? 'CLOSED' : 'RUNNING',
+        completed: hasExplicitDayStop,
         isRealEvent: true,
         realTrack: 'workday',
         realTrackIndex: 0,
@@ -22556,6 +23932,99 @@ function calendarTimelineStatusRowsForRealOrders(days = []) {
   return rows.map((row) => ({ row, dayKey: today }))
 }
 
+function calendarTimelineStatusRowIsRunning(row = {}) {
+  const stopLabel = String(row?.qrStop ?? '').trim()
+  const hasStop =
+    calendarTimelineRowStopMinutes(row) >= 0 ||
+    Boolean(stopLabel && stopLabel !== '-' && stopLabel !== '--:--' && stopLabel !== '--:--:--')
+  const hasStart = calendarTimelineRowStartMinutes(row) >= 0
+  return Boolean(row?.isRunning) || (hasStart && !hasStop)
+}
+
+function calendarTimelineStatusFallbackRow(resource = {}, startMinutes = -1) {
+  const minutes = Number(startMinutes)
+  return {
+    workerName: resource?.name || resource?.worker?.workerName || resource?.worker?.name || '',
+    workerLogin: resource?.worker?.workerLogin || resource?.worker?.login || resource?.worker?.id || '',
+    workerId: resource?.worker?.workerId || resource?.worker?.id || '',
+    qrStart: Number.isFinite(minutes) && minutes >= 0 ? `${pad2(Math.floor(minutes / 60))}:${pad2(minutes % 60)}` : '',
+    qrStop: '-',
+    isRunning: true,
+  }
+}
+
+function calendarTimelineBuildRealStatusOrder(row = {}, dayKey = '', rowIndex = -1, index = 0, resources = []) {
+  const startMinutes = calendarTimelineRowStartMinutes(row)
+  if (!Number.isFinite(startMinutes) || startMinutes < 0 || rowIndex < 0) {
+    return null
+  }
+
+  const startTs = calendarTimelineTimestampFromDayMinutes(dayKey, startMinutes)
+  if (!startTs) {
+    return null
+  }
+
+  const isRunning = calendarTimelineStatusRowIsRunning(row)
+  const stopMinutes = calendarTimelineRowStopMinutes(row)
+  const durationSec = calendarTimelineStatusDurationSeconds(row)
+  const now = Date.now()
+  let endTs = 0
+  if (!isRunning && Number.isFinite(stopMinutes) && stopMinutes >= 0) {
+    endTs = calendarTimelineTimestampFromDayMinutes(dayKey, stopMinutes)
+    if (endTs <= startTs) {
+      endTs = calendarTimelineTimestampFromDayMinutes(calendarAddDays(dayKey, 1), stopMinutes)
+    }
+  } else if (isRunning) {
+    endTs = Math.max(now, startTs + 15 * 60 * 1000)
+  } else if (durationSec > 0) {
+    endTs = startTs + durationSec * 1000
+  }
+
+  if (!endTs || endTs <= startTs) {
+    return null
+  }
+
+  const startIso = new Date(startTs).toISOString()
+  const endIso = new Date(endTs).toISOString()
+  const start = calendarTimelineIsoToDayTime(startIso)
+  const end = calendarTimelineIsoToDayTime(endIso)
+  if (!start || !end) {
+    return null
+  }
+
+  const durationLabel = calendarTimelineRealDurationLabel(start.timestamp, end.timestamp)
+  const titleLabel =
+    calendarTimelineReadableClientLabel(dashboardResolveClientLabel(row)) ||
+    calendarTimelineRealStartObjectLabel(row) ||
+    'QR START'
+
+  return {
+    id: `real-status-${rowIndex}-${dayKey}-${index}`,
+    row: rowIndex,
+    assignedRows: [rowIndex],
+    workerAssignments: ordersWorkerAssignmentsFromRows([rowIndex], resources),
+    dateYmd: start.day,
+    startTime: start.time,
+    endDateYmd: end.day,
+    endTime: end.time,
+    validUntil: end.day,
+    nextDate: start.day,
+    title: `${titleLabel} · ${durationLabel}`,
+    clientLabel: dashboardResolveClientLabel(row),
+    addressLabel: String(row?.activeLocation ?? row?.lokalizacja ?? row?.location ?? '').trim(),
+    type: 'other',
+    tone: 'steel',
+    actualStartAt: startIso,
+    sourceStartAt: startIso,
+    actualEndAt: isRunning ? '' : endIso,
+    status: isRunning ? 'RUNNING' : 'CLOSED',
+    completed: !isRunning,
+    isRealEvent: true,
+    realTrack: 'workday',
+    realTrackIndex: 0,
+  }
+}
+
 function calendarTimelineRealStatusOrders(resources = [], days = [], existingOrders = []) {
   const existingKeys = new Set(
     (Array.isArray(existingOrders) ? existingOrders : [])
@@ -22563,88 +24032,95 @@ function calendarTimelineRealStatusOrders(resources = [], days = [], existingOrd
       .map((order) => `${Number(order?.row)}|${String(order?.dateYmd ?? '').trim()}`),
   )
 
-  return calendarTimelineStatusRowsForRealOrders(days)
-    .map(({ row, dayKey }, index) => {
-      const startMinutes = dashboardScheduleTimeToMinutes(row?.qrStart)
-      if (!Number.isFinite(startMinutes) || startMinutes < 0) {
-        return null
-      }
+  const orders = []
+  const usedKeys = new Set(existingKeys)
+  const addOrder = (row, dayKey, rowIndex, index) => {
+    const key = `${rowIndex}|${dayKey}`
+    if (usedKeys.has(key)) {
+      return
+    }
+    const order = calendarTimelineBuildRealStatusOrder(row, dayKey, rowIndex, index, resources)
+    if (!order) {
+      return
+    }
+    usedKeys.add(key)
+    orders.push(order)
+  }
 
-      const rowIndex = calendarTimelineRowForRealEvent(row, resources)
-      if (rowIndex < 0) {
-        return null
-      }
+  calendarTimelineStatusRowsForRealOrders(days).forEach(({ row, dayKey }, index) => {
+    const rowIndex = calendarTimelineRowForRealEvent(row, resources)
+    if (rowIndex >= 0) {
+      addOrder(row, dayKey, rowIndex, index)
+    }
+  })
 
-      const key = `${rowIndex}|${dayKey}`
-      if (existingKeys.has(key)) {
-        return null
+  const today = todayYmd()
+  const visibleDays = new Set((Array.isArray(days) ? days : []).map((day) => String(day ?? '').trim()).filter(Boolean))
+  if (visibleDays.has(today)) {
+    ;(Array.isArray(resources) ? resources : []).forEach((resource, rowIndex) => {
+      if (resource?.type !== 'worker') {
+        return
       }
-
-      const startTs = calendarTimelineTimestampFromDayMinutes(dayKey, startMinutes)
-      if (!startTs) {
-        return null
+      const activeStartMinutes = calendarTimelineActiveWorkerStartMinutes(resource, today)
+      if (!Number.isFinite(activeStartMinutes) || activeStartMinutes < 0) {
+        return
       }
-
-      const stopMinutes = dashboardScheduleTimeToMinutes(row?.qrStop)
-      const durationSec = calendarTimelineStatusDurationSeconds(row)
-      const now = Date.now()
-      let endTs = 0
-      if (Number.isFinite(stopMinutes) && stopMinutes >= 0) {
-        endTs = calendarTimelineTimestampFromDayMinutes(dayKey, stopMinutes)
-        if (endTs <= startTs) {
-          endTs = calendarTimelineTimestampFromDayMinutes(calendarAddDays(dayKey, 1), stopMinutes)
-        }
-      } else if (row?.isRunning) {
-        endTs = Math.max(now, startTs + 15 * 60 * 1000)
-      } else if (durationSec > 0) {
-        endTs = startTs + durationSec * 1000
-      }
-
-      if (!endTs || endTs <= startTs) {
-        return null
-      }
-
-      const startIso = new Date(startTs).toISOString()
-      const endIso = new Date(endTs).toISOString()
-      const start = calendarTimelineIsoToDayTime(startIso)
-      const end = calendarTimelineIsoToDayTime(endIso)
-      if (!start || !end) {
-        return null
-      }
-
-      const durationLabel = calendarTimelineRealDurationLabel(start.timestamp, end.timestamp)
-      const titleLabel =
-        calendarTimelineReadableClientLabel(dashboardResolveClientLabel(row)) ||
-        calendarTimelineRealStartObjectLabel(row) ||
-        'QR START'
-
-      return {
-        id: `real-status-${rowIndex}-${dayKey}-${index}`,
-        row: rowIndex,
-        assignedRows: [rowIndex],
-        workerAssignments: ordersWorkerAssignmentsFromRows([rowIndex], resources),
-        dateYmd: start.day,
-        startTime: start.time,
-        endDateYmd: end.day,
-        endTime: end.time,
-        validUntil: end.day,
-        nextDate: start.day,
-        title: `${titleLabel} · ${durationLabel}`,
-        clientLabel: dashboardResolveClientLabel(row),
-        addressLabel: String(row?.activeLocation ?? row?.lokalizacja ?? row?.location ?? '').trim(),
-        type: 'other',
-        tone: 'steel',
-        actualStartAt: startIso,
-        sourceStartAt: startIso,
-        actualEndAt: row?.isRunning ? '' : endIso,
-        status: row?.isRunning ? 'RUNNING' : 'CLOSED',
-        completed: !row?.isRunning,
-        isRealEvent: true,
-        realTrack: 'workday',
-        realTrackIndex: 0,
-      }
+      addOrder(calendarTimelineStatusFallbackRow(resource, activeStartMinutes), today, rowIndex, `state-${rowIndex}`)
     })
-    .filter(Boolean)
+  }
+
+  return orders
+}
+
+function calendarTimelineEnsureActiveWorkerStatusOrders(orders = [], resources = [], days = []) {
+  const result = Array.isArray(orders) ? [...orders] : []
+  const today = todayYmd()
+  const visibleDays = new Set((Array.isArray(days) ? days : []).map((day) => String(day ?? '').trim()).filter(Boolean))
+  if (!visibleDays.has(today)) {
+    return result
+  }
+
+  const stateMap = calendarTimelineBuildWorkerStateMap(today)
+  ;(Array.isArray(resources) ? resources : []).forEach((resource, rowIndex) => {
+    if (resource?.type !== 'worker') {
+      return
+    }
+
+    const isRunning = [...calendarTimelineWorkerAliasKeys(resource.worker)].some((key) => Boolean(stateMap.get(key)?.isRunning))
+    if (!isRunning) {
+      return
+    }
+    const activeStartMinutes = calendarTimelineActiveWorkerStartMinutes(resource, today)
+    if (!Number.isFinite(activeStartMinutes) || activeStartMinutes < 0) {
+      return
+    }
+
+    const fallbackOrder = calendarTimelineBuildRealStatusOrder(
+      calendarTimelineStatusFallbackRow(resource, activeStartMinutes),
+      today,
+      rowIndex,
+      `active-${rowIndex}`,
+      resources,
+    )
+    if (!fallbackOrder) {
+      return
+    }
+
+    for (let index = result.length - 1; index >= 0; index -= 1) {
+      const order = result[index]
+      if (
+        order?.isRealEvent &&
+        order?.realTrack === 'workday' &&
+        Number(order?.row) === rowIndex &&
+        String(order?.dateYmd ?? '').trim() === today
+      ) {
+        result.splice(index, 1)
+      }
+    }
+    result.push(fallbackOrder)
+  })
+
+  return result
 }
 
 function calendarTimelineRealEventOrders(resources = [], days = [], plannedOrders = []) {
@@ -22717,7 +24193,11 @@ function calendarTimelineRealEventOrders(resources = [], days = [], plannedOrder
       }
     })
     .filter(Boolean)
-  return [...workdayOrders, ...statusFallbackOrders, ...eventOrders]
+  return calendarTimelineEnsureActiveWorkerStatusOrders(
+    [...workdayOrders, ...statusFallbackOrders, ...eventOrders],
+    resources,
+    days,
+  )
 }
 
 function calendarTimelinePrototypeHtml() {
@@ -24710,16 +26190,16 @@ function bindCalendarViewFunctions() {
     appState.calendarTimelineSlideDirection = 0
     appState.calendarTimelineResetScroll = true
     renderCalendarView()
-    void calendarEnsureTimelineWorkerState({ force: true }).catch(() => {})
+    void calendarTimelineRefreshBars().catch(() => {})
   })
   binding.add(document.getElementById('calendarTimelineCompletedToggle'), 'click', () => {
     appState.calendarTimelineShowCompleted = appState.calendarTimelineShowCompleted === false
     renderCalendarView()
   })
   binding.add(document.getElementById('calendarTimelineRefreshBtn'), 'click', () => {
-    renderCalendarView()
-    void calendarEnsureTimelineWorkerState({ force: true }).catch(() => {})
-    showTransientNotice('Kalendarz odświeżony.')
+    void calendarTimelineRefreshBars({ notice: true }).catch(() => {
+      showTransientNotice('Nie udało się odświeżyć pasków kalendarza.', 'error')
+    })
   })
   binding.add(document.getElementById('calendarTimelineTypeBtn'), 'click', (event) => {
     const button = event.currentTarget
