@@ -18468,6 +18468,11 @@ body{
   width:100%;
 }
 
+#portalRoot .sidebar > .menu-order-add{
+  margin:0 6px 12px;
+  width:calc(100% - 12px);
+}
+
 #portalRoot .menu-order-add:hover{
   box-shadow:0 16px 30px rgba(37,99,235,.28);
   transform:translateY(-1px);
@@ -18489,11 +18494,13 @@ body{
 }
 
 .sidebar.is-collapsed #portalRoot .menu-order-add .mi-label,
-#portalRoot .sidebar.is-collapsed .menu-order-add .mi-label{
+#portalRoot .sidebar.is-collapsed .menu-order-add .mi-label,
+#portalRoot.sidebar-collapsed .menu-order-add .mi-label{
   display:none;
 }
 
-#portalRoot .sidebar.is-collapsed .menu-order-add{
+#portalRoot .sidebar.is-collapsed .menu-order-add,
+#portalRoot.sidebar-collapsed .menu-order-add{
   padding:7px;
 }
 

@@ -53,6 +53,11 @@
 
     <div class="app-body">
       <aside class="sidebar" id="portalSidebar">
+        <button class="menu-order-add" id="sidebarOrdersAddBtn" type="button">
+          <span class="menu-order-add-icon" aria-hidden="true">+</span>
+          <span class="mi-label">Dodaj zlecenie</span>
+        </button>
+
         <div class="sidebar-head">
           <div class="sidebar-title">Menu</div>
           <button
@@ -70,10 +75,6 @@
         </div>
 
         <div class="menu">
-          <button class="menu-order-add" id="sidebarOrdersAddBtn" type="button">
-            <span class="menu-order-add-icon" aria-hidden="true">+</span>
-            <span class="mi-label">Dodaj zlecenie</span>
-          </button>
           <button class="menu-item active" data-route="dashboard" type="button">
             <span class="mi-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5v8a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-8z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
