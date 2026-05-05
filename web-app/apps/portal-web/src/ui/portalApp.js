@@ -8164,9 +8164,9 @@ function ordersSaveEditor() {
     description: ordersReadInputValue('ordersEditDescription'),
   }
 
-  const conflict = calendarTimelineFindOrderConflict(nextOrder, ordersListSourceOrders())
+  const conflict = calendarTimelineFindOrderConflict(nextOrder, ordersListSourceOrders(), calendarTimelineResources())
   if (conflict) {
-    showTransientNotice('Nie zapisano: pracownik ma już zlecenie w tym czasie.', 'error')
+    showTransientNotice('Nie zapisano: pracownik ma już zlecenie w tym czasie. Nakładanie jest dozwolone tylko w BUFORZE.', 'error')
     return
   }
 
@@ -19829,6 +19829,30 @@ function calendarTimelineOrderRangeLabel(order = {}) {
   return `${startLabel} - ${endLabel}`
 }
 
+function calendarTimelineDaysForOrder(order = {}) {
+  const startDay = String(order?.dateYmd ?? '').trim()
+  const endDay = String(order?.endDateYmd || order?.dateYmd || startDay).trim()
+  const startOrdinal = calendarTimelineDayOrdinal(startDay)
+  const endOrdinal = calendarTimelineDayOrdinal(endDay)
+  if (!Number.isFinite(startOrdinal) || !Number.isFinite(endOrdinal)) {
+    return []
+  }
+  const firstDay = endOrdinal < startOrdinal ? endDay : startDay
+  const dayCount = Math.min(14, Math.max(1, Math.abs(endOrdinal - startOrdinal) + 1))
+  return Array.from({ length: dayCount }, (_, index) => calendarAddDays(firstDay, index))
+}
+
+function calendarTimelineSameConflictOrder(left = {}, right = {}) {
+  const leftId = String(left?.id ?? '').trim()
+  const rightId = String(right?.id ?? '').trim()
+  if (leftId && rightId && leftId === rightId) {
+    return true
+  }
+  const leftKeys = calendarTimelineOrderSourceKeys(left)
+  const rightKeys = calendarTimelineOrderSourceKeys(right)
+  return Boolean(leftKeys.length && rightKeys.some((key) => leftKeys.includes(key)))
+}
+
 function calendarTimelineTimestampFromDayMinutes(dayKey, minutes) {
   const day = String(dayKey ?? '').trim()
   const value = Number(minutes)
@@ -21834,9 +21858,16 @@ function calendarTimelineFindOrderConflicts(candidate = {}, orders = [], resourc
     return []
   }
   const conflicts = []
+  const sourceOrders = Array.isArray(orders) ? orders : []
+  const conflictDays = calendarTimelineDaysForOrder(candidate)
+  const realOrders =
+    conflictDays.length && calendarTimelineSourceRowsCoverDays(conflictDays)
+      ? calendarTimelineRealEventOrders(resources, conflictDays, sourceOrders).filter((order) => order?.realTrack && order.realTrack !== 'workday')
+      : []
+  const checkedOrders = [...sourceOrders, ...realOrders]
 
-  orders.forEach((order) => {
-    if (!order || order.id === candidate.id) {
+  checkedOrders.forEach((order) => {
+    if (!order || calendarTimelineSameConflictOrder(candidate, order)) {
       return
     }
     const interval = calendarTimelineOrderInterval(order)
@@ -21865,8 +21896,8 @@ function calendarTimelineFindOrderConflicts(candidate = {}, orders = [], resourc
   return conflicts
 }
 
-function calendarTimelineFindOrderConflict(candidate = {}, orders = []) {
-  return calendarTimelineFindOrderConflicts(candidate, orders)[0]?.order ?? null
+function calendarTimelineFindOrderConflict(candidate = {}, orders = [], resources = calendarTimelineResources()) {
+  return calendarTimelineFindOrderConflicts(candidate, orders, resources)[0]?.order ?? null
 }
 
 function calendarTimelineMoveWouldConflict(
