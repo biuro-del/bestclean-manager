@@ -23941,9 +23941,10 @@ function calendarTimelineStatusRowIsRunning(row = {}) {
   return Boolean(row?.isRunning) || (hasStart && !hasStop)
 }
 
-function calendarTimelineStatusFallbackRow(resource = {}, startMinutes = -1) {
+function calendarTimelineStatusFallbackRow(resource = {}, startMinutes = -1, sourceRow = null) {
   const minutes = Number(startMinutes)
   return {
+    ...(sourceRow && typeof sourceRow === 'object' ? sourceRow : {}),
     workerName: resource?.name || resource?.worker?.workerName || resource?.worker?.name || '',
     workerLogin: resource?.worker?.workerLogin || resource?.worker?.login || resource?.worker?.id || '',
     workerId: resource?.worker?.workerId || resource?.worker?.id || '',
@@ -24065,7 +24066,8 @@ function calendarTimelineRealStatusOrders(resources = [], days = [], existingOrd
       if (!Number.isFinite(activeStartMinutes) || activeStartMinutes < 0) {
         return
       }
-      addOrder(calendarTimelineStatusFallbackRow(resource, activeStartMinutes), today, rowIndex, `state-${rowIndex}`)
+      const statusRow = calendarTimelineCurrentStatusRowForResource(resource, today)
+      addOrder(calendarTimelineStatusFallbackRow(resource, activeStartMinutes, statusRow), today, rowIndex, `state-${rowIndex}`)
     })
   }
 
@@ -24095,8 +24097,9 @@ function calendarTimelineEnsureActiveWorkerStatusOrders(orders = [], resources =
       return
     }
 
+    const statusRow = calendarTimelineCurrentStatusRowForResource(resource, today)
     const fallbackOrder = calendarTimelineBuildRealStatusOrder(
-      calendarTimelineStatusFallbackRow(resource, activeStartMinutes),
+      calendarTimelineStatusFallbackRow(resource, activeStartMinutes, statusRow),
       today,
       rowIndex,
       `active-${rowIndex}`,
