@@ -16,8 +16,12 @@
         "@dataconnect/generated": "file:apps/portal-web/src/dataconnect-generated",
         "firebase": "^12.9.0",
         "jszip": "^3.10.1",
+        "pdfmake": "^0.3.7",
         "react": "^19.2.0",
         "react-dom": "^19.2.0"
+    },
+    "overrides": {
+        "protobufjs": "7.5.5"
     },
     "devDependencies": {
         "@eslint/js": "^9.39.1",

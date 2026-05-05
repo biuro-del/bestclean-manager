@@ -64,6 +64,32 @@ node_modules/
 
 # dotenv environment variables file
 .env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+**/.secret
+**/.secret.*
+
+# Local Firebase/Data Connect scratch files and exports
+.firebase-temp-*
+.firebase-temp-*/
+firebase-debug.log
+firebase-debug.*.log
+
+# Build outputs / generated artefacts
+dist/
+**/dist/
+web-app/dist-final-mobile/
+reports/
+state-snapshots/
+input/
+_tmp*/
+.tmp*/
+_mobileweb_hotfix/
+_portalweb_hotfix/
+_portalweb_main/
 
 # dataconnect generated files
 .dataconnect

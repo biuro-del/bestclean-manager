@@ -76,6 +76,8 @@ function mapFunctionToCanonical(value) {
   if (upper === 'STOP10') return 'STOP10'
   if (upper === 'STOP15') return 'STOP15'
   if (lower === 'clean') return 'clean'
+  if (lower === 'strefa_specjalna') return 'strefa_specjalna'
+  if (lower === 'kod_specjalny') return 'strefa_specjalna'
   if (lower === 'sprzatanie_indywidualne') return 'clean'
   if (lower === 'zlecenie_indywidualne') return 'clean'
   if (lower === 'podajnik_mydlo') return 'podajnik_mydlo'
@@ -88,6 +90,8 @@ function mapFunctionToCanonical(value) {
   const key = compactKey(raw)
   const map = {
     sprzatanie: 'clean',
+    strefaspecjalna: 'strefa_specjalna',
+    kodspecjalny: 'strefa_specjalna',
     zlecenieindywidualne: 'clean',
     sprzatanieindywidualne: 'clean',
     startczaspracy: 'START',
@@ -109,6 +113,7 @@ function mapFunctionToUiLabel(value) {
   const canonical = mapFunctionToCanonical(value)
   const labels = {
     clean: 'Sprzątanie',
+    strefa_specjalna: 'Strefa specjalna',
     START: 'START (czas pracy)',
     STOP0: 'STOP0 (czas pracy + 0 min)',
     STOP5: 'STOP5 (czas pracy + 5 min)',

@@ -1,25 +1,36 @@
 import JSZip from 'jszip'
 import {
+  clientStorageForOrg,
   clientsForOrg,
+  deleteClientStorageForOrg,
   deleteClientForOrg,
   deleteEventForOrg,
   deleteIndividualJobForOrg,
+  deleteStorageForOrg,
   deleteWorkdayForOrg,
   deleteZoneForOrg,
   eventsForOrg,
   individualJobsForOrg,
+  insertClientStorageForOrg,
   insertClientForOrg,
   insertEventForOrg,
   insertIndividualJobForOrg,
+  insertStorageForOrg,
   insertWorkdayForOrg,
   insertWorkerForOrg,
   insertZoneForOrg,
+  startWorkdayPause,
+  stopWorkdayPause,
+  storageForOrg,
+  updateClientStorageForOrg,
   updateClientForOrg,
   updateEventForOrg,
   updateIndividualJobForOrg,
+  updateStorageForOrg,
   updateWorkdayForOrg,
   updateZoneForOrg,
   workersForOrg,
+  workdayPausesForOrg,
   workdaysForOrg,
   zonesForOrg,
 } from '@dataconnect/generated'
@@ -40,8 +51,11 @@ const BACKUP_DB_VERSION = 1
 const BACKUP_STORE_NAME = 'archives'
 const RETENTION_DAYS = 5
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
+const PAGED_QUERY_LIMIT = 500
 const AUTH_SNAPSHOT_NOTE =
   'Migawka auth/users.json jest oparta o dane pracownikow z Data Connect (login/email/rola/active). Pelny backup Firebase Auth wymaga backendu z uprawnieniami admin.'
+const OPTIONAL_OPERATION_HINT =
+  'Brak wdrozonej operacji Data Connect dla czesci modulow backupu. Wykonaj deploy dataconnect.'
 
 const TYPE_LABELS = {
   full: 'Pelna kopia',
@@ -61,11 +75,25 @@ const PROVIDER_REGISTRY = [
   { id: 'clients', label: 'Klienci/obiekty', types: ['full', 'objects'] },
   { id: 'zones', label: 'Strefy', types: ['full', 'objects'] },
   { id: 'individualOrders', label: 'Zlecenia indywidualne', types: ['full', 'objects'] },
+  { id: 'storage', label: 'Magazyn', types: ['full', 'objects'] },
+  { id: 'clientStorage', label: 'Magazyn klientow', types: ['full', 'objects'] },
   { id: 'workdays', label: 'Dni pracy', types: ['full', 'workers', 'objects'] },
+  { id: 'workdayPauses', label: 'Przerwy pracy', types: ['full', 'workers', 'objects'] },
   { id: 'events', label: 'Zdarzenia', types: ['full', 'workers', 'objects'] },
 ]
 
-const REQUIRED_PROVIDER_IDS = ['workers', 'styles', 'clients', 'zones', 'individualOrders', 'workdays', 'events']
+const REQUIRED_PROVIDER_IDS = [
+  'workers',
+  'styles',
+  'clients',
+  'zones',
+  'individualOrders',
+  'storage',
+  'clientStorage',
+  'workdays',
+  'workdayPauses',
+  'events',
+]
 
 export const BACKUP_TYPE_OPTIONS = [
   { value: 'full', label: TYPE_LABELS.full },
@@ -97,9 +125,67 @@ function roleSafeText(value) {
   return String(value ?? '').trim()
 }
 
+function messageFromError(error) {
+  if (error instanceof Error) {
+    return String(error.message ?? '')
+  }
+  return String(error ?? '')
+}
+
+function extractNestedErrorMessage(rawMessage) {
+  const message = roleSafeText(rawMessage)
+  if (!message || !message.startsWith('{')) {
+    return ''
+  }
+
+  try {
+    const parsed = JSON.parse(message)
+    return roleSafeText(parsed?.error?.message ?? parsed?.message)
+  } catch {
+    return ''
+  }
+}
+
+function isOperationNotFoundMessage(rawMessage, operationName) {
+  const message = messageFromError(rawMessage)
+  const nested = extractNestedErrorMessage(message)
+  const fullMessage = `${message} ${nested}`.toLowerCase()
+  const operation = roleSafeText(operationName).toLowerCase()
+  if (!operation) {
+    return false
+  }
+
+  return (
+    fullMessage.includes(`operation \"${operation}\" not found`) ||
+    fullMessage.includes(`operation "${operation}" not found`) ||
+    fullMessage.includes(`operation '${operation}' not found`) ||
+    (fullMessage.includes('operation') && fullMessage.includes('not found') && fullMessage.includes(operation)) ||
+    ((fullMessage.includes('"status":"not_found"') ||
+      fullMessage.includes('"code":404') ||
+      fullMessage.includes('"code":"404"')) &&
+      fullMessage.includes(operation))
+  )
+}
+
+function withOperationNotFoundHint(error, operationName, moduleLabel = '') {
+  const message = messageFromError(error)
+  if (isOperationNotFoundMessage(message, operationName)) {
+    const label = roleSafeText(moduleLabel)
+    const suffix = label ? ` Modul: ${label}.` : ''
+    return new Error(`${OPTIONAL_OPERATION_HINT} Brak operacji: ${operationName}.${suffix}`)
+  }
+
+  return error instanceof Error ? error : new Error(message || OPTIONAL_OPERATION_HINT)
+}
+
 function toNullableText(value) {
   const text = String(value ?? '').trim()
   return text ? text : null
+}
+
+function toNullableNumber(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function toBoolean(value, fallback = true) {
@@ -379,27 +465,113 @@ function buildStylesBackupRows(snapshot = {}) {
   return rows
 }
 
+async function fetchPagedRows(loadPage, listKey) {
+  const collected = []
+  let offset = 0
+
+  while (true) {
+    const response = await loadPage(offset)
+    const pageRows = Array.isArray(response?.data?.[listKey]) ? response.data[listKey] : []
+    collected.push(...pageRows)
+
+    if (pageRows.length < PAGED_QUERY_LIMIT) {
+      break
+    }
+
+    offset += pageRows.length
+  }
+
+  return deepClone(collected)
+}
+
+async function fetchStorageRows(orgId) {
+  return fetchPagedRows((offset) => storageForOrg({ orgId, limit: PAGED_QUERY_LIMIT, offset }), 'storages')
+}
+
+async function fetchClientStorageRows(orgId) {
+  return fetchPagedRows(
+    (offset) => clientStorageForOrg({ orgId, limit: PAGED_QUERY_LIMIT, offset }),
+    'clientStorages',
+  )
+}
+
+async function fetchOptionalBackupRows(loadRows, options = {}) {
+  const operationName = roleSafeText(options.operationName)
+  const moduleLabel = roleSafeText(options.moduleLabel)
+
+  try {
+    return {
+      available: true,
+      rows: await loadRows(),
+    }
+  } catch (error) {
+    if (isOperationNotFoundMessage(error, operationName)) {
+      return {
+        available: false,
+        rows: [],
+      }
+    }
+    throw withOperationNotFoundHint(error, operationName, moduleLabel)
+  }
+}
+
 async function fetchRawDataset(orgId) {
   ensureFirebaseOrThrow()
 
-  const [workersResponse, clientsResponse, zonesResponse, individualResponse, eventsResponse, workdaysResponse, styleSnapshot] = await Promise.all([
-    workersForOrg({ orgId }),
-    clientsForOrg({ orgId }),
-    zonesForOrg({ orgId }),
-    individualJobsForOrg({ orgId }),
-    eventsForOrg({ orgId }),
-    workdaysForOrg({ orgId }),
-    getOrgAndUserStylesForBackup(orgId),
+  const [workersResponse, clientsResponse, zonesResponse, individualResponse, eventsResponse, workdaysResponse, styleSnapshot] =
+    await Promise.all([
+      workersForOrg({ orgId }),
+      clientsForOrg({ orgId }),
+      zonesForOrg({ orgId }),
+      individualJobsForOrg({ orgId }),
+      eventsForOrg({ orgId }),
+      workdaysForOrg({ orgId }),
+      getOrgAndUserStylesForBackup(orgId),
+    ])
+
+  const [storageModule, clientStorageModule, workdayPausesModule] = await Promise.all([
+    fetchOptionalBackupRows(() => fetchStorageRows(orgId), {
+      operationName: 'StorageForOrg',
+      moduleLabel: 'Magazyn',
+    }),
+    fetchOptionalBackupRows(() => fetchClientStorageRows(orgId), {
+      operationName: 'ClientStorageForOrg',
+      moduleLabel: 'Magazyn klientow',
+    }),
+    fetchOptionalBackupRows(
+      async () => deepClone((await workdayPausesForOrg({ orgId }))?.data?.workdayPauses ?? []),
+      {
+        operationName: 'WorkdayPausesForOrg',
+        moduleLabel: 'Przerwy pracy',
+      },
+    ),
   ])
 
+  const availableModuleIds = new Set(['workers', 'styles', 'clients', 'zones', 'individualOrders', 'events', 'workdays'])
+  if (storageModule.available) {
+    availableModuleIds.add('storage')
+  }
+  if (clientStorageModule.available) {
+    availableModuleIds.add('clientStorage')
+  }
+  if (workdayPausesModule.available) {
+    availableModuleIds.add('workdayPauses')
+  }
+
   return {
-    workers: deepClone(workersResponse?.data?.workers ?? []),
-    styles: deepClone(buildStylesBackupRows(styleSnapshot)),
-    clients: deepClone(clientsResponse?.data?.clients ?? []),
-    zones: deepClone(zonesResponse?.data?.zones ?? []),
-    individualOrders: deepClone(individualResponse?.data?.individualClientJobs ?? []),
-    events: deepClone(eventsResponse?.data?.events ?? []),
-    workdays: deepClone(workdaysResponse?.data?.workdays ?? []),
+    data: {
+      workers: deepClone(workersResponse?.data?.workers ?? []),
+      styles: deepClone(buildStylesBackupRows(styleSnapshot)),
+      clients: deepClone(clientsResponse?.data?.clients ?? []),
+      zones: deepClone(zonesResponse?.data?.zones ?? []),
+      individualOrders: deepClone(individualResponse?.data?.individualClientJobs ?? []),
+      storage: storageModule.rows,
+      clientStorage: clientStorageModule.rows,
+      events: deepClone(eventsResponse?.data?.events ?? []),
+      workdayPauses: workdayPausesModule.rows,
+      workdays: deepClone(workdaysResponse?.data?.workdays ?? []),
+    },
+    availableModuleIds,
   }
 }
 
@@ -411,7 +583,10 @@ function filterDatasetByType(dataset, type) {
     clients: Array.isArray(dataset?.clients) ? dataset.clients : [],
     zones: Array.isArray(dataset?.zones) ? dataset.zones : [],
     individualOrders: Array.isArray(dataset?.individualOrders) ? dataset.individualOrders : [],
+    storage: Array.isArray(dataset?.storage) ? dataset.storage : [],
+    clientStorage: Array.isArray(dataset?.clientStorage) ? dataset.clientStorage : [],
     events: Array.isArray(dataset?.events) ? dataset.events : [],
+    workdayPauses: Array.isArray(dataset?.workdayPauses) ? dataset.workdayPauses : [],
     workdays: Array.isArray(dataset?.workdays) ? dataset.workdays : [],
   }
 
@@ -425,13 +600,27 @@ function filterDatasetByType(dataset, type) {
         .map((row) => String(row?.login ?? '').trim())
         .filter(Boolean),
     )
+    const filteredWorkdays = source.workdays.filter((row) => workerLogins.has(String(row?.workerLogin ?? '').trim()))
+    const filteredWorkdayIds = new Set(
+      filteredWorkdays
+        .map((row) => String(row?.workdayId ?? '').trim())
+        .filter(Boolean),
+    )
+
     return {
       ...source,
       clients: [],
       zones: [],
       individualOrders: [],
+      storage: [],
+      clientStorage: [],
       events: source.events.filter((row) => workerLogins.has(String(row?.workerLogin ?? '').trim())),
-      workdays: source.workdays.filter((row) => workerLogins.has(String(row?.workerLogin ?? '').trim())),
+      workdayPauses: source.workdayPauses.filter((row) => {
+        const workdayId = String(row?.workdayId ?? '').trim()
+        const workerLogin = String(row?.workerLogin ?? '').trim()
+        return filteredWorkdayIds.has(workdayId) || workerLogins.has(workerLogin)
+      }),
+      workdays: filteredWorkdays,
     }
   }
 
@@ -440,13 +629,33 @@ function filterDatasetByType(dataset, type) {
       .map((row) => String(row?.zoneId ?? '').trim())
       .filter(Boolean),
   )
+  const clientIds = new Set(
+    source.clients
+      .map((row) => String(row?.clientId ?? '').trim())
+      .filter(Boolean),
+  )
+  const filteredClientStorage = source.clientStorage.filter((row) => clientIds.has(String(row?.clientId ?? '').trim()))
+  const storageProductIndexes = new Set(
+    filteredClientStorage
+      .map((row) => String(row?.productIndex ?? '').trim())
+      .filter(Boolean),
+  )
+  const filteredWorkdays = source.workdays.filter((row) => zoneIds.has(String(row?.utilityRoomId ?? '').trim()))
+  const filteredWorkdayIds = new Set(
+    filteredWorkdays
+      .map((row) => String(row?.workdayId ?? '').trim())
+      .filter(Boolean),
+  )
 
   return {
     ...source,
     workers: [],
     styles: [],
+    storage: source.storage.filter((row) => storageProductIndexes.has(String(row?.productIndex ?? '').trim())),
+    clientStorage: filteredClientStorage,
     events: source.events.filter((row) => zoneIds.has(String(row?.zoneId ?? '').trim())),
-    workdays: source.workdays.filter((row) => zoneIds.has(String(row?.utilityRoomId ?? '').trim())),
+    workdayPauses: source.workdayPauses.filter((row) => filteredWorkdayIds.has(String(row?.workdayId ?? '').trim())),
+    workdays: filteredWorkdays,
   }
 }
 
@@ -493,9 +702,9 @@ function createManifestBase({ orgId, type, title, createdAt, createdBy, source, 
 async function buildBackupArchive({ orgId, type, title, createdBy, source = 'manual', monthKey = '' }) {
   const normalizedType = normalizeType(type)
   const createdAt = nowIso()
-  const dataset = await fetchRawDataset(orgId)
-  const filteredDataset = filterDatasetByType(dataset, normalizedType)
-  const selectedProviders = providersForType(normalizedType)
+  const snapshot = await fetchRawDataset(orgId)
+  const filteredDataset = filterDatasetByType(snapshot.data, normalizedType)
+  const selectedProviders = providersForType(normalizedType).filter((provider) => snapshot.availableModuleIds.has(provider.id))
 
   const manifest = createManifestBase({
     orgId,
@@ -1037,6 +1246,162 @@ async function restoreClientsModule(orgId, rows) {
   }
 }
 
+async function restoreStorageModule(orgId, rows) {
+  const importedRows = Array.isArray(rows) ? rows : []
+  const currentRows = await fetchStorageRows(orgId)
+  const currentMap = mapRowsByKey(currentRows, 'productIndex')
+
+  let created = 0
+  let updated = 0
+  let skipped = 0
+
+  for (const row of importedRows) {
+    const productIndex = roleSafeText(row?.productIndex)
+    const productId = roleSafeText(row?.productId)
+    const name = roleSafeText(row?.name)
+    const productType = roleSafeText(row?.productType)
+    if (!productIndex || !productId || !name || !productType) {
+      skipped += 1
+      continue
+    }
+
+    const payload = {
+      orgId,
+      productIndex,
+      productId,
+      name,
+      productType,
+      quantity: toNullableNumber(row?.quantity),
+      quantityMin: toNullableNumber(row?.quantityMin),
+      quantityMax: toNullableNumber(row?.quantityMax),
+      description: toNullableText(row?.description),
+      qrCode: toNullableText(row?.qrCode),
+    }
+
+    try {
+      if (currentMap.has(productIndex)) {
+        await updateStorageForOrg(payload)
+        updated += 1
+      } else {
+        await insertStorageForOrg(payload)
+        created += 1
+      }
+    } catch (error) {
+      throw withOperationNotFoundHint(error, currentMap.has(productIndex) ? 'UpdateStorageForOrg' : 'InsertStorageForOrg', 'Magazyn')
+    }
+  }
+
+  return {
+    moduleId: 'storage',
+    created,
+    updated,
+    deleted: 0,
+    skipped,
+  }
+}
+
+async function cleanupStorageModule(orgId, rows) {
+  const importedMap = mapRowsByKey(rows, 'productIndex')
+  const currentRows = await fetchStorageRows(orgId)
+  let deleted = 0
+
+  for (const row of currentRows) {
+    const productIndex = roleSafeText(row?.productIndex)
+    if (!productIndex || importedMap.has(productIndex)) {
+      continue
+    }
+
+    try {
+      await deleteStorageForOrg({ orgId, productIndex })
+      deleted += 1
+    } catch (error) {
+      throw withOperationNotFoundHint(error, 'DeleteStorageForOrg', 'Magazyn')
+    }
+  }
+
+  return deleted
+}
+
+async function restoreClientStorageModule(orgId, rows) {
+  const importedRows = Array.isArray(rows) ? rows : []
+  const currentRows = await fetchClientStorageRows(orgId)
+  const currentMap = new Map(
+    currentRows.map((row) => [`${roleSafeText(row?.clientId)}::${roleSafeText(row?.productIndex)}`, row]),
+  )
+  const importedKeys = new Set()
+
+  let created = 0
+  let updated = 0
+  let deleted = 0
+  let skipped = 0
+
+  for (const row of importedRows) {
+    const clientId = roleSafeText(row?.clientId)
+    const productIndex = roleSafeText(row?.productIndex)
+    const name = roleSafeText(row?.name)
+    const productType = roleSafeText(row?.productType)
+    if (!clientId || !productIndex || !name || !productType) {
+      skipped += 1
+      continue
+    }
+
+    const key = `${clientId}::${productIndex}`
+    importedKeys.add(key)
+
+    const payload = {
+      orgId,
+      clientId,
+      productIndex,
+      name,
+      productType,
+      quantity: toNullableNumber(row?.quantity),
+      quantityMin: toNullableNumber(row?.quantityMin),
+      quantityMax: toNullableNumber(row?.quantityMax),
+      qrCode: toNullableText(row?.qrCode),
+    }
+
+    try {
+      if (currentMap.has(key)) {
+        await updateClientStorageForOrg(payload)
+        updated += 1
+      } else {
+        await insertClientStorageForOrg(payload)
+        created += 1
+      }
+    } catch (error) {
+      throw withOperationNotFoundHint(
+        error,
+        currentMap.has(key) ? 'UpdateClientStorageForOrg' : 'InsertClientStorageForOrg',
+        'Magazyn klientow',
+      )
+    }
+  }
+
+  for (const row of currentRows) {
+    const clientId = roleSafeText(row?.clientId)
+    const productIndex = roleSafeText(row?.productIndex)
+    const key = `${clientId}::${productIndex}`
+    if (!clientId || !productIndex || importedKeys.has(key)) {
+      continue
+    }
+
+    try {
+      await deleteClientStorageForOrg({ orgId, clientId, productIndex })
+      deleted += 1
+    } catch (error) {
+      throw withOperationNotFoundHint(error, 'DeleteClientStorageForOrg', 'Magazyn klientow')
+    }
+  }
+
+  return {
+    moduleId: 'clientStorage',
+    created,
+    updated,
+    deleted,
+    skipped,
+  }
+}
+
 async function restoreZonesModule(orgId, rows) {
   const importedRows = Array.isArray(rows) ? rows : []
   const currentResponse = await zonesForOrg({ orgId })
@@ -1184,6 +1549,7 @@ async function restoreWorkdaysModule(orgId, rows) {
       endAt: toNullableText(row?.endAt),
       durationSec: Number.isFinite(Number(row?.durationSec)) ? Number(row.durationSec) : null,
       status: toNullableText(row?.status),
+      gps: toNullableText(row?.gps),
       comment: toNullableText(row?.comment),
       updatedBy: toNullableText(row?.updatedBy),
     }
@@ -1215,6 +1581,74 @@ async function restoreWorkdaysModule(orgId, rows) {
   }
 }
 
+async function restoreWorkdayPausesModule(orgId, rows) {
+  const importedRows = Array.isArray(rows) ? rows : []
+  let created = 0
+  let updated = 0
+  let skipped = 0
+
+  for (const row of importedRows) {
+    const pauseId = roleSafeText(row?.pauseId)
+    const workdayId = roleSafeText(row?.workdayId)
+    const workerLogin = roleSafeText(row?.workerLogin)
+    if (!pauseId || !workdayId) {
+      skipped += 1
+      continue
+    }
+
+    try {
+      await startWorkdayPause({
+        orgId,
+        pauseId,
+        workdayId,
+        workerLogin: toNullableText(workerLogin),
+        workerName: toNullableText(row?.workerName),
+        startAt: toNullableText(row?.startAt),
+        stopAt: toNullableText(row?.stopAt),
+        durationSec: toNullableNumber(row?.durationSec),
+        status: toNullableText(row?.status),
+        pauseEventId: toNullableText(row?.pauseEventId),
+        deviceId: toNullableText(row?.deviceId),
+      })
+      created += 1
+    } catch (error) {
+      if (isOperationNotFoundMessage(error, 'StartWorkdayPause')) {
+        throw withOperationNotFoundHint(error, 'StartWorkdayPause', 'Przerwy pracy')
+      }
+
+      const stopAt = toNullableText(row?.stopAt)
+      const durationSec = toNullableNumber(row?.durationSec)
+      const status = toNullableText(row?.status)
+      if (!stopAt && durationSec == null && !status) {
+        skipped += 1
+        continue
+      }
+
+      try {
+        await stopWorkdayPause({
+          orgId,
+          pauseId,
+          workdayId,
+          stopAt,
+          durationSec,
+          status,
+        })
+        updated += 1
+      } catch (updateError) {
+        throw withOperationNotFoundHint(updateError, 'StopWorkdayPause', 'Przerwy pracy')
+      }
+    }
+  }
+
+  return {
+    moduleId: 'workdayPauses',
+    created,
+    updated,
+    deleted: 0,
+    skipped,
+  }
+}
+
 async function restoreEventsModule(orgId, rows) {
   const importedRows = Array.isArray(rows) ? rows : []
   const currentResponse = await eventsForOrg({ orgId })
@@ -1237,8 +1671,10 @@ async function restoreEventsModule(orgId, rows) {
     const payload = {
       orgId,
       eventId,
+      workdayId: toNullableText(row?.workdayId),
       zoneId: toNullableText(row?.zoneId),
       workerLogin: toNullableText(row?.workerLogin),
+      workerName: toNullableText(row?.workerName),
       startAt: toNullableText(row?.startAt),
       endAt: toNullableText(row?.endAt),
       durationSec: Number.isFinite(Number(row?.durationSec)) ? Number(row.durationSec) : null,
@@ -1282,14 +1718,28 @@ const RESTORE_HANDLERS = {
   workers: restoreWorkersModule,
   styles: restoreStylesModule,
   clients: restoreClientsModule,
+  storage: restoreStorageModule,
+  clientStorage: restoreClientStorageModule,
   zones: restoreZonesModule,
   individualOrders: restoreIndividualOrdersModule,
   workdays: restoreWorkdaysModule,
+  workdayPauses: restoreWorkdayPausesModule,
   events: restoreEventsModule,
 }
 
 function sortRestoreModules(moduleIds = []) {
-  const order = ['workers', 'styles', 'clients', 'zones', 'individualOrders', 'workdays', 'events']
+  const order = [
+    'workers',
+    'styles',
+    'clients',
+    'zones',
+    'individualOrders',
+    'storage',
+    'clientStorage',
+    'workdays',
+    'workdayPauses',
+    'events',
+  ]
   return [...new Set(moduleIds)].sort((left, right) => order.indexOf(left) - order.indexOf(right))
 }
 
@@ -1327,6 +1777,14 @@ async function restoreFromParsedArchive({ orgId, parsed, restoredBy, sourceLabel
     const rows = Array.isArray(modulePayloads[moduleId]) ? modulePayloads[moduleId] : []
     const result = await handler(orgId, rows)
     moduleResults.push(result)
+  }
+
+  if (moduleIds.includes('storage')) {
+    const deleted = await cleanupStorageModule(orgId, Array.isArray(modulePayloads.storage) ? modulePayloads.storage : [])
+    const storageResult = moduleResults.find((result) => result?.moduleId === 'storage')
+    if (storageResult) {
+      storageResult.deleted = Number(storageResult.deleted ?? 0) + deleted
+    }
   }
 
   await applyRetentionPolicy(orgId, { keepPreRestoreId: preRestore.id })

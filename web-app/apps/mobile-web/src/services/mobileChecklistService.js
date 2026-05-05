@@ -142,6 +142,8 @@ export async function saveZoneChecklistResult({
 
   const payload = {
     orgId,
+    source: 'mobile-web',
+    createdByUid: toText(session?.uid) || null,
     zoneId,
     zoneName: toText(zone?.zoneName || activeCycle?.zoneName) || null,
     clientName: toText(zone?.clientName || activeCycle?.clientName) || null,
@@ -194,6 +196,7 @@ export async function saveWorkdayCloseResult({
   const closeAttachments = Array.isArray(closeAttachmentsMeta) ? closeAttachmentsMeta : []
   const payload = {
     orgId,
+    createdByUid: toText(session?.uid) || null,
     workdayId: toText(workday?.workdayId) || null,
     stopZoneId: toText(stopZone?.id) || null,
     stopZoneName: toText(stopZone?.name) || null,

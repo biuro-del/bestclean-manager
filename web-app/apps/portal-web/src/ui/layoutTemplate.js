@@ -5,7 +5,7 @@
       <div class="login-logo">
         <img src="/logotyp.jpg" alt="Best Clean" />
       </div>
-      <div class="login-title">iClean - PORTAL</div>
+      <p class="login-claim">Sprz&#261;tanie z nami to czysta przyjemno&#347;&#263;.</p>
     </div>
 
     <div class="login-field">
@@ -27,14 +27,20 @@
 <div class="app-bg" id="portalRoot" style="display:none;">
   <div class="app-shell">
     <header class="header">
-      <div class="header-left">
-        <div class="logo-block" aria-label="Logo">
+      <button
+        class="header-left header-home-link"
+        data-route="dashboard"
+        type="button"
+        aria-label="Przejdź do strony głównej"
+        title="Strona główna"
+      >
+        <div class="logo-block logo-block--bestclean" aria-label="Logo Best Clean">
           <img src="/logotyp.jpg" alt="Best Clean" />
         </div>
         <div class="brand">
-          <div class="brand-title">iClean - PORTAL</div>
+          <div class="brand-claim">Sprz&#261;tanie z nami to czysta przyjemno&#347;&#263;.</div>
         </div>
-      </div>
+      </button>
 
       <div class="header-right">
         <div class="user-chip" id="userChip" title="Użytkownik">
@@ -64,6 +70,10 @@
         </div>
 
         <div class="menu">
+          <button class="menu-order-add" id="sidebarOrdersAddBtn" type="button">
+            <span class="menu-order-add-icon" aria-hidden="true">+</span>
+            <span class="mi-label">Dodaj zlecenie</span>
+          </button>
           <button class="menu-item active" data-route="dashboard" type="button">
             <span class="mi-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5v8a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-8z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -76,11 +86,82 @@
             </span>
             <span class="mi-label">Zdarzenia</span>
           </button>
+          <button class="menu-section" type="button" data-toggle="orders">
+            <span class="mi-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M8 4h8l2 2v14H6V6l2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 10h6M9 14h6M9 18h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </span>
+            <span class="mi-label">Zlecenia</span>
+            <span class="chev">▼</span>
+          </button>
+          <div class="submenu" id="submenu-orders">
+            <button class="submenu-item" data-route="orders" type="button">
+              <span class="mi-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M5 6h14M5 12h14M5 18h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </span>
+              <span class="mi-label">Lista zlecen</span>
+            </button>
+            <button class="submenu-item" data-route="ordersMap" type="button">
+              <span class="mi-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 21s7-5.2 7-11a7 7 0 1 0-14 0c0 5.8 7 11 7 11Z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="1.8"/></svg>
+              </span>
+              <span class="mi-label">Mapa</span>
+            </button>
+          </div>
+          <button class="menu-item" data-route="calendar" type="button">
+            <span class="mi-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 3v4M16 3v4M4 10h16M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </span>
+            <span class="mi-label">Kalendarz</span>
+            <span class="menu-task-badge" id="menuCalendarTaskDueCount" hidden>0</span>
+          </button>
+          <button class="menu-section" type="button" data-toggle="kanban">
+            <span class="mi-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="5" height="14" rx="1.5" stroke="currentColor" stroke-width="1.8"/><rect x="10.5" y="5" width="5" height="10" rx="1.5" stroke="currentColor" stroke-width="1.8"/><rect x="17" y="5" width="3" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8"/></svg>
+            </span>
+            <span class="mi-label">Kanban</span>
+            <span class="menu-task-badge" id="menuKanbanTaskDueCount" hidden>0</span>
+            <span class="chev">▼</span>
+          </button>
+          <div class="submenu submenu-kanban" id="submenu-kanban">
+            <button class="submenu-item" type="button" data-kanban-menu-section="home">
+              <span class="mi-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-9.5Z" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"/></svg>
+              </span>
+              <span class="mi-label">Strona główna</span>
+            </button>
+            <button class="submenu-item" type="button" data-kanban-menu-section="tasks">
+              <span class="mi-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="m8.5 12.2 2.2 2.2 4.8-5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9"/></svg>
+              </span>
+              <span class="mi-label">Moje zadania</span>
+              <span class="menu-task-badge kanban-submenu-count" data-kanban-my-count hidden>0</span>
+            </button>
+            <button class="submenu-item" type="button" data-kanban-menu-section="inbox">
+              <span class="mi-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M5 18h14l-1.4-2.2V11a5.6 5.6 0 0 0-11.2 0v4.8L5 18Z" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"/><path d="M10 20a2 2 0 0 0 4 0" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/></svg>
+              </span>
+              <span class="mi-label">Skrzynka odbiorcza</span>
+              <span class="kanban-submenu-dot" data-kanban-inbox-dot hidden></span>
+            </button>
+            <button class="submenu-item kanban-submenu-create" id="kanbanMenuCreateBtn" type="button">
+              <span class="mi-ico" aria-hidden="true">+</span>
+              <span class="mi-label">Utwórz zadanie</span>
+            </button>
+            <div class="kanban-menu-heading">Projekty / klienci</div>
+            <div class="kanban-menu-dynamic" id="kanbanPortalMenuProjects"></div>
+            <button class="kanban-menu-more" id="kanbanPortalMenuShowMore" type="button" hidden>Pokaż więcej</button>
+          </div>
           <button class="menu-item" data-route="schedule" type="button">
             <span class="mi-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 3v4M16 3v4M3 10h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
             </span>
             <span class="mi-label">Grafik pracy</span>
+          </button>
+          <button class="menu-item" data-route="coordinator" type="button">
+            <span class="mi-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="1.8"/><circle cx="17" cy="8" r="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 20a5 5 0 0 1 10 0M14 20a4 4 0 0 1 8 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </span>
+            <span class="mi-label">Koordynator</span>
           </button>
 
           <button class="menu-section" type="button" data-toggle="clients">
@@ -107,12 +188,6 @@
                 <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="12" r="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M14 10h4M14 14h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
               </span>
               <span class="mi-label">Profil klienta</span>
-            </button>
-            <button class="submenu-item" data-route="checklists" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><rect x="5" y="4" width="14" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 9l1.5 1.5L12 8M8 14l1.5 1.5L12 13M14 9h3M14 14h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </span>
-              <span class="mi-label">Checklisty</span>
             </button>
           </div>
 
@@ -171,12 +246,6 @@
               </span>
               <span class="mi-label">Zestawienia</span>
             </button>
-            <button class="submenu-item" data-route="coordinator" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="1.8"/><circle cx="17" cy="8" r="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 20a5 5 0 0 1 10 0M14 20a4 4 0 0 1 8 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-              </span>
-              <span class="mi-label">Koordynator</span>
-            </button>
           </div>
 
           <button class="menu-section" type="button" data-toggle="settings">
@@ -204,52 +273,79 @@
 
       <main class="main">
         <section id="view-dashboard">
+          <div
+            class="dashboard-loading-overlay"
+            id="dashboardLoadingOverlay"
+            style="display:none;"
+            aria-live="polite"
+            aria-busy="false"
+            aria-label="Wczytywanie danych pulpitu"
+          >
+            <div class="dashboard-loading-card">
+              <span class="dashboard-loading-spinner" aria-hidden="true"></span>
+            </div>
+          </div>
           <div class="dash-grid">
             <div class="card dash-pulse dash-overview-panel">
               <div class="card-title-row">
                 <div class="card-title">Przegląd</div>
               </div>
 
-              <div class="dash-summary" id="dashSummaryTables">
-                <div class="dash-summary-table" aria-label="Tabela 1">
-                  <div class="dash-summary-table-title">Dzień dzisiejszy</div>
-                  <div class="dash-summary-table-rows">
-                    <button class="dash-summary-row" type="button" data-dash-metric="activeNow">
-                      <span class="dash-summary-row-label">Aktywni teraz</span>
-                      <span class="dash-summary-row-value" id="sumActiveNowCount">0</span>
-                    </button>
-                    <button class="dash-summary-row" type="button" data-dash-metric="finishedToday">
-                      <span class="dash-summary-row-label">Zakończone (START + STOP)</span>
-                      <span class="dash-summary-row-value" id="sumFinishedTodayCount">0</span>
-                    </button>
-                    <div class="dash-summary-row dash-summary-row--static">
-                      <span class="dash-summary-row-label">Suma godzin</span>
-                      <span class="dash-summary-row-value" id="sumTotalHoursToday">00:00</span>
+              <div class="dash-summary dash-summary--no-comments" id="dashSummaryTables">
+                <div class="dash-summary-table dash-summary-table--today" data-dashboard-section="overview" aria-label="Dzień dzisiejszy i błędy w systemie">
+                  <div class="dash-summary-block">
+                    <div class="dash-summary-table-title">Dzień dzisiejszy</div>
+                    <div class="dash-summary-table-rows dash-summary-table-rows--compact">
+                      <button class="dash-summary-row dash-summary-row--compact" type="button" data-dash-metric="activeNow">
+                        <span class="dash-summary-row-label">Aktywni teraz</span>
+                        <span class="dash-summary-row-value" id="sumActiveNowCount">0</span>
+                      </button>
+                      <button class="dash-summary-row dash-summary-row--compact" type="button" data-dash-metric="finishedToday">
+                        <span class="dash-summary-row-label">Zakończone (START + STOP)</span>
+                        <span class="dash-summary-row-value" id="sumFinishedTodayCount">0</span>
+                      </button>
+                      <div class="dash-summary-row dash-summary-row--compact dash-summary-row--static">
+                        <span class="dash-summary-row-label">Suma godzin dzisiaj</span>
+                        <span class="dash-summary-row-value" id="sumTotalHoursToday">00:00</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="dash-summary-block dash-summary-errors-block">
+                    <div class="dash-summary-table-title dash-summary-table-title--sub">Błędy w systemie</div>
+                    <div class="dash-summary-table-rows dash-summary-table-rows--compact">
+                      <button class="dash-summary-row dash-summary-row--compact" type="button" data-dash-metric="openStartStopYesterday">
+                        <span class="dash-summary-row-label">Nie zamknięte START-STOP</span>
+                        <span class="dash-summary-row-value" id="sumOpenStartStopYesterdayCount">0</span>
+                      </button>
+                      <button class="dash-summary-row dash-summary-row--compact" type="button" data-dash-metric="openCleanYesterday">
+                        <span class="dash-summary-row-label">Nie zamknięte CLEAN</span>
+                        <span class="dash-summary-row-value" id="sumOpenCleanYesterdayCount">0</span>
+                      </button>
+                      <button class="dash-summary-row dash-summary-row--compact" type="button" data-dash-metric="cleanTooLong">
+                        <span class="dash-summary-row-label">CLEAN &gt; 1,5h</span>
+                        <span class="dash-summary-row-value" id="sumCleanTooLongCount">0</span>
+                      </button>
                     </div>
                   </div>
                 </div>
 
-                <div class="dash-summary-table" aria-label="Tabela 2">
-                  <div class="dash-summary-table-title">Błędy w systemie</div>
-                  <div class="dash-summary-table-rows">
-                    <button class="dash-summary-row" type="button" data-dash-metric="openStartStopYesterday">
-                      <span class="dash-summary-row-label">Nie zamknięte START-STOP (do wczoraj)</span>
-                      <span class="dash-summary-row-value" id="sumOpenStartStopYesterdayCount">0</span>
-                    </button>
-                    <button class="dash-summary-row" type="button" data-dash-metric="openCleanYesterday">
-                      <span class="dash-summary-row-label">Nie zamknięte CLEAN (do wczoraj)</span>
-                      <span class="dash-summary-row-value" id="sumOpenCleanYesterdayCount">0</span>
-                    </button>
-                    <button class="dash-summary-row" type="button" data-dash-metric="cleanTooLong">
-                      <span class="dash-summary-row-label">CLEAN &gt; 1,5h (wczoraj + dziś)</span>
-                      <span class="dash-summary-row-value" id="sumCleanTooLongCount">0</span>
-                    </button>
+                <div class="dash-summary-table dash-kanban-panel" id="dashKanbanTasksPanel" data-dashboard-section="tasks" aria-label="Dzisiejsze zadania i zaległe">
+                  <div class="dash-kanban-title-row">
+                    <div>
+                      <div class="dash-summary-table-title">Dzisiejsze zadania i zaległe</div>
+                    </div>
+                    <span class="pill dash-kanban-count" id="dashKanbanTasksCount">0</span>
+                  </div>
+                  <div class="dash-kanban-list" id="dashKanbanTasksList">
+                    <div class="dash-kanban-empty">Brak dzisiejszych i zaległych zadań.</div>
                   </div>
                 </div>
+
               </div>
             </div>
 
-            <div class="card dash-feedback dash-activity-panel">
+            <div class="card dash-feedback dash-activity-panel" data-dashboard-section="active">
               <div class="card-title-row">
                 <div class="card-title">Aktywni w dniu dzisiejszym</div>
                 <div class="dash-activity-actions">
@@ -291,7 +387,7 @@
               </div>
             </div>
 
-            <aside class="card dash-goals dash-side-panel dash-schedule-panel">
+            <aside class="card dash-goals dash-side-panel dash-schedule-panel" data-dashboard-section="schedule">
               <div class="card-title-row">
                 <div class="card-title">Grafik dnia</div>
                 <button
@@ -340,7 +436,11 @@
         </section>
 
         <section id="view-schedule" style="display:none;"></section>
+        <section id="view-calendar" style="display:none;"></section>
+        <section id="view-kanban" style="display:none;"></section>
         <section id="view-events" style="display:none;"></section>
+        <section id="view-orders" style="display:none;"></section>
+        <section id="view-ordersMap" style="display:none;"></section>
         <section id="view-zones" style="display:none;"></section>
         <section id="view-workerProfile" style="display:none;"></section>
         <section id="view-workerTime" style="display:none;"></section>
@@ -349,7 +449,6 @@
         <section id="view-audits" style="display:none;"></section>
         <section id="view-individualOrders" style="display:none;"></section>
         <section id="view-clientProfile" style="display:none;"></section>
-        <section id="view-checklists" style="display:none;"></section>
         <section id="view-reports" style="display:none;"></section>
         <section id="view-settings" style="display:none;"></section>
 

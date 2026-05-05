@@ -6,6 +6,56 @@ import {
 } from '@dataconnect/generated'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
+const READ_CACHE_MS = 30000
+const clientsCache = new Map()
+
+function cachedClientsKey(orgId) {
+  return String(orgId ?? '').trim()
+}
+
+function invalidateClientsCache(orgId) {
+  const key = cachedClientsKey(orgId)
+  if (key) {
+    clientsCache.delete(key)
+    return
+  }
+  clientsCache.clear()
+}
+
+async function readClientsCached(orgId, loader) {
+  const key = cachedClientsKey(orgId)
+  const now = Date.now()
+  const cached = key ? clientsCache.get(key) : null
+
+  if (cached?.promise) {
+    return cached.promise
+  }
+
+  if (cached?.expiresAt > now && Array.isArray(cached.value)) {
+    return cached.value
+  }
+
+  const promise = loader()
+    .then((value) => {
+      if (key) {
+        clientsCache.set(key, { value, expiresAt: Date.now() + READ_CACHE_MS, promise: null })
+      }
+      return value
+    })
+    .catch((error) => {
+      if (key) {
+        clientsCache.delete(key)
+      }
+      throw error
+    })
+
+  if (key) {
+    clientsCache.set(key, { value: cached?.value ?? null, expiresAt: cached?.expiresAt ?? 0, promise })
+  }
+
+  return promise
+}
+
 function normalizeStatus(status) {
   const value = String(status ?? '').trim().toLowerCase()
 
@@ -55,9 +105,11 @@ export async function getClients(orgId) {
   }
 
   ensureFirebase()
-  const response = await clientsForOrg({ orgId })
-  const rows = response?.data?.clients ?? []
-  return rows.map((row) => mapClient(orgId, row))
+  return readClientsCached(orgId, async () => {
+    const response = await clientsForOrg({ orgId })
+    const rows = response?.data?.clients ?? []
+    return rows.map((row) => mapClient(orgId, row))
+  })
 }
 
 export async function getClientById(orgId, clientId) {
@@ -89,6 +141,7 @@ export async function createClient(orgId, payload) {
     equipment: asNullableText(payload?.equipment ?? payload?.sprzet),
     clientInfo: asNullableText(payload?.clientInfo ?? payload?.info ?? payload?.informacje),
   })
+  invalidateClientsCache(orgId)
 
   return {
     id: clientId,
@@ -119,6 +172,7 @@ export async function updateClient(orgId, clientId, payload) {
     equipment: asNullableText(payload?.equipment ?? payload?.sprzet),
     clientInfo: asNullableText(payload?.clientInfo ?? payload?.info ?? payload?.informacje),
   })
+  invalidateClientsCache(orgId)
 
   return {
     id: clientId,
@@ -137,6 +191,7 @@ export async function deleteClient(orgId, clientId) {
     orgId,
     clientId,
   })
+  invalidateClientsCache(orgId)
 
   return {
     success: true,

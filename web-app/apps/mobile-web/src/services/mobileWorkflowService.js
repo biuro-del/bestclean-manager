@@ -464,6 +464,93 @@ function appendComment(base, addition) {
   return left ? `${left} | ${right}` : right
 }
 
+function scanObjectCode(value) {
+  const raw = toText(value)
+  if (!raw || raw === '-') {
+    return ''
+  }
+
+  if (/^[A-Za-z0-9_-]{3,}$/.test(raw)) {
+    return raw.toUpperCase()
+  }
+
+  const match = raw.match(/\b([A-Z]{1,8}\d{1,}[A-Z0-9_-]*)\b/i)
+  return match?.[1] ? String(match[1]).trim().toUpperCase() : ''
+}
+
+function scanObjectFromComment(comment, phase = 'START') {
+  const text = toText(comment)
+  if (!text) {
+    return ''
+  }
+
+  const normalizedPhase = toUpper(phase) === 'STOP' ? 'STOP' : 'START'
+  const regex =
+    normalizedPhase === 'START'
+      ? /(QR\s*START|START_QR|START)\s*[:=-]?\s*([A-Z0-9_-]{3,})/i
+      : /(QR\s*STOP|STOP_QR|STOP)\s*[:=-]?\s*([A-Z0-9_-]{3,})/i
+  const match = text.match(regex)
+  return scanObjectCode(match?.[2])
+}
+
+function commentWithScanObject(base, phase, code) {
+  const normalizedPhase = toUpper(phase) === 'STOP' ? 'STOP' : 'START'
+  const normalizedCode = scanObjectCode(code)
+  const currentCode = scanObjectFromComment(base, normalizedPhase)
+  const baseText = toText(base)
+  if (!normalizedCode || currentCode) {
+    return baseText || null
+  }
+  return appendComment(baseText, `QR ${normalizedPhase} ${normalizedCode}`)
+}
+
+function workdayStartObjectForUpdate(workday, fallback = '') {
+  return (
+    scanObjectCode(workday?.startObject) ||
+    scanObjectFromComment(workday?.comment, 'START') ||
+    scanObjectCode(fallback) ||
+    scanObjectCode(workday?.utilityRoomId) ||
+    null
+  )
+}
+
+function workdayStopObjectForUpdate(workday, fallback = '') {
+  return (
+    scanObjectCode(workday?.stopObject) ||
+    scanObjectFromComment(workday?.comment, 'STOP') ||
+    scanObjectCode(fallback) ||
+    null
+  )
+}
+
+function workdayCommentWithScanObjects(workday, options = {}) {
+  const hasCommentOverride = Object.prototype.hasOwnProperty.call(options, 'comment')
+  let comment = toText(hasCommentOverride ? options.comment : workday?.comment)
+  const startObject = workdayStartObjectForUpdate(workday, options.startObject)
+  const stopObject = workdayStopObjectForUpdate(workday, options.stopObject)
+
+  comment = commentWithScanObject(comment, 'START', startObject)
+  if (stopObject) {
+    comment = commentWithScanObject(comment, 'STOP', stopObject)
+  }
+
+  return comment || null
+}
+
+function gpsActionToken(value) {
+  const match = toText(value).match(/^([A-Z_]+)_GPS\b/i)
+  return match?.[1] ? String(match[1]).trim().toUpperCase() : ''
+}
+
+function mergeWorkdayGpsColumn(base, latest) {
+  const baseText = toText(base)
+  const latestAction = gpsActionToken(latest)
+  if (baseText && (latestAction === 'CLEAN_START' || latestAction === 'CLEAN_STOP' || latestAction === 'CLEAN')) {
+    return fitGpsColumn(baseText)
+  }
+  return mergeGpsColumn(base, latest)
+}
+
 function geolocationErrorMessage(error, actionLabel) {
   const action = toText(actionLabel) || 'operacje'
   const code = Number(error?.code || 0)
@@ -514,6 +601,16 @@ async function readBestCurrentPosition(options = {}) {
 
   let bestPosition = null
   let bestAccuracy = Number.POSITIVE_INFINITY
+  const existingOpenWorkday = null
+  if (existingOpenWorkday) {
+    return {
+      message: 'DzieĹ„ pracy jest juĹĽ aktywny.',
+      workdayId: toText(existingOpenWorkday.workdayId),
+      startAt: parseIso(existingOpenWorkday.startAt),
+      reused: true,
+    }
+  }
+
   let lastError = null
 
   for (const timeoutMs of attempts) {
@@ -541,7 +638,7 @@ async function readBestCurrentPosition(options = {}) {
   if (lastError) {
     throw lastError
   }
-  throw new Error('Nie udalo sie pobrac GPS.')
+  throw new Error('Nie udało się pobrać GPS.')
 }
 async function captureGpsForAction(actionLabel) {
   try {
@@ -622,11 +719,18 @@ function classifyZone(functionLabel) {
 }
 
 function isIndividualCleanToken(token) {
-  return token === 'SPRZATANIEINDYWIDUALNE' || token === 'ZLECENIEINDYWIDUALNE'
+  const value = toUpper(token)
+  return value.includes('SPRZATANIEINDYWIDUALNE') || value.includes('ZLECENIEINDYWIDUALNE')
 }
 
 function isSpecialCleanToken(token) {
-  return token === 'STREFASPECJALNA'
+  const value = toUpper(token)
+  return value.includes('STREFASPECJALNA') || value.includes('KODSPECJALNY')
+}
+
+function isSpecialOrIndividualFlowZone(zone) {
+  const token = functionToken(zone?.functionName)
+  return isIndividualCleanToken(token) || isSpecialCleanToken(token)
 }
 
 function isPauseResumeZone(zone) {
@@ -752,6 +856,8 @@ function normalizeWorkday(row) {
     workerLogin: toText(row?.workerLogin),
     workerName: toText(row?.workerName),
     utilityRoomId: toText(row?.utilityRoomId),
+    startObject: toText(row?.startObject),
+    stopObject: toText(row?.stopObject),
     startAt,
     endAt,
     status,
@@ -1309,6 +1415,47 @@ async function fetchWorkerWorkdayRows(orgId, workerLogin) {
   return []
 }
 
+async function findExistingOpenWorkdayForScan(snapshot, session, workerLoginCandidates = []) {
+  const orgId = toText(snapshot?.orgId)
+  if (!orgId) {
+    return null
+  }
+
+  const workdayRows = []
+  if (Array.isArray(snapshot?.workdays) && snapshot.workdays.length) {
+    workdayRows.push(...snapshot.workdays)
+  }
+
+  try {
+    const response = await workdaysForOrg({ orgId })
+    const rows = response?.data?.workdays ?? []
+    if (Array.isArray(rows) && rows.length) {
+      workdayRows.push(...rows)
+    }
+  } catch {
+    // Best effort only; a fresh list helps avoid creating duplicate RUNNING workdays.
+  }
+
+  if (!workdayRows.length) {
+    return null
+  }
+
+  const preferredLogin =
+    toText(snapshot?.worker?.login) ||
+    toText(session?.workerLogin) ||
+    toText(session?.login) ||
+    toText(workerLoginCandidates[0])
+  const preferredName = toText(snapshot?.worker?.name || session?.workerName)
+  const scopedWorkdays = selectWorkerScopedWorkdays(workdayRows, preferredLogin, preferredName, session)
+  const activeWorkday = pickActiveWorkday(scopedWorkdays)
+
+  if (!isWorkdayOpen(activeWorkday) || !isTodayIso(activeWorkday?.startAt)) {
+    return null
+  }
+
+  return activeWorkday
+}
+
 async function fetchWorkdayPauseRows(orgId, workerLogin = '') {
   const org = toText(orgId)
   if (!org || workdayPausesForOrgUnavailable) {
@@ -1472,10 +1619,12 @@ async function stopWorkdayPauseRecord(snapshot, pause) {
 
   const pauseId = toText(pause?.pauseId)
   const workdayId = toText(pause?.workdayId)
+  const workerLogin = toText(snapshot?.worker?.login || pause?.workerLogin)
   if (!pauseId) {
     throw new Error('Brak aktywnej pauzy do zakończenia.')
   }
   const nowValue = nowIso()
+  const workerScope = workerLogin ? { workerLogin } : {}
   const durationSec = pauseDurationSec(
     {
       ...pause,
@@ -1489,6 +1638,7 @@ async function stopWorkdayPauseRecord(snapshot, pause) {
       orgId: snapshot.orgId,
       pauseId,
       workdayId,
+      ...workerScope,
       stopAt: nowValue,
       durationSec,
       status: 'CLOSED',
@@ -1497,6 +1647,7 @@ async function stopWorkdayPauseRecord(snapshot, pause) {
       orgId: snapshot.orgId,
       pauseId,
       workdayId,
+      ...workerScope,
       stopAt: nowValue,
       status: 'CLOSED',
     },
@@ -1504,6 +1655,7 @@ async function stopWorkdayPauseRecord(snapshot, pause) {
       orgId: snapshot.orgId,
       pauseId,
       workdayId,
+      ...workerScope,
       stopAt: nowValue,
     },
     {
@@ -1671,7 +1823,8 @@ async function closeEndingIfDue(session, workday) {
       endAt: fallbackEndAt,
       durationSec,
       status: 'CLOSED',
-      comment: workday.comment || null,
+      comment: workdayCommentWithScanObjects(workday),
+      gps: workday.gps || null,
       updatedBy: workday.workerLogin || null,
     })
 
@@ -1700,7 +1853,8 @@ async function closeEndingIfDue(session, workday) {
     endAt,
     durationSec,
     status: 'CLOSED',
-    comment: workday.comment || null,
+    comment: workdayCommentWithScanObjects(workday),
+    gps: workday.gps || null,
     updatedBy: workday.workerLogin || null,
   })
 
@@ -1867,31 +2021,59 @@ export async function getMobileSnapshot(session) {
   }
 }
 
-async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
+async function createWorkdayForScan(snapshot, startZone, gpsData = null, session = null) {
   const startAt = nowIso()
   const workdayId = makeId('WD')
+  const sessionWorkerLogin = toText(session?.workerLogin)
   const initialLogin = toText(snapshot?.worker?.login)
   const fallbackLogin = primaryLoginCandidate(initialLogin)
   const fallbackFromName = primaryLoginCandidate(snapshot?.worker?.name)
-  const workerLoginCandidates = [...new Set([initialLogin, fallbackLogin, fallbackFromName].filter(Boolean))]
+  const fallbackFromSessionWorker = primaryLoginCandidate(sessionWorkerLogin)
+  const fallbackFromSessionLogin = primaryLoginCandidate(session?.login)
+  const fallbackFromSessionEmail = primaryLoginCandidate(session?.email)
+  const workerLoginCandidates = [
+    ...new Set(
+      [
+        sessionWorkerLogin,
+        fallbackFromSessionWorker,
+        initialLogin,
+        fallbackLogin,
+        fallbackFromName,
+        fallbackFromSessionLogin,
+        fallbackFromSessionEmail,
+      ].filter(Boolean),
+    ),
+  ]
 
   if (!workerLoginCandidates.length) {
-    throw new Error('Brak loginu pracownika w sesji. Zaloguj sie ponownie.')
+    throw new Error('Brak loginu pracownika w sesji. Zaloguj się ponownie.')
+  }
+
+  const existingOpenWorkday = await findExistingOpenWorkdayForScan(snapshot, session, workerLoginCandidates)
+  if (existingOpenWorkday) {
+    return {
+      message: 'Dzień pracy jest już aktywny.',
+      workdayId: toText(existingOpenWorkday.workdayId),
+      startAt: parseIso(existingOpenWorkday.startAt),
+      reused: true,
+    }
   }
 
   let lastError = null
+  const startObject = scanObjectCode(startZone?.id)
+  const startComment = commentWithScanObject(null, 'START', startObject)
   for (const workerLogin of workerLoginCandidates) {
     const payload = {
       orgId: snapshot.orgId,
       workdayId,
       workerLogin,
-      workerName: snapshot.worker.name || null,
-      utilityRoomId: startZone?.id || null,
+      workerName: toText(snapshot?.worker?.name || session?.workerName) || null,
+      utilityRoomId: startObject || null,
       startAt,
       endAt: null,
       durationSec: null,
       status: 'RUNNING',
-      comment: null,
+      comment: startComment,
       gps: fitGpsColumn(gpsColumnValue(gpsData)),
       updatedBy: workerLogin || null,
     }
@@ -1912,11 +2094,15 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
 
       if (snapshot?.worker) {
         snapshot.worker.login = workerLogin
+        if (!toText(snapshot.worker.name) && toText(session?.workerName)) {
+          snapshot.worker.name = toText(session.workerName)
+        }
       }
 
       return {
         message: 'Rozpoczęto dzień pracy.',
         workdayId,
+        workerLogin,
         startAt,
       }
     } catch (error) {
@@ -1944,6 +2130,7 @@ async function createWorkdayForScan(snapshot, startZone, gpsData = null) {
   return {
     message: 'Rozpoczęto dzień pracy.',
     workdayId,
+    workerLogin: workerLoginCandidates[0] || '',
     startAt,
   }
 }
@@ -1953,8 +2140,8 @@ async function applyStopToWorkday(snapshot, workday, stopZone, gpsData = null, e
   const graceMin = Number(stopZone?.stopGraceMin ?? 0)
   const gpsValue = gpsColumnValue(gpsData)
   const fullGps = mergeGpsColumn(workday?.gps, gpsValue)
-  const stopComment = appendComment(workday.comment, `STOP ${stopZone.id}`)
-  const fullComment = stopComment
+  const stopObject = scanObjectCode(stopZone?.id)
+  const fullComment = workdayCommentWithScanObjects(workday, { stopObject })
   const endAt = graceMin > 0
     ? new Date(new Date(scannedAt).getTime() + graceMin * 60_000).toISOString()
     : scannedAt
@@ -1984,7 +2171,8 @@ async function startWorkdayEnding(snapshot, workday, stopZone, gpsData = null, e
   const graceMin = Number(stopZone?.stopGraceMin ?? 0)
   const gpsValue = gpsColumnValue(gpsData)
   const fullGps = mergeGpsColumn(workday?.gps, gpsValue)
-  const stopComment = appendComment(workday.comment, `STOP ${stopZone.id}`)
+  const stopObject = scanObjectCode(stopZone?.id)
+  const stopComment = workdayCommentWithScanObjects(workday, { stopObject })
   const endAt = graceMin > 0
     ? new Date(new Date(scannedAt).getTime() + graceMin * 60_000).toISOString()
     : scannedAt
@@ -2009,6 +2197,86 @@ async function startWorkdayEnding(snapshot, workday, stopZone, gpsData = null, e
     return `Rozpoczęto kończenie dnia. Doliczono ${graceMin} min (STOP${graceMin}).`
   }
   return 'Rozpoczęto kończenie dnia.'
+}
+
+// Keep the open workday marker in sync without replacing the original day START data.
+async function appendGpsToOpenWorkday(snapshot, workday, gpsData = null, overrides = {}) {
+  const workdayId = toText(overrides?.workdayId || workday?.workdayId)
+  const workerLogin = toText(overrides?.workerLogin || workday?.workerLogin || snapshot?.worker?.login)
+  const gpsValue = gpsColumnValue(gpsData)
+  if (!workdayId || !workerLogin || !gpsValue) {
+    return workday
+  }
+
+  const utilityRoomIdSource = overrides?.allowUtilityRoomUpdate === true && Object.prototype.hasOwnProperty.call(overrides, 'utilityRoomId')
+    ? overrides.utilityRoomId
+    : workday?.utilityRoomId
+  const startAtSource = Object.prototype.hasOwnProperty.call(overrides, 'startAt')
+    ? overrides.startAt
+    : workday?.startAt
+  const commentSource = Object.prototype.hasOwnProperty.call(overrides, 'comment')
+    ? overrides.comment
+    : workday?.comment
+  const gpsBase = Object.prototype.hasOwnProperty.call(overrides, 'gps')
+    ? overrides.gps
+    : workday?.gps
+  const nextGps = mergeWorkdayGpsColumn(gpsBase, gpsValue)
+  const nextComment = workdayCommentWithScanObjects(
+    {
+      ...(workday || {}),
+      utilityRoomId: utilityRoomIdSource,
+      comment: commentSource,
+    },
+  )
+  const nextStartObject = workdayStartObjectForUpdate(
+    {
+      ...(workday || {}),
+      utilityRoomId: utilityRoomIdSource,
+      comment: nextComment,
+    },
+  )
+  const nextStopObject = workdayStopObjectForUpdate(
+    {
+      ...(workday || {}),
+      comment: nextComment,
+    },
+  )
+  const nextWorkday = {
+    ...(workday || {}),
+    workdayId,
+    workerLogin,
+    workerName: toText(overrides?.workerName || workday?.workerName || snapshot?.worker?.name),
+    utilityRoomId: toText(utilityRoomIdSource),
+    startObject: nextStartObject || '',
+    stopObject: nextStopObject || '',
+    startAt: parseIso(startAtSource),
+    endAt: '',
+    durationSec: null,
+    status: 'RUNNING',
+    comment: toText(nextComment),
+    gps: toText(nextGps),
+  }
+
+  if (toText(gpsBase) === nextWorkday.gps && toText(commentSource) === nextWorkday.comment) {
+    return nextWorkday
+  }
+
+  await updateWorkdayForOrg({
+    orgId: snapshot.orgId,
+    workdayId,
+    workerLogin,
+    workerName: nextWorkday.workerName || null,
+    utilityRoomId: nextWorkday.utilityRoomId || null,
+    startAt: nextWorkday.startAt || null,
+    endAt: null,
+    durationSec: null,
+    status: 'RUNNING',
+    comment: nextWorkday.comment || null,
+    gps: nextWorkday.gps || null,
+    updatedBy: snapshot.worker.login || null,
+  })
+
+  return nextWorkday
 }
 
 async function closeWorkdayNow(snapshot, workday, stopZone, gpsData = null) {
@@ -2069,7 +2337,8 @@ async function setWorkdayRunning(snapshot, workday) {
     endAt: null,
     durationSec: null,
     status: 'RUNNING',
-    comment: workday.comment || null,
+    comment: workdayCommentWithScanObjects(workday),
+    gps: workday.gps || null,
     updatedBy: snapshot.worker.login || null,
   })
 }
@@ -2344,7 +2613,11 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
   const workdayOpen = isWorkdayOpen(activeWorkday)
   const staleWorkdayOpen = workdayOpen && !isTodayIso(activeWorkday?.startAt)
   const effectiveWorkdayOpen = workdayOpen && !staleWorkdayOpen
+  const specialFlowZone = isSpecialCleanToken(functionToken(zone?.functionName))
+  const specialOrIndividualFlowZone = isSpecialOrIndividualFlowZone(zone)
+  const shouldTreatAsStopZone = zone.kind === 'STOP' && !specialOrIndividualFlowZone
   let pauseClosedByScan = false
+  let currentWorkday = activeWorkday ? { ...activeWorkday } : null
 
   if (zone.kind === 'START') {
     const startGps = await captureGpsForAction('START')
@@ -2355,14 +2628,14 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
       }
     }
 
-    await createWorkdayForScan(snapshot, zone, startGps)
+    await createWorkdayForScan(snapshot, zone, startGps, session)
     return {
       message: 'Rozpoczęto dzień pracy (START).',
       snapshot: await getMobileSnapshot(session),
     }
   }
 
-  if (zone.kind === 'STOP') {
+  if (shouldTreatAsStopZone) {
     const stopGps = await captureGpsForAction('STOP')
     if (!workdayOpen) {
       throw new Error('Brak aktywnego dnia. Najpierw zeskanuj START.')
@@ -2408,17 +2681,45 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
 
   if (effectiveWorkdayOpen && toUpper(activeWorkday?.status) === 'ENDING') {
     await setWorkdayRunning(snapshot, activeWorkday)
+    currentWorkday = currentWorkday
+      ? {
+        ...currentWorkday,
+        endAt: '',
+        durationSec: null,
+        status: 'RUNNING',
+      }
+      : currentWorkday
   }
 
   if (activeCycle && isEventOpen(activeCycle)) {
     if (normalizeKey(activeCycle.zoneId) === normalizeKey(zone.id)) {
       const closeGps = await captureGpsForAction('CLEAN_STOP')
       await stopCycle(snapshot, activeCycle, 'QR_SAME', comment, closeGps)
+      if (specialFlowZone) {
+        currentWorkday = await appendGpsToOpenWorkday(snapshot, currentWorkday, closeGps)
+      }
       if (closeWorkdayImmediately) {
         const autoStopZone = resolveAutoStopZone(snapshot, zone)
-        const stopMessage = await closeWorkdayNow(snapshot, activeWorkday, autoStopZone, cloneGpsWithAction(closeGps, 'STOP'))
+        const stopMessage = await closeWorkdayNow(
+          snapshot,
+          currentWorkday,
+          autoStopZone,
+          cloneGpsWithAction(closeGps, 'STOP'),
+        )
+        const additionallyClosed = await closeAdditionalOpenWorkdays(
+          snapshot,
+          currentWorkday,
+          autoStopZone,
+          cloneGpsWithAction(closeGps, 'STOP'),
+        )
+        const messageSuffix = additionallyClosed > 0
+          ? ` Dodatkowo zamknięto ${additionallyClosed} zaległych wpisów dnia.`
+          : ''
         return {
-          message: withPauseClosedPrefix(`Zakończono sprzątanie tej strefy. ${stopMessage}`.trim(), pauseClosedByScan),
+          message: withPauseClosedPrefix(
+            `Zakończono sprzątanie tej strefy. ${stopMessage}${messageSuffix}`.trim(),
+            pauseClosedByScan,
+          ),
           snapshot: await getMobileSnapshot(session),
         }
       }
@@ -2431,6 +2732,13 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
     const switchGps = await captureGpsForAction('CLEAN')
     await stopCycle(snapshot, activeCycle, 'QR_SWITCH', comment, cloneGpsWithAction(switchGps, 'CLEAN_STOP'))
     await startCycle(snapshot, zone, '', cloneGpsWithAction(switchGps, 'CLEAN_START'))
+    if (specialFlowZone) {
+      currentWorkday = await appendGpsToOpenWorkday(
+        snapshot,
+        currentWorkday,
+        cloneGpsWithAction(switchGps, 'CLEAN_START'),
+      )
+    }
     return {
       message: withPauseClosedPrefix(`Zmiana strefy na: ${zone.name || zone.id}.`, pauseClosedByScan),
       snapshot: await getMobileSnapshot(session),
@@ -2440,8 +2748,27 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
   if (!effectiveWorkdayOpen) {
     if (isAutoStartCleanZone(zone)) {
       const startGps = await captureGpsForAction('START')
-      const created = await createWorkdayForScan(snapshot, snapshot?.startZone || zone, startGps)
-      await startCycle(snapshot, zone, created.workdayId, cloneGpsWithAction(startGps, 'CLEAN_START'), created.startAt)
+      const created = await createWorkdayForScan(snapshot, zone, startGps, session)
+      const cleanStartGps = cloneGpsWithAction(startGps, 'CLEAN_START')
+      await startCycle(snapshot, zone, created.workdayId, cleanStartGps, created.startAt)
+      if (specialFlowZone) {
+        currentWorkday = await appendGpsToOpenWorkday(
+          snapshot,
+          {
+            workdayId: created.workdayId,
+            workerLogin: toText(snapshot?.worker?.login),
+            workerName: toText(snapshot?.worker?.name || session?.workerName),
+            utilityRoomId: toText(zone?.id),
+            startAt: created.startAt,
+            endAt: '',
+            durationSec: null,
+            status: 'RUNNING',
+            comment: commentWithScanObject('', 'START', zone?.id),
+            gps: fitGpsColumn(gpsColumnValue(startGps)),
+          },
+          cleanStartGps,
+        )
+      }
       return {
         message: withPauseClosedPrefix('Rozpoczęto dzień i sprzątanie strefy.', pauseClosedByScan),
         snapshot: await getMobileSnapshot(session),
@@ -2453,6 +2780,9 @@ export async function scanMobileQr({ session, snapshot, qrCode, comment, closeWo
 
   const cleanStartGps = await captureGpsForAction('CLEAN_START')
   await startCycle(snapshot, zone, '', cleanStartGps)
+  if (specialFlowZone) {
+    currentWorkday = await appendGpsToOpenWorkday(snapshot, currentWorkday, cleanStartGps)
+  }
   return {
     message: withPauseClosedPrefix(`Rozpoczęto sprzątanie: ${zone.name || zone.id}.`, pauseClosedByScan),
     snapshot: await getMobileSnapshot(session),

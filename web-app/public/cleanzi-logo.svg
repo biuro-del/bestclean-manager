@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 100" role="img" aria-labelledby="cleanziTitle">
+  <title id="cleanziTitle">Cleanzi</title>
+  <defs>
+    <linearGradient id="cleanziMark" x1="22" y1="86" x2="92" y2="14" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1752ff"/>
+      <stop offset="0.55" stop-color="#087bff"/>
+      <stop offset="1" stop-color="#21d6df"/>
+    </linearGradient>
+    <linearGradient id="cleanziPixel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#21d6df"/>
+      <stop offset="1" stop-color="#1752ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="360" height="100" rx="18" fill="#fff"/>
+  <g fill="url(#cleanziPixel)">
+    <rect x="12" y="45" width="8" height="8" rx="1.5"/>
+    <rect x="28" y="34" width="11" height="11" rx="1.8"/>
+    <rect x="28" y="55" width="11" height="11" rx="1.8"/>
+    <rect x="45" y="24" width="15" height="15" rx="2"/>
+    <rect x="45" y="43" width="19" height="19" rx="2.2"/>
+    <rect x="45" y="66" width="12" height="12" rx="1.8"/>
+    <rect x="67" y="36" width="10" height="10" rx="1.8"/>
+    <rect x="67" y="57" width="10" height="10" rx="1.8"/>
+  </g>
+  <path
+    d="M119.6 77.4A40 40 0 1 1 120 22.9l-20.2 18A13 13 0 1 0 99.6 59l20 18.4Z"
+    fill="url(#cleanziMark)"
+  />
+  <text
+    x="152"
+    y="68"
+    fill="#061641"
+    font-family="Inter, Manrope, Segoe UI, Arial, sans-serif"
+    font-size="48"
+    font-weight="800"
+    letter-spacing="-1"
+  >Cleanzi</text>
+</svg>

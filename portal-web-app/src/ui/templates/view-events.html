@@ -101,24 +101,33 @@
 
     <div class="grid">
       <div class="field">
-        <label for="evEditWorker">Pracownik</label>
-        <select id="evEditWorker" aria-label="Pracownik">
-          <option value="">(wybierz)</option>
-        </select>
+        <label for="evEditWorkerSearch">Pracownik</label>
+        <div class="ev-editor-picker">
+          <input id="evEditWorkerSearch" type="text" placeholder="Wpisz imie i nazwisko..." autocomplete="off" />
+          <select id="evEditWorker" class="ev-editor-picker-list" aria-label="Lista pracownikow">
+            <option value="">(wybierz)</option>
+          </select>
+        </div>
       </div>
 
       <div class="field">
-        <label for="evEditPom">Klient</label>
-        <select id="evEditPom" aria-label="Klient">
-          <option value="">(wybierz)</option>
-        </select>
+        <label for="evEditPomSearch">Klient</label>
+        <div class="ev-editor-picker">
+          <input id="evEditPomSearch" type="text" placeholder="Wpisz nazwe klienta..." autocomplete="off" />
+          <select id="evEditPom" class="ev-editor-picker-list" aria-label="Lista klientow">
+            <option value="">(wybierz)</option>
+          </select>
+        </div>
       </div>
 
       <div class="field">
-        <label for="evEditStrefa">Strefa</label>
-        <select id="evEditStrefa" aria-label="Strefa">
-          <option value="">(wybierz)</option>
-        </select>
+        <label for="evEditStrefaSearch">Strefa</label>
+        <div class="ev-editor-picker">
+          <input id="evEditStrefaSearch" type="text" placeholder="Wpisz nazwe strefy..." autocomplete="off" />
+          <select id="evEditStrefa" class="ev-editor-picker-list" aria-label="Lista stref">
+            <option value="">(wybierz)</option>
+          </select>
+        </div>
       </div>
 
       <div class="field">

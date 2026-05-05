@@ -2,6 +2,56 @@ import { insertWorkerForOrg, workersForOrg } from '@dataconnect/generated'
 import { executeMutation, mutationRef } from 'firebase/data-connect'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
+const READ_CACHE_MS = 30000
+const workersCache = new Map()
+
+function cachedWorkersKey(orgId) {
+  return String(orgId ?? '').trim()
+}
+
+function invalidateWorkersCache(orgId) {
+  const key = cachedWorkersKey(orgId)
+  if (key) {
+    workersCache.delete(key)
+    return
+  }
+  workersCache.clear()
+}
+
+async function readWorkersCached(orgId, loader) {
+  const key = cachedWorkersKey(orgId)
+  const now = Date.now()
+  const cached = key ? workersCache.get(key) : null
+
+  if (cached?.promise) {
+    return cached.promise
+  }
+
+  if (cached?.expiresAt > now && Array.isArray(cached.value)) {
+    return cached.value
+  }
+
+  const promise = loader()
+    .then((value) => {
+      if (key) {
+        workersCache.set(key, { value, expiresAt: Date.now() + READ_CACHE_MS, promise: null })
+      }
+      return value
+    })
+    .catch((error) => {
+      if (key) {
+        workersCache.delete(key)
+      }
+      throw error
+    })
+
+  if (key) {
+    workersCache.set(key, { value: cached?.value ?? null, expiresAt: cached?.expiresAt ?? 0, promise })
+  }
+
+  return promise
+}
+
 function resolveNextWorkerId(rows = []) {
   let maxNumber = 0
   let padWidth = 3
@@ -80,6 +130,52 @@ function asNullableText(value) {
   return raw ? raw : null
 }
 
+function normalizeApiBase(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return '/api'
+  if (raw.startsWith('/')) {
+    const withoutTrailing = raw.replace(/\/+$/, '')
+    return withoutTrailing.endsWith('/api') ? withoutTrailing : `${withoutTrailing}/api`
+  }
+
+  const withoutTrailing = raw.replace(/\/+$/, '')
+  return withoutTrailing.endsWith('/api') ? withoutTrailing : `${withoutTrailing}/api`
+}
+
+function getAdminApiBase() {
+  return normalizeApiBase(import.meta.env.VITE_ADMIN_API_BASE || '/api')
+}
+
+async function parseApiError(response, fallbackMessage) {
+  let rawText = ''
+  try {
+    rawText = await response.text()
+  } catch {
+    rawText = ''
+  }
+
+  if (!rawText) {
+    if (response.status === 404) {
+      return 'Endpoint dodawania użytkowników nie jest dostępny. W lokalnym środowisku uruchom też backend portalu na porcie 8080.'
+    }
+    if (response.status === 500 || response.status === 502 || response.status === 503 || response.status === 504) {
+      return 'Backend administracyjny nie odpowiada albo zwrócił błąd. Sprawdź, czy działa lokalny backend portalu i czy ma konfigurację Firebase Admin oraz bazy danych.'
+    }
+    return fallbackMessage
+  }
+
+  if (/^\s*</.test(rawText)) {
+    return 'Endpoint dodawania użytkowników zwrócił stronę HTML zamiast JSON. Najczęściej oznacza to brak lokalnego proxy/backendu dla /api/admin/users.'
+  }
+
+  try {
+    const body = JSON.parse(rawText)
+    return String(body?.error?.message ?? body?.message ?? fallbackMessage).trim() || fallbackMessage
+  } catch {
+    return rawText.slice(0, 500) || fallbackMessage
+  }
+}
+
 function getDataConnectOrThrow() {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
@@ -114,6 +210,7 @@ function mapWorker(orgId, row) {
     role: workerType,
     type: workerType,
     active: Boolean(row.active ?? true),
+    authUid: String(row.authUid ?? row.auth_uid ?? '').trim(),
     email: loginEmail,
     phone: String(row.phone ?? '').trim(),
     editedBy: String(row.updatedBy ?? row.edit ?? '').trim(),
@@ -128,8 +225,10 @@ export async function getWorkers(orgId, filters = {}) {
   }
 
   ensureFirebase()
-  const response = await workersForOrg({ orgId })
-  const rows = response?.data?.workers ?? []
+  const rows = await readWorkersCached(orgId, async () => {
+    const response = await workersForOrg({ orgId })
+    return response?.data?.workers ?? []
+  })
 
   let workers = rows.map((row) => mapWorker(orgId, row))
 
@@ -187,6 +286,7 @@ export async function createWorker(orgId, payload) {
     workerType,
     workerId,
   })
+  invalidateWorkersCache(orgId)
 
   return {
     id: workerId,
@@ -201,6 +301,55 @@ export async function createWorker(orgId, payload) {
     phone: phone ?? '',
     ...payload,
   }
+}
+
+export async function createWorkerUser(orgId, payload) {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  }
+
+  const firebase = ensureFirebase()
+  const currentUser = firebase?.auth?.currentUser
+  if (!currentUser) {
+    throw new Error('Sesja wygasła. Zaloguj się ponownie.')
+  }
+
+  const idToken = await currentUser.getIdToken(true)
+  let response
+  try {
+    response = await fetch(`${getAdminApiBase()}/admin/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        orgId,
+        email: payload?.email,
+        password: payload?.password,
+        displayName: payload?.displayName ?? payload?.workerName ?? payload?.name,
+        login: payload?.login,
+        role: payload?.role,
+        phone: payload?.phone,
+        active: payload?.active ?? true,
+      }),
+    })
+  } catch {
+    throw new Error('Nie można połączyć się z backendem dodawania użytkowników. W lokalnym środowisku uruchom też backend portalu na porcie 8080.')
+  }
+
+  if (response.ok) {
+    invalidateWorkersCache(orgId)
+    try {
+      const body = await response.json()
+      return body?.data?.user ?? body?.user ?? null
+    } catch {
+      return null
+    }
+  }
+
+  const message = await parseApiError(response, 'Nie udało się dodać użytkownika.')
+  throw new Error(message)
 }
 
 export async function updateWorker(orgId, workerId, payload) {
@@ -230,6 +379,7 @@ export async function updateWorker(orgId, workerId, payload) {
   } catch (error) {
     throw withOperationNotFoundHint(error, 'UpdateWorkerForOrg')
   }
+  invalidateWorkersCache(orgId)
 
   return {
     id: String(payload?.workerId ?? payload?.id ?? login).trim() || login,

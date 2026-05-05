@@ -28,6 +28,16 @@
   </div>
 
   <div class="tool">
+    <label for="znSort">Sortuj</label>
+    <select id="znSort">
+      <option value="functionAsc">Typ strefy A-Z</option>
+      <option value="functionDesc">Typ strefy Z-A</option>
+      <option value="clientZone">Klient / strefa</option>
+      <option value="dateDesc">Data od najnowszej</option>
+    </select>
+  </div>
+
+  <div class="tool">
     <label for="znEditedBy">Edytował</label>
     <input id="znEditedBy" type="text" placeholder="np. Rafał" />
   </div>
@@ -73,7 +83,7 @@
 <div class="overlay" id="znEditorOverlay" aria-label="Edytuj strefę" role="dialog" aria-modal="true">
   <div class="modal">
     <div class="logo-block" style="display:inline-flex">
-      <img id="znLogo" alt="FIDO iClean" style="height:42px;width:auto;" />
+      <img id="znLogo" alt="Cleanzi" style="height:42px;width:auto;" />
     </div>
 
     <h3>Edytuj / dodaj strefę</h3>

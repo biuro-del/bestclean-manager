@@ -1,5 +1,6 @@
 import { getApp, getApps, initializeApp } from 'firebase/app'
 import { getAnalytics, isSupported } from 'firebase/analytics'
+import { ReCaptchaEnterpriseProvider, initializeAppCheck } from 'firebase/app-check'
 import { getAuth, onAuthStateChanged } from 'firebase/auth'
 import { connectDataConnectEmulator, getDataConnect } from 'firebase/data-connect'
 import { getFirestore } from 'firebase/firestore'
@@ -12,8 +13,8 @@ const firebaseConfig = {
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'iclean-room',
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'iclean-room.firebasestorage.app',
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '1080573912983',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:1080573912983:web:1804804661c8f8a088c6d2',
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || 'G-QX1P8GGH2Y',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:1080573912983:web:d64286e3776c009788c6d2',
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || 'G-XCVP812482',
 }
 
 const requiredConfigKeys = ['apiKey', 'authDomain', 'projectId', 'appId']
@@ -21,6 +22,7 @@ const requiredConfigKeys = ['apiKey', 'authDomain', 'projectId', 'appId']
 let analyticsPromise = null
 let emulatorConnected = false
 let authReadyPromise = null
+let appCheckInitialized = false
 
 function hasValue(value) {
   return typeof value === 'string' && value.trim().length > 0
@@ -42,9 +44,25 @@ export function ensureFirebaseApp() {
   }
 
   if (getApps().length > 0) {
-    return getApp()
+    const existingApp = getApp()
+    ensureFirebaseAppCheck(existingApp)
+    return existingApp
   }
-  return initializeApp(firebaseConfig)
+  const app = initializeApp(firebaseConfig)
+  ensureFirebaseAppCheck(app)
+  return app
+}
+
+function ensureFirebaseAppCheck(app) {
+  const appCheckSiteKey = String(import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY ?? '').trim()
+  if (appCheckInitialized || !appCheckSiteKey || typeof window === 'undefined') {
+    return
+  }
+  initializeAppCheck(app, {
+    provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
+    isTokenAutoRefreshEnabled: true,
+  })
+  appCheckInitialized = true
 }
 
 export function ensureFirebaseAnalytics() {

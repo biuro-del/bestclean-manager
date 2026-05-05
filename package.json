@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "build": "node build-webapp.js",
+    "prepare:final-mobile-hosting": "node scripts/prepare-final-mobile-hosting.js",
+    "build:final-mobile-hosting": "npm --prefix web-app run build && npm run prepare:final-mobile-hosting",
     "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -13,8 +15,15 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@google-cloud/cloud-sql-connector": "^1.10.0",
     "dotenv": "^17.3.1",
+    "firebase-admin": "^13.8.0",
     "googleapis": "^171.4.0",
     "pg": "^8.18.0"
+  },
+  "overrides": {
+    "firebase-admin": {
+      "uuid": "14.0.0"
+    }
   }
 }

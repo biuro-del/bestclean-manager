@@ -1,0 +1,385 @@
+<div class="orders-view">
+  <div id="ordersListPanel">
+    <div class="orders-topbar">
+      <button class="orders-cycle-toggle" id="ordersCycleToggle" type="button" aria-pressed="false">Wszystkie</button>
+    </div>
+
+    <section class="orders-card orders-search-card" aria-label="Szukaj zlecenia">
+      <div class="orders-search-head">
+        <label for="ordersSearchInput">Szukaj</label>
+        <span title="Wyszukiwanie po nazwie, kliencie, pracowniku albo adresie">?</span>
+      </div>
+      <div class="orders-search-row">
+        <input id="ordersSearchInput" type="search" placeholder="Wpisz nazwę, klienta, pracownika terenowego albo adres..." autocomplete="off" />
+        <button class="orders-search-btn" id="ordersSearchBtn" type="button" aria-label="Szukaj">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle>
+            <path d="m16.5 16.5 3.5 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+          </svg>
+        </button>
+      </div>
+    </section>
+
+    <section class="orders-card orders-table-card" aria-label="Lista zleceń">
+      <div class="orders-table" id="ordersTable">
+        <div class="orders-head">
+          <div>Data od</div>
+          <div>Data do</div>
+          <div>Następne ↑</div>
+          <div>Nazwa</div>
+          <div>Klient</div>
+          <div>Pracownik terenowy</div>
+          <div>Adres</div>
+          <div>Akcje</div>
+        </div>
+        <div id="ordersRows"></div>
+      </div>
+      <div class="orders-footer">
+        <span id="ordersStatus">Widok: wszystkie zlecenia.</span>
+        <span id="ordersCount">0 zleceń</span>
+      </div>
+    </section>
+  </div>
+
+  <section class="orders-modal-overlay" id="ordersEditorPanel" hidden aria-label="Dodaj lub edytuj zlecenie">
+    <div class="orders-modal" role="dialog" aria-modal="true" aria-labelledby="ordersEditTitle">
+      <button class="orders-modal-close" id="ordersEditBack" type="button" aria-label="Zamknij">×</button>
+
+      <div class="orders-modal-head">
+        <div class="orders-modal-titlebar">
+          <h2 id="ordersEditTitle">Dodaj zlecenie</h2>
+        </div>
+        <div class="orders-modal-controls">
+          <div class="orders-tabs" role="tablist" aria-label="Sekcje zlecenia">
+            <button class="orders-tab is-active" type="button" role="tab" data-orders-tab-target="basic">Podstawowe</button>
+            <button class="orders-tab" type="button" role="tab" data-orders-tab-target="tasks">Zadania</button>
+            <button class="orders-tab" type="button" role="tab" data-orders-tab-target="extra">Dodatkowe</button>
+          </div>
+          <div class="orders-modal-head-actions">
+            <span>* Pola wymagane</span>
+            <button class="orders-save-btn" type="button" data-orders-save>Zapisz</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="orders-tab-panel is-active" data-orders-tab-panel="basic">
+        <div class="orders-modal-grid">
+          <section class="orders-form-panel">
+            <div class="orders-panel-title">
+              <span>Klient *</span>
+              <button type="button" title="Dane klienta">?</button>
+            </div>
+
+            <label class="orders-field">
+              <span>Klient *</span>
+              <select id="ordersEditClient"></select>
+            </label>
+
+            <label class="orders-field">
+              <span>Nazwa klienta *</span>
+              <input id="ordersEditClientName" type="text" autocomplete="off" />
+            </label>
+
+            <label class="orders-field">
+              <span>NIP</span>
+              <input id="ordersEditNip" type="text" autocomplete="off" />
+            </label>
+
+            <label class="orders-field">
+              <span>Ulica *</span>
+              <input id="ordersEditStreet" type="text" autocomplete="off" />
+            </label>
+
+            <label class="orders-field">
+              <span>Miasto *</span>
+              <input id="ordersEditCity" type="text" autocomplete="off" />
+            </label>
+
+            <label class="orders-field">
+              <span>Kod pocztowy *</span>
+              <input id="ordersEditPostCode" type="text" autocomplete="off" />
+            </label>
+
+            <label class="orders-field">
+              <span>Województwo</span>
+              <input id="ordersEditRegion" type="text" autocomplete="off" />
+            </label>
+
+            <label class="orders-field">
+              <span>Kraj</span>
+              <input id="ordersEditCountry" type="text" autocomplete="off" />
+            </label>
+
+            <label class="orders-field">
+              <span>E-mail</span>
+              <input id="ordersEditEmail" type="email" autocomplete="off" />
+            </label>
+          </section>
+
+          <section class="orders-form-panel">
+            <div class="orders-panel-title">
+              <span>Pracownik terenowy *</span>
+              <button type="button" title="Osoba odpowiedzialna">?</button>
+            </div>
+
+            <label class="orders-field">
+              <span>Nazwa *</span>
+              <input id="ordersEditName" type="text" autocomplete="off" />
+            </label>
+
+            <div class="orders-field orders-worker-field">
+              <span>Pracownik terenowy *</span>
+              <select id="ordersEditWorker"></select>
+              <details class="orders-worker-extra">
+                <summary>Przypisz wi&#281;cej pracownik&#243;w</summary>
+                <div class="orders-worker-checklist" id="ordersEditWorkerChecklist"></div>
+              </details>
+            </div>
+
+            <div class="orders-form-two">
+              <label class="orders-field">
+                <span>Data od *</span>
+                <input id="ordersEditStart" type="date" />
+              </label>
+              <label class="orders-field">
+                <span>Data do *</span>
+                <input id="ordersEditEnd" type="date" />
+              </label>
+            </div>
+
+            <div class="orders-form-two">
+              <label class="orders-field">
+                <span>Godzina START *</span>
+                <input id="ordersEditTime" type="time" />
+              </label>
+              <label class="orders-field">
+                <span>Godzina STOP *</span>
+                <input id="ordersEditEndTime" type="time" />
+              </label>
+            </div>
+
+            <label class="orders-field">
+              <span>Następne *</span>
+              <input id="ordersEditNext" type="date" />
+            </label>
+
+            <div class="orders-field orders-location-field">
+              <label for="ordersEditLocation">Lokalizacje</label>
+              <div class="orders-location-combo">
+                <input id="ordersEditLocation" type="text" autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-controls="ordersLocationSuggestions" />
+                <div class="orders-location-suggestions" id="ordersLocationSuggestions" hidden></div>
+                <input id="ordersEditLocationPlaceId" type="hidden" />
+                <input id="ordersEditLocationLat" type="hidden" />
+                <input id="ordersEditLocationLng" type="hidden" />
+                <input id="ordersEditLocationMapUrl" type="hidden" />
+              </div>
+            </div>
+
+            <div class="orders-field orders-editor-inline-add">
+              <span>Urządzenia</span>
+              <div>
+                <select id="ordersEditDevice">
+                  <option>Nothing selected</option>
+                </select>
+                <button type="button">Dodaj</button>
+              </div>
+            </div>
+
+            <label class="orders-field">
+              <span>Rodzaj zlecenia</span>
+              <select id="ordersEditType">
+                <option value="individual">Zlecenie indywidualne</option>
+                <option value="cyclic">Zlecenie cykliczne</option>
+                <option value="renovation">Zlecenie poremontowe</option>
+                <option value="windows">Mycie okien</option>
+                <option value="other">Inne zlecenie</option>
+              </select>
+            </label>
+
+            <label class="orders-field">
+              <span>Priorytet</span>
+              <select id="ordersEditPriority">
+                <option>Normalny</option>
+                <option>Pilne</option>
+                <option>Niski</option>
+              </select>
+            </label>
+
+            <div class="orders-form-two">
+              <label class="orders-field">
+                <span>Płatność</span>
+                <select id="ordersEditPayment">
+                  <option>Transfer</option>
+                  <option>Gotówka</option>
+                  <option>Przelew odroczony</option>
+                </select>
+              </label>
+              <label class="orders-field">
+                <span>Dni</span>
+                <input id="ordersEditPaymentDays" type="number" min="0" step="1" value="7" />
+              </label>
+            </div>
+
+            <label class="orders-field">
+              <span>Sugerowana opłata</span>
+              <input id="ordersEditPrice" type="number" min="0" step="1" />
+            </label>
+
+            <label class="orders-field">
+              <span>Telefon *</span>
+              <input id="ordersEditPhone" type="tel" autocomplete="off" />
+            </label>
+
+            <div class="orders-checks" aria-label="Powiadomienia">
+              <strong>Powiadomienia</strong>
+              <label><input type="checkbox" /> Wystaw i wyślij FV</label>
+              <label><input type="checkbox" /> Wyślij mailem raport końcowy</label>
+              <label><input type="checkbox" /> SMS</label>
+            </div>
+
+            <input id="ordersEditDurationHours" type="hidden" value="2" />
+          </section>
+
+          <div class="orders-form-side">
+            <section class="orders-side-panel orders-side-panel--schedule">
+              <div class="orders-panel-title">
+                <span>Harmonogram</span>
+                <button type="button" title="Odśwież harmonogram">↻</button>
+              </div>
+              <div class="orders-schedule-mode">
+                <label><input type="radio" name="ordersScheduleMode" value="once" checked /> Jednorazowe</label>
+                <label><input type="radio" name="ordersScheduleMode" value="repeat" /> Cykliczne</label>
+              </div>
+              <div class="orders-schedule-repeat">
+                <div class="orders-field orders-editor-repeat">
+                  <span>Powtarzaj co</span>
+                  <div>
+                    <input id="ordersEditRepeatEvery" type="number" min="1" step="1" />
+                    <select id="ordersEditRepeatUnit">
+                      <option value="day">Dzień</option>
+                      <option value="week">Tydzień</option>
+                      <option value="month">Miesiąc</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div class="orders-schedule-head">
+                <span>Klient</span>
+                <span>Data od</span>
+                <span>Data do</span>
+              </div>
+              <div class="orders-schedule-empty" id="ordersSchedulePreview">
+                Harmonogram pojawi się po uzupełnieniu zlecenia.
+              </div>
+            </section>
+
+            <section class="orders-side-panel">
+              <div class="orders-panel-title">
+                <span>Dodatkowe informacje</span>
+                <button type="button" title="Informacje">?</button>
+              </div>
+              <label class="orders-check-line"><input type="checkbox" /> Rezerwacja terminu</label>
+              <label class="orders-field">
+                <span>Numer zewnętrzny</span>
+                <input id="ordersEditExternalNumber" type="text" autocomplete="off" />
+              </label>
+              <label class="orders-field">
+                <span>Wyprzedzenie</span>
+                <input id="ordersEditAdvance" type="number" min="0" step="1" />
+              </label>
+            </section>
+
+            <section class="orders-side-panel">
+              <div class="orders-panel-title">
+                <span>Harmonogram klienta</span>
+                <button type="button" title="Harmonogram klienta">?</button>
+              </div>
+              <div class="orders-schedule-empty">Historia terminów pojawi się po podpięciu danych zleceń.</div>
+            </section>
+
+            <section class="orders-side-panel">
+              <div class="orders-panel-title">
+                <span>Pola dodatkowe</span>
+                <button type="button" title="Pola dodatkowe">?</button>
+              </div>
+              <label class="orders-field">
+                <span>Godzina SMS</span>
+                <input id="ordersEditSmsTime" type="time" />
+              </label>
+              <label class="orders-field">
+                <span>Wyślij SMS</span>
+                <textarea id="ordersEditSms" placeholder="Maksymalna długość wiadomości to 130 znaków."></textarea>
+              </label>
+            </section>
+          </div>
+        </div>
+
+        <label class="orders-field orders-description">
+          <span>Opis zlecenia *</span>
+          <textarea id="ordersEditDescription"></textarea>
+        </label>
+
+        <div class="orders-modal-footer">
+          <span>* Pola wymagane</span>
+          <button class="orders-save-btn" id="ordersEditSave" type="button">Zapisz</button>
+        </div>
+      </div>
+
+      <div class="orders-tab-panel" data-orders-tab-panel="tasks" hidden>
+        <div class="orders-taskbar">
+          <button class="orders-save-btn" type="button">Dodaj</button>
+        </div>
+        <div class="orders-subtable">
+          <div class="orders-subtable-head">
+            <div>Nazwa</div>
+            <div>Opis</div>
+            <div>Zdjęcie</div>
+            <div>Pola wymagane</div>
+            <div>Raport</div>
+            <div></div>
+          </div>
+          <div class="orders-subtable-empty">Brak zadań. To miejsce zostawiamy pod listę czynności zlecenia.</div>
+        </div>
+      </div>
+
+      <div class="orders-tab-panel" data-orders-tab-panel="extra" hidden>
+        <div class="orders-extra-grid">
+          <section>
+            <label class="orders-field">
+              <span>Współpracownicy</span>
+              <div class="orders-inline-add">
+                <select id="ordersCoworkerSelect"></select>
+                <button id="ordersCoworkerAdd" type="button">Dodaj</button>
+              </div>
+            </label>
+          </section>
+
+          <section class="orders-subtable">
+            <div class="orders-subtable-head orders-subtable-head--two">
+              <div>Pracownik</div>
+              <div>Usuń</div>
+            </div>
+            <div class="orders-coworker-rows" id="ordersCoworkerRows"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="orders-map-overlay" id="ordersMapOverlay" hidden aria-label="Mapa lokalizacji zlecenia">
+    <div class="orders-map-modal" role="dialog" aria-modal="true" aria-labelledby="ordersMapTitle">
+      <div class="orders-map-head">
+        <div>
+          <div class="orders-map-eyebrow">Lokalizacja zlecenia</div>
+          <h2 id="ordersMapTitle">Mapa</h2>
+          <p id="ordersMapAddress">-</p>
+        </div>
+        <button class="orders-map-close" type="button" data-orders-map-close aria-label="Zamknij mapę">×</button>
+      </div>
+      <iframe id="ordersMapFrame" title="Mapa lokalizacji zlecenia" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+      <div class="orders-map-actions">
+        <a id="ordersMapExternal" href="#" target="_blank" rel="noopener noreferrer">Otwórz w Google Maps</a>
+      </div>
+    </div>
+  </section>
+</div>

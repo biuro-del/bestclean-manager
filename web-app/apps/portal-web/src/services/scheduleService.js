@@ -1,11 +1,54 @@
 ﻿const SCHEDULE_SPREADSHEET_ID = '1fT9pG2HpW9xT8b28d4jbhg2m3izhM08-U0QybwXvkas'
 const SCHEDULE_GID = 2096376868
-const SCHEDULE_FETCH_TIMEOUT_MS = 15000
-const SCHEDULE_CACHE_TTL_MS = 60 * 1000
+const SCHEDULE_FETCH_TIMEOUT_MS = 30000
+const SCHEDULE_CACHE_TTL_MS = 5 * 60 * 1000
+const SCHEDULE_STORAGE_KEY = 'portal.dashboardSchedule.lastGood'
 
 let scheduleCache = null
 let scheduleCacheAt = 0
 let scheduleInFlight = null
+
+function readStoredScheduleCache() {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SCHEDULE_STORAGE_KEY) || 'null')
+    const payload = parsed?.payload
+    if (!payload || !Array.isArray(payload.days)) {
+      return null
+    }
+    return {
+      cachedAt: Number(parsed.cachedAt) || 0,
+      payload,
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeStoredScheduleCache(payload) {
+  if (typeof window === 'undefined' || !window.localStorage || !payload || !Array.isArray(payload.days)) {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(
+      SCHEDULE_STORAGE_KEY,
+      JSON.stringify({
+        cachedAt: Date.now(),
+        payload,
+      }),
+    )
+  } catch {
+    // Browser storage can be full or disabled. The in-memory cache still works.
+  }
+}
+
+function scheduleErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error ?? 'Błąd pobierania grafiku.')
+}
 
 const DAY_NAME_TO_CANONICAL = new Map(
   [
@@ -124,6 +167,15 @@ function rowCell(rows, rowIndex, colIndex) {
   return textFromCell(cell)
 }
 
+function isNoShiftCellValue(value) {
+  const normalized = String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+  return !normalized || normalized === '-' || normalized === 'brak zmiany' || normalized === 'brak zmian'
+}
+
+function hasRealShiftValue(...values) {
+  return values.some((value) => !isNoShiftCellValue(value))
+}
+
 function loadScheduleTableJsonp(spreadsheetId = SCHEDULE_SPREADSHEET_ID, gid = SCHEDULE_GID) {
   return new Promise((resolve, reject) => {
     const root = window.google || (window.google = {})
@@ -176,7 +228,7 @@ function loadScheduleTableJsonp(spreadsheetId = SCHEDULE_SPREADSHEET_ID, gid = S
     script.onerror = () => finishError('Nie udało się pobrać grafiku z Google Sheets.')
     script.src =
       `https://docs.google.com/spreadsheets/d/${encodeURIComponent(String(spreadsheetId))}/gviz/tq` +
-      `?gid=${encodeURIComponent(String(gid))}&tqx=out:json&ts=${Date.now()}`
+      `?gid=${encodeURIComponent(String(gid))}&tqx=out:json&ts=${Math.floor(Date.now() / SCHEDULE_CACHE_TTL_MS)}`
 
     document.head.appendChild(script)
   })
@@ -260,12 +312,17 @@ function parseScheduleTable(table) {
       const morningTask = rowCell(rows, morningRowIndex, day.shiftCol)
       const afternoonStart = afternoonRowIndex > 0 ? rowCell(rows, afternoonRowIndex, day.startCol) : ''
       const afternoonTask = afternoonRowIndex > 0 ? rowCell(rows, afternoonRowIndex, day.shiftCol) : ''
-      const hasAnyData = [morningStart, morningTask, afternoonStart, afternoonTask].some((value) => String(value).trim())
+      const hasMorningShift = hasRealShiftValue(morningStart, morningTask)
+      const hasAfternoonShift = hasRealShiftValue(afternoonStart, afternoonTask)
+
+      if (!hasMorningShift && !hasAfternoonShift) {
+        return
+      }
 
       bucket.entries.push({
         workerId: workerId || '-',
         workerName: workerName || workerId || '-',
-        status: hasAnyData ? 'Praca' : 'Brak zmiany',
+        status: 'Praca',
         morningStart,
         morningTask,
         afternoonStart,
@@ -291,21 +348,43 @@ export async function getScheduleBoard() {
     return scheduleCache
   }
 
+  const stored = readStoredScheduleCache()
+  if (stored?.payload && now - stored.cachedAt < SCHEDULE_CACHE_TTL_MS) {
+    scheduleCache = stored.payload
+    scheduleCacheAt = stored.cachedAt || now
+    return scheduleCache
+  }
+
   if (scheduleInFlight) {
     return scheduleInFlight
   }
 
   scheduleInFlight = (async () => {
-    const table = await loadScheduleTableJsonp()
-    const days = parseScheduleTable(table)
-    const payload = {
-      days,
-      fetchedAtIso: new Date().toISOString(),
-      todayKey: todayYmd(),
+    try {
+      const table = await loadScheduleTableJsonp()
+      const days = parseScheduleTable(table)
+      const payload = {
+        days,
+        fetchedAtIso: new Date().toISOString(),
+        todayKey: todayYmd(),
+        stale: false,
+      }
+      scheduleCache = payload
+      scheduleCacheAt = Date.now()
+      writeStoredScheduleCache(payload)
+      return payload
+    } catch (error) {
+      const fallback = scheduleCache || stored?.payload
+      if (fallback && Array.isArray(fallback.days) && fallback.days.length) {
+        return {
+          ...fallback,
+          todayKey: todayYmd(),
+          stale: true,
+          staleReason: scheduleErrorMessage(error),
+        }
+      }
+      throw error
     }
-    scheduleCache = payload
-    scheduleCacheAt = Date.now()
-    return payload
   })()
 
   try {

@@ -1,9 +1,16 @@
 import { executeMutation, executeQuery, mutationRef, queryRef } from 'firebase/data-connect'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
-export const STYLE_FALLBACK_ID = 'classic-blue'
+export const STYLE_FALLBACK_ID = 'sneat-iclean'
 
 const STYLE_REGISTRY = Object.freeze([
+  {
+    id: 'sneat-iclean',
+    name: 'Sneat Cleanzi',
+    description: 'Nowoczesny, jasny panel administracyjny inspirowany Sneat, dopasowany do Cleanzi.',
+    order: 5,
+    active: true,
+  },
   {
     id: 'classic-blue',
     name: 'Classic Blue',
@@ -97,7 +104,7 @@ function isOperationNotFoundMessage(rawMessage, operationName) {
   }
 
   return (
-    fullMessage.includes(`operation \"${operation}\" not found`) ||
+    fullMessage.includes(`operation "${operation}" not found`) ||
     fullMessage.includes(`operation "${operation}" not found`) ||
     fullMessage.includes(`operation '${operation}' not found`) ||
     (fullMessage.includes('operation') && fullMessage.includes('not found') && fullMessage.includes(operation)) ||

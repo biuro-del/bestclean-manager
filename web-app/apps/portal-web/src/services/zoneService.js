@@ -1,6 +1,56 @@
 import { deleteZoneForOrg, insertZoneForOrg, updateZoneForOrg, zonesForOrg } from '@dataconnect/generated'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
+const READ_CACHE_MS = 30000
+const zonesCache = new Map()
+
+function cachedZonesKey(orgId) {
+  return String(orgId ?? '').trim()
+}
+
+function invalidateZonesCache(orgId) {
+  const key = cachedZonesKey(orgId)
+  if (key) {
+    zonesCache.delete(key)
+    return
+  }
+  zonesCache.clear()
+}
+
+async function readZonesCached(orgId, loader) {
+  const key = cachedZonesKey(orgId)
+  const now = Date.now()
+  const cached = key ? zonesCache.get(key) : null
+
+  if (cached?.promise) {
+    return cached.promise
+  }
+
+  if (cached?.expiresAt > now && Array.isArray(cached.value)) {
+    return cached.value
+  }
+
+  const promise = loader()
+    .then((value) => {
+      if (key) {
+        zonesCache.set(key, { value, expiresAt: Date.now() + READ_CACHE_MS, promise: null })
+      }
+      return value
+    })
+    .catch((error) => {
+      if (key) {
+        zonesCache.delete(key)
+      }
+      throw error
+    })
+
+  if (key) {
+    zonesCache.set(key, { value: cached?.value ?? null, expiresAt: cached?.expiresAt ?? 0, promise })
+  }
+
+  return promise
+}
+
 function toText(value) {
   return String(value ?? '').trim()
 }
@@ -36,9 +86,11 @@ export async function getZones(orgId) {
   }
 
   ensureFirebase()
-  const response = await zonesForOrg({ orgId })
-  const rows = response?.data?.zones ?? []
-  return rows.map((row) => mapZone(orgId, row))
+  return readZonesCached(orgId, async () => {
+    const response = await zonesForOrg({ orgId })
+    const rows = response?.data?.zones ?? []
+    return rows.map((row) => mapZone(orgId, row))
+  })
 }
 
 export async function getZoneById(orgId, zoneId) {
@@ -74,6 +126,7 @@ export async function createZone(orgId, payload) {
     editedBy: payload?.editedBy ?? null,
     date: payload?.date ?? null,
   })
+  invalidateZonesCache(orgId)
 
   return {
     id: zoneId,
@@ -113,6 +166,7 @@ export async function updateZone(orgId, zoneId, payload) {
     editedBy: payload?.editedBy ?? null,
     date: payload?.date ?? null,
   })
+  invalidateZonesCache(orgId)
 
   return {
     id: zoneId,
@@ -138,6 +192,7 @@ export async function deleteZone(orgId, zoneId) {
     orgId,
     zoneId: toText(zoneId),
   })
+  invalidateZonesCache(orgId)
 
   return {
     success: true,

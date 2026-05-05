@@ -12,3 +12,31 @@ env:
     value: iclean-room.web.app
     availability:
       - RUNTIME
+  - variable: FIREBASE_PROJECT_ID
+    value: iclean-room
+    availability:
+      - RUNTIME
+  - variable: CLOUD_SQL_CONNECTION_NAME
+    value: iclean-room:europe-west3:iclean-room-instance
+    availability:
+      - RUNTIME
+  - variable: DB_CONNECTOR
+    value: cloudsql
+    availability:
+      - RUNTIME
+  - variable: DB_NAME
+    value: iclean-room-database
+    availability:
+      - RUNTIME
+  - variable: DB_USER
+    secret: DB_USER
+    availability:
+      - RUNTIME
+  - variable: DB_PASS
+    secret: DB_PASS
+    availability:
+      - RUNTIME
+  - variable: DB_SSL_REJECT_UNAUTHORIZED
+    value: "true"
+    availability:
+      - RUNTIME

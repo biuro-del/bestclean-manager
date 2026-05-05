@@ -76,6 +76,18 @@
             </span>
             <span class="mi-label">Zdarzenia</span>
           </button>
+          <button class="menu-item" data-route="calendar" type="button">
+            <span class="mi-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 3v4M16 3v4M4 10h16M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </span>
+            <span class="mi-label">Kalendarz</span>
+          </button>
+          <button class="menu-item" data-route="kanban" type="button">
+            <span class="mi-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="5" height="14" rx="1.5" stroke="currentColor" stroke-width="1.8"/><rect x="10.5" y="5" width="5" height="10" rx="1.5" stroke="currentColor" stroke-width="1.8"/><rect x="17" y="5" width="3" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8"/></svg>
+            </span>
+            <span class="mi-label">Kanban</span>
+          </button>
           <button class="menu-item" data-route="schedule" type="button">
             <span class="mi-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 3v4M16 3v4M3 10h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -129,6 +141,12 @@
               </span>
               <span class="mi-label">Strefy</span>
             </button>
+            <button class="submenu-item" data-route="audits" type="button">
+              <span class="mi-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v6c0 4.8-3 7.8-7 9-4-1.2-7-4.2-7-9V6l7-3z" stroke="currentColor" stroke-width="1.8"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="mi-label">Audyty</span>
+            </button>
           </div>
 
           <button class="menu-section" type="button" data-toggle="workers">
@@ -164,12 +182,6 @@
                 <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 10h8M8 14h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
               </span>
               <span class="mi-label">Zestawienia</span>
-            </button>
-            <button class="submenu-item" data-route="audits" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v6c0 4.8-3 7.8-7 9-4-1.2-7-4.2-7-9V6l7-3z" stroke="currentColor" stroke-width="1.8"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </span>
-              <span class="mi-label">Audyty</span>
             </button>
             <button class="submenu-item" data-route="coordinator" type="button">
               <span class="mi-ico" aria-hidden="true">
@@ -211,40 +223,55 @@
               </div>
 
               <div class="dash-summary" id="dashSummaryTables">
-                <div class="dash-summary-table" aria-label="Tabela 1">
-                  <div class="dash-summary-table-title">Dzień dzisiejszy</div>
-                  <div class="dash-summary-table-rows">
-                    <button class="dash-summary-row" type="button" data-dash-metric="activeNow">
-                      <span class="dash-summary-row-label">Aktywni teraz</span>
-                      <span class="dash-summary-row-value" id="sumActiveNowCount">0</span>
-                    </button>
-                    <button class="dash-summary-row" type="button" data-dash-metric="finishedToday">
-                      <span class="dash-summary-row-label">Zakończone (START + STOP)</span>
-                      <span class="dash-summary-row-value" id="sumFinishedTodayCount">0</span>
-                    </button>
-                    <div class="dash-summary-row dash-summary-row--static">
-                      <span class="dash-summary-row-label">Suma godzin</span>
-                      <span class="dash-summary-row-value" id="sumTotalHoursToday">00:00</span>
+                <div class="dash-summary-table dash-summary-table--today" aria-label="Dzień dzisiejszy i błędy w systemie">
+                  <div class="dash-summary-block">
+                    <div class="dash-summary-table-title">Dzień dzisiejszy</div>
+                    <div class="dash-summary-table-rows dash-summary-table-rows--compact">
+                      <button class="dash-summary-row dash-summary-row--compact" type="button" data-dash-metric="activeNow">
+                        <span class="dash-summary-row-label">Aktywni teraz</span>
+                        <span class="dash-summary-row-value" id="sumActiveNowCount">0</span>
+                      </button>
+                      <button class="dash-summary-row dash-summary-row--compact" type="button" data-dash-metric="finishedToday">
+                        <span class="dash-summary-row-label">Zakończone (START + STOP)</span>
+                        <span class="dash-summary-row-value" id="sumFinishedTodayCount">0</span>
+                      </button>
+                      <div class="dash-summary-row dash-summary-row--compact dash-summary-row--static">
+                        <span class="dash-summary-row-label">Suma godzin</span>
+                        <span class="dash-summary-row-value" id="sumTotalHoursToday">00:00</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="dash-summary-block dash-summary-errors-block">
+                    <div class="dash-summary-table-title dash-summary-table-title--sub">Błędy w systemie</div>
+                    <div class="dash-summary-table-rows dash-summary-table-rows--compact">
+                      <button class="dash-summary-row dash-summary-row--compact" type="button" data-dash-metric="openStartStopYesterday">
+                        <span class="dash-summary-row-label">Nie zamknięte START-STOP</span>
+                        <span class="dash-summary-row-value" id="sumOpenStartStopYesterdayCount">0</span>
+                      </button>
+                      <button class="dash-summary-row dash-summary-row--compact" type="button" data-dash-metric="openCleanYesterday">
+                        <span class="dash-summary-row-label">Nie zamknięte CLEAN</span>
+                        <span class="dash-summary-row-value" id="sumOpenCleanYesterdayCount">0</span>
+                      </button>
+                      <button class="dash-summary-row dash-summary-row--compact" type="button" data-dash-metric="cleanTooLong">
+                        <span class="dash-summary-row-label">CLEAN &gt; 1,5h</span>
+                        <span class="dash-summary-row-value" id="sumCleanTooLongCount">0</span>
+                      </button>
                     </div>
                   </div>
                 </div>
 
-                <div class="dash-summary-table" aria-label="Tabela 2">
-                  <div class="dash-summary-table-title">Błędy w systemie</div>
-                  <div class="dash-summary-table-rows">
-                    <button class="dash-summary-row" type="button" data-dash-metric="openStartStopYesterday">
-                      <span class="dash-summary-row-label">Nie zamknięte START-STOP (do wczoraj)</span>
-                      <span class="dash-summary-row-value" id="sumOpenStartStopYesterdayCount">0</span>
-                    </button>
-                    <button class="dash-summary-row" type="button" data-dash-metric="openCleanYesterday">
-                      <span class="dash-summary-row-label">Nie zamknięte CLEAN (do wczoraj)</span>
-                      <span class="dash-summary-row-value" id="sumOpenCleanYesterdayCount">0</span>
-                    </button>
-                    <button class="dash-summary-row" type="button" data-dash-metric="cleanTooLong">
-                      <span class="dash-summary-row-label">CLEAN &gt; 1,5h (wczoraj + dziś)</span>
-                      <span class="dash-summary-row-value" id="sumCleanTooLongCount">0</span>
-                    </button>
+                <div class="dash-summary-table dash-comments-panel" id="dashCommentsPanel" aria-label="Nowe komentarze">
+                  <div class="dash-comments-title-row">
+                    <div class="dash-summary-table-title">Nowe komentarze</div>
+                    <span class="pill dash-comments-count" id="dashCommentsCount">0</span>
                   </div>
+                  <div class="dash-comments-list" id="dashCommentsList">
+                    <div class="dash-comments-empty">Brak nowych komentarzy.</div>
+                  </div>
+                  <button class="btn2 dash-comments-read-all" id="dashCommentsAckAll" type="button" disabled>
+                    Oznacz jako odczytane
+                  </button>
                 </div>
               </div>
             </div>
@@ -340,6 +367,8 @@
         </section>
 
         <section id="view-schedule" style="display:none;"></section>
+        <section id="view-calendar" style="display:none;"></section>
+        <section id="view-kanban" style="display:none;"></section>
         <section id="view-events" style="display:none;"></section>
         <section id="view-zones" style="display:none;"></section>
         <section id="view-workerProfile" style="display:none;"></section>

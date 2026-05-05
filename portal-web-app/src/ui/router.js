@@ -1,5 +1,7 @@
 ﻿const routeToViewId = {
   dashboard: 'view-dashboard',
+  calendar: 'view-calendar',
+  kanban: 'view-kanban',
   schedule: 'view-schedule',
   events: 'view-events',
   zones: 'view-zones',
@@ -20,7 +22,7 @@
 const routeGroups = {
   clientsList: 'clients',
   zones: 'objects',
-  audits: 'reports',
+  audits: 'objects',
   coordinator: 'reports',
   individualOrders: 'clients',
   clientProfile: 'clients',

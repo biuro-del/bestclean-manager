@@ -6,19 +6,15 @@
     <div class="reports-grid reports-grid--dashboard">
       <button class="report-tile" type="button" data-rep-open="events">
         <div class="rt-title">Zdarzenia</div>
-        <div class="rt-sub">Porównanie klientów i stref z wykresem czasu per lokalizacja.</div>
-      </button>
-      <button class="report-tile" type="button" data-rep-open="history">
-        <div class="rt-title">Historia</div>
-        <div class="rt-sub">Historia dnia dla obiektu, osoby lub strefy z tygodnia albo miesiąca.</div>
+        <div class="rt-sub">Historia zdarzeń według stref z tygodnia albo miesiąca.</div>
       </button>
       <button class="report-tile" type="button" data-rep-open="workerTime">
         <div class="rt-title">Czasy pracowników</div>
-        <div class="rt-sub">Analiza czasu pracy pracowników (w kolejnym kroku).</div>
+        <div class="rt-sub">Historia pracy według osób z tygodnia albo miesiąca.</div>
       </button>
       <button class="report-tile" type="button" data-rep-open="clients">
         <div class="rt-title">Klienci</div>
-        <div class="rt-sub">Przekrojowe porównania klientów (w kolejnym kroku).</div>
+        <div class="rt-sub">Historia pracy według klientów z tygodnia albo miesiąca.</div>
       </button>
       <button class="report-tile" type="button" data-rep-open="audits">
         <div class="rt-title">Audyty</div>
@@ -37,149 +33,106 @@
     </div>
 
     <div id="repEvents" style="display:none;">
-      <div class="rep-dashboard">
-        <div class="rep-dashboard-main">
-          <div class="rep-compare">
-            <div class="rep-panel">
-              <h3>Panel A</h3>
-              <div class="rep-row">
-                <label>Klient</label>
-                <select id="repA_client"></select>
+      <div class="rep-events-shell">
+        <div class="rep-panel rep-events-filter">
+          <h3>Filtry</h3>
+          <div class="rep-events-filter-grid">
+            <div class="rep-row">
+              <label>Zakres dat</label>
+              <div class="rep-inline-range">
+                <input id="repEventsFrom" type="date" />
+                <input id="repEventsTo" type="date" />
               </div>
-              <div class="rep-row">
-                <label>Strefa (opcjonalnie)</label>
-                <select id="repA_zone"></select>
-              </div>
-              <div class="rep-row">
-                <label>Pracownik (opcjonalnie)</label>
-                <select id="repA_worker"></select>
-              </div>
-              <div class="rep-row">
-                <label>Zakres dat</label>
-                <div class="rep-inline-range">
-                  <input id="repA_from" type="date" />
-                  <input id="repA_to" type="date" />
-                </div>
-              </div>
-              <div class="rep-note">Najpierw wybierz klienta, potem opcjonalnie strefę przypisaną do klienta.</div>
             </div>
-
-            <div class="rep-panel">
-              <h3>Panel B</h3>
-              <div class="rep-row">
-                <label>Klient</label>
-                <select id="repB_client"></select>
-              </div>
-              <div class="rep-row">
-                <label>Strefa (opcjonalnie)</label>
-                <select id="repB_zone"></select>
-              </div>
-              <div class="rep-row">
-                <label>Pracownik (opcjonalnie)</label>
-                <select id="repB_worker"></select>
-              </div>
-              <div class="rep-row">
-                <label>Zakres dat</label>
-                <div class="rep-inline-range">
-                  <input id="repB_from" type="date" />
-                  <input id="repB_to" type="date" />
-                </div>
-              </div>
-              <div class="rep-note">Pola strefa i pracownik nie są wymagane do utworzenia zestawienia.</div>
+            <div class="rep-row">
+              <label>Klient</label>
+              <select id="repEventsClient"></select>
             </div>
-          </div>
-
-          <div class="rep-tools">
-            <div class="rep-chip">
-              <input type="radio" name="repMode" id="repMode_single" value="single" checked />
-              <label for="repMode_single">Pojedyncze zdarzenia</label>
+            <div class="rep-row">
+              <label>Strefa</label>
+              <select id="repEventsZone"></select>
             </div>
-            <div class="rep-chip">
-              <input type="radio" name="repMode" id="repMode_day" value="day" />
-              <label for="repMode_day">Łączone: dzień do dnia</label>
+            <div class="rep-row">
+              <label>Pracownik</label>
+              <select id="repEventsWorker"></select>
             </div>
-          </div>
-
-          <div class="rep-tools">
-            <div class="rep-chip">
-              <input type="checkbox" id="repChk_time" checked />
-              <label for="repChk_time">Łączny czas</label>
+            <div class="rep-row">
+              <label>Status</label>
+              <select id="repEventsStatus">
+                <option value="all">Wszystkie</option>
+                <option value="closed">Zamknięte</option>
+                <option value="running">Otwarte</option>
+              </select>
             </div>
-            <div class="rep-chip">
-              <input type="checkbox" id="repChk_count" checked />
-              <label for="repChk_count">Liczba zdarzeń</label>
+            <div class="rep-row">
+              <label>Typ zdarzenia</label>
+              <select id="repEventsType">
+                <option value="">Wszystkie typy</option>
+              </select>
             </div>
-            <div class="rep-chip">
-              <input type="checkbox" id="repChk_avg" />
-              <label for="repChk_avg">Średni czas</label>
+            <div class="rep-row">
+              <label>Grupuj według</label>
+              <select id="repEventsGroupBy">
+                <option value="client">Klient</option>
+                <option value="zone">Strefa</option>
+                <option value="worker">Pracownik</option>
+                <option value="type">Typ zdarzenia</option>
+                <option value="day">Dzień</option>
+              </select>
             </div>
-            <div class="rep-chip">
-              <input type="checkbox" id="repChk_minmax" />
-              <label for="repChk_minmax">Min/Max</label>
+            <div class="rep-row">
+              <label>Szukaj</label>
+              <input id="repEventsSearch" type="text" placeholder="np. klient, strefa, lokalizacja, komentarz..." />
             </div>
           </div>
 
           <div class="rep-actions">
-            <button class="rep-btn primary" type="button" id="repRun">Porównaj</button>
+            <button class="rep-btn primary" type="button" id="repRun">Generuj zestawienie</button>
             <button class="rep-btn" type="button" id="repDownloadCsv" disabled>Pobierz CSV</button>
           </div>
           <div id="repStatus" class="rep-note" style="margin-top:2px;"></div>
         </div>
 
-        <aside class="rep-dashboard-side">
-          <div class="rep-kpi-grid">
-            <div class="rep-kpi-card">
-              <div class="k">Panel A - liczba</div>
-              <div class="v" id="repKpiCountA">0</div>
-            </div>
-            <div class="rep-kpi-card">
-              <div class="k">Panel A - czas</div>
-              <div class="v" id="repKpiTimeA">00:00:00</div>
-            </div>
-            <div class="rep-kpi-card">
-              <div class="k">Panel B - liczba</div>
-              <div class="v" id="repKpiCountB">0</div>
-            </div>
-            <div class="rep-kpi-card">
-              <div class="k">Panel B - czas</div>
-              <div class="v" id="repKpiTimeB">00:00:00</div>
-            </div>
+        <div class="rep-kpi-grid rep-events-kpis">
+          <div class="rep-kpi-card">
+            <div class="k">Zdarzenia</div>
+            <div class="v" id="repKpiCountA">0</div>
+          </div>
+          <div class="rep-kpi-card">
+            <div class="k">Łączny czas</div>
+            <div class="v" id="repKpiTimeA">00:00:00</div>
+          </div>
+          <div class="rep-kpi-card">
+            <div class="k">Pracownicy</div>
+            <div class="v" id="repKpiCountB">0</div>
+          </div>
+          <div class="rep-kpi-card">
+            <div class="k">Średni czas</div>
+            <div class="v" id="repKpiTimeB">00:00:00</div>
+          </div>
+        </div>
+
+        <div id="repSummary" class="rep-summary" style="display:none;"></div>
+
+        <div class="rep-events-grid">
+          <div class="rep-tablewrap" id="repTableAWrap" style="display:none;">
+            <div class="rep-tabletitle">Podsumowanie</div>
+            <table class="rep-table" id="repTableA"></table>
           </div>
 
-          <div class="rep-chart-panel">
+          <div class="rep-chart-panel" id="repDiffWrap" style="display:none;">
             <div class="rep-chart-head">
-              <h3>Czas per lokalizacja</h3>
-              <p class="rep-note">Wykres słupkowy czasu pracy zakończonych zdarzeń.</p>
+              <h3>Najwięcej czasu</h3>
+              <p class="rep-note">Top grup według łącznego czasu zdarzeń.</p>
             </div>
-            <div class="rep-chart-grid">
-              <div class="rep-chart-card">
-                <div class="rep-chart-title" id="repChartPanelAName">Panel A</div>
-                <div class="rep-bars" id="repChartA"></div>
-              </div>
-              <div class="rep-chart-card">
-                <div class="rep-chart-title" id="repChartPanelBName">Panel B</div>
-                <div class="rep-bars" id="repChartB"></div>
-              </div>
-            </div>
+            <div class="rep-bars" id="repChartA"></div>
           </div>
-        </aside>
-      </div>
+        </div>
 
-      <div id="repSummary" class="rep-summary" style="display:none;"></div>
-
-      <div id="repTableAWrap" class="rep-tablewrap" style="display:none; margin-top: 12px;">
-        <div class="rep-tabletitle">Tabela A</div>
-        <table class="rep-table" id="repTableA"></table>
-      </div>
-
-      <div id="repTableBWrap" class="rep-tablewrap" style="display:none; margin-top: 14px;">
-        <div class="rep-tabletitle">Tabela B</div>
-        <table class="rep-table" id="repTableB"></table>
-      </div>
-
-      <div id="repDiffWrap" class="rep-tablewrap" style="display:none; margin-top: 14px;">
-        <div class="rep-tabletitle">Różnice (B - A)</div>
-        <table class="rep-table" id="repTableDiff"></table>
+        <div class="rep-tablewrap" id="repTableBWrap" style="display:none;">
+          <div class="rep-tabletitle">Szczegóły zdarzeń</div>
+          <table class="rep-table" id="repTableB"></table>
+        </div>
       </div>
     </div>
 
@@ -205,9 +158,9 @@
 
         <div class="rep-panel rep-history-panel">
           <div class="rep-row" id="repHistoryClientWrap">
-            <label>Obiekt (klient)</label>
+            <label>Klient</label>
             <div class="rep-history-picker">
-              <input id="repHistoryClientSearch" type="text" placeholder="Wpisz nazwę obiektu..." autocomplete="off" />
+              <input id="repHistoryClientSearch" type="text" placeholder="Wpisz nazwę klienta..." autocomplete="off" />
               <select id="repHistoryClient" class="rep-history-picker-list"></select>
             </div>
           </div>
@@ -241,6 +194,12 @@
         <div id="repHistorySummary" class="rep-summary" style="display:none;"></div>
 
         <div class="rep-tablewrap rep-history-tablewrap">
+          <div id="repHistoryLoading" class="rep-history-loading" style="display:none;" aria-live="polite" aria-busy="true">
+            <div class="rep-history-loading-card">
+              <span class="rep-history-spinner" aria-hidden="true"></span>
+              <span data-rep-history-loading-text>Ładowanie historii...</span>
+            </div>
+          </div>
           <table class="rep-table" id="repHistoryTable"></table>
         </div>
       </div>

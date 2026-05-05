@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function bestcleanOrg(orgId) {
+      return orgId == 'bestclean';
+    }
+
+    function hasOrgAccess(orgId) {
+      return signedIn()
+        && (
+          request.auth.token.org_id == orgId
+          || request.auth.token.orgId == orgId
+          || request.auth.token.orgs[orgId] == true
+          || request.auth.token.role in ['ADMIN', 'MANAGER', 'COORDINATOR']
+        );
+    }
+
+    function isOwnMobileCreate(orgId) {
+      return signedIn()
+        && bestcleanOrg(orgId)
+        && request.resource.data.orgId == orgId
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.source == 'mobile-web';
+    }
+
+    function canReadMobileResult(orgId) {
+      return hasOrgAccess(orgId)
+        || (signedIn()
+          && bestcleanOrg(orgId)
+          && resource.data.createdByUid == request.auth.uid);
+    }
+
+    // Mobile: zapis rezultatow zamkniecia strefy
+    match /orgs/{orgId}/zoneChecklistResults/{docId} {
+      allow create: if isOwnMobileCreate(orgId);
+      allow read: if canReadMobileResult(orgId);
+    }
+
+    // Mobile: zapis rezultatow zamkniecia dnia
+    match /orgs/{orgId}/workdayCloseResults/{docId} {
+      allow create: if isOwnMobileCreate(orgId);
+      allow read: if canReadMobileResult(orgId);
+    }
+
+    // Definicje checklist (pod przyszly powrot checklisty)
+    match /orgs/{orgId}/zoneChecklistDefinitions/{zoneId} {
+      allow read: if signedIn() && bestcleanOrg(orgId);
+    }
+
+    // Fallback legacy path (tylko odczyt)
+    match /zoneChecklistDefinitions/{docId} {
+      allow read: if signedIn();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

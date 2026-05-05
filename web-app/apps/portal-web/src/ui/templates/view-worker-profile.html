@@ -1,5 +1,5 @@
 <h1 class="welcome">Profil pracownika</h1>
-<p class="subwelcome">Lista + podgl&#261;d/edycja + dodawanie. Usuwanie: tylko Admin (twarde deleteRow).</p>
+<p class="subwelcome">Lista + podgl&#261;d/edycja + dodawanie u&#380;ytkownik&#243;w. Usuwanie: tylko Admin.</p>
 
 <div class="toolbar" aria-label="Filtry pracownik&#243;w">
   <div class="tool" style="min-width:260px">
@@ -40,7 +40,7 @@
   </div>
 
   <div class="tool-actions">
-    <button class="btn2" id="wkAddBtn" type="button">Dodaj pracownika</button>
+    <button class="btn2" id="wkAddBtn" type="button">Dodaj u&#380;ytkownika</button>
     <button class="btn2" id="wkResetBtn" type="button">Od&#347;wie&#380;</button>
     <button class="btn2 primary" id="wkSearchBtn" type="button">Szukaj</button>
   </div>
@@ -76,7 +76,7 @@
 <div class="overlay" id="wkEditorOverlay" aria-label="Profil pracownika" role="dialog" aria-modal="true">
   <div class="modal">
     <div class="logo-block" style="display:inline-flex">
-      <img id="wkLogo" alt="FIDO iClean" style="height:42px;width:auto;" />
+      <img id="wkLogo" alt="Cleanzi" style="height:42px;width:auto;" />
     </div>
 
     <h3 id="wkModalTitle">Profil pracownika</h3>
@@ -107,12 +107,12 @@
         <label for="wkEditType">Typ (K)</label>
         <select id="wkEditType">
           <option value="Admin">Admin</option>
-          <option value="Kierownik">Kierownik</option>
+          <option value="Kierownik">Kierownik / MANAGER</option>
           <option value="Koordynator">Koordynator</option>
           <option value="Stażysta">Sta&#380;ysta</option>
           <option value="Stały personel na obiekcie">Sta&#322;y personel na obiekcie</option>
           <option value="Zespół mobilny">Zesp&#243;&#322; mobilny</option>
-          <option value="Pracownik">Pracownik</option>
+          <option value="Pracownik">Pracownik / WORKER</option>
         </select>
       </div>
 
@@ -155,7 +155,7 @@
       </div>
 
       <div class="field">
-        <label for="wkNewPass">Nowe has&#322;o (E) &#8212; wpisz, je&#347;li zmieniasz</label>
+        <label for="wkNewPass">Has&#322;o tymczasowe (E)</label>
         <input id="wkNewPass" type="text" maxlength="120" />
       </div>
 

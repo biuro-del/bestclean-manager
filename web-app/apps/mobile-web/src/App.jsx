@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ensureFirebaseAnalytics } from './firebase/firebaseClient'
 import { getMobileSession, loginMobile, logoutMobile } from './services/mobileAuthService'
+import { getZoneAuditValidationError } from './services/mobileAuditService'
 import {
   defaultQrFunctionLabel,
   findZoneByQrId,
@@ -18,7 +19,14 @@ import {
   scanMobileQr,
   startMobilePause,
 } from './services/mobileWorkflowService'
-import { readMobileLanguage, writeMobileLanguage, writeMobileSession } from './state/sessionStore'
+import {
+  clearMobileAuditSession,
+  readMobileAuditSession,
+  readMobileLanguage,
+  writeMobileAuditSession,
+  writeMobileLanguage,
+  writeMobileSession,
+} from './state/sessionStore'
 import { LOGIN_LANGUAGE_OPTIONS, t as i18nT, translateRuntimeMessage } from './state/mobileI18n'
 
 const VIEW = {
@@ -43,6 +51,36 @@ const COORD = {
   EDIT_QR: 'edit-qr',
 }
 
+function createUuid() {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID()
+    }
+  } catch {
+    // Ignore and use fallback below.
+  }
+
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (token) => {
+    const random = Math.floor(Math.random() * 16)
+    const value = token === 'x' ? random : ((random & 0x3) | 0x8)
+    return value.toString(16)
+  })
+}
+
+function resolveCoordinatorAuditResumeView(viewValue, zoneIdValue) {
+  const view = txt(viewValue)
+  const zoneId = txt(zoneIdValue)
+  if (view === COORD.AUDIT_FORM && zoneId) {
+    return COORD.AUDIT_FORM
+  }
+  return COORD.AUDIT_SCAN
+}
+
+function isCoordinatorAuditFlowView(value) {
+  const view = txt(value)
+  return view === COORD.AUDIT_START || view === COORD.AUDIT_SCAN || view === COORD.AUDIT_FORM
+}
+
 const SCHEDULE_SYNC_MS = 15 * 60 * 1000
 const SCHEDULE_SWIPE_THRESHOLD_PX = 45
 const MAX_REASONABLE_WORKDAY_SEC = 20 * 60 * 60
@@ -51,9 +89,13 @@ const CHECKLIST_ENABLED = false
 const NOTICE_AUTO_HIDE_MS = 5000
 const INACTIVITY_AUTO_LOGOUT_MS = 60 * 60 * 1000
 const INACTIVITY_CHECK_MS = 15000
+const MOBILE_UI_SCALE_STORAGE_KEY = 'iclean_mobile_ui_scale_v1'
+const MOBILE_UI_SCALE_DEFAULT = 1
+const MOBILE_UI_SCALE_SMALL = 0.6
 
 const QR_FUNCTION_OPTIONS = [
   'Sprzątanie',
+  'Strefa specjalna',
   'START (czas pracy)',
   'STOP0 (czas pracy + 0 min)',
   'STOP5 (czas pracy + 5 min)',
@@ -211,7 +253,13 @@ function normalizeFunctionToken(value) {
 
 function isSpecialOrIndividualCleanFunction(functionName) {
   const token = normalizeFunctionToken(functionName)
-  return token === 'zlecenieindywidualne' || token === 'sprzatanieindywidualne' || token === 'strefaspecjalna'
+  if (!token) return false
+  return (
+    token.includes('zlecenieindywidualne') ||
+    token.includes('sprzatanieindywidualne') ||
+    token.includes('strefaspecjalna') ||
+    token.includes('kodspecjalny')
+  )
 }
 
 function parseIso(value) {
@@ -453,10 +501,48 @@ function resolveWorkflowView(snapshot, nowIsoValue = new Date().toISOString()) {
   return VIEW.START
 }
 
+function normalizeMobileUiScale(value) {
+  const parsed = Number(value)
+  if (Math.abs(parsed - MOBILE_UI_SCALE_SMALL) < 0.001) {
+    return MOBILE_UI_SCALE_SMALL
+  }
+  return MOBILE_UI_SCALE_DEFAULT
+}
+
+function readMobileUiScale() {
+  if (typeof window === 'undefined') {
+    return MOBILE_UI_SCALE_DEFAULT
+  }
+  try {
+    return normalizeMobileUiScale(window.localStorage?.getItem(MOBILE_UI_SCALE_STORAGE_KEY))
+  } catch {
+    return MOBILE_UI_SCALE_DEFAULT
+  }
+}
+
+function writeMobileUiScale(value) {
+  const normalized = normalizeMobileUiScale(value)
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage?.setItem(MOBILE_UI_SCALE_STORAGE_KEY, String(normalized))
+    } catch {
+      // Ignore storage errors and keep runtime value only.
+    }
+  }
+  return normalized
+}
+
 function resolveCycleCloseReason(activeCycle, scannedZone) {
   if (!isCycleOpen(activeCycle)) return ''
   const kind = up(scannedZone?.kind)
   if (!kind) return ''
+  const isSpecialOrIndividual = isSpecialOrIndividualCleanFunction(scannedZone?.functionName)
+  if (isSpecialOrIndividual) {
+    if (normalizeKey(activeCycle?.zoneId) === normalizeKey(scannedZone?.id)) {
+      return 'QR_SAME'
+    }
+    return 'QR_SWITCH'
+  }
   if (kind === 'STOP') return 'STOP_END_DAY'
   if (kind === 'CLEAN' || kind === 'INDIVIDUAL') {
     if (normalizeKey(activeCycle?.zoneId) === normalizeKey(scannedZone?.id)) {
@@ -721,7 +807,7 @@ function WorkHud({ workerName, timer, onPause, onStop, startLabel, topActionIsSt
   )
 }
 
-function SettingsModal({ open, session, onClose, onLogout, languageCode, onLanguageChange, t }) {
+function SettingsModal({ open, session, onClose, onLogout, languageCode, onLanguageChange, uiScale, onUiScaleChange, t }) {
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false)
   const activeLanguage = useMemo(
     () => LOGIN_LANGUAGE_OPTIONS.find((option) => option.code === languageCode) || LOGIN_LANGUAGE_OPTIONS[0],
@@ -775,6 +861,26 @@ function SettingsModal({ open, session, onClose, onLogout, languageCode, onLangu
                 })}
               </div>
             ) : null}
+          </div>
+          <div className="settings-item">
+            {t('settings.uiScale')}
+            <small>{t('settings.uiScaleHint')}</small>
+            <div className="settings-scale__actions" role="group" aria-label={t('settings.uiScale')}>
+              <button
+                className={`settings-scale__btn${uiScale >= 0.99 ? ' is-active' : ''}`}
+                type="button"
+                onClick={() => onUiScaleChange(MOBILE_UI_SCALE_DEFAULT)}
+              >
+                {t('settings.uiScale100')}
+              </button>
+              <button
+                className={`settings-scale__btn${uiScale < 0.99 ? ' is-active' : ''}`}
+                type="button"
+                onClick={() => onUiScaleChange(MOBILE_UI_SCALE_SMALL)}
+              >
+                {t('settings.uiScale60')}
+              </button>
+            </div>
           </div>
           <button className="settings-item settings-item--danger" type="button" onClick={onLogout}>
             {t('settings.logout')}
@@ -1059,7 +1165,7 @@ function WorkdayClosePromptModal({ open, pending, error, onChoose, onCancel }) {
     <div className="modal" onClick={pending ? undefined : onCancel}>
       <div className="modal-content" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">Zakonczenie dnia</div>
+          <div className="modal-title">Zakończenie dnia</div>
           <button className="link-btn" type="button" onClick={onCancel} disabled={pending}>
             Wróć
           </button>
@@ -1114,7 +1220,7 @@ function formatDateTime(value) {
 
 function scheduleShiftLabel(index) {
   if (index === 0) return 'Rano'
-  if (index === 1) return 'Popoludnie'
+  if (index === 1) return 'Popołudnie'
   return `Zmiana ${index + 1}`
 }
 
@@ -1160,13 +1266,13 @@ function CoordinatorAuditScan({ objectTimerText, auditTimerText, onScanZone, onE
         Wróć
       </button>
       <button className="btn secondary" type="button" onClick={onEnd}>
-        Zakoncz audyt
+        Zakończ audyt
       </button>
     </section>
   )
 }
 
-function CoordinatorAuditForm({ zoneId, cleanValue, comment, onPick, onComment, onSend, onBack }) {
+function CoordinatorAuditForm({ zoneId, cleanValue, comment, pending, onPick, onComment, onSend, onBack }) {
   return (
     <section className="card col">
       <div className="title-small">Audyt strefy</div>
@@ -1174,22 +1280,22 @@ function CoordinatorAuditForm({ zoneId, cleanValue, comment, onPick, onComment, 
       <div className="box">
         <div className="tile-label">Czy jest tu czysto?</div>
         <div className="row-inline">
-          <button className={`btn ${cleanValue === 1 ? 'primary' : 'secondary'}`} type="button" onClick={() => onPick(1)}>
+          <button className={`btn ${cleanValue === 1 ? 'primary' : 'secondary'}`} type="button" onClick={() => onPick(1)} disabled={pending}>
             TAK
           </button>
-          <button className={`btn ${cleanValue === 0 ? 'primary' : 'secondary'}`} type="button" onClick={() => onPick(0)}>
+          <button className={`btn ${cleanValue === 0 ? 'primary' : 'secondary'}`} type="button" onClick={() => onPick(0)} disabled={pending}>
             NIE
           </button>
         </div>
       </div>
       <div className="box col">
         <label className="muted">Komentarz (opcjonalnie)</label>
-        <textarea className="textarea" maxLength={300} value={comment} onChange={(event) => onComment(event.target.value)} placeholder="Dodaj komentarz..." />
+        <textarea className="textarea" maxLength={300} value={comment} onChange={(event) => onComment(event.target.value)} placeholder="Dodaj komentarz..." disabled={pending} />
       </div>
-      <button className="btn primary" type="button" onClick={onSend}>
-        Wyslij audyt
+      <button className="btn primary" type="button" onClick={onSend} disabled={pending}>
+        {pending ? 'Zapisywanie...' : 'Wyślij audyt'}
       </button>
-      <button className="btn secondary" type="button" onClick={onBack}>
+      <button className="btn secondary" type="button" onClick={onBack} disabled={pending}>
         Wróć
       </button>
     </section>
@@ -1263,10 +1369,21 @@ function CoordinatorEditQr({
 }
 
 export default function App() {
-  const [session, setSession] = useState(() => getMobileSession())
+  const [initialMobileState] = useState(() => {
+    const savedSession = getMobileSession()
+    const savedAudit = savedSession?.token ? readMobileAuditSession(savedSession) : null
+    return {
+      session: savedSession,
+      audit: savedAudit,
+    }
+  })
+  const initialSession = initialMobileState.session
+  const initialAudit = initialMobileState.audit
+
+  const [session, setSession] = useState(initialSession)
   const [snapshot, setSnapshot] = useState(null)
-  const [view, setView] = useState(() => (getMobileSession()?.token ? VIEW.MENU : VIEW.LOGIN))
-  const [languageCode, setLanguageCode] = useState(() => readMobileLanguage(getMobileSession()))
+  const [view, setView] = useState(() => (initialSession?.token ? (initialAudit ? VIEW.COORDINATOR : VIEW.MENU) : VIEW.LOGIN))
+  const [languageCode, setLanguageCode] = useState(() => readMobileLanguage(initialSession))
   const [notice, setNotice] = useState('')
   const [tick, setTick] = useState(Date.now())
   const [refreshPending, setRefreshPending] = useState(false)
@@ -1275,17 +1392,20 @@ export default function App() {
   const [operationPending, setOperationPending] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [uiScale, setUiScale] = useState(() => readMobileUiScale())
   const [worklogMonth, setWorklogMonth] = useState(() => monthNow())
   const [summaryMonth, setSummaryMonth] = useState(() => monthNow())
   const [scanState, setScanState] = useState({ open: false, title: 'Skanuj QR', subtitle: '', pending: false, error: '', intent: 'workflow', nonce: 0 })
-  const [coordView, setCoordView] = useState(COORD.HOME)
+  const [coordView, setCoordView] = useState(() => (initialAudit ? resolveCoordinatorAuditResumeView(initialAudit.view, initialAudit.zoneId) : COORD.HOME))
   const [coordBusy, setCoordBusy] = useState(false)
   const [coordClients, setCoordClients] = useState([])
   const [coordZones, setCoordZones] = useState([])
-  const [coordAuditZoneId, setCoordAuditZoneId] = useState('')
-  const [coordAuditClean, setCoordAuditClean] = useState(null)
-  const [coordAuditComment, setCoordAuditComment] = useState('')
-  const [coordAuditStartedAt, setCoordAuditStartedAt] = useState('')
+  const [coordAuditSessionId, setCoordAuditSessionId] = useState(() => txt(initialAudit?.sessionId))
+  const [coordAuditDraftId, setCoordAuditDraftId] = useState(() => txt(initialAudit?.auditId))
+  const [coordAuditZoneId, setCoordAuditZoneId] = useState(() => txt(initialAudit?.zoneId))
+  const [coordAuditClean, setCoordAuditClean] = useState(() => (initialAudit?.cleanValue === 0 || initialAudit?.cleanValue === 1 ? Number(initialAudit.cleanValue) : null))
+  const [coordAuditComment, setCoordAuditComment] = useState(() => txt(initialAudit?.comment))
+  const [coordAuditStartedAt, setCoordAuditStartedAt] = useState(() => txt(initialAudit?.startedAt))
   const [coordEditForm, setCoordEditForm] = useState({
     qrId: '',
     functionName: defaultQrFunctionLabel(),
@@ -1303,7 +1423,7 @@ export default function App() {
   })
   const [scheduleDayIndex, setScheduleDayIndex] = useState(0)
   const [scheduleUpdatedPopupOpen, setScheduleUpdatedPopupOpen] = useState(false)
-  const [versionPopupOpen, setVersionPopupOpen] = useState(() => !getMobileSession()?.token)
+  const [versionPopupOpen, setVersionPopupOpen] = useState(() => !initialSession?.token)
   const [checklistLoading, setChecklistLoading] = useState(false)
   const [checklistError, setChecklistError] = useState('')
   const [checklistErrorKind, setChecklistErrorKind] = useState('')
@@ -1323,6 +1443,8 @@ export default function App() {
   const lastUserActivityDayRef = useRef(localDayKey(new Date().toISOString()))
   const inactivityMidnightHandledRef = useRef(false)
   const inactivityAutoLogoutHandledRef = useRef(false)
+  const coordAuditSubmitLockRef = useRef(false)
+  const nowIso = useMemo(() => new Date(tick).toISOString(), [tick])
 
   const markUserActivity = useCallback(() => {
     lastUserActivityMsRef.current = Date.now()
@@ -1339,6 +1461,10 @@ export default function App() {
     const normalized = writeMobileLanguage(nextLanguageCode, session)
     setLanguageCode(normalized)
   }, [session])
+
+  const setMobileUiScale = useCallback((nextScale) => {
+    setUiScale(writeMobileUiScale(nextScale))
+  }, [])
 
   const reloadApp = useCallback(() => {
     if (typeof window === 'undefined' || !window.location?.reload) {
@@ -1366,12 +1492,35 @@ export default function App() {
     setWorkdayClosePromptState(createWorkdayClosePromptState())
   }, [])
 
-  const resetCoordinatorAuditState = useCallback(() => {
+  const clearCoordinatorAuditDraft = useCallback(() => {
+    setCoordAuditDraftId('')
     setCoordAuditZoneId('')
     setCoordAuditClean(null)
     setCoordAuditComment('')
-    setCoordAuditStartedAt('')
   }, [])
+
+  const resetCoordinatorAuditState = useCallback(() => {
+    clearCoordinatorAuditDraft()
+    setCoordAuditSessionId('')
+    setCoordAuditStartedAt('')
+  }, [clearCoordinatorAuditDraft])
+
+  const ensureCoordinatorAuditSession = useCallback((startedAtValue = nowIso) => {
+    const startedAt = parseIso(startedAtValue) || nowIso
+    const sessionId = txt(coordAuditSessionId) || createUuid()
+
+    if (!txt(coordAuditSessionId)) {
+      setCoordAuditSessionId(sessionId)
+    }
+    if (!txt(coordAuditStartedAt)) {
+      setCoordAuditStartedAt(startedAt)
+    }
+
+    return {
+      sessionId,
+      startedAt: txt(coordAuditStartedAt) || startedAt,
+    }
+  }, [coordAuditSessionId, coordAuditStartedAt, nowIso])
 
   const forceLoginWithMessage = useCallback((message) => {
     setSession(null)
@@ -1383,6 +1532,7 @@ export default function App() {
     setCoordClients([])
     setCoordZones([])
     setCoordBusy(false)
+    clearMobileAuditSession()
     resetCoordinatorAuditState()
     setSchedulePending(false)
     setScheduleError('')
@@ -1555,7 +1705,6 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [refreshNoticeHidden, refreshPending])
 
-  const nowIso = useMemo(() => new Date(tick).toISOString(), [tick])
   const activeWorkday = snapshot?.activeWorkday
   const activePause = snapshot?.activePause
   const activeCycle = snapshot?.activeCycle
@@ -1598,7 +1747,6 @@ export default function App() {
     return `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`
   }, [activeWorkday?.status, activeWorkday?.endAt, tick])
   const showWorkflowScanHelp = liveWorkdayOpen && !pauseOpen && !activeCycleOpen && up(activeWorkday?.status) !== 'ENDING'
-  const todayTasksProgressPct = 0
 
   useEffect(() => {
     if (!session?.token) return
@@ -1640,6 +1788,14 @@ export default function App() {
   const coordAuditCounter = useMemo(
     () => (coordAuditStartedAt ? hms(secBetween(coordAuditStartedAt, nowIso)) : '00:00:00'),
     [coordAuditStartedAt, nowIso],
+  )
+  const hasActiveCoordinatorAudit = useMemo(
+    () => Boolean(txt(coordAuditSessionId) && parseIso(coordAuditStartedAt)),
+    [coordAuditSessionId, coordAuditStartedAt],
+  )
+  const coordinatorAuditResumeView = useMemo(
+    () => (hasActiveCoordinatorAudit ? resolveCoordinatorAuditResumeView(coordView, coordAuditZoneId) : COORD.HOME),
+    [coordAuditZoneId, coordView, hasActiveCoordinatorAudit],
   )
   const scheduleDays = useMemo(
     () => (Array.isArray(schedulePayload.schedule?.days) ? schedulePayload.schedule.days : []),
@@ -1686,6 +1842,86 @@ export default function App() {
       workdayClosePromptState.pending,
     ],
   )
+
+  useEffect(() => {
+    if (session?.token) {
+      return
+    }
+    coordAuditSubmitLockRef.current = false
+    clearMobileAuditSession()
+  }, [session?.token])
+
+  useEffect(() => {
+    if (!hasActiveCoordinatorAudit) {
+      clearMobileAuditSession()
+      return
+    }
+
+    if (!session?.token || !coordinatorAccess) {
+      coordAuditSubmitLockRef.current = false
+      clearMobileAuditSession()
+      resetCoordinatorAuditState()
+      if (isCoordinatorAuditFlowView(coordView)) {
+        setCoordView(COORD.HOME)
+      }
+      return
+    }
+
+    const startedDayKey = localDayKey(coordAuditStartedAt)
+    const nowDayKey = localDayKey(nowIso)
+    if (!startedDayKey || !nowDayKey || startedDayKey !== nowDayKey) {
+      coordAuditSubmitLockRef.current = false
+      clearMobileAuditSession()
+      resetCoordinatorAuditState()
+      if (isCoordinatorAuditFlowView(coordView)) {
+        setCoordView(COORD.HOME)
+      }
+    }
+  }, [
+    coordAuditStartedAt,
+    coordView,
+    coordinatorAccess,
+    hasActiveCoordinatorAudit,
+    nowIso,
+    resetCoordinatorAuditState,
+    session?.token,
+  ])
+
+  useEffect(() => {
+    if (!session?.token || !coordinatorAccess || !hasActiveCoordinatorAudit) {
+      return
+    }
+
+    writeMobileAuditSession(
+      {
+        sessionId: coordAuditSessionId,
+        startedAt: coordAuditStartedAt,
+        view: coordinatorAuditResumeView,
+        zoneId: coordAuditZoneId,
+        cleanValue: coordAuditClean,
+        comment: coordAuditComment,
+        auditId: coordAuditDraftId,
+        orgId: session?.orgId,
+        uid: session?.uid,
+        workerLogin: snapshot?.worker?.login || session?.workerLogin,
+        login: session?.login,
+        email: session?.email,
+      },
+      session,
+    )
+  }, [
+    coordAuditClean,
+    coordAuditComment,
+    coordAuditDraftId,
+    coordAuditSessionId,
+    coordAuditStartedAt,
+    coordAuditZoneId,
+    coordinatorAccess,
+    coordinatorAuditResumeView,
+    hasActiveCoordinatorAudit,
+    session,
+    snapshot?.worker?.login,
+  ])
 
   useEffect(() => {
     if (!CHECKLIST_ENABLED) {
@@ -1840,9 +2076,9 @@ export default function App() {
       setNotice('Nie masz dostępu do modułu koordynatora.')
       return
     }
-    setCoordView(COORD.HOME)
+    setCoordView(hasActiveCoordinatorAudit ? coordinatorAuditResumeView : COORD.HOME)
     setView(VIEW.COORDINATOR)
-  }, [coordinatorAccess])
+  }, [coordinatorAccess, coordinatorAuditResumeView, hasActiveCoordinatorAudit])
 
   const ensureRunningToday = useCallback(
     (nextSnapshot) => {
@@ -1903,15 +2139,19 @@ export default function App() {
       setNotice('Nie masz dostępu do modułu koordynatora.')
       return
     }
+    if (hasActiveCoordinatorAudit) {
+      setCoordView(coordinatorAuditResumeView)
+      return
+    }
     resetCoordinatorAuditState()
     setCoordView(COORD.AUDIT_START)
-  }, [coordinatorAccess, resetCoordinatorAuditState])
+  }, [coordinatorAccess, coordinatorAuditResumeView, hasActiveCoordinatorAudit, resetCoordinatorAuditState])
 
   const doCoordinatorAuditCheck = useCallback(() => {
     const state = ensureRunningToday()
     if (state.ok) {
+      ensureCoordinatorAuditSession(nowIso)
       setCoordView(COORD.AUDIT_SCAN)
-      if (!coordAuditStartedAt) setCoordAuditStartedAt(nowIso)
       return
     }
 
@@ -1920,24 +2160,58 @@ export default function App() {
       : 'Brak START dzisiaj. Zeskanuj START obiektu, aby rozpocząć pracę.'
     setNotice(message)
     openScan('coordinator-audit-start', 'START obiektu (audyt)', 'Zeskanuj kod START obiektu.')
-  }, [coordAuditStartedAt, ensureRunningToday, nowIso])
+  }, [ensureCoordinatorAuditSession, ensureRunningToday, nowIso])
 
   const doCoordinatorAuditSend = useCallback(async () => {
     if (!session?.token || !snapshot) return
+    if (coordAuditSubmitLockRef.current) {
+      return
+    }
+    if (!coordAuditZoneId) {
+      setNotice('Najpierw zeskanuj strefę do audytu.')
+      return
+    }
     if (coordAuditClean !== 0 && coordAuditClean !== 1) {
       setNotice('Wybierz TAK lub NIE.')
       return
     }
+
+    const runningState = ensureRunningToday()
+    if (!runningState.ok) {
+      const message = runningState.stale
+        ? 'Masz otwarty dzień z poprzedniego dnia. Zeskanuj START dzisiaj, aby wznowić pracę.'
+        : 'Brak START dzisiaj. Zeskanuj START obiektu, aby wznowić pracę.'
+      setNotice(message)
+      openScan('coordinator-audit-start', 'START obiektu (audyt)', 'Zeskanuj kod START obiektu.')
+      return
+    }
+
+    const zone = (snapshot?.zones || []).find((item) => normalizeKey(item?.id) === normalizeKey(coordAuditZoneId)) || null
+    const zoneError = getZoneAuditValidationError(zone)
+    if (zoneError) {
+      setNotice(zoneError)
+      setCoordView(COORD.AUDIT_SCAN)
+      return
+    }
+
+    const auditSession = ensureCoordinatorAuditSession(coordAuditStartedAt || nowIso)
+    const auditId = txt(coordAuditDraftId) || createUuid()
+    if (!txt(coordAuditDraftId)) {
+      setCoordAuditDraftId(auditId)
+    }
+
     try {
+      coordAuditSubmitLockRef.current = true
       setCoordBusy(true)
       await logAuditZone(session, snapshot, {
+        auditId,
+        sessionId: auditSession.sessionId,
+        auditStartedAt: auditSession.startedAt,
         zoneId: coordAuditZoneId,
         cleanValue: coordAuditClean,
         comment: coordAuditComment,
       })
-      setCoordAuditZoneId('')
-      setCoordAuditClean(null)
-      setCoordAuditComment('')
+      clearCoordinatorAuditDraft()
       setCoordView(COORD.AUDIT_SCAN)
       setNotice('Zapisano audyt strefy.')
     } catch (error) {
@@ -1947,9 +2221,24 @@ export default function App() {
       }
       setNotice(parseErrorMessage(error, 'Nie udało się zapisać audytu.'))
     } finally {
+      coordAuditSubmitLockRef.current = false
       setCoordBusy(false)
     }
-  }, [coordAuditClean, coordAuditComment, coordAuditZoneId, forceLoginWithMessage, session, snapshot])
+  }, [
+    clearCoordinatorAuditDraft,
+    coordAuditClean,
+    coordAuditComment,
+    coordAuditDraftId,
+    coordAuditStartedAt,
+    coordAuditZoneId,
+    ensureCoordinatorAuditSession,
+    ensureRunningToday,
+    forceLoginWithMessage,
+    nowIso,
+    openScan,
+    session,
+    snapshot,
+  ])
 
   const doCoordinatorQrSave = useCallback(async () => {
     if (!session?.token) return
@@ -2006,6 +2295,8 @@ export default function App() {
     try {
       await logoutMobile()
     } finally {
+      coordAuditSubmitLockRef.current = false
+      clearMobileAuditSession()
       setSession(null)
       setSnapshot(null)
       setView(VIEW.LOGIN)
@@ -2199,6 +2490,13 @@ export default function App() {
     }
 
     setSnapshot(result.snapshot)
+    setSession((prev) => {
+      if (!prev) return prev
+      const workerLogin = txt(result?.snapshot?.worker?.login) || prev.workerLogin
+      const workerName = txt(result?.snapshot?.worker?.name) || prev.workerName
+      if (prev.workerLogin === workerLogin && prev.workerName === workerName) return prev
+      return writeMobileSession({ ...prev, workerLogin, workerName })
+    })
     setNotice(resultMessage)
     const nextView = intent === 'menu' ? VIEW.MENU : resolveWorkflowView(result.snapshot)
     setView(nextView)
@@ -2321,22 +2619,39 @@ export default function App() {
 
         const result = await scanMobileQr({ session, snapshot, qrCode: code, comment })
         setSnapshot(result.snapshot)
+        setSession((prev) => {
+          if (!prev) return prev
+          const workerLogin = txt(result?.snapshot?.worker?.login) || prev.workerLogin
+          const workerName = txt(result?.snapshot?.worker?.name) || prev.workerName
+          if (prev.workerLogin === workerLogin && prev.workerName === workerName) return prev
+          return writeMobileSession({ ...prev, workerLogin, workerName })
+        })
         const runningState = ensureRunningToday(result.snapshot)
         if (!runningState.ok) {
           throw new Error('Nie wykryto RUNNING dzisiaj.')
         }
+        ensureCoordinatorAuditSession(nowIso)
         setCoordView(COORD.AUDIT_SCAN)
-        if (!coordAuditStartedAt) setCoordAuditStartedAt(nowIso)
         setNotice('START audytu potwierdzony.')
         closeScan()
         return
       }
 
       if (intent === 'coordinator-audit-zone') {
+        const runningState = ensureRunningToday()
+        if (!runningState.ok) {
+          throw new Error('Brak START dzisiaj. Zeskanuj START obiektu, aby rozpocząć audyt.')
+        }
         const scannedZone = findZoneInSnapshot(snapshot, code)
         if (!scannedZone) {
           throw new Error('Nie znaleziono strefy dla podanego kodu QR.')
         }
+        const zoneError = getZoneAuditValidationError(scannedZone)
+        if (zoneError) {
+          throw new Error(zoneError)
+        }
+        ensureCoordinatorAuditSession(coordAuditStartedAt || nowIso)
+        setCoordAuditDraftId(createUuid())
         setCoordAuditZoneId(txt(scannedZone.id))
         setCoordAuditClean(null)
         setCoordAuditComment('')
@@ -2653,6 +2968,7 @@ export default function App() {
             zoneId={coordAuditZoneId}
             cleanValue={coordAuditClean}
             comment={coordAuditComment}
+            pending={coordBusy}
             onPick={setCoordAuditClean}
             onComment={(value) => setCoordAuditComment(txt(value).slice(0, 300))}
             onSend={doCoordinatorAuditSend}
@@ -2735,22 +3051,6 @@ export default function App() {
             t={tr}
 	          />
 	          <button className="btn action btn-xl" type="button" onClick={() => openScan('workflow', tr('scan.titleDefault'), tr('scan.subtitleDefault'))}>{tr('workflow.scanQrButton')}</button>
-	          <button className="btn secondary btn-xl btn--coming-soon" type="button" disabled aria-disabled="true" title="Wkrótce">
-	            {tr('workflow.todayTasksButton')}
-	          </button>
-          <div className="today-tasks-progress" aria-hidden="true">
-            <div className="today-tasks-progress__top">
-              <span>{tr('workflow.progressLabel')}</span>
-              <strong>{todayTasksProgressPct}%</strong>
-            </div>
-            <div className="today-tasks-progress__track">
-              <div className="today-tasks-progress__fill" style={{ width: `${todayTasksProgressPct}%` }} />
-            </div>
-            <div className="today-tasks-progress__scale">
-              <span>0%</span>
-              <span>100%</span>
-            </div>
-          </div>
 	          <div className="scan-glass checklist-wrap">
 	            <div className="scan-title">{view === VIEW.END ? tr('workflow.endTitle') : view === VIEW.CLEAN ? tr('workflow.cleanTitle') : showWorkflowScanHelp ? tr('workflow.scanTitle') : tr('workflow.startTitle')}</div>
             {view === VIEW.CLEAN ? (
@@ -2813,14 +3113,17 @@ export default function App() {
   }
 
   const isLoginView = view === VIEW.LOGIN
+  const hasNoticePopup = Boolean(notice) || (refreshPending && !refreshNoticeHidden)
+  const viewportStyle = useMemo(() => ({ '--mobile-ui-scale': uiScale }), [uiScale])
 
   return (
-    <div className={`app-shell${isLoginView ? ' app-shell--login' : ''}`}>
+    <div className="app-viewport" style={viewportStyle}>
+      <div className={`app-shell${isLoginView ? ' app-shell--login' : ''}${hasNoticePopup ? ' app-shell--notice-active' : ''}`}>
       <header className={`header${isLoginView ? ' header--login' : ''}`}>
         <div className="header-left"><button className="top-nav-btn top-nav-btn--icon" type="button" aria-label={tr('header.homeAria')} onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}><span className="top-nav-ico"><HomeIcon /></span></button></div>
         <div className="header-center">
           <button className="logo-home-btn" type="button" aria-label={tr('header.logoAria')} onClick={() => setView(session?.token ? VIEW.MENU : VIEW.LOGIN)}>
-            <img className="header-logo header-logo--bestclean" src="https://static.wixstatic.com/media/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png/v1/fill/w_698,h_238,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/f53ca5_5f74c82b2ea6402aa1b469096b7ad4c5~mv2.png" alt="Best Clean" />
+            <img className="header-logo header-logo--bestclean" src="/logotyp.jpg" alt="Best Clean" />
           </button>
         </div>
         <div className="header-right"><button className="top-nav-btn top-nav-btn--icon" type="button" aria-label={tr('header.settingsAria')} disabled={!session?.token} onClick={() => setSettingsOpen(true)}><span className="top-nav-ico"><SettingsIcon /></span></button></div>
@@ -2832,6 +3135,7 @@ export default function App() {
       <div className="notice-bottom-stack" aria-live="polite">
         {notice ? (
           <div className="notice-box notice-box--bottom" role="status">
+            <div className="notice-box__badge">Best Clean</div>
             <span className="notice-box__text">{trRuntime(notice)}</span>
             <button className="notice-ok-btn" type="button" onClick={() => setNotice('')} aria-label={tr('common.close')}>
               {tr('common.ok')}
@@ -2840,6 +3144,7 @@ export default function App() {
         ) : null}
         {refreshPending && !refreshNoticeHidden ? (
           <div className="notice-box notice-box--bottom notice-muted" role="status">
+            <div className="notice-box__badge">Best Clean</div>
             <span className="notice-box__text">{tr('common.syncingData')}</span>
             <button className="notice-ok-btn" type="button" onClick={() => setRefreshNoticeHidden(true)} aria-label={tr('common.close')}>
               {tr('common.ok')}
@@ -2854,6 +3159,8 @@ export default function App() {
         onLogout={doLogout}
         languageCode={languageCode}
         onLanguageChange={setAppLanguage}
+        uiScale={uiScale}
+        onUiScaleChange={setMobileUiScale}
         t={tr}
       />
       <ScanModal
@@ -2921,6 +3228,7 @@ export default function App() {
           </div>
         </div>
       ) : null}
+      </div>
     </div>
   )
 }

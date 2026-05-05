@@ -1,7 +1,11 @@
 ﻿const routeToViewId = {
   dashboard: 'view-dashboard',
+  calendar: 'view-calendar',
+  kanban: 'view-kanban',
   schedule: 'view-schedule',
   events: 'view-events',
+  orders: 'view-orders',
+  ordersMap: 'view-ordersMap',
   zones: 'view-zones',
   workerProfile: 'view-workerProfile',
   workerTime: 'view-workerTime',
@@ -10,7 +14,6 @@
   audits: 'view-audits',
   individualOrders: 'view-individualOrders',
   clientProfile: 'view-clientProfile',
-  checklists: 'view-checklists',
   reports: 'view-reports',
   settings: 'view-settings',
   settingsStyles: 'view-settings',
@@ -21,10 +24,11 @@ const routeGroups = {
   clientsList: 'clients',
   zones: 'objects',
   audits: 'objects',
-  coordinator: 'reports',
   individualOrders: 'clients',
   clientProfile: 'clients',
-  checklists: 'clients',
+  orders: 'orders',
+  ordersMap: 'orders',
+  kanban: 'kanban',
   workerTime: 'workers',
   workerTimeDetail: 'workers',
   workerProfile: 'workers',
@@ -44,6 +48,9 @@ function setSubmenuState(route) {
   document.querySelectorAll('.submenu').forEach((submenu) => {
     submenu.classList.remove('open')
   })
+  document.querySelectorAll('.menu-section').forEach((section) => {
+    section.classList.remove('open', 'active')
+  })
 
   const group = routeGroups[route]
   if (!group) {
@@ -53,6 +60,10 @@ function setSubmenuState(route) {
   const submenu = document.getElementById(`submenu-${group}`)
   if (submenu) {
     submenu.classList.add('open')
+  }
+  const section = document.querySelector(`.menu-section[data-toggle="${group}"]`)
+  if (section) {
+    section.classList.add('open', 'active')
   }
 }
 

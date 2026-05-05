@@ -1,9 +1,16 @@
 import { executeMutation, executeQuery, mutationRef, queryRef } from 'firebase/data-connect'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
-export const STYLE_FALLBACK_ID = 'classic-blue'
+export const STYLE_FALLBACK_ID = 'sneat-iclean'
 
 const STYLE_REGISTRY = Object.freeze([
+  {
+    id: 'sneat-iclean',
+    name: 'Sneat iClean',
+    description: 'Nowoczesny, jasny panel administracyjny inspirowany Sneat, dopasowany do iClean.',
+    order: 5,
+    active: true,
+  },
   {
     id: 'classic-blue',
     name: 'Classic Blue',

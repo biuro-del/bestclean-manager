@@ -1,0 +1,227 @@
+<div class="kanban-page kanban-workspace">
+  <main class="kanban-main-panel">
+    <section class="kanban-home-view" id="kanbanHomeView">
+      <div class="kanban-home-hero">
+        <p id="kanbanHomeDate">Dzisiaj</p>
+        <h1 id="kanbanHomeGreeting">Dzień dobry</h1>
+      </div>
+
+      <section class="kanban-home-card kanban-home-card--tasks">
+        <div class="kanban-home-card-head">
+          <div class="kanban-home-title">
+            <span class="kanban-home-avatar" id="kanbanHomeAvatar">?</span>
+            <div>
+              <h2>Moje zadania</h2>
+              <p>Zadania przypisane do Ciebie i Twojego zespołu.</p>
+            </div>
+          </div>
+          <button class="kanban-home-menu" type="button" aria-label="Opcje">...</button>
+        </div>
+        <div class="kanban-home-tabs" role="tablist" aria-label="Filtr zadań">
+          <button type="button" data-kanban-home-tab="upcoming">Nadchodzące</button>
+          <button type="button" data-kanban-home-tab="overdue">Zaległe <span id="kanbanHomeOverdueCount">(0)</span></button>
+          <button type="button" data-kanban-home-tab="completed">Ukończone</button>
+        </div>
+        <button class="kanban-home-add" type="button" data-kanban-home-add-task>+ Utwórz zadanie</button>
+        <div class="kanban-home-task-list" id="kanbanHomeTasks"></div>
+      </section>
+
+      <section class="kanban-home-card kanban-home-card--projects">
+        <div class="kanban-home-card-head">
+          <div>
+            <h2>Projekty</h2>
+            <p>Klienci i obiekty z najbliższymi zadaniami.</p>
+          </div>
+          <button class="kanban-home-menu" type="button" aria-label="Opcje">...</button>
+        </div>
+        <div class="kanban-project-grid" id="kanbanHomeProjects"></div>
+      </section>
+    </section>
+
+    <section class="kanban-task-board-view" id="kanbanTaskBoardView" hidden>
+      <div class="kanban-workbar" aria-label="Narzędzia Kanban">
+        <button class="kanban-workbar-btn" type="button" aria-label="Wstecz">‹</button>
+        <button class="kanban-workbar-btn" type="button" aria-label="Dalej">›</button>
+        <button class="kanban-workbar-btn" type="button" aria-label="Ostatnie">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.7" />
+            <path d="M12 7.5V12l3 2" stroke="currentColor" stroke-linecap="round" stroke-width="1.7" />
+          </svg>
+        </button>
+        <label class="kanban-workbar-search">
+          <span aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
+              <path d="M16.5 16.5L21 21" stroke="currentColor" stroke-linecap="round" stroke-width="2" />
+            </svg>
+          </span>
+          <input id="kanbanSearch" type="search" placeholder="Wyszukaj" autocomplete="off" />
+          <kbd>Ctrl</kbd><kbd>K</kbd>
+        </label>
+        <span class="kanban-workbar-spacer"></span>
+        <button class="kanban-workbar-help" type="button" aria-label="Pomoc">?</button>
+        <span class="kanban-workbar-avatar" id="kanbanBoardAvatar">?</span>
+      </div>
+
+      <div class="kanban-board-header">
+        <div class="kanban-board-title">
+          <span class="kanban-board-avatar" id="kanbanBoardTitleAvatar">?</span>
+          <h1>Moje zadania</h1>
+          <button type="button" aria-label="Opcje widoku">⌄</button>
+        </div>
+        <div class="kanban-board-header-actions">
+          <button class="btn2" type="button">Udostępnij</button>
+          <button class="btn2" type="button">Dostosuj</button>
+        </div>
+      </div>
+
+      <div class="kanban-board-tabs" role="tablist" aria-label="Widoki zadań">
+        <button class="is-active" type="button">Tablica</button>
+        <button type="button">Lista</button>
+        <button type="button">Kalendarz</button>
+        <button type="button">Pulpit nawigacyjny</button>
+        <button type="button">Pliki</button>
+      </div>
+
+      <div class="kanban-board-toolbar">
+        <div class="kanban-board-toolbar-left">
+          <button class="btn2 primary" id="kanbanAddTaskBtn" type="button">+ Dodaj zadanie</button>
+          <button class="btn2 primary kanban-toolbar-split" type="button" aria-label="Więcej opcji dodawania">⌄</button>
+        </div>
+        <div class="kanban-board-toolbar-right">
+          <span class="kanban-toolbar-chip">Liczba filtrów: 1 ×</span>
+          <span class="kanban-toolbar-chip">Parametry sortowania: 1 ×</span>
+          <button class="kanban-toolbar-text" type="button">Grupuj</button>
+          <button class="kanban-toolbar-text" type="button">Opcje</button>
+        </div>
+      </div>
+
+      <div class="kanban-sync-status" id="kanbanSyncStatus" hidden aria-live="polite">
+        <span class="kanban-sync-spinner" aria-hidden="true"></span>
+        <span data-kanban-sync-text>Synchronizacja zadań...</span>
+      </div>
+
+      <div class="kanban-board-wrap">
+        <div class="kanban-board" id="kanbanBoard" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="kanban-inbox-view" id="kanbanInboxView" hidden>
+      <div class="kanban-workbar" aria-label="Narzędzia skrzynki">
+        <button class="kanban-workbar-btn" type="button" aria-label="Wstecz">‹</button>
+        <button class="kanban-workbar-btn" type="button" aria-label="Dalej">›</button>
+        <button class="kanban-workbar-btn" type="button" aria-label="Ostatnie">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.7" />
+            <path d="M12 7.5V12l3 2" stroke="currentColor" stroke-linecap="round" stroke-width="1.7" />
+          </svg>
+        </button>
+        <label class="kanban-workbar-search kanban-workbar-search--readonly">
+          <span aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
+              <path d="M16.5 16.5L21 21" stroke="currentColor" stroke-linecap="round" stroke-width="2" />
+            </svg>
+          </span>
+          <input type="search" placeholder="Wyszukaj" autocomplete="off" />
+          <kbd>Ctrl</kbd><kbd>K</kbd>
+        </label>
+        <span class="kanban-workbar-spacer"></span>
+        <button class="kanban-workbar-help" type="button" aria-label="Pomoc">?</button>
+        <span class="kanban-workbar-avatar" id="kanbanInboxAvatar">?</span>
+      </div>
+
+      <div class="kanban-inbox-head">
+        <h1>Skrzynka odbiorcza</h1>
+        <button class="btn2" type="button">Zarządzaj powiadomieniami</button>
+      </div>
+      <div class="kanban-inbox-tabs" role="tablist" aria-label="Skrzynka odbiorcza">
+        <button class="is-active" type="button" data-kanban-inbox-tab="activity">Aktywność</button>
+        <button type="button" data-kanban-inbox-tab="bookmarks">Zakładki</button>
+      </div>
+      <div class="kanban-inbox-toolbar">
+        <button type="button">Filtruj</button>
+        <button type="button">Gęstość: Szczegółowy</button>
+        <span></span>
+        <button type="button" aria-label="Więcej">...</button>
+      </div>
+      <div class="kanban-inbox-list" id="kanbanInboxList"></div>
+    </section>
+  </main>
+
+  <div class="kanban-done-popover" id="kanbanDonePopover" role="dialog" aria-modal="false" aria-hidden="true" hidden>
+    <div class="kanban-done-head">
+      <span class="kanban-done-icon" aria-hidden="true">✓</span>
+      <div>
+        <p>Potwierdzenie wykonania</p>
+        <h2 id="kanbanDoneTaskTitle">Zadanie</h2>
+        <small id="kanbanDoneTaskMeta">Potwierdź, co zostało wykonane.</small>
+      </div>
+      <button class="kanban-done-close" id="kanbanDoneCloseBtn" type="button" aria-label="Zamknij">×</button>
+    </div>
+    <label class="kanban-done-field">
+      <span>Co zostało zrobione?</span>
+      <textarea id="kanbanDoneNote" rows="4" maxlength="600" placeholder="Np. sprawdzono obiekt, przekazano informację, wykonano sprzątanie..."></textarea>
+    </label>
+    <div class="kanban-done-actions">
+      <button class="btn2" id="kanbanDoneCancelBtn" type="button">Anuluj</button>
+      <button class="btn2 primary" id="kanbanDoneSaveBtn" type="button">Oznacz jako zakończone</button>
+    </div>
+  </div>
+
+  <div class="kanban-column-overlay" id="kanbanColumnOverlay" aria-hidden="true" hidden>
+    <div class="kanban-column-modal" role="dialog" aria-modal="true" aria-labelledby="kanbanColumnModalTitle">
+      <div class="kanban-column-modal-head">
+        <div>
+          <p>Zarządzanie tablicą</p>
+          <h2 id="kanbanColumnModalTitle">Nowa kolumna</h2>
+        </div>
+        <button class="kanban-column-close" id="kanbanColumnCloseBtn" type="button" aria-label="Zamknij">×</button>
+      </div>
+      <div class="kanban-column-form">
+        <label>
+          <span>Nazwa kolumny</span>
+          <input id="kanbanColumnName" type="text" maxlength="40" placeholder="Np. Do wykonania" autocomplete="off" />
+        </label>
+        <label>
+          <span>Kolor</span>
+          <select id="kanbanColumnColor"></select>
+        </label>
+        <div class="kanban-column-scope-field">
+          <span>Typ kolumny</span>
+          <select id="kanbanColumnScope" hidden aria-hidden="true"></select>
+          <div class="kanban-scope-options" id="kanbanColumnScopeChoices" role="radiogroup" aria-label="Typ kolumny">
+            <label>
+              <input type="radio" name="kanbanColumnScopeChoice" value="global" />
+              <span>Ogólna</span>
+            </label>
+            <label>
+              <input type="radio" name="kanbanColumnScopeChoice" value="user" />
+              <span>Użytkownik</span>
+            </label>
+            <label>
+              <input type="radio" name="kanbanColumnScopeChoice" value="project" />
+              <span>Inny projekt</span>
+            </label>
+            <label>
+              <input type="radio" name="kanbanColumnScopeChoice" value="object" />
+              <span>Obiekt</span>
+            </label>
+          </div>
+        </div>
+        <label id="kanbanColumnOwnerWrap" hidden>
+          <span id="kanbanColumnOwnerLabel">Przypisanie</span>
+          <input id="kanbanColumnOwner" type="text" list="kanbanColumnOwnerOptions" placeholder="Wpisz lub wybierz..." autocomplete="off" />
+          <datalist id="kanbanColumnOwnerOptions"></datalist>
+        </label>
+        <p class="kanban-column-delete-info" id="kanbanColumnDeleteInfo"></p>
+      </div>
+      <div class="kanban-column-modal-actions">
+        <button class="btn2 danger" id="kanbanColumnDeleteBtn" type="button" hidden>Usuń kolumnę</button>
+        <span></span>
+        <button class="btn2" id="kanbanColumnCancelBtn" type="button">Anuluj</button>
+        <button class="btn2 primary" id="kanbanColumnSaveBtn" type="button">Dodaj kolumnę</button>
+      </div>
+    </div>
+  </div>
+</div>

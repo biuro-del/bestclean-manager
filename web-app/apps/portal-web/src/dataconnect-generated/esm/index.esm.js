@@ -2,7 +2,7 @@ import { queryRef, executeQuery, mutationRef, executeMutation, validateArgs } fr
 
 export const connectorConfig = {
   connector: 'example',
-  service: 'iclean2--service',
+  service: 'iclean-room-service',
   location: 'europe-west3'
 };
 
@@ -555,4 +555,3 @@ activeWorkdayPauseForWorkerRef.operationName = 'ActiveWorkdayPauseForWorker';
 export function activeWorkdayPauseForWorker(dcOrVars, vars) {
   return executeQuery(activeWorkdayPauseForWorkerRef(dcOrVars, vars));
 }
-

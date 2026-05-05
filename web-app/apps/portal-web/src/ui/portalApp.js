@@ -7,15 +7,13 @@ import {
   getIndividualOrders,
   updateIndividualOrder,
 } from '../services/individualOrderService'
-import { createWorker, getWorkers, updateWorker } from '../services/workerService'
+import { createWorkerUser, getWorkers, updateWorker } from '../services/workerService'
 import { createZone, deleteZone, getZones, updateZone } from '../services/zoneService'
 import {
   createEvent,
   createWorkday,
   deleteEvent,
-  deleteWorkday,
   getTodayActiveWorkers,
-  getTodayWorktimeFingerprint,
   getWorkdays,
   getWorkerTime,
   updateEvent,
@@ -41,6 +39,7 @@ import {
   setOrgDefaultStyle,
   setUserStyle,
 } from '../services/styleService'
+import { deletePortalTasks, fetchPortalTasks, upsertPortalTasks } from '../services/portalTaskService'
 import { portalLayoutTemplate } from './layoutTemplate'
 import { createRouter } from './router'
 import { viewTemplates } from './viewTemplates'
@@ -76,8 +75,74 @@ const appState = {
   eventsTotal: 0,
   eventsTotalPages: 1,
   eventsFilters: null,
+  eventsWorkerLoginFilter: '',
+  eventsWorkerLoginFilterText: '',
   eventsSelectedKeys: new Set(),
   eventRows: [],
+  ordersSearch: '',
+  ordersShowCyclic: false,
+  ordersEditingId: '',
+  ordersEditorMode: 'edit',
+  ordersEditorTab: 'basic',
+  ordersMapDateFrom: '',
+  ordersMapDateTo: '',
+  ordersMapStatus: 'new',
+  ordersMapType: '',
+  ordersMapWorker: '',
+  ordersMapWorkerOnly: true,
+  ordersMapSearch: '',
+  calendarTasks: [],
+  calendarRemoteTasksLoaded: false,
+  calendarRemoteTasksLoading: false,
+  calendarViewMode: 'week',
+  calendarCursorDay: '',
+  calendarEditorTaskId: '',
+  calendarEditorTab: 'comments',
+  calendarDragTaskId: '',
+  calendarToneFilters: ['blue', 'green', 'amber', 'red', 'message'],
+  calendarShowCompletedTasks: false,
+  calendarShowReadTasks: false,
+  calendarTimelineHourTimer: null,
+  calendarTimelineSlideDirection: 0,
+  calendarTimelineResetScroll: false,
+  calendarTimelineShowCompleted: true,
+  calendarTimelineTypeFilters: ['individual', 'cyclic', 'renovation', 'windows', 'other'],
+  calendarTimelineDemoOrders: [],
+  calendarTimelineDragOrderId: '',
+  calendarTimelineDragSourceRow: null,
+  calendarTimelineDragTargetRow: null,
+  calendarTimelineDragTargetSlot: null,
+  calendarTimelineDropHandled: false,
+  calendarTimelineDragResources: [],
+  calendarTimelineDragConflictKey: '',
+  calendarTimelineDragConflictValue: false,
+  calendarTimelineWorkerStateLoading: false,
+  calendarTimelineWorkerStateFetchedAt: 0,
+  calendarTimelineWorkerStateDayKey: '',
+  calendarTimelineWorkerStateRangeStart: '',
+  calendarTimelineWorkerStateRangeEnd: '',
+  calendarTimelineWorkerStateRows: [],
+  calendarTimelineWorkerStateSourceRows: [],
+  calendarTimelineCurrentWorkerStatusDayKey: '',
+  calendarTimelineCurrentWorkerStatusRows: [],
+  calendarTimelinePopupEventRows: [],
+  calendarTimelineStatusAlerts: [],
+  calendarTimelineStatusAlertShownKeys: new Set(),
+  kanbanColumns: [],
+  kanbanColumnEditorMode: 'add',
+  kanbanColumnEditorId: '',
+  kanbanColumnDeleteConfirm: false,
+  kanbanSearch: '',
+  kanbanSection: 'home',
+  kanbanHomeTaskTab: 'upcoming',
+  kanbanInboxTab: 'activity',
+  kanbanProjectLimit: 9,
+  kanbanDragColumnId: '',
+  kanbanDragTaskId: '',
+  kanbanPendingStatus: '',
+  kanbanDoneTaskId: '',
+  kanbanDataLoading: false,
+  kanbanDataLoadingText: '',
   workerDetailPage: 1,
   workerDetailPageSize: 50,
   workerDetailRows: [],
@@ -99,6 +164,9 @@ const appState = {
   zoneModalZoneId: '',
   eventEditorMode: 'add',
   eventEditorItem: null,
+  eventEditorWorkerOptions: [],
+  eventEditorClientOptions: [],
+  eventEditorZoneOptions: [],
   workerProfileRows: [],
   workerProfileViewRows: [],
   workerProfileModalMode: 'view',
@@ -126,15 +194,21 @@ const appState = {
   dashboardMetricDetails: {},
   dashboardMetricValues: {},
   dashboardTodayRows: [],
+  dashboardNewComments: [],
   dashboardScheduleDays: [],
   dashboardScheduleSelectedDay: '',
   dashboardScheduleFetchedAt: '',
+  dashboardScheduleLoading: false,
+  dashboardScheduleError: '',
+  dashboardScheduleStale: false,
   dashboardScheduleSourceRows: [],
+  dashboardBackgroundDataLoaded: false,
   dashboardScheduleAlertSnoozeUntil: 0,
   dashboardScheduleAlertMuted: false,
   dashboardScheduleAlertLastKey: '',
   dashboardScheduleLateShownKeys: new Set(),
   dashboardScheduleLatePendingKeys: [],
+  dashboardLoadingCount: 0,
   settingsActiveTab: 'styles',
   settingsEffectiveStyleId: STYLE_FALLBACK_ID,
   settingsEffectiveStyleSource: 'fallback',
@@ -147,11 +221,19 @@ const appState = {
 }
 let portalNoticeTimer = null
 let dashboardRefreshTimer = null
-let dashboardLastWorktimeToken = ''
+let dashboardBackgroundRefreshPromise = null
+let dashboardReferencePreloadPromise = null
+let dashboardScheduleRefreshPromise = null
 let dashboardMetricPopoverHideTimer = null
 let dashboardScheduleLimitRaf = 0
 let dashboardScheduleLimitTimerA = 0
 let dashboardScheduleLimitTimerB = 0
+let calendarRemoteSaveTimer = 0
+let calendarTimelineWorkerStateRefreshTimer = null
+let calendarTimelineBarClickTimer = 0
+let calendarTimelineEventsPopupAnchor = null
+let calendarTimelineEventsPopupScrollParent = null
+let calendarTimelineEventsPopupRaf = 0
 let reportsViewInitPromise = null
 let reportGeoPreviewHideTimer = null
 let reportHistoryScopedFilter = null
@@ -161,9 +243,20 @@ const reportGeoModalState = {
   zoom: 18,
 }
 const DASHBOARD_REFRESH_INTERVAL_MS = 15 * 60 * 1000
+const CALENDAR_TIMELINE_STATUS_REFRESH_MS = DASHBOARD_REFRESH_INTERVAL_MS
 const DASHBOARD_SCHEDULE_SOON_WINDOW_MINUTES = 60
 const DASHBOARD_SCHEDULE_VISIBLE_WORKERS = 10
 const DASHBOARD_LONG_CLEAN_SECONDS = 90 * 60
+const DASHBOARD_NEW_COMMENTS_LIMIT = 5
+const DASHBOARD_DUE_TASKS_PREVIEW_LIMIT = 10
+const DASHBOARD_LOADING_STAGES = ['overview', 'tasks', 'active', 'schedule']
+const DASHBOARD_POST_LOAD_DELAY_MS = 900
+const DASHBOARD_LOCAL_CACHE_VERSION = 1
+const DASHBOARD_LOCAL_CACHE_TTL_MS = 8 * 60 * 60 * 1000
+const DASHBOARD_LOCAL_CACHE_PREFIX = 'portal.dashboard.snapshot'
+const DASHBOARD_COMMENT_READ_STORAGE_PREFIX = 'portal.dashboardComments.read'
+const DASHBOARD_COMMENT_SYNC_STORAGE_PREFIX = 'portal.dashboardComments.sync'
+const DASHBOARD_COMMENT_SYNC_LOOKBACK_DAYS = 3
 const REPORT_HISTORY_SYSTEM_CLIENT_LABEL = 'Best Clean biuro'
 const REPORT_HISTORY_SYSTEM_ZONE_LABEL = 'SYSTEM'
 const BACKUP_TYPE_LABELS = {
@@ -201,6 +294,48 @@ const WORKER_DETAIL_RESIZABLE_COLUMN_INDEXES = new Set([0, 1, 2, 3, 4, 5, 6, 7, 
 const GRID_COLUMN_RESIZE_CLASS = 'grid-col-resize-active'
 const GRID_COLUMN_RESIZE_ATTR = 'data-grid-col-resizer'
 const GRID_COLUMN_MAX_WIDTH = 780
+const CALENDAR_STORAGE_PREFIX = 'portal.calendar.tasks'
+const KANBAN_COLUMNS_STORAGE_PREFIX = 'portal.kanban.columns'
+const CALENDAR_HOUR_HEIGHT_PX = 56
+const CALENDAR_TIMED_TASK_GAP_PX = 4
+const CALENDAR_MIN_TIMED_TASK_HEIGHT_PX = 28
+const CALENDAR_TIMED_TASK_OVERLAP_OFFSET_PX = 14
+const CALENDAR_TIMELINE_SLOT_MINUTES = 15
+const CALENDAR_TIMELINE_SLOTS_PER_HOUR = 60 / CALENDAR_TIMELINE_SLOT_MINUTES
+const CALENDAR_TONE_OPTIONS = [
+  { value: 'blue', label: 'Standard', css: 'blue' },
+  { value: 'green', label: 'Gotowe / kontrola', css: 'green' },
+  { value: 'amber', label: 'Pilne', css: 'amber' },
+  { value: 'red', label: 'Problem', css: 'red' },
+  { value: 'message', label: 'Wiadomość pracownika', css: 'message' },
+]
+const KANBAN_STANDARD_NEW_TASK_COLUMN = { id: 'newTask', label: 'Nowe zadanie', color: 'red' }
+const KANBAN_COLUMNS = [
+  KANBAN_STANDARD_NEW_TASK_COLUMN,
+  { id: 'inProgress', label: 'W trakcie', color: 'blue' },
+  { id: 'inReview', label: 'Do sprawdzenia', color: 'amber' },
+  { id: 'done', label: 'Gotowe', color: 'green' },
+]
+const KANBAN_NEW_PERSON_TASK_COLUMN_LABELS = ['nowe zadania', 'nowe zadanie']
+const KANBAN_COLUMN_COLORS = [
+  { value: 'blue', label: 'Niebieski', accent: '#2563eb', soft: '#eef5ff', border: '#c7dcff' },
+  { value: 'amber', label: 'Pomarańczowy', accent: '#f59e0b', soft: '#fff7e6', border: '#fde5ad' },
+  { value: 'green', label: 'Zielony', accent: '#16a34a', soft: '#edfdf4', border: '#bbf7d0' },
+  { value: 'red', label: 'Czerwony', accent: '#e11d48', soft: '#fff0f3', border: '#fecdd3' },
+  { value: 'violet', label: 'Fioletowy', accent: '#7c3aed', soft: '#f3efff', border: '#ddd6fe' },
+  { value: 'cyan', label: 'Turkusowy', accent: '#0891b2', soft: '#ecfeff', border: '#a5f3fc' },
+  { value: 'slate', label: 'Grafitowy', accent: '#475569', soft: '#f1f5f9', border: '#cbd5e1' },
+]
+const KANBAN_COLUMN_SCOPES = [
+  { value: 'global', label: 'Ogólna', targetLabel: '', optionKind: '' },
+  { value: 'user', label: 'Użytkownik', targetLabel: 'Użytkownik', optionKind: 'workers' },
+  { value: 'person', label: 'Inny projekt', targetLabel: 'Osoba', optionKind: 'workers' },
+  { value: 'object', label: 'Obiekt', targetLabel: 'Obiekt', optionKind: 'zones' },
+]
+const FLOATING_TABLE_SCROLL_SELECTOR =
+  '#portalRoot :is(.events-table, .workers-table, .zones-table, .io-table, .rep-tablewrap, .chk-tablewrap, .backup-table-wrap)'
+const FLOATING_TABLE_SCROLL_CLOSEST_SELECTOR =
+  '.events-table, .workers-table, .zones-table, .io-table, .rep-tablewrap, .chk-tablewrap, .backup-table-wrap'
 
 let workerDetailColumnDragState = null
 const WORKER_DETAIL_COLUMN_RESIZE_CLASS = 'wtd-col-resize-active'
@@ -387,8 +522,12 @@ function setupResizableGridTable(options = {}) {
     }
 
     const computedHead = window.getComputedStyle(headNode)
+    const headWidth = Math.floor(headNode.getBoundingClientRect().width || headNode.clientWidth || tableWidth)
+    const paddingLeftPx = Math.max(0, Number.parseFloat(computedHead.paddingLeft || '0') || 0)
+    const paddingRightPx = Math.max(0, Number.parseFloat(computedHead.paddingRight || '0') || 0)
+    const contentWidth = Math.max(0, Math.min(tableWidth, headWidth) - paddingLeftPx - paddingRightPx)
     const columnGapPx = Math.max(0, Number.parseFloat(computedHead.columnGap || '0') || 0)
-    const budget = Math.max(0, Math.floor(tableWidth - columnGapPx * Math.max(0, columnCount - 1)))
+    const budget = Math.max(0, Math.floor(contentWidth - columnGapPx * Math.max(0, columnCount - 1)))
     if (budget <= 0) {
       return false
     }
@@ -581,6 +720,169 @@ function setupResizableGridTable(options = {}) {
   }
 }
 
+function setupFloatingTableScrollbar() {
+  const scroller = document.createElement('div')
+  scroller.id = 'portalFloatingXScroll'
+  scroller.className = 'portal-floating-x-scroll'
+  scroller.setAttribute('aria-hidden', 'true')
+
+  const spacer = document.createElement('div')
+  spacer.className = 'portal-floating-x-scroll-spacer'
+  scroller.appendChild(spacer)
+  document.body.appendChild(scroller)
+
+  let activeTable = null
+  let updateRaf = 0
+  let syncingFromBar = false
+  let syncingFromTable = false
+
+  const tableIsUsable = (node) => {
+    if (!(node instanceof HTMLElement)) {
+      return false
+    }
+    const root = document.getElementById('portalRoot')
+    if (!root?.contains(node)) {
+      return false
+    }
+    const rect = node.getBoundingClientRect()
+    return (
+      node.offsetParent !== null &&
+      node.scrollWidth > node.clientWidth + 2 &&
+      rect.width > 80 &&
+      rect.bottom > 0 &&
+      rect.top < window.innerHeight
+    )
+  }
+
+  const visibleScore = (node) => {
+    const rect = node.getBoundingClientRect()
+    const visibleTop = Math.max(0, rect.top)
+    const visibleBottom = Math.min(window.innerHeight, rect.bottom)
+    const visibleHeight = Math.max(0, visibleBottom - visibleTop)
+    return visibleHeight * Math.max(0, Math.min(window.innerWidth, rect.right) - Math.max(0, rect.left))
+  }
+
+  const findBestTable = () => {
+    if (tableIsUsable(activeTable)) {
+      return activeTable
+    }
+
+    return [...document.querySelectorAll(FLOATING_TABLE_SCROLL_SELECTOR)]
+      .filter((node) => tableIsUsable(node))
+      .sort((left, right) => visibleScore(right) - visibleScore(left))[0] ?? null
+  }
+
+  const hide = () => {
+    scroller.classList.remove('is-visible')
+    activeTable = null
+  }
+
+  const update = () => {
+    updateRaf = 0
+    const table = findBestTable()
+    if (!(table instanceof HTMLElement)) {
+      hide()
+      return
+    }
+
+    activeTable = table
+    const rect = table.getBoundingClientRect()
+    const margin = 10
+    const left = Math.max(margin, Math.floor(rect.left))
+    const right = Math.min(window.innerWidth - margin, Math.ceil(rect.right))
+    const width = Math.max(0, right - left)
+    if (width < 96) {
+      hide()
+      return
+    }
+
+    spacer.style.width = `${Math.max(table.scrollWidth, table.clientWidth)}px`
+    scroller.style.left = `${left}px`
+    scroller.style.width = `${width}px`
+    scroller.classList.add('is-visible')
+
+    if (!syncingFromBar) {
+      syncingFromTable = true
+      scroller.scrollLeft = table.scrollLeft
+      syncingFromTable = false
+    }
+  }
+
+  const scheduleUpdate = () => {
+    if (updateRaf) {
+      return
+    }
+    updateRaf = window.requestAnimationFrame(update)
+  }
+
+  const setActiveFromEvent = (event) => {
+    const table = event.target?.closest?.(FLOATING_TABLE_SCROLL_CLOSEST_SELECTOR)
+    if (tableIsUsable(table)) {
+      activeTable = table
+      scheduleUpdate()
+    }
+  }
+
+  const handleDocumentScroll = (event) => {
+    const table = event.target?.closest?.(FLOATING_TABLE_SCROLL_CLOSEST_SELECTOR)
+    if (tableIsUsable(table)) {
+      activeTable = table
+      if (!syncingFromBar) {
+        syncingFromTable = true
+        scroller.scrollLeft = table.scrollLeft
+        syncingFromTable = false
+      }
+    }
+    scheduleUpdate()
+  }
+
+  const handleBarScroll = () => {
+    if (!(activeTable instanceof HTMLElement) || syncingFromTable) {
+      return
+    }
+    syncingFromBar = true
+    activeTable.scrollLeft = scroller.scrollLeft
+    syncingFromBar = false
+  }
+
+  const handleResize = () => {
+    scheduleUpdate()
+  }
+
+  const observer = new MutationObserver(() => {
+    scheduleUpdate()
+  })
+  const root = document.getElementById('portalRoot')
+  if (root) {
+    observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] })
+  }
+
+  document.addEventListener('pointerover', setActiveFromEvent, true)
+  document.addEventListener('focusin', setActiveFromEvent, true)
+  document.addEventListener('mousedown', setActiveFromEvent, true)
+  document.addEventListener('touchstart', setActiveFromEvent, true)
+  document.addEventListener('scroll', handleDocumentScroll, true)
+  window.addEventListener('resize', handleResize)
+  scroller.addEventListener('scroll', handleBarScroll)
+
+  scheduleUpdate()
+
+  return () => {
+    if (updateRaf) {
+      window.cancelAnimationFrame(updateRaf)
+    }
+    observer.disconnect()
+    document.removeEventListener('pointerover', setActiveFromEvent, true)
+    document.removeEventListener('focusin', setActiveFromEvent, true)
+    document.removeEventListener('mousedown', setActiveFromEvent, true)
+    document.removeEventListener('touchstart', setActiveFromEvent, true)
+    document.removeEventListener('scroll', handleDocumentScroll, true)
+    window.removeEventListener('resize', handleResize)
+    scroller.removeEventListener('scroll', handleBarScroll)
+    scroller.remove()
+  }
+}
+
 function workerDetailDefaultColumnWidths() {
   return [...WORKER_DETAIL_COLUMN_DEFAULT_WIDTHS]
 }
@@ -767,6 +1069,16 @@ function localDateTimeInputToIso(value) {
   return date.toISOString()
 }
 
+function localDateAndTimeInputToIso(dateYmd, timeValue) {
+  const day = String(dateYmd ?? '').trim()
+  const time = String(timeValue ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^\d{2}:\d{2}$/.test(time)) {
+    return ''
+  }
+
+  return localDateTimeInputToIso(`${day}T${time}`)
+}
+
 function formatDatePl(isoValue) {
   const iso = toIso(isoValue)
   if (!iso) {
@@ -892,6 +1204,927 @@ function ymdToIsoRangeEnd(ymd) {
   return `${value}T23:59:59.999Z`
 }
 
+function calendarDateFromYmd(ymd) {
+  const value = String(ymd ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date()
+  }
+  return new Date(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, Number(value.slice(8, 10)))
+}
+
+function calendarDateToYmd(dateValue) {
+  const date = dateValue instanceof Date ? dateValue : new Date(dateValue)
+  if (!Number.isFinite(date.getTime())) {
+    return todayYmd()
+  }
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+}
+
+function calendarAddDays(ymd, days) {
+  const date = calendarDateFromYmd(ymd)
+  date.setDate(date.getDate() + Number(days || 0))
+  return calendarDateToYmd(date)
+}
+
+function calendarStartOfWeek(ymd) {
+  const date = calendarDateFromYmd(ymd)
+  const mondayOffset = (date.getDay() + 6) % 7
+  date.setDate(date.getDate() - mondayOffset)
+  return calendarDateToYmd(date)
+}
+
+function calendarMonthStart(ymd) {
+  const date = calendarDateFromYmd(ymd)
+  date.setDate(1)
+  return calendarDateToYmd(date)
+}
+
+function calendarMonthGridStart(ymd) {
+  return calendarStartOfWeek(calendarMonthStart(ymd))
+}
+
+function calendarMonthLabel(ymd) {
+  const date = calendarDateFromYmd(ymd)
+  return date.toLocaleDateString('pl-PL', { month: 'long', year: 'numeric' })
+}
+
+function calendarDayShortLabel(ymd) {
+  const date = calendarDateFromYmd(ymd)
+  return date.toLocaleDateString('pl-PL', { weekday: 'short' })
+}
+
+function calendarDayNumberLabel(ymd) {
+  const date = calendarDateFromYmd(ymd)
+  return String(date.getDate())
+}
+
+function calendarDayToneClass(dayKey, dayIndex = 0) {
+  const weekDay = calendarDateFromYmd(dayKey).getDay()
+  if (weekDay === 0 || weekDay === 6) {
+    return 'weekend'
+  }
+  return dayIndex % 2 === 0 ? 'light' : 'dark'
+}
+
+function calendarStorageKey() {
+  const orgId = String(appState.session?.orgId ?? '').trim() || 'local'
+  return `${CALENDAR_STORAGE_PREFIX}:${orgId}`
+}
+
+function kanbanColumnsStorageKey() {
+  const orgId = String(appState.session?.orgId ?? '').trim() || 'local'
+  return `${KANBAN_COLUMNS_STORAGE_PREFIX}:${orgId}`
+}
+
+function kanbanDefaultColumns() {
+  return KANBAN_COLUMNS.map((column) => ({ ...column }))
+}
+
+function kanbanIsNewTaskColumn(column = {}) {
+  const label = normalizeSearchText(column.label)
+  return column.id === KANBAN_STANDARD_NEW_TASK_COLUMN.id || KANBAN_NEW_PERSON_TASK_COLUMN_LABELS.includes(label)
+}
+
+function kanbanColumnColorMeta(color = '') {
+  const value = String(color ?? '').trim()
+  return KANBAN_COLUMN_COLORS.find((item) => item.value === value) ?? KANBAN_COLUMN_COLORS[0]
+}
+
+function kanbanColumnStyle(column = {}) {
+  const color = kanbanColumnColorMeta(column.color)
+  return `--column-accent:${color.accent};--column-soft:${color.soft};--column-border:${color.border};`
+}
+
+function kanbanNormalizeColumnScope(scope = '') {
+  const value = String(scope ?? '').trim()
+  const normalized = value === 'client' ? 'object' : value
+  return KANBAN_COLUMN_SCOPES.some((item) => item.value === normalized) ? normalized : 'global'
+}
+
+function kanbanColumnScopeMeta(scope = '') {
+  const value = kanbanNormalizeColumnScope(scope)
+  return KANBAN_COLUMN_SCOPES.find((item) => item.value === value) ?? KANBAN_COLUMN_SCOPES[0]
+}
+
+function kanbanVisibleColumnScope(scope = '') {
+  const value = kanbanNormalizeColumnScope(scope)
+  return value === 'person' ? 'project' : value
+}
+
+function kanbanCurrentUserOption() {
+  const label =
+    String(appState.session?.name ?? '').trim() ||
+    String(appState.session?.login ?? '').trim() ||
+    String(appState.session?.email ?? '').trim()
+  const id =
+    String(appState.session?.uid ?? '').trim() ||
+    String(appState.session?.userId ?? '').trim() ||
+    String(appState.session?.login ?? '').trim() ||
+    String(appState.session?.email ?? '').trim() ||
+    label
+  return label ? { id: `user:${id}`, label } : null
+}
+
+function kanbanColumnScopeOptionsHtml(selectedScope = '') {
+  const selected = kanbanNormalizeColumnScope(selectedScope)
+  return KANBAN_COLUMN_SCOPES.map(
+    (scope) => `<option value="${escapeHtml(scope.value)}"${scope.value === selected ? ' selected' : ''}>${escapeHtml(scope.label)}</option>`,
+  ).join('')
+}
+
+function kanbanZoneOptions() {
+  const seen = new Set()
+  return (Array.isArray(appState.zones) ? appState.zones : [])
+    .map((zone) => mapZoneForView(zone))
+    .filter((zone) => !isUnassignedCleanZone(zone))
+    .map((zone) => {
+      const label = [zone.clientName, zone.zoneName].filter((value) => value && value !== '-').join(' / ') || String(zone.qr ?? '').trim()
+      const id = String(zone.id ?? zone.qr ?? zone.zoneId ?? label).trim()
+      return { id: `zone:${id || label}`, label }
+    })
+    .filter((option) => {
+      if (!option.label) {
+        return false
+      }
+      const key = normalizeSearchText(option.id || option.label)
+      if (seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+    .sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
+}
+
+function kanbanColumnOwnerOptions(scope = '') {
+  const meta = kanbanColumnScopeMeta(scope)
+  if (!meta.optionKind) {
+    return []
+  }
+  const options = meta.optionKind === 'zones' ? kanbanZoneOptions() : calendarDirectoryOptions(meta.optionKind)
+  const currentUser = meta.value === 'user' ? kanbanCurrentUserOption() : null
+  const seen = new Set()
+  return [currentUser, ...options]
+    .filter(Boolean)
+    .filter((option) => {
+      const key = normalizeSearchText(option.id || option.label)
+      if (!key || seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+}
+
+function kanbanColumnOwnerOptionsHtml(scope = '') {
+  return kanbanColumnOwnerOptions(scope)
+    .map((option) => `<option value="${escapeHtml(option.label)}"></option>`)
+    .join('')
+}
+
+function kanbanResolveColumnOwner(scope = '', rawOwner = '') {
+  const normalizedScope = kanbanNormalizeColumnScope(scope)
+  if (normalizedScope === 'global') {
+    return { ownerId: '', ownerLabel: '' }
+  }
+  const value = String(rawOwner ?? '').trim()
+  if (!value) {
+    return { ownerId: '', ownerLabel: '' }
+  }
+  const valueKey = normalizeSearchText(value)
+  const match = kanbanColumnOwnerOptions(normalizedScope).find(
+    (option) => normalizeSearchText(option.label) === valueKey || normalizeSearchText(option.id) === valueKey,
+  )
+  return {
+    ownerId: match?.id || `${normalizedScope}:${value}`,
+    ownerLabel: match?.label || value,
+  }
+}
+
+function kanbanNormalizeColumn(rawColumn = {}, index = 0) {
+  const rawId = String(rawColumn.id ?? '').trim().replace(/[^A-Za-z0-9_-]/g, '')
+  const id = rawId || `custom-${Date.now().toString(36)}-${index}`
+  const label = String(rawColumn.label ?? rawColumn.name ?? '').trim() || `Kolumna ${index + 1}`
+  const color = kanbanColumnColorMeta(rawColumn.color).value
+  const scope = kanbanNormalizeColumnScope(rawColumn.scope)
+  const ownerLabel = scope === 'global' ? '' : String(rawColumn.ownerLabel ?? rawColumn.ownerName ?? '').trim()
+  const ownerId = scope === 'global' ? '' : String(rawColumn.ownerId ?? '').trim() || (ownerLabel ? `${scope}:${ownerLabel}` : '')
+  return { id, label, color, scope, ownerId, ownerLabel }
+}
+
+function kanbanNormalizeColumns(rawColumns = []) {
+  const source = Array.isArray(rawColumns) && rawColumns.length ? rawColumns : kanbanDefaultColumns()
+  const seen = new Set()
+  const columns = source
+    .map((column, index) => kanbanNormalizeColumn(column, index))
+    .filter((column) => {
+      if (!column.id || seen.has(column.id)) {
+        return false
+      }
+      seen.add(column.id)
+      return true
+    })
+  const normalizedColumns = kanbanIsNewTaskColumn(columns[0] ?? {})
+    ? columns
+    : columns.some((column) => kanbanIsNewTaskColumn(column))
+      ? columns
+      : [kanbanNormalizeColumn(KANBAN_STANDARD_NEW_TASK_COLUMN, -1), ...columns]
+  return normalizedColumns.length ? normalizedColumns : kanbanDefaultColumns()
+}
+
+function kanbanLoadColumns() {
+  try {
+    const raw = window.localStorage.getItem(kanbanColumnsStorageKey())
+    const parsed = raw ? JSON.parse(raw) : null
+    return kanbanNormalizeColumns(Array.isArray(parsed) ? parsed : kanbanDefaultColumns())
+  } catch {
+    return kanbanDefaultColumns()
+  }
+}
+
+function kanbanSaveColumns(columns = appState.kanbanColumns) {
+  const normalized = kanbanNormalizeColumns(columns)
+  appState.kanbanColumns = normalized
+  try {
+    window.localStorage.setItem(kanbanColumnsStorageKey(), JSON.stringify(normalized))
+  } catch {
+    showTransientNotice('Nie udało się zapisać kolumn Kanban w przeglądarce.', 'error')
+  }
+  return normalized
+}
+
+function kanbanColumnsForStatus() {
+  if (Array.isArray(appState.kanbanColumns) && appState.kanbanColumns.length) {
+    return appState.kanbanColumns
+  }
+  return kanbanLoadColumns()
+}
+
+function kanbanDefaultStatus() {
+  return kanbanColumnsForStatus()[0]?.id || KANBAN_COLUMNS[0]?.id || 'inProgress'
+}
+
+function kanbanNewPersonTaskStatus() {
+  const targetLabels = new Set(KANBAN_NEW_PERSON_TASK_COLUMN_LABELS.map((label) => normalizeSearchText(label)))
+  const column = kanbanColumnsForStatus().find((item) => targetLabels.has(normalizeSearchText(item.label)))
+  return column?.id || kanbanDefaultStatus()
+}
+
+function kanbanNewTaskStatus() {
+  const columns = kanbanColumnsForStatus()
+  const standardColumn = columns.find((column) => kanbanIsNewTaskColumn(column))
+  return standardColumn?.id || kanbanDefaultStatus()
+}
+
+function calendarHasAssignedWorkers(workers = []) {
+  return calendarSelectionLabels(workers).length > 0
+}
+
+function kanbanDefaultStatusForTask(workers = [], preferredStatus = '') {
+  const status = String(preferredStatus ?? '').trim()
+  if (status) {
+    return kanbanNormalizeStatus(status)
+  }
+  return calendarHasAssignedWorkers(workers) ? kanbanNewPersonTaskStatus() : kanbanNewTaskStatus()
+}
+
+function calendarWorkerLabel(worker = {}) {
+  return String(
+    worker.workerName ??
+      worker.workername ??
+      worker.worker_name ??
+      worker.name ??
+      worker.displayName ??
+      worker.fullName ??
+      worker.login ??
+      worker.email ??
+      worker.id ??
+      '',
+  ).trim()
+}
+
+function calendarWorkerId(worker = {}) {
+  return String(worker.workerId ?? worker.id ?? worker.login ?? worker.workerLogin ?? worker.email ?? '').trim()
+}
+
+function calendarObjectLabel(object = {}) {
+  return String(
+    object.name ??
+      object.clientName ??
+      object.objectName ??
+      object.nazwa ??
+      object.companyName ??
+      object.shortName ??
+      object.id ??
+      '',
+  ).trim()
+}
+
+function calendarObjectId(object = {}) {
+  return String(object.id ?? object.clientId ?? object.objectId ?? object.code ?? '').trim()
+}
+
+function calendarDirectoryOptions(kind = 'workers') {
+  const source = kind === 'objects' ? appState.clients : appState.workers
+  const seen = new Set()
+  return (Array.isArray(source) ? source : [])
+    .map((item) => {
+      const label = kind === 'objects' ? calendarObjectLabel(item) : calendarWorkerLabel(item)
+      const rawId = kind === 'objects' ? calendarObjectId(item) : calendarWorkerId(item)
+      const id = kind === 'objects' ? `client:${rawId || label}` : rawId
+      return { id, label }
+    })
+    .filter((option) => {
+      if (!option.label) {
+        return false
+      }
+      const key = normalizeSearchText(option.id || option.label)
+      if (seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+    .sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
+}
+
+function calendarNormalizeSelectionList(rawValue = [], fallbackText = '') {
+  const rawItems = Array.isArray(rawValue)
+    ? rawValue
+    : String(rawValue ?? '')
+        .split(/[;\n]/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+  const fallbackItems = !rawItems.length
+    ? String(fallbackText ?? '')
+        .split(/[;\n]/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : []
+  const seen = new Set()
+  return [...rawItems, ...fallbackItems]
+    .map((item) => {
+      if (typeof item === 'object' && item !== null) {
+        const label = String(item.label ?? item.name ?? item.title ?? item.value ?? '').trim()
+        const id = String(item.id ?? item.value ?? '').trim()
+        return { id, label }
+      }
+      return { id: '', label: String(item ?? '').trim() }
+    })
+    .filter((item) => {
+      if (!item.label) {
+        return false
+      }
+      const key = normalizeSearchText(item.id || item.label)
+      if (seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+}
+
+function calendarNormalizeZoneSelection(rawZone = null, fallbackId = '', fallbackLabel = '', fallbackLocation = '') {
+  if (typeof rawZone === 'object' && rawZone !== null) {
+    const id = String(rawZone.id ?? rawZone.zoneId ?? rawZone.value ?? '').trim()
+    const label = String(rawZone.label ?? rawZone.zoneName ?? rawZone.name ?? rawZone.value ?? '').trim()
+    const clientLabel = String(rawZone.clientLabel ?? rawZone.clientName ?? '').trim()
+    const location = String(rawZone.location ?? rawZone.zoneLocation ?? rawZone.lokalizacja ?? '').trim()
+    return label || id ? { id, label: label || id, clientLabel, location } : null
+  }
+  const id = String(rawZone || fallbackId || '').trim()
+  const label = String(fallbackLabel || rawZone || fallbackId || '').trim()
+  const location = String(fallbackLocation ?? '').trim()
+  return label || id ? { id, label: label || id, clientLabel: '', location } : null
+}
+
+function calendarClientSelectionKeys(objects = []) {
+  const selections = calendarNormalizeSelectionList(objects)
+  const ids = new Set()
+  const labels = new Set()
+  selections.forEach((selection) => {
+    const id = String(selection.id ?? '').replace(/^client:/, '').trim()
+    const label = String(selection.label ?? '').trim()
+    if (id) {
+      ids.add(normalizeSearchText(id))
+    }
+    if (label) {
+      labels.add(normalizeSearchText(label))
+    }
+  })
+  return { ids, labels, hasSelection: selections.length > 0 }
+}
+
+function calendarZoneOptionsForClients(objects = []) {
+  const { ids, labels, hasSelection } = calendarClientSelectionKeys(objects)
+  if (!hasSelection) {
+    return []
+  }
+  const seen = new Set()
+  return (Array.isArray(appState.zones) ? appState.zones : [])
+    .map((zone) => mapZoneForView(zone))
+    .filter((zone) => !isUnassignedCleanZone(zone))
+    .filter((zone) => {
+      const clientId = normalizeSearchText(zone.clientId)
+      const clientName = normalizeSearchText(zone.clientName)
+      return ids.has(clientId) || labels.has(clientName) || ids.has(clientName) || labels.has(clientId)
+    })
+    .map((zone) => {
+      const id = String(zone.id ?? zone.qr ?? zone.zoneId ?? zone.zoneName ?? '').trim()
+      const label = String(zone.zoneName ?? zone.name ?? zone.zone ?? id).trim()
+      const clientLabel = String(zone.clientName ?? '').trim()
+      const location = String(zone.location ?? zone.lokalizacja ?? '').trim()
+      return { id, label, clientLabel, location: location === '-' ? '' : location }
+    })
+    .filter((zone) => {
+      if (!zone.label) {
+        return false
+      }
+      const key = normalizeSearchText(zone.id || zone.label)
+      if (seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+    .sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
+}
+
+function calendarZoneDisplayLabel(zone = {}) {
+  const label = String(zone.label ?? zone.zoneName ?? '').trim()
+  const location = String(zone.location ?? zone.zoneLocation ?? '').trim()
+  const visibleLocation = location && location !== '-' ? location : 'brak lokalizacji'
+  return [label || 'Strefa', visibleLocation].filter(Boolean).join(' - ')
+}
+
+function calendarReadZoneSelection() {
+  const select = document.getElementById('calendarTaskZone')
+  if (!(select instanceof HTMLSelectElement)) {
+    return null
+  }
+  const id = String(select.value ?? '').trim()
+  if (!id) {
+    return null
+  }
+  const option = select.selectedOptions?.[0]
+  const label = String(option?.getAttribute('data-zone-label') ?? option?.textContent ?? id).trim()
+  const clientLabel = String(option?.getAttribute('data-client-label') ?? '').trim()
+  const location = String(option?.getAttribute('data-zone-location') ?? '').trim()
+  return { id, label, clientLabel, location }
+}
+
+function calendarSyncZoneOptions(selectedZone = null, options = {}) {
+  const select = document.getElementById('calendarTaskZone')
+  if (!(select instanceof HTMLSelectElement)) {
+    return
+  }
+  const preserveUnknown = Boolean(options.preserveUnknown)
+  const objects = calendarReadPickerRows('objects')
+  const hasClient = calendarClientSelectionKeys(objects).hasSelection
+  const zones = calendarZoneOptionsForClients(objects)
+  const normalizedSelected = calendarNormalizeZoneSelection(selectedZone)
+  const selectedId = String(normalizedSelected?.id ?? '').trim()
+  const selectedLabel = String(normalizedSelected?.label ?? '').trim()
+  const selectedLocation = String(normalizedSelected?.location ?? '').trim()
+  const hasSelectedInList = selectedId ? zones.some((zone) => String(zone.id) === selectedId) : false
+
+  if (!hasClient) {
+    select.disabled = true
+    select.innerHTML = '<option value="">Najpierw wybierz klienta</option>'
+    return
+  }
+
+  if (!zones.length && !selectedLabel) {
+    select.disabled = true
+    select.innerHTML = '<option value="">Brak stref dla wybranego klienta</option>'
+    return
+  }
+
+  const fallbackOption =
+    preserveUnknown && selectedLabel && !hasSelectedInList
+      ? `<option value="${escapeHtml(selectedId || selectedLabel)}" data-zone-label="${escapeHtml(selectedLabel)}" data-zone-location="${escapeHtml(selectedLocation)}" selected>${escapeHtml(calendarZoneDisplayLabel({ label: selectedLabel, location: selectedLocation }))}</option>`
+      : ''
+  select.disabled = false
+  select.innerHTML = `
+    <option value="">Bez przypisanej strefy</option>
+    ${fallbackOption}
+    ${zones
+      .map((zone) => {
+        const selected = selectedId && String(zone.id) === selectedId ? ' selected' : ''
+        return `<option value="${escapeHtml(zone.id)}" data-zone-label="${escapeHtml(zone.label)}" data-zone-location="${escapeHtml(zone.location)}" data-client-label="${escapeHtml(zone.clientLabel)}"${selected}>${escapeHtml(calendarZoneDisplayLabel(zone))}</option>`
+      })
+      .join('')}
+  `
+}
+
+function calendarSelectionLabels(selections = []) {
+  return (Array.isArray(selections) ? selections : [])
+    .map((item) => String(item?.label ?? item?.name ?? item ?? '').trim())
+    .filter(Boolean)
+}
+
+function calendarNormalizeTimeValue(value = '') {
+  const raw = String(value ?? '').trim()
+  const match = raw.match(/^(\d{1,2})(?::(\d{1,2}))?$/)
+  if (!match) {
+    return ''
+  }
+  const hour = Number(match[1])
+  const minute = Number(match[2] ?? 0)
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return ''
+  }
+  return `${pad2(hour)}:${pad2(minute)}`
+}
+
+function calendarTimeToMinutes(value = '') {
+  const normalized = calendarNormalizeTimeValue(value)
+  if (!normalized) {
+    return null
+  }
+  const [hour, minute] = normalized.split(':').map((part) => Number(part))
+  return hour * 60 + minute
+}
+
+function calendarMinutesToTime(minutes) {
+  const value = Number(minutes)
+  if (!Number.isFinite(value) || value < 0 || value > 1439) {
+    return ''
+  }
+  const hour = Math.floor(value / 60)
+  const minute = value % 60
+  return `${pad2(hour)}:${pad2(minute)}`
+}
+
+function calendarCurrentActorLabel() {
+  return (
+    String(appState.session?.name ?? '').trim() ||
+    String(appState.session?.login ?? '').trim() ||
+    String(appState.session?.email ?? '').trim() ||
+    'Użytkownik'
+  )
+}
+
+function calendarToneLabel(tone = '') {
+  const value = String(tone ?? '').trim()
+  return CALENDAR_TONE_OPTIONS.find((option) => option.value === value)?.label ?? 'Standard'
+}
+
+function kanbanColumnLabel(status = '') {
+  const value = kanbanNormalizeStatus(status)
+  return kanbanColumnsForStatus().find((column) => column.id === value)?.label ?? value
+}
+
+function calendarDateLabelFromYmd(dateYmd = '') {
+  const value = String(dateYmd ?? '').trim()
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? formatDatePl(`${value}T12:00:00.000Z`) : '-'
+}
+
+function calendarSelectionText(selections = []) {
+  const labels = calendarSelectionLabels(selections)
+  return labels.length ? labels.join(', ') : '-'
+}
+
+function calendarTaskZoneText(task = {}) {
+  const zoneLabel = String(task.zone?.label ?? task.zoneName ?? '').trim()
+  const zoneLocation = String(task.zone?.location ?? task.zoneLocation ?? '').trim()
+  return zoneLabel ? calendarZoneDisplayLabel({ label: zoneLabel, location: zoneLocation }) : '-'
+}
+
+function calendarActivityTimestamp(value = '') {
+  return toIso(value) || new Date().toISOString()
+}
+
+function calendarNormalizeActivityLog(rawValue = []) {
+  const rawItems = Array.isArray(rawValue) ? rawValue : []
+  const seen = new Set()
+  return rawItems
+    .map((item) => {
+      if (typeof item !== 'object' || item === null) {
+        return null
+      }
+      const at = calendarActivityTimestamp(item.at ?? item.createdAt ?? item.timestamp)
+      const action = String(item.action ?? item.title ?? '').trim()
+      const actor = String(item.actor ?? item.by ?? '').trim() || 'System'
+      const details = String(item.details ?? item.description ?? '').trim()
+      const id = String(item.id ?? `${at}-${action}-${actor}-${details}`).trim()
+      return action ? { id, at, actor, action, details } : null
+    })
+    .filter(Boolean)
+    .filter((item) => {
+      const key = item.id || `${item.at}-${item.action}-${item.actor}`
+      if (seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+    .sort((left, right) => new Date(left.at).getTime() - new Date(right.at).getTime())
+}
+
+function calendarActivityEntry(action = '', details = '', options = {}) {
+  const at = calendarActivityTimestamp(options.at)
+  const actor = String(options.actor ?? '').trim() || calendarCurrentActorLabel()
+  const title = String(action ?? '').trim() || 'Zmieniono zadanie'
+  const description = String(details ?? '').trim()
+  return {
+    id: `activity-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    at,
+    actor,
+    action: title,
+    details: description,
+  }
+}
+
+function calendarAppendTaskActivity(task = {}, action = '', details = '', options = {}) {
+  const activityLog = calendarNormalizeActivityLog(task.activityLog)
+  return {
+    ...task,
+    activityLog: [...activityLog, calendarActivityEntry(action, details, options)],
+  }
+}
+
+function calendarTaskChangeDetails(beforeTask = {}, afterTask = {}) {
+  const fields = [
+    ['Tytuł', beforeTask.title, afterTask.title],
+    ['Data', calendarDateLabelFromYmd(beforeTask.dateYmd), calendarDateLabelFromYmd(afterTask.dateYmd)],
+    ['START', calendarNormalizeTimeValue(beforeTask.startTime ?? beforeTask.time) || '-', calendarNormalizeTimeValue(afterTask.startTime ?? afterTask.time) || '-'],
+    ['STOP', calendarNormalizeTimeValue(beforeTask.endTime) || '-', calendarNormalizeTimeValue(afterTask.endTime) || '-'],
+    ['Typ', calendarToneLabel(calendarTaskToneValue(beforeTask)), calendarToneLabel(calendarTaskToneValue(afterTask))],
+    ['Kolumna', kanbanColumnLabel(beforeTask.kanbanStatus), kanbanColumnLabel(afterTask.kanbanStatus)],
+    ['Osoby', calendarSelectionText(beforeTask.workers), calendarSelectionText(afterTask.workers)],
+    ['Klienci', calendarSelectionText(beforeTask.objects), calendarSelectionText(afterTask.objects)],
+    ['Strefa', calendarTaskZoneText(beforeTask), calendarTaskZoneText(afterTask)],
+  ]
+  if (String(beforeTask.notes ?? '').trim() !== String(afterTask.notes ?? '').trim()) {
+    fields.push(['Opis', beforeTask.notes ? 'uzupełniony' : 'pusty', afterTask.notes ? 'uzupełniony' : 'pusty'])
+  }
+  const changes = fields
+    .map(([label, beforeValue, afterValue]) => {
+      const beforeText = String(beforeValue ?? '').trim() || '-'
+      const afterText = String(afterValue ?? '').trim() || '-'
+      return beforeText === afterText ? '' : `${label}: ${beforeText} -> ${afterText}`
+    })
+    .filter(Boolean)
+  return changes.length ? changes.join('\n') : 'Zapisano bez zmian w polach zadania.'
+}
+
+function kanbanNormalizeStatus(status = '') {
+  const value = String(status ?? '').trim()
+  return kanbanColumnsForStatus().some((column) => column.id === value) ? value : kanbanDefaultStatus()
+}
+
+function calendarNormalizeTask(rawTask = {}) {
+  const id = String(rawTask.id ?? '').trim() || `cal-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  const dateYmd = /^\d{4}-\d{2}-\d{2}$/.test(String(rawTask.dateYmd ?? '').trim())
+    ? String(rawTask.dateYmd).trim()
+    : todayYmd()
+  const rawTone = String(rawTask.tone ?? '').trim()
+  const tone = rawTask.generatedFromComment && (rawTone === 'red' || rawTone === 'workerMessage')
+    ? 'message'
+    : CALENDAR_TONE_OPTIONS.some((option) => option.value === rawTone)
+      ? rawTone
+      : 'blue'
+  const startTime = calendarNormalizeTimeValue(rawTask.startTime || rawTask.time)
+  const endTime = calendarNormalizeTimeValue(rawTask.endTime || rawTask.stopTime || rawTask.timeEnd)
+  const workers = calendarNormalizeSelectionList(rawTask.workers ?? rawTask.assignees ?? rawTask.people)
+  const objects = calendarNormalizeSelectionList(rawTask.objects ?? rawTask.clients ?? rawTask.sites, rawTask.place)
+  const zone = calendarNormalizeZoneSelection(
+    rawTask.zone ?? rawTask.selectedZone,
+    rawTask.zoneId ?? rawTask.roomId ?? rawTask.utilityRoomId,
+    rawTask.zoneName ?? rawTask.strefa,
+    rawTask.zoneLocation ?? rawTask.location,
+  )
+  const completionStatus = String(rawTask.completionStatus ?? rawTask.taskStatus ?? '').trim().toUpperCase()
+  const completedRaw = rawTask.completed ?? rawTask.kanbanCompleted ?? rawTask.done
+  const completed = completedRaw === undefined || completedRaw === null ? completionStatus === 'ZAKONCZONE' : Boolean(completedRaw)
+  return {
+    id,
+    title: String(rawTask.title ?? '').trim() || 'Nowe zadanie',
+    dateYmd,
+    time: startTime,
+    startTime,
+    endTime,
+    place: String(rawTask.place ?? '').trim(),
+    workers,
+    objects,
+    zone,
+    zoneId: zone?.id || '',
+    zoneName: zone?.label || '',
+    zoneLocation: zone?.location || '',
+    kanbanStatus: kanbanDefaultStatusForTask(workers, rawTask.kanbanStatus ?? rawTask.status),
+    active: rawTask.active === undefined ? true : Boolean(rawTask.active),
+    completed,
+    kanbanCompleted: completed,
+    completionStatus: completed ? 'ZAKONCZONE' : 'AKTYWNE',
+    completedAt: completed ? String(rawTask.completedAt ?? rawTask.kanbanCompletedAt ?? '').trim() : '',
+    completedBy: completed ? String(rawTask.completedBy ?? rawTask.kanbanCompletedBy ?? '').trim() : '',
+    completedNote: completed ? String(rawTask.completedNote ?? rawTask.kanbanDoneNote ?? rawTask.doneNote ?? '').trim() : '',
+    read: Boolean(rawTask.read ?? rawTask.isRead ?? rawTask.seen ?? false),
+    readAt: String(rawTask.readAt ?? rawTask.seenAt ?? rawTask.acknowledgedAt ?? '').trim(),
+    readBy: String(rawTask.readBy ?? rawTask.seenBy ?? rawTask.acknowledgedBy ?? '').trim(),
+    notes: String(rawTask.notes ?? '').trim(),
+    generatedFromComment: Boolean(rawTask.generatedFromComment),
+    sourceCommentKey: String(rawTask.sourceCommentKey ?? rawTask.sourceKey ?? '').trim(),
+    sourceComment: String(rawTask.sourceComment ?? '').trim(),
+    sourceEventId: String(rawTask.sourceEventId ?? '').trim(),
+    sourceKind: String(rawTask.sourceKind ?? '').trim(),
+    sourceWorkerName: String(rawTask.sourceWorkerName ?? rawTask.workerName ?? '').trim(),
+    sourceWorkerLogin: String(rawTask.sourceWorkerLogin ?? rawTask.workerLogin ?? '').trim(),
+    dueDateYmd: /^\d{4}-\d{2}-\d{2}$/.test(String(rawTask.dueDateYmd ?? '').trim())
+      ? String(rawTask.dueDateYmd).trim()
+      : '',
+    dueTime: calendarNormalizeTimeValue(rawTask.dueTime ?? rawTask.deadlineTime),
+    deadlineAt: toIso(rawTask.deadlineAt),
+    activityLog: calendarNormalizeActivityLog(rawTask.activityLog ?? rawTask.activities),
+    tone,
+    createdAt: String(rawTask.createdAt ?? '').trim() || new Date().toISOString(),
+    updatedAt: String(rawTask.updatedAt ?? '').trim() || new Date().toISOString(),
+  }
+}
+
+function calendarLoadTasks() {
+  try {
+    const raw = window.localStorage.getItem(calendarStorageKey())
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.map((task) => calendarNormalizeTask(task)) : []
+  } catch {
+    return []
+  }
+}
+
+function calendarTaskUpdatedAtValue(task = {}) {
+  const candidates = [task.updatedAt, task.completedAt, task.createdAt]
+  for (const candidate of candidates) {
+    const time = Date.parse(String(candidate ?? ''))
+    if (Number.isFinite(time)) {
+      return time
+    }
+  }
+  return 0
+}
+
+function calendarTaskMergeKeys(task = {}) {
+  const keys = []
+  const id = String(task.id ?? '').trim()
+  const sourceCommentKey = String(task.sourceCommentKey ?? '').trim()
+  if (id) keys.push(`id:${id}`)
+  if (sourceCommentKey) keys.push(`comment:${sourceCommentKey}`)
+  return keys
+}
+
+function calendarMergeTaskLists(...taskLists) {
+  const byKey = new Map()
+  const canonicalTasks = []
+
+  taskLists
+    .flat()
+    .filter(Boolean)
+    .map((task) => calendarNormalizeTask(task))
+    .forEach((task) => {
+      const keys = calendarTaskMergeKeys(task)
+      if (!keys.length) {
+        canonicalTasks.push(task)
+        return
+      }
+
+      const existing = keys.map((key) => byKey.get(key)).find(Boolean)
+      if (!existing) {
+        keys.forEach((key) => byKey.set(key, task))
+        canonicalTasks.push(task)
+        return
+      }
+
+      const winner = calendarTaskUpdatedAtValue(task) >= calendarTaskUpdatedAtValue(existing) ? task : existing
+      const loser = winner === task ? existing : task
+      const merged = calendarNormalizeTask({
+        ...loser,
+        ...winner,
+        workers: winner.workers?.length ? winner.workers : loser.workers,
+        objects: winner.objects?.length ? winner.objects : loser.objects,
+        activityLog: calendarNormalizeActivityLog([...(loser.activityLog ?? []), ...(winner.activityLog ?? [])]),
+      })
+      const existingIndex = canonicalTasks.findIndex((item) => item === existing || item.id === existing.id)
+      if (existingIndex >= 0) {
+        canonicalTasks[existingIndex] = merged
+      }
+      calendarTaskMergeKeys(merged).forEach((key) => byKey.set(key, merged))
+    })
+
+  const seen = new Set()
+  return calendarSortTasks(
+    canonicalTasks.filter((task) => {
+      const key = String(task.id ?? '').trim()
+      if (!key || seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    }),
+  )
+}
+
+function calendarQueueRemoteTaskSave(tasks = appState.calendarTasks) {
+  const orgId = String(appState.session?.orgId ?? '').trim()
+  if (!orgId) {
+    return
+  }
+
+  if (calendarRemoteSaveTimer) {
+    window.clearTimeout(calendarRemoteSaveTimer)
+  }
+
+  const snapshot = (Array.isArray(tasks) ? tasks : []).map((task) => calendarNormalizeTask(task))
+  calendarRemoteSaveTimer = window.setTimeout(() => {
+    calendarRemoteSaveTimer = 0
+    void upsertPortalTasks(orgId, snapshot).catch((error) => {
+      console.warn('[portal/tasks] remote save failed', error)
+    })
+  }, 350)
+}
+
+function calendarSaveTasks(tasks = appState.calendarTasks, options = {}) {
+  const normalized = (Array.isArray(tasks) ? tasks : []).map((task) => calendarNormalizeTask(task))
+  appState.calendarTasks = calendarSortTasks(normalized)
+  try {
+    window.localStorage.setItem(calendarStorageKey(), JSON.stringify(appState.calendarTasks))
+  } catch {
+    showTransientNotice('Nie udało się zapisać kalendarza w przeglądarce.', 'error')
+  }
+  if (options.syncRemote !== false) {
+    calendarQueueRemoteTaskSave(appState.calendarTasks)
+  }
+}
+
+async function calendarSyncRemoteTasks({ render = false } = {}) {
+  const orgId = String(appState.session?.orgId ?? '').trim()
+  if (!orgId || appState.calendarRemoteTasksLoading) {
+    return appState.calendarTasks
+  }
+
+  appState.calendarRemoteTasksLoading = true
+  renderKanbanSyncStatus()
+  try {
+    const localTasks = calendarLoadTasks()
+    const remoteTasks = await fetchPortalTasks(orgId)
+    const mergedTasks = calendarMergeTaskLists(localTasks, remoteTasks)
+    const remoteCount = Array.isArray(remoteTasks) ? remoteTasks.length : 0
+    calendarSaveTasks(mergedTasks, { syncRemote: false })
+    appState.calendarRemoteTasksLoaded = true
+    if (mergedTasks.length > remoteCount) {
+      calendarQueueRemoteTaskSave(mergedTasks)
+    }
+    if (render) {
+      renderDashboardKanbanTasks()
+      if (appState.currentRoute === 'calendar') renderCalendarView()
+      if (appState.currentRoute === 'kanban') renderKanbanView()
+    }
+    return appState.calendarTasks
+  } catch (error) {
+    appState.calendarRemoteTasksLoaded = false
+    console.warn('[portal/tasks] remote load failed', error)
+    return appState.calendarTasks
+  } finally {
+    appState.calendarRemoteTasksLoading = false
+    renderKanbanSyncStatus()
+  }
+}
+
+function calendarDeleteRemoteTasksById(taskIds = []) {
+  const orgId = String(appState.session?.orgId ?? '').trim()
+  const ids = (Array.isArray(taskIds) ? taskIds : [taskIds])
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean)
+  if (!orgId || !ids.length) {
+    return
+  }
+
+  void deletePortalTasks(orgId, ids).catch((error) => {
+    console.warn('[portal/tasks] remote delete failed', error)
+  })
+}
+
+function calendarSortTasks(tasks = []) {
+  return [...tasks].sort((left, right) => {
+    const leftDate = String(left.dateYmd ?? '')
+    const rightDate = String(right.dateYmd ?? '')
+    if (leftDate !== rightDate) {
+      return leftDate.localeCompare(rightDate)
+    }
+    const leftTime = String(left.time ?? '')
+    const rightTime = String(right.time ?? '')
+    if (leftTime !== rightTime) {
+      return leftTime.localeCompare(rightTime)
+    }
+    const leftEndTime = String(left.endTime ?? '')
+    const rightEndTime = String(right.endTime ?? '')
+    if (leftEndTime !== rightEndTime) {
+      return leftEndTime.localeCompare(rightEndTime)
+    }
+    return String(left.title ?? '').localeCompare(String(right.title ?? ''), 'pl', { sensitivity: 'base' })
+  })
+}
+
 function normalizeClientStatus(status) {
   const value = String(status ?? '').trim().toLowerCase()
 
@@ -926,6 +2159,7 @@ function roleLevel(role) {
   if (
     normalized.includes('kierownik') ||
     normalized.includes('manager') ||
+    normalized.includes('menager') ||
     normalized.includes('menedzer') ||
     normalized.includes('menedżer')
   ) {
@@ -936,6 +2170,7 @@ function roleLevel(role) {
     normalized.includes('pracownik') ||
     normalized.includes('worker') ||
     normalized.includes('koordynator') ||
+    normalized.includes('coordynator') ||
     normalized.includes('coordinator') ||
     normalized.includes('stażysta') ||
     normalized.includes('stazysta') ||
@@ -958,10 +2193,6 @@ function canDeleteWorkers() {
 
 function canManageClients() {
   return roleLevel(appState.session?.role) >= 2
-}
-
-function canDeleteClients() {
-  return roleLevel(appState.session?.role) >= 3
 }
 
 function canManageEvents() {
@@ -1937,6 +3168,9 @@ function renderDashboardEvents(rows) {
   const eventsList = document.getElementById('dashEventsList')
   const eventsPill = document.getElementById('dashEventsPill')
   appState.dashboardTodayRows = Array.isArray(rows) ? [...rows] : []
+  if (appState.currentRoute === 'calendar' && document.getElementById('calendarTimelinePrototype')) {
+    window.requestAnimationFrame(() => renderCalendarView())
+  }
 
   if (!eventsList) {
     return
@@ -1983,7 +3217,7 @@ function renderDashboardEvents(rows) {
           : `<button class="dash-entity-link" type="button" data-dash-history-kind="objects" data-dash-row-index="${rowIndex}">${escapeHtml(clientLabel)}</button>`
         const zoneCell = zoneLabel === '-'
           ? '<span class="muted">-</span>'
-          : `<button class="dash-entity-link" type="button" data-dash-history-kind="zones" data-dash-row-index="${rowIndex}">${escapeHtml(zoneLabel)}</button>`
+          : `<button class="dash-entity-link" type="button" data-dash-history-kind="zones" data-dash-row-index="${rowIndex}">${zoneNameWithQrHtml(zoneLabel, row)}</button>`
         const rowClass = lateMinutes > 0 ? 'list-row dash-events-row dash-events-row--has-late' : 'list-row dash-events-row'
         return `
       <div class="${rowClass}">
@@ -2200,6 +3434,9 @@ function dashboardWorkerAliasKeys(workerName, workerLogin = '', workerId = '', o
     if (!tokens.length) {
       return
     }
+    if (tokens.length > 1) {
+      keys.add(`n:${tokens.slice().reverse().join(' ')}`)
+    }
 
     if (includeLooseNameKeys || tokens.length === 1) {
       keys.add(`f:${tokens[0]}`)
@@ -2330,48 +3567,6 @@ function dashboardResolveWorkerByScheduleAlias(entry, workers = []) {
   }
 
   return null
-}
-
-function dashboardCollectStartedWorkerStartsForDay(dayKey) {
-  const normalizedDayKey = String(dayKey ?? '').trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey)) {
-    return new Map()
-  }
-
-  const sourceRows = Array.isArray(appState.dashboardScheduleSourceRows) ? appState.dashboardScheduleSourceRows : []
-  if (!sourceRows.length) {
-    return new Map()
-  }
-
-  const startedMap = new Map()
-  sourceRows.forEach((row) => {
-    if (dashboardResolveDayKey(row) !== normalizedDayKey) {
-      return
-    }
-
-    const startIso = toIso(row?.startAt ?? row?.dayStartAt)
-    if (!startIso) {
-      return
-    }
-    const startTs = new Date(startIso).getTime()
-    if (!Number.isFinite(startTs) || startTs <= 0) {
-      return
-    }
-
-    const keys = dashboardWorkerAliasKeys(
-      row?.workerName ?? row?.name,
-      row?.workerLogin ?? row?.login ?? row?.workerId ?? row?.id,
-      row?.workerId ?? row?.id,
-    )
-    keys.forEach((key) => {
-      const prevTs = Number(startedMap.get(key) ?? 0)
-      if (!prevTs || startTs < prevTs) {
-        startedMap.set(key, startTs)
-      }
-    })
-  })
-
-  return startedMap
 }
 
 function dashboardNormalizeWorkerIdDigits(value) {
@@ -2649,10 +3844,23 @@ function dashboardShowScheduleLateStartAlert(dayKey, lateEntries = []) {
     node = document.createElement('div')
     node.id = 'dashScheduleLateAlert'
     node.className = 'dash-schedule-alert dash-schedule-alert--late'
+    node.setAttribute('role', 'alertdialog')
+    node.setAttribute('aria-modal', 'true')
+    node.setAttribute('aria-labelledby', 'dashScheduleLateAlertTitle')
     node.innerHTML = `
-      <div class="dash-schedule-alert-signal" aria-hidden="true">INFO</div>
-      <div class="dash-schedule-alert-title">Pracownicy pojawili się po czasie</div>
-      <div class="dash-schedule-alert-text" id="dashScheduleLateAlertText"></div>
+      <div class="dash-schedule-alert-header">
+        <span class="dash-schedule-alert-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke="currentColor" stroke-width="2"/>
+          </svg>
+        </span>
+        <div class="dash-schedule-alert-heading">
+          <div class="dash-schedule-alert-signal" aria-hidden="true">INFO</div>
+          <div class="dash-schedule-alert-title" id="dashScheduleLateAlertTitle">Pracownicy pojawili się po czasie</div>
+          <div class="dash-schedule-alert-text" id="dashScheduleLateAlertText"></div>
+        </div>
+      </div>
       <div class="dash-schedule-alert-list-wrap">
         <div class="dash-schedule-alert-list-title">Lista osób:</div>
         <ul class="dash-schedule-alert-list" id="dashScheduleLateAlertList"></ul>
@@ -2710,8 +3918,14 @@ function dashboardShowScheduleLateStartAlert(dayKey, lateEntries = []) {
         const name = escapeHtml(String(entry.workerName ?? '-'))
         const lateLabel = dashboardLateMinutesToHm(entry?.lateMinutes)
         const start = String(entry?.startTime ?? '').trim()
-        const startLabel = start && start !== '-' ? ` • START: ${escapeHtml(start)}` : ''
-        return `<li>${name}${startLabel} • Spóźnienie: ${lateLabel}</li>`
+        const startLabel = start && start !== '-' ? escapeHtml(start) : '-'
+        return `
+          <li>
+            <span class="dash-schedule-alert-person">${name}</span>
+            <span class="dash-schedule-alert-meta">START: ${startLabel}</span>
+            <span class="dash-schedule-alert-status">Spóźnienie: ${lateLabel}</span>
+          </li>
+        `
       })
       .join('')
   }
@@ -2759,16 +3973,38 @@ function dashboardShowScheduleMissingStartAlert(dayKey, missingEntries = []) {
     node = document.createElement('div')
     node.id = 'dashScheduleMissingAlert'
     node.className = 'dash-schedule-alert'
+    node.setAttribute('role', 'alertdialog')
+    node.setAttribute('aria-modal', 'true')
+    node.setAttribute('aria-labelledby', 'dashScheduleMissingAlertTitle')
     node.innerHTML = `
-      <div class="dash-schedule-alert-signal" aria-hidden="true">UWAGA</div>
-      <div class="dash-schedule-alert-title">Brak QR START</div>
-      <div class="dash-schedule-alert-text" id="dashScheduleMissingAlertText"></div>
+      <div class="dash-schedule-alert-header">
+        <span class="dash-schedule-alert-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 8v5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+            <path d="M12 17h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+            <path d="M10.3 4.3 2.7 18a2 2 0 0 0 1.75 3h15.1a2 2 0 0 0 1.75-3L13.7 4.3a2 2 0 0 0-3.4 0Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div class="dash-schedule-alert-heading">
+          <div class="dash-schedule-alert-signal" aria-hidden="true">UWAGA</div>
+          <div class="dash-schedule-alert-title" id="dashScheduleMissingAlertTitle">Brak QR START</div>
+          <div class="dash-schedule-alert-text" id="dashScheduleMissingAlertText"></div>
+        </div>
+      </div>
       <div class="dash-schedule-alert-list-wrap">
         <div class="dash-schedule-alert-list-title">Lista osób:</div>
         <ul class="dash-schedule-alert-list" id="dashScheduleMissingAlertList"></ul>
       </div>
       <div class="dash-schedule-alert-actions">
-        <button type="button" class="btn2 secondary" data-alert-action="snooze">Za 15 min</button>
+        <div class="dash-schedule-alert-snooze">
+          <label for="dashScheduleMissingSnooze">Przypomnij za</label>
+          <select id="dashScheduleMissingSnooze" data-alert-snooze-minutes>
+            <option value="15">15 min</option>
+            <option value="30">30 min</option>
+            <option value="60">1 h</option>
+          </select>
+          <button type="button" class="btn2 secondary" data-alert-action="snooze">Odłóż</button>
+        </div>
         <button type="button" class="btn2 danger" data-alert-action="mute">Nie pokazuj</button>
       </div>
     `
@@ -2781,7 +4017,11 @@ function dashboardShowScheduleMissingStartAlert(dayKey, missingEntries = []) {
 
       const action = String(button.getAttribute('data-alert-action') ?? '').trim()
       if (action === 'snooze') {
-        appState.dashboardScheduleAlertSnoozeUntil = Date.now() + DASHBOARD_REFRESH_INTERVAL_MS
+        const snoozeSelect = node.querySelector('[data-alert-snooze-minutes]')
+        const selectedMinutes = Number(snoozeSelect?.value ?? 15)
+        const allowedMinutes = [15, 30, 60]
+        const snoozeMinutes = allowedMinutes.includes(selectedMinutes) ? selectedMinutes : 15
+        appState.dashboardScheduleAlertSnoozeUntil = Date.now() + snoozeMinutes * 60 * 1000
         dashboardHideScheduleMissingStartAlert()
         return
       }
@@ -2829,8 +4069,13 @@ function dashboardShowScheduleMissingStartAlert(dayKey, missingEntries = []) {
       .map((entry) => {
         const name = escapeHtml(String(entry.workerName ?? '-'))
         const start = String(entry.startTime ?? '').trim()
-        const startLabel = start && start !== '-' ? ` • START: ${escapeHtml(start)}` : ''
-        return `<li>${name}${startLabel}</li>`
+        const startLabel = start && start !== '-' ? escapeHtml(start) : '-'
+        return `
+          <li>
+            <span class="dash-schedule-alert-person">${name}</span>
+            <span class="dash-schedule-alert-meta">Planowany START: ${startLabel}</span>
+          </li>
+        `
       })
       .join('')
   }
@@ -2902,7 +4147,12 @@ function dashboardRenderScheduleCards(dayBucket) {
   const dayKey = dashboardResolveScheduleDayKey(dayBucket)
   const entries = Array.isArray(dayBucket?.entries) ? dayBucket.entries : []
   if (!entries.length) {
-    cardsRoot.innerHTML = '<div class="dash-schedule-empty">Brak danych grafiku dla wybranego dnia.</div>'
+    const message = appState.dashboardScheduleLoading
+      ? 'Wczytywanie grafiku...'
+      : appState.dashboardScheduleError
+        ? 'Nie udało się pobrać grafiku.'
+        : 'Brak danych grafiku dla wybranego dnia.'
+    cardsRoot.innerHTML = `<div class="dash-schedule-empty">${escapeHtml(message)}</div>`
     cardsRoot.style.removeProperty('max-height')
     cardsRoot.scrollTop = 0
     window.requestAnimationFrame(() => {
@@ -3091,9 +4341,17 @@ function renderDashboardSchedulePanel() {
 
   const days = Array.isArray(appState.dashboardScheduleDays) ? appState.dashboardScheduleDays : []
   if (!days.length) {
-    if (dayNameNode) dayNameNode.textContent = 'Brak danych'
+    const isLoading = Boolean(appState.dashboardScheduleLoading)
+    const errorMessage = String(appState.dashboardScheduleError ?? '').trim()
+    if (dayNameNode) dayNameNode.textContent = isLoading ? 'Ładowanie' : 'Brak danych'
     if (dayDateNode) dayDateNode.textContent = '-'
-    if (syncNode) syncNode.textContent = 'Ostatnia synchronizacja: -'
+    if (syncNode) {
+      syncNode.textContent = isLoading
+        ? 'Pobieranie grafiku...'
+        : errorMessage
+          ? `Nie udało się pobrać grafiku: ${errorMessage}`
+          : 'Ostatnia synchronizacja: -'
+    }
     if (prevButton) prevButton.disabled = true
     if (nextButton) nextButton.disabled = true
     dashboardRenderScheduleCards(null)
@@ -3124,7 +4382,9 @@ function renderDashboardSchedulePanel() {
   const fetchedAtIso = toIso(appState.dashboardScheduleFetchedAt)
   if (syncNode) {
     syncNode.textContent = fetchedAtIso
-      ? `Ostatnia synchronizacja: ${formatDatePl(fetchedAtIso)} ${formatTime(fetchedAtIso)}`
+      ? `Ostatnia synchronizacja: ${formatDatePl(fetchedAtIso)} ${formatTime(fetchedAtIso)}${
+          appState.dashboardScheduleStale ? ' (ostatnie zapisane dane)' : ''
+        }`
       : 'Ostatnia synchronizacja: -'
   }
 
@@ -3522,8 +4782,148 @@ function dashboardResolveClientLabel(row) {
   return resolveClientLabelWithQrFallback(rawClientLabel, qrCandidate)
 }
 
+function resolveZoneByQrCandidate(value) {
+  const code = reportHistoryNormalizeQrCode(value)
+  if (!code) {
+    return null
+  }
+  const normalizedCode = normalizeSearchText(code)
+  return (Array.isArray(appState.zones) ? appState.zones : []).find((zone) => {
+    const candidates = [
+      zone?.id,
+      zone?.zoneId,
+      zone?.qr,
+      zone?.qrCode,
+      zone?.roomId,
+      zone?.utilityRoomId,
+    ]
+    return candidates.some((candidate) => normalizeSearchText(reportHistoryNormalizeQrCode(candidate) || candidate) === normalizedCode)
+  }) ?? null
+}
+
+function resolveZoneNameByQrCandidate(value) {
+  const zone = resolveZoneByQrCandidate(value)
+  const label = String(zone?.name ?? zone?.zone ?? zone?.zoneName ?? zone?.strefa ?? '').trim()
+  return label && label !== '-' && !dashboardIsQrCodeLike(label) ? label : ''
+}
+
 function dashboardResolveZoneLabel(row) {
-  return String(row?.zoneName ?? row?.strefa ?? row?.activeZone ?? '').trim() || '-'
+  const codeCandidates = [
+    row?.activeZoneId,
+    row?.zoneId,
+    row?.roomId,
+    row?.utilityRoomId,
+    row?.qr,
+    row?.qrCode,
+  ]
+  for (const candidate of codeCandidates) {
+    const label = resolveZoneNameByQrCandidate(candidate)
+    if (label) {
+      return label
+    }
+  }
+
+  const rawLabel = String(row?.zoneName ?? row?.strefa ?? row?.activeZone ?? '').trim()
+  const rawLabelResolved = resolveZoneNameByQrCandidate(rawLabel)
+  if (rawLabelResolved) {
+    return rawLabelResolved
+  }
+  if (rawLabel && !reportHistoryNormalizeQrCode(rawLabel)) {
+    return rawLabel
+  }
+
+  return '-'
+}
+
+function zoneQrCodeFromRow(row = {}) {
+  const candidates = [
+    row?.activeZoneId,
+    row?.zoneId,
+    row?.roomId,
+    row?.utilityRoomId,
+    row?.workdayUtilityRoomId,
+    row?.qr,
+    row?.qrCode,
+    row?.id,
+    row?.dayStartObject,
+    row?.dayStopObject,
+    row?.startObject,
+    row?.stopObject,
+  ]
+
+  for (const candidate of candidates) {
+    const code = reportHistoryNormalizeQrCode(candidate)
+    if (code && code !== '-') {
+      return code
+    }
+  }
+
+  return ''
+}
+
+function zoneNameWithQrHtml(zoneName, source = {}) {
+  const name = String(zoneName ?? '').trim() || '-'
+  const qr = typeof source === 'string' ? reportHistoryNormalizeQrCode(source) : zoneQrCodeFromRow(source)
+  const normalizedName = normalizeSearchText(name)
+  const normalizedQr = normalizeSearchText(qr)
+  const showQr = Boolean(qr && qr !== '-' && normalizedQr && normalizedQr !== normalizedName)
+
+  return `
+    <span class="zone-with-qr">
+      <span class="zone-name-line">${escapeHtml(name)}</span>
+      ${showQr ? `<span class="zone-qr-line">QR: ${escapeHtml(qr)}</span>` : ''}
+    </span>
+  `
+}
+
+function eventEditorNormalizeScannedQr(value = '') {
+  const code = reportHistoryNormalizeQrCode(value)
+  if (!code || calendarTimelineIsTechnicalEventCode(code)) {
+    return ''
+  }
+  return code
+}
+
+function eventEditorFirstScannedQr(candidates = []) {
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    const code = eventEditorNormalizeScannedQr(candidate)
+    if (code) {
+      return code
+    }
+  }
+  return ''
+}
+
+function eventEditorScannedQrLabel(item = {}) {
+  const startQr = eventEditorFirstScannedQr([
+    item?.startObject,
+    item?.dayStartObject,
+    reportHistoryExtractQrFromComment(item?.comment, 'start'),
+    reportHistoryExtractQrFromComment(item?.dayComment, 'start'),
+  ])
+  const stopQr = eventEditorFirstScannedQr([
+    item?.stopObject,
+    item?.dayStopObject,
+    reportHistoryExtractQrFromComment(item?.comment, 'stop'),
+    reportHistoryExtractQrFromComment(item?.dayComment, 'stop'),
+  ])
+
+  if (startQr && stopQr && startQr !== stopQr) {
+    return `START: ${startQr} / STOP: ${stopQr}`
+  }
+  if (startQr || stopQr) {
+    return startQr || stopQr
+  }
+
+  return eventEditorFirstScannedQr([
+    item?.qr,
+    item?.qrCode,
+    item?.activeZoneId,
+    item?.workdayUtilityRoomId,
+    item?.utilityRoomId,
+    item?.roomId,
+    item?.zoneId,
+  ]) || '-'
 }
 
 function dashboardBuildHistoryRow(row, dayFallback) {
@@ -3547,12 +4947,716 @@ function dashboardBuildHistoryRow(row, dayFallback) {
   }
 }
 
+function dashboardCommentUserStorageKey() {
+  const orgId = String(appState.session?.orgId ?? '').trim() || 'org'
+  const userId =
+    String(appState.session?.uid ?? '').trim() ||
+    String(appState.session?.userId ?? '').trim() ||
+    String(appState.session?.id ?? '').trim() ||
+    String(appState.session?.login ?? '').trim() ||
+    String(appState.session?.email ?? '').trim() ||
+    String(appState.session?.name ?? '').trim() ||
+    'user'
+  return `${DASHBOARD_COMMENT_READ_STORAGE_PREFIX}:${orgId}:${userId}`
+}
+
+function dashboardCommentSyncStorageKey(orgId = appState.session?.orgId) {
+  const orgPart = dashboardLocalCachePart(orgId, 'org')
+  const userPart = dashboardLocalCachePart(
+    appState.session?.uid ??
+      appState.session?.userId ??
+      appState.session?.email ??
+      appState.session?.login ??
+      appState.session?.name,
+    'user',
+  )
+  return `${DASHBOARD_COMMENT_SYNC_STORAGE_PREFIX}.${orgPart}.${userPart}`
+}
+
+function dashboardReadCommentSyncState(orgId = appState.session?.orgId) {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return {}
+  }
+
+  try {
+    const raw = window.localStorage.getItem(dashboardCommentSyncStorageKey(orgId))
+    const parsed = raw ? JSON.parse(raw) : {}
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function dashboardWriteCommentSyncState(orgId = appState.session?.orgId, patch = {}) {
+  if (typeof window === 'undefined' || !window.localStorage || !orgId) {
+    return
+  }
+
+  try {
+    const existing = dashboardReadCommentSyncState(orgId)
+    window.localStorage.setItem(
+      dashboardCommentSyncStorageKey(orgId),
+      JSON.stringify({
+        ...existing,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      }),
+    )
+  } catch {
+    // Synchronization metadata is only a performance hint.
+  }
+}
+
+function dashboardCommentSyncRangeFrom(orgId = appState.session?.orgId, options = {}) {
+  if (options.forceFull === true) {
+    return firstDayOfCurrentMonthYmd()
+  }
+
+  const fallbackFrom = daysAgoYmd(DASHBOARD_COMMENT_SYNC_LOOKBACK_DAYS)
+  const state = dashboardReadCommentSyncState(orgId)
+  const lastSyncedDay = String(state.lastSyncedDay ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(lastSyncedDay)) {
+    return fallbackFrom
+  }
+
+  const overlapFrom = calendarAddDays(lastSyncedDay, -1)
+  return overlapFrom > fallbackFrom ? overlapFrom : fallbackFrom
+}
+
+function dashboardReadCommentKeys() {
+  try {
+    const raw = window.localStorage.getItem(dashboardCommentUserStorageKey())
+    const parsed = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(parsed) ? parsed.map((item) => String(item ?? '').trim()).filter(Boolean) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function dashboardWriteCommentKeys(keys) {
+  try {
+    const list = [...keys].map((item) => String(item ?? '').trim()).filter(Boolean).slice(-800)
+    window.localStorage.setItem(dashboardCommentUserStorageKey(), JSON.stringify(list))
+  } catch {
+    // Read status is a UI convenience. If storage is unavailable, keep the dashboard working.
+  }
+}
+
+function dashboardCommentTimestamp(row, kind = 'event') {
+  return (
+    toIso(row?.updatedAt) ||
+    toIso(row?.closeMarkedAt) ||
+    (kind === 'day' ? toIso(row?.dayEndAt) : toIso(row?.endAt)) ||
+    toIso(row?.endAt) ||
+    toIso(row?.dayEndAt) ||
+    toIso(row?.startAt) ||
+    toIso(row?.dayStartAt) ||
+    ''
+  )
+}
+
+function dashboardCommentKey(row, kind, comment) {
+  const id = String(row?.eventId ?? row?.workdayId ?? row?.id ?? '').trim()
+  const worker = String(row?.workerLogin ?? row?.workerName ?? '').trim()
+  const timestamp = dashboardCommentTimestamp(row, kind)
+  const textKey = normalizeSearchText(comment).slice(0, 120)
+  return [kind, id || worker || 'row', timestamp || dashboardResolveDayKey(row), textKey].join('::')
+}
+
+function dashboardRowHasClosedCommentContext(row, kind) {
+  const status = String(row?.status ?? '').trim().toUpperCase()
+  if (status === 'CLOSED' || status === 'WORKDAY_CLOSED') {
+    return true
+  }
+  if (toIso(row?.closeMarkedAt)) {
+    return true
+  }
+  return kind === 'day' ? Boolean(toIso(row?.dayEndAt)) : Boolean(toIso(row?.endAt))
+}
+
+function dashboardBuildNewComments(eventRows = [], workdayRows = []) {
+  const comments = []
+  const seenKeys = new Set()
+
+  const pushComment = (row, kind, rawComment) => {
+    const comment = normalizeVisibleEventComment(rawComment)
+    if (!comment || !dashboardRowHasClosedCommentContext(row, kind)) {
+      return
+    }
+
+    const key = dashboardCommentKey(row, kind, comment)
+    if (!key || seenKeys.has(key)) {
+      return
+    }
+
+    seenKeys.add(key)
+    comments.push({
+      key,
+      kind,
+      sourceLabel: kind === 'day' ? 'Dzień' : 'Strefa',
+      comment,
+      workerName: dashboardResolveWorkerLabel(row),
+      workerLogin: String(row?.workerLogin ?? '').trim(),
+      clientName: dashboardResolveClientLabel(row),
+      clientId: String(row?.clientId ?? '').trim(),
+      zoneName: dashboardResolveZoneLabel(row),
+      zoneId: String(row?.zoneId ?? row?.roomId ?? row?.utilityRoomId ?? '').trim(),
+      zoneLocation: String(row?.lokalizacja ?? row?.location ?? '').trim(),
+      dayKey: dashboardResolveDayKey(row),
+      timestamp: dashboardCommentTimestamp(row, kind),
+      sourceEventId: String(row?.eventId ?? row?.workdayId ?? row?.id ?? '').trim(),
+    })
+  }
+
+  ;(Array.isArray(eventRows) ? eventRows : []).forEach((row) => {
+    pushComment(row, 'event', row?.comment)
+  })
+  ;(Array.isArray(workdayRows) ? workdayRows : []).forEach((row) => {
+    pushComment(row, 'day', row?.dayComment || row?.comment)
+  })
+
+  return comments.sort((left, right) => {
+    const leftTime = Date.parse(left.timestamp || `${left.dayKey || '1970-01-01'}T00:00:00.000Z`)
+    const rightTime = Date.parse(right.timestamp || `${right.dayKey || '1970-01-01'}T00:00:00.000Z`)
+    return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0)
+  })
+}
+
+function dashboardCommentTaskHash(value = '') {
+  const text = String(value ?? '')
+  let hash = 0
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) >>> 0
+  }
+  return hash.toString(36)
+}
+
+function dashboardCommentTaskId(comment = {}) {
+  const key = String(comment?.key ?? '').trim()
+  return `comment-task-${dashboardCommentTaskHash(key)}`
+}
+
+function dashboardCommentTaskDate(comment = {}) {
+  const timestamp = toIso(comment?.timestamp)
+  if (timestamp) {
+    return new Date(timestamp)
+  }
+  const dayKey = String(comment?.dayKey ?? '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+    const date = calendarDateFromYmd(dayKey)
+    date.setHours(8, 0, 0, 0)
+    return date
+  }
+  return new Date()
+}
+
+function dashboardDateToHm(dateValue) {
+  const date = dateValue instanceof Date ? dateValue : new Date(dateValue)
+  if (!Number.isFinite(date.getTime())) {
+    return ''
+  }
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+function dashboardCurrentUserTaskSelection() {
+  const option = kanbanCurrentUserOption()
+  const label =
+    String(option?.label ?? '').trim() ||
+    String(appState.session?.name ?? '').trim() ||
+    String(appState.session?.login ?? '').trim() ||
+    String(appState.session?.email ?? '').trim() ||
+    'Użytkownik'
+  const id =
+    String(option?.id ?? '').trim() ||
+    String(appState.session?.uid ?? '').trim() ||
+    String(appState.session?.login ?? '').trim() ||
+    label
+  return [{ id, label }]
+}
+
+function dashboardWorkerRoleText(worker = {}) {
+  return normalizeSearchText([worker.role, worker.type, worker.workerType].filter(Boolean).join(' '))
+}
+
+function dashboardWorkerIsAdminOrManager(worker = {}) {
+  return roleLevel(worker.role ?? worker.type ?? worker.workerType) >= 2
+}
+
+function dashboardWorkerIsCoordinator(worker = {}) {
+  const role = dashboardWorkerRoleText(worker)
+  return (
+    role.includes('koordynator') ||
+    role.includes('koord') ||
+    role.includes('coordynator') ||
+    role.includes('coordinator') ||
+    role === 'member'
+  )
+}
+
+function dashboardWorkerTaskSelection(worker = {}) {
+  const label = calendarWorkerLabel(worker)
+  const id = calendarWorkerId(worker) || String(worker.login ?? worker.workerLogin ?? worker.authUid ?? worker.email ?? label).trim()
+  return label ? { id, label } : null
+}
+
+function dashboardAddTaskAssignee(target = [], selection = null) {
+  const label = String(selection?.label ?? '').trim()
+  if (!label) {
+    return target
+  }
+  const id = String(selection?.id ?? '').trim()
+  const key = normalizeSearchText(id || label)
+  if (!key) {
+    return target
+  }
+  if (!target.some((item) => normalizeSearchText(item.id || item.label) === key || normalizeSearchText(item.label) === normalizeSearchText(label))) {
+    target.push({ id, label })
+  }
+  return target
+}
+
+function dashboardCommentObjectAccessValues(comment = {}) {
+  return [
+    comment.clientId,
+    comment.clientName,
+    comment.zoneId,
+    comment.zoneName,
+    comment.zoneLocation,
+    comment.clientId ? `client:${comment.clientId}` : '',
+    comment.clientName ? `client:${comment.clientName}` : '',
+    comment.zoneId ? `zone:${comment.zoneId}` : '',
+    comment.zoneName ? `zone:${comment.zoneName}` : '',
+  ]
+}
+
+function dashboardCommentRelevantZones(comment = {}) {
+  const commentMatch = calendarAccessMatch(dashboardCommentObjectAccessValues(comment))
+  return (Array.isArray(appState.zones) ? appState.zones : []).filter((zone) =>
+    calendarValuesMatchAccess(calendarZoneAccessValues(zone), commentMatch),
+  )
+}
+
+function dashboardCommentRelevantClients(comment = {}) {
+  const commentMatch = calendarAccessMatch(dashboardCommentObjectAccessValues(comment))
+  const directClients = (Array.isArray(appState.clients) ? appState.clients : []).filter((client) =>
+    calendarValuesMatchAccess(calendarClientAccessValues(client), commentMatch),
+  )
+  const zoneClientMatch = calendarAccessMatch(
+    dashboardCommentRelevantZones(comment).flatMap((zone) => {
+      const view = mapZoneForView(zone)
+      return [view.clientId, view.clientName, view.clientId ? `client:${view.clientId}` : '', view.clientName ? `client:${view.clientName}` : '']
+    }),
+  )
+  const zoneClients = calendarMatchHasValues(zoneClientMatch)
+    ? (Array.isArray(appState.clients) ? appState.clients : []).filter((client) =>
+        calendarValuesMatchAccess(calendarClientAccessValues(client), zoneClientMatch),
+      )
+    : []
+  const seen = new Set()
+  return [...directClients, ...zoneClients].filter((client) => {
+    const key = normalizeSearchText(client.id ?? client.clientId ?? client.name ?? client.clientName)
+    if (!key || seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
+
+function dashboardWorkerResponsibleForComment(worker = {}, comment = {}) {
+  const workerMatch = calendarAccessMatch(calendarWorkerAccessValues(worker))
+  const clientResponsible = dashboardCommentRelevantClients(comment).some((client) =>
+    calendarValuesMatchAccess(
+      calendarSplitAccessValues([
+        client.coordinator,
+        client.coordinatorName,
+        client.coordinatorLogin,
+        client.manager,
+        client.managerName,
+        client.owner,
+        client.responsible,
+        client.assignees,
+        client.workers,
+        client.osoby,
+        client.osobyWykonujace,
+      ]),
+      workerMatch,
+    ),
+  )
+  if (clientResponsible) {
+    return true
+  }
+
+  return dashboardCommentRelevantZones(comment).some((zone) => {
+    const view = mapZoneForView(zone)
+    return calendarValuesMatchAccess([zone.workerLogin, zone.workerName, view.workerLogin, view.workerName], workerMatch)
+  })
+}
+
+function dashboardResponsibleUsersForComment(comment = {}) {
+  const assignees = []
+  const workers = Array.isArray(appState.workers) ? appState.workers : []
+
+  workers.forEach((worker) => {
+    if (worker?.active === false) {
+      return
+    }
+    const selection = dashboardWorkerTaskSelection(worker)
+    if (!selection) {
+      return
+    }
+    if (dashboardWorkerIsAdminOrManager(worker)) {
+      dashboardAddTaskAssignee(assignees, selection)
+      return
+    }
+    if (dashboardWorkerIsCoordinator(worker) && dashboardWorkerResponsibleForComment(worker, comment)) {
+      dashboardAddTaskAssignee(assignees, selection)
+    }
+  })
+
+  if (calendarCanSeeAllOrganizationTasks() || (calendarIsCoordinatorRole() && dashboardCommentTaskIsAllowedForCurrentUser(comment))) {
+    dashboardCurrentUserTaskSelection().forEach((selection) => dashboardAddTaskAssignee(assignees, selection))
+  }
+
+  if (!assignees.length && dashboardCommentTaskIsAllowedForCurrentUser(comment)) {
+    dashboardCurrentUserTaskSelection().forEach((selection) => dashboardAddTaskAssignee(assignees, selection))
+  }
+
+  return assignees
+}
+
+function dashboardCommentTaskIsAllowedForCurrentUser(comment = {}) {
+  if (calendarCanSeeAllOrganizationTasks()) {
+    return true
+  }
+  if (!calendarIsCoordinatorRole()) {
+    return false
+  }
+  const scope = calendarCoordinatorAccessScope()
+  return calendarValuesMatchAccess(dashboardCommentObjectAccessValues(comment), scope.objectMatch)
+}
+
+function dashboardBuildTaskFromComment(comment = {}) {
+  const createdDate = dashboardCommentTaskDate(comment)
+  const deadlineDate = new Date(createdDate.getTime() + 24 * 60 * 60 * 1000)
+  const dateYmd = calendarDateToYmd(createdDate)
+  const dueDateYmd = calendarDateToYmd(deadlineDate)
+  const startTime = dashboardDateToHm(createdDate)
+  const dueTime = dashboardDateToHm(deadlineDate)
+  const clientLabel = String(comment.clientName ?? '').trim()
+  const zoneLabel = String(comment.zoneName ?? '').trim()
+  const zoneLocation = String(comment.zoneLocation ?? '').trim()
+  const placeLabel = clientLabel && clientLabel !== '-' ? clientLabel : ''
+  const zone = calendarNormalizeZoneSelection(
+    null,
+    comment.zoneId,
+    zoneLabel && zoneLabel !== '-' ? zoneLabel : '',
+    zoneLocation && zoneLocation !== '-' ? zoneLocation : '',
+  )
+  const sourceComment = String(comment.comment ?? '').trim()
+  const workerLabel = String(comment.workerName ?? comment.workerLogin ?? '').trim() || 'pracownik'
+  const deadlineLabel = `${formatDatePl(deadlineDate.toISOString())} ${dashboardDateToHm(deadlineDate)}`
+  const assignedWorkers = dashboardResponsibleUsersForComment(comment)
+  const notes = [
+    `Komentarz pracownika: ${sourceComment}`,
+    `Pracownik: ${workerLabel}`,
+    placeLabel ? `Klient: ${placeLabel}` : '',
+    zoneLabel && zoneLabel !== '-' ? `Strefa: ${calendarZoneDisplayLabel({ label: zoneLabel, location: zoneLocation })}` : '',
+    `Termin realizacji: ${deadlineLabel}`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  return calendarNormalizeTask({
+    id: dashboardCommentTaskId(comment),
+    title: `Komentarz: ${workerLabel}`,
+    dateYmd,
+    time: startTime,
+    startTime,
+    endTime: '',
+    tone: 'message',
+    place: placeLabel,
+    workers: assignedWorkers,
+    objects: placeLabel ? [{ id: comment.clientId ? `client:${comment.clientId}` : '', label: placeLabel }] : [],
+    zone,
+    zoneId: zone?.id || '',
+    zoneName: zone?.label || '',
+    zoneLocation: zone?.location || '',
+    kanbanStatus: kanbanNewTaskStatus(),
+    notes,
+    generatedFromComment: true,
+    sourceCommentKey: String(comment.key ?? '').trim(),
+    sourceComment,
+    sourceEventId: String(comment.sourceEventId ?? '').trim(),
+    sourceKind: String(comment.kind ?? '').trim(),
+    sourceWorkerName: workerLabel,
+    sourceWorkerLogin: String(comment.workerLogin ?? '').trim(),
+    dueDateYmd,
+    dueTime,
+    deadlineAt: deadlineDate.toISOString(),
+    activityLog: [
+      calendarActivityEntry(
+        'Dodano komentarz pracownika',
+        [
+          sourceComment ? `Komentarz: ${sourceComment}` : '',
+          `Pracownik: ${workerLabel}`,
+          placeLabel ? `Klient: ${placeLabel}` : '',
+          zoneLabel && zoneLabel !== '-' ? `Strefa: ${calendarZoneDisplayLabel({ label: zoneLabel, location: zoneLocation })}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        { actor: workerLabel, at: createdDate.toISOString() },
+      ),
+      calendarActivityEntry(
+        'Utworzono zadanie z komentarza',
+        [
+          `Termin realizacji: ${deadlineLabel}`,
+          `Dopisane osoby: ${calendarSelectionText(assignedWorkers)}`,
+        ].join('\n'),
+        { actor: 'System', at: createdDate.toISOString() },
+      ),
+    ],
+    createdAt: createdDate.toISOString(),
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+function dashboardSyncCommentTasks(comments = []) {
+  if (!appState.session?.orgId) {
+    return 0
+  }
+  const sourceComments = Array.isArray(comments) ? comments : []
+  if (!sourceComments.length) {
+    return 0
+  }
+
+  const commentsByKey = new Map()
+  sourceComments.forEach((comment) => {
+    const key = String(comment?.key ?? '').trim()
+    const taskId = dashboardCommentTaskId(comment)
+    if (key) commentsByKey.set(key, comment)
+    if (taskId) commentsByKey.set(taskId, comment)
+  })
+
+  let migratedExistingTasks = false
+  const existingTasks = calendarLoadTasks().map((task) => {
+    let nextTask = task
+    if (task?.generatedFromComment && task.tone !== 'message') {
+      migratedExistingTasks = true
+      nextTask = calendarNormalizeTask({
+        ...task,
+        tone: 'message',
+        updatedAt: new Date().toISOString(),
+      })
+    }
+
+    const sourceKey = String(nextTask?.sourceCommentKey ?? '').trim()
+    const comment = commentsByKey.get(sourceKey) ?? commentsByKey.get(String(nextTask?.id ?? '').trim())
+    if (!nextTask?.generatedFromComment || !comment || !dashboardCommentTaskIsAllowedForCurrentUser(comment)) {
+      return nextTask
+    }
+
+    const desiredTask = dashboardBuildTaskFromComment(comment)
+    const beforeAssignees = calendarSelectionText(nextTask.workers)
+    const afterAssignees = calendarSelectionText(desiredTask.workers)
+    const shouldUpdateAssignees = beforeAssignees !== afterAssignees
+    const shouldUpdateSource =
+      String(nextTask.sourceComment ?? '').trim() !== String(desiredTask.sourceComment ?? '').trim() ||
+      String(nextTask.dueDateYmd ?? '').trim() !== String(desiredTask.dueDateYmd ?? '').trim() ||
+      String(nextTask.dueTime ?? '').trim() !== String(desiredTask.dueTime ?? '').trim()
+
+    if (!shouldUpdateAssignees && !shouldUpdateSource) {
+      return nextTask
+    }
+
+    migratedExistingTasks = true
+    const updatedAt = new Date().toISOString()
+    let mergedTask = calendarNormalizeTask({
+      ...nextTask,
+      title: desiredTask.title,
+      tone: 'message',
+      place: desiredTask.place,
+      workers: desiredTask.workers,
+      objects: desiredTask.objects,
+      zone: desiredTask.zone,
+      zoneId: desiredTask.zoneId,
+      zoneName: desiredTask.zoneName,
+      zoneLocation: desiredTask.zoneLocation,
+      notes: desiredTask.notes,
+      generatedFromComment: true,
+      sourceCommentKey: desiredTask.sourceCommentKey,
+      sourceComment: desiredTask.sourceComment,
+      sourceEventId: desiredTask.sourceEventId,
+      sourceKind: desiredTask.sourceKind,
+      sourceWorkerName: desiredTask.sourceWorkerName,
+      sourceWorkerLogin: desiredTask.sourceWorkerLogin,
+      dueDateYmd: desiredTask.dueDateYmd,
+      dueTime: desiredTask.dueTime,
+      deadlineAt: desiredTask.deadlineAt,
+      updatedAt,
+    })
+    if (shouldUpdateAssignees) {
+      mergedTask = calendarNormalizeTask(
+        calendarAppendTaskActivity(
+          mergedTask,
+          'Zaktualizowano osoby odpowiedzialne',
+          `Dopisane osoby: ${afterAssignees || '-'}`,
+          { actor: 'System', at: updatedAt },
+        ),
+      )
+    }
+    return mergedTask
+  })
+  const existingKeys = new Set(
+    existingTasks
+      .flatMap((task) => [task?.sourceCommentKey, task?.id])
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean),
+  )
+  const newTasks = []
+
+  sourceComments.forEach((comment) => {
+    const key = String(comment?.key ?? '').trim()
+    if (!key || existingKeys.has(key) || existingKeys.has(dashboardCommentTaskId(comment))) {
+      return
+    }
+    if (!dashboardCommentTaskIsAllowedForCurrentUser(comment)) {
+      return
+    }
+    const task = dashboardBuildTaskFromComment(comment)
+    if (!task?.id) {
+      return
+    }
+    existingKeys.add(key)
+    existingKeys.add(task.id)
+    newTasks.push(task)
+  })
+
+  if (!newTasks.length) {
+    if (migratedExistingTasks) {
+      calendarSaveTasks(existingTasks)
+    }
+    return 0
+  }
+
+  calendarSaveTasks([...existingTasks, ...newTasks])
+  return newTasks.length
+}
+
+function renderDashboardNewComments(comments = []) {
+  const panel = document.getElementById('dashCommentsPanel')
+  const listNode = document.getElementById('dashCommentsList')
+  const countNode = document.getElementById('dashCommentsCount')
+  const ackAllButton = document.getElementById('dashCommentsAckAll')
+  if (!panel || !listNode) {
+    return
+  }
+
+  const sourceComments = Array.isArray(comments) ? comments : []
+  appState.dashboardNewComments = sourceComments
+  const readKeys = dashboardReadCommentKeys()
+  const unreadComments = sourceComments.filter((item) => item?.key && !readKeys.has(item.key))
+  panel.classList.toggle('is-unread', unreadComments.length > 0)
+  if (countNode) {
+    countNode.textContent = String(unreadComments.length)
+  }
+  if (ackAllButton instanceof HTMLButtonElement) {
+    ackAllButton.disabled = unreadComments.length === 0
+  }
+
+  if (!unreadComments.length) {
+    listNode.innerHTML = '<div class="dash-comments-empty">Brak nowych komentarzy.</div>'
+    return
+  }
+
+  const visibleComments = unreadComments.slice(0, DASHBOARD_NEW_COMMENTS_LIMIT)
+  const hiddenCount = Math.max(0, unreadComments.length - visibleComments.length)
+  listNode.innerHTML =
+    visibleComments
+      .map((item) => {
+        const when = item.timestamp
+          ? `${formatDatePl(item.timestamp)} ${formatTime(item.timestamp)}`
+          : item.dayKey || '-'
+        const place = [item.clientName, item.zoneName].filter((value) => value && value !== '-').join(' / ')
+        return `
+          <button class="dash-comment-item is-unread" type="button" data-dash-comment-key="${escapeHtml(item.key)}" title="${escapeHtml(item.comment)}">
+            <span class="dash-comment-top">
+              <span class="dash-comment-worker">${escapeHtml(item.workerName || '-')}</span>
+              <span class="dash-comment-source">${escapeHtml(item.sourceLabel)}</span>
+            </span>
+            <span class="dash-comment-text">${escapeHtml(item.comment)}</span>
+            <span class="dash-comment-meta">${escapeHtml(when)}${place ? ` / ${escapeHtml(place)}` : ''}</span>
+          </button>
+        `
+      })
+      .join('') +
+    (hiddenCount ? `<div class="dash-comments-more">+${hiddenCount} kolejnych komentarzy</div>` : '')
+}
+
+function dashboardMarkCommentRead(key) {
+  const normalizedKey = String(key ?? '').trim()
+  if (!normalizedKey) {
+    return
+  }
+
+  const readKeys = dashboardReadCommentKeys()
+  readKeys.add(normalizedKey)
+  dashboardWriteCommentKeys(readKeys)
+  renderDashboardNewComments(appState.dashboardNewComments)
+}
+
+function dashboardMarkAllCommentsRead() {
+  const readKeys = dashboardReadCommentKeys()
+  ;(Array.isArray(appState.dashboardNewComments) ? appState.dashboardNewComments : []).forEach((item) => {
+    if (item?.key) {
+      readKeys.add(String(item.key))
+    }
+  })
+  dashboardWriteCommentKeys(readKeys)
+  renderDashboardNewComments(appState.dashboardNewComments)
+}
+
 function dashboardMetricDetailsOrEmpty(metricKey) {
   const details = appState.dashboardMetricDetails?.[metricKey]
   return Array.isArray(details) ? details : []
 }
 
-function dashboardBuildSummary(todayRows = [], eventRows = []) {
+function dashboardSumDurationSeconds(rows = [], { excludeDay = '' } = {}) {
+  const omittedDay = String(excludeDay ?? '').trim()
+  return (Array.isArray(rows) ? rows : []).reduce((sum, row) => {
+    if (omittedDay && dashboardResolveDayKey(row) === omittedDay) {
+      return sum
+    }
+    return sum + dashboardEventDurationSec(row)
+  }, 0)
+}
+
+function dashboardBuildPeriodHourValues(
+  todayRows = [],
+  currentWeekRows = [],
+  previousWeekRows = [],
+  currentMonthRows = [],
+  previousMonthRows = [],
+) {
+  const today = todayYmd()
+  const totalTodaySec = (Array.isArray(todayRows) ? todayRows : []).reduce(
+    (sum, row) => sum + dashboardParseDurationLabelToSeconds(row?.duration),
+    0,
+  )
+  const currentWeekSec = totalTodaySec + dashboardSumDurationSeconds(currentWeekRows, { excludeDay: today })
+  const previousWeekSec = dashboardSumDurationSeconds(previousWeekRows)
+  const currentMonthSec = totalTodaySec + dashboardSumDurationSeconds(currentMonthRows, { excludeDay: today })
+  const previousMonthSec = dashboardSumDurationSeconds(previousMonthRows)
+
+  return {
+    totalHoursCurrentWeek: durationSecondsToHm(currentWeekSec),
+    totalHoursPreviousWeek: durationSecondsToHm(previousWeekSec),
+    totalHoursCurrentMonth: durationSecondsToHm(currentMonthSec),
+    totalHoursPreviousMonth: durationSecondsToHm(previousMonthSec),
+  }
+}
+
+function dashboardBuildSummary(todayRows = [], eventRows = [], periodHourValues = {}) {
   const today = todayYmd()
   const yesterday = daysAgoYmd(1)
   const normalizedTodayRows = Array.isArray(todayRows) ? todayRows : []
@@ -3721,6 +5825,10 @@ function dashboardBuildSummary(todayRows = [], eventRows = []) {
       activeNow: activeNowRows.length,
       finishedToday: finishedRows.length,
       totalHoursToday: durationSecondsToHm(totalTodaySec),
+      totalHoursCurrentWeek: periodHourValues.totalHoursCurrentWeek ?? '00:00',
+      totalHoursPreviousWeek: periodHourValues.totalHoursPreviousWeek ?? '00:00',
+      totalHoursCurrentMonth: periodHourValues.totalHoursCurrentMonth ?? '00:00',
+      totalHoursPreviousMonth: periodHourValues.totalHoursPreviousMonth ?? '00:00',
       openStartStopYesterday: openStartStopYesterdayIssues.length,
       openCleanYesterday: openCleanYesterdayIssues.length,
       cleanTooLong: cleanTooLongDetails.length,
@@ -3754,6 +5862,364 @@ function renderDashboardSummary(summary) {
   setValue('sumOpenStartStopYesterdayCount', values.openStartStopYesterday ?? 0)
   setValue('sumOpenCleanYesterdayCount', values.openCleanYesterday ?? 0)
   setValue('sumCleanTooLongCount', values.cleanTooLong ?? 0)
+}
+
+function dashboardAddUserMatchKey(target, rawValue = '') {
+  const normalized = normalizeSearchText(rawValue)
+  if (!normalized) {
+    return
+  }
+  target.keys.add(normalized)
+  const compact = normalized.replace(/[^a-z0-9]/g, '')
+  if (compact.length >= 3) {
+    target.compactKeys.add(compact)
+  }
+}
+
+function dashboardCurrentUserMatchKeys() {
+  const match = { keys: new Set(), compactKeys: new Set() }
+  const session = appState.session ?? {}
+  ;[
+    session.uid,
+    session.userId,
+    session.id,
+    session.login,
+    session.email,
+    session.name,
+    session.displayName,
+    session.workerName,
+  ].forEach((value) => dashboardAddUserMatchKey(match, value))
+
+  const emailLocal = String(session.email ?? '').split('@')[0]
+  dashboardAddUserMatchKey(match, emailLocal)
+
+  const workerCandidates = (Array.isArray(appState.workers) ? appState.workers : []).filter((worker) => {
+    const workerMatch = { keys: new Set(), compactKeys: new Set() }
+    ;[
+      calendarWorkerId(worker),
+      calendarWorkerLabel(worker),
+      worker.login,
+      worker.workerLogin,
+      worker.email,
+      worker.loginEmail,
+      worker.authUid,
+      worker.auth_uid,
+      worker.uid,
+    ].forEach((value) => dashboardAddUserMatchKey(workerMatch, value))
+    return (
+      [...workerMatch.keys].some((key) => match.keys.has(key)) ||
+      [...workerMatch.compactKeys].some((key) => match.compactKeys.has(key))
+    )
+  })
+
+  workerCandidates.forEach((worker) => {
+    ;[
+      calendarWorkerId(worker),
+      calendarWorkerLabel(worker),
+      worker.login,
+      worker.workerLogin,
+      worker.email,
+      worker.loginEmail,
+      worker.authUid,
+      worker.auth_uid,
+      worker.uid,
+    ].forEach((value) => dashboardAddUserMatchKey(match, value))
+  })
+
+  return match
+}
+
+function dashboardTaskColumnBelongsToCurrentUser(task = {}, match = dashboardCurrentUserMatchKeys()) {
+  const status = String(task.kanbanStatus ?? '').trim()
+  if (!status || (!match.keys.size && !match.compactKeys.size)) {
+    return false
+  }
+  const column = kanbanColumnsForStatus().find((item) => item.id === status)
+  const scope = kanbanNormalizeColumnScope(column?.scope)
+  if (!column || (scope !== 'user' && scope !== 'person')) {
+    return false
+  }
+
+  const candidate = { keys: new Set(), compactKeys: new Set() }
+  ;[column.ownerId, column.ownerLabel, column.ownerName].forEach((value) => dashboardAddUserMatchKey(candidate, value))
+  return (
+    [...candidate.keys].some((key) => match.keys.has(key)) ||
+    [...candidate.compactKeys].some((key) => match.compactKeys.has(key))
+  )
+}
+
+function dashboardDueKanbanTasks(options = {}) {
+  const includeWorkerMessages = options.includeWorkerMessages !== false
+  const today = todayYmd()
+  return calendarSortTasks(calendarLoadTasks()).filter((task) => {
+    const taskDay = String(task.dateYmd ?? '').trim()
+    if (!includeWorkerMessages && (task.generatedFromComment || calendarTaskToneValue(task) === 'message')) {
+      return false
+    }
+    return (
+      /^\d{4}-\d{2}-\d{2}$/.test(taskDay) &&
+      taskDay <= today &&
+      task.active !== false &&
+      !kanbanTaskIsCompleted(task) &&
+      calendarTaskIsVisibleForCurrentUser(task)
+    )
+  })
+}
+
+function updateSidebarTaskDueBadges(counts) {
+  const calendarValue = Math.max(0, Number(typeof counts === 'object' ? counts.calendar : counts) || 0)
+  const kanbanValue = Math.max(0, Number(typeof counts === 'object' ? counts.kanban : counts) || 0)
+  ;[
+    ['menuCalendarTaskDueCount', calendarValue],
+    ['menuKanbanTaskDueCount', kanbanValue],
+  ].forEach(([id, value]) => {
+    const badge = document.getElementById(id)
+    if (!badge) {
+      return
+    }
+
+    badge.textContent = value > 99 ? '99+' : String(value)
+    badge.hidden = value <= 0
+    badge.setAttribute('aria-label', value ? `${value} dzisiejszych i zaległych zadań` : 'Brak dzisiejszych i zaległych zadań')
+  })
+}
+
+function dashboardKanbanTaskMeta(task = {}) {
+  const taskDay = String(task.dateYmd ?? '').trim()
+  const dateLabel = taskDay && taskDay !== todayYmd() ? formatDatePl(`${taskDay}T12:00:00.000Z`) : ''
+  const startTime = calendarNormalizeTimeValue(task.startTime ?? task.time)
+  const endTime = calendarNormalizeTimeValue(task.endTime)
+  const timeRange = startTime && endTime ? `${startTime}-${endTime}` : startTime || 'bez godziny'
+  const objects = calendarSelectionLabels(task.objects)
+  const place = objects.length ? objects.join(', ') : String(task.place ?? '').trim()
+  const zoneLabel = String(task.zone?.label ?? task.zoneName ?? '').trim()
+  const zoneLocation = String(task.zone?.location ?? task.zoneLocation ?? '').trim()
+  const zoneDisplay = zoneLabel ? calendarZoneDisplayLabel({ label: zoneLabel, location: zoneLocation }) : ''
+  const status = kanbanNormalizeStatus(task.kanbanStatus)
+  const columnLabel = kanbanColumnsForStatus().find((column) => column.id === status)?.label || 'Kanban'
+  const dueDate = String(task.dueDateYmd ?? '').trim()
+  const dueTime = calendarNormalizeTimeValue(task.dueTime)
+  const dueLabel = dueDate ? `Termin: ${formatDatePl(`${dueDate}T12:00:00.000Z`)}${dueTime ? ` ${dueTime}` : ''}` : ''
+  return [dateLabel, timeRange, dueLabel, place, zoneDisplay, columnLabel].filter(Boolean).join(' · ')
+}
+
+function renderDashboardKanbanTasks() {
+  const list = document.getElementById('dashKanbanTasksList')
+  const count = document.getElementById('dashKanbanTasksCount')
+  const allTasks = dashboardDueKanbanTasks()
+  const calendarBadgeTasks = dashboardDueKanbanTasks({ includeWorkerMessages: false })
+  const tasks = allTasks.slice(0, DASHBOARD_DUE_TASKS_PREVIEW_LIMIT)
+  updateSidebarTaskDueBadges({ calendar: calendarBadgeTasks.length, kanban: allTasks.length })
+
+  if (count) {
+    count.textContent = String(allTasks.length)
+  }
+  if (!list) {
+    return
+  }
+
+  if (!tasks.length) {
+    list.innerHTML = '<div class="dash-kanban-empty">Brak dzisiejszych i zaległych zadań.</div>'
+    return
+  }
+
+  list.innerHTML = tasks
+    .map((task) => {
+      const tone = calendarTaskToneValue(task)
+      const title = String(task.title ?? '').trim() || 'Zadanie'
+      return `
+        <button class="dash-kanban-task dash-kanban-task--${escapeHtml(tone)}" type="button" data-dash-kanban-task-id="${escapeHtml(task.id)}">
+          <span class="dash-kanban-task-title">${escapeHtml(title)}</span>
+          <span class="dash-kanban-task-meta">${escapeHtml(dashboardKanbanTaskMeta(task))}</span>
+        </button>
+      `
+    })
+    .join('')
+}
+
+function dashboardLocalCachePart(value, fallback = 'none') {
+  const normalized = normalizeSearchText(value).replace(/[^a-z0-9_-]/g, '')
+  return normalized ? normalized.slice(0, 96) : fallback
+}
+
+function dashboardLocalCacheKey(orgId = appState.session?.orgId) {
+  const orgPart = dashboardLocalCachePart(orgId, 'org')
+  const userPart = dashboardLocalCachePart(
+    appState.session?.uid ??
+      appState.session?.userId ??
+      appState.session?.email ??
+      appState.session?.login ??
+      appState.session?.name,
+    'user',
+  )
+  return `${DASHBOARD_LOCAL_CACHE_PREFIX}.${orgPart}.${userPart}`
+}
+
+function dashboardReadLocalSnapshot(orgId = appState.session?.orgId) {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return null
+  }
+
+  try {
+    const raw = window.localStorage.getItem(dashboardLocalCacheKey(orgId))
+    if (!raw) {
+      return null
+    }
+
+    const parsed = JSON.parse(raw)
+    if (!parsed || Number(parsed.version) !== DASHBOARD_LOCAL_CACHE_VERSION) {
+      return null
+    }
+
+    const cachedAt = Number(parsed.cachedAt) || 0
+    const dayKey = String(parsed.dayKey ?? '').trim()
+    if (dayKey !== todayYmd() || !cachedAt || Date.now() - cachedAt > DASHBOARD_LOCAL_CACHE_TTL_MS) {
+      return null
+    }
+
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function dashboardWriteLocalSnapshot(orgId = appState.session?.orgId, patch = {}) {
+  if (typeof window === 'undefined' || !window.localStorage || !orgId) {
+    return
+  }
+
+  const existing = dashboardReadLocalSnapshot(orgId) ?? {}
+  const snapshot = {
+    version: DASHBOARD_LOCAL_CACHE_VERSION,
+    dayKey: todayYmd(),
+    cachedAt: Date.now(),
+    summary: patch.summary ?? existing.summary ?? null,
+    todayRows: Array.isArray(patch.todayRows) ? patch.todayRows : Array.isArray(existing.todayRows) ? existing.todayRows : [],
+    scheduleSourceRows: Array.isArray(patch.scheduleSourceRows)
+      ? patch.scheduleSourceRows
+      : Array.isArray(existing.scheduleSourceRows)
+        ? existing.scheduleSourceRows
+        : [],
+    comments: Array.isArray(patch.comments)
+      ? patch.comments.slice(0, DASHBOARD_NEW_COMMENTS_LIMIT)
+      : Array.isArray(existing.comments)
+        ? existing.comments
+        : [],
+    workers: Array.isArray(patch.workers) ? patch.workers : Array.isArray(existing.workers) ? existing.workers : [],
+  }
+
+  try {
+    window.localStorage.setItem(dashboardLocalCacheKey(orgId), JSON.stringify(snapshot))
+  } catch {
+    // Local storage can be disabled or full. The live dashboard still works.
+  }
+}
+
+function dashboardApplyLocalSnapshot(orgId = appState.session?.orgId) {
+  const snapshot = dashboardReadLocalSnapshot(orgId)
+  if (!snapshot) {
+    return false
+  }
+
+  if (Array.isArray(snapshot.scheduleSourceRows)) {
+    appState.dashboardScheduleSourceRows = snapshot.scheduleSourceRows
+  }
+  if (Array.isArray(snapshot.workers) && snapshot.workers.length) {
+    appState.workers = snapshot.workers
+    appState.workerTimeRows = snapshot.workers
+  }
+  if (snapshot.summary) {
+    renderDashboardSummary(snapshot.summary)
+  }
+  if (Array.isArray(snapshot.todayRows)) {
+    appState.dashboardTodayRows = snapshot.todayRows
+    renderDashboardEvents(snapshot.todayRows)
+  }
+  if (Array.isArray(snapshot.comments)) {
+    renderDashboardNewComments(snapshot.comments)
+  }
+
+  renderDashboardKanbanTasks()
+  setDashboardLastRefresh(new Date(Number(snapshot.cachedAt) || Date.now()))
+  return true
+}
+
+function dashboardViewIsVisible() {
+  const view = document.getElementById('view-dashboard')
+  if (!view) {
+    return false
+  }
+
+  return appState.currentRoute === 'dashboard' || view.style.display !== 'none'
+}
+
+function dashboardSetLoadingStage(stage) {
+  const view = document.getElementById('view-dashboard')
+  if (!view) {
+    return
+  }
+
+  const normalizedStage = DASHBOARD_LOADING_STAGES.includes(stage) ? stage : 'start'
+  view.setAttribute('data-dashboard-stage', normalizedStage)
+}
+
+function dashboardMarkLoadingStage(stage) {
+  if (appState.dashboardLoadingCount <= 0 || !dashboardViewIsVisible()) {
+    return
+  }
+  dashboardSetLoadingStage(stage)
+}
+
+function dashboardNextPaint() {
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+    return Promise.resolve()
+  }
+
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => resolve())
+  })
+}
+
+async function dashboardRevealLoadingStage(stage) {
+  dashboardMarkLoadingStage(stage)
+  await dashboardNextPaint()
+}
+
+function dashboardSyncLoadingOverlay() {
+  const overlay = document.getElementById('dashboardLoadingOverlay')
+  const view = document.getElementById('view-dashboard')
+  if (!overlay) {
+    return
+  }
+
+  const active = appState.dashboardLoadingCount > 0 && dashboardViewIsVisible()
+  overlay.style.display = active ? 'grid' : 'none'
+  overlay.setAttribute('aria-busy', active ? 'true' : 'false')
+  overlay.setAttribute('aria-hidden', active ? 'false' : 'true')
+  view?.classList.toggle('is-loading', active)
+  if (active) {
+    view?.setAttribute('data-dashboard-loading', 'true')
+    if (view && !view.getAttribute('data-dashboard-stage')) {
+      dashboardSetLoadingStage('start')
+    }
+  } else {
+    view?.removeAttribute('data-dashboard-loading')
+    view?.removeAttribute('data-dashboard-stage')
+  }
+}
+
+function dashboardBeginLoading() {
+  const wasIdle = Math.max(0, Number(appState.dashboardLoadingCount) || 0) === 0
+  appState.dashboardLoadingCount = Math.max(0, Number(appState.dashboardLoadingCount) || 0) + 1
+  if (wasIdle) {
+    dashboardSetLoadingStage('start')
+  }
+  dashboardSyncLoadingOverlay()
+}
+
+function dashboardEndLoading() {
+  appState.dashboardLoadingCount = Math.max(0, (Number(appState.dashboardLoadingCount) || 0) - 1)
+  dashboardSyncLoadingOverlay()
 }
 
 function dashboardHideMetricPopover() {
@@ -4206,11 +6672,6 @@ async function saveClientData() {
   }
 }
 
-async function deleteClientData(clientId) {
-  void clientId
-  showTransientNotice('Usuwanie klientów jest wyłączone.', 'error')
-}
-
 function profileFieldValue(value, fallback = '-') {
   const raw = String(value ?? '').trim()
   return raw || fallback
@@ -4531,6 +6992,1852 @@ async function fetchClientProfileForCurrentSession(force = false) {
   }
 }
 
+function eventTargetClosest(event, selector) {
+  const target = event?.target
+  if (target && typeof target.closest === 'function') {
+    return target.closest(selector)
+  }
+  const parent = target?.parentElement
+  if (parent && typeof parent.closest === 'function') {
+    return parent.closest(selector)
+  }
+  return null
+}
+
+function ordersDateTimeFromTimeline(dayKey = '', timeValue = '') {
+  const day = String(dayKey ?? '').trim()
+  const time = String(timeValue ?? '').trim()
+  return `${day || '-'} ${time || '--:--'}`
+}
+
+function ordersTimelineClientLabel(order = {}) {
+  const direct = String(order?.clientLabel ?? order?.client ?? '').trim()
+  if (direct) {
+    return direct
+  }
+
+  const title = String(order?.title ?? '').trim()
+  if (!title) {
+    return '-'
+  }
+  const firmaMatch = title.match(/^(Firma\s+\S+)/i)
+  if (firmaMatch) {
+    return firmaMatch[1]
+  }
+  const firstChunk = title.split(/\s+\d{1,4}[/\s-]/)[0]?.trim()
+  return firstChunk || title.split(/\s+/).slice(0, 2).join(' ')
+}
+
+function ordersTimelineAddressLabel(order = {}) {
+  const direct = String(order?.addressLabel ?? order?.address ?? order?.location ?? '').trim()
+  if (direct) {
+    return direct
+  }
+
+  const title = String(order?.title ?? '').trim()
+  if (!title) {
+    return '-'
+  }
+
+  const patterns = [
+    /\d{2}-\d{3}.*/u,
+    /(ul\.\s+.*)/iu,
+    /([A-ZĄĆĘŁŃÓŚŹŻ][\p{L}-]+(?:\s+\d+[A-Za-z]?)?.*)$/u,
+  ]
+  for (const pattern of patterns) {
+    const match = title.match(pattern)
+    if (match?.[0]) {
+      return match[0].trim()
+    }
+  }
+
+  return '-'
+}
+
+function ordersFindTimelineOrder(orderId) {
+  const id = String(orderId ?? '').trim()
+  if (!id) {
+    return null
+  }
+  return ordersListSourceOrders().find((order) => String(order?.id ?? '') === id) ?? null
+}
+
+function ordersDurationHours(order = {}) {
+  const minutes = calendarTimelineOrderDurationMinutes(order)
+  return Math.max(1, Math.round(minutes / 60))
+}
+
+function ordersNormalizeDateField(value, fallback = todayYmd()) {
+  const raw = String(value ?? '').trim()
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : fallback
+}
+
+function ordersNormalizeTimeField(value, fallback = '08:00') {
+  return calendarNormalizeTimeValue(value) || fallback
+}
+
+function ordersSetInputValue(id, value = '') {
+  const node = document.getElementById(id)
+  if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement) {
+    node.value = String(value ?? '')
+  }
+}
+
+function ordersReadInputValue(id) {
+  const node = document.getElementById(id)
+  return node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement
+    ? String(node.value ?? '').trim()
+    : ''
+}
+
+function ordersWorkerOptionsHtml(selectedRow) {
+  const selected = Number(selectedRow)
+  return [
+    `<option value=""${Number.isFinite(selected) ? '' : ' selected'}>Wybierz</option>`,
+    ...calendarTimelineResources()
+      .map((resource, index) => ({ resource, index }))
+      .filter(({ resource }) => resource?.type !== 'placeholder')
+      .map(({ resource, index }) => {
+        const selectedAttr = Number.isFinite(selected) && index === selected ? ' selected' : ''
+        return `<option value="${index}"${selectedAttr}>${escapeHtml(resource.name || `Wiersz ${index + 1}`)}</option>`
+      }),
+  ].join('')
+}
+
+function ordersNormalizeOrderRows(order = {}, resources = calendarTimelineResources()) {
+  const max = Array.isArray(resources) && resources.length ? resources.length : Number.POSITIVE_INFINITY
+  const source = Array.isArray(order?.assignedRows) && order.assignedRows.length ? order.assignedRows : [order?.row]
+  const rows = []
+  source.forEach((value) => {
+    const row = Number(value)
+    if (!Number.isInteger(row) || row < 0 || row >= max || rows.includes(row)) {
+      return
+    }
+    rows.push(row)
+  })
+  return rows.length ? rows : [0]
+}
+
+function calendarTimelineRowAllowsOverlap(rowIndex, resources = calendarTimelineResources()) {
+  const row = Number(rowIndex)
+  return Number.isInteger(row) && resources[row]?.type === 'buffer'
+}
+
+function ordersReadSelectedWorkerRows() {
+  const checklist = document.getElementById('ordersEditWorkerChecklist')
+  const primaryRow = Number(ordersReadInputValue('ordersEditWorker'))
+  const rows = Number.isInteger(primaryRow) && primaryRow >= 0 ? [primaryRow] : []
+  if (!checklist) {
+    return rows
+  }
+  ;[...checklist.querySelectorAll('[data-orders-worker-row]:checked')]
+    .map((input) => Number(input.getAttribute('data-orders-worker-row')))
+    .forEach((row) => {
+      if (Number.isInteger(row) && row >= 0 && !rows.includes(row)) {
+        rows.push(row)
+      }
+    })
+  return rows
+}
+
+function ordersWorkerAssignmentsFromRows(rows = [], resources = calendarTimelineResources()) {
+  return rows
+    .map((row) => ({
+      row,
+      name: String(resources[row]?.name ?? `Wiersz ${row + 1}`).trim(),
+      key: String(resources[row]?.key ?? '').trim(),
+    }))
+    .filter((item) => item.name)
+}
+
+function ordersWorkerLabelForOrder(order = {}, resources = calendarTimelineResources()) {
+  const rows = ordersNormalizeOrderRows(order, resources)
+  return ordersWorkerAssignmentsFromRows(rows, resources)
+    .map((item) => item.name)
+    .join(', ')
+}
+
+function ordersWorkerChecklistHtml(order = {}) {
+  const resources = calendarTimelineResources()
+  const selectedRows = new Set(ordersNormalizeOrderRows(order, resources))
+  return resources
+    .map((resource, index) => ({ resource, index }))
+    .filter(({ resource }) => resource?.type !== 'placeholder')
+    .map(({ resource, index }) => {
+      const checked = selectedRows.has(index) ? ' checked' : ''
+      return `
+        <label class="orders-worker-choice">
+          <input type="checkbox" data-orders-worker-row="${index}"${checked} />
+          <span>${escapeHtml(resource.name || `Wiersz ${index + 1}`)}</span>
+        </label>
+      `
+    })
+    .join('')
+}
+
+function ordersRenderWorkerChecklist(order = {}) {
+  const checklist = document.getElementById('ordersEditWorkerChecklist')
+  if (checklist) {
+    checklist.innerHTML = ordersWorkerChecklistHtml(order)
+  }
+  const selected = ordersNormalizeOrderRows(order)
+  ordersSetInputValue('ordersEditWorker', selected[0] ?? 0)
+}
+
+function ordersClientDisplayName(client = {}) {
+  return String(client?.name ?? client?.clientName ?? client?.clientLabel ?? client?.id ?? client?.clientId ?? '').trim()
+}
+
+function ordersClientOptionsHtml(selectedLabel = '') {
+  const selected = String(selectedLabel ?? '').trim()
+  const clients = (Array.isArray(appState.clients) ? appState.clients : [])
+    .map((client) => ordersClientDisplayName(client))
+    .filter(Boolean)
+    .filter((value, index, source) => source.findIndex((item) => normalizeSearchText(item) === normalizeSearchText(value)) === index)
+    .sort((left, right) => left.localeCompare(right, 'pl', { sensitivity: 'base' }))
+
+  const hasSelected = selected && clients.some((client) => normalizeSearchText(client) === normalizeSearchText(selected))
+  const selectedOption =
+    selected && !hasSelected ? `<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}</option>` : ''
+
+  return [
+    `<option value=""${selected ? '' : ' selected'}>-- Nowy klient --</option>`,
+    selectedOption,
+    ...clients.map((client) => {
+      const selectedAttr = selected && normalizeSearchText(client) === normalizeSearchText(selected) ? ' selected' : ''
+      return `<option value="${escapeHtml(client)}"${selectedAttr}>${escapeHtml(client)}</option>`
+    }),
+  ].join('')
+}
+
+function ordersTimelineToneForType(type = '') {
+  const normalized = String(type ?? '').trim()
+  if (normalized === 'cyclic') return 'red'
+  if (normalized === 'renovation') return 'teal'
+  if (normalized === 'windows') return 'yellow'
+  if (normalized === 'individual') return 'blue'
+  return 'gray'
+}
+
+function ordersNextOrderId() {
+  return `fw-order-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function ordersDefaultStartTime() {
+  const now = new Date()
+  const hour = Math.min(Math.max(now.getHours() + 1, 4), 21)
+  return `${pad2(hour)}:00`
+}
+
+function ordersDefaultEndTime(startTime = '08:00') {
+  const startMinutes = calendarTimelineTimeMinutes(startTime, 8 * 60)
+  return calendarMinutesToTime(Math.min(startMinutes + 120, 23 * 60)) || '10:00'
+}
+
+function ordersCreateDraftOrder() {
+  const startTime = ordersDefaultStartTime()
+  const row = 0
+  return {
+    id: ordersNextOrderId(),
+    row,
+    assignedRows: [row],
+    workerAssignments: ordersWorkerAssignmentsFromRows([row]),
+    dateYmd: todayYmd(),
+    startTime,
+    endDateYmd: todayYmd(),
+    endTime: ordersDefaultEndTime(startTime),
+    validUntil: todayYmd(),
+    nextDate: todayYmd(),
+    title: 'Nowe zlecenie',
+    clientLabel: '',
+    addressLabel: '',
+    type: 'cyclic',
+    tone: ordersTimelineToneForType('cyclic'),
+    priority: 'Normalny',
+    repeatEvery: 7,
+    repeatUnit: 'day',
+    advanceDays: 4,
+    price: 0,
+    description: '',
+    coworkers: [],
+    tasks: [],
+    isDraft: true,
+  }
+}
+
+function ordersDiscardDraftIfNeeded() {
+  if (appState.ordersEditorMode !== 'add' || !appState.ordersEditingId) {
+    return
+  }
+  const draftId = String(appState.ordersEditingId)
+  appState.calendarTimelineDemoOrders = ordersListSourceOrders().filter((order) => !(order?.isDraft && order?.id === draftId))
+}
+
+function ordersOpenAddEditor() {
+  void ordersWarmLocationSources().then(() => {
+    if (appState.currentRoute === 'orders' && appState.ordersEditorMode === 'add') {
+      renderOrdersView()
+    }
+  })
+  const draft = ordersCreateDraftOrder()
+  appState.calendarTimelineDemoOrders = [draft, ...ordersListSourceOrders().filter((order) => !order?.isDraft)]
+  appState.ordersEditingId = draft.id
+  appState.ordersEditorMode = 'add'
+  appState.ordersEditorTab = 'basic'
+  renderOrdersView()
+}
+
+function ordersCoworkerOptionsHtml(order = {}) {
+  const current = new Set((Array.isArray(order?.coworkers) ? order.coworkers : []).map((item) => normalizeSearchText(item?.name ?? item)))
+  return [
+    '<option value="">-= Wybierz =-</option>',
+    ...calendarTimelineResources()
+      .filter((resource) => resource.type !== 'buffer' && resource.type !== 'placeholder')
+      .map((resource, index) => ({ label: resource.name, value: `${index}:${resource.name}` }))
+      .filter((resource) => !current.has(normalizeSearchText(resource.label)))
+      .map((resource) => `<option value="${escapeHtml(resource.value)}">${escapeHtml(resource.label)}</option>`),
+  ].join('')
+}
+
+function ordersRenderCoworkerRows(order = {}) {
+  const rows = document.getElementById('ordersCoworkerRows')
+  const select = document.getElementById('ordersCoworkerSelect')
+  if (select instanceof HTMLSelectElement) {
+    select.innerHTML = ordersCoworkerOptionsHtml(order)
+  }
+  if (!rows) {
+    return
+  }
+  const coworkers = Array.isArray(order?.coworkers) ? order.coworkers : []
+  rows.innerHTML = coworkers.length
+    ? coworkers
+        .map((coworker, index) => {
+          const name = String(coworker?.name ?? coworker ?? '').trim()
+          return `
+            <div class="orders-coworker-row">
+              <div>${escapeHtml(name || '-')}</div>
+              <div><button type="button" data-orders-remove-coworker="${index}">Usuń</button></div>
+            </div>
+          `
+        })
+        .join('')
+    : '<div class="orders-subtable-empty">Brak współpracowników.</div>'
+}
+
+function ordersAddCoworkerToCurrentOrder() {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  const select = document.getElementById('ordersCoworkerSelect')
+  if (!order || !(select instanceof HTMLSelectElement) || !select.value) {
+    return
+  }
+  const [, nameValue = ''] = String(select.value).split(':')
+  const name = nameValue.trim()
+  if (!name) {
+    return
+  }
+  const coworkers = Array.isArray(order.coworkers) ? order.coworkers : []
+  if (coworkers.some((item) => normalizeSearchText(item?.name ?? item) === normalizeSearchText(name))) {
+    return
+  }
+  order.coworkers = [...coworkers, { name }]
+  ordersRenderCoworkerRows(order)
+}
+
+function ordersRemoveCoworkerFromCurrentOrder(index) {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  if (!order) {
+    return
+  }
+  const removeIndex = Number(index)
+  const coworkers = Array.isArray(order.coworkers) ? order.coworkers : []
+  if (!Number.isInteger(removeIndex) || removeIndex < 0 || removeIndex >= coworkers.length) {
+    return
+  }
+  order.coworkers = coworkers.filter((_, itemIndex) => itemIndex !== removeIndex)
+  ordersRenderCoworkerRows(order)
+}
+
+function ordersLocationSuggestionKey(value = '') {
+  return normalizeSearchText(value).replace(/\s+/g, ' ').trim()
+}
+
+function ordersAddLocationSuggestion(map, value = '', meta = '') {
+  const label = String(value ?? '').replace(/\s+/g, ' ').trim()
+  if (!label || label === '-') {
+    return
+  }
+  const key = ordersLocationSuggestionKey(label)
+  if (!key || map.has(key)) {
+    return
+  }
+  map.set(key, {
+    label,
+    meta: String(meta ?? '').replace(/\s+/g, ' ').trim(),
+  })
+}
+
+function ordersLocalLocationSuggestions() {
+  const suggestions = new Map()
+
+  ;(Array.isArray(appState.clients) ? appState.clients : []).forEach((client) => {
+    const city = String(client?.city ?? '').trim()
+    const address = String(client?.address ?? '').trim()
+    const name = String(client?.name ?? client?.clientName ?? '').trim()
+    ordersAddLocationSuggestion(suggestions, [city, address].filter(Boolean).join(' '), name ? `Klient: ${name}` : 'Klient')
+    ordersAddLocationSuggestion(suggestions, address, name ? `Klient: ${name}` : 'Klient')
+  })
+
+  ;(Array.isArray(appState.zones) ? appState.zones : []).forEach((zone) => {
+    const location = String(zone?.location ?? zone?.lokalizacja ?? '').trim()
+    const client = String(zone?.clientName ?? zone?.clientLabel ?? '').trim()
+    const zoneName = String(zone?.zoneName ?? zone?.name ?? '').trim()
+    ordersAddLocationSuggestion(suggestions, location, [client, zoneName].filter(Boolean).join(' / ') || 'Strefa')
+  })
+
+  ordersListSourceOrders().forEach((order) => {
+    const address = ordersTimelineAddressLabel(order)
+    const client = ordersTimelineClientLabel(order)
+    ordersAddLocationSuggestion(suggestions, address, client ? `Zlecenie: ${client}` : 'Zlecenie')
+  })
+
+  return [...suggestions.values()].sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
+}
+
+const ordersGoogleLocationCache = new Map()
+const ordersGoogleLocationStatus = new Map()
+const ordersMapGeocodeCache = new Map()
+let ordersGoogleMapsLoaderPromise = null
+let ordersGooglePlacesSessionToken = null
+let ordersGoogleLocationDebounceHandle = null
+let ordersGoogleLocationRequestSeq = 0
+let ordersGoogleLocationResolveHandle = null
+let ordersGoogleLocationResolveSeq = 0
+let ordersRenderedLocationSuggestions = []
+
+function ordersGoogleMapsApiKey() {
+  return String(import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? import.meta.env.VITE_GOOGLE_API_KEY ?? '').trim()
+}
+
+function ordersMapQuery(address = '') {
+  const query = String(address ?? '').replace(/\s+/g, ' ').trim()
+  if (!query) {
+    return ''
+  }
+  if (/^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(query)) {
+    return query
+  }
+  return /\b(pol(?:ska|and)|pl)\b/i.test(query) ? query : `${query}, Polska`
+}
+
+function ordersGoogleMapsSearchUrl(address = '') {
+  const query = ordersMapQuery(address)
+  return query ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}` : ''
+}
+
+function ordersGoogleMapsEmbedUrlFromQuery(query = '', zoom = 16) {
+  const normalizedQuery = ordersMapQuery(query)
+  if (!normalizedQuery) {
+    return ''
+  }
+  const normalizedZoom = Math.min(Math.max(Number(zoom) || 16, 3), 21)
+  return `https://maps.google.com/maps?q=${encodeURIComponent(normalizedQuery)}&z=${normalizedZoom}&hl=pl&output=embed`
+}
+
+function ordersLoadGoogleMaps() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return Promise.reject(new Error('Google Maps działa tylko w przeglądarce.'))
+  }
+
+  if (window.google?.maps?.importLibrary) {
+    return Promise.resolve(window.google.maps)
+  }
+
+  const key = ordersGoogleMapsApiKey()
+  if (!key) {
+    return Promise.reject(new Error('Brak klucza Google Maps.'))
+  }
+
+  if (ordersGoogleMapsLoaderPromise) {
+    return ordersGoogleMapsLoaderPromise
+  }
+
+  ordersGoogleMapsLoaderPromise = new Promise((resolve, reject) => {
+    const callbackName = `__cleanziGoogleMapsReady_${Date.now()}`
+    const script = document.createElement('script')
+    const cleanup = () => {
+      try {
+        delete window[callbackName]
+      } catch {
+        window[callbackName] = undefined
+      }
+    }
+
+    window[callbackName] = () => {
+      cleanup()
+      resolve(window.google.maps)
+    }
+
+    script.async = true
+    script.defer = true
+    script.dataset.cleanziGoogleMaps = 'true'
+    script.src =
+      `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}` +
+      `&v=weekly&language=pl&region=PL&loading=async&callback=${encodeURIComponent(callbackName)}`
+    script.onerror = () => {
+      cleanup()
+      ordersGoogleMapsLoaderPromise = null
+      reject(new Error('Nie udało się połączyć z Google Maps.'))
+    }
+
+    document.head.append(script)
+  })
+
+  return ordersGoogleMapsLoaderPromise
+}
+
+function ordersGoogleSuggestionLabel(prediction = {}) {
+  return String(
+    prediction?.text?.text ??
+      prediction?.text ??
+      prediction?.description ??
+      prediction?.mainText?.text ??
+      prediction?.structured_formatting?.main_text ??
+      '',
+  ).trim()
+}
+
+function ordersGoogleSuggestionMeta(prediction = {}) {
+  return String(
+    prediction?.secondaryText?.text ??
+      prediction?.structured_formatting?.secondary_text ??
+      prediction?.description?.replace(ordersGoogleSuggestionLabel(prediction), '') ??
+      'Google Maps',
+  )
+    .replace(/^,\s*/, '')
+    .trim()
+}
+
+async function ordersFetchGoogleLocationSuggestions(queryValue = '') {
+  const query = String(queryValue ?? '').trim()
+  if (query.length < 3 || !ordersGoogleMapsApiKey()) {
+    return []
+  }
+
+  const maps = await ordersLoadGoogleMaps()
+  const places = await maps.importLibrary('places')
+
+  if (places?.AutocompleteSuggestion?.fetchAutocompleteSuggestions) {
+    if (!ordersGooglePlacesSessionToken && places.AutocompleteSessionToken) {
+      ordersGooglePlacesSessionToken = new places.AutocompleteSessionToken()
+    }
+    const response = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+      input: query,
+      includedRegionCodes: ['pl'],
+      language: 'pl',
+      region: 'pl',
+      sessionToken: ordersGooglePlacesSessionToken,
+    })
+    return (Array.isArray(response?.suggestions) ? response.suggestions : [])
+      .map((suggestion) => {
+        const prediction = suggestion?.placePrediction
+        const label = ordersGoogleSuggestionLabel(prediction)
+        if (!label) {
+          return null
+        }
+        return {
+          label,
+          meta: ordersGoogleSuggestionMeta(prediction) || 'Google Maps',
+          placeId: String(prediction?.placeId ?? '').trim(),
+          prediction,
+          source: 'google',
+        }
+      })
+      .filter(Boolean)
+  }
+
+  const service = places?.AutocompleteService ? new places.AutocompleteService() : null
+  if (!service?.getPlacePredictions) {
+    return []
+  }
+
+  const response = await service.getPlacePredictions({
+    componentRestrictions: { country: 'pl' },
+    input: query,
+    types: ['address'],
+  })
+  return (Array.isArray(response?.predictions) ? response.predictions : [])
+    .map((prediction) => {
+      const label = ordersGoogleSuggestionLabel(prediction)
+      if (!label) {
+        return null
+      }
+      return {
+        label,
+        meta: ordersGoogleSuggestionMeta(prediction) || 'Google Maps',
+        placeId: String(prediction?.place_id ?? '').trim(),
+        prediction,
+        source: 'google',
+      }
+    })
+    .filter(Boolean)
+}
+
+function ordersQueueGoogleLocationSuggestions(queryValue = '') {
+  const query = ordersLocationSuggestionKey(queryValue)
+  if (query.length < 3) {
+    return
+  }
+
+  if (!ordersGoogleMapsApiKey()) {
+    ordersGoogleLocationStatus.set(query, 'missing-key')
+    ordersRenderLocationSuggestions(queryValue)
+    return
+  }
+
+  if (ordersGoogleLocationCache.has(query)) {
+    ordersRenderLocationSuggestions(queryValue)
+    return
+  }
+
+  window.clearTimeout(ordersGoogleLocationDebounceHandle)
+  ordersGoogleLocationStatus.set(query, 'loading')
+  ordersRenderLocationSuggestions(queryValue)
+
+  const requestSeq = ++ordersGoogleLocationRequestSeq
+  ordersGoogleLocationDebounceHandle = window.setTimeout(() => {
+    ordersFetchGoogleLocationSuggestions(queryValue)
+      .then((rows) => {
+        if (requestSeq !== ordersGoogleLocationRequestSeq) {
+          return
+        }
+        ordersGoogleLocationCache.set(query, rows)
+        ordersGoogleLocationStatus.set(query, rows.length ? 'ready' : 'empty')
+        const input = document.getElementById('ordersEditLocation')
+        if (input instanceof HTMLInputElement && document.activeElement === input) {
+          ordersRenderLocationSuggestions(input.value)
+        }
+      })
+      .catch(() => {
+        if (requestSeq !== ordersGoogleLocationRequestSeq) {
+          return
+        }
+        ordersGoogleLocationStatus.set(query, 'error')
+        const input = document.getElementById('ordersEditLocation')
+        if (input instanceof HTMLInputElement && document.activeElement === input) {
+          ordersRenderLocationSuggestions(input.value)
+        }
+      })
+  }, 260)
+}
+
+function ordersQueueGoogleLocationResolve(queryValue = '') {
+  const raw = String(queryValue ?? '').replace(/\s+/g, ' ').trim()
+  const query = ordersLocationSuggestionKey(raw)
+  window.clearTimeout(ordersGoogleLocationResolveHandle)
+
+  if (query.length < 5) {
+    ordersSetLocationGeoFields({ mapUrl: ordersGoogleMapsSearchUrl(raw) })
+    return
+  }
+
+  ordersSetLocationGeoFields({ mapUrl: ordersGoogleMapsSearchUrl(raw) })
+  if (!ordersGoogleMapsApiKey()) {
+    return
+  }
+
+  const requestSeq = ++ordersGoogleLocationResolveSeq
+  ordersGoogleLocationResolveHandle = window.setTimeout(() => {
+    ordersFetchGoogleLocationSuggestions(raw)
+      .then((rows) => {
+        if (requestSeq !== ordersGoogleLocationResolveSeq) {
+          return
+        }
+        const best = rows.find((item) => item.source === 'google') || rows[0]
+        if (!best) {
+          return
+        }
+        return ordersResolveGooglePlaceDetails(best).then((details) => {
+          if (requestSeq !== ordersGoogleLocationResolveSeq) {
+            return
+          }
+          const input = document.getElementById('ordersEditLocation')
+          if (!(input instanceof HTMLInputElement) || ordersLocationSuggestionKey(input.value) !== query) {
+            return
+          }
+          ordersSetLocationGeoFields({
+            placeId: details.placeId || best.placeId || '',
+            lat: details.lat || '',
+            lng: details.lng || '',
+            mapUrl: ordersGoogleMapsSearchUrl(details.address || raw),
+          })
+        })
+      })
+      .catch(() => {
+        if (requestSeq === ordersGoogleLocationResolveSeq) {
+          ordersSetLocationGeoFields({ mapUrl: ordersGoogleMapsSearchUrl(raw) })
+        }
+      })
+  }, 700)
+}
+
+function ordersHideLocationSuggestions() {
+  const box = document.getElementById('ordersLocationSuggestions')
+  const input = document.getElementById('ordersEditLocation')
+  if (box) {
+    box.hidden = true
+    box.innerHTML = ''
+  }
+  ordersRenderedLocationSuggestions = []
+  if (input instanceof HTMLInputElement) {
+    input.setAttribute('aria-expanded', 'false')
+  }
+}
+
+function ordersLocationStatusText(status) {
+  if (status === 'loading') {
+    return 'Szukam w Google Maps...'
+  }
+  if (status === 'missing-key') {
+    return 'Możesz użyć wpisanego adresu. Pełne podpowiedzi Google Maps pojawią się po dodaniu klucza API.'
+  }
+  if (status === 'error') {
+    return 'Nie udało się pobrać podpowiedzi z Google Maps.'
+  }
+  return 'Brak podpowiedzi dla wpisanego adresu.'
+}
+
+function ordersRenderLocationSuggestions(queryValue = '') {
+  const input = document.getElementById('ordersEditLocation')
+  const box = document.getElementById('ordersLocationSuggestions')
+  if (!(input instanceof HTMLInputElement) || !box) {
+    return
+  }
+
+  const query = ordersLocationSuggestionKey(queryValue)
+  if (query.length < 2) {
+    ordersHideLocationSuggestions()
+    return
+  }
+
+  const localRows = ordersLocalLocationSuggestions()
+    .filter((item) => ordersLocationSuggestionKey([item.label, item.meta].join(' ')).includes(query))
+    .map((item) => ({ ...item, source: 'local' }))
+    .slice(0, 8)
+  const googleRows = (ordersGoogleLocationCache.get(query) ?? [])
+    .filter((item) => ordersLocationSuggestionKey([item.label, item.meta].join(' ')).includes(query))
+    .slice(0, 8)
+  const manualMapRow =
+    query.length >= 3
+      ? [
+          {
+            label: String(queryValue ?? '').replace(/\s+/g, ' ').trim(),
+            mapUrl: ordersGoogleMapsSearchUrl(queryValue),
+            meta: ordersGoogleMapsApiKey()
+              ? 'Użyj wpisanego adresu, jeśli Google nie podpowiedziało wyniku'
+              : 'Użyj wpisanego adresu. Google Maps wyszuka go po tekście.',
+            source: 'manual-map',
+          },
+        ]
+      : []
+  const used = new Set()
+  const rows = [...googleRows, ...localRows, ...manualMapRow]
+    .filter((item) => {
+      const key = ordersLocationSuggestionKey(item.label)
+      if (!key || used.has(key)) {
+        return false
+      }
+      used.add(key)
+      return true
+    })
+    .slice(0, 8)
+  const status = ordersGoogleLocationStatus.get(query)
+
+  if (!rows.length) {
+    box.innerHTML = `<div class="orders-location-empty">${escapeHtml(ordersLocationStatusText(status))}</div>`
+    box.hidden = false
+    input.setAttribute('aria-expanded', 'true')
+    return
+  }
+
+  ordersRenderedLocationSuggestions = rows
+  box.innerHTML = rows
+    .map(
+      (item, index) => `
+        <button type="button" class="orders-location-suggestion" data-orders-location-index="${index}">
+          <strong>${escapeHtml(item.label)}</strong>
+          <span>
+            ${item.source === 'google' || item.source === 'manual-map' ? '<b>Google Maps</b>' : '<b>Portal</b>'}
+            ${item.meta ? ` · ${escapeHtml(item.meta)}` : ''}
+          </span>
+        </button>
+      `,
+    )
+    .join('')
+  box.hidden = false
+  input.setAttribute('aria-expanded', 'true')
+}
+
+function ordersSetLocationGeoFields({ placeId = '', lat = '', lng = '', mapUrl = '' } = {}) {
+  ordersSetInputValue('ordersEditLocationPlaceId', placeId)
+  ordersSetInputValue('ordersEditLocationLat', lat)
+  ordersSetInputValue('ordersEditLocationLng', lng)
+  ordersSetInputValue('ordersEditLocationMapUrl', mapUrl)
+}
+
+function ordersClearLocationGeoFields() {
+  ordersSetLocationGeoFields()
+}
+
+async function ordersResolveGooglePlaceDetails(item = {}) {
+  const maps = await ordersLoadGoogleMaps()
+  const places = await maps.importLibrary('places')
+  let place = item.prediction?.toPlace?.()
+
+  if (!place && places?.Place && item.placeId) {
+    place = new places.Place({
+      id: item.placeId,
+      requestedLanguage: 'pl',
+      requestedRegion: 'pl',
+    })
+  }
+
+  if (!place?.fetchFields) {
+    return {
+      address: item.label,
+      lat: '',
+      lng: '',
+      placeId: item.placeId || '',
+    }
+  }
+
+  await place.fetchFields({ fields: ['formattedAddress', 'location'] })
+  const location = place.location
+  const latValue = typeof location?.lat === 'function' ? location.lat() : location?.lat
+  const lngValue = typeof location?.lng === 'function' ? location.lng() : location?.lng
+  const lat = Number.isFinite(Number(latValue)) ? String(Number(latValue)) : ''
+  const lng = Number.isFinite(Number(lngValue)) ? String(Number(lngValue)) : ''
+  return {
+    address: String(place.formattedAddress ?? item.label ?? '').trim() || item.label,
+    lat,
+    lng,
+    placeId: String(item.placeId ?? place.id ?? '').trim(),
+  }
+}
+
+function ordersPickLocationSuggestion(item = {}) {
+  ordersSetInputValue('ordersEditLocation', item.label || '')
+  ordersHideLocationSuggestions()
+  if (item.source === 'manual-map') {
+    ordersSetLocationGeoFields({ mapUrl: item.mapUrl || ordersGoogleMapsSearchUrl(item.label) })
+    return
+  }
+  if (item.source !== 'google') {
+    ordersClearLocationGeoFields()
+    return
+  }
+
+  ordersSetLocationGeoFields({ placeId: item.placeId || '', mapUrl: ordersGoogleMapsSearchUrl(item.label) })
+  void ordersResolveGooglePlaceDetails(item)
+    .then((details) => {
+      ordersSetInputValue('ordersEditLocation', details.address || item.label || '')
+      ordersSetLocationGeoFields(details)
+      ordersGooglePlacesSessionToken = null
+    })
+    .catch(() => {
+      ordersGooglePlacesSessionToken = null
+      showTransientNotice('Adres wybrany, ale nie udało się pobrać współrzędnych z Google Maps.', 'error')
+    })
+}
+
+function ordersParseMapCoordinate(value) {
+  const raw = String(value ?? '').replace(',', '.').trim()
+  if (!raw) {
+    return null
+  }
+  const number = Number(raw)
+  return Number.isFinite(number) ? number : null
+}
+
+function ordersMapCoordinates(order = {}) {
+  const lat = ordersParseMapCoordinate(order?.lat ?? order?.latitude)
+  const lng = ordersParseMapCoordinate(order?.lng ?? order?.lon ?? order?.longitude)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return null
+  }
+  if (lat === 0 && lng === 0) {
+    return null
+  }
+  return { lat, lng }
+}
+
+function ordersMapInfo(order = {}) {
+  const address = ordersTimelineAddressLabel(order)
+  const coords = ordersMapCoordinates(order)
+  const query = coords ? `${coords.lat},${coords.lng}` : address
+  const embedUrl = ordersGoogleMapsEmbedUrlFromQuery(query, coords ? 18 : 16)
+  const externalUrl =
+    String(order?.mapUrl ?? order?.googleMapsUrl ?? '').trim() ||
+    (coords ? ordersGoogleMapsSearchUrl(query) : ordersGoogleMapsSearchUrl(address))
+  return {
+    address,
+    embedUrl,
+    externalUrl,
+    query,
+  }
+}
+
+function ordersCloseMapModal() {
+  const overlay = document.getElementById('ordersMapOverlay')
+  const frame = document.getElementById('ordersMapFrame')
+  if (overlay) {
+    overlay.hidden = true
+  }
+  if (frame instanceof HTMLIFrameElement) {
+    frame.removeAttribute('src')
+  }
+}
+
+function ordersOpenMapModal(orderId) {
+  const order = ordersFindTimelineOrder(orderId)
+  if (!order) {
+    showTransientNotice('Nie znaleziono zlecenia do podglądu mapy.', 'error')
+    return
+  }
+
+  const info = ordersMapInfo(order)
+  if (!info.embedUrl || !info.address || info.address === '-') {
+    showTransientNotice('To zlecenie nie ma adresu lokalizacji.', 'error')
+    return
+  }
+
+  const overlay = document.getElementById('ordersMapOverlay')
+  const title = document.getElementById('ordersMapTitle')
+  const address = document.getElementById('ordersMapAddress')
+  const frame = document.getElementById('ordersMapFrame')
+  const external = document.getElementById('ordersMapExternal')
+  if (!overlay || !(frame instanceof HTMLIFrameElement)) {
+    showTransientNotice(`Adres: ${info.address}`)
+    return
+  }
+
+  if (title) {
+    title.textContent = String(order?.title ?? 'Zlecenie').trim() || 'Zlecenie'
+  }
+  if (address) {
+    address.textContent = info.address
+  }
+  if (frame.getAttribute('src') !== info.embedUrl) {
+    frame.setAttribute('src', info.embedUrl)
+  }
+  if (external instanceof HTMLAnchorElement) {
+    external.href = info.externalUrl || ordersGoogleMapsSearchUrl(info.query)
+  }
+  overlay.hidden = false
+}
+
+let ordersLocationSourcesPromise = null
+
+function ordersWarmLocationSources() {
+  if (ordersLocationSourcesPromise) {
+    return ordersLocationSourcesPromise
+  }
+
+  const loaders = []
+  if (!appState.clientsLoaded) {
+    loaders.push(fetchClientsForCurrentSession(false))
+  }
+  if (!appState.zonesLoaded) {
+    loaders.push(fetchZonesForCurrentSession(false))
+  }
+
+  if (!loaders.length) {
+    return Promise.resolve()
+  }
+
+  ordersLocationSourcesPromise = Promise.allSettled(loaders).finally(() => {
+    ordersLocationSourcesPromise = null
+  })
+  return ordersLocationSourcesPromise
+}
+
+function ordersRenderEditorTabs() {
+  const activeTab = String(appState.ordersEditorTab || 'basic')
+  document.querySelectorAll('#ordersEditorPanel [data-orders-tab-target]').forEach((tab) => {
+    const target = String(tab.getAttribute('data-orders-tab-target') || '')
+    tab.classList.toggle('is-active', target === activeTab)
+    tab.setAttribute('aria-selected', target === activeTab ? 'true' : 'false')
+  })
+  document.querySelectorAll('#ordersEditorPanel [data-orders-tab-panel]').forEach((panel) => {
+    const target = String(panel.getAttribute('data-orders-tab-panel') || '')
+    panel.classList.toggle('is-active', target === activeTab)
+    panel.hidden = target !== activeTab
+  })
+}
+
+function ordersRenderSchedulePreview(order = {}) {
+  const preview = document.getElementById('ordersSchedulePreview')
+  if (!preview) {
+    return
+  }
+
+  const client = ordersTimelineClientLabel(order)
+  const start = ordersNormalizeDateField(order.dateYmd, todayYmd())
+  const end = ordersNormalizeDateField(order.validUntil || order.endDateYmd || start, start)
+  preview.innerHTML = `
+    <div class="orders-schedule-preview-row">
+      <strong>${escapeHtml(client || '-')}</strong>
+      <span>${escapeHtml(start)}</span>
+      <span>${escapeHtml(end)}</span>
+    </div>
+    <div class="orders-schedule-preview-note">
+      ${String(order.repeatUnit || 'day') === 'day' ? `Co ${escapeHtml(order.repeatEvery || 1)} dni` : `Powtarzanie: ${escapeHtml(order.repeatUnit || 'day')}`}
+    </div>
+  `
+}
+
+function ordersRenderEditor(order = {}) {
+  const listPanel = document.getElementById('ordersListPanel')
+  const editorPanel = document.getElementById('ordersEditorPanel')
+  if (!editorPanel) {
+    return
+  }
+
+  if (listPanel) {
+    listPanel.hidden = false
+  }
+  editorPanel.hidden = false
+
+  const title = document.getElementById('ordersEditTitle')
+  if (title) {
+    title.textContent = appState.ordersEditorMode === 'add' ? 'Dodaj zlecenie' : 'Edytuj zlecenie'
+  }
+
+  const clientSelect = document.getElementById('ordersEditClient')
+  if (clientSelect instanceof HTMLSelectElement) {
+    clientSelect.innerHTML = ordersClientOptionsHtml(ordersTimelineClientLabel(order))
+  }
+
+  const workerSelect = document.getElementById('ordersEditWorker')
+  if (workerSelect instanceof HTMLSelectElement) {
+    workerSelect.innerHTML = ordersWorkerOptionsHtml(Number(order.row ?? 0))
+  }
+
+  const startDay = ordersNormalizeDateField(order.dateYmd, todayYmd())
+  const validUntil = ordersNormalizeDateField(order.validUntil || order.dateTo || order.endValidDate || order.endDateYmd || startDay, startDay)
+  const nextDate = ordersNormalizeDateField(order.nextDate || startDay, startDay)
+  const type = String(order.type ?? 'other').trim() || 'other'
+  const duration = ordersDurationHours(order)
+
+  ordersSetInputValue('ordersEditName', order.title || '')
+  ordersSetInputValue('ordersEditClient', ordersTimelineClientLabel(order))
+  ordersSetInputValue('ordersEditStart', startDay)
+  ordersSetInputValue('ordersEditNext', nextDate)
+  ordersSetInputValue('ordersEditTime', ordersNormalizeTimeField(order.startTime, '08:00'))
+  ordersSetInputValue('ordersEditEnd', validUntil)
+  ordersSetInputValue('ordersEditEndTime', ordersNormalizeTimeField(order.endTime, ordersDefaultEndTime(order.startTime)))
+  ordersSetInputValue('ordersEditDurationHours', duration)
+  ordersSetInputValue('ordersEditLocation', ordersTimelineAddressLabel(order))
+  ordersSetLocationGeoFields({
+    placeId: order.placeId || order.googlePlaceId || '',
+    lat: order.lat || order.latitude || '',
+    lng: order.lng || order.longitude || '',
+    mapUrl: order.mapUrl || order.googleMapsUrl || ordersGoogleMapsSearchUrl(ordersTimelineAddressLabel(order)),
+  })
+  ordersSetInputValue('ordersEditRepeatEvery', order.repeatEvery || 7)
+  ordersSetInputValue('ordersEditRepeatUnit', order.repeatUnit || 'day')
+  ordersSetInputValue('ordersEditPriority', order.priority || 'Normalny')
+  ordersSetInputValue('ordersEditAdvance', order.advanceDays || 4)
+  ordersSetInputValue('ordersEditType', ['individual', 'cyclic', 'renovation', 'windows', 'other'].includes(type) ? type : 'other')
+  ordersSetInputValue('ordersEditPrice', order.price || 0)
+  ordersSetInputValue('ordersEditTaskName', order.taskName || '')
+  ordersSetInputValue('ordersEditSms', order.smsText || '')
+  ordersSetInputValue('ordersEditSmsTime', order.smsTime || '')
+  ordersSetInputValue('ordersEditPhone', order.phone || '')
+  ordersSetInputValue('ordersEditDescription', order.description || order.title || '')
+  ordersSetInputValue('ordersEditClientName', order.clientName || order.clientLabel || '')
+  ordersRenderWorkerChecklist(order)
+  ordersRenderSchedulePreview(order)
+  ordersRenderCoworkerRows(order)
+  ordersRenderEditorTabs()
+  ordersHideLocationSuggestions()
+}
+
+function ordersOpenEditor(orderId) {
+  const order = ordersFindTimelineOrder(orderId)
+  if (!order) {
+    showTransientNotice('Nie znaleziono zlecenia do edycji.', 'error')
+    return
+  }
+  void ordersWarmLocationSources()
+  appState.ordersEditingId = String(orderId ?? '').trim()
+  appState.ordersEditorMode = 'edit'
+  appState.ordersEditorTab = 'basic'
+  renderOrdersView()
+}
+
+function ordersOpenEditorFromCalendar(orderId) {
+  const id = String(orderId ?? '').trim()
+  if (!ordersFindTimelineOrder(id)) {
+    showTransientNotice('Nie znaleziono zlecenia do edycji.', 'error')
+    return
+  }
+
+  appState.ordersEditingId = id
+  appState.ordersEditorMode = 'edit'
+  appState.ordersEditorTab = 'basic'
+  document.querySelector('[data-route="orders"]')?.click()
+  window.setTimeout(() => {
+    renderOrdersView()
+    void ordersWarmLocationSources()
+  }, 0)
+}
+
+function ordersShowList() {
+  ordersDiscardDraftIfNeeded()
+  appState.ordersEditingId = ''
+  appState.ordersEditorMode = 'edit'
+  appState.ordersEditorTab = 'basic'
+  renderOrdersView()
+}
+
+function ordersSaveEditor() {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  if (!order) {
+    showTransientNotice('Nie znaleziono zlecenia do zapisu.', 'error')
+    ordersShowList()
+    return
+  }
+  const isAddMode = appState.ordersEditorMode === 'add'
+
+  const dateYmd = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), ordersNormalizeDateField(order.dateYmd, todayYmd()))
+  const startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), ordersNormalizeTimeField(order.startTime, '08:00'))
+  const startMinutes = calendarTimelineTimeMinutes(startTime, 8 * 60)
+  const explicitEndDate = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), dateYmd)
+  const explicitEndTime = calendarNormalizeTimeValue(ordersReadInputValue('ordersEditEndTime'))
+  const durationHours = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditDurationHours')) || ordersDurationHours(order)))
+  const totalEndMinutes = startMinutes + durationHours * 60
+  let endDateYmd = explicitEndTime ? explicitEndDate : calendarAddDays(dateYmd, Math.floor(totalEndMinutes / 1440))
+  let endTime = explicitEndTime || calendarMinutesToTime(totalEndMinutes % 1440) || '23:59'
+  if (endDateYmd === dateYmd && calendarTimelineTimeMinutes(endTime, startMinutes + 60) <= startMinutes) {
+    showTransientNotice('Godzina STOP musi być późniejsza niż godzina START.', 'error')
+    return
+  }
+  const selectedRows = ordersReadSelectedWorkerRows()
+  const row = Number(ordersReadInputValue('ordersEditWorker'))
+  const safeRow = selectedRows[0] ?? (Number.isInteger(row) && row >= 0 ? row : Number(order.row ?? 0))
+  const type = String(ordersReadInputValue('ordersEditType') || order.type || 'other').trim()
+  const clientLabel = ordersReadInputValue('ordersEditClient') || ordersReadInputValue('ordersEditClientName')
+
+  const nextOrder = {
+    ...order,
+    isDraft: false,
+    row: safeRow,
+    assignedRows: selectedRows.length ? selectedRows : [safeRow],
+    workerAssignments: ordersWorkerAssignmentsFromRows(selectedRows.length ? selectedRows : [safeRow]),
+    dateYmd,
+    startTime,
+    endDateYmd,
+    endTime,
+    validUntil: explicitEndDate,
+    nextDate: ordersNormalizeDateField(ordersReadInputValue('ordersEditNext'), dateYmd),
+    title: ordersReadInputValue('ordersEditName') || order.title || 'Zlecenie',
+    clientLabel,
+    clientName: ordersReadInputValue('ordersEditClientName'),
+    addressLabel: ordersReadInputValue('ordersEditLocation'),
+    googlePlaceId: ordersReadInputValue('ordersEditLocationPlaceId'),
+    placeId: ordersReadInputValue('ordersEditLocationPlaceId'),
+    lat: ordersReadInputValue('ordersEditLocationLat'),
+    lng: ordersReadInputValue('ordersEditLocationLng'),
+    mapUrl: ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(ordersReadInputValue('ordersEditLocation')),
+    googleMapsUrl: ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(ordersReadInputValue('ordersEditLocation')),
+    repeatEvery: Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || 1)),
+    repeatUnit: ordersReadInputValue('ordersEditRepeatUnit') || 'day',
+    priority: ordersReadInputValue('ordersEditPriority') || 'Normalny',
+    advanceDays: Math.max(0, Math.floor(Number(ordersReadInputValue('ordersEditAdvance')) || 0)),
+    type: ['individual', 'cyclic', 'renovation', 'windows', 'other'].includes(type) ? type : 'other',
+    tone: ordersTimelineToneForType(type),
+    price: Math.max(0, Number(ordersReadInputValue('ordersEditPrice')) || 0),
+    taskName: ordersReadInputValue('ordersEditTaskName'),
+    smsText: ordersReadInputValue('ordersEditSms'),
+    smsTime: ordersReadInputValue('ordersEditSmsTime'),
+    phone: ordersReadInputValue('ordersEditPhone'),
+    description: ordersReadInputValue('ordersEditDescription'),
+  }
+
+  const conflict = calendarTimelineFindOrderConflict(nextOrder, ordersListSourceOrders())
+  if (conflict) {
+    showTransientNotice('Nie zapisano: pracownik ma już zlecenie w tym czasie.', 'error')
+    return
+  }
+
+  appState.calendarTimelineDemoOrders = ordersListSourceOrders().map((item) => (item.id === nextOrder.id ? nextOrder : item))
+  appState.ordersEditorMode = 'edit'
+  appState.ordersEditingId = ''
+  renderOrdersView()
+  showTransientNotice(isAddMode ? 'Zlecenie dodane do bieżącego widoku.' : 'Zlecenie zapisane w bieżącym widoku.')
+}
+
+function ordersRowsFromCalendarTimeline() {
+  const resources = calendarTimelineResources()
+  return ordersListSourceOrders().map((order) => {
+    const resource = resources[Number(order.row)] ?? null
+    const endDay = String(order.endDateYmd || order.dateYmd || '').trim()
+    const visibleEndDay = String(order.validUntil || endDay).trim()
+    return {
+      id: String(order.id ?? '').trim(),
+      dateFrom: ordersDateTimeFromTimeline(order.dateYmd, order.startTime),
+      dateTo: ordersDateTimeFromTimeline(visibleEndDay, order.endTime),
+      nextDate: String(order.nextDate || order.dateYmd || '').trim() || '-',
+      name: String(order.title ?? '').trim() || '-',
+      client: ordersTimelineClientLabel(order),
+      worker: ordersWorkerLabelForOrder(order, resources) || String(resource?.name ?? order.workerLabel ?? `Wiersz ${Number(order.row) + 1}`).trim(),
+      address: ordersTimelineAddressLabel(order),
+      cyclic: String(order.type ?? '').trim() === 'cyclic',
+      completed: Boolean(order.completed),
+      type: String(order.type ?? '').trim() || 'other',
+    }
+  })
+}
+
+function ordersListVisibleRows() {
+  const query = normalizeSearchText(appState.ordersSearch)
+  return ordersRowsFromCalendarTimeline().filter((row) => {
+    if (appState.ordersShowCyclic && !row.cyclic) {
+      return false
+    }
+    if (!query) {
+      return true
+    }
+    return normalizeSearchText([row.dateFrom, row.dateTo, row.nextDate, row.name, row.client, row.worker, row.address].join(' ')).includes(query)
+  }).sort((left, right) => String(left.nextDate ?? '').localeCompare(String(right.nextDate ?? '')))
+}
+
+function ordersListActionButtonHtml(kind, label, iconPath) {
+  return `
+    <button class="orders-action orders-action--${escapeHtml(kind)}" type="button" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}" data-orders-list-action="${escapeHtml(kind)}">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">${iconPath}</svg>
+    </button>
+  `
+}
+
+function ordersListRowHtml(row = {}) {
+  const editIcon =
+    '<path d="m5 16.5-.5 3 3-.5L18 8.5 15.5 6 5 16.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="m14.5 7 2.5 2.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
+  const pinIcon =
+    '<path d="M12 21s7-5.2 7-11a7 7 0 0 0-14 0c0 5.8 7 11 7 11Z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="10" r="2.4" stroke="currentColor" stroke-width="2"/>'
+  const deleteIcon =
+    '<path d="M5 7h14M9 7V5h6v2M8 10v8M12 10v8M16 10v8M7 7l1 13h8l1-13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+
+  return `
+    <div class="orders-row" data-order-id="${escapeHtml(row.id)}">
+      <div>${escapeHtml(row.dateFrom || '-')}</div>
+      <div>${escapeHtml(row.dateTo || '-')}</div>
+      <div>${escapeHtml(row.nextDate || '-')}</div>
+      <div class="orders-strong">${escapeHtml(row.name || '-')}</div>
+      <div>${escapeHtml(row.client || '-')}</div>
+      <div>${escapeHtml(row.worker || '-')}</div>
+      <div>${escapeHtml(row.address || '-')}</div>
+      <div class="orders-actions">
+        ${ordersListActionButtonHtml('edit', 'Edytuj', editIcon)}
+        ${ordersListActionButtonHtml('pin', 'Pokaż adres', pinIcon)}
+        ${ordersListActionButtonHtml('delete', 'Usuń', deleteIcon)}
+      </div>
+    </div>
+  `
+}
+
+function renderOrdersView() {
+  const listPanel = document.getElementById('ordersListPanel')
+  const editorPanel = document.getElementById('ordersEditorPanel')
+  const rowsNode = document.getElementById('ordersRows')
+  const countNode = document.getElementById('ordersCount')
+  const statusNode = document.getElementById('ordersStatus')
+  const searchInput = document.getElementById('ordersSearchInput')
+  const cycleToggle = document.getElementById('ordersCycleToggle')
+
+  if (appState.ordersEditingId) {
+    const order = ordersFindTimelineOrder(appState.ordersEditingId)
+    if (order) {
+      ordersRenderEditor(order)
+      return
+    }
+    appState.ordersEditingId = ''
+  }
+
+  if (listPanel) {
+    listPanel.hidden = false
+  }
+  if (editorPanel) {
+    editorPanel.hidden = true
+  }
+
+  if (!rowsNode) {
+    return
+  }
+
+  if (searchInput instanceof HTMLInputElement && searchInput.value !== appState.ordersSearch) {
+    searchInput.value = appState.ordersSearch
+  }
+
+  if (cycleToggle instanceof HTMLButtonElement) {
+    cycleToggle.classList.toggle('is-active', appState.ordersShowCyclic)
+    cycleToggle.setAttribute('aria-pressed', appState.ordersShowCyclic ? 'true' : 'false')
+    cycleToggle.textContent = appState.ordersShowCyclic ? 'Cykliczne' : 'Wszystkie'
+  }
+
+  const rows = ordersListVisibleRows()
+  rowsNode.innerHTML = rows.length
+    ? rows.map((row) => ordersListRowHtml(row)).join('')
+    : `
+      <div class="orders-row orders-row-empty">
+        <div>-</div><div>-</div><div>-</div><div>Brak zleceń dla wybranych filtrów.</div><div>-</div><div>-</div><div>-</div><div>-</div>
+      </div>
+    `
+
+  if (countNode) {
+    countNode.textContent = `${rows.length} zleceń`
+  }
+  if (statusNode) {
+    statusNode.textContent = appState.ordersShowCyclic ? 'Widok: zlecenia cykliczne.' : 'Widok: wszystkie zlecenia.'
+  }
+}
+
+let ordersMapInstance = null
+let ordersMapInfoWindow = null
+let ordersMapMarkers = []
+let ordersMapRenderSeq = 0
+
+function ordersMapMonthEnd(ymd = todayYmd()) {
+  const date = calendarDateFromYmd(ymd)
+  date.setMonth(date.getMonth() + 1, 0)
+  return calendarDateToYmd(date)
+}
+
+function ordersMapEnsureDefaults() {
+  const today = todayYmd()
+  if (!appState.ordersMapDateFrom) {
+    appState.ordersMapDateFrom = calendarMonthStart(today)
+  }
+  if (!appState.ordersMapDateTo) {
+    appState.ordersMapDateTo = ordersMapMonthEnd(today)
+  }
+  if (typeof appState.ordersMapWorkerOnly !== 'boolean') {
+    appState.ordersMapWorkerOnly = true
+  }
+  if (typeof appState.ordersMapStatus !== 'string') {
+    appState.ordersMapStatus = 'new'
+  }
+}
+
+function ordersMapSetNotice(message = '', isError = false) {
+  const notice = document.getElementById('ordersMapNotice')
+  if (!notice) {
+    return
+  }
+  notice.textContent = message
+  notice.hidden = !message
+  notice.classList.toggle('is-error', Boolean(isError))
+}
+
+function ordersMapWorkerOptionsHtml() {
+  const selected = String(appState.ordersMapWorker ?? '')
+  const resources = calendarTimelineResources()
+  return [
+    `<option value=""${selected ? '' : ' selected'}>Wszyscy</option>`,
+    ...resources
+      .filter((resource) => resource.type !== 'placeholder')
+      .map((resource, index) => {
+        const value = String(index)
+        const selectedAttr = selected === value ? ' selected' : ''
+        return `<option value="${escapeHtml(value)}"${selectedAttr}>${escapeHtml(resource.name || `Wiersz ${index + 1}`)}</option>`
+      }),
+  ].join('')
+}
+
+function ordersMapSyncControls() {
+  ordersMapEnsureDefaults()
+  ordersSetInputValue('ordersMapDateFrom', appState.ordersMapDateFrom)
+  ordersSetInputValue('ordersMapDateTo', appState.ordersMapDateTo)
+  ordersSetInputValue('ordersMapStatus', appState.ordersMapStatus)
+  ordersSetInputValue('ordersMapType', appState.ordersMapType)
+  ordersSetInputValue('ordersMapSearch', appState.ordersMapSearch)
+
+  const workerSelect = document.getElementById('ordersMapWorker')
+  if (workerSelect instanceof HTMLSelectElement) {
+    workerSelect.innerHTML = ordersMapWorkerOptionsHtml()
+    workerSelect.value = String(appState.ordersMapWorker ?? '')
+    workerSelect.disabled = !appState.ordersMapWorkerOnly
+  }
+
+  const workerOnly = document.getElementById('ordersMapWorkerOnly')
+  if (workerOnly instanceof HTMLInputElement) {
+    workerOnly.checked = Boolean(appState.ordersMapWorkerOnly)
+  }
+}
+
+function ordersMapReadControls() {
+  appState.ordersMapDateFrom = ordersNormalizeDateField(ordersReadInputValue('ordersMapDateFrom'), calendarMonthStart(todayYmd()))
+  appState.ordersMapDateTo = ordersNormalizeDateField(ordersReadInputValue('ordersMapDateTo'), ordersMapMonthEnd(todayYmd()))
+  appState.ordersMapStatus = ordersReadInputValue('ordersMapStatus')
+  appState.ordersMapType = ordersReadInputValue('ordersMapType')
+  appState.ordersMapWorker = ordersReadInputValue('ordersMapWorker')
+  appState.ordersMapSearch = ordersReadInputValue('ordersMapSearch')
+  const workerOnly = document.getElementById('ordersMapWorkerOnly')
+  appState.ordersMapWorkerOnly = workerOnly instanceof HTMLInputElement ? workerOnly.checked : true
+}
+
+function ordersMapOrderEndDay(order = {}) {
+  return ordersNormalizeDateField(order?.endDateYmd || order?.validUntil || order?.dateYmd, order?.dateYmd || todayYmd())
+}
+
+function ordersMapOrderIsActive(order = {}) {
+  const today = todayYmd()
+  return !order?.completed && String(order?.dateYmd ?? '') <= today && ordersMapOrderEndDay(order) >= today
+}
+
+function ordersMapVisibleOrders() {
+  ordersMapEnsureDefaults()
+  const query = normalizeSearchText(appState.ordersMapSearch)
+  const from = appState.ordersMapDateFrom
+  const to = appState.ordersMapDateTo
+  const selectedWorker = String(appState.ordersMapWorker ?? '')
+  const selectedWorkerRow = Number(selectedWorker)
+  const filterWorker = appState.ordersMapWorkerOnly && selectedWorker && Number.isInteger(selectedWorkerRow)
+
+  return ordersListSourceOrders()
+    .filter((order) => {
+      const start = ordersNormalizeDateField(order?.dateYmd, todayYmd())
+      const end = ordersMapOrderEndDay(order)
+      if (start > to || end < from) {
+        return false
+      }
+
+      if (appState.ordersMapStatus === 'new' && order?.completed) {
+        return false
+      }
+      if (appState.ordersMapStatus === 'completed' && !order?.completed) {
+        return false
+      }
+      if (appState.ordersMapStatus === 'active' && !ordersMapOrderIsActive(order)) {
+        return false
+      }
+
+      if (appState.ordersMapType && String(order?.type ?? '') !== appState.ordersMapType) {
+        return false
+      }
+
+      if (filterWorker && !ordersNormalizeOrderRows(order).includes(selectedWorkerRow)) {
+        return false
+      }
+
+      if (!query) {
+        return true
+      }
+
+      const haystack = [
+        order?.title,
+        ordersTimelineClientLabel(order),
+        ordersTimelineAddressLabel(order),
+        ordersWorkerLabelForOrder(order),
+        order?.type,
+      ].join(' ')
+      return normalizeSearchText(haystack).includes(query)
+    })
+    .sort((left, right) => {
+      const byDate = String(left?.dateYmd ?? '').localeCompare(String(right?.dateYmd ?? ''))
+      if (byDate) return byDate
+      return String(left?.startTime ?? '').localeCompare(String(right?.startTime ?? ''))
+    })
+}
+
+function ordersMapFallbackIframe(query = 'Polska') {
+  const canvas = document.getElementById('ordersMapCanvas')
+  if (!canvas) {
+    return
+  }
+  const src = ordersGoogleMapsEmbedUrlFromQuery(query || 'Polska', query === 'Polska' ? 6 : 11)
+  canvas.innerHTML = src
+    ? `<iframe class="orders-map-fallback-frame" src="${escapeHtml(src)}" title="Mapa zleceń" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>`
+    : ''
+}
+
+function ordersMapClearMarkers() {
+  ordersMapMarkers.forEach((marker) => {
+    if (marker && typeof marker.setMap === 'function') {
+      marker.setMap(null)
+    } else if (marker) {
+      marker.map = null
+    }
+  })
+  ordersMapMarkers = []
+}
+
+async function ordersMapGeocodeOrder(order = {}, maps) {
+  const direct = ordersMapCoordinates(order)
+  if (direct) {
+    return direct
+  }
+
+  const address = ordersTimelineAddressLabel(order)
+  const query = ordersMapQuery(address)
+  if (!query || query === 'Polska') {
+    return null
+  }
+  if (ordersMapGeocodeCache.has(query)) {
+    return ordersMapGeocodeCache.get(query)
+  }
+  if (!maps?.Geocoder) {
+    return null
+  }
+
+  const geocoder = new maps.Geocoder()
+  const result = await new Promise((resolve) => {
+    geocoder.geocode({ address: query }, (results, status) => {
+      if (status !== 'OK' || !Array.isArray(results) || !results[0]?.geometry?.location) {
+        resolve(null)
+        return
+      }
+      const location = results[0].geometry.location
+      resolve({ lat: location.lat(), lng: location.lng() })
+    })
+  })
+  ordersMapGeocodeCache.set(query, result)
+  return result
+}
+
+function ordersMapInfoHtml(order = {}) {
+  const title = String(order?.title ?? 'Zlecenie').trim() || 'Zlecenie'
+  const client = ordersTimelineClientLabel(order)
+  const address = ordersTimelineAddressLabel(order)
+  const worker = ordersWorkerLabelForOrder(order)
+  const time = `${ordersDateTimeFromTimeline(order?.dateYmd, order?.startTime)} - ${ordersDateTimeFromTimeline(order?.endDateYmd || order?.dateYmd, order?.endTime)}`
+  return `
+    <div class="orders-map-infowindow">
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(client || '-')}</span>
+      <span>${escapeHtml(address || '-')}</span>
+      <span>${escapeHtml(worker || '-')}</span>
+      <small>${escapeHtml(time)}</small>
+    </div>
+  `
+}
+
+async function ordersMapRenderCanvas(orders = []) {
+  const canvas = document.getElementById('ordersMapCanvas')
+  if (!canvas) {
+    return
+  }
+
+  const renderSeq = ++ordersMapRenderSeq
+  ordersMapSetNotice('Ładowanie mapy...')
+
+  try {
+    const maps = await ordersLoadGoogleMaps()
+    if (renderSeq !== ordersMapRenderSeq || appState.currentRoute !== 'ordersMap') {
+      return
+    }
+
+    canvas.innerHTML = ''
+    if (!ordersMapInstance) {
+      ordersMapInstance = new maps.Map(canvas, {
+        center: { lat: 52.069, lng: 19.48 },
+        zoom: 6,
+        mapTypeControl: true,
+        streetViewControl: true,
+        fullscreenControl: true,
+      })
+      ordersMapInfoWindow = new maps.InfoWindow()
+    }
+
+    ordersMapClearMarkers()
+    const bounds = new maps.LatLngBounds()
+    let markerCount = 0
+
+    for (const order of orders) {
+      const address = ordersTimelineAddressLabel(order)
+      if (!address || address === '-') {
+        continue
+      }
+      const position = await ordersMapGeocodeOrder(order, maps)
+      if (renderSeq !== ordersMapRenderSeq || appState.currentRoute !== 'ordersMap') {
+        return
+      }
+      if (!position) {
+        continue
+      }
+      const marker = new maps.Marker({
+        map: ordersMapInstance,
+        position,
+        title: String(order?.title ?? 'Zlecenie'),
+        label: {
+          text: String(markerCount + 1),
+          color: '#fff',
+          fontSize: '12px',
+          fontWeight: '800',
+        },
+      })
+      marker.addListener('click', () => {
+        ordersMapInfoWindow?.setContent(ordersMapInfoHtml(order))
+        ordersMapInfoWindow?.open({ anchor: marker, map: ordersMapInstance })
+      })
+      ordersMapMarkers.push(marker)
+      bounds.extend(position)
+      markerCount += 1
+    }
+
+    if (markerCount) {
+      ordersMapInstance.fitBounds(bounds, 70)
+      if (markerCount === 1) {
+        ordersMapInstance.setZoom(13)
+      }
+      ordersMapSetNotice('')
+    } else {
+      ordersMapInstance.setCenter({ lat: 52.069, lng: 19.48 })
+      ordersMapInstance.setZoom(6)
+      ordersMapSetNotice('Brak zleceń z adresem dla wybranych filtrów.')
+    }
+  } catch {
+    const firstAddress = orders.map((order) => ordersTimelineAddressLabel(order)).find((address) => address && address !== '-')
+    ordersMapFallbackIframe(firstAddress || 'Polska')
+    ordersMapSetNotice('Nie udało się uruchomić interaktywnej mapy. Pokazuję podgląd Google Maps.', true)
+  }
+}
+
+function renderOrdersMapView() {
+  ordersMapSyncControls()
+  const orders = ordersMapVisibleOrders()
+  const countNode = document.getElementById('ordersMapCount')
+  if (countNode) {
+    countNode.textContent = String(orders.length)
+  }
+  void ordersMapRenderCanvas(orders)
+}
+
+function bindOrdersViewFunctions() {
+  const binding = createBindingHelpers()
+  const root = document.getElementById('view-orders')
+  renderOrdersView()
+
+  binding.add(root, 'input', (event) => {
+    if (event.target?.id === 'ordersEditLocation') {
+      ordersClearLocationGeoFields()
+      ordersRenderLocationSuggestions(String(event.target.value ?? ''))
+      ordersQueueGoogleLocationSuggestions(String(event.target.value ?? ''))
+      ordersQueueGoogleLocationResolve(String(event.target.value ?? ''))
+      void ordersWarmLocationSources().then(() => {
+        const input = document.getElementById('ordersEditLocation')
+        if (input instanceof HTMLInputElement && document.activeElement === input) {
+          ordersRenderLocationSuggestions(input.value)
+        }
+      })
+      return
+    }
+
+    if (event.target?.id === 'ordersSearchInput') {
+      appState.ordersSearch = String(event.target.value ?? '')
+      renderOrdersView()
+    }
+  })
+
+  binding.add(root, 'change', (event) => {
+    if (event.target?.id === 'ordersEditClient') {
+      const order = ordersFindTimelineOrder(appState.ordersEditingId)
+      if (order) {
+        order.clientLabel = ordersReadInputValue('ordersEditClient')
+        ordersRenderSchedulePreview(order)
+      }
+      return
+    }
+    if (event.target?.id === 'ordersEditWorker') {
+      const order = ordersFindTimelineOrder(appState.ordersEditingId)
+      const row = Number(ordersReadInputValue('ordersEditWorker'))
+      if (order && Number.isInteger(row) && row >= 0) {
+        order.row = row
+        order.assignedRows = ordersReadSelectedWorkerRows()
+        ordersRenderWorkerChecklist(order)
+      }
+      return
+    }
+    if (event.target?.hasAttribute?.('data-orders-worker-row')) {
+      const order = ordersFindTimelineOrder(appState.ordersEditingId)
+      if (order) {
+        order.assignedRows = ordersReadSelectedWorkerRows()
+      }
+      return
+    }
+    if (['ordersEditStart', 'ordersEditEnd', 'ordersEditRepeatEvery', 'ordersEditRepeatUnit'].includes(String(event.target?.id ?? ''))) {
+      const order = ordersFindTimelineOrder(appState.ordersEditingId)
+      if (order) {
+        order.dateYmd = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), order.dateYmd || todayYmd())
+        order.validUntil = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), order.validUntil || order.dateYmd || todayYmd())
+        order.repeatEvery = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || 1))
+        order.repeatUnit = ordersReadInputValue('ordersEditRepeatUnit') || 'day'
+        ordersRenderSchedulePreview(order)
+      }
+    }
+  })
+
+  binding.add(root, 'click', (event) => {
+    const locationSuggestion = eventTargetClosest(event, '[data-orders-location-index]')
+    if (locationSuggestion) {
+      event.preventDefault()
+      const index = Number(locationSuggestion.getAttribute('data-orders-location-index'))
+      const item = Number.isInteger(index) ? ordersRenderedLocationSuggestions[index] : null
+      if (item) {
+        ordersPickLocationSuggestion(item)
+      }
+      return
+    }
+
+    const addOrder = eventTargetClosest(event, '#ordersAddBtn')
+    if (addOrder) {
+      event.preventDefault()
+      ordersOpenAddEditor()
+      return
+    }
+
+    const toggle = eventTargetClosest(event, '#ordersCycleToggle')
+    if (toggle) {
+      event.preventDefault()
+      appState.ordersShowCyclic = !appState.ordersShowCyclic
+      renderOrdersView()
+      return
+    }
+
+    const editorTab = eventTargetClosest(event, '[data-orders-tab-target]')
+    if (editorTab) {
+      event.preventDefault()
+      appState.ordersEditorTab = String(editorTab.getAttribute('data-orders-tab-target') || 'basic')
+      ordersRenderEditorTabs()
+      return
+    }
+
+    const back = eventTargetClosest(event, '#ordersEditBack')
+    if (back) {
+      event.preventDefault()
+      ordersShowList()
+      return
+    }
+
+    if (event.target?.id === 'ordersEditorPanel') {
+      event.preventDefault()
+      ordersShowList()
+      return
+    }
+
+    const save = eventTargetClosest(event, '#ordersEditSave, [data-orders-save]')
+    if (save) {
+      event.preventDefault()
+      ordersSaveEditor()
+      return
+    }
+
+    const addCoworker = eventTargetClosest(event, '#ordersCoworkerAdd')
+    if (addCoworker) {
+      event.preventDefault()
+      ordersAddCoworkerToCurrentOrder()
+      return
+    }
+
+    const removeCoworker = eventTargetClosest(event, '[data-orders-remove-coworker]')
+    if (removeCoworker) {
+      event.preventDefault()
+      ordersRemoveCoworkerFromCurrentOrder(removeCoworker.getAttribute('data-orders-remove-coworker'))
+      return
+    }
+
+    const action = eventTargetClosest(event, '[data-orders-list-action]')
+    if (action) {
+      event.preventDefault()
+      const row = eventTargetClosest(event, '[data-order-id]')
+      const orderId = row?.getAttribute('data-order-id') || ''
+      const actionName = action.getAttribute('data-orders-list-action')
+      if (actionName === 'edit') {
+        ordersOpenEditor(orderId)
+        return
+      }
+      if (actionName === 'pin') {
+        ordersOpenMapModal(orderId)
+        return
+      }
+      if (actionName === 'delete') {
+        showTransientNotice('Usuwanie zleceń podepniemy po podłączeniu bazy.', 'error')
+        return
+      }
+    }
+
+    const search = eventTargetClosest(event, '#ordersSearchBtn')
+    if (search) {
+      event.preventDefault()
+      renderOrdersView()
+      return
+    }
+
+    const mapClose = eventTargetClosest(event, '[data-orders-map-close]')
+    if (mapClose || event.target?.id === 'ordersMapOverlay') {
+      event.preventDefault()
+      ordersCloseMapModal()
+      return
+    }
+
+    const locationArea = eventTargetClosest(event, '.orders-location-combo')
+    if (!locationArea) {
+      ordersHideLocationSuggestions()
+    }
+  })
+
+  binding.add(root, 'keydown', (event) => {
+    if (event.target?.id === 'ordersEditLocation' && event.key === 'Escape') {
+      ordersHideLocationSuggestions()
+    }
+    if (event.key === 'Escape') {
+      ordersCloseMapModal()
+    }
+  })
+
+  return binding.done
+}
+
+function bindOrdersMapViewFunctions() {
+  const binding = createBindingHelpers()
+  const root = document.getElementById('view-ordersMap')
+
+  binding.add(root, 'change', (event) => {
+    const targetId = String(event.target?.id ?? '')
+    if (
+      [
+        'ordersMapDateFrom',
+        'ordersMapDateTo',
+        'ordersMapStatus',
+        'ordersMapType',
+        'ordersMapWorker',
+        'ordersMapWorkerOnly',
+      ].includes(targetId)
+    ) {
+      ordersMapReadControls()
+      renderOrdersMapView()
+    }
+  })
+
+  binding.add(root, 'input', (event) => {
+    if (event.target?.id === 'ordersMapSearch') {
+      appState.ordersMapSearch = String(event.target.value ?? '')
+      renderOrdersMapView()
+    }
+  })
+
+  binding.add(root, 'click', (event) => {
+    const apply = eventTargetClosest(event, '#ordersMapApplyBtn, #ordersMapRefreshBtn, #ordersMapSearchBtn')
+    if (apply) {
+      event.preventDefault()
+      ordersMapReadControls()
+      renderOrdersMapView()
+    }
+  })
+
+  return binding.done
+}
+
 let individualOrdersSearchDebounceHandle = null
 
 function individualOrderQrUrl(qrCode, size = 260) {
@@ -4837,6 +9144,47 @@ function closeIndividualOrderQrModal() {
   appState.individualOrderQrCurrent = ''
 }
 
+const PDF_EXPORT_FONT_FAMILY = 'RobotoPdf'
+const PDF_EXPORT_FONT_REGULAR_FILE = 'Roboto-Regular.ttf'
+const PDF_EXPORT_FONT_BOLD_FILE = 'Roboto-Medium.ttf'
+let pdfExportFontVfsPromise = null
+let pdfMakeExportPromise = null
+
+async function loadPdfExportFontVfs() {
+  if (!pdfExportFontVfsPromise) {
+    pdfExportFontVfsPromise = import('pdfmake/build/vfs_fonts.js').then((module) => {
+      const vfs = module?.default ?? module?.pdfMake?.vfs ?? module?.vfs ?? module
+      if (!vfs || typeof vfs !== 'object') {
+        throw new Error('Nie udało się przygotować fontów PDF.')
+      }
+      return vfs
+    })
+  }
+
+  return pdfExportFontVfsPromise
+}
+
+async function ensurePdfMakeLoaded() {
+  if (!pdfMakeExportPromise) {
+    pdfMakeExportPromise = Promise.all([import('pdfmake/build/pdfmake.js'), loadPdfExportFontVfs()]).then(
+      ([module, vfs]) => {
+        const pdfMake = module?.default ?? module?.pdfMake ?? module
+        if (!pdfMake || typeof pdfMake.createPdf !== 'function') {
+          throw new Error('Biblioteka PDF nie jest dostępna.')
+        }
+        if (typeof pdfMake.addVirtualFileSystem === 'function') {
+          pdfMake.addVirtualFileSystem(vfs)
+        } else {
+          pdfMake.vfs = vfs
+        }
+        return pdfMake
+      },
+    )
+  }
+
+  return pdfMakeExportPromise
+}
+
 async function ensureJsPdfLoaded() {
   if (window.jspdf?.jsPDF) {
     return window.jspdf.jsPDF
@@ -4864,6 +9212,29 @@ async function ensureJsPdfLoaded() {
   }
 
   return window.jspdf.jsPDF
+}
+
+async function ensurePdfUnicodeFont(pdf) {
+  if (!pdf || typeof pdf.addFileToVFS !== 'function' || typeof pdf.addFont !== 'function') {
+    throw new Error('Ta wersja jsPDF nie obsługuje osadzania fontów Unicode.')
+  }
+
+  const vfs = await loadPdfExportFontVfs()
+  const regularFont = String(vfs[PDF_EXPORT_FONT_REGULAR_FILE] ?? '').trim()
+  const boldFont = String(vfs[PDF_EXPORT_FONT_BOLD_FILE] ?? vfs['Roboto-Bold.ttf'] ?? '').trim()
+  if (!regularFont || !boldFont) {
+    throw new Error('Brak plików fontów PDF z polskimi znakami.')
+  }
+
+  pdf.addFileToVFS(PDF_EXPORT_FONT_REGULAR_FILE, regularFont)
+  pdf.addFont(PDF_EXPORT_FONT_REGULAR_FILE, PDF_EXPORT_FONT_FAMILY, 'normal')
+  pdf.addFileToVFS(PDF_EXPORT_FONT_BOLD_FILE, boldFont)
+  pdf.addFont(PDF_EXPORT_FONT_BOLD_FILE, PDF_EXPORT_FONT_FAMILY, 'bold')
+  pdf.setFont(PDF_EXPORT_FONT_FAMILY, 'normal')
+}
+
+function setPdfUnicodeFont(pdf, style = 'normal') {
+  pdf.setFont(PDF_EXPORT_FONT_FAMILY, style)
 }
 
 async function downloadCurrentIndividualOrderQrPng() {
@@ -4932,7 +9303,7 @@ async function downloadCurrentIndividualOrderQrPdf() {
     pdf.text(`Kod QR: ${code}`, pageWidth / 2, 20, { align: 'center' })
     pdf.addImage(dataUrl, 'PNG', startX, 40, qrSize, qrSize)
     pdf.setFontSize(10)
-    pdf.text('Wygenerowano w iClean Portal', pageWidth / 2, pageHeight - 15, { align: 'center' })
+    pdf.text('Wygenerowano w Cleanzi Portal', pageWidth / 2, pageHeight - 15, { align: 'center' })
     pdf.save(`${code}.pdf`)
     individualOrdersSetStatus(`OK · pobrano ${code}.pdf`)
   } catch (error) {
@@ -5307,7 +9678,7 @@ function renderEventsRows(rows) {
       const zoneCell =
         zoneLabel === '-'
           ? '-'
-          : `<button class="events-cell-link" type="button" data-event-history-zone="${index}" title="Pokaz historie strefy">${escapeHtml(zoneLabel)}</button>`
+          : `<button class="events-cell-link" type="button" data-event-history-zone="${index}" title="Pokaz historie strefy">${zoneNameWithQrHtml(zoneLabel, row)}</button>`
       const startLabel = dashboardClockLabelToHm(row.start, '-')
       const stopLabel = dashboardClockLabelToHm(row.stop, '-')
       const durationLabel = dashboardDurationLabelToHm(row.duration, '00:00')
@@ -5437,6 +9808,132 @@ function getZoneById(zoneId) {
   return appState.zones.find((zone) => String(zone.id) === id) ?? null
 }
 
+function eventEditorGetPickerConfig(kind) {
+  const normalizedKind = String(kind ?? '').trim().toLowerCase()
+  if (normalizedKind === 'worker' || normalizedKind === 'workers') {
+    return {
+      inputId: 'evEditWorkerSearch',
+      selectId: 'evEditWorker',
+      placeholderLabel: '(wybierz pracownika)',
+      options: appState.eventEditorWorkerOptions,
+    }
+  }
+
+  if (normalizedKind === 'zone' || normalizedKind === 'zones') {
+    return {
+      inputId: 'evEditStrefaSearch',
+      selectId: 'evEditStrefa',
+      placeholderLabel: '(wybierz strefe)',
+      options: appState.eventEditorZoneOptions,
+    }
+  }
+
+  return {
+    inputId: 'evEditPomSearch',
+    selectId: 'evEditPom',
+    placeholderLabel: '(wybierz klienta)',
+    options: appState.eventEditorClientOptions,
+  }
+}
+
+function eventEditorSetPickerExpanded(config, expanded, optionCount = 0) {
+  const select = document.getElementById(config.selectId)
+  if (!select) {
+    return
+  }
+
+  if (!expanded) {
+    select.size = 1
+    select.classList.remove('is-expanded')
+    return
+  }
+
+  const rows = Math.min(Math.max(Number(optionCount || 0) + 1, 2), 8)
+  select.size = rows
+  select.classList.add('is-expanded')
+}
+
+function eventEditorCollapsePicker(kind) {
+  eventEditorSetPickerExpanded(eventEditorGetPickerConfig(kind), false, 0)
+}
+
+function eventEditorMaybeCollapsePicker(kind) {
+  const config = eventEditorGetPickerConfig(kind)
+  const activeId = String(document.activeElement?.id ?? '').trim()
+  if (activeId === config.inputId || activeId === config.selectId) {
+    return
+  }
+
+  eventEditorSetPickerExpanded(config, false, 0)
+}
+
+function eventEditorSyncSearchInput(kind) {
+  const config = eventEditorGetPickerConfig(kind)
+  const select = document.getElementById(config.selectId)
+  const input = document.getElementById(config.inputId)
+  if (!select || !input) {
+    return
+  }
+
+  const selectedOption = select.selectedOptions?.[0]
+  input.value = select.value ? String(selectedOption?.textContent ?? '').trim() : ''
+}
+
+function eventEditorApplyPickerFilter(kind, { expandOnEmpty = false } = {}) {
+  const config = eventEditorGetPickerConfig(kind)
+  const select = document.getElementById(config.selectId)
+  if (!select) {
+    return
+  }
+
+  const currentValue = String(select.value ?? '').trim()
+  const query = String(document.getElementById(config.inputId)?.value ?? '').trim()
+  const filteredOptions = reportHistoryFilterOptions(config.options, query)
+  const placeholderLabel = query && !filteredOptions.length ? '(brak dopasowan)' : config.placeholderLabel
+
+  setSelectOptions(select, filteredOptions, placeholderLabel)
+  const placeholderOption = select.options[0]
+  if (placeholderOption) {
+    const hasMatches = filteredOptions.length > 0
+    placeholderOption.hidden = hasMatches
+    placeholderOption.disabled = hasMatches
+  }
+
+  eventEditorSetPickerExpanded(config, Boolean(query) || expandOnEmpty, filteredOptions.length)
+  if (currentValue && filteredOptions.some((option) => option.value === currentValue)) {
+    select.value = currentValue
+  }
+}
+
+function eventEditorApplyAllPickerFilters() {
+  eventEditorApplyPickerFilter('worker')
+  eventEditorApplyPickerFilter('client')
+  eventEditorApplyPickerFilter('zone')
+}
+
+function eventEditorEnsureOption(options, value, fallbackLabel) {
+  const normalizedValue = String(value ?? '').trim()
+  if (!normalizedValue) {
+    return [...options]
+  }
+
+  if (options.some((option) => String(option.value ?? '').trim() === normalizedValue)) {
+    return [...options]
+  }
+
+  const label = fallbackLabel ? `${fallbackLabel} (spoza listy)` : `${normalizedValue} (spoza listy)`
+  return [...options, { value: normalizedValue, label }]
+}
+
+function eventEditorResetSearchInputs() {
+  ;['evEditWorkerSearch', 'evEditPomSearch', 'evEditStrefaSearch'].forEach((id) => {
+    const input = document.getElementById(id)
+    if (input) {
+      input.value = ''
+    }
+  })
+}
+
 function populateEventEditorOptions(selectedWorkerLogin, selectedClientId, selectedZoneId) {
   const workerSelect = document.getElementById('evEditWorker')
   const clientSelect = document.getElementById('evEditPom')
@@ -5466,19 +9963,15 @@ function populateEventEditorOptions(selectedWorkerLogin, selectedClientId, selec
   }))
   clientOptions.sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
 
-  setSelectOptions(workerSelect, workerOptions)
-  setSelectOptions(clientSelect, clientOptions)
-
   const normalizedClientId = String(selectedClientId ?? '').trim()
-  if (normalizedClientId) {
-    clientSelect.value = normalizedClientId
-  }
 
   const availableZones = normalizedClientId
     ? appState.zones.filter((zone) => String(zone.clientId ?? '').trim() === normalizedClientId)
     : appState.zones
 
   const zoneOptions = availableZones
+    .map((zone) => mapZoneForView(zone))
+    .filter((zone) => !isUnassignedCleanZone(zone))
     .map((zone) => {
       const zoneId = String(zone.id ?? '').trim()
       if (!zoneId) {
@@ -5492,8 +9985,6 @@ function populateEventEditorOptions(selectedWorkerLogin, selectedClientId, selec
     })
     .filter(Boolean)
 
-  setSelectOptions(zoneSelect, zoneOptions)
-
   const normalizedWorkerLogin = String(selectedWorkerLogin ?? '').trim()
   const normalizedZoneId = String(selectedZoneId ?? '').trim()
   const fallbackWorkerLabel =
@@ -5504,9 +9995,17 @@ function populateEventEditorOptions(selectedWorkerLogin, selectedClientId, selec
   const fallbackZoneLabel =
     appState.zones.find((zone) => String(zone.id ?? '').trim() === normalizedZoneId)?.name ?? normalizedZoneId
 
+  appState.eventEditorWorkerOptions = eventEditorEnsureOption(workerOptions, normalizedWorkerLogin, fallbackWorkerLabel)
+  appState.eventEditorClientOptions = eventEditorEnsureOption(clientOptions, normalizedClientId, fallbackClientLabel)
+  appState.eventEditorZoneOptions = eventEditorEnsureOption(zoneOptions, normalizedZoneId, fallbackZoneLabel)
+
+  eventEditorApplyAllPickerFilters()
   ensureSelectValue(workerSelect, normalizedWorkerLogin, fallbackWorkerLabel)
   ensureSelectValue(clientSelect, normalizedClientId, fallbackClientLabel)
   ensureSelectValue(zoneSelect, normalizedZoneId, fallbackZoneLabel)
+  eventEditorSyncSearchInput('worker')
+  eventEditorSyncSearchInput('client')
+  eventEditorSyncSearchInput('zone')
 }
 
 function fillEventsClientFilterDatalist() {
@@ -5609,6 +10108,7 @@ async function openEventEditor(item) {
   const stopInput = document.getElementById('evEditStop')
   const stopNowButton = document.getElementById('evStopNowBtn')
   const commentInput = document.getElementById('evEditComment')
+  const scannedQrInput = document.getElementById('evScannedQr')
   const deleteButton = document.getElementById('evDeleteBtn')
   const saveButton = document.getElementById('evSaveBtn')
 
@@ -5616,6 +10116,7 @@ async function openEventEditor(item) {
   const selectedClientId = zone?.clientId ?? item.clientId
   const selectedZoneId = zone?.id ?? item.roomId ?? item.utilityRoomId
 
+  eventEditorResetSearchInputs()
   populateEventEditorOptions(item.workerLogin, selectedClientId, selectedZoneId)
 
   if (title) title.textContent = 'Edytuj zdarzenie'
@@ -5630,6 +10131,9 @@ async function openEventEditor(item) {
   if (commentInput) {
     commentInput.readOnly = true
     commentInput.value = normalizeVisibleEventComment(item.comment)
+  }
+  if (scannedQrInput) {
+    scannedQrInput.value = eventEditorScannedQrLabel(item)
   }
   if (saveButton) {
     saveButton.disabled = false
@@ -5669,9 +10173,11 @@ async function openCreateEventEditor() {
   const startInput = document.getElementById('evEditStart')
   const stopInput = document.getElementById('evEditStop')
   const commentInput = document.getElementById('evEditComment')
+  const scannedQrInput = document.getElementById('evScannedQr')
   const deleteButton = document.getElementById('evDeleteBtn')
   const saveButton = document.getElementById('evSaveBtn')
 
+  eventEditorResetSearchInputs()
   populateEventEditorOptions('', '', '')
 
   if (title) title.textContent = 'Dodaj zdarzenie'
@@ -5683,6 +10189,9 @@ async function openCreateEventEditor() {
   if (commentInput) {
     commentInput.readOnly = true
     commentInput.value = ''
+  }
+  if (scannedQrInput) {
+    scannedQrInput.value = '-'
   }
   if (saveButton) {
     saveButton.disabled = false
@@ -5703,6 +10212,9 @@ function closeEventEditor() {
     overlay.style.display = 'none'
   }
 
+  eventEditorCollapsePicker('worker')
+  eventEditorCollapsePicker('client')
+  eventEditorCollapsePicker('zone')
   appState.eventEditorMode = 'add'
   appState.eventEditorItem = null
 }
@@ -5763,44 +10275,14 @@ function readEventEditorPayload() {
   }
 }
 
-async function refreshDashboardWidgets(options = {}) {
-  if (!appState.session?.orgId) {
-    return
-  }
-
-  const rangeFrom = firstDayOfCurrentMonthYmd()
-  const rangeTo = todayYmd()
-  const [todayActive, recentEvents, todayWorkdays, scheduleBoard] = await Promise.all([
-    getTodayActiveWorkers(appState.session.orgId),
-    getWorkdays(appState.session.orgId, {
-      source: 'events',
-      fromIso: rangeFrom,
-      toIso: rangeTo,
-      page: 1,
-      pageSize: 100000,
-    }).catch(() => ({ items: [] })),
-    getWorkdays(appState.session.orgId, {
-      source: 'workdays',
-      fromIso: rangeTo,
-      toIso: rangeTo,
-      page: 1,
-      pageSize: 100000,
-    }).catch(() => ({ items: [] })),
-    getScheduleBoard().catch(() => null),
-  ])
-  const todayStartSourceRows = [...(recentEvents.items ?? []), ...(todayWorkdays.items ?? [])]
-  appState.dashboardScheduleSourceRows = todayStartSourceRows
-  const todayRows = dashboardApplyFirstQrStartToday(
-    todayActive.items ?? [],
-    todayStartSourceRows,
-    scheduleBoard?.days ?? appState.dashboardScheduleDays,
-  )
-  const summary = dashboardBuildSummary(todayRows, recentEvents.items ?? [])
-  renderDashboardEvents(todayRows)
-  renderDashboardSummary(summary)
+function dashboardApplyScheduleBoard(scheduleBoard) {
   if (scheduleBoard && Array.isArray(scheduleBoard.days)) {
     appState.dashboardScheduleDays = scheduleBoard.days
-    appState.dashboardScheduleFetchedAt = String(scheduleBoard.fetchedAtIso ?? '')
+    if (scheduleBoard.fetchedAtIso !== undefined) {
+      appState.dashboardScheduleFetchedAt = String(scheduleBoard.fetchedAtIso ?? '')
+    }
+    appState.dashboardScheduleStale = Boolean(scheduleBoard.stale)
+    appState.dashboardScheduleError = scheduleBoard.stale ? String(scheduleBoard.staleReason ?? '').trim() : ''
     const preferredToday = String(scheduleBoard.todayKey ?? '').trim()
     const selectedExists = scheduleBoard.days.some((day) => day.key === appState.dashboardScheduleSelectedDay)
     const todayMatch = scheduleBoard.days.find((day) => day.key === preferredToday)
@@ -5815,28 +10297,375 @@ async function refreshDashboardWidgets(options = {}) {
     }
   } else if (!appState.dashboardScheduleDays.length) {
     appState.dashboardScheduleDays = []
-    appState.dashboardScheduleFetchedAt = ''
-  }
-  renderDashboardSchedulePanel()
-
-  const explicitToken = String(options.worktimeToken ?? '').trim()
-  if (explicitToken) {
-    dashboardLastWorktimeToken = explicitToken
-  }
-
-  if (options.syncWorktimeToken) {
-    try {
-      const fingerprint = await getTodayWorktimeFingerprint(appState.session.orgId)
-      const token = String(fingerprint?.token ?? '').trim()
-      if (token) {
-        dashboardLastWorktimeToken = token
-      }
-    } catch {
-      // Keep previous token when probe fails; next interval will try again.
+    appState.dashboardScheduleStale = false
+    if (!appState.dashboardScheduleFetchedAt) {
+      appState.dashboardScheduleFetchedAt = ''
     }
   }
 
-  setDashboardLastRefresh(new Date())
+  renderDashboardSchedulePanel()
+}
+
+async function dashboardLoadFastRows(orgId) {
+  const rangeTo = todayYmd()
+  const fastEventsFrom = daysAgoYmd(1)
+  const [todayActive, recentEvents, todayWorkdays] = await Promise.all([
+    getTodayActiveWorkers(orgId),
+    getWorkdays(orgId, {
+      source: 'events',
+      fromIso: fastEventsFrom,
+      toIso: rangeTo,
+      page: 1,
+      pageSize: 5000,
+    }).catch(() => ({ items: [] })),
+    getWorkdays(orgId, {
+      source: 'workdays',
+      fromIso: rangeTo,
+      toIso: rangeTo,
+      page: 1,
+      pageSize: 5000,
+    }).catch(() => ({ items: [] })),
+  ])
+
+  const todayStartSourceRows = [...(recentEvents.items ?? []), ...(todayWorkdays.items ?? [])]
+  appState.dashboardScheduleSourceRows = todayStartSourceRows
+  const todayRows = dashboardApplyFirstQrStartToday(
+    todayActive.items ?? [],
+    todayStartSourceRows,
+    appState.dashboardScheduleDays,
+  )
+
+  return { todayRows, recentEvents, todayWorkdays }
+}
+
+async function dashboardRefreshBackgroundData(orgId, options = {}) {
+  const activeOrgId = String(appState.session?.orgId ?? '').trim()
+  if (!orgId || orgId !== activeOrgId) {
+    return
+  }
+
+  const rangeFrom = dashboardCommentSyncRangeFrom(orgId, { forceFull: options.forceFull === true })
+  const rangeTo = todayYmd()
+  let fetchFailed = false
+  const recentEvents = await getWorkdays(orgId, {
+    source: 'events',
+    fromIso: rangeFrom,
+    toIso: rangeTo,
+    page: 1,
+    pageSize: 12000,
+  }).catch((error) => {
+    fetchFailed = true
+    console.warn('[portal/dashboard] comment sync fetch failed', error)
+    return { items: [] }
+  })
+
+  if (String(appState.session?.orgId ?? '').trim() !== orgId) {
+    return
+  }
+  if (fetchFailed) {
+    appState.dashboardBackgroundDataLoaded = false
+    return
+  }
+
+  const summary = dashboardBuildSummary(
+    appState.dashboardTodayRows,
+    recentEvents.items ?? [],
+    dashboardBuildPeriodHourValues(appState.dashboardTodayRows),
+  )
+  const dashboardComments = dashboardBuildNewComments(recentEvents.items ?? [], [])
+  renderDashboardSummary(summary)
+  dashboardSyncCommentTasks(dashboardComments)
+  renderDashboardKanbanTasks()
+  renderDashboardNewComments(dashboardComments)
+  dashboardWriteLocalSnapshot(orgId, {
+    summary,
+    todayRows: appState.dashboardTodayRows,
+    scheduleSourceRows: appState.dashboardScheduleSourceRows,
+    comments: dashboardComments,
+  })
+  dashboardWriteCommentSyncState(orgId, {
+    lastSyncedAt: new Date().toISOString(),
+    lastSyncedDay: rangeTo,
+    lastRangeFrom: rangeFrom,
+    lastCount: Array.isArray(recentEvents.items) ? recentEvents.items.length : 0,
+  })
+  appState.dashboardBackgroundDataLoaded = true
+}
+
+function dashboardStartBackgroundDataRefresh(orgId, options = {}) {
+  const activeOrgId = String(orgId ?? appState.session?.orgId ?? '').trim()
+  if (!activeOrgId) {
+    return null
+  }
+
+  if (appState.dashboardBackgroundDataLoaded && !options.force) {
+    return null
+  }
+
+  if (dashboardBackgroundRefreshPromise) {
+    return dashboardBackgroundRefreshPromise
+  }
+
+  dashboardBackgroundRefreshPromise = dashboardRefreshBackgroundData(activeOrgId, options)
+    .catch((error) => {
+      console.warn('[portal/dashboard] background data refresh failed', error)
+    })
+    .finally(() => {
+      dashboardBackgroundRefreshPromise = null
+    })
+  return dashboardBackgroundRefreshPromise
+}
+
+function dashboardStartScheduleRefresh(orgId) {
+  const activeOrgId = String(orgId ?? appState.session?.orgId ?? '').trim()
+  if (!activeOrgId) {
+    return null
+  }
+
+  if (dashboardScheduleRefreshPromise) {
+    return dashboardScheduleRefreshPromise
+  }
+
+  appState.dashboardScheduleLoading = true
+  appState.dashboardScheduleError = ''
+  appState.dashboardScheduleStale = false
+  renderDashboardSchedulePanel()
+
+  dashboardScheduleRefreshPromise = getScheduleBoard()
+    .then((scheduleBoard) => {
+      if (String(appState.session?.orgId ?? '').trim() === activeOrgId) {
+        appState.dashboardScheduleLoading = false
+        dashboardApplyScheduleBoard(scheduleBoard)
+      }
+    })
+    .catch((error) => {
+      console.warn('[portal/dashboard] schedule refresh failed', error)
+      if (String(appState.session?.orgId ?? '').trim() === activeOrgId) {
+        appState.dashboardScheduleLoading = false
+        appState.dashboardScheduleError = error instanceof Error ? error.message : 'Błąd pobierania danych.'
+        dashboardApplyScheduleBoard(null)
+      }
+    })
+    .finally(() => {
+      dashboardScheduleRefreshPromise = null
+      if (String(appState.session?.orgId ?? '').trim() === activeOrgId) {
+        appState.dashboardScheduleLoading = false
+        renderDashboardSchedulePanel()
+      }
+    })
+  return dashboardScheduleRefreshPromise
+}
+
+function dashboardStartReferencePreload(orgId) {
+  const activeOrgId = String(orgId ?? appState.session?.orgId ?? '').trim()
+  if (!activeOrgId) {
+    return null
+  }
+
+  if (dashboardReferencePreloadPromise) {
+    return dashboardReferencePreloadPromise
+  }
+
+  const loaders = []
+  if (!appState.clientsLoaded) {
+    loaders.push(
+      getClients(activeOrgId).then((clients) => {
+        if (String(appState.session?.orgId ?? '').trim() !== activeOrgId) return
+        appState.clients = clients
+        appState.clientsLoaded = true
+        setSubwelcomeMetric('#view-clientsList .subwelcome', clients.length)
+        setSubwelcomeMetric('#view-clientProfile .subwelcome', clients.length)
+        fillClientsCoordinatorSelect()
+        fillClientProfileCoordinatorOptions()
+      }),
+    )
+  }
+  if (!appState.workersLoaded) {
+    loaders.push(
+      getWorkers(activeOrgId).then((workers) => {
+        if (String(appState.session?.orgId ?? '').trim() !== activeOrgId) return
+        appState.workers = workers
+        appState.workersLoaded = true
+        appState.workerTimeRows = workers
+        setSubwelcomeMetric('#view-workerTime .subwelcome', workers.length)
+        setSubwelcomeMetric('#view-workerProfile .subwelcome', workers.length)
+        dashboardWriteLocalSnapshot(activeOrgId, { workers })
+        if (appState.dashboardScheduleDays.length) {
+          renderDashboardSchedulePanel()
+        }
+      }),
+    )
+  }
+  if (!appState.zonesLoaded) {
+    loaders.push(
+      getZones(activeOrgId).then((zones) => {
+        if (String(appState.session?.orgId ?? '').trim() !== activeOrgId) return
+        appState.zones = zones
+        appState.zonesLoaded = true
+        setSubwelcomeMetric('#view-zones .subwelcome', zones.length)
+      }),
+    )
+  }
+
+  if (!loaders.length) {
+    return null
+  }
+
+  dashboardReferencePreloadPromise = Promise.allSettled(loaders)
+    .catch(() => {})
+    .finally(() => {
+      dashboardReferencePreloadPromise = null
+    })
+  return dashboardReferencePreloadPromise
+}
+
+function runDashboardPostLoadWork(callback, delayMs = DASHBOARD_POST_LOAD_DELAY_MS) {
+  if (typeof window === 'undefined') {
+    callback()
+    return
+  }
+
+  window.setTimeout(() => {
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(callback, { timeout: 5000 })
+      return
+    }
+
+    window.setTimeout(callback, 0)
+  }, Math.max(0, Number(delayMs) || 0))
+}
+
+function dashboardStartPostLoadRefresh(orgId, options = {}) {
+  const activeOrgId = String(orgId ?? appState.session?.orgId ?? '').trim()
+  if (!activeOrgId) {
+    return
+  }
+
+  const shouldRefreshBackground = options.backgroundData === true
+  const shouldPreloadReferences = options.preloadReferences !== false
+  const shouldSyncTasks = options.syncTasks === true
+  runDashboardPostLoadWork(() => {
+    if (String(appState.session?.orgId ?? '').trim() !== activeOrgId) {
+      return
+    }
+
+    if (shouldRefreshBackground) {
+      dashboardStartBackgroundDataRefresh(activeOrgId)
+    }
+    if (shouldPreloadReferences) {
+      dashboardStartReferencePreload(activeOrgId)
+    }
+    if (shouldSyncTasks) {
+      void calendarSyncRemoteTasks({ render: true }).catch((error) => {
+        console.warn('[portal/tasks] background sync failed', error)
+      })
+    }
+  })
+}
+
+function dashboardEnsureTaskDataForRoute(routeName, renderAfterLoad) {
+  const activeOrgId = String(appState.session?.orgId ?? '').trim()
+  if (!activeOrgId) {
+    return
+  }
+  const isKanbanRoute = routeName === 'kanban'
+
+  const renderIfStillCurrent = () => {
+    if (appState.currentRoute === routeName && typeof renderAfterLoad === 'function') {
+      renderAfterLoad()
+    }
+  }
+
+  renderIfStillCurrent()
+  if (isKanbanRoute) {
+    kanbanSetDataLoading(true, appState.calendarRemoteTasksLoaded ? 'Dociągam komentarze pracowników...' : 'Synchronizuję zadania...')
+  }
+
+  const remoteTaskPromise = appState.calendarRemoteTasksLoaded
+    ? Promise.resolve(appState.calendarTasks)
+    : calendarSyncRemoteTasks({ render: true })
+
+  Promise.resolve(remoteTaskPromise)
+    .catch((error) => {
+      console.warn('[portal/tasks] remote task refresh failed', error)
+    })
+    .finally(() => {
+      renderIfStillCurrent()
+      if (isKanbanRoute && !dashboardBackgroundRefreshPromise) {
+        kanbanSetDataLoading(false)
+      }
+    })
+
+  runDashboardPostLoadWork(() => {
+    if (String(appState.session?.orgId ?? '').trim() !== activeOrgId) {
+      return
+    }
+    if (isKanbanRoute) {
+      kanbanSetDataLoading(true, 'Dociągam komentarze pracowników...')
+    }
+    const backgroundPromise = dashboardStartBackgroundDataRefresh(activeOrgId)
+    if (!backgroundPromise) {
+      if (isKanbanRoute) {
+        kanbanSetDataLoading(false)
+      }
+      return
+    }
+    Promise.resolve(backgroundPromise)
+      .catch((error) => {
+        console.warn('[portal/tasks] route background task refresh failed', error)
+      })
+      .finally(() => {
+        renderIfStillCurrent()
+        if (isKanbanRoute) {
+          kanbanSetDataLoading(false)
+        }
+      })
+  }, 450)
+}
+
+function deferRouteTaskDataRefresh(routeName, renderAfterLoad) {
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+    dashboardEnsureTaskDataForRoute(routeName, renderAfterLoad)
+    return
+  }
+
+  window.requestAnimationFrame(() => {
+    dashboardEnsureTaskDataForRoute(routeName, renderAfterLoad)
+  })
+}
+
+async function refreshDashboardWidgets() {
+  if (!appState.session?.orgId) {
+    return
+  }
+
+  const orgId = String(appState.session.orgId)
+  dashboardStartScheduleRefresh(orgId)
+  dashboardBeginLoading()
+  try {
+    const { todayRows, recentEvents } = await dashboardLoadFastRows(orgId)
+    const summary = dashboardBuildSummary(todayRows, recentEvents.items ?? [], dashboardBuildPeriodHourValues(todayRows))
+    renderDashboardSummary(summary)
+    await dashboardRevealLoadingStage('overview')
+    renderDashboardKanbanTasks()
+    renderDashboardNewComments(dashboardBuildNewComments(recentEvents.items ?? [], []))
+    await dashboardRevealLoadingStage('tasks')
+    renderDashboardEvents(todayRows)
+    await dashboardRevealLoadingStage('active')
+    renderDashboardSchedulePanel()
+    await dashboardRevealLoadingStage('schedule')
+    setDashboardLastRefresh(new Date())
+    dashboardWriteLocalSnapshot(orgId, {
+      summary,
+      todayRows,
+      scheduleSourceRows: appState.dashboardScheduleSourceRows,
+      comments: dashboardBuildNewComments(recentEvents.items ?? [], []),
+    })
+  } finally {
+    dashboardEndLoading()
+  }
+
+  dashboardStartPostLoadRefresh(orgId, { preloadReferences: true })
 }
 
 function setDashboardLastRefresh(dateValue) {
@@ -5937,13 +10766,13 @@ async function saveEventEditor() {
   }
 
   const saveButton = document.getElementById('evSaveBtn')
+  const editedHistorySource = appState.eventEditorMode === 'edit' ? { ...(appState.eventEditorItem || {}) } : null
   if (saveButton) {
     saveButton.disabled = true
     saveButton.textContent = 'Zapisywanie...'
   }
 
   try {
-    let savedItem = null
     const derivedEndAt = payload.eventKind === 'start' ? null : payload.endAt
     const derivedStartAt = payload.eventKind === 'stop' ? derivedEndAt : payload.startAt
     const derivedDurationSec = payload.eventKind === 'start_stop' ? Number(payload.durationSec ?? 0) : 0
@@ -5952,7 +10781,7 @@ async function saveEventEditor() {
     const derivedEndReason = eventEndReasonFromKind(payload.eventKind)
 
     if (appState.eventEditorMode === 'add') {
-      savedItem = await createEvent(appState.session.orgId, {
+      await createEvent(appState.session.orgId, {
         eventId: `EV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         ...eventPayload,
         startAt: derivedStartAt,
@@ -5968,7 +10797,7 @@ async function saveEventEditor() {
         throw new Error('Brak eventId dla edycji zdarzenia.')
       }
 
-      savedItem = await updateEvent(appState.session.orgId, eventId, {
+      await updateEvent(appState.session.orgId, eventId, {
         ...appState.eventEditorItem,
         ...eventPayload,
         startAt: derivedStartAt,
@@ -5981,7 +10810,15 @@ async function saveEventEditor() {
     }
 
     closeEventEditor()
-    await fetchEventsForCurrentSession({ resetPage: false })
+    if (document.getElementById('evRows')) {
+      await fetchEventsForCurrentSession({ resetPage: false })
+    }
+    await reportHistoryRefreshAfterEventSave({
+      ...(editedHistorySource || {}),
+      ...eventPayload,
+      startAt: derivedStartAt,
+      endAt: derivedEndAt,
+    })
     await refreshDashboardWidgets({ syncWorktimeToken: true })
     showTransientNotice('Zmiany zostały zapisane.')
   } catch (error) {
@@ -6195,11 +11032,17 @@ function readEventsFilterInputs() {
   const room = document.getElementById('evRoomId')
   const status = document.getElementById('evStatus')
   const q = document.getElementById('evQ')
+  const workerValue = String(worker?.value ?? '').trim()
+  const workerLogin =
+    workerValue && workerValue === String(appState.eventsWorkerLoginFilterText ?? '').trim()
+      ? String(appState.eventsWorkerLoginFilter ?? '').trim()
+      : ''
 
   return {
     from: String(from?.value ?? '').trim(),
     to: String(to?.value ?? '').trim(),
-    worker: String(worker?.value ?? '').trim(),
+    worker: workerValue,
+    workerLogin,
     strefa: String(zone?.value ?? '').trim(),
     pomieszczenie: String(client?.value ?? '').trim(),
     roomId: String(room?.value ?? '').trim(),
@@ -6221,6 +11064,8 @@ function applyEventsFilterInputs(filters = {}) {
   if (from) from.value = String(filters.from ?? '')
   if (to) to.value = String(filters.to ?? '')
   if (worker) worker.value = String(filters.worker ?? '')
+  appState.eventsWorkerLoginFilter = String(filters.workerLogin ?? '').trim()
+  appState.eventsWorkerLoginFilterText = String(filters.worker ?? '').trim()
   if (zone) zone.value = String(filters.strefa ?? '')
   if (client) client.value = String(filters.pomieszczenie ?? '')
   if (room) room.value = String(filters.roomId ?? '')
@@ -6235,7 +11080,8 @@ function readEventsFilters() {
     source: 'events',
     fromIso: ymdToIsoRangeStart(raw.from),
     toIso: ymdToIsoRangeEnd(raw.to),
-    worker: raw.worker,
+    worker: raw.workerLogin ? '' : raw.worker,
+    workerLogin: raw.workerLogin,
     strefa: raw.strefa,
     pomieszczenie: raw.pomieszczenie,
     roomId: raw.roomId,
@@ -6266,6 +11112,283 @@ function updateEventsPager(shown) {
 
   if (nextBtn) {
     nextBtn.disabled = appState.eventsPage >= appState.eventsTotalPages
+  }
+}
+
+const EVENTS_EXPORT_COLUMNS = [
+  {
+    label: 'Pracownik',
+    width: '*',
+    getValue: (row) => String(row?.workerName ?? row?.workerLogin ?? '-').trim() || '-',
+  },
+  {
+    label: 'Klient',
+    width: '*',
+    getValue: (row) => {
+      const qrCandidate =
+        row?.zoneId ?? row?.roomId ?? row?.utilityRoomId ?? row?.dayStartObject ?? row?.dayStopObject ?? row?.strefa
+      return resolveClientLabelWithQrFallback(String(row?.clientName ?? row?.klient ?? '-').trim() || '-', qrCandidate)
+    },
+  },
+  {
+    label: 'Strefa',
+    width: '*',
+    getValue: (row) => String(row?.strefa ?? row?.zoneName ?? '-').trim() || '-',
+  },
+  {
+    label: 'QR',
+    width: 38,
+    getValue: (row) => zoneQrCodeFromRow(row) || '-',
+  },
+  {
+    label: 'Lokalizacja',
+    width: '*',
+    getValue: (row) => String(row?.lokalizacja ?? row?.location ?? '-').trim() || '-',
+  },
+  {
+    label: 'Data',
+    width: 48,
+    getValue: (row) => String(row?.date ?? '-').trim() || '-',
+  },
+  {
+    label: 'Start',
+    width: 35,
+    getValue: (row) => dashboardClockLabelToHm(row?.start, '-'),
+  },
+  {
+    label: 'Stop',
+    width: 35,
+    getValue: (row) => dashboardClockLabelToHm(row?.stop, '-'),
+  },
+  {
+    label: 'Czas',
+    width: 38,
+    getValue: (row) => dashboardDurationLabelToHm(row?.duration, '00:00'),
+  },
+  {
+    label: 'Typ',
+    width: 46,
+    getValue: (row) => eventTypeInfo(row).label,
+  },
+  {
+    label: 'Komentarz',
+    width: '*',
+    getValue: (row) => normalizeVisibleEventComment(row?.comment) || '-',
+  },
+  {
+    label: 'Edytował',
+    width: 46,
+    getValue: (row) => String(row?.editedBy ?? '-').trim() || '-',
+  },
+]
+
+function eventExportCellLooksLikeError(value) {
+  const text = String(value ?? '').trim().toLowerCase()
+  if (!text) {
+    return false
+  }
+
+  return (
+    (text.includes('"error"') && text.includes('"code"')) ||
+    (text.includes('operation "') && text.includes('not found')) ||
+    text.includes('"status":"not_found"') ||
+    text.includes('"code":404')
+  )
+}
+
+function normalizeEventsExportRows(rows = []) {
+  return (Array.isArray(rows) ? rows : []).filter((row) => {
+    const candidates = [
+      row?.workerLogin,
+      row?.workerName,
+      row?.klient,
+      row?.clientName,
+      row?.strefa,
+      row?.zoneName,
+      row?.lokalizacja,
+      row?.roomId,
+      row?.zoneId,
+    ]
+    return !candidates.some((value) => eventExportCellLooksLikeError(value))
+  })
+}
+
+function eventsExportRowsToMatrix(rows = []) {
+  return normalizeEventsExportRows(rows).map((row) =>
+    EVENTS_EXPORT_COLUMNS.map((column) => String(column.getValue(row) ?? '').trim() || '-'),
+  )
+}
+
+function eventsExportFilenameBase() {
+  const filters = readEventsFilterInputs()
+  const from = workerDetailSanitizeFilename(filters.from || firstDayOfCurrentMonthYmd()) || 'od'
+  const to = workerDetailSanitizeFilename(filters.to || todayYmd()) || 'do'
+  return `zdarzenia-${from}_${to}`
+}
+
+function eventsExportFiltersSummary() {
+  const filters = readEventsFilterInputs()
+  const entries = [
+    ['Od', filters.from || '-'],
+    ['Do', filters.to || '-'],
+    ['Pracownik', filters.worker || '-'],
+    ['Klient', filters.pomieszczenie || '-'],
+    ['Strefa', filters.strefa || '-'],
+    ['Kod QR', filters.roomId || '-'],
+    ['Status', filters.status || 'wszystkie'],
+    ['Szukaj', filters.q || '-'],
+  ]
+  return entries.map(([label, value]) => `${label}: ${value}`).join(' | ')
+}
+
+async function fetchEventsExportRows() {
+  if (!appState.session?.orgId) {
+    throw new Error('Brak aktywnej sesji.')
+  }
+
+  ensureEventsDefaultDates()
+  appState.eventsFilters = readEventsFilterInputs()
+  await ensureEventReferenceDataLoaded()
+
+  const pageSize = Math.max(Number(appState.eventsTotal ?? 0) || 0, 100000)
+  const response = await getWorkdays(appState.session.orgId, {
+    ...readEventsFilters(),
+    page: 1,
+    pageSize,
+  })
+
+  return normalizeEventsExportRows(response?.items ?? [])
+}
+
+function downloadEventsExcel(rows = []) {
+  const matrix = eventsExportRowsToMatrix(rows)
+  const headers = EVENTS_EXPORT_COLUMNS.map((column) => column.label)
+  const cellHtml = (value, tag = 'td') =>
+    `<${tag} class="text">${escapeHtml(value).replaceAll('\n', '<br />')}</${tag}>`
+  const tableRows = [
+    `<tr>${headers.map((header) => cellHtml(header, 'th')).join('')}</tr>`,
+    ...matrix.map((row) => `<tr>${row.map((value) => cellHtml(value)).join('')}</tr>`),
+  ].join('')
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font-family: Arial, sans-serif; }
+    table { border-collapse: collapse; width: 100%; }
+    th { background: #eef4ff; font-weight: 700; }
+    th, td { border: 1px solid #cfd8e8; padding: 6px; vertical-align: top; }
+    .text { mso-number-format: "\\@"; }
+  </style>
+</head>
+<body>
+  <h2>Zdarzenia</h2>
+  <p>${escapeHtml(eventsExportFiltersSummary())}</p>
+  <p>Wygenerowano: ${escapeHtml(formatDatePl(new Date().toISOString()))} ${escapeHtml(formatTime(new Date().toISOString()))}</p>
+  <table>${tableRows}</table>
+</body>
+</html>`
+  const blob = new Blob([`\ufeff${html}`], { type: 'application/vnd.ms-excel;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${eventsExportFilenameBase()}.xls`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+async function downloadEventsPdf(rows = []) {
+  const matrix = eventsExportRowsToMatrix(rows)
+  const pdfMake = await ensurePdfMakeLoaded()
+  const body = [
+    EVENTS_EXPORT_COLUMNS.map((column) => ({ text: column.label, style: 'tableHeader' })),
+    ...matrix.map((row) => row.map((value) => ({ text: value, style: 'tableCell' }))),
+  ]
+
+  const docDefinition = {
+    pageSize: 'A4',
+    pageOrientation: 'landscape',
+    pageMargins: [18, 20, 18, 20],
+    defaultStyle: {
+      font: 'Roboto',
+      fontSize: 7,
+    },
+    content: [
+      { text: 'Zdarzenia', style: 'title' },
+      { text: eventsExportFiltersSummary(), style: 'subtitle' },
+      { text: `Liczba rekordów: ${matrix.length}`, style: 'subtitle', margin: [0, 0, 0, 8] },
+      {
+        table: {
+          headerRows: 1,
+          widths: EVENTS_EXPORT_COLUMNS.map((column) => column.width),
+          body,
+        },
+        layout: {
+          fillColor: (rowIndex) => (rowIndex === 0 ? '#eef4ff' : rowIndex % 2 === 0 ? '#f8fbff' : null),
+          hLineColor: () => '#dbe4f0',
+          vLineColor: () => '#dbe4f0',
+          paddingLeft: () => 4,
+          paddingRight: () => 4,
+          paddingTop: () => 3,
+          paddingBottom: () => 3,
+        },
+      },
+    ],
+    styles: {
+      title: { fontSize: 15, bold: true, margin: [0, 0, 0, 4] },
+      subtitle: { fontSize: 8, color: '#475569', margin: [0, 0, 0, 3] },
+      tableHeader: { bold: true, color: '#334155', fontSize: 7 },
+      tableCell: { fontSize: 6.5, color: '#0f172a' },
+    },
+  }
+
+  pdfMake.createPdf(docDefinition).download(`${eventsExportFilenameBase()}.pdf`)
+}
+
+async function downloadEventsExport(format = 'excel') {
+  const normalized = String(format ?? '').trim().toLowerCase() === 'pdf' ? 'pdf' : 'excel'
+  const buttons = [
+    document.getElementById('evExportPdfBtn'),
+    document.getElementById('evExportExcelBtn'),
+  ].filter((button) => button instanceof HTMLButtonElement)
+  const trigger = document.getElementById(normalized === 'pdf' ? 'evExportPdfBtn' : 'evExportExcelBtn')
+  const previousText = trigger?.textContent ?? ''
+
+  buttons.forEach((button) => {
+    button.disabled = true
+    button.setAttribute('aria-busy', 'true')
+  })
+  if (trigger) {
+    trigger.textContent = 'Eksport...'
+  }
+
+  try {
+    const rows = await fetchEventsExportRows()
+    if (!rows.length) {
+      showTransientNotice('Brak zdarzeń do eksportu dla wybranych filtrów.', 'error')
+      return
+    }
+
+    if (normalized === 'pdf') {
+      await downloadEventsPdf(rows)
+    } else {
+      downloadEventsExcel(rows)
+    }
+
+    showTransientNotice(`Eksport zdarzeń gotowy (${rows.length}).`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udało się wyeksportować zdarzeń.'
+    showTransientNotice(message, 'error')
+  } finally {
+    buttons.forEach((button) => {
+      button.disabled = false
+      button.setAttribute('aria-busy', 'false')
+    })
+    if (trigger) {
+      trigger.textContent = previousText || (normalized === 'pdf' ? 'PDF' : 'Excel')
+    }
   }
 }
 
@@ -6408,6 +11531,74 @@ function mapZoneForView(zone) {
   }
 }
 
+function zoneValueIsEmptyDash(value) {
+  const normalized = normalizeSearchText(value)
+  return !normalized || normalized === '-'
+}
+
+function isUnassignedCleanZone(zone) {
+  const clientKey = normalizeSearchText(zone.clientName || zone.clientId)
+  const functionKey = normalizeSearchText(zone.function)
+  return (
+    clientKey === 'unassigned' &&
+    functionKey === 'clean' &&
+    zoneValueIsEmptyDash(zone.zoneName) &&
+    zoneValueIsEmptyDash(zone.location)
+  )
+}
+
+function visiblePortalZones() {
+  return (Array.isArray(appState.zones) ? appState.zones : [])
+    .map((zone) => mapZoneForView(zone))
+    .filter((zone) => !isUnassignedCleanZone(zone))
+}
+
+function compareZoneText(left, right) {
+  return String(left ?? '').localeCompare(String(right ?? ''), 'pl', { numeric: true, sensitivity: 'base' })
+}
+
+function sortZonesForView(zones) {
+  const mode = String(document.getElementById('znSort')?.value ?? 'functionAsc').trim()
+  const sorted = [...zones]
+  sorted.sort((left, right) => {
+    if (mode === 'functionDesc') {
+      return (
+        compareZoneText(right.function, left.function) ||
+        compareZoneText(left.clientName, right.clientName) ||
+        compareZoneText(left.zoneName, right.zoneName) ||
+        compareZoneText(left.qr, right.qr)
+      )
+    }
+
+    if (mode === 'clientZone') {
+      return (
+        compareZoneText(left.clientName, right.clientName) ||
+        compareZoneText(left.zoneName, right.zoneName) ||
+        compareZoneText(left.location, right.location) ||
+        compareZoneText(left.function, right.function) ||
+        compareZoneText(left.qr, right.qr)
+      )
+    }
+
+    if (mode === 'dateDesc') {
+      return (
+        compareZoneText(right.dateLabel, left.dateLabel) ||
+        compareZoneText(left.clientName, right.clientName) ||
+        compareZoneText(left.zoneName, right.zoneName) ||
+        compareZoneText(left.qr, right.qr)
+      )
+    }
+
+    return (
+      compareZoneText(left.function, right.function) ||
+      compareZoneText(left.clientName, right.clientName) ||
+      compareZoneText(left.zoneName, right.zoneName) ||
+      compareZoneText(left.qr, right.qr)
+    )
+  })
+  return sorted
+}
+
 function getFilteredZones() {
   const qrFilter = String(document.getElementById('znQr')?.value ?? '').trim().toLowerCase()
   const clientFilter = String(document.getElementById('znClient')?.value ?? '').trim().toLowerCase()
@@ -6417,8 +11608,8 @@ function getFilteredZones() {
   const editedByFilter = String(document.getElementById('znEditedBy')?.value ?? '').trim().toLowerCase()
   const q = String(document.getElementById('znQ')?.value ?? '').trim().toLowerCase()
 
-  return appState.zones
-    .map((zone) => mapZoneForView(zone))
+  return sortZonesForView(
+    visiblePortalZones()
     .filter((zone) => {
       if (qrFilter && !String(zone.qr).toLowerCase().includes(qrFilter)) return false
       if (clientFilter && !String(zone.clientName).toLowerCase().includes(clientFilter)) return false
@@ -6436,7 +11627,8 @@ function getFilteredZones() {
         .join(' ')
 
       return haystack.includes(q)
-    })
+    }),
+  )
 }
 
 function renderZonesRows(rows) {
@@ -6460,7 +11652,7 @@ function renderZonesRows(rows) {
       <div class="zones-row">
         <div class="mono">${escapeHtml(zone.qr)}</div>
         <div>${escapeHtml(zone.clientName)}</div>
-        <div>${escapeHtml(zone.zoneName)}</div>
+        <div>${zoneNameWithQrHtml(zone.zoneName, zone.qr)}</div>
         <div>${escapeHtml(zone.location)}</div>
         <div>${escapeHtml(zone.function)}</div>
         <div class="mono">${escapeHtml(zone.dateLabel)}</div>
@@ -6544,7 +11736,7 @@ async function fetchZonesForCurrentSession(force = false) {
     appState.zones = zones
     appState.zonesLoaded = true
     filterZonesTable({ resetPage: true })
-    setSubwelcomeMetric('#view-zones .subwelcome', zones.length)
+    setSubwelcomeMetric('#view-zones .subwelcome', visiblePortalZones().length)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Błąd pobierania stref.'
     if (root) {
@@ -6564,6 +11756,10 @@ function resetZoneFilters() {
       input.value = ''
     }
   })
+  const sort = document.getElementById('znSort')
+  if (sort) {
+    sort.value = 'functionAsc'
+  }
 }
 
 function closeZoneModal() {
@@ -6926,7 +12122,7 @@ function syncWorkerProfileAddButtonState() {
   const allowed = canManageWorkers()
   addButton.style.display = ''
   addButton.disabled = !allowed
-  addButton.title = allowed ? 'Dodaj nowego pracownika' : 'Brak uprawnień do dodawania pracowników.'
+  addButton.title = allowed ? 'Dodaj nowego użytkownika' : 'Brak uprawnień do dodawania użytkowników.'
 }
 
 function getNextWorkerProfileIdPreview() {
@@ -6950,6 +12146,46 @@ function getNextWorkerProfileIdPreview() {
   })
 
   return `W${String(maxNumber + 1).padStart(padWidth, '0')}`
+}
+
+let workerProfileDefaultTypeOptionsHtml = ''
+
+function configureWorkerProfileRoleOptions(typeInput, mode) {
+  if (!(typeInput instanceof HTMLSelectElement)) {
+    return
+  }
+
+  if (!workerProfileDefaultTypeOptionsHtml) {
+    workerProfileDefaultTypeOptionsHtml = typeInput.innerHTML
+  }
+
+  if (mode === 'add') {
+    typeInput.innerHTML = `
+      <option value="WORKER">WORKER</option>
+      <option value="MANAGER">MANAGER</option>
+    `
+    typeInput.value = 'WORKER'
+    return
+  }
+
+  if (typeInput.innerHTML !== workerProfileDefaultTypeOptionsHtml) {
+    typeInput.innerHTML = workerProfileDefaultTypeOptionsHtml
+  }
+}
+
+function workerProfileRoleForCreate(value) {
+  const role = String(value ?? '').trim().toUpperCase()
+  if (role === 'MANAGER' || role === 'KIEROWNIK') return 'MANAGER'
+  if (role === 'WORKER' || role === 'PRACOWNIK') return 'WORKER'
+  return ''
+}
+
+function workerProfileLoginFromEmail(value) {
+  const email = String(value ?? '').trim().toLowerCase()
+  if (!email.includes('@')) {
+    return ''
+  }
+  return email.split('@')[0] || ''
 }
 
 function openWorkerProfileModal(worker = null, mode = 'view') {
@@ -6989,18 +12225,23 @@ function openWorkerProfileModal(worker = null, mode = 'view') {
     modalLogo.setAttribute('src', headerLogo.getAttribute('src'))
   }
 
+  configureWorkerProfileRoleOptions(typeInput, mode)
+
   if (mode === 'add') {
     const nextWorkerId = getNextWorkerProfileIdPreview()
-    if (modalTitle) modalTitle.textContent = 'Dodaj pracownika'
-    if (saveButton) saveButton.textContent = 'Dodaj pracownika'
+    if (modalTitle) modalTitle.textContent = 'Dodaj użytkownika'
+    if (saveButton) saveButton.textContent = 'Dodaj użytkownika'
     if (idLabel) idLabel.textContent = nextWorkerId
     if (addedAtLabel) addedAtLabel.textContent = '-'
     if (editedAtLabel) editedAtLabel.textContent = '-'
     if (editedByLabel) editedByLabel.textContent = appState.session?.name ?? '-'
     if (idInput) idInput.value = nextWorkerId
     if (nameInput) nameInput.value = ''
-    if (loginInput) loginInput.value = ''
-    if (typeInput) typeInput.value = 'Pracownik'
+    if (loginInput) {
+      loginInput.value = ''
+      loginInput.dataset.autoFromEmail = '1'
+    }
+    if (typeInput) typeInput.value = 'WORKER'
     if (activeInput) activeInput.value = '1'
     if (onlineInput) onlineInput.value = 'NIE'
     if (emailInput) emailInput.value = ''
@@ -7015,7 +12256,10 @@ function openWorkerProfileModal(worker = null, mode = 'view') {
     if (editedByLabel) editedByLabel.textContent = worker?.editedBy || '-'
     if (idInput) idInput.value = worker?.workerId || worker?.id || '-'
     if (nameInput) nameInput.value = worker?.name || ''
-    if (loginInput) loginInput.value = worker?.login || ''
+    if (loginInput) {
+      loginInput.value = worker?.login || ''
+      loginInput.dataset.autoFromEmail = '0'
+    }
     if (typeInput) typeInput.value = worker?.type || worker?.role || 'Pracownik'
     if (activeInput) activeInput.value = worker?.active ? '1' : '0'
     if (onlineInput) onlineInput.value = workerBoolLabel(Boolean(worker?.online))
@@ -7179,6 +12423,32 @@ async function saveWorkerProfileData() {
 
   const newPass = String(document.getElementById('wkNewPass')?.value ?? '').trim()
   const repeatPass = String(document.getElementById('wkNewPass2')?.value ?? '').trim()
+  const isAddingUser = appState.workerProfileModalMode === 'add'
+  const createRole = workerProfileRoleForCreate(payload.role)
+
+  if (isAddingUser) {
+    if (!payload.email) {
+      alert('Podaj email użytkownika.')
+      return
+    }
+
+    if (!createRole) {
+      alert('Nowy użytkownik może mieć rolę MANAGER albo WORKER.')
+      return
+    }
+
+    const expectedLogin = workerProfileLoginFromEmail(payload.email)
+    if (expectedLogin && payload.login.toLowerCase() !== expectedLogin) {
+      alert('Login musi być taki sam jak część emaila przed @, aby mobile działał bez aliasów.')
+      return
+    }
+
+    if (!newPass || newPass.length < 6) {
+      alert('Hasło tymczasowe musi mieć co najmniej 6 znaków.')
+      return
+    }
+  }
+
   if (newPass || repeatPass) {
     if (newPass !== repeatPass) {
       alert('Hasła nie są takie same.')
@@ -7187,9 +12457,14 @@ async function saveWorkerProfileData() {
   }
 
   try {
-    if (appState.workerProfileModalMode === 'add') {
-      await createWorker(appState.session.orgId, payload)
-      showTransientNotice('Pracownik został dodany.')
+    if (isAddingUser) {
+      await createWorkerUser(appState.session.orgId, {
+        ...payload,
+        displayName: payload.name,
+        password: newPass,
+        role: createRole,
+      })
+      showTransientNotice('Użytkownik został dodany i może się zalogować.')
     } else {
       const currentLogin = String(appState.workerProfileCurrent?.login ?? '').trim()
       if (!currentLogin) {
@@ -7498,9 +12773,9 @@ function workerTimeResetExportOptions() {
     checkbox.checked = checkbox.defaultChecked
   })
 
-  const portrait = document.querySelector('input[name="wtExportOrientation"][value="p"]')
-  if (portrait) {
-    portrait.checked = true
+  const landscape = document.querySelector('input[name="wtExportOrientation"][value="l"]')
+  if (landscape) {
+    landscape.checked = true
   }
 
   const fromInput = document.getElementById('wtExportFrom')
@@ -7738,6 +13013,7 @@ async function downloadWorkerTimeEwidencjaPdf(options) {
 
     const JsPdf = await ensureJsPdfLoaded()
     const pdf = new JsPdf({ orientation: exportOptions.orientation, unit: 'mm', format: 'a4' })
+    await ensurePdfUnicodeFont(pdf)
     const pageWidth = pdf.internal.pageSize.getWidth()
     const pageHeight = pdf.internal.pageSize.getHeight()
     const left = 10
@@ -7764,7 +13040,7 @@ async function downloadWorkerTimeEwidencjaPdf(options) {
     }
 
     const drawTableHeader = (topY) => {
-      pdf.setFont('helvetica', 'bold')
+      setPdfUnicodeFont(pdf, 'bold')
       pdf.setFontSize(8.5)
       let x = left
       columns.forEach((column) => {
@@ -7783,12 +13059,12 @@ async function downloadWorkerTimeEwidencjaPdf(options) {
       const subtitle = `Login: ${group.workerLogin} | Typ: ${group.workerType} | Zakres: ${fromLabel} - ${toLabel}`
       const summaryLine = `Wpisy: ${group.rows.length} | Czas pracy: ${durationSecondsToHm(group.totalWorkSec)} | Przerwy: ${durationSecondsToHm(group.totalBreakSec)} | Realny: ${durationSecondsToHm(group.totalNetSec)}`
 
-      pdf.setFont('helvetica', 'bold')
+      setPdfUnicodeFont(pdf, 'bold')
       pdf.setFontSize(12)
       pdf.text('Ewidencja pracy pracownika', left, 12)
       pdf.setFontSize(11)
       pdf.text(workerTitle, left, 18)
-      pdf.setFont('helvetica', 'normal')
+      setPdfUnicodeFont(pdf, 'normal')
       pdf.setFontSize(9)
       pdf.text(subtitle, left, 23)
       pdf.text(summaryLine, left, 28)
@@ -7796,22 +13072,22 @@ async function downloadWorkerTimeEwidencjaPdf(options) {
       let y = 35
       drawTableHeader(y)
       y += 6
-      pdf.setFont('helvetica', 'normal')
+      setPdfUnicodeFont(pdf, 'normal')
       pdf.setFontSize(8.2)
 
       group.rows.forEach((row, rowIndex) => {
         if (y > pageHeight - 10) {
           pdf.addPage()
-          pdf.setFont('helvetica', 'bold')
+          setPdfUnicodeFont(pdf, 'bold')
           pdf.setFontSize(10)
           pdf.text(`Ewidencja pracy - ${workerTitle} (cd.)`, left, 12)
-          pdf.setFont('helvetica', 'normal')
+          setPdfUnicodeFont(pdf, 'normal')
           pdf.setFontSize(8.5)
           pdf.text(`${fromLabel} - ${toLabel}`, left, 17)
           y = 24
           drawTableHeader(y)
           y += 6
-          pdf.setFont('helvetica', 'normal')
+          setPdfUnicodeFont(pdf, 'normal')
           pdf.setFontSize(8.2)
         }
 
@@ -7891,11 +13167,15 @@ async function fetchWorkersForCurrentSession() {
 
   try {
     const workers = await getWorkers(appState.session.orgId)
+    appState.workers = workers
+    appState.workersLoaded = true
     appState.workerTimeRows = workers
     workerTimeResetSelection()
     filterWorkerTimeTable({ resetPage: true })
   } catch (error) {
     workerTimeResetSelection()
+    appState.workers = []
+    appState.workersLoaded = false
     appState.workerTimeRows = []
     appState.workerTimeViewRows = []
     const message = error instanceof Error ? error.message : 'Błąd pobierania pracowników.'
@@ -8916,12 +14196,12 @@ function workerDetailExportFilenameBase() {
 
 function workerDetailResetExportOptions() {
   document.querySelectorAll('[data-wtd-export-col]').forEach((checkbox) => {
-    checkbox.checked = true
+    checkbox.checked = checkbox.defaultChecked
   })
 
-  const portrait = document.querySelector('input[name="wtdExportOrientation"][value="p"]')
-  if (portrait) {
-    portrait.checked = true
+  const landscape = document.querySelector('input[name="wtdExportOrientation"][value="l"]')
+  if (landscape) {
+    landscape.checked = true
   }
 }
 
@@ -8994,6 +14274,7 @@ async function downloadWorkerDetailEwidencjaPdf(options) {
   const rows = workerDetailExportRows()
   const JsPdf = await ensureJsPdfLoaded()
   const pdf = new JsPdf({ orientation: exportOptions.orientation, unit: 'mm', format: 'a4' })
+  await ensurePdfUnicodeFont(pdf)
   const pageWidth = pdf.internal.pageSize.getWidth()
   const pageHeight = pdf.internal.pageSize.getHeight()
   const left = 10
@@ -9020,16 +14301,16 @@ async function downloadWorkerDetailEwidencjaPdf(options) {
   }
 
   const drawHeader = (title, subtitle) => {
-    pdf.setFont('helvetica', 'bold')
+    setPdfUnicodeFont(pdf, 'bold')
     pdf.setFontSize(12)
     pdf.text(title, left, 12)
-    pdf.setFont('helvetica', 'normal')
+    setPdfUnicodeFont(pdf, 'normal')
     pdf.setFontSize(9)
     pdf.text(subtitle, left, 18)
   }
 
   const drawTableHead = (topY) => {
-    pdf.setFont('helvetica', 'bold')
+    setPdfUnicodeFont(pdf, 'bold')
     pdf.setFontSize(8.5)
     let x = left
     headerColumns.forEach((col) => {
@@ -9046,7 +14327,7 @@ async function downloadWorkerDetailEwidencjaPdf(options) {
   let y = 26
   drawTableHead(y)
   y += 6
-  pdf.setFont('helvetica', 'normal')
+  setPdfUnicodeFont(pdf, 'normal')
   pdf.setFontSize(8.2)
 
   rows.forEach((row, index) => {
@@ -9056,7 +14337,7 @@ async function downloadWorkerDetailEwidencjaPdf(options) {
       y = 26
       drawTableHead(y)
       y += 6
-      pdf.setFont('helvetica', 'normal')
+      setPdfUnicodeFont(pdf, 'normal')
       pdf.setFontSize(8.2)
     }
     let x = left
@@ -9591,6 +14872,11 @@ async function prepareReportsView() {
   reportSetSelectOptions('repB_client', clientOptions, '(wybierz klienta)')
   reportSetSelectOptions('repA_worker', workerOptions, '(wszyscy pracownicy)')
   reportSetSelectOptions('repB_worker', workerOptions, '(wszyscy pracownicy)')
+  reportSetSelectOptions('repEventsClient', clientOptions, '(wszyscy klienci)')
+  reportSetSelectOptions('repEventsWorker', workerOptions, '(wszyscy pracownicy)')
+  reportSetSelectOptions('repEventsType', reportEventsTypeOptions(), 'Wszystkie typy')
+  reportEventsDefaultDates()
+  reportRefreshEventsZoneOptions()
   appState.reportHistoryClientOptions = [...clientOptions]
   appState.reportHistoryWorkerOptions = [...workerOptions]
   appState.reportHistoryZoneOptions = [...zoneOptions]
@@ -9601,10 +14887,10 @@ async function prepareReportsView() {
   reportHistorySetTab(appState.reportHistoryTab)
   reportHistoryApplyRangeMode(reportHistoryReadRangeMode(), { force: false })
   reportHistoryResetResults({ clearStatus: true })
-  reportHistorySetStatus('Wybierz filtr i kliknij "Pokaz historie".')
+  reportHistorySetStatus('Wybierz filtr i kliknij "Pokaż historię".')
   reportSetKpiValues()
   reportResetCharts()
-  reportSetStatus('Wybierz klienta w panelu A i B, a następnie uruchom porównanie.')
+  reportSetStatus('Ustaw filtry i wygeneruj zestawienie zdarzeń.')
 }
 
 function reportHistoryNormalizeTab(value) {
@@ -9614,6 +14900,69 @@ function reportHistoryNormalizeTab(value) {
   }
 
   return 'objects'
+}
+
+function reportHistoryKindForTab(tab) {
+  const normalized = reportHistoryNormalizeTab(tab)
+  if (normalized === 'workers') {
+    return 'workerTime'
+  }
+  if (normalized === 'zones') {
+    return 'events'
+  }
+
+  return 'clients'
+}
+
+function reportHistoryBuilderConfig(kind) {
+  const normalized = String(kind ?? '').trim()
+  if (normalized === 'events') {
+    return {
+      tab: 'zones',
+      title: 'Zdarzenia',
+      subtitle: 'Historia zdarzeń według stref.',
+      status: 'Wybierz strefę i kliknij "Pokaż historię".',
+      showTabs: false,
+    }
+  }
+  if (normalized === 'workerTime') {
+    return {
+      tab: 'workers',
+      title: 'Czasy pracowników',
+      subtitle: 'Historia pracy według osób.',
+      status: 'Wybierz osobę i kliknij "Pokaż historię".',
+      showTabs: false,
+    }
+  }
+  if (normalized === 'clients') {
+    return {
+      tab: 'objects',
+      title: 'Klienci',
+      subtitle: 'Historia pracy według klientów.',
+      status: 'Wybierz klienta i kliknij "Pokaż historię".',
+      showTabs: false,
+    }
+  }
+  if (normalized === 'history') {
+    return {
+      tab: appState.reportHistoryTab,
+      title: 'Historia',
+      subtitle: 'Historia dnia dla klienta, osoby lub strefy.',
+      status: 'Wybierz filtr i kliknij "Pokaż historię".',
+      showTabs: true,
+    }
+  }
+
+  return null
+}
+
+function reportHistorySetTabsVisible(visible) {
+  const tabs = document.getElementById('repHistoryTabs')
+  if (!tabs) {
+    return
+  }
+
+  tabs.style.display = visible ? '' : 'none'
 }
 
 function reportHistoryReadRangeMode() {
@@ -9660,6 +15009,24 @@ function reportHistorySetStatus(message = '', isError = false) {
 
   node.textContent = message
   node.style.color = isError ? '#b91c1c' : ''
+}
+
+function reportHistorySetLoading(isLoading, message = 'Ładowanie historii...') {
+  const loading = document.getElementById('repHistoryLoading')
+  const loadingText = loading?.querySelector('[data-rep-history-loading-text]')
+  const button = document.getElementById('repHistoryRun')
+
+  if (loading) {
+    loading.style.display = isLoading ? 'grid' : 'none'
+    loading.setAttribute('aria-busy', isLoading ? 'true' : 'false')
+  }
+  if (loadingText) {
+    loadingText.textContent = message
+  }
+  if (button) {
+    button.disabled = Boolean(isLoading)
+    button.textContent = isLoading ? 'Ładowanie...' : 'Pokaż historię'
+  }
 }
 
 function reportHistorySetTab(tab) {
@@ -9711,8 +15078,8 @@ function reportHistorySetSummaryRows(rows = []) {
     <div class="rep-summary-card">
       ${workerLine}
       <div><b>Dni:</b> ${days}</div>
-      <div><b>Wpisy:</b> ${events} · <b>RUNNING:</b> ${running}</div>
-      <div><b>Czas pracy razem:</b> ${durationSecondsToHms(closedSec)}</div>
+      <div><b>Wpisy:</b> ${events} · <b>Otwarte:</b> ${running}</div>
+      <div><b>Czas pracy:</b> ${durationSecondsToHms(closedSec)}</div>
     </div>
   `
   reportSetVisible('repHistorySummary', true)
@@ -9801,6 +15168,53 @@ function reportHistoryEditButtonHtml(editKey) {
   `
 }
 
+function reportHistoryIsDayStopSource(item) {
+  if (!item || typeof item !== 'object') {
+    return false
+  }
+
+  const stopIso = toIso(item?.dayEndAt ?? item?.endAt ?? item?.closeMarkedAt)
+  if (!stopIso) {
+    return false
+  }
+
+  const endReason = String(item?.endReason ?? '').trim().toUpperCase()
+  const status = String(item?.status ?? '').trim().toUpperCase()
+  return (
+    item?.historyMarkerOnly ||
+    endReason === 'WORKDAY_STOP' ||
+    endReason === 'STOP_END_DAY' ||
+    status === 'WORKDAY_CLOSED'
+  )
+}
+
+function reportHistoryHasDayStart(row) {
+  return Boolean(toIso(row?.dayStartIso ?? row?.qrStartSourceItem?.dayStartAt ?? row?.qrStartSourceItem?.startAt))
+}
+
+function reportHistoryHasDayStop(row) {
+  return reportHistoryIsDayStopSource(row?.qrStopSourceItem)
+}
+
+function reportHistoryHasOpenWorkerDay(row) {
+  return reportHistoryHasDayStart(row) && !reportHistoryHasDayStop(row)
+}
+
+function reportHistoryDayStartCloseSource(row) {
+  const source = row?.qrStartSourceItem
+  if (!source || typeof source !== 'object') {
+    return null
+  }
+
+  const sourceId = String(source?.eventId ?? source?.workdayId ?? source?.id ?? '').trim()
+  if (!sourceId) {
+    return null
+  }
+
+  const startIso = toIso(source?.startAt ?? source?.dayStartAt ?? row?.dayStartIso)
+  return startIso ? source : null
+}
+
 function reportHistoryRenderDetails(row, tab, dayKey = '') {
   const details = Array.isArray(row.details) ? row.details : []
   if (!details.length && tab !== 'workers') {
@@ -9816,7 +15230,7 @@ function reportHistoryRenderDetails(row, tab, dayKey = '') {
           return `
           <tr>
             <td>${escapeHtml(resolvedClient)}</td>
-            <td>${escapeHtml(detail.zoneLabel || '-')}</td>
+            <td>${zoneNameWithQrHtml(detail.zoneLabel || '-', detail.sourceItem)}</td>
             <td>${escapeHtml(detail.locationLabel || '-')}</td>
             <td>${escapeHtml(detail.workerLabel || '-')}</td>
             <td class="time-start">${escapeHtml(detail.startLabel || '-')}</td>
@@ -9834,7 +15248,7 @@ function reportHistoryRenderDetails(row, tab, dayKey = '') {
       <div class="rep-history-detail">
         <table class="rep-history-detail-table">
           <thead>
-            <tr><th>Klient</th><th>Strefa</th><th>Lokalizacja strefy</th><th>Osoba</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th><th class="ta-right">Edytuj</th></tr>
+            <tr><th>Klient</th><th>Strefa</th><th>Lok.</th><th>Osoba</th><th class="time-start">Start</th><th class="time-stop">Stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th><th class="ta-right">Edytuj</th></tr>
           </thead>
           <tbody>${body}</tbody>
         </table>
@@ -9843,7 +15257,7 @@ function reportHistoryRenderDetails(row, tab, dayKey = '') {
   }
 
   if (tab === 'workers') {
-    const hasRunning = Number(row?.runningCount ?? 0) > 0
+    const hasDayStop = reportHistoryHasDayStop(row)
     const qrStartEditKey = reportHistoryStoreEditableSource(dayKey, 'marker-start', row?.qrStartSourceItem)
     const qrStopEditKey = reportHistoryStoreEditableSource(dayKey, 'marker-stop', row?.qrStopSourceItem)
     const qrStartIsSystem = reportHistoryIsSystemEntrySource(row?.qrStartSourceItem)
@@ -9856,7 +15270,7 @@ function reportHistoryRenderDetails(row, tab, dayKey = '') {
           return `
           <tr>
             <td>${escapeHtml(resolvedClient)}</td>
-            <td>${escapeHtml(detail.zoneLabel || '-')}</td>
+            <td>${zoneNameWithQrHtml(detail.zoneLabel || '-', detail.sourceItem)}</td>
             <td>${escapeHtml(detail.locationLabel || '-')}</td>
             <td class="time-start">${escapeHtml(detail.startLabel || '-')}</td>
             <td class="time-stop">${escapeHtml(detail.stopLabel || '-')}</td>
@@ -9878,10 +15292,16 @@ function reportHistoryRenderDetails(row, tab, dayKey = '') {
     const qrStopZoneLabel = qrStopIsSystem ? REPORT_HISTORY_SYSTEM_ZONE_LABEL : String(row.qrStopZoneCode || '-')
     const qrStartLocationLabel = qrStartIsSystem ? REPORT_HISTORY_SYSTEM_ZONE_LABEL : String(row.qrStartGeoLabel || '-')
     const qrStopLocationLabel = qrStopIsSystem ? REPORT_HISTORY_SYSTEM_ZONE_LABEL : String(row.qrStopGeoLabel || '-')
+    const qrStartZoneSource = row.qrStartZoneCode && row.qrStartZoneCode !== '-'
+      ? row.qrStartZoneCode
+      : (row?.qrStartSourceItem ?? qrStartZoneLabel)
+    const qrStopZoneSource = row.qrStopZoneCode && row.qrStopZoneCode !== '-'
+      ? row.qrStopZoneCode
+      : (row?.qrStopSourceItem ?? qrStopZoneLabel)
     const qrStartRow = `
       <tr class="rep-history-marker-row">
         <td>${escapeHtml(qrStartClient)}</td>
-        <td>${escapeHtml(qrStartZoneLabel)}</td>
+        <td>${zoneNameWithQrHtml(qrStartZoneLabel, qrStartZoneSource)}</td>
         <td>${reportHistoryGeoCellHtml(qrStartLocationLabel)}</td>
         <td class="time-start">${escapeHtml(row.qrStartLabel || '-')}</td>
         <td class="time-stop">-</td>
@@ -9893,7 +15313,7 @@ function reportHistoryRenderDetails(row, tab, dayKey = '') {
     const qrStopRow = `
       <tr class="rep-history-marker-row">
         <td>${escapeHtml(qrStopClient)}</td>
-        <td>${escapeHtml(qrStopZoneLabel)}</td>
+        <td>${zoneNameWithQrHtml(qrStopZoneLabel, qrStopZoneSource)}</td>
         <td>${reportHistoryGeoCellHtml(qrStopLocationLabel)}</td>
         <td class="time-start">-</td>
         <td class="time-stop">${escapeHtml(row.qrStopLabel || '-')}</td>
@@ -9902,13 +15322,13 @@ function reportHistoryRenderDetails(row, tab, dayKey = '') {
         <td class="ta-right rep-history-edit-cell">${reportHistoryEditButtonHtml(qrStopEditKey)}</td>
       </tr>
     `
-    const body = `${hasRunning ? '' : qrStopRow}${detailsBody}${qrStartRow}`
+    const body = `${hasDayStop ? qrStopRow : ''}${detailsBody}${qrStartRow}`
 
     return `
       <div class="rep-history-detail">
         <table class="rep-history-detail-table">
           <thead>
-            <tr><th>Klient</th><th>Strefa</th><th>Lokalizacja strefy</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th><th class="ta-right">Edytuj</th></tr>
+            <tr><th>Klient</th><th>Strefa</th><th>Lok.</th><th class="time-start">Start</th><th class="time-stop">Stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th><th class="ta-right">Edytuj</th></tr>
           </thead>
           <tbody>${body}</tbody>
         </table>
@@ -9922,7 +15342,7 @@ function reportHistoryRenderDetails(row, tab, dayKey = '') {
         const editKey = reportHistoryStoreEditableDetail(dayKey, detailIndex, detail)
         return `
         <tr>
-          <td>${escapeHtml(detail.zoneLabel || '-')}</td>
+          <td>${zoneNameWithQrHtml(detail.zoneLabel || '-', detail.sourceItem)}</td>
           <td>${escapeHtml(detail.locationLabel || '-')}</td>
           <td>${escapeHtml(detail.workerLabel || '-')}</td>
           <td class="time-start">${escapeHtml(detail.startLabel || '-')}</td>
@@ -9940,7 +15360,7 @@ function reportHistoryRenderDetails(row, tab, dayKey = '') {
     <div class="rep-history-detail">
       <table class="rep-history-detail-table">
         <thead>
-          <tr><th>Strefa</th><th>Lokalizacja strefy</th><th>Osoba</th><th class="time-start">Godzina start</th><th class="time-stop">Godzina stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th><th class="ta-right">Edytuj</th></tr>
+          <tr><th>Strefa</th><th>Lok.</th><th>Osoba</th><th class="time-start">Start</th><th class="time-stop">Stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th><th class="ta-right">Edytuj</th></tr>
         </thead>
         <tbody>${body}</tbody>
       </table>
@@ -9950,11 +15370,11 @@ function reportHistoryRenderDetails(row, tab, dayKey = '') {
 
 function reportHistoryDayInfoHtml(row) {
   const startValue = String(row?.qrStartLabel ?? '').trim() || '--:--:--'
-  const hasRunning = Number(row?.runningCount ?? 0) > 0
-  const stopValue = hasRunning ? '--:--:--' : String(row?.qrStopLabel ?? '').trim() || '--:--:--'
+  const hasOpenDay = reportHistoryHasOpenWorkerDay(row)
+  const stopValue = hasOpenDay ? '--:--:--' : String(row?.qrStopLabel ?? '').trim() || '--:--:--'
   const workValue = durationSecondsToHms(Number(row?.closedSec ?? 0))
   const dayKey = String(row?.dayKey ?? '').trim()
-  const canStopDay = hasRunning && Boolean(dayKey) && canManageEvents()
+  const canStopDay = hasOpenDay && Boolean(dayKey) && canManageEvents()
   const stopDayBusy = canStopDay && appState.reportHistoryClosingDayKey === dayKey
   const stopDayButton = canStopDay
     ? `
@@ -9964,7 +15384,7 @@ function reportHistoryDayInfoHtml(row) {
         data-rep-history-stop-day="${escapeHtml(dayKey)}"
         ${stopDayBusy ? 'disabled' : ''}
       >
-        ${stopDayBusy ? 'Zamykanie...' : 'Zakończ dzień (QR STOP)'}
+        ${stopDayBusy ? 'Zamykanie...' : 'Zamknij dzień pracy'}
       </button>
     `
     : ''
@@ -9993,10 +15413,9 @@ function reportHistoryDayInfoHtml(row) {
   `
 }
 
-function reportHistoryPromptStopDateTime({ dayLabel = '-', workerName = '-', defaultIso = '' } = {}) {
-  const fallbackIso = defaultIso || new Date().toISOString()
-  const defaultValue = isoToLocalDateTimeInput(fallbackIso)
-
+function reportHistoryPromptStopDateTime({ dayKey = '', dayLabel = '-', workerName = '-' } = {}) {
+  const normalizedDayKey = String(dayKey ?? '').trim()
+  const initialDate = /^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey) ? normalizedDayKey : todayYmd()
   return new Promise((resolve) => {
     const existingOverlay = document.getElementById('repHistoryStopDayOverlay')
     if (existingOverlay) {
@@ -10020,14 +15439,22 @@ function reportHistoryPromptStopDateTime({ dayLabel = '-', workerName = '-', def
         <div class="modal-body">
           <div class="form-grid">
             <div class="form-field span-2">
-              <label for="repHistoryStopDayInput">Data i godzina zakończenia</label>
+              <label for="repHistoryStopDayDateInput">Data zakończenia</label>
+              <input
+                class="rep-history-stopday-date"
+                id="repHistoryStopDayDateInput"
+                type="date"
+                value="${escapeHtml(initialDate)}"
+              />
+            </div>
+            <div class="form-field span-2">
+              <label for="repHistoryStopDayInput">Godzina zakończenia</label>
               <input
                 id="repHistoryStopDayInput"
-                type="datetime-local"
+                type="time"
                 step="60"
-                value="${escapeHtml(defaultValue)}"
               />
-              <div class="field-hint">Wybierz moment, który ma zostać zapisany jako QR STOP.</div>
+              <div class="field-hint">Domyślnie ustawiona jak dzień rozpoczęcia pracy. Możesz ją zmienić.</div>
             </div>
           </div>
         </div>
@@ -10048,16 +15475,21 @@ function reportHistoryPromptStopDateTime({ dayLabel = '-', workerName = '-', def
       resolve(String(isoValue ?? '').trim())
     }
 
+    const dateInput = overlay.querySelector('#repHistoryStopDayDateInput')
     const input = overlay.querySelector('#repHistoryStopDayInput')
     const cancelButton = overlay.querySelector('[data-rep-history-stop-cancel]')
     const closeButton = overlay.querySelector('[data-rep-history-stop-close]')
     const confirmButton = overlay.querySelector('[data-rep-history-stop-confirm]')
 
     const submit = () => {
-      const iso = localDateTimeInputToIso(input?.value)
+      const iso = localDateAndTimeInputToIso(dateInput?.value, input?.value)
       if (!iso) {
         alert('Podaj poprawną datę i godzinę zakończenia.')
-        input?.focus()
+        if (!String(dateInput?.value ?? '').trim()) {
+          dateInput?.focus()
+        } else {
+          input?.focus()
+        }
         return
       }
 
@@ -10099,6 +15531,54 @@ function reportHistoryPromptStopDateTime({ dayLabel = '-', workerName = '-', def
   })
 }
 
+function reportEventsDefaultDates() {
+  const fromInput = document.getElementById('repEventsFrom')
+  const toInput = document.getElementById('repEventsTo')
+  if (fromInput && !String(fromInput.value ?? '').trim()) {
+    fromInput.value = firstDayOfCurrentMonthYmd()
+  }
+  if (toInput && !String(toInput.value ?? '').trim()) {
+    toInput.value = todayYmd()
+  }
+}
+
+function reportEventsTypeOptions() {
+  return [
+    { value: 'QR START', label: 'QR START' },
+    { value: 'QR STOP', label: 'QR STOP' },
+    { value: 'QR START + STOP', label: 'QR START + STOP' },
+    { value: 'CLEAN', label: 'CLEAN' },
+    { value: 'Strefa spec.', label: 'Strefa specjalna' },
+    { value: 'Zlecenie ind.', label: 'Zlecenie indywidualne' },
+    { value: 'Inne QR', label: 'Inne QR' },
+  ]
+}
+
+function reportRefreshEventsZoneOptions() {
+  const clientSelect = document.getElementById('repEventsClient')
+  const zoneSelect = document.getElementById('repEventsZone')
+  if (!zoneSelect) {
+    return
+  }
+
+  const clientId = String(clientSelect?.value ?? '').trim()
+  const currentZoneId = String(zoneSelect.value ?? '').trim()
+  const zones = visiblePortalZones()
+    .filter((zone) => !clientId || String(zone.clientId ?? '').trim() === clientId)
+    .map((zone) => ({
+      value: String(zone.id ?? zone.qr ?? '').trim(),
+      label: [zone.clientName, zone.zoneName, zone.location].filter((value) => String(value ?? '').trim() && value !== '-').join(' / '),
+    }))
+    .filter((option) => option.value)
+    .sort((left, right) => left.label.localeCompare(right.label, 'pl', { numeric: true, sensitivity: 'base' }))
+
+  reportSetSelectOptions('repEventsZone', zones, clientId ? '(wszystkie strefy klienta)' : '(wszystkie strefy)')
+  zoneSelect.disabled = false
+  if (currentZoneId && zones.some((option) => option.value === currentZoneId)) {
+    zoneSelect.value = currentZoneId
+  }
+}
+
 async function reportHistoryCloseWorkerDay(dayKey) {
   if (!appState.session?.orgId) {
     return
@@ -10132,8 +15612,21 @@ async function reportHistoryCloseWorkerDay(dayKey) {
     const status = String(detail?.statusLabel ?? '').trim().toUpperCase()
     return status === 'RUNNING' && detail?.sourceItem
   })
-  if (!runningDetails.length) {
-    alert('Brak aktywnych wpisów RUNNING do zamknięcia.')
+  const dayStartSource = reportHistoryDayStartCloseSource(row)
+  const closeTargets = runningDetails.length
+    ? runningDetails
+    : dayStartSource
+      ? [
+          {
+            sourceItem: dayStartSource,
+            statusLabel: 'RUNNING',
+            isDayMarkerClose: true,
+          },
+        ]
+      : []
+
+  if (!closeTargets.length) {
+    alert('Brak otwartego dnia pracy do zamknięcia. Odśwież historię.')
     return
   }
 
@@ -10143,17 +15636,17 @@ async function reportHistoryCloseWorkerDay(dayKey) {
   const workerName = String(workerSelect?.selectedOptions?.[0]?.textContent ?? workerSearch?.value ?? '').trim() || 'pracownika'
   const dayLabel = formatDatePl(`${normalizedDayKey}T00:00:00.000Z`)
   const selectedEndIso = await reportHistoryPromptStopDateTime({
+    dayKey: normalizedDayKey,
     dayLabel,
     workerName,
-    defaultIso: new Date().toISOString(),
   })
   if (!selectedEndIso) {
     return
   }
 
   const selectedEndTs = new Date(selectedEndIso).getTime()
-  const latestStartTs = runningDetails.reduce((maxTs, detail) => {
-    const startIso = toIso(detail?.sourceItem?.startAt ?? detail?.sourceItem?.dayStartAt)
+  const latestStartTs = closeTargets.reduce((maxTs, detail) => {
+    const startIso = toIso(detail?.sourceItem?.startAt ?? detail?.sourceItem?.dayStartAt ?? row?.dayStartIso)
     const startTs = startIso ? new Date(startIso).getTime() : 0
     return Number.isFinite(startTs) && startTs > maxTs ? startTs : maxTs
   }, 0)
@@ -10170,7 +15663,7 @@ async function reportHistoryCloseWorkerDay(dayKey) {
     const nowIso = selectedEndIso
     let updatedCount = 0
 
-    for (const detail of runningDetails) {
+    for (const detail of closeTargets) {
       const source = detail.sourceItem ?? {}
       const eventId = String(source?.eventId ?? source?.workdayId ?? source?.id ?? '').trim()
       if (!eventId) {
@@ -10183,7 +15676,7 @@ async function reportHistoryCloseWorkerDay(dayKey) {
       }
 
       const sourceWorkerName = String(source?.workerName ?? source?.name ?? workerName).trim() || workerName
-      const sourceStartAt = toIso(source?.startAt ?? source?.dayStartAt) || nowIso
+      const sourceStartAt = toIso(source?.startAt ?? source?.dayStartAt ?? row?.dayStartIso) || nowIso
       const startMs = new Date(sourceStartAt).getTime()
       const nowMs = new Date(nowIso).getTime()
       const safeEndAt = Number.isFinite(startMs) && Number.isFinite(nowMs) && nowMs < startMs ? sourceStartAt : nowIso
@@ -10223,7 +15716,11 @@ async function reportHistoryCloseWorkerDay(dayKey) {
     await runReportHistory()
     await fetchEventsForCurrentSession({ resetPage: false })
     await refreshDashboardWidgets({ syncWorktimeToken: true })
-    showTransientNotice(`Dzień zakończony. Zamknięto ${updatedCount} aktywne wpisy.`)
+    showTransientNotice(
+      runningDetails.length
+        ? `Dzień zakończony. Zamknięto ${updatedCount} aktywne wpisy.`
+        : 'Dzień pracy został zamknięty.',
+    )
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Nie udało się zakończyć dnia.'
     alert(message)
@@ -10245,7 +15742,7 @@ function reportHistoryRenderTable() {
   const rows = Array.isArray(appState.reportHistoryRows) ? appState.reportHistoryRows : []
   const isWorkersTab = tab === 'workers'
   const detailLabel = isWorkersTab ? 'Info dnia' : 'Szczegoly'
-  const closedLabel = 'Czas pracy razem'
+  const closedLabel = 'Czas pracy'
   const headHtml = `
     <thead>
       <tr>
@@ -10253,7 +15750,7 @@ function reportHistoryRenderTable() {
         <th>Data</th>
         <th class="ta-right">Wpisy</th>
         <th class="ta-right">${closedLabel}</th>
-        <th class="ta-right">RUNNING</th>
+        <th class="ta-right">Otwarte</th>
         <th class="ta-right">${detailLabel}</th>
       </tr>
     </thead>
@@ -10568,7 +16065,7 @@ function reportHistoryIsSystemEntrySource(item) {
     return false
   }
 
-  if (Boolean(item?.historyMarkerOnly)) {
+  if (item?.historyMarkerOnly) {
     return true
   }
 
@@ -10842,6 +16339,7 @@ function reportHistoryBuildRows(items, tab) {
         dayEndIso: '',
         dayStartTs: 0,
         dayEndTs: 0,
+        latestRunningStartTs: 0,
         dayStartClientLabel: '-',
         dayEndClientLabel: '-',
         dayStartZoneCode: '-',
@@ -10861,7 +16359,7 @@ function reportHistoryBuildRows(items, tab) {
     const bucket = groups.get(dayKey)
     const status = reportHistoryResolveStatus(item)
     const closedSec = reportHistoryClosedDurationSec(item)
-    const isMarkerOnly = Boolean(item?.historyMarkerOnly)
+    const isMarkerOnly = item?.historyMarkerOnly
     const startIso = toIso(item?.startAt)
     const endIso = toIso(item?.endAt)
     const sortStartTs = reportHistoryToTimestamp(startIso)
@@ -10891,6 +16389,9 @@ function reportHistoryBuildRows(items, tab) {
       bucket.closedSec += closedSec
       if (status === 'RUNNING') {
         bucket.runningCount += 1
+        if (sortStartTs > bucket.latestRunningStartTs) {
+          bucket.latestRunningStartTs = sortStartTs
+        }
       }
     }
     if (dayStartTs && (!bucket.dayStartTs || dayStartTs < bucket.dayStartTs)) {
@@ -10988,14 +16489,17 @@ function reportHistoryBuildRows(items, tab) {
       const hasRunning = Number(bucket.runningCount ?? 0) > 0
       const todayKey = todayYmd()
       const isTodayBucket = String(bucket.dayKey ?? '').trim() === todayKey
-      const dayEndForWorkers = hasRunning && isTodayBucket ? Date.now() : bucket.dayEndTs
-      const dayRangeSec =
-        bucket.dayStartTs && dayEndForWorkers && dayEndForWorkers > bucket.dayStartTs
-          ? Math.floor((dayEndForWorkers - bucket.dayStartTs) / 1000)
+      const activeRunningSec =
+        hasRunning &&
+        isTodayBucket &&
+        Number(bucket.latestRunningStartTs ?? 0) > 0 &&
+        Number(bucket.latestRunningStartTs ?? 0) > Number(bucket.dayEndTs ?? 0)
+          ? Math.max(0, Math.floor((Date.now() - Number(bucket.latestRunningStartTs ?? 0)) / 1000))
           : 0
+      const totalWorkSec = Math.max(0, Number(bucket.closedSec ?? 0)) + activeRunningSec
       return {
         ...bucket,
-        closedSec: normalizedTab === 'workers' ? dayRangeSec : bucket.closedSec,
+        closedSec: normalizedTab === 'workers' ? totalWorkSec : bucket.closedSec,
         qrStartLabel: formatTime(bucket.dayStartIso),
         qrStopLabel: formatTime(bucket.dayEndIso),
         qrStartClientLabel: bucket.dayStartClientLabel || '-',
@@ -11059,6 +16563,7 @@ async function runReportHistory() {
 
   reportHistoryResetResults({ clearStatus: false })
   reportHistorySetStatus('Ładowanie historii...')
+  reportHistorySetLoading(true)
 
   try {
     const fetchFilters = {
@@ -11080,8 +16585,10 @@ async function runReportHistory() {
         reportMatchesPanelSelection(item, { clientId: filters.clientId, zoneId: '', workerLogin: '' }),
       )
     } else if (filters.tab === 'workers') {
-      const filteredEvents = items.filter((item) =>
-        reportMatchesPanelSelection(item, { clientId: '', zoneId: '', workerLogin: filters.workerLogin }),
+      const filteredEvents = items.filter(
+        (item) =>
+          reportIsWorkerHistoryDetailItem(item) &&
+          reportMatchesPanelSelection(item, { clientId: '', zoneId: '', workerLogin: filters.workerLogin }),
       )
 
       let markerRows = []
@@ -11147,7 +16654,38 @@ async function runReportHistory() {
     reportHistorySetStatus(`Historia gotowa. Dni: ${rowsCount} · wpisy: ${eventsCount}.`)
   } catch (error) {
     reportHistorySetStatus(error instanceof Error ? error.message : 'Blad pobierania historii.', true)
+  } finally {
+    reportHistorySetLoading(false)
   }
+}
+
+function reportHistoryPanelIsVisible() {
+  const panel = document.getElementById('repHistory')
+  return panel instanceof HTMLElement && panel.style.display !== 'none'
+}
+
+async function reportHistoryRefreshAfterEventSave(updatedItem = null) {
+  if (!reportHistoryPanelIsVisible()) {
+    return
+  }
+
+  const previousExpanded = { ...(appState.reportHistoryExpanded || {}) }
+  const updatedDayKey = reportHistoryDayKey(updatedItem || {})
+  await runReportHistory()
+
+  const availableDayKeys = new Set((Array.isArray(appState.reportHistoryRows) ? appState.reportHistoryRows : []).map((row) => String(row.dayKey ?? '').trim()))
+  const nextExpanded = {}
+  Object.entries(previousExpanded).forEach(([dayKey, expanded]) => {
+    if (expanded && availableDayKeys.has(dayKey)) {
+      nextExpanded[dayKey] = true
+    }
+  })
+  if (updatedDayKey && availableDayKeys.has(updatedDayKey)) {
+    nextExpanded[updatedDayKey] = true
+  }
+
+  appState.reportHistoryExpanded = nextExpanded
+  reportHistoryRenderTable()
 }
 
 function reportHistoryFindWorkerOption(workerLogin, workerName) {
@@ -11370,7 +16908,7 @@ async function openEventHistoryFromRow(row, tab, options = {}) {
 
   go('reports')
   await ensureReportsViewReady()
-  openReportBuilder('history')
+  openReportBuilder(reportHistoryKindForTab(normalizedTab))
   reportHistorySetTab(normalizedTab)
 
   const fromInput = document.getElementById('repHistoryFrom')
@@ -11454,7 +16992,7 @@ async function openDashboardWorkerHistory(workerLogin, workerName) {
 
   go('reports')
   await ensureReportsViewReady()
-  openReportBuilder('history')
+  openReportBuilder('workerTime')
   reportHistorySetTab('workers')
 
   const today = todayYmd()
@@ -11498,31 +17036,35 @@ function reportHistoryToggle(dayKey) {
 function openReportBuilder(kind) {
   const title = document.getElementById('repTitle')
   const subtitle = document.getElementById('repSubtitle')
+  const historyConfig = reportHistoryBuilderConfig(kind)
   reportSetVisible('repHome', false)
   reportSetVisible('repBuilder', true)
   reportResetResults()
 
-  if (kind === 'events') {
-    if (title) title.textContent = 'Zestawienie zdarzeń'
-    if (subtitle) subtitle.textContent = 'Porównanie panelu A i B dla zamkniętych zdarzeń (strefa i pracownik opcjonalne).'
-    reportSetVisible('repEvents', true)
-    reportSetVisible('repHistory', false)
-    reportSetVisible('repSoon', false)
-    reportSetStatus('Wybierz klienta w panelu A i B, strefa i pracownik sa opcjonalne.')
-    return
-  }
-
-  if (kind === 'history') {
-    if (title) title.textContent = 'Historia'
-    if (subtitle) subtitle.textContent = 'Historia dnia dla obiektu, osoby lub strefy.'
+  if (historyConfig) {
+    if (title) title.textContent = historyConfig.title
+    if (subtitle) subtitle.textContent = historyConfig.subtitle
     reportSetVisible('repEvents', false)
     reportSetVisible('repHistory', true)
     reportSetVisible('repSoon', false)
+    reportHistorySetTabsVisible(historyConfig.showTabs)
     reportHistoryApplyAllSelectFilters()
-    reportHistorySetTab(appState.reportHistoryTab)
+    reportHistorySetTab(historyConfig.tab)
     reportHistoryApplyRangeMode(reportHistoryReadRangeMode(), { force: false })
     reportHistoryResetResults({ clearStatus: false })
-    reportHistorySetStatus('Wybierz filtr i kliknij "Pokaz historie".')
+    reportHistorySetStatus(historyConfig.status)
+    return
+  }
+
+  if (kind === 'eventsOperational') {
+    if (title) title.textContent = 'Zestawienie zdarzeń'
+    if (subtitle) subtitle.textContent = 'Operacyjne podsumowanie zdarzeń według klientów, stref, pracowników i typów.'
+    reportSetVisible('repEvents', true)
+    reportSetVisible('repHistory', false)
+    reportSetVisible('repSoon', false)
+    reportEventsDefaultDates()
+    reportRefreshEventsZoneOptions()
+    reportSetStatus('Ustaw filtry i kliknij "Generuj zestawienie".')
     return
   }
 
@@ -11531,6 +17073,7 @@ function openReportBuilder(kind) {
   reportSetVisible('repEvents', false)
   reportSetVisible('repHistory', false)
   reportSetVisible('repSoon', true)
+  reportHistorySetTabsVisible(true)
 }
 
 function closeReportBuilder() {
@@ -11539,6 +17082,7 @@ function closeReportBuilder() {
   reportSetVisible('repEvents', false)
   reportSetVisible('repHistory', false)
   reportSetVisible('repSoon', false)
+  reportHistorySetTabsVisible(true)
   reportGeoHidePreview()
   reportGeoCloseModal()
   reportResetResults()
@@ -11700,6 +17244,357 @@ async function reportFetchEventsForPanel(orgId, panel) {
   })
 }
 
+function reportReadEventsFilters() {
+  return {
+    from: String(document.getElementById('repEventsFrom')?.value ?? '').trim(),
+    to: String(document.getElementById('repEventsTo')?.value ?? '').trim(),
+    clientId: String(document.getElementById('repEventsClient')?.value ?? '').trim(),
+    zoneId: String(document.getElementById('repEventsZone')?.value ?? '').trim(),
+    workerLogin: String(document.getElementById('repEventsWorker')?.value ?? '').trim(),
+    status: String(document.getElementById('repEventsStatus')?.value ?? 'all').trim(),
+    type: String(document.getElementById('repEventsType')?.value ?? '').trim(),
+    groupBy: String(document.getElementById('repEventsGroupBy')?.value ?? 'client').trim() || 'client',
+    search: String(document.getElementById('repEventsSearch')?.value ?? '').trim(),
+  }
+}
+
+function reportEventClientLabel(item) {
+  const qrCandidate =
+    item?.zoneId ??
+    item?.roomId ??
+    item?.utilityRoomId ??
+    item?.dayStartObject ??
+    item?.dayStopObject ??
+    item?.strefa
+  return resolveClientLabelWithQrFallback(String(item?.clientName ?? item?.klient ?? item?.clientId ?? '-').trim() || '-', qrCandidate)
+}
+
+function reportEventZoneLabel(item) {
+  return String(item?.zoneName ?? item?.strefa ?? item?.zoneId ?? item?.roomId ?? '-').trim() || '-'
+}
+
+function reportEventLocationLabel(item) {
+  return String(item?.lokalizacja ?? item?.location ?? '-').trim() || '-'
+}
+
+function reportEventWorkerLabel(item) {
+  return String(item?.workerName ?? item?.workerLogin ?? '-').trim() || '-'
+}
+
+function reportEventTypeLabel(item) {
+  return eventTypeInfo(item).label
+}
+
+function reportEventDurationSec(item) {
+  const direct = Number(item?.durationSec ?? 0)
+  if (Number.isFinite(direct) && direct > 0) {
+    return Math.floor(direct)
+  }
+
+  const startIso = toIso(item?.startAt)
+  const endIso = toIso(item?.endAt)
+  if (!startIso || !endIso) {
+    return 0
+  }
+
+  const startMs = new Date(startIso).getTime()
+  const endMs = new Date(endIso).getTime()
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return 0
+  }
+
+  return Math.floor((endMs - startMs) / 1000)
+}
+
+function reportEventMatchesStatus(item, status) {
+  const normalized = String(status ?? 'all').trim().toLowerCase()
+  if (!normalized || normalized === 'all') {
+    return true
+  }
+
+  const closed = reportClosedEvent(item)
+  if (normalized === 'closed') {
+    return closed
+  }
+  if (normalized === 'running') {
+    return !closed
+  }
+  return true
+}
+
+function reportEventMatchesSearch(item, search) {
+  const query = normalizeSearchText(search)
+  if (!query) {
+    return true
+  }
+
+  const haystack = [
+    reportEventClientLabel(item),
+    reportEventZoneLabel(item),
+    reportEventLocationLabel(item),
+    reportEventWorkerLabel(item),
+    item?.workerLogin,
+    reportEventTypeLabel(item),
+    normalizeVisibleEventComment(item?.comment),
+    item?.editedBy,
+    item?.date,
+    item?.start,
+    item?.stop,
+  ]
+    .map((value) => normalizeSearchText(value))
+    .join(' ')
+
+  return haystack.includes(query)
+}
+
+function reportEventMatchesFilters(item, filters) {
+  if (!reportMatchesPanelSelection(item, filters)) {
+    return false
+  }
+  if (!reportEventMatchesStatus(item, filters.status)) {
+    return false
+  }
+  if (filters.type && reportEventTypeLabel(item) !== filters.type) {
+    return false
+  }
+  return reportEventMatchesSearch(item, filters.search)
+}
+
+function reportEventGroupLabel(item, groupBy) {
+  const mode = String(groupBy ?? 'client').trim()
+  if (mode === 'zone') {
+    const zone = reportEventZoneLabel(item)
+    const location = reportEventLocationLabel(item)
+    return [zone, location && location !== '-' ? location : ''].filter(Boolean).join(' / ') || 'Bez strefy'
+  }
+  if (mode === 'worker') {
+    return reportEventWorkerLabel(item) || 'Bez pracownika'
+  }
+  if (mode === 'type') {
+    return reportEventTypeLabel(item)
+  }
+  if (mode === 'day') {
+    const key = String(item?.dayKey ?? item?.startAt ?? item?.endAt ?? '').slice(0, 10)
+    return key ? formatDatePl(`${key}T12:00:00.000Z`) : 'Bez daty'
+  }
+  return reportEventClientLabel(item) || 'Bez klienta'
+}
+
+function reportAggregateEvents(items, groupBy) {
+  const groups = new Map()
+
+  items.forEach((item) => {
+    const group = reportEventGroupLabel(item, groupBy)
+    if (!groups.has(group)) {
+      groups.set(group, {
+        group,
+        count: 0,
+        totalSec: 0,
+        avgSec: 0,
+        closed: 0,
+        running: 0,
+        workers: new Set(),
+        clients: new Set(),
+        zones: new Set(),
+        firstStart: '',
+        lastStop: '',
+      })
+    }
+
+    const bucket = groups.get(group)
+    const durationSec = reportEventDurationSec(item)
+    const startIso = toIso(item?.startAt)
+    const endIso = toIso(item?.endAt)
+    bucket.count += 1
+    bucket.totalSec += durationSec
+    if (reportClosedEvent(item)) {
+      bucket.closed += 1
+    } else {
+      bucket.running += 1
+    }
+    const worker = reportEventWorkerLabel(item)
+    const client = reportEventClientLabel(item)
+    const zone = reportEventZoneLabel(item)
+    if (worker && worker !== '-') bucket.workers.add(worker)
+    if (client && client !== '-') bucket.clients.add(client)
+    if (zone && zone !== '-') bucket.zones.add(zone)
+    if (startIso && (!bucket.firstStart || startIso < bucket.firstStart)) {
+      bucket.firstStart = startIso
+    }
+    if (endIso && (!bucket.lastStop || endIso > bucket.lastStop)) {
+      bucket.lastStop = endIso
+    }
+  })
+
+  return [...groups.values()]
+    .map((bucket) => ({
+      ...bucket,
+      workerCount: bucket.workers.size,
+      clientCount: bucket.clients.size,
+      zoneCount: bucket.zones.size,
+      avgSec: bucket.count ? Math.floor(bucket.totalSec / bucket.count) : 0,
+    }))
+    .sort((left, right) => {
+      if (right.totalSec !== left.totalSec) return right.totalSec - left.totalSec
+      if (right.count !== left.count) return right.count - left.count
+      return left.group.localeCompare(right.group, 'pl', { numeric: true, sensitivity: 'base' })
+    })
+}
+
+function reportRenderEventsSummary(items, groupRows, filters) {
+  const summary = document.getElementById('repSummary')
+  if (!summary) {
+    return
+  }
+
+  const closed = items.filter((item) => reportClosedEvent(item)).length
+  const running = items.length - closed
+  const clients = new Set(items.map((item) => reportEventClientLabel(item)).filter((value) => value && value !== '-')).size
+  const zones = new Set(items.map((item) => reportEventZoneLabel(item)).filter((value) => value && value !== '-')).size
+  const longest = groupRows[0]
+  summary.innerHTML = `
+    <div class="rep-summary-card">
+      <div><b>Zakres:</b> ${escapeHtml(formatDatePl(`${filters.from}T12:00:00.000Z`))} - ${escapeHtml(formatDatePl(`${filters.to}T12:00:00.000Z`))}</div>
+      <div><b>Status:</b> zamknięte ${closed} · otwarte ${running}</div>
+      <div><b>Zakres danych:</b> klienci ${clients} · strefy ${zones}</div>
+      <div><b>Największa grupa:</b> ${escapeHtml(longest?.group ?? '-')} · ${escapeHtml(durationSecondsToHms(longest?.totalSec ?? 0))}</div>
+    </div>
+  `
+  reportSetVisible('repSummary', true)
+}
+
+function reportMapEventsDetailsRows(items) {
+  return items
+    .slice()
+    .sort((left, right) => String(right.startAt ?? right.endAt ?? '').localeCompare(String(left.startAt ?? left.endAt ?? '')))
+    .slice(0, 300)
+    .map((item) => ({
+      date: item.date || formatDatePl(item.startAt || item.endAt),
+      start: dashboardClockLabelToHm(item.start, '-'),
+      stop: dashboardClockLabelToHm(item.stop, '-'),
+      duration: durationSecondsToHms(reportEventDurationSec(item)),
+      worker: reportEventWorkerLabel(item),
+      client: reportEventClientLabel(item),
+      zone: zoneNameWithQrHtml(reportEventZoneLabel(item), item),
+      location: reportEventLocationLabel(item),
+      type: reportEventTypeLabel(item),
+      comment: normalizeVisibleEventComment(item.comment) || '-',
+    }))
+}
+
+async function runEventsOperationalReport() {
+  if (!appState.session?.orgId) {
+    return
+  }
+
+  const filters = reportReadEventsFilters()
+  if (!filters.from || !filters.to) {
+    reportSetStatus('Wybierz zakres dat.', true)
+    return
+  }
+  if (filters.from > filters.to) {
+    reportSetStatus('Data "od" nie może być większa niż "do".', true)
+    return
+  }
+
+  reportResetResults()
+  reportSetStatus('Ładowanie zdarzeń...')
+
+  try {
+    const sourceRows = await reportFetchEventsPaged(appState.session.orgId, {
+      source: 'events',
+      fromIso: ymdToIsoRangeStart(filters.from),
+      toIso: ymdToIsoRangeEnd(filters.to),
+      pageSize: 1000,
+      maxPages: 200,
+    })
+    const rows = sourceRows.filter((item) => reportEventMatchesFilters(item, filters))
+    const stats = reportStats(rows)
+    const workerCount = new Set(rows.map((item) => reportEventWorkerLabel(item)).filter((value) => value && value !== '-')).size
+    const groupRows = reportAggregateEvents(rows, filters.groupBy)
+    reportSetKpiValues(
+      { count: rows.length, totalSec: stats.totalSec },
+      { count: workerCount, totalSec: stats.avgSec },
+    )
+    reportRenderEventsSummary(rows, groupRows, filters)
+
+    const groupHeaders = [
+      { key: 'group', label: 'Grupa' },
+      { key: 'count', label: 'Zdarzenia', align: 'right' },
+      { key: 'total', label: 'Łączny czas', align: 'right' },
+      { key: 'avg', label: 'Średni czas', align: 'right' },
+      { key: 'workers', label: 'Pracownicy', align: 'right' },
+      { key: 'clients', label: 'Klienci', align: 'right' },
+      { key: 'zones', label: 'Strefy', align: 'right' },
+      { key: 'running', label: 'Otwarte', align: 'right' },
+      { key: 'closed', label: 'Zamknięte', align: 'right' },
+    ]
+    const groupMapped = groupRows.map((row) => ({
+      group: row.group,
+      count: String(row.count),
+      total: durationSecondsToHms(row.totalSec),
+      avg: durationSecondsToHms(row.avgSec),
+      workers: String(row.workerCount),
+      clients: String(row.clientCount),
+      zones: String(row.zoneCount),
+      running: String(row.running),
+      closed: String(row.closed),
+    }))
+    reportRenderTable('repTableA', groupHeaders, groupMapped)
+    reportSetVisible('repTableAWrap', true)
+
+    reportRenderLocationChart(
+      'repChartA',
+      groupRows.slice(0, 10).map((row) => ({
+        location: row.group,
+        totalSec: row.totalSec,
+        count: row.count,
+      })),
+    )
+    reportSetVisible('repDiffWrap', true)
+
+    const detailHeaders = [
+      { key: 'date', label: 'Data' },
+      { key: 'start', label: 'START' },
+      { key: 'stop', label: 'STOP' },
+      { key: 'duration', label: 'Czas', align: 'right' },
+      { key: 'worker', label: 'Pracownik' },
+      { key: 'client', label: 'Klient' },
+      { key: 'zone', label: 'Strefa', html: true },
+      { key: 'location', label: 'Lokalizacja' },
+      { key: 'type', label: 'Typ' },
+      { key: 'comment', label: 'Komentarz' },
+    ]
+    const detailRows = reportMapEventsDetailsRows(rows)
+    reportRenderTable('repTableB', detailHeaders, detailRows)
+    reportSetVisible('repTableBWrap', true)
+
+    const csvLines = [
+      reportToCsvLine(['Zestawienie zdarzeń']),
+      reportToCsvLine(['Zakres', `${filters.from} - ${filters.to}`]),
+      reportToCsvLine(['Zdarzenia', rows.length, 'Łączny czas', durationSecondsToHms(stats.totalSec)]),
+      '',
+      reportToCsvLine(['Podsumowanie']),
+      reportToCsvLine(groupHeaders.map((header) => header.label)),
+      ...groupMapped.map((row) => reportToCsvLine(groupHeaders.map((header) => row[header.key] ?? ''))),
+      '',
+      reportToCsvLine(['Szczegóły']),
+      reportToCsvLine(detailHeaders.map((header) => header.label)),
+      ...detailRows.map((row) => reportToCsvLine(detailHeaders.map((header) => row[header.key] ?? ''))),
+    ]
+    appState.reportLastCsv = csvLines.join('\n')
+
+    const downloadButton = document.getElementById('repDownloadCsv')
+    if (downloadButton) {
+      downloadButton.disabled = !appState.reportLastCsv
+    }
+
+    reportSetStatus(`Gotowe. Zdarzenia: ${rows.length} · grupy: ${groupRows.length}.`)
+  } catch (error) {
+    reportSetStatus(error instanceof Error ? error.message : 'Błąd pobierania danych do zestawienia.', true)
+  }
+}
+
 function reportNormalizeText(value) {
   return String(value ?? '')
     .trim()
@@ -11751,6 +17646,10 @@ function reportMatchesWorkerSelection(item, workerLogin) {
   }
 
   return false
+}
+
+function reportIsWorkerHistoryDetailItem(item) {
+  return String(item?.historySourceKind ?? '').trim().toLowerCase() !== 'workday'
 }
 
 function reportMatchesPanelSelection(item, panel) {
@@ -11882,7 +17781,7 @@ function reportRenderTable(tableId, headers, rows) {
           .map((header) => {
             const value = row[header.key] ?? '-'
             const style = header.align ? ` style="text-align:${header.align};"` : ''
-            return `<td${style}>${escapeHtml(value)}</td>`
+            return `<td${style}>${header.html ? value : escapeHtml(value)}</td>`
           })
           .join('')}</tr>`,
     )
@@ -11931,7 +17830,7 @@ function reportDownloadCsv() {
   URL.revokeObjectURL(url)
 }
 
-async function runEventsReportComparison() {
+async function _runEventsReportComparison() {
   if (!appState.session?.orgId) {
     return
   }
@@ -12361,7 +18260,52 @@ function bindSubmenuToggles() {
 
 function bindRouteButtons(router) {
   const handleRouteClick = (event) => {
-    const button = event.target.closest('[data-route]')
+    const kanbanMenuButton = eventTargetClosest(event, '[data-kanban-menu-section]')
+    if (kanbanMenuButton) {
+      appState.kanbanSection = kanbanNormalizeSection(kanbanMenuButton.getAttribute('data-kanban-menu-section'))
+      if (appState.kanbanSection !== 'tasks') {
+        appState.kanbanSearch = ''
+      }
+      router.go('kanban')
+      return
+    }
+
+    const kanbanProjectButton = eventTargetClosest(event, '#portalSidebar [data-kanban-project-filter]')
+    if (kanbanProjectButton) {
+      appState.kanbanSection = 'tasks'
+      appState.kanbanSearch = String(kanbanProjectButton.getAttribute('data-kanban-project-filter') ?? '').trim()
+      router.go('kanban')
+      return
+    }
+
+    const kanbanMenuCreateButton = eventTargetClosest(event, '#kanbanMenuCreateBtn')
+    if (kanbanMenuCreateButton) {
+      kanbanCreateTask()
+      return
+    }
+
+    const kanbanMenuShowMore = eventTargetClosest(event, '#kanbanPortalMenuShowMore')
+    if (kanbanMenuShowMore) {
+      appState.kanbanProjectLimit = Math.min(60, Math.max(9, Number(appState.kanbanProjectLimit) || 9) + 12)
+      renderKanbanView()
+      return
+    }
+
+    const kanbanTeamAddButton = eventTargetClosest(event, '#kanbanPortalTeamAddBtn')
+    if (kanbanTeamAddButton) {
+      showTransientNotice('Zespoły będą zarządzane z poziomu organizacji.')
+      return
+    }
+
+    const sidebarOrdersAddButton = eventTargetClosest(event, '#sidebarOrdersAddBtn')
+    if (sidebarOrdersAddButton) {
+      event.preventDefault()
+      router.go('orders')
+      ordersOpenAddEditor()
+      return
+    }
+
+    const button = eventTargetClosest(event, '[data-route]')
     if (!button) {
       return
     }
@@ -12377,6 +18321,6259 @@ function bindRouteButtons(router) {
   return () => {
     document.removeEventListener('click', handleRouteClick)
   }
+}
+
+function calendarAllToneValues() {
+  return CALENDAR_TONE_OPTIONS.map((option) => option.value)
+}
+
+function calendarNormalizeToneFilters(filters) {
+  const allowed = new Set(calendarAllToneValues())
+  if (!Array.isArray(filters)) {
+    return calendarAllToneValues()
+  }
+  const seen = new Set()
+  const normalized = filters
+    .map((value) => String(value ?? '').trim())
+    .filter((value) => {
+      if (!allowed.has(value) || seen.has(value)) {
+        return false
+      }
+      seen.add(value)
+      return true
+    })
+  return normalized.length ? normalized : calendarAllToneValues()
+}
+
+function calendarSelectedToneSet() {
+  return new Set(calendarNormalizeToneFilters(appState.calendarToneFilters))
+}
+
+function calendarTaskToneValue(task = {}) {
+  const tone = String(task.tone ?? '').trim()
+  return calendarAllToneValues().includes(tone) ? tone : 'blue'
+}
+
+function calendarTaskMatchesToneFilter(task = {}) {
+  return calendarSelectedToneSet().has(calendarTaskToneValue(task))
+}
+
+function calendarTaskIsRead(task = {}, readCommentKeys = null) {
+  if (task.read || task.isRead || task.seen || task.readAt || task.seenAt || task.acknowledgedAt) {
+    return true
+  }
+  const sourceKey = String(task.sourceCommentKey ?? task.sourceKey ?? '').trim()
+  if (!sourceKey) {
+    return false
+  }
+  const keys = readCommentKeys instanceof Set ? readCommentKeys : dashboardReadCommentKeys()
+  return keys.has(sourceKey)
+}
+
+function calendarTaskMatchesStatusFilters(task = {}, readCommentKeys = null) {
+  if (!appState.calendarShowCompletedTasks && kanbanTaskIsCompleted(task)) {
+    return false
+  }
+  if (!appState.calendarShowReadTasks && calendarTaskIsRead(task, readCommentKeys)) {
+    return false
+  }
+  return true
+}
+
+function calendarRoleText() {
+  return normalizeSearchText(appState.session?.role)
+}
+
+function calendarCanSeeAllOrganizationTasks() {
+  const role = calendarRoleText()
+  return (
+    roleLevel(appState.session?.role) >= 2 ||
+    role === 'admin' ||
+    role === 'administrator' ||
+    role === 'owner' ||
+    role === 'superadmin' ||
+    role.includes('manager') ||
+    role.includes('menager') ||
+    role.includes('menedzer') ||
+    role.includes('kierownik')
+  )
+}
+
+function calendarIsCoordinatorRole() {
+  const role = calendarRoleText()
+  return (
+    role.includes('koordynator') ||
+    role.includes('koord') ||
+    role.includes('coordinator') ||
+    role.includes('coordynator') ||
+    role === 'member'
+  )
+}
+
+function calendarEmptyAccessMatch() {
+  return { keys: new Set(), compactKeys: new Set() }
+}
+
+function calendarAddAccessKey(target, value) {
+  dashboardAddUserMatchKey(target, value)
+  const raw = String(value ?? '').trim()
+  if (!raw) {
+    return
+  }
+  const withoutKnownPrefix = raw.replace(/^(client|zone|user|person|object):/i, '').trim()
+  if (withoutKnownPrefix && withoutKnownPrefix !== raw) {
+    dashboardAddUserMatchKey(target, withoutKnownPrefix)
+  }
+}
+
+function calendarAccessMatch(values = []) {
+  const match = calendarEmptyAccessMatch()
+  values.flat().forEach((value) => calendarAddAccessKey(match, value))
+  return match
+}
+
+function calendarMatchHasValues(match) {
+  return Boolean(match?.keys?.size || match?.compactKeys?.size)
+}
+
+function calendarValuesMatchAccess(values = [], accessMatch = calendarEmptyAccessMatch()) {
+  if (!calendarMatchHasValues(accessMatch)) {
+    return false
+  }
+  const candidate = calendarAccessMatch(values)
+  return (
+    [...candidate.keys].some((key) => accessMatch.keys.has(key)) ||
+    [...candidate.compactKeys].some((key) => accessMatch.compactKeys.has(key))
+  )
+}
+
+function calendarSelectionAccessValues(selection = {}) {
+  if (selection && typeof selection === 'object') {
+    return [
+      selection.id,
+      selection.label,
+      selection.name,
+      selection.title,
+      selection.value,
+      selection.login,
+      selection.workerLogin,
+      selection.email,
+      selection.clientId,
+      selection.zoneId,
+      selection.zoneName,
+    ]
+  }
+  return [selection]
+}
+
+function calendarSelectionMatchesAccess(selections = [], accessMatch = calendarEmptyAccessMatch()) {
+  return calendarNormalizeSelectionList(selections).some((selection) =>
+    calendarValuesMatchAccess(calendarSelectionAccessValues(selection), accessMatch),
+  )
+}
+
+function calendarSplitAccessValues(value = '') {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => calendarSplitAccessValues(item))
+  }
+  if (value && typeof value === 'object') {
+    return calendarSelectionAccessValues(value).filter((item) => String(item ?? '').trim())
+  }
+  return String(value ?? '')
+    .split(/[;,\n|]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function calendarWorkerAccessValues(worker = {}) {
+  return [
+    calendarWorkerId(worker),
+    calendarWorkerLabel(worker),
+    worker.id,
+    worker.workerId,
+    worker.login,
+    worker.workerLogin,
+    worker.workerName,
+    worker.name,
+    worker.fullName,
+    worker.displayName,
+    worker.email,
+    worker.loginEmail,
+    worker.authUid,
+    worker.auth_uid,
+    worker.uid,
+  ]
+}
+
+function calendarAddWorkerAccessKeys(match, worker = {}) {
+  calendarWorkerAccessValues(worker).forEach((value) => calendarAddAccessKey(match, value))
+}
+
+function calendarFindWorkerByHint(hint = '') {
+  const hintMatch = calendarAccessMatch([hint])
+  return (Array.isArray(appState.workers) ? appState.workers : []).find((worker) =>
+    calendarValuesMatchAccess(calendarWorkerAccessValues(worker), hintMatch),
+  )
+}
+
+function calendarAddWorkerHintAccess(match, hint = '') {
+  calendarAddAccessKey(match, hint)
+  const worker = calendarFindWorkerByHint(hint)
+  if (worker) {
+    calendarAddWorkerAccessKeys(match, worker)
+  }
+}
+
+function calendarClientAccessValues(client = {}) {
+  const id = String(client.id ?? client.clientId ?? '').trim()
+  const name = String(client.name ?? client.clientName ?? '').trim()
+  return [id, name, client.nip, client.city, id ? `client:${id}` : '', name ? `client:${name}` : '']
+}
+
+function calendarAddClientAccessKeys(match, client = {}) {
+  calendarClientAccessValues(client).forEach((value) => calendarAddAccessKey(match, value))
+}
+
+function calendarZoneAccessValues(zone = {}) {
+  const view = mapZoneForView(zone)
+  const zoneId = String(view.id ?? view.zoneId ?? view.qr ?? zone.id ?? zone.zoneId ?? zone.qr ?? '').trim()
+  const zoneName = String(view.zoneName ?? zone.name ?? zone.zone ?? '').trim()
+  const clientId = String(view.clientId ?? zone.clientId ?? '').trim()
+  const clientName = String(view.clientName ?? '').trim()
+  return [
+    zoneId,
+    zoneName,
+    view.location,
+    view.function,
+    clientId,
+    clientName,
+    zoneId ? `zone:${zoneId}` : '',
+    zoneName ? `zone:${zoneName}` : '',
+    clientId ? `client:${clientId}` : '',
+    clientName ? `client:${clientName}` : '',
+  ]
+}
+
+function calendarAddZoneAccessKeys(match, zone = {}) {
+  calendarZoneAccessValues(zone).forEach((value) => calendarAddAccessKey(match, value))
+}
+
+function calendarCoordinatorAccessScope() {
+  const userMatch = dashboardCurrentUserMatchKeys()
+  const teamMatch = calendarEmptyAccessMatch()
+  const objectMatch = calendarEmptyAccessMatch()
+  const responsibleClientIds = new Set()
+  const responsibleClientNames = new Set()
+
+  ;(Array.isArray(appState.workers) ? appState.workers : []).forEach((worker) => {
+    if (calendarValuesMatchAccess(calendarWorkerAccessValues(worker), userMatch)) {
+      calendarAddWorkerAccessKeys(userMatch, worker)
+    }
+  })
+
+  ;(Array.isArray(appState.clients) ? appState.clients : []).forEach((client) => {
+    const coordinatorMatches = calendarValuesMatchAccess(
+      calendarSplitAccessValues([
+        client.coordinator,
+        client.coordinatorName,
+        client.coordinatorLogin,
+        client.manager,
+        client.managerName,
+        client.owner,
+        client.responsible,
+      ]),
+      userMatch,
+    )
+    const assignedOnClient = calendarValuesMatchAccess(
+      calendarSplitAccessValues([client.assignees, client.workers, client.osoby, client.osobyWykonujace]),
+      userMatch,
+    )
+
+    if (!coordinatorMatches && !assignedOnClient) {
+      return
+    }
+
+    calendarAddClientAccessKeys(objectMatch, client)
+    const clientId = normalizeSearchText(client.id ?? client.clientId)
+    const clientName = normalizeSearchText(client.name ?? client.clientName)
+    if (clientId) responsibleClientIds.add(clientId)
+    if (clientName) responsibleClientNames.add(clientName)
+
+    calendarSplitAccessValues([client.assignees, client.workers, client.osoby, client.osobyWykonujace]).forEach((hint) =>
+      calendarAddWorkerHintAccess(teamMatch, hint),
+    )
+  })
+
+  ;(Array.isArray(appState.zones) ? appState.zones : []).forEach((zone) => {
+    const view = mapZoneForView(zone)
+    const zoneWorkerMatches = calendarValuesMatchAccess([zone.workerLogin, zone.workerName, view.workerLogin, view.workerName], userMatch)
+    const clientId = normalizeSearchText(view.clientId ?? zone.clientId)
+    const clientName = normalizeSearchText(view.clientName)
+    const clientMatches =
+      (clientId && responsibleClientIds.has(clientId)) ||
+      (clientName && responsibleClientNames.has(clientName))
+
+    if (!zoneWorkerMatches && !clientMatches) {
+      return
+    }
+
+    calendarAddZoneAccessKeys(objectMatch, zone)
+    ;[zone.workerLogin, zone.workerName, view.workerLogin, view.workerName].forEach((hint) => calendarAddWorkerHintAccess(teamMatch, hint))
+  })
+
+  return { userMatch, teamMatch, objectMatch }
+}
+
+function calendarTaskAssignedToAccess(task = {}, accessMatch = calendarEmptyAccessMatch()) {
+  return calendarSelectionMatchesAccess(task.workers ?? task.assignees ?? task.people, accessMatch)
+}
+
+function calendarTaskObjectsMatchAccess(task = {}, objectMatch = calendarEmptyAccessMatch()) {
+  const objectValues = calendarNormalizeSelectionList(task.objects ?? task.clients ?? task.sites, task.place).flatMap((selection) =>
+    calendarSelectionAccessValues(selection),
+  )
+  const zone = task.zone ?? {}
+  return calendarValuesMatchAccess(
+    [
+      objectValues,
+      task.place,
+      task.clientId,
+      task.clientName,
+      task.objectId,
+      task.objectName,
+      task.zoneId,
+      task.zoneName,
+      task.zoneLocation,
+      zone.id,
+      zone.label,
+      zone.clientLabel,
+      zone.location,
+    ],
+    objectMatch,
+  )
+}
+
+function calendarTaskColumnMatchesAccess(task = {}, scope = calendarCoordinatorAccessScope()) {
+  const status = String(task.kanbanStatus ?? '').trim()
+  if (!status) {
+    return false
+  }
+  const column = kanbanColumnsForStatus().find((item) => item.id === status)
+  const columnScope = kanbanNormalizeColumnScope(column?.scope)
+  const ownerValues = [column?.ownerId, column?.ownerLabel, column?.ownerName]
+  if (columnScope === 'user' || columnScope === 'person') {
+    return calendarValuesMatchAccess(ownerValues, scope.userMatch) || calendarValuesMatchAccess(ownerValues, scope.teamMatch)
+  }
+  if (columnScope === 'object') {
+    return calendarValuesMatchAccess(ownerValues, scope.objectMatch)
+  }
+  return false
+}
+
+function calendarTaskIsVisibleForCurrentUser(task = {}) {
+  if (calendarCanSeeAllOrganizationTasks()) {
+    return true
+  }
+  if (!calendarIsCoordinatorRole()) {
+    return false
+  }
+  const scope = calendarCoordinatorAccessScope()
+  return (
+    calendarTaskAssignedToAccess(task, scope.userMatch) ||
+    dashboardTaskColumnBelongsToCurrentUser(task, scope.userMatch) ||
+    calendarTaskAssignedToAccess(task, scope.teamMatch) ||
+    calendarTaskObjectsMatchAccess(task, scope.objectMatch) ||
+    calendarTaskColumnMatchesAccess(task, scope)
+  )
+}
+
+function calendarAccessibleTasks() {
+  return appState.calendarTasks.filter((task) => calendarTaskIsVisibleForCurrentUser(task))
+}
+
+function calendarTaskMatchesFilter(task = {}, readCommentKeys = null) {
+  return (
+    calendarTaskIsVisibleForCurrentUser(task) &&
+    calendarTaskMatchesToneFilter(task) &&
+    calendarTaskMatchesStatusFilters(task, readCommentKeys)
+  )
+}
+
+function calendarEnsureState() {
+  if (!appState.calendarCursorDay) {
+    appState.calendarCursorDay = todayYmd()
+  }
+  if (!['day', 'week', 'month'].includes(appState.calendarViewMode)) {
+    appState.calendarViewMode = 'week'
+  }
+  appState.calendarToneFilters = calendarNormalizeToneFilters(appState.calendarToneFilters)
+  appState.calendarTasks = calendarLoadTasks()
+}
+
+function calendarTasksForDay(dayKey, readCommentKeys = null) {
+  const keys = readCommentKeys instanceof Set ? readCommentKeys : dashboardReadCommentKeys()
+  return calendarSortTasks(appState.calendarTasks.filter((task) => task.dateYmd === dayKey && calendarTaskMatchesFilter(task, keys)))
+}
+
+function calendarTaskHourValue(task) {
+  const raw = String(task?.startTime ?? task?.time ?? '').trim()
+  const match = raw.match(/^(\d{1,2})(?::\d{2})?$/)
+  if (!match) {
+    return ''
+  }
+  const hour = Number(match[1])
+  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? pad2(hour) : ''
+}
+
+function calendarTasksForDayAndHour(dayKey, hourValue, readCommentKeys = null) {
+  const hour = String(hourValue ?? '').trim()
+  return calendarTasksForDay(dayKey, readCommentKeys).filter((task) => calendarTaskHourValue(task) === hour)
+}
+
+function calendarTimedTaskRange(task = {}) {
+  const startMinutes = calendarTimeToMinutes(task.startTime ?? task.time)
+  if (startMinutes === null) {
+    return null
+  }
+  const rawEndMinutes = calendarTimeToMinutes(task.endTime)
+  const endMinutes = rawEndMinutes !== null && rawEndMinutes > startMinutes ? rawEndMinutes : Math.min(startMinutes + 60, 1440)
+  return {
+    start: Math.max(0, Math.min(startMinutes, 1439)),
+    end: Math.max(startMinutes + 1, Math.min(endMinutes, 1440)),
+  }
+}
+
+function calendarTimedTasksForDay(dayKey, readCommentKeys = null) {
+  return calendarTasksForDay(dayKey, readCommentKeys)
+    .map((task) => ({ task, range: calendarTimedTaskRange(task) }))
+    .filter((item) => item.range)
+    .sort((left, right) => {
+      if (left.range.start !== right.range.start) {
+        return left.range.start - right.range.start
+      }
+      if (left.range.end !== right.range.end) {
+        return right.range.end - left.range.end
+      }
+      return String(left.task.title ?? '').localeCompare(String(right.task.title ?? ''), 'pl', { sensitivity: 'base' })
+    })
+}
+
+function calendarLayoutTimedTasks(dayKey, readCommentKeys = null) {
+  const items = calendarTimedTasksForDay(dayKey, readCommentKeys)
+  const clusters = []
+  let currentCluster = []
+  let currentEnd = -1
+
+  items.forEach((item) => {
+    if (!currentCluster.length || item.range.start < currentEnd) {
+      currentCluster.push(item)
+      currentEnd = Math.max(currentEnd, item.range.end)
+      return
+    }
+    clusters.push(currentCluster)
+    currentCluster = [item]
+    currentEnd = item.range.end
+  })
+  if (currentCluster.length) {
+    clusters.push(currentCluster)
+  }
+
+  return clusters.flatMap((cluster) => {
+    const laneEnds = []
+    const placed = cluster.map((item) => {
+      const laneIndex = laneEnds.findIndex((end) => end <= item.range.start)
+      const lane = laneIndex >= 0 ? laneIndex : laneEnds.length
+      laneEnds[lane] = item.range.end
+      return { ...item, lane }
+    })
+    const laneCount = Math.max(1, laneEnds.length)
+    return placed.map((item) => ({ ...item, laneCount }))
+  })
+}
+
+function calendarTimedTasksLayerHtml(dayKey, readCommentKeys = null) {
+  return calendarLayoutTimedTasks(dayKey, readCommentKeys)
+    .map((item) => {
+      const top = (item.range.start / 60) * CALENDAR_HOUR_HEIGHT_PX + CALENDAR_TIMED_TASK_GAP_PX
+      const rawHeight = ((item.range.end - item.range.start) / 60) * CALENDAR_HOUR_HEIGHT_PX - CALENDAR_TIMED_TASK_GAP_PX * 2
+      const height = Math.max(CALENDAR_MIN_TIMED_TASK_HEIGHT_PX, rawHeight)
+      const left = item.lane * CALENDAR_TIMED_TASK_OVERLAP_OFFSET_PX
+      const right = Math.max(4, (item.laneCount - item.lane - 1) * 6 + 4)
+      const style = `--calendar-task-top:${top.toFixed(2)}px;--calendar-task-height:${height.toFixed(2)}px;--calendar-task-left:${left}px;--calendar-task-right:${right}px;--calendar-task-z:${item.lane + 2};`
+      return calendarTaskHtml(item.task, { timed: true, style })
+    })
+    .join('')
+}
+
+function calendarTaskHtml(task, { compact = false, timed = false, style = '' } = {}) {
+  const title = escapeHtml(task.title)
+  const startTime = calendarNormalizeTimeValue(task.startTime ?? task.time)
+  const endTime = calendarNormalizeTimeValue(task.endTime)
+  const timeRange = startTime && endTime ? `${startTime}-${endTime}` : startTime
+  const place = String(task.place ?? '').trim()
+  const workers = calendarSelectionLabels(task.workers)
+  const objects = calendarSelectionLabels(task.objects)
+  const zoneLabel = String(task.zone?.label ?? task.zoneName ?? '').trim()
+  const zoneLocation = String(task.zone?.location ?? task.zoneLocation ?? '').trim()
+  const zoneDisplay = zoneLabel ? calendarZoneDisplayLabel({ label: zoneLabel, location: zoneLocation }) : ''
+  const placeLabel = [objects.length ? objects.join(', ') : place, zoneDisplay].filter(Boolean).join(' / ')
+  const metaParts = [
+    timeRange,
+    placeLabel,
+    workers.length ? workers.join(', ') : '',
+  ].filter(Boolean)
+  return `
+    <div
+      class="calendar-task calendar-task--${escapeHtml(task.tone || 'blue')}${compact ? ' calendar-task--compact' : ''}${timed ? ' calendar-task--timed' : ''}"
+      role="button"
+      tabindex="0"
+      draggable="true"
+      data-calendar-task-id="${escapeHtml(task.id)}"
+      title="${title}"
+      ${style ? `style="${escapeHtml(style)}"` : ''}
+    >
+      <span class="calendar-task-title">${title}</span>
+      ${metaParts.length ? `<span class="calendar-task-meta">${escapeHtml(metaParts.join(' · '))}</span>` : ''}
+    </div>
+  `
+}
+
+function calendarTimeGridHtml(days = []) {
+  const dayKeys = Array.isArray(days) ? days : []
+  const hours = Array.from({ length: 24 }, (_, index) => pad2(index))
+  const readCommentKeys = dashboardReadCommentKeys()
+  return `
+    <div class="calendar-time-grid" style="--calendar-day-count:${Math.max(1, dayKeys.length)}">
+      <div class="calendar-time-corner"></div>
+      ${dayKeys
+        .map(
+          (dayKey, dayIndex) => `
+            <div class="calendar-time-day-head calendar-time-col--${calendarDayToneClass(dayKey, dayIndex)}${dayKey === todayYmd() ? ' is-today' : ''}" data-calendar-day="${escapeHtml(dayKey)}">
+              <span>${escapeHtml(calendarDayShortLabel(dayKey))}</span>
+              <strong>${escapeHtml(calendarDayNumberLabel(dayKey))}</strong>
+            </div>
+          `,
+        )
+        .join('')}
+      <div class="calendar-time-label calendar-time-label--all-day">Bez godziny</div>
+      ${dayKeys
+        .map((dayKey, dayIndex) => {
+          const tasks = calendarTasksForDayAndHour(dayKey, '', readCommentKeys)
+          return `
+            <div class="calendar-time-slot calendar-time-slot--all-day calendar-time-col--${calendarDayToneClass(dayKey, dayIndex)}" data-calendar-day="${escapeHtml(dayKey)}" data-calendar-hour="">
+              ${tasks.length ? tasks.map((task) => calendarTaskHtml(task, { compact: true })).join('') : ''}
+            </div>
+          `
+        })
+        .join('')}
+      <div class="calendar-time-hours-column" aria-hidden="true">
+        ${hours.map((hour) => `<div class="calendar-time-label">${hour}:00</div>`).join('')}
+      </div>
+      ${dayKeys
+        .map(
+          (dayKey, dayIndex) => `
+            <div class="calendar-time-day-column calendar-time-col--${calendarDayToneClass(dayKey, dayIndex)}" data-calendar-day="${escapeHtml(dayKey)}">
+              <div class="calendar-time-slots">
+                ${hours
+                  .map(
+                    (hour) => `
+                      <div class="calendar-time-slot calendar-time-col--${calendarDayToneClass(dayKey, dayIndex)}" data-calendar-day="${escapeHtml(dayKey)}" data-calendar-hour="${hour}"></div>
+                    `,
+                  )
+                  .join('')}
+              </div>
+              <div class="calendar-time-task-layer">
+                ${calendarTimedTasksLayerHtml(dayKey, readCommentKeys)}
+              </div>
+            </div>
+          `,
+        )
+        .join('')}
+    </div>
+  `
+}
+
+function calendarPickerConfig(kind = 'workers') {
+  return kind === 'objects'
+    ? {
+        datalistId: 'calendarObjectOptions',
+        rowsId: 'calendarObjectPickerRows',
+        inputName: 'calendarTaskObject',
+        placeholder: 'Wpisz nazwę klienta...',
+      }
+    : {
+        datalistId: 'calendarWorkerOptions',
+        rowsId: 'calendarWorkerPickerRows',
+        inputName: 'calendarTaskWorker',
+        placeholder: 'Wpisz imię, nazwisko lub login...',
+      }
+}
+
+function calendarRenderDatalist(kind = 'workers') {
+  const config = calendarPickerConfig(kind)
+  const datalist = document.getElementById(config.datalistId)
+  if (!datalist) {
+    return
+  }
+  datalist.innerHTML = calendarDirectoryOptions(kind)
+    .map((option) => `<option value="${escapeHtml(option.label)}"></option>`)
+    .join('')
+}
+
+function calendarPickerRowHtml(kind = 'workers', selection = {}) {
+  const config = calendarPickerConfig(kind)
+  return `
+    <div class="calendar-picker-row" data-calendar-picker-row="${escapeHtml(kind)}">
+      <input
+        type="text"
+        name="${escapeHtml(config.inputName)}"
+        list="${escapeHtml(config.datalistId)}"
+        data-calendar-picker-input="${escapeHtml(kind)}"
+        value="${escapeHtml(selection.label ?? '')}"
+        placeholder="${escapeHtml(config.placeholder)}"
+        autocomplete="off"
+      />
+      <button class="calendar-picker-remove" type="button" data-calendar-remove-picker="${escapeHtml(kind)}" aria-label="Usuń pozycję">×</button>
+    </div>
+  `
+}
+
+function calendarSetPickerRows(kind = 'workers', selections = []) {
+  const config = calendarPickerConfig(kind)
+  const rows = document.getElementById(config.rowsId)
+  if (!rows) {
+    return
+  }
+  const normalized = calendarNormalizeSelectionList(selections)
+  rows.innerHTML = (normalized.length ? normalized : [{}]).map((selection) => calendarPickerRowHtml(kind, selection)).join('')
+}
+
+function calendarAddPickerRow(kind = 'workers') {
+  const config = calendarPickerConfig(kind)
+  const rows = document.getElementById(config.rowsId)
+  if (!rows) {
+    return
+  }
+  rows.insertAdjacentHTML('beforeend', calendarPickerRowHtml(kind))
+  const inputs = rows.querySelectorAll(`[data-calendar-picker-input="${kind}"]`)
+  inputs[inputs.length - 1]?.focus?.()
+}
+
+function calendarResolvePickerValue(kind = 'workers', value = '') {
+  const label = String(value ?? '').trim()
+  if (!label) {
+    return null
+  }
+  const normalized = normalizeSearchText(label)
+  const matched = calendarDirectoryOptions(kind).find((option) => {
+    return normalizeSearchText(option.label) === normalized || normalizeSearchText(option.id) === normalized
+  })
+  return matched ?? { id: '', label }
+}
+
+function calendarReadPickerRows(kind = 'workers') {
+  const config = calendarPickerConfig(kind)
+  const rows = document.getElementById(config.rowsId)
+  const seen = new Set()
+  return Array.from(rows?.querySelectorAll(`[data-calendar-picker-input="${kind}"]`) ?? [])
+    .map((input) => calendarResolvePickerValue(kind, input.value))
+    .filter(Boolean)
+    .filter((selection) => {
+      const key = normalizeSearchText(selection.id || selection.label)
+      if (seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+}
+
+function calendarMiniMonthHtml() {
+  const cursor = appState.calendarCursorDay || todayYmd()
+  const monthStart = calendarMonthStart(cursor)
+  const gridStart = calendarMonthGridStart(cursor)
+  const currentMonth = monthStart.slice(0, 7)
+  const today = todayYmd()
+  const label = calendarMonthLabel(cursor).replace(/^./, (char) => char.toLocaleUpperCase('pl'))
+  const days = Array.from({ length: 42 }, (_, index) => calendarAddDays(gridStart, index))
+  const readCommentKeys = dashboardReadCommentKeys()
+  return `
+    <div class="calendar-mini-head">
+      <button class="calendar-mini-nav" type="button" data-calendar-mini-nav="-1" aria-label="Poprzedni miesiąc">&lt;</button>
+      <strong>${escapeHtml(label)}</strong>
+      <button class="calendar-mini-nav" type="button" data-calendar-mini-nav="1" aria-label="Następny miesiąc">&gt;</button>
+    </div>
+    <div class="calendar-mini-weekdays">
+      ${['Pon', 'Wt', 'Śr', 'Czw', 'Pt', 'Sob', 'Nd'].map((day) => `<span>${day}</span>`).join('')}
+    </div>
+    <div class="calendar-mini-grid">
+      ${days
+        .map((dayKey) => {
+          const outsideMonth = !dayKey.startsWith(currentMonth)
+          const taskCount = calendarTasksForDay(dayKey, readCommentKeys).length
+          return `
+            <button
+              class="calendar-mini-day${outsideMonth ? ' is-muted' : ''}${dayKey === today ? ' is-today' : ''}${dayKey === cursor ? ' is-selected' : ''}${taskCount ? ' has-tasks' : ''}"
+              type="button"
+              data-calendar-mini-day="${escapeHtml(dayKey)}"
+              aria-label="${escapeHtml(formatDatePl(`${dayKey}T12:00:00.000Z`))}"
+            >
+              <span>${escapeHtml(calendarDayNumberLabel(dayKey))}</span>
+            </button>
+          `
+        })
+        .join('')}
+    </div>
+  `
+}
+
+function calendarTaskFiltersHtml() {
+  const selected = calendarSelectedToneSet()
+  const allSelected = selected.size === CALENDAR_TONE_OPTIONS.length
+  const accessibleTasks = calendarAccessibleTasks()
+  const readCommentKeys = dashboardReadCommentKeys()
+  const visibleCount = accessibleTasks.filter((task) => calendarTaskMatchesFilter(task, readCommentKeys)).length
+  const totalCount = accessibleTasks.length
+  return `
+    <div class="calendar-filter-head">
+      <h3>Filtr zadań</h3>
+      <span>${visibleCount} / ${totalCount}</span>
+    </div>
+    <div class="calendar-filter-list">
+      <label class="calendar-filter-item calendar-filter-item--all">
+        <input type="checkbox" data-calendar-filter-all ${allSelected ? 'checked' : ''} />
+        <span class="calendar-filter-mark"></span>
+        <span>Wszystkie</span>
+      </label>
+      ${CALENDAR_TONE_OPTIONS.map(
+        (option) => `
+          <label class="calendar-filter-item calendar-filter-item--${escapeHtml(option.css)}">
+            <input type="checkbox" data-calendar-filter-tone="${escapeHtml(option.value)}" ${!allSelected && selected.has(option.value) ? 'checked' : ''} />
+            <span class="calendar-filter-mark"></span>
+            <span>${escapeHtml(option.label)}</span>
+          </label>
+        `,
+      ).join('')}
+      <label class="calendar-filter-item calendar-filter-item--utility">
+        <input type="checkbox" data-calendar-filter-show-completed ${appState.calendarShowCompletedTasks ? 'checked' : ''} />
+        <span class="calendar-filter-mark"></span>
+        <span>Pokazuj zakończone</span>
+      </label>
+      <label class="calendar-filter-item calendar-filter-item--utility">
+        <input type="checkbox" data-calendar-filter-show-read ${appState.calendarShowReadTasks ? 'checked' : ''} />
+        <span class="calendar-filter-mark"></span>
+        <span>Pokazuj przeczytane</span>
+      </label>
+    </div>
+  `
+}
+
+function calendarRenderContextPanel() {
+  const miniMonth = document.getElementById('calendarMiniMonth')
+  const filters = document.getElementById('calendarTaskFilters')
+  if (miniMonth) {
+    miniMonth.innerHTML = calendarMiniMonthHtml()
+  }
+  if (filters) {
+    filters.innerHTML = calendarTaskFiltersHtml()
+  }
+}
+
+function calendarMoveMiniMonth(direction) {
+  const dir = direction < 0 ? -1 : 1
+  const cursor = calendarDateFromYmd(appState.calendarCursorDay || todayYmd())
+  const targetYear = cursor.getFullYear()
+  const targetMonth = cursor.getMonth() + dir
+  const targetLastDay = new Date(targetYear, targetMonth + 1, 0).getDate()
+  const targetDay = Math.min(cursor.getDate(), targetLastDay)
+  appState.calendarCursorDay = calendarDateToYmd(new Date(targetYear, targetMonth, targetDay))
+  renderCalendarView()
+}
+
+function calendarDayColumnHtml(dayKey, { monthMode = false, wide = false, readCommentKeys = null } = {}) {
+  const tasks = calendarTasksForDay(dayKey, readCommentKeys)
+  const isToday = dayKey === todayYmd()
+  const currentMonth = appState.calendarCursorDay.slice(0, 7)
+  const outsideMonth = monthMode && !dayKey.startsWith(currentMonth)
+  return `
+    <div class="calendar-day-cell${isToday ? ' is-today' : ''}${outsideMonth ? ' is-muted' : ''}${wide ? ' is-wide' : ''}" data-calendar-day="${escapeHtml(dayKey)}">
+      <div class="calendar-day-head">
+        <div>
+          <span class="calendar-day-name">${escapeHtml(calendarDayShortLabel(dayKey))}</span>
+          <span class="calendar-day-number">${escapeHtml(calendarDayNumberLabel(dayKey))}</span>
+        </div>
+        <button class="calendar-day-add" type="button" data-calendar-add-day="${escapeHtml(dayKey)}" aria-label="Dodaj zadanie">+</button>
+      </div>
+      <div class="calendar-day-tasks">
+        ${tasks.length ? tasks.map((task) => calendarTaskHtml(task, { compact: monthMode })).join('') : '<div class="calendar-empty-day">Brak zadań</div>'}
+      </div>
+    </div>
+  `
+}
+
+function calendarUpdateRangeLabel() {
+  const label = document.getElementById('calendarRangeLabel')
+  if (!label) {
+    return
+  }
+  if (document.getElementById('calendarTimelinePrototype')) {
+    const start = appState.calendarCursorDay || todayYmd()
+    const end = calendarAddDays(start, 2)
+    label.textContent = `${formatDatePl(`${start}T12:00:00.000Z`)} - ${formatDatePl(`${end}T12:00:00.000Z`)}`
+    return
+  }
+  const mode = appState.calendarViewMode
+  const cursor = appState.calendarCursorDay || todayYmd()
+  if (mode === 'day') {
+    label.textContent = formatDatePl(`${cursor}T12:00:00.000Z`)
+    return
+  }
+  if (mode === 'month') {
+    label.textContent = calendarMonthLabel(cursor)
+    return
+  }
+  const start = calendarStartOfWeek(cursor)
+  const end = calendarAddDays(start, 6)
+  label.textContent = `${formatDatePl(`${start}T12:00:00.000Z`)} - ${formatDatePl(`${end}T12:00:00.000Z`)}`
+}
+
+function calendarTimelineDayMonthLabel(dayKey) {
+  const date = calendarDateFromYmd(dayKey)
+  return date.toLocaleDateString('pl-PL', { weekday: 'short', day: 'numeric', month: 'long' })
+}
+
+function calendarTimelineTypeOptions() {
+  return [
+    { value: 'individual', label: 'Zlecenia indywidualne' },
+    { value: 'cyclic', label: 'Zlecenie cykliczne' },
+    { value: 'renovation', label: 'Zlecenie poremontowe' },
+    { value: 'windows', label: 'Mycie okien' },
+    { value: 'other', label: 'Inne zlecenie' },
+  ]
+}
+
+function calendarTimelineAllTypeValues() {
+  return calendarTimelineTypeOptions().map((option) => option.value)
+}
+
+function calendarTimelineSelectedTypes() {
+  const allowed = new Set(calendarTimelineAllTypeValues())
+  const selected = Array.isArray(appState.calendarTimelineTypeFilters)
+    ? appState.calendarTimelineTypeFilters.filter((value) => allowed.has(value))
+    : []
+  if (!selected.length) {
+    return new Set()
+  }
+  return new Set(selected)
+}
+
+function calendarTimelineSyncControls() {
+  const completedButton = document.getElementById('calendarTimelineCompletedToggle')
+  if (completedButton instanceof HTMLButtonElement) {
+    const enabled = appState.calendarTimelineShowCompleted !== false
+    completedButton.classList.toggle('is-active', enabled)
+    completedButton.setAttribute('aria-pressed', enabled ? 'true' : 'false')
+    completedButton.textContent = enabled ? 'Zakończone: pokaż' : 'Zakończone: nie pokazuj'
+  }
+
+  const selected = calendarTimelineSelectedTypes()
+  document.querySelectorAll('#calendarTimelineTypePanel [data-calendar-timeline-type]').forEach((input) => {
+    if (input instanceof HTMLInputElement) {
+      input.checked = selected.has(input.getAttribute('data-calendar-timeline-type') || '')
+    }
+  })
+}
+
+function calendarTimelineStatusDayKey() {
+  const dayKey = String(appState.calendarCursorDay || todayYmd()).trim()
+  return /^\d{4}-\d{2}-\d{2}$/.test(dayKey) ? dayKey : todayYmd()
+}
+
+async function calendarEnsureTimelineWorkerState(options = {}) {
+  if (!appState.session?.orgId || appState.calendarTimelineWorkerStateLoading) {
+    return
+  }
+  const dayKey = String(options?.dayKey || calendarTimelineStatusDayKey()).trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+    return
+  }
+  const rangeEndDay = calendarAddDays(dayKey, 2)
+  const force = options?.force === true
+  const fetchedAt = Number(appState.calendarTimelineWorkerStateFetchedAt || 0)
+  const isFresh = fetchedAt > 0 && Date.now() - fetchedAt < CALENDAR_TIMELINE_STATUS_REFRESH_MS
+  if (
+    !force &&
+    appState.calendarTimelineWorkerStateDayKey === dayKey &&
+    appState.calendarTimelineWorkerStateRangeStart === dayKey &&
+    appState.calendarTimelineWorkerStateRangeEnd === rangeEndDay &&
+    isFresh
+  ) {
+    return
+  }
+
+  appState.calendarTimelineWorkerStateLoading = true
+  try {
+    let statusRows = []
+    let sourceRows = []
+    let currentStatusRows = []
+    if (dayKey === todayYmd()) {
+      const [{ todayRows }, eventsResponse] = await Promise.all([
+        dashboardLoadFastRows(String(appState.session.orgId)),
+        getWorkdays(appState.session.orgId, {
+          source: 'events',
+          fromIso: dayKey,
+          toIso: rangeEndDay,
+          page: 1,
+          pageSize: 8000,
+        }).catch(() => ({ items: [] })),
+      ])
+      statusRows = Array.isArray(todayRows) ? todayRows : []
+      currentStatusRows = statusRows
+      sourceRows = Array.isArray(eventsResponse?.items) ? eventsResponse.items : []
+      appState.dashboardTodayRows = statusRows
+    } else {
+      const [eventsResponse, currentStatusResponse] = await Promise.all([
+        getWorkdays(appState.session.orgId, {
+          source: 'events',
+          fromIso: dayKey,
+          toIso: rangeEndDay,
+          page: 1,
+          pageSize: 8000,
+        }).catch(() => ({ items: [] })),
+        dashboardLoadFastRows(String(appState.session.orgId)).catch(() => ({ todayRows: appState.dashboardTodayRows || [] })),
+      ])
+      sourceRows = Array.isArray(eventsResponse.items) ? eventsResponse.items : []
+      currentStatusRows = Array.isArray(currentStatusResponse?.todayRows) ? currentStatusResponse.todayRows : []
+      if (currentStatusRows.length) {
+        appState.dashboardTodayRows = currentStatusRows
+      }
+    }
+
+    appState.calendarTimelineWorkerStateDayKey = dayKey
+    appState.calendarTimelineWorkerStateRangeStart = dayKey
+    appState.calendarTimelineWorkerStateRangeEnd = rangeEndDay
+    appState.calendarTimelineWorkerStateRows = statusRows
+    appState.calendarTimelineWorkerStateSourceRows = sourceRows
+    appState.calendarTimelineCurrentWorkerStatusDayKey = todayYmd()
+    appState.calendarTimelineCurrentWorkerStatusRows = currentStatusRows
+    appState.calendarTimelineWorkerStateFetchedAt = Date.now()
+    if (appState.currentRoute === 'calendar' && calendarTimelineStatusDayKey() === dayKey) {
+      renderCalendarView()
+    }
+  } catch {
+    // Status kropek pozostaje czerwony, jeśli nie uda się pobrać aktywnych startów.
+  } finally {
+    appState.calendarTimelineWorkerStateLoading = false
+  }
+}
+
+function calendarStartTimelineWorkerStatusRefresh() {
+  if (calendarTimelineWorkerStateRefreshTimer) {
+    return
+  }
+
+  calendarTimelineWorkerStateRefreshTimer = window.setInterval(() => {
+    if (appState.currentRoute !== 'calendar' || !document.getElementById('calendarTimelinePrototype')) {
+      return
+    }
+    void calendarEnsureTimelineWorkerState({ force: true }).catch(() => {})
+  }, CALENDAR_TIMELINE_STATUS_REFRESH_MS)
+}
+
+function calendarStopTimelineWorkerStatusRefresh() {
+  if (!calendarTimelineWorkerStateRefreshTimer) {
+    return
+  }
+  window.clearInterval(calendarTimelineWorkerStateRefreshTimer)
+  calendarTimelineWorkerStateRefreshTimer = null
+}
+
+function calendarTimelineWorkerName(rawName = '') {
+  const name = String(rawName ?? '').trim().replace(/\s+/g, ' ')
+  if (!name) {
+    return ''
+  }
+  const parts = name.split(' ')
+  if (parts.length < 2) {
+    return name
+  }
+  return `${parts.slice(1).join(' ')} ${parts[0]}`
+}
+
+function calendarTimelineWorkerAliasKeys(worker = {}) {
+  const keys = new Set()
+  const addKeys = (nextKeys) => {
+    if (!(nextKeys instanceof Set)) {
+      return
+    }
+    nextKeys.forEach((key) => {
+      if (key) {
+        keys.add(String(key))
+      }
+    })
+  }
+  const workerName = worker?.workerName ?? worker?.fullName ?? worker?.name
+  const workerLogin = worker?.workerLogin ?? worker?.login ?? worker?.id
+  const workerId = worker?.workerId ?? worker?.id
+  addKeys(dashboardWorkerAliasKeys(workerName, workerLogin, workerId, { includeLooseNameKeys: false }))
+  const loginEmail = String(worker?.loginEmail ?? worker?.email ?? '').trim()
+  if (loginEmail) {
+    addKeys(dashboardWorkerAliasKeys(workerName, loginEmail, workerId, { includeLooseNameKeys: false }))
+  }
+  return keys
+}
+
+function calendarTimelineEventTimestamp(value) {
+  const iso = toIso(value)
+  if (!iso) {
+    return 0
+  }
+  const timestamp = new Date(iso).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function calendarTimelineSourceRowStartMinutes(row) {
+  const iso = toIso(row?.startAt ?? row?.dayStartAt)
+  if (!iso) {
+    return -1
+  }
+  const date = new Date(iso)
+  if (!Number.isFinite(date.getTime())) {
+    return -1
+  }
+  return date.getHours() * 60 + date.getMinutes()
+}
+
+function calendarTimelineBuildWorkerStateMap(dayKey) {
+  const normalizedDayKey = String(dayKey ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey)) {
+    return new Map()
+  }
+
+  const stateMap = new Map()
+  const upsertState = (key, state = {}) => {
+    if (!key) {
+      return
+    }
+    const existing = stateMap.get(key) || {
+      hasStart: false,
+      isRunning: false,
+      startMinutes: -1,
+    }
+    const nextStartMinutes = Number(state.startMinutes ?? -1)
+    stateMap.set(key, {
+      hasStart: existing.hasStart || Boolean(state.hasStart),
+      isRunning: existing.isRunning || Boolean(state.isRunning),
+      startMinutes:
+        existing.startMinutes >= 0 && nextStartMinutes >= 0
+          ? Math.min(existing.startMinutes, nextStartMinutes)
+          : existing.startMinutes >= 0
+            ? existing.startMinutes
+            : nextStartMinutes >= 0
+              ? nextStartMinutes
+              : -1,
+    })
+  }
+
+  const todayKey = todayYmd()
+  const rows =
+    normalizedDayKey === todayKey
+      ? Array.isArray(appState.calendarTimelineCurrentWorkerStatusRows) && appState.calendarTimelineCurrentWorkerStatusRows.length
+        ? appState.calendarTimelineCurrentWorkerStatusRows
+        : Array.isArray(appState.dashboardTodayRows)
+          ? appState.dashboardTodayRows
+          : []
+      : appState.calendarTimelineWorkerStateDayKey === normalizedDayKey
+        ? Array.isArray(appState.calendarTimelineWorkerStateRows)
+          ? appState.calendarTimelineWorkerStateRows
+          : []
+        : []
+  rows.forEach((row) => {
+    const startMinutes = dashboardScheduleTimeToMinutes(row?.qrStart)
+    const hasStart = Number.isFinite(startMinutes) && startMinutes >= 0
+    const stopLabel = String(row?.qrStop ?? '').trim()
+    const hasStop = Boolean(stopLabel && stopLabel !== '-' && stopLabel !== '--:--' && stopLabel !== '--:--:--')
+    const keys = dashboardResolveTodayRowAliasKeys(row)
+    keys.forEach((key) => {
+      upsertState(key, {
+        hasStart,
+        isRunning: Boolean(row?.isRunning) || (hasStart && !hasStop),
+        startMinutes,
+      })
+    })
+  })
+
+  const sourceRows =
+    appState.calendarTimelineWorkerStateDayKey === normalizedDayKey
+      ? Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
+        ? appState.calendarTimelineWorkerStateSourceRows
+        : []
+      : []
+  const sourceBuckets = new Map()
+  const ensureBucket = (key) => {
+    if (!sourceBuckets.has(key)) {
+      sourceBuckets.set(key, {
+        hasStart: false,
+        startMinutes: -1,
+        latestStartTs: 0,
+        latestStopTs: 0,
+        explicitRunning: false,
+      })
+    }
+    return sourceBuckets.get(key)
+  }
+
+  sourceRows.forEach((row) => {
+    if (dashboardResolveDayKey(row) !== normalizedDayKey) {
+      return
+    }
+    const keys = dashboardResolveTodayRowAliasKeys(row)
+    if (!(keys instanceof Set) || !keys.size) {
+      return
+    }
+
+    const startTs = calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
+    const stopTs = calendarTimelineEventTimestamp(row?.endAt ?? row?.dayEndAt)
+    const startMinutes = calendarTimelineSourceRowStartMinutes(row)
+    const status = String(row?.status ?? '').trim().toUpperCase()
+
+    keys.forEach((key) => {
+      const bucket = ensureBucket(key)
+      if (startTs > 0) {
+        bucket.hasStart = true
+        bucket.latestStartTs = Math.max(bucket.latestStartTs, startTs)
+        if (startMinutes >= 0) {
+          bucket.startMinutes =
+            bucket.startMinutes >= 0 ? Math.min(bucket.startMinutes, startMinutes) : startMinutes
+        }
+      }
+      if (stopTs > 0) {
+        bucket.latestStopTs = Math.max(bucket.latestStopTs, stopTs)
+      }
+      if (startTs > 0 && !stopTs && (status === 'RUNNING' || status === 'OPEN' || Boolean(row?.isRunning))) {
+        bucket.explicitRunning = true
+      }
+    })
+  })
+
+  sourceBuckets.forEach((bucket, key) => {
+    upsertState(key, {
+      hasStart: bucket.hasStart,
+      isRunning: bucket.explicitRunning || (bucket.latestStartTs > 0 && bucket.latestStartTs > bucket.latestStopTs),
+      startMinutes: bucket.startMinutes,
+    })
+  })
+
+  return stateMap
+}
+
+function calendarTimelineWorkerHasStart(worker = {}) {
+  const dayKey = todayYmd()
+  const stateMap = calendarTimelineBuildWorkerStateMap(dayKey)
+  const workerKeys = calendarTimelineWorkerAliasKeys(worker)
+  return [...workerKeys].some((key) => {
+    const state = stateMap.get(key)
+    return Boolean(state?.isRunning)
+  })
+}
+
+function calendarTimelineWorkerIsActive(worker = {}) {
+  if (!worker || worker.active === false || worker.isActive === false || worker.enabled === false) {
+    return false
+  }
+  const status = normalizeSearchText(worker?.status ?? worker?.workerStatus ?? worker?.state)
+  if (!status) {
+    return true
+  }
+  return ['aktywny', 'active', '1', 'true', 'yes', 'tak'].includes(status)
+}
+
+function calendarTimelineResources() {
+  const source = Array.isArray(appState.workers) && appState.workers.length ? appState.workers : appState.workerTimeRows
+  const seen = new Set()
+  const workers = (Array.isArray(source) ? source : [])
+    .filter((worker) => calendarTimelineWorkerIsActive(worker))
+    .map((worker) => {
+      const rawName = String(worker.workerName ?? worker.fullName ?? worker.name ?? worker.login ?? worker.workerId ?? '').trim()
+      const name = calendarTimelineWorkerName(rawName)
+      const key = normalizeSearchText(worker.workerId || worker.login || rawName || name)
+      return name && key ? { name, key, type: 'worker', worker, started: calendarTimelineWorkerHasStart(worker) } : null
+    })
+    .filter(Boolean)
+    .filter((resource) => {
+      if (seen.has(resource.key)) {
+        return false
+      }
+      seen.add(resource.key)
+      return true
+    })
+    .sort((first, second) => first.name.localeCompare(second.name, 'pl', { sensitivity: 'base' }))
+
+  if (workers.length) {
+    return [{ name: 'BUFOR', key: 'buffer', type: 'buffer' }, ...workers]
+  }
+
+  return [
+    { name: 'BUFOR', key: 'buffer', type: 'buffer' },
+    {
+      name: appState.workersLoaded ? 'Brak pracowników' : 'Ładowanie pracowników...',
+      key: 'workers-placeholder',
+      type: 'placeholder',
+    },
+  ]
+}
+
+function calendarTimelineCurrentHourHtml(days = [], hours = [], resources = []) {
+  const now = new Date()
+  const today = calendarDateToYmd(now)
+  const dayIndex = days.indexOf(today)
+  const slotsPerDay = hours.length * CALENDAR_TIMELINE_SLOTS_PER_HOUR
+  const dayStartMinutes = Number(hours[0] ?? 0) * 60
+  const dayEndMinutes = (Number(hours[hours.length - 1] ?? 23) + 1) * 60
+  const nowMinutes = now.getHours() * 60 + now.getMinutes()
+  if (dayIndex < 0 || !slotsPerDay || nowMinutes < dayStartMinutes || nowMinutes >= dayEndMinutes) {
+    return ''
+  }
+
+  const slotInDay = Math.max(0, Math.min(slotsPerDay - 1, Math.round((nowMinutes - dayStartMinutes) / CALENDAR_TIMELINE_SLOT_MINUTES)))
+  const slot = dayIndex * slotsPerDay + slotInDay + 1
+  return `
+    <div
+      class="fw-current-hour"
+      style="grid-column:${slot + 1}; grid-row:2 / span ${resources.length + 1};"
+      aria-label="Aktualna godzina ${pad2(now.getHours())}:${pad2(now.getMinutes())}"
+    ></div>
+  `
+}
+
+function calendarScheduleTimelineHourRefresh() {
+  if (appState.calendarTimelineHourTimer) {
+    window.clearTimeout(appState.calendarTimelineHourTimer)
+    appState.calendarTimelineHourTimer = null
+  }
+
+  const now = new Date()
+  const nextSlot = new Date(now)
+  nextSlot.setHours(now.getHours(), Math.floor(now.getMinutes() / CALENDAR_TIMELINE_SLOT_MINUTES) * CALENDAR_TIMELINE_SLOT_MINUTES + CALENDAR_TIMELINE_SLOT_MINUTES, 1, 0)
+  const delayMs = Math.max(nextSlot.getTime() - now.getTime(), 1000)
+  appState.calendarTimelineHourTimer = window.setTimeout(() => {
+    appState.calendarTimelineHourTimer = null
+    if (appState.currentRoute === 'calendar' && document.getElementById('calendarTimelinePrototype')) {
+      renderCalendarView()
+    }
+  }, delayMs)
+}
+
+function calendarTimelineTimeMinutes(value, fallback = 0) {
+  const minutes = calendarTimeToMinutes(value)
+  return Number.isFinite(minutes) ? minutes : fallback
+}
+
+function calendarTimelineSnapMinutes(value, fallback = 0) {
+  const minutes = Number(value)
+  const normalized = Number.isFinite(minutes) ? minutes : Number(fallback)
+  const safe = Number.isFinite(normalized) ? normalized : 0
+  return Math.round(safe / CALENDAR_TIMELINE_SLOT_MINUTES) * CALENDAR_TIMELINE_SLOT_MINUTES
+}
+
+function calendarTimelineSnapDurationMinutes(value) {
+  return Math.max(CALENDAR_TIMELINE_SLOT_MINUTES, calendarTimelineSnapMinutes(value, CALENDAR_TIMELINE_SLOT_MINUTES))
+}
+
+function calendarTimelineCompareYmd(left, right) {
+  return String(left ?? '').localeCompare(String(right ?? ''))
+}
+
+function calendarTimelineSlotIndex(dayKey, timeValue, days = [], hours = []) {
+  const normalizedDay = String(dayKey ?? '').trim()
+  const firstDay = String(days[0] ?? '').trim()
+  const lastDay = String(days[days.length - 1] ?? '').trim()
+  const slotsPerDay = hours.length * CALENDAR_TIMELINE_SLOTS_PER_HOUR
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDay) || !firstDay || !lastDay || !slotsPerDay) {
+    return null
+  }
+
+  if (calendarTimelineCompareYmd(normalizedDay, firstDay) < 0) {
+    return 0
+  }
+  if (calendarTimelineCompareYmd(normalizedDay, lastDay) > 0) {
+    return days.length * slotsPerDay
+  }
+
+  const dayIndex = days.indexOf(normalizedDay)
+  if (dayIndex < 0) {
+    return null
+  }
+
+  const dayStartMinutes = Number(hours[0] ?? 0) * 60
+  const dayEndMinutes = (Number(hours[hours.length - 1] ?? 23) + 1) * 60
+  const minutes = calendarTimelineTimeMinutes(timeValue, dayStartMinutes)
+  if (minutes <= dayStartMinutes) {
+    return dayIndex * slotsPerDay
+  }
+  if (minutes >= dayEndMinutes) {
+    return (dayIndex + 1) * slotsPerDay
+  }
+
+  return dayIndex * slotsPerDay + (minutes - dayStartMinutes) / CALENDAR_TIMELINE_SLOT_MINUTES
+}
+
+function calendarTimelineOrderPosition(order, days = [], hours = []) {
+  const startDay = String(order?.dateYmd ?? '').trim()
+  const startTime = String(order?.startTime ?? '').trim()
+  let endDay = String(order?.endDateYmd || order?.dateYmd || '').trim()
+  const endTime = String(order?.endTime ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDay) || !/^\d{4}-\d{2}-\d{2}$/.test(endDay)) {
+    return null
+  }
+
+  const startMinutes = calendarTimelineTimeMinutes(startTime, 0)
+  const endMinutes = calendarTimelineTimeMinutes(endTime, startMinutes + 60)
+  if (endDay === startDay && endMinutes <= startMinutes) {
+    endDay = calendarAddDays(startDay, 1)
+  }
+
+  const startIndex = calendarTimelineSlotIndex(startDay, startTime, days, hours)
+  const endIndex = calendarTimelineSlotIndex(endDay, endTime, days, hours)
+  if (!Number.isFinite(startIndex) || !Number.isFinite(endIndex)) {
+    return null
+  }
+
+  const rangeSlots = days.length * hours.length * CALENDAR_TIMELINE_SLOTS_PER_HOUR
+  const visibleStart = Math.max(0, Math.min(rangeSlots, startIndex))
+  const visibleEnd = Math.max(0, Math.min(rangeSlots, endIndex))
+  if (visibleEnd <= visibleStart) {
+    return null
+  }
+
+  const startSlot = Math.max(0, Math.min(rangeSlots - 1, Math.round(visibleStart)))
+  const endSlot = Math.max(startSlot + 1, Math.min(rangeSlots, Math.round(visibleEnd)))
+  return {
+    startColumn: startSlot + 2,
+    span: Math.max(1, endSlot - startSlot),
+    visibleStart: startSlot,
+    visibleEnd: endSlot,
+  }
+}
+
+function calendarTimelineLayoutEventBars(bars = [], days = [], hours = [], resources = [], selectedTypes = calendarTimelineSelectedTypes()) {
+  const items = bars
+    .filter((bar) => bar.row < resources.length)
+    .filter((bar) => selectedTypes.has(bar.type || 'other'))
+    .filter((bar) => appState.calendarTimelineShowCompleted !== false || !bar.completed)
+    .map((bar) => {
+      const position = calendarTimelineOrderPosition(bar, days, hours)
+      return position ? { bar, position, lane: 0, laneCount: 1 } : null
+    })
+    .filter(Boolean)
+
+  const rowLaneCounts = new Map()
+  const byRow = new Map()
+  items.forEach((item) => {
+    const row = Number(item.bar.row)
+    if (!byRow.has(row)) {
+      byRow.set(row, [])
+    }
+    byRow.get(row).push(item)
+  })
+
+  byRow.forEach((rowItems, row) => {
+    if (!calendarTimelineRowAllowsOverlap(row, resources)) {
+      rowItems.forEach((item) => {
+        item.lane = 0
+        item.laneCount = 1
+      })
+      rowLaneCounts.set(row, 1)
+      return
+    }
+
+    const laneEnds = []
+    rowItems
+      .sort((left, right) => left.position.visibleStart - right.position.visibleStart || left.position.visibleEnd - right.position.visibleEnd)
+      .forEach((item) => {
+        const lane = laneEnds.findIndex((end) => end <= item.position.visibleStart)
+        const nextLane = lane >= 0 ? lane : laneEnds.length
+        item.lane = nextLane
+        laneEnds[nextLane] = item.position.visibleEnd
+      })
+    const laneCount = Math.max(1, laneEnds.length)
+    rowLaneCounts.set(row, laneCount)
+    rowItems.forEach((item) => {
+      item.laneCount = laneCount
+    })
+  })
+
+  return { items, rowLaneCounts }
+}
+
+function calendarTimelineDefaultDemoOrders() {
+  return []
+}
+
+function ordersIsSeedDemoOrder(order = {}) {
+  return /^fw-order-(?:[1-9]|1\d|2[0-3])$/.test(String(order?.id ?? '').trim())
+}
+
+function ordersListSourceOrders() {
+  if (!Array.isArray(appState.calendarTimelineDemoOrders)) {
+    appState.calendarTimelineDemoOrders = calendarTimelineDefaultDemoOrders()
+  }
+  appState.calendarTimelineDemoOrders = appState.calendarTimelineDemoOrders.filter((order) => !ordersIsSeedDemoOrder(order))
+  return appState.calendarTimelineDemoOrders
+}
+
+function calendarTimelineDayDiff(startYmd, endYmd) {
+  const start = calendarDateFromYmd(startYmd)
+  const end = calendarDateFromYmd(endYmd)
+  return Math.round((end.getTime() - start.getTime()) / 86400000)
+}
+
+function calendarTimelineDayOrdinal(ymd) {
+  const value = String(ymd ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null
+  }
+  return Math.floor(Date.UTC(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, Number(value.slice(8, 10))) / 86400000)
+}
+
+function calendarTimelineOrderDurationMinutes(order = {}) {
+  const startDay = String(order.dateYmd ?? todayYmd()).trim()
+  const endDay = String(order.endDateYmd || order.dateYmd || startDay).trim()
+  const startMinutes = calendarTimelineTimeMinutes(order.startTime, 4 * 60)
+  const endMinutes = calendarTimelineTimeMinutes(order.endTime, startMinutes + 60)
+  let daySpan = Math.max(0, calendarTimelineDayDiff(startDay, endDay))
+  if (daySpan === 0 && endMinutes <= startMinutes) {
+    daySpan = 1
+  }
+  const duration = daySpan * 1440 + endMinutes - startMinutes
+  return Number.isFinite(duration) && duration > 0 ? duration : 60
+}
+
+function calendarTimelineOrderInterval(order = {}) {
+  const startDay = String(order.dateYmd ?? '').trim()
+  const endDay = String(order.endDateYmd || order.dateYmd || '').trim()
+  const startOrdinal = calendarTimelineDayOrdinal(startDay)
+  const endOrdinal = calendarTimelineDayOrdinal(endDay)
+  if (!Number.isFinite(startOrdinal) || !Number.isFinite(endOrdinal)) {
+    return null
+  }
+  const startMinutes = calendarTimelineTimeMinutes(order.startTime, 4 * 60)
+  const endMinutes = calendarTimelineTimeMinutes(order.endTime, startMinutes + 60)
+  let start = startOrdinal * 1440 + startMinutes
+  let end = endOrdinal * 1440 + endMinutes
+  if (end <= start) {
+    end += 1440
+  }
+  return { start, end }
+}
+
+function calendarTimelineOrderTitle(order = {}) {
+  return (
+    String(order?.title ?? order?.name ?? order?.clientLabel ?? order?.client ?? order?.addressLabel ?? '').trim() ||
+    'Zlecenie'
+  )
+}
+
+function calendarTimelineTimeLabel(value, fallback = '--:--') {
+  const raw = String(value ?? '').trim()
+  const match = raw.match(/^(\d{1,2}):(\d{2})/)
+  if (!match) {
+    return fallback
+  }
+  return `${pad2(Number(match[1]))}:${match[2]}`
+}
+
+function calendarTimelineDateLabel(ymd) {
+  const raw = String(ymd ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw || '-'
+  }
+  return `${raw.slice(8, 10)}.${raw.slice(5, 7)}.${raw.slice(0, 4)}`
+}
+
+function calendarTimelineOrderRangeLabel(order = {}) {
+  const startDay = String(order?.dateYmd ?? '').trim()
+  const endDay = String(order?.endDateYmd || order?.dateYmd || '').trim()
+  const startTime = calendarTimelineTimeLabel(order?.startTime)
+  const endTime = calendarTimelineTimeLabel(order?.endTime)
+  const startLabel = `${calendarTimelineDateLabel(startDay)} ${startTime}`
+  const endLabel = endDay && endDay !== startDay ? `${calendarTimelineDateLabel(endDay)} ${endTime}` : endTime
+  return `${startLabel} - ${endLabel}`
+}
+
+function calendarTimelineTimestampFromDayMinutes(dayKey, minutes) {
+  const day = String(dayKey ?? '').trim()
+  const value = Number(minutes)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(value)) {
+    return 0
+  }
+  const date = calendarDateFromYmd(day)
+  date.setMinutes(date.getMinutes() + Math.floor(value))
+  const timestamp = date.getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function calendarTimelineHmFromTimestamp(timestamp, fallback = '--:--') {
+  const value = Number(timestamp)
+  if (!Number.isFinite(value) || value <= 0) {
+    return fallback
+  }
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) {
+    return fallback
+  }
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+function calendarTimelineOrderPlannedBounds(order = {}) {
+  const startDay = String(order?.dateYmd ?? '').trim()
+  const endDay = String(order?.endDateYmd || order?.dateYmd || startDay).trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDay) || !/^\d{4}-\d{2}-\d{2}$/.test(endDay)) {
+    return null
+  }
+
+  const startMinutes = calendarTimelineTimeMinutes(order?.startTime, 8 * 60)
+  const endMinutes = calendarTimelineTimeMinutes(order?.endTime, startMinutes + 60)
+  let startTs = calendarTimelineTimestampFromDayMinutes(startDay, startMinutes)
+  let endTs = calendarTimelineTimestampFromDayMinutes(endDay, endMinutes)
+  if (!startTs || !endTs) {
+    return null
+  }
+  if (endTs <= startTs) {
+    endTs += 24 * 60 * 60 * 1000
+  }
+
+  return {
+    startDay,
+    endDay,
+    startMinutes,
+    endMinutes,
+    startTs,
+    endTs,
+    startLabel: calendarTimelineTimeLabel(order?.startTime),
+    endLabel: calendarTimelineTimeLabel(order?.endTime),
+  }
+}
+
+function calendarTimelineOrderActualIsoFromKeys(order = {}, keys = []) {
+  for (const key of keys) {
+    const iso = toIso(order?.[key])
+    if (iso) {
+      return iso
+    }
+  }
+
+  return ''
+}
+
+function calendarTimelineOrderActualTimeFromKeys(order = {}, keys = [], dayKey = '') {
+  const day = String(dayKey ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return ''
+  }
+
+  for (const key of keys) {
+    const minutes = dashboardScheduleTimeToMinutes(order?.[key])
+    if (Number.isFinite(minutes) && minutes >= 0) {
+      return new Date(calendarTimelineTimestampFromDayMinutes(day, minutes)).toISOString()
+    }
+  }
+
+  return ''
+}
+
+function calendarTimelineActualStateFromOrderFields(order = {}, planned = null) {
+  const startIso =
+    calendarTimelineOrderActualIsoFromKeys(order, [
+      'actualStartAt',
+      'actualStartedAt',
+      'actualStartIso',
+      'realStartAt',
+      'serviceStartAt',
+      'startedAt',
+      'qrStartAt',
+      'qrStartIso',
+      'startRealAt',
+    ]) ||
+    calendarTimelineOrderActualTimeFromKeys(order, [
+      'actualStartTime',
+      'realStartTime',
+      'serviceStartTime',
+      'qrStart',
+      'qrStartTime',
+    ], planned?.startDay)
+  const endIso =
+    calendarTimelineOrderActualIsoFromKeys(order, [
+      'actualEndAt',
+      'actualFinishedAt',
+      'actualStopAt',
+      'actualEndIso',
+      'realEndAt',
+      'serviceEndAt',
+      'finishedAt',
+      'completedAt',
+      'qrStopAt',
+      'qrEndAt',
+      'qrStopIso',
+    ]) ||
+    calendarTimelineOrderActualTimeFromKeys(order, [
+      'actualEndTime',
+      'actualStopTime',
+      'realEndTime',
+      'serviceEndTime',
+      'finishTime',
+      'finishedTime',
+      'qrStop',
+      'qrStopTime',
+    ], planned?.endDay || planned?.startDay)
+
+  const startTs = startIso ? new Date(startIso).getTime() : 0
+  const endTs = endIso ? new Date(endIso).getTime() : 0
+  return {
+    startTs: Number.isFinite(startTs) ? startTs : 0,
+    endTs: Number.isFinite(endTs) ? endTs : 0,
+    isRunning: Boolean(startIso) && !endIso,
+    source: startIso || endIso ? 'order' : '',
+  }
+}
+
+function calendarTimelineTextTokens(...values) {
+  return values
+    .map((value) => normalizeSearchText(value))
+    .filter(Boolean)
+    .filter((value, index, list) => list.indexOf(value) === index)
+}
+
+function calendarTimelineUsefulTextTokens(...values) {
+  const generic = new Set(['-', 'nowe', 'nowe zlecenie', 'nowy klient', 'zlecenie', 'klient', 'bufor'])
+  return calendarTimelineTextTokens(...values).filter((value) => value.length >= 4 && !generic.has(value))
+}
+
+function calendarTimelineSourceRowTextTokens(row = {}) {
+  return calendarTimelineUsefulTextTokens(
+    row?.client,
+    row?.clientName,
+    row?.clientLabel,
+    row?.customer,
+    row?.customerName,
+    row?.activeClient,
+    row?.zone,
+    row?.zoneCode,
+    row?.zoneName,
+    row?.activeZone,
+    row?.address,
+    row?.addressLabel,
+    row?.location,
+    row?.title,
+    row?.taskName,
+  )
+}
+
+function calendarTimelineOrderTextTokens(order = {}) {
+  return calendarTimelineUsefulTextTokens(
+    order?.client,
+    order?.clientName,
+    order?.clientLabel,
+    ordersTimelineClientLabel(order),
+    order?.address,
+    order?.addressLabel,
+    order?.location,
+    ordersTimelineAddressLabel(order),
+    order?.title,
+    order?.taskName,
+  )
+}
+
+function calendarTimelineOrderSourceKeys(order = {}) {
+  return calendarTimelineTextTokens(
+    order?.sourceEventId,
+    order?.eventId,
+    order?.workdayId,
+    order?.orderId,
+    order?.externalId,
+    order?.remoteId,
+    order?.jobId,
+    order?.taskId,
+    order?.id,
+  )
+}
+
+function calendarTimelineSourceRowKeys(row = {}) {
+  return calendarTimelineTextTokens(
+    row?.orderId,
+    row?.calendarOrderId,
+    row?.sourceOrderId,
+    row?.jobId,
+    row?.taskId,
+    row?.eventId,
+    row?.workdayId,
+    row?.id,
+  )
+}
+
+function calendarTimelineTokensMatch(leftTokens = [], rightTokens = []) {
+  return leftTokens.some((left) =>
+    rightTokens.some((right) => {
+      if (!left || !right) {
+        return false
+      }
+      return left === right || (left.length >= 4 && right.includes(left)) || (right.length >= 4 && left.includes(right))
+    }),
+  )
+}
+
+function calendarTimelineResourceMatchesSourceRow(resource = {}, row = {}) {
+  if (resource?.type !== 'worker') {
+    return false
+  }
+  const resourceKeys = calendarTimelineWorkerAliasKeys(resource.worker)
+  const rowKeys = dashboardResolveTodayRowAliasKeys(row)
+  if (!(resourceKeys instanceof Set) || !(rowKeys instanceof Set) || !resourceKeys.size || !rowKeys.size) {
+    return false
+  }
+  return [...resourceKeys].some((key) => rowKeys.has(key))
+}
+
+function calendarTimelineSourceRowMatchesOrder(row = {}, order = {}, planned = null) {
+  if (!planned) {
+    return false
+  }
+  const dayKey = dashboardResolveDayKey(row)
+  if (dayKey && dayKey !== planned.startDay && dayKey !== planned.endDay) {
+    return false
+  }
+
+  const startTs = calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
+  const endTs = calendarTimelineEventTimestamp(row?.endAt ?? row?.dayEndAt)
+  const orderKeys = calendarTimelineOrderSourceKeys(order)
+  const rowKeys = calendarTimelineSourceRowKeys(row)
+  const hasExplicitLink = orderKeys.length > 0 && rowKeys.some((key) => orderKeys.includes(key))
+  if (hasExplicitLink) {
+    return true
+  }
+
+  const hasTextMatch = calendarTimelineTokensMatch(calendarTimelineOrderTextTokens(order), calendarTimelineSourceRowTextTokens(row))
+  if (!hasTextMatch) {
+    return false
+  }
+
+  const hasReasonableTimeWindow =
+    (startTs > 0 && startTs < planned.endTs + 12 * 60 * 60 * 1000 && startTs > planned.startTs - 2 * 60 * 60 * 1000) ||
+    (endTs > 0 && endTs < planned.endTs + 12 * 60 * 60 * 1000 && endTs > planned.startTs - 2 * 60 * 60 * 1000)
+  return hasReasonableTimeWindow
+}
+
+function calendarTimelineActualStateFromWorkerRows(order = {}, resource = {}, planned = null) {
+  if (!planned || resource?.type !== 'worker') {
+    return { startTs: 0, endTs: 0, isRunning: false, source: '' }
+  }
+  const sourceRows =
+    appState.calendarTimelineWorkerStateDayKey === planned.startDay && Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
+      ? appState.calendarTimelineWorkerStateSourceRows
+      : []
+  const matches = sourceRows
+    .filter((row) => calendarTimelineResourceMatchesSourceRow(resource, row))
+    .filter((row) => calendarTimelineSourceRowMatchesOrder(row, order, planned))
+    .map((row) => {
+      const startTs = calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
+      const endTs = calendarTimelineEventTimestamp(row?.endAt ?? row?.dayEndAt)
+      const status = String(row?.status ?? '').trim().toUpperCase()
+      const proximity = startTs > 0 ? Math.abs(startTs - planned.startTs) : Number.POSITIVE_INFINITY
+      return {
+        row,
+        startTs,
+        endTs,
+        isRunning: startTs > 0 && !endTs && (status === 'RUNNING' || status === 'OPEN' || Boolean(row?.isRunning)),
+        proximity,
+      }
+    })
+    .filter((item) => item.startTs > 0 || item.endTs > 0)
+    .sort((left, right) => left.proximity - right.proximity || left.startTs - right.startTs)
+
+  if (!matches.length) {
+    return { startTs: 0, endTs: 0, isRunning: false, source: '' }
+  }
+
+  const best = matches[0]
+  return {
+    startTs: best.startTs,
+    endTs: best.endTs,
+    isRunning: best.isRunning || (best.startTs > 0 && !best.endTs),
+    source: 'workday',
+  }
+}
+
+function calendarTimelineOrderActualState(order = {}, resource = {}, planned = null) {
+  const fromOrder = calendarTimelineActualStateFromOrderFields(order, planned)
+  if (fromOrder.startTs || fromOrder.endTs) {
+    return fromOrder
+  }
+  const fromRows = calendarTimelineActualStateFromWorkerRows(order, resource, planned)
+  if (fromRows.startTs || fromRows.endTs) {
+    return fromRows
+  }
+  return { startTs: 0, endTs: 0, isRunning: false, source: '' }
+}
+
+function calendarTimelineOrderCompletedFromStatus(order = {}) {
+  const status = normalizeSearchText(order?.status ?? order?.orderStatus ?? order?.state)
+  return ['closed', 'done', 'completed', 'finished', 'complete', 'zakończone', 'zakonczone'].includes(status)
+}
+
+function calendarTimelineDelayMinutes(actualTs, plannedTs) {
+  const actual = Number(actualTs)
+  const planned = Number(plannedTs)
+  if (!Number.isFinite(actual) || !Number.isFinite(planned) || actual <= planned + 60000) {
+    return 0
+  }
+  return Math.max(1, Math.ceil((actual - planned) / 60000))
+}
+
+function calendarTimelineStatusAlertFor(kind, order = {}, resource = {}, planned = null, actual = {}, details = {}) {
+  const id = String(order?.id ?? '').trim()
+  if (!id || !planned) {
+    return null
+  }
+  const title = calendarTimelineOrderTitle(order)
+  const worker = String(resource?.name ?? '').trim()
+  const startDelay = Number(details?.startDelay ?? 0)
+  const endDelay = Number(details?.endDelay ?? 0)
+  const actualStartLabel = calendarTimelineHmFromTimestamp(actual?.startTs)
+  const actualEndLabel = calendarTimelineHmFromTimestamp(actual?.endTs)
+
+  if (kind === 'missing-start') {
+    return {
+      key: `${kind}|${id}|${planned.startTs}`,
+      kind,
+      signal: 'UWAGA',
+      title: 'Zlecenie nie wystartowało',
+      text: `Zlecenie nie rozpoczęło się o planowanej godzinie ${planned.startLabel}.`,
+      rows: [
+        {
+          person: title,
+          meta: worker ? `Pracownik: ${worker}` : 'Pracownik: -',
+          status: `Plan START: ${planned.startLabel}`,
+        },
+      ],
+    }
+  }
+
+  if (kind === 'started-late') {
+    return {
+      key: `${kind}|${id}|${actual?.startTs || 0}|${startDelay}`,
+      kind,
+      signal: 'INFO',
+      title: 'Zlecenie rozpoczęte z opóźnieniem',
+      text: `Start opóźniony o ${dashboardLateMinutesToHm(startDelay)} względem planu.`,
+      rows: [
+        {
+          person: title,
+          meta: `Plan START: ${planned.startLabel}`,
+          status: `Realny START: ${actualStartLabel}`,
+        },
+      ],
+    }
+  }
+
+  if (kind === 'completed-late') {
+    return {
+      key: `${kind}|${id}|${actual?.endTs || 0}|${endDelay}`,
+      kind,
+      signal: 'INFO',
+      title: 'Zlecenie zakończone z opóźnieniem',
+      text: `STOP opóźniony o ${dashboardLateMinutesToHm(endDelay)} względem planu.`,
+      rows: [
+        {
+          person: title,
+          meta: `Plan STOP: ${planned.endLabel}`,
+          status: `Realny STOP: ${actualEndLabel}`,
+        },
+      ],
+    }
+  }
+
+  if (kind === 'started-late-ended') {
+    const endText = endDelay > 0 ? ` STOP opóźniony o ${dashboardLateMinutesToHm(endDelay)}.` : ' STOP zgodny z planem.'
+    return {
+      key: `${kind}|${id}|${actual?.startTs || 0}|${actual?.endTs || 0}|${startDelay}|${endDelay}`,
+      kind,
+      signal: 'UWAGA',
+      title: 'Opóźniony start zlecenia',
+      text: `START opóźniony o ${dashboardLateMinutesToHm(startDelay)}.${endText}`,
+      rows: [
+        {
+          person: title,
+          meta: `START: ${planned.startLabel} -> ${actualStartLabel}`,
+          status: `STOP: ${planned.endLabel} -> ${actualEndLabel}`,
+        },
+      ],
+    }
+  }
+
+  return null
+}
+
+function calendarTimelineWorkerEventsFilter(resource = {}) {
+  const worker = resource?.worker ?? {}
+  const workerName = String(worker?.workerName ?? worker?.fullName ?? worker?.name ?? resource?.name ?? '').trim()
+  const displayName = String(resource?.name ?? workerName).trim()
+  const workerLogin = String(
+    worker?.workerLogin ?? worker?.login ?? worker?.loginEmail ?? worker?.email ?? worker?.workerId ?? worker?.id ?? workerName,
+  ).trim()
+  return {
+    worker: displayName || workerName || workerLogin,
+    workerLogin: workerLogin || workerName || displayName,
+  }
+}
+
+function calendarTimelineOpenWorkerEvents(rowIndex) {
+  const row = Number(rowIndex)
+  const resources = calendarTimelineResources()
+  const resource = Number.isInteger(row) ? resources[row] ?? null : null
+  if (!resource || resource.type !== 'worker') {
+    return
+  }
+
+  const filters = calendarTimelineWorkerEventsFilter(resource)
+  if (!filters.worker && !filters.workerLogin) {
+    return
+  }
+
+  appState.eventsPage = 1
+  appState.eventsFilters = {
+    from: firstDayOfCurrentMonthYmd(),
+    to: todayYmd(),
+    worker: filters.worker,
+    workerLogin: filters.workerLogin,
+    strefa: '',
+    pomieszczenie: '',
+    roomId: '',
+    status: '',
+    q: '',
+  }
+  appState.eventsWorkerLoginFilter = filters.workerLogin
+  appState.eventsWorkerLoginFilterText = filters.worker
+  const routeButton = document.querySelector('[data-route="events"]')
+  if (routeButton instanceof HTMLElement) {
+    routeButton.click()
+  } else {
+    applyEventsFilterInputs(appState.eventsFilters)
+    void fetchEventsForCurrentSession({ resetPage: true })
+  }
+}
+
+function calendarTimelineHideEventsPopup() {
+  if (calendarTimelineBarClickTimer) {
+    window.clearTimeout(calendarTimelineBarClickTimer)
+    calendarTimelineBarClickTimer = 0
+  }
+  calendarTimelineStopEventsPopupTracking()
+  const node = document.getElementById('calendarTimelineEventsPopup')
+  if (node) {
+    node.remove()
+  }
+  appState.calendarTimelinePopupEventRows = []
+}
+
+function calendarTimelineScheduleEventsPopupPosition() {
+  const node = document.getElementById('calendarTimelineEventsPopup')
+  const anchor = calendarTimelineEventsPopupAnchor
+  if (!node || !(anchor instanceof HTMLElement) || !document.body.contains(anchor)) {
+    calendarTimelineHideEventsPopup()
+    return
+  }
+
+  if (calendarTimelineEventsPopupRaf) {
+    return
+  }
+  calendarTimelineEventsPopupRaf = window.requestAnimationFrame(() => {
+    calendarTimelineEventsPopupRaf = 0
+    const currentNode = document.getElementById('calendarTimelineEventsPopup')
+    const currentAnchor = calendarTimelineEventsPopupAnchor
+    if (!currentNode || !(currentAnchor instanceof HTMLElement) || !document.body.contains(currentAnchor)) {
+      calendarTimelineHideEventsPopup()
+      return
+    }
+    calendarTimelinePositionEventsPopup(currentNode, currentAnchor)
+  })
+}
+
+function calendarTimelineStopEventsPopupTracking() {
+  window.removeEventListener('scroll', calendarTimelineScheduleEventsPopupPosition, true)
+  window.removeEventListener('resize', calendarTimelineScheduleEventsPopupPosition)
+  if (calendarTimelineEventsPopupScrollParent instanceof HTMLElement) {
+    calendarTimelineEventsPopupScrollParent.removeEventListener('scroll', calendarTimelineScheduleEventsPopupPosition)
+  }
+  if (calendarTimelineEventsPopupRaf) {
+    window.cancelAnimationFrame(calendarTimelineEventsPopupRaf)
+    calendarTimelineEventsPopupRaf = 0
+  }
+  calendarTimelineEventsPopupAnchor = null
+  calendarTimelineEventsPopupScrollParent = null
+}
+
+function calendarTimelineStartEventsPopupTracking(anchor) {
+  calendarTimelineStopEventsPopupTracking()
+  if (!(anchor instanceof HTMLElement)) {
+    return
+  }
+  calendarTimelineEventsPopupAnchor = anchor
+  calendarTimelineEventsPopupScrollParent = anchor.closest('.fw-timeline-scroll')
+  window.addEventListener('scroll', calendarTimelineScheduleEventsPopupPosition, true)
+  window.addEventListener('resize', calendarTimelineScheduleEventsPopupPosition)
+  if (calendarTimelineEventsPopupScrollParent instanceof HTMLElement) {
+    calendarTimelineEventsPopupScrollParent.addEventListener('scroll', calendarTimelineScheduleEventsPopupPosition)
+  }
+}
+
+function calendarTimelineBarContextFromElement(bar) {
+  if (!(bar instanceof HTMLElement)) {
+    return null
+  }
+  const row = Number(bar.getAttribute('data-calendar-timeline-row'))
+  const resources = calendarTimelineResources()
+  const resource = Number.isInteger(row) ? resources[row] ?? null : null
+  const dateYmd = String(bar.getAttribute('data-calendar-timeline-date') || calendarTimelineStatusDayKey()).trim()
+  if (!resource || resource.type !== 'worker' || !/^\d{4}-\d{2}-\d{2}$/.test(dateYmd)) {
+    return null
+  }
+  return {
+    bar,
+    row,
+    resource,
+    dateYmd,
+    orderId: String(bar.getAttribute('data-calendar-timeline-order-id') || '').trim(),
+    isRealEvent: bar.getAttribute('data-calendar-timeline-real-event') === '1',
+    sourceEventId: String(bar.getAttribute('data-calendar-timeline-source-event-id') || '').trim(),
+    workdayId: String(bar.getAttribute('data-calendar-timeline-workday-id') || '').trim(),
+    sourceStartAt: toIso(bar.getAttribute('data-calendar-timeline-source-start') || ''),
+  }
+}
+
+function calendarTimelinePopupEventSortTime(row = {}) {
+  const markerType = calendarTimelineEventMarkerType(row)
+  const value =
+    markerType === 'QR START'
+      ? row?.dayStartAt ?? row?.startAt
+      : markerType === 'QR STOP'
+        ? row?.dayEndAt ?? row?.endAt ?? row?.closeMarkedAt ?? row?.startAt
+        : row?.startAt ?? row?.dayStartAt ?? row?.endAt ?? row?.dayEndAt
+  return calendarTimelineEventTimestamp(value)
+}
+
+function calendarTimelinePopupEventSortPriority(row = {}) {
+  const markerType = calendarTimelineEventMarkerType(row)
+  if (markerType === 'QR START') {
+    return 0
+  }
+  if (calendarTimelineEventIsDayShellItem({ row, startTs: 0, endTs: 0 }, [], 0, 0)) {
+    return 1
+  }
+  if (markerType === 'QR STOP') {
+    return 9
+  }
+  return 5
+}
+
+function calendarTimelineDayStartMarkerFromRows(rows = [], dayKey = '') {
+  const day = String(dayKey ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return null
+  }
+
+  let best = null
+  ;(Array.isArray(rows) ? rows : []).forEach((row) => {
+    if (calendarTimelineEventMarkerType(row) === 'QR START') {
+      best = best || { row: null, marker: null, score: Number.POSITIVE_INFINITY, hasExisting: true }
+      return
+    }
+
+    const startIso = toIso(row?.dayStartAt ?? row?.startAt)
+    if (!startIso || calendarDateToYmd(startIso) !== day) {
+      return
+    }
+
+    const qrCandidate = reportHistoryResolveDayQrCandidate(row, 'start')
+    const sourceKind = String(row?.historySourceKind ?? '').trim().toLowerCase()
+    const hasDayStartHint = [row?.dayStartAt, row?.dayStartObject, row?.dayComment, row?.workdayUtilityRoomId]
+      .some((value) => String(value ?? '').trim())
+    const score =
+      Number(qrCandidate?.score ?? 0) * 10 +
+      (sourceKind === 'workday' ? 5 : 0) +
+      (hasDayStartHint ? 2 : 0)
+    if (best && best.hasExisting) {
+      return
+    }
+    if (best && score <= best.score) {
+      return
+    }
+
+    const qrCode = qrCandidate?.code && qrCandidate.code !== '-' ? qrCandidate.code : ''
+    best = {
+      row,
+      score,
+      hasExisting: false,
+      marker: {
+        ...row,
+        calendarTimelineMarkerType: 'QR START',
+        calendarTimelinePopupSyntheticMarker: true,
+        calendarTimelineMarkerSourceRow: row,
+        historyMarkerOnly: true,
+        startAt: startIso,
+        endAt: '',
+        dayStartAt: startIso,
+        dayEndAt: '',
+        durationSec: 0,
+        dayStartObject: qrCode || row?.dayStartObject || row?.startObject || row?.workdayUtilityRoomId || '',
+      },
+    }
+  })
+
+  return best?.hasExisting ? null : best?.marker ?? null
+}
+
+function calendarTimelineRowsWithDayStartMarker(rows = [], dayKey = '') {
+  const sourceRows = Array.isArray(rows) ? rows : []
+  const startMarker = calendarTimelineDayStartMarkerFromRows(sourceRows, dayKey)
+  const result = startMarker ? [startMarker, ...sourceRows] : [...sourceRows]
+
+  return result.sort((left, right) => {
+    const timeDiff = calendarTimelinePopupEventSortTime(left) - calendarTimelinePopupEventSortTime(right)
+    if (timeDiff) {
+      return timeDiff
+    }
+    const priorityDiff = calendarTimelinePopupEventSortPriority(left) - calendarTimelinePopupEventSortPriority(right)
+    if (priorityDiff) {
+      return priorityDiff
+    }
+    return calendarTimelineEventIdentityValues(left).join('|').localeCompare(calendarTimelineEventIdentityValues(right).join('|'))
+  })
+}
+
+async function calendarTimelineFetchWorkerDayEvents(resource = {}, dayKey = '') {
+  const day = String(dayKey ?? '').trim()
+  if (!appState.session?.orgId || resource?.type !== 'worker' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return []
+  }
+  const filters = calendarTimelineWorkerEventsFilter(resource)
+  const baseQuery = {
+    source: 'events',
+    fromIso: day,
+    toIso: day,
+    page: 1,
+    pageSize: 1000,
+  }
+  const queryAttempts = [
+    filters.workerLogin ? { ...baseQuery, workerLogin: filters.workerLogin } : null,
+    filters.worker ? { ...baseQuery, worker: filters.worker } : null,
+    baseQuery,
+  ].filter(Boolean)
+
+  for (const query of queryAttempts) {
+    const response = await getWorkdays(appState.session.orgId, query)
+    const rows = (Array.isArray(response?.items) ? response.items : [])
+      .filter((row) => calendarTimelineRealEventRowDay(row) === day)
+      .sort((left, right) =>
+        calendarTimelineEventTimestamp(left?.startAt ?? left?.dayStartAt ?? left?.endAt ?? left?.dayEndAt) -
+        calendarTimelineEventTimestamp(right?.startAt ?? right?.dayStartAt ?? right?.endAt ?? right?.dayEndAt),
+      )
+    const matchedRows = rows.filter((row) => calendarTimelineResourceMatchesSourceRow(resource, row))
+    if (matchedRows.length) {
+      return calendarTimelineRowsWithDayStartMarker(matchedRows, day)
+    }
+    if (query.workerLogin || query.worker) {
+      continue
+    }
+  }
+
+  return []
+}
+
+function calendarTimelineEventIdentityValues(row = {}) {
+  return [
+    row?.eventId,
+    row?.workdayId,
+    row?.id,
+    row?.startEventId,
+    row?.endEventId,
+  ]
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean)
+}
+
+function calendarTimelineFindEventRowForBar(rows = [], context = {}) {
+  const sourceRows = (Array.isArray(rows) ? rows : []).filter((row) => !row?.calendarTimelinePopupSyntheticMarker)
+  const ids = new Set([context?.sourceEventId, context?.workdayId, context?.orderId?.replace(/^real-/, '')]
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean))
+  if (ids.size) {
+    const exact = sourceRows.find((row) =>
+      calendarTimelineEventIdentityValues(row).some((value) => ids.has(value)),
+    )
+    if (exact) {
+      return exact
+    }
+  }
+
+  const sourceStartTs = calendarTimelineEventTimestamp(context?.sourceStartAt)
+  if (sourceStartTs > 0) {
+    return [...sourceRows]
+      .map((row) => ({
+        row,
+        distance: Math.abs(calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt) - sourceStartTs),
+      }))
+      .filter((item) => Number.isFinite(item.distance))
+      .sort((left, right) => left.distance - right.distance)[0]?.row ?? null
+  }
+
+  return sourceRows.length ? sourceRows[0] : Array.isArray(rows) && rows.length ? rows[0] : null
+}
+
+function calendarTimelineEventDurationFromRow(row = {}) {
+  if (calendarTimelineEventMarkerType(row)) {
+    return 0
+  }
+
+  const direct = Number(row?.durationSec ?? 0)
+  if (Number.isFinite(direct) && direct > 0) {
+    return direct
+  }
+  const startTs = calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
+  const endTs = calendarTimelineEventTimestamp(row?.endAt ?? row?.dayEndAt)
+  if (startTs > 0 && endTs > startTs) {
+    return Math.floor((endTs - startTs) / 1000)
+  }
+  if (startTs > 0 && normalizeEventStatus(row?.status, Boolean(row?.endAt ?? row?.dayEndAt)) === 'RUNNING') {
+    return Math.max(0, Math.floor((Date.now() - startTs) / 1000))
+  }
+  return 0
+}
+
+function calendarTimelineShortTimeLabel(value = '') {
+  const iso = toIso(value)
+  if (!iso) {
+    return '--:--'
+  }
+  const date = new Date(iso)
+  if (!Number.isFinite(date.getTime())) {
+    return '--:--'
+  }
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+function calendarTimelineEventTimeRangeLabel(row = {}) {
+  const markerType = calendarTimelineEventMarkerType(row)
+  if (markerType === 'QR STOP') {
+    return calendarTimelineShortTimeLabel(row?.dayEndAt ?? row?.endAt ?? row?.closeMarkedAt ?? row?.startAt)
+  }
+  if (markerType === 'QR START' || markerType === 'QR START + STOP') {
+    return calendarTimelineShortTimeLabel(row?.dayStartAt ?? row?.startAt ?? row?.endAt)
+  }
+
+  const startValue = row?.startAt ?? row?.dayStartAt
+  const endIso = toIso(row?.endAt ?? row?.dayEndAt)
+  const startLabel = calendarTimelineShortTimeLabel(startValue)
+  const endLabel = endIso ? calendarTimelineShortTimeLabel(endIso) : 'trwa'
+  return `${startLabel} - ${endLabel}`
+}
+
+function calendarTimelineIsTechnicalEventCode(value = '') {
+  const normalized = String(value ?? '').trim().toUpperCase().replace(/^QR\s+/, '')
+  return /^EV-\d+(?:-\d+)?$/.test(normalized)
+}
+
+function calendarTimelineIsSystemAddedEntry(row = {}) {
+  const eventId = String(row?.eventId ?? row?.id ?? '').trim()
+  const workdayId = String(row?.workdayId ?? row?.linkedWorkdayId ?? '').trim()
+  const hasPortalEventId = calendarTimelineIsTechnicalEventCode(eventId)
+  const sameEventAndWorkday = !workdayId || workdayId === eventId
+  const hasMobileScanLink = [row?.startEventId, row?.endEventId, row?.deviceId]
+    .some((value) => String(value ?? '').trim())
+  const scannedObject = eventEditorFirstScannedQr([
+    row?.dayStartObject,
+    row?.dayStopObject,
+    row?.startObject,
+    row?.stopObject,
+    row?.dayComment,
+    row?.comment,
+  ])
+  return Boolean(hasPortalEventId && sameEventAndWorkday && !hasMobileScanLink && !scannedObject)
+}
+
+function calendarTimelineSystemAddedMarkerLabel(row = {}) {
+  if (!calendarTimelineIsSystemAddedEntry(row)) {
+    return ''
+  }
+  const markerType = eventTypeInfo(row).label
+  return markerType === 'QR START' || markerType === 'QR START + STOP' ? 'Dodano w systemie' : ''
+}
+
+function calendarTimelineEventMarkerType(row = {}) {
+  const explicitMarker = String(row?.calendarTimelineMarkerType ?? '').trim().toUpperCase()
+  if (explicitMarker === 'QR START' || explicitMarker === 'QR STOP' || explicitMarker === 'QR START + STOP') {
+    return explicitMarker
+  }
+
+  const label = eventTypeInfo(row).label
+  return label === 'QR START' || label === 'QR STOP' || label === 'QR START + STOP' ? label : ''
+}
+
+function calendarTimelineEventIsDayMarker(row = {}) {
+  return Boolean(calendarTimelineEventMarkerType(row))
+}
+
+function calendarTimelineEventIsSystemStatus(row = {}) {
+  if (calendarTimelineEventIsDayMarker(row)) {
+    return false
+  }
+
+  if (reportHistoryIsSystemEntrySource(row)) {
+    return true
+  }
+
+  const candidates = [
+    zoneQrCodeFromRow(row),
+    row?.zoneId,
+    row?.roomId,
+    row?.utilityRoomId,
+    row?.strefa,
+    row?.zoneName,
+    row?.dayStartObject,
+    row?.dayStopObject,
+    dashboardResolveClientLabel(row),
+    dashboardResolveZoneLabel(row),
+  ]
+  return candidates.some((value) => calendarTimelineIsTechnicalEventCode(value))
+}
+
+function calendarTimelineMarkerMetaLabel(row = {}, markerType = '') {
+  const normalizedMarker = String(markerType ?? '').trim().toUpperCase()
+  if (!normalizedMarker) {
+    return ''
+  }
+
+  if (calendarTimelineSystemAddedMarkerLabel(row)) {
+    return normalizedMarker
+  }
+
+  const phase = normalizedMarker === 'QR STOP' ? 'stop' : 'start'
+  const qr = reportHistoryResolveDayQrCode(row, phase)
+  const client =
+    calendarTimelineReadableClientLabel(dashboardResolveClientLabel(row)) ||
+    calendarTimelineReadableClientLabel(reportHistoryResolveClientByZoneCode(qr, ''))
+  const parts = [client, qr && qr !== '-' ? `QR ${qr}` : '']
+    .map((value) => String(value ?? '').trim())
+    .filter((value, index, list) => value && value !== '-' && list.indexOf(value) === index)
+
+  return parts.join(' / ')
+}
+
+function calendarTimelineEventStatusLabel(status = '') {
+  const normalized = String(status ?? '').trim().toUpperCase()
+  if (normalized === 'CLOSED') {
+    return 'Zakończone'
+  }
+  if (normalized === 'RUNNING' || normalized === 'OPEN') {
+    return 'W trakcie'
+  }
+  return normalized || '-'
+}
+
+const CALENDAR_TIMELINE_GRAPH_ZONE_COLORS = [
+  { bg: '#2f6bf2', hover: '#1d4ed8', shadow: 'rgba(47,107,242,.24)' },
+  { bg: '#16a34a', hover: '#15803d', shadow: 'rgba(22,163,74,.24)' },
+  { bg: '#f59e0b', hover: '#d97706', shadow: 'rgba(245,158,11,.26)' },
+  { bg: '#0ea5e9', hover: '#0284c7', shadow: 'rgba(14,165,233,.24)' },
+  { bg: '#7c3aed', hover: '#6d28d9', shadow: 'rgba(124,58,237,.24)' },
+  { bg: '#dc2626', hover: '#b91c1c', shadow: 'rgba(220,38,38,.24)' },
+  { bg: '#0891b2', hover: '#0e7490', shadow: 'rgba(8,145,178,.24)' },
+  { bg: '#be185d', hover: '#9d174d', shadow: 'rgba(190,24,93,.24)' },
+]
+
+function calendarTimelineGraphZoneLabel(row = {}) {
+  const markerType = calendarTimelineEventMarkerType(row)
+  if (markerType) {
+    return markerType
+  }
+
+  if (calendarTimelineEventIsSystemStatus(row)) {
+    return 'System'
+  }
+
+  const zone = String(dashboardResolveZoneLabel(row) || '').trim()
+  if (zone && zone !== '-') {
+    return zone
+  }
+
+  return ''
+}
+
+function calendarTimelineGraphZoneStyle(row = {}, label = '') {
+  if (calendarTimelineEventIsSystemStatus(row)) {
+    return '--zone-color:#64748b;--zone-color-hover:#475569;--zone-shadow:rgba(100,116,139,.24);'
+  }
+
+  const color = calendarTimelineGraphColorForKey(label || calendarTimelineGraphZoneLabel(row))
+  return `--zone-color:${color.bg};--zone-color-hover:${color.hover};--zone-shadow:${color.shadow};`
+}
+
+function calendarTimelineGraphColorForKey(value = '') {
+  const key = String(value ?? '').trim()
+  let hash = 0
+  for (let index = 0; index < key.length; index += 1) {
+    hash = (hash * 31 + key.charCodeAt(index)) >>> 0
+  }
+  const color = CALENDAR_TIMELINE_GRAPH_ZONE_COLORS[hash % CALENDAR_TIMELINE_GRAPH_ZONE_COLORS.length]
+  return color || CALENDAR_TIMELINE_GRAPH_ZONE_COLORS[0]
+}
+
+function calendarTimelineGraphClientLabel(row = {}) {
+  const markerType = calendarTimelineEventMarkerType(row)
+  if (markerType) {
+    return markerType
+  }
+
+  if (calendarTimelineEventIsSystemStatus(row)) {
+    return 'System'
+  }
+  const client = calendarTimelineReadableClientLabel(dashboardResolveClientLabel(row))
+  if (!client || client === '-' || dashboardIsQrCodeLike(client)) {
+    return ''
+  }
+  return client
+}
+
+function calendarTimelineAssignGraphLanes(items = []) {
+  const laneEnds = []
+  items.forEach((item) => {
+    let lane = laneEnds.findIndex((endTs) => endTs <= item.startTs)
+    if (lane < 0) {
+      lane = laneEnds.length
+    }
+    laneEnds[lane] = item.endTs
+    item.lane = lane
+  })
+  return Math.max(1, laneEnds.length)
+}
+
+function calendarTimelineMergeGraphItemsByLabel(items = [], labelResolver = () => '') {
+  const groups = []
+  const lastByLabel = new Map()
+  items.forEach((item) => {
+    const label = String(labelResolver(item.row) || '').trim() || '-'
+    const key = normalizeSearchText(label) || label.toLowerCase()
+    const last = lastByLabel.get(key)
+    if (last && item.startTs <= last.endTs + 60 * 1000) {
+      last.endTs = Math.max(last.endTs, item.endTs)
+      last.rows.push(item)
+      return
+    }
+
+    const group = {
+      ...item,
+      label,
+      rows: [item],
+    }
+    groups.push(group)
+    lastByLabel.set(key, group)
+  })
+  return groups
+}
+
+function calendarTimelineInactiveGraphItems(activeItems = [], rangeStart = 0, rangeEnd = 0) {
+  const start = Number(rangeStart)
+  const end = Number(rangeEnd)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return []
+  }
+
+  const intervals = (Array.isArray(activeItems) ? activeItems : [])
+    .map((item) => ({
+      startTs: Math.max(start, Number(item?.startTs || 0)),
+      endTs: Math.min(end, Number(item?.endTs || 0)),
+    }))
+    .filter((item) => Number.isFinite(item.startTs) && Number.isFinite(item.endTs) && item.endTs > item.startTs)
+    .sort((left, right) => left.startTs - right.startTs || left.endTs - right.endTs)
+
+  const merged = []
+  intervals.forEach((item) => {
+    const last = merged[merged.length - 1]
+    if (last && item.startTs <= last.endTs + 1000) {
+      last.endTs = Math.max(last.endTs, item.endTs)
+      return
+    }
+    merged.push({ ...item })
+  })
+
+  const gaps = []
+  let cursor = start
+  merged.forEach((item) => {
+    if (item.startTs - cursor >= 60 * 1000) {
+      gaps.push({ startTs: cursor, endTs: item.startTs })
+    }
+    cursor = Math.max(cursor, item.endTs)
+  })
+  if (end - cursor >= 60 * 1000) {
+    gaps.push({ startTs: cursor, endTs: end })
+  }
+
+  return gaps
+}
+
+function calendarTimelineEventDisplayParts(row = {}) {
+  const type = eventTypeInfo(row).label
+  const client = calendarTimelineReadableClientLabel(dashboardResolveClientLabel(row))
+  const zone = String(dashboardResolveZoneLabel(row) || '').trim()
+  const qr = String(zoneQrCodeFromRow(row) || '').trim()
+  const markerType = calendarTimelineEventMarkerType(row)
+  const systemAddedLabel = calendarTimelineSystemAddedMarkerLabel(row)
+  const isSystemStatus = calendarTimelineEventIsSystemStatus(row)
+  const markerMeta = markerType ? calendarTimelineMarkerMetaLabel(row, markerType) : ''
+  const place = systemAddedLabel
+    ? systemAddedLabel
+    : markerType
+    ? markerType
+    : isSystemStatus
+      ? 'Status dodany przez system'
+      : ([client, zone]
+          .map((value) => String(value ?? '').trim())
+          .filter((value, placeIndex, list) => value && value !== '-' && list.indexOf(value) === placeIndex)
+          .join(' / ') || (qr && qr !== '-' ? `QR ${qr}` : '-'))
+  const duration = `${durationSecondsToHm(calendarTimelineEventDurationFromRow(row))}h`
+  const status = calendarTimelineEventStatusLabel(normalizeEventStatus(row?.status, Boolean(row?.endAt ?? row?.dayEndAt)))
+  const meta = markerType ? markerMeta || status : `${type} · ${duration} · ${status}`
+  return { type, place, duration, status, meta, isSystemStatus, markerType }
+}
+
+function calendarTimelineEventRowHtml(row = {}, index = 0) {
+  const parts = calendarTimelineEventDisplayParts(row)
+  return `
+    <li class="calendar-events-popup-row">
+      <button type="button" data-calendar-event-popup-edit="${index}" title="Edytuj zdarzenie">
+        <span class="calendar-events-popup-time">${escapeHtml(calendarTimelineEventTimeRangeLabel(row))}</span>
+        <span class="calendar-events-popup-main">${escapeHtml(parts.place)}</span>
+        <span class="calendar-events-popup-meta">${escapeHtml(parts.meta)}</span>
+      </button>
+    </li>
+  `
+}
+
+function calendarTimelineEventBounds(row = {}) {
+  let startTs = calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
+  let endTs = calendarTimelineEventTimestamp(row?.endAt ?? row?.dayEndAt)
+  const durationSec = calendarTimelineEventDurationFromRow(row)
+  if (startTs > 0 && endTs <= 0 && durationSec > 0) {
+    endTs = startTs + durationSec * 1000
+  }
+  if (startTs <= 0 && endTs > 0 && durationSec > 0) {
+    startTs = endTs - durationSec * 1000
+  }
+  if (startTs > 0 && endTs <= startTs) {
+    endTs = startTs + Math.max(5 * 60 * 1000, Math.min(durationSec * 1000, 15 * 60 * 1000) || 5 * 60 * 1000)
+  }
+  if (startTs <= 0 || endTs <= startTs) {
+    return null
+  }
+  return { startTs, endTs }
+}
+
+function calendarTimelineEventIsDayShellItem(item = {}, items = [], rangeStart = 0, rangeEnd = 0) {
+  const row = item?.row ?? {}
+  const coversFullRange =
+    Math.abs(Number(item?.startTs || 0) - Number(rangeStart || 0)) <= 1000 &&
+    Math.abs(Number(item?.endTs || 0) - Number(rangeEnd || 0)) <= 1000
+  if (!coversFullRange) {
+    return false
+  }
+
+  const hasNestedDetails = (Array.isArray(items) ? items : []).some((candidate) => {
+    if (!candidate || candidate === item || candidate.parts?.markerType || candidate.parts?.isSystemStatus) {
+      return false
+    }
+    return candidate.startTs > item.startTs + 1000 || candidate.endTs < item.endTs - 1000
+  })
+  if (!hasNestedDetails) {
+    return false
+  }
+
+  const sourceKind = String(row?.historySourceKind ?? '').trim().toLowerCase()
+  const hasExplicitEvent = row?.hasExplicitEventId === true
+  const hasScanEventLink = [row?.startEventId, row?.endEventId, row?.deviceId]
+    .some((value) => String(value ?? '').trim())
+  const hasDayShellHints = [row?.dayStartObject, row?.dayStopObject, row?.dayComment, row?.workdayUtilityRoomId]
+    .some((value) => String(value ?? '').trim())
+
+  return sourceKind === 'workday' || (!hasExplicitEvent && hasDayShellHints) || (hasDayShellHints && !hasScanEventLink)
+}
+
+function calendarTimelineEventsGraphData(rows = []) {
+  const items = (Array.isArray(rows) ? rows : [])
+    .map((row, index) => {
+      const bounds = calendarTimelineEventBounds(row)
+      if (!bounds) {
+        return null
+      }
+      return {
+        row,
+        index,
+        ...bounds,
+        parts: calendarTimelineEventDisplayParts(row),
+      }
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.startTs - right.startTs || left.endTs - right.endTs)
+
+  if (!items.length) {
+    return null
+  }
+
+  const rangeStart = Math.min(...items.map((item) => item.startTs))
+  const rangeEnd = Math.max(...items.map((item) => item.endTs))
+  const rangeMs = Math.max(60 * 1000, rangeEnd - rangeStart)
+  const detailItems = items.filter((item) => {
+    if (item.parts.markerType) {
+      return false
+    }
+    if (item.parts.isSystemStatus) {
+      return false
+    }
+    const coversFullRange = Math.abs(item.startTs - rangeStart) <= 1000 && Math.abs(item.endTs - rangeEnd) <= 1000
+    if (calendarTimelineEventIsDayShellItem(item, items, rangeStart, rangeEnd)) {
+      return false
+    }
+    return !(items.length > 1 && coversFullRange && item.parts.type === 'QR START')
+  })
+  const graphItems = detailItems
+  const clientItems = calendarTimelineMergeGraphItemsByLabel(graphItems, calendarTimelineGraphClientLabel)
+    .filter((item) => {
+      const label = String(item.label ?? '').trim()
+      const technicalLabel = label.replace(/^QR\s+/i, '')
+      return Boolean(label && label !== '-' && !dashboardIsQrCodeLike(technicalLabel))
+    })
+  const zoneItems = graphItems.filter((item) => {
+    const label = calendarTimelineGraphZoneLabel(item.row)
+    const technicalLabel = String(label).replace(/^QR\s+/i, '')
+    return Boolean(label && label !== '-' && !dashboardIsQrCodeLike(technicalLabel))
+  })
+  const inactiveItems = calendarTimelineInactiveGraphItems(zoneItems, rangeStart, rangeEnd)
+  const totalSeconds = Math.max(1, Math.floor((rangeEnd - rangeStart) / 1000))
+  const totalDuration = `${durationSecondsToHm(totalSeconds)}h`
+
+  return {
+    items,
+    rangeStart,
+    rangeEnd,
+    rangeMs,
+    clientItems,
+    zoneItems,
+    inactiveItems,
+    totalDuration,
+    totalSeconds,
+  }
+}
+
+function calendarTimelineEventsGraphHtml(rows = []) {
+  const graphData = calendarTimelineEventsGraphData(rows)
+  if (!graphData) {
+    return ''
+  }
+
+  const {
+    rangeStart,
+    rangeEnd,
+    rangeMs,
+    clientItems,
+    zoneItems,
+    inactiveItems,
+    totalDuration,
+  } = graphData
+  const clientLaneCount = calendarTimelineAssignGraphLanes(clientItems)
+  const zoneLaneCount = calendarTimelineAssignGraphLanes(zoneItems)
+  const clientBarsHtml = clientItems.map((item) => {
+    const left = Math.max(0, ((item.startTs - rangeStart) / rangeMs) * 100)
+    const width = Math.max(2.4, ((item.endTs - item.startTs) / rangeMs) * 100)
+    const label = item.label || calendarTimelineGraphClientLabel(item.row)
+    const duration = `${durationSecondsToHm(Math.floor((item.endTs - item.startTs) / 1000))}h`
+    const title = `${label} · ${duration}`
+    const zoneStyle = calendarTimelineGraphZoneStyle(item.row, label)
+    return `
+      <button class="calendar-events-graph-bar calendar-events-graph-clientbar" type="button" data-calendar-event-popup-edit="${item.index}" style="--left:${left.toFixed(3)}%;--width:${Math.min(width, 100 - left).toFixed(3)}%;--lane:${item.lane};${zoneStyle}" title="${escapeHtml(title)}">
+        <span>${escapeHtml(label)}</span>
+      </button>
+    `
+  }).join('')
+  const clientTrackHtml = clientBarsHtml
+    ? `
+      <div class="calendar-events-graph-track calendar-events-graph-client-track" style="--lane-count:${clientLaneCount};">
+        ${clientBarsHtml}
+      </div>
+    `
+    : ''
+  const inactiveBarsHtml = inactiveItems.map((item) => {
+    const left = Math.max(0, ((item.startTs - rangeStart) / rangeMs) * 100)
+    const width = Math.max(1.2, ((item.endTs - item.startTs) / rangeMs) * 100)
+    const duration = `${durationSecondsToHm(Math.floor((item.endTs - item.startTs) / 1000))}h`
+    const title = `Brak aktywności · ${duration}`
+    return `
+      <div class="calendar-events-graph-bar calendar-events-graph-bar--inactive" style="--left:${left.toFixed(3)}%;--width:${Math.min(width, 100 - left).toFixed(3)}%;--lane:0;" title="${escapeHtml(title)}">
+        <span>${escapeHtml('Brak aktywności')}</span>
+      </div>
+    `
+  }).join('')
+  const zoneBarsHtml = zoneItems.map((item) => {
+    const left = Math.max(0, ((item.startTs - rangeStart) / rangeMs) * 100)
+    const width = Math.max(2.4, ((item.endTs - item.startTs) / rangeMs) * 100)
+    const label = calendarTimelineGraphZoneLabel(item.row)
+    const title = `${calendarTimelineEventTimeRangeLabel(item.row)} · ${label} · ${item.parts.meta}`
+    const toneClass = item.parts.isSystemStatus ? ' is-system' : ''
+    const zoneStyle = calendarTimelineGraphZoneStyle(item.row, label)
+    return `
+      <button class="calendar-events-graph-bar${toneClass}" type="button" data-calendar-event-popup-edit="${item.index}" style="--left:${left.toFixed(3)}%;--width:${Math.min(width, 100 - left).toFixed(3)}%;--lane:${item.lane};${zoneStyle}" title="${escapeHtml(title)}">
+        <span>${escapeHtml(label)}</span>
+      </button>
+    `
+  }).join('')
+
+  return `
+    <div class="calendar-events-graph" aria-label="Graficzny przebieg zdarzeń">
+      <div class="calendar-events-graph-axis">
+        <span>${escapeHtml(calendarTimelineShortTimeLabel(new Date(rangeStart).toISOString()))}</span>
+        <strong>${escapeHtml(totalDuration)}</strong>
+        <span>${escapeHtml(calendarTimelineShortTimeLabel(new Date(rangeEnd).toISOString()))}</span>
+      </div>
+      <div class="calendar-events-graph-mainbar" title="Łączny zakres: ${escapeHtml(totalDuration)}">Łączny zakres · ${escapeHtml(totalDuration)}</div>
+      ${clientTrackHtml}
+      <div class="calendar-events-graph-track calendar-events-graph-zone-track" style="--lane-count:${zoneLaneCount};">
+        ${inactiveBarsHtml}
+        ${zoneBarsHtml}
+      </div>
+    </div>
+  `
+}
+
+function calendarTimelinePiePercentLabel(value = 0) {
+  const percent = Number(value)
+  if (!Number.isFinite(percent) || percent <= 0) {
+    return '0%'
+  }
+  if (percent >= 9.95) {
+    return `${Math.round(percent)}%`
+  }
+  return `${percent.toFixed(1).replace('.', ',')}%`
+}
+
+function calendarTimelineEventsPieHtml(rows = []) {
+  const graphData = calendarTimelineEventsGraphData(rows)
+  if (!graphData) {
+    return ''
+  }
+
+  const { zoneItems, inactiveItems, totalSeconds } = graphData
+  const segmentsByKey = new Map()
+  const addSegment = (key, label, seconds, color) => {
+    const normalizedKey = String(key ?? '').trim()
+    const normalizedLabel = String(label ?? '').trim()
+    const duration = Number(seconds)
+    if (!normalizedKey || !normalizedLabel || !Number.isFinite(duration) || duration <= 0) {
+      return
+    }
+    const current = segmentsByKey.get(normalizedKey) || {
+      label: normalizedLabel,
+      seconds: 0,
+      color,
+    }
+    current.seconds += duration
+    current.color = current.color || color
+    segmentsByKey.set(normalizedKey, current)
+  }
+
+  zoneItems.forEach((item) => {
+    const label = calendarTimelineGraphZoneLabel(item.row)
+    const duration = Math.max(0, Math.floor((item.endTs - item.startTs) / 1000))
+    addSegment(`zone:${normalizeSearchText(label) || label.toLowerCase()}`, label, duration, calendarTimelineGraphColorForKey(label).bg)
+  })
+
+  inactiveItems.forEach((item) => {
+    const duration = Math.max(0, Math.floor((item.endTs - item.startTs) / 1000))
+    addSegment('inactive', 'Brak aktywności', duration, '#cbd5e1')
+  })
+
+  const segments = Array.from(segmentsByKey.values())
+    .filter((segment) => segment.seconds > 0)
+    .sort((left, right) => {
+      if (left.label === 'Brak aktywności') return 1
+      if (right.label === 'Brak aktywności') return -1
+      return right.seconds - left.seconds
+    })
+
+  if (!segments.length) {
+    return ''
+  }
+
+  let cursor = 0
+  const gradientParts = segments.map((segment) => {
+    const percent = Math.max(0, (segment.seconds / totalSeconds) * 100)
+    const start = Math.min(100, cursor)
+    const end = Math.min(100, cursor + percent)
+    segment.startPercent = start
+    segment.endPercent = Math.max(start, end)
+    cursor += percent
+    return `${segment.color} ${segment.startPercent.toFixed(3)}% ${segment.endPercent.toFixed(3)}%`
+  })
+  if (cursor < 100) {
+    gradientParts.push(`#eef2f7 ${cursor.toFixed(3)}% 100%`)
+  }
+
+  const highlightGradientFor = (segment) => {
+    const parts = []
+    if (segment.startPercent > 0) {
+      parts.push(`#d8e0ec 0% ${segment.startPercent.toFixed(3)}%`)
+    }
+    parts.push(`${segment.color} ${segment.startPercent.toFixed(3)}% ${segment.endPercent.toFixed(3)}%`)
+    if (segment.endPercent < 100) {
+      parts.push(`#d8e0ec ${segment.endPercent.toFixed(3)}% 100%`)
+    }
+    return parts.join(', ')
+  }
+
+  const legendHtml = segments.map((segment) => {
+    const percent = (segment.seconds / totalSeconds) * 100
+    const duration = `${durationSecondsToHm(segment.seconds)}h`
+    const highlightGradient = highlightGradientFor(segment)
+    return `
+      <li tabindex="0" data-calendar-pie-highlight="${escapeHtml(highlightGradient)}">
+        <span class="calendar-events-pie-dot" style="--pie-dot:${escapeHtml(segment.color)};"></span>
+        <span class="calendar-events-pie-name">${escapeHtml(segment.label)}</span>
+        <strong>${escapeHtml(calendarTimelinePiePercentLabel(percent))}</strong>
+        <em>${escapeHtml(duration)}</em>
+      </li>
+    `
+  }).join('')
+
+  return `
+    <aside class="calendar-events-popup-summary" aria-label="Udział stref i braku aktywności">
+      <div class="calendar-events-pie-wrap">
+        <div class="calendar-events-pie" data-calendar-pie-chart style="--pie:${escapeHtml(gradientParts.join(', '))};">
+          <span><strong>100%</strong><em>Dzień</em></span>
+        </div>
+      </div>
+      <ul class="calendar-events-pie-legend">${legendHtml}</ul>
+    </aside>
+  `
+}
+
+function calendarTimelinePositionEventsPopup(node, anchor) {
+  if (!(node instanceof HTMLElement) || !(anchor instanceof HTMLElement)) {
+    return
+  }
+  const rect = anchor.getBoundingClientRect()
+  const width = Math.min(760, Math.max(420, window.innerWidth - 24))
+  node.style.width = `${width}px`
+  const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.left))
+  const measuredHeight = node.getBoundingClientRect().height || node.scrollHeight || 180
+  const popupHeight = Math.min(Math.max(180, measuredHeight), Math.max(180, window.innerHeight - 24))
+  const maxTop = Math.max(12, window.innerHeight - popupHeight - 12)
+  const top = Math.max(12, Math.min(maxTop, rect.bottom + 8))
+  node.style.left = `${left}px`
+  node.style.top = `${top}px`
+}
+
+function calendarTimelineSizeEventsPopup(node, rowCount = 0, options = {}) {
+  if (!(node instanceof HTMLElement)) {
+    return
+  }
+
+  const loading = options?.loading === true
+  const error = String(options?.error ?? '').trim()
+  const rows = Number(rowCount)
+  const visibleRows = loading || error
+    ? 1
+    : Math.max(1, Math.min(15, Number.isFinite(rows) && rows > 0 ? Math.ceil(rows) : 1))
+
+  node.style.setProperty('--calendar-events-visible-rows', String(visibleRows))
+
+  const headHeight = node.querySelector('.calendar-events-popup-head')?.getBoundingClientRect?.().height || 0
+  const graphHeight = node.querySelector('.calendar-events-graph')?.getBoundingClientRect?.().height || 0
+  const summary = node.querySelector('.calendar-events-popup-summary')
+  const summaryHeight = summary?.scrollHeight || summary?.getBoundingClientRect?.().height || 0
+  const popupChrome = Math.ceil(headHeight + graphHeight + 2)
+  const viewportBudget = Math.max(180, window.innerHeight - 24 - popupChrome)
+  const listHeight = visibleRows * 48 + 12
+  const desiredBodyHeight = Math.max(listHeight, summaryHeight)
+  node.style.setProperty('--calendar-events-body-max-height', `${Math.floor(Math.min(desiredBodyHeight, viewportBudget))}px`)
+}
+
+function calendarTimelineRenderEventsPopup(node, context = {}, rows = [], options = {}) {
+  const loading = options?.loading === true
+  const error = String(options?.error ?? '').trim()
+  const workerName = String(context?.resource?.name ?? 'Pracownik').trim()
+  const graphHtml = !loading && !error && rows.length ? calendarTimelineEventsGraphHtml(rows) : ''
+  const pieHtml = !loading && !error && rows.length ? calendarTimelineEventsPieHtml(rows) : ''
+  const rowsHtml = loading
+    ? '<li class="calendar-events-popup-empty">Pobieram zdarzenia...</li>'
+    : error
+      ? `<li class="calendar-events-popup-empty is-error">${escapeHtml(error)}</li>`
+      : rows.length
+        ? rows.map((row, index) => calendarTimelineEventRowHtml(row, index)).join('')
+        : '<li class="calendar-events-popup-empty">Brak zdarzeń dla tego pracownika w tym dniu.</li>'
+  node.innerHTML = `
+    <div class="calendar-events-popup-head">
+      <div>
+        <strong>${escapeHtml(workerName)}</strong>
+        <span>${escapeHtml(calendarTimelineDateLabel(context?.dateYmd))}</span>
+      </div>
+      <button type="button" data-calendar-events-popup-close aria-label="Zamknij">×</button>
+    </div>
+    ${graphHtml}
+    <div class="calendar-events-popup-body${pieHtml ? ' has-summary' : ''}">
+      <ul class="calendar-events-popup-list">${rowsHtml}</ul>
+      ${pieHtml}
+    </div>
+  `
+  calendarTimelineSizeEventsPopup(node, rows.length, options)
+}
+
+function calendarTimelineSetPieHighlight(rowNode = null, highlighted = false) {
+  const summary = rowNode?.closest?.('.calendar-events-popup-summary')
+  const pie = summary?.querySelector?.('[data-calendar-pie-chart]')
+  if (!(pie instanceof HTMLElement)) {
+    return
+  }
+
+  const gradient = String(rowNode?.getAttribute?.('data-calendar-pie-highlight') ?? '').trim()
+  if (highlighted && gradient) {
+    pie.style.setProperty('--pie-active', gradient)
+    pie.classList.add('is-highlighted')
+    rowNode.classList.add('is-highlighted')
+    return
+  }
+
+  pie.classList.remove('is-highlighted')
+  pie.style.removeProperty('--pie-active')
+  summary?.querySelectorAll?.('.calendar-events-pie-legend li.is-highlighted').forEach((node) => {
+    node.classList.remove('is-highlighted')
+  })
+}
+
+async function calendarTimelineShowWorkerDayEventsPopup(bar) {
+  const context = calendarTimelineBarContextFromElement(bar)
+  if (!context) {
+    showTransientNotice('Ten pasek nie ma przypisanego pracownika.', 'error')
+    return
+  }
+
+  calendarTimelineHideEventsPopup()
+  const node = document.createElement('div')
+  node.id = 'calendarTimelineEventsPopup'
+  node.className = 'calendar-events-popup'
+  node.setAttribute('role', 'dialog')
+  node.setAttribute('aria-label', 'Zdarzenia pracownika w dniu')
+  document.body.appendChild(node)
+  calendarTimelineRenderEventsPopup(node, context, [], { loading: true })
+  calendarTimelineStartEventsPopupTracking(context.bar)
+  calendarTimelinePositionEventsPopup(node, context.bar)
+
+  node.addEventListener('click', (event) => {
+    const closeButton = event.target?.closest?.('[data-calendar-events-popup-close]')
+    if (closeButton) {
+      calendarTimelineHideEventsPopup()
+      return
+    }
+    const editButton = event.target?.closest?.('[data-calendar-event-popup-edit]')
+    if (editButton) {
+      const index = Number(editButton.getAttribute('data-calendar-event-popup-edit'))
+      const row = Array.isArray(appState.calendarTimelinePopupEventRows) ? appState.calendarTimelinePopupEventRows[index] : null
+      if (row) {
+        calendarTimelineHideEventsPopup()
+        void openEventEditor(row?.calendarTimelineMarkerSourceRow || row)
+      }
+    }
+  })
+  node.addEventListener('mouseover', (event) => {
+    const row = event.target?.closest?.('[data-calendar-pie-highlight]')
+    if (row instanceof HTMLElement) {
+      calendarTimelineSetPieHighlight(row, true)
+    }
+  })
+  node.addEventListener('mouseout', (event) => {
+    const row = event.target?.closest?.('[data-calendar-pie-highlight]')
+    if (row instanceof HTMLElement && !row.contains(event.relatedTarget)) {
+      calendarTimelineSetPieHighlight(row, false)
+    }
+  })
+  node.addEventListener('focusin', (event) => {
+    const row = event.target?.closest?.('[data-calendar-pie-highlight]')
+    if (row instanceof HTMLElement) {
+      calendarTimelineSetPieHighlight(row, true)
+    }
+  })
+  node.addEventListener('focusout', (event) => {
+    const row = event.target?.closest?.('[data-calendar-pie-highlight]')
+    if (row instanceof HTMLElement && !row.contains(event.relatedTarget)) {
+      calendarTimelineSetPieHighlight(row, false)
+    }
+  })
+
+  try {
+    const rows = await calendarTimelineFetchWorkerDayEvents(context.resource, context.dateYmd)
+    if (!document.body.contains(node)) {
+      return
+    }
+    appState.calendarTimelinePopupEventRows = rows
+    calendarTimelineRenderEventsPopup(node, context, rows)
+    calendarTimelinePositionEventsPopup(node, context.bar)
+  } catch (error) {
+    if (!document.body.contains(node)) {
+      return
+    }
+    const message = error instanceof Error ? error.message : 'Nie udało się pobrać zdarzeń.'
+    calendarTimelineRenderEventsPopup(node, context, [], { error: message })
+    calendarTimelinePositionEventsPopup(node, context.bar)
+  }
+}
+
+async function calendarTimelineOpenRealEventEditorFromBar(bar) {
+  const context = calendarTimelineBarContextFromElement(bar)
+  if (!context) {
+    showTransientNotice('Nie znaleziono pracownika dla tego zdarzenia.', 'error')
+    return
+  }
+  try {
+    const rows = await calendarTimelineFetchWorkerDayEvents(context.resource, context.dateYmd)
+    const row = calendarTimelineFindEventRowForBar(rows, context)
+    if (!row) {
+      showTransientNotice('Nie znaleziono zdarzenia do edycji.', 'error')
+      return
+    }
+    await openEventEditor(row)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udało się otworzyć edycji zdarzenia.'
+    showTransientNotice(message, 'error')
+  }
+}
+
+function calendarTimelineOrderStatus(order = {}, resources = []) {
+  const row = Number(order?.row)
+  const resource = Number.isInteger(row) ? resources[row] ?? null : null
+  const planned = calendarTimelineOrderPlannedBounds(order)
+  if (!planned) {
+    return { kind: 'planned', label: 'Zaplanowane', alert: null }
+  }
+
+  const actual = calendarTimelineOrderActualState(order, resource, planned)
+  const completed = Boolean(order?.completed) || calendarTimelineOrderCompletedFromStatus(order) || actual.endTs > 0
+  const startDelay = calendarTimelineDelayMinutes(actual.startTs, planned.startTs)
+  const endDelay = calendarTimelineDelayMinutes(actual.endTs, planned.endTs)
+
+  if (actual.startTs > 0) {
+    if (completed) {
+      if (startDelay > 0) {
+        return {
+          kind: 'started-late-ended',
+          label: 'Start opóźniony',
+          alert: calendarTimelineStatusAlertFor('started-late-ended', order, resource, planned, actual, { startDelay, endDelay }),
+        }
+      }
+      if (endDelay > 0) {
+        return {
+          kind: 'completed-late',
+          label: 'Zakończone z opóźnieniem',
+          alert: calendarTimelineStatusAlertFor('completed-late', order, resource, planned, actual, { endDelay }),
+        }
+      }
+      return { kind: 'completed', label: 'Zakończone', alert: null }
+    }
+
+    if (startDelay > 0) {
+      return {
+        kind: 'started-late',
+        label: 'Rozpoczęte z opóźnieniem',
+        alert: calendarTimelineStatusAlertFor('started-late', order, resource, planned, actual, { startDelay }),
+      }
+    }
+    return { kind: 'running', label: 'Realizowane', alert: null }
+  }
+
+  const now = Date.now()
+  if (!completed && now > planned.startTs) {
+    return {
+      kind: 'missing-start',
+      label: 'Brak startu',
+      alert: calendarTimelineStatusAlertFor('missing-start', order, resource, planned, actual),
+    }
+  }
+
+  if (!completed && planned.startTs >= now && planned.startTs - now <= 60 * 60 * 1000) {
+    return { kind: 'upcoming', label: 'Start do 1h', alert: null }
+  }
+
+  return completed ? { kind: 'completed', label: 'Zakończone', alert: null } : { kind: 'planned', label: 'Zaplanowane', alert: null }
+}
+
+function calendarTimelineUniqueStatusAlerts(alerts = []) {
+  const seen = new Set()
+  return (Array.isArray(alerts) ? alerts : [])
+    .filter((alert) => alert?.key)
+    .filter((alert) => {
+      const key = String(alert.key)
+      if (seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+}
+
+function calendarTimelineHideStatusAlert() {
+  const node = document.getElementById('calendarTimelineStatusAlert')
+  if (node) {
+    node.remove()
+  }
+}
+
+function calendarTimelineShowPendingStatusAlert() {
+  if (appState.currentRoute !== 'calendar' || document.visibilityState !== 'visible') {
+    calendarTimelineHideStatusAlert()
+    return
+  }
+  if (!(appState.calendarTimelineStatusAlertShownKeys instanceof Set)) {
+    appState.calendarTimelineStatusAlertShownKeys = new Set()
+  }
+
+  const priority = {
+    'missing-start': 1,
+    'started-late-ended': 2,
+    'completed-late': 3,
+    'started-late': 4,
+  }
+  const alert = calendarTimelineUniqueStatusAlerts(appState.calendarTimelineStatusAlerts)
+    .filter((item) => !appState.calendarTimelineStatusAlertShownKeys.has(String(item.key)))
+    .sort((left, right) => (priority[left.kind] || 99) - (priority[right.kind] || 99))[0]
+
+  if (!alert) {
+    calendarTimelineHideStatusAlert()
+    return
+  }
+
+  calendarTimelineHideStatusAlert()
+  const node = document.createElement('div')
+  node.id = 'calendarTimelineStatusAlert'
+  node.className = `dash-schedule-alert calendar-timeline-status-alert calendar-timeline-status-alert--${escapeHtml(alert.kind)}`
+  node.setAttribute('role', 'alertdialog')
+  node.setAttribute('aria-modal', 'true')
+  node.setAttribute('aria-labelledby', 'calendarTimelineStatusAlertTitle')
+  const rows = Array.isArray(alert.rows) && alert.rows.length ? alert.rows : []
+  node.innerHTML = `
+    <div class="dash-schedule-alert-header">
+      <span class="dash-schedule-alert-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12 8v5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+          <path d="M12 17h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+          <path d="M10.3 4.3 2.7 18a2 2 0 0 0 1.75 3h15.1a2 2 0 0 0 1.75-3L13.7 4.3a2 2 0 0 0-3.4 0Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <div class="dash-schedule-alert-heading">
+        <div class="dash-schedule-alert-signal" aria-hidden="true">${escapeHtml(alert.signal || 'INFO')}</div>
+        <div class="dash-schedule-alert-title" id="calendarTimelineStatusAlertTitle">${escapeHtml(alert.title || 'Status zlecenia')}</div>
+        <div class="dash-schedule-alert-text">${escapeHtml(alert.text || '')}</div>
+      </div>
+    </div>
+    <div class="dash-schedule-alert-list-wrap">
+      <div class="dash-schedule-alert-list-title">Szczegóły:</div>
+      <ul class="dash-schedule-alert-list">
+        ${rows
+          .map(
+            (row) => `
+              <li>
+                <span class="dash-schedule-alert-person">${escapeHtml(row?.person || 'Zlecenie')}</span>
+                <span class="dash-schedule-alert-meta">${escapeHtml(row?.meta || '-')}</span>
+                <span class="dash-schedule-alert-status">${escapeHtml(row?.status || '')}</span>
+              </li>
+            `,
+          )
+          .join('')}
+      </ul>
+    </div>
+    <div class="dash-schedule-alert-actions">
+      <button type="button" class="btn2 primary" data-alert-action="ok">OK</button>
+    </div>
+  `
+  node.addEventListener('click', (event) => {
+    const button = event.target?.closest?.('[data-alert-action]')
+    if (!button) {
+      return
+    }
+    appState.calendarTimelineStatusAlertShownKeys.add(String(alert.key))
+    calendarTimelineHideStatusAlert()
+  })
+  document.body.appendChild(node)
+}
+
+function calendarTimelineOrderRowsAfterMove(order = {}, rowIndex, sourceRowIndex = null, resources = calendarTimelineResources()) {
+  const nextRow = Number(rowIndex)
+  if (!Number.isInteger(nextRow) || nextRow < 0) {
+    return []
+  }
+  const currentRows = ordersNormalizeOrderRows(order, resources)
+  const sourceRow = Number(sourceRowIndex)
+  let rows = [nextRow]
+  if (currentRows.length > 1) {
+    rows =
+      Number.isInteger(sourceRow) && currentRows.includes(sourceRow)
+        ? currentRows.map((row) => (row === sourceRow ? nextRow : row))
+        : currentRows.includes(nextRow)
+          ? currentRows
+          : [...currentRows, nextRow]
+  }
+
+  return rows.filter((row, index, list) => Number.isInteger(row) && row >= 0 && list.indexOf(row) === index)
+}
+
+function calendarTimelineDropTargetFromEvent(event) {
+  const x = Number(event?.clientX)
+  const y = Number(event?.clientY)
+  const stage = document.getElementById('calendarPrototypeTimeline')
+  const scopedTarget = (node) => {
+    const target = node?.closest?.('[data-calendar-timeline-row]')
+    return target instanceof HTMLElement && (!stage || stage.contains(target)) ? target : null
+  }
+
+  if (Number.isFinite(x) && Number.isFinite(y) && typeof document.elementsFromPoint === 'function') {
+    const elements = document.elementsFromPoint(x, y)
+    const slotTarget = elements
+      .map((node) => node?.closest?.('[data-calendar-timeline-row][data-calendar-timeline-slot]'))
+      .find((node) => node instanceof HTMLElement && (!stage || stage.contains(node)))
+    if (slotTarget) {
+      return slotTarget
+    }
+
+    const rowTarget = elements.map(scopedTarget).find(Boolean)
+    if (rowTarget) {
+      return rowTarget
+    }
+  }
+
+  return scopedTarget(event?.target)
+}
+
+function calendarTimelineDropInfoFromTarget(target) {
+  if (!(target instanceof HTMLElement)) {
+    return null
+  }
+  const rowIndex = Number(target.getAttribute('data-calendar-timeline-row'))
+  if (!Number.isInteger(rowIndex)) {
+    return null
+  }
+  const slotValue = target.getAttribute('data-calendar-timeline-slot')
+  const slotIndex = slotValue == null ? null : Number(slotValue)
+  return {
+    rowIndex,
+    slotIndex: Number.isInteger(slotIndex) ? slotIndex : null,
+  }
+}
+
+function calendarTimelineDropInfoFromState() {
+  const rowIndex = Number(appState.calendarTimelineDragTargetRow)
+  if (!Number.isInteger(rowIndex)) {
+    return null
+  }
+  const slotIndex = Number(appState.calendarTimelineDragTargetSlot)
+  return {
+    rowIndex,
+    slotIndex: Number.isInteger(slotIndex) ? slotIndex : null,
+  }
+}
+
+function calendarTimelineHighlightedDropInfo() {
+  return calendarTimelineDropInfoFromTarget(
+    document.querySelector('#view-calendar .is-timeline-drop-target, #view-calendar .is-timeline-drop-invalid'),
+  )
+}
+
+function calendarTimelineResolveDropInfo(event = null) {
+  return (
+    calendarTimelineDropInfoFromTarget(event ? calendarTimelineDropTargetFromEvent(event) : null) ||
+    calendarTimelineHighlightedDropInfo() ||
+    calendarTimelineDropInfoFromState()
+  )
+}
+
+function calendarTimelineRememberDropInfo(info = null) {
+  if (!info) {
+    appState.calendarTimelineDragTargetRow = null
+    appState.calendarTimelineDragTargetSlot = null
+    return
+  }
+  appState.calendarTimelineDragTargetRow = info.rowIndex
+  appState.calendarTimelineDragTargetSlot = info.slotIndex
+}
+
+function calendarTimelineResetDragState() {
+  appState.calendarTimelineDragOrderId = ''
+  appState.calendarTimelineDragSourceRow = null
+  appState.calendarTimelineDragTargetRow = null
+  appState.calendarTimelineDragTargetSlot = null
+  appState.calendarTimelineDropHandled = false
+  appState.calendarTimelineDragResources = []
+  appState.calendarTimelineDragConflictKey = ''
+  appState.calendarTimelineDragConflictValue = false
+}
+
+function calendarTimelineHandleMoveResult(moveResult) {
+  if (moveResult?.moved) {
+    showTransientNotice('Zlecenie przypięte do nowego miejsca.', 'success')
+    return
+  }
+  if (moveResult?.conflicts?.length) {
+    calendarTimelineShowConflictDialog(moveResult.conflicts, moveResult.candidate)
+    return
+  }
+  showTransientNotice('Nie można przenieść zlecenia.', 'error')
+}
+
+function calendarTimelineBuildMovedOrder(order = {}, rowIndex, slotIndex = null, sourceRowIndex = null, resources = calendarTimelineResources()) {
+  const nextRow = Number(rowIndex)
+  if (!Number.isInteger(nextRow) || nextRow < 0) {
+    return null
+  }
+  const assignedRows = calendarTimelineOrderRowsAfterMove(order, nextRow, sourceRowIndex, resources)
+  if (!assignedRows.length) {
+    return null
+  }
+  const cursor = appState.calendarCursorDay || todayYmd()
+  const days = Array.from({ length: 3 }, (_, index) => calendarAddDays(cursor, index))
+  const hours = Array.from({ length: 20 }, (_, index) => index + 4)
+  const slotTarget = slotIndex == null ? null : calendarTimelineSlotToDayTime(slotIndex, days, hours)
+  let nextOrder = { ...order, row: assignedRows[0], assignedRows, workerAssignments: ordersWorkerAssignmentsFromRows(assignedRows, resources) }
+
+  if (slotTarget) {
+    const duration = calendarTimelineSnapDurationMinutes(calendarTimelineOrderDurationMinutes(order))
+    const startMinutes = calendarTimelineTimeMinutes(slotTarget.time, 4 * 60)
+    const totalEndMinutes = startMinutes + duration
+    const endDayOffset = Math.floor(totalEndMinutes / 1440)
+    const endMinutes = totalEndMinutes % 1440
+    const endDateYmd = calendarAddDays(slotTarget.dayKey, endDayOffset)
+    nextOrder = {
+      ...nextOrder,
+      dateYmd: slotTarget.dayKey,
+      startTime: calendarMinutesToTime(startMinutes) || slotTarget.time,
+      endDateYmd,
+      endTime: calendarMinutesToTime(endMinutes) || '23:59',
+    }
+  }
+
+  return nextOrder
+}
+
+function calendarTimelineFindOrderConflicts(candidate = {}, orders = [], resources = calendarTimelineResources()) {
+  const candidateInterval = calendarTimelineOrderInterval(candidate)
+  if (!candidateInterval) {
+    return []
+  }
+  const candidateRows = new Set(
+    ordersNormalizeOrderRows(candidate, resources).filter((row) => !calendarTimelineRowAllowsOverlap(row, resources)),
+  )
+  if (!candidateRows.size) {
+    return []
+  }
+  const conflicts = []
+
+  orders.forEach((order) => {
+    if (!order || order.id === candidate.id) {
+      return
+    }
+    const interval = calendarTimelineOrderInterval(order)
+    if (!interval || !(candidateInterval.start < interval.end && interval.start < candidateInterval.end)) {
+      return
+    }
+    ordersNormalizeOrderRows(order, resources).forEach((row) => {
+      if (!candidateRows.has(row) || calendarTimelineRowAllowsOverlap(row, resources)) {
+        return
+      }
+      const key = `${String(order.id ?? '')}::${row}`
+      if (conflicts.some((item) => item.key === key)) {
+        return
+      }
+      conflicts.push({
+        key,
+        row,
+        workerName: String(resources[row]?.name ?? `Wiersz ${row + 1}`).trim(),
+        order,
+        title: calendarTimelineOrderTitle(order),
+        time: calendarTimelineOrderRangeLabel(order),
+      })
+    })
+  })
+
+  return conflicts
+}
+
+function calendarTimelineFindOrderConflict(candidate = {}, orders = []) {
+  return calendarTimelineFindOrderConflicts(candidate, orders)[0]?.order ?? null
+}
+
+function calendarTimelineMoveWouldConflict(
+  orderId,
+  rowIndex,
+  slotIndex = null,
+  sourceRowIndex = null,
+  resources = calendarTimelineResources(),
+  orders = ordersListSourceOrders(),
+) {
+  const id = String(orderId ?? '').trim()
+  const currentOrder = orders.find((order) => order.id === id)
+  const candidate = currentOrder ? calendarTimelineBuildMovedOrder(currentOrder, rowIndex, slotIndex, sourceRowIndex, resources) : null
+  return Boolean(candidate && calendarTimelineFindOrderConflicts(candidate, orders, resources).length)
+}
+
+function calendarTimelineDragConflict(orderId, rowIndex, slotIndex = null, sourceRowIndex = null) {
+  const resources = Array.isArray(appState.calendarTimelineDragResources) && appState.calendarTimelineDragResources.length
+    ? appState.calendarTimelineDragResources
+    : calendarTimelineResources()
+  const key = [
+    String(orderId ?? '').trim(),
+    Number(rowIndex),
+    slotIndex == null ? '' : Number(slotIndex),
+    sourceRowIndex == null ? '' : Number(sourceRowIndex),
+  ].join('|')
+  if (key && key === appState.calendarTimelineDragConflictKey) {
+    return Boolean(appState.calendarTimelineDragConflictValue)
+  }
+
+  const hasConflict = calendarTimelineMoveWouldConflict(orderId, rowIndex, slotIndex, sourceRowIndex, resources)
+  appState.calendarTimelineDragConflictKey = key
+  appState.calendarTimelineDragConflictValue = hasConflict
+  return hasConflict
+}
+
+function calendarTimelineSlotToDayTime(slotIndex, days = [], hours = []) {
+  const slot = Number(slotIndex)
+  const slotsPerDay = hours.length * CALENDAR_TIMELINE_SLOTS_PER_HOUR
+  if (!Number.isInteger(slot) || slot < 0 || !slotsPerDay) {
+    return null
+  }
+  const dayIndex = Math.floor(slot / slotsPerDay)
+  const slotInDay = slot % slotsPerDay
+  const hourIndex = Math.floor(slotInDay / CALENDAR_TIMELINE_SLOTS_PER_HOUR)
+  const minute = (slotInDay % CALENDAR_TIMELINE_SLOTS_PER_HOUR) * CALENDAR_TIMELINE_SLOT_MINUTES
+  const dayKey = days[dayIndex]
+  const hour = hours[hourIndex]
+  if (!dayKey || !Number.isFinite(Number(hour))) {
+    return null
+  }
+  return { dayKey, time: `${pad2(Number(hour))}:${pad2(minute)}` }
+}
+
+function calendarTimelineMoveOrder(orderId, rowIndex, slotIndex = null, sourceRowIndex = null, resources = calendarTimelineResources()) {
+  const id = String(orderId ?? '').trim()
+  const nextRow = Number(rowIndex)
+  if (!id || !Number.isInteger(nextRow) || nextRow < 0) {
+    return { moved: false, conflicts: [], candidate: null }
+  }
+  const orders = ordersListSourceOrders()
+  const currentOrder = orders.find((order) => order.id === id)
+  const nextOrder = currentOrder ? calendarTimelineBuildMovedOrder(currentOrder, nextRow, slotIndex, sourceRowIndex, resources) : null
+  if (!nextOrder) {
+    return { moved: false, conflicts: [], candidate: null }
+  }
+  const conflicts = calendarTimelineFindOrderConflicts(nextOrder, orders, resources)
+  if (conflicts.length) {
+    return { moved: false, conflicts, candidate: nextOrder }
+  }
+  appState.calendarTimelineDemoOrders = orders.map((order) => (order.id === id ? nextOrder : order))
+  renderCalendarView()
+  return { moved: true, conflicts: [], candidate: nextOrder }
+}
+
+function calendarTimelineShowConflictDialog(conflicts = [], candidate = null) {
+  const existing = document.getElementById('calendarTimelineConflictDialog')
+  if (existing) {
+    existing.remove()
+  }
+
+  const title = candidate ? calendarTimelineOrderTitle(candidate) : 'Zlecenie'
+  const time = candidate ? calendarTimelineOrderRangeLabel(candidate) : ''
+  const rows = conflicts.slice(0, 8)
+  const extraCount = Math.max(0, conflicts.length - rows.length)
+  const detailsHtml = rows.length
+    ? rows
+        .map(
+          (conflict) => `
+            <li class="calendar-conflict-item">
+              <div>
+                <strong>${escapeHtml(conflict.workerName || 'Pracownik')}</strong>
+                <span>${escapeHtml(conflict.title || 'Zlecenie')}</span>
+              </div>
+              <small>${escapeHtml(conflict.time || '-')}</small>
+            </li>
+          `,
+        )
+        .join('')
+    : '<li class="calendar-conflict-item"><div><strong>Brak szczegółów kolizji.</strong></div></li>'
+
+  const overlay = document.createElement('div')
+  overlay.id = 'calendarTimelineConflictDialog'
+  overlay.className = 'calendar-conflict-overlay'
+  overlay.innerHTML = `
+    <section class="calendar-conflict-dialog" role="dialog" aria-modal="true" aria-labelledby="calendarConflictTitle">
+      <button class="calendar-conflict-close" type="button" data-calendar-conflict-close aria-label="Zamknij">×</button>
+      <div class="calendar-conflict-icon">!</div>
+      <div class="calendar-conflict-copy">
+        <p class="calendar-conflict-kicker">Kolizja terminu</p>
+        <h2 id="calendarConflictTitle">Nie można przenieść zlecenia</h2>
+        <p>
+          Zlecenie <strong>${escapeHtml(title)}</strong>${time ? ` na ${escapeHtml(time)}` : ''}
+          nakłada się na inne zlecenie u jednej lub kilku przypisanych osób.
+        </p>
+      </div>
+      <ul class="calendar-conflict-list">${detailsHtml}</ul>
+      ${extraCount ? `<p class="calendar-conflict-more">I jeszcze ${extraCount} konfliktów.</p>` : ''}
+      <div class="calendar-conflict-actions">
+        <button class="btn primary" type="button" data-calendar-conflict-close>Rozumiem</button>
+      </div>
+    </section>
+  `
+  overlay.addEventListener('click', (event) => {
+    const target = event.target
+    if (target === overlay || target?.closest?.('[data-calendar-conflict-close]')) {
+      overlay.remove()
+    }
+  })
+  document.body.appendChild(overlay)
+}
+
+function calendarTimelineClearDropTargets() {
+  document
+    .querySelectorAll('#view-calendar .is-timeline-drop-target, #view-calendar .is-timeline-drop-invalid')
+    .forEach((node) => node.classList.remove('is-timeline-drop-target', 'is-timeline-drop-invalid'))
+}
+
+function calendarTimelineVisualOrders(orders = [], resources = calendarTimelineResources()) {
+  return orders.flatMap((order) =>
+    ordersNormalizeOrderRows(order, resources).map((row) => ({
+      ...order,
+      row,
+    })),
+  )
+}
+
+function calendarTimelineSourceRowsCoverDays(days = []) {
+  const start = String(appState.calendarTimelineWorkerStateRangeStart || appState.calendarTimelineWorkerStateDayKey || '').trim()
+  const end = String(appState.calendarTimelineWorkerStateRangeEnd || appState.calendarTimelineWorkerStateDayKey || '').trim()
+  const source = Array.isArray(days) ? days : []
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || !source.length) {
+    return false
+  }
+  return source.every((day) => String(day ?? '') >= start && String(day ?? '') <= end)
+}
+
+function calendarTimelineRealEventHasPlace(row = {}) {
+  const client = normalizeSearchText(dashboardResolveClientLabel(row))
+  const zone = normalizeSearchText(dashboardResolveZoneLabel(row))
+  const qr = normalizeSearchText(zoneQrCodeFromRow(row))
+  const generic = new Set(['', '-', 'brak klienta', 'nieprzypisany', 'unknown', 'none'])
+  return [client, zone, qr].some((value) => value && !generic.has(value))
+}
+
+function calendarTimelineRealEventIsOrder(row = {}) {
+  const startIso = toIso(row?.startAt ?? row?.dayStartAt)
+  const endIso = toIso(row?.endAt ?? row?.dayEndAt)
+  if (!startIso && !endIso) {
+    return false
+  }
+
+  const endReason = String(row?.endReason ?? '').trim().toUpperCase()
+  const status = String(row?.status ?? '').trim().toUpperCase()
+  if (endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY' || status === 'WORKDAY_CLOSED') {
+    return false
+  }
+
+  const typeLabel = eventTypeInfo(row).label
+  if (typeLabel === 'QR STOP') {
+    return false
+  }
+
+  return calendarTimelineRealEventHasPlace(row)
+}
+
+function calendarTimelineRealEventTrack(row = {}) {
+  if (!calendarTimelineRealEventIsOrder(row)) {
+    return ''
+  }
+  const typeLabel = eventTypeInfo(row).label
+  if (dashboardRowIsIndividual(row) || dashboardRowIsSpecial(row) || typeLabel === 'Zlecenie ind.' || typeLabel === 'Strefa spec.') {
+    return 'client'
+  }
+  return ''
+}
+
+function calendarTimelineRowForRealEvent(row = {}, resources = []) {
+  const index = (Array.isArray(resources) ? resources : []).findIndex((resource) =>
+    calendarTimelineResourceMatchesSourceRow(resource, row),
+  )
+  return index >= 0 ? index : -1
+}
+
+function calendarTimelineRealEventId(row = {}, index = 0) {
+  const direct = String(row?.eventId ?? row?.workdayId ?? row?.id ?? '').trim()
+  if (direct) {
+    return `real-${direct}`
+  }
+  const start = toIso(row?.startAt ?? row?.dayStartAt)
+  const end = toIso(row?.endAt ?? row?.dayEndAt)
+  const worker = String(row?.workerLogin ?? row?.workerName ?? '').trim()
+  const zone = String(row?.zoneId ?? row?.roomId ?? row?.utilityRoomId ?? row?.strefa ?? row?.zoneName ?? '').trim()
+  return `real-${normalizeSearchText([worker, zone, start, end, index].join('|')).replace(/\s+/g, '-')}`
+}
+
+function calendarTimelineIsoToDayTime(isoValue = '') {
+  const iso = toIso(isoValue)
+  if (!iso) {
+    return null
+  }
+  const date = new Date(iso)
+  if (!Number.isFinite(date.getTime())) {
+    return null
+  }
+  return {
+    day: calendarDateToYmd(date),
+    time: `${pad2(date.getHours())}:${pad2(date.getMinutes())}`,
+    timestamp: date.getTime(),
+  }
+}
+
+function calendarTimelineRealEventEndIso(row = {}, startIso = '') {
+  const explicitEnd = toIso(row?.endAt ?? row?.dayEndAt)
+  if (explicitEnd) {
+    return explicitEnd
+  }
+  const start = toIso(startIso)
+  if (!start) {
+    return ''
+  }
+  const startTs = new Date(start).getTime()
+  if (!Number.isFinite(startTs)) {
+    return ''
+  }
+  const durationSec = Number(row?.durationSec ?? 0)
+  const durationMs = Number.isFinite(durationSec) && durationSec > 0 ? durationSec * 1000 : 60 * 60 * 1000
+  const now = Date.now()
+  const endTs = Math.max(startTs + 15 * 60 * 1000, Math.min(now > startTs ? now : startTs + durationMs, startTs + durationMs))
+  return new Date(endTs).toISOString()
+}
+
+function calendarTimelineRealEventTitle(row = {}, track = '') {
+  const client = String(dashboardResolveClientLabel(row) || '').trim()
+  const zone = String(dashboardResolveZoneLabel(row) || '').trim()
+  const qr = String(zoneQrCodeFromRow(row) || '').trim()
+  const prefix = track === 'client' ? 'Klient/spec.' : track === 'zone' ? 'Strefa' : 'START-STOP'
+  const parts = [client, zone]
+    .map((value) => String(value ?? '').trim())
+    .filter((value, index, list) => value && value !== '-' && list.indexOf(value) === index)
+  if (parts.length) {
+    return `${prefix}: ${parts.join(' / ')}`
+  }
+  return qr ? `${prefix}: QR ${qr}` : prefix
+}
+
+function calendarTimelineRealDurationLabel(startTs = 0, endTs = 0) {
+  const start = Number(startTs)
+  const end = Number(endTs)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return '00:00h'
+  }
+  return `${durationSecondsToHm(Math.floor((end - start) / 1000))}h`
+}
+
+function calendarTimelineReadableClientLabel(value = '') {
+  const label = String(value ?? '').trim()
+  const normalized = normalizeSearchText(label)
+  const generic = new Set(['', '-', 'brak klienta', 'nieprzypisany', 'unknown', 'none'])
+  return label && !generic.has(normalized) ? label : ''
+}
+
+function calendarTimelineRealStartObjectLabel(row = {}) {
+  const systemAddedLabel = calendarTimelineSystemAddedMarkerLabel(row)
+  if (systemAddedLabel) {
+    return systemAddedLabel
+  }
+
+  const client = calendarTimelineReadableClientLabel(dashboardResolveClientLabel(row))
+  const qr = String(row?.dayStartObject ?? row?.startObject ?? zoneQrCodeFromRow(row) ?? '').trim()
+  if (client) {
+    return client
+  }
+  return qr && qr !== '-' ? `QR ${qr}` : 'QR START'
+}
+
+function calendarTimelineRealEventRowDay(row = {}) {
+  const iso = toIso(row?.startAt ?? row?.dayStartAt ?? row?.endAt ?? row?.dayEndAt)
+  return iso ? calendarDateToYmd(iso) : ''
+}
+
+function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows = []) {
+  const visibleDays = new Set((Array.isArray(days) ? days : []).map((day) => String(day ?? '').trim()).filter(Boolean))
+  const buckets = new Map()
+
+  ;(Array.isArray(sourceRows) ? sourceRows : []).forEach((row) => {
+    const rowIndex = calendarTimelineRowForRealEvent(row, resources)
+    const dayKey = calendarTimelineRealEventRowDay(row)
+    if (rowIndex < 0 || !visibleDays.has(dayKey)) {
+      return
+    }
+
+    const startTs = calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
+    const endTs = calendarTimelineEventTimestamp(row?.endAt ?? row?.dayEndAt)
+    if (!startTs && !endTs) {
+      return
+    }
+
+    const key = `${rowIndex}|${dayKey}`
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        dayKey,
+        rowIndex,
+        firstStartTs: 0,
+        latestEndTs: 0,
+        hasRunning: false,
+        startObjectLabel: '',
+        sourceEventId: '',
+        workdayId: '',
+        sourceStartAt: '',
+      })
+    }
+    const bucket = buckets.get(key)
+    if (startTs > 0) {
+      if (!bucket.firstStartTs || startTs < bucket.firstStartTs) {
+        bucket.firstStartTs = startTs
+        bucket.startObjectLabel = calendarTimelineRealStartObjectLabel(row)
+        bucket.sourceEventId = String(row?.eventId ?? '').trim()
+        bucket.workdayId = String(row?.workdayId ?? row?.id ?? '').trim()
+        bucket.sourceStartAt = toIso(row?.startAt ?? row?.dayStartAt)
+      }
+    }
+    if (endTs > 0) {
+      bucket.latestEndTs = Math.max(bucket.latestEndTs, endTs)
+    }
+    const status = normalizeEventStatus(row?.status, Boolean(row?.endAt ?? row?.dayEndAt))
+    if (startTs > 0 && !endTs && status === 'RUNNING') {
+      bucket.hasRunning = true
+    }
+  })
+
+  return [...buckets.values()]
+    .map((bucket) => {
+      const startTs = bucket.firstStartTs || bucket.latestEndTs
+      if (!startTs) {
+        return null
+      }
+      const now = Date.now()
+      const endTs =
+        bucket.latestEndTs ||
+        (bucket.hasRunning && bucket.dayKey === todayYmd() ? Math.max(now, startTs + 15 * 60 * 1000) : startTs + 60 * 60 * 1000)
+      const startIso = new Date(startTs).toISOString()
+      const endIso = new Date(Math.max(endTs, startTs + 15 * 60 * 1000)).toISOString()
+      const start = calendarTimelineIsoToDayTime(startIso)
+      const end = calendarTimelineIsoToDayTime(endIso)
+      if (!start || !end) {
+        return null
+      }
+      const durationLabel = calendarTimelineRealDurationLabel(start.timestamp, end.timestamp)
+      const titleParts = [bucket.startObjectLabel || 'QR START', durationLabel]
+      const title = titleParts.join(' · ')
+      return {
+        id: `real-workday-${bucket.rowIndex}-${bucket.dayKey}`,
+        sourceEventId: bucket.sourceEventId,
+        workdayId: bucket.workdayId,
+        row: bucket.rowIndex,
+        assignedRows: [bucket.rowIndex],
+        workerAssignments: ordersWorkerAssignmentsFromRows([bucket.rowIndex], resources),
+        dateYmd: start.day,
+        startTime: start.time,
+        endDateYmd: end.day,
+        endTime: end.time,
+        validUntil: end.day,
+        nextDate: start.day,
+        title,
+        clientLabel: '',
+        addressLabel: '',
+        type: 'other',
+        tone: 'steel',
+        actualStartAt: startIso,
+        sourceStartAt: bucket.sourceStartAt || startIso,
+        actualEndAt: bucket.latestEndTs ? endIso : '',
+        status: bucket.latestEndTs ? 'CLOSED' : 'RUNNING',
+        completed: Boolean(bucket.latestEndTs),
+        isRealEvent: true,
+        realTrack: 'workday',
+        realTrackIndex: 0,
+      }
+    })
+    .filter(Boolean)
+}
+
+function calendarTimelineRealEventOrders(resources = [], days = [], plannedOrders = []) {
+  if (!calendarTimelineSourceRowsCoverDays(days)) {
+    return []
+  }
+  const visibleDays = new Set((Array.isArray(days) ? days : []).map((day) => String(day ?? '').trim()).filter(Boolean))
+  const sourceRows = Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
+    ? appState.calendarTimelineWorkerStateSourceRows
+    : []
+  const plannedEventKeys = new Set(
+    (Array.isArray(plannedOrders) ? plannedOrders : [])
+      .flatMap((order) => calendarTimelineOrderSourceKeys(order))
+      .filter(Boolean),
+  )
+  const seen = new Set()
+
+  const workdayOrders = calendarTimelineRealWorkdayOrders(resources, days, sourceRows)
+  const eventOrders = sourceRows
+    .map((row, index) => ({ row, index }))
+    .map(({ row, index }) => ({ row, index, track: calendarTimelineRealEventTrack(row) }))
+    .filter(({ track }) => track)
+    .map(({ row, index, track }) => {
+      const startIso = toIso(row?.startAt ?? row?.dayStartAt) || toIso(row?.endAt ?? row?.dayEndAt)
+      const endIso = calendarTimelineRealEventEndIso(row, startIso)
+      const start = calendarTimelineIsoToDayTime(startIso)
+      const end = calendarTimelineIsoToDayTime(endIso)
+      if (!start || !end || !visibleDays.has(start.day)) {
+        return null
+      }
+      const rowIndex = calendarTimelineRowForRealEvent(row, resources)
+      if (rowIndex < 0) {
+        return null
+      }
+      const id = calendarTimelineRealEventId(row, index)
+      const rowKeys = calendarTimelineSourceRowKeys(row)
+      if (rowKeys.some((key) => plannedEventKeys.has(key))) {
+        return null
+      }
+      if (seen.has(id)) {
+        return null
+      }
+      seen.add(id)
+
+      const completed = Boolean(toIso(row?.endAt ?? row?.dayEndAt)) || normalizeEventStatus(row?.status, Boolean(row?.endAt)) === 'CLOSED'
+      const durationLabel = calendarTimelineRealDurationLabel(start.timestamp, end.timestamp)
+      return {
+        id,
+        sourceEventId: String(row?.eventId ?? '').trim(),
+        workdayId: String(row?.workdayId ?? '').trim(),
+        row: rowIndex,
+        assignedRows: [rowIndex],
+        workerAssignments: ordersWorkerAssignmentsFromRows([rowIndex], resources),
+        dateYmd: start.day,
+        startTime: start.time,
+        endDateYmd: end.day,
+        endTime: end.time,
+        validUntil: end.day,
+        nextDate: start.day,
+        title: `${start.time}-${end.time} ${calendarTimelineRealEventTitle(row, track)}${durationLabel ? ` · ${durationLabel}` : ''}`,
+        clientLabel: dashboardResolveClientLabel(row),
+        addressLabel: String(row?.lokalizacja ?? row?.location ?? row?.address ?? '').trim(),
+        type: 'other',
+        tone: ordersTimelineToneForType('other'),
+        actualStartAt: startIso,
+        actualEndAt: toIso(row?.endAt ?? row?.dayEndAt),
+        status: completed ? 'CLOSED' : 'RUNNING',
+        completed,
+        isRealEvent: true,
+        realTrack: track,
+        realTrackIndex: track === 'client' ? 1 : 2,
+      }
+    })
+    .filter(Boolean)
+  return [...workdayOrders, ...eventOrders]
+}
+
+function calendarTimelinePrototypeHtml() {
+  const cursor = appState.calendarCursorDay || todayYmd()
+  const days = Array.from({ length: 3 }, (_, index) => calendarAddDays(cursor, index))
+  const hours = Array.from({ length: 20 }, (_, index) => index + 4)
+  const slotsPerHour = CALENDAR_TIMELINE_SLOTS_PER_HOUR
+  const slotsPerDay = hours.length * slotsPerHour
+  const totalSlots = days.length * slotsPerDay
+  const resources = calendarTimelineResources()
+  const plannedOrders = ordersListSourceOrders()
+  const realEventOrders = calendarTimelineRealEventOrders(resources, days, plannedOrders)
+  const bars = calendarTimelineVisualOrders([...plannedOrders, ...realEventOrders], resources)
+  const selectedTypes = calendarTimelineSelectedTypes()
+  const layout = calendarTimelineLayoutEventBars(bars, days, hours, resources, selectedTypes)
+  const realTrackCounts = new Map()
+  realEventOrders.forEach((order) => {
+    const row = Number(order?.row)
+    const trackIndex = Number(order?.realTrackIndex ?? 0)
+    if (!Number.isInteger(row) || row < 0 || !Number.isFinite(trackIndex)) {
+      return
+    }
+    realTrackCounts.set(row, Math.max(Number(realTrackCounts.get(row) ?? 0), Math.floor(trackIndex) + 1))
+  })
+  const plannedLaneCounts = new Map()
+  layout.items.forEach((item) => {
+    if (item?.bar?.isRealEvent) {
+      return
+    }
+    const row = Number(item?.bar?.row)
+    if (!Number.isInteger(row) || row < 0) {
+      return
+    }
+    const laneCount = Number(item?.laneCount || 1)
+    plannedLaneCounts.set(row, Math.max(Number(plannedLaneCounts.get(row) || 0), laneCount))
+  })
+  const rowHeights = resources
+    .map((_, rowIndex) => {
+      const laneCount = Number(plannedLaneCounts.get(rowIndex) || 0)
+      const trackCount = Number(realTrackCounts.get(rowIndex) || 0)
+      return `${Math.max(38, 8 + Math.max(1, trackCount + laneCount) * 24)}px`
+    })
+    .join(' ')
+  const dayHeaders = days
+    .map((day, index) => {
+      const label = calendarTimelineDayMonthLabel(day)
+      return `<div class="fw-date-head${index % 2 ? ' fw-date-head--alt' : ''}" style="grid-column:${index * slotsPerDay + 2} / span ${slotsPerDay}; grid-row:1;">${escapeHtml(label)}</div>`
+    })
+    .join('')
+  const hourHeaders = days
+    .flatMap((day, dayIndex) =>
+      hours.map((hour, hourIndex) => {
+        const slot = dayIndex * slotsPerDay + hourIndex * slotsPerHour + 1
+        const classes = ['fw-hour-head']
+        if (hourIndex === 0) classes.push('fw-hour-head--day-start')
+        if (dayIndex % 2) classes.push('fw-hour-head--alt')
+        return `<div class="${classes.join(' ')}" style="grid-column:${slot + 1} / span ${slotsPerHour}; grid-row:2;">${pad2(hour)}:00</div>`
+      }),
+    )
+    .join('')
+  const rowLabels = resources
+    .map((resource, index) => {
+      const muted = resource.type === 'buffer' ? ' is-buffer' : resource.type === 'placeholder' ? ' is-placeholder' : ''
+      const workerClass = resource.type === 'worker' ? ' is-worker' : ''
+      const started = resource.type === 'worker' && resource.started ? ' is-started' : ''
+      return `
+        <div class="fw-resource-name${muted}${workerClass}${started}" style="grid-row:${index + 3};" data-calendar-timeline-row="${index}">
+          <span>${escapeHtml(resource.name)}</span>
+          ${resource.type === 'worker' ? '<i aria-hidden="true"></i>' : ''}
+        </div>
+      `
+    })
+    .join('')
+  const cells = resources
+    .flatMap((_, rowIndex) =>
+      Array.from({ length: totalSlots }, (_, slotIndex) => {
+        const dayIndex = Math.floor(slotIndex / slotsPerDay)
+        const slotInDay = slotIndex % slotsPerDay
+        const quarterIndex = slotInDay % slotsPerHour
+        const classes = ['fw-grid-cell']
+        if (quarterIndex === 0) classes.push('fw-grid-cell--hour-start')
+        if (slotInDay === 0) classes.push('fw-grid-cell--day-start')
+        if (dayIndex % 2) classes.push('fw-grid-cell--alt')
+        return `<div class="${classes.join(' ')}" style="grid-column:${slotIndex + 2}; grid-row:${rowIndex + 3};" data-calendar-timeline-row="${rowIndex}" data-calendar-timeline-slot="${slotIndex}"></div>`
+      }),
+    )
+    .join('')
+  const statusAlerts = []
+  const eventBars = layout.items
+    .map((item) => {
+      const { bar, position, lane, laneCount } = item
+      const timeLabel = `${bar.dateYmd} ${bar.startTime} - ${bar.endDateYmd || bar.dateYmd} ${bar.endTime}`
+      const status = calendarTimelineOrderStatus(bar, resources)
+      if (status.alert) {
+        statusAlerts.push(status.alert)
+      }
+      const realTrackIndex = Number(bar.realTrackIndex ?? 0)
+      const realTrackCount = Number(realTrackCounts.get(bar.row) || 0)
+      const plannedOffsetBase = realTrackCount > 0 ? 7 + realTrackCount * 24 : 7
+      const stackStyle = bar.isRealEvent
+        ? `--fw-bar-height:20px;--fw-bar-offset:${4 + Math.max(0, Math.floor(realTrackIndex)) * 24}px;--fw-bar-z:${8 + Math.max(0, Math.floor(realTrackIndex))};`
+        : laneCount > 1
+          ? `--fw-bar-height:20px;--fw-bar-offset:${plannedOffsetBase + lane * 22}px;--fw-bar-z:${10 + realTrackCount + lane};`
+          : `--fw-bar-height:24px;--fw-bar-offset:${plannedOffsetBase}px;--fw-bar-z:${4 + realTrackCount};`
+      const titleLabel = status?.label ? `${timeLabel} · ${status.label}` : timeLabel
+      const realEventAttr = bar.isRealEvent ? ' data-calendar-timeline-real-event="1"' : ''
+      const draggableAttr = bar.isRealEvent ? 'false' : 'true'
+      const realTrackClass = bar.isRealEvent ? ` fw-event-real--${escapeHtml(bar.realTrack || 'event')}` : ''
+      const sourceEventId = String(bar.sourceEventId ?? '').trim()
+      const workdayId = String(bar.workdayId ?? '').trim()
+      const sourceStartAt = toIso(bar.sourceStartAt ?? bar.actualStartAt ?? '')
+      const barMetaAttrs = [
+        `data-calendar-timeline-date="${escapeHtml(bar.dateYmd || '')}"`,
+        `data-calendar-timeline-start="${escapeHtml(bar.startTime || '')}"`,
+        sourceEventId ? `data-calendar-timeline-source-event-id="${escapeHtml(sourceEventId)}"` : '',
+        workdayId ? `data-calendar-timeline-workday-id="${escapeHtml(workdayId)}"` : '',
+        sourceStartAt ? `data-calendar-timeline-source-start="${escapeHtml(sourceStartAt)}"` : '',
+      ].filter(Boolean).join(' ')
+      return `
+        <button class="fw-event-bar fw-event-bar--${escapeHtml(bar.tone)} fw-event-status--${escapeHtml(status.kind)}${bar.completed ? ' is-completed' : ''}${laneCount > 1 ? ' is-stacked' : ''}${bar.isRealEvent ? ' is-real-event' : ''}${realTrackClass}" style="grid-column:${position.startColumn} / span ${position.span}; grid-row:${bar.row + 3};${stackStyle}" type="button" title="${escapeHtml(titleLabel)}" draggable="${draggableAttr}" data-calendar-timeline-order-id="${escapeHtml(bar.id)}" data-calendar-timeline-row="${bar.row}" ${barMetaAttrs}${realEventAttr}>
+          <span class="fw-event-mark" aria-hidden="true">&#9670;</span>
+          <span class="fw-event-title">${escapeHtml(bar.title)}</span>
+          ${laneCount > 1 ? `<strong class="fw-event-stack-badge">${lane + 1}/${laneCount}</strong>` : ''}
+        </button>
+      `
+    })
+    .join('')
+  const currentHour = calendarTimelineCurrentHourHtml(days, hours, resources)
+  appState.calendarTimelineStatusAlerts = calendarTimelineUniqueStatusAlerts(statusAlerts)
+
+  return `
+    <div class="fw-timeline-scroll">
+      <div class="fw-timeline-grid" style="--slot-count:${totalSlots}; --row-count:${resources.length}; grid-template-rows:30px 28px ${rowHeights};">
+        <div class="fw-resource-head" aria-hidden="true"></div>
+        ${dayHeaders}
+        ${hourHeaders}
+        ${rowLabels}
+        ${cells}
+        ${currentHour}
+        ${eventBars}
+      </div>
+    </div>
+  `
+}
+
+function renderCalendarTimelinePrototype() {
+  const stage = document.getElementById('calendarPrototypeTimeline')
+  if (!stage) {
+    return
+  }
+  calendarStartTimelineWorkerStatusRefresh()
+  void calendarEnsureTimelineWorkerState().catch(() => {})
+  calendarUpdateRangeLabel()
+  calendarTimelineHideEventsPopup()
+  const mode = appState.calendarViewMode || 'week'
+  document.querySelectorAll('#view-calendar [data-calendar-view]').forEach((button) => {
+    button.classList.toggle('is-active', button.getAttribute('data-calendar-view') === mode)
+  })
+  const slideDirection = Number(appState.calendarTimelineSlideDirection || 0)
+  stage.classList.remove('is-slide-next', 'is-slide-prev')
+  stage.innerHTML = calendarTimelinePrototypeHtml()
+  calendarTimelineSyncControls()
+  calendarTimelineShowPendingStatusAlert()
+  if (slideDirection) {
+    void stage.offsetWidth
+    stage.classList.add(slideDirection > 0 ? 'is-slide-next' : 'is-slide-prev')
+    appState.calendarTimelineSlideDirection = 0
+  }
+  if (appState.calendarTimelineResetScroll) {
+    appState.calendarTimelineResetScroll = false
+    window.requestAnimationFrame(() => {
+      const scroller = stage.querySelector('.fw-timeline-scroll')
+      if (scroller instanceof HTMLElement) {
+        scroller.scrollLeft = 0
+      }
+    })
+  }
+  calendarScheduleTimelineHourRefresh()
+}
+
+function renderCalendarView() {
+  if (document.getElementById('calendarTimelinePrototype')) {
+    calendarEnsureState()
+    renderCalendarTimelinePrototype()
+    return
+  }
+  const board = document.getElementById('calendarBoard')
+  if (!board) {
+    return
+  }
+  calendarEnsureState()
+  const mode = appState.calendarViewMode
+
+  document.querySelectorAll('[data-calendar-view]').forEach((button) => {
+    button.classList.toggle('is-active', button.getAttribute('data-calendar-view') === mode)
+  })
+  calendarUpdateRangeLabel()
+  calendarRenderContextPanel()
+
+  if (mode === 'day') {
+    board.className = 'calendar-board calendar-board--day'
+    board.innerHTML = calendarTimeGridHtml([appState.calendarCursorDay])
+    return
+  }
+
+  if (mode === 'month') {
+    const start = calendarMonthGridStart(appState.calendarCursorDay)
+    const days = Array.from({ length: 42 }, (_, index) => calendarAddDays(start, index))
+    const readCommentKeys = dashboardReadCommentKeys()
+    board.className = 'calendar-board calendar-board--month'
+    board.innerHTML = `
+      <div class="calendar-weekdays">
+        ${['Pon', 'Wt', 'Śr', 'Czw', 'Pt', 'Sob', 'Nd'].map((day) => `<span>${day}</span>`).join('')}
+      </div>
+      <div class="calendar-month-grid">
+        ${days.map((dayKey) => calendarDayColumnHtml(dayKey, { monthMode: true, readCommentKeys })).join('')}
+      </div>
+    `
+    return
+  }
+
+  const start = calendarStartOfWeek(appState.calendarCursorDay)
+  const days = Array.from({ length: 7 }, (_, index) => calendarAddDays(start, index))
+  board.className = 'calendar-board calendar-board--week'
+  board.innerHTML = calendarTimeGridHtml(days)
+}
+
+function calendarActivityDateTimeLabel(value = '') {
+  const iso = toIso(value)
+  return iso ? `${formatDatePl(iso)} ${formatTime(iso)}` : '-'
+}
+
+function calendarEditorCurrentTask() {
+  const id = String(appState.calendarEditorTaskId ?? '').trim()
+  return id ? appState.calendarTasks.find((task) => task.id === id) ?? null : null
+}
+
+function calendarTaskActivityEntries(task = null) {
+  if (!task) {
+    return []
+  }
+  const entries = calendarNormalizeActivityLog(task.activityLog)
+  if (entries.length) {
+    return entries
+  }
+  const createdAt = calendarActivityTimestamp(task.createdAt)
+  const sourceWorker = String(task.sourceWorkerName ?? '').trim()
+  const fallback = []
+  if (task.generatedFromComment && (sourceWorker || task.sourceComment)) {
+    fallback.push(
+      calendarActivityEntry(
+        'Dodano komentarz pracownika',
+        [
+          task.sourceComment ? `Komentarz: ${task.sourceComment}` : '',
+          sourceWorker ? `Pracownik: ${sourceWorker}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        { actor: sourceWorker || 'Pracownik', at: createdAt },
+      ),
+    )
+  }
+  fallback.push(calendarActivityEntry('Utworzono zadanie', `Dopisane osoby: ${calendarSelectionText(task.workers)}`, { actor: 'System', at: createdAt }))
+  return calendarNormalizeActivityLog(fallback)
+}
+
+function calendarTaskAssignedSummaryHtml(task = null) {
+  if (!task) {
+    return '<div class="calendar-task-assigned-empty">Historia pojawi się po zapisaniu zadania.</div>'
+  }
+  const sourceWorker = String(task.sourceWorkerName ?? '').trim()
+  const rows = [
+    task.generatedFromComment && sourceWorker ? ['Komentarz dodał', sourceWorker] : null,
+    ['Dopisane osoby', calendarSelectionText(task.workers)],
+    ['Klienci', calendarSelectionText(task.objects)],
+    ['Strefa', calendarTaskZoneText(task)],
+  ].filter(Boolean)
+  return rows
+    .map(
+      ([label, value]) => `
+        <div>
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value || '-')}</strong>
+        </div>
+      `,
+    )
+    .join('')
+}
+
+function calendarRenderEditorActivity(task = calendarEditorCurrentTask()) {
+  const summary = document.getElementById('calendarTaskAssignedSummary')
+  const list = document.getElementById('calendarTaskActivityList')
+  if (summary) {
+    summary.innerHTML = calendarTaskAssignedSummaryHtml(task)
+  }
+  if (!list) {
+    return
+  }
+  const entries = calendarTaskActivityEntries(task)
+  if (!entries.length) {
+    list.innerHTML = '<div class="calendar-task-activity-empty">Brak historii aktywności.</div>'
+    return
+  }
+  list.innerHTML = entries
+    .map(
+      (entry) => `
+        <article class="calendar-task-activity-item">
+          <div class="calendar-task-activity-dot" aria-hidden="true"></div>
+          <div>
+            <div class="calendar-task-activity-main">
+              <strong>${escapeHtml(entry.action)}</strong>
+              <span>${escapeHtml(calendarActivityDateTimeLabel(entry.at))}</span>
+            </div>
+            <div class="calendar-task-activity-actor">${escapeHtml(entry.actor)}</div>
+            ${entry.details ? `<pre>${escapeHtml(entry.details)}</pre>` : ''}
+          </div>
+        </article>
+      `,
+    )
+    .join('')
+}
+
+function calendarSetEditorTab(tab = 'comments') {
+  const nextTab = tab === 'activity' ? 'activity' : 'comments'
+  appState.calendarEditorTab = nextTab
+  document.querySelectorAll('#calendarEditorOverlay [data-calendar-task-tab]').forEach((button) => {
+    button.classList.toggle('is-active', button.getAttribute('data-calendar-task-tab') === nextTab)
+  })
+  const commentsPanel = document.getElementById('calendarTaskCommentsPanel')
+  const activityPanel = document.getElementById('calendarTaskActivityPanel')
+  if (commentsPanel) commentsPanel.hidden = nextTab !== 'comments'
+  if (activityPanel) activityPanel.hidden = nextTab !== 'activity'
+  if (nextTab === 'activity') {
+    calendarRenderEditorActivity()
+  }
+}
+
+function calendarOpenEditor(taskId = '', dayKey = '', timeValue = null) {
+  const task = appState.calendarTasks.find((item) => item.id === taskId) ?? null
+  const date = task?.dateYmd || dayKey || appState.calendarCursorDay || todayYmd()
+  appState.calendarEditorTaskId = task?.id || ''
+
+  const overlay = document.getElementById('calendarEditorOverlay')
+  const titleNode = document.getElementById('calendarEditorTitle')
+  const deleteButton = document.getElementById('calendarTaskDeleteBtn')
+  const duplicateButton = document.getElementById('calendarTaskDuplicateBtn')
+  const saveButton = document.getElementById('calendarTaskSaveBtn')
+  const completeButton = document.getElementById('calendarTaskCompleteBtn')
+  const ownerAvatar = document.getElementById('calendarTaskOwnerAvatar')
+  const commentAvatar = document.getElementById('calendarTaskCommentAvatar')
+  const ownerName = document.getElementById('calendarTaskOwnerName')
+  const titleInput = document.getElementById('calendarTaskTitle')
+  const dateInput = document.getElementById('calendarTaskDate')
+  const startInput = document.getElementById('calendarTaskTime')
+  const endInput = document.getElementById('calendarTaskEndTime')
+  const toneInput = document.getElementById('calendarTaskTone')
+  const notesInput = document.getElementById('calendarTaskNotes')
+
+  calendarRenderDatalist('workers')
+  calendarRenderDatalist('objects')
+  if (!appState.workersLoaded) {
+    void fetchWorkersForCurrentSession()
+      .then(() => calendarRenderDatalist('workers'))
+      .catch(() => {})
+  }
+  if (!appState.clientsLoaded) {
+    void fetchClientsForCurrentSession(false)
+      .then(() => {
+        calendarRenderDatalist('objects')
+        calendarSyncZoneOptions(task?.zone ?? calendarNormalizeZoneSelection(null, task?.zoneId, task?.zoneName, task?.zoneLocation), { preserveUnknown: true })
+      })
+      .catch(() => {})
+  }
+  if (!appState.zonesLoaded) {
+    void fetchZonesForCurrentSession(false)
+      .then(() => {
+        calendarSyncZoneOptions(task?.zone ?? calendarNormalizeZoneSelection(null, task?.zoneId, task?.zoneName, task?.zoneLocation), { preserveUnknown: true })
+      })
+      .catch(() => {})
+  }
+
+  if (titleNode) titleNode.textContent = task ? 'Edytuj zadanie' : 'Dodaj zadanie'
+  if (deleteButton instanceof HTMLButtonElement) deleteButton.style.display = task ? '' : 'none'
+  if (duplicateButton instanceof HTMLButtonElement) duplicateButton.style.display = task ? '' : 'none'
+  if (saveButton instanceof HTMLButtonElement) saveButton.textContent = 'Zapisz'
+  if (completeButton instanceof HTMLButtonElement) {
+    const completed = task ? kanbanTaskIsCompleted(task) : false
+    completeButton.disabled = !task
+    completeButton.classList.toggle('is-completed', completed)
+    completeButton.innerHTML = `<span aria-hidden="true">&#10003;</span>${completed ? 'Cofnij uko&#324;czenie' : 'Oznacz jako uko&#324;czone'}`
+  }
+  const sessionName = String(appState.session?.name || appState.session?.login || appState.session?.email || 'Użytkownik').trim()
+  const initials = kanbanInitials(sessionName)
+  if (ownerAvatar) ownerAvatar.textContent = initials
+  if (commentAvatar) commentAvatar.textContent = initials
+  if (ownerName) ownerName.textContent = sessionName
+  if (titleInput) titleInput.value = task?.title ?? ''
+  if (dateInput) dateInput.value = date
+  const startValue = calendarNormalizeTimeValue(task?.startTime ?? task?.time ?? (timeValue == null ? '' : timeValue ? `${pad2(Number(timeValue))}:00` : ''))
+  if (startInput) startInput.value = startValue
+  const defaultEndValue =
+    !task && startValue
+      ? calendarMinutesToTime(Math.min((calendarTimeToMinutes(startValue) ?? 0) + 60, 1439))
+      : ''
+  if (endInput) endInput.value = calendarNormalizeTimeValue(task?.endTime) || defaultEndValue
+  if (toneInput) toneInput.value = task ? calendarTaskToneValue(task) : 'blue'
+  if (notesInput) notesInput.value = task?.notes ?? ''
+  if (document.getElementById('calendarWorkerPickerRows')) {
+    calendarSetPickerRows('workers', task?.workers ?? [])
+  }
+  if (document.getElementById('calendarObjectPickerRows')) {
+    calendarSetPickerRows('objects', task?.objects?.length ? task.objects : calendarNormalizeSelectionList([], task?.place ?? ''))
+  }
+  calendarSyncZoneOptions(task?.zone ?? calendarNormalizeZoneSelection(null, task?.zoneId, task?.zoneName, task?.zoneLocation), { preserveUnknown: true })
+  calendarRenderEditorActivity(task)
+  calendarSetEditorTab('comments')
+
+  if (overlay) {
+    overlay.style.display = 'flex'
+  }
+  titleInput?.focus?.()
+}
+
+function calendarCloseEditor() {
+  const overlay = document.getElementById('calendarEditorOverlay')
+  if (overlay) {
+    overlay.style.display = 'none'
+  }
+  appState.calendarEditorTaskId = ''
+  appState.kanbanPendingStatus = ''
+}
+
+function calendarDuplicateEditorTask() {
+  const id = String(appState.calendarEditorTaskId ?? '').trim()
+  const task = appState.calendarTasks.find((item) => item.id === id)
+  if (!task) {
+    return
+  }
+  appState.calendarEditorTaskId = ''
+  const titleNode = document.getElementById('calendarEditorTitle')
+  const deleteButton = document.getElementById('calendarTaskDeleteBtn')
+  const duplicateButton = document.getElementById('calendarTaskDuplicateBtn')
+  const saveButton = document.getElementById('calendarTaskSaveBtn')
+  if (titleNode) titleNode.textContent = 'Duplikuj zadanie'
+  if (deleteButton instanceof HTMLButtonElement) deleteButton.style.display = 'none'
+  if (duplicateButton instanceof HTMLButtonElement) duplicateButton.style.display = 'none'
+  if (saveButton instanceof HTMLButtonElement) saveButton.textContent = 'Zapisz kopię'
+  document.getElementById('calendarTaskDate')?.focus?.()
+  showTransientNotice('To jest kopia zadania. Zmień datę, osobę albo obiekt i zapisz.', 'info')
+}
+
+function calendarSaveEditorTask() {
+  const title = String(document.getElementById('calendarTaskTitle')?.value ?? '').trim()
+  const dateYmd = String(document.getElementById('calendarTaskDate')?.value ?? '').trim()
+  const startRaw = String(document.getElementById('calendarTaskTime')?.value ?? '').trim()
+  const endRaw = String(document.getElementById('calendarTaskEndTime')?.value ?? '').trim()
+  const startTime = calendarNormalizeTimeValue(startRaw)
+  const endTime = calendarNormalizeTimeValue(endRaw)
+  if (!title) {
+    showTransientNotice('Wpisz tytuł zadania.', 'error')
+    return
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateYmd)) {
+    showTransientNotice('Wybierz datę zadania.', 'error')
+    return
+  }
+  if (startRaw && !endRaw) {
+    showTransientNotice('Podaj godzinę STOP dla zadania.', 'error')
+    return
+  }
+  if (!startRaw && endRaw) {
+    showTransientNotice('Podaj godzinę START dla zadania.', 'error')
+    return
+  }
+  if (startRaw && !startTime) {
+    showTransientNotice('Podaj poprawną godzinę START.', 'error')
+    return
+  }
+  if (endRaw && !endTime) {
+    showTransientNotice('Podaj poprawną godzinę STOP.', 'error')
+    return
+  }
+  const startMinutes = calendarTimeToMinutes(startTime)
+  const endMinutes = calendarTimeToMinutes(endTime)
+  if (startMinutes != null && endMinutes != null && endMinutes <= startMinutes) {
+    showTransientNotice('Godzina STOP musi być później niż START. Zadanie jest jednodniowe.', 'error')
+    return
+  }
+
+  const existingId = String(appState.calendarEditorTaskId ?? '').trim()
+  const existing = appState.calendarTasks.find((task) => task.id === existingId)
+  const hasWorkerPicker = Boolean(document.getElementById('calendarWorkerPickerRows'))
+  const hasObjectPicker = Boolean(document.getElementById('calendarObjectPickerRows'))
+  const workers = hasWorkerPicker ? calendarReadPickerRows('workers') : (existing?.workers ?? [])
+  const objects = hasObjectPicker ? calendarReadPickerRows('objects') : (existing?.objects ?? [])
+  const zone = calendarReadZoneSelection()
+  const preferredKanbanStatus = String(existing?.kanbanStatus ?? '').trim() || String(appState.kanbanPendingStatus ?? '').trim()
+  let nextTask = calendarNormalizeTask({
+    ...(existing ?? {}),
+    id: existing?.id || `cal-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    title,
+    dateYmd,
+    time: startTime,
+    startTime,
+    endTime,
+    tone: String(document.getElementById('calendarTaskTone')?.value ?? 'blue').trim(),
+    place: hasObjectPicker ? calendarSelectionLabels(objects).join(', ') : (existing?.place ?? ''),
+    workers,
+    objects,
+    zone,
+    zoneId: zone?.id || '',
+    zoneName: zone?.label || '',
+    zoneLocation: zone?.location || '',
+    kanbanStatus: kanbanDefaultStatusForTask(workers, preferredKanbanStatus),
+    notes: String(document.getElementById('calendarTaskNotes')?.value ?? '').trim(),
+    updatedAt: new Date().toISOString(),
+  })
+  nextTask = calendarNormalizeTask(
+    calendarAppendTaskActivity(
+      nextTask,
+      existing ? 'Zmieniono zadanie' : 'Dodano zadanie',
+      existing
+        ? calendarTaskChangeDetails(existing, nextTask)
+        : [
+            `Data: ${calendarDateLabelFromYmd(nextTask.dateYmd)}`,
+            `Osoby: ${calendarSelectionText(nextTask.workers)}`,
+            `Klienci: ${calendarSelectionText(nextTask.objects)}`,
+            `Strefa: ${calendarTaskZoneText(nextTask)}`,
+          ].join('\n'),
+    ),
+  )
+
+  const withoutCurrent = appState.calendarTasks.filter((task) => task.id !== nextTask.id)
+  calendarSaveTasks([...withoutCurrent, nextTask])
+  appState.calendarCursorDay = nextTask.dateYmd
+  appState.kanbanPendingStatus = ''
+  calendarCloseEditor()
+  renderCalendarView()
+  renderDashboardKanbanTasks()
+  if (appState.currentRoute === 'kanban') {
+    renderKanbanView()
+  }
+}
+
+function calendarDeleteEditorTask() {
+  const id = String(appState.calendarEditorTaskId ?? '').trim()
+  if (!id) {
+    return
+  }
+  calendarSaveTasks(appState.calendarTasks.filter((task) => task.id !== id))
+  calendarDeleteRemoteTasksById([id])
+  calendarCloseEditor()
+  renderCalendarView()
+  renderDashboardKanbanTasks()
+  if (appState.currentRoute === 'kanban') {
+    renderKanbanView()
+  }
+}
+
+function calendarToggleEditorTaskCompleted() {
+  const id = String(appState.calendarEditorTaskId ?? '').trim()
+  const task = appState.calendarTasks.find((item) => item.id === id)
+  if (!task) {
+    showTransientNotice('Najpierw zapisz zadanie, potem możesz oznaczyć je jako ukończone.', 'info')
+    return
+  }
+  const completed = !kanbanTaskIsCompleted(task)
+  const completedBy = String(appState.session?.name || appState.session?.email || appState.session?.uid || '').trim()
+  const changedAt = new Date().toISOString()
+  const nextTasks = appState.calendarTasks.map((item) =>
+    item.id === id
+      ? calendarNormalizeTask(
+          calendarAppendTaskActivity(
+            {
+              ...item,
+              active: true,
+              completed,
+              kanbanCompleted: completed,
+              completionStatus: completed ? 'ZAKONCZONE' : 'AKTYWNE',
+              completedAt: completed ? changedAt : '',
+              completedBy: completed ? completedBy : '',
+              completedNote: completed ? String(item.completedNote ?? '').trim() || calendarCompletionNoteForTask(item, completedBy) : '',
+              updatedAt: changedAt,
+            },
+            completed ? 'Oznaczono jako ukończone' : 'Cofnięto ukończenie',
+            completed ? calendarCompletionActivityDetails(item, String(item.completedNote ?? '').trim(), completedBy) : '',
+            { actor: completedBy, at: changedAt },
+          ),
+        )
+      : item,
+  )
+  calendarSaveTasks(nextTasks)
+  renderCalendarView()
+  renderDashboardKanbanTasks()
+  calendarOpenEditor(id)
+  showTransientNotice(completed ? 'Zadanie oznaczone jako ukończone.' : 'Cofnięto ukończenie zadania.')
+}
+
+function calendarMoveTask(taskId, dayKey, timeValue = null) {
+  const id = String(taskId ?? '').trim()
+  const dateYmd = String(dayKey ?? '').trim()
+  if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(dateYmd)) {
+    return
+  }
+  const nextTasks = appState.calendarTasks.map((task) => {
+    if (task.id !== id) {
+      return task
+    }
+    const nextTime =
+      timeValue == null
+        ? task.time
+        : String(timeValue ?? '').trim()
+          ? `${pad2(Number(timeValue))}:00`
+          : ''
+    const shouldUpdateTime = timeValue != null
+    const currentStart = calendarTimeToMinutes(task.startTime ?? task.time)
+    const currentEnd = calendarTimeToMinutes(task.endTime)
+    const nextStart = calendarTimeToMinutes(nextTime)
+    const duration = currentStart != null && currentEnd != null && currentEnd > currentStart ? currentEnd - currentStart : null
+    const nextEnd =
+      !nextTime
+        ? ''
+        : !shouldUpdateTime
+          ? task.endTime
+          : duration != null && nextStart != null && nextStart + duration <= 1439
+            ? calendarMinutesToTime(nextStart + duration)
+            : ''
+    const changedAt = new Date().toISOString()
+    return calendarNormalizeTask(
+      calendarAppendTaskActivity(
+        { ...task, dateYmd, time: nextTime, startTime: nextTime, endTime: nextEnd, updatedAt: changedAt },
+        'Przesunięto w kalendarzu',
+        [
+          `Data: ${calendarDateLabelFromYmd(task.dateYmd)} -> ${calendarDateLabelFromYmd(dateYmd)}`,
+          shouldUpdateTime ? `START: ${calendarNormalizeTimeValue(task.startTime ?? task.time) || '-'} -> ${nextTime || '-'}` : '',
+          shouldUpdateTime ? `STOP: ${calendarNormalizeTimeValue(task.endTime) || '-'} -> ${nextEnd || '-'}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        { at: changedAt },
+      ),
+    )
+  })
+  calendarSaveTasks(nextTasks)
+  renderCalendarView()
+  renderDashboardKanbanTasks()
+  if (appState.currentRoute === 'kanban') {
+    renderKanbanView()
+  }
+}
+
+function calendarMoveCursor(direction) {
+  const dir = direction < 0 ? -1 : 1
+  const mode = appState.calendarViewMode
+  if (document.getElementById('calendarTimelinePrototype')) {
+    appState.calendarTimelineSlideDirection = dir
+    appState.calendarCursorDay = calendarAddDays(appState.calendarCursorDay || todayYmd(), dir)
+    renderCalendarView()
+    void calendarEnsureTimelineWorkerState({ force: true }).catch(() => {})
+    return
+  }
+  if (mode === 'month') {
+    const date = calendarDateFromYmd(appState.calendarCursorDay || todayYmd())
+    date.setMonth(date.getMonth() + dir)
+    appState.calendarCursorDay = calendarDateToYmd(date)
+  } else {
+    appState.calendarCursorDay = calendarAddDays(appState.calendarCursorDay || todayYmd(), mode === 'day' ? dir : dir * 7)
+  }
+  renderCalendarView()
+}
+
+function kanbanEnsureState() {
+  appState.kanbanColumns = kanbanLoadColumns()
+  appState.calendarTasks = calendarLoadTasks()
+  appState.kanbanSearch = String(appState.kanbanSearch ?? '').trim()
+}
+
+function kanbanTaskSearchText(task = {}) {
+  const people = calendarSelectionLabels(task.workers).join(' ')
+  const objects = calendarSelectionLabels(task.objects).join(' ')
+  const zone = String(task.zone?.label ?? task.zoneName ?? '').trim()
+  const zoneLocation = String(task.zone?.location ?? task.zoneLocation ?? '').trim()
+  return normalizeSearchText([task.title, task.notes, task.place, people, objects, zone, zoneLocation].filter(Boolean).join(' '))
+}
+
+function kanbanVisibleTasks() {
+  kanbanEnsureState()
+  const query = normalizeSearchText(appState.kanbanSearch)
+  const activeTasks = appState.calendarTasks.filter((task) => !kanbanTaskIsCompleted(task))
+  const tasks = query ? activeTasks.filter((task) => kanbanTaskSearchText(task).includes(query)) : activeTasks
+  return calendarSortTasks(tasks)
+}
+
+function kanbanNewColumnId() {
+  return `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function kanbanColorOptionsHtml(selectedColor = '') {
+  const selected = kanbanColumnColorMeta(selectedColor).value
+  return KANBAN_COLUMN_COLORS.map(
+    (color) => `<option value="${escapeHtml(color.value)}"${color.value === selected ? ' selected' : ''}>${escapeHtml(color.label)}</option>`,
+  ).join('')
+}
+
+function kanbanSyncScopeChoiceState() {
+  const scopeSelect = document.getElementById('kanbanColumnScope')
+  const scope = kanbanVisibleColumnScope(scopeSelect?.value)
+  document.querySelectorAll('input[name="kanbanColumnScopeChoice"]').forEach((input) => {
+    if (input instanceof HTMLInputElement) {
+      input.checked = input.value === scope
+    }
+  })
+}
+
+function kanbanSyncColumnScopeFields({ clearOwner = false } = {}) {
+  const scopeSelect = document.getElementById('kanbanColumnScope')
+  const ownerWrap = document.getElementById('kanbanColumnOwnerWrap')
+  const ownerLabel = document.getElementById('kanbanColumnOwnerLabel')
+  const ownerInput = document.getElementById('kanbanColumnOwner')
+  const ownerOptions = document.getElementById('kanbanColumnOwnerOptions')
+  const scope = kanbanNormalizeColumnScope(scopeSelect?.value)
+  const meta = kanbanColumnScopeMeta(scope)
+
+  if (ownerOptions) {
+    ownerOptions.innerHTML = kanbanColumnOwnerOptionsHtml(scope)
+  }
+  if (ownerLabel) {
+    ownerLabel.textContent = meta.targetLabel || 'Przypisanie'
+  }
+  if (ownerInput && clearOwner) {
+    ownerInput.value = ''
+  }
+  if (ownerInput) {
+    ownerInput.placeholder =
+      scope === 'object'
+        ? 'Wpisz lub wybierz obiekt...'
+        : scope === 'person'
+          ? 'Wpisz lub wybierz osobę...'
+          : 'Wpisz lub wybierz użytkownika...'
+  }
+  if (ownerWrap) {
+    ownerWrap.hidden = scope === 'global'
+  }
+  kanbanSyncScopeChoiceState()
+}
+
+function kanbanColumnScopeBadgeHtml(column = {}) {
+  const scope = kanbanNormalizeColumnScope(column.scope)
+  if (scope === 'global') {
+    return ''
+  }
+  const meta = kanbanColumnScopeMeta(scope)
+  const owner = String(column.ownerLabel ?? '').trim()
+  const label =
+    scope === 'user'
+      ? 'Użytkownik'
+      : scope === 'person'
+        ? 'Inny projekt'
+        : scope === 'object'
+          ? 'Obiekt'
+        : meta.label
+  return `<span class="kanban-column-scope">${escapeHtml(label)}${owner ? `: ${escapeHtml(owner)}` : ''}</span>`
+}
+
+function kanbanColumnTaskCount(columnId = '') {
+  const id = String(columnId ?? '').trim()
+  if (!id) {
+    return 0
+  }
+  return calendarLoadTasks().filter((task) => String(task.kanbanStatus ?? '') === id).length
+}
+
+function kanbanOpenColumnEditor(columnId = '') {
+  kanbanEnsureState()
+  const id = String(columnId ?? '').trim()
+  const column = id ? appState.kanbanColumns.find((item) => item.id === id) : null
+  appState.kanbanColumnEditorMode = column ? 'edit' : 'add'
+  appState.kanbanColumnEditorId = column?.id || ''
+  appState.kanbanColumnDeleteConfirm = false
+
+  const overlay = document.getElementById('kanbanColumnOverlay')
+  const title = document.getElementById('kanbanColumnModalTitle')
+  const nameInput = document.getElementById('kanbanColumnName')
+  const colorSelect = document.getElementById('kanbanColumnColor')
+  const scopeSelect = document.getElementById('kanbanColumnScope')
+  const ownerInput = document.getElementById('kanbanColumnOwner')
+  const deleteButton = document.getElementById('kanbanColumnDeleteBtn')
+  const deleteInfo = document.getElementById('kanbanColumnDeleteInfo')
+  const saveButton = document.getElementById('kanbanColumnSaveBtn')
+  if (!overlay || !nameInput || !colorSelect || !scopeSelect || !ownerInput) {
+    return
+  }
+
+  if (title) title.textContent = column ? 'Edytuj kolumnę' : 'Nowa kolumna'
+  nameInput.value = column?.label || ''
+  colorSelect.innerHTML = kanbanColorOptionsHtml(column?.color || 'blue')
+  scopeSelect.innerHTML = kanbanColumnScopeOptionsHtml(column?.scope || 'global')
+  const normalizedScope = kanbanNormalizeColumnScope(column?.scope || 'global')
+  scopeSelect.value = normalizedScope
+  ownerInput.value = column?.ownerLabel || ''
+  kanbanSyncColumnScopeFields()
+  if (deleteButton) {
+    deleteButton.hidden = !column
+    deleteButton.disabled = !column
+    deleteButton.textContent = 'Usuń kolumnę'
+  }
+  if (deleteInfo) {
+    const count = column ? kanbanColumnTaskCount(column.id) : 0
+    deleteInfo.textContent = column && count ? `W tej kolumnie jest ${count} zadań. Przy usunięciu zostaną przeniesione do pierwszej kolumny.` : ''
+    deleteInfo.classList.remove('is-warning')
+  }
+  if (saveButton) saveButton.textContent = column ? 'Zapisz zmiany' : 'Dodaj kolumnę'
+  overlay.hidden = false
+  overlay.setAttribute('aria-hidden', 'false')
+  window.setTimeout(() => nameInput.focus(), 0)
+}
+
+function kanbanCloseColumnEditor() {
+  const overlay = document.getElementById('kanbanColumnOverlay')
+  if (overlay) {
+    overlay.hidden = true
+    overlay.setAttribute('aria-hidden', 'true')
+  }
+  appState.kanbanColumnEditorMode = 'add'
+  appState.kanbanColumnEditorId = ''
+  appState.kanbanColumnDeleteConfirm = false
+}
+
+function kanbanModalIsVisible(elementId = '') {
+  const element = document.getElementById(elementId)
+  return element instanceof HTMLElement && !element.hidden && element.getAttribute('aria-hidden') !== 'true'
+}
+
+function kanbanHasOpenWindow() {
+  return kanbanModalIsVisible('kanbanColumnOverlay') || kanbanModalIsVisible('kanbanDonePopover')
+}
+
+function kanbanTargetIsInsideOpenWindow(target) {
+  if (!(target instanceof Element)) {
+    return false
+  }
+  return Boolean(target.closest('#kanbanColumnOverlay .kanban-column-modal') || target.closest('#kanbanDonePopover'))
+}
+
+function kanbanConsumeBackgroundClickWhenWindowOpen(event) {
+  if (!kanbanHasOpenWindow() || kanbanTargetIsInsideOpenWindow(event.target)) {
+    return false
+  }
+  if (kanbanModalIsVisible('kanbanDonePopover')) {
+    kanbanCloseDonePopover()
+  }
+  event.preventDefault()
+  event.stopPropagation()
+  return true
+}
+
+function kanbanSaveColumnEditor() {
+  const nameInput = document.getElementById('kanbanColumnName')
+  const colorSelect = document.getElementById('kanbanColumnColor')
+  const scopeSelect = document.getElementById('kanbanColumnScope')
+  const ownerInput = document.getElementById('kanbanColumnOwner')
+  const label = String(nameInput?.value ?? '').trim()
+  const color = kanbanColumnColorMeta(colorSelect?.value).value
+  const scope = kanbanNormalizeColumnScope(scopeSelect?.value)
+  const owner = kanbanResolveColumnOwner(scope, ownerInput?.value)
+  if (!label) {
+    showTransientNotice('Podaj nazwę kolumny.', 'error')
+    nameInput?.focus()
+    return
+  }
+  if (scope !== 'global' && !owner.ownerLabel) {
+    showTransientNotice('Wybierz użytkownika, osobę albo obiekt dla tej kolumny.', 'error')
+    ownerInput?.focus()
+    return
+  }
+
+  const columns = kanbanLoadColumns()
+  if (appState.kanbanColumnEditorMode === 'edit' && appState.kanbanColumnEditorId) {
+    const updated = columns.map((column) =>
+      column.id === appState.kanbanColumnEditorId ? { ...column, label, color, scope, ...owner } : column,
+    )
+    kanbanSaveColumns(updated)
+    showTransientNotice('Kolumna została zaktualizowana.')
+  } else {
+    kanbanSaveColumns([...columns, { id: kanbanNewColumnId(), label, color, scope, ...owner }])
+    showTransientNotice('Kolumna została dodana.')
+  }
+  kanbanCloseColumnEditor()
+  renderKanbanView()
+}
+
+function kanbanDeleteColumnEditor() {
+  const columnId = String(appState.kanbanColumnEditorId ?? '').trim()
+  const columns = kanbanLoadColumns()
+  const column = columns.find((item) => item.id === columnId)
+  const deleteButton = document.getElementById('kanbanColumnDeleteBtn')
+  const deleteInfo = document.getElementById('kanbanColumnDeleteInfo')
+  if (!column) {
+    return
+  }
+  if (columns.length <= 1) {
+    showTransientNotice('Nie można usunąć ostatniej kolumny.', 'error')
+    return
+  }
+  const tasksBeforeDelete = calendarLoadTasks()
+  const taskCount = tasksBeforeDelete.filter((task) => String(task.kanbanStatus ?? '') === columnId).length
+  if (!appState.kanbanColumnDeleteConfirm) {
+    appState.kanbanColumnDeleteConfirm = true
+    if (deleteButton) deleteButton.textContent = 'Potwierdź usunięcie'
+    if (deleteInfo) {
+      const fallbackLabel = columns.find((item) => item.id !== columnId)?.label || 'pierwszej kolumny'
+      deleteInfo.textContent = taskCount
+        ? `Potwierdź usunięcie. ${taskCount} zadań zostanie przeniesionych do kolumny „${fallbackLabel}”.`
+        : 'Potwierdź usunięcie pustej kolumny.'
+      deleteInfo.classList.add('is-warning')
+    }
+    return
+  }
+
+  const remainingColumns = columns.filter((item) => item.id !== columnId)
+  const fallbackStatus = remainingColumns[0]?.id || KANBAN_COLUMNS[0]?.id || 'inProgress'
+  kanbanSaveColumns(remainingColumns)
+  const nextTasks = tasksBeforeDelete.map((task) =>
+    String(task.kanbanStatus ?? '') === columnId ? { ...task, kanbanStatus: fallbackStatus, updatedAt: new Date().toISOString() } : task,
+  )
+  calendarSaveTasks(nextTasks)
+  kanbanCloseColumnEditor()
+  renderKanbanView()
+  showTransientNotice('Kolumna została usunięta.')
+}
+
+function kanbanInitials(name = '') {
+  const parts = String(name ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  if (!parts.length) {
+    return '?'
+  }
+  return `${parts[0]?.[0] ?? ''}${parts[1]?.[0] ?? ''}`.toUpperCase() || parts[0].slice(0, 2).toUpperCase()
+}
+
+function kanbanTaskIsCompleted(task = {}) {
+  return Boolean(task.completed ?? task.kanbanCompleted ?? false)
+}
+
+function kanbanTaskDoneSummary(task = {}) {
+  const note = String(task.completedNote ?? task.kanbanDoneNote ?? task.doneNote ?? '').trim()
+  const by = String(task.completedBy ?? task.kanbanCompletedBy ?? '').trim()
+  const at = String(task.completedAt ?? task.kanbanCompletedAt ?? '').trim()
+  const date = at ? `${formatDatePl(at)} ${formatTime(at)}` : ''
+  const meta = [by, date].filter(Boolean).join(' · ')
+  return { note, meta }
+}
+
+function renderKanbanSyncStatus() {
+  const node = document.getElementById('kanbanSyncStatus')
+  if (!node) {
+    return
+  }
+
+  const active = appState.currentRoute === 'kanban' && (appState.kanbanDataLoading || appState.calendarRemoteTasksLoading)
+  const textNode = node.querySelector('[data-kanban-sync-text]')
+  if (textNode) {
+    textNode.textContent =
+      String(appState.kanbanDataLoadingText ?? '').trim() ||
+      (appState.calendarRemoteTasksLoading ? 'Synchronizacja zadań...' : 'Odświeżanie tablicy...')
+  }
+  node.hidden = !active
+}
+
+function kanbanSetDataLoading(active, text = '') {
+  appState.kanbanDataLoading = Boolean(active)
+  appState.kanbanDataLoadingText = active ? String(text ?? '').trim() : ''
+  renderKanbanSyncStatus()
+}
+
+function calendarCompletionNoteForTask(task = {}, completedBy = '') {
+  const actor = String(completedBy ?? '').trim() || 'użytkownika'
+  return task.generatedFromComment ? `Załatwione przez ${actor}` : ''
+}
+
+function calendarCompletionActivityDetails(task = {}, note = '', completedBy = '') {
+  const parts = []
+  const cleanNote = String(note ?? '').trim()
+  const actor = String(completedBy ?? '').trim()
+  if (cleanNote) {
+    parts.push(`Komentarz: ${cleanNote}`)
+  } else if (task.generatedFromComment && actor) {
+    parts.push(`Komentarz: zadanie zostało załatwione przez ${actor}.`)
+  }
+  if (task.generatedFromComment) {
+    const assignees = calendarSelectionText(task.workers)
+    if (assignees) {
+      parts.push(`Dopisane osoby: ${assignees}`)
+    }
+  }
+  return parts.join('\n')
+}
+
+function kanbanCardHtml(task = {}) {
+  const title = String(task.title ?? '').trim() || 'Nowe zadanie'
+  const tone = calendarTaskToneValue(task)
+  const toneMeta = CALENDAR_TONE_OPTIONS.find((option) => option.value === tone) ?? CALENDAR_TONE_OPTIONS[0]
+  const objects = calendarSelectionLabels(task.objects)
+  const workers = calendarSelectionLabels(task.workers)
+  const startTime = calendarNormalizeTimeValue(task.startTime ?? task.time)
+  const endTime = calendarNormalizeTimeValue(task.endTime)
+  const timeRange = startTime && endTime ? `${startTime}-${endTime}` : startTime
+  const dateLabel = task.dateYmd ? formatDatePl(`${task.dateYmd}T12:00:00.000Z`) : '-'
+  const zoneLabel = String(task.zone?.label ?? task.zoneName ?? '').trim()
+  const zoneLocation = String(task.zone?.location ?? task.zoneLocation ?? '').trim()
+  const zoneDisplay = zoneLabel ? calendarZoneDisplayLabel({ label: zoneLabel, location: zoneLocation }) : ''
+  const objectLabel = [objects.length ? objects.join(', ') : String(task.place ?? '').trim(), zoneDisplay].filter(Boolean).join(' / ')
+  const dueDate = String(task.dueDateYmd ?? '').trim()
+  const dueTime = calendarNormalizeTimeValue(task.dueTime)
+  const dueLabel = dueDate ? `Termin: ${formatDatePl(`${dueDate}T12:00:00.000Z`)}${dueTime ? ` ${dueTime}` : ''}` : ''
+  const metaItems = [dateLabel, timeRange, dueLabel, objectLabel].filter(Boolean)
+  const completed = kanbanTaskIsCompleted(task)
+  const doneSummary = kanbanTaskDoneSummary(task)
+  return `
+    <article
+      class="kanban-card kanban-card--${escapeHtml(toneMeta.css)}${completed ? ' is-completed' : ''}"
+      draggable="true"
+      tabindex="0"
+      role="button"
+      data-kanban-task-id="${escapeHtml(task.id)}"
+      data-kanban-completed="${completed ? '1' : '0'}"
+      title="${escapeHtml(title)}"
+    >
+      <div class="kanban-card-top">
+        <div class="kanban-card-tag">${escapeHtml(toneMeta.label)}</div>
+        <button
+          class="kanban-card-done-btn${completed ? ' is-done' : ''}"
+          type="button"
+          draggable="false"
+          data-kanban-complete-task="${escapeHtml(task.id)}"
+          aria-label="${completed ? 'Cofnij zakończenie zadania' : 'Oznacz zadanie jako wykonane'}"
+          title="${completed ? 'Cofnij zakończenie zadania' : 'Oznacz zadanie jako wykonane'}"
+        >
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M5 12.5l4.2 4.2L19 7" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" />
+          </svg>
+        </button>
+      </div>
+      <h3>${escapeHtml(title)}</h3>
+      ${metaItems.length ? `<p class="kanban-card-meta">${escapeHtml(metaItems.join(' · '))}</p>` : ''}
+      ${
+        completed
+          ? `<p class="kanban-card-done-summary"><strong>Zakończone</strong>${doneSummary.note ? `: ${escapeHtml(doneSummary.note)}` : ''}${doneSummary.meta ? `<span>${escapeHtml(doneSummary.meta)}</span>` : ''}</p>`
+          : ''
+      }
+      <div class="kanban-card-footer">
+        <div class="kanban-card-stats">
+          <span title="Obiekty">Obiekty ${objects.length || (objectLabel ? 1 : 0)}</span>
+          <span title="Osoby">Osoby ${workers.length}</span>
+        </div>
+        <div class="kanban-card-avatars" aria-label="Przypisane osoby">
+          ${
+            workers.length
+              ? workers.slice(0, 4).map((name) => `<span title="${escapeHtml(name)}">${escapeHtml(kanbanInitials(name))}</span>`).join('')
+              : '<span title="Brak osoby">?</span>'
+          }
+        </div>
+      </div>
+    </article>
+  `
+}
+
+function kanbanNormalizeSection(section = '') {
+  const value = String(section ?? '').trim()
+  return ['home', 'tasks', 'inbox'].includes(value) ? value : 'home'
+}
+
+function kanbanWorkspaceTasks({ includeCompleted = true } = {}) {
+  kanbanEnsureState()
+  const tasks = appState.calendarTasks.filter((task) => calendarTaskIsVisibleForCurrentUser(task))
+  return calendarSortTasks(includeCompleted ? tasks : tasks.filter((task) => !kanbanTaskIsCompleted(task)))
+}
+
+function kanbanMessageTask(task = {}) {
+  return (
+    Boolean(task.generatedFromComment) ||
+    calendarTaskToneValue(task) === 'message' ||
+    normalizeSearchText(task.sourceKind).includes('comment')
+  )
+}
+
+function kanbanWorkspaceTaskDateValue(task = {}) {
+  const date = String(task.dueDateYmd || task.dateYmd || '').trim()
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : '9999-12-31'
+}
+
+function kanbanWorkspaceTaskTimeValue(task = {}) {
+  return calendarNormalizeTimeValue(task.dueTime || task.startTime || task.time) || '99:99'
+}
+
+function kanbanSortByAge(tasks = [], { newestFirst = false } = {}) {
+  return [...tasks].sort((left, right) => {
+    const leftDate = kanbanWorkspaceTaskDateValue(left)
+    const rightDate = kanbanWorkspaceTaskDateValue(right)
+    if (leftDate !== rightDate) {
+      return newestFirst ? rightDate.localeCompare(leftDate) : leftDate.localeCompare(rightDate)
+    }
+    const leftTime = kanbanWorkspaceTaskTimeValue(left)
+    const rightTime = kanbanWorkspaceTaskTimeValue(right)
+    if (leftTime !== rightTime) {
+      return newestFirst ? rightTime.localeCompare(leftTime) : leftTime.localeCompare(rightTime)
+    }
+    return String(left.title ?? '').localeCompare(String(right.title ?? ''), 'pl', { sensitivity: 'base' })
+  })
+}
+
+function kanbanTaskProjectLabel(task = {}) {
+  const objects = calendarSelectionLabels(task.objects)
+  const objectLabel = objects[0] || String(task.place ?? '').trim()
+  const zoneLabel = String(task.zone?.label ?? task.zoneName ?? '').trim()
+  const zoneLocation = String(task.zone?.location ?? task.zoneLocation ?? '').trim()
+  const zoneDisplay = zoneLabel ? calendarZoneDisplayLabel({ label: zoneLabel, location: zoneLocation }) : ''
+  return [objectLabel, zoneDisplay].filter(Boolean).join(' / ') || 'Bez projektu'
+}
+
+function kanbanTaskShortDateLabel(task = {}) {
+  const date = String(task.dueDateYmd || task.dateYmd || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return 'Bez daty'
+  }
+  const today = todayYmd()
+  if (date === today) {
+    return 'Dzisiaj'
+  }
+  return calendarDateLabelFromYmd(date)
+}
+
+function kanbanHomeCurrentDateLabel() {
+  try {
+    return new Intl.DateTimeFormat('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())
+  } catch {
+    return calendarDateLabelFromYmd(todayYmd())
+  }
+}
+
+function kanbanHomeGreetingName() {
+  const full = String(appState.session?.name || appState.session?.login || appState.session?.email || '').trim()
+  if (!full) {
+    return 'użytkowniku'
+  }
+  return full.split(/\s+/)[0] || full
+}
+
+function kanbanHomeTaskRowHtml(task = {}) {
+  const title = String(task.title ?? '').trim() || 'Zadanie'
+  const project = kanbanTaskProjectLabel(task)
+  const dateLabel = kanbanTaskShortDateLabel(task)
+  const status = kanbanColumnLabel(task.kanbanStatus)
+  const completed = kanbanTaskIsCompleted(task)
+  return `
+    <button class="kanban-home-task-row${completed ? ' is-completed' : ''}" type="button" data-kanban-task-id="${escapeHtml(task.id)}">
+      <span class="kanban-home-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="m6 12.5 4 4L18 8" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" />
+        </svg>
+      </span>
+      <span class="kanban-home-task-main">
+        <strong>${escapeHtml(title)}</strong>
+        <small>${escapeHtml(project)}</small>
+      </span>
+      <span class="kanban-home-task-status">${escapeHtml(status)}</span>
+      <span class="kanban-home-task-date">${escapeHtml(dateLabel)}</span>
+    </button>
+  `
+}
+
+function kanbanHomeTaskGroups(tasks = kanbanWorkspaceTasks()) {
+  const today = todayYmd()
+  const active = tasks.filter((task) => !kanbanTaskIsCompleted(task))
+  const completed = tasks.filter((task) => kanbanTaskIsCompleted(task))
+  return {
+    upcoming: kanbanSortByAge(active.filter((task) => kanbanWorkspaceTaskDateValue(task) >= today)).slice(0, 7),
+    overdue: kanbanSortByAge(active.filter((task) => kanbanWorkspaceTaskDateValue(task) < today)).slice(0, 7),
+    completed: kanbanSortByAge(completed, { newestFirst: true }).slice(0, 7),
+    overdueTotal: active.filter((task) => kanbanWorkspaceTaskDateValue(task) < today).length,
+  }
+}
+
+function kanbanProjectSummaries(tasks = kanbanWorkspaceTasks({ includeCompleted: false })) {
+  const colors = ['violet', 'blue', 'pink', 'cyan', 'amber', 'green']
+  const byLabel = new Map()
+  tasks.forEach((task) => {
+    const label = kanbanTaskProjectLabel(task)
+    const key = normalizeSearchText(label)
+    if (!key) {
+      return
+    }
+    const current = byLabel.get(key) ?? {
+      label,
+      count: 0,
+      earliest: kanbanWorkspaceTaskDateValue(task),
+      color: colors[byLabel.size % colors.length],
+    }
+    current.count += 1
+    const date = kanbanWorkspaceTaskDateValue(task)
+    if (date < current.earliest) {
+      current.earliest = date
+    }
+    byLabel.set(key, current)
+  })
+  return [...byLabel.values()].sort((left, right) => {
+    if (left.earliest !== right.earliest) {
+      return left.earliest.localeCompare(right.earliest)
+    }
+    return left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' })
+  })
+}
+
+function kanbanProjectIconHtml(color = 'blue') {
+  return `
+    <span class="kanban-project-icon kanban-project-icon--${escapeHtml(color)}" aria-hidden="true">
+      <span></span><span></span><span></span>
+    </span>
+  `
+}
+
+function renderKanbanSidebar(tasks = kanbanWorkspaceTasks()) {
+  const activeSection = kanbanNormalizeSection(appState.kanbanSection)
+  document.querySelectorAll('[data-kanban-section], [data-kanban-menu-section]').forEach((button) => {
+    const section = button.getAttribute('data-kanban-section') || button.getAttribute('data-kanban-menu-section')
+    button.classList.toggle('is-active', String(section) === activeSection)
+    button.classList.toggle('active', String(section) === activeSection && appState.currentRoute === 'kanban')
+  })
+  document.querySelectorAll('[data-toggle="kanban"]').forEach((button) => {
+    button.classList.toggle('active', appState.currentRoute === 'kanban')
+    button.classList.toggle('open', appState.currentRoute === 'kanban')
+  })
+
+  const activeTasks = tasks.filter((task) => !kanbanTaskIsCompleted(task))
+  const messageTasks = activeTasks.filter((task) => kanbanMessageTask(task))
+  document.querySelectorAll('[data-kanban-my-count]').forEach((node) => {
+    node.textContent = String(activeTasks.length)
+    node.hidden = activeTasks.length === 0
+  })
+  document.querySelectorAll('[data-kanban-inbox-dot]').forEach((node) => {
+    node.hidden = messageTasks.length === 0
+  })
+
+  const projectRoot = document.getElementById('kanbanPortalMenuProjects')
+  const projectSummaries = kanbanProjectSummaries(activeTasks)
+  const projectLimit = Math.max(4, Number(appState.kanbanProjectLimit) || 9)
+  if (projectRoot) {
+    projectRoot.innerHTML = projectSummaries.slice(0, projectLimit).map((project) => `
+      <button class="submenu-item kanban-menu-project" type="button" data-kanban-project-filter="${escapeHtml(project.label)}" title="${escapeHtml(project.label)}">
+        ${kanbanProjectIconHtml(project.color)}
+        <span class="mi-label">${escapeHtml(project.label)}</span>
+        <small>${project.count}</small>
+      </button>
+    `).join('') || '<p class="kanban-menu-empty">Brak aktywnych projektów.</p>'
+  }
+
+  const showMore = document.getElementById('kanbanPortalMenuShowMore')
+  if (showMore) {
+    showMore.hidden = projectSummaries.length <= projectLimit
+  }
+
+}
+
+function renderKanbanHome(tasks = kanbanWorkspaceTasks()) {
+  const dateNode = document.getElementById('kanbanHomeDate')
+  const greetingNode = document.getElementById('kanbanHomeGreeting')
+  const avatarNode = document.getElementById('kanbanHomeAvatar')
+  if (dateNode) dateNode.textContent = kanbanHomeCurrentDateLabel()
+  if (greetingNode) greetingNode.textContent = `Dzień dobry, ${kanbanHomeGreetingName()}`
+  if (avatarNode) avatarNode.textContent = kanbanInitials(appState.session?.name || appState.session?.email || '?')
+
+  const groups = kanbanHomeTaskGroups(tasks)
+  const activeTab = ['upcoming', 'overdue', 'completed'].includes(appState.kanbanHomeTaskTab) ? appState.kanbanHomeTaskTab : 'upcoming'
+  appState.kanbanHomeTaskTab = activeTab
+  document.querySelectorAll('#view-kanban [data-kanban-home-tab]').forEach((button) => {
+    button.classList.toggle('is-active', String(button.getAttribute('data-kanban-home-tab')) === activeTab)
+  })
+  const overdueCount = document.getElementById('kanbanHomeOverdueCount')
+  if (overdueCount) overdueCount.textContent = `(${groups.overdueTotal})`
+
+  const taskRoot = document.getElementById('kanbanHomeTasks')
+  const visibleTasks = groups[activeTab] ?? []
+  if (taskRoot) {
+    taskRoot.innerHTML = visibleTasks.length
+      ? visibleTasks.map((task) => kanbanHomeTaskRowHtml(task)).join('')
+      : '<div class="kanban-home-empty">Brak zadań w tym widoku.</div>'
+  }
+
+  const projectRoot = document.getElementById('kanbanHomeProjects')
+  const projects = kanbanProjectSummaries(tasks.filter((task) => !kanbanTaskIsCompleted(task))).slice(0, 7)
+  if (projectRoot) {
+    projectRoot.innerHTML = `
+      <button class="kanban-project-card kanban-project-card--create" type="button" data-kanban-home-add-task>
+        <span aria-hidden="true">+</span>
+        <strong>Utwórz zadanie</strong>
+      </button>
+      ${projects.map((project) => `
+        <button class="kanban-project-card" type="button" data-kanban-project-filter="${escapeHtml(project.label)}" title="${escapeHtml(project.label)}">
+          ${kanbanProjectIconHtml(project.color)}
+          <span>
+            <strong>${escapeHtml(project.label)}</strong>
+            <small>${project.count} ${project.count === 1 ? 'zadanie' : 'zadań'} do wykonania</small>
+          </span>
+        </button>
+      `).join('')}
+    `
+  }
+}
+
+function kanbanInboxDateGroupLabel(dateYmd = '') {
+  const value = String(dateYmd ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return 'Bez daty'
+  }
+  const today = todayYmd()
+  if (value === today) {
+    return 'Dzisiaj'
+  }
+  const yesterday = calendarAddDays(today, -1)
+  if (value === yesterday) {
+    return 'Wczoraj'
+  }
+  return calendarDateLabelFromYmd(value)
+}
+
+function kanbanInboxTaskRowHtml(task = {}) {
+  const title = String(task.title ?? '').trim() || 'Zadanie'
+  const dateLabel = calendarDateLabelFromYmd(task.dueDateYmd || task.dateYmd)
+  const comments = calendarNormalizeActivityLog(task.activityLog).length
+  return `
+    <button class="kanban-inbox-task-row" type="button" data-kanban-task-id="${escapeHtml(task.id)}">
+      <span class="kanban-inbox-task-check" aria-hidden="true">✓</span>
+      <span class="kanban-inbox-task-title">${escapeHtml(title)}</span>
+      ${comments ? `<span class="kanban-inbox-task-comments">${comments}</span>` : ''}
+      <span class="kanban-inbox-task-date">${escapeHtml(dateLabel)}</span>
+      <span class="kanban-inbox-task-icons" aria-hidden="true">♡ ◌</span>
+    </button>
+  `
+}
+
+function kanbanInboxActivityGroups(tasks = []) {
+  const groups = new Map()
+  kanbanSortByAge(tasks.filter((task) => !kanbanTaskIsCompleted(task) && kanbanMessageTask(task))).forEach((task) => {
+    const label = kanbanTaskProjectLabel(task)
+    const key = normalizeSearchText(label)
+    const sourceWorker = String(task.sourceWorkerName || task.sourceWorkerLogin || calendarSelectionLabels(task.workers)[0] || 'pracownik').trim()
+    if (!groups.has(key)) {
+      groups.set(key, {
+        label,
+        worker: sourceWorker,
+        color: calendarTaskToneValue(task) === 'message' ? 'violet' : 'blue',
+        tasks: [],
+      })
+    }
+    groups.get(key).tasks.push(task)
+  })
+  return [...groups.values()]
+}
+
+function kanbanInboxBookmarkGroups(tasks = []) {
+  const groups = new Map()
+  kanbanSortByAge(tasks.filter((task) => !kanbanTaskIsCompleted(task))).forEach((task) => {
+    const key = String(task.dueDateYmd || task.dateYmd || '').trim() || 'none'
+    if (!groups.has(key)) {
+      groups.set(key, {
+        label: key === 'none' ? 'Bez daty' : `Twoje zadania na ${kanbanInboxDateGroupLabel(key)}`,
+        tasks: [],
+      })
+    }
+    groups.get(key).tasks.push(task)
+  })
+  return [...groups.values()]
+}
+
+function renderKanbanInbox(tasks = kanbanWorkspaceTasks()) {
+  const root = document.getElementById('kanbanInboxList')
+  if (!root) {
+    return
+  }
+  const activeTab = appState.kanbanInboxTab === 'bookmarks' ? 'bookmarks' : 'activity'
+  appState.kanbanInboxTab = activeTab
+  document.querySelectorAll('#view-kanban [data-kanban-inbox-tab]').forEach((button) => {
+    button.classList.toggle('is-active', String(button.getAttribute('data-kanban-inbox-tab')) === activeTab)
+  })
+
+  const avatar = document.getElementById('kanbanInboxAvatar')
+  if (avatar) avatar.textContent = kanbanInitials(appState.session?.name || appState.session?.email || '?')
+
+  if (activeTab === 'bookmarks') {
+    const groups = kanbanInboxBookmarkGroups(tasks).slice(0, 12)
+    root.innerHTML = groups.length
+      ? groups.map((group) => `
+          <section class="kanban-inbox-group kanban-inbox-group--bookmarks">
+            <div class="kanban-inbox-date-label">${escapeHtml(kanbanInboxDateGroupLabel(group.tasks[0]?.dateYmd || group.tasks[0]?.dueDateYmd))}</div>
+            <div class="kanban-inbox-group-inner">
+              <div class="kanban-inbox-group-head">
+                <span class="kanban-inbox-calendar-icon" aria-hidden="true"></span>
+                <h2>${escapeHtml(group.label)}</h2>
+              </div>
+              <div class="kanban-inbox-task-table">
+                ${group.tasks.slice(0, 3).map((task) => kanbanInboxTaskRowHtml(task)).join('')}
+              </div>
+              ${group.tasks.length > 3 ? '<button class="kanban-inbox-more" type="button">Pokaż więcej zadań</button>' : ''}
+            </div>
+          </section>
+        `).join('')
+      : '<div class="kanban-inbox-empty">Brak zadań do pokazania.</div>'
+    return
+  }
+
+  const groups = kanbanInboxActivityGroups(tasks).slice(0, 20)
+  root.innerHTML = groups.length
+    ? groups.map((group) => `
+        <section class="kanban-inbox-group">
+          <div class="kanban-inbox-date-label">${escapeHtml(kanbanInboxDateGroupLabel(group.tasks[0]?.dateYmd))}</div>
+          <div class="kanban-inbox-group-inner">
+            <div class="kanban-inbox-group-head">
+              <span class="kanban-inbox-project-dot kanban-inbox-project-dot--${escapeHtml(group.color)}" aria-hidden="true"></span>
+              <h2>${escapeHtml(group.label)}</h2>
+              <span class="kanban-inbox-unread-dot" aria-hidden="true"></span>
+            </div>
+            <p class="kanban-inbox-group-subtitle">Nowe zadania dodane przez: ${escapeHtml(group.worker)}</p>
+            <div class="kanban-inbox-task-table">
+              ${group.tasks.slice(0, 3).map((task) => kanbanInboxTaskRowHtml(task)).join('')}
+            </div>
+            ${group.tasks.length > 3 ? '<button class="kanban-inbox-more" type="button">Pokaż więcej zadań</button>' : ''}
+          </div>
+        </section>
+      `).join('')
+    : '<div class="kanban-inbox-empty">Brak aktywnych wiadomości pracowników.</div>'
+}
+
+function renderKanbanBoard(tasks = kanbanVisibleTasks()) {
+  const board = document.getElementById('kanbanBoard')
+  if (!board) {
+    return
+  }
+  const columns = appState.kanbanColumns
+  board.style.setProperty('--kanban-column-count', String(columns.length))
+  board.style.removeProperty('min-width')
+  board.innerHTML = `
+    ${columns.map((column) => {
+      const columnTasks = tasks.filter((task) => kanbanNormalizeStatus(task.kanbanStatus) === column.id)
+      return `
+        <section
+          class="kanban-column kanban-column--${escapeHtml(column.id)}"
+          data-kanban-column="${escapeHtml(column.id)}"
+          style="${escapeHtml(kanbanColumnStyle(column))}"
+        >
+          <div class="kanban-column-head">
+            <div
+              class="kanban-column-title"
+              draggable="true"
+              data-kanban-column-drag-handle="${escapeHtml(column.id)}"
+              title="Przeciągnij, aby zmienić kolejność kolumn"
+            >
+              <span class="kanban-column-dot" aria-hidden="true"></span>
+              <h2>${escapeHtml(column.label)}</h2>
+              <span class="kanban-column-count">${columnTasks.length}</span>
+              ${kanbanColumnScopeBadgeHtml(column)}
+            </div>
+            <button class="kanban-more-btn" type="button" data-kanban-edit-column="${escapeHtml(column.id)}" aria-label="Edytuj kolumnę ${escapeHtml(column.label)}">⋮</button>
+          </div>
+          <div class="kanban-column-list">
+            ${columnTasks.length ? columnTasks.map((task) => kanbanCardHtml(task)).join('') : '<div class="kanban-empty">Brak zadań</div>'}
+          </div>
+          <button class="kanban-add-item" type="button" data-kanban-add-task="${escapeHtml(column.id)}">+ Dodaj zadanie</button>
+        </section>
+      `
+    }).join('')}
+    <section class="kanban-column kanban-column--new">
+      <button class="kanban-add-column" type="button">+ Nowa kolumna</button>
+    </section>
+  `
+}
+
+function renderKanbanView() {
+  renderKanbanSyncStatus()
+  kanbanEnsureState()
+  appState.kanbanSection = kanbanNormalizeSection(appState.kanbanSection)
+  const searchInput = document.getElementById('kanbanSearch')
+  if (searchInput && searchInput.value !== appState.kanbanSearch) {
+    searchInput.value = appState.kanbanSearch
+  }
+  const workspaceTasks = kanbanWorkspaceTasks()
+  renderKanbanSidebar(workspaceTasks)
+
+  const homeView = document.getElementById('kanbanHomeView')
+  const taskBoardView = document.getElementById('kanbanTaskBoardView')
+  const inboxView = document.getElementById('kanbanInboxView')
+  if (homeView) homeView.hidden = appState.kanbanSection !== 'home'
+  if (taskBoardView) taskBoardView.hidden = appState.kanbanSection !== 'tasks'
+  if (inboxView) inboxView.hidden = appState.kanbanSection !== 'inbox'
+  const boardAvatar = kanbanInitials(appState.session?.name || appState.session?.email || '?')
+  const boardAvatarNode = document.getElementById('kanbanBoardAvatar')
+  const boardTitleAvatarNode = document.getElementById('kanbanBoardTitleAvatar')
+  if (boardAvatarNode) boardAvatarNode.textContent = boardAvatar
+  if (boardTitleAvatarNode) boardTitleAvatarNode.textContent = boardAvatar
+
+  if (appState.kanbanSection === 'home') {
+    renderKanbanHome(workspaceTasks)
+    return
+  }
+  if (appState.kanbanSection === 'inbox') {
+    renderKanbanInbox(workspaceTasks)
+    return
+  }
+  renderKanbanBoard(kanbanVisibleTasks())
+}
+
+function kanbanMoveTask(taskId, status) {
+  const id = String(taskId ?? '').trim()
+  const nextStatus = kanbanNormalizeStatus(status)
+  if (!id) {
+    return
+  }
+  const changedAt = new Date().toISOString()
+  const tasks = calendarLoadTasks().map((task) =>
+    task.id === id
+      ? calendarNormalizeTask(
+          calendarAppendTaskActivity(
+            { ...task, kanbanStatus: nextStatus, updatedAt: changedAt },
+            'Przeniesiono w Kanbanie',
+            `Kolumna: ${kanbanColumnLabel(task.kanbanStatus)} -> ${kanbanColumnLabel(nextStatus)}`,
+            { at: changedAt },
+          ),
+        )
+      : task,
+  )
+  calendarSaveTasks(tasks)
+  renderDashboardKanbanTasks()
+  renderKanbanView()
+}
+
+function kanbanCloseDonePopover() {
+  const popover = document.getElementById('kanbanDonePopover')
+  if (popover) {
+    popover.hidden = true
+    popover.setAttribute('aria-hidden', 'true')
+  }
+  appState.kanbanDoneTaskId = ''
+}
+
+function kanbanConfirmTaskDone() {
+  const id = String(appState.kanbanDoneTaskId ?? '').trim()
+  const noteInput = document.getElementById('kanbanDoneNote')
+  const note = String(noteInput?.value ?? '').trim()
+  if (!id) {
+    kanbanCloseDonePopover()
+    return
+  }
+  if (!note) {
+    showTransientNotice('Napisz krótko, co zostało zrobione.', 'error')
+    noteInput?.focus?.()
+    return
+  }
+
+  const completedAt = new Date().toISOString()
+  const completedBy = String(appState.session?.name || appState.session?.email || appState.session?.uid || '').trim()
+  const tasks = calendarLoadTasks().map((task) =>
+    task.id === id
+      ? calendarNormalizeTask(
+          calendarAppendTaskActivity(
+            {
+              ...task,
+              active: true,
+              completed: true,
+              kanbanCompleted: true,
+              completionStatus: 'ZAKONCZONE',
+              completedAt,
+              completedBy,
+              completedNote: note,
+              updatedAt: completedAt,
+            },
+            'Oznaczono jako ukończone',
+            calendarCompletionActivityDetails(task, note, completedBy),
+            { actor: completedBy, at: completedAt },
+          ),
+        )
+      : task,
+  )
+  calendarSaveTasks(tasks)
+  kanbanCloseDonePopover()
+  renderDashboardKanbanTasks()
+  renderKanbanView()
+  showTransientNotice('Zadanie oznaczone jako zakończone.')
+}
+
+function kanbanCompleteTaskNow(taskId = '') {
+  const id = String(taskId ?? '').trim()
+  if (!id) {
+    return
+  }
+
+  const tasksBefore = calendarLoadTasks()
+  const task = tasksBefore.find((item) => item.id === id)
+  if (!task) {
+    return
+  }
+
+  if (kanbanTaskIsCompleted(task)) {
+    const updatedAt = new Date().toISOString()
+    const tasks = tasksBefore.map((item) =>
+      item.id === id
+        ? calendarNormalizeTask(
+            calendarAppendTaskActivity(
+              {
+                ...item,
+                active: true,
+                completed: false,
+                kanbanCompleted: false,
+                completionStatus: 'AKTYWNE',
+                completedAt: '',
+                completedBy: '',
+                completedNote: '',
+                updatedAt,
+              },
+              'Cofnięto ukończenie',
+              '',
+              { at: updatedAt },
+            ),
+          )
+        : item,
+    )
+    calendarSaveTasks(tasks)
+    kanbanCloseDonePopover()
+    renderDashboardKanbanTasks()
+    renderKanbanView()
+    showTransientNotice('Cofnięto zakończenie zadania.')
+    return
+  }
+
+  const completedAt = new Date().toISOString()
+  const completedBy = String(appState.session?.name || appState.session?.email || appState.session?.uid || '').trim()
+  const tasks = tasksBefore.map((item) =>
+    item.id === id
+      ? calendarNormalizeTask(
+          calendarAppendTaskActivity(
+            {
+              ...item,
+              active: true,
+              completed: true,
+              kanbanCompleted: true,
+              completionStatus: 'ZAKONCZONE',
+              completedAt,
+              completedBy,
+              completedNote: calendarCompletionNoteForTask(item, completedBy),
+              updatedAt: completedAt,
+            },
+            'Oznaczono jako ukończone',
+            calendarCompletionActivityDetails(item, '', completedBy),
+            { actor: completedBy, at: completedAt },
+          ),
+        )
+      : item,
+  )
+  calendarSaveTasks(tasks)
+  kanbanCloseDonePopover()
+  renderDashboardKanbanTasks()
+  renderKanbanView()
+  showTransientNotice('Zadanie oznaczone jako zakończone.')
+}
+
+function kanbanColumnDropPosition(event, columnNode) {
+  if (!(columnNode instanceof HTMLElement)) {
+    return 'before'
+  }
+  const rect = columnNode.getBoundingClientRect()
+  return event.clientX > rect.left + rect.width / 2 ? 'after' : 'before'
+}
+
+function kanbanClearColumnDragClasses() {
+  document.querySelectorAll('#view-kanban .kanban-column').forEach((node) => {
+    node.classList.remove('is-column-dragging', 'is-column-drop-target', 'is-column-drop-before', 'is-column-drop-after')
+  })
+}
+
+function kanbanMarkColumnDropTarget(columnNode, position = 'before') {
+  if (!(columnNode instanceof HTMLElement)) {
+    return
+  }
+  document.querySelectorAll('#view-kanban .kanban-column.is-column-drop-target').forEach((node) => {
+    if (node !== columnNode) {
+      node.classList.remove('is-column-drop-target', 'is-column-drop-before', 'is-column-drop-after')
+    }
+  })
+  columnNode.classList.add('is-column-drop-target')
+  columnNode.classList.toggle('is-column-drop-before', position !== 'after')
+  columnNode.classList.toggle('is-column-drop-after', position === 'after')
+}
+
+function kanbanMoveColumn(sourceColumnId = '', targetColumnId = '', position = 'before') {
+  const sourceId = String(sourceColumnId ?? '').trim()
+  const targetId = String(targetColumnId ?? '').trim()
+  if (!sourceId || !targetId || sourceId === targetId) {
+    return
+  }
+
+  const columns = kanbanLoadColumns()
+  const sourceIndex = columns.findIndex((column) => column.id === sourceId)
+  const rawTargetIndex = columns.findIndex((column) => column.id === targetId)
+  if (sourceIndex < 0 || rawTargetIndex < 0) {
+    return
+  }
+
+  const nextColumns = [...columns]
+  const [movedColumn] = nextColumns.splice(sourceIndex, 1)
+  let targetIndex = rawTargetIndex
+  if (sourceIndex < rawTargetIndex) {
+    targetIndex -= 1
+  }
+  const insertIndex = position === 'after' ? targetIndex + 1 : targetIndex
+  nextColumns.splice(Math.max(0, Math.min(insertIndex, nextColumns.length)), 0, movedColumn)
+  kanbanSaveColumns(nextColumns)
+  renderKanbanView()
+}
+
+function kanbanOpenCalendarTask(taskId = '') {
+  const id = String(taskId ?? '').trim()
+  const task = calendarLoadTasks().find((item) => item.id === id)
+  if (task?.dateYmd) {
+    appState.calendarCursorDay = task.dateYmd
+  }
+  appState.calendarViewMode = 'week'
+  document.querySelector('[data-route="calendar"]')?.click()
+  window.setTimeout(() => {
+    renderCalendarView()
+    if (id) {
+      calendarOpenEditor(id)
+    }
+  }, 0)
+}
+
+function kanbanCreateTask(status = '') {
+  const normalizedStatus = String(status ?? '').trim() ? kanbanNormalizeStatus(status) : ''
+  appState.kanbanPendingStatus = normalizedStatus
+  appState.calendarCursorDay = todayYmd()
+  appState.calendarViewMode = 'week'
+  document.querySelector('[data-route="calendar"]')?.click()
+  window.setTimeout(() => {
+    renderCalendarView()
+    calendarOpenEditor('', appState.calendarCursorDay)
+    const toneInput = document.getElementById('calendarTaskTone')
+    if (toneInput && normalizedStatus === 'done') {
+      toneInput.value = 'green'
+    }
+    showTransientNotice('Dodaj zadanie w kalendarzu. Po zapisie pojawi się też w Kanbanie.')
+  }, 0)
+}
+
+function bindKanbanViewFunctions() {
+  const binding = createBindingHelpers()
+  const root = document.getElementById('view-kanban')
+
+  binding.add(document.getElementById('kanbanSearch'), 'input', (event) => {
+    appState.kanbanSearch = String(event.target?.value ?? '')
+    renderKanbanView()
+  })
+  binding.add(document.getElementById('kanbanAddTaskBtn'), 'click', () => kanbanCreateTask())
+  binding.add(document.getElementById('kanbanQuickCreateBtn'), 'click', () => kanbanCreateTask())
+  binding.add(document.getElementById('kanbanInboxOpenTasksBtn'), 'click', () => {
+    appState.kanbanSection = 'tasks'
+    appState.kanbanSearch = 'Wiadomość pracownika'
+    renderKanbanView()
+  })
+  binding.add(document.getElementById('kanbanColumnSaveBtn'), 'click', kanbanSaveColumnEditor)
+  binding.add(document.getElementById('kanbanColumnCancelBtn'), 'click', kanbanCloseColumnEditor)
+  binding.add(document.getElementById('kanbanColumnCloseBtn'), 'click', kanbanCloseColumnEditor)
+  binding.add(document.getElementById('kanbanColumnDeleteBtn'), 'click', kanbanDeleteColumnEditor)
+  binding.add(document.getElementById('kanbanDoneSaveBtn'), 'click', kanbanConfirmTaskDone)
+  binding.add(document.getElementById('kanbanDoneCancelBtn'), 'click', kanbanCloseDonePopover)
+  binding.add(document.getElementById('kanbanDoneCloseBtn'), 'click', kanbanCloseDonePopover)
+  binding.add(document.getElementById('kanbanColumnScope'), 'change', () => kanbanSyncColumnScopeFields({ clearOwner: true }))
+  document.querySelectorAll('input[name="kanbanColumnScopeChoice"]').forEach((input) => {
+    binding.add(input, 'change', () => {
+      const scopeSelect = document.getElementById('kanbanColumnScope')
+      if (scopeSelect && input instanceof HTMLInputElement && input.checked) {
+        scopeSelect.value = input.value === 'project' ? 'person' : input.value
+        kanbanSyncColumnScopeFields({ clearOwner: true })
+      }
+    })
+  })
+  binding.add(document.getElementById('kanbanColumnOverlay'), 'click', (event) => {
+    if (event.target?.id === 'kanbanColumnOverlay') {
+      kanbanCloseColumnEditor()
+    }
+  })
+  binding.add(document.getElementById('kanbanColumnOverlay'), 'keydown', (event) => {
+    if (event.key === 'Escape') {
+      kanbanCloseColumnEditor()
+    }
+    if (event.key === 'Enter' && ['kanbanColumnName', 'kanbanColumnOwner'].includes(event.target?.id)) {
+      kanbanSaveColumnEditor()
+    }
+  })
+  binding.add(document.getElementById('kanbanDonePopover'), 'keydown', (event) => {
+    if (event.key === 'Escape') {
+      kanbanCloseDonePopover()
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      kanbanConfirmTaskDone()
+    }
+  })
+  binding.add(root, 'click', (event) => {
+    if (kanbanConsumeBackgroundClickWhenWindowOpen(event)) {
+      return
+    }
+    const sectionButton = event.target?.closest?.('[data-kanban-section]')
+    if (sectionButton) {
+      appState.kanbanSection = kanbanNormalizeSection(sectionButton.getAttribute('data-kanban-section'))
+      if (appState.kanbanSection !== 'tasks') {
+        appState.kanbanSearch = ''
+      }
+      renderKanbanView()
+      return
+    }
+    const homeTab = event.target?.closest?.('[data-kanban-home-tab]')
+    if (homeTab) {
+      appState.kanbanHomeTaskTab = String(homeTab.getAttribute('data-kanban-home-tab') ?? 'upcoming')
+      renderKanbanView()
+      return
+    }
+    const inboxTab = event.target?.closest?.('[data-kanban-inbox-tab]')
+    if (inboxTab) {
+      appState.kanbanInboxTab = String(inboxTab.getAttribute('data-kanban-inbox-tab') ?? 'activity')
+      renderKanbanView()
+      return
+    }
+    const projectFilter = event.target?.closest?.('[data-kanban-project-filter]')
+    if (projectFilter) {
+      const label = String(projectFilter.getAttribute('data-kanban-project-filter') ?? '').trim()
+      appState.kanbanSection = 'tasks'
+      appState.kanbanSearch = label
+      renderKanbanView()
+      return
+    }
+    if (event.target?.closest?.('[data-kanban-home-add-task]')) {
+      kanbanCreateTask()
+      return
+    }
+    if (event.target?.closest?.('#kanbanSidebarShowMore')) {
+      appState.kanbanProjectLimit = Math.min(60, Math.max(9, Number(appState.kanbanProjectLimit) || 9) + 12)
+      renderKanbanView()
+      return
+    }
+    const completeTask = event.target?.closest?.('[data-kanban-complete-task]')
+    if (completeTask) {
+      event.preventDefault()
+      event.stopPropagation()
+      kanbanCompleteTaskNow(completeTask.getAttribute('data-kanban-complete-task'))
+      return
+    }
+    const editColumn = event.target?.closest?.('[data-kanban-edit-column]')
+    if (editColumn) {
+      kanbanOpenColumnEditor(editColumn.getAttribute('data-kanban-edit-column'))
+      return
+    }
+    const addTask = event.target?.closest?.('[data-kanban-add-task]')
+    if (addTask) {
+      kanbanCreateTask(addTask.getAttribute('data-kanban-add-task'))
+      return
+    }
+    if (event.target?.closest?.('.kanban-add-column')) {
+      kanbanOpenColumnEditor()
+      return
+    }
+    const card = event.target?.closest?.('[data-kanban-task-id]')
+    if (card) {
+      kanbanOpenCalendarTask(card.getAttribute('data-kanban-task-id'))
+    }
+  })
+  binding.add(root, 'keydown', (event) => {
+    if (event.key !== 'Enter') {
+      return
+    }
+    if (kanbanHasOpenWindow() && !kanbanTargetIsInsideOpenWindow(event.target)) {
+      return
+    }
+    if (event.target?.closest?.('[data-kanban-complete-task]')) {
+      return
+    }
+    const card = event.target?.closest?.('[data-kanban-task-id]')
+    if (card) {
+      kanbanOpenCalendarTask(card.getAttribute('data-kanban-task-id'))
+    }
+  })
+  binding.add(root, 'dragstart', (event) => {
+    if (kanbanHasOpenWindow()) {
+      event.preventDefault()
+      return
+    }
+    if (event.target?.closest?.('[data-kanban-complete-task]')) {
+      event.preventDefault()
+      return
+    }
+    const columnHandle = event.target?.closest?.('[data-kanban-column-drag-handle]')
+    if (columnHandle) {
+      const column = columnHandle.closest('[data-kanban-column]')
+      const columnId = String(column?.getAttribute('data-kanban-column') ?? '').trim()
+      if (!columnId) {
+        return
+      }
+      appState.kanbanDragColumnId = columnId
+      appState.kanbanDragTaskId = ''
+      column?.classList.add('is-column-dragging')
+      event.dataTransfer?.setData('application/x-icanban-column', columnId)
+      event.dataTransfer?.setData('text/plain', columnId)
+      event.dataTransfer.effectAllowed = 'move'
+      return
+    }
+
+    const card = event.target?.closest?.('[data-kanban-task-id]')
+    if (!card) {
+      return
+    }
+    appState.kanbanDragTaskId = String(card.getAttribute('data-kanban-task-id') ?? '')
+    event.dataTransfer?.setData('text/plain', appState.kanbanDragTaskId)
+    event.dataTransfer.effectAllowed = 'move'
+  })
+  binding.add(root, 'dragover', (event) => {
+    if (kanbanHasOpenWindow()) {
+      event.preventDefault()
+      return
+    }
+    const column = event.target?.closest?.('[data-kanban-column]')
+    if (!column) {
+      return
+    }
+    event.preventDefault()
+    if (appState.kanbanDragColumnId) {
+      const targetColumnId = String(column.getAttribute('data-kanban-column') ?? '').trim()
+      if (targetColumnId && targetColumnId !== appState.kanbanDragColumnId) {
+        kanbanMarkColumnDropTarget(column, kanbanColumnDropPosition(event, column))
+      }
+      event.dataTransfer.dropEffect = 'move'
+      return
+    }
+    column.classList.add('is-drop-target')
+  })
+  binding.add(root, 'dragleave', (event) => {
+    const column = event.target?.closest?.('[data-kanban-column]')
+    column?.classList.remove('is-drop-target')
+    if (appState.kanbanDragColumnId) {
+      column?.classList.remove('is-column-drop-target', 'is-column-drop-before', 'is-column-drop-after')
+    }
+  })
+  binding.add(root, 'drop', (event) => {
+    if (kanbanHasOpenWindow()) {
+      event.preventDefault()
+      return
+    }
+    const column = event.target?.closest?.('[data-kanban-column]')
+    if (!column) {
+      return
+    }
+    event.preventDefault()
+    column.classList.remove('is-drop-target', 'is-column-drop-target', 'is-column-drop-before', 'is-column-drop-after')
+    if (appState.kanbanDragColumnId) {
+      kanbanMoveColumn(appState.kanbanDragColumnId, column.getAttribute('data-kanban-column'), kanbanColumnDropPosition(event, column))
+      appState.kanbanDragColumnId = ''
+      kanbanClearColumnDragClasses()
+      return
+    }
+    const taskId = event.dataTransfer?.getData('text/plain') || appState.kanbanDragTaskId
+    kanbanMoveTask(taskId, column.getAttribute('data-kanban-column'))
+    appState.kanbanDragTaskId = ''
+  })
+  binding.add(root, 'dragend', () => {
+    appState.kanbanDragColumnId = ''
+    appState.kanbanDragTaskId = ''
+    document.querySelectorAll('.kanban-column.is-drop-target').forEach((node) => node.classList.remove('is-drop-target'))
+    kanbanClearColumnDragClasses()
+  })
+
+  return binding.done
+}
+
+function bindCalendarViewFunctions() {
+  const binding = createBindingHelpers()
+
+  binding.add(document.getElementById('calendarAddBtn'), 'click', () => {
+    calendarOpenEditor('', appState.calendarCursorDay || todayYmd())
+  })
+  binding.add(document.getElementById('calendarPrevBtn'), 'click', () => calendarMoveCursor(-1))
+  binding.add(document.getElementById('calendarNextBtn'), 'click', () => calendarMoveCursor(1))
+  binding.add(document.getElementById('calendarTodayBtn'), 'click', () => {
+    appState.calendarCursorDay = todayYmd()
+    appState.calendarTimelineSlideDirection = 0
+    appState.calendarTimelineResetScroll = true
+    renderCalendarView()
+    void calendarEnsureTimelineWorkerState({ force: true }).catch(() => {})
+  })
+  binding.add(document.getElementById('calendarTimelineCompletedToggle'), 'click', () => {
+    appState.calendarTimelineShowCompleted = appState.calendarTimelineShowCompleted === false
+    renderCalendarView()
+  })
+  binding.add(document.getElementById('calendarTimelineRefreshBtn'), 'click', () => {
+    renderCalendarView()
+    void calendarEnsureTimelineWorkerState({ force: true }).catch(() => {})
+    showTransientNotice('Kalendarz odświeżony.')
+  })
+  binding.add(document.getElementById('calendarTimelineTypeBtn'), 'click', (event) => {
+    const button = event.currentTarget
+    const panel = document.getElementById('calendarTimelineTypePanel')
+    if (!(button instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) {
+      return
+    }
+    const shouldOpen = panel.hasAttribute('hidden')
+    panel.toggleAttribute('hidden', !shouldOpen)
+    button.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false')
+  })
+  binding.add(document.getElementById('calendarTimelineTypePanel'), 'change', (event) => {
+    const input = event.target
+    if (!(input instanceof HTMLInputElement) || !input.hasAttribute('data-calendar-timeline-type')) {
+      return
+    }
+    const type = String(input.getAttribute('data-calendar-timeline-type') || '').trim()
+    const allowed = new Set(calendarTimelineAllTypeValues())
+    if (!allowed.has(type)) {
+      return
+    }
+    const selected = new Set(appState.calendarTimelineTypeFilters || [])
+    if (input.checked) {
+      selected.add(type)
+    } else {
+      selected.delete(type)
+    }
+    appState.calendarTimelineTypeFilters = [...selected].filter((value) => allowed.has(value))
+    renderCalendarView()
+  })
+  const timelineStage = document.getElementById('calendarPrototypeTimeline')
+  binding.add(timelineStage, 'dblclick', (event) => {
+    const bar = event.target?.closest?.('[data-calendar-timeline-order-id]')
+    if (!(bar instanceof HTMLElement)) {
+      return
+    }
+    if (calendarTimelineBarClickTimer) {
+      window.clearTimeout(calendarTimelineBarClickTimer)
+      calendarTimelineBarClickTimer = 0
+    }
+    if (bar.getAttribute('data-calendar-timeline-real-event') === '1') {
+      event.preventDefault()
+      event.stopPropagation()
+      void calendarTimelineOpenRealEventEditorFromBar(bar)
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    ordersOpenEditorFromCalendar(bar.getAttribute('data-calendar-timeline-order-id'))
+  })
+  binding.add(timelineStage, 'click', (event) => {
+    const bar = event.target?.closest?.('[data-calendar-timeline-order-id]')
+    if (bar instanceof HTMLElement) {
+      event.preventDefault()
+      event.stopPropagation()
+      if (calendarTimelineBarClickTimer) {
+        window.clearTimeout(calendarTimelineBarClickTimer)
+      }
+      calendarTimelineBarClickTimer = window.setTimeout(() => {
+        calendarTimelineBarClickTimer = 0
+        void calendarTimelineShowWorkerDayEventsPopup(bar)
+      }, 220)
+      return
+    }
+    const resourceNode = event.target?.closest?.('.fw-resource-name[data-calendar-timeline-row]')
+    if (!(resourceNode instanceof HTMLElement)) {
+      return
+    }
+    event.preventDefault()
+    calendarTimelineOpenWorkerEvents(resourceNode.getAttribute('data-calendar-timeline-row'))
+  })
+  binding.add(document, 'click', (event) => {
+    const popup = document.getElementById('calendarTimelineEventsPopup')
+    if (!popup) {
+      return
+    }
+    const target = event.target
+    if (target instanceof Node && (popup.contains(target) || target?.closest?.('[data-calendar-timeline-order-id]'))) {
+      return
+    }
+    calendarTimelineHideEventsPopup()
+  })
+  binding.add(document, 'keydown', (event) => {
+    if (event.key === 'Escape') {
+      calendarTimelineHideEventsPopup()
+    }
+  })
+  binding.add(timelineStage, 'dragstart', (event) => {
+    const bar = event.target?.closest?.('[data-calendar-timeline-order-id]')
+    if (!(bar instanceof HTMLElement)) {
+      return
+    }
+    if (bar.getAttribute('data-calendar-timeline-real-event') === '1') {
+      event.preventDefault()
+      return
+    }
+    const orderId = String(bar.getAttribute('data-calendar-timeline-order-id') ?? '').trim()
+    if (!orderId) {
+      return
+    }
+    const sourceRow = Number(bar.getAttribute('data-calendar-timeline-row'))
+    appState.calendarTimelineDragOrderId = orderId
+    appState.calendarTimelineDragSourceRow = Number.isInteger(sourceRow) ? sourceRow : null
+    appState.calendarTimelineDragTargetRow = null
+    appState.calendarTimelineDragTargetSlot = null
+    appState.calendarTimelineDropHandled = false
+    appState.calendarTimelineDragResources = calendarTimelineResources()
+    appState.calendarTimelineDragConflictKey = ''
+    appState.calendarTimelineDragConflictValue = false
+    bar.classList.add('is-dragging')
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData('text/plain', orderId)
+      if (Number.isInteger(sourceRow)) {
+        event.dataTransfer.setData('application/x-calendar-source-row', String(sourceRow))
+      }
+    }
+  })
+  binding.add(timelineStage, 'dragover', (event) => {
+    if (!appState.calendarTimelineDragOrderId) {
+      return
+    }
+    const target = calendarTimelineDropTargetFromEvent(event)
+    if (!(target instanceof HTMLElement)) {
+      return
+    }
+    const dropInfo = calendarTimelineDropInfoFromTarget(target)
+    if (!dropInfo) {
+      return
+    }
+    event.preventDefault()
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move'
+    }
+    calendarTimelineRememberDropInfo(dropInfo)
+    const hasConflict = calendarTimelineDragConflict(
+      appState.calendarTimelineDragOrderId,
+      dropInfo.rowIndex,
+      dropInfo.slotIndex,
+      appState.calendarTimelineDragSourceRow,
+    )
+    calendarTimelineClearDropTargets()
+    target.classList.add(hasConflict ? 'is-timeline-drop-invalid' : 'is-timeline-drop-target')
+  })
+  binding.add(timelineStage, 'dragleave', (event) => {
+    const target = calendarTimelineDropTargetFromEvent(event)
+    if (target instanceof HTMLElement && (!(event.relatedTarget instanceof Node) || !target.contains(event.relatedTarget))) {
+      target.classList.remove('is-timeline-drop-target', 'is-timeline-drop-invalid')
+    }
+  })
+  binding.add(timelineStage, 'drop', (event) => {
+    const dropInfo = calendarTimelineResolveDropInfo(event)
+    if (!dropInfo) {
+      return
+    }
+    event.preventDefault()
+    appState.calendarTimelineDropHandled = true
+    const orderId = String(event.dataTransfer?.getData('text/plain') || appState.calendarTimelineDragOrderId || '').trim()
+    const sourceRowValue = event.dataTransfer?.getData('application/x-calendar-source-row')
+    const sourceRow = sourceRowValue ? Number(sourceRowValue) : appState.calendarTimelineDragSourceRow
+    const dragResources = Array.isArray(appState.calendarTimelineDragResources) && appState.calendarTimelineDragResources.length
+      ? appState.calendarTimelineDragResources
+      : calendarTimelineResources()
+    calendarTimelineClearDropTargets()
+    const moveResult = calendarTimelineMoveOrder(
+      orderId,
+      dropInfo.rowIndex,
+      dropInfo.slotIndex,
+      Number.isInteger(sourceRow) ? sourceRow : null,
+      dragResources,
+    )
+    calendarTimelineResetDragState()
+    calendarTimelineHandleMoveResult(moveResult)
+  })
+  binding.add(timelineStage, 'dragend', () => {
+    if (!appState.calendarTimelineDropHandled && appState.calendarTimelineDragOrderId) {
+      const dropInfo = calendarTimelineResolveDropInfo()
+      if (dropInfo) {
+        const dragResources = Array.isArray(appState.calendarTimelineDragResources) && appState.calendarTimelineDragResources.length
+          ? appState.calendarTimelineDragResources
+          : calendarTimelineResources()
+        const moveResult = calendarTimelineMoveOrder(
+          appState.calendarTimelineDragOrderId,
+          dropInfo.rowIndex,
+          dropInfo.slotIndex,
+          Number.isInteger(Number(appState.calendarTimelineDragSourceRow)) ? Number(appState.calendarTimelineDragSourceRow) : null,
+          dragResources,
+        )
+        calendarTimelineHandleMoveResult(moveResult)
+      }
+    }
+    calendarTimelineResetDragState()
+    calendarTimelineClearDropTargets()
+    document.querySelectorAll('#view-calendar .fw-event-bar.is-dragging').forEach((node) => {
+      node.classList.remove('is-dragging')
+    })
+  })
+  binding.add(document, 'click', (event) => {
+    const filter = document.getElementById('calendarTimelineTypeFilter')
+    const panel = document.getElementById('calendarTimelineTypePanel')
+    const button = document.getElementById('calendarTimelineTypeBtn')
+    if (!(filter instanceof HTMLElement) || !(panel instanceof HTMLElement) || !(button instanceof HTMLButtonElement)) {
+      return
+    }
+    const target = event.target
+    if (target instanceof Node && filter.contains(target)) {
+      return
+    }
+    panel.setAttribute('hidden', '')
+    button.setAttribute('aria-expanded', 'false')
+  })
+
+  document.querySelectorAll('[data-calendar-view]').forEach((button) => {
+    binding.add(button, 'click', () => {
+      appState.calendarViewMode = String(button.getAttribute('data-calendar-view') ?? 'week')
+      renderCalendarView()
+    })
+  })
+
+  const contextPanel = document.querySelector('#view-calendar .calendar-context-panel')
+  binding.add(contextPanel, 'click', (event) => {
+    const navButton = event.target?.closest?.('[data-calendar-mini-nav]')
+    if (navButton) {
+      calendarMoveMiniMonth(Number(navButton.getAttribute('data-calendar-mini-nav') ?? 1))
+      return
+    }
+    const dayButton = event.target?.closest?.('[data-calendar-mini-day]')
+    if (dayButton) {
+      const dayKey = String(dayButton.getAttribute('data-calendar-mini-day') ?? '').trim()
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+        appState.calendarCursorDay = dayKey
+        renderCalendarView()
+      }
+    }
+  })
+  binding.add(contextPanel, 'change', (event) => {
+    const input = event.target
+    if (!(input instanceof HTMLInputElement)) {
+      return
+    }
+    if (input.hasAttribute('data-calendar-filter-all')) {
+      appState.calendarToneFilters = calendarAllToneValues()
+      renderCalendarView()
+      return
+    }
+    if (input.hasAttribute('data-calendar-filter-show-completed')) {
+      appState.calendarShowCompletedTasks = input.checked
+      renderCalendarView()
+      return
+    }
+    if (input.hasAttribute('data-calendar-filter-show-read')) {
+      appState.calendarShowReadTasks = input.checked
+      renderCalendarView()
+      return
+    }
+    const tone = String(input.getAttribute('data-calendar-filter-tone') ?? '').trim()
+    if (!tone) {
+      return
+    }
+    const current = calendarNormalizeToneFilters(appState.calendarToneFilters)
+    const selected = current.length === CALENDAR_TONE_OPTIONS.length ? new Set() : new Set(current)
+    if (input.checked) {
+      selected.add(tone)
+    } else {
+      selected.delete(tone)
+    }
+    appState.calendarToneFilters = selected.size ? calendarNormalizeToneFilters([...selected]) : calendarAllToneValues()
+    renderCalendarView()
+  })
+
+  const board = document.getElementById('calendarBoard')
+  binding.add(board, 'click', (event) => {
+    const addButton = event.target?.closest?.('[data-calendar-add-day]')
+    if (addButton) {
+      calendarOpenEditor('', addButton.getAttribute('data-calendar-add-day'))
+      return
+    }
+    const taskNode = event.target?.closest?.('[data-calendar-task-id]')
+    if (taskNode) {
+      calendarOpenEditor(taskNode.getAttribute('data-calendar-task-id'))
+      return
+    }
+    const timeSlot = event.target?.closest?.('[data-calendar-day][data-calendar-hour]')
+    if (timeSlot) {
+      calendarOpenEditor('', timeSlot.getAttribute('data-calendar-day'), timeSlot.getAttribute('data-calendar-hour'))
+    }
+  })
+  binding.add(board, 'keydown', (event) => {
+    if (event.key !== 'Enter') {
+      return
+    }
+    const taskNode = event.target?.closest?.('[data-calendar-task-id]')
+    if (taskNode) {
+      calendarOpenEditor(taskNode.getAttribute('data-calendar-task-id'))
+    }
+  })
+  binding.add(board, 'dragstart', (event) => {
+    const taskNode = event.target?.closest?.('[data-calendar-task-id]')
+    if (!taskNode) {
+      return
+    }
+    appState.calendarDragTaskId = String(taskNode.getAttribute('data-calendar-task-id') ?? '')
+    event.dataTransfer?.setData('text/plain', appState.calendarDragTaskId)
+    event.dataTransfer.effectAllowed = 'move'
+  })
+  binding.add(board, 'dragover', (event) => {
+    const dayCell = event.target?.closest?.('[data-calendar-day]')
+    if (!dayCell) {
+      return
+    }
+    event.preventDefault()
+    dayCell.classList.add('is-drop-target')
+  })
+  binding.add(board, 'dragleave', (event) => {
+    const dayCell = event.target?.closest?.('[data-calendar-day]')
+    dayCell?.classList.remove('is-drop-target')
+  })
+  binding.add(board, 'drop', (event) => {
+    const dayCell = event.target?.closest?.('[data-calendar-day]')
+    if (!dayCell) {
+      return
+    }
+    event.preventDefault()
+    dayCell.classList.remove('is-drop-target')
+    const taskId = event.dataTransfer?.getData('text/plain') || appState.calendarDragTaskId
+    const hourValue = dayCell.hasAttribute('data-calendar-hour') ? dayCell.getAttribute('data-calendar-hour') : null
+    calendarMoveTask(taskId, dayCell.getAttribute('data-calendar-day'), hourValue)
+    appState.calendarDragTaskId = ''
+  })
+  binding.add(board, 'dragend', () => {
+    appState.calendarDragTaskId = ''
+    document
+      .querySelectorAll('.calendar-day-cell.is-drop-target, .calendar-time-slot.is-drop-target')
+      .forEach((node) => node.classList.remove('is-drop-target'))
+  })
+
+  binding.add(document.getElementById('calendarEditorOverlay'), 'click', (event) => {
+    const tabButton = event.target?.closest?.('[data-calendar-task-tab]')
+    if (tabButton) {
+      calendarSetEditorTab(tabButton.getAttribute('data-calendar-task-tab'))
+      return
+    }
+    const addPickerButton = event.target?.closest?.('[data-calendar-add-picker]')
+    if (addPickerButton) {
+      const kind = addPickerButton.getAttribute('data-calendar-add-picker')
+      calendarAddPickerRow(kind)
+      if (kind === 'objects') {
+        calendarSyncZoneOptions(calendarReadZoneSelection())
+      }
+      return
+    }
+    const removePickerButton = event.target?.closest?.('[data-calendar-remove-picker]')
+    if (removePickerButton) {
+      const kind = removePickerButton.getAttribute('data-calendar-remove-picker') || 'workers'
+      const row = removePickerButton.closest('[data-calendar-picker-row]')
+      const rows = document.getElementById(calendarPickerConfig(kind).rowsId)
+      row?.remove()
+      if (rows && !rows.querySelector('[data-calendar-picker-row]')) {
+        calendarAddPickerRow(kind)
+      }
+      if (kind === 'objects') {
+        calendarSyncZoneOptions(calendarReadZoneSelection())
+      }
+      return
+    }
+    if (event.target?.id === 'calendarEditorOverlay') {
+      calendarCloseEditor()
+    }
+  })
+  binding.add(document.getElementById('calendarEditorOverlay'), 'input', (event) => {
+    if (event.target?.closest?.('[data-calendar-picker-input="objects"]')) {
+      calendarSyncZoneOptions(calendarReadZoneSelection())
+    }
+  })
+  binding.add(document.getElementById('calendarEditorOverlay'), 'change', (event) => {
+    if (event.target?.closest?.('[data-calendar-picker-input="objects"]')) {
+      calendarSyncZoneOptions(calendarReadZoneSelection())
+    }
+  })
+  binding.add(document.getElementById('calendarEditorCloseBtn'), 'click', calendarCloseEditor)
+  binding.add(document.getElementById('calendarTaskCancelBtn'), 'click', calendarCloseEditor)
+  binding.add(document.getElementById('calendarTaskSaveBtn'), 'click', calendarSaveEditorTask)
+  binding.add(document.getElementById('calendarTaskDeleteBtn'), 'click', calendarDeleteEditorTask)
+  binding.add(document.getElementById('calendarTaskDuplicateBtn'), 'click', calendarDuplicateEditorTask)
+  binding.add(document.getElementById('calendarTaskCompleteBtn'), 'click', calendarToggleEditorTaskCompleted)
+
+  return binding.done
 }
 
 function createBindingHelpers() {
@@ -12444,6 +24641,26 @@ function bindDashboardViewFunctions() {
 
   binding.add(document.getElementById('dashScheduleNextBtn'), 'click', () => {
     dashboardMoveScheduleDay(1)
+  })
+
+  binding.add(document.getElementById('dashCommentsAckAll'), 'click', () => {
+    dashboardMarkAllCommentsRead()
+  })
+
+  binding.add(document.getElementById('dashCommentsList'), 'click', (event) => {
+    const button = event.target?.closest?.('[data-dash-comment-key]')
+    if (!button) {
+      return
+    }
+    dashboardMarkCommentRead(button.getAttribute('data-dash-comment-key'))
+  })
+
+  binding.add(document.getElementById('dashKanbanTasksList'), 'click', (event) => {
+    const button = event.target?.closest?.('[data-dash-kanban-task-id]')
+    if (!button) {
+      return
+    }
+    kanbanOpenCalendarTask(button.getAttribute('data-dash-kanban-task-id'))
   })
 
   binding.add(document.getElementById('dashScheduleRefreshBtn'), 'click', (event) => {
@@ -12610,8 +24827,10 @@ function bindIndividualOrdersViewFunctions() {
     cssVarName: '--io-grid',
     storageKey: 'portal.grid.individualOrders',
     defaultWidths: [120, 110, 290, 120, 140, 220, 160, 260, 130, 170],
-    minWidths: [96, 90, 180, 90, 110, 140, 110, 170, 108, 140],
+    minWidths: [72, 66, 118, 68, 82, 96, 80, 112, 78, 92],
     nonResizableIndexes: [9],
+    autoFitToViewport: true,
+    enforceFullWidth: true,
     maxWidth: 780,
   })
   individualOrdersSyncPermissions()
@@ -12726,10 +24945,10 @@ function bindEventsViewFunctions() {
     tableSelector: '#view-events .events-table',
     headSelector: '#view-events .events-head',
     cssVarName: '--events-grid',
-    storageKey: 'portal.grid.events',
-    defaultWidths: [36, 162, 146, 146, 154, 96, 82, 82, 92, 92, 108, 52],
-    minWidths: [34, 110, 110, 108, 118, 84, 72, 72, 80, 82, 92, 46],
-    nonResizableIndexes: [11],
+    storageKey: 'portal.grid.events.v3',
+    defaultWidths: [28, 90, 90, 94, 94, 78, 56, 56, 64, 72, 74, 38],
+    minWidths: [26, 62, 62, 64, 64, 66, 44, 44, 48, 56, 58, 34],
+    nonResizableIndexes: [0, 11],
     autoFitToViewport: true,
     enforceFullWidth: true,
     maxWidth: 680,
@@ -12743,6 +24962,12 @@ function bindEventsViewFunctions() {
 
   binding.add(document.getElementById('evResetBtn'), 'click', () => {
     void fetchEventsForCurrentSession({ resetPage: false })
+  })
+  binding.add(document.getElementById('evExportPdfBtn'), 'click', () => {
+    void downloadEventsExport('pdf')
+  })
+  binding.add(document.getElementById('evExportExcelBtn'), 'click', () => {
+    void downloadEventsExport('excel')
   })
 
   binding.add(document.getElementById('evPrevBtn'), 'click', () => {
@@ -12760,6 +24985,10 @@ function bindEventsViewFunctions() {
   binding.add(document.getElementById('evStatus'), 'change', () => {
     appState.eventsPage = 1
     void fetchEventsForCurrentSession({ resetPage: false })
+  })
+  binding.add(document.getElementById('evWorker'), 'input', () => {
+    appState.eventsWorkerLoginFilter = ''
+    appState.eventsWorkerLoginFilterText = ''
   })
 
   binding.add(document.getElementById('evAddBtn'), 'click', () => {
@@ -12895,6 +25124,57 @@ function bindEventsViewFunctions() {
   binding.add(document.getElementById('evStopNowBtn'), 'click', setEventStopNow)
   binding.add(document.getElementById('evEditPom'), 'change', refreshEventZoneOptionsForClient)
   binding.add(document.getElementById('evEditStrefa'), 'change', syncEventRoomAndClientFromZone)
+  ;[
+    { inputId: 'evEditWorkerSearch', selectId: 'evEditWorker', kind: 'worker' },
+    { inputId: 'evEditPomSearch', selectId: 'evEditPom', kind: 'client' },
+    { inputId: 'evEditStrefaSearch', selectId: 'evEditStrefa', kind: 'zone' },
+  ].forEach(({ inputId, selectId, kind }) => {
+    binding.add(document.getElementById(inputId), 'input', () => {
+      eventEditorApplyPickerFilter(kind, { expandOnEmpty: true })
+    })
+    binding.add(document.getElementById(inputId), 'focus', () => {
+      eventEditorApplyPickerFilter(kind, { expandOnEmpty: true })
+    })
+    binding.add(document.getElementById(inputId), 'blur', () => {
+      window.setTimeout(() => {
+        eventEditorMaybeCollapsePicker(kind)
+      }, 120)
+    })
+    binding.add(document.getElementById(inputId), 'keydown', (event) => {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        const select = document.getElementById(selectId)
+        if (select) {
+          select.focus()
+        }
+        return
+      }
+
+      if (event.key !== 'Enter') {
+        return
+      }
+
+      const select = document.getElementById(selectId)
+      if (select && select.options.length > 1) {
+        const firstMatch = select.options[1]
+        select.value = String(firstMatch?.value ?? '')
+      }
+      eventEditorSyncSearchInput(kind)
+      eventEditorCollapsePicker(kind)
+    })
+    binding.add(document.getElementById(selectId), 'focus', () => {
+      eventEditorApplyPickerFilter(kind, { expandOnEmpty: true })
+    })
+    binding.add(document.getElementById(selectId), 'change', () => {
+      eventEditorSyncSearchInput(kind)
+      eventEditorCollapsePicker(kind)
+    })
+    binding.add(document.getElementById(selectId), 'blur', () => {
+      window.setTimeout(() => {
+        eventEditorMaybeCollapsePicker(kind)
+      }, 120)
+    })
+  })
 
   return () => {
     cleanupEventsTableResize()
@@ -12908,10 +25188,12 @@ function bindZonesViewFunctions() {
     tableSelector: '#view-zones .zones-table',
     headSelector: '#view-zones .zones-head',
     cssVarName: '--zones-grid',
-    storageKey: 'portal.grid.zones',
-    defaultWidths: [110, 150, 220, 180, 130, 132, 140, 120],
-    minWidths: [84, 110, 140, 130, 100, 110, 110, 96],
+    storageKey: 'portal.grid.zones.v2',
+    defaultWidths: [64, 116, 126, 120, 82, 82, 84, 64],
+    minWidths: [46, 70, 76, 72, 58, 58, 58, 54],
     nonResizableIndexes: [7],
+    autoFitToViewport: true,
+    enforceFullWidth: true,
     maxWidth: 740,
   })
 
@@ -12927,6 +25209,9 @@ function bindZonesViewFunctions() {
     binding.add(document.getElementById(id), 'keydown', (event) => {
       if (event.key === 'Enter') filterZonesTable({ resetPage: true })
     })
+  })
+  binding.add(document.getElementById('znSort'), 'change', () => {
+    filterZonesTable({ resetPage: true })
   })
 
   binding.add(document.getElementById('znPrevBtn'), 'click', () => {
@@ -12960,7 +25245,10 @@ function bindZonesViewFunctions() {
     void deleteZoneData()
   })
 
-  return binding.done
+  return () => {
+    cleanupZonesTableResize()
+    binding.done()
+  }
 }
 function bindWorkerTimeViewFunctions(router) {
   const binding = createBindingHelpers()
@@ -12970,8 +25258,10 @@ function bindWorkerTimeViewFunctions(router) {
     cssVarName: '--events-grid',
     storageKey: 'portal.grid.workerTime',
     defaultWidths: [42, 120, 220, 180, 100, 140],
-    minWidths: [34, 90, 150, 120, 82, 100],
+    minWidths: [32, 74, 112, 92, 66, 78],
     nonResizableIndexes: [5],
+    autoFitToViewport: true,
+    enforceFullWidth: true,
     maxWidth: 680,
   })
 
@@ -13231,8 +25521,10 @@ function bindWorkerProfileViewFunctions() {
     cssVarName: '--workers-grid',
     storageKey: 'portal.grid.workerProfile',
     defaultWidths: [90, 220, 150, 180, 110, 120, 130, 240, 110],
-    minWidths: [72, 140, 110, 120, 88, 92, 100, 150, 92],
+    minWidths: [54, 104, 80, 90, 64, 66, 72, 100, 68],
     nonResizableIndexes: [8],
+    autoFitToViewport: true,
+    enforceFullWidth: true,
     maxWidth: 760,
   })
 
@@ -13308,6 +25600,33 @@ function bindWorkerProfileViewFunctions() {
     void deleteWorkerProfileData()
   })
   binding.add(document.getElementById('wkFillQrBtn'), 'click', fillWorkerQrFromCredentials)
+  binding.add(document.getElementById('wkEditEmail'), 'input', () => {
+    if (appState.workerProfileModalMode !== 'add') {
+      return
+    }
+
+    const emailInput = document.getElementById('wkEditEmail')
+    const loginInput = document.getElementById('wkEditLogin')
+    if (!(emailInput instanceof HTMLInputElement) || !(loginInput instanceof HTMLInputElement)) {
+      return
+    }
+
+    const nextLogin = workerProfileLoginFromEmail(emailInput.value)
+    if (!nextLogin) {
+      return
+    }
+
+    if (!loginInput.value.trim() || loginInput.dataset.autoFromEmail === '1') {
+      loginInput.value = nextLogin
+      loginInput.dataset.autoFromEmail = '1'
+    }
+  })
+  binding.add(document.getElementById('wkEditLogin'), 'input', () => {
+    const loginInput = document.getElementById('wkEditLogin')
+    if (loginInput instanceof HTMLInputElement) {
+      loginInput.dataset.autoFromEmail = '0'
+    }
+  })
   binding.add(document.getElementById('wkShowPassBtn'), 'click', () => {
     const passInput = document.getElementById('wkCurrentPass')
     const showButton = document.getElementById('wkShowPassBtn')
@@ -13387,7 +25706,7 @@ function bindReportsViewFunctions() {
       const tab = String(historyTabButton.getAttribute('data-rep-history-tab') ?? '').trim()
       if (tab) {
         reportHistorySetTab(tab)
-        reportHistorySetStatus('Wybierz filtr i kliknij "Pokaz historie".')
+        reportHistorySetStatus('Wybierz filtr i kliknij "Pokaż historię".')
       }
       return
     }
@@ -13464,11 +25783,31 @@ function bindReportsViewFunctions() {
 
   binding.add(document.getElementById('repBack'), 'click', closeReportBuilder)
   binding.add(document.getElementById('repRun'), 'click', () => {
-    void runEventsReportComparison()
+    void runEventsOperationalReport()
   })
   binding.add(document.getElementById('repDownloadCsv'), 'click', reportDownloadCsv)
   binding.add(document.getElementById('repA_client'), 'change', () => reportRefreshZoneOptions('A'))
   binding.add(document.getElementById('repB_client'), 'change', () => reportRefreshZoneOptions('B'))
+  binding.add(document.getElementById('repEventsClient'), 'change', reportRefreshEventsZoneOptions)
+  ;[
+    'repEventsFrom',
+    'repEventsTo',
+    'repEventsClient',
+    'repEventsZone',
+    'repEventsWorker',
+    'repEventsStatus',
+    'repEventsType',
+    'repEventsGroupBy',
+    'repEventsSearch',
+  ].forEach((id) => {
+    binding.add(document.getElementById(id), 'keydown', (event) => {
+      if (event.key !== 'Enter') {
+        return
+      }
+
+      void runEventsOperationalReport()
+    })
+  })
   binding.add(document.getElementById('repHistoryRun'), 'click', () => {
     void runReportHistory()
   })
@@ -13662,58 +26001,38 @@ function bindSettingsViewFunctions() {
 }
 
 async function hydrateSections(orgId) {
-  const rangeFrom = firstDayOfCurrentMonthYmd()
-  const rangeTo = todayYmd()
-  const [clients, workers, zones, todayActive, recentEvents, todayWorkdays, worktimeFingerprint] =
-    await Promise.all([
-    getClients(orgId),
-    getWorkers(orgId),
-    getZones(orgId),
-    getTodayActiveWorkers(orgId),
-    getWorkdays(orgId, {
-      source: 'events',
-      fromIso: rangeFrom,
-      toIso: rangeTo,
-      page: 1,
-      pageSize: 100000,
-    }).catch(() => ({ items: [] })),
-    getWorkdays(orgId, {
-      source: 'workdays',
-      fromIso: rangeTo,
-      toIso: rangeTo,
-      page: 1,
-      pageSize: 100000,
-    }).catch(() => ({ items: [] })),
-    getTodayWorktimeFingerprint(orgId).catch(() => null),
-  ])
-  const todayStartSourceRows = [...(recentEvents.items ?? []), ...(todayWorkdays.items ?? [])]
-  const todayRows = dashboardApplyFirstQrStartToday(
-    todayActive.items ?? [],
-    todayStartSourceRows,
-    appState.dashboardScheduleDays,
-  )
-  const summary = dashboardBuildSummary(todayRows, recentEvents.items ?? [])
+  const hasLocalSnapshot = dashboardApplyLocalSnapshot(orgId)
+  dashboardStartScheduleRefresh(orgId)
+  if (!hasLocalSnapshot) {
+    dashboardBeginLoading()
+  }
+  try {
+    const { todayRows, recentEvents } = await dashboardLoadFastRows(orgId)
+    const summary = dashboardBuildSummary(todayRows, recentEvents.items ?? [], dashboardBuildPeriodHourValues(todayRows))
+    const comments = dashboardBuildNewComments(recentEvents.items ?? [], [])
+    renderDashboardSummary(summary)
+    await dashboardRevealLoadingStage('overview')
+    renderDashboardKanbanTasks()
+    renderDashboardNewComments(comments)
+    await dashboardRevealLoadingStage('tasks')
+    renderDashboardEvents(todayRows)
+    await dashboardRevealLoadingStage('active')
+    renderDashboardSchedulePanel()
+    await dashboardRevealLoadingStage('schedule')
+    setDashboardLastRefresh(new Date())
+    dashboardWriteLocalSnapshot(orgId, {
+      summary,
+      todayRows,
+      scheduleSourceRows: appState.dashboardScheduleSourceRows,
+      comments,
+    })
+  } finally {
+    if (!hasLocalSnapshot) {
+      dashboardEndLoading()
+    }
+  }
 
-  appState.clients = clients
-  appState.clientsLoaded = true
-  appState.workers = workers
-  appState.workersLoaded = true
-  appState.workerTimeRows = workers
-  appState.zones = zones
-  appState.zonesLoaded = true
-
-  renderDashboardEvents(todayRows)
-  renderDashboardSummary(summary)
-  dashboardLastWorktimeToken = String(worktimeFingerprint?.token ?? '').trim()
-  filterClientsTable()
-  filterZonesTable()
-  fillClientProfileCoordinatorOptions()
-
-  setSubwelcomeMetric('#view-clientsList .subwelcome', clients.length)
-  setSubwelcomeMetric('#view-clientProfile .subwelcome', clients.length)
-  setSubwelcomeMetric('#view-workerTime .subwelcome', workers.length)
-  setSubwelcomeMetric('#view-workerProfile .subwelcome', workers.length)
-  setSubwelcomeMetric('#view-zones .subwelcome', zones.length)
+  dashboardStartPostLoadRefresh(orgId, { preloadReferences: true })
 }
 
 function bindLogin(router) {
@@ -13763,6 +26082,9 @@ function bindLogin(router) {
       appState.eventsFilters = null
       appState.eventsSelectedKeys = new Set()
       appState.eventRows = []
+      appState.calendarTasks = []
+      appState.calendarRemoteTasksLoaded = false
+      appState.calendarRemoteTasksLoading = false
       appState.workerDetailRows = []
       appState.workerDetailSourceRows = []
       appState.workerDetailViewRows = []
@@ -13791,11 +26113,16 @@ function bindLogin(router) {
       appState.dashboardMetricValues = {}
       appState.dashboardTodayRows = []
       appState.dashboardScheduleSourceRows = []
+      appState.dashboardScheduleLoading = false
+      appState.dashboardScheduleError = ''
+      appState.dashboardScheduleStale = false
+      appState.dashboardBackgroundDataLoaded = false
       appState.dashboardScheduleAlertSnoozeUntil = 0
       appState.dashboardScheduleAlertMuted = false
       appState.dashboardScheduleAlertLastKey = ''
       appState.dashboardScheduleLateShownKeys = new Set()
       appState.dashboardScheduleLatePendingKeys = []
+      appState.dashboardLoadingCount = 0
       appState.settingsActiveTab = readStoredSettingsTab()
       appState.settingsEffectiveStyleId = STYLE_FALLBACK_ID
       appState.settingsEffectiveStyleSource = 'fallback'
@@ -13811,9 +26138,9 @@ function bindLogin(router) {
       setUserChip(normalizedSession)
       syncSettingsPermissions()
       await settingsRefreshStyleState({ silent: true })
+      router.go('dashboard')
       await hydrateSections(normalizedSession.orgId)
       startDashboardAutoRefresh()
-      router.go('dashboard')
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Błąd logowania.')
     } finally {
@@ -13846,7 +26173,6 @@ function bindLogout() {
   const handleLogout = () => {
     stopDashboardAutoRefresh()
     dashboardHideMetricPopover()
-    dashboardLastWorktimeToken = ''
     appState.currentRoute = ''
     appState.session = null
     appState.clients = []
@@ -13871,6 +26197,9 @@ function bindLogout() {
     appState.eventsFilters = null
     appState.eventsSelectedKeys = new Set()
     appState.eventRows = []
+    appState.calendarTasks = []
+    appState.calendarRemoteTasksLoaded = false
+    appState.calendarRemoteTasksLoading = false
     appState.workerDetailRows = []
     appState.workerDetailSourceRows = []
     appState.workerDetailViewRows = []
@@ -13899,11 +26228,16 @@ function bindLogout() {
     appState.dashboardMetricValues = {}
     appState.dashboardTodayRows = []
     appState.dashboardScheduleSourceRows = []
+    appState.dashboardScheduleLoading = false
+    appState.dashboardScheduleError = ''
+    appState.dashboardScheduleStale = false
+    appState.dashboardBackgroundDataLoaded = false
     appState.dashboardScheduleAlertSnoozeUntil = 0
     appState.dashboardScheduleAlertMuted = false
     appState.dashboardScheduleAlertLastKey = ''
     appState.dashboardScheduleLateShownKeys = new Set()
     appState.dashboardScheduleLatePendingKeys = []
+    appState.dashboardLoadingCount = 0
     appState.settingsActiveTab = readStoredSettingsTab()
     appState.settingsEffectiveStyleId = STYLE_FALLBACK_ID
     appState.settingsEffectiveStyleSource = 'fallback'
@@ -13947,9 +26281,45 @@ export function mountPortalApp() {
       dashboardHideScheduleMissingStartAlert()
       dashboardHideScheduleLateStartAlert()
     }
+    if (appState.currentRoute !== 'calendar') {
+      calendarTimelineHideStatusAlert()
+    }
+    dashboardSyncLoadingOverlay()
 
     if (appState.currentRoute === 'dashboard') {
+      renderDashboardKanbanTasks()
       triggerDashboardRefreshIfAllowed()
+    }
+
+    if (appState.currentRoute === 'calendar') {
+      renderCalendarView()
+      void calendarEnsureTimelineWorkerState({ force: true }).catch(() => {})
+      deferRouteTaskDataRefresh('calendar', renderCalendarView)
+      if (!appState.clientsLoaded) {
+        void fetchClientsForCurrentSession(false).then(renderCalendarView).catch(() => {})
+      }
+      if (!appState.workersLoaded) {
+        void fetchWorkersForCurrentSession().then(renderCalendarView).catch(() => {})
+      }
+      if (!appState.zonesLoaded) {
+        void fetchZonesForCurrentSession(false).then(renderCalendarView).catch(() => {})
+      }
+      return
+    }
+
+    if (appState.currentRoute === 'kanban') {
+      renderKanbanView()
+      deferRouteTaskDataRefresh('kanban', renderKanbanView)
+      if (!appState.clientsLoaded) {
+        void fetchClientsForCurrentSession(false).then(renderKanbanView).catch(() => {})
+      }
+      if (!appState.workersLoaded) {
+        void fetchWorkersForCurrentSession().then(renderKanbanView).catch(() => {})
+      }
+      if (!appState.zonesLoaded) {
+        void fetchZonesForCurrentSession(false).then(renderKanbanView).catch(() => {})
+      }
+      return
     }
 
     if (route === 'clientsList') {
@@ -13959,6 +26329,21 @@ export function mountPortalApp() {
 
     if (route === 'events') {
       void fetchEventsForCurrentSession({ applyStoredFilters: true })
+      return
+    }
+
+    if (route === 'orders') {
+      renderOrdersView()
+      void ordersWarmLocationSources()
+      return
+    }
+
+    if (route === 'ordersMap') {
+      renderOrdersMapView()
+      void ordersWarmLocationSources().then(renderOrdersMapView).catch(() => {})
+      if (!appState.workersLoaded) {
+        void fetchWorkersForCurrentSession().then(renderOrdersMapView).catch(() => {})
+      }
       return
     }
 
@@ -14027,16 +26412,24 @@ export function mountPortalApp() {
       return
     }
     triggerDashboardRefreshIfAllowed()
+    if (appState.currentRoute === 'calendar') {
+      void calendarEnsureTimelineWorkerState({ force: true }).catch(() => {})
+    }
   }
   document.addEventListener('visibilitychange', handleVisibilityChange)
 
   const cleanups = [
     bindSidebarCollapseToggle(),
+    setupFloatingTableScrollbar(),
     bindSubmenuToggles(),
     bindRouteButtons(router),
+    bindCalendarViewFunctions(),
+    bindKanbanViewFunctions(),
     bindDashboardViewFunctions(),
     bindLogin(router),
     bindLogout(),
+    bindOrdersViewFunctions(),
+    bindOrdersMapViewFunctions(),
     bindClientsViewFunctions(),
     bindClientProfileViewFunctions(),
     bindIndividualOrdersViewFunctions(),
@@ -14048,6 +26441,7 @@ export function mountPortalApp() {
     bindReportsViewFunctions(),
     bindSettingsViewFunctions(),
     () => document.removeEventListener('visibilitychange', handleVisibilityChange),
+    calendarStopTimelineWorkerStatusRefresh,
   ]
 
   const session = requireAuth() ?? getSession()
@@ -14076,7 +26470,6 @@ export function mountPortalApp() {
         const message = error instanceof Error ? error.message : 'Błąd inicjalizacji sesji.'
         console.error(message)
         stopDashboardAutoRefresh()
-        dashboardLastWorktimeToken = ''
         appState.currentRoute = ''
         logout()
         appState.session = null
@@ -14128,11 +26521,16 @@ export function mountPortalApp() {
         appState.dashboardMetricValues = {}
         appState.dashboardTodayRows = []
         appState.dashboardScheduleSourceRows = []
+        appState.dashboardScheduleLoading = false
+        appState.dashboardScheduleError = ''
+        appState.dashboardScheduleStale = false
+        appState.dashboardBackgroundDataLoaded = false
         appState.dashboardScheduleAlertSnoozeUntil = 0
         appState.dashboardScheduleAlertMuted = false
         appState.dashboardScheduleAlertLastKey = ''
         appState.dashboardScheduleLateShownKeys = new Set()
         appState.dashboardScheduleLatePendingKeys = []
+        appState.dashboardLoadingCount = 0
         appState.settingsActiveTab = readStoredSettingsTab()
         appState.settingsEffectiveStyleId = STYLE_FALLBACK_ID
         appState.settingsEffectiveStyleSource = 'fallback'
@@ -14154,7 +26552,6 @@ export function mountPortalApp() {
     router.go('dashboard')
   } else {
     stopDashboardAutoRefresh()
-    dashboardLastWorktimeToken = ''
     appState.currentRoute = ''
     appState.settingsActiveTab = readStoredSettingsTab()
     appState.settingsEffectiveStyleId = STYLE_FALLBACK_ID
@@ -14173,7 +26570,6 @@ export function mountPortalApp() {
 
   return () => {
     stopDashboardAutoRefresh()
-    dashboardLastWorktimeToken = ''
     dashboardHideScheduleMissingStartAlert()
     dashboardHideScheduleLateStartAlert()
     cleanups.forEach((cleanup) => {

@@ -49,6 +49,23 @@ function mapRole(dcRole) {
   return 'Koordynator'
 }
 
+function normalizeRoleText(value) {
+  const lowered = toText(value).toLowerCase()
+  const normalized = typeof lowered.normalize === 'function' ? lowered.normalize('NFD') : lowered
+  return normalized.replace(/[\u0300-\u036f]/g, '')
+}
+
+function isWorkerPortalRole(role) {
+  const normalized = normalizeRoleText(role)
+  return normalized === 'worker' || normalized === 'pracownik' || normalized.includes('worker') || normalized.includes('pracownik')
+}
+
+function assertPortalAccessAllowed(context) {
+  if (isWorkerPortalRole(context?.role)) {
+    throw new Error('Rola WORKER nie ma dostępu do portalu. Dla pracowników użyj aplikacji mobilnej.')
+  }
+}
+
 function extractOrgIdFromEmail(email) {
   const normalized = String(email ?? '').trim().toLowerCase()
   const parts = normalized.split('@')
@@ -167,6 +184,64 @@ function isLocalHttpEndpoint(value) {
   return endpoint.includes('://127.0.0.1') || endpoint.includes('://localhost')
 }
 
+function normalizeApiBase(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return '/api'
+  if (raw.startsWith('/')) {
+    const withoutTrailing = raw.replace(/\/+$/, '')
+    return withoutTrailing.endsWith('/api') ? withoutTrailing : `${withoutTrailing}/api`
+  }
+
+  const withoutTrailing = raw.replace(/\/+$/, '')
+  return withoutTrailing.endsWith('/api') ? withoutTrailing : `${withoutTrailing}/api`
+}
+
+function getAuthApiBase() {
+  return normalizeApiBase(import.meta.env.VITE_ADMIN_API_BASE || '/api')
+}
+
+function isDataConnectOrganizationFailure(error) {
+  const message = String(error?.message ?? error ?? '').toLowerCase()
+  return (
+    message.includes('organizationmembers') ||
+    message.includes('organizationmember') ||
+    message.includes('sql execution failed') ||
+    message.includes('"code":"internal"') ||
+    message.includes('code":"internal')
+  )
+}
+
+async function fetchBackendOrganizationMemberships(firebaseUser, orgIdHint = '') {
+  if (!firebaseUser) {
+    return []
+  }
+
+  const idToken = await firebaseUser.getIdToken()
+  const hint = String(orgIdHint ?? '').trim()
+  const url = `${getAuthApiBase()}/auth/session-context${hint ? `?orgId=${encodeURIComponent(hint)}` : ''}`
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      Accept: 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    let message = ''
+    try {
+      const body = await response.json()
+      message = String(body?.error?.message ?? '').trim()
+    } catch {
+      message = ''
+    }
+    throw new Error(message || 'Nie udało się pobrać organizacji użytkownika z backendu.')
+  }
+
+  const body = await response.json().catch(() => ({}))
+  return Array.isArray(body?.data?.organizationMembers) ? body.data.organizationMembers : []
+}
+
 function getBootstrapMembershipEndpoint() {
   const fromEnv = String(import.meta.env.VITE_AUTH_BOOTSTRAP_MEMBERSHIP_ENDPOINT ?? '').trim()
   const useEmulators = isTrue(import.meta.env.VITE_USE_EMULATORS)
@@ -216,15 +291,32 @@ async function bootstrapMembershipIfNeeded(firebaseUser, orgIdHint) {
 }
 
 async function resolveOrganizationContext(userEmail, firebaseUser = null) {
-  let response = await myOrganizations()
-  let memberships = response?.data?.organizationMembers ?? []
+  const orgFromEmailHint = extractOrgIdFromEmail(userEmail)
+  let memberships = []
+
+  try {
+    const response = await myOrganizations()
+    memberships = response?.data?.organizationMembers ?? []
+  } catch (error) {
+    if (!firebaseUser || !isDataConnectOrganizationFailure(error)) {
+      throw error
+    }
+
+    memberships = await fetchBackendOrganizationMemberships(firebaseUser, orgFromEmailHint)
+  }
 
   if (!memberships.length) {
-    const orgFromEmailHint = extractOrgIdFromEmail(userEmail)
     if (firebaseUser) {
       await bootstrapMembershipIfNeeded(firebaseUser, orgFromEmailHint)
-      response = await myOrganizations()
-      memberships = response?.data?.organizationMembers ?? []
+      try {
+        const response = await myOrganizations()
+        memberships = response?.data?.organizationMembers ?? []
+      } catch (error) {
+        if (!isDataConnectOrganizationFailure(error)) {
+          throw error
+        }
+        memberships = await fetchBackendOrganizationMemberships(firebaseUser, orgFromEmailHint)
+      }
     }
 
     if (!memberships.length) {
@@ -356,6 +448,7 @@ export async function ensureSessionContext(session) {
 
   try {
     const orgContext = await resolveOrganizationContext(currentUser.email, currentUser)
+    assertPortalAccessAllowed(orgContext)
     await assertWorkerIsActive(orgContext.orgId, currentUser)
     const normalizedSession = buildSessionFromFirebase(currentUser, orgContext)
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(normalizedSession))
@@ -392,6 +485,7 @@ export async function login({ login: loginValue, password }) {
 
   try {
     const orgContext = await resolveOrganizationContext(credential.user.email ?? normalizedLogin, credential.user)
+    assertPortalAccessAllowed(orgContext)
     await assertWorkerIsActive(orgContext.orgId, credential.user)
     const session = buildSessionFromFirebase(credential.user, orgContext)
     saveSession(session)

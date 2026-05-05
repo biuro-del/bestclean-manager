@@ -87,6 +87,19 @@ function normalizeRoleToken(roleValue) {
   return ''
 }
 
+function isWorkerActiveValue(value) {
+  if (typeof value === 'boolean') {
+    return value
+  }
+
+  const normalized = toText(value).toLowerCase()
+  if (!normalized) {
+    return true
+  }
+
+  return !['false', '0', 'no', 'nie'].includes(normalized)
+}
+
 function emailPrefix(value) {
   const email = toText(value).toLowerCase()
   if (!email || !email.includes('@')) {
@@ -192,6 +205,8 @@ async function resolveWorkerLoginForSession(orgId, emailValue, loginFromEmail, d
     return {
       workerLogin: toText(loginFromEmail),
       workerRole: '',
+      workerExists: false,
+      workerActive: true,
     }
   }
 
@@ -199,17 +214,20 @@ async function resolveWorkerLoginForSession(orgId, emailValue, loginFromEmail, d
     const response = await workersForOrg({ orgId: normalizedOrgId })
     const workerRows = response?.data?.workers ?? []
     const workerLogin = resolveCanonicalWorkerLogin(workerRows, emailValue, loginFromEmail, displayNameValue)
-    const workerRole = normalizeRoleToken(
-      workerRows.find((row) => toText(row?.login).toLowerCase() === toText(workerLogin).toLowerCase())?.role,
-    )
+    const workerRow = workerRows.find((row) => toText(row?.login).toLowerCase() === toText(workerLogin).toLowerCase())
+    const workerRole = normalizeRoleToken(workerRow?.role)
     return {
       workerLogin,
       workerRole,
+      workerExists: Boolean(workerRow),
+      workerActive: isWorkerActiveValue(workerRow?.active),
     }
   } catch {
     return {
       workerLogin: toText(loginFromEmail),
       workerRole: '',
+      workerExists: false,
+      workerActive: true,
     }
   }
 }
@@ -231,6 +249,15 @@ function isTrue(value) {
 function isLocalHttpEndpoint(value) {
   const endpoint = toText(value).toLowerCase()
   return endpoint.includes('://127.0.0.1') || endpoint.includes('://localhost')
+}
+
+function isBrowserSameOriginAvailable() {
+  if (typeof window === 'undefined' || !window.location) {
+    return false
+  }
+
+  const protocol = toText(window.location.protocol).toLowerCase()
+  return protocol === 'https:' || protocol === 'http:'
 }
 
 function mapFirebaseLoginError(error) {
@@ -272,6 +299,10 @@ function getBootstrapMembershipEndpoint() {
   const useEmulators = isTrue(import.meta.env.VITE_USE_EMULATORS)
   if (endpointFromEnv && (!isLocalHttpEndpoint(endpointFromEnv) || useEmulators)) {
     return endpointFromEnv
+  }
+
+  if (!useEmulators && isBrowserSameOriginAvailable()) {
+    return '/authBootstrapMembership'
   }
 
   const projectId = toText(import.meta.env.VITE_FIREBASE_PROJECT_ID) || 'iclean-room'
@@ -432,6 +463,11 @@ export async function loginMobile({ login, password }) {
       loginFromEmail,
       credential.user.displayName,
     )
+
+    if (workerContext.workerExists && !workerContext.workerActive) {
+      throw new Error('Konto pracownika jest nieaktywne. Skontaktuj sie z administratorem.')
+    }
+
     const workerLogin = toText(workerContext.workerLogin || loginFromEmail)
     const effectiveRole =
       normalizeRoleToken(workerContext.workerRole) ||

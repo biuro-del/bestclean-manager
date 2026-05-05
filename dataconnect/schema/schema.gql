@@ -1,0 +1,460 @@
+﻿# dataconnect/schema/schema.gql
+# Best Clean — Multi-tenant schema (organizations) + membership access
+# Change: Zone field `id` renamed to `ZoneId` (DB column still `id`)
+# Includes: core tables + checklists + client_ind
+
+type Organization @table(
+  name: "organizations",
+  singular: "organization",
+  plural: "organizations",
+  key: "orgId"
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  name: String! @col(name: "name", dataType: "varchar(120)")
+  status: String @col(name: "status", dataType: "varchar(30)")
+  createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
+}
+
+type OrganizationMember @table(
+  name: "organization_member",
+  singular: "organizationMember",
+  plural: "organizationMembers",
+  key: ["orgId", "uid"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  uid: String! @col(name: "uid", dataType: "varchar(128)")
+  role: String! @col(name: "role", dataType: "varchar(30)") # ADMIN / MANAGER / WORKER
+  createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
+}
+
+type OrgUiStyle @table(
+  name: "org_ui_style",
+  singular: "orgUiStyle",
+  plural: "orgUiStyles",
+  key: "orgId"
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  defaultStyleId: String! @col(name: "default_style_id", dataType: "varchar(64)")
+  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
+  updatedBy: String @col(name: "updated_by", dataType: "varchar(120)")
+}
+
+type UserUiStylePreference @table(
+  name: "user_ui_style_preference",
+  singular: "userUiStylePreference",
+  plural: "userUiStylePreferences",
+  key: ["orgId", "uid"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  uid: String! @col(name: "uid", dataType: "varchar(128)")
+  styleId: String! @col(name: "style_id", dataType: "varchar(64)")
+  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
+  updatedBy: String @col(name: "updated_by", dataType: "varchar(120)")
+}
+
+type Worker @table(
+  name: "worker",
+  singular: "worker",
+  plural: "workers",
+  key: ["orgId", "login"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  login: String! @col(name: "login", dataType: "varchar(80)")
+  workerId: String @col(name: "worker_id", dataType: "varchar(64)")
+  workerName: String @col(name: "full_name")
+
+  # Login email do aplikacji: np. franosz@bestclean.pl
+  loginEmail: String @col(name: "login_email", dataType: "varchar(160)")
+
+  # UID z Firebase Auth
+  authUid: String @col(name: "auth_uid", dataType: "varchar(128)")
+
+  # Rola pracownika: WORKER/COORD/MANAGER/ADMIN
+  role: String @col(name: "role", dataType: "varchar(32)")
+
+  active: Boolean @col(name: "active")
+  email: String @col(name: "email")
+  phone: String @col(name: "phone")
+  workerType: String @col(name: "worker_type", dataType: "varchar(40)")
+
+  createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
+  edit: String @col(name: "edit")
+}
+
+
+type Client @table(
+  name: "client",
+  singular: "client",
+  plural: "clients",
+  key: ["orgId", "clientId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  clientId: String! @col(name: "client_id", dataType: "varchar(64)")
+  name: String @col(name: "name")
+  nip: String @col(name: "nip")
+  city: String @col(name: "city")
+  address: String @col(name: "address")
+  contact: String @col(name: "contact")
+  status: String @col(name: "status")
+  coordinator: String @col(name: "coordinator")
+  serviceFrequency: String @col(name: "service_frequency")
+  assignees: String @col(name: "assignees")
+  chemistry: String @col(name: "chemistry")
+  equipment: String @col(name: "equipment")
+  clientInfo: String @col(name: "client_info")
+}
+
+type Zone @table(
+  name: "zone",
+  singular: "zone",
+  plural: "zones",
+  key: ["orgId", "zoneId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  # RENAMED FIELD: was `id`, now `ZoneId` (DB column stays `id`)
+  zoneId: String! @col(name: "id", dataType: "varchar(64)")
+
+  clientId: String! @col(name: "client_id", dataType: "varchar(64)")
+  client: Client! @ref(fields: ["orgId", "clientId"], references: ["orgId", "clientId"])
+
+  zone: String @col(name: "zone")
+  function: String @col(name: "function")
+  editedBy: String @col(name: "edited_by")
+  date: Timestamp @col(name: "date")
+  location: String @col(name: "location")
+}
+
+type Storage @table(
+  name: "storage",
+  singular: "storage",
+  plural: "storages",
+  # Use productIndex as the key so client inventory can reference it directly.
+  key: ["orgId", "productIndex"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  productIndex: String! @col(name: "product_index", dataType: "varchar(64)")
+  productId: String! @col(name: "product_id", dataType: "varchar(64)")
+
+  name: String! @col(name: "name")
+  productType: String! @col(name: "product_type")
+
+  quantity: Int! @col(name: "quantity")
+  quantityMin: Int! @col(name: "quantity_min")
+  quantityMax: Int @col(name: "quantity_max")
+
+  description: String @col(name: "product_description")
+  qrCode: String @col(name: "qrcode")
+}
+
+type ClientStorage @table(
+  name: "client_storage",
+  singular: "clientStorage",
+  plural: "clientStorages",
+  key: ["orgId", "clientId", "productIndex"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  clientId: String! @col(name: "client_id", dataType: "varchar(64)")
+  client: Client! @ref(fields: ["orgId", "clientId"], references: ["orgId", "clientId"])
+
+  productIndex: String! @col(name: "product_index", dataType: "varchar(64)")
+  storage: Storage! @ref(fields: ["orgId", "productIndex"], references: ["orgId", "productIndex"])
+
+  name: String! @col(name: "name")
+  productType: String! @col(name: "product_type")
+
+  quantity: Int! @col(name: "quantity")
+  quantityMin: Int! @col(name: "quantity_min")
+  quantityMax: Int @col(name: "quantity_max")
+
+  qrCode: String @col(name: "qrcode")
+}
+
+type IndividualClientJob @table(
+  name: "individual_job",
+  singular: "individualClientJob",
+  plural: "individualClientJobs",
+  key: ["orgId", "clientIndId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  clientIndId: String! @col(name: "client_ind_id", dataType: "varchar(64)")
+  date: Timestamp @col(name: "date")
+  name: String @col(name: "name")
+  nip: String @col(name: "nip")
+  city: String @col(name: "city")
+  address: String @col(name: "address")
+  contact: String @col(name: "contact")
+  clientInfo: String @col(name: "client_info")
+  qrCode: String @col(name: "qr_code")
+}
+
+type Workday @table(
+  name: "workday",
+  singular: "workday",
+  plural: "workdays",
+  key: ["orgId", "workdayId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  workdayId: String! @col(name: "workday_id", dataType: "varchar(64)")
+
+  workerLogin: String! @col(name: "worker_login", dataType: "varchar(80)")
+  workerName: String @col(name: "worker_name")
+  worker: Worker! @ref(fields: ["orgId", "workerLogin"], references: ["orgId", "login"])
+
+  utilityRoomId: String @col(name: "utility_room_id")
+
+  startAt: Timestamp @col(name: "start_at")
+  endScanAt: Timestamp @col(name: "end_scan_at")
+  autoCloseAt: Timestamp @col(name: "auto_close_at")
+  endAt: Timestamp @col(name: "end_at")
+
+  durationSec: Int @col(name: "duration_sec")
+  status: String @col(name: "status")
+  deviceId: String @col(name: "device_id")
+
+  gps: String @col(name: "gps", dataType: "varchar(255)")
+
+  startEventId: String @col(name: "start_event_id")
+  endEventId: String @col(name: "end_event_id")
+
+  createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
+
+  pauseTotalSec: Int @col(name: "pause_total_sec")
+  pauseOpenId: String @col(name: "pause_open_id")
+  pauseOpenAt: Timestamp @col(name: "pause_open_at")
+
+  startObject: String @col(name: "start_object")
+  stopObject: String @col(name: "stop_object")
+
+  wtAlertAck: Boolean @col(name: "wt_alert_ack")
+  wtAlertAckAt: Timestamp @col(name: "wt_alert_ack_at")
+  wtAlertAckBy: String @col(name: "wt_alert_ack_by")
+
+  updatedBy: String @col(name: "updated_by")
+  comment: String @col(name: "comment")
+}
+
+type WorkdayPause @table(
+  name: "workday_pause",
+  singular: "workdayPause",
+  plural: "workdayPauses",
+  key: ["orgId", "pauseId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  pauseId: String! @col(name: "pause_id", dataType: "varchar(64)")
+
+  workdayId: String! @col(name: "workday_id", dataType: "varchar(64)")
+  workday: Workday! @ref(fields: ["orgId", "workdayId"], references: ["orgId", "workdayId"])
+
+  workerLogin: String @col(name: "worker_login", dataType: "varchar(80)")
+  workerName: String @col(name: "worker_name")
+  deviceId: String @col(name: "device_id")
+  pauseEventId: String @col(name: "pause_event_id")
+
+  startAt: Timestamp @col(name: "start_at")
+  stopAt: Timestamp @col(name: "stop_at")
+  durationSec: Int @col(name: "duration_sec")
+  status: String @col(name: "status")
+
+  createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
+}
+
+type BackupCycle @table(
+  name: "backup_cycle",
+  singular: "backupCycle",
+  plural: "backupCycles",
+  key: ["orgId", "cycleId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  cycleId: String! @col(name: "cycle_id", dataType: "varchar(64)")
+
+  workerLogin: String @col(name: "worker_login", dataType: "varchar(80)")
+  workerName: String @col(name: "worker_name")
+  roomId: String @col(name: "room_id")
+  strefa: String @col(name: "strefa")
+  pomieszczenie: String @col(name: "pomieszczenie")
+
+  startAt: Timestamp @col(name: "start_at")
+  endAt: Timestamp @col(name: "end_at")
+  durationSec: Int @col(name: "duration_sec")
+  endReason: String @col(name: "end_reason")
+  comment: String @col(name: "comment")
+  status: String @col(name: "status")
+  closeMarkedAt: Timestamp @col(name: "close_marked_at")
+
+  deviceId: String @col(name: "device_id")
+  startEventId: String @col(name: "start_event_id")
+  endEventId: String @col(name: "end_event_id")
+
+  createdAt: Timestamp @col(name: "created_at")
+  editedAt: Timestamp @col(name: "edited_at")
+}
+
+type Event @table(
+  name: "event",
+  singular: "event",
+  plural: "events",
+  key: ["orgId", "eventId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  eventId: String! @col(name: "event_id", dataType: "varchar(64)")
+
+  workdayId: String @col(name: "workday_id", dataType: "varchar(64)")
+  workday: Workday @ref(fields: ["orgId", "workdayId"], references: ["orgId", "workdayId"])
+
+  zoneId: String @col(name: "zone_id", dataType: "varchar(64)")
+  zone: Zone @ref(fields: ["orgId", "zoneId"], references: ["orgId", "zoneId"])
+
+  workerLogin: String @col(name: "worker_login", dataType: "varchar(80)")
+  workerName: String @col(name: "worker_name")
+  worker: Worker @ref(fields: ["orgId", "workerLogin"], references: ["orgId", "login"])
+
+  startAt: Timestamp @col(name: "start_at")
+  endAt: Timestamp @col(name: "end_at")
+  durationSec: Int @col(name: "duration_sec")
+  status: String @col(name: "status")
+  closeMarkedAt: Timestamp @col(name: "close_marked_at")
+  endReason: String @col(name: "end_reason")
+  comment: String @col(name: "comment")
+
+  deviceId: String @col(name: "device_id")
+  startEventId: String @col(name: "start_event_id")
+  endEventId: String @col(name: "end_event_id")
+
+  createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
+}
+
+# =========================
+# CHECKLISTS
+# =========================
+
+type CheckListDef @table(
+  name: "checklist_def",
+  singular: "checkListDef",
+  plural: "checkListDefs",
+  key: ["orgId", "clientId", "dataObject", "qrId", "taskId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  clientId: String! @col(name: "client_id", dataType: "varchar(64)")
+  client: Client! @ref(fields: ["orgId", "clientId"], references: ["orgId", "clientId"])
+
+  dataObject: String! @col(name: "data_object")
+  qrId: String! @col(name: "qr_id", dataType: "varchar(80)")
+  taskId: String! @col(name: "task_id", dataType: "varchar(80)")
+
+  taskName: String @col(name: "task_name")
+  required: Boolean @col(name: "required")
+  sortOrder: Int @col(name: "sort_order")
+  active: Boolean @col(name: "active")
+
+
+  performedAt: Timestamp @col(name: "performed_at")
+  updatedAt: Timestamp @col(name: "updated_at")
+  updatedBy: String @col(name: "updated_by")
+}
+
+type CheckListExtra @table(
+  name: "checklist_extra",
+  singular: "checkListExtra",
+  plural: "checkListExtras",
+  key: ["orgId", "extraId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  extraId: String! @col(name: "extra_id", dataType: "varchar(80)")
+
+  clientId: String @col(name: "client_id", dataType: "varchar(64)")
+  client: Client @ref(fields: ["orgId", "clientId"], references: ["orgId", "clientId"])
+
+  dataObject: String @col(name: "data_object")
+  qrId: String @col(name: "qr_id", dataType: "varchar(80)")
+  taskName: String @col(name: "task_name")
+  required: Boolean @col(name: "required")
+  priority: String @col(name: "priority")
+  status: String @col(name: "status")
+
+  createdAt: Timestamp @col(name: "created_at")
+  createdBy: String @col(name: "created_by")
+  closedAt: Timestamp @col(name: "closed_at")
+  performedAt: Timestamp @col(name: "performed_at")
+  closedBy: String @col(name: "closed_by")
+  notDoneReason: String @col(name: "not_done_reason")
+}
+
+type CheckListLog @table(
+  name: "checklist_log",
+  singular: "checkListLog",
+  plural: "checkListLogs",
+  key: ["orgId", "logId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  logId: String! @col(name: "log_id", dataType: "varchar(80)")
+
+  date: Timestamp @col(name: "date")
+  workerLogin: String @col(name: "worker", dataType: "varchar(80)")
+  workdayId: String @col(name: "workday_id", dataType: "varchar(64)")
+  cycleId: String @col(name: "cycle_id", dataType: "varchar(64)")
+
+  clientId: String @col(name: "client_id", dataType: "varchar(64)")
+  client: Client @ref(fields: ["orgId", "clientId"], references: ["orgId", "clientId"])
+
+  dataObject: String @col(name: "data_object")
+  qrId: String @col(name: "qr_id", dataType: "varchar(80)")
+
+  dailyStats: String @col(name: "daily_stats")
+  extraStats: String @col(name: "extra_stats")
+  notDoneReasons: String @col(name: "not_done_reasons")
+  submittedAt: Timestamp @col(name: "submitted_at")
+}
+
+type ClientInd @table(
+  name: "client_ind",
+  singular: "clientInd",
+  plural: "clientInds",
+  key: ["orgId", "qrCode"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  qrCode: String! @col(name: "qr_code", dataType: "varchar(120)")
+  createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")
+  status: String @col(name: "status")
+}
+
+
+
+

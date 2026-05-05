@@ -1,5 +1,6 @@
 ﻿import { initializeApp, getApp, getApps } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
+import { ReCaptchaEnterpriseProvider, initializeAppCheck } from 'firebase/app-check'
 import { connectDataConnectEmulator, getDataConnect } from 'firebase/data-connect'
 import { connectorConfig } from '@dataconnect/generated'
 
@@ -7,12 +8,13 @@ const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCdRVjbPWm6MueCHOwsmmbdkEKZoO6Dy-k',
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'iclean-room.firebaseapp.com',
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'iclean-room',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:1080573912983:web:d8ef39327b91708488c6d2',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:1080573912983:web:d64286e3776c009788c6d2',
 }
 
 const requiredConfigKeys = ['apiKey', 'authDomain', 'projectId', 'appId']
 
 let emulatorConnected = false
+let appCheckInitialized = false
 
 function hasValue(value) {
   return typeof value === 'string' && value.trim().length > 0
@@ -38,6 +40,14 @@ export function ensureFirebase() {
   }
 
   const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig)
+  const appCheckSiteKey = String(import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY ?? '').trim()
+  if (!appCheckInitialized && appCheckSiteKey && typeof window !== 'undefined') {
+    initializeAppCheck(app, {
+      provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
+      isTokenAutoRefreshEnabled: true,
+    })
+    appCheckInitialized = true
+  }
   const auth = getAuth(app)
   const dataConnect = getDataConnect(connectorConfig)
 

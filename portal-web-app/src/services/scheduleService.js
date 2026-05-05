@@ -124,6 +124,15 @@ function rowCell(rows, rowIndex, colIndex) {
   return textFromCell(cell)
 }
 
+function isNoShiftCellValue(value) {
+  const normalized = String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+  return !normalized || normalized === '-' || normalized === 'brak zmiany' || normalized === 'brak zmian'
+}
+
+function hasRealShiftValue(...values) {
+  return values.some((value) => !isNoShiftCellValue(value))
+}
+
 function loadScheduleTableJsonp(spreadsheetId = SCHEDULE_SPREADSHEET_ID, gid = SCHEDULE_GID) {
   return new Promise((resolve, reject) => {
     const root = window.google || (window.google = {})
@@ -260,12 +269,17 @@ function parseScheduleTable(table) {
       const morningTask = rowCell(rows, morningRowIndex, day.shiftCol)
       const afternoonStart = afternoonRowIndex > 0 ? rowCell(rows, afternoonRowIndex, day.startCol) : ''
       const afternoonTask = afternoonRowIndex > 0 ? rowCell(rows, afternoonRowIndex, day.shiftCol) : ''
-      const hasAnyData = [morningStart, morningTask, afternoonStart, afternoonTask].some((value) => String(value).trim())
+      const hasMorningShift = hasRealShiftValue(morningStart, morningTask)
+      const hasAfternoonShift = hasRealShiftValue(afternoonStart, afternoonTask)
+
+      if (!hasMorningShift && !hasAfternoonShift) {
+        return
+      }
 
       bucket.entries.push({
         workerId: workerId || '-',
         workerName: workerName || workerId || '-',
-        status: hasAnyData ? 'Praca' : 'Brak zmiany',
+        status: 'Praca',
         morningStart,
         morningTask,
         afternoonStart,

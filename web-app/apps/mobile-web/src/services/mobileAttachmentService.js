@@ -57,8 +57,13 @@ export async function uploadClosureAttachments({
   await waitForFirebaseAuthReady()
 
   const orgId = toText(session?.orgId)
+  const createdByUid = toText(session?.uid)
   if (!orgId) {
     throw new Error('Brak orgId do zapisu załączników.')
+  }
+
+  if (!createdByUid) {
+    throw new Error('Brak UID uzytkownika do zapisu zalacznikow.')
   }
 
   const attachmentList = Array.isArray(attachments) ? attachments : []
@@ -101,6 +106,7 @@ export async function uploadClosureAttachments({
           scope: safeScope,
           orgId: toSafePathToken(orgId),
           workerLogin: safeWorkerLogin,
+          createdByUid,
           source: 'mobile-web',
         },
       })

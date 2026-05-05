@@ -1,0 +1,83 @@
+<div class="calendar-page">
+  <div class="calendar-hero">
+    <div>
+      <h1 class="welcome">Kalendarz</h1>
+      <p class="subwelcome">Plan zadań z widokiem dziennym, tygodniowym i miesięcznym.</p>
+    </div>
+    <button class="btn2 primary calendar-add-main" id="calendarAddBtn" type="button">Dodaj zadanie</button>
+  </div>
+
+  <div class="calendar-shell">
+    <div class="calendar-toolbar" aria-label="Sterowanie kalendarzem">
+      <div class="calendar-nav">
+        <button class="btn2 secondary calendar-icon-btn" id="calendarPrevBtn" type="button" aria-label="Poprzedni zakres" title="Poprzedni zakres">&lt;</button>
+        <button class="btn2 secondary" id="calendarTodayBtn" type="button">Dzisiaj</button>
+        <button class="btn2 secondary calendar-icon-btn" id="calendarNextBtn" type="button" aria-label="Następny zakres" title="Następny zakres">&gt;</button>
+      </div>
+
+      <div class="calendar-range-label" id="calendarRangeLabel">-</div>
+
+      <div class="calendar-view-switch" role="group" aria-label="Widok kalendarza">
+        <button class="calendar-view-btn" type="button" data-calendar-view="day">Dzień</button>
+        <button class="calendar-view-btn is-active" type="button" data-calendar-view="week">Tydzień</button>
+        <button class="calendar-view-btn" type="button" data-calendar-view="month">Miesiąc</button>
+      </div>
+    </div>
+
+    <div class="calendar-context-panel" aria-label="Kalendarz pomocniczy i filtry">
+      <div class="calendar-mini-month" id="calendarMiniMonth"></div>
+      <div class="calendar-task-filters" id="calendarTaskFilters"></div>
+    </div>
+
+    <div class="calendar-board" id="calendarBoard" aria-live="polite"></div>
+  </div>
+
+  <div class="modal-overlay calendar-editor-overlay" id="calendarEditorOverlay" style="display:none;">
+    <div class="modal calendar-editor-modal" role="dialog" aria-modal="true" aria-labelledby="calendarEditorTitle">
+      <div class="modal-head">
+        <h3 id="calendarEditorTitle">Zadanie</h3>
+        <button class="x" type="button" id="calendarEditorCloseBtn" aria-label="Zamknij">×</button>
+      </div>
+
+      <div class="grid">
+        <label>
+          Tytuł
+          <input id="calendarTaskTitle" type="text" placeholder="np. Kontrola obiektu" />
+        </label>
+        <label>
+          Data
+          <input id="calendarTaskDate" type="date" />
+        </label>
+        <label>
+          Godzina START
+          <input id="calendarTaskTime" type="time" />
+        </label>
+        <label>
+          Godzina STOP
+          <input id="calendarTaskEndTime" type="time" />
+        </label>
+        <label>
+          Typ
+          <select id="calendarTaskTone">
+            <option value="blue">Standard</option>
+            <option value="green">Gotowe / kontrola</option>
+            <option value="amber">Pilne</option>
+            <option value="red">Problem</option>
+          </select>
+        </label>
+        <label class="wide">
+          Opis
+          <textarea id="calendarTaskNotes" rows="3" placeholder="Krótki opis zadania..."></textarea>
+        </label>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn2 danger" type="button" id="calendarTaskDeleteBtn">Usuń</button>
+        <button class="btn2 secondary" type="button" id="calendarTaskDuplicateBtn">Duplikuj</button>
+        <span class="spacer"></span>
+        <button class="btn2" type="button" id="calendarTaskCancelBtn">Anuluj</button>
+        <button class="btn2 primary" type="button" id="calendarTaskSaveBtn">Zapisz</button>
+      </div>
+    </div>
+  </div>
+</div>
