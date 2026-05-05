@@ -16597,6 +16597,7 @@ body{
   padding:0 8px;
   display:flex;
   align-items:center;
+  justify-content:center;
   gap:5px;
   color:#fff;
   font-size:.75rem;
@@ -17069,7 +17070,9 @@ body{
 }
 
 #view-calendar .fw-event-title{
+  flex:0 1 auto;
   min-width:0;
+  max-width:calc(100% - 18px);
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
