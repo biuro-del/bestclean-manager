@@ -81,12 +81,12 @@ const SECURITY_HEADERS = {
     "base-uri 'self'",
     "object-src 'none'",
     "frame-ancestors 'self'",
-    "script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://www.gstatic.com https://www.google.com https://www.recaptcha.net",
+    "script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://www.gstatic.com https://www.google.com https://docs.google.com https://www.recaptcha.net",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' data: https://fonts.gstatic.com",
     "img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com https://*.googleusercontent.com",
     "connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.cloudfunctions.net https://*.firebasedataconnect.googleapis.com https://firebasestorage.googleapis.com wss://*.firebaseio.com",
-    "frame-src 'self' https://*.google.com https://*.googleapis.com https://www.recaptcha.net",
+    "frame-src 'self' https://*.google.com https://*.googleapis.com https://docs.google.com https://www.recaptcha.net",
   ].join('; '),
 }
 
