@@ -19414,10 +19414,10 @@ body{
   }
 }
 
-/* Ultra compact dashboard day schedule */
+/* Dashboard day schedule aligned with the rest of dashboard typography */
 #portalRoot #view-dashboard .dash-schedule-panel{
-  gap:3px !important;
-  padding:6px !important;
+  gap:5px !important;
+  padding:8px !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-panel .card-title{
@@ -19427,7 +19427,7 @@ body{
 
 #portalRoot #view-dashboard .dash-schedule-panel .card-title-row{
   margin:0 !important;
-  min-height:25px !important;
+  min-height:26px !important;
 }
 
 #portalRoot #view-dashboard .dash-refresh-btn--icon{
@@ -19443,59 +19443,59 @@ body{
 }
 
 #portalRoot #view-dashboard .dash-schedule-sync{
-  font-size:9px !important;
-  line-height:1.05 !important;
+  font-size:10px !important;
+  line-height:1.15 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-daybar{
-  grid-template-columns:23px minmax(0, 1fr) 23px !important;
-  gap:4px !important;
+  grid-template-columns:24px minmax(0, 1fr) 24px !important;
+  gap:5px !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-nav{
   border-radius:5px !important;
-  font-size:11px !important;
-  height:23px !important;
-  min-height:23px !important;
-  min-width:23px !important;
-  width:23px !important;
+  font-size:12px !important;
+  height:24px !important;
+  min-height:24px !important;
+  min-width:24px !important;
+  width:24px !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-dayname{
-  font-size:14px !important;
-  line-height:1 !important;
+  font-size:15px !important;
+  line-height:1.05 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-daydate{
-  font-size:9px !important;
-  line-height:1 !important;
+  font-size:10px !important;
+  line-height:1.05 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-cards{
-  gap:3px !important;
-  margin-top:2px !important;
-  padding:3px 5px 3px 3px !important;
+  gap:5px !important;
+  margin-top:3px !important;
+  padding:4px 6px 4px 4px !important;
   border-radius:8px !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-card{
   border-left-width:2px !important;
-  border-radius:6px !important;
-  gap:2px !important;
-  padding:3px 5px !important;
+  border-radius:7px !important;
+  gap:3px !important;
+  padding:5px 7px !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-top{
-  gap:4px !important;
+  gap:6px !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-worker-meta{
-  gap:4px !important;
+  gap:5px !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-worker-name{
-  font-size:11px !important;
-  line-height:1.05 !important;
+  font-size:13px !important;
+  line-height:1.12 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-start-icon{
@@ -19505,14 +19505,14 @@ body{
 }
 
 #portalRoot #view-dashboard .dash-schedule-status-badge{
-  font-size:9px !important;
-  padding:2px 5px !important;
+  font-size:10px !important;
+  padding:2px 6px !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-startline,
 #portalRoot #view-dashboard .dash-schedule-line{
-  column-gap:5px !important;
-  grid-template-columns:55px minmax(0, 1fr) !important;
+  column-gap:7px !important;
+  grid-template-columns:66px minmax(0, 1fr) !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-startline{
@@ -19526,22 +19526,22 @@ body{
 }
 
 #portalRoot #view-dashboard .dash-schedule-line-label{
-  font-size:9px !important;
-  line-height:1.05 !important;
+  font-size:10px !important;
+  line-height:1.1 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-start-value,
 #portalRoot #view-dashboard .dash-schedule-line-text{
-  font-size:10px !important;
-  line-height:1.05 !important;
+  font-size:12px !important;
+  line-height:1.12 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-late{
-  border-radius:5px !important;
-  font-size:9px !important;
-  line-height:1.05 !important;
+  border-radius:6px !important;
+  font-size:10px !important;
+  line-height:1.1 !important;
   margin-top:2px !important;
-  padding:2px 5px !important;
+  padding:3px 6px !important;
 }
 
 /* Clickable elements should always show a hand cursor */
