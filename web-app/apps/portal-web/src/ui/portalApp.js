@@ -9430,6 +9430,24 @@ function eventTypeInfo(row) {
   const startIso = toIso(row?.startAt)
   const endIso = toIso(row?.endAt)
   const durationSec = Number(row?.durationSec ?? 0)
+  const sourceKind = String(row?.historySourceKind ?? '').trim().toLowerCase()
+  const eventId = String(row?.eventId ?? row?.id ?? '').trim()
+  const workdayId = String(row?.workdayId ?? row?.linkedWorkdayId ?? '').trim()
+  const hasExplicitEventId =
+    row?.hasExplicitEventId === true ||
+    (sourceKind === 'event' && eventId && (!workdayId || eventId !== workdayId))
+  const hasClientOrZoneContext = [
+    row?.zoneId,
+    row?.roomId,
+    row?.utilityRoomId,
+    row?.clientId,
+    row?.klient,
+    row?.clientName,
+    row?.zoneName,
+    row?.strefa,
+  ]
+    .map((value) => String(value ?? '').trim())
+    .some((value) => value && value !== '-')
   const stopOnlyByTiming =
     Boolean(startIso && endIso) &&
     Number.isFinite(new Date(endIso).getTime() - new Date(startIso).getTime()) &&
@@ -9443,9 +9461,6 @@ function eventTypeInfo(row) {
   if (clientIndId || endReason === 'INDIVIDUAL_DONE') {
     return { label: 'Zlecenie ind.', className: 'event-type-badge--individual' }
   }
-  if (status === 'RUNNING' && !row?.endAt) {
-    return { label: 'QR START', className: 'event-type-badge--start' }
-  }
   if (endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY' || stopOnlyByTiming) {
     return { label: 'QR STOP', className: 'event-type-badge--stop' }
   }
@@ -9454,6 +9469,12 @@ function eventTypeInfo(row) {
   }
   if (isSpecial) {
     return { label: 'Strefa spec.', className: 'event-type-badge--special' }
+  }
+  if (status === 'RUNNING' && !row?.endAt) {
+    if (hasExplicitEventId && hasClientOrZoneContext) {
+      return { label: 'CLEAN', className: 'event-type-badge--clean' }
+    }
+    return { label: 'QR START', className: 'event-type-badge--start' }
   }
   if (endReason === 'QR_NEW' || endReason === 'QR_SAME' || row?.endAt) {
     return { label: 'CLEAN', className: 'event-type-badge--clean' }
@@ -16145,6 +16166,13 @@ function ensureReportGeoUi() {
     preview.className = 'rep-geo-preview'
     preview.style.display = 'none'
     preview.innerHTML = '<iframe id="repGeoPreviewFrame" title="Podglad satelitarny" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>'
+    preview.addEventListener('mouseenter', () => {
+      if (reportGeoPreviewHideTimer) {
+        window.clearTimeout(reportGeoPreviewHideTimer)
+        reportGeoPreviewHideTimer = null
+      }
+    })
+    preview.addEventListener('mouseleave', reportGeoHidePreviewSoon)
     document.body.appendChild(preview)
   }
 
