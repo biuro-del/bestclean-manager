@@ -7188,6 +7188,103 @@ function ordersClientDisplayName(client = {}) {
   return String(client?.name ?? client?.clientName ?? client?.clientLabel ?? client?.id ?? client?.clientId ?? '').trim()
 }
 
+function ordersFirstClientText(...values) {
+  return values
+    .map((value) => String(value ?? '').replace(/\s+/g, ' ').trim())
+    .find(Boolean) ?? ''
+}
+
+function ordersClientId(client = {}) {
+  return ordersFirstClientText(client?.id, client?.clientId)
+}
+
+function ordersFindClientBySelection(value = '') {
+  const selected = String(value ?? '').trim()
+  if (!selected) {
+    return null
+  }
+  const normalized = normalizeSearchText(selected)
+  const clients = Array.isArray(appState.clients) ? appState.clients : []
+  return (
+    clients.find((client) => normalizeSearchText(ordersClientId(client)) === normalized) ||
+    clients.find((client) => normalizeSearchText(ordersClientDisplayName(client)) === normalized) ||
+    clients.find((client) => normalizeSearchText(client?.name ?? client?.clientName ?? '') === normalized) ||
+    null
+  )
+}
+
+function ordersClientPostCodeFromAddress(address = '') {
+  const match = String(address ?? '').match(/\b\d{2}-\d{3}\b/)
+  return match?.[0] ?? ''
+}
+
+function ordersClientFormData(client = {}) {
+  const address = ordersFirstClientText(client?.address, client?.adres, client?.street, client?.ulica)
+  const postCode = ordersFirstClientText(
+    client?.postCode,
+    client?.postalCode,
+    client?.zip,
+    client?.kodPocztowy,
+    ordersClientPostCodeFromAddress(address),
+  )
+  const contact = ordersFirstClientText(client?.email, client?.contact, client?.phone)
+  const email = /\S+@\S+\.\S+/.test(contact) ? contact : ordersFirstClientText(client?.email)
+  return {
+    clientId: ordersClientId(client),
+    clientName: ordersClientDisplayName(client),
+    nip: ordersFirstClientText(client?.nip),
+    street: address,
+    city: ordersFirstClientText(client?.city, client?.miasto),
+    postCode,
+    region: ordersFirstClientText(client?.region, client?.voivodeship, client?.wojewodztwo, client?.województwo),
+    country: ordersFirstClientText(client?.country, client?.kraj) || (address || postCode ? 'Polska' : ''),
+    email,
+    contact,
+  }
+}
+
+function ordersClientAddressLabel(data = {}) {
+  const street = ordersFirstClientText(data.street)
+  const cityLine = [ordersFirstClientText(data.postCode), ordersFirstClientText(data.city)].filter(Boolean).join(' ')
+  return [street, cityLine].filter(Boolean).join(', ')
+}
+
+function ordersSetClientFieldsFromData(data = {}) {
+  ordersSetInputValue('ordersEditClientName', data.clientName || '')
+  ordersSetInputValue('ordersEditNip', data.nip || '')
+  ordersSetInputValue('ordersEditStreet', data.street || '')
+  ordersSetInputValue('ordersEditCity', data.city || '')
+  ordersSetInputValue('ordersEditPostCode', data.postCode || '')
+  ordersSetInputValue('ordersEditRegion', data.region || '')
+  ordersSetInputValue('ordersEditCountry', data.country || '')
+  ordersSetInputValue('ordersEditEmail', data.email || '')
+  const addressLabel = ordersClientAddressLabel(data)
+  if (addressLabel) {
+    ordersSetInputValue('ordersEditLocation', addressLabel)
+    ordersSetLocationGeoFields({
+      placeId: '',
+      lat: '',
+      lng: '',
+      mapUrl: ordersGoogleMapsSearchUrl(addressLabel),
+    })
+  }
+}
+
+function ordersApplySelectedClientToEditor(selectionValue = '') {
+  const client = ordersFindClientBySelection(selectionValue)
+  if (!client) {
+    ordersSetClientFieldsFromData({ clientName: String(selectionValue ?? '').trim() })
+    if (!String(selectionValue ?? '').trim()) {
+      ordersSetInputValue('ordersEditLocation', '')
+      ordersSetLocationGeoFields({ placeId: '', lat: '', lng: '', mapUrl: '' })
+    }
+    return null
+  }
+  const data = ordersClientFormData(client)
+  ordersSetClientFieldsFromData(data)
+  return { client, data }
+}
+
 function ordersClientOptionsHtml(selectedLabel = '') {
   const selected = String(selectedLabel ?? '').trim()
   const clients = (Array.isArray(appState.clients) ? appState.clients : [])
@@ -8027,9 +8124,12 @@ function ordersRenderEditor(order = {}) {
   const nextDate = ordersNormalizeDateField(order.nextDate || startDay, startDay)
   const type = String(order.type ?? 'other').trim() || 'other'
   const duration = ordersDurationHours(order)
+  const orderClientLabel = ordersTimelineClientLabel(order)
+  const selectedClient = ordersFindClientBySelection(order.clientId || order.clientLabel || orderClientLabel)
+  const selectedClientData = selectedClient ? ordersClientFormData(selectedClient) : {}
 
   ordersSetInputValue('ordersEditName', order.title || '')
-  ordersSetInputValue('ordersEditClient', ordersTimelineClientLabel(order))
+  ordersSetInputValue('ordersEditClient', orderClientLabel)
   ordersSetInputValue('ordersEditStart', startDay)
   ordersSetInputValue('ordersEditNext', nextDate)
   ordersSetInputValue('ordersEditTime', ordersNormalizeTimeField(order.startTime, '08:00'))
@@ -8054,7 +8154,14 @@ function ordersRenderEditor(order = {}) {
   ordersSetInputValue('ordersEditSmsTime', order.smsTime || '')
   ordersSetInputValue('ordersEditPhone', order.phone || '')
   ordersSetInputValue('ordersEditDescription', order.description || order.title || '')
-  ordersSetInputValue('ordersEditClientName', order.clientName || order.clientLabel || '')
+  ordersSetInputValue('ordersEditClientName', order.clientName || order.clientLabel || selectedClientData.clientName || '')
+  ordersSetInputValue('ordersEditNip', order.nip || order.clientNip || selectedClientData.nip || '')
+  ordersSetInputValue('ordersEditStreet', order.street || order.clientStreet || selectedClientData.street || '')
+  ordersSetInputValue('ordersEditCity', order.city || order.clientCity || selectedClientData.city || '')
+  ordersSetInputValue('ordersEditPostCode', order.postCode || order.postalCode || order.clientPostCode || selectedClientData.postCode || '')
+  ordersSetInputValue('ordersEditRegion', order.region || order.clientRegion || selectedClientData.region || '')
+  ordersSetInputValue('ordersEditCountry', order.country || order.clientCountry || selectedClientData.country || '')
+  ordersSetInputValue('ordersEditEmail', order.email || order.clientEmail || selectedClientData.email || '')
   ordersRenderWorkerChecklist(order)
   ordersRenderSchedulePreview(order)
   ordersRenderCoworkerRows(order)
@@ -8127,6 +8234,17 @@ function ordersSaveEditor() {
   const safeRow = selectedRows[0] ?? (Number.isInteger(row) && row >= 0 ? row : Number(order.row ?? 0))
   const type = String(ordersReadInputValue('ordersEditType') || order.type || 'other').trim()
   const clientLabel = ordersReadInputValue('ordersEditClient') || ordersReadInputValue('ordersEditClientName')
+  const selectedClient = ordersFindClientBySelection(clientLabel)
+  const selectedClientData = selectedClient ? ordersClientFormData(selectedClient) : {}
+  const clientName = ordersReadInputValue('ordersEditClientName') || selectedClientData.clientName
+  const clientStreet = ordersReadInputValue('ordersEditStreet') || selectedClientData.street
+  const clientCity = ordersReadInputValue('ordersEditCity') || selectedClientData.city
+  const clientPostCode = ordersReadInputValue('ordersEditPostCode') || selectedClientData.postCode
+  const clientAddressLabel = ordersReadInputValue('ordersEditLocation') || ordersClientAddressLabel({
+    street: clientStreet,
+    city: clientCity,
+    postCode: clientPostCode,
+  })
 
   const nextOrder = {
     ...order,
@@ -8141,15 +8259,29 @@ function ordersSaveEditor() {
     validUntil: explicitEndDate,
     nextDate: ordersNormalizeDateField(ordersReadInputValue('ordersEditNext'), dateYmd),
     title: ordersReadInputValue('ordersEditName') || order.title || 'Zlecenie',
-    clientLabel,
-    clientName: ordersReadInputValue('ordersEditClientName'),
-    addressLabel: ordersReadInputValue('ordersEditLocation'),
+    clientId: selectedClientData.clientId || order.clientId || '',
+    clientLabel: clientName || clientLabel,
+    clientName,
+    nip: ordersReadInputValue('ordersEditNip') || selectedClientData.nip,
+    clientNip: ordersReadInputValue('ordersEditNip') || selectedClientData.nip,
+    street: clientStreet,
+    clientStreet,
+    city: clientCity,
+    clientCity,
+    postCode: clientPostCode,
+    postalCode: clientPostCode,
+    clientPostCode,
+    region: ordersReadInputValue('ordersEditRegion') || selectedClientData.region,
+    country: ordersReadInputValue('ordersEditCountry') || selectedClientData.country,
+    email: ordersReadInputValue('ordersEditEmail') || selectedClientData.email,
+    contact: ordersReadInputValue('ordersEditEmail') || selectedClientData.contact,
+    addressLabel: clientAddressLabel,
     googlePlaceId: ordersReadInputValue('ordersEditLocationPlaceId'),
     placeId: ordersReadInputValue('ordersEditLocationPlaceId'),
     lat: ordersReadInputValue('ordersEditLocationLat'),
     lng: ordersReadInputValue('ordersEditLocationLng'),
-    mapUrl: ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(ordersReadInputValue('ordersEditLocation')),
-    googleMapsUrl: ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(ordersReadInputValue('ordersEditLocation')),
+    mapUrl: ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(clientAddressLabel),
+    googleMapsUrl: ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(clientAddressLabel),
     repeatEvery: Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || 1)),
     repeatUnit: ordersReadInputValue('ordersEditRepeatUnit') || 'day',
     priority: ordersReadInputValue('ordersEditPriority') || 'Normalny',
@@ -8642,8 +8774,25 @@ function bindOrdersViewFunctions() {
   binding.add(root, 'change', (event) => {
     if (event.target?.id === 'ordersEditClient') {
       const order = ordersFindTimelineOrder(appState.ordersEditingId)
+      const selection = ordersReadInputValue('ordersEditClient')
+      const applied = ordersApplySelectedClientToEditor(selection)
       if (order) {
-        order.clientLabel = ordersReadInputValue('ordersEditClient')
+        const data = applied?.data ?? { clientName: selection }
+        order.clientId = data.clientId || ''
+        order.clientLabel = data.clientName || selection
+        order.clientName = data.clientName || selection
+        order.nip = data.nip || ''
+        order.clientNip = data.nip || ''
+        order.street = data.street || ''
+        order.city = data.city || ''
+        order.postCode = data.postCode || ''
+        order.region = data.region || ''
+        order.country = data.country || ''
+        order.email = data.email || ''
+        order.contact = data.contact || ''
+        order.addressLabel = ordersReadInputValue('ordersEditLocation') || ordersClientAddressLabel(data)
+        order.mapUrl = ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(order.addressLabel)
+        order.googleMapsUrl = order.mapUrl
         ordersRenderSchedulePreview(order)
       }
       return
