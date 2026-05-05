@@ -19143,3 +19143,30 @@ body{
   padding:1px 4px !important;
 }
 
+/* Clickable elements should always show a hand cursor */
+#portalRoot :is(
+  button:not(:disabled),
+  a[href],
+  [role="button"],
+  [data-route],
+  [data-toggle],
+  [data-action],
+  [data-calendar-timeline-order-id],
+  .dash-schedule-worker-link,
+  .fw-resource-name.is-worker
+){
+  cursor:pointer !important;
+}
+
+#portalRoot #view-calendar :is(.fw-event-bar, .fw-event-bar.is-real-event){
+  cursor:pointer !important;
+}
+
+#portalRoot #view-calendar :is(.fw-event-bar.is-dragging, .fw-event-bar:active){
+  cursor:grabbing !important;
+}
+
+#portalRoot :is(button:disabled, [aria-disabled="true"], .is-disabled){
+  cursor:not-allowed !important;
+}
+
