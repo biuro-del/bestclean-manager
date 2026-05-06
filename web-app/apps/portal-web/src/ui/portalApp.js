@@ -24364,12 +24364,15 @@ function calendarTimelinePrototypeHtml() {
   const totalSlots = days.length * slotsPerDay
   const resources = calendarTimelineResources()
   const plannedOrders = ordersListSourceOrders()
-  const realEventOrders = []
-  const bars = calendarTimelineVisualOrders(plannedOrders, resources)
+  const sourceRows = calendarTimelineSourceRowsCoverDays(days) && Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
+    ? appState.calendarTimelineWorkerStateSourceRows
+    : []
+  const realWorkdayOrders = calendarTimelineRealWorkdayOrders(resources, days, sourceRows)
+  const bars = calendarTimelineVisualOrders([...plannedOrders, ...realWorkdayOrders], resources)
   const selectedTypes = calendarTimelineSelectedTypes()
   const layout = calendarTimelineLayoutEventBars(bars, days, hours, resources, selectedTypes)
   const realTrackCounts = new Map()
-  realEventOrders.forEach((order) => {
+  realWorkdayOrders.forEach((order) => {
     const row = Number(order?.row)
     const trackIndex = Number(order?.realTrackIndex ?? 0)
     if (!Number.isInteger(row) || row < 0 || !Number.isFinite(trackIndex)) {
