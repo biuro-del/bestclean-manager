@@ -20588,9 +20588,7 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
 
     const cycleStartTs =
       calendarTimelineSourceRowWorkdayStartTimestamp(row) ||
-      calendarTimelineEventTimestamp(row?.dayStartAt) ||
-      calendarTimelineEventsRowStartTimestamp(row) ||
-      calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
+      calendarTimelineEventTimestamp(row?.dayStartAt)
     const stopTs = calendarTimelineSourceRowDayStopTimestamp(row)
     const cycleStartMinutes = cycleStartTs > 0 ? calendarTimelineTimestampToMinutes(new Date(cycleStartTs).toISOString()) : -1
 
@@ -23861,9 +23859,7 @@ function calendarTimelineCurrentStatusRowForResource(resource = {}, dayKey = '')
     .forEach((row) => {
       const startTs =
         calendarTimelineSourceRowWorkdayStartTimestamp(row) ||
-        calendarTimelineEventTimestamp(row?.dayStartAt) ||
-        calendarTimelineEventsRowStartTimestamp(row) ||
-        calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
+        calendarTimelineEventTimestamp(row?.dayStartAt)
       const stopTs = calendarTimelineSourceRowDayStopTimestamp(row)
       if (startTs > 0 && startTs > stopTs && startTs >= bestSourceStartTs) {
         bestSourceStartTs = startTs
@@ -23902,9 +23898,7 @@ function calendarTimelineActiveWorkerStartMinutes(resource = {}, dayKey = '') {
     .forEach((row) => {
       const startTs =
         calendarTimelineSourceRowWorkdayStartTimestamp(row) ||
-        calendarTimelineEventTimestamp(row?.dayStartAt) ||
-        calendarTimelineEventsRowStartTimestamp(row) ||
-        calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
+        calendarTimelineEventTimestamp(row?.dayStartAt)
       if (startTs > 0) {
         latestCycleStartTs = Math.max(latestCycleStartTs, startTs)
       }
@@ -23956,7 +23950,9 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
     }
 
     const startTs = calendarTimelineEventsRowStartTimestamp(row) || calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
-    const workdayStartTs = calendarTimelineSourceRowWorkdayStartTimestamp(row)
+    const workdayStartTs =
+      calendarTimelineSourceRowWorkdayStartTimestamp(row) ||
+      calendarTimelineEventTimestamp(row?.dayStartAt)
     const endTs = calendarTimelineEventsRowStopTimestamp(row) || calendarTimelineEventTimestamp(row?.endAt ?? row?.dayEndAt)
     if (!startTs && !endTs) {
       return
@@ -23992,8 +23988,8 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         bucket.sourceStartAt = new Date(workdayStartTs).toISOString()
       }
     }
-    if (startTs > 0) {
-      bucket.latestCycleStartTs = Math.max(bucket.latestCycleStartTs, workdayStartTs || startTs)
+    if (workdayStartTs > 0) {
+      bucket.latestCycleStartTs = Math.max(bucket.latestCycleStartTs, workdayStartTs)
       if (!bucket.clientLabel) {
         bucket.clientLabel = dashboardResolveClientLabel(row)
       }
