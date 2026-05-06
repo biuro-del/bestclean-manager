@@ -21737,7 +21737,7 @@ function calendarTimelineDeduplicatePopupMarkerRows(rows = []) {
   return result
 }
 
-async function calendarTimelineFetchWorkerDayEvents(resource = {}, dayKey = '') {
+async function calendarTimelineFetchWorkerDayEvents(resource = {}, dayKey = '', context = {}) {
   const day = String(dayKey ?? '').trim()
   if (!appState.session?.orgId || resource?.type !== 'worker' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
     return []
@@ -21766,7 +21766,7 @@ async function calendarTimelineFetchWorkerDayEvents(resource = {}, dayKey = '') 
       )
     const matchedRows = rows.filter((row) => calendarTimelineResourceMatchesSourceRow(resource, row))
     if (matchedRows.length) {
-      return calendarTimelineRowsWithDayStartMarker(matchedRows, day)
+      return calendarTimelineRowsWithDayStartMarker(calendarTimelineFilterRowsForBarContext(matchedRows, context), day)
     }
     if (query.workerLogin || query.worker) {
       continue
@@ -21780,12 +21780,61 @@ function calendarTimelineEventIdentityValues(row = {}) {
   return [
     row?.eventId,
     row?.workdayId,
+    row?.linkedWorkdayId,
     row?.id,
     row?.startEventId,
     row?.endEventId,
   ]
     .map((value) => String(value ?? '').trim())
     .filter(Boolean)
+}
+
+function calendarTimelineRowMatchesBarCycle(row = {}, context = {}) {
+  const contextWorkdayId = String(context?.workdayId ?? '').trim()
+  const contextSourceEventId = String(context?.sourceEventId ?? '').trim()
+  const sourceStartTs = calendarTimelineEventTimestamp(context?.sourceStartAt)
+
+  if (contextWorkdayId) {
+    const rowWorkdayId = calendarTimelineRealWorkdayIdentity(row)
+    if (rowWorkdayId && rowWorkdayId === contextWorkdayId) {
+      return true
+    }
+
+    const rowIds = calendarTimelineEventIdentityValues(row)
+    if (rowIds.includes(contextWorkdayId)) {
+      return true
+    }
+  }
+
+  if (contextSourceEventId && calendarTimelineEventIdentityValues(row).includes(contextSourceEventId)) {
+    return true
+  }
+
+  if (sourceStartTs > 0) {
+    const rowStartTs =
+      calendarTimelineSourceRowWorkdayStartTimestamp(row) ||
+      calendarTimelineEventTimestamp(row?.dayStartAt)
+    if (rowStartTs > 0 && Math.abs(rowStartTs - sourceStartTs) <= 60 * 1000) {
+      return true
+    }
+  }
+
+  return !contextWorkdayId && !contextSourceEventId && sourceStartTs <= 0
+}
+
+function calendarTimelineFilterRowsForBarContext(rows = [], context = {}) {
+  const sourceRows = Array.isArray(rows) ? rows : []
+  const hasCycleHint = Boolean(
+    String(context?.workdayId ?? '').trim() ||
+      String(context?.sourceEventId ?? '').trim() ||
+      calendarTimelineEventTimestamp(context?.sourceStartAt) > 0,
+  )
+  if (!hasCycleHint) {
+    return sourceRows
+  }
+
+  const scopedRows = sourceRows.filter((row) => calendarTimelineRowMatchesBarCycle(row, context))
+  return scopedRows.length ? scopedRows : sourceRows
 }
 
 function calendarTimelineFindEventRowForBar(rows = [], context = {}) {
@@ -23011,7 +23060,7 @@ async function calendarTimelineShowWorkerDayEventsPopup(bar) {
   })
 
   try {
-    const rows = await calendarTimelineFetchWorkerDayEvents(context.resource, context.dateYmd)
+    const rows = await calendarTimelineFetchWorkerDayEvents(context.resource, context.dateYmd, context)
     if (!document.body.contains(node)) {
       return
     }
@@ -23035,7 +23084,7 @@ async function calendarTimelineOpenRealEventEditorFromBar(bar) {
     return
   }
   try {
-    const rows = await calendarTimelineFetchWorkerDayEvents(context.resource, context.dateYmd)
+    const rows = await calendarTimelineFetchWorkerDayEvents(context.resource, context.dateYmd, context)
     const row = calendarTimelineFindEventRowForBar(rows, context)
     if (!row) {
       showTransientNotice('Nie znaleziono zdarzenia do edycji.', 'error')
@@ -23738,6 +23787,41 @@ function calendarTimelineRealStartObjectLabel(row = {}) {
   return qr && qr !== '-' ? `QR ${qr}` : 'QR START'
 }
 
+function calendarTimelineRealWorkdayIdentity(row = {}) {
+  const sourceKind = String(row?.historySourceKind ?? '').trim().toLowerCase()
+  const linkedWorkdayId = String(row?.linkedWorkdayId ?? row?.workday?.workdayId ?? '').trim()
+  const workdayId = String(row?.workdayId ?? '').trim()
+  const id = String(row?.id ?? '').trim()
+
+  if (linkedWorkdayId) {
+    return linkedWorkdayId
+  }
+  if (sourceKind === 'workday' && (workdayId || id)) {
+    return workdayId || id
+  }
+  if (workdayId && workdayId !== String(row?.eventId ?? '').trim()) {
+    return workdayId
+  }
+
+  return ''
+}
+
+function calendarTimelineRealWorkdayCycleKey(row = {}, rowIndex = -1, dayKey = '', startTs = 0) {
+  const workdayIdentity = calendarTimelineRealWorkdayIdentity(row)
+  if (workdayIdentity) {
+    return `${rowIndex}|${dayKey}|wd:${workdayIdentity}`
+  }
+
+  const dayStartTs =
+    calendarTimelineSourceRowWorkdayStartTimestamp(row) ||
+    calendarTimelineEventTimestamp(row?.dayStartAt) ||
+    Number(startTs || 0)
+  const minuteKey = dayStartTs > 0 ? Math.round(dayStartTs / 60000) : 0
+  const qr = String(row?.dayStartObject ?? row?.startObject ?? row?.workdayUtilityRoomId ?? '').trim()
+  const qrKey = normalizeSearchText(qr) || '-'
+  return `${rowIndex}|${dayKey}|start:${minuteKey}|${qrKey}`
+}
+
 function calendarTimelineRealEventRowDay(row = {}) {
   const iso = toIso(row?.startAt ?? row?.dayStartAt ?? row?.endAt ?? row?.dayEndAt)
   if (iso) {
@@ -23842,11 +23926,12 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
       return
     }
 
-    const key = `${rowIndex}|${dayKey}`
+    const key = calendarTimelineRealWorkdayCycleKey(row, rowIndex, dayKey, startTs || workdayStartTs)
     if (!buckets.has(key)) {
       buckets.set(key, {
         dayKey,
         rowIndex,
+        cycleKey: key,
         firstStartTs: 0,
         latestActivityEndTs: 0,
         latestDayStopTs: 0,
@@ -23863,7 +23948,7 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         bucket.firstStartTs = workdayStartTs
         bucket.startObjectLabel = calendarTimelineRealStartObjectLabel(row)
         bucket.sourceEventId = String(row?.eventId ?? '').trim()
-        bucket.workdayId = String(row?.workdayId ?? row?.id ?? '').trim()
+        bucket.workdayId = calendarTimelineRealWorkdayIdentity(row) || String(row?.workdayId ?? row?.id ?? '').trim()
         bucket.sourceStartAt = new Date(workdayStartTs).toISOString()
       }
     }
