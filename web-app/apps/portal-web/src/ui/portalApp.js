@@ -23971,8 +23971,10 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         firstStartTs: 0,
         latestActivityEndTs: 0,
         latestDayStopTs: 0,
-        hasRunning: false,
+        latestCycleStartTs: 0,
         startObjectLabel: '',
+        clientLabel: '',
+        addressLabel: '',
         sourceEventId: '',
         workdayId: '',
         sourceStartAt: '',
@@ -23983,9 +23985,20 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
       if (!bucket.firstStartTs || workdayStartTs < bucket.firstStartTs) {
         bucket.firstStartTs = workdayStartTs
         bucket.startObjectLabel = calendarTimelineRealStartObjectLabel(row)
+        bucket.clientLabel = dashboardResolveClientLabel(row)
+        bucket.addressLabel = String(row?.lokalizacja ?? row?.location ?? row?.address ?? '').trim()
         bucket.sourceEventId = String(row?.eventId ?? '').trim()
         bucket.workdayId = calendarTimelineRealWorkdayIdentity(row) || String(row?.workdayId ?? row?.id ?? '').trim()
         bucket.sourceStartAt = new Date(workdayStartTs).toISOString()
+      }
+    }
+    if (startTs > 0) {
+      bucket.latestCycleStartTs = Math.max(bucket.latestCycleStartTs, workdayStartTs || startTs)
+      if (!bucket.clientLabel) {
+        bucket.clientLabel = dashboardResolveClientLabel(row)
+      }
+      if (!bucket.addressLabel) {
+        bucket.addressLabel = String(row?.lokalizacja ?? row?.location ?? row?.address ?? '').trim()
       }
     }
     if (endTs > 0) {
@@ -23995,34 +24008,20 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
     if (dayStopTs > 0) {
       bucket.latestDayStopTs = Math.max(bucket.latestDayStopTs, dayStopTs)
     }
-    const status = normalizeEventStatus(row?.status, Boolean(row?.endAt ?? row?.dayEndAt))
-    if (startTs > 0 && !endTs && status === 'RUNNING') {
-      bucket.hasRunning = true
-    }
   })
 
   return [...buckets.values()]
     .map((bucket) => {
       const now = Date.now()
-      const resource = resources[bucket.rowIndex] ?? null
-      const statusRow = calendarTimelineCurrentStatusRowForResource(resource, bucket.dayKey)
-      const activeStartMinutes = calendarTimelineActiveWorkerStartMinutes(resource, bucket.dayKey)
-      const statusStartMinutes = activeStartMinutes >= 0 ? activeStartMinutes : calendarTimelineRowStartMinutes(statusRow)
-      const statusStartTs = Number.isFinite(statusStartMinutes) && statusStartMinutes >= 0
-        ? calendarTimelineTimestampFromDayMinutes(bucket.dayKey, statusStartMinutes)
-        : 0
-      const stateRunning = calendarTimelineWorkerResourceIsRunningOnDay(resource, bucket.dayKey)
       const hasExplicitDayStop = bucket.latestDayStopTs > 0
-      const startTs = !hasExplicitDayStop && statusStartTs > 0
-        ? statusStartTs
-        : bucket.firstStartTs || bucket.latestDayStopTs || bucket.latestActivityEndTs
+      const startTs = bucket.firstStartTs || bucket.latestCycleStartTs || bucket.latestDayStopTs || bucket.latestActivityEndTs
       if (!startTs) {
         return null
       }
       const shouldRunToNow =
         !hasExplicitDayStop &&
         bucket.dayKey === todayYmd() &&
-        (bucket.hasRunning || stateRunning || bucket.firstStartTs > 0 || statusStartTs > 0)
+        bucket.latestCycleStartTs > bucket.latestDayStopTs
       const endTs =
         bucket.latestDayStopTs ||
         (shouldRunToNow
@@ -24036,13 +24035,10 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         return null
       }
       const durationLabel = calendarTimelineRealDurationLabel(start.timestamp, end.timestamp)
-      const statusTitle = statusRow
-        ? calendarTimelineReadableClientLabel(dashboardResolveClientLabel(statusRow)) || calendarTimelineRealStartObjectLabel(statusRow)
-        : ''
-      const titleParts = [(!hasExplicitDayStop && statusTitle) || bucket.startObjectLabel || 'QR START', durationLabel]
+      const titleParts = [bucket.startObjectLabel || 'QR START', durationLabel]
       const title = titleParts.join(' · ')
       return {
-        id: `real-workday-${bucket.rowIndex}-${bucket.dayKey}`,
+        id: `real-workday-${bucket.rowIndex}-${bucket.dayKey}-${bucket.cycleKey}`,
         sourceEventId: bucket.sourceEventId,
         workdayId: bucket.workdayId,
         row: bucket.rowIndex,
@@ -24055,8 +24051,8 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         validUntil: end.day,
         nextDate: start.day,
         title,
-        clientLabel: '',
-        addressLabel: '',
+        clientLabel: bucket.clientLabel,
+        addressLabel: bucket.addressLabel,
         type: 'other',
         tone: 'steel',
         actualStartAt: startIso,
