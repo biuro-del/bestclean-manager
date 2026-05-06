@@ -24014,7 +24014,19 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
     .map((bucket) => {
       const now = Date.now()
       const hasExplicitDayStop = bucket.latestDayStopTs > 0
-      const startTs = bucket.firstStartTs || bucket.latestCycleStartTs || bucket.latestDayStopTs || bucket.latestActivityEndTs
+      const resource = resources[bucket.rowIndex] ?? null
+      const statusRow = calendarTimelineCurrentStatusRowForResource(resource, bucket.dayKey)
+      const activeStartMinutes = calendarTimelineActiveWorkerStartMinutes(resource, bucket.dayKey)
+      const fallbackStartTs =
+        Number.isFinite(activeStartMinutes) && activeStartMinutes >= 0
+          ? calendarTimelineTimestampFromDayMinutes(bucket.dayKey, activeStartMinutes)
+          : 0
+      const startTs =
+        bucket.firstStartTs ||
+        (!hasExplicitDayStop && fallbackStartTs > 0 ? fallbackStartTs : 0) ||
+        bucket.latestCycleStartTs ||
+        bucket.latestDayStopTs ||
+        bucket.latestActivityEndTs
       if (!startTs) {
         return null
       }
@@ -24035,7 +24047,10 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         return null
       }
       const durationLabel = calendarTimelineRealDurationLabel(start.timestamp, end.timestamp)
-      const titleParts = [bucket.startObjectLabel || 'QR START', durationLabel]
+      const fallbackTitle = statusRow
+        ? calendarTimelineReadableClientLabel(dashboardResolveClientLabel(statusRow)) || calendarTimelineRealStartObjectLabel(statusRow)
+        : ''
+      const titleParts = [bucket.startObjectLabel || fallbackTitle || 'QR START', durationLabel]
       const title = titleParts.join(' · ')
       return {
         id: `real-workday-${bucket.rowIndex}-${bucket.dayKey}-${bucket.cycleKey}`,
