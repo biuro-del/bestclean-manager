@@ -20526,29 +20526,108 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
   }
 
   const stateMap = new Map()
-  const upsertState = (key, state = {}) => {
+  const upsertState = (key, state = {}, options = {}) => {
     if (!key) {
       return
     }
+    const preferSource = Boolean(options.preferSource)
     const existing = stateMap.get(key) || {
       hasStart: false,
       isRunning: false,
       startMinutes: -1,
+      sourceOfTruth: '',
     }
     const nextStartMinutes = Number(state.startMinutes ?? -1)
     stateMap.set(key, {
-      hasStart: existing.hasStart || Boolean(state.hasStart),
-      isRunning: existing.isRunning || Boolean(state.isRunning),
+      hasStart: preferSource ? Boolean(state.hasStart) : existing.hasStart || Boolean(state.hasStart),
+      isRunning: preferSource ? Boolean(state.isRunning) : existing.isRunning || Boolean(state.isRunning),
       startMinutes:
-        existing.startMinutes >= 0 && nextStartMinutes >= 0
+        preferSource
+          ? nextStartMinutes >= 0
+            ? nextStartMinutes
+            : -1
+          : existing.startMinutes >= 0 && nextStartMinutes >= 0
           ? Math.min(existing.startMinutes, nextStartMinutes)
           : existing.startMinutes >= 0
             ? existing.startMinutes
             : nextStartMinutes >= 0
               ? nextStartMinutes
               : -1,
+      sourceOfTruth: preferSource ? 'events' : existing.sourceOfTruth || String(state.sourceOfTruth ?? '').trim(),
     })
   }
+
+  const sourceRows =
+    appState.calendarTimelineWorkerStateDayKey === normalizedDayKey
+      ? Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
+        ? appState.calendarTimelineWorkerStateSourceRows
+        : []
+      : []
+  const sourceBuckets = new Map()
+  const ensureSourceBucket = (key) => {
+    if (!sourceBuckets.has(key)) {
+      sourceBuckets.set(key, {
+        hasStart: false,
+        earliestStartMinutes: -1,
+        latestStartTs: 0,
+        latestStartMinutes: -1,
+        latestStopTs: 0,
+      })
+    }
+    return sourceBuckets.get(key)
+  }
+
+  sourceRows.forEach((row) => {
+    if ((dashboardResolveDayKey(row) || calendarTimelineRealEventRowDay(row)) !== normalizedDayKey) {
+      return
+    }
+    const keys = dashboardResolveTodayRowAliasKeys(row)
+    if (!(keys instanceof Set) || !keys.size) {
+      return
+    }
+
+    const cycleStartTs =
+      calendarTimelineSourceRowWorkdayStartTimestamp(row) ||
+      calendarTimelineEventTimestamp(row?.dayStartAt) ||
+      calendarTimelineEventsRowStartTimestamp(row) ||
+      calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
+    const stopTs = calendarTimelineSourceRowDayStopTimestamp(row)
+    const cycleStartMinutes = cycleStartTs > 0 ? calendarTimelineTimestampToMinutes(new Date(cycleStartTs).toISOString()) : -1
+
+    keys.forEach((key) => {
+      const bucket = ensureSourceBucket(key)
+      if (cycleStartTs > 0) {
+        bucket.hasStart = true
+        if (cycleStartMinutes >= 0) {
+          bucket.earliestStartMinutes =
+            bucket.earliestStartMinutes >= 0
+              ? Math.min(bucket.earliestStartMinutes, cycleStartMinutes)
+              : cycleStartMinutes
+        }
+        if (cycleStartTs >= bucket.latestStartTs) {
+          bucket.latestStartTs = cycleStartTs
+          bucket.latestStartMinutes = cycleStartMinutes
+        }
+      }
+      if (stopTs > 0) {
+        bucket.latestStopTs = Math.max(bucket.latestStopTs, stopTs)
+      }
+    })
+  })
+
+  sourceBuckets.forEach((bucket, key) => {
+    const sourceRunning = bucket.latestStartTs > 0 && bucket.latestStartTs > bucket.latestStopTs
+    upsertState(
+      key,
+      {
+        hasStart: bucket.hasStart,
+        isRunning: sourceRunning,
+        startMinutes: sourceRunning ? bucket.latestStartMinutes : bucket.earliestStartMinutes,
+        sourceOfTruth: 'events',
+      },
+      { preferSource: true },
+    )
+  })
 
   const todayKey = todayYmd()
   const rows =
@@ -20572,82 +20651,14 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
       Boolean(stopLabel && stopLabel !== '-' && stopLabel !== '--:--' && stopLabel !== '--:--:--')
     const keys = dashboardResolveTodayRowAliasKeys(row)
     keys.forEach((key) => {
+      if (sourceBuckets.has(key)) {
+        return
+      }
       upsertState(key, {
         hasStart,
         isRunning: hasStart && !hasStop,
         startMinutes,
       })
-    })
-  })
-
-  const sourceRows =
-    appState.calendarTimelineWorkerStateDayKey === normalizedDayKey
-      ? Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
-        ? appState.calendarTimelineWorkerStateSourceRows
-        : []
-      : []
-  const sourceBuckets = new Map()
-  const ensureBucket = (key) => {
-    if (!sourceBuckets.has(key)) {
-      sourceBuckets.set(key, {
-        hasStart: false,
-        startMinutes: -1,
-        latestStartTs: 0,
-        latestStopTs: 0,
-      })
-    }
-    return sourceBuckets.get(key)
-  }
-
-  sourceRows.forEach((row) => {
-    if ((dashboardResolveDayKey(row) || calendarTimelineRealEventRowDay(row)) !== normalizedDayKey) {
-      return
-    }
-    const keys = dashboardResolveTodayRowAliasKeys(row)
-    if (!(keys instanceof Set) || !keys.size) {
-      return
-    }
-
-    const startTs = calendarTimelineEventsRowStartTimestamp(row) || calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
-    const stopTs = calendarTimelineSourceRowDayStopTimestamp(row)
-    const startMinutes = calendarTimelineSourceRowStartMinutes(row)
-
-    keys.forEach((key) => {
-      const bucket = ensureBucket(key)
-      if (startTs > 0) {
-        bucket.hasStart = true
-        bucket.latestStartTs = Math.max(bucket.latestStartTs, startTs)
-        if (startMinutes >= 0) {
-          bucket.startMinutes =
-            bucket.startMinutes >= 0 ? Math.min(bucket.startMinutes, startMinutes) : startMinutes
-        }
-      }
-      if (stopTs > 0) {
-        bucket.latestStopTs = Math.max(bucket.latestStopTs, stopTs)
-      }
-    })
-  })
-
-  sourceBuckets.forEach((bucket, key) => {
-    const existing = stateMap.get(key) || {
-      hasStart: false,
-      isRunning: false,
-      startMinutes: -1,
-    }
-    const existingStartMinutes = Number(existing.startMinutes ?? -1)
-    const sourceStartMinutes = Number(bucket.startMinutes ?? -1)
-    const sourceRunning = bucket.latestStartTs > 0 && bucket.latestStartTs > bucket.latestStopTs
-    stateMap.set(key, {
-      hasStart: existing.hasStart || bucket.hasStart,
-      isRunning: sourceRunning,
-      startMinutes:
-        existingStartMinutes >= 0 && sourceStartMinutes >= 0
-          ? Math.min(existingStartMinutes, sourceStartMinutes)
-          : existingStartMinutes >= 0
-            ? existingStartMinutes
-            : sourceStartMinutes >= 0
-              ? sourceStartMinutes
-              : -1,
     })
   })
 
@@ -23836,6 +23847,33 @@ function calendarTimelineCurrentStatusRowForResource(resource = {}, dayKey = '')
     return null
   }
 
+  const sourceRows =
+    appState.calendarTimelineWorkerStateDayKey === normalizedDay
+      ? Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
+        ? appState.calendarTimelineWorkerStateSourceRows
+        : []
+      : []
+  let bestSourceRow = null
+  let bestSourceStartTs = 0
+  sourceRows
+    .filter((row) => (dashboardResolveDayKey(row) || calendarTimelineRealEventRowDay(row)) === normalizedDay)
+    .filter((row) => calendarTimelineResourceMatchesSourceRow(resource, row))
+    .forEach((row) => {
+      const startTs =
+        calendarTimelineSourceRowWorkdayStartTimestamp(row) ||
+        calendarTimelineEventTimestamp(row?.dayStartAt) ||
+        calendarTimelineEventsRowStartTimestamp(row) ||
+        calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
+      const stopTs = calendarTimelineSourceRowDayStopTimestamp(row)
+      if (startTs > 0 && startTs > stopTs && startTs >= bestSourceStartTs) {
+        bestSourceStartTs = startTs
+        bestSourceRow = row
+      }
+    })
+  if (bestSourceRow) {
+    return bestSourceRow
+  }
+
   const rows = Array.isArray(appState.calendarTimelineCurrentWorkerStatusRows) && appState.calendarTimelineCurrentWorkerStatusRows.length
     ? appState.calendarTimelineCurrentWorkerStatusRows
     : Array.isArray(appState.dashboardTodayRows)
@@ -23850,62 +23888,60 @@ function calendarTimelineActiveWorkerStartMinutes(resource = {}, dayKey = '') {
     return -1
   }
 
-  const candidates = []
-  const statusRows = Array.isArray(appState.calendarTimelineCurrentWorkerStatusRows) && appState.calendarTimelineCurrentWorkerStatusRows.length
-    ? appState.calendarTimelineCurrentWorkerStatusRows
-    : Array.isArray(appState.dashboardTodayRows)
-      ? appState.dashboardTodayRows
-      : []
-  statusRows
-    .filter((row) => calendarTimelineResourceMatchesSourceRow(resource, row))
-    .filter((row) => calendarTimelineStatusRowIsRunning(row))
-    .forEach((row) => {
-      const minutes = calendarTimelineRowStartMinutes(row)
-      if (minutes >= 0) {
-        candidates.push(minutes)
-      }
-    })
-
   const sourceRows =
     appState.calendarTimelineWorkerStateDayKey === normalizedDay
       ? Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
         ? appState.calendarTimelineWorkerStateSourceRows
         : []
       : []
-  let latestStartTs = 0
+  let latestCycleStartTs = 0
   let latestStopTs = 0
   sourceRows
     .filter((row) => (dashboardResolveDayKey(row) || calendarTimelineRealEventRowDay(row)) === normalizedDay)
     .filter((row) => calendarTimelineResourceMatchesSourceRow(resource, row))
     .forEach((row) => {
-      const startTs = calendarTimelineEventsRowIsRunning(row)
-        ? calendarTimelineEventsRowStartTimestamp(row)
-        : calendarTimelineSourceRowWorkdayStartTimestamp(row)
+      const startTs =
+        calendarTimelineSourceRowWorkdayStartTimestamp(row) ||
+        calendarTimelineEventTimestamp(row?.dayStartAt) ||
+        calendarTimelineEventsRowStartTimestamp(row) ||
+        calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
       if (startTs > 0) {
-        latestStartTs = Math.max(latestStartTs, startTs)
+        latestCycleStartTs = Math.max(latestCycleStartTs, startTs)
       }
       const stopTs = calendarTimelineSourceRowDayStopTimestamp(row)
       if (stopTs > 0) {
         latestStopTs = Math.max(latestStopTs, stopTs)
       }
     })
-  if (latestStartTs > 0 && latestStartTs > latestStopTs) {
-    const minutes = calendarTimelineTimestampToMinutes(new Date(latestStartTs).toISOString())
-    if (minutes >= 0) {
-      candidates.push(minutes)
-    }
+  if (latestCycleStartTs > 0 && latestCycleStartTs > latestStopTs) {
+    return calendarTimelineTimestampToMinutes(new Date(latestCycleStartTs).toISOString())
   }
 
   const stateMap = calendarTimelineBuildWorkerStateMap(normalizedDay)
-  ;[...calendarTimelineWorkerAliasKeys(resource.worker)].forEach((key) => {
+  const eventStateMinutes = [...calendarTimelineWorkerAliasKeys(resource.worker)].reduce((best, key) => {
     const state = stateMap.get(key)
-    const minutes = Number(state?.startMinutes ?? -1)
-    if (state?.isRunning && Number.isFinite(minutes) && minutes >= 0) {
-      candidates.push(minutes)
+    if (state?.sourceOfTruth === 'events' && state?.isRunning) {
+      const minutes = Number(state?.startMinutes ?? -1)
+      if (Number.isFinite(minutes) && minutes >= 0) {
+        return Math.max(best, minutes)
+      }
     }
-  })
-
-  return candidates.length ? Math.max(...candidates) : -1
+    return best
+  }, -1)
+  if (eventStateMinutes >= 0) {
+    return eventStateMinutes
+  }
+  const statusRows = Array.isArray(appState.calendarTimelineCurrentWorkerStatusRows) && appState.calendarTimelineCurrentWorkerStatusRows.length
+    ? appState.calendarTimelineCurrentWorkerStatusRows
+    : Array.isArray(appState.dashboardTodayRows)
+      ? appState.dashboardTodayRows
+      : []
+  const fallbackMinutes = statusRows
+    .filter((row) => calendarTimelineResourceMatchesSourceRow(resource, row))
+    .filter((row) => calendarTimelineStatusRowIsRunning(row))
+    .map((row) => calendarTimelineRowStartMinutes(row))
+    .filter((minutes) => Number.isFinite(minutes) && minutes >= 0)
+  return fallbackMinutes.length ? Math.max(...fallbackMinutes) : -1
 }
 
 function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows = []) {
