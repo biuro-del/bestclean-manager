@@ -24332,8 +24332,8 @@ function calendarTimelinePrototypeHtml() {
   const totalSlots = days.length * slotsPerDay
   const resources = calendarTimelineResources()
   const plannedOrders = ordersListSourceOrders()
-  const realEventOrders = calendarTimelineRealEventOrders(resources, days, plannedOrders)
-  const bars = calendarTimelineVisualOrders([...plannedOrders, ...realEventOrders], resources)
+  const realEventOrders = []
+  const bars = calendarTimelineVisualOrders(plannedOrders, resources)
   const selectedTypes = calendarTimelineSelectedTypes()
   const layout = calendarTimelineLayoutEventBars(bars, days, hours, resources, selectedTypes)
   const realTrackCounts = new Map()
