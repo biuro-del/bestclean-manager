@@ -19895,6 +19895,27 @@ function calendarTimelineStatusDayKey() {
   return /^\d{4}-\d{2}-\d{2}$/.test(dayKey) ? dayKey : todayYmd()
 }
 
+function calendarTimelineSetWorkerStateLoading(isLoading) {
+  const loading = Boolean(isLoading)
+  appState.calendarTimelineWorkerStateLoading = loading
+
+  const stage = document.getElementById('calendarPrototypeTimeline')
+  if (stage instanceof HTMLElement) {
+    stage.setAttribute('aria-busy', loading ? 'true' : 'false')
+    const overlay = stage.querySelector('.fw-timeline-loading')
+    if (overlay instanceof HTMLElement) {
+      overlay.hidden = !loading
+      overlay.classList.toggle('is-hidden', !loading)
+    }
+  }
+
+  const refreshButton = document.getElementById('calendarTimelineRefreshBtn')
+  if (refreshButton instanceof HTMLButtonElement) {
+    refreshButton.classList.toggle('is-loading', loading)
+    refreshButton.setAttribute('aria-busy', loading ? 'true' : 'false')
+  }
+}
+
 async function calendarEnsureTimelineWorkerState(options = {}) {
   if (!appState.session?.orgId) {
     return
@@ -19926,7 +19947,7 @@ async function calendarEnsureTimelineWorkerState(options = {}) {
     return
   }
 
-  appState.calendarTimelineWorkerStateLoading = true
+  calendarTimelineSetWorkerStateLoading(true)
   try {
     let statusRows = []
     let sourceRows = []
@@ -19978,7 +19999,7 @@ async function calendarEnsureTimelineWorkerState(options = {}) {
   } catch {
     // Status kropek pozostaje czerwony, jeśli nie uda się pobrać aktywnych startów.
   } finally {
-    appState.calendarTimelineWorkerStateLoading = false
+    calendarTimelineSetWorkerStateLoading(false)
     if (appState.calendarTimelineWorkerStateRefreshQueued === true) {
       const queuedDayKey = calendarTimelineStatusDayKey()
       appState.calendarTimelineWorkerStateRefreshQueued = false
@@ -24344,6 +24365,7 @@ function calendarTimelinePrototypeHtml() {
     .join('')
   const currentHour = calendarTimelineCurrentHourHtml(days, hours, resources)
   appState.calendarTimelineStatusAlerts = calendarTimelineUniqueStatusAlerts(statusAlerts)
+  const loadingHidden = appState.calendarTimelineWorkerStateLoading ? '' : ' hidden'
 
   return `
     <div class="fw-timeline-scroll">
@@ -24355,6 +24377,13 @@ function calendarTimelinePrototypeHtml() {
         ${cells}
         ${currentHour}
         ${eventBars}
+      </div>
+    </div>
+    <div class="fw-timeline-loading${appState.calendarTimelineWorkerStateLoading ? '' : ' is-hidden'}" role="status" aria-live="polite"${loadingHidden}>
+      <div class="fw-timeline-loading-card">
+        <span class="fw-timeline-spinner" aria-hidden="true"></span>
+        <strong>Ładowanie kalendarza...</strong>
+        <small>Pobieram zlecenia i zdarzenia pracowników</small>
       </div>
     </div>
   `
