@@ -19001,29 +19001,44 @@ body{
 /* Report history layout corrections */
 #portalRoot #view-reports .rep-history-day-info{
   align-items:center !important;
-  display:flex !important;
-  flex-direction:row !important;
-  flex-wrap:wrap !important;
-  gap:10px !important;
+  display:grid !important;
+  gap:12px !important;
+  grid-template-columns:minmax(260px, 340px) minmax(180px, 220px) !important;
   justify-content:flex-end !important;
+  justify-items:stretch !important;
+  width:100% !important;
 }
 
 #portalRoot #view-reports .rep-history-day-info .dash-time-stack{
   align-self:center !important;
   box-sizing:border-box !important;
-  flex:0 1 340px !important;
+  grid-column:1 !important;
   max-width:340px !important;
-  min-width:240px !important;
-  width:340px !important;
+  min-width:0 !important;
+  width:100% !important;
 }
 
 #portalRoot #view-reports .rep-history-stopday-btn{
   align-self:center !important;
   display:inline-flex !important;
+  grid-column:2 !important;
   justify-content:center !important;
   max-width:220px !important;
   min-width:180px !important;
-  width:auto !important;
+  width:100% !important;
+}
+
+@media (max-width:1120px){
+  #portalRoot #view-reports .rep-history-day-info{
+    grid-template-columns:minmax(220px, 1fr) !important;
+    justify-content:stretch !important;
+  }
+
+  #portalRoot #view-reports .rep-history-stopday-btn{
+    grid-column:1 !important;
+    justify-self:stretch !important;
+    max-width:none !important;
+  }
 }
 
 #portalRoot #view-reports .rep-history-detail-table{
