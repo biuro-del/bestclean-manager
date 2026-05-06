@@ -24379,11 +24379,17 @@ function calendarTimelinePrototypeHtml() {
     ? appState.calendarTimelineWorkerStateSourceRows
     : []
   const realWorkdayOrders = calendarTimelineRealWorkdayOrders(resources, days, sourceRows)
-  const bars = calendarTimelineVisualOrders([...plannedOrders, ...realWorkdayOrders], resources)
+  const realStatusOrders = calendarTimelineRealStatusOrders(resources, days, realWorkdayOrders)
+  const realOrders = calendarTimelineEnsureActiveWorkerStatusOrders(
+    [...realWorkdayOrders, ...realStatusOrders],
+    resources,
+    days,
+  )
+  const bars = calendarTimelineVisualOrders([...plannedOrders, ...realOrders], resources)
   const selectedTypes = calendarTimelineSelectedTypes()
   const layout = calendarTimelineLayoutEventBars(bars, days, hours, resources, selectedTypes)
   const realTrackCounts = new Map()
-  realWorkdayOrders.forEach((order) => {
+  realOrders.forEach((order) => {
     const row = Number(order?.row)
     const trackIndex = Number(order?.realTrackIndex ?? 0)
     if (!Number.isInteger(row) || row < 0 || !Number.isFinite(trackIndex)) {
