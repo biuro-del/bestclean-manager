@@ -15,6 +15,7 @@
     "dependencies": {
         "@dataconnect/generated": "file:apps/portal-web/src/dataconnect-generated",
         "firebase": "^12.9.0",
+        "jspdf": "^4.2.1",
         "jszip": "^3.10.1",
         "pdfmake": "^0.3.7",
         "react": "^19.2.0",

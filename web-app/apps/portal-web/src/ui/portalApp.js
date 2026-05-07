@@ -10942,28 +10942,14 @@ async function ensureJsPdfLoaded() {
     return window.jspdf.jsPDF
   }
 
-  await new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-io-jspdf="1"]')
-    if (existing) {
-      existing.addEventListener('load', () => resolve(), { once: true })
-      existing.addEventListener('error', () => reject(new Error('Nie udało się załadować jsPDF.')), { once: true })
-      return
-    }
-
-    const script = document.createElement('script')
-    script.dataset.ioJspdf = '1'
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
-    script.async = true
-    script.addEventListener('load', () => resolve(), { once: true })
-    script.addEventListener('error', () => reject(new Error('Nie udało się załadować jsPDF.')), { once: true })
-    document.head.appendChild(script)
-  })
-
-  if (!window.jspdf?.jsPDF) {
+  const module = await import('jspdf')
+  const jsPdf = module?.jsPDF ?? module?.default?.jsPDF ?? module?.default
+  if (typeof jsPdf !== 'function') {
     throw new Error('Biblioteka jsPDF nie jest dostępna.')
   }
 
-  return window.jspdf.jsPDF
+  window.jspdf = { ...(window.jspdf ?? {}), jsPDF: jsPdf }
+  return jsPdf
 }
 
 async function ensurePdfUnicodeFont(pdf) {
