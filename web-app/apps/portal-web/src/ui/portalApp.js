@@ -3559,31 +3559,6 @@ function dashboardBuildPlannedOrderActivityItems(dayKey = todayYmd(), rangeStart
     })
 }
 
-function dashboardActiveWorkerTimelineGroups() {
-  const workers = Array.isArray(appState.workers) ? appState.workers : []
-  return workers
-    .filter((worker) => worker && worker.active !== false)
-    .map((worker) => {
-      const identity = dashboardActivityWorkerIdentity(
-        {
-          workerName: worker?.workerName ?? worker?.name,
-          workerLogin: worker?.workerLogin ?? worker?.login ?? worker?.id,
-          workerId: worker?.workerId ?? worker?.id,
-        },
-        worker,
-      )
-      return {
-        workerKey: identity.workerKey,
-        workerSortKey: identity.workerSortKey,
-        workerDisplayName: identity.workerDisplayName,
-        workerName: identity.workerName,
-        workerLogin: identity.workerLogin,
-        bars: [],
-        locationLabels: [],
-      }
-    })
-}
-
 function dashboardLaneActivityBars(bars = []) {
   const laneEnds = []
   return bars
@@ -3630,12 +3605,6 @@ function renderDashboardActivityCalendar(rows = []) {
     ...dashboardBuildPlannedOrderActivityItems(dayKey, rangeStart, rangeEnd),
   ]
   const grouped = new Map()
-  dashboardActiveWorkerTimelineGroups().forEach((group) => {
-    const key = group.workerKey || `n:${normalizeSearchText(group.workerDisplayName)}`
-    if (key && !grouped.has(key)) {
-      grouped.set(key, group)
-    }
-  })
   activityItems.forEach((item) => {
     const key = item.workerKey || `n:${normalizeSearchText(item.workerDisplayName)}`
     if (!grouped.has(key)) {
