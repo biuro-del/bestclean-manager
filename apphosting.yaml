@@ -1,4 +1,8 @@
 env:
+  - variable: NODE_ENV
+    value: production
+    availability:
+      - RUNTIME
   - variable: APP_TARGET
     value: portal
     availability:
@@ -22,6 +26,14 @@ env:
       - RUNTIME
   - variable: DB_CONNECTOR
     value: cloudsql
+    availability:
+      - RUNTIME
+  - variable: CLOUD_SQL_AUTH_CLIENT
+    value: compute
+    availability:
+      - RUNTIME
+  - variable: CLOUD_SQL_AUTH_TYPE
+    value: PASSWORD
     availability:
       - RUNTIME
   - variable: DB_NAME

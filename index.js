@@ -5,6 +5,7 @@ const dotenv = require('dotenv')
 const admin = require('firebase-admin')
 const { Pool } = require('pg')
 const { AuthTypes, Connector, IpAddressTypes } = require('@google-cloud/cloud-sql-connector')
+const { Compute, GoogleAuth } = require('google-auth-library')
 
 function isTrue(value) {
   return ['1', 'true', 'yes', 'tak'].includes(
@@ -52,6 +53,7 @@ const CLOUD_SQL_CONNECTION_NAME = String(
     process.env.INSTANCE_CONNECTION_NAME ||
     (FIREBASE_PROJECT_ID === 'iclean-room' ? 'iclean-room:europe-west3:iclean-room-instance' : ''),
 ).trim()
+const CLOUD_SQL_ADMIN_SCOPE = 'https://www.googleapis.com/auth/sqlservice.admin'
 
 let firebaseAdminInitialized = false
 let dbPool = null
@@ -204,11 +206,45 @@ function logAdminUsersError(error, context = '') {
   console.error(`[admin/users]${context ? ` ${context}` : ''} ${code}: ${message}`)
 }
 
+function logPortalStorageError(context, error) {
+  const code = normalizeText(error?.publicCode || error?.code || error?.response?.data?.error || 'UNKNOWN')
+  const message = normalizeText(
+    error?.publicMessage || error?.message || error?.response?.data?.error_description || 'Unknown portal storage error',
+  ).slice(0, 800)
+  console.error(`[${context}] ${code}: ${message}`)
+}
+
 function mapDatabaseConnectionError(error) {
   const code = normalizeText(error?.code).toUpperCase()
   const message = normalizeText(error?.message)
+  const lowerMessage = message.toLowerCase()
+  const responseError = normalizeText(error?.response?.data?.error).toLowerCase()
+  const responseDescription = normalizeText(error?.response?.data?.error_description).toLowerCase()
   const host = normalizeText(process.env.DB_HOST || process.env.PGHOST || '127.0.0.1')
   const port = normalizeText(process.env.DB_PORT || process.env.PGPORT || '5432')
+
+  if (
+    code === 'INVALID_GRANT' ||
+    responseError === 'invalid_grant' ||
+    lowerMessage.includes('invalid_grant') ||
+    lowerMessage.includes('invalid_rapt') ||
+    responseDescription.includes('invalid_rapt')
+  ) {
+    return {
+      status: 500,
+      code: 'GOOGLE_AUTH_REAUTH_REQUIRED',
+      message:
+        'Backend nie moze uwierzytelnic polaczenia z Google Cloud (invalid_grant/invalid_rapt). Sprawdz konto serwisowe runtime.',
+    }
+  }
+
+  if (lowerMessage.includes('not_authorized') || lowerMessage.includes('cloudsql.instances.get')) {
+    return {
+      status: 500,
+      code: 'CLOUD_SQL_NOT_AUTHORIZED',
+      message: 'Konto serwisowe backendu nie ma uprawnien do instancji Cloud SQL.',
+    }
+  }
 
   if (code === 'ECONNREFUSED') {
     return {
@@ -579,6 +615,21 @@ function getCloudSqlAuthType() {
   return AuthTypes[value] || AuthTypes.PASSWORD
 }
 
+function isGoogleServerlessRuntime() {
+  return Boolean(process.env.K_SERVICE || process.env.K_REVISION || process.env.FUNCTION_TARGET || process.env.FUNCTION_NAME)
+}
+
+function createCloudSqlConnectorAuth() {
+  const mode = normalizeText(process.env.CLOUD_SQL_AUTH_CLIENT || process.env.DB_CLOUD_SQL_AUTH_CLIENT).toLowerCase()
+  if (mode === 'compute' || (!mode && isGoogleServerlessRuntime())) {
+    return new Compute({ scopes: [CLOUD_SQL_ADMIN_SCOPE] })
+  }
+  if (mode === 'google-auth' || mode === 'adc') {
+    return new GoogleAuth({ scopes: [CLOUD_SQL_ADMIN_SCOPE] })
+  }
+  return undefined
+}
+
 function isFalse(value) {
   return ['0', 'false', 'no', 'nie'].includes(normalizeText(value).toLowerCase())
 }
@@ -594,7 +645,7 @@ function getDbSslOptions(sslEnabled) {
 
 async function getCloudSqlConnectorOptions() {
   if (!cloudSqlOptionsPromise) {
-    cloudSqlConnector = cloudSqlConnector || new Connector()
+    cloudSqlConnector = cloudSqlConnector || new Connector({ auth: createCloudSqlConnectorAuth() })
     cloudSqlOptionsPromise = cloudSqlConnector
       .getOptions({
         instanceConnectionName: CLOUD_SQL_CONNECTION_NAME,
@@ -1182,10 +1233,12 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
   }
 
   const requesterUid = normalizeText(decodedToken?.uid)
-  const pool = await getDbPool()
-  const client = await pool.connect()
+  let client = null
 
   try {
+    const pool = await getDbPool()
+    client = await pool.connect()
+
     await ensurePortalTaskTable(client)
     await requirePortalTaskAccess(client, orgId, requesterUid)
 
@@ -1231,8 +1284,9 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
     const savedTasks = await readPortalTasks(client, orgId)
     sendJson(res, 200, { ok: true, data: { tasks: savedTasks } })
   } catch (error) {
+    logPortalStorageError('portal/tasks', error)
     try {
-      await client.query('rollback')
+      if (client) await client.query('rollback')
     } catch {
       // ignore rollback failure
     }
@@ -1250,7 +1304,7 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
       normalizeText(error?.publicMessage) || error?.message || 'Nie udało się obsłużyć zadań portalu.',
     )
   } finally {
-    client.release()
+    if (client) client.release()
   }
 }
 
@@ -1361,10 +1415,12 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
   }
 
   const requesterUid = normalizeText(decodedToken?.uid)
-  const pool = await getDbPool()
-  const client = await pool.connect()
+  let client = null
 
   try {
+    const pool = await getDbPool()
+    client = await pool.connect()
+
     await ensurePortalScheduleOrderTable(client)
     await requirePortalTaskAccess(client, orgId, requesterUid)
 
@@ -1412,8 +1468,9 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
     const savedOrders = await readPortalScheduleOrders(client, orgId)
     sendJson(res, 200, { ok: true, data: { orders: savedOrders } })
   } catch (error) {
+    logPortalStorageError('portal/schedule-orders', error)
     try {
-      await client.query('rollback')
+      if (client) await client.query('rollback')
     } catch {
       // ignore rollback failure
     }
@@ -1431,7 +1488,7 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
       normalizeText(error?.publicMessage) || error?.message || 'Nie udało się obsłużyć zleceń grafiku.',
     )
   } finally {
-    client.release()
+    if (client) client.release()
   }
 }
 
