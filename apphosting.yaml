@@ -41,11 +41,11 @@ env:
     availability:
       - RUNTIME
   - variable: DB_USER
-    secret: DB_USER
+    secret: PORTAL_DB_USER
     availability:
       - RUNTIME
   - variable: DB_PASS
-    secret: DB_PASS
+    secret: PORTAL_DB_PASS
     availability:
       - RUNTIME
   - variable: DB_SSL_REJECT_UNAUTHORIZED
