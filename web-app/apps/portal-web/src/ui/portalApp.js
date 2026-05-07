@@ -22442,10 +22442,13 @@ function calendarTimelineResourceAvatarTone(index = 0) {
 }
 
 function calendarTimelineResourceRowHeight(rowIndex, resource = {}) {
+  if (resource?.type === 'buffer') {
+    return 72
+  }
   const laneCount = Number(appState.calendarTimelinePlannedLaneCounts?.get?.(rowIndex) || 0)
   const trackCount = Number(appState.calendarTimelineRealTrackCounts?.get?.(rowIndex) || 0)
   const stackedHeight = 8 + Math.max(1, trackCount, laneCount) * 24
-  return resource?.type === 'buffer' ? Math.max(72, stackedHeight) : Math.max(40, stackedHeight)
+  return Math.max(40, stackedHeight)
 }
 
 function calendarTimelineCurrentHourHtml(days = [], hours = [], resources = []) {
@@ -26643,11 +26646,15 @@ function calendarTimelinePrototypeHtml() {
       const realTrackIndex = Number(bar.realTrackIndex ?? 0)
       const realTrackCount = Number(realTrackCounts.get(bar.row) || 0)
       const plannedOffsetBase = 7
-      const stackStyle = bar.isRealEvent
-        ? `--fw-bar-height:20px;--fw-bar-offset:${4 + Math.max(0, Math.floor(realTrackIndex)) * 24}px;--fw-bar-z:${8 + Math.max(0, Math.floor(realTrackIndex))};`
-        : laneCount > 1
-          ? `--fw-bar-height:20px;--fw-bar-offset:${plannedOffsetBase + lane * 22}px;--fw-bar-z:${10 + realTrackCount + lane};`
-          : `--fw-bar-height:24px;--fw-bar-offset:${plannedOffsetBase}px;--fw-bar-z:${4 + realTrackCount};`
+      const isBufferEvent = resources[bar.row]?.type === 'buffer'
+      const bufferLane = Math.max(0, Math.floor(Number(lane) || 0))
+      const stackStyle = isBufferEvent
+        ? `--fw-bar-height:22px;--fw-bar-offset:${Math.min(44, 8 + bufferLane * 11)}px;--fw-bar-z:${120 + bufferLane};`
+        : bar.isRealEvent
+          ? `--fw-bar-height:20px;--fw-bar-offset:${4 + Math.max(0, Math.floor(realTrackIndex)) * 24}px;--fw-bar-z:${8 + Math.max(0, Math.floor(realTrackIndex))};`
+          : laneCount > 1
+            ? `--fw-bar-height:20px;--fw-bar-offset:${plannedOffsetBase + lane * 22}px;--fw-bar-z:${10 + realTrackCount + lane};`
+            : `--fw-bar-height:24px;--fw-bar-offset:${plannedOffsetBase}px;--fw-bar-z:${4 + realTrackCount};`
       const titleLabel = status?.label ? `${timeLabel} · ${status.label}` : timeLabel
       const realEventAttr = bar.isRealEvent ? ' data-calendar-timeline-real-event="1"' : ''
       const recurringAttr = bar.isRecurringInstance ? ' data-calendar-timeline-recurring-instance="1"' : ''
@@ -26655,7 +26662,6 @@ function calendarTimelinePrototypeHtml() {
       const sourceOrderAttr = sourceOrderId ? ` data-calendar-timeline-source-order-id="${escapeHtml(sourceOrderId)}"` : ''
       const draggableAttr = bar.isRealEvent || bar.isRecurringInstance ? 'false' : 'true'
       const realTrackClass = bar.isRealEvent ? ` fw-event-real--${escapeHtml(bar.realTrack || 'event')}` : ''
-      const isBufferEvent = resources[bar.row]?.type === 'buffer'
       const sourceEventId = String(bar.sourceEventId ?? '').trim()
       const workdayId = String(bar.workdayId ?? '').trim()
       const sourceStartAt = toIso(bar.sourceStartAt ?? bar.actualStartAt ?? '')
