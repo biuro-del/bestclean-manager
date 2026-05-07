@@ -13915,7 +13915,7 @@ function renderWorkerProfileRows(rows) {
         <div>${escapeHtml(worker.name || '-')}</div>
         <div class="mono">${escapeHtml(worker.login || '-')}</div>
         <div>${escapeHtml(worker.type || worker.role || '-')}</div>
-        <div><span class="pill ${worker.active ? 'pill-true' : 'pill-false'}">${escapeHtml(worker.active ? 'TRUE' : 'FALSE')}</span></div>
+        <div><span class="pill ${worker.active ? 'pill-true' : 'pill-false'}">${escapeHtml(workerBoolLabel(worker.active))}</span></div>
         <div><span class="pill ${worker.online ? 'pill-yes' : 'pill-no'}">${escapeHtml(workerBoolLabel(Boolean(worker.online)))}</span></div>
         <div>${escapeHtml(worker.phone || '-')}</div>
         <div>${escapeHtml(worker.email || '-')}</div>
@@ -14574,7 +14574,7 @@ function renderWorkerRows(rows) {
         <div class="mono">${escapeHtml(worker.workerId || worker.id || '-')}</div>
         <div>${escapeHtml(displayName)}</div>
         <div>${escapeHtml(worker.type || '-')}</div>
-        <div><span class="pill ${worker.active ? 'pill-true' : 'pill-false'}">${escapeHtml(worker.active ? 'TRUE' : 'FALSE')}</span></div>
+        <div><span class="pill ${worker.active ? 'pill-true' : 'pill-false'}">${escapeHtml(workerBoolLabel(worker.active))}</span></div>
         <div><button class="btn2" type="button" data-worker-login="${escapeHtml(worker.login || worker.id || '')}" data-worker-name="${escapeHtml(worker.name || '')}">Pokaż</button></div>
       </div>
     `
@@ -29732,7 +29732,7 @@ function bindWorkerTimeViewFunctions(router) {
     if (qInput) qInput.value = ''
     if (typeInput) typeInput.value = ''
     if (workerIdInput) workerIdInput.value = ''
-    if (activeInput) activeInput.value = ''
+    if (activeInput) activeInput.value = '1'
     workerTimeSetSearchSuggestionsOpen(false)
     void fetchWorkersForCurrentSession()
   })
