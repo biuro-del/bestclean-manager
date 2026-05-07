@@ -20449,7 +20449,7 @@ body{
   grid-template-columns:112px minmax(0, 1fr) 78px !important;
   gap:8px !important;
   align-items:center !important;
-  min-height:38px !important;
+  min-height:var(--dash-row-height, 38px) !important;
 }
 
 #portalRoot #view-dashboard .dash-activity-timeline-person{
@@ -20464,7 +20464,7 @@ body{
 
 #portalRoot #view-dashboard .dash-activity-timeline-track{
   position:relative !important;
-  min-height:28px !important;
+  min-height:var(--dash-track-height, 28px) !important;
   border:1px solid #e1eaf8 !important;
   border-radius:8px !important;
   overflow:hidden !important;
@@ -20490,7 +20490,7 @@ body{
 #portalRoot #view-dashboard .dash-activity-timeline-bar{
   position:absolute !important;
   left:var(--dash-left) !important;
-  top:4px !important;
+  top:calc(4px + var(--dash-lane, 0) * 22px) !important;
   width:var(--dash-width) !important;
   height:18px !important;
   border-radius:6px !important;
@@ -20514,6 +20514,13 @@ body{
   background:#1fe516 !important;
   color:#102a0d !important;
   box-shadow:0 5px 12px rgba(31,229,22,.18) !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-bar.is-planned{
+  background:#bfdbfe !important;
+  color:#123057 !important;
+  border:1px solid rgba(96,165,250,.72) !important;
+  box-shadow:0 5px 12px rgba(59,130,246,.15) !important;
 }
 
 #portalRoot #view-dashboard .dash-activity-timeline-meta{

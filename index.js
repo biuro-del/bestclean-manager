@@ -36,6 +36,7 @@ const API_PROXY_TIMEOUT_MS = Number(process.env.API_PROXY_TIMEOUT_MS || 15000)
 const ADMIN_USERS_PATH = '/api/admin/users'
 const AUTH_SESSION_CONTEXT_PATH = '/api/auth/session-context'
 const PORTAL_TASKS_PATH = '/api/portal/tasks'
+const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
 const MAX_JSON_BODY_BYTES = 1024 * 1024
 const MAX_PROXY_BODY_BYTES = Number(process.env.MAX_PROXY_BODY_BYTES || MAX_JSON_BODY_BYTES)
 const FIREBASE_PROJECT_ID = String(
@@ -1248,6 +1249,187 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
   }
 }
 
+async function ensurePortalScheduleOrderTable(client) {
+  await client.query(`
+    create table if not exists public.portal_schedule_order (
+      org_id varchar(64) not null,
+      order_id varchar(180) not null,
+      payload jsonb not null default '{}'::jsonb,
+      updated_by varchar(128),
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      primary key (org_id, order_id)
+    )
+  `)
+  await client.query(
+    'create index if not exists portal_schedule_order_org_date_idx on public.portal_schedule_order (org_id, ((payload->>\'dateYmd\')), ((payload->>\'startTime\')), order_id)',
+  )
+  await client.query('create index if not exists portal_schedule_order_org_updated_idx on public.portal_schedule_order (org_id, updated_at desc)')
+}
+
+function sanitizePortalScheduleOrderId(value) {
+  const id = normalizeText(value)
+  return id ? id.slice(0, 180) : ''
+}
+
+function sanitizePortalScheduleOrderPayload(rawOrder) {
+  if (!rawOrder || typeof rawOrder !== 'object' || Array.isArray(rawOrder)) {
+    return null
+  }
+
+  const id = sanitizePortalScheduleOrderId(rawOrder.id)
+  if (!id || rawOrder.isDraft) {
+    return null
+  }
+
+  const nowIso = new Date().toISOString()
+  return {
+    ...rawOrder,
+    id,
+    isDraft: false,
+    recordKind: 'portal-schedule-order',
+    updatedAt: normalizeText(rawOrder.updatedAt) || nowIso,
+    createdAt: normalizeText(rawOrder.createdAt) || nowIso,
+  }
+}
+
+async function readPortalScheduleOrders(client, orgId) {
+  const result = await client.query(
+    `select payload
+       from public.portal_schedule_order
+      where org_id = $1
+      order by
+        coalesce(payload->>'dateYmd', '') asc,
+        coalesce(payload->>'startTime', payload->>'time', '') asc,
+        order_id asc`,
+    [orgId],
+  )
+  return result.rows.map((row) => row.payload).filter((order) => order && typeof order === 'object')
+}
+
+async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  const method = String(req.method || 'GET').toUpperCase()
+  if (!['GET', 'POST', 'DELETE'].includes(method)) {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolone metody to GET, POST i DELETE.')
+    return
+  }
+
+  let body = {}
+  if (method !== 'GET') {
+    try {
+      body = await readJsonBody(req)
+    } catch (error) {
+      if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
+        sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duże.')
+        return
+      }
+      sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w żądaniu.')
+      return
+    }
+  }
+
+  const orgId = normalizeOrgId(method === 'GET' ? requestUrl.searchParams.get('orgId') : body?.orgId)
+  if (!orgId) {
+    sendApiError(res, 400, 'INVALID_ORG_ID', 'Brak poprawnego orgId.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status, mapped.code, mapped.message)
+    return
+  }
+
+  const requesterUid = normalizeText(decodedToken?.uid)
+  const pool = await getDbPool()
+  const client = await pool.connect()
+
+  try {
+    await ensurePortalScheduleOrderTable(client)
+    await requirePortalTaskAccess(client, orgId, requesterUid)
+
+    if (method === 'GET') {
+      const orders = await readPortalScheduleOrders(client, orgId)
+      sendJson(res, 200, { ok: true, data: { orders } })
+      return
+    }
+
+    if (method === 'DELETE') {
+      const orderIds = (Array.isArray(body?.orderIds) ? body.orderIds : [])
+        .map((value) => sanitizePortalScheduleOrderId(value))
+        .filter(Boolean)
+      if (!orderIds.length) {
+        sendJson(res, 200, { ok: true, data: { deletedOrderIds: [] } })
+        return
+      }
+
+      await client.query('delete from public.portal_schedule_order where org_id = $1 and order_id = any($2::varchar[])', [
+        orgId,
+        orderIds,
+      ])
+      sendJson(res, 200, { ok: true, data: { deletedOrderIds: orderIds } })
+      return
+    }
+
+    const rawOrders = Array.isArray(body?.orders) ? body.orders : []
+    const orders = rawOrders.map((order) => sanitizePortalScheduleOrderPayload(order)).filter(Boolean).slice(0, 5000)
+
+    await client.query('begin')
+    for (const order of orders) {
+      await client.query(
+        `insert into public.portal_schedule_order (org_id, order_id, payload, updated_by, created_at, updated_at)
+         values ($1, $2, $3::jsonb, $4, now(), now())
+         on conflict (org_id, order_id)
+         do update set
+           payload = excluded.payload,
+           updated_by = excluded.updated_by,
+           updated_at = now()`,
+        [orgId, order.id, JSON.stringify(order), requesterUid],
+      )
+    }
+    await client.query('commit')
+
+    const savedOrders = await readPortalScheduleOrders(client, orgId)
+    sendJson(res, 200, { ok: true, data: { orders: savedOrders } })
+  } catch (error) {
+    try {
+      await client.query('rollback')
+    } catch {
+      // ignore rollback failure
+    }
+
+    const mappedDb = mapDatabaseConnectionError(error)
+    if (mappedDb) {
+      sendApiError(res, mappedDb.status, mappedDb.code, mappedDb.message)
+      return
+    }
+
+    sendApiError(
+      res,
+      error?.statusCode || 500,
+      normalizeText(error?.publicCode) || 'PORTAL_SCHEDULE_ORDERS_ERROR',
+      normalizeText(error?.publicMessage) || error?.message || 'Nie udało się obsłużyć zleceń grafiku.',
+    )
+  } finally {
+    client.release()
+  }
+}
+
 function isApiMethodWithBody(method) {
   const upper = String(method || '').toUpperCase()
   return upper !== 'GET' && upper !== 'HEAD'
@@ -1312,6 +1494,13 @@ const server = http.createServer((req, res) => {
   if (requestUrl.pathname === PORTAL_TASKS_PATH) {
     handlePortalTasksRequest(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PORTAL_TASKS_ERROR', error?.message || 'Unexpected portal tasks error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === PORTAL_SCHEDULE_ORDERS_PATH) {
+    handlePortalScheduleOrdersRequest(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'PORTAL_SCHEDULE_ORDERS_ERROR', error?.message || 'Unexpected portal schedule orders error.')
     })
     return
   }

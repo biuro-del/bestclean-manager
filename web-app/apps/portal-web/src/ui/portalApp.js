@@ -40,6 +40,11 @@ import {
   setUserStyle,
 } from '../services/styleService'
 import { deletePortalTasks, fetchPortalTasks, upsertPortalTasks } from '../services/portalTaskService'
+import {
+  deletePortalScheduleOrders,
+  fetchPortalScheduleOrders,
+  upsertPortalScheduleOrders,
+} from '../services/portalScheduleOrderService'
 import { portalLayoutTemplate } from './layoutTemplate'
 import { createRouter } from './router'
 import { viewTemplates } from './viewTemplates'
@@ -108,6 +113,8 @@ const appState = {
   calendarTimelineShowCompleted: true,
   calendarTimelineTypeFilters: ['individual', 'cyclic', 'renovation', 'windows', 'other'],
   calendarTimelineDemoOrders: [],
+  calendarTimelineOrdersRemoteLoaded: false,
+  calendarTimelineOrdersRemoteLoading: false,
   calendarTimelineDragOrderId: '',
   calendarTimelineDragSourceRow: null,
   calendarTimelineDragTargetRow: null,
@@ -234,6 +241,8 @@ let dashboardScheduleLimitRaf = 0
 let dashboardScheduleLimitTimerA = 0
 let dashboardScheduleLimitTimerB = 0
 let calendarRemoteSaveTimer = 0
+let ordersRemoteSaveTimer = 0
+let ordersRemoteRetryTimer = 0
 let calendarTimelineWorkerStateRefreshTimer = null
 let calendarTimelineBarClickTimer = 0
 let calendarTimelineEventsPopupAnchor = null
@@ -302,6 +311,7 @@ const GRID_COLUMN_RESIZE_CLASS = 'grid-col-resize-active'
 const GRID_COLUMN_RESIZE_ATTR = 'data-grid-col-resizer'
 const GRID_COLUMN_MAX_WIDTH = 780
 const CALENDAR_STORAGE_PREFIX = 'portal.calendar.tasks'
+const ORDERS_STORAGE_PREFIX = 'portal.schedule.orders'
 const KANBAN_COLUMNS_STORAGE_PREFIX = 'portal.kanban.columns'
 const CALENDAR_HOUR_HEIGHT_PX = 56
 const CALENDAR_TIMED_TASK_GAP_PX = 4
@@ -1022,7 +1032,24 @@ function showTransientNotice(message, type = 'success') {
 
   portalNoticeTimer = window.setTimeout(() => {
     notice?.classList.remove('show')
-  }, 3000)
+  }, type === 'error' ? 7000 : 3000)
+}
+
+function formatErrorNoticeMessage(error, fallback = 'Wystąpił nieoczekiwany błąd.') {
+  const candidates = [
+    error instanceof Error ? error.message : '',
+    typeof error === 'string' ? error : '',
+    typeof error?.message === 'string' ? error.message : '',
+  ]
+  const message = candidates.map((value) => String(value ?? '').trim()).find(Boolean)
+  return message && message !== '[object Object]' ? message : fallback
+}
+
+function showPortalErrorNotice(prefix, error, fallback) {
+  const intro = String(prefix ?? '').trim() || 'Wystąpił błąd.'
+  const detail = formatErrorNoticeMessage(error, fallback)
+  const normalizedIntro = /[.!?]$/.test(intro) ? intro : `${intro}.`
+  showTransientNotice(`${normalizedIntro} ${detail}`, 'error')
 }
 
 function escapeHtml(value) {
@@ -1276,6 +1303,11 @@ function calendarDayToneClass(dayKey, dayIndex = 0) {
 function calendarStorageKey() {
   const orgId = String(appState.session?.orgId ?? '').trim() || 'local'
   return `${CALENDAR_STORAGE_PREFIX}:${orgId}`
+}
+
+function ordersStorageKey() {
+  const orgId = String(appState.session?.orgId ?? '').trim() || 'local'
+  return `${ORDERS_STORAGE_PREFIX}:${orgId}`
 }
 
 function kanbanColumnsStorageKey() {
@@ -2046,6 +2078,7 @@ function calendarQueueRemoteTaskSave(tasks = appState.calendarTasks) {
     calendarRemoteSaveTimer = 0
     void upsertPortalTasks(orgId, snapshot).catch((error) => {
       console.warn('[portal/tasks] remote save failed', error)
+      showPortalErrorNotice('Nie udało się zapisać zadań kalendarza w bazie', error)
     })
   }, 350)
 }
@@ -2090,6 +2123,7 @@ async function calendarSyncRemoteTasks({ render = false } = {}) {
   } catch (error) {
     appState.calendarRemoteTasksLoaded = false
     console.warn('[portal/tasks] remote load failed', error)
+    showPortalErrorNotice('Nie udało się pobrać zadań kalendarza z bazy', error)
     return appState.calendarTasks
   } finally {
     appState.calendarRemoteTasksLoading = false
@@ -2108,6 +2142,7 @@ function calendarDeleteRemoteTasksById(taskIds = []) {
 
   void deletePortalTasks(orgId, ids).catch((error) => {
     console.warn('[portal/tasks] remote delete failed', error)
+    showPortalErrorNotice('Nie udało się usunąć zadań kalendarza z bazy', error)
   })
 }
 
@@ -3376,6 +3411,167 @@ function dashboardTimelinePercent(ts, rangeStart, rangeEnd) {
   return ((ts - rangeStart) / span) * 100
 }
 
+function dashboardFindWorkerByAliasKeys(keys = new Set()) {
+  const sourceKeys = keys instanceof Set ? keys : new Set()
+  if (!sourceKeys.size) {
+    return null
+  }
+
+  const workers = Array.isArray(appState.workers) ? appState.workers : []
+  return (
+    workers.find((worker) => {
+      const workerKeys = dashboardWorkerAliasKeys(
+        worker?.workerName ?? worker?.name,
+        worker?.workerLogin ?? worker?.login ?? worker?.id,
+        worker?.workerId ?? worker?.id,
+        { includeLooseNameKeys: false },
+      )
+      return [...workerKeys].some((key) => sourceKeys.has(key))
+    }) ?? null
+  )
+}
+
+function dashboardActivityWorkerIdentity(row = {}, linkedWorker = null) {
+  const worker = linkedWorker || null
+  const workerName = String(worker?.workerName ?? worker?.name ?? row?.workerName ?? row?.name ?? '').trim()
+  const workerLogin = String(worker?.workerLogin ?? worker?.login ?? row?.workerLogin ?? row?.login ?? row?.id ?? '').trim()
+  const workerId = String(worker?.workerId ?? worker?.id ?? row?.workerId ?? row?.id ?? '').trim()
+  const displaySource = workerName || workerLogin || workerId || '-'
+  const workerDisplayName = dashboardWorkerSurnameDisplayName(displaySource)
+  const workerSortKey = dashboardWorkerSurnameSortKey(displaySource)
+  const idKey = normalizeSearchText(workerId)
+  const loginKey = normalizeSearchText(workerLogin)
+  const nameKey = normalizeSearchText(displaySource)
+  const workerKey = idKey ? `id:${idKey}` : loginKey ? `l:${loginKey}` : `n:${nameKey}`
+
+  return {
+    workerKey,
+    workerName: displaySource,
+    workerDisplayName,
+    workerSortKey,
+    workerLogin,
+  }
+}
+
+function dashboardBuildWorkdayActivityItems(rows = [], dayKey = todayYmd(), rangeStart = 0, rangeEnd = 0, nowTs = Date.now()) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      const startDate = dashboardTodayDateFromTime(row?.qrStart ?? row?.start ?? row?.dayStartAt ?? row?.startAt, dayKey)
+      if (!startDate) {
+        return null
+      }
+
+      const stopDate = row?.isRunning
+        ? null
+        : dashboardTodayDateFromTime(row?.qrStop ?? row?.stop ?? row?.dayEndAt ?? row?.endAt, dayKey)
+      const durationSeconds = dashboardParseDurationLabelToSeconds(row?.duration)
+      let startTs = startDate.getTime()
+      let stopTs = stopDate ? stopDate.getTime() : nowTs
+
+      if (!stopDate && durationSeconds > 0 && !row?.isRunning) {
+        stopTs = startTs + durationSeconds * 1000
+      }
+      if (stopTs < startTs) {
+        stopTs = row?.isRunning ? nowTs : startTs
+      }
+
+      const clippedStart = Math.max(startTs, rangeStart)
+      const clippedStop = Math.min(stopTs, rangeEnd)
+      if (clippedStop < rangeStart || clippedStart > rangeEnd) {
+        return null
+      }
+
+      const rowKeys = dashboardResolveTodayRowAliasKeys(row)
+      const linkedWorker = dashboardFindWorkerByAliasKeys(rowKeys)
+      const identity = dashboardActivityWorkerIdentity(row, linkedWorker)
+      const clientLabel = dashboardResolveClientLabel(row)
+      const locationLabel =
+        clientLabel && clientLabel !== '-'
+          ? clientLabel
+          : String(row?.activeClient ?? row?.activeZone ?? row?.strefa ?? row?.zoneName ?? '').trim()
+      const elapsedSeconds = Math.max(0, Math.floor((stopTs - startTs) / 1000))
+      const durationLabel = row?.isRunning ? durationSecondsToHm(elapsedSeconds) : dashboardDurationLabelToHm(row?.duration, durationSecondsToHm(elapsedSeconds))
+
+      return {
+        ...identity,
+        kind: 'workday',
+        startTs,
+        stopTs,
+        clippedStart,
+        clippedStop,
+        label: durationLabel,
+        locationLabel,
+        isRunning: Boolean(row?.isRunning),
+      }
+    })
+    .filter(Boolean)
+}
+
+function dashboardBuildPlannedOrderActivityItems(dayKey = todayYmd(), rangeStart = 0, rangeEnd = 0) {
+  const resources = calendarTimelineResources()
+  const plannedOrders = calendarTimelineExpandRecurringOrdersForDays(ordersListSourceOrders(), [dayKey])
+  return plannedOrders
+    .filter((order) => !order?.completed)
+    .flatMap((order) => {
+      const planned = calendarTimelineOrderPlannedBounds(order)
+      if (!planned) {
+        return []
+      }
+
+      const clippedStart = Math.max(planned.startTs, rangeStart)
+      const clippedStop = Math.min(planned.endTs, rangeEnd)
+      if (clippedStop < rangeStart || clippedStart > rangeEnd) {
+        return []
+      }
+
+      const rows = ordersNormalizeOrderRows(order, resources).filter((row) => resources[row]?.type === 'worker')
+      if (!rows.length) {
+        return []
+      }
+
+      return rows.map((row) => {
+        const resource = resources[row] ?? {}
+        const worker = resource.worker ?? null
+        const identity = dashboardActivityWorkerIdentity(
+          {
+            workerName: resource.name,
+            workerLogin: worker?.workerLogin ?? worker?.login,
+            workerId: worker?.workerId ?? worker?.id,
+          },
+          worker,
+        )
+        const title = calendarTimelineOrderTitle(order)
+        const clientLabel = ordersTimelineClientLabel(order)
+        const locationLabel = clientLabel && clientLabel !== '-' ? clientLabel : ordersTimelineAddressLabel(order)
+
+        return {
+          ...identity,
+          kind: 'planned',
+          startTs: planned.startTs,
+          stopTs: planned.endTs,
+          clippedStart,
+          clippedStop,
+          label: title,
+          locationLabel,
+          isRunning: false,
+        }
+      })
+    })
+}
+
+function dashboardLaneActivityBars(bars = []) {
+  const laneEnds = []
+  return bars
+    .slice()
+    .sort((left, right) => left.clippedStart - right.clippedStart || left.clippedStop - right.clippedStop)
+    .map((bar) => {
+      const laneIndex = laneEnds.findIndex((endTs) => endTs <= bar.clippedStart)
+      const lane = laneIndex >= 0 ? laneIndex : laneEnds.length
+      laneEnds[lane] = bar.clippedStop
+      return { ...bar, lane }
+    })
+}
+
 function renderDashboardActivityCalendar(rows = []) {
   const root = document.getElementById('dashActivityCalendar')
   if (!root) {
@@ -3404,73 +3600,73 @@ function renderDashboardActivityCalendar(rows = []) {
     return `<span class="is-hour" style="--dash-left:${left.toFixed(3)}%">${escapeHtml(pad2(hour))}</span>`
   })
 
-  const items = safeRows
-    .map((row) => {
-      const startDate = dashboardTodayDateFromTime(row?.qrStart ?? row?.start ?? row?.dayStartAt ?? row?.startAt, dayKey)
-      if (!startDate) {
-        return null
-      }
+  const activityItems = [
+    ...dashboardBuildWorkdayActivityItems(safeRows, dayKey, rangeStart, rangeEnd, nowTs),
+    ...dashboardBuildPlannedOrderActivityItems(dayKey, rangeStart, rangeEnd),
+  ]
+  const grouped = new Map()
+  activityItems.forEach((item) => {
+    const key = item.workerKey || `n:${normalizeSearchText(item.workerDisplayName)}`
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        workerKey: key,
+        workerSortKey: item.workerSortKey,
+        workerDisplayName: item.workerDisplayName,
+        workerName: item.workerName,
+        workerLogin: item.workerLogin,
+        bars: [],
+        locationLabels: [],
+      })
+    }
+    const group = grouped.get(key)
+    group.bars.push(item)
+    if (item.locationLabel && !group.locationLabels.includes(item.locationLabel)) {
+      group.locationLabels.push(item.locationLabel)
+    }
+  })
 
-      const stopDate = row?.isRunning
-        ? null
-        : dashboardTodayDateFromTime(row?.qrStop ?? row?.stop ?? row?.dayEndAt ?? row?.endAt, dayKey)
-      const durationSeconds = dashboardParseDurationLabelToSeconds(row?.duration)
-      let startTs = startDate.getTime()
-      let stopTs = stopDate ? stopDate.getTime() : nowTs
-
-      if (!stopDate && durationSeconds > 0 && !row?.isRunning) {
-        stopTs = startTs + durationSeconds * 1000
-      }
-      if (stopTs < startTs) {
-        stopTs = row?.isRunning ? nowTs : startTs
-      }
-
-      const clippedStart = Math.max(startTs, rangeStart)
-      const clippedStop = Math.min(stopTs, rangeEnd)
-      if (clippedStop < rangeStart || clippedStart > rangeEnd) {
-        return null
-      }
-
-      const left = Math.max(0, Math.min(100, dashboardTimelinePercent(clippedStart, rangeStart, rangeEnd)))
-      const right = Math.max(0, Math.min(100, dashboardTimelinePercent(clippedStop, rangeStart, rangeEnd)))
-      const width = Math.max(1.8, right - left)
-      const clientLabel = dashboardResolveClientLabel(row)
-      const workerName = String(row?.workerName ?? '').trim() || '-'
-      const workerDisplayName = dashboardWorkerSurnameDisplayName(workerName)
-      const workerSortKey = dashboardWorkerSurnameSortKey(workerName)
-      const workerLogin = String(row?.workerLogin ?? row?.id ?? '').trim()
-      const locationLabel =
-        clientLabel && clientLabel !== '-'
-          ? clientLabel
-          : String(row?.activeClient ?? row?.activeZone ?? row?.strefa ?? row?.zoneName ?? '').trim()
-      const elapsedSeconds = Math.max(0, Math.floor((stopTs - startTs) / 1000))
-      const durationLabel = row?.isRunning ? durationSecondsToHm(elapsedSeconds) : dashboardDurationLabelToHm(row?.duration, durationSecondsToHm(elapsedSeconds))
-      const barLabel = durationLabel
-      const workerButton = workerName === '-'
-        ? `<span>${escapeHtml(workerDisplayName)}</span>`
-        : `<button class="dash-worker-link" type="button" data-dash-worker-login="${escapeHtml(workerLogin)}" data-dash-worker-name="${escapeHtml(workerName)}">${escapeHtml(workerDisplayName)}</button>`
-
+  const items = [...grouped.values()]
+    .map((group) => {
+      const bars = dashboardLaneActivityBars(group.bars)
+      const laneCount = Math.max(1, ...bars.map((bar) => Number(bar.lane) + 1))
+      const workerButton = group.workerName === '-'
+        ? `<span>${escapeHtml(group.workerDisplayName)}</span>`
+        : `<button class="dash-worker-link" type="button" data-dash-worker-login="${escapeHtml(group.workerLogin)}" data-dash-worker-name="${escapeHtml(group.workerName)}">${escapeHtml(group.workerDisplayName)}</button>`
+      const barsHtml = bars
+        .map((bar) => {
+          const left = Math.max(0, Math.min(100, dashboardTimelinePercent(bar.clippedStart, rangeStart, rangeEnd)))
+          const right = Math.max(0, Math.min(100, dashboardTimelinePercent(bar.clippedStop, rangeStart, rangeEnd)))
+          const width = Math.max(1.8, right - left)
+          const classes = ['dash-activity-timeline-bar']
+          if (bar.isRunning) classes.push('is-running')
+          if (bar.kind === 'planned') classes.push('is-planned')
+          const title = `${group.workerDisplayName}: ${hourLabel(bar.startTs)} - ${bar.isRunning ? 'teraz' : hourLabel(bar.stopTs)}`
+          return `
+            <span
+              class="${classes.join(' ')}"
+              style="--dash-left:${left.toFixed(3)}%;--dash-width:${width.toFixed(3)}%;--dash-lane:${Number(bar.lane) || 0};"
+              title="${escapeHtml(title)}"
+            >
+              ${escapeHtml(bar.label)}
+            </span>
+          `
+        })
+        .join('')
+      const locationLabel = group.locationLabels.slice(0, 3).join(', ')
       return {
-        startTs,
-        workerSortKey,
-        workerDisplayName,
+        startTs: Math.min(...bars.map((bar) => bar.startTs)),
+        workerSortKey: group.workerSortKey,
         html: `
-          <div class="dash-activity-timeline-row">
+          <div class="dash-activity-timeline-row" style="--dash-lane-count:${laneCount};--dash-row-height:${laneCount * 22 + 14}px;--dash-track-height:${laneCount * 22 + 6}px;">
             <div class="dash-activity-timeline-person">${workerButton}</div>
-            <div class="dash-activity-timeline-track" title="${escapeHtml(`${workerDisplayName}: ${hourLabel(startTs)} - ${row?.isRunning ? 'teraz' : hourLabel(stopTs)}`)}">
-              <span
-                class="dash-activity-timeline-bar${row?.isRunning ? ' is-running' : ''}"
-                style="--dash-left:${left.toFixed(3)}%;--dash-width:${width.toFixed(3)}%;"
-              >
-                ${escapeHtml(barLabel)}
-              </span>
+            <div class="dash-activity-timeline-track">
+              ${barsHtml}
             </div>
             <div class="dash-activity-timeline-meta">${escapeHtml(locationLabel || '')}</div>
           </div>
         `,
       }
     })
-    .filter(Boolean)
     .sort((a, b) => {
       const byWorker = String(a.workerSortKey ?? '').localeCompare(String(b.workerSortKey ?? ''), 'pl', {
         sensitivity: 'base',
@@ -9671,10 +9867,13 @@ function ordersSaveEditor() {
   const supplies = ordersReadEditorSupplies(order)
   const equipmentToTake = supplies.filter((item) => ordersSupplyKind(item.kind) === 'equipment')
   const chemicalsToTake = supplies.filter((item) => ordersSupplyKind(item.kind) === 'chemical')
+  const nowIso = new Date().toISOString()
 
   const nextOrder = {
     ...order,
     isDraft: false,
+    createdAt: String(order.createdAt ?? '').trim() || nowIso,
+    updatedAt: nowIso,
     row: safeRow,
     assignedRows: selectedRows.length ? selectedRows : [safeRow],
     workerAssignments: ordersWorkerAssignmentsFromRows(selectedRows.length ? selectedRows : [safeRow]),
@@ -9755,7 +9954,7 @@ function ordersSaveEditor() {
     return
   }
 
-  appState.calendarTimelineDemoOrders = ordersListSourceOrders().map((item) => (item.id === nextOrder.id ? nextOrder : item))
+  ordersSaveTimelineOrders(ordersListSourceOrders().map((item) => (item.id === nextOrder.id ? nextOrder : item)))
   appState.ordersEditorMode = 'edit'
   appState.ordersEditingId = ''
   renderOrdersView()
@@ -10499,7 +10698,13 @@ function bindOrdersViewFunctions() {
         return
       }
       if (actionName === 'delete') {
-        showTransientNotice('Usuwanie zleceń podepniemy po podłączeniu bazy.', 'error')
+        ordersSaveTimelineOrders(ordersListSourceOrders().filter((order) => String(order?.id ?? '') !== orderId))
+        ordersDeleteRemoteTimelineOrdersById([orderId])
+        renderOrdersView()
+        if (appState.currentRoute === 'calendar') {
+          renderCalendarView()
+        }
+        showTransientNotice('Zlecenie usunięte z grafiku.', 'success')
         return
       }
     }
@@ -12251,6 +12456,9 @@ function dashboardStartReferencePreload(orgId) {
         dashboardWriteLocalSnapshot(activeOrgId, { workers })
         if (appState.dashboardScheduleDays.length) {
           renderDashboardSchedulePanel()
+        }
+        if (appState.currentRoute === 'dashboard') {
+          renderDashboardActivityCalendar(appState.dashboardTodayRows)
         }
       }),
     )
@@ -22648,9 +22856,280 @@ function ordersIsSeedDemoOrder(order = {}) {
   return /^fw-order-(?:[1-9]|1\d|2[0-3])$/.test(String(order?.id ?? '').trim())
 }
 
+function ordersNormalizeTimelineOrder(order = {}) {
+  if (!order || typeof order !== 'object' || Array.isArray(order)) {
+    return null
+  }
+
+  const id = String(order.id ?? '').trim()
+  if (!id || order.isDraft || ordersIsSeedDemoOrder(order)) {
+    return null
+  }
+
+  const nowIso = new Date().toISOString()
+  const dateYmd = ordersNormalizeDateField(order.dateYmd ?? order.dateFrom ?? order.startDate, todayYmd())
+  const startTime = ordersNormalizeTimeField(order.startTime ?? order.time, '08:00')
+  const endDateYmd = ordersNormalizeDateField(order.endDateYmd ?? order.validUntil ?? order.dateTo ?? order.endDate, dateYmd)
+  const endTime = ordersNormalizeTimeField(order.endTime ?? order.stopTime, ordersDefaultEndTime(startTime))
+  const assignedRows = ordersNormalizeOrderRows({ ...order, dateYmd, startTime, endDateYmd, endTime }, [])
+  const row = assignedRows[0] ?? 0
+  const type = ['individual', 'cyclic', 'renovation', 'windows', 'other'].includes(String(order.type ?? '').trim())
+    ? String(order.type).trim()
+    : 'other'
+  const createdAt = String(order.createdAt ?? '').trim() || nowIso
+  const updatedAt = String(order.updatedAt ?? '').trim() || createdAt
+
+  return {
+    ...order,
+    id,
+    row,
+    assignedRows,
+    workerAssignments: Array.isArray(order.workerAssignments) && order.workerAssignments.length ? order.workerAssignments : [],
+    dateYmd,
+    startTime,
+    endDateYmd,
+    endTime,
+    validUntil: ordersNormalizeDateField(order.validUntil ?? endDateYmd, endDateYmd),
+    nextDate: ordersNormalizeDateField(order.nextDate ?? dateYmd, dateYmd),
+    title: String(order.title ?? order.name ?? '').trim() || 'Zlecenie',
+    type,
+    tone: order.tone || ordersTimelineToneForType(type),
+    createdAt,
+    updatedAt,
+    isDraft: false,
+  }
+}
+
+function ordersOrderUpdatedAtValue(order = {}) {
+  const candidates = [order.updatedAt, order.createdAt]
+  for (const candidate of candidates) {
+    const time = Date.parse(String(candidate ?? ''))
+    if (Number.isFinite(time)) {
+      return time
+    }
+  }
+  return 0
+}
+
+function ordersSortTimelineOrders(orders = []) {
+  return [...orders].sort((left, right) => {
+    const byDate = String(left?.dateYmd ?? '').localeCompare(String(right?.dateYmd ?? ''))
+    if (byDate) return byDate
+    const byStart = String(left?.startTime ?? '').localeCompare(String(right?.startTime ?? ''))
+    if (byStart) return byStart
+    return String(left?.id ?? '').localeCompare(String(right?.id ?? ''))
+  })
+}
+
+function ordersMergeTimelineOrderLists(...orderLists) {
+  const byId = new Map()
+  orderLists
+    .flat()
+    .filter(Boolean)
+    .map((order) => ordersNormalizeTimelineOrder(order))
+    .filter(Boolean)
+    .forEach((order) => {
+      const existing = byId.get(order.id)
+      if (!existing || ordersOrderUpdatedAtValue(order) >= ordersOrderUpdatedAtValue(existing)) {
+        byId.set(order.id, order)
+      }
+    })
+  return ordersSortTimelineOrders([...byId.values()])
+}
+
+function ordersTimelineOrderSyncSignature(orders = []) {
+  return ordersMergeTimelineOrderLists(orders)
+    .map((order) => `${String(order.id ?? '').trim()}:${String(order.updatedAt ?? '').trim()}`)
+    .join('|')
+}
+
+function ordersTimelineOrderListsDiffer(left = [], right = []) {
+  return ordersTimelineOrderSyncSignature(left) !== ordersTimelineOrderSyncSignature(right)
+}
+
+function ordersLoadLocalTimelineOrders() {
+  try {
+    const raw = window.localStorage.getItem(ordersStorageKey())
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? ordersMergeTimelineOrderLists(parsed) : []
+  } catch {
+    return []
+  }
+}
+
+function ordersPersistLocalTimelineOrders(orders = []) {
+  try {
+    window.localStorage.setItem(ordersStorageKey(), JSON.stringify(ordersMergeTimelineOrderLists(orders)))
+  } catch {
+    showTransientNotice('Nie udało się zapisać zleceń grafiku w przeglądarce.', 'error')
+  }
+}
+
+function ordersScheduleRemoteTimelineOrderRetry(delayMs = 15000) {
+  if (ordersRemoteRetryTimer || typeof window === 'undefined') {
+    return
+  }
+  const orgId = String(appState.session?.orgId ?? '').trim()
+  if (!orgId || !ordersListSourceOrders().length) {
+    return
+  }
+
+  ordersRemoteRetryTimer = window.setTimeout(() => {
+    ordersRemoteRetryTimer = 0
+    if (String(appState.session?.orgId ?? '').trim() !== orgId) {
+      return
+    }
+    ordersQueueRemoteTimelineOrderSave(ordersListSourceOrders())
+  }, Math.max(3000, Number(delayMs) || 15000))
+}
+
+function ordersQueueRemoteTimelineOrderSave(orders = ordersListSourceOrders()) {
+  const orgId = String(appState.session?.orgId ?? '').trim()
+  if (!orgId) {
+    return
+  }
+
+  if (ordersRemoteSaveTimer) {
+    window.clearTimeout(ordersRemoteSaveTimer)
+  }
+
+  const snapshot = ordersMergeTimelineOrderLists(orders)
+  ordersRemoteSaveTimer = window.setTimeout(() => {
+    ordersRemoteSaveTimer = 0
+    void upsertPortalScheduleOrders(orgId, snapshot)
+      .then(() => {
+        appState.calendarTimelineOrdersRemoteLoaded = true
+        if (ordersRemoteRetryTimer) {
+          window.clearTimeout(ordersRemoteRetryTimer)
+          ordersRemoteRetryTimer = 0
+        }
+      })
+      .catch((error) => {
+        console.warn('[portal/schedule-orders] remote save failed', error)
+        ordersScheduleRemoteTimelineOrderRetry()
+        showPortalErrorNotice('Nie udało się zapisać zlecenia w bazie. Zostaje kopia lokalna', error)
+      })
+  }, 350)
+}
+
+function ordersSaveTimelineOrders(orders = appState.calendarTimelineDemoOrders, options = {}) {
+  const sourceOrders = Array.isArray(orders) ? orders : []
+  const normalized = ordersMergeTimelineOrderLists(sourceOrders)
+  const normalizedIds = new Set(normalized.map((order) => String(order.id ?? '').trim()).filter(Boolean))
+  const draftById = new Map()
+  if (options.preserveDrafts !== false) {
+    ;[...sourceOrders, ...(Array.isArray(appState.calendarTimelineDemoOrders) ? appState.calendarTimelineDemoOrders : [])].forEach((order) => {
+      const id = String(order?.id ?? '').trim()
+      if (!id || !order?.isDraft || normalizedIds.has(id) || draftById.has(id)) {
+        return
+      }
+      draftById.set(id, order)
+    })
+  }
+  appState.calendarTimelineDemoOrders = [...draftById.values(), ...normalized]
+  ordersPersistLocalTimelineOrders(normalized)
+  if (options.syncRemote !== false) {
+    ordersQueueRemoteTimelineOrderSave(normalized)
+  }
+  return normalized
+}
+
+async function ordersSyncRemoteTimelineOrders({ render = false } = {}) {
+  const orgId = String(appState.session?.orgId ?? '').trim()
+  if (!orgId || appState.calendarTimelineOrdersRemoteLoading) {
+    return ordersListSourceOrders()
+  }
+
+  appState.calendarTimelineOrdersRemoteLoading = true
+  try {
+    const stateOrders = Array.isArray(appState.calendarTimelineDemoOrders) ? appState.calendarTimelineDemoOrders : []
+    const localOrders = ordersLoadLocalTimelineOrders()
+    const remoteOrders = await fetchPortalScheduleOrders(orgId)
+    const mergedOrders = ordersMergeTimelineOrderLists(stateOrders, localOrders, remoteOrders)
+    ordersSaveTimelineOrders(mergedOrders, { syncRemote: false })
+    appState.calendarTimelineOrdersRemoteLoaded = true
+    if (ordersTimelineOrderListsDiffer(mergedOrders, remoteOrders)) {
+      ordersQueueRemoteTimelineOrderSave(mergedOrders)
+    }
+    if (render) {
+      if (appState.currentRoute === 'dashboard') renderDashboardActivityCalendar(appState.dashboardTodayRows)
+      if (appState.currentRoute === 'calendar') renderCalendarView()
+      if (appState.currentRoute === 'orders') renderOrdersView()
+      if (appState.currentRoute === 'ordersMap') renderOrdersMapView()
+    }
+    return appState.calendarTimelineDemoOrders
+  } catch (error) {
+    appState.calendarTimelineOrdersRemoteLoaded = false
+    console.warn('[portal/schedule-orders] remote load failed', error)
+    showPortalErrorNotice('Nie udało się pobrać zleceń grafiku z bazy', error)
+    return ordersListSourceOrders()
+  } finally {
+    appState.calendarTimelineOrdersRemoteLoading = false
+  }
+}
+
+function ordersDeleteRemoteTimelineOrdersById(orderIds = []) {
+  const orgId = String(appState.session?.orgId ?? '').trim()
+  const ids = (Array.isArray(orderIds) ? orderIds : [orderIds])
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean)
+  if (!orgId || !ids.length) {
+    return
+  }
+
+  void deletePortalScheduleOrders(orgId, ids).catch((error) => {
+    console.warn('[portal/schedule-orders] remote delete failed', error)
+    showPortalErrorNotice('Nie udało się usunąć zlecenia grafiku z bazy', error)
+  })
+}
+
+function ordersEnsureTimelineOrdersForRoute(routeName, renderAfterLoad) {
+  const activeOrgId = String(appState.session?.orgId ?? '').trim()
+  if (!activeOrgId) {
+    return
+  }
+
+  const renderIfStillCurrent = () => {
+    if (appState.currentRoute === routeName && typeof renderAfterLoad === 'function') {
+      renderAfterLoad()
+    }
+  }
+
+  if (!ordersListSourceOrders().length) {
+    const localOrders = ordersLoadLocalTimelineOrders()
+    if (localOrders.length) {
+      ordersSaveTimelineOrders(localOrders, { syncRemote: false })
+      renderIfStillCurrent()
+    }
+  }
+
+  const remotePromise = appState.calendarTimelineOrdersRemoteLoaded
+    ? Promise.resolve(appState.calendarTimelineDemoOrders)
+    : ordersSyncRemoteTimelineOrders({ render: true })
+
+  Promise.resolve(remotePromise)
+    .catch((error) => {
+      console.warn('[portal/schedule-orders] route refresh failed', error)
+      showPortalErrorNotice('Nie udało się odświeżyć zleceń grafiku z bazy', error)
+    })
+    .finally(renderIfStillCurrent)
+}
+
+function deferRouteOrderDataRefresh(routeName, renderAfterLoad) {
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+    ordersEnsureTimelineOrdersForRoute(routeName, renderAfterLoad)
+    return
+  }
+
+  window.requestAnimationFrame(() => {
+    ordersEnsureTimelineOrdersForRoute(routeName, renderAfterLoad)
+  })
+}
+
 function ordersListSourceOrders() {
   if (!Array.isArray(appState.calendarTimelineDemoOrders)) {
-    appState.calendarTimelineDemoOrders = calendarTimelineDefaultDemoOrders()
+    const localOrders = ordersLoadLocalTimelineOrders()
+    appState.calendarTimelineDemoOrders = localOrders.length ? localOrders : calendarTimelineDefaultDemoOrders()
   }
   appState.calendarTimelineDemoOrders = appState.calendarTimelineDemoOrders.filter((order) => !ordersIsSeedDemoOrder(order))
   return appState.calendarTimelineDemoOrders
@@ -25455,7 +25934,13 @@ function calendarTimelineBuildMovedOrder(order = {}, rowIndex, slotIndex = null,
   const days = Array.from({ length: 3 }, (_, index) => calendarAddDays(cursor, index))
   const hours = Array.from({ length: 20 }, (_, index) => index + 4)
   const slotTarget = slotIndex == null ? null : calendarTimelineSlotToDayTime(slotIndex, days, hours)
-  let nextOrder = { ...order, row: assignedRows[0], assignedRows, workerAssignments: ordersWorkerAssignmentsFromRows(assignedRows, resources) }
+  let nextOrder = {
+    ...order,
+    row: assignedRows[0],
+    assignedRows,
+    workerAssignments: ordersWorkerAssignmentsFromRows(assignedRows, resources),
+    updatedAt: new Date().toISOString(),
+  }
 
   if (slotTarget) {
     const duration = calendarTimelineSnapDurationMinutes(calendarTimelineOrderDurationMinutes(order))
@@ -25598,7 +26083,7 @@ function calendarTimelineMoveOrder(orderId, rowIndex, slotIndex = null, sourceRo
   if (conflicts.length) {
     return { moved: false, conflicts, candidate: nextOrder }
   }
-  appState.calendarTimelineDemoOrders = orders.map((order) => (order.id === id ? nextOrder : order))
+  ordersSaveTimelineOrders(orders.map((order) => (order.id === id ? nextOrder : order)))
   renderCalendarView()
   return { moved: true, conflicts: [], candidate: nextOrder }
 }
@@ -30614,6 +31099,13 @@ function bindLogin(router) {
       appState.calendarTasks = []
       appState.calendarRemoteTasksLoaded = false
       appState.calendarRemoteTasksLoading = false
+      appState.calendarTimelineDemoOrders = []
+      appState.calendarTimelineOrdersRemoteLoaded = false
+      appState.calendarTimelineOrdersRemoteLoading = false
+      if (ordersRemoteRetryTimer) {
+        window.clearTimeout(ordersRemoteRetryTimer)
+        ordersRemoteRetryTimer = 0
+      }
       appState.workerDetailRows = []
       appState.workerDetailSourceRows = []
       appState.workerDetailViewRows = []
@@ -30729,6 +31221,13 @@ function bindLogout() {
     appState.calendarTasks = []
     appState.calendarRemoteTasksLoaded = false
     appState.calendarRemoteTasksLoading = false
+    appState.calendarTimelineDemoOrders = []
+    appState.calendarTimelineOrdersRemoteLoaded = false
+    appState.calendarTimelineOrdersRemoteLoading = false
+    if (ordersRemoteRetryTimer) {
+      window.clearTimeout(ordersRemoteRetryTimer)
+      ordersRemoteRetryTimer = 0
+    }
     appState.workerDetailRows = []
     appState.workerDetailSourceRows = []
     appState.workerDetailViewRows = []
@@ -30818,12 +31317,14 @@ export function mountPortalApp() {
     if (appState.currentRoute === 'dashboard') {
       renderDashboardKanbanTasks()
       triggerDashboardRefreshIfAllowed()
+      deferRouteOrderDataRefresh('dashboard', () => renderDashboardActivityCalendar(appState.dashboardTodayRows))
     }
 
     if (appState.currentRoute === 'calendar') {
       renderCalendarView()
       void calendarEnsureTimelineWorkerState({ force: true }).catch(() => {})
       deferRouteTaskDataRefresh('calendar', renderCalendarView)
+      deferRouteOrderDataRefresh('calendar', renderCalendarView)
       if (!appState.clientsLoaded) {
         void fetchClientsForCurrentSession(false).then(renderCalendarView).catch(() => {})
       }
@@ -30863,12 +31364,14 @@ export function mountPortalApp() {
 
     if (route === 'orders') {
       renderOrdersView()
+      deferRouteOrderDataRefresh('orders', renderOrdersView)
       void ordersWarmLocationSources()
       return
     }
 
     if (route === 'ordersMap') {
       renderOrdersMapView()
+      deferRouteOrderDataRefresh('ordersMap', renderOrdersMapView)
       void ordersWarmLocationSources().then(renderOrdersMapView).catch(() => {})
       if (!appState.workersLoaded) {
         void fetchWorkersForCurrentSession().then(renderOrdersMapView).catch(() => {})
