@@ -595,11 +595,16 @@ function getDbSslOptions(sslEnabled) {
 async function getCloudSqlConnectorOptions() {
   if (!cloudSqlOptionsPromise) {
     cloudSqlConnector = cloudSqlConnector || new Connector()
-    cloudSqlOptionsPromise = cloudSqlConnector.getOptions({
-      instanceConnectionName: CLOUD_SQL_CONNECTION_NAME,
-      ipType: getCloudSqlIpType(),
-      authType: getCloudSqlAuthType(),
-    })
+    cloudSqlOptionsPromise = cloudSqlConnector
+      .getOptions({
+        instanceConnectionName: CLOUD_SQL_CONNECTION_NAME,
+        ipType: getCloudSqlIpType(),
+        authType: getCloudSqlAuthType(),
+      })
+      .catch((error) => {
+        cloudSqlOptionsPromise = null
+        throw error
+      })
   }
 
   return cloudSqlOptionsPromise
