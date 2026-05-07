@@ -26,7 +26,14 @@
           <button class="fw-view-btn" type="button" data-calendar-view="month">Miesi&#261;c</button>
           <button class="fw-toolbar-icon" id="calendarPrevBtn" type="button" aria-label="Poprzedni zakres">&lsaquo;</button>
           <button class="fw-toolbar-icon" id="calendarNextBtn" type="button" aria-label="Nast&#281;pny zakres">&rsaquo;</button>
-          <span class="fw-range-label" id="calendarRangeLabel">-</span>
+          <span class="fw-date-jump">
+            <button class="fw-date-jump-btn" id="calendarTimelineDateBtn" type="button" aria-label="Wybierz dat&#281;">
+              <span aria-hidden="true">&#128197;</span>
+              <strong id="calendarTimelineDateLabel">-</strong>
+            </button>
+            <input id="calendarTimelineDateInput" type="date" aria-label="Data pocz&#261;tku zakresu" />
+          </span>
+          <span class="fw-range-label"><i aria-hidden="true"></i><strong id="calendarRangeLabel">-</strong></span>
         </div>
       </div>
 

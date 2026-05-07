@@ -42,7 +42,7 @@
   </div>
 
   <section class="orders-modal-overlay" id="ordersEditorPanel" hidden aria-label="Dodaj lub edytuj zlecenie">
-    <div class="orders-modal" role="dialog" aria-modal="true" aria-labelledby="ordersEditTitle">
+    <div class="orders-modal orders-modal--simple" role="dialog" aria-modal="true" aria-labelledby="ordersEditTitle">
       <button class="orders-modal-close" id="ordersEditBack" type="button" aria-label="Zamknij">×</button>
 
       <div class="orders-modal-head">
@@ -50,11 +50,6 @@
           <h2 id="ordersEditTitle">Dodaj zlecenie</h2>
         </div>
         <div class="orders-modal-controls">
-          <div class="orders-tabs" role="tablist" aria-label="Sekcje zlecenia">
-            <button class="orders-tab is-active" type="button" role="tab" data-orders-tab-target="basic">Podstawowe</button>
-            <button class="orders-tab" type="button" role="tab" data-orders-tab-target="tasks">Zadania</button>
-            <button class="orders-tab" type="button" role="tab" data-orders-tab-target="extra">Dodatkowe</button>
-          </div>
           <div class="orders-modal-head-actions">
             <span>* Pola wymagane</span>
             <button class="orders-save-btn" type="button" data-orders-save>Zapisz</button>
@@ -66,8 +61,7 @@
         <div class="orders-modal-grid">
           <section class="orders-form-panel">
             <div class="orders-panel-title">
-              <span>Klient *</span>
-              <button type="button" title="Dane klienta">?</button>
+              <span>Klient</span>
             </div>
 
             <label class="orders-field">
@@ -76,8 +70,8 @@
             </label>
 
             <label class="orders-field">
-              <span>Nazwa klienta *</span>
-              <input id="ordersEditClientName" type="text" autocomplete="off" />
+              <span>Nazwa klienta</span>
+              <input id="ordersEditClientName" type="text" autocomplete="off" placeholder="Wpisz, gdy dodajesz nowego klienta" />
             </label>
 
             <label class="orders-field">
@@ -118,8 +112,7 @@
 
           <section class="orders-form-panel">
             <div class="orders-panel-title">
-              <span>Pracownik terenowy *</span>
-              <button type="button" title="Osoba odpowiedzialna">?</button>
+              <span>Przypisanie i termin</span>
             </div>
 
             <label class="orders-field">
@@ -128,7 +121,7 @@
             </label>
 
             <div class="orders-field orders-worker-field">
-              <span>Pracownik terenowy *</span>
+              <span>Pracownik/pracownicy</span>
               <select id="ordersEditWorker" hidden aria-hidden="true"></select>
               <details class="orders-worker-picker" id="ordersEditWorkerPicker">
                 <summary id="ordersEditWorkerSummary">
@@ -136,15 +129,16 @@
                 </summary>
                 <div class="orders-worker-checklist" id="ordersEditWorkerChecklist"></div>
               </details>
+              <p class="orders-field-hint">Brak wybranej osoby oznacza przypisanie do BUFORA.</p>
             </div>
 
             <div class="orders-form-two">
               <label class="orders-field">
-                <span>Data od *</span>
+                <span>Data START *</span>
                 <input id="ordersEditStart" type="date" />
               </label>
               <label class="orders-field">
-                <span>Data do *</span>
+                <span>Data STOP *</span>
                 <input id="ordersEditEnd" type="date" />
               </label>
             </div>
@@ -166,16 +160,17 @@
             </label>
 
             <div class="orders-field orders-location-field">
-              <label for="ordersEditLocation">Adres wykonania zlecenia</label>
+              <label for="ordersEditAddressSelect">Adres wykonania zlecenia *</label>
+              <select id="ordersEditAddressSelect"></select>
               <div class="orders-location-combo">
-                <input id="ordersEditLocation" type="text" autocomplete="off" placeholder="Wpisz tylko, jeśli adres jest inny niż domyślny klienta" aria-autocomplete="list" aria-expanded="false" aria-controls="ordersLocationSuggestions" aria-describedby="ordersEditLocationHint" />
+                <input id="ordersEditLocation" type="text" autocomplete="off" placeholder="Wybierz adres klienta albo wpisz ręcznie" aria-autocomplete="list" aria-expanded="false" aria-controls="ordersLocationSuggestions" aria-describedby="ordersEditLocationHint" />
                 <div class="orders-location-suggestions" id="ordersLocationSuggestions" hidden></div>
                 <input id="ordersEditLocationPlaceId" type="hidden" />
                 <input id="ordersEditLocationLat" type="hidden" />
                 <input id="ordersEditLocationLng" type="hidden" />
                 <input id="ordersEditLocationMapUrl" type="hidden" />
               </div>
-              <p class="orders-field-hint" id="ordersEditLocationHint">Puste pole oznacza adres siedziby firmy.</p>
+              <p class="orders-field-hint" id="ordersEditLocationHint">Lista pokazuje adres klienta oraz jego obiekty/strefy. Możesz wpisać inny adres.</p>
             </div>
 
             <div class="orders-field orders-editor-inline-add">
@@ -376,6 +371,46 @@
           <span>Opis zlecenia *</span>
           <textarea id="ordersEditDescription"></textarea>
         </label>
+
+        <label class="orders-field orders-worker-comment">
+          <span>Komentarz dla pracownika</span>
+          <textarea id="ordersEditWorkerComment" placeholder="Widoczny tylko dla przypisanych pracowników w aplikacji"></textarea>
+        </label>
+
+        <section class="orders-form-panel orders-simple-subtasks">
+          <div class="orders-panel-title">
+            <span>Podzadania i wyposażenie</span>
+          </div>
+
+          <div class="orders-subtask-grid">
+            <div class="orders-subtask-box">
+              <div class="orders-subtask-head">
+                <strong>Czynności do wykonania</strong>
+              </div>
+              <div class="orders-inline-add orders-inline-add--simple">
+                <input id="ordersSubtaskName" type="text" autocomplete="off" placeholder="Np. odkurzyć biuro, umyć sanitariaty..." />
+                <button id="ordersSubtaskAdd" type="button">Dodaj</button>
+              </div>
+              <div class="orders-simple-list" id="ordersSubtaskRows"></div>
+            </div>
+
+            <div class="orders-subtask-box">
+              <div class="orders-subtask-head">
+                <strong>Sprzęt lub chemia do zabrania</strong>
+              </div>
+              <div class="orders-inline-add orders-inline-add--supply">
+                <select id="ordersSupplyKind" aria-label="Typ pozycji">
+                  <option value="equipment">Sprzęt</option>
+                  <option value="chemical">Chemia</option>
+                  <option value="other">Inne</option>
+                </select>
+                <input id="ordersSupplyName" type="text" autocomplete="off" placeholder="Np. odkurzacz, płyn do szkła..." />
+                <button id="ordersSupplyAdd" type="button">Dodaj</button>
+              </div>
+              <div class="orders-simple-list" id="ordersSupplyRows"></div>
+            </div>
+          </div>
+        </section>
 
         <div class="orders-modal-footer">
           <span>* Pola wymagane</span>

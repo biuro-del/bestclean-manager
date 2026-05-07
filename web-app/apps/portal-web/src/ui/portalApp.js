@@ -116,6 +116,9 @@ const appState = {
   calendarTimelineDragResources: [],
   calendarTimelineDragConflictKey: '',
   calendarTimelineDragConflictValue: false,
+  calendarTimelineDragHoverKey: '',
+  calendarTimelineDragHoverInvalid: false,
+  calendarTimelineDragHoverNode: null,
   calendarTimelineWorkerStateLoading: false,
   calendarTimelineWorkerStateRefreshQueued: false,
   calendarTimelineWorkerStateFetchedAt: 0,
@@ -249,6 +252,7 @@ const DASHBOARD_ACTIVITY_VIEW_STORAGE_KEY = 'portal.dashboard.activityView.v2'
 const CALENDAR_TIMELINE_STATUS_REFRESH_MS = DASHBOARD_REFRESH_INTERVAL_MS
 const DASHBOARD_SCHEDULE_SOON_WINDOW_MINUTES = 60
 const DASHBOARD_SCHEDULE_VISIBLE_WORKERS = 10
+const DASHBOARD_SCHEDULE_LATE_ALERT_MINUTES = 10
 const DASHBOARD_LONG_CLEAN_SECONDS = 90 * 60
 const DASHBOARD_NEW_COMMENTS_LIMIT = 5
 const DASHBOARD_DUE_TASKS_PREVIEW_LIMIT = 10
@@ -3762,6 +3766,129 @@ function dashboardScheduleStartTimestamp(dayKey, startMinutes) {
   return dayStartMs + Math.floor(minutes) * 60 * 1000
 }
 
+function dashboardScheduleMeaningfulLineText(value = '') {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim()
+  return text && normalizeSearchText(text) !== 'brak zmiany' ? text : ''
+}
+
+function dashboardMergeScheduleLineText(current = '', next = '') {
+  const left = dashboardScheduleMeaningfulLineText(current)
+  const right = dashboardScheduleMeaningfulLineText(next)
+  if (!left) {
+    return right || 'Brak zmiany'
+  }
+  if (!right) {
+    return left
+  }
+
+  const leftKey = normalizeSearchText(left)
+  const rightKey = normalizeSearchText(right)
+  if (leftKey === rightKey) {
+    return left
+  }
+  if (leftKey.includes(rightKey)) {
+    return left
+  }
+  if (rightKey.includes(leftKey)) {
+    return right
+  }
+  return `${left} / ${right}`
+}
+
+function dashboardScheduleEntryDedupeKey(entry = {}) {
+  const direct = String(entry?.workerKey ?? '').trim()
+  if (direct) {
+    return direct
+  }
+  const login = normalizeSearchText(entry?.workerLogin)
+  if (login) {
+    return `l:${login}`
+  }
+  const historyName = normalizeSearchText(entry?.workerHistoryName)
+  if (historyName) {
+    return `n:${historyName}`
+  }
+  const workerName = normalizeSearchText(entry?.workerName)
+  return workerName ? `n:${workerName}` : ''
+}
+
+function dashboardPreferredScheduleEntry(left = {}, right = {}) {
+  const leftHasStart = dashboardScheduleTimeToMinutes(left?.startTime) >= 0
+  const rightHasStart = dashboardScheduleTimeToMinutes(right?.startTime) >= 0
+  if (leftHasStart !== rightHasStart) {
+    return leftHasStart ? left : right
+  }
+
+  const leftIsWork = String(left?.status ?? '').trim() === 'Praca'
+  const rightIsWork = String(right?.status ?? '').trim() === 'Praca'
+  if (leftIsWork !== rightIsWork) {
+    return leftIsWork ? left : right
+  }
+
+  const leftPriority = Number(left?.priority ?? Number.POSITIVE_INFINITY)
+  const rightPriority = Number(right?.priority ?? Number.POSITIVE_INFINITY)
+  if (leftPriority !== rightPriority) {
+    return leftPriority < rightPriority ? left : right
+  }
+
+  const leftStart = Number(left?.startMinutes ?? Number.POSITIVE_INFINITY)
+  const rightStart = Number(right?.startMinutes ?? Number.POSITIVE_INFINITY)
+  if (leftStart !== rightStart) {
+    return leftStart < rightStart ? left : right
+  }
+
+  return left
+}
+
+function dashboardMergeScheduleEntries(entries = []) {
+  const rows = Array.isArray(entries) ? entries : []
+  const byWorker = new Map()
+  rows.forEach((entry) => {
+    const key = dashboardScheduleEntryDedupeKey(entry)
+    if (!key) {
+      byWorker.set(`row:${byWorker.size}`, entry)
+      return
+    }
+
+    const existing = byWorker.get(key)
+    if (!existing) {
+      byWorker.set(key, entry)
+      return
+    }
+
+    const preferred = dashboardPreferredScheduleEntry(existing, entry)
+    const other = preferred === existing ? entry : existing
+    const hasQrStartAny = Boolean(existing.hasQrStartAny || entry.hasQrStartAny)
+    const hasQrStartActive = Boolean(existing.hasQrStartActive || entry.hasQrStartActive)
+    const isMissingStart = !hasQrStartAny && Boolean(existing.isMissingStart || entry.isMissingStart)
+    const priority = hasQrStartActive ? 2 : isMissingStart ? 0 : Math.min(Number(existing.priority ?? 4), Number(entry.priority ?? 4))
+    const toneClass = isMissingStart
+      ? 'is-missing-start'
+      : hasQrStartActive
+        ? 'is-started'
+        : preferred.toneClass || other.toneClass || ''
+
+    byWorker.set(key, {
+      ...preferred,
+      workerLogin: preferred.workerLogin || other.workerLogin || '',
+      workerHistoryName: preferred.workerHistoryName || other.workerHistoryName || preferred.workerName,
+      status: String(existing.status ?? '').trim() === 'Praca' || String(entry.status ?? '').trim() === 'Praca' ? 'Praca' : preferred.status,
+      statusClass: String(existing.status ?? '').trim() === 'Praca' || String(entry.status ?? '').trim() === 'Praca' ? 'is-work' : preferred.statusClass,
+      morningText: dashboardMergeScheduleLineText(existing.morningText, entry.morningText),
+      afternoonText: dashboardMergeScheduleLineText(existing.afternoonText, entry.afternoonText),
+      hasQrStartAny,
+      hasQrStartActive,
+      lateMinutes: Math.max(Number(existing.lateMinutes ?? 0), Number(entry.lateMinutes ?? 0)),
+      hasScheduleStart: Boolean(existing.hasScheduleStart || entry.hasScheduleStart),
+      isMissingStart,
+      priority,
+      toneClass,
+    })
+  })
+
+  return [...byWorker.values()]
+}
+
 function dashboardWorkerAliasKeys(workerName, workerLogin = '', workerId = '', options = {}) {
   const keys = new Set()
   const includeLooseNameKeys = options?.includeLooseNameKeys !== false
@@ -4508,7 +4635,7 @@ function dashboardRenderScheduleCards(dayBucket) {
   const todayWorkerStateMap = dashboardBuildTodayWorkerStateById(dayKey)
   const workersPool = Array.isArray(appState.workers) ? appState.workers : []
 
-  const enrichedEntries = entries
+  const enrichedRows = entries
     .map((entry) => {
       const linkedWorkerById = dashboardResolveWorkerById(entry?.workerId, workersPool)
       const linkedWorkerForLabel = linkedWorkerById ?? dashboardResolveWorkerByScheduleAlias(entry, workersPool)
@@ -4540,6 +4667,14 @@ function dashboardRenderScheduleCards(dayBucket) {
         ''
       const activeIdKey = normalizeSearchText(activeIdSource)
       const activeIdDigits = dashboardNormalizeWorkerIdDigits(activeIdSource)
+      const workerKey =
+        activeIdKey
+          ? `id:${activeIdKey}`
+          : activeIdDigits
+            ? `idn:${activeIdDigits}`
+            : workerLogin
+              ? `l:${normalizeSearchText(workerLogin)}`
+              : `n:${normalizeSearchText(workerHistoryName || workerName)}`
       const todayState =
         (activeIdKey ? todayWorkerStateMap.get(`id:${activeIdKey}`) : null) ||
         (activeIdDigits ? todayWorkerStateMap.get(`idn:${activeIdDigits}`) : null) ||
@@ -4590,6 +4725,7 @@ function dashboardRenderScheduleCards(dayBucket) {
       }
 
       return {
+        workerKey,
         workerName,
         workerLogin,
         workerHistoryName,
@@ -4608,6 +4744,7 @@ function dashboardRenderScheduleCards(dayBucket) {
         toneClass,
       }
     })
+  const enrichedEntries = dashboardMergeScheduleEntries(enrichedRows)
     .sort((left, right) => {
       if (left.priority !== right.priority) {
         return left.priority - right.priority
@@ -4670,7 +4807,9 @@ function dashboardRenderScheduleCards(dayBucket) {
   dashboardQueueScheduleVisibleLimit()
   const missingStartEntries = enrichedEntries.filter((entry) => entry.isMissingStart)
   dashboardShowScheduleMissingStartAlert(dayKey, missingStartEntries)
-  const lateStartedEntries = enrichedEntries.filter((entry) => entry.hasQrStartAny && Number(entry.lateMinutes) > 0)
+  const lateStartedEntries = enrichedEntries.filter(
+    (entry) => entry.hasQrStartAny && Number(entry.lateMinutes) >= DASHBOARD_SCHEDULE_LATE_ALERT_MINUTES,
+  )
   dashboardShowScheduleLateStartAlert(dayKey, lateStartedEntries)
 }
 
@@ -7669,6 +7808,497 @@ function ordersClientAddressLabel(data = {}) {
   return [street, cityLine].filter(Boolean).join(', ')
 }
 
+function ordersWorkerOnlyComment(order = {}) {
+  return ordersFirstClientText(
+    order?.workerComment,
+    order?.workerOnlyComment,
+    order?.employeeComment,
+    order?.appComment,
+    order?.mobileComment,
+    order?.internalComment,
+    order?.privateWorkerComment,
+    order?.commentForWorkers,
+  )
+}
+
+function ordersListEntryText(value = '') {
+  return String(value ?? '').replace(/\s+/g, ' ').trim()
+}
+
+function ordersSplitListText(value = '') {
+  return String(value ?? '')
+    .split(/\r?\n|[;,|]/)
+    .map((item) => ordersListEntryText(item))
+    .filter(Boolean)
+}
+
+function ordersListItemId(prefix = 'item') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function ordersNormalizeSubtask(item = {}, index = 0) {
+  if (typeof item === 'string') {
+    const name = ordersListEntryText(item)
+    return name ? { id: ordersListItemId('task'), name, taskName: name, completed: false } : null
+  }
+  if (!item || typeof item !== 'object') {
+    return null
+  }
+  const name = ordersFirstClientText(item.name, item.taskName, item.title, item.label, item.description)
+  if (!name) {
+    return null
+  }
+  return {
+    ...item,
+    id: String(item.id ?? item.taskId ?? '').trim() || `task-${index + 1}`,
+    name,
+    taskName: name,
+    description: ordersFirstClientText(item.description, item.note),
+    completed: Boolean(item.completed),
+  }
+}
+
+function ordersOrderSubtasks(order = {}) {
+  const source = Array.isArray(order?.tasks)
+    ? order.tasks
+    : Array.isArray(order?.subtasks)
+      ? order.subtasks
+      : Array.isArray(order?.activities)
+        ? order.activities
+        : []
+  const rows = source.map((item, index) => ordersNormalizeSubtask(item, index)).filter(Boolean)
+  const singleTask = ordersListEntryText(order?.taskName)
+  if (singleTask && !rows.some((item) => normalizeSearchText(item.name) === normalizeSearchText(singleTask))) {
+    rows.push({
+      id: 'task-main',
+      name: singleTask,
+      taskName: singleTask,
+      completed: false,
+    })
+  }
+  return rows
+}
+
+function ordersSupplyKind(value = '') {
+  const normalized = normalizeSearchText(value)
+  if (['chemia', 'chemical', 'chemicals', 'srodek', 'środek', 'detergent'].includes(normalized)) {
+    return 'chemical'
+  }
+  if (['sprzet', 'sprzęt', 'equipment', 'tool', 'tools'].includes(normalized)) {
+    return 'equipment'
+  }
+  return 'other'
+}
+
+function ordersSupplyKindLabel(kind = '') {
+  const normalized = ordersSupplyKind(kind)
+  if (normalized === 'chemical') return 'Chemia'
+  if (normalized === 'equipment') return 'Sprzęt'
+  return 'Inne'
+}
+
+function ordersNormalizeSupplyItem(item = {}, index = 0, fallbackKind = 'other') {
+  if (typeof item === 'string') {
+    const name = ordersListEntryText(item)
+    return name
+      ? {
+          id: ordersListItemId('supply'),
+          kind: ordersSupplyKind(fallbackKind),
+          name,
+        }
+      : null
+  }
+  if (!item || typeof item !== 'object') {
+    return null
+  }
+  const name = ordersFirstClientText(item.name, item.item, item.label, item.title, item.equipmentName, item.chemicalName, item.description)
+  if (!name) {
+    return null
+  }
+  return {
+    ...item,
+    id: String(item.id ?? item.supplyId ?? '').trim() || `supply-${index + 1}`,
+    kind: ordersSupplyKind(item.kind ?? item.type ?? item.category ?? fallbackKind),
+    name,
+    quantity: ordersFirstClientText(item.quantity, item.amount, item.qty),
+    note: ordersFirstClientText(item.note, item.description),
+  }
+}
+
+function ordersPushSupplyItems(target, source, fallbackKind = 'other') {
+  const rows = Array.isArray(source)
+    ? source
+    : typeof source === 'string'
+      ? ordersSplitListText(source)
+      : []
+  rows
+    .map((item, index) => ordersNormalizeSupplyItem(item, index, fallbackKind))
+    .filter(Boolean)
+    .forEach((item) => {
+      const key = `${ordersSupplyKind(item.kind)}:${normalizeSearchText(item.name)}`
+      if (!target.some((row) => `${ordersSupplyKind(row.kind)}:${normalizeSearchText(row.name)}` === key)) {
+        target.push(item)
+      }
+    })
+}
+
+function ordersOrderSupplies(order = {}) {
+  const rows = []
+  ordersPushSupplyItems(rows, order?.supplies ?? order?.orderSupplies ?? order?.itemsToTake, 'other')
+  ordersPushSupplyItems(rows, order?.equipmentToTake ?? order?.equipmentItems ?? order?.equipmentList ?? order?.equipment ?? order?.sprzet, 'equipment')
+  ordersPushSupplyItems(rows, order?.chemicalsToTake ?? order?.chemicalItems ?? order?.chemicalList ?? order?.chemicals ?? order?.chemia, 'chemical')
+  return rows
+}
+
+function ordersSubtaskRowsHtml(order = {}) {
+  const tasks = ordersOrderSubtasks(order)
+  if (!tasks.length) {
+    return '<div class="orders-simple-list-empty">Brak dodanych czynności.</div>'
+  }
+  return tasks
+    .map(
+      (task, index) => `
+        <div class="orders-simple-row">
+          <em>${index + 1}</em>
+          <strong title="${escapeHtml(task.name)}">${escapeHtml(task.name)}</strong>
+          <button type="button" data-orders-remove-subtask="${index}">Usuń</button>
+        </div>
+      `,
+    )
+    .join('')
+}
+
+function ordersSupplyRowsHtml(order = {}) {
+  const supplies = ordersOrderSupplies(order)
+  if (!supplies.length) {
+    return '<div class="orders-simple-list-empty">Brak dodanego sprzętu lub chemii.</div>'
+  }
+  return supplies
+    .map(
+      (item, index) => `
+        <div class="orders-simple-row">
+          <em>${escapeHtml(ordersSupplyKindLabel(item.kind))}</em>
+          <span title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
+          <button type="button" data-orders-remove-supply="${index}">Usuń</button>
+        </div>
+      `,
+    )
+    .join('')
+}
+
+function ordersRenderSubtasksAndSupplies(order = {}) {
+  const taskRows = document.getElementById('ordersSubtaskRows')
+  const supplyRows = document.getElementById('ordersSupplyRows')
+  if (taskRows) {
+    taskRows.innerHTML = ordersSubtaskRowsHtml(order)
+  }
+  if (supplyRows) {
+    supplyRows.innerHTML = ordersSupplyRowsHtml(order)
+  }
+}
+
+function ordersSetOrderSupplies(order = {}, supplies = []) {
+  const rows = Array.isArray(supplies) ? supplies : []
+  order.supplies = rows
+  order.itemsToTake = rows
+  order.suppliesForWorkers = rows
+  order.equipmentToTake = rows.filter((item) => ordersSupplyKind(item.kind) === 'equipment')
+  order.equipmentItems = order.equipmentToTake
+  order.chemicalsToTake = rows.filter((item) => ordersSupplyKind(item.kind) === 'chemical')
+  order.chemicalItems = order.chemicalsToTake
+}
+
+function ordersAddSubtaskToCurrentOrder() {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  const input = document.getElementById('ordersSubtaskName')
+  const name = ordersListEntryText(input instanceof HTMLInputElement ? input.value : '')
+  if (!order || !name) {
+    return
+  }
+  const tasks = ordersOrderSubtasks(order)
+  if (!tasks.some((task) => normalizeSearchText(task.name) === normalizeSearchText(name))) {
+    tasks.push({
+      id: ordersListItemId('task'),
+      name,
+      taskName: name,
+      completed: false,
+    })
+  }
+  order.tasks = tasks
+  order.subtasks = tasks
+  order.taskName = tasks[0]?.name || ''
+  if (input instanceof HTMLInputElement) {
+    input.value = ''
+    input.focus()
+  }
+  ordersRenderSubtasksAndSupplies(order)
+}
+
+function ordersRemoveSubtaskFromCurrentOrder(index) {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  const removeIndex = Number(index)
+  const tasks = ordersOrderSubtasks(order)
+  if (!order || !Number.isInteger(removeIndex) || removeIndex < 0 || removeIndex >= tasks.length) {
+    return
+  }
+  order.tasks = tasks.filter((_, itemIndex) => itemIndex !== removeIndex)
+  order.subtasks = order.tasks
+  order.taskName = order.tasks[0]?.name || ''
+  ordersRenderSubtasksAndSupplies(order)
+}
+
+function ordersAddSupplyToCurrentOrder() {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  const input = document.getElementById('ordersSupplyName')
+  const kind = ordersReadInputValue('ordersSupplyKind') || 'equipment'
+  const name = ordersListEntryText(input instanceof HTMLInputElement ? input.value : '')
+  if (!order || !name) {
+    return
+  }
+  const supplies = ordersOrderSupplies(order)
+  const key = `${ordersSupplyKind(kind)}:${normalizeSearchText(name)}`
+  if (!supplies.some((item) => `${ordersSupplyKind(item.kind)}:${normalizeSearchText(item.name)}` === key)) {
+    supplies.push({
+      id: ordersListItemId('supply'),
+      kind: ordersSupplyKind(kind),
+      name,
+    })
+  }
+  ordersSetOrderSupplies(order, supplies)
+  if (input instanceof HTMLInputElement) {
+    input.value = ''
+    input.focus()
+  }
+  ordersRenderSubtasksAndSupplies(order)
+}
+
+function ordersRemoveSupplyFromCurrentOrder(index) {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  const removeIndex = Number(index)
+  const supplies = ordersOrderSupplies(order)
+  if (!order || !Number.isInteger(removeIndex) || removeIndex < 0 || removeIndex >= supplies.length) {
+    return
+  }
+  ordersSetOrderSupplies(order, supplies.filter((_, itemIndex) => itemIndex !== removeIndex))
+  ordersRenderSubtasksAndSupplies(order)
+}
+
+function ordersReadEditorSubtasks(order = {}) {
+  const tasks = ordersOrderSubtasks(order)
+  const pending = ordersListEntryText(ordersReadInputValue('ordersSubtaskName'))
+  if (pending && !tasks.some((task) => normalizeSearchText(task.name) === normalizeSearchText(pending))) {
+    tasks.push({
+      id: ordersListItemId('task'),
+      name: pending,
+      taskName: pending,
+      completed: false,
+    })
+  }
+  return tasks
+}
+
+function ordersReadEditorSupplies(order = {}) {
+  const supplies = ordersOrderSupplies(order)
+  const pending = ordersListEntryText(ordersReadInputValue('ordersSupplyName'))
+  const kind = ordersReadInputValue('ordersSupplyKind') || 'equipment'
+  const key = `${ordersSupplyKind(kind)}:${normalizeSearchText(pending)}`
+  if (pending && !supplies.some((item) => `${ordersSupplyKind(item.kind)}:${normalizeSearchText(item.name)}` === key)) {
+    supplies.push({
+      id: ordersListItemId('supply'),
+      kind: ordersSupplyKind(kind),
+      name: pending,
+    })
+  }
+  return supplies
+}
+
+function ordersExecutionAddressFromValue(value = {}) {
+  if (typeof value === 'string') {
+    return ordersFirstClientText(value)
+  }
+  if (!value || typeof value !== 'object') {
+    return ''
+  }
+  const direct = ordersFirstClientText(
+    value.address,
+    value.adres,
+    value.fullAddress,
+    value.executionAddress,
+    value.location,
+    value.lokalizacja,
+    value.label,
+  )
+  const street = ordersFirstClientText(value.street, value.ulica, direct)
+  const cityLine = [
+    ordersFirstClientText(value.postCode, value.postalCode, value.zip, value.kodPocztowy),
+    ordersFirstClientText(value.city, value.miasto),
+  ]
+    .filter(Boolean)
+    .join(' ')
+  return [street, cityLine].filter(Boolean).join(', ')
+}
+
+function ordersShortAddressLabel(value = '', maxLength = 78) {
+  const raw = String(value ?? '').replace(/\s+/g, ' ').trim()
+  if (raw.length <= maxLength) {
+    return raw
+  }
+  return `${raw.slice(0, Math.max(8, maxLength - 3)).trim()}...`
+}
+
+function ordersAddClientExecutionAddress(target, value = '', meta = '') {
+  const label = ordersExecutionAddressFromValue(value)
+  if (!label || label === '-') {
+    return
+  }
+  const key = ordersLocationSuggestionKey(label)
+  if (!key || target.some((item) => ordersLocationSuggestionKey(item.label) === key)) {
+    return
+  }
+  target.push({
+    label,
+    meta: String(meta ?? '').replace(/\s+/g, ' ').trim(),
+  })
+}
+
+function ordersZoneMatchesClient(zone = {}, client = {}) {
+  const clientId = normalizeSearchText(ordersClientId(client))
+  const clientName = normalizeSearchText(ordersClientDisplayName(client))
+  const zoneClientId = normalizeSearchText(zone?.clientId ?? zone?.client ?? zone?.objectId ?? '')
+  const zoneClientName = normalizeSearchText(zone?.clientName ?? zone?.clientLabel ?? zone?.objectName ?? '')
+  return Boolean(
+    (clientId && zoneClientId && zoneClientId === clientId) ||
+      (clientName && zoneClientName && zoneClientName === clientName) ||
+      (clientName && zoneClientId && zoneClientId === clientName),
+  )
+}
+
+function ordersClientExecutionAddresses(client = {}) {
+  if (!client) {
+    return []
+  }
+  const rows = []
+  const clientData = ordersClientFormData(client)
+  ordersAddClientExecutionAddress(rows, ordersClientAddressLabel(clientData), 'Adres klienta')
+
+  ;[
+    client?.addresses,
+    client?.adresy,
+    client?.executionAddresses,
+    client?.serviceAddresses,
+    client?.locations,
+    client?.lokalizacje,
+    client?.objects,
+    client?.obiekty,
+    client?.sites,
+    client?.zones,
+    client?.strefy,
+  ].forEach((source) => {
+    if (!Array.isArray(source)) {
+      return
+    }
+    source.forEach((item) => {
+      const meta = ordersFirstClientText(item?.name, item?.zone, item?.zoneName, item?.label, 'Adres klienta')
+      ordersAddClientExecutionAddress(rows, item, meta)
+    })
+  })
+
+  ;(Array.isArray(appState.zones) ? appState.zones : [])
+    .filter((zone) => ordersZoneMatchesClient(zone, client))
+    .forEach((zone) => {
+      const meta = ordersFirstClientText(zone?.name, zone?.zone, zone?.zoneName, 'Obiekt klienta')
+      const value = ordersFirstClientText(zone?.location, zone?.lokalizacja, zone?.address, zone?.adres)
+      ordersAddClientExecutionAddress(rows, value || zone, meta)
+    })
+
+  return rows
+}
+
+function ordersClientAddressOptionsHtml(client = null, selectedLabel = '') {
+  const selected = String(selectedLabel ?? '').replace(/\s+/g, ' ').trim()
+  const rows = client ? ordersClientExecutionAddresses(client) : []
+  const defaultAddress = rows[0]?.label || ''
+  const selectedKey = ordersLocationSuggestionKey(selected)
+  const selectedIsDefault = selectedKey && ordersLocationSuggestionKey(defaultAddress) === selectedKey
+  const hasSelected = selectedKey && rows.slice(1).some((row) => ordersLocationSuggestionKey(row.label) === selectedKey)
+  const defaultText = client
+    ? defaultAddress
+      ? `Adres domyślny: ${ordersShortAddressLabel(defaultAddress, 64)}`
+      : 'Brak adresu klienta - wpisz ręcznie'
+    : 'Najpierw wybierz klienta'
+
+  return [
+    `<option value=""${!selected || selectedIsDefault ? ' selected' : ''}>${escapeHtml(defaultText)}</option>`,
+    ...rows.slice(1).map((row) => {
+      const selectedAttr = selectedKey && ordersLocationSuggestionKey(row.label) === selectedKey ? ' selected' : ''
+      const meta = row.meta ? `${row.meta}: ` : ''
+      return `<option value="${escapeHtml(row.label)}"${selectedAttr}>${escapeHtml(
+        `${meta}${ordersShortAddressLabel(row.label)}`,
+      )}</option>`
+    }),
+    selected && !selectedIsDefault && !hasSelected
+      ? `<option value="${escapeHtml(selected)}" selected>Adres wpisany ręcznie: ${escapeHtml(ordersShortAddressLabel(selected))}</option>`
+      : '',
+  ].join('')
+}
+
+function ordersSyncAddressSelectToLocation(locationValue = '') {
+  const select = document.getElementById('ordersEditAddressSelect')
+  if (!(select instanceof HTMLSelectElement)) {
+    return
+  }
+  const value = String(locationValue ?? '').replace(/\s+/g, ' ').trim()
+  if (!value) {
+    select.value = ''
+    return
+  }
+  const valueKey = ordersLocationSuggestionKey(value)
+  const matchingOption = [...select.options].find((option) => ordersLocationSuggestionKey(option.value) === valueKey)
+  if (matchingOption) {
+    select.value = matchingOption.value
+    return
+  }
+  const customOption =
+    [...select.options].find((option) => option.getAttribute('data-orders-address-custom') === 'true') ??
+    (() => {
+      const option = document.createElement('option')
+      option.setAttribute('data-orders-address-custom', 'true')
+      select.append(option)
+      return option
+    })()
+  customOption.value = value
+  customOption.textContent = `Adres wpisany ręcznie: ${ordersShortAddressLabel(value)}`
+  select.value = value
+}
+
+function ordersRenderClientAddressSelect(client = null, selectedLabel = '') {
+  const select = document.getElementById('ordersEditAddressSelect')
+  if (!(select instanceof HTMLSelectElement)) {
+    return
+  }
+  const selected = String(selectedLabel ?? '').replace(/\s+/g, ' ').trim()
+  select.innerHTML = ordersClientAddressOptionsHtml(client, selected)
+  select.disabled = !client && !selected
+  const defaultAddress = client ? ordersClientExecutionAddresses(client)[0]?.label || '' : ''
+  const selectedIsDefault = selected && ordersLocationSuggestionKey(defaultAddress) === ordersLocationSuggestionKey(selected)
+  ordersSyncAddressSelectToLocation(selectedIsDefault ? '' : selected)
+}
+
+function ordersApplyExecutionAddressSelection(value = '') {
+  const address = String(value ?? '').replace(/\s+/g, ' ').trim()
+  ordersSetInputValue('ordersEditLocation', address)
+  ordersHideLocationSuggestions()
+  if (address) {
+    ordersSetLocationGeoFields({ mapUrl: ordersGoogleMapsSearchUrl(address) })
+    ordersQueueGoogleLocationResolve(address)
+    return address
+  }
+  const client = ordersFindClientBySelection(ordersReadInputValue('ordersEditClient'))
+  const data = client ? ordersClientFormData(client) : {}
+  ordersSetLocationGeoFields({ mapUrl: ordersGoogleMapsSearchUrl(ordersClientAddressLabel(data)) })
+  return ''
+}
+
 function ordersSetClientFieldsFromData(data = {}) {
   ordersSetInputValue('ordersEditClientName', data.clientName || '')
   ordersSetInputValue('ordersEditNip', data.nip || '')
@@ -7694,14 +8324,17 @@ function ordersApplySelectedClientToEditor(selectionValue = '') {
   const client = ordersFindClientBySelection(selectionValue)
   if (!client) {
     ordersSetClientFieldsFromData({ clientName: String(selectionValue ?? '').trim() })
+    ordersRenderClientAddressSelect(null, ordersReadInputValue('ordersEditLocation'))
     if (!String(selectionValue ?? '').trim()) {
       ordersSetInputValue('ordersEditLocation', '')
       ordersSetLocationGeoFields({ placeId: '', lat: '', lng: '', mapUrl: '' })
+      ordersRenderClientAddressSelect(null, '')
     }
     return null
   }
   const data = ordersClientFormData(client)
   ordersSetClientFieldsFromData(data)
+  ordersRenderClientAddressSelect(client, ordersReadInputValue('ordersEditLocation'))
   return { client, data }
 }
 
@@ -7771,15 +8404,24 @@ function ordersCreateDraftOrder() {
     type: 'individual',
     tone: ordersTimelineToneForType('individual'),
     priority: 'Normalny',
-    repeatEvery: 7,
+    repeatPreset: 'day',
+    repeatEvery: 1,
     repeatUnit: 'day',
     advanceDays: 0,
     price: 0,
     description: '',
     coworkers: [],
     tasks: [],
+    subtasks: [],
+    supplies: [],
+    suppliesForWorkers: [],
+    equipmentToTake: [],
+    equipmentItems: [],
+    chemicalsToTake: [],
+    chemicalItems: [],
     deviceNotes: [],
     isDraft: true,
+    workerComment: '',
   }
 }
 
@@ -7898,11 +8540,14 @@ function ordersLocalLocationSuggestions() {
   const suggestions = new Map()
 
   ;(Array.isArray(appState.clients) ? appState.clients : []).forEach((client) => {
-    const city = String(client?.city ?? '').trim()
-    const address = String(client?.address ?? '').trim()
     const name = String(client?.name ?? client?.clientName ?? '').trim()
-    ordersAddLocationSuggestion(suggestions, [city, address].filter(Boolean).join(' '), name ? `Klient: ${name}` : 'Klient')
-    ordersAddLocationSuggestion(suggestions, address, name ? `Klient: ${name}` : 'Klient')
+    ordersClientExecutionAddresses(client).forEach((row) => {
+      ordersAddLocationSuggestion(
+        suggestions,
+        row.label,
+        [name ? `Klient: ${name}` : 'Klient', row.meta].filter(Boolean).join(' / '),
+      )
+    })
   })
 
   ;(Array.isArray(appState.zones) ? appState.zones : []).forEach((zone) => {
@@ -8344,6 +8989,7 @@ async function ordersResolveGooglePlaceDetails(item = {}) {
 
 function ordersPickLocationSuggestion(item = {}) {
   ordersSetInputValue('ordersEditLocation', item.label || '')
+  ordersSyncAddressSelectToLocation(item.label || '')
   ordersHideLocationSuggestions()
   if (item.source === 'manual-map') {
     ordersSetLocationGeoFields({ mapUrl: item.mapUrl || ordersGoogleMapsSearchUrl(item.label) })
@@ -8358,6 +9004,7 @@ function ordersPickLocationSuggestion(item = {}) {
   void ordersResolveGooglePlaceDetails(item)
     .then((details) => {
       ordersSetInputValue('ordersEditLocation', details.address || item.label || '')
+      ordersSyncAddressSelectToLocation(details.address || item.label || '')
       ordersSetLocationGeoFields(details)
       ordersGooglePlacesSessionToken = null
     })
@@ -8893,6 +9540,7 @@ function ordersRenderEditor(order = {}) {
   ordersSetInputValue('ordersEditEndTime', ordersNormalizeTimeField(order.endTime, ordersDefaultEndTime(order.startTime)))
   ordersSetInputValue('ordersEditDurationHours', duration)
   ordersSetInputValue('ordersEditLocation', explicitExecutionAddress)
+  ordersRenderClientAddressSelect(selectedClient, explicitExecutionAddress)
   ordersSetLocationGeoFields({
     placeId: order.placeId || order.googlePlaceId || '',
     lat: order.lat || order.latitude || '',
@@ -8910,6 +9558,7 @@ function ordersRenderEditor(order = {}) {
   ordersSetInputValue('ordersEditSmsTime', order.smsTime || '')
   ordersSetInputValue('ordersEditPhone', order.phone || '')
   ordersSetInputValue('ordersEditDescription', order.description || order.title || '')
+  ordersSetInputValue('ordersEditWorkerComment', ordersWorkerOnlyComment(order))
   ordersSetInputValue('ordersEditClientName', order.clientName || order.clientLabel || selectedClientData.clientName || '')
   ordersSetInputValue('ordersEditNip', order.nip || order.clientNip || selectedClientData.nip || '')
   ordersSetInputValue('ordersEditStreet', order.street || order.clientStreet || selectedClientData.street || '')
@@ -8920,6 +9569,7 @@ function ordersRenderEditor(order = {}) {
   ordersSetInputValue('ordersEditEmail', order.email || order.clientEmail || selectedClientData.email || '')
   ordersRenderWorkerChecklist(order)
   ordersRenderDeviceNotes(order)
+  ordersRenderSubtasksAndSupplies(order)
   ordersSyncScheduleControls(order)
   ordersRenderSchedulePreview(order)
   ordersRenderCoworkerRows(order)
@@ -9012,6 +9662,15 @@ function ordersSaveEditor() {
     postCode: clientPostCode,
   })
   const clientAddressLabel = executionAddressLabel || defaultClientAddressLabel
+  const rawTitle = ordersReadInputValue('ordersEditName')
+  const generatedTitle = [clientName || clientLabel || 'Zlecenie', clientAddressLabel].filter(Boolean).join(' - ')
+  const title = normalizeSearchText(rawTitle) === normalizeSearchText('Nowe zlecenie') ? generatedTitle : rawTitle || generatedTitle
+  const description = ordersReadInputValue('ordersEditDescription') || order.description || title
+  const workerComment = ordersReadInputValue('ordersEditWorkerComment')
+  const subtasks = ordersReadEditorSubtasks(order)
+  const supplies = ordersReadEditorSupplies(order)
+  const equipmentToTake = supplies.filter((item) => ordersSupplyKind(item.kind) === 'equipment')
+  const chemicalsToTake = supplies.filter((item) => ordersSupplyKind(item.kind) === 'chemical')
 
   const nextOrder = {
     ...order,
@@ -9026,7 +9685,7 @@ function ordersSaveEditor() {
     validUntil: explicitEndDate,
     scheduleMode,
     nextDate: ordersNormalizeDateField(ordersReadInputValue('ordersEditNext'), dateYmd),
-    title: ordersReadInputValue('ordersEditName') || order.title || 'Zlecenie',
+    title: title || order.title || 'Zlecenie',
     clientId: selectedClientData.clientId || order.clientId || '',
     clientLabel: clientName || clientLabel,
     clientName,
@@ -9064,11 +9723,28 @@ function ordersSaveEditor() {
     type: ['individual', 'cyclic', 'renovation', 'windows', 'other'].includes(type) ? type : 'other',
     tone: ordersTimelineToneForType(type),
     price: Math.max(0, Number(ordersReadInputValue('ordersEditPrice')) || 0),
-    taskName: ordersReadInputValue('ordersEditTaskName'),
+    taskName: subtasks[0]?.name || ordersReadInputValue('ordersEditTaskName'),
+    tasks: subtasks,
+    subtasks,
+    activities: subtasks,
+    supplies,
+    itemsToTake: supplies,
+    suppliesForWorkers: supplies,
+    equipmentToTake,
+    equipmentItems: equipmentToTake,
+    chemicalsToTake,
+    chemicalItems: chemicalsToTake,
     smsText: ordersReadInputValue('ordersEditSms'),
     smsTime: ordersReadInputValue('ordersEditSmsTime'),
     phone: ordersReadInputValue('ordersEditPhone'),
-    description: ordersReadInputValue('ordersEditDescription'),
+    description,
+    workerComment,
+    workerOnlyComment: workerComment,
+    employeeComment: workerComment,
+    appComment: workerComment,
+    mobileComment: workerComment,
+    privateWorkerComment: workerComment,
+    commentForWorkers: workerComment,
     deviceNotes: ordersDeviceNotes(order),
     deviceMessages: ordersDeviceNotes(order),
   }
@@ -9529,6 +10205,7 @@ function bindOrdersViewFunctions() {
 
   binding.add(root, 'input', (event) => {
     if (event.target?.id === 'ordersEditLocation') {
+      ordersSyncAddressSelectToLocation(String(event.target.value ?? ''))
       ordersClearLocationGeoFields()
       ordersRenderLocationSuggestions(String(event.target.value ?? ''))
       ordersQueueGoogleLocationSuggestions(String(event.target.value ?? ''))
@@ -9551,6 +10228,23 @@ function bindOrdersViewFunctions() {
   binding.add(root, 'change', (event) => {
     if (event.target?.id === 'ordersDeviceNotePhoto') {
       ordersRenderDeviceNotePhotoPreview()
+      return
+    }
+
+    if (event.target?.id === 'ordersEditAddressSelect') {
+      const address = ordersApplyExecutionAddressSelection(ordersReadInputValue('ordersEditAddressSelect'))
+      const order = ordersFindTimelineOrder(appState.ordersEditingId)
+      if (order) {
+        const selectedClient = ordersFindClientBySelection(ordersReadInputValue('ordersEditClient'))
+        const selectedClientData = selectedClient ? ordersClientFormData(selectedClient) : {}
+        const defaultAddress = ordersClientAddressLabel(selectedClientData)
+        order.addressLabel = address || defaultAddress
+        order.executionAddressLabel = address
+        order.customAddressLabel = address
+        order.mapUrl = ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(order.addressLabel)
+        order.googleMapsUrl = order.mapUrl
+        ordersRenderSchedulePreview(order)
+      }
       return
     }
 
@@ -9719,6 +10413,34 @@ function bindOrdersViewFunctions() {
       return
     }
 
+    const addSubtask = eventTargetClosest(event, '#ordersSubtaskAdd')
+    if (addSubtask) {
+      event.preventDefault()
+      ordersAddSubtaskToCurrentOrder()
+      return
+    }
+
+    const removeSubtask = eventTargetClosest(event, '[data-orders-remove-subtask]')
+    if (removeSubtask) {
+      event.preventDefault()
+      ordersRemoveSubtaskFromCurrentOrder(removeSubtask.getAttribute('data-orders-remove-subtask'))
+      return
+    }
+
+    const addSupply = eventTargetClosest(event, '#ordersSupplyAdd')
+    if (addSupply) {
+      event.preventDefault()
+      ordersAddSupplyToCurrentOrder()
+      return
+    }
+
+    const removeSupply = eventTargetClosest(event, '[data-orders-remove-supply]')
+    if (removeSupply) {
+      event.preventDefault()
+      ordersRemoveSupplyFromCurrentOrder(removeSupply.getAttribute('data-orders-remove-supply'))
+      return
+    }
+
     const timeToggle = eventTargetClosest(event, '#ordersScheduleTimeToggle')
     if (timeToggle) {
       event.preventDefault()
@@ -9803,6 +10525,16 @@ function bindOrdersViewFunctions() {
   })
 
   binding.add(root, 'keydown', (event) => {
+    if (event.key === 'Enter' && event.target?.id === 'ordersSubtaskName') {
+      event.preventDefault()
+      ordersAddSubtaskToCurrentOrder()
+      return
+    }
+    if (event.key === 'Enter' && event.target?.id === 'ordersSupplyName') {
+      event.preventDefault()
+      ordersAddSupplyToCurrentOrder()
+      return
+    }
     if (event.key === 'Escape' && !document.getElementById('ordersDeviceNoteOverlay')?.hidden) {
       ordersCloseDeviceNoteModal()
       return
@@ -11777,6 +12509,81 @@ function eventEndReasonFromKind(eventKind) {
   return null
 }
 
+function eventEditorRowMatchesWorker(row, payload) {
+  const payloadLogin = normalizeSearchText(payload?.workerLogin)
+  const payloadName = normalizeSearchText(payload?.workerName)
+  const rowLoginRaw = normalizeSearchText(row?.workerLogin ?? row?.login ?? row?.workerId)
+  const rowLogin = rowLoginRaw && rowLoginRaw !== '-' ? rowLoginRaw : ''
+  const rowName = normalizeSearchText(row?.workerName ?? row?.name)
+
+  if (payloadLogin && rowLogin) {
+    return payloadLogin === rowLogin
+  }
+
+  if (payloadName && rowName) {
+    return payloadName === rowName
+  }
+
+  return Boolean(payloadLogin && rowName && payloadLogin === rowName)
+}
+
+function eventEditorIsSameEditedRow(row) {
+  if (appState.eventEditorMode !== 'edit' || !appState.eventEditorItem) {
+    return false
+  }
+
+  const editedIds = new Set(eventDeletionCandidateIds(appState.eventEditorItem))
+  const rowIds = eventDeletionCandidateIds(row)
+  if (rowIds.some((id) => editedIds.has(id))) {
+    return true
+  }
+
+  const editedFingerprint = eventRowFingerprintKey(appState.eventEditorItem)
+  return Boolean(editedFingerprint && eventRowFingerprintKey(row) === editedFingerprint)
+}
+
+async function eventEditorFindOverlappingStatus(payload, startAt, endAt) {
+  const candidateInterval = workStatusIntervalFromTimes(startAt, endAt, payload?.durationSec)
+  if (!candidateInterval) {
+    return null
+  }
+
+  const fromYmd = workStatusYmdFromTimestamp(candidateInterval.startTs)
+  const toYmd = workStatusYmdFromTimestamp(candidateInterval.endTs - 1)
+  if (!fromYmd || !toYmd) {
+    return null
+  }
+
+  const response = await getWorkdays(appState.session.orgId, {
+    source: 'events',
+    fromIso: ymdToIsoRangeStart(fromYmd),
+    toIso: ymdToIsoRangeEnd(toYmd),
+    page: 1,
+    pageSize: 10000,
+  })
+
+  const rows = Array.isArray(response?.items) ? response.items : []
+  for (const row of rows) {
+    if (eventEditorIsSameEditedRow(row) || !eventEditorRowMatchesWorker(row, payload)) {
+      continue
+    }
+
+    const rowInterval = workStatusIntervalFromRow(row)
+    if (workStatusIntervalsOverlap(candidateInterval, rowInterval)) {
+      return { row, interval: rowInterval }
+    }
+  }
+
+  return null
+}
+
+function eventEditorOverlapMessage(payload, overlap) {
+  const workerLabel = String(payload?.workerName || payload?.workerLogin || 'Pracownik').trim()
+  const startLabel = workerDetailIsoToHm(overlap?.interval?.startIso)
+  const endLabel = workerDetailIsoToHm(overlap?.interval?.endIso)
+  return `Nie mozna zapisac statusu: ${workerLabel} ma juz status w tym czasie (${startLabel} - ${endLabel}).`
+}
+
 async function saveEventEditor() {
   if (!appState.session?.orgId) {
     return
@@ -11820,6 +12627,13 @@ async function saveEventEditor() {
     const derivedStatus = payload.eventKind === 'start' ? 'RUNNING' : 'CLOSED'
     const derivedCloseMarkedAt = payload.eventKind === 'start' ? null : derivedEndAt || null
     const derivedEndReason = eventEndReasonFromKind(payload.eventKind)
+
+    if (payload.eventKind === 'start_stop') {
+      const overlap = await eventEditorFindOverlappingStatus(payload, derivedStartAt, derivedEndAt)
+      if (overlap) {
+        throw new Error(eventEditorOverlapMessage(payload, overlap))
+      }
+    }
 
     if (appState.eventEditorMode === 'add') {
       await createEvent(appState.session.orgId, {
@@ -13851,6 +14665,40 @@ function workerTimeResolveRowDayKey(row) {
   return workerDetailDateKeyFromIso(row?.startAt || row?.endAt)
 }
 
+function workerTimeOverlapGroupKey(row) {
+  const loginKey = normalizeSearchText(row?.workerLogin)
+  const nameKey = normalizeSearchText(row?.workerName)
+  const workerKey = loginKey && loginKey !== '-' ? loginKey : nameKey || '-'
+  const dayKey = String(row?.dayKey ?? '').trim() || workerDetailDateKeyFromIso(row?.startIso || row?.endIso)
+  return `${workerKey}|${dayKey || '-'}`
+}
+
+function workerTimeApplyOverlapAccounting(rows = []) {
+  const intervalsByGroup = new Map()
+
+  return rows.map((row) => {
+    const next = { ...row }
+    const interval = workStatusIntervalFromTimes(row?.startIso, row?.endIso, row?.durationSec)
+    if (!interval) {
+      return next
+    }
+
+    const groupKey = workerTimeOverlapGroupKey(row)
+    const existingIntervals = intervalsByGroup.get(groupKey) ?? []
+    const countedSec = Math.max(0, workStatusIntervalAdditionalSeconds(interval, existingIntervals))
+    intervalsByGroup.set(groupKey, workStatusIntervalsMerge([...existingIntervals, interval]))
+
+    const originalDurationSec = Math.max(0, Math.floor(Number(row?.durationSec ?? 0) || 0))
+    const originalBreakSec = Math.max(0, Math.floor(Number(row?.breakSec ?? 0) || 0))
+    next.rawDurationSec = originalDurationSec
+    next.excludedByOverlap = originalDurationSec > 0 && countedSec <= 0
+    next.durationSec = countedSec
+    next.breakSec = Math.min(originalBreakSec, countedSec)
+    next.netSec = Math.max(0, next.durationSec - next.breakSec)
+    return next
+  })
+}
+
 const WORKER_TIME_EXPORT_COLUMNS = [
   {
     id: 'date',
@@ -14031,7 +14879,7 @@ async function workerTimeBuildExportRowsForWorkers(
     pageSize: 100000,
   })
 
-  return (response?.items ?? [])
+  const rows = (response?.items ?? [])
     .filter((item) => {
       if (!selectedLogins.size && !selectedNames.size) {
         return true
@@ -14087,6 +14935,8 @@ async function workerTimeBuildExportRowsForWorkers(
       const rightStart = new Date(toIso(right.startIso) || 0).getTime()
       return leftStart - rightStart
     })
+
+  return workerTimeApplyOverlapAccounting(rows).filter((row) => !row.excludedByOverlap)
 }
 
 async function downloadWorkerTimeEwidencjaPdf(options) {
@@ -14454,6 +15304,130 @@ function workerDetailComputeRangeSeconds(startAt, endAt) {
   return Math.floor((endMs - startMs) / 1000)
 }
 
+function workStatusTimestamp(value) {
+  const iso = toIso(value)
+  if (!iso) {
+    return 0
+  }
+
+  const timestamp = new Date(iso).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function workStatusYmdFromTimestamp(timestamp) {
+  const normalized = Number(timestamp ?? 0)
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    return ''
+  }
+
+  const date = new Date(normalized)
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+}
+
+function workStatusIntervalFromTimes(startAt, endAt, durationSec = 0) {
+  let startTs = workStatusTimestamp(startAt)
+  let endTs = workStatusTimestamp(endAt)
+  const duration = Number(durationSec ?? 0)
+  const durationMs = Number.isFinite(duration) && duration > 0 ? Math.floor(duration) * 1000 : 0
+
+  if (startTs > 0 && endTs <= 0 && durationMs > 0) {
+    endTs = startTs + durationMs
+  }
+  if (startTs <= 0 && endTs > 0 && durationMs > 0) {
+    startTs = endTs - durationMs
+  }
+  if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || startTs <= 0 || endTs <= startTs) {
+    return null
+  }
+
+  return {
+    startTs,
+    endTs,
+    startIso: new Date(startTs).toISOString(),
+    endIso: new Date(endTs).toISOString(),
+  }
+}
+
+function workStatusIntervalFromRow(row) {
+  return workStatusIntervalFromTimes(
+    row?.startIso ?? row?.startAt ?? row?.dayStartAt,
+    row?.endIso ?? row?.endAt ?? row?.dayEndAt,
+    row?.durationSec ?? row?.closedSec,
+  )
+}
+
+function workStatusIntervalsOverlap(left, right) {
+  return Boolean(left && right && left.startTs < right.endTs && right.startTs < left.endTs)
+}
+
+function workStatusIntervalsMerge(intervals = []) {
+  const sorted = intervals
+    .filter(Boolean)
+    .map((interval) => ({
+      startTs: Number(interval.startTs ?? 0),
+      endTs: Number(interval.endTs ?? 0),
+    }))
+    .filter((interval) => Number.isFinite(interval.startTs) && Number.isFinite(interval.endTs) && interval.endTs > interval.startTs)
+    .sort((left, right) => left.startTs - right.startTs || left.endTs - right.endTs)
+
+  const merged = []
+  sorted.forEach((interval) => {
+    const last = merged[merged.length - 1]
+    if (!last || interval.startTs > last.endTs) {
+      merged.push({ ...interval })
+      return
+    }
+
+    last.endTs = Math.max(last.endTs, interval.endTs)
+  })
+
+  return merged
+}
+
+function workStatusIntervalsTotalSeconds(intervals = []) {
+  const totalMs = workStatusIntervalsMerge(intervals).reduce(
+    (sum, interval) => sum + Math.max(0, interval.endTs - interval.startTs),
+    0,
+  )
+  return Math.floor(totalMs / 1000)
+}
+
+function workStatusRowsTotalSeconds(rows = []) {
+  return workStatusIntervalsTotalSeconds(rows.map((row) => workStatusIntervalFromRow(row)))
+}
+
+function workStatusIntervalAdditionalSeconds(interval, existingIntervals = []) {
+  if (!interval) {
+    return 0
+  }
+
+  let uncovered = [{ startTs: interval.startTs, endTs: interval.endTs }]
+  workStatusIntervalsMerge(existingIntervals).forEach((existing) => {
+    if (!uncovered.length) {
+      return
+    }
+
+    const next = []
+    uncovered.forEach((segment) => {
+      if (!workStatusIntervalsOverlap(segment, existing)) {
+        next.push(segment)
+        return
+      }
+
+      if (segment.startTs < existing.startTs) {
+        next.push({ startTs: segment.startTs, endTs: Math.min(segment.endTs, existing.startTs) })
+      }
+      if (existing.endTs < segment.endTs) {
+        next.push({ startTs: Math.max(segment.startTs, existing.endTs), endTs: segment.endTs })
+      }
+    })
+    uncovered = next
+  })
+
+  const additionalMs = uncovered.reduce((sum, segment) => sum + Math.max(0, segment.endTs - segment.startTs), 0)
+  return Math.floor(additionalMs / 1000)
+}
+
 function workerDetailAlertLevelFromWorkSec(workSec) {
   const seconds = Number(workSec ?? 0)
   if (!Number.isFinite(seconds) || seconds <= 0) {
@@ -14614,8 +15588,9 @@ function workerDetailAggregateRows(rows) {
 
   return [...groups.values()]
     .map((bucket) => {
-      const workSec = workerDetailComputeRangeSeconds(bucket.startAt, bucket.endAt)
-      const breakSec = Math.max(0, Math.floor(Number(bucket.breakSec ?? 0)))
+      const mergedWorkSec = workStatusRowsTotalSeconds(bucket.sourceRows)
+      const workSec = mergedWorkSec || workerDetailComputeRangeSeconds(bucket.startAt, bucket.endAt)
+      const breakSec = Math.min(workSec, Math.max(0, Math.floor(Number(bucket.breakSec ?? 0))))
       const netSec = Math.max(0, workSec - breakSec)
       const alertLevel = workerDetailAlertLevelFromWorkSec(workSec)
       const alertAck = workerDetailIsAcked(bucket.dayKey)
@@ -17541,6 +18516,7 @@ function reportHistoryBuildRows(items, tab) {
         dayEndIsBoundary: false,
         dayStartSourceItem: null,
         dayEndSourceItem: null,
+        closedIntervals: [],
         details: [],
       })
     }
@@ -17578,6 +18554,12 @@ function reportHistoryBuildRows(items, tab) {
     if (!isMarkerOnly) {
       bucket.countAll += 1
       bucket.closedSec += closedSec
+      if (normalizedTab === 'workers') {
+        const closedInterval = workStatusIntervalFromTimes(startIso, endIso, closedSec)
+        if (closedInterval) {
+          bucket.closedIntervals.push(closedInterval)
+        }
+      }
       if (status === 'RUNNING') {
         bucket.runningCount += 1
         if (sortStartTs > bucket.latestRunningStartTs) {
@@ -17698,6 +18680,10 @@ function reportHistoryBuildRows(items, tab) {
       const todayKey = todayYmd()
       const isTodayBucket = String(bucket.dayKey ?? '').trim() === todayKey
       const detailedClosedSec = Math.max(0, Number(bucket.closedSec ?? 0))
+      const uniqueClosedSec =
+        normalizedTab === 'workers' && Array.isArray(bucket.closedIntervals) && bucket.closedIntervals.length
+          ? workStatusIntervalsTotalSeconds(bucket.closedIntervals)
+          : 0
       const activeRunningSec =
         hasRunning &&
         isTodayBucket &&
@@ -17717,10 +18703,11 @@ function reportHistoryBuildRows(items, tab) {
         Number(bucket.dayStartTs ?? 0) > 0
           ? Math.max(0, Math.floor((Date.now() - Number(bucket.dayStartTs ?? 0)) / 1000))
           : 0
-      const totalWorkSec =
-        normalizedTab === 'workers'
-          ? daySpanSec || activeDaySpanSec || detailedClosedSec + activeRunningSec
-          : detailedClosedSec
+      let totalWorkSec = detailedClosedSec
+      if (normalizedTab === 'workers') {
+        const closedBaseSec = uniqueClosedSec || daySpanSec || detailedClosedSec
+        totalWorkSec = closedBaseSec > 0 ? closedBaseSec + activeRunningSec : activeDaySpanSec || activeRunningSec
+      }
       return {
         ...bucket,
         closedSec: normalizedTab === 'workers' ? totalWorkSec : bucket.closedSec,
@@ -20402,6 +21389,11 @@ function calendarTimelineSelectedTypes() {
   return new Set(selected)
 }
 
+function calendarTimelineDateInputLabel(dayKey = '') {
+  const day = String(dayKey || todayYmd()).trim()
+  return formatDatePl(`${/^\d{4}-\d{2}-\d{2}$/.test(day) ? day : todayYmd()}T12:00:00.000Z`)
+}
+
 function calendarTimelineSyncControls() {
   const completedButton = document.getElementById('calendarTimelineCompletedToggle')
   if (completedButton instanceof HTMLButtonElement) {
@@ -20417,11 +21409,40 @@ function calendarTimelineSyncControls() {
       input.checked = selected.has(input.getAttribute('data-calendar-timeline-type') || '')
     }
   })
+
+  const cursor = String(appState.calendarCursorDay || todayYmd()).trim()
+  const safeCursor = /^\d{4}-\d{2}-\d{2}$/.test(cursor) ? cursor : todayYmd()
+  const dateInput = document.getElementById('calendarTimelineDateInput')
+  if (dateInput instanceof HTMLInputElement) {
+    dateInput.value = safeCursor
+  }
+  const dateLabel = document.getElementById('calendarTimelineDateLabel')
+  if (dateLabel) {
+    dateLabel.textContent = calendarTimelineDateInputLabel(safeCursor)
+  }
 }
 
 function calendarTimelineStatusDayKey() {
   const dayKey = String(appState.calendarCursorDay || todayYmd()).trim()
   return /^\d{4}-\d{2}-\d{2}$/.test(dayKey) ? dayKey : todayYmd()
+}
+
+function calendarTimelineCurrentStatusRowsForDay(dayKey = '') {
+  const normalizedDayKey = String(dayKey ?? '').trim()
+  if (normalizedDayKey !== todayYmd()) {
+    return []
+  }
+
+  if (Array.isArray(appState.calendarTimelineCurrentWorkerStatusRows) && appState.calendarTimelineCurrentWorkerStatusRows.length) {
+    return appState.calendarTimelineCurrentWorkerStatusRows
+  }
+
+  return Array.isArray(appState.dashboardTodayRows) ? appState.dashboardTodayRows : []
+}
+
+function calendarTimelineHasCurrentStatusSnapshot(dayKey = '') {
+  const normalizedDayKey = String(dayKey ?? '').trim()
+  return normalizedDayKey === todayYmd() && appState.calendarTimelineCurrentWorkerStatusDayKey === todayYmd()
 }
 
 function calendarTimelineSetWorkerStateLoading(isLoading) {
@@ -20849,6 +21870,42 @@ function calendarTimelineSourceRowHasWorkdayStart(row = {}) {
   return calendarTimelineSourceRowWorkdayStartTimestamp(row) > 0
 }
 
+function calendarTimelineSourceRowWorkerDotStartTimestamp(row = {}) {
+  if (calendarTimelineSourceRowIsSystemOnly(row)) {
+    return 0
+  }
+
+  const markerType = calendarTimelineEventMarkerType(row)
+  const dayStartTs = calendarTimelineEventTimestamp(row?.dayStartAt)
+  if (markerType === 'QR START' || markerType === 'QR START + STOP') {
+    return dayStartTs || calendarTimelineEventsRowStartTimestamp(row) || calendarTimelineEventTimestamp(row?.startAt)
+  }
+
+  const qrStartTs = calendarTimelineEventTimestamp(
+    row?.qrStartAt ??
+      row?.qrStartIso ??
+      row?.dayStartIso ??
+      row?.firstStartIso ??
+      row?.qrStartSourceItem?.startAt ??
+      row?.qrStartSourceItem?.dayStartAt,
+  )
+  if (qrStartTs > 0) {
+    return qrStartTs
+  }
+
+  const sourceKind = String(row?.historySourceKind ?? '').trim().toLowerCase()
+  const hasDayStartHint = [
+    row?.dayStartObject,
+    row?.workdayUtilityRoomId,
+    reportHistoryExtractQrFromComment(row?.dayComment ?? row?.comment, 'start'),
+  ].some((value) => String(value ?? '').trim())
+  if (dayStartTs > 0 && (sourceKind === 'workday' || hasDayStartHint)) {
+    return dayStartTs
+  }
+
+  return 0
+}
+
 function calendarTimelineRowsDayKey(rows = []) {
   return (Array.isArray(rows) ? rows : [])
     .map((row) => dashboardResolveDayKey(row) || calendarTimelineRealEventRowDay(row))
@@ -21118,7 +22175,9 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
             : nextStartMinutes >= 0
               ? nextStartMinutes
               : -1,
-      sourceOfTruth: preferSource ? 'events' : existing.sourceOfTruth || String(state.sourceOfTruth ?? '').trim(),
+      sourceOfTruth: preferSource
+        ? String(state.sourceOfTruth ?? '').trim() || 'events'
+        : existing.sourceOfTruth || String(state.sourceOfTruth ?? '').trim(),
     })
   }
 
@@ -21128,6 +22187,52 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
         ? appState.calendarTimelineWorkerStateSourceRows
         : []
       : []
+  const todayKey = todayYmd()
+  const rows =
+    normalizedDayKey === todayKey
+      ? Array.isArray(appState.calendarTimelineCurrentWorkerStatusRows) && appState.calendarTimelineCurrentWorkerStatusRows.length
+        ? appState.calendarTimelineCurrentWorkerStatusRows
+        : Array.isArray(appState.dashboardTodayRows)
+          ? appState.dashboardTodayRows
+          : []
+      : appState.calendarTimelineWorkerStateDayKey === normalizedDayKey
+        ? Array.isArray(appState.calendarTimelineWorkerStateRows)
+          ? appState.calendarTimelineWorkerStateRows
+          : []
+        : []
+  const hasCurrentStatusSnapshot =
+    normalizedDayKey === todayKey && (calendarTimelineHasCurrentStatusSnapshot(normalizedDayKey) || rows.length > 0)
+  const currentStatusByKey = new Map()
+  if (hasCurrentStatusSnapshot) {
+    rows.forEach((row) => {
+      const startMinutes = calendarTimelineRowStartMinutes(row)
+      const hasStart = Number.isFinite(startMinutes) && startMinutes >= 0
+      const isRunning = calendarTimelineStatusRowIsRunning(row)
+      const keys = dashboardResolveTodayRowAliasKeys(row)
+      keys.forEach((key) => {
+        if (!key) {
+          return
+        }
+        const existing = currentStatusByKey.get(key) || {
+          hasStart: false,
+          isRunning: false,
+          startMinutes: -1,
+        }
+        currentStatusByKey.set(key, {
+          hasStart: existing.hasStart || hasStart,
+          isRunning: existing.isRunning || isRunning,
+          startMinutes:
+            existing.startMinutes >= 0 && startMinutes >= 0
+              ? Math.min(existing.startMinutes, startMinutes)
+              : existing.startMinutes >= 0
+                ? existing.startMinutes
+                : startMinutes >= 0
+                  ? startMinutes
+                  : -1,
+        })
+      })
+    })
+  }
   const sourceBuckets = new Map()
   const ensureSourceBucket = (key) => {
     if (!sourceBuckets.has(key)) {
@@ -21151,9 +22256,7 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
       return
     }
 
-    const cycleStartTs =
-      calendarTimelineSourceRowWorkdayStartTimestamp(row) ||
-      calendarTimelineEventTimestamp(row?.dayStartAt)
+    const cycleStartTs = calendarTimelineSourceRowWorkerDotStartTimestamp(row)
     const stopTs = calendarTimelineSourceRowDayStopTimestamp(row)
     const cycleStartMinutes = cycleStartTs > 0 ? calendarTimelineTimestampToMinutes(new Date(cycleStartTs).toISOString()) : -1
 
@@ -21179,39 +22282,34 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
   })
 
   sourceBuckets.forEach((bucket, key) => {
-    const sourceRunning = bucket.latestStartTs > 0 && bucket.latestStartTs > bucket.latestStopTs
+    const currentStatus = currentStatusByKey.get(key)
+    const sourceRunning = hasCurrentStatusSnapshot
+      ? Boolean(currentStatus?.isRunning)
+      : bucket.latestStartTs > 0 && bucket.latestStartTs > bucket.latestStopTs
     upsertState(
       key,
       {
         hasStart: bucket.hasStart,
         isRunning: sourceRunning,
-        startMinutes: sourceRunning ? bucket.latestStartMinutes : bucket.earliestStartMinutes,
-        sourceOfTruth: 'events',
+        startMinutes: sourceRunning
+          ? currentStatus?.startMinutes >= 0
+            ? currentStatus.startMinutes
+            : bucket.latestStartMinutes
+          : currentStatus?.startMinutes >= 0
+            ? currentStatus.startMinutes
+            : bucket.earliestStartMinutes,
+        sourceOfTruth: hasCurrentStatusSnapshot ? 'status' : 'events',
       },
       { preferSource: true },
     )
   })
 
-  const todayKey = todayYmd()
-  const rows =
-    normalizedDayKey === todayKey
-      ? Array.isArray(appState.calendarTimelineCurrentWorkerStatusRows) && appState.calendarTimelineCurrentWorkerStatusRows.length
-        ? appState.calendarTimelineCurrentWorkerStatusRows
-        : Array.isArray(appState.dashboardTodayRows)
-          ? appState.dashboardTodayRows
-          : []
-      : appState.calendarTimelineWorkerStateDayKey === normalizedDayKey
-        ? Array.isArray(appState.calendarTimelineWorkerStateRows)
-          ? appState.calendarTimelineWorkerStateRows
-          : []
-        : []
   rows.forEach((row) => {
+    if (hasCurrentStatusSnapshot) {
+      return
+    }
     const startMinutes = calendarTimelineRowStartMinutes(row)
     const hasStart = Number.isFinite(startMinutes) && startMinutes >= 0
-    const stopLabel = String(row?.qrStop ?? '').trim()
-    const hasStop =
-      calendarTimelineRowStopMinutes(row) >= 0 ||
-      Boolean(stopLabel && stopLabel !== '-' && stopLabel !== '--:--' && stopLabel !== '--:--:--')
     const keys = dashboardResolveTodayRowAliasKeys(row)
     keys.forEach((key) => {
       if (sourceBuckets.has(key)) {
@@ -21219,10 +22317,30 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
       }
       upsertState(key, {
         hasStart,
-        isRunning: hasStart && !hasStop,
+        isRunning: calendarTimelineStatusRowIsRunning(row),
         startMinutes,
       })
     })
+  })
+
+  currentStatusByKey.forEach((state, key) => {
+    const sourceBucket = sourceBuckets.get(key)
+    const hasEventStart = Boolean(sourceBucket?.hasStart)
+    const sourceStartMinutes = Number(sourceBucket?.latestStartMinutes ?? sourceBucket?.earliestStartMinutes ?? -1)
+    upsertState(
+      key,
+      {
+        hasStart: hasEventStart,
+        isRunning: hasEventStart && Boolean(state.isRunning),
+        startMinutes: hasEventStart
+          ? Number(state.startMinutes ?? -1) >= 0
+            ? Number(state.startMinutes)
+            : sourceStartMinutes
+          : -1,
+        sourceOfTruth: hasEventStart ? 'events+status' : 'status',
+      },
+      { preferSource: true },
+    )
   })
 
   return stateMap
@@ -21284,6 +22402,21 @@ function calendarTimelineResources() {
   ]
 }
 
+function calendarTimelineGridRowForResource(resource = {}, index = 0) {
+  return resource?.type === 'buffer' ? 1 : Number(index) + 3
+}
+
+function calendarTimelineResourceAvatarTone(index = 0) {
+  return `tone-${(Math.max(0, Number(index) || 0) % 8) + 1}`
+}
+
+function calendarTimelineResourceRowHeight(rowIndex, resource = {}) {
+  const laneCount = Number(appState.calendarTimelinePlannedLaneCounts?.get?.(rowIndex) || 0)
+  const trackCount = Number(appState.calendarTimelineRealTrackCounts?.get?.(rowIndex) || 0)
+  const stackedHeight = 8 + Math.max(1, trackCount, laneCount) * 24
+  return resource?.type === 'buffer' ? Math.max(72, stackedHeight) : Math.max(40, stackedHeight)
+}
+
 function calendarTimelineCurrentHourHtml(days = [], hours = [], resources = []) {
   const now = new Date()
   const today = calendarDateToYmd(now)
@@ -21298,10 +22431,16 @@ function calendarTimelineCurrentHourHtml(days = [], hours = [], resources = []) 
 
   const slotInDay = Math.max(0, Math.min(slotsPerDay - 1, Math.round((nowMinutes - dayStartMinutes) / CALENDAR_TIMELINE_SLOT_MINUTES)))
   const slot = dayIndex * slotsPerDay + slotInDay + 1
+  const firstWorkerIndex = resources.findIndex((resource) => resource?.type !== 'buffer')
+  const workerRows = resources.filter((resource) => resource?.type !== 'buffer').length
+  if (firstWorkerIndex < 0 || !workerRows) {
+    return ''
+  }
+  const firstWorkerGridRow = calendarTimelineGridRowForResource(resources[firstWorkerIndex], firstWorkerIndex)
   return `
     <div
       class="fw-current-hour"
-      style="grid-column:${slot + 1}; grid-row:2 / span ${resources.length + 1};"
+      style="grid-column:${slot + 1}; grid-row:${firstWorkerGridRow} / span ${workerRows};"
       aria-label="Aktualna godzina ${pad2(now.getHours())}:${pad2(now.getMinutes())}"
     ></div>
   `
@@ -21573,6 +22712,203 @@ function calendarTimelineDaysForOrder(order = {}) {
   const firstDay = endOrdinal < startOrdinal ? endDay : startDay
   const dayCount = Math.min(14, Math.max(1, Math.abs(endOrdinal - startOrdinal) + 1))
   return Array.from({ length: dayCount }, (_, index) => calendarAddDays(firstDay, index))
+}
+
+function calendarTimelineOrderIsRecurring(order = {}) {
+  return ordersScheduleModeForOrder(order) === 'repeat'
+}
+
+function calendarTimelineRecurringInterval(order = {}) {
+  return Math.max(1, Math.floor(Number(order?.repeatEvery) || 1))
+}
+
+function calendarTimelineRecurringUnit(order = {}) {
+  const unit = String(order?.repeatUnit ?? '').trim()
+  if (['day', 'week', 'month', 'year'].includes(unit)) {
+    return unit
+  }
+  const preset = String(order?.repeatPreset ?? '').trim()
+  if (['day', 'week', 'month', 'year'].includes(preset)) {
+    return preset
+  }
+  return 'day'
+}
+
+function calendarTimelineDateWeekday(dayKey = '') {
+  const day = String(dayKey ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return -1
+  }
+  const date = calendarDateFromYmd(day)
+  const weekday = date.getDay()
+  return Number.isInteger(weekday) ? weekday : -1
+}
+
+function calendarTimelineRepeatWeekdays(order = {}) {
+  const values = Array.isArray(order?.repeatWeekdays) ? order.repeatWeekdays : []
+  const weekdays = values
+    .map((value) => Number(value))
+    .filter((value, index, list) => Number.isInteger(value) && value >= 0 && value <= 6 && list.indexOf(value) === index)
+  return weekdays.length ? weekdays : [calendarTimelineDateWeekday(order?.dateYmd)].filter((value) => value >= 0)
+}
+
+function calendarTimelineRecurringSeriesEnd(order = {}) {
+  const candidates = [
+    order?.repeatUntil,
+    order?.repeatEndDate,
+    order?.recurrenceEndDate,
+    order?.seriesEndDate,
+    order?.repeatUntilYmd,
+  ]
+  return candidates.map((value) => String(value ?? '').trim()).find((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)) || ''
+}
+
+function calendarTimelineAddMonthsClamped(dayKey = '', offset = 0) {
+  const day = String(dayKey ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return ''
+  }
+  const year = Number(day.slice(0, 4))
+  const month = Number(day.slice(5, 7)) - 1
+  const date = Number(day.slice(8, 10))
+  const targetMonthIndex = month + Math.floor(Number(offset) || 0)
+  const lastDay = new Date(year, targetMonthIndex + 1, 0).getDate()
+  return calendarDateToYmd(new Date(year, targetMonthIndex, Math.min(date, lastDay)))
+}
+
+function calendarTimelineRecurringOccurrenceEnd(order = {}, occurrenceDay = '') {
+  const duration = calendarTimelineOrderDurationMinutes(order)
+  const startMinutes = calendarTimelineTimeMinutes(order?.startTime, 4 * 60)
+  const totalEndMinutes = startMinutes + duration
+  const dayOffset = Math.floor(totalEndMinutes / 1440)
+  const endMinutes = totalEndMinutes % 1440
+  return {
+    endDateYmd: calendarAddDays(occurrenceDay, dayOffset),
+    endTime: calendarMinutesToTime(endMinutes) || calendarTimelineTimeLabel(order?.endTime, '23:59'),
+  }
+}
+
+function calendarTimelineRecurringInstance(order = {}, occurrenceDay = '', index = 0) {
+  const baseDay = String(order?.dateYmd ?? '').trim()
+  if (occurrenceDay === baseDay) {
+    return {
+      ...order,
+      isRecurringSeries: true,
+      sourceOrderId: String(order?.sourceOrderId ?? order?.id ?? '').trim(),
+    }
+  }
+  const occurrenceEnd = calendarTimelineRecurringOccurrenceEnd(order, occurrenceDay)
+  const sourceOrderId = String(order?.sourceOrderId ?? order?.id ?? '').trim()
+  return {
+    ...order,
+    id: `${sourceOrderId || 'order'}__repeat__${occurrenceDay}`,
+    sourceOrderId,
+    orderId: sourceOrderId,
+    recurrenceSourceDateYmd: baseDay,
+    recurrenceIndex: index,
+    isRecurringSeries: true,
+    isRecurringInstance: true,
+    dateYmd: occurrenceDay,
+    endDateYmd: occurrenceEnd.endDateYmd,
+    endTime: occurrenceEnd.endTime,
+    validUntil: occurrenceEnd.endDateYmd,
+    nextDate: occurrenceDay,
+    actualStartAt: '',
+    actualStartedAt: '',
+    actualStartIso: '',
+    actualEndAt: '',
+    actualFinishedAt: '',
+    actualStopAt: '',
+    actualEndIso: '',
+    actualStopIso: '',
+    qrStartAt: '',
+    qrStartIso: '',
+    qrStopAt: '',
+    qrStopIso: '',
+    sourceEventId: '',
+    eventId: '',
+    workdayId: '',
+    completed: false,
+    status: '',
+  }
+}
+
+function calendarTimelineRecurringDaysForRange(order = {}, days = []) {
+  if (!calendarTimelineOrderIsRecurring(order)) {
+    return []
+  }
+  const visibleDays = Array.isArray(days) ? days.filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(String(day ?? ''))) : []
+  if (!visibleDays.length) {
+    return []
+  }
+  const baseDay = String(order?.dateYmd ?? '').trim()
+  const baseOrdinal = calendarTimelineDayOrdinal(baseDay)
+  if (!Number.isFinite(baseOrdinal)) {
+    return []
+  }
+  const firstVisible = visibleDays[0]
+  const lastVisible = visibleDays[visibleDays.length - 1]
+  const durationDays = Math.max(0, Math.floor(calendarTimelineOrderDurationMinutes(order) / 1440))
+  const rangeStart = calendarAddDays(firstVisible, -durationDays)
+  const rangeEnd = lastVisible
+  const rangeStartOrdinal = calendarTimelineDayOrdinal(rangeStart)
+  const rangeEndOrdinal = calendarTimelineDayOrdinal(rangeEnd)
+  if (!Number.isFinite(rangeStartOrdinal) || !Number.isFinite(rangeEndOrdinal)) {
+    return []
+  }
+  const seriesEnd = calendarTimelineRecurringSeriesEnd(order)
+  const seriesEndOrdinal = seriesEnd ? calendarTimelineDayOrdinal(seriesEnd) : Number.POSITIVE_INFINITY
+  const every = calendarTimelineRecurringInterval(order)
+  const unit = calendarTimelineRecurringUnit(order)
+  const occurrenceDays = []
+
+  if (unit === 'month' || unit === 'year') {
+    const stepMonths = every * (unit === 'year' ? 12 : 1)
+    for (let index = 0; index < 240; index += 1) {
+      const day = calendarTimelineAddMonthsClamped(baseDay, index * stepMonths)
+      const ordinal = calendarTimelineDayOrdinal(day)
+      if (!Number.isFinite(ordinal)) {
+        break
+      }
+      if (ordinal > Math.min(rangeEndOrdinal, seriesEndOrdinal)) {
+        break
+      }
+      if (ordinal >= rangeStartOrdinal) {
+        occurrenceDays.push(day)
+      }
+    }
+    return occurrenceDays
+  }
+
+  const weekStart = calendarStartOfWeek(baseDay)
+  const weekdays = unit === 'week' ? calendarTimelineRepeatWeekdays(order) : []
+  for (let ordinal = Math.max(baseOrdinal, rangeStartOrdinal); ordinal <= rangeEndOrdinal && ordinal <= seriesEndOrdinal; ordinal += 1) {
+    const day = calendarAddDays(baseDay, ordinal - baseOrdinal)
+    const diff = ordinal - baseOrdinal
+    if (unit === 'week') {
+      const weekDiff = Math.floor(calendarTimelineDayDiff(weekStart, calendarStartOfWeek(day)) / 7)
+      if (weekDiff >= 0 && weekDiff % every === 0 && weekdays.includes(calendarTimelineDateWeekday(day))) {
+        occurrenceDays.push(day)
+      }
+    } else if (diff >= 0 && diff % every === 0) {
+      occurrenceDays.push(day)
+    }
+  }
+
+  return occurrenceDays
+}
+
+function calendarTimelineExpandRecurringOrdersForDays(orders = [], days = []) {
+  return (Array.isArray(orders) ? orders : []).flatMap((order) => {
+    if (!calendarTimelineOrderIsRecurring(order)) {
+      return [order]
+    }
+    const occurrenceDays = calendarTimelineRecurringDaysForRange(order, days)
+    if (!occurrenceDays.length) {
+      return []
+    }
+    return occurrenceDays.map((day, index) => calendarTimelineRecurringInstance(order, day, index))
+  })
 }
 
 function calendarTimelineSameConflictOrder(left = {}, right = {}) {
@@ -22145,6 +23481,7 @@ function calendarTimelineBarContextFromElement(bar) {
     resource,
     dateYmd,
     orderId: String(bar.getAttribute('data-calendar-timeline-order-id') || '').trim(),
+    sourceOrderId: String(bar.getAttribute('data-calendar-timeline-source-order-id') || '').trim(),
     isRealEvent: bar.getAttribute('data-calendar-timeline-real-event') === '1',
     sourceEventId: String(bar.getAttribute('data-calendar-timeline-source-event-id') || '').trim(),
     workdayId: String(bar.getAttribute('data-calendar-timeline-workday-id') || '').trim(),
@@ -23970,6 +25307,10 @@ function calendarTimelineDropTargetFromEvent(event) {
     const target = node?.closest?.('[data-calendar-timeline-row]')
     return target instanceof HTMLElement && (!stage || stage.contains(target)) ? target : null
   }
+  const directSlotTarget = event?.target?.closest?.('[data-calendar-timeline-row][data-calendar-timeline-slot]')
+  if (directSlotTarget instanceof HTMLElement && (!stage || stage.contains(directSlotTarget))) {
+    return directSlotTarget
+  }
 
   if (Number.isFinite(x) && Number.isFinite(y) && typeof document.elementsFromPoint === 'function') {
     const elements = document.elementsFromPoint(x, y)
@@ -24050,6 +25391,9 @@ function calendarTimelineResetDragState() {
   appState.calendarTimelineDragResources = []
   appState.calendarTimelineDragConflictKey = ''
   appState.calendarTimelineDragConflictValue = false
+  appState.calendarTimelineDragHoverKey = ''
+  appState.calendarTimelineDragHoverInvalid = false
+  appState.calendarTimelineDragHoverNode = null
 }
 
 function calendarTimelineHandleMoveResult(moveResult) {
@@ -24282,10 +25626,49 @@ function calendarTimelineShowConflictDialog(conflicts = [], candidate = null) {
   document.body.appendChild(overlay)
 }
 
+function calendarTimelineDropInfoKey(info = null) {
+  if (!info) {
+    return ''
+  }
+  return [Number(info.rowIndex), info.slotIndex == null ? '' : Number(info.slotIndex)].join('|')
+}
+
 function calendarTimelineClearDropTargets() {
+  const hoverNode = appState.calendarTimelineDragHoverNode
+  if (hoverNode instanceof HTMLElement) {
+    hoverNode.classList.remove('is-timeline-drop-target', 'is-timeline-drop-invalid')
+  }
   document
     .querySelectorAll('#view-calendar .is-timeline-drop-target, #view-calendar .is-timeline-drop-invalid')
     .forEach((node) => node.classList.remove('is-timeline-drop-target', 'is-timeline-drop-invalid'))
+  appState.calendarTimelineDragHoverKey = ''
+  appState.calendarTimelineDragHoverInvalid = false
+  appState.calendarTimelineDragHoverNode = null
+}
+
+function calendarTimelineMarkDropTarget(target, info = null, invalid = false) {
+  if (!(target instanceof HTMLElement) || !info) {
+    calendarTimelineClearDropTargets()
+    return
+  }
+  const key = calendarTimelineDropInfoKey(info)
+  if (
+    key &&
+    key === appState.calendarTimelineDragHoverKey &&
+    Boolean(invalid) === Boolean(appState.calendarTimelineDragHoverInvalid) &&
+    appState.calendarTimelineDragHoverNode === target
+  ) {
+    return
+  }
+  const previous = appState.calendarTimelineDragHoverNode
+  if (previous instanceof HTMLElement && previous !== target) {
+    previous.classList.remove('is-timeline-drop-target', 'is-timeline-drop-invalid')
+  }
+  target.classList.toggle('is-timeline-drop-target', !invalid)
+  target.classList.toggle('is-timeline-drop-invalid', Boolean(invalid))
+  appState.calendarTimelineDragHoverKey = key
+  appState.calendarTimelineDragHoverInvalid = Boolean(invalid)
+  appState.calendarTimelineDragHoverNode = target
 }
 
 function calendarTimelineVisualOrders(orders = [], resources = calendarTimelineResources()) {
@@ -24523,6 +25906,16 @@ function calendarTimelineCurrentStatusRowForResource(resource = {}, dayKey = '')
     return null
   }
 
+  const statusRows = calendarTimelineCurrentStatusRowsForDay(normalizedDay)
+  const statusMatches = statusRows.filter((row) => calendarTimelineResourceMatchesSourceRow(resource, row))
+  const runningStatusRow = statusMatches.find((row) => calendarTimelineStatusRowIsRunning(row))
+  if (runningStatusRow) {
+    return runningStatusRow
+  }
+  if (calendarTimelineHasCurrentStatusSnapshot(normalizedDay) || statusMatches.length) {
+    return null
+  }
+
   const sourceRows =
     appState.calendarTimelineWorkerStateDayKey === normalizedDay
       ? Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
@@ -24548,17 +25941,25 @@ function calendarTimelineCurrentStatusRowForResource(resource = {}, dayKey = '')
     return bestSourceRow
   }
 
-  const rows = Array.isArray(appState.calendarTimelineCurrentWorkerStatusRows) && appState.calendarTimelineCurrentWorkerStatusRows.length
-    ? appState.calendarTimelineCurrentWorkerStatusRows
-    : Array.isArray(appState.dashboardTodayRows)
-      ? appState.dashboardTodayRows
-      : []
-  return rows.find((row) => calendarTimelineResourceMatchesSourceRow(resource, row) && calendarTimelineStatusRowIsRunning(row)) || null
+  return null
 }
 
 function calendarTimelineActiveWorkerStartMinutes(resource = {}, dayKey = '') {
   const normalizedDay = String(dayKey ?? '').trim()
   if (resource?.type !== 'worker' || normalizedDay !== todayYmd()) {
+    return -1
+  }
+
+  const statusRows = calendarTimelineCurrentStatusRowsForDay(normalizedDay)
+  const statusMatches = statusRows.filter((row) => calendarTimelineResourceMatchesSourceRow(resource, row))
+  const statusMinutes = statusMatches
+    .filter((row) => calendarTimelineStatusRowIsRunning(row))
+    .map((row) => calendarTimelineRowStartMinutes(row))
+    .filter((minutes) => Number.isFinite(minutes) && minutes >= 0)
+  if (statusMinutes.length) {
+    return Math.max(...statusMinutes)
+  }
+  if (calendarTimelineHasCurrentStatusSnapshot(normalizedDay) || statusMatches.length) {
     return -1
   }
 
@@ -24603,17 +26004,7 @@ function calendarTimelineActiveWorkerStartMinutes(resource = {}, dayKey = '') {
   if (eventStateMinutes >= 0) {
     return eventStateMinutes
   }
-  const statusRows = Array.isArray(appState.calendarTimelineCurrentWorkerStatusRows) && appState.calendarTimelineCurrentWorkerStatusRows.length
-    ? appState.calendarTimelineCurrentWorkerStatusRows
-    : Array.isArray(appState.dashboardTodayRows)
-      ? appState.dashboardTodayRows
-      : []
-  const fallbackMinutes = statusRows
-    .filter((row) => calendarTimelineResourceMatchesSourceRow(resource, row))
-    .filter((row) => calendarTimelineStatusRowIsRunning(row))
-    .map((row) => calendarTimelineRowStartMinutes(row))
-    .filter((minutes) => Number.isFinite(minutes) && minutes >= 0)
-  return fallbackMinutes.length ? Math.max(...fallbackMinutes) : -1
+  return -1
 }
 
 function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows = []) {
@@ -24695,6 +26086,8 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         Number.isFinite(activeStartMinutes) && activeStartMinutes >= 0
           ? calendarTimelineTimestampFromDayMinutes(bucket.dayKey, activeStartMinutes)
           : 0
+      const hasActiveStatus = Number.isFinite(activeStartMinutes) && activeStartMinutes >= 0
+      const hasCurrentStatusSnapshot = calendarTimelineHasCurrentStatusSnapshot(bucket.dayKey)
       const startTs =
         bucket.firstStartTs ||
         (!hasExplicitDayStop && fallbackStartTs > 0 ? fallbackStartTs : 0) ||
@@ -24707,7 +26100,8 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
       const shouldRunToNow =
         !hasExplicitDayStop &&
         bucket.dayKey === todayYmd() &&
-        bucket.latestCycleStartTs > bucket.latestDayStopTs
+        bucket.latestCycleStartTs > bucket.latestDayStopTs &&
+        (!hasCurrentStatusSnapshot || hasActiveStatus)
       const endTs =
         bucket.latestDayStopTs ||
         (shouldRunToNow
@@ -24773,12 +26167,59 @@ function calendarTimelineStatusRowsForRealOrders(days = []) {
   return rows.map((row) => ({ row, dayKey: today }))
 }
 
+function calendarTimelineStatusRowClosedHint(row = {}) {
+  const values = [
+    row?.status,
+    row?.statusLabel,
+    row?.state,
+    row?.workerStatus,
+    row?.workStatus,
+    row?.activeStatus,
+    row?.qrStatus,
+  ]
+    .map((value) => normalizeSearchText(value))
+    .filter(Boolean)
+  if (!values.length) {
+    return false
+  }
+  const closedValues = new Set([
+    'ok',
+    'closed',
+    'complete',
+    'completed',
+    'done',
+    'finished',
+    'stopped',
+    'stop',
+    'inactive',
+    'offline',
+    'nieaktywny',
+    'nieaktywna',
+    'zakonczone',
+    'zakonczony',
+    'zakonczona',
+    'zamkniete',
+    'zamkniety',
+    'zamknieta',
+    'po pracy',
+    'brak startu',
+    'brak aktywnosci',
+  ])
+  return values.some((value) => closedValues.has(value))
+}
+
 function calendarTimelineStatusRowIsRunning(row = {}) {
   const stopLabel = String(row?.qrStop ?? '').trim()
   const hasStop =
     calendarTimelineRowStopMinutes(row) >= 0 ||
     Boolean(stopLabel && stopLabel !== '-' && stopLabel !== '--:--' && stopLabel !== '--:--:--')
   const hasStart = calendarTimelineRowStartMinutes(row) >= 0
+  if (calendarTimelineStatusRowClosedHint(row)) {
+    return false
+  }
+  if (Object.prototype.hasOwnProperty.call(row, 'isRunning')) {
+    return Boolean(row?.isRunning) && hasStart && !hasStop
+  }
   return hasStart && !hasStop
 }
 
@@ -25052,7 +26493,7 @@ function calendarTimelinePrototypeHtml() {
   const slotsPerDay = hours.length * slotsPerHour
   const totalSlots = days.length * slotsPerDay
   const resources = calendarTimelineResources()
-  const plannedOrders = ordersListSourceOrders()
+  const plannedOrders = calendarTimelineExpandRecurringOrdersForDays(ordersListSourceOrders(), days)
   const sourceRows = calendarTimelineSourceRowsCoverDays(days) && Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
     ? appState.calendarTimelineWorkerStateSourceRows
     : []
@@ -25087,17 +26528,23 @@ function calendarTimelinePrototypeHtml() {
     const laneCount = Number(item?.laneCount || 1)
     plannedLaneCounts.set(row, Math.max(Number(plannedLaneCounts.get(row) || 0), laneCount))
   })
-  const rowHeights = resources
-    .map((_, rowIndex) => {
-      const laneCount = Number(plannedLaneCounts.get(rowIndex) || 0)
-      const trackCount = Number(realTrackCounts.get(rowIndex) || 0)
-      return `${Math.max(38, 8 + Math.max(1, trackCount, laneCount) * 24)}px`
-    })
+  appState.calendarTimelinePlannedLaneCounts = plannedLaneCounts
+  appState.calendarTimelineRealTrackCounts = realTrackCounts
+  const bufferIndex = resources.findIndex((resource) => resource?.type === 'buffer')
+  const bufferHeight = bufferIndex >= 0 ? calendarTimelineResourceRowHeight(bufferIndex, resources[bufferIndex]) : 0
+  const workerRowHeights = resources
+    .map((resource, rowIndex) => (resource?.type === 'buffer' ? '' : `${calendarTimelineResourceRowHeight(rowIndex, resource)}px`))
+    .filter(Boolean)
     .join(' ')
+  const gridRows = `${bufferHeight}px 30px 28px${workerRowHeights ? ` ${workerRowHeights}` : ''}`
+  const bufferPlane =
+    bufferIndex >= 0
+      ? `<div class="fw-buffer-sticky-plane" style="grid-column:2 / span ${totalSlots}; grid-row:1;" aria-hidden="true"></div>`
+      : ''
   const dayHeaders = days
     .map((day, index) => {
       const label = calendarTimelineDayMonthLabel(day)
-      return `<div class="fw-date-head${index % 2 ? ' fw-date-head--alt' : ''}" style="grid-column:${index * slotsPerDay + 2} / span ${slotsPerDay}; grid-row:1;">${escapeHtml(label)}</div>`
+      return `<div class="fw-date-head${index % 2 ? ' fw-date-head--alt' : ''}" style="grid-column:${index * slotsPerDay + 2} / span ${slotsPerDay}; grid-row:2;">${escapeHtml(label)}</div>`
     })
     .join('')
   const hourHeaders = days
@@ -25107,17 +26554,24 @@ function calendarTimelinePrototypeHtml() {
         const classes = ['fw-hour-head']
         if (hourIndex === 0) classes.push('fw-hour-head--day-start')
         if (dayIndex % 2) classes.push('fw-hour-head--alt')
-        return `<div class="${classes.join(' ')}" style="grid-column:${slot + 1} / span ${slotsPerHour}; grid-row:2;">${pad2(hour)}:00</div>`
+        return `<div class="${classes.join(' ')}" style="grid-column:${slot + 1} / span ${slotsPerHour}; grid-row:3;">${pad2(hour)}:00</div>`
       }),
     )
     .join('')
+  const workerHead = '<div class="fw-resource-worker-head" style="grid-row:2 / span 2;">Pracownik</div>'
   const rowLabels = resources
     .map((resource, index) => {
       const muted = resource.type === 'buffer' ? ' is-buffer' : resource.type === 'placeholder' ? ' is-placeholder' : ''
       const workerClass = resource.type === 'worker' ? ' is-worker' : ''
       const started = resource.type === 'worker' && resource.started ? ' is-started' : ''
+      const gridRow = calendarTimelineGridRowForResource(resource, index)
+      const avatar =
+        resource.type === 'worker'
+          ? `<b class="fw-resource-avatar ${calendarTimelineResourceAvatarTone(index)}" aria-hidden="true">${escapeHtml(kanbanInitials(resource.name))}</b>`
+          : ''
       return `
-        <div class="fw-resource-name${muted}${workerClass}${started}" style="grid-row:${index + 3};" data-calendar-timeline-row="${index}">
+        <div class="fw-resource-name${muted}${workerClass}${started}" style="grid-row:${gridRow};" data-calendar-timeline-row="${index}">
+          ${avatar}
           <span>${escapeHtml(resource.name)}</span>
           ${resource.type === 'worker' ? '<i aria-hidden="true"></i>' : ''}
         </div>
@@ -25131,10 +26585,12 @@ function calendarTimelinePrototypeHtml() {
         const slotInDay = slotIndex % slotsPerDay
         const quarterIndex = slotInDay % slotsPerHour
         const classes = ['fw-grid-cell']
+        const resource = resources[rowIndex] || {}
+        if (resource.type === 'buffer') classes.push('fw-grid-cell--buffer')
         if (quarterIndex === 0) classes.push('fw-grid-cell--hour-start')
         if (slotInDay === 0) classes.push('fw-grid-cell--day-start')
         if (dayIndex % 2) classes.push('fw-grid-cell--alt')
-        return `<div class="${classes.join(' ')}" style="grid-column:${slotIndex + 2}; grid-row:${rowIndex + 3};" data-calendar-timeline-row="${rowIndex}" data-calendar-timeline-slot="${slotIndex}"></div>`
+        return `<div class="${classes.join(' ')}" style="grid-column:${slotIndex + 2}; grid-row:${calendarTimelineGridRowForResource(resource, rowIndex)};" data-calendar-timeline-row="${rowIndex}" data-calendar-timeline-slot="${slotIndex}"></div>`
       }),
     )
     .join('')
@@ -25157,8 +26613,12 @@ function calendarTimelinePrototypeHtml() {
           : `--fw-bar-height:24px;--fw-bar-offset:${plannedOffsetBase}px;--fw-bar-z:${4 + realTrackCount};`
       const titleLabel = status?.label ? `${timeLabel} · ${status.label}` : timeLabel
       const realEventAttr = bar.isRealEvent ? ' data-calendar-timeline-real-event="1"' : ''
-      const draggableAttr = bar.isRealEvent ? 'false' : 'true'
+      const recurringAttr = bar.isRecurringInstance ? ' data-calendar-timeline-recurring-instance="1"' : ''
+      const sourceOrderId = String(bar.sourceOrderId || bar.id || '').trim()
+      const sourceOrderAttr = sourceOrderId ? ` data-calendar-timeline-source-order-id="${escapeHtml(sourceOrderId)}"` : ''
+      const draggableAttr = bar.isRealEvent || bar.isRecurringInstance ? 'false' : 'true'
       const realTrackClass = bar.isRealEvent ? ` fw-event-real--${escapeHtml(bar.realTrack || 'event')}` : ''
+      const isBufferEvent = resources[bar.row]?.type === 'buffer'
       const sourceEventId = String(bar.sourceEventId ?? '').trim()
       const workdayId = String(bar.workdayId ?? '').trim()
       const sourceStartAt = toIso(bar.sourceStartAt ?? bar.actualStartAt ?? '')
@@ -25169,8 +26629,9 @@ function calendarTimelinePrototypeHtml() {
         workdayId ? `data-calendar-timeline-workday-id="${escapeHtml(workdayId)}"` : '',
         sourceStartAt ? `data-calendar-timeline-source-start="${escapeHtml(sourceStartAt)}"` : '',
       ].filter(Boolean).join(' ')
+      const gridRow = calendarTimelineGridRowForResource(resources[bar.row] || {}, bar.row)
       return `
-        <button class="fw-event-bar fw-event-bar--${escapeHtml(bar.tone)} fw-event-status--${escapeHtml(status.kind)}${bar.completed ? ' is-completed' : ''}${laneCount > 1 ? ' is-stacked' : ''}${bar.isRealEvent ? ' is-real-event' : ''}${realTrackClass}" style="grid-column:${position.startColumn} / span ${position.span}; grid-row:${bar.row + 3};${stackStyle}" type="button" title="${escapeHtml(titleLabel)}" draggable="${draggableAttr}" data-calendar-timeline-order-id="${escapeHtml(bar.id)}" data-calendar-timeline-row="${bar.row}" ${barMetaAttrs}${realEventAttr}>
+        <button class="fw-event-bar fw-event-bar--${escapeHtml(bar.tone)} fw-event-status--${escapeHtml(status.kind)}${bar.completed ? ' is-completed' : ''}${laneCount > 1 ? ' is-stacked' : ''}${bar.isRealEvent ? ' is-real-event' : ''}${bar.isRecurringInstance ? ' is-recurring-instance' : ''}${isBufferEvent ? ' is-buffer-event' : ''}${realTrackClass}" style="grid-column:${position.startColumn} / span ${position.span}; grid-row:${gridRow};${stackStyle}" type="button" title="${escapeHtml(titleLabel)}" draggable="${draggableAttr}" data-calendar-timeline-order-id="${escapeHtml(bar.id)}" data-calendar-timeline-row="${bar.row}" ${barMetaAttrs}${realEventAttr}${recurringAttr}${sourceOrderAttr}>
           <span class="fw-event-mark" aria-hidden="true">&#9670;</span>
           <span class="fw-event-title">${escapeHtml(bar.title)}</span>
           ${laneCount > 1 ? `<strong class="fw-event-stack-badge">${lane + 1}/${laneCount}</strong>` : ''}
@@ -25184,8 +26645,9 @@ function calendarTimelinePrototypeHtml() {
 
   return `
     <div class="fw-timeline-scroll">
-      <div class="fw-timeline-grid" style="--slot-count:${totalSlots}; --row-count:${resources.length}; grid-template-rows:30px 28px ${rowHeights};">
-        <div class="fw-resource-head" aria-hidden="true"></div>
+      <div class="fw-timeline-grid" style="--slot-count:${totalSlots}; --row-count:${resources.length}; --fw-buffer-height:${bufferHeight}px; grid-template-rows:${gridRows};">
+        ${bufferPlane}
+        ${workerHead}
         ${dayHeaders}
         ${hourHeaders}
         ${rowLabels}
@@ -27053,6 +28515,24 @@ function bindCalendarViewFunctions() {
     renderCalendarView()
     void calendarTimelineRefreshBars().catch(() => {})
   })
+  binding.add(document.getElementById('calendarTimelineDateBtn'), 'click', () => {
+    const input = document.getElementById('calendarTimelineDateInput')
+    if (input instanceof HTMLInputElement) {
+      input.showPicker?.()
+      input.focus()
+    }
+  })
+  binding.add(document.getElementById('calendarTimelineDateInput'), 'change', (event) => {
+    const value = String(event.target?.value ?? '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return
+    }
+    appState.calendarCursorDay = value
+    appState.calendarTimelineSlideDirection = 0
+    appState.calendarTimelineResetScroll = true
+    renderCalendarView()
+    void calendarEnsureTimelineWorkerState({ force: true, dayKey: value }).catch(() => {})
+  })
   binding.add(document.getElementById('calendarTimelineCompletedToggle'), 'click', () => {
     appState.calendarTimelineShowCompleted = appState.calendarTimelineShowCompleted === false
     renderCalendarView()
@@ -27109,7 +28589,9 @@ function bindCalendarViewFunctions() {
     }
     event.preventDefault()
     event.stopPropagation()
-    ordersOpenEditorFromCalendar(bar.getAttribute('data-calendar-timeline-order-id'))
+    ordersOpenEditorFromCalendar(
+      bar.getAttribute('data-calendar-timeline-source-order-id') || bar.getAttribute('data-calendar-timeline-order-id'),
+    )
   })
   binding.add(timelineStage, 'click', (event) => {
     const bar = event.target?.closest?.('[data-calendar-timeline-order-id]')
@@ -27153,7 +28635,10 @@ function bindCalendarViewFunctions() {
     if (!(bar instanceof HTMLElement)) {
       return
     }
-    if (bar.getAttribute('data-calendar-timeline-real-event') === '1') {
+    if (
+      bar.getAttribute('data-calendar-timeline-real-event') === '1' ||
+      bar.getAttribute('data-calendar-timeline-recurring-instance') === '1'
+    ) {
       event.preventDefault()
       return
     }
@@ -27170,6 +28655,9 @@ function bindCalendarViewFunctions() {
     appState.calendarTimelineDragResources = calendarTimelineResources()
     appState.calendarTimelineDragConflictKey = ''
     appState.calendarTimelineDragConflictValue = false
+    appState.calendarTimelineDragHoverKey = ''
+    appState.calendarTimelineDragHoverInvalid = false
+    appState.calendarTimelineDragHoverNode = null
     bar.classList.add('is-dragging')
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = 'move'
@@ -27196,19 +28684,17 @@ function bindCalendarViewFunctions() {
       event.dataTransfer.dropEffect = 'move'
     }
     calendarTimelineRememberDropInfo(dropInfo)
-    const hasConflict = calendarTimelineDragConflict(
-      appState.calendarTimelineDragOrderId,
-      dropInfo.rowIndex,
-      dropInfo.slotIndex,
-      appState.calendarTimelineDragSourceRow,
-    )
-    calendarTimelineClearDropTargets()
-    target.classList.add(hasConflict ? 'is-timeline-drop-invalid' : 'is-timeline-drop-target')
+    calendarTimelineMarkDropTarget(target, dropInfo, false)
   })
   binding.add(timelineStage, 'dragleave', (event) => {
     const target = calendarTimelineDropTargetFromEvent(event)
     if (target instanceof HTMLElement && (!(event.relatedTarget instanceof Node) || !target.contains(event.relatedTarget))) {
       target.classList.remove('is-timeline-drop-target', 'is-timeline-drop-invalid')
+      if (appState.calendarTimelineDragHoverNode === target) {
+        appState.calendarTimelineDragHoverKey = ''
+        appState.calendarTimelineDragHoverInvalid = false
+        appState.calendarTimelineDragHoverNode = null
+      }
     }
   })
   binding.add(timelineStage, 'drop', (event) => {
