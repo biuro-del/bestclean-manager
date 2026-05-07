@@ -350,7 +350,7 @@
 
             <div class="card dash-feedback dash-activity-panel" data-dashboard-section="active">
               <div class="card-title-row">
-                <div class="card-title">Aktywni w dniu dzisiejszym</div>
+                <div class="card-title" id="dashActivityTitle">Widok dnia dzisiejszego</div>
                 <div class="dash-activity-actions">
                   <button
                     class="btn2 secondary dash-refresh-btn dash-refresh-btn--icon"
@@ -360,18 +360,52 @@
                     title="Odśwież pulpit"
                   >
                     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <path d="M20 6v6h-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                      <path d="M4 18v-6h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                      <path d="M7.5 9a7 7 0 0 1 11-2.5L20 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                      <path d="M16.5 15a7 7 0 0 1-11 2.5L4 16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M20 11a8 8 0 0 0-14.2-5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                      <path d="M6 5H3V2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M4 13a8 8 0 0 0 14.2 5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                      <path d="M18 19h3v3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                   </button>
-                  <span class="pill" id="dashEventsPill">0</span>
+                  <button
+                    class="btn2 secondary dash-refresh-btn dash-refresh-btn--icon"
+                    id="dashActivitySettingsBtn"
+                    type="button"
+                    aria-label="Ustaw widok panelu"
+                    aria-expanded="false"
+                    title="Ustaw widok panelu"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" stroke="currentColor" stroke-width="2.1"/>
+                      <path d="M12 2.5v3" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+                      <path d="M12 18.5v3" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+                      <path d="M4.5 12h-3" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+                      <path d="M22.5 12h-3" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+                      <path d="M6.7 6.7 4.6 4.6" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+                      <path d="m19.4 19.4-2.1-2.1" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+                      <path d="m17.3 6.7 2.1-2.1" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+                      <path d="m4.6 19.4 2.1-2.1" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+                    </svg>
+                  </button>
                 </div>
+              </div>
+              <div class="dash-activity-view-popover" id="dashActivityViewPopover" hidden>
+                <div class="dash-activity-view-popover-title">Widoczność panelu</div>
+                <button class="dash-activity-view-option" type="button" data-dash-activity-view="today-calendar" aria-pressed="true">
+                  <span class="dash-activity-view-option-name">Oś dnia dzisiejszego</span>
+                  <span class="dash-activity-view-option-note">Kalendarz z aktualnym czasem na środku</span>
+                </button>
+                <button class="dash-activity-view-option" type="button" data-dash-activity-view="active-list" aria-pressed="false">
+                  <span class="dash-activity-view-option-name">Lista aktywnych pracowników</span>
+                  <span class="dash-activity-view-option-note">Dotychczasowy widok aktywnych osób</span>
+                </button>
               </div>
               <div class="dash-last-refresh" id="dashLastRefresh">Ostatnie odświeżenie: - (autoodświeżenie co 15 min)</div>
 
-              <div class="dash-events">
+              <div class="dash-activity-calendar" id="dashActivityCalendar" data-dash-activity-view-panel="today-calendar">
+                <div class="dash-activity-calendar-empty">Ładowanie widoku dnia...</div>
+              </div>
+
+              <div class="dash-events" data-dash-activity-view-panel="active-list" hidden>
                 <div class="dash-events-head">
                   <div>Osoba</div>
                   <div>Wpisy</div>

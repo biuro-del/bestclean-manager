@@ -2378,6 +2378,65 @@ body{ background: var(--page); }
   justify-content: flex-start !important;
   flex: 1 1 100%;
 }
+#view-workerTime .wt-worker-picker{
+  position: relative;
+}
+#view-workerTime .wt-worker-picker input{
+  width: 100%;
+}
+#view-workerTime .wt-worker-suggestions{
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 1200;
+  max-height: 280px;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, .16);
+  padding: 6px;
+}
+#view-workerTime .wt-worker-suggestions[hidden]{
+  display: none !important;
+}
+#view-workerTime .wt-worker-suggestion{
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+#view-workerTime .wt-worker-suggestion:hover,
+#view-workerTime .wt-worker-suggestion:focus{
+  outline: none;
+  background: #eef4ff;
+}
+#view-workerTime .wt-worker-suggestion span{
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#view-workerTime .wt-worker-suggestion small{
+  color: var(--muted2);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+#view-workerTime .wt-worker-suggestion-empty{
+  padding: 10px;
+  color: var(--muted2);
+  font-size: 13px;
+}
 #wtExportOverlay .modal{
   width: min(860px, 96vw) !important;
   max-height: 90vh;
@@ -7029,9 +7088,52 @@ textarea:focus{
   gap:10px;
 }
 
+#view-settings .backup-import-modules li small{
+  margin-left:auto;
+  color:#2563eb;
+  font-weight:700;
+  font-size:12px;
+  white-space:nowrap;
+}
+
 #view-settings .backup-import-auth{
   font-size:13px;
   color:var(--sub);
+}
+
+#view-settings .backup-restore-plan{
+  border-top:1px solid var(--line);
+  padding-top:10px;
+}
+
+#view-settings .backup-restore-plan-grid{
+  display:grid;
+  grid-template-columns:repeat(4, minmax(90px, 1fr));
+  gap:8px;
+}
+
+#view-settings .backup-restore-plan-grid div{
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:#fff;
+  padding:8px 10px;
+}
+
+#view-settings .backup-restore-plan-grid span{
+  display:block;
+  color:var(--sub);
+  font-size:11px;
+  text-transform:uppercase;
+}
+
+#view-settings .backup-restore-plan-grid strong{
+  font-size:18px;
+}
+
+#view-settings .backup-restore-plan p{
+  margin:8px 0 0;
+  color:var(--sub);
+  font-size:12px;
 }
 
 #view-settings .backup-list-header{
@@ -16027,9 +16129,10 @@ body{
 #portalRoot #view-events > .toolbar{
   box-sizing:border-box !important;
   display:grid !important;
-  gap:10px 12px !important;
-  grid-template-columns:repeat(5, minmax(0, 1fr)) !important;
+  gap:12px 14px !important;
+  grid-template-columns:repeat(4, minmax(0, 1fr)) !important;
   max-width:100% !important;
+  padding:14px 14px 16px !important;
   width:100% !important;
 }
 
@@ -16039,15 +16142,34 @@ body{
   width:100% !important;
 }
 
+#portalRoot #view-events > .toolbar .tool label{
+  color:#64748b !important;
+  font-size:12px !important;
+  font-weight:800 !important;
+  letter-spacing:.02em !important;
+}
+
+#portalRoot #view-events > .toolbar .tool input,
+#portalRoot #view-events > .toolbar .tool select{
+  min-height:38px !important;
+}
+
+#portalRoot #view-events > .toolbar .tool:nth-last-child(2){
+  grid-column:span 2 !important;
+}
+
 #portalRoot #view-events > .toolbar .tool-actions{
   align-self:end !important;
   display:flex !important;
   flex-wrap:wrap !important;
   gap:8px !important;
-  grid-column:4 / span 2 !important;
+  grid-column:1 / -1 !important;
   justify-content:flex-end !important;
+  border-top:1px solid #e7eef8 !important;
+  margin-top:2px !important;
   margin-left:0 !important;
   min-width:0 !important;
+  padding-top:12px !important;
   width:100% !important;
 }
 
@@ -16123,6 +16245,10 @@ body{
     grid-template-columns:repeat(3, minmax(0, 1fr)) !important;
   }
 
+  #portalRoot #view-events > .toolbar .tool:nth-last-child(2){
+    grid-column:1 / -1 !important;
+  }
+
   #portalRoot #view-events > .toolbar .tool-actions{
     grid-column:1 / -1 !important;
     justify-content:flex-start !important;
@@ -16140,6 +16266,10 @@ body{
 @media (max-width:760px){
   #portalRoot #view-events > .toolbar{
     grid-template-columns:1fr !important;
+  }
+
+  #portalRoot #view-events > .toolbar .tool:nth-last-child(2){
+    grid-column:auto !important;
   }
 
   #portalRoot #view-events > .toolbar .tool-actions .btn2{
@@ -18998,6 +19128,23 @@ body{
   padding:7px;
 }
 
+/* Sidebar: keep the last settings submenu entry visible. */
+@media (min-width: 761px){
+  #portalRoot .sidebar{
+    height:calc(100vh - 116px) !important;
+    max-height:calc(100vh - 116px) !important;
+    overflow:hidden !important;
+  }
+
+  #portalRoot .sidebar .menu{
+    height:calc(100% - 48px) !important;
+    max-height:none !important;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+    padding-bottom:28px !important;
+  }
+}
+
 /* Report history layout corrections */
 #portalRoot #view-reports .rep-history-day-info{
   align-items:center !important;
@@ -19521,18 +19668,25 @@ body{
 
 /* Dashboard day schedule aligned with the rest of dashboard typography */
 #portalRoot #view-dashboard .dash-schedule-panel{
-  gap:6px !important;
-  padding:9px !important;
+  gap:8px !important;
+  padding:12px !important;
+  border:1px solid #dbe6f6 !important;
+  border-radius:16px !important;
+  background:linear-gradient(180deg, #ffffff 0%, #f8fbff 100%) !important;
+  box-shadow:0 12px 30px rgba(37,99,235,.08) !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-panel .card-title{
-  font-size:18px !important;
-  line-height:1.1 !important;
+  font-size:15px !important;
+  line-height:1.15 !important;
+  font-weight:800 !important;
+  color:#2563eb !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-panel .card-title-row{
   margin:0 !important;
-  min-height:31px !important;
+  min-height:32px !important;
+  align-items:center !important;
 }
 
 #portalRoot #view-dashboard .dash-refresh-btn--icon{
@@ -19540,113 +19694,432 @@ body{
   min-height:28px !important;
   min-width:28px !important;
   width:28px !important;
+  border:1px solid #cfe0fb !important;
+  border-radius:10px !important;
+  background:#f4f8ff !important;
+  color:#2563eb !important;
 }
 
 #portalRoot #view-dashboard .dash-refresh-btn--icon svg{
-  height:16px !important;
-  width:16px !important;
+  height:14px !important;
+  width:14px !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-sync{
-  font-size:12px !important;
-  line-height:1.2 !important;
+  font-size:11px !important;
+  line-height:1.35 !important;
+  color:#7b8ba7 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-daybar{
-  grid-template-columns:29px minmax(0, 1fr) 29px !important;
+  grid-template-columns:30px minmax(0, 1fr) 30px !important;
   gap:6px !important;
+  align-items:center !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-nav{
-  border-radius:7px !important;
-  font-size:14px !important;
-  height:29px !important;
-  min-height:29px !important;
-  min-width:29px !important;
-  width:29px !important;
+  border-radius:10px !important;
+  font-size:13px !important;
+  height:30px !important;
+  min-height:30px !important;
+  min-width:30px !important;
+  width:30px !important;
+  border:1px solid #d7e4f8 !important;
+  background:#ffffff !important;
+  color:#5f7293 !important;
+  box-shadow:0 4px 10px rgba(15,23,42,.04) !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-dayname{
-  font-size:18px !important;
-  line-height:1.08 !important;
+  font-size:14px !important;
+  line-height:1.1 !important;
+  font-weight:800 !important;
+  color:#334155 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-daydate{
-  font-size:12px !important;
-  line-height:1.08 !important;
+  font-size:11px !important;
+  line-height:1.1 !important;
+  color:#7b8ba7 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-cards{
-  gap:6px !important;
-  margin-top:4px !important;
-  padding:4px 7px 4px 4px !important;
-  border-radius:10px !important;
+  gap:7px !important;
+  margin-top:2px !important;
+  padding:1px 5px 1px 1px !important;
+  border-radius:12px !important;
+  background:transparent !important;
+  scrollbar-color: rgba(148,163,184,.55) transparent !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-card{
-  border-left-width:3px !important;
-  border-radius:9px !important;
-  gap:4px !important;
-  padding:6px 8px !important;
+  border:1px solid #dbe6f6 !important;
+  border-left-width:5px !important;
+  border-radius:12px !important;
+  gap:5px !important;
+  padding:7px 9px !important;
+  background:#ffffff !important;
+  box-shadow:0 6px 14px rgba(15,23,42,.045) !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-card.is-started{
+  border-color:#bfe8ce !important;
+  border-left-color:#16a34a !important;
+  background:linear-gradient(180deg, #fcfffd 0%, #effcf3 100%) !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-card.is-upcoming{
+  border-color:#f4dbb3 !important;
+  border-left-color:#f59e0b !important;
+  background:linear-gradient(180deg, #fffdfa 0%, #fff5e4 100%) !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-card.is-missing-start{
+  border-color:#f1c6c6 !important;
+  border-left-color:#dc2626 !important;
+  background:linear-gradient(180deg, #fffafb 0%, #fff0f0 100%) !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-top{
-  gap:7px !important;
+  gap:8px !important;
+  align-items:flex-start !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-worker-meta{
-  gap:6px !important;
+  gap:5px !important;
+  min-width:0 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-worker-name{
-  font-size:16px !important;
-  line-height:1.15 !important;
+  font-size:13px !important;
+  line-height:1.18 !important;
+  font-weight:800 !important;
+  color:#1f2937 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-start-icon{
-  font-size:11px !important;
+  font-size:10px !important;
   height:16px !important;
   width:16px !important;
+  border:1px solid #9fe3b9 !important;
+  background:#f2fff7 !important;
+  color:#18a957 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-status-badge{
-  font-size:12px !important;
-  padding:2px 7px !important;
+  font-size:9px !important;
+  line-height:1 !important;
+  padding:4px 7px !important;
+  border-radius:999px !important;
+  font-weight:800 !important;
+  letter-spacing:.01em !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-status-badge.is-work{
+  color:#166534 !important;
+  background:#eefcf2 !important;
+  border:1px solid #7ee2a8 !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-status-badge.is-off{
+  color:#64748b !important;
+  background:#f8fafc !important;
+  border:1px solid #d7e1ee !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-startline,
 #portalRoot #view-dashboard .dash-schedule-line{
-  column-gap:8px !important;
-  grid-template-columns:78px minmax(0, 1fr) !important;
+  column-gap:7px !important;
+  grid-template-columns:72px minmax(0, 1fr) !important;
+  align-items:start !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-startline{
   border-bottom:1px solid #e3eaf5 !important;
-  padding:2px 0 3px !important;
+  padding:0 0 5px !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-shifts .dash-schedule-line + .dash-schedule-line{
   margin-top:3px !important;
   padding-top:3px !important;
+  border-top:1px dashed #e6eefb !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-line-label{
-  font-size:12px !important;
-  line-height:1.12 !important;
+  font-size:10px !important;
+  line-height:1.2 !important;
+  letter-spacing:0 !important;
+  color:#71829f !important;
+  font-weight:700 !important;
+  text-transform:none !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-card.is-started .dash-schedule-line-label,
+#portalRoot #view-dashboard .dash-schedule-card.is-started .dash-schedule-start-value{
+  color:#166534 !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-card.is-upcoming .dash-schedule-line-label,
+#portalRoot #view-dashboard .dash-schedule-card.is-upcoming .dash-schedule-start-value{
+  color:#b45309 !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-card.is-missing-start .dash-schedule-line-label,
+#portalRoot #view-dashboard .dash-schedule-card.is-missing-start .dash-schedule-start-value{
+  color:#b91c1c !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-start-value,
 #portalRoot #view-dashboard .dash-schedule-line-text{
-  font-size:15px !important;
-  line-height:1.15 !important;
+  font-size:12px !important;
+  line-height:1.22 !important;
+  color:#1f2937 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-late{
-  border-radius:8px !important;
+  border-radius:10px !important;
+  font-size:10px !important;
+  line-height:1.2 !important;
+  margin-top:-2px !important;
+  padding:4px 6px !important;
+  box-shadow:none !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-cards::-webkit-scrollbar{
+  width:10px !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-cards::-webkit-scrollbar-thumb{
+  background:rgba(148,163,184,.42) !important;
+  border:2px solid transparent !important;
+  border-radius:999px !important;
+  background-clip:content-box !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-cards::-webkit-scrollbar-track{
+  background:transparent !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-panel{
+  position:relative !important;
+}
+
+#portalRoot #view-dashboard [data-dash-activity-view-panel][hidden],
+#portalRoot #view-dashboard .dash-activity-view-popover[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-actions{
+  align-items:center !important;
+  display:inline-flex !important;
+  gap:7px !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-view-popover{
+  position:absolute !important;
+  top:48px !important;
+  right:18px !important;
+  z-index:40 !important;
+  width:min(330px, calc(100vw - 40px)) !important;
+  border:1px solid #d6e3f6 !important;
+  border-radius:14px !important;
+  background:#ffffff !important;
+  box-shadow:0 18px 42px rgba(15,23,42,.16) !important;
+  padding:10px !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-view-popover-title{
+  color:#334155 !important;
   font-size:12px !important;
-  line-height:1.12 !important;
-  margin-top:3px !important;
-  padding:4px 7px !important;
+  font-weight:900 !important;
+  letter-spacing:0 !important;
+  padding:2px 4px 8px !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-view-option{
+  align-items:flex-start !important;
+  background:#fff !important;
+  border:1px solid transparent !important;
+  border-radius:10px !important;
+  color:#0f172a !important;
+  display:flex !important;
+  flex-direction:column !important;
+  gap:3px !important;
+  padding:9px 10px !important;
+  text-align:left !important;
+  width:100% !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-view-option:hover{
+  background:#f6f9ff !important;
+  border-color:#dbe7fb !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-view-option.is-selected{
+  background:#eef5ff !important;
+  border-color:#adc9fb !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-view-option-name{
+  font-size:13px !important;
+  font-weight:900 !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-view-option-note{
+  color:#667894 !important;
+  font-size:11px !important;
+  line-height:1.25 !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-calendar{
+  margin-top:8px !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-axis{
+  display:grid !important;
+  grid-template-columns:112px minmax(0, 1fr) 78px !important;
+  gap:8px !important;
+  padding:0 4px 7px 0 !important;
+  color:#7a8aa5 !important;
+  font-size:11px !important;
+  font-weight:800 !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-ticks{
+  position:relative !important;
+  min-height:28px !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-ticks span{
+  position:absolute !important;
+  left:var(--dash-left) !important;
+  transform:translateX(-50%) !important;
+  color:#7a8aa5 !important;
+  font-weight:800 !important;
+  line-height:1 !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-ticks .is-hour{
+  top:17px !important;
+  font-size:9px !important;
+  color:#8a99b1 !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-ticks .is-now{
+  top:0 !important;
+  color:#ef4444 !important;
+  font-size:11px !important;
+  font-weight:900 !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline{
+  position:relative !important;
+  display:flex !important;
+  flex-direction:column !important;
+  gap:7px !important;
+  max-height:min(78vh, 500px) !important;
+  overflow:auto !important;
+  padding:2px 4px 2px 0 !important;
+  background-image:none !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-now-line{
+  display:none !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-row{
+  display:grid !important;
+  grid-template-columns:112px minmax(0, 1fr) 78px !important;
+  gap:8px !important;
+  align-items:center !important;
+  min-height:38px !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-person{
+  min-width:0 !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+  font-size:12px !important;
+  font-weight:800 !important;
+  color:#334155 !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-track{
+  position:relative !important;
+  min-height:28px !important;
+  border:1px solid #e1eaf8 !important;
+  border-radius:8px !important;
+  overflow:hidden !important;
+  background:
+    repeating-linear-gradient(90deg, transparent 0, transparent 23px, rgba(37,99,235,.11) 24px),
+    linear-gradient(180deg, #fbfdff 0%, #f2f7ff 100%) !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-track::after{
+  content:"" !important;
+  position:absolute !important;
+  top:-8px !important;
+  bottom:-8px !important;
+  left:var(--dash-now-left) !important;
+  width:2px !important;
+  transform:translateX(-50%) !important;
+  background:#ef4444 !important;
+  box-shadow:0 0 0 1px rgba(239,68,68,.10) !important;
+  pointer-events:none !important;
+  z-index:3 !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-bar{
+  position:absolute !important;
+  left:var(--dash-left) !important;
+  top:4px !important;
+  width:var(--dash-width) !important;
+  height:18px !important;
+  border-radius:6px !important;
+  background:#3f5bbd !important;
+  color:#fff !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  min-width:26px !important;
+  overflow:hidden !important;
+  padding:0 7px !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+  font-size:11px !important;
+  font-weight:800 !important;
+  box-shadow:0 5px 12px rgba(47,82,190,.22) !important;
+  z-index:1 !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-bar.is-running{
+  background:#1fe516 !important;
+  color:#102a0d !important;
+  box-shadow:0 5px 12px rgba(31,229,22,.18) !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-meta{
+  min-width:0 !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+  color:#64748b !important;
+  font-size:11px !important;
+  font-weight:700 !important;
+  text-align:left !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-calendar-empty{
+  border:1px dashed #c7d8f2 !important;
+  border-radius:12px !important;
+  color:#60718f !important;
+  font-size:13px !important;
+  font-weight:800 !important;
+  padding:18px !important;
+  text-align:center !important;
+  background:#f8fbff !important;
 }
 
 /* Clickable elements should always show a hand cursor */

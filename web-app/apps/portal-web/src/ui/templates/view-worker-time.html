@@ -4,7 +4,10 @@
 <div class="toolbar" aria-label="Filtry pracownik&#243;w">
   <div class="tool" style="min-width:250px">
     <label for="wtQ">Szukaj</label>
-    <input id="wtQ" type="text" placeholder="np. Rafa&#322; / Marta" />
+    <div class="wt-worker-picker">
+      <input id="wtQ" type="text" placeholder="np. Dudek Sabina / Sabina" autocomplete="off" />
+      <div id="wtQSuggestions" class="wt-worker-suggestions" hidden></div>
+    </div>
   </div>
 
   <div class="tool" style="min-width:220px">
@@ -37,7 +40,7 @@
   <div class="events-head">
     <div class="events-select-col"><input id="wtSelectAll" type="checkbox" aria-label="Zaznacz wszystkich pracownik&#243;w na stronie" /></div>
     <div>ID</div>
-    <div>Imi&#281; i nazwisko</div>
+    <div>Nazwisko i imi&#281;</div>
     <div>Typ</div>
     <div>Aktywny</div>
     <div></div>

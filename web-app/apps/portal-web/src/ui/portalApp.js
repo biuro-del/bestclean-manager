@@ -195,6 +195,7 @@ const appState = {
   dashboardMetricDetails: {},
   dashboardMetricValues: {},
   dashboardTodayRows: [],
+  dashboardActivityView: 'today-calendar',
   dashboardNewComments: [],
   dashboardScheduleDays: [],
   dashboardScheduleSelectedDay: '',
@@ -244,6 +245,7 @@ const reportGeoModalState = {
   zoom: 18,
 }
 const DASHBOARD_REFRESH_INTERVAL_MS = 15 * 60 * 1000
+const DASHBOARD_ACTIVITY_VIEW_STORAGE_KEY = 'portal.dashboard.activityView.v1'
 const CALENDAR_TIMELINE_STATUS_REFRESH_MS = DASHBOARD_REFRESH_INTERVAL_MS
 const DASHBOARD_SCHEDULE_SOON_WINDOW_MINUTES = 60
 const DASHBOARD_SCHEDULE_VISIBLE_WORKERS = 10
@@ -2666,13 +2668,33 @@ function settingsRenderImportSummary() {
         .map((moduleInfo) => {
           const moduleLabel = String(moduleInfo?.label ?? moduleInfo?.id ?? '-').trim() || '-'
           const records = Number(moduleInfo?.records ?? 0) || 0
-          return `<li><strong>${escapeHtml(moduleLabel)}</strong> <span>${records}</span></li>`
+          const plan = moduleInfo?.plan
+          const planHtml = plan
+            ? `<small>+${Number(plan.created ?? 0) || 0} / ~${Number(plan.updated ?? 0) || 0} / -${Number(plan.deleted ?? 0) || 0}</small>`
+            : ''
+          return `<li><strong>${escapeHtml(moduleLabel)}</strong> <span>${records}</span>${planHtml}</li>`
         })
         .join('')
     : '<li><strong>Brak modulow</strong> <span>0</span></li>'
 
   const authUsers = Number(summary.authUsers ?? 0) || 0
   const schemaVersion = String(summary.schemaVersion ?? '').trim() || '-'
+  const plan = summary.restorePlan
+  const totals = plan?.totals
+  const restorePlanHtml = totals
+    ? `
+      <div class="backup-restore-plan">
+        <div class="backup-import-modules-title">Plan przywrocenia</div>
+        <div class="backup-restore-plan-grid">
+          <div><span>Dodane</span><strong>${Number(totals.created ?? 0) || 0}</strong></div>
+          <div><span>Zmienione</span><strong>${Number(totals.updated ?? 0) || 0}</strong></div>
+          <div><span>Usuwane</span><strong>${Number(totals.deleted ?? 0) || 0}</strong></div>
+          <div><span>Bez zmian</span><strong>${Number(totals.unchanged ?? 0) || 0}</strong></div>
+        </div>
+        <p>Format przy module: <strong>+ dodane / ~ zmienione / - usuwane</strong>.</p>
+      </div>
+    `
+    : ''
 
   summaryNode.innerHTML = `
     <div class="backup-import-card">
@@ -2689,6 +2711,7 @@ function settingsRenderImportSummary() {
         <ul>${modulesHtml}</ul>
       </div>
       <div class="backup-import-auth">Auth snapshot (pelna kopia): <strong>${authUsers}</strong></div>
+      ${restorePlanHtml}
     </div>
   `
 
@@ -2831,7 +2854,7 @@ async function settingsCreateBackup() {
     createButton.disabled = true
     createButton.textContent = 'Tworzenie...'
   }
-  settingsSetCreateNote('Tworzenie backupu w toku...', 'info')
+  settingsSetCreateNote('Tworzenie backupu i przygotowanie pliku ZIP...', 'info')
 
   try {
     const created = await createBackup({
@@ -2841,8 +2864,9 @@ async function settingsCreateBackup() {
       createdBy: settingsCurrentActor(),
       source: 'manual',
     })
-    settingsSetCreateNote(`Utworzono: ${created.fileName} (${formatBytes(created.sizeBytes)}).`, 'success')
-    showTransientNotice('Backup ZIP zostal utworzony.')
+    await settingsDownloadBackup(created.id)
+    settingsSetCreateNote(`Utworzono i pobrano: ${created.fileName} (${formatBytes(created.sizeBytes)}).`, 'success')
+    showTransientNotice('Backup ZIP zostal utworzony i pobrany.')
     await settingsLoadBackups({ runAutomation: false })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Nie udalo sie utworzyc backupu.'
@@ -2876,7 +2900,7 @@ async function settingsInspectImportFile() {
   }
 
   try {
-    const inspection = await inspectBackupFile(file)
+    const inspection = await inspectBackupFile(file, { orgId: settingsCurrentOrgId() })
     appState.settingsImportInspection = inspection
     settingsRenderImportSummary()
     showTransientNotice('Plik backupu jest poprawny.')
@@ -3165,10 +3189,316 @@ function dashboardDurationLabelToHm(value, fallback = '00:00') {
   return durationSecondsToHm(seconds)
 }
 
+const DASHBOARD_POLISH_FIRST_NAMES = new Set([
+  'agnieszka',
+  'adam',
+  'aleksandra',
+  'alina',
+  'aneta',
+  'andrzej',
+  'barbara',
+  'beata',
+  'bernadeta',
+  'czeslawa',
+  'dagmara',
+  'dariusz',
+  'edyta',
+  'ewa',
+  'gosia',
+  'grzegorz',
+  'inna',
+  'iwona',
+  'izabela',
+  'jan',
+  'joanna',
+  'jolanta',
+  'justyna',
+  'karol',
+  'katarzyna',
+  'krzysztof',
+  'malgorzata',
+  'mariola',
+  'marta',
+  'marcin',
+  'marek',
+  'mariusz',
+  'michal',
+  'monika',
+  'natalia',
+  'nina',
+  'patrycja',
+  'pawel',
+  'piotr',
+  'paulina',
+  'rafal',
+  'renata',
+  'romana',
+  'sabina',
+  'slawomir',
+  'symon',
+  'szymon',
+  'teresa',
+  'tomasz',
+  'weronika',
+  'wieslawa',
+  'wojciech',
+])
+
+function dashboardWorkerNameTokenKey(value) {
+  return normalizeSearchText(value)
+    .replace(/ł/g, 'l')
+    .replace(/Ł/g, 'l')
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function dashboardWorkerSurnameDisplayName(value) {
+  const raw = String(value ?? '').trim().replace(/\s+/g, ' ')
+  if (!raw || raw === '-') {
+    return raw || '-'
+  }
+
+  const parts = raw.split(' ').filter(Boolean)
+  if (parts.length < 2) {
+    return raw
+  }
+
+  const firstToken = dashboardWorkerNameTokenKey(parts[0])
+  const lastToken = dashboardWorkerNameTokenKey(parts[parts.length - 1])
+  const looksGivenNameFirst = DASHBOARD_POLISH_FIRST_NAMES.has(firstToken)
+  const looksSurnameFirst = !looksGivenNameFirst && DASHBOARD_POLISH_FIRST_NAMES.has(lastToken)
+
+  if (looksSurnameFirst) {
+    return raw
+  }
+
+  return `${parts[parts.length - 1]} ${parts.slice(0, -1).join(' ')}`
+}
+
+function dashboardWorkerSurnameSortKey(value) {
+  return normalizeSearchText(dashboardWorkerSurnameDisplayName(value))
+}
+
+function dashboardNormalizeActivityView(value) {
+  return String(value ?? '').trim() === 'active-list' ? 'active-list' : 'today-calendar'
+}
+
+function dashboardReadActivityViewPreference() {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return 'today-calendar'
+  }
+
+  try {
+    return dashboardNormalizeActivityView(window.localStorage.getItem(DASHBOARD_ACTIVITY_VIEW_STORAGE_KEY))
+  } catch {
+    return 'today-calendar'
+  }
+}
+
+function dashboardWriteActivityViewPreference(value) {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(DASHBOARD_ACTIVITY_VIEW_STORAGE_KEY, dashboardNormalizeActivityView(value))
+  } catch {
+    // localStorage can be unavailable in hardened browser profiles.
+  }
+}
+
+function dashboardSetActivitySettingsOpen(isOpen) {
+  const popover = document.getElementById('dashActivityViewPopover')
+  const button = document.getElementById('dashActivitySettingsBtn')
+  if (popover) {
+    popover.hidden = !isOpen
+  }
+  if (button) {
+    button.setAttribute('aria-expanded', isOpen ? 'true' : 'false')
+  }
+}
+
+function dashboardApplyActivityView() {
+  const view = dashboardNormalizeActivityView(appState.dashboardActivityView)
+  const title = document.getElementById('dashActivityTitle')
+  const panels = document.querySelectorAll('[data-dash-activity-view-panel]')
+  const options = document.querySelectorAll('[data-dash-activity-view]')
+
+  if (title) {
+    title.textContent = view === 'active-list' ? 'Aktywni w dniu dzisiejszym' : 'Oś dnia dzisiejszego'
+  }
+
+  panels.forEach((panel) => {
+    const isVisible = panel.getAttribute('data-dash-activity-view-panel') === view
+    panel.hidden = !isVisible
+  })
+
+  options.forEach((option) => {
+    const isSelected = option.getAttribute('data-dash-activity-view') === view
+    option.classList.toggle('is-selected', isSelected)
+    option.setAttribute('aria-pressed', isSelected ? 'true' : 'false')
+  })
+}
+
+function dashboardSetActivityView(value, { persist = true } = {}) {
+  const normalized = dashboardNormalizeActivityView(value)
+  appState.dashboardActivityView = normalized
+  if (persist) {
+    dashboardWriteActivityViewPreference(normalized)
+  }
+  if (normalized === 'today-calendar') {
+    renderDashboardActivityCalendar(appState.dashboardTodayRows)
+  }
+  dashboardApplyActivityView()
+}
+
+function dashboardTodayDateFromTime(value, dayKey = todayYmd()) {
+  const iso = toIso(value)
+  if (iso) {
+    return new Date(iso)
+  }
+
+  const time = dashboardClockLabelToHm(value, '')
+  const match = time.match(/^(\d{2}):(\d{2})$/)
+  if (!match) {
+    return null
+  }
+
+  const date = new Date(`${dayKey}T${match[1]}:${match[2]}:00`)
+  return Number.isFinite(date.getTime()) ? date : null
+}
+
+function dashboardTimelinePercent(ts, rangeStart, rangeEnd) {
+  const span = Math.max(1, rangeEnd - rangeStart)
+  return ((ts - rangeStart) / span) * 100
+}
+
+function renderDashboardActivityCalendar(rows = []) {
+  const root = document.getElementById('dashActivityCalendar')
+  if (!root) {
+    return
+  }
+
+  const safeRows = Array.isArray(rows) ? rows : []
+  const now = new Date()
+  const nowTs = now.getTime()
+  const dayKey = todayYmd()
+  const rangeStartDate = new Date(`${dayKey}T04:00:00`)
+  const rangeEndDate = new Date(`${dayKey}T23:00:00`)
+  const rangeStart = rangeStartDate.getTime()
+  const rangeEnd = rangeEndDate.getTime()
+  const snappedNow = new Date(now)
+  snappedNow.setMinutes(Math.floor(snappedNow.getMinutes() / 30) * 30, 0, 0)
+  const nowLeft = Math.max(0, Math.min(100, dashboardTimelinePercent(snappedNow.getTime(), rangeStart, rangeEnd)))
+  const hourLabel = (timestamp) => {
+    const date = new Date(timestamp)
+    return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+  }
+  const tickLabels = Array.from({ length: 20 }, (_, index) => {
+    const hour = 4 + index
+    const timestamp = new Date(`${dayKey}T${pad2(hour)}:00:00`).getTime()
+    const left = Math.max(0, Math.min(100, dashboardTimelinePercent(timestamp, rangeStart, rangeEnd)))
+    return `<span class="is-hour" style="--dash-left:${left.toFixed(3)}%">${escapeHtml(pad2(hour))}</span>`
+  })
+
+  const items = safeRows
+    .map((row) => {
+      const startDate = dashboardTodayDateFromTime(row?.qrStart ?? row?.start ?? row?.dayStartAt ?? row?.startAt, dayKey)
+      if (!startDate) {
+        return null
+      }
+
+      const stopDate = row?.isRunning
+        ? null
+        : dashboardTodayDateFromTime(row?.qrStop ?? row?.stop ?? row?.dayEndAt ?? row?.endAt, dayKey)
+      const durationSeconds = dashboardParseDurationLabelToSeconds(row?.duration)
+      let startTs = startDate.getTime()
+      let stopTs = stopDate ? stopDate.getTime() : nowTs
+
+      if (!stopDate && durationSeconds > 0 && !row?.isRunning) {
+        stopTs = startTs + durationSeconds * 1000
+      }
+      if (stopTs < startTs) {
+        stopTs = row?.isRunning ? nowTs : startTs
+      }
+
+      const clippedStart = Math.max(startTs, rangeStart)
+      const clippedStop = Math.min(stopTs, rangeEnd)
+      if (clippedStop < rangeStart || clippedStart > rangeEnd) {
+        return null
+      }
+
+      const left = Math.max(0, Math.min(100, dashboardTimelinePercent(clippedStart, rangeStart, rangeEnd)))
+      const right = Math.max(0, Math.min(100, dashboardTimelinePercent(clippedStop, rangeStart, rangeEnd)))
+      const width = Math.max(1.8, right - left)
+      const clientLabel = dashboardResolveClientLabel(row)
+      const workerName = String(row?.workerName ?? '').trim() || '-'
+      const workerDisplayName = dashboardWorkerSurnameDisplayName(workerName)
+      const workerSortKey = dashboardWorkerSurnameSortKey(workerName)
+      const workerLogin = String(row?.workerLogin ?? row?.id ?? '').trim()
+      const locationLabel =
+        clientLabel && clientLabel !== '-'
+          ? clientLabel
+          : String(row?.activeClient ?? row?.activeZone ?? row?.strefa ?? row?.zoneName ?? '').trim()
+      const elapsedSeconds = Math.max(0, Math.floor((stopTs - startTs) / 1000))
+      const durationLabel = row?.isRunning ? durationSecondsToHm(elapsedSeconds) : dashboardDurationLabelToHm(row?.duration, durationSecondsToHm(elapsedSeconds))
+      const barLabel = durationLabel
+      const workerButton = workerName === '-'
+        ? `<span>${escapeHtml(workerDisplayName)}</span>`
+        : `<button class="dash-worker-link" type="button" data-dash-worker-login="${escapeHtml(workerLogin)}" data-dash-worker-name="${escapeHtml(workerName)}">${escapeHtml(workerDisplayName)}</button>`
+
+      return {
+        startTs,
+        workerSortKey,
+        workerDisplayName,
+        html: `
+          <div class="dash-activity-timeline-row">
+            <div class="dash-activity-timeline-person">${workerButton}</div>
+            <div class="dash-activity-timeline-track" title="${escapeHtml(`${workerDisplayName}: ${hourLabel(startTs)} - ${row?.isRunning ? 'teraz' : hourLabel(stopTs)}`)}">
+              <span
+                class="dash-activity-timeline-bar${row?.isRunning ? ' is-running' : ''}"
+                style="--dash-left:${left.toFixed(3)}%;--dash-width:${width.toFixed(3)}%;"
+              >
+                ${escapeHtml(barLabel)}
+              </span>
+            </div>
+            <div class="dash-activity-timeline-meta">${escapeHtml(locationLabel || '')}</div>
+          </div>
+        `,
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      const byWorker = String(a.workerSortKey ?? '').localeCompare(String(b.workerSortKey ?? ''), 'pl', {
+        sensitivity: 'base',
+      })
+      return byWorker || a.startTs - b.startTs
+    })
+
+  if (!items.length) {
+    root.innerHTML = `
+      <div class="dash-activity-calendar-empty">Brak aktywności do pokazania na osi dnia.</div>
+    `
+    return
+  }
+
+  root.innerHTML = `
+    <div class="dash-activity-timeline-axis" aria-hidden="true">
+      <div class="dash-activity-timeline-axis-spacer"></div>
+      <div class="dash-activity-timeline-ticks">${tickLabels.join('')}</div>
+      <div></div>
+    </div>
+    <div class="dash-activity-timeline" style="--dash-now-left:${nowLeft.toFixed(3)}%;" aria-label="Oś aktywności dnia dzisiejszego">
+      ${items.map((item) => item.html).join('')}
+    </div>
+  `
+}
+
 function renderDashboardEvents(rows) {
   const eventsList = document.getElementById('dashEventsList')
   const eventsPill = document.getElementById('dashEventsPill')
   appState.dashboardTodayRows = Array.isArray(rows) ? [...rows] : []
+  renderDashboardActivityCalendar(rows)
+  dashboardApplyActivityView()
   if (appState.currentRoute === 'calendar' && document.getElementById('calendarTimelinePrototype')) {
     window.requestAnimationFrame(() => renderCalendarView())
   }
@@ -3198,27 +3528,38 @@ function renderDashboardEvents(rows) {
     return
   }
 
-  eventsList.innerHTML = rows
+  const sortedRows = rows
+    .map((row, sourceIndex) => ({
+      row,
+      sourceIndex,
+      workerSortKey: dashboardWorkerSurnameSortKey(row?.workerName),
+    }))
+    .sort((left, right) =>
+      String(left.workerSortKey ?? '').localeCompare(String(right.workerSortKey ?? ''), 'pl', { sensitivity: 'base' }),
+    )
+
+  eventsList.innerHTML = sortedRows
     .map(
-      (row, rowIndex) => {
+      ({ row, sourceIndex }) => {
         const startValue = dashboardClockLabelToHm(row.qrStart, '--:--')
         const stopValue = row?.isRunning ? '--:--' : dashboardClockLabelToHm(row.qrStop, '--:--')
         const workValue = dashboardDurationLabelToHm(row.duration, '00:00')
         const lateMinutes = Number(row?.lateMinutes ?? 0)
         const lateValue = dashboardLateMinutesToHm(lateMinutes)
         const workerName = String(row.workerName ?? '').trim() || '-'
+        const workerDisplayName = dashboardWorkerSurnameDisplayName(workerName)
         const workerLogin = String(row.workerLogin ?? row.id ?? '').trim()
         const clientLabel = dashboardResolveClientLabel(row)
         const zoneLabel = String(row.activeZone ?? '').trim() || '-'
         const workerCell = workerName === '-'
-          ? `<span>${escapeHtml(workerName)}</span>`
-          : `<button class="dash-worker-link" type="button" data-dash-worker-login="${escapeHtml(workerLogin)}" data-dash-worker-name="${escapeHtml(workerName)}">${escapeHtml(workerName)}</button>`
+          ? `<span>${escapeHtml(workerDisplayName)}</span>`
+          : `<button class="dash-worker-link" type="button" data-dash-worker-login="${escapeHtml(workerLogin)}" data-dash-worker-name="${escapeHtml(workerName)}">${escapeHtml(workerDisplayName)}</button>`
         const clientCell = clientLabel === '-'
           ? '<span class="muted">-</span>'
-          : `<button class="dash-entity-link" type="button" data-dash-history-kind="objects" data-dash-row-index="${rowIndex}">${escapeHtml(clientLabel)}</button>`
+          : `<button class="dash-entity-link" type="button" data-dash-history-kind="objects" data-dash-row-index="${sourceIndex}">${escapeHtml(clientLabel)}</button>`
         const zoneCell = zoneLabel === '-'
           ? '<span class="muted">-</span>'
-          : `<button class="dash-entity-link" type="button" data-dash-history-kind="zones" data-dash-row-index="${rowIndex}">${zoneNameWithQrHtml(zoneLabel, row)}</button>`
+          : `<button class="dash-entity-link" type="button" data-dash-history-kind="zones" data-dash-row-index="${sourceIndex}">${zoneNameWithQrHtml(zoneLabel, row)}</button>`
         const rowClass = lateMinutes > 0 ? 'list-row dash-events-row dash-events-row--has-late' : 'list-row dash-events-row'
         return `
       <div class="${rowClass}">
@@ -6244,7 +6585,7 @@ function dashboardScheduleMetricPopoverHide() {
   }
   dashboardMetricPopoverHideTimer = window.setTimeout(() => {
     dashboardHideMetricPopover()
-  }, 120)
+  }, 260)
 }
 
 function dashboardCancelMetricPopoverHide() {
@@ -6310,9 +6651,9 @@ function dashboardShowMetricPopover(metricKey, anchorButton) {
   let left = anchorRect.left + (anchorRect.width - popoverRect.width) / 2
   left = Math.max(10, Math.min(left, window.innerWidth - popoverRect.width - 10))
 
-  let top = anchorRect.bottom + 8
+  let top = anchorRect.bottom + 2
   if (top + popoverRect.height > window.innerHeight - 10) {
-    top = Math.max(10, anchorRect.top - popoverRect.height - 8)
+    top = Math.max(10, anchorRect.top - popoverRect.height - 2)
   }
 
   popover.style.left = `${Math.round(left)}px`
@@ -13255,6 +13596,117 @@ function workerTimeToggleSelectAllOnPage(checked) {
   workerTimeSyncSelectionUi()
 }
 
+function workerTimeDisplayName(worker = {}) {
+  return dashboardWorkerSurnameDisplayName(worker?.name || worker?.login || worker?.id || '-')
+}
+
+function workerTimeSearchHaystack(worker = {}) {
+  return [
+    worker?.workerId,
+    worker?.id,
+    worker?.name,
+    workerTimeDisplayName(worker),
+    worker?.login,
+    worker?.type,
+    worker?.role,
+    worker?.phone,
+    worker?.email,
+  ]
+    .map((value) => normalizeSearchText(value))
+    .join(' ')
+}
+
+function workerTimeCompareByDisplayName(left = {}, right = {}) {
+  const leftLabel = workerTimeDisplayName(left)
+  const rightLabel = workerTimeDisplayName(right)
+  const byName = leftLabel.localeCompare(rightLabel, 'pl', { numeric: true, sensitivity: 'base' })
+  if (byName) {
+    return byName
+  }
+
+  return String(left?.workerId ?? left?.id ?? left?.login ?? '').localeCompare(
+    String(right?.workerId ?? right?.id ?? right?.login ?? ''),
+    'pl',
+    { numeric: true, sensitivity: 'base' },
+  )
+}
+
+function workerTimeSetSearchSuggestionsOpen(isOpen) {
+  const root = document.getElementById('wtQSuggestions')
+  if (!root) {
+    return
+  }
+
+  root.hidden = !isOpen
+}
+
+function workerTimeRenderSearchSuggestions({ expandOnEmpty = false } = {}) {
+  const input = document.getElementById('wtQ')
+  const root = document.getElementById('wtQSuggestions')
+  if (!(input instanceof HTMLInputElement) || !root) {
+    return
+  }
+
+  const query = normalizeSearchText(input.value)
+  if (!query && !expandOnEmpty) {
+    root.innerHTML = ''
+    workerTimeSetSearchSuggestionsOpen(false)
+    return
+  }
+
+  const rows = [...(Array.isArray(appState.workerTimeRows) ? appState.workerTimeRows : [])]
+    .filter((worker) => !query || workerTimeSearchHaystack(worker).includes(query))
+    .sort(workerTimeCompareByDisplayName)
+    .slice(0, 30)
+
+  if (!rows.length) {
+    root.innerHTML = '<div class="wt-worker-suggestion-empty">Brak dopasowanych osób.</div>'
+    workerTimeSetSearchSuggestionsOpen(true)
+    return
+  }
+
+  root.innerHTML = rows
+    .map((worker) => {
+      const label = workerTimeDisplayName(worker)
+      const original = String(worker?.name ?? '').trim()
+      const meta = [worker?.workerId || worker?.id, worker?.type || worker?.role]
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)
+        .join(' · ')
+      return `
+        <button
+          class="wt-worker-suggestion"
+          type="button"
+          data-wt-worker-label="${escapeHtml(label)}"
+          data-wt-worker-name="${escapeHtml(original)}"
+        >
+          <span>${escapeHtml(label)}</span>
+          ${meta ? `<small>${escapeHtml(meta)}</small>` : ''}
+        </button>
+      `
+    })
+    .join('')
+  workerTimeSetSearchSuggestionsOpen(true)
+}
+
+function workerTimePickSearchSuggestion(button) {
+  if (!(button instanceof HTMLElement)) {
+    return
+  }
+
+  const input = document.getElementById('wtQ')
+  if (!(input instanceof HTMLInputElement)) {
+    return
+  }
+
+  const label = String(button.getAttribute('data-wt-worker-label') ?? '').trim()
+  if (label) {
+    input.value = label
+  }
+  workerTimeSetSearchSuggestionsOpen(false)
+  filterWorkerTimeTable({ resetPage: true })
+}
+
 function getFilteredWorkerTimeRows(rows = appState.workerTimeRows) {
   const q = normalizeSearchText(document.getElementById('wtQ')?.value)
   const typeFilter = normalizeSearchText(document.getElementById('wtType')?.value)
@@ -13286,11 +13738,8 @@ function getFilteredWorkerTimeRows(rows = appState.workerTimeRows) {
       return true
     }
 
-    const haystack = [worker.workerId, worker.id, worker.name, worker.login, worker.type, worker.role, worker.phone, worker.email]
-      .map((value) => normalizeSearchText(value))
-      .join(' ')
-    return haystack.includes(q)
-  })
+    return workerTimeSearchHaystack(worker).includes(q)
+  }).sort(workerTimeCompareByDisplayName)
 }
 
 function renderWorkerRows(rows) {
@@ -13316,16 +13765,19 @@ function renderWorkerRows(rows) {
 
   root.innerHTML = rows
     .map(
-      (worker) => `
+      (worker) => {
+        const displayName = workerTimeDisplayName(worker)
+        return `
       <div class="events-row${workerTimeIsSelected(workerTimeSelectionKey(worker)) ? ' is-selected' : ''}">
         <div class="events-select-col"><input type="checkbox" data-wt-select="${escapeHtml(workerTimeSelectionKey(worker))}" ${workerTimeIsSelected(workerTimeSelectionKey(worker)) ? 'checked' : ''} aria-label="Zaznacz pracownika ${escapeHtml(worker.name || worker.login || worker.id || '')}" /></div>
         <div class="mono">${escapeHtml(worker.workerId || worker.id || '-')}</div>
-        <div>${escapeHtml(worker.name || '-')}</div>
+        <div>${escapeHtml(displayName)}</div>
         <div>${escapeHtml(worker.type || '-')}</div>
         <div><span class="pill ${worker.active ? 'pill-true' : 'pill-false'}">${escapeHtml(worker.active ? 'TRUE' : 'FALSE')}</span></div>
         <div><button class="btn2" type="button" data-worker-login="${escapeHtml(worker.login || worker.id || '')}" data-worker-name="${escapeHtml(worker.name || '')}">Pokaż</button></div>
       </div>
-    `,
+    `
+      },
     )
     .join('')
 
@@ -13866,9 +14318,10 @@ async function fetchWorkersForCurrentSession() {
 
   try {
     const workers = await getWorkers(appState.session.orgId)
+    const sortedWorkers = [...workers].sort(workerTimeCompareByDisplayName)
     appState.workers = workers
     appState.workersLoaded = true
-    appState.workerTimeRows = workers
+    appState.workerTimeRows = sortedWorkers
     workerTimeResetSelection()
     filterWorkerTimeTable({ resetPage: true })
   } catch (error) {
@@ -15296,7 +15749,14 @@ function reportHistoryFilterOptions(options, query) {
   return options.filter((option) => {
     const label = normalizeSearchText(option.label)
     const value = normalizeSearchText(option.value)
-    return label.includes(normalizedQuery) || value.includes(normalizedQuery)
+    const originalLabel = normalizeSearchText(option.originalLabel)
+    const searchLabel = normalizeSearchText(option.searchLabel)
+    return (
+      label.includes(normalizedQuery) ||
+      value.includes(normalizedQuery) ||
+      originalLabel.includes(normalizedQuery) ||
+      searchLabel.includes(normalizedQuery)
+    )
   })
 }
 
@@ -15556,7 +16016,17 @@ async function prepareReportsView() {
   clientOptions.sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
   const workerOptions = workerDirectory.map((worker) => ({
     value: String(worker.login ?? worker.id ?? ''),
-    label: worker.name || worker.login || worker.id,
+    label: dashboardWorkerSurnameDisplayName(worker.name || worker.login || worker.id),
+    originalLabel: worker.name || worker.login || worker.id,
+    searchLabel: [
+      worker.name,
+      dashboardWorkerSurnameDisplayName(worker.name),
+      worker.login,
+      worker.id,
+    ]
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean)
+      .join(' '),
   }))
   workerOptions.sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
   const zoneOptions = appState.zones
@@ -16539,6 +17009,16 @@ function reportHistoryClosedDurationSec(item) {
   return Number.isFinite(diff) && diff > 0 ? diff : 0
 }
 
+function reportHistoryRangeSecondsFromTimestamps(startTs, endTs) {
+  const start = Number(startTs ?? 0)
+  const end = Number(endTs ?? 0)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= start) {
+    return 0
+  }
+
+  return Math.floor((end - start) / 1000)
+}
+
 function reportHistoryDurationLabel(item) {
   const status = reportHistoryResolveStatus(item)
   if (status !== 'CLOSED') {
@@ -17056,6 +17536,8 @@ function reportHistoryBuildRows(items, tab) {
         dayEndQrScore: 0,
         dayStartEventTs: 0,
         dayEndEventTs: 0,
+        dayStartIsBoundary: false,
+        dayEndIsBoundary: false,
         dayStartSourceItem: null,
         dayEndSourceItem: null,
         details: [],
@@ -17074,6 +17556,8 @@ function reportHistoryBuildRows(items, tab) {
     const dayEndIso = toIso(item?.dayEndAt) || endIso
     const dayStartTs = reportHistoryToTimestamp(dayStartIso)
     const dayEndTs = reportHistoryToTimestamp(dayEndIso)
+    const hasExplicitDayStart = Boolean(toIso(item?.dayStartAt)) || Boolean(isMarkerOnly && dayStartIso)
+    const hasExplicitDayEnd = Boolean(toIso(item?.dayEndAt)) || reportHistoryIsDayStopSource(item)
     const clientQrCandidate =
       item?.zoneId ??
       item?.utilityRoomId ??
@@ -17100,7 +17584,13 @@ function reportHistoryBuildRows(items, tab) {
         }
       }
     }
-    if (dayStartTs && (!bucket.dayStartTs || dayStartTs < bucket.dayStartTs)) {
+    const shouldReplaceDayStart =
+      dayStartTs &&
+      (!bucket.dayStartTs ||
+        (normalizedTab === 'workers' && hasExplicitDayStart && !bucket.dayStartIsBoundary) ||
+        (!(normalizedTab === 'workers' && bucket.dayStartIsBoundary && !hasExplicitDayStart) &&
+          dayStartTs < bucket.dayStartTs))
+    if (shouldReplaceDayStart) {
       bucket.dayStartTs = dayStartTs
       bucket.dayStartIso = dayStartIso
       bucket.dayStartClientLabel = qrStartClientLabel
@@ -17108,26 +17598,34 @@ function reportHistoryBuildRows(items, tab) {
       bucket.dayStartGeoLabel = qrStartGeoLabel
       bucket.dayStartQrScore = qrStartCandidate.score
       bucket.dayStartEventTs = sortStartTs
+      bucket.dayStartIsBoundary = hasExplicitDayStart
       bucket.dayStartSourceItem = item
     } else if (dayStartTs && dayStartTs === bucket.dayStartTs) {
+      const replaceByBoundary = hasExplicitDayStart && !bucket.dayStartIsBoundary
       const replaceByScore = qrStartCandidate.score > Number(bucket.dayStartQrScore ?? 0)
       const replaceByEventTs =
         qrStartCandidate.score === Number(bucket.dayStartQrScore ?? 0) &&
         sortStartTs > 0 &&
         (Number(bucket.dayStartEventTs ?? 0) <= 0 || sortStartTs < Number(bucket.dayStartEventTs ?? 0))
       const replaceByMissing = (bucket.dayStartZoneCode === '-' || !bucket.dayStartZoneCode) && qrStartZoneCode !== '-'
-      if (replaceByScore || replaceByEventTs || replaceByMissing) {
+      if (replaceByBoundary || replaceByScore || replaceByEventTs || replaceByMissing) {
         bucket.dayStartZoneCode = qrStartZoneCode
         bucket.dayStartClientLabel = qrStartClientLabel
         bucket.dayStartQrScore = qrStartCandidate.score
         bucket.dayStartEventTs = sortStartTs
+        bucket.dayStartIsBoundary = hasExplicitDayStart || bucket.dayStartIsBoundary
         bucket.dayStartSourceItem = item
       }
       if ((bucket.dayStartGeoLabel === '-' || !bucket.dayStartGeoLabel) && qrStartGeoLabel !== '-') {
         bucket.dayStartGeoLabel = qrStartGeoLabel
       }
     }
-    if (dayEndTs && dayEndTs > bucket.dayEndTs) {
+    const shouldReplaceDayEnd =
+      dayEndTs &&
+      (!bucket.dayEndTs ||
+        (normalizedTab === 'workers' && hasExplicitDayEnd && !bucket.dayEndIsBoundary) ||
+        (!(normalizedTab === 'workers' && bucket.dayEndIsBoundary && !hasExplicitDayEnd) && dayEndTs > bucket.dayEndTs))
+    if (shouldReplaceDayEnd) {
       bucket.dayEndTs = dayEndTs
       bucket.dayEndIso = dayEndIso
       bucket.dayEndClientLabel = qrStopClientLabel
@@ -17135,19 +17633,22 @@ function reportHistoryBuildRows(items, tab) {
       bucket.dayEndGeoLabel = qrStopGeoLabel
       bucket.dayEndQrScore = qrStopCandidate.score
       bucket.dayEndEventTs = sortEndTs
+      bucket.dayEndIsBoundary = hasExplicitDayEnd
       bucket.dayEndSourceItem = item
     } else if (dayEndTs && dayEndTs === bucket.dayEndTs) {
+      const replaceByBoundary = hasExplicitDayEnd && !bucket.dayEndIsBoundary
       const replaceByScore = qrStopCandidate.score > Number(bucket.dayEndQrScore ?? 0)
       const replaceByEventTs =
         qrStopCandidate.score === Number(bucket.dayEndQrScore ?? 0) &&
         sortEndTs > 0 &&
         (Number(bucket.dayEndEventTs ?? 0) <= 0 || sortEndTs > Number(bucket.dayEndEventTs ?? 0))
       const replaceByMissing = (bucket.dayEndZoneCode === '-' || !bucket.dayEndZoneCode) && qrStopZoneCode !== '-'
-      if (replaceByScore || replaceByEventTs || replaceByMissing) {
+      if (replaceByBoundary || replaceByScore || replaceByEventTs || replaceByMissing) {
         bucket.dayEndZoneCode = qrStopZoneCode
         bucket.dayEndClientLabel = qrStopClientLabel
         bucket.dayEndQrScore = qrStopCandidate.score
         bucket.dayEndEventTs = sortEndTs
+        bucket.dayEndIsBoundary = hasExplicitDayEnd || bucket.dayEndIsBoundary
         bucket.dayEndSourceItem = item
       }
       if ((bucket.dayEndGeoLabel === '-' || !bucket.dayEndGeoLabel) && qrStopGeoLabel !== '-') {
@@ -17195,6 +17696,7 @@ function reportHistoryBuildRows(items, tab) {
       const hasRunning = Number(bucket.runningCount ?? 0) > 0
       const todayKey = todayYmd()
       const isTodayBucket = String(bucket.dayKey ?? '').trim() === todayKey
+      const detailedClosedSec = Math.max(0, Number(bucket.closedSec ?? 0))
       const activeRunningSec =
         hasRunning &&
         isTodayBucket &&
@@ -17202,7 +17704,22 @@ function reportHistoryBuildRows(items, tab) {
         Number(bucket.latestRunningStartTs ?? 0) > Number(bucket.dayEndTs ?? 0)
           ? Math.max(0, Math.floor((Date.now() - Number(bucket.latestRunningStartTs ?? 0)) / 1000))
           : 0
-      const totalWorkSec = Math.max(0, Number(bucket.closedSec ?? 0)) + activeRunningSec
+      const daySpanSec =
+        normalizedTab === 'workers' && bucket.dayStartIsBoundary && bucket.dayEndIsBoundary
+          ? reportHistoryRangeSecondsFromTimestamps(bucket.dayStartTs, bucket.dayEndTs)
+          : 0
+      const activeDaySpanSec =
+        normalizedTab === 'workers' &&
+        bucket.dayStartIsBoundary &&
+        !bucket.dayEndIsBoundary &&
+        isTodayBucket &&
+        Number(bucket.dayStartTs ?? 0) > 0
+          ? Math.max(0, Math.floor((Date.now() - Number(bucket.dayStartTs ?? 0)) / 1000))
+          : 0
+      const totalWorkSec =
+        normalizedTab === 'workers'
+          ? daySpanSec || activeDaySpanSec || detailedClosedSec + activeRunningSec
+          : detailedClosedSec
       return {
         ...bucket,
         closedSec: normalizedTab === 'workers' ? totalWorkSec : bucket.closedSec,
@@ -17411,12 +17928,21 @@ function reportHistoryFindWorkerOption(workerLogin, workerName) {
 
   const normalizedNameKey = normalizeSearchText(normalizedName)
   if (normalizedNameKey) {
-    const exact = appState.reportHistoryWorkerOptions.find((option) => normalizeSearchText(option.label) === normalizedNameKey)
+    const exact = appState.reportHistoryWorkerOptions.find((option) => {
+      const aliases = [
+        option.label,
+        option.originalLabel,
+        dashboardWorkerSurnameDisplayName(option.originalLabel),
+      ].map((value) => normalizeSearchText(value))
+      return aliases.some((value) => value === normalizedNameKey)
+    })
     if (exact) {
       return exact
     }
 
-    const partial = appState.reportHistoryWorkerOptions.find((option) => normalizeSearchText(option.label).includes(normalizedNameKey))
+    const partial = appState.reportHistoryWorkerOptions.find((option) =>
+      normalizeSearchText([option.label, option.originalLabel, option.searchLabel].join(' ')).includes(normalizedNameKey),
+    )
     if (partial) {
       return partial
     }
@@ -17425,7 +17951,9 @@ function reportHistoryFindWorkerOption(workerLogin, workerName) {
   const loginLocalPart = normalizedLogin ? normalizeSearchText(normalizedLogin.split('@')[0]) : ''
   if (loginLocalPart) {
     return (
-      appState.reportHistoryWorkerOptions.find((option) => normalizeSearchText(option.label).includes(loginLocalPart)) ?? null
+      appState.reportHistoryWorkerOptions.find((option) =>
+        normalizeSearchText([option.label, option.originalLabel, option.searchLabel].join(' ')).includes(loginLocalPart),
+      ) ?? null
     )
   }
 
@@ -20142,6 +20670,22 @@ function calendarTimelineSetsIntersect(left = new Set(), right = new Set()) {
   return [...left].some((key) => right.has(key))
 }
 
+function calendarTimelineExactWorkerNameKeys(values = []) {
+  const keys = new Set()
+  ;(Array.isArray(values) ? values : [values]).forEach((value) => {
+    const normalized = calendarTimelineNormalizeWorkerIdentity(value).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!normalized) {
+      return
+    }
+    keys.add(normalized)
+    const tokens = normalized.split(' ').filter(Boolean)
+    if (tokens.length > 1) {
+      keys.add(tokens.slice().reverse().join(' '))
+    }
+  })
+  return keys
+}
+
 function calendarTimelineResourceWorkerIdentity(resource = {}) {
   const worker = resource?.worker ?? {}
   return calendarTimelineWorkerIdentity([
@@ -20172,6 +20716,26 @@ function calendarTimelineSourceRowWorkerIdentity(row = {}) {
     row?.email,
     row?.workerId,
     useRowIdAsWorkerId ? row?.id : '',
+  ])
+}
+
+function calendarTimelineResourceExactWorkerNames(resource = {}) {
+  const worker = resource?.worker ?? {}
+  return calendarTimelineExactWorkerNameKeys([
+    resource?.name,
+    worker?.workerName,
+    worker?.fullName,
+    worker?.displayName,
+    worker?.name,
+  ])
+}
+
+function calendarTimelineSourceRowExactWorkerNames(row = {}) {
+  return calendarTimelineExactWorkerNameKeys([
+    row?.workerName,
+    row?.fullName,
+    row?.displayName,
+    row?.name,
   ])
 }
 
@@ -21246,25 +21810,27 @@ function calendarTimelineResourceMatchesSourceRow(resource = {}, row = {}) {
   if (resource?.type !== 'worker') {
     return false
   }
-  const resourceKeys = calendarTimelineWorkerAliasKeys(resource.worker)
-  const rowKeys = dashboardResolveTodayRowAliasKeys(row)
-  if (
-    resourceKeys instanceof Set &&
-    rowKeys instanceof Set &&
-    resourceKeys.size &&
-    rowKeys.size &&
-    [...resourceKeys].some((key) => rowKeys.has(key))
-  ) {
+  const resourceIdentity = calendarTimelineResourceWorkerIdentity(resource)
+  const rowIdentity = calendarTimelineSourceRowWorkerIdentity(row)
+  const idsMatch = calendarTimelineSetsIntersect(resourceIdentity.ids, rowIdentity.ids)
+  const loginsMatch = calendarTimelineSetsIntersect(resourceIdentity.logins, rowIdentity.logins)
+  if (idsMatch || loginsMatch) {
     return true
   }
 
-  const resourceIdentity = calendarTimelineResourceWorkerIdentity(resource)
-  const rowIdentity = calendarTimelineSourceRowWorkerIdentity(row)
-  return (
-    calendarTimelineSetsIntersect(resourceIdentity.ids, rowIdentity.ids) ||
-    calendarTimelineSetsIntersect(resourceIdentity.logins, rowIdentity.logins) ||
-    calendarTimelineSetsIntersect(resourceIdentity.names, rowIdentity.names)
-  )
+  const resourceHasStrongIdentity =
+    (resourceIdentity.ids instanceof Set && resourceIdentity.ids.size > 0) ||
+    (resourceIdentity.logins instanceof Set && resourceIdentity.logins.size > 0)
+  const rowHasStrongIdentity =
+    (rowIdentity.ids instanceof Set && rowIdentity.ids.size > 0) ||
+    (rowIdentity.logins instanceof Set && rowIdentity.logins.size > 0)
+  if (resourceHasStrongIdentity || rowHasStrongIdentity) {
+    return false
+  }
+
+  const resourceExactNames = calendarTimelineResourceExactWorkerNames(resource)
+  const rowExactNames = calendarTimelineSourceRowExactWorkerNames(row)
+  return calendarTimelineSetsIntersect(resourceExactNames, rowExactNames)
 }
 
 function calendarTimelineSourceRowMatchesOrder(row = {}, order = {}, planned = null) {
@@ -21685,6 +22251,91 @@ function calendarTimelineRowsWithDayStartMarker(rows = [], dayKey = '') {
   })
 }
 
+function calendarTimelineStatusPopupStartIso(row = {}, dayKey = '', context = {}) {
+  const directIso = toIso(
+    row?.dayStartAt ??
+      row?.startAt ??
+      row?.qrStartAt ??
+      row?.qrStartIso ??
+      row?.dayStartIso ??
+      row?.firstStartIso ??
+      context?.sourceStartAt,
+  )
+  if (directIso) {
+    return directIso
+  }
+
+  const minutes = calendarTimelineRowStartMinutes(row)
+  if (Number.isFinite(minutes) && minutes >= 0) {
+    const timestamp = calendarTimelineTimestampFromDayMinutes(dayKey, minutes)
+    if (timestamp > 0) {
+      return new Date(timestamp).toISOString()
+    }
+  }
+
+  const contextStartTs = calendarTimelineEventTimestamp(context?.sourceStartAt)
+  return contextStartTs > 0 ? new Date(contextStartTs).toISOString() : ''
+}
+
+function calendarTimelineStatusPopupRows(resource = {}, dayKey = '', context = {}) {
+  const day = String(dayKey ?? '').trim()
+  if (resource?.type !== 'worker' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return []
+  }
+
+  const statusRow = calendarTimelineCurrentStatusRowForResource(resource, day)
+  const contextStartTs = calendarTimelineEventTimestamp(context?.sourceStartAt)
+  if (!statusRow && contextStartTs <= 0) {
+    return []
+  }
+
+  const startMinutesFromContext = contextStartTs > 0
+    ? calendarTimelineTimestampToMinutes(new Date(contextStartTs).toISOString())
+    : -1
+  const startMinutesFromRow = statusRow ? calendarTimelineRowStartMinutes(statusRow) : -1
+  const startMinutes = startMinutesFromRow >= 0 ? startMinutesFromRow : startMinutesFromContext
+  if (!Number.isFinite(startMinutes) || startMinutes < 0) {
+    return []
+  }
+
+  const baseRow = calendarTimelineStatusFallbackRow(resource, startMinutes, statusRow)
+  const startIso = calendarTimelineStatusPopupStartIso(baseRow, day, context)
+  if (!startIso) {
+    return []
+  }
+
+  const qrCode = reportHistoryResolveDayQrCode(baseRow, 'start') || zoneQrCodeFromRow(baseRow)
+  const marker = {
+    ...baseRow,
+    calendarTimelineMarkerType: 'QR START',
+    calendarTimelinePopupSyntheticMarker: true,
+    calendarTimelineMarkerSourceRow: statusRow || baseRow,
+    historyMarkerOnly: true,
+    startAt: startIso,
+    endAt: '',
+    dayStartAt: startIso,
+    dayEndAt: '',
+    durationSec: 0,
+    status: 'RUNNING',
+    dayStartObject: qrCode || baseRow?.dayStartObject || baseRow?.startObject || baseRow?.workdayUtilityRoomId || '',
+  }
+  const span = {
+    ...baseRow,
+    calendarTimelineStatusFallbackSpan: true,
+    calendarTimelinePopupSyntheticMarker: true,
+    calendarTimelineMarkerSourceRow: statusRow || baseRow,
+    startAt: startIso,
+    endAt: '',
+    dayStartAt: startIso,
+    dayEndAt: '',
+    durationSec: Math.max(0, Math.floor((Date.now() - new Date(startIso).getTime()) / 1000)),
+    status: 'RUNNING',
+    dayStartObject: qrCode || baseRow?.dayStartObject || baseRow?.startObject || baseRow?.workdayUtilityRoomId || '',
+  }
+
+  return calendarTimelineRowsWithDayStartMarker([marker, span], day)
+}
+
 function calendarTimelinePopupMarkerDedupeKey(row = {}) {
   const markerType = calendarTimelineEventMarkerType(row)
   if (markerType !== 'QR START' && markerType !== 'QR STOP' && markerType !== 'QR START + STOP') {
@@ -21782,7 +22433,7 @@ async function calendarTimelineFetchWorkerDayEvents(resource = {}, dayKey = '', 
     }
   }
 
-  return []
+  return calendarTimelineStatusPopupRows(resource, day, context)
 }
 
 function calendarTimelineEventIdentityValues(row = {}) {
@@ -21802,11 +22453,17 @@ function calendarTimelineRowMatchesBarCycle(row = {}, context = {}) {
   const contextWorkdayId = String(context?.workdayId ?? '').trim()
   const contextSourceEventId = String(context?.sourceEventId ?? '').trim()
   const sourceStartTs = calendarTimelineEventTimestamp(context?.sourceStartAt)
+  const rowStartTs =
+    calendarTimelineSourceRowWorkdayStartTimestamp(row) ||
+    calendarTimelineEventTimestamp(row?.dayStartAt)
 
   if (contextWorkdayId) {
     const rowWorkdayId = calendarTimelineRealWorkdayIdentity(row)
     if (rowWorkdayId && rowWorkdayId === contextWorkdayId) {
-      return true
+      if (sourceStartTs <= 0) {
+        return true
+      }
+      return rowStartTs > 0 && Math.abs(rowStartTs - sourceStartTs) <= 60 * 1000
     }
 
     const rowIds = calendarTimelineEventIdentityValues(row)
@@ -21820,9 +22477,6 @@ function calendarTimelineRowMatchesBarCycle(row = {}, context = {}) {
   }
 
   if (sourceStartTs > 0) {
-    const rowStartTs =
-      calendarTimelineSourceRowWorkdayStartTimestamp(row) ||
-      calendarTimelineEventTimestamp(row?.dayStartAt)
     if (rowStartTs > 0 && Math.abs(rowStartTs - sourceStartTs) <= 60 * 1000) {
       return true
     }
@@ -21954,6 +22608,10 @@ function calendarTimelineSystemAddedMarkerLabel(row = {}) {
 }
 
 function calendarTimelineEventMarkerType(row = {}) {
+  if (row?.calendarTimelineStatusFallbackSpan) {
+    return ''
+  }
+
   const explicitMarker = String(row?.calendarTimelineMarkerType ?? '').trim().toUpperCase()
   if (explicitMarker === 'QR START' || explicitMarker === 'QR STOP' || explicitMarker === 'QR START + STOP') {
     return explicitMarker
@@ -22265,6 +22923,26 @@ function calendarTimelineEventDisplayParts(row = {}) {
   const zone = String(dashboardResolveZoneLabel(row) || '').trim()
   const qr = String(zoneQrCodeFromRow(row) || '').trim()
   const markerType = calendarTimelineEventMarkerType(row)
+  if (row?.calendarTimelineStatusFallbackSpan) {
+    const place = ([client, zone]
+      .map((value) => String(value ?? '').trim())
+      .filter((value, placeIndex, list) => value && value !== '-' && list.indexOf(value) === placeIndex)
+      .join(' / ') || (qr && qr !== '-' ? `QR ${qr}` : 'Aktywny status'))
+    const duration = `${durationSecondsToHm(calendarTimelineEventDurationFromRow(row))}h`
+    const location = calendarTimelineEventLocationLabel(row)
+    const gps = calendarTimelineEventGpsCoords(row, markerType)
+    return {
+      type: 'Status',
+      place,
+      duration,
+      status: 'W trakcie',
+      meta: `Status aktywny · ${duration} · W trakcie`,
+      isSystemStatus: false,
+      markerType: '',
+      location,
+      gps,
+    }
+  }
   const systemAddedLabel = calendarTimelineSystemAddedMarkerLabel(row)
   const isSystemStatus = calendarTimelineEventIsSystemStatus(row)
   const markerMeta = markerType ? calendarTimelineMarkerMetaLabel(row, markerType) : ''
@@ -23817,10 +24495,6 @@ function calendarTimelineRealWorkdayIdentity(row = {}) {
 
 function calendarTimelineRealWorkdayCycleKey(row = {}, rowIndex = -1, dayKey = '', startTs = 0) {
   const workdayIdentity = calendarTimelineRealWorkdayIdentity(row)
-  if (workdayIdentity) {
-    return `${rowIndex}|${dayKey}|wd:${workdayIdentity}`
-  }
-
   const dayStartTs =
     calendarTimelineSourceRowWorkdayStartTimestamp(row) ||
     calendarTimelineEventTimestamp(row?.dayStartAt) ||
@@ -23828,6 +24502,9 @@ function calendarTimelineRealWorkdayCycleKey(row = {}, rowIndex = -1, dayKey = '
   const minuteKey = dayStartTs > 0 ? Math.round(dayStartTs / 60000) : 0
   const qr = String(row?.dayStartObject ?? row?.startObject ?? row?.workdayUtilityRoomId ?? '').trim()
   const qrKey = normalizeSearchText(qr) || '-'
+  if (workdayIdentity) {
+    return `${rowIndex}|${dayKey}|wd:${workdayIdentity}|start:${minuteKey}|${qrKey}`
+  }
   return `${rowIndex}|${dayKey}|start:${minuteKey}|${qrKey}`
 }
 
@@ -26800,6 +27477,8 @@ function bindDashboardViewFunctions() {
 
   syncDashboardSidePanelHeight()
   requestAnimationFrame(() => syncDashboardSidePanelHeight())
+  appState.dashboardActivityView = dashboardReadActivityViewPreference()
+  dashboardSetActivityView(appState.dashboardActivityView, { persist: false })
 
   binding.add(document.getElementById('dashRefreshBtn'), 'click', (event) => {
     void (async () => {
@@ -26829,6 +27508,35 @@ function bindDashboardViewFunctions() {
         button.setAttribute('aria-busy', 'false')
       }
     })()
+  })
+
+  binding.add(document.getElementById('dashActivitySettingsBtn'), 'click', (event) => {
+    event.stopPropagation()
+    const popover = document.getElementById('dashActivityViewPopover')
+    dashboardSetActivitySettingsOpen(Boolean(popover?.hidden))
+  })
+
+  binding.add(document.getElementById('dashActivityViewPopover'), 'click', (event) => {
+    event.stopPropagation()
+    const button = event.target?.closest?.('[data-dash-activity-view]')
+    if (!button) {
+      return
+    }
+    dashboardSetActivityView(button.getAttribute('data-dash-activity-view'))
+    dashboardSetActivitySettingsOpen(false)
+  })
+
+  binding.add(document, 'click', (event) => {
+    const target = event.target
+    const popover = document.getElementById('dashActivityViewPopover')
+    const button = document.getElementById('dashActivitySettingsBtn')
+    if (!(target instanceof Node) || !popover || popover.hidden) {
+      return
+    }
+    if (popover.contains(target) || button?.contains(target)) {
+      return
+    }
+    dashboardSetActivitySettingsOpen(false)
   })
 
   binding.add(document.getElementById('dashSchedulePrevBtn'), 'click', () => {
@@ -26979,6 +27687,21 @@ function bindDashboardViewFunctions() {
       return
     }
 
+    const button = event.target.closest('[data-dash-worker-login], [data-dash-worker-name]')
+    if (!button) {
+      return
+    }
+
+    const workerLogin = String(button.getAttribute('data-dash-worker-login') ?? '').trim()
+    const workerName = String(button.getAttribute('data-dash-worker-name') ?? '').trim()
+    if (!workerLogin && !workerName) {
+      return
+    }
+
+    void openDashboardWorkerHistory(workerLogin, workerName)
+  })
+
+  binding.add(document.getElementById('dashActivityCalendar'), 'click', (event) => {
     const button = event.target.closest('[data-dash-worker-login], [data-dash-worker-name]')
     if (!button) {
       return
@@ -27492,10 +28215,90 @@ function bindWorkerTimeViewFunctions(router) {
     if (typeInput) typeInput.value = ''
     if (workerIdInput) workerIdInput.value = ''
     if (activeInput) activeInput.value = ''
+    workerTimeSetSearchSuggestionsOpen(false)
     void fetchWorkersForCurrentSession()
   })
 
-  ;['wtQ', 'wtType', 'wtWorkerId'].forEach((id) => {
+  binding.add(document.getElementById('wtQ'), 'focus', () => {
+    workerTimeRenderSearchSuggestions({ expandOnEmpty: true })
+  })
+  binding.add(document.getElementById('wtQ'), 'input', () => {
+    workerTimeRenderSearchSuggestions({ expandOnEmpty: true })
+    filterWorkerTimeTable({ resetPage: true })
+  })
+  binding.add(document.getElementById('wtQ'), 'keydown', (event) => {
+    if (event.key === 'ArrowDown') {
+      const firstSuggestion = document.querySelector('#wtQSuggestions .wt-worker-suggestion')
+      if (firstSuggestion instanceof HTMLElement) {
+        event.preventDefault()
+        firstSuggestion.focus()
+      }
+      return
+    }
+
+    if (event.key === 'Escape') {
+      workerTimeSetSearchSuggestionsOpen(false)
+      return
+    }
+
+    if (event.key === 'Enter') {
+      const firstSuggestion = document.querySelector('#wtQSuggestions:not([hidden]) .wt-worker-suggestion')
+      if (firstSuggestion instanceof HTMLElement) {
+        event.preventDefault()
+        workerTimePickSearchSuggestion(firstSuggestion)
+      } else {
+        filterWorkerTimeTable({ resetPage: true })
+      }
+    }
+  })
+  binding.add(document.getElementById('wtQ'), 'blur', () => {
+    window.setTimeout(() => workerTimeSetSearchSuggestionsOpen(false), 140)
+  })
+  binding.add(document.getElementById('wtQSuggestions'), 'mousedown', (event) => {
+    event.preventDefault()
+  })
+  binding.add(document.getElementById('wtQSuggestions'), 'click', (event) => {
+    const button = event.target?.closest?.('.wt-worker-suggestion')
+    if (button) {
+      workerTimePickSearchSuggestion(button)
+    }
+  })
+  binding.add(document.getElementById('wtQSuggestions'), 'keydown', (event) => {
+    const currentButton = event.target?.closest?.('.wt-worker-suggestion')
+    if (!(currentButton instanceof HTMLElement)) {
+      return
+    }
+
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      workerTimePickSearchSuggestion(currentButton)
+      return
+    }
+
+    if (event.key === 'Escape') {
+      workerTimeSetSearchSuggestionsOpen(false)
+      document.getElementById('wtQ')?.focus()
+      return
+    }
+
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+      return
+    }
+
+    event.preventDefault()
+    const buttons = [...document.querySelectorAll('#wtQSuggestions .wt-worker-suggestion')]
+    const index = buttons.indexOf(currentButton)
+    const nextIndex =
+      event.key === 'ArrowDown'
+        ? Math.min(buttons.length - 1, index + 1)
+        : Math.max(0, index - 1)
+    const nextButton = buttons[nextIndex]
+    if (nextButton instanceof HTMLElement) {
+      nextButton.focus()
+    }
+  })
+
+  ;['wtType', 'wtWorkerId'].forEach((id) => {
     binding.add(document.getElementById(id), 'keydown', (event) => {
       if (event.key === 'Enter') {
         filterWorkerTimeTable({ resetPage: true })

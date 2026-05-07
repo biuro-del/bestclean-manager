@@ -44,6 +44,7 @@ import {
   upsertOrgStyleForBackup,
   upsertUserStyleForBackup,
 } from './styleService'
+import { deletePortalTasks, fetchPortalTasks, upsertPortalTasks } from './portalTaskService'
 
 const BACKUP_SCHEMA_VERSION = '1.0.0'
 const BACKUP_DB_NAME = 'portal-backups'
@@ -52,6 +53,11 @@ const BACKUP_STORE_NAME = 'archives'
 const RETENTION_DAYS = 5
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 const PAGED_QUERY_LIMIT = 500
+const CALENDAR_STORAGE_PREFIX = 'portal.calendar.tasks'
+const KANBAN_COLUMNS_STORAGE_PREFIX = 'portal.kanban.columns'
+const DASHBOARD_ACTIVITY_VIEW_STORAGE_KEY = 'portal.dashboard.activityView.v1'
+const SIDEBAR_COLLAPSE_STORAGE_KEY = 'portal.sidebarCollapsed'
+const WORKER_DETAIL_COLUMN_WIDTHS_STORAGE_KEY = 'portal.workerDetailColumnWidths'
 const AUTH_SNAPSHOT_NOTE =
   'Migawka auth/users.json jest oparta o dane pracownikow z Data Connect (login/email/rola/active). Pelny backup Firebase Auth wymaga backendu z uprawnieniami admin.'
 const OPTIONAL_OPERATION_HINT =
@@ -80,6 +86,10 @@ const PROVIDER_REGISTRY = [
   { id: 'workdays', label: 'Dni pracy', types: ['full', 'workers', 'objects'] },
   { id: 'workdayPauses', label: 'Przerwy pracy', types: ['full', 'workers', 'objects'] },
   { id: 'events', label: 'Zdarzenia', types: ['full', 'workers', 'objects'] },
+  { id: 'portalTasks', label: 'Zadania portalu', types: ['full'] },
+  { id: 'calendarTasks', label: 'Kalendarz lokalny', types: ['full'] },
+  { id: 'kanbanColumns', label: 'Kolumny Kanban', types: ['full'] },
+  { id: 'uiPreferences', label: 'Preferencje widoku', types: ['full'] },
 ]
 
 const REQUIRED_PROVIDER_IDS = [
@@ -93,6 +103,10 @@ const REQUIRED_PROVIDER_IDS = [
   'workdays',
   'workdayPauses',
   'events',
+  'portalTasks',
+  'calendarTasks',
+  'kanbanColumns',
+  'uiPreferences',
 ]
 
 export const BACKUP_TYPE_OPTIONS = [
@@ -315,6 +329,135 @@ function deepClone(value) {
   return JSON.parse(JSON.stringify(value))
 }
 
+function stableClone(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => stableClone(item))
+  }
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = stableClone(value[key])
+        return acc
+      }, {})
+  }
+  return value
+}
+
+function stableJson(value) {
+  return JSON.stringify(stableClone(value))
+}
+
+function calendarStorageKey(orgId) {
+  return `${CALENDAR_STORAGE_PREFIX}:${String(orgId ?? '').trim() || 'local'}`
+}
+
+function kanbanColumnsStorageKey(orgId) {
+  return `${KANBAN_COLUMNS_STORAGE_PREFIX}:${String(orgId ?? '').trim() || 'local'}`
+}
+
+function readJsonStorage(storage, key, fallback) {
+  if (!storage || !key) {
+    return fallback
+  }
+  try {
+    const raw = storage.getItem(key)
+    if (!raw) {
+      return fallback
+    }
+    return JSON.parse(raw)
+  } catch {
+    return fallback
+  }
+}
+
+function writeJsonStorage(storage, key, value) {
+  if (!storage || !key) {
+    return
+  }
+  storage.setItem(key, JSON.stringify(value))
+}
+
+function readLocalStorageArray(key) {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return []
+  }
+  const parsed = readJsonStorage(window.localStorage, key, [])
+  return Array.isArray(parsed) ? deepClone(parsed) : []
+}
+
+function readUiPreferenceRows() {
+  if (typeof window === 'undefined') {
+    return []
+  }
+  const rows = []
+  const read = (storage, storageName, key, parseJson = false) => {
+    if (!storage || !key) {
+      return
+    }
+    const raw = storage.getItem(key)
+    if (raw == null) {
+      return
+    }
+    rows.push({
+      key,
+      storage: storageName,
+      value: parseJson ? readJsonStorage(storage, key, null) : raw,
+      valueType: parseJson ? 'json' : 'text',
+    })
+  }
+  read(window.localStorage, 'localStorage', DASHBOARD_ACTIVITY_VIEW_STORAGE_KEY)
+  read(window.sessionStorage, 'sessionStorage', SIDEBAR_COLLAPSE_STORAGE_KEY)
+  read(window.sessionStorage, 'sessionStorage', WORKER_DETAIL_COLUMN_WIDTHS_STORAGE_KEY, true)
+  return rows
+}
+
+function restoreUiPreferenceRows(rows = []) {
+  if (typeof window === 'undefined') {
+    return { created: 0, updated: 0, deleted: 0, skipped: Array.isArray(rows) ? rows.length : 0 }
+  }
+
+  const currentRows = readUiPreferenceRows()
+  const importedRows = Array.isArray(rows) ? rows : []
+  const importedKeys = new Set(importedRows.map((row) => backupModuleRowKey('uiPreferences', row)).filter(Boolean))
+  let created = 0
+  let updated = 0
+  let deleted = 0
+  let skipped = 0
+  importedRows.forEach((row) => {
+    const key = roleSafeText(row?.key)
+    const storageName = roleSafeText(row?.storage)
+    const storage = storageName === 'sessionStorage' ? window.sessionStorage : window.localStorage
+    if (!key || !storage) {
+      skipped += 1
+      return
+    }
+    const hadValue = storage.getItem(key) != null
+    if (String(row?.valueType ?? '') === 'json') {
+      writeJsonStorage(storage, key, row?.value ?? null)
+    } else {
+      storage.setItem(key, String(row?.value ?? ''))
+    }
+    if (hadValue) {
+      updated += 1
+    } else {
+      created += 1
+    }
+  })
+  currentRows.forEach((row) => {
+    const key = backupModuleRowKey('uiPreferences', row)
+    if (!key || importedKeys.has(key)) {
+      return
+    }
+    const storage = row.storage === 'sessionStorage' ? window.sessionStorage : window.localStorage
+    if (storage && row.key) {
+      storage.removeItem(row.key)
+      deleted += 1
+    }
+  })
+  return { created, updated, deleted, skipped }
+}
+
 async function sha256(text) {
   const raw = String(text ?? '')
   if (!globalThis.crypto?.subtle) {
@@ -498,6 +641,7 @@ async function fetchClientStorageRows(orgId) {
 async function fetchOptionalBackupRows(loadRows, options = {}) {
   const operationName = roleSafeText(options.operationName)
   const moduleLabel = roleSafeText(options.moduleLabel)
+  const optional = Boolean(options.optional)
 
   try {
     return {
@@ -511,6 +655,13 @@ async function fetchOptionalBackupRows(loadRows, options = {}) {
         rows: [],
       }
     }
+    if (optional) {
+      console.warn(`[backup] optional module skipped: ${moduleLabel || operationName || 'unknown'}`, error)
+      return {
+        available: false,
+        rows: [],
+      }
+    }
     throw withOperationNotFoundHint(error, operationName, moduleLabel)
   }
 }
@@ -518,7 +669,15 @@ async function fetchOptionalBackupRows(loadRows, options = {}) {
 async function fetchRawDataset(orgId) {
   ensureFirebaseOrThrow()
 
-  const [workersResponse, clientsResponse, zonesResponse, individualResponse, eventsResponse, workdaysResponse, styleSnapshot] =
+  const [
+    workersResponse,
+    clientsResponse,
+    zonesResponse,
+    individualResponse,
+    eventsResponse,
+    workdaysResponse,
+    styleSnapshot,
+  ] =
     await Promise.all([
       workersForOrg({ orgId }),
       clientsForOrg({ orgId }),
@@ -529,7 +688,7 @@ async function fetchRawDataset(orgId) {
       getOrgAndUserStylesForBackup(orgId),
     ])
 
-  const [storageModule, clientStorageModule, workdayPausesModule] = await Promise.all([
+  const [storageModule, clientStorageModule, workdayPausesModule, portalTasksModule] = await Promise.all([
     fetchOptionalBackupRows(() => fetchStorageRows(orgId), {
       operationName: 'StorageForOrg',
       moduleLabel: 'Magazyn',
@@ -545,9 +704,25 @@ async function fetchRawDataset(orgId) {
         moduleLabel: 'Przerwy pracy',
       },
     ),
+    fetchOptionalBackupRows(() => fetchPortalTasks(orgId), {
+      operationName: 'FetchPortalTasks',
+      moduleLabel: 'Zadania portalu',
+      optional: true,
+    }),
   ])
 
-  const availableModuleIds = new Set(['workers', 'styles', 'clients', 'zones', 'individualOrders', 'events', 'workdays'])
+  const availableModuleIds = new Set([
+    'workers',
+    'styles',
+    'clients',
+    'zones',
+    'individualOrders',
+    'events',
+    'workdays',
+    'calendarTasks',
+    'kanbanColumns',
+    'uiPreferences',
+  ])
   if (storageModule.available) {
     availableModuleIds.add('storage')
   }
@@ -556,6 +731,9 @@ async function fetchRawDataset(orgId) {
   }
   if (workdayPausesModule.available) {
     availableModuleIds.add('workdayPauses')
+  }
+  if (portalTasksModule.available) {
+    availableModuleIds.add('portalTasks')
   }
 
   return {
@@ -570,6 +748,10 @@ async function fetchRawDataset(orgId) {
       events: deepClone(eventsResponse?.data?.events ?? []),
       workdayPauses: workdayPausesModule.rows,
       workdays: deepClone(workdaysResponse?.data?.workdays ?? []),
+      portalTasks: portalTasksModule.rows,
+      calendarTasks: readLocalStorageArray(calendarStorageKey(orgId)),
+      kanbanColumns: readLocalStorageArray(kanbanColumnsStorageKey(orgId)),
+      uiPreferences: readUiPreferenceRows(),
     },
     availableModuleIds,
   }
@@ -588,6 +770,10 @@ function filterDatasetByType(dataset, type) {
     events: Array.isArray(dataset?.events) ? dataset.events : [],
     workdayPauses: Array.isArray(dataset?.workdayPauses) ? dataset.workdayPauses : [],
     workdays: Array.isArray(dataset?.workdays) ? dataset.workdays : [],
+    portalTasks: Array.isArray(dataset?.portalTasks) ? dataset.portalTasks : [],
+    calendarTasks: Array.isArray(dataset?.calendarTasks) ? dataset.calendarTasks : [],
+    kanbanColumns: Array.isArray(dataset?.kanbanColumns) ? dataset.kanbanColumns : [],
+    uiPreferences: Array.isArray(dataset?.uiPreferences) ? dataset.uiPreferences : [],
   }
 
   if (normalizedType === 'full') {
@@ -614,6 +800,16 @@ function filterDatasetByType(dataset, type) {
       individualOrders: [],
       storage: [],
       clientStorage: [],
+      portalTasks: source.portalTasks.filter((row) => {
+        const workerLogin = String(row?.sourceWorkerLogin ?? '').trim()
+        return !workerLogin || workerLogins.has(workerLogin)
+      }),
+      calendarTasks: source.calendarTasks.filter((row) => {
+        const workers = Array.isArray(row?.workers) ? row.workers : []
+        return workers.some((worker) => workerLogins.has(String(worker?.id ?? worker?.login ?? '').trim()))
+      }),
+      kanbanColumns: [],
+      uiPreferences: [],
       events: source.events.filter((row) => workerLogins.has(String(row?.workerLogin ?? '').trim())),
       workdayPauses: source.workdayPauses.filter((row) => {
         const workdayId = String(row?.workdayId ?? '').trim()
@@ -651,6 +847,16 @@ function filterDatasetByType(dataset, type) {
     ...source,
     workers: [],
     styles: [],
+    portalTasks: source.portalTasks.filter((row) => {
+      const objects = Array.isArray(row?.objects) ? row.objects : []
+      return objects.some((item) => clientIds.has(String(item?.id ?? item?.clientId ?? '').trim()))
+    }),
+    calendarTasks: source.calendarTasks.filter((row) => {
+      const objects = Array.isArray(row?.objects) ? row.objects : []
+      return objects.some((item) => clientIds.has(String(item?.id ?? item?.clientId ?? '').trim()))
+    }),
+    kanbanColumns: [],
+    uiPreferences: [],
     storage: source.storage.filter((row) => storageProductIndexes.has(String(row?.productIndex ?? '').trim())),
     clientStorage: filteredClientStorage,
     events: source.events.filter((row) => zoneIds.has(String(row?.zoneId ?? '').trim())),
@@ -687,6 +893,10 @@ function deriveAuthSnapshot(workersRows = []) {
 function createManifestBase({ orgId, type, title, createdAt, createdBy, source, monthKey }) {
   return {
     schemaVersion: BACKUP_SCHEMA_VERSION,
+    app: {
+      name: 'Cleanzi Portal',
+      backupSchemaVersion: BACKUP_SCHEMA_VERSION,
+    },
     orgId: String(orgId ?? '').trim(),
     type: normalizeType(type),
     title: String(title ?? '').trim(),
@@ -966,6 +1176,96 @@ function mapRowsByKey(rows, keyName) {
     }
   })
   return map
+}
+
+function backupModuleRowKey(moduleId, row = {}) {
+  const id = roleSafeText(moduleId)
+  if (id === 'workers') return roleSafeText(row?.login)
+  if (id === 'styles') return [roleSafeText(row?.kind), roleSafeText(row?.uid), roleSafeText(row?.styleId)].filter(Boolean).join('::')
+  if (id === 'clients') return roleSafeText(row?.clientId)
+  if (id === 'zones') return roleSafeText(row?.zoneId)
+  if (id === 'individualOrders') return roleSafeText(row?.clientIndId)
+  if (id === 'storage') return roleSafeText(row?.productIndex)
+  if (id === 'clientStorage') return [roleSafeText(row?.clientId), roleSafeText(row?.productIndex)].filter(Boolean).join('::')
+  if (id === 'workdays') return roleSafeText(row?.workdayId)
+  if (id === 'workdayPauses') return roleSafeText(row?.pauseId) || [roleSafeText(row?.workdayId), roleSafeText(row?.startAt)].filter(Boolean).join('::')
+  if (id === 'events') return roleSafeText(row?.eventId)
+  if (id === 'portalTasks' || id === 'calendarTasks' || id === 'kanbanColumns') return roleSafeText(row?.id)
+  if (id === 'uiPreferences') return [roleSafeText(row?.storage), roleSafeText(row?.key)].filter(Boolean).join('::')
+  return roleSafeText(row?.id)
+}
+
+function mapRowsByModuleKey(moduleId, rows = []) {
+  const map = new Map()
+  ;(Array.isArray(rows) ? rows : []).forEach((row, index) => {
+    const key = backupModuleRowKey(moduleId, row) || `row:${index}`
+    map.set(key, row)
+  })
+  return map
+}
+
+function diffModuleRows(moduleId, currentRows = [], importedRows = []) {
+  const currentMap = mapRowsByModuleKey(moduleId, currentRows)
+  const importedMap = mapRowsByModuleKey(moduleId, importedRows)
+  let created = 0
+  let updated = 0
+  let deleted = 0
+  let unchanged = 0
+
+  importedMap.forEach((row, key) => {
+    if (!currentMap.has(key)) {
+      created += 1
+      return
+    }
+    if (stableJson(currentMap.get(key)) === stableJson(row)) {
+      unchanged += 1
+    } else {
+      updated += 1
+    }
+  })
+
+  currentMap.forEach((_row, key) => {
+    if (!importedMap.has(key)) {
+      deleted += 1
+    }
+  })
+
+  return {
+    moduleId,
+    created,
+    updated,
+    deleted,
+    unchanged,
+    currentRecords: currentMap.size,
+    importedRecords: importedMap.size,
+  }
+}
+
+async function buildRestorePlan(orgId, modulePayloads = {}) {
+  const current = await fetchRawDataset(orgId)
+  const moduleIds = sortRestoreModules(Object.keys(modulePayloads).filter((id) => RESTORE_HANDLERS[id]))
+  const modules = moduleIds.map((moduleId) => {
+    const importedRows = Array.isArray(modulePayloads?.[moduleId]) ? modulePayloads[moduleId] : []
+    const currentRows = Array.isArray(current?.data?.[moduleId]) ? current.data[moduleId] : []
+    return diffModuleRows(moduleId, currentRows, importedRows)
+  })
+  return {
+    orgId: String(orgId ?? '').trim(),
+    generatedAt: nowIso(),
+    modules,
+    totals: modules.reduce(
+      (acc, item) => {
+        acc.created += Number(item.created ?? 0) || 0
+        acc.updated += Number(item.updated ?? 0) || 0
+        acc.deleted += Number(item.deleted ?? 0) || 0
+        acc.unchanged += Number(item.unchanged ?? 0) || 0
+        acc.currentRecords += Number(item.currentRecords ?? 0) || 0
+        acc.importedRecords += Number(item.importedRecords ?? 0) || 0
+        return acc
+      },
+      { created: 0, updated: 0, deleted: 0, unchanged: 0, currentRecords: 0, importedRecords: 0 },
+    ),
+  }
 }
 
 const AVAILABLE_STYLE_IDS = new Set(
@@ -1714,6 +2014,114 @@ async function restoreEventsModule(orgId, rows) {
   }
 }
 
+async function restorePortalTasksModule(orgId, rows) {
+  const importedRows = Array.isArray(rows) ? rows : []
+  let currentRows = []
+  try {
+    currentRows = await fetchPortalTasks(orgId)
+  } catch (error) {
+    console.warn('[backup] portal tasks restore skipped: remote load failed', error)
+    return {
+      moduleId: 'portalTasks',
+      created: 0,
+      updated: 0,
+      deleted: 0,
+      skipped: importedRows.length,
+      warning: 'Pominieto zadania portalu: endpoint /api/portal/tasks jest niedostepny.',
+    }
+  }
+  const currentMap = mapRowsByModuleKey('portalTasks', currentRows)
+
+  let created = 0
+  let updated = 0
+  let deleted = 0
+  let skipped = 0
+
+  const validRows = importedRows.filter((row) => {
+    if (backupModuleRowKey('portalTasks', row)) {
+      return true
+    }
+    skipped += 1
+    return false
+  })
+  const importedMap = mapRowsByModuleKey('portalTasks', validRows)
+
+  validRows.forEach((row) => {
+    const key = backupModuleRowKey('portalTasks', row)
+    if (!currentMap.has(key)) {
+      created += 1
+    } else if (stableJson(currentMap.get(key)) !== stableJson(row)) {
+      updated += 1
+    }
+  })
+
+  const idsToDelete = []
+  currentMap.forEach((_row, key) => {
+    if (!importedMap.has(key)) {
+      idsToDelete.push(key)
+    }
+  })
+
+  try {
+    if (validRows.length) {
+      await upsertPortalTasks(orgId, validRows)
+    }
+    if (idsToDelete.length) {
+      await deletePortalTasks(orgId, idsToDelete)
+      deleted = idsToDelete.length
+    }
+  } catch (error) {
+    console.warn('[backup] portal tasks restore skipped: remote save failed', error)
+    return {
+      moduleId: 'portalTasks',
+      created: 0,
+      updated: 0,
+      deleted: 0,
+      skipped: importedRows.length,
+      warning: 'Pominieto zadania portalu: nie udalo sie zapisac przez /api/portal/tasks.',
+    }
+  }
+
+  return {
+    moduleId: 'portalTasks',
+    created,
+    updated,
+    deleted,
+    skipped,
+  }
+}
+
+function restoreLocalArrayModule(moduleId, storageKey, rows) {
+  const importedRows = Array.isArray(rows) ? rows : []
+  const currentRows = readLocalStorageArray(storageKey)
+  const diff = diffModuleRows(moduleId, currentRows, importedRows)
+  if (typeof window !== 'undefined' && window.localStorage) {
+    writeJsonStorage(window.localStorage, storageKey, importedRows)
+  }
+  return {
+    moduleId,
+    created: diff.created,
+    updated: diff.updated,
+    deleted: diff.deleted,
+    skipped: 0,
+  }
+}
+
+async function restoreCalendarTasksModule(orgId, rows) {
+  return restoreLocalArrayModule('calendarTasks', calendarStorageKey(orgId), rows)
+}
+
+async function restoreKanbanColumnsModule(orgId, rows) {
+  return restoreLocalArrayModule('kanbanColumns', kanbanColumnsStorageKey(orgId), rows)
+}
+
+async function restoreUiPreferencesModule(_orgId, rows) {
+  return {
+    moduleId: 'uiPreferences',
+    ...restoreUiPreferenceRows(rows),
+  }
+}
+
 const RESTORE_HANDLERS = {
   workers: restoreWorkersModule,
   styles: restoreStylesModule,
@@ -1725,6 +2133,10 @@ const RESTORE_HANDLERS = {
   workdays: restoreWorkdaysModule,
   workdayPauses: restoreWorkdayPausesModule,
   events: restoreEventsModule,
+  portalTasks: restorePortalTasksModule,
+  calendarTasks: restoreCalendarTasksModule,
+  kanbanColumns: restoreKanbanColumnsModule,
+  uiPreferences: restoreUiPreferencesModule,
 }
 
 function sortRestoreModules(moduleIds = []) {
@@ -1739,6 +2151,10 @@ function sortRestoreModules(moduleIds = []) {
     'workdays',
     'workdayPauses',
     'events',
+    'portalTasks',
+    'calendarTasks',
+    'kanbanColumns',
+    'uiPreferences',
   ]
   return [...new Set(moduleIds)].sort((left, right) => order.indexOf(left) - order.indexOf(right))
 }
@@ -1853,7 +2269,7 @@ export async function createBackup({
   }
 }
 
-export async function inspectBackupFile(file) {
+export async function inspectBackupFile(file, options = {}) {
   if (!(file instanceof Blob)) {
     throw new Error('Nie wybrano poprawnego pliku ZIP.')
   }
@@ -1867,9 +2283,12 @@ export async function inspectBackupFile(file) {
   const modules = Array.isArray(manifest?.modules) ? manifest.modules : []
   const sourceType = normalizeType(manifest?.type)
   const title = String(manifest?.title ?? '').trim() || TYPE_LABELS[sourceType]
+  const orgId = roleSafeText(options?.orgId)
+  const restorePlan = orgId ? await buildRestorePlan(orgId, parsed.modulePayloads ?? {}) : null
 
   return {
     parsed,
+    restorePlan,
     summary: {
       title,
       type: sourceType,
@@ -1883,14 +2302,16 @@ export async function inspectBackupFile(file) {
         id: String(moduleInfo?.id ?? ''),
         label: String(moduleInfo?.label ?? moduleInfo?.id ?? ''),
         records: Number(moduleInfo?.records ?? 0) || 0,
+        plan: restorePlan?.modules?.find((item) => item?.moduleId === String(moduleInfo?.id ?? '')) ?? null,
       })),
       authUsers: Number(manifest?.auth?.users ?? 0) || 0,
+      restorePlan,
     },
   }
 }
 
 export async function restoreBackupFromFile({ orgId, file, restoredBy = '-' }) {
-  const inspection = await inspectBackupFile(file)
+  const inspection = await inspectBackupFile(file, { orgId })
   const parsed = inspection.parsed
   const summary = inspection.summary
 

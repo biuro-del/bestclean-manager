@@ -44,6 +44,28 @@ function setActiveRoute(route) {
   })
 }
 
+function keepActiveSidebarItemVisible(route) {
+  window.requestAnimationFrame(() => {
+    const activeItem = [...document.querySelectorAll('#portalSidebar [data-route].active')]
+      .find((item) => item instanceof HTMLElement && item.dataset.route === route)
+    const menu = activeItem?.closest?.('.menu')
+    if (!(activeItem instanceof HTMLElement) || !(menu instanceof HTMLElement)) {
+      return
+    }
+
+    const menuRect = menu.getBoundingClientRect()
+    const itemRect = activeItem.getBoundingClientRect()
+    const topGap = itemRect.top - menuRect.top
+    const bottomGap = itemRect.bottom - menuRect.bottom
+
+    if (topGap < 8) {
+      menu.scrollTop += topGap - 12
+    } else if (bottomGap > -8) {
+      menu.scrollTop += bottomGap + 12
+    }
+  })
+}
+
 function setSubmenuState(route) {
   document.querySelectorAll('.submenu').forEach((submenu) => {
     submenu.classList.remove('open')
@@ -114,6 +136,7 @@ export function createRouter(onRouteChange) {
 
     setSubmenuState(nextRoute)
     setActiveRoute(nextRoute)
+    keepActiveSidebarItemVisible(nextRoute)
     currentRoute = nextRoute
 
     if (typeof onRouteChange === 'function') {
