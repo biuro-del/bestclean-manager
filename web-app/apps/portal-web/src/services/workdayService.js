@@ -2396,7 +2396,28 @@ export async function getTodayActiveWorkers(orgId) {
       const isClean = endReason === 'QR_NEW' || endReason === 'QR_SAME' || endReason === 'QR_START_STOP'
       const isDayStopMarker =
         endTs > 0 && (endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY' || rawStatus === 'WORKDAY_CLOSED')
-      const isDayStartMarker = status === 'RUNNING' && startTs > 0 && !hasStop
+      const isExplicitEvent = item?.hasExplicitEventId === true || String(item?.historySourceKind ?? '').trim().toLowerCase() === 'event'
+      const hasClientOrZoneContext = [
+        item?.zoneId,
+        item?.utilityRoomId,
+        item?.roomId,
+        item?.clientId,
+        item?.clientName,
+        item?.klient,
+        item?.zoneName,
+        item?.strefa,
+      ].some((value) => {
+        const text = String(value ?? '').trim()
+        return Boolean(text) && text !== '-'
+      })
+      const isDayStartMarker =
+        status === 'RUNNING' &&
+        startTs > 0 &&
+        !hasStop &&
+        (!isExplicitEvent || !hasClientOrZoneContext) &&
+        !isIndividual &&
+        !isSpecial &&
+        !isClean
       const isDurationRelevant = isIndividual || isSpecial || isDayStartMarker || isDayStopMarker || (hasStop && !isClean)
       const startObjectLabel = String(item.dayStartObject ?? '').trim()
       const zoneCode = resolveZoneCode(item)
@@ -2451,7 +2472,7 @@ export async function getTodayActiveWorkers(orgId) {
         bucket.latestDayStopIso = endIso
       }
 
-      if (status === 'RUNNING' && startTs > 0) {
+      if (isDayStartMarker) {
         const runningKey = `${startTs}|${startIso}`
         if (!bucket.runningCandidateKeys.has(runningKey)) {
           bucket.runningCandidateKeys.add(runningKey)

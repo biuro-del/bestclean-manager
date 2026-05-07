@@ -26251,7 +26251,13 @@ function calendarTimelineStatusRowIsRunning(row = {}) {
   if (Object.prototype.hasOwnProperty.call(row, 'isRunning')) {
     return Boolean(row?.isRunning) && hasStart && !hasStop
   }
-  return hasStart && !hasStop
+  if (!hasStart || hasStop) {
+    return false
+  }
+  const runningValues = new Set(['running', 'open', 'w trakcie', 'rozpoczety', 'rozpoczeta'])
+  return [row?.status, row?.statusLabel, row?.state, row?.workStatus, row?.qrStatus]
+    .map((value) => normalizeSearchText(value))
+    .some((value) => runningValues.has(value))
 }
 
 function calendarTimelineStatusFallbackRow(resource = {}, startMinutes = -1, sourceRow = null) {
