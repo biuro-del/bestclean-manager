@@ -16746,7 +16746,7 @@ body{
   padding:0 20px;
   background:#f8fafc;
   color:#111a35;
-  font-weight:900;
+  font-weight:400;
   text-transform:uppercase;
 }
 
@@ -16763,7 +16763,7 @@ body{
   background:#fff;
   color:#111a35;
   font-size:.88rem;
-  font-weight:900;
+  font-weight:400;
 }
 
 #view-calendar .fw-date-head{
@@ -16776,7 +16776,7 @@ body{
   background:#fff;
   color:#111a35;
   font-size:.82rem;
-  font-weight:900;
+  font-weight:400;
   text-transform:none;
   border-left:2px solid #cbd7f5;
 }
@@ -16794,7 +16794,7 @@ body{
   justify-content:center;
   background:#fff;
   color:#61708d;
-  font-weight:900;
+  font-weight:400;
   font-size:.72rem;
   font-variant-numeric:tabular-nums;
 }
@@ -16819,7 +16819,7 @@ body{
   padding:0 12px 0 18px;
   background:#fff;
   color:#334267;
-  font-weight:900;
+  font-weight:400;
 }
 
 #view-calendar .fw-resource-name.is-worker{
@@ -16837,7 +16837,7 @@ body{
   background:#f8fafc;
   color:#111a35;
   font-size:.82rem;
-  font-weight:900;
+  font-weight:400;
   text-transform:uppercase;
 }
 
