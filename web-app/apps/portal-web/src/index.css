@@ -20149,16 +20149,3 @@ body{
   cursor:not-allowed !important;
 }
 
-#portalRoot #view-dashboard .dash-schedule-panel{
-  overflow:visible !important;
-}
-
-#portalRoot #view-dashboard .dash-schedule-cards{
-  flex:0 0 auto !important;
-  height:var(--dash-schedule-list-height, auto) !important;
-  min-height:var(--dash-schedule-list-height, 0px) !important;
-  max-height:var(--dash-schedule-list-height, none) !important;
-  overflow-y:auto !important;
-  overflow-x:hidden !important;
-}
-

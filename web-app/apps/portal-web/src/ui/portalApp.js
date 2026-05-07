@@ -4431,7 +4431,6 @@ function dashboardApplyScheduleVisibleLimit() {
 
   const cards = [...cardsRoot.querySelectorAll('.dash-schedule-card')].filter((node) => node instanceof HTMLElement)
   if (!cards.length) {
-    cardsRoot.style.removeProperty('--dash-schedule-list-height')
     cardsRoot.style.removeProperty('max-height')
     return
   }
@@ -4450,9 +4449,7 @@ function dashboardApplyScheduleVisibleLimit() {
     }
   }
 
-  const listHeight = `${Math.max(120, Math.ceil(height) + 2)}px`
-  cardsRoot.style.setProperty('--dash-schedule-list-height', listHeight)
-  cardsRoot.style.maxHeight = listHeight
+  cardsRoot.style.maxHeight = `${Math.max(120, Math.ceil(height) + 2)}px`
 }
 
 function dashboardQueueScheduleVisibleLimit() {
