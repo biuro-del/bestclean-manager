@@ -19900,6 +19900,50 @@ body{
   background:transparent !important;
 }
 
+/* Dashboard day schedule expanded record viewport */
+@media (min-width: 1051px){
+  #portalRoot #view-dashboard{
+    --dash-schedule-record-window-height:1088px;
+  }
+
+  #portalRoot #view-dashboard .dash-grid{
+    grid-template-columns:minmax(0, 2.05fr) minmax(420px, .76fr) !important;
+    grid-template-areas:
+      "overview overview"
+      "activity side" !important;
+    align-items:start !important;
+  }
+
+  #portalRoot #view-dashboard .dash-overview-panel{
+    grid-area:overview !important;
+    align-self:start !important;
+  }
+
+  #portalRoot #view-dashboard .dash-activity-panel{
+    grid-area:activity !important;
+    align-self:start !important;
+  }
+
+  #portalRoot #view-dashboard .dash-schedule-panel{
+    align-self:start !important;
+    contain:layout paint !important;
+    grid-area:side !important;
+    height:auto !important;
+    max-height:none !important;
+    min-height:calc(var(--dash-schedule-record-window-height) + 126px) !important;
+    overflow:hidden !important;
+  }
+
+  #portalRoot #view-dashboard .dash-schedule-cards{
+    flex:0 0 auto !important;
+    height:var(--dash-schedule-record-window-height) !important;
+    max-height:var(--dash-schedule-record-window-height) !important;
+    min-height:var(--dash-schedule-record-window-height) !important;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+  }
+}
+
 #portalRoot #view-dashboard .dash-activity-panel{
   position:relative !important;
 }
