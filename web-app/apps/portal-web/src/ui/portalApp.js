@@ -14673,30 +14673,56 @@ function workerTimeOverlapGroupKey(row) {
   return `${workerKey}|${dayKey || '-'}`
 }
 
-function workerTimeApplyOverlapAccounting(rows = []) {
-  const intervalsByGroup = new Map()
+function workerTimeExportWorkerName(value) {
+  return dashboardWorkerSurnameDisplayName(value)
+}
 
-  return rows.map((row) => {
+function workerTimeApplyOverlapAccounting(rows = []) {
+  const activeRowsByGroup = new Map()
+  const output = []
+
+  rows.forEach((row) => {
     const next = { ...row }
     const interval = workStatusIntervalFromTimes(row?.startIso, row?.endIso, row?.durationSec)
     if (!interval) {
-      return next
+      if (Math.max(0, Number(next.durationSec ?? 0) || 0) > 0) {
+        output.push(next)
+      }
+      return
     }
 
     const groupKey = workerTimeOverlapGroupKey(row)
-    const existingIntervals = intervalsByGroup.get(groupKey) ?? []
-    const countedSec = Math.max(0, workStatusIntervalAdditionalSeconds(interval, existingIntervals))
-    intervalsByGroup.set(groupKey, workStatusIntervalsMerge([...existingIntervals, interval]))
-
     const originalDurationSec = Math.max(0, Math.floor(Number(row?.durationSec ?? 0) || 0))
     const originalBreakSec = Math.max(0, Math.floor(Number(row?.breakSec ?? 0) || 0))
     next.rawDurationSec = originalDurationSec
-    next.excludedByOverlap = originalDurationSec > 0 && countedSec <= 0
-    next.durationSec = countedSec
-    next.breakSec = Math.min(originalBreakSec, countedSec)
+    next.durationSec = Math.max(0, Math.floor((interval.endTs - interval.startTs) / 1000))
+    next.breakSec = Math.min(originalBreakSec, next.durationSec)
     next.netSec = Math.max(0, next.durationSec - next.breakSec)
-    return next
+    next.startIso = interval.startIso
+    next.endIso = interval.endIso
+
+    const active = activeRowsByGroup.get(groupKey)
+    if (!active || interval.startTs > active.interval.endTs) {
+      const entry = { row: next, interval: { startTs: interval.startTs, endTs: interval.endTs } }
+      activeRowsByGroup.set(groupKey, entry)
+      output.push(next)
+      return
+    }
+
+    active.interval.startTs = Math.min(active.interval.startTs, interval.startTs)
+    active.interval.endTs = Math.max(active.interval.endTs, interval.endTs)
+    active.row.startIso = new Date(active.interval.startTs).toISOString()
+    active.row.endIso = new Date(active.interval.endTs).toISOString()
+    active.row.rawDurationSec = Math.max(0, Number(active.row.rawDurationSec ?? 0) || 0) + originalDurationSec
+    active.row.durationSec = Math.max(0, Math.floor((active.interval.endTs - active.interval.startTs) / 1000))
+    active.row.breakSec = Math.min(
+      active.row.durationSec,
+      Math.max(0, Number(active.row.breakSec ?? 0) || 0) + originalBreakSec,
+    )
+    active.row.netSec = Math.max(0, active.row.durationSec - active.row.breakSec)
   })
+
+  return output
 }
 
 const WORKER_TIME_EXPORT_COLUMNS = [
@@ -14710,7 +14736,7 @@ const WORKER_TIME_EXPORT_COLUMNS = [
     id: 'worker',
     label: 'Pracownik',
     weight: 1.8,
-    getValue: (row) => row.workerName || '-',
+    getValue: (row) => workerTimeExportWorkerName(row.workerName || '-'),
   },
   {
     id: 'workerId',
@@ -14892,21 +14918,24 @@ async function workerTimeBuildExportRowsForWorkers(
       const loginKey = normalizeSearchText(item?.workerLogin)
       const nameKey = normalizeSearchText(item?.workerName)
       const resolvedWorker = workerLookupByLogin.get(loginKey) || workerLookupByName.get(nameKey) || null
+      const sourceWorkerName =
+        String(resolvedWorker?.workerName ?? item?.workerName ?? item?.workerLogin ?? '').trim() || '-'
       const dayKey = workerTimeResolveRowDayKey(item)
       const startIso = toIso(item?.startAt)
       const endIso = toIso(item?.endAt)
       const durationRaw = Number(item?.durationSec)
+      const rangeSec = workerDetailComputeRangeSeconds(startIso, endIso)
       const computedSec =
-        Number.isFinite(durationRaw) && durationRaw >= 0
+        Number.isFinite(durationRaw) && durationRaw > 0
           ? Math.floor(durationRaw)
-          : workerDetailComputeRangeSeconds(startIso, endIso)
+          : rangeSec
       const breakSec = Math.max(0, Number(item?.breakSec ?? item?.pauseTotalSec ?? 0) || 0)
       return {
         workerId:
           String(resolvedWorker?.workerId ?? item?.workerId ?? item?.id ?? item?.workerLogin ?? '').trim() ||
           '-',
-        workerName:
-          String(resolvedWorker?.workerName ?? item?.workerName ?? item?.workerLogin ?? '').trim() || '-',
+        workerName: workerTimeExportWorkerName(sourceWorkerName),
+        workerSourceName: sourceWorkerName,
         workerLogin:
           String(resolvedWorker?.workerLogin ?? item?.workerLogin ?? item?.workerId ?? '').trim() || '-',
         workerType: String(resolvedWorker?.workerType ?? item?.workerType ?? item?.role ?? '').trim() || '-',
@@ -14920,8 +14949,8 @@ async function workerTimeBuildExportRowsForWorkers(
       }
     })
     .sort((left, right) => {
-      const byName = normalizeSearchText(left.workerName).localeCompare(
-        normalizeSearchText(right.workerName),
+      const byName = dashboardWorkerSurnameSortKey(left.workerName).localeCompare(
+        dashboardWorkerSurnameSortKey(right.workerName),
         'pl',
         { sensitivity: 'base' },
       )
@@ -14936,7 +14965,7 @@ async function workerTimeBuildExportRowsForWorkers(
       return leftStart - rightStart
     })
 
-  return workerTimeApplyOverlapAccounting(rows).filter((row) => !row.excludedByOverlap)
+  return workerTimeApplyOverlapAccounting(rows).filter((row) => Math.max(0, Number(row?.durationSec ?? 0) || 0) > 0)
 }
 
 async function downloadWorkerTimeEwidencjaPdf(options) {
@@ -15003,7 +15032,7 @@ async function downloadWorkerTimeEwidencjaPdf(options) {
     })
 
     const groupedRows = [...groups.values()].sort((left, right) =>
-      normalizeSearchText(left.workerName).localeCompare(normalizeSearchText(right.workerName), 'pl', {
+      dashboardWorkerSurnameSortKey(left.workerName).localeCompare(dashboardWorkerSurnameSortKey(right.workerName), 'pl', {
         sensitivity: 'base',
       }),
     )
