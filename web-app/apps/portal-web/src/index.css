@@ -20545,6 +20545,29 @@ body{
   background:#f8fbff !important;
 }
 
+/* Dashboard timeline width balance on medium desktop screens. */
+@media (min-width:1051px) and (max-width:1499px){
+  #portalRoot #view-dashboard .dash-grid{
+    grid-template-columns:minmax(0, 1fr) minmax(340px, 360px) !important;
+  }
+
+  #portalRoot #view-dashboard .dash-activity-panel{
+    min-width:0 !important;
+  }
+
+  #portalRoot #view-dashboard .dash-activity-timeline-axis,
+  #portalRoot #view-dashboard .dash-activity-timeline-row{
+    grid-template-columns:100px minmax(0, 1fr) 66px !important;
+    gap:6px !important;
+  }
+}
+
+@media (min-width:1500px){
+  #portalRoot #view-dashboard .dash-grid{
+    grid-template-columns:minmax(0, 1fr) minmax(390px, 420px) !important;
+  }
+}
+
 /* Clickable elements should always show a hand cursor */
 #portalRoot :is(
   button:not(:disabled),
