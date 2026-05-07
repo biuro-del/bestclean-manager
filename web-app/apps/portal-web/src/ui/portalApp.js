@@ -4769,14 +4769,15 @@ function syncDashboardSidePanelHeight() {
   }
 
   const bottomGap = 14
-  const viewportTarget = Math.max(640, Math.floor(viewportHeight - rectTop - bottomGap))
+  const minSchedulePanelHeight = 1180
+  const viewportTarget = Math.max(minSchedulePanelHeight, Math.floor(viewportHeight - rectTop - bottomGap))
   let targetHeight = viewportTarget
   const activityPanel = document.querySelector('#view-dashboard .dash-activity-panel')
   if (activityPanel instanceof HTMLElement) {
     const activityBottom = activityPanel.getBoundingClientRect().bottom
     const columnTarget = Math.floor(activityBottom - rectTop)
     if (Number.isFinite(columnTarget) && columnTarget > 520) {
-      targetHeight = Math.max(640, Math.min(1400, columnTarget))
+      targetHeight = Math.max(minSchedulePanelHeight, Math.min(1400, columnTarget))
     }
   }
   panel.style.setProperty('--dash-side-target-height', `${targetHeight}px`)
