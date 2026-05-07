@@ -14794,23 +14794,39 @@ const WORKER_TIME_EXPORT_COLUMNS = [
   },
 ]
 
+const WORKER_TIME_EXPORT_DEFAULT_COLUMNS = new Set(['date', 'worker', 'start', 'stop', 'work', 'break'])
+
+function previousMonthRangeYmd(reference = new Date()) {
+  const source = reference instanceof Date ? reference : new Date(reference)
+  const safeDate = Number.isFinite(source.getTime()) ? source : new Date()
+  const year = safeDate.getFullYear()
+  const month = safeDate.getMonth()
+  const first = new Date(year, month - 1, 1)
+  const last = new Date(year, month, 0)
+  return {
+    fromYmd: `${first.getFullYear()}-${pad2(first.getMonth() + 1)}-${pad2(first.getDate())}`,
+    toYmd: `${last.getFullYear()}-${pad2(last.getMonth() + 1)}-${pad2(last.getDate())}`,
+  }
+}
+
 function workerTimeResetExportOptions() {
   document.querySelectorAll('[data-wt-export-col]').forEach((checkbox) => {
-    checkbox.checked = checkbox.defaultChecked
+    checkbox.checked = WORKER_TIME_EXPORT_DEFAULT_COLUMNS.has(String(checkbox.value ?? '').trim())
   })
 
-  const landscape = document.querySelector('input[name="wtExportOrientation"][value="l"]')
-  if (landscape) {
-    landscape.checked = true
+  const portrait = document.querySelector('input[name="wtExportOrientation"][value="p"]')
+  if (portrait) {
+    portrait.checked = true
   }
 
+  const { fromYmd, toYmd } = previousMonthRangeYmd()
   const fromInput = document.getElementById('wtExportFrom')
   const toInput = document.getElementById('wtExportTo')
   if (fromInput) {
-    fromInput.value = firstDayOfCurrentMonthYmd()
+    fromInput.value = fromYmd
   }
   if (toInput) {
-    toInput.value = todayYmd()
+    toInput.value = toYmd
   }
 }
 
