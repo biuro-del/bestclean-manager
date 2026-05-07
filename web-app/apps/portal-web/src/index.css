@@ -19668,8 +19668,8 @@ body{
 
 /* Dashboard day schedule aligned with the rest of dashboard typography */
 #portalRoot #view-dashboard .dash-schedule-panel{
-  gap:8px !important;
-  padding:12px !important;
+  gap:6px !important;
+  padding:10px !important;
   border:1px solid #dbe6f6 !important;
   border-radius:16px !important;
   background:linear-gradient(180deg, #ffffff 0%, #f8fbff 100%) !important;
@@ -19677,53 +19677,53 @@ body{
 }
 
 #portalRoot #view-dashboard .dash-schedule-panel .card-title{
-  font-size:15px !important;
-  line-height:1.15 !important;
+  font-size:14px !important;
+  line-height:1.08 !important;
   font-weight:800 !important;
   color:#2563eb !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-panel .card-title-row{
   margin:0 !important;
-  min-height:32px !important;
+  min-height:28px !important;
   align-items:center !important;
 }
 
 #portalRoot #view-dashboard .dash-refresh-btn--icon{
-  height:28px !important;
-  min-height:28px !important;
-  min-width:28px !important;
-  width:28px !important;
+  height:24px !important;
+  min-height:24px !important;
+  min-width:24px !important;
+  width:24px !important;
   border:1px solid #cfe0fb !important;
-  border-radius:10px !important;
+  border-radius:8px !important;
   background:#f4f8ff !important;
   color:#2563eb !important;
 }
 
 #portalRoot #view-dashboard .dash-refresh-btn--icon svg{
-  height:14px !important;
-  width:14px !important;
+  height:13px !important;
+  width:13px !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-sync{
-  font-size:11px !important;
-  line-height:1.35 !important;
+  font-size:10px !important;
+  line-height:1.2 !important;
   color:#7b8ba7 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-daybar{
-  grid-template-columns:30px minmax(0, 1fr) 30px !important;
-  gap:6px !important;
+  grid-template-columns:26px minmax(0, 1fr) 26px !important;
+  gap:5px !important;
   align-items:center !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-nav{
-  border-radius:10px !important;
-  font-size:13px !important;
-  height:30px !important;
-  min-height:30px !important;
-  min-width:30px !important;
-  width:30px !important;
+  border-radius:8px !important;
+  font-size:12px !important;
+  height:26px !important;
+  min-height:26px !important;
+  min-width:26px !important;
+  width:26px !important;
   border:1px solid #d7e4f8 !important;
   background:#ffffff !important;
   color:#5f7293 !important;
@@ -19731,33 +19731,36 @@ body{
 }
 
 #portalRoot #view-dashboard .dash-schedule-dayname{
-  font-size:14px !important;
+  font-size:13px !important;
   line-height:1.1 !important;
   font-weight:800 !important;
   color:#334155 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-daydate{
-  font-size:11px !important;
+  font-size:10px !important;
   line-height:1.1 !important;
   color:#7b8ba7 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-cards{
-  gap:7px !important;
-  margin-top:2px !important;
-  padding:1px 5px 1px 1px !important;
-  border-radius:12px !important;
+  gap:4px !important;
+  margin-top:1px !important;
+  padding:2px 5px 2px 2px !important;
+  border-radius:10px !important;
   background:transparent !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
   scrollbar-color: rgba(148,163,184,.55) transparent !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-card{
   border:1px solid #dbe6f6 !important;
-  border-left-width:5px !important;
-  border-radius:12px !important;
-  gap:5px !important;
-  padding:7px 9px !important;
+  border-left-width:4px !important;
+  border-radius:9px !important;
+  gap:3px !important;
+  min-height:48px !important;
+  padding:5px 7px !important;
   background:#ffffff !important;
   box-shadow:0 6px 14px rgba(15,23,42,.045) !important;
 }
@@ -19781,35 +19784,35 @@ body{
 }
 
 #portalRoot #view-dashboard .dash-schedule-top{
-  gap:8px !important;
-  align-items:flex-start !important;
+  gap:6px !important;
+  align-items:center !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-worker-meta{
-  gap:5px !important;
+  gap:4px !important;
   min-width:0 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-worker-name{
-  font-size:13px !important;
-  line-height:1.18 !important;
+  font-size:12px !important;
+  line-height:1.08 !important;
   font-weight:800 !important;
   color:#1f2937 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-start-icon{
   font-size:10px !important;
-  height:16px !important;
-  width:16px !important;
+  height:14px !important;
+  width:14px !important;
   border:1px solid #9fe3b9 !important;
   background:#f2fff7 !important;
   color:#18a957 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-status-badge{
-  font-size:9px !important;
+  font-size:8px !important;
   line-height:1 !important;
-  padding:4px 7px !important;
+  padding:3px 6px !important;
   border-radius:999px !important;
   font-weight:800 !important;
   letter-spacing:.01em !important;
@@ -19829,25 +19832,39 @@ body{
 
 #portalRoot #view-dashboard .dash-schedule-startline,
 #portalRoot #view-dashboard .dash-schedule-line{
-  column-gap:7px !important;
-  grid-template-columns:72px minmax(0, 1fr) !important;
+  column-gap:5px !important;
+  grid-template-columns:60px minmax(0, 1fr) !important;
   align-items:start !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-startline{
   border-bottom:1px solid #e3eaf5 !important;
-  padding:0 0 5px !important;
+  padding:0 0 2px !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-shifts{
+  display:grid !important;
+  grid-template-columns:repeat(2, minmax(0, 1fr)) !important;
+  gap:3px !important;
+  min-width:0 !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-shifts .dash-schedule-line{
+  grid-template-columns:44px minmax(0, 1fr) !important;
+  min-width:0 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-shifts .dash-schedule-line + .dash-schedule-line{
-  margin-top:3px !important;
-  padding-top:3px !important;
-  border-top:1px dashed #e6eefb !important;
+  margin-top:0 !important;
+  padding-top:0 !important;
+  padding-left:4px !important;
+  border-top:0 !important;
+  border-left:1px dashed #e6eefb !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-line-label{
-  font-size:10px !important;
-  line-height:1.2 !important;
+  font-size:9px !important;
+  line-height:1.05 !important;
   letter-spacing:0 !important;
   color:#71829f !important;
   font-weight:700 !important;
@@ -19871,22 +19888,22 @@ body{
 
 #portalRoot #view-dashboard .dash-schedule-start-value,
 #portalRoot #view-dashboard .dash-schedule-line-text{
-  font-size:12px !important;
-  line-height:1.22 !important;
+  font-size:10px !important;
+  line-height:1.08 !important;
   color:#1f2937 !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-late{
-  border-radius:10px !important;
-  font-size:10px !important;
-  line-height:1.2 !important;
-  margin-top:-2px !important;
-  padding:4px 6px !important;
+  border-radius:7px !important;
+  font-size:9px !important;
+  line-height:1.05 !important;
+  margin-top:0 !important;
+  padding:2px 5px !important;
   box-shadow:none !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-cards::-webkit-scrollbar{
-  width:10px !important;
+  width:8px !important;
 }
 
 #portalRoot #view-dashboard .dash-schedule-cards::-webkit-scrollbar-thumb{
