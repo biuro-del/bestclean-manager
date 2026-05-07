@@ -20434,8 +20434,8 @@ body{
   display:flex !important;
   flex-direction:column !important;
   gap:7px !important;
-  max-height:min(78vh, 500px) !important;
-  overflow:auto !important;
+  max-height:none !important;
+  overflow:visible !important;
   padding:2px 4px 2px 0 !important;
   background-image:none !important;
 }
