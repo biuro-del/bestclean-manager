@@ -89,6 +89,7 @@ const appState = {
   ordersEditingId: '',
   ordersEditorMode: 'edit',
   ordersEditorTab: 'basic',
+  ordersClientCreateReturnOrderId: '',
   ordersMapDateFrom: '',
   ordersMapDateTo: '',
   ordersMapStatus: 'new',
@@ -117,6 +118,9 @@ const appState = {
   calendarTimelineOrdersRemoteLoading: false,
   calendarTimelineDragOrderId: '',
   calendarTimelineDragSourceRow: null,
+  calendarTimelineDragSourceOrderId: '',
+  calendarTimelineDragOccurrenceDate: '',
+  calendarTimelineDragRecurringSeries: false,
   calendarTimelineDragTargetRow: null,
   calendarTimelineDragTargetSlot: null,
   calendarTimelineDropHandled: false,
@@ -205,6 +209,7 @@ const appState = {
   dashboardMetricDetails: {},
   dashboardMetricValues: {},
   dashboardTodayRows: [],
+  dashboardActivityWorkdayRows: [],
   dashboardActivityView: 'today-calendar',
   dashboardNewComments: [],
   dashboardScheduleDays: [],
@@ -231,6 +236,10 @@ const appState = {
   settingsAutomationDayKey: '',
   currentRoute: '',
 }
+
+const ORDERS_NEW_CLIENT_VALUE = '__orders_new_client__'
+const ORDERS_CLIENT_ADDRESS_MEMORY_PREFIX = 'portal-orders-client-addresses'
+
 let portalNoticeTimer = null
 let dashboardRefreshTimer = null
 let dashboardBackgroundRefreshPromise = null
@@ -260,7 +269,6 @@ const DASHBOARD_REFRESH_INTERVAL_MS = 15 * 60 * 1000
 const DASHBOARD_ACTIVITY_VIEW_STORAGE_KEY = 'portal.dashboard.activityView.v2'
 const CALENDAR_TIMELINE_STATUS_REFRESH_MS = DASHBOARD_REFRESH_INTERVAL_MS
 const DASHBOARD_SCHEDULE_SOON_WINDOW_MINUTES = 60
-const DASHBOARD_SCHEDULE_VISIBLE_WORKERS = 10
 const DASHBOARD_SCHEDULE_LATE_ALERT_MINUTES = 10
 const DASHBOARD_LONG_CLEAN_SECONDS = 90 * 60
 const DASHBOARD_NEW_COMMENTS_LIMIT = 5
@@ -746,12 +754,20 @@ function setupFloatingTableScrollbar() {
   const spacer = document.createElement('div')
   spacer.className = 'portal-floating-x-scroll-spacer'
   scroller.appendChild(spacer)
+
+  const track = document.createElement('div')
+  track.className = 'portal-floating-x-scroll-track'
+  const thumb = document.createElement('div')
+  thumb.className = 'portal-floating-x-scroll-thumb'
+  track.appendChild(thumb)
+  scroller.appendChild(track)
   document.body.appendChild(scroller)
 
   let activeTable = null
   let updateRaf = 0
   let syncingFromBar = false
   let syncingFromTable = false
+  let barDragState = null
 
   const tableIsUsable = (node) => {
     if (!(node instanceof HTMLElement)) {
@@ -794,6 +810,50 @@ function setupFloatingTableScrollbar() {
     activeTable = null
   }
 
+  const maxScrollLeft = (node) => {
+    if (!(node instanceof HTMLElement)) {
+      return 0
+    }
+    return Math.max(0, Number(node.scrollWidth || 0) - Number(node.clientWidth || 0))
+  }
+
+  const updateVisualThumb = (table) => {
+    if (!(table instanceof HTMLElement)) {
+      return
+    }
+    const trackWidth = Math.max(0, track.getBoundingClientRect().width)
+    const tableScrollWidth = Math.max(Number(table.scrollWidth || 0), Number(table.clientWidth || 0))
+    const tableClientWidth = Math.max(0, Number(table.clientWidth || 0))
+    const tableMax = maxScrollLeft(table)
+    if (trackWidth < 24 || tableMax <= 0 || tableScrollWidth <= 0) {
+      thumb.style.width = '0px'
+      thumb.style.transform = 'translateX(0)'
+      return
+    }
+    const thumbWidth = Math.max(58, Math.min(trackWidth, (tableClientWidth / tableScrollWidth) * trackWidth))
+    const maxLeft = Math.max(0, trackWidth - thumbWidth)
+    const left = tableMax > 0 ? Math.max(0, Math.min(maxLeft, (Number(table.scrollLeft || 0) / tableMax) * maxLeft)) : 0
+    thumb.style.width = `${thumbWidth}px`
+    thumb.style.transform = `translateX(${left}px)`
+  }
+
+  const syncBarPositionFromTable = (table) => {
+    if (!(table instanceof HTMLElement)) {
+      return
+    }
+    updateVisualThumb(table)
+  }
+
+  const syncTablePositionFromBar = (table) => {
+    if (!(table instanceof HTMLElement)) {
+      return
+    }
+    syncingFromBar = true
+    table.scrollLeft = scroller.scrollLeft
+    syncingFromBar = false
+    updateVisualThumb(table)
+  }
+
   const update = () => {
     updateRaf = 0
     const table = findBestTable()
@@ -819,9 +879,9 @@ function setupFloatingTableScrollbar() {
     scroller.classList.add('is-visible')
 
     if (!syncingFromBar) {
-      syncingFromTable = true
-      scroller.scrollLeft = table.scrollLeft
-      syncingFromTable = false
+      syncBarPositionFromTable(table)
+    } else {
+      updateVisualThumb(table)
     }
   }
 
@@ -845,9 +905,7 @@ function setupFloatingTableScrollbar() {
     if (tableIsUsable(table)) {
       activeTable = table
       if (!syncingFromBar) {
-        syncingFromTable = true
-        scroller.scrollLeft = table.scrollLeft
-        syncingFromTable = false
+        syncBarPositionFromTable(table)
       }
     }
     scheduleUpdate()
@@ -857,9 +915,80 @@ function setupFloatingTableScrollbar() {
     if (!(activeTable instanceof HTMLElement) || syncingFromTable) {
       return
     }
+    syncTablePositionFromBar(activeTable)
+  }
+
+  const handleBarPointerDown = (event) => {
+    if (event.button !== undefined && event.button !== 0) {
+      return
+    }
+    const table = tableIsUsable(activeTable) ? activeTable : findBestTable()
+    if (!(table instanceof HTMLElement) || maxScrollLeft(table) <= 0) {
+      return
+    }
+    const trackRect = track.getBoundingClientRect()
+    const thumbRect = thumb.getBoundingClientRect()
+    const trackWidth = Math.max(0, trackRect.width)
+    const thumbWidth = Math.max(1, thumbRect.width)
+    const maxLeft = Math.max(1, trackWidth - thumbWidth)
+    const target = event.target instanceof HTMLElement ? event.target : null
+    const grabbedThumb = Boolean(target?.closest?.('.portal-floating-x-scroll-thumb'))
+    const pointerX = Number(event.clientX || 0)
+    const clickOffset = grabbedThumb
+      ? Math.max(0, Math.min(thumbWidth, pointerX - thumbRect.left))
+      : thumbWidth / 2
+    activeTable = table
+    barDragState = {
+      pointerId: event.pointerId,
+      clickOffset,
+      maxLeft,
+      tableMax: maxScrollLeft(table),
+      trackLeft: trackRect.left,
+    }
+    scroller.classList.add('is-dragging')
+    track.classList.add('is-dragging')
+    if (typeof track.setPointerCapture === 'function' && event.pointerId !== undefined) {
+      try {
+        track.setPointerCapture(event.pointerId)
+      } catch {
+        // Ignore pointer capture errors on browsers with native scrollbar handling.
+      }
+    }
+    handleBarPointerMove(event)
+    event.preventDefault()
+  }
+
+  const handleBarPointerMove = (event) => {
+    if (!barDragState || barDragState.pointerId !== event.pointerId || !(activeTable instanceof HTMLElement)) {
+      return
+    }
+    const rawLeft = Number(event.clientX || 0) - barDragState.trackLeft - barDragState.clickOffset
+    const thumbLeft = Math.max(0, Math.min(barDragState.maxLeft, rawLeft))
+    const nextScroll = (thumbLeft / barDragState.maxLeft) * barDragState.tableMax
+
     syncingFromBar = true
-    activeTable.scrollLeft = scroller.scrollLeft
+    activeTable.scrollLeft = nextScroll
     syncingFromBar = false
+
+    syncBarPositionFromTable(activeTable)
+    event.preventDefault()
+  }
+
+  const stopBarDrag = (event) => {
+    if (!barDragState || (event?.pointerId !== undefined && barDragState.pointerId !== event.pointerId)) {
+      return
+    }
+    const pointerId = barDragState.pointerId
+    barDragState = null
+    scroller.classList.remove('is-dragging')
+    track.classList.remove('is-dragging')
+    if (typeof track.releasePointerCapture === 'function' && pointerId !== undefined) {
+      try {
+        track.releasePointerCapture(pointerId)
+      } catch {
+        // Ignore release errors for pointers captured by another element.
+      }
+    }
   }
 
   const handleResize = () => {
@@ -881,6 +1010,10 @@ function setupFloatingTableScrollbar() {
   document.addEventListener('scroll', handleDocumentScroll, true)
   window.addEventListener('resize', handleResize)
   scroller.addEventListener('scroll', handleBarScroll)
+  track.addEventListener('pointerdown', handleBarPointerDown)
+  track.addEventListener('pointermove', handleBarPointerMove)
+  track.addEventListener('pointerup', stopBarDrag)
+  track.addEventListener('pointercancel', stopBarDrag)
 
   scheduleUpdate()
 
@@ -896,6 +1029,10 @@ function setupFloatingTableScrollbar() {
     document.removeEventListener('scroll', handleDocumentScroll, true)
     window.removeEventListener('resize', handleResize)
     scroller.removeEventListener('scroll', handleBarScroll)
+    track.removeEventListener('pointerdown', handleBarPointerDown)
+    track.removeEventListener('pointermove', handleBarPointerMove)
+    track.removeEventListener('pointerup', stopBarDrag)
+    track.removeEventListener('pointercancel', stopBarDrag)
     scroller.remove()
   }
 }
@@ -3420,12 +3557,7 @@ function dashboardFindWorkerByAliasKeys(keys = new Set()) {
   const workers = Array.isArray(appState.workers) ? appState.workers : []
   return (
     workers.find((worker) => {
-      const workerKeys = dashboardWorkerAliasKeys(
-        worker?.workerName ?? worker?.name,
-        worker?.workerLogin ?? worker?.login ?? worker?.id,
-        worker?.workerId ?? worker?.id,
-        { includeLooseNameKeys: false },
-      )
+      const workerKeys = dashboardWorkerIdIdentityKeys(worker?.workerId ?? worker?.id)
       return [...workerKeys].some((key) => sourceKeys.has(key))
     }) ?? null
   )
@@ -3435,14 +3567,13 @@ function dashboardActivityWorkerIdentity(row = {}, linkedWorker = null) {
   const worker = linkedWorker || null
   const workerName = String(worker?.workerName ?? worker?.name ?? row?.workerName ?? row?.name ?? '').trim()
   const workerLogin = String(worker?.workerLogin ?? worker?.login ?? row?.workerLogin ?? row?.login ?? row?.id ?? '').trim()
-  const workerId = String(worker?.workerId ?? worker?.id ?? row?.workerId ?? row?.id ?? '').trim()
+  const workerId = dashboardCanonicalWorkerId(worker?.workerId ?? worker?.id ?? row?.workerId ?? row?.id)
   const displaySource = workerName || workerLogin || workerId || '-'
   const workerDisplayName = dashboardWorkerSurnameDisplayName(displaySource)
   const workerSortKey = dashboardWorkerSurnameSortKey(displaySource)
   const idKey = normalizeSearchText(workerId)
-  const loginKey = normalizeSearchText(workerLogin)
-  const nameKey = normalizeSearchText(displaySource)
-  const workerKey = idKey ? `id:${idKey}` : loginKey ? `l:${loginKey}` : `n:${nameKey}`
+  const fallbackKey = normalizeSearchText(workerLogin || displaySource)
+  const workerKey = idKey ? `id:${idKey}` : `unresolved:${fallbackKey || 'worker'}`
 
   return {
     workerKey,
@@ -3453,6 +3584,235 @@ function dashboardActivityWorkerIdentity(row = {}, linkedWorker = null) {
   }
 }
 
+function dashboardActivityCleanCompanyLabel(value = '') {
+  const label = String(value ?? '').trim()
+  const normalized = normalizeSearchText(label)
+  const generic = new Set([
+    '',
+    '-',
+    'unassigned',
+    'brak klienta',
+    'brak firmy',
+    'nieprzypisany',
+    'unknown',
+    'none',
+    'qr start',
+    'qr stop',
+    'qr start stop',
+    'start',
+    'stop',
+    'start stop',
+    'aktywny status',
+    'status',
+    'klient spec',
+    'strefa',
+  ])
+  if (!label || generic.has(normalized)) {
+    return ''
+  }
+  if (/^qr\s+[a-z0-9-]+$/i.test(label) || /^w\d+$/i.test(label) || dashboardIsQrCodeLike(label)) {
+    return ''
+  }
+  return label
+}
+
+function dashboardActivityResolveClientByQr(value = '') {
+  const code = reportHistoryNormalizeQrCode(value)
+  if (!code || calendarTimelineIsTechnicalEventCode(code)) {
+    return ''
+  }
+
+  const zone = resolveZoneByQrCandidate(code)
+  const zoneClientLabel = dashboardActivityCleanCompanyLabel(
+    zone?.clientName ?? zone?.clientLabel ?? zone?.client ?? zone?.companyName,
+  )
+  if (zoneClientLabel) {
+    return zoneClientLabel
+  }
+
+  const clientId = String(zone?.clientId ?? zone?.clientID ?? '').trim()
+  if (clientId) {
+    const normalizedClientId = normalizeSearchText(clientId)
+    const client = (Array.isArray(appState.clients) ? appState.clients : []).find((item) => {
+      const candidates = [item?.id, item?.clientId, item?.name, item?.clientName]
+      return candidates.some((candidate) => normalizeSearchText(candidate) === normalizedClientId)
+    })
+    const clientLabel = dashboardActivityCleanCompanyLabel(client?.name ?? client?.clientName ?? client?.clientLabel)
+    if (clientLabel) {
+      return clientLabel
+    }
+  }
+
+  return dashboardActivityCleanCompanyLabel(reportHistoryResolveClientByZoneCode(code, ''))
+}
+
+function dashboardActivityQrCodesFromRow(row = {}) {
+  const candidates = [
+    row?.activeZoneId,
+    row?.zoneId,
+    row?.roomId,
+    row?.utilityRoomId,
+    row?.workdayUtilityRoomId,
+    row?.qr,
+    row?.qrCode,
+    row?.activeZone,
+    row?.zoneName,
+    row?.strefa,
+    row?.dayStartObject,
+    row?.startObject,
+    row?.dayStopObject,
+    row?.stopObject,
+    row?.qrStartSourceItem?.dayStartObject,
+    row?.qrStartSourceItem?.startObject,
+    row?.qrStopSourceItem?.dayStopObject,
+    row?.qrStopSourceItem?.stopObject,
+    reportHistoryExtractQrFromComment(row?.comment, 'start'),
+    reportHistoryExtractQrFromComment(row?.comment, 'stop'),
+    reportHistoryExtractQrFromComment(row?.dayComment, 'start'),
+    reportHistoryExtractQrFromComment(row?.dayComment, 'stop'),
+    row?.comment,
+    row?.dayComment,
+  ]
+  const codes = []
+  candidates.forEach((candidate) => {
+    const code = reportHistoryNormalizeQrCode(candidate)
+    if (code && !calendarTimelineIsTechnicalEventCode(code) && !codes.includes(code)) {
+      codes.push(code)
+    }
+  })
+  return codes
+}
+
+function dashboardActivityCompanyLabel(row = {}) {
+  const directCandidates = [
+    row?.clientName,
+    row?.clientLabel,
+    row?.klient,
+    row?.activeClient,
+    row?.companyName,
+    row?.customerName,
+    row?.accountName,
+    row?.client?.name,
+    row?.client?.clientName,
+    row?.client?.clientLabel,
+  ]
+
+  for (const candidate of directCandidates) {
+    const label = dashboardActivityCleanCompanyLabel(candidate)
+    if (label) {
+      return label
+    }
+  }
+
+  const resolvedClient = dashboardActivityCleanCompanyLabel(dashboardResolveClientLabel(row))
+  if (resolvedClient) {
+    return resolvedClient
+  }
+
+  for (const candidate of dashboardActivityQrCodesFromRow(row)) {
+    const resolvedByQr = dashboardActivityResolveClientByQr(candidate)
+    if (resolvedByQr) {
+      return resolvedByQr
+    }
+  }
+
+  return '-'
+}
+
+function dashboardActivityCompanyLabelForGroup(bars = [], fallbackLabels = []) {
+  const cleanFallback = (Array.isArray(fallbackLabels) ? fallbackLabels : [])
+    .map((label) => dashboardActivityCleanCompanyLabel(label))
+    .find(Boolean)
+
+  const cleanBars = (Array.isArray(bars) ? bars : [])
+    .map((bar) => ({
+      bar,
+      label: dashboardActivityCleanCompanyLabel(bar?.companyLabel ?? bar?.locationLabel),
+      startTs: Number(bar?.startTs ?? 0),
+      stopTs: Number(bar?.stopTs ?? 0),
+      isRunning: Boolean(bar?.isRunning),
+    }))
+    .filter((item) => item.label)
+
+  const running = cleanBars
+    .filter((item) => item.isRunning)
+    .sort((left, right) => right.startTs - left.startTs)[0]
+  if (running?.label) {
+    return running.label
+  }
+
+  const latestWorkday = cleanBars
+    .filter((item) => item.bar?.kind === 'workday')
+    .sort((left, right) => right.stopTs - left.stopTs || right.startTs - left.startTs)[0]
+  if (latestWorkday?.label) {
+    return latestWorkday.label
+  }
+
+  const planned = cleanBars.find((item) => item.bar?.kind === 'planned')
+  return planned?.label || cleanFallback || '-'
+}
+
+function dashboardActivityTimestampFromRow(row = {}) {
+  const timestamps = [
+    calendarTimelineEventsRowStartTimestamp(row),
+    calendarTimelineEventsRowStopTimestamp(row),
+    calendarTimelineEventTimestamp(row?.activeSortTs),
+    calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt),
+    calendarTimelineEventTimestamp(row?.endAt ?? row?.dayEndAt),
+    calendarTimelineEventTimestamp(row?.qrStartSourceItem?.startAt ?? row?.qrStartSourceItem?.dayStartAt),
+    calendarTimelineEventTimestamp(row?.qrStopSourceItem?.endAt ?? row?.qrStopSourceItem?.dayEndAt),
+  ].filter((value) => Number.isFinite(value) && value > 0)
+  return timestamps.length ? Math.max(...timestamps) : 0
+}
+
+function dashboardActivityLatestQrCompanyLabelForRow(row = {}, dayKey = '', sourceRows = []) {
+  const workerId = dashboardResolveWorkerIdValue(row)
+  if (!workerId) {
+    return ''
+  }
+
+  const normalizedDay =
+    String(dayKey ?? '').trim() ||
+    dashboardResolveDayKey(row) ||
+    calendarTimelineRealEventRowDay(row) ||
+    todayYmd()
+
+  const matches = (Array.isArray(sourceRows) ? sourceRows : [])
+    .map((sourceRow) => {
+      const sourceWorkerId = dashboardResolveWorkerIdValue(sourceRow)
+      if (!sourceWorkerId || sourceWorkerId !== workerId) {
+        return null
+      }
+
+      const sourceDay = dashboardResolveDayKey(sourceRow) || calendarTimelineRealEventRowDay(sourceRow)
+      if (normalizedDay && sourceDay && sourceDay !== normalizedDay) {
+        return null
+      }
+
+      const qrCodes = dashboardActivityQrCodesFromRow(sourceRow)
+      if (!qrCodes.length) {
+        return null
+      }
+
+      const label =
+        dashboardActivityCleanCompanyLabel(dashboardActivityCompanyLabel(sourceRow)) ||
+        qrCodes.map((code) => dashboardActivityResolveClientByQr(code)).find(Boolean) ||
+        ''
+      if (!label) {
+        return null
+      }
+
+      return {
+        label,
+        timestamp: dashboardActivityTimestampFromRow(sourceRow),
+      }
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.timestamp - left.timestamp)
+
+  return matches[0]?.label || ''
+}
+
 function dashboardBuildWorkdayActivityItems(rows = [], dayKey = todayYmd(), rangeStart = 0, rangeEnd = 0, nowTs = Date.now()) {
   return (Array.isArray(rows) ? rows : [])
     .map((row) => {
@@ -3461,18 +3821,22 @@ function dashboardBuildWorkdayActivityItems(rows = [], dayKey = todayYmd(), rang
         return null
       }
 
-      const stopDate = row?.isRunning
+      const endSource = row?.qrStop ?? row?.stop ?? row?.dayEndAt ?? row?.endAt
+      const hasStop = Boolean(toIso(endSource) || dashboardClockLabelToHm(endSource, ''))
+      const status = String(row?.status ?? row?.state ?? '').trim().toUpperCase()
+      const isRunning = Boolean(row?.isRunning) || (!hasStop && (status === 'RUNNING' || status === 'OPEN'))
+      const stopDate = isRunning
         ? null
-        : dashboardTodayDateFromTime(row?.qrStop ?? row?.stop ?? row?.dayEndAt ?? row?.endAt, dayKey)
+        : dashboardTodayDateFromTime(endSource, dayKey)
       const durationSeconds = dashboardParseDurationLabelToSeconds(row?.duration)
       let startTs = startDate.getTime()
       let stopTs = stopDate ? stopDate.getTime() : nowTs
 
-      if (!stopDate && durationSeconds > 0 && !row?.isRunning) {
+      if (!stopDate && durationSeconds > 0 && !isRunning) {
         stopTs = startTs + durationSeconds * 1000
       }
       if (stopTs < startTs) {
-        stopTs = row?.isRunning ? nowTs : startTs
+        stopTs = isRunning ? nowTs : startTs
       }
 
       const clippedStart = Math.max(startTs, rangeStart)
@@ -3484,13 +3848,12 @@ function dashboardBuildWorkdayActivityItems(rows = [], dayKey = todayYmd(), rang
       const rowKeys = dashboardResolveTodayRowAliasKeys(row)
       const linkedWorker = dashboardFindWorkerByAliasKeys(rowKeys)
       const identity = dashboardActivityWorkerIdentity(row, linkedWorker)
-      const clientLabel = dashboardResolveClientLabel(row)
-      const locationLabel =
-        clientLabel && clientLabel !== '-'
-          ? clientLabel
-          : String(row?.activeClient ?? row?.activeZone ?? row?.strefa ?? row?.zoneName ?? '').trim()
+      const companyLabel =
+        dashboardActivityCleanCompanyLabel(dashboardActivityCompanyLabel(row)) ||
+        dashboardActivityLatestQrCompanyLabelForRow(row, dayKey, appState.dashboardScheduleSourceRows) ||
+        '-'
       const elapsedSeconds = Math.max(0, Math.floor((stopTs - startTs) / 1000))
-      const durationLabel = row?.isRunning ? durationSecondsToHm(elapsedSeconds) : dashboardDurationLabelToHm(row?.duration, durationSecondsToHm(elapsedSeconds))
+      const durationLabel = isRunning ? durationSecondsToHm(elapsedSeconds) : dashboardDurationLabelToHm(row?.duration, durationSecondsToHm(elapsedSeconds))
 
       return {
         ...identity,
@@ -3500,8 +3863,9 @@ function dashboardBuildWorkdayActivityItems(rows = [], dayKey = todayYmd(), rang
         clippedStart,
         clippedStop,
         label: durationLabel,
-        locationLabel,
-        isRunning: Boolean(row?.isRunning),
+        locationLabel: companyLabel,
+        companyLabel,
+        isRunning,
       }
     })
     .filter(Boolean)
@@ -3542,7 +3906,7 @@ function dashboardBuildPlannedOrderActivityItems(dayKey = todayYmd(), rangeStart
         )
         const title = calendarTimelineOrderTitle(order)
         const clientLabel = ordersTimelineClientLabel(order)
-        const locationLabel = clientLabel && clientLabel !== '-' ? clientLabel : ordersTimelineAddressLabel(order)
+        const companyLabel = dashboardActivityCleanCompanyLabel(clientLabel) || dashboardActivityCleanCompanyLabel(ordersTimelineAddressLabel(order))
 
         return {
           ...identity,
@@ -3552,7 +3916,8 @@ function dashboardBuildPlannedOrderActivityItems(dayKey = todayYmd(), rangeStart
           clippedStart,
           clippedStop,
           label: title,
-          locationLabel,
+          locationLabel: companyLabel,
+          companyLabel,
           isRunning: false,
         }
       })
@@ -3600,8 +3965,11 @@ function renderDashboardActivityCalendar(rows = []) {
     return `<span class="is-hour" style="--dash-left:${left.toFixed(3)}%">${escapeHtml(pad2(hour))}</span>`
   })
 
+  const workdayRows = Array.isArray(appState.dashboardActivityWorkdayRows) && appState.dashboardActivityWorkdayRows.length
+    ? appState.dashboardActivityWorkdayRows
+    : safeRows
   const activityItems = [
-    ...dashboardBuildWorkdayActivityItems(safeRows, dayKey, rangeStart, rangeEnd, nowTs),
+    ...dashboardBuildWorkdayActivityItems(workdayRows, dayKey, rangeStart, rangeEnd, nowTs),
     ...dashboardBuildPlannedOrderActivityItems(dayKey, rangeStart, rangeEnd),
   ]
   const grouped = new Map()
@@ -3615,13 +3983,13 @@ function renderDashboardActivityCalendar(rows = []) {
         workerName: item.workerName,
         workerLogin: item.workerLogin,
         bars: [],
-        locationLabels: [],
+        companyLabels: [],
       })
     }
     const group = grouped.get(key)
     group.bars.push(item)
-    if (item.locationLabel && !group.locationLabels.includes(item.locationLabel)) {
-      group.locationLabels.push(item.locationLabel)
+    if (item.companyLabel && !group.companyLabels.includes(item.companyLabel)) {
+      group.companyLabels.push(item.companyLabel)
     }
   })
 
@@ -3652,9 +4020,10 @@ function renderDashboardActivityCalendar(rows = []) {
           `
         })
         .join('')
-      const locationLabel = group.locationLabels.slice(0, 3).join(', ')
+      const companyLabel = dashboardActivityCompanyLabelForGroup(bars, group.companyLabels)
       return {
         startTs: bars.length ? Math.min(...bars.map((bar) => bar.startTs)) : Number.MAX_SAFE_INTEGER,
+        companyLabel,
         workerSortKey: group.workerSortKey,
         html: `
           <div class="dash-activity-timeline-row" style="--dash-lane-count:${laneCount};--dash-row-height:${laneCount * 22 + 14}px;--dash-track-height:${laneCount * 22 + 6}px;">
@@ -3662,7 +4031,7 @@ function renderDashboardActivityCalendar(rows = []) {
             <div class="dash-activity-timeline-track">
               ${barsHtml}
             </div>
-            <div class="dash-activity-timeline-meta">${escapeHtml(locationLabel || '')}</div>
+            <div class="dash-activity-timeline-meta" title="${escapeHtml(companyLabel || '')}">${escapeHtml(companyLabel || '')}</div>
           </div>
         `,
       }
@@ -4068,6 +4437,7 @@ function dashboardMergeScheduleEntries(entries = []) {
       ...preferred,
       workerLogin: preferred.workerLogin || other.workerLogin || '',
       workerHistoryName: preferred.workerHistoryName || other.workerHistoryName || preferred.workerName,
+      workerDisplayName: preferred.workerDisplayName || dashboardWorkerSurnameDisplayName(preferred.workerName),
       status: String(existing.status ?? '').trim() === 'Praca' || String(entry.status ?? '').trim() === 'Praca' ? 'Praca' : preferred.status,
       statusClass: String(existing.status ?? '').trim() === 'Praca' || String(entry.status ?? '').trim() === 'Praca' ? 'is-work' : preferred.statusClass,
       morningText: dashboardMergeScheduleLineText(existing.morningText, entry.morningText),
@@ -4247,40 +4617,35 @@ function dashboardCanonicalWorkerId(value) {
   return /^W\d+$/.test(raw) ? raw : ''
 }
 
+function dashboardWorkerIdIdentityKeys(workerId) {
+  const canonicalId = dashboardCanonicalWorkerId(workerId)
+  const keys = new Set()
+  if (!canonicalId) {
+    return keys
+  }
+
+  const normalizedId = normalizeSearchText(canonicalId)
+  if (normalizedId) {
+    keys.add(`id:${normalizedId}`)
+  }
+
+  return keys
+}
+
 function dashboardResolveWorkerIdValue(row, workersPool = []) {
-  const direct = dashboardCanonicalWorkerId(row?.workerId ?? row?.id)
-  if (direct) {
-    return direct
-  }
+  void workersPool
+  const candidates = [
+    row?.workerId,
+    row?.worker?.workerId,
+    row?.employeeId,
+    row?.employee?.workerId,
+    row?.id,
+  ]
 
-  const workers = Array.isArray(workersPool) ? workersPool : []
-  if (!workers.length) {
-    return ''
-  }
-
-  const rowLoginKey = normalizeSearchText(row?.workerLogin ?? row?.login)
-  if (rowLoginKey) {
-    const matchByLogin = workers.find((worker) => {
-      const workerLoginKey = normalizeSearchText(worker?.workerLogin ?? worker?.login ?? worker?.id)
-      return Boolean(workerLoginKey) && workerLoginKey === rowLoginKey
-    })
-    const byLoginId = dashboardCanonicalWorkerId(matchByLogin?.workerId ?? matchByLogin?.id)
-    if (byLoginId) {
-      return byLoginId
-    }
-  }
-
-  const rowNameKey = normalizeSearchText(row?.workerName ?? row?.name)
-  if (rowNameKey) {
-    const matchesByName = workers.filter((worker) => {
-      const workerNameKey = normalizeSearchText(worker?.workerName ?? worker?.name)
-      return Boolean(workerNameKey) && workerNameKey === rowNameKey
-    })
-    if (matchesByName.length === 1) {
-      const byNameId = dashboardCanonicalWorkerId(matchesByName[0]?.workerId ?? matchesByName[0]?.id)
-      if (byNameId) {
-        return byNameId
-      }
+  for (const candidate of candidates) {
+    const workerId = dashboardCanonicalWorkerId(candidate)
+    if (workerId) {
+      return workerId
     }
   }
 
@@ -4349,10 +4714,6 @@ function dashboardBuildTodayWorkerStateById(dayKey) {
     if (workerIdKey) {
       upsertState(`id:${workerIdKey}`, row)
     }
-    const idDigits = dashboardNormalizeWorkerIdDigits(resolvedWorkerId)
-    if (idDigits) {
-      upsertState(`idn:${idDigits}`, row)
-    }
   })
 
   // Fallback for schedule colors: include all today's source rows (events/workdays),
@@ -4382,58 +4743,13 @@ function dashboardBuildTodayWorkerStateById(dayKey) {
     if (workerIdKey) {
       upsertState(`id:${workerIdKey}`, rowLike)
     }
-    const idDigits = dashboardNormalizeWorkerIdDigits(resolvedWorkerId)
-    if (idDigits) {
-      upsertState(`idn:${idDigits}`, rowLike)
-    }
   })
 
   return stateMap
 }
 
 function dashboardResolveScheduleWorkerAliasKeys(entry) {
-  const keySet = new Set()
-  const addKeys = (keys) => {
-    if (!(keys instanceof Set)) {
-      return
-    }
-    keys.forEach((key) => {
-      if (key) {
-        keySet.add(String(key))
-      }
-    })
-  }
-
-  addKeys(
-    dashboardWorkerAliasKeys(
-      entry?.workerName,
-      entry?.workerLogin ?? entry?.workerId ?? '',
-      entry?.workerId ?? '',
-      { includeLooseNameKeys: false },
-    ),
-  )
-
-  const workers = Array.isArray(appState.workers) ? appState.workers : []
-  if (!workers.length) {
-    return keySet
-  }
-
-  const linkedWorker =
-    dashboardResolveWorkerById(entry?.workerId, workers) ?? dashboardResolveWorkerByScheduleAlias(entry, workers)
-  if (!linkedWorker) {
-    return keySet
-  }
-
-  addKeys(
-    dashboardWorkerAliasKeys(
-      linkedWorker?.workerName ?? linkedWorker?.name,
-      linkedWorker?.workerLogin ?? linkedWorker?.login ?? linkedWorker?.id,
-      linkedWorker?.workerId ?? linkedWorker?.id,
-      { includeLooseNameKeys: false },
-    ),
-  )
-
-  return keySet
+  return dashboardWorkerIdIdentityKeys(dashboardResolveWorkerIdValue(entry))
 }
 
 function dashboardHideScheduleMissingStartAlert() {
@@ -4752,27 +5068,9 @@ function dashboardApplyScheduleVisibleLimit() {
     return
   }
 
-  const cards = [...cardsRoot.querySelectorAll('.dash-schedule-card')].filter((node) => node instanceof HTMLElement)
-  if (!cards.length) {
-    cardsRoot.style.removeProperty('max-height')
-    return
-  }
-
-  const visibleCount = Math.min(DASHBOARD_SCHEDULE_VISIBLE_WORKERS, cards.length)
-  const styles = window.getComputedStyle(cardsRoot)
-  const rowGap = Math.max(0, Number.parseFloat(styles.rowGap || styles.gap || '0') || 0)
-
-  let height = 0
-  for (let index = 0; index < visibleCount; index += 1) {
-    const card = cards[index]
-    const cardHeight = Math.max(0, Math.ceil(card.getBoundingClientRect().height || card.offsetHeight || 0))
-    height += cardHeight
-    if (index > 0) {
-      height += rowGap
-    }
-  }
-
-  cardsRoot.style.maxHeight = `${Math.max(120, Math.ceil(height) + 2)}px`
+  cardsRoot.style.removeProperty('height')
+  cardsRoot.style.removeProperty('max-height')
+  cardsRoot.style.removeProperty('min-height')
 }
 
 function dashboardQueueScheduleVisibleLimit() {
@@ -4834,10 +5132,11 @@ function dashboardRenderScheduleCards(dayBucket) {
   const enrichedRows = entries
     .map((entry) => {
       const linkedWorkerById = dashboardResolveWorkerById(entry?.workerId, workersPool)
-      const linkedWorkerForLabel = linkedWorkerById ?? dashboardResolveWorkerByScheduleAlias(entry, workersPool)
+      const linkedWorkerForLabel = linkedWorkerById
       const workerName = dashboardScheduleWorkerDisplayName(
         linkedWorkerForLabel?.workerName ?? linkedWorkerForLabel?.name ?? entry?.workerName ?? entry?.workerId,
       )
+      const workerDisplayName = dashboardWorkerSurnameDisplayName(workerName)
       const workerLogin = String(entry?.workerLogin ?? linkedWorkerForLabel?.workerLogin ?? linkedWorkerForLabel?.login ?? '').trim()
       const workerHistoryName =
         String(linkedWorkerForLabel?.workerName ?? linkedWorkerForLabel?.name ?? workerName).trim() || workerName
@@ -4862,19 +5161,11 @@ function dashboardRenderScheduleCards(dayBucket) {
         dashboardResolveWorkerIdValue(linkedWorkerForLabel, workersPool) ||
         ''
       const activeIdKey = normalizeSearchText(activeIdSource)
-      const activeIdDigits = dashboardNormalizeWorkerIdDigits(activeIdSource)
       const workerKey =
         activeIdKey
           ? `id:${activeIdKey}`
-          : activeIdDigits
-            ? `idn:${activeIdDigits}`
-            : workerLogin
-              ? `l:${normalizeSearchText(workerLogin)}`
-              : `n:${normalizeSearchText(workerHistoryName || workerName)}`
-      const todayState =
-        (activeIdKey ? todayWorkerStateMap.get(`id:${activeIdKey}`) : null) ||
-        (activeIdDigits ? todayWorkerStateMap.get(`idn:${activeIdDigits}`) : null) ||
-        null
+          : `unresolved:${normalizeSearchText(workerLogin || workerHistoryName || workerName) || 'worker'}`
+      const todayState = activeIdKey ? todayWorkerStateMap.get(`id:${activeIdKey}`) : null
 
       const actualStartMinutes = Number(todayState?.startMinutes ?? -1)
       const hasQrStartAny = Boolean(todayState?.hasStart) && actualStartMinutes >= 0
@@ -4923,6 +5214,7 @@ function dashboardRenderScheduleCards(dayBucket) {
       return {
         workerKey,
         workerName,
+        workerDisplayName,
         workerLogin,
         workerHistoryName,
         status,
@@ -4965,7 +5257,7 @@ function dashboardRenderScheduleCards(dayBucket) {
           title="Pokaż historię czasu: ${escapeHtml(entry.workerHistoryName)}"
           data-dash-worker-login="${escapeHtml(entry.workerLogin)}"
           data-dash-worker-name="${escapeHtml(entry.workerHistoryName)}"
-        >${escapeHtml(entry.workerName)}</button>
+        >${escapeHtml(entry.workerDisplayName || dashboardWorkerSurnameDisplayName(entry.workerName))}</button>
       `
       return `
         <article class="${cardClass}">
@@ -5092,30 +5384,7 @@ function syncDashboardSidePanelHeight() {
     return
   }
 
-  if (window.matchMedia('(max-width: 1240px)').matches) {
-    panel.style.removeProperty('--dash-side-target-height')
-    return
-  }
-
-  const rectTop = panel.getBoundingClientRect().top
-  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
-  if (!(viewportHeight > 0)) {
-    return
-  }
-
-  const bottomGap = 14
-  const minSchedulePanelHeight = 1180
-  const viewportTarget = Math.max(minSchedulePanelHeight, Math.floor(viewportHeight - rectTop - bottomGap))
-  let targetHeight = viewportTarget
-  const activityPanel = document.querySelector('#view-dashboard .dash-activity-panel')
-  if (activityPanel instanceof HTMLElement) {
-    const activityBottom = activityPanel.getBoundingClientRect().bottom
-    const columnTarget = Math.floor(activityBottom - rectTop)
-    if (Number.isFinite(columnTarget) && columnTarget > 520) {
-      targetHeight = Math.max(minSchedulePanelHeight, Math.min(1400, columnTarget))
-    }
-  }
-  panel.style.setProperty('--dash-side-target-height', `${targetHeight}px`)
+  panel.style.removeProperty('--dash-side-target-height')
   dashboardQueueScheduleVisibleLimit()
 }
 
@@ -5227,46 +5496,7 @@ function dashboardBuildScheduleStartMinutesMapForDay(scheduleDays = [], dayKey =
 }
 
 function dashboardResolveTodayRowAliasKeys(row) {
-  const keys = dashboardWorkerAliasKeys(
-    row?.workerName ?? row?.name,
-    row?.workerLogin ?? row?.login ?? row?.workerId ?? row?.id,
-    row?.workerId ?? row?.id,
-    { includeLooseNameKeys: false },
-  )
-
-  const workers = Array.isArray(appState.workers) ? appState.workers : []
-  if (!workers.length) {
-    return keys
-  }
-
-  const rowLoginKey = normalizeSearchText(row?.workerLogin ?? row?.login ?? row?.id)
-  const rowIdKey = normalizeSearchText(row?.workerId ?? row?.id)
-  const rowNameKey = normalizeSearchText(row?.workerName ?? row?.name)
-  const linkedWorker = workers.find((worker) => {
-    const workerLoginKey = normalizeSearchText(worker?.workerLogin ?? worker?.login ?? worker?.id)
-    const workerIdKey = normalizeSearchText(worker?.workerId ?? worker?.id)
-    const workerNameKey = normalizeSearchText(worker?.workerName ?? worker?.name)
-    return (
-      (rowLoginKey && workerLoginKey && rowLoginKey === workerLoginKey) ||
-      (rowIdKey && workerIdKey && rowIdKey === workerIdKey) ||
-      (rowNameKey && workerNameKey && rowNameKey === workerNameKey)
-    )
-  })
-
-  if (linkedWorker) {
-    dashboardWorkerAliasKeys(
-      linkedWorker?.workerName ?? linkedWorker?.name,
-      linkedWorker?.workerLogin ?? linkedWorker?.login ?? linkedWorker?.id,
-      linkedWorker?.workerId ?? linkedWorker?.id,
-      { includeLooseNameKeys: false },
-    ).forEach((key) => {
-      if (key) {
-        keys.add(String(key))
-      }
-    })
-  }
-
-  return keys
+  return dashboardWorkerIdIdentityKeys(dashboardResolveWorkerIdValue(row))
 }
 
 function dashboardResolveLateMinutesForTodayRow(row, scheduleStartMap) {
@@ -6773,6 +7003,11 @@ function dashboardWriteLocalSnapshot(orgId = appState.session?.orgId, patch = {}
     cachedAt: Date.now(),
     summary: patch.summary ?? existing.summary ?? null,
     todayRows: Array.isArray(patch.todayRows) ? patch.todayRows : Array.isArray(existing.todayRows) ? existing.todayRows : [],
+    activityWorkdayRows: Array.isArray(patch.activityWorkdayRows)
+      ? patch.activityWorkdayRows
+      : Array.isArray(existing.activityWorkdayRows)
+        ? existing.activityWorkdayRows
+        : [],
     scheduleSourceRows: Array.isArray(patch.scheduleSourceRows)
       ? patch.scheduleSourceRows
       : Array.isArray(existing.scheduleSourceRows)
@@ -6801,6 +7036,9 @@ function dashboardApplyLocalSnapshot(orgId = appState.session?.orgId) {
 
   if (Array.isArray(snapshot.scheduleSourceRows)) {
     appState.dashboardScheduleSourceRows = snapshot.scheduleSourceRows
+  }
+  if (Array.isArray(snapshot.activityWorkdayRows)) {
+    appState.dashboardActivityWorkdayRows = snapshot.activityWorkdayRows
   }
   if (Array.isArray(snapshot.workers) && snapshot.workers.length) {
     appState.workers = snapshot.workers
@@ -7244,6 +7482,7 @@ function closeClientModal() {
     modal.style.display = 'none'
   }
 
+  appState.ordersClientCreateReturnOrderId = ''
   appState.clientModalMode = 'add'
   appState.clientModalClientId = ''
   setClientModalReadonly(false)
@@ -7310,6 +7549,7 @@ async function saveClientData() {
   const mode = String(appState.clientModalMode ?? 'add')
   const id = String(document.getElementById('clId')?.value ?? '').trim()
   const name = String(document.getElementById('clNazwa')?.value ?? '').trim()
+  const ordersReturnOrderId = mode === 'add' ? String(appState.ordersClientCreateReturnOrderId ?? '').trim() : ''
 
   if (!id || !name) {
     alert('Uzupełnij ID i Nazwę klienta.')
@@ -7344,6 +7584,9 @@ async function saveClientData() {
 
     closeClientModal()
     await fetchClientsForCurrentSession(true)
+    if (ordersReturnOrderId) {
+      ordersSelectCreatedClientInEditor(payload, ordersReturnOrderId)
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Błąd zapisu klienta.'
     alert(message)
@@ -8149,7 +8392,7 @@ function ordersOrderSupplies(order = {}) {
 function ordersSubtaskRowsHtml(order = {}) {
   const tasks = ordersOrderSubtasks(order)
   if (!tasks.length) {
-    return '<div class="orders-simple-list-empty">Brak dodanych czynności.</div>'
+    return '<div class="orders-simple-list-empty">Brak dodanych zadań.</div>'
   }
   return tasks
     .map(
@@ -8357,6 +8600,72 @@ function ordersAddClientExecutionAddress(target, value = '', meta = '') {
   })
 }
 
+function ordersClientAddressMemoryKey() {
+  const orgId = String(appState.session?.orgId ?? 'default').trim() || 'default'
+  return `${ORDERS_CLIENT_ADDRESS_MEMORY_PREFIX}:${orgId}`
+}
+
+function ordersClientAddressMemoryIdentity(client = {}) {
+  return normalizeSearchText(ordersClientId(client) || ordersClientDisplayName(client))
+}
+
+function ordersReadClientAddressMemory() {
+  try {
+    const raw = window.localStorage?.getItem(ordersClientAddressMemoryKey()) || '{}'
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function ordersWriteClientAddressMemory(memory = {}) {
+  try {
+    window.localStorage?.setItem(ordersClientAddressMemoryKey(), JSON.stringify(memory))
+  } catch {
+    // Local address memory is a convenience only; order save still works without it.
+  }
+}
+
+function ordersStoredClientExecutionAddresses(client = {}) {
+  const key = ordersClientAddressMemoryIdentity(client)
+  if (!key) {
+    return []
+  }
+  const memory = ordersReadClientAddressMemory()
+  const rows = Array.isArray(memory[key]) ? memory[key] : []
+  return rows
+    .map((row) => ({
+      label: ordersExecutionAddressFromValue(row?.label ?? row),
+      meta: ordersFirstClientText(row?.meta, 'Zapamiętany adres'),
+    }))
+    .filter((row) => row.label)
+}
+
+function ordersStoreClientExecutionAddress(client = {}, address = '') {
+  const key = ordersClientAddressMemoryIdentity(client)
+  const label = ordersExecutionAddressFromValue(address)
+  if (!key || !label) {
+    return false
+  }
+  const memory = ordersReadClientAddressMemory()
+  const rows = Array.isArray(memory[key]) ? memory[key] : []
+  const exists = rows.some((row) => ordersLocationSuggestionKey(row?.label ?? row) === ordersLocationSuggestionKey(label))
+  if (exists) {
+    return false
+  }
+  memory[key] = [
+    ...rows,
+    {
+      label,
+      meta: 'Zapamiętany adres',
+      createdAt: new Date().toISOString(),
+    },
+  ]
+  ordersWriteClientAddressMemory(memory)
+  return true
+}
+
 function ordersZoneMatchesClient(zone = {}, client = {}) {
   const clientId = normalizeSearchText(ordersClientId(client))
   const clientName = normalizeSearchText(ordersClientDisplayName(client))
@@ -8406,6 +8715,10 @@ function ordersClientExecutionAddresses(client = {}) {
       const value = ordersFirstClientText(zone?.location, zone?.lokalizacja, zone?.address, zone?.adres)
       ordersAddClientExecutionAddress(rows, value || zone, meta)
     })
+
+  ordersStoredClientExecutionAddresses(client).forEach((row) => {
+    ordersAddClientExecutionAddress(rows, row.label, row.meta)
+  })
 
   return rows
 }
@@ -8547,13 +8860,90 @@ function ordersClientOptionsHtml(selectedLabel = '') {
     selected && !hasSelected ? `<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}</option>` : ''
 
   return [
-    `<option value=""${selected ? '' : ' selected'}>-- Nowy klient --</option>`,
+    `<option value=""${selected ? '' : ' selected'}>Wybierz klienta</option>`,
+    `<option value="${ORDERS_NEW_CLIENT_VALUE}">+ Dodaj nowego klienta</option>`,
     selectedOption,
     ...clients.map((client) => {
       const selectedAttr = selected && normalizeSearchText(client) === normalizeSearchText(selected) ? ' selected' : ''
       return `<option value="${escapeHtml(client)}"${selectedAttr}>${escapeHtml(client)}</option>`
     }),
   ].join('')
+}
+
+function ordersApplyClientDataToOrder(order = {}, data = {}, selection = '') {
+  if (!order || typeof order !== 'object') {
+    return
+  }
+  const clientName = data.clientName || String(selection ?? '').trim()
+  const defaultAddress = ordersClientAddressLabel(data)
+  order.clientId = data.clientId || ''
+  order.clientLabel = clientName
+  order.clientName = clientName
+  order.nip = data.nip || ''
+  order.clientNip = data.nip || ''
+  order.street = data.street || ''
+  order.clientStreet = data.street || ''
+  order.city = data.city || ''
+  order.clientCity = data.city || ''
+  order.postCode = data.postCode || ''
+  order.postalCode = data.postCode || ''
+  order.clientPostCode = data.postCode || ''
+  order.region = data.region || ''
+  order.country = data.country || ''
+  order.email = data.email || ''
+  order.contact = data.contact || ''
+  order.addressLabel = ordersReadInputValue('ordersEditLocation') || defaultAddress
+  order.executionAddressLabel = ordersReadInputValue('ordersEditLocation')
+  order.customAddressLabel = order.executionAddressLabel
+  order.mapUrl = ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(order.addressLabel)
+  order.googleMapsUrl = order.mapUrl
+}
+
+function ordersOpenClientCreateFromEditor() {
+  appState.ordersClientCreateReturnOrderId = String(appState.ordersEditingId ?? '').trim()
+  const select = document.getElementById('ordersEditClient')
+  if (select instanceof HTMLSelectElement) {
+    select.value = ''
+  }
+  openClientModal('add')
+  window.setTimeout(() => {
+    document.getElementById('clNazwa')?.focus()
+  }, 0)
+}
+
+function ordersSelectCreatedClientInEditor(payload = {}, orderId = '') {
+  const targetOrderId = String(orderId ?? '').trim()
+  const client =
+    ordersFindClientBySelection(payload?.clientId || payload?.id) ||
+    ordersFindClientBySelection(payload?.name) ||
+    payload
+  const data = ordersClientFormData(client)
+  const label = data.clientName || String(payload?.name ?? '').trim()
+  const order = ordersFindTimelineOrder(targetOrderId)
+  if (order) {
+    ordersApplyClientDataToOrder(order, data, label)
+  }
+  if (appState.currentRoute === 'orders' && appState.ordersEditingId === targetOrderId) {
+    renderOrdersView()
+    showTransientNotice('Dodano klienta i podpięto go do zlecenia.')
+  }
+}
+
+function ordersAddExecutionAddressForCurrentClient() {
+  const selectedClient = ordersFindClientBySelection(ordersReadInputValue('ordersEditClient'))
+  if (!selectedClient) {
+    showTransientNotice('Najpierw wybierz klienta.', 'error')
+    return
+  }
+  const address = ordersReadInputValue('ordersEditLocation')
+  if (!address) {
+    showTransientNotice('Wpisz adres wykonania zlecenia.', 'error')
+    return
+  }
+  const added = ordersStoreClientExecutionAddress(selectedClient, address)
+  ordersRenderClientAddressSelect(selectedClient, address)
+  ordersSyncAddressSelectToLocation(address)
+  showTransientNotice(added ? 'Adres zapamiętany dla tego klienta.' : 'Ten adres jest już na liście klienta.')
 }
 
 function ordersTimelineToneForType(type = '') {
@@ -8622,7 +9012,7 @@ function ordersCreateDraftOrder() {
 }
 
 function ordersDiscardDraftIfNeeded() {
-  if (appState.ordersEditorMode !== 'add' || !appState.ordersEditingId) {
+  if (!['add', 'single-override'].includes(String(appState.ordersEditorMode ?? '')) || !appState.ordersEditingId) {
     return
   }
   const draftId = String(appState.ordersEditingId)
@@ -9701,7 +10091,7 @@ function ordersRenderEditor(order = {}) {
 
   const title = document.getElementById('ordersEditTitle')
   if (title) {
-    title.textContent = appState.ordersEditorMode === 'add' ? 'Dodaj zlecenie' : 'Edytuj zlecenie'
+    title.textContent = appState.ordersEditorMode === 'add' ? 'Dodaj zlecenie' : 'Edycja zlecenia'
   }
 
   const clientSelect = document.getElementById('ordersEditClient')
@@ -9803,6 +10193,44 @@ function ordersOpenEditorFromCalendar(orderId) {
   }, 0)
 }
 
+function ordersOpenRecurringOccurrenceEditorFromCalendar(sourceOrderId = '', occurrenceDateYmd = '') {
+  const sourceId = String(sourceOrderId ?? '').trim()
+  const occurrenceDay = String(occurrenceDateYmd ?? '').trim()
+  const sourceOrder = calendarTimelineSourceOrderById(sourceId)
+  if (!sourceOrder || !calendarTimelineOrderIsRecurring(sourceOrder) || !/^\d{4}-\d{2}-\d{2}$/.test(occurrenceDay)) {
+    showTransientNotice('Nie znaleziono wystąpienia cyklicznego do edycji.', 'error')
+    return
+  }
+
+  const overrideId = calendarTimelineRecurringOverrideId(sourceId, occurrenceDay)
+  const existingOverride = ordersFindTimelineOrder(overrideId)
+  const overrideOrder =
+    existingOverride ||
+    calendarTimelineBuildSingleOccurrenceOverride(sourceOrder, occurrenceDay, {
+      isDraft: true,
+      updatedAt: new Date().toISOString(),
+    })
+  if (!overrideOrder) {
+    showTransientNotice('Nie udało się przygotować edycji tego dnia.', 'error')
+    return
+  }
+
+  if (!existingOverride) {
+    appState.calendarTimelineDemoOrders = [
+      overrideOrder,
+      ...ordersListSourceOrders().filter((order) => String(order?.id ?? '') !== overrideId),
+    ]
+  }
+  appState.ordersEditingId = overrideId
+  appState.ordersEditorMode = 'single-override'
+  appState.ordersEditorTab = 'basic'
+  document.querySelector('[data-route="orders"]')?.click()
+  window.setTimeout(() => {
+    renderOrdersView()
+    void ordersWarmLocationSources()
+  }, 0)
+}
+
 function ordersShowList() {
   ordersCloseDeviceNoteModal()
   ordersDiscardDraftIfNeeded()
@@ -9844,8 +10272,16 @@ function ordersSaveEditor() {
   const selectedType = String(ordersReadInputValue('ordersEditType') || order.type || 'individual').trim()
   const scheduleMode = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat' || selectedType === 'cyclic' ? 'repeat' : 'once'
   const type = scheduleMode === 'repeat' ? 'cyclic' : selectedType === 'cyclic' ? 'individual' : selectedType
-  const clientLabel = ordersReadInputValue('ordersEditClient') || ordersReadInputValue('ordersEditClientName')
+  const clientLabel = ordersReadInputValue('ordersEditClient')
+  if (!clientLabel || clientLabel === ORDERS_NEW_CLIENT_VALUE) {
+    showTransientNotice('Nie zapisano: wybierz klienta z listy.', 'error')
+    return
+  }
   const selectedClient = ordersFindClientBySelection(clientLabel)
+  if (!selectedClient) {
+    showTransientNotice('Nie zapisano: wybierz klienta istniejącego w bazie albo dodaj nowego klienta.', 'error')
+    return
+  }
   const selectedClientData = selectedClient ? ordersClientFormData(selectedClient) : {}
   const clientName = ordersReadInputValue('ordersEditClientName') || selectedClientData.clientName
   const clientStreet = ordersReadInputValue('ordersEditStreet') || selectedClientData.street
@@ -9954,7 +10390,11 @@ function ordersSaveEditor() {
     return
   }
 
-  ordersSaveTimelineOrders(ordersListSourceOrders().map((item) => (item.id === nextOrder.id ? nextOrder : item)))
+  const sourceOrders = ordersListSourceOrders()
+  const nextOrders = nextOrder.recurrenceOverride
+    ? calendarTimelineOrdersWithSingleOccurrenceOverride(sourceOrders, nextOrder)
+    : sourceOrders.map((item) => (item.id === nextOrder.id ? nextOrder : item))
+  ordersSaveTimelineOrders(nextOrders)
   appState.ordersEditorMode = 'edit'
   appState.ordersEditingId = ''
   renderOrdersView()
@@ -10511,26 +10951,14 @@ function bindOrdersViewFunctions() {
     if (event.target?.id === 'ordersEditClient') {
       const order = ordersFindTimelineOrder(appState.ordersEditingId)
       const selection = ordersReadInputValue('ordersEditClient')
+      if (selection === ORDERS_NEW_CLIENT_VALUE) {
+        ordersOpenClientCreateFromEditor()
+        return
+      }
       const applied = ordersApplySelectedClientToEditor(selection)
       if (order) {
         const data = applied?.data ?? { clientName: selection }
-        order.clientId = data.clientId || ''
-        order.clientLabel = data.clientName || selection
-        order.clientName = data.clientName || selection
-        order.nip = data.nip || ''
-        order.clientNip = data.nip || ''
-        order.street = data.street || ''
-        order.city = data.city || ''
-        order.postCode = data.postCode || ''
-        order.region = data.region || ''
-        order.country = data.country || ''
-        order.email = data.email || ''
-        order.contact = data.contact || ''
-        order.addressLabel = ordersReadInputValue('ordersEditLocation') || ordersClientAddressLabel(data)
-        order.executionAddressLabel = ordersReadInputValue('ordersEditLocation')
-        order.customAddressLabel = order.executionAddressLabel
-        order.mapUrl = ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(order.addressLabel)
-        order.googleMapsUrl = order.mapUrl
+        ordersApplyClientDataToOrder(order, data, selection)
         ordersRenderSchedulePreview(order)
       }
       return
@@ -10630,6 +11058,13 @@ function bindOrdersViewFunctions() {
     if (addSupply) {
       event.preventDefault()
       ordersAddSupplyToCurrentOrder()
+      return
+    }
+
+    const addAddressMemory = eventTargetClosest(event, '#ordersAddressMemoryAdd')
+    if (addAddressMemory) {
+      event.preventDefault()
+      ordersAddExecutionAddressForCurrentClient()
       return
     }
 
@@ -11608,8 +12043,8 @@ function renderEventsRows(rows) {
       const canSelect = canManageEvents()
       const comment = normalizeVisibleEventComment(row.comment)
       const commentCell = comment
-        ? `<button class="btn2" type="button" data-event-comment="${index}" title="Pokaz komentarz">💬</button>`
-        : ''
+        ? `<button class="event-comment-btn" type="button" data-event-comment="${index}" title="Pokaż komentarz" aria-label="Pokaż komentarz">i</button>`
+        : '<span class="event-empty">-</span>'
       const workerLogin = String(row.workerLogin ?? '').trim()
       const workerName = resolveWorkerNameFromWorkers(workerLogin, row.workerName)
       const workerPrimary = workerName || workerLogin || '-'
@@ -11646,6 +12081,10 @@ function renderEventsRows(rows) {
       const startLabel = dashboardClockLabelToHm(row.start, '-')
       const stopLabel = dashboardClockLabelToHm(row.stop, '-')
       const durationLabel = dashboardDurationLabelToHm(row.duration, '00:00')
+      const locationLabel = String(row.lokalizacja || '-').trim() || '-'
+      const editedByLabel = String(row.editedBy || '-').trim() || '-'
+      const timePill = (label, type) =>
+        `<span class="event-time-pill event-time-pill--${type}${label === '-' ? ' is-empty' : ''}">${escapeHtml(label)}</span>`
 
       return `
         <div class="events-row${isSelected ? ' is-selected' : ''}">
@@ -11655,13 +12094,13 @@ function renderEventsRows(rows) {
           <div>${workerCell}</div>
           <div>${clientCell}</div>
           <div>${zoneCell}</div>
-          <div>${escapeHtml(row.lokalizacja || '-')}</div>
-          <div class="mono">${escapeHtml(row.date || '-')}</div>
-          <div class="mono time-start">${escapeHtml(startLabel)}</div>
-          <div class="mono time-stop">${escapeHtml(stopLabel)}</div>
-          <div class="mono time-duration">${escapeHtml(durationLabel)}</div>
-          <div>${commentCell}</div>
-          <div>${escapeHtml(row.editedBy || '-')}</div>
+          <div><span class="${locationLabel === '-' ? 'event-empty' : 'event-location'}">${escapeHtml(locationLabel)}</span></div>
+          <div><span class="event-date-pill mono">${escapeHtml(row.date || '-')}</span></div>
+          <div class="mono time-start">${timePill(startLabel, 'start')}</div>
+          <div class="mono time-stop">${timePill(stopLabel, 'stop')}</div>
+          <div class="mono time-duration">${timePill(durationLabel, 'duration')}</div>
+          <div class="event-comment-cell">${commentCell}</div>
+          <div><span class="${editedByLabel === '-' ? 'event-empty' : 'event-edited-by'}">${escapeHtml(editedByLabel)}</span></div>
           <div>
             <button class="event-edit-icon-btn" type="button" data-event-edit="${index}" aria-label="Edytuj zdarzenie" title="Edytuj zdarzenie">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -12293,9 +12732,10 @@ async function dashboardLoadFastRows(orgId) {
 
   const todayStartSourceRows = [...(recentEvents.items ?? []), ...(todayWorkdays.items ?? [])]
   appState.dashboardScheduleSourceRows = todayStartSourceRows
+  appState.dashboardActivityWorkdayRows = Array.isArray(todayWorkdays.items) ? todayWorkdays.items : []
   const todayRows = dashboardApplyFirstQrStartToday(
     todayActive.items ?? [],
-    todayStartSourceRows,
+    todayWorkdays.items ?? [],
     appState.dashboardScheduleDays,
   )
 
@@ -12344,6 +12784,7 @@ async function dashboardRefreshBackgroundData(orgId, options = {}) {
   dashboardWriteLocalSnapshot(orgId, {
     summary,
     todayRows: appState.dashboardTodayRows,
+    activityWorkdayRows: appState.dashboardActivityWorkdayRows,
     scheduleSourceRows: appState.dashboardScheduleSourceRows,
     comments: dashboardComments,
   })
@@ -12625,6 +13066,7 @@ async function refreshDashboardWidgets() {
     dashboardWriteLocalSnapshot(orgId, {
       summary,
       todayRows,
+      activityWorkdayRows: appState.dashboardActivityWorkdayRows,
       scheduleSourceRows: appState.dashboardScheduleSourceRows,
       comments: dashboardBuildNewComments(recentEvents.items ?? [], []),
     })
@@ -17456,14 +17898,33 @@ function reportHistorySetSummaryRows(rows = []) {
       document.getElementById('repHistoryWorkerSearch')?.value ??
       '',
   ).trim()
-  const workerLine = isWorkersTab ? `<div><b>Osoba:</b> ${escapeHtml(selectedWorkerLabel || '-')}</div>` : ''
+  const selectedLabel = isWorkersTab ? selectedWorkerLabel || '-' : 'Wybrany zakres'
+  const selectedCaption = isWorkersTab ? 'Osoba' : 'Zestawienie'
 
   summary.innerHTML = `
-    <div class="rep-summary-card">
-      ${workerLine}
-      <div><b>Dni:</b> ${days}</div>
-      <div><b>Wpisy:</b> ${events} · <b>Otwarte:</b> ${running}</div>
-      <div><b>Czas pracy:</b> ${durationSecondsToHms(closedSec)}</div>
+    <div class="rep-history-summary-card">
+      <div class="rep-history-summary-person">
+        <span>${escapeHtml(selectedCaption)}</span>
+        <strong>${escapeHtml(selectedLabel)}</strong>
+      </div>
+      <div class="rep-history-summary-grid">
+        <div class="rep-history-summary-kpi">
+          <span>Dni</span>
+          <strong>${escapeHtml(String(days))}</strong>
+        </div>
+        <div class="rep-history-summary-kpi">
+          <span>Wpisy</span>
+          <strong>${escapeHtml(String(events))}</strong>
+        </div>
+        <div class="rep-history-summary-kpi">
+          <span>Otwarte</span>
+          <strong>${escapeHtml(String(running))}</strong>
+        </div>
+        <div class="rep-history-summary-kpi is-total">
+          <span>Czas pracy</span>
+          <strong>${escapeHtml(durationSecondsToHms(closedSec))}</strong>
+        </div>
+      </div>
     </div>
   `
   reportSetVisible('repHistorySummary', true)
@@ -17775,21 +18236,18 @@ function reportHistoryDayInfoHtml(row) {
 
   return `
     <div class="rep-history-day-info">
-      <div class="dash-time-stack">
-        <div class="dash-time-line dash-time-line--start">
-          <span class="dash-time-label">Godzina START</span>
-          <span class="dash-time-colon">:</span>
-          <span class="dash-time-value">${escapeHtml(startValue)}</span>
+      <div class="rep-history-day-metrics">
+        <div class="rep-history-time-pill is-start">
+          <span>Start</span>
+          <strong>${escapeHtml(startValue)}</strong>
         </div>
-        <div class="dash-time-line dash-time-line--stop">
-          <span class="dash-time-label">Godzina STOP</span>
-          <span class="dash-time-colon">:</span>
-          <span class="dash-time-value">${escapeHtml(stopValue)}</span>
+        <div class="rep-history-time-pill is-stop">
+          <span>Stop</span>
+          <strong>${escapeHtml(stopValue)}</strong>
         </div>
-        <div class="dash-time-line dash-time-line--work">
-          <span class="dash-time-label">Czas pracy</span>
-          <span class="dash-time-colon">:</span>
-          <span class="dash-time-value time-duration">${escapeHtml(workValue)}</span>
+        <div class="rep-history-time-pill is-work">
+          <span>Czas</span>
+          <strong>${escapeHtml(workValue)}</strong>
         </div>
       </div>
       ${stopDayButton}
@@ -18125,13 +18583,13 @@ function reportHistoryRenderTable() {
   const tab = reportHistoryNormalizeTab(appState.reportHistoryTab)
   const rows = Array.isArray(appState.reportHistoryRows) ? appState.reportHistoryRows : []
   const isWorkersTab = tab === 'workers'
-  const detailLabel = isWorkersTab ? 'Info dnia' : 'Szczegoly'
+  const detailLabel = isWorkersTab ? 'Godziny dnia' : 'Szczegóły'
   const closedLabel = 'Czas pracy'
   const headHtml = `
     <thead>
       <tr>
         <th></th>
-        <th>Data</th>
+        <th>Dzień</th>
         <th class="ta-right">Wpisy</th>
         <th class="ta-right">${closedLabel}</th>
         <th class="ta-right">Otwarte</th>
@@ -18149,7 +18607,7 @@ function reportHistoryRenderTable() {
     .map((row) => {
       const dayKey = String(row.dayKey ?? '').trim()
       const expanded = Boolean(appState.reportHistoryExpanded?.[dayKey])
-      const actionLabel = expanded ? 'Zwin' : 'Rozwin'
+      const actionLabel = expanded ? 'Ukryj' : 'Szczegóły'
       const dayLabel = formatDatePl(`${dayKey}T00:00:00.000Z`)
       const detailHtml = reportHistoryRenderDetails(row, tab, dayKey)
       const detailValue = isWorkersTab
@@ -21742,7 +22200,7 @@ async function calendarEnsureTimelineWorkerState(options = {}) {
     let sourceRows = []
     let currentStatusRows = []
     if (dayKey === todayYmd()) {
-      const [{ todayRows }, eventsResponse] = await Promise.all([
+      const [{ todayRows, todayWorkdays }, eventsResponse] = await Promise.all([
         dashboardLoadFastRows(String(appState.session.orgId)),
         getWorkdays(appState.session.orgId, {
           source: 'events',
@@ -21754,10 +22212,13 @@ async function calendarEnsureTimelineWorkerState(options = {}) {
       ])
       statusRows = Array.isArray(todayRows) ? todayRows : []
       currentStatusRows = statusRows
-      sourceRows = Array.isArray(eventsResponse?.items) ? eventsResponse.items : []
+      sourceRows = [
+        ...(Array.isArray(eventsResponse?.items) ? eventsResponse.items : []),
+        ...(Array.isArray(todayWorkdays?.items) ? todayWorkdays.items : []),
+      ]
       appState.dashboardTodayRows = statusRows
     } else {
-      const [eventsResponse, currentStatusResponse] = await Promise.all([
+      const [eventsResponse, workdaysResponse, currentStatusResponse] = await Promise.all([
         getWorkdays(appState.session.orgId, {
           source: 'events',
           fromIso: dayKey,
@@ -21765,9 +22226,19 @@ async function calendarEnsureTimelineWorkerState(options = {}) {
           page: 1,
           pageSize: 8000,
         }).catch(() => ({ items: [] })),
+        getWorkdays(appState.session.orgId, {
+          source: 'workdays',
+          fromIso: dayKey,
+          toIso: rangeEndDay,
+          page: 1,
+          pageSize: 8000,
+        }).catch(() => ({ items: [] })),
         dashboardLoadFastRows(String(appState.session.orgId)).catch(() => ({ todayRows: appState.dashboardTodayRows || [] })),
       ])
-      sourceRows = Array.isArray(eventsResponse.items) ? eventsResponse.items : []
+      sourceRows = [
+        ...(Array.isArray(eventsResponse.items) ? eventsResponse.items : []),
+        ...(Array.isArray(workdaysResponse.items) ? workdaysResponse.items : []),
+      ]
       currentStatusRows = Array.isArray(currentStatusResponse?.todayRows) ? currentStatusResponse.todayRows : []
       if (currentStatusRows.length) {
         appState.dashboardTodayRows = currentStatusRows
@@ -21843,26 +22314,7 @@ function calendarTimelineWorkerName(rawName = '') {
 }
 
 function calendarTimelineWorkerAliasKeys(worker = {}) {
-  const keys = new Set()
-  const addKeys = (nextKeys) => {
-    if (!(nextKeys instanceof Set)) {
-      return
-    }
-    nextKeys.forEach((key) => {
-      if (key) {
-        keys.add(String(key))
-      }
-    })
-  }
-  const workerName = worker?.workerName ?? worker?.fullName ?? worker?.name
-  const workerLogin = worker?.workerLogin ?? worker?.login ?? worker?.id
-  const workerId = worker?.workerId ?? worker?.id
-  addKeys(dashboardWorkerAliasKeys(workerName, workerLogin, workerId, { includeLooseNameKeys: false }))
-  const loginEmail = String(worker?.loginEmail ?? worker?.email ?? '').trim()
-  if (loginEmail) {
-    addKeys(dashboardWorkerAliasKeys(workerName, loginEmail, workerId, { includeLooseNameKeys: false }))
-  }
-  return keys
+  return dashboardWorkerIdIdentityKeys(worker?.workerId ?? worker?.id)
 }
 
 function calendarTimelineNormalizeWorkerIdentity(value = '') {
@@ -22566,17 +23018,21 @@ function calendarTimelineBuildWorkerStateMap(dayKey) {
     const sourceBucket = sourceBuckets.get(key)
     const hasEventStart = Boolean(sourceBucket?.hasStart)
     const sourceStartMinutes = Number(sourceBucket?.latestStartMinutes ?? sourceBucket?.earliestStartMinutes ?? -1)
+    const stateStartMinutes = Number(state.startMinutes ?? -1)
+    const useCurrentStatusAsTruth = hasCurrentStatusSnapshot
     upsertState(
       key,
       {
-        hasStart: hasEventStart,
-        isRunning: hasEventStart && Boolean(state.isRunning),
-        startMinutes: hasEventStart
-          ? Number(state.startMinutes ?? -1) >= 0
-            ? Number(state.startMinutes)
-            : sourceStartMinutes
-          : -1,
-        sourceOfTruth: hasEventStart ? 'events+status' : 'status',
+        hasStart: useCurrentStatusAsTruth ? Boolean(state.hasStart) : hasEventStart,
+        isRunning: useCurrentStatusAsTruth ? Boolean(state.isRunning) : hasEventStart && Boolean(state.isRunning),
+        startMinutes: useCurrentStatusAsTruth
+          ? stateStartMinutes
+          : hasEventStart
+            ? stateStartMinutes >= 0
+              ? stateStartMinutes
+              : sourceStartMinutes
+            : -1,
+        sourceOfTruth: useCurrentStatusAsTruth ? 'workday' : hasEventStart ? 'events+status' : 'status',
       },
       { preferSource: true },
     )
@@ -22614,7 +23070,8 @@ function calendarTimelineResources() {
     .map((worker) => {
       const rawName = String(worker.workerName ?? worker.fullName ?? worker.name ?? worker.login ?? worker.workerId ?? '').trim()
       const name = calendarTimelineWorkerName(rawName)
-      const key = normalizeSearchText(worker.workerId || worker.login || rawName || name)
+      const workerId = dashboardCanonicalWorkerId(worker.workerId ?? worker.id)
+      const key = normalizeSearchText(workerId)
       return name && key ? { name, key, type: 'worker', worker, started: calendarTimelineWorkerHasStart(worker) } : null
     })
     .filter(Boolean)
@@ -22651,7 +23108,7 @@ function calendarTimelineResourceAvatarTone(index = 0) {
 
 function calendarTimelineResourceRowHeight(rowIndex, resource = {}) {
   if (resource?.type === 'buffer') {
-    return 72
+    return 48
   }
   const laneCount = Number(appState.calendarTimelinePlannedLaneCounts?.get?.(rowIndex) || 0)
   const trackCount = Number(appState.calendarTimelineRealTrackCounts?.get?.(rowIndex) || 0)
@@ -23308,6 +23765,7 @@ function calendarTimelineRecurringInstance(order = {}, occurrenceDay = '', index
       ...order,
       isRecurringSeries: true,
       sourceOrderId: String(order?.sourceOrderId ?? order?.id ?? '').trim(),
+      recurrenceOriginalDateYmd: baseDay,
     }
   }
   const occurrenceEnd = calendarTimelineRecurringOccurrenceEnd(order, occurrenceDay)
@@ -23318,6 +23776,7 @@ function calendarTimelineRecurringInstance(order = {}, occurrenceDay = '', index
     sourceOrderId,
     orderId: sourceOrderId,
     recurrenceSourceDateYmd: baseDay,
+    recurrenceOriginalDateYmd: occurrenceDay,
     recurrenceIndex: index,
     isRecurringSeries: true,
     isRecurringInstance: true,
@@ -23344,6 +23803,133 @@ function calendarTimelineRecurringInstance(order = {}, occurrenceDay = '', index
     completed: false,
     status: '',
   }
+}
+
+function calendarTimelineRecurringSkippedDates(order = {}) {
+  const values = [
+    ...(Array.isArray(order?.recurrenceSkippedDates) ? order.recurrenceSkippedDates : []),
+    ...(Array.isArray(order?.recurrenceExceptionDates) ? order.recurrenceExceptionDates : []),
+    ...(Array.isArray(order?.skipDates) ? order.skipDates : []),
+  ]
+  return new Set(
+    values
+      .map((value) => String(value ?? '').trim())
+      .filter((value, index, list) => /^\d{4}-\d{2}-\d{2}$/.test(value) && list.indexOf(value) === index),
+  )
+}
+
+function calendarTimelineRecurringOverrideDate(order = {}) {
+  return String(order?.recurrenceOriginalDateYmd ?? order?.recurrenceOverrideDateYmd ?? order?.occurrenceDateYmd ?? order?.dateYmd ?? '').trim()
+}
+
+function calendarTimelineRecurringOverrideId(sourceOrderId = '', occurrenceDay = '') {
+  const sourceId = String(sourceOrderId ?? '').trim()
+  const day = String(occurrenceDay ?? '').trim()
+  return sourceId && /^\d{4}-\d{2}-\d{2}$/.test(day) ? `${sourceId}__override__${day}` : ''
+}
+
+function calendarTimelineSourceOrderById(sourceOrderId = '') {
+  const sourceId = String(sourceOrderId ?? '').trim()
+  if (!sourceId) {
+    return null
+  }
+  return ordersListSourceOrders().find((order) => String(order?.id ?? '').trim() === sourceId) ?? null
+}
+
+function calendarTimelineOrderWithSkippedOccurrence(order = {}, occurrenceDay = '') {
+  const day = String(occurrenceDay ?? '').trim()
+  if (!order || typeof order !== 'object' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return order
+  }
+  const skippedDates = calendarTimelineRecurringSkippedDates(order)
+  skippedDates.add(day)
+  return {
+    ...order,
+    recurrenceSkippedDates: [...skippedDates].sort(),
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+function calendarTimelineCleanRecurringGeneratedFields(order = {}) {
+  const next = { ...order }
+  delete next.isRecurringSeries
+  delete next.isRecurringInstance
+  delete next.recurrenceIndex
+  delete next.recurrenceSourceDateYmd
+  return next
+}
+
+function calendarTimelineSingleOccurrenceType(sourceOrder = {}) {
+  const sourceType = String(sourceOrder?.type ?? '').trim()
+  if (!sourceType || sourceType === 'cyclic') {
+    return 'individual'
+  }
+  return ['individual', 'renovation', 'windows', 'other'].includes(sourceType) ? sourceType : 'other'
+}
+
+function calendarTimelineBuildSingleOccurrenceOverride(sourceOrder = {}, occurrenceDay = '', patch = {}) {
+  const sourceOrderId = String(sourceOrder?.id ?? sourceOrder?.sourceOrderId ?? '').trim()
+  const day = String(occurrenceDay ?? '').trim()
+  const overrideId = calendarTimelineRecurringOverrideId(sourceOrderId, day)
+  if (!sourceOrderId || !overrideId) {
+    return null
+  }
+
+  const occurrence = calendarTimelineRecurringInstance(sourceOrder, day, 0)
+  const patchOrder = calendarTimelineCleanRecurringGeneratedFields(patch)
+  const nowIso = new Date().toISOString()
+  const type = calendarTimelineSingleOccurrenceType(sourceOrder)
+  return {
+    ...calendarTimelineCleanRecurringGeneratedFields(occurrence),
+    ...patchOrder,
+    id: overrideId,
+    sourceOrderId,
+    orderId: sourceOrderId,
+    recurrenceOverride: true,
+    recurrenceOverrideKind: 'single-day',
+    recurrenceOriginalDateYmd: day,
+    recurrenceOverrideDateYmd: day,
+    scheduleMode: 'once',
+    type,
+    tone: ordersTimelineToneForType(type),
+    createdAt: String(patch?.createdAt ?? occurrence?.createdAt ?? sourceOrder?.createdAt ?? '').trim() || nowIso,
+    updatedAt: nowIso,
+    isDraft: Boolean(patch?.isDraft),
+  }
+}
+
+function calendarTimelineOrdersWithSingleOccurrenceOverride(orders = [], overrideOrder = {}) {
+  const sourceOrderId = String(overrideOrder?.sourceOrderId ?? overrideOrder?.orderId ?? '').trim()
+  const occurrenceDay = calendarTimelineRecurringOverrideDate(overrideOrder)
+  if (!sourceOrderId || !/^\d{4}-\d{2}-\d{2}$/.test(occurrenceDay)) {
+    return Array.isArray(orders) ? orders : []
+  }
+
+  let hasOverride = false
+  let hasSource = false
+  const nextOrders = (Array.isArray(orders) ? orders : []).map((order) => {
+    const orderId = String(order?.id ?? '').trim()
+    if (orderId === sourceOrderId) {
+      hasSource = true
+      return calendarTimelineOrderWithSkippedOccurrence(order, occurrenceDay)
+    }
+    if (orderId === overrideOrder.id) {
+      hasOverride = true
+      return overrideOrder
+    }
+    return order
+  })
+
+  if (!hasSource) {
+    const source = calendarTimelineSourceOrderById(sourceOrderId)
+    if (source) {
+      nextOrders.push(calendarTimelineOrderWithSkippedOccurrence(source, occurrenceDay))
+    }
+  }
+  if (!hasOverride) {
+    nextOrders.push(overrideOrder)
+  }
+  return nextOrders
 }
 
 function calendarTimelineRecurringDaysForRange(order = {}, days = []) {
@@ -23420,7 +24006,10 @@ function calendarTimelineExpandRecurringOrdersForDays(orders = [], days = []) {
     if (!occurrenceDays.length) {
       return []
     }
-    return occurrenceDays.map((day, index) => calendarTimelineRecurringInstance(order, day, index))
+    const skippedDates = calendarTimelineRecurringSkippedDates(order)
+    return occurrenceDays
+      .filter((day) => !skippedDates.has(day))
+      .map((day, index) => calendarTimelineRecurringInstance(order, day, index))
   })
 }
 
@@ -23624,6 +24213,8 @@ function calendarTimelineOrderSourceKeys(order = {}) {
     order?.eventId,
     order?.workdayId,
     order?.orderId,
+    order?.sourceOrderId,
+    order?.recurrenceSourceOrderId,
     order?.externalId,
     order?.remoteId,
     order?.jobId,
@@ -23637,6 +24228,7 @@ function calendarTimelineSourceRowKeys(row = {}) {
     row?.orderId,
     row?.calendarOrderId,
     row?.sourceOrderId,
+    row?.recurrenceSourceOrderId,
     row?.jobId,
     row?.taskId,
     row?.eventId,
@@ -23660,27 +24252,9 @@ function calendarTimelineResourceMatchesSourceRow(resource = {}, row = {}) {
   if (resource?.type !== 'worker') {
     return false
   }
-  const resourceIdentity = calendarTimelineResourceWorkerIdentity(resource)
-  const rowIdentity = calendarTimelineSourceRowWorkerIdentity(row)
-  const idsMatch = calendarTimelineSetsIntersect(resourceIdentity.ids, rowIdentity.ids)
-  const loginsMatch = calendarTimelineSetsIntersect(resourceIdentity.logins, rowIdentity.logins)
-  if (idsMatch || loginsMatch) {
-    return true
-  }
-
-  const resourceHasStrongIdentity =
-    (resourceIdentity.ids instanceof Set && resourceIdentity.ids.size > 0) ||
-    (resourceIdentity.logins instanceof Set && resourceIdentity.logins.size > 0)
-  const rowHasStrongIdentity =
-    (rowIdentity.ids instanceof Set && rowIdentity.ids.size > 0) ||
-    (rowIdentity.logins instanceof Set && rowIdentity.logins.size > 0)
-  if (resourceHasStrongIdentity || rowHasStrongIdentity) {
-    return false
-  }
-
-  const resourceExactNames = calendarTimelineResourceExactWorkerNames(resource)
-  const rowExactNames = calendarTimelineSourceRowExactWorkerNames(row)
-  return calendarTimelineSetsIntersect(resourceExactNames, rowExactNames)
+  const resourceWorkerId = dashboardCanonicalWorkerId(resource?.worker?.workerId ?? resource?.worker?.id)
+  const rowWorkerId = dashboardResolveWorkerIdValue(row)
+  return Boolean(resourceWorkerId && rowWorkerId && resourceWorkerId === rowWorkerId)
 }
 
 function calendarTimelineSourceRowMatchesOrder(row = {}, order = {}, planned = null) {
@@ -23727,17 +24301,25 @@ function calendarTimelineActualStateFromWorkerRows(order = {}, resource = {}, pl
       const startTs = calendarTimelineEventTimestamp(row?.startAt ?? row?.dayStartAt)
       const endTs = calendarTimelineEventTimestamp(row?.endAt ?? row?.dayEndAt)
       const status = String(row?.status ?? '').trim().toUpperCase()
+      const sourceKind = String(row?.historySourceKind ?? '').trim().toLowerCase()
       const proximity = startTs > 0 ? Math.abs(startTs - planned.startTs) : Number.POSITIVE_INFINITY
       return {
         row,
         startTs,
         endTs,
         isRunning: startTs > 0 && !endTs && (status === 'RUNNING' || status === 'OPEN' || Boolean(row?.isRunning)),
+        hasEnd: endTs > 0,
+        isWorkdaySource: sourceKind === 'workday' || row?.hasExplicitEventId === false,
         proximity,
       }
     })
     .filter((item) => item.startTs > 0 || item.endTs > 0)
-    .sort((left, right) => left.proximity - right.proximity || left.startTs - right.startTs)
+    .sort((left, right) =>
+      Number(right.hasEnd) - Number(left.hasEnd) ||
+      Number(right.isWorkdaySource) - Number(left.isWorkdaySource) ||
+      left.proximity - right.proximity ||
+      left.startTs - right.startTs,
+    )
 
   if (!matches.length) {
     return { startTs: 0, endTs: 0, isRunning: false, source: '' }
@@ -23747,7 +24329,7 @@ function calendarTimelineActualStateFromWorkerRows(order = {}, resource = {}, pl
   return {
     startTs: best.startTs,
     endTs: best.endTs,
-    isRunning: best.isRunning || (best.startTs > 0 && !best.endTs),
+    isRunning: best.isRunning,
     source: 'workday',
   }
 }
@@ -25644,6 +26226,9 @@ function calendarTimelineOrderStatus(order = {}, resources = []) {
   }
 
   const actual = calendarTimelineOrderActualState(order, resource, planned)
+  if (order?.systemClosed && actual.startTs > 0 && actual.endTs > 0) {
+    return { kind: 'system-ended', label: 'Zakończone przez system', alert: null }
+  }
   const completed = Boolean(order?.completed) || calendarTimelineOrderCompletedFromStatus(order) || actual.endTs > 0
   const startDelay = calendarTimelineDelayMinutes(actual.startTs, planned.startTs)
   const endDelay = calendarTimelineDelayMinutes(actual.endTs, planned.endTs)
@@ -25898,6 +26483,9 @@ function calendarTimelineRememberDropInfo(info = null) {
 function calendarTimelineResetDragState() {
   appState.calendarTimelineDragOrderId = ''
   appState.calendarTimelineDragSourceRow = null
+  appState.calendarTimelineDragSourceOrderId = ''
+  appState.calendarTimelineDragOccurrenceDate = ''
+  appState.calendarTimelineDragRecurringSeries = false
   appState.calendarTimelineDragTargetRow = null
   appState.calendarTimelineDragTargetSlot = null
   appState.calendarTimelineDropHandled = false
@@ -25910,6 +26498,9 @@ function calendarTimelineResetDragState() {
 }
 
 function calendarTimelineHandleMoveResult(moveResult) {
+  if (moveResult?.pending) {
+    return
+  }
   if (moveResult?.moved) {
     showTransientNotice('Zlecenie przypięte do nowego miejsca.', 'success')
     return
@@ -26067,15 +26658,140 @@ function calendarTimelineSlotToDayTime(slotIndex, days = [], hours = []) {
   return { dayKey, time: `${pad2(Number(hour))}:${pad2(minute)}` }
 }
 
-function calendarTimelineMoveOrder(orderId, rowIndex, slotIndex = null, sourceRowIndex = null, resources = calendarTimelineResources()) {
+function calendarTimelineRecurringContextFromBar(bar) {
+  if (!(bar instanceof HTMLElement)) {
+    return null
+  }
+  const orderId = String(bar.getAttribute('data-calendar-timeline-order-id') || '').trim()
+  const sourceOrderId = String(bar.getAttribute('data-calendar-timeline-source-order-id') || orderId).trim()
+  const occurrenceDateYmd = String(
+    bar.getAttribute('data-calendar-timeline-occurrence-date') ||
+      bar.getAttribute('data-calendar-timeline-date') ||
+      '',
+  ).trim()
+  const isRecurringSeries = bar.getAttribute('data-calendar-timeline-recurring-series') === '1'
+  const isRecurrenceOverride = bar.getAttribute('data-calendar-timeline-recurrence-override') === '1'
+  const sourceOrder = calendarTimelineSourceOrderById(sourceOrderId)
+  return {
+    orderId,
+    sourceOrderId,
+    occurrenceDateYmd,
+    isRecurringSeries,
+    isRecurrenceOverride,
+    sourceOrder,
+    shouldAskScope: Boolean(
+      isRecurringSeries &&
+        !isRecurrenceOverride &&
+        sourceOrder &&
+        calendarTimelineOrderIsRecurring(sourceOrder) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(occurrenceDateYmd),
+    ),
+  }
+}
+
+function calendarTimelineShowRecurringScopeDialog({ occurrenceDateYmd = '', title = '', time = '', onSingle = null, onSeries = null } = {}) {
+  document.getElementById('calendarTimelineRecurringScopeDialog')?.remove()
+  const overlay = document.createElement('div')
+  overlay.id = 'calendarTimelineRecurringScopeDialog'
+  overlay.className = 'calendar-conflict-overlay calendar-recurring-scope-overlay'
+  overlay.innerHTML = `
+    <section class="calendar-conflict-dialog calendar-recurring-scope-dialog" role="dialog" aria-modal="true" aria-labelledby="calendarRecurringScopeTitle">
+      <button class="calendar-conflict-close" type="button" data-calendar-recurring-scope="cancel" aria-label="Zamknij">×</button>
+      <div class="calendar-conflict-icon calendar-recurring-scope-icon">↻</div>
+      <div class="calendar-conflict-copy">
+        <p class="calendar-conflict-kicker">Zlecenie cykliczne</p>
+        <h2 id="calendarRecurringScopeTitle">Co chcesz zmienić?</h2>
+        <p>
+          Zlecenie <strong>${escapeHtml(title || 'Zlecenie')}</strong>${time ? ` (${escapeHtml(time)})` : ''}
+          należy do serii cyklicznej. Wybierz, czy zmieniasz całą serię, czy tylko dzień ${escapeHtml(calendarTimelineDateLabel(occurrenceDateYmd))}.
+        </p>
+      </div>
+      <div class="calendar-recurring-scope-actions">
+        <button class="btn secondary" type="button" data-calendar-recurring-scope="single">Tylko ten jeden dzień</button>
+        <button class="btn primary" type="button" data-calendar-recurring-scope="series">Reguły cykliczności</button>
+      </div>
+    </section>
+  `
+  overlay.addEventListener('click', (event) => {
+    const target = event.target
+    const button = target?.closest?.('[data-calendar-recurring-scope]')
+    if (target !== overlay && !button) {
+      return
+    }
+    const action = String(button?.getAttribute?.('data-calendar-recurring-scope') || 'cancel')
+    overlay.remove()
+    if (action === 'single' && typeof onSingle === 'function') {
+      onSingle()
+    } else if (action === 'series' && typeof onSeries === 'function') {
+      onSeries()
+    }
+  })
+  document.body.appendChild(overlay)
+}
+
+function calendarTimelineAskRecurringMoveScope(orderId, rowIndex, slotIndex = null, sourceRowIndex = null, resources = calendarTimelineResources(), options = {}) {
+  const sourceOrderId = String(options.sourceOrderId ?? '').trim()
+  const occurrenceDateYmd = String(options.occurrenceDateYmd ?? '').trim()
+  const sourceOrder = calendarTimelineSourceOrderById(sourceOrderId)
+  if (!sourceOrder) {
+    return { moved: false, conflicts: [], candidate: null }
+  }
+  const occurrenceOrder = calendarTimelineRecurringInstance(sourceOrder, occurrenceDateYmd, 0)
+  calendarTimelineShowRecurringScopeDialog({
+    sourceOrderId,
+    occurrenceDateYmd,
+    title: calendarTimelineOrderTitle(sourceOrder),
+    time: calendarTimelineOrderRangeLabel(occurrenceOrder),
+    onSingle: () => {
+      const result = calendarTimelineMoveOrder(orderId, rowIndex, slotIndex, sourceRowIndex, resources, {
+        ...options,
+        recurringEditScope: 'single',
+      })
+      calendarTimelineHandleMoveResult(result)
+    },
+    onSeries: () => {
+      ordersOpenEditorFromCalendar(sourceOrderId)
+    },
+  })
+  return { moved: false, pending: true, conflicts: [], candidate: null }
+}
+
+function calendarTimelineMoveOrderWithRecurringChoice(orderId, rowIndex, slotIndex = null, sourceRowIndex = null, resources = calendarTimelineResources(), options = {}) {
+  const sourceOrderId = String(options.sourceOrderId ?? '').trim()
+  const occurrenceDateYmd = String(options.occurrenceDateYmd ?? '').trim()
+  const requiresScope =
+    options.recurringEditScope !== 'single' &&
+    options.recurringEditScope !== 'series' &&
+    Boolean(options.isRecurringSeries) &&
+    Boolean(sourceOrderId) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(occurrenceDateYmd) &&
+    calendarTimelineOrderIsRecurring(calendarTimelineSourceOrderById(sourceOrderId) || {})
+
+  if (requiresScope) {
+    return calendarTimelineAskRecurringMoveScope(orderId, rowIndex, slotIndex, sourceRowIndex, resources, options)
+  }
+  return calendarTimelineMoveOrder(orderId, rowIndex, slotIndex, sourceRowIndex, resources, options)
+}
+
+function calendarTimelineMoveOrder(orderId, rowIndex, slotIndex = null, sourceRowIndex = null, resources = calendarTimelineResources(), options = {}) {
   const id = String(orderId ?? '').trim()
   const nextRow = Number(rowIndex)
   if (!id || !Number.isInteger(nextRow) || nextRow < 0) {
     return { moved: false, conflicts: [], candidate: null }
   }
   const orders = ordersListSourceOrders()
-  const currentOrder = orders.find((order) => order.id === id)
-  const nextOrder = currentOrder ? calendarTimelineBuildMovedOrder(currentOrder, nextRow, slotIndex, sourceRowIndex, resources) : null
+  const sourceOrderId = String(options.sourceOrderId ?? '').trim()
+  const occurrenceDateYmd = String(options.occurrenceDateYmd ?? '').trim()
+  const sourceOrder = options.recurringEditScope === 'single' ? calendarTimelineSourceOrderById(sourceOrderId) : null
+  const overrideId = sourceOrder ? calendarTimelineRecurringOverrideId(sourceOrderId, occurrenceDateYmd) : ''
+  const currentOrder =
+    sourceOrder && overrideId
+      ? orders.find((order) => String(order?.id ?? '') === overrideId) || calendarTimelineRecurringInstance(sourceOrder, occurrenceDateYmd, 0)
+      : orders.find((order) => order.id === id)
+  let nextOrder = currentOrder ? calendarTimelineBuildMovedOrder(currentOrder, nextRow, slotIndex, sourceRowIndex, resources) : null
+  if (nextOrder && sourceOrder && overrideId) {
+    nextOrder = calendarTimelineBuildSingleOccurrenceOverride(sourceOrder, occurrenceDateYmd, nextOrder)
+  }
   if (!nextOrder) {
     return { moved: false, conflicts: [], candidate: null }
   }
@@ -26083,7 +26799,10 @@ function calendarTimelineMoveOrder(orderId, rowIndex, slotIndex = null, sourceRo
   if (conflicts.length) {
     return { moved: false, conflicts, candidate: nextOrder }
   }
-  ordersSaveTimelineOrders(orders.map((order) => (order.id === id ? nextOrder : order)))
+  const nextOrders = nextOrder.recurrenceOverride
+    ? calendarTimelineOrdersWithSingleOccurrenceOverride(orders, nextOrder)
+    : orders.map((order) => (order.id === id ? nextOrder : order))
+  ordersSaveTimelineOrders(nextOrders)
   renderCalendarView()
   return { moved: true, conflicts: [], candidate: nextOrder }
 }
@@ -26224,14 +26943,14 @@ function calendarTimelineRealEventIsOrder(row = {}) {
     return false
   }
 
-  const endReason = String(row?.endReason ?? '').trim().toUpperCase()
-  const status = String(row?.status ?? '').trim().toUpperCase()
-  if (endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY' || status === 'WORKDAY_CLOSED') {
+  const typeLabel = eventTypeInfo(row).label
+  if (typeLabel === 'QR START' || typeLabel === 'QR STOP' || typeLabel === 'QR START + STOP') {
     return false
   }
 
-  const typeLabel = eventTypeInfo(row).label
-  if (typeLabel === 'QR STOP') {
+  const endReason = String(row?.endReason ?? '').trim().toUpperCase()
+  const status = String(row?.status ?? '').trim().toUpperCase()
+  if (endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY' || status === 'WORKDAY_CLOSED') {
     return false
   }
 
@@ -26305,17 +27024,24 @@ function calendarTimelineRealEventEndIso(row = {}, startIso = '') {
 }
 
 function calendarTimelineRealEventTitle(row = {}, track = '') {
+  const companyLabel = dashboardActivityCompanyLabel(row)
+  const company = dashboardActivityCleanCompanyLabel(companyLabel)
   const client = String(dashboardResolveClientLabel(row) || '').trim()
   const zone = String(dashboardResolveZoneLabel(row) || '').trim()
   const qr = String(zoneQrCodeFromRow(row) || '').trim()
   const prefix = track === 'client' ? 'Klient/spec.' : track === 'zone' ? 'Strefa' : 'START-STOP'
+  if (company) {
+    return `${prefix}: ${company}`
+  }
   const parts = [client, zone]
     .map((value) => String(value ?? '').trim())
-    .filter((value, index, list) => value && value !== '-' && list.indexOf(value) === index)
+    .map((value) => dashboardActivityCleanCompanyLabel(value))
+    .filter((value, index, list) => value && list.indexOf(value) === index)
   if (parts.length) {
     return `${prefix}: ${parts.join(' / ')}`
   }
-  return qr ? `${prefix}: QR ${qr}` : prefix
+  const qrClient = dashboardActivityCleanCompanyLabel(reportHistoryResolveClientByZoneCode(qr, ''))
+  return qrClient ? `${prefix}: ${qrClient}` : prefix
 }
 
 function calendarTimelineRealDurationLabel(startTs = 0, endTs = 0) {
@@ -26365,16 +27091,21 @@ function calendarTimelineRealStartObjectLabel(row = {}) {
     return systemAddedLabel
   }
 
+  const companyLabel = dashboardActivityCleanCompanyLabel(dashboardActivityCompanyLabel(row))
+  if (companyLabel) {
+    return companyLabel
+  }
+
   const client = calendarTimelineReadableClientLabel(dashboardResolveClientLabel(row))
   const qr = String(row?.dayStartObject ?? row?.startObject ?? zoneQrCodeFromRow(row) ?? '').trim()
   const qrClient = calendarTimelineReadableClientLabel(reportHistoryResolveClientByZoneCode(qr, ''))
-  if (client) {
+  if (dashboardActivityCleanCompanyLabel(client)) {
     return client
   }
-  if (qrClient && !dashboardIsQrCodeLike(qrClient)) {
+  if (dashboardActivityCleanCompanyLabel(qrClient)) {
     return qrClient
   }
-  return qr && qr !== '-' ? `QR ${qr}` : 'QR START'
+  return ''
 }
 
 function calendarTimelineRealWorkdayIdentity(row = {}) {
@@ -26557,6 +27288,7 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         latestDayStopTs: 0,
         latestCycleStartTs: 0,
         startObjectLabel: '',
+        companyLabel: '',
         clientLabel: '',
         addressLabel: '',
         sourceEventId: '',
@@ -26569,6 +27301,7 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
       if (!bucket.firstStartTs || workdayStartTs < bucket.firstStartTs) {
         bucket.firstStartTs = workdayStartTs
         bucket.startObjectLabel = calendarTimelineRealStartObjectLabel(row)
+        bucket.companyLabel = dashboardActivityCompanyLabel(row)
         bucket.clientLabel = dashboardResolveClientLabel(row)
         bucket.addressLabel = String(row?.lokalizacja ?? row?.location ?? row?.address ?? '').trim()
         bucket.sourceEventId = String(row?.eventId ?? '').trim()
@@ -26580,6 +27313,9 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
       bucket.latestCycleStartTs = Math.max(bucket.latestCycleStartTs, workdayStartTs)
       if (!bucket.clientLabel) {
         bucket.clientLabel = dashboardResolveClientLabel(row)
+      }
+      if (!dashboardActivityCleanCompanyLabel(bucket.companyLabel)) {
+        bucket.companyLabel = dashboardActivityCompanyLabel(row)
       }
       if (!bucket.addressLabel) {
         bucket.addressLabel = String(row?.lokalizacja ?? row?.location ?? row?.address ?? '').trim()
@@ -26626,6 +27362,7 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         (shouldRunToNow
           ? Math.max(now, startTs + 15 * 60 * 1000)
           : bucket.latestActivityEndTs || startTs + 60 * 60 * 1000)
+      const systemClosed = !hasExplicitDayStop && !shouldRunToNow
       const startIso = new Date(startTs).toISOString()
       const endIso = new Date(Math.max(endTs, startTs + 15 * 60 * 1000)).toISOString()
       const start = calendarTimelineIsoToDayTime(startIso)
@@ -26634,10 +27371,18 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         return null
       }
       const durationLabel = calendarTimelineRealDurationLabel(start.timestamp, end.timestamp)
+      const latestQrCompanyLabel = dashboardActivityLatestQrCompanyLabelForRow(
+        resource?.worker ?? statusRow ?? {},
+        bucket.dayKey,
+        sourceRows,
+      )
+      const bucketCompanyLabel = dashboardActivityCleanCompanyLabel(bucket.companyLabel) || latestQrCompanyLabel
       const fallbackTitle = statusRow
-        ? calendarTimelineReadableClientLabel(dashboardResolveClientLabel(statusRow)) || calendarTimelineRealStartObjectLabel(statusRow)
+        ? dashboardActivityCleanCompanyLabel(dashboardActivityCompanyLabel(statusRow)) ||
+          latestQrCompanyLabel ||
+          calendarTimelineRealStartObjectLabel(statusRow)
         : ''
-      const titleParts = [bucket.startObjectLabel || fallbackTitle || 'QR START', durationLabel]
+      const titleParts = [bucketCompanyLabel || bucket.startObjectLabel || fallbackTitle || 'Klient nieustalony', durationLabel]
       const title = titleParts.join(' · ')
       return {
         id: `real-workday-${bucket.rowIndex}-${bucket.dayKey}-${bucket.cycleKey}`,
@@ -26653,15 +27398,16 @@ function calendarTimelineRealWorkdayOrders(resources = [], days = [], sourceRows
         validUntil: end.day,
         nextDate: start.day,
         title,
-        clientLabel: bucket.clientLabel,
+        clientLabel: bucketCompanyLabel || bucket.clientLabel,
         addressLabel: bucket.addressLabel,
         type: 'other',
         tone: 'steel',
         actualStartAt: startIso,
         sourceStartAt: bucket.sourceStartAt || startIso,
-        actualEndAt: hasExplicitDayStop ? endIso : '',
-        status: hasExplicitDayStop ? 'CLOSED' : 'RUNNING',
-        completed: hasExplicitDayStop,
+        actualEndAt: hasExplicitDayStop || systemClosed ? endIso : '',
+        status: hasExplicitDayStop || systemClosed ? 'CLOSED' : 'RUNNING',
+        completed: hasExplicitDayStop || systemClosed,
+        systemClosed,
         isRealEvent: true,
         realTrack: 'workday',
         realTrackIndex: 0,
@@ -26801,10 +27547,17 @@ function calendarTimelineBuildRealStatusOrder(row = {}, dayKey = '', rowIndex = 
   }
 
   const durationLabel = calendarTimelineRealDurationLabel(start.timestamp, end.timestamp)
+  const resource = resources[rowIndex] ?? null
+  const sourceRows =
+    appState.calendarTimelineWorkerStateDayKey === dayKey && Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
+      ? appState.calendarTimelineWorkerStateSourceRows
+      : []
+  const latestQrCompanyLabel = dashboardActivityLatestQrCompanyLabelForRow(resource?.worker ?? row, dayKey, sourceRows)
+  const companyLabel = dashboardActivityCleanCompanyLabel(dashboardActivityCompanyLabel(row)) || latestQrCompanyLabel
   const titleLabel =
-    calendarTimelineReadableClientLabel(dashboardResolveClientLabel(row)) ||
+    companyLabel ||
     calendarTimelineRealStartObjectLabel(row) ||
-    'QR START'
+    'Klient nieustalony'
 
   return {
     id: `real-status-${rowIndex}-${dayKey}-${index}`,
@@ -26818,7 +27571,7 @@ function calendarTimelineBuildRealStatusOrder(row = {}, dayKey = '', rowIndex = 
     validUntil: end.day,
     nextDate: start.day,
     title: `${titleLabel} · ${durationLabel}`,
-    clientLabel: dashboardResolveClientLabel(row),
+    clientLabel: companyLabel || dashboardResolveClientLabel(row),
     addressLabel: String(row?.activeLocation ?? row?.lokalizacja ?? row?.location ?? '').trim(),
     type: 'other',
     tone: 'steel',
@@ -27056,11 +27809,19 @@ function calendarTimelinePrototypeHtml() {
   appState.calendarTimelinePlannedLaneCounts = plannedLaneCounts
   appState.calendarTimelineRealTrackCounts = realTrackCounts
   const bufferIndex = resources.findIndex((resource) => resource?.type === 'buffer')
-  const bufferHeight = bufferIndex >= 0 ? calendarTimelineResourceRowHeight(bufferIndex, resources[bufferIndex]) : 0
-  const workerRowHeights = resources
-    .map((resource, rowIndex) => (resource?.type === 'buffer' ? '' : `${calendarTimelineResourceRowHeight(rowIndex, resource)}px`))
+  const rowHeights = resources.map((resource, rowIndex) => ({
+    resource,
+    height: calendarTimelineResourceRowHeight(rowIndex, resource),
+  }))
+  const bufferHeight = bufferIndex >= 0 ? rowHeights[bufferIndex]?.height || 0 : 0
+  const workerRowsHeight = rowHeights
+    .filter(({ resource }) => resource?.type !== 'buffer')
+    .reduce((sum, { height }) => sum + height, 0)
+  const workerRowHeights = rowHeights
+    .map(({ resource, height }) => (resource?.type === 'buffer' ? '' : `${height}px`))
     .filter(Boolean)
     .join(' ')
+  appState.calendarTimelineStageHeight = bufferHeight + 30 + 28 + workerRowsHeight + 24
   const gridRows = `${bufferHeight}px 30px 28px${workerRowHeights ? ` ${workerRowHeights}` : ''}`
   const bufferPlane =
     bufferIndex >= 0
@@ -27082,6 +27843,13 @@ function calendarTimelinePrototypeHtml() {
         return `<div class="${classes.join(' ')}" style="grid-column:${slot + 1} / span ${slotsPerHour}; grid-row:3;">${pad2(hour)}:00</div>`
       }),
     )
+    .join('')
+  const daySeparators = days
+    .slice(1)
+    .map((_, index) => {
+      const dayIndex = index + 1
+      return `<div class="fw-day-separator" style="grid-column:${dayIndex * slotsPerDay + 2}; grid-row:1 / -1;" aria-hidden="true"></div>`
+    })
     .join('')
   const workerHead = '<div class="fw-resource-worker-head" style="grid-row:2 / span 2;">Pracownik</div>'
   const rowLabels = resources
@@ -27142,10 +27910,16 @@ function calendarTimelinePrototypeHtml() {
             : `--fw-bar-height:24px;--fw-bar-offset:${plannedOffsetBase}px;--fw-bar-z:${4 + realTrackCount};`
       const titleLabel = status?.label ? `${timeLabel} · ${status.label}` : timeLabel
       const realEventAttr = bar.isRealEvent ? ' data-calendar-timeline-real-event="1"' : ''
-      const recurringAttr = bar.isRecurringInstance ? ' data-calendar-timeline-recurring-instance="1"' : ''
+      const recurringAttr = [
+        bar.isRecurringSeries ? ' data-calendar-timeline-recurring-series="1"' : '',
+        bar.isRecurringInstance ? ' data-calendar-timeline-recurring-instance="1"' : '',
+        bar.recurrenceOverride ? ' data-calendar-timeline-recurrence-override="1"' : '',
+      ].join('')
+      const occurrenceDate = String(bar.recurrenceOriginalDateYmd || bar.recurrenceOverrideDateYmd || bar.dateYmd || '').trim()
+      const occurrenceDateAttr = occurrenceDate ? ` data-calendar-timeline-occurrence-date="${escapeHtml(occurrenceDate)}"` : ''
       const sourceOrderId = String(bar.sourceOrderId || bar.id || '').trim()
       const sourceOrderAttr = sourceOrderId ? ` data-calendar-timeline-source-order-id="${escapeHtml(sourceOrderId)}"` : ''
-      const draggableAttr = bar.isRealEvent || bar.isRecurringInstance ? 'false' : 'true'
+      const draggableAttr = bar.isRealEvent ? 'false' : 'true'
       const realTrackClass = bar.isRealEvent ? ` fw-event-real--${escapeHtml(bar.realTrack || 'event')}` : ''
       const sourceEventId = String(bar.sourceEventId ?? '').trim()
       const workdayId = String(bar.workdayId ?? '').trim()
@@ -27159,7 +27933,7 @@ function calendarTimelinePrototypeHtml() {
       ].filter(Boolean).join(' ')
       const gridRow = calendarTimelineGridRowForResource(resources[bar.row] || {}, bar.row)
       return `
-        <button class="fw-event-bar fw-event-bar--${escapeHtml(bar.tone)} fw-event-status--${escapeHtml(status.kind)}${bar.completed ? ' is-completed' : ''}${laneCount > 1 ? ' is-stacked' : ''}${bar.isRealEvent ? ' is-real-event' : ''}${bar.isRecurringInstance ? ' is-recurring-instance' : ''}${isBufferEvent ? ' is-buffer-event' : ''}${realTrackClass}" style="grid-column:${position.startColumn} / span ${position.span}; grid-row:${gridRow};${stackStyle}" type="button" title="${escapeHtml(titleLabel)}" draggable="${draggableAttr}" data-calendar-timeline-order-id="${escapeHtml(bar.id)}" data-calendar-timeline-row="${bar.row}" ${barMetaAttrs}${realEventAttr}${recurringAttr}${sourceOrderAttr}>
+        <button class="fw-event-bar fw-event-bar--${escapeHtml(bar.tone)} fw-event-status--${escapeHtml(status.kind)}${bar.completed ? ' is-completed' : ''}${laneCount > 1 ? ' is-stacked' : ''}${bar.isRealEvent ? ' is-real-event' : ''}${bar.isRecurringSeries ? ' is-recurring-series' : ''}${bar.isRecurringInstance ? ' is-recurring-instance' : ''}${bar.recurrenceOverride ? ' is-recurrence-override' : ''}${isBufferEvent ? ' is-buffer-event' : ''}${realTrackClass}" style="grid-column:${position.startColumn} / span ${position.span}; grid-row:${gridRow};${stackStyle}" type="button" title="${escapeHtml(titleLabel)}" draggable="${draggableAttr}" data-calendar-timeline-order-id="${escapeHtml(bar.id)}" data-calendar-timeline-row="${bar.row}" ${barMetaAttrs}${realEventAttr}${recurringAttr}${sourceOrderAttr}${occurrenceDateAttr}>
           <span class="fw-event-mark" aria-hidden="true">&#9670;</span>
           <span class="fw-event-title">${escapeHtml(bar.title)}</span>
           ${laneCount > 1 ? `<strong class="fw-event-stack-badge">${lane + 1}/${laneCount}</strong>` : ''}
@@ -27180,6 +27954,7 @@ function calendarTimelinePrototypeHtml() {
         ${hourHeaders}
         ${rowLabels}
         ${cells}
+        ${daySeparators}
         ${currentHour}
         ${eventBars}
       </div>
@@ -27210,6 +27985,12 @@ function renderCalendarTimelinePrototype() {
   const slideDirection = Number(appState.calendarTimelineSlideDirection || 0)
   stage.classList.remove('is-slide-next', 'is-slide-prev')
   stage.innerHTML = calendarTimelinePrototypeHtml()
+  const stageHeight = Number(appState.calendarTimelineStageHeight || 0)
+  if (Number.isFinite(stageHeight) && stageHeight > 0) {
+    stage.style.setProperty('--fw-timeline-stage-height', `${stageHeight}px`)
+  } else {
+    stage.style.removeProperty('--fw-timeline-stage-height')
+  }
   calendarTimelineSyncControls()
   calendarTimelineShowPendingStatusAlert()
   if (slideDirection) {
@@ -29117,8 +29898,22 @@ function bindCalendarViewFunctions() {
     }
     event.preventDefault()
     event.stopPropagation()
+    const recurringContext = calendarTimelineRecurringContextFromBar(bar)
+    if (recurringContext?.shouldAskScope) {
+      calendarTimelineShowRecurringScopeDialog({
+        sourceOrderId: recurringContext.sourceOrderId,
+        occurrenceDateYmd: recurringContext.occurrenceDateYmd,
+        title: calendarTimelineOrderTitle(recurringContext.sourceOrder),
+        time: calendarTimelineOrderRangeLabel(calendarTimelineRecurringInstance(recurringContext.sourceOrder, recurringContext.occurrenceDateYmd, 0)),
+        onSingle: () => ordersOpenRecurringOccurrenceEditorFromCalendar(recurringContext.sourceOrderId, recurringContext.occurrenceDateYmd),
+        onSeries: () => ordersOpenEditorFromCalendar(recurringContext.sourceOrderId),
+      })
+      return
+    }
     ordersOpenEditorFromCalendar(
-      bar.getAttribute('data-calendar-timeline-source-order-id') || bar.getAttribute('data-calendar-timeline-order-id'),
+      recurringContext?.isRecurrenceOverride
+        ? recurringContext.orderId
+        : recurringContext?.sourceOrderId || bar.getAttribute('data-calendar-timeline-order-id'),
     )
   })
   binding.add(timelineStage, 'click', (event) => {
@@ -29163,10 +29958,7 @@ function bindCalendarViewFunctions() {
     if (!(bar instanceof HTMLElement)) {
       return
     }
-    if (
-      bar.getAttribute('data-calendar-timeline-real-event') === '1' ||
-      bar.getAttribute('data-calendar-timeline-recurring-instance') === '1'
-    ) {
+    if (bar.getAttribute('data-calendar-timeline-real-event') === '1') {
       event.preventDefault()
       return
     }
@@ -29174,9 +29966,13 @@ function bindCalendarViewFunctions() {
     if (!orderId) {
       return
     }
+    const recurringContext = calendarTimelineRecurringContextFromBar(bar)
     const sourceRow = Number(bar.getAttribute('data-calendar-timeline-row'))
     appState.calendarTimelineDragOrderId = orderId
     appState.calendarTimelineDragSourceRow = Number.isInteger(sourceRow) ? sourceRow : null
+    appState.calendarTimelineDragSourceOrderId = recurringContext?.sourceOrderId || ''
+    appState.calendarTimelineDragOccurrenceDate = recurringContext?.occurrenceDateYmd || ''
+    appState.calendarTimelineDragRecurringSeries = Boolean(recurringContext?.shouldAskScope)
     appState.calendarTimelineDragTargetRow = null
     appState.calendarTimelineDragTargetSlot = null
     appState.calendarTimelineDropHandled = false
@@ -29190,6 +29986,15 @@ function bindCalendarViewFunctions() {
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = 'move'
       event.dataTransfer.setData('text/plain', orderId)
+      if (recurringContext?.sourceOrderId) {
+        event.dataTransfer.setData('application/x-calendar-source-order-id', recurringContext.sourceOrderId)
+      }
+      if (recurringContext?.occurrenceDateYmd) {
+        event.dataTransfer.setData('application/x-calendar-occurrence-date', recurringContext.occurrenceDateYmd)
+      }
+      if (recurringContext?.shouldAskScope) {
+        event.dataTransfer.setData('application/x-calendar-recurring-series', '1')
+      }
       if (Number.isInteger(sourceRow)) {
         event.dataTransfer.setData('application/x-calendar-source-row', String(sourceRow))
       }
@@ -29235,16 +30040,22 @@ function bindCalendarViewFunctions() {
     const orderId = String(event.dataTransfer?.getData('text/plain') || appState.calendarTimelineDragOrderId || '').trim()
     const sourceRowValue = event.dataTransfer?.getData('application/x-calendar-source-row')
     const sourceRow = sourceRowValue ? Number(sourceRowValue) : appState.calendarTimelineDragSourceRow
+    const recurringMoveOptions = {
+      sourceOrderId: String(event.dataTransfer?.getData('application/x-calendar-source-order-id') || appState.calendarTimelineDragSourceOrderId || '').trim(),
+      occurrenceDateYmd: String(event.dataTransfer?.getData('application/x-calendar-occurrence-date') || appState.calendarTimelineDragOccurrenceDate || '').trim(),
+      isRecurringSeries: event.dataTransfer?.getData('application/x-calendar-recurring-series') === '1' || Boolean(appState.calendarTimelineDragRecurringSeries),
+    }
     const dragResources = Array.isArray(appState.calendarTimelineDragResources) && appState.calendarTimelineDragResources.length
       ? appState.calendarTimelineDragResources
       : calendarTimelineResources()
     calendarTimelineClearDropTargets()
-    const moveResult = calendarTimelineMoveOrder(
+    const moveResult = calendarTimelineMoveOrderWithRecurringChoice(
       orderId,
       dropInfo.rowIndex,
       dropInfo.slotIndex,
       Number.isInteger(sourceRow) ? sourceRow : null,
       dragResources,
+      recurringMoveOptions,
     )
     calendarTimelineResetDragState()
     calendarTimelineHandleMoveResult(moveResult)
@@ -29256,12 +30067,17 @@ function bindCalendarViewFunctions() {
         const dragResources = Array.isArray(appState.calendarTimelineDragResources) && appState.calendarTimelineDragResources.length
           ? appState.calendarTimelineDragResources
           : calendarTimelineResources()
-        const moveResult = calendarTimelineMoveOrder(
+        const moveResult = calendarTimelineMoveOrderWithRecurringChoice(
           appState.calendarTimelineDragOrderId,
           dropInfo.rowIndex,
           dropInfo.slotIndex,
           Number.isInteger(Number(appState.calendarTimelineDragSourceRow)) ? Number(appState.calendarTimelineDragSourceRow) : null,
           dragResources,
+          {
+            sourceOrderId: appState.calendarTimelineDragSourceOrderId,
+            occurrenceDateYmd: appState.calendarTimelineDragOccurrenceDate,
+            isRecurringSeries: appState.calendarTimelineDragRecurringSeries,
+          },
         )
         calendarTimelineHandleMoveResult(moveResult)
       }
@@ -31037,6 +31853,7 @@ async function hydrateSections(orgId) {
     dashboardWriteLocalSnapshot(orgId, {
       summary,
       todayRows,
+      activityWorkdayRows: appState.dashboardActivityWorkdayRows,
       scheduleSourceRows: appState.dashboardScheduleSourceRows,
       comments,
     })

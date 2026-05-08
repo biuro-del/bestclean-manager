@@ -214,6 +214,16 @@ function logPortalStorageError(context, error) {
   console.error(`[${context}] ${code}: ${message}`)
 }
 
+function isDatabaseSslBadCertificateError(error) {
+  const code = normalizeText(error?.code).toUpperCase()
+  const message = normalizeText(error?.message).toLowerCase()
+  return (
+    code === 'ERR_SSL_SSLV3_ALERT_BAD_CERTIFICATE' ||
+    message.includes('sslv3 alert bad certificate') ||
+    message.includes('alert bad certificate')
+  )
+}
+
 function mapDatabaseConnectionError(error) {
   const code = normalizeText(error?.code).toUpperCase()
   const message = normalizeText(error?.message)
@@ -243,6 +253,15 @@ function mapDatabaseConnectionError(error) {
       status: 500,
       code: 'CLOUD_SQL_NOT_AUTHORIZED',
       message: 'Konto serwisowe backendu nie ma uprawnien do instancji Cloud SQL.',
+    }
+  }
+
+  if (isDatabaseSslBadCertificateError(error)) {
+    return {
+      status: 503,
+      code: 'DB_SSL_BAD_CERTIFICATE',
+      message:
+        'Backend testowy nie moze uwierzytelnic polaczenia SSL z baza PostgreSQL. Odnow polaczenie z baza albo sprawdz DB_CONNECTOR/DB_SSL/PGSSLMODE i certyfikaty Cloud SQL.',
     }
   }
 
@@ -719,6 +738,54 @@ async function getDbPool() {
   return dbPool
 }
 
+async function resetDbConnectionCache() {
+  const currentPool = dbPool
+  const currentConnector = cloudSqlConnector
+  dbPool = null
+  cloudSqlOptionsPromise = null
+  cloudSqlConnector = null
+
+  if (currentPool) {
+    try {
+      await currentPool.end()
+    } catch {
+      // best effort only
+    }
+  }
+
+  if (currentConnector) {
+    try {
+      await currentConnector.close()
+    } catch {
+      // best effort only
+    }
+  }
+}
+
+async function connectDbClient() {
+  const pool = await getDbPool()
+  try {
+    return await pool.connect()
+  } catch (error) {
+    if (!isDatabaseSslBadCertificateError(error)) {
+      throw error
+    }
+
+    await resetDbConnectionCache()
+    const retryPool = await getDbPool()
+    return retryPool.connect()
+  }
+}
+
+async function databaseRelationExists(client, relationName) {
+  const normalized = normalizeText(relationName)
+  if (!normalized) {
+    return false
+  }
+  const result = await client.query('select to_regclass($1::text) as relation_name', [normalized])
+  return Boolean(normalizeText(result.rows?.[0]?.relation_name))
+}
+
 function resolveNextWorkerId(rows = []) {
   let maxNumber = 0
   let padWidth = 3
@@ -830,8 +897,7 @@ async function deleteFirebaseUserQuietly(user) {
 }
 
 async function createAdminManagedUser(payload, requesterUid) {
-  const pool = await getDbPool()
-  const client = await pool.connect()
+  const client = await connectDbClient()
   let createdAuthUser = null
 
   try {
@@ -955,7 +1021,7 @@ async function createAdminManagedUser(payload, requesterUid) {
 
     throw error
   } finally {
-    client.release()
+    if (client) client.release()
   }
 }
 
@@ -1075,10 +1141,10 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
 
   const requestedOrgId = normalizeOrgId(method === 'GET' ? requestUrl.searchParams.get('orgId') : body?.orgId)
   const requesterUid = normalizeText(decodedToken?.uid)
-  const pool = await getDbPool()
-  const client = await pool.connect()
+  let client = null
 
   try {
+    client = await connectDbClient()
     const rows = await getRequesterMemberships(client, requesterUid)
     const memberships = rows
       .filter((row) => !requestedOrgId || normalizeOrgId(row.org_id) === requestedOrgId)
@@ -1114,6 +1180,10 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
 }
 
 async function ensurePortalTaskTable(client) {
+  if (await databaseRelationExists(client, 'public.portal_task')) {
+    return
+  }
+
   await client.query(`
     create table if not exists public.portal_task (
       org_id varchar(64) not null,
@@ -1236,8 +1306,7 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
   let client = null
 
   try {
-    const pool = await getDbPool()
-    client = await pool.connect()
+    client = await connectDbClient()
 
     await ensurePortalTaskTable(client)
     await requirePortalTaskAccess(client, orgId, requesterUid)
@@ -1309,6 +1378,10 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
 }
 
 async function ensurePortalScheduleOrderTable(client) {
+  if (await databaseRelationExists(client, 'public.portal_schedule_order')) {
+    return
+  }
+
   await client.query(`
     create table if not exists public.portal_schedule_order (
       org_id varchar(64) not null,
@@ -1418,8 +1491,7 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
   let client = null
 
   try {
-    const pool = await getDbPool()
-    client = await pool.connect()
+    client = await connectDbClient()
 
     await ensurePortalScheduleOrderTable(client)
     await requirePortalTaskAccess(client, orgId, requesterUid)

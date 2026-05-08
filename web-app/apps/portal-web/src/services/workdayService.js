@@ -1304,7 +1304,16 @@ function mapWorkday(orgId, row, lookupMaps) {
     allowWorkerFallbackFromPlace ? inferredWorker?.workerLogin : '',
     workerFromName?.login,
   )
+  const workerFromExplicitLogin =
+    resolveWorkerByLogin(
+      lookupMaps,
+      workerLoginCandidate,
+      row.workerLogin,
+      row.workday?.workerLogin,
+      linkedWorkday?.workerLogin,
+    ) || null
   const worker =
+    workerFromExplicitLogin ||
     resolveWorkerByLogin(
       lookupMaps,
       resolvedWorkerLogin,
@@ -1315,6 +1324,21 @@ function mapWorkday(orgId, row, lookupMaps) {
       allowWorkerFallbackFromPlace ? zone?.workerLogin : '',
       allowWorkerFallbackFromPlace ? inferredWorker?.workerLogin : '',
     ) || null
+  const directWorkerId = canonicalWorkerId(
+    pickFirstText(
+      row.workerId,
+      row.worker?.workerId,
+      row.worker?.id,
+      row.workday?.workerId,
+      row.workday?.worker?.workerId,
+      row.workday?.worker?.id,
+      linkedWorkday?.workerId,
+      linkedWorkday?.worker?.workerId,
+      linkedWorkday?.worker?.id,
+    ),
+  )
+  const workerIdValue =
+    directWorkerId || canonicalWorkerId(workerFromExplicitLogin?.workerId ?? workerFromExplicitLogin?.id)
   const hasStop = Boolean(endAt || (!rawEventId && dayEndAt))
   const status = normalizeStatus(row.status, hasStop)
   const stopIsoForView = endAt || (!rawEventId ? dayEndAt : '')
@@ -1334,6 +1358,7 @@ function mapWorkday(orgId, row, lookupMaps) {
     historySourceKind: rawEventId ? 'event' : 'workday',
     hasExplicitEventId: Boolean(rawEventId),
     orgId,
+    workerId: workerIdValue,
     workerLogin: resolvedWorkerLogin,
     workerName: workerNameValue,
     workerType: sanitizeTextValue(worker?.type ?? worker?.role),
@@ -2036,7 +2061,392 @@ export async function getTodayWorktimeFingerprint(orgId) {
   }
 }
 
-export async function getTodayActiveWorkers(orgId) {
+async function getTodayActiveWorkersFromWorkdays(orgId) {
+  const day = currentDayYmd()
+  const [workdayResponse, workerDirectory] = await Promise.all([
+    getWorkdays(orgId, { source: 'workdays', fromIso: day, toIso: day, page: 1, pageSize: 100000 }),
+    getWorkers(orgId).catch(() => []),
+  ])
+  const nowTs = Date.now()
+  const workers = new Map()
+  const workerAliases = new Map()
+  const resolveDisplayName = createWorkerDisplayNameResolver(workerDirectory)
+  const workerLookupMaps = buildLookupMaps([], [], workerDirectory, [])
+  const workerByCanonicalId = new Map()
+  const workerByCanonicalDigits = new Map()
+  const workerByNormalizedName = new Map()
+
+  workerDirectory.forEach((worker) => {
+    const workerId = canonicalWorkerId(worker?.workerId ?? worker?.id)
+    if (workerId && !workerByCanonicalId.has(workerId)) {
+      workerByCanonicalId.set(workerId, worker)
+    }
+
+    const workerDigits = canonicalWorkerDigits(workerId)
+    if (workerDigits && !workerByCanonicalDigits.has(workerDigits)) {
+      workerByCanonicalDigits.set(workerDigits, worker)
+    }
+
+    const workerNameKey = normalizePersonName(pickWorkerNameValue(worker))
+    if (!workerNameKey) {
+      return
+    }
+
+    if (!workerByNormalizedName.has(workerNameKey)) {
+      workerByNormalizedName.set(workerNameKey, worker)
+      return
+    }
+
+    workerByNormalizedName.set(workerNameKey, null)
+  })
+
+  const resolveWorkerDirectoryEntry = (item) => {
+    const directWorkerId = canonicalWorkerId(item?.workerId ?? item?.worker?.workerId ?? item?.id)
+    return directWorkerId ? workerByCanonicalId.get(directWorkerId) || null : null
+  }
+
+  const hasReadableLabel = (value) => {
+    const text = String(value ?? '').trim()
+    return Boolean(text) && text !== '-'
+  }
+  const hasReadableClientLabel = (value) => {
+    const text = String(value ?? '').trim()
+    if (!text || text === '-') {
+      return false
+    }
+    const normalized = normalizeLookupKey(text)
+    return normalized !== 'unassigned' && normalized !== 'brakklienta' && normalized !== 'nieprzypisany'
+  }
+  const isQrZoneCodeLike = (value) => {
+    const text = String(value ?? '').trim().toUpperCase()
+    if (!text || text === '-') {
+      return false
+    }
+    return /^[A-Z]{1,8}\d{2,}[A-Z0-9-]*$/.test(text)
+  }
+  const resolveZoneCode = (item) => {
+    const candidates = [
+      item?.zoneId,
+      item?.utilityRoomId,
+      item?.roomId,
+      item?.workdayUtilityRoomId,
+      item?.dayStartObject,
+      item?.dayStopObject,
+    ]
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean)
+
+    const qrCode = candidates.find((value) => isQrZoneCodeLike(value))
+    if (qrCode) {
+      return qrCode
+    }
+
+    return candidates[0] || ''
+  }
+
+  const shouldReplaceDisplayName = (currentName, candidateName, workerLogin) => {
+    const current = String(currentName ?? '').trim()
+    const candidate = String(candidateName ?? '').trim()
+    if (!candidate) {
+      return false
+    }
+    if (!current) {
+      return true
+    }
+
+    const currentParts = current.split(/\s+/).filter(Boolean).length
+    const candidateParts = candidate.split(/\s+/).filter(Boolean).length
+    if (candidateParts > currentParts) {
+      return true
+    }
+
+    const loginNormalized = normalizeLookupKey(workerLogin)
+    const currentNormalized = normalizeLookupKey(current)
+    const candidateNormalized = normalizeLookupKey(candidate)
+    if (loginNormalized && currentNormalized === loginNormalized && candidateNormalized !== loginNormalized) {
+      return true
+    }
+
+    return false
+  }
+
+  const resolveBucket = (item) => {
+    const resolvedWorkerId = canonicalWorkerId(item?.workerId ?? item?.worker?.workerId ?? item?.id)
+    if (!resolvedWorkerId) {
+      return null
+    }
+    const linkedWorker = resolveWorkerDirectoryEntry(item)
+    const resolvedWorkerLogin = String(
+      linkedWorker?.login ?? linkedWorker?.workerLogin ?? item?.workerLogin ?? item?.login ?? '',
+    ).trim()
+    const resolvedWorkerName = String(
+      pickWorkerNameValue(linkedWorker) || item?.workerName || item?.name || '',
+    ).trim()
+    const primaryLabel = resolveDisplayName(resolvedWorkerLogin, resolvedWorkerName)
+    const aliases = [`id:${normalizeLookupKey(resolvedWorkerId)}`]
+      .map((value) => normalizeLookupKey(value))
+      .filter(Boolean)
+
+    let key = aliases.map((alias) => workerAliases.get(alias)).find(Boolean)
+    if (!key) {
+      key = aliases[0] || (resolvedWorkerId ? `id:${normalizeLookupKey(resolvedWorkerId)}` : '')
+    }
+    if (!key) {
+      return null
+    }
+
+    if (!workers.has(key)) {
+      workers.set(key, {
+        id: resolvedWorkerId || resolvedWorkerLogin || resolvedWorkerName || key,
+        workerId: resolvedWorkerId || '',
+        workerLogin: resolvedWorkerLogin || '',
+        workerName: primaryLabel,
+        entriesCount: 0,
+        activeClient: '-',
+        activeZone: '-',
+        activeLocation: '-',
+        activeSortTs: 0,
+        latestEventTs: 0,
+        firstStartIso: '',
+        firstStartTs: 0,
+        firstStartClient: '-',
+        firstStartZone: '-',
+        firstStartZoneId: '',
+        firstStartLocation: '-',
+        latestStopIso: '',
+        latestStopTs: 0,
+        closedSec: 0,
+        closedIntervals: new Set(),
+        runningCandidates: [],
+      })
+    }
+
+    const bucket = workers.get(key)
+    if (resolvedWorkerId && !String(bucket.workerId ?? '').trim()) {
+      bucket.workerId = resolvedWorkerId
+    }
+    if (resolvedWorkerLogin && !String(bucket.workerLogin ?? '').trim()) {
+      bucket.workerLogin = resolvedWorkerLogin
+    }
+    if (resolvedWorkerId && !String(bucket.id ?? '').trim()) {
+      bucket.id = resolvedWorkerId
+    } else if (resolvedWorkerLogin && !String(bucket.id ?? '').trim()) {
+      bucket.id = resolvedWorkerLogin
+    }
+    if (shouldReplaceDisplayName(bucket.workerName, primaryLabel, resolvedWorkerLogin)) {
+      bucket.workerName = primaryLabel
+    }
+
+    aliases.forEach((alias) => {
+      workerAliases.set(alias, key)
+    })
+
+    return bucket
+  }
+
+  const uniqueRows = new Map()
+  ;(workdayResponse.items ?? [])
+    .filter((item) => isItemFromLocalDay(item, day))
+    .forEach((item, index) => {
+      const startIso = toIso(item?.dayStartAt || item?.startAt)
+      const endIso = toIso(item?.dayEndAt || item?.endAt || item?.dayEndScanAt)
+      if (!startIso && !endIso) {
+        return
+      }
+
+      const rowId =
+        String(item?.workdayId ?? item?.linkedWorkdayId ?? '').trim() ||
+        [
+          normalizeLookupKey(item?.workerLogin ?? item?.workerName),
+          startIso,
+          endIso,
+          index,
+        ].join('|')
+      if (!uniqueRows.has(rowId)) {
+        uniqueRows.set(rowId, item)
+      }
+    })
+
+  ;[...uniqueRows.values()].forEach((item) => {
+    const bucket = resolveBucket(item)
+    if (!bucket) {
+      return
+    }
+
+    bucket.entriesCount += 1
+    const startIso = toIso(item?.dayStartAt || item?.startAt)
+    const endIso = toIso(item?.dayEndAt || item?.endAt || item?.dayEndScanAt)
+    const startTs = toTimestamp(startIso)
+    const endTs = toTimestamp(endIso)
+    const hasStop = endTs > 0
+    const status = normalizeStatus(item?.status, hasStop)
+    const startObjectLabel = String(item?.dayStartObject ?? '').trim()
+    const zoneCode = resolveZoneCode(item)
+    const clientLabelRaw = String(item?.clientName ?? item?.klient ?? item?.clientId ?? '').trim()
+    const zoneLabelRaw = String(item?.zoneName ?? item?.strefa ?? '').trim()
+    const locationLabelRaw = String(item?.lokalizacja ?? item?.location ?? '').trim()
+    const clientLabel = hasReadableClientLabel(clientLabelRaw)
+      ? clientLabelRaw
+      : hasReadableLabel(startObjectLabel)
+        ? startObjectLabel
+        : '-'
+    const zoneLabel = hasReadableLabel(zoneLabelRaw) ? zoneLabelRaw : '-'
+    const locationLabel = hasReadableLabel(locationLabelRaw) ? locationLabelRaw : '-'
+    const eventTs = toTimestamp(item?.updatedAt || endIso || startIso)
+    if (eventTs > bucket.latestEventTs) {
+      bucket.latestEventTs = eventTs
+    }
+
+    if (startTs > 0 && (bucket.firstStartTs <= 0 || startTs < bucket.firstStartTs)) {
+      bucket.firstStartTs = startTs
+      bucket.firstStartIso = startIso
+      bucket.firstStartClient = clientLabel
+      bucket.firstStartZone = zoneLabel
+      bucket.firstStartZoneId = zoneCode
+      bucket.firstStartLocation = locationLabel
+    } else if (startTs > 0 && startTs === bucket.firstStartTs) {
+      if (!hasReadableClientLabel(bucket.firstStartClient) && hasReadableClientLabel(clientLabel)) {
+        bucket.firstStartClient = clientLabel
+      }
+      if (!hasReadableLabel(bucket.firstStartZone) && hasReadableLabel(zoneLabel)) {
+        bucket.firstStartZone = zoneLabel
+      }
+      if (!String(bucket.firstStartZoneId ?? '').trim() && zoneCode) {
+        bucket.firstStartZoneId = zoneCode
+      }
+      if (!hasReadableLabel(bucket.firstStartLocation) && hasReadableLabel(locationLabel)) {
+        bucket.firstStartLocation = locationLabel
+      }
+    }
+
+    if (endTs > bucket.latestStopTs) {
+      bucket.latestStopTs = endTs
+      bucket.latestStopIso = endIso
+    }
+
+    if (status === 'RUNNING' && startTs > 0 && !hasStop) {
+      bucket.runningCandidates.push({
+        startTs,
+        startIso,
+        clientLabel,
+        zoneLabel,
+        zoneId: zoneCode,
+        locationLabel,
+      })
+      return
+    }
+
+    if (status === 'CLOSED') {
+      const intervalKey = `${startTs}|${endTs}|${String(item?.workdayId ?? '').trim()}`
+      if (!bucket.closedIntervals.has(intervalKey)) {
+        const directDuration = Number(item?.durationSec)
+        const intervalSec =
+          Number.isFinite(directDuration) && directDuration > 0
+            ? Math.floor(directDuration)
+            : startTs > 0 && endTs > startTs
+              ? Math.floor((endTs - startTs) / 1000)
+              : 0
+        if (intervalSec > 0) {
+          bucket.closedIntervals.add(intervalKey)
+          bucket.closedSec += intervalSec
+        }
+      }
+    }
+  })
+
+  const items = [...workers.values()]
+    .map((bucket) => {
+      const activeCandidates = bucket.runningCandidates
+        .slice()
+        .sort((left, right) => right.startTs - left.startTs)
+      const activeCandidate = activeCandidates[0] ?? null
+      const isRunning = Boolean(activeCandidate)
+      const startIso = bucket.firstStartIso || activeCandidate?.startIso || ''
+      const stopIso = isRunning ? '' : bucket.latestStopIso || ''
+      const activeSec =
+        isRunning && activeCandidate?.startTs > 0 && nowTs > activeCandidate.startTs
+          ? Math.floor((nowTs - activeCandidate.startTs) / 1000)
+          : 0
+      const totalSec = Math.max(0, bucket.closedSec + activeSec)
+      let duration = durationToHms(totalSec)
+      if (duration === '-' && (isRunning || bucket.firstStartTs > 0)) {
+        duration = '00:00:00'
+      }
+
+      const resolvedClient = isRunning
+        ? activeCandidate?.clientLabel ?? bucket.firstStartClient ?? '-'
+        : bucket.firstStartClient ?? '-'
+      const resolvedZone = isRunning
+        ? activeCandidate?.zoneLabel ?? bucket.firstStartZone ?? '-'
+        : bucket.firstStartZone ?? '-'
+      const resolvedZoneId = String(
+        isRunning ? activeCandidate?.zoneId ?? bucket.firstStartZoneId ?? '' : bucket.firstStartZoneId ?? '',
+      ).trim()
+      const resolvedLocation = isRunning
+        ? activeCandidate?.locationLabel ?? bucket.firstStartLocation ?? '-'
+        : bucket.firstStartLocation ?? '-'
+
+      return {
+        id: bucket.workerId || bucket.id,
+        workerId: bucket.workerId || '',
+        workerLogin: bucket.workerLogin || bucket.workerId || bucket.id,
+        workerName: bucket.workerName,
+        entriesCount: bucket.entriesCount,
+        activeClient: hasReadableClientLabel(resolvedClient) ? resolvedClient : '-',
+        activeZone: hasReadableLabel(resolvedZone) ? resolvedZone : '-',
+        activeZoneId: resolvedZoneId,
+        zoneId: resolvedZoneId,
+        roomId: resolvedZoneId,
+        utilityRoomId: resolvedZoneId,
+        activeLocation: hasReadableLabel(resolvedLocation) ? resolvedLocation : '-',
+        qrStart: formatTime(startIso),
+        qrStop: stopIso ? formatTime(stopIso) : '-',
+        duration,
+        durationSec: totalSec,
+        isRunning,
+        status: isRunning ? 'RUNNING' : 'CLOSED',
+        sourceOfTruth: 'workday',
+        startAt: startIso,
+        dayStartAt: startIso,
+        endAt: stopIso,
+        dayEndAt: stopIso,
+        activeSortTs: isRunning ? activeCandidate?.startTs ?? 0 : 0,
+        latestEventTs: bucket.latestEventTs,
+      }
+    })
+    .sort((left, right) => {
+      if (Number(right.isRunning) !== Number(left.isRunning)) {
+        return Number(right.isRunning) - Number(left.isRunning)
+      }
+
+      if (right.activeSortTs !== left.activeSortTs) {
+        return right.activeSortTs - left.activeSortTs
+      }
+
+      if (right.latestEventTs !== left.latestEventTs) {
+        return right.latestEventTs - left.latestEventTs
+      }
+
+      return left.workerName.localeCompare(right.workerName, 'pl', { sensitivity: 'base' })
+    })
+    .map((item) => {
+      const visibleItem = { ...item }
+      delete visibleItem.latestEventTs
+      return visibleItem
+    })
+
+  return {
+    orgId,
+    day,
+    items,
+  }
+}
+
+export async function getTodayActiveWorkers(orgId, options = {}) {
+  if (options?.source !== 'legacy-events') {
+    return getTodayActiveWorkersFromWorkdays(orgId)
+  }
+
   const day = currentDayYmd()
   const [workdayResponse, eventsResponse, workerDirectory] = await Promise.all([
     getWorkdays(orgId, { fromIso: day, toIso: day, page: 1, pageSize: 100000 }),
@@ -2079,39 +2489,8 @@ export async function getTodayActiveWorkers(orgId) {
   })
 
   const resolveWorkerDirectoryEntry = (item) => {
-    const directWorkerId = canonicalWorkerId(item?.workerId ?? item?.id)
-    if (directWorkerId) {
-      const directWorker = workerByCanonicalId.get(directWorkerId)
-      if (directWorker) {
-        return directWorker
-      }
-    }
-
-    const byLogin = resolveWorkerByLogin(
-      workerLookupMaps,
-      item?.workerLogin,
-      item?.login,
-      item?.workerId,
-      item?.id,
-    )
-    if (byLogin) {
-      return byLogin
-    }
-
-    const workerIdDigits = canonicalWorkerDigits(item?.workerId ?? item?.id)
-    if (workerIdDigits) {
-      const byDigits = workerByCanonicalDigits.get(workerIdDigits)
-      if (byDigits) {
-        return byDigits
-      }
-    }
-
-    const workerNameKey = normalizePersonName(item?.workerName ?? item?.name)
-    if (workerNameKey && workerByNormalizedName.has(workerNameKey)) {
-      return workerByNormalizedName.get(workerNameKey) || null
-    }
-
-    return null
+    const directWorkerId = canonicalWorkerId(item?.workerId ?? item?.worker?.workerId ?? item?.id)
+    return directWorkerId ? workerByCanonicalId.get(directWorkerId) || null : null
   }
   const hasReadableLabel = (value) => {
     const text = String(value ?? '').trim()
@@ -2179,10 +2558,11 @@ export async function getTodayActiveWorkers(orgId) {
   }
 
   const resolveBucket = (item) => {
+    const resolvedWorkerId = canonicalWorkerId(item?.workerId ?? item?.worker?.workerId ?? item?.id)
+    if (!resolvedWorkerId) {
+      return null
+    }
     const linkedWorker = resolveWorkerDirectoryEntry(item)
-    const resolvedWorkerId = canonicalWorkerId(
-      linkedWorker?.workerId ?? linkedWorker?.id ?? item?.workerId ?? item?.id,
-    )
     const resolvedWorkerLogin = String(
       linkedWorker?.login ?? linkedWorker?.workerLogin ?? item?.workerLogin ?? item?.login ?? '',
     ).trim()
@@ -2192,14 +2572,7 @@ export async function getTodayActiveWorkers(orgId) {
     const workerLogin = resolvedWorkerLogin
     const workerName = resolvedWorkerName
     const primaryLabel = resolveDisplayName(workerLogin, workerName)
-    const idDigits = canonicalWorkerDigits(resolvedWorkerId)
-    const aliases = [
-      resolvedWorkerId ? `id:${normalizeLookupKey(resolvedWorkerId)}` : '',
-      idDigits ? `idn:${idDigits}` : '',
-      workerLogin,
-      extractLoginLocalPart(workerLogin),
-      workerName,
-    ]
+    const aliases = [`id:${normalizeLookupKey(resolvedWorkerId)}`]
       .map((value) => normalizeLookupKey(value))
       .filter(Boolean)
 

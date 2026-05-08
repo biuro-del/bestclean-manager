@@ -58,7 +58,160 @@
       </div>
 
       <div class="orders-tab-panel is-active" data-orders-tab-panel="basic">
-        <div class="orders-modal-grid">
+        <div class="orders-modal-grid orders-modal-grid--unified">
+          <section class="orders-form-panel orders-main-card">
+            <div class="orders-panel-title">
+              <span>Zlecenie</span>
+            </div>
+
+            <div class="orders-editor-table">
+              <section class="orders-editor-section orders-editor-section--client orders-editor-section--who">
+                <h3>Kto</h3>
+                <label class="orders-field">
+                  <span>Klient *</span>
+                  <select id="ordersEditClient"></select>
+                </label>
+                <label class="orders-field orders-client-name-preview">
+                  <span>Wybrany klient</span>
+                  <input id="ordersEditClientName" type="text" autocomplete="off" readonly placeholder="Najpierw wybierz klienta" />
+                </label>
+                <div class="orders-field orders-worker-field">
+                  <span>Pracownik/pracownicy</span>
+                  <select id="ordersEditWorker" hidden aria-hidden="true"></select>
+                  <details class="orders-worker-picker" id="ordersEditWorkerPicker">
+                    <summary id="ordersEditWorkerSummary">
+                      <span id="ordersEditWorkerSummaryText">BUFOR</span>
+                    </summary>
+                    <div class="orders-worker-checklist" id="ordersEditWorkerChecklist"></div>
+                  </details>
+                  <p class="orders-field-hint">Brak wybranej osoby oznacza przypisanie do BUFORA.</p>
+                </div>
+              </section>
+
+              <section class="orders-editor-section orders-editor-section--assignment">
+                <h3>Kiedy i częstotliwość</h3>
+
+                <div class="orders-form-two">
+                  <label class="orders-field">
+                    <span>Data START *</span>
+                    <input id="ordersEditStart" type="date" />
+                  </label>
+                  <label class="orders-field">
+                    <span>Data STOP *</span>
+                    <input id="ordersEditEnd" type="date" />
+                  </label>
+                </div>
+
+                <div class="orders-form-two">
+                  <label class="orders-field">
+                    <span>Godzina START *</span>
+                    <input id="ordersEditTime" type="time" />
+                  </label>
+                  <label class="orders-field">
+                    <span>Godzina STOP *</span>
+                    <input id="ordersEditEndTime" type="time" />
+                  </label>
+                </div>
+
+                <div class="orders-schedule-rules">
+                  <div class="orders-schedule-mode">
+                    <label><input type="radio" name="ordersScheduleMode" value="once" checked /> Jednorazowe</label>
+                    <label><input type="radio" name="ordersScheduleMode" value="repeat" /> Cykliczne</label>
+                  </div>
+                  <div class="orders-schedule-repeat" id="ordersScheduleRepeatPanel">
+                    <label class="orders-field">
+                      <span>Powtarza się</span>
+                      <select id="ordersEditRepeatPreset">
+                        <option value="day">Codziennie</option>
+                        <option value="week">Co tydzień</option>
+                        <option value="month">Co miesiąc</option>
+                        <option value="year">Co rok</option>
+                        <option value="interval">Okresowo</option>
+                        <option value="custom">Wybór niestandardowy</option>
+                      </select>
+                    </label>
+                    <div class="orders-schedule-custom">
+                      <span>Co</span>
+                      <input id="ordersEditRepeatEvery" type="number" min="1" step="1" />
+                      <select id="ordersEditRepeatUnit">
+                        <option value="day">Dzień</option>
+                        <option value="week">Tydzień</option>
+                        <option value="month">Miesiąc</option>
+                        <option value="year">Rok</option>
+                      </select>
+                    </div>
+                    <div class="orders-schedule-weekdays">
+                      <span>W następujące dni:</span>
+                      <div class="orders-weekday-grid">
+                        <label><input type="checkbox" data-orders-repeat-weekday="1" /> P</label>
+                        <label><input type="checkbox" data-orders-repeat-weekday="2" /> W</label>
+                        <label><input type="checkbox" data-orders-repeat-weekday="3" /> Ś</label>
+                        <label><input type="checkbox" data-orders-repeat-weekday="4" /> C</label>
+                        <label><input type="checkbox" data-orders-repeat-weekday="5" /> P</label>
+                        <label><input type="checkbox" data-orders-repeat-weekday="6" /> S</label>
+                        <label><input type="checkbox" data-orders-repeat-weekday="0" /> N</label>
+                      </div>
+                    </div>
+                    <div class="orders-field orders-editor-repeat">
+                      <span>Liczba dni po ukończeniu</span>
+                      <div>
+                        <input id="ordersEditRepeatAfterDays" type="number" min="0" step="1" value="0" />
+                        <select id="ordersEditRepeatAfterUnit">
+                          <option value="day">Dni</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="orders-schedule-empty" id="ordersSchedulePreview">
+                    Harmonogram pojawi się po uzupełnieniu zlecenia.
+                  </div>
+                </div>
+              </section>
+
+              <section class="orders-editor-section orders-editor-section--address">
+                <h3>Gdzie</h3>
+                <div class="orders-field orders-location-field">
+                  <label for="ordersEditAddressSelect">Adres wykonania zlecenia *</label>
+                  <select id="ordersEditAddressSelect"></select>
+                  <div class="orders-location-combo">
+                    <input id="ordersEditLocation" type="text" autocomplete="off" placeholder="Wybierz adres klienta albo wpisz ręcznie" aria-autocomplete="list" aria-expanded="false" aria-controls="ordersLocationSuggestions" aria-describedby="ordersEditLocationHint" />
+                    <button class="orders-address-save" id="ordersAddressMemoryAdd" type="button">Dodaj</button>
+                    <div class="orders-location-suggestions" id="ordersLocationSuggestions" hidden></div>
+                    <input id="ordersEditLocationPlaceId" type="hidden" />
+                    <input id="ordersEditLocationLat" type="hidden" />
+                    <input id="ordersEditLocationLng" type="hidden" />
+                    <input id="ordersEditLocationMapUrl" type="hidden" />
+                  </div>
+                  <p class="orders-field-hint" id="ordersEditLocationHint">
+                    Wybierz adres z listy. Jeśli adres wykonania jest inny niż domyślny, wpisz go i zapamiętaj na przyszłość przyciskiem Dodaj.
+                  </p>
+                </div>
+              </section>
+            </div>
+
+            <div class="orders-hidden-fields" aria-hidden="true">
+              <input id="ordersEditName" type="hidden" />
+              <input id="ordersEditNip" type="hidden" />
+              <input id="ordersEditStreet" type="hidden" />
+              <input id="ordersEditCity" type="hidden" />
+              <input id="ordersEditPostCode" type="hidden" />
+              <input id="ordersEditRegion" type="hidden" />
+              <input id="ordersEditCountry" type="hidden" />
+              <input id="ordersEditEmail" type="hidden" />
+              <input id="ordersEditNext" type="hidden" />
+              <input id="ordersEditType" type="hidden" value="individual" />
+              <input id="ordersEditPriority" type="hidden" value="Normalny" />
+              <input id="ordersEditPrice" type="hidden" value="0" />
+              <input id="ordersEditPhone" type="hidden" />
+              <input id="ordersEditSmsTime" type="hidden" />
+              <input id="ordersEditSms" type="hidden" />
+              <input id="ordersEditDurationHours" type="hidden" value="2" />
+              <div class="orders-device-notes" id="ordersDeviceNotesRows" hidden></div>
+            </div>
+          </section>
+        </div>
+
+        <div class="orders-modal-grid orders-modal-grid--legacy" hidden aria-hidden="true">
           <section class="orders-form-panel">
             <div class="orders-panel-title">
               <span>Klient</span>
@@ -248,7 +401,7 @@
           <div class="orders-form-side">
             <section class="orders-side-panel orders-side-panel--schedule">
               <div class="orders-panel-title">
-                <span>Harmonogram</span>
+                <span>Typ zlecenia</span>
                 <button type="button" title="Odśwież harmonogram">↻</button>
               </div>
               <div class="orders-schedule-mode">
@@ -385,7 +538,7 @@
           <div class="orders-subtask-grid">
             <div class="orders-subtask-box">
               <div class="orders-subtask-head">
-                <strong>Czynności do wykonania</strong>
+                <strong>Zadania do wykonania w trakcie zlecenia</strong>
               </div>
               <div class="orders-inline-add orders-inline-add--simple">
                 <input id="ordersSubtaskName" type="text" autocomplete="off" placeholder="Np. odkurzyć biuro, umyć sanitariaty..." />
