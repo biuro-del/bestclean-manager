@@ -1760,6 +1760,59 @@ function calendarNormalizeSelectionList(rawValue = [], fallbackText = '') {
     })
 }
 
+function calendarNormalizeTaskReadReceipts(rawValue = []) {
+  const source = Array.isArray(rawValue)
+    ? rawValue
+    : rawValue && typeof rawValue === 'object'
+      ? Object.values(rawValue)
+      : []
+  const seen = new Set()
+  return source
+    .map((item) => {
+      const sourceItem = item && typeof item === 'object' ? item : { label: item }
+      const id = String(sourceItem.id ?? sourceItem.userId ?? sourceItem.workerId ?? sourceItem.login ?? sourceItem.email ?? '').trim()
+      const label = String(sourceItem.label ?? sourceItem.name ?? sourceItem.workerName ?? sourceItem.by ?? sourceItem.email ?? id).trim()
+      const at = toIso(sourceItem.at ?? sourceItem.readAt ?? sourceItem.seenAt ?? sourceItem.timestamp) || ''
+      const key = normalizeSearchText(id || label)
+      if (!key || !label) {
+        return null
+      }
+      return { id, label, at }
+    })
+    .filter(Boolean)
+    .filter((receipt) => {
+      const key = normalizeSearchText(receipt.id || receipt.label)
+      if (seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+}
+
+function calendarMergeTaskReadReceipts(...receiptLists) {
+  const byKey = new Map()
+  receiptLists.flatMap((list) => calendarNormalizeTaskReadReceipts(list)).forEach((receipt) => {
+    const key = normalizeSearchText(receipt.id || receipt.label)
+    const existing = byKey.get(key)
+    if (!existing) {
+      byKey.set(key, receipt)
+      return
+    }
+    const existingTime = Date.parse(existing.at || '')
+    const nextTime = Date.parse(receipt.at || '')
+    if ((Number.isFinite(nextTime) ? nextTime : 0) >= (Number.isFinite(existingTime) ? existingTime : 0)) {
+      byKey.set(key, {
+        ...existing,
+        ...receipt,
+        id: receipt.id || existing.id,
+        label: receipt.label || existing.label,
+      })
+    }
+  })
+  return [...byKey.values()].sort((left, right) => String(left.label).localeCompare(String(right.label), 'pl', { sensitivity: 'base' }))
+}
+
 function calendarNormalizeZoneSelection(rawZone = null, fallbackId = '', fallbackLabel = '', fallbackLocation = '') {
   if (typeof rawZone === 'object' && rawZone !== null) {
     const id = String(rawZone.id ?? rawZone.zoneId ?? rawZone.value ?? '').trim()
@@ -2099,6 +2152,9 @@ function calendarNormalizeTask(rawTask = {}) {
     read: Boolean(rawTask.read ?? rawTask.isRead ?? rawTask.seen ?? false),
     readAt: String(rawTask.readAt ?? rawTask.seenAt ?? rawTask.acknowledgedAt ?? '').trim(),
     readBy: String(rawTask.readBy ?? rawTask.seenBy ?? rawTask.acknowledgedBy ?? '').trim(),
+    readReceipts: calendarNormalizeTaskReadReceipts(rawTask.readReceipts ?? rawTask.readByUsers ?? rawTask.seenByUsers ?? rawTask.acknowledgedByUsers),
+    lastReadAt: String(rawTask.lastReadAt ?? rawTask.latestReadAt ?? '').trim(),
+    lastReadBy: String(rawTask.lastReadBy ?? rawTask.latestReadBy ?? '').trim(),
     notes: String(rawTask.notes ?? '').trim(),
     generatedFromComment: Boolean(rawTask.generatedFromComment),
     sourceCommentKey: String(rawTask.sourceCommentKey ?? rawTask.sourceKey ?? '').trim(),
@@ -2178,6 +2234,7 @@ function calendarMergeTaskLists(...taskLists) {
         ...winner,
         workers: winner.workers?.length ? winner.workers : loser.workers,
         objects: winner.objects?.length ? winner.objects : loser.objects,
+        readReceipts: calendarMergeTaskReadReceipts(loser.readReceipts, winner.readReceipts),
         activityLog: calendarNormalizeActivityLog([...(loser.activityLog ?? []), ...(winner.activityLog ?? [])]),
       })
       const existingIndex = canonicalTasks.findIndex((item) => item === existing || item.id === existing.id)
@@ -6837,6 +6894,96 @@ function dashboardCurrentUserMatchKeys() {
   return match
 }
 
+function calendarCurrentUserTaskIdentity() {
+  const match = dashboardCurrentUserMatchKeys()
+  const worker = (Array.isArray(appState.workers) ? appState.workers : []).find((item) =>
+    calendarValuesMatchAccess(calendarWorkerAccessValues(item), match),
+  )
+  const workerId = worker ? calendarWorkerId(worker) : ''
+  const workerLabel = worker ? calendarWorkerLabel(worker) : ''
+  const option = kanbanCurrentUserOption()
+  const label = workerLabel || String(option?.label ?? '').trim() || calendarCurrentActorLabel()
+  const id = workerId || String(option?.id ?? '').trim() || label
+  return { id, label }
+}
+
+function calendarTaskReadReceiptValues(receipt = {}) {
+  return [
+    receipt.id,
+    receipt.label,
+    receipt.name,
+    receipt.workerId,
+    receipt.workerName,
+    receipt.userId,
+    receipt.login,
+    receipt.email,
+  ]
+}
+
+function calendarTaskReadByCurrentUser(task = {}, match = dashboardCurrentUserMatchKeys()) {
+  const receipts = calendarNormalizeTaskReadReceipts(task.readReceipts ?? task.readByUsers ?? task.seenByUsers)
+  if (receipts.length) {
+    return receipts.some((receipt) => calendarValuesMatchAccess(calendarTaskReadReceiptValues(receipt), match))
+  }
+  return Boolean(task.read || task.isRead || task.seen || task.readAt || task.seenAt || task.acknowledgedAt)
+}
+
+function calendarTaskShouldShowOnDashboardForCurrentUser(task = {}, match = dashboardCurrentUserMatchKeys()) {
+  const hasAssignedWorkers = calendarHasAssignedWorkers(task.workers ?? task.assignees ?? task.people)
+  const assignedToCurrentUser = calendarTaskAssignedToAccess(task, match)
+  const responsibleForCurrentUser = hasAssignedWorkers ? assignedToCurrentUser : calendarTaskIsVisibleForCurrentUser(task)
+  return Boolean(responsibleForCurrentUser && !calendarTaskReadByCurrentUser(task, match))
+}
+
+function calendarMarkTaskRead(taskId = '', options = {}) {
+  const id = String(taskId ?? '').trim()
+  if (!id) {
+    return false
+  }
+  const tasksBefore = calendarLoadTasks()
+  const task = tasksBefore.find((item) => item.id === id)
+  if (!task) {
+    return false
+  }
+  const match = dashboardCurrentUserMatchKeys()
+  if (calendarTaskReadByCurrentUser(task, match)) {
+    return false
+  }
+  const readAt = new Date().toISOString()
+  const actor = calendarCurrentUserTaskIdentity()
+  const receipt = { id: actor.id, label: actor.label, at: readAt }
+  const details = `Przeczytał: ${actor.label}`
+  const nextTasks = tasksBefore.map((item) =>
+    item.id === id
+      ? calendarNormalizeTask(
+          calendarAppendTaskActivity(
+            {
+              ...item,
+              readReceipts: calendarMergeTaskReadReceipts(item.readReceipts, [receipt]),
+              lastReadAt: readAt,
+              lastReadBy: actor.label,
+              updatedAt: readAt,
+            },
+            'Odczytano zadanie',
+            details,
+            { actor: actor.label, at: readAt },
+          ),
+        )
+      : item,
+  )
+  calendarSaveTasks(nextTasks)
+  if (options.renderDashboard !== false) {
+    renderDashboardKanbanTasks()
+  }
+  if (options.renderKanban && appState.currentRoute === 'kanban') {
+    renderKanbanView()
+  }
+  if (options.renderCalendar && appState.currentRoute === 'calendar') {
+    renderCalendarView()
+  }
+  return true
+}
+
 function dashboardTaskColumnBelongsToCurrentUser(task = {}, match = dashboardCurrentUserMatchKeys()) {
   const status = String(task.kanbanStatus ?? '').trim()
   if (!status || (!match.keys.size && !match.compactKeys.size)) {
@@ -6859,6 +7006,7 @@ function dashboardTaskColumnBelongsToCurrentUser(task = {}, match = dashboardCur
 function dashboardDueKanbanTasks(options = {}) {
   const includeWorkerMessages = options.includeWorkerMessages !== false
   const today = todayYmd()
+  const currentUserMatch = dashboardCurrentUserMatchKeys()
   return calendarSortTasks(calendarLoadTasks()).filter((task) => {
     const taskDay = String(task.dateYmd ?? '').trim()
     if (!includeWorkerMessages && (task.generatedFromComment || calendarTaskToneValue(task) === 'message')) {
@@ -6869,7 +7017,7 @@ function dashboardDueKanbanTasks(options = {}) {
       taskDay <= today &&
       task.active !== false &&
       !kanbanTaskIsCompleted(task) &&
-      calendarTaskIsVisibleForCurrentUser(task)
+      calendarTaskShouldShowOnDashboardForCurrentUser(task, currentUserMatch)
     )
   })
 }
@@ -21278,6 +21426,9 @@ function calendarTaskMatchesToneFilter(task = {}) {
 }
 
 function calendarTaskIsRead(task = {}, readCommentKeys = null) {
+  if (calendarTaskReadByCurrentUser(task)) {
+    return true
+  }
   if (task.read || task.isRead || task.seen || task.readAt || task.seenAt || task.acknowledgedAt) {
     return true
   }
@@ -28816,6 +28967,9 @@ function calendarCompletionActivityDetails(task = {}, note = '', completedBy = '
   const parts = []
   const cleanNote = String(note ?? '').trim()
   const actor = String(completedBy ?? '').trim()
+  if (actor) {
+    parts.push(`Ukończył: ${actor}`)
+  }
   if (cleanNote) {
     parts.push(`Komentarz: ${cleanNote}`)
   } else if (task.generatedFromComment && actor) {
@@ -29552,6 +29706,13 @@ function kanbanMoveColumn(sourceColumnId = '', targetColumnId = '', position = '
 function kanbanOpenCalendarTask(taskId = '') {
   const id = String(taskId ?? '').trim()
   const task = calendarLoadTasks().find((item) => item.id === id)
+  if (id) {
+    calendarMarkTaskRead(id, {
+      renderDashboard: appState.currentRoute === 'dashboard',
+      renderKanban: false,
+      renderCalendar: false,
+    })
+  }
   if (task?.dateYmd) {
     appState.calendarCursorDay = task.dateYmd
   }
