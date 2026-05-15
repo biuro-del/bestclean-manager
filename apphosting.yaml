@@ -8,6 +8,10 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  - variable: VITE_GOOGLE_MAPS_API_KEY
+    secret: GOOGLE_MAPS_API_KEY
+    availability:
+      - BUILD
   - variable: API_PROXY_TARGET
     value: https://europe-central2-iclean-room.cloudfunctions.net
     availability:
