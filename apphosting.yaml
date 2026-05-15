@@ -52,7 +52,3 @@ env:
     value: "true"
     availability:
       - RUNTIME
-  - variable: WORKER_PASSWORD_SECRET
-    secret: WORKER_PASSWORD_SECRET
-    availability:
-      - RUNTIME
