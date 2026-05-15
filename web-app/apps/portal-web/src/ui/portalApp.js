@@ -9523,6 +9523,223 @@ function ordersRenderWorkerChecklist(order = {}) {
   ordersSyncWorkerPickerLabel(selected)
 }
 
+function ordersFormatWorkMinutes(minutes = 0) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0))
+  const hours = Math.floor(total / 60)
+  const mins = total % 60
+  if (!hours) {
+    return `${mins} min`
+  }
+  return mins ? `${hours}h ${pad2(mins)}min` : `${hours}h`
+}
+
+function ordersHoursInputValue(minutes = 0) {
+  const hours = Math.max(0, Math.round(Number(minutes) || 0)) / 60
+  return Number.isInteger(hours) ? String(hours) : String(Math.round(hours * 100) / 100)
+}
+
+function ordersStoredWorkMinutes(order = {}) {
+  const stored = Number(
+    order.requiredWorkMinutes ?? order.workMinutes ?? order.serviceWorkMinutes ?? order.standardWorkMinutes ?? 0,
+  )
+  if (Number.isFinite(stored) && stored > 0) {
+    return Math.max(15, Math.round(stored))
+  }
+  return Math.max(60, calendarTimelineOrderDurationMinutes(order))
+}
+
+function ordersReadWorkMinutes(order = {}) {
+  const inputValue = ordersReadInputValue('ordersEditWorkHours')
+  const rawHours = inputValue ? Number(inputValue) : NaN
+  if (Number.isFinite(rawHours) && rawHours > 0) {
+    return Math.max(15, Math.round(rawHours * 60))
+  }
+  return ordersStoredWorkMinutes(order)
+}
+
+function ordersAccessWindowMinutes(order = {}) {
+  const start = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), order.startTime || '08:00')
+  const end = ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(start))
+  const startMinutes = calendarTimelineTimeMinutes(start, 8 * 60)
+  let endMinutes = calendarTimelineTimeMinutes(end, startMinutes + 60)
+  if (endMinutes <= startMinutes) {
+    endMinutes += 1440
+  }
+  return Math.max(15, endMinutes - startMinutes)
+}
+
+function ordersSelectedWorkSubjects(order = {}) {
+  const resources = calendarTimelineResources()
+  const useEditorSelection =
+    document.getElementById('ordersEditorPanel') &&
+    String(order?.id ?? '') &&
+    String(order?.id ?? '') === String(appState.ordersEditingId ?? '')
+  const rows = useEditorSelection ? ordersReadSelectedWorkerRows() : ordersNormalizeOrderRows(order, resources)
+  const workerRows = rows.filter((row) => !calendarTimelineRowAllowsOverlap(row, resources))
+  if (workerRows.length) {
+    return workerRows.map((row, index) => ({
+      key: `row:${row}`,
+      row,
+      index,
+      type: 'worker',
+      label: ordersWorkerRowLabel(row, resources),
+    }))
+  }
+
+  const requiredPeople = Math.max(
+    1,
+    Math.min(
+      20,
+      Math.floor(
+        Number(useEditorSelection ? ordersReadInputValue('ordersEditRequiredPeople') : 0) ||
+          Number(order.requiredPeople) ||
+          Number(order.requiredWorkers) ||
+          Number(order.workerSlots) ||
+          1,
+      ),
+    ),
+  )
+  return Array.from({ length: requiredPeople }, (_, index) => ({
+    key: `buffer:${index + 1}`,
+    row: 0,
+    index,
+    type: 'buffer',
+    label: `BUFOR ${index + 1}`,
+  }))
+}
+
+function ordersSplitMinutesEvenly(totalMinutes = 0, count = 1) {
+  const total = Math.max(0, Math.round(Number(totalMinutes) || 0))
+  const safeCount = Math.max(1, Math.floor(Number(count) || 1))
+  const base = Math.floor(total / safeCount)
+  const remainder = total - base * safeCount
+  return Array.from({ length: safeCount }, (_, index) => base + (index < remainder ? 1 : 0))
+}
+
+function ordersAllocationMap(order = {}) {
+  const rows = Array.isArray(order.workAllocations)
+    ? order.workAllocations
+    : Array.isArray(order.workerAllocations)
+      ? order.workerAllocations
+      : []
+  const map = new Map()
+  rows.forEach((item) => {
+    const key = String(item?.key ?? '').trim()
+    const minutes = Math.max(0, Math.round(Number(item?.minutes ?? item?.workMinutes ?? item?.durationMinutes) || 0))
+    if (key && minutes > 0) {
+      map.set(key, minutes)
+    }
+  })
+  return map
+}
+
+function ordersWorkAllocationsForSubjects(order = {}, subjects = [], totalMinutes = 0, forceEven = false) {
+  const safeSubjects = Array.isArray(subjects) && subjects.length ? subjects : ordersSelectedWorkSubjects(order)
+  const total = Math.max(15, Math.round(Number(totalMinutes) || ordersReadWorkMinutes(order)))
+  const existing = ordersAllocationMap(order)
+  const canUseExisting =
+    !forceEven &&
+    safeSubjects.length > 0 &&
+    safeSubjects.every((subject) => existing.has(subject.key)) &&
+    [...existing.keys()].every((key) => safeSubjects.some((subject) => subject.key === key))
+  const values = canUseExisting ? safeSubjects.map((subject) => existing.get(subject.key) || 0) : ordersSplitMinutesEvenly(total, safeSubjects.length)
+  return safeSubjects.map((subject, index) => ({
+    ...subject,
+    minutes: Math.max(0, Math.round(Number(values[index]) || 0)),
+  }))
+}
+
+function ordersReadWorkAllocationsFromControls(order = {}) {
+  const subjects = ordersSelectedWorkSubjects(order)
+  const values = new Map()
+  document.querySelectorAll('#ordersWorkAllocationRows [data-orders-work-allocation]').forEach((input) => {
+    if (!(input instanceof HTMLInputElement)) {
+      return
+    }
+    const key = String(input.getAttribute('data-orders-work-allocation') ?? '').trim()
+    const minutes = Math.max(0, Math.round(Number(input.value) || 0))
+    if (key) {
+      values.set(key, minutes)
+    }
+  })
+  const fallback = ordersWorkAllocationsForSubjects(order, subjects, ordersReadWorkMinutes(order))
+  return subjects.map((subject) => ({
+    ...subject,
+    minutes: values.has(subject.key) ? values.get(subject.key) : fallback.find((item) => item.key === subject.key)?.minutes || 0,
+  }))
+}
+
+function ordersStoreWorkAllocations(order = {}, allocations = []) {
+  const safe = (Array.isArray(allocations) ? allocations : [])
+    .map((item) => ({
+      key: String(item?.key ?? '').trim(),
+      row: Number.isInteger(Number(item?.row)) ? Number(item.row) : 0,
+      type: String(item?.type ?? '').trim() || 'buffer',
+      label: String(item?.label ?? '').trim(),
+      minutes: Math.max(0, Math.round(Number(item?.minutes) || 0)),
+    }))
+    .filter((item) => item.key && item.minutes > 0)
+  order.workAllocations = safe
+  order.workerAllocations = safe
+  return safe
+}
+
+function ordersRenderWorkAllocationControls(order = {}, { forceEven = false } = {}) {
+  const panel = document.getElementById('ordersWorkloadPanel')
+  const rows = document.getElementById('ordersWorkAllocationRows')
+  const summary = document.getElementById('ordersWorkAllocationSummary')
+  const peopleInput = document.getElementById('ordersEditRequiredPeople')
+  if (!panel || !rows || !summary) {
+    return
+  }
+  const isRepeat = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat'
+  panel.hidden = !isRepeat
+  if (!isRepeat) {
+    return
+  }
+  const subjects = ordersSelectedWorkSubjects(order)
+  const hasWorkers = subjects.some((subject) => subject.type === 'worker')
+  if (peopleInput instanceof HTMLInputElement) {
+    peopleInput.disabled = hasWorkers
+    if (hasWorkers) {
+      peopleInput.value = String(subjects.length || 1)
+    }
+  }
+  const totalMinutes = ordersReadWorkMinutes(order)
+  const accessMinutes = ordersAccessWindowMinutes(order)
+  const allocations = ordersWorkAllocationsForSubjects(order, subjects, totalMinutes, forceEven)
+  ordersStoreWorkAllocations(order, allocations)
+  const maxMinutes = Math.max(totalMinutes, accessMinutes, ...allocations.map((item) => item.minutes), 60)
+  rows.innerHTML = allocations
+    .map((item) => `
+      <label class="orders-work-allocation-row">
+        <span>${escapeHtml(item.label || 'BUFOR')}</span>
+        <input type="range" min="15" max="${maxMinutes}" step="15" value="${item.minutes}" data-orders-work-allocation="${escapeHtml(item.key)}" />
+        <input type="number" min="0.25" step="0.25" value="${escapeHtml(ordersHoursInputValue(item.minutes))}" data-orders-work-allocation-hours="${escapeHtml(item.key)}" aria-label="Godziny dla ${escapeHtml(item.label || 'slotu')}" />
+      </label>
+    `)
+    .join('')
+  ordersUpdateWorkAllocationSummary(order)
+}
+
+function ordersUpdateWorkAllocationSummary(order = {}) {
+  const summary = document.getElementById('ordersWorkAllocationSummary')
+  if (!summary) {
+    return
+  }
+  const allocations = ordersReadWorkAllocationsFromControls(order)
+  const total = ordersReadWorkMinutes(order)
+  const assigned = allocations.reduce((sum, item) => sum + Math.max(0, Number(item.minutes) || 0), 0)
+  const accessMinutes = ordersAccessWindowMinutes(order)
+  const overAccess = allocations.some((item) => item.minutes > accessMinutes)
+  const mismatch = Math.abs(assigned - total) > 0
+  summary.classList.toggle('is-error', mismatch || overAccess)
+  summary.textContent = overAccess
+    ? `Przydział jednej osoby przekracza okno dostępu (${ordersFormatWorkMinutes(accessMinutes)}).`
+    : `Przydzielono ${ordersFormatWorkMinutes(assigned)} / ${ordersFormatWorkMinutes(total)}.`
+  ordersStoreWorkAllocations(order, allocations)
+}
+
 function ordersCloseWorkerPicker() {
   const picker = document.getElementById('ordersEditWorkerPicker')
   if (picker instanceof HTMLDetailsElement) {
@@ -10561,6 +10778,15 @@ function ordersCreateDraftOrder() {
     startTime,
     endDateYmd: todayYmd(),
     endTime: ordersDefaultEndTime(startTime),
+    accessStartTime: startTime,
+    accessEndTime: ordersDefaultEndTime(startTime),
+    requiredWorkMinutes: 120,
+    serviceWorkMinutes: 120,
+    standardWorkMinutes: 120,
+    requiredPeople: 1,
+    requiredWorkers: 1,
+    workerSlots: 1,
+    workAllocations: [],
     validUntil: todayYmd(),
     nextDate: todayYmd(),
     title: 'Nowe zlecenie',
@@ -11319,10 +11545,15 @@ function ordersSetScheduleModeValue(mode = 'once') {
 }
 
 function ordersSetScheduleRepeatDisabled(disabled = true) {
+  const rules = document.getElementById('ordersScheduleRulesPanel')
   const panel = document.getElementById('ordersScheduleRepeatPanel')
+  if (rules) {
+    rules.hidden = Boolean(disabled)
+  }
   if (!panel) {
     return
   }
+  panel.hidden = Boolean(disabled)
   panel.classList.toggle('is-disabled', Boolean(disabled))
   panel.querySelectorAll('input, select, button').forEach((node) => {
     if (node instanceof HTMLInputElement || node instanceof HTMLSelectElement || node instanceof HTMLButtonElement) {
@@ -11332,6 +11563,18 @@ function ordersSetScheduleRepeatDisabled(disabled = true) {
   ordersSyncRepeatSelectPickers()
   if (disabled) {
     ordersCloseRepeatSelectPickers()
+  }
+}
+
+function ordersSyncScheduleTimeLabels(mode = 'once') {
+  const startLabel = document.getElementById('ordersStartTimeLabel')
+  const endLabel = document.getElementById('ordersEndTimeLabel')
+  const isRepeat = String(mode ?? '').trim() === 'repeat'
+  if (startLabel) {
+    startLabel.textContent = isRepeat ? 'Dostęp do obiektu od *' : 'Godzina START *'
+  }
+  if (endLabel) {
+    endLabel.textContent = isRepeat ? 'Dostęp do obiektu do *' : 'Godzina STOP *'
   }
 }
 
@@ -11410,14 +11653,18 @@ function ordersSyncScheduleControls(order = {}) {
   const mode = ordersScheduleModeForOrder(order)
   ordersSetScheduleModeValue(mode)
   ordersSetScheduleRepeatDisabled(mode !== 'repeat')
+  ordersSyncScheduleTimeLabels(mode)
   ordersSetScheduleTimeVisible(true)
   ordersSyncScheduleMirrorFields(order)
+  ordersSetInputValue('ordersEditWorkHours', ordersHoursInputValue(ordersStoredWorkMinutes(order)))
+  ordersSetInputValue('ordersEditRequiredPeople', order.requiredPeople || order.requiredWorkers || order.workerSlots || 1)
   ordersSetInputValue('ordersEditRepeatPreset', ordersRepeatPresetFromOrder(order))
   ordersSetInputValue('ordersEditRepeatEvery', order.repeatEvery || 1)
   ordersSetInputValue('ordersEditRepeatUnit', order.repeatUnit || 'week')
   ordersSetInputValue('ordersEditRepeatAfterDays', order.repeatAfterDays || 0)
   ordersSetRepeatWeekdayChecks(ordersRepeatWeekdaysFromOrder(order))
   ordersSyncRepeatSelectPickers()
+  ordersRenderWorkAllocationControls(order)
 }
 
 function ordersApplyRepeatPresetToControls(preset = '') {
@@ -11456,6 +11703,16 @@ function ordersUpdateOrderScheduleFromControls(order = {}) {
   order.validUntil = order.endDateYmd
   order.startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), order.startTime || '08:00')
   order.endTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(order.startTime))
+  order.accessStartTime = order.startTime
+  order.accessEndTime = order.endTime
+  order.requiredWorkMinutes = mode === 'repeat' ? ordersReadWorkMinutes(order) : calendarTimelineOrderDurationMinutes(order)
+  order.serviceWorkMinutes = order.requiredWorkMinutes
+  order.standardWorkMinutes = order.requiredWorkMinutes
+  order.requiredPeople = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRequiredPeople')) || Number(order.requiredPeople) || 1))
+  order.workerSlots = order.requiredPeople
+  if (mode === 'repeat') {
+    ordersStoreWorkAllocations(order, ordersReadWorkAllocationsFromControls(order))
+  }
   order.repeatPreset = mode === 'repeat' ? ordersReadInputValue('ordersEditRepeatPreset') || ordersRepeatPresetFromOrder(order) : 'none'
   order.repeatEvery = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || 1))
   order.repeatUnit = ordersReadInputValue('ordersEditRepeatUnit') || 'week'
@@ -11463,6 +11720,7 @@ function ordersUpdateOrderScheduleFromControls(order = {}) {
   order.repeatWeekdays = ordersReadRepeatWeekdays()
   ordersSetInputValue('ordersEditType', order.type)
   ordersSetScheduleRepeatDisabled(mode !== 'repeat')
+  ordersSyncScheduleTimeLabels(mode)
 }
 
 function ordersRenderSchedulePreview(order = {}) {
@@ -11477,6 +11735,9 @@ function ordersRenderSchedulePreview(order = {}) {
     const typeLabel = isRepeat ? 'Zlecenie cykliczne' : 'Zlecenie jednorazowe'
     const cadenceLabel = isRepeat ? ordersRepeatUnitLabel(order.repeatUnit, order.repeatEvery) : 'Bez powtarzania'
     const workerLabel = ordersPreviewWorkerLabel(order)
+    const workLabel = isRepeat
+      ? `Dostęp ${startTime}-${endTime} · praca ${ordersFormatWorkMinutes(ordersReadWorkMinutes(order))}`
+      : ''
     preview.innerHTML = `
       <div class="orders-schedule-preview-row orders-schedule-preview-row--summary">
         <span class="orders-schedule-preview-icon" aria-hidden="true">
@@ -11496,7 +11757,7 @@ function ordersRenderSchedulePreview(order = {}) {
           <span><em>Stop</em><strong>${escapeHtml(`${end} ${endTime}`)}</strong></span>
         </div>
         <div class="orders-schedule-preview-note${isRepeat ? '' : ' is-muted'}">
-          ${escapeHtml(cadenceLabel)}
+          ${escapeHtml(isRepeat && workLabel ? `${cadenceLabel} · ${workLabel}` : cadenceLabel)}
         </div>
       </div>
     `
@@ -11545,6 +11806,12 @@ function ordersBuildRepeatCalendarOrder(order = {}) {
     validUntil: end,
     startTime,
     endTime: ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(startTime)),
+    accessStartTime: startTime,
+    accessEndTime: ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(startTime)),
+    requiredWorkMinutes: mode === 'repeat' ? ordersReadWorkMinutes(order) : calendarTimelineOrderDurationMinutes(order),
+    serviceWorkMinutes: mode === 'repeat' ? ordersReadWorkMinutes(order) : calendarTimelineOrderDurationMinutes(order),
+    requiredPeople: Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRequiredPeople')) || Number(order.requiredPeople) || 1)),
+    workAllocations: mode === 'repeat' ? ordersReadWorkAllocationsFromControls(order) : [],
     repeatPreset: mode === 'repeat' ? ordersReadInputValue('ordersEditRepeatPreset') || ordersRepeatPresetFromOrder(order) : 'none',
     repeatEvery,
     repeatUnit,
@@ -11990,6 +12257,23 @@ function ordersSaveEditor() {
   const selectedType = String(ordersReadInputValue('ordersEditType') || order.type || 'individual').trim()
   const scheduleMode = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat' || selectedType === 'cyclic' ? 'repeat' : 'once'
   const type = scheduleMode === 'repeat' ? 'cyclic' : selectedType === 'cyclic' ? 'individual' : selectedType
+  const requiredWorkMinutes = scheduleMode === 'repeat' ? ordersReadWorkMinutes(order) : calendarTimelineOrderDurationMinutes(order)
+  const requiredPeople = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRequiredPeople')) || Number(order.requiredPeople) || 1))
+  const workAllocations = scheduleMode === 'repeat' ? ordersReadWorkAllocationsFromControls(order) : []
+  const assignedWorkMinutes = workAllocations.reduce((sum, item) => sum + Math.max(0, Number(item.minutes) || 0), 0)
+  const accessMinutes = ordersAccessWindowMinutes(order)
+  if (scheduleMode === 'repeat') {
+    if (Math.abs(assignedWorkMinutes - requiredWorkMinutes) > 0) {
+      showTransientNotice('Nie zapisano: suma godzin osób musi być równa wymaganemu czasowi pracy.', 'error')
+      ordersUpdateWorkAllocationSummary(order)
+      return
+    }
+    if (workAllocations.some((item) => Number(item.minutes) > accessMinutes)) {
+      showTransientNotice('Nie zapisano: przydział osoby przekracza okno dostępu do obiektu.', 'error')
+      ordersUpdateWorkAllocationSummary(order)
+      return
+    }
+  }
   const clientLabel = ordersReadInputValue('ordersEditClient')
   if (!clientLabel || clientLabel === ORDERS_NEW_CLIENT_VALUE) {
     showTransientNotice('Nie zapisano: wybierz klienta z listy.', 'error')
@@ -12037,6 +12321,16 @@ function ordersSaveEditor() {
     endTime,
     validUntil: explicitEndDate,
     scheduleMode,
+    accessStartTime: startTime,
+    accessEndTime: endTime,
+    requiredWorkMinutes,
+    serviceWorkMinutes: requiredWorkMinutes,
+    standardWorkMinutes: requiredWorkMinutes,
+    requiredPeople,
+    requiredWorkers: requiredPeople,
+    workerSlots: requiredPeople,
+    workAllocations,
+    workerAllocations: workAllocations,
     nextDate: ordersNormalizeDateField(ordersReadInputValue('ordersEditNext'), dateYmd),
     title: title || order.title || 'Zlecenie',
     clientId: selectedClientData.clientId || order.clientId || '',
@@ -12582,6 +12876,39 @@ function bindOrdersViewFunctions() {
       return
     }
 
+    if (
+      ['ordersEditWorkHours', 'ordersEditRequiredPeople'].includes(String(event.target?.id ?? '')) ||
+      event.target?.hasAttribute?.('data-orders-work-allocation') ||
+      event.target?.hasAttribute?.('data-orders-work-allocation-hours')
+    ) {
+      const order = ordersFindTimelineOrder(appState.ordersEditingId)
+      if (order) {
+        if (event.target?.id === 'ordersEditWorkHours' || event.target?.id === 'ordersEditRequiredPeople') {
+          order.requiredWorkMinutes = ordersReadWorkMinutes(order)
+          order.serviceWorkMinutes = order.requiredWorkMinutes
+          order.requiredPeople = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRequiredPeople')) || 1))
+          ordersRenderWorkAllocationControls(order, { forceEven: true })
+        } else if (event.target?.hasAttribute?.('data-orders-work-allocation-hours')) {
+          const key = String(event.target.getAttribute('data-orders-work-allocation-hours') ?? '').trim()
+          const minutes = Math.max(0, Math.round((Number(event.target.value) || 0) * 60))
+          const range = document.querySelector(`#ordersWorkAllocationRows [data-orders-work-allocation="${CSS.escape(key)}"]`)
+          if (range instanceof HTMLInputElement) {
+            range.value = String(minutes)
+          }
+          ordersUpdateWorkAllocationSummary(order)
+        } else {
+          const key = String(event.target.getAttribute('data-orders-work-allocation') ?? '').trim()
+          const hours = document.querySelector(`#ordersWorkAllocationRows [data-orders-work-allocation-hours="${CSS.escape(key)}"]`)
+          if (hours instanceof HTMLInputElement) {
+            hours.value = ordersHoursInputValue(Number(event.target.value) || 0)
+          }
+          ordersUpdateWorkAllocationSummary(order)
+        }
+        ordersRenderSchedulePreview(order)
+      }
+      return
+    }
+
     if (event.target?.id === 'ordersSearchInput') {
       appState.ordersSearch = String(event.target.value ?? '')
       renderOrdersView()
@@ -12626,6 +12953,7 @@ function bindOrdersViewFunctions() {
         ordersRenderSchedulePreview(order)
       } else {
         ordersSetScheduleRepeatDisabled(event.target?.value !== 'repeat')
+        ordersSyncScheduleTimeLabels(event.target?.value === 'repeat' ? 'repeat' : 'once')
         ordersRenderRepeatCalendar({})
       }
       return
@@ -12665,6 +12993,8 @@ function bindOrdersViewFunctions() {
         'ordersEditRepeatEvery',
         'ordersEditRepeatUnit',
         'ordersEditRepeatAfterDays',
+        'ordersEditWorkHours',
+        'ordersEditRequiredPeople',
       ].includes(String(event.target?.id ?? '')) ||
       event.target?.hasAttribute?.('data-orders-repeat-weekday')
     ) {
@@ -12676,6 +13006,9 @@ function bindOrdersViewFunctions() {
       const order = ordersFindTimelineOrder(appState.ordersEditingId)
       if (order) {
         ordersUpdateOrderScheduleFromControls(order)
+        if (targetId === 'ordersEditTime' || targetId === 'ordersEditEndTime') {
+          ordersRenderWorkAllocationControls(order)
+        }
         if (targetId === 'ordersEditStart' || targetId === 'ordersScheduleStartDate') {
           const checkedWeekdays = ordersReadRepeatWeekdays()
           if (!checkedWeekdays.length) {
@@ -12712,6 +13045,7 @@ function bindOrdersViewFunctions() {
         order.row = row
         order.assignedRows = ordersReadSelectedWorkerRows()
         ordersRenderWorkerChecklist(order)
+        ordersRenderWorkAllocationControls(order, { forceEven: true })
         ordersRenderSchedulePreview(order)
       }
       return
@@ -12723,6 +13057,7 @@ function bindOrdersViewFunctions() {
       if (order) {
         order.row = rows[0] ?? 0
         order.assignedRows = rows
+        ordersRenderWorkAllocationControls(order, { forceEven: true })
         ordersRenderSchedulePreview(order)
       }
       return
@@ -15111,6 +15446,24 @@ function eventEditorOverlapMessage(payload, overlap) {
   return `Nie mozna zapisac statusu: ${workerLabel} ma juz status w tym czasie (${startLabel} - ${endLabel}).`
 }
 
+function eventEditorFutureTimeMessage(payload = {}) {
+  const nowTs = Date.now()
+  const futureFields = [
+    ['Start', payload.startAt],
+    ['Stop', payload.endAt],
+  ].filter(([, value]) => {
+    const ts = new Date(value ?? '').getTime()
+    return Number.isFinite(ts) && ts > nowTs
+  })
+
+  if (!futureFields.length) {
+    return ''
+  }
+
+  const fieldLabel = futureFields.map(([label]) => label).join(' i ')
+  return `Nie mozna zapisac zdarzenia z czasem przyszlym. Popraw pole: ${fieldLabel}.`
+}
+
 async function saveEventEditor() {
   if (!appState.session?.orgId) {
     return
@@ -15138,6 +15491,11 @@ async function saveEventEditor() {
       alert('Godzina STOP musi byc pozniejsza niz START.')
       return
     }
+  }
+  const futureTimeMessage = eventEditorFutureTimeMessage(payload)
+  if (futureTimeMessage) {
+    alert(futureTimeMessage)
+    return
   }
 
   const saveButton = document.getElementById('evSaveBtn')
@@ -29098,12 +29456,64 @@ function calendarTimelineMarkDropTarget(target, info = null, invalid = false) {
 }
 
 function calendarTimelineVisualOrders(orders = [], resources = calendarTimelineResources()) {
-  return orders.flatMap((order) =>
-    ordersNormalizeOrderRows(order, resources).map((row) => ({
+  return orders.flatMap((order) => calendarTimelineVisualOrderSlots(order, resources))
+}
+
+function calendarTimelineWorkSlotEnd(startDay = '', startTime = '08:00', minutes = 60) {
+  const startMinutes = calendarTimelineTimeMinutes(startTime, 8 * 60)
+  const totalEndMinutes = startMinutes + Math.max(15, Math.round(Number(minutes) || 60))
+  return {
+    endDateYmd: calendarAddDays(startDay, Math.floor(totalEndMinutes / 1440)),
+    endTime: calendarMinutesToTime(totalEndMinutes % 1440) || '23:59',
+  }
+}
+
+function calendarTimelineVisualOrderSlots(order = {}, resources = calendarTimelineResources()) {
+  if (order?.isRealEvent || ordersScheduleModeForOrder(order) !== 'repeat') {
+    return ordersNormalizeOrderRows(order, resources).map((row) => ({
       ...order,
       row,
-    })),
-  )
+    }))
+  }
+
+  const allocations = Array.isArray(order.workAllocations) && order.workAllocations.length
+    ? order.workAllocations
+    : ordersWorkAllocationsForSubjects(order, [], Number(order.requiredWorkMinutes) || calendarTimelineOrderDurationMinutes(order), false)
+  const safeAllocations = allocations
+    .map((item, index) => ({
+      key: String(item?.key ?? `slot:${index + 1}`).trim(),
+      row: Number.isInteger(Number(item?.row)) ? Number(item.row) : 0,
+      label: String(item?.label ?? '').trim(),
+      minutes: Math.max(15, Math.round(Number(item?.minutes) || 0)),
+    }))
+    .filter((item) => item.minutes > 0)
+
+  if (!safeAllocations.length) {
+    return ordersNormalizeOrderRows(order, resources).map((row) => ({ ...order, row }))
+  }
+
+  const startDay = String(order.dateYmd ?? todayYmd()).trim()
+  const accessStart = ordersNormalizeTimeField(order.accessStartTime || order.startTime, '08:00')
+  return safeAllocations.map((allocation, index) => {
+    const end = calendarTimelineWorkSlotEnd(startDay, accessStart, allocation.minutes)
+    const slotKey = normalizeSearchText(allocation.key || `slot-${index + 1}`).replace(/[^a-z0-9_-]+/g, '-')
+    return {
+      ...order,
+      id: `${String(order.id ?? 'order')}__workslot__${slotKey || index + 1}`,
+      row: allocation.row,
+      assignedRows: [allocation.row],
+      workerAssignments: ordersWorkerAssignmentsFromRows([allocation.row], resources),
+      startTime: accessStart,
+      endDateYmd: end.endDateYmd,
+      endTime: end.endTime,
+      validUntil: end.endDateYmd,
+      workSlotKey: allocation.key,
+      workSlotLabel: allocation.label,
+      slotWorkMinutes: allocation.minutes,
+      sourceOrderId: String(order.sourceOrderId || order.id || '').trim(),
+      title: `${calendarTimelineOrderTitle(order)} · ${ordersFormatWorkMinutes(allocation.minutes)}`,
+    }
+  })
 }
 
 function calendarTimelineSourceRowsCoverDays(days = []) {

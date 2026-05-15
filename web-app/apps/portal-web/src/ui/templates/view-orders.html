@@ -112,6 +112,11 @@
               </section>
 
               <section class="orders-editor-section orders-editor-section--assignment">
+                <div class="orders-schedule-mode">
+                    <label><input type="radio" name="ordersScheduleMode" value="once" checked /> Jednorazowe</label>
+                    <label><input type="radio" name="ordersScheduleMode" value="repeat" /> Cykliczne</label>
+                </div>
+
                 <h3>Kiedy i częstotliwość</h3>
 
                 <div class="orders-form-two">
@@ -127,19 +132,38 @@
 
                 <div class="orders-form-two">
                   <label class="orders-field">
-                    <span>Godzina START *</span>
+                    <span id="ordersStartTimeLabel">Godzina START *</span>
                     <input id="ordersEditTime" type="time" />
                   </label>
                   <label class="orders-field">
-                    <span>Godzina STOP *</span>
+                    <span id="ordersEndTimeLabel">Godzina STOP *</span>
                     <input id="ordersEditEndTime" type="time" />
                   </label>
                 </div>
 
-                <div class="orders-schedule-rules">
-                  <div class="orders-schedule-mode">
-                    <label><input type="radio" name="ordersScheduleMode" value="once" checked /> Jednorazowe</label>
-                    <label><input type="radio" name="ordersScheduleMode" value="repeat" /> Cykliczne</label>
+                <div class="orders-schedule-rules" id="ordersScheduleRulesPanel" hidden>
+                  <div class="orders-workload-panel" id="ordersWorkloadPanel">
+                    <div class="orders-workload-head">
+                      <div>
+                        <strong>Standardowy cykl usługi</strong>
+                        <span>Określ dostęp do obiektu oraz łączny czas pracy potrzebny do wykonania usługi.</span>
+                      </div>
+                    </div>
+                    <div class="orders-workload-grid">
+                      <label class="orders-field">
+                        <span>Wymagany czas pracy *</span>
+                        <input id="ordersEditWorkHours" type="number" min="0.25" step="0.25" value="2" />
+                      </label>
+                      <label class="orders-field">
+                        <span>Liczba osób do obsadzenia</span>
+                        <input id="ordersEditRequiredPeople" type="number" min="1" step="1" value="1" />
+                      </label>
+                    </div>
+                    <p class="orders-workload-hint" id="ordersWorkloadHint">
+                      Przy BUFORZE liczba osób tworzy puste sloty do obsadzenia. Po wyborze pracowników czas dzieli się między wybrane osoby.
+                    </p>
+                    <div class="orders-work-allocation" id="ordersWorkAllocationRows"></div>
+                    <div class="orders-work-summary" id="ordersWorkAllocationSummary"></div>
                   </div>
 
                   <div class="orders-schedule-repeat" id="ordersScheduleRepeatPanel">
@@ -243,24 +267,6 @@
                 <span>Komentarz dla pracownika <small>- tylko aplikacja pracownika</small></span>
                 <textarea id="ordersEditWorkerComment" placeholder="Widoczny tylko dla przypisanych pracowników w aplikacji"></textarea>
               </label>
-            </div>
-
-            <div class="orders-device-panel">
-              <div class="orders-subtask-head">
-                <strong>Uwagi terenowe</strong>
-              </div>
-              <div class="orders-inline-add orders-inline-add--device">
-                <select id="ordersEditDevice">
-                  <option value="">Wybierz</option>
-                  <option>Opis / uwaga</option>
-                  <option>Uszkodzenie</option>
-                  <option>Brak dostępu</option>
-                  <option>Zdjęcie kontrolne</option>
-                  <option>Inne</option>
-                </select>
-                <button id="ordersDeviceNoteAdd" type="button">Dodaj</button>
-              </div>
-              <div class="orders-device-notes" id="ordersDeviceNotesRows" hidden></div>
             </div>
 
             <div class="orders-subtask-grid">

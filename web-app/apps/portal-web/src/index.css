@@ -21786,7 +21786,7 @@ body{
 #portalRoot #view-orders .orders-modal--simple .orders-schedule-mode{
   background:#fff !important;
   border-radius:12px !important;
-  margin:0 !important;
+  margin:0 0 10px !important;
 }
 
 #portalRoot #view-orders .orders-modal--simple .orders-description,
@@ -21893,8 +21893,96 @@ body{
   gap:10px !important;
 }
 
+#portalRoot #view-orders .orders-schedule-rules[hidden]{
+  display:none !important;
+}
+
 #portalRoot #view-orders .orders-schedule-rules .orders-schedule-repeat{
   margin:0 !important;
+}
+
+#portalRoot #view-orders .orders-workload-panel{
+  background:#f8fbff !important;
+  border:1px solid #dbe7fb !important;
+  border-radius:12px !important;
+  display:grid !important;
+  gap:10px !important;
+  padding:12px !important;
+}
+
+#portalRoot #view-orders .orders-workload-head{
+  align-items:flex-start !important;
+  display:flex !important;
+  justify-content:space-between !important;
+  gap:12px !important;
+}
+
+#portalRoot #view-orders .orders-workload-head strong{
+  color:#0f2852 !important;
+  display:block !important;
+  font:900 13px/1.2 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-workload-head span,
+#portalRoot #view-orders .orders-workload-hint{
+  color:#64758f !important;
+  font:700 11px/1.45 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  margin:0 !important;
+}
+
+#portalRoot #view-orders .orders-workload-grid{
+  display:grid !important;
+  gap:10px !important;
+  grid-template-columns:repeat(2, minmax(0, 1fr)) !important;
+}
+
+#portalRoot #view-orders .orders-work-allocation{
+  display:grid !important;
+  gap:8px !important;
+}
+
+#portalRoot #view-orders .orders-work-allocation-row{
+  align-items:center !important;
+  background:#fff !important;
+  border:1px solid #dbe7fb !important;
+  border-radius:10px !important;
+  display:grid !important;
+  gap:10px !important;
+  grid-template-columns:minmax(120px, .8fr) minmax(180px, 1.4fr) 96px !important;
+  padding:9px 10px !important;
+}
+
+#portalRoot #view-orders .orders-work-allocation-row span{
+  color:#10233f !important;
+  font:900 12px/1.2 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-work-allocation-row input[type="range"]{
+  accent-color:#2f63e6 !important;
+  width:100% !important;
+}
+
+#portalRoot #view-orders .orders-work-allocation-row input[type="number"]{
+  min-height:34px !important;
+  text-align:center !important;
+}
+
+#portalRoot #view-orders .orders-work-summary{
+  background:#eef6ff !important;
+  border:1px solid #bfdbfe !important;
+  border-radius:10px !important;
+  color:#1d4ed8 !important;
+  font:900 12px/1.3 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  padding:9px 10px !important;
+}
+
+#portalRoot #view-orders .orders-work-summary.is-error{
+  background:#fff1f2 !important;
+  border-color:#fecdd3 !important;
+  color:#be123c !important;
 }
 
 #portalRoot #view-orders .orders-schedule-rules .orders-schedule-empty{
@@ -22536,6 +22624,10 @@ body{
 #portalRoot #view-orders .orders-modal--simple .orders-schedule-rules{
   display:grid !important;
   gap:12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-rules[hidden]{
+  display:none !important;
 }
 
 #portalRoot #view-orders .orders-modal--simple .orders-schedule-mode{
