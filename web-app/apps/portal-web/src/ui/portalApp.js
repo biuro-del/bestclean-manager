@@ -9341,6 +9341,39 @@ function ordersNormalizeTimeField(value, fallback = '08:00') {
   return calendarNormalizeTimeValue(value) || fallback
 }
 
+function ordersTimelineOrderStartTimestamp(order = {}) {
+  const day = ordersNormalizeDateField(order?.dateYmd ?? order?.dateFrom ?? order?.startDate, '')
+  const time = ordersNormalizeTimeField(order?.startTime ?? order?.time, '00:00')
+  const iso = localDateAndTimeInputToIso(day, time)
+  const timestamp = iso ? new Date(iso).getTime() : NaN
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+function ordersTimelineOrderCanBeDeleted(order = {}) {
+  if (!order || order.completed || order.isDraft) {
+    return false
+  }
+  const startTs = ordersTimelineOrderStartTimestamp(order)
+  return Number.isFinite(startTs) && startTs > Date.now()
+}
+
+function ordersTimelineOrderDeleteLabel(order = {}) {
+  return ordersFirstClientText(order?.title, order?.name, order?.clientLabel, order?.client, order?.clientName, 'to zlecenie')
+}
+
+function ordersConfirmTimelineOrderDelete(order = {}) {
+  const label = ordersTimelineOrderDeleteLabel(order)
+  return window.confirm(
+    [
+      `Czy na pewno chcesz usunąć zlecenie: ${label}?`,
+      '',
+      'Ta operacja jest nieodwracalna.',
+      '',
+      'Usunąć można tylko zlecenia w statusie zaplanowane. Historycznych zleceń, zleceń rozpoczętych oraz aktualnie realizowanych nie da się usunąć.',
+    ].join('\n'),
+  )
+}
+
 function ordersSetInputValue(id, value = '') {
   const node = document.getElementById(id)
   if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement) {
@@ -13261,13 +13294,7 @@ function bindOrdersViewFunctions() {
         return
       }
       if (actionName === 'delete') {
-        ordersSaveTimelineOrders(ordersListSourceOrders().filter((order) => String(order?.id ?? '') !== orderId))
-        ordersDeleteRemoteTimelineOrdersById([orderId])
-        renderOrdersView()
-        if (appState.currentRoute === 'calendar') {
-          renderCalendarView()
-        }
-        showTransientNotice('Zlecenie usunięte z grafiku.', 'success')
+        void ordersDeleteTimelineOrderFromList(orderId)
         return
       }
     }
@@ -25986,15 +26013,20 @@ function ordersScheduleRemoteTimelineOrderRetry(delayMs = 15000) {
   }, Math.max(3000, Number(delayMs) || 15000))
 }
 
+function ordersCancelRemoteTimelineOrderSave() {
+  if (ordersRemoteSaveTimer) {
+    window.clearTimeout(ordersRemoteSaveTimer)
+    ordersRemoteSaveTimer = 0
+  }
+}
+
 function ordersQueueRemoteTimelineOrderSave(orders = ordersListSourceOrders()) {
   const orgId = String(appState.session?.orgId ?? '').trim()
   if (!orgId) {
     return
   }
 
-  if (ordersRemoteSaveTimer) {
-    window.clearTimeout(ordersRemoteSaveTimer)
-  }
+  ordersCancelRemoteTimelineOrderSave()
 
   const snapshot = ordersMergeTimelineOrderLists(orders)
   ordersRemoteSaveTimer = window.setTimeout(() => {
@@ -26071,19 +26103,65 @@ async function ordersSyncRemoteTimelineOrders({ render = false } = {}) {
   }
 }
 
-function ordersDeleteRemoteTimelineOrdersById(orderIds = []) {
+async function ordersDeleteRemoteTimelineOrdersById(orderIds = []) {
   const orgId = String(appState.session?.orgId ?? '').trim()
   const ids = (Array.isArray(orderIds) ? orderIds : [orderIds])
     .map((value) => String(value ?? '').trim())
     .filter(Boolean)
-  if (!orgId || !ids.length) {
-    return
+  if (!orgId) {
+    const error = new Error('Brak identyfikatora organizacji dla usuwania zlecenia.')
+    showPortalErrorNotice('Nie udało się usunąć zlecenia grafiku z bazy. Zlecenie pozostaje na liście', error)
+    throw error
+  }
+  if (!ids.length) {
+    return null
   }
 
-  void deletePortalScheduleOrders(orgId, ids).catch((error) => {
+  try {
+    const result = await deletePortalScheduleOrders(orgId, ids)
+    appState.calendarTimelineOrdersRemoteLoaded = true
+    return result
+  } catch (error) {
     console.warn('[portal/schedule-orders] remote delete failed', error)
-    showPortalErrorNotice('Nie udało się usunąć zlecenia grafiku z bazy', error)
-  })
+    showPortalErrorNotice('Nie udało się usunąć zlecenia grafiku z bazy. Zlecenie pozostaje na liście', error)
+    throw error
+  }
+}
+
+async function ordersDeleteTimelineOrderFromList(orderId = '') {
+  const id = String(orderId ?? '').trim()
+  const order = ordersFindTimelineOrder(id)
+  if (!order) {
+    showTransientNotice('Nie znaleziono zlecenia do usunięcia.', 'error')
+    return false
+  }
+
+  if (!ordersTimelineOrderCanBeDeleted(order)) {
+    showTransientNotice(
+      'Nie można usunąć tego zlecenia. Usuwać można tylko zlecenia zaplanowane, które jeszcze się nie rozpoczęły.',
+      'error',
+    )
+    return false
+  }
+
+  if (!ordersConfirmTimelineOrderDelete(order)) {
+    return false
+  }
+
+  const nextOrders = ordersListSourceOrders().filter((item) => String(item?.id ?? '') !== id)
+  try {
+    ordersCancelRemoteTimelineOrderSave()
+    await ordersDeleteRemoteTimelineOrdersById([id])
+    ordersSaveTimelineOrders(nextOrders, { syncRemote: false })
+    renderOrdersView()
+    if (appState.currentRoute === 'calendar') {
+      renderCalendarView()
+    }
+    showTransientNotice('Zlecenie usunięte z bazy i grafiku.', 'success')
+    return true
+  } catch {
+    return false
+  }
 }
 
 function ordersEnsureTimelineOrdersForRoute(routeName, renderAfterLoad) {
