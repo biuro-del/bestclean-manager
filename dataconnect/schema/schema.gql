@@ -90,6 +90,27 @@ type Worker @table(
   edit: String @col(name: "edit")
 }
 
+type WorkerCredential @table(
+  name: "worker_credential",
+  singular: "workerCredential",
+  plural: "workerCredentials",
+  key: ["orgId", "login"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  login: String! @col(name: "login", dataType: "varchar(80)")
+  worker: Worker! @ref(fields: ["orgId", "login"], references: ["orgId", "login"])
+
+  encryptedPassword: String! @col(name: "encrypted_password")
+  iv: String! @col(name: "iv", dataType: "varchar(64)")
+  authTag: String! @col(name: "auth_tag", dataType: "varchar(64)")
+  algorithm: String! @col(name: "algorithm", dataType: "varchar(40)")
+
+  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
+  updatedBy: String @col(name: "updated_by", dataType: "varchar(160)")
+}
+
 
 type Client @table(
   name: "client",

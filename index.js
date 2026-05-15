@@ -1,6 +1,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const http = require('node:http')
+const crypto = require('node:crypto')
 const dotenv = require('dotenv')
 const admin = require('firebase-admin')
 const { Pool } = require('pg')
@@ -30,30 +31,44 @@ for (const envFile of LOCAL_ENV_FILES) {
 const PORT = Number(process.env.PORT || 8080)
 const HOST = '0.0.0.0'
 const DIST_DIR = path.join(__dirname, 'web-app', 'dist')
+const LOCAL_PORTAL_DATA_DIR = path.join(__dirname, '.local-data')
 const APP_TARGET = String(process.env.APP_TARGET || '').trim().toLowerCase()
 const API_PROXY_TARGET = String(process.env.API_PROXY_TARGET || 'https://europe-central2-iclean-room.cloudfunctions.net').trim().replace(/\/+$/, '')
 const API_PROXY_FORWARDED_HOST = String(process.env.API_PROXY_FORWARDED_HOST || 'iclean-room.web.app').trim()
 const API_PROXY_TIMEOUT_MS = Number(process.env.API_PROXY_TIMEOUT_MS || 15000)
 const ADMIN_USERS_PATH = '/api/admin/users'
+const AUTH_PROVISION_WORKER_PATH = '/api/auth/provision-worker'
+const AUTH_ROLLBACK_WORKER_PATH = '/api/auth/rollback-worker'
+const ADMIN_WORKER_PASSWORD_REVEAL_PATH = '/api/admin/worker-password/reveal'
+const ADMIN_WORKER_PASSWORD_SET_PATH = '/api/admin/worker-password/set'
 const AUTH_SESSION_CONTEXT_PATH = '/api/auth/session-context'
 const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
+const DATACONNECT_LOCATION = String(process.env.FIREBASE_DATACONNECT_LOCATION || process.env.DATACONNECT_LOCATION || 'europe-west3').trim()
+const DATACONNECT_SERVICE = String(process.env.FIREBASE_DATACONNECT_SERVICE || process.env.DATACONNECT_SERVICE || 'iclean-room-service').trim()
+const DATACONNECT_CONNECTOR = String(process.env.FIREBASE_DATACONNECT_CONNECTOR || process.env.DATACONNECT_CONNECTOR || 'example').trim()
 const MAX_JSON_BODY_BYTES = 1024 * 1024
 const MAX_PROXY_BODY_BYTES = Number(process.env.MAX_PROXY_BODY_BYTES || MAX_JSON_BODY_BYTES)
+const DEFAULT_FIREBASE_PROJECT_ID = 'iclean-room'
+const DEFAULT_FIREBASE_WEB_API_KEY = 'AIzaSyCdRVjbPWm6MueCHOwsmmbdkEKZoO6Dy-k'
 const FIREBASE_PROJECT_ID = String(
   process.env.FIREBASE_PROJECT_ID ||
     process.env.GOOGLE_CLOUD_PROJECT ||
     process.env.GCLOUD_PROJECT ||
     process.env.VITE_FIREBASE_PROJECT_ID ||
-    '',
+    DEFAULT_FIREBASE_PROJECT_ID,
 ).trim()
-const FIREBASE_WEB_API_KEY = String(process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || '').trim()
+const FIREBASE_WEB_API_KEY = String(
+  process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || DEFAULT_FIREBASE_WEB_API_KEY,
+).trim()
 const CLOUD_SQL_CONNECTION_NAME = String(
   process.env.CLOUD_SQL_CONNECTION_NAME ||
     process.env.INSTANCE_CONNECTION_NAME ||
     (FIREBASE_PROJECT_ID === 'iclean-room' ? 'iclean-room:europe-west3:iclean-room-instance' : ''),
 ).trim()
 const CLOUD_SQL_ADMIN_SCOPE = 'https://www.googleapis.com/auth/sqlservice.admin'
+const ROLLBACK_TOKEN_MAX_AGE_MS = Number(process.env.ROLLBACK_TOKEN_MAX_AGE_MS || 15 * 60 * 1000)
+const WORKER_PASSWORD_ALGORITHM = 'aes-256-gcm'
 
 let firebaseAdminInitialized = false
 let dbPool = null
@@ -200,10 +215,29 @@ function sendApiError(res, statusCode, code, message, details = undefined) {
   })
 }
 
+function isLocalDevelopmentRuntime() {
+  return NODE_ENV !== 'production'
+}
+
+function publicErrorDetails(error) {
+  if (!isLocalDevelopmentRuntime()) {
+    return undefined
+  }
+
+  const details = {
+    code: normalizeText(error?.publicCode || error?.code),
+    message: normalizeText(error?.publicMessage || error?.message).slice(0, 500),
+    firebase: normalizeText(error?.firebaseRestMessage || error?.errorInfo?.message).slice(0, 240),
+  }
+
+  return Object.fromEntries(Object.entries(details).filter(([, value]) => value))
+}
+
 function logAdminUsersError(error, context = '') {
   const code = normalizeText(error?.publicCode || error?.code || error?.message || 'UNKNOWN')
   const message = normalizeText(error?.publicMessage || error?.message || 'Unknown admin users error')
-  console.error(`[admin/users]${context ? ` ${context}` : ''} ${code}: ${message}`)
+  const firebase = normalizeText(error?.firebaseRestMessage || error?.errorInfo?.message)
+  console.error(`[admin/users]${context ? ` ${context}` : ''} ${code}: ${message}${firebase ? ` (${firebase})` : ''}`)
 }
 
 function logPortalStorageError(context, error) {
@@ -269,7 +303,7 @@ function mapDatabaseConnectionError(error) {
     return {
       status: 503,
       code: 'DB_CONNECTION_REFUSED',
-      message: `Backend nie może połączyć się z bazą PostgreSQL na ${host}:${port}. Uruchom lokalną bazę albo Cloud SQL Proxy.`,
+      message: `Backend nie moĹĽe poĹ‚Ä…czyÄ‡ siÄ™ z bazÄ… PostgreSQL na ${host}:${port}. Uruchom lokalnÄ… bazÄ™ albo Cloud SQL Proxy.`,
     }
   }
 
@@ -277,7 +311,7 @@ function mapDatabaseConnectionError(error) {
     return {
       status: 503,
       code: 'DB_CONNECTION_FAILED',
-      message: `Backend nie może połączyć się z bazą PostgreSQL (${host}:${port}). Sprawdź host bazy lub tunel Cloud SQL Proxy.`,
+      message: `Backend nie moĹĽe poĹ‚Ä…czyÄ‡ siÄ™ z bazÄ… PostgreSQL (${host}:${port}). SprawdĹş host bazy lub tunel Cloud SQL Proxy.`,
     }
   }
 
@@ -285,7 +319,7 @@ function mapDatabaseConnectionError(error) {
     return {
       status: 500,
       code: 'DB_AUTH_FAILED',
-      message: 'Baza danych odrzuciła login lub hasło backendu.',
+      message: 'Baza danych odrzuciĹ‚a login lub hasĹ‚o backendu.',
     }
   }
 
@@ -365,14 +399,66 @@ function normalizeLogin(value) {
   return login
 }
 
+const LOGIN_LOCAL_PART_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,78}[a-z0-9])?$/
+
+function normalizeLoginLocalPart(value) {
+  const raw = normalizeLower(value)
+  const login = raw.includes('@') ? raw.split('@')[0] : raw
+  if (!LOGIN_LOCAL_PART_PATTERN.test(login)) {
+    return ''
+  }
+  return login
+}
+
+function normalizeWorkerCredentialLogin(value) {
+  const login = normalizeText(value)
+  if (!login || login.length > 80 || /[\u0000-\u001f\u007f]/.test(login)) {
+    return ''
+  }
+  return login
+}
+
 function emailLocalPart(email) {
   return normalizeLower(email).split('@')[0] || ''
 }
 
+function emailDomain(email) {
+  const normalized = normalizeEmail(email)
+  if (!normalized) {
+    return ''
+  }
+
+  const atIndex = normalized.indexOf('@')
+  if (atIndex < 0) {
+    return ''
+  }
+
+  const domain = normalized.slice(atIndex + 1).trim()
+  if (!domain || domain.includes('@')) {
+    return ''
+  }
+
+  return domain
+}
+
+function buildManagedUserEmail(login, requesterEmail) {
+  const localPart = normalizeLoginLocalPart(login)
+  const domain = emailDomain(requesterEmail)
+  return localPart && domain ? normalizeEmail(`${localPart}@${domain}`) : ''
+}
+
 function normalizeUserRole(value) {
-  const role = normalizeText(value).toUpperCase()
-  if (role === 'MANAGER' || role === 'KIEROWNIK') return 'MANAGER'
-  if (role === 'WORKER' || role === 'PRACOWNIK') return 'WORKER'
+  const rawRole = normalizeText(value)
+  const role = rawRole.toUpperCase()
+  const normalized = rawRole
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+
+  if (role === 'ADMIN' || role === 'OWNER' || role === 'SUPERADMIN' || normalized.includes('admin')) return ''
+  if (role === 'MANAGER' || role === 'KIEROWNIK' || normalized.includes('manager') || normalized.includes('kierownik')) return 'MANAGER'
+  if (role === 'COORDINATOR' || role === 'KOORDYNATOR' || normalized.includes('koordynator') || normalized.includes('coordinator')) return 'COORDINATOR'
+  if (rawRole) return 'WORKER'
   return ''
 }
 
@@ -403,22 +489,27 @@ function isFirebaseCredentialError(error) {
   const message = normalizeText(error?.message).toLowerCase()
   return (
     code.includes('app/invalid-credential') ||
+    code.includes('auth/invalid-credential') ||
     code.includes('credential') ||
     code.includes('insufficient-permission') ||
     message.includes('could not load the default credentials') ||
     message.includes('application default credentials') ||
-    message.includes('insufficient permission')
+    message.includes('insufficient permission') ||
+    message.includes('unable to detect a project id') ||
+    message.includes('metadata server') ||
+    message.includes('metadata.google.internal')
   )
 }
 
 function mapFirebaseAdminError(error) {
   const code = normalizeText(error?.code).toLowerCase()
   const restMessage = normalizeText(error?.firebaseRestMessage || error?.message).toUpperCase()
+  const firebaseDetail = normalizeText(error?.firebaseRestMessage || error?.code || error?.message)
   if (isFirebaseDuplicateEmail(error)) {
     return {
       status: 409,
       code: 'EMAIL_ALREADY_EXISTS',
-      message: 'Ten email ma już konto Firebase Auth.',
+      message: 'Ten email ma juĹĽ konto Firebase Auth.',
     }
   }
 
@@ -426,7 +517,7 @@ function mapFirebaseAdminError(error) {
     return {
       status: 400,
       code: 'WEAK_PASSWORD',
-      message: 'Hasło jest zbyt słabe. Użyj co najmniej 6 znaków.',
+      message: 'HasĹ‚o jest zbyt sĹ‚abe. UĹĽyj co najmniej 6 znakĂłw.',
     }
   }
 
@@ -438,11 +529,43 @@ function mapFirebaseAdminError(error) {
     }
   }
 
+  if (restMessage.includes('OPERATION_NOT_ALLOWED')) {
+    return {
+      status: 500,
+      code: 'FIREBASE_EMAIL_PASSWORD_DISABLED',
+      message: 'Firebase Authentication ma wyĹ‚Ä…czone logowanie Email/Password. WĹ‚Ä…cz provider Email/Password albo uruchom backend z poĹ›wiadczeniami Firebase Admin.',
+    }
+  }
+
+  if (restMessage.includes('API_KEY_INVALID') || restMessage.includes('INVALID_API_KEY')) {
+    return {
+      status: 500,
+      code: 'FIREBASE_API_KEY_INVALID',
+      message: 'Backend ma niepoprawny Firebase Web API key. SprawdĹş FIREBASE_WEB_API_KEY w .env.local.',
+    }
+  }
+
+  if (restMessage.includes('PROJECT_NOT_FOUND') || restMessage.includes('CONFIGURATION_NOT_FOUND')) {
+    return {
+      status: 500,
+      code: 'FIREBASE_PROJECT_CONFIG_INVALID',
+      message: 'Backend nie trafia w poprawny projekt Firebase. SprawdĹş FIREBASE_PROJECT_ID i FIREBASE_WEB_API_KEY.',
+    }
+  }
+
+  if (restMessage.includes('TOO_MANY_ATTEMPTS_TRY_LATER')) {
+    return {
+      status: 429,
+      code: 'FIREBASE_TOO_MANY_ATTEMPTS',
+      message: 'Firebase chwilowo blokuje tworzenie kont po zbyt wielu prĂłbach. SprĂłbuj ponownie za kilka minut.',
+    }
+  }
+
   if (restMessage.includes('INVALID_ID_TOKEN') || restMessage.includes('USER_NOT_FOUND')) {
     return {
       status: 401,
       code: 'UNAUTHENTICATED',
-      message: 'Token Firebase jest niepoprawny albo wygasł.',
+      message: 'Token Firebase jest niepoprawny albo wygasĹ‚.',
     }
   }
 
@@ -450,14 +573,16 @@ function mapFirebaseAdminError(error) {
     return {
       status: 500,
       code: 'FIREBASE_ADMIN_CREDENTIALS_MISSING',
-      message: 'Backend nie ma lokalnych poświadczeń Firebase Admin.',
+      message: 'Backend nie ma lokalnych poĹ›wiadczeĹ„ Firebase Admin.',
     }
   }
 
   return {
     status: 500,
     code: 'FIREBASE_AUTH_ERROR',
-    message: 'Nie udało się utworzyć konta Firebase Auth.',
+    message: firebaseDetail
+      ? `Nie udaĹ‚o siÄ™ utworzyÄ‡ konta Firebase Auth. Firebase zwrĂłciĹ‚: ${firebaseDetail.slice(0, 180)}.`
+      : 'Nie udaĹ‚o siÄ™ utworzyÄ‡ konta Firebase Auth.',
   }
 }
 
@@ -542,7 +667,7 @@ async function assertFirebaseEmailAvailable(email) {
     const error = new Error('EMAIL_ALREADY_EXISTS')
     error.statusCode = 409
     error.publicCode = 'EMAIL_ALREADY_EXISTS'
-    error.publicMessage = 'Ten email ma już konto Firebase Auth.'
+    error.publicMessage = 'Ten email ma juĹĽ konto Firebase Auth.'
     throw error
   } catch (error) {
     if (error.publicCode === 'EMAIL_ALREADY_EXISTS') {
@@ -572,7 +697,7 @@ async function createFirebaseAuthUser(payload) {
       email: user.email || payload.email,
     }
   } catch (adminError) {
-    if (!isFirebaseCredentialError(adminError) || !canUseFirebaseRest()) {
+    if (!canUseFirebaseRest()) {
       const mapped = mapFirebaseAdminError(adminError)
       adminError.statusCode = mapped.status
       adminError.publicCode = mapped.code
@@ -584,11 +709,14 @@ async function createFirebaseAuthUser(payload) {
       const error = new Error('FIREBASE_ADMIN_REQUIRED_FOR_DISABLED_USER')
       error.statusCode = 500
       error.publicCode = 'FIREBASE_ADMIN_CREDENTIALS_MISSING'
-      error.publicMessage = 'Tworzenie nieaktywnego konta wymaga poświadczeń Firebase Admin.'
+      error.publicMessage = 'Tworzenie nieaktywnego konta wymaga poĹ›wiadczeĹ„ Firebase Admin.'
       throw error
     }
 
     try {
+      console.warn(
+        `[admin/users] Firebase Admin createUser failed; trying REST fallback (${normalizeText(adminError?.code || adminError?.message) || 'unknown error'})`,
+      )
       const body = await callFirebaseIdentityToolkit('signUp', {
         email: payload.email,
         password: payload.password,
@@ -608,6 +736,517 @@ async function createFirebaseAuthUser(payload) {
       restError.publicMessage = mapped.message
       throw restError
     }
+  }
+}
+
+function resolveRollbackSecret() {
+  return (
+    normalizeText(process.env.ROLLBACK_TOKEN_SECRET) ||
+    normalizeText(process.env.AUTH_ROLLBACK_TOKEN_SECRET) ||
+    `${FIREBASE_PROJECT_ID}:portal-worker-provision-rollback`
+  )
+}
+
+function timingSafeCompare(left, right) {
+  const leftBuffer = Buffer.from(String(left || ''))
+  const rightBuffer = Buffer.from(String(right || ''))
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false
+  }
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer)
+}
+
+function signRollbackPayload(payloadBase64) {
+  return crypto.createHmac('sha256', resolveRollbackSecret()).update(payloadBase64).digest('base64url')
+}
+
+function createProvisionRollbackToken(payload) {
+  const payloadBase64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
+  return `${payloadBase64}.${signRollbackPayload(payloadBase64)}`
+}
+
+function verifyProvisionRollbackToken(token) {
+  const raw = normalizeText(token)
+  const [payloadBase64, signature] = raw.split('.', 2)
+  if (!payloadBase64 || !signature) {
+    const error = new Error('INVALID_ROLLBACK_TOKEN')
+    error.statusCode = 400
+    error.publicCode = 'INVALID_ROLLBACK_TOKEN'
+    error.publicMessage = 'Niepoprawny rollbackToken.'
+    throw error
+  }
+
+  const expected = signRollbackPayload(payloadBase64)
+  if (!timingSafeCompare(signature, expected)) {
+    const error = new Error('INVALID_ROLLBACK_TOKEN_SIGNATURE')
+    error.statusCode = 403
+    error.publicCode = 'INVALID_ROLLBACK_TOKEN'
+    error.publicMessage = 'Niepoprawny podpis rollbackToken.'
+    throw error
+  }
+
+  let payload
+  try {
+    payload = JSON.parse(Buffer.from(payloadBase64, 'base64url').toString('utf8'))
+  } catch {
+    const error = new Error('INVALID_ROLLBACK_TOKEN_PAYLOAD')
+    error.statusCode = 400
+    error.publicCode = 'INVALID_ROLLBACK_TOKEN'
+    error.publicMessage = 'Nie mozna odczytac rollbackToken.'
+    throw error
+  }
+
+  const createdAt = Number(payload?.createdAt || 0)
+  if (!Number.isFinite(createdAt) || createdAt <= 0 || Date.now() - createdAt > ROLLBACK_TOKEN_MAX_AGE_MS) {
+    const error = new Error('ROLLBACK_TOKEN_EXPIRED')
+    error.statusCode = 410
+    error.publicCode = 'ROLLBACK_TOKEN_EXPIRED'
+    error.publicMessage = 'rollbackToken wygasl.'
+    throw error
+  }
+
+  return payload
+}
+
+async function findFirebaseAuthUserByEmail(email) {
+  try {
+    return await ensureFirebaseAdmin().auth().getUserByEmail(email)
+  } catch (error) {
+    if (isFirebaseUserNotFound(error)) {
+      return null
+    }
+    if (isFirebaseCredentialError(error) && canUseFirebaseRest()) {
+      return null
+    }
+    throw error
+  }
+}
+
+function buildProvisionWorkerPayload(body, requester = {}) {
+  const orgId = normalizeOrgId(body?.orgId)
+  const loginLocalPart = normalizeLoginLocalPart(body?.loginLocalPart || body?.login)
+  const requesterEmail = normalizeEmail(requester?.email)
+  const email = buildManagedUserEmail(loginLocalPart, requesterEmail)
+  const workerName = normalizeText(body?.workerName || body?.displayName || body?.name) || loginLocalPart
+  const roleInput = normalizeText(body?.roleLabel || body?.role)
+  const role = roleInput ? normalizeUserRole(roleInput) : 'WORKER'
+  const password = normalizeText(body?.password)
+  const active = asPayloadBoolean(body?.active, true)
+
+  const validationErrors = []
+  if (!orgId) validationErrors.push('Brak poprawnego orgId.')
+  if (!requesterEmail) validationErrors.push('Token Firebase konta dodajacego nie zawiera poprawnego emaila.')
+  if (!loginLocalPart) validationErrors.push('Podaj poprawny login bez znaku @.')
+  if (!email) validationErrors.push('Nie mozna zbudowac emaila z loginu i domeny konta dodajacego.')
+  if (!workerName) validationErrors.push('Podaj imie i nazwisko pracownika.')
+  if (!role) validationErrors.push('Nowy uzytkownik nie moze byc tworzony z rola Admin.')
+  if (password.length < 6) validationErrors.push('Haslo tymczasowe musi miec co najmniej 6 znakow.')
+
+  return {
+    value: { orgId, loginLocalPart, email, workerName, role, password, active },
+    validationErrors,
+  }
+}
+
+async function provisionWorkerAuthUser(payload, requester) {
+  const existingUser = await findFirebaseAuthUserByEmail(payload.email)
+  if (existingUser?.uid) {
+    return {
+      email: payload.email,
+      uid: existingUser.uid,
+      existing: true,
+      rollbackToken: null,
+    }
+  }
+
+  const createdUser = await createFirebaseAuthUser({
+    email: payload.email,
+    password: payload.password,
+    displayName: payload.workerName,
+    active: payload.active,
+  })
+
+  if (!createdUser?.uid) {
+    const error = new Error('FIREBASE_AUTH_UID_MISSING')
+    error.statusCode = 500
+    error.publicCode = 'FIREBASE_AUTH_UID_MISSING'
+    error.publicMessage = 'Firebase Auth nie zwrocil UID nowego uzytkownika.'
+    throw error
+  }
+
+  return {
+    email: payload.email,
+    uid: createdUser.uid,
+    existing: false,
+    rollbackToken: createProvisionRollbackToken({
+      version: 1,
+      uid: createdUser.uid,
+      email: payload.email,
+      orgId: payload.orgId,
+      createdByUid: normalizeText(requester?.uid),
+      createdByEmail: normalizeEmail(requester?.email),
+      authProvider: normalizeText(createdUser?.provider),
+      authIdToken: normalizeText(createdUser?.idToken),
+      createdAt: Date.now(),
+      nonce: crypto.randomBytes(12).toString('base64url'),
+    }),
+  }
+}
+
+function dataConnectOperationUrl(kind) {
+  const suffix = kind === 'mutation' ? ':executeMutation' : ':executeQuery'
+  const base =
+    `https://firebasedataconnect.googleapis.com/v1/projects/${encodeURIComponent(FIREBASE_PROJECT_ID)}` +
+    `/locations/${encodeURIComponent(DATACONNECT_LOCATION)}` +
+    `/services/${encodeURIComponent(DATACONNECT_SERVICE)}` +
+    `/connectors/${encodeURIComponent(DATACONNECT_CONNECTOR)}${suffix}`
+  return FIREBASE_WEB_API_KEY ? `${base}?key=${encodeURIComponent(FIREBASE_WEB_API_KEY)}` : base
+}
+
+async function executeDataConnectOperation(kind, operationName, variables, firebaseIdToken) {
+  const token = normalizeText(firebaseIdToken)
+  if (!token) {
+    const error = new Error('DATACONNECT_TOKEN_MISSING')
+    error.statusCode = 401
+    error.publicCode = 'UNAUTHENTICATED'
+    error.publicMessage = 'Brak tokenu Firebase dla operacji Data Connect.'
+    throw error
+  }
+
+  const connectorName =
+    `projects/${FIREBASE_PROJECT_ID}/locations/${DATACONNECT_LOCATION}/services/${DATACONNECT_SERVICE}/connectors/${DATACONNECT_CONNECTOR}`
+  const response = await fetch(dataConnectOperationUrl(kind), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Firebase-Auth-Token': token,
+    },
+    body: JSON.stringify({
+      name: connectorName,
+      operationName,
+      variables: variables ?? {},
+    }),
+  })
+
+  let payload = null
+  let rawText = ''
+  try {
+    rawText = await response.text()
+    payload = rawText ? JSON.parse(rawText) : null
+  } catch {
+    payload = null
+  }
+
+  const errors = Array.isArray(payload?.errors) ? payload.errors : []
+  if (!response.ok || errors.length) {
+    const firstError = errors[0] ?? payload?.error ?? {}
+    const message =
+      normalizeText(firstError?.message) ||
+      normalizeText(payload?.error?.message) ||
+      normalizeText(rawText) ||
+      `Data Connect zwrocil blad HTTP ${response.status}.`
+    const error = new Error(message)
+    error.statusCode = response.ok ? 500 : response.status
+    error.publicCode = 'DATACONNECT_OPERATION_FAILED'
+    error.publicMessage = message
+    error.details = errors.length ? errors : payload?.error || rawText
+    throw error
+  }
+
+  return payload ?? {}
+}
+
+async function queryWorkersForOrgViaDataConnect(orgId, firebaseIdToken) {
+  const response = await executeDataConnectOperation('query', 'WorkersForOrg', { orgId }, firebaseIdToken)
+  return Array.isArray(response?.data?.workers) ? response.data.workers : []
+}
+
+function buildWorkerPasswordPayload(body, { requirePassword = false } = {}) {
+  const orgId = normalizeOrgId(body?.orgId)
+  const login = normalizeWorkerCredentialLogin(body?.login || body?.workerLogin)
+  const password = normalizeText(body?.password)
+  const skipAuthUpdate = isTrue(body?.skipAuthUpdate)
+  const validationErrors = []
+
+  if (!orgId) validationErrors.push('Brak poprawnego orgId.')
+  if (!login) validationErrors.push('Podaj poprawny login pracownika.')
+  if (requirePassword && password.length < 6) {
+    validationErrors.push('Haslo musi miec co najmniej 6 znakow.')
+  }
+
+  return {
+    value: { orgId, login, password, skipAuthUpdate },
+    validationErrors,
+  }
+}
+
+function workerPasswordConfigError() {
+  const error = new Error('WORKER_PASSWORD_SECRET_MISSING')
+  error.statusCode = 500
+  error.publicCode = 'WORKER_PASSWORD_SECRET_MISSING'
+  error.publicMessage =
+    'Brak konfiguracji WORKER_PASSWORD_SECRET. Ustaw sekret backendu, aby szyfrowac i odczytywac hasla pracownikow.'
+  return error
+}
+
+function resolveWorkerPasswordKey() {
+  const secret = normalizeText(process.env.WORKER_PASSWORD_SECRET || process.env.PORTAL_WORKER_PASSWORD_SECRET)
+  if (!secret) {
+    throw workerPasswordConfigError()
+  }
+  return crypto.createHash('sha256').update(secret, 'utf8').digest()
+}
+
+function encryptWorkerPassword(password) {
+  const key = resolveWorkerPasswordKey()
+  const iv = crypto.randomBytes(12)
+  const cipher = crypto.createCipheriv(WORKER_PASSWORD_ALGORITHM, key, iv)
+  const encrypted = Buffer.concat([cipher.update(String(password), 'utf8'), cipher.final()])
+  return {
+    encryptedPassword: encrypted.toString('base64url'),
+    iv: iv.toString('base64url'),
+    authTag: cipher.getAuthTag().toString('base64url'),
+    algorithm: WORKER_PASSWORD_ALGORITHM,
+  }
+}
+
+function decryptWorkerPassword(credential) {
+  const algorithm = normalizeText(credential?.algorithm)
+  if (algorithm !== WORKER_PASSWORD_ALGORITHM) {
+    const error = new Error('WORKER_PASSWORD_UNSUPPORTED_ALGORITHM')
+    error.statusCode = 500
+    error.publicCode = 'WORKER_PASSWORD_UNSUPPORTED_ALGORITHM'
+    error.publicMessage = 'Zapisane haslo uzywa nieobslugiwanego algorytmu szyfrowania.'
+    throw error
+  }
+
+  const key = resolveWorkerPasswordKey()
+  const iv = Buffer.from(normalizeText(credential?.iv), 'base64url')
+  const authTag = Buffer.from(normalizeText(credential?.authTag), 'base64url')
+  const encrypted = Buffer.from(normalizeText(credential?.encryptedPassword), 'base64url')
+  const decipher = crypto.createDecipheriv(WORKER_PASSWORD_ALGORITHM, key, iv)
+  decipher.setAuthTag(authTag)
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8')
+}
+
+function isWorkerPasswordRevealableConfigError(error) {
+  const code = normalizeText(error?.publicCode || error?.message)
+  const message = normalizeText(error?.message).toLowerCase()
+  return (
+    code === 'WORKER_PASSWORD_SECRET_MISSING' ||
+    code === 'WORKER_PASSWORD_UNSUPPORTED_ALGORITHM' ||
+    message.includes('unable to authenticate data') ||
+    message.includes('invalid initialization vector') ||
+    message.includes('invalid authentication tag')
+  )
+}
+
+function workerPasswordRevealUnavailableMessage(error) {
+  const code = normalizeText(error?.publicCode || error?.message)
+  if (code === 'WORKER_PASSWORD_SECRET_MISSING') {
+    return 'Hasło jest zapisane w sejfie, ale ten backend nie ma ustawionego WORKER_PASSWORD_SECRET, więc nie może go odszyfrować.'
+  }
+  if (code === 'WORKER_PASSWORD_UNSUPPORTED_ALGORITHM') {
+    return normalizeText(error?.publicMessage) || 'Hasło jest zapisane w nieobsługiwanym formacie szyfrowania.'
+  }
+  return 'Hasło jest zapisane w sejfie, ale nie udało się go odszyfrować w tym środowisku. Ustaw poprawny WORKER_PASSWORD_SECRET albo ustaw nowe hasło tymczasowe i zapisz.'
+}
+
+async function queryAdminWorkerCredentialForOrg(orgId, login, firebaseIdToken) {
+  const response = await executeDataConnectOperation(
+    'query',
+    'AdminWorkerCredentialForOrg',
+    { orgId, login },
+    firebaseIdToken,
+  )
+  return response?.data ?? {}
+}
+
+function isDataConnectWorkerNotFound(error) {
+  const message = normalizeText(error?.publicMessage || error?.message).toLowerCase()
+  return message.includes('nie znaleziono pracownika') || message.includes('worker') && message.includes('not found')
+}
+
+function addWorkerCredentialMatchKey(keys, value) {
+  const raw = normalizeText(value)
+  if (!raw) {
+    return
+  }
+  const lowered = raw.toLowerCase()
+  keys.add(lowered)
+  if (lowered.includes('@')) {
+    keys.add(lowered.split('@')[0])
+  }
+}
+
+function workerCredentialMatchKeys(row) {
+  const keys = new Set()
+  addWorkerCredentialMatchKey(keys, row?.login)
+  addWorkerCredentialMatchKey(keys, row?.workerLogin)
+  addWorkerCredentialMatchKey(keys, row?.workerId)
+  addWorkerCredentialMatchKey(keys, row?.loginEmail ?? row?.login_email)
+  addWorkerCredentialMatchKey(keys, row?.email)
+  addWorkerCredentialMatchKey(keys, row?.authUid ?? row?.auth_uid)
+  return keys
+}
+
+function findWorkerForCredentialLogin(rows, login) {
+  const requested = new Set()
+  addWorkerCredentialMatchKey(requested, login)
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const keys = workerCredentialMatchKeys(row)
+    for (const key of requested) {
+      if (keys.has(key)) {
+        return row
+      }
+    }
+  }
+  return null
+}
+
+async function resolveAdminWorkerCredentialForOrg(orgId, login, firebaseIdToken) {
+  try {
+    return {
+      data: await queryAdminWorkerCredentialForOrg(orgId, login, firebaseIdToken),
+      login,
+      requestedLogin: login,
+      workerMissing: false,
+    }
+  } catch (error) {
+    if (!isDataConnectWorkerNotFound(error)) {
+      throw error
+    }
+  }
+
+  const workers = await queryWorkersForOrgViaDataConnect(orgId, firebaseIdToken)
+  const matchedWorker = findWorkerForCredentialLogin(workers, login)
+  const resolvedLogin = normalizeText(matchedWorker?.login)
+  if (!resolvedLogin) {
+    return {
+      data: { worker: null, workerCredential: null },
+      login,
+      requestedLogin: login,
+      workerMissing: true,
+    }
+  }
+
+  return {
+    data: await queryAdminWorkerCredentialForOrg(orgId, resolvedLogin, firebaseIdToken),
+    login: resolvedLogin,
+    requestedLogin: login,
+    workerMissing: false,
+  }
+}
+
+async function upsertWorkerCredentialForOrg(payload, firebaseIdToken) {
+  await executeDataConnectOperation('mutation', 'UpsertWorkerCredentialForOrg', payload, firebaseIdToken)
+}
+
+async function updateFirebaseAuthPassword(uid, password) {
+  const authUid = normalizeText(uid)
+  if (!authUid) {
+    const error = new Error('WORKER_AUTH_UID_MISSING')
+    error.statusCode = 400
+    error.publicCode = 'WORKER_AUTH_UID_MISSING'
+    error.publicMessage = 'Pracownik nie ma zapisanego UID Firebase Auth.'
+    throw error
+  }
+
+  await ensureFirebaseAdmin().auth().updateUser(authUid, { password })
+}
+
+function findExistingWorkerInRows(rows, login, email) {
+  const normalizedLogin = normalizeLower(login)
+  const normalizedEmail = normalizeEmail(email)
+  return (Array.isArray(rows) ? rows : []).find((row) => {
+    const rowLogin = normalizeLower(row?.login)
+    const rowLoginEmail = normalizeEmail(row?.loginEmail ?? row?.login_email)
+    const rowEmail = normalizeEmail(row?.email)
+    return (
+      (normalizedLogin && rowLogin === normalizedLogin) ||
+      (normalizedEmail && (rowLoginEmail === normalizedEmail || rowEmail === normalizedEmail))
+    )
+  })
+}
+
+function buildWorkerAlreadyExistsError(existingWorker, login, email) {
+  const normalizedLogin = normalizeLower(login)
+  const normalizedEmail = normalizeEmail(email)
+  const rowLogin = normalizeLower(existingWorker?.login)
+  const rowLoginEmail = normalizeEmail(existingWorker?.loginEmail ?? existingWorker?.login_email)
+  const rowEmail = normalizeEmail(existingWorker?.email)
+  const sameLogin = normalizedLogin && rowLogin === normalizedLogin
+  const sameEmail = normalizedEmail && (rowLoginEmail === normalizedEmail || rowEmail === normalizedEmail)
+  const error = new Error('WORKER_ALREADY_EXISTS')
+  error.statusCode = 409
+  error.publicCode = 'WORKER_ALREADY_EXISTS'
+  if (sameLogin && sameEmail) {
+    error.publicMessage =
+      'Ten uĹĽytkownik juĹĽ istnieje w tej organizacji. Login i email muszÄ… byÄ‡ unikalne w obrÄ™bie jednej organizacji.'
+  } else if (sameLogin) {
+    error.publicMessage = 'Ten login jest juĹĽ zajÄ™ty w tej organizacji.'
+  } else {
+    error.publicMessage = 'Ten email jest juĹĽ przypisany do uĹĽytkownika w tej organizacji.'
+  }
+  return error
+}
+
+async function createAdminManagedUserViaDataConnect(payload, decodedToken, firebaseIdToken) {
+  const rows = await queryWorkersForOrgViaDataConnect(payload.orgId, firebaseIdToken)
+  const existingWorker = findExistingWorkerInRows(rows, payload.login, payload.email)
+  if (existingWorker) {
+    throw buildWorkerAlreadyExistsError(existingWorker, payload.login, payload.email)
+  }
+
+  const provisionedUser = await provisionWorkerAuthUser(
+    {
+      orgId: payload.orgId,
+      loginLocalPart: payload.login,
+      email: payload.email,
+      workerName: payload.displayName,
+      role: payload.role,
+      password: payload.password,
+      active: payload.active,
+    },
+    decodedToken,
+  )
+  const workerId = resolveNextWorkerId(rows)
+
+  try {
+    await executeDataConnectOperation(
+      'mutation',
+      'InsertWorkerWithMembershipForOrg',
+      {
+        orgId: payload.orgId,
+        login: payload.login,
+        workerName: payload.displayName,
+        loginEmail: provisionedUser.email,
+        authUid: provisionedUser.uid,
+        role: payload.role,
+        active: payload.active,
+        email: provisionedUser.email,
+        phone: payload.phone || null,
+        workerType: payload.role,
+        workerId,
+      },
+      firebaseIdToken,
+    )
+  } catch (error) {
+    if (!provisionedUser.existing && provisionedUser.rollbackToken) {
+      await deleteFirebaseUserQuietly(provisionedUser.uid)
+    }
+    throw error
+  }
+
+  return {
+    uid: provisionedUser.uid,
+    email: provisionedUser.email,
+    login: payload.login,
+    displayName: payload.displayName,
+    role: payload.role,
+    active: payload.active,
+    phone: payload.phone,
+    workerId,
   }
 }
 
@@ -738,6 +1377,85 @@ async function getDbPool() {
   return dbPool
 }
 
+function hasDatabaseConnectionConfig() {
+  if (normalizeText(process.env.DATABASE_URL)) {
+    return true
+  }
+
+  const host = normalizeText(process.env.DB_HOST || process.env.PGHOST)
+  const database = normalizeText(process.env.DB_NAME || process.env.PGDATABASE)
+  const useIamDatabaseAuth = getCloudSqlAuthType() === AuthTypes.IAM
+  const user = normalizeText(
+    useIamDatabaseAuth
+      ? process.env.DB_IAM_USER || process.env.CLOUD_SQL_IAM_USER || process.env.DB_USER || process.env.PGUSER
+      : process.env.DB_USER || process.env.PGUSER,
+  )
+
+  if (!database || !user) {
+    return false
+  }
+
+  if (shouldUseCloudSqlConnector(host)) {
+    return Boolean(CLOUD_SQL_CONNECTION_NAME)
+  }
+
+  return Boolean(host)
+}
+
+function shouldProxyAdminUsersRequest() {
+  const mode = normalizeText(process.env.ADMIN_USERS_MODE || process.env.ADMIN_USERS_PROXY_MODE).toLowerCase()
+  if (mode === 'proxy' || mode === 'remote') {
+    return true
+  }
+  if (mode === 'local' || mode === 'direct') {
+    return false
+  }
+
+  return false
+}
+
+function shouldProxyDatabaseBackedRequest() {
+  const mode = normalizeText(process.env.PORTAL_DB_ROUTES_MODE || process.env.API_DB_ROUTES_MODE).toLowerCase()
+  if (mode === 'local' || mode === 'direct') {
+    return false
+  }
+
+  const target = normalizeText(API_PROXY_TARGET).toLowerCase()
+  if (!target || target.includes('://127.0.0.1') || target.includes('://localhost')) {
+    return false
+  }
+
+  return !hasDatabaseConnectionConfig()
+}
+
+function shouldProxyPortalTasksRequest() {
+  const mode = normalizeText(process.env.PORTAL_TASKS_MODE).toLowerCase()
+  if (['local', 'direct', 'file'].includes(mode)) {
+    return false
+  }
+  if (['proxy', 'remote'].includes(mode)) {
+    return true
+  }
+  if (NODE_ENV !== 'production') {
+    return false
+  }
+  return shouldProxyDatabaseBackedRequest()
+}
+
+function shouldProxyPortalScheduleOrdersRequest() {
+  const mode = normalizeText(process.env.PORTAL_SCHEDULE_ORDERS_MODE).toLowerCase()
+  if (['local', 'direct', 'file'].includes(mode)) {
+    return false
+  }
+  if (['proxy', 'remote'].includes(mode)) {
+    return true
+  }
+  if (NODE_ENV !== 'production') {
+    return false
+  }
+  return shouldProxyDatabaseBackedRequest()
+}
+
 async function resetDbConnectionCache() {
   const currentPool = dbPool
   const currentConnector = cloudSqlConnector
@@ -791,7 +1509,7 @@ function resolveNextWorkerId(rows = []) {
   let padWidth = 3
 
   rows.forEach((row) => {
-    const raw = normalizeText(row?.worker_id).toUpperCase()
+    const raw = normalizeText(row?.worker_id ?? row?.workerId).toUpperCase()
     const match = /^W(\d+)$/.exec(raw)
     if (!match) return
 
@@ -844,27 +1562,44 @@ async function ensureWorkerAuthUidColumn(client) {
   await client.query('alter table public.worker add column if not exists auth_uid varchar(128)')
 }
 
-function buildUserPayload(body) {
+function asPayloadBoolean(value, defaultValue = true) {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue
+  }
+  if (typeof value === 'boolean') {
+    return value
+  }
+
+  return !['false', '0', 'no', 'nie'].includes(normalizeLower(value))
+}
+
+function buildUserPayload(body, requester = {}) {
   const orgId = normalizeOrgId(body?.orgId)
-  const email = normalizeEmail(body?.email)
+  const requestedEmail = normalizeEmail(body?.email)
   const displayName = normalizeText(body?.displayName || body?.workerName || body?.name)
-  const login = normalizeLogin(body?.login || emailLocalPart(email))
+  const login = normalizeLoginLocalPart(body?.login || emailLocalPart(requestedEmail))
+  const requesterEmail = normalizeEmail(requester?.email)
+  const email = buildManagedUserEmail(login, requesterEmail)
   const role = normalizeUserRole(body?.role)
   const password = normalizeText(body?.password)
   const phone = normalizeText(body?.phone)
-  const active = body?.active === undefined ? true : Boolean(body.active)
+  const active = asPayloadBoolean(body?.active, true)
   const emailLogin = emailLocalPart(email)
 
   const validationErrors = []
+  if (!requesterEmail) validationErrors.push('Token Firebase konta dodajacego nie zawiera poprawnego emaila.')
+  if (requestedEmail && email && requestedEmail !== email) {
+    validationErrors.push('Email musi byc wyliczony z loginu i domeny konta dodajacego.')
+  }
   if (!orgId) validationErrors.push('Brak poprawnego orgId.')
   if (!email) validationErrors.push('Podaj poprawny email.')
-  if (!displayName) validationErrors.push('Podaj imię i nazwisko.')
+  if (!displayName) validationErrors.push('Podaj imiÄ™ i nazwisko.')
   if (!login) validationErrors.push('Podaj poprawny login.')
   if (login && emailLogin && login !== emailLogin) {
-    validationErrors.push('Login musi być taki sam jak część emaila przed @, aby mobile działał bez aliasów.')
+    validationErrors.push('Login musi byÄ‡ taki sam jak czÄ™Ĺ›Ä‡ emaila przed @, aby mobile dziaĹ‚aĹ‚ bez aliasĂłw.')
   }
-  if (!role) validationErrors.push('Rola musi być MANAGER albo WORKER.')
-  if (password.length < 6) validationErrors.push('Hasło tymczasowe musi mieć co najmniej 6 znaków.')
+  if (!role) validationErrors.push('Rola musi byÄ‡ MANAGER albo WORKER.')
+  if (password.length < 6) validationErrors.push('HasĹ‚o tymczasowe musi mieÄ‡ co najmniej 6 znakĂłw.')
 
   return {
     value: { orgId, email, displayName, login, role, password, phone, active },
@@ -908,8 +1643,8 @@ async function createAdminManagedUser(payload, requesterUid) {
       error.statusCode = membership ? 403 : 404
       error.publicCode = membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING'
       error.publicMessage = membership
-        ? 'Brak uprawnień do dodawania użytkowników.'
-        : 'Brak dostępu do tej organizacji.'
+        ? 'Brak uprawnieĹ„ do dodawania uĹĽytkownikĂłw.'
+        : 'Brak dostÄ™pu do tej organizacji.'
       throw error
     }
 
@@ -920,8 +1655,8 @@ async function createAdminManagedUser(payload, requesterUid) {
       error.publicCode = 'WORKER_ALREADY_EXISTS'
       error.publicMessage =
         normalizeLower(existingWorker.login) === payload.login
-          ? 'Ten login jest już zajęty.'
-          : 'Ten email jest już przypisany do pracownika.'
+          ? 'Ten login jest juĹĽ zajÄ™ty.'
+          : 'Ten email jest juĹĽ przypisany do pracownika.'
       throw error
     }
 
@@ -938,7 +1673,7 @@ async function createAdminManagedUser(payload, requesterUid) {
       const error = new Error('FORBIDDEN')
       error.statusCode = 403
       error.publicCode = 'FORBIDDEN'
-      error.publicMessage = 'Brak uprawnień do dodawania użytkowników.'
+      error.publicMessage = 'Brak uprawnieĹ„ do dodawania uĹĽytkownikĂłw.'
       throw error
     }
 
@@ -949,8 +1684,8 @@ async function createAdminManagedUser(payload, requesterUid) {
       error.publicCode = 'WORKER_ALREADY_EXISTS'
       error.publicMessage =
         normalizeLower(duplicateWorker.login) === payload.login
-          ? 'Ten login jest już zajęty.'
-          : 'Ten email jest już przypisany do pracownika.'
+          ? 'Ten login jest juĹĽ zajÄ™ty.'
+          : 'Ten email jest juĹĽ przypisany do pracownika.'
       throw error
     }
 
@@ -1025,6 +1760,365 @@ async function createAdminManagedUser(payload, requesterUid) {
   }
 }
 
+async function handleAuthProvisionWorkerRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  let body
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
+      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
+      return
+    }
+    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status === 500 ? 500 : 401, mapped.code, mapped.status === 500 ? mapped.message : 'Token Firebase jest niepoprawny albo wygasl.')
+    return
+  }
+
+  const { value: payload, validationErrors } = buildProvisionWorkerPayload(body, decodedToken)
+  if (validationErrors.length) {
+    sendApiError(res, 400, 'VALIDATION_ERROR', validationErrors[0], validationErrors)
+    return
+  }
+
+  try {
+    const result = await provisionWorkerAuthUser(payload, decodedToken)
+    sendJson(res, 200, result)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    const status = Number(error?.statusCode ?? mapped.status ?? 500)
+    sendApiError(
+      res,
+      Number.isFinite(status) ? status : 500,
+      normalizeText(error?.publicCode) || mapped.code || 'AUTH_PROVISION_WORKER_FAILED',
+      normalizeText(error?.publicMessage) || mapped.message || 'Nie udalo sie utworzyc konta Firebase Auth.',
+      publicErrorDetails(error),
+    )
+  }
+}
+
+async function handleAuthRollbackWorkerRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  let body
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
+      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
+      return
+    }
+    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status === 500 ? 500 : 401, mapped.code, mapped.status === 500 ? mapped.message : 'Token Firebase jest niepoprawny albo wygasl.')
+    return
+  }
+
+  try {
+    const payload = verifyProvisionRollbackToken(body?.rollbackToken)
+    const createdByUid = normalizeText(payload?.createdByUid)
+    const createdByEmail = normalizeEmail(payload?.createdByEmail)
+    const callerUid = normalizeText(decodedToken?.uid)
+    const callerEmail = normalizeEmail(decodedToken?.email)
+    if ((createdByUid && createdByUid !== callerUid) || (createdByEmail && createdByEmail !== callerEmail)) {
+      sendApiError(res, 403, 'ROLLBACK_FORBIDDEN', 'rollbackToken zostal wystawiony dla innego konta.')
+      return
+    }
+
+    await deleteFirebaseUserQuietly({
+      uid: payload?.uid,
+      provider: payload?.authProvider,
+      idToken: payload?.authIdToken,
+    })
+    sendJson(res, 200, { success: true, deleted: true, uid: normalizeText(payload?.uid) })
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    const status = Number(error?.statusCode ?? mapped.status ?? 500)
+    sendApiError(
+      res,
+      Number.isFinite(status) ? status : 500,
+      normalizeText(error?.publicCode) || mapped.code || 'AUTH_ROLLBACK_WORKER_FAILED',
+      normalizeText(error?.publicMessage) || mapped.message || 'Nie udalo sie cofnac konta Firebase Auth.',
+      publicErrorDetails(error),
+    )
+  }
+}
+
+async function handleAdminWorkerPasswordRevealRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  let body
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
+      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
+      return
+    }
+    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  try {
+    await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status === 500 ? 500 : 401, mapped.code, mapped.status === 500 ? mapped.message : 'Token Firebase jest niepoprawny albo wygasl.')
+    return
+  }
+
+  const { value: payload, validationErrors } = buildWorkerPasswordPayload(body)
+  if (validationErrors.length) {
+    sendApiError(res, 400, 'VALIDATION_ERROR', validationErrors[0], validationErrors)
+    return
+  }
+
+  try {
+    const resolved = await resolveAdminWorkerCredentialForOrg(payload.orgId, payload.login, token)
+    const data = resolved.data
+    if (resolved.workerMissing) {
+      sendJson(res, 200, {
+        ok: true,
+        data: {
+          hasPassword: false,
+          workerMissing: true,
+          login: payload.login,
+          message: 'Nie znaleziono rekordu pracownika dla tego loginu w organizacji.',
+          password: '',
+          updatedAt: null,
+          updatedBy: '',
+        },
+      })
+      return
+    }
+
+    const credential = data?.workerCredential ?? null
+    if (!credential?.encryptedPassword) {
+      sendJson(res, 200, {
+        ok: true,
+        data: {
+          hasPassword: false,
+          login: resolved.login,
+          requestedLogin: resolved.requestedLogin,
+          password: '',
+          updatedAt: null,
+          updatedBy: '',
+        },
+      })
+      return
+    }
+
+    let password = ''
+    try {
+      password = decryptWorkerPassword(credential)
+    } catch (error) {
+      if (!isWorkerPasswordRevealableConfigError(error)) {
+        throw error
+      }
+      sendJson(res, 200, {
+        ok: true,
+        data: {
+          hasPassword: false,
+          passwordVaultUnavailable: true,
+          message: workerPasswordRevealUnavailableMessage(error),
+          password: '',
+          login: resolved.login,
+          requestedLogin: resolved.requestedLogin,
+          updatedAt: credential.updatedAt ?? null,
+          updatedBy: credential.updatedBy ?? '',
+        },
+      })
+      return
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      data: {
+        hasPassword: true,
+        password,
+        login: resolved.login,
+        requestedLogin: resolved.requestedLogin,
+        updatedAt: credential.updatedAt ?? null,
+        updatedBy: credential.updatedBy ?? '',
+      },
+    })
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    const status = Number(error?.statusCode ?? mapped.status ?? 500)
+    sendApiError(
+      res,
+      Number.isFinite(status) ? status : 500,
+      normalizeText(error?.publicCode) || 'WORKER_PASSWORD_REVEAL_FAILED',
+      normalizeText(error?.publicMessage) || error?.message || 'Nie udalo sie odczytac hasla pracownika.',
+      publicErrorDetails(error),
+    )
+  }
+}
+
+async function handleAdminWorkerPasswordSetRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  let body
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
+      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
+      return
+    }
+    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status === 500 ? 500 : 401, mapped.code, mapped.status === 500 ? mapped.message : 'Token Firebase jest niepoprawny albo wygasl.')
+    return
+  }
+
+  const { value: payload, validationErrors } = buildWorkerPasswordPayload(body, { requirePassword: true })
+  if (validationErrors.length) {
+    sendApiError(res, 400, 'VALIDATION_ERROR', validationErrors[0], validationErrors)
+    return
+  }
+
+  try {
+    const resolved = await resolveAdminWorkerCredentialForOrg(payload.orgId, payload.login, token)
+    const data = resolved.data
+    if (resolved.workerMissing) {
+      const error = new Error('WORKER_NOT_FOUND')
+      error.statusCode = 404
+      error.publicCode = 'WORKER_NOT_FOUND'
+      error.publicMessage = 'Nie znaleziono rekordu pracownika dla tego loginu w organizacji.'
+      throw error
+    }
+
+    const worker = data?.worker ?? null
+    if (!worker?.authUid) {
+      const error = new Error('WORKER_AUTH_UID_MISSING')
+      error.statusCode = 400
+      error.publicCode = 'WORKER_AUTH_UID_MISSING'
+      error.publicMessage = 'Pracownik nie ma zapisanego UID Firebase Auth.'
+      throw error
+    }
+
+    if (!payload.skipAuthUpdate) {
+      await updateFirebaseAuthPassword(worker.authUid, payload.password)
+    }
+
+    const encrypted = encryptWorkerPassword(payload.password)
+    await upsertWorkerCredentialForOrg(
+      {
+        orgId: payload.orgId,
+        login: resolved.login,
+        ...encrypted,
+        updatedBy: normalizeEmail(decodedToken?.email) || normalizeText(decodedToken?.uid) || null,
+      },
+      token,
+    )
+
+    sendJson(res, 200, {
+      ok: true,
+      data: {
+        hasPassword: true,
+        login: resolved.login,
+        requestedLogin: resolved.requestedLogin,
+        updatedAt: new Date().toISOString(),
+        skippedAuthUpdate: payload.skipAuthUpdate,
+      },
+    })
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    const status = Number(error?.statusCode ?? mapped.status ?? 500)
+    sendApiError(
+      res,
+      Number.isFinite(status) ? status : 500,
+      normalizeText(error?.publicCode) || mapped.code || 'WORKER_PASSWORD_SET_FAILED',
+      normalizeText(error?.publicMessage) || mapped.message || error?.message || 'Nie udalo sie zapisac hasla pracownika.',
+      publicErrorDetails(error),
+    )
+  }
+}
+
 async function handleAdminUsersRequest(req, res) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
@@ -1042,10 +2136,10 @@ async function handleAdminUsersRequest(req, res) {
     body = await readJsonBody(req)
   } catch (error) {
     if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
-      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Żądanie jest zbyt duże.')
+      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Ĺ»Ä…danie jest zbyt duĹĽe.')
       return
     }
-    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w żądaniu.')
+    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w ĹĽÄ…daniu.')
     return
   }
 
@@ -1055,29 +2149,34 @@ async function handleAdminUsersRequest(req, res) {
     return
   }
 
-  const { value: payload, validationErrors } = buildUserPayload(body)
-  if (validationErrors.length) {
-    sendApiError(res, 400, 'VALIDATION_ERROR', validationErrors[0], validationErrors)
-    return
-  }
-
   let decodedToken
   try {
     decodedToken = await verifyFirebaseIdToken(token)
   } catch (error) {
     logAdminUsersError(error, 'verify-token')
     const mapped = mapFirebaseAdminError(error)
-    sendApiError(res, mapped.status === 500 ? 500 : 401, mapped.code === 'FIREBASE_AUTH_ERROR' ? 'UNAUTHENTICATED' : mapped.code, mapped.status === 500 ? mapped.message : 'Token Firebase jest niepoprawny albo wygasł.')
+    sendApiError(res, mapped.status === 500 ? 500 : 401, mapped.code === 'FIREBASE_AUTH_ERROR' ? 'UNAUTHENTICATED' : mapped.code, mapped.status === 500 ? mapped.message : 'Token Firebase jest niepoprawny albo wygasĹ‚.')
+    return
+  }
+
+  const { value: payload, validationErrors } = buildUserPayload(body, decodedToken)
+  if (validationErrors.length) {
+    sendApiError(res, 400, 'VALIDATION_ERROR', validationErrors[0], validationErrors)
     return
   }
 
   try {
-    const user = await createAdminManagedUser(payload, decodedToken.uid)
+    const adminUsersMode = normalizeText(process.env.ADMIN_USERS_MODE || process.env.ADMIN_USERS_PROXY_MODE).toLowerCase()
+    const useDataConnectProvisioning =
+      !hasDatabaseConnectionConfig() || ['dataconnect', 'data-connect', 'auth', 'firebase-auth'].includes(adminUsersMode)
+    const user = useDataConnectProvisioning
+      ? await createAdminManagedUserViaDataConnect(payload, decodedToken, token)
+      : await createAdminManagedUser(payload, decodedToken.uid)
     sendJson(res, 201, { ok: true, data: { user } })
   } catch (error) {
     logAdminUsersError(error, 'create-user')
     if (error?.message === 'DB_CONFIG_MISSING') {
-      sendApiError(res, 500, 'DB_CONFIG_MISSING', 'Brak konfiguracji połączenia z bazą danych.')
+      sendApiError(res, 500, 'DB_CONFIG_MISSING', 'Brak konfiguracji poĹ‚Ä…czenia z bazÄ… danych.')
       return
     }
 
@@ -1092,7 +2191,8 @@ async function handleAdminUsersRequest(req, res) {
       res,
       Number.isFinite(status) ? status : 500,
       normalizeText(error?.publicCode) || 'CREATE_USER_FAILED',
-      normalizeText(error?.publicMessage) || 'Nie udało się dodać użytkownika.',
+      normalizeText(error?.publicMessage) || 'Nie udaĹ‚o siÄ™ dodaÄ‡ uĹĽytkownika.',
+      publicErrorDetails(error),
     )
   }
 }
@@ -1116,10 +2216,10 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
       body = await readJsonBody(req)
     } catch (error) {
       if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
-        sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Żądanie jest zbyt duże.')
+        sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Ĺ»Ä…danie jest zbyt duĹĽe.')
         return
       }
-      sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w żądaniu.')
+      sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w ĹĽÄ…daniu.')
       return
     }
   }
@@ -1173,7 +2273,7 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
       return
     }
 
-    sendApiError(res, 500, 'AUTH_CONTEXT_ERROR', error?.message || 'Nie udało się pobrać organizacji użytkownika.')
+    sendApiError(res, 500, 'AUTH_CONTEXT_ERROR', error?.message || 'Nie udaĹ‚o siÄ™ pobraÄ‡ organizacji uĹĽytkownika.')
   } finally {
     client.release()
   }
@@ -1233,8 +2333,8 @@ async function requirePortalTaskAccess(client, orgId, uid) {
     error.statusCode = membership ? 403 : 404
     error.publicCode = membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING'
     error.publicMessage = membership
-      ? 'Brak uprawnień do zadań portalu.'
-      : 'Brak dostępu do tej organizacji.'
+      ? 'Brak uprawnieĹ„ do zadaĹ„ portalu.'
+      : 'Brak dostÄ™pu do tej organizacji.'
     throw error
   }
   return role
@@ -1252,6 +2352,107 @@ async function readPortalTasks(client, orgId) {
     [orgId],
   )
   return result.rows.map((row) => row.payload).filter((task) => task && typeof task === 'object')
+}
+
+function shouldUseLocalPortalTaskFileStorage() {
+  return NODE_ENV !== 'production' && !hasDatabaseConnectionConfig()
+}
+
+function portalTaskFilePath(orgId) {
+  const safeOrgId = normalizeOrgId(orgId).replace(/[^a-z0-9_-]/gi, '_') || 'default'
+  return path.join(LOCAL_PORTAL_DATA_DIR, 'portal-tasks', `${safeOrgId}.json`)
+}
+
+function sortPortalTasks(tasks = []) {
+  return [...tasks].sort((left, right) => {
+    const leftDate = normalizeText(left?.dateYmd || left?.date || left?.dayKey)
+    const rightDate = normalizeText(right?.dateYmd || right?.date || right?.dayKey)
+    if (leftDate !== rightDate) {
+      return leftDate.localeCompare(rightDate)
+    }
+    const leftTime = normalizeText(left?.startTime || left?.time)
+    const rightTime = normalizeText(right?.startTime || right?.time)
+    if (leftTime !== rightTime) {
+      return leftTime.localeCompare(rightTime)
+    }
+    return normalizeText(left?.id).localeCompare(normalizeText(right?.id))
+  })
+}
+
+async function readPortalTasksFile(orgId) {
+  try {
+    const raw = await fs.promises.readFile(portalTaskFilePath(orgId), 'utf8')
+    const parsed = JSON.parse(raw)
+    const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : []
+    return sortPortalTasks(tasks.filter((task) => task && typeof task === 'object'))
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return []
+    }
+    throw error
+  }
+}
+
+async function writePortalTasksFile(orgId, tasks) {
+  const filePath = portalTaskFilePath(orgId)
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
+  await fs.promises.writeFile(
+    filePath,
+    JSON.stringify(
+      {
+        orgId,
+        updatedAt: new Date().toISOString(),
+        tasks: sortPortalTasks(tasks),
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+}
+
+async function handlePortalTasksFileRequest(method, orgId, body, requesterUid, res) {
+  const existingTasks = await readPortalTasksFile(orgId)
+
+  if (method === 'GET') {
+    sendJson(res, 200, { ok: true, data: { tasks: existingTasks, storage: 'local-file' } })
+    return
+  }
+
+  if (method === 'DELETE') {
+    const taskIds = (Array.isArray(body?.taskIds) ? body.taskIds : [])
+      .map((value) => sanitizePortalTaskId(value))
+      .filter(Boolean)
+    if (!taskIds.length) {
+      sendJson(res, 200, { ok: true, data: { deletedTaskIds: [] } })
+      return
+    }
+
+    const deleted = new Set(taskIds)
+    const nextTasks = existingTasks.filter((task) => !deleted.has(sanitizePortalTaskId(task?.id)))
+    await writePortalTasksFile(orgId, nextTasks)
+    sendJson(res, 200, { ok: true, data: { deletedTaskIds: taskIds } })
+    return
+  }
+
+  const nowIso = new Date().toISOString()
+  const nextById = new Map(existingTasks.map((task) => [sanitizePortalTaskId(task?.id), task]).filter(([id]) => id))
+  const rawTasks = Array.isArray(body?.tasks) ? body.tasks : []
+  const tasks = rawTasks.map((task) => sanitizePortalTaskPayload(task)).filter(Boolean).slice(0, 2000)
+  tasks.forEach((task) => {
+    const previous = nextById.get(task.id)
+    nextById.set(task.id, {
+      ...previous,
+      ...task,
+      updatedBy: requesterUid || previous?.updatedBy || '',
+      updatedAt: nowIso,
+      createdAt: normalizeText(previous?.createdAt) || normalizeText(task.createdAt) || nowIso,
+    })
+  })
+
+  const savedTasks = sortPortalTasks([...nextById.values()])
+  await writePortalTasksFile(orgId, savedTasks)
+  sendJson(res, 200, { ok: true, data: { tasks: savedTasks, storage: 'local-file' } })
 }
 
 async function handlePortalTasksRequest(req, res, requestUrl) {
@@ -1273,10 +2474,10 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
       body = await readJsonBody(req)
     } catch (error) {
       if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
-        sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Żądanie jest zbyt duże.')
+        sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Ĺ»Ä…danie jest zbyt duĹĽe.')
         return
       }
-      sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w żądaniu.')
+      sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w ĹĽÄ…daniu.')
       return
     }
   }
@@ -1306,6 +2507,11 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
   let client = null
 
   try {
+    if (shouldUseLocalPortalTaskFileStorage()) {
+      await handlePortalTasksFileRequest(method, orgId, body, requesterUid, res)
+      return
+    }
+
     client = await connectDbClient()
 
     await ensurePortalTaskTable(client)
@@ -1370,7 +2576,7 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
       res,
       error?.statusCode || 500,
       normalizeText(error?.publicCode) || 'PORTAL_TASKS_ERROR',
-      normalizeText(error?.publicMessage) || error?.message || 'Nie udało się obsłużyć zadań portalu.',
+      normalizeText(error?.publicMessage) || error?.message || 'Nie udaĹ‚o siÄ™ obsĹ‚uĹĽyÄ‡ zadaĹ„ portalu.',
     )
   } finally {
     if (client) client.release()
@@ -1439,6 +2645,107 @@ async function readPortalScheduleOrders(client, orgId) {
   return result.rows.map((row) => row.payload).filter((order) => order && typeof order === 'object')
 }
 
+function shouldUseLocalPortalScheduleOrderFileStorage() {
+  return NODE_ENV !== 'production' && !hasDatabaseConnectionConfig()
+}
+
+function portalScheduleOrderFilePath(orgId) {
+  const safeOrgId = normalizeOrgId(orgId).replace(/[^a-z0-9_-]/gi, '_') || 'default'
+  return path.join(LOCAL_PORTAL_DATA_DIR, 'portal-schedule-orders', `${safeOrgId}.json`)
+}
+
+function sortPortalScheduleOrders(orders = []) {
+  return [...orders].sort((left, right) => {
+    const leftDate = normalizeText(left?.dateYmd || left?.date || left?.startDate)
+    const rightDate = normalizeText(right?.dateYmd || right?.date || right?.startDate)
+    if (leftDate !== rightDate) {
+      return leftDate.localeCompare(rightDate)
+    }
+    const leftTime = normalizeText(left?.startTime || left?.time)
+    const rightTime = normalizeText(right?.startTime || right?.time)
+    if (leftTime !== rightTime) {
+      return leftTime.localeCompare(rightTime)
+    }
+    return normalizeText(left?.id).localeCompare(normalizeText(right?.id))
+  })
+}
+
+async function readPortalScheduleOrdersFile(orgId) {
+  try {
+    const raw = await fs.promises.readFile(portalScheduleOrderFilePath(orgId), 'utf8')
+    const parsed = JSON.parse(raw)
+    const orders = Array.isArray(parsed?.orders) ? parsed.orders : []
+    return sortPortalScheduleOrders(orders.filter((order) => order && typeof order === 'object'))
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return []
+    }
+    throw error
+  }
+}
+
+async function writePortalScheduleOrdersFile(orgId, orders) {
+  const filePath = portalScheduleOrderFilePath(orgId)
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
+  await fs.promises.writeFile(
+    filePath,
+    JSON.stringify(
+      {
+        orgId,
+        updatedAt: new Date().toISOString(),
+        orders: sortPortalScheduleOrders(orders),
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+}
+
+async function handlePortalScheduleOrdersFileRequest(method, orgId, body, requesterUid, res) {
+  const existingOrders = await readPortalScheduleOrdersFile(orgId)
+
+  if (method === 'GET') {
+    sendJson(res, 200, { ok: true, data: { orders: existingOrders, storage: 'local-file' } })
+    return
+  }
+
+  if (method === 'DELETE') {
+    const orderIds = (Array.isArray(body?.orderIds) ? body.orderIds : [])
+      .map((value) => sanitizePortalScheduleOrderId(value))
+      .filter(Boolean)
+    if (!orderIds.length) {
+      sendJson(res, 200, { ok: true, data: { deletedOrderIds: [] } })
+      return
+    }
+
+    const deleted = new Set(orderIds)
+    const nextOrders = existingOrders.filter((order) => !deleted.has(sanitizePortalScheduleOrderId(order?.id)))
+    await writePortalScheduleOrdersFile(orgId, nextOrders)
+    sendJson(res, 200, { ok: true, data: { deletedOrderIds: orderIds } })
+    return
+  }
+
+  const nowIso = new Date().toISOString()
+  const nextById = new Map(existingOrders.map((order) => [sanitizePortalScheduleOrderId(order?.id), order]).filter(([id]) => id))
+  const rawOrders = Array.isArray(body?.orders) ? body.orders : []
+  const orders = rawOrders.map((order) => sanitizePortalScheduleOrderPayload(order)).filter(Boolean).slice(0, 5000)
+  orders.forEach((order) => {
+    const previous = nextById.get(order.id)
+    nextById.set(order.id, {
+      ...previous,
+      ...order,
+      updatedBy: requesterUid || previous?.updatedBy || '',
+      updatedAt: nowIso,
+      createdAt: normalizeText(previous?.createdAt) || normalizeText(order.createdAt) || nowIso,
+    })
+  })
+
+  const savedOrders = sortPortalScheduleOrders([...nextById.values()])
+  await writePortalScheduleOrdersFile(orgId, savedOrders)
+  sendJson(res, 200, { ok: true, data: { orders: savedOrders, storage: 'local-file' } })
+}
+
 async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
@@ -1458,10 +2765,10 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
       body = await readJsonBody(req)
     } catch (error) {
       if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
-        sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duże.')
+        sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duĹĽe.')
         return
       }
-      sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w żądaniu.')
+      sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w ĹĽÄ…daniu.')
       return
     }
   }
@@ -1491,6 +2798,11 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
   let client = null
 
   try {
+    if (shouldUseLocalPortalScheduleOrderFileStorage()) {
+      await handlePortalScheduleOrdersFileRequest(method, orgId, body, requesterUid, res)
+      return
+    }
+
     client = await connectDbClient()
 
     await ensurePortalScheduleOrderTable(client)
@@ -1557,7 +2869,7 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
       res,
       error?.statusCode || 500,
       normalizeText(error?.publicCode) || 'PORTAL_SCHEDULE_ORDERS_ERROR',
-      normalizeText(error?.publicMessage) || error?.message || 'Nie udało się obsłużyć zleceń grafiku.',
+      normalizeText(error?.publicMessage) || error?.message || 'Nie udaĹ‚o siÄ™ obsĹ‚uĹĽyÄ‡ zleceĹ„ grafiku.',
     )
   } finally {
     if (client) client.release()
@@ -1626,6 +2938,19 @@ const server = http.createServer((req, res) => {
 
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
   if (requestUrl.pathname === PORTAL_TASKS_PATH) {
+    if (shouldProxyPortalTasksRequest()) {
+      proxyApiRequest(req, res, requestUrl).catch((error) => {
+        sendJson(res, 500, {
+          ok: false,
+          error: {
+            code: 'PORTAL_TASKS_PROXY_ERROR',
+            message: error?.message || 'Unexpected portal tasks proxy error.',
+          },
+        })
+      })
+      return
+    }
+
     handlePortalTasksRequest(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PORTAL_TASKS_ERROR', error?.message || 'Unexpected portal tasks error.')
     })
@@ -1633,8 +2958,49 @@ const server = http.createServer((req, res) => {
   }
 
   if (requestUrl.pathname === PORTAL_SCHEDULE_ORDERS_PATH) {
+    if (shouldProxyPortalScheduleOrdersRequest()) {
+      proxyApiRequest(req, res, requestUrl).catch((error) => {
+        sendJson(res, 500, {
+          ok: false,
+          error: {
+            code: 'PORTAL_SCHEDULE_ORDERS_PROXY_ERROR',
+            message: error?.message || 'Unexpected portal schedule orders proxy error.',
+          },
+        })
+      })
+      return
+    }
+
     handlePortalScheduleOrdersRequest(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PORTAL_SCHEDULE_ORDERS_ERROR', error?.message || 'Unexpected portal schedule orders error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === AUTH_PROVISION_WORKER_PATH || requestUrl.pathname === '/authProvisionWorker') {
+    handleAuthProvisionWorkerRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'AUTH_PROVISION_WORKER_ERROR', error?.message || 'Unexpected auth provision worker error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === AUTH_ROLLBACK_WORKER_PATH || requestUrl.pathname === '/authRollbackWorker') {
+    handleAuthRollbackWorkerRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'AUTH_ROLLBACK_WORKER_ERROR', error?.message || 'Unexpected auth rollback worker error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === ADMIN_WORKER_PASSWORD_REVEAL_PATH || requestUrl.pathname === '/adminWorkerPasswordReveal') {
+    handleAdminWorkerPasswordRevealRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'WORKER_PASSWORD_REVEAL_ERROR', error?.message || 'Unexpected worker password reveal error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === ADMIN_WORKER_PASSWORD_SET_PATH || requestUrl.pathname === '/adminWorkerPasswordSet') {
+    handleAdminWorkerPasswordSetRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'WORKER_PASSWORD_SET_ERROR', error?.message || 'Unexpected worker password set error.')
     })
     return
   }
@@ -1647,6 +3013,19 @@ const server = http.createServer((req, res) => {
   }
 
   if (requestUrl.pathname === ADMIN_USERS_PATH) {
+    if (shouldProxyAdminUsersRequest()) {
+      proxyApiRequest(req, res, requestUrl).catch((error) => {
+        sendJson(res, 500, {
+          ok: false,
+          error: {
+            code: 'ADMIN_USERS_PROXY_ERROR',
+            message: error?.message || 'Unexpected admin users proxy error.',
+          },
+        })
+      })
+      return
+    }
+
     handleAdminUsersRequest(req, res).catch((error) => {
       sendApiError(res, 500, 'ADMIN_USERS_ERROR', error?.message || 'Unexpected admin users error.')
     })

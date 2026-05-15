@@ -7,7 +7,7 @@ import {
   getIndividualOrders,
   updateIndividualOrder,
 } from '../services/individualOrderService'
-import { createWorkerUser, getWorkers, updateWorker } from '../services/workerService'
+import { createWorkerUser, getWorkers, revealWorkerPassword, setWorkerPassword, updateWorker } from '../services/workerService'
 import { createZone, deleteZone, getZones, updateZone } from '../services/zoneService'
 import {
   createEvent,
@@ -90,6 +90,7 @@ const appState = {
   ordersEditorMode: 'edit',
   ordersEditorTab: 'basic',
   ordersClientCreateReturnOrderId: '',
+  ordersRepeatCalendarMonth: '',
   ordersMapDateFrom: '',
   ordersMapDateTo: '',
   ordersMapStatus: 'new',
@@ -2425,6 +2426,14 @@ function canManageWorkers() {
 
 function canDeleteWorkers() {
   return roleLevel(appState.session?.role) >= 3
+}
+
+function canRevealWorkerPasswords() {
+  return roleLevel(appState.session?.role) >= 3
+}
+
+function workerPasswordVaultMissingMessage() {
+  return 'Firebase Auth nie pozwala odczytać starego hasła. To konto nie ma jeszcze hasła zapisanego w sejfie. Wpisz hasło w polach poniżej i zapisz profil, aby od tej chwili Admin mógł je podejrzeć.'
 }
 
 function canManageClients() {
@@ -8240,6 +8249,17 @@ function ordersWorkerLabelForOrder(order = {}, resources = calendarTimelineResou
     .join(', ')
 }
 
+function ordersPreviewWorkerLabel(order = {}, resources = calendarTimelineResources()) {
+  const rows =
+    document.getElementById('ordersEditorPanel') && String(order?.id ?? '') === String(appState.ordersEditingId ?? '')
+      ? ordersReadSelectedWorkerRows()
+      : ordersNormalizeOrderRows(order, resources)
+  return ordersWorkerAssignmentsFromRows(rows, resources)
+    .filter((item) => resources[item.row]?.type === 'worker')
+    .map((item) => item.name)
+    .join(', ')
+}
+
 function ordersWorkerChecklistHtml(order = {}) {
   const resources = calendarTimelineResources()
   const selectedRows = new Set(ordersNormalizeOrderRows(order, resources))
@@ -8328,6 +8348,15 @@ function ordersRenderWorkerChecklist(order = {}) {
   const selected = ordersNormalizeOrderRows(order)
   ordersSetInputValue('ordersEditWorker', selected[0] ?? 0)
   ordersSyncWorkerPickerLabel(selected)
+}
+
+function ordersCloseWorkerPicker() {
+  const picker = document.getElementById('ordersEditWorkerPicker')
+  if (picker instanceof HTMLDetailsElement) {
+    picker.open = false
+    return
+  }
+  picker?.removeAttribute?.('open')
 }
 
 function ordersClientDisplayName(client = {}) {
@@ -9018,6 +9047,234 @@ function ordersClientOptionsHtml(selectedLabel = '') {
   ].join('')
 }
 
+function ordersClientPickerRows() {
+  const seen = new Set()
+  return (Array.isArray(appState.clients) ? appState.clients : [])
+    .map((client) => {
+      const name = ordersClientDisplayName(client)
+      const code = ordersClientId(client)
+      const key = normalizeSearchText(name)
+      if (!name || seen.has(key)) {
+        return null
+      }
+      seen.add(key)
+      return {
+        name,
+        code: code && normalizeSearchText(code) !== key ? code : '',
+        value: name,
+      }
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.name.localeCompare(right.name, 'pl', { sensitivity: 'base' }))
+}
+
+function ordersClientPickerQuery() {
+  const input = document.getElementById('ordersClientPickerInput')
+  return input instanceof HTMLInputElement ? String(input.value ?? '') : ''
+}
+
+function ordersRenderClientPickerList(queryValue = ordersClientPickerQuery()) {
+  const list = document.getElementById('ordersClientPickerList')
+  if (!list) {
+    return
+  }
+  const selected = ordersReadInputValue('ordersEditClient')
+  const selectedKey = normalizeSearchText(selected)
+  const rawQuery = String(queryValue ?? '').trim()
+  const query = normalizeSearchText(rawQuery) === selectedKey ? '' : normalizeSearchText(rawQuery)
+  const rows = ordersClientPickerRows().filter((row) => {
+    if (!query) {
+      return true
+    }
+    return normalizeSearchText(row.name).includes(query) || normalizeSearchText(row.code).includes(query)
+  })
+  const activeIndex = Math.max(
+    0,
+    rows.findIndex((row) => normalizeSearchText(row.value) === selectedKey || normalizeSearchText(row.code) === selectedKey),
+  )
+  const rowHtml = rows
+    .slice(0, 80)
+    .map((row, index) => {
+      const active = index === activeIndex ? ' is-active' : ''
+      return `
+        <button class="orders-client-picker-option${active}" type="button" role="option" data-orders-client-pick="${escapeHtml(row.value)}" aria-selected="${active ? 'true' : 'false'}">
+          <span>${escapeHtml(row.name)}</span>
+          <small>${escapeHtml(row.code || row.name)}</small>
+        </button>
+      `
+    })
+    .join('')
+  const emptyHtml = rows.length
+    ? ''
+    : `<div class="orders-client-picker-empty">Brak pasujących klientów.</div>`
+  list.innerHTML = `
+    ${rowHtml}
+    ${emptyHtml}
+    <button class="orders-client-picker-option orders-client-picker-option--new" type="button" role="option" data-orders-client-pick="${escapeHtml(ORDERS_NEW_CLIENT_VALUE)}">
+      <span>+ Dodaj nowego klienta</span>
+      <small>Nowy</small>
+    </button>
+  `
+}
+
+function ordersSetClientPickerOpen(open = true) {
+  const input = document.getElementById('ordersClientPickerInput')
+  const list = document.getElementById('ordersClientPickerList')
+  if (input) {
+    input.setAttribute('aria-expanded', open ? 'true' : 'false')
+  }
+  if (list) {
+    list.hidden = !open
+  }
+  if (open) {
+    ordersRenderClientPickerList()
+  }
+}
+
+function ordersHideClientPicker() {
+  ordersSetClientPickerOpen(false)
+}
+
+function ordersSyncClientPicker(value = ordersReadInputValue('ordersEditClient')) {
+  const input = document.getElementById('ordersClientPickerInput')
+  if (!(input instanceof HTMLInputElement)) {
+    return
+  }
+  const raw = String(value ?? '').trim()
+  const client = ordersFindClientBySelection(raw)
+  const label = client ? ordersClientDisplayName(client) : raw === ORDERS_NEW_CLIENT_VALUE ? '' : raw
+  input.value = label
+  input.title = label
+  ordersRenderClientPickerList(label)
+}
+
+function ordersPickClientFromPicker(value = '') {
+  const selected = String(value ?? '').trim()
+  if (!selected) {
+    return
+  }
+  ordersSetInputValue('ordersEditClient', selected)
+  ordersSyncClientPicker(selected)
+  ordersHideClientPicker()
+  const select = document.getElementById('ordersEditClient')
+  if (select instanceof HTMLSelectElement) {
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+}
+
+function ordersRepeatSelectPickerIds() {
+  return [...document.querySelectorAll('#ordersEditorPanel [data-orders-repeat-select]')]
+    .map((node) => String(node.getAttribute('data-orders-repeat-select') ?? '').trim())
+    .filter(Boolean)
+}
+
+function ordersRepeatSelectPickerParts(selectId = '') {
+  const id = String(selectId ?? '').trim()
+  const select = document.getElementById(id)
+  const root = document.querySelector(`#ordersEditorPanel [data-orders-repeat-select="${id}"]`)
+  const button = root?.querySelector?.('[data-orders-repeat-select-toggle]')
+  const label = root?.querySelector?.('[data-orders-repeat-select-label]')
+  const list = root?.querySelector?.('.orders-repeat-select-list')
+  return {
+    select: select instanceof HTMLSelectElement ? select : null,
+    root: root instanceof HTMLElement ? root : null,
+    button: button instanceof HTMLButtonElement ? button : null,
+    label: label instanceof HTMLElement ? label : null,
+    list: list instanceof HTMLElement ? list : null,
+  }
+}
+
+function ordersRenderRepeatSelectPicker(selectId = '') {
+  const { select, root, button, label, list } = ordersRepeatSelectPickerParts(selectId)
+  if (!select || !root || !button || !label || !list) {
+    return
+  }
+  const selectedOption = select.selectedOptions?.[0] || [...select.options].find((option) => option.value === select.value) || select.options[0]
+  const selectedLabel = String(selectedOption?.textContent ?? '').trim()
+  label.textContent = selectedLabel || '-'
+  button.title = selectedLabel || ''
+  button.disabled = Boolean(select.disabled)
+  root.classList.toggle('is-disabled', Boolean(select.disabled))
+  if (select.disabled) {
+    button.setAttribute('aria-expanded', 'false')
+    list.hidden = true
+  }
+  list.innerHTML = [...select.options]
+    .map((option) => {
+      const value = String(option.value ?? '')
+      const optionLabel = String(option.textContent ?? '').trim()
+      const active = value === select.value ? ' is-active' : ''
+      return `
+        <button class="orders-repeat-select-option orders-client-picker-option${active}" type="button" role="option" data-orders-repeat-select-id="${escapeHtml(select.id)}" data-orders-repeat-select-pick="${escapeHtml(value)}" aria-selected="${active ? 'true' : 'false'}">
+          <span>${escapeHtml(optionLabel)}</span>
+        </button>
+      `
+    })
+    .join('')
+}
+
+function ordersSetRepeatSelectPickerOpen(selectId = '', open = true) {
+  const targetId = String(selectId ?? '').trim()
+  ordersRepeatSelectPickerIds().forEach((id) => {
+    const { button, list } = ordersRepeatSelectPickerParts(id)
+    const shouldOpen = Boolean(open && id === targetId)
+    if (shouldOpen) {
+      ordersRenderRepeatSelectPicker(id)
+    }
+    if (button) {
+      button.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false')
+    }
+    if (list) {
+      list.hidden = !shouldOpen
+    }
+  })
+}
+
+function ordersCloseRepeatSelectPickers() {
+  ordersSetRepeatSelectPickerOpen('', false)
+}
+
+function ordersSyncRepeatSelectPickers(selectId = '') {
+  const id = String(selectId ?? '').trim()
+  const ids = id ? [id] : ordersRepeatSelectPickerIds()
+  ids.forEach((pickerId) => {
+    ordersRenderRepeatSelectPicker(pickerId)
+  })
+}
+
+function ordersRepeatSelectPickerOptions(selectId = '') {
+  const id = String(selectId ?? '').trim()
+  return [...document.querySelectorAll(`#ordersEditorPanel [data-orders-repeat-select-id="${id}"]`)].filter(
+    (node) => node instanceof HTMLElement,
+  )
+}
+
+function ordersFocusRepeatSelectPickerOption(selectId = '', fallback = 'selected') {
+  const options = ordersRepeatSelectPickerOptions(selectId)
+  if (!options.length) {
+    return
+  }
+  const selected = options.find((option) => option.getAttribute('aria-selected') === 'true')
+  const target = fallback === 'last' ? options[options.length - 1] : selected || options[0]
+  target?.focus()
+}
+
+function ordersPickRepeatSelectOption(selectId = '', value = '') {
+  const id = String(selectId ?? '').trim()
+  const selectedValue = String(value ?? '')
+  const select = document.getElementById(id)
+  if (!(select instanceof HTMLSelectElement) || select.disabled) {
+    return
+  }
+  if (![...select.options].some((option) => option.value === selectedValue)) {
+    return
+  }
+  select.value = selectedValue
+  ordersSyncRepeatSelectPickers(id)
+  ordersSetRepeatSelectPickerOpen(id, false)
+  select.dispatchEvent(new Event('change', { bubbles: true }))
+}
+
 function ordersApplyClientDataToOrder(order = {}, data = {}, selection = '') {
   if (!order || typeof order !== 'object') {
     return
@@ -9053,6 +9310,7 @@ function ordersOpenClientCreateFromEditor() {
   if (select instanceof HTMLSelectElement) {
     select.value = ''
   }
+  ordersSyncClientPicker('')
   openClientModal('add')
   window.setTimeout(() => {
     document.getElementById('clNazwa')?.focus()
@@ -9174,6 +9432,7 @@ function ordersOpenAddEditor() {
     }
   })
   const draft = ordersCreateDraftOrder()
+  ordersSetRepeatCalendarMonthFromDate(draft.dateYmd)
   appState.calendarTimelineDemoOrders = [draft, ...ordersListSourceOrders().filter((order) => !order?.isDraft)]
   appState.ordersEditingId = draft.id
   appState.ordersEditorMode = 'add'
@@ -9897,6 +10156,10 @@ function ordersSetScheduleRepeatDisabled(disabled = true) {
       node.disabled = Boolean(disabled)
     }
   })
+  ordersSyncRepeatSelectPickers()
+  if (disabled) {
+    ordersCloseRepeatSelectPickers()
+  }
 }
 
 function ordersSetScheduleTimeVisible(visible = true) {
@@ -9981,6 +10244,7 @@ function ordersSyncScheduleControls(order = {}) {
   ordersSetInputValue('ordersEditRepeatUnit', order.repeatUnit || 'week')
   ordersSetInputValue('ordersEditRepeatAfterDays', order.repeatAfterDays || 0)
   ordersSetRepeatWeekdayChecks(ordersRepeatWeekdaysFromOrder(order))
+  ordersSyncRepeatSelectPickers()
 }
 
 function ordersApplyRepeatPresetToControls(preset = '') {
@@ -9989,6 +10253,7 @@ function ordersApplyRepeatPresetToControls(preset = '') {
     ordersSetInputValue('ordersEditRepeatEvery', 1)
     ordersSetInputValue('ordersEditRepeatUnit', normalized)
   }
+  ordersSyncRepeatSelectPickers()
 }
 
 function ordersSyncMainScheduleFromMirror(targetId = '') {
@@ -10029,26 +10294,153 @@ function ordersUpdateOrderScheduleFromControls(order = {}) {
 
 function ordersRenderSchedulePreview(order = {}) {
   const preview = document.getElementById('ordersSchedulePreview')
-  if (!preview) {
+  if (preview) {
+    const client = ordersTimelineClientLabel(order)
+    const start = ordersNormalizeDateField(order.dateYmd, todayYmd())
+    const end = ordersNormalizeDateField(order.endDateYmd || order.validUntil || start, start)
+    const startTime = ordersNormalizeTimeField(order.startTime, '08:00')
+    const endTime = ordersNormalizeTimeField(order.endTime, ordersDefaultEndTime(startTime))
+    const isRepeat = ordersScheduleModeForOrder(order) === 'repeat'
+    const typeLabel = isRepeat ? 'Zlecenie cykliczne' : 'Zlecenie jednorazowe'
+    const cadenceLabel = isRepeat ? ordersRepeatUnitLabel(order.repeatUnit, order.repeatEvery) : 'Bez powtarzania'
+    const workerLabel = ordersPreviewWorkerLabel(order)
+    preview.innerHTML = `
+      <div class="orders-schedule-preview-row orders-schedule-preview-row--summary">
+        <span class="orders-schedule-preview-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <rect x="4" y="5" width="16" height="15" rx="3"></rect>
+            <path d="M8 3v4M16 3v4M4 10h16"></path>
+            <path d="M9 14h.01M12 14h.01M15 14h.01M9 17h.01M12 17h.01"></path>
+          </svg>
+        </span>
+        <div class="orders-schedule-preview-main">
+          <strong>${escapeHtml(typeLabel)}</strong>
+          <span>${escapeHtml(client || 'Nowe zlecenie')}</span>
+          ${workerLabel ? `<span class="orders-schedule-preview-worker">Pracownik: ${escapeHtml(workerLabel)}</span>` : ''}
+        </div>
+        <div class="orders-schedule-preview-range" aria-label="Zakres wykonania">
+          <span><em>Start</em><strong>${escapeHtml(`${start} ${startTime}`)}</strong></span>
+          <span><em>Stop</em><strong>${escapeHtml(`${end} ${endTime}`)}</strong></span>
+        </div>
+        <div class="orders-schedule-preview-note${isRepeat ? '' : ' is-muted'}">
+          ${escapeHtml(cadenceLabel)}
+        </div>
+      </div>
+    `
+  }
+
+  ordersRenderRepeatCalendar(order)
+}
+
+function ordersRepeatCalendarNormalizeMonth(value = '', fallback = todayYmd()) {
+  const raw = String(value ?? '').trim()
+  if (/^\d{4}-\d{2}$/.test(raw)) {
+    return `${raw}-01`
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return calendarMonthStart(raw)
+  }
+  return calendarMonthStart(ordersNormalizeDateField(fallback, todayYmd()))
+}
+
+function ordersSetRepeatCalendarMonthFromDate(value = '') {
+  appState.ordersRepeatCalendarMonth = ordersRepeatCalendarNormalizeMonth(value, todayYmd())
+}
+
+function ordersRepeatCalendarVisibleDays(monthStart = todayYmd()) {
+  const start = calendarMonthGridStart(monthStart)
+  return Array.from({ length: 42 }, (_, index) => calendarAddDays(start, index))
+}
+
+function ordersBuildRepeatCalendarOrder(order = {}) {
+  const checkedMode = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value
+  const mode = checkedMode ? (checkedMode === 'repeat' ? 'repeat' : 'once') : ordersScheduleModeForOrder(order)
+  const selectedType = ordersReadInputValue('ordersEditType') || order.type || 'individual'
+  const start = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), order.dateYmd || todayYmd())
+  const end = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), order.endDateYmd || order.validUntil || start)
+  const startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), order.startTime || '08:00')
+  const repeatEvery = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || Number(order.repeatEvery) || 1))
+  const repeatUnit = ordersReadInputValue('ordersEditRepeatUnit') || order.repeatUnit || 'week'
+  const repeatWeekdays = ordersReadRepeatWeekdays()
+
+  return {
+    ...order,
+    scheduleMode: mode,
+    type: mode === 'repeat' ? 'cyclic' : selectedType === 'cyclic' ? 'individual' : selectedType,
+    dateYmd: start,
+    endDateYmd: end,
+    validUntil: end,
+    startTime,
+    endTime: ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(startTime)),
+    repeatPreset: mode === 'repeat' ? ordersReadInputValue('ordersEditRepeatPreset') || ordersRepeatPresetFromOrder(order) : 'none',
+    repeatEvery,
+    repeatUnit,
+    repeatAfterDays: Math.max(0, Math.floor(Number(ordersReadInputValue('ordersEditRepeatAfterDays')) || Number(order.repeatAfterDays) || 0)),
+    repeatWeekdays,
+  }
+}
+
+function ordersMoveRepeatCalendarMonth(direction = 1) {
+  const base = ordersRepeatCalendarNormalizeMonth(appState.ordersRepeatCalendarMonth || ordersReadInputValue('ordersEditStart'), todayYmd())
+  const date = calendarDateFromYmd(base)
+  date.setMonth(date.getMonth() + (Number(direction) < 0 ? -1 : 1), 1)
+  appState.ordersRepeatCalendarMonth = calendarMonthStart(calendarDateToYmd(date))
+}
+
+function ordersRenderRepeatCalendar(order = {}) {
+  const root = document.getElementById('ordersRepeatCalendar')
+  const label = document.getElementById('ordersRepeatCalendarLabel')
+  const grid = document.getElementById('ordersRepeatCalendarGrid')
+  const summary = document.getElementById('ordersRepeatCalendarSummary')
+  if (!root || !label || !grid) {
     return
   }
 
-  const client = ordersTimelineClientLabel(order)
-  const start = ordersNormalizeDateField(order.dateYmd, todayYmd())
-  const end = ordersNormalizeDateField(order.endDateYmd || order.validUntil || start, start)
-  const startTime = ordersNormalizeTimeField(order.startTime, '08:00')
-  const endTime = ordersNormalizeTimeField(order.endTime, ordersDefaultEndTime(startTime))
-  const isRepeat = ordersScheduleModeForOrder(order) === 'repeat'
-  preview.innerHTML = `
-    <div class="orders-schedule-preview-row">
-      <strong>${escapeHtml(client || '-')}</strong>
-      <span>${escapeHtml(`${start} ${startTime}`)}</span>
-      <span>${escapeHtml(`${end} ${endTime}`)}</span>
-    </div>
-    <div class="orders-schedule-preview-note${isRepeat ? '' : ' is-muted'}">
-      ${isRepeat ? escapeHtml(ordersRepeatUnitLabel(order.repeatUnit, order.repeatEvery)) : 'Jednorazowe - bez powtarzania'}
-    </div>
-  `
+  const previewOrder = ordersBuildRepeatCalendarOrder(order)
+  const startDay = ordersNormalizeDateField(previewOrder.dateYmd, todayYmd())
+  if (!appState.ordersRepeatCalendarMonth) {
+    appState.ordersRepeatCalendarMonth = calendarMonthStart(startDay)
+  }
+
+  const monthStart = ordersRepeatCalendarNormalizeMonth(appState.ordersRepeatCalendarMonth, startDay)
+  const currentMonth = monthStart.slice(0, 7)
+  const visibleDays = ordersRepeatCalendarVisibleDays(monthStart)
+  const isRepeat = ordersScheduleModeForOrder(previewOrder) === 'repeat'
+  const occurrenceDays = new Set()
+  if (isRepeat) {
+    const skippedDates = calendarTimelineRecurringSkippedDates(previewOrder)
+    calendarTimelineRecurringDaysForRange(previewOrder, visibleDays).forEach((day) => {
+      if (!skippedDates.has(day)) {
+        occurrenceDays.add(day)
+      }
+    })
+  }
+
+  const today = todayYmd()
+  label.textContent = calendarMonthLabel(monthStart).replace(/^./, (char) => char.toLocaleUpperCase('pl-PL'))
+  root.classList.toggle('is-disabled', !isRepeat)
+  grid.innerHTML = visibleDays
+    .map((day) => {
+      const dayNumber = Number(day.slice(8, 10))
+      const outsideMonth = !day.startsWith(currentMonth)
+      const isOccurrence = occurrenceDays.has(day)
+      const className = [
+        'orders-repeat-calendar-day',
+        outsideMonth ? 'is-muted' : '',
+        day === today ? 'is-today' : '',
+        day === startDay ? 'is-start' : '',
+        isOccurrence ? 'is-occurrence' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+      return `<span class="${className}" title="${escapeHtml(day)}">${escapeHtml(String(dayNumber))}</span>`
+    })
+    .join('')
+
+  if (summary) {
+    const monthOccurrenceCount = visibleDays.filter((day) => day.startsWith(currentMonth) && occurrenceDays.has(day)).length
+    summary.textContent = isRepeat ? `${monthOccurrenceCount} terminów w miesiącu` : 'Tryb jednorazowy'
+  }
 }
 
 function ordersDeviceNotes(order = {}) {
@@ -10267,6 +10659,7 @@ function ordersRenderEditor(order = {}) {
 
   ordersSetInputValue('ordersEditName', order.title || '')
   ordersSetInputValue('ordersEditClient', orderClientLabel)
+  ordersSyncClientPicker(orderClientLabel)
   ordersSetInputValue('ordersEditStart', startDay)
   ordersSetInputValue('ordersEditNext', nextDate)
   ordersSetInputValue('ordersEditTime', ordersNormalizeTimeField(order.startTime, '08:00'))
@@ -10321,6 +10714,7 @@ function ordersOpenEditor(orderId) {
   appState.ordersEditingId = String(orderId ?? '').trim()
   appState.ordersEditorMode = 'edit'
   appState.ordersEditorTab = 'basic'
+  ordersSetRepeatCalendarMonthFromDate(order.dateYmd)
   renderOrdersView()
 }
 
@@ -10334,6 +10728,7 @@ function ordersOpenEditorFromCalendar(orderId) {
   appState.ordersEditingId = id
   appState.ordersEditorMode = 'edit'
   appState.ordersEditorTab = 'basic'
+  ordersSetRepeatCalendarMonthFromDate(ordersFindTimelineOrder(id)?.dateYmd)
   document.querySelector('[data-route="orders"]')?.click()
   window.setTimeout(() => {
     renderOrdersView()
@@ -10372,6 +10767,7 @@ function ordersOpenRecurringOccurrenceEditorFromCalendar(sourceOrderId = '', occ
   appState.ordersEditingId = overrideId
   appState.ordersEditorMode = 'single-override'
   appState.ordersEditorTab = 'basic'
+  ordersSetRepeatCalendarMonthFromDate(occurrenceDay)
   document.querySelector('[data-route="orders"]')?.click()
   window.setTimeout(() => {
     renderOrdersView()
@@ -10385,6 +10781,7 @@ function ordersShowList() {
   appState.ordersEditingId = ''
   appState.ordersEditorMode = 'edit'
   appState.ordersEditorTab = 'basic'
+  appState.ordersRepeatCalendarMonth = ''
   renderOrdersView()
 }
 
@@ -10991,6 +11388,12 @@ function bindOrdersViewFunctions() {
   renderOrdersView()
 
   binding.add(root, 'input', (event) => {
+    if (event.target?.id === 'ordersClientPickerInput') {
+      ordersSetClientPickerOpen(true)
+      ordersRenderClientPickerList(String(event.target.value ?? ''))
+      return
+    }
+
     if (event.target?.id === 'ordersEditLocation') {
       ordersSyncAddressSelectToLocation(String(event.target.value ?? ''))
       ordersClearLocationGeoFields()
@@ -11009,6 +11412,13 @@ function bindOrdersViewFunctions() {
     if (event.target?.id === 'ordersSearchInput') {
       appState.ordersSearch = String(event.target.value ?? '')
       renderOrdersView()
+    }
+  })
+
+  binding.add(root, 'focusin', (event) => {
+    if (event.target?.id === 'ordersClientPickerInput') {
+      ordersCloseRepeatSelectPickers()
+      ordersSetClientPickerOpen(true)
     }
   })
 
@@ -11043,6 +11453,7 @@ function bindOrdersViewFunctions() {
         ordersRenderSchedulePreview(order)
       } else {
         ordersSetScheduleRepeatDisabled(event.target?.value !== 'repeat')
+        ordersRenderRepeatCalendar({})
       }
       return
     }
@@ -11057,6 +11468,10 @@ function bindOrdersViewFunctions() {
         ordersRenderSchedulePreview(order)
       }
       return
+    }
+
+    if (['ordersEditRepeatPreset', 'ordersEditRepeatUnit'].includes(String(event.target?.id ?? ''))) {
+      ordersSyncRepeatSelectPickers(String(event.target?.id ?? ''))
     }
 
     if (event.target?.id === 'ordersEditRepeatPreset') {
@@ -11082,6 +11497,9 @@ function bindOrdersViewFunctions() {
     ) {
       const targetId = String(event.target?.id ?? '')
       ordersSyncMainScheduleFromMirror(targetId)
+      if (targetId === 'ordersEditStart' || targetId === 'ordersScheduleStartDate') {
+        ordersSetRepeatCalendarMonthFromDate(ordersReadInputValue(targetId))
+      }
       const order = ordersFindTimelineOrder(appState.ordersEditingId)
       if (order) {
         ordersUpdateOrderScheduleFromControls(order)
@@ -11092,6 +11510,8 @@ function bindOrdersViewFunctions() {
           }
         }
         ordersRenderSchedulePreview(order)
+      } else {
+        ordersRenderRepeatCalendar({})
       }
       return
     }
@@ -11099,6 +11519,7 @@ function bindOrdersViewFunctions() {
     if (event.target?.id === 'ordersEditClient') {
       const order = ordersFindTimelineOrder(appState.ordersEditingId)
       const selection = ordersReadInputValue('ordersEditClient')
+      ordersSyncClientPicker(selection)
       if (selection === ORDERS_NEW_CLIENT_VALUE) {
         ordersOpenClientCreateFromEditor()
         return
@@ -11118,6 +11539,7 @@ function bindOrdersViewFunctions() {
         order.row = row
         order.assignedRows = ordersReadSelectedWorkerRows()
         ordersRenderWorkerChecklist(order)
+        ordersRenderSchedulePreview(order)
       }
       return
     }
@@ -11128,12 +11550,54 @@ function bindOrdersViewFunctions() {
       if (order) {
         order.row = rows[0] ?? 0
         order.assignedRows = rows
+        ordersRenderSchedulePreview(order)
       }
       return
     }
   })
 
   binding.add(root, 'click', (event) => {
+    if (!eventTargetClosest(event, '.orders-worker-picker')) {
+      ordersCloseWorkerPicker()
+    }
+
+    const clientPick = eventTargetClosest(event, '[data-orders-client-pick]')
+    if (clientPick) {
+      event.preventDefault()
+      ordersCloseRepeatSelectPickers()
+      ordersPickClientFromPicker(clientPick.getAttribute('data-orders-client-pick'))
+      return
+    }
+
+    if (eventTargetClosest(event, '.orders-client-picker')) {
+      ordersCloseRepeatSelectPickers()
+      ordersSetClientPickerOpen(true)
+      return
+    }
+
+    const repeatSelectPick = eventTargetClosest(event, '[data-orders-repeat-select-pick]')
+    if (repeatSelectPick) {
+      event.preventDefault()
+      ordersHideClientPicker()
+      ordersPickRepeatSelectOption(
+        repeatSelectPick.getAttribute('data-orders-repeat-select-id'),
+        repeatSelectPick.getAttribute('data-orders-repeat-select-pick'),
+      )
+      return
+    }
+
+    const repeatSelectToggle = eventTargetClosest(event, '[data-orders-repeat-select-toggle]')
+    if (repeatSelectToggle) {
+      event.preventDefault()
+      ordersHideClientPicker()
+      ordersHideLocationSuggestions()
+      const picker = repeatSelectToggle.closest('[data-orders-repeat-select]')
+      const selectId = picker?.getAttribute('data-orders-repeat-select') || ''
+      const isOpen = repeatSelectToggle.getAttribute('aria-expanded') === 'true'
+      ordersSetRepeatSelectPickerOpen(selectId, !isOpen)
+      return
+    }
+
     const locationSuggestion = eventTargetClosest(event, '[data-orders-location-index]')
     if (locationSuggestion) {
       event.preventDefault()
@@ -11142,6 +11606,14 @@ function bindOrdersViewFunctions() {
       if (item) {
         ordersPickLocationSuggestion(item)
       }
+      return
+    }
+
+    const repeatCalendarNav = eventTargetClosest(event, '[data-orders-repeat-calendar-nav]')
+    if (repeatCalendarNav) {
+      event.preventDefault()
+      ordersMoveRepeatCalendarMonth(Number(repeatCalendarNav.getAttribute('data-orders-repeat-calendar-nav')) || 1)
+      ordersRenderRepeatCalendar(ordersFindTimelineOrder(appState.ordersEditingId) || {})
       return
     }
 
@@ -11310,9 +11782,107 @@ function bindOrdersViewFunctions() {
     if (!locationArea) {
       ordersHideLocationSuggestions()
     }
+    const clientPickerArea = eventTargetClosest(event, '.orders-client-picker')
+    if (!clientPickerArea) {
+      ordersHideClientPicker()
+    }
+    const repeatPickerArea = eventTargetClosest(event, '.orders-repeat-select-picker')
+    if (!repeatPickerArea) {
+      ordersCloseRepeatSelectPickers()
+    }
   })
 
   binding.add(root, 'keydown', (event) => {
+    if (event.target?.id === 'ordersClientPickerInput') {
+      if (event.key === 'Escape') {
+        ordersHideClientPicker()
+        return
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        const firstOption = document.querySelector('#ordersClientPickerList [data-orders-client-pick]')
+        if (firstOption instanceof HTMLElement) {
+          ordersPickClientFromPicker(firstOption.getAttribute('data-orders-client-pick'))
+        }
+        return
+      }
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        ordersSetClientPickerOpen(true)
+        const firstOption = document.querySelector('#ordersClientPickerList [data-orders-client-pick]')
+        if (firstOption instanceof HTMLElement) {
+          firstOption.focus()
+        }
+        return
+      }
+    }
+
+    if (event.target?.hasAttribute?.('data-orders-client-pick')) {
+      const current = event.target
+      if (event.key === 'Escape') {
+        ordersHideClientPicker()
+        document.getElementById('ordersClientPickerInput')?.focus()
+        return
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        ordersPickClientFromPicker(current.getAttribute('data-orders-client-pick'))
+        return
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        const options = [...document.querySelectorAll('#ordersClientPickerList [data-orders-client-pick]')]
+        const index = options.indexOf(current)
+        const nextIndex = event.key === 'ArrowDown' ? Math.min(options.length - 1, index + 1) : Math.max(0, index - 1)
+        const next = options[nextIndex]
+        if (next instanceof HTMLElement) {
+          next.focus()
+        }
+        return
+      }
+    }
+
+    if (event.target?.hasAttribute?.('data-orders-repeat-select-toggle')) {
+      const picker = event.target.closest('[data-orders-repeat-select]')
+      const selectId = picker?.getAttribute('data-orders-repeat-select') || ''
+      if (event.key === 'Escape') {
+        ordersCloseRepeatSelectPickers()
+        return
+      }
+      if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        ordersSetRepeatSelectPickerOpen(selectId, true)
+        ordersFocusRepeatSelectPickerOption(selectId, event.key === 'ArrowUp' ? 'last' : 'selected')
+        return
+      }
+    }
+
+    if (event.target?.hasAttribute?.('data-orders-repeat-select-pick')) {
+      const current = event.target
+      const selectId = current.getAttribute('data-orders-repeat-select-id') || ''
+      if (event.key === 'Escape') {
+        ordersSetRepeatSelectPickerOpen(selectId, false)
+        const { button } = ordersRepeatSelectPickerParts(selectId)
+        button?.focus()
+        return
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        ordersPickRepeatSelectOption(selectId, current.getAttribute('data-orders-repeat-select-pick'))
+        const { button } = ordersRepeatSelectPickerParts(selectId)
+        button?.focus()
+        return
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        const options = ordersRepeatSelectPickerOptions(selectId)
+        const index = options.indexOf(current)
+        const nextIndex = event.key === 'ArrowDown' ? Math.min(options.length - 1, index + 1) : Math.max(0, index - 1)
+        options[nextIndex]?.focus()
+        return
+      }
+    }
+
     if (event.key === 'Enter' && event.target?.id === 'ordersSubtaskName') {
       event.preventDefault()
       ordersAddSubtaskToCurrentOrder()
@@ -14732,7 +15302,7 @@ function setWorkerProfileModalReadOnly(readOnly) {
     hint.style.display = readOnly ? 'block' : 'none'
   }
 
-  ;['wkEditName', 'wkEditLogin', 'wkEditType', 'wkEditActive', 'wkEditEmail', 'wkEditPhone', 'wkEditQr', 'wkNewPass', 'wkNewPass2'].forEach(
+  ;['wkEditName', 'wkEditLogin', 'wkEditType', 'wkEditActive', 'wkEditPhone', 'wkEditQr', 'wkNewPass', 'wkNewPass2'].forEach(
     (id) => {
       const input = document.getElementById(id)
       if (input) {
@@ -14740,6 +15310,15 @@ function setWorkerProfileModalReadOnly(readOnly) {
       }
     },
   )
+
+  const emailInput = document.getElementById('wkEditEmail')
+  if (emailInput) {
+    const addMode = appState.workerProfileModalMode === 'add'
+    emailInput.disabled = readOnly || addMode
+    emailInput.title = addMode
+      ? 'Email jest wyliczany z loginu i domeny konta dodającego.'
+      : ''
+  }
 
   const saveButton = document.getElementById('wkSaveBtn')
   if (saveButton) {
@@ -14800,10 +15379,14 @@ function configureWorkerProfileRoleOptions(typeInput, mode) {
 
   if (mode === 'add') {
     typeInput.innerHTML = `
-      <option value="WORKER">WORKER</option>
-      <option value="MANAGER">MANAGER</option>
+      <option value="Pracownik">Pracownik / WORKER</option>
+      <option value="Kierownik">Kierownik / MANAGER</option>
+      <option value="Koordynator">Koordynator / COORDINATOR</option>
+      <option value="Stażysta">Stażysta</option>
+      <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
+      <option value="Zespół mobilny">Zespół mobilny</option>
     `
-    typeInput.value = 'WORKER'
+    typeInput.value = 'Pracownik'
     return
   }
 
@@ -14813,18 +15396,83 @@ function configureWorkerProfileRoleOptions(typeInput, mode) {
 }
 
 function workerProfileRoleForCreate(value) {
-  const role = String(value ?? '').trim().toUpperCase()
-  if (role === 'MANAGER' || role === 'KIEROWNIK') return 'MANAGER'
-  if (role === 'WORKER' || role === 'PRACOWNIK') return 'WORKER'
+  const raw = String(value ?? '').trim()
+  const normalized = normalizeSearchText(raw).toLowerCase()
+  if (!normalized) {
+    return ''
+  }
+  if (normalized.includes('admin') || normalized.includes('owner') || normalized.includes('superadmin')) {
+    return ''
+  }
+  if (normalized.includes('manager') || normalized.includes('menager') || normalized.includes('menedzer') || normalized.includes('kierownik')) {
+    return 'MANAGER'
+  }
+  if (normalized.includes('koordynator') || normalized.includes('coordynator') || normalized.includes('coordinator')) {
+    return 'COORDINATOR'
+  }
+  return 'WORKER'
+}
+
+const WORKER_LOGIN_LOCAL_PART_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,78}[a-z0-9])?$/
+
+function sanitizeWorkerLoginLocalPart(value) {
+  return String(value ?? '').trim().toLowerCase()
+}
+
+function isValidWorkerLoginLocalPart(value) {
+  const localPart = sanitizeWorkerLoginLocalPart(value)
+  if (!localPart || localPart.includes('@')) {
+    return false
+  }
+
+  return WORKER_LOGIN_LOCAL_PART_PATTERN.test(localPart)
+}
+
+function getWorkerCreatorEmailDomain() {
+  const candidates = [appState.session?.email, appState.session?.login]
+  for (const candidate of candidates) {
+    const source = String(candidate ?? '')
+      .trim()
+      .toLowerCase()
+    const atIndex = source.indexOf('@')
+    if (atIndex < 0) {
+      continue
+    }
+
+    const domain = source.slice(atIndex + 1).trim()
+    if (domain && !domain.includes('@')) {
+      return domain
+    }
+  }
   return ''
 }
 
-function workerProfileLoginFromEmail(value) {
-  const email = String(value ?? '').trim().toLowerCase()
-  if (!email.includes('@')) {
+function buildWorkerLoginEmailPreview(loginValue) {
+  const localPart = sanitizeWorkerLoginLocalPart(loginValue)
+  if (!isValidWorkerLoginLocalPart(localPart)) {
     return ''
   }
-  return email.split('@')[0] || ''
+
+  const domain = getWorkerCreatorEmailDomain()
+  if (!domain) {
+    return ''
+  }
+
+  return `${localPart}@${domain}`
+}
+
+function syncWorkerProfileEmailPreview() {
+  if (appState.workerProfileModalMode !== 'add') {
+    return
+  }
+
+  const emailInput = document.getElementById('wkEditEmail')
+  if (!(emailInput instanceof HTMLInputElement)) {
+    return
+  }
+
+  const loginInput = document.getElementById('wkEditLogin')
+  emailInput.value = buildWorkerLoginEmailPreview(loginInput?.value ?? '')
 }
 
 function openWorkerProfileModal(worker = null, mode = 'view') {
@@ -14852,10 +15500,16 @@ function openWorkerProfileModal(worker = null, mode = 'view') {
   const qrInput = document.getElementById('wkEditQr')
   const newPassInput = document.getElementById('wkNewPass')
   const newPass2Input = document.getElementById('wkNewPass2')
+  const newPassWrap = document.getElementById('wkNewPassWrap')
+  const newPass2Wrap = document.getElementById('wkNewPass2Wrap')
+  const newPassLabel = document.querySelector('label[for="wkNewPass"]')
+  const newPass2Label = document.querySelector('label[for="wkNewPass2"]')
   const deleteButton = document.getElementById('wkDeleteBtn')
   const passWrap = document.getElementById('wkCurrentPassWrap')
   const currentPass = document.getElementById('wkCurrentPass')
   const showPassButton = document.getElementById('wkShowPassBtn')
+  const copyPassButton = document.getElementById('wkCopyPassBtn')
+  const passHint = document.getElementById('wkCurrentPassHint')
   const saveButton = document.getElementById('wkSaveBtn')
 
   const headerLogo = document.querySelector('.header .logo-block img')
@@ -14878,12 +15532,17 @@ function openWorkerProfileModal(worker = null, mode = 'view') {
     if (nameInput) nameInput.value = ''
     if (loginInput) {
       loginInput.value = ''
-      loginInput.dataset.autoFromEmail = '1'
+      loginInput.dataset.autoFromEmail = '0'
     }
-    if (typeInput) typeInput.value = 'WORKER'
+    if (typeInput) typeInput.value = 'Pracownik'
     if (activeInput) activeInput.value = '1'
     if (onlineInput) onlineInput.value = 'NIE'
-    if (emailInput) emailInput.value = ''
+    if (emailInput) {
+      emailInput.value = ''
+      emailInput.placeholder = getWorkerCreatorEmailDomain()
+        ? `login@${getWorkerCreatorEmailDomain()}`
+        : 'Email zostanie wyliczony z loginu'
+    }
     if (phoneInput) phoneInput.value = ''
     if (qrInput) qrInput.value = ''
   } else {
@@ -14902,23 +15561,50 @@ function openWorkerProfileModal(worker = null, mode = 'view') {
     if (typeInput) typeInput.value = worker?.type || worker?.role || 'Pracownik'
     if (activeInput) activeInput.value = worker?.active ? '1' : '0'
     if (onlineInput) onlineInput.value = workerBoolLabel(Boolean(worker?.online))
-    if (emailInput) emailInput.value = worker?.email || ''
+    if (emailInput) {
+      emailInput.value = worker?.email || ''
+      emailInput.placeholder = ''
+    }
     if (phoneInput) phoneInput.value = worker?.phone || ''
     if (qrInput) qrInput.value = worker?.qrText || ''
   }
 
   if (newPassInput) newPassInput.value = ''
   if (newPass2Input) newPass2Input.value = ''
+  if (newPassLabel) {
+    newPassLabel.textContent = mode === 'edit' ? 'Ustaw / zapisz hasło w sejfie' : 'Hasło tymczasowe (E)'
+  }
+  if (newPass2Label) {
+    newPass2Label.textContent = mode === 'edit' ? 'Powtórz hasło do sejfu' : 'Powtórz hasło'
+  }
+  if (newPassInput) {
+    newPassInput.placeholder = mode === 'edit' ? 'Wpisz nowe albo znane obecne hasło' : ''
+  }
+  if (newPass2Input) {
+    newPass2Input.placeholder = mode === 'edit' ? 'Powtórz hasło do zapisania' : ''
+  }
 
   if (passWrap) {
-    passWrap.style.display = 'none'
+    const showPasswordVault = mode === 'edit' && canRevealWorkerPasswords()
+    passWrap.style.display = showPasswordVault ? '' : 'none'
+    passWrap.dataset.loaded = '0'
+    passWrap.dataset.login = showPasswordVault ? String(worker?.login ?? '').trim() : ''
   }
   if (currentPass) {
     currentPass.value = ''
     currentPass.type = 'password'
+    currentPass.dataset.loaded = '0'
+    currentPass.placeholder = mode === 'edit' && canRevealWorkerPasswords() ? 'Kliknij Pokaż, aby pobrać hasło' : ''
   }
   if (showPassButton) {
     showPassButton.textContent = 'Pokaż'
+    showPassButton.disabled = false
+  }
+  if (copyPassButton) {
+    copyPassButton.disabled = true
+  }
+  if (passHint) {
+    passHint.textContent = 'Hasło jest pobierane z szyfrowanego sejfu tylko dla Admina.'
   }
 
   if (deleteButton) {
@@ -14926,6 +15612,15 @@ function openWorkerProfileModal(worker = null, mode = 'view') {
   }
 
   setWorkerProfileModalReadOnly(mode === 'view' || !canManageWorkers())
+  const showPasswordInputs = mode === 'add' || (mode === 'edit' && canRevealWorkerPasswords())
+  ;[newPassWrap, newPass2Wrap].forEach((wrap) => {
+    if (wrap) wrap.style.display = showPasswordInputs ? '' : 'none'
+  })
+  if (mode === 'edit' && !canRevealWorkerPasswords()) {
+    if (newPassInput) newPassInput.disabled = true
+    if (newPass2Input) newPass2Input.disabled = true
+  }
+  syncWorkerProfileEmailPreview()
   overlay.style.display = 'flex'
 }
 
@@ -14937,6 +15632,67 @@ function closeWorkerProfileModal() {
 
   appState.workerProfileCurrent = null
   appState.workerProfileModalMode = 'view'
+}
+
+async function loadWorkerProfilePassword() {
+  if (!canRevealWorkerPasswords()) {
+    alert('Brak uprawnień do podglądu hasła pracownika.')
+    return ''
+  }
+
+  const orgId = String(appState.session?.orgId ?? '').trim()
+  const login = String(appState.workerProfileCurrent?.login ?? document.getElementById('wkEditLogin')?.value ?? '').trim()
+  const passInput = document.getElementById('wkCurrentPass')
+  const showButton = document.getElementById('wkShowPassBtn')
+  const copyButton = document.getElementById('wkCopyPassBtn')
+  const hint = document.getElementById('wkCurrentPassHint')
+
+  if (!orgId || !login) {
+    alert('Brak organizacji albo loginu pracownika.')
+    return ''
+  }
+
+  if (passInput?.dataset.loaded === '1' && passInput.value) {
+    return passInput.value
+  }
+
+  if (showButton) showButton.disabled = true
+  if (copyButton) copyButton.disabled = true
+  if (hint) hint.textContent = 'Pobieranie hasła z szyfrowanego sejfu...'
+
+  try {
+    const result = await revealWorkerPassword(orgId, login)
+    if (!result?.hasPassword || !result?.password) {
+      if (passInput) {
+        passInput.value = ''
+        passInput.dataset.loaded = '0'
+      }
+      const message = String(result?.message ?? '').trim() || workerPasswordVaultMissingMessage()
+      if (hint) hint.textContent = message
+      alert(message)
+      return ''
+    }
+
+    if (passInput) {
+      passInput.value = String(result.password)
+      passInput.dataset.loaded = '1'
+    }
+    if (copyButton) copyButton.disabled = false
+    if (hint) {
+      const updatedAt = String(result.updatedAt ?? '').trim()
+      hint.textContent = updatedAt
+        ? `Hasło zapisane w sejfie. Ostatnia aktualizacja: ${updatedAt}.`
+        : 'Hasło zapisane w sejfie.'
+    }
+    return String(result.password)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udało się pobrać hasła pracownika.'
+    if (hint) hint.textContent = message
+    alert(message)
+    return ''
+  } finally {
+    if (showButton) showButton.disabled = false
+  }
 }
 
 function fillWorkerQrFromCredentials() {
@@ -15045,12 +15801,25 @@ async function saveWorkerProfileData() {
     return
   }
 
+  const isAddingUser = appState.workerProfileModalMode === 'add'
+  const rawLogin = String(document.getElementById('wkEditLogin')?.value ?? '').trim()
+  const login = isAddingUser ? sanitizeWorkerLoginLocalPart(rawLogin) : rawLogin
+  if (isAddingUser) {
+    const loginInput = document.getElementById('wkEditLogin')
+    if (loginInput instanceof HTMLInputElement) {
+      loginInput.value = login
+    }
+    syncWorkerProfileEmailPreview()
+  }
+
   const payload = {
     name: String(document.getElementById('wkEditName')?.value ?? '').trim(),
-    login: String(document.getElementById('wkEditLogin')?.value ?? '').trim(),
+    login,
     role: String(document.getElementById('wkEditType')?.value ?? 'Pracownik').trim(),
     active: String(document.getElementById('wkEditActive')?.value ?? '1').trim() === '1',
-    email: String(document.getElementById('wkEditEmail')?.value ?? '').trim(),
+    email: isAddingUser
+      ? buildWorkerLoginEmailPreview(login)
+      : String(document.getElementById('wkEditEmail')?.value ?? '').trim(),
     phone: String(document.getElementById('wkEditPhone')?.value ?? '').trim(),
     qrText: String(document.getElementById('wkEditQr')?.value ?? '').trim(),
   }
@@ -15062,23 +15831,22 @@ async function saveWorkerProfileData() {
 
   const newPass = String(document.getElementById('wkNewPass')?.value ?? '').trim()
   const repeatPass = String(document.getElementById('wkNewPass2')?.value ?? '').trim()
-  const isAddingUser = appState.workerProfileModalMode === 'add'
   const createRole = workerProfileRoleForCreate(payload.role)
+  const canUpdatePassword = canRevealWorkerPasswords()
 
   if (isAddingUser) {
+    if (!isValidWorkerLoginLocalPart(payload.login)) {
+      alert('Login musi być lokalną częścią emaila (bez @) i może zawierać tylko litery, cyfry, ".", "-" oraz "_".')
+      return
+    }
+
     if (!payload.email) {
-      alert('Podaj email użytkownika.')
+      alert('Nie można zbudować finalnego emaila. Sprawdź login i domenę konta dodającego.')
       return
     }
 
     if (!createRole) {
-      alert('Nowy użytkownik może mieć rolę MANAGER albo WORKER.')
-      return
-    }
-
-    const expectedLogin = workerProfileLoginFromEmail(payload.email)
-    if (expectedLogin && payload.login.toLowerCase() !== expectedLogin) {
-      alert('Login musi być taki sam jak część emaila przed @, aby mobile działał bez aliasów.')
+      alert('Nowy użytkownik nie może być tworzony z rolą Admin.')
       return
     }
 
@@ -15093,17 +15861,36 @@ async function saveWorkerProfileData() {
       alert('Hasła nie są takie same.')
       return
     }
+    if (!isAddingUser && !canUpdatePassword) {
+      alert('Tylko Admin może resetować hasło pracownika.')
+      return
+    }
+    if (!isAddingUser && newPass.length < 6) {
+      alert('Hasło musi mieć co najmniej 6 znaków.')
+      return
+    }
   }
+
+  let successNotice = ''
 
   try {
     if (isAddingUser) {
-      await createWorkerUser(appState.session.orgId, {
+      const createdUser = await createWorkerUser(appState.session.orgId, {
         ...payload,
         displayName: payload.name,
         password: newPass,
         role: createRole,
+        storePassword: canUpdatePassword,
       })
-      showTransientNotice('Użytkownik został dodany i może się zalogować.')
+      const addedName = String(createdUser?.name ?? createdUser?.workerName ?? payload.name).trim()
+      const addedEmail = String(createdUser?.email ?? payload.email).trim()
+      successNotice = addedEmail
+        ? `Dodano użytkownika ${addedName || addedEmail}. Login: ${addedEmail}.`
+        : `Dodano użytkownika ${addedName || payload.login}.`
+      const passwordVaultWarning = String(createdUser?.passwordVaultWarning ?? '').trim()
+      if (passwordVaultWarning) {
+        successNotice += ` Uwaga: nie zapisano hasła w sejfie (${passwordVaultWarning}).`
+      }
     } else {
       const currentLogin = String(appState.workerProfileCurrent?.login ?? '').trim()
       if (!currentLogin) {
@@ -15122,11 +15909,16 @@ async function saveWorkerProfileData() {
         phone: payload.phone,
         editedBy: String(appState.session?.name ?? '').trim(),
       })
-      showTransientNotice('Zmiany pracownika zostały zapisane.')
+      successNotice = 'Zmiany pracownika zostały zapisane.'
+      if (newPass) {
+        await setWorkerPassword(appState.session.orgId, currentLogin, newPass)
+        successNotice = 'Zmiany pracownika zostały zapisane. Hasło ustawiono w Firebase Auth i zapisano w sejfie.'
+      }
     }
 
     closeWorkerProfileModal()
     await fetchWorkerProfilesForCurrentSession(true)
+    showTransientNotice(successNotice)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Błąd zapisu pracownika.'
     alert(message)
@@ -31591,34 +32383,23 @@ function bindWorkerProfileViewFunctions() {
     void deleteWorkerProfileData()
   })
   binding.add(document.getElementById('wkFillQrBtn'), 'click', fillWorkerQrFromCredentials)
-  binding.add(document.getElementById('wkEditEmail'), 'input', () => {
-    if (appState.workerProfileModalMode !== 'add') {
-      return
-    }
+  ;['input', 'change', 'blur'].forEach((eventName) => {
+    binding.add(document.getElementById('wkEditLogin'), eventName, () => {
+      const loginInput = document.getElementById('wkEditLogin')
+      if (!(loginInput instanceof HTMLInputElement)) {
+        return
+      }
 
-    const emailInput = document.getElementById('wkEditEmail')
-    const loginInput = document.getElementById('wkEditLogin')
-    if (!(emailInput instanceof HTMLInputElement) || !(loginInput instanceof HTMLInputElement)) {
-      return
-    }
-
-    const nextLogin = workerProfileLoginFromEmail(emailInput.value)
-    if (!nextLogin) {
-      return
-    }
-
-    if (!loginInput.value.trim() || loginInput.dataset.autoFromEmail === '1') {
-      loginInput.value = nextLogin
-      loginInput.dataset.autoFromEmail = '1'
-    }
-  })
-  binding.add(document.getElementById('wkEditLogin'), 'input', () => {
-    const loginInput = document.getElementById('wkEditLogin')
-    if (loginInput instanceof HTMLInputElement) {
       loginInput.dataset.autoFromEmail = '0'
-    }
+      if (appState.workerProfileModalMode !== 'add') {
+        return
+      }
+
+      loginInput.value = sanitizeWorkerLoginLocalPart(loginInput.value)
+      syncWorkerProfileEmailPreview()
+    })
   })
-  binding.add(document.getElementById('wkShowPassBtn'), 'click', () => {
+  binding.add(document.getElementById('wkShowPassBtn'), 'click', async () => {
     const passInput = document.getElementById('wkCurrentPass')
     const showButton = document.getElementById('wkShowPassBtn')
     if (!passInput || !showButton) {
@@ -31626,14 +32407,25 @@ function bindWorkerProfileViewFunctions() {
     }
 
     const show = passInput.type === 'password'
+    if (show && !passInput.value) {
+      const loadedPassword = await loadWorkerProfilePassword()
+      if (!loadedPassword) {
+        return
+      }
+    }
     passInput.type = show ? 'text' : 'password'
     showButton.textContent = show ? 'Ukryj' : 'Pokaż'
   })
   binding.add(document.getElementById('wkCopyPassBtn'), 'click', async () => {
     const passInput = document.getElementById('wkCurrentPass')
-    if (!passInput?.value) {
-      alert('Brak hasła do skopiowania.')
+    if (!passInput) {
       return
+    }
+    if (!passInput?.value) {
+      const loadedPassword = await loadWorkerProfilePassword()
+      if (!loadedPassword) {
+        return
+      }
     }
 
     try {

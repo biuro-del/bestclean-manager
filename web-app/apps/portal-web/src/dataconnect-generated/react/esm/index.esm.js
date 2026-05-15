@@ -1,4 +1,4 @@
-import { insertWorkerForOrgRef, updateWorkerForOrgRef, upsertOrgUiStyleForOrgRef, deleteOrgUiStyleForOrgRef, upsertMyUiStylePreferenceRef, deleteMyUiStylePreferenceRef, upsertUserUiStylePreferenceForOrgRef, deleteUserUiStylePreferenceForOrgRef, insertClientForOrgRef, updateClientForOrgRef, deleteClientForOrgRef, insertIndividualJobForOrgRef, updateIndividualJobForOrgRef, deleteIndividualJobForOrgRef, insertZoneForOrgRef, updateZoneForOrgRef, deleteZoneForOrgRef, insertWorkdayForOrgRef, updateWorkdayForOrgRef, deleteWorkdayForOrgRef, insertEventForOrgRef, updateEventForOrgRef, deleteEventForOrgRef, insertBackupCycleForOrgRef, updateBackupCycleForOrgRef, insertStorageForOrgRef, updateStorageForOrgRef, deleteStorageForOrgRef, insertClientStorageForOrgRef, updateClientStorageForOrgRef, deleteClientStorageForOrgRef, startWorkdayPauseRef, stopWorkdayPauseRef, myOrganizationsRef, orgUiStyleForOrgRef, myUiStylePreferenceRef, userUiStylePreferencesForOrgRef, workersForOrgRef, clientsForOrgRef, individualJobsForOrgRef, zonesForOrgRef, workdaysForOrgRef, backupCyclesForOrgRef, eventsForOrgRef, workerWorkdaysForOrgRef, storageForOrgRef, clientStorageForClientRef, clientStorageForOrgRef, workdayPausesForOrgRef, activeWorkdayPauseForWorkerRef, connectorConfig } from '../../esm/index.esm.js';
+import { insertWorkerForOrgRef, insertWorkerWithMembershipForOrgRef, updateWorkerForOrgRef, upsertWorkerCredentialForOrgRef, upsertOrgUiStyleForOrgRef, deleteOrgUiStyleForOrgRef, upsertMyUiStylePreferenceRef, deleteMyUiStylePreferenceRef, upsertUserUiStylePreferenceForOrgRef, deleteUserUiStylePreferenceForOrgRef, insertClientForOrgRef, updateClientForOrgRef, deleteClientForOrgRef, insertIndividualJobForOrgRef, updateIndividualJobForOrgRef, deleteIndividualJobForOrgRef, insertZoneForOrgRef, updateZoneForOrgRef, deleteZoneForOrgRef, insertWorkdayForOrgRef, updateWorkdayForOrgRef, deleteWorkdayForOrgRef, insertEventForOrgRef, updateEventForOrgRef, deleteEventForOrgRef, insertBackupCycleForOrgRef, updateBackupCycleForOrgRef, insertStorageForOrgRef, updateStorageForOrgRef, deleteStorageForOrgRef, insertClientStorageForOrgRef, updateClientStorageForOrgRef, deleteClientStorageForOrgRef, startWorkdayPauseRef, stopWorkdayPauseRef, myOrganizationsRef, orgUiStyleForOrgRef, myUiStylePreferenceRef, userUiStylePreferencesForOrgRef, canManageWorkersForOrgRef, workersForOrgRef, adminWorkerCredentialForOrgRef, clientsForOrgRef, individualJobsForOrgRef, zonesForOrgRef, workdaysForOrgRef, backupCyclesForOrgRef, eventsForOrgRef, workerWorkdaysForOrgRef, storageForOrgRef, clientStorageForClientRef, clientStorageForOrgRef, workdayPausesForOrgRef, activeWorkdayPauseForWorkerRef, connectorConfig } from '../../esm/index.esm.js';
 import { validateArgs, CallerSdkTypeEnum } from 'firebase/data-connect';
 import { useDataConnectQuery, useDataConnectMutation, validateReactArgs } from '@tanstack-query-firebase/react/data-connect';
 
@@ -10,10 +10,26 @@ export function useInsertWorkerForOrg(dcOrOptions, options) {
   return useDataConnectMutation(refFactory, inputOpts, CallerSdkTypeEnum.GeneratedReact);
 }
 
+export function useInsertWorkerWithMembershipForOrg(dcOrOptions, options) {
+  const { dc: dcInstance, vars: inputOpts } = validateArgs(connectorConfig, dcOrOptions, options);
+  function refFactory(vars) {
+    return insertWorkerWithMembershipForOrgRef(dcInstance, vars);
+  }
+  return useDataConnectMutation(refFactory, inputOpts, CallerSdkTypeEnum.GeneratedReact);
+}
+
 export function useUpdateWorkerForOrg(dcOrOptions, options) {
   const { dc: dcInstance, vars: inputOpts } = validateArgs(connectorConfig, dcOrOptions, options);
   function refFactory(vars) {
     return updateWorkerForOrgRef(dcInstance, vars);
+  }
+  return useDataConnectMutation(refFactory, inputOpts, CallerSdkTypeEnum.GeneratedReact);
+}
+
+export function useUpsertWorkerCredentialForOrg(dcOrOptions, options) {
+  const { dc: dcInstance, vars: inputOpts } = validateArgs(connectorConfig, dcOrOptions, options);
+  function refFactory(vars) {
+    return upsertWorkerCredentialForOrgRef(dcInstance, vars);
   }
   return useDataConnectMutation(refFactory, inputOpts, CallerSdkTypeEnum.GeneratedReact);
 }
@@ -291,9 +307,21 @@ export function useUserUiStylePreferencesForOrg(dcOrVars, varsOrOptions, options
   return useDataConnectQuery(ref, inputOpts, CallerSdkTypeEnum.GeneratedReact);
 }
 
+export function useCanManageWorkersForOrg(dcOrVars, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateReactArgs(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  const ref = canManageWorkersForOrgRef(dcInstance, inputVars);
+  return useDataConnectQuery(ref, inputOpts, CallerSdkTypeEnum.GeneratedReact);
+}
+
 export function useWorkersForOrg(dcOrVars, varsOrOptions, options) {
   const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateReactArgs(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
   const ref = workersForOrgRef(dcInstance, inputVars);
+  return useDataConnectQuery(ref, inputOpts, CallerSdkTypeEnum.GeneratedReact);
+}
+
+export function useAdminWorkerCredentialForOrg(dcOrVars, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateReactArgs(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  const ref = adminWorkerCredentialForOrgRef(dcInstance, inputVars);
   return useDataConnectQuery(ref, inputOpts, CallerSdkTypeEnum.GeneratedReact);
 }
 

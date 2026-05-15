@@ -16,6 +16,34 @@ function getPortalApiBase() {
   return normalizeApiBase(import.meta.env.VITE_ADMIN_API_BASE || '/api')
 }
 
+let scheduleOrdersEndpointUnavailable = false
+
+function isLocalDevRemoteDisabled() {
+  return import.meta.env.DEV && String(import.meta.env.VITE_DISABLE_PORTAL_SCHEDULE_REMOTE ?? '').trim() === '1'
+}
+
+function isPortalScheduleOrdersRouteUnavailable(message, status) {
+  const lowered = String(message ?? '').toLowerCase()
+  return (
+    Number(status) === 404 &&
+    (lowered.includes('portal/schedule-orders') || lowered.includes('schedule-orders')) &&
+    (lowered.includes('not implemented') || lowered.includes('not found') || lowered.includes('page not found'))
+  )
+}
+
+function shouldSkipPortalScheduleOrdersRemote() {
+  return isLocalDevRemoteDisabled() || scheduleOrdersEndpointUnavailable
+}
+
+function warnPortalScheduleOrdersUnavailable(action, message) {
+  console.warn(`[portal/schedule-orders] ${action} skipped; endpoint unavailable`, message)
+}
+
+function disablePortalScheduleOrdersEndpoint(action, message) {
+  scheduleOrdersEndpointUnavailable = true
+  warnPortalScheduleOrdersUnavailable(action, message)
+}
+
 async function parsePortalScheduleOrderApiError(response, fallbackMessage) {
   let rawText = ''
   try {
@@ -25,18 +53,33 @@ async function parsePortalScheduleOrderApiError(response, fallbackMessage) {
   }
 
   if (!rawText) {
-    return fallbackMessage
+    return {
+      message: fallbackMessage,
+      routeUnavailable: isPortalScheduleOrdersRouteUnavailable(fallbackMessage, response?.status),
+    }
   }
 
   if (/^\s*</.test(rawText)) {
-    return 'Endpoint zleceń grafiku zwrócił HTML zamiast JSON. Sprawdź lokalny backend/proxy /api/portal/schedule-orders.'
+    const message = 'Endpoint zlecen grafiku zwrocil HTML zamiast JSON. Sprawdz lokalny backend/proxy /api/portal/schedule-orders.'
+    return {
+      message,
+      routeUnavailable: isPortalScheduleOrdersRouteUnavailable(rawText, response?.status),
+    }
   }
 
   try {
     const body = JSON.parse(rawText)
-    return String(body?.error?.message ?? body?.message ?? fallbackMessage).trim() || fallbackMessage
+    const message = String(body?.error?.message ?? body?.message ?? fallbackMessage).trim() || fallbackMessage
+    return {
+      message,
+      routeUnavailable: isPortalScheduleOrdersRouteUnavailable(message, response?.status),
+    }
   } catch {
-    return rawText.slice(0, 500) || fallbackMessage
+    const message = rawText.slice(0, 500) || fallbackMessage
+    return {
+      message,
+      routeUnavailable: isPortalScheduleOrdersRouteUnavailable(message, response?.status),
+    }
   }
 }
 
@@ -48,7 +91,7 @@ async function portalScheduleOrderAuthHeaders() {
   const firebase = ensureFirebase()
   const currentUser = firebase?.auth?.currentUser
   if (!currentUser) {
-    throw new Error('Sesja wygasła. Zaloguj się ponownie.')
+    throw new Error('Sesja wygasla. Zaloguj sie ponownie.')
   }
 
   const idToken = await currentUser.getIdToken()
@@ -60,7 +103,7 @@ async function portalScheduleOrderAuthHeaders() {
 
 export async function fetchPortalScheduleOrders(orgId) {
   const normalizedOrgId = String(orgId ?? '').trim()
-  if (!normalizedOrgId) {
+  if (!normalizedOrgId || shouldSkipPortalScheduleOrdersRemote()) {
     return []
   }
 
@@ -71,8 +114,12 @@ export async function fetchPortalScheduleOrders(orgId) {
   })
 
   if (!response.ok) {
-    const message = await parsePortalScheduleOrderApiError(response, 'Nie udało się pobrać zleceń grafiku.')
-    throw new Error(message)
+    const error = await parsePortalScheduleOrderApiError(response, 'Nie udalo sie pobrac zlecen grafiku.')
+    if (error.routeUnavailable) {
+      disablePortalScheduleOrdersEndpoint('load', error.message)
+      return []
+    }
+    throw new Error(error.message)
   }
 
   const body = await response.json().catch(() => ({}))
@@ -81,11 +128,11 @@ export async function fetchPortalScheduleOrders(orgId) {
 
 export async function upsertPortalScheduleOrders(orgId, orders = []) {
   const normalizedOrgId = String(orgId ?? '').trim()
-  if (!normalizedOrgId) {
-    return []
+  const sourceOrders = Array.isArray(orders) ? orders : []
+  if (!normalizedOrgId || shouldSkipPortalScheduleOrdersRemote()) {
+    return sourceOrders
   }
 
-  const sourceOrders = Array.isArray(orders) ? orders : []
   const headers = await portalScheduleOrderAuthHeaders()
   const response = await fetch(`${getPortalApiBase()}/portal/schedule-orders`, {
     method: 'POST',
@@ -97,8 +144,12 @@ export async function upsertPortalScheduleOrders(orgId, orders = []) {
   })
 
   if (!response.ok) {
-    const message = await parsePortalScheduleOrderApiError(response, 'Nie udało się zapisać zleceń grafiku.')
-    throw new Error(message)
+    const error = await parsePortalScheduleOrderApiError(response, 'Nie udalo sie zapisac zlecen grafiku.')
+    if (error.routeUnavailable) {
+      disablePortalScheduleOrdersEndpoint('save', error.message)
+      return sourceOrders
+    }
+    throw new Error(error.message)
   }
 
   const body = await response.json().catch(() => ({}))
@@ -110,7 +161,7 @@ export async function deletePortalScheduleOrders(orgId, orderIds = []) {
   const ids = (Array.isArray(orderIds) ? orderIds : [])
     .map((value) => String(value ?? '').trim())
     .filter(Boolean)
-  if (!normalizedOrgId || !ids.length) {
+  if (!normalizedOrgId || !ids.length || shouldSkipPortalScheduleOrdersRemote()) {
     return []
   }
 
@@ -125,8 +176,12 @@ export async function deletePortalScheduleOrders(orgId, orderIds = []) {
   })
 
   if (!response.ok) {
-    const message = await parsePortalScheduleOrderApiError(response, 'Nie udało się usunąć zlecenia grafiku.')
-    throw new Error(message)
+    const error = await parsePortalScheduleOrderApiError(response, 'Nie udalo sie usunac zlecenia grafiku.')
+    if (error.routeUnavailable) {
+      disablePortalScheduleOrdersEndpoint('delete', error.message)
+      return ids
+    }
+    throw new Error(error.message)
   }
 
   const body = await response.json().catch(() => ({}))

@@ -6006,7 +6006,7 @@ textarea:focus{
 }
 
 /* =========================================================
-   Grafik pracy (embed Google Sheets)
+   Grafik pracy
    ========================================================= */
 #view-schedule{
   width: 100%;
@@ -6034,20 +6034,32 @@ textarea:focus{
   margin-bottom: 8px;
 }
 
-#view-schedule .schedule-embed-frame{
-  display: block;
+#view-schedule .schedule-embed-empty{
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
   width: 100%;
-  min-height: 72vh;
-  height: calc(100vh - 230px);
+  min-height: 240px;
   border: 1px solid #dbe7fb;
   border-radius: 12px;
-  background: #fff;
+  background: linear-gradient(135deg, rgba(105, 108, 255, .08), rgba(255, 255, 255, .96));
+  color: var(--ui-ink);
+  padding: 24px;
+}
+
+#view-schedule .schedule-embed-empty strong{
+  font-size: 18px;
+}
+
+#view-schedule .schedule-embed-empty span{
+  color: var(--ui-muted);
 }
 
 @media (max-width: 960px){
-  #view-schedule .schedule-embed-frame{
-    min-height: 68vh;
-    height: calc(100vh - 190px);
+  #view-schedule .schedule-embed-empty{
+    min-height: 180px;
+    padding: 18px;
   }
 }
 
@@ -21972,6 +21984,1618 @@ body{
   #portalRoot #view-orders .orders-editor-section + .orders-editor-section{
     border-left:0 !important;
     border-top:1px solid #e3ebf7 !important;
+  }
+}
+
+/* Orders: scoped Sneat-style editor refresh. */
+#portalRoot #view-orders .orders-modal.orders-modal--simple{
+  --orders-editor-bg:#f7f9ff;
+  --orders-editor-card:#ffffff;
+  --orders-editor-primary:#696cff;
+  --orders-editor-primary-hover:#5f61e6;
+  --orders-editor-primary-soft:rgba(105,108,255,.14);
+  --orders-editor-primary-faint:#eef2ff;
+  --orders-editor-heading:#384551;
+  --orders-editor-text:#566a7f;
+  --orders-editor-muted:#8a99ab;
+  --orders-editor-line:rgba(67,89,113,.12);
+  --orders-editor-line-strong:rgba(67,89,113,.2);
+  --orders-editor-shadow:0 .25rem 1rem rgba(161,172,184,.35);
+  --orders-editor-shadow-soft:0 .16rem .56rem rgba(67,89,113,.08);
+  background:var(--orders-editor-bg) !important;
+  border:1px solid var(--orders-editor-line) !important;
+  box-shadow:0 18px 48px rgba(67,89,113,.24) !important;
+  color:var(--orders-editor-text) !important;
+  font-family:"Public Sans", "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple *,
+#portalRoot #view-orders .orders-modal--simple *::before,
+#portalRoot #view-orders .orders-modal--simple *::after{
+  box-sizing:border-box;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-modal-head{
+  background:rgba(255,255,255,.98) !important;
+  border-bottom:1px solid var(--orders-editor-line) !important;
+  gap:16px !important;
+  padding:14px 24px 12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-modal-titlebar{
+  align-items:center !important;
+  display:flex !important;
+  flex:1 1 auto !important;
+  gap:16px !important;
+  justify-content:space-between !important;
+  min-width:0 !important;
+  width:auto !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-modal-controls{
+  flex:0 0 auto !important;
+  margin-left:auto !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-modal-head h2{
+  color:#0f3d2f !important;
+  font-size:22px !important;
+  font-weight:800 !important;
+  letter-spacing:0 !important;
+  margin:0 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-modal-head-actions{
+  align-items:center !important;
+  display:flex !important;
+  flex:0 0 auto !important;
+  gap:12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-modal-head-actions span,
+#portalRoot #view-orders .orders-modal--simple .orders-modal-footer span{
+  color:#d32222 !important;
+  font-size:12px !important;
+  font-weight:700 !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-save-btn,
+#portalRoot #view-orders .orders-modal--simple .orders-address-save,
+#portalRoot #view-orders .orders-modal--simple .orders-inline-add button,
+#portalRoot #view-orders .orders-modal--simple #ordersDeviceNoteAdd,
+#portalRoot #view-orders .orders-modal--simple #ordersSubtaskAdd,
+#portalRoot #view-orders .orders-modal--simple #ordersSupplyAdd{
+  background:var(--orders-editor-primary) !important;
+  border:1px solid var(--orders-editor-primary) !important;
+  border-radius:6px !important;
+  box-shadow:0 2px 6px rgba(105,108,255,.32) !important;
+  color:#fff !important;
+  cursor:pointer !important;
+  font-size:13px !important;
+  font-weight:700 !important;
+  min-height:36px !important;
+  padding:0 16px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-save-btn:hover,
+#portalRoot #view-orders .orders-modal--simple .orders-address-save:hover,
+#portalRoot #view-orders .orders-modal--simple .orders-inline-add button:hover{
+  background:var(--orders-editor-primary-hover) !important;
+  border-color:var(--orders-editor-primary-hover) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-modal-close{
+  align-items:center !important;
+  background:#fff !important;
+  border:1px solid var(--orders-editor-line) !important;
+  border-radius:6px !important;
+  box-shadow:none !important;
+  color:#a1acb8 !important;
+  display:flex !important;
+  font-size:20px !important;
+  font-weight:500 !important;
+  height:34px !important;
+  justify-content:center !important;
+  line-height:1 !important;
+  padding:0 !important;
+  position:static !important;
+  right:auto !important;
+  top:auto !important;
+  width:34px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-modal-close:hover{
+  background:#f5f5f9 !important;
+  color:#566a7f !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-tab-panel.is-active{
+  background:var(--orders-editor-bg) !important;
+  padding:14px 24px 18px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-editor-layout{
+  display:grid !important;
+  gap:14px !important;
+  grid-column:1 / -1 !important;
+  margin:0 auto !important;
+  max-width:960px !important;
+  width:100% !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-main-card,
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card{
+  background:var(--orders-editor-card) !important;
+  border:1px solid var(--orders-editor-line) !important;
+  border-radius:8px !important;
+  box-shadow:var(--orders-editor-shadow-soft) !important;
+  margin:0 !important;
+  max-width:none !important;
+  overflow:visible !important;
+  padding:14px !important;
+  width:100% !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-panel-title{
+  border-bottom:1px solid var(--orders-editor-line) !important;
+  color:var(--orders-editor-primary) !important;
+  font-size:14px !important;
+  font-weight:800 !important;
+  margin:0 0 12px !important;
+  padding:0 0 10px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-editor-table{
+  background:#fff !important;
+  border:1px solid var(--orders-editor-line) !important;
+  border-radius:8px !important;
+  display:grid !important;
+  grid-template-columns:repeat(2, minmax(0, 1fr)) !important;
+  overflow:visible !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-editor-section{
+  display:grid !important;
+  gap:11px !important;
+  min-width:0 !important;
+  padding:14px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-editor-section + .orders-editor-section{
+  border-top:0 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-editor-section--address{
+  border-left:1px solid var(--orders-editor-line) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-editor-section--assignment{
+  border-top:1px solid var(--orders-editor-line) !important;
+  grid-column:1 / -1 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-editor-section h3{
+  color:var(--orders-editor-primary) !important;
+  font-size:13px !important;
+  font-weight:800 !important;
+  letter-spacing:0 !important;
+  margin:0 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-field{
+  color:#25384f !important;
+  display:grid !important;
+  font-size:12px !important;
+  font-weight:700 !important;
+  gap:6px !important;
+  margin:0 !important;
+  min-width:0 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-field > span,
+#portalRoot #view-orders .orders-modal--simple .orders-location-field > label,
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-weekdays > span,
+#portalRoot #view-orders .orders-modal--simple .orders-editor-repeat > span{
+  color:#25384f !important;
+  font-size:12px !important;
+  font-weight:700 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple :is(input, select, textarea),
+#portalRoot #view-orders .orders-modal--simple .orders-worker-picker summary{
+  background:#fff !important;
+  border:1px solid var(--orders-editor-line-strong) !important;
+  border-radius:6px !important;
+  box-shadow:none !important;
+  color:#25384f !important;
+  font-family:inherit !important;
+  font-size:13px !important;
+  font-weight:600 !important;
+  min-height:38px !important;
+  outline:none !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple :is(input, select){
+  padding:0 12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple textarea{
+  min-height:86px !important;
+  padding:10px 12px !important;
+  resize:vertical !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple :is(input, select, textarea):focus,
+#portalRoot #view-orders .orders-modal--simple .orders-worker-picker[open] summary{
+  border-color:var(--orders-editor-primary) !important;
+  box-shadow:0 0 0 3px var(--orders-editor-primary-soft) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple #ordersEditClient[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker{
+  min-width:0 !important;
+  position:relative !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple #ordersClientPickerInput{
+  padding-right:34px !important;
+  width:100% !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker::after{
+  border-bottom:2px solid #566a7f !important;
+  border-right:2px solid #566a7f !important;
+  content:"" !important;
+  height:7px !important;
+  pointer-events:none !important;
+  position:absolute !important;
+  right:14px !important;
+  top:17px !important;
+  transform:rotate(45deg) !important;
+  width:7px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker:has(#ordersClientPickerInput[aria-expanded="true"])::after{
+  top:19px !important;
+  transform:rotate(225deg) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker-list{
+  background:#fff !important;
+  border:1px solid rgba(105,108,255,.28) !important;
+  border-radius:8px !important;
+  box-shadow:0 14px 34px rgba(67,89,113,.18) !important;
+  display:grid !important;
+  gap:2px !important;
+  left:0 !important;
+  max-height:248px !important;
+  overflow:auto !important;
+  padding:8px 6px !important;
+  position:absolute !important;
+  right:0 !important;
+  top:calc(100% + 8px) !important;
+  z-index:60 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker-list[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker-list::-webkit-scrollbar{
+  width:10px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker-list::-webkit-scrollbar-track{
+  background:#f3f6fb !important;
+  border-radius:999px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker-list::-webkit-scrollbar-thumb{
+  background:#8d98a7 !important;
+  border:2px solid #f3f6fb !important;
+  border-radius:999px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker-option{
+  align-items:center !important;
+  background:#fff !important;
+  border:0 !important;
+  border-radius:8px !important;
+  box-shadow:none !important;
+  color:#25384f !important;
+  cursor:pointer !important;
+  display:grid !important;
+  font-family:inherit !important;
+  font-size:12px !important;
+  line-height:1.2 !important;
+  gap:10px !important;
+  grid-template-columns:minmax(0, 1fr) auto !important;
+  min-height:42px !important;
+  padding:0 12px !important;
+  text-align:left !important;
+  width:100% !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker-option span{
+  font-family:inherit !important;
+  font-size:12px !important;
+  font-weight:700 !important;
+  line-height:1.2 !important;
+  min-width:0 !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker-option small{
+  color:#53647d !important;
+  font-family:inherit !important;
+  font-size:11px !important;
+  font-weight:600 !important;
+  line-height:1.2 !important;
+  min-width:48px !important;
+  text-align:right !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker-option:is(:hover, :focus-visible, .is-active){
+  background:#efecff !important;
+  color:#1f2f49 !important;
+  outline:none !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker-option--new{
+  border-top:1px solid var(--orders-editor-line) !important;
+  color:var(--orders-editor-primary) !important;
+  margin-top:4px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-client-picker-empty{
+  color:#8a99ab !important;
+  font-size:12px !important;
+  font-weight:700 !important;
+  padding:10px 12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple :is(#ordersEditRepeatPreset, #ordersEditRepeatUnit)[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-picker{
+  min-width:0 !important;
+  position:relative !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-toggle{
+  align-items:center !important;
+  background:#fff !important;
+  border:1px solid var(--orders-editor-line-strong) !important;
+  border-radius:6px !important;
+  box-shadow:none !important;
+  color:#25384f !important;
+  cursor:pointer !important;
+  display:flex !important;
+  font-family:inherit !important;
+  font-size:13px !important;
+  font-weight:600 !important;
+  height:38px !important;
+  justify-content:flex-start !important;
+  line-height:1.2 !important;
+  min-height:38px !important;
+  outline:none !important;
+  overflow:hidden !important;
+  padding:0 34px 0 12px !important;
+  position:relative !important;
+  text-align:left !important;
+  width:100% !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-toggle > span{
+  min-width:0 !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-toggle:is(:hover, :focus-visible),
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-toggle[aria-expanded="true"]{
+  border-color:var(--orders-editor-primary) !important;
+  box-shadow:0 0 0 3px var(--orders-editor-primary-soft) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-toggle:disabled{
+  background:#f7f9fc !important;
+  color:#a1acb8 !important;
+  cursor:not-allowed !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-picker::after{
+  border-bottom:2px solid #566a7f !important;
+  border-right:2px solid #566a7f !important;
+  content:"" !important;
+  height:7px !important;
+  pointer-events:none !important;
+  position:absolute !important;
+  right:14px !important;
+  top:15px !important;
+  transform:rotate(45deg) !important;
+  width:7px !important;
+  z-index:1 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-picker:has(.orders-repeat-select-toggle[aria-expanded="true"])::after{
+  top:17px !important;
+  transform:rotate(225deg) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-picker.is-disabled::after{
+  border-color:#a1acb8 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-list{
+  background:#fff !important;
+  border:1px solid rgba(105,108,255,.28) !important;
+  border-radius:8px !important;
+  box-shadow:0 14px 34px rgba(67,89,113,.18) !important;
+  display:grid !important;
+  gap:2px !important;
+  left:0 !important;
+  max-height:248px !important;
+  overflow:auto !important;
+  padding:8px 6px !important;
+  position:absolute !important;
+  right:0 !important;
+  top:calc(100% + 8px) !important;
+  z-index:70 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-list[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-list::-webkit-scrollbar{
+  width:10px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-list::-webkit-scrollbar-track{
+  background:#f3f6fb !important;
+  border-radius:999px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-list::-webkit-scrollbar-thumb{
+  background:#8d98a7 !important;
+  border:2px solid #f3f6fb !important;
+  border-radius:999px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-select-option{
+  grid-template-columns:minmax(0, 1fr) !important;
+  min-height:34px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple :is(input, textarea)::placeholder{
+  color:#a1acb8 !important;
+  font-weight:600 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple :is(input, select):disabled,
+#portalRoot #view-orders .orders-modal--simple input[readonly]{
+  background:#f7f9fc !important;
+  color:#a1acb8 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-field-hint{
+  color:#63768f !important;
+  font-size:11px !important;
+  font-weight:600 !important;
+  line-height:1.45 !important;
+  margin:0 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-form-two{
+  display:grid !important;
+  gap:10px !important;
+  grid-template-columns:repeat(2, minmax(0, 1fr)) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-location-field{
+  background:#fff !important;
+  border:1px solid var(--orders-editor-line) !important;
+  border-radius:8px !important;
+  gap:8px !important;
+  padding:10px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-location-combo{
+  display:grid !important;
+  gap:8px !important;
+  grid-template-columns:minmax(0, 1fr) auto !important;
+  position:relative !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-location-suggestions{
+  background:#fff !important;
+  border:1px solid var(--orders-editor-line-strong) !important;
+  border-radius:8px !important;
+  box-shadow:var(--orders-editor-shadow) !important;
+  grid-column:1 / -1 !important;
+  max-height:220px !important;
+  overflow:auto !important;
+  z-index:12 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-worker-picker .orders-worker-checklist{
+  border-color:var(--orders-editor-line-strong) !important;
+  border-radius:8px !important;
+  box-shadow:var(--orders-editor-shadow) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-rules{
+  display:grid !important;
+  gap:12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-mode{
+  background:#f5f6ff !important;
+  border:1px solid var(--orders-editor-line) !important;
+  border-radius:8px !important;
+  display:grid !important;
+  gap:4px !important;
+  grid-template-columns:repeat(2, minmax(0, 1fr)) !important;
+  padding:4px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-mode label{
+  align-items:center !important;
+  border-radius:6px !important;
+  color:#697a8d !important;
+  display:flex !important;
+  font-size:12px !important;
+  font-weight:800 !important;
+  justify-content:center !important;
+  min-height:32px !important;
+  padding:0 10px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-mode label:has(input:checked){
+  background:var(--orders-editor-primary) !important;
+  box-shadow:0 2px 6px rgba(105,108,255,.28) !important;
+  color:#fff !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-repeat{
+  background:#fff !important;
+  border:1px solid var(--orders-editor-line) !important;
+  border-radius:8px !important;
+  display:grid !important;
+  gap:12px !important;
+  padding:12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-repeat.is-disabled{
+  background:#f8f9fc !important;
+  border-style:dashed !important;
+  opacity:.7 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-config{
+  align-items:end !important;
+  display:grid !important;
+  gap:10px !important;
+  grid-template-columns:minmax(0, 1fr) minmax(220px, .72fr) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-custom,
+#portalRoot #view-orders .orders-modal--simple .orders-editor-repeat > div{
+  align-items:center !important;
+  display:grid !important;
+  gap:8px !important;
+  grid-template-columns:auto minmax(78px, .45fr) minmax(130px, .55fr) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-custom{
+  align-self:end !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-custom > span{
+  align-items:center !important;
+  align-self:center !important;
+  color:#697a8d !important;
+  display:flex !important;
+  font-size:12px !important;
+  font-weight:700 !important;
+  height:38px !important;
+  justify-content:center !important;
+  min-width:22px !important;
+  padding:0 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-weekdays{
+  display:grid !important;
+  gap:8px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-weekday-grid{
+  display:grid !important;
+  gap:7px !important;
+  grid-template-columns:repeat(7, minmax(0, 1fr)) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-weekday-grid label{
+  align-items:center !important;
+  background:#fff !important;
+  border:1px solid var(--orders-editor-line) !important;
+  border-radius:6px !important;
+  color:#566a7f !important;
+  display:flex !important;
+  flex-direction:column !important;
+  font-size:12px !important;
+  font-weight:800 !important;
+  gap:4px !important;
+  justify-content:center !important;
+  min-height:42px !important;
+  padding:6px 2px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-weekday-grid input{
+  accent-color:var(--orders-editor-primary) !important;
+  height:14px !important;
+  min-height:14px !important;
+  padding:0 !important;
+  width:14px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar{
+  background:#fff !important;
+  border:1px solid var(--orders-editor-line) !important;
+  border-radius:8px !important;
+  box-shadow:0 .16rem .56rem rgba(67,89,113,.06) !important;
+  display:grid !important;
+  gap:10px !important;
+  padding:12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar.is-disabled{
+  opacity:.68 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-head{
+  align-items:center !important;
+  display:grid !important;
+  grid-template-columns:32px minmax(0, 1fr) 32px !important;
+  gap:8px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-head strong{
+  color:var(--orders-editor-heading) !important;
+  font-size:14px !important;
+  font-weight:700 !important;
+  text-align:center !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-head button{
+  align-items:center !important;
+  background:#fff !important;
+  border:1px solid var(--orders-editor-line) !important;
+  border-radius:6px !important;
+  color:#697a8d !important;
+  cursor:pointer !important;
+  display:flex !important;
+  font-size:20px !important;
+  height:32px !important;
+  justify-content:center !important;
+  line-height:1 !important;
+  padding:0 !important;
+  width:32px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-head button:hover{
+  background:var(--orders-editor-primary-faint) !important;
+  border-color:rgba(105,108,255,.32) !important;
+  color:var(--orders-editor-primary) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-weekdays,
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-grid{
+  display:grid !important;
+  gap:4px !important;
+  grid-template-columns:repeat(7, minmax(0, 1fr)) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-weekdays span{
+  color:#566a7f !important;
+  font-size:11px !important;
+  font-weight:700 !important;
+  line-height:24px !important;
+  text-align:center !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-day{
+  align-items:center !important;
+  border:1px solid transparent !important;
+  border-radius:8px !important;
+  color:#25384f !important;
+  display:flex !important;
+  font-size:12px !important;
+  font-weight:600 !important;
+  height:31px !important;
+  justify-content:center !important;
+  min-width:0 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-day.is-muted{
+  color:#a1acb8 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-day.is-today{
+  border-color:#93c5fd !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-day.is-occurrence{
+  background:#e8f0ff !important;
+  color:#4f52d8 !important;
+  font-weight:800 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-day.is-start{
+  background:var(--orders-editor-primary) !important;
+  box-shadow:0 4px 10px rgba(105,108,255,.26) !important;
+  color:#fff !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-foot{
+  align-items:center !important;
+  border-top:1px solid var(--orders-editor-line) !important;
+  color:#697a8d !important;
+  display:flex !important;
+  flex-wrap:wrap !important;
+  font-size:11px !important;
+  font-weight:700 !important;
+  gap:8px 14px !important;
+  justify-content:space-between !important;
+  padding-top:9px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-foot span{
+  align-items:center !important;
+  display:inline-flex !important;
+  gap:6px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-foot strong{
+  color:#4f52d8 !important;
+  font-size:11px !important;
+  font-weight:800 !important;
+  margin-left:auto !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-dot{
+  background:#e8f0ff !important;
+  border:1px solid #cdd9ff !important;
+  border-radius:999px !important;
+  display:inline-block !important;
+  height:10px !important;
+  width:10px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-dot--start{
+  background:var(--orders-editor-primary) !important;
+  border-color:var(--orders-editor-primary) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty{
+  align-items:stretch !important;
+  background:#f8f9fc !important;
+  border:1px solid var(--orders-editor-line) !important;
+  border-radius:8px !important;
+  color:#697a8d !important;
+  display:grid !important;
+  gap:7px !important;
+  min-height:0 !important;
+  padding:10px !important;
+  text-align:left !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row{
+  display:grid !important;
+  gap:8px !important;
+  grid-template-columns:minmax(0, 1.3fr) repeat(2, minmax(0, .85fr)) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row :is(strong, span),
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-note{
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-grid,
+#portalRoot #view-orders .orders-modal--simple .orders-subtask-grid{
+  display:grid !important;
+  gap:12px !important;
+  grid-template-columns:repeat(2, minmax(0, 1fr)) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-description,
+#portalRoot #view-orders .orders-modal--simple .orders-worker-comment{
+  margin:0 !important;
+  max-width:none !important;
+  width:100% !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-device-panel,
+#portalRoot #view-orders .orders-modal--simple .orders-subtask-box{
+  background:#fff !important;
+  border:1px solid var(--orders-editor-line) !important;
+  border-radius:8px !important;
+  display:grid !important;
+  gap:10px !important;
+  padding:12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-device-panel{
+  margin-top:12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-subtask-grid{
+  margin-top:12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-subtask-head{
+  align-items:center !important;
+  color:var(--orders-editor-heading) !important;
+  display:flex !important;
+  font-size:13px !important;
+  font-weight:800 !important;
+  justify-content:space-between !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-inline-add{
+  display:grid !important;
+  gap:8px !important;
+  grid-template-columns:minmax(0, 1fr) auto !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-inline-add--device,
+#portalRoot #view-orders .orders-modal--simple .orders-inline-add--supply{
+  grid-template-columns:minmax(120px, .4fr) minmax(0, 1fr) auto !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-device-notes,
+#portalRoot #view-orders .orders-modal--simple .orders-simple-list{
+  display:grid !important;
+  gap:7px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-modal-footer{
+  align-items:center !important;
+  background:#fff !important;
+  border:1px solid var(--orders-editor-line) !important;
+  border-radius:8px !important;
+  display:flex !important;
+  justify-content:flex-end !important;
+  margin:0 auto !important;
+  max-width:960px !important;
+  padding:10px 12px !important;
+  width:100% !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-editor-layout,
+#portalRoot #view-orders .orders-modal--simple .orders-modal-footer{
+  max-width:1180px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-editor-layout{
+  gap:22px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-row){
+  align-items:center !important;
+  background:#fff !important;
+  border:1px solid rgba(67,89,113,.12) !important;
+  border-radius:8px !important;
+  box-shadow:0 10px 28px rgba(67,89,113,.14) !important;
+  display:grid !important;
+  gap:10px 18px !important;
+  grid-template-columns:44px minmax(0, 1fr) !important;
+  grid-template-rows:auto auto !important;
+  margin:2px auto 0 !important;
+  max-width:900px !important;
+  min-height:112px !important;
+  padding:18px 24px !important;
+  position:relative !important;
+  width:100% !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-row)::before{
+  background:#f0edff !important;
+  border-radius:8px !important;
+  box-shadow:inset 0 0 0 1px rgba(105,108,255,.08) !important;
+  content:"" !important;
+  grid-column:1 !important;
+  grid-row:1 / span 2 !important;
+  height:42px !important;
+  width:42px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-row)::after{
+  border:2px solid var(--orders-editor-primary) !important;
+  border-radius:4px !important;
+  box-shadow:0 -5px 0 -3px var(--orders-editor-primary) inset !important;
+  content:"" !important;
+  grid-column:1 !important;
+  grid-row:1 / span 2 !important;
+  height:18px !important;
+  justify-self:center !important;
+  width:18px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-row) .orders-schedule-preview-row{
+  align-items:center !important;
+  grid-column:2 !important;
+  grid-row:1 !important;
+  grid-template-columns:minmax(0, 1.05fr) repeat(2, minmax(0, .78fr)) !important;
+  gap:32px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-row) .orders-schedule-preview-row strong{
+  color:#0b1535 !important;
+  font-size:15px !important;
+  font-weight:800 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-row) .orders-schedule-preview-row span{
+  color:#41516b !important;
+  font-size:14px !important;
+  font-weight:700 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-row) .orders-schedule-preview-note{
+  background:#efedff !important;
+  border:0 !important;
+  border-radius:8px !important;
+  color:var(--orders-editor-primary) !important;
+  font-size:14px !important;
+  font-weight:800 !important;
+  grid-column:2 !important;
+  grid-row:2 !important;
+  justify-self:start !important;
+  margin:0 !important;
+  padding:9px 14px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card{
+  border-color:rgba(67,89,113,.14) !important;
+  box-shadow:0 8px 28px rgba(67,89,113,.14) !important;
+  padding:22px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-panel-title{
+  border-bottom:1px solid rgba(67,89,113,.18) !important;
+  color:#0b1535 !important;
+  font-size:20px !important;
+  font-weight:800 !important;
+  margin:0 0 24px !important;
+  padding:0 0 14px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-detail-grid{
+  gap:24px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-field > span,
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-subtask-head{
+  color:#0b1535 !important;
+  font-size:15px !important;
+  font-weight:800 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-worker-comment > span small{
+  color:#7f8ba2 !important;
+  font-size:13px !important;
+  font-weight:700 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card textarea{
+  border-radius:8px !important;
+  font-size:15px !important;
+  min-height:118px !important;
+  padding:16px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card :is(input, select){
+  border-radius:8px !important;
+  font-size:14px !important;
+  min-height:48px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-device-panel,
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-subtask-box{
+  border-color:rgba(67,89,113,.16) !important;
+  border-radius:8px !important;
+  gap:16px !important;
+  padding:20px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-device-panel{
+  margin-top:24px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-subtask-grid{
+  gap:24px !important;
+  margin-top:24px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add{
+  align-items:center !important;
+  gap:14px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add--simple{
+  grid-template-columns:minmax(0, 1fr) 96px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add--supply{
+  grid-template-columns:140px minmax(0, 1fr) 96px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add--device{
+  grid-template-columns:minmax(240px, 360px) 108px !important;
+  justify-content:start !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add button{
+  background:linear-gradient(135deg, #5271f2 0%, #7b5cf6 100%) !important;
+  border:0 !important;
+  border-radius:8px !important;
+  box-shadow:0 5px 14px rgba(105,108,255,.28) !important;
+  font-size:14px !important;
+  min-height:48px !important;
+  min-width:96px !important;
+  padding:0 16px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card #ordersDeviceNoteAdd{
+  justify-self:start !important;
+  min-width:108px !important;
+  width:108px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-simple-list-empty{
+  align-items:center !important;
+  background:#fbfcff !important;
+  border:1px dashed #cfd8ee !important;
+  border-radius:8px !important;
+  color:#71809a !important;
+  display:flex !important;
+  font-size:14px !important;
+  font-weight:700 !important;
+  gap:14px !important;
+  min-height:64px !important;
+  padding:14px 18px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-simple-list-empty::before{
+  background:#f0edff !important;
+  border-radius:8px !important;
+  box-shadow:inset 0 0 0 1px rgba(105,108,255,.1) !important;
+  content:"" !important;
+  flex:0 0 auto !important;
+  height:34px !important;
+  width:34px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-modal-footer{
+  box-shadow:0 8px 24px rgba(67,89,113,.12) !important;
+  gap:18px !important;
+  min-height:76px !important;
+  padding:14px 16px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-modal-footer .orders-save-btn{
+  border-radius:8px !important;
+  font-size:15px !important;
+  min-height:48px !important;
+  min-width:106px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-panel-title{
+  color:var(--orders-editor-primary) !important;
+  font-size:14px !important;
+  margin:0 0 16px !important;
+  padding:0 0 10px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-field > span{
+  color:#25384f !important;
+  font-size:12px !important;
+  font-weight:700 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-subtask-head{
+  color:var(--orders-editor-heading) !important;
+  font-size:13px !important;
+  font-weight:800 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-worker-comment > span small{
+  color:#697a8d !important;
+  font-size:12px !important;
+  font-weight:600 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card textarea{
+  font-size:13px !important;
+  min-height:92px !important;
+  padding:10px 12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card :is(input, select){
+  font-size:13px !important;
+  min-height:38px !important;
+  padding:0 12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add button{
+  border-radius:6px !important;
+  font-size:13px !important;
+  min-height:36px !important;
+  min-width:82px !important;
+  padding:0 14px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card #ordersDeviceNoteAdd{
+  min-width:82px !important;
+  width:82px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add--simple{
+  grid-template-columns:minmax(0, 1fr) 82px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add--supply{
+  grid-template-columns:120px minmax(0, 1fr) 82px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add--device{
+  grid-template-columns:minmax(200px, 360px) 82px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-simple-list-empty{
+  font-size:12px !important;
+  gap:10px !important;
+  min-height:56px !important;
+  padding:12px 14px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-simple-list-empty::before{
+  height:30px !important;
+  width:30px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-modal-footer{
+  min-height:62px !important;
+  padding:10px 12px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-modal-footer .orders-save-btn{
+  border-radius:6px !important;
+  font-size:13px !important;
+  min-height:36px !important;
+  min-width:82px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-icon){
+  grid-template-columns:1fr !important;
+  grid-template-rows:auto !important;
+  min-height:84px !important;
+  padding:14px 18px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-icon)::before,
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-icon)::after{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary{
+  align-items:center !important;
+  display:grid !important;
+  gap:14px !important;
+  grid-column:1 !important;
+  grid-row:1 !important;
+  grid-template-columns:42px minmax(150px, 1fr) minmax(260px, 1.35fr) auto !important;
+  width:100% !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-icon{
+  align-items:center !important;
+  background:#f0edff !important;
+  border-radius:8px !important;
+  box-shadow:inset 0 0 0 1px rgba(105,108,255,.1) !important;
+  display:flex !important;
+  height:42px !important;
+  justify-content:center !important;
+  overflow:visible !important;
+  position:relative !important;
+  width:42px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-icon::before{
+  border:2px solid var(--orders-editor-primary) !important;
+  border-radius:4px !important;
+  content:"" !important;
+  height:18px !important;
+  width:18px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-icon::after{
+  background:var(--orders-editor-primary) !important;
+  border-radius:999px !important;
+  box-shadow:7px 0 0 var(--orders-editor-primary), 0 7px 0 rgba(105,108,255,.35), 7px 7px 0 rgba(105,108,255,.35) !important;
+  content:"" !important;
+  height:3px !important;
+  position:absolute !important;
+  width:3px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-main{
+  display:grid !important;
+  gap:3px !important;
+  min-width:0 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary .orders-schedule-preview-main strong{
+  color:#0b1535 !important;
+  font-size:13px !important;
+  font-weight:800 !important;
+  line-height:1.25 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary .orders-schedule-preview-main span{
+  color:#697a8d !important;
+  font-size:12px !important;
+  font-weight:700 !important;
+  line-height:1.25 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-range{
+  align-items:center !important;
+  display:grid !important;
+  gap:10px !important;
+  grid-template-columns:repeat(2, minmax(0, 1fr)) !important;
+  min-width:0 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-range span{
+  background:#f8f9fc !important;
+  border:1px solid var(--orders-editor-line) !important;
+  border-radius:8px !important;
+  display:grid !important;
+  gap:3px !important;
+  min-width:0 !important;
+  padding:8px 10px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-range em{
+  color:#8a99ab !important;
+  font-size:10px !important;
+  font-style:normal !important;
+  font-weight:800 !important;
+  letter-spacing:0 !important;
+  line-height:1 !important;
+  text-transform:uppercase !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-range strong{
+  color:#25384f !important;
+  font-size:13px !important;
+  font-weight:700 !important;
+  line-height:1.2 !important;
+  min-width:0 !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary .orders-schedule-preview-note{
+  grid-column:auto !important;
+  grid-row:auto !important;
+  justify-self:end !important;
+  margin:0 !important;
+  max-width:170px !important;
+  padding:8px 11px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-icon){
+  align-items:center !important;
+  box-shadow:0 10px 30px rgba(67,89,113,.12) !important;
+  min-height:118px !important;
+  padding:26px 34px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary{
+  align-items:center !important;
+  column-gap:34px !important;
+  display:grid !important;
+  grid-template-columns:76px minmax(220px, 1fr) minmax(390px, .95fr) !important;
+  grid-template-rows:auto auto !important;
+  row-gap:10px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-icon{
+  align-self:center !important;
+  background:linear-gradient(180deg, #f7f5ff 0%, #f0edff 100%) !important;
+  border:1px solid rgba(105,108,255,.18) !important;
+  border-radius:14px !important;
+  box-shadow:0 10px 24px rgba(105,108,255,.1), inset 0 0 0 1px rgba(255,255,255,.68) !important;
+  color:var(--orders-editor-primary) !important;
+  grid-column:1 !important;
+  grid-row:1 / span 2 !important;
+  height:76px !important;
+  width:76px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-icon::before,
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-icon::after{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-icon svg{
+  display:block !important;
+  fill:none !important;
+  height:34px !important;
+  overflow:visible !important;
+  stroke:currentColor !important;
+  stroke-linecap:round !important;
+  stroke-linejoin:round !important;
+  stroke-width:2.4 !important;
+  width:34px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-main{
+  align-self:end !important;
+  grid-column:2 !important;
+  grid-row:1 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary .orders-schedule-preview-main strong{
+  color:#0b1535 !important;
+  font-size:22px !important;
+  font-weight:800 !important;
+  line-height:1.12 !important;
+  overflow:visible !important;
+  white-space:normal !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary .orders-schedule-preview-main span{
+  color:#566a7f !important;
+  font-size:16px !important;
+  font-weight:700 !important;
+  line-height:1.2 !important;
+  overflow:visible !important;
+  white-space:normal !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary .orders-schedule-preview-note{
+  align-self:start !important;
+  background:#f0edff !important;
+  border:0 !important;
+  border-radius:14px !important;
+  color:var(--orders-editor-primary) !important;
+  font-size:16px !important;
+  font-weight:800 !important;
+  grid-column:2 !important;
+  grid-row:2 !important;
+  justify-self:start !important;
+  line-height:1 !important;
+  margin:0 !important;
+  max-width:none !important;
+  overflow:visible !important;
+  padding:12px 20px !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-range{
+  align-self:center !important;
+  grid-column:3 !important;
+  grid-row:1 / span 2 !important;
+  gap:16px !important;
+  grid-template-columns:repeat(2, minmax(180px, 1fr)) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-range span{
+  background:#fff !important;
+  border:1px solid rgba(67,89,113,.16) !important;
+  border-radius:12px !important;
+  box-shadow:0 4px 14px rgba(67,89,113,.05) !important;
+  gap:8px !important;
+  min-height:72px !important;
+  overflow:visible !important;
+  padding:14px 18px !important;
+  white-space:normal !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-range em{
+  color:#7f8ba2 !important;
+  font-size:12px !important;
+  font-weight:800 !important;
+  line-height:1 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-range strong{
+  color:#0b1535 !important;
+  font-size:16px !important;
+  font-weight:800 !important;
+  line-height:1.15 !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-icon) .orders-schedule-preview-row--summary{
+  column-gap:24px !important;
+  grid-column:1 !important;
+  grid-row:1 !important;
+  grid-template-columns:76px minmax(0, 1fr) minmax(308px, .86fr) !important;
+  min-width:0 !important;
+  overflow:hidden !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-icon) .orders-schedule-preview-main{
+  min-width:0 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-icon) .orders-schedule-preview-range{
+  gap:12px !important;
+  grid-template-columns:repeat(2, minmax(0, 1fr)) !important;
+  min-width:0 !important;
+  width:100% !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-icon) .orders-schedule-preview-range span{
+  min-width:0 !important;
+  padding:12px 14px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-icon) .orders-schedule-preview-range strong{
+  font-size:13px !important;
+  letter-spacing:0 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-icon) .orders-schedule-preview-row--summary{
+  column-gap:22px !important;
+  grid-template-columns:58px minmax(0, 1fr) minmax(308px, .86fr) !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-icon) .orders-schedule-preview-icon{
+  border-radius:10px !important;
+  height:58px !important;
+  width:58px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-icon) .orders-schedule-preview-icon svg{
+  height:26px !important;
+  width:26px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary .orders-schedule-preview-main .orders-schedule-preview-worker{
+  color:#697a8d !important;
+  display:block !important;
+  font-size:12px !important;
+  font-weight:700 !important;
+  line-height:1.25 !important;
+  overflow:visible !important;
+  white-space:normal !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-hidden-fields{
+  display:none !important;
+}
+
+@media (max-width:900px){
+  #portalRoot #view-orders .orders-modal--simple .orders-editor-table,
+  #portalRoot #view-orders .orders-modal--simple .orders-detail-grid,
+  #portalRoot #view-orders .orders-modal--simple .orders-subtask-grid,
+  #portalRoot #view-orders .orders-modal--simple .orders-repeat-config{
+    grid-template-columns:1fr !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-editor-section--address{
+    border-left:0 !important;
+    border-top:1px solid var(--orders-editor-line) !important;
+  }
+}
+
+@media (max-width:760px){
+  #portalRoot #view-orders .orders-modal.orders-modal--simple{
+    border-radius:10px !important;
+    max-height:calc(100vh - 12px) !important;
+    width:calc(100vw - 12px) !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-tab-panel.is-active{
+    padding:12px !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-modal-titlebar{
+    align-items:flex-start !important;
+    flex-direction:column !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-modal-controls{
+    margin-left:0 !important;
+    width:100% !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-modal-head-actions{
+    padding-right:0 !important;
+    width:100% !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-form-two,
+  #portalRoot #view-orders .orders-modal--simple .orders-location-combo,
+  #portalRoot #view-orders .orders-modal--simple .orders-schedule-custom,
+  #portalRoot #view-orders .orders-modal--simple .orders-editor-repeat > div,
+  #portalRoot #view-orders .orders-modal--simple .orders-inline-add,
+  #portalRoot #view-orders .orders-modal--simple .orders-inline-add--device,
+  #portalRoot #view-orders .orders-modal--simple .orders-inline-add--supply,
+  #portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row{
+    grid-template-columns:1fr !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add--simple,
+  #portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add--device,
+  #portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add--supply{
+    grid-template-columns:1fr !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-detail-card #ordersDeviceNoteAdd{
+    justify-self:stretch !important;
+    width:100% !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-row){
+    grid-template-columns:1fr !important;
+    padding:16px !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-row)::before,
+  #portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-row)::after{
+    display:none !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-row) .orders-schedule-preview-row,
+  #portalRoot #view-orders .orders-modal--simple .orders-schedule-empty:has(.orders-schedule-preview-row) .orders-schedule-preview-note{
+    grid-column:1 !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary{
+    grid-template-columns:42px minmax(0, 1fr) !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary .orders-schedule-preview-range,
+  #portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary .orders-schedule-preview-note{
+    grid-column:1 / -1 !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary .orders-schedule-preview-note{
+    justify-self:start !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-range{
+    grid-template-columns:1fr !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-weekday-grid{
+    gap:5px !important;
+  }
+
+  #portalRoot #view-orders .orders-modal--simple .orders-repeat-calendar-day{
+    border-radius:7px !important;
+    height:28px !important;
   }
 }
 

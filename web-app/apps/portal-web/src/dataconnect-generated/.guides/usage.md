@@ -12,12 +12,16 @@ For each operation, there is a wrapper hook that can be used to call the operati
 
 Here are all of the hooks that get generated:
 ```ts
-import { useInsertWorkerForOrg, useUpdateWorkerForOrg, useUpsertOrgUiStyleForOrg, useDeleteOrgUiStyleForOrg, useUpsertMyUiStylePreference, useDeleteMyUiStylePreference, useUpsertUserUiStylePreferenceForOrg, useDeleteUserUiStylePreferenceForOrg, useInsertClientForOrg, useUpdateClientForOrg } from '@dataconnect/generated/react';
+import { useInsertWorkerForOrg, useInsertWorkerWithMembershipForOrg, useUpdateWorkerForOrg, useUpsertWorkerCredentialForOrg, useUpsertOrgUiStyleForOrg, useDeleteOrgUiStyleForOrg, useUpsertMyUiStylePreference, useDeleteMyUiStylePreference, useUpsertUserUiStylePreferenceForOrg, useDeleteUserUiStylePreferenceForOrg } from '@dataconnect/generated/react';
 // The types of these hooks are available in react/index.d.ts
 
 const { data, isPending, isSuccess, isError, error } = useInsertWorkerForOrg(insertWorkerForOrgVars);
 
+const { data, isPending, isSuccess, isError, error } = useInsertWorkerWithMembershipForOrg(insertWorkerWithMembershipForOrgVars);
+
 const { data, isPending, isSuccess, isError, error } = useUpdateWorkerForOrg(updateWorkerForOrgVars);
+
+const { data, isPending, isSuccess, isError, error } = useUpsertWorkerCredentialForOrg(upsertWorkerCredentialForOrgVars);
 
 const { data, isPending, isSuccess, isError, error } = useUpsertOrgUiStyleForOrg(upsertOrgUiStyleForOrgVars);
 
@@ -30,10 +34,6 @@ const { data, isPending, isSuccess, isError, error } = useDeleteMyUiStylePrefere
 const { data, isPending, isSuccess, isError, error } = useUpsertUserUiStylePreferenceForOrg(upsertUserUiStylePreferenceForOrgVars);
 
 const { data, isPending, isSuccess, isError, error } = useDeleteUserUiStylePreferenceForOrg(deleteUserUiStylePreferenceForOrgVars);
-
-const { data, isPending, isSuccess, isError, error } = useInsertClientForOrg(insertClientForOrgVars);
-
-const { data, isPending, isSuccess, isError, error } = useUpdateClientForOrg(updateClientForOrgVars);
 
 ```
 
@@ -72,14 +72,20 @@ If a user is not using a supported framework, they can use the generated SDK dir
 Here's an example of how to use it with the first 5 operations:
 
 ```js
-import { insertWorkerForOrg, updateWorkerForOrg, upsertOrgUiStyleForOrg, deleteOrgUiStyleForOrg, upsertMyUiStylePreference, deleteMyUiStylePreference, upsertUserUiStylePreferenceForOrg, deleteUserUiStylePreferenceForOrg, insertClientForOrg, updateClientForOrg } from '@dataconnect/generated';
+import { insertWorkerForOrg, insertWorkerWithMembershipForOrg, updateWorkerForOrg, upsertWorkerCredentialForOrg, upsertOrgUiStyleForOrg, deleteOrgUiStyleForOrg, upsertMyUiStylePreference, deleteMyUiStylePreference, upsertUserUiStylePreferenceForOrg, deleteUserUiStylePreferenceForOrg } from '@dataconnect/generated';
 
 
 // Operation InsertWorkerForOrg:  For variables, look at type InsertWorkerForOrgVars in ../index.d.ts
 const { data } = await InsertWorkerForOrg(dataConnect, insertWorkerForOrgVars);
 
+// Operation InsertWorkerWithMembershipForOrg:  For variables, look at type InsertWorkerWithMembershipForOrgVars in ../index.d.ts
+const { data } = await InsertWorkerWithMembershipForOrg(dataConnect, insertWorkerWithMembershipForOrgVars);
+
 // Operation UpdateWorkerForOrg:  For variables, look at type UpdateWorkerForOrgVars in ../index.d.ts
 const { data } = await UpdateWorkerForOrg(dataConnect, updateWorkerForOrgVars);
+
+// Operation UpsertWorkerCredentialForOrg:  For variables, look at type UpsertWorkerCredentialForOrgVars in ../index.d.ts
+const { data } = await UpsertWorkerCredentialForOrg(dataConnect, upsertWorkerCredentialForOrgVars);
 
 // Operation UpsertOrgUiStyleForOrg:  For variables, look at type UpsertOrgUiStyleForOrgVars in ../index.d.ts
 const { data } = await UpsertOrgUiStyleForOrg(dataConnect, upsertOrgUiStyleForOrgVars);
@@ -98,12 +104,6 @@ const { data } = await UpsertUserUiStylePreferenceForOrg(dataConnect, upsertUser
 
 // Operation DeleteUserUiStylePreferenceForOrg:  For variables, look at type DeleteUserUiStylePreferenceForOrgVars in ../index.d.ts
 const { data } = await DeleteUserUiStylePreferenceForOrg(dataConnect, deleteUserUiStylePreferenceForOrgVars);
-
-// Operation InsertClientForOrg:  For variables, look at type InsertClientForOrgVars in ../index.d.ts
-const { data } = await InsertClientForOrg(dataConnect, insertClientForOrgVars);
-
-// Operation UpdateClientForOrg:  For variables, look at type UpdateClientForOrgVars in ../index.d.ts
-const { data } = await UpdateClientForOrg(dataConnect, updateClientForOrgVars);
 
 
 ```

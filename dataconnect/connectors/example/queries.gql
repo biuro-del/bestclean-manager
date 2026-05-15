@@ -62,6 +62,13 @@ query UserUiStylePreferencesForOrg($orgId: String!) @auth(level: USER) {
   }
 }
 
+query CanManageWorkersForOrg($orgId: String!) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do dodawania pracownikow.")
+    }
+}
+
 query WorkersForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
@@ -73,6 +80,7 @@ query WorkersForOrg($orgId: String!) @auth(level: USER) {
     workerId
     workerName
     loginEmail
+    authUid
     role
     active
     email
@@ -81,6 +89,33 @@ query WorkersForOrg($orgId: String!) @auth(level: USER) {
     edit
     createdAt
     updatedAt
+  }
+}
+
+query AdminWorkerCredentialForOrg($orgId: String!, $login: String!) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      role @check(expr: "this in ['ADMIN']", message: "Brak uprawnien do podgladu hasla pracownika.")
+    }
+
+  worker(key: { orgId: $orgId, login: $login })
+    @check(expr: "this != null", message: "Nie znaleziono pracownika w tej organizacji.") {
+      login
+      workerName
+      loginEmail
+      email
+      authUid
+  }
+
+  workerCredential(key: { orgId: $orgId, login: $login }) {
+    orgId
+    login
+    encryptedPassword
+    iv
+    authTag
+    algorithm
+    updatedAt
+    updatedBy
   }
 }
 

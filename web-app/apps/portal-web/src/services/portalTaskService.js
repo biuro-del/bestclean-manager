@@ -16,6 +16,34 @@ function getPortalApiBase() {
   return normalizeApiBase(import.meta.env.VITE_ADMIN_API_BASE || '/api')
 }
 
+let portalTasksEndpointUnavailable = false
+
+function isLocalDevRemoteDisabled() {
+  return import.meta.env.DEV && String(import.meta.env.VITE_DISABLE_PORTAL_TASKS_REMOTE ?? '').trim() === '1'
+}
+
+function isPortalTasksRouteUnavailable(message, status) {
+  const lowered = String(message ?? '').toLowerCase()
+  return (
+    Number(status) === 404 &&
+    (lowered.includes('portal/tasks') || lowered.includes('/tasks')) &&
+    (lowered.includes('not implemented') || lowered.includes('not found') || lowered.includes('page not found'))
+  )
+}
+
+function shouldSkipPortalTasksRemote() {
+  return isLocalDevRemoteDisabled() || portalTasksEndpointUnavailable
+}
+
+function warnPortalTasksUnavailable(action, message) {
+  console.warn(`[portal/tasks] ${action} skipped; endpoint unavailable`, message)
+}
+
+function disablePortalTasksEndpoint(action, message) {
+  portalTasksEndpointUnavailable = true
+  warnPortalTasksUnavailable(action, message)
+}
+
 async function parsePortalTaskApiError(response, fallbackMessage) {
   let rawText = ''
   try {
@@ -25,18 +53,33 @@ async function parsePortalTaskApiError(response, fallbackMessage) {
   }
 
   if (!rawText) {
-    return fallbackMessage
+    return {
+      message: fallbackMessage,
+      routeUnavailable: isPortalTasksRouteUnavailable(fallbackMessage, response?.status),
+    }
   }
 
   if (/^\s*</.test(rawText)) {
-    return 'Endpoint zadań portalu zwrócił HTML zamiast JSON. Sprawdź lokalny backend/proxy /api/portal/tasks.'
+    const message = 'Endpoint zadan portalu zwrocil HTML zamiast JSON. Sprawdz lokalny backend/proxy /api/portal/tasks.'
+    return {
+      message,
+      routeUnavailable: isPortalTasksRouteUnavailable(rawText, response?.status),
+    }
   }
 
   try {
     const body = JSON.parse(rawText)
-    return String(body?.error?.message ?? body?.message ?? fallbackMessage).trim() || fallbackMessage
+    const message = String(body?.error?.message ?? body?.message ?? fallbackMessage).trim() || fallbackMessage
+    return {
+      message,
+      routeUnavailable: isPortalTasksRouteUnavailable(message, response?.status),
+    }
   } catch {
-    return rawText.slice(0, 500) || fallbackMessage
+    const message = rawText.slice(0, 500) || fallbackMessage
+    return {
+      message,
+      routeUnavailable: isPortalTasksRouteUnavailable(message, response?.status),
+    }
   }
 }
 
@@ -48,7 +91,7 @@ async function portalTaskAuthHeaders() {
   const firebase = ensureFirebase()
   const currentUser = firebase?.auth?.currentUser
   if (!currentUser) {
-    throw new Error('Sesja wygasła. Zaloguj się ponownie.')
+    throw new Error('Sesja wygasla. Zaloguj sie ponownie.')
   }
 
   const idToken = await currentUser.getIdToken()
@@ -60,7 +103,7 @@ async function portalTaskAuthHeaders() {
 
 export async function fetchPortalTasks(orgId) {
   const normalizedOrgId = String(orgId ?? '').trim()
-  if (!normalizedOrgId) {
+  if (!normalizedOrgId || shouldSkipPortalTasksRemote()) {
     return []
   }
 
@@ -71,8 +114,12 @@ export async function fetchPortalTasks(orgId) {
   })
 
   if (!response.ok) {
-    const message = await parsePortalTaskApiError(response, 'Nie udało się pobrać zadań portalu.')
-    throw new Error(message)
+    const error = await parsePortalTaskApiError(response, 'Nie udalo sie pobrac zadan portalu.')
+    if (error.routeUnavailable) {
+      disablePortalTasksEndpoint('load', error.message)
+      return []
+    }
+    throw new Error(error.message)
   }
 
   const body = await response.json().catch(() => ({}))
@@ -81,11 +128,11 @@ export async function fetchPortalTasks(orgId) {
 
 export async function upsertPortalTasks(orgId, tasks = []) {
   const normalizedOrgId = String(orgId ?? '').trim()
-  if (!normalizedOrgId) {
-    return []
+  const sourceTasks = Array.isArray(tasks) ? tasks : []
+  if (!normalizedOrgId || shouldSkipPortalTasksRemote()) {
+    return sourceTasks
   }
 
-  const sourceTasks = Array.isArray(tasks) ? tasks : []
   const headers = await portalTaskAuthHeaders()
   const response = await fetch(`${getPortalApiBase()}/portal/tasks`, {
     method: 'POST',
@@ -97,8 +144,12 @@ export async function upsertPortalTasks(orgId, tasks = []) {
   })
 
   if (!response.ok) {
-    const message = await parsePortalTaskApiError(response, 'Nie udało się zapisać zadań portalu.')
-    throw new Error(message)
+    const error = await parsePortalTaskApiError(response, 'Nie udalo sie zapisac zadan portalu.')
+    if (error.routeUnavailable) {
+      disablePortalTasksEndpoint('save', error.message)
+      return sourceTasks
+    }
+    throw new Error(error.message)
   }
 
   const body = await response.json().catch(() => ({}))
@@ -110,7 +161,7 @@ export async function deletePortalTasks(orgId, taskIds = []) {
   const ids = (Array.isArray(taskIds) ? taskIds : [])
     .map((value) => String(value ?? '').trim())
     .filter(Boolean)
-  if (!normalizedOrgId || !ids.length) {
+  if (!normalizedOrgId || !ids.length || shouldSkipPortalTasksRemote()) {
     return []
   }
 
@@ -125,8 +176,12 @@ export async function deletePortalTasks(orgId, taskIds = []) {
   })
 
   if (!response.ok) {
-    const message = await parsePortalTaskApiError(response, 'Nie udało się usunąć zadania portalu.')
-    throw new Error(message)
+    const error = await parsePortalTaskApiError(response, 'Nie udalo sie usunac zadania portalu.')
+    if (error.routeUnavailable) {
+      disablePortalTasksEndpoint('delete', error.message)
+      return ids
+    }
+    throw new Error(error.message)
   }
 
   const body = await response.json().catch(() => ({}))

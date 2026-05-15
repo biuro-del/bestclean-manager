@@ -14,7 +14,9 @@ This README will guide you through the process of using the generated JavaScript
   - [*OrgUiStyleForOrg*](#orguistylefororg)
   - [*MyUiStylePreference*](#myuistylepreference)
   - [*UserUiStylePreferencesForOrg*](#useruistylepreferencesfororg)
+  - [*CanManageWorkersForOrg*](#canmanageworkersfororg)
   - [*WorkersForOrg*](#workersfororg)
+  - [*AdminWorkerCredentialForOrg*](#adminworkercredentialfororg)
   - [*ClientsForOrg*](#clientsfororg)
   - [*IndividualJobsForOrg*](#individualjobsfororg)
   - [*ZonesForOrg*](#zonesfororg)
@@ -29,7 +31,9 @@ This README will guide you through the process of using the generated JavaScript
   - [*ActiveWorkdayPauseForWorker*](#activeworkdaypauseforworker)
 - [**Mutations**](#mutations)
   - [*InsertWorkerForOrg*](#insertworkerfororg)
+  - [*InsertWorkerWithMembershipForOrg*](#insertworkerwithmembershipfororg)
   - [*UpdateWorkerForOrg*](#updateworkerfororg)
+  - [*UpsertWorkerCredentialForOrg*](#upsertworkercredentialfororg)
   - [*UpsertOrgUiStyleForOrg*](#upsertorguistylefororg)
   - [*DeleteOrgUiStyleForOrg*](#deleteorguistylefororg)
   - [*UpsertMyUiStylePreference*](#upsertmyuistylepreference)
@@ -110,7 +114,7 @@ Below are examples of how to use the `example` connector's generated functions t
 ## MyOrganizations
 You can execute the `MyOrganizations` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-myOrganizations(): QueryPromise<MyOrganizationsData, undefined>;
+myOrganizations(options?: ExecuteQueryOptions): QueryPromise<MyOrganizationsData, undefined>;
 
 interface MyOrganizationsRef {
   ...
@@ -121,7 +125,7 @@ export const myOrganizationsRef: MyOrganizationsRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-myOrganizations(dc: DataConnect): QueryPromise<MyOrganizationsData, undefined>;
+myOrganizations(dc: DataConnect, options?: ExecuteQueryOptions): QueryPromise<MyOrganizationsData, undefined>;
 
 interface MyOrganizationsRef {
   ...
@@ -209,7 +213,7 @@ executeQuery(ref).then((response) => {
 ## OrgUiStyleForOrg
 You can execute the `OrgUiStyleForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-orgUiStyleForOrg(vars: OrgUiStyleForOrgVariables): QueryPromise<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
+orgUiStyleForOrg(vars: OrgUiStyleForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
 
 interface OrgUiStyleForOrgRef {
   ...
@@ -220,7 +224,7 @@ export const orgUiStyleForOrgRef: OrgUiStyleForOrgRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-orgUiStyleForOrg(dc: DataConnect, vars: OrgUiStyleForOrgVariables): QueryPromise<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
+orgUiStyleForOrg(dc: DataConnect, vars: OrgUiStyleForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
 
 interface OrgUiStyleForOrgRef {
   ...
@@ -323,7 +327,7 @@ executeQuery(ref).then((response) => {
 ## MyUiStylePreference
 You can execute the `MyUiStylePreference` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-myUiStylePreference(vars: MyUiStylePreferenceVariables): QueryPromise<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
+myUiStylePreference(vars: MyUiStylePreferenceVariables, options?: ExecuteQueryOptions): QueryPromise<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
 
 interface MyUiStylePreferenceRef {
   ...
@@ -334,7 +338,7 @@ export const myUiStylePreferenceRef: MyUiStylePreferenceRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-myUiStylePreference(dc: DataConnect, vars: MyUiStylePreferenceVariables): QueryPromise<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
+myUiStylePreference(dc: DataConnect, vars: MyUiStylePreferenceVariables, options?: ExecuteQueryOptions): QueryPromise<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
 
 interface MyUiStylePreferenceRef {
   ...
@@ -438,7 +442,7 @@ executeQuery(ref).then((response) => {
 ## UserUiStylePreferencesForOrg
 You can execute the `UserUiStylePreferencesForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-userUiStylePreferencesForOrg(vars: UserUiStylePreferencesForOrgVariables): QueryPromise<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
+userUiStylePreferencesForOrg(vars: UserUiStylePreferencesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
 
 interface UserUiStylePreferencesForOrgRef {
   ...
@@ -449,7 +453,7 @@ export const userUiStylePreferencesForOrgRef: UserUiStylePreferencesForOrgRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-userUiStylePreferencesForOrg(dc: DataConnect, vars: UserUiStylePreferencesForOrgVariables): QueryPromise<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
+userUiStylePreferencesForOrg(dc: DataConnect, vars: UserUiStylePreferencesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
 
 interface UserUiStylePreferencesForOrgRef {
   ...
@@ -550,10 +554,121 @@ executeQuery(ref).then((response) => {
 });
 ```
 
+## CanManageWorkersForOrg
+You can execute the `CanManageWorkersForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+canManageWorkersForOrg(vars: CanManageWorkersForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<CanManageWorkersForOrgData, CanManageWorkersForOrgVariables>;
+
+interface CanManageWorkersForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CanManageWorkersForOrgVariables): QueryRef<CanManageWorkersForOrgData, CanManageWorkersForOrgVariables>;
+}
+export const canManageWorkersForOrgRef: CanManageWorkersForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+canManageWorkersForOrg(dc: DataConnect, vars: CanManageWorkersForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<CanManageWorkersForOrgData, CanManageWorkersForOrgVariables>;
+
+interface CanManageWorkersForOrgRef {
+  ...
+  (dc: DataConnect, vars: CanManageWorkersForOrgVariables): QueryRef<CanManageWorkersForOrgData, CanManageWorkersForOrgVariables>;
+}
+export const canManageWorkersForOrgRef: CanManageWorkersForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the canManageWorkersForOrgRef:
+```typescript
+const name = canManageWorkersForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `CanManageWorkersForOrg` query requires an argument of type `CanManageWorkersForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface CanManageWorkersForOrgVariables {
+  orgId: string;
+}
+```
+### Return Type
+Recall that executing the `CanManageWorkersForOrg` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `CanManageWorkersForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface CanManageWorkersForOrgData {
+  organizationMember?: {
+    role: string;
+  };
+}
+```
+### Using `CanManageWorkersForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, canManageWorkersForOrg, CanManageWorkersForOrgVariables } from '@dataconnect/generated';
+
+// The `CanManageWorkersForOrg` query requires an argument of type `CanManageWorkersForOrgVariables`:
+const canManageWorkersForOrgVars: CanManageWorkersForOrgVariables = {
+  orgId: ..., 
+};
+
+// Call the `canManageWorkersForOrg()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await canManageWorkersForOrg(canManageWorkersForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await canManageWorkersForOrg({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await canManageWorkersForOrg(dataConnect, canManageWorkersForOrgVars);
+
+console.log(data.organizationMember);
+
+// Or, you can use the `Promise` API.
+canManageWorkersForOrg(canManageWorkersForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.organizationMember);
+});
+```
+
+### Using `CanManageWorkersForOrg`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, canManageWorkersForOrgRef, CanManageWorkersForOrgVariables } from '@dataconnect/generated';
+
+// The `CanManageWorkersForOrg` query requires an argument of type `CanManageWorkersForOrgVariables`:
+const canManageWorkersForOrgVars: CanManageWorkersForOrgVariables = {
+  orgId: ..., 
+};
+
+// Call the `canManageWorkersForOrgRef()` function to get a reference to the query.
+const ref = canManageWorkersForOrgRef(canManageWorkersForOrgVars);
+// Variables can be defined inline as well.
+const ref = canManageWorkersForOrgRef({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = canManageWorkersForOrgRef(dataConnect, canManageWorkersForOrgVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.organizationMember);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.organizationMember);
+});
+```
+
 ## WorkersForOrg
 You can execute the `WorkersForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-workersForOrg(vars: WorkersForOrgVariables): QueryPromise<WorkersForOrgData, WorkersForOrgVariables>;
+workersForOrg(vars: WorkersForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkersForOrgData, WorkersForOrgVariables>;
 
 interface WorkersForOrgRef {
   ...
@@ -564,7 +679,7 @@ export const workersForOrgRef: WorkersForOrgRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-workersForOrg(dc: DataConnect, vars: WorkersForOrgVariables): QueryPromise<WorkersForOrgData, WorkersForOrgVariables>;
+workersForOrg(dc: DataConnect, vars: WorkersForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkersForOrgData, WorkersForOrgVariables>;
 
 interface WorkersForOrgRef {
   ...
@@ -598,6 +713,7 @@ export interface WorkersForOrgData {
     workerId?: string | null;
     workerName?: string | null;
     loginEmail?: string | null;
+    authUid?: string | null;
     role?: string | null;
     active?: boolean | null;
     email?: string | null;
@@ -672,10 +788,142 @@ executeQuery(ref).then((response) => {
 });
 ```
 
+## AdminWorkerCredentialForOrg
+You can execute the `AdminWorkerCredentialForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+adminWorkerCredentialForOrg(vars: AdminWorkerCredentialForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
+
+interface AdminWorkerCredentialForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: AdminWorkerCredentialForOrgVariables): QueryRef<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
+}
+export const adminWorkerCredentialForOrgRef: AdminWorkerCredentialForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+adminWorkerCredentialForOrg(dc: DataConnect, vars: AdminWorkerCredentialForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
+
+interface AdminWorkerCredentialForOrgRef {
+  ...
+  (dc: DataConnect, vars: AdminWorkerCredentialForOrgVariables): QueryRef<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
+}
+export const adminWorkerCredentialForOrgRef: AdminWorkerCredentialForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the adminWorkerCredentialForOrgRef:
+```typescript
+const name = adminWorkerCredentialForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `AdminWorkerCredentialForOrg` query requires an argument of type `AdminWorkerCredentialForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface AdminWorkerCredentialForOrgVariables {
+  orgId: string;
+  login: string;
+}
+```
+### Return Type
+Recall that executing the `AdminWorkerCredentialForOrg` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `AdminWorkerCredentialForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface AdminWorkerCredentialForOrgData {
+  worker?: {
+    login: string;
+    workerName?: string | null;
+    loginEmail?: string | null;
+    email?: string | null;
+    authUid?: string | null;
+  };
+    workerCredential?: {
+      orgId: string;
+      login: string;
+      encryptedPassword: string;
+      iv: string;
+      authTag: string;
+      algorithm: string;
+      updatedAt: TimestampString;
+      updatedBy?: string | null;
+    } & WorkerCredential_Key;
+}
+```
+### Using `AdminWorkerCredentialForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, adminWorkerCredentialForOrg, AdminWorkerCredentialForOrgVariables } from '@dataconnect/generated';
+
+// The `AdminWorkerCredentialForOrg` query requires an argument of type `AdminWorkerCredentialForOrgVariables`:
+const adminWorkerCredentialForOrgVars: AdminWorkerCredentialForOrgVariables = {
+  orgId: ..., 
+  login: ..., 
+};
+
+// Call the `adminWorkerCredentialForOrg()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await adminWorkerCredentialForOrg(adminWorkerCredentialForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await adminWorkerCredentialForOrg({ orgId: ..., login: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await adminWorkerCredentialForOrg(dataConnect, adminWorkerCredentialForOrgVars);
+
+console.log(data.worker);
+console.log(data.workerCredential);
+
+// Or, you can use the `Promise` API.
+adminWorkerCredentialForOrg(adminWorkerCredentialForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.worker);
+  console.log(data.workerCredential);
+});
+```
+
+### Using `AdminWorkerCredentialForOrg`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, adminWorkerCredentialForOrgRef, AdminWorkerCredentialForOrgVariables } from '@dataconnect/generated';
+
+// The `AdminWorkerCredentialForOrg` query requires an argument of type `AdminWorkerCredentialForOrgVariables`:
+const adminWorkerCredentialForOrgVars: AdminWorkerCredentialForOrgVariables = {
+  orgId: ..., 
+  login: ..., 
+};
+
+// Call the `adminWorkerCredentialForOrgRef()` function to get a reference to the query.
+const ref = adminWorkerCredentialForOrgRef(adminWorkerCredentialForOrgVars);
+// Variables can be defined inline as well.
+const ref = adminWorkerCredentialForOrgRef({ orgId: ..., login: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = adminWorkerCredentialForOrgRef(dataConnect, adminWorkerCredentialForOrgVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.worker);
+console.log(data.workerCredential);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.worker);
+  console.log(data.workerCredential);
+});
+```
+
 ## ClientsForOrg
 You can execute the `ClientsForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-clientsForOrg(vars: ClientsForOrgVariables): QueryPromise<ClientsForOrgData, ClientsForOrgVariables>;
+clientsForOrg(vars: ClientsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<ClientsForOrgData, ClientsForOrgVariables>;
 
 interface ClientsForOrgRef {
   ...
@@ -686,7 +934,7 @@ export const clientsForOrgRef: ClientsForOrgRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-clientsForOrg(dc: DataConnect, vars: ClientsForOrgVariables): QueryPromise<ClientsForOrgData, ClientsForOrgVariables>;
+clientsForOrg(dc: DataConnect, vars: ClientsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<ClientsForOrgData, ClientsForOrgVariables>;
 
 interface ClientsForOrgRef {
   ...
@@ -798,7 +1046,7 @@ executeQuery(ref).then((response) => {
 ## IndividualJobsForOrg
 You can execute the `IndividualJobsForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-individualJobsForOrg(vars: IndividualJobsForOrgVariables): QueryPromise<IndividualJobsForOrgData, IndividualJobsForOrgVariables>;
+individualJobsForOrg(vars: IndividualJobsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<IndividualJobsForOrgData, IndividualJobsForOrgVariables>;
 
 interface IndividualJobsForOrgRef {
   ...
@@ -809,7 +1057,7 @@ export const individualJobsForOrgRef: IndividualJobsForOrgRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-individualJobsForOrg(dc: DataConnect, vars: IndividualJobsForOrgVariables): QueryPromise<IndividualJobsForOrgData, IndividualJobsForOrgVariables>;
+individualJobsForOrg(dc: DataConnect, vars: IndividualJobsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<IndividualJobsForOrgData, IndividualJobsForOrgVariables>;
 
 interface IndividualJobsForOrgRef {
   ...
@@ -917,7 +1165,7 @@ executeQuery(ref).then((response) => {
 ## ZonesForOrg
 You can execute the `ZonesForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-zonesForOrg(vars: ZonesForOrgVariables): QueryPromise<ZonesForOrgData, ZonesForOrgVariables>;
+zonesForOrg(vars: ZonesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<ZonesForOrgData, ZonesForOrgVariables>;
 
 interface ZonesForOrgRef {
   ...
@@ -928,7 +1176,7 @@ export const zonesForOrgRef: ZonesForOrgRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-zonesForOrg(dc: DataConnect, vars: ZonesForOrgVariables): QueryPromise<ZonesForOrgData, ZonesForOrgVariables>;
+zonesForOrg(dc: DataConnect, vars: ZonesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<ZonesForOrgData, ZonesForOrgVariables>;
 
 interface ZonesForOrgRef {
   ...
@@ -1034,7 +1282,7 @@ executeQuery(ref).then((response) => {
 ## WorkdaysForOrg
 You can execute the `WorkdaysForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-workdaysForOrg(vars: WorkdaysForOrgVariables): QueryPromise<WorkdaysForOrgData, WorkdaysForOrgVariables>;
+workdaysForOrg(vars: WorkdaysForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysForOrgData, WorkdaysForOrgVariables>;
 
 interface WorkdaysForOrgRef {
   ...
@@ -1045,7 +1293,7 @@ export const workdaysForOrgRef: WorkdaysForOrgRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-workdaysForOrg(dc: DataConnect, vars: WorkdaysForOrgVariables): QueryPromise<WorkdaysForOrgData, WorkdaysForOrgVariables>;
+workdaysForOrg(dc: DataConnect, vars: WorkdaysForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysForOrgData, WorkdaysForOrgVariables>;
 
 interface WorkdaysForOrgRef {
   ...
@@ -1163,7 +1411,7 @@ executeQuery(ref).then((response) => {
 ## BackupCyclesForOrg
 You can execute the `BackupCyclesForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-backupCyclesForOrg(vars: BackupCyclesForOrgVariables): QueryPromise<BackupCyclesForOrgData, BackupCyclesForOrgVariables>;
+backupCyclesForOrg(vars: BackupCyclesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<BackupCyclesForOrgData, BackupCyclesForOrgVariables>;
 
 interface BackupCyclesForOrgRef {
   ...
@@ -1174,7 +1422,7 @@ export const backupCyclesForOrgRef: BackupCyclesForOrgRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-backupCyclesForOrg(dc: DataConnect, vars: BackupCyclesForOrgVariables): QueryPromise<BackupCyclesForOrgData, BackupCyclesForOrgVariables>;
+backupCyclesForOrg(dc: DataConnect, vars: BackupCyclesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<BackupCyclesForOrgData, BackupCyclesForOrgVariables>;
 
 interface BackupCyclesForOrgRef {
   ...
@@ -1285,7 +1533,7 @@ executeQuery(ref).then((response) => {
 ## EventsForOrg
 You can execute the `EventsForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-eventsForOrg(vars: EventsForOrgVariables): QueryPromise<EventsForOrgData, EventsForOrgVariables>;
+eventsForOrg(vars: EventsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsForOrgData, EventsForOrgVariables>;
 
 interface EventsForOrgRef {
   ...
@@ -1296,7 +1544,7 @@ export const eventsForOrgRef: EventsForOrgRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-eventsForOrg(dc: DataConnect, vars: EventsForOrgVariables): QueryPromise<EventsForOrgData, EventsForOrgVariables>;
+eventsForOrg(dc: DataConnect, vars: EventsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsForOrgData, EventsForOrgVariables>;
 
 interface EventsForOrgRef {
   ...
@@ -1422,7 +1670,7 @@ executeQuery(ref).then((response) => {
 ## WorkerWorkdaysForOrg
 You can execute the `WorkerWorkdaysForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-workerWorkdaysForOrg(vars: WorkerWorkdaysForOrgVariables): QueryPromise<WorkerWorkdaysForOrgData, WorkerWorkdaysForOrgVariables>;
+workerWorkdaysForOrg(vars: WorkerWorkdaysForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkerWorkdaysForOrgData, WorkerWorkdaysForOrgVariables>;
 
 interface WorkerWorkdaysForOrgRef {
   ...
@@ -1433,7 +1681,7 @@ export const workerWorkdaysForOrgRef: WorkerWorkdaysForOrgRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-workerWorkdaysForOrg(dc: DataConnect, vars: WorkerWorkdaysForOrgVariables): QueryPromise<WorkerWorkdaysForOrgData, WorkerWorkdaysForOrgVariables>;
+workerWorkdaysForOrg(dc: DataConnect, vars: WorkerWorkdaysForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkerWorkdaysForOrgData, WorkerWorkdaysForOrgVariables>;
 
 interface WorkerWorkdaysForOrgRef {
   ...
@@ -1554,7 +1802,7 @@ executeQuery(ref).then((response) => {
 ## StorageForOrg
 You can execute the `StorageForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-storageForOrg(vars: StorageForOrgVariables): QueryPromise<StorageForOrgData, StorageForOrgVariables>;
+storageForOrg(vars: StorageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<StorageForOrgData, StorageForOrgVariables>;
 
 interface StorageForOrgRef {
   ...
@@ -1565,7 +1813,7 @@ export const storageForOrgRef: StorageForOrgRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-storageForOrg(dc: DataConnect, vars: StorageForOrgVariables): QueryPromise<StorageForOrgData, StorageForOrgVariables>;
+storageForOrg(dc: DataConnect, vars: StorageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<StorageForOrgData, StorageForOrgVariables>;
 
 interface StorageForOrgRef {
   ...
@@ -1680,7 +1928,7 @@ executeQuery(ref).then((response) => {
 ## ClientStorageForClient
 You can execute the `ClientStorageForClient` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-clientStorageForClient(vars: ClientStorageForClientVariables): QueryPromise<ClientStorageForClientData, ClientStorageForClientVariables>;
+clientStorageForClient(vars: ClientStorageForClientVariables, options?: ExecuteQueryOptions): QueryPromise<ClientStorageForClientData, ClientStorageForClientVariables>;
 
 interface ClientStorageForClientRef {
   ...
@@ -1691,7 +1939,7 @@ export const clientStorageForClientRef: ClientStorageForClientRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-clientStorageForClient(dc: DataConnect, vars: ClientStorageForClientVariables): QueryPromise<ClientStorageForClientData, ClientStorageForClientVariables>;
+clientStorageForClient(dc: DataConnect, vars: ClientStorageForClientVariables, options?: ExecuteQueryOptions): QueryPromise<ClientStorageForClientData, ClientStorageForClientVariables>;
 
 interface ClientStorageForClientRef {
   ...
@@ -1818,7 +2066,7 @@ executeQuery(ref).then((response) => {
 ## ClientStorageForOrg
 You can execute the `ClientStorageForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-clientStorageForOrg(vars: ClientStorageForOrgVariables): QueryPromise<ClientStorageForOrgData, ClientStorageForOrgVariables>;
+clientStorageForOrg(vars: ClientStorageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<ClientStorageForOrgData, ClientStorageForOrgVariables>;
 
 interface ClientStorageForOrgRef {
   ...
@@ -1829,7 +2077,7 @@ export const clientStorageForOrgRef: ClientStorageForOrgRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-clientStorageForOrg(dc: DataConnect, vars: ClientStorageForOrgVariables): QueryPromise<ClientStorageForOrgData, ClientStorageForOrgVariables>;
+clientStorageForOrg(dc: DataConnect, vars: ClientStorageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<ClientStorageForOrgData, ClientStorageForOrgVariables>;
 
 interface ClientStorageForOrgRef {
   ...
@@ -1943,7 +2191,7 @@ executeQuery(ref).then((response) => {
 ## WorkdayPausesForOrg
 You can execute the `WorkdayPausesForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-workdayPausesForOrg(vars: WorkdayPausesForOrgVariables): QueryPromise<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
+workdayPausesForOrg(vars: WorkdayPausesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
 
 interface WorkdayPausesForOrgRef {
   ...
@@ -1954,7 +2202,7 @@ export const workdayPausesForOrgRef: WorkdayPausesForOrgRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-workdayPausesForOrg(dc: DataConnect, vars: WorkdayPausesForOrgVariables): QueryPromise<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
+workdayPausesForOrg(dc: DataConnect, vars: WorkdayPausesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
 
 interface WorkdayPausesForOrgRef {
   ...
@@ -2065,7 +2313,7 @@ executeQuery(ref).then((response) => {
 ## ActiveWorkdayPauseForWorker
 You can execute the `ActiveWorkdayPauseForWorker` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
-activeWorkdayPauseForWorker(vars: ActiveWorkdayPauseForWorkerVariables): QueryPromise<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
+activeWorkdayPauseForWorker(vars: ActiveWorkdayPauseForWorkerVariables, options?: ExecuteQueryOptions): QueryPromise<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
 
 interface ActiveWorkdayPauseForWorkerRef {
   ...
@@ -2076,7 +2324,7 @@ export const activeWorkdayPauseForWorkerRef: ActiveWorkdayPauseForWorkerRef;
 ```
 You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
 ```typescript
-activeWorkdayPauseForWorker(dc: DataConnect, vars: ActiveWorkdayPauseForWorkerVariables): QueryPromise<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
+activeWorkdayPauseForWorker(dc: DataConnect, vars: ActiveWorkdayPauseForWorkerVariables, options?: ExecuteQueryOptions): QueryPromise<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
 
 interface ActiveWorkdayPauseForWorkerRef {
   ...
@@ -2338,6 +2586,150 @@ executeMutation(ref).then((response) => {
 });
 ```
 
+## InsertWorkerWithMembershipForOrg
+You can execute the `InsertWorkerWithMembershipForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+insertWorkerWithMembershipForOrg(vars: InsertWorkerWithMembershipForOrgVariables): MutationPromise<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
+
+interface InsertWorkerWithMembershipForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: InsertWorkerWithMembershipForOrgVariables): MutationRef<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
+}
+export const insertWorkerWithMembershipForOrgRef: InsertWorkerWithMembershipForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+insertWorkerWithMembershipForOrg(dc: DataConnect, vars: InsertWorkerWithMembershipForOrgVariables): MutationPromise<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
+
+interface InsertWorkerWithMembershipForOrgRef {
+  ...
+  (dc: DataConnect, vars: InsertWorkerWithMembershipForOrgVariables): MutationRef<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
+}
+export const insertWorkerWithMembershipForOrgRef: InsertWorkerWithMembershipForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the insertWorkerWithMembershipForOrgRef:
+```typescript
+const name = insertWorkerWithMembershipForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `InsertWorkerWithMembershipForOrg` mutation requires an argument of type `InsertWorkerWithMembershipForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface InsertWorkerWithMembershipForOrgVariables {
+  orgId: string;
+  login: string;
+  workerName?: string | null;
+  loginEmail?: string | null;
+  authUid: string;
+  role?: string | null;
+  active?: boolean | null;
+  email?: string | null;
+  phone?: string | null;
+  workerType?: string | null;
+  workerId?: string | null;
+}
+```
+### Return Type
+Recall that executing the `InsertWorkerWithMembershipForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `InsertWorkerWithMembershipForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface InsertWorkerWithMembershipForOrgData {
+  worker_insert: Worker_Key;
+  organizationMember_upsert: OrganizationMember_Key;
+}
+```
+### Using `InsertWorkerWithMembershipForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, insertWorkerWithMembershipForOrg, InsertWorkerWithMembershipForOrgVariables } from '@dataconnect/generated';
+
+// The `InsertWorkerWithMembershipForOrg` mutation requires an argument of type `InsertWorkerWithMembershipForOrgVariables`:
+const insertWorkerWithMembershipForOrgVars: InsertWorkerWithMembershipForOrgVariables = {
+  orgId: ..., 
+  login: ..., 
+  workerName: ..., // optional
+  loginEmail: ..., // optional
+  authUid: ..., 
+  role: ..., // optional
+  active: ..., // optional
+  email: ..., // optional
+  phone: ..., // optional
+  workerType: ..., // optional
+  workerId: ..., // optional
+};
+
+// Call the `insertWorkerWithMembershipForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await insertWorkerWithMembershipForOrg(insertWorkerWithMembershipForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await insertWorkerWithMembershipForOrg({ orgId: ..., login: ..., workerName: ..., loginEmail: ..., authUid: ..., role: ..., active: ..., email: ..., phone: ..., workerType: ..., workerId: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await insertWorkerWithMembershipForOrg(dataConnect, insertWorkerWithMembershipForOrgVars);
+
+console.log(data.worker_insert);
+console.log(data.organizationMember_upsert);
+
+// Or, you can use the `Promise` API.
+insertWorkerWithMembershipForOrg(insertWorkerWithMembershipForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.worker_insert);
+  console.log(data.organizationMember_upsert);
+});
+```
+
+### Using `InsertWorkerWithMembershipForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, insertWorkerWithMembershipForOrgRef, InsertWorkerWithMembershipForOrgVariables } from '@dataconnect/generated';
+
+// The `InsertWorkerWithMembershipForOrg` mutation requires an argument of type `InsertWorkerWithMembershipForOrgVariables`:
+const insertWorkerWithMembershipForOrgVars: InsertWorkerWithMembershipForOrgVariables = {
+  orgId: ..., 
+  login: ..., 
+  workerName: ..., // optional
+  loginEmail: ..., // optional
+  authUid: ..., 
+  role: ..., // optional
+  active: ..., // optional
+  email: ..., // optional
+  phone: ..., // optional
+  workerType: ..., // optional
+  workerId: ..., // optional
+};
+
+// Call the `insertWorkerWithMembershipForOrgRef()` function to get a reference to the mutation.
+const ref = insertWorkerWithMembershipForOrgRef(insertWorkerWithMembershipForOrgVars);
+// Variables can be defined inline as well.
+const ref = insertWorkerWithMembershipForOrgRef({ orgId: ..., login: ..., workerName: ..., loginEmail: ..., authUid: ..., role: ..., active: ..., email: ..., phone: ..., workerType: ..., workerId: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = insertWorkerWithMembershipForOrgRef(dataConnect, insertWorkerWithMembershipForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.worker_insert);
+console.log(data.organizationMember_upsert);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.worker_insert);
+  console.log(data.organizationMember_upsert);
+});
+```
+
 ## UpdateWorkerForOrg
 You can execute the `UpdateWorkerForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
@@ -2474,6 +2866,133 @@ console.log(data.worker_update);
 executeMutation(ref).then((response) => {
   const data = response.data;
   console.log(data.worker_update);
+});
+```
+
+## UpsertWorkerCredentialForOrg
+You can execute the `UpsertWorkerCredentialForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+upsertWorkerCredentialForOrg(vars: UpsertWorkerCredentialForOrgVariables): MutationPromise<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
+
+interface UpsertWorkerCredentialForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpsertWorkerCredentialForOrgVariables): MutationRef<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
+}
+export const upsertWorkerCredentialForOrgRef: UpsertWorkerCredentialForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+upsertWorkerCredentialForOrg(dc: DataConnect, vars: UpsertWorkerCredentialForOrgVariables): MutationPromise<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
+
+interface UpsertWorkerCredentialForOrgRef {
+  ...
+  (dc: DataConnect, vars: UpsertWorkerCredentialForOrgVariables): MutationRef<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
+}
+export const upsertWorkerCredentialForOrgRef: UpsertWorkerCredentialForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the upsertWorkerCredentialForOrgRef:
+```typescript
+const name = upsertWorkerCredentialForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `UpsertWorkerCredentialForOrg` mutation requires an argument of type `UpsertWorkerCredentialForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface UpsertWorkerCredentialForOrgVariables {
+  orgId: string;
+  login: string;
+  encryptedPassword: string;
+  iv: string;
+  authTag: string;
+  algorithm: string;
+  updatedBy?: string | null;
+}
+```
+### Return Type
+Recall that executing the `UpsertWorkerCredentialForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `UpsertWorkerCredentialForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface UpsertWorkerCredentialForOrgData {
+  workerCredential_upsert: WorkerCredential_Key;
+}
+```
+### Using `UpsertWorkerCredentialForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, upsertWorkerCredentialForOrg, UpsertWorkerCredentialForOrgVariables } from '@dataconnect/generated';
+
+// The `UpsertWorkerCredentialForOrg` mutation requires an argument of type `UpsertWorkerCredentialForOrgVariables`:
+const upsertWorkerCredentialForOrgVars: UpsertWorkerCredentialForOrgVariables = {
+  orgId: ..., 
+  login: ..., 
+  encryptedPassword: ..., 
+  iv: ..., 
+  authTag: ..., 
+  algorithm: ..., 
+  updatedBy: ..., // optional
+};
+
+// Call the `upsertWorkerCredentialForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await upsertWorkerCredentialForOrg(upsertWorkerCredentialForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await upsertWorkerCredentialForOrg({ orgId: ..., login: ..., encryptedPassword: ..., iv: ..., authTag: ..., algorithm: ..., updatedBy: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await upsertWorkerCredentialForOrg(dataConnect, upsertWorkerCredentialForOrgVars);
+
+console.log(data.workerCredential_upsert);
+
+// Or, you can use the `Promise` API.
+upsertWorkerCredentialForOrg(upsertWorkerCredentialForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.workerCredential_upsert);
+});
+```
+
+### Using `UpsertWorkerCredentialForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, upsertWorkerCredentialForOrgRef, UpsertWorkerCredentialForOrgVariables } from '@dataconnect/generated';
+
+// The `UpsertWorkerCredentialForOrg` mutation requires an argument of type `UpsertWorkerCredentialForOrgVariables`:
+const upsertWorkerCredentialForOrgVars: UpsertWorkerCredentialForOrgVariables = {
+  orgId: ..., 
+  login: ..., 
+  encryptedPassword: ..., 
+  iv: ..., 
+  authTag: ..., 
+  algorithm: ..., 
+  updatedBy: ..., // optional
+};
+
+// Call the `upsertWorkerCredentialForOrgRef()` function to get a reference to the mutation.
+const ref = upsertWorkerCredentialForOrgRef(upsertWorkerCredentialForOrgVars);
+// Variables can be defined inline as well.
+const ref = upsertWorkerCredentialForOrgRef({ orgId: ..., login: ..., encryptedPassword: ..., iv: ..., authTag: ..., algorithm: ..., updatedBy: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = upsertWorkerCredentialForOrgRef(dataConnect, upsertWorkerCredentialForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.workerCredential_upsert);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.workerCredential_upsert);
 });
 ```
 
@@ -6395,6 +6914,7 @@ export interface StopWorkdayPauseVariables {
   orgId: string;
   pauseId: string;
   workdayId: string;
+  workerLogin?: string | null;
   stopAt?: TimestampString | null;
   durationSec?: number | null;
   status?: string | null;
@@ -6421,6 +6941,7 @@ const stopWorkdayPauseVars: StopWorkdayPauseVariables = {
   orgId: ..., 
   pauseId: ..., 
   workdayId: ..., 
+  workerLogin: ..., // optional
   stopAt: ..., // optional
   durationSec: ..., // optional
   status: ..., // optional
@@ -6430,7 +6951,7 @@ const stopWorkdayPauseVars: StopWorkdayPauseVariables = {
 // You can use the `await` keyword to wait for the promise to resolve.
 const { data } = await stopWorkdayPause(stopWorkdayPauseVars);
 // Variables can be defined inline as well.
-const { data } = await stopWorkdayPause({ orgId: ..., pauseId: ..., workdayId: ..., stopAt: ..., durationSec: ..., status: ..., });
+const { data } = await stopWorkdayPause({ orgId: ..., pauseId: ..., workdayId: ..., workerLogin: ..., stopAt: ..., durationSec: ..., status: ..., });
 
 // You can also pass in a `DataConnect` instance to the action shortcut function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -6458,6 +6979,7 @@ const stopWorkdayPauseVars: StopWorkdayPauseVariables = {
   orgId: ..., 
   pauseId: ..., 
   workdayId: ..., 
+  workerLogin: ..., // optional
   stopAt: ..., // optional
   durationSec: ..., // optional
   status: ..., // optional
@@ -6466,7 +6988,7 @@ const stopWorkdayPauseVars: StopWorkdayPauseVariables = {
 // Call the `stopWorkdayPauseRef()` function to get a reference to the mutation.
 const ref = stopWorkdayPauseRef(stopWorkdayPauseVars);
 // Variables can be defined inline as well.
-const ref = stopWorkdayPauseRef({ orgId: ..., pauseId: ..., workdayId: ..., stopAt: ..., durationSec: ..., status: ..., });
+const ref = stopWorkdayPauseRef({ orgId: ..., pauseId: ..., workdayId: ..., workerLogin: ..., stopAt: ..., durationSec: ..., status: ..., });
 
 // You can also pass in a `DataConnect` instance to the `MutationRef` function.
 const dataConnect = getDataConnect(connectorConfig);

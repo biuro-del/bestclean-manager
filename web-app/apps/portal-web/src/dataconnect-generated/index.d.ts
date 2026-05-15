@@ -1,4 +1,4 @@
-import { ConnectorConfig, DataConnect, QueryRef, QueryPromise, MutationRef, MutationPromise } from 'firebase/data-connect';
+import { ConnectorConfig, DataConnect, QueryRef, QueryPromise, ExecuteQueryOptions, MutationRef, MutationPromise } from 'firebase/data-connect';
 
 export const connectorConfig: ConnectorConfig;
 
@@ -32,6 +32,31 @@ export interface ActiveWorkdayPauseForWorkerVariables {
   workerLogin: string;
 }
 
+export interface AdminWorkerCredentialForOrgData {
+  worker?: {
+    login: string;
+    workerName?: string | null;
+    loginEmail?: string | null;
+    email?: string | null;
+    authUid?: string | null;
+  };
+    workerCredential?: {
+      orgId: string;
+      login: string;
+      encryptedPassword: string;
+      iv: string;
+      authTag: string;
+      algorithm: string;
+      updatedAt: TimestampString;
+      updatedBy?: string | null;
+    } & WorkerCredential_Key;
+}
+
+export interface AdminWorkerCredentialForOrgVariables {
+  orgId: string;
+  login: string;
+}
+
 export interface BackupCycle_Key {
   orgId: string;
   cycleId: string;
@@ -56,6 +81,16 @@ export interface BackupCyclesForOrgData {
 }
 
 export interface BackupCyclesForOrgVariables {
+  orgId: string;
+}
+
+export interface CanManageWorkersForOrgData {
+  organizationMember?: {
+    role: string;
+  };
+}
+
+export interface CanManageWorkersForOrgVariables {
   orgId: string;
 }
 
@@ -481,6 +516,25 @@ export interface InsertWorkerForOrgVariables {
   workerId?: string | null;
 }
 
+export interface InsertWorkerWithMembershipForOrgData {
+  worker_insert: Worker_Key;
+  organizationMember_upsert: OrganizationMember_Key;
+}
+
+export interface InsertWorkerWithMembershipForOrgVariables {
+  orgId: string;
+  login: string;
+  workerName?: string | null;
+  loginEmail?: string | null;
+  authUid: string;
+  role?: string | null;
+  active?: boolean | null;
+  email?: string | null;
+  phone?: string | null;
+  workerType?: string | null;
+  workerId?: string | null;
+}
+
 export interface InsertZoneForOrgData {
   zone_insert: Zone_Key;
 }
@@ -579,6 +633,7 @@ export interface StopWorkdayPauseVariables {
   orgId: string;
   pauseId: string;
   workdayId: string;
+  workerLogin?: string | null;
   stopAt?: TimestampString | null;
   durationSec?: number | null;
   status?: string | null;
@@ -812,6 +867,20 @@ export interface UpsertUserUiStylePreferenceForOrgVariables {
   updatedBy?: string | null;
 }
 
+export interface UpsertWorkerCredentialForOrgData {
+  workerCredential_upsert: WorkerCredential_Key;
+}
+
+export interface UpsertWorkerCredentialForOrgVariables {
+  orgId: string;
+  login: string;
+  encryptedPassword: string;
+  iv: string;
+  authTag: string;
+  algorithm: string;
+  updatedBy?: string | null;
+}
+
 export interface UserUiStylePreference_Key {
   orgId: string;
   uid: string;
@@ -893,6 +962,12 @@ export interface WorkdaysForOrgVariables {
   orgId: string;
 }
 
+export interface WorkerCredential_Key {
+  orgId: string;
+  login: string;
+  __typename?: 'WorkerCredential_Key';
+}
+
 export interface WorkerWorkdaysForOrgData {
   workdays: ({
     workdayId: string;
@@ -934,6 +1009,7 @@ export interface WorkersForOrgData {
     workerId?: string | null;
     workerName?: string | null;
     loginEmail?: string | null;
+    authUid?: string | null;
     role?: string | null;
     active?: boolean | null;
     email?: string | null;
@@ -983,6 +1059,18 @@ export const insertWorkerForOrgRef: InsertWorkerForOrgRef;
 export function insertWorkerForOrg(vars: InsertWorkerForOrgVariables): MutationPromise<InsertWorkerForOrgData, InsertWorkerForOrgVariables>;
 export function insertWorkerForOrg(dc: DataConnect, vars: InsertWorkerForOrgVariables): MutationPromise<InsertWorkerForOrgData, InsertWorkerForOrgVariables>;
 
+interface InsertWorkerWithMembershipForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: InsertWorkerWithMembershipForOrgVariables): MutationRef<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: InsertWorkerWithMembershipForOrgVariables): MutationRef<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
+  operationName: string;
+}
+export const insertWorkerWithMembershipForOrgRef: InsertWorkerWithMembershipForOrgRef;
+
+export function insertWorkerWithMembershipForOrg(vars: InsertWorkerWithMembershipForOrgVariables): MutationPromise<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
+export function insertWorkerWithMembershipForOrg(dc: DataConnect, vars: InsertWorkerWithMembershipForOrgVariables): MutationPromise<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
+
 interface UpdateWorkerForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
   (vars: UpdateWorkerForOrgVariables): MutationRef<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
@@ -994,6 +1082,18 @@ export const updateWorkerForOrgRef: UpdateWorkerForOrgRef;
 
 export function updateWorkerForOrg(vars: UpdateWorkerForOrgVariables): MutationPromise<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
 export function updateWorkerForOrg(dc: DataConnect, vars: UpdateWorkerForOrgVariables): MutationPromise<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
+
+interface UpsertWorkerCredentialForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpsertWorkerCredentialForOrgVariables): MutationRef<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpsertWorkerCredentialForOrgVariables): MutationRef<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
+  operationName: string;
+}
+export const upsertWorkerCredentialForOrgRef: UpsertWorkerCredentialForOrgRef;
+
+export function upsertWorkerCredentialForOrg(vars: UpsertWorkerCredentialForOrgVariables): MutationPromise<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
+export function upsertWorkerCredentialForOrg(dc: DataConnect, vars: UpsertWorkerCredentialForOrgVariables): MutationPromise<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
 
 interface UpsertOrgUiStyleForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1376,8 +1476,8 @@ interface MyOrganizationsRef {
 }
 export const myOrganizationsRef: MyOrganizationsRef;
 
-export function myOrganizations(): QueryPromise<MyOrganizationsData, undefined>;
-export function myOrganizations(dc: DataConnect): QueryPromise<MyOrganizationsData, undefined>;
+export function myOrganizations(options?: ExecuteQueryOptions): QueryPromise<MyOrganizationsData, undefined>;
+export function myOrganizations(dc: DataConnect, options?: ExecuteQueryOptions): QueryPromise<MyOrganizationsData, undefined>;
 
 interface OrgUiStyleForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1388,8 +1488,8 @@ interface OrgUiStyleForOrgRef {
 }
 export const orgUiStyleForOrgRef: OrgUiStyleForOrgRef;
 
-export function orgUiStyleForOrg(vars: OrgUiStyleForOrgVariables): QueryPromise<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
-export function orgUiStyleForOrg(dc: DataConnect, vars: OrgUiStyleForOrgVariables): QueryPromise<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
+export function orgUiStyleForOrg(vars: OrgUiStyleForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
+export function orgUiStyleForOrg(dc: DataConnect, vars: OrgUiStyleForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
 
 interface MyUiStylePreferenceRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1400,8 +1500,8 @@ interface MyUiStylePreferenceRef {
 }
 export const myUiStylePreferenceRef: MyUiStylePreferenceRef;
 
-export function myUiStylePreference(vars: MyUiStylePreferenceVariables): QueryPromise<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
-export function myUiStylePreference(dc: DataConnect, vars: MyUiStylePreferenceVariables): QueryPromise<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
+export function myUiStylePreference(vars: MyUiStylePreferenceVariables, options?: ExecuteQueryOptions): QueryPromise<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
+export function myUiStylePreference(dc: DataConnect, vars: MyUiStylePreferenceVariables, options?: ExecuteQueryOptions): QueryPromise<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
 
 interface UserUiStylePreferencesForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1412,8 +1512,20 @@ interface UserUiStylePreferencesForOrgRef {
 }
 export const userUiStylePreferencesForOrgRef: UserUiStylePreferencesForOrgRef;
 
-export function userUiStylePreferencesForOrg(vars: UserUiStylePreferencesForOrgVariables): QueryPromise<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
-export function userUiStylePreferencesForOrg(dc: DataConnect, vars: UserUiStylePreferencesForOrgVariables): QueryPromise<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
+export function userUiStylePreferencesForOrg(vars: UserUiStylePreferencesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
+export function userUiStylePreferencesForOrg(dc: DataConnect, vars: UserUiStylePreferencesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
+
+interface CanManageWorkersForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CanManageWorkersForOrgVariables): QueryRef<CanManageWorkersForOrgData, CanManageWorkersForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CanManageWorkersForOrgVariables): QueryRef<CanManageWorkersForOrgData, CanManageWorkersForOrgVariables>;
+  operationName: string;
+}
+export const canManageWorkersForOrgRef: CanManageWorkersForOrgRef;
+
+export function canManageWorkersForOrg(vars: CanManageWorkersForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<CanManageWorkersForOrgData, CanManageWorkersForOrgVariables>;
+export function canManageWorkersForOrg(dc: DataConnect, vars: CanManageWorkersForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<CanManageWorkersForOrgData, CanManageWorkersForOrgVariables>;
 
 interface WorkersForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1424,8 +1536,20 @@ interface WorkersForOrgRef {
 }
 export const workersForOrgRef: WorkersForOrgRef;
 
-export function workersForOrg(vars: WorkersForOrgVariables): QueryPromise<WorkersForOrgData, WorkersForOrgVariables>;
-export function workersForOrg(dc: DataConnect, vars: WorkersForOrgVariables): QueryPromise<WorkersForOrgData, WorkersForOrgVariables>;
+export function workersForOrg(vars: WorkersForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkersForOrgData, WorkersForOrgVariables>;
+export function workersForOrg(dc: DataConnect, vars: WorkersForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkersForOrgData, WorkersForOrgVariables>;
+
+interface AdminWorkerCredentialForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: AdminWorkerCredentialForOrgVariables): QueryRef<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: AdminWorkerCredentialForOrgVariables): QueryRef<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
+  operationName: string;
+}
+export const adminWorkerCredentialForOrgRef: AdminWorkerCredentialForOrgRef;
+
+export function adminWorkerCredentialForOrg(vars: AdminWorkerCredentialForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
+export function adminWorkerCredentialForOrg(dc: DataConnect, vars: AdminWorkerCredentialForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
 
 interface ClientsForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1436,8 +1560,8 @@ interface ClientsForOrgRef {
 }
 export const clientsForOrgRef: ClientsForOrgRef;
 
-export function clientsForOrg(vars: ClientsForOrgVariables): QueryPromise<ClientsForOrgData, ClientsForOrgVariables>;
-export function clientsForOrg(dc: DataConnect, vars: ClientsForOrgVariables): QueryPromise<ClientsForOrgData, ClientsForOrgVariables>;
+export function clientsForOrg(vars: ClientsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<ClientsForOrgData, ClientsForOrgVariables>;
+export function clientsForOrg(dc: DataConnect, vars: ClientsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<ClientsForOrgData, ClientsForOrgVariables>;
 
 interface IndividualJobsForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1448,8 +1572,8 @@ interface IndividualJobsForOrgRef {
 }
 export const individualJobsForOrgRef: IndividualJobsForOrgRef;
 
-export function individualJobsForOrg(vars: IndividualJobsForOrgVariables): QueryPromise<IndividualJobsForOrgData, IndividualJobsForOrgVariables>;
-export function individualJobsForOrg(dc: DataConnect, vars: IndividualJobsForOrgVariables): QueryPromise<IndividualJobsForOrgData, IndividualJobsForOrgVariables>;
+export function individualJobsForOrg(vars: IndividualJobsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<IndividualJobsForOrgData, IndividualJobsForOrgVariables>;
+export function individualJobsForOrg(dc: DataConnect, vars: IndividualJobsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<IndividualJobsForOrgData, IndividualJobsForOrgVariables>;
 
 interface ZonesForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1460,8 +1584,8 @@ interface ZonesForOrgRef {
 }
 export const zonesForOrgRef: ZonesForOrgRef;
 
-export function zonesForOrg(vars: ZonesForOrgVariables): QueryPromise<ZonesForOrgData, ZonesForOrgVariables>;
-export function zonesForOrg(dc: DataConnect, vars: ZonesForOrgVariables): QueryPromise<ZonesForOrgData, ZonesForOrgVariables>;
+export function zonesForOrg(vars: ZonesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<ZonesForOrgData, ZonesForOrgVariables>;
+export function zonesForOrg(dc: DataConnect, vars: ZonesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<ZonesForOrgData, ZonesForOrgVariables>;
 
 interface WorkdaysForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1472,8 +1596,8 @@ interface WorkdaysForOrgRef {
 }
 export const workdaysForOrgRef: WorkdaysForOrgRef;
 
-export function workdaysForOrg(vars: WorkdaysForOrgVariables): QueryPromise<WorkdaysForOrgData, WorkdaysForOrgVariables>;
-export function workdaysForOrg(dc: DataConnect, vars: WorkdaysForOrgVariables): QueryPromise<WorkdaysForOrgData, WorkdaysForOrgVariables>;
+export function workdaysForOrg(vars: WorkdaysForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysForOrgData, WorkdaysForOrgVariables>;
+export function workdaysForOrg(dc: DataConnect, vars: WorkdaysForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysForOrgData, WorkdaysForOrgVariables>;
 
 interface BackupCyclesForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1484,8 +1608,8 @@ interface BackupCyclesForOrgRef {
 }
 export const backupCyclesForOrgRef: BackupCyclesForOrgRef;
 
-export function backupCyclesForOrg(vars: BackupCyclesForOrgVariables): QueryPromise<BackupCyclesForOrgData, BackupCyclesForOrgVariables>;
-export function backupCyclesForOrg(dc: DataConnect, vars: BackupCyclesForOrgVariables): QueryPromise<BackupCyclesForOrgData, BackupCyclesForOrgVariables>;
+export function backupCyclesForOrg(vars: BackupCyclesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<BackupCyclesForOrgData, BackupCyclesForOrgVariables>;
+export function backupCyclesForOrg(dc: DataConnect, vars: BackupCyclesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<BackupCyclesForOrgData, BackupCyclesForOrgVariables>;
 
 interface EventsForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1496,8 +1620,8 @@ interface EventsForOrgRef {
 }
 export const eventsForOrgRef: EventsForOrgRef;
 
-export function eventsForOrg(vars: EventsForOrgVariables): QueryPromise<EventsForOrgData, EventsForOrgVariables>;
-export function eventsForOrg(dc: DataConnect, vars: EventsForOrgVariables): QueryPromise<EventsForOrgData, EventsForOrgVariables>;
+export function eventsForOrg(vars: EventsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsForOrgData, EventsForOrgVariables>;
+export function eventsForOrg(dc: DataConnect, vars: EventsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsForOrgData, EventsForOrgVariables>;
 
 interface WorkerWorkdaysForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1508,8 +1632,8 @@ interface WorkerWorkdaysForOrgRef {
 }
 export const workerWorkdaysForOrgRef: WorkerWorkdaysForOrgRef;
 
-export function workerWorkdaysForOrg(vars: WorkerWorkdaysForOrgVariables): QueryPromise<WorkerWorkdaysForOrgData, WorkerWorkdaysForOrgVariables>;
-export function workerWorkdaysForOrg(dc: DataConnect, vars: WorkerWorkdaysForOrgVariables): QueryPromise<WorkerWorkdaysForOrgData, WorkerWorkdaysForOrgVariables>;
+export function workerWorkdaysForOrg(vars: WorkerWorkdaysForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkerWorkdaysForOrgData, WorkerWorkdaysForOrgVariables>;
+export function workerWorkdaysForOrg(dc: DataConnect, vars: WorkerWorkdaysForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkerWorkdaysForOrgData, WorkerWorkdaysForOrgVariables>;
 
 interface StorageForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1520,8 +1644,8 @@ interface StorageForOrgRef {
 }
 export const storageForOrgRef: StorageForOrgRef;
 
-export function storageForOrg(vars: StorageForOrgVariables): QueryPromise<StorageForOrgData, StorageForOrgVariables>;
-export function storageForOrg(dc: DataConnect, vars: StorageForOrgVariables): QueryPromise<StorageForOrgData, StorageForOrgVariables>;
+export function storageForOrg(vars: StorageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<StorageForOrgData, StorageForOrgVariables>;
+export function storageForOrg(dc: DataConnect, vars: StorageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<StorageForOrgData, StorageForOrgVariables>;
 
 interface ClientStorageForClientRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1532,8 +1656,8 @@ interface ClientStorageForClientRef {
 }
 export const clientStorageForClientRef: ClientStorageForClientRef;
 
-export function clientStorageForClient(vars: ClientStorageForClientVariables): QueryPromise<ClientStorageForClientData, ClientStorageForClientVariables>;
-export function clientStorageForClient(dc: DataConnect, vars: ClientStorageForClientVariables): QueryPromise<ClientStorageForClientData, ClientStorageForClientVariables>;
+export function clientStorageForClient(vars: ClientStorageForClientVariables, options?: ExecuteQueryOptions): QueryPromise<ClientStorageForClientData, ClientStorageForClientVariables>;
+export function clientStorageForClient(dc: DataConnect, vars: ClientStorageForClientVariables, options?: ExecuteQueryOptions): QueryPromise<ClientStorageForClientData, ClientStorageForClientVariables>;
 
 interface ClientStorageForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1544,8 +1668,8 @@ interface ClientStorageForOrgRef {
 }
 export const clientStorageForOrgRef: ClientStorageForOrgRef;
 
-export function clientStorageForOrg(vars: ClientStorageForOrgVariables): QueryPromise<ClientStorageForOrgData, ClientStorageForOrgVariables>;
-export function clientStorageForOrg(dc: DataConnect, vars: ClientStorageForOrgVariables): QueryPromise<ClientStorageForOrgData, ClientStorageForOrgVariables>;
+export function clientStorageForOrg(vars: ClientStorageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<ClientStorageForOrgData, ClientStorageForOrgVariables>;
+export function clientStorageForOrg(dc: DataConnect, vars: ClientStorageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<ClientStorageForOrgData, ClientStorageForOrgVariables>;
 
 interface WorkdayPausesForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1556,8 +1680,8 @@ interface WorkdayPausesForOrgRef {
 }
 export const workdayPausesForOrgRef: WorkdayPausesForOrgRef;
 
-export function workdayPausesForOrg(vars: WorkdayPausesForOrgVariables): QueryPromise<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
-export function workdayPausesForOrg(dc: DataConnect, vars: WorkdayPausesForOrgVariables): QueryPromise<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
+export function workdayPausesForOrg(vars: WorkdayPausesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
+export function workdayPausesForOrg(dc: DataConnect, vars: WorkdayPausesForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdayPausesForOrgData, WorkdayPausesForOrgVariables>;
 
 interface ActiveWorkdayPauseForWorkerRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -1568,6 +1692,6 @@ interface ActiveWorkdayPauseForWorkerRef {
 }
 export const activeWorkdayPauseForWorkerRef: ActiveWorkdayPauseForWorkerRef;
 
-export function activeWorkdayPauseForWorker(vars: ActiveWorkdayPauseForWorkerVariables): QueryPromise<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
-export function activeWorkdayPauseForWorker(dc: DataConnect, vars: ActiveWorkdayPauseForWorkerVariables): QueryPromise<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
+export function activeWorkdayPauseForWorker(vars: ActiveWorkdayPauseForWorkerVariables, options?: ExecuteQueryOptions): QueryPromise<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
+export function activeWorkdayPauseForWorker(dc: DataConnect, vars: ActiveWorkdayPauseForWorkerVariables, options?: ExecuteQueryOptions): QueryPromise<ActiveWorkdayPauseForWorkerData, ActiveWorkdayPauseForWorkerVariables>;
 

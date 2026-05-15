@@ -21,7 +21,9 @@ You can also follow the instructions from the [Data Connect documentation](https
   - [*OrgUiStyleForOrg*](#orguistylefororg)
   - [*MyUiStylePreference*](#myuistylepreference)
   - [*UserUiStylePreferencesForOrg*](#useruistylepreferencesfororg)
+  - [*CanManageWorkersForOrg*](#canmanageworkersfororg)
   - [*WorkersForOrg*](#workersfororg)
+  - [*AdminWorkerCredentialForOrg*](#adminworkercredentialfororg)
   - [*ClientsForOrg*](#clientsfororg)
   - [*IndividualJobsForOrg*](#individualjobsfororg)
   - [*ZonesForOrg*](#zonesfororg)
@@ -36,7 +38,9 @@ You can also follow the instructions from the [Data Connect documentation](https
   - [*ActiveWorkdayPauseForWorker*](#activeworkdaypauseforworker)
 - [**Mutations**](#mutations)
   - [*InsertWorkerForOrg*](#insertworkerfororg)
+  - [*InsertWorkerWithMembershipForOrg*](#insertworkerwithmembershipfororg)
   - [*UpdateWorkerForOrg*](#updateworkerfororg)
+  - [*UpsertWorkerCredentialForOrg*](#upsertworkercredentialfororg)
   - [*UpsertOrgUiStyleForOrg*](#upsertorguistylefororg)
   - [*DeleteOrgUiStyleForOrg*](#deleteorguistylefororg)
   - [*UpsertMyUiStylePreference*](#upsertmyuistylepreference)
@@ -499,6 +503,90 @@ export default function UserUiStylePreferencesForOrgComponent() {
 }
 ```
 
+## CanManageWorkersForOrg
+You can execute the `CanManageWorkersForOrg` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useCanManageWorkersForOrg(dc: DataConnect, vars: CanManageWorkersForOrgVariables, options?: useDataConnectQueryOptions<CanManageWorkersForOrgData>): UseDataConnectQueryResult<CanManageWorkersForOrgData, CanManageWorkersForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useCanManageWorkersForOrg(vars: CanManageWorkersForOrgVariables, options?: useDataConnectQueryOptions<CanManageWorkersForOrgData>): UseDataConnectQueryResult<CanManageWorkersForOrgData, CanManageWorkersForOrgVariables>;
+```
+
+### Variables
+The `CanManageWorkersForOrg` Query requires an argument of type `CanManageWorkersForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface CanManageWorkersForOrgVariables {
+  orgId: string;
+}
+```
+### Return Type
+Recall that calling the `CanManageWorkersForOrg` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `CanManageWorkersForOrg` Query is of type `CanManageWorkersForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface CanManageWorkersForOrgData {
+  organizationMember?: {
+    role: string;
+  };
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `CanManageWorkersForOrg`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, CanManageWorkersForOrgVariables } from '@dataconnect/generated';
+import { useCanManageWorkersForOrg } from '@dataconnect/generated/react'
+
+export default function CanManageWorkersForOrgComponent() {
+  // The `useCanManageWorkersForOrg` Query hook requires an argument of type `CanManageWorkersForOrgVariables`:
+  const canManageWorkersForOrgVars: CanManageWorkersForOrgVariables = {
+    orgId: ..., 
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useCanManageWorkersForOrg(canManageWorkersForOrgVars);
+  // Variables can be defined inline as well.
+  const query = useCanManageWorkersForOrg({ orgId: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useCanManageWorkersForOrg(dataConnect, canManageWorkersForOrgVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useCanManageWorkersForOrg(canManageWorkersForOrgVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useCanManageWorkersForOrg(dataConnect, canManageWorkersForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.organizationMember);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
 ## WorkersForOrg
 You can execute the `WorkersForOrg` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
 
@@ -531,6 +619,7 @@ export interface WorkersForOrgData {
     workerId?: string | null;
     workerName?: string | null;
     loginEmail?: string | null;
+    authUid?: string | null;
     role?: string | null;
     active?: boolean | null;
     email?: string | null;
@@ -589,6 +678,107 @@ export default function WorkersForOrgComponent() {
   // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
   if (query.isSuccess) {
     console.log(query.data.workers);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## AdminWorkerCredentialForOrg
+You can execute the `AdminWorkerCredentialForOrg` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useAdminWorkerCredentialForOrg(dc: DataConnect, vars: AdminWorkerCredentialForOrgVariables, options?: useDataConnectQueryOptions<AdminWorkerCredentialForOrgData>): UseDataConnectQueryResult<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useAdminWorkerCredentialForOrg(vars: AdminWorkerCredentialForOrgVariables, options?: useDataConnectQueryOptions<AdminWorkerCredentialForOrgData>): UseDataConnectQueryResult<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
+```
+
+### Variables
+The `AdminWorkerCredentialForOrg` Query requires an argument of type `AdminWorkerCredentialForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface AdminWorkerCredentialForOrgVariables {
+  orgId: string;
+  login: string;
+}
+```
+### Return Type
+Recall that calling the `AdminWorkerCredentialForOrg` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `AdminWorkerCredentialForOrg` Query is of type `AdminWorkerCredentialForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface AdminWorkerCredentialForOrgData {
+  worker?: {
+    login: string;
+    workerName?: string | null;
+    loginEmail?: string | null;
+    email?: string | null;
+    authUid?: string | null;
+  };
+    workerCredential?: {
+      orgId: string;
+      login: string;
+      encryptedPassword: string;
+      iv: string;
+      authTag: string;
+      algorithm: string;
+      updatedAt: TimestampString;
+      updatedBy?: string | null;
+    } & WorkerCredential_Key;
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `AdminWorkerCredentialForOrg`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, AdminWorkerCredentialForOrgVariables } from '@dataconnect/generated';
+import { useAdminWorkerCredentialForOrg } from '@dataconnect/generated/react'
+
+export default function AdminWorkerCredentialForOrgComponent() {
+  // The `useAdminWorkerCredentialForOrg` Query hook requires an argument of type `AdminWorkerCredentialForOrgVariables`:
+  const adminWorkerCredentialForOrgVars: AdminWorkerCredentialForOrgVariables = {
+    orgId: ..., 
+    login: ..., 
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useAdminWorkerCredentialForOrg(adminWorkerCredentialForOrgVars);
+  // Variables can be defined inline as well.
+  const query = useAdminWorkerCredentialForOrg({ orgId: ..., login: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useAdminWorkerCredentialForOrg(dataConnect, adminWorkerCredentialForOrgVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useAdminWorkerCredentialForOrg(adminWorkerCredentialForOrgVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useAdminWorkerCredentialForOrg(dataConnect, adminWorkerCredentialForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.worker);
+    console.log(query.data.workerCredential);
   }
   return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
 }
@@ -1913,6 +2103,122 @@ export default function InsertWorkerForOrgComponent() {
 }
 ```
 
+## InsertWorkerWithMembershipForOrg
+You can execute the `InsertWorkerWithMembershipForOrg` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
+```javascript
+useInsertWorkerWithMembershipForOrg(options?: useDataConnectMutationOptions<InsertWorkerWithMembershipForOrgData, FirebaseError, InsertWorkerWithMembershipForOrgVariables>): UseDataConnectMutationResult<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Mutation hook function.
+```javascript
+useInsertWorkerWithMembershipForOrg(dc: DataConnect, options?: useDataConnectMutationOptions<InsertWorkerWithMembershipForOrgData, FirebaseError, InsertWorkerWithMembershipForOrgVariables>): UseDataConnectMutationResult<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
+```
+
+### Variables
+The `InsertWorkerWithMembershipForOrg` Mutation requires an argument of type `InsertWorkerWithMembershipForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface InsertWorkerWithMembershipForOrgVariables {
+  orgId: string;
+  login: string;
+  workerName?: string | null;
+  loginEmail?: string | null;
+  authUid: string;
+  role?: string | null;
+  active?: boolean | null;
+  email?: string | null;
+  phone?: string | null;
+  workerType?: string | null;
+  workerId?: string | null;
+}
+```
+### Return Type
+Recall that calling the `InsertWorkerWithMembershipForOrg` Mutation hook function returns a `UseMutationResult` object. This object holds the state of your Mutation, including whether the Mutation is loading, has completed, or has succeeded/failed, among other things.
+
+To check the status of a Mutation, use the `UseMutationResult.status` field. You can also check for pending / success / error status using the `UseMutationResult.isPending`, `UseMutationResult.isSuccess`, and `UseMutationResult.isError` fields.
+
+To execute the Mutation, call `UseMutationResult.mutate()`. This function executes the Mutation, but does not return the data from the Mutation.
+
+To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `InsertWorkerWithMembershipForOrg` Mutation is of type `InsertWorkerWithMembershipForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface InsertWorkerWithMembershipForOrgData {
+  worker_insert: Worker_Key;
+  organizationMember_upsert: OrganizationMember_Key;
+}
+```
+
+To learn more about the `UseMutationResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useMutation).
+
+### Using `InsertWorkerWithMembershipForOrg`'s Mutation hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, InsertWorkerWithMembershipForOrgVariables } from '@dataconnect/generated';
+import { useInsertWorkerWithMembershipForOrg } from '@dataconnect/generated/react'
+
+export default function InsertWorkerWithMembershipForOrgComponent() {
+  // Call the Mutation hook function to get a `UseMutationResult` object which holds the state of your Mutation.
+  const mutation = useInsertWorkerWithMembershipForOrg();
+
+  // You can also pass in a `DataConnect` instance to the Mutation hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const mutation = useInsertWorkerWithMembershipForOrg(dataConnect);
+
+  // You can also pass in a `useDataConnectMutationOptions` object to the Mutation hook function.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useInsertWorkerWithMembershipForOrg(options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectMutationOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useInsertWorkerWithMembershipForOrg(dataConnect, options);
+
+  // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
+  // The `useInsertWorkerWithMembershipForOrg` Mutation requires an argument of type `InsertWorkerWithMembershipForOrgVariables`:
+  const insertWorkerWithMembershipForOrgVars: InsertWorkerWithMembershipForOrgVariables = {
+    orgId: ..., 
+    login: ..., 
+    workerName: ..., // optional
+    loginEmail: ..., // optional
+    authUid: ..., 
+    role: ..., // optional
+    active: ..., // optional
+    email: ..., // optional
+    phone: ..., // optional
+    workerType: ..., // optional
+    workerId: ..., // optional
+  };
+  mutation.mutate(insertWorkerWithMembershipForOrgVars);
+  // Variables can be defined inline as well.
+  mutation.mutate({ orgId: ..., login: ..., workerName: ..., loginEmail: ..., authUid: ..., role: ..., active: ..., email: ..., phone: ..., workerType: ..., workerId: ..., });
+
+  // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  mutation.mutate(insertWorkerWithMembershipForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Mutation.
+  if (mutation.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (mutation.isError) {
+    return <div>Error: {mutation.error.message}</div>;
+  }
+
+  // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
+  if (mutation.isSuccess) {
+    console.log(mutation.data.worker_insert);
+    console.log(mutation.data.organizationMember_upsert);
+  }
+  return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
 ## UpdateWorkerForOrg
 You can execute the `UpdateWorkerForOrg` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
 ```javascript
@@ -2022,6 +2328,112 @@ export default function UpdateWorkerForOrgComponent() {
   // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
   if (mutation.isSuccess) {
     console.log(mutation.data.worker_update);
+  }
+  return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## UpsertWorkerCredentialForOrg
+You can execute the `UpsertWorkerCredentialForOrg` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
+```javascript
+useUpsertWorkerCredentialForOrg(options?: useDataConnectMutationOptions<UpsertWorkerCredentialForOrgData, FirebaseError, UpsertWorkerCredentialForOrgVariables>): UseDataConnectMutationResult<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Mutation hook function.
+```javascript
+useUpsertWorkerCredentialForOrg(dc: DataConnect, options?: useDataConnectMutationOptions<UpsertWorkerCredentialForOrgData, FirebaseError, UpsertWorkerCredentialForOrgVariables>): UseDataConnectMutationResult<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
+```
+
+### Variables
+The `UpsertWorkerCredentialForOrg` Mutation requires an argument of type `UpsertWorkerCredentialForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface UpsertWorkerCredentialForOrgVariables {
+  orgId: string;
+  login: string;
+  encryptedPassword: string;
+  iv: string;
+  authTag: string;
+  algorithm: string;
+  updatedBy?: string | null;
+}
+```
+### Return Type
+Recall that calling the `UpsertWorkerCredentialForOrg` Mutation hook function returns a `UseMutationResult` object. This object holds the state of your Mutation, including whether the Mutation is loading, has completed, or has succeeded/failed, among other things.
+
+To check the status of a Mutation, use the `UseMutationResult.status` field. You can also check for pending / success / error status using the `UseMutationResult.isPending`, `UseMutationResult.isSuccess`, and `UseMutationResult.isError` fields.
+
+To execute the Mutation, call `UseMutationResult.mutate()`. This function executes the Mutation, but does not return the data from the Mutation.
+
+To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `UpsertWorkerCredentialForOrg` Mutation is of type `UpsertWorkerCredentialForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface UpsertWorkerCredentialForOrgData {
+  workerCredential_upsert: WorkerCredential_Key;
+}
+```
+
+To learn more about the `UseMutationResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useMutation).
+
+### Using `UpsertWorkerCredentialForOrg`'s Mutation hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, UpsertWorkerCredentialForOrgVariables } from '@dataconnect/generated';
+import { useUpsertWorkerCredentialForOrg } from '@dataconnect/generated/react'
+
+export default function UpsertWorkerCredentialForOrgComponent() {
+  // Call the Mutation hook function to get a `UseMutationResult` object which holds the state of your Mutation.
+  const mutation = useUpsertWorkerCredentialForOrg();
+
+  // You can also pass in a `DataConnect` instance to the Mutation hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const mutation = useUpsertWorkerCredentialForOrg(dataConnect);
+
+  // You can also pass in a `useDataConnectMutationOptions` object to the Mutation hook function.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useUpsertWorkerCredentialForOrg(options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectMutationOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useUpsertWorkerCredentialForOrg(dataConnect, options);
+
+  // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
+  // The `useUpsertWorkerCredentialForOrg` Mutation requires an argument of type `UpsertWorkerCredentialForOrgVariables`:
+  const upsertWorkerCredentialForOrgVars: UpsertWorkerCredentialForOrgVariables = {
+    orgId: ..., 
+    login: ..., 
+    encryptedPassword: ..., 
+    iv: ..., 
+    authTag: ..., 
+    algorithm: ..., 
+    updatedBy: ..., // optional
+  };
+  mutation.mutate(upsertWorkerCredentialForOrgVars);
+  // Variables can be defined inline as well.
+  mutation.mutate({ orgId: ..., login: ..., encryptedPassword: ..., iv: ..., authTag: ..., algorithm: ..., updatedBy: ..., });
+
+  // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  mutation.mutate(upsertWorkerCredentialForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Mutation.
+  if (mutation.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (mutation.isError) {
+    return <div>Error: {mutation.error.message}</div>;
+  }
+
+  // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
+  if (mutation.isSuccess) {
+    console.log(mutation.data.workerCredential_upsert);
   }
   return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
 }
@@ -5271,6 +5683,7 @@ export interface StopWorkdayPauseVariables {
   orgId: string;
   pauseId: string;
   workdayId: string;
+  workerLogin?: string | null;
   stopAt?: TimestampString | null;
   durationSec?: number | null;
   status?: string | null;
@@ -5327,13 +5740,14 @@ export default function StopWorkdayPauseComponent() {
     orgId: ..., 
     pauseId: ..., 
     workdayId: ..., 
+    workerLogin: ..., // optional
     stopAt: ..., // optional
     durationSec: ..., // optional
     status: ..., // optional
   };
   mutation.mutate(stopWorkdayPauseVars);
   // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., pauseId: ..., workdayId: ..., stopAt: ..., durationSec: ..., status: ..., });
+  mutation.mutate({ orgId: ..., pauseId: ..., workdayId: ..., workerLogin: ..., stopAt: ..., durationSec: ..., status: ..., });
 
   // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
   const options = {

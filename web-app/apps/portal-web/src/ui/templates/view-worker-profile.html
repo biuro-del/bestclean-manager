@@ -145,21 +145,21 @@
       </div>
 
       <div class="field" id="wkCurrentPassWrap" style="grid-column: 1 / -1; display:none;">
-        <label for="wkCurrentPass">Obecne has&#322;o (D) &#8212; tylko Admin/Kierownik</label>
+        <label for="wkCurrentPass">Przypisane has&#322;o (D) &#8212; tylko Admin</label>
         <div class="pass-inline">
           <input id="wkCurrentPass" type="password" readonly />
           <button class="btn2" id="wkShowPassBtn" type="button">Poka&#380;</button>
           <button class="btn2" id="wkCopyPassBtn" type="button">Kopiuj</button>
         </div>
-        <div class="muted" style="margin-top:6px;">Has&#322;o jest pobierane z bazy tylko dla Admin/Kierownik.</div>
+        <div class="muted" id="wkCurrentPassHint" style="margin-top:6px;">Has&#322;o jest pobierane z szyfrowanego sejfu tylko dla Admina.</div>
       </div>
 
-      <div class="field">
+      <div class="field" id="wkNewPassWrap">
         <label for="wkNewPass">Has&#322;o tymczasowe (E)</label>
         <input id="wkNewPass" type="text" maxlength="120" />
       </div>
 
-      <div class="field">
+      <div class="field" id="wkNewPass2Wrap">
         <label for="wkNewPass2">Powt&#243;rz has&#322;o</label>
         <input id="wkNewPass2" type="text" maxlength="120" />
       </div>
