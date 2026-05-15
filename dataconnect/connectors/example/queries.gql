@@ -139,6 +139,40 @@ query ClientsForOrg($orgId: String!) @auth(level: USER) {
     chemistry
     equipment
     clientInfo
+    objectType
+    cooperationStartAt
+    cooperationEndAt
+    contactPerson
+    phone
+    email
+    emergencyContact
+    contactPosition
+    postalCode
+    accessHours
+    accessMethod
+    serviceEntry
+    serviceType
+    serviceDays
+    preferredHours
+    workMode
+    sla
+    rbhAmount
+    requiredPermissions
+    bhpRequirements
+    workRestrictions
+    excludedZones
+    operationalRisks
+    specialInstructions
+    specialEquipment
+    storagePlace
+    backroomAccess
+    technicalNotes
+    internalNotes
+    coordinatorChangedAt
+    lastExecutionAt
+    lastWorkerAssignmentAt
+    createdAt
+    updatedAt
   }
 }
 

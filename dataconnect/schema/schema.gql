@@ -134,6 +134,54 @@ type Client @table(
   chemistry: String @col(name: "chemistry")
   equipment: String @col(name: "equipment")
   clientInfo: String @col(name: "client_info")
+
+  # Dane podstawowe profilu klienta
+  objectType: String @col(name: "object_type")
+  cooperationStartAt: Timestamp @col(name: "cooperation_start_at")
+  cooperationEndAt: Timestamp @col(name: "cooperation_end_at")
+
+  # Koordynacja i kontakt
+  contactPerson: String @col(name: "contact_person")
+  phone: String @col(name: "phone")
+  email: String @col(name: "email")
+  emergencyContact: String @col(name: "emergency_contact")
+  contactPosition: String @col(name: "contact_position")
+
+  # Lokalizacja i dostep
+  postalCode: String @col(name: "postal_code")
+  accessHours: String @col(name: "access_hours")
+  accessMethod: String @col(name: "access_method")
+  serviceEntry: String @col(name: "service_entry")
+
+  # Warunki obslugi
+  serviceType: String @col(name: "service_type")
+  serviceDays: String @col(name: "service_days")
+  preferredHours: String @col(name: "preferred_hours")
+  workMode: String @col(name: "work_mode")
+  sla: String @col(name: "sla")
+  rbhAmount: Float @col(name: "rbh_amount")
+
+  # Informacje operacyjne
+  requiredPermissions: String @col(name: "required_permissions")
+  bhpRequirements: String @col(name: "bhp_requirements")
+  workRestrictions: String @col(name: "work_restrictions")
+  excludedZones: String @col(name: "excluded_zones")
+  operationalRisks: String @col(name: "operational_risks")
+  specialInstructions: String @col(name: "special_instructions")
+
+  # Chemia i sprzet
+  specialEquipment: String @col(name: "special_equipment")
+  storagePlace: String @col(name: "storage_place")
+  backroomAccess: String @col(name: "backroom_access")
+  technicalNotes: String @col(name: "technical_notes")
+
+  # Notatki i timeline
+  internalNotes: String @col(name: "internal_notes")
+  coordinatorChangedAt: Timestamp @col(name: "coordinator_changed_at")
+  lastExecutionAt: Timestamp @col(name: "last_execution_at")
+  lastWorkerAssignmentAt: Timestamp @col(name: "last_worker_assignment_at")
+  createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
 }
 
 type Zone @table(

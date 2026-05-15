@@ -825,6 +825,40 @@ export interface ClientsForOrgData {
     chemistry?: string | null;
     equipment?: string | null;
     clientInfo?: string | null;
+    objectType?: string | null;
+    cooperationStartAt?: TimestampString | null;
+    cooperationEndAt?: TimestampString | null;
+    contactPerson?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    emergencyContact?: string | null;
+    contactPosition?: string | null;
+    postalCode?: string | null;
+    accessHours?: string | null;
+    accessMethod?: string | null;
+    serviceEntry?: string | null;
+    serviceType?: string | null;
+    serviceDays?: string | null;
+    preferredHours?: string | null;
+    workMode?: string | null;
+    sla?: string | null;
+    rbhAmount?: number | null;
+    requiredPermissions?: string | null;
+    bhpRequirements?: string | null;
+    workRestrictions?: string | null;
+    excludedZones?: string | null;
+    operationalRisks?: string | null;
+    specialInstructions?: string | null;
+    specialEquipment?: string | null;
+    storagePlace?: string | null;
+    backroomAccess?: string | null;
+    technicalNotes?: string | null;
+    internalNotes?: string | null;
+    coordinatorChangedAt?: TimestampString | null;
+    lastExecutionAt?: TimestampString | null;
+    lastWorkerAssignmentAt?: TimestampString | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
   })[];
 }
 ```
@@ -3048,6 +3082,38 @@ export interface InsertClientForOrgVariables {
   chemistry?: string | null;
   equipment?: string | null;
   clientInfo?: string | null;
+  objectType?: string | null;
+  cooperationStartAt?: TimestampString | null;
+  cooperationEndAt?: TimestampString | null;
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  emergencyContact?: string | null;
+  contactPosition?: string | null;
+  postalCode?: string | null;
+  accessHours?: string | null;
+  accessMethod?: string | null;
+  serviceEntry?: string | null;
+  serviceType?: string | null;
+  serviceDays?: string | null;
+  preferredHours?: string | null;
+  workMode?: string | null;
+  sla?: string | null;
+  rbhAmount?: number | null;
+  requiredPermissions?: string | null;
+  bhpRequirements?: string | null;
+  workRestrictions?: string | null;
+  excludedZones?: string | null;
+  operationalRisks?: string | null;
+  specialInstructions?: string | null;
+  specialEquipment?: string | null;
+  storagePlace?: string | null;
+  backroomAccess?: string | null;
+  technicalNotes?: string | null;
+  internalNotes?: string | null;
+  coordinatorChangedAt?: TimestampString | null;
+  lastExecutionAt?: TimestampString | null;
+  lastWorkerAssignmentAt?: TimestampString | null;
 }
 ```
 ### Return Type
@@ -3111,10 +3177,42 @@ export default function InsertClientForOrgComponent() {
     chemistry: ..., // optional
     equipment: ..., // optional
     clientInfo: ..., // optional
+    objectType: ..., // optional
+    cooperationStartAt: ..., // optional
+    cooperationEndAt: ..., // optional
+    contactPerson: ..., // optional
+    phone: ..., // optional
+    email: ..., // optional
+    emergencyContact: ..., // optional
+    contactPosition: ..., // optional
+    postalCode: ..., // optional
+    accessHours: ..., // optional
+    accessMethod: ..., // optional
+    serviceEntry: ..., // optional
+    serviceType: ..., // optional
+    serviceDays: ..., // optional
+    preferredHours: ..., // optional
+    workMode: ..., // optional
+    sla: ..., // optional
+    rbhAmount: ..., // optional
+    requiredPermissions: ..., // optional
+    bhpRequirements: ..., // optional
+    workRestrictions: ..., // optional
+    excludedZones: ..., // optional
+    operationalRisks: ..., // optional
+    specialInstructions: ..., // optional
+    specialEquipment: ..., // optional
+    storagePlace: ..., // optional
+    backroomAccess: ..., // optional
+    technicalNotes: ..., // optional
+    internalNotes: ..., // optional
+    coordinatorChangedAt: ..., // optional
+    lastExecutionAt: ..., // optional
+    lastWorkerAssignmentAt: ..., // optional
   };
   mutation.mutate(insertClientForOrgVars);
   // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., });
+  mutation.mutate({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., objectType: ..., cooperationStartAt: ..., cooperationEndAt: ..., contactPerson: ..., phone: ..., email: ..., emergencyContact: ..., contactPosition: ..., postalCode: ..., accessHours: ..., accessMethod: ..., serviceEntry: ..., serviceType: ..., serviceDays: ..., preferredHours: ..., workMode: ..., sla: ..., rbhAmount: ..., requiredPermissions: ..., bhpRequirements: ..., workRestrictions: ..., excludedZones: ..., operationalRisks: ..., specialInstructions: ..., specialEquipment: ..., storagePlace: ..., backroomAccess: ..., technicalNotes: ..., internalNotes: ..., coordinatorChangedAt: ..., lastExecutionAt: ..., lastWorkerAssignmentAt: ..., });
 
   // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
   const options = {
@@ -3168,6 +3266,38 @@ export interface UpdateClientForOrgVariables {
   chemistry?: string | null;
   equipment?: string | null;
   clientInfo?: string | null;
+  objectType?: string | null;
+  cooperationStartAt?: TimestampString | null;
+  cooperationEndAt?: TimestampString | null;
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  emergencyContact?: string | null;
+  contactPosition?: string | null;
+  postalCode?: string | null;
+  accessHours?: string | null;
+  accessMethod?: string | null;
+  serviceEntry?: string | null;
+  serviceType?: string | null;
+  serviceDays?: string | null;
+  preferredHours?: string | null;
+  workMode?: string | null;
+  sla?: string | null;
+  rbhAmount?: number | null;
+  requiredPermissions?: string | null;
+  bhpRequirements?: string | null;
+  workRestrictions?: string | null;
+  excludedZones?: string | null;
+  operationalRisks?: string | null;
+  specialInstructions?: string | null;
+  specialEquipment?: string | null;
+  storagePlace?: string | null;
+  backroomAccess?: string | null;
+  technicalNotes?: string | null;
+  internalNotes?: string | null;
+  coordinatorChangedAt?: TimestampString | null;
+  lastExecutionAt?: TimestampString | null;
+  lastWorkerAssignmentAt?: TimestampString | null;
 }
 ```
 ### Return Type
@@ -3231,10 +3361,42 @@ export default function UpdateClientForOrgComponent() {
     chemistry: ..., // optional
     equipment: ..., // optional
     clientInfo: ..., // optional
+    objectType: ..., // optional
+    cooperationStartAt: ..., // optional
+    cooperationEndAt: ..., // optional
+    contactPerson: ..., // optional
+    phone: ..., // optional
+    email: ..., // optional
+    emergencyContact: ..., // optional
+    contactPosition: ..., // optional
+    postalCode: ..., // optional
+    accessHours: ..., // optional
+    accessMethod: ..., // optional
+    serviceEntry: ..., // optional
+    serviceType: ..., // optional
+    serviceDays: ..., // optional
+    preferredHours: ..., // optional
+    workMode: ..., // optional
+    sla: ..., // optional
+    rbhAmount: ..., // optional
+    requiredPermissions: ..., // optional
+    bhpRequirements: ..., // optional
+    workRestrictions: ..., // optional
+    excludedZones: ..., // optional
+    operationalRisks: ..., // optional
+    specialInstructions: ..., // optional
+    specialEquipment: ..., // optional
+    storagePlace: ..., // optional
+    backroomAccess: ..., // optional
+    technicalNotes: ..., // optional
+    internalNotes: ..., // optional
+    coordinatorChangedAt: ..., // optional
+    lastExecutionAt: ..., // optional
+    lastWorkerAssignmentAt: ..., // optional
   };
   mutation.mutate(updateClientForOrgVars);
   // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., });
+  mutation.mutate({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., objectType: ..., cooperationStartAt: ..., cooperationEndAt: ..., contactPerson: ..., phone: ..., email: ..., emergencyContact: ..., contactPosition: ..., postalCode: ..., accessHours: ..., accessMethod: ..., serviceEntry: ..., serviceType: ..., serviceDays: ..., preferredHours: ..., workMode: ..., sla: ..., rbhAmount: ..., requiredPermissions: ..., bhpRequirements: ..., workRestrictions: ..., excludedZones: ..., operationalRisks: ..., specialInstructions: ..., specialEquipment: ..., storagePlace: ..., backroomAccess: ..., technicalNotes: ..., internalNotes: ..., coordinatorChangedAt: ..., lastExecutionAt: ..., lastWorkerAssignmentAt: ..., });
 
   // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
   const options = {

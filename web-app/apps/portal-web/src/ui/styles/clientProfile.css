@@ -1,0 +1,1926 @@
+#portalRoot #view-clientProfile,
+#portalRoot #view-clientProfileDetails {
+  --cp-surface: #ffffff;
+  --cp-heading: #25364d;
+  --cp-text: #566a7f;
+  --cp-muted: #7f8da2;
+  --cp-line: rgba(67, 89, 113, 0.13);
+  --cp-soft: #f6f8fc;
+  --cp-primary: #696cff;
+  --cp-primary-dark: #585adf;
+  color: var(--cp-text);
+}
+
+#portalRoot #view-clientProfile .cp-filters-card,
+#portalRoot #view-clientProfile .cp-table,
+#portalRoot #view-clientProfileDetails .cpd-summary-card,
+#portalRoot #view-clientProfileDetails .cpd-content-card,
+#portalRoot #view-clientProfileDetails .cpd-section-card {
+  border: 1px solid var(--cp-line);
+  border-radius: 14px;
+  background: var(--cp-surface);
+  box-shadow: 0 0.16rem 0.56rem rgba(67, 89, 113, 0.08);
+}
+
+#portalRoot #view-clientProfile .cp-filters-card {
+  padding: 22px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+#portalRoot #view-clientProfile .cp-filters-card .tool {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+#portalRoot #view-clientProfile .cp-filters-card label,
+#portalRoot #view-clientProfileDetails .cpd-info-label,
+#portalRoot #view-clientProfileDetails .cpd-mini-label,
+#portalRoot #view-clientProfileDetails .cpd-stat-label {
+  color: var(--cp-muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-clientProfile .cp-filters-card input,
+#portalRoot #view-clientProfile .cp-filters-card select,
+#portalRoot #view-clientProfileDetails .cpd-edit-input,
+#portalRoot #view-clientProfileDetails .cpd-data-filters input,
+#portalRoot #view-clientProfileDetails .cpd-data-filters select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(67, 89, 113, 0.2);
+  border-radius: 10px;
+  background: #ffffff;
+  color: #384551;
+  font: inherit;
+  font-size: 0.95rem;
+  padding: 0 12px;
+}
+
+#portalRoot #view-clientProfileDetails textarea.cpd-edit-input {
+  min-height: 86px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-info-value.is-editing-control {
+  display: block;
+  width: 100%;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-day-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-day-option {
+  position: relative;
+  display: inline-flex;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-day-option input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-day-option span {
+  min-width: 43px;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(67, 89, 113, 0.2);
+  border-radius: 8px;
+  background: #fff;
+  color: #34465f;
+  font-size: 0.82rem;
+  font-weight: 850;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-day-option input:checked + span {
+  border-color: rgba(105, 108, 255, 0.38);
+  background: rgba(105, 108, 255, 0.12);
+  color: var(--cp-primary-dark);
+  box-shadow: 0 6px 14px rgba(105, 108, 255, 0.12);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-day-option input:focus-visible + span {
+  outline: 2px solid rgba(105, 108, 255, 0.28);
+  outline-offset: 2px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-time-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-date-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-time-part {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-date-part {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-time-part span {
+  color: #60749a;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-date-part span {
+  color: #60749a;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-time-part .cpd-edit-input {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-date-part .cpd-edit-input {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+#portalRoot #view-clientProfile .tool-actions {
+  grid-column: 1 / -1;
+  padding-top: 14px;
+  border-top: 1px solid rgba(67, 89, 113, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+#portalRoot #view-clientProfile .tool-actions-right {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-left: auto;
+}
+
+#portalRoot #view-clientProfile .cp-table {
+  margin-top: 18px;
+  overflow: hidden;
+}
+
+#portalRoot #view-clientProfile .cp-head,
+#portalRoot #view-clientProfile .cp-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 150px;
+  align-items: center;
+  gap: 10px;
+}
+
+#portalRoot #view-clientProfile .cp-head {
+  padding: 14px 16px;
+  background: #f3f6fb;
+  border-bottom: 1px solid rgba(67, 89, 113, 0.1);
+  color: var(--cp-muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-clientProfile .cp-head > div:last-child {
+  text-align: right;
+}
+
+#portalRoot #view-clientProfile .cp-row {
+  padding: 12px 14px;
+  border-bottom: 1px solid #e8edf5;
+  background: #fff;
+}
+
+#portalRoot #view-clientProfile .cp-row:hover {
+  background: #fbfcff;
+}
+
+#portalRoot #view-clientProfile .cp-row-meta {
+  margin-top: -1px;
+  padding-top: 0;
+  color: var(--cp-muted);
+  background: #fbfcff;
+}
+
+#portalRoot #view-clientProfile .cp-row-empty > div:first-child {
+  grid-column: 1 / -1;
+  padding: 18px 4px;
+  text-align: center;
+  color: var(--cp-muted);
+}
+
+#portalRoot #view-clientProfile .cp-row-empty > div:not(:first-child) {
+  display: none;
+}
+
+#portalRoot #view-clientProfile .cp-row-empty--error > div:first-child {
+  color: #d14362;
+}
+
+#portalRoot #view-clientProfile .cp-client-cell,
+#portalRoot #view-clientProfile .cp-actions,
+#portalRoot #view-clientProfileDetails .cpd-edit-actions,
+#portalRoot #view-clientProfileDetails .cpd-content-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#portalRoot #view-clientProfile .cp-actions,
+#portalRoot #view-clientProfileDetails .cpd-content-toolbar {
+  justify-content: flex-end;
+}
+
+#portalRoot #view-clientProfile .cp-client-avatar,
+#portalRoot #view-clientProfileDetails .cpd-avatar,
+#portalRoot #view-clientProfileDetails .cpd-employee-item span {
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  font-weight: 850;
+}
+
+#portalRoot #view-clientProfile .cp-client-avatar {
+  width: 36px;
+  height: 36px;
+  font-size: 0.74rem;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-avatar {
+  width: 72px;
+  height: 72px;
+  font-size: 1.35rem;
+}
+
+#portalRoot #view-clientProfile .cp-client-avatar--violet,
+#portalRoot #view-clientProfileDetails .cpd-avatar--violet { background: rgba(105, 108, 255, 0.18); color: #595cde; }
+#portalRoot #view-clientProfile .cp-client-avatar--blue,
+#portalRoot #view-clientProfileDetails .cpd-avatar--blue { background: rgba(44, 122, 255, 0.16); color: #2c6cff; }
+#portalRoot #view-clientProfile .cp-client-avatar--green,
+#portalRoot #view-clientProfileDetails .cpd-avatar--green { background: rgba(113, 221, 55, 0.21); color: #2f8c14; }
+#portalRoot #view-clientProfile .cp-client-avatar--cyan,
+#portalRoot #view-clientProfileDetails .cpd-avatar--cyan { background: rgba(3, 195, 236, 0.2); color: #008db0; }
+#portalRoot #view-clientProfile .cp-client-avatar--amber,
+#portalRoot #view-clientProfileDetails .cpd-avatar--amber { background: rgba(255, 171, 0, 0.22); color: #a96a00; }
+#portalRoot #view-clientProfile .cp-client-avatar--rose,
+#portalRoot #view-clientProfileDetails .cpd-avatar--rose { background: rgba(255, 62, 29, 0.18); color: #b63d22; }
+
+#portalRoot #view-clientProfile .cp-client-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+#portalRoot #view-clientProfile .cp-client-name {
+  color: var(--cp-heading);
+  font-size: 0.94rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-clientProfile .cp-client-sub,
+#portalRoot #view-clientProfile .cp-cell-muted {
+  color: #6f86a8;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+#portalRoot #view-clientProfile .cp-status-badge,
+#portalRoot #view-clientProfileDetails .cpd-status-badge,
+#portalRoot #view-clientProfileDetails .cpd-data-badge,
+#portalRoot #view-clientProfileDetails .cpd-data-count {
+  min-height: 26px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 11px;
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+#portalRoot #view-clientProfile .cp-status-badge--active,
+#portalRoot #view-clientProfileDetails .cpd-status-badge.is-active,
+#portalRoot #view-clientProfileDetails .cpd-data-badge--done {
+  color: #1d7a29;
+  background: rgba(113, 221, 55, 0.2);
+}
+
+#portalRoot #view-clientProfile .cp-status-badge--inactive,
+#portalRoot #view-clientProfileDetails .cpd-status-badge.is-inactive {
+  color: #cf4b2f;
+  background: rgba(255, 62, 29, 0.2);
+}
+
+#portalRoot #view-clientProfile .cp-status-badge--suspended,
+#portalRoot #view-clientProfileDetails .cpd-status-badge.is-suspended {
+  color: #9c6b00;
+  background: rgba(255, 171, 0, 0.2);
+}
+
+#portalRoot #view-clientProfile .cp-status-badge--archived,
+#portalRoot #view-clientProfileDetails .cpd-status-badge.is-archived {
+  color: #415369;
+  background: rgba(67, 89, 113, 0.16);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 430px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-layout[hidden],
+#portalRoot #view-clientProfileDetails .cpd-panel[hidden],
+#portalRoot #view-clientProfileDetails .cpd-edit-actions[hidden],
+#portalRoot #view-clientProfileDetails .cpd-kebab-btn[hidden] {
+  display: none !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-card {
+  padding: 24px;
+  display: grid;
+  gap: 18px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-back,
+#portalRoot #view-clientProfileDetails .cpd-kebab-btn {
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(67, 89, 113, 0.2);
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cp-text);
+  background: #fff;
+  box-shadow: 0 0.12rem 0.44rem rgba(67, 89, 113, 0.12);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-back svg,
+#portalRoot #view-clientProfileDetails .cpd-kebab-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-header {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 12px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-header h2 {
+  margin: 0;
+  color: var(--cp-heading);
+  font-size: 1.55rem;
+  line-height: 1.2;
+  font-weight: 850;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-header p {
+  margin: 0;
+  color: #95a2b4;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-block-title {
+  color: var(--cp-primary);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stats-grid,
+#portalRoot #view-clientProfileDetails .cpd-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stat-card,
+#portalRoot #view-clientProfileDetails .cpd-mini-field,
+#portalRoot #view-clientProfileDetails .cpd-additional-card {
+  border: 1px solid var(--cp-line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8faff 100%);
+  padding: 12px 13px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stat-value {
+  color: var(--cp-heading);
+  font-size: 1.22rem;
+  font-weight: 850;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-mini-value,
+#portalRoot #view-clientProfileDetails .cpd-info-value {
+  color: #34465f;
+  font-size: 0.94rem;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-tab {
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--cp-text);
+  font-size: 0.94rem;
+  font-weight: 800;
+  padding: 0 14px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-tab.is-active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--cp-primary), var(--cp-primary-dark));
+  border-color: var(--cp-primary);
+  box-shadow: 0 0.45rem 1rem rgba(105, 108, 255, 0.24);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-content-card {
+  padding: 24px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel--orders,
+#portalRoot #view-clientProfileDetails .cpd-panel--calendar,
+#portalRoot #view-clientProfileDetails .cpd-data-panel,
+#portalRoot #view-clientProfileDetails .cpd-panel--locations,
+#portalRoot #view-clientProfileDetails .cpd-panel--reports {
+  display: block;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-section-card {
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-section-head h3 {
+  margin: 0;
+  color: var(--cp-heading);
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-section-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cp-primary);
+  background: rgba(105, 108, 255, 0.1);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-section-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-fields-grid,
+#portalRoot #view-clientProfileDetails .cpd-additional-grid,
+#portalRoot #view-clientProfileDetails .cpd-data-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-info-field {
+  border-top: 1px solid rgba(67, 89, 113, 0.08);
+  padding-top: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-notes-box {
+  min-height: 96px;
+  border: 1px solid rgba(67, 89, 113, 0.13);
+  border-radius: 12px;
+  background: #f8faff;
+  color: #34465f;
+  padding: 13px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-employee-list,
+#portalRoot #view-clientProfileDetails .cpd-timeline,
+#portalRoot #view-clientProfileDetails .cpd-report-list {
+  display: grid;
+  gap: 10px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-employee-item,
+#portalRoot #view-clientProfileDetails .cpd-timeline li,
+#portalRoot #view-clientProfileDetails .cpd-report-row {
+  border: 1px solid var(--cp-line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px 14px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-employee-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-employee-item span {
+  width: 32px;
+  height: 32px;
+  background: rgba(105, 108, 255, 0.14);
+  color: var(--cp-primary-dark);
+  font-size: 0.72rem;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-toolbar,
+#portalRoot #view-clientProfileDetails .cpd-data-filters {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-toolbar h3 {
+  margin: 0;
+  color: var(--cp-heading);
+  font-size: 1.12rem;
+  font-weight: 850;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-toolbar p {
+  margin: 4px 0 0;
+  color: #718198;
+  font-weight: 650;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-table {
+  border: 1px solid var(--cp-line);
+  border-radius: 12px;
+  background: #fff;
+  overflow-x: auto;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-head,
+#portalRoot #view-clientProfileDetails .cpd-data-row {
+  display: grid;
+  min-width: 760px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-orders-table .cpd-data-head,
+#portalRoot #view-clientProfileDetails .cpd-orders-table .cpd-data-row {
+  grid-template-columns: minmax(210px, 1.5fr) 118px 126px minmax(130px, 0.9fr) minmax(140px, 1fr) 100px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-contacts-table .cpd-data-head,
+#portalRoot #view-clientProfileDetails .cpd-contacts-table .cpd-data-row {
+  grid-template-columns: minmax(180px, 1.2fr) 140px 140px minmax(170px, 1fr) minmax(160px, 1fr);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-messages-table .cpd-data-head,
+#portalRoot #view-clientProfileDetails .cpd-messages-table .cpd-data-row,
+#portalRoot #view-clientProfileDetails .cpd-offers-table .cpd-data-head,
+#portalRoot #view-clientProfileDetails .cpd-offers-table .cpd-data-row,
+#portalRoot #view-clientProfileDetails .cpd-files-table .cpd-data-head,
+#portalRoot #view-clientProfileDetails .cpd-files-table .cpd-data-row {
+  grid-template-columns: 150px minmax(230px, 1.5fr) minmax(130px, 0.8fr) 120px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-head {
+  background: #f3f6fb;
+  color: var(--cp-muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-head > div,
+#portalRoot #view-clientProfileDetails .cpd-data-row > div {
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row {
+  border-top: 1px solid rgba(67, 89, 113, 0.09);
+  color: #34465f;
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row strong {
+  display: block;
+  color: #1f2d44;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row span {
+  display: block;
+  margin-top: 3px;
+  color: #7b8ba2;
+  font-size: 0.78rem;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-empty-note {
+  border: 1px dashed rgba(67, 89, 113, 0.22);
+  border-radius: 11px;
+  background: #f8faff;
+  color: #718198;
+  padding: 12px;
+  font-weight: 700;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-card h4 {
+  margin: 0 0 10px;
+  color: var(--cp-heading);
+  font-size: 0.98rem;
+  font-weight: 850;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-item {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.7fr) minmax(0, 1.3fr);
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid rgba(67, 89, 113, 0.08);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-item span {
+  color: #7b8ba2;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-item strong {
+  color: #34465f;
+  font-weight: 700;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-calendar-mount {
+  min-height: 620px;
+}
+
+#portalRoot #view-clientProfileDetails .fc {
+  color: #34465f;
+}
+
+#portalRoot #view-clientProfileDetails .fc .fc-button {
+  border-radius: 9px;
+  border-color: rgba(105, 108, 255, 0.28);
+  background: var(--cp-primary);
+}
+
+#portalRoot #view-clientProfileDetails .fc .fc-button-primary:not(:disabled).fc-button-active,
+#portalRoot #view-clientProfileDetails .fc .fc-button-primary:not(:disabled):active {
+  background: var(--cp-primary-dark);
+  border-color: var(--cp-primary-dark);
+}
+
+@media (max-width: 1180px) {
+  #portalRoot #view-clientProfileDetails .cpd-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  #portalRoot #view-clientProfile .cp-filters-card,
+  #portalRoot #view-clientProfileDetails .cpd-panel,
+  #portalRoot #view-clientProfileDetails .cpd-fields-grid,
+  #portalRoot #view-clientProfileDetails .cpd-additional-grid,
+  #portalRoot #view-clientProfileDetails .cpd-data-stat-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #portalRoot #view-clientProfile .cp-head,
+  #portalRoot #view-clientProfile .cp-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #portalRoot #view-clientProfile .cp-head > div:last-child,
+  #portalRoot #view-clientProfile .cp-actions {
+    justify-content: flex-start;
+    text-align: left;
+  }
+}
+
+/* Client profile details redesign */
+#portalRoot #view-clientProfileDetails {
+  background:
+    radial-gradient(circle at 0 0, rgba(105, 108, 255, 0.06), transparent 32%),
+    #f5f6fb;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-layout {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 26px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(270px, 340px) minmax(0, 1fr);
+  grid-template-areas:
+    "profile title"
+    "profile stats"
+    "profile mini";
+  gap: 12px 18px;
+  align-items: stretch;
+  padding: 28px 20px;
+  overflow: hidden;
+  border-color: rgba(67, 89, 113, 0.08);
+  border-radius: 14px;
+  background: linear-gradient(105deg, #ffffff 0%, #f7f6ff 42%, #edfbfd 100%);
+  box-shadow: 0 10px 28px rgba(67, 89, 113, 0.1);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-back {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  color: var(--cp-primary);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 12px rgba(67, 89, 113, 0.13);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-profile {
+  grid-area: profile;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  min-height: 190px;
+  padding: 6px 24px 6px 4px;
+  text-align: center;
+  border-right: 1px solid rgba(105, 108, 255, 0.12);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-avatar {
+  width: 76px;
+  height: 76px;
+  font-size: 1.32rem;
+  box-shadow: 0 12px 26px rgba(105, 108, 255, 0.14);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-header {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-header h2 {
+  max-width: 280px;
+  margin: 0;
+  color: #051a3f;
+  font-size: 1.42rem;
+  line-height: 1.12;
+  font-weight: 900;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-header p {
+  margin: 0;
+  color: #6f7f99;
+  font-size: 0.88rem;
+  font-weight: 850;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-block-title {
+  grid-area: title;
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  margin: 0 56px 2px 0;
+  color: #001741;
+  font-size: 0.96rem;
+  font-weight: 900;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-block-title::before {
+  content: "";
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background-color: rgba(105, 108, 255, 0.12);
+  background-image:
+    linear-gradient(135deg, rgba(105, 108, 255, 0.12), rgba(105, 108, 255, 0)),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 18V6M5 18h14M9 15l3-3 2 2 4-6' stroke='%23696cff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%, 16px 16px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stats-grid,
+#portalRoot #view-clientProfileDetails .cpd-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stats-grid {
+  grid-area: stats;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-mini-grid {
+  grid-area: mini;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stat-card,
+#portalRoot #view-clientProfileDetails .cpd-mini-field {
+  position: relative;
+  min-height: 86px;
+  padding: 17px 54px 17px 14px;
+  overflow: hidden;
+  border: 1px solid rgba(67, 89, 113, 0.09);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 5px 14px rgba(67, 89, 113, 0.07);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stat-card::after,
+#portalRoot #view-clientProfileDetails .cpd-mini-field::after {
+  content: "";
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  transform: translateY(-50%);
+  background-color: rgba(105, 108, 255, 0.14);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 17px 17px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stat-card:nth-child(1)::after {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 21V8m5 13V4m5 17v-9M4 21h16' stroke='%23696cff' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stat-card:nth-child(2)::after {
+  background-color: rgba(0, 186, 209, 0.14);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='5' y='5' width='14' height='14' rx='3' stroke='%2300bad1' stroke-width='2'/%3E%3Cpath d='m9 12 2 2 4-5' stroke='%2300bad1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stat-card:nth-child(3)::after,
+#portalRoot #view-clientProfileDetails .cpd-mini-field:nth-child(2)::after {
+  background-color: rgba(133, 92, 248, 0.14);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='9' cy='8' r='3' stroke='%23855cf8' stroke-width='2'/%3E%3Cpath d='M4 19a5 5 0 0 1 10 0M17 10v6M14 13h6' stroke='%23855cf8' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stat-card:nth-child(4)::after {
+  background-color: rgba(133, 92, 248, 0.13);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='5' y='6' width='14' height='13' rx='2' stroke='%23855cf8' stroke-width='2'/%3E%3Cpath d='M8 4v4M16 4v4M5 10h14' stroke='%23855cf8' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+#portalRoot #view-clientProfileDetails .cpd-mini-field:nth-child(1)::after {
+  display: none;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-mini-field:nth-child(3)::after {
+  background-color: rgba(255, 171, 0, 0.15);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 21s6-5 6-10a6 6 0 0 0-12 0c0 5 6 10 6 10Z' stroke='%23ff9f00' stroke-width='2'/%3E%3Ccircle cx='12' cy='11' r='2' stroke='%23ff9f00' stroke-width='2'/%3E%3C/svg%3E");
+}
+
+#portalRoot #view-clientProfileDetails .cpd-mini-field:nth-child(4)::after {
+  background-color: rgba(0, 186, 209, 0.12);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='12' r='8' stroke='%2300bad1' stroke-width='2'/%3E%3Cpath d='M12 8v5l3 2' stroke='%2300bad1' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stat-label,
+#portalRoot #view-clientProfileDetails .cpd-mini-label,
+#portalRoot #view-clientProfileDetails .cpd-info-label {
+  color: #60749a;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.045em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stat-value,
+#portalRoot #view-clientProfileDetails .cpd-mini-value,
+#portalRoot #view-clientProfileDetails .cpd-info-value {
+  min-width: 0;
+  color: #061b41;
+  font-size: 0.91rem;
+  font-weight: 850;
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stat-value--date {
+  white-space: pre-line;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-stat-value.is-empty,
+#portalRoot #view-clientProfileDetails .cpd-mini-value.is-empty,
+#portalRoot #view-clientProfileDetails .cpd-info-value.is-empty {
+  color: #8b99ad;
+  font-style: italic;
+  font-weight: 800;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-main-column {
+  min-width: 0;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-tabs {
+  gap: 12px 18px;
+  margin: 0 0 16px;
+  padding: 0;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-tab {
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  color: #445675;
+  background: transparent;
+  box-shadow: none;
+  font-size: 0.94rem;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-tab.is-active {
+  color: #fff;
+  background: linear-gradient(135deg, #7367f0, #6554e8);
+  box-shadow: 0 8px 18px rgba(105, 108, 255, 0.24);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-content-card {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-content-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 40px;
+  margin-bottom: 12px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-kebab-btn {
+  width: 38px;
+  height: 38px;
+  color: #6f7f99;
+  background: #fff;
+  border-color: rgba(67, 89, 113, 0.12);
+  border-radius: 9px;
+  box-shadow: 0 4px 12px rgba(67, 89, 113, 0.12);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-section-card {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border-color: rgba(67, 89, 113, 0.11);
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: 0 5px 15px rgba(67, 89, 113, 0.08);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-section-card--full {
+  grid-column: 1 / -1;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-section-head {
+  min-height: 62px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(67, 89, 113, 0.1);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-section-head h3 {
+  color: #001741;
+  font-size: 0.96rem;
+  font-weight: 900;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-section-head::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-right: 2px solid #6f7f99;
+  border-bottom: 2px solid #6f7f99;
+  transform: rotate(45deg);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-section-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-fields-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-info-field {
+  min-height: 76px;
+  padding: 14px 14px;
+  gap: 6px;
+  border-top: 0;
+  border-right: 1px solid rgba(67, 89, 113, 0.1);
+  border-bottom: 1px solid rgba(67, 89, 113, 0.1);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-info-field:nth-child(3n) {
+  border-right: 0;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-info-field:nth-last-child(-n + 3) {
+  border-bottom: 0;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-info-value .cpd-status-badge {
+  min-height: 28px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-notes-box {
+  min-height: 110px;
+  margin: 14px;
+  border-color: rgba(67, 89, 113, 0.11);
+  border-radius: 10px;
+  background: #f8faff;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-notes-box.cpd-notes-inline-editor {
+  display: grid;
+  gap: 10px;
+  background: #fff;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-inline-notes-input {
+  min-height: 120px;
+  resize: vertical;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-inline-notes-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-inline-notes-save {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(105, 108, 255, 0.34);
+  border-radius: 10px;
+  background: var(--cp-primary);
+  color: #fff;
+  padding: 0 14px;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(105, 108, 255, 0.18);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-inline-notes-save:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+@media (max-width: 1180px) {
+  #portalRoot #view-clientProfileDetails .cpd-summary-card {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "profile"
+      "title"
+      "stats"
+      "mini";
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-summary-profile {
+    min-height: auto;
+    padding: 0 56px 20px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(105, 108, 255, 0.12);
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-stats-grid,
+  #portalRoot #view-clientProfileDetails .cpd-mini-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  #portalRoot #view-clientProfileDetails .cpd-summary-card {
+    padding: 22px 14px;
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-summary-profile {
+    padding-inline: 42px;
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-stats-grid,
+  #portalRoot #view-clientProfileDetails .cpd-mini-grid,
+  #portalRoot #view-clientProfileDetails .cpd-panel,
+  #portalRoot #view-clientProfileDetails .cpd-fields-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-info-field,
+  #portalRoot #view-clientProfileDetails .cpd-info-field:nth-child(3n),
+  #portalRoot #view-clientProfileDetails .cpd-info-field:nth-last-child(-n + 3) {
+    border-right: 0;
+    border-bottom: 1px solid rgba(67, 89, 113, 0.1);
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-info-field:last-child {
+    border-bottom: 0;
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-tabs {
+    gap: 8px;
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-tab {
+    min-height: 38px;
+    padding-inline: 13px;
+  }
+}
+
+@media (max-width: 560px) {
+  #portalRoot #view-clientProfileDetails .cpd-summary-card {
+    border-radius: 12px;
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-summary-header h2 {
+    font-size: 1.18rem;
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-stat-card,
+  #portalRoot #view-clientProfileDetails .cpd-mini-field {
+    padding-right: 46px;
+  }
+}
+
+/* iClean2 profile table alignment */
+#portalRoot #view-clientProfile .cp-table {
+  border-radius: 12px;
+  background: #fff;
+}
+
+#portalRoot #view-clientProfile .cp-head,
+#portalRoot #view-clientProfile .cp-row {
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 16px;
+}
+
+#portalRoot #view-clientProfile .cp-head {
+  padding: 15px 16px;
+  background: #f5f7fb;
+}
+
+#portalRoot #view-clientProfile .cp-row {
+  min-height: 62px;
+  padding: 12px 14px;
+}
+
+#portalRoot #view-clientProfile .cp-row:last-child {
+  border-bottom: 0;
+}
+
+#portalRoot #view-clientProfile .cp-client-avatar {
+  width: 34px;
+  height: 34px;
+}
+
+#portalRoot #view-clientProfile .cp-client-name {
+  white-space: normal;
+}
+
+#portalRoot #view-clientProfile .cp-client-sub {
+  color: #617aa6;
+  font-weight: 850;
+}
+
+#portalRoot #view-clientProfile .cp-details-btn {
+  min-width: 116px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-content-toolbar[hidden],
+#portalRoot #view-clientProfileDetails .cpd-panel[hidden] {
+  display: none !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel {
+  display: block;
+  width: 100%;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel[data-client-profile-panel="profile"] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-panel {
+  padding: 0 8px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 0 16px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-toolbar h3 {
+  color: #001741;
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-toolbar p {
+  color: #61708b;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-count {
+  color: var(--cp-primary);
+  background: transparent;
+  font-weight: 900;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-filters {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.58fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin: 0 0 28px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-filters--single {
+  grid-template-columns: minmax(260px, 520px);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel--reports .cpd-data-filters {
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  margin-bottom: 16px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-filters label {
+  display: grid;
+  gap: 7px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-filters label > span {
+  color: #60749a;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-stat-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel--reports .cpd-data-stat-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-stat {
+  min-height: 66px;
+  border: 1px solid rgba(67, 89, 113, 0.1);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(67, 89, 113, 0.06);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel--orders {
+  display: block;
+  width: 100%;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel--orders .cpd-orders-mode {
+  display: block;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel--orders .cpd-data-toolbar {
+  margin-bottom: 16px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel--orders .cpd-data-stat-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 28px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel--orders .cpd-data-filters {
+  grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.58fr) auto;
+  margin-bottom: 28px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel--orders .cpd-data-table {
+  margin-top: 0;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-panel--orders .cpd-orders-calendar-panel,
+#portalRoot #view-clientProfileDetails .cpd-panel--orders [data-cpd-orders-panel="calendar"] {
+  display: none !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-table,
+#portalRoot #view-clientProfileDetails .zones-table {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid rgba(67, 89, 113, 0.11);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(67, 89, 113, 0.06);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-head,
+#portalRoot #view-clientProfileDetails .cpd-data-row,
+#portalRoot #view-clientProfileDetails .zones-head,
+#portalRoot #view-clientProfileDetails .zones-row {
+  display: grid;
+  min-width: 760px;
+  align-items: center;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-head,
+#portalRoot #view-clientProfileDetails .zones-head {
+  min-height: 40px;
+  background: #f5f7fb;
+  color: #465b7d;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row,
+#portalRoot #view-clientProfileDetails .zones-row {
+  min-height: 64px;
+  border-top: 1px solid rgba(67, 89, 113, 0.09);
+  color: #10223f;
+  font-weight: 750;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-head > div,
+#portalRoot #view-clientProfileDetails .cpd-data-row > div,
+#portalRoot #view-clientProfileDetails .zones-head > div,
+#portalRoot #view-clientProfileDetails .zones-row > div {
+  min-width: 0;
+  padding: 12px 14px;
+  overflow-wrap: anywhere;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row--empty > div:first-child,
+#portalRoot #view-clientProfileDetails .cpd-zones-row-empty > div:first-child {
+  grid-column: 1 / -1;
+  color: #61708b;
+  font-weight: 800;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row--empty > div:not(:first-child),
+#portalRoot #view-clientProfileDetails .cpd-zones-row-empty > div:not(:first-child) {
+  display: none;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row strong,
+#portalRoot #view-clientProfileDetails .zones-row strong {
+  display: block;
+  color: #001741;
+  font-weight: 900;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row span,
+#portalRoot #view-clientProfileDetails .zones-row span {
+  display: block;
+  color: #61708b;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row .cpd-data-badge,
+#portalRoot #view-clientProfileDetails .zones-row .cpd-data-badge {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  margin-top: 0;
+  color: #5258ff;
+  background: rgba(105, 108, 255, 0.13);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-orders-table .cpd-data-head,
+#portalRoot #view-clientProfileDetails .cpd-orders-table .cpd-data-row {
+  grid-template-columns: minmax(220px, 1.45fr) 132px 132px minmax(140px, 0.9fr) minmax(160px, 1fr) 118px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-contacts-table .cpd-data-head,
+#portalRoot #view-clientProfileDetails .cpd-contacts-table .cpd-data-row {
+  grid-template-columns: minmax(240px, 1.25fr) 150px 140px minmax(190px, 1fr) minmax(190px, 1fr);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-messages-table .cpd-data-head,
+#portalRoot #view-clientProfileDetails .cpd-messages-table .cpd-data-row,
+#portalRoot #view-clientProfileDetails .cpd-offers-table .cpd-data-head,
+#portalRoot #view-clientProfileDetails .cpd-offers-table .cpd-data-row,
+#portalRoot #view-clientProfileDetails .cpd-files-table .cpd-data-head,
+#portalRoot #view-clientProfileDetails .cpd-files-table .cpd-data-row {
+  grid-template-columns: minmax(220px, 1.35fr) minmax(170px, 0.7fr) minmax(170px, 0.8fr) minmax(130px, 0.65fr);
+}
+
+#portalRoot #view-clientProfileDetails .zones-head,
+#portalRoot #view-clientProfileDetails .zones-row {
+  grid-template-columns: 160px minmax(180px, 0.9fr) minmax(220px, 1fr) minmax(160px, 0.8fr);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-qr-pill {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 10px;
+  border-radius: 999px;
+  color: #008db0;
+  background: rgba(3, 195, 236, 0.2);
+  font-size: 0.72rem;
+  font-weight: 900;
+  vertical-align: middle;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-card {
+  min-height: 106px;
+  padding: 14px;
+  border: 1px solid rgba(67, 89, 113, 0.11);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(67, 89, 113, 0.06);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-card h4 {
+  margin: 0 0 12px;
+  color: #001741;
+  font-size: 0.96rem;
+  font-weight: 900;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-empty {
+  padding: 14px 12px;
+  border: 1px dashed rgba(91, 113, 145, 0.28);
+  border-radius: 10px;
+  background: #f8fbff;
+  color: #61708b;
+  font-weight: 800;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-item {
+  grid-template-columns: minmax(150px, 0.45fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 0;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-report-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 66px;
+  border-radius: 10px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-report-row b {
+  color: var(--cp-primary);
+}
+
+@media (max-width: 900px) {
+  #portalRoot #view-clientProfile .cp-head,
+  #portalRoot #view-clientProfile .cp-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-panel[data-client-profile-panel="profile"],
+  #portalRoot #view-clientProfileDetails .cpd-data-stat-grid,
+  #portalRoot #view-clientProfileDetails .cpd-panel--reports .cpd-data-stat-grid,
+  #portalRoot #view-clientProfileDetails .cpd-additional-grid,
+  #portalRoot #view-clientProfileDetails .cpd-data-filters,
+  #portalRoot #view-clientProfileDetails .cpd-data-filters--single,
+  #portalRoot #view-clientProfileDetails .cpd-panel--reports .cpd-data-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-panel--orders .cpd-data-stat-grid,
+  #portalRoot #view-clientProfileDetails .cpd-panel--orders .cpd-data-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-data-panel {
+    padding: 0;
+  }
+}
+
+#portalRoot #view-clientProfileDetails .cpd-worker-picker-btn {
+  width: 100%;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(67, 89, 113, 0.2);
+  border-radius: 10px;
+  background: #fff;
+  color: #10223f;
+  padding: 6px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-worker-picker-btn:hover,
+#portalRoot #view-clientProfileDetails .cpd-worker-picker-btn:focus-visible {
+  border-color: rgba(105, 108, 255, 0.52);
+  box-shadow: 0 0 0 3px rgba(105, 108, 255, 0.1);
+  outline: 0;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-worker-picker-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-worker-picker-copy strong,
+#portalRoot .cpd-assign-copy strong,
+#portalRoot #view-clientProfileDetails .cpd-employee-copy strong {
+  overflow: hidden;
+  color: #10223f;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-worker-picker-copy small,
+#portalRoot .cpd-assign-copy small,
+#portalRoot #view-clientProfileDetails .cpd-employee-copy small {
+  overflow: hidden;
+  color: #61708b;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-worker-picker-chevron {
+  color: #61708b;
+  font-size: 1rem;
+  justify-self: end;
+}
+
+#portalRoot .cpd-worker-avatar,
+#portalRoot #view-clientProfileDetails .cpd-employee-item .cpd-worker-avatar {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(105, 108, 255, 0.16);
+  color: #696cff;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+#portalRoot .cpd-worker-avatar--blue { background: rgba(90, 141, 238, 0.16); color: #2f69d9; }
+#portalRoot .cpd-worker-avatar--green { background: rgba(113, 221, 55, 0.18); color: #188b2a; }
+#portalRoot .cpd-worker-avatar--cyan { background: rgba(3, 195, 236, 0.18); color: #0086a3; }
+#portalRoot .cpd-worker-avatar--amber { background: rgba(255, 171, 0, 0.22); color: #a66b00; }
+#portalRoot .cpd-worker-avatar--rose { background: rgba(255, 62, 29, 0.16); color: #c44734; }
+
+#portalRoot #view-clientProfileDetails .cpd-employee-shell {
+  padding: 16px 14px;
+  display: grid;
+  gap: 12px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-employee-item {
+  min-height: 66px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-color: rgba(67, 89, 113, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(67, 89, 113, 0.05);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-employee-copy {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-employee-copy > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-employee-empty {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  padding: 14px;
+  border: 1px dashed rgba(105, 108, 255, 0.26);
+  border-radius: 10px;
+  background: #f8fbff;
+  color: #61708b;
+  font-weight: 850;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-employee-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-employee-add-btn {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(105, 108, 255, 0.28);
+  border-radius: 10px;
+  background: rgba(105, 108, 255, 0.1);
+  color: var(--cp-primary-dark);
+  padding: 0 14px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-employee-add-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-employee-remove-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 62, 29, 0.28);
+  border-radius: 10px;
+  background: rgba(255, 62, 29, 0.08);
+  color: #c44734;
+  font-size: 1rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+#portalRoot .cpd-assign-overlay {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+#portalRoot .cpd-assign-modal {
+  width: min(650px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid rgba(67, 89, 113, 0.12);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 22px 70px rgba(16, 34, 63, 0.24);
+}
+
+#portalRoot .cpd-assign-head,
+#portalRoot .cpd-assign-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px;
+}
+
+#portalRoot .cpd-assign-head {
+  border-bottom: 1px solid rgba(67, 89, 113, 0.1);
+}
+
+#portalRoot .cpd-assign-head h3 {
+  margin: 0;
+  color: #10223f;
+  font-size: 1.08rem;
+  font-weight: 900;
+}
+
+#portalRoot .cpd-assign-body {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px 20px;
+}
+
+#portalRoot .cpd-assign-search {
+  width: 100%;
+  height: 46px;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  overflow: hidden;
+  border: 1px solid rgba(105, 108, 255, 0.48);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(105, 108, 255, 0.1);
+}
+
+#portalRoot .cpd-assign-search .topbar-search-icon {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 22px;
+  color: #5f708a;
+}
+
+#portalRoot .cpd-assign-search .topbar-search-icon svg {
+  width: 18px !important;
+  height: 18px !important;
+  display: block;
+  flex: 0 0 auto;
+}
+
+#portalRoot .cpd-assign-search .topbar-search-input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #10223f;
+  font: inherit;
+  font-weight: 750;
+}
+
+#portalRoot .cpd-assign-search .topbar-search-input::placeholder {
+  color: #8a98ad;
+  opacity: 1;
+}
+
+#portalRoot .cpd-assign-list {
+  min-height: 0;
+  height: min(360px, calc(100vh - 264px));
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid rgba(67, 89, 113, 0.12);
+  border-radius: 12px;
+  background: #fff;
+}
+
+#portalRoot .cpd-assign-row {
+  position: relative;
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(67, 89, 113, 0.13);
+  border-radius: 10px;
+  background: #f9fbff;
+  cursor: pointer;
+}
+
+#portalRoot .cpd-assign-row.is-selected {
+  border-color: rgba(105, 108, 255, 0.52);
+  background: rgba(105, 108, 255, 0.08);
+}
+
+#portalRoot .cpd-assign-row input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+#portalRoot .cpd-assign-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+#portalRoot .cpd-assign-choice {
+  width: 22px;
+  height: 22px;
+  border: 2px solid #b8c4d3;
+  border-radius: 999px;
+  background: #fff;
+  justify-self: end;
+}
+
+#portalRoot .cpd-assign-row.is-selected .cpd-assign-choice {
+  border-color: var(--cp-primary);
+  box-shadow: inset 0 0 0 5px #fff;
+  background: var(--cp-primary);
+}
+
+#portalRoot .cpd-assign-empty {
+  min-height: 70px;
+  display: flex;
+  align-items: center;
+  color: #61708b;
+  font-weight: 850;
+  padding: 12px;
+}
+
+#portalRoot .cpd-assign-actions {
+  justify-content: flex-end;
+  border-top: 1px solid rgba(67, 89, 113, 0.1);
+}

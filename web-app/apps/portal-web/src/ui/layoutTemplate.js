@@ -486,6 +486,7 @@
         <section id="view-audits" style="display:none;"></section>
         <section id="view-individualOrders" style="display:none;"></section>
         <section id="view-clientProfile" style="display:none;"></section>
+        <section id="view-clientProfileDetails" style="display:none;"></section>
         <section id="view-reports" style="display:none;"></section>
         <section id="view-settings" style="display:none;"></section>
 

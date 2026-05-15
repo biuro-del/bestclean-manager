@@ -1,5 +1,6 @@
 ﻿import { useEffect } from 'react'
 import './index.css'
+import './ui/styles/clientProfile.css'
 import { mountPortalApp } from './ui/portalApp'
 
 function App() {

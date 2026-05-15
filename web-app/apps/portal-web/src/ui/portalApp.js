@@ -1,4 +1,10 @@
 ﻿import { ensureSessionContext, login, logout, getSession, requireAuth } from '../auth/authService'
+import { Calendar } from '@fullcalendar/core'
+import plLocale from '@fullcalendar/core/locales/pl'
+import dayGridPlugin from '@fullcalendar/daygrid'
+import interactionPlugin from '@fullcalendar/interaction'
+import listPlugin from '@fullcalendar/list'
+import timeGridPlugin from '@fullcalendar/timegrid'
 import { getDataSourceLabel } from '../firebase/firebaseClient'
 import { createClient, getClients, updateClient } from '../services/clientService'
 import {
@@ -198,6 +204,12 @@ const appState = {
   clientProfileRows: [],
   clientProfileCurrent: null,
   clientProfileEditMode: false,
+  clientProfileActiveTab: 'profile',
+  clientProfileCalendarInstance: null,
+  clientProfileCalendarRows: [],
+  clientProfileAssignSelectedKeys: new Set(),
+  clientProfileCoordinatorSelectedKey: '',
+  clientProfileEditAssignees: '',
   reportLastCsv: '',
   reportHistoryTab: 'objects',
   reportHistoryRows: [],
@@ -2371,6 +2383,14 @@ function normalizeClientStatus(status) {
 
   if (value === 'inactive' || value === 'nieaktywny') {
     return 'Nieaktywny'
+  }
+
+  if (value === 'suspended' || value === 'wstrzymany') {
+    return 'Wstrzymany'
+  }
+
+  if (value === 'archived' || value === 'archiwalny') {
+    return 'Archiwalny'
   }
 
   return 'Aktywny'
@@ -7755,74 +7775,495 @@ function profileFieldValue(value, fallback = '-') {
   return raw || fallback
 }
 
-function mapClientForProfileView(client) {
+const CLIENT_PROFILE_STATUS_OPTIONS = ['Aktywny', 'Nieaktywny', 'Wstrzymany', 'Archiwalny']
+const CLIENT_PROFILE_DETAIL_TABS = ['profile', 'orders', 'calendar', 'contacts', 'messages', 'additional', 'offers', 'files', 'locations', 'reports']
+const CLIENT_PROFILE_AVATAR_CLASSES = ['violet', 'blue', 'green', 'cyan', 'amber', 'rose']
+const CLIENT_PROFILE_WEEKDAY_OPTIONS = [
+  { value: 'Pon', aliases: ['pon', 'poniedzialek', 'poniedziałek'] },
+  { value: 'Wt', aliases: ['wt', 'wtorek'] },
+  { value: 'Sr', aliases: ['sr', 'śr', 'sroda', 'środa'] },
+  { value: 'Czw', aliases: ['czw', 'czwartek'] },
+  { value: 'Pt', aliases: ['pt', 'piatek', 'piątek'] },
+  { value: 'Sob', aliases: ['sob', 'sobota'] },
+  { value: 'Nd', aliases: ['nd', 'niedz', 'niedziela'] },
+]
+const CLIENT_PROFILE_EDIT_FIELDS = [
+  { id: 'cpdFieldStatus', field: 'status', type: 'select', options: CLIENT_PROFILE_STATUS_OPTIONS },
+  { id: 'cpdFieldName', field: 'name', required: true },
+  { id: 'cpdFieldNip', field: 'nip' },
+  { id: 'cpdFieldObjectType', field: 'objectType' },
+  { id: 'cpdFieldCooperationStart', field: 'cooperationStartAt', endField: 'cooperationEndAt', type: 'date-range' },
+  { id: 'cpdFieldCoordinator', field: 'coordinator', type: 'worker-single' },
+  { id: 'cpdFieldContactPerson', field: 'contactPerson' },
+  { id: 'cpdFieldPhone', field: 'phone' },
+  { id: 'cpdFieldEmail', field: 'email' },
+  { id: 'cpdFieldEmergencyContact', field: 'emergencyContact' },
+  { id: 'cpdFieldContactPosition', field: 'contactPosition' },
+  { id: 'cpdFieldCity', field: 'city' },
+  { id: 'cpdFieldAddress', field: 'address', multiline: true },
+  { id: 'cpdFieldPostalCode', field: 'postalCode' },
+  { id: 'cpdFieldAccessHours', field: 'accessHours', type: 'time-range' },
+  { id: 'cpdFieldAccessMethod', field: 'accessMethod', multiline: true },
+  { id: 'cpdFieldServiceEntry', field: 'serviceEntry', multiline: true },
+  { id: 'cpdFieldServiceType', field: 'serviceType' },
+  { id: 'cpdFieldFrequency', field: 'serviceFrequency' },
+  { id: 'cpdFieldServiceDays', field: 'serviceDays', type: 'weekdays' },
+  { id: 'cpdFieldPreferredHours', field: 'preferredHours', type: 'time-range' },
+  { id: 'cpdFieldWorkMode', field: 'workMode', type: 'time-range' },
+  { id: 'cpdFieldSla', field: 'sla' },
+  { id: 'cpdFieldRbhAmount', field: 'rbhAmount', type: 'number', step: '0.25' },
+  { id: 'cpdFieldPermissions', field: 'requiredPermissions', multiline: true },
+  { id: 'cpdFieldBhp', field: 'bhpRequirements', multiline: true },
+  { id: 'cpdFieldRestrictions', field: 'workRestrictions', multiline: true },
+  { id: 'cpdFieldExcludedZones', field: 'excludedZones', multiline: true },
+  { id: 'cpdFieldOperationalRisks', field: 'operationalRisks', multiline: true },
+  { id: 'cpdFieldSpecialInstructions', field: 'specialInstructions', multiline: true },
+  { id: 'cpdFieldChemicals', field: 'chemistry', multiline: true },
+  { id: 'cpdFieldEquipment', field: 'equipment', multiline: true },
+  { id: 'cpdFieldSpecialEquipment', field: 'specialEquipment', multiline: true },
+  { id: 'cpdFieldStorage', field: 'storagePlace' },
+  { id: 'cpdFieldBackroomAccess', field: 'backroomAccess' },
+  { id: 'cpdFieldTechnicalNotes', field: 'technicalNotes', multiline: true },
+  { id: 'cpdFieldInternalNotes', field: 'internalNotes', multiline: true },
+]
+
+function clientProfileText(value, fallback = '') {
+  const raw = String(value ?? '').trim()
+  return raw || fallback
+}
+
+function clientProfileDateInputValue(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/)
+  if (match) return match[1]
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) return ''
+  return calendarDateToYmd(date)
+}
+
+function clientProfileDateLabel(value) {
+  const raw = clientProfileDateInputValue(value)
+  if (!raw) return ''
+  return raw.split('-').reverse().join('.')
+}
+
+function clientProfileCooperationPeriodLabel(client = {}) {
+  const start = clientProfileDateLabel(client.cooperationStartAt)
+  const end = clientProfileDateLabel(client.cooperationEndAt)
+  if (start && end) return `${start} do ${end}`
+  if (start) return `od ${start}`
+  if (end) return `do ${end}`
+  return ''
+}
+
+function clientProfileNumberInputValue(value) {
+  const raw = String(value ?? '').trim().replace(',', '.')
+  if (!raw) return ''
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? String(parsed) : raw
+}
+
+function clientProfileNumberLabel(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const parsed = Number(raw.replace(',', '.'))
+  if (!Number.isFinite(parsed)) return raw
+  return parsed.toLocaleString('pl-PL', { maximumFractionDigits: 2 })
+}
+
+function clientProfileDateTimeLabel(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) {
+    return clientProfileDateLabel(raw)
+  }
+  const dateLabel = calendarDateToYmd(date).split('-').reverse().join('.')
+  const timeLabel = date.toLocaleTimeString('pl-PL', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+  return `${dateLabel}\n${timeLabel}`
+}
+
+function clientProfileEscapeRegExp(value) {
+  return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function clientProfileContainsWord(value, word) {
+  const normalizedValue = normalizeSearchText(value)
+  const normalizedWord = normalizeSearchText(word)
+  if (!normalizedValue || !normalizedWord) return false
+  const pattern = new RegExp(`(^|[^a-z0-9])${clientProfileEscapeRegExp(normalizedWord)}([^a-z0-9]|$)`)
+  return pattern.test(normalizedValue)
+}
+
+function clientProfileSelectedWeekdays(value) {
+  const selected = new Set()
+  CLIENT_PROFILE_WEEKDAY_OPTIONS.forEach((day) => {
+    if (day.aliases.some((alias) => clientProfileContainsWord(value, alias))) {
+      selected.add(day.value)
+    }
+  })
+  return selected
+}
+
+function renderClientProfileWeekdayPicker(definition, value) {
+  const selected = clientProfileSelectedWeekdays(value)
+  const original = clientProfileText(value)
+  return `
+    <div class="cpd-day-picker" data-client-profile-days-field="${escapeHtml(definition.field)}" data-cpd-days-original="${escapeHtml(original)}" data-cpd-days-had-selection="${selected.size ? 'true' : 'false'}">
+      ${CLIENT_PROFILE_WEEKDAY_OPTIONS.map((day) => `
+        <label class="cpd-day-option">
+          <input type="checkbox" value="${escapeHtml(day.value)}" data-client-profile-edit-day="${escapeHtml(definition.field)}"${selected.has(day.value) ? ' checked' : ''} />
+          <span>${escapeHtml(day.value)}</span>
+        </label>
+      `).join('')}
+    </div>
+  `
+}
+
+function clientProfileNormalizeTimePart(hour, minute = '00') {
+  const parsedHour = Number(hour)
+  const parsedMinute = Number(minute || '00')
+  if (!Number.isInteger(parsedHour) || !Number.isInteger(parsedMinute)) return ''
+  if (parsedHour < 0 || parsedHour > 23 || parsedMinute < 0 || parsedMinute > 59) return ''
+  return `${String(parsedHour).padStart(2, '0')}:${String(parsedMinute).padStart(2, '0')}`
+}
+
+function clientProfileParseTimeRange(value) {
+  const raw = clientProfileText(value)
+  const rawNormalized = normalizeSearchText(raw)
+  if (rawNormalized.includes('calodob') || rawNormalized.includes('non stop') || rawNormalized.includes('24h') || /(^|[^\d])24\s*\/\s*7(?=$|[^\d])/.test(raw)) {
+    return {
+      from: '',
+      to: '',
+      hadTime: false,
+    }
+  }
+  const normalized = raw.replace(/[–—]/g, '-').replace(/\./g, ':')
+  const matches = [...normalized.matchAll(/(?:^|[^\d])(\d{1,2})(?::?(\d{2}))?(?=$|[^\d])/g)]
+    .map((match) => clientProfileNormalizeTimePart(match[1], match[2]))
+    .filter(Boolean)
   return {
-    ...client,
-    id: String(client.id ?? ''),
-    name: String(client.name ?? ''),
-    status: normalizeClientStatus(client.status),
-    nip: String(client.nip ?? ''),
-    coordinator: String(client.coordinator ?? ''),
-    contact: String(client.contact ?? client.phone ?? client.email ?? ''),
-    city: String(client.city ?? ''),
-    address: String(client.address ?? ''),
-    frequency: String(client.frequency ?? client.czestotliwosc ?? ''),
-    workers: String(client.workers ?? client.osobyWykonujace ?? client.osoby ?? ''),
-    chemicals: String(client.chemia ?? ''),
-    equipment: String(client.sprzet ?? ''),
-    information: String(client.info ?? client.informacje ?? ''),
+    from: matches[0] ?? '',
+    to: matches[1] ?? '',
+    hadTime: matches.length > 0,
   }
 }
 
-function getFilteredClientProfiles() {
-  const nameFilter = String(document.getElementById('cpSearchName')?.value ?? '')
-    .trim()
-    .toLowerCase()
-  const nipFilter = String(document.getElementById('cpSearchNip')?.value ?? '')
-    .trim()
-    .toLowerCase()
+function renderClientProfileTimeRange(definition, value) {
+  const original = clientProfileText(value)
+  const range = clientProfileParseTimeRange(original)
+  return `
+    <div class="cpd-time-range" data-client-profile-time-field="${escapeHtml(definition.field)}" data-cpd-time-original="${escapeHtml(original)}" data-cpd-time-had-range="${range.hadTime ? 'true' : 'false'}">
+      <label class="cpd-time-part">
+        <span>Od</span>
+        <input class="cpd-edit-input" type="time" data-client-profile-time-part="from" value="${escapeHtml(range.from)}" />
+      </label>
+      <label class="cpd-time-part">
+        <span>Do</span>
+        <input class="cpd-edit-input" type="time" data-client-profile-time-part="to" value="${escapeHtml(range.to)}" />
+      </label>
+    </div>
+  `
+}
 
-  return appState.clients
-    .map((client) => mapClientForProfileView(client))
-    .filter((client) => {
-      if (nameFilter && !client.name.toLowerCase().includes(nameFilter)) {
-        return false
+function renderClientProfileDateRange(definition, client = appState.clientProfileCurrent) {
+  const start = clientProfileDateInputValue(client?.[definition.field])
+  const end = clientProfileDateInputValue(client?.[definition.endField])
+  return `
+    <div class="cpd-date-range" data-client-profile-date-range="${escapeHtml(definition.field)}">
+      <label class="cpd-date-part">
+        <span>Od</span>
+        <input class="cpd-edit-input" type="date" data-client-profile-date-range-part="start" value="${escapeHtml(start)}" />
+      </label>
+      <label class="cpd-date-part">
+        <span>Do</span>
+        <input class="cpd-edit-input" type="date" data-client-profile-date-range-part="end" value="${escapeHtml(end)}" />
+      </label>
+    </div>
+  `
+}
+
+function clientProfileWorkerSubLabel(worker = {}) {
+  return String(worker.email ?? worker.workerEmail ?? worker.mail ?? worker.login ?? worker.workerLogin ?? worker.authUid ?? '').trim()
+}
+
+function clientProfileWorkerOption(worker = {}) {
+  const label = calendarWorkerLabel(worker)
+  const id = calendarWorkerId(worker)
+  const subLabel = clientProfileWorkerSubLabel(worker)
+  const key = normalizeSearchText(id || subLabel || label)
+  if (!label || !key) return null
+  return {
+    key,
+    id,
+    label,
+    subLabel,
+    searchText: normalizeSearchText([label, subLabel, id].join(' ')),
+    worker,
+  }
+}
+
+function clientProfileWorkerOptions() {
+  const seen = new Set()
+  return (Array.isArray(appState.workers) ? appState.workers : [])
+    .map((worker) => clientProfileWorkerOption(worker))
+    .filter((option) => {
+      if (!option || seen.has(option.key)) return false
+      seen.add(option.key)
+      return true
+    })
+    .sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
+}
+
+function clientProfileWorkerOptionInitials(option = {}) {
+  const source = clientProfileText(option.label, option.subLabel || option.id)
+  const words = source.split(/\s+/).filter(Boolean)
+  return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : source.slice(0, 2)).toUpperCase()
+}
+
+function clientProfileWorkerOptionAvatarClass(option = {}) {
+  const key = String(option.key ?? option.id ?? option.label ?? '')
+  const sum = [...key].reduce((total, char) => total + char.charCodeAt(0), 0)
+  return CLIENT_PROFILE_AVATAR_CLASSES[sum % CLIENT_PROFILE_AVATAR_CLASSES.length]
+}
+
+function clientProfileFindWorkerOptionByText(value) {
+  const normalized = normalizeSearchText(value)
+  if (!normalized) return null
+  return clientProfileWorkerOptions().find((option) => (
+    normalizeSearchText(option.label) === normalized ||
+    normalizeSearchText(option.subLabel) === normalized ||
+    normalizeSearchText(option.id) === normalized
+  )) ?? null
+}
+
+function renderClientProfileWorkerSelect(definition, value) {
+  const selected = clientProfileFindWorkerOptionByText(value)
+  const label = selected?.label || clientProfileText(value, 'Wybierz koordynatora')
+  const subLabel = selected?.subLabel || (selected ? selected.id : 'Lista pracowników')
+  const avatarClass = selected ? clientProfileWorkerOptionAvatarClass(selected) : 'violet'
+  const initials = selected ? clientProfileWorkerOptionInitials(selected) : '--'
+  return `
+    <input type="hidden" data-client-profile-edit-field="${escapeHtml(definition.field)}" value="${escapeHtml(clientProfileText(value))}" />
+    <button class="cpd-worker-picker-btn" id="cpdCoordinatorPickerBtn" type="button">
+      <span class="cpd-worker-avatar cpd-worker-avatar--${escapeHtml(avatarClass)}">${escapeHtml(initials)}</span>
+      <span class="cpd-worker-picker-copy">
+        <strong id="cpdCoordinatorPickerLabel">${escapeHtml(label)}</strong>
+        <small id="cpdCoordinatorPickerSubLabel">${escapeHtml(subLabel)}</small>
+      </span>
+      <span class="cpd-worker-picker-chevron" aria-hidden="true">⌄</span>
+    </button>
+  `
+}
+
+function clientProfileAssignedWorkerItems(client = appState.clientProfileCurrent) {
+  const options = clientProfileWorkerOptions()
+  const values = clientProfileText(client?.assignees)
+    .split(/[,;\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+  const seen = new Set()
+  return values
+    .map((value) => {
+      const normalized = normalizeSearchText(value)
+      const matched = options.find((option) => (
+        normalizeSearchText(option.label) === normalized ||
+        normalizeSearchText(option.subLabel) === normalized ||
+        normalizeSearchText(option.id) === normalized
+      ))
+      if (matched) return matched
+      return {
+        key: `custom:${normalized || value}`,
+        id: '',
+        label: value,
+        subLabel: '',
+        searchText: normalized,
+        custom: true,
       }
-
-      if (nipFilter && !client.nip.toLowerCase().includes(nipFilter)) {
-        return false
-      }
-
+    })
+    .filter((item) => {
+      if (!item.label || seen.has(item.key)) return false
+      seen.add(item.key)
       return true
     })
 }
 
-function renderClientProfileTable(rows) {
-  const tbody = document.getElementById('clientProfileBody')
-  if (!tbody) {
-    return
+function clientProfileAssignedWorkerKeys(client = appState.clientProfileCurrent) {
+  return new Set(clientProfileAssignedWorkerItems(client).filter((item) => !item.custom).map((item) => item.key))
+}
+
+function clientProfileFormatWorkerAssignmentsFromKeys(keys = new Set()) {
+  return clientProfileWorkerOptions()
+    .filter((option) => keys.has(option.key))
+    .map((option) => option.label)
+    .join(', ')
+}
+
+function readClientProfileWeekdays(definition) {
+  const inputs = [...document.querySelectorAll(`[data-client-profile-edit-day="${definition.field}"]`)]
+  if (!inputs.length) return ''
+  const root = inputs[0].closest('[data-client-profile-days-field]')
+  const selected = inputs
+    .filter((input) => input.checked)
+    .map((input) => String(input.value ?? '').trim())
+    .filter(Boolean)
+  if (selected.length) return selected.join(', ')
+  const original = String(root?.dataset?.cpdDaysOriginal ?? '').trim()
+  return original && root?.dataset?.cpdDaysHadSelection !== 'true' ? original : ''
+}
+
+function readClientProfileTimeRange(definition) {
+  const root = document.querySelector(`[data-client-profile-time-field="${definition.field}"]`)
+  if (!root) return ''
+  const from = String(root.querySelector('[data-client-profile-time-part="from"]')?.value ?? '').trim()
+  const to = String(root.querySelector('[data-client-profile-time-part="to"]')?.value ?? '').trim()
+  if (from && to) return `${from} - ${to}`
+  if (from) return `od ${from}`
+  if (to) return `do ${to}`
+  const original = String(root.dataset?.cpdTimeOriginal ?? '').trim()
+  return original && root.dataset?.cpdTimeHadRange !== 'true' ? original : ''
+}
+
+function mapClientForProfileView(client = {}) {
+  const mapped = {
+    ...client,
+    id: String(client.id ?? client.clientId ?? ''),
+    clientId: String(client.clientId ?? client.id ?? ''),
+    name: String(client.name ?? ''),
+    status: normalizeClientStatus(client.status),
+    nip: String(client.nip ?? ''),
+    city: String(client.city ?? ''),
+    address: String(client.address ?? ''),
+    contact: String(client.contact ?? client.phone ?? client.email ?? ''),
+    coordinator: String(client.coordinator ?? ''),
+    serviceFrequency: String(client.serviceFrequency ?? client.frequency ?? client.czestotliwosc ?? ''),
+    assignees: String(client.assignees ?? client.workers ?? client.osobyWykonujace ?? client.osoby ?? ''),
+    chemistry: String(client.chemistry ?? client.chemia ?? ''),
+    equipment: String(client.equipment ?? client.sprzet ?? ''),
+    clientInfo: String(client.clientInfo ?? client.info ?? client.informacje ?? ''),
   }
+
+  ;[
+    'objectType',
+    'cooperationStartAt',
+    'cooperationEndAt',
+    'contactPerson',
+    'phone',
+    'email',
+    'emergencyContact',
+    'contactPosition',
+    'postalCode',
+    'accessHours',
+    'accessMethod',
+    'serviceEntry',
+    'serviceType',
+    'serviceDays',
+    'preferredHours',
+    'workMode',
+    'sla',
+    'rbhAmount',
+    'requiredPermissions',
+    'bhpRequirements',
+    'workRestrictions',
+    'excludedZones',
+    'operationalRisks',
+    'specialInstructions',
+    'specialEquipment',
+    'storagePlace',
+    'backroomAccess',
+    'technicalNotes',
+    'internalNotes',
+    'coordinatorChangedAt',
+    'lastExecutionAt',
+    'lastWorkerAssignmentAt',
+    'createdAt',
+    'updatedAt',
+  ].forEach((field) => {
+    mapped[field] = client[field] ?? ''
+  })
+
+  return {
+    ...mapped,
+    frequency: mapped.serviceFrequency,
+    workers: mapped.assignees,
+    chemicals: mapped.chemistry,
+    information: mapped.clientInfo,
+  }
+}
+
+function getFilteredClientProfiles() {
+  const nameFilter = normalizeSearchText(document.getElementById('cpSearchName')?.value)
+  const cityFilter = normalizeSearchText(document.getElementById('cpSearchCity')?.value)
+  const coordinatorFilter = normalizeSearchText(document.getElementById('cpSearchCoordinator')?.value)
+  const statusFilter = normalizeSearchText(document.getElementById('cpSearchStatus')?.value)
+  const limit = Number(document.getElementById('cpPageSize')?.value) || 50
+
+  return appState.clients
+    .map((client) => mapClientForProfileView(client))
+    .filter((client) => {
+      const haystack = normalizeSearchText([client.id, client.name, client.nip].join(' '))
+      if (nameFilter && !haystack.includes(nameFilter)) return false
+      if (cityFilter && !normalizeSearchText(client.city).includes(cityFilter)) return false
+      if (coordinatorFilter && !normalizeSearchText(client.coordinator).includes(coordinatorFilter)) return false
+      if (statusFilter && normalizeSearchText(client.status) !== statusFilter) return false
+      return true
+    })
+    .slice(0, Math.max(1, limit))
+}
+
+function clientProfileInitials(client) {
+  const source = clientProfileText(client?.name, client?.id)
+  const words = source.split(/\s+/).filter(Boolean)
+  return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : source.slice(0, 2)).toUpperCase()
+}
+
+function clientProfileAvatarClass(client) {
+  const key = String(client?.id ?? client?.name ?? '')
+  const sum = [...key].reduce((total, char) => total + char.charCodeAt(0), 0)
+  return CLIENT_PROFILE_AVATAR_CLASSES[sum % CLIENT_PROFILE_AVATAR_CLASSES.length]
+}
+
+function clientProfileStatusClass(status) {
+  const normalized = normalizeSearchText(status)
+  if (normalized.includes('nieaktywn')) return 'inactive'
+  if (normalized.includes('wstrzym') || normalized.includes('suspend')) return 'suspended'
+  if (normalized.includes('archiw')) return 'archived'
+  return 'active'
+}
+
+function renderClientProfileTable(rows) {
+  const body = document.getElementById('clientProfileBody')
+  if (!body) return
 
   if (!rows.length) {
-    tbody.innerHTML = `
-      <tr><td colspan="4" style="text-align:center; padding:40px; color:#64748b;">Brak klientów do wyświetlenia.</td></tr>
-    `
+    body.innerHTML = '<div class="cp-row cp-row-empty"><div>Brak klientow do wyswietlenia.</div><div></div></div>'
     return
   }
 
-  tbody.innerHTML = rows
-    .map(
-      (client) => `
-      <tr>
-        <td class="mono">${escapeHtml(profileFieldValue(client.id))}</td>
-        <td><b>${escapeHtml(profileFieldValue(client.name))}</b></td>
-        <td>${escapeHtml(profileFieldValue(client.nip))}</td>
-        <td style="text-align:right;">
-          <button class="btn2" type="button" data-client-profile-id="${escapeHtml(client.id)}">Podgląd</button>
-        </td>
-      </tr>
-    `,
-    )
+  body.innerHTML = rows
+    .map((client) => {
+      const avatarClass = clientProfileAvatarClass(client)
+      const subline = client.clientId || client.id
+      return `
+        <div class="cp-row" data-client-profile-row="${escapeHtml(client.id)}">
+          <div class="cp-client-cell">
+            <span class="cp-client-avatar cp-client-avatar--${avatarClass}">${escapeHtml(clientProfileInitials(client))}</span>
+            <span class="cp-client-copy">
+              <strong class="cp-client-name">${escapeHtml(profileFieldValue(client.name))}</strong>
+              <span class="cp-client-sub">${escapeHtml(profileFieldValue(subline))}</span>
+            </span>
+          </div>
+          <div class="cp-actions">
+            <button class="btn2 cp-details-btn" type="button" data-client-profile-id="${escapeHtml(client.id)}">Zobacz profil</button>
+          </div>
+        </div>
+      `
+    })
     .join('')
 }
 
@@ -7832,155 +8273,833 @@ function filterClientProfileTable() {
   renderClientProfileTable(filtered)
 }
 
-function fillClientProfileCoordinatorOptions() {
-  const list = document.getElementById('cpKoordList')
-  if (!list) {
-    return
+function clientProfileFindById(clientId) {
+  const normalizedId = String(clientId ?? '').trim()
+  return appState.clients.find((client) => String(client.id ?? client.clientId ?? '').trim() === normalizedId) ?? null
+}
+
+function clientProfileSetText(id, value, fallback = 'Brak danych') {
+  const node = document.getElementById(id)
+  if (node) {
+    const empty = !clientProfileText(value)
+    node.textContent = profileFieldValue(value, fallback)
+    node.classList.toggle('is-empty', empty)
   }
+}
 
-  const uniqueNames = [...new Set(appState.workers.map((worker) => String(worker.name ?? '').trim()).filter(Boolean))]
-  uniqueNames.sort((left, right) => left.localeCompare(right, 'pl', { sensitivity: 'base' }))
+function renderClientProfileInternalNotesInline(client = appState.clientProfileCurrent) {
+  const node = document.getElementById('cpdFieldInternalNotes')
+  if (!node || appState.clientProfileEditMode || !canManageClients()) return
+  const value = clientProfileText(client?.internalNotes)
+  node.classList.remove('is-empty')
+  node.classList.add('cpd-notes-inline-editor')
+  node.innerHTML = `
+    <textarea
+      class="cpd-edit-input cpd-inline-notes-input"
+      id="cpdInternalNotesInput"
+      rows="5"
+      placeholder="Brak notatek"
+    >${escapeHtml(value)}</textarea>
+    <div class="cpd-inline-notes-actions">
+      <button class="cpd-inline-notes-save" id="cpdInternalNotesSaveBtn" type="button">Zapisz notatkę</button>
+    </div>
+  `
+}
 
-  list.innerHTML = ''
-  uniqueNames.forEach((name) => {
-    const option = document.createElement('option')
-    option.value = name
-    list.appendChild(option)
+function clientProfileZones(client = appState.clientProfileCurrent) {
+  const clientId = String(client?.id ?? client?.clientId ?? '').trim()
+  if (!clientId) return []
+  return appState.zones.filter((zone) => String(zone.clientId ?? '').trim() === clientId)
+}
+
+function clientProfileTaskMatchesClient(task = {}, client = appState.clientProfileCurrent) {
+  const clientId = normalizeSearchText(client?.id ?? client?.clientId)
+  const clientName = normalizeSearchText(client?.name)
+  const directValues = [
+    task.clientId,
+    task.clientName,
+    task.place,
+    task.title,
+    ...(calendarNormalizeSelectionList(task.objects ?? task.clients ?? task.sites, task.place).flatMap((selection) => [
+      selection.id,
+      selection.label,
+    ])),
+  ].map((value) => normalizeSearchText(value))
+
+  return directValues.some((value) => value && ((clientId && value.includes(clientId)) || (clientName && value.includes(clientName))))
+}
+
+function clientProfileTasks(client = appState.clientProfileCurrent) {
+  calendarEnsureState()
+  return appState.calendarTasks.filter((task) => clientProfileTaskMatchesClient(task, client))
+}
+
+function clientProfileOrders(client = appState.clientProfileCurrent) {
+  const clientId = normalizeSearchText(client?.id ?? client?.clientId)
+  const clientName = normalizeSearchText(client?.name)
+  return ordersListSourceOrders().filter((order) => {
+    const values = [order.clientId, order.clientLabel, order.client, order.title, order.addressLabel, order.location]
+      .map((value) => normalizeSearchText(value))
+      .filter(Boolean)
+    return values.some((value) => (clientId && value.includes(clientId)) || (clientName && value.includes(clientName)))
   })
 }
 
-function setClientProfileFieldValues(client) {
-  const mapped = mapClientForProfileView(client)
-  const title = document.getElementById('cpModalTitle')
-  if (title) {
-    title.textContent = `Szczegóły Klienta: ${profileFieldValue(mapped.name)}`
-  }
+function clientProfileWorkerCount(client = appState.clientProfileCurrent) {
+  return clientProfileText(client?.assignees)
+    .split(/[,;\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean).length
+}
 
-  const viewMap = {
-    'view-id': mapped.id,
-    'view-status': mapped.status,
-    'view-nazwa': mapped.name,
-    'view-nip': mapped.nip,
-    'view-koordynator': mapped.coordinator,
-    'view-kontakt': mapped.contact,
-    'view-miasto': mapped.city,
-    'view-adres': mapped.address,
-    'view-czestotliwosc': mapped.frequency,
-    'view-osoby': mapped.workers,
-    'view-chemia': mapped.chemicals,
-    'view-sprzet': mapped.equipment,
-    'view-informacje': mapped.information,
-  }
+function clientProfileSetActiveTab(tab = 'profile') {
+  const nextTab = CLIENT_PROFILE_DETAIL_TABS.includes(tab) ? tab : 'profile'
+  appState.clientProfileActiveTab = nextTab
 
-  Object.entries(viewMap).forEach(([id, value]) => {
-    const node = document.getElementById(id)
-    if (node) {
-      node.textContent = profileFieldValue(value)
-    }
+  document.querySelectorAll('[data-client-profile-tab]').forEach((button) => {
+    const active = button.getAttribute('data-client-profile-tab') === nextTab
+    button.classList.toggle('is-active', active)
+    button.setAttribute('aria-selected', active ? 'true' : 'false')
   })
-
-  const editMap = {
-    'edit-status': mapped.status,
-    'edit-nazwa': mapped.name,
-    'edit-nip': mapped.nip,
-    'edit-koordynator': mapped.coordinator,
-    'edit-kontakt': mapped.contact,
-    'edit-miasto': mapped.city,
-    'edit-adres': mapped.address,
-    'edit-czestotliwosc': mapped.frequency,
-    'edit-osoby': mapped.workers,
-    'edit-chemia': mapped.chemicals,
-    'edit-sprzet': mapped.equipment,
-    'edit-informacje': mapped.information,
+  document.querySelectorAll('[data-client-profile-panel]').forEach((panel) => {
+    const active = panel.getAttribute('data-client-profile-panel') === nextTab
+    panel.classList.toggle('is-active', active)
+    panel.hidden = !active
+  })
+  const editToolbar = document.querySelector('#view-clientProfileDetails .cpd-content-toolbar')
+  if (editToolbar) {
+    editToolbar.hidden = nextTab !== 'profile'
   }
 
-  Object.entries(editMap).forEach(([id, value]) => {
-    const input = document.getElementById(id)
-    if (input) {
-      input.value = String(value ?? '')
-    }
+  if (nextTab === 'calendar') {
+    clientProfileCalendarEnsureInitialized()
+    clientProfileCalendarRenderEvents()
+  }
+}
+
+function renderClientProfileSummary(client) {
+  const zones = clientProfileZones(client)
+  const tasks = clientProfileTasks(client)
+  const activeTasks = tasks.filter((task) => !kanbanTaskIsCompleted(task))
+  const statusClass = clientProfileStatusClass(client.status)
+
+  clientProfileSetText('cpdAvatar', clientProfileInitials(client), '--')
+  const avatar = document.getElementById('cpdAvatar')
+  if (avatar) {
+    avatar.className = `cpd-avatar cpd-avatar--${clientProfileAvatarClass(client)}`
+  }
+  clientProfileSetText('cpdClientName', client.name)
+  clientProfileSetText('cpdClientId', `ID: ${client.id}`)
+  const badge = document.getElementById('cpdStatusBadge')
+  if (badge) {
+    badge.textContent = normalizeClientStatus(client.status)
+    badge.className = `BadgeStatus cpd-status-badge is-${statusClass}`
+  }
+  clientProfileSetText('cpdStatZones', zones.length, '0')
+  clientProfileSetText('cpdStatActiveTasks', activeTasks.length, '0')
+  clientProfileSetText('cpdStatWorkers', clientProfileWorkerCount(client), '0')
+  clientProfileSetText('cpdStatLastExecution', clientProfileDateTimeLabel(client.lastExecutionAt))
+  clientProfileSetText('cpdQuickCoordinator', client.coordinator)
+  clientProfileSetText('cpdQuickContact', client.contactPerson || client.phone || client.email || client.contact)
+  clientProfileSetText('cpdQuickCity', client.city)
+  clientProfileSetText('cpdQuickFrequency', client.serviceFrequency)
+}
+
+function clientProfileFieldDisplay(client, field) {
+  if (field === 'cooperationStartAt') return clientProfileCooperationPeriodLabel(client)
+  return client[field]
+}
+
+function renderClientProfileFields(client) {
+  const values = {
+    cpdFieldId: client.id,
+    cpdFieldStatus: client.status,
+    cpdFieldName: client.name,
+    cpdFieldNip: client.nip,
+    cpdFieldObjectType: client.objectType,
+    cpdFieldCooperationStart: clientProfileCooperationPeriodLabel(client),
+    cpdFieldCoordinator: client.coordinator,
+    cpdFieldContactPerson: client.contactPerson,
+    cpdFieldPhone: client.phone,
+    cpdFieldEmail: client.email,
+    cpdFieldEmergencyContact: client.emergencyContact,
+    cpdFieldContactPosition: client.contactPosition,
+    cpdFieldCity: client.city,
+    cpdFieldAddress: client.address,
+    cpdFieldPostalCode: client.postalCode,
+    cpdFieldAccessHours: client.accessHours,
+    cpdFieldAccessMethod: client.accessMethod,
+    cpdFieldServiceEntry: client.serviceEntry,
+    cpdFieldServiceType: client.serviceType,
+    cpdFieldFrequency: client.serviceFrequency,
+    cpdFieldServiceDays: client.serviceDays,
+    cpdFieldPreferredHours: client.preferredHours,
+    cpdFieldWorkMode: client.workMode,
+    cpdFieldSla: client.sla,
+    cpdFieldRbhAmount: clientProfileNumberLabel(client.rbhAmount),
+    cpdFieldPermissions: client.requiredPermissions,
+    cpdFieldBhp: client.bhpRequirements,
+    cpdFieldRestrictions: client.workRestrictions,
+    cpdFieldExcludedZones: client.excludedZones,
+    cpdFieldOperationalRisks: client.operationalRisks,
+    cpdFieldSpecialInstructions: client.specialInstructions,
+    cpdFieldChemicals: client.chemistry,
+    cpdFieldEquipment: client.equipment,
+    cpdFieldSpecialEquipment: client.specialEquipment,
+    cpdFieldStorage: client.storagePlace,
+    cpdFieldBackroomAccess: client.backroomAccess,
+    cpdFieldTechnicalNotes: client.technicalNotes,
+    cpdFieldInternalNotes: client.internalNotes,
+  }
+
+  Object.entries(values).forEach(([id, value]) => {
+    document.getElementById(id)?.classList.remove('is-editing-control', 'cpd-notes-inline-editor')
+    clientProfileSetText(id, value, id === 'cpdFieldInternalNotes' ? 'Brak notatek' : 'Brak danych')
   })
+  renderClientProfileInternalNotesInline(client)
+
+  const statusField = document.getElementById('cpdFieldStatus')
+  if (statusField) {
+    const status = normalizeClientStatus(client.status)
+    statusField.classList.remove('is-empty')
+    statusField.innerHTML = `<span class="cpd-status-badge is-${clientProfileStatusClass(status)}">${escapeHtml(status)}</span>`
+  }
+}
+
+function clientProfileDataRow(columns = []) {
+  return `<div class="cpd-data-row">${columns.map((column) => `<div>${column}</div>`).join('')}</div>`
+}
+
+function clientProfileEmptyDataRow(text, columns = 1) {
+  return `<div class="cpd-data-row cpd-data-row--empty">${Array.from({ length: Math.max(1, columns) }, (_, index) => `<div>${index === 0 ? escapeHtml(text) : ''}</div>`).join('')}</div>`
+}
+
+function renderClientProfileOrders(client) {
+  const orders = clientProfileOrders(client)
+  const tasks = clientProfileTasks(client)
+  clientProfileSetText('cpdOrdersTotal', orders.length + tasks.length, '0')
+  clientProfileSetText('cpdOrdersActive', tasks.filter((task) => !kanbanTaskIsCompleted(task)).length, '0')
+  clientProfileSetText('cpdOrdersDone', tasks.filter((task) => kanbanTaskIsCompleted(task)).length, '0')
+  const rows = document.getElementById('cpdOrdersRows')
+  if (!rows) return
+  const items = [
+    ...orders.map((order) => ({
+      title: ordersTimelineClientLabel(order) || order.title || 'Zlecenie',
+      date: order.date || order.dateYmd || order.dayKey || '',
+      status: order.completed ? 'Ukończone' : 'Aktywne',
+      worker: ordersWorkerSelectionLabel(ordersNormalizeOrderRows(order)) || '-',
+      place: ordersTimelineAddressLabel(order) || '-',
+      type: order.orderType || order.type || 'Zlecenie',
+      priority: order.priority || order.priorytet || 'Normalny',
+    })),
+    ...tasks.map((task) => ({
+      title: task.title || 'Zadanie',
+      date: task.dateYmd || task.dueDate || '',
+      status: kanbanTaskIsCompleted(task) ? 'Ukończone' : 'Aktywne',
+      worker: calendarSelectionText(task.workers) || '-',
+      place: calendarSelectionText(task.objects) || '-',
+      type: calendarToneLabel(calendarTaskToneValue(task)),
+      priority: task.priority || task.priorytet || '-',
+    })),
+  ]
+
+  rows.innerHTML = items.length
+    ? items
+        .map((item) =>
+          clientProfileDataRow([
+            `<strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.type)}</span>`,
+            `<span class="cpd-data-badge">${escapeHtml(item.status)}</span>`,
+            escapeHtml(clientProfileDateLabel(item.date) || item.date || '-'),
+            escapeHtml(item.worker),
+            escapeHtml(item.place),
+            escapeHtml(item.priority),
+          ]),
+        )
+        .join('')
+    : clientProfileEmptyDataRow('Brak zleceń dla wybranych filtrów.', 6)
+}
+
+function renderClientProfileContacts(client) {
+  const rows = [
+    { person: client.contactPerson || client.name, position: client.contactPosition, phone: client.phone || client.contact, email: client.email, note: 'Kontakt główny' },
+    { person: 'Kontakt awaryjny', position: '', phone: client.emergencyContact, email: '', note: 'Pilne zgłoszenia' },
+  ].filter((item) => [item.person, item.phone, item.email].some((value) => clientProfileText(value)))
+  clientProfileSetText('cpdContactsCount', `${rows.length} kontaktów`, '0 kontaktów')
+  const root = document.getElementById('cpdContactsRows')
+  if (!root) return
+  root.innerHTML = rows.length
+    ? rows
+        .map((item) =>
+          clientProfileDataRow([
+            `<strong>${escapeHtml(item.person)}</strong><span>${escapeHtml(item.note)}</span>`,
+            escapeHtml(profileFieldValue(item.position)),
+            escapeHtml(profileFieldValue(item.phone)),
+            escapeHtml(profileFieldValue(item.email)),
+            escapeHtml(profileFieldValue(client.address)),
+          ]),
+        )
+        .join('')
+    : clientProfileEmptyDataRow('Brak zapisanych kontaktów.', 5)
+}
+
+function renderClientProfileMessages(client) {
+  const rows = clientProfileTasks(client).filter((task) => calendarTaskToneValue(task) === 'message' || task.generatedFromComment)
+  const root = document.getElementById('cpdMessagesRows')
+  if (!root) return
+  root.innerHTML = rows.length
+    ? rows
+        .map((task) =>
+          clientProfileDataRow([
+            escapeHtml(task.dateYmd || task.createdAt || '-'),
+            `<strong>${escapeHtml(task.title || 'Wiadomość')}</strong><span>${escapeHtml(task.description || task.note || '')}</span>`,
+            escapeHtml(calendarSelectionText(task.workers) || '-'),
+            `<span class="cpd-data-badge">${kanbanTaskIsCompleted(task) ? 'Zamknięte' : 'Otwarte'}</span>`,
+          ]),
+        )
+        .join('')
+    : clientProfileEmptyDataRow('Brak wiadomości powiązanych z tym klientem.', 4)
+}
+
+function renderClientProfileAdditional(client) {
+  const root = document.getElementById('cpdAdditionalGrid')
+  if (!root) return
+  const groups = [
+    ['Warunki obsługi', [['Rodzaj usługi', client.serviceType], ['Częstotliwość', client.serviceFrequency], ['Dni', client.serviceDays], ['Preferowane godziny', client.preferredHours], ['Tryb pracy', client.workMode], ['SLA', client.sla], ['Ilość RBH', clientProfileNumberLabel(client.rbhAmount)]]],
+    ['Operacyjne', [['Uprawnienia', client.requiredPermissions], ['BHP', client.bhpRequirements], ['Ograniczenia', client.workRestrictions], ['Strefy wyłączone', client.excludedZones], ['Ryzyka', client.operationalRisks], ['Instrukcje specjalne', client.specialInstructions]]],
+    ['Chemia i sprzęt', [['Chemia', client.chemistry], ['Sprzęt', client.equipment], ['Sprzęt specjalny', client.specialEquipment], ['Miejsce przechowywania', client.storagePlace], ['Dostęp do zaplecza', client.backroomAccess], ['Uwagi techniczne', client.technicalNotes]]],
+    ['Notatki', [['Informacje klienta', client.clientInfo], ['Notatki wewnętrzne', client.internalNotes]]],
+  ]
+  root.innerHTML = groups
+    .map(
+      ([title, items]) => {
+        const visibleItems = items.filter(([, value]) => clientProfileText(value))
+        return `
+          <article class="cpd-additional-card">
+            <h4>${escapeHtml(title)}</h4>
+            ${
+              visibleItems.length
+                ? visibleItems.map(([label, value]) => `<div class="cpd-additional-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(profileFieldValue(value))}</strong></div>`).join('')
+                : '<div class="cpd-additional-empty">Brak danych w tej sekcji.</div>'
+            }
+          </article>
+        `
+      },
+    )
+    .join('')
+}
+
+function renderClientProfileSimpleRows(rootId, emptyText, columns = 4) {
+  const root = document.getElementById(rootId)
+  if (root) {
+    root.innerHTML = clientProfileEmptyDataRow(emptyText, columns)
+  }
+}
+
+function renderClientProfileZones(client) {
+  const zones = clientProfileZones(client)
+  clientProfileSetText('cpdZonesCount', `Strefy klienta: ${zones.length}`)
+  const root = document.getElementById('cpdZonesRows')
+  if (!root) return
+  root.innerHTML = zones.length
+    ? zones
+        .map((zone) => {
+          const code = zone.zoneId || zone.qrCode || zone.qr || '-'
+          const name = zone.zone || zone.name || 'Strefa'
+          const location = zone.location || zone.address || '-'
+          const zoneFunction = zone.function || zone.type || '-'
+          return `
+            <div class="zones-row cpd-zones-row">
+              <div><span class="cpd-qr-pill">QR</span><strong>${escapeHtml(code)}</strong><span>Kod QR</span></div>
+              <div><strong>${escapeHtml(name)}</strong></div>
+              <div>${escapeHtml(profileFieldValue(location))}</div>
+              <div><span class="cpd-data-badge">${escapeHtml(profileFieldValue(zoneFunction))}</span></div>
+            </div>
+          `
+        })
+        .join('')
+    : '<div class="zones-row cpd-zones-row cpd-zones-row-empty"><div>Brak stref przypisanych do tego klienta.</div><div></div><div></div><div></div></div>'
+}
+
+function renderClientProfileReports(client) {
+  const zones = clientProfileZones(client)
+  const tasks = clientProfileTasks(client)
+  const clientId = String(client?.id ?? '').trim()
+  const zoneIds = new Set(zones.map((zone) => String(zone.zoneId ?? '').trim()).filter(Boolean))
+  const events = appState.eventRows.filter((event) => {
+    const eventClientId = String(event?.clientId ?? event?.zone?.client?.clientId ?? '').trim()
+    const zoneId = String(event?.zoneId ?? event?.zone?.zoneId ?? '').trim()
+    return eventClientId === clientId || (zoneId && zoneIds.has(zoneId))
+  })
+  const seconds = events.reduce((sum, event) => sum + Number(event.durationSec ?? 0), 0)
+  clientProfileSetText('cpdReportsEvents', events.length, '0')
+  clientProfileSetText('cpdReportsTime', durationSecondsToHm(seconds), '0 min')
+  clientProfileSetText('cpdReportsTasks', tasks.length, '0')
+  clientProfileSetText('cpdReportsZones', zones.length, '0')
+  const root = document.getElementById('cpdReportsRows')
+  if (root) {
+    root.innerHTML = `
+      <div class="cpd-report-row">
+        <div><strong>Aktywność klienta</strong><span>Zdarzenia, strefy i zadania z obecnych danych portalu</span></div>
+        <b>${escapeHtml(events.length)} zdarzeń</b>
+      </div>
+      <div class="cpd-report-row">
+        <div><strong>Czas realizacji</strong><span>Suma czasu zdarzeń dla stref klienta</span></div>
+        <b>${escapeHtml(durationSecondsToHm(seconds))}</b>
+      </div>
+    `
+  }
+}
+
+function renderClientProfileTimeline(client) {
+  const root = document.getElementById('cpdTimelineList')
+  if (!root) return
+  const items = [
+    ['Utworzono profil', clientProfileDateLabel(client.createdAt)],
+    ['Okres współpracy', clientProfileCooperationPeriodLabel(client)],
+    ['Zmiana koordynatora', clientProfileDateLabel(client.coordinatorChangedAt)],
+    ['Ostatnia realizacja', clientProfileDateLabel(client.lastExecutionAt)],
+    ['Ostatnie przypisanie pracownika', clientProfileDateLabel(client.lastWorkerAssignmentAt)],
+    ['Ostatnia aktualizacja', clientProfileDateLabel(client.updatedAt)],
+  ].filter(([, value]) => clientProfileText(value))
+  root.innerHTML = items.length
+    ? items.map(([label, value]) => `<li><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></li>`).join('')
+    : '<li><strong>Brak danych timeline</strong><span>Uzupełnij daty w profilu klienta.</span></li>'
+}
+
+function renderClientProfileEmployees(client) {
+  const root = document.getElementById('cpdEmployeeList')
+  const addButton = document.getElementById('cpdEmployeeAssignOpenBtn')
+  if (addButton) {
+    addButton.hidden = !canManageClients()
+  }
+  if (!root) return
+  const sourceClient = appState.clientProfileEditMode
+    ? { ...client, assignees: appState.clientProfileEditAssignees }
+    : client
+  const assigned = clientProfileAssignedWorkerItems(sourceClient)
+  root.innerHTML = assigned.length
+    ? assigned
+        .map((worker) => {
+          const avatarClass = worker.custom ? 'violet' : clientProfileWorkerOptionAvatarClass(worker)
+          const removeButton = canManageClients()
+            ? `<button class="cpd-employee-remove-btn" type="button" data-cpd-employee-remove="${escapeHtml(worker.key)}" aria-label="Usuń przypisanego pracownika">×</button>`
+            : ''
+          return `
+            <div class="cpd-employee-item">
+              <div class="cpd-employee-copy">
+                <span class="cpd-worker-avatar cpd-worker-avatar--${escapeHtml(avatarClass)}">${escapeHtml(clientProfileWorkerOptionInitials(worker))}</span>
+                <div>
+                  <strong>${escapeHtml(worker.label)}</strong>
+                  ${worker.subLabel ? `<small>${escapeHtml(worker.subLabel)}</small>` : ''}
+                </div>
+              </div>
+              ${removeButton}
+            </div>
+          `
+        })
+        .join('')
+    : '<div class="cpd-employee-empty">Brak przypisanych pracowników.</div>'
+}
+
+function fillClientProfileCoordinatorOptions() {}
+
+async function ensureClientProfileWorkersLoaded() {
+  if (appState.workersLoaded) return true
+  if (!appState.session?.orgId) return false
+  await fetchWorkersForCurrentSession()
+  return appState.workersLoaded
+}
+
+function clientProfileSetAssignOverlayOpen(id, open) {
+  const overlay = document.getElementById(id)
+  if (overlay) {
+    overlay.style.display = open ? 'flex' : 'none'
+  }
+}
+
+function renderClientProfileWorkerPickerList(mode) {
+  const isCoordinator = mode === 'coordinator'
+  const list = document.getElementById(isCoordinator ? 'cpdCoordinatorWorkerList' : 'cpdAssignWorkerList')
+  const input = document.getElementById(isCoordinator ? 'cpdCoordinatorSearchInput' : 'cpdAssignSearchInput')
+  const confirm = document.getElementById(isCoordinator ? 'cpdCoordinatorConfirmBtn' : 'cpdAssignConfirmBtn')
+  if (!list) return
+
+  const query = normalizeSearchText(input?.value)
+  const selectedKeys = isCoordinator
+    ? new Set(appState.clientProfileCoordinatorSelectedKey ? [appState.clientProfileCoordinatorSelectedKey] : [])
+    : appState.clientProfileAssignSelectedKeys
+  const options = clientProfileWorkerOptions().filter((option) => !query || option.searchText.includes(query))
+
+  if (confirm) {
+    confirm.disabled = isCoordinator
+      ? !appState.clientProfileCoordinatorSelectedKey
+      : appState.clientProfileAssignSelectedKeys.size === 0
+  }
+
+  list.innerHTML = options.length
+    ? options
+        .map((option) => {
+          const checked = selectedKeys.has(option.key)
+          return `
+            <label class="cpd-assign-row${checked ? ' is-selected' : ''}">
+              <input
+                type="${isCoordinator ? 'radio' : 'checkbox'}"
+                name="${isCoordinator ? 'cpdCoordinatorWorker' : 'cpdAssignWorker'}"
+                value="${escapeHtml(option.key)}"
+                data-cpd-${isCoordinator ? 'coordinator' : 'assign'}-option
+                ${checked ? 'checked' : ''}
+              />
+              <span class="cpd-worker-avatar cpd-worker-avatar--${escapeHtml(clientProfileWorkerOptionAvatarClass(option))}">${escapeHtml(clientProfileWorkerOptionInitials(option))}</span>
+              <span class="cpd-assign-copy">
+                <strong>${escapeHtml(option.label)}</strong>
+                ${option.subLabel ? `<small>${escapeHtml(option.subLabel)}</small>` : ''}
+              </span>
+              <span class="cpd-assign-choice" aria-hidden="true"></span>
+            </label>
+          `
+        })
+        .join('')
+    : '<div class="cpd-assign-empty">Brak pracowników dla wybranego wyszukiwania.</div>'
+}
+
+async function openClientProfileCoordinatorPicker() {
+  if (!appState.clientProfileEditMode) return
+  const loaded = await ensureClientProfileWorkersLoaded()
+  if (!loaded) {
+    showTransientNotice('Nie udało się wczytać listy pracowników.', 'error')
+    return
+  }
+  const input = document.getElementById('cpdCoordinatorSearchInput')
+  if (input) input.value = ''
+  const selected = clientProfileFindWorkerOptionByText(document.querySelector('[data-client-profile-edit-field="coordinator"]')?.value ?? appState.clientProfileCurrent?.coordinator)
+  appState.clientProfileCoordinatorSelectedKey = selected?.key ?? ''
+  renderClientProfileWorkerPickerList('coordinator')
+  const list = document.getElementById('cpdCoordinatorWorkerList')
+  if (list) list.scrollTop = 0
+  clientProfileSetAssignOverlayOpen('cpdCoordinatorOverlay', true)
+  window.setTimeout(() => input?.focus(), 0)
+}
+
+async function openClientProfileAssignPicker() {
+  const loaded = await ensureClientProfileWorkersLoaded()
+  if (!loaded) {
+    showTransientNotice('Nie udało się wczytać listy pracowników.', 'error')
+    return
+  }
+  const input = document.getElementById('cpdAssignSearchInput')
+  if (input) input.value = ''
+  const currentAssignees = appState.clientProfileEditMode
+    ? appState.clientProfileEditAssignees
+    : appState.clientProfileCurrent?.assignees
+  appState.clientProfileAssignSelectedKeys = clientProfileAssignedWorkerKeys({
+    ...appState.clientProfileCurrent,
+    assignees: currentAssignees,
+  })
+  renderClientProfileWorkerPickerList('assign')
+  const list = document.getElementById('cpdAssignWorkerList')
+  if (list) list.scrollTop = 0
+  clientProfileSetAssignOverlayOpen('cpdAssignOverlay', true)
+  window.setTimeout(() => input?.focus(), 0)
+}
+
+function closeClientProfileCoordinatorPicker() {
+  appState.clientProfileCoordinatorSelectedKey = ''
+  clientProfileSetAssignOverlayOpen('cpdCoordinatorOverlay', false)
+}
+
+function closeClientProfileAssignPicker() {
+  appState.clientProfileAssignSelectedKeys = new Set()
+  clientProfileSetAssignOverlayOpen('cpdAssignOverlay', false)
+}
+
+function setClientProfileCoordinatorEditValue(value) {
+  const normalizedValue = clientProfileText(value)
+  const node = document.getElementById('cpdFieldCoordinator')
+  if (node) {
+    node.innerHTML = renderClientProfileWorkerSelect({ field: 'coordinator' }, normalizedValue)
+    return
+  }
+  const hiddenInput = document.querySelector('[data-client-profile-edit-field="coordinator"]')
+  if (hiddenInput) hiddenInput.value = normalizedValue
+  const option = clientProfileFindWorkerOptionByText(normalizedValue)
+  const labelNode = document.getElementById('cpdCoordinatorPickerLabel')
+  const subLabelNode = document.getElementById('cpdCoordinatorPickerSubLabel')
+  if (labelNode) labelNode.textContent = normalizedValue || 'Wybierz koordynatora'
+  if (subLabelNode) subLabelNode.textContent = option?.subLabel || (option ? option.id : 'Lista pracowników')
+}
+
+function confirmClientProfileCoordinatorPicker() {
+  const option = clientProfileWorkerOptions().find((item) => item.key === appState.clientProfileCoordinatorSelectedKey)
+  if (!option || !appState.clientProfileCurrent) return
+  setClientProfileCoordinatorEditValue(option.label)
+  closeClientProfileCoordinatorPicker()
+}
+
+async function saveClientProfileAssignees(assignees) {
+  if (!appState.session?.orgId || !appState.clientProfileCurrent) return false
+  const payload = { assignees: clientProfileText(assignees) }
+
+  try {
+    await updateClient(appState.session.orgId, appState.clientProfileCurrent.id, payload)
+    const updatedClient = mapClientForProfileView({
+      ...appState.clientProfileCurrent,
+      ...payload,
+    })
+    appState.clientProfileCurrent = updatedClient
+    const index = appState.clients.findIndex((client) => String(client.id ?? client.clientId ?? '') === String(updatedClient.id))
+    if (index >= 0) {
+      appState.clients[index] = {
+        ...appState.clients[index],
+        ...updatedClient,
+      }
+    }
+    filterClientProfileTable()
+    renderClientProfileSummary(updatedClient)
+    renderClientProfileEmployees(updatedClient)
+    renderClientProfileTimeline(updatedClient)
+    showTransientNotice('Zapisano przypisanych pracowników.')
+    return true
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udało się zapisać przypisanych pracowników.'
+    alert(message)
+    return false
+  }
+}
+
+async function confirmClientProfileAssignPicker() {
+  if (!appState.clientProfileCurrent) return
+  const assignees = clientProfileFormatWorkerAssignmentsFromKeys(appState.clientProfileAssignSelectedKeys)
+  if (appState.clientProfileEditMode) {
+    appState.clientProfileEditAssignees = assignees
+    renderClientProfileEmployees(appState.clientProfileCurrent)
+    clientProfileSetText('cpdStatWorkers', clientProfileWorkerCount({ ...appState.clientProfileCurrent, assignees }), '0')
+    closeClientProfileAssignPicker()
+    return
+  }
+
+  const saved = await saveClientProfileAssignees(assignees)
+  if (saved) {
+    closeClientProfileAssignPicker()
+  }
+}
+
+async function removeClientProfileAssignedWorker(key) {
+  if (!appState.clientProfileCurrent) return
+  const currentAssignees = appState.clientProfileEditMode
+    ? appState.clientProfileEditAssignees
+    : appState.clientProfileCurrent.assignees
+  const nextAssignees = clientProfileAssignedWorkerItems({
+    ...appState.clientProfileCurrent,
+    assignees: currentAssignees,
+  })
+    .filter((worker) => worker.key !== key)
+    .map((worker) => worker.label)
+    .join(', ')
+
+  if (appState.clientProfileEditMode) {
+    appState.clientProfileEditAssignees = nextAssignees
+    renderClientProfileEmployees(appState.clientProfileCurrent)
+    clientProfileSetText('cpdStatWorkers', clientProfileWorkerCount({ ...appState.clientProfileCurrent, assignees: nextAssignees }), '0')
+    return
+  }
+
+  await saveClientProfileAssignees(nextAssignees)
+}
+
+async function saveClientProfileInternalNotesInline() {
+  if (!appState.session?.orgId || !appState.clientProfileCurrent) return
+  const input = document.getElementById('cpdInternalNotesInput')
+  if (!input) return
+  const saveButton = document.getElementById('cpdInternalNotesSaveBtn')
+  const payload = { internalNotes: String(input.value ?? '').trim() }
+
+  if (saveButton) saveButton.disabled = true
+  try {
+    await updateClient(appState.session.orgId, appState.clientProfileCurrent.id, payload)
+    const updatedClient = mapClientForProfileView({
+      ...appState.clientProfileCurrent,
+      ...payload,
+    })
+    appState.clientProfileCurrent = updatedClient
+    const index = appState.clients.findIndex((client) => String(client.id ?? client.clientId ?? '') === String(updatedClient.id))
+    if (index >= 0) {
+      appState.clients[index] = {
+        ...appState.clients[index],
+        ...updatedClient,
+      }
+    }
+    filterClientProfileTable()
+    renderClientProfileFields(updatedClient)
+    renderClientProfileAdditional(updatedClient)
+    showTransientNotice('Zapisano notatki wewnętrzne.')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udało się zapisać notatek wewnętrznych.'
+    alert(message)
+    if (saveButton) saveButton.disabled = false
+  }
+}
+
+function renderClientProfilePanels(client) {
+  renderClientProfileOrders(client)
+  renderClientProfileContacts(client)
+  renderClientProfileMessages(client)
+  renderClientProfileAdditional(client)
+  renderClientProfileSimpleRows('cpdOffersRows', 'Brak ofert. Dodanie ofert wymaga rozszerzenia danych.', 4)
+  renderClientProfileSimpleRows('cpdFilesRows', 'Brak plików. Upload plików nie zapisuje danych w tej wersji.', 4)
+  renderClientProfileZones(client)
+  renderClientProfileReports(client)
+  renderClientProfileTimeline(client)
+  renderClientProfileEmployees(client)
 }
 
 function setClientProfileEditMode(editMode) {
+  const wasEditing = appState.clientProfileEditMode
   appState.clientProfileEditMode = Boolean(editMode)
+  if (appState.clientProfileEditMode && !wasEditing) {
+    appState.clientProfileEditAssignees = clientProfileText(appState.clientProfileCurrent?.assignees)
+  }
+  if (!appState.clientProfileEditMode) {
+    appState.clientProfileEditAssignees = ''
+  }
+  const actions = document.getElementById('cpdEditActions')
+  const editButton = document.getElementById('cpdEditMenuBtn')
+  if (actions) actions.hidden = !appState.clientProfileEditMode
+  if (editButton) editButton.hidden = appState.clientProfileEditMode || !canManageClients()
 
-  const pairs = [
-    ['view-status', 'edit-status'],
-    ['view-nazwa', 'edit-nazwa'],
-    ['view-nip', 'edit-nip'],
-    ['view-koordynator', 'edit-koordynator'],
-    ['view-kontakt', 'edit-kontakt'],
-    ['view-miasto', 'edit-miasto'],
-    ['view-adres', 'edit-adres'],
-    ['view-czestotliwosc', 'edit-czestotliwosc'],
-    ['view-osoby', 'edit-osoby'],
-    ['view-chemia', 'edit-chemia'],
-    ['view-sprzet', 'edit-sprzet'],
-    ['view-informacje', 'edit-informacje'],
-  ]
+  if (!appState.clientProfileCurrent) return
 
-  pairs.forEach(([viewId, editId]) => {
-    const viewNode = document.getElementById(viewId)
-    const editNode = document.getElementById(editId)
-    if (viewNode) viewNode.style.display = appState.clientProfileEditMode ? 'none' : ''
-    if (editNode) editNode.style.display = appState.clientProfileEditMode ? '' : 'none'
-  })
-
-  const editButton = document.getElementById('cpBtnEdit')
-  const saveButton = document.getElementById('cpBtnSave')
-  const cancelButton = document.getElementById('cpBtnCancel')
-  const closeButton = document.getElementById('cpBtnClose')
-
-  if (editButton) editButton.style.display = appState.clientProfileEditMode ? 'none' : ''
-  if (saveButton) saveButton.style.display = appState.clientProfileEditMode ? '' : 'none'
-  if (cancelButton) cancelButton.style.display = appState.clientProfileEditMode ? '' : 'none'
-  if (closeButton) closeButton.style.display = appState.clientProfileEditMode ? 'none' : ''
-}
-
-function openClientProfileModal(clientId) {
-  const modal = document.getElementById('cpModal')
-  if (!modal) {
+  if (!appState.clientProfileEditMode) {
+    renderClientProfileFields(appState.clientProfileCurrent)
+    renderClientProfileEmployees(appState.clientProfileCurrent)
     return
   }
 
-  const normalizedId = String(clientId ?? '').trim()
-  const client = appState.clients.find((item) => String(item.id) === normalizedId)
+  CLIENT_PROFILE_EDIT_FIELDS.forEach((definition) => {
+    const node = document.getElementById(definition.id)
+    if (!node) return
+    const value = definition.type === 'date'
+      ? clientProfileDateInputValue(appState.clientProfileCurrent[definition.field])
+      : definition.type === 'number'
+        ? clientProfileNumberInputValue(appState.clientProfileCurrent[definition.field])
+        : clientProfileText(appState.clientProfileCurrent[definition.field])
+    const name = escapeHtml(definition.field)
+    node.classList.remove('is-empty', 'cpd-notes-inline-editor')
+    node.classList.add('is-editing-control')
+    if (definition.type === 'select') {
+      node.innerHTML = `
+        <select class="cpd-edit-input" data-client-profile-edit-field="${name}">
+          ${definition.options.map((option) => `<option value="${escapeHtml(option)}"${option === value ? ' selected' : ''}>${escapeHtml(option)}</option>`).join('')}
+        </select>
+      `
+      return
+    }
+    if (definition.type === 'worker-single') {
+      node.innerHTML = renderClientProfileWorkerSelect(definition, value)
+      return
+    }
+    if (definition.type === 'date-range') {
+      node.innerHTML = renderClientProfileDateRange(definition, appState.clientProfileCurrent)
+      return
+    }
+    if (definition.type === 'weekdays') {
+      node.innerHTML = renderClientProfileWeekdayPicker(definition, value)
+      return
+    }
+    if (definition.type === 'time-range') {
+      node.innerHTML = renderClientProfileTimeRange(definition, value)
+      return
+    }
+    if (definition.type === 'number') {
+      node.innerHTML = `<input class="cpd-edit-input" data-client-profile-edit-field="${name}" type="number" min="0" step="${escapeHtml(definition.step ?? 'any')}" inputmode="decimal" value="${escapeHtml(value)}" />`
+      return
+    }
+    if (definition.multiline) {
+      node.innerHTML = `<textarea class="cpd-edit-input" data-client-profile-edit-field="${name}" rows="3">${escapeHtml(value)}</textarea>`
+      return
+    }
+    node.innerHTML = `<input class="cpd-edit-input" data-client-profile-edit-field="${name}" type="${definition.type === 'date' ? 'date' : 'text'}" value="${escapeHtml(value)}" />`
+  })
+  renderClientProfileEmployees(appState.clientProfileCurrent)
+}
+
+function readClientProfileEditPayload() {
+  const payload = {}
+  CLIENT_PROFILE_EDIT_FIELDS.forEach((definition) => {
+    if (definition.type === 'weekdays') {
+      payload[definition.field] = readClientProfileWeekdays(definition)
+      return
+    }
+    if (definition.type === 'date-range') {
+      const root = document.querySelector(`[data-client-profile-date-range="${definition.field}"]`)
+      payload[definition.field] = String(root?.querySelector('[data-client-profile-date-range-part="start"]')?.value ?? '').trim()
+      payload[definition.endField] = String(root?.querySelector('[data-client-profile-date-range-part="end"]')?.value ?? '').trim()
+      return
+    }
+    if (definition.type === 'time-range') {
+      payload[definition.field] = readClientProfileTimeRange(definition)
+      return
+    }
+    const input = document.querySelector(`[data-client-profile-edit-field="${definition.field}"]`)
+    if (!input) return
+    if (definition.type === 'number') {
+      payload[definition.field] = String(input.value ?? '').trim().replace(',', '.')
+      return
+    }
+    payload[definition.field] = String(input.value ?? '').trim()
+  })
+  payload.assignees = clientProfileText(appState.clientProfileEditAssignees)
+  return payload
+}
+
+function renderClientProfileDetailView() {
+  const empty = document.getElementById('cpdEmptyState')
+  const layout = document.getElementById('cpdLayout')
+  const client = appState.clientProfileCurrent
+
   if (!client) {
+    if (empty) empty.hidden = false
+    if (layout) layout.hidden = true
+    return
+  }
+
+  if (empty) empty.hidden = true
+  if (layout) layout.hidden = false
+  renderClientProfileSummary(client)
+  renderClientProfileFields(client)
+  renderClientProfilePanels(client)
+  setClientProfileEditMode(appState.clientProfileEditMode)
+  clientProfileSetActiveTab(appState.clientProfileActiveTab)
+}
+
+function openClientProfileDetails(clientId) {
+  const client = clientProfileFindById(clientId)
+  if (!client) {
+    showTransientNotice('Nie znaleziono klienta.', 'error')
     return
   }
 
   appState.clientProfileCurrent = mapClientForProfileView(client)
-  setClientProfileFieldValues(appState.clientProfileCurrent)
-  setClientProfileEditMode(false)
-  modal.style.display = 'flex'
-}
-
-function closeClientProfileModal() {
-  const modal = document.getElementById('cpModal')
-  if (modal) {
-    modal.style.display = 'none'
+  appState.clientProfileEditMode = false
+  appState.clientProfileActiveTab = 'profile'
+  if (typeof window.go === 'function') {
+    window.go('clientProfileDetails')
+  } else {
+    renderClientProfileDetailView()
   }
-
-  appState.clientProfileCurrent = null
-  setClientProfileEditMode(false)
 }
 
-function enterClientProfileEdit() {
-  if (!appState.clientProfileCurrent) {
+async function fetchClientProfileDetailForCurrentSession(force = false) {
+  if (!appState.session?.orgId) return
+  if (!force && appState.clientsLoaded) {
+    renderClientProfileDetailView()
     return
   }
-
-  setClientProfileEditMode(true)
-}
-
-function cancelClientProfileEdit() {
-  if (!appState.clientProfileCurrent) {
-    return
+  await fetchClientProfileForCurrentSession(force)
+  if (appState.clientProfileCurrent?.id) {
+    const refreshed = clientProfileFindById(appState.clientProfileCurrent.id)
+    appState.clientProfileCurrent = refreshed ? mapClientForProfileView(refreshed) : appState.clientProfileCurrent
   }
-
-  setClientProfileFieldValues(appState.clientProfileCurrent)
-  setClientProfileEditMode(false)
+  renderClientProfileDetailView()
 }
 
 async function saveClientProfileEdit() {
@@ -7988,84 +9107,138 @@ async function saveClientProfileEdit() {
     return
   }
 
-  const payload = {
-    name: String(document.getElementById('edit-nazwa')?.value ?? '').trim(),
-    status: String(document.getElementById('edit-status')?.value ?? 'Aktywny').trim(),
-    nip: String(document.getElementById('edit-nip')?.value ?? '').trim(),
-    coordinator: String(document.getElementById('edit-koordynator')?.value ?? '').trim(),
-    contact: String(document.getElementById('edit-kontakt')?.value ?? '').trim(),
-    city: String(document.getElementById('edit-miasto')?.value ?? '').trim(),
-    address: String(document.getElementById('edit-adres')?.value ?? '').trim(),
-    frequency: String(document.getElementById('edit-czestotliwosc')?.value ?? '').trim(),
-    workers: String(document.getElementById('edit-osoby')?.value ?? '').trim(),
-    chemia: String(document.getElementById('edit-chemia')?.value ?? '').trim(),
-    sprzet: String(document.getElementById('edit-sprzet')?.value ?? '').trim(),
-    informacje: String(document.getElementById('edit-informacje')?.value ?? '').trim(),
-  }
-
-  if (!payload.name) {
-    alert('Nazwa klienta nie może być pusta.')
+  const payload = readClientProfileEditPayload()
+  if (!clientProfileText(payload.name)) {
+    alert('Nazwa klienta nie moze byc pusta.')
     return
   }
 
   try {
-    await updateClient(appState.session.orgId, appState.clientProfileCurrent.id, payload)
-
-    const updatedClient = {
+    const savedClient = await updateClient(appState.session.orgId, appState.clientProfileCurrent.id, payload)
+    const updatedClient = mapClientForProfileView({
       ...appState.clientProfileCurrent,
-      ...payload,
-      status: normalizeClientStatus(payload.status),
-    }
+      ...savedClient,
+      status: normalizeClientStatus(savedClient.status ?? payload.status),
+    })
     appState.clientProfileCurrent = updatedClient
-
-    const index = appState.clients.findIndex((client) => String(client.id) === String(updatedClient.id))
+    const index = appState.clients.findIndex((client) => String(client.id ?? client.clientId ?? '') === String(updatedClient.id))
     if (index >= 0) {
       appState.clients[index] = {
         ...appState.clients[index],
         ...updatedClient,
       }
     }
-
+    appState.clientProfileEditMode = false
+    appState.clientProfileEditAssignees = ''
     filterClientProfileTable()
-    setClientProfileFieldValues(updatedClient)
-    setClientProfileEditMode(false)
+    renderClientProfileDetailView()
+    const endDatePendingDeploy = clientProfileText(payload.cooperationEndAt) && !clientProfileText(savedClient.cooperationEndAt)
+    showTransientNotice(endDatePendingDeploy
+      ? 'Zapisano profil. Data końca okresu wymaga jeszcze wdrożenia Data Connect.'
+      : 'Zapisano profil klienta.')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Błąd zapisu profilu klienta.'
+    const message = error instanceof Error ? error.message : 'Blad zapisu profilu klienta.'
     alert(message)
   }
 }
 
+function clientProfileCalendarEvents(client = appState.clientProfileCurrent) {
+  const taskEvents = clientProfileTasks(client).map((task) => ({
+    id: task.id,
+    title: task.title || 'Zadanie',
+    start: task.dateYmd || task.dueDate || todayYmd(),
+    allDay: !clientProfileText(task.startTime || task.time),
+    backgroundColor: kanbanTaskIsCompleted(task) ? '#71dd37' : '#696cff',
+    borderColor: kanbanTaskIsCompleted(task) ? '#71dd37' : '#696cff',
+    extendedProps: { type: 'task' },
+  }))
+  const orderEvents = clientProfileOrders(client).map((order) => ({
+    id: `order:${order.id ?? order.orderId ?? Math.random()}`,
+    title: ordersTimelineClientLabel(order) || order.title || 'Zlecenie',
+    start: order.date || order.dateYmd || order.dayKey || todayYmd(),
+    allDay: true,
+    backgroundColor: order.completed ? '#71dd37' : '#03c3ec',
+    borderColor: order.completed ? '#71dd37' : '#03c3ec',
+    extendedProps: { type: 'order' },
+  }))
+  return [...taskEvents, ...orderEvents]
+}
+
+function clientProfileCalendarRenderEvents() {
+  if (!(appState.clientProfileCalendarInstance instanceof Calendar)) return
+  const events = clientProfileCalendarEvents()
+  appState.clientProfileCalendarRows = events
+  appState.clientProfileCalendarInstance.removeAllEvents()
+  appState.clientProfileCalendarInstance.addEventSource(events)
+  const empty = document.getElementById('cpdCalendarEmpty')
+  if (empty) empty.hidden = events.length > 0
+  clientProfileSetText('cpdCalendarSyncMeta', `Wydarzenia klienta: ${events.length}`)
+}
+
+function clientProfileCalendarEnsureInitialized() {
+  const mount = document.getElementById('cpdCalendarMount')
+  if (!mount) return
+  if (appState.clientProfileCalendarInstance instanceof Calendar) {
+    appState.clientProfileCalendarInstance.updateSize()
+    return
+  }
+
+  appState.clientProfileCalendarInstance = new Calendar(mount, {
+    plugins: [dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin],
+    locale: plLocale,
+    initialView: 'dayGridMonth',
+    height: 'auto',
+    headerToolbar: {
+      left: 'prev,next today',
+      center: 'title',
+      right: 'dayGridMonth,timeGridWeek,listWeek',
+    },
+    eventClick: (info) => {
+      const type = info?.event?.extendedProps?.type
+      if (type === 'task' && info?.event?.id) {
+        calendarOpenEditor(info.event.id)
+      }
+    },
+  })
+  appState.clientProfileCalendarInstance.render()
+}
+
+async function refreshClientProfileCalendar() {
+  clientProfileSetText('cpdCalendarSyncMeta', 'Synchronizuje zadania...')
+  await calendarSyncRemoteTasks({ render: false }).catch(() => appState.calendarTasks)
+  clientProfileCalendarRenderEvents()
+  renderClientProfileSummary(appState.clientProfileCurrent)
+}
+
 async function fetchClientProfileForCurrentSession(force = false) {
-  const tbody = document.getElementById('clientProfileBody')
+  const body = document.getElementById('clientProfileBody')
 
   if (!appState.session?.orgId) {
-    if (tbody) {
-      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:40px; color:#ef4444;">Brak aktywnej sesji organizacji.</td></tr>'
+    if (body) {
+      body.innerHTML = '<div class="cp-row cp-row-empty cp-row-empty--error"><div>Brak aktywnej sesji organizacji.</div><div></div></div>'
     }
     return
   }
 
   if (!force && appState.clientsLoaded) {
-    fillClientProfileCoordinatorOptions()
     filterClientProfileTable()
     return
   }
 
-  if (tbody) {
-    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:40px; color:#64748b;">Ładowanie danych...</td></tr>'
+  if (body) {
+    body.innerHTML = '<div class="cp-row cp-row-empty"><div>Ladowanie danych...</div><div></div></div>'
   }
 
   try {
     const clients = await getClients(appState.session.orgId)
     appState.clients = clients
     appState.clientsLoaded = true
-    fillClientProfileCoordinatorOptions()
     filterClientProfileTable()
     setSubwelcomeMetric('#view-clientProfile .subwelcome', clients.length)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Błąd pobierania profilu klientów.'
-    if (tbody) {
-      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:40px; color:#ef4444;">${escapeHtml(message)}</td></tr>`
+    if (body) {
+      body.innerHTML = `<div class="cp-row cp-row-empty cp-row-empty--error"><div>${escapeHtml(message)}</div><div></div></div>`
     }
   }
 }
@@ -22044,17 +23217,18 @@ function bindClientProfileViewFunctions() {
   window.ClientProfileModule = {
     fetch: () => fetchClientProfileForCurrentSession(true),
   }
-  window.closeCpModal = closeClientProfileModal
-  window.cpEnterEdit = enterClientProfileEdit
-  window.cpCancelEdit = cancelClientProfileEdit
-  window.cpSaveEdit = () => {
-    void saveClientProfileEdit()
-  }
 
   binding.add(document.getElementById('cpSearchName'), 'input', filterClientProfileTable)
-  binding.add(document.getElementById('cpSearchNip'), 'input', filterClientProfileTable)
+  binding.add(document.getElementById('cpSearchCity'), 'input', filterClientProfileTable)
+  binding.add(document.getElementById('cpSearchCoordinator'), 'input', filterClientProfileTable)
+  binding.add(document.getElementById('cpSearchStatus'), 'change', filterClientProfileTable)
+  binding.add(document.getElementById('cpPageSize'), 'change', filterClientProfileTable)
+  binding.add(document.getElementById('cpSearchBtn'), 'click', filterClientProfileTable)
+  binding.add(document.getElementById('cpRefreshBtn'), 'click', () => {
+    void fetchClientProfileForCurrentSession(true)
+  })
 
-  ;['cpSearchName', 'cpSearchNip'].forEach((id) => {
+  ;['cpSearchName', 'cpSearchCity', 'cpSearchCoordinator'].forEach((id) => {
     binding.add(document.getElementById(id), 'keydown', (event) => {
       if (event.key !== 'Enter') return
       filterClientProfileTable()
@@ -22072,21 +23246,92 @@ function bindClientProfileViewFunctions() {
       return
     }
 
-    openClientProfileModal(clientId)
-  })
-
-  binding.add(document.getElementById('cpModal'), 'click', (event) => {
-    if (event.target?.id === 'cpModal') {
-      closeClientProfileModal()
-    }
+    openClientProfileDetails(clientId)
   })
 
   return () => {
     delete window.ClientProfileModule
-    delete window.closeCpModal
-    delete window.cpEnterEdit
-    delete window.cpCancelEdit
-    delete window.cpSaveEdit
+    binding.done()
+  }
+}
+
+function bindClientProfileDetailsViewFunctions() {
+  const binding = createBindingHelpers()
+
+  binding.add(document.getElementById('cpdTabs'), 'click', (event) => {
+    const button = event.target.closest('[data-client-profile-tab]')
+    if (!button) return
+    clientProfileSetActiveTab(button.getAttribute('data-client-profile-tab'))
+  })
+  binding.add(document.getElementById('cpdEditMenuBtn'), 'click', () => setClientProfileEditMode(true))
+  binding.add(document.getElementById('cpdInlineCancelBtn'), 'click', () => {
+    appState.clientProfileEditMode = false
+    renderClientProfileDetailView()
+  })
+  binding.add(document.getElementById('cpdInlineSaveBtn'), 'click', () => {
+    void saveClientProfileEdit()
+  })
+  binding.add(document.getElementById('cpdOrdersAddBtn'), 'click', () => {
+    if (typeof window.go === 'function') {
+      window.go('orders')
+    }
+    ordersOpenAddEditor()
+  })
+  binding.add(document.getElementById('view-clientProfileDetails'), 'click', (event) => {
+    if (event.target.closest('#cpdCoordinatorPickerBtn')) {
+      void openClientProfileCoordinatorPicker()
+      return
+    }
+    if (event.target.closest('#cpdEmployeeAssignOpenBtn')) {
+      void openClientProfileAssignPicker()
+      return
+    }
+    if (event.target.closest('#cpdInternalNotesSaveBtn')) {
+      void saveClientProfileInternalNotesInline()
+      return
+    }
+    const removeButton = event.target.closest('[data-cpd-employee-remove]')
+    if (removeButton) {
+      void removeClientProfileAssignedWorker(removeButton.getAttribute('data-cpd-employee-remove'))
+    }
+  })
+  binding.add(document.getElementById('cpdCoordinatorSearchInput'), 'input', () => renderClientProfileWorkerPickerList('coordinator'))
+  binding.add(document.getElementById('cpdAssignSearchInput'), 'input', () => renderClientProfileWorkerPickerList('assign'))
+  binding.add(document.getElementById('cpdCoordinatorWorkerList'), 'change', (event) => {
+    const input = event.target.closest('[data-cpd-coordinator-option]')
+    if (!input) return
+    appState.clientProfileCoordinatorSelectedKey = String(input.value ?? '')
+    renderClientProfileWorkerPickerList('coordinator')
+  })
+  binding.add(document.getElementById('cpdAssignWorkerList'), 'change', (event) => {
+    const input = event.target.closest('[data-cpd-assign-option]')
+    if (!input) return
+    const key = String(input.value ?? '')
+    if (input.checked) {
+      appState.clientProfileAssignSelectedKeys.add(key)
+    } else {
+      appState.clientProfileAssignSelectedKeys.delete(key)
+    }
+    renderClientProfileWorkerPickerList('assign')
+  })
+  ;['cpdCoordinatorCloseBtn', 'cpdCoordinatorCancelBtn'].forEach((id) => {
+    binding.add(document.getElementById(id), 'click', closeClientProfileCoordinatorPicker)
+  })
+  ;['cpdAssignCloseBtn', 'cpdAssignCancelBtn'].forEach((id) => {
+    binding.add(document.getElementById(id), 'click', closeClientProfileAssignPicker)
+  })
+  binding.add(document.getElementById('cpdCoordinatorConfirmBtn'), 'click', confirmClientProfileCoordinatorPicker)
+  binding.add(document.getElementById('cpdAssignConfirmBtn'), 'click', () => {
+    void confirmClientProfileAssignPicker()
+  })
+  binding.add(document.getElementById('cpdCoordinatorOverlay'), 'click', (event) => {
+    if (event.target?.id === 'cpdCoordinatorOverlay') closeClientProfileCoordinatorPicker()
+  })
+  binding.add(document.getElementById('cpdAssignOverlay'), 'click', (event) => {
+    if (event.target?.id === 'cpdAssignOverlay') closeClientProfileAssignPicker()
+  })
+
+  return () => {
     binding.done()
   }
 }
@@ -32863,6 +34108,11 @@ function bindLogin(router) {
       appState.clientProfileRows = []
       appState.clientProfileCurrent = null
       appState.clientProfileEditMode = false
+      appState.clientProfileActiveTab = 'profile'
+      appState.clientProfileCalendarRows = []
+      appState.clientProfileAssignSelectedKeys = new Set()
+      appState.clientProfileCoordinatorSelectedKey = ''
+      appState.clientProfileEditAssignees = ''
       appState.eventsFilters = null
       appState.eventsSelectedKeys = new Set()
       appState.eventRows = []
@@ -32985,6 +34235,11 @@ function bindLogout() {
     appState.clientProfileRows = []
     appState.clientProfileCurrent = null
     appState.clientProfileEditMode = false
+    appState.clientProfileActiveTab = 'profile'
+    appState.clientProfileCalendarRows = []
+    appState.clientProfileAssignSelectedKeys = new Set()
+    appState.clientProfileCoordinatorSelectedKey = ''
+    appState.clientProfileEditAssignees = ''
     appState.eventsFilters = null
     appState.eventsSelectedKeys = new Set()
     appState.eventRows = []
@@ -33169,6 +34424,19 @@ export function mountPortalApp() {
       return
     }
 
+    if (route === 'clientProfileDetails') {
+      void fetchClientProfileDetailForCurrentSession(false)
+      if (!appState.workersLoaded) {
+        void fetchWorkersForCurrentSession().then(renderClientProfileDetailView).catch(() => {})
+      }
+      if (!appState.zonesLoaded) {
+        void fetchZonesForCurrentSession(false).then(renderClientProfileDetailView).catch(() => {})
+      }
+      deferRouteTaskDataRefresh('clientProfileDetails', renderClientProfileDetailView)
+      deferRouteOrderDataRefresh('clientProfileDetails', renderClientProfileDetailView)
+      return
+    }
+
     if (route === 'individualOrders') {
       void fetchIndividualOrdersForCurrentSession({ resetPage: false })
       return
@@ -33234,6 +34502,7 @@ export function mountPortalApp() {
     bindOrdersMapViewFunctions(),
     bindClientsViewFunctions(),
     bindClientProfileViewFunctions(),
+    bindClientProfileDetailsViewFunctions(),
     bindIndividualOrdersViewFunctions(),
     bindEventsViewFunctions(),
     bindZonesViewFunctions(),
@@ -33294,6 +34563,11 @@ export function mountPortalApp() {
         appState.clientProfileRows = []
         appState.clientProfileCurrent = null
         appState.clientProfileEditMode = false
+        appState.clientProfileActiveTab = 'profile'
+        appState.clientProfileCalendarRows = []
+        appState.clientProfileAssignSelectedKeys = new Set()
+        appState.clientProfileCoordinatorSelectedKey = ''
+        appState.clientProfileEditAssignees = ''
         appState.eventsFilters = null
         appState.eventsSelectedKeys = new Set()
         appState.eventRows = []

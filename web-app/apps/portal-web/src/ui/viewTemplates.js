@@ -1,6 +1,7 @@
 ﻿import auditsView from './templates/view-audits.html?raw'
 import calendarView from './templates/view-calendar.html?raw'
 import clientProfileView from './templates/view-client-profile.html?raw'
+import clientProfileDetailsView from './templates/view-client-profile-details.html?raw'
 import clientsListView from './templates/view-clients-list.html?raw'
 import eventsView from './templates/view-events.html?raw'
 import individualOrdersView from './templates/view-individual-orders.html?raw'
@@ -31,5 +32,6 @@ export const viewTemplates = {
   audits: auditsView,
   individualOrders: individualOrdersView,
   clientProfile: clientProfileView,
+  clientProfileDetails: clientProfileDetailsView,
   reports: reportsView,
 }

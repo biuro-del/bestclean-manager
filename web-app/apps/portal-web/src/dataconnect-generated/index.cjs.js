@@ -1,34 +1,10 @@
-const { queryRef, executeQuery, mutationRef, executeMutation, validateArgs } = require('firebase/data-connect');
+const { queryRef, executeQuery, validateArgsWithOptions, mutationRef, executeMutation, validateArgs } = require('firebase/data-connect');
 
 const connectorConfig = {
   connector: 'example',
   service: 'iclean-room-service',
   location: 'europe-west3'
 };
-
-function isDataConnectQueryOptions(value) {
-  return Boolean(value && typeof value === 'object' && 'fetchPolicy' in value);
-}
-
-function validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, validateVars, hasVars) {
-  if (!hasVars) {
-    if (isDataConnectQueryOptions(dcOrVars) && varsOrOptions === undefined) {
-      const validated = validateArgs(connectorConfig, undefined, undefined, validateVars);
-      return { ...validated, options: dcOrVars };
-    }
-
-    const validated = validateArgs(connectorConfig, dcOrVars, undefined, validateVars);
-    return { ...validated, options: varsOrOptions };
-  }
-
-  if (options === undefined && isDataConnectQueryOptions(varsOrOptions)) {
-    const validated = validateArgs(connectorConfig, dcOrVars, undefined, validateVars);
-    return { ...validated, options: varsOrOptions };
-  }
-
-  const validated = validateArgs(connectorConfig, dcOrVars, varsOrOptions, validateVars);
-  return { ...validated, options };
-}
 exports.connectorConfig = connectorConfig;
 
 const insertWorkerForOrgRef = (dcOrVars, vars) => {

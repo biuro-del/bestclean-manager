@@ -977,6 +977,40 @@ export interface ClientsForOrgData {
     chemistry?: string | null;
     equipment?: string | null;
     clientInfo?: string | null;
+    objectType?: string | null;
+    cooperationStartAt?: TimestampString | null;
+    cooperationEndAt?: TimestampString | null;
+    contactPerson?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    emergencyContact?: string | null;
+    contactPosition?: string | null;
+    postalCode?: string | null;
+    accessHours?: string | null;
+    accessMethod?: string | null;
+    serviceEntry?: string | null;
+    serviceType?: string | null;
+    serviceDays?: string | null;
+    preferredHours?: string | null;
+    workMode?: string | null;
+    sla?: string | null;
+    rbhAmount?: number | null;
+    requiredPermissions?: string | null;
+    bhpRequirements?: string | null;
+    workRestrictions?: string | null;
+    excludedZones?: string | null;
+    operationalRisks?: string | null;
+    specialInstructions?: string | null;
+    specialEquipment?: string | null;
+    storagePlace?: string | null;
+    backroomAccess?: string | null;
+    technicalNotes?: string | null;
+    internalNotes?: string | null;
+    coordinatorChangedAt?: TimestampString | null;
+    lastExecutionAt?: TimestampString | null;
+    lastWorkerAssignmentAt?: TimestampString | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
   })[];
 }
 ```
@@ -3722,6 +3756,38 @@ export interface InsertClientForOrgVariables {
   chemistry?: string | null;
   equipment?: string | null;
   clientInfo?: string | null;
+  objectType?: string | null;
+  cooperationStartAt?: TimestampString | null;
+  cooperationEndAt?: TimestampString | null;
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  emergencyContact?: string | null;
+  contactPosition?: string | null;
+  postalCode?: string | null;
+  accessHours?: string | null;
+  accessMethod?: string | null;
+  serviceEntry?: string | null;
+  serviceType?: string | null;
+  serviceDays?: string | null;
+  preferredHours?: string | null;
+  workMode?: string | null;
+  sla?: string | null;
+  rbhAmount?: number | null;
+  requiredPermissions?: string | null;
+  bhpRequirements?: string | null;
+  workRestrictions?: string | null;
+  excludedZones?: string | null;
+  operationalRisks?: string | null;
+  specialInstructions?: string | null;
+  specialEquipment?: string | null;
+  storagePlace?: string | null;
+  backroomAccess?: string | null;
+  technicalNotes?: string | null;
+  internalNotes?: string | null;
+  coordinatorChangedAt?: TimestampString | null;
+  lastExecutionAt?: TimestampString | null;
+  lastWorkerAssignmentAt?: TimestampString | null;
 }
 ```
 ### Return Type
@@ -3755,13 +3821,45 @@ const insertClientForOrgVars: InsertClientForOrgVariables = {
   chemistry: ..., // optional
   equipment: ..., // optional
   clientInfo: ..., // optional
+  objectType: ..., // optional
+  cooperationStartAt: ..., // optional
+  cooperationEndAt: ..., // optional
+  contactPerson: ..., // optional
+  phone: ..., // optional
+  email: ..., // optional
+  emergencyContact: ..., // optional
+  contactPosition: ..., // optional
+  postalCode: ..., // optional
+  accessHours: ..., // optional
+  accessMethod: ..., // optional
+  serviceEntry: ..., // optional
+  serviceType: ..., // optional
+  serviceDays: ..., // optional
+  preferredHours: ..., // optional
+  workMode: ..., // optional
+  sla: ..., // optional
+  rbhAmount: ..., // optional
+  requiredPermissions: ..., // optional
+  bhpRequirements: ..., // optional
+  workRestrictions: ..., // optional
+  excludedZones: ..., // optional
+  operationalRisks: ..., // optional
+  specialInstructions: ..., // optional
+  specialEquipment: ..., // optional
+  storagePlace: ..., // optional
+  backroomAccess: ..., // optional
+  technicalNotes: ..., // optional
+  internalNotes: ..., // optional
+  coordinatorChangedAt: ..., // optional
+  lastExecutionAt: ..., // optional
+  lastWorkerAssignmentAt: ..., // optional
 };
 
 // Call the `insertClientForOrg()` function to execute the mutation.
 // You can use the `await` keyword to wait for the promise to resolve.
 const { data } = await insertClientForOrg(insertClientForOrgVars);
 // Variables can be defined inline as well.
-const { data } = await insertClientForOrg({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., });
+const { data } = await insertClientForOrg({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., objectType: ..., cooperationStartAt: ..., cooperationEndAt: ..., contactPerson: ..., phone: ..., email: ..., emergencyContact: ..., contactPosition: ..., postalCode: ..., accessHours: ..., accessMethod: ..., serviceEntry: ..., serviceType: ..., serviceDays: ..., preferredHours: ..., workMode: ..., sla: ..., rbhAmount: ..., requiredPermissions: ..., bhpRequirements: ..., workRestrictions: ..., excludedZones: ..., operationalRisks: ..., specialInstructions: ..., specialEquipment: ..., storagePlace: ..., backroomAccess: ..., technicalNotes: ..., internalNotes: ..., coordinatorChangedAt: ..., lastExecutionAt: ..., lastWorkerAssignmentAt: ..., });
 
 // You can also pass in a `DataConnect` instance to the action shortcut function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -3798,12 +3896,44 @@ const insertClientForOrgVars: InsertClientForOrgVariables = {
   chemistry: ..., // optional
   equipment: ..., // optional
   clientInfo: ..., // optional
+  objectType: ..., // optional
+  cooperationStartAt: ..., // optional
+  cooperationEndAt: ..., // optional
+  contactPerson: ..., // optional
+  phone: ..., // optional
+  email: ..., // optional
+  emergencyContact: ..., // optional
+  contactPosition: ..., // optional
+  postalCode: ..., // optional
+  accessHours: ..., // optional
+  accessMethod: ..., // optional
+  serviceEntry: ..., // optional
+  serviceType: ..., // optional
+  serviceDays: ..., // optional
+  preferredHours: ..., // optional
+  workMode: ..., // optional
+  sla: ..., // optional
+  rbhAmount: ..., // optional
+  requiredPermissions: ..., // optional
+  bhpRequirements: ..., // optional
+  workRestrictions: ..., // optional
+  excludedZones: ..., // optional
+  operationalRisks: ..., // optional
+  specialInstructions: ..., // optional
+  specialEquipment: ..., // optional
+  storagePlace: ..., // optional
+  backroomAccess: ..., // optional
+  technicalNotes: ..., // optional
+  internalNotes: ..., // optional
+  coordinatorChangedAt: ..., // optional
+  lastExecutionAt: ..., // optional
+  lastWorkerAssignmentAt: ..., // optional
 };
 
 // Call the `insertClientForOrgRef()` function to get a reference to the mutation.
 const ref = insertClientForOrgRef(insertClientForOrgVars);
 // Variables can be defined inline as well.
-const ref = insertClientForOrgRef({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., });
+const ref = insertClientForOrgRef({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., objectType: ..., cooperationStartAt: ..., cooperationEndAt: ..., contactPerson: ..., phone: ..., email: ..., emergencyContact: ..., contactPosition: ..., postalCode: ..., accessHours: ..., accessMethod: ..., serviceEntry: ..., serviceType: ..., serviceDays: ..., preferredHours: ..., workMode: ..., sla: ..., rbhAmount: ..., requiredPermissions: ..., bhpRequirements: ..., workRestrictions: ..., excludedZones: ..., operationalRisks: ..., specialInstructions: ..., specialEquipment: ..., storagePlace: ..., backroomAccess: ..., technicalNotes: ..., internalNotes: ..., coordinatorChangedAt: ..., lastExecutionAt: ..., lastWorkerAssignmentAt: ..., });
 
 // You can also pass in a `DataConnect` instance to the `MutationRef` function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -3870,6 +4000,38 @@ export interface UpdateClientForOrgVariables {
   chemistry?: string | null;
   equipment?: string | null;
   clientInfo?: string | null;
+  objectType?: string | null;
+  cooperationStartAt?: TimestampString | null;
+  cooperationEndAt?: TimestampString | null;
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  emergencyContact?: string | null;
+  contactPosition?: string | null;
+  postalCode?: string | null;
+  accessHours?: string | null;
+  accessMethod?: string | null;
+  serviceEntry?: string | null;
+  serviceType?: string | null;
+  serviceDays?: string | null;
+  preferredHours?: string | null;
+  workMode?: string | null;
+  sla?: string | null;
+  rbhAmount?: number | null;
+  requiredPermissions?: string | null;
+  bhpRequirements?: string | null;
+  workRestrictions?: string | null;
+  excludedZones?: string | null;
+  operationalRisks?: string | null;
+  specialInstructions?: string | null;
+  specialEquipment?: string | null;
+  storagePlace?: string | null;
+  backroomAccess?: string | null;
+  technicalNotes?: string | null;
+  internalNotes?: string | null;
+  coordinatorChangedAt?: TimestampString | null;
+  lastExecutionAt?: TimestampString | null;
+  lastWorkerAssignmentAt?: TimestampString | null;
 }
 ```
 ### Return Type
@@ -3903,13 +4065,45 @@ const updateClientForOrgVars: UpdateClientForOrgVariables = {
   chemistry: ..., // optional
   equipment: ..., // optional
   clientInfo: ..., // optional
+  objectType: ..., // optional
+  cooperationStartAt: ..., // optional
+  cooperationEndAt: ..., // optional
+  contactPerson: ..., // optional
+  phone: ..., // optional
+  email: ..., // optional
+  emergencyContact: ..., // optional
+  contactPosition: ..., // optional
+  postalCode: ..., // optional
+  accessHours: ..., // optional
+  accessMethod: ..., // optional
+  serviceEntry: ..., // optional
+  serviceType: ..., // optional
+  serviceDays: ..., // optional
+  preferredHours: ..., // optional
+  workMode: ..., // optional
+  sla: ..., // optional
+  rbhAmount: ..., // optional
+  requiredPermissions: ..., // optional
+  bhpRequirements: ..., // optional
+  workRestrictions: ..., // optional
+  excludedZones: ..., // optional
+  operationalRisks: ..., // optional
+  specialInstructions: ..., // optional
+  specialEquipment: ..., // optional
+  storagePlace: ..., // optional
+  backroomAccess: ..., // optional
+  technicalNotes: ..., // optional
+  internalNotes: ..., // optional
+  coordinatorChangedAt: ..., // optional
+  lastExecutionAt: ..., // optional
+  lastWorkerAssignmentAt: ..., // optional
 };
 
 // Call the `updateClientForOrg()` function to execute the mutation.
 // You can use the `await` keyword to wait for the promise to resolve.
 const { data } = await updateClientForOrg(updateClientForOrgVars);
 // Variables can be defined inline as well.
-const { data } = await updateClientForOrg({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., });
+const { data } = await updateClientForOrg({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., objectType: ..., cooperationStartAt: ..., cooperationEndAt: ..., contactPerson: ..., phone: ..., email: ..., emergencyContact: ..., contactPosition: ..., postalCode: ..., accessHours: ..., accessMethod: ..., serviceEntry: ..., serviceType: ..., serviceDays: ..., preferredHours: ..., workMode: ..., sla: ..., rbhAmount: ..., requiredPermissions: ..., bhpRequirements: ..., workRestrictions: ..., excludedZones: ..., operationalRisks: ..., specialInstructions: ..., specialEquipment: ..., storagePlace: ..., backroomAccess: ..., technicalNotes: ..., internalNotes: ..., coordinatorChangedAt: ..., lastExecutionAt: ..., lastWorkerAssignmentAt: ..., });
 
 // You can also pass in a `DataConnect` instance to the action shortcut function.
 const dataConnect = getDataConnect(connectorConfig);
@@ -3946,12 +4140,44 @@ const updateClientForOrgVars: UpdateClientForOrgVariables = {
   chemistry: ..., // optional
   equipment: ..., // optional
   clientInfo: ..., // optional
+  objectType: ..., // optional
+  cooperationStartAt: ..., // optional
+  cooperationEndAt: ..., // optional
+  contactPerson: ..., // optional
+  phone: ..., // optional
+  email: ..., // optional
+  emergencyContact: ..., // optional
+  contactPosition: ..., // optional
+  postalCode: ..., // optional
+  accessHours: ..., // optional
+  accessMethod: ..., // optional
+  serviceEntry: ..., // optional
+  serviceType: ..., // optional
+  serviceDays: ..., // optional
+  preferredHours: ..., // optional
+  workMode: ..., // optional
+  sla: ..., // optional
+  rbhAmount: ..., // optional
+  requiredPermissions: ..., // optional
+  bhpRequirements: ..., // optional
+  workRestrictions: ..., // optional
+  excludedZones: ..., // optional
+  operationalRisks: ..., // optional
+  specialInstructions: ..., // optional
+  specialEquipment: ..., // optional
+  storagePlace: ..., // optional
+  backroomAccess: ..., // optional
+  technicalNotes: ..., // optional
+  internalNotes: ..., // optional
+  coordinatorChangedAt: ..., // optional
+  lastExecutionAt: ..., // optional
+  lastWorkerAssignmentAt: ..., // optional
 };
 
 // Call the `updateClientForOrgRef()` function to get a reference to the mutation.
 const ref = updateClientForOrgRef(updateClientForOrgVars);
 // Variables can be defined inline as well.
-const ref = updateClientForOrgRef({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., });
+const ref = updateClientForOrgRef({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., objectType: ..., cooperationStartAt: ..., cooperationEndAt: ..., contactPerson: ..., phone: ..., email: ..., emergencyContact: ..., contactPosition: ..., postalCode: ..., accessHours: ..., accessMethod: ..., serviceEntry: ..., serviceType: ..., serviceDays: ..., preferredHours: ..., workMode: ..., sla: ..., rbhAmount: ..., requiredPermissions: ..., bhpRequirements: ..., workRestrictions: ..., excludedZones: ..., operationalRisks: ..., specialInstructions: ..., specialEquipment: ..., storagePlace: ..., backroomAccess: ..., technicalNotes: ..., internalNotes: ..., coordinatorChangedAt: ..., lastExecutionAt: ..., lastWorkerAssignmentAt: ..., });
 
 // You can also pass in a `DataConnect` instance to the `MutationRef` function.
 const dataConnect = getDataConnect(connectorConfig);

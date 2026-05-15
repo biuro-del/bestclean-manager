@@ -269,6 +269,38 @@ mutation InsertClientForOrg(
   $chemistry: String
   $equipment: String
   $clientInfo: String
+  $objectType: String
+  $cooperationStartAt: Timestamp
+  $cooperationEndAt: Timestamp
+  $contactPerson: String
+  $phone: String
+  $email: String
+  $emergencyContact: String
+  $contactPosition: String
+  $postalCode: String
+  $accessHours: String
+  $accessMethod: String
+  $serviceEntry: String
+  $serviceType: String
+  $serviceDays: String
+  $preferredHours: String
+  $workMode: String
+  $sla: String
+  $rbhAmount: Float
+  $requiredPermissions: String
+  $bhpRequirements: String
+  $workRestrictions: String
+  $excludedZones: String
+  $operationalRisks: String
+  $specialInstructions: String
+  $specialEquipment: String
+  $storagePlace: String
+  $backroomAccess: String
+  $technicalNotes: String
+  $internalNotes: String
+  $coordinatorChangedAt: Timestamp
+  $lastExecutionAt: Timestamp
+  $lastWorkerAssignmentAt: Timestamp
 ) @auth(level: USER) @transaction {
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
@@ -292,6 +324,40 @@ mutation InsertClientForOrg(
     chemistry: $chemistry
     equipment: $equipment
     clientInfo: $clientInfo
+    objectType: $objectType
+    cooperationStartAt: $cooperationStartAt
+    cooperationEndAt: $cooperationEndAt
+    contactPerson: $contactPerson
+    phone: $phone
+    email: $email
+    emergencyContact: $emergencyContact
+    contactPosition: $contactPosition
+    postalCode: $postalCode
+    accessHours: $accessHours
+    accessMethod: $accessMethod
+    serviceEntry: $serviceEntry
+    serviceType: $serviceType
+    serviceDays: $serviceDays
+    preferredHours: $preferredHours
+    workMode: $workMode
+    sla: $sla
+    rbhAmount: $rbhAmount
+    requiredPermissions: $requiredPermissions
+    bhpRequirements: $bhpRequirements
+    workRestrictions: $workRestrictions
+    excludedZones: $excludedZones
+    operationalRisks: $operationalRisks
+    specialInstructions: $specialInstructions
+    specialEquipment: $specialEquipment
+    storagePlace: $storagePlace
+    backroomAccess: $backroomAccess
+    technicalNotes: $technicalNotes
+    internalNotes: $internalNotes
+    coordinatorChangedAt: $coordinatorChangedAt
+    lastExecutionAt: $lastExecutionAt
+    lastWorkerAssignmentAt: $lastWorkerAssignmentAt
+    createdAt_expr: "request.time"
+    updatedAt_expr: "request.time"
   })
 }
 
@@ -310,6 +376,38 @@ mutation UpdateClientForOrg(
   $chemistry: String
   $equipment: String
   $clientInfo: String
+  $objectType: String
+  $cooperationStartAt: Timestamp
+  $cooperationEndAt: Timestamp
+  $contactPerson: String
+  $phone: String
+  $email: String
+  $emergencyContact: String
+  $contactPosition: String
+  $postalCode: String
+  $accessHours: String
+  $accessMethod: String
+  $serviceEntry: String
+  $serviceType: String
+  $serviceDays: String
+  $preferredHours: String
+  $workMode: String
+  $sla: String
+  $rbhAmount: Float
+  $requiredPermissions: String
+  $bhpRequirements: String
+  $workRestrictions: String
+  $excludedZones: String
+  $operationalRisks: String
+  $specialInstructions: String
+  $specialEquipment: String
+  $storagePlace: String
+  $backroomAccess: String
+  $technicalNotes: String
+  $internalNotes: String
+  $coordinatorChangedAt: Timestamp
+  $lastExecutionAt: Timestamp
+  $lastWorkerAssignmentAt: Timestamp
 ) @auth(level: USER) @transaction {
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
@@ -333,6 +431,39 @@ mutation UpdateClientForOrg(
       chemistry: $chemistry
       equipment: $equipment
       clientInfo: $clientInfo
+      objectType: $objectType
+      cooperationStartAt: $cooperationStartAt
+      cooperationEndAt: $cooperationEndAt
+      contactPerson: $contactPerson
+      phone: $phone
+      email: $email
+      emergencyContact: $emergencyContact
+      contactPosition: $contactPosition
+      postalCode: $postalCode
+      accessHours: $accessHours
+      accessMethod: $accessMethod
+      serviceEntry: $serviceEntry
+      serviceType: $serviceType
+      serviceDays: $serviceDays
+      preferredHours: $preferredHours
+      workMode: $workMode
+      sla: $sla
+      rbhAmount: $rbhAmount
+      requiredPermissions: $requiredPermissions
+      bhpRequirements: $bhpRequirements
+      workRestrictions: $workRestrictions
+      excludedZones: $excludedZones
+      operationalRisks: $operationalRisks
+      specialInstructions: $specialInstructions
+      specialEquipment: $specialEquipment
+      storagePlace: $storagePlace
+      backroomAccess: $backroomAccess
+      technicalNotes: $technicalNotes
+      internalNotes: $internalNotes
+      coordinatorChangedAt: $coordinatorChangedAt
+      lastExecutionAt: $lastExecutionAt
+      lastWorkerAssignmentAt: $lastWorkerAssignmentAt
+      updatedAt_expr: "request.time"
     }
   )
 }
