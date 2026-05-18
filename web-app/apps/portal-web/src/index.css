@@ -17960,15 +17960,15 @@ body.calendar-events-popup-dragging *{
   display:grid;
   gap:0;
   grid-template-columns:
-    minmax(88px, .72fr)
-    minmax(88px, .72fr)
-    minmax(96px, .78fr)
-    minmax(140px, 1.18fr)
-    minmax(140px, 1.15fr)
-    minmax(140px, 1.05fr)
-    minmax(220px, 1.8fr)
-    132px;
-  min-width:940px;
+    minmax(78px, .72fr)
+    minmax(78px, .72fr)
+    minmax(84px, .76fr)
+    minmax(118px, 1.18fr)
+    minmax(104px, 1fr)
+    minmax(126px, 1.18fr)
+    minmax(132px, 1.35fr)
+    104px;
+  min-width:0;
 }
 
 #portalRoot #view-orders .orders-head{
@@ -17982,7 +17982,8 @@ body.calendar-events-popup-dragging *{
 #portalRoot #view-orders .orders-head > div,
 #portalRoot #view-orders .orders-row > div{
   min-width:0;
-  padding:12px 14px;
+  overflow-wrap:anywhere;
+  padding:12px 10px;
 }
 
 #portalRoot #view-orders .orders-row{
@@ -18007,7 +18008,7 @@ body.calendar-events-popup-dragging *{
 
 #portalRoot #view-orders .orders-actions{
   display:flex;
-  gap:8px;
+  gap:6px;
   justify-content:flex-end;
 }
 
@@ -18018,9 +18019,10 @@ body.calendar-events-popup-dragging *{
   color:#fff;
   cursor:pointer;
   display:inline-flex;
-  height:32px;
+  flex:0 0 30px;
+  height:30px;
   justify-content:center;
-  width:32px;
+  width:30px;
 }
 
 #portalRoot #view-orders .orders-action svg{
