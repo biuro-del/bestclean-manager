@@ -18729,6 +18729,11 @@ body{
   flex-direction:column;
 }
 
+#portalRoot #view-orders #ordersSchedulePreview,
+#portalRoot #view-orders .orders-modal--simple #ordersSchedulePreview{
+  display:none !important;
+}
+
 #portalRoot #view-orders .orders-schedule-mode{
   background:#fff;
   border:1px solid #d8e2f2;
@@ -18882,6 +18887,141 @@ body{
   gap:7px;
 }
 
+#portalRoot #view-orders .orders-weekly-pattern{
+  background:#f8fbff;
+  border:1px solid #dbe7fb;
+  border-radius:10px;
+  display:grid;
+  gap:10px;
+  padding:12px;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-head{
+  align-items:flex-start;
+  display:flex;
+  gap:12px;
+  justify-content:space-between;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-head div{
+  display:grid;
+  gap:3px;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-head strong{
+  color:#10233f;
+  font:900 13px/1.2 "Manrope", "Segoe UI", Arial, sans-serif;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-head span{
+  color:#64758f;
+  font:700 11px/1.4 "Manrope", "Segoe UI", Arial, sans-serif;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-head em{
+  background:#eef4ff;
+  border:1px solid #d7e5ff;
+  border-radius:999px;
+  color:#285bc8;
+  font:900 11px/1 "Manrope", "Segoe UI", Arial, sans-serif;
+  font-style:normal;
+  padding:6px 9px;
+  white-space:nowrap;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-actions{
+  align-items:center;
+  display:flex;
+  gap:8px;
+  justify-content:flex-end;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-actions button{
+  align-items:center;
+  background:#fff;
+  border:1px solid #cfdcff;
+  border-radius:8px;
+  color:#285bc8;
+  cursor:pointer;
+  display:inline-flex;
+  font:900 11px/1 "Manrope", "Segoe UI", Arial, sans-serif;
+  justify-content:center;
+  min-height:30px;
+  padding:0 10px;
+  white-space:nowrap;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-actions button:hover{
+  background:#eef4ff;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-actions button:disabled{
+  cursor:not-allowed;
+  opacity:.45;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-rows{
+  display:grid;
+  gap:8px;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-row{
+  align-items:end;
+  background:#fff;
+  border:1px solid #dbe7fb;
+  border-radius:9px;
+  display:grid;
+  gap:8px;
+  grid-template-columns:minmax(96px, .75fr) repeat(4, minmax(92px, 1fr)) minmax(150px, 1.15fr);
+  padding:9px 10px;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-row.is-invalid{
+  background:#fff7f7;
+  border-color:#ffc7c7;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-row strong{
+  align-self:center;
+  color:#10233f;
+  font:900 12px/1.2 "Manrope", "Segoe UI", Arial, sans-serif;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-row label{
+  display:grid;
+  gap:4px;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-row label span{
+  color:#64758f;
+  font:900 10px/1 "Manrope", "Segoe UI", Arial, sans-serif;
+  text-transform:uppercase;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-row input{
+  background:#fff;
+  border:1px solid #cfd8e8;
+  border-radius:7px;
+  color:#10233f;
+  font:800 12px/1.2 "Manrope", "Segoe UI", Arial, sans-serif;
+  min-height:34px;
+  padding:0 8px;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-row small{
+  align-self:center;
+  color:#0f8a43;
+  font:800 11px/1.3 "Manrope", "Segoe UI", Arial, sans-serif;
+}
+
+#portalRoot #view-orders .orders-weekly-pattern-row.is-invalid small{
+  color:#d2142f;
+}
+
 #portalRoot #view-orders .orders-schedule-custom input,
 #portalRoot #view-orders .orders-schedule-custom select{
   background:#fff;
@@ -18891,6 +19031,19 @@ body{
   font:700 12px/1.2 "Manrope", "Segoe UI", Arial, sans-serif;
   min-height:32px;
   padding:6px 8px;
+}
+
+#portalRoot #view-orders .orders-schedule-custom.is-monthly-interval{
+  grid-template-columns:auto 92px auto;
+}
+
+#portalRoot #view-orders .orders-schedule-custom.is-monthly-interval [data-orders-repeat-select="ordersEditRepeatUnit"]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-schedule-custom .orders-repeat-month-suffix{
+  color:#334155;
+  font:800 12px/1.2 "Manrope", "Segoe UI", Arial, sans-serif;
 }
 
 #portalRoot #view-orders .orders-schedule-monthly{
@@ -19033,12 +19186,6 @@ body{
   min-height:70px;
 }
 
-#portalRoot #view-orders .orders-modal--simple .orders-worker-comment span::after{
-  color:#64748b;
-  content:" - tylko aplikacja pracownika";
-  font-weight:700;
-}
-
 #portalRoot #view-orders .orders-modal--simple .orders-simple-subtasks{
   margin-top:14px;
 }
@@ -19078,7 +19225,7 @@ body{
 }
 
 #portalRoot #view-orders .orders-inline-add--supply{
-  grid-template-columns:112px minmax(0, 1fr) auto;
+  grid-template-columns:112px minmax(0, 1fr) minmax(130px, .45fr) auto;
 }
 
 #portalRoot #view-orders .orders-inline-add--simple input,
@@ -19166,6 +19313,19 @@ body{
 
 #portalRoot #view-orders .orders-simple-row button:hover{
   background:#fee2e2;
+}
+
+#portalRoot #view-orders .orders-simple-row--supply{
+  grid-template-columns:auto minmax(0, 1fr) minmax(96px, .35fr) auto;
+}
+
+#portalRoot #view-orders .orders-simple-row--supply small{
+  color:#71809a;
+  font:800 11px/1.2 "Manrope", "Segoe UI", Arial, sans-serif;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 
 #portalRoot #view-orders .orders-map-overlay{
@@ -21897,8 +22057,254 @@ body{
   display:none !important;
 }
 
+#portalRoot #view-orders .orders-schedule-custom[hidden],
+#portalRoot #view-orders .orders-modal--simple .orders-schedule-custom[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders #ordersScheduleTimeGrid[hidden],
+#portalRoot #view-orders .orders-modal--simple #ordersScheduleTimeGrid[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-time-input{
+  cursor:pointer !important;
+}
+
+.orders-time-picker{
+  position:fixed;
+  width:172px;
+  z-index:10000;
+}
+
+.orders-time-picker[hidden]{
+  display:none !important;
+}
+
+.orders-time-picker-panel{
+  background:#fff;
+  border:1px solid #cfd8e8;
+  box-shadow:0 18px 42px rgba(15, 23, 42, .18);
+  display:grid;
+  gap:0;
+}
+
+.orders-time-picker-columns{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  max-height:220px;
+  overflow:hidden;
+}
+
+.orders-time-picker-column{
+  max-height:220px;
+  overflow:auto;
+  overscroll-behavior:contain;
+  padding:4px;
+}
+
+.orders-time-picker-column + .orders-time-picker-column{
+  border-left:1px solid #e2e8f0;
+}
+
+.orders-time-picker-column button{
+  align-items:center;
+  background:#fff;
+  border:0;
+  color:#10233f;
+  cursor:pointer;
+  display:flex;
+  font:800 13px/1 "Manrope", "Segoe UI", Arial, sans-serif;
+  height:34px;
+  justify-content:center;
+  width:100%;
+}
+
+.orders-time-picker-column button:hover,
+.orders-time-picker-column button:focus-visible{
+  background:#eef4ff;
+  outline:none;
+}
+
+.orders-time-picker-column button.is-selected{
+  background:#2f63e6;
+  color:#fff;
+}
+
+.orders-time-picker-actions{
+  align-items:center;
+  border-top:1px solid #e2e8f0;
+  display:flex;
+  gap:6px;
+  justify-content:flex-end;
+  padding:7px;
+}
+
+.orders-time-picker-actions button{
+  border-radius:7px;
+  cursor:pointer;
+  font:900 12px/1 "Manrope", "Segoe UI", Arial, sans-serif;
+  min-height:30px;
+  padding:0 11px;
+}
+
+.orders-time-picker-cancel{
+  background:#fff;
+  border:1px solid #d8e3f2;
+  color:#52627a;
+}
+
+.orders-time-picker-ok{
+  background:#2f63e6;
+  border:1px solid #2f63e6;
+  color:#fff;
+}
+
+#portalRoot #view-orders .orders-extended-work-toggle{
+  align-items:flex-start !important;
+  background:#fff !important;
+  border:1px solid #dbe7fb !important;
+  border-radius:10px !important;
+  color:#10233f !important;
+  cursor:pointer !important;
+  display:flex !important;
+  gap:10px !important;
+  padding:10px 12px !important;
+}
+
+#portalRoot #view-orders .orders-extended-work-toggle input{
+  accent-color:#635bff !important;
+  flex:0 0 auto !important;
+  height:18px !important;
+  margin:2px 0 0 !important;
+  width:18px !important;
+}
+
+#portalRoot #view-orders .orders-extended-work-toggle span{
+  display:grid !important;
+  gap:3px !important;
+  min-width:0 !important;
+}
+
+#portalRoot #view-orders .orders-extended-work-toggle strong{
+  color:#0f2852 !important;
+  font:900 12px/1.3 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-extended-work-toggle small{
+  color:#64758f !important;
+  font:700 11px/1.45 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
 #portalRoot #view-orders .orders-schedule-rules .orders-schedule-repeat{
   margin:0 !important;
+}
+
+#portalRoot #view-orders .orders-access-windows{
+  background:#fff !important;
+  border:1px solid #dbe7fb !important;
+  border-radius:12px !important;
+  display:grid !important;
+  gap:10px !important;
+  padding:12px !important;
+}
+
+#portalRoot #view-orders .orders-access-windows[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-access-windows-head{
+  align-items:flex-start !important;
+  display:flex !important;
+  gap:12px !important;
+  justify-content:space-between !important;
+}
+
+#portalRoot #view-orders .orders-access-windows-head div{
+  display:grid !important;
+  gap:3px !important;
+  min-width:0 !important;
+}
+
+#portalRoot #view-orders .orders-access-windows-head strong{
+  color:#0f2852 !important;
+  font:900 13px/1.2 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-access-windows-head span{
+  color:#64758f !important;
+  font:700 11px/1.45 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-access-windows-head button,
+#portalRoot #view-orders .orders-access-window-row button{
+  align-items:center !important;
+  border:0 !important;
+  border-radius:8px !important;
+  cursor:pointer !important;
+  display:inline-flex !important;
+  font:900 12px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  justify-content:center !important;
+  min-height:34px !important;
+  padding:0 12px !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-access-windows-head button{
+  background:#635bff !important;
+  color:#fff !important;
+}
+
+#portalRoot #view-orders .orders-access-windows-head button:hover{
+  background:#5148f0 !important;
+}
+
+#portalRoot #view-orders .orders-access-window-rows{
+  display:grid !important;
+  gap:8px !important;
+}
+
+#portalRoot #view-orders .orders-access-window-row{
+  align-items:end !important;
+  background:#f8fbff !important;
+  border:1px solid #dbe7fb !important;
+  border-radius:10px !important;
+  display:grid !important;
+  gap:10px !important;
+  grid-template-columns:minmax(170px, 1.2fr) repeat(2, minmax(110px, .8fr)) auto !important;
+  padding:10px !important;
+}
+
+#portalRoot #view-orders .orders-access-window-row label{
+  display:grid !important;
+  gap:4px !important;
+}
+
+#portalRoot #view-orders .orders-access-window-row span{
+  color:#64758f !important;
+  font:900 10px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  text-transform:uppercase !important;
+}
+
+#portalRoot #view-orders .orders-access-window-row input,
+#portalRoot #view-orders .orders-access-window-row select{
+  background:#fff !important;
+  border:1px solid #cfd8e8 !important;
+  border-radius:8px !important;
+  color:#10233f !important;
+  font:800 12px/1.2 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  min-height:36px !important;
+  padding:0 9px !important;
+}
+
+#portalRoot #view-orders .orders-access-window-row button{
+  background:#eef4ff !important;
+  color:#285bc8 !important;
+}
+
+#portalRoot #view-orders .orders-access-window-row button:disabled{
+  cursor:not-allowed !important;
+  opacity:.45 !important;
 }
 
 #portalRoot #view-orders .orders-workload-panel{
@@ -21942,22 +22348,39 @@ body{
 }
 
 #portalRoot #view-orders .orders-work-allocation-row{
-  align-items:center !important;
+  align-items:end !important;
   background:#fff !important;
   border:1px solid #dbe7fb !important;
   border-radius:10px !important;
   display:grid !important;
   gap:10px !important;
-  grid-template-columns:minmax(120px, .8fr) minmax(180px, 1.4fr) 96px !important;
+  grid-template-columns:minmax(120px, .7fr) repeat(2, minmax(96px, .45fr)) minmax(160px, 1.1fr) 88px !important;
   padding:9px 10px !important;
 }
 
-#portalRoot #view-orders .orders-work-allocation-row span{
+#portalRoot #view-orders .orders-work-allocation-person{
   color:#10233f !important;
   font:900 12px/1.2 "Manrope", "Segoe UI", Arial, sans-serif !important;
   overflow:hidden !important;
   text-overflow:ellipsis !important;
   white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-work-allocation-time{
+  display:grid !important;
+  gap:4px !important;
+}
+
+#portalRoot #view-orders .orders-work-allocation-time small{
+  color:#64758f !important;
+  font:900 10px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  letter-spacing:0 !important;
+  text-transform:uppercase !important;
+}
+
+#portalRoot #view-orders .orders-work-allocation-time input[type="time"]{
+  min-height:34px !important;
+  padding:0 8px !important;
 }
 
 #portalRoot #view-orders .orders-work-allocation-row input[type="range"]{
@@ -22072,6 +22495,23 @@ body{
   #portalRoot #view-orders .orders-editor-section + .orders-editor-section{
     border-left:0 !important;
     border-top:1px solid #e3ebf7 !important;
+  }
+
+  #portalRoot #view-orders .orders-access-windows-head{
+    align-items:stretch !important;
+    flex-direction:column !important;
+  }
+
+  #portalRoot #view-orders .orders-weekly-pattern-head,
+  #portalRoot #view-orders .orders-weekly-pattern-actions{
+    align-items:stretch !important;
+    flex-direction:column !important;
+  }
+
+  #portalRoot #view-orders .orders-access-window-row,
+  #portalRoot #view-orders .orders-work-allocation-row,
+  #portalRoot #view-orders .orders-weekly-pattern-row{
+    grid-template-columns:1fr !important;
   }
 }
 
@@ -22575,6 +23015,21 @@ body{
   color:#a1acb8 !important;
 }
 
+#portalRoot #view-orders .orders-modal--simple input.orders-time-input[readonly]{
+  background:#fff !important;
+  border-color:#cfd8e8 !important;
+  box-shadow:none !important;
+  color:#10233f !important;
+  cursor:pointer !important;
+  opacity:1 !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple input.orders-time-input[readonly]:focus{
+  border-color:#635bff !important;
+  box-shadow:0 0 0 3px rgba(99, 91, 255, .14) !important;
+  outline:none !important;
+}
+
 #portalRoot #view-orders .orders-modal--simple .orders-field-hint{
   color:#63768f !important;
   font-size:11px !important;
@@ -23059,6 +23514,837 @@ body{
   padding:9px 14px !important;
 }
 
+#portalRoot #view-orders .orders-modal--simple .orders-object-plan-card{
+  border-color:rgba(67,89,113,.14) !important;
+  box-shadow:0 8px 28px rgba(67,89,113,.12) !important;
+  padding:18px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-object-plan-card .orders-panel-title{
+  border-bottom:1px solid rgba(67,89,113,.18) !important;
+  color:var(--orders-editor-primary) !important;
+  font-size:14px !important;
+  margin:0 0 14px !important;
+  padding:0 0 10px !important;
+}
+
+#portalRoot #view-orders .orders-object-plan-grid{
+  display:grid !important;
+  gap:14px !important;
+  grid-template-columns:minmax(220px, 300px) minmax(0, 1fr) !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-list,
+#portalRoot #view-orders .orders-object-zone-panel{
+  background:#fff !important;
+  border:1px solid #dbe6f5 !important;
+  border-radius:10px !important;
+  min-width:0 !important;
+  padding:12px !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-head{
+  align-items:center !important;
+  display:flex !important;
+  justify-content:space-between !important;
+  margin-bottom:10px !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-head strong,
+#portalRoot #view-orders .orders-object-zone-title strong{
+  color:#10233f !important;
+  font:900 13px/1.2 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-head span{
+  background:#eef4ff !important;
+  border:1px solid #d9e6ff !important;
+  border-radius:999px !important;
+  color:#2563eb !important;
+  font:900 12px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  padding:5px 9px !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-rows{
+  display:grid !important;
+  gap:8px !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-card{
+  background:#f8fbff !important;
+  border:1px solid #dbe6f5 !important;
+  border-radius:8px !important;
+  color:#263c5d !important;
+  cursor:pointer !important;
+  display:grid !important;
+  gap:4px !important;
+  padding:10px 12px !important;
+  text-align:left !important;
+  width:100% !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-card.is-active{
+  background:#eef4ff !important;
+  border-color:#7ea8ff !important;
+  box-shadow:inset 3px 0 0 #2f63e6 !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-card strong{
+  color:#10233f !important;
+  font:900 13px/1.2 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-card span,
+#portalRoot #view-orders .orders-object-zone-title span,
+#portalRoot #view-orders .orders-object-zone-empty,
+#portalRoot #view-orders .orders-object-task-list-empty{
+  color:#71809a !important;
+  font:700 12px/1.35 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-title{
+  align-items:flex-start !important;
+  display:flex !important;
+  gap:12px !important;
+  justify-content:space-between !important;
+  margin-bottom:12px !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-title em{
+  background:#e9fff2 !important;
+  border:1px solid #bdeccf !important;
+  border-radius:999px !important;
+  color:#0c8a43 !important;
+  font:900 11px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  font-style:normal !important;
+  padding:6px 9px !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-object-task-form{
+  display:grid !important;
+  gap:10px !important;
+  grid-template-columns:150px minmax(0, 1fr) 170px 140px 82px !important;
+  margin-bottom:12px !important;
+}
+
+#portalRoot #view-orders .orders-object-task-form :is(input, select){
+  border:1px solid #d8e3f2 !important;
+  border-radius:8px !important;
+  color:#10233f !important;
+  font:800 13px/1.2 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  min-height:38px !important;
+  padding:0 11px !important;
+}
+
+#portalRoot #view-orders .orders-object-task-form button{
+  background:linear-gradient(135deg, #5271f2 0%, #7b5cf6 100%) !important;
+  border:0 !important;
+  border-radius:8px !important;
+  color:#fff !important;
+  font:900 13px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  min-height:38px !important;
+}
+
+#portalRoot #view-orders .orders-object-task-list{
+  display:grid !important;
+  gap:8px !important;
+}
+
+#portalRoot #view-orders .orders-object-task-row{
+  align-items:center !important;
+  background:#fbfcff !important;
+  border:1px solid #dbe6f5 !important;
+  border-radius:8px !important;
+  display:grid !important;
+  gap:10px !important;
+  grid-template-columns:86px minmax(0, 1fr) 150px 64px !important;
+  padding:9px 10px !important;
+}
+
+#portalRoot #view-orders .orders-object-task-row em{
+  background:#eef4ff !important;
+  border-radius:999px !important;
+  color:#2563eb !important;
+  font:900 11px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  font-style:normal !important;
+  padding:6px 8px !important;
+  text-align:center !important;
+}
+
+#portalRoot #view-orders .orders-object-task-row strong{
+  color:#10233f !important;
+  font:800 13px/1.25 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-object-task-row span{
+  color:#64758f !important;
+  font:800 12px/1.25 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-task-row button{
+  background:#fff !important;
+  border:1px solid #ffd2d2 !important;
+  border-radius:7px !important;
+  color:#bd1f1f !important;
+  font:900 12px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  min-height:32px !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar{
+  background:#f8fbff !important;
+  border:1px solid #dbe6f5 !important;
+  border-radius:10px !important;
+  margin-top:14px !important;
+  padding:12px !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-head{
+  align-items:center !important;
+  display:flex !important;
+  gap:12px !important;
+  justify-content:space-between !important;
+  margin-bottom:10px !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-head > div:first-child{
+  display:grid !important;
+  gap:3px !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-head strong{
+  color:#10233f !important;
+  font:900 13px/1.15 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-head span{
+  color:#71809a !important;
+  font:700 11px/1.25 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-nav{
+  align-items:center !important;
+  display:flex !important;
+  gap:8px !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-nav b{
+  color:#263c5d !important;
+  font:900 12px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  min-width:120px !important;
+  text-align:center !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-nav button{
+  align-items:center !important;
+  background:#fff !important;
+  border:1px solid #d8e3f2 !important;
+  border-radius:8px !important;
+  color:#2f63e6 !important;
+  display:inline-flex !important;
+  font:900 17px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  height:32px !important;
+  justify-content:center !important;
+  width:34px !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-tools{
+  align-items:center !important;
+  display:flex !important;
+  gap:8px !important;
+  justify-content:flex-end !important;
+  min-width:0 !important;
+}
+
+#portalRoot #view-orders .orders-object-add-task-button{
+  align-items:center !important;
+  background:linear-gradient(135deg, #5271f2 0%, #7b5cf6 100%) !important;
+  border:0 !important;
+  border-radius:9px !important;
+  box-shadow:0 10px 22px rgba(82,113,242,.18) !important;
+  color:#fff !important;
+  cursor:pointer !important;
+  display:inline-flex !important;
+  font:900 12px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  height:36px !important;
+  justify-content:center !important;
+  padding:0 14px !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-weekdays,
+#portalRoot #view-orders .orders-object-calendar-grid{
+  display:grid !important;
+  grid-template-columns:repeat(7, minmax(0, 1fr)) !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-weekdays{
+  color:#7d8da7 !important;
+  font:900 10px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  margin-bottom:6px !important;
+  text-align:center !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-day{
+  background:#fff !important;
+  border:1px solid #e2ebf7 !important;
+  min-height:78px !important;
+  min-width:0 !important;
+  padding:7px !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-day.is-active-day{
+  cursor:pointer !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-day.is-inactive{
+  background:#f7f9fc !important;
+  color:#a8b3c4 !important;
+  cursor:not-allowed !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-day.is-inactive .orders-object-calendar-date{
+  color:#a8b3c4 !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-day.is-muted{
+  background:#f2f6fb !important;
+  color:#a1aec0 !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-day.is-today{
+  box-shadow:inset 0 0 0 2px rgba(47,99,230,.22) !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-date{
+  color:#40526e !important;
+  font:900 11px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  margin-bottom:6px !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-items{
+  display:grid !important;
+  gap:4px !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-chip{
+  background:#eaf2ff !important;
+  border:1px solid #a8c8ff !important;
+  border-radius:7px !important;
+  color:#174ea6 !important;
+  cursor:grab !important;
+  display:grid !important;
+  gap:2px !important;
+  min-width:0 !important;
+  padding:5px 6px !important;
+  text-align:left !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-chip:active{
+  cursor:grabbing !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-chip.is-dragging{
+  opacity:.55 !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-chip span,
+#portalRoot #view-orders .orders-object-calendar-chip strong{
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-chip span{
+  color:#2563eb !important;
+  font:900 10px/1.1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-chip strong{
+  color:#10233f !important;
+  font:800 11px/1.1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-plan-shell{
+  min-width:0 !important;
+  position:relative !important;
+}
+
+#portalRoot #view-orders .orders-object-plan-shell > .orders-object-calendar{
+  margin-top:0 !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-filter{
+  align-items:center !important;
+  appearance:none !important;
+  background:#fff !important;
+  border:1px solid #d8e3f2 !important;
+  border-radius:9px !important;
+  color:inherit !important;
+  cursor:pointer !important;
+  display:flex !important;
+  gap:10px !important;
+  justify-content:space-between !important;
+  justify-self:end !important;
+  min-height:36px !important;
+  min-width:230px !important;
+  padding:0 12px !important;
+  position:relative !important;
+  text-align:left !important;
+  z-index:8 !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-filter > span{
+  color:#71809a !important;
+  font:900 10px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  text-transform:uppercase !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-filter > strong{
+  color:#1d3f8f !important;
+  font:900 12px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-filter summary{
+  align-items:center !important;
+  background:#fff !important;
+  border:1px solid #d8e3f2 !important;
+  border-radius:9px !important;
+  cursor:pointer !important;
+  display:flex !important;
+  gap:10px !important;
+  justify-content:space-between !important;
+  min-height:36px !important;
+  padding:0 12px !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-filter summary::-webkit-details-marker{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-filter summary span{
+  color:#71809a !important;
+  font:900 10px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  text-transform:uppercase !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-filter summary strong{
+  color:#1d3f8f !important;
+  font:900 12px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-filter-menu{
+  background:#fff !important;
+  border:1px solid #d8e3f2 !important;
+  border-radius:10px !important;
+  box-shadow:0 16px 36px rgba(27,45,76,.16) !important;
+  display:grid !important;
+  gap:6px !important;
+  left:0 !important;
+  max-height:260px !important;
+  overflow:auto !important;
+  padding:8px !important;
+  position:absolute !important;
+  right:0 !important;
+  top:calc(100% + 6px) !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-filter-row{
+  align-items:flex-start !important;
+  background:#f8fbff !important;
+  border:1px solid #edf3fb !important;
+  border-radius:8px !important;
+  cursor:pointer !important;
+  display:grid !important;
+  gap:8px !important;
+  grid-template-columns:18px minmax(0, 1fr) !important;
+  padding:8px !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-filter-row input{
+  margin-top:2px !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-filter-row span{
+  display:grid !important;
+  gap:2px !important;
+  min-width:0 !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-filter-row strong{
+  color:#10233f !important;
+  font:900 12px/1.2 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-filter-row small{
+  color:#71809a !important;
+  font:700 11px/1.25 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-window-backdrop{
+  align-items:center !important;
+  background:rgba(15, 27, 46, .46) !important;
+  display:flex !important;
+  inset:0 !important;
+  justify-content:center !important;
+  padding:24px !important;
+  position:fixed !important;
+  z-index:110 !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-window{
+  background:#fff !important;
+  border:1px solid #d8e3f2 !important;
+  border-radius:14px !important;
+  box-shadow:0 28px 70px rgba(15, 27, 46, .24) !important;
+  display:grid !important;
+  gap:12px !important;
+  max-height:min(78vh, 720px) !important;
+  overflow:hidden !important;
+  padding:18px !important;
+  width:min(760px, calc(100vw - 48px)) !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-window-head{
+  align-items:flex-start !important;
+  display:flex !important;
+  gap:14px !important;
+  justify-content:space-between !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-window-head div{
+  display:grid !important;
+  gap:4px !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-window-head strong{
+  color:#10233f !important;
+  font:900 20px/1.2 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-window-head span,
+#portalRoot #view-orders .orders-object-zone-window-summary{
+  color:#71809a !important;
+  font:800 12px/1.35 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-window-head button{
+  align-items:center !important;
+  background:#fff !important;
+  border:1px solid #d8e3f2 !important;
+  border-radius:9px !important;
+  color:#71809a !important;
+  cursor:pointer !important;
+  display:inline-flex !important;
+  font:900 18px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  height:36px !important;
+  justify-content:center !important;
+  width:36px !important;
+}
+
+#portalRoot #view-orders .orders-object-zone-window-list{
+  display:grid !important;
+  gap:8px !important;
+  grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)) !important;
+  max-height:58vh !important;
+  overflow:auto !important;
+  padding-right:4px !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-backdrop{
+  align-items:center !important;
+  background:rgba(15, 27, 46, .46) !important;
+  display:flex !important;
+  inset:0 !important;
+  justify-content:center !important;
+  padding:24px !important;
+  position:fixed !important;
+  z-index:145 !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window{
+  background:#fff !important;
+  border:1px solid #d8e3f2 !important;
+  border-radius:14px !important;
+  box-shadow:0 28px 70px rgba(15, 27, 46, .24) !important;
+  display:grid !important;
+  gap:14px !important;
+  max-height:none !important;
+  max-width:calc(100vw - 48px) !important;
+  overflow:visible !important;
+  padding:18px !important;
+  width:min(1040px, calc(100vw - 48px)) !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-head{
+  align-items:flex-start !important;
+  border-bottom:1px solid #e1e9f5 !important;
+  display:flex !important;
+  gap:14px !important;
+  justify-content:space-between !important;
+  padding-bottom:12px !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-head div{
+  display:grid !important;
+  gap:4px !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-head strong{
+  color:#10233f !important;
+  font:900 20px/1.2 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-head span,
+#portalRoot #view-orders .orders-object-task-window-form label > span{
+  color:#71809a !important;
+  font:800 12px/1.35 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-head button{
+  align-items:center !important;
+  background:#fff !important;
+  border:1px solid #d8e3f2 !important;
+  border-radius:9px !important;
+  color:#71809a !important;
+  cursor:pointer !important;
+  display:inline-flex !important;
+  font:900 18px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  height:36px !important;
+  justify-content:center !important;
+  width:36px !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-form{
+  display:grid !important;
+  gap:12px !important;
+  grid-template-areas:
+    "zone name type date"
+    "zone name cadence action" !important;
+  grid-template-columns:minmax(210px, .9fr) minmax(320px, 1.5fr) minmax(150px, .65fr) minmax(150px, .65fr) !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-form label{
+  display:grid !important;
+  gap:6px !important;
+  min-width:0 !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-form :is(input, select){
+  border:1px solid #d8e3f2 !important;
+  border-radius:9px !important;
+  color:#10233f !important;
+  font:800 12px/1.2 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  min-height:40px !important;
+  min-width:0 !important;
+  padding:0 12px !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-form :is(input, select):disabled{
+  background:#f3f6fb !important;
+  color:#98a6ba !important;
+  cursor:not-allowed !important;
+  opacity:.72 !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-form button{
+  align-self:end !important;
+  background:linear-gradient(135deg, #5271f2 0%, #7b5cf6 100%) !important;
+  border:0 !important;
+  border-radius:9px !important;
+  color:#fff !important;
+  cursor:pointer !important;
+  font:900 12px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  min-height:40px !important;
+  padding:0 14px !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-zone{
+  grid-area:zone !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-name{
+  grid-area:name !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-type{
+  grid-area:type !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-date{
+  grid-area:date !important;
+}
+
+#portalRoot #view-orders .orders-object-task-window-cadence{
+  grid-area:cadence !important;
+}
+
+#portalRoot #view-orders #ordersObjectTaskAdd{
+  grid-area:action !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-head{
+  display:grid !important;
+  grid-template-columns:minmax(0, 1fr) minmax(420px, auto) auto !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-grid{
+  border:1px solid #dbe6f5 !important;
+  border-radius:10px !important;
+  overflow:hidden !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-day{
+  appearance:none !important;
+  cursor:pointer !important;
+  display:block !important;
+  text-align:left !important;
+}
+
+#portalRoot #view-orders .orders-object-calendar-day:is(:hover, :focus-visible){
+  background:#f5f9ff !important;
+  outline:2px solid rgba(47,99,230,.18) !important;
+  outline-offset:-2px !important;
+}
+
+#portalRoot #view-orders .orders-object-day-backdrop{
+  align-items:center !important;
+  background:rgba(15,28,48,.42) !important;
+  bottom:0 !important;
+  display:flex !important;
+  justify-content:center !important;
+  left:0 !important;
+  padding:18px !important;
+  position:fixed !important;
+  right:0 !important;
+  top:0 !important;
+  z-index:140 !important;
+}
+
+#portalRoot #view-orders .orders-object-day-modal{
+  background:#fff !important;
+  border:1px solid #d8e3f2 !important;
+  border-radius:14px !important;
+  box-shadow:0 26px 72px rgba(15,28,48,.28) !important;
+  max-height:min(78vh, 680px) !important;
+  max-width:860px !important;
+  overflow:auto !important;
+  padding:18px !important;
+  width:min(860px, calc(100vw - 36px)) !important;
+}
+
+#portalRoot #view-orders .orders-object-day-head{
+  align-items:flex-start !important;
+  border-bottom:1px solid #e1e9f5 !important;
+  display:flex !important;
+  gap:12px !important;
+  justify-content:space-between !important;
+  margin-bottom:14px !important;
+  padding-bottom:12px !important;
+}
+
+#portalRoot #view-orders .orders-object-day-head div{
+  display:grid !important;
+  gap:4px !important;
+}
+
+#portalRoot #view-orders .orders-object-day-head strong{
+  color:#10233f !important;
+  font:900 20px/1.15 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-day-head span{
+  color:#71809a !important;
+  font:700 12px/1.35 "Manrope", "Segoe UI", Arial, sans-serif !important;
+}
+
+#portalRoot #view-orders .orders-object-day-head button{
+  background:#fff !important;
+  border:1px solid #d8e3f2 !important;
+  border-radius:9px !important;
+  color:#71809a !important;
+  font:900 20px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  height:36px !important;
+  width:38px !important;
+}
+
+#portalRoot #view-orders .orders-object-day-add,
+#portalRoot #view-orders .orders-object-day-row{
+  display:grid !important;
+  gap:10px !important;
+  grid-template-columns:minmax(160px, 1.1fr) minmax(190px, 1.4fr) 130px 150px 82px !important;
+}
+
+#portalRoot #view-orders .orders-object-day-add{
+  background:#f8fbff !important;
+  border:1px solid #dbe6f5 !important;
+  border-radius:10px !important;
+  margin-bottom:14px !important;
+  padding:12px !important;
+}
+
+#portalRoot #view-orders .orders-object-day-list{
+  display:grid !important;
+  gap:8px !important;
+}
+
+#portalRoot #view-orders .orders-object-day-row{
+  align-items:center !important;
+  border:1px solid #e1e9f5 !important;
+  border-radius:9px !important;
+  padding:9px !important;
+}
+
+#portalRoot #view-orders .orders-object-day-add :is(input, select),
+#portalRoot #view-orders .orders-object-day-row :is(input, select){
+  border:1px solid #d8e3f2 !important;
+  border-radius:8px !important;
+  color:#10233f !important;
+  font:800 12px/1.2 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  min-height:36px !important;
+  min-width:0 !important;
+  padding:0 10px !important;
+}
+
+#portalRoot #view-orders .orders-object-day-add :is(input, select):disabled,
+#portalRoot #view-orders .orders-object-day-row :is(input, select):disabled{
+  background:#f3f6fb !important;
+  color:#98a6ba !important;
+  cursor:not-allowed !important;
+  opacity:.72 !important;
+}
+
+#portalRoot #view-orders .orders-object-day-add button{
+  background:linear-gradient(135deg, #5271f2 0%, #7b5cf6 100%) !important;
+  border:0 !important;
+  border-radius:8px !important;
+  color:#fff !important;
+  font:900 12px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  min-height:36px !important;
+}
+
+#portalRoot #view-orders .orders-object-day-row button{
+  background:#fff !important;
+  border:1px solid #ffd2d2 !important;
+  border-radius:8px !important;
+  color:#bd1f1f !important;
+  font:900 12px/1 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  min-height:34px !important;
+}
+
 #portalRoot #view-orders .orders-modal--simple .orders-detail-card{
   border-color:rgba(67,89,113,.14) !important;
   box-shadow:0 8px 28px rgba(67,89,113,.14) !important;
@@ -23085,6 +24371,13 @@ body{
   font-weight:800 !important;
 }
 
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-subtask-head small{
+  color:#71809a !important;
+  font:700 12px/1.25 "Manrope", "Segoe UI", Arial, sans-serif !important;
+  margin-left:6px !important;
+}
+
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-description > span small,
 #portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-worker-comment > span small{
   color:#7f8ba2 !important;
   font-size:13px !important;
@@ -23118,6 +24411,7 @@ body{
 
 #portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-subtask-grid{
   gap:24px !important;
+  grid-template-columns:1fr !important;
   margin-top:24px !important;
 }
 
@@ -23131,7 +24425,7 @@ body{
 }
 
 #portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add--supply{
-  grid-template-columns:140px minmax(0, 1fr) 96px !important;
+  grid-template-columns:140px minmax(0, 1fr) minmax(160px, .45fr) 96px !important;
 }
 
 #portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add--device{
@@ -23213,6 +24507,7 @@ body{
   font-weight:800 !important;
 }
 
+#portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-description > span small,
 #portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-worker-comment > span small{
   color:#697a8d !important;
   font-size:12px !important;
@@ -23249,7 +24544,7 @@ body{
 }
 
 #portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add--supply{
-  grid-template-columns:120px minmax(0, 1fr) 82px !important;
+  grid-template-columns:120px minmax(0, 1fr) minmax(140px, .45fr) 82px !important;
 }
 
 #portalRoot #view-orders .orders-modal--simple .orders-detail-card .orders-inline-add--device{
@@ -23589,6 +24884,7 @@ body{
 
 @media (max-width:900px){
   #portalRoot #view-orders .orders-modal--simple .orders-editor-table,
+  #portalRoot #view-orders .orders-modal--simple .orders-object-plan-grid,
   #portalRoot #view-orders .orders-modal--simple .orders-detail-grid,
   #portalRoot #view-orders .orders-modal--simple .orders-subtask-grid,
   #portalRoot #view-orders .orders-modal--simple .orders-repeat-config{
@@ -23675,6 +24971,64 @@ body{
 
   #portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-row--summary .orders-schedule-preview-note{
     justify-self:start !important;
+  }
+
+  #portalRoot #view-orders .orders-object-task-form,
+  #portalRoot #view-orders .orders-object-task-row{
+    grid-template-columns:1fr !important;
+  }
+
+  #portalRoot #view-orders .orders-object-calendar-head{
+    align-items:flex-start !important;
+    grid-template-columns:1fr !important;
+  }
+
+  #portalRoot #view-orders .orders-object-calendar-tools{
+    align-items:stretch !important;
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    width:100% !important;
+  }
+
+  #portalRoot #view-orders .orders-object-add-task-button{
+    width:100% !important;
+  }
+
+  #portalRoot #view-orders .orders-object-zone-filter{
+    justify-self:stretch !important;
+    min-width:0 !important;
+    width:100% !important;
+  }
+
+  #portalRoot #view-orders .orders-object-task-window{
+    width:min(820px, calc(100vw - 32px)) !important;
+  }
+
+  #portalRoot #view-orders .orders-object-task-window-form{
+    grid-template-columns:1fr !important;
+  }
+
+  #portalRoot #view-orders .orders-object-day-add,
+  #portalRoot #view-orders .orders-object-day-row{
+    grid-template-columns:1fr !important;
+  }
+
+  #portalRoot #view-orders .orders-object-calendar-day{
+    min-height:64px !important;
+    padding:5px !important;
+  }
+
+  #portalRoot #view-orders .orders-object-calendar-chip{
+    padding:4px 5px !important;
+  }
+
+  #portalRoot #view-orders .orders-object-calendar-chip span{
+    display:none !important;
+  }
+
+  #portalRoot #view-orders .orders-object-task-row button{
+    justify-self:stretch !important;
+    width:100% !important;
   }
 
   #portalRoot #view-orders .orders-modal--simple .orders-schedule-preview-range{

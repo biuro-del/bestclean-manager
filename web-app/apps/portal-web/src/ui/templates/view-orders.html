@@ -125,12 +125,12 @@
                     <input id="ordersEditStart" type="date" />
                   </label>
                   <label class="orders-field">
-                    <span>Data STOP *</span>
+                    <span id="ordersEndDateLabel">Data STOP *</span>
                     <input id="ordersEditEnd" type="date" />
                   </label>
                 </div>
 
-                <div class="orders-form-two">
+                <div class="orders-form-two" id="ordersScheduleTimeGrid">
                   <label class="orders-field">
                     <span id="ordersStartTimeLabel">Godzina START *</span>
                     <input id="ordersEditTime" type="time" />
@@ -141,7 +141,26 @@
                   </label>
                 </div>
 
+                <label class="orders-extended-work-toggle">
+                  <input id="ordersEditAllowExtendedWork" type="checkbox" />
+                  <span>
+                    <strong>Pracownik może wydłużyć czas pracy, jeśli sytuacja na obiekcie tego wymaga</strong>
+                    <small>Informacja pojawi się w aplikacji pracownika, np. gdy po imprezie trzeba posprzątać dodatkowe zabrudzenia.</small>
+                  </span>
+                </label>
+
                 <div class="orders-schedule-rules" id="ordersScheduleRulesPanel" hidden>
+                  <div class="orders-access-windows" id="ordersAccessWindowsPanel" hidden>
+                    <div class="orders-access-windows-head">
+                      <div>
+                        <strong>Ogólny dostęp do obiektu</strong>
+                        <span>Określ, w jakie dni i w jakich godzinach można wejść na obiekt.</span>
+                      </div>
+                      <button id="ordersAccessWindowAdd" type="button">Dodaj okno</button>
+                    </div>
+                    <div class="orders-access-window-rows" id="ordersAccessWindowRows"></div>
+                  </div>
+
                   <div class="orders-workload-panel" id="ordersWorkloadPanel">
                     <div class="orders-workload-head">
                       <div>
@@ -151,7 +170,7 @@
                     </div>
                     <div class="orders-workload-grid">
                       <label class="orders-field">
-                        <span>Wymagany czas pracy *</span>
+                        <span id="ordersEditWorkHoursLabel">Wymagany czas pracy *</span>
                         <input id="ordersEditWorkHours" type="number" min="0.25" step="0.25" value="2" />
                       </label>
                       <label class="orders-field">
@@ -176,7 +195,6 @@
                           <option value="month">Co miesiąc</option>
                           <option value="year">Co rok</option>
                           <option value="interval">Okresowo</option>
-                          <option value="custom">Wybór niestandardowy</option>
                         </select>
                         <div class="orders-repeat-select-picker" data-orders-repeat-select="ordersEditRepeatPreset">
                           <button id="ordersRepeatPresetPickerButton" class="orders-repeat-select-toggle" type="button" data-orders-repeat-select-toggle aria-haspopup="listbox" aria-expanded="false" aria-controls="ordersRepeatPresetPickerList">
@@ -200,6 +218,7 @@
                           </button>
                           <div id="ordersRepeatUnitPickerList" class="orders-repeat-select-list" role="listbox" hidden></div>
                         </div>
+                        <span class="orders-repeat-month-suffix" data-orders-repeat-month-suffix hidden>miesięcy</span>
                       </div>
                     </div>
 
@@ -214,6 +233,20 @@
                         <label><input type="checkbox" data-orders-repeat-weekday="6" /> S</label>
                         <label><input type="checkbox" data-orders-repeat-weekday="0" /> N</label>
                       </div>
+                    </div>
+
+                    <div class="orders-weekly-pattern" id="ordersWeeklyPatternPanel" hidden>
+                      <div class="orders-weekly-pattern-head">
+                        <div>
+                          <strong>Wzorzec tygodnia</strong>
+                          <span>Ustaw osobne okno dostępu, roboczogodziny i obsadę dla każdego dnia cyklu.</span>
+                        </div>
+                        <div class="orders-weekly-pattern-actions">
+                          <button id="ordersWeeklyPatternApplyAll" type="button">Zastosuj do wszystkich</button>
+                          <em id="ordersWeeklyPatternSummary">-</em>
+                        </div>
+                      </div>
+                      <div class="orders-weekly-pattern-rows" id="ordersWeeklyPatternRows"></div>
                     </div>
 
                     <div class="orders-repeat-calendar" id="ordersRepeatCalendar" aria-live="polite">
@@ -233,22 +266,32 @@
                       </div>
                     </div>
 
-                    <div class="orders-field orders-editor-repeat">
-                      <span>Liczba dni po ukończeniu</span>
-                      <div>
-                        <input id="ordersEditRepeatAfterDays" type="number" min="0" step="1" value="0" />
-                        <select id="ordersEditRepeatAfterUnit">
-                          <option value="day">Dni</option>
-                        </select>
-                      </div>
-                    </div>
                   </div>
 
-                  <div class="orders-schedule-empty" id="ordersSchedulePreview">
-                    Harmonogram pojawi się po uzupełnieniu zlecenia.
-                  </div>
                 </div>
               </section>
+            </div>
+          </section>
+
+          <section class="orders-form-panel orders-object-plan-card">
+            <div class="orders-panel-title">
+              <span>Plan zadań na obiekcie</span>
+            </div>
+
+            <div class="orders-object-plan-shell" id="ordersObjectPlanPanel">
+              <div class="orders-object-zone-list">
+                <div class="orders-object-zone-head">
+                  <strong>Strefy obiektu</strong>
+                  <span id="ordersObjectZoneCount">0</span>
+                </div>
+                <div class="orders-object-zone-rows" id="ordersObjectZoneRows"></div>
+              </div>
+
+              <div class="orders-object-zone-panel" id="ordersObjectZonePanel" hidden>
+                <div class="orders-object-zone-empty">
+                  Wybierz klienta i strefę, aby zaplanować czynności.
+                </div>
+              </div>
             </div>
           </section>
 
@@ -259,31 +302,20 @@
 
             <div class="orders-detail-grid">
               <label class="orders-field orders-description">
-                <span>Opis zlecenia *</span>
+                <span>Opis zlecenia * <small>- widoczne tylko w systemie, pracownik nie widzi tego w aplikacji</small></span>
                 <textarea id="ordersEditDescription" placeholder="Co ma zostać wykonane?"></textarea>
               </label>
 
               <label class="orders-field orders-worker-comment">
-                <span>Komentarz dla pracownika <small>- tylko aplikacja pracownika</small></span>
-                <textarea id="ordersEditWorkerComment" placeholder="Widoczny tylko dla przypisanych pracowników w aplikacji"></textarea>
+                <span>Komentarz dla pracownika <small>- pracownik widzi to w aplikacji</small></span>
+                <textarea id="ordersEditWorkerComment" placeholder="Pracownik widzi ten komentarz w aplikacji"></textarea>
               </label>
             </div>
 
             <div class="orders-subtask-grid">
               <div class="orders-subtask-box">
                 <div class="orders-subtask-head">
-                  <strong>Zadania do wykonania</strong>
-                </div>
-                <div class="orders-inline-add orders-inline-add--simple">
-                  <input id="ordersSubtaskName" type="text" autocomplete="off" placeholder="Np. odkurzyć biuro, umyć sanitariaty..." />
-                  <button id="ordersSubtaskAdd" type="button">Dodaj</button>
-                </div>
-                <div class="orders-simple-list" id="ordersSubtaskRows"></div>
-              </div>
-
-              <div class="orders-subtask-box">
-                <div class="orders-subtask-head">
-                  <strong>Sprzęt lub chemia do zabrania</strong>
+                  <strong>Wyposażenie obiektu <small>- sprzęt i chemia na stałe przypisane do obiektu</small></strong>
                 </div>
                 <div class="orders-inline-add orders-inline-add--supply">
                   <select id="ordersSupplyKind" aria-label="Typ pozycji">
@@ -292,6 +324,7 @@
                     <option value="other">Inne</option>
                   </select>
                   <input id="ordersSupplyName" type="text" autocomplete="off" placeholder="Np. odkurzacz, płyn do szkła..." />
+                  <input id="ordersSupplyQr" type="text" autocomplete="off" placeholder="Numer kodu QR" />
                   <button id="ordersSupplyAdd" type="button">Dodaj</button>
                 </div>
                 <div class="orders-simple-list" id="ordersSupplyRows"></div>

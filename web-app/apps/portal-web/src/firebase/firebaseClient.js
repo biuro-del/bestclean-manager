@@ -1,5 +1,5 @@
 ﻿import { initializeApp, getApp, getApps } from 'firebase/app'
-import { getAuth } from 'firebase/auth'
+import { browserLocalPersistence, getAuth, onAuthStateChanged, setPersistence } from 'firebase/auth'
 import { ReCaptchaEnterpriseProvider, initializeAppCheck } from 'firebase/app-check'
 import { connectDataConnectEmulator, getDataConnect } from 'firebase/data-connect'
 import { connectorConfig } from '@dataconnect/generated'
@@ -15,6 +15,8 @@ const requiredConfigKeys = ['apiKey', 'authDomain', 'projectId', 'appId']
 
 let emulatorConnected = false
 let appCheckInitialized = false
+let authPersistencePromise = null
+let authReadyPromise = null
 
 function hasValue(value) {
   return typeof value === 'string' && value.trim().length > 0
@@ -65,4 +67,75 @@ export function ensureFirebase() {
     auth,
     dataConnect,
   }
+}
+
+function ensureAuthPersistence(auth) {
+  if (!auth || typeof window === 'undefined') {
+    return Promise.resolve()
+  }
+
+  if (!authPersistencePromise) {
+    authPersistencePromise = setPersistence(auth, browserLocalPersistence).catch((error) => {
+      console.warn('[firebase] auth persistence setup failed', error)
+    })
+  }
+
+  return authPersistencePromise
+}
+
+export async function ensureFirebaseAuthPersistence() {
+  const firebase = ensureFirebase()
+  if (!firebase?.auth) {
+    return null
+  }
+
+  await ensureAuthPersistence(firebase.auth)
+  return firebase.auth
+}
+
+export async function waitForFirebaseAuthReady(timeoutMs = 5000) {
+  const firebase = ensureFirebase()
+  const auth = firebase?.auth
+  if (!auth) {
+    return null
+  }
+
+  await ensureAuthPersistence(auth)
+
+  if (auth.currentUser) {
+    return auth.currentUser
+  }
+
+  if (!authReadyPromise) {
+    authReadyPromise = new Promise((resolve) => {
+      let settled = false
+      let unsubscribe = null
+      const finish = (user) => {
+        if (settled) {
+          return
+        }
+        settled = true
+        if (unsubscribe) {
+          unsubscribe()
+        }
+        authReadyPromise = null
+        resolve(user || auth.currentUser || null)
+      }
+
+      const timer = window.setTimeout(() => finish(auth.currentUser || null), Math.max(500, Number(timeoutMs) || 5000))
+      unsubscribe = onAuthStateChanged(
+        auth,
+        (user) => {
+          window.clearTimeout(timer)
+          finish(user)
+        },
+        () => {
+          window.clearTimeout(timer)
+          finish(auth.currentUser || null)
+        },
+      )
+    })
+  }
+
+  return authReadyPromise
 }

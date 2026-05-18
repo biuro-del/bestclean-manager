@@ -872,6 +872,40 @@ body {
   margin-top: -2px;
 }
 
+.schedule-extended-work-notice,
+.schedule-extended-work-chip {
+  border: 1px solid rgba(37, 99, 235, 0.24);
+  background: rgba(37, 99, 235, 0.08);
+  color: #143c8a;
+}
+
+.schedule-extended-work-notice {
+  border-radius: 14px;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.schedule-extended-work-notice strong {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.schedule-extended-work-notice span {
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.schedule-extended-work-chip {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  padding: 6px 9px;
+}
+
 .row-inline {
   display: flex;
   align-items: center;

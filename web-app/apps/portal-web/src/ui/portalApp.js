@@ -5,7 +5,7 @@ import dayGridPlugin from '@fullcalendar/daygrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import listPlugin from '@fullcalendar/list'
 import timeGridPlugin from '@fullcalendar/timegrid'
-import { getDataSourceLabel } from '../firebase/firebaseClient'
+import { getDataSourceLabel, waitForFirebaseAuthReady } from '../firebase/firebaseClient'
 import { createClient, getClients, updateClient } from '../services/clientService'
 import {
   createIndividualOrder,
@@ -97,6 +97,13 @@ const appState = {
   ordersEditorTab: 'basic',
   ordersClientCreateReturnOrderId: '',
   ordersRepeatCalendarMonth: '',
+  ordersObjectPlanZoneKey: '',
+  ordersObjectPlanCalendarMonth: '',
+  ordersObjectPlanDraggingTaskId: '',
+  ordersObjectPlanSelectedZoneKeys: [],
+  ordersObjectPlanDayEditorDate: '',
+  ordersObjectPlanZoneWindowOpen: false,
+  ordersObjectPlanTaskWindowOpen: false,
   ordersMapDateFrom: '',
   ordersMapDateTo: '',
   ordersMapStatus: 'new',
@@ -251,7 +258,23 @@ const appState = {
 }
 
 const ORDERS_NEW_CLIENT_VALUE = '__orders_new_client__'
+const ORDERS_OBJECT_ALL_ZONES_KEY = '__orders_object_all_zones__'
 const ORDERS_CLIENT_ADDRESS_MEMORY_PREFIX = 'portal-orders-client-addresses'
+const ORDERS_CLIENT_OBJECT_PLAN_MARKER = 'PORTAL_OBJECT_PLAN_JSON'
+const ORDERS_CLIENT_OBJECT_EQUIPMENT_MARKER = 'PORTAL_OBJECT_EQUIPMENT_JSON'
+const ORDERS_CLIENT_OBJECT_CHEMISTRY_MARKER = 'PORTAL_OBJECT_CHEMISTRY_JSON'
+const ORDERS_DEFAULT_REPEAT_WEEKDAYS = [1, 2, 3, 4, 5]
+const ORDERS_ALL_REPEAT_WEEKDAYS = [1, 2, 3, 4, 5, 6, 0]
+const ORDERS_ACCESS_ALL_DAYS = 'all'
+const ORDERS_WEEKDAY_LABELS = {
+  0: 'Niedziela',
+  1: 'Poniedziałek',
+  2: 'Wtorek',
+  3: 'Środa',
+  4: 'Czwartek',
+  5: 'Piątek',
+  6: 'Sobota',
+}
 
 let portalNoticeTimer = null
 let dashboardRefreshTimer = null
@@ -265,6 +288,9 @@ let dashboardScheduleLimitTimerB = 0
 let calendarRemoteSaveTimer = 0
 let ordersRemoteSaveTimer = 0
 let ordersRemoteRetryTimer = 0
+let ordersTimePickerTarget = null
+let ordersTimePickerHour = 0
+let ordersTimePickerMinute = 0
 let calendarTimelineWorkerStateRefreshTimer = null
 let calendarTimelineBarClickTimer = 0
 let calendarTimelineEventsPopupAnchor = null
@@ -9388,6 +9414,62 @@ function ordersReadInputValue(id) {
     : ''
 }
 
+function ordersBooleanValue(value) {
+  if (typeof value === 'boolean') {
+    return value
+  }
+  if (typeof value === 'number') {
+    return value !== 0
+  }
+  const normalized = String(value ?? '').trim().toLowerCase()
+  return ['1', 'true', 'tak', 'yes', 'y', 't', 'on'].includes(normalized)
+}
+
+function ordersExtendedWorkAllowed(order = {}) {
+  const candidates = [
+    order.allowExtendedWork,
+    order.extendedWorkAllowed,
+    order.canExtendWorkTime,
+    order.workerCanExtendWorkTime,
+    order.allowLongerWork,
+    order.longerWorkAllowed,
+    order.overtimeAllowed,
+    order.allowOvertime,
+  ]
+  for (const candidate of candidates) {
+    if (candidate !== undefined && candidate !== null && String(candidate).trim() !== '') {
+      return ordersBooleanValue(candidate)
+    }
+  }
+  return false
+}
+
+function ordersSetCheckboxValue(id, checked = false) {
+  const node = document.getElementById(id)
+  if (node instanceof HTMLInputElement) {
+    node.checked = Boolean(checked)
+  }
+}
+
+function ordersReadCheckboxValue(id, fallback = false) {
+  const node = document.getElementById(id)
+  return node instanceof HTMLInputElement ? Boolean(node.checked) : Boolean(fallback)
+}
+
+function ordersReadExtendedWorkAllowed(order = {}) {
+  return ordersReadCheckboxValue('ordersEditAllowExtendedWork', ordersExtendedWorkAllowed(order))
+}
+
+function ordersAssignExtendedWorkFlags(target = {}, allowed = false) {
+  const normalized = Boolean(allowed)
+  target.allowExtendedWork = normalized
+  target.extendedWorkAllowed = normalized
+  target.canExtendWorkTime = normalized
+  target.workerCanExtendWorkTime = normalized
+  target.overtimeAllowed = normalized
+  return target
+}
+
 function ordersWorkerOptionsHtml(selectedRow) {
   const selected = Number(selectedRow)
   return [
@@ -9590,15 +9672,334 @@ function ordersReadWorkMinutes(order = {}) {
   return ordersStoredWorkMinutes(order)
 }
 
-function ordersAccessWindowMinutes(order = {}) {
-  const start = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), order.startTime || '08:00')
-  const end = ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(start))
-  const startMinutes = calendarTimelineTimeMinutes(start, 8 * 60)
-  let endMinutes = calendarTimelineTimeMinutes(end, startMinutes + 60)
+function ordersAccessWindowSources(order = {}) {
+  return [
+    order?.accessWindows,
+    order?.objectAccessWindows,
+    order?.accessTimeWindows,
+    order?.buildingAccessWindows,
+  ].find((value) => Array.isArray(value) && value.length) || []
+}
+
+function ordersNormalizeAccessWindowWeekday(value = ORDERS_ACCESS_ALL_DAYS) {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (!raw || raw === ORDERS_ACCESS_ALL_DAYS || raw === '*' || raw === 'every' || raw === 'all_days' || raw === 'alldays') {
+    return ORDERS_ACCESS_ALL_DAYS
+  }
+  const weekday = ordersNormalizeWeekday(value)
+  return weekday === null ? ORDERS_ACCESS_ALL_DAYS : weekday
+}
+
+function ordersNormalizeAccessWindowWeekdays(value = ORDERS_ACCESS_ALL_DAYS) {
+  const source = Array.isArray(value) && value.length ? value : [value]
+  const weekdays = source.map(ordersNormalizeAccessWindowWeekday)
+  if (weekdays.includes(ORDERS_ACCESS_ALL_DAYS)) {
+    return [ORDERS_ACCESS_ALL_DAYS]
+  }
+  return weekdays.filter((weekday, index, list) => Number.isInteger(weekday) && list.indexOf(weekday) === index)
+}
+
+function ordersNormalizeAccessWindow(window = {}, order = {}, index = 0) {
+  const fallbackStart = ordersNormalizeTimeField(
+    order?.accessStartTime ?? order?.startTime ?? ordersReadInputValue('ordersEditTime'),
+    '08:00',
+  )
+  const fallbackEnd = ordersNormalizeTimeField(
+    order?.accessEndTime ?? order?.endTime ?? ordersReadInputValue('ordersEditEndTime'),
+    ordersDefaultEndTime(fallbackStart),
+  )
+  const weekdays = ordersNormalizeAccessWindowWeekdays(
+    Array.isArray(window?.weekdays) && window.weekdays.length
+      ? window.weekdays
+      : window?.weekday ?? window?.day ?? window?.repeatWeekday ?? ORDERS_ACCESS_ALL_DAYS,
+  )
+  const startTime = ordersNormalizeTimeField(
+    window?.accessStartTime ?? window?.startTime ?? window?.fromTime ?? window?.accessFrom,
+    fallbackStart,
+  )
+  const endTime = ordersNormalizeTimeField(
+    window?.accessEndTime ?? window?.endTime ?? window?.toTime ?? window?.accessTo,
+    fallbackEnd || ordersDefaultEndTime(startTime),
+  )
+  const firstWeekday = weekdays[0] ?? ORDERS_ACCESS_ALL_DAYS
+  return {
+    id: String(window?.id ?? `access-window-${index + 1}`).trim() || `access-window-${index + 1}`,
+    weekdays,
+    weekday: firstWeekday,
+    day: firstWeekday,
+    label: firstWeekday === ORDERS_ACCESS_ALL_DAYS ? 'Wszystkie dni' : ordersWeekdayLabel(firstWeekday),
+    startTime,
+    endTime,
+    accessStartTime: startTime,
+    accessEndTime: endTime,
+  }
+}
+
+function ordersFallbackAccessWindow(order = {}) {
+  return ordersNormalizeAccessWindow(
+    {
+      weekday: ORDERS_ACCESS_ALL_DAYS,
+      accessStartTime: ordersReadInputValue('ordersEditTime') || order.accessStartTime || order.startTime || '08:00',
+      accessEndTime:
+        ordersReadInputValue('ordersEditEndTime') ||
+        order.accessEndTime ||
+        order.endTime ||
+        ordersDefaultEndTime(order.accessStartTime || order.startTime || '08:00'),
+    },
+    order,
+    0,
+  )
+}
+
+function ordersAccessWindowsForOrder(order = {}) {
+  const sources = ordersAccessWindowSources(order)
+    .map((window, index) => ordersNormalizeAccessWindow(window, order, index))
+    .filter(Boolean)
+  return sources.length ? sources : [ordersFallbackAccessWindow(order)]
+}
+
+function ordersAccessWindowControlsRows() {
+  return [...document.querySelectorAll('#ordersAccessWindowRows [data-orders-access-window-row]')]
+}
+
+function ordersReadAccessWindowsFromControls(order = {}) {
+  const rows = ordersAccessWindowControlsRows()
+  if (!rows.length) {
+    return []
+  }
+  return rows
+    .map((row, index) => {
+      const dayInput = row.querySelector('[data-orders-access-window-day]')
+      const startInput = row.querySelector('[data-orders-access-window-start]')
+      const endInput = row.querySelector('[data-orders-access-window-end]')
+      return ordersNormalizeAccessWindow(
+        {
+          weekday: dayInput instanceof HTMLSelectElement ? dayInput.value : row.getAttribute('data-orders-access-window-day'),
+          accessStartTime: startInput instanceof HTMLInputElement ? startInput.value : '',
+          accessEndTime: endInput instanceof HTMLInputElement ? endInput.value : '',
+        },
+        order,
+        index,
+      )
+    })
+    .filter(Boolean)
+}
+
+function ordersEnsureAccessWindowsFromControls(order = {}) {
+  const rows = ordersReadAccessWindowsFromControls(order)
+  return rows.length ? rows : ordersAccessWindowsForOrder(order)
+}
+
+function ordersStoreAccessWindows(order = {}, windows = []) {
+  const safe = (Array.isArray(windows) ? windows : [])
+    .map((window, index) => ordersNormalizeAccessWindow(window, order, index))
+    .filter(Boolean)
+  const finalWindows = safe.length ? safe : [ordersFallbackAccessWindow(order)]
+  order.accessWindows = finalWindows
+  order.objectAccessWindows = finalWindows
+  order.accessTimeWindows = finalWindows
+  order.buildingAccessWindows = finalWindows
+  const first = finalWindows[0]
+  if (first) {
+    order.accessStartTime = first.accessStartTime
+    order.accessEndTime = first.accessEndTime
+    if (ordersScheduleModeForOrder(order) === 'repeat') {
+      order.startTime = first.accessStartTime
+      order.endTime = first.accessEndTime
+    }
+  }
+  return finalWindows
+}
+
+function ordersClearAccessWindows(order = {}) {
+  order.accessWindows = []
+  order.objectAccessWindows = []
+  order.accessTimeWindows = []
+  order.buildingAccessWindows = []
+  return []
+}
+
+function ordersAccessWindowDayOptionsHtml(selected = ORDERS_ACCESS_ALL_DAYS) {
+  const normalized = ordersNormalizeAccessWindowWeekday(selected)
+  return [
+    `<option value="${ORDERS_ACCESS_ALL_DAYS}"${normalized === ORDERS_ACCESS_ALL_DAYS ? ' selected' : ''}>Wszystkie dni</option>`,
+    ...[1, 2, 3, 4, 5, 6, 0].map(
+      (weekday) => `<option value="${weekday}"${normalized === weekday ? ' selected' : ''}>${escapeHtml(ordersWeekdayLabel(weekday))}</option>`,
+    ),
+  ].join('')
+}
+
+function ordersRenderAccessWindowsControls(order = {}) {
+  const panel = document.getElementById('ordersAccessWindowsPanel')
+  const rows = document.getElementById('ordersAccessWindowRows')
+  if (!panel || !rows) {
+    return
+  }
+  const isRepeat = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat'
+  panel.hidden = !isRepeat
+  if (!isRepeat) {
+    rows.innerHTML = ''
+    return
+  }
+  const windows = ordersAccessWindowsForOrder(order)
+  rows.innerHTML = windows
+    .map((window, index) => `
+      <div class="orders-access-window-row" data-orders-access-window-row data-orders-access-window-index="${index}">
+        <label>
+          <span>Dzień</span>
+          <select data-orders-access-window-day aria-label="Dzień okna dostępu">
+            ${ordersAccessWindowDayOptionsHtml(window.weekday)}
+          </select>
+        </label>
+        <label>
+          <span>Dostęp od</span>
+          <input type="time" value="${escapeHtml(window.accessStartTime)}" data-orders-access-window-start />
+        </label>
+        <label>
+          <span>Dostęp do</span>
+          <input type="time" value="${escapeHtml(window.accessEndTime)}" data-orders-access-window-end />
+        </label>
+        <button type="button" data-orders-access-window-remove="${index}"${windows.length <= 1 ? ' disabled' : ''}>Usuń</button>
+      </div>
+    `)
+    .join('')
+  ordersEnhanceTimeInputs(rows)
+}
+
+function ordersAddAccessWindowToCurrentOrder() {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  if (!order) {
+    return
+  }
+  const windows = ordersEnsureAccessWindowsFromControls(order)
+  const last = windows[windows.length - 1] || ordersFallbackAccessWindow(order)
+  const next = ordersNormalizeAccessWindow(
+    {
+      weekday: ORDERS_ACCESS_ALL_DAYS,
+      accessStartTime: last.accessStartTime,
+      accessEndTime: last.accessEndTime,
+    },
+    order,
+    windows.length,
+  )
+  ordersStoreAccessWindows(order, [...windows, next])
+  ordersRenderAccessWindowsControls(order)
+  ordersRenderWorkAllocationControls(order, { forceEven: true })
+  ordersRenderSchedulePreview(order)
+}
+
+function ordersRemoveAccessWindowFromCurrentOrder(index = 0) {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  if (!order) {
+    return
+  }
+  const removeIndex = Number(index)
+  const windows = ordersEnsureAccessWindowsFromControls(order)
+  if (!Number.isInteger(removeIndex) || windows.length <= 1) {
+    return
+  }
+  ordersStoreAccessWindows(order, windows.filter((_, itemIndex) => itemIndex !== removeIndex))
+  ordersRenderAccessWindowsControls(order)
+  ordersRenderWorkAllocationControls(order, { forceEven: true })
+  ordersRenderSchedulePreview(order)
+}
+
+function ordersFallbackAccessWindowRange(order = {}) {
+  const startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), order.accessStartTime || order.startTime || '08:00')
+  const endTime = ordersNormalizeTimeField(
+    ordersReadInputValue('ordersEditEndTime'),
+    order.accessEndTime || order.endTime || ordersDefaultEndTime(startTime),
+  )
+  const startMinutes = calendarTimelineTimeMinutes(startTime, 8 * 60)
+  let endMinutes = calendarTimelineTimeMinutes(endTime, startMinutes + 60)
   if (endMinutes <= startMinutes) {
     endMinutes += 1440
   }
-  return Math.max(15, endMinutes - startMinutes)
+  return {
+    startTime,
+    endTime,
+    startMinutes,
+    endMinutes,
+    minutes: Math.max(15, endMinutes - startMinutes),
+  }
+}
+
+function ordersAccessWindowAppliesToWeekday(window = {}, weekday = null) {
+  const normalizedWeekday = ordersNormalizeWeekday(weekday)
+  if (normalizedWeekday === null) {
+    return true
+  }
+  const weekdays = ordersNormalizeAccessWindowWeekdays(window.weekdays ?? window.weekday ?? window.day)
+  return weekdays.includes(ORDERS_ACCESS_ALL_DAYS) || weekdays.includes(normalizedWeekday)
+}
+
+function ordersAccessWindowRanges(order = {}, weekday = null) {
+  const windows = ordersAccessWindowControlsRows().length ? ordersReadAccessWindowsFromControls(order) : ordersAccessWindowsForOrder(order)
+  const normalizedWeekday = ordersNormalizeWeekday(weekday)
+  const scopedWindows = normalizedWeekday === null
+    ? windows
+    : windows.filter((window) => ordersAccessWindowAppliesToWeekday(window, normalizedWeekday))
+  const ranges = scopedWindows
+    .map((window) => {
+      const startTime = ordersNormalizeTimeField(window.accessStartTime || window.startTime, '08:00')
+      const endTime = ordersNormalizeTimeField(window.accessEndTime || window.endTime, ordersDefaultEndTime(startTime))
+      const startMinutes = calendarTimelineTimeMinutes(startTime, 8 * 60)
+      let endMinutes = calendarTimelineTimeMinutes(endTime, startMinutes + 60)
+      if (endMinutes <= startMinutes) {
+        endMinutes += 1440
+      }
+      return {
+        ...window,
+        startTime,
+        endTime,
+        accessStartTime: startTime,
+        accessEndTime: endTime,
+        startMinutes,
+        endMinutes,
+        minutes: Math.max(15, endMinutes - startMinutes),
+      }
+    })
+    .filter((range) => range.minutes > 0)
+  if (ranges.length) {
+    return ranges
+  }
+  return normalizedWeekday === null ? [ordersFallbackAccessWindowRange(order)] : []
+}
+
+function ordersAccessWindowMinutes(order = {}, weekday = null) {
+  const ranges = ordersAccessWindowRanges(order, weekday)
+  return ranges.length ? Math.max(15, ...ranges.map((range) => range.minutes)) : 0
+}
+
+function ordersAccessWindowRange(order = {}) {
+  return ordersAccessWindowRanges(order)[0] || ordersFallbackAccessWindowRange(order)
+}
+
+function ordersAllocationEndTimeFromMinutes(startTime = '08:00', minutes = 60) {
+  const start = calendarTimelineTimeMinutes(ordersNormalizeTimeField(startTime, '08:00'), 8 * 60)
+  const duration = Math.max(15, Math.round(Number(minutes) || 60))
+  return calendarMinutesToTime((start + duration) % 1440) || '23:59'
+}
+
+function ordersAllocationDurationFromTimes(startTime = '08:00', endTime = '') {
+  const start = calendarTimelineTimeMinutes(ordersNormalizeTimeField(startTime, '08:00'), 8 * 60)
+  let end = calendarTimelineTimeMinutes(ordersNormalizeTimeField(endTime, ordersAllocationEndTimeFromMinutes(startTime, 60)), start + 60)
+  if (end <= start) {
+    end += 1440
+  }
+  return Math.max(15, end - start)
+}
+
+function ordersAllocationFitsAccess(order = {}, allocation = {}, weekday = null) {
+  const duration = Math.max(15, Math.round(Number(allocation.minutes) || 0))
+  return ordersAccessWindowRanges(order, weekday).some((access) => {
+    let start = calendarTimelineTimeMinutes(ordersNormalizeTimeField(allocation.startTime || allocation.planStartTime, access.startTime), access.startMinutes)
+    if (access.endMinutes > 1440 && start < access.startMinutes) {
+      start += 1440
+    }
+    const end = start + duration
+    return start >= access.startMinutes && end <= access.endMinutes
+  })
 }
 
 function ordersSelectedWorkSubjects(order = {}) {
@@ -9641,6 +10042,17 @@ function ordersSelectedWorkSubjects(order = {}) {
   }))
 }
 
+function ordersUpdateWorkHoursLabel(peopleCount = 1) {
+  const label = document.getElementById('ordersEditWorkHoursLabel')
+  if (!label) {
+    return
+  }
+  label.textContent =
+    Math.max(1, Math.floor(Number(peopleCount) || 1)) > 1
+      ? 'Wymagany czas pracy dla każdej z osób *'
+      : 'Wymagany czas pracy *'
+}
+
 function ordersSplitMinutesEvenly(totalMinutes = 0, count = 1) {
   const total = Math.max(0, Math.round(Number(totalMinutes) || 0))
   const safeCount = Math.max(1, Math.floor(Number(count) || 1))
@@ -9655,12 +10067,21 @@ function ordersAllocationMap(order = {}) {
     : Array.isArray(order.workerAllocations)
       ? order.workerAllocations
       : []
+  const access = ordersAccessWindowRange(order)
   const map = new Map()
   rows.forEach((item) => {
     const key = String(item?.key ?? '').trim()
     const minutes = Math.max(0, Math.round(Number(item?.minutes ?? item?.workMinutes ?? item?.durationMinutes) || 0))
     if (key && minutes > 0) {
-      map.set(key, minutes)
+      const startTime = ordersNormalizeTimeField(
+        item?.startTime ?? item?.planStartTime ?? item?.workerStartTime ?? item?.fromTime,
+        access.startTime,
+      )
+      const endTime = ordersNormalizeTimeField(
+        item?.endTime ?? item?.planEndTime ?? item?.workerEndTime ?? item?.toTime,
+        ordersAllocationEndTimeFromMinutes(startTime, minutes),
+      )
+      map.set(key, { minutes, startTime, endTime })
     }
   })
   return map
@@ -9671,20 +10092,33 @@ function ordersWorkAllocationsForSubjects(order = {}, subjects = [], totalMinute
   const total = Math.max(15, Math.round(Number(totalMinutes) || ordersReadWorkMinutes(order)))
   const existing = ordersAllocationMap(order)
   const canUseExisting =
-    !forceEven &&
+      !forceEven &&
     safeSubjects.length > 0 &&
     safeSubjects.every((subject) => existing.has(subject.key)) &&
     [...existing.keys()].every((key) => safeSubjects.some((subject) => subject.key === key))
-  const values = canUseExisting ? safeSubjects.map((subject) => existing.get(subject.key) || 0) : ordersSplitMinutesEvenly(total, safeSubjects.length)
-  return safeSubjects.map((subject, index) => ({
-    ...subject,
-    minutes: Math.max(0, Math.round(Number(values[index]) || 0)),
-  }))
+  const values = canUseExisting
+    ? safeSubjects.map((subject) => existing.get(subject.key)?.minutes || 0)
+    : ordersSplitMinutesEvenly(total, safeSubjects.length)
+  const access = ordersAccessWindowRange(order)
+  return safeSubjects.map((subject, index) => {
+    const detail = existing.get(subject.key)
+    const minutes = Math.max(0, Math.round(Number(values[index]) || 0))
+    const startTime = ordersNormalizeTimeField(detail?.startTime, access.startTime)
+    const endTime = ordersNormalizeTimeField(detail?.endTime, ordersAllocationEndTimeFromMinutes(startTime, minutes))
+    return {
+      ...subject,
+      minutes,
+      startTime,
+      endTime,
+    }
+  })
 }
 
 function ordersReadWorkAllocationsFromControls(order = {}) {
   const subjects = ordersSelectedWorkSubjects(order)
   const values = new Map()
+  const starts = new Map()
+  const ends = new Map()
   document.querySelectorAll('#ordersWorkAllocationRows [data-orders-work-allocation]').forEach((input) => {
     if (!(input instanceof HTMLInputElement)) {
       return
@@ -9695,26 +10129,99 @@ function ordersReadWorkAllocationsFromControls(order = {}) {
       values.set(key, minutes)
     }
   })
+  document.querySelectorAll('#ordersWorkAllocationRows [data-orders-work-allocation-start]').forEach((input) => {
+    if (!(input instanceof HTMLInputElement)) {
+      return
+    }
+    const key = String(input.getAttribute('data-orders-work-allocation-start') ?? '').trim()
+    const value = ordersNormalizeTimeField(input.value, '')
+    if (key && value) {
+      starts.set(key, value)
+    }
+  })
+  document.querySelectorAll('#ordersWorkAllocationRows [data-orders-work-allocation-end]').forEach((input) => {
+    if (!(input instanceof HTMLInputElement)) {
+      return
+    }
+    const key = String(input.getAttribute('data-orders-work-allocation-end') ?? '').trim()
+    const value = ordersNormalizeTimeField(input.value, '')
+    if (key && value) {
+      ends.set(key, value)
+    }
+  })
   const fallback = ordersWorkAllocationsForSubjects(order, subjects, ordersReadWorkMinutes(order))
   return subjects.map((subject) => ({
     ...subject,
     minutes: values.has(subject.key) ? values.get(subject.key) : fallback.find((item) => item.key === subject.key)?.minutes || 0,
+    startTime: starts.get(subject.key) || fallback.find((item) => item.key === subject.key)?.startTime || ordersAccessWindowRange(order).startTime,
+    endTime:
+      ends.get(subject.key) ||
+      fallback.find((item) => item.key === subject.key)?.endTime ||
+      ordersAllocationEndTimeFromMinutes(
+        starts.get(subject.key) || fallback.find((item) => item.key === subject.key)?.startTime || ordersAccessWindowRange(order).startTime,
+        values.get(subject.key) || fallback.find((item) => item.key === subject.key)?.minutes || 60,
+      ),
   }))
 }
 
 function ordersStoreWorkAllocations(order = {}, allocations = []) {
+  const access = ordersAccessWindowRange(order)
   const safe = (Array.isArray(allocations) ? allocations : [])
-    .map((item) => ({
-      key: String(item?.key ?? '').trim(),
-      row: Number.isInteger(Number(item?.row)) ? Number(item.row) : 0,
-      type: String(item?.type ?? '').trim() || 'buffer',
-      label: String(item?.label ?? '').trim(),
-      minutes: Math.max(0, Math.round(Number(item?.minutes) || 0)),
-    }))
+    .map((item) => {
+      const minutes = Math.max(0, Math.round(Number(item?.minutes) || 0))
+      const startTime = ordersNormalizeTimeField(item?.startTime ?? item?.planStartTime, access.startTime)
+      const endTime = ordersNormalizeTimeField(item?.endTime ?? item?.planEndTime, ordersAllocationEndTimeFromMinutes(startTime, minutes))
+      return {
+        key: String(item?.key ?? '').trim(),
+        row: Number.isInteger(Number(item?.row)) ? Number(item.row) : 0,
+        type: String(item?.type ?? '').trim() || 'buffer',
+        label: String(item?.label ?? '').trim(),
+        minutes,
+        startTime,
+        endTime,
+        planStartTime: startTime,
+        planEndTime: endTime,
+      }
+    })
     .filter((item) => item.key && item.minutes > 0)
   order.workAllocations = safe
   order.workerAllocations = safe
   return safe
+}
+
+function ordersWorkAllocationInput(key = '', attribute = '') {
+  const safeKey = String(key ?? '').trim()
+  const safeAttribute = String(attribute ?? '').trim()
+  if (!safeKey || !safeAttribute || !window.CSS?.escape) {
+    return null
+  }
+  return document.querySelector(`#ordersWorkAllocationRows [${safeAttribute}="${CSS.escape(safeKey)}"]`)
+}
+
+function ordersSyncAllocationEndInputFromMinutes(key = '') {
+  const range = ordersWorkAllocationInput(key, 'data-orders-work-allocation')
+  const start = ordersWorkAllocationInput(key, 'data-orders-work-allocation-start')
+  const end = ordersWorkAllocationInput(key, 'data-orders-work-allocation-end')
+  if (!(range instanceof HTMLInputElement) || !(start instanceof HTMLInputElement) || !(end instanceof HTMLInputElement)) {
+    return
+  }
+  end.value = ordersAllocationEndTimeFromMinutes(start.value, Number(range.value) || 60)
+}
+
+function ordersSyncAllocationDurationFromTimes(key = '') {
+  const range = ordersWorkAllocationInput(key, 'data-orders-work-allocation')
+  const hours = ordersWorkAllocationInput(key, 'data-orders-work-allocation-hours')
+  const start = ordersWorkAllocationInput(key, 'data-orders-work-allocation-start')
+  const end = ordersWorkAllocationInput(key, 'data-orders-work-allocation-end')
+  if (!(range instanceof HTMLInputElement) || !(start instanceof HTMLInputElement) || !(end instanceof HTMLInputElement)) {
+    return
+  }
+  const minutes = ordersAllocationDurationFromTimes(start.value, end.value)
+  range.max = String(Math.max(Number(range.max) || 0, minutes))
+  range.value = String(minutes)
+  if (hours instanceof HTMLInputElement) {
+    hours.value = ordersHoursInputValue(minutes)
+  }
 }
 
 function ordersRenderWorkAllocationControls(order = {}, { forceEven = false } = {}) {
@@ -9728,9 +10235,11 @@ function ordersRenderWorkAllocationControls(order = {}, { forceEven = false } = 
   const isRepeat = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat'
   panel.hidden = !isRepeat
   if (!isRepeat) {
+    ordersUpdateWorkHoursLabel(1)
     return
   }
   const subjects = ordersSelectedWorkSubjects(order)
+  ordersUpdateWorkHoursLabel(subjects.length)
   const hasWorkers = subjects.some((subject) => subject.type === 'worker')
   if (peopleInput instanceof HTMLInputElement) {
     peopleInput.disabled = hasWorkers
@@ -9745,13 +10254,22 @@ function ordersRenderWorkAllocationControls(order = {}, { forceEven = false } = 
   const maxMinutes = Math.max(totalMinutes, accessMinutes, ...allocations.map((item) => item.minutes), 60)
   rows.innerHTML = allocations
     .map((item) => `
-      <label class="orders-work-allocation-row">
-        <span>${escapeHtml(item.label || 'BUFOR')}</span>
+      <div class="orders-work-allocation-row">
+        <span class="orders-work-allocation-person">${escapeHtml(item.label || 'BUFOR')}</span>
+        <label class="orders-work-allocation-time">
+          <small>Plan START</small>
+          <input type="time" value="${escapeHtml(item.startTime || ordersAccessWindowRange(order).startTime)}" data-orders-work-allocation-start="${escapeHtml(item.key)}" />
+        </label>
+        <label class="orders-work-allocation-time">
+          <small>Plan STOP</small>
+          <input type="time" value="${escapeHtml(item.endTime || ordersAllocationEndTimeFromMinutes(item.startTime, item.minutes))}" data-orders-work-allocation-end="${escapeHtml(item.key)}" />
+        </label>
         <input type="range" min="15" max="${maxMinutes}" step="15" value="${item.minutes}" data-orders-work-allocation="${escapeHtml(item.key)}" />
         <input type="number" min="0.25" step="0.25" value="${escapeHtml(ordersHoursInputValue(item.minutes))}" data-orders-work-allocation-hours="${escapeHtml(item.key)}" aria-label="Godziny dla ${escapeHtml(item.label || 'slotu')}" />
-      </label>
+      </div>
     `)
     .join('')
+  ordersEnhanceTimeInputs(rows)
   ordersUpdateWorkAllocationSummary(order)
 }
 
@@ -9765,9 +10283,12 @@ function ordersUpdateWorkAllocationSummary(order = {}) {
   const assigned = allocations.reduce((sum, item) => sum + Math.max(0, Number(item.minutes) || 0), 0)
   const accessMinutes = ordersAccessWindowMinutes(order)
   const overAccess = allocations.some((item) => item.minutes > accessMinutes)
+  const outsideAccess = allocations.some((item) => !ordersAllocationFitsAccess(order, item))
   const mismatch = Math.abs(assigned - total) > 0
-  summary.classList.toggle('is-error', mismatch || overAccess)
-  summary.textContent = overAccess
+  summary.classList.toggle('is-error', mismatch || overAccess || outsideAccess)
+  summary.textContent = outsideAccess
+    ? 'Plan pracy osoby musi mieścić się w godzinach dostępu do obiektu.'
+    : overAccess
     ? `Przydział jednej osoby przekracza okno dostępu (${ordersFormatWorkMinutes(accessMinutes)}).`
     : `Przydzielono ${ordersFormatWorkMinutes(assigned)} / ${ordersFormatWorkMinutes(total)}.`
   ordersStoreWorkAllocations(order, allocations)
@@ -9959,6 +10480,7 @@ function ordersNormalizeSupplyItem(item = {}, index = 0, fallbackKind = 'other')
     id: String(item.id ?? item.supplyId ?? '').trim() || `supply-${index + 1}`,
     kind: ordersSupplyKind(item.kind ?? item.type ?? item.category ?? fallbackKind),
     name,
+    qrCode: ordersFirstClientText(item.qrCode, item.qr, item.code, item.qrNumber, item.assetQr, item.assetCode),
     quantity: ordersFirstClientText(item.quantity, item.amount, item.qty),
     note: ordersFirstClientText(item.note, item.description),
   }
@@ -9974,8 +10496,8 @@ function ordersPushSupplyItems(target, source, fallbackKind = 'other') {
     .map((item, index) => ordersNormalizeSupplyItem(item, index, fallbackKind))
     .filter(Boolean)
     .forEach((item) => {
-      const key = `${ordersSupplyKind(item.kind)}:${normalizeSearchText(item.name)}`
-      if (!target.some((row) => `${ordersSupplyKind(row.kind)}:${normalizeSearchText(row.name)}` === key)) {
+      const key = `${ordersSupplyKind(item.kind)}:${normalizeSearchText(item.name)}:${normalizeSearchText(item.qrCode)}`
+      if (!target.some((row) => `${ordersSupplyKind(row.kind)}:${normalizeSearchText(row.name)}:${normalizeSearchText(row.qrCode)}` === key)) {
         target.push(item)
       }
     })
@@ -10014,15 +10536,693 @@ function ordersSupplyRowsHtml(order = {}) {
   }
   return supplies
     .map(
-      (item, index) => `
-        <div class="orders-simple-row">
+      (item, index) => {
+        const qrCode = ordersFirstClientText(item.qrCode, item.qr, item.code, item.qrNumber, item.assetQr, item.assetCode)
+        return `
+        <div class="orders-simple-row orders-simple-row--supply">
           <em>${escapeHtml(ordersSupplyKindLabel(item.kind))}</em>
           <span title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
+          <small>${qrCode ? `QR: ${escapeHtml(qrCode)}` : 'QR: -'}</small>
           <button type="button" data-orders-remove-supply="${index}">Usuń</button>
+        </div>
+      `
+      },
+    )
+    .join('')
+}
+
+function ordersObjectPlanReadableZoneText(...values) {
+  return values
+    .map((value) => ordersFirstClientText(value))
+    .find((value) => value && value !== '-' && !dashboardIsQrCodeLike(value))
+    || ''
+}
+
+function ordersObjectPlanZoneLabel(zone = {}, index = 0) {
+  return (
+    ordersObjectPlanReadableZoneText(zone?.zoneName, zone?.zone, zone?.name, zone?.label, zone?.title, zone?.function, zone?.type) ||
+    `Strefa ${index + 1}`
+  )
+}
+
+function ordersObjectPlanZoneLocation(zone = {}) {
+  const parts = [
+    ordersObjectPlanReadableZoneText(
+      zone?.location,
+      zone?.zoneLocation,
+      zone?.lokalizacja,
+      zone?.roomLocation,
+      zone?.areaLocation,
+      zone?.objectLocation,
+      zone?.room,
+      zone?.pomieszczenie,
+      zone?.floorName,
+      zone?.floor,
+      zone?.pietro,
+      zone?.level,
+      zone?.section,
+      zone?.place,
+    ),
+    ordersObjectPlanReadableZoneText(zone?.address, zone?.adres, zone?.building, zone?.budynek, zone?.siteName, zone?.objectName),
+  ].filter(Boolean)
+  return [...new Set(parts)].join(' - ')
+}
+
+function ordersObjectPlanZoneDisplayLabel(zone = {}, options = {}) {
+  const label = ordersFirstClientText(zone?.label, zone?.name, zone?.zoneName, zone?.zone) || 'Strefa'
+  if (options.includeLocation === false || String(zone?.key ?? '').trim() === ORDERS_OBJECT_ALL_ZONES_KEY) {
+    return label
+  }
+  const location = ordersFirstClientText(zone?.location, zone?.meta)
+  return `${label} - ${location && location !== 'Brak lokalizacji' ? location : 'brak lokalizacji'}`
+}
+
+function ordersObjectPlanZoneQr(zone = {}) {
+  return ordersFirstClientText(zone?.qr, zone?.qrCode, zone?.code, zone?.zoneCode)
+}
+
+function ordersObjectPlanZoneKey(zone = {}, index = 0) {
+  const raw = ordersFirstClientText(zone?.id, zone?.zoneId, zone?.qr, zone?.qrCode, zone?.code, zone?.name, zone?.zoneName, `zone-${index + 1}`)
+  return `zone:${normalizeSearchText(raw || `zone-${index + 1}`)}`
+}
+
+function ordersNormalizeObjectPlanZone(zone = {}, index = 0) {
+  const label = ordersObjectPlanZoneLabel(zone, index)
+  const location = ordersObjectPlanZoneLocation(zone)
+  const qr = ordersObjectPlanZoneQr(zone)
+  return {
+    key: ordersObjectPlanZoneKey(zone, index),
+    label,
+    location,
+    qr,
+    meta: location || 'Brak lokalizacji',
+  }
+}
+
+function ordersPushObjectPlanZones(target = [], source = []) {
+  if (!Array.isArray(source)) {
+    return
+  }
+  source.forEach((zone) => {
+    const normalized = ordersNormalizeObjectPlanZone(zone, target.length)
+    if (!normalized.label) {
+      return
+    }
+    if (
+      !target.some(
+        (item) =>
+          item.key === normalized.key ||
+          `${normalizeSearchText(item.label)}|${normalizeSearchText(item.location)}` ===
+            `${normalizeSearchText(normalized.label)}|${normalizeSearchText(normalized.location)}`,
+      )
+    ) {
+      target.push(normalized)
+    }
+  })
+}
+
+function ordersObjectPlanZonesForOrder(order = {}) {
+  const selectedClient = ordersFindClientBySelection(ordersReadInputValue('ordersEditClient') || order.clientId || order.clientLabel || order.clientName)
+  if (!selectedClient) {
+    return []
+  }
+  const rows = []
+  ;[selectedClient?.zones, selectedClient?.strefy, selectedClient?.objects, selectedClient?.obiekty, selectedClient?.locations].forEach((source) => {
+    ordersPushObjectPlanZones(rows, source)
+  })
+  ordersPushObjectPlanZones(
+    rows,
+    (Array.isArray(appState.zones) ? appState.zones : []).filter((zone) => ordersZoneMatchesClient(zone, selectedClient)),
+  )
+  return rows
+}
+
+function ordersObjectPlanAllZonesOption() {
+  return {
+    key: ORDERS_OBJECT_ALL_ZONES_KEY,
+    label: 'Wszystkie strefy',
+    location: 'Cały obiekt',
+    qr: '',
+    meta: 'Cały obiekt',
+  }
+}
+
+function ordersObjectPlanZoneForKey(zones = [], zoneKey = '') {
+  const key = String(zoneKey ?? '').trim()
+  if (key === ORDERS_OBJECT_ALL_ZONES_KEY) {
+    return ordersObjectPlanAllZonesOption()
+  }
+  return (Array.isArray(zones) ? zones : []).find((zone) => zone.key === key) || null
+}
+
+function ordersObjectPlanTasks(order = {}) {
+  const source = Array.isArray(order?.objectPlanTasks)
+    ? order.objectPlanTasks
+    : Array.isArray(order?.zoneTaskPlan)
+      ? order.zoneTaskPlan
+      : Array.isArray(order?.objectZoneTasks)
+        ? order.objectZoneTasks
+        : []
+  return source
+    .map((task, index) => {
+      const name = ordersListEntryText(task?.name ?? task?.taskName ?? task?.title ?? task?.description)
+      if (!name) {
+        return null
+      }
+      const mode = String(task?.mode ?? task?.type ?? 'repeat').trim() === 'once' ? 'once' : 'repeat'
+      return {
+        ...task,
+        id: String(task?.id ?? '').trim() || `object-task-${index + 1}`,
+        zoneKey: String(task?.zoneKey ?? '').trim(),
+        zoneLabel:
+          String(task?.zoneKey ?? '').trim() === ORDERS_OBJECT_ALL_ZONES_KEY
+            ? 'Wszystkie strefy'
+            : String(task?.zoneLabel ?? '').trim(),
+        name,
+        mode,
+        cadence: String(task?.cadence ?? task?.frequency ?? task?.repeatLabel ?? '').trim(),
+        dateYmd: ordersNormalizeDateField(task?.dateYmd ?? task?.dueDate ?? task?.date, ''),
+      }
+    })
+    .filter(Boolean)
+}
+
+function ordersSetObjectPlanTasks(order = {}, tasks = []) {
+  const rows = Array.isArray(tasks) ? tasks : []
+  order.objectPlanTasks = rows
+  order.zoneTaskPlan = rows
+  order.objectZoneTasks = rows
+}
+
+function ordersObjectPlanTaskModeLabel(mode = '') {
+  return String(mode ?? '') === 'once' ? 'Jednorazowe' : 'Cykliczne'
+}
+
+function ordersObjectPlanTaskWhenLabel(task = {}) {
+  const date = ordersNormalizeDateField(task?.dateYmd ?? task?.dueDate ?? task?.date, '')
+  if (String(task?.mode ?? '') === 'once') {
+    return date ? `Termin: ${formatDatePl(`${date}T12:00:00.000Z`)}` : 'Termin do ustalenia'
+  }
+  return [task.cadence || 'Codziennie', date ? `od ${formatDatePl(`${date}T12:00:00.000Z`)}` : ''].filter(Boolean).join(' · ')
+}
+
+function ordersObjectPlanTaskDate(task = {}, order = {}) {
+  return ordersNormalizeDateField(task?.dateYmd ?? task?.dueDate ?? task?.date, order?.dateYmd || todayYmd())
+}
+
+function ordersObjectPlanCalendarMonth(order = {}) {
+  const fallback = calendarMonthStart(order?.dateYmd || todayYmd())
+  const current = ordersNormalizeDateField(appState.ordersObjectPlanCalendarMonth, fallback)
+  return calendarMonthStart(current)
+}
+
+function ordersObjectPlanTaskRepeatStepDays(task = {}) {
+  const cadence = normalizeSearchText(task?.cadence ?? task?.frequency ?? '')
+  if (cadence.includes('codzien')) {
+    return 1
+  }
+  if (cadence.includes('2') || cadence.includes('dwa')) {
+    return 14
+  }
+  if (cadence.includes('mies')) {
+    return 0
+  }
+  if (cadence.includes('audyt')) {
+    return null
+  }
+  return 7
+}
+
+function ordersObjectPlanMonthOccurrenceDates(task = {}, order = {}, monthStart = todayYmd()) {
+  const start = ordersObjectPlanTaskDate(task, order)
+  const gridStart = calendarMonthGridStart(monthStart)
+  const gridEnd = calendarAddDays(gridStart, 41)
+  if (String(task?.mode ?? '') === 'once') {
+    return start >= gridStart && start <= gridEnd ? [start] : []
+  }
+  const stepDays = ordersObjectPlanTaskRepeatStepDays(task)
+  if (stepDays === null) {
+    return start >= gridStart && start <= gridEnd ? [start] : []
+  }
+  if (stepDays === 0) {
+    const dates = []
+    const startDate = calendarDateFromYmd(start)
+    let cursor = calendarDateFromYmd(calendarMonthStart(gridStart))
+    cursor.setDate(startDate.getDate())
+    if (calendarDateToYmd(cursor) < gridStart) {
+      cursor.setMonth(cursor.getMonth() + 1)
+    }
+    while (calendarDateToYmd(cursor) <= gridEnd) {
+      const day = calendarDateToYmd(cursor)
+      if (day >= start) {
+        dates.push(day)
+      }
+      cursor.setMonth(cursor.getMonth() + 1)
+    }
+    return dates
+  }
+  const dates = []
+  let cursor = start
+  while (cursor < gridStart) {
+    cursor = calendarAddDays(cursor, stepDays)
+  }
+  while (cursor <= gridEnd) {
+    dates.push(cursor)
+    cursor = calendarAddDays(cursor, stepDays)
+  }
+  return dates
+}
+
+function ordersObjectPlanActiveDaysForRange(order = {}, days = []) {
+  const visibleDays = (Array.isArray(days) ? days : [])
+    .map((day) => String(day ?? '').trim())
+    .filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day))
+  if (!visibleDays.length) {
+    return new Set()
+  }
+
+  if (ordersScheduleModeForOrder(order) === 'repeat') {
+    const skippedDates = calendarTimelineRecurringSkippedDates(order)
+    return new Set(calendarTimelineRecurringDaysForRange(order, visibleDays).filter((day) => !skippedDates.has(day)))
+  }
+
+  const visibleSet = new Set(visibleDays)
+  return new Set(calendarTimelineDaysForOrder(order).filter((day) => visibleSet.has(day)))
+}
+
+function ordersObjectPlanDayIsActive(order = {}, day = '') {
+  const dayKey = ordersNormalizeDateField(day, '')
+  return dayKey ? ordersObjectPlanActiveDaysForRange(order, [dayKey]).has(dayKey) : false
+}
+
+function ordersObjectPlanSelectedZoneKeys(zones = []) {
+  const available = new Set((Array.isArray(zones) ? zones : []).map((zone) => zone.key))
+  return (Array.isArray(appState.ordersObjectPlanSelectedZoneKeys) ? appState.ordersObjectPlanSelectedZoneKeys : [])
+    .map((key) => String(key ?? '').trim())
+    .filter((key) => available.has(key))
+}
+
+function ordersObjectPlanVisibleZones(zones = []) {
+  const rows = Array.isArray(zones) ? zones : []
+  const selected = ordersObjectPlanSelectedZoneKeys(rows)
+  if (!selected.length) {
+    return rows
+  }
+  const selectedSet = new Set(selected)
+  return rows.filter((zone) => selectedSet.has(zone.key))
+}
+
+function ordersObjectPlanZoneFilterHtml(zones = []) {
+  const rows = Array.isArray(zones) ? zones : []
+  if (!rows.length) {
+    return '<div class="orders-object-zone-empty">Brak stref dla wybranego klienta.</div>'
+  }
+  const selected = ordersObjectPlanSelectedZoneKeys(rows)
+  const activeCount = selected.length || rows.length
+  return `
+    <button class="orders-object-zone-filter" type="button" data-orders-object-zone-window-open="1">
+      <span>Strefy na kalendarzu</span>
+      <strong>${activeCount === rows.length ? 'Wszystkie strefy' : `${activeCount} z ${rows.length}`}</strong>
+    </button>
+  `
+}
+
+function ordersObjectPlanZoneWindowHtml(zones = []) {
+  const rows = Array.isArray(zones) ? zones : []
+  if (!rows.length || !appState.ordersObjectPlanZoneWindowOpen) {
+    return ''
+  }
+  const selected = ordersObjectPlanSelectedZoneKeys(rows)
+  const selectedSet = selected.length ? new Set(selected) : new Set(rows.map((zone) => zone.key))
+  const activeCount = selected.length || rows.length
+  return `
+    <div class="orders-object-zone-window-backdrop" data-orders-object-zone-window-close="1">
+      <section class="orders-object-zone-window" role="dialog" aria-modal="true" aria-label="Strefy na kalendarzu">
+        <div class="orders-object-zone-window-head">
+          <div>
+            <strong>Strefy na kalendarzu</strong>
+            <span>Wybierz strefy, które mają być widoczne w planie czynności.</span>
+          </div>
+          <button type="button" data-orders-object-zone-window-close="1" aria-label="Zamknij">×</button>
+        </div>
+        <div class="orders-object-zone-window-summary">
+          Widoczne: ${escapeHtml(String(activeCount))} z ${escapeHtml(String(rows.length))}
+        </div>
+        <div class="orders-object-zone-window-list">
+          ${rows
+            .map(
+              (zone) => `
+                <label class="orders-object-zone-filter-row">
+                  <input type="checkbox" data-orders-object-zone-filter="${escapeHtml(zone.key)}"${selectedSet.has(zone.key) ? ' checked' : ''} />
+                  <span>
+                    <strong>${escapeHtml(zone.label)}</strong>
+                    <small>${escapeHtml(zone.location || 'Brak lokalizacji')}</small>
+                  </span>
+                </label>
+              `,
+            )
+            .join('')}
+        </div>
+      </section>
+    </div>
+  `
+}
+
+function ordersObjectPlanCalendarTasksByDay(order = {}, zones = [], monthStart = todayYmd(), activeDays = null) {
+  const zoneLabels = new Map(zones.map((zone) => [zone.key, zone.label]))
+  const allowedZoneKeys = new Set(zones.map((zone) => zone.key))
+  const allowedDays = activeDays instanceof Set ? activeDays : null
+  const byDay = new Map()
+  ordersObjectPlanTasks(order).forEach((task) => {
+    const taskZone = String(task.zoneKey ?? '').trim()
+    const isAllZonesTask = taskZone === ORDERS_OBJECT_ALL_ZONES_KEY
+    if (allowedZoneKeys.size && taskZone && !isAllZonesTask && !allowedZoneKeys.has(taskZone)) {
+      return
+    }
+    ordersObjectPlanMonthOccurrenceDates(task, order, monthStart).forEach((day) => {
+      if (allowedDays && !allowedDays.has(day)) {
+        return
+      }
+      const rows = byDay.get(day) || []
+      rows.push({
+        ...task,
+        day,
+        zoneLabel: isAllZonesTask ? 'Wszystkie strefy' : task.zoneLabel || zoneLabels.get(task.zoneKey) || 'Strefa',
+      })
+      byDay.set(day, rows)
+    })
+  })
+  return byDay
+}
+
+function ordersObjectPlanCalendarHtml(order = {}, zones = []) {
+  const monthStart = ordersObjectPlanCalendarMonth(order)
+  const gridStart = calendarMonthGridStart(monthStart)
+  const visibleZones = ordersObjectPlanVisibleZones(zones)
+  const monthKey = monthStart.slice(0, 7)
+  const today = todayYmd()
+  const days = Array.from({ length: 42 }, (_, index) => calendarAddDays(gridStart, index))
+  const activeDays = ordersObjectPlanActiveDaysForRange(order, days)
+  const tasksByDay = ordersObjectPlanCalendarTasksByDay(order, visibleZones, monthStart, activeDays)
+
+  return `
+    <div class="orders-object-calendar">
+      <div class="orders-object-calendar-head">
+        <div>
+          <strong>Kalendarz czynności</strong>
+          <span>Zbiorczy widok zadań dla wybranych stref obiektu</span>
+        </div>
+        <div class="orders-object-calendar-tools">
+          <button class="orders-object-add-task-button" type="button" data-orders-object-task-window-open="1">Dodaj zadanie</button>
+          ${ordersObjectPlanZoneFilterHtml(zones)}
+        </div>
+        <div class="orders-object-calendar-nav">
+          <button type="button" data-orders-object-calendar-month="-1" aria-label="Poprzedni miesiąc">‹</button>
+          <b>${escapeHtml(calendarMonthLabel(monthStart).replace(/^./, (char) => char.toLocaleUpperCase('pl-PL')))}</b>
+          <button type="button" data-orders-object-calendar-month="1" aria-label="Następny miesiąc">›</button>
+        </div>
+      </div>
+      <div class="orders-object-calendar-weekdays">
+        ${['P', 'W', 'Ś', 'C', 'P', 'S', 'N'].map((day) => `<span>${day}</span>`).join('')}
+      </div>
+      <div class="orders-object-calendar-grid">
+        ${days
+          .map((day) => {
+            const dayTasks = tasksByDay.get(day) || []
+            const isMuted = !day.startsWith(monthKey)
+            const isToday = day === today
+            const isActive = activeDays.has(day)
+            const dayAttributes = isActive
+              ? `role="button" tabindex="0" data-orders-object-calendar-day="${escapeHtml(day)}"`
+              : 'aria-disabled="true"'
+            return `
+              <div class="orders-object-calendar-day${isMuted ? ' is-muted' : ''}${isToday ? ' is-today' : ''}${isActive ? ' is-active-day' : ' is-inactive'}" ${dayAttributes}>
+                <div class="orders-object-calendar-date">${escapeHtml(calendarDayNumberLabel(day))}</div>
+                <div class="orders-object-calendar-items">
+                  ${dayTasks
+                    .map(
+                      (task) => `
+                        <button class="orders-object-calendar-chip" type="button" draggable="true" data-orders-object-task-drag="${escapeHtml(task.id)}" title="${escapeHtml(`${task.zoneLabel}: ${task.name}`)}">
+                          <span>${escapeHtml(task.zoneLabel)}</span>
+                          <strong>${escapeHtml(task.name)}</strong>
+                        </button>
+                      `,
+                    )
+                    .join('')}
+                </div>
+              </div>
+            `
+          })
+          .join('')}
+      </div>
+      ${ordersObjectPlanZoneWindowHtml(zones)}
+      ${ordersObjectPlanTaskWindowHtml(order, zones)}
+    </div>
+  `
+}
+
+function ordersObjectPlanCadenceOptionsHtml(selected = '') {
+  const value = String(selected || 'Codziennie').trim()
+  return ['Codziennie', 'Co tydzień', 'Co 2 tygodnie', 'Co miesiąc']
+    .map((option) => `<option value="${escapeHtml(option)}"${option === value ? ' selected' : ''}>${escapeHtml(option)}</option>`)
+    .join('')
+}
+
+function ordersObjectPlanZoneOptionsHtml(zones = [], selectedKey = '', options = {}) {
+  const rows = Array.isArray(zones) ? zones : []
+  const selected = String(selectedKey ?? '').trim()
+  if (!rows.length) {
+    return '<option value="">Brak stref</option>'
+  }
+  const allOption = options.includeAll
+    ? [`<option value="${escapeHtml(ORDERS_OBJECT_ALL_ZONES_KEY)}"${ORDERS_OBJECT_ALL_ZONES_KEY === selected ? ' selected' : ''}>Wszystkie strefy</option>`]
+    : []
+  return allOption
+    .concat(
+      rows.map((zone) => {
+        const label = ordersObjectPlanZoneDisplayLabel(zone)
+        return `<option value="${escapeHtml(zone.key)}"${zone.key === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`
+      }),
+    )
+    .join('')
+}
+
+function ordersObjectPlanTaskWindowHtml(order = {}, zones = []) {
+  const rows = Array.isArray(zones) ? zones : []
+  if (!rows.length || !appState.ordersObjectPlanTaskWindowOpen) {
+    return ''
+  }
+  const selectedZone = rows.some((zone) => zone.key === appState.ordersObjectPlanZoneKey)
+    ? appState.ordersObjectPlanZoneKey
+    : ORDERS_OBJECT_ALL_ZONES_KEY
+  const taskDate = ordersNormalizeDateField(order?.dateYmd || appState.ordersObjectPlanCalendarMonth || todayYmd(), todayYmd())
+  return `
+    <div class="orders-object-task-window-backdrop" data-orders-object-task-window-close="1">
+      <section class="orders-object-task-window" role="dialog" aria-modal="true" aria-label="Dodaj zadanie na obiekcie">
+        <div class="orders-object-task-window-head">
+          <div>
+            <strong>Dodaj zadanie</strong>
+            <span>Przypisz czynność do konkretnej strefy albo do wszystkich stref obiektu.</span>
+          </div>
+          <button type="button" data-orders-object-task-window-close="1" aria-label="Zamknij">×</button>
+        </div>
+        <div class="orders-object-task-window-form">
+          <label class="orders-object-task-window-zone">
+            <span>Zakres zadania</span>
+            <select id="ordersObjectTaskZone">${ordersObjectPlanZoneOptionsHtml(rows, selectedZone, { includeAll: true })}</select>
+          </label>
+          <label class="orders-object-task-window-name">
+            <span>Czynność</span>
+            <input id="ordersObjectTaskName" type="text" autocomplete="off" placeholder="Np. mycie podłogi, listwy przypodłogowe..." />
+          </label>
+          <label class="orders-object-task-window-type">
+            <span>Typ</span>
+            <select id="ordersObjectTaskMode">
+              <option value="repeat" selected>Cykliczne</option>
+              <option value="once">Jednorazowe</option>
+            </select>
+          </label>
+          <label class="orders-object-task-window-date">
+            <span>Od dnia</span>
+            <input id="ordersObjectTaskDate" type="date" value="${escapeHtml(taskDate)}" />
+          </label>
+          <label class="orders-object-task-window-cadence">
+            <span>Częstotliwość</span>
+            <select id="ordersObjectTaskCadence">${ordersObjectPlanCadenceOptionsHtml('Codziennie')}</select>
+          </label>
+          <button id="ordersObjectTaskAdd" type="button">Dodaj zadanie</button>
+        </div>
+      </section>
+    </div>
+  `
+}
+
+function ordersObjectPlanTasksForDay(order = {}, zones = [], day = '') {
+  const dayKey = ordersNormalizeDateField(day, '')
+  if (!dayKey) {
+    return []
+  }
+  if (!ordersObjectPlanDayIsActive(order, dayKey)) {
+    return []
+  }
+  const visibleZones = ordersObjectPlanVisibleZones(zones)
+  const allowedZoneKeys = new Set(visibleZones.map((zone) => zone.key))
+  return ordersObjectPlanTasks(order).filter((task) => {
+    const taskZone = String(task.zoneKey ?? '').trim()
+    if (allowedZoneKeys.size && taskZone && taskZone !== ORDERS_OBJECT_ALL_ZONES_KEY && !allowedZoneKeys.has(taskZone)) {
+      return false
+    }
+    return ordersObjectPlanMonthOccurrenceDates(task, order, calendarMonthStart(dayKey)).includes(dayKey)
+  })
+}
+
+function ordersObjectPlanDayEditorHtml(order = {}, zones = []) {
+  const day = ordersNormalizeDateField(appState.ordersObjectPlanDayEditorDate, '')
+  if (!day || !ordersObjectPlanDayIsActive(order, day)) {
+    return ''
+  }
+  const visibleZones = ordersObjectPlanVisibleZones(zones)
+  const usableZones = visibleZones.length ? visibleZones : zones
+  const dayTasks = ordersObjectPlanTasksForDay(order, zones, day)
+  const defaultZone = usableZones[0]?.key || ''
+  return `
+    <div class="orders-object-day-backdrop" data-orders-object-day-close="1">
+      <section class="orders-object-day-modal" role="dialog" aria-modal="true" aria-label="Edycja czynności dnia">
+        <div class="orders-object-day-head">
+          <div>
+            <strong>${escapeHtml(formatDatePl(`${day}T12:00:00.000Z`))}</strong>
+            <span>Edytuj czynności jednorazowe i reguły cykliczności tego dnia.</span>
+          </div>
+          <button type="button" data-orders-object-day-close="1" aria-label="Zamknij">×</button>
+        </div>
+
+        <div class="orders-object-day-add">
+          <select id="ordersObjectDayZone" aria-label="Strefa">${ordersObjectPlanZoneOptionsHtml(usableZones, defaultZone, { includeAll: true })}</select>
+          <input id="ordersObjectDayTaskName" type="text" autocomplete="off" placeholder="Czynność do wykonania w tej strefie" />
+          <select id="ordersObjectDayTaskMode" aria-label="Typ czynności">
+            <option value="once">Jednorazowe</option>
+            <option value="repeat">Cykliczne</option>
+          </select>
+          <select id="ordersObjectDayTaskCadence" aria-label="Częstotliwość" disabled>${ordersObjectPlanCadenceOptionsHtml('Codziennie')}</select>
+          <button id="ordersObjectDayTaskAdd" type="button">Dodaj</button>
+        </div>
+
+        <div class="orders-object-day-list">
+          ${
+            dayTasks.length
+              ? dayTasks
+                  .map(
+                    (task) => `
+                      <div class="orders-object-day-row" data-orders-object-day-task="${escapeHtml(task.id)}">
+                        <select data-orders-object-day-task-zone="${escapeHtml(task.id)}" aria-label="Strefa">${ordersObjectPlanZoneOptionsHtml(usableZones, task.zoneKey, { includeAll: true })}</select>
+                        <input data-orders-object-day-task-name="${escapeHtml(task.id)}" type="text" value="${escapeHtml(task.name)}" aria-label="Nazwa czynności" />
+                        <select data-orders-object-day-task-mode="${escapeHtml(task.id)}" aria-label="Typ czynności">
+                          <option value="once"${task.mode === 'once' ? ' selected' : ''}>Jednorazowe</option>
+                          <option value="repeat"${task.mode !== 'once' ? ' selected' : ''}>Cykliczne</option>
+                        </select>
+                        <select data-orders-object-day-task-cadence="${escapeHtml(task.id)}" aria-label="Częstotliwość"${task.mode === 'once' ? ' disabled' : ''}>${ordersObjectPlanCadenceOptionsHtml(task.cadence || 'Codziennie')}</select>
+                        <button type="button" data-orders-remove-object-task="${escapeHtml(task.id)}">Usuń</button>
+                      </div>
+                    `,
+                  )
+                  .join('')
+              : '<div class="orders-object-task-list-empty">Brak czynności w tym dniu. Dodaj pierwszą pozycję powyżej.</div>'
+          }
+        </div>
+      </section>
+    </div>
+  `
+}
+
+function ordersMoveObjectPlanTaskDate(taskId = '', day = '') {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  const id = String(taskId ?? '').trim()
+  const targetDay = ordersNormalizeDateField(day, '')
+  if (!order || !id || !targetDay) {
+    return
+  }
+  const tasks = ordersObjectPlanTasks(order).map((task) =>
+    String(task.id ?? '').trim() === id
+      ? {
+          ...task,
+          dateYmd: targetDay,
+          dueDate: targetDay,
+          date: targetDay,
+        }
+      : task,
+  )
+  ordersSetObjectPlanTasks(order, tasks)
+  ordersRenderObjectPlan(order)
+  ordersRenderSchedulePreview(order)
+}
+
+function ordersMoveObjectPlanCalendarMonth(offset = 0) {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId) || {}
+  const current = calendarDateFromYmd(ordersObjectPlanCalendarMonth(order))
+  current.setMonth(current.getMonth() + Number(offset || 0))
+  appState.ordersObjectPlanCalendarMonth = calendarMonthStart(calendarDateToYmd(current))
+  ordersRenderObjectPlan(order)
+}
+
+function ordersObjectPlanTaskRowsHtml(order = {}, zoneKey = '') {
+  const key = String(zoneKey ?? '').trim()
+  const tasks = ordersObjectPlanTasks(order).filter((task) => String(task.zoneKey ?? '').trim() === key)
+  if (!tasks.length) {
+    return '<div class="orders-object-task-list-empty">Brak zaplanowanych czynności dla tej strefy.</div>'
+  }
+  return tasks
+    .map(
+      (task) => `
+        <div class="orders-object-task-row">
+          <em>${escapeHtml(ordersObjectPlanTaskModeLabel(task.mode))}</em>
+          <strong title="${escapeHtml(task.name)}">${escapeHtml(task.name)}</strong>
+          <span>${escapeHtml(ordersObjectPlanTaskWhenLabel(task))}</span>
+          <button type="button" data-orders-remove-object-task="${escapeHtml(task.id)}">Usuń</button>
         </div>
       `,
     )
     .join('')
+}
+
+function ordersRefreshObjectPlanScheduleWindow(order = {}, options = {}) {
+  if (!order || typeof order !== 'object') {
+    return
+  }
+  if (options.syncMonth) {
+    appState.ordersObjectPlanCalendarMonth = calendarMonthStart(order?.dateYmd || todayYmd())
+  }
+  const openedDay = ordersNormalizeDateField(appState.ordersObjectPlanDayEditorDate, '')
+  if (openedDay && !ordersObjectPlanDayIsActive(order, openedDay)) {
+    appState.ordersObjectPlanDayEditorDate = ''
+  }
+  ordersRenderObjectPlan(order)
+}
+
+function ordersRenderObjectPlan(order = {}) {
+  const panel = document.getElementById('ordersObjectPlanPanel')
+  if (!panel) {
+    return
+  }
+  const zones = ordersObjectPlanZonesForOrder(order)
+  if (!appState.ordersObjectPlanCalendarMonth) {
+    appState.ordersObjectPlanCalendarMonth = calendarMonthStart(order?.dateYmd || todayYmd())
+  }
+  if (!zones.length) {
+    appState.ordersObjectPlanZoneKey = ''
+    appState.ordersObjectPlanSelectedZoneKeys = []
+    appState.ordersObjectPlanDayEditorDate = ''
+    appState.ordersObjectPlanZoneWindowOpen = false
+    appState.ordersObjectPlanTaskWindowOpen = false
+    panel.innerHTML = '<div class="orders-object-zone-empty">Po wyborze klienta zobaczysz tu kalendarz czynności i strefy obiektu.</div>'
+    return
+  }
+  if (!zones.some((zone) => zone.key === appState.ordersObjectPlanZoneKey)) {
+    appState.ordersObjectPlanZoneKey = zones[0].key
+  }
+  panel.innerHTML = `
+    ${ordersObjectPlanCalendarHtml(order, zones)}
+    ${ordersObjectPlanDayEditorHtml(order, zones)}
+  `
 }
 
 function ordersRenderSubtasksAndSupplies(order = {}) {
@@ -10089,24 +11289,30 @@ function ordersRemoveSubtaskFromCurrentOrder(index) {
 function ordersAddSupplyToCurrentOrder() {
   const order = ordersFindTimelineOrder(appState.ordersEditingId)
   const input = document.getElementById('ordersSupplyName')
+  const qrInput = document.getElementById('ordersSupplyQr')
   const kind = ordersReadInputValue('ordersSupplyKind') || 'equipment'
   const name = ordersListEntryText(input instanceof HTMLInputElement ? input.value : '')
+  const qrCode = ordersListEntryText(qrInput instanceof HTMLInputElement ? qrInput.value : '')
   if (!order || !name) {
     return
   }
   const supplies = ordersOrderSupplies(order)
-  const key = `${ordersSupplyKind(kind)}:${normalizeSearchText(name)}`
-  if (!supplies.some((item) => `${ordersSupplyKind(item.kind)}:${normalizeSearchText(item.name)}` === key)) {
+  const key = `${ordersSupplyKind(kind)}:${normalizeSearchText(name)}:${normalizeSearchText(qrCode)}`
+  if (!supplies.some((item) => `${ordersSupplyKind(item.kind)}:${normalizeSearchText(item.name)}:${normalizeSearchText(item.qrCode)}` === key)) {
     supplies.push({
       id: ordersListItemId('supply'),
       kind: ordersSupplyKind(kind),
       name,
+      qrCode,
     })
   }
   ordersSetOrderSupplies(order, supplies)
   if (input instanceof HTMLInputElement) {
     input.value = ''
     input.focus()
+  }
+  if (qrInput instanceof HTMLInputElement) {
+    qrInput.value = ''
   }
   ordersRenderSubtasksAndSupplies(order)
 }
@@ -10120,6 +11326,137 @@ function ordersRemoveSupplyFromCurrentOrder(index) {
   }
   ordersSetOrderSupplies(order, supplies.filter((_, itemIndex) => itemIndex !== removeIndex))
   ordersRenderSubtasksAndSupplies(order)
+}
+
+function ordersAddObjectPlanTaskToCurrentOrder() {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  const zones = order ? ordersObjectPlanZonesForOrder(order) : []
+  const selectedZoneKey = String(ordersReadInputValue('ordersObjectTaskZone') || appState.ordersObjectPlanZoneKey || '').trim()
+  const zone = ordersObjectPlanZoneForKey(zones, selectedZoneKey)
+  const input = document.getElementById('ordersObjectTaskName')
+  const name = ordersListEntryText(input instanceof HTMLInputElement ? input.value : '')
+  if (!order || !zone || !name) {
+    showTransientNotice('Wybierz strefę i wpisz czynność.', 'error')
+    return
+  }
+  const mode = ordersReadInputValue('ordersObjectTaskMode') === 'once' ? 'once' : 'repeat'
+  const tasks = ordersObjectPlanTasks(order)
+  tasks.push({
+    id: ordersListItemId('object-task'),
+    zoneKey: zone.key,
+    zoneLabel: zone.label,
+    name,
+    taskName: name,
+    mode,
+    cadence: mode === 'repeat' ? ordersReadInputValue('ordersObjectTaskCadence') || 'Codziennie' : '',
+    dateYmd: ordersNormalizeDateField(ordersReadInputValue('ordersObjectTaskDate'), order.dateYmd || todayYmd()),
+    dueDate: ordersNormalizeDateField(ordersReadInputValue('ordersObjectTaskDate'), order.dateYmd || todayYmd()),
+  })
+  ordersSetObjectPlanTasks(order, tasks)
+  appState.ordersObjectPlanTaskWindowOpen = false
+  ordersRenderObjectPlan(order)
+}
+
+function ordersRemoveObjectPlanTaskFromCurrentOrder(taskId = '') {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  const id = String(taskId ?? '').trim()
+  if (!order || !id) {
+    return
+  }
+  ordersSetObjectPlanTasks(
+    order,
+    ordersObjectPlanTasks(order).filter((task) => String(task.id ?? '').trim() !== id),
+  )
+  ordersRenderObjectPlan(order)
+}
+
+function ordersAddObjectPlanDayTaskToCurrentOrder() {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  const day = ordersNormalizeDateField(appState.ordersObjectPlanDayEditorDate, '')
+  const zones = order ? ordersObjectPlanZonesForOrder(order) : []
+  const zoneKey = String(ordersReadInputValue('ordersObjectDayZone') || '').trim()
+  const zone = ordersObjectPlanZoneForKey(zones, zoneKey)
+  const name = ordersListEntryText(ordersReadInputValue('ordersObjectDayTaskName'))
+  if (!order || !day || !zone || !name) {
+    showTransientNotice('Wybierz strefę i wpisz czynność.', 'error')
+    return
+  }
+  const mode = ordersReadInputValue('ordersObjectDayTaskMode') === 'repeat' ? 'repeat' : 'once'
+  const tasks = ordersObjectPlanTasks(order)
+  tasks.push({
+    id: ordersListItemId('object-task'),
+    zoneKey: zone.key,
+    zoneLabel: zone.label,
+    name,
+    taskName: name,
+    mode,
+    cadence: mode === 'repeat' ? ordersReadInputValue('ordersObjectDayTaskCadence') || 'Codziennie' : '',
+    dateYmd: day,
+    dueDate: day,
+    date: day,
+  })
+  ordersSetObjectPlanTasks(order, tasks)
+  ordersRenderObjectPlan(order)
+}
+
+function ordersUpdateObjectPlanDayTaskFromControl(target) {
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  if (!order || !target) {
+    return
+  }
+  const day = ordersNormalizeDateField(appState.ordersObjectPlanDayEditorDate, order.dateYmd || todayYmd())
+  const zones = ordersObjectPlanZonesForOrder(order)
+  const zoneByKey = new Map(zones.map((zone) => [zone.key, zone]))
+  zoneByKey.set(ORDERS_OBJECT_ALL_ZONES_KEY, ordersObjectPlanAllZonesOption())
+  const id =
+    target.getAttribute?.('data-orders-object-day-task-name') ||
+    target.getAttribute?.('data-orders-object-day-task-zone') ||
+    target.getAttribute?.('data-orders-object-day-task-mode') ||
+    target.getAttribute?.('data-orders-object-day-task-cadence') ||
+    ''
+  if (!id) {
+    return
+  }
+  const tasks = ordersObjectPlanTasks(order).map((task) => {
+    if (String(task.id ?? '').trim() !== id) {
+      return task
+    }
+    const next = { ...task, dateYmd: task.dateYmd || day, dueDate: task.dueDate || day, date: task.date || day }
+    if (target.hasAttribute?.('data-orders-object-day-task-name')) {
+      const name = ordersListEntryText(target.value)
+      if (name) {
+        next.name = name
+        next.taskName = name
+      }
+    }
+    if (target.hasAttribute?.('data-orders-object-day-task-zone')) {
+      const zone = zoneByKey.get(String(target.value ?? '').trim())
+      if (zone) {
+        next.zoneKey = zone.key
+        next.zoneLabel = zone.label
+      }
+    }
+    if (target.hasAttribute?.('data-orders-object-day-task-mode')) {
+      next.mode = target.value === 'repeat' ? 'repeat' : 'once'
+      if (next.mode === 'once') {
+        next.cadence = ''
+        next.dateYmd = day
+        next.dueDate = day
+        next.date = day
+      } else {
+        next.cadence = next.cadence || 'Codziennie'
+        next.dateYmd = next.dateYmd || day
+      }
+    }
+    if (target.hasAttribute?.('data-orders-object-day-task-cadence')) {
+      next.mode = 'repeat'
+      next.cadence = String(target.value ?? '').trim() || 'Codziennie'
+      next.dateYmd = next.dateYmd || day
+    }
+    return next
+  })
+  ordersSetObjectPlanTasks(order, tasks)
+  ordersRenderObjectPlan(order)
 }
 
 function ordersReadEditorSubtasks(order = {}) {
@@ -10139,16 +11476,171 @@ function ordersReadEditorSubtasks(order = {}) {
 function ordersReadEditorSupplies(order = {}) {
   const supplies = ordersOrderSupplies(order)
   const pending = ordersListEntryText(ordersReadInputValue('ordersSupplyName'))
+  const pendingQrCode = ordersListEntryText(ordersReadInputValue('ordersSupplyQr'))
   const kind = ordersReadInputValue('ordersSupplyKind') || 'equipment'
-  const key = `${ordersSupplyKind(kind)}:${normalizeSearchText(pending)}`
-  if (pending && !supplies.some((item) => `${ordersSupplyKind(item.kind)}:${normalizeSearchText(item.name)}` === key)) {
+  const key = `${ordersSupplyKind(kind)}:${normalizeSearchText(pending)}:${normalizeSearchText(pendingQrCode)}`
+  if (pending && !supplies.some((item) => `${ordersSupplyKind(item.kind)}:${normalizeSearchText(item.name)}:${normalizeSearchText(item.qrCode)}` === key)) {
     supplies.push({
       id: ordersListItemId('supply'),
       kind: ordersSupplyKind(kind),
       name: pending,
+      qrCode: pendingQrCode,
     })
   }
   return supplies
+}
+
+function ordersEscapeRegExp(value = '') {
+  return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function ordersMarkedJsonStart(marker = '') {
+  return `<!-- ${String(marker ?? '').trim()}:START -->`
+}
+
+function ordersMarkedJsonEnd(marker = '') {
+  return `<!-- ${String(marker ?? '').trim()}:END -->`
+}
+
+function ordersWriteMarkedJsonBlock(currentText = '', marker = '', payload = {}) {
+  const raw = String(currentText ?? '').trim()
+  const cleanMarker = String(marker ?? '').trim()
+  if (!cleanMarker) {
+    return raw
+  }
+  const start = ordersMarkedJsonStart(cleanMarker)
+  const end = ordersMarkedJsonEnd(cleanMarker)
+  const block = `${start}\n${JSON.stringify(payload)}\n${end}`
+  const pattern = new RegExp(`${ordersEscapeRegExp(start)}[\\s\\S]*?${ordersEscapeRegExp(end)}`, 'm')
+  if (pattern.test(raw)) {
+    return raw.replace(pattern, block).trim()
+  }
+  return [raw, block].filter(Boolean).join('\n\n').trim()
+}
+
+function ordersClientObjectDataSchedule(order = {}) {
+  const mode = String(order.scheduleMode ?? '').trim() || (String(order.type ?? '').trim() === 'cyclic' ? 'repeat' : 'once')
+  return {
+    mode,
+    dateStart: ordersNormalizeDateField(order.dateYmd, ''),
+    dateStop:
+      mode === 'repeat'
+        ? ordersRepeatEndDateForOrder(order)
+        : ordersNormalizeDateField(order.endDateYmd ?? order.validUntil, ''),
+    accessStartTime: ordersNormalizeTimeField(order.accessStartTime ?? order.startTime, ''),
+    accessEndTime: ordersNormalizeTimeField(order.accessEndTime ?? order.endTime, ''),
+    accessWindows: mode === 'repeat' ? ordersAccessWindowsForOrder(order) : [],
+    requiredWorkMinutes: Math.max(0, Number(order.requiredWorkMinutes ?? order.serviceWorkMinutes ?? order.standardWorkMinutes) || 0),
+    requiredPeople: Math.max(1, Number(order.requiredPeople ?? order.requiredWorkers ?? order.workerSlots) || 1),
+    repeatPreset: String(order.repeatPreset ?? '').trim(),
+    repeatEvery: Math.max(1, Number(order.repeatEvery) || 1),
+    repeatUnit: String(order.repeatUnit ?? '').trim(),
+    repeatWeekdays: Array.isArray(order.repeatWeekdays) ? order.repeatWeekdays : [],
+    weeklyScheduleRules: ordersWeeklyPatternSources(order),
+    workAllocations: Array.isArray(order.workAllocations) ? order.workAllocations : Array.isArray(order.workerAllocations) ? order.workerAllocations : [],
+  }
+}
+
+function ordersClientObjectDataPayload(order = {}, client = {}, supplies = [], objectPlanTasks = []) {
+  const nowIso = new Date().toISOString()
+  const clientId = ordersClientId(client) || ordersFirstClientText(order.clientId)
+  const zones = ordersObjectPlanZonesForOrder(order).map((zone) => ({
+    key: String(zone.key ?? '').trim(),
+    name: String(zone.label ?? '').trim(),
+    location: String(zone.location ?? '').trim(),
+    qrCode: String(zone.qr ?? '').trim(),
+  }))
+  const normalizedTasks = objectPlanTasks.map((task) => ({
+    id: String(task.id ?? '').trim(),
+    zoneKey: String(task.zoneKey ?? '').trim(),
+    zoneName: String(task.zoneLabel ?? '').trim(),
+    name: String(task.name ?? task.taskName ?? '').trim(),
+    type: String(task.mode ?? '').trim() === 'once' ? 'once' : 'repeat',
+    frequency: String(task.cadence ?? '').trim(),
+    date: ordersNormalizeDateField(task.dateYmd ?? task.dueDate ?? task.date, ''),
+  }))
+  const normalizedSupplies = supplies.map((item) => ({
+    id: String(item.id ?? '').trim(),
+    kind: ordersSupplyKind(item.kind),
+    type: ordersSupplyKindLabel(item.kind),
+    name: String(item.name ?? '').trim(),
+    qrCode: ordersFirstClientText(item.qrCode, item.qr, item.code, item.qrNumber),
+    quantity: ordersFirstClientText(item.quantity, item.amount, item.qty),
+    note: ordersFirstClientText(item.note, item.description),
+  }))
+  return {
+    plan: {
+      version: 1,
+      source: 'portal-order-editor',
+      updatedAt: nowIso,
+      clientId,
+      clientName: ordersClientDisplayName(client) || ordersFirstClientText(order.clientName, order.clientLabel),
+      orderId: String(order.id ?? '').trim(),
+      orderTitle: String(order.title ?? '').trim(),
+      schedule: ordersClientObjectDataSchedule(order),
+      zones,
+      tasks: normalizedTasks,
+    },
+    equipment: {
+      version: 1,
+      source: 'portal-order-editor',
+      updatedAt: nowIso,
+      clientId,
+      orderId: String(order.id ?? '').trim(),
+      items: normalizedSupplies.filter((item) => item.kind !== 'chemical'),
+    },
+    chemistry: {
+      version: 1,
+      source: 'portal-order-editor',
+      updatedAt: nowIso,
+      clientId,
+      orderId: String(order.id ?? '').trim(),
+      items: normalizedSupplies.filter((item) => item.kind === 'chemical'),
+    },
+  }
+}
+
+async function ordersSyncObjectDataToClient(order = {}, client = {}, supplies = [], objectPlanTasks = []) {
+  const orgId = String(appState.session?.orgId ?? '').trim()
+  const clientId = ordersClientId(client) || ordersFirstClientText(order.clientId)
+  if (!orgId || !clientId) {
+    throw new Error('Brak organizacji albo klienta do zapisu danych obiektu.')
+  }
+  const currentClient = ordersFindClientBySelection(clientId) || client || {}
+  const payloads = ordersClientObjectDataPayload(order, currentClient, supplies, objectPlanTasks)
+  const currentClientInfo = String(currentClient.clientInfo ?? currentClient.info ?? currentClient.informacje ?? '')
+  const currentEquipment = String(currentClient.equipment ?? currentClient.sprzet ?? '')
+  const currentChemistry = String(currentClient.chemistry ?? currentClient.chemia ?? '')
+  const updatePayload = {
+    clientInfo: ordersWriteMarkedJsonBlock(
+      currentClientInfo,
+      ORDERS_CLIENT_OBJECT_PLAN_MARKER,
+      payloads.plan,
+    ),
+    equipment: ordersWriteMarkedJsonBlock(
+      currentEquipment,
+      ORDERS_CLIENT_OBJECT_EQUIPMENT_MARKER,
+      payloads.equipment,
+    ),
+    chemistry: ordersWriteMarkedJsonBlock(
+      currentChemistry,
+      ORDERS_CLIENT_OBJECT_CHEMISTRY_MARKER,
+      payloads.chemistry,
+    ),
+  }
+  const updatedClient = await updateClient(orgId, clientId, updatePayload)
+  const index = appState.clients.findIndex((item) => String(item.id ?? item.clientId ?? '').trim() === clientId)
+  if (index >= 0) {
+    appState.clients[index] = {
+      ...appState.clients[index],
+      ...updatedClient,
+      info: updatedClient.clientInfo ?? updatePayload.clientInfo,
+      informacje: updatedClient.clientInfo ?? updatePayload.clientInfo,
+      sprzet: updatedClient.equipment ?? updatePayload.equipment,
+      chemia: updatedClient.chemistry ?? updatePayload.chemistry,
+    }
+  }
+  return updatedClient
 }
 
 function ordersExecutionAddressFromValue(value = {}) {
@@ -10159,13 +11651,14 @@ function ordersExecutionAddressFromValue(value = {}) {
     return ''
   }
   const direct = ordersFirstClientText(
+    value.buildingAddress,
+    value.objectAddress,
+    value.siteAddress,
+    value.serviceAddress,
     value.address,
     value.adres,
     value.fullAddress,
     value.executionAddress,
-    value.location,
-    value.lokalizacja,
-    value.label,
   )
   const street = ordersFirstClientText(value.street, value.ulica, direct)
   const cityLine = [
@@ -10175,6 +11668,66 @@ function ordersExecutionAddressFromValue(value = {}) {
     .filter(Boolean)
     .join(' ')
   return [street, cityLine].filter(Boolean).join(', ')
+}
+
+function ordersBuildingAddressFromValue(value = {}) {
+  const explicit = ordersExecutionAddressFromValue(value)
+  if (explicit) {
+    return explicit
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return ''
+  }
+  return ordersFirstClientText(
+    value.building,
+    value.budynek,
+    value.buildingName,
+    value.objectName,
+    value.siteName,
+    value.objectLocation,
+    value.location,
+    value.lokalizacja,
+  )
+}
+
+function ordersValueLooksLikeZoneLocation(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false
+  }
+  const zoneName = ordersFirstClientText(
+    value.zone,
+    value.zoneName,
+    value.strefa,
+    value.nazwaStrefy,
+    value.function,
+    value.room,
+    value.pomieszczenie,
+    value.area,
+    value.areaName,
+  )
+  if (zoneName) {
+    return true
+  }
+  const label = ordersFirstClientText(value.name, value.label, value.title)
+  const kind = normalizeSearchText(ordersFirstClientText(value.kind, value.type, value.category))
+  return Boolean(label && ['zone', 'strefa', 'room', 'pomieszczenie', 'area', 'obszar'].some((part) => kind.includes(part)))
+}
+
+function ordersLooksLikeExecutionAddress(value = '') {
+  const raw = String(value ?? '').replace(/\s+/g, ' ').trim()
+  if (raw.length < 8) {
+    return false
+  }
+  if (/^(aneks|biuro|ciąg|ciag|drzwi|inne|magazyn|maszyna|pomieszczenie|recepcja|strefa|szatnia|wc)\b/i.test(raw)) {
+    return false
+  }
+  if (/\b\d{2}-\d{3}\b/.test(raw)) {
+    return true
+  }
+  if (/\b(ul\.?|ulica|aleja|al\.?|osiedle|os\.?|plac|pl\.?|rynek)\b/i.test(raw)) {
+    return true
+  }
+  return /\d/.test(raw) && raw.split(/\s+/).length >= 2
 }
 
 function ordersShortAddressLabel(value = '', maxLength = 78) {
@@ -10187,7 +11740,7 @@ function ordersShortAddressLabel(value = '', maxLength = 78) {
 
 function ordersAddClientExecutionAddress(target, value = '', meta = '') {
   const label = ordersExecutionAddressFromValue(value)
-  if (!label || label === '-') {
+  if (!label || label === '-' || !ordersLooksLikeExecutionAddress(label)) {
     return
   }
   const key = ordersLocationSuggestionKey(label)
@@ -10291,29 +11844,37 @@ function ordersClientExecutionAddresses(client = {}) {
     client?.adresy,
     client?.executionAddresses,
     client?.serviceAddresses,
-    client?.locations,
-    client?.lokalizacje,
+    client?.sites,
+    client?.buildings,
+    client?.budynki,
     client?.objects,
     client?.obiekty,
-    client?.sites,
-    client?.zones,
-    client?.strefy,
   ].forEach((source) => {
     if (!Array.isArray(source)) {
       return
     }
     source.forEach((item) => {
-      const meta = ordersFirstClientText(item?.name, item?.zone, item?.zoneName, item?.label, 'Adres klienta')
+      if (ordersValueLooksLikeZoneLocation(item)) {
+        return
+      }
+      const meta = ordersFirstClientText(item?.buildingName, item?.objectName, item?.siteName, item?.name, item?.label, 'Adres klienta')
       ordersAddClientExecutionAddress(rows, item, meta)
+    })
+  })
+
+  ;[client?.locations, client?.lokalizacje].forEach((source) => {
+    if (!Array.isArray(source)) {
+      return
+    }
+    source.forEach((item) => {
+      ordersAddClientExecutionAddress(rows, ordersBuildingAddressFromValue(item), '')
     })
   })
 
   ;(Array.isArray(appState.zones) ? appState.zones : [])
     .filter((zone) => ordersZoneMatchesClient(zone, client))
     .forEach((zone) => {
-      const meta = ordersFirstClientText(zone?.name, zone?.zone, zone?.zoneName, 'Obiekt klienta')
-      const value = ordersFirstClientText(zone?.location, zone?.lokalizacja, zone?.address, zone?.adres)
-      ordersAddClientExecutionAddress(rows, value || zone, meta)
+      ordersAddClientExecutionAddress(rows, ordersBuildingAddressFromValue(zone), '')
     })
 
   ordersStoredClientExecutionAddresses(client).forEach((row) => {
@@ -10663,6 +12224,69 @@ function ordersSyncRepeatSelectPickers(selectId = '') {
   ids.forEach((pickerId) => {
     ordersRenderRepeatSelectPicker(pickerId)
   })
+  ordersSyncRepeatIntervalControls()
+}
+
+function ordersRepeatPresetIsFixed(preset = '') {
+  return ['day', 'week', 'year'].includes(String(preset ?? '').trim())
+}
+
+function ordersRepeatPresetUsesIntervalControls(preset = '') {
+  return ['month', 'interval', 'custom'].includes(String(preset ?? '').trim())
+}
+
+function ordersSyncRepeatIntervalControls() {
+  const preset = ordersReadInputValue('ordersEditRepeatPreset')
+  const custom = document.querySelector('#ordersEditorPanel .orders-schedule-custom')
+  if (!(custom instanceof HTMLElement)) {
+    return
+  }
+  const visible = ordersRepeatPresetUsesIntervalControls(preset)
+  const isMonthlyInterval = preset === 'month'
+  if (isMonthlyInterval) {
+    ordersSetInputValue('ordersEditRepeatUnit', 'month')
+  }
+  custom.classList.toggle('is-monthly-interval', isMonthlyInterval)
+  custom.hidden = !visible
+  custom.setAttribute('aria-hidden', visible ? 'false' : 'true')
+  const monthSuffix = custom.querySelector('[data-orders-repeat-month-suffix]')
+  if (monthSuffix instanceof HTMLElement) {
+    monthSuffix.hidden = !isMonthlyInterval
+  }
+  const unitPicker = custom.querySelector('[data-orders-repeat-select="ordersEditRepeatUnit"]')
+  if (unitPicker instanceof HTMLElement) {
+    unitPicker.hidden = isMonthlyInterval
+    unitPicker.setAttribute('aria-hidden', isMonthlyInterval ? 'true' : 'false')
+  }
+  custom.querySelectorAll('input, select, button').forEach((node) => {
+    if (node instanceof HTMLInputElement || node instanceof HTMLSelectElement || node instanceof HTMLButtonElement) {
+      const isUnitControl = node.id === 'ordersEditRepeatUnit' || Boolean(node.closest('[data-orders-repeat-select="ordersEditRepeatUnit"]'))
+      node.disabled = !visible || (isMonthlyInterval && isUnitControl)
+    }
+  })
+}
+
+function ordersRepeatIntervalFromControls(order = {}) {
+  const preset = ordersReadInputValue('ordersEditRepeatPreset') || ordersRepeatPresetFromOrder(order)
+  if (preset === 'month') {
+    return {
+      repeatPreset: 'month',
+      repeatEvery: Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || Number(order.repeatEvery) || 1)),
+      repeatUnit: 'month',
+    }
+  }
+  if (ordersRepeatPresetIsFixed(preset)) {
+    return {
+      repeatPreset: preset,
+      repeatEvery: 1,
+      repeatUnit: preset,
+    }
+  }
+  return {
+    repeatPreset: preset || 'interval',
+    repeatEvery: Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || Number(order.repeatEvery) || 1)),
+    repeatUnit: ordersReadInputValue('ordersEditRepeatUnit') || order.repeatUnit || 'week',
+  }
 }
 
 function ordersRepeatSelectPickerOptions(selectId = '') {
@@ -10799,6 +12423,142 @@ function ordersDefaultEndTime(startTime = '08:00') {
   return calendarMinutesToTime(Math.min(startMinutes + 120, 23 * 60)) || '10:00'
 }
 
+function ordersPrepareTimeInput(input) {
+  if (!(input instanceof HTMLInputElement)) {
+    return null
+  }
+  const isTimeInput = input.type === 'time' || input.classList.contains('orders-time-input')
+  if (!isTimeInput) {
+    return null
+  }
+  if (input.type === 'time') {
+    try {
+      input.type = 'text'
+    } catch {
+      // Keep the field usable if the browser refuses changing the type.
+    }
+  }
+  input.classList.add('orders-time-input')
+  input.inputMode = 'numeric'
+  input.autocomplete = 'off'
+  input.placeholder = 'hh:mm'
+  input.readOnly = true
+  input.setAttribute('aria-haspopup', 'dialog')
+  return input
+}
+
+function ordersEnhanceTimeInputs(root = document) {
+  const scope = root && typeof root.querySelectorAll === 'function' ? root : document
+  scope.querySelectorAll('input[type="time"], input.orders-time-input').forEach((input) => ordersPrepareTimeInput(input))
+}
+
+function ordersTimeParts(value = '', fallback = '08:00') {
+  const normalized = ordersNormalizeTimeField(value, ordersNormalizeTimeField(fallback, '08:00'))
+  const [hour = '08', minute = '00'] = normalized.split(':')
+  return {
+    hour: Math.min(23, Math.max(0, Math.floor(Number(hour) || 0))),
+    minute: Math.min(59, Math.max(0, Math.floor(Number(minute) || 0))),
+  }
+}
+
+function ordersEnsureTimePicker() {
+  let picker = document.getElementById('ordersTimePicker')
+  if (picker instanceof HTMLElement) {
+    return picker
+  }
+  picker = document.createElement('div')
+  picker.id = 'ordersTimePicker'
+  picker.className = 'orders-time-picker'
+  picker.hidden = true
+  const hours = Array.from({ length: 24 }, (_, value) => value)
+  const minutes = Array.from({ length: 60 }, (_, value) => value)
+  picker.innerHTML = `
+    <div class="orders-time-picker-panel" role="dialog" aria-label="Wybierz godzinę">
+      <div class="orders-time-picker-columns">
+        <div class="orders-time-picker-column" data-orders-time-hours>
+          ${hours.map((value) => `<button type="button" data-orders-time-hour="${value}">${escapeHtml(pad2(value))}</button>`).join('')}
+        </div>
+        <div class="orders-time-picker-column" data-orders-time-minutes>
+          ${minutes.map((value) => `<button type="button" data-orders-time-minute="${value}">${escapeHtml(pad2(value))}</button>`).join('')}
+        </div>
+      </div>
+      <div class="orders-time-picker-actions">
+        <button class="orders-time-picker-cancel" type="button" data-orders-time-cancel>Anuluj</button>
+        <button class="orders-time-picker-ok" type="button" data-orders-time-ok>OK</button>
+      </div>
+    </div>
+  `
+  document.body.append(picker)
+  return picker
+}
+
+function ordersSetTimePickerSelection(hour = 0, minute = 0) {
+  ordersTimePickerHour = Math.min(23, Math.max(0, Math.floor(Number(hour) || 0)))
+  ordersTimePickerMinute = Math.min(59, Math.max(0, Math.floor(Number(minute) || 0)))
+  const picker = ordersEnsureTimePicker()
+  picker.querySelectorAll('[data-orders-time-hour]').forEach((button) => {
+    button.classList.toggle('is-selected', Number(button.getAttribute('data-orders-time-hour')) === ordersTimePickerHour)
+  })
+  picker.querySelectorAll('[data-orders-time-minute]').forEach((button) => {
+    button.classList.toggle('is-selected', Number(button.getAttribute('data-orders-time-minute')) === ordersTimePickerMinute)
+  })
+  window.requestAnimationFrame(() => {
+    picker.querySelector('[data-orders-time-hour].is-selected')?.scrollIntoView?.({ block: 'center' })
+    picker.querySelector('[data-orders-time-minute].is-selected')?.scrollIntoView?.({ block: 'center' })
+  })
+}
+
+function ordersPositionTimePicker(input) {
+  const picker = ordersEnsureTimePicker()
+  const rect = input.getBoundingClientRect()
+  const margin = 8
+  const width = picker.offsetWidth || 172
+  const height = picker.offsetHeight || 256
+  const left = Math.min(Math.max(margin, rect.left), Math.max(margin, window.innerWidth - width - margin))
+  const belowTop = rect.bottom + 4
+  const aboveTop = rect.top - height - 4
+  const top = belowTop + height + margin <= window.innerHeight ? belowTop : Math.max(margin, aboveTop)
+  picker.style.left = `${Math.round(left)}px`
+  picker.style.top = `${Math.round(top)}px`
+}
+
+function ordersOpenTimePicker(input) {
+  const prepared = ordersPrepareTimeInput(input)
+  if (!prepared) {
+    return
+  }
+  ordersCloseRepeatSelectPickers()
+  ordersHideLocationSuggestions()
+  ordersTimePickerTarget = prepared
+  const fallback = prepared.getAttribute('data-orders-time-fallback') || prepared.value || '08:00'
+  const parts = ordersTimeParts(prepared.value, fallback)
+  const picker = ordersEnsureTimePicker()
+  picker.hidden = false
+  ordersSetTimePickerSelection(parts.hour, parts.minute)
+  ordersPositionTimePicker(prepared)
+}
+
+function ordersCloseTimePicker() {
+  const picker = document.getElementById('ordersTimePicker')
+  if (picker instanceof HTMLElement) {
+    picker.hidden = true
+  }
+  ordersTimePickerTarget = null
+}
+
+function ordersApplyTimePickerSelection() {
+  const input = ordersTimePickerTarget
+  if (!(input instanceof HTMLInputElement)) {
+    ordersCloseTimePicker()
+    return
+  }
+  input.value = `${pad2(ordersTimePickerHour)}:${pad2(ordersTimePickerMinute)}`
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  input.dispatchEvent(new Event('change', { bubbles: true }))
+  ordersCloseTimePicker()
+  input.focus({ preventScroll: true })
+}
+
 function ordersCreateDraftOrder() {
   const startTime = ordersDefaultStartTime()
   const row = 0
@@ -10813,6 +12573,10 @@ function ordersCreateDraftOrder() {
     endTime: ordersDefaultEndTime(startTime),
     accessStartTime: startTime,
     accessEndTime: ordersDefaultEndTime(startTime),
+    accessWindows: [],
+    objectAccessWindows: [],
+    accessTimeWindows: [],
+    buildingAccessWindows: [],
     requiredWorkMinutes: 120,
     serviceWorkMinutes: 120,
     standardWorkMinutes: 120,
@@ -10831,6 +12595,7 @@ function ordersCreateDraftOrder() {
     repeatPreset: 'day',
     repeatEvery: 1,
     repeatUnit: 'day',
+    repeatWeekdays: [...ORDERS_DEFAULT_REPEAT_WEEKDAYS],
     advanceDays: 0,
     price: 0,
     description: '',
@@ -10846,6 +12611,11 @@ function ordersCreateDraftOrder() {
     deviceNotes: [],
     isDraft: true,
     workerComment: '',
+    allowExtendedWork: false,
+    extendedWorkAllowed: false,
+    canExtendWorkTime: false,
+    workerCanExtendWorkTime: false,
+    overtimeAllowed: false,
   }
 }
 
@@ -10865,6 +12635,11 @@ function ordersOpenAddEditor() {
   })
   const draft = ordersCreateDraftOrder()
   ordersSetRepeatCalendarMonthFromDate(draft.dateYmd)
+  appState.ordersObjectPlanCalendarMonth = calendarMonthStart(draft.dateYmd || todayYmd())
+  appState.ordersObjectPlanSelectedZoneKeys = []
+  appState.ordersObjectPlanDayEditorDate = ''
+  appState.ordersObjectPlanZoneWindowOpen = false
+  appState.ordersObjectPlanTaskWindowOpen = false
   appState.calendarTimelineDemoOrders = [draft, ...ordersListSourceOrders().filter((order) => !order?.isDraft)]
   appState.ordersEditingId = draft.id
   appState.ordersEditorMode = 'add'
@@ -11036,6 +12811,10 @@ function ordersLoadGoogleMaps() {
     return Promise.reject(new Error('Google Maps działa tylko w przeglądarce.'))
   }
 
+  if (ordersMapGoogleAuthFailed) {
+    return Promise.reject(new Error('Google Maps odrzuciło klucz API.'))
+  }
+
   if (window.google?.maps?.importLibrary) {
     return Promise.resolve(window.google.maps)
   }
@@ -11063,6 +12842,20 @@ function ordersLoadGoogleMaps() {
     window[callbackName] = () => {
       cleanup()
       resolve(window.google.maps)
+    }
+
+    window.gm_authFailure = () => {
+      cleanup()
+      ordersMapGoogleAuthFailed = true
+      ordersGoogleMapsLoaderPromise = null
+      reject(new Error('Google Maps odrzuciło klucz API.'))
+      if (appState.currentRoute === 'ordersMap') {
+        const firstAddress = ordersMapVisibleOrders()
+          .map((order) => ordersTimelineAddressLabel(order))
+          .find((address) => address && address !== '-')
+        ordersMapFallbackIframe(firstAddress || 'Polska')
+        ordersMapSetNotice('Google Maps odrzuciło klucz API. Sprawdź Maps JavaScript API, billing i ograniczenia domeny klucza.', true)
+      }
     }
 
     script.async = true
@@ -11568,6 +13361,13 @@ function ordersScheduleModeForOrder(order = {}) {
   return String(order?.type ?? '').trim() === 'cyclic' || String(order?.scheduleMode ?? '').trim() === 'repeat' ? 'repeat' : 'once'
 }
 
+function ordersRepeatEndDateForOrder(order = {}) {
+  return ordersNormalizeDateField(
+    order?.repeatUntil ?? order?.repeatEndDate ?? order?.recurrenceEndDate ?? order?.seriesEndDate ?? order?.repeatUntilYmd,
+    '',
+  )
+}
+
 function ordersSetScheduleModeValue(mode = 'once') {
   const normalized = mode === 'repeat' ? 'repeat' : 'once'
   document.querySelectorAll('#ordersEditorPanel input[name="ordersScheduleMode"]').forEach((input) => {
@@ -11575,6 +13375,27 @@ function ordersSetScheduleModeValue(mode = 'once') {
       input.checked = input.value === normalized
     }
   })
+}
+
+function ordersApplyScheduleModeDateDefaults(order = {}, mode = 'once') {
+  const normalized = mode === 'repeat' ? 'repeat' : 'once'
+  const today = todayYmd()
+  const currentStart = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), order.dateYmd || today)
+  const nextStart = normalized === 'repeat' ? currentStart : today
+  const nextEnd = normalized === 'repeat' ? '' : today
+
+  ordersSetInputValue('ordersEditStart', nextStart)
+  ordersSetInputValue('ordersScheduleStartDate', nextStart)
+  ordersSetInputValue('ordersEditEnd', nextEnd)
+  ordersSetInputValue('ordersScheduleEndDate', nextEnd)
+
+  order.dateYmd = nextStart
+  order.endDateYmd = normalized === 'repeat' ? nextStart : nextEnd
+  order.validUntil = normalized === 'repeat' ? '' : nextEnd
+  order.repeatUntil = ''
+  order.repeatEndDate = ''
+  order.recurrenceEndDate = ''
+  order.seriesEndDate = ''
 }
 
 function ordersSetScheduleRepeatDisabled(disabled = true) {
@@ -11600,9 +13421,13 @@ function ordersSetScheduleRepeatDisabled(disabled = true) {
 }
 
 function ordersSyncScheduleTimeLabels(mode = 'once') {
+  const endDateLabel = document.getElementById('ordersEndDateLabel')
   const startLabel = document.getElementById('ordersStartTimeLabel')
   const endLabel = document.getElementById('ordersEndTimeLabel')
   const isRepeat = String(mode ?? '').trim() === 'repeat'
+  if (endDateLabel) {
+    endDateLabel.textContent = isRepeat ? 'Data końca cyklu' : 'Data STOP *'
+  }
   if (startLabel) {
     startLabel.textContent = isRepeat ? 'Dostęp do obiektu od *' : 'Godzina START *'
   }
@@ -11634,7 +13459,10 @@ function ordersRepeatUnitLabel(unit = 'day', every = 1) {
 
 function ordersRepeatPresetFromOrder(order = {}) {
   const preset = String(order?.repeatPreset ?? '').trim()
-  if (['day', 'week', 'month', 'year', 'interval', 'custom'].includes(preset)) {
+  if (preset === 'custom') {
+    return 'interval'
+  }
+  if (['day', 'week', 'month', 'year', 'interval'].includes(preset)) {
     return preset
   }
   const every = Math.max(1, Math.floor(Number(order?.repeatEvery) || 1))
@@ -11642,7 +13470,7 @@ function ordersRepeatPresetFromOrder(order = {}) {
   if (every === 1 && ['day', 'week', 'month', 'year'].includes(unit)) {
     return unit
   }
-  return 'custom'
+  return 'interval'
 }
 
 function ordersWeekdayFromDateKey(dayKey = todayYmd()) {
@@ -11652,12 +13480,38 @@ function ordersWeekdayFromDateKey(dayKey = todayYmd()) {
   return Number.isInteger(day) ? day : 1
 }
 
+function ordersDefaultRepeatWeekdays() {
+  return [...ORDERS_DEFAULT_REPEAT_WEEKDAYS]
+}
+
+function ordersAllRepeatWeekdays() {
+  return [...ORDERS_ALL_REPEAT_WEEKDAYS]
+}
+
+function ordersRepeatOrderUsesAllWeekdays(order = {}) {
+  const preset = ordersRepeatPresetFromOrder(order)
+  const unit = String(order?.repeatUnit ?? preset).trim()
+  return preset === 'day' || unit === 'day'
+}
+
+function ordersRepeatControlsUseAllWeekdays(order = {}) {
+  const preset = ordersReadInputValue('ordersEditRepeatPreset') || ordersRepeatPresetFromOrder(order)
+  const unit = String(ordersReadInputValue('ordersEditRepeatUnit') || order?.repeatUnit || preset).trim()
+  return preset === 'day' || unit === 'day'
+}
+
 function ordersRepeatWeekdaysFromOrder(order = {}) {
+  if (ordersRepeatOrderUsesAllWeekdays(order)) {
+    return ordersAllRepeatWeekdays()
+  }
   const source = Array.isArray(order?.repeatWeekdays) ? order.repeatWeekdays : []
   const weekdays = source
     .map((value) => Number(value))
     .filter((value, index, list) => Number.isInteger(value) && value >= 0 && value <= 6 && list.indexOf(value) === index)
-  return weekdays.length ? weekdays : [ordersWeekdayFromDateKey(order?.dateYmd)]
+  if (weekdays.length) {
+    return weekdays
+  }
+  return ordersScheduleModeForOrder(order) === 'repeat' ? ordersDefaultRepeatWeekdays() : [ordersWeekdayFromDateKey(order?.dateYmd)]
 }
 
 function ordersSetRepeatWeekdayChecks(weekdays = []) {
@@ -11675,9 +13529,399 @@ function ordersReadRepeatWeekdays() {
     .filter((value, index, list) => Number.isInteger(value) && value >= 0 && value <= 6 && list.indexOf(value) === index)
 }
 
+function ordersReadRepeatWeekdaysForMode(mode = 'once') {
+  if (String(mode ?? '').trim() === 'repeat' && ordersRepeatControlsUseAllWeekdays()) {
+    return ordersAllRepeatWeekdays()
+  }
+  const weekdays = ordersReadRepeatWeekdays()
+  return String(mode ?? '').trim() === 'repeat' && !weekdays.length ? ordersDefaultRepeatWeekdays() : weekdays
+}
+
+function ordersWeekdayLabel(weekday = 1) {
+  const value = Number(weekday)
+  return ORDERS_WEEKDAY_LABELS[Number.isInteger(value) ? value : 1] || 'Dzień'
+}
+
+function ordersNormalizeWeekday(value) {
+  const number = Number(value)
+  return Number.isInteger(number) && number >= 0 && number <= 6 ? number : null
+}
+
+function ordersTimeWindowMinutes(startTime = '08:00', endTime = '10:00') {
+  const start = calendarTimelineTimeMinutes(ordersNormalizeTimeField(startTime, '08:00'), 8 * 60)
+  let end = calendarTimelineTimeMinutes(ordersNormalizeTimeField(endTime, ordersDefaultEndTime(startTime)), start + 60)
+  if (end <= start) {
+    end += 1440
+  }
+  return Math.max(15, end - start)
+}
+
+function ordersWeeklyPatternSources(order = {}) {
+  return [
+    order?.weeklyScheduleRules,
+    order?.weeklyPattern,
+    order?.repeatDayRules,
+    order?.dayScheduleRules,
+  ].find((value) => Array.isArray(value)) || []
+}
+
+function ordersNormalizeWeeklyPatternRule(rule = {}, order = {}, weekdayFallback = null) {
+  const weekday = ordersNormalizeWeekday(
+    rule?.weekday ?? rule?.day ?? rule?.repeatWeekday ?? rule?.weekdayIndex ?? weekdayFallback,
+  )
+  if (weekday === null) {
+    return null
+  }
+  const accessStartTime = ordersNormalizeTimeField(
+    rule?.accessStartTime ?? rule?.startTime ?? rule?.fromTime ?? rule?.accessFrom,
+    order.accessStartTime || order.startTime || '08:00',
+  )
+  const accessEndTime = ordersNormalizeTimeField(
+    rule?.accessEndTime ?? rule?.endTime ?? rule?.toTime ?? rule?.accessTo,
+    order.accessEndTime || order.endTime || ordersDefaultEndTime(accessStartTime),
+  )
+  const requiredWorkMinutes = Math.max(
+    15,
+    Math.round(Number(rule?.requiredWorkMinutes ?? rule?.workMinutes ?? rule?.serviceWorkMinutes ?? rule?.minutes) || ordersStoredWorkMinutes(order)),
+  )
+  const requiredPeople = Math.max(
+    1,
+    Math.floor(Number(rule?.requiredPeople ?? rule?.requiredWorkers ?? rule?.workerSlots) || Number(order.requiredPeople) || 1),
+  )
+  return {
+    weekday,
+    day: weekday,
+    label: ordersWeekdayLabel(weekday),
+    accessStartTime,
+    startTime: accessStartTime,
+    accessEndTime,
+    endTime: accessEndTime,
+    requiredWorkMinutes,
+    workMinutes: requiredWorkMinutes,
+    serviceWorkMinutes: requiredWorkMinutes,
+    requiredPeople,
+    requiredWorkers: requiredPeople,
+    workerSlots: requiredPeople,
+  }
+}
+
+function ordersFallbackWeeklyPatternRule(order = {}, weekday = 1) {
+  return ordersNormalizeWeeklyPatternRule(
+    {
+      weekday,
+      accessStartTime: ordersNormalizeTimeField(order.accessStartTime || order.startTime, '08:00'),
+      accessEndTime: ordersNormalizeTimeField(order.accessEndTime || order.endTime, ordersDefaultEndTime(order.startTime)),
+      requiredWorkMinutes: ordersStoredWorkMinutes(order),
+      requiredPeople: Math.max(1, Math.floor(Number(order.requiredPeople ?? order.requiredWorkers ?? order.workerSlots) || 1)),
+    },
+    order,
+    weekday,
+  )
+}
+
+function ordersWeeklyPatternRulesForWeekdays(order = {}, weekdays = []) {
+  const selected = (Array.isArray(weekdays) ? weekdays : [])
+    .map(ordersNormalizeWeekday)
+    .filter((weekday, index, list) => weekday !== null && list.indexOf(weekday) === index)
+  const existing = new Map()
+  ordersWeeklyPatternSources(order).forEach((rule) => {
+    const normalized = ordersNormalizeWeeklyPatternRule(rule, order)
+    if (normalized) {
+      existing.set(normalized.weekday, normalized)
+    }
+  })
+  return selected
+    .map((weekday) => existing.get(weekday) || ordersFallbackWeeklyPatternRule(order, weekday))
+    .filter(Boolean)
+}
+
+function ordersWeeklyPatternEnabledFromControls(order = {}) {
+  const isRepeat = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat'
+  if (!isRepeat) {
+    return false
+  }
+  const preset = ordersReadInputValue('ordersEditRepeatPreset') || ordersRepeatPresetFromOrder(order)
+  if (preset === 'week') {
+    return true
+  }
+  return ['interval', 'custom'].includes(preset) && (ordersReadInputValue('ordersEditRepeatUnit') || order.repeatUnit) === 'week'
+}
+
+function ordersReadWeeklyPatternRules(order = {}) {
+  const rows = [...document.querySelectorAll('#ordersWeeklyPatternRows [data-orders-weekly-pattern-row]')]
+  if (!rows.length) {
+    return []
+  }
+  return rows
+    .map((row) => {
+      const weekday = ordersNormalizeWeekday(row.getAttribute('data-orders-weekday'))
+      if (weekday === null) {
+        return null
+      }
+      const startInput = row.querySelector('[data-orders-weekly-pattern-start]')
+      const endInput = row.querySelector('[data-orders-weekly-pattern-end]')
+      const hoursInput = row.querySelector('[data-orders-weekly-pattern-hours]')
+      const peopleInput = row.querySelector('[data-orders-weekly-pattern-people]')
+      return ordersNormalizeWeeklyPatternRule(
+        {
+          weekday,
+          accessStartTime: startInput instanceof HTMLInputElement ? startInput.value : '',
+          accessEndTime: endInput instanceof HTMLInputElement ? endInput.value : '',
+          requiredWorkMinutes: Math.max(15, Math.round((Number(hoursInput instanceof HTMLInputElement ? hoursInput.value : 0) || 0) * 60)),
+          requiredPeople: peopleInput instanceof HTMLInputElement ? peopleInput.value : 1,
+        },
+        order,
+        weekday,
+      )
+    })
+    .filter(Boolean)
+}
+
+function ordersStoreWeeklyPatternRules(order = {}, rules = []) {
+  const safe = (Array.isArray(rules) ? rules : [])
+    .map((rule) => ordersNormalizeWeeklyPatternRule(rule, order))
+    .filter(Boolean)
+    .sort((left, right) => left.weekday - right.weekday)
+  order.weeklyScheduleRules = safe
+  order.weeklyPattern = safe
+  order.repeatDayRules = safe
+  order.dayScheduleRules = safe
+  return safe
+}
+
+function ordersWeeklyPatternRulesFromControlsForWeekdays(order = {}, weekdays = []) {
+  const currentRules = ordersReadWeeklyPatternRules(order)
+  const sourceOrder = currentRules.length
+    ? {
+        ...order,
+        weeklyScheduleRules: currentRules,
+        weeklyPattern: currentRules,
+        repeatDayRules: currentRules,
+        dayScheduleRules: currentRules,
+      }
+    : order
+  return ordersWeeklyPatternRulesForWeekdays(sourceOrder, weekdays)
+}
+
+function ordersWeeklyPatternAccessMinutes(rule = {}) {
+  return ordersTimeWindowMinutes(rule.accessStartTime || rule.startTime, rule.accessEndTime || rule.endTime)
+}
+
+function ordersWeeklyPatternMinPeople(rule = {}) {
+  const accessMinutes = ordersWeeklyPatternAccessMinutes(rule)
+  const workMinutes = Math.max(15, Math.round(Number(rule.requiredWorkMinutes ?? rule.workMinutes) || 0))
+  return Math.max(1, Math.ceil(workMinutes / Math.max(15, accessMinutes)))
+}
+
+function ordersWeeklyPatternFitsObjectAccess(order = {}, rule = {}) {
+  const weekday = ordersNormalizeWeekday(rule.weekday ?? rule.day)
+  if (weekday === null) {
+    return true
+  }
+  return ordersAllocationFitsAccess(
+    order,
+    {
+      startTime: rule.accessStartTime || rule.startTime,
+      minutes: ordersTimeWindowMinutes(rule.accessStartTime || rule.startTime, rule.accessEndTime || rule.endTime),
+    },
+    weekday,
+  )
+}
+
+function ordersWeeklyPatternStatus(rule = {}, order = {}) {
+  const people = Math.max(1, Math.floor(Number(rule.requiredPeople ?? rule.workerSlots) || 1))
+  const minPeople = ordersWeeklyPatternMinPeople(rule)
+  if (people < minPeople) {
+    return {
+      kind: 'error',
+      text: `Minimum ${minPeople} os. przy oknie ${ordersFormatWorkMinutes(ordersWeeklyPatternAccessMinutes(rule))}.`,
+    }
+  }
+  if (!ordersWeeklyPatternFitsObjectAccess(order, rule)) {
+    return {
+      kind: 'error',
+      text: 'Poza ogólnym dostępem do obiektu.',
+    }
+  }
+  return {
+    kind: 'ok',
+    text: `${people} os. po ok. ${ordersFormatWorkMinutes(Math.ceil((Number(rule.requiredWorkMinutes) || 0) / people))}.`,
+  }
+}
+
+function ordersRenderWeeklyPatternControls(order = {}) {
+  const panel = document.getElementById('ordersWeeklyPatternPanel')
+  const rows = document.getElementById('ordersWeeklyPatternRows')
+  const summary = document.getElementById('ordersWeeklyPatternSummary')
+  const applyAll = document.getElementById('ordersWeeklyPatternApplyAll')
+  if (!panel || !rows) {
+    return
+  }
+  const visible = ordersWeeklyPatternEnabledFromControls(order)
+  panel.hidden = !visible
+  const isRepeatMode = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat'
+  ordersSetScheduleTimeVisible(!isRepeatMode && !visible)
+  const workload = document.getElementById('ordersWorkloadPanel')
+  if (workload) {
+    workload.hidden = visible || !isRepeatMode
+  }
+  if (!visible) {
+    rows.innerHTML = ''
+    if (summary) summary.textContent = '-'
+    if (applyAll instanceof HTMLButtonElement) applyAll.disabled = true
+    return
+  }
+  const weekdays = ordersReadRepeatWeekdaysForMode('repeat')
+  const rules = ordersWeeklyPatternRulesForWeekdays(order, weekdays)
+  if (summary) {
+    summary.textContent = `${rules.length} dni w tygodniu`
+  }
+  if (applyAll instanceof HTMLButtonElement) {
+    applyAll.disabled = rules.length <= 1
+  }
+  rows.innerHTML = rules
+    .map((rule) => {
+      const status = ordersWeeklyPatternStatus(rule, order)
+      return `
+        <div class="orders-weekly-pattern-row${status.kind === 'error' ? ' is-invalid' : ''}" data-orders-weekly-pattern-row data-orders-weekday="${rule.weekday}">
+          <strong>${escapeHtml(rule.label)}</strong>
+          <label>
+            <span>Dostęp od</span>
+            <input type="time" value="${escapeHtml(rule.accessStartTime)}" data-orders-weekly-pattern-start />
+          </label>
+          <label>
+            <span>Dostęp do</span>
+            <input type="time" value="${escapeHtml(rule.accessEndTime)}" data-orders-weekly-pattern-end />
+          </label>
+          <label>
+            <span>Praca rbh</span>
+            <input type="number" min="0.25" step="0.25" value="${escapeHtml(ordersHoursInputValue(rule.requiredWorkMinutes))}" data-orders-weekly-pattern-hours />
+          </label>
+          <label>
+            <span>Osób</span>
+            <input type="number" min="1" step="1" value="${escapeHtml(String(rule.requiredPeople))}" data-orders-weekly-pattern-people />
+          </label>
+          <small>${escapeHtml(status.text)}</small>
+        </div>
+      `
+    })
+    .join('')
+  ordersEnhanceTimeInputs(rows)
+}
+
+function ordersApplyFirstWeeklyPatternToAll() {
+  const rows = [...document.querySelectorAll('#ordersWeeklyPatternRows [data-orders-weekly-pattern-row]')]
+  if (rows.length <= 1) {
+    return
+  }
+  const first = rows[0]
+  const source = {
+    startTime: first.querySelector('[data-orders-weekly-pattern-start]')?.value || '',
+    endTime: first.querySelector('[data-orders-weekly-pattern-end]')?.value || '',
+    hours: first.querySelector('[data-orders-weekly-pattern-hours]')?.value || '',
+    people: first.querySelector('[data-orders-weekly-pattern-people]')?.value || '',
+  }
+  rows.slice(1).forEach((row) => {
+    const startInput = row.querySelector('[data-orders-weekly-pattern-start]')
+    const endInput = row.querySelector('[data-orders-weekly-pattern-end]')
+    const hoursInput = row.querySelector('[data-orders-weekly-pattern-hours]')
+    const peopleInput = row.querySelector('[data-orders-weekly-pattern-people]')
+    if (startInput instanceof HTMLInputElement) startInput.value = source.startTime
+    if (endInput instanceof HTMLInputElement) endInput.value = source.endTime
+    if (hoursInput instanceof HTMLInputElement) hoursInput.value = source.hours
+    if (peopleInput instanceof HTMLInputElement) peopleInput.value = source.people
+  })
+  const order = ordersFindTimelineOrder(appState.ordersEditingId)
+  if (order) {
+    ordersUpdateOrderScheduleFromControls(order)
+    ordersRefreshObjectPlanScheduleWindow(order, { syncMonth: false })
+    ordersRenderSchedulePreview(order)
+  }
+  showTransientNotice('Zastosowano pierwszy wzorzec do wszystkich dni.')
+}
+
+function ordersWorkAllocationsForWeeklyPatternRule(order = {}, rule = {}) {
+  const resources = calendarTimelineResources()
+  const selectedRows = ordersNormalizeOrderRows(order, resources).filter((row) => !calendarTimelineRowAllowsOverlap(row, resources))
+  const people = Math.max(1, Math.floor(Number(rule.requiredPeople ?? rule.workerSlots) || 1))
+  const minutes = ordersSplitMinutesEvenly(rule.requiredWorkMinutes, people)
+  const startTime = ordersNormalizeTimeField(rule.accessStartTime || rule.startTime, order.startTime || '08:00')
+  return Array.from({ length: people }, (_, index) => {
+    const row = selectedRows[index] ?? 0
+    const hasWorker = selectedRows[index] !== undefined
+    const label = hasWorker ? ordersWorkerRowLabel(row, resources) : `BUFOR ${index + 1}`
+    const itemMinutes = Math.max(15, Math.round(Number(minutes[index]) || 0))
+    const endTime = ordersAllocationEndTimeFromMinutes(startTime, itemMinutes)
+    return {
+      key: `weekly:${rule.weekday}:${index + 1}`,
+      row,
+      type: hasWorker ? 'worker' : 'buffer',
+      label,
+      minutes: itemMinutes,
+      startTime,
+      endTime,
+      planStartTime: startTime,
+      planEndTime: endTime,
+    }
+  })
+}
+
+function ordersWeeklyPatternRuleForDate(order = {}, dayKey = '') {
+  if (calendarTimelineRecurringUnit(order) !== 'week') {
+    return null
+  }
+  const weekday = calendarTimelineDateWeekday(dayKey)
+  if (weekday < 0) {
+    return null
+  }
+  const rules = ordersWeeklyPatternSources(order)
+    .map((rule) => ordersNormalizeWeeklyPatternRule(rule, order))
+    .filter(Boolean)
+  return rules.find((rule) => rule.weekday === weekday) || null
+}
+
+function ordersApplyWeeklyPatternRuleToOccurrence(order = {}, occurrenceDay = '') {
+  const rule = ordersWeeklyPatternRuleForDate(order, occurrenceDay)
+  if (!rule) {
+    return order
+  }
+  const startTime = ordersNormalizeTimeField(rule.accessStartTime, order.startTime || '08:00')
+  const endTime = ordersNormalizeTimeField(rule.accessEndTime, order.endTime || ordersDefaultEndTime(startTime))
+  const endDateYmd =
+    calendarTimelineTimeMinutes(endTime, 0) <= calendarTimelineTimeMinutes(startTime, 0)
+      ? calendarAddDays(occurrenceDay, 1)
+      : occurrenceDay
+  const workAllocations = ordersWorkAllocationsForWeeklyPatternRule(order, rule)
+  return {
+    ...order,
+    dateYmd: occurrenceDay,
+    startTime,
+    endDateYmd,
+    endTime,
+    validUntil: endDateYmd,
+    accessStartTime: startTime,
+    accessEndTime: endTime,
+    requiredWorkMinutes: rule.requiredWorkMinutes,
+    serviceWorkMinutes: rule.requiredWorkMinutes,
+    standardWorkMinutes: rule.requiredWorkMinutes,
+    requiredPeople: rule.requiredPeople,
+    requiredWorkers: rule.requiredPeople,
+    workerSlots: rule.requiredPeople,
+    workAllocations,
+    workerAllocations: workAllocations,
+    weeklyPatternRule: rule,
+  }
+}
+
 function ordersSyncScheduleMirrorFields(order = {}) {
+  const mode = ordersScheduleModeForOrder(order)
   ordersSetInputValue('ordersScheduleStartDate', ordersNormalizeDateField(order.dateYmd, todayYmd()))
-  ordersSetInputValue('ordersScheduleEndDate', ordersNormalizeDateField(order.endDateYmd || order.validUntil || order.dateYmd, order.dateYmd || todayYmd()))
+  ordersSetInputValue(
+    'ordersScheduleEndDate',
+    mode === 'repeat'
+      ? ordersRepeatEndDateForOrder(order)
+      : ordersNormalizeDateField(order.endDateYmd || order.validUntil || order.dateYmd, order.dateYmd || todayYmd()),
+  )
   ordersSetInputValue('ordersScheduleStartTime', ordersNormalizeTimeField(order.startTime, '08:00'))
   ordersSetInputValue('ordersScheduleEndTime', ordersNormalizeTimeField(order.endTime, ordersDefaultEndTime(order.startTime)))
 }
@@ -11687,17 +13931,19 @@ function ordersSyncScheduleControls(order = {}) {
   ordersSetScheduleModeValue(mode)
   ordersSetScheduleRepeatDisabled(mode !== 'repeat')
   ordersSyncScheduleTimeLabels(mode)
-  ordersSetScheduleTimeVisible(true)
+  ordersSetScheduleTimeVisible(mode !== 'repeat')
   ordersSyncScheduleMirrorFields(order)
   ordersSetInputValue('ordersEditWorkHours', ordersHoursInputValue(ordersStoredWorkMinutes(order)))
   ordersSetInputValue('ordersEditRequiredPeople', order.requiredPeople || order.requiredWorkers || order.workerSlots || 1)
-  ordersSetInputValue('ordersEditRepeatPreset', ordersRepeatPresetFromOrder(order))
-  ordersSetInputValue('ordersEditRepeatEvery', order.repeatEvery || 1)
-  ordersSetInputValue('ordersEditRepeatUnit', order.repeatUnit || 'week')
-  ordersSetInputValue('ordersEditRepeatAfterDays', order.repeatAfterDays || 0)
+  const repeatPreset = ordersRepeatPresetFromOrder(order)
+  ordersSetInputValue('ordersEditRepeatPreset', repeatPreset)
+  ordersSetInputValue('ordersEditRepeatEvery', ordersRepeatPresetIsFixed(repeatPreset) ? 1 : order.repeatEvery || 1)
+  ordersSetInputValue('ordersEditRepeatUnit', repeatPreset === 'month' ? 'month' : ordersRepeatPresetIsFixed(repeatPreset) ? repeatPreset : order.repeatUnit || 'week')
   ordersSetRepeatWeekdayChecks(ordersRepeatWeekdaysFromOrder(order))
   ordersSyncRepeatSelectPickers()
+  ordersRenderAccessWindowsControls(order)
   ordersRenderWorkAllocationControls(order)
+  ordersRenderWeeklyPatternControls(order)
 }
 
 function ordersApplyRepeatPresetToControls(preset = '') {
@@ -11729,31 +13975,68 @@ function ordersSyncMainScheduleFromMirror(targetId = '') {
 function ordersUpdateOrderScheduleFromControls(order = {}) {
   const mode = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat' ? 'repeat' : 'once'
   const selectedType = ordersReadInputValue('ordersEditType') || order.type || 'individual'
+  const startDay = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), order.dateYmd || todayYmd())
+  const rawEndDate = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), '')
   order.scheduleMode = mode
   order.type = mode === 'repeat' ? 'cyclic' : selectedType === 'cyclic' ? 'individual' : selectedType
-  order.dateYmd = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), order.dateYmd || todayYmd())
-  order.endDateYmd = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), order.endDateYmd || order.dateYmd)
-  order.validUntil = order.endDateYmd
+  order.dateYmd = startDay
+  order.endDateYmd = mode === 'repeat' ? startDay : ordersNormalizeDateField(rawEndDate, order.endDateYmd || startDay)
+  order.validUntil = mode === 'repeat' ? '' : order.endDateYmd
+  order.repeatUntil = mode === 'repeat' ? rawEndDate : ''
+  order.repeatEndDate = mode === 'repeat' ? rawEndDate : ''
+  order.recurrenceEndDate = mode === 'repeat' ? rawEndDate : ''
+  order.seriesEndDate = mode === 'repeat' ? rawEndDate : ''
   order.startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), order.startTime || '08:00')
   order.endTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(order.startTime))
   order.accessStartTime = order.startTime
   order.accessEndTime = order.endTime
+  if (mode === 'repeat') {
+    ordersStoreAccessWindows(order, ordersEnsureAccessWindowsFromControls(order))
+  } else {
+    ordersClearAccessWindows(order)
+  }
   order.requiredWorkMinutes = mode === 'repeat' ? ordersReadWorkMinutes(order) : calendarTimelineOrderDurationMinutes(order)
   order.serviceWorkMinutes = order.requiredWorkMinutes
   order.standardWorkMinutes = order.requiredWorkMinutes
   order.requiredPeople = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRequiredPeople')) || Number(order.requiredPeople) || 1))
   order.workerSlots = order.requiredPeople
-  if (mode === 'repeat') {
-    ordersStoreWorkAllocations(order, ordersReadWorkAllocationsFromControls(order))
+  ordersAssignExtendedWorkFlags(order, ordersReadExtendedWorkAllowed(order))
+  const repeatInterval = ordersRepeatIntervalFromControls(order)
+  const repeatWeekdays = ordersReadRepeatWeekdaysForMode(mode)
+  const weeklyPatternEnabled = mode === 'repeat' && repeatInterval.repeatUnit === 'week'
+  const weeklyRules = weeklyPatternEnabled ? ordersWeeklyPatternRulesFromControlsForWeekdays(order, repeatWeekdays) : []
+  if (weeklyRules.length) {
+    const firstRule = weeklyRules[0]
+    order.startTime = firstRule.accessStartTime
+    order.endTime = firstRule.accessEndTime
+    order.accessStartTime = firstRule.accessStartTime
+    order.accessEndTime = firstRule.accessEndTime
+    order.requiredWorkMinutes = firstRule.requiredWorkMinutes
+    order.serviceWorkMinutes = firstRule.requiredWorkMinutes
+    order.standardWorkMinutes = firstRule.requiredWorkMinutes
+    order.requiredPeople = firstRule.requiredPeople
+    order.workerSlots = firstRule.requiredPeople
+    ordersStoreWorkAllocations(order, ordersWorkAllocationsForWeeklyPatternRule(order, firstRule))
+    ordersStoreWeeklyPatternRules(order, weeklyRules)
+  } else {
+    ordersStoreWeeklyPatternRules(order, [])
+    if (mode === 'repeat') {
+      ordersStoreWorkAllocations(order, ordersReadWorkAllocationsFromControls(order))
+    }
   }
-  order.repeatPreset = mode === 'repeat' ? ordersReadInputValue('ordersEditRepeatPreset') || ordersRepeatPresetFromOrder(order) : 'none'
-  order.repeatEvery = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || 1))
-  order.repeatUnit = ordersReadInputValue('ordersEditRepeatUnit') || 'week'
-  order.repeatAfterDays = Math.max(0, Math.floor(Number(ordersReadInputValue('ordersEditRepeatAfterDays')) || 0))
-  order.repeatWeekdays = ordersReadRepeatWeekdays()
+  order.repeatPreset = mode === 'repeat' ? repeatInterval.repeatPreset : 'none'
+  order.repeatEvery = repeatInterval.repeatEvery
+  order.repeatUnit = repeatInterval.repeatUnit
+  order.repeatAfterDays = 0
+  order.repeatWeekdays = weeklyRules.length ? weeklyRules.map((rule) => rule.weekday) : repeatWeekdays
+  ordersSetRepeatWeekdayChecks(order.repeatWeekdays)
   ordersSetInputValue('ordersEditType', order.type)
   ordersSetScheduleRepeatDisabled(mode !== 'repeat')
   ordersSyncScheduleTimeLabels(mode)
+  ordersSetScheduleTimeVisible(mode !== 'repeat')
+  ordersSyncRepeatIntervalControls()
+  ordersRenderAccessWindowsControls(order)
+  ordersRenderWeeklyPatternControls(order)
 }
 
 function ordersRenderSchedulePreview(order = {}) {
@@ -11761,16 +14044,18 @@ function ordersRenderSchedulePreview(order = {}) {
   if (preview) {
     const client = ordersTimelineClientLabel(order)
     const start = ordersNormalizeDateField(order.dateYmd, todayYmd())
-    const end = ordersNormalizeDateField(order.endDateYmd || order.validUntil || start, start)
+    const isRepeat = ordersScheduleModeForOrder(order) === 'repeat'
+    const end = isRepeat ? start : ordersNormalizeDateField(order.endDateYmd || order.validUntil || start, start)
+    const repeatEnd = ordersRepeatEndDateForOrder(order)
     const startTime = ordersNormalizeTimeField(order.startTime, '08:00')
     const endTime = ordersNormalizeTimeField(order.endTime, ordersDefaultEndTime(startTime))
-    const isRepeat = ordersScheduleModeForOrder(order) === 'repeat'
     const typeLabel = isRepeat ? 'Zlecenie cykliczne' : 'Zlecenie jednorazowe'
     const cadenceLabel = isRepeat ? ordersRepeatUnitLabel(order.repeatUnit, order.repeatEvery) : 'Bez powtarzania'
     const workerLabel = ordersPreviewWorkerLabel(order)
     const workLabel = isRepeat
       ? `Dostęp ${startTime}-${endTime} · praca ${ordersFormatWorkMinutes(ordersReadWorkMinutes(order))}`
       : ''
+    const repeatEndLabel = isRepeat ? (repeatEnd ? `do ${repeatEnd}` : 'bez daty końca') : ''
     preview.innerHTML = `
       <div class="orders-schedule-preview-row orders-schedule-preview-row--summary">
         <span class="orders-schedule-preview-icon" aria-hidden="true">
@@ -11790,7 +14075,7 @@ function ordersRenderSchedulePreview(order = {}) {
           <span><em>Stop</em><strong>${escapeHtml(`${end} ${endTime}`)}</strong></span>
         </div>
         <div class="orders-schedule-preview-note${isRepeat ? '' : ' is-muted'}">
-          ${escapeHtml(isRepeat && workLabel ? `${cadenceLabel} · ${workLabel}` : cadenceLabel)}
+          ${escapeHtml(isRepeat && workLabel ? `${cadenceLabel} · ${repeatEndLabel} · ${workLabel}` : cadenceLabel)}
         </div>
       </div>
     `
@@ -11824,33 +14109,66 @@ function ordersBuildRepeatCalendarOrder(order = {}) {
   const mode = checkedMode ? (checkedMode === 'repeat' ? 'repeat' : 'once') : ordersScheduleModeForOrder(order)
   const selectedType = ordersReadInputValue('ordersEditType') || order.type || 'individual'
   const start = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), order.dateYmd || todayYmd())
-  const end = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), order.endDateYmd || order.validUntil || start)
+  const rawEnd = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), '')
+  const end = mode === 'repeat' ? start : ordersNormalizeDateField(rawEnd, order.endDateYmd || order.validUntil || start)
+  const repeatEnd = mode === 'repeat' ? rawEnd : ''
   const startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), order.startTime || '08:00')
-  const repeatEvery = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || Number(order.repeatEvery) || 1))
-  const repeatUnit = ordersReadInputValue('ordersEditRepeatUnit') || order.repeatUnit || 'week'
-  const repeatWeekdays = ordersReadRepeatWeekdays()
+  const repeatInterval = ordersRepeatIntervalFromControls(order)
+  const repeatWeekdays = ordersReadRepeatWeekdaysForMode(mode)
+  const weeklyRules = mode === 'repeat' && repeatInterval.repeatUnit === 'week'
+    ? ordersWeeklyPatternRulesFromControlsForWeekdays(order, repeatWeekdays)
+    : []
+  const firstWeeklyRule = weeklyRules[0] || null
+  const accessWindows = mode === 'repeat' ? ordersEnsureAccessWindowsFromControls(order) : []
+  const firstAccessWindow = accessWindows[0] || null
+  const effectiveStartTime = firstWeeklyRule?.accessStartTime || firstAccessWindow?.accessStartTime || startTime
+  const effectiveEndTime =
+    firstWeeklyRule?.accessEndTime ||
+    firstAccessWindow?.accessEndTime ||
+    ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(startTime))
+  const effectiveWorkMinutes = firstWeeklyRule?.requiredWorkMinutes || (mode === 'repeat' ? ordersReadWorkMinutes(order) : calendarTimelineOrderDurationMinutes(order))
+  const effectivePeople = firstWeeklyRule?.requiredPeople || Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRequiredPeople')) || Number(order.requiredPeople) || 1))
+  const effectiveAllocations = firstWeeklyRule
+    ? ordersWorkAllocationsForWeeklyPatternRule(order, firstWeeklyRule)
+    : mode === 'repeat'
+      ? ordersReadWorkAllocationsFromControls(order)
+      : []
+  const allowExtendedWork = ordersReadExtendedWorkAllowed(order)
 
-  return {
+  return ordersAssignExtendedWorkFlags({
     ...order,
     scheduleMode: mode,
     type: mode === 'repeat' ? 'cyclic' : selectedType === 'cyclic' ? 'individual' : selectedType,
     dateYmd: start,
     endDateYmd: end,
-    validUntil: end,
-    startTime,
-    endTime: ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(startTime)),
-    accessStartTime: startTime,
-    accessEndTime: ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(startTime)),
-    requiredWorkMinutes: mode === 'repeat' ? ordersReadWorkMinutes(order) : calendarTimelineOrderDurationMinutes(order),
-    serviceWorkMinutes: mode === 'repeat' ? ordersReadWorkMinutes(order) : calendarTimelineOrderDurationMinutes(order),
-    requiredPeople: Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRequiredPeople')) || Number(order.requiredPeople) || 1)),
-    workAllocations: mode === 'repeat' ? ordersReadWorkAllocationsFromControls(order) : [],
-    repeatPreset: mode === 'repeat' ? ordersReadInputValue('ordersEditRepeatPreset') || ordersRepeatPresetFromOrder(order) : 'none',
-    repeatEvery,
-    repeatUnit,
-    repeatAfterDays: Math.max(0, Math.floor(Number(ordersReadInputValue('ordersEditRepeatAfterDays')) || Number(order.repeatAfterDays) || 0)),
-    repeatWeekdays,
-  }
+    validUntil: mode === 'repeat' ? '' : end,
+    repeatUntil: repeatEnd,
+    repeatEndDate: repeatEnd,
+    recurrenceEndDate: repeatEnd,
+    seriesEndDate: repeatEnd,
+    startTime: effectiveStartTime,
+    endTime: effectiveEndTime,
+    accessStartTime: effectiveStartTime,
+    accessEndTime: effectiveEndTime,
+    requiredWorkMinutes: effectiveWorkMinutes,
+    serviceWorkMinutes: effectiveWorkMinutes,
+    requiredPeople: effectivePeople,
+    workAllocations: effectiveAllocations,
+    workerAllocations: effectiveAllocations,
+    repeatPreset: mode === 'repeat' ? repeatInterval.repeatPreset : 'none',
+    repeatEvery: repeatInterval.repeatEvery,
+    repeatUnit: repeatInterval.repeatUnit,
+    repeatAfterDays: 0,
+    repeatWeekdays: weeklyRules.length ? weeklyRules.map((rule) => rule.weekday) : repeatWeekdays,
+    accessWindows,
+    objectAccessWindows: accessWindows,
+    accessTimeWindows: accessWindows,
+    buildingAccessWindows: accessWindows,
+    weeklyScheduleRules: weeklyRules,
+    weeklyPattern: weeklyRules,
+    repeatDayRules: weeklyRules,
+    dayScheduleRules: weeklyRules,
+  }, allowExtendedWork)
 }
 
 function ordersMoveRepeatCalendarMonth(direction = 1) {
@@ -12118,7 +14436,11 @@ function ordersRenderEditor(order = {}) {
   }
 
   const startDay = ordersNormalizeDateField(order.dateYmd, todayYmd())
-  const validUntil = ordersNormalizeDateField(order.validUntil || order.dateTo || order.endValidDate || order.endDateYmd || startDay, startDay)
+  const scheduleMode = ordersScheduleModeForOrder(order)
+  const validUntil =
+    scheduleMode === 'repeat'
+      ? ordersRepeatEndDateForOrder(order)
+      : ordersNormalizeDateField(order.validUntil || order.dateTo || order.endValidDate || order.endDateYmd || startDay, startDay)
   const nextDate = ordersNormalizeDateField(order.nextDate || startDay, startDay)
   const type = String(order.type ?? 'other').trim() || 'other'
   const duration = ordersDurationHours(order)
@@ -12147,8 +14469,8 @@ function ordersRenderEditor(order = {}) {
     lng: order.lng || order.longitude || '',
     mapUrl: order.mapUrl || order.googleMapsUrl || ordersGoogleMapsSearchUrl(mapAddress),
   })
-  ordersSetInputValue('ordersEditRepeatEvery', order.repeatEvery || 7)
-  ordersSetInputValue('ordersEditRepeatUnit', order.repeatUnit || 'day')
+  ordersSetInputValue('ordersEditRepeatEvery', order.repeatEvery || 1)
+  ordersSetInputValue('ordersEditRepeatUnit', order.repeatUnit || 'week')
   ordersSetInputValue('ordersEditPriority', order.priority || 'Normalny')
   ordersSetInputValue('ordersEditAdvance', order.advanceDays || 0)
   ordersSetInputValue('ordersEditType', ['individual', 'cyclic', 'renovation', 'windows', 'other'].includes(type) ? type : 'other')
@@ -12159,6 +14481,7 @@ function ordersRenderEditor(order = {}) {
   ordersSetInputValue('ordersEditPhone', order.phone || '')
   ordersSetInputValue('ordersEditDescription', order.description || order.title || '')
   ordersSetInputValue('ordersEditWorkerComment', ordersWorkerOnlyComment(order))
+  ordersSetCheckboxValue('ordersEditAllowExtendedWork', ordersExtendedWorkAllowed(order))
   ordersSetInputValue('ordersEditClientName', order.clientName || order.clientLabel || selectedClientData.clientName || '')
   ordersSetInputValue('ordersEditNip', order.nip || order.clientNip || selectedClientData.nip || '')
   ordersSetInputValue('ordersEditStreet', order.street || order.clientStreet || selectedClientData.street || '')
@@ -12169,6 +14492,7 @@ function ordersRenderEditor(order = {}) {
   ordersSetInputValue('ordersEditEmail', order.email || order.clientEmail || selectedClientData.email || '')
   ordersRenderWorkerChecklist(order)
   ordersRenderDeviceNotes(order)
+  ordersRenderObjectPlan(order)
   ordersRenderSubtasksAndSupplies(order)
   ordersSyncScheduleControls(order)
   ordersRenderSchedulePreview(order)
@@ -12188,6 +14512,11 @@ function ordersOpenEditor(orderId) {
   appState.ordersEditorMode = 'edit'
   appState.ordersEditorTab = 'basic'
   ordersSetRepeatCalendarMonthFromDate(order.dateYmd)
+  appState.ordersObjectPlanCalendarMonth = calendarMonthStart(order.dateYmd || todayYmd())
+  appState.ordersObjectPlanSelectedZoneKeys = []
+  appState.ordersObjectPlanDayEditorDate = ''
+  appState.ordersObjectPlanZoneWindowOpen = false
+  appState.ordersObjectPlanTaskWindowOpen = false
   renderOrdersView()
 }
 
@@ -12202,6 +14531,11 @@ function ordersOpenEditorFromCalendar(orderId) {
   appState.ordersEditorMode = 'edit'
   appState.ordersEditorTab = 'basic'
   ordersSetRepeatCalendarMonthFromDate(ordersFindTimelineOrder(id)?.dateYmd)
+  appState.ordersObjectPlanCalendarMonth = calendarMonthStart(ordersFindTimelineOrder(id)?.dateYmd || todayYmd())
+  appState.ordersObjectPlanSelectedZoneKeys = []
+  appState.ordersObjectPlanDayEditorDate = ''
+  appState.ordersObjectPlanZoneWindowOpen = false
+  appState.ordersObjectPlanTaskWindowOpen = false
   document.querySelector('[data-route="orders"]')?.click()
   window.setTimeout(() => {
     renderOrdersView()
@@ -12258,7 +14592,7 @@ function ordersShowList() {
   renderOrdersView()
 }
 
-function ordersSaveEditor() {
+async function ordersSaveEditor() {
   const order = ordersFindTimelineOrder(appState.ordersEditingId)
   if (!order) {
     showTransientNotice('Nie znaleziono zlecenia do zapisu.', 'error')
@@ -12270,32 +14604,89 @@ function ordersSaveEditor() {
   const dateYmd = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), ordersNormalizeDateField(order.dateYmd, todayYmd()))
   const startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), ordersNormalizeTimeField(order.startTime, '08:00'))
   const startMinutes = calendarTimelineTimeMinutes(startTime, 8 * 60)
-  const explicitEndDate = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), dateYmd)
+  const selectedType = String(ordersReadInputValue('ordersEditType') || order.type || 'individual').trim()
+  const scheduleMode =
+    document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat' ||
+    selectedType === 'cyclic'
+      ? 'repeat'
+      : 'once'
+  const repeatInterval = ordersRepeatIntervalFromControls(order)
+  const usesWeeklyPattern = scheduleMode === 'repeat' && repeatInterval.repeatUnit === 'week'
+  const rawEndDate = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), '')
+  const repeatEndDate = scheduleMode === 'repeat' ? rawEndDate : ''
+  const explicitEndDate = scheduleMode === 'repeat' ? dateYmd : ordersNormalizeDateField(rawEndDate, dateYmd)
   const explicitEndTime = calendarNormalizeTimeValue(ordersReadInputValue('ordersEditEndTime'))
   const durationHours = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditDurationHours')) || ordersDurationHours(order)))
   const totalEndMinutes = startMinutes + durationHours * 60
   let endDateYmd = explicitEndTime ? explicitEndDate : calendarAddDays(dateYmd, Math.floor(totalEndMinutes / 1440))
   let endTime = explicitEndTime || calendarMinutesToTime(totalEndMinutes % 1440) || '23:59'
-  if (explicitEndDate < dateYmd) {
+  if (scheduleMode === 'repeat' && repeatEndDate && repeatEndDate < dateYmd) {
+    showTransientNotice('Data końca cyklu nie może być wcześniejsza niż data START.', 'error')
+    return
+  }
+  if (scheduleMode !== 'repeat' && explicitEndDate < dateYmd) {
     showTransientNotice('Data zakończenia pierwszego zlecenia nie może być wcześniejsza niż data rozpoczęcia.', 'error')
     return
   }
-  if (endDateYmd === dateYmd && calendarTimelineTimeMinutes(endTime, startMinutes + 60) <= startMinutes) {
+  if (!usesWeeklyPattern && endDateYmd === dateYmd && calendarTimelineTimeMinutes(endTime, startMinutes + 60) <= startMinutes) {
     showTransientNotice('Godzina STOP musi być późniejsza niż godzina START.', 'error')
     return
   }
   const selectedRows = ordersReadSelectedWorkerRows()
   const row = Number(ordersReadInputValue('ordersEditWorker'))
   const safeRow = selectedRows[0] ?? (Number.isInteger(row) && row >= 0 ? row : Number(order.row ?? 0))
-  const selectedType = String(ordersReadInputValue('ordersEditType') || order.type || 'individual').trim()
-  const scheduleMode = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat' || selectedType === 'cyclic' ? 'repeat' : 'once'
   const type = scheduleMode === 'repeat' ? 'cyclic' : selectedType === 'cyclic' ? 'individual' : selectedType
-  const requiredWorkMinutes = scheduleMode === 'repeat' ? ordersReadWorkMinutes(order) : calendarTimelineOrderDurationMinutes(order)
-  const requiredPeople = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRequiredPeople')) || Number(order.requiredPeople) || 1))
-  const workAllocations = scheduleMode === 'repeat' ? ordersReadWorkAllocationsFromControls(order) : []
+  const selectedRepeatWeekdays = ordersReadRepeatWeekdaysForMode(scheduleMode)
+  const weeklyRules = scheduleMode === 'repeat' && repeatInterval.repeatUnit === 'week'
+    ? ordersWeeklyPatternRulesFromControlsForWeekdays(order, selectedRepeatWeekdays)
+    : []
+  const firstWeeklyRule = weeklyRules[0] || null
+  const accessWindows = scheduleMode === 'repeat' ? ordersEnsureAccessWindowsFromControls(order) : []
+  const firstAccessWindow = accessWindows[0] || null
+  const allocationBaseOrder = {
+    ...order,
+    accessWindows,
+    objectAccessWindows: accessWindows,
+    accessTimeWindows: accessWindows,
+    buildingAccessWindows: accessWindows,
+    assignedRows: selectedRows.length ? selectedRows : [safeRow],
+    row: safeRow,
+  }
+  const requiredWorkMinutes = firstWeeklyRule
+    ? firstWeeklyRule.requiredWorkMinutes
+    : scheduleMode === 'repeat'
+      ? ordersReadWorkMinutes(order)
+      : calendarTimelineOrderDurationMinutes(order)
+  const requiredPeople = firstWeeklyRule
+    ? firstWeeklyRule.requiredPeople
+    : Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRequiredPeople')) || Number(order.requiredPeople) || 1))
+  const workAllocations = firstWeeklyRule
+    ? ordersWorkAllocationsForWeeklyPatternRule(allocationBaseOrder, firstWeeklyRule)
+    : scheduleMode === 'repeat'
+      ? ordersReadWorkAllocationsFromControls(order)
+      : []
   const assignedWorkMinutes = workAllocations.reduce((sum, item) => sum + Math.max(0, Number(item.minutes) || 0), 0)
   const accessMinutes = ordersAccessWindowMinutes(order)
-  if (scheduleMode === 'repeat') {
+  if (scheduleMode === 'repeat' && weeklyRules.length) {
+    const invalidRule = weeklyRules.find((rule) => Math.max(1, Number(rule.requiredPeople) || 1) < ordersWeeklyPatternMinPeople(rule))
+    if (invalidRule) {
+      showTransientNotice(
+        `Nie zapisano: ${ordersWeekdayLabel(invalidRule.weekday)} wymaga minimum ${ordersWeeklyPatternMinPeople(invalidRule)} osób w podanym oknie dostępu.`,
+        'error',
+      )
+      ordersRenderWeeklyPatternControls(order)
+      return
+    }
+    const outsideAccessRule = weeklyRules.find((rule) => !ordersWeeklyPatternFitsObjectAccess(allocationBaseOrder, rule))
+    if (outsideAccessRule) {
+      showTransientNotice(
+        `Nie zapisano: ${ordersWeekdayLabel(outsideAccessRule.weekday)} jest poza ogólnym dostępem do obiektu.`,
+        'error',
+      )
+      ordersRenderWeeklyPatternControls(allocationBaseOrder)
+      return
+    }
+  } else if (scheduleMode === 'repeat') {
     if (Math.abs(assignedWorkMinutes - requiredWorkMinutes) > 0) {
       showTransientNotice('Nie zapisano: suma godzin osób musi być równa wymaganemu czasowi pracy.', 'error')
       ordersUpdateWorkAllocationSummary(order)
@@ -12303,6 +14694,11 @@ function ordersSaveEditor() {
     }
     if (workAllocations.some((item) => Number(item.minutes) > accessMinutes)) {
       showTransientNotice('Nie zapisano: przydział osoby przekracza okno dostępu do obiektu.', 'error')
+      ordersUpdateWorkAllocationSummary(order)
+      return
+    }
+    if (workAllocations.some((item) => !ordersAllocationFitsAccess(order, item))) {
+      showTransientNotice('Nie zapisano: plan pracy osoby musi mieścić się w godzinach dostępu do obiektu.', 'error')
       ordersUpdateWorkAllocationSummary(order)
       return
     }
@@ -12336,11 +14732,20 @@ function ordersSaveEditor() {
   const workerComment = ordersReadInputValue('ordersEditWorkerComment')
   const subtasks = ordersReadEditorSubtasks(order)
   const supplies = ordersReadEditorSupplies(order)
+  const objectPlanTasks = ordersObjectPlanTasks(order)
   const equipmentToTake = supplies.filter((item) => ordersSupplyKind(item.kind) === 'equipment')
   const chemicalsToTake = supplies.filter((item) => ordersSupplyKind(item.kind) === 'chemical')
+  const allowExtendedWork = ordersReadExtendedWorkAllowed(order)
   const nowIso = new Date().toISOString()
+  const savedStartTime = firstWeeklyRule?.accessStartTime || firstAccessWindow?.accessStartTime || startTime
+  const savedEndTime = firstWeeklyRule?.accessEndTime || firstAccessWindow?.accessEndTime || endTime
+  const savedEndDateYmd =
+    firstWeeklyRule && calendarTimelineTimeMinutes(savedEndTime, 0) <= calendarTimelineTimeMinutes(savedStartTime, 0)
+      ? calendarAddDays(dateYmd, 1)
+      : endDateYmd
+  const savedRepeatWeekdays = weeklyRules.length ? weeklyRules.map((rule) => rule.weekday) : selectedRepeatWeekdays
 
-  const nextOrder = {
+  const nextOrder = ordersAssignExtendedWorkFlags({
     ...order,
     isDraft: false,
     createdAt: String(order.createdAt ?? '').trim() || nowIso,
@@ -12349,13 +14754,21 @@ function ordersSaveEditor() {
     assignedRows: selectedRows.length ? selectedRows : [safeRow],
     workerAssignments: ordersWorkerAssignmentsFromRows(selectedRows.length ? selectedRows : [safeRow]),
     dateYmd,
-    startTime,
-    endDateYmd,
-    endTime,
-    validUntil: explicitEndDate,
+    startTime: savedStartTime,
+    endDateYmd: savedEndDateYmd,
+    endTime: savedEndTime,
+    validUntil: scheduleMode === 'repeat' ? '' : explicitEndDate,
+    repeatUntil: repeatEndDate,
+    repeatEndDate,
+    recurrenceEndDate: repeatEndDate,
+    seriesEndDate: repeatEndDate,
     scheduleMode,
-    accessStartTime: startTime,
-    accessEndTime: endTime,
+    accessStartTime: savedStartTime,
+    accessEndTime: savedEndTime,
+    accessWindows,
+    objectAccessWindows: accessWindows,
+    accessTimeWindows: accessWindows,
+    buildingAccessWindows: accessWindows,
     requiredWorkMinutes,
     serviceWorkMinutes: requiredWorkMinutes,
     standardWorkMinutes: requiredWorkMinutes,
@@ -12391,11 +14804,15 @@ function ordersSaveEditor() {
     lng: ordersReadInputValue('ordersEditLocationLng'),
     mapUrl: ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(clientAddressLabel),
     googleMapsUrl: ordersReadInputValue('ordersEditLocationMapUrl') || ordersGoogleMapsSearchUrl(clientAddressLabel),
-    repeatPreset: scheduleMode === 'repeat' ? ordersReadInputValue('ordersEditRepeatPreset') || 'custom' : 'none',
-    repeatEvery: Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || 1)),
-    repeatUnit: ordersReadInputValue('ordersEditRepeatUnit') || 'day',
-    repeatAfterDays: Math.max(0, Math.floor(Number(ordersReadInputValue('ordersEditRepeatAfterDays')) || 0)),
-    repeatWeekdays: ordersReadRepeatWeekdays(),
+    repeatPreset: scheduleMode === 'repeat' ? repeatInterval.repeatPreset : 'none',
+    repeatEvery: repeatInterval.repeatEvery,
+    repeatUnit: repeatInterval.repeatUnit,
+    repeatAfterDays: 0,
+    repeatWeekdays: savedRepeatWeekdays,
+    weeklyScheduleRules: weeklyRules,
+    weeklyPattern: weeklyRules,
+    repeatDayRules: weeklyRules,
+    dayScheduleRules: weeklyRules,
     priority: ordersReadInputValue('ordersEditPriority') || 'Normalny',
     advanceDays: document.getElementById('ordersEditAdvance')
       ? Math.max(0, Math.floor(Number(ordersReadInputValue('ordersEditAdvance')) || 0))
@@ -12407,6 +14824,9 @@ function ordersSaveEditor() {
     tasks: subtasks,
     subtasks,
     activities: subtasks,
+    objectPlanTasks,
+    zoneTaskPlan: objectPlanTasks,
+    objectZoneTasks: objectPlanTasks,
     supplies,
     itemsToTake: supplies,
     suppliesForWorkers: supplies,
@@ -12427,7 +14847,7 @@ function ordersSaveEditor() {
     commentForWorkers: workerComment,
     deviceNotes: ordersDeviceNotes(order),
     deviceMessages: ordersDeviceNotes(order),
-  }
+  }, allowExtendedWork)
 
   const conflict = calendarTimelineFindOrderConflict(nextOrder, ordersListSourceOrders(), calendarTimelineResources())
   if (conflict) {
@@ -12439,6 +14859,14 @@ function ordersSaveEditor() {
   const nextOrders = nextOrder.recurrenceOverride
     ? calendarTimelineOrdersWithSingleOccurrenceOverride(sourceOrders, nextOrder)
     : sourceOrders.map((item) => (item.id === nextOrder.id ? nextOrder : item))
+  if (!nextOrder.recurrenceOverride) {
+    try {
+      await ordersSyncObjectDataToClient(nextOrder, selectedClient, supplies, objectPlanTasks)
+    } catch (error) {
+      showPortalErrorNotice('Nie udało się zapisać planu zadań i wyposażenia do danych klienta', error)
+      return
+    }
+  }
   ordersSaveTimelineOrders(nextOrders)
   appState.ordersEditorMode = 'edit'
   appState.ordersEditingId = ''
@@ -12575,6 +15003,7 @@ let ordersMapInstance = null
 let ordersMapInfoWindow = null
 let ordersMapMarkers = []
 let ordersMapRenderSeq = 0
+let ordersMapGoogleAuthFailed = false
 
 function ordersMapMonthEnd(ymd = todayYmd()) {
   const date = calendarDateFromYmd(ymd)
@@ -12865,10 +15294,16 @@ async function ordersMapRenderCanvas(orders = []) {
       ordersMapInstance.setZoom(6)
       ordersMapSetNotice('Brak zleceń z adresem dla wybranych filtrów.')
     }
-  } catch {
+  } catch (error) {
     const firstAddress = orders.map((order) => ordersTimelineAddressLabel(order)).find((address) => address && address !== '-')
     ordersMapFallbackIframe(firstAddress || 'Polska')
-    ordersMapSetNotice('Nie udało się uruchomić interaktywnej mapy. Pokazuję podgląd Google Maps.', true)
+    const message = String(error?.message ?? '')
+    ordersMapSetNotice(
+      message.includes('odrzuciło klucz API')
+        ? 'Google Maps odrzuciło klucz API. Sprawdź Maps JavaScript API, billing i ograniczenia domeny klucza.'
+        : 'Nie udało się uruchomić interaktywnej mapy. Pokazuję podgląd Google Maps.',
+      true,
+    )
   }
 }
 
@@ -12886,6 +15321,16 @@ function bindOrdersViewFunctions() {
   const binding = createBindingHelpers()
   const root = document.getElementById('view-orders')
   renderOrdersView()
+  ordersEnhanceTimeInputs(root)
+
+  binding.add(root, 'pointerdown', (event) => {
+    const timeInput = eventTargetClosest(event, 'input.orders-time-input, input[type="time"]')
+    if (timeInput instanceof HTMLInputElement) {
+      event.preventDefault()
+      ordersOpenTimePicker(timeInput)
+      timeInput.focus({ preventScroll: true })
+    }
+  })
 
   binding.add(root, 'input', (event) => {
     if (event.target?.id === 'ordersClientPickerInput') {
@@ -12912,7 +15357,9 @@ function bindOrdersViewFunctions() {
     if (
       ['ordersEditWorkHours', 'ordersEditRequiredPeople'].includes(String(event.target?.id ?? '')) ||
       event.target?.hasAttribute?.('data-orders-work-allocation') ||
-      event.target?.hasAttribute?.('data-orders-work-allocation-hours')
+      event.target?.hasAttribute?.('data-orders-work-allocation-hours') ||
+      event.target?.hasAttribute?.('data-orders-work-allocation-start') ||
+      event.target?.hasAttribute?.('data-orders-work-allocation-end')
     ) {
       const order = ordersFindTimelineOrder(appState.ordersEditingId)
       if (order) {
@@ -12928,6 +15375,15 @@ function bindOrdersViewFunctions() {
           if (range instanceof HTMLInputElement) {
             range.value = String(minutes)
           }
+          ordersSyncAllocationEndInputFromMinutes(key)
+          ordersUpdateWorkAllocationSummary(order)
+        } else if (event.target?.hasAttribute?.('data-orders-work-allocation-start')) {
+          const key = String(event.target.getAttribute('data-orders-work-allocation-start') ?? '').trim()
+          ordersSyncAllocationEndInputFromMinutes(key)
+          ordersUpdateWorkAllocationSummary(order)
+        } else if (event.target?.hasAttribute?.('data-orders-work-allocation-end')) {
+          const key = String(event.target.getAttribute('data-orders-work-allocation-end') ?? '').trim()
+          ordersSyncAllocationDurationFromTimes(key)
           ordersUpdateWorkAllocationSummary(order)
         } else {
           const key = String(event.target.getAttribute('data-orders-work-allocation') ?? '').trim()
@@ -12935,6 +15391,7 @@ function bindOrdersViewFunctions() {
           if (hours instanceof HTMLInputElement) {
             hours.value = ordersHoursInputValue(Number(event.target.value) || 0)
           }
+          ordersSyncAllocationEndInputFromMinutes(key)
           ordersUpdateWorkAllocationSummary(order)
         }
         ordersRenderSchedulePreview(order)
@@ -12949,15 +15406,76 @@ function bindOrdersViewFunctions() {
   })
 
   binding.add(root, 'focusin', (event) => {
+    const timeInput = eventTargetClosest(event, 'input.orders-time-input, input[type="time"]')
+    if (timeInput instanceof HTMLInputElement) {
+      ordersOpenTimePicker(timeInput)
+      return
+    }
     if (event.target?.id === 'ordersClientPickerInput') {
       ordersCloseRepeatSelectPickers()
       ordersSetClientPickerOpen(true)
     }
   })
 
+  binding.add(document, 'click', (event) => {
+    const hourButton = eventTargetClosest(event, '[data-orders-time-hour]')
+    if (hourButton) {
+      event.preventDefault()
+      ordersSetTimePickerSelection(Number(hourButton.getAttribute('data-orders-time-hour')), ordersTimePickerMinute)
+      return
+    }
+    const minuteButton = eventTargetClosest(event, '[data-orders-time-minute]')
+    if (minuteButton) {
+      event.preventDefault()
+      ordersSetTimePickerSelection(ordersTimePickerHour, Number(minuteButton.getAttribute('data-orders-time-minute')))
+      return
+    }
+    if (eventTargetClosest(event, '[data-orders-time-ok]')) {
+      event.preventDefault()
+      ordersApplyTimePickerSelection()
+      return
+    }
+    if (eventTargetClosest(event, '[data-orders-time-cancel]')) {
+      event.preventDefault()
+      ordersCloseTimePicker()
+      return
+    }
+    if (!eventTargetClosest(event, '#ordersTimePicker') && !eventTargetClosest(event, 'input.orders-time-input')) {
+      ordersCloseTimePicker()
+    }
+  })
+
+  binding.add(document, 'keydown', (event) => {
+    if (!ordersTimePickerTarget) {
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      ordersCloseTimePicker()
+    } else if (event.key === 'Enter') {
+      event.preventDefault()
+      ordersApplyTimePickerSelection()
+    }
+  })
+
+  binding.add(window, 'resize', () => {
+    if (ordersTimePickerTarget instanceof HTMLInputElement) {
+      ordersPositionTimePicker(ordersTimePickerTarget)
+    }
+  })
+
   binding.add(root, 'change', (event) => {
     if (event.target?.id === 'ordersDeviceNotePhoto') {
       ordersRenderDeviceNotePhotoPreview()
+      return
+    }
+
+    if (event.target?.id === 'ordersEditAllowExtendedWork') {
+      const order = ordersFindTimelineOrder(appState.ordersEditingId)
+      if (order) {
+        ordersAssignExtendedWorkFlags(order, ordersReadExtendedWorkAllowed(order))
+        ordersRenderSchedulePreview(order)
+      }
       return
     }
 
@@ -12981,8 +15499,11 @@ function bindOrdersViewFunctions() {
     if (event.target?.name === 'ordersScheduleMode') {
       const order = ordersFindTimelineOrder(appState.ordersEditingId)
       if (order) {
+        const nextMode = event.target?.value === 'repeat' ? 'repeat' : 'once'
+        ordersApplyScheduleModeDateDefaults(order, nextMode)
         ordersUpdateOrderScheduleFromControls(order)
         ordersSyncScheduleControls(order)
+        ordersRefreshObjectPlanScheduleWindow(order, { syncMonth: true })
         ordersRenderSchedulePreview(order)
       } else {
         ordersSetScheduleRepeatDisabled(event.target?.value !== 'repeat')
@@ -12998,7 +15519,9 @@ function bindOrdersViewFunctions() {
         const selectedType = ordersReadInputValue('ordersEditType') || 'individual'
         order.type = selectedType
         order.scheduleMode = selectedType === 'cyclic' ? 'repeat' : 'once'
+        ordersApplyScheduleModeDateDefaults(order, order.scheduleMode)
         ordersSyncScheduleControls(order)
+        ordersRefreshObjectPlanScheduleWindow(order, { syncMonth: true })
         ordersRenderSchedulePreview(order)
       }
       return
@@ -13025,11 +15548,19 @@ function bindOrdersViewFunctions() {
         'ordersEditRepeatPreset',
         'ordersEditRepeatEvery',
         'ordersEditRepeatUnit',
-        'ordersEditRepeatAfterDays',
         'ordersEditWorkHours',
         'ordersEditRequiredPeople',
       ].includes(String(event.target?.id ?? '')) ||
-      event.target?.hasAttribute?.('data-orders-repeat-weekday')
+      event.target?.hasAttribute?.('data-orders-repeat-weekday') ||
+      event.target?.hasAttribute?.('data-orders-weekly-pattern-start') ||
+      event.target?.hasAttribute?.('data-orders-weekly-pattern-end') ||
+      event.target?.hasAttribute?.('data-orders-weekly-pattern-hours') ||
+      event.target?.hasAttribute?.('data-orders-weekly-pattern-people') ||
+      event.target?.hasAttribute?.('data-orders-access-window-day') ||
+      event.target?.hasAttribute?.('data-orders-access-window-start') ||
+      event.target?.hasAttribute?.('data-orders-access-window-end') ||
+      event.target?.hasAttribute?.('data-orders-work-allocation-start') ||
+      event.target?.hasAttribute?.('data-orders-work-allocation-end')
     ) {
       const targetId = String(event.target?.id ?? '')
       ordersSyncMainScheduleFromMirror(targetId)
@@ -13038,8 +15569,14 @@ function bindOrdersViewFunctions() {
       }
       const order = ordersFindTimelineOrder(appState.ordersEditingId)
       if (order) {
+        const changedAccessWindow =
+          event.target?.hasAttribute?.('data-orders-access-window-day') ||
+          event.target?.hasAttribute?.('data-orders-access-window-start') ||
+          event.target?.hasAttribute?.('data-orders-access-window-end')
         ordersUpdateOrderScheduleFromControls(order)
-        if (targetId === 'ordersEditTime' || targetId === 'ordersEditEndTime') {
+        if (changedAccessWindow) {
+          ordersRenderWorkAllocationControls(order, { forceEven: true })
+        } else if (targetId === 'ordersEditTime' || targetId === 'ordersEditEndTime') {
           ordersRenderWorkAllocationControls(order)
         }
         if (targetId === 'ordersEditStart' || targetId === 'ordersScheduleStartDate') {
@@ -13048,6 +15585,9 @@ function bindOrdersViewFunctions() {
             order.repeatWeekdays = [ordersWeekdayFromDateKey(order.dateYmd)]
           }
         }
+        ordersRefreshObjectPlanScheduleWindow(order, {
+          syncMonth: targetId === 'ordersEditStart' || targetId === 'ordersScheduleStartDate',
+        })
         ordersRenderSchedulePreview(order)
       } else {
         ordersRenderRepeatCalendar({})
@@ -13065,10 +15605,56 @@ function bindOrdersViewFunctions() {
       }
       const applied = ordersApplySelectedClientToEditor(selection)
       if (order) {
+        appState.ordersObjectPlanZoneKey = ''
+        appState.ordersObjectPlanSelectedZoneKeys = []
+        appState.ordersObjectPlanDayEditorDate = ''
+        appState.ordersObjectPlanZoneWindowOpen = false
+        appState.ordersObjectPlanTaskWindowOpen = false
         const data = applied?.data ?? { clientName: selection }
         ordersApplyClientDataToOrder(order, data, selection)
+        ordersRenderObjectPlan(order)
         ordersRenderSchedulePreview(order)
       }
+      return
+    }
+    if (event.target?.hasAttribute?.('data-orders-object-zone-filter')) {
+      const order = ordersFindTimelineOrder(appState.ordersEditingId)
+      if (order) {
+        const zones = ordersObjectPlanZonesForOrder(order)
+        const key = String(event.target.getAttribute('data-orders-object-zone-filter') || '').trim()
+        const allKeys = zones.map((zone) => zone.key)
+        const base = ordersObjectPlanSelectedZoneKeys(zones)
+        const selected = new Set(base.length ? base : allKeys)
+        if (event.target.checked) {
+          selected.add(key)
+        } else {
+          selected.delete(key)
+        }
+        if (!selected.size) {
+          event.target.checked = true
+          showTransientNotice('Wybierz co najmniej jedną strefę.', 'error')
+          return
+        }
+        appState.ordersObjectPlanSelectedZoneKeys = selected.size === allKeys.length ? [] : [...selected]
+        ordersRenderObjectPlan(order)
+      }
+      return
+    }
+    if (event.target?.id === 'ordersObjectDayTaskMode' || event.target?.id === 'ordersObjectTaskMode') {
+      const cadenceId = event.target.id === 'ordersObjectTaskMode' ? 'ordersObjectTaskCadence' : 'ordersObjectDayTaskCadence'
+      const cadence = document.getElementById(cadenceId)
+      if (cadence instanceof HTMLSelectElement) {
+        cadence.disabled = event.target.value !== 'repeat'
+      }
+      return
+    }
+    if (
+      event.target?.hasAttribute?.('data-orders-object-day-task-name') ||
+      event.target?.hasAttribute?.('data-orders-object-day-task-zone') ||
+      event.target?.hasAttribute?.('data-orders-object-day-task-mode') ||
+      event.target?.hasAttribute?.('data-orders-object-day-task-cadence')
+    ) {
+      ordersUpdateObjectPlanDayTaskFromControl(event.target)
       return
     }
     if (event.target?.id === 'ordersEditWorker') {
@@ -13158,6 +15744,13 @@ function bindOrdersViewFunctions() {
       return
     }
 
+    const weeklyPatternApplyAll = eventTargetClosest(event, '#ordersWeeklyPatternApplyAll')
+    if (weeklyPatternApplyAll) {
+      event.preventDefault()
+      ordersApplyFirstWeeklyPatternToAll()
+      return
+    }
+
     const addOrder = eventTargetClosest(event, '#ordersAddBtn')
     if (addOrder) {
       event.preventDefault()
@@ -13197,7 +15790,97 @@ function bindOrdersViewFunctions() {
     const save = eventTargetClosest(event, '#ordersEditSave, [data-orders-save]')
     if (save) {
       event.preventDefault()
-      ordersSaveEditor()
+      void ordersSaveEditor()
+      return
+    }
+
+    const objectZone = eventTargetClosest(event, '[data-orders-object-zone]')
+    if (objectZone) {
+      event.preventDefault()
+      appState.ordersObjectPlanZoneKey = String(objectZone.getAttribute('data-orders-object-zone') || '').trim()
+      ordersRenderObjectPlan(ordersFindTimelineOrder(appState.ordersEditingId) || {})
+      return
+    }
+
+    const addObjectTask = eventTargetClosest(event, '#ordersObjectTaskAdd')
+    if (addObjectTask) {
+      event.preventDefault()
+      ordersAddObjectPlanTaskToCurrentOrder()
+      return
+    }
+
+    const taskWindowOpen = eventTargetClosest(event, '[data-orders-object-task-window-open]')
+    if (taskWindowOpen) {
+      event.preventDefault()
+      appState.ordersObjectPlanTaskWindowOpen = true
+      ordersRenderObjectPlan(ordersFindTimelineOrder(appState.ordersEditingId) || {})
+      window.setTimeout(() => document.getElementById('ordersObjectTaskName')?.focus?.(), 0)
+      return
+    }
+
+    const taskWindowClose = eventTargetClosest(event, '[data-orders-object-task-window-close]')
+    if (taskWindowClose && (taskWindowClose.tagName === 'BUTTON' || event.target === taskWindowClose)) {
+      event.preventDefault()
+      appState.ordersObjectPlanTaskWindowOpen = false
+      ordersRenderObjectPlan(ordersFindTimelineOrder(appState.ordersEditingId) || {})
+      return
+    }
+
+    const zoneWindowOpen = eventTargetClosest(event, '[data-orders-object-zone-window-open]')
+    if (zoneWindowOpen) {
+      event.preventDefault()
+      appState.ordersObjectPlanZoneWindowOpen = true
+      ordersRenderObjectPlan(ordersFindTimelineOrder(appState.ordersEditingId) || {})
+      return
+    }
+
+    const zoneWindowClose = eventTargetClosest(event, '[data-orders-object-zone-window-close]')
+    if (zoneWindowClose && (zoneWindowClose.tagName === 'BUTTON' || event.target === zoneWindowClose)) {
+      event.preventDefault()
+      appState.ordersObjectPlanZoneWindowOpen = false
+      ordersRenderObjectPlan(ordersFindTimelineOrder(appState.ordersEditingId) || {})
+      return
+    }
+
+    const calendarMonth = eventTargetClosest(event, '[data-orders-object-calendar-month]')
+    if (calendarMonth) {
+      event.preventDefault()
+      ordersMoveObjectPlanCalendarMonth(Number(calendarMonth.getAttribute('data-orders-object-calendar-month')) || 0)
+      return
+    }
+
+    const dayClose = eventTargetClosest(event, '[data-orders-object-day-close]')
+    if (dayClose && (dayClose.tagName === 'BUTTON' || event.target === dayClose)) {
+      event.preventDefault()
+      appState.ordersObjectPlanDayEditorDate = ''
+      ordersRenderObjectPlan(ordersFindTimelineOrder(appState.ordersEditingId) || {})
+      return
+    }
+
+    const addDayTask = eventTargetClosest(event, '#ordersObjectDayTaskAdd')
+    if (addDayTask) {
+      event.preventDefault()
+      ordersAddObjectPlanDayTaskToCurrentOrder()
+      return
+    }
+
+    const calendarDay = eventTargetClosest(event, '[data-orders-object-calendar-day]')
+    if (calendarDay) {
+      event.preventDefault()
+      const order = ordersFindTimelineOrder(appState.ordersEditingId) || {}
+      const day = ordersNormalizeDateField(calendarDay.getAttribute('data-orders-object-calendar-day'), todayYmd())
+      if (!ordersObjectPlanDayIsActive(order, day)) {
+        return
+      }
+      appState.ordersObjectPlanDayEditorDate = day
+      ordersRenderObjectPlan(order)
+      return
+    }
+
+    const removeObjectTask = eventTargetClosest(event, '[data-orders-remove-object-task]')
+    if (removeObjectTask) {
+      event.preventDefault()
+      ordersRemoveObjectPlanTaskFromCurrentOrder(removeObjectTask.getAttribute('data-orders-remove-object-task'))
       return
     }
 
@@ -13233,6 +15916,20 @@ function bindOrdersViewFunctions() {
     if (removeSupply) {
       event.preventDefault()
       ordersRemoveSupplyFromCurrentOrder(removeSupply.getAttribute('data-orders-remove-supply'))
+      return
+    }
+
+    const addAccessWindow = eventTargetClosest(event, '#ordersAccessWindowAdd')
+    if (addAccessWindow) {
+      event.preventDefault()
+      ordersAddAccessWindowToCurrentOrder()
+      return
+    }
+
+    const removeAccessWindow = eventTargetClosest(event, '[data-orders-access-window-remove]')
+    if (removeAccessWindow) {
+      event.preventDefault()
+      ordersRemoveAccessWindowFromCurrentOrder(removeAccessWindow.getAttribute('data-orders-access-window-remove'))
       return
     }
 
@@ -13423,7 +16120,28 @@ function bindOrdersViewFunctions() {
       ordersAddSubtaskToCurrentOrder()
       return
     }
-    if (event.key === 'Enter' && event.target?.id === 'ordersSupplyName') {
+    if (event.key === 'Enter' && event.target?.id === 'ordersObjectTaskName') {
+      event.preventDefault()
+      ordersAddObjectPlanTaskToCurrentOrder()
+      return
+    }
+    if (event.key === 'Enter' && event.target?.id === 'ordersObjectDayTaskName') {
+      event.preventDefault()
+      ordersAddObjectPlanDayTaskToCurrentOrder()
+      return
+    }
+    if ((event.key === 'Enter' || event.key === ' ') && event.target?.hasAttribute?.('data-orders-object-calendar-day')) {
+      event.preventDefault()
+      const order = ordersFindTimelineOrder(appState.ordersEditingId) || {}
+      const day = ordersNormalizeDateField(event.target.getAttribute('data-orders-object-calendar-day'), todayYmd())
+      if (!ordersObjectPlanDayIsActive(order, day)) {
+        return
+      }
+      appState.ordersObjectPlanDayEditorDate = day
+      ordersRenderObjectPlan(order)
+      return
+    }
+    if (event.key === 'Enter' && ['ordersSupplyName', 'ordersSupplyQr'].includes(event.target?.id)) {
       event.preventDefault()
       ordersAddSupplyToCurrentOrder()
       return
@@ -13435,9 +16153,67 @@ function bindOrdersViewFunctions() {
     if (event.target?.id === 'ordersEditLocation' && event.key === 'Escape') {
       ordersHideLocationSuggestions()
     }
+    if (event.key === 'Escape' && appState.ordersObjectPlanZoneWindowOpen) {
+      appState.ordersObjectPlanZoneWindowOpen = false
+      ordersRenderObjectPlan(ordersFindTimelineOrder(appState.ordersEditingId) || {})
+      return
+    }
+    if (event.key === 'Escape' && appState.ordersObjectPlanTaskWindowOpen) {
+      appState.ordersObjectPlanTaskWindowOpen = false
+      ordersRenderObjectPlan(ordersFindTimelineOrder(appState.ordersEditingId) || {})
+      return
+    }
     if (event.key === 'Escape') {
       ordersCloseMapModal()
     }
+  })
+
+  binding.add(root, 'dragstart', (event) => {
+    const chip = eventTargetClosest(event, '[data-orders-object-task-drag]')
+    if (!chip) {
+      return
+    }
+    const id = String(chip.getAttribute('data-orders-object-task-drag') || '').trim()
+    appState.ordersObjectPlanDraggingTaskId = id
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData('text/plain', id)
+    }
+    chip.classList.add('is-dragging')
+  })
+
+  binding.add(root, 'dragend', (event) => {
+    const chip = eventTargetClosest(event, '[data-orders-object-task-drag]')
+    chip?.classList.remove('is-dragging')
+    appState.ordersObjectPlanDraggingTaskId = ''
+  })
+
+  binding.add(root, 'dragover', (event) => {
+    const day = eventTargetClosest(event, '[data-orders-object-calendar-day]')
+    if (!day) {
+      return
+    }
+    event.preventDefault()
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move'
+    }
+  })
+
+  binding.add(root, 'drop', (event) => {
+    const day = eventTargetClosest(event, '[data-orders-object-calendar-day]')
+    if (!day) {
+      return
+    }
+    event.preventDefault()
+    const order = ordersFindTimelineOrder(appState.ordersEditingId) || {}
+    const targetDay = ordersNormalizeDateField(day.getAttribute('data-orders-object-calendar-day'), '')
+    if (!ordersObjectPlanDayIsActive(order, targetDay)) {
+      appState.ordersObjectPlanDraggingTaskId = ''
+      return
+    }
+    const id = String(event.dataTransfer?.getData('text/plain') || appState.ordersObjectPlanDraggingTaskId || '').trim()
+    ordersMoveObjectPlanTaskDate(id, targetDay)
+    appState.ordersObjectPlanDraggingTaskId = ''
   })
 
   return binding.done
@@ -14301,11 +17077,9 @@ function renderEventsRows(rows) {
       const workerLogin = String(row.workerLogin ?? '').trim()
       const workerName = resolveWorkerNameFromWorkers(workerLogin, row.workerName)
       const workerPrimary = workerName || workerLogin || '-'
-      const workerSecondary = workerLogin && workerName && workerLogin !== workerName ? workerLogin : ''
       const workerCard = `
         <div class="events-worker-cell">
           <div class="events-worker-name">${escapeHtml(workerPrimary)}</div>
-          <div class="events-worker-login mono">${escapeHtml(workerSecondary || '')}</div>
         </div>
       `
       const workerCell =
@@ -20558,6 +23332,123 @@ function reportHistoryDayStartCloseSource(row) {
   return startIso ? source : null
 }
 
+function reportHistorySourceId(source) {
+  return String(source?.eventId ?? source?.workdayId ?? source?.id ?? '').trim()
+}
+
+function reportHistorySourceIds(source) {
+  return [source?.eventId, source?.workdayId, source?.id]
+    .map((value) => String(value ?? '').trim())
+    .filter((value, index, list) => value && list.indexOf(value) === index)
+}
+
+function reportHistoryApplyClosedWorkerDay(dayKey, endAt, closedTargets = []) {
+  const normalizedDayKey = String(dayKey ?? '').trim()
+  const endIso = toIso(endAt)
+  if (!normalizedDayKey || !endIso || !Array.isArray(appState.reportHistoryRows)) {
+    return false
+  }
+
+  const targetMap = new Map()
+  closedTargets.forEach((target) => {
+    const source = target?.sourceItem ?? target
+    const targetIds = [...reportHistorySourceIds(source), ...reportHistorySourceIds(target)]
+    targetIds.forEach((targetId) => {
+      targetMap.set(targetId, target)
+    })
+  })
+
+  let changed = false
+  appState.reportHistoryRows = appState.reportHistoryRows.map((row) => {
+    if (String(row?.dayKey ?? '').trim() !== normalizedDayKey) {
+      return row
+    }
+
+    changed = true
+    const details = Array.isArray(row.details) ? row.details : []
+    const nextDetails = details.map((detail) => {
+      const sourceIds = reportHistorySourceIds(detail?.sourceItem)
+      const target = sourceIds.map((sourceId) => targetMap.get(sourceId)).find(Boolean)
+      const shouldClose =
+        Boolean(target) ||
+        (!targetMap.size && String(detail?.statusLabel ?? '').trim().toUpperCase() === 'RUNNING')
+      if (!shouldClose) {
+        return detail
+      }
+
+      const detailEndIso = toIso(target?.endAt) || endIso
+      const sourceStartIso = toIso(detail?.sourceItem?.startAt ?? detail?.sourceItem?.dayStartAt)
+      const targetDuration = Number(target?.durationSec ?? 0)
+      const fallbackDuration =
+        reportHistoryToTimestamp(sourceStartIso) && reportHistoryToTimestamp(detailEndIso)
+          ? reportHistoryRangeSecondsFromTimestamps(reportHistoryToTimestamp(sourceStartIso), reportHistoryToTimestamp(detailEndIso))
+          : 0
+      const durationSec = Number.isFinite(targetDuration) && targetDuration > 0 ? Math.floor(targetDuration) : fallbackDuration
+
+      return {
+        ...detail,
+        stopLabel: formatTime(detailEndIso),
+        durationLabel: durationSecondsToHms(durationSec),
+        statusLabel: 'CLOSED',
+        sortEndTs: reportHistoryToTimestamp(detailEndIso) || Number(detail?.sortEndTs ?? 0),
+        sourceItem: {
+          ...(detail.sourceItem || {}),
+          endAt: detailEndIso,
+          dayEndAt: detailEndIso,
+          closeMarkedAt: detailEndIso,
+          endReason: 'WORKDAY_STOP',
+          durationSec,
+          status: 'CLOSED',
+        },
+      }
+    })
+
+    const seedTarget = closedTargets[0] ?? {}
+    const seedSource = seedTarget?.sourceItem ?? row?.qrStartSourceItem ?? row?.dayStartSourceItem ?? {}
+    const rowStartIso = toIso(row?.dayStartIso ?? row?.qrStartSourceItem?.dayStartAt ?? row?.qrStartSourceItem?.startAt)
+    const endTs = reportHistoryToTimestamp(endIso)
+    const startTs = Number(row?.dayStartTs ?? 0) || reportHistoryToTimestamp(rowStartIso)
+    const closedSecFromSpan = reportHistoryRangeSecondsFromTimestamps(startTs, endTs)
+    const detailsClosedSec = nextDetails.reduce((sum, detail) => {
+      if (String(detail?.statusLabel ?? '').trim().toUpperCase() !== 'CLOSED') {
+        return sum
+      }
+      return sum + reportHistoryClosedDurationSec(detail?.sourceItem || {})
+    }, 0)
+    const nextClosedSec = closedSecFromSpan || detailsClosedSec || Number(row?.closedSec ?? 0) || 0
+    const stopSource = {
+      ...(row?.qrStopSourceItem || {}),
+      ...(seedSource || {}),
+      historyMarkerOnly: true,
+      dayStartAt: rowStartIso || toIso(seedSource?.startAt ?? seedSource?.dayStartAt),
+      dayEndAt: endIso,
+      endAt: endIso,
+      closeMarkedAt: endIso,
+      endReason: 'WORKDAY_STOP',
+      status: 'WORKDAY_CLOSED',
+    }
+
+    return {
+      ...row,
+      runningCount: nextDetails.filter((detail) => String(detail?.statusLabel ?? '').trim().toUpperCase() === 'RUNNING').length,
+      closedSec: nextClosedSec,
+      dayEndIso: endIso,
+      dayEndTs: endTs || Number(row?.dayEndTs ?? 0),
+      dayEndIsBoundary: true,
+      dayEndSourceItem: stopSource,
+      latestRunningStartTs: 0,
+      qrStopLabel: formatTime(endIso),
+      qrStopSourceItem: stopSource,
+      details: nextDetails,
+    }
+  })
+
+  if (changed) {
+    reportHistorySetSummaryRows(appState.reportHistoryRows)
+  }
+  return changed
+}
+
 function reportHistoryRenderDetails(row, tab, dayKey = '') {
   const details = Array.isArray(row.details) ? row.details : []
   if (!details.length && tab !== 'workers') {
@@ -21002,6 +23893,7 @@ async function reportHistoryCloseWorkerDay(dayKey) {
   try {
     const nowIso = selectedEndIso
     let updatedCount = 0
+    const closedTargets = []
 
     for (const detail of closeTargets) {
       const source = detail.sourceItem ?? {}
@@ -21046,6 +23938,14 @@ async function reportHistoryCloseWorkerDay(dayKey) {
         comment: String(source?.comment ?? '').trim(),
         updatedBy: appState.session?.name ?? null,
       })
+      closedTargets.push({
+        eventId,
+        workdayId: String(source?.workdayId ?? eventId).trim() || eventId,
+        sourceItem: source,
+        startAt: sourceStartAt,
+        endAt: safeEndAt,
+        durationSec,
+      })
       updatedCount += 1
     }
 
@@ -21053,7 +23953,10 @@ async function reportHistoryCloseWorkerDay(dayKey) {
       throw new Error('Nie udało się zamknąć żadnego aktywnego wpisu.')
     }
 
+    reportHistoryApplyClosedWorkerDay(normalizedDayKey, nowIso, closedTargets)
+    reportHistoryRenderTable()
     await runReportHistory()
+    reportHistoryApplyClosedWorkerDay(normalizedDayKey, nowIso, closedTargets)
     await fetchEventsForCurrentSession({ resetPage: false })
     await refreshDashboardWidgets({ syncWorktimeToken: true })
     showTransientNotice(
@@ -25908,8 +28811,9 @@ function ordersNormalizeTimelineOrder(order = {}) {
     : 'other'
   const createdAt = String(order.createdAt ?? '').trim() || nowIso
   const updatedAt = String(order.updatedAt ?? '').trim() || createdAt
+  const allowExtendedWork = ordersExtendedWorkAllowed(order)
 
-  return {
+  return ordersAssignExtendedWorkFlags({
     ...order,
     id,
     row,
@@ -25927,7 +28831,7 @@ function ordersNormalizeTimelineOrder(order = {}) {
     createdAt,
     updatedAt,
     isDraft: false,
-  }
+  }, allowExtendedWork)
 }
 
 function ordersOrderUpdatedAtValue(order = {}) {
@@ -26077,15 +28981,10 @@ async function ordersSyncRemoteTimelineOrders({ render = false } = {}) {
 
   appState.calendarTimelineOrdersRemoteLoading = true
   try {
-    const stateOrders = Array.isArray(appState.calendarTimelineDemoOrders) ? appState.calendarTimelineDemoOrders : []
-    const localOrders = ordersLoadLocalTimelineOrders()
     const remoteOrders = await fetchPortalScheduleOrders(orgId)
-    const mergedOrders = ordersMergeTimelineOrderLists(stateOrders, localOrders, remoteOrders)
-    ordersSaveTimelineOrders(mergedOrders, { syncRemote: false })
+    const canonicalOrders = ordersMergeTimelineOrderLists(remoteOrders)
+    ordersSaveTimelineOrders(canonicalOrders, { syncRemote: false })
     appState.calendarTimelineOrdersRemoteLoaded = true
-    if (ordersTimelineOrderListsDiffer(mergedOrders, remoteOrders)) {
-      ordersQueueRemoteTimelineOrderSave(mergedOrders)
-    }
     if (render) {
       if (appState.currentRoute === 'dashboard') renderDashboardActivityCalendar(appState.dashboardTodayRows)
       if (appState.currentRoute === 'calendar') renderCalendarView()
@@ -26119,6 +29018,11 @@ async function ordersDeleteRemoteTimelineOrdersById(orderIds = []) {
 
   try {
     const result = await deletePortalScheduleOrders(orgId, ids)
+    const deletedIds = new Set((Array.isArray(result) ? result : []).map((value) => String(value ?? '').trim()).filter(Boolean))
+    const missingIds = ids.filter((value) => !deletedIds.has(value))
+    if (missingIds.length) {
+      throw new Error('Backend nie potwierdził usunięcia zlecenia z bazy.')
+    }
     appState.calendarTimelineOrdersRemoteLoaded = true
     return result
   } catch (error) {
@@ -26176,14 +29080,6 @@ function ordersEnsureTimelineOrdersForRoute(routeName, renderAfterLoad) {
     }
   }
 
-  if (!ordersListSourceOrders().length) {
-    const localOrders = ordersLoadLocalTimelineOrders()
-    if (localOrders.length) {
-      ordersSaveTimelineOrders(localOrders, { syncRemote: false })
-      renderIfStillCurrent()
-    }
-  }
-
   const remotePromise = appState.calendarTimelineOrdersRemoteLoaded
     ? Promise.resolve(appState.calendarTimelineDemoOrders)
     : ordersSyncRemoteTimelineOrders({ render: true })
@@ -26209,8 +29105,7 @@ function deferRouteOrderDataRefresh(routeName, renderAfterLoad) {
 
 function ordersListSourceOrders() {
   if (!Array.isArray(appState.calendarTimelineDemoOrders)) {
-    const localOrders = ordersLoadLocalTimelineOrders()
-    appState.calendarTimelineDemoOrders = localOrders.length ? localOrders : calendarTimelineDefaultDemoOrders()
+    appState.calendarTimelineDemoOrders = calendarTimelineDefaultDemoOrders()
   }
   appState.calendarTimelineDemoOrders = appState.calendarTimelineDemoOrders.filter((order) => !ordersIsSeedDemoOrder(order))
   return appState.calendarTimelineDemoOrders
@@ -26384,18 +29279,19 @@ function calendarTimelineRecurringOccurrenceEnd(order = {}, occurrenceDay = '') 
 
 function calendarTimelineRecurringInstance(order = {}, occurrenceDay = '', index = 0) {
   const baseDay = String(order?.dateYmd ?? '').trim()
+  const scheduledOrder = ordersApplyWeeklyPatternRuleToOccurrence(order, occurrenceDay)
   if (occurrenceDay === baseDay) {
     return {
-      ...order,
+      ...scheduledOrder,
       isRecurringSeries: true,
       sourceOrderId: String(order?.sourceOrderId ?? order?.id ?? '').trim(),
       recurrenceOriginalDateYmd: baseDay,
     }
   }
-  const occurrenceEnd = calendarTimelineRecurringOccurrenceEnd(order, occurrenceDay)
+  const occurrenceEnd = calendarTimelineRecurringOccurrenceEnd(scheduledOrder, occurrenceDay)
   const sourceOrderId = String(order?.sourceOrderId ?? order?.id ?? '').trim()
   return {
-    ...order,
+    ...scheduledOrder,
     id: `${sourceOrderId || 'order'}__repeat__${occurrenceDay}`,
     sourceOrderId,
     orderId: sourceOrderId,
@@ -29177,16 +32073,17 @@ function calendarTimelineBuildMovedOrder(order = {}, rowIndex, slotIndex = null,
 }
 
 function calendarTimelineFindOrderConflicts(candidate = {}, orders = [], resources = calendarTimelineResources()) {
-  const candidateInterval = calendarTimelineOrderInterval(candidate)
-  if (!candidateInterval) {
-    return []
-  }
-  const candidateRows = new Set(
-    ordersNormalizeOrderRows(candidate, resources).filter((row) => !calendarTimelineRowAllowsOverlap(row, resources)),
-  )
-  if (!candidateRows.size) {
-    return []
-  }
+  const candidateSlots = calendarTimelineVisualOrderSlots(candidate, resources)
+    .map((slot) => ({
+      order: slot,
+      interval: calendarTimelineOrderInterval(slot),
+      rows: new Set(
+        ordersNormalizeOrderRows(slot, resources).filter((row) => !calendarTimelineRowAllowsOverlap(row, resources)),
+      ),
+    }))
+    .filter((slot) => slot.interval && slot.rows.size)
+  if (!candidateSlots.length) return []
+
   const conflicts = []
   const sourceOrders = Array.isArray(orders) ? orders : []
   const conflictDays = calendarTimelineDaysForOrder(candidate)
@@ -29197,28 +32094,40 @@ function calendarTimelineFindOrderConflicts(candidate = {}, orders = [], resourc
   const checkedOrders = [...sourceOrders, ...realOrders]
 
   checkedOrders.forEach((order) => {
-    if (!order || calendarTimelineSameConflictOrder(candidate, order)) {
+    if (!order) {
       return
     }
-    const interval = calendarTimelineOrderInterval(order)
-    if (!interval || !(candidateInterval.start < interval.end && interval.start < candidateInterval.end)) {
-      return
-    }
-    ordersNormalizeOrderRows(order, resources).forEach((row) => {
-      if (!candidateRows.has(row) || calendarTimelineRowAllowsOverlap(row, resources)) {
+    const orderSlots = calendarTimelineVisualOrderSlots(order, resources)
+    orderSlots.forEach((orderSlot) => {
+      if (!orderSlot || candidateSlots.some((candidateSlot) => calendarTimelineSameConflictOrder(candidateSlot.order, orderSlot))) {
         return
       }
-      const key = `${String(order.id ?? '')}::${row}`
-      if (conflicts.some((item) => item.key === key)) {
+      const interval = calendarTimelineOrderInterval(orderSlot)
+      if (!interval) {
         return
       }
-      conflicts.push({
-        key,
-        row,
-        workerName: String(resources[row]?.name ?? `Wiersz ${row + 1}`).trim(),
-        order,
-        title: calendarTimelineOrderTitle(order),
-        time: calendarTimelineOrderRangeLabel(order),
+      const rows = ordersNormalizeOrderRows(orderSlot, resources)
+      candidateSlots.forEach((candidateSlot) => {
+        if (!(candidateSlot.interval.start < interval.end && interval.start < candidateSlot.interval.end)) {
+          return
+        }
+        rows.forEach((row) => {
+          if (!candidateSlot.rows.has(row) || calendarTimelineRowAllowsOverlap(row, resources)) {
+            return
+          }
+          const key = `${String(orderSlot.id ?? order.id ?? '')}::${row}`
+          if (conflicts.some((item) => item.key === key)) {
+            return
+          }
+          conflicts.push({
+            key,
+            row,
+            workerName: String(resources[row]?.name ?? `Wiersz ${row + 1}`).trim(),
+            order: orderSlot,
+            title: calendarTimelineOrderTitle(orderSlot),
+            time: calendarTimelineOrderRangeLabel(orderSlot),
+          })
+        })
       })
     })
   })
@@ -29563,6 +32472,8 @@ function calendarTimelineVisualOrderSlots(order = {}, resources = calendarTimeli
       row: Number.isInteger(Number(item?.row)) ? Number(item.row) : 0,
       label: String(item?.label ?? '').trim(),
       minutes: Math.max(15, Math.round(Number(item?.minutes) || 0)),
+      startTime: ordersNormalizeTimeField(item?.startTime ?? item?.planStartTime, ''),
+      endTime: ordersNormalizeTimeField(item?.endTime ?? item?.planEndTime, ''),
     }))
     .filter((item) => item.minutes > 0)
 
@@ -29573,7 +32484,8 @@ function calendarTimelineVisualOrderSlots(order = {}, resources = calendarTimeli
   const startDay = String(order.dateYmd ?? todayYmd()).trim()
   const accessStart = ordersNormalizeTimeField(order.accessStartTime || order.startTime, '08:00')
   return safeAllocations.map((allocation, index) => {
-    const end = calendarTimelineWorkSlotEnd(startDay, accessStart, allocation.minutes)
+    const allocationStart = ordersNormalizeTimeField(allocation.startTime, accessStart)
+    const end = calendarTimelineWorkSlotEnd(startDay, allocationStart, allocation.minutes)
     const slotKey = normalizeSearchText(allocation.key || `slot-${index + 1}`).replace(/[^a-z0-9_-]+/g, '-')
     return {
       ...order,
@@ -29581,7 +32493,7 @@ function calendarTimelineVisualOrderSlots(order = {}, resources = calendarTimeli
       row: allocation.row,
       assignedRows: [allocation.row],
       workerAssignments: ordersWorkerAssignmentsFromRows([allocation.row], resources),
-      startTime: accessStart,
+      startTime: allocationStart,
       endDateYmd: end.endDateYmd,
       endTime: end.endTime,
       validUntil: end.endDateYmd,
@@ -35003,6 +37915,15 @@ export function mountPortalApp() {
     calendarStopTimelineWorkerStatusRefresh,
   ]
 
+  let portalDisposed = false
+  window.go = router.go
+
+  void (async () => {
+  await waitForFirebaseAuthReady()
+  if (portalDisposed) {
+    return
+  }
+
   const session = requireAuth() ?? getSession()
 
   if (session) {
@@ -35129,10 +38050,10 @@ export function mountPortalApp() {
     applyPortalTheme(STYLE_FALLBACK_ID)
     syncSettingsPermissions()
   }
-
-  window.go = router.go
+  })()
 
   return () => {
+    portalDisposed = true
     stopDashboardAutoRefresh()
     dashboardHideScheduleMissingStartAlert()
     dashboardHideScheduleLateStartAlert()

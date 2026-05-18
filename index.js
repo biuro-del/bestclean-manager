@@ -2584,25 +2584,33 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
 }
 
 async function ensurePortalScheduleOrderTable(client) {
-  if (await databaseRelationExists(client, 'public.portal_schedule_order')) {
-    return
+  if (!(await databaseRelationExists(client, 'public.portal_schedule_order'))) {
+    await client.query(`
+      create table if not exists public.portal_schedule_order (
+        org_id varchar(64) not null,
+        order_id varchar(180) not null,
+        payload jsonb not null default '{}'::jsonb,
+        updated_by varchar(128),
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        primary key (org_id, order_id)
+      )
+    `)
   }
-
-  await client.query(`
-    create table if not exists public.portal_schedule_order (
-      org_id varchar(64) not null,
-      order_id varchar(180) not null,
-      payload jsonb not null default '{}'::jsonb,
-      updated_by varchar(128),
-      created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now(),
-      primary key (org_id, order_id)
-    )
-  `)
   await client.query(
     'create index if not exists portal_schedule_order_org_date_idx on public.portal_schedule_order (org_id, ((payload->>\'dateYmd\')), ((payload->>\'startTime\')), order_id)',
   )
   await client.query('create index if not exists portal_schedule_order_org_updated_idx on public.portal_schedule_order (org_id, updated_at desc)')
+  await client.query(`
+    create table if not exists public.portal_schedule_order_deleted (
+      org_id varchar(64) not null,
+      order_id varchar(180) not null,
+      deleted_by varchar(128),
+      deleted_at timestamptz not null default now(),
+      primary key (org_id, order_id)
+    )
+  `)
+  await client.query('create index if not exists portal_schedule_order_deleted_org_updated_idx on public.portal_schedule_order_deleted (org_id, deleted_at desc)')
 }
 
 function sanitizePortalScheduleOrderId(value) {
@@ -2643,6 +2651,21 @@ async function readPortalScheduleOrders(client, orgId) {
     [orgId],
   )
   return result.rows.map((row) => row.payload).filter((order) => order && typeof order === 'object')
+}
+
+async function readDeletedPortalScheduleOrderIds(client, orgId, orderIds = []) {
+  const ids = (Array.isArray(orderIds) ? orderIds : [])
+    .map((value) => sanitizePortalScheduleOrderId(value))
+    .filter((value, index, list) => value && list.indexOf(value) === index)
+  if (!ids.length) {
+    return new Set()
+  }
+
+  const result = await client.query(
+    'select order_id from public.portal_schedule_order_deleted where org_id = $1 and order_id = any($2::varchar[])',
+    [orgId, ids],
+  )
+  return new Set(result.rows.map((row) => sanitizePortalScheduleOrderId(row.order_id)).filter(Boolean))
 }
 
 function shouldUseLocalPortalScheduleOrderFileStorage() {
@@ -2823,19 +2846,38 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
         return
       }
 
+      await client.query('begin')
       await client.query('delete from public.portal_schedule_order where org_id = $1 and order_id = any($2::varchar[])', [
         orgId,
         orderIds,
       ])
+      for (const orderId of orderIds) {
+        await client.query(
+          `insert into public.portal_schedule_order_deleted (org_id, order_id, deleted_by, deleted_at)
+           values ($1, $2, $3, now())
+           on conflict (org_id, order_id)
+           do update set
+             deleted_by = excluded.deleted_by,
+             deleted_at = excluded.deleted_at`,
+          [orgId, orderId, requesterUid],
+        )
+      }
+      await client.query('commit')
       sendJson(res, 200, { ok: true, data: { deletedOrderIds: orderIds } })
       return
     }
 
     const rawOrders = Array.isArray(body?.orders) ? body.orders : []
     const orders = rawOrders.map((order) => sanitizePortalScheduleOrderPayload(order)).filter(Boolean).slice(0, 5000)
+    const deletedOrderIds = await readDeletedPortalScheduleOrderIds(
+      client,
+      orgId,
+      orders.map((order) => order.id),
+    )
+    const activeOrders = orders.filter((order) => !deletedOrderIds.has(order.id))
 
     await client.query('begin')
-    for (const order of orders) {
+    for (const order of activeOrders) {
       await client.query(
         `insert into public.portal_schedule_order (org_id, order_id, payload, updated_by, created_at, updated_at)
          values ($1, $2, $3::jsonb, $4, now(), now())

@@ -1,6 +1,11 @@
 import { clientsForOrg, myOrganizations, workersForOrg } from '@dataconnect/generated'
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth'
-import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
+import {
+  ensureFirebase,
+  ensureFirebaseAuthPersistence,
+  isFirebaseConfigured,
+  waitForFirebaseAuthReady,
+} from '../firebase/firebaseClient'
 
 const AUTH_STORAGE_KEY = 'iclean.portal.auth'
 const LAST_ORG_STORAGE_KEY = 'iclean.portal.lastOrgId'
@@ -403,11 +408,6 @@ export function getSession() {
   const currentUser = firebase?.auth?.currentUser ?? null
 
   if (!currentUser) {
-    if (session?.source === 'firebase') {
-      localStorage.removeItem(AUTH_STORAGE_KEY)
-      return null
-    }
-
     return session
   }
 
@@ -440,7 +440,7 @@ export async function ensureSessionContext(session) {
   }
 
   const firebase = ensureFirebase()
-  const currentUser = firebase?.auth?.currentUser
+  const currentUser = firebase?.auth?.currentUser || (await waitForFirebaseAuthReady())
 
   if (!currentUser) {
     return null
@@ -481,6 +481,7 @@ export async function login({ login: loginValue, password }) {
     throw new Error('Brak konfiguracji Firebase.')
   }
 
+  await ensureFirebaseAuthPersistence()
   const credential = await signInWithEmailAndPassword(firebase.auth, normalizedLogin, normalizedPassword)
 
   try {

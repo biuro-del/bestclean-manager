@@ -129,8 +129,11 @@ export async function fetchPortalScheduleOrders(orgId) {
 export async function upsertPortalScheduleOrders(orgId, orders = []) {
   const normalizedOrgId = String(orgId ?? '').trim()
   const sourceOrders = Array.isArray(orders) ? orders : []
-  if (!normalizedOrgId || shouldSkipPortalScheduleOrdersRemote()) {
+  if (!normalizedOrgId) {
     return sourceOrders
+  }
+  if (shouldSkipPortalScheduleOrdersRemote()) {
+    throw new Error('Endpoint zleceń grafiku jest niedostępny. Nie zapisuję lokalnej kopii jako źródła prawdy.')
   }
 
   const headers = await portalScheduleOrderAuthHeaders()
@@ -147,7 +150,6 @@ export async function upsertPortalScheduleOrders(orgId, orders = []) {
     const error = await parsePortalScheduleOrderApiError(response, 'Nie udalo sie zapisac zlecen grafiku.')
     if (error.routeUnavailable) {
       disablePortalScheduleOrdersEndpoint('save', error.message)
-      return sourceOrders
     }
     throw new Error(error.message)
   }
@@ -161,8 +163,11 @@ export async function deletePortalScheduleOrders(orgId, orderIds = []) {
   const ids = (Array.isArray(orderIds) ? orderIds : [])
     .map((value) => String(value ?? '').trim())
     .filter(Boolean)
-  if (!normalizedOrgId || !ids.length || shouldSkipPortalScheduleOrdersRemote()) {
+  if (!normalizedOrgId || !ids.length) {
     return []
+  }
+  if (shouldSkipPortalScheduleOrdersRemote()) {
+    throw new Error('Endpoint zleceń grafiku jest niedostępny. Nie potwierdzam usunięcia bez zapisu w bazie.')
   }
 
   const headers = await portalScheduleOrderAuthHeaders()
@@ -179,7 +184,6 @@ export async function deletePortalScheduleOrders(orgId, orderIds = []) {
     const error = await parsePortalScheduleOrderApiError(response, 'Nie udalo sie usunac zlecenia grafiku.')
     if (error.routeUnavailable) {
       disablePortalScheduleOrdersEndpoint('delete', error.message)
-      return ids
     }
     throw new Error(error.message)
   }

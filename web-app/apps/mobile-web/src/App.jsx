@@ -235,6 +235,40 @@ function up(value) {
   return txt(value).toUpperCase()
 }
 
+function boolLike(value) {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  const normalized = txt(value).toLowerCase()
+  return ['1', 'true', 'tak', 'yes', 'y', 't', 'on'].includes(normalized)
+}
+
+function scheduleExtendedWorkAllowed(source = {}) {
+  const candidates = [
+    source?.allowExtendedWork,
+    source?.extendedWorkAllowed,
+    source?.canExtendWorkTime,
+    source?.workerCanExtendWorkTime,
+    source?.allowLongerWork,
+    source?.longerWorkAllowed,
+    source?.overtimeAllowed,
+    source?.allowOvertime,
+    source?.mozliwoscPracyDluzszej,
+    source?.mozePrzedluzycCzasPracy,
+  ]
+  return candidates.some((candidate) => candidate !== undefined && candidate !== null && txt(candidate) !== '' && boolLike(candidate))
+}
+
+function scheduleExtendedWorkNotice(source = {}) {
+  if (!scheduleExtendedWorkAllowed(source)) return ''
+  return (
+    txt(source?.extendedWorkNotice) ||
+    txt(source?.extendedWorkMessage) ||
+    txt(source?.longerWorkNotice) ||
+    txt(source?.overtimeNotice) ||
+    'Możesz wydłużyć czas pracy, jeśli sytuacja na obiekcie tego wymaga.'
+  )
+}
+
 function normalizeKey(value) {
   return txt(value).toLowerCase()
 }
@@ -2848,6 +2882,7 @@ export default function App() {
     }
 
     if (view === VIEW.SCHEDULE) {
+      const dayExtendedWorkNotice = scheduleExtendedWorkNotice(scheduleSelectedDay || {})
       return (
         <section className="card col">
           <div className="list-month-header">
@@ -2904,15 +2939,25 @@ export default function App() {
               >
                 <div className="muted">Status</div>
                 <div style={{ fontSize: 22, fontWeight: 900 }}>{txt(scheduleSelectedDay.statusLabel) || '-'}</div>
+                {dayExtendedWorkNotice ? (
+                  <div className="schedule-extended-work-notice" role="note">
+                    <strong>Możliwość dłuższej pracy</strong>
+                    <span>{dayExtendedWorkNotice}</span>
+                  </div>
+                ) : null}
                 {scheduleVisibleShiftIndexes.map((shiftIndex) => {
                   const shift = (Array.isArray(scheduleSelectedDay.shifts) ? scheduleSelectedDay.shifts : []).find(
                     (item) => Number(item?.slotIndex) === shiftIndex,
                   )
+                  const shiftExtendedWorkNotice = dayExtendedWorkNotice ? '' : scheduleExtendedWorkNotice(shift || {})
                   return (
                     <div key={`shift-${shiftIndex}`} className="summary-row" style={{ alignItems: 'flex-start', flexDirection: 'column' }}>
                       <span className="muted">{scheduleShiftLabel(shiftIndex)}</span>
                       <strong>{txt(shift?.primaryText) || 'Brak zmiany'}</strong>
                       {txt(shift?.secondaryText) ? <span>{txt(shift?.secondaryText)}</span> : null}
+                      {shiftExtendedWorkNotice ? (
+                        <span className="schedule-extended-work-chip">{shiftExtendedWorkNotice}</span>
+                      ) : null}
                     </div>
                   )
                 })}
