@@ -19,6 +19,7 @@ This README will guide you through the process of using the generated JavaScript
   - [*AdminWorkerCredentialForOrg*](#adminworkercredentialfororg)
   - [*ClientsForOrg*](#clientsfororg)
   - [*IndividualJobsForOrg*](#individualjobsfororg)
+  - [*TasksForOrg*](#tasksfororg)
   - [*ZonesForOrg*](#zonesfororg)
   - [*WorkdaysForOrg*](#workdaysfororg)
   - [*BackupCyclesForOrg*](#backupcyclesfororg)
@@ -46,6 +47,8 @@ This README will guide you through the process of using the generated JavaScript
   - [*InsertIndividualJobForOrg*](#insertindividualjobfororg)
   - [*UpdateIndividualJobForOrg*](#updateindividualjobfororg)
   - [*DeleteIndividualJobForOrg*](#deleteindividualjobfororg)
+  - [*UpsertTaskForOrg*](#upserttaskfororg)
+  - [*DeleteTaskForOrg*](#deletetaskfororg)
   - [*InsertZoneForOrg*](#insertzonefororg)
   - [*UpdateZoneForOrg*](#updatezonefororg)
   - [*DeleteZoneForOrg*](#deletezonefororg)
@@ -269,7 +272,7 @@ import { connectorConfig, orgUiStyleForOrg, OrgUiStyleForOrgVariables } from '@d
 
 // The `OrgUiStyleForOrg` query requires an argument of type `OrgUiStyleForOrgVariables`:
 const orgUiStyleForOrgVars: OrgUiStyleForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `orgUiStyleForOrg()` function to execute the query.
@@ -299,7 +302,7 @@ import { connectorConfig, orgUiStyleForOrgRef, OrgUiStyleForOrgVariables } from 
 
 // The `OrgUiStyleForOrg` query requires an argument of type `OrgUiStyleForOrgVariables`:
 const orgUiStyleForOrgVars: OrgUiStyleForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `orgUiStyleForOrgRef()` function to get a reference to the query.
@@ -384,7 +387,7 @@ import { connectorConfig, myUiStylePreference, MyUiStylePreferenceVariables } fr
 
 // The `MyUiStylePreference` query requires an argument of type `MyUiStylePreferenceVariables`:
 const myUiStylePreferenceVars: MyUiStylePreferenceVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `myUiStylePreference()` function to execute the query.
@@ -414,7 +417,7 @@ import { connectorConfig, myUiStylePreferenceRef, MyUiStylePreferenceVariables }
 
 // The `MyUiStylePreference` query requires an argument of type `MyUiStylePreferenceVariables`:
 const myUiStylePreferenceVars: MyUiStylePreferenceVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `myUiStylePreferenceRef()` function to get a reference to the query.
@@ -499,7 +502,7 @@ import { connectorConfig, userUiStylePreferencesForOrg, UserUiStylePreferencesFo
 
 // The `UserUiStylePreferencesForOrg` query requires an argument of type `UserUiStylePreferencesForOrgVariables`:
 const userUiStylePreferencesForOrgVars: UserUiStylePreferencesForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `userUiStylePreferencesForOrg()` function to execute the query.
@@ -529,7 +532,7 @@ import { connectorConfig, userUiStylePreferencesForOrgRef, UserUiStylePreference
 
 // The `UserUiStylePreferencesForOrg` query requires an argument of type `UserUiStylePreferencesForOrgVariables`:
 const userUiStylePreferencesForOrgVars: UserUiStylePreferencesForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `userUiStylePreferencesForOrgRef()` function to get a reference to the query.
@@ -610,7 +613,7 @@ import { connectorConfig, canManageWorkersForOrg, CanManageWorkersForOrgVariable
 
 // The `CanManageWorkersForOrg` query requires an argument of type `CanManageWorkersForOrgVariables`:
 const canManageWorkersForOrgVars: CanManageWorkersForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `canManageWorkersForOrg()` function to execute the query.
@@ -640,7 +643,7 @@ import { connectorConfig, canManageWorkersForOrgRef, CanManageWorkersForOrgVaria
 
 // The `CanManageWorkersForOrg` query requires an argument of type `CanManageWorkersForOrgVariables`:
 const canManageWorkersForOrgVars: CanManageWorkersForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `canManageWorkersForOrgRef()` function to get a reference to the query.
@@ -733,7 +736,7 @@ import { connectorConfig, workersForOrg, WorkersForOrgVariables } from '@datacon
 
 // The `WorkersForOrg` query requires an argument of type `WorkersForOrgVariables`:
 const workersForOrgVars: WorkersForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `workersForOrg()` function to execute the query.
@@ -763,7 +766,7 @@ import { connectorConfig, workersForOrgRef, WorkersForOrgVariables } from '@data
 
 // The `WorkersForOrg` query requires an argument of type `WorkersForOrgVariables`:
 const workersForOrgVars: WorkersForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `workersForOrgRef()` function to get a reference to the query.
@@ -859,8 +862,8 @@ import { connectorConfig, adminWorkerCredentialForOrg, AdminWorkerCredentialForO
 
 // The `AdminWorkerCredentialForOrg` query requires an argument of type `AdminWorkerCredentialForOrgVariables`:
 const adminWorkerCredentialForOrgVars: AdminWorkerCredentialForOrgVariables = {
-  orgId: ..., 
-  login: ..., 
+  orgId: ...,
+  login: ...,
 };
 
 // Call the `adminWorkerCredentialForOrg()` function to execute the query.
@@ -892,8 +895,8 @@ import { connectorConfig, adminWorkerCredentialForOrgRef, AdminWorkerCredentialF
 
 // The `AdminWorkerCredentialForOrg` query requires an argument of type `AdminWorkerCredentialForOrgVariables`:
 const adminWorkerCredentialForOrgVars: AdminWorkerCredentialForOrgVariables = {
-  orgId: ..., 
-  login: ..., 
+  orgId: ...,
+  login: ...,
 };
 
 // Call the `adminWorkerCredentialForOrgRef()` function to get a reference to the query.
@@ -1022,7 +1025,7 @@ import { connectorConfig, clientsForOrg, ClientsForOrgVariables } from '@datacon
 
 // The `ClientsForOrg` query requires an argument of type `ClientsForOrgVariables`:
 const clientsForOrgVars: ClientsForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `clientsForOrg()` function to execute the query.
@@ -1052,7 +1055,7 @@ import { connectorConfig, clientsForOrgRef, ClientsForOrgVariables } from '@data
 
 // The `ClientsForOrg` query requires an argument of type `ClientsForOrgVariables`:
 const clientsForOrgVars: ClientsForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `clientsForOrgRef()` function to get a reference to the query.
@@ -1141,7 +1144,7 @@ import { connectorConfig, individualJobsForOrg, IndividualJobsForOrgVariables } 
 
 // The `IndividualJobsForOrg` query requires an argument of type `IndividualJobsForOrgVariables`:
 const individualJobsForOrgVars: IndividualJobsForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `individualJobsForOrg()` function to execute the query.
@@ -1171,7 +1174,7 @@ import { connectorConfig, individualJobsForOrgRef, IndividualJobsForOrgVariables
 
 // The `IndividualJobsForOrg` query requires an argument of type `IndividualJobsForOrgVariables`:
 const individualJobsForOrgVars: IndividualJobsForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `individualJobsForOrgRef()` function to get a reference to the query.
@@ -1193,6 +1196,164 @@ console.log(data.individualClientJobs);
 executeQuery(ref).then((response) => {
   const data = response.data;
   console.log(data.individualClientJobs);
+});
+```
+
+## TasksForOrg
+You can execute the `TasksForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+tasksForOrg(vars: TasksForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<TasksForOrgData, TasksForOrgVariables>;
+
+interface TasksForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: TasksForOrgVariables): QueryRef<TasksForOrgData, TasksForOrgVariables>;
+}
+export const tasksForOrgRef: TasksForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+tasksForOrg(dc: DataConnect, vars: TasksForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<TasksForOrgData, TasksForOrgVariables>;
+
+interface TasksForOrgRef {
+  ...
+  (dc: DataConnect, vars: TasksForOrgVariables): QueryRef<TasksForOrgData, TasksForOrgVariables>;
+}
+export const tasksForOrgRef: TasksForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the tasksForOrgRef:
+```typescript
+const name = tasksForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `TasksForOrg` query requires an argument of type `TasksForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface TasksForOrgVariables {
+  orgId: string;
+}
+```
+### Return Type
+Recall that executing the `TasksForOrg` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `TasksForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface TasksForOrgData {
+  tasks: ({
+    orgId: string;
+    idTask: string;
+    dateYmd?: string | null;
+    startTime?: string | null;
+    endDateYmd?: string | null;
+    endTime?: string | null;
+    scheduleMode?: string | null;
+    accessStartTime?: string | null;
+    accessEndTime?: string | null;
+    accessWindows?: string | null;
+    requiredWorkMinutes?: number | null;
+    requiredPeople?: number | null;
+    workAllocations?: string | null;
+    workerId?: string | null;
+    workerIds?: string | null;
+    workerLabel?: string | null;
+    workerName?: string | null;
+    workerLogin?: string | null;
+    clientId?: string | null;
+    clientLabel?: string | null;
+    clientName?: string | null;
+    nip?: string | null;
+    street?: string | null;
+    city?: string | null;
+    postCode?: string | null;
+    addressLabel?: string | null;
+    executionAddressLabel?: string | null;
+    lat?: number | null;
+    lng?: number | null;
+    zoneId?: string | null;
+    zoneLabel?: string | null;
+    repeatPreset?: string | null;
+    repeatEvery?: number | null;
+    repeatUnit?: string | null;
+    repeatWeekdays?: string | null;
+    weeklyScheduleRules?: string | null;
+    title?: string | null;
+    type?: string | null;
+    price?: number | null;
+    description?: string | null;
+    workerComment?: string | null;
+    supplies?: string | null;
+    objectPlanTasks?: string | null;
+    allowExtendedWork?: boolean | null;
+    createdByUid?: string | null;
+    updatedByUid?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+  } & Task_Key)[];
+}
+```
+### Using `TasksForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, tasksForOrg, TasksForOrgVariables } from '@dataconnect/generated';
+
+// The `TasksForOrg` query requires an argument of type `TasksForOrgVariables`:
+const tasksForOrgVars: TasksForOrgVariables = {
+  orgId: ...,
+};
+
+// Call the `tasksForOrg()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await tasksForOrg(tasksForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await tasksForOrg({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await tasksForOrg(dataConnect, tasksForOrgVars);
+
+console.log(data.tasks);
+
+// Or, you can use the `Promise` API.
+tasksForOrg(tasksForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.tasks);
+});
+```
+
+### Using `TasksForOrg`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, tasksForOrgRef, TasksForOrgVariables } from '@dataconnect/generated';
+
+// The `TasksForOrg` query requires an argument of type `TasksForOrgVariables`:
+const tasksForOrgVars: TasksForOrgVariables = {
+  orgId: ...,
+};
+
+// Call the `tasksForOrgRef()` function to get a reference to the query.
+const ref = tasksForOrgRef(tasksForOrgVars);
+// Variables can be defined inline as well.
+const ref = tasksForOrgRef({ orgId: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = tasksForOrgRef(dataConnect, tasksForOrgVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.tasks);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.tasks);
 });
 ```
 
@@ -1258,7 +1419,7 @@ import { connectorConfig, zonesForOrg, ZonesForOrgVariables } from '@dataconnect
 
 // The `ZonesForOrg` query requires an argument of type `ZonesForOrgVariables`:
 const zonesForOrgVars: ZonesForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `zonesForOrg()` function to execute the query.
@@ -1288,7 +1449,7 @@ import { connectorConfig, zonesForOrgRef, ZonesForOrgVariables } from '@dataconn
 
 // The `ZonesForOrg` query requires an argument of type `ZonesForOrgVariables`:
 const zonesForOrgVars: ZonesForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `zonesForOrgRef()` function to get a reference to the query.
@@ -1387,7 +1548,7 @@ import { connectorConfig, workdaysForOrg, WorkdaysForOrgVariables } from '@datac
 
 // The `WorkdaysForOrg` query requires an argument of type `WorkdaysForOrgVariables`:
 const workdaysForOrgVars: WorkdaysForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `workdaysForOrg()` function to execute the query.
@@ -1417,7 +1578,7 @@ import { connectorConfig, workdaysForOrgRef, WorkdaysForOrgVariables } from '@da
 
 // The `WorkdaysForOrg` query requires an argument of type `WorkdaysForOrgVariables`:
 const workdaysForOrgVars: WorkdaysForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `workdaysForOrgRef()` function to get a reference to the query.
@@ -1509,7 +1670,7 @@ import { connectorConfig, backupCyclesForOrg, BackupCyclesForOrgVariables } from
 
 // The `BackupCyclesForOrg` query requires an argument of type `BackupCyclesForOrgVariables`:
 const backupCyclesForOrgVars: BackupCyclesForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `backupCyclesForOrg()` function to execute the query.
@@ -1539,7 +1700,7 @@ import { connectorConfig, backupCyclesForOrgRef, BackupCyclesForOrgVariables } f
 
 // The `BackupCyclesForOrg` query requires an argument of type `BackupCyclesForOrgVariables`:
 const backupCyclesForOrgVars: BackupCyclesForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `backupCyclesForOrgRef()` function to get a reference to the query.
@@ -1646,7 +1807,7 @@ import { connectorConfig, eventsForOrg, EventsForOrgVariables } from '@dataconne
 
 // The `EventsForOrg` query requires an argument of type `EventsForOrgVariables`:
 const eventsForOrgVars: EventsForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `eventsForOrg()` function to execute the query.
@@ -1676,7 +1837,7 @@ import { connectorConfig, eventsForOrgRef, EventsForOrgVariables } from '@dataco
 
 // The `EventsForOrg` query requires an argument of type `EventsForOrgVariables`:
 const eventsForOrgVars: EventsForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `eventsForOrgRef()` function to get a reference to the query.
@@ -1776,8 +1937,8 @@ import { connectorConfig, workerWorkdaysForOrg, WorkerWorkdaysForOrgVariables } 
 
 // The `WorkerWorkdaysForOrg` query requires an argument of type `WorkerWorkdaysForOrgVariables`:
 const workerWorkdaysForOrgVars: WorkerWorkdaysForOrgVariables = {
-  orgId: ..., 
-  workerLogin: ..., 
+  orgId: ...,
+  workerLogin: ...,
 };
 
 // Call the `workerWorkdaysForOrg()` function to execute the query.
@@ -1807,8 +1968,8 @@ import { connectorConfig, workerWorkdaysForOrgRef, WorkerWorkdaysForOrgVariables
 
 // The `WorkerWorkdaysForOrg` query requires an argument of type `WorkerWorkdaysForOrgVariables`:
 const workerWorkdaysForOrgVars: WorkerWorkdaysForOrgVariables = {
-  orgId: ..., 
-  workerLogin: ..., 
+  orgId: ...,
+  workerLogin: ...,
 };
 
 // Call the `workerWorkdaysForOrgRef()` function to get a reference to the query.
@@ -1900,7 +2061,7 @@ import { connectorConfig, storageForOrg, StorageForOrgVariables } from '@datacon
 
 // The `StorageForOrg` query requires an argument of type `StorageForOrgVariables`:
 const storageForOrgVars: StorageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -1932,7 +2093,7 @@ import { connectorConfig, storageForOrgRef, StorageForOrgVariables } from '@data
 
 // The `StorageForOrg` query requires an argument of type `StorageForOrgVariables`:
 const storageForOrgVars: StorageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -2036,8 +2197,8 @@ import { connectorConfig, clientStorageForClient, ClientStorageForClientVariable
 
 // The `ClientStorageForClient` query requires an argument of type `ClientStorageForClientVariables`:
 const clientStorageForClientVars: ClientStorageForClientVariables = {
-  orgId: ..., 
-  clientId: ..., 
+  orgId: ...,
+  clientId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -2069,8 +2230,8 @@ import { connectorConfig, clientStorageForClientRef, ClientStorageForClientVaria
 
 // The `ClientStorageForClient` query requires an argument of type `ClientStorageForClientVariables`:
 const clientStorageForClientVars: ClientStorageForClientVariables = {
-  orgId: ..., 
-  clientId: ..., 
+  orgId: ...,
+  clientId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -2163,7 +2324,7 @@ import { connectorConfig, clientStorageForOrg, ClientStorageForOrgVariables } fr
 
 // The `ClientStorageForOrg` query requires an argument of type `ClientStorageForOrgVariables`:
 const clientStorageForOrgVars: ClientStorageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -2195,7 +2356,7 @@ import { connectorConfig, clientStorageForOrgRef, ClientStorageForOrgVariables }
 
 // The `ClientStorageForOrg` query requires an argument of type `ClientStorageForOrgVariables`:
 const clientStorageForOrgVars: ClientStorageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -2289,7 +2450,7 @@ import { connectorConfig, workdayPausesForOrg, WorkdayPausesForOrgVariables } fr
 
 // The `WorkdayPausesForOrg` query requires an argument of type `WorkdayPausesForOrgVariables`:
 const workdayPausesForOrgVars: WorkdayPausesForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `workdayPausesForOrg()` function to execute the query.
@@ -2319,7 +2480,7 @@ import { connectorConfig, workdayPausesForOrgRef, WorkdayPausesForOrgVariables }
 
 // The `WorkdayPausesForOrg` query requires an argument of type `WorkdayPausesForOrgVariables`:
 const workdayPausesForOrgVars: WorkdayPausesForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `workdayPausesForOrgRef()` function to get a reference to the query.
@@ -2412,8 +2573,8 @@ import { connectorConfig, activeWorkdayPauseForWorker, ActiveWorkdayPauseForWork
 
 // The `ActiveWorkdayPauseForWorker` query requires an argument of type `ActiveWorkdayPauseForWorkerVariables`:
 const activeWorkdayPauseForWorkerVars: ActiveWorkdayPauseForWorkerVariables = {
-  orgId: ..., 
-  workerLogin: ..., 
+  orgId: ...,
+  workerLogin: ...,
 };
 
 // Call the `activeWorkdayPauseForWorker()` function to execute the query.
@@ -2443,8 +2604,8 @@ import { connectorConfig, activeWorkdayPauseForWorkerRef, ActiveWorkdayPauseForW
 
 // The `ActiveWorkdayPauseForWorker` query requires an argument of type `ActiveWorkdayPauseForWorkerVariables`:
 const activeWorkdayPauseForWorkerVars: ActiveWorkdayPauseForWorkerVariables = {
-  orgId: ..., 
-  workerLogin: ..., 
+  orgId: ...,
+  workerLogin: ...,
 };
 
 // Call the `activeWorkdayPauseForWorkerRef()` function to get a reference to the query.
@@ -2547,8 +2708,8 @@ import { connectorConfig, insertWorkerForOrg, InsertWorkerForOrgVariables } from
 
 // The `InsertWorkerForOrg` mutation requires an argument of type `InsertWorkerForOrgVariables`:
 const insertWorkerForOrgVars: InsertWorkerForOrgVariables = {
-  orgId: ..., 
-  login: ..., 
+  orgId: ...,
+  login: ...,
   workerName: ..., // optional
   loginEmail: ..., // optional
   role: ..., // optional
@@ -2586,8 +2747,8 @@ import { connectorConfig, insertWorkerForOrgRef, InsertWorkerForOrgVariables } f
 
 // The `InsertWorkerForOrg` mutation requires an argument of type `InsertWorkerForOrgVariables`:
 const insertWorkerForOrgVars: InsertWorkerForOrgVariables = {
-  orgId: ..., 
-  login: ..., 
+  orgId: ...,
+  login: ...,
   workerName: ..., // optional
   loginEmail: ..., // optional
   role: ..., // optional
@@ -2685,11 +2846,11 @@ import { connectorConfig, insertWorkerWithMembershipForOrg, InsertWorkerWithMemb
 
 // The `InsertWorkerWithMembershipForOrg` mutation requires an argument of type `InsertWorkerWithMembershipForOrgVariables`:
 const insertWorkerWithMembershipForOrgVars: InsertWorkerWithMembershipForOrgVariables = {
-  orgId: ..., 
-  login: ..., 
+  orgId: ...,
+  login: ...,
   workerName: ..., // optional
   loginEmail: ..., // optional
-  authUid: ..., 
+  authUid: ...,
   role: ..., // optional
   active: ..., // optional
   email: ..., // optional
@@ -2727,11 +2888,11 @@ import { connectorConfig, insertWorkerWithMembershipForOrgRef, InsertWorkerWithM
 
 // The `InsertWorkerWithMembershipForOrg` mutation requires an argument of type `InsertWorkerWithMembershipForOrgVariables`:
 const insertWorkerWithMembershipForOrgVars: InsertWorkerWithMembershipForOrgVariables = {
-  orgId: ..., 
-  login: ..., 
+  orgId: ...,
+  login: ...,
   workerName: ..., // optional
   loginEmail: ..., // optional
-  authUid: ..., 
+  authUid: ...,
   role: ..., // optional
   active: ..., // optional
   email: ..., // optional
@@ -2828,8 +2989,8 @@ import { connectorConfig, updateWorkerForOrg, UpdateWorkerForOrgVariables } from
 
 // The `UpdateWorkerForOrg` mutation requires an argument of type `UpdateWorkerForOrgVariables`:
 const updateWorkerForOrgVars: UpdateWorkerForOrgVariables = {
-  orgId: ..., 
-  login: ..., 
+  orgId: ...,
+  login: ...,
   workerName: ..., // optional
   loginEmail: ..., // optional
   role: ..., // optional
@@ -2868,8 +3029,8 @@ import { connectorConfig, updateWorkerForOrgRef, UpdateWorkerForOrgVariables } f
 
 // The `UpdateWorkerForOrg` mutation requires an argument of type `UpdateWorkerForOrgVariables`:
 const updateWorkerForOrgVars: UpdateWorkerForOrgVariables = {
-  orgId: ..., 
-  login: ..., 
+  orgId: ...,
+  login: ...,
   workerName: ..., // optional
   loginEmail: ..., // optional
   role: ..., // optional
@@ -2963,12 +3124,12 @@ import { connectorConfig, upsertWorkerCredentialForOrg, UpsertWorkerCredentialFo
 
 // The `UpsertWorkerCredentialForOrg` mutation requires an argument of type `UpsertWorkerCredentialForOrgVariables`:
 const upsertWorkerCredentialForOrgVars: UpsertWorkerCredentialForOrgVariables = {
-  orgId: ..., 
-  login: ..., 
-  encryptedPassword: ..., 
-  iv: ..., 
-  authTag: ..., 
-  algorithm: ..., 
+  orgId: ...,
+  login: ...,
+  encryptedPassword: ...,
+  iv: ...,
+  authTag: ...,
+  algorithm: ...,
   updatedBy: ..., // optional
 };
 
@@ -2999,12 +3160,12 @@ import { connectorConfig, upsertWorkerCredentialForOrgRef, UpsertWorkerCredentia
 
 // The `UpsertWorkerCredentialForOrg` mutation requires an argument of type `UpsertWorkerCredentialForOrgVariables`:
 const upsertWorkerCredentialForOrgVars: UpsertWorkerCredentialForOrgVariables = {
-  orgId: ..., 
-  login: ..., 
-  encryptedPassword: ..., 
-  iv: ..., 
-  authTag: ..., 
-  algorithm: ..., 
+  orgId: ...,
+  login: ...,
+  encryptedPassword: ...,
+  iv: ...,
+  authTag: ...,
+  algorithm: ...,
   updatedBy: ..., // optional
 };
 
@@ -3086,8 +3247,8 @@ import { connectorConfig, upsertOrgUiStyleForOrg, UpsertOrgUiStyleForOrgVariable
 
 // The `UpsertOrgUiStyleForOrg` mutation requires an argument of type `UpsertOrgUiStyleForOrgVariables`:
 const upsertOrgUiStyleForOrgVars: UpsertOrgUiStyleForOrgVariables = {
-  orgId: ..., 
-  styleId: ..., 
+  orgId: ...,
+  styleId: ...,
   updatedBy: ..., // optional
 };
 
@@ -3118,8 +3279,8 @@ import { connectorConfig, upsertOrgUiStyleForOrgRef, UpsertOrgUiStyleForOrgVaria
 
 // The `UpsertOrgUiStyleForOrg` mutation requires an argument of type `UpsertOrgUiStyleForOrgVariables`:
 const upsertOrgUiStyleForOrgVars: UpsertOrgUiStyleForOrgVariables = {
-  orgId: ..., 
-  styleId: ..., 
+  orgId: ...,
+  styleId: ...,
   updatedBy: ..., // optional
 };
 
@@ -3199,7 +3360,7 @@ import { connectorConfig, deleteOrgUiStyleForOrg, DeleteOrgUiStyleForOrgVariable
 
 // The `DeleteOrgUiStyleForOrg` mutation requires an argument of type `DeleteOrgUiStyleForOrgVariables`:
 const deleteOrgUiStyleForOrgVars: DeleteOrgUiStyleForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `deleteOrgUiStyleForOrg()` function to execute the mutation.
@@ -3229,7 +3390,7 @@ import { connectorConfig, deleteOrgUiStyleForOrgRef, DeleteOrgUiStyleForOrgVaria
 
 // The `DeleteOrgUiStyleForOrg` mutation requires an argument of type `DeleteOrgUiStyleForOrgVariables`:
 const deleteOrgUiStyleForOrgVars: DeleteOrgUiStyleForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `deleteOrgUiStyleForOrgRef()` function to get a reference to the mutation.
@@ -3310,8 +3471,8 @@ import { connectorConfig, upsertMyUiStylePreference, UpsertMyUiStylePreferenceVa
 
 // The `UpsertMyUiStylePreference` mutation requires an argument of type `UpsertMyUiStylePreferenceVariables`:
 const upsertMyUiStylePreferenceVars: UpsertMyUiStylePreferenceVariables = {
-  orgId: ..., 
-  styleId: ..., 
+  orgId: ...,
+  styleId: ...,
   updatedBy: ..., // optional
 };
 
@@ -3342,8 +3503,8 @@ import { connectorConfig, upsertMyUiStylePreferenceRef, UpsertMyUiStylePreferenc
 
 // The `UpsertMyUiStylePreference` mutation requires an argument of type `UpsertMyUiStylePreferenceVariables`:
 const upsertMyUiStylePreferenceVars: UpsertMyUiStylePreferenceVariables = {
-  orgId: ..., 
-  styleId: ..., 
+  orgId: ...,
+  styleId: ...,
   updatedBy: ..., // optional
 };
 
@@ -3423,7 +3584,7 @@ import { connectorConfig, deleteMyUiStylePreference, DeleteMyUiStylePreferenceVa
 
 // The `DeleteMyUiStylePreference` mutation requires an argument of type `DeleteMyUiStylePreferenceVariables`:
 const deleteMyUiStylePreferenceVars: DeleteMyUiStylePreferenceVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `deleteMyUiStylePreference()` function to execute the mutation.
@@ -3453,7 +3614,7 @@ import { connectorConfig, deleteMyUiStylePreferenceRef, DeleteMyUiStylePreferenc
 
 // The `DeleteMyUiStylePreference` mutation requires an argument of type `DeleteMyUiStylePreferenceVariables`:
 const deleteMyUiStylePreferenceVars: DeleteMyUiStylePreferenceVariables = {
-  orgId: ..., 
+  orgId: ...,
 };
 
 // Call the `deleteMyUiStylePreferenceRef()` function to get a reference to the mutation.
@@ -3535,9 +3696,9 @@ import { connectorConfig, upsertUserUiStylePreferenceForOrg, UpsertUserUiStylePr
 
 // The `UpsertUserUiStylePreferenceForOrg` mutation requires an argument of type `UpsertUserUiStylePreferenceForOrgVariables`:
 const upsertUserUiStylePreferenceForOrgVars: UpsertUserUiStylePreferenceForOrgVariables = {
-  orgId: ..., 
-  uid: ..., 
-  styleId: ..., 
+  orgId: ...,
+  uid: ...,
+  styleId: ...,
   updatedBy: ..., // optional
 };
 
@@ -3568,9 +3729,9 @@ import { connectorConfig, upsertUserUiStylePreferenceForOrgRef, UpsertUserUiStyl
 
 // The `UpsertUserUiStylePreferenceForOrg` mutation requires an argument of type `UpsertUserUiStylePreferenceForOrgVariables`:
 const upsertUserUiStylePreferenceForOrgVars: UpsertUserUiStylePreferenceForOrgVariables = {
-  orgId: ..., 
-  uid: ..., 
-  styleId: ..., 
+  orgId: ...,
+  uid: ...,
+  styleId: ...,
   updatedBy: ..., // optional
 };
 
@@ -3651,8 +3812,8 @@ import { connectorConfig, deleteUserUiStylePreferenceForOrg, DeleteUserUiStylePr
 
 // The `DeleteUserUiStylePreferenceForOrg` mutation requires an argument of type `DeleteUserUiStylePreferenceForOrgVariables`:
 const deleteUserUiStylePreferenceForOrgVars: DeleteUserUiStylePreferenceForOrgVariables = {
-  orgId: ..., 
-  uid: ..., 
+  orgId: ...,
+  uid: ...,
 };
 
 // Call the `deleteUserUiStylePreferenceForOrg()` function to execute the mutation.
@@ -3682,8 +3843,8 @@ import { connectorConfig, deleteUserUiStylePreferenceForOrgRef, DeleteUserUiStyl
 
 // The `DeleteUserUiStylePreferenceForOrg` mutation requires an argument of type `DeleteUserUiStylePreferenceForOrgVariables`:
 const deleteUserUiStylePreferenceForOrgVars: DeleteUserUiStylePreferenceForOrgVariables = {
-  orgId: ..., 
-  uid: ..., 
+  orgId: ...,
+  uid: ...,
 };
 
 // Call the `deleteUserUiStylePreferenceForOrgRef()` function to get a reference to the mutation.
@@ -3807,8 +3968,8 @@ import { connectorConfig, insertClientForOrg, InsertClientForOrgVariables } from
 
 // The `InsertClientForOrg` mutation requires an argument of type `InsertClientForOrgVariables`:
 const insertClientForOrgVars: InsertClientForOrgVariables = {
-  orgId: ..., 
-  clientId: ..., 
+  orgId: ...,
+  clientId: ...,
   name: ..., // optional
   nip: ..., // optional
   city: ..., // optional
@@ -3882,8 +4043,8 @@ import { connectorConfig, insertClientForOrgRef, InsertClientForOrgVariables } f
 
 // The `InsertClientForOrg` mutation requires an argument of type `InsertClientForOrgVariables`:
 const insertClientForOrgVars: InsertClientForOrgVariables = {
-  orgId: ..., 
-  clientId: ..., 
+  orgId: ...,
+  clientId: ...,
   name: ..., // optional
   nip: ..., // optional
   city: ..., // optional
@@ -4051,8 +4212,8 @@ import { connectorConfig, updateClientForOrg, UpdateClientForOrgVariables } from
 
 // The `UpdateClientForOrg` mutation requires an argument of type `UpdateClientForOrgVariables`:
 const updateClientForOrgVars: UpdateClientForOrgVariables = {
-  orgId: ..., 
-  clientId: ..., 
+  orgId: ...,
+  clientId: ...,
   name: ..., // optional
   nip: ..., // optional
   city: ..., // optional
@@ -4126,8 +4287,8 @@ import { connectorConfig, updateClientForOrgRef, UpdateClientForOrgVariables } f
 
 // The `UpdateClientForOrg` mutation requires an argument of type `UpdateClientForOrgVariables`:
 const updateClientForOrgVars: UpdateClientForOrgVariables = {
-  orgId: ..., 
-  clientId: ..., 
+  orgId: ...,
+  clientId: ...,
   name: ..., // optional
   nip: ..., // optional
   city: ..., // optional
@@ -4251,8 +4412,8 @@ import { connectorConfig, deleteClientForOrg, DeleteClientForOrgVariables } from
 
 // The `DeleteClientForOrg` mutation requires an argument of type `DeleteClientForOrgVariables`:
 const deleteClientForOrgVars: DeleteClientForOrgVariables = {
-  orgId: ..., 
-  clientId: ..., 
+  orgId: ...,
+  clientId: ...,
 };
 
 // Call the `deleteClientForOrg()` function to execute the mutation.
@@ -4282,8 +4443,8 @@ import { connectorConfig, deleteClientForOrgRef, DeleteClientForOrgVariables } f
 
 // The `DeleteClientForOrg` mutation requires an argument of type `DeleteClientForOrgVariables`:
 const deleteClientForOrgVars: DeleteClientForOrgVariables = {
-  orgId: ..., 
-  clientId: ..., 
+  orgId: ...,
+  clientId: ...,
 };
 
 // Call the `deleteClientForOrgRef()` function to get a reference to the mutation.
@@ -4371,8 +4532,8 @@ import { connectorConfig, insertIndividualJobForOrg, InsertIndividualJobForOrgVa
 
 // The `InsertIndividualJobForOrg` mutation requires an argument of type `InsertIndividualJobForOrgVariables`:
 const insertIndividualJobForOrgVars: InsertIndividualJobForOrgVariables = {
-  orgId: ..., 
-  clientIndId: ..., 
+  orgId: ...,
+  clientIndId: ...,
   date: ..., // optional
   name: ..., // optional
   nip: ..., // optional
@@ -4410,8 +4571,8 @@ import { connectorConfig, insertIndividualJobForOrgRef, InsertIndividualJobForOr
 
 // The `InsertIndividualJobForOrg` mutation requires an argument of type `InsertIndividualJobForOrgVariables`:
 const insertIndividualJobForOrgVars: InsertIndividualJobForOrgVariables = {
-  orgId: ..., 
-  clientIndId: ..., 
+  orgId: ...,
+  clientIndId: ...,
   date: ..., // optional
   name: ..., // optional
   nip: ..., // optional
@@ -4507,8 +4668,8 @@ import { connectorConfig, updateIndividualJobForOrg, UpdateIndividualJobForOrgVa
 
 // The `UpdateIndividualJobForOrg` mutation requires an argument of type `UpdateIndividualJobForOrgVariables`:
 const updateIndividualJobForOrgVars: UpdateIndividualJobForOrgVariables = {
-  orgId: ..., 
-  clientIndId: ..., 
+  orgId: ...,
+  clientIndId: ...,
   date: ..., // optional
   name: ..., // optional
   nip: ..., // optional
@@ -4546,8 +4707,8 @@ import { connectorConfig, updateIndividualJobForOrgRef, UpdateIndividualJobForOr
 
 // The `UpdateIndividualJobForOrg` mutation requires an argument of type `UpdateIndividualJobForOrgVariables`:
 const updateIndividualJobForOrgVars: UpdateIndividualJobForOrgVariables = {
-  orgId: ..., 
-  clientIndId: ..., 
+  orgId: ...,
+  clientIndId: ...,
   date: ..., // optional
   name: ..., // optional
   nip: ..., // optional
@@ -4635,8 +4796,8 @@ import { connectorConfig, deleteIndividualJobForOrg, DeleteIndividualJobForOrgVa
 
 // The `DeleteIndividualJobForOrg` mutation requires an argument of type `DeleteIndividualJobForOrgVariables`:
 const deleteIndividualJobForOrgVars: DeleteIndividualJobForOrgVariables = {
-  orgId: ..., 
-  clientIndId: ..., 
+  orgId: ...,
+  clientIndId: ...,
 };
 
 // Call the `deleteIndividualJobForOrg()` function to execute the mutation.
@@ -4666,8 +4827,8 @@ import { connectorConfig, deleteIndividualJobForOrgRef, DeleteIndividualJobForOr
 
 // The `DeleteIndividualJobForOrg` mutation requires an argument of type `DeleteIndividualJobForOrgVariables`:
 const deleteIndividualJobForOrgVars: DeleteIndividualJobForOrgVariables = {
-  orgId: ..., 
-  clientIndId: ..., 
+  orgId: ...,
+  clientIndId: ...,
 };
 
 // Call the `deleteIndividualJobForOrgRef()` function to get a reference to the mutation.
@@ -4689,6 +4850,368 @@ console.log(data.individualClientJob_delete);
 executeMutation(ref).then((response) => {
   const data = response.data;
   console.log(data.individualClientJob_delete);
+});
+```
+
+## UpsertTaskForOrg
+You can execute the `UpsertTaskForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+upsertTaskForOrg(vars: UpsertTaskForOrgVariables): MutationPromise<UpsertTaskForOrgData, UpsertTaskForOrgVariables>;
+
+interface UpsertTaskForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpsertTaskForOrgVariables): MutationRef<UpsertTaskForOrgData, UpsertTaskForOrgVariables>;
+}
+export const upsertTaskForOrgRef: UpsertTaskForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+upsertTaskForOrg(dc: DataConnect, vars: UpsertTaskForOrgVariables): MutationPromise<UpsertTaskForOrgData, UpsertTaskForOrgVariables>;
+
+interface UpsertTaskForOrgRef {
+  ...
+  (dc: DataConnect, vars: UpsertTaskForOrgVariables): MutationRef<UpsertTaskForOrgData, UpsertTaskForOrgVariables>;
+}
+export const upsertTaskForOrgRef: UpsertTaskForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the upsertTaskForOrgRef:
+```typescript
+const name = upsertTaskForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `UpsertTaskForOrg` mutation requires an argument of type `UpsertTaskForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface UpsertTaskForOrgVariables {
+  orgId: string;
+  idTask: string;
+  dateYmd?: string | null;
+  startTime?: string | null;
+  endDateYmd?: string | null;
+  endTime?: string | null;
+  scheduleMode?: string | null;
+  accessStartTime?: string | null;
+  accessEndTime?: string | null;
+  accessWindows?: string | null;
+  requiredWorkMinutes?: number | null;
+  requiredPeople?: number | null;
+  workAllocations?: string | null;
+  workerId?: string | null;
+  workerIds?: string | null;
+  workerLabel?: string | null;
+  workerName?: string | null;
+  workerLogin?: string | null;
+  clientId?: string | null;
+  clientLabel?: string | null;
+  clientName?: string | null;
+  nip?: string | null;
+  street?: string | null;
+  city?: string | null;
+  postCode?: string | null;
+  addressLabel?: string | null;
+  executionAddressLabel?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  zoneId?: string | null;
+  zoneLabel?: string | null;
+  repeatPreset?: string | null;
+  repeatEvery?: number | null;
+  repeatUnit?: string | null;
+  repeatWeekdays?: string | null;
+  weeklyScheduleRules?: string | null;
+  title?: string | null;
+  type?: string | null;
+  price?: number | null;
+  description?: string | null;
+  workerComment?: string | null;
+  supplies?: string | null;
+  objectPlanTasks?: string | null;
+  allowExtendedWork?: boolean | null;
+  createdByUid?: string | null;
+  updatedByUid?: string | null;
+  createdAt?: TimestampString | null;
+  updatedAt?: TimestampString | null;
+}
+```
+### Return Type
+Recall that executing the `UpsertTaskForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `UpsertTaskForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface UpsertTaskForOrgData {
+  task_upsert: Task_Key;
+}
+```
+### Using `UpsertTaskForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, upsertTaskForOrg, UpsertTaskForOrgVariables } from '@dataconnect/generated';
+
+// The `UpsertTaskForOrg` mutation requires an argument of type `UpsertTaskForOrgVariables`:
+const upsertTaskForOrgVars: UpsertTaskForOrgVariables = {
+  orgId: ...,
+  idTask: ...,
+  dateYmd: ..., // optional
+  startTime: ..., // optional
+  endDateYmd: ..., // optional
+  endTime: ..., // optional
+  scheduleMode: ..., // optional
+  accessStartTime: ..., // optional
+  accessEndTime: ..., // optional
+  accessWindows: ..., // optional
+  requiredWorkMinutes: ..., // optional
+  requiredPeople: ..., // optional
+  workAllocations: ..., // optional
+  workerId: ..., // optional
+  workerIds: ..., // optional
+  workerLabel: ..., // optional
+  workerName: ..., // optional
+  workerLogin: ..., // optional
+  clientId: ..., // optional
+  clientLabel: ..., // optional
+  clientName: ..., // optional
+  nip: ..., // optional
+  street: ..., // optional
+  city: ..., // optional
+  postCode: ..., // optional
+  addressLabel: ..., // optional
+  executionAddressLabel: ..., // optional
+  lat: ..., // optional
+  lng: ..., // optional
+  zoneId: ..., // optional
+  zoneLabel: ..., // optional
+  repeatPreset: ..., // optional
+  repeatEvery: ..., // optional
+  repeatUnit: ..., // optional
+  repeatWeekdays: ..., // optional
+  weeklyScheduleRules: ..., // optional
+  title: ..., // optional
+  type: ..., // optional
+  price: ..., // optional
+  description: ..., // optional
+  workerComment: ..., // optional
+  supplies: ..., // optional
+  objectPlanTasks: ..., // optional
+  allowExtendedWork: ..., // optional
+  createdByUid: ..., // optional
+  updatedByUid: ..., // optional
+  createdAt: ..., // optional
+  updatedAt: ..., // optional
+};
+
+// Call the `upsertTaskForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await upsertTaskForOrg(upsertTaskForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await upsertTaskForOrg({ orgId: ..., idTask: ..., dateYmd: ..., startTime: ..., endDateYmd: ..., endTime: ..., scheduleMode: ..., accessStartTime: ..., accessEndTime: ..., accessWindows: ..., requiredWorkMinutes: ..., requiredPeople: ..., workAllocations: ..., workerId: ..., workerIds: ..., workerLabel: ..., workerName: ..., workerLogin: ..., clientId: ..., clientLabel: ..., clientName: ..., nip: ..., street: ..., city: ..., postCode: ..., addressLabel: ..., executionAddressLabel: ..., lat: ..., lng: ..., zoneId: ..., zoneLabel: ..., repeatPreset: ..., repeatEvery: ..., repeatUnit: ..., repeatWeekdays: ..., weeklyScheduleRules: ..., title: ..., type: ..., price: ..., description: ..., workerComment: ..., supplies: ..., objectPlanTasks: ..., allowExtendedWork: ..., createdByUid: ..., updatedByUid: ..., createdAt: ..., updatedAt: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await upsertTaskForOrg(dataConnect, upsertTaskForOrgVars);
+
+console.log(data.task_upsert);
+
+// Or, you can use the `Promise` API.
+upsertTaskForOrg(upsertTaskForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.task_upsert);
+});
+```
+
+### Using `UpsertTaskForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, upsertTaskForOrgRef, UpsertTaskForOrgVariables } from '@dataconnect/generated';
+
+// The `UpsertTaskForOrg` mutation requires an argument of type `UpsertTaskForOrgVariables`:
+const upsertTaskForOrgVars: UpsertTaskForOrgVariables = {
+  orgId: ...,
+  idTask: ...,
+  dateYmd: ..., // optional
+  startTime: ..., // optional
+  endDateYmd: ..., // optional
+  endTime: ..., // optional
+  scheduleMode: ..., // optional
+  accessStartTime: ..., // optional
+  accessEndTime: ..., // optional
+  accessWindows: ..., // optional
+  requiredWorkMinutes: ..., // optional
+  requiredPeople: ..., // optional
+  workAllocations: ..., // optional
+  workerId: ..., // optional
+  workerIds: ..., // optional
+  workerLabel: ..., // optional
+  workerName: ..., // optional
+  workerLogin: ..., // optional
+  clientId: ..., // optional
+  clientLabel: ..., // optional
+  clientName: ..., // optional
+  nip: ..., // optional
+  street: ..., // optional
+  city: ..., // optional
+  postCode: ..., // optional
+  addressLabel: ..., // optional
+  executionAddressLabel: ..., // optional
+  lat: ..., // optional
+  lng: ..., // optional
+  zoneId: ..., // optional
+  zoneLabel: ..., // optional
+  repeatPreset: ..., // optional
+  repeatEvery: ..., // optional
+  repeatUnit: ..., // optional
+  repeatWeekdays: ..., // optional
+  weeklyScheduleRules: ..., // optional
+  title: ..., // optional
+  type: ..., // optional
+  price: ..., // optional
+  description: ..., // optional
+  workerComment: ..., // optional
+  supplies: ..., // optional
+  objectPlanTasks: ..., // optional
+  allowExtendedWork: ..., // optional
+  createdByUid: ..., // optional
+  updatedByUid: ..., // optional
+  createdAt: ..., // optional
+  updatedAt: ..., // optional
+};
+
+// Call the `upsertTaskForOrgRef()` function to get a reference to the mutation.
+const ref = upsertTaskForOrgRef(upsertTaskForOrgVars);
+// Variables can be defined inline as well.
+const ref = upsertTaskForOrgRef({ orgId: ..., idTask: ..., dateYmd: ..., startTime: ..., endDateYmd: ..., endTime: ..., scheduleMode: ..., accessStartTime: ..., accessEndTime: ..., accessWindows: ..., requiredWorkMinutes: ..., requiredPeople: ..., workAllocations: ..., workerId: ..., workerIds: ..., workerLabel: ..., workerName: ..., workerLogin: ..., clientId: ..., clientLabel: ..., clientName: ..., nip: ..., street: ..., city: ..., postCode: ..., addressLabel: ..., executionAddressLabel: ..., lat: ..., lng: ..., zoneId: ..., zoneLabel: ..., repeatPreset: ..., repeatEvery: ..., repeatUnit: ..., repeatWeekdays: ..., weeklyScheduleRules: ..., title: ..., type: ..., price: ..., description: ..., workerComment: ..., supplies: ..., objectPlanTasks: ..., allowExtendedWork: ..., createdByUid: ..., updatedByUid: ..., createdAt: ..., updatedAt: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = upsertTaskForOrgRef(dataConnect, upsertTaskForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.task_upsert);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.task_upsert);
+});
+```
+
+## DeleteTaskForOrg
+You can execute the `DeleteTaskForOrg` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+deleteTaskForOrg(vars: DeleteTaskForOrgVariables): MutationPromise<DeleteTaskForOrgData, DeleteTaskForOrgVariables>;
+
+interface DeleteTaskForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteTaskForOrgVariables): MutationRef<DeleteTaskForOrgData, DeleteTaskForOrgVariables>;
+}
+export const deleteTaskForOrgRef: DeleteTaskForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+deleteTaskForOrg(dc: DataConnect, vars: DeleteTaskForOrgVariables): MutationPromise<DeleteTaskForOrgData, DeleteTaskForOrgVariables>;
+
+interface DeleteTaskForOrgRef {
+  ...
+  (dc: DataConnect, vars: DeleteTaskForOrgVariables): MutationRef<DeleteTaskForOrgData, DeleteTaskForOrgVariables>;
+}
+export const deleteTaskForOrgRef: DeleteTaskForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the deleteTaskForOrgRef:
+```typescript
+const name = deleteTaskForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `DeleteTaskForOrg` mutation requires an argument of type `DeleteTaskForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface DeleteTaskForOrgVariables {
+  orgId: string;
+  idTask: string;
+}
+```
+### Return Type
+Recall that executing the `DeleteTaskForOrg` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `DeleteTaskForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface DeleteTaskForOrgData {
+  task_delete?: Task_Key | null;
+}
+```
+### Using `DeleteTaskForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, deleteTaskForOrg, DeleteTaskForOrgVariables } from '@dataconnect/generated';
+
+// The `DeleteTaskForOrg` mutation requires an argument of type `DeleteTaskForOrgVariables`:
+const deleteTaskForOrgVars: DeleteTaskForOrgVariables = {
+  orgId: ...,
+  idTask: ...,
+};
+
+// Call the `deleteTaskForOrg()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await deleteTaskForOrg(deleteTaskForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await deleteTaskForOrg({ orgId: ..., idTask: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await deleteTaskForOrg(dataConnect, deleteTaskForOrgVars);
+
+console.log(data.task_delete);
+
+// Or, you can use the `Promise` API.
+deleteTaskForOrg(deleteTaskForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.task_delete);
+});
+```
+
+### Using `DeleteTaskForOrg`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, deleteTaskForOrgRef, DeleteTaskForOrgVariables } from '@dataconnect/generated';
+
+// The `DeleteTaskForOrg` mutation requires an argument of type `DeleteTaskForOrgVariables`:
+const deleteTaskForOrgVars: DeleteTaskForOrgVariables = {
+  orgId: ...,
+  idTask: ...,
+};
+
+// Call the `deleteTaskForOrgRef()` function to get a reference to the mutation.
+const ref = deleteTaskForOrgRef(deleteTaskForOrgVars);
+// Variables can be defined inline as well.
+const ref = deleteTaskForOrgRef({ orgId: ..., idTask: ..., });
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = deleteTaskForOrgRef(dataConnect, deleteTaskForOrgVars);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.task_delete);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.task_delete);
 });
 ```
 
@@ -4753,9 +5276,9 @@ import { connectorConfig, insertZoneForOrg, InsertZoneForOrgVariables } from '@d
 
 // The `InsertZoneForOrg` mutation requires an argument of type `InsertZoneForOrgVariables`:
 const insertZoneForOrgVars: InsertZoneForOrgVariables = {
-  orgId: ..., 
-  zoneId: ..., 
-  clientId: ..., 
+  orgId: ...,
+  zoneId: ...,
+  clientId: ...,
   zone: ..., // optional
   function: ..., // optional
   editedBy: ..., // optional
@@ -4790,9 +5313,9 @@ import { connectorConfig, insertZoneForOrgRef, InsertZoneForOrgVariables } from 
 
 // The `InsertZoneForOrg` mutation requires an argument of type `InsertZoneForOrgVariables`:
 const insertZoneForOrgVars: InsertZoneForOrgVariables = {
-  orgId: ..., 
-  zoneId: ..., 
-  clientId: ..., 
+  orgId: ...,
+  zoneId: ...,
+  clientId: ...,
   zone: ..., // optional
   function: ..., // optional
   editedBy: ..., // optional
@@ -4883,9 +5406,9 @@ import { connectorConfig, updateZoneForOrg, UpdateZoneForOrgVariables } from '@d
 
 // The `UpdateZoneForOrg` mutation requires an argument of type `UpdateZoneForOrgVariables`:
 const updateZoneForOrgVars: UpdateZoneForOrgVariables = {
-  orgId: ..., 
-  zoneId: ..., 
-  clientId: ..., 
+  orgId: ...,
+  zoneId: ...,
+  clientId: ...,
   zone: ..., // optional
   function: ..., // optional
   editedBy: ..., // optional
@@ -4920,9 +5443,9 @@ import { connectorConfig, updateZoneForOrgRef, UpdateZoneForOrgVariables } from 
 
 // The `UpdateZoneForOrg` mutation requires an argument of type `UpdateZoneForOrgVariables`:
 const updateZoneForOrgVars: UpdateZoneForOrgVariables = {
-  orgId: ..., 
-  zoneId: ..., 
-  clientId: ..., 
+  orgId: ...,
+  zoneId: ...,
+  clientId: ...,
   zone: ..., // optional
   function: ..., // optional
   editedBy: ..., // optional
@@ -5007,8 +5530,8 @@ import { connectorConfig, deleteZoneForOrg, DeleteZoneForOrgVariables } from '@d
 
 // The `DeleteZoneForOrg` mutation requires an argument of type `DeleteZoneForOrgVariables`:
 const deleteZoneForOrgVars: DeleteZoneForOrgVariables = {
-  orgId: ..., 
-  zoneId: ..., 
+  orgId: ...,
+  zoneId: ...,
 };
 
 // Call the `deleteZoneForOrg()` function to execute the mutation.
@@ -5038,8 +5561,8 @@ import { connectorConfig, deleteZoneForOrgRef, DeleteZoneForOrgVariables } from 
 
 // The `DeleteZoneForOrg` mutation requires an argument of type `DeleteZoneForOrgVariables`:
 const deleteZoneForOrgVars: DeleteZoneForOrgVariables = {
-  orgId: ..., 
-  zoneId: ..., 
+  orgId: ...,
+  zoneId: ...,
 };
 
 // Call the `deleteZoneForOrgRef()` function to get a reference to the mutation.
@@ -5129,9 +5652,9 @@ import { connectorConfig, insertWorkdayForOrg, InsertWorkdayForOrgVariables } fr
 
 // The `InsertWorkdayForOrg` mutation requires an argument of type `InsertWorkdayForOrgVariables`:
 const insertWorkdayForOrgVars: InsertWorkdayForOrgVariables = {
-  orgId: ..., 
-  workdayId: ..., 
-  workerLogin: ..., 
+  orgId: ...,
+  workdayId: ...,
+  workerLogin: ...,
   workerName: ..., // optional
   utilityRoomId: ..., // optional
   startAt: ..., // optional
@@ -5170,9 +5693,9 @@ import { connectorConfig, insertWorkdayForOrgRef, InsertWorkdayForOrgVariables }
 
 // The `InsertWorkdayForOrg` mutation requires an argument of type `InsertWorkdayForOrgVariables`:
 const insertWorkdayForOrgVars: InsertWorkdayForOrgVariables = {
-  orgId: ..., 
-  workdayId: ..., 
-  workerLogin: ..., 
+  orgId: ...,
+  workdayId: ...,
+  workerLogin: ...,
   workerName: ..., // optional
   utilityRoomId: ..., // optional
   startAt: ..., // optional
@@ -5271,9 +5794,9 @@ import { connectorConfig, updateWorkdayForOrg, UpdateWorkdayForOrgVariables } fr
 
 // The `UpdateWorkdayForOrg` mutation requires an argument of type `UpdateWorkdayForOrgVariables`:
 const updateWorkdayForOrgVars: UpdateWorkdayForOrgVariables = {
-  orgId: ..., 
-  workdayId: ..., 
-  workerLogin: ..., 
+  orgId: ...,
+  workdayId: ...,
+  workerLogin: ...,
   workerName: ..., // optional
   utilityRoomId: ..., // optional
   startAt: ..., // optional
@@ -5312,9 +5835,9 @@ import { connectorConfig, updateWorkdayForOrgRef, UpdateWorkdayForOrgVariables }
 
 // The `UpdateWorkdayForOrg` mutation requires an argument of type `UpdateWorkdayForOrgVariables`:
 const updateWorkdayForOrgVars: UpdateWorkdayForOrgVariables = {
-  orgId: ..., 
-  workdayId: ..., 
-  workerLogin: ..., 
+  orgId: ...,
+  workdayId: ...,
+  workerLogin: ...,
   workerName: ..., // optional
   utilityRoomId: ..., // optional
   startAt: ..., // optional
@@ -5403,8 +5926,8 @@ import { connectorConfig, deleteWorkdayForOrg, DeleteWorkdayForOrgVariables } fr
 
 // The `DeleteWorkdayForOrg` mutation requires an argument of type `DeleteWorkdayForOrgVariables`:
 const deleteWorkdayForOrgVars: DeleteWorkdayForOrgVariables = {
-  orgId: ..., 
-  workdayId: ..., 
+  orgId: ...,
+  workdayId: ...,
 };
 
 // Call the `deleteWorkdayForOrg()` function to execute the mutation.
@@ -5434,8 +5957,8 @@ import { connectorConfig, deleteWorkdayForOrgRef, DeleteWorkdayForOrgVariables }
 
 // The `DeleteWorkdayForOrg` mutation requires an argument of type `DeleteWorkdayForOrgVariables`:
 const deleteWorkdayForOrgVars: DeleteWorkdayForOrgVariables = {
-  orgId: ..., 
-  workdayId: ..., 
+  orgId: ...,
+  workdayId: ...,
 };
 
 // Call the `deleteWorkdayForOrgRef()` function to get a reference to the mutation.
@@ -5529,8 +6052,8 @@ import { connectorConfig, insertEventForOrg, InsertEventForOrgVariables } from '
 
 // The `InsertEventForOrg` mutation requires an argument of type `InsertEventForOrgVariables`:
 const insertEventForOrgVars: InsertEventForOrgVariables = {
-  orgId: ..., 
-  eventId: ..., 
+  orgId: ...,
+  eventId: ...,
   workdayId: ..., // optional
   zoneId: ..., // optional
   workerLogin: ..., // optional
@@ -5574,8 +6097,8 @@ import { connectorConfig, insertEventForOrgRef, InsertEventForOrgVariables } fro
 
 // The `InsertEventForOrg` mutation requires an argument of type `InsertEventForOrgVariables`:
 const insertEventForOrgVars: InsertEventForOrgVariables = {
-  orgId: ..., 
-  eventId: ..., 
+  orgId: ...,
+  eventId: ...,
   workdayId: ..., // optional
   zoneId: ..., // optional
   workerLogin: ..., // optional
@@ -5683,8 +6206,8 @@ import { connectorConfig, updateEventForOrg, UpdateEventForOrgVariables } from '
 
 // The `UpdateEventForOrg` mutation requires an argument of type `UpdateEventForOrgVariables`:
 const updateEventForOrgVars: UpdateEventForOrgVariables = {
-  orgId: ..., 
-  eventId: ..., 
+  orgId: ...,
+  eventId: ...,
   workdayId: ..., // optional
   zoneId: ..., // optional
   workerLogin: ..., // optional
@@ -5728,8 +6251,8 @@ import { connectorConfig, updateEventForOrgRef, UpdateEventForOrgVariables } fro
 
 // The `UpdateEventForOrg` mutation requires an argument of type `UpdateEventForOrgVariables`:
 const updateEventForOrgVars: UpdateEventForOrgVariables = {
-  orgId: ..., 
-  eventId: ..., 
+  orgId: ...,
+  eventId: ...,
   workdayId: ..., // optional
   zoneId: ..., // optional
   workerLogin: ..., // optional
@@ -5823,8 +6346,8 @@ import { connectorConfig, deleteEventForOrg, DeleteEventForOrgVariables } from '
 
 // The `DeleteEventForOrg` mutation requires an argument of type `DeleteEventForOrgVariables`:
 const deleteEventForOrgVars: DeleteEventForOrgVariables = {
-  orgId: ..., 
-  eventId: ..., 
+  orgId: ...,
+  eventId: ...,
 };
 
 // Call the `deleteEventForOrg()` function to execute the mutation.
@@ -5854,8 +6377,8 @@ import { connectorConfig, deleteEventForOrgRef, DeleteEventForOrgVariables } fro
 
 // The `DeleteEventForOrg` mutation requires an argument of type `DeleteEventForOrgVariables`:
 const deleteEventForOrgVars: DeleteEventForOrgVariables = {
-  orgId: ..., 
-  eventId: ..., 
+  orgId: ...,
+  eventId: ...,
 };
 
 // Call the `deleteEventForOrgRef()` function to get a reference to the mutation.
@@ -5950,8 +6473,8 @@ import { connectorConfig, insertBackupCycleForOrg, InsertBackupCycleForOrgVariab
 
 // The `InsertBackupCycleForOrg` mutation requires an argument of type `InsertBackupCycleForOrgVariables`:
 const insertBackupCycleForOrgVars: InsertBackupCycleForOrgVariables = {
-  orgId: ..., 
-  cycleId: ..., 
+  orgId: ...,
+  cycleId: ...,
   workerLogin: ..., // optional
   workerName: ..., // optional
   roomId: ..., // optional
@@ -5996,8 +6519,8 @@ import { connectorConfig, insertBackupCycleForOrgRef, InsertBackupCycleForOrgVar
 
 // The `InsertBackupCycleForOrg` mutation requires an argument of type `InsertBackupCycleForOrgVariables`:
 const insertBackupCycleForOrgVars: InsertBackupCycleForOrgVariables = {
-  orgId: ..., 
-  cycleId: ..., 
+  orgId: ...,
+  cycleId: ...,
   workerLogin: ..., // optional
   workerName: ..., // optional
   roomId: ..., // optional
@@ -6107,8 +6630,8 @@ import { connectorConfig, updateBackupCycleForOrg, UpdateBackupCycleForOrgVariab
 
 // The `UpdateBackupCycleForOrg` mutation requires an argument of type `UpdateBackupCycleForOrgVariables`:
 const updateBackupCycleForOrgVars: UpdateBackupCycleForOrgVariables = {
-  orgId: ..., 
-  cycleId: ..., 
+  orgId: ...,
+  cycleId: ...,
   workerLogin: ..., // optional
   workerName: ..., // optional
   roomId: ..., // optional
@@ -6153,8 +6676,8 @@ import { connectorConfig, updateBackupCycleForOrgRef, UpdateBackupCycleForOrgVar
 
 // The `UpdateBackupCycleForOrg` mutation requires an argument of type `UpdateBackupCycleForOrgVariables`:
 const updateBackupCycleForOrgVars: UpdateBackupCycleForOrgVariables = {
-  orgId: ..., 
-  cycleId: ..., 
+  orgId: ...,
+  cycleId: ...,
   workerLogin: ..., // optional
   workerName: ..., // optional
   roomId: ..., // optional
@@ -6257,11 +6780,11 @@ import { connectorConfig, insertStorageForOrg, InsertStorageForOrgVariables } fr
 
 // The `InsertStorageForOrg` mutation requires an argument of type `InsertStorageForOrgVariables`:
 const insertStorageForOrgVars: InsertStorageForOrgVariables = {
-  orgId: ..., 
-  productIndex: ..., 
-  productId: ..., 
-  name: ..., 
-  productType: ..., 
+  orgId: ...,
+  productIndex: ...,
+  productId: ...,
+  name: ...,
+  productType: ...,
   quantity: ..., // optional
   quantityMin: ..., // optional
   quantityMax: ..., // optional
@@ -6296,11 +6819,11 @@ import { connectorConfig, insertStorageForOrgRef, InsertStorageForOrgVariables }
 
 // The `InsertStorageForOrg` mutation requires an argument of type `InsertStorageForOrgVariables`:
 const insertStorageForOrgVars: InsertStorageForOrgVariables = {
-  orgId: ..., 
-  productIndex: ..., 
-  productId: ..., 
-  name: ..., 
-  productType: ..., 
+  orgId: ...,
+  productIndex: ...,
+  productId: ...,
+  name: ...,
+  productType: ...,
   quantity: ..., // optional
   quantityMin: ..., // optional
   quantityMax: ..., // optional
@@ -6393,8 +6916,8 @@ import { connectorConfig, updateStorageForOrg, UpdateStorageForOrgVariables } fr
 
 // The `UpdateStorageForOrg` mutation requires an argument of type `UpdateStorageForOrgVariables`:
 const updateStorageForOrgVars: UpdateStorageForOrgVariables = {
-  orgId: ..., 
-  productIndex: ..., 
+  orgId: ...,
+  productIndex: ...,
   productId: ..., // optional
   name: ..., // optional
   productType: ..., // optional
@@ -6432,8 +6955,8 @@ import { connectorConfig, updateStorageForOrgRef, UpdateStorageForOrgVariables }
 
 // The `UpdateStorageForOrg` mutation requires an argument of type `UpdateStorageForOrgVariables`:
 const updateStorageForOrgVars: UpdateStorageForOrgVariables = {
-  orgId: ..., 
-  productIndex: ..., 
+  orgId: ...,
+  productIndex: ...,
   productId: ..., // optional
   name: ..., // optional
   productType: ..., // optional
@@ -6521,8 +7044,8 @@ import { connectorConfig, deleteStorageForOrg, DeleteStorageForOrgVariables } fr
 
 // The `DeleteStorageForOrg` mutation requires an argument of type `DeleteStorageForOrgVariables`:
 const deleteStorageForOrgVars: DeleteStorageForOrgVariables = {
-  orgId: ..., 
-  productIndex: ..., 
+  orgId: ...,
+  productIndex: ...,
 };
 
 // Call the `deleteStorageForOrg()` function to execute the mutation.
@@ -6552,8 +7075,8 @@ import { connectorConfig, deleteStorageForOrgRef, DeleteStorageForOrgVariables }
 
 // The `DeleteStorageForOrg` mutation requires an argument of type `DeleteStorageForOrgVariables`:
 const deleteStorageForOrgVars: DeleteStorageForOrgVariables = {
-  orgId: ..., 
-  productIndex: ..., 
+  orgId: ...,
+  productIndex: ...,
 };
 
 // Call the `deleteStorageForOrgRef()` function to get a reference to the mutation.
@@ -6640,11 +7163,11 @@ import { connectorConfig, insertClientStorageForOrg, InsertClientStorageForOrgVa
 
 // The `InsertClientStorageForOrg` mutation requires an argument of type `InsertClientStorageForOrgVariables`:
 const insertClientStorageForOrgVars: InsertClientStorageForOrgVariables = {
-  orgId: ..., 
-  clientId: ..., 
-  productIndex: ..., 
-  name: ..., 
-  productType: ..., 
+  orgId: ...,
+  clientId: ...,
+  productIndex: ...,
+  name: ...,
+  productType: ...,
   quantity: ..., // optional
   quantityMin: ..., // optional
   quantityMax: ..., // optional
@@ -6678,11 +7201,11 @@ import { connectorConfig, insertClientStorageForOrgRef, InsertClientStorageForOr
 
 // The `InsertClientStorageForOrg` mutation requires an argument of type `InsertClientStorageForOrgVariables`:
 const insertClientStorageForOrgVars: InsertClientStorageForOrgVariables = {
-  orgId: ..., 
-  clientId: ..., 
-  productIndex: ..., 
-  name: ..., 
-  productType: ..., 
+  orgId: ...,
+  clientId: ...,
+  productIndex: ...,
+  name: ...,
+  productType: ...,
   quantity: ..., // optional
   quantityMin: ..., // optional
   quantityMax: ..., // optional
@@ -6773,9 +7296,9 @@ import { connectorConfig, updateClientStorageForOrg, UpdateClientStorageForOrgVa
 
 // The `UpdateClientStorageForOrg` mutation requires an argument of type `UpdateClientStorageForOrgVariables`:
 const updateClientStorageForOrgVars: UpdateClientStorageForOrgVariables = {
-  orgId: ..., 
-  clientId: ..., 
-  productIndex: ..., 
+  orgId: ...,
+  clientId: ...,
+  productIndex: ...,
   name: ..., // optional
   productType: ..., // optional
   quantity: ..., // optional
@@ -6811,9 +7334,9 @@ import { connectorConfig, updateClientStorageForOrgRef, UpdateClientStorageForOr
 
 // The `UpdateClientStorageForOrg` mutation requires an argument of type `UpdateClientStorageForOrgVariables`:
 const updateClientStorageForOrgVars: UpdateClientStorageForOrgVariables = {
-  orgId: ..., 
-  clientId: ..., 
-  productIndex: ..., 
+  orgId: ...,
+  clientId: ...,
+  productIndex: ...,
   name: ..., // optional
   productType: ..., // optional
   quantity: ..., // optional
@@ -6900,9 +7423,9 @@ import { connectorConfig, deleteClientStorageForOrg, DeleteClientStorageForOrgVa
 
 // The `DeleteClientStorageForOrg` mutation requires an argument of type `DeleteClientStorageForOrgVariables`:
 const deleteClientStorageForOrgVars: DeleteClientStorageForOrgVariables = {
-  orgId: ..., 
-  clientId: ..., 
-  productIndex: ..., 
+  orgId: ...,
+  clientId: ...,
+  productIndex: ...,
 };
 
 // Call the `deleteClientStorageForOrg()` function to execute the mutation.
@@ -6932,9 +7455,9 @@ import { connectorConfig, deleteClientStorageForOrgRef, DeleteClientStorageForOr
 
 // The `DeleteClientStorageForOrg` mutation requires an argument of type `DeleteClientStorageForOrgVariables`:
 const deleteClientStorageForOrgVars: DeleteClientStorageForOrgVariables = {
-  orgId: ..., 
-  clientId: ..., 
-  productIndex: ..., 
+  orgId: ...,
+  clientId: ...,
+  productIndex: ...,
 };
 
 // Call the `deleteClientStorageForOrgRef()` function to get a reference to the mutation.
@@ -7024,10 +7547,10 @@ import { connectorConfig, startWorkdayPause, StartWorkdayPauseVariables } from '
 
 // The `StartWorkdayPause` mutation requires an argument of type `StartWorkdayPauseVariables`:
 const startWorkdayPauseVars: StartWorkdayPauseVariables = {
-  orgId: ..., 
-  pauseId: ..., 
-  workdayId: ..., 
-  workerLogin: ..., 
+  orgId: ...,
+  pauseId: ...,
+  workdayId: ...,
+  workerLogin: ...,
   workerName: ..., // optional
   startAt: ..., // optional
   stopAt: ..., // optional
@@ -7066,10 +7589,10 @@ import { connectorConfig, startWorkdayPauseRef, StartWorkdayPauseVariables } fro
 
 // The `StartWorkdayPause` mutation requires an argument of type `StartWorkdayPauseVariables`:
 const startWorkdayPauseVars: StartWorkdayPauseVariables = {
-  orgId: ..., 
-  pauseId: ..., 
-  workdayId: ..., 
-  workerLogin: ..., 
+  orgId: ...,
+  pauseId: ...,
+  workdayId: ...,
+  workerLogin: ...,
   workerName: ..., // optional
   startAt: ..., // optional
   stopAt: ..., // optional
@@ -7164,9 +7687,9 @@ import { connectorConfig, stopWorkdayPause, StopWorkdayPauseVariables } from '@d
 
 // The `StopWorkdayPause` mutation requires an argument of type `StopWorkdayPauseVariables`:
 const stopWorkdayPauseVars: StopWorkdayPauseVariables = {
-  orgId: ..., 
-  pauseId: ..., 
-  workdayId: ..., 
+  orgId: ...,
+  pauseId: ...,
+  workdayId: ...,
   workerLogin: ..., // optional
   stopAt: ..., // optional
   durationSec: ..., // optional
@@ -7202,9 +7725,9 @@ import { connectorConfig, stopWorkdayPauseRef, StopWorkdayPauseVariables } from 
 
 // The `StopWorkdayPause` mutation requires an argument of type `StopWorkdayPauseVariables`:
 const stopWorkdayPauseVars: StopWorkdayPauseVariables = {
-  orgId: ..., 
-  pauseId: ..., 
-  workdayId: ..., 
+  orgId: ...,
+  pauseId: ...,
+  workdayId: ...,
   workerLogin: ..., // optional
   stopAt: ..., // optional
   durationSec: ..., // optional

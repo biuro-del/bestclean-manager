@@ -303,6 +303,15 @@ export interface DeleteStorageForOrgVariables {
   productIndex: string;
 }
 
+export interface DeleteTaskForOrgData {
+  task_delete?: Task_Key | null;
+}
+
+export interface DeleteTaskForOrgVariables {
+  orgId: string;
+  idTask: string;
+}
+
 export interface DeleteUserUiStylePreferenceForOrgData {
   userUiStylePreference_delete?: UserUiStylePreference_Key | null;
 }
@@ -732,6 +741,69 @@ export interface Storage_Key {
   __typename?: 'Storage_Key';
 }
 
+export interface Task_Key {
+  orgId: string;
+  idTask: string;
+  __typename?: 'Task_Key';
+}
+
+export interface TasksForOrgData {
+  tasks: ({
+    orgId: string;
+    idTask: string;
+    dateYmd?: string | null;
+    startTime?: string | null;
+    endDateYmd?: string | null;
+    endTime?: string | null;
+    scheduleMode?: string | null;
+    accessStartTime?: string | null;
+    accessEndTime?: string | null;
+    accessWindows?: string | null;
+    requiredWorkMinutes?: number | null;
+    requiredPeople?: number | null;
+    workAllocations?: string | null;
+    workerId?: string | null;
+    workerIds?: string | null;
+    workerLabel?: string | null;
+    workerName?: string | null;
+    workerLogin?: string | null;
+    clientId?: string | null;
+    clientLabel?: string | null;
+    clientName?: string | null;
+    nip?: string | null;
+    street?: string | null;
+    city?: string | null;
+    postCode?: string | null;
+    addressLabel?: string | null;
+    executionAddressLabel?: string | null;
+    lat?: number | null;
+    lng?: number | null;
+    zoneId?: string | null;
+    zoneLabel?: string | null;
+    repeatPreset?: string | null;
+    repeatEvery?: number | null;
+    repeatUnit?: string | null;
+    repeatWeekdays?: string | null;
+    weeklyScheduleRules?: string | null;
+    title?: string | null;
+    type?: string | null;
+    price?: number | null;
+    description?: string | null;
+    workerComment?: string | null;
+    supplies?: string | null;
+    objectPlanTasks?: string | null;
+    allowExtendedWork?: boolean | null;
+    createdByUid?: string | null;
+    updatedByUid?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+  } & Task_Key)[];
+}
+
+export interface TasksForOrgVariables {
+  orgId: string;
+}
+
 export interface UpdateBackupCycleForOrgData {
   backupCycle_update?: BackupCycle_Key | null;
 }
@@ -952,6 +1024,61 @@ export interface UpsertOrgUiStyleForOrgVariables {
   orgId: string;
   styleId: string;
   updatedBy?: string | null;
+}
+
+export interface UpsertTaskForOrgData {
+  task_upsert: Task_Key;
+}
+
+export interface UpsertTaskForOrgVariables {
+  orgId: string;
+  idTask: string;
+  dateYmd?: string | null;
+  startTime?: string | null;
+  endDateYmd?: string | null;
+  endTime?: string | null;
+  scheduleMode?: string | null;
+  accessStartTime?: string | null;
+  accessEndTime?: string | null;
+  accessWindows?: string | null;
+  requiredWorkMinutes?: number | null;
+  requiredPeople?: number | null;
+  workAllocations?: string | null;
+  workerId?: string | null;
+  workerIds?: string | null;
+  workerLabel?: string | null;
+  workerName?: string | null;
+  workerLogin?: string | null;
+  clientId?: string | null;
+  clientLabel?: string | null;
+  clientName?: string | null;
+  nip?: string | null;
+  street?: string | null;
+  city?: string | null;
+  postCode?: string | null;
+  addressLabel?: string | null;
+  executionAddressLabel?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  zoneId?: string | null;
+  zoneLabel?: string | null;
+  repeatPreset?: string | null;
+  repeatEvery?: number | null;
+  repeatUnit?: string | null;
+  repeatWeekdays?: string | null;
+  weeklyScheduleRules?: string | null;
+  title?: string | null;
+  type?: string | null;
+  price?: number | null;
+  description?: string | null;
+  workerComment?: string | null;
+  supplies?: string | null;
+  objectPlanTasks?: string | null;
+  allowExtendedWork?: boolean | null;
+  createdByUid?: string | null;
+  updatedByUid?: string | null;
+  createdAt?: TimestampString | null;
+  updatedAt?: TimestampString | null;
 }
 
 export interface UpsertUserUiStylePreferenceForOrgData {
@@ -1337,6 +1464,30 @@ export const deleteIndividualJobForOrgRef: DeleteIndividualJobForOrgRef;
 export function deleteIndividualJobForOrg(vars: DeleteIndividualJobForOrgVariables): MutationPromise<DeleteIndividualJobForOrgData, DeleteIndividualJobForOrgVariables>;
 export function deleteIndividualJobForOrg(dc: DataConnect, vars: DeleteIndividualJobForOrgVariables): MutationPromise<DeleteIndividualJobForOrgData, DeleteIndividualJobForOrgVariables>;
 
+interface UpsertTaskForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpsertTaskForOrgVariables): MutationRef<UpsertTaskForOrgData, UpsertTaskForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpsertTaskForOrgVariables): MutationRef<UpsertTaskForOrgData, UpsertTaskForOrgVariables>;
+  operationName: string;
+}
+export const upsertTaskForOrgRef: UpsertTaskForOrgRef;
+
+export function upsertTaskForOrg(vars: UpsertTaskForOrgVariables): MutationPromise<UpsertTaskForOrgData, UpsertTaskForOrgVariables>;
+export function upsertTaskForOrg(dc: DataConnect, vars: UpsertTaskForOrgVariables): MutationPromise<UpsertTaskForOrgData, UpsertTaskForOrgVariables>;
+
+interface DeleteTaskForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteTaskForOrgVariables): MutationRef<DeleteTaskForOrgData, DeleteTaskForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteTaskForOrgVariables): MutationRef<DeleteTaskForOrgData, DeleteTaskForOrgVariables>;
+  operationName: string;
+}
+export const deleteTaskForOrgRef: DeleteTaskForOrgRef;
+
+export function deleteTaskForOrg(vars: DeleteTaskForOrgVariables): MutationPromise<DeleteTaskForOrgData, DeleteTaskForOrgVariables>;
+export function deleteTaskForOrg(dc: DataConnect, vars: DeleteTaskForOrgVariables): MutationPromise<DeleteTaskForOrgData, DeleteTaskForOrgVariables>;
+
 interface InsertZoneForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
   (vars: InsertZoneForOrgVariables): MutationRef<InsertZoneForOrgData, InsertZoneForOrgVariables>;
@@ -1672,6 +1823,18 @@ export const individualJobsForOrgRef: IndividualJobsForOrgRef;
 
 export function individualJobsForOrg(vars: IndividualJobsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<IndividualJobsForOrgData, IndividualJobsForOrgVariables>;
 export function individualJobsForOrg(dc: DataConnect, vars: IndividualJobsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<IndividualJobsForOrgData, IndividualJobsForOrgVariables>;
+
+interface TasksForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: TasksForOrgVariables): QueryRef<TasksForOrgData, TasksForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: TasksForOrgVariables): QueryRef<TasksForOrgData, TasksForOrgVariables>;
+  operationName: string;
+}
+export const tasksForOrgRef: TasksForOrgRef;
+
+export function tasksForOrg(vars: TasksForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<TasksForOrgData, TasksForOrgVariables>;
+export function tasksForOrg(dc: DataConnect, vars: TasksForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<TasksForOrgData, TasksForOrgVariables>;
 
 interface ZonesForOrgRef {
   /* Allow users to create refs without passing in DataConnect */

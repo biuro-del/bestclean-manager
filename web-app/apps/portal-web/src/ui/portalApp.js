@@ -46,11 +46,7 @@ import {
   setUserStyle,
 } from '../services/styleService'
 import { deletePortalTasks, fetchPortalTasks, upsertPortalTasks } from '../services/portalTaskService'
-import {
-  deletePortalScheduleOrders,
-  fetchPortalScheduleOrders,
-  upsertPortalScheduleOrders,
-} from '../services/portalScheduleOrderService'
+import { deleteScheduleTasks, fetchScheduleTasks, upsertScheduleTasks } from '../services/scheduleTaskDataConnectService'
 import { portalLayoutTemplate } from './layoutTemplate'
 import { createRouter } from './router'
 import { viewTemplates } from './viewTemplates'
@@ -147,7 +143,6 @@ const appState = {
   calendarTimelineWorkerStateSourceRows: [],
   calendarTimelineCurrentWorkerStatusDayKey: '',
   calendarTimelineCurrentWorkerStatusRows: [],
-  calendarTimelinePopupEventRows: [],
   calendarTimelineStatusAlerts: [],
   calendarTimelineStatusAlertShownKeys: new Set(),
   kanbanColumns: [],
@@ -267,9 +262,14 @@ let ordersRemoteSaveTimer = 0
 let ordersRemoteRetryTimer = 0
 let calendarTimelineWorkerStateRefreshTimer = null
 let calendarTimelineBarClickTimer = 0
-let calendarTimelineEventsPopupAnchor = null
-let calendarTimelineEventsPopupScrollParent = null
-let calendarTimelineEventsPopupRaf = 0
+let calendarTimelineEventsPopupSequence = 0
+let calendarTimelineEventsPopupZIndex = 12000
+let calendarTimelineEventsPopupDragState = null
+const calendarTimelineEventsPopupRegistry = new Map()
+let sidebarGlobalSearchResults = []
+let sidebarGlobalSearchActiveIndex = -1
+let sidebarGlobalSearchClientsLoadPromise = null
+let sidebarGlobalSearchOrdersLoadPromise = null
 let reportsViewInitPromise = null
 let reportGeoPreviewHideTimer = null
 let reportHistoryScopedFilter = null
@@ -323,6 +323,35 @@ const STYLE_SOURCE_LABELS = {
   fallback: 'domyslny fallback',
 }
 const SIDEBAR_COLLAPSE_STORAGE_KEY = 'portal.sidebarCollapsed'
+const SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS = [
+  { id: 'section-dashboard', kind: 'section', label: 'Pulpit', meta: 'Sekcja', route: 'dashboard' },
+  { id: 'section-events', kind: 'section', label: 'Zdarzenia', meta: 'Sekcja', route: 'events' },
+  { id: 'section-orders', kind: 'section', label: 'Zlecenia', meta: 'Sekcja', route: 'orders' },
+  { id: 'sub-orders-list', kind: 'subsection', label: 'Lista zleceń', meta: 'Podsekcja dział "Zlecenia"', route: 'orders' },
+  { id: 'sub-orders-map', kind: 'subsection', label: 'Mapa', meta: 'Podsekcja dział "Zlecenia"', route: 'ordersMap' },
+  { id: 'section-calendar', kind: 'section', label: 'Kalendarz', meta: 'Sekcja', route: 'calendar' },
+  { id: 'section-kanban', kind: 'section', label: 'Kanban', meta: 'Sekcja', route: 'kanban', kanbanSection: 'home' },
+  { id: 'sub-kanban-home', kind: 'subsection', label: 'Strona główna', meta: 'Podsekcja dział "Kanban"', route: 'kanban', kanbanSection: 'home' },
+  { id: 'sub-kanban-tasks', kind: 'subsection', label: 'Moje zadania', meta: 'Podsekcja dział "Kanban"', route: 'kanban', kanbanSection: 'tasks' },
+  { id: 'sub-kanban-inbox', kind: 'subsection', label: 'Skrzynka odbiorcza', meta: 'Podsekcja dział "Kanban"', route: 'kanban', kanbanSection: 'inbox' },
+  { id: 'section-schedule', kind: 'section', label: 'Grafik pracy', meta: 'Sekcja', route: 'schedule' },
+  { id: 'section-coordinator', kind: 'section', label: 'Koordynator', meta: 'Sekcja', route: 'coordinator' },
+  { id: 'section-clients', kind: 'section', label: 'Klienci', meta: 'Sekcja', route: 'clientsList' },
+  { id: 'sub-clients-list', kind: 'subsection', label: 'Lista klientów', meta: 'Podsekcja dział "Klienci"', route: 'clientsList' },
+  { id: 'sub-client-profile', kind: 'subsection', label: 'Profil klienta', meta: 'Podsekcja dział "Klienci"', route: 'clientProfile' },
+  { id: 'sub-individual-orders', kind: 'subsection', label: 'Zlecenia indywidualne', meta: 'Podsekcja dział "Klienci"', route: 'individualOrders' },
+  { id: 'section-objects', kind: 'section', label: 'Obiekty', meta: 'Sekcja', route: 'zones' },
+  { id: 'sub-objects-zones', kind: 'subsection', label: 'Strefy / obiekty', meta: 'Podsekcja dział "Obiekty"', route: 'zones' },
+  { id: 'sub-objects-audits', kind: 'subsection', label: 'Audyty', meta: 'Podsekcja dział "Obiekty"', route: 'audits' },
+  { id: 'section-workers', kind: 'section', label: 'Pracownicy', meta: 'Sekcja', route: 'workerProfile' },
+  { id: 'sub-worker-time', kind: 'subsection', label: 'Czas pracy pracownika', meta: 'Podsekcja dział "Pracownicy"', route: 'workerTime' },
+  { id: 'sub-worker-profile', kind: 'subsection', label: 'Profil pracownika', meta: 'Podsekcja dział "Pracownicy"', route: 'workerProfile' },
+  { id: 'section-reports', kind: 'section', label: 'Raporty', meta: 'Sekcja', route: 'reports' },
+  { id: 'sub-reports-summary', kind: 'subsection', label: 'Zestawienia', meta: 'Podsekcja dział "Raporty"', route: 'reports' },
+  { id: 'section-settings', kind: 'section', label: 'Ustawienia', meta: 'Sekcja', route: 'settingsStyles' },
+  { id: 'sub-settings-styles', kind: 'subsection', label: 'Style', meta: 'Podsekcja dział "Ustawienia"', route: 'settingsStyles' },
+  { id: 'sub-settings-backup', kind: 'subsection', label: 'Kopia zapasowa', meta: 'Podsekcja dział "Ustawienia"', route: 'settingsBackup' },
+]
 const WORKER_DETAIL_COLUMN_WIDTHS_STORAGE_KEY = 'portal.workerDetailColumnWidths'
 const WORKER_DETAIL_COLUMN_DEFAULT_WIDTHS = [42, 88, 168, 138, 108, 108, 112, 138, 102, 126, 90]
 const WORKER_DETAIL_COLUMN_MIN_WIDTHS = [34, 76, 120, 108, 92, 92, 96, 116, 88, 104, 72]
@@ -332,7 +361,6 @@ const GRID_COLUMN_RESIZE_CLASS = 'grid-col-resize-active'
 const GRID_COLUMN_RESIZE_ATTR = 'data-grid-col-resizer'
 const GRID_COLUMN_MAX_WIDTH = 780
 const CALENDAR_STORAGE_PREFIX = 'portal.calendar.tasks'
-const ORDERS_STORAGE_PREFIX = 'portal.schedule.orders'
 const KANBAN_COLUMNS_STORAGE_PREFIX = 'portal.kanban.columns'
 const CALENDAR_HOUR_HEIGHT_PX = 56
 const CALENDAR_TIMED_TASK_GAP_PX = 4
@@ -1111,6 +1139,7 @@ function setSidebarCollapsed(collapsed, { persist = true } = {}) {
     document.querySelectorAll('#portalSidebar .submenu.open').forEach((submenu) => {
       submenu.classList.remove('open')
     })
+    sidebarGlobalSearchClose()
   }
 
   if (!persist) {
@@ -1192,6 +1221,29 @@ function formatErrorNoticeMessage(error, fallback = 'Wystąpił nieoczekiwany b�
     typeof error?.message === 'string' ? error.message : '',
   ]
   const message = candidates.map((value) => String(value ?? '').trim()).find(Boolean)
+  if (message) {
+    const normalized = message.toLowerCase()
+    if (normalized.includes('operation') && normalized.includes('not found') && normalized.includes('tasksfororg')) {
+      return 'Operacja Data Connect TasksForOrg nie jest jeszcze wdrożona w Firebase. Wdróż connector Data Connect i odśwież portal.'
+    }
+
+    if (message.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(message)
+        const parsedMessage = String(parsed?.error?.message ?? parsed?.message ?? '').trim()
+        const parsedStatus = String(parsed?.error?.status ?? parsed?.status ?? '').trim()
+        const parsedNormalized = parsedMessage.toLowerCase()
+        if (parsedNormalized.includes('operation') && parsedNormalized.includes('not found')) {
+          return `Operacja Data Connect ${parsedMessage.replace(/^operation\s+/i, '')} nie jest jeszcze wdrożona w Firebase. Wdróż connector Data Connect i odśwież portal.`
+        }
+        if (parsedMessage) {
+          return parsedStatus ? `${parsedMessage} (${parsedStatus})` : parsedMessage
+        }
+      } catch {
+        // fall through to the raw message below
+      }
+    }
+  }
   return message && message !== '[object Object]' ? message : fallback
 }
 
@@ -1453,11 +1505,6 @@ function calendarDayToneClass(dayKey, dayIndex = 0) {
 function calendarStorageKey() {
   const orgId = String(appState.session?.orgId ?? '').trim() || 'local'
   return `${CALENDAR_STORAGE_PREFIX}:${orgId}`
-}
-
-function ordersStorageKey() {
-  const orgId = String(appState.session?.orgId ?? '').trim() || 'local'
-  return `${ORDERS_STORAGE_PREFIX}:${orgId}`
 }
 
 function kanbanColumnsStorageKey() {
@@ -9440,11 +9487,18 @@ function ordersReadSelectedWorkerRows() {
 
 function ordersWorkerAssignmentsFromRows(rows = [], resources = calendarTimelineResources()) {
   return rows
-    .map((row) => ({
-      row,
-      name: String(resources[row]?.name ?? `Wiersz ${row + 1}`).trim(),
-      key: String(resources[row]?.key ?? '').trim(),
-    }))
+    .map((row) => {
+      const resource = resources[row] ?? {}
+      const worker = resource.worker ?? {}
+      const workerId = dashboardCanonicalWorkerId(worker.workerId ?? worker.id) || String(worker.workerId ?? worker.id ?? '').trim()
+      return {
+        row,
+        name: String(resource.name ?? `Wiersz ${row + 1}`).trim(),
+        key: String(resource.key ?? '').trim(),
+        workerId,
+        workerLogin: String(worker.workerLogin ?? worker.login ?? '').trim(),
+      }
+    })
     .filter((item) => item.name)
 }
 
@@ -12258,7 +12312,7 @@ function ordersShowList() {
   renderOrdersView()
 }
 
-function ordersSaveEditor() {
+async function ordersSaveEditor() {
   const order = ordersFindTimelineOrder(appState.ordersEditingId)
   if (!order) {
     showTransientNotice('Nie znaleziono zlecenia do zapisu.', 'error')
@@ -12439,11 +12493,16 @@ function ordersSaveEditor() {
   const nextOrders = nextOrder.recurrenceOverride
     ? calendarTimelineOrdersWithSingleOccurrenceOverride(sourceOrders, nextOrder)
     : sourceOrders.map((item) => (item.id === nextOrder.id ? nextOrder : item))
-  ordersSaveTimelineOrders(nextOrders)
+
+  const savedRemotely = await ordersSaveRemoteTimelineOrdersNow(nextOrders, { render: true, showError: true, retry: false })
+  if (!savedRemotely) {
+    return
+  }
+
   appState.ordersEditorMode = 'edit'
   appState.ordersEditingId = ''
   renderOrdersView()
-  showTransientNotice(isAddMode ? 'Zlecenie dodane do bieżącego widoku.' : 'Zlecenie zapisane w bieżącym widoku.')
+  showTransientNotice(isAddMode ? 'Zlecenie dodane i zapisane w bazie.' : 'Zlecenie zapisane w bazie.', 'success')
 }
 
 function ordersRowsFromCalendarTimeline() {
@@ -13197,7 +13256,7 @@ function bindOrdersViewFunctions() {
     const save = eventTargetClosest(event, '#ordersEditSave, [data-orders-save]')
     if (save) {
       event.preventDefault()
-      ordersSaveEditor()
+      void ordersSaveEditor()
       return
     }
 
@@ -23747,6 +23806,390 @@ function bindSubmenuToggles() {
   }
 }
 
+function sidebarGlobalSearchNodes() {
+  const root = document.getElementById('topbarGlobalSearch')
+  return {
+    root,
+    input: document.getElementById('topbarGlobalSearchInput'),
+    clear: document.getElementById('topbarGlobalSearchClear'),
+    results: document.getElementById('topbarGlobalSearchResults'),
+  }
+}
+
+function sidebarGlobalSearchTextFromParts(...parts) {
+  return normalizeSearchText(parts.filter((part) => String(part ?? '').trim()).join(' '))
+}
+
+function sidebarGlobalSearchStaticItems() {
+  return SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS.map((item) => ({
+    ...item,
+    searchText: sidebarGlobalSearchTextFromParts(item.label, item.meta),
+  }))
+}
+
+function sidebarGlobalSearchClientLabel(client = {}) {
+  return (
+    String(client?.name ?? client?.clientName ?? client?.clientLabel ?? client?.label ?? client?.companyName ?? '').trim() ||
+    String(client?.clientId ?? client?.id ?? '').trim() ||
+    'Klient'
+  )
+}
+
+function sidebarGlobalSearchClientItems() {
+  const clients = Array.isArray(appState.clients) ? appState.clients : []
+  return clients
+    .map((client) => {
+      const clientId = String(client?.id ?? client?.clientId ?? '').trim()
+      const label = sidebarGlobalSearchClientLabel(client)
+      if (!clientId || !label) return null
+      const subLabel = [client?.city, client?.street || client?.address, client?.nip]
+        .map((part) => String(part ?? '').trim())
+        .filter(Boolean)
+        .join(' | ')
+      return {
+        id: `client:${clientId}`,
+        kind: 'client',
+        label,
+        meta: 'Klient',
+        subLabel,
+        clientId,
+        searchText: sidebarGlobalSearchTextFromParts(
+          label,
+          client?.clientName,
+          client?.clientLabel,
+          client?.city,
+          client?.street,
+          client?.address,
+          client?.nip,
+          clientId,
+        ),
+      }
+    })
+    .filter(Boolean)
+}
+
+function sidebarGlobalSearchOrderItems() {
+  return ordersListSourceOrders()
+    .map((order) => {
+      const orderId = String(order?.id ?? order?.idTask ?? '').trim()
+      if (!orderId) return null
+      const label = calendarTimelineOrderTitle(order)
+      const clientLabel = ordersTimelineClientLabel(order)
+      const dateLabel = calendarTimelineDateLabel(order?.dateYmd)
+      const timeLabel = calendarTimelineTimeLabel(order?.startTime, '')
+      const subLabel = [clientLabel && clientLabel !== '-' ? clientLabel : '', [dateLabel, timeLabel].filter(Boolean).join(' ')]
+        .map((part) => String(part ?? '').trim())
+        .filter(Boolean)
+        .join(' | ')
+      return {
+        id: `order:${orderId}`,
+        kind: 'order',
+        label,
+        meta: 'Zlecenie',
+        subLabel,
+        orderId,
+        searchText: sidebarGlobalSearchTextFromParts(
+          label,
+          order?.taskName,
+          order?.title,
+          order?.name,
+          order?.clientLabel,
+          order?.clientName,
+          order?.client,
+          ordersTimelineAddressLabel(order),
+          orderId,
+        ),
+      }
+    })
+    .filter(Boolean)
+}
+
+function sidebarGlobalSearchScore(item, normalizedQuery) {
+  const query = String(normalizedQuery ?? '').trim()
+  if (!query) return 0
+  const text = String(item?.searchText ?? '').trim()
+  if (!text) return -1
+
+  const tokens = query.split(/\s+/).filter(Boolean)
+  if (tokens.length && !tokens.every((token) => text.includes(token))) {
+    return -1
+  }
+
+  const label = normalizeSearchText(item?.label)
+  if (label === query) return 500
+  if (label.startsWith(query)) return 420
+  if (label.split(/\s+/).some((word) => word.startsWith(query))) return 360
+  if (text.includes(query)) return 260
+  return tokens.length ? 180 : -1
+}
+
+function sidebarGlobalSearchBuildResults(query) {
+  const normalizedQuery = normalizeSearchText(query)
+  if (!normalizedQuery) return []
+
+  const kindWeight = {
+    section: 0,
+    subsection: 1,
+    order: 2,
+    client: 3,
+  }
+
+  return [
+    ...sidebarGlobalSearchStaticItems(),
+    ...sidebarGlobalSearchOrderItems(),
+    ...sidebarGlobalSearchClientItems(),
+  ]
+    .map((item) => ({ ...item, score: sidebarGlobalSearchScore(item, normalizedQuery) }))
+    .filter((item) => item.score >= 0)
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score
+      const leftKind = kindWeight[left.kind] ?? 9
+      const rightKind = kindWeight[right.kind] ?? 9
+      if (leftKind !== rightKind) return leftKind - rightKind
+      return String(left.label ?? '').localeCompare(String(right.label ?? ''), 'pl')
+    })
+    .slice(0, 40)
+}
+
+function sidebarGlobalSearchRender() {
+  const { input, clear, results } = sidebarGlobalSearchNodes()
+  if (!input || !results) return
+
+  const query = String(input.value ?? '')
+  const hasQuery = Boolean(normalizeSearchText(query))
+  if (clear) {
+    clear.hidden = !query
+  }
+
+  if (!hasQuery) {
+    sidebarGlobalSearchResults = []
+    sidebarGlobalSearchActiveIndex = -1
+    results.hidden = true
+    results.innerHTML = ''
+    input.setAttribute('aria-expanded', 'false')
+    input.removeAttribute('aria-activedescendant')
+    return
+  }
+
+  sidebarGlobalSearchResults = sidebarGlobalSearchBuildResults(query)
+  if (sidebarGlobalSearchActiveIndex >= sidebarGlobalSearchResults.length) {
+    sidebarGlobalSearchActiveIndex = sidebarGlobalSearchResults.length ? sidebarGlobalSearchResults.length - 1 : -1
+  }
+
+  if (!sidebarGlobalSearchResults.length) {
+    results.innerHTML = '<div class="topbar-search-empty">Brak wyników</div>'
+    results.hidden = false
+    input.setAttribute('aria-expanded', 'true')
+    input.removeAttribute('aria-activedescendant')
+    return
+  }
+
+  results.innerHTML = sidebarGlobalSearchResults
+    .map((item, index) => {
+      const isActive = index === sidebarGlobalSearchActiveIndex
+      const subLabel = String(item.subLabel ?? '').trim()
+      return `
+        <button
+          class="topbar-search-result${isActive ? ' is-active' : ''}"
+          id="topbarGlobalSearchResult-${index}"
+          type="button"
+          role="option"
+          aria-selected="${isActive ? 'true' : 'false'}"
+          data-topbar-search-result-index="${index}"
+        >
+          <span class="topbar-search-result-copy">
+            <span class="topbar-search-result-label">${escapeHtml(item.label)}</span>
+            ${subLabel ? `<span class="topbar-search-result-sub">${escapeHtml(subLabel)}</span>` : ''}
+          </span>
+          <span class="topbar-search-result-meta">${escapeHtml(item.meta)}</span>
+        </button>
+      `
+    })
+    .join('')
+  results.hidden = false
+  input.setAttribute('aria-expanded', 'true')
+  if (sidebarGlobalSearchActiveIndex >= 0) {
+    input.setAttribute('aria-activedescendant', `topbarGlobalSearchResult-${sidebarGlobalSearchActiveIndex}`)
+  } else {
+    input.removeAttribute('aria-activedescendant')
+  }
+}
+
+function sidebarGlobalSearchClose() {
+  const { input, results } = sidebarGlobalSearchNodes()
+  sidebarGlobalSearchActiveIndex = -1
+  if (results) {
+    results.hidden = true
+    results.innerHTML = ''
+  }
+  if (input) {
+    input.setAttribute('aria-expanded', 'false')
+    input.removeAttribute('aria-activedescendant')
+  }
+}
+
+function sidebarGlobalSearchClear({ focus = false } = {}) {
+  const { input, clear } = sidebarGlobalSearchNodes()
+  if (input) {
+    input.value = ''
+    if (focus) input.focus()
+  }
+  if (clear) {
+    clear.hidden = true
+  }
+  sidebarGlobalSearchClose()
+}
+
+function sidebarGlobalSearchEnsureLazyData() {
+  const { input } = sidebarGlobalSearchNodes()
+  const hasQuery = Boolean(normalizeSearchText(input?.value))
+  if (!hasQuery || !appState.session?.orgId) return
+
+  if (!appState.clientsLoaded && !sidebarGlobalSearchClientsLoadPromise) {
+    sidebarGlobalSearchClientsLoadPromise = fetchClientsForCurrentSession(false)
+      .catch((error) => {
+        console.warn('[global-search] clients load failed', error)
+      })
+      .finally(() => {
+        sidebarGlobalSearchClientsLoadPromise = null
+        sidebarGlobalSearchRender()
+      })
+  }
+
+  if (
+    !appState.calendarTimelineOrdersRemoteLoaded &&
+    !appState.calendarTimelineOrdersRemoteLoading &&
+    !sidebarGlobalSearchOrdersLoadPromise
+  ) {
+    sidebarGlobalSearchOrdersLoadPromise = ordersSyncRemoteTimelineOrders({ render: false })
+      .catch((error) => {
+        console.warn('[global-search] orders load failed', error)
+      })
+      .finally(() => {
+        sidebarGlobalSearchOrdersLoadPromise = null
+        sidebarGlobalSearchRender()
+      })
+  }
+}
+
+async function sidebarGlobalSearchActivate(result, router) {
+  if (!result) return
+  sidebarGlobalSearchClose()
+
+  if (result.kind === 'order') {
+    let order = ordersFindTimelineOrder(result.orderId)
+    if (!order && appState.session?.orgId) {
+      await ordersSyncRemoteTimelineOrders({ render: false })
+      order = ordersFindTimelineOrder(result.orderId)
+    }
+    if (!order) {
+      showTransientNotice('Nie znaleziono zlecenia.', 'error')
+      return
+    }
+    router.go('orders')
+    window.setTimeout(() => {
+      ordersOpenEditor(result.orderId)
+    }, 0)
+    return
+  }
+
+  if (result.kind === 'client') {
+    if (!clientProfileFindById(result.clientId) && appState.session?.orgId) {
+      await fetchClientsForCurrentSession(false)
+    }
+    openClientProfileDetails(result.clientId)
+    return
+  }
+
+  if (result.kanbanSection) {
+    appState.kanbanSection = kanbanNormalizeSection(result.kanbanSection)
+  }
+  router.go(result.route || 'dashboard')
+}
+
+function bindSidebarGlobalSearch(router) {
+  const { root, input, clear, results } = sidebarGlobalSearchNodes()
+  if (!root || !input || !results) return () => {}
+
+  const binding = createBindingHelpers()
+
+  const handleSearchInput = () => {
+    sidebarGlobalSearchActiveIndex = -1
+    sidebarGlobalSearchRender()
+    sidebarGlobalSearchEnsureLazyData()
+  }
+
+  binding.add(input, 'input', handleSearchInput)
+  binding.add(input, 'focus', () => {
+    sidebarGlobalSearchRender()
+    sidebarGlobalSearchEnsureLazyData()
+  })
+  binding.add(input, 'keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      sidebarGlobalSearchClose()
+      return
+    }
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (!sidebarGlobalSearchResults.length) {
+        sidebarGlobalSearchRender()
+      }
+      if (!sidebarGlobalSearchResults.length) return
+      event.preventDefault()
+      const direction = event.key === 'ArrowDown' ? 1 : -1
+      sidebarGlobalSearchActiveIndex =
+        sidebarGlobalSearchActiveIndex < 0
+          ? direction > 0
+            ? 0
+            : sidebarGlobalSearchResults.length - 1
+          : (sidebarGlobalSearchActiveIndex + direction + sidebarGlobalSearchResults.length) % sidebarGlobalSearchResults.length
+      sidebarGlobalSearchRender()
+      return
+    }
+
+    if (event.key === 'Enter') {
+      const result =
+        sidebarGlobalSearchResults[sidebarGlobalSearchActiveIndex] ?? sidebarGlobalSearchResults[0] ?? null
+      if (!result) return
+      event.preventDefault()
+      void sidebarGlobalSearchActivate(result, router)
+    }
+  })
+
+  binding.add(clear, 'click', () => {
+    sidebarGlobalSearchClear({ focus: true })
+  })
+
+  binding.add(results, 'mousemove', (event) => {
+    const button = eventTargetClosest(event, '[data-topbar-search-result-index]')
+    if (!button) return
+    const index = Number(button.getAttribute('data-topbar-search-result-index'))
+    if (!Number.isInteger(index) || index === sidebarGlobalSearchActiveIndex) return
+    sidebarGlobalSearchActiveIndex = index
+    sidebarGlobalSearchRender()
+  })
+
+  binding.add(results, 'click', (event) => {
+    const button = eventTargetClosest(event, '[data-topbar-search-result-index]')
+    if (!button) return
+    const index = Number(button.getAttribute('data-topbar-search-result-index'))
+    const result = Number.isInteger(index) ? sidebarGlobalSearchResults[index] : null
+    if (!result) return
+    event.preventDefault()
+    void sidebarGlobalSearchActivate(result, router)
+  })
+
+  binding.add(document, 'click', (event) => {
+    if (root.contains(event.target)) return
+    sidebarGlobalSearchClose()
+  })
+
+  return () => {
+    binding.done()
+  }
+}
+
 function bindRouteButtons(router) {
   const handleRouteClick = (event) => {
     const kanbanMenuButton = eventTargetClosest(event, '[data-kanban-menu-section]')
@@ -25882,7 +26325,14 @@ function calendarTimelineDefaultDemoOrders() {
   return []
 }
 
+function ordersIsDatabaseScheduleOrder(order = {}) {
+  return String(order?.recordKind ?? '').trim() === 'portal-schedule-order' || Boolean(String(order?.idTask ?? '').trim())
+}
+
 function ordersIsSeedDemoOrder(order = {}) {
+  if (ordersIsDatabaseScheduleOrder(order)) {
+    return false
+  }
   return /^fw-order-(?:[1-9]|1\d|2[0-3])$/.test(String(order?.id ?? '').trim())
 }
 
@@ -25978,21 +26428,11 @@ function ordersTimelineOrderListsDiffer(left = [], right = []) {
 }
 
 function ordersLoadLocalTimelineOrders() {
-  try {
-    const raw = window.localStorage.getItem(ordersStorageKey())
-    const parsed = raw ? JSON.parse(raw) : []
-    return Array.isArray(parsed) ? ordersMergeTimelineOrderLists(parsed) : []
-  } catch {
-    return []
-  }
+  return []
 }
 
 function ordersPersistLocalTimelineOrders(orders = []) {
-  try {
-    window.localStorage.setItem(ordersStorageKey(), JSON.stringify(ordersMergeTimelineOrderLists(orders)))
-  } catch {
-    showTransientNotice('Nie udało się zapisać zleceń grafiku w przeglądarce.', 'error')
-  }
+  void orders
 }
 
 function ordersScheduleRemoteTimelineOrderRetry(delayMs = 15000) {
@@ -26000,7 +26440,7 @@ function ordersScheduleRemoteTimelineOrderRetry(delayMs = 15000) {
     return
   }
   const orgId = String(appState.session?.orgId ?? '').trim()
-  if (!orgId || !ordersListSourceOrders().length) {
+  if (!orgId) {
     return
   }
 
@@ -26026,25 +26466,66 @@ function ordersQueueRemoteTimelineOrderSave(orders = ordersListSourceOrders()) {
     return
   }
 
-  ordersCancelRemoteTimelineOrderSave()
+  ordersClearRemoteTimelineOrderSaveTimer()
 
   const snapshot = ordersMergeTimelineOrderLists(orders)
   ordersRemoteSaveTimer = window.setTimeout(() => {
     ordersRemoteSaveTimer = 0
-    void upsertPortalScheduleOrders(orgId, snapshot)
-      .then(() => {
-        appState.calendarTimelineOrdersRemoteLoaded = true
-        if (ordersRemoteRetryTimer) {
-          window.clearTimeout(ordersRemoteRetryTimer)
-          ordersRemoteRetryTimer = 0
-        }
-      })
-      .catch((error) => {
-        console.warn('[portal/schedule-orders] remote save failed', error)
-        ordersScheduleRemoteTimelineOrderRetry()
-        showPortalErrorNotice('Nie udało się zapisać zlecenia w bazie. Zostaje kopia lokalna', error)
-      })
+    void ordersSaveRemoteTimelineOrdersNow(snapshot)
   }, 350)
+}
+
+function ordersClearRemoteTimelineOrderSaveTimer() {
+  if (ordersRemoteSaveTimer) {
+    window.clearTimeout(ordersRemoteSaveTimer)
+    ordersRemoteSaveTimer = 0
+  }
+}
+
+function ordersClearRemoteTimelineOrderRetryTimer() {
+  if (ordersRemoteRetryTimer) {
+    window.clearTimeout(ordersRemoteRetryTimer)
+    ordersRemoteRetryTimer = 0
+  }
+}
+
+function ordersRenderScheduleOrderViews() {
+  if (appState.currentRoute === 'dashboard') renderDashboardActivityCalendar(appState.dashboardTodayRows)
+  if (appState.currentRoute === 'calendar') renderCalendarView()
+  if (appState.currentRoute === 'orders') renderOrdersView()
+  if (appState.currentRoute === 'ordersMap') renderOrdersMapView()
+}
+
+async function ordersSaveRemoteTimelineOrdersNow(orders = ordersListSourceOrders(), options = {}) {
+  const orgId = String(appState.session?.orgId ?? '').trim()
+  if (!orgId) {
+    return false
+  }
+
+  ordersClearRemoteTimelineOrderSaveTimer()
+
+  const snapshot = ordersMergeTimelineOrderLists(orders)
+  try {
+    const savedOrders = await upsertScheduleTasks(orgId, snapshot)
+    appState.calendarTimelineOrdersRemoteLoaded = true
+    ordersClearRemoteTimelineOrderRetryTimer()
+    if (Array.isArray(savedOrders)) {
+      ordersSaveTimelineOrders(savedOrders, { syncRemote: false, preserveDrafts: false })
+    }
+    if (options.render) {
+      ordersRenderScheduleOrderViews()
+    }
+    return true
+  } catch (error) {
+    console.warn('[portal/schedule-orders] remote save failed', error)
+    if (options.retry !== false) {
+      ordersScheduleRemoteTimelineOrderRetry()
+    }
+    if (options.showError !== false) {
+      showPortalErrorNotice('Nie udało się zapisać zlecenia w Firebase Data Connect. Zlecenie nie zostało zapisane.', error)
+    }
+    return false
+  }
 }
 
 function ordersSaveTimelineOrders(orders = appState.calendarTimelineDemoOrders, options = {}) {
@@ -26079,7 +26560,7 @@ async function ordersSyncRemoteTimelineOrders({ render = false } = {}) {
   try {
     const stateOrders = Array.isArray(appState.calendarTimelineDemoOrders) ? appState.calendarTimelineDemoOrders : []
     const localOrders = ordersLoadLocalTimelineOrders()
-    const remoteOrders = await fetchPortalScheduleOrders(orgId)
+    const remoteOrders = await fetchScheduleTasks(orgId)
     const mergedOrders = ordersMergeTimelineOrderLists(stateOrders, localOrders, remoteOrders)
     ordersSaveTimelineOrders(mergedOrders, { syncRemote: false })
     appState.calendarTimelineOrdersRemoteLoaded = true
@@ -26096,35 +26577,58 @@ async function ordersSyncRemoteTimelineOrders({ render = false } = {}) {
   } catch (error) {
     appState.calendarTimelineOrdersRemoteLoaded = false
     console.warn('[portal/schedule-orders] remote load failed', error)
-    showPortalErrorNotice('Nie udało się pobrać zleceń grafiku z bazy', error)
+    showPortalErrorNotice('Nie udało się pobrać zleceń z Firebase', error)
     return ordersListSourceOrders()
   } finally {
     appState.calendarTimelineOrdersRemoteLoading = false
   }
 }
 
-async function ordersDeleteRemoteTimelineOrdersById(orderIds = []) {
+async function ordersDeleteTimelineOrdersById(orderIds = [], options = {}) {
   const orgId = String(appState.session?.orgId ?? '').trim()
   const ids = (Array.isArray(orderIds) ? orderIds : [orderIds])
     .map((value) => String(value ?? '').trim())
     .filter(Boolean)
-  if (!orgId) {
-    const error = new Error('Brak identyfikatora organizacji dla usuwania zlecenia.')
-    showPortalErrorNotice('Nie udało się usunąć zlecenia grafiku z bazy. Zlecenie pozostaje na liście', error)
-    throw error
+  const deletedIds = new Set(ids)
+  const nextOrders = Array.isArray(options.nextOrders)
+    ? ordersMergeTimelineOrderLists(options.nextOrders)
+    : ordersMergeTimelineOrderLists(ordersListSourceOrders().filter((order) => !deletedIds.has(String(order?.id ?? '').trim())))
+
+  ordersClearRemoteTimelineOrderSaveTimer()
+  ordersSaveTimelineOrders(nextOrders, { syncRemote: false, preserveDrafts: false })
+  if (options.render !== false) {
+    ordersRenderScheduleOrderViews()
   }
-  if (!ids.length) {
-    return null
+
+  if (!orgId) {
+    if (options.notice) {
+      showTransientNotice(options.notice, 'success')
+    }
+    return true
   }
 
   try {
-    const result = await deletePortalScheduleOrders(orgId, ids)
+    if (ids.length) {
+      await deleteScheduleTasks(orgId, ids)
+    }
+    const savedOrders = await upsertScheduleTasks(orgId, nextOrders)
     appState.calendarTimelineOrdersRemoteLoaded = true
-    return result
+    ordersClearRemoteTimelineOrderRetryTimer()
+    if (Array.isArray(savedOrders)) {
+      ordersSaveTimelineOrders(savedOrders, { syncRemote: false, preserveDrafts: false })
+    }
+    if (options.render !== false) {
+      ordersRenderScheduleOrderViews()
+    }
+    if (options.notice) {
+      showTransientNotice(options.notice, 'success')
+    }
+    return true
   } catch (error) {
     console.warn('[portal/schedule-orders] remote delete failed', error)
-    showPortalErrorNotice('Nie udało się usunąć zlecenia grafiku z bazy. Zlecenie pozostaje na liście', error)
-    throw error
+    showPortalErrorNotice('Nie udało się usunąć zlecenia z Firebase', error)
+    ordersScheduleRemoteTimelineOrderRetry()
+    return false
   }
 }
 
@@ -26148,20 +26652,7 @@ async function ordersDeleteTimelineOrderFromList(orderId = '') {
     return false
   }
 
-  const nextOrders = ordersListSourceOrders().filter((item) => String(item?.id ?? '') !== id)
-  try {
-    ordersCancelRemoteTimelineOrderSave()
-    await ordersDeleteRemoteTimelineOrdersById([id])
-    ordersSaveTimelineOrders(nextOrders, { syncRemote: false })
-    renderOrdersView()
-    if (appState.currentRoute === 'calendar') {
-      renderCalendarView()
-    }
-    showTransientNotice('Zlecenie usunięte z bazy i grafiku.', 'success')
-    return true
-  } catch {
-    return false
-  }
+  return ordersDeleteTimelineOrdersById([id], { notice: 'Zlecenie usunięte z bazy i grafiku.' })
 }
 
 function ordersEnsureTimelineOrdersForRoute(routeName, renderAfterLoad) {
@@ -26191,7 +26682,7 @@ function ordersEnsureTimelineOrdersForRoute(routeName, renderAfterLoad) {
   Promise.resolve(remotePromise)
     .catch((error) => {
       console.warn('[portal/schedule-orders] route refresh failed', error)
-      showPortalErrorNotice('Nie udało się odświeżyć zleceń grafiku z bazy', error)
+      showPortalErrorNotice('Nie udało się odświeżyć zleceń z Firebase', error)
     })
     .finally(renderIfStillCurrent)
 }
@@ -27117,70 +27608,309 @@ function calendarTimelineOpenWorkerEvents(rowIndex) {
   }
 }
 
-function calendarTimelineHideEventsPopup() {
+function calendarTimelineClearEventsPopupTimer() {
   if (calendarTimelineBarClickTimer) {
     window.clearTimeout(calendarTimelineBarClickTimer)
     calendarTimelineBarClickTimer = 0
   }
-  calendarTimelineHidePieDetailPopup()
-  calendarTimelineStopEventsPopupTracking()
-  const node = document.getElementById('calendarTimelineEventsPopup')
-  if (node) {
-    node.remove()
-  }
-  appState.calendarTimelinePopupEventRows = []
 }
 
-function calendarTimelineScheduleEventsPopupPosition() {
-  const node = document.getElementById('calendarTimelineEventsPopup')
-  const anchor = calendarTimelineEventsPopupAnchor
-  if (!node || !(anchor instanceof HTMLElement) || !document.body.contains(anchor)) {
-    calendarTimelineHideEventsPopup()
+function calendarTimelineNextEventsPopupId() {
+  calendarTimelineEventsPopupSequence += 1
+  return `calendar-events-popup-${Date.now()}-${calendarTimelineEventsPopupSequence}`
+}
+
+function calendarTimelineEventsPopupId(node) {
+  return node instanceof HTMLElement
+    ? String(node.getAttribute('data-calendar-events-popup-id') || '').trim()
+    : String(node || '').trim()
+}
+
+function calendarTimelineEventsPopupState(nodeOrId) {
+  const popupId = calendarTimelineEventsPopupId(nodeOrId)
+  return popupId ? calendarTimelineEventsPopupRegistry.get(popupId) ?? null : null
+}
+
+function calendarTimelineEventsPopupRows(nodeOrId) {
+  const state = calendarTimelineEventsPopupState(nodeOrId)
+  return Array.isArray(state?.rows) ? state.rows : []
+}
+
+function calendarTimelineBringEventsPopupToFront(node) {
+  if (!(node instanceof HTMLElement)) {
+    return
+  }
+  calendarTimelineEventsPopupZIndex += 1
+  node.style.zIndex = String(calendarTimelineEventsPopupZIndex)
+
+  const detail = document.getElementById('calendarTimelinePieDetailPopup')
+  if (detail instanceof HTMLElement && detail.calendarPieDetailParent === node) {
+    detail.style.zIndex = String(calendarTimelineEventsPopupZIndex + 1)
+  }
+}
+
+function calendarTimelineSetEventsPopupPosition(node, left, top) {
+  if (!(node instanceof HTMLElement)) {
     return
   }
 
-  if (calendarTimelineEventsPopupRaf) {
+  const margin = 12
+  const rect = node.getBoundingClientRect()
+  const width = rect.width || node.offsetWidth || 280
+  const height = rect.height || node.offsetHeight || node.scrollHeight || 180
+  const maxLeft = Math.max(margin, window.innerWidth - width - margin)
+  const maxTop = Math.max(margin, window.innerHeight - height - margin)
+  const nextLeft = Math.max(margin, Math.min(maxLeft, Number(left) || margin))
+  const nextTop = Math.max(margin, Math.min(maxTop, Number(top) || margin))
+  node.style.left = `${Math.round(nextLeft)}px`
+  node.style.top = `${Math.round(nextTop)}px`
+}
+
+function calendarTimelineClampEventsPopupToViewport(node) {
+  if (!(node instanceof HTMLElement)) {
     return
   }
-  calendarTimelineEventsPopupRaf = window.requestAnimationFrame(() => {
-    calendarTimelineEventsPopupRaf = 0
-    const currentNode = document.getElementById('calendarTimelineEventsPopup')
-    const currentAnchor = calendarTimelineEventsPopupAnchor
-    if (!currentNode || !(currentAnchor instanceof HTMLElement) || !document.body.contains(currentAnchor)) {
-      calendarTimelineHideEventsPopup()
+  const rect = node.getBoundingClientRect()
+  calendarTimelineSetEventsPopupPosition(node, rect.left, rect.top)
+}
+
+function calendarTimelineClampAllEventsPopupsToViewport() {
+  calendarTimelineEventsPopupRegistry.forEach((state) => {
+    calendarTimelineClampEventsPopupToViewport(state?.node)
+  })
+  calendarTimelinePositionPieDetailPopup()
+}
+
+function calendarTimelineStopEventsPopupDrag() {
+  const dragState = calendarTimelineEventsPopupDragState
+  if (!dragState) {
+    return
+  }
+
+  const node = dragState.node
+  if (node instanceof HTMLElement) {
+    node.classList.remove('is-dragging')
+    try {
+      node.releasePointerCapture?.(dragState.pointerId)
+    } catch {}
+  }
+
+  document.body?.classList?.remove('calendar-events-popup-dragging')
+  window.removeEventListener('pointermove', calendarTimelineHandleEventsPopupDragMove)
+  window.removeEventListener('pointerup', calendarTimelineHandleEventsPopupDragEnd)
+  window.removeEventListener('pointercancel', calendarTimelineHandleEventsPopupDragEnd)
+  calendarTimelineEventsPopupDragState = null
+}
+
+function calendarTimelineHandleEventsPopupDragMove(event) {
+  const dragState = calendarTimelineEventsPopupDragState
+  if (!dragState || event.pointerId !== dragState.pointerId) {
+    return
+  }
+
+  event.preventDefault()
+  const nextLeft = dragState.left + (event.clientX - dragState.clientX)
+  const nextTop = dragState.top + (event.clientY - dragState.clientY)
+  calendarTimelineSetEventsPopupPosition(dragState.node, nextLeft, nextTop)
+  const popupState = calendarTimelineEventsPopupState(dragState.node)
+  if (popupState) {
+    popupState.dragged = true
+  }
+  calendarTimelinePositionPieDetailPopup()
+}
+
+function calendarTimelineHandleEventsPopupDragEnd(event) {
+  if (calendarTimelineEventsPopupDragState && event.pointerId !== calendarTimelineEventsPopupDragState.pointerId) {
+    return
+  }
+  calendarTimelineStopEventsPopupDrag()
+}
+
+function calendarTimelineStartEventsPopupDrag(node, event) {
+  if (!(node instanceof HTMLElement) || event.button !== 0) {
+    return
+  }
+
+  const target = event.target
+  if (!(target instanceof HTMLElement)) {
+    return
+  }
+  const handle = target.closest('.calendar-events-popup-head')
+  if (!(handle instanceof HTMLElement) || !node.contains(handle)) {
+    return
+  }
+  if (target.closest('button, a, input, textarea, select, [data-calendar-events-no-drag]')) {
+    return
+  }
+
+  event.preventDefault()
+  calendarTimelineStopEventsPopupDrag()
+  calendarTimelineBringEventsPopupToFront(node)
+  const rect = node.getBoundingClientRect()
+  calendarTimelineEventsPopupDragState = {
+    node,
+    pointerId: event.pointerId,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    left: rect.left,
+    top: rect.top,
+  }
+  node.classList.add('is-dragging')
+  document.body?.classList?.add('calendar-events-popup-dragging')
+  try {
+    node.setPointerCapture?.(event.pointerId)
+  } catch {}
+  window.addEventListener('pointermove', calendarTimelineHandleEventsPopupDragMove)
+  window.addEventListener('pointerup', calendarTimelineHandleEventsPopupDragEnd)
+  window.addEventListener('pointercancel', calendarTimelineHandleEventsPopupDragEnd)
+}
+
+function calendarTimelineCloseEventsPopup(nodeOrId) {
+  const state = calendarTimelineEventsPopupState(nodeOrId)
+  const node = state?.node instanceof HTMLElement
+    ? state.node
+    : nodeOrId instanceof HTMLElement
+      ? nodeOrId
+      : null
+  const popupId = calendarTimelineEventsPopupId(node || nodeOrId)
+  if (!node) {
+    if (popupId) {
+      calendarTimelineEventsPopupRegistry.delete(popupId)
+    }
+    return
+  }
+
+  if (calendarTimelineEventsPopupDragState?.node === node) {
+    calendarTimelineStopEventsPopupDrag()
+  }
+  calendarTimelineHidePieDetailPopup(popupId)
+  node.remove()
+  if (popupId) {
+    calendarTimelineEventsPopupRegistry.delete(popupId)
+  }
+}
+
+function calendarTimelineHideEventsPopup() {
+  calendarTimelineClearEventsPopupTimer()
+  calendarTimelineStopEventsPopupDrag()
+  calendarTimelineHidePieDetailPopup()
+  calendarTimelineEventsPopupRegistry.forEach((state) => {
+    if (state?.node instanceof HTMLElement) {
+      state.node.remove()
+    }
+  })
+  calendarTimelineEventsPopupRegistry.clear()
+  document.querySelectorAll('.calendar-events-popup[data-calendar-events-popup-id]').forEach((node) => {
+    node.remove()
+  })
+  calendarTimelineEventsPopupZIndex = 12000
+}
+
+function calendarTimelineBindEventsPopupNode(node) {
+  if (!(node instanceof HTMLElement)) {
+    return
+  }
+
+  node.addEventListener('pointerdown', (event) => {
+    calendarTimelineBringEventsPopupToFront(node)
+    calendarTimelineStartEventsPopupDrag(node, event)
+  })
+  node.addEventListener('click', (event) => {
+    calendarTimelineBringEventsPopupToFront(node)
+    const closeButton = event.target?.closest?.('[data-calendar-events-popup-close]')
+    if (closeButton) {
+      event.preventDefault()
+      event.stopPropagation()
+      calendarTimelineCloseEventsPopup(node)
       return
     }
-    calendarTimelinePositionEventsPopup(currentNode, currentAnchor)
-    calendarTimelinePositionPieDetailPopup()
+    const pieLegendRow = event.target?.closest?.('[data-calendar-pie-key]')
+    if (pieLegendRow instanceof HTMLElement) {
+      event.preventDefault()
+      event.stopPropagation()
+      calendarTimelineSetPieHighlight(pieLegendRow, true)
+      calendarTimelineShowPieDetailPopup(pieLegendRow.getAttribute('data-calendar-pie-key'), pieLegendRow, node)
+      return
+    }
+    const pieChart = event.target?.closest?.('[data-calendar-pie-chart]')
+    if (pieChart instanceof HTMLElement) {
+      event.preventDefault()
+      event.stopPropagation()
+      const key = calendarTimelinePieKeyFromChartClick(pieChart, event)
+      if (key) {
+        const row = [...node.querySelectorAll('[data-calendar-pie-key]')]
+          .find((item) => item instanceof HTMLElement && item.getAttribute('data-calendar-pie-key') === key)
+        if (row instanceof HTMLElement) {
+          calendarTimelineSetPieHighlight(row, true)
+        }
+        calendarTimelineShowPieDetailPopup(key, pieChart, node)
+      }
+      return
+    }
+    const geoButton = event.target?.closest?.('[data-calendar-event-geo][data-rep-geo-lat][data-rep-geo-lon]')
+    if (geoButton) {
+      event.preventDefault()
+      event.stopPropagation()
+      const coords = reportGeoReadCoordsFromNode(geoButton)
+      if (coords) {
+        reportGeoOpenModal(coords.lat, coords.lon)
+      }
+      return
+    }
+    const editButton = event.target?.closest?.('[data-calendar-event-popup-edit]')
+    if (editButton) {
+      const index = Number(editButton.getAttribute('data-calendar-event-popup-edit'))
+      const row = calendarTimelineEventsPopupRows(node)[index] ?? null
+      if (row) {
+        void openEventEditor(row?.calendarTimelineMarkerSourceRow || row)
+      }
+    }
   })
-}
-
-function calendarTimelineStopEventsPopupTracking() {
-  window.removeEventListener('scroll', calendarTimelineScheduleEventsPopupPosition, true)
-  window.removeEventListener('resize', calendarTimelineScheduleEventsPopupPosition)
-  if (calendarTimelineEventsPopupScrollParent instanceof HTMLElement) {
-    calendarTimelineEventsPopupScrollParent.removeEventListener('scroll', calendarTimelineScheduleEventsPopupPosition)
-  }
-  if (calendarTimelineEventsPopupRaf) {
-    window.cancelAnimationFrame(calendarTimelineEventsPopupRaf)
-    calendarTimelineEventsPopupRaf = 0
-  }
-  calendarTimelineEventsPopupAnchor = null
-  calendarTimelineEventsPopupScrollParent = null
-}
-
-function calendarTimelineStartEventsPopupTracking(anchor) {
-  calendarTimelineStopEventsPopupTracking()
-  if (!(anchor instanceof HTMLElement)) {
-    return
-  }
-  calendarTimelineEventsPopupAnchor = anchor
-  calendarTimelineEventsPopupScrollParent = anchor.closest('.fw-timeline-scroll')
-  window.addEventListener('scroll', calendarTimelineScheduleEventsPopupPosition, true)
-  window.addEventListener('resize', calendarTimelineScheduleEventsPopupPosition)
-  if (calendarTimelineEventsPopupScrollParent instanceof HTMLElement) {
-    calendarTimelineEventsPopupScrollParent.addEventListener('scroll', calendarTimelineScheduleEventsPopupPosition)
-  }
+  node.addEventListener('mouseover', (event) => {
+    const geoButton = event.target?.closest?.('[data-calendar-event-geo][data-rep-geo-lat][data-rep-geo-lon]')
+    if (geoButton instanceof HTMLElement) {
+      const coords = reportGeoReadCoordsFromNode(geoButton)
+      if (coords) {
+        reportGeoShowPreview(geoButton, coords.lat, coords.lon)
+      }
+    }
+    const row = event.target?.closest?.('[data-calendar-pie-highlight]')
+    if (row instanceof HTMLElement) {
+      calendarTimelineSetPieHighlight(row, true)
+    }
+  })
+  node.addEventListener('mouseout', (event) => {
+    const geoButton = event.target?.closest?.('[data-calendar-event-geo][data-rep-geo-lat][data-rep-geo-lon]')
+    if (geoButton instanceof HTMLElement && !geoButton.contains(event.relatedTarget)) {
+      reportGeoHidePreviewSoon()
+    }
+    const row = event.target?.closest?.('[data-calendar-pie-highlight]')
+    if (row instanceof HTMLElement && !row.contains(event.relatedTarget)) {
+      calendarTimelineSetPieHighlight(row, false)
+    }
+  })
+  node.addEventListener('focusin', (event) => {
+    const row = event.target?.closest?.('[data-calendar-pie-highlight]')
+    if (row instanceof HTMLElement) {
+      calendarTimelineSetPieHighlight(row, true)
+    }
+  })
+  node.addEventListener('focusout', (event) => {
+    const row = event.target?.closest?.('[data-calendar-pie-highlight]')
+    if (row instanceof HTMLElement && !row.contains(event.relatedTarget)) {
+      calendarTimelineSetPieHighlight(row, false)
+    }
+  })
+  node.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return
+    }
+    const pieLegendRow = event.target?.closest?.('[data-calendar-pie-key]')
+    if (pieLegendRow instanceof HTMLElement) {
+      event.preventDefault()
+      calendarTimelineShowPieDetailPopup(pieLegendRow.getAttribute('data-calendar-pie-key'), pieLegendRow, node)
+    }
+  })
 }
 
 function calendarTimelineBarContextFromElement(bar) {
@@ -28496,8 +29226,12 @@ function calendarTimelinePieDetailHtml(details = {}) {
   `
 }
 
-function calendarTimelineHidePieDetailPopup() {
+function calendarTimelineHidePieDetailPopup(popupId = '') {
   const node = document.getElementById('calendarTimelinePieDetailPopup')
+  const expectedPopupId = String(popupId || '').trim()
+  if (node && expectedPopupId && node.calendarPieDetailPopupId !== expectedPopupId) {
+    return
+  }
   if (node) {
     node.remove()
   }
@@ -28508,8 +29242,14 @@ function calendarTimelinePositionPieDetailPopup(anchor = null) {
   if (!(node instanceof HTMLElement)) {
     return
   }
-  const parent = document.getElementById('calendarTimelineEventsPopup')
   const anchorNode = anchor instanceof HTMLElement ? anchor : node.calendarPieDetailAnchor
+  const parent = node.calendarPieDetailParent instanceof HTMLElement
+    ? node.calendarPieDetailParent
+    : anchorNode?.closest?.('.calendar-events-popup')
+  if (parent instanceof HTMLElement && !document.body.contains(parent)) {
+    calendarTimelineHidePieDetailPopup(node.calendarPieDetailPopupId)
+    return
+  }
   const rect = (anchorNode instanceof HTMLElement ? anchorNode : parent)?.getBoundingClientRect?.()
   const parentRect = parent?.getBoundingClientRect?.()
   if (!rect) {
@@ -28528,15 +29268,25 @@ function calendarTimelinePositionPieDetailPopup(anchor = null) {
     : Math.max(12, Math.min(window.innerHeight - height - 12, fallbackTop))
   node.style.left = `${left}px`
   node.style.top = `${top}px`
+  const parentZIndex = Number.parseInt(parent?.style?.zIndex || '', 10)
+  if (Number.isFinite(parentZIndex)) {
+    node.style.zIndex = String(parentZIndex + 1)
+  }
 }
 
-function calendarTimelineShowPieDetailPopup(segmentKey = '', anchor = null) {
-  const rows = Array.isArray(appState.calendarTimelinePopupEventRows) ? appState.calendarTimelinePopupEventRows : []
+function calendarTimelineShowPieDetailPopup(segmentKey = '', anchor = null, sourcePopup = null) {
+  const parent = sourcePopup instanceof HTMLElement
+    ? sourcePopup
+    : anchor?.closest?.('.calendar-events-popup')
+  const rows = calendarTimelineEventsPopupRows(parent)
   const details = calendarTimelinePieSegmentDetails(rows, segmentKey)
   if (!details) {
     return
   }
 
+  if (parent instanceof HTMLElement) {
+    calendarTimelineBringEventsPopupToFront(parent)
+  }
   let node = document.getElementById('calendarTimelinePieDetailPopup')
   if (!node) {
     node = document.createElement('div')
@@ -28547,6 +29297,8 @@ function calendarTimelineShowPieDetailPopup(segmentKey = '', anchor = null) {
     document.body.appendChild(node)
   }
   node.calendarPieDetailAnchor = anchor instanceof HTMLElement ? anchor : null
+  node.calendarPieDetailParent = parent instanceof HTMLElement ? parent : null
+  node.calendarPieDetailPopupId = calendarTimelineEventsPopupId(parent)
   node.innerHTML = calendarTimelinePieDetailHtml(details)
   node.onclick = (event) => {
     const closeButton = event.target?.closest?.('[data-calendar-pie-detail-close]')
@@ -28596,15 +29348,12 @@ function calendarTimelinePositionEventsPopup(node, anchor) {
     return
   }
   const rect = anchor.getBoundingClientRect()
-  const width = Math.min(760, Math.max(420, window.innerWidth - 24))
+  const width = Math.min(760, Math.max(280, window.innerWidth - 24))
   node.style.width = `${width}px`
-  const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.left))
   const measuredHeight = node.getBoundingClientRect().height || node.scrollHeight || 180
   const popupHeight = Math.min(Math.max(180, measuredHeight), Math.max(180, window.innerHeight - 24))
-  const maxTop = Math.max(12, window.innerHeight - popupHeight - 12)
-  const top = Math.max(12, Math.min(maxTop, rect.bottom + 8))
-  node.style.left = `${left}px`
-  node.style.top = `${top}px`
+  const top = Math.min(window.innerHeight - popupHeight - 12, rect.bottom + 8)
+  calendarTimelineSetEventsPopupPosition(node, rect.left, top)
 }
 
 function calendarTimelineSizeEventsPopup(node, rowCount = 0, options = {}) {
@@ -28691,133 +29440,51 @@ async function calendarTimelineShowWorkerDayEventsPopup(bar) {
     return
   }
 
-  calendarTimelineHideEventsPopup()
+  calendarTimelineClearEventsPopupTimer()
+  const popupId = calendarTimelineNextEventsPopupId()
   const node = document.createElement('div')
-  node.id = 'calendarTimelineEventsPopup'
   node.className = 'calendar-events-popup'
+  node.setAttribute('data-calendar-events-popup-id', popupId)
   node.setAttribute('role', 'dialog')
   node.setAttribute('aria-label', 'Zdarzenia pracownika w dniu')
+  calendarTimelineEventsPopupRegistry.set(popupId, {
+    node,
+    context,
+    rows: [],
+    dragged: false,
+  })
   document.body.appendChild(node)
+  calendarTimelineBindEventsPopupNode(node)
   calendarTimelineRenderEventsPopup(node, context, [], { loading: true })
-  calendarTimelineStartEventsPopupTracking(context.bar)
+  calendarTimelineBringEventsPopupToFront(node)
   calendarTimelinePositionEventsPopup(node, context.bar)
-
-  node.addEventListener('click', (event) => {
-    const detailCloseButton = event.target?.closest?.('[data-calendar-pie-detail-close]')
-    if (detailCloseButton) {
-      event.preventDefault()
-      calendarTimelineHidePieDetailPopup()
-      return
-    }
-    const closeButton = event.target?.closest?.('[data-calendar-events-popup-close]')
-    if (closeButton) {
-      calendarTimelineHideEventsPopup()
-      return
-    }
-    const pieLegendRow = event.target?.closest?.('[data-calendar-pie-key]')
-    if (pieLegendRow instanceof HTMLElement) {
-      event.preventDefault()
-      event.stopPropagation()
-      calendarTimelineSetPieHighlight(pieLegendRow, true)
-      calendarTimelineShowPieDetailPopup(pieLegendRow.getAttribute('data-calendar-pie-key'), pieLegendRow)
-      return
-    }
-    const pieChart = event.target?.closest?.('[data-calendar-pie-chart]')
-    if (pieChart instanceof HTMLElement) {
-      event.preventDefault()
-      event.stopPropagation()
-      const key = calendarTimelinePieKeyFromChartClick(pieChart, event)
-      if (key) {
-        const row = [...node.querySelectorAll('[data-calendar-pie-key]')]
-          .find((item) => item instanceof HTMLElement && item.getAttribute('data-calendar-pie-key') === key)
-        if (row instanceof HTMLElement) {
-          calendarTimelineSetPieHighlight(row, true)
-        }
-        calendarTimelineShowPieDetailPopup(key, pieChart)
-      }
-      return
-    }
-    const geoButton = event.target?.closest?.('[data-calendar-event-geo][data-rep-geo-lat][data-rep-geo-lon]')
-    if (geoButton) {
-      event.preventDefault()
-      event.stopPropagation()
-      const coords = reportGeoReadCoordsFromNode(geoButton)
-      if (coords) {
-        reportGeoOpenModal(coords.lat, coords.lon)
-      }
-      return
-    }
-    const editButton = event.target?.closest?.('[data-calendar-event-popup-edit]')
-    if (editButton) {
-      const index = Number(editButton.getAttribute('data-calendar-event-popup-edit'))
-      const row = Array.isArray(appState.calendarTimelinePopupEventRows) ? appState.calendarTimelinePopupEventRows[index] : null
-      if (row) {
-        calendarTimelineHideEventsPopup()
-        void openEventEditor(row?.calendarTimelineMarkerSourceRow || row)
-      }
-    }
-  })
-  node.addEventListener('mouseover', (event) => {
-    const geoButton = event.target?.closest?.('[data-calendar-event-geo][data-rep-geo-lat][data-rep-geo-lon]')
-    if (geoButton instanceof HTMLElement) {
-      const coords = reportGeoReadCoordsFromNode(geoButton)
-      if (coords) {
-        reportGeoShowPreview(geoButton, coords.lat, coords.lon)
-      }
-    }
-    const row = event.target?.closest?.('[data-calendar-pie-highlight]')
-    if (row instanceof HTMLElement) {
-      calendarTimelineSetPieHighlight(row, true)
-    }
-  })
-  node.addEventListener('mouseout', (event) => {
-    const geoButton = event.target?.closest?.('[data-calendar-event-geo][data-rep-geo-lat][data-rep-geo-lon]')
-    if (geoButton instanceof HTMLElement && !geoButton.contains(event.relatedTarget)) {
-      reportGeoHidePreviewSoon()
-    }
-    const row = event.target?.closest?.('[data-calendar-pie-highlight]')
-    if (row instanceof HTMLElement && !row.contains(event.relatedTarget)) {
-      calendarTimelineSetPieHighlight(row, false)
-    }
-  })
-  node.addEventListener('focusin', (event) => {
-    const row = event.target?.closest?.('[data-calendar-pie-highlight]')
-    if (row instanceof HTMLElement) {
-      calendarTimelineSetPieHighlight(row, true)
-    }
-  })
-  node.addEventListener('focusout', (event) => {
-    const row = event.target?.closest?.('[data-calendar-pie-highlight]')
-    if (row instanceof HTMLElement && !row.contains(event.relatedTarget)) {
-      calendarTimelineSetPieHighlight(row, false)
-    }
-  })
-  node.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ') {
-      return
-    }
-    const pieLegendRow = event.target?.closest?.('[data-calendar-pie-key]')
-    if (pieLegendRow instanceof HTMLElement) {
-      event.preventDefault()
-      calendarTimelineShowPieDetailPopup(pieLegendRow.getAttribute('data-calendar-pie-key'), pieLegendRow)
-    }
-  })
 
   try {
     const rows = await calendarTimelineFetchWorkerDayEvents(context.resource, context.dateYmd, context)
-    if (!document.body.contains(node)) {
+    const popupState = calendarTimelineEventsPopupRegistry.get(popupId)
+    if (!popupState || !document.body.contains(node)) {
       return
     }
-    appState.calendarTimelinePopupEventRows = rows
+    popupState.rows = rows
     calendarTimelineRenderEventsPopup(node, context, rows)
-    calendarTimelinePositionEventsPopup(node, context.bar)
+    if (!popupState.dragged && context.bar instanceof HTMLElement && document.body.contains(context.bar)) {
+      calendarTimelinePositionEventsPopup(node, context.bar)
+    } else {
+      calendarTimelineClampEventsPopupToViewport(node)
+    }
   } catch (error) {
-    if (!document.body.contains(node)) {
+    const popupState = calendarTimelineEventsPopupRegistry.get(popupId)
+    if (!popupState || !document.body.contains(node)) {
       return
     }
+    popupState.rows = []
     const message = error instanceof Error ? error.message : 'Nie udało się pobrać zdarzeń.'
     calendarTimelineRenderEventsPopup(node, context, [], { error: message })
-    calendarTimelinePositionEventsPopup(node, context.bar)
+    if (!popupState.dragged && context.bar instanceof HTMLElement && document.body.contains(context.bar)) {
+      calendarTimelinePositionEventsPopup(node, context.bar)
+    } else {
+      calendarTimelineClampEventsPopupToViewport(node)
+    }
   }
 }
 
@@ -29351,6 +30018,307 @@ function calendarTimelineShowRecurringScopeDialog({ occurrenceDateYmd = '', titl
     }
   })
   document.body.appendChild(overlay)
+}
+
+function calendarHideTaskContextMenu() {
+  document.getElementById('calendarTaskContextMenu')?.remove()
+}
+
+function calendarHideTaskDeleteConfirm() {
+  document.getElementById('calendarTaskDeleteConfirmDialog')?.remove()
+}
+
+function calendarTaskContextPosition(node, x, y) {
+  if (!(node instanceof HTMLElement)) {
+    return
+  }
+  const margin = 10
+  const rect = node.getBoundingClientRect()
+  const width = rect.width || node.offsetWidth || 180
+  const height = rect.height || node.offsetHeight || node.scrollHeight || 150
+  const left = Math.max(margin, Math.min(window.innerWidth - width - margin, Number(x) || margin))
+  const top = Math.max(margin, Math.min(window.innerHeight - height - margin, Number(y) || margin))
+  node.style.left = `${Math.round(left)}px`
+  node.style.top = `${Math.round(top)}px`
+}
+
+function calendarTimelineContextFromBar(bar) {
+  if (!(bar instanceof HTMLElement)) {
+    return null
+  }
+  const recurringContext = calendarTimelineRecurringContextFromBar(bar)
+  const orderId = String(bar.getAttribute('data-calendar-timeline-order-id') || '').trim()
+  return {
+    kind: 'timeline-order',
+    bar,
+    orderId,
+    sourceOrderId: recurringContext?.sourceOrderId || orderId,
+    occurrenceDateYmd: recurringContext?.occurrenceDateYmd || '',
+    isRealEvent: bar.getAttribute('data-calendar-timeline-real-event') === '1',
+    isRecurringSeries: Boolean(recurringContext?.isRecurringSeries),
+    isRecurrenceOverride: Boolean(recurringContext?.isRecurrenceOverride),
+    shouldAskScope: Boolean(recurringContext?.shouldAskScope),
+    sourceOrder: recurringContext?.sourceOrder || null,
+  }
+}
+
+function calendarTimelineOrderFromContext(context = {}) {
+  if (!context || context.isRealEvent) {
+    return null
+  }
+  const orderId = String(context.orderId ?? '').trim()
+  const sourceOrderId = String(context.sourceOrderId ?? '').trim()
+  const occurrenceDateYmd = String(context.occurrenceDateYmd ?? '').trim()
+  const directOrder = ordersFindTimelineOrder(orderId)
+  if (directOrder) {
+    return directOrder
+  }
+  const sourceOrder = context.sourceOrder || calendarTimelineSourceOrderById(sourceOrderId)
+  if (sourceOrder && context.isRecurringSeries && /^\d{4}-\d{2}-\d{2}$/.test(occurrenceDateYmd)) {
+    return calendarTimelineRecurringInstance(sourceOrder, occurrenceDateYmd, 0)
+  }
+  return sourceOrder || null
+}
+
+function calendarTimelineEditOrderFromContext(context = {}) {
+  if (!context) {
+    return
+  }
+  if (context.isRealEvent && context.bar instanceof HTMLElement) {
+    void calendarTimelineOpenRealEventEditorFromBar(context.bar)
+    return
+  }
+  if (context.shouldAskScope && context.sourceOrder) {
+    calendarTimelineShowRecurringScopeDialog({
+      sourceOrderId: context.sourceOrderId,
+      occurrenceDateYmd: context.occurrenceDateYmd,
+      title: calendarTimelineOrderTitle(context.sourceOrder),
+      time: calendarTimelineOrderRangeLabel(calendarTimelineRecurringInstance(context.sourceOrder, context.occurrenceDateYmd, 0)),
+      onSingle: () => ordersOpenRecurringOccurrenceEditorFromCalendar(context.sourceOrderId, context.occurrenceDateYmd),
+      onSeries: () => ordersOpenEditorFromCalendar(context.sourceOrderId),
+    })
+    return
+  }
+  ordersOpenEditorFromCalendar(
+    context.isRecurrenceOverride
+      ? context.orderId
+      : context.sourceOrderId || context.orderId,
+  )
+}
+
+function calendarTimelineDuplicateOrderFromContext(context = {}) {
+  const sourceOrder = calendarTimelineOrderFromContext(context)
+  if (!sourceOrder) {
+    showTransientNotice('Nie znaleziono zlecenia do duplikowania.', 'error')
+    return
+  }
+
+  const nowIso = new Date().toISOString()
+  const baseOrder = calendarTimelineCleanRecurringGeneratedFields(sourceOrder)
+  const sourceType = String(baseOrder.type ?? '').trim()
+  const type = sourceType === 'cyclic' ? 'individual' : sourceType || 'individual'
+  const copy = {
+    ...baseOrder,
+    id: ordersNextOrderId(),
+    orderId: '',
+    sourceOrderId: '',
+    recurrenceOverride: false,
+    recurrenceOverrideKind: '',
+    recurrenceOriginalDateYmd: '',
+    recurrenceOverrideDateYmd: '',
+    recurrenceSkippedDates: [],
+    recurrenceExceptionDates: [],
+    skipDates: [],
+    scheduleMode: 'once',
+    type,
+    tone: ordersTimelineToneForType(type),
+    validUntil: String(baseOrder.endDateYmd || baseOrder.dateYmd || todayYmd()).trim(),
+    nextDate: String(baseOrder.dateYmd || todayYmd()).trim(),
+    repeatPreset: 'none',
+    repeatEvery: 1,
+    repeatUnit: 'day',
+    repeatAfterDays: 0,
+    repeatWeekdays: [],
+    weeklyScheduleRules: [],
+    title: `${calendarTimelineOrderTitle(baseOrder) || 'Zlecenie'} (kopia)`,
+    completed: false,
+    status: '',
+    isDraft: false,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  }
+  ordersSaveTimelineOrders([copy, ...ordersListSourceOrders()])
+  renderCalendarView()
+  if (appState.currentRoute === 'orders') {
+    renderOrdersView()
+  }
+  showTransientNotice('Zlecenie zduplikowane.', 'success')
+}
+
+function calendarTimelineDeleteOrderFromContext(context = {}) {
+  if (!context || context.isRealEvent) {
+    showTransientNotice('Tego zdarzenia nie można usunąć z menu zlecenia.', 'error')
+    return
+  }
+  const orderId = String(context.orderId ?? '').trim()
+  const sourceOrderId = String(context.sourceOrderId ?? '').trim()
+  const occurrenceDateYmd = String(context.occurrenceDateYmd ?? '').trim()
+  const sourceOrders = ordersListSourceOrders()
+  let deleteRemoteIds = []
+  let nextOrders = sourceOrders
+  let notice = 'Zadanie usunięte z kalendarza.'
+
+  if (context.shouldAskScope && context.sourceOrder && /^\d{4}-\d{2}-\d{2}$/.test(occurrenceDateYmd)) {
+    nextOrders = sourceOrders.map((order) =>
+      String(order?.id ?? '').trim() === sourceOrderId
+        ? calendarTimelineOrderWithSkippedOccurrence(order, occurrenceDateYmd)
+        : order,
+    )
+    notice = 'Wystąpienie cykliczne usunięte z tego dnia.'
+  } else {
+    const targetId = context.isRecurrenceOverride ? orderId : sourceOrderId || orderId
+    if (!targetId) {
+      showTransientNotice('Nie znaleziono zlecenia do usunięcia.', 'error')
+      return
+    }
+    nextOrders = sourceOrders.filter((order) => String(order?.id ?? '').trim() !== targetId)
+    deleteRemoteIds = [targetId]
+  }
+
+  return ordersDeleteTimelineOrdersById(deleteRemoteIds, { nextOrders, notice })
+}
+
+function calendarDeleteTaskById(taskId = '') {
+  const id = String(taskId ?? '').trim()
+  if (!id) {
+    return
+  }
+  calendarSaveTasks(appState.calendarTasks.filter((task) => task.id !== id))
+  calendarDeleteRemoteTasksById([id])
+  if (appState.calendarEditorTaskId === id) {
+    calendarCloseEditor()
+  }
+  renderCalendarView()
+  renderDashboardKanbanTasks()
+  if (appState.currentRoute === 'kanban') {
+    renderKanbanView()
+  }
+  showTransientNotice('Zadanie usunięte z kalendarza.', 'success')
+}
+
+function calendarShowTaskDeleteConfirm({ title = 'Zadanie', message = 'Czy na pewno chcesz usunąć to zadanie?', onConfirm = null } = {}) {
+  calendarHideTaskDeleteConfirm()
+  const overlay = document.createElement('div')
+  overlay.id = 'calendarTaskDeleteConfirmDialog'
+  overlay.className = 'calendar-conflict-overlay calendar-task-delete-confirm-overlay'
+  overlay.innerHTML = `
+    <section class="calendar-conflict-dialog calendar-task-delete-confirm" role="dialog" aria-modal="true" aria-labelledby="calendarTaskDeleteConfirmTitle">
+      <button class="calendar-conflict-close" type="button" data-calendar-task-delete-confirm="cancel" aria-label="Zamknij">×</button>
+      <div class="calendar-conflict-icon calendar-task-delete-confirm-icon">!</div>
+      <div class="calendar-conflict-copy">
+        <p class="calendar-conflict-kicker">Potwierdzenie usunięcia</p>
+        <h2 id="calendarTaskDeleteConfirmTitle">Czy na pewno chcesz usunąć to zadanie?</h2>
+        <p><strong>${escapeHtml(title || 'Zadanie')}</strong></p>
+        <p>${escapeHtml(message)}</p>
+      </div>
+      <div class="calendar-task-delete-confirm-actions">
+        <button class="btn secondary" type="button" data-calendar-task-delete-confirm="cancel">Anuluj</button>
+        <button class="btn danger" type="button" data-calendar-task-delete-confirm="delete">Usuń</button>
+      </div>
+    </section>
+  `
+  overlay.addEventListener('click', async (event) => {
+    const target = event.target
+    const button = target?.closest?.('[data-calendar-task-delete-confirm]')
+    if (target !== overlay && !button) {
+      return
+    }
+    const action = String(button?.getAttribute?.('data-calendar-task-delete-confirm') || 'cancel')
+    if (action !== 'delete') {
+      overlay.remove()
+      return
+    }
+    const deleteButton = button instanceof HTMLButtonElement ? button : null
+    if (deleteButton) {
+      deleteButton.disabled = true
+      deleteButton.textContent = 'Usuwanie...'
+    }
+    await Promise.resolve(typeof onConfirm === 'function' ? onConfirm() : null)
+    overlay.remove()
+  })
+  document.body.appendChild(overlay)
+}
+
+function calendarShowTaskContextMenu(context = {}, x = 0, y = 0) {
+  calendarHideTaskContextMenu()
+  if (!context || !context.kind) {
+    return
+  }
+  const isRealEvent = Boolean(context.isRealEvent)
+  const menu = document.createElement('div')
+  menu.id = 'calendarTaskContextMenu'
+  menu.className = 'calendar-task-context-menu'
+  menu.setAttribute('role', 'menu')
+  menu.innerHTML = `
+    <button type="button" role="menuitem" data-calendar-task-context-action="edit">Edytuj</button>
+    <button type="button" role="menuitem" data-calendar-task-context-action="duplicate"${isRealEvent ? ' disabled' : ''}>Duplikuj</button>
+    <button type="button" role="menuitem" class="is-danger" data-calendar-task-context-action="delete"${isRealEvent ? ' disabled' : ''}>Usuń</button>
+  `
+  menu.addEventListener('click', (event) => {
+    const button = event.target?.closest?.('[data-calendar-task-context-action]')
+    if (!(button instanceof HTMLButtonElement) || button.disabled) {
+      return
+    }
+    const action = String(button.getAttribute('data-calendar-task-context-action') || '').trim()
+    calendarHideTaskContextMenu()
+    if (context.kind === 'calendar-task') {
+      const task = appState.calendarTasks.find((item) => String(item.id ?? '') === String(context.taskId ?? ''))
+      if (!task) {
+        showTransientNotice('Nie znaleziono zadania.', 'error')
+        return
+      }
+      if (action === 'edit') {
+        calendarOpenEditor(context.taskId)
+        return
+      }
+      if (action === 'duplicate') {
+        calendarOpenEditor(context.taskId)
+        calendarDuplicateEditorTask()
+        return
+      }
+      if (action === 'delete') {
+        calendarShowTaskDeleteConfirm({
+          title: task.title || 'Zadanie',
+          onConfirm: () => calendarDeleteTaskById(context.taskId),
+        })
+      }
+      return
+    }
+
+    if (context.kind === 'timeline-order') {
+      const order = calendarTimelineOrderFromContext(context)
+      const title = order ? calendarTimelineOrderTitle(order) : 'Zlecenie'
+      if (action === 'edit') {
+        calendarTimelineEditOrderFromContext(context)
+        return
+      }
+      if (action === 'duplicate') {
+        calendarTimelineDuplicateOrderFromContext(context)
+        return
+      }
+      if (action === 'delete') {
+        calendarShowTaskDeleteConfirm({
+          title,
+          message: context.shouldAskScope
+            ? 'Usunięte zostanie tylko to wystąpienie zlecenia cyklicznego.'
+            : 'Tej operacji nie można cofnąć.',
+          onConfirm: () => calendarTimelineDeleteOrderFromContext(context),
+        })
+      }
+    }
+  })
+  document.body.appendChild(menu)
+  calendarTaskContextPosition(menu, x, y)
 }
 
 function calendarTimelineAskRecurringMoveScope(orderId, rowIndex, slotIndex = null, sourceRowIndex = null, resources = calendarTimelineResources(), options = {}) {
@@ -30653,7 +31621,6 @@ function renderCalendarTimelinePrototype() {
   calendarStartTimelineWorkerStatusRefresh()
   void calendarEnsureTimelineWorkerState().catch(() => {})
   calendarUpdateRangeLabel()
-  calendarTimelineHideEventsPopup()
   const mode = appState.calendarViewMode || 'week'
   document.querySelectorAll('#view-calendar [data-calendar-view]').forEach((button) => {
     button.classList.toggle('is-active', button.getAttribute('data-calendar-view') === mode)
@@ -31055,14 +32022,7 @@ function calendarDeleteEditorTask() {
   if (!id) {
     return
   }
-  calendarSaveTasks(appState.calendarTasks.filter((task) => task.id !== id))
-  calendarDeleteRemoteTasksById([id])
-  calendarCloseEditor()
-  renderCalendarView()
-  renderDashboardKanbanTasks()
-  if (appState.currentRoute === 'kanban') {
-    renderKanbanView()
-  }
+  calendarDeleteTaskById(id)
 }
 
 function calendarToggleEditorTaskCompleted() {
@@ -32567,6 +33527,19 @@ function bindCalendarViewFunctions() {
     renderCalendarView()
   })
   const timelineStage = document.getElementById('calendarPrototypeTimeline')
+  binding.add(timelineStage, 'contextmenu', (event) => {
+    const bar = event.target?.closest?.('[data-calendar-timeline-order-id]')
+    if (!(bar instanceof HTMLElement)) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    calendarTimelineClearEventsPopupTimer()
+    const context = calendarTimelineContextFromBar(bar)
+    if (context) {
+      calendarShowTaskContextMenu(context, event.clientX, event.clientY)
+    }
+  })
   binding.add(timelineStage, 'dblclick', (event) => {
     const bar = event.target?.closest?.('[data-calendar-timeline-order-id]')
     if (!(bar instanceof HTMLElement)) {
@@ -32623,20 +33596,21 @@ function bindCalendarViewFunctions() {
     event.preventDefault()
     calendarTimelineOpenWorkerEvents(resourceNode.getAttribute('data-calendar-timeline-row'))
   })
+  binding.add(window, 'resize', calendarTimelineClampAllEventsPopupsToViewport)
   binding.add(document, 'click', (event) => {
-    const popup = document.getElementById('calendarTimelineEventsPopup')
-    if (!popup) {
+    const menu = document.getElementById('calendarTaskContextMenu')
+    if (!menu) {
       return
     }
     const target = event.target
-    if (target instanceof Node && (popup.contains(target) || target?.closest?.('[data-calendar-timeline-order-id]'))) {
+    if (target instanceof Node && menu.contains(target)) {
       return
     }
-    calendarTimelineHideEventsPopup()
+    calendarHideTaskContextMenu()
   })
   binding.add(document, 'keydown', (event) => {
     if (event.key === 'Escape') {
-      calendarTimelineHideEventsPopup()
+      calendarHideTaskContextMenu()
     }
   })
   binding.add(timelineStage, 'dragstart', (event) => {
@@ -32848,6 +33822,19 @@ function bindCalendarViewFunctions() {
   })
 
   const board = document.getElementById('calendarBoard')
+  binding.add(board, 'contextmenu', (event) => {
+    const taskNode = event.target?.closest?.('[data-calendar-task-id]')
+    if (!taskNode) {
+      return
+    }
+    const taskId = String(taskNode.getAttribute('data-calendar-task-id') ?? '').trim()
+    if (!taskId) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    calendarShowTaskContextMenu({ kind: 'calendar-task', taskId }, event.clientX, event.clientY)
+  })
   binding.add(board, 'click', (event) => {
     const addButton = event.target?.closest?.('[data-calendar-add-day]')
     if (addButton) {
@@ -32963,7 +33950,12 @@ function bindCalendarViewFunctions() {
   binding.add(document.getElementById('calendarTaskDuplicateBtn'), 'click', calendarDuplicateEditorTask)
   binding.add(document.getElementById('calendarTaskCompleteBtn'), 'click', calendarToggleEditorTaskCompleted)
 
-  return binding.done
+  return () => {
+    calendarTimelineHideEventsPopup()
+    calendarHideTaskContextMenu()
+    calendarHideTaskDeleteConfirm()
+    binding.done()
+  }
 }
 
 function createBindingHelpers() {
@@ -34980,6 +35972,7 @@ export function mountPortalApp() {
     bindSidebarCollapseToggle(),
     setupFloatingTableScrollbar(),
     bindSubmenuToggles(),
+    bindSidebarGlobalSearch(router),
     bindRouteButtons(router),
     bindCalendarViewFunctions(),
     bindKanbanViewFunctions(),

@@ -563,6 +563,129 @@ mutation DeleteIndividualJobForOrg(
   individualClientJob_delete(key: { orgId: $orgId, clientIndId: $clientIndId })
 }
 
+mutation UpsertTaskForOrg(
+  $orgId: String!
+  $idTask: String!
+  $dateYmd: String
+  $startTime: String
+  $endDateYmd: String
+  $endTime: String
+  $scheduleMode: String
+  $accessStartTime: String
+  $accessEndTime: String
+  $accessWindows: String
+  $requiredWorkMinutes: Int
+  $requiredPeople: Int
+  $workAllocations: String
+  $workerId: String
+  $workerIds: String
+  $workerLabel: String
+  $workerName: String
+  $workerLogin: String
+  $clientId: String
+  $clientLabel: String
+  $clientName: String
+  $nip: String
+  $street: String
+  $city: String
+  $postCode: String
+  $addressLabel: String
+  $executionAddressLabel: String
+  $lat: Float
+  $lng: Float
+  $zoneId: String
+  $zoneLabel: String
+  $repeatPreset: String
+  $repeatEvery: Int
+  $repeatUnit: String
+  $repeatWeekdays: String
+  $weeklyScheduleRules: String
+  $title: String
+  $type: String
+  $price: Float
+  $description: String
+  $workerComment: String
+  $supplies: String
+  $objectPlanTasks: String
+  $allowExtendedWork: Boolean
+  $createdByUid: String
+  $updatedByUid: String
+  $createdAt: Timestamp
+  $updatedAt: Timestamp
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR']", message: "Brak uprawnien do zapisu zlecen grafiku.")
+      }
+  }
+
+  task_upsert(data: {
+    orgId: $orgId
+    idTask: $idTask
+    dateYmd: $dateYmd
+    startTime: $startTime
+    endDateYmd: $endDateYmd
+    endTime: $endTime
+    scheduleMode: $scheduleMode
+    accessStartTime: $accessStartTime
+    accessEndTime: $accessEndTime
+    accessWindows: $accessWindows
+    requiredWorkMinutes: $requiredWorkMinutes
+    requiredPeople: $requiredPeople
+    workAllocations: $workAllocations
+    workerId: $workerId
+    workerIds: $workerIds
+    workerLabel: $workerLabel
+    workerName: $workerName
+    workerLogin: $workerLogin
+    clientId: $clientId
+    clientLabel: $clientLabel
+    clientName: $clientName
+    nip: $nip
+    street: $street
+    city: $city
+    postCode: $postCode
+    addressLabel: $addressLabel
+    executionAddressLabel: $executionAddressLabel
+    lat: $lat
+    lng: $lng
+    zoneId: $zoneId
+    zoneLabel: $zoneLabel
+    repeatPreset: $repeatPreset
+    repeatEvery: $repeatEvery
+    repeatUnit: $repeatUnit
+    repeatWeekdays: $repeatWeekdays
+    weeklyScheduleRules: $weeklyScheduleRules
+    title: $title
+    type: $type
+    price: $price
+    description: $description
+    workerComment: $workerComment
+    supplies: $supplies
+    objectPlanTasks: $objectPlanTasks
+    allowExtendedWork: $allowExtendedWork
+    createdByUid: $createdByUid
+    updatedByUid: $updatedByUid
+    createdAt: $createdAt
+    updatedAt: $updatedAt
+  })
+}
+
+mutation DeleteTaskForOrg(
+  $orgId: String!
+  $idTask: String!
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR']", message: "Brak uprawnien do usuwania zlecen grafiku.")
+      }
+  }
+
+  task_delete(key: { orgId: $orgId, idTask: $idTask })
+}
+
 mutation InsertZoneForOrg(
   $orgId: String!
   $zoneId: String!
