@@ -44,8 +44,46 @@
         </div>
       </button>
 
+      <div class="topbar-search" id="topbarGlobalSearch" role="search" aria-label="Szukaj w portalu">
+        <span class="topbar-search-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
+            <path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <input
+          class="topbar-search-input"
+          id="topbarGlobalSearchInput"
+          type="search"
+          placeholder="Szukaj sekcji, zleceń i klientów..."
+          autocomplete="off"
+          aria-label="Szukaj sekcji, zleceń i klientów"
+          aria-expanded="false"
+          aria-controls="topbarGlobalSearchResults"
+        />
+        <button class="topbar-search-clear" id="topbarGlobalSearchClear" type="button" aria-label="Wyczyść wyszukiwanie" hidden>×</button>
+        <div class="topbar-search-results" id="topbarGlobalSearchResults" role="listbox" aria-label="Wyniki wyszukiwania" hidden></div>
+      </div>
+
       <div class="header-right">
+        <button class="topbar-action-btn" type="button" aria-label="Powiadomienia" title="Powiadomienia">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 9a6 6 0 1 1 12 0v4.5l1.4 2.3a1 1 0 0 1-.9 1.5H5.5a1 1 0 0 1-.9-1.5L6 13.5V9z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            <path d="M10 20a2 2 0 0 0 4 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button class="topbar-action-btn" type="button" aria-label="Szybkie akcje" title="Szybkie akcje">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3v18M3 12h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </button>
         <div class="user-chip" id="userChip" title="Użytkownik">
+          <span class="user-avatar" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M5 21a7 7 0 0 1 14 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </span>
           <span class="name" id="userName">-</span>
           <span class="dot" id="userDot" aria-hidden="true"></span>
         </div>

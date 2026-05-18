@@ -2354,6 +2354,717 @@ async function readPortalTasks(client, orgId) {
   return result.rows.map((row) => row.payload).filter((task) => task && typeof task === 'object')
 }
 
+const PORTAL_SCHEDULE_ORDER_COLUMNS = [
+  'org_id',
+  'id_task',
+  'client_id',
+  'zone_id',
+  'access_end_time',
+  'access_start_time',
+  'access_windows',
+  'address_label',
+  'allow_extended_work',
+  'city',
+  'client_label',
+  'client_name',
+  'created_at',
+  'created_by_uid',
+  'date_ymd',
+  'description',
+  'end_date_ymd',
+  'end_time',
+  'execution_address_label',
+  'lat',
+  'lng',
+  'nip',
+  'object_plan_tasks',
+  'post_code',
+  'price',
+  'repeat_every',
+  'repeat_preset',
+  'repeat_unit',
+  'repeat_weekdays',
+  'required_people',
+  'required_work_minutes',
+  'schedule_mode',
+  'start_time',
+  'street',
+  'supplies',
+  'title',
+  'type',
+  'updated_at',
+  'updated_by_uid',
+  'weekly_schedule_rules',
+  'work_allocations',
+  'worker_comment',
+  'worker_id',
+  'worker_ids',
+  'worker_label',
+  'worker_login',
+  'worker_name',
+  'zone_label',
+]
+
+function portalScheduleOrderNullableText(value, maxLength = 0) {
+  const text = normalizeText(value)
+  if (!text) return null
+  return maxLength > 0 ? text.slice(0, maxLength) : text
+}
+
+function sanitizePortalScheduleOrderId(value) {
+  return normalizeText(value).slice(0, 180)
+}
+
+function normalizePortalScheduleOrderDate(value, fallback = '') {
+  const text = normalizeText(value)
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : fallback
+}
+
+function normalizePortalScheduleOrderTime(value, fallback = '') {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)/.exec(normalizeText(value))
+  return match ? `${match[1]}:${match[2]}` : fallback
+}
+
+function portalScheduleOrderNumber(value, fallback = null) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback
+  const text = normalizeText(value).replace(',', '.')
+  if (!text) return fallback
+  const parsed = Number(text)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function portalScheduleOrderInteger(value, fallback = null) {
+  const parsed = portalScheduleOrderNumber(value, fallback)
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback
+}
+
+function portalScheduleOrderBoolean(value) {
+  if (typeof value === 'boolean') return value
+  return isTrue(value)
+}
+
+function portalScheduleOrderJsonValue(value, fallback = []) {
+  if (Array.isArray(value)) return value
+  if (value && typeof value === 'object') return value
+  const text = normalizeText(value)
+  if (!text) return fallback
+  try {
+    const parsed = JSON.parse(text)
+    return parsed == null ? fallback : parsed
+  } catch {
+    return fallback
+  }
+}
+
+function portalScheduleOrderFirstJsonValue(fallback, ...values) {
+  for (const value of values) {
+    if (Array.isArray(value) || (value && typeof value === 'object')) return value
+    const text = normalizeText(value)
+    if (!text) continue
+    const parsed = portalScheduleOrderJsonValue(text, null)
+    if (parsed != null) return parsed
+  }
+  return fallback
+}
+
+function portalScheduleOrderJsonString(value, fallback = []) {
+  return JSON.stringify(portalScheduleOrderJsonValue(value, fallback))
+}
+
+function portalScheduleOrderDateOrdinal(value) {
+  const ymd = normalizePortalScheduleOrderDate(value)
+  if (!ymd) return null
+  return Math.floor(Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(5, 7)) - 1, Number(ymd.slice(8, 10))) / 86400000)
+}
+
+function portalScheduleOrderTimeMinutes(value) {
+  const time = normalizePortalScheduleOrderTime(value)
+  if (!time) return null
+  return Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5))
+}
+
+function portalScheduleOrderDurationMinutes(order = {}) {
+  const explicit = portalScheduleOrderInteger(order.requiredWorkMinutes ?? order.required_work_minutes ?? order.durationMinutes, null)
+  if (Number.isFinite(explicit) && explicit > 0) return explicit
+  const startDay = normalizePortalScheduleOrderDate(order.dateYmd ?? order.date_ymd)
+  const endDay = normalizePortalScheduleOrderDate(order.endDateYmd ?? order.end_date_ymd, startDay)
+  const startMinute = portalScheduleOrderTimeMinutes(order.startTime ?? order.start_time)
+  const endMinute = portalScheduleOrderTimeMinutes(order.endTime ?? order.end_time)
+  const startOrdinal = portalScheduleOrderDateOrdinal(startDay)
+  const endOrdinal = portalScheduleOrderDateOrdinal(endDay)
+  if (startOrdinal == null || endOrdinal == null || startMinute == null || endMinute == null || endOrdinal < startOrdinal) return null
+  const total = (endOrdinal - startOrdinal) * 1440 + endMinute - startMinute
+  return total > 0 ? total : null
+}
+
+function portalScheduleOrderWorkerId(value) {
+  const raw = normalizeText(value)
+  const lowered = raw.toLowerCase()
+  if (!raw || lowered === 'buffer' || lowered === 'bufor') return ''
+  const upper = raw.toUpperCase()
+  return /^W\d+$/.test(upper) ? upper : raw.slice(0, 64)
+}
+
+function portalScheduleOrderWorkerKey(value) {
+  return normalizeText(value).toLowerCase()
+}
+
+function portalScheduleOrderUniqueText(values = []) {
+  const seen = new Set()
+  const result = []
+  values.forEach((value) => {
+    const text = normalizeText(value)
+    const key = text.toLowerCase()
+    if (!text || seen.has(key)) return
+    seen.add(key)
+    result.push(text)
+  })
+  return result
+}
+
+function portalScheduleOrderAllocationFromItem(item, index = 0) {
+  if (typeof item === 'string') {
+    const workerId = portalScheduleOrderWorkerId(item)
+    return workerId ? { row: index, workerId, key: portalScheduleOrderWorkerKey(workerId), name: workerId, workerLogin: '', allocationMinutes: null } : null
+  }
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+  const rawKey = portalScheduleOrderNullableText(item.key ?? item.workerKey ?? item.id, 128)
+  const workerId = portalScheduleOrderWorkerId(item.workerId ?? item.worker_id ?? item.id ?? rawKey)
+  const name = portalScheduleOrderNullableText(item.name ?? item.workerName ?? item.worker_label ?? item.workerLabel ?? item.label, 240)
+  const loweredKey = normalizeText(rawKey || workerId || name).toLowerCase()
+  const isBuffer = loweredKey === 'buffer' || loweredKey === 'bufor' || normalizeText(name).toLowerCase() === 'bufor'
+  const row = portalScheduleOrderInteger(item.row ?? item.rowIndex, index)
+  return {
+    row: Number.isInteger(row) && row >= 0 ? row : index,
+    workerId: isBuffer ? '' : workerId,
+    key: isBuffer ? 'buffer' : portalScheduleOrderWorkerKey(rawKey || workerId),
+    name: name || (isBuffer ? 'BUFOR' : workerId),
+    workerLogin: portalScheduleOrderNullableText(item.workerLogin ?? item.worker_login ?? item.login, 80) || '',
+    allocationMinutes: portalScheduleOrderInteger(item.allocationMinutes ?? item.minutes, null),
+  }
+}
+
+function portalScheduleOrderAllocationsFromOrder(order = {}) {
+  const source = portalScheduleOrderFirstJsonValue([], order.workAllocations, order.work_allocations, order.workerAssignments, order.assignedWorkers, order.workers)
+  const allocations = (Array.isArray(source) ? source : []).map((item, index) => portalScheduleOrderAllocationFromItem(item, index)).filter(Boolean)
+  if (!allocations.length && Array.isArray(order.assignedRows) && order.assignedRows.length) {
+    order.assignedRows.forEach((row, index) => {
+      const rowIndex = portalScheduleOrderInteger(row, index)
+      allocations.push({
+        row: Number.isInteger(rowIndex) && rowIndex >= 0 ? rowIndex : index,
+        workerId: '',
+        key: 'buffer',
+        name: portalScheduleOrderNullableText(order.workerLabel ?? order.worker_label, 240) || 'BUFOR',
+        workerLogin: '',
+        allocationMinutes: null,
+      })
+    })
+  }
+  if (!allocations.length) {
+    const workerId = portalScheduleOrderWorkerId(order.workerId ?? order.worker_id)
+    const workerLabel = portalScheduleOrderNullableText(order.workerLabel ?? order.worker_label ?? order.workerName ?? order.worker_name, 240)
+    if (workerId || workerLabel) {
+      allocations.push({
+        row: portalScheduleOrderInteger(order.row, 0) ?? 0,
+        workerId,
+        key: workerId ? portalScheduleOrderWorkerKey(workerId) : 'buffer',
+        name: workerLabel || workerId || 'BUFOR',
+        workerLogin: portalScheduleOrderNullableText(order.workerLogin ?? order.worker_login, 80) || '',
+        allocationMinutes: portalScheduleOrderInteger(order.requiredWorkMinutes ?? order.required_work_minutes, null),
+      })
+    }
+  }
+  if (!allocations.length) {
+    allocations.push({ row: portalScheduleOrderInteger(order.row, 0) ?? 0, workerId: '', key: 'buffer', name: 'BUFOR', workerLogin: '', allocationMinutes: null })
+  }
+  return allocations
+}
+
+function portalScheduleOrderTimestamp(value, fallbackIso = new Date().toISOString()) {
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString()
+  const text = normalizeText(value)
+  if (!text) return fallbackIso
+  const parsed = Date.parse(text)
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : fallbackIso
+}
+
+function portalScheduleOrderDbRow(order = {}, orgId, requesterUid) {
+  const idTask = sanitizePortalScheduleOrderId(order.idTask ?? order.id ?? order.id_task)
+  if (!idTask || order.isDraft) return null
+  const nowIso = new Date().toISOString()
+  const dateYmd = normalizePortalScheduleOrderDate(order.dateYmd ?? order.date_ymd ?? order.dateFrom ?? order.startDate)
+  const startTime = normalizePortalScheduleOrderTime(order.startTime ?? order.start_time ?? order.time)
+  const endDateYmd = normalizePortalScheduleOrderDate(order.endDateYmd ?? order.end_date_ymd ?? order.validUntil ?? order.dateTo ?? order.endDate, dateYmd)
+  const endTime = normalizePortalScheduleOrderTime(order.endTime ?? order.end_time ?? order.stopTime)
+  const allocations = portalScheduleOrderAllocationsFromOrder(order)
+  const realAllocations = allocations.filter((item) => portalScheduleOrderWorkerId(item.workerId))
+  const workerIds = portalScheduleOrderUniqueText(realAllocations.map((item) => portalScheduleOrderWorkerId(item.workerId)))
+  const primaryAllocation = realAllocations[0] || null
+  const workerLabel = realAllocations.length
+    ? realAllocations.map((item) => item.name || item.workerId).filter(Boolean).join(', ')
+    : portalScheduleOrderNullableText(order.workerLabel ?? order.worker_label ?? order.workerName ?? order.worker_name, 240) || 'BUFOR'
+  const objectPlanTasks = portalScheduleOrderFirstJsonValue([], order.objectPlanTasks, order.object_plan_tasks, order.tasks, order.subtasks, order.activities)
+  const supplies = portalScheduleOrderFirstJsonValue([], order.supplies, order.itemsToTake, order.suppliesForWorkers)
+  const uid = normalizeText(requesterUid)
+  return {
+    org_id: orgId,
+    id_task: idTask,
+    client_id: portalScheduleOrderNullableText(order.clientId ?? order.client_id, 64),
+    zone_id: portalScheduleOrderNullableText(order.zoneId ?? order.zone_id, 64),
+    access_end_time: portalScheduleOrderNullableText(normalizePortalScheduleOrderTime(order.accessEndTime ?? order.access_end_time, endTime), 5),
+    access_start_time: portalScheduleOrderNullableText(normalizePortalScheduleOrderTime(order.accessStartTime ?? order.access_start_time, startTime), 5),
+    access_windows: portalScheduleOrderJsonString(order.accessWindows ?? order.access_windows, []),
+    address_label: portalScheduleOrderNullableText(order.addressLabel ?? order.address_label, 800),
+    allow_extended_work: portalScheduleOrderBoolean(order.allowExtendedWork ?? order.allow_extended_work),
+    city: portalScheduleOrderNullableText(order.city ?? order.clientCity, 160),
+    client_label: portalScheduleOrderNullableText(order.clientLabel ?? order.client_label ?? order.clientName ?? order.client_name, 500),
+    client_name: portalScheduleOrderNullableText(order.clientName ?? order.client_name ?? order.clientLabel ?? order.client_label, 500),
+    created_at: portalScheduleOrderTimestamp(order.createdAt ?? order.created_at, nowIso),
+    created_by_uid: portalScheduleOrderNullableText(order.createdByUid ?? order.created_by_uid ?? order.createdBy ?? uid, 128),
+    date_ymd: portalScheduleOrderNullableText(dateYmd, 10),
+    description: portalScheduleOrderNullableText(order.description, 4000),
+    end_date_ymd: portalScheduleOrderNullableText(endDateYmd, 10),
+    end_time: portalScheduleOrderNullableText(endTime, 5),
+    execution_address_label: portalScheduleOrderNullableText(order.executionAddressLabel ?? order.execution_address_label ?? order.customAddressLabel, 800),
+    lat: portalScheduleOrderNumber(order.lat ?? order.latitude, null),
+    lng: portalScheduleOrderNumber(order.lng ?? order.longitude, null),
+    nip: portalScheduleOrderNullableText(order.nip ?? order.clientNip, 80),
+    object_plan_tasks: JSON.stringify(Array.isArray(objectPlanTasks) ? objectPlanTasks : []),
+    post_code: portalScheduleOrderNullableText(order.postCode ?? order.post_code ?? order.postalCode ?? order.clientPostCode, 32),
+    price: portalScheduleOrderNumber(order.price, 0),
+    repeat_every: portalScheduleOrderInteger(order.repeatEvery ?? order.repeat_every, null),
+    repeat_preset: portalScheduleOrderNullableText(order.repeatPreset ?? order.repeat_preset, 32),
+    repeat_unit: portalScheduleOrderNullableText(order.repeatUnit ?? order.repeat_unit, 16),
+    repeat_weekdays: portalScheduleOrderJsonString(order.repeatWeekdays ?? order.repeat_weekdays, []),
+    required_people: workerIds.length,
+    required_work_minutes: portalScheduleOrderDurationMinutes({ ...order, dateYmd, startTime, endDateYmd, endTime }),
+    schedule_mode:
+      portalScheduleOrderNullableText(order.scheduleMode ?? order.schedule_mode, 32) ||
+      (normalizeText(order.type) === 'cyclic' || normalizeText(order.repeatPreset ?? order.repeat_preset) !== 'none' ? 'repeat' : 'once'),
+    start_time: portalScheduleOrderNullableText(startTime, 5),
+    street: portalScheduleOrderNullableText(order.street ?? order.clientStreet, 500),
+    supplies: JSON.stringify(Array.isArray(supplies) ? supplies : []),
+    title: portalScheduleOrderNullableText(order.title ?? order.name, 500) || 'Zlecenie',
+    type: portalScheduleOrderNullableText(order.type, 40) || 'other',
+    updated_at: nowIso,
+    updated_by_uid: portalScheduleOrderNullableText(uid || order.updatedByUid || order.updated_by_uid || order.updatedBy, 128),
+    weekly_schedule_rules: portalScheduleOrderJsonString(order.weeklyScheduleRules ?? order.weekly_schedule_rules, []),
+    work_allocations: JSON.stringify(allocations),
+    worker_comment: portalScheduleOrderNullableText(order.workerComment ?? order.worker_comment ?? order.workerOnlyComment, 4000),
+    worker_id: primaryAllocation?.workerId || portalScheduleOrderNullableText(order.workerId ?? order.worker_id, 64),
+    worker_ids: JSON.stringify(workerIds),
+    worker_label: workerLabel,
+    worker_login: primaryAllocation?.workerLogin || portalScheduleOrderNullableText(order.workerLogin ?? order.worker_login, 80),
+    worker_name: primaryAllocation?.name || portalScheduleOrderNullableText(order.workerName ?? order.worker_name, 240),
+    zone_label: portalScheduleOrderNullableText(order.zoneLabel ?? order.zone_label ?? order.zoneName, 240),
+  }
+}
+
+function portalScheduleOrderFromDbRow(row = {}) {
+  const id = sanitizePortalScheduleOrderId(row.id_task ?? row.idTask ?? row.id)
+  if (!id) return null
+  const dateYmd = normalizePortalScheduleOrderDate(row.date_ymd ?? row.dateYmd)
+  const endDateYmd = normalizePortalScheduleOrderDate(row.end_date_ymd ?? row.endDateYmd, dateYmd)
+  const allocations = portalScheduleOrderAllocationsFromOrder(row)
+  const assignedRows = portalScheduleOrderUniqueText(allocations.map((item) => String(item.row)))
+    .map((value) => portalScheduleOrderInteger(value, 0))
+    .filter((value) => Number.isInteger(value))
+  const workerIds = portalScheduleOrderJsonValue(row.worker_ids ?? row.workerIds, [])
+  const accessWindows = portalScheduleOrderJsonValue(row.access_windows ?? row.accessWindows, [])
+  const repeatWeekdays = portalScheduleOrderJsonValue(row.repeat_weekdays ?? row.repeatWeekdays, [])
+  const weeklyScheduleRules = portalScheduleOrderJsonValue(row.weekly_schedule_rules ?? row.weeklyScheduleRules, [])
+  const supplies = portalScheduleOrderJsonValue(row.supplies, [])
+  const objectPlanTasks = portalScheduleOrderJsonValue(row.object_plan_tasks ?? row.objectPlanTasks, [])
+  const clientName = portalScheduleOrderNullableText(row.client_name ?? row.joined_client_name ?? row.clientLabel, 500)
+  const clientLabel = portalScheduleOrderNullableText(row.client_label ?? clientName, 500)
+  const workerName = portalScheduleOrderNullableText(row.worker_name ?? row.joined_worker_name, 240)
+  const workerLogin = portalScheduleOrderNullableText(row.worker_login ?? row.joined_worker_login, 80)
+  const createdAt = portalScheduleOrderTimestamp(row.created_at ?? row.createdAt)
+  const updatedAt = portalScheduleOrderTimestamp(row.updated_at ?? row.updatedAt, createdAt)
+  return {
+    id,
+    idTask: id,
+    isDraft: false,
+    recordKind: 'portal-schedule-order',
+    row: assignedRows[0] ?? 0,
+    assignedRows: assignedRows.length ? assignedRows : [0],
+    workerAssignments: allocations,
+    dateYmd,
+    startTime: normalizePortalScheduleOrderTime(row.start_time ?? row.startTime, '08:00'),
+    endDateYmd,
+    endTime: normalizePortalScheduleOrderTime(row.end_time ?? row.endTime, '09:00'),
+    validUntil: endDateYmd,
+    nextDate: dateYmd,
+    scheduleMode: portalScheduleOrderNullableText(row.schedule_mode ?? row.scheduleMode, 32) || 'once',
+    accessStartTime: normalizePortalScheduleOrderTime(row.access_start_time ?? row.accessStartTime),
+    accessEndTime: normalizePortalScheduleOrderTime(row.access_end_time ?? row.accessEndTime),
+    accessWindows: Array.isArray(accessWindows) ? accessWindows : [],
+    requiredWorkMinutes: portalScheduleOrderInteger(row.required_work_minutes ?? row.requiredWorkMinutes, null),
+    requiredPeople: portalScheduleOrderInteger(row.required_people ?? row.requiredPeople, 0),
+    workAllocations: allocations,
+    workerId: portalScheduleOrderNullableText(row.worker_id ?? row.workerId, 64),
+    workerIds: Array.isArray(workerIds) ? workerIds : [],
+    workerLabel: portalScheduleOrderNullableText(row.worker_label ?? row.workerLabel ?? workerName, 500) || 'BUFOR',
+    workerName,
+    workerLogin,
+    clientId: portalScheduleOrderNullableText(row.client_id ?? row.clientId, 64),
+    clientLabel,
+    clientName: clientName || clientLabel,
+    nip: portalScheduleOrderNullableText(row.nip ?? row.joined_client_nip, 80),
+    clientNip: portalScheduleOrderNullableText(row.nip ?? row.joined_client_nip, 80),
+    street: portalScheduleOrderNullableText(row.street ?? row.joined_client_street, 500),
+    clientStreet: portalScheduleOrderNullableText(row.street ?? row.joined_client_street, 500),
+    city: portalScheduleOrderNullableText(row.city ?? row.joined_client_city, 160),
+    clientCity: portalScheduleOrderNullableText(row.city ?? row.joined_client_city, 160),
+    postCode: portalScheduleOrderNullableText(row.post_code ?? row.joined_client_post_code, 32),
+    postalCode: portalScheduleOrderNullableText(row.post_code ?? row.joined_client_post_code, 32),
+    clientPostCode: portalScheduleOrderNullableText(row.post_code ?? row.joined_client_post_code, 32),
+    addressLabel: portalScheduleOrderNullableText(row.address_label ?? row.addressLabel, 800),
+    executionAddressLabel: portalScheduleOrderNullableText(row.execution_address_label ?? row.executionAddressLabel, 800),
+    customAddressLabel: portalScheduleOrderNullableText(row.execution_address_label ?? row.executionAddressLabel, 800),
+    lat: portalScheduleOrderNumber(row.lat, null),
+    lng: portalScheduleOrderNumber(row.lng, null),
+    zoneId: portalScheduleOrderNullableText(row.zone_id ?? row.zoneId, 64),
+    zoneLabel: portalScheduleOrderNullableText(row.zone_label ?? row.zoneLabel, 240),
+    repeatPreset: portalScheduleOrderNullableText(row.repeat_preset ?? row.repeatPreset, 32),
+    repeatEvery: portalScheduleOrderInteger(row.repeat_every ?? row.repeatEvery, null),
+    repeatUnit: portalScheduleOrderNullableText(row.repeat_unit ?? row.repeatUnit, 16),
+    repeatWeekdays: Array.isArray(repeatWeekdays) ? repeatWeekdays : [],
+    weeklyScheduleRules: Array.isArray(weeklyScheduleRules) ? weeklyScheduleRules : [],
+    title: portalScheduleOrderNullableText(row.title, 500) || clientLabel || 'Zlecenie',
+    type: portalScheduleOrderNullableText(row.type, 40) || 'other',
+    price: portalScheduleOrderNumber(row.price, 0),
+    description: portalScheduleOrderNullableText(row.description, 4000),
+    workerComment: portalScheduleOrderNullableText(row.worker_comment ?? row.workerComment, 4000),
+    workerOnlyComment: portalScheduleOrderNullableText(row.worker_comment ?? row.workerComment, 4000),
+    employeeComment: portalScheduleOrderNullableText(row.worker_comment ?? row.workerComment, 4000),
+    appComment: portalScheduleOrderNullableText(row.worker_comment ?? row.workerComment, 4000),
+    mobileComment: portalScheduleOrderNullableText(row.worker_comment ?? row.workerComment, 4000),
+    privateWorkerComment: portalScheduleOrderNullableText(row.worker_comment ?? row.workerComment, 4000),
+    commentForWorkers: portalScheduleOrderNullableText(row.worker_comment ?? row.workerComment, 4000),
+    supplies: Array.isArray(supplies) ? supplies : [],
+    itemsToTake: Array.isArray(supplies) ? supplies : [],
+    suppliesForWorkers: Array.isArray(supplies) ? supplies : [],
+    objectPlanTasks: Array.isArray(objectPlanTasks) ? objectPlanTasks : [],
+    tasks: Array.isArray(objectPlanTasks) ? objectPlanTasks : [],
+    subtasks: Array.isArray(objectPlanTasks) ? objectPlanTasks : [],
+    activities: Array.isArray(objectPlanTasks) ? objectPlanTasks : [],
+    allowExtendedWork: portalScheduleOrderBoolean(row.allow_extended_work ?? row.allowExtendedWork),
+    createdByUid: portalScheduleOrderNullableText(row.created_by_uid ?? row.createdByUid, 128),
+    updatedByUid: portalScheduleOrderNullableText(row.updated_by_uid ?? row.updatedByUid, 128),
+    createdAt,
+    updatedAt,
+  }
+}
+
+function sortPortalScheduleOrders(orders = []) {
+  return [...orders].sort((left, right) => {
+    const leftDate = normalizeText(left?.dateYmd)
+    const rightDate = normalizeText(right?.dateYmd)
+    if (leftDate !== rightDate) return leftDate.localeCompare(rightDate)
+    const leftTime = normalizeText(left?.startTime)
+    const rightTime = normalizeText(right?.startTime)
+    if (leftTime !== rightTime) return leftTime.localeCompare(rightTime)
+    return normalizeText(left?.id).localeCompare(normalizeText(right?.id))
+  })
+}
+
+async function ensurePortalScheduleOrderTable(client) {
+  await client.query(`
+    create table if not exists public.task (
+      org_id varchar(64) not null,
+      id_task varchar(180) not null,
+      client_id varchar(64),
+      zone_id varchar(64),
+      access_end_time varchar(5),
+      access_start_time varchar(5),
+      access_windows text,
+      address_label text,
+      allow_extended_work boolean,
+      city text,
+      client_label text,
+      client_name text,
+      created_at timestamptz,
+      created_by_uid varchar(128),
+      date_ymd varchar(10),
+      description text,
+      end_date_ymd varchar(10),
+      end_time varchar(5),
+      execution_address_label text,
+      lat double precision,
+      lng double precision,
+      nip text,
+      object_plan_tasks text,
+      post_code text,
+      price double precision,
+      repeat_every integer,
+      repeat_preset varchar(32),
+      repeat_unit varchar(16),
+      repeat_weekdays text,
+      required_people integer,
+      required_work_minutes integer,
+      schedule_mode varchar(32),
+      start_time varchar(5),
+      street text,
+      supplies text,
+      title text,
+      type varchar(40),
+      updated_at timestamptz,
+      updated_by_uid varchar(128),
+      weekly_schedule_rules text,
+      work_allocations text,
+      worker_comment text,
+      worker_id varchar(64),
+      worker_ids text,
+      worker_label text,
+      worker_login varchar(80),
+      worker_name text,
+      zone_label text,
+      primary key (org_id, id_task)
+    )
+  `)
+}
+
+async function requirePortalScheduleOrderAccess(client, orgId, uid, { write = false } = {}) {
+  const membership = await getRequesterMembership(client, orgId, uid)
+  const role = normalizeRequesterRole(membership?.role)
+  const allowed = write ? ['ADMIN', 'MANAGER', 'COORDINATOR'] : ['ADMIN', 'MANAGER', 'COORDINATOR', 'WORKER']
+  if (!allowed.includes(role)) {
+    const error = new Error('FORBIDDEN')
+    error.statusCode = membership ? 403 : 404
+    error.publicCode = membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING'
+    error.publicMessage = membership ? 'Brak uprawnien do zlecen.' : 'Brak dostepu do tej organizacji.'
+    throw error
+  }
+  return role
+}
+
+async function readPortalScheduleOrders(client, orgId) {
+  const result = await client.query(
+    `select
+        t.*,
+        c.name as joined_client_name,
+        c.nip as joined_client_nip,
+        c.city as joined_client_city,
+        c.postal_code as joined_client_post_code,
+        c.address as joined_client_street,
+        w.full_name as joined_worker_name,
+        w.login as joined_worker_login
+       from public.task t
+       left join public.client c
+         on c.org_id = t.org_id and c.client_id = t.client_id
+       left join lateral (
+         select worker_id, full_name, login
+           from public.worker
+          where org_id = t.org_id
+            and t.worker_id is not null
+            and (
+              lower(coalesce(worker_id, '')) = lower(t.worker_id)
+              or lower(coalesce(login, '')) = lower(t.worker_id)
+            )
+          order by login asc
+          limit 1
+       ) w on true
+      where t.org_id = $1
+      order by t.date_ymd asc nulls last, t.start_time asc nulls last, t.id_task asc`,
+    [orgId],
+  )
+  return sortPortalScheduleOrders(result.rows.map((row) => portalScheduleOrderFromDbRow(row)).filter(Boolean))
+}
+
+async function upsertPortalScheduleOrderTask(client, dbRow) {
+  const columns = PORTAL_SCHEDULE_ORDER_COLUMNS
+  const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ')
+  const assignments = columns
+    .filter((column) => !['org_id', 'id_task', 'created_at', 'created_by_uid'].includes(column))
+    .map((column) => `${column} = excluded.${column}`)
+    .join(', ')
+  const values = columns.map((column) => dbRow[column] ?? null)
+  await client.query(
+    `insert into public.task (${columns.join(', ')})
+     values (${placeholders})
+     on conflict (org_id, id_task)
+     do update set ${assignments}`,
+    values,
+  )
+}
+
+function shouldUseLocalPortalScheduleOrderFileStorage() {
+  return NODE_ENV !== 'production' && !hasDatabaseConnectionConfig()
+}
+
+function portalScheduleOrderFilePath(orgId) {
+  const safeOrgId = normalizeOrgId(orgId).replace(/[^a-z0-9_-]/gi, '_') || 'default'
+  return path.join(LOCAL_PORTAL_DATA_DIR, 'portal-schedule-orders', `${safeOrgId}.json`)
+}
+
+async function readPortalScheduleOrdersFile(orgId) {
+  try {
+    const raw = await fs.promises.readFile(portalScheduleOrderFilePath(orgId), 'utf8')
+    const parsed = JSON.parse(raw)
+    const orders = Array.isArray(parsed?.orders) ? parsed.orders : []
+    return sortPortalScheduleOrders(orders.filter((order) => order && typeof order === 'object'))
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      console.warn('[portal/schedule-orders] local read failed', error?.message || error)
+    }
+    return []
+  }
+}
+
+async function writePortalScheduleOrdersFile(orgId, orders) {
+  const filePath = portalScheduleOrderFilePath(orgId)
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
+  await fs.promises.writeFile(
+    filePath,
+    JSON.stringify({ orgId, updatedAt: new Date().toISOString(), orders: sortPortalScheduleOrders(orders) }, null, 2),
+    'utf8',
+  )
+}
+
+async function handlePortalScheduleOrdersFileRequest(method, orgId, body, requesterUid, res) {
+  const existingOrders = await readPortalScheduleOrdersFile(orgId)
+  if (method === 'GET') {
+    sendJson(res, 200, { ok: true, data: { orders: existingOrders, storage: 'local-file' } })
+    return
+  }
+  if (method === 'DELETE') {
+    const orderIds = (Array.isArray(body?.orderIds) ? body.orderIds : []).map((value) => sanitizePortalScheduleOrderId(value)).filter(Boolean)
+    const deleted = new Set(orderIds)
+    const nextOrders = existingOrders.filter((order) => !deleted.has(sanitizePortalScheduleOrderId(order?.id ?? order?.idTask)))
+    await writePortalScheduleOrdersFile(orgId, nextOrders)
+    sendJson(res, 200, { ok: true, data: { deletedOrderIds: orderIds } })
+    return
+  }
+  const rawOrders = Array.isArray(body?.orders) ? body.orders : []
+  const savedOrders = sortPortalScheduleOrders(
+    rawOrders
+      .map((order) => {
+        const row = portalScheduleOrderDbRow(order, orgId, requesterUid)
+        return row ? portalScheduleOrderFromDbRow(row) : null
+      })
+      .filter(Boolean)
+      .slice(0, 2000),
+  )
+  await writePortalScheduleOrdersFile(orgId, savedOrders)
+  sendJson(res, 200, { ok: true, data: { orders: savedOrders, storage: 'local-file' } })
+}
+
+async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  const method = String(req.method || 'GET').toUpperCase()
+  if (!['GET', 'POST', 'DELETE'].includes(method)) {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolone metody to GET, POST i DELETE.')
+    return
+  }
+
+  let body = {}
+  if (method !== 'GET') {
+    try {
+      body = await readJsonBody(req)
+    } catch (error) {
+      if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
+        sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
+        return
+      }
+      sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
+      return
+    }
+  }
+
+  const orgId = normalizeOrgId(method === 'GET' ? requestUrl.searchParams.get('orgId') : body?.orgId)
+  if (!orgId) {
+    sendApiError(res, 400, 'INVALID_ORG_ID', 'Brak poprawnego orgId.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status, mapped.code, mapped.message)
+    return
+  }
+
+  const requesterUid = normalizeText(decodedToken?.uid)
+  let client = null
+  try {
+    if (shouldUseLocalPortalScheduleOrderFileStorage()) {
+      await handlePortalScheduleOrdersFileRequest(method, orgId, body, requesterUid, res)
+      return
+    }
+
+    client = await connectDbClient()
+    await ensurePortalScheduleOrderTable(client)
+    await requirePortalScheduleOrderAccess(client, orgId, requesterUid, { write: method !== 'GET' })
+
+    if (method === 'GET') {
+      const orders = await readPortalScheduleOrders(client, orgId)
+      sendJson(res, 200, { ok: true, data: { orders } })
+      return
+    }
+
+    if (method === 'DELETE') {
+      const orderIds = (Array.isArray(body?.orderIds) ? body.orderIds : []).map((value) => sanitizePortalScheduleOrderId(value)).filter(Boolean)
+      if (!orderIds.length) {
+        sendJson(res, 200, { ok: true, data: { deletedOrderIds: [] } })
+        return
+      }
+      await client.query('delete from public.task where org_id = $1 and id_task = any($2::varchar[])', [orgId, orderIds])
+      sendJson(res, 200, { ok: true, data: { deletedOrderIds: orderIds } })
+      return
+    }
+
+    const rawOrders = Array.isArray(body?.orders) ? body.orders : []
+    const rows = rawOrders.map((order) => portalScheduleOrderDbRow(order, orgId, requesterUid)).filter(Boolean).slice(0, 2000)
+    await client.query('begin')
+    for (const row of rows) {
+      await upsertPortalScheduleOrderTask(client, row)
+    }
+    const rowIds = rows.map((row) => sanitizePortalScheduleOrderId(row?.id_task)).filter(Boolean)
+    if (rowIds.length) {
+      await client.query('delete from public.task where org_id = $1 and id_task <> all($2::varchar[])', [orgId, rowIds])
+    } else {
+      await client.query('delete from public.task where org_id = $1', [orgId])
+    }
+    await client.query('commit')
+    const savedOrders = await readPortalScheduleOrders(client, orgId)
+    sendJson(res, 200, { ok: true, data: { orders: savedOrders } })
+  } catch (error) {
+    logPortalStorageError('portal/schedule-orders', error)
+    try {
+      if (client) await client.query('rollback')
+    } catch {
+      // ignore rollback failure
+    }
+    const mappedDb = mapDatabaseConnectionError(error)
+    if (mappedDb) {
+      sendApiError(res, mappedDb.status, mappedDb.code, mappedDb.message)
+      return
+    }
+    sendApiError(
+      res,
+      error?.statusCode || 500,
+      normalizeText(error?.publicCode) || 'PORTAL_SCHEDULE_ORDERS_ERROR',
+      normalizeText(error?.publicMessage) || error?.message || 'Nie udalo sie obsluzyc zlecen.',
+    )
+  } finally {
+    if (client) client.release()
+  }
+}
+
 function shouldUseLocalPortalTaskFileStorage() {
   return NODE_ENV !== 'production' && !hasDatabaseConnectionConfig()
 }
@@ -2583,341 +3294,6 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
   }
 }
 
-async function ensurePortalScheduleOrderTable(client) {
-  if (!(await databaseRelationExists(client, 'public.portal_schedule_order'))) {
-    await client.query(`
-      create table if not exists public.portal_schedule_order (
-        org_id varchar(64) not null,
-        order_id varchar(180) not null,
-        payload jsonb not null default '{}'::jsonb,
-        updated_by varchar(128),
-        created_at timestamptz not null default now(),
-        updated_at timestamptz not null default now(),
-        primary key (org_id, order_id)
-      )
-    `)
-  }
-  await client.query(
-    'create index if not exists portal_schedule_order_org_date_idx on public.portal_schedule_order (org_id, ((payload->>\'dateYmd\')), ((payload->>\'startTime\')), order_id)',
-  )
-  await client.query('create index if not exists portal_schedule_order_org_updated_idx on public.portal_schedule_order (org_id, updated_at desc)')
-  await client.query(`
-    create table if not exists public.portal_schedule_order_deleted (
-      org_id varchar(64) not null,
-      order_id varchar(180) not null,
-      deleted_by varchar(128),
-      deleted_at timestamptz not null default now(),
-      primary key (org_id, order_id)
-    )
-  `)
-  await client.query('create index if not exists portal_schedule_order_deleted_org_updated_idx on public.portal_schedule_order_deleted (org_id, deleted_at desc)')
-}
-
-function sanitizePortalScheduleOrderId(value) {
-  const id = normalizeText(value)
-  return id ? id.slice(0, 180) : ''
-}
-
-function sanitizePortalScheduleOrderPayload(rawOrder) {
-  if (!rawOrder || typeof rawOrder !== 'object' || Array.isArray(rawOrder)) {
-    return null
-  }
-
-  const id = sanitizePortalScheduleOrderId(rawOrder.id)
-  if (!id || rawOrder.isDraft) {
-    return null
-  }
-
-  const nowIso = new Date().toISOString()
-  return {
-    ...rawOrder,
-    id,
-    isDraft: false,
-    recordKind: 'portal-schedule-order',
-    updatedAt: normalizeText(rawOrder.updatedAt) || nowIso,
-    createdAt: normalizeText(rawOrder.createdAt) || nowIso,
-  }
-}
-
-async function readPortalScheduleOrders(client, orgId) {
-  const result = await client.query(
-    `select payload
-       from public.portal_schedule_order
-      where org_id = $1
-      order by
-        coalesce(payload->>'dateYmd', '') asc,
-        coalesce(payload->>'startTime', payload->>'time', '') asc,
-        order_id asc`,
-    [orgId],
-  )
-  return result.rows.map((row) => row.payload).filter((order) => order && typeof order === 'object')
-}
-
-async function readDeletedPortalScheduleOrderIds(client, orgId, orderIds = []) {
-  const ids = (Array.isArray(orderIds) ? orderIds : [])
-    .map((value) => sanitizePortalScheduleOrderId(value))
-    .filter((value, index, list) => value && list.indexOf(value) === index)
-  if (!ids.length) {
-    return new Set()
-  }
-
-  const result = await client.query(
-    'select order_id from public.portal_schedule_order_deleted where org_id = $1 and order_id = any($2::varchar[])',
-    [orgId, ids],
-  )
-  return new Set(result.rows.map((row) => sanitizePortalScheduleOrderId(row.order_id)).filter(Boolean))
-}
-
-function shouldUseLocalPortalScheduleOrderFileStorage() {
-  return NODE_ENV !== 'production' && !hasDatabaseConnectionConfig()
-}
-
-function portalScheduleOrderFilePath(orgId) {
-  const safeOrgId = normalizeOrgId(orgId).replace(/[^a-z0-9_-]/gi, '_') || 'default'
-  return path.join(LOCAL_PORTAL_DATA_DIR, 'portal-schedule-orders', `${safeOrgId}.json`)
-}
-
-function sortPortalScheduleOrders(orders = []) {
-  return [...orders].sort((left, right) => {
-    const leftDate = normalizeText(left?.dateYmd || left?.date || left?.startDate)
-    const rightDate = normalizeText(right?.dateYmd || right?.date || right?.startDate)
-    if (leftDate !== rightDate) {
-      return leftDate.localeCompare(rightDate)
-    }
-    const leftTime = normalizeText(left?.startTime || left?.time)
-    const rightTime = normalizeText(right?.startTime || right?.time)
-    if (leftTime !== rightTime) {
-      return leftTime.localeCompare(rightTime)
-    }
-    return normalizeText(left?.id).localeCompare(normalizeText(right?.id))
-  })
-}
-
-async function readPortalScheduleOrdersFile(orgId) {
-  try {
-    const raw = await fs.promises.readFile(portalScheduleOrderFilePath(orgId), 'utf8')
-    const parsed = JSON.parse(raw)
-    const orders = Array.isArray(parsed?.orders) ? parsed.orders : []
-    return sortPortalScheduleOrders(orders.filter((order) => order && typeof order === 'object'))
-  } catch (error) {
-    if (error?.code === 'ENOENT') {
-      return []
-    }
-    throw error
-  }
-}
-
-async function writePortalScheduleOrdersFile(orgId, orders) {
-  const filePath = portalScheduleOrderFilePath(orgId)
-  await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
-  await fs.promises.writeFile(
-    filePath,
-    JSON.stringify(
-      {
-        orgId,
-        updatedAt: new Date().toISOString(),
-        orders: sortPortalScheduleOrders(orders),
-      },
-      null,
-      2,
-    ),
-    'utf8',
-  )
-}
-
-async function handlePortalScheduleOrdersFileRequest(method, orgId, body, requesterUid, res) {
-  const existingOrders = await readPortalScheduleOrdersFile(orgId)
-
-  if (method === 'GET') {
-    sendJson(res, 200, { ok: true, data: { orders: existingOrders, storage: 'local-file' } })
-    return
-  }
-
-  if (method === 'DELETE') {
-    const orderIds = (Array.isArray(body?.orderIds) ? body.orderIds : [])
-      .map((value) => sanitizePortalScheduleOrderId(value))
-      .filter(Boolean)
-    if (!orderIds.length) {
-      sendJson(res, 200, { ok: true, data: { deletedOrderIds: [] } })
-      return
-    }
-
-    const deleted = new Set(orderIds)
-    const nextOrders = existingOrders.filter((order) => !deleted.has(sanitizePortalScheduleOrderId(order?.id)))
-    await writePortalScheduleOrdersFile(orgId, nextOrders)
-    sendJson(res, 200, { ok: true, data: { deletedOrderIds: orderIds } })
-    return
-  }
-
-  const nowIso = new Date().toISOString()
-  const nextById = new Map(existingOrders.map((order) => [sanitizePortalScheduleOrderId(order?.id), order]).filter(([id]) => id))
-  const rawOrders = Array.isArray(body?.orders) ? body.orders : []
-  const orders = rawOrders.map((order) => sanitizePortalScheduleOrderPayload(order)).filter(Boolean).slice(0, 5000)
-  orders.forEach((order) => {
-    const previous = nextById.get(order.id)
-    nextById.set(order.id, {
-      ...previous,
-      ...order,
-      updatedBy: requesterUid || previous?.updatedBy || '',
-      updatedAt: nowIso,
-      createdAt: normalizeText(previous?.createdAt) || normalizeText(order.createdAt) || nowIso,
-    })
-  })
-
-  const savedOrders = sortPortalScheduleOrders([...nextById.values()])
-  await writePortalScheduleOrdersFile(orgId, savedOrders)
-  sendJson(res, 200, { ok: true, data: { orders: savedOrders, storage: 'local-file' } })
-}
-
-async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204)
-    res.end()
-    return
-  }
-
-  const method = String(req.method || 'GET').toUpperCase()
-  if (!['GET', 'POST', 'DELETE'].includes(method)) {
-    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolone metody to GET, POST i DELETE.')
-    return
-  }
-
-  let body = {}
-  if (method !== 'GET') {
-    try {
-      body = await readJsonBody(req)
-    } catch (error) {
-      if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
-        sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duĹĽe.')
-        return
-      }
-      sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w ĹĽÄ…daniu.')
-      return
-    }
-  }
-
-  const orgId = normalizeOrgId(method === 'GET' ? requestUrl.searchParams.get('orgId') : body?.orgId)
-  if (!orgId) {
-    sendApiError(res, 400, 'INVALID_ORG_ID', 'Brak poprawnego orgId.')
-    return
-  }
-
-  const token = parseBearerToken(req)
-  if (!token) {
-    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
-    return
-  }
-
-  let decodedToken
-  try {
-    decodedToken = await verifyFirebaseIdToken(token)
-  } catch (error) {
-    const mapped = mapFirebaseAdminError(error)
-    sendApiError(res, mapped.status, mapped.code, mapped.message)
-    return
-  }
-
-  const requesterUid = normalizeText(decodedToken?.uid)
-  let client = null
-
-  try {
-    if (shouldUseLocalPortalScheduleOrderFileStorage()) {
-      await handlePortalScheduleOrdersFileRequest(method, orgId, body, requesterUid, res)
-      return
-    }
-
-    client = await connectDbClient()
-
-    await ensurePortalScheduleOrderTable(client)
-    await requirePortalTaskAccess(client, orgId, requesterUid)
-
-    if (method === 'GET') {
-      const orders = await readPortalScheduleOrders(client, orgId)
-      sendJson(res, 200, { ok: true, data: { orders } })
-      return
-    }
-
-    if (method === 'DELETE') {
-      const orderIds = (Array.isArray(body?.orderIds) ? body.orderIds : [])
-        .map((value) => sanitizePortalScheduleOrderId(value))
-        .filter(Boolean)
-      if (!orderIds.length) {
-        sendJson(res, 200, { ok: true, data: { deletedOrderIds: [] } })
-        return
-      }
-
-      await client.query('begin')
-      await client.query('delete from public.portal_schedule_order where org_id = $1 and order_id = any($2::varchar[])', [
-        orgId,
-        orderIds,
-      ])
-      for (const orderId of orderIds) {
-        await client.query(
-          `insert into public.portal_schedule_order_deleted (org_id, order_id, deleted_by, deleted_at)
-           values ($1, $2, $3, now())
-           on conflict (org_id, order_id)
-           do update set
-             deleted_by = excluded.deleted_by,
-             deleted_at = excluded.deleted_at`,
-          [orgId, orderId, requesterUid],
-        )
-      }
-      await client.query('commit')
-      sendJson(res, 200, { ok: true, data: { deletedOrderIds: orderIds } })
-      return
-    }
-
-    const rawOrders = Array.isArray(body?.orders) ? body.orders : []
-    const orders = rawOrders.map((order) => sanitizePortalScheduleOrderPayload(order)).filter(Boolean).slice(0, 5000)
-    const deletedOrderIds = await readDeletedPortalScheduleOrderIds(
-      client,
-      orgId,
-      orders.map((order) => order.id),
-    )
-    const activeOrders = orders.filter((order) => !deletedOrderIds.has(order.id))
-
-    await client.query('begin')
-    for (const order of activeOrders) {
-      await client.query(
-        `insert into public.portal_schedule_order (org_id, order_id, payload, updated_by, created_at, updated_at)
-         values ($1, $2, $3::jsonb, $4, now(), now())
-         on conflict (org_id, order_id)
-         do update set
-           payload = excluded.payload,
-           updated_by = excluded.updated_by,
-           updated_at = now()`,
-        [orgId, order.id, JSON.stringify(order), requesterUid],
-      )
-    }
-    await client.query('commit')
-
-    const savedOrders = await readPortalScheduleOrders(client, orgId)
-    sendJson(res, 200, { ok: true, data: { orders: savedOrders } })
-  } catch (error) {
-    logPortalStorageError('portal/schedule-orders', error)
-    try {
-      if (client) await client.query('rollback')
-    } catch {
-      // ignore rollback failure
-    }
-
-    const mappedDb = mapDatabaseConnectionError(error)
-    if (mappedDb) {
-      sendApiError(res, mappedDb.status, mappedDb.code, mappedDb.message)
-      return
-    }
-
-    sendApiError(
-      res,
-      error?.statusCode || 500,
-      normalizeText(error?.publicCode) || 'PORTAL_SCHEDULE_ORDERS_ERROR',
-      normalizeText(error?.publicMessage) || error?.message || 'Nie udaĹ‚o siÄ™ obsĹ‚uĹĽyÄ‡ zleceĹ„ grafiku.',
-    )
-  } finally {
-    if (client) client.release()
-  }
-}
-
 function isApiMethodWithBody(method) {
   const upper = String(method || '').toUpperCase()
   return upper !== 'GET' && upper !== 'HEAD'
@@ -2979,26 +3355,6 @@ const server = http.createServer((req, res) => {
   }
 
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
-  if (requestUrl.pathname === PORTAL_TASKS_PATH) {
-    if (shouldProxyPortalTasksRequest()) {
-      proxyApiRequest(req, res, requestUrl).catch((error) => {
-        sendJson(res, 500, {
-          ok: false,
-          error: {
-            code: 'PORTAL_TASKS_PROXY_ERROR',
-            message: error?.message || 'Unexpected portal tasks proxy error.',
-          },
-        })
-      })
-      return
-    }
-
-    handlePortalTasksRequest(req, res, requestUrl).catch((error) => {
-      sendApiError(res, 500, 'PORTAL_TASKS_ERROR', error?.message || 'Unexpected portal tasks error.')
-    })
-    return
-  }
-
   if (requestUrl.pathname === PORTAL_SCHEDULE_ORDERS_PATH) {
     if (shouldProxyPortalScheduleOrdersRequest()) {
       proxyApiRequest(req, res, requestUrl).catch((error) => {
@@ -3015,6 +3371,26 @@ const server = http.createServer((req, res) => {
 
     handlePortalScheduleOrdersRequest(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PORTAL_SCHEDULE_ORDERS_ERROR', error?.message || 'Unexpected portal schedule orders error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === PORTAL_TASKS_PATH) {
+    if (shouldProxyPortalTasksRequest()) {
+      proxyApiRequest(req, res, requestUrl).catch((error) => {
+        sendJson(res, 500, {
+          ok: false,
+          error: {
+            code: 'PORTAL_TASKS_PROXY_ERROR',
+            message: error?.message || 'Unexpected portal tasks proxy error.',
+          },
+        })
+      })
+      return
+    }
+
+    handlePortalTasksRequest(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'PORTAL_TASKS_ERROR', error?.message || 'Unexpected portal tasks error.')
     })
     return
   }

@@ -195,6 +195,68 @@ query IndividualJobsForOrg($orgId: String!) @auth(level: USER) {
   }
 }
 
+query TasksForOrg($orgId: String!) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+    }
+
+  tasks(
+    limit: 5000
+    where: { orgId: { eq: $orgId } }
+    orderBy: [{ dateYmd: ASC }, { startTime: ASC }, { idTask: ASC }]
+  ) {
+    orgId
+    idTask
+    dateYmd
+    startTime
+    endDateYmd
+    endTime
+    scheduleMode
+    accessStartTime
+    accessEndTime
+    accessWindows
+    requiredWorkMinutes
+    requiredPeople
+    workAllocations
+    workerId
+    workerIds
+    workerLabel
+    workerName
+    workerLogin
+    clientId
+    clientLabel
+    clientName
+    nip
+    street
+    city
+    postCode
+    addressLabel
+    executionAddressLabel
+    lat
+    lng
+    zoneId
+    zoneLabel
+    repeatPreset
+    repeatEvery
+    repeatUnit
+    repeatWeekdays
+    weeklyScheduleRules
+    title
+    type
+    price
+    description
+    workerComment
+    supplies
+    objectPlanTasks
+    allowExtendedWork
+    createdByUid
+    updatedByUid
+    createdAt
+    updatedAt
+  }
+}
+
 query ZonesForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {

@@ -68,7 +68,6 @@ startProcess('api', process.execPath, ['index.js'], {
   ADMIN_USERS_MODE: process.env.ADMIN_USERS_MODE || 'dataconnect',
   PORTAL_DB_ROUTES_MODE: process.env.PORTAL_DB_ROUTES_MODE || 'proxy',
   PORTAL_TASKS_MODE: process.env.PORTAL_TASKS_MODE || 'local',
-  PORTAL_SCHEDULE_ORDERS_MODE: process.env.PORTAL_SCHEDULE_ORDERS_MODE || 'local',
 })
 
 console.log(`[dev] Starting portal web on http://${webHost}:5173`)

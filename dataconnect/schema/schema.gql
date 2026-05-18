@@ -275,6 +275,75 @@ type IndividualClientJob @table(
   qrCode: String @col(name: "qr_code")
 }
 
+type Task @table(
+  name: "task",
+  singular: "task",
+  plural: "tasks",
+  key: ["orgId", "idTask"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  idTask: String! @col(name: "id_task", dataType: "varchar(180)")
+
+  dateYmd: String @col(name: "date_ymd", dataType: "varchar(10)")
+  startTime: String @col(name: "start_time", dataType: "varchar(5)")
+  endDateYmd: String @col(name: "end_date_ymd", dataType: "varchar(10)")
+  endTime: String @col(name: "end_time", dataType: "varchar(5)")
+  scheduleMode: String @col(name: "schedule_mode", dataType: "varchar(32)")
+
+  accessStartTime: String @col(name: "access_start_time", dataType: "varchar(5)")
+  accessEndTime: String @col(name: "access_end_time", dataType: "varchar(5)")
+  accessWindows: String @col(name: "access_windows")
+
+  requiredWorkMinutes: Int @col(name: "required_work_minutes")
+  requiredPeople: Int @col(name: "required_people")
+  workAllocations: String @col(name: "work_allocations")
+
+  workerId: String @col(name: "worker_id", dataType: "varchar(64)")
+  workerIds: String @col(name: "worker_ids")
+  workerLabel: String @col(name: "worker_label")
+  workerName: String @col(name: "worker_name")
+  workerLogin: String @col(name: "worker_login", dataType: "varchar(80)")
+
+  clientId: String @col(name: "client_id", dataType: "varchar(64)")
+  client: Client @ref(fields: ["orgId", "clientId"], references: ["orgId", "clientId"])
+  clientLabel: String @col(name: "client_label")
+  clientName: String @col(name: "client_name")
+  nip: String @col(name: "nip")
+  street: String @col(name: "street")
+  city: String @col(name: "city")
+  postCode: String @col(name: "post_code")
+  addressLabel: String @col(name: "address_label")
+  executionAddressLabel: String @col(name: "execution_address_label")
+  lat: Float @col(name: "lat")
+  lng: Float @col(name: "lng")
+
+  zoneId: String @col(name: "zone_id", dataType: "varchar(64)")
+  zone: Zone @ref(fields: ["orgId", "zoneId"], references: ["orgId", "zoneId"])
+  zoneLabel: String @col(name: "zone_label")
+
+  repeatPreset: String @col(name: "repeat_preset", dataType: "varchar(32)")
+  repeatEvery: Int @col(name: "repeat_every")
+  repeatUnit: String @col(name: "repeat_unit", dataType: "varchar(16)")
+  repeatWeekdays: String @col(name: "repeat_weekdays")
+  weeklyScheduleRules: String @col(name: "weekly_schedule_rules")
+
+  title: String @col(name: "title")
+  type: String @col(name: "type", dataType: "varchar(40)")
+  price: Float @col(name: "price")
+  description: String @col(name: "description")
+  workerComment: String @col(name: "worker_comment")
+  supplies: String @col(name: "supplies")
+  objectPlanTasks: String @col(name: "object_plan_tasks")
+  allowExtendedWork: Boolean @col(name: "allow_extended_work")
+
+  createdByUid: String @col(name: "created_by_uid", dataType: "varchar(128)")
+  updatedByUid: String @col(name: "updated_by_uid", dataType: "varchar(128)")
+  createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
+}
+
 type Workday @table(
   name: "workday",
   singular: "workday",
