@@ -7,8 +7,6 @@
     "dev": "node scripts/dev-local.js",
     "dev:web": "npm --prefix web-app run dev -- --host 127.0.0.1",
     "build": "node build-webapp.js",
-    "prepare:final-mobile-hosting": "node scripts/prepare-final-mobile-hosting.js",
-    "build:final-mobile-hosting": "npm --prefix web-app run build && npm run prepare:final-mobile-hosting",
     "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

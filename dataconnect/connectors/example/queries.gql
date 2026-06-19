@@ -134,6 +134,7 @@ query ClientsForOrg($orgId: String!) @auth(level: USER) {
     contact
     coordinator
     status
+    clientType
     serviceFrequency
     assignees
     chemistry

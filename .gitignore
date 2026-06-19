@@ -72,6 +72,11 @@ node_modules/
 !**/.env.example
 **/.secret
 **/.secret.*
+serviceAccountKey.json
+*serviceAccountKey*.json
+*service-account*.json
+*firebase-admin*.json
+*-firebase-*.json
 
 # Local Firebase/Data Connect scratch files and exports
 .firebase-temp-*
@@ -83,7 +88,7 @@ firebase-debug.*.log
 dist/
 **/dist/
 web-app/dist-final-mobile/
-reports/
+/reports/
 state-snapshots/
 input/
 _tmp*/

@@ -85,6 +85,7 @@ mutation InsertWorkerWithMembershipForOrg(
 mutation UpdateWorkerForOrg(
   $orgId: String!
   $login: String!
+  $newLogin: String @retired(reason: "Login changes are handled by RenameWorkerForOrg.")
   $workerName: String
   $loginEmail: String
   $role: String
@@ -117,6 +118,239 @@ mutation UpdateWorkerForOrg(
       updatedAt_expr: "request.time"
     }
   )
+}
+
+mutation UpdateWorkerProfileForOrg(
+  $orgId: String!
+  $login: String!
+  $workerName: String
+  $loginEmail: String
+  $authUid: String! = ""
+  $role: String
+  $memberRole: String
+  $active: Boolean
+  $email: String
+  $phone: String
+  $workerType: String
+  $workerId: String
+  $edit: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do edycji pracownikow.")
+      }
+  }
+
+  worker_update(
+    key: { orgId: $orgId, login: $login }
+    data: {
+      workerName: $workerName
+      loginEmail: $loginEmail
+      authUid: $authUid
+      role: $role
+      active: $active
+      email: $email
+      phone: $phone
+      workerType: $workerType
+      workerId: $workerId
+      edit: $edit
+      updatedAt_expr: "request.time"
+    }
+  )
+
+  organizationMember_upsert(data: {
+    orgId: $orgId
+    uid: $authUid
+    role: $memberRole
+  })
+}
+
+mutation RenameWorkerForOrg(
+  $orgId: String!
+  $login: String!
+  $newLogin: String!
+  $workerName: String
+  $loginEmail: String
+  $authUid: String! = ""
+  $role: String
+  $memberRole: String
+  $active: Boolean
+  $email: String
+  $phone: String
+  $workerType: String
+  $workerId: String
+  $createdAt: Timestamp
+  $edit: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN']", message: "Login pracownika moze zmienic tylko Admin.")
+      }
+
+    currentWorker: worker(key: { orgId: $orgId, login: $login })
+      @check(expr: "this != null", message: "Nie znaleziono pracownika w tej organizacji.") {
+        login
+      }
+
+    targetWorker: worker(key: { orgId: $orgId, login: $newLogin })
+      @check(expr: "this == null", message: "Ten login jest juz zajety w tej organizacji.") {
+        login
+      }
+  }
+
+  worker_insert(data: {
+    orgId: $orgId
+    login: $newLogin
+    workerName: $workerName
+    loginEmail: $loginEmail
+    authUid: $authUid
+    role: $role
+    active: $active
+    email: $email
+    phone: $phone
+    workerType: $workerType
+    workerId: $workerId
+    createdAt: $createdAt
+    updatedAt_expr: "request.time"
+    edit: $edit
+  })
+
+  organizationMember_upsert(data: {
+    orgId: $orgId
+    uid: $authUid
+    role: $memberRole
+  })
+
+  workdayPause_updateMany(
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
+    data: {
+      workerLogin: $newLogin
+      workerName: $workerName
+      updatedAt_expr: "request.time"
+    }
+  )
+
+  event_updateMany(
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
+    data: {
+      workerLogin: $newLogin
+      workerName: $workerName
+      updatedAt_expr: "request.time"
+    }
+  )
+
+  workday_updateMany(
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
+    data: {
+      workerLogin: $newLogin
+      workerName: $workerName
+      updatedAt_expr: "request.time"
+    }
+  )
+
+  backupCycle_updateMany(
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
+    data: {
+      workerLogin: $newLogin
+      workerName: $workerName
+      editedAt_expr: "request.time"
+    }
+  )
+
+  checkListLog_updateMany(
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
+    data: {
+      workerLogin: $newLogin
+    }
+  )
+
+  taskLogin_update: task_updateMany(
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
+    data: {
+      workerLogin: $newLogin
+      workerName: $workerName
+      workerLabel: $workerName
+      updatedAt_expr: "request.time"
+    }
+  )
+
+  taskWorkerId_update: task_updateMany(
+    where: { orgId: { eq: $orgId }, workerId: { eq: $login } }
+    data: {
+      workerId: $newLogin
+      updatedAt_expr: "request.time"
+    }
+  )
+
+  workerCredential_updateMany(
+    where: { orgId: { eq: $orgId }, login: { eq: $login } }
+    data: {
+      login: $newLogin
+      updatedBy: $edit
+      updatedAt_expr: "request.time"
+    }
+  )
+
+  worker_delete(key: { orgId: $orgId, login: $login })
+}
+
+mutation DeleteWorkerProfileForOrg(
+  $orgId: String!
+  $login: String!
+  $workerId: String! = ""
+  $authUid: String! = ""
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN']", message: "Pracownika moze usunac tylko Admin.")
+      }
+
+    currentWorker: worker(key: { orgId: $orgId, login: $login })
+      @check(expr: "this != null", message: "Nie znaleziono pracownika w tej organizacji.") {
+        login
+      }
+  }
+
+  workerCredential_deleteMany(
+    where: { orgId: { eq: $orgId }, login: { eq: $login } }
+  )
+
+  workdayPause_deleteMany(
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
+  )
+
+  event_deleteMany(
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
+  )
+
+  checkListLog_deleteMany(
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
+  )
+
+  backupCycle_deleteMany(
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
+  )
+
+  taskLogin_delete: task_deleteMany(
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
+  )
+
+  taskWorkerId_delete: task_deleteMany(
+    where: { orgId: { eq: $orgId }, workerId: { eq: $workerId } }
+  )
+
+  workday_deleteMany(
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
+  )
+
+  organizationMember_deleteMany(
+    where: { orgId: { eq: $orgId }, uid: { eq: $authUid } }
+  )
+
+  worker_delete(key: { orgId: $orgId, login: $login })
 }
 
 mutation UpsertWorkerCredentialForOrg(
@@ -263,6 +497,7 @@ mutation InsertClientForOrg(
   $address: String
   $contact: String
   $status: String
+  $clientType: String
   $coordinator: String
   $serviceFrequency: String
   $assignees: String
@@ -318,6 +553,7 @@ mutation InsertClientForOrg(
     address: $address
     contact: $contact
     status: $status
+    clientType: $clientType
     coordinator: $coordinator
     serviceFrequency: $serviceFrequency
     assignees: $assignees
@@ -370,6 +606,7 @@ mutation UpdateClientForOrg(
   $address: String
   $contact: String
   $status: String
+  $clientType: String
   $coordinator: String
   $serviceFrequency: String
   $assignees: String
@@ -425,6 +662,7 @@ mutation UpdateClientForOrg(
       address: $address
       contact: $contact
       status: $status
+      clientType: $clientType
       coordinator: $coordinator
       serviceFrequency: $serviceFrequency
       assignees: $assignees
@@ -475,9 +713,42 @@ mutation DeleteClientForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN']", message: "Brak uprawnien do usuwania klient w.")
+        role @check(expr: "this in ['ADMIN']", message: "Klienta moze usunac tylko Admin.")
+      }
+
+    currentClient: client(key: { orgId: $orgId, clientId: $clientId })
+      @check(expr: "this != null", message: "Nie znaleziono klienta w tej organizacji.") {
+        clientId
       }
   }
+
+  checkListLog_deleteMany(
+    where: { orgId: { eq: $orgId }, clientId: { eq: $clientId } }
+  )
+
+  checkListExtra_deleteMany(
+    where: { orgId: { eq: $orgId }, clientId: { eq: $clientId } }
+  )
+
+  checkListDef_deleteMany(
+    where: { orgId: { eq: $orgId }, clientId: { eq: $clientId } }
+  )
+
+  clientStorage_deleteMany(
+    where: { orgId: { eq: $orgId }, clientId: { eq: $clientId } }
+  )
+
+  event_deleteMany(
+    where: { orgId: { eq: $orgId }, zone: { clientId: { eq: $clientId } } }
+  )
+
+  task_deleteMany(
+    where: { orgId: { eq: $orgId }, clientId: { eq: $clientId } }
+  )
+
+  zone_deleteMany(
+    where: { orgId: { eq: $orgId }, clientId: { eq: $clientId } }
+  )
 
   client_delete(key: { orgId: $orgId, clientId: $clientId })
 }

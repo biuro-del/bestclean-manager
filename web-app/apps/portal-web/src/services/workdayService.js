@@ -74,6 +74,135 @@ async function readWorkdayCached(orgId, bucket, loader) {
   return promise
 }
 
+function normalizePortalApiBase(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return '/api'
+  if (raw.startsWith('/')) {
+    const withoutTrailing = raw.replace(/\/+$/, '')
+    return withoutTrailing.endsWith('/api') ? withoutTrailing : `${withoutTrailing}/api`
+  }
+
+  const withoutTrailing = raw.replace(/\/+$/, '')
+  return withoutTrailing.endsWith('/api') ? withoutTrailing : `${withoutTrailing}/api`
+}
+
+function getPortalApiBase() {
+  return normalizePortalApiBase(import.meta.env.VITE_ADMIN_API_BASE || '/api')
+}
+
+async function portalEventAuthHeaders() {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase.')
+  }
+
+  const firebase = ensureFirebase()
+  const currentUser = firebase?.auth?.currentUser
+  if (!currentUser) {
+    throw new Error('Sesja wygasla. Zaloguj sie ponownie.')
+  }
+
+  const idToken = await currentUser.getIdToken()
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${idToken}`,
+  }
+}
+
+async function parsePortalEventApiError(response, fallbackMessage) {
+  const rawText = await response.text().catch(() => '')
+  if (!rawText) {
+    const error = new Error(fallbackMessage)
+    error.status = response?.status
+    throw error
+  }
+
+  if (/^\s*</.test(rawText)) {
+    const error = new Error('Endpoint usuwania zdarzen zwrocil HTML zamiast JSON. Odswiez aplikacje i sprobuj ponownie.')
+    error.status = response?.status
+    throw error
+  }
+
+  try {
+    const body = JSON.parse(rawText)
+    const message = String(body?.error?.message ?? body?.message ?? fallbackMessage).trim() || fallbackMessage
+    const error = new Error(message)
+    error.status = response?.status
+    error.code = body?.error?.code
+    throw error
+  } catch (error) {
+    if (error instanceof Error && error.status) {
+      throw error
+    }
+    const parsedError = new Error(rawText.slice(0, 500) || fallbackMessage)
+    parsedError.status = response?.status
+    throw parsedError
+  }
+}
+
+function slimPortalEventDeleteRow(row = {}) {
+  if (!row || typeof row !== 'object') {
+    return row
+  }
+
+  return {
+    id: row.id,
+    eventId: row.eventId,
+    workdayId: row.workdayId,
+    linkedWorkdayId: row.linkedWorkdayId,
+    cycleId: row.cycleId,
+    backupCycleId: row.backupCycleId,
+    startEventId: row.startEventId,
+    endEventId: row.endEventId,
+    pauseId: row.pauseId,
+  }
+}
+
+export async function forceDeletePortalEvents(orgId, rows = [], ids = []) {
+  const normalizedOrgId = String(orgId ?? '').trim()
+  if (!normalizedOrgId) {
+    throw new Error('Brak identyfikatora organizacji.')
+  }
+
+  const normalizedRows = (Array.isArray(rows) ? rows : [rows]).map((row) => slimPortalEventDeleteRow(row)).filter(Boolean)
+  const normalizedIds = [
+    ...new Set((Array.isArray(ids) ? ids : [ids]).map((value) => String(value ?? '').trim()).filter(Boolean)),
+  ]
+  if (!normalizedIds.length && !normalizedRows.length) {
+    throw new Error('Brak identyfikatora zdarzenia do usuniecia.')
+  }
+
+  const headers = await portalEventAuthHeaders()
+  const response = await fetch(`${getPortalApiBase()}/portal/events`, {
+    method: 'DELETE',
+    headers,
+    body: JSON.stringify({
+      orgId: normalizedOrgId,
+      ids: normalizedIds,
+      rows: normalizedRows,
+    }),
+  })
+
+  if (!response.ok) {
+    await parsePortalEventApiError(response, 'Nie udalo sie usunac zdarzen.')
+  }
+
+  const body = await response.json().catch(() => ({}))
+  const counts = body?.data?.counts ?? {}
+  const deletedTotal = Number(body?.data?.deletedTotal)
+  const deletedAny =
+    (Number.isFinite(deletedTotal) && deletedTotal > 0) ||
+    Object.values(counts).some((value) => Number(value) > 0)
+
+  if (deletedAny) {
+    invalidateWorkdayCache(normalizedOrgId)
+  }
+
+  return {
+    ...(body?.data ?? {}),
+    deletedAny,
+  }
+}
+
 function pad2(value) {
   return String(value).padStart(2, '0')
 }
@@ -606,11 +735,15 @@ function mergeZoneData(primary, secondary) {
     return null
   }
 
+  const primarySpecial = primary?.isSpecialZone === true
+  const secondarySpecial = secondary?.isSpecialZone === true
   return {
     id: pickFirstText(primary?.id, secondary?.id),
     clientId: pickFirstText(primary?.clientId, secondary?.clientId),
     name: pickFirstText(primary?.name, secondary?.name),
     zone: pickFirstText(primary?.zone, secondary?.zone),
+    functionName: pickFirstText(primary?.functionName, primary?.function, secondary?.functionName, secondary?.function),
+    isSpecialZone: primarySpecial || secondarySpecial,
     location: pickFirstText(primary?.location, secondary?.location),
     workerLogin: pickFirstText(primary?.workerLogin, secondary?.workerLogin),
     workerName: pickFirstText(primary?.workerName, secondary?.workerName),
@@ -961,45 +1094,6 @@ function buildLookupMaps(clients, zones, workers, workdayRows = []) {
   }
 }
 
-function findClientByTextHints(lookupMaps, hints = []) {
-  if (!lookupMaps || !Array.isArray(hints) || !hints.length) {
-    return null
-  }
-
-  const clientEntries = [...(lookupMaps.clientByNormalizedName?.entries?.() ?? [])]
-
-  for (const rawHint of hints) {
-    const text = sanitizeTextValue(rawHint)
-    if (!text) {
-      continue
-    }
-
-    const normalized = normalizeLookupKey(text)
-    if (!normalized) {
-      continue
-    }
-
-    const exact =
-      lookupMaps.clientByNormalizedId.get(normalized) ||
-      lookupMaps.clientByNormalizedName.get(normalized) ||
-      null
-    if (exact) {
-      return exact
-    }
-
-    const partial = clientEntries.find(
-      ([nameKey]) =>
-        Boolean(nameKey) &&
-        (nameKey.includes(normalized) || normalized.includes(nameKey)),
-    )
-    if (partial?.[1]) {
-      return partial[1]
-    }
-  }
-
-  return null
-}
-
 function extractQrCodesFromText(value) {
   const text = sanitizeTextValue(value)
   if (!text) {
@@ -1022,22 +1116,45 @@ function extractQrCodesFromText(value) {
   return codes
 }
 
-function extractQrCodeByPhase(value, phase) {
-  const text = sanitizeTextValue(value)
-  if (!text) {
-    return ''
+function isAssignedQrCodeLike(value) {
+  const text = sanitizeTextValue(value).toUpperCase()
+  if (!text || text === '-') {
+    return false
   }
+  return /^[A-Z]{1,8}\d{2,}[A-Z0-9-]*$/.test(text)
+}
 
-  const normalizedPhase = String(phase ?? '').trim().toLowerCase() === 'start' ? 'start' : 'stop'
-  const regex =
-    normalizedPhase === 'start'
-      ? /(START|QR\s*START|START_QR)\s*[:=-]?\s*([A-Z0-9-]{3,})/i
-      : /(STOP|QR\s*STOP|STOP_QR)\s*[:=-]?\s*([A-Z0-9-]{3,})/i
-  const match = text.match(regex)
-  if (match?.[2]) {
-    return String(match[2]).trim().toUpperCase()
+function firstAssignedQrCode(candidates = []) {
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    const direct = sanitizeTextValue(candidate).toUpperCase()
+    if (isAssignedQrCodeLike(direct)) {
+      return direct
+    }
+    const extracted = extractQrCodesFromText(direct).find((code) => isAssignedQrCodeLike(code))
+    if (extracted) {
+      return extracted
+    }
   }
+  return ''
+}
 
+function firstExplicitQrCode(candidates = []) {
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    const direct = sanitizeTextValue(candidate).toUpperCase()
+    if (isAssignedQrCodeLike(direct)) {
+      return direct
+    }
+  }
+  return ''
+}
+
+function firstExplicitTextCode(candidates = []) {
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    const direct = sanitizeTextValue(candidate)
+    if (direct) {
+      return direct
+    }
+  }
   return ''
 }
 
@@ -1051,7 +1168,6 @@ function findZoneByCode(lookupMaps, code) {
   return (
     lookupMaps.zoneById.get(text) ||
     lookupMaps.zoneByNormalizedId.get(normalized) ||
-    lookupMaps.zoneByNormalizedName.get(normalized) ||
     null
   )
 }
@@ -1071,27 +1187,65 @@ function resolveClientFromZone(lookupMaps, zone) {
   )
 }
 
-function resolveClientFromQrHints(lookupMaps, hints = []) {
-  if (!lookupMaps || !Array.isArray(hints) || !hints.length) {
+function resolveClientByIdStrict(lookupMaps, clientId) {
+  const id = sanitizeTextValue(clientId)
+  if (!lookupMaps || !id) {
     return null
   }
 
-  for (const hint of hints) {
-    const directCode = sanitizeTextValue(hint)
-    const codes = directCode ? [directCode, ...extractQrCodesFromText(directCode)] : []
-    for (const code of codes) {
-      const zone = findZoneByCode(lookupMaps, code)
-      if (!zone) {
-        continue
-      }
-      const client = resolveClientFromZone(lookupMaps, zone)
-      if (client) {
-        return client
-      }
+  const normalized = normalizeLookupKey(id)
+  return lookupMaps.clientById.get(id) || lookupMaps.clientByNormalizedId.get(normalized) || null
+}
+
+function qrFunctionToken(value) {
+  const raw = sanitizeTextValue(value)
+  if (!raw) return ''
+  let normalized = raw
+  try {
+    normalized = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  } catch {
+    normalized = raw
+  }
+  return normalized.toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function isSpecialQrFunction(value) {
+  const token = qrFunctionToken(value)
+  return token.includes('STREFASPECJALNA') || token.includes('KODSPECJALNY')
+}
+
+function resolveCurrentQrZoneMeta(qrCode, lookupMaps) {
+  const code = firstExplicitQrCode([qrCode])
+  if (!code || !lookupMaps) {
+    return {
+      qrCode: code,
+      zone: null,
+      client: null,
+      clientId: '',
+      clientName: '',
+      zoneName: '',
+      functionName: '',
+      isSpecialZone: false,
+      location: '',
     }
   }
 
-  return null
+  const zone = findZoneByCode(lookupMaps, code)
+  const clientId = sanitizeTextValue(zone?.clientId)
+  const client = resolveClientByIdStrict(lookupMaps, clientId)
+  const functionName = sanitizeTextValue(pickFirstText(zone?.functionName, zone?.function, zone?.function_name))
+
+  return {
+    qrCode: code,
+    zone,
+    client,
+    clientId,
+    clientName: sanitizeTextValue(client?.name || clientId),
+    zoneName: sanitizeTextValue(pickFirstText(zone?.name, zone?.zone, zone?.zoneName)),
+    functionName,
+    isSpecialZone: isSpecialQrFunction(functionName),
+    location: sanitizeTextValue(zone?.location),
+  }
 }
 
 function pickClosestWorkerCandidate(candidates, eventStartAt) {
@@ -1156,14 +1310,25 @@ function mapWorkday(orgId, row, lookupMaps) {
   )
   const dayStopObjectRaw = sanitizeTextValue(row?.workday?.stopObject ?? linkedWorkday?.stopObject ?? rawStopObject)
   const dayComment = sanitizeTextValue(row?.workday?.comment ?? linkedWorkday?.comment ?? row?.comment)
-  const dayStartQrFromComment = extractQrCodeByPhase(dayComment, 'start')
-  const dayStopQrFromComment = extractQrCodeByPhase(dayComment, 'stop')
-  const commentQrHints = extractQrCodesFromText(dayComment)
-  const dayStartObject = sanitizeTextValue(
-    pickFirstText(dayStartObjectRaw, dayStartQrFromComment, commentQrHints[0]),
+  const dayStartObject = sanitizeTextValue(dayStartObjectRaw)
+  const dayStopObject = sanitizeTextValue(dayStopObjectRaw)
+  const explicitEventQrCode = firstExplicitQrCode([row?.zoneId, row?.utilityRoomId, row?.roomId])
+  const workdayStartQrCode = firstExplicitQrCode([
+    dayStartObjectRaw,
+    rawStartObject,
+    workdayUtilityRoomId,
+    row?.utilityRoomId,
+    row?.roomId,
+  ])
+  const workdayStopQrCode = firstExplicitQrCode([dayStopObjectRaw, rawStopObject])
+  const authoritativeQrCode = rawEventId ? explicitEventQrCode : workdayStartQrCode
+  roomId = sanitizeTextValue(
+    pickFirstText(
+      authoritativeQrCode,
+      roomId,
+      firstExplicitTextCode([workdayUtilityRoomId, dayStartObjectRaw, rawStartObject]),
+    ),
   )
-  const dayStopObject = sanitizeTextValue(pickFirstText(dayStopObjectRaw, dayStopQrFromComment, commentQrHints[0]))
-  roomId = sanitizeTextValue(pickFirstText(roomId, dayStartObject, dayStopObject, commentQrHints[0]))
   normalizedRoomId = normalizeLookupKey(roomId)
   const durationSec = calculateDuration(row)
   const fallbackZoneNameFromRow = sanitizeTextValue(
@@ -1180,6 +1345,9 @@ function mapWorkday(orgId, row, lookupMaps) {
     clientId: sanitizeTextValue(row?.zone?.client?.clientId ?? row?.clientId),
     name: sanitizeTextValue(pickFirstText(row?.zone?.zone, row?.zone?.name, fallbackZoneNameFromRow)),
     zone: sanitizeTextValue(pickFirstText(row?.zone?.zone, row?.zone?.name, fallbackZoneNameFromRow)),
+    functionName: sanitizeTextValue(
+      pickFirstText(row?.zone?.functionName, row?.zone?.function, row?.zoneFunction, row?.functionName, row?.function),
+    ),
     location: sanitizeTextValue(pickFirstText(row?.zone?.location, fallbackZoneLocationFromRow)),
     workerLogin: sanitizeTextValue(row?.zone?.workerLogin),
     workerName: sanitizeTextValue(pickWorkerNameValue(row?.zone?.worker)),
@@ -1188,15 +1356,15 @@ function mapWorkday(orgId, row, lookupMaps) {
     ? zoneFromRowRaw
     : null
 
-  const zoneFromLookup =
-    lookupMaps.zoneById.get(roomId) ||
-    lookupMaps.zoneByNormalizedId.get(normalizedRoomId) ||
-    lookupMaps.zoneByNormalizedName.get(normalizedRoomId) ||
-    null
-  const zone = mergeZoneData(zoneFromRow, zoneFromLookup)
+  const currentQrMeta = resolveCurrentQrZoneMeta(authoritativeQrCode, lookupMaps)
+  const fallbackZoneMeta = !authoritativeQrCode ? resolveCurrentQrZoneMeta(roomId, lookupMaps) : null
+  const zoneFromLookup = currentQrMeta.zone || fallbackZoneMeta?.zone || null
+  const zone = currentQrMeta.zone
+    ? mergeZoneData(currentQrMeta.zone, zoneFromRow)
+    : !authoritativeQrCode
+      ? mergeZoneData(zoneFromRow, zoneFromLookup)
+      : null
 
-  const zoneClientId = sanitizeTextValue(zone?.clientId ?? row.clientId)
-  const normalizedZoneClientId = normalizeLookupKey(zoneClientId)
   const clientFromEvent = row?.client
     ? {
         id: sanitizeTextValue(row.client.clientId ?? row.clientId),
@@ -1214,59 +1382,50 @@ function mapWorkday(orgId, row, lookupMaps) {
           }
       : null
 
-  const clientFromZone =
-    lookupMaps.clientById.get(zoneClientId) ||
-    lookupMaps.clientByNormalizedId.get(normalizedZoneClientId) ||
-    lookupMaps.clientByNormalizedName.get(normalizedZoneClientId) ||
-    null
+  const clientFromZone = currentQrMeta.zone
+    ? currentQrMeta.client
+    : !authoritativeQrCode
+      ? resolveClientFromZone(lookupMaps, zone)
+      : null
 
-  const clientFromRoomId =
-    lookupMaps.clientById.get(roomId) ||
-    lookupMaps.clientByNormalizedId.get(normalizedRoomId) ||
-    lookupMaps.clientByNormalizedName.get(normalizedRoomId) ||
-    null
-
-  const clientFromObjectHints = findClientByTextHints(lookupMaps, [
-    dayStartObject,
-    dayStopObject,
-    rawStartObject,
-    rawStopObject,
-    dayComment,
-    row?.comment,
-  ])
-  const clientFromQrHints = resolveClientFromQrHints(lookupMaps, [
-    dayStartObject,
-    dayStopObject,
-    ...commentQrHints,
-    roomId,
-    workdayUtilityRoomId,
-    rawStartObject,
-    rawStopObject,
-  ])
-
-  const client =
-    clientFromEvent || clientFromZone || clientFromRoomId || clientFromQrHints || clientFromObjectHints || null
+  const assignedQrCode = firstExplicitQrCode([authoritativeQrCode]) || (!rawEventId ? workdayStopQrCode : '')
+  const client = clientFromZone || (!authoritativeQrCode ? clientFromEvent : null)
   const resolvedClientId = sanitizeTextValue(
     pickFirstText(
-      row.clientId,
+      currentQrMeta.clientId,
       zone?.clientId,
       client?.id,
-      clientFromRoomId?.id,
-      clientFromQrHints?.id,
-      clientFromObjectHints?.id,
+      !authoritativeQrCode ? row.clientId : '',
     ),
   )
   const resolvedClientName = sanitizeTextValue(
     pickFirstText(
+      currentQrMeta.clientName,
       client?.name,
-      fallbackClientNameFromRow,
-      clientFromQrHints?.name,
-      clientFromObjectHints?.name,
+      !authoritativeQrCode ? fallbackClientNameFromRow : '',
       resolvedClientId,
     ),
   )
-  const resolvedZoneName = sanitizeTextValue(pickFirstText(zone?.name, zone?.zone, fallbackZoneNameFromRow))
-  const resolvedZoneLocation = sanitizeTextValue(pickFirstText(zone?.location, fallbackZoneLocationFromRow))
+  const resolvedZoneName = sanitizeTextValue(
+    authoritativeQrCode
+      ? pickFirstText(currentQrMeta.zoneName, authoritativeQrCode)
+      : pickFirstText(zone?.name, zone?.zone, fallbackZoneNameFromRow),
+  )
+  const resolvedZoneLocation = sanitizeTextValue(
+    authoritativeQrCode ? pickFirstText(currentQrMeta.location) : pickFirstText(zone?.location, fallbackZoneLocationFromRow),
+  )
+  const resolvedZoneFunction = sanitizeTextValue(
+    authoritativeQrCode
+      ? pickFirstText(currentQrMeta.functionName, zone?.functionName, zone?.function)
+      : pickFirstText(zone?.functionName, zone?.function, row?.zoneFunction, row?.functionName, row?.function),
+  )
+  const resolvedIsSpecialZone = Boolean(
+    currentQrMeta.isSpecialZone ||
+      fallbackZoneMeta?.isSpecialZone ||
+      zone?.isSpecialZone ||
+      row?.isSpecialZone === true ||
+      isSpecialQrFunction(resolvedZoneFunction),
+  )
   const eventDayKey = toLocalDayKey(startAt || endAt)
   const roomDayKey = normalizedRoomId && eventDayKey ? `${normalizedRoomId}|${eventDayKey}` : ''
   const inferredFromRoomDay = roomDayKey
@@ -1367,6 +1526,9 @@ function mapWorkday(orgId, row, lookupMaps) {
     zoneId: roomId,
     strefa: sanitizeTextValue(resolvedZoneName || '-'),
     zoneName: sanitizeTextValue(resolvedZoneName || '-'),
+    zoneFunction: resolvedZoneFunction,
+    functionName: resolvedZoneFunction,
+    isSpecialZone: resolvedIsSpecialZone,
     clientId: resolvedClientId,
     klient: sanitizeTextValue(resolvedClientName || '-'),
     clientName: sanitizeTextValue(resolvedClientName || '-'),
@@ -1380,6 +1542,7 @@ function mapWorkday(orgId, row, lookupMaps) {
     dayStartObject,
     dayStopObject,
     workdayUtilityRoomId,
+    qrCode: assignedQrCode,
     dayComment,
     date: formatDatePl(startAt || endAt),
     start: formatTime(startAt),
@@ -1617,6 +1780,7 @@ async function assertWorkdayVisibleAfterSave(orgId, workdayId, options = {}) {
       q: targetId,
       page: 1,
       pageSize: 20,
+      forceRefresh: true,
     })
     const found = (response.items ?? []).some((item) => {
       const candidate = String(item?.workdayId ?? item?.eventId ?? item?.id ?? '').trim()
@@ -1649,10 +1813,24 @@ function mergeMappedEventCollections(primaryItems, secondaryItems) {
     const preferred = preferRight ? right : left
     const fallback = preferRight ? left : right
     const merged = { ...fallback, ...preferred }
+    const explicitSource = [left, right].find((item) => {
+      const sourceKind = String(item?.historySourceKind ?? '').trim().toLowerCase()
+      const eventId = String(item?.eventId ?? item?.id ?? '').trim()
+      return item?.hasExplicitEventId === true || (sourceKind === 'event' && eventId)
+    })
     const identity = mappedItemIdentity(merged)
 
     if (identity && !mappedItemHasValue(merged.id)) {
       merged.id = identity
+    }
+    if (explicitSource) {
+      const explicitEventId = String(explicitSource?.eventId ?? explicitSource?.id ?? '').trim()
+      if (explicitEventId) {
+        merged.id = explicitEventId
+        merged.eventId = explicitEventId
+      }
+      merged.historySourceKind = 'event'
+      merged.hasExplicitEventId = true
     }
     if (!mappedItemHasValue(merged.eventId) && mappedItemHasValue(merged.workdayId)) {
       merged.eventId = merged.workdayId
@@ -1678,6 +1856,131 @@ function mergeMappedEventCollections(primaryItems, secondaryItems) {
   secondaryItems.forEach((item, index) => upsert(item, index, 'workday'))
 
   return [...mergedById.values()]
+}
+
+function mappedEventIntervalMinute(value) {
+  const iso = toIso(value)
+  if (!iso) {
+    return ''
+  }
+
+  const timestamp = new Date(iso).getTime()
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return ''
+  }
+
+  return String(Math.floor(timestamp / 60000))
+}
+
+function mappedEventIntervalIdentityKeys(item = {}) {
+  const startMinute = mappedEventIntervalMinute(item?.startAt || item?.dayStartAt)
+  const endMinute = mappedEventIntervalMinute(item?.endAt || item?.dayEndAt || item?.closeMarkedAt)
+  if (!startMinute || !endMinute) {
+    return []
+  }
+
+  return [
+    item?.workerId,
+    item?.workerLogin,
+    item?.workerName,
+  ]
+    .map((value) => normalizeLookupKey(value))
+    .filter(Boolean)
+    .filter((value, index, list) => list.indexOf(value) === index)
+    .map((workerKey) => `${workerKey}|${startMinute}|${endMinute}`)
+}
+
+function mappedEventScannedQrCode(item = {}) {
+  return firstAssignedQrCode([
+    item?.dayStartObject,
+    item?.dayStopObject,
+    item?.startObject,
+    item?.stopObject,
+    item?.dayComment,
+    item?.comment,
+  ])
+}
+
+function mappedEventIntervalQrCode(item = {}) {
+  return firstAssignedQrCode([
+    mappedEventScannedQrCode(item),
+    item?.comment,
+    item?.dayComment,
+  ])
+}
+
+function mappedEventHasAssignedQrObject(item = {}) {
+  const qrCode = mappedEventIntervalQrCode(item)
+  if (!qrCode) {
+    return false
+  }
+  const zoneLabel = sanitizeTextValue(item?.strefa ?? item?.zoneName)
+  const clientLabel = sanitizeTextValue(item?.clientName ?? item?.klient ?? item?.clientId)
+  return Boolean(zoneLabel && zoneLabel !== '-' && clientLabel && clientLabel !== '-')
+}
+
+function mappedEventIntervalScore(item = {}) {
+  let score = mappedItemScore(item)
+  const sourceKind = String(item?.historySourceKind ?? '').trim().toLowerCase()
+  const scannedQr = mappedEventScannedQrCode(item)
+  if (scannedQr) score += 2000
+  if (sourceKind === 'workday' || item?.hasExplicitEventId === false) score += 1000
+  if (mappedEventHasAssignedQrObject(item)) score += scannedQr ? 500 : 50
+  if (mappedEventIntervalQrCode(item)) score += 250
+  if (mappedItemHasValue(item?.zoneId ?? item?.roomId ?? item?.utilityRoomId)) score += 8
+  if (mappedItemHasValue(item?.strefa ?? item?.zoneName)) score += 6
+  if (mappedItemHasValue(item?.clientName ?? item?.klient ?? item?.clientId)) score += 5
+  if (mappedItemHasValue(item?.dayStartObject ?? item?.dayStopObject ?? item?.workdayUtilityRoomId)) score += 4
+  if (mappedItemHasValue(item?.lokalizacja ?? item?.location)) score += 2
+  if (sourceKind === 'event') score -= 25
+  return {
+    score,
+    stamp: mappedItemStamp(item),
+  }
+}
+
+function dedupeMappedEventIntervals(items = []) {
+  const byInterval = new Map()
+  ;(Array.isArray(items) ? items : []).forEach((item, index) => {
+    const keys = mappedEventIntervalIdentityKeys(item)
+    const key = keys.find((candidate) => byInterval.has(candidate)) || keys[0] || `row-${index}`
+    const existing = byInterval.get(key)
+    if (!existing) {
+      ;(keys.length ? keys : [key]).forEach((candidate) => {
+        byInterval.set(candidate, item)
+      })
+      return
+    }
+
+    const existingHasScannedQr = Boolean(mappedEventScannedQrCode(existing))
+    const incomingHasScannedQr = Boolean(mappedEventScannedQrCode(item))
+    const mergedKeys = [
+      ...mappedEventIntervalIdentityKeys(existing),
+      ...mappedEventIntervalIdentityKeys(item),
+      key,
+    ].filter(Boolean)
+
+    if (existingHasScannedQr !== incomingHasScannedQr) {
+      const preferred = incomingHasScannedQr ? item : existing
+      ;[...new Set(mergedKeys)].forEach((candidate) => {
+        byInterval.set(candidate, preferred)
+      })
+      return
+    }
+
+    const existingScore = mappedEventIntervalScore(existing)
+    const incomingScore = mappedEventIntervalScore(item)
+    const preferred =
+      incomingScore.score > existingScore.score ||
+      (incomingScore.score === existingScore.score && incomingScore.stamp > existingScore.stamp)
+        ? item
+        : existing
+    ;[...new Set(mergedKeys)].forEach((candidate) => {
+      byInterval.set(candidate, preferred)
+    })
+  })
+
+  return [...new Set(byInterval.values())]
 }
 
 async function fetchMappedEvents(orgId) {
@@ -1742,7 +2045,7 @@ async function fetchMappedEvents(orgId) {
     return mergeMappedEventCollections(acc, items)
   }, [])
 
-  return merged.filter((item) => isDisplayableMappedItem(item))
+  return dedupeMappedEventIntervals(merged.filter((item) => isDisplayableMappedItem(item)))
 }
 
 async function getMappedEventsForOrg(orgId) {
@@ -1799,6 +2102,10 @@ async function resolveWorkerLoginHint(orgId, filters = {}) {
 }
 
 export async function getWorkdays(orgId, filters = {}) {
+  if (filters.forceRefresh === true || filters.bypassCache === true || filters.noCache === true) {
+    invalidateWorkdayCache(orgId)
+  }
+
   const source = String(filters.source ?? '').trim().toLowerCase()
   let mapped
   if (source === 'events' || source === 'event') {
@@ -1812,7 +2119,7 @@ export async function getWorkdays(orgId, filters = {}) {
           'WorkerWorkdaysForOrg',
         )
         if (mappedWorkerRows.length) {
-          mapped = mergeMappedEventCollections(mapped, mappedWorkerRows)
+          mapped = dedupeMappedEventIntervals(mergeMappedEventCollections(mapped, mappedWorkerRows))
             .filter((item) => isDisplayableMappedItem(item))
         }
       } catch (error) {
@@ -2061,17 +2368,16 @@ export async function getTodayWorktimeFingerprint(orgId) {
   }
 }
 
-async function getTodayActiveWorkersFromWorkdays(orgId) {
+async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
   const day = currentDayYmd()
   const [workdayResponse, workerDirectory] = await Promise.all([
-    getWorkdays(orgId, { source: 'workdays', fromIso: day, toIso: day, page: 1, pageSize: 100000 }),
+    getWorkdays(orgId, { source: 'workdays', fromIso: day, toIso: day, page: 1, pageSize: 100000, forceRefresh: options.forceRefresh === true }),
     getWorkers(orgId).catch(() => []),
   ])
   const nowTs = Date.now()
   const workers = new Map()
   const workerAliases = new Map()
   const resolveDisplayName = createWorkerDisplayNameResolver(workerDirectory)
-  const workerLookupMaps = buildLookupMaps([], [], workerDirectory, [])
   const workerByCanonicalId = new Map()
   const workerByCanonicalDigits = new Map()
   const workerByNormalizedName = new Map()
@@ -2444,13 +2750,13 @@ async function getTodayActiveWorkersFromWorkdays(orgId) {
 
 export async function getTodayActiveWorkers(orgId, options = {}) {
   if (options?.source !== 'legacy-events') {
-    return getTodayActiveWorkersFromWorkdays(orgId)
+    return getTodayActiveWorkersFromWorkdays(orgId, options)
   }
 
   const day = currentDayYmd()
   const [workdayResponse, eventsResponse, workerDirectory] = await Promise.all([
-    getWorkdays(orgId, { fromIso: day, toIso: day, page: 1, pageSize: 100000 }),
-    getWorkdays(orgId, { source: 'events', fromIso: day, toIso: day, page: 1, pageSize: 100000 }).catch(() => ({
+    getWorkdays(orgId, { fromIso: day, toIso: day, page: 1, pageSize: 100000, forceRefresh: options.forceRefresh === true }),
+    getWorkdays(orgId, { source: 'events', fromIso: day, toIso: day, page: 1, pageSize: 100000, forceRefresh: options.forceRefresh === true }).catch(() => ({
       items: [],
     })),
     getWorkers(orgId).catch(() => []),
@@ -2459,7 +2765,6 @@ export async function getTodayActiveWorkers(orgId, options = {}) {
   const workers = new Map()
   const workerAliases = new Map()
   const resolveDisplayName = createWorkerDisplayNameResolver(workerDirectory)
-  const workerLookupMaps = buildLookupMaps([], [], workerDirectory, [])
   const workerByCanonicalId = new Map()
   const workerByCanonicalDigits = new Map()
   const workerByNormalizedName = new Map()
@@ -3023,6 +3328,7 @@ export async function createEvent(orgId, payload = {}) {
     await runMutationOperation('InsertEventForOrg', {
       orgId,
       eventId: canonicalWorkdayId,
+      workdayId: canonicalWorkdayId,
       ...eventMutationPayload,
     })
     eventSaved = true
@@ -3054,6 +3360,8 @@ export async function createEvent(orgId, payload = {}) {
     const firstError = writeErrors[0]
     throw firstError instanceof Error ? firstError : new Error('Nie udalo sie zapisac zdarzenia.')
   }
+
+  invalidateWorkdayCache(orgId)
 
   try {
     await assertWorkdayVisibleAfterSave(orgId, canonicalWorkdayId)
@@ -3137,6 +3445,7 @@ export async function updateEvent(orgId, eventId, payload = {}) {
     await runMutationOperation('UpdateEventForOrg', {
       orgId,
       eventId: normalizedEventId,
+      workdayId: canonicalWorkdayId,
       ...eventMutationPayload,
     })
     eventUpdated = true
@@ -3170,7 +3479,37 @@ export async function updateEvent(orgId, eventId, payload = {}) {
   }
 }
 
-export async function deleteEvent(orgId, eventId) {
+async function findEventIdsLinkedToWorkday(orgId, workdayId) {
+  const normalizedWorkdayId = String(workdayId ?? '').trim()
+  if (!normalizedWorkdayId) {
+    return []
+  }
+
+  try {
+    const response = await runQueryOperation('EventsForOrg', { orgId })
+    const rows = Array.isArray(response?.data?.events) ? response.data.events : []
+    return [
+      ...new Set(
+        rows
+          .filter((row) => {
+            const ids = [row?.eventId, row?.workdayId, row?.startEventId, row?.endEventId]
+              .map((value) => String(value ?? '').trim())
+              .filter(Boolean)
+            return ids.includes(normalizedWorkdayId)
+          })
+          .map((row) => String(row?.eventId ?? '').trim())
+          .filter(Boolean),
+      ),
+    ]
+  } catch (error) {
+    if (isOperationNotFoundError(error, 'EventsForOrg')) {
+      return []
+    }
+    throw error
+  }
+}
+
+export async function deleteEvent(orgId, eventId, options = {}) {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
@@ -3181,30 +3520,45 @@ export async function deleteEvent(orgId, eventId) {
   }
 
   ensureFirebase()
+  const deleteLinkedWorkday = Boolean(options?.deleteLinkedWorkday ?? options?.deleteWorkday)
   const deleteErrors = []
   let workdayDeleted = false
   let eventDeleted = false
+  let eventDeleteFailures = 0
+  let linkedEventIds = []
 
-  try {
-    await deleteWorkday(orgId, normalizedEventId)
-    workdayDeleted = true
-  } catch (error) {
-    deleteErrors.push(error)
-  }
+  if (deleteLinkedWorkday) {
+    try {
+      linkedEventIds = await findEventIdsLinkedToWorkday(orgId, normalizedEventId)
+    } catch (error) {
+      deleteErrors.push(error)
+    }
 
-  try {
-    await runMutationOperation('DeleteEventForOrg', {
-      orgId,
-      eventId: normalizedEventId,
-    })
-    eventDeleted = true
-  } catch (error) {
-    if (!isOperationNotFoundError(error, 'DeleteEventForOrg')) {
+    try {
+      await deleteWorkday(orgId, normalizedEventId)
+      workdayDeleted = true
+    } catch (error) {
       deleteErrors.push(error)
     }
   }
 
-  if (!workdayDeleted && !eventDeleted) {
+  const eventIdsToDelete = [...new Set([normalizedEventId, ...linkedEventIds].filter(Boolean))]
+  for (const targetEventId of eventIdsToDelete) {
+    try {
+      const response = await runMutationOperation('DeleteEventForOrg', {
+        orgId,
+        eventId: targetEventId,
+      })
+      eventDeleted = Boolean(response?.data?.event_delete?.eventId) || eventDeleted
+    } catch (error) {
+      if (!isOperationNotFoundError(error, 'DeleteEventForOrg')) {
+        eventDeleteFailures += 1
+        deleteErrors.push(error)
+      }
+    }
+  }
+
+  if ((!workdayDeleted && !eventDeleted) || (deleteLinkedWorkday && eventDeleteFailures > 0)) {
     const firstError = deleteErrors[0]
     throw firstError instanceof Error ? firstError : new Error('Nie udalo sie usunac zdarzenia.')
   }
@@ -3214,6 +3568,9 @@ export async function deleteEvent(orgId, eventId) {
     success: true,
     orgId,
     eventId: normalizedEventId,
+    workdayDeleted,
+    eventDeleted,
+    linkedEventIds,
   }
 }
 

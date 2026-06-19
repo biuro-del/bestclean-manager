@@ -8,6 +8,8 @@ import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient
 
 const READ_CACHE_MS = 30000
 const clientsCache = new Map()
+const CLIENT_TYPE_RETAIL = 'DETALICZNY'
+const CLIENT_TYPE_RECURRING = 'CYKLICZNY'
 
 const CLIENT_TEXT_FIELD_DEFINITIONS = [
   { field: 'name' },
@@ -16,6 +18,7 @@ const CLIENT_TEXT_FIELD_DEFINITIONS = [
   { field: 'address' },
   { field: 'contact', aliases: ['phone', 'email'] },
   { field: 'status' },
+  { field: 'clientType', aliases: ['client_type', 'typKlienta', 'cooperationModel'] },
   { field: 'coordinator' },
   { field: 'serviceFrequency', aliases: ['frequency', 'czestotliwosc'] },
   { field: 'assignees', aliases: ['workers', 'osobyWykonujace', 'osoby'] },
@@ -63,7 +66,7 @@ const CLIENT_TIMESTAMP_FIELD_DEFINITIONS = [
 ]
 
 const CLIENT_READONLY_TIMESTAMP_FIELDS = ['createdAt', 'updatedAt']
-const CLIENT_DEPLOY_PENDING_FIELDS = ['cooperationEndAt', 'rbhAmount']
+const CLIENT_DEPLOY_PENDING_FIELDS = ['cooperationEndAt', 'rbhAmount', 'clientType']
 
 function cachedClientsKey(orgId) {
   return String(orgId ?? '').trim()
@@ -78,16 +81,21 @@ function invalidateClientsCache(orgId) {
   clientsCache.clear()
 }
 
-async function readClientsCached(orgId, loader) {
+function shouldRefreshClientsCache(options = {}) {
+  return Boolean(options?.forceRefresh === true || options?.bypassCache === true || options?.noCache === true)
+}
+
+async function readClientsCached(orgId, loader, options = {}) {
   const key = cachedClientsKey(orgId)
   const now = Date.now()
   const cached = key ? clientsCache.get(key) : null
+  const force = shouldRefreshClientsCache(options)
 
-  if (cached?.promise) {
+  if (!force && cached?.promise) {
     return cached.promise
   }
 
-  if (cached?.expiresAt > now && Array.isArray(cached.value)) {
+  if (!force && cached?.expiresAt > now && Array.isArray(cached.value)) {
     return cached.value
   }
 
@@ -132,6 +140,49 @@ function normalizeStatus(status) {
   }
 
   return String(status ?? '').trim() || 'Aktywny'
+}
+
+function normalizeClientType(value) {
+  const key = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\s_-]+/g, '')
+
+  if (key.includes('detal') || key.includes('jednoraz') || key === 'oneoff' || key === 'single') {
+    return CLIENT_TYPE_RETAIL
+  }
+
+  return CLIENT_TYPE_RECURRING
+}
+
+function normalizeClientNameForUniqueness(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+function assertClientNameAvailable(rows = [], name = '', currentClientId = '') {
+  const normalizedName = normalizeClientNameForUniqueness(name)
+  if (!normalizedName) {
+    throw new Error('Nazwa klienta jest wymagana.')
+  }
+
+  const currentId = String(currentClientId ?? '').trim()
+  const duplicate = rows.find((row) => {
+    const rowClientId = String(row?.clientId ?? row?.id ?? '').trim()
+    if (currentId && rowClientId === currentId) {
+      return false
+    }
+    return normalizeClientNameForUniqueness(row?.name) === normalizedName
+  })
+
+  if (duplicate) {
+    throw new Error('Taki klient już istnieje.')
+  }
 }
 
 function asNullableText(value) {
@@ -218,6 +269,28 @@ function buildMergedClientSource(currentRow = {}, payload = {}) {
   }
 }
 
+function nextClientIdFromRows(rows = []) {
+  const usedNumbers = new Set()
+  const usedIds = new Set()
+
+  rows.forEach((row) => {
+    const raw = String(row?.clientId ?? row?.id ?? '').trim()
+    if (!raw) return
+    usedIds.add(raw.toUpperCase())
+    const match = raw.match(/^LK(\d+)$/i)
+    if (match) {
+      usedNumbers.add(Number(match[1]))
+    }
+  })
+
+  let nextNumber = 1
+  while (usedNumbers.has(nextNumber) || usedIds.has(`LK${String(nextNumber).padStart(3, '0')}`)) {
+    nextNumber += 1
+  }
+
+  return `LK${String(nextNumber).padStart(3, '0')}`
+}
+
 function buildClientMutationPayload(orgId, clientId, source = {}) {
   const payload = {
     orgId,
@@ -226,8 +299,13 @@ function buildClientMutationPayload(orgId, clientId, source = {}) {
 
   for (const definition of CLIENT_TEXT_FIELD_DEFINITIONS) {
     const value = source[definition.field]
-    payload[definition.field] =
-      definition.field === 'status' ? asNullableText(value) ?? 'Aktywny' : asNullableText(value)
+    if (definition.field === 'status') {
+      payload[definition.field] = asNullableText(value) ?? 'Aktywny'
+    } else if (definition.field === 'clientType') {
+      payload[definition.field] = normalizeClientType(value)
+    } else {
+      payload[definition.field] = asNullableText(value)
+    }
   }
 
   for (const definition of CLIENT_TIMESTAMP_FIELD_DEFINITIONS) {
@@ -290,8 +368,14 @@ function mapClient(orgId, row) {
   }
 
   for (const definition of CLIENT_TEXT_FIELD_DEFINITIONS) {
-    base[definition.field] =
-      definition.field === 'status' ? normalizeStatus(row[definition.field]) : String(row[definition.field] ?? '')
+    if (definition.field === 'status') {
+      base[definition.field] = normalizeStatus(row[definition.field])
+    } else if (definition.field === 'clientType') {
+      base.clientTypeRaw = String(row[definition.field] ?? '')
+      base[definition.field] = normalizeClientType(row[definition.field])
+    } else {
+      base[definition.field] = String(row[definition.field] ?? '')
+    }
   }
 
   for (const definition of CLIENT_TIMESTAMP_FIELD_DEFINITIONS) {
@@ -323,7 +407,7 @@ function mapClient(orgId, row) {
   }
 }
 
-export async function getClients(orgId) {
+export async function getClients(orgId, options = {}) {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
   }
@@ -333,7 +417,7 @@ export async function getClients(orgId) {
     const response = await clientsForOrg({ orgId })
     const rows = response?.data?.clients ?? []
     return rows.map((row) => mapClient(orgId, row))
-  })
+  }, options)
 }
 
 export async function getClientById(orgId, clientId) {
@@ -341,15 +425,26 @@ export async function getClientById(orgId, clientId) {
   return clients.find((client) => client.id === clientId) ?? null
 }
 
-export async function createClient(orgId, payload) {
-  const clientId = String(payload?.clientId ?? payload?.id ?? `cl-${Date.now()}`)
-
+export async function createClient(orgId, payload, options = {}) {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
   }
 
   ensureFirebase()
+  if (shouldRefreshClientsCache(options)) {
+    invalidateClientsCache(orgId)
+  }
   const source = buildClientSource(payload)
+  const response = await clientsForOrg({ orgId })
+  const rows = response?.data?.clients ?? []
+  assertClientNameAvailable(rows, source.name)
+
+  const requestedClientId = String(payload?.clientId ?? payload?.id ?? '').trim()
+  let clientId = requestedClientId
+  if (!clientId) {
+    clientId = nextClientIdFromRows(rows)
+  }
+
   const mutationResult = await runClientMutationWithDeployCompatibility(
     insertClientForOrg,
     buildClientMutationPayload(orgId, clientId, source),
@@ -379,6 +474,7 @@ export async function updateClient(orgId, clientId, payload) {
     (row) => String(row?.clientId ?? '').trim() === String(clientId ?? '').trim(),
   )
   const mergedSource = buildMergedClientSource(currentRow ?? {}, payload)
+  assertClientNameAvailable(clientsResponse?.data?.clients ?? [], mergedSource.name, clientId)
   const mutationResult = await runClientMutationWithDeployCompatibility(
     updateClientForOrg,
     buildClientMutationPayload(orgId, clientId, mergedSource),

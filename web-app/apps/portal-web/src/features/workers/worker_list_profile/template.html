@@ -1,0 +1,344 @@
+<div class="worker-profile-kpi-grid" aria-label="Podsumowanie profili pracowników">
+  <article class="worker-profile-kpi-card worker-profile-kpi-card--all">
+    <div>
+      <p class="worker-profile-kpi-label">Wszyscy</p>
+      <strong id="wkKpiAll">0</strong>
+      <span>Liczba profili</span>
+    </div>
+    <i class="worker-profile-kpi-icon" aria-hidden="true"></i>
+  </article>
+
+  <article class="worker-profile-kpi-card worker-profile-kpi-card--active">
+    <div>
+      <p class="worker-profile-kpi-label">Aktywni</p>
+      <strong id="wkKpiActive">0</strong>
+      <span>Status aktywny</span>
+    </div>
+    <i class="worker-profile-kpi-icon" aria-hidden="true"></i>
+  </article>
+
+  <article class="worker-profile-kpi-card worker-profile-kpi-card--online">
+    <div>
+      <p class="worker-profile-kpi-label">Online</p>
+      <strong id="wkKpiOnline">0</strong>
+      <span>Zalogowani teraz</span>
+    </div>
+    <i class="worker-profile-kpi-icon" aria-hidden="true"></i>
+  </article>
+
+  <article class="worker-profile-kpi-card worker-profile-kpi-card--inactive">
+    <div>
+      <p class="worker-profile-kpi-label">Nieaktywni</p>
+      <strong id="wkKpiInactive">0</strong>
+      <span>Status nieaktywny</span>
+    </div>
+    <i class="worker-profile-kpi-icon" aria-hidden="true"></i>
+  </article>
+</div>
+
+<div class="worker-profile-confirm-overlay" id="wkDeleteConfirmOverlay" aria-label="Potwierdzenie usunięcia pracownika" role="dialog" aria-modal="true" style="display:none;">
+  <div class="worker-profile-confirm-modal">
+    <div class="worker-profile-confirm-icon" aria-hidden="true">!</div>
+    <h3>Usunąć pracownika?</h3>
+    <p id="wkDeleteConfirmText">
+      Usuniesz profil pracownika, jego dostęp do aplikacji oraz konto Firebase Auth.
+    </p>
+    <p class="worker-profile-confirm-note">
+      Ta operacja usuwa też powiązane rekordy i nie da się jej cofnąć.
+    </p>
+    <div class="worker-profile-confirm-actions">
+      <button class="btn2" id="wkDeleteConfirmCancel" type="button">Anuluj</button>
+      <button class="btn2 danger worker-profile-confirm-danger" id="wkDeleteConfirmConfirm" type="button">Usuń pracownika</button>
+    </div>
+  </div>
+</div>
+
+<div class="toolbar worker-profile-filter-panel" aria-label="Filtry pracowników">
+  <h2>Filtry wyszukiwania</h2>
+
+  <div class="worker-profile-filter-grid">
+    <div class="tool">
+      <label for="wkType">Rola</label>
+      <select id="wkType">
+        <option value="">(wszystkie)</option>
+        <option value="Admin">Admin</option>
+        <option value="Kierownik">Kierownik</option>
+        <option value="Koordynator">Koordynator</option>
+        <option value="Stażysta">Stażysta</option>
+        <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
+        <option value="Zespół mobilny">Zespół mobilny</option>
+        <option value="Pracownik">Pracownik</option>
+      </select>
+    </div>
+
+    <div class="tool">
+      <label for="wkActive">Status</label>
+      <select id="wkActive">
+        <option value="">(wszyscy)</option>
+        <option value="1">Aktywni</option>
+        <option value="0">Nieaktywni</option>
+      </select>
+    </div>
+
+    <div class="tool">
+      <label for="wkOnline">Online</label>
+      <select id="wkOnline">
+        <option value="">(wszyscy)</option>
+        <option value="1">Online</option>
+        <option value="0">Offline</option>
+      </select>
+    </div>
+
+    <div class="tool">
+      <label for="wkSort">Sortuj wg</label>
+      <select id="wkSort">
+        <option value="nameAsc">Imię i nazwisko A-Z</option>
+        <option value="nameDesc">Imię i nazwisko Z-A</option>
+        <option value="surnameAsc">Nazwisko i imię A-Z</option>
+        <option value="surnameDesc">Nazwisko i imię Z-A</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="worker-profile-filter-actions">
+    <select id="wkPageSize" aria-label="Liczba rekordów na stronie">
+      <option value="50">50</option>
+      <option value="100">100</option>
+      <option value="200">200</option>
+    </select>
+
+    <div class="tool worker-profile-search-tool">
+      <label for="wkQ">Szukaj</label>
+      <input id="wkQ" type="text" placeholder="Szukaj pracownika..." />
+    </div>
+
+    <button class="btn2" id="wkResetBtn" type="button">Odśwież</button>
+    <button class="btn2" id="wkOpenExportBtn" type="button">Pobierz ewidencj&#281; pracy</button>
+    <button class="btn2" id="wkAddBtn" type="button">Dodaj pracownika</button>
+    <button class="btn2 primary" id="wkSearchBtn" type="button">Szukaj</button>
+  </div>
+</div>
+
+<div class="overlay wa-export-overlay" id="wkExportOverlay" aria-label="Pobierz ewidencje pracy" role="dialog" aria-modal="true" hidden>
+  <div class="modal wa-export-modal">
+    <button class="wa-export-close" id="wkExportCloseBtn" type="button" aria-label="Zamknij">&times;</button>
+    <h3>Pobierz ewidencj&#281; pracy</h3>
+    <p class="meta">Wybierz zakres dat, kolumny i format pliku do pobrania.</p>
+
+    <div class="wk-export-summary">
+      <div>
+        <span>Wybrano pracownik&#243;w</span>
+        <strong id="wkExportSelectedCount">0</strong>
+        <p id="wkExportSelectedNames">Zaznacz pracownika z listy.</p>
+      </div>
+      <label>
+        Od
+        <input id="wkExportFrom" type="date" />
+      </label>
+      <label>
+        Do
+        <input id="wkExportTo" type="date" />
+      </label>
+    </div>
+
+    <div class="wa-export-grid">
+      <div class="wa-export-block">
+        <div class="wa-export-title">Kolumny</div>
+        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="date" checked /> Data</label>
+        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="worker" checked /> Pracownik</label>
+        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="type" /> Typ</label>
+        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="start" checked /> Start pracy</label>
+        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="stop" checked /> Koniec pracy</label>
+        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="work" checked /> Czas pracy</label>
+        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="net" checked /> Realny czas pracy</label>
+        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="break" checked /> Przerwa</label>
+        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="editedBy" /> Edytowa&#322;</label>
+        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="comment" /> Komentarz</label>
+        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="alert" /> Alert</label>
+        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="ack" /> ACK</label>
+      </div>
+
+      <div class="wa-export-block">
+        <div class="wa-export-title">Orientacja PDF</div>
+        <label class="wa-export-radio"><input type="radio" name="wkExportOrientation" value="p" /> Pion</label>
+        <label class="wa-export-radio"><input type="radio" name="wkExportOrientation" value="l" checked /> Poziom</label>
+        <p class="wa-export-hint">Domy&#347;lnie: poziom. Opcja dotyczy tylko pliku PDF.</p>
+      </div>
+    </div>
+
+    <div class="wa-export-preview-block">
+      <div class="wa-export-preview-head">
+        <div>
+          <div class="wa-export-title">Podgl&#261;d pliku</div>
+          <p id="wkExportPreviewMeta">-</p>
+        </div>
+        <button class="btn2" id="wkExportPreviewBtn" type="button">Podgl&#261;d pliku</button>
+      </div>
+      <div class="wa-export-preview" id="wkExportPreview" aria-live="polite"></div>
+    </div>
+
+    <div class="row-actions wa-export-actions">
+      <div class="left">
+        <button class="btn2 primary" id="wkExportCsvBtn" type="button">Pobierz CSV</button>
+        <button class="btn2" id="wkExportPdfBtn" type="button">Pobierz PDF</button>
+      </div>
+      <div class="right">
+        <button class="btn2 danger" id="wkExportCancelBtn" type="button">Anuluj</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="workers-table" aria-label="Tabela pracowników">
+  <div class="workers-head">
+    <div class="worker-profile-select-cell">
+      <input id="wkSelectAll" type="checkbox" aria-label="Zaznacz widoczne wiersze" />
+    </div>
+    <div>Użytkownik</div>
+    <div>Rola</div>
+    <div>Login</div>
+    <div>Kontakt</div>
+    <div>Status</div>
+    <div>Online</div>
+    <div>Akcje</div>
+  </div>
+
+  <div id="wkRows"></div>
+
+  <div class="pager">
+    <div class="pager-left">
+      <span class="pager-label" id="wkPageLabel">Strona 1 / 1</span>
+      <span id="wkShownLabel">Wyświetlono: —</span>
+    </div>
+    <div class="pager-right">
+      <button class="btn2 pager-btn" id="wkPrevBtn" type="button" aria-label="Poprzednia strona">←</button>
+      <button class="btn2 pager-btn" id="wkNextBtn" type="button" aria-label="Następna strona">→</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="wkEditorOverlay" aria-label="Profil pracownika" role="dialog" aria-modal="true">
+  <div class="modal">
+    <header class="worker-profile-modal-header">
+      <div>
+        <h3 id="wkModalTitle">Profil pracownika</h3>
+        <p class="meta">
+          ID: <span class="mono" id="wkIdLabel">—</span>
+          | Dodano: <span class="mono" id="wkAddedAt">—</span>
+          | Edycja: <span class="mono" id="wkEditedAt">—</span>
+          | Ostatnio edytował: <b id="wkEditedBy">—</b>
+        </p>
+      </div>
+    </header>
+
+    <div class="worker-profile-modal-section">
+      <h4>Dane podstawowe</h4>
+      <div class="grid">
+        <div class="field">
+          <label for="wkEditId">ID (A) - blokada</label>
+          <input id="wkEditId" type="text" maxlength="64" disabled />
+        </div>
+
+        <div class="field">
+          <label for="wkEditName">Imię i nazwisko (B)</label>
+          <input id="wkEditName" type="text" maxlength="200" />
+        </div>
+
+        <div class="field">
+          <label for="wkEditLogin">Login (C)</label>
+          <input id="wkEditLogin" type="text" maxlength="120" />
+        </div>
+
+        <div class="field">
+          <label for="wkEditType">Typ (K)</label>
+          <select id="wkEditType">
+            <option value="Admin">Admin</option>
+            <option value="Kierownik">Kierownik / MANAGER</option>
+            <option value="Koordynator">Koordynator</option>
+            <option value="Stażysta">Stażysta</option>
+            <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
+            <option value="Zespół mobilny">Zespół mobilny</option>
+            <option value="Pracownik">Pracownik / WORKER</option>
+          </select>
+        </div>
+
+        <div class="worker-profile-basic-error" id="wkBasicError" role="alert" aria-live="polite" hidden></div>
+      </div>
+    </div>
+
+    <div class="worker-profile-modal-section">
+      <h4>Status i kontakt</h4>
+      <div class="grid">
+        <div class="field">
+          <label for="wkEditActive">Aktywny (H)</label>
+          <select id="wkEditActive" class="active-flag">
+            <option value="1">TAK</option>
+            <option value="0">NIE</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="wkOnlineNow">Zalogowany teraz (F) - podgląd</label>
+          <input id="wkOnlineNow" type="text" disabled />
+        </div>
+
+        <div class="field">
+          <label for="wkEditEmail">Email (I)</label>
+          <input id="wkEditEmail" type="email" maxlength="200" />
+        </div>
+
+        <div class="field">
+          <label for="wkEditPhone">Telefon (J)</label>
+          <input id="wkEditPhone" type="text" maxlength="80" />
+        </div>
+      </div>
+    </div>
+
+    <div class="worker-profile-modal-section">
+      <h4 id="wkPasswordSectionTitle">Hasło</h4>
+      <div class="grid">
+        <div class="field" id="wkCurrentPassWrap" style="grid-column: 1 / -1; display:none;">
+          <label for="wkCurrentPass">Przypisane hasło (D) - tylko Admin</label>
+          <div class="pass-inline">
+            <input id="wkCurrentPass" type="password" readonly />
+            <button class="btn2" id="wkShowPassBtn" type="button">Pokaż</button>
+            <button class="btn2" id="wkCopyPassBtn" type="button">Kopiuj</button>
+          </div>
+          <div class="muted" id="wkCurrentPassHint" style="margin-top:6px;">Hasło jest pobierane z szyfrowanego sejfu tylko dla Admina.</div>
+        </div>
+
+        <div class="field" id="wkNewPassWrap">
+          <label for="wkNewPass">Hasło tymczasowe (E)</label>
+          <div class="worker-profile-password-input">
+            <input id="wkNewPass" type="password" maxlength="120" autocomplete="new-password" />
+            <button class="worker-profile-password-toggle" id="wkNewPassToggle" type="button" data-worker-password-toggle="wkNewPass" aria-label="Pokaż hasło" title="Pokaż hasło"></button>
+          </div>
+        </div>
+
+        <div class="field" id="wkNewPass2Wrap">
+          <label for="wkNewPass2">Powtórz hasło</label>
+          <div class="worker-profile-password-input">
+            <input id="wkNewPass2" type="password" maxlength="120" autocomplete="new-password" />
+            <button class="worker-profile-password-toggle" id="wkNewPass2Toggle" type="button" data-worker-password-toggle="wkNewPass2" aria-label="Pokaż hasło" title="Pokaż hasło"></button>
+          </div>
+        </div>
+
+        <div class="worker-profile-password-error" id="wkPasswordError" role="alert" aria-live="polite" hidden></div>
+      </div>
+    </div>
+
+    <div class="hint" id="wkReadOnlyHint" style="display:none;">
+      Ten użytkownik ma uprawnienia tylko do podglądu (Koordynator/Stażysta).
+    </div>
+
+    <div class="row-actions">
+      <div class="left">
+        <button class="btn2 danger" id="wkDeleteBtn" type="button" style="display:none;">Usuń</button>
+      </div>
+      <div class="right">
+        <button class="btn2" id="wkCancelBtn" type="button">Zamknij</button>
+        <button class="btn2 primary" id="wkSaveBtn" type="button">Zapisz</button>
+      </div>
+    </div>
+  </div>
+</div>

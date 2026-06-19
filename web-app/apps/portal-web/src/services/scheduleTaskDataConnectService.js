@@ -81,6 +81,34 @@ function firstJsonValue(fallback, ...values) {
   return fallback
 }
 
+const SERVICE_BLOCKS_PAYLOAD_MARKER = 'cleanz_service_blocks_v2'
+
+function serviceBlocksPayloadFromRules(value) {
+  const rules = parseJsonValue(value, [])
+  const source = Array.isArray(rules) ? rules : []
+  return source.find((item) => item && typeof item === 'object' && item.marker === SERVICE_BLOCKS_PAYLOAD_MARKER) || null
+}
+
+function weeklyRulesWithoutServicePayload(value) {
+  const rules = parseJsonValue(value, [])
+  if (!Array.isArray(rules)) return []
+  return rules.filter((item) => !(item && typeof item === 'object' && item.marker === SERVICE_BLOCKS_PAYLOAD_MARKER))
+}
+
+function serviceBlocksPayloadFromOrder(order = {}) {
+  const serviceBlocks = firstJsonValue([], order.serviceBlocks, order.service_blocks)
+  if (!Array.isArray(serviceBlocks) || !serviceBlocks.length) {
+    return null
+  }
+  const accessWindows = firstJsonValue([], order.objectAccessWindows, order.accessWindows, order.access_windows)
+  return {
+    marker: SERVICE_BLOCKS_PAYLOAD_MARKER,
+    version: finiteInteger(order.serviceModelVersion ?? order.service_model_version, 2) || 2,
+    serviceBlocks,
+    objectAccessWindows: Array.isArray(accessWindows) ? accessWindows : [],
+  }
+}
+
 function dateOrdinal(ymd) {
   const value = normalizeDateYmd(ymd)
   if (!value) return null
@@ -124,6 +152,10 @@ function workerKey(value) {
   return normalizeText(value).toLowerCase()
 }
 
+function isVolatileAllocationKey(value) {
+  return /^(row|weekly|slot|buffer|bufor)(:|$)/i.test(normalizeText(value))
+}
+
 function uniqueTextValues(values = []) {
   const seen = new Set()
   const result = []
@@ -155,26 +187,119 @@ function allocationFromItem(item, index = 0) {
 
   const row = finiteInteger(item.row ?? item.rowIndex, index)
   const rawKey = nullableText(item.key ?? item.workerKey ?? item.id, 128)
-  const workerId = normalizeWorkerId(item.workerId ?? item.worker_id ?? item.id ?? rawKey)
+  const rawWorkerKey = nullableText(item.workerKey, 128) || ''
+  const rawId = nullableText(item.id, 128)
+  const stableItemId = rawId && !isVolatileAllocationKey(rawId) ? rawId : ''
+  const fallbackWorkerId =
+    rawKey && !isVolatileAllocationKey(rawKey)
+      ? rawKey
+      : rawWorkerKey && !isVolatileAllocationKey(rawWorkerKey)
+        ? rawWorkerKey
+        : ''
+  const explicitWorkerId = normalizeWorkerId(item.workerId ?? item.worker_id ?? item.employeeId)
+  const workerId = explicitWorkerId || normalizeWorkerId(stableItemId || fallbackWorkerId)
   const name = nullableText(item.name ?? item.workerName ?? item.label ?? item.workerLabel, 240)
+  const workerLogin = nullableText(item.workerLogin ?? item.login, 80) || ''
   const loweredKey = normalizeText(rawKey || workerId || name).toLowerCase()
-  const isBuffer = loweredKey === 'buffer' || loweredKey === 'bufor' || normalizeText(name).toLowerCase() === 'bufor'
+  const allocationType = normalizeText(item.type ?? item.workerType ?? item.kind).toLowerCase()
+  const hasWorkerIdentity = Boolean(allocationType === 'worker' || workerId || workerLogin || rawWorkerKey)
+  const isBuffer =
+    !hasWorkerIdentity &&
+    (
+      allocationType === 'buffer' ||
+      allocationType === 'bufor' ||
+      allocationType === 'unassigned' ||
+      allocationType === 'empty' ||
+      /^slot(:|$)/.test(loweredKey) ||
+      loweredKey === 'buffer' ||
+      loweredKey === 'bufor' ||
+      normalizeText(name).toLowerCase() === 'bufor'
+    )
+  const allocationMinutes = finiteInteger(item.allocationMinutes ?? item.minutes, null)
 
   return {
     row: Number.isInteger(row) && row >= 0 ? row : index,
     workerId: isBuffer ? '' : workerId,
-    key: isBuffer ? 'buffer' : workerKey(rawKey || workerId),
+    key: isBuffer ? rawKey || 'buffer' : workerKey(workerId || rawKey || name),
+    type: isBuffer ? 'unassigned' : (allocationType === 'worker' ? 'worker' : allocationType || 'worker'),
+    slotId: nullableText(item.slotId ?? item.slot_id, 128),
+    teamId: nullableText(item.teamId ?? item.team_id, 128),
+    serviceBlockId: nullableText(item.serviceBlockId ?? item.service_block_id, 128),
+    serviceBlockKind: nullableText(item.serviceBlockKind ?? item.service_block_kind, 64),
+    serviceBlockLabel: nullableText(item.serviceBlockLabel ?? item.service_block_label, 240),
     name: name || (isBuffer ? 'BUFOR' : workerId),
-    workerLogin: nullableText(item.workerLogin ?? item.login, 80) || '',
-    allocationMinutes: finiteInteger(item.allocationMinutes ?? item.minutes, null),
+    workerLogin: isBuffer ? '' : workerLogin,
+    workerKey: isBuffer ? '' : rawWorkerKey,
+    allocationMinutes,
+    minutes: allocationMinutes,
+    startTime: nullableText(normalizeTime(item.startTime ?? item.planStartTime), 5),
+    endTime: nullableText(normalizeTime(item.endTime ?? item.planEndTime), 5),
+    planStartTime: nullableText(normalizeTime(item.planStartTime ?? item.startTime), 5),
+    planEndTime: nullableText(normalizeTime(item.planEndTime ?? item.endTime), 5),
+  }
+}
+
+function allocationHasStableWorkerIdentity(item = {}) {
+  const type = normalizeText(item.type ?? item.workerType ?? item.kind).toLowerCase()
+  const key = normalizeText(item.key ?? item.workerKey ?? item.id).toLowerCase()
+  const workerId = normalizeWorkerId(item.workerId ?? item.worker_id ?? item.employeeId)
+  const workerLogin = nullableText(item.workerLogin ?? item.login, 80)
+  const workerKeyValue = nullableText(item.workerKey, 128)
+  const hasWorkerIdentity = Boolean(type === 'worker' || workerId || workerLogin || workerKeyValue)
+  if (!hasWorkerIdentity && (['buffer', 'bufor', 'unassigned', 'empty'].includes(type) || /^slot(:|$)/.test(key))) {
+    return true
+  }
+  return hasWorkerIdentity
+}
+
+function mergeAllocationIdentity(item = {}, fallback = null) {
+  if (!fallback || typeof fallback !== 'object' || Array.isArray(fallback)) {
+    return item
+  }
+  return {
+    ...item,
+    workerId: item.workerId || item.worker_id || fallback.workerId || fallback.worker_id || fallback.employeeId,
+    workerLogin: item.workerLogin || item.login || fallback.workerLogin || fallback.login,
+    name: item.name || item.workerName || item.label || fallback.name || fallback.workerName || fallback.label || fallback.workerLabel,
+    label: item.label || item.name || fallback.label || fallback.name || fallback.workerName || fallback.workerLabel,
+    workerKey: item.workerKey || fallback.workerKey || fallback.key,
   }
 }
 
 function allocationsFromOrder(order = {}) {
-  const source = firstJsonValue([], order.workAllocations, order.workerAssignments, order.assignedWorkers, order.workers)
+  const allocationSource = firstJsonValue([], order.workAllocations, order.workerAllocations)
+  const assignmentSource = firstJsonValue([], order.workerAssignments, order.assignedWorkers, order.workers)
+  let source = Array.isArray(allocationSource) && allocationSource.length
+    ? allocationSource
+    : firstJsonValue([], order.workerAssignments, order.assignedWorkers, order.workers)
+
+  if (Array.isArray(source) && source.length && Array.isArray(assignmentSource) && assignmentSource.length) {
+    source = source.map((item, index) => {
+      if (allocationHasStableWorkerIdentity(item)) {
+        return item
+      }
+      const row = finiteInteger(item?.row ?? item?.rowIndex, index)
+      const fallback =
+        assignmentSource.find((assignment, assignmentIndex) => finiteInteger(assignment?.row ?? assignment?.rowIndex, assignmentIndex) === row) ||
+        assignmentSource[index] ||
+        null
+      return mergeAllocationIdentity(item, fallback)
+    })
+  }
+
   const allocations = (Array.isArray(source) ? source : [])
     .map((item, index) => allocationFromItem(item, index))
     .filter(Boolean)
+
+  if (!allocations.some((item) => normalizeWorkerId(item.workerId)) && Array.isArray(assignmentSource) && assignmentSource.length) {
+    const assignmentAllocations = assignmentSource
+      .map((item, index) => allocationFromItem(item, index))
+      .filter(Boolean)
+      .filter((item) => normalizeWorkerId(item.workerId))
+    if (assignmentAllocations.length) {
+      return assignmentAllocations
+    }
+  }
 
   if (!allocations.length && Array.isArray(order.assignedRows) && order.assignedRows.length) {
     order.assignedRows.forEach((row, index) => {
@@ -248,6 +373,13 @@ function getPortalApiBase() {
 
 let scheduleOrdersEndpointUnavailable = false
 
+const SCHEDULE_ORDERS_FALLBACK_CODES = new Set([
+  'DB_CONFIG_MISSING',
+  'PORTAL_SCHEDULE_ORDERS_ERROR',
+  'PORTAL_SCHEDULE_ORDERS_PROXY_ERROR',
+  'UPSTREAM_UNAVAILABLE',
+])
+
 function isLocalDevScheduleOrdersRemoteDisabled() {
   return import.meta.env.DEV && normalizeText(import.meta.env.VITE_DISABLE_PORTAL_SCHEDULE_ORDERS_REMOTE) === '1'
 }
@@ -265,6 +397,28 @@ function isScheduleOrdersRouteUnavailable(message, status) {
   )
 }
 
+function isScheduleOrdersBackendUnavailable({ code = '', isHtml = false, message = '', status = 0 } = {}) {
+  const numericStatus = Number(status)
+  if ([400, 401, 403].includes(numericStatus)) {
+    return false
+  }
+  if (isScheduleOrdersRouteUnavailable(message, numericStatus)) {
+    return true
+  }
+  if (numericStatus >= 500) {
+    return true
+  }
+  if (isHtml) {
+    return true
+  }
+  return SCHEDULE_ORDERS_FALLBACK_CODES.has(normalizeText(code).toUpperCase())
+}
+
+function disableScheduleOrdersEndpoint(action, message) {
+  scheduleOrdersEndpointUnavailable = true
+  console.warn(`[portal/schedule-orders] ${action} uses DataConnect fallback; backend unavailable`, message)
+}
+
 async function parseScheduleOrdersApiError(response, fallbackMessage) {
   let rawText = ''
   try {
@@ -274,15 +428,18 @@ async function parseScheduleOrdersApiError(response, fallbackMessage) {
   }
 
   if (!rawText) {
+    const message = fallbackMessage
     return {
-      message: fallbackMessage,
-      routeUnavailable: isScheduleOrdersRouteUnavailable(fallbackMessage, response?.status),
+      backendUnavailable: isScheduleOrdersBackendUnavailable({ message, status: response?.status }),
+      message,
+      routeUnavailable: isScheduleOrdersRouteUnavailable(message, response?.status),
     }
   }
 
   if (/^\s*</.test(rawText)) {
     const message = 'Endpoint zlecen zwrocil HTML zamiast JSON. Sprawdz backend/proxy /api/portal/schedule-orders.'
     return {
+      backendUnavailable: isScheduleOrdersBackendUnavailable({ isHtml: true, message: rawText, status: response?.status }),
       message,
       routeUnavailable: isScheduleOrdersRouteUnavailable(rawText, response?.status),
     }
@@ -290,14 +447,18 @@ async function parseScheduleOrdersApiError(response, fallbackMessage) {
 
   try {
     const body = JSON.parse(rawText)
+    const code = normalizeText(body?.error?.code ?? body?.code)
     const message = normalizeText(body?.error?.message ?? body?.message ?? fallbackMessage) || fallbackMessage
     return {
+      backendUnavailable: isScheduleOrdersBackendUnavailable({ code, message, status: response?.status }),
+      code,
       message,
       routeUnavailable: isScheduleOrdersRouteUnavailable(message, response?.status),
     }
   } catch {
     const message = rawText.slice(0, 500) || fallbackMessage
     return {
+      backendUnavailable: isScheduleOrdersBackendUnavailable({ message, status: response?.status }),
       message,
       routeUnavailable: isScheduleOrdersRouteUnavailable(message, response?.status),
     }
@@ -322,14 +483,20 @@ async function scheduleOrderAuthHeaders() {
 
 async function fetchScheduleTasksViaBackend(orgId) {
   const headers = await scheduleOrderAuthHeaders()
-  const response = await fetch(`${getPortalApiBase()}/portal/schedule-orders?orgId=${encodeURIComponent(orgId)}`, {
-    method: 'GET',
-    headers,
-  })
+  let response
+  try {
+    response = await fetch(`${getPortalApiBase()}/portal/schedule-orders?orgId=${encodeURIComponent(orgId)}`, {
+      method: 'GET',
+      headers,
+    })
+  } catch (error) {
+    disableScheduleOrdersEndpoint('load', error?.message || error)
+    return null
+  }
   if (!response.ok) {
     const error = await parseScheduleOrdersApiError(response, 'Nie udalo sie pobrac zlecen.')
-    if (error.routeUnavailable) {
-      scheduleOrdersEndpointUnavailable = true
+    if (error.backendUnavailable) {
+      disableScheduleOrdersEndpoint('load', error.message)
       return null
     }
     throw new Error(error.message)
@@ -341,18 +508,24 @@ async function fetchScheduleTasksViaBackend(orgId) {
 async function upsertScheduleTasksViaBackend(orgId, orders = []) {
   const headers = await scheduleOrderAuthHeaders()
   const sourceOrders = Array.isArray(orders) ? orders : []
-  const response = await fetch(`${getPortalApiBase()}/portal/schedule-orders`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      orgId,
-      orders: sourceOrders,
-    }),
-  })
+  let response
+  try {
+    response = await fetch(`${getPortalApiBase()}/portal/schedule-orders`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        orgId,
+        orders: sourceOrders,
+      }),
+    })
+  } catch (error) {
+    disableScheduleOrdersEndpoint('save', error?.message || error)
+    return null
+  }
   if (!response.ok) {
     const error = await parseScheduleOrdersApiError(response, 'Nie udalo sie zapisac zlecen.')
-    if (error.routeUnavailable) {
-      scheduleOrdersEndpointUnavailable = true
+    if (error.backendUnavailable) {
+      disableScheduleOrdersEndpoint('save', error.message)
       return null
     }
     throw new Error(error.message)
@@ -367,18 +540,24 @@ async function deleteScheduleTasksViaBackend(orgId, orderIds = []) {
     .filter(Boolean)
   if (!ids.length) return []
   const headers = await scheduleOrderAuthHeaders()
-  const response = await fetch(`${getPortalApiBase()}/portal/schedule-orders`, {
-    method: 'DELETE',
-    headers,
-    body: JSON.stringify({
-      orgId,
-      orderIds: ids,
-    }),
-  })
+  let response
+  try {
+    response = await fetch(`${getPortalApiBase()}/portal/schedule-orders`, {
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({
+        orgId,
+        orderIds: ids,
+      }),
+    })
+  } catch (error) {
+    disableScheduleOrdersEndpoint('delete', error?.message || error)
+    return null
+  }
   if (!response.ok) {
     const error = await parseScheduleOrdersApiError(response, 'Nie udalo sie usunac zlecenia.')
-    if (error.routeUnavailable) {
-      scheduleOrdersEndpointUnavailable = true
+    if (error.backendUnavailable) {
+      disableScheduleOrdersEndpoint('delete', error.message)
       return null
     }
     throw new Error(error.message)
@@ -426,6 +605,9 @@ function normalizeTaskRow(row = {}) {
     repeatUnit: value('repeatUnit', 'repeat_unit'),
     repeatWeekdays: value('repeatWeekdays', 'repeat_weekdays'),
     weeklyScheduleRules: value('weeklyScheduleRules', 'weekly_schedule_rules'),
+    serviceModelVersion: value('serviceModelVersion', 'service_model_version'),
+    serviceBlocks: value('serviceBlocks', 'service_blocks'),
+    objectAccessWindows: value('objectAccessWindows', 'object_access_windows'),
     title: value('title', 'name'),
     type: value('type'),
     price: value('price'),
@@ -461,7 +643,13 @@ function mapScheduleOrderToTaskVariables(orgId, rawOrder = {}) {
     : nullableText(rawOrder.workerLabel ?? rawOrder.workerName, 240) || 'BUFOR'
   const objectPlanTasks = firstJsonValue([], rawOrder.objectPlanTasks, rawOrder.tasks, rawOrder.subtasks, rawOrder.activities)
   const supplies = firstJsonValue([], rawOrder.supplies, rawOrder.itemsToTake, rawOrder.suppliesForWorkers)
+  const servicePayload = serviceBlocksPayloadFromOrder(rawOrder)
+  const weeklyScheduleRules = servicePayload
+    ? [servicePayload]
+    : weeklyRulesWithoutServicePayload(rawOrder.weeklyScheduleRules)
   const uid = currentUserUid()
+  const updatedAt = toIsoTimestamp(rawOrder.updatedAt, nowIso)
+  const updatedByUid = nullableText(rawOrder.updatedByUid ?? rawOrder.updatedBy ?? uid, 128)
 
   return {
     orgId,
@@ -500,7 +688,7 @@ function mapScheduleOrderToTaskVariables(orgId, rawOrder = {}) {
     repeatEvery: finiteInteger(rawOrder.repeatEvery, null),
     repeatUnit: nullableText(rawOrder.repeatUnit, 16),
     repeatWeekdays: jsonString(rawOrder.repeatWeekdays, []),
-    weeklyScheduleRules: jsonString(rawOrder.weeklyScheduleRules, []),
+    weeklyScheduleRules: JSON.stringify(weeklyScheduleRules),
     title: nullableText(rawOrder.title ?? rawOrder.name, 500) || 'Zlecenie',
     type: nullableText(rawOrder.type, 40) || 'other',
     price: finiteNumber(rawOrder.price, 0),
@@ -510,9 +698,9 @@ function mapScheduleOrderToTaskVariables(orgId, rawOrder = {}) {
     objectPlanTasks: JSON.stringify(Array.isArray(objectPlanTasks) ? objectPlanTasks : []),
     allowExtendedWork: Boolean(rawOrder.allowExtendedWork),
     createdByUid: nullableText(rawOrder.createdByUid ?? rawOrder.createdBy ?? uid, 128),
-    updatedByUid: nullableText(uid || rawOrder.updatedByUid || rawOrder.updatedBy, 128),
+    updatedByUid,
     createdAt: toIsoTimestamp(rawOrder.createdAt, nowIso),
-    updatedAt: nowIso,
+    updatedAt,
   }
 }
 
@@ -528,8 +716,21 @@ function mapTaskRowToScheduleOrder(row = {}) {
   const assignedRows = uniqueTextValues(allocations.map((item) => String(item.row))).map((value) => finiteInteger(value, 0)).filter((rowIndex) => Number.isInteger(rowIndex))
   const workerIds = parseJsonValue(task.workerIds, [])
   const repeatWeekdays = parseJsonValue(task.repeatWeekdays, [])
-  const weeklyScheduleRules = parseJsonValue(task.weeklyScheduleRules, [])
+  const servicePayload = serviceBlocksPayloadFromRules(task.weeklyScheduleRules)
+  const weeklyScheduleRules = servicePayload ? [] : parseJsonValue(task.weeklyScheduleRules, [])
   const accessWindows = parseJsonValue(task.accessWindows, [])
+  const serviceBlocksFromColumn = parseJsonValue(task.serviceBlocks, [])
+  const objectAccessWindowsFromColumn = parseJsonValue(task.objectAccessWindows, [])
+  const serviceBlocks = Array.isArray(serviceBlocksFromColumn) && serviceBlocksFromColumn.length
+    ? serviceBlocksFromColumn
+    : Array.isArray(servicePayload?.serviceBlocks)
+      ? servicePayload.serviceBlocks
+      : []
+  const objectAccessWindows = Array.isArray(objectAccessWindowsFromColumn) && objectAccessWindowsFromColumn.length
+    ? objectAccessWindowsFromColumn
+    : Array.isArray(servicePayload?.objectAccessWindows)
+      ? servicePayload.objectAccessWindows
+      : accessWindows
   const supplies = parseJsonValue(task.supplies, [])
   const objectPlanTasks = parseJsonValue(task.objectPlanTasks, [])
   const dateYmd = normalizeDateYmd(task.dateYmd)
@@ -554,7 +755,10 @@ function mapTaskRowToScheduleOrder(row = {}) {
     scheduleMode: nullableText(task.scheduleMode, 32) || 'once',
     accessStartTime: normalizeTime(task.accessStartTime),
     accessEndTime: normalizeTime(task.accessEndTime),
-    accessWindows: Array.isArray(accessWindows) ? accessWindows : [],
+    accessWindows: Array.isArray(objectAccessWindows) ? objectAccessWindows : [],
+    objectAccessWindows: Array.isArray(objectAccessWindows) ? objectAccessWindows : [],
+    accessTimeWindows: Array.isArray(objectAccessWindows) ? objectAccessWindows : [],
+    buildingAccessWindows: Array.isArray(objectAccessWindows) ? objectAccessWindows : [],
     requiredWorkMinutes: finiteInteger(task.requiredWorkMinutes, null),
     requiredPeople: finiteInteger(task.requiredPeople, 0),
     workAllocations: allocations,
@@ -587,6 +791,8 @@ function mapTaskRowToScheduleOrder(row = {}) {
     repeatUnit: nullableText(task.repeatUnit, 16),
     repeatWeekdays: Array.isArray(repeatWeekdays) ? repeatWeekdays : [],
     weeklyScheduleRules: Array.isArray(weeklyScheduleRules) ? weeklyScheduleRules : [],
+    serviceModelVersion: finiteInteger(task.serviceModelVersion ?? servicePayload?.version, serviceBlocks.length ? 2 : null),
+    serviceBlocks: Array.isArray(serviceBlocks) ? serviceBlocks : [],
     title: nullableText(task.title, 500) || 'Zlecenie',
     type: nullableText(task.type, 40) || 'other',
     price: finiteNumber(task.price, 0),

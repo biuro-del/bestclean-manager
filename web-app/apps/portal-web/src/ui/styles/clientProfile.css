@@ -12,6 +12,7 @@
 }
 
 #portalRoot #view-clientProfile .cp-filters-card,
+#portalRoot #view-clientProfile .cp-cooperation-card,
 #portalRoot #view-clientProfile .cp-table,
 #portalRoot #view-clientProfileDetails .cpd-summary-card,
 #portalRoot #view-clientProfileDetails .cpd-content-card,
@@ -25,7 +26,7 @@
 #portalRoot #view-clientProfile .cp-filters-card {
   padding: 22px;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -188,6 +189,115 @@
   margin-left: auto;
 }
 
+#portalRoot #view-clientProfile .cp-cooperation-card {
+  margin-top: 14px;
+  padding: 18px 20px 20px;
+  display: grid;
+  gap: 10px;
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-title {
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-option {
+  min-width: 0;
+  min-height: 72px;
+  border: 1px solid rgba(67, 89, 113, 0.14);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #28374f;
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease,
+    background 0.16s ease;
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-option:hover,
+#portalRoot #view-clientProfile .cp-cooperation-option:focus-visible {
+  border-color: rgba(105, 108, 255, 0.32);
+  box-shadow: 0 9px 22px rgba(67, 89, 113, 0.09);
+  transform: translateY(-1px);
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-option.is-active {
+  border-color: rgba(105, 108, 255, 0.78);
+  background: #ffffff;
+  box-shadow: 0 10px 22px rgba(105, 108, 255, 0.08);
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #53647e;
+  background: #f2f5fb;
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-option.is-active .cp-cooperation-icon {
+  color: #696cff;
+  background: rgba(105, 108, 255, 0.1);
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-copy strong {
+  color: #2d3853;
+  font-size: 0.88rem;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-copy span {
+  color: #7b879c;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-active {
+  display: none;
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: #696cff;
+  background: rgba(105, 108, 255, 0.11);
+  font-size: 0.72rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-option.is-active .cp-cooperation-active {
+  display: inline-flex;
+}
+
 #portalRoot #view-clientProfile .cp-table {
   margin-top: 18px;
   overflow: hidden;
@@ -196,7 +306,7 @@
 #portalRoot #view-clientProfile .cp-head,
 #portalRoot #view-clientProfile .cp-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 150px;
+  grid-template-columns: minmax(260px, 1fr) 150px 132px;
   align-items: center;
   gap: 10px;
 }
@@ -260,6 +370,54 @@
 #portalRoot #view-clientProfile .cp-actions,
 #portalRoot #view-clientProfileDetails .cpd-content-toolbar {
   justify-content: flex-end;
+}
+
+#portalRoot #view-clientProfile .cp-status-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+#portalRoot #view-clientProfile .cp-action-icon {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #dbe4f1;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #315d96;
+  background: #fff;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease;
+}
+
+#portalRoot #view-clientProfile .cp-action-icon:hover,
+#portalRoot #view-clientProfile .cp-action-icon:focus-visible {
+  border-color: rgba(67, 97, 238, 0.35);
+  color: #2444c8;
+  background: #eef4ff;
+  transform: translateY(-1px);
+}
+
+#portalRoot #view-clientProfile .cp-action-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+#portalRoot #view-clientProfile .cp-action-icon--danger {
+  color: #b42318;
+}
+
+#portalRoot #view-clientProfile .cp-action-icon--danger:hover,
+#portalRoot #view-clientProfile .cp-action-icon--danger:focus-visible {
+  border-color: rgba(217, 45, 32, 0.28);
+  color: #b42318;
+  background: #fff1f0;
 }
 
 #portalRoot #view-clientProfile .cp-client-avatar,
@@ -356,6 +514,46 @@
 #portalRoot #view-clientProfileDetails .cpd-status-badge.is-archived {
   color: #415369;
   background: rgba(67, 89, 113, 0.16);
+}
+
+#portalRoot #view-clientProfile .cp-status-badge {
+  min-width: 64px;
+  min-height: 24px;
+  justify-content: center;
+  gap: 0;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--cp-status-color, #425b7f);
+  background: var(--cp-status-bg, #f1f5f9);
+  box-shadow: none;
+  font-size: 0.76rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+#portalRoot #view-clientProfile .cp-status-badge::before {
+  display: none;
+}
+
+#portalRoot #view-clientProfile .cp-status-badge--active {
+  --cp-status-color: #148a00;
+  --cp-status-bg: #dcfbd2;
+}
+
+#portalRoot #view-clientProfile .cp-status-badge--inactive {
+  --cp-status-color: #c73322;
+  --cp-status-bg: #ffe3e0;
+}
+
+#portalRoot #view-clientProfile .cp-status-badge--suspended {
+  --cp-status-color: #9b6900;
+  --cp-status-bg: #fff0c9;
+}
+
+#portalRoot #view-clientProfile .cp-status-badge--archived {
+  --cp-status-color: #7a8799;
+  --cp-status-bg: #eef1f6;
 }
 
 #portalRoot #view-clientProfileDetails .cpd-layout {
@@ -745,6 +943,7 @@
 
 @media (max-width: 900px) {
   #portalRoot #view-clientProfile .cp-filters-card,
+  #portalRoot #view-clientProfile .cp-cooperation-options,
   #portalRoot #view-clientProfileDetails .cpd-panel,
   #portalRoot #view-clientProfileDetails .cpd-fields-grid,
   #portalRoot #view-clientProfileDetails .cpd-additional-grid,
@@ -755,6 +954,10 @@
   #portalRoot #view-clientProfile .cp-head,
   #portalRoot #view-clientProfile .cp-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  #portalRoot #view-clientProfile .cp-cooperation-option {
+    grid-template-columns: 42px minmax(0, 1fr) auto;
   }
 
   #portalRoot #view-clientProfile .cp-head > div:last-child,
@@ -1232,7 +1435,7 @@
 
 #portalRoot #view-clientProfile .cp-head,
 #portalRoot #view-clientProfile .cp-row {
-  grid-template-columns: minmax(0, 1fr) 150px;
+  grid-template-columns: minmax(0, 1fr) 150px 132px;
   gap: 16px;
 }
 
@@ -1264,8 +1467,329 @@
   font-weight: 850;
 }
 
-#portalRoot #view-clientProfile .cp-details-btn {
-  min-width: 116px;
+#portalRoot #view-clientProfile .modal-overlay[hidden],
+#portalRoot #view-clientProfile .modal-overlay[aria-hidden="true"] {
+  display: none !important;
+}
+
+#portalRoot #view-clientProfile .modal-overlay {
+  position: fixed;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 9999;
+}
+
+#portalRoot #view-clientProfile #clModal .modal-content {
+  width: min(860px, calc(100vw - 32px)) !important;
+  max-height: min(86vh, 720px) !important;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px !important;
+}
+
+#portalRoot #view-clientProfile #clModal .modal-header {
+  align-items: center;
+  padding: 22px 26px;
+}
+
+#portalRoot #view-clientProfile #clModal .modal-header h2 {
+  margin: 0;
+  color: #2f3b4c !important;
+  font-size: 1.45rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+#portalRoot #view-clientProfile #clModal .modal-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 18px;
+  padding: 20px 26px 18px;
+  overflow: auto;
+  background: #fff;
+}
+
+#portalRoot #view-clientProfile #clModal .filter-group {
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#portalRoot #view-clientProfile #clModal .cl-field--wide {
+  grid-column: 1 / -1;
+}
+
+#portalRoot #view-clientProfile #clModal .filter-group label {
+  margin: 0;
+  color: #8795aa;
+  font-size: 0.69rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-clientProfile #clModal .fido-input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #dbe4f1;
+  border-radius: 8px;
+  background: #fff;
+  color: #2f3b4c;
+  font-size: 0.92rem;
+  font-weight: 650;
+  line-height: 1.2;
+  padding: 9px 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+#portalRoot #view-clientProfile #clModal .fido-input:focus {
+  border-color: #696cff;
+  box-shadow: 0 0 0 3px rgba(105, 108, 255, 0.14);
+  outline: none;
+}
+
+#portalRoot #view-clientProfile #clModal .fido-input[readonly] {
+  color: #728197;
+  background: #f6f8fb;
+  cursor: default;
+}
+
+#portalRoot #view-clientProfile #clModal select.fido-input {
+  cursor: pointer;
+}
+
+#portalRoot #view-clientProfile #clModal .modal-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 26px;
+  background: #fff;
+}
+
+#portalRoot #view-clientProfile #clModal .btn-fido {
+  min-height: 38px;
+  border-radius: 8px;
+  padding: 0 16px;
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+#portalRoot #view-clientProfile .cp-modal-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #dbe4f1;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #425b7f;
+  background: #fff;
+  cursor: pointer;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+#portalRoot #view-clientProfile .cp-modal-close:hover,
+#portalRoot #view-clientProfile .cp-modal-close:focus-visible {
+  border-color: #b9c8dd;
+  background: #f7f9fc;
+}
+
+#portalRoot #portalModalRoot #clModal.modal-overlay[hidden],
+#portalRoot #portalModalRoot #clModal.modal-overlay[aria-hidden="true"] {
+  display: none !important;
+}
+
+#portalRoot #portalModalRoot #clModal.modal-overlay {
+  position: fixed;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 13050;
+}
+
+#portalRoot #portalModalRoot #clModal .modal-content {
+  width: min(860px, calc(100vw - 32px)) !important;
+  max-height: min(86vh, 720px) !important;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px !important;
+}
+
+#portalRoot #portalModalRoot #clModal .modal-header {
+  align-items: center;
+  padding: 22px 26px;
+}
+
+#portalRoot #portalModalRoot #clModal .modal-header h2 {
+  margin: 0;
+  color: #2f3b4c !important;
+  font-size: 1.45rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+#portalRoot #portalModalRoot #clModal .modal-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 18px;
+  padding: 20px 26px 18px;
+  overflow: auto;
+  background: #fff;
+}
+
+#portalRoot #portalModalRoot #clModal .filter-group {
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#portalRoot #portalModalRoot #clModal .cl-field--wide {
+  grid-column: 1 / -1;
+}
+
+#portalRoot #portalModalRoot #clModal .filter-group label {
+  margin: 0;
+  color: #8795aa;
+  font-size: 0.69rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+#portalRoot #portalModalRoot #clModal .fido-input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #dbe4f1;
+  border-radius: 8px;
+  background: #fff;
+  color: #2f3b4c;
+  font-size: 0.92rem;
+  font-weight: 650;
+  line-height: 1.2;
+  padding: 9px 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+#portalRoot #portalModalRoot #clModal .fido-input:focus {
+  border-color: #696cff;
+  box-shadow: 0 0 0 3px rgba(105, 108, 255, 0.14);
+  outline: none;
+}
+
+#portalRoot #portalModalRoot #clModal .fido-input[readonly] {
+  color: #728197;
+  background: #f6f8fb;
+  cursor: default;
+}
+
+#portalRoot #portalModalRoot #clModal select.fido-input {
+  cursor: pointer;
+}
+
+#portalRoot #portalModalRoot #clModal .modal-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 26px;
+  background: #fff;
+}
+
+#portalRoot #portalModalRoot #clModal .btn-fido {
+  min-height: 38px;
+  border-radius: 8px;
+  padding: 0 16px;
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+#portalRoot #portalModalRoot #clModal .cp-modal-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #dbe4f1;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #425b7f;
+  background: #fff;
+  cursor: pointer;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+#portalRoot #portalModalRoot #clModal .cp-modal-close:hover,
+#portalRoot #portalModalRoot #clModal .cp-modal-close:focus-visible {
+  border-color: #b9c8dd;
+  background: #f7f9fc;
+}
+
+@media (max-width: 760px) {
+  #portalRoot #view-clientProfile #clModal .modal-content {
+    width: calc(100vw - 18px) !important;
+    max-height: calc(100vh - 18px) !important;
+  }
+
+  #portalRoot #portalModalRoot #clModal .modal-content {
+    width: calc(100vw - 18px) !important;
+    max-height: calc(100vh - 18px) !important;
+  }
+
+  #portalRoot #view-clientProfile #clModal .modal-header,
+  #portalRoot #view-clientProfile #clModal .modal-body,
+  #portalRoot #view-clientProfile #clModal .modal-footer,
+  #portalRoot #portalModalRoot #clModal .modal-header,
+  #portalRoot #portalModalRoot #clModal .modal-body,
+  #portalRoot #portalModalRoot #clModal .modal-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  #portalRoot #view-clientProfile #clModal .modal-body,
+  #portalRoot #portalModalRoot #clModal .modal-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+#portalRoot #view-clientProfile .cp-delete-confirm-body {
+  display: block;
+}
+
+#portalRoot #view-clientProfile .cp-delete-warning {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #ffd5d2;
+  border-radius: 10px;
+  color: #9f1f17;
+  background: #fff4f2;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+#portalRoot #view-clientProfile .cp-delete-danger {
+  background: #d92d20;
+  border-color: #d92d20;
+}
+
+#portalRoot #view-clientProfile .cp-delete-danger:hover,
+#portalRoot #view-clientProfile .cp-delete-danger:focus-visible {
+  background: #b42318;
+  border-color: #b42318;
 }
 
 #portalRoot #view-clientProfileDetails .cpd-content-toolbar[hidden],
@@ -1923,4 +2447,635 @@
 #portalRoot .cpd-assign-actions {
   justify-content: flex-end;
   border-top: 1px solid rgba(67, 89, 113, 0.1);
+}
+
+/* Client profile visual unification */
+#portalRoot #view-clientProfileDetails {
+  --cp-view-bg: var(--iclean-admin-bg, #f7f7f9);
+  --cp-card-bg: #ffffff;
+  background: var(--cp-view-bg) !important;
+}
+
+#portalRoot #view-clientProfileDetails :is(
+  .cpd-summary-card,
+  .cpd-section-card,
+  .cpd-stat-card,
+  .cpd-mini-field,
+  .cpd-data-table,
+  .zones-table,
+  .cpd-data-stat,
+  .cpd-additional-card,
+  .cpd-employee-item,
+  .cpd-timeline li,
+  .cpd-report-row,
+  .cpd-notes-box,
+  .cpd-employee-shell
+) {
+  background: var(--cp-card-bg) !important;
+  background-image: none !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-card {
+  box-shadow: 0 5px 15px rgba(67, 89, 113, 0.08) !important;
+}
+
+#portalRoot #view-clientProfileDetails :is(.cpd-stat-card, .cpd-mini-field) {
+  box-shadow: 0 4px 12px rgba(67, 89, 113, 0.06) !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-block-title,
+#portalRoot #view-clientProfileDetails :is(.cpd-stat-label, .cpd-mini-label) {
+  color: #465b7d !important;
+  font-family: inherit !important;
+  font-size: 0.72rem !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.045em !important;
+  line-height: 1.2 !important;
+  text-transform: uppercase !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-summary-block-title {
+  font-size: 0.96rem !important;
+}
+
+#portalRoot #view-clientProfileDetails :is(
+  .cpd-stat-value,
+  .cpd-mini-value,
+  .cpd-info-value,
+  .cpd-data-row strong,
+  .zones-row strong
+) {
+  color: #001741 !important;
+  font-family: inherit !important;
+  font-size: 0.85rem !important;
+  font-style: normal;
+  font-weight: 900 !important;
+  line-height: 1.28 !important;
+}
+
+#portalRoot #view-clientProfileDetails :is(
+  .cpd-stat-value.is-empty,
+  .cpd-mini-value.is-empty,
+  .cpd-info-value.is-empty
+) {
+  color: #8b99ad !important;
+  font-style: italic;
+  font-weight: 800 !important;
+}
+
+/* Client profile tabs consistency */
+#portalRoot #view-clientProfileDetails .cpd-data-panel {
+  font-family: inherit !important;
+  font-size: 14px !important;
+  color: #10264b !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-toolbar h3 {
+  color: #001741 !important;
+  font-size: 1.15rem !important;
+  font-weight: 900 !important;
+  line-height: 1.2 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-toolbar p,
+#portalRoot #view-clientProfileDetails .cpd-data-count {
+  color: #465b7d !important;
+  font-size: 0.88rem !important;
+  font-weight: 800 !important;
+  line-height: 1.25 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-filters label > span,
+#portalRoot #view-clientProfileDetails .cpd-data-stat span,
+#portalRoot #view-clientProfileDetails .cpd-additional-item span {
+  color: #61769a !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.02em !important;
+  line-height: 1.2 !important;
+  text-transform: uppercase !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-filters input,
+#portalRoot #view-clientProfileDetails .cpd-data-filters select {
+  color: #10264b !important;
+  font-family: inherit !important;
+  font-size: 14px !important;
+  font-weight: 750 !important;
+  line-height: 1.2 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-stat {
+  min-height: 66px !important;
+  display: grid !important;
+  align-content: center !important;
+  gap: 6px !important;
+  padding: 14px 16px !important;
+  border: 1px solid rgba(67, 89, 113, 0.1) !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  box-shadow: 0 4px 12px rgba(67, 89, 113, 0.06) !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-stat span,
+#portalRoot #view-clientProfileDetails .cpd-data-stat strong {
+  display: block !important;
+  min-width: 0 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-stat strong,
+#portalRoot #view-clientProfileDetails .cpd-additional-item strong {
+  color: #0b234c !important;
+  font-family: inherit !important;
+  font-size: 14px !important;
+  font-style: normal !important;
+  font-weight: 900 !important;
+  line-height: 1.18 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-table {
+  border: 1px solid #dce8fb !important;
+  border-radius: 12px !important;
+  background: #fff !important;
+  box-shadow: 0 8px 18px rgba(11, 35, 76, 0.05) !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-head {
+  min-height: 44px !important;
+  border-bottom: 1px solid #dce8fb !important;
+  background: #eef4ff !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-head > div {
+  position: relative !important;
+  color: #61769a !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.02em !important;
+  line-height: 1.2 !important;
+  text-transform: uppercase !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-head > div:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 12px;
+  bottom: 12px;
+  width: 1px;
+  background: rgba(97, 118, 154, 0.12);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row {
+  min-height: 62px !important;
+  border-top: 1px solid #e6eef9 !important;
+  color: #10264b !important;
+  font-size: 14px !important;
+  font-weight: 750 !important;
+  line-height: 1.2 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row > div {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row strong {
+  color: #0b234c !important;
+  font-size: 14px !important;
+  font-weight: 900 !important;
+  line-height: 1.15 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row span:not(.cpd-data-badge) {
+  margin-top: 4px !important;
+  color: #8a9ab7 !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 1.05 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-data-row .cpd-data-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 26px !important;
+  padding: 5px 11px !important;
+  border-radius: 999px !important;
+  color: #365885 !important;
+  background: #eef4ff !important;
+  font-size: 12px !important;
+  font-weight: 900 !important;
+  line-height: 1.1 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-card {
+  display: grid !important;
+  align-content: start !important;
+  min-height: 106px !important;
+  padding: 14px !important;
+  border: 1px solid rgba(67, 89, 113, 0.11) !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  box-shadow: 0 4px 12px rgba(67, 89, 113, 0.06) !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-card h4 {
+  margin: 0 0 10px !important;
+  color: #001741 !important;
+  font-size: 14px !important;
+  font-weight: 900 !important;
+  line-height: 1.2 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-item {
+  display: grid !important;
+  grid-template-columns: minmax(170px, 0.55fr) minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 14px !important;
+  min-height: 38px !important;
+  padding: 9px 0 !important;
+  border-top: 1px solid #edf1f6 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-item:first-of-type {
+  border-top: 0 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-item strong {
+  min-width: 0 !important;
+  overflow-wrap: anywhere !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-additional-empty {
+  min-height: 48px !important;
+  display: flex !important;
+  align-items: center !important;
+  padding: 12px !important;
+  color: #61769a !important;
+  font-size: 14px !important;
+  font-style: normal !important;
+  font-weight: 850 !important;
+  line-height: 1.25 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-report-list {
+  display: grid !important;
+  gap: 10px !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-report-row {
+  min-height: 66px !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 16px !important;
+  padding: 14px !important;
+  border: 1px solid rgba(67, 89, 113, 0.11) !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  box-shadow: 0 4px 12px rgba(67, 89, 113, 0.06) !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-report-row > div {
+  min-width: 0 !important;
+  display: grid !important;
+  gap: 4px !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-report-row strong {
+  display: block !important;
+  color: #0b234c !important;
+  font-size: 14px !important;
+  font-weight: 900 !important;
+  line-height: 1.18 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-report-row span {
+  display: block !important;
+  color: #61708b !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-report-row b {
+  justify-self: end !important;
+  color: var(--cp-primary) !important;
+  font-size: 14px !important;
+  font-weight: 900 !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table {
+  margin-top: 0 !important;
+  border: 1px solid #dce8fb !important;
+  border-radius: 12px !important;
+  background: #fff !important;
+  box-shadow: 0 8px 18px rgba(11, 35, 76, 0.05) !important;
+  overflow-x: auto !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-head,
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-row {
+  grid-template-columns: 192px 228px 244px 176px 136px 132px 132px 72px !important;
+  gap: 8px !important;
+  width: max-content !important;
+  min-width: 100% !important;
+  max-width: none !important;
+  box-sizing: border-box !important;
+  align-items: center !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-head {
+  min-height: 44px !important;
+  padding: 12px 14px !important;
+  border-bottom: 1px solid #dce8fb !important;
+  background: #eef4ff !important;
+  color: #6d7f9c !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-row {
+  min-height: 62px !important;
+  padding: 10px 14px !important;
+  border-top: 1px solid #e6eef9 !important;
+  background: #fff !important;
+  color: #10264b !important;
+  font-size: 14px !important;
+  line-height: 1.2 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-row:hover {
+  background: #fbfdff !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-head > div,
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-row > div {
+  min-width: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-head > div {
+  position: relative !important;
+  color: #61769a !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.02em !important;
+  line-height: 1.2 !important;
+  text-transform: uppercase !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-head > div:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 2px;
+  bottom: 2px;
+  width: 1px;
+  background: rgba(97, 118, 154, 0.16);
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-row :is(strong, small) {
+  display: block !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-row strong {
+  color: #0b234c !important;
+  font-size: 14px !important;
+  font-weight: 900 !important;
+  line-height: 1.15 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-row small {
+  margin-top: 4px !important;
+  color: #8a9ab7 !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 1.05 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-qr-cell,
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-client-cell,
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-zone-cell {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-qr-badge,
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-client-avatar {
+  flex: 0 0 auto !important;
+  width: 34px !important;
+  height: 34px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 999px !important;
+  background: #eef1f7 !important;
+  color: #71809a !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-client-avatar {
+  background: #e8f1ff !important;
+  color: #2463c9 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-client-avatar.client-tone-blue {
+  background: #dbeafe !important;
+  color: #1d4ed8 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-client-avatar.client-tone-pink {
+  background: #fce7f3 !important;
+  color: #be185d !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-client-avatar.client-tone-green {
+  background: #dcfce7 !important;
+  color: #15803d !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-client-avatar.client-tone-amber {
+  background: #fef3c7 !important;
+  color: #b45309 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-client-avatar.client-tone-cyan {
+  background: #cffafe !important;
+  color: #0891b2 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-client-avatar.client-tone-violet {
+  background: #ede9fe !important;
+  color: #6d28d9 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-client-avatar.client-tone-lime {
+  background: #d9f99d !important;
+  color: #4d7c0f !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-client-avatar.client-tone-orange {
+  background: #ffedd5 !important;
+  color: #c2410c !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-zone-icon {
+  flex: 0 0 auto !important;
+  width: 28px !important;
+  height: 28px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 8px !important;
+  background: #e8f1ff !important;
+  color: #2463c9 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-zone-icon svg {
+  width: 15px !important;
+  height: 15px !important;
+  display: block !important;
+  fill: none !important;
+  stroke: currentColor !important;
+  stroke-linecap: round !important;
+  stroke-linejoin: round !important;
+  stroke-width: 1.9 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-zone-icon.zone-kind-kitchen {
+  background: #ffedd5 !important;
+  color: #c46b24 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-zone-icon.zone-kind-archive {
+  background: #f3d8ff !important;
+  color: #a21caf !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-zone-icon.zone-kind-office,
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-zone-icon.zone-kind-generic-blue {
+  background: #dbeafe !important;
+  color: #2563eb !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-zone-icon.zone-kind-floor,
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-zone-icon.zone-kind-desk,
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-zone-icon.zone-kind-generic-green {
+  background: #dcfce7 !important;
+  color: #16a34a !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-zone-icon.zone-kind-generic-purple {
+  background: #ede9fe !important;
+  color: #7c3aed !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-zone-icon.zone-kind-generic-amber {
+  background: #fef3c7 !important;
+  color: #b45309 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-zone-icon.zone-kind-generic-cyan {
+  background: #cffafe !important;
+  color: #0891b2 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-location-text {
+  display: block !important;
+  color: #10264b !important;
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  line-height: 1.2 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-function-pill {
+  max-width: 100% !important;
+  min-height: 26px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 5px 11px !important;
+  border-radius: 999px !important;
+  font-size: 12px !important;
+  font-weight: 900 !important;
+  line-height: 1.1 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  text-transform: none !important;
+  white-space: nowrap !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-function-pill.is-clean,
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-function-pill.is-start {
+  background: #bff4ff !important;
+  color: #0077a0 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-function-pill.is-stop {
+  background: #ffd1ca !important;
+  color: #d84322 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-function-pill.is-special {
+  background: #fff0c9 !important;
+  color: #a46400 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-function-pill.is-neutral {
+  background: #eef4ff !important;
+  color: #365885 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-date-cell {
+  color: #08255a !important;
+  font-size: 14px !important;
+  font-weight: 900 !important;
+  line-height: 1.2 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-actions {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0 !important;
+}
+
+#portalRoot #view-clientProfileDetails .cpd-zones-table .zones-actions .zones-action-btn {
+  width: 32px !important;
+  min-width: 32px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 !important;
+  border-radius: 9px !important;
+  font-size: 20px !important;
+  line-height: 1 !important;
+  color: #5967ff !important;
+  background: #fff !important;
+}
+
+@media (max-width: 640px) {
+  #portalRoot #view-clientProfileDetails .cpd-report-row,
+  #portalRoot #view-clientProfileDetails .cpd-additional-item {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #portalRoot #view-clientProfileDetails .cpd-report-row b {
+    justify-self: start !important;
+  }
 }

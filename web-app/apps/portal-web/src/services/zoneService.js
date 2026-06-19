@@ -80,12 +80,15 @@ function mapZone(orgId, row) {
   }
 }
 
-export async function getZones(orgId) {
+export async function getZones(orgId, options = {}) {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
   ensureFirebase()
+  if (options?.forceRefresh === true || options?.bypassCache === true || options?.noCache === true) {
+    invalidateZonesCache(orgId)
+  }
   return readZonesCached(orgId, async () => {
     const response = await zonesForOrg({ orgId })
     const rows = response?.data?.zones ?? []
@@ -122,7 +125,6 @@ export async function createZone(orgId, payload) {
     zone: payload?.name ?? payload?.zone ?? null,
     function: payload?.function ?? null,
     location: payload?.location ?? null,
-    workerLogin: payload?.workerLogin ?? null,
     editedBy: payload?.editedBy ?? null,
     date: payload?.date ?? null,
   })
@@ -162,7 +164,6 @@ export async function updateZone(orgId, zoneId, payload) {
     zone: payload?.name ?? payload?.zone ?? null,
     function: payload?.function ?? null,
     location: payload?.location ?? null,
-    workerLogin: payload?.workerLogin ?? null,
     editedBy: payload?.editedBy ?? null,
     date: payload?.date ?? null,
   })

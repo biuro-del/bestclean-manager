@@ -254,9 +254,18 @@ function getBootstrapMembershipEndpoint() {
     return fromEnv
   }
 
-  const projectId = String(import.meta.env.VITE_FIREBASE_PROJECT_ID ?? 'iclean-room').trim() || 'iclean-room'
+  if (!useEmulators) {
+    return '/authBootstrapMembership'
+  }
 
-  return `https://europe-west3-${projectId}.cloudfunctions.net/authBootstrapMembership`
+  const projectId = String(import.meta.env.VITE_FIREBASE_PROJECT_ID ?? 'iclean-room').trim() || 'iclean-room'
+  const host = String(import.meta.env.VITE_FUNCTIONS_EMULATOR_HOST ?? '').trim()
+  const port = Number(import.meta.env.VITE_FUNCTIONS_EMULATOR_PORT ?? 5001)
+  if (useEmulators && host) {
+    return `http://${host}:${port}/${projectId}/europe-west3/authBootstrapMembership`
+  }
+
+  return '/authBootstrapMembership'
 }
 
 async function bootstrapMembershipIfNeeded(firebaseUser, orgIdHint) {

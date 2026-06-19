@@ -128,6 +128,7 @@ type Client @table(
   address: String @col(name: "address")
   contact: String @col(name: "contact")
   status: String @col(name: "status")
+  clientType: String @col(name: "client_type", dataType: "varchar(24)")
   coordinator: String @col(name: "coordinator")
   serviceFrequency: String @col(name: "service_frequency")
   assignees: String @col(name: "assignees")
@@ -280,7 +281,10 @@ type Task @table(
   singular: "task",
   plural: "tasks",
   key: ["orgId", "idTask"]
-) {
+)
+@index(name: "task_org_date_idx", fields: ["orgId", "dateYmd", "startTime", "idTask"])
+@index(name: "task_org_updated_idx", fields: ["orgId", "updatedAt"], order: [ASC, DESC])
+@index(name: "task_org_worker_idx", fields: ["orgId", "workerId"]) {
   orgId: String! @col(name: "org_id", dataType: "varchar(64)")
   organization: Organization! @ref(fields: "orgId", references: "orgId")
 

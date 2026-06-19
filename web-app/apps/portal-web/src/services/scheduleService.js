@@ -7,6 +7,7 @@ const SCHEDULE_STORAGE_KEY = 'portal.dashboardSchedule.lastGood'
 let scheduleCache = null
 let scheduleCacheAt = 0
 let scheduleInFlight = null
+let scheduleInFlightForce = false
 
 function readStoredScheduleCache() {
   if (typeof window === 'undefined' || !window.localStorage) {
@@ -176,7 +177,7 @@ function hasRealShiftValue(...values) {
   return values.some((value) => !isNoShiftCellValue(value))
 }
 
-function loadScheduleTableJsonp(spreadsheetId = SCHEDULE_SPREADSHEET_ID, gid = SCHEDULE_GID) {
+function loadScheduleTableJsonp(spreadsheetId = SCHEDULE_SPREADSHEET_ID, gid = SCHEDULE_GID, cacheToken = '') {
   return new Promise((resolve, reject) => {
     const root = window.google || (window.google = {})
     const visualization = root.visualization || (root.visualization = {})
@@ -226,9 +227,10 @@ function loadScheduleTableJsonp(spreadsheetId = SCHEDULE_SPREADSHEET_ID, gid = S
 
     script.async = true
     script.onerror = () => finishError('Nie udało się pobrać grafiku z Google Sheets.')
+    const cacheBust = cacheToken || Math.floor(Date.now() / SCHEDULE_CACHE_TTL_MS)
     script.src =
       `https://docs.google.com/spreadsheets/d/${encodeURIComponent(String(spreadsheetId))}/gviz/tq` +
-      `?gid=${encodeURIComponent(String(gid))}&tqx=out:json&ts=${Math.floor(Date.now() / SCHEDULE_CACHE_TTL_MS)}`
+      `?gid=${encodeURIComponent(String(gid))}&tqx=out:json&ts=${encodeURIComponent(String(cacheBust))}`
 
     document.head.appendChild(script)
   })
@@ -342,26 +344,28 @@ function todayYmd() {
   return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
 }
 
-export async function getScheduleBoard() {
+export async function getScheduleBoard(options = {}) {
   const now = Date.now()
-  if (scheduleCache && now - scheduleCacheAt < SCHEDULE_CACHE_TTL_MS) {
+  const forceRefresh = options?.forceRefresh === true || options?.bypassCache === true || options?.noCache === true
+  if (!forceRefresh && scheduleCache && now - scheduleCacheAt < SCHEDULE_CACHE_TTL_MS) {
     return scheduleCache
   }
 
   const stored = readStoredScheduleCache()
-  if (stored?.payload && now - stored.cachedAt < SCHEDULE_CACHE_TTL_MS) {
+  if (!forceRefresh && stored?.payload && now - stored.cachedAt < SCHEDULE_CACHE_TTL_MS) {
     scheduleCache = stored.payload
     scheduleCacheAt = stored.cachedAt || now
     return scheduleCache
   }
 
-  if (scheduleInFlight) {
+  if (scheduleInFlight && (!forceRefresh || scheduleInFlightForce)) {
     return scheduleInFlight
   }
 
+  scheduleInFlightForce = forceRefresh
   scheduleInFlight = (async () => {
     try {
-      const table = await loadScheduleTableJsonp()
+      const table = await loadScheduleTableJsonp(undefined, undefined, forceRefresh ? Date.now() : '')
       const days = parseScheduleTable(table)
       const payload = {
         days,
@@ -391,6 +395,7 @@ export async function getScheduleBoard() {
     return await scheduleInFlight
   } finally {
     scheduleInFlight = null
+    scheduleInFlightForce = false
   }
 }
 

@@ -41,6 +41,9 @@ You can also follow the instructions from the [Data Connect documentation](https
   - [*InsertWorkerForOrg*](#insertworkerfororg)
   - [*InsertWorkerWithMembershipForOrg*](#insertworkerwithmembershipfororg)
   - [*UpdateWorkerForOrg*](#updateworkerfororg)
+  - [*UpdateWorkerProfileForOrg*](#updateworkerprofilefororg)
+  - [*RenameWorkerForOrg*](#renameworkerfororg)
+  - [*DeleteWorkerProfileForOrg*](#deleteworkerprofilefororg)
   - [*UpsertWorkerCredentialForOrg*](#upsertworkercredentialfororg)
   - [*UpsertOrgUiStyleForOrg*](#upsertorguistylefororg)
   - [*DeleteOrgUiStyleForOrg*](#deleteorguistylefororg)
@@ -291,7 +294,7 @@ import { useOrgUiStyleForOrg } from '@dataconnect/generated/react'
 export default function OrgUiStyleForOrgComponent() {
   // The `useOrgUiStyleForOrg` Query hook requires an argument of type `OrgUiStyleForOrgVariables`:
   const orgUiStyleForOrgVars: OrgUiStyleForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -379,7 +382,7 @@ import { useMyUiStylePreference } from '@dataconnect/generated/react'
 export default function MyUiStylePreferenceComponent() {
   // The `useMyUiStylePreference` Query hook requires an argument of type `MyUiStylePreferenceVariables`:
   const myUiStylePreferenceVars: MyUiStylePreferenceVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -467,7 +470,7 @@ import { useUserUiStylePreferencesForOrg } from '@dataconnect/generated/react'
 export default function UserUiStylePreferencesForOrgComponent() {
   // The `useUserUiStylePreferencesForOrg` Query hook requires an argument of type `UserUiStylePreferencesForOrgVariables`:
   const userUiStylePreferencesForOrgVars: UserUiStylePreferencesForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -551,7 +554,7 @@ import { useCanManageWorkersForOrg } from '@dataconnect/generated/react'
 export default function CanManageWorkersForOrgComponent() {
   // The `useCanManageWorkersForOrg` Query hook requires an argument of type `CanManageWorkersForOrgVariables`:
   const canManageWorkersForOrgVars: CanManageWorkersForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -647,7 +650,7 @@ import { useWorkersForOrg } from '@dataconnect/generated/react'
 export default function WorkersForOrgComponent() {
   // The `useWorkersForOrg` Query hook requires an argument of type `WorkersForOrgVariables`:
   const workersForOrgVars: WorkersForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -746,8 +749,8 @@ import { useAdminWorkerCredentialForOrg } from '@dataconnect/generated/react'
 export default function AdminWorkerCredentialForOrgComponent() {
   // The `useAdminWorkerCredentialForOrg` Query hook requires an argument of type `AdminWorkerCredentialForOrgVariables`:
   const adminWorkerCredentialForOrgVars: AdminWorkerCredentialForOrgVariables = {
-    orgId: ...,
-    login: ...,
+    orgId: ..., 
+    login: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -823,6 +826,7 @@ export interface ClientsForOrgData {
     contact?: string | null;
     coordinator?: string | null;
     status?: string | null;
+    clientType?: string | null;
     serviceFrequency?: string | null;
     assignees?: string | null;
     chemistry?: string | null;
@@ -878,7 +882,7 @@ import { useClientsForOrg } from '@dataconnect/generated/react'
 export default function ClientsForOrgComponent() {
   // The `useClientsForOrg` Query hook requires an argument of type `ClientsForOrgVariables`:
   const clientsForOrgVars: ClientsForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -970,7 +974,7 @@ import { useIndividualJobsForOrg } from '@dataconnect/generated/react'
 export default function IndividualJobsForOrgComponent() {
   // The `useIndividualJobsForOrg` Query hook requires an argument of type `IndividualJobsForOrgVariables`:
   const individualJobsForOrgVars: IndividualJobsForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1101,7 +1105,7 @@ import { useTasksForOrg } from '@dataconnect/generated/react'
 export default function TasksForOrgComponent() {
   // The `useTasksForOrg` Query hook requires an argument of type `TasksForOrgVariables`:
   const tasksForOrgVars: TasksForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1191,7 +1195,7 @@ import { useZonesForOrg } from '@dataconnect/generated/react'
 export default function ZonesForOrgComponent() {
   // The `useZonesForOrg` Query hook requires an argument of type `ZonesForOrgVariables`:
   const zonesForOrgVars: ZonesForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1293,7 +1297,7 @@ import { useWorkdaysForOrg } from '@dataconnect/generated/react'
 export default function WorkdaysForOrgComponent() {
   // The `useWorkdaysForOrg` Query hook requires an argument of type `WorkdaysForOrgVariables`:
   const workdaysForOrgVars: WorkdaysForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1388,7 +1392,7 @@ import { useBackupCyclesForOrg } from '@dataconnect/generated/react'
 export default function BackupCyclesForOrgComponent() {
   // The `useBackupCyclesForOrg` Query hook requires an argument of type `BackupCyclesForOrgVariables`:
   const backupCyclesForOrgVars: BackupCyclesForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1498,7 +1502,7 @@ import { useEventsForOrg } from '@dataconnect/generated/react'
 export default function EventsForOrgComponent() {
   // The `useEventsForOrg` Query hook requires an argument of type `EventsForOrgVariables`:
   const eventsForOrgVars: EventsForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1601,8 +1605,8 @@ import { useWorkerWorkdaysForOrg } from '@dataconnect/generated/react'
 export default function WorkerWorkdaysForOrgComponent() {
   // The `useWorkerWorkdaysForOrg` Query hook requires an argument of type `WorkerWorkdaysForOrgVariables`:
   const workerWorkdaysForOrgVars: WorkerWorkdaysForOrgVariables = {
-    orgId: ...,
-    workerLogin: ...,
+    orgId: ..., 
+    workerLogin: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1697,7 +1701,7 @@ import { useStorageForOrg } from '@dataconnect/generated/react'
 export default function StorageForOrgComponent() {
   // The `useStorageForOrg` Query hook requires an argument of type `StorageForOrgVariables`:
   const storageForOrgVars: StorageForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -1804,8 +1808,8 @@ import { useClientStorageForClient } from '@dataconnect/generated/react'
 export default function ClientStorageForClientComponent() {
   // The `useClientStorageForClient` Query hook requires an argument of type `ClientStorageForClientVariables`:
   const clientStorageForClientVars: ClientStorageForClientVariables = {
-    orgId: ...,
-    clientId: ...,
+    orgId: ..., 
+    clientId: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -1901,7 +1905,7 @@ import { useClientStorageForOrg } from '@dataconnect/generated/react'
 export default function ClientStorageForOrgComponent() {
   // The `useClientStorageForOrg` Query hook requires an argument of type `ClientStorageForOrgVariables`:
   const clientStorageForOrgVars: ClientStorageForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -1998,7 +2002,7 @@ import { useWorkdayPausesForOrg } from '@dataconnect/generated/react'
 export default function WorkdayPausesForOrgComponent() {
   // The `useWorkdayPausesForOrg` Query hook requires an argument of type `WorkdayPausesForOrgVariables`:
   const workdayPausesForOrgVars: WorkdayPausesForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -2094,8 +2098,8 @@ import { useActiveWorkdayPauseForWorker } from '@dataconnect/generated/react'
 export default function ActiveWorkdayPauseForWorkerComponent() {
   // The `useActiveWorkdayPauseForWorker` Query hook requires an argument of type `ActiveWorkdayPauseForWorkerVariables`:
   const activeWorkdayPauseForWorkerVars: ActiveWorkdayPauseForWorkerVariables = {
-    orgId: ...,
-    workerLogin: ...,
+    orgId: ..., 
+    workerLogin: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -2233,8 +2237,8 @@ export default function InsertWorkerForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertWorkerForOrg` Mutation requires an argument of type `InsertWorkerForOrgVariables`:
   const insertWorkerForOrgVars: InsertWorkerForOrgVariables = {
-    orgId: ...,
-    login: ...,
+    orgId: ..., 
+    login: ..., 
     workerName: ..., // optional
     loginEmail: ..., // optional
     role: ..., // optional
@@ -2347,11 +2351,11 @@ export default function InsertWorkerWithMembershipForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertWorkerWithMembershipForOrg` Mutation requires an argument of type `InsertWorkerWithMembershipForOrgVariables`:
   const insertWorkerWithMembershipForOrgVars: InsertWorkerWithMembershipForOrgVariables = {
-    orgId: ...,
-    login: ...,
+    orgId: ..., 
+    login: ..., 
     workerName: ..., // optional
     loginEmail: ..., // optional
-    authUid: ...,
+    authUid: ..., 
     role: ..., // optional
     active: ..., // optional
     email: ..., // optional
@@ -2462,8 +2466,8 @@ export default function UpdateWorkerForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateWorkerForOrg` Mutation requires an argument of type `UpdateWorkerForOrgVariables`:
   const updateWorkerForOrgVars: UpdateWorkerForOrgVariables = {
-    orgId: ...,
-    login: ...,
+    orgId: ..., 
+    login: ..., 
     workerName: ..., // optional
     loginEmail: ..., // optional
     role: ..., // optional
@@ -2496,6 +2500,386 @@ export default function UpdateWorkerForOrgComponent() {
   // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
   if (mutation.isSuccess) {
     console.log(mutation.data.worker_update);
+  }
+  return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## UpdateWorkerProfileForOrg
+You can execute the `UpdateWorkerProfileForOrg` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
+```javascript
+useUpdateWorkerProfileForOrg(options?: useDataConnectMutationOptions<UpdateWorkerProfileForOrgData, FirebaseError, UpdateWorkerProfileForOrgVariables>): UseDataConnectMutationResult<UpdateWorkerProfileForOrgData, UpdateWorkerProfileForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Mutation hook function.
+```javascript
+useUpdateWorkerProfileForOrg(dc: DataConnect, options?: useDataConnectMutationOptions<UpdateWorkerProfileForOrgData, FirebaseError, UpdateWorkerProfileForOrgVariables>): UseDataConnectMutationResult<UpdateWorkerProfileForOrgData, UpdateWorkerProfileForOrgVariables>;
+```
+
+### Variables
+The `UpdateWorkerProfileForOrg` Mutation requires an argument of type `UpdateWorkerProfileForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface UpdateWorkerProfileForOrgVariables {
+  orgId: string;
+  login: string;
+  workerName?: string | null;
+  loginEmail?: string | null;
+  authUid?: string;
+  role?: string | null;
+  memberRole?: string | null;
+  active?: boolean | null;
+  email?: string | null;
+  phone?: string | null;
+  workerType?: string | null;
+  workerId?: string | null;
+  edit?: string | null;
+}
+```
+### Return Type
+Recall that calling the `UpdateWorkerProfileForOrg` Mutation hook function returns a `UseMutationResult` object. This object holds the state of your Mutation, including whether the Mutation is loading, has completed, or has succeeded/failed, among other things.
+
+To check the status of a Mutation, use the `UseMutationResult.status` field. You can also check for pending / success / error status using the `UseMutationResult.isPending`, `UseMutationResult.isSuccess`, and `UseMutationResult.isError` fields.
+
+To execute the Mutation, call `UseMutationResult.mutate()`. This function executes the Mutation, but does not return the data from the Mutation.
+
+To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `UpdateWorkerProfileForOrg` Mutation is of type `UpdateWorkerProfileForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface UpdateWorkerProfileForOrgData {
+  worker_update?: Worker_Key | null;
+  organizationMember_upsert: OrganizationMember_Key;
+}
+```
+
+To learn more about the `UseMutationResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useMutation).
+
+### Using `UpdateWorkerProfileForOrg`'s Mutation hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, UpdateWorkerProfileForOrgVariables } from '@dataconnect/generated';
+import { useUpdateWorkerProfileForOrg } from '@dataconnect/generated/react'
+
+export default function UpdateWorkerProfileForOrgComponent() {
+  // Call the Mutation hook function to get a `UseMutationResult` object which holds the state of your Mutation.
+  const mutation = useUpdateWorkerProfileForOrg();
+
+  // You can also pass in a `DataConnect` instance to the Mutation hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const mutation = useUpdateWorkerProfileForOrg(dataConnect);
+
+  // You can also pass in a `useDataConnectMutationOptions` object to the Mutation hook function.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useUpdateWorkerProfileForOrg(options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectMutationOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useUpdateWorkerProfileForOrg(dataConnect, options);
+
+  // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
+  // The `useUpdateWorkerProfileForOrg` Mutation requires an argument of type `UpdateWorkerProfileForOrgVariables`:
+  const updateWorkerProfileForOrgVars: UpdateWorkerProfileForOrgVariables = {
+    orgId: ..., 
+    login: ..., 
+    workerName: ..., // optional
+    loginEmail: ..., // optional
+    authUid: ..., // optional
+    role: ..., // optional
+    memberRole: ..., // optional
+    active: ..., // optional
+    email: ..., // optional
+    phone: ..., // optional
+    workerType: ..., // optional
+    workerId: ..., // optional
+    edit: ..., // optional
+  };
+  mutation.mutate(updateWorkerProfileForOrgVars);
+  // Variables can be defined inline as well.
+  mutation.mutate({ orgId: ..., login: ..., workerName: ..., loginEmail: ..., authUid: ..., role: ..., memberRole: ..., active: ..., email: ..., phone: ..., workerType: ..., workerId: ..., edit: ..., });
+
+  // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  mutation.mutate(updateWorkerProfileForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Mutation.
+  if (mutation.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (mutation.isError) {
+    return <div>Error: {mutation.error.message}</div>;
+  }
+
+  // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
+  if (mutation.isSuccess) {
+    console.log(mutation.data.worker_update);
+    console.log(mutation.data.organizationMember_upsert);
+  }
+  return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## RenameWorkerForOrg
+You can execute the `RenameWorkerForOrg` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
+```javascript
+useRenameWorkerForOrg(options?: useDataConnectMutationOptions<RenameWorkerForOrgData, FirebaseError, RenameWorkerForOrgVariables>): UseDataConnectMutationResult<RenameWorkerForOrgData, RenameWorkerForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Mutation hook function.
+```javascript
+useRenameWorkerForOrg(dc: DataConnect, options?: useDataConnectMutationOptions<RenameWorkerForOrgData, FirebaseError, RenameWorkerForOrgVariables>): UseDataConnectMutationResult<RenameWorkerForOrgData, RenameWorkerForOrgVariables>;
+```
+
+### Variables
+The `RenameWorkerForOrg` Mutation requires an argument of type `RenameWorkerForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface RenameWorkerForOrgVariables {
+  orgId: string;
+  login: string;
+  newLogin: string;
+  workerName?: string | null;
+  loginEmail?: string | null;
+  authUid?: string;
+  role?: string | null;
+  memberRole?: string | null;
+  active?: boolean | null;
+  email?: string | null;
+  phone?: string | null;
+  workerType?: string | null;
+  workerId?: string | null;
+  createdAt?: TimestampString | null;
+  edit?: string | null;
+}
+```
+### Return Type
+Recall that calling the `RenameWorkerForOrg` Mutation hook function returns a `UseMutationResult` object. This object holds the state of your Mutation, including whether the Mutation is loading, has completed, or has succeeded/failed, among other things.
+
+To check the status of a Mutation, use the `UseMutationResult.status` field. You can also check for pending / success / error status using the `UseMutationResult.isPending`, `UseMutationResult.isSuccess`, and `UseMutationResult.isError` fields.
+
+To execute the Mutation, call `UseMutationResult.mutate()`. This function executes the Mutation, but does not return the data from the Mutation.
+
+To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `RenameWorkerForOrg` Mutation is of type `RenameWorkerForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface RenameWorkerForOrgData {
+  worker_insert: Worker_Key;
+  organizationMember_upsert: OrganizationMember_Key;
+  workdayPause_updateMany: number;
+  event_updateMany: number;
+  workday_updateMany: number;
+  backupCycle_updateMany: number;
+  checkListLog_updateMany: number;
+  taskLogin_update: number;
+  taskWorkerId_update: number;
+  workerCredential_updateMany: number;
+  worker_delete?: Worker_Key | null;
+}
+```
+
+To learn more about the `UseMutationResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useMutation).
+
+### Using `RenameWorkerForOrg`'s Mutation hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, RenameWorkerForOrgVariables } from '@dataconnect/generated';
+import { useRenameWorkerForOrg } from '@dataconnect/generated/react'
+
+export default function RenameWorkerForOrgComponent() {
+  // Call the Mutation hook function to get a `UseMutationResult` object which holds the state of your Mutation.
+  const mutation = useRenameWorkerForOrg();
+
+  // You can also pass in a `DataConnect` instance to the Mutation hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const mutation = useRenameWorkerForOrg(dataConnect);
+
+  // You can also pass in a `useDataConnectMutationOptions` object to the Mutation hook function.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useRenameWorkerForOrg(options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectMutationOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useRenameWorkerForOrg(dataConnect, options);
+
+  // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
+  // The `useRenameWorkerForOrg` Mutation requires an argument of type `RenameWorkerForOrgVariables`:
+  const renameWorkerForOrgVars: RenameWorkerForOrgVariables = {
+    orgId: ..., 
+    login: ..., 
+    newLogin: ..., 
+    workerName: ..., // optional
+    loginEmail: ..., // optional
+    authUid: ..., // optional
+    role: ..., // optional
+    memberRole: ..., // optional
+    active: ..., // optional
+    email: ..., // optional
+    phone: ..., // optional
+    workerType: ..., // optional
+    workerId: ..., // optional
+    createdAt: ..., // optional
+    edit: ..., // optional
+  };
+  mutation.mutate(renameWorkerForOrgVars);
+  // Variables can be defined inline as well.
+  mutation.mutate({ orgId: ..., login: ..., newLogin: ..., workerName: ..., loginEmail: ..., authUid: ..., role: ..., memberRole: ..., active: ..., email: ..., phone: ..., workerType: ..., workerId: ..., createdAt: ..., edit: ..., });
+
+  // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  mutation.mutate(renameWorkerForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Mutation.
+  if (mutation.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (mutation.isError) {
+    return <div>Error: {mutation.error.message}</div>;
+  }
+
+  // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
+  if (mutation.isSuccess) {
+    console.log(mutation.data.worker_insert);
+    console.log(mutation.data.organizationMember_upsert);
+    console.log(mutation.data.workdayPause_updateMany);
+    console.log(mutation.data.event_updateMany);
+    console.log(mutation.data.workday_updateMany);
+    console.log(mutation.data.backupCycle_updateMany);
+    console.log(mutation.data.checkListLog_updateMany);
+    console.log(mutation.data.taskLogin_update);
+    console.log(mutation.data.taskWorkerId_update);
+    console.log(mutation.data.workerCredential_updateMany);
+    console.log(mutation.data.worker_delete);
+  }
+  return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## DeleteWorkerProfileForOrg
+You can execute the `DeleteWorkerProfileForOrg` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
+```javascript
+useDeleteWorkerProfileForOrg(options?: useDataConnectMutationOptions<DeleteWorkerProfileForOrgData, FirebaseError, DeleteWorkerProfileForOrgVariables>): UseDataConnectMutationResult<DeleteWorkerProfileForOrgData, DeleteWorkerProfileForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Mutation hook function.
+```javascript
+useDeleteWorkerProfileForOrg(dc: DataConnect, options?: useDataConnectMutationOptions<DeleteWorkerProfileForOrgData, FirebaseError, DeleteWorkerProfileForOrgVariables>): UseDataConnectMutationResult<DeleteWorkerProfileForOrgData, DeleteWorkerProfileForOrgVariables>;
+```
+
+### Variables
+The `DeleteWorkerProfileForOrg` Mutation requires an argument of type `DeleteWorkerProfileForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface DeleteWorkerProfileForOrgVariables {
+  orgId: string;
+  login: string;
+  workerId?: string;
+  authUid?: string;
+}
+```
+### Return Type
+Recall that calling the `DeleteWorkerProfileForOrg` Mutation hook function returns a `UseMutationResult` object. This object holds the state of your Mutation, including whether the Mutation is loading, has completed, or has succeeded/failed, among other things.
+
+To check the status of a Mutation, use the `UseMutationResult.status` field. You can also check for pending / success / error status using the `UseMutationResult.isPending`, `UseMutationResult.isSuccess`, and `UseMutationResult.isError` fields.
+
+To execute the Mutation, call `UseMutationResult.mutate()`. This function executes the Mutation, but does not return the data from the Mutation.
+
+To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `DeleteWorkerProfileForOrg` Mutation is of type `DeleteWorkerProfileForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface DeleteWorkerProfileForOrgData {
+  workerCredential_deleteMany: number;
+  workdayPause_deleteMany: number;
+  event_deleteMany: number;
+  checkListLog_deleteMany: number;
+  backupCycle_deleteMany: number;
+  taskLogin_delete: number;
+  taskWorkerId_delete: number;
+  workday_deleteMany: number;
+  organizationMember_deleteMany: number;
+  worker_delete?: Worker_Key | null;
+}
+```
+
+To learn more about the `UseMutationResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useMutation).
+
+### Using `DeleteWorkerProfileForOrg`'s Mutation hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, DeleteWorkerProfileForOrgVariables } from '@dataconnect/generated';
+import { useDeleteWorkerProfileForOrg } from '@dataconnect/generated/react'
+
+export default function DeleteWorkerProfileForOrgComponent() {
+  // Call the Mutation hook function to get a `UseMutationResult` object which holds the state of your Mutation.
+  const mutation = useDeleteWorkerProfileForOrg();
+
+  // You can also pass in a `DataConnect` instance to the Mutation hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const mutation = useDeleteWorkerProfileForOrg(dataConnect);
+
+  // You can also pass in a `useDataConnectMutationOptions` object to the Mutation hook function.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useDeleteWorkerProfileForOrg(options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectMutationOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useDeleteWorkerProfileForOrg(dataConnect, options);
+
+  // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
+  // The `useDeleteWorkerProfileForOrg` Mutation requires an argument of type `DeleteWorkerProfileForOrgVariables`:
+  const deleteWorkerProfileForOrgVars: DeleteWorkerProfileForOrgVariables = {
+    orgId: ..., 
+    login: ..., 
+    workerId: ..., // optional
+    authUid: ..., // optional
+  };
+  mutation.mutate(deleteWorkerProfileForOrgVars);
+  // Variables can be defined inline as well.
+  mutation.mutate({ orgId: ..., login: ..., workerId: ..., authUid: ..., });
+
+  // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  mutation.mutate(deleteWorkerProfileForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Mutation.
+  if (mutation.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (mutation.isError) {
+    return <div>Error: {mutation.error.message}</div>;
+  }
+
+  // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
+  if (mutation.isSuccess) {
+    console.log(mutation.data.workerCredential_deleteMany);
+    console.log(mutation.data.workdayPause_deleteMany);
+    console.log(mutation.data.event_deleteMany);
+    console.log(mutation.data.checkListLog_deleteMany);
+    console.log(mutation.data.backupCycle_deleteMany);
+    console.log(mutation.data.taskLogin_delete);
+    console.log(mutation.data.taskWorkerId_delete);
+    console.log(mutation.data.workday_deleteMany);
+    console.log(mutation.data.organizationMember_deleteMany);
+    console.log(mutation.data.worker_delete);
   }
   return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
 }
@@ -2572,12 +2956,12 @@ export default function UpsertWorkerCredentialForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpsertWorkerCredentialForOrg` Mutation requires an argument of type `UpsertWorkerCredentialForOrgVariables`:
   const upsertWorkerCredentialForOrgVars: UpsertWorkerCredentialForOrgVariables = {
-    orgId: ...,
-    login: ...,
-    encryptedPassword: ...,
-    iv: ...,
-    authTag: ...,
-    algorithm: ...,
+    orgId: ..., 
+    login: ..., 
+    encryptedPassword: ..., 
+    iv: ..., 
+    authTag: ..., 
+    algorithm: ..., 
     updatedBy: ..., // optional
   };
   mutation.mutate(upsertWorkerCredentialForOrgVars);
@@ -2674,8 +3058,8 @@ export default function UpsertOrgUiStyleForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpsertOrgUiStyleForOrg` Mutation requires an argument of type `UpsertOrgUiStyleForOrgVariables`:
   const upsertOrgUiStyleForOrgVars: UpsertOrgUiStyleForOrgVariables = {
-    orgId: ...,
-    styleId: ...,
+    orgId: ..., 
+    styleId: ..., 
     updatedBy: ..., // optional
   };
   mutation.mutate(upsertOrgUiStyleForOrgVars);
@@ -2770,7 +3154,7 @@ export default function DeleteOrgUiStyleForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteOrgUiStyleForOrg` Mutation requires an argument of type `DeleteOrgUiStyleForOrgVariables`:
   const deleteOrgUiStyleForOrgVars: DeleteOrgUiStyleForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
   mutation.mutate(deleteOrgUiStyleForOrgVars);
   // Variables can be defined inline as well.
@@ -2866,8 +3250,8 @@ export default function UpsertMyUiStylePreferenceComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpsertMyUiStylePreference` Mutation requires an argument of type `UpsertMyUiStylePreferenceVariables`:
   const upsertMyUiStylePreferenceVars: UpsertMyUiStylePreferenceVariables = {
-    orgId: ...,
-    styleId: ...,
+    orgId: ..., 
+    styleId: ..., 
     updatedBy: ..., // optional
   };
   mutation.mutate(upsertMyUiStylePreferenceVars);
@@ -2962,7 +3346,7 @@ export default function DeleteMyUiStylePreferenceComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteMyUiStylePreference` Mutation requires an argument of type `DeleteMyUiStylePreferenceVariables`:
   const deleteMyUiStylePreferenceVars: DeleteMyUiStylePreferenceVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
   mutation.mutate(deleteMyUiStylePreferenceVars);
   // Variables can be defined inline as well.
@@ -3059,9 +3443,9 @@ export default function UpsertUserUiStylePreferenceForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpsertUserUiStylePreferenceForOrg` Mutation requires an argument of type `UpsertUserUiStylePreferenceForOrgVariables`:
   const upsertUserUiStylePreferenceForOrgVars: UpsertUserUiStylePreferenceForOrgVariables = {
-    orgId: ...,
-    uid: ...,
-    styleId: ...,
+    orgId: ..., 
+    uid: ..., 
+    styleId: ..., 
     updatedBy: ..., // optional
   };
   mutation.mutate(upsertUserUiStylePreferenceForOrgVars);
@@ -3157,8 +3541,8 @@ export default function DeleteUserUiStylePreferenceForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteUserUiStylePreferenceForOrg` Mutation requires an argument of type `DeleteUserUiStylePreferenceForOrgVariables`:
   const deleteUserUiStylePreferenceForOrgVars: DeleteUserUiStylePreferenceForOrgVariables = {
-    orgId: ...,
-    uid: ...,
+    orgId: ..., 
+    uid: ..., 
   };
   mutation.mutate(deleteUserUiStylePreferenceForOrgVars);
   // Variables can be defined inline as well.
@@ -3210,6 +3594,7 @@ export interface InsertClientForOrgVariables {
   address?: string | null;
   contact?: string | null;
   status?: string | null;
+  clientType?: string | null;
   coordinator?: string | null;
   serviceFrequency?: string | null;
   assignees?: string | null;
@@ -3297,14 +3682,15 @@ export default function InsertClientForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertClientForOrg` Mutation requires an argument of type `InsertClientForOrgVariables`:
   const insertClientForOrgVars: InsertClientForOrgVariables = {
-    orgId: ...,
-    clientId: ...,
+    orgId: ..., 
+    clientId: ..., 
     name: ..., // optional
     nip: ..., // optional
     city: ..., // optional
     address: ..., // optional
     contact: ..., // optional
     status: ..., // optional
+    clientType: ..., // optional
     coordinator: ..., // optional
     serviceFrequency: ..., // optional
     assignees: ..., // optional
@@ -3346,7 +3732,7 @@ export default function InsertClientForOrgComponent() {
   };
   mutation.mutate(insertClientForOrgVars);
   // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., objectType: ..., cooperationStartAt: ..., cooperationEndAt: ..., contactPerson: ..., phone: ..., email: ..., emergencyContact: ..., contactPosition: ..., postalCode: ..., accessHours: ..., accessMethod: ..., serviceEntry: ..., serviceType: ..., serviceDays: ..., preferredHours: ..., workMode: ..., sla: ..., rbhAmount: ..., requiredPermissions: ..., bhpRequirements: ..., workRestrictions: ..., excludedZones: ..., operationalRisks: ..., specialInstructions: ..., specialEquipment: ..., storagePlace: ..., backroomAccess: ..., technicalNotes: ..., internalNotes: ..., coordinatorChangedAt: ..., lastExecutionAt: ..., lastWorkerAssignmentAt: ..., });
+  mutation.mutate({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., clientType: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., objectType: ..., cooperationStartAt: ..., cooperationEndAt: ..., contactPerson: ..., phone: ..., email: ..., emergencyContact: ..., contactPosition: ..., postalCode: ..., accessHours: ..., accessMethod: ..., serviceEntry: ..., serviceType: ..., serviceDays: ..., preferredHours: ..., workMode: ..., sla: ..., rbhAmount: ..., requiredPermissions: ..., bhpRequirements: ..., workRestrictions: ..., excludedZones: ..., operationalRisks: ..., specialInstructions: ..., specialEquipment: ..., storagePlace: ..., backroomAccess: ..., technicalNotes: ..., internalNotes: ..., coordinatorChangedAt: ..., lastExecutionAt: ..., lastWorkerAssignmentAt: ..., });
 
   // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
   const options = {
@@ -3394,6 +3780,7 @@ export interface UpdateClientForOrgVariables {
   address?: string | null;
   contact?: string | null;
   status?: string | null;
+  clientType?: string | null;
   coordinator?: string | null;
   serviceFrequency?: string | null;
   assignees?: string | null;
@@ -3481,14 +3868,15 @@ export default function UpdateClientForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateClientForOrg` Mutation requires an argument of type `UpdateClientForOrgVariables`:
   const updateClientForOrgVars: UpdateClientForOrgVariables = {
-    orgId: ...,
-    clientId: ...,
+    orgId: ..., 
+    clientId: ..., 
     name: ..., // optional
     nip: ..., // optional
     city: ..., // optional
     address: ..., // optional
     contact: ..., // optional
     status: ..., // optional
+    clientType: ..., // optional
     coordinator: ..., // optional
     serviceFrequency: ..., // optional
     assignees: ..., // optional
@@ -3530,7 +3918,7 @@ export default function UpdateClientForOrgComponent() {
   };
   mutation.mutate(updateClientForOrgVars);
   // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., objectType: ..., cooperationStartAt: ..., cooperationEndAt: ..., contactPerson: ..., phone: ..., email: ..., emergencyContact: ..., contactPosition: ..., postalCode: ..., accessHours: ..., accessMethod: ..., serviceEntry: ..., serviceType: ..., serviceDays: ..., preferredHours: ..., workMode: ..., sla: ..., rbhAmount: ..., requiredPermissions: ..., bhpRequirements: ..., workRestrictions: ..., excludedZones: ..., operationalRisks: ..., specialInstructions: ..., specialEquipment: ..., storagePlace: ..., backroomAccess: ..., technicalNotes: ..., internalNotes: ..., coordinatorChangedAt: ..., lastExecutionAt: ..., lastWorkerAssignmentAt: ..., });
+  mutation.mutate({ orgId: ..., clientId: ..., name: ..., nip: ..., city: ..., address: ..., contact: ..., status: ..., clientType: ..., coordinator: ..., serviceFrequency: ..., assignees: ..., chemistry: ..., equipment: ..., clientInfo: ..., objectType: ..., cooperationStartAt: ..., cooperationEndAt: ..., contactPerson: ..., phone: ..., email: ..., emergencyContact: ..., contactPosition: ..., postalCode: ..., accessHours: ..., accessMethod: ..., serviceEntry: ..., serviceType: ..., serviceDays: ..., preferredHours: ..., workMode: ..., sla: ..., rbhAmount: ..., requiredPermissions: ..., bhpRequirements: ..., workRestrictions: ..., excludedZones: ..., operationalRisks: ..., specialInstructions: ..., specialEquipment: ..., storagePlace: ..., backroomAccess: ..., technicalNotes: ..., internalNotes: ..., coordinatorChangedAt: ..., lastExecutionAt: ..., lastWorkerAssignmentAt: ..., });
 
   // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
   const options = {
@@ -3584,6 +3972,13 @@ To execute the Mutation, call `UseMutationResult.mutate()`. This function execut
 To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `DeleteClientForOrg` Mutation is of type `DeleteClientForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
 ```javascript
 export interface DeleteClientForOrgData {
+  checkListLog_deleteMany: number;
+  checkListExtra_deleteMany: number;
+  checkListDef_deleteMany: number;
+  clientStorage_deleteMany: number;
+  event_deleteMany: number;
+  task_deleteMany: number;
+  zone_deleteMany: number;
   client_delete?: Client_Key | null;
 }
 ```
@@ -3621,8 +4016,8 @@ export default function DeleteClientForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteClientForOrg` Mutation requires an argument of type `DeleteClientForOrgVariables`:
   const deleteClientForOrgVars: DeleteClientForOrgVariables = {
-    orgId: ...,
-    clientId: ...,
+    orgId: ..., 
+    clientId: ..., 
   };
   mutation.mutate(deleteClientForOrgVars);
   // Variables can be defined inline as well.
@@ -3645,6 +4040,13 @@ export default function DeleteClientForOrgComponent() {
 
   // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
   if (mutation.isSuccess) {
+    console.log(mutation.data.checkListLog_deleteMany);
+    console.log(mutation.data.checkListExtra_deleteMany);
+    console.log(mutation.data.checkListDef_deleteMany);
+    console.log(mutation.data.clientStorage_deleteMany);
+    console.log(mutation.data.event_deleteMany);
+    console.log(mutation.data.task_deleteMany);
+    console.log(mutation.data.zone_deleteMany);
     console.log(mutation.data.client_delete);
   }
   return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
@@ -3725,8 +4127,8 @@ export default function InsertIndividualJobForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertIndividualJobForOrg` Mutation requires an argument of type `InsertIndividualJobForOrgVariables`:
   const insertIndividualJobForOrgVars: InsertIndividualJobForOrgVariables = {
-    orgId: ...,
-    clientIndId: ...,
+    orgId: ..., 
+    clientIndId: ..., 
     date: ..., // optional
     name: ..., // optional
     nip: ..., // optional
@@ -3837,8 +4239,8 @@ export default function UpdateIndividualJobForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateIndividualJobForOrg` Mutation requires an argument of type `UpdateIndividualJobForOrgVariables`:
   const updateIndividualJobForOrgVars: UpdateIndividualJobForOrgVariables = {
-    orgId: ...,
-    clientIndId: ...,
+    orgId: ..., 
+    clientIndId: ..., 
     date: ..., // optional
     name: ..., // optional
     nip: ..., // optional
@@ -3941,8 +4343,8 @@ export default function DeleteIndividualJobForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteIndividualJobForOrg` Mutation requires an argument of type `DeleteIndividualJobForOrgVariables`:
   const deleteIndividualJobForOrgVars: DeleteIndividualJobForOrgVariables = {
-    orgId: ...,
-    clientIndId: ...,
+    orgId: ..., 
+    clientIndId: ..., 
   };
   mutation.mutate(deleteIndividualJobForOrgVars);
   // Variables can be defined inline as well.
@@ -4083,8 +4485,8 @@ export default function UpsertTaskForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpsertTaskForOrg` Mutation requires an argument of type `UpsertTaskForOrgVariables`:
   const upsertTaskForOrgVars: UpsertTaskForOrgVariables = {
-    orgId: ...,
-    idTask: ...,
+    orgId: ..., 
+    idTask: ..., 
     dateYmd: ..., // optional
     startTime: ..., // optional
     endDateYmd: ..., // optional
@@ -4225,8 +4627,8 @@ export default function DeleteTaskForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteTaskForOrg` Mutation requires an argument of type `DeleteTaskForOrgVariables`:
   const deleteTaskForOrgVars: DeleteTaskForOrgVariables = {
-    orgId: ...,
-    idTask: ...,
+    orgId: ..., 
+    idTask: ..., 
   };
   mutation.mutate(deleteTaskForOrgVars);
   // Variables can be defined inline as well.
@@ -4327,9 +4729,9 @@ export default function InsertZoneForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertZoneForOrg` Mutation requires an argument of type `InsertZoneForOrgVariables`:
   const insertZoneForOrgVars: InsertZoneForOrgVariables = {
-    orgId: ...,
-    zoneId: ...,
-    clientId: ...,
+    orgId: ..., 
+    zoneId: ..., 
+    clientId: ..., 
     zone: ..., // optional
     function: ..., // optional
     editedBy: ..., // optional
@@ -4435,9 +4837,9 @@ export default function UpdateZoneForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateZoneForOrg` Mutation requires an argument of type `UpdateZoneForOrgVariables`:
   const updateZoneForOrgVars: UpdateZoneForOrgVariables = {
-    orgId: ...,
-    zoneId: ...,
-    clientId: ...,
+    orgId: ..., 
+    zoneId: ..., 
+    clientId: ..., 
     zone: ..., // optional
     function: ..., // optional
     editedBy: ..., // optional
@@ -4537,8 +4939,8 @@ export default function DeleteZoneForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteZoneForOrg` Mutation requires an argument of type `DeleteZoneForOrgVariables`:
   const deleteZoneForOrgVars: DeleteZoneForOrgVariables = {
-    orgId: ...,
-    zoneId: ...,
+    orgId: ..., 
+    zoneId: ..., 
   };
   mutation.mutate(deleteZoneForOrgVars);
   // Variables can be defined inline as well.
@@ -4643,9 +5045,9 @@ export default function InsertWorkdayForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertWorkdayForOrg` Mutation requires an argument of type `InsertWorkdayForOrgVariables`:
   const insertWorkdayForOrgVars: InsertWorkdayForOrgVariables = {
-    orgId: ...,
-    workdayId: ...,
-    workerLogin: ...,
+    orgId: ..., 
+    workdayId: ..., 
+    workerLogin: ..., 
     workerName: ..., // optional
     utilityRoomId: ..., // optional
     startAt: ..., // optional
@@ -4759,9 +5161,9 @@ export default function UpdateWorkdayForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateWorkdayForOrg` Mutation requires an argument of type `UpdateWorkdayForOrgVariables`:
   const updateWorkdayForOrgVars: UpdateWorkdayForOrgVariables = {
-    orgId: ...,
-    workdayId: ...,
-    workerLogin: ...,
+    orgId: ..., 
+    workdayId: ..., 
+    workerLogin: ..., 
     workerName: ..., // optional
     utilityRoomId: ..., // optional
     startAt: ..., // optional
@@ -4865,8 +5267,8 @@ export default function DeleteWorkdayForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteWorkdayForOrg` Mutation requires an argument of type `DeleteWorkdayForOrgVariables`:
   const deleteWorkdayForOrgVars: DeleteWorkdayForOrgVariables = {
-    orgId: ...,
-    workdayId: ...,
+    orgId: ..., 
+    workdayId: ..., 
   };
   mutation.mutate(deleteWorkdayForOrgVars);
   // Variables can be defined inline as well.
@@ -4975,8 +5377,8 @@ export default function InsertEventForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertEventForOrg` Mutation requires an argument of type `InsertEventForOrgVariables`:
   const insertEventForOrgVars: InsertEventForOrgVariables = {
-    orgId: ...,
-    eventId: ...,
+    orgId: ..., 
+    eventId: ..., 
     workdayId: ..., // optional
     zoneId: ..., // optional
     workerLogin: ..., // optional
@@ -5099,8 +5501,8 @@ export default function UpdateEventForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateEventForOrg` Mutation requires an argument of type `UpdateEventForOrgVariables`:
   const updateEventForOrgVars: UpdateEventForOrgVariables = {
-    orgId: ...,
-    eventId: ...,
+    orgId: ..., 
+    eventId: ..., 
     workdayId: ..., // optional
     zoneId: ..., // optional
     workerLogin: ..., // optional
@@ -5209,8 +5611,8 @@ export default function DeleteEventForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteEventForOrg` Mutation requires an argument of type `DeleteEventForOrgVariables`:
   const deleteEventForOrgVars: DeleteEventForOrgVariables = {
-    orgId: ...,
-    eventId: ...,
+    orgId: ..., 
+    eventId: ..., 
   };
   mutation.mutate(deleteEventForOrgVars);
   // Variables can be defined inline as well.
@@ -5320,8 +5722,8 @@ export default function InsertBackupCycleForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertBackupCycleForOrg` Mutation requires an argument of type `InsertBackupCycleForOrgVariables`:
   const insertBackupCycleForOrgVars: InsertBackupCycleForOrgVariables = {
-    orgId: ...,
-    cycleId: ...,
+    orgId: ..., 
+    cycleId: ..., 
     workerLogin: ..., // optional
     workerName: ..., // optional
     roomId: ..., // optional
@@ -5446,8 +5848,8 @@ export default function UpdateBackupCycleForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateBackupCycleForOrg` Mutation requires an argument of type `UpdateBackupCycleForOrgVariables`:
   const updateBackupCycleForOrgVars: UpdateBackupCycleForOrgVariables = {
-    orgId: ...,
-    cycleId: ...,
+    orgId: ..., 
+    cycleId: ..., 
     workerLogin: ..., // optional
     workerName: ..., // optional
     roomId: ..., // optional
@@ -5565,11 +5967,11 @@ export default function InsertStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertStorageForOrg` Mutation requires an argument of type `InsertStorageForOrgVariables`:
   const insertStorageForOrgVars: InsertStorageForOrgVariables = {
-    orgId: ...,
-    productIndex: ...,
-    productId: ...,
-    name: ...,
-    productType: ...,
+    orgId: ..., 
+    productIndex: ..., 
+    productId: ..., 
+    name: ..., 
+    productType: ..., 
     quantity: ..., // optional
     quantityMin: ..., // optional
     quantityMax: ..., // optional
@@ -5677,8 +6079,8 @@ export default function UpdateStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateStorageForOrg` Mutation requires an argument of type `UpdateStorageForOrgVariables`:
   const updateStorageForOrgVars: UpdateStorageForOrgVariables = {
-    orgId: ...,
-    productIndex: ...,
+    orgId: ..., 
+    productIndex: ..., 
     productId: ..., // optional
     name: ..., // optional
     productType: ..., // optional
@@ -5781,8 +6183,8 @@ export default function DeleteStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteStorageForOrg` Mutation requires an argument of type `DeleteStorageForOrgVariables`:
   const deleteStorageForOrgVars: DeleteStorageForOrgVariables = {
-    orgId: ...,
-    productIndex: ...,
+    orgId: ..., 
+    productIndex: ..., 
   };
   mutation.mutate(deleteStorageForOrgVars);
   // Variables can be defined inline as well.
@@ -5884,11 +6286,11 @@ export default function InsertClientStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertClientStorageForOrg` Mutation requires an argument of type `InsertClientStorageForOrgVariables`:
   const insertClientStorageForOrgVars: InsertClientStorageForOrgVariables = {
-    orgId: ...,
-    clientId: ...,
-    productIndex: ...,
-    name: ...,
-    productType: ...,
+    orgId: ..., 
+    clientId: ..., 
+    productIndex: ..., 
+    name: ..., 
+    productType: ..., 
     quantity: ..., // optional
     quantityMin: ..., // optional
     quantityMax: ..., // optional
@@ -5994,9 +6396,9 @@ export default function UpdateClientStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateClientStorageForOrg` Mutation requires an argument of type `UpdateClientStorageForOrgVariables`:
   const updateClientStorageForOrgVars: UpdateClientStorageForOrgVariables = {
-    orgId: ...,
-    clientId: ...,
-    productIndex: ...,
+    orgId: ..., 
+    clientId: ..., 
+    productIndex: ..., 
     name: ..., // optional
     productType: ..., // optional
     quantity: ..., // optional
@@ -6098,9 +6500,9 @@ export default function DeleteClientStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteClientStorageForOrg` Mutation requires an argument of type `DeleteClientStorageForOrgVariables`:
   const deleteClientStorageForOrgVars: DeleteClientStorageForOrgVariables = {
-    orgId: ...,
-    clientId: ...,
-    productIndex: ...,
+    orgId: ..., 
+    clientId: ..., 
+    productIndex: ..., 
   };
   mutation.mutate(deleteClientStorageForOrgVars);
   // Variables can be defined inline as well.
@@ -6205,10 +6607,10 @@ export default function StartWorkdayPauseComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useStartWorkdayPause` Mutation requires an argument of type `StartWorkdayPauseVariables`:
   const startWorkdayPauseVars: StartWorkdayPauseVariables = {
-    orgId: ...,
-    pauseId: ...,
-    workdayId: ...,
-    workerLogin: ...,
+    orgId: ..., 
+    pauseId: ..., 
+    workdayId: ..., 
+    workerLogin: ..., 
     workerName: ..., // optional
     startAt: ..., // optional
     stopAt: ..., // optional
@@ -6317,9 +6719,9 @@ export default function StopWorkdayPauseComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useStopWorkdayPause` Mutation requires an argument of type `StopWorkdayPauseVariables`:
   const stopWorkdayPauseVars: StopWorkdayPauseVariables = {
-    orgId: ...,
-    pauseId: ...,
-    workdayId: ...,
+    orgId: ..., 
+    pauseId: ..., 
+    workdayId: ..., 
     workerLogin: ..., // optional
     stopAt: ..., // optional
     durationSec: ..., // optional

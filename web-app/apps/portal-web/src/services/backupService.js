@@ -1511,6 +1511,7 @@ async function restoreClientsModule(orgId, rows) {
       address: toNullableText(row?.address),
       contact: toNullableText(row?.contact),
       status: toNullableText(row?.status),
+      clientType: toNullableText(row?.clientType),
       coordinator: toNullableText(row?.coordinator),
       serviceFrequency: toNullableText(row?.serviceFrequency),
       assignees: toNullableText(row?.assignees),

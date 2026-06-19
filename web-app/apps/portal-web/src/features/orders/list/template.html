@@ -1,0 +1,665 @@
+<div class="orders-view">
+  <div id="ordersListPanel">
+    <div class="orders-kpi-grid" aria-label="Podsumowanie zlece&#324;">
+      <article class="orders-kpi-card orders-kpi-card--all">
+        <div>
+          <p class="orders-kpi-label">Wszystkie</p>
+          <strong id="ordersKpiAll">0</strong>
+          <span>Liczba zlece&#324;</span>
+        </div>
+        <i class="orders-kpi-icon" aria-hidden="true"></i>
+      </article>
+
+      <article class="orders-kpi-card orders-kpi-card--active">
+        <div>
+          <p class="orders-kpi-label">Aktywne</p>
+          <strong id="ordersKpiActive">0</strong>
+          <span>Realizowane teraz</span>
+        </div>
+        <i class="orders-kpi-icon" aria-hidden="true"></i>
+      </article>
+
+      <article class="orders-kpi-card orders-kpi-card--cyclic">
+        <div>
+          <p class="orders-kpi-label">Cykliczne</p>
+          <strong id="ordersKpiCyclic">0</strong>
+          <span>Sta&#322;y harmonogram</span>
+        </div>
+        <i class="orders-kpi-icon" aria-hidden="true"></i>
+      </article>
+
+      <article class="orders-kpi-card orders-kpi-card--oneoff">
+        <div>
+          <p class="orders-kpi-label">Niecykliczne</p>
+          <strong id="ordersKpiOneoff">0</strong>
+          <span>Zlecenia jednorazowe</span>
+        </div>
+        <i class="orders-kpi-icon" aria-hidden="true"></i>
+      </article>
+    </div>
+
+    <section class="orders-card orders-filter-card" aria-label="Filtry zlece&#324;">
+      <div class="orders-filter-head">
+        <div>
+          <h2>Filtry wyszukiwania</h2>
+          <span id="ordersActiveFilters">Wszystkie</span>
+        </div>
+        <button class="orders-filter-clear" id="ordersFilterClear" type="button">Wyczy&#347;&#263; filtry</button>
+      </div>
+
+      <div class="orders-quickbar" aria-label="Szybkie widoki listy zlece&#324;">
+        <button type="button" data-orders-quick-filter="active_future">Aktywne i przysz&#322;e</button>
+        <button type="button" data-orders-quick-filter="today">Dzisiaj</button>
+        <button type="button" data-orders-quick-filter="overdue">Zaleg&#322;e</button>
+        <button type="button" data-orders-quick-filter="completed">Zako&#324;czone</button>
+        <button type="button" data-orders-quick-filter="all">Wszystkie</button>
+      </div>
+
+      <div class="orders-filter-grid">
+        <div class="orders-tool">
+          <label for="ordersListDateFrom">Data od</label>
+          <input id="ordersListDateFrom" type="date" />
+        </div>
+
+        <div class="orders-tool">
+          <label for="ordersListDateTo">Data do</label>
+          <input id="ordersListDateTo" type="date" />
+        </div>
+
+        <div class="orders-tool">
+          <label for="ordersListStatus">Status</label>
+          <select id="ordersListStatus">
+            <option value="">(wszystkie)</option>
+            <option value="active">Aktywne</option>
+            <option value="upcoming">Nadchodz&#261;ce</option>
+            <option value="completed">Zako&#324;czone</option>
+            <option value="expired">Po terminie</option>
+          </select>
+        </div>
+
+        <div class="orders-tool">
+          <label for="ordersListType">Typ</label>
+          <select id="ordersListType">
+            <option value="">Wszystkie</option>
+            <option value="individual">Jednorazowe</option>
+            <option value="cyclic">Cykliczne</option>
+            <option value="renovation">Poremontowe</option>
+            <option value="windows">Mycie okien</option>
+            <option value="other">Inne</option>
+          </select>
+        </div>
+
+        <div class="orders-tool">
+          <label for="ordersListClient">Klient</label>
+          <select id="ordersListClient">
+            <option value="">(wszyscy)</option>
+          </select>
+        </div>
+
+        <div class="orders-tool">
+          <label for="ordersListWorker">Pracownik terenowy</label>
+          <select id="ordersListWorker">
+            <option value="">(wszyscy)</option>
+          </select>
+        </div>
+
+        <div class="orders-tool">
+          <label for="ordersListAssignment">Przypisanie</label>
+          <select id="ordersListAssignment">
+            <option value="">Wszystkie</option>
+            <option value="assigned">Przypisane</option>
+            <option value="buffer">BUFOR</option>
+          </select>
+        </div>
+
+        <div class="orders-tool">
+          <label for="ordersListSort">Sortuj wg</label>
+          <select id="ordersListSort">
+            <option value="nextAsc">Nast&#281;pne rosn&#261;co</option>
+            <option value="nextDesc">Nast&#281;pne malej&#261;co</option>
+            <option value="dateAsc">Data od rosn&#261;co</option>
+            <option value="dateDesc">Data od malej&#261;co</option>
+            <option value="clientAsc">Klient A-Z</option>
+            <option value="workerAsc">Pracownik A-Z</option>
+            <option value="nameAsc">Nazwa A-Z</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="orders-filter-actions">
+        <div class="orders-tool orders-search-tool">
+          <label for="ordersSearchInput">Szukaj</label>
+          <input id="ordersSearchInput" type="search" placeholder="Szukaj po nazwie, kliencie, pracowniku albo adresie..." autocomplete="off" />
+        </div>
+
+        <button class="orders-refresh-btn" id="ordersRefreshBtn" type="button" aria-label="Od&#347;wie&#380; list&#281; zlece&#324;" title="Od&#347;wie&#380;">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M3 16v5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M3 12A9 9 0 0 1 18.4 5.6L21 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M21 3v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+          <span>Od&#347;wie&#380;</span>
+        </button>
+
+        <button class="orders-search-btn" id="ordersSearchBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle>
+            <path d="m16.5 16.5 3.5 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+          </svg>
+          <span>Szukaj</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="orders-card orders-model-card" aria-label="Model zlece&#324;">
+      <div class="orders-model-title">Model zlece&#324;</div>
+      <div class="orders-model-options" id="ordersListModel">
+        <button class="orders-model-option is-active" type="button" data-orders-list-model="all" aria-pressed="true">
+          <span class="orders-model-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 6.5h16M4 12h16M4 17.5h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          <span class="orders-model-copy">
+            <strong>Wszystkie</strong>
+            <span>Poka&#380; pe&#322;n&#261; list&#281;</span>
+          </span>
+          <span class="orders-model-active">Aktywne</span>
+        </button>
+        <button class="orders-model-option" type="button" data-orders-list-model="cyclic" aria-pressed="false">
+          <span class="orders-model-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M17.5 7.5H8.5a4 4 0 0 0 0 8h7M15 5l2.5 2.5L15 10M7 19l-2.5-2.5L7 14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="orders-model-copy">
+            <strong>Cykliczne</strong>
+            <span>Zlecenia powtarzalne</span>
+          </span>
+          <span class="orders-model-active">Aktywne</span>
+        </button>
+        <button class="orders-model-option" type="button" data-orders-list-model="oneoff" aria-pressed="false">
+          <span class="orders-model-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M7 4h10a2 2 0 0 1 2 2v14H5V6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 9h8M8 13h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          <span class="orders-model-copy">
+            <strong>Niecykliczne</strong>
+            <span>Zlecenia jednorazowe</span>
+          </span>
+          <span class="orders-model-active">Aktywne</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="orders-card orders-table-card" aria-label="Lista zlece&#324;">
+      <div class="orders-table" id="ordersTable">
+        <div class="orders-head">
+          <div>Status</div>
+          <div>Termin</div>
+          <div>Nast&#281;pne</div>
+          <div>Nazwa</div>
+          <div>Klient</div>
+          <div>Pracownik terenowy</div>
+          <div>Adres</div>
+          <div>Typ</div>
+          <div>Akcje</div>
+        </div>
+        <div id="ordersRows"></div>
+      </div>
+      <div class="orders-footer">
+        <span id="ordersStatus">Widok: wszystkie zlecenia.</span>
+        <span id="ordersCount">0 zlece&#324;</span>
+      </div>
+    </section>
+  </div>
+
+  <section class="orders-modal-overlay" id="ordersEditorPanel" hidden aria-label="Dodaj lub edytuj zlecenie">
+    <div class="orders-modal orders-modal--simple" role="dialog" aria-modal="true" aria-labelledby="ordersEditTitle">
+      <div class="orders-modal-head">
+        <div class="orders-modal-titlebar">
+          <h2 id="ordersEditTitle">Dodaj zlecenie</h2>
+        </div>
+        <div class="orders-modal-controls">
+          <div class="orders-modal-head-actions">
+            <span>* Pola wymagane</span>
+            <button class="orders-modal-close" id="ordersEditBack" type="button" aria-label="Zamknij">&times;</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="orders-tab-panel is-active" data-orders-tab-panel="basic">
+        <div class="orders-wizard-shell">
+          <aside class="orders-wizard-rail" aria-label="Kroki dodawania zlecenia">
+            <ol class="orders-wizard-steps" id="ordersWizardSteps">
+              <li>
+                <button type="button" data-orders-step-target="client">
+                  <span>1</span>
+                  <strong>Klient i adres</strong>
+                </button>
+              </li>
+              <li>
+                <button type="button" data-orders-step-target="schedule">
+                  <span>2</span>
+                  <strong>Termin</strong>
+                </button>
+              </li>
+              <li>
+                <button type="button" data-orders-step-target="staffing">
+                  <span>3</span>
+                  <strong>Zmiany i osoby</strong>
+                </button>
+              </li>
+              <li>
+                <button type="button" data-orders-step-target="recurrence">
+                  <span>4</span>
+                  <strong>Cykliczno&#347;&#263;</strong>
+                </button>
+              </li>
+              <li>
+                <button type="button" data-orders-step-target="details">
+                  <span>5</span>
+                  <strong>Opis i podsumowanie</strong>
+                </button>
+              </li>
+            </ol>
+
+            <section class="orders-wizard-summary" aria-label="Podsumowanie zlecenia">
+              <div>
+                <span>Podsumowanie</span>
+                <strong id="ordersWizardSummaryClient">-</strong>
+              </div>
+              <dl>
+                <div>
+                  <dt>Adres</dt>
+                  <dd id="ordersWizardSummaryAddress">-</dd>
+                </div>
+                <div>
+                  <dt>Termin</dt>
+                  <dd id="ordersWizardSummarySchedule">-</dd>
+                </div>
+                <div>
+                  <dt>Obsada</dt>
+                  <dd id="ordersWizardSummaryWorkers">BUFOR</dd>
+                </div>
+                <div>
+                  <dt>RBH</dt>
+                  <dd id="ordersWizardSummaryWork">-</dd>
+                </div>
+              </dl>
+            </section>
+          </aside>
+
+          <div class="orders-wizard-content">
+            <div class="orders-editor-layout orders-editor-layout--wizard">
+          <section class="orders-form-panel orders-main-card">
+            <div class="orders-panel-title">
+              <span>Zlecenie</span>
+            </div>
+
+            <div class="orders-editor-table">
+              <section class="orders-editor-section orders-editor-section--who" data-orders-step-panel="client">
+                <h3>Kto</h3>
+                <div class="orders-field orders-client-picker-field">
+                  <span>Klient *</span>
+                  <select id="ordersEditClient" hidden aria-hidden="true"></select>
+                  <div class="orders-client-picker" id="ordersClientPicker">
+                    <input id="ordersClientPickerInput" type="text" autocomplete="off" placeholder="Wybierz klienta..." role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ordersClientPickerList" />
+                    <div class="orders-client-picker-list" id="ordersClientPickerList" role="listbox" hidden></div>
+                  </div>
+                </div>
+                <label class="orders-field orders-client-name-preview">
+                  <span>Wybrany klient</span>
+                  <input id="ordersEditClientName" type="text" autocomplete="off" readonly placeholder="Najpierw wybierz klienta" />
+                </label>
+                <div class="orders-individual-client-fields" id="ordersIndividualClientFields" hidden>
+                  <div class="orders-individual-client-head">
+                    <strong>Dane klienta jednorazowego</strong>
+                    <span>Wymagane do zapisania klienta razem ze zleceniem.</span>
+                  </div>
+                  <div class="orders-individual-client-grid">
+                    <label class="orders-field">
+                      <span>Zlecaj&#261;cy / nazwa *</span>
+                      <input id="ordersIndividualName" type="text" autocomplete="off" placeholder="Imi&#281; i nazwisko albo nazwa" />
+                    </label>
+                    <label class="orders-field">
+                      <span>NIP</span>
+                      <input id="ordersIndividualNip" type="text" autocomplete="off" placeholder="Opcjonalnie" />
+                    </label>
+                    <label class="orders-field">
+                      <span>Telefon</span>
+                      <input id="ordersIndividualPhone" type="tel" autocomplete="off" placeholder="Telefon albo mail wymagany" />
+                    </label>
+                    <label class="orders-field">
+                      <span>Mail</span>
+                      <input id="ordersIndividualEmail" type="email" autocomplete="off" placeholder="Mail albo telefon wymagany" />
+                    </label>
+                  </div>
+                </div>
+              </section>
+
+              <section class="orders-editor-section orders-editor-section--address" data-orders-step-panel="client">
+                <h3>Gdzie</h3>
+                <div class="orders-field orders-location-field">
+                  <label for="ordersEditAddressSelect">Adres wykonania zlecenia *</label>
+                  <select id="ordersEditAddressSelect"></select>
+                  <div class="orders-location-combo">
+                    <input id="ordersEditLocation" type="text" autocomplete="off" placeholder="Wybierz adres klienta albo wpisz ręcznie" aria-autocomplete="list" aria-expanded="false" aria-controls="ordersLocationSuggestions" aria-describedby="ordersEditLocationHint" />
+                    <button class="orders-address-save" id="ordersAddressMemoryAdd" type="button">Dodaj</button>
+                    <div class="orders-location-suggestions" id="ordersLocationSuggestions" hidden></div>
+                    <input id="ordersEditLocationPlaceId" type="hidden" />
+                    <input id="ordersEditLocationLat" type="hidden" />
+                    <input id="ordersEditLocationLng" type="hidden" />
+                    <input id="ordersEditLocationMapUrl" type="hidden" />
+                  </div>
+                  <p class="orders-field-hint" id="ordersEditLocationHint">
+                    Wybierz adres z listy. Jeśli adres wykonania jest inny niż domyślny, wpisz go i zapamiętaj przyciskiem Dodaj.
+                  </p>
+                </div>
+              </section>
+
+              <section class="orders-editor-section orders-editor-section--assignment" data-orders-step-group="schedule-flow">
+                <div class="orders-schedule-mode" data-orders-step-panel="schedule">
+                    <label><input type="radio" name="ordersScheduleMode" value="once" checked /> Jednorazowe</label>
+                    <label><input type="radio" name="ordersScheduleMode" value="repeat" /> Cykliczne</label>
+                </div>
+
+                <h3 data-orders-step-panel="schedule">Kiedy i częstotliwość</h3>
+
+                <div class="orders-form-two" data-orders-step-panel="schedule">
+                  <label class="orders-field">
+                    <span>Data START *</span>
+                    <input id="ordersEditStart" type="date" />
+                  </label>
+                  <label class="orders-field">
+                    <span id="ordersEndDateLabel">Data STOP *</span>
+                    <input id="ordersEditEnd" type="date" />
+                  </label>
+                </div>
+
+                <div class="orders-form-two" id="ordersScheduleTimeGrid" data-orders-step-panel="schedule">
+                  <label class="orders-field">
+                    <span id="ordersStartTimeLabel">Godzina START *</span>
+                    <input id="ordersEditTime" type="time" />
+                  </label>
+                  <label class="orders-field">
+                    <span id="ordersEndTimeLabel">Godzina STOP *</span>
+                    <input id="ordersEditEndTime" type="time" />
+                  </label>
+                </div>
+
+                <label class="orders-extended-work-toggle" data-orders-step-panel="schedule">
+                  <input id="ordersEditAllowExtendedWork" type="checkbox" />
+                  <span>
+                    <strong>Pracownik może wydłużyć czas pracy, jeśli sytuacja na obiekcie tego wymaga</strong>
+                    <small>Informacja pojawi się w aplikacji pracownika, np. gdy po imprezie trzeba posprzątać dodatkowe zabrudzenia.</small>
+                  </span>
+                </label>
+
+                <div class="orders-schedule-rules" id="ordersScheduleRulesPanel" hidden>
+                  <div class="orders-access-windows" id="ordersAccessWindowsPanel" data-orders-step-panel="schedule" data-orders-repeat-only="true" hidden>
+                    <div class="orders-access-windows-head">
+                      <div>
+                        <strong>Dni dost&#281;pu i wyj&#261;tki</strong>
+                        <span>Godziny powy&#380;ej s&#261; domy&#347;lne. Tutaj wy&#322;&#261;cz dni bez dost&#281;pu albo ustaw inne godziny tylko dla wybranego dnia.</span>
+                      </div>
+                    </div>
+                    <div class="orders-access-window-rows" id="ordersAccessWindowRows"></div>
+                  </div>
+
+                  <div class="orders-workload-panel" id="ordersWorkloadPanel" data-orders-step-panel="staffing">
+                    <div class="orders-workload-head">
+                      <div>
+                        <strong>Zespo&#322;y i zmiany</strong>
+                        <span>Dodaj zmiany, godziny pracy oraz osoby potrzebne do wykonania zlecenia.</span>
+                      </div>
+                    </div>
+                    <div class="orders-field orders-worker-field">
+                      <span>Pracownik/pracownicy</span>
+                      <select id="ordersEditWorker" hidden aria-hidden="true"></select>
+                      <details class="orders-worker-picker" id="ordersEditWorkerPicker">
+                        <summary id="ordersEditWorkerSummary">
+                          <span id="ordersEditWorkerSummaryText">BUFOR</span>
+                        </summary>
+                        <div class="orders-worker-checklist" id="ordersEditWorkerChecklist"></div>
+                      </details>
+                      <p class="orders-field-hint">Brak wybranej osoby oznacza przypisanie do BUFORA.</p>
+                    </div>
+                    <div class="orders-workload-grid">
+                      <label class="orders-field">
+                        <span id="ordersEditWorkHoursLabel">Wymagany czas pracy (rbh) *</span>
+                        <input id="ordersEditWorkHours" type="number" min="0.25" step="0.25" value="2" />
+                      </label>
+                      <label class="orders-field">
+                        <span>Liczba osób do obsadzenia</span>
+                        <input id="ordersEditRequiredPeople" type="number" min="1" step="1" value="1" />
+                      </label>
+                    </div>
+                    <p class="orders-workload-hint" id="ordersWorkloadHint">
+                      Nieobsadzone osoby trafi&#261; do BUFORU. Wpisane rbh okre&#347;la czas pracy dla danej osoby.
+                    </p>
+                    <div class="orders-work-allocation" id="ordersWorkAllocationRows"></div>
+                    <div class="orders-work-summary" id="ordersWorkAllocationSummary"></div>
+                  </div>
+
+                  <div class="orders-schedule-repeat" id="ordersScheduleRepeatPanel" data-orders-step-panel="recurrence">
+                    <div class="orders-repeat-config">
+                      <label class="orders-field">
+                        <span>Powtarza się</span>
+                        <select id="ordersEditRepeatPreset" hidden aria-hidden="true">
+                          <option value="week">Co tydzień</option>
+                          <option value="interval">Okresowo</option>
+                        </select>
+                        <div class="orders-repeat-select-picker" data-orders-repeat-select="ordersEditRepeatPreset">
+                          <button id="ordersRepeatPresetPickerButton" class="orders-repeat-select-toggle" type="button" data-orders-repeat-select-toggle aria-haspopup="listbox" aria-expanded="false" aria-controls="ordersRepeatPresetPickerList">
+                            <span data-orders-repeat-select-label>Co tydzień</span>
+                          </button>
+                          <div id="ordersRepeatPresetPickerList" class="orders-repeat-select-list" role="listbox" hidden></div>
+                        </div>
+                      </label>
+                      <div class="orders-schedule-custom">
+                        <span>Co</span>
+                        <input id="ordersEditRepeatEvery" type="number" min="1" step="1" />
+                        <select id="ordersEditRepeatUnit" hidden aria-hidden="true">
+                          <option value="week">Tydzień</option>
+                        </select>
+                        <div class="orders-repeat-select-picker" data-orders-repeat-select="ordersEditRepeatUnit">
+                          <button id="ordersRepeatUnitPickerButton" class="orders-repeat-select-toggle" type="button" data-orders-repeat-select-toggle aria-haspopup="listbox" aria-expanded="false" aria-controls="ordersRepeatUnitPickerList">
+                            <span data-orders-repeat-select-label>Tydzień</span>
+                          </button>
+                          <div id="ordersRepeatUnitPickerList" class="orders-repeat-select-list" role="listbox" hidden></div>
+                        </div>
+                        <span class="orders-repeat-month-suffix" data-orders-repeat-month-suffix hidden>miesięcy</span>
+                      </div>
+                    </div>
+
+                    <div class="orders-schedule-weekdays">
+                      <span>W następujące dni:</span>
+                      <div class="orders-weekday-grid">
+                        <label><input type="checkbox" data-orders-repeat-weekday="1" /> P</label>
+                        <label><input type="checkbox" data-orders-repeat-weekday="2" /> W</label>
+                        <label><input type="checkbox" data-orders-repeat-weekday="3" /> Ś</label>
+                        <label><input type="checkbox" data-orders-repeat-weekday="4" /> C</label>
+                        <label><input type="checkbox" data-orders-repeat-weekday="5" /> P</label>
+                        <label><input type="checkbox" data-orders-repeat-weekday="6" /> S</label>
+                        <label><input type="checkbox" data-orders-repeat-weekday="0" /> N</label>
+                      </div>
+                    </div>
+
+                    <div class="orders-weekly-pattern" id="ordersWeeklyPatternPanel" hidden>
+                      <div class="orders-weekly-pattern-head">
+                        <div>
+                          <strong>Wzorzec tygodnia</strong>
+                          <span>Ustaw osobne okno dostępu, roboczogodziny i obsadę dla każdego dnia cyklu.</span>
+                        </div>
+                        <div class="orders-weekly-pattern-actions">
+                          <button id="ordersWeeklyPatternApplyAll" type="button">Zastosuj do wszystkich</button>
+                          <em id="ordersWeeklyPatternSummary">-</em>
+                        </div>
+                      </div>
+                      <div class="orders-weekly-pattern-rows" id="ordersWeeklyPatternRows"></div>
+                    </div>
+
+                    <div class="orders-repeat-calendar" id="ordersRepeatCalendar" aria-live="polite">
+                      <div class="orders-repeat-calendar-head">
+                        <button type="button" data-orders-repeat-calendar-nav="-1" aria-label="Poprzedni miesiąc">&lsaquo;</button>
+                        <strong id="ordersRepeatCalendarLabel">-</strong>
+                        <button type="button" data-orders-repeat-calendar-nav="1" aria-label="Następny miesiąc">&rsaquo;</button>
+                      </div>
+                      <div class="orders-repeat-calendar-weekdays" aria-hidden="true">
+                        <span>P</span><span>W</span><span>Ś</span><span>C</span><span>P</span><span>S</span><span>N</span>
+                      </div>
+                      <div class="orders-repeat-calendar-grid" id="ordersRepeatCalendarGrid"></div>
+                      <div class="orders-repeat-calendar-foot">
+                        <span><i class="orders-repeat-calendar-dot orders-repeat-calendar-dot--start"></i> Start</span>
+                        <span><i class="orders-repeat-calendar-dot"></i> Dni wykonania</span>
+                        <strong id="ordersRepeatCalendarSummary">-</strong>
+                      </div>
+                    </div>
+
+                  </div>
+
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="orders-form-panel orders-object-plan-card" data-orders-step-panel="details">
+            <div class="orders-panel-title">
+              <span>Plan zadań na obiekcie</span>
+            </div>
+
+            <div class="orders-object-plan-shell" id="ordersObjectPlanPanel">
+              <div class="orders-object-zone-list">
+                <div class="orders-object-zone-head">
+                  <strong>Strefy obiektu</strong>
+                  <span id="ordersObjectZoneCount">0</span>
+                </div>
+                <div class="orders-object-zone-rows" id="ordersObjectZoneRows"></div>
+              </div>
+
+              <div class="orders-object-zone-panel" id="ordersObjectZonePanel" hidden>
+                <div class="orders-object-zone-empty">
+                  Wybierz klienta i strefę, aby zaplanować czynności.
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="orders-form-panel orders-detail-card" data-orders-step-panel="details">
+            <div class="orders-panel-title">
+              <span>Opis i wyposażenie</span>
+            </div>
+
+            <div class="orders-detail-grid">
+              <label class="orders-field orders-description">
+                <span>Opis zlecenia * <small>- widoczne tylko w systemie, pracownik nie widzi tego w aplikacji</small></span>
+                <textarea id="ordersEditDescription" placeholder="Co ma zostać wykonane?"></textarea>
+              </label>
+
+              <label class="orders-field orders-worker-comment">
+                <span>Komentarz dla pracownika <small>- pracownik widzi to w aplikacji</small></span>
+                <textarea id="ordersEditWorkerComment" placeholder="Pracownik widzi ten komentarz w aplikacji"></textarea>
+              </label>
+            </div>
+
+            <div class="orders-subtask-grid">
+              <div class="orders-subtask-box">
+                <div class="orders-subtask-head">
+                  <strong>Wyposażenie obiektu <small>- sprzęt i chemia na stałe przypisane do obiektu</small></strong>
+                </div>
+                <div class="orders-inline-add orders-inline-add--supply">
+                  <select id="ordersSupplyKind" aria-label="Typ pozycji">
+                    <option value="equipment">Sprzęt</option>
+                    <option value="chemical">Chemia</option>
+                    <option value="other">Inne</option>
+                  </select>
+                  <input id="ordersSupplyName" type="text" autocomplete="off" placeholder="Np. odkurzacz, płyn do szkła..." />
+                  <input id="ordersSupplyQr" type="text" autocomplete="off" placeholder="Numer kodu QR" />
+                  <button id="ordersSupplyAdd" type="button">Dodaj</button>
+                </div>
+                <div class="orders-simple-list" id="ordersSupplyRows"></div>
+              </div>
+            </div>
+          </section>
+            </div>
+          </div>
+        </div>
+
+        <div class="orders-hidden-fields" aria-hidden="true">
+          <input id="ordersEditName" type="hidden" />
+          <input id="ordersEditNip" type="hidden" />
+          <input id="ordersEditStreet" type="hidden" />
+          <input id="ordersEditCity" type="hidden" />
+          <input id="ordersEditPostCode" type="hidden" />
+          <input id="ordersEditRegion" type="hidden" />
+          <input id="ordersEditCountry" type="hidden" />
+          <input id="ordersEditEmail" type="hidden" />
+          <input id="ordersEditNext" type="hidden" />
+          <input id="ordersEditType" type="hidden" value="individual" />
+          <input id="ordersEditPriority" type="hidden" value="Normalny" />
+          <input id="ordersEditPrice" type="hidden" value="0" />
+          <input id="ordersEditPhone" type="hidden" />
+          <input id="ordersEditSmsTime" type="hidden" />
+          <input id="ordersEditSms" type="hidden" />
+          <input id="ordersEditAdvance" type="hidden" value="0" />
+          <input id="ordersEditDurationHours" type="hidden" value="2" />
+          <input id="ordersScheduleStartDate" type="hidden" />
+          <input id="ordersScheduleEndDate" type="hidden" />
+          <input id="ordersScheduleStartTime" type="hidden" />
+          <input id="ordersScheduleEndTime" type="hidden" />
+        </div>
+
+        <div class="orders-modal-footer orders-wizard-footer">
+          <span id="ordersWizardValidation">* Pola wymagane</span>
+          <div class="orders-wizard-actions">
+            <button class="orders-wizard-nav orders-wizard-nav--back" type="button" data-orders-step-prev>Wstecz</button>
+            <button class="orders-wizard-nav orders-wizard-nav--next" type="button" data-orders-step-next>Dalej</button>
+            <button class="orders-save-btn" id="ordersEditSave" type="button">Zapisz</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="orders-device-note-overlay" id="ordersDeviceNoteOverlay" hidden aria-label="Dodaj opis do zlecenia">
+    <div class="orders-device-note-modal" role="dialog" aria-modal="true" aria-labelledby="ordersDeviceNoteTitle">
+      <div class="orders-device-note-head">
+        <h3 id="ordersDeviceNoteTitle">Dodaj opis</h3>
+        <button type="button" data-orders-device-note-close aria-label="Zamknij">&times;</button>
+      </div>
+      <div class="orders-device-note-body">
+        <label class="orders-field">
+          <span>Typ / temat</span>
+          <input id="ordersDeviceNoteSubject" type="text" maxlength="80" autocomplete="off" />
+        </label>
+        <label class="orders-field">
+          <span>Krótki opis</span>
+          <textarea id="ordersDeviceNoteDescription" maxlength="500" placeholder="Napisz krótko, o co chodzi."></textarea>
+        </label>
+        <label class="orders-field orders-device-photo-field">
+          <span>Zdjęcie</span>
+          <input id="ordersDeviceNotePhoto" type="file" accept="image/*" />
+        </label>
+        <div class="orders-device-photo-preview" id="ordersDeviceNotePhotoPreview">Nie wybrano zdjęcia.</div>
+      </div>
+      <div class="orders-device-note-actions">
+        <button type="button" data-orders-device-note-close>Anuluj</button>
+        <button class="orders-save-btn" id="ordersDeviceNoteSave" type="button">Dodaj</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="orders-map-overlay" id="ordersMapOverlay" hidden aria-label="Mapa lokalizacji zlecenia">
+    <div class="orders-map-modal" role="dialog" aria-modal="true" aria-labelledby="ordersMapTitle">
+      <div class="orders-map-head">
+        <div>
+          <div class="orders-map-eyebrow">Lokalizacja zlecenia</div>
+          <h2 id="ordersMapTitle">Mapa</h2>
+          <p id="ordersMapAddress">-</p>
+        </div>
+        <button class="orders-map-close" type="button" data-orders-map-close aria-label="Zamknij mapę">&times;</button>
+      </div>
+      <iframe id="ordersMapFrame" title="Mapa lokalizacji zlecenia" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+      <div class="orders-map-actions">
+        <a id="ordersMapExternal" href="#" target="_blank" rel="noopener noreferrer">Otwórz w Google Maps</a>
+      </div>
+    </div>
+  </section>
+</div>

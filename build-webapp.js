@@ -6,9 +6,10 @@ const webAppDir = path.join(__dirname, 'web-app')
 
 function normalizeTarget(value) {
   const raw = String(value || '').trim().toLowerCase()
-  if (raw.startsWith('mobile')) return 'mobile'
-  if (raw.startsWith('portal')) return 'portal'
-  return 'both'
+  if (raw && !raw.startsWith('portal')) {
+    console.warn(`[build-webapp] APP_TARGET=${raw} is no longer supported; building portal only.`)
+  }
+  return 'portal'
 }
 
 function run(command, args, options = {}) {
@@ -53,17 +54,7 @@ function main() {
   console.log(`[build-webapp] APP_TARGET=${target}`)
   installWebAppDependencies(npmCmd)
 
-  if (target === 'mobile') {
-    run(npmCmd, ['run', 'build:mobile'], { cwd: webAppDir })
-    return
-  }
-
-  if (target === 'portal') {
-    run(npmCmd, ['run', 'build:portal'], { cwd: webAppDir })
-    return
-  }
-
-  run(npmCmd, ['run', 'build:both'], { cwd: webAppDir })
+  run(npmCmd, ['run', 'build:portal'], { cwd: webAppDir })
 }
 
 main()

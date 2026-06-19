@@ -8,11 +8,10 @@
   ordersMap: 'view-ordersMap',
   zones: 'view-zones',
   workerProfile: 'view-workerProfile',
+  workerAccount: 'view-workerAccount',
   workerTime: 'view-workerTime',
   workerTimeDetail: 'view-workerTimeDetail',
-  clientsList: 'view-clientsList',
   audits: 'view-audits',
-  individualOrders: 'view-individualOrders',
   clientProfile: 'view-clientProfile',
   clientProfileDetails: 'view-clientProfileDetails',
   reports: 'view-reports',
@@ -22,10 +21,8 @@
 }
 
 const routeGroups = {
-  clientsList: 'clients',
   zones: 'objects',
   audits: 'objects',
-  individualOrders: 'clients',
   clientProfile: 'clients',
   clientProfileDetails: 'clients',
   orders: 'orders',
@@ -34,10 +31,16 @@ const routeGroups = {
   workerTime: 'workers',
   workerTimeDetail: 'workers',
   workerProfile: 'workers',
+  workerAccount: 'workers',
   reports: 'reports',
   settings: 'settings',
   settingsStyles: 'settings',
   settingsBackup: 'settings',
+}
+
+function normalizeRoute(route) {
+  const nextRoute = String(route ?? '').trim()
+  return nextRoute === 'clientsList' ? 'clientProfile' : nextRoute
 }
 
 function setActiveRoute(route) {
@@ -121,7 +124,7 @@ export function createRouter(onRouteChange) {
   let currentRoute = null
 
   function go(route) {
-    const nextRoute = String(route ?? '').trim() || 'dashboard'
+    const nextRoute = normalizeRoute(route) || 'dashboard'
     const viewId = routeToViewId[nextRoute]
 
     hideAllViews()

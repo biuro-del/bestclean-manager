@@ -21,16 +21,17 @@ function invalidateWorkersCache(orgId) {
   workersCache.clear()
 }
 
-async function readWorkersCached(orgId, loader) {
+async function readWorkersCached(orgId, loader, options = {}) {
   const key = cachedWorkersKey(orgId)
   const now = Date.now()
   const cached = key ? workersCache.get(key) : null
+  const force = Boolean(options?.force)
 
-  if (cached?.promise) {
+  if (!force && cached?.promise) {
     return cached.promise
   }
 
-  if (cached?.expiresAt > now && Array.isArray(cached.value)) {
+  if (!force && cached?.expiresAt > now && Array.isArray(cached.value)) {
     return cached.value
   }
 
@@ -137,14 +138,17 @@ function asBoolean(value, defaultValue = true) {
   if (typeof value === 'boolean') {
     return value
   }
+  if (typeof value === 'number') {
+    return value !== 0
+  }
   const normalized = String(value ?? '').trim().toLowerCase()
   if (!normalized) {
     return defaultValue
   }
-  if (['false', '0', 'no', 'nie'].includes(normalized)) {
+  if (['false', '0', 'no', 'nie', 'inactive', 'disabled', 'nieaktywny', 'nieaktywna'].includes(normalized)) {
     return false
   }
-  if (['true', '1', 'yes', 'tak'].includes(normalized)) {
+  if (['true', '1', 'yes', 'tak', 'active', 'aktywny', 'aktywna', 'enabled'].includes(normalized)) {
     return true
   }
   return defaultValue
@@ -157,6 +161,33 @@ function isTrue(value) {
 function isLocalHttpEndpoint(value) {
   const endpoint = String(value ?? '').trim().toLowerCase()
   return endpoint.includes('://127.0.0.1') || endpoint.includes('://localhost')
+}
+
+function isCloudFunctionsEndpoint(value) {
+  const endpoint = String(value ?? '').trim().toLowerCase()
+  if (!endpoint) {
+    return false
+  }
+
+  try {
+    return new URL(endpoint).hostname.endsWith('.cloudfunctions.net')
+  } catch {
+    return endpoint.includes('cloudfunctions.net')
+  }
+}
+
+function isRelativeApiEndpoint(value) {
+  return String(value ?? '').trim().startsWith('/api/')
+}
+
+function isLocalWorkerAdminEndpoint(value) {
+  const endpoint = String(value ?? '').trim()
+  return (
+    endpoint.startsWith('/api/admin/worker-profile/') ||
+    endpoint.startsWith('/api/admin/worker-password/') ||
+    endpoint === '/api/auth/provision-worker' ||
+    endpoint === '/api/auth/rollback-worker'
+  )
 }
 
 function normalizeForComparison(value) {
@@ -192,6 +223,20 @@ function normalizeWorkerRoleCanonical(value) {
   return 'WORKER'
 }
 
+function formatWorkerRoleLabel(value, fallback = 'Pracownik') {
+  const raw = String(value ?? '').trim()
+  if (!raw) {
+    return fallback
+  }
+
+  const upper = raw.toUpperCase()
+  if (upper === 'ADMIN') return 'Admin'
+  if (upper === 'MANAGER') return 'Kierownik'
+  if (upper === 'COORDINATOR') return 'Koordynator'
+  if (upper === 'WORKER') return 'Pracownik'
+  return raw
+}
+
 function normalizeLoginLocalPart(value) {
   const raw = String(value ?? '').trim().toLowerCase()
   const localPart = raw.includes('@') ? raw.split('@')[0] : raw
@@ -204,12 +249,23 @@ function normalizeLoginLocalPart(value) {
   return localPart
 }
 
+function hasAsciiControlCharacter(value) {
+  const text = String(value ?? '')
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index)
+    if (code <= 31 || code === 127) {
+      return true
+    }
+  }
+  return false
+}
+
 function normalizeWorkerCredentialLogin(value) {
   const login = String(value ?? '').trim()
   if (!login) {
     throw new Error('Pole login jest wymagane.')
   }
-  if (login.length > 80 || /[\u0000-\u001f\u007f]/.test(login)) {
+  if (login.length > 80 || hasAsciiControlCharacter(login)) {
     throw new Error('Podaj poprawny login pracownika.')
   }
   return login
@@ -234,6 +290,18 @@ function findExistingWorkerForOrg(rows = [], login, email) {
   })
 }
 
+function findExistingWorkerIdForOrg(rows = [], workerId) {
+  const normalizedWorkerId = normalizeUniqueWorkerValue(workerId)
+  if (!normalizedWorkerId) {
+    return null
+  }
+
+  return (Array.isArray(rows) ? rows : []).find((row) => {
+    const rowWorkerId = normalizeUniqueWorkerValue(row?.workerId ?? row?.worker_id ?? row?.id)
+    return rowWorkerId === normalizedWorkerId
+  })
+}
+
 function createDuplicateWorkerError(existingWorker, login, email) {
   const sameLogin = normalizeUniqueWorkerValue(existingWorker?.login ?? existingWorker?.workerLogin) === normalizeUniqueWorkerValue(login)
   const rowLoginEmail = normalizeUniqueWorkerValue(existingWorker?.loginEmail ?? existingWorker?.login_email)
@@ -250,9 +318,27 @@ function createDuplicateWorkerError(existingWorker, login, email) {
   return new Error('Ten email jest już przypisany do użytkownika w tej organizacji.')
 }
 
+function createDuplicateWorkerIdError(workerId) {
+  return new Error(`ID pracownika ${workerId} jest już zajęte w tej organizacji.`)
+}
+
 function resolveFunctionEndpoint(envKey, functionName) {
   const fromEnv = String(import.meta.env?.[envKey] ?? '').trim()
   const useEmulators = isTrue(import.meta.env.VITE_USE_EMULATORS)
+  const apiEndpoints = {
+    authProvisionWorker: '/api/auth/provision-worker',
+    authRollbackWorker: '/api/auth/rollback-worker',
+    workerPasswordReveal: '/api/admin/worker-password/reveal',
+    workerPasswordSet: '/api/admin/worker-password/set',
+    workerProfileUpdate: '/api/admin/worker-profile/update',
+    workerProfileDelete: '/api/admin/worker-profile/delete',
+  }
+  if (apiEndpoints[functionName] && !useEmulators) {
+    return apiEndpoints[functionName]
+  }
+  if (fromEnv && isCloudFunctionsEndpoint(fromEnv) && !useEmulators) {
+    return apiEndpoints[functionName] || `/__functions/${functionName}`
+  }
   if (fromEnv && (!isLocalHttpEndpoint(fromEnv) || useEmulators)) {
     return fromEnv
   }
@@ -268,6 +354,12 @@ function resolveFunctionEndpoint(envKey, functionName) {
   }
   if (functionName === 'workerPasswordSet') {
     return '/api/admin/worker-password/set'
+  }
+  if (functionName === 'workerProfileUpdate') {
+    return '/api/admin/worker-profile/update'
+  }
+  if (functionName === 'workerProfileDelete') {
+    return '/api/admin/worker-profile/delete'
   }
 
   if (import.meta.env.DEV && !useEmulators) {
@@ -307,11 +399,24 @@ async function readResponsePayload(response) {
 function resolveFunctionErrorMessage(body, rawText = '', statusCode = null, endpoint = '') {
   if (!body || typeof body !== 'object') {
     const text = String(rawText ?? '').trim()
+    const lowered = text.toLowerCase()
+    if (lowered.includes('forbidden_host')) {
+      return 'FORBIDDEN_HOST: worker-profile nadal trafia w zdalny host guard. Sprawdz, czy nie dziala stary Vite na localhost/::1:5173, otworz portal przez http://127.0.0.1:5173 i uruchom root `npm run dev` z aktualnego katalogu.'
+    }
+    if (isLocalWorkerAdminEndpoint(endpoint) && (lowered.includes('econnrefused') || lowered.includes('proxy error') || lowered.includes('http proxy error'))) {
+      return 'Proxy endpointu pracownika nie odpowiada. Uruchom ponownie Vite; web-only dev powinien kierowac worker-profile do https://cleanzi-01.web.app, a root npm run dev do lokalnego backendu 8080.'
+    }
+    const looksLikeHtml = lowered.includes('<html') || lowered.includes('<!doctype html')
+    if (statusCode >= 500 && isRelativeApiEndpoint(endpoint) && (!text || looksLikeHtml)) {
+      if (isLocalWorkerAdminEndpoint(endpoint)) {
+        return 'Proxy endpointu pracownika nie odpowiada. Uruchom ponownie dev server; jesli uzywasz root npm run dev, sprawdz http://127.0.0.1:8080/healthz.'
+      }
+      return 'Lokalny backend API nie odpowiada albo uruchomiono samo web-app bez procesu root `npm run dev`. Uruchom `npm run dev` z katalogu projektu albo ustaw VITE_DEV_API_PROXY_TARGET na dzialajacy backend.'
+    }
     if (!text) {
       return ''
     }
 
-    const lowered = text.toLowerCase()
     const unauthorizedHtml =
       statusCode === 401 &&
       lowered.includes('<html') &&
@@ -331,7 +436,49 @@ function resolveFunctionErrorMessage(body, rawText = '', statusCode = null, endp
     return text.length > 260 ? `${text.slice(0, 260)}...` : text
   }
 
-  return String(body?.error?.message ?? body?.message ?? '').trim()
+  const code = String(body?.error?.code ?? body?.code ?? '').trim()
+  const message = String(body?.error?.message ?? body?.message ?? '').trim()
+  if (code.toUpperCase() === 'UPSTREAM_FORBIDDEN_HOST') {
+    return `UPSTREAM_FORBIDDEN_HOST: zdalny Firebase Hosting odrzucil worker-profile proxy albo dziala stary proces dev na localhost/::1:5173. Otworz portal przez http://127.0.0.1:5173, zatrzymaj stare procesy Vite i uruchom root npm run dev od nowa. Jesli blad zostaje, ustaw lokalny backend worker-profile: WORKER_PROFILE_MODE=local/direct + konfiguracja DB i Firebase Admin. ${message}`.trim()
+  }
+  if (code.toUpperCase() === 'DB_CONFIG_MISSING') {
+    return `DB_CONFIG_MISSING: worker-profile dziala lokalnie, ale backend nie ma konfiguracji DB. Dodaj lokalne DB/Firebase Admin albo testuj przez wdrozony Firebase Hosting. ${message}`.trim()
+  }
+  if (code.toUpperCase() === 'DB_TLS_CERT_VERIFY_FAILED') {
+    return `DB_TLS_CERT_VERIFY_FAILED: Cloud SQL auth dziala, ale lokalny antivirus/proxy przechwytuje polaczenie TLS do bazy. Wylacz skanowanie SSL/TLS dla Node/Cloud SQL albo testuj worker-profile przez wdrozony Firebase Hosting. ${message}`.trim()
+  }
+  if (code.toUpperCase() === 'LOGIN_CHANGE_REQUIRES_DB') {
+    return `LOGIN_CHANGE_REQUIRES_DB: backend nadal dziala na starszej wersji bez zmiany loginu przez Data Connect. Uruchom ponownie root npm run dev; jesli to wdrozenie, wgraj aktualny connector Data Connect. ${message}`.trim()
+  }
+  if (code.toUpperCase() === 'WORKER_PROFILE_DELETE_REQUIRES_DB') {
+    return 'Nie udało się usunąć pracownika w lokalnym trybie Cloud SQL. Odświeżam tę operację przez Data Connect; jeśli błąd wróci, zrestartuj dev stack.'
+  }
+  if (code.toUpperCase() === 'FIREBASE_TLS_CERT_ERROR') {
+    return `FIREBASE_TLS_CERT_ERROR: lokalny Node backend nie ufa certyfikatowi Google/Firebase. Zrestartuj root npm run dev; dev-local ustawia NODE_OPTIONS=--use-system-ca. Jesli blad zostaje, dodaj firmowy certyfikat CA przez NODE_EXTRA_CA_CERTS. ${message}`.trim()
+  }
+  if (code.toUpperCase() === 'FIREBASE_ADMIN_CREDENTIALS_MISSING') {
+    return `FIREBASE_ADMIN_CREDENTIALS_MISSING: backend nie ma poswiadczen Firebase Admin. Dodaj serviceAccountKey.json obok index.js albo ustaw GOOGLE_APPLICATION_CREDENTIALS w root .env.local i zrestartuj npm run dev. ${message}`.trim()
+  }
+  if (code.toUpperCase() === 'FIREBASE_AUTH_UNAVAILABLE') {
+    return `FIREBASE_AUTH_UNAVAILABLE: lokalny backend nie moze polaczyc sie z Firebase Auth. Sprawdz internet/proxy dla Node. Jesli to certyfikat, zrestartuj root npm run dev i sprawdz NODE_OPTIONS=--use-system-ca. ${message}`.trim()
+  }
+  if (code.toUpperCase() === 'LOGIN_CHANGE_FORBIDDEN') {
+    return message || 'Login pracownika moze zmienic tylko Admin.'
+  }
+  if (code.toUpperCase() === 'FORBIDDEN' && isLocalWorkerAdminEndpoint(endpoint)) {
+    return message || 'Brak uprawnien do zapisania danych pracownika. Sprawdz role konta w tej organizacji.'
+  }
+  if (
+    code.toUpperCase() === 'FORBIDDEN_HOST' ||
+    message.toUpperCase().includes('FORBIDDEN_HOST') ||
+    message.toLowerCase().includes('available only via firebase hosting')
+  ) {
+    return 'FORBIDDEN_HOST: worker-profile nadal trafia w zdalny host guard. Sprawdz stary proces Vite na localhost/::1:5173, uzyj http://127.0.0.1:5173 i uruchom swiezy root `npm run dev`, zeby request szedl przez /api do lokalnego backendu.'
+  }
+  if (code && message) {
+    return `${code}: ${message}`
+  }
+  return message || code
 }
 
 async function callAuthorizedFunction(functionName, envKey, payload, fallbackMessage) {
@@ -356,6 +503,9 @@ async function callAuthorizedFunction(functionName, envKey, payload, fallbackMes
     })
   } catch (error) {
     const networkMessage = error instanceof Error ? error.message : String(error ?? '')
+    if (isLocalWorkerAdminEndpoint(endpoint)) {
+      throw new Error(`${fallbackMessage} Proxy endpointu pracownika nie odpowiada dla ${endpoint}. Uruchom ponownie dev server. ${networkMessage}`)
+    }
     throw new Error(`${fallbackMessage} Blad sieci podczas polaczenia z funkcja "${functionName}" (${endpoint}). ${networkMessage}`)
   }
 
@@ -414,6 +564,24 @@ async function workerPasswordSet(payload) {
   )
 }
 
+async function workerProfileUpdate(payload) {
+  return callAuthorizedFunction(
+    'workerProfileUpdate',
+    'VITE_WORKER_PROFILE_UPDATE_ENDPOINT',
+    payload,
+    'Nie udalo sie zaktualizowac profilu pracownika.',
+  )
+}
+
+async function workerProfileDelete(payload) {
+  return callAuthorizedFunction(
+    'workerProfileDelete',
+    'VITE_WORKER_PROFILE_DELETE_ENDPOINT',
+    payload,
+    'Nie udalo sie usunac pracownika.',
+  )
+}
+
 function getDataConnectOrThrow() {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
@@ -453,7 +621,8 @@ function mapWorker(orgId, row) {
   const workerName = String(
     row.workerName ?? row.workername ?? row.worker_name ?? row.name ?? row.displayName ?? row.fullName ?? login,
   ).trim()
-  const workerType = String(row.workerType ?? row.role ?? 'Pracownik').trim()
+  const role = formatWorkerRoleLabel(row.role ?? row.workerType, 'Pracownik')
+  const workerType = String(row.workerType ?? role).trim()
   const loginEmail = String(row.loginEmail ?? row.email ?? '').trim()
 
   return {
@@ -465,9 +634,10 @@ function mapWorker(orgId, row) {
     workerName,
     fullName: workerName,
     name: workerName,
-    role: workerType,
-    type: workerType,
-    active: Boolean(row.active ?? true),
+    role,
+    type: role,
+    workerType,
+    active: asBoolean(row.active, true),
     authUid: String(row.authUid ?? row.auth_uid ?? '').trim(),
     email: loginEmail,
     phone: String(row.phone ?? '').trim(),
@@ -483,10 +653,21 @@ export async function getWorkers(orgId, filters = {}) {
   }
 
   ensureFirebase()
+  const force = Boolean(
+    filters?.force ||
+      filters?.refresh ||
+      filters?.forceRefresh ||
+      filters?.bypassCache ||
+      filters?.noCache ||
+      filters?.fetchPolicy === 'SERVER_ONLY',
+  )
+  const fetchPolicy = String(filters?.fetchPolicy ?? (force ? 'SERVER_ONLY' : '')).trim()
   const rows = await readWorkersCached(orgId, async () => {
-    const response = await workersForOrg({ orgId })
+    const response = fetchPolicy
+      ? await workersForOrg({ orgId }, { fetchPolicy })
+      : await workersForOrg({ orgId })
     return response?.data?.workers ?? []
-  })
+  }, { force })
 
   let workers = rows.map((row) => mapWorker(orgId, row))
 
@@ -530,7 +711,11 @@ export async function createWorker(orgId, payload) {
   ensureFirebase()
   const existingResponse = await workersForOrg({ orgId })
   const existingRows = existingResponse?.data?.workers ?? []
-  const workerId = resolveNextWorkerId(existingRows)
+  const requestedWorkerId = asNullableText(payload?.workerId ?? payload?.id)
+  if (requestedWorkerId && findExistingWorkerIdForOrg(existingRows, requestedWorkerId)) {
+    throw createDuplicateWorkerIdError(requestedWorkerId)
+  }
+  const workerId = requestedWorkerId || resolveNextWorkerId(existingRows)
 
   await insertWorkerForOrg({
     orgId,
@@ -596,7 +781,11 @@ async function createWorkerUserViaProvision(orgId, payload) {
   if (existingWorker) {
     throw createDuplicateWorkerError(existingWorker, loginLocalPart, requestedEmail)
   }
-  const workerId = resolveNextWorkerId(existingRows)
+  const requestedWorkerId = asNullableText(payload?.workerId ?? payload?.id)
+  if (requestedWorkerId && findExistingWorkerIdForOrg(existingRows, requestedWorkerId)) {
+    throw createDuplicateWorkerIdError(requestedWorkerId)
+  }
+  const workerId = requestedWorkerId || resolveNextWorkerId(existingRows)
 
   const provisionResponse = await authProvisionWorker({
     orgId: normalizedOrgId,
@@ -719,42 +908,54 @@ export async function updateWorker(orgId, workerId, payload) {
     throw new Error('Brak loginu pracownika do aktualizacji.')
   }
 
-  const dataConnect = getDataConnectOrThrow()
+  const active = asBoolean(payload?.active, true)
+  const newLogin = asNullableText(payload?.newLogin ?? payload?.nextLogin ?? payload?.loginNew)
+  const response = await workerProfileUpdate({
+    orgId,
+    login,
+    newLogin,
+    workerId: asNullableText(payload?.workerId ?? payload?.id) ?? login,
+    name: asNullableText(payload?.workerName ?? payload?.name ?? payload?.fullName),
+    email: asNullableText(payload?.loginEmail ?? payload?.email),
+    phone: asNullableText(payload?.phone),
+    role: asNullableText(payload?.role ?? payload?.workerType) ?? 'WORKER',
+    workerType: asNullableText(payload?.workerType ?? payload?.role) ?? 'WORKER',
+    active,
+    editedBy: asNullableText(payload?.edit ?? payload?.editedBy),
+    authUid: asNullableText(payload?.authUid ?? payload?.uid),
+  })
 
-  try {
-    await executeMutation(
-      mutationRef(dataConnect, 'UpdateWorkerForOrg', {
-        orgId,
-        login,
-        workerName: asNullableText(payload?.workerName ?? payload?.name ?? payload?.fullName),
-        loginEmail: asNullableText(payload?.loginEmail ?? payload?.email),
-        role: asNullableText(payload?.role ?? payload?.workerType) ?? 'Worker',
-        active: payload?.active ?? true,
-        email: asNullableText(payload?.email ?? payload?.loginEmail),
-        phone: asNullableText(payload?.phone),
-        workerType: asNullableText(payload?.workerType ?? payload?.role),
-        workerId: asNullableText(payload?.workerId ?? payload?.id) ?? login,
-        edit: asNullableText(payload?.edit ?? payload?.editedBy),
-      }),
-    )
-  } catch (error) {
-    throw withOperationNotFoundHint(error, 'UpdateWorkerForOrg')
-  }
   invalidateWorkersCache(orgId)
 
   return {
+    ...payload,
+    ...(response?.data?.worker ?? {}),
     id: String(payload?.workerId ?? payload?.id ?? login).trim() || login,
     workerId: String(payload?.workerId ?? payload?.id ?? login).trim() || login,
     orgId,
-    login,
-    ...payload,
+    login: String(response?.data?.worker?.login ?? newLogin ?? login).trim() || login,
+    active,
+    authUpdated: Boolean(response?.data?.authUpdated),
+    authWarning: String(response?.data?.authWarning ?? '').trim(),
+    storage: String(response?.data?.storage ?? '').trim(),
+    loginChangeSkipped: Boolean(response?.data?.loginChangeSkipped),
   }
 }
 
-export async function deleteWorker(orgId, workerId) {
-  return {
-    success: true,
-    orgId,
-    workerId,
+export async function deleteWorker(orgId, workerId, payload = {}) {
+  const login = String(payload?.login ?? payload?.workerLogin ?? workerId ?? '').trim()
+  if (!login) {
+    throw new Error('Brak loginu pracownika do usuniecia.')
   }
+
+  const response = await workerProfileDelete({
+    orgId,
+    login,
+    workerId: asNullableText(payload?.workerId ?? payload?.id ?? workerId),
+    authUid: asNullableText(payload?.authUid ?? payload?.uid),
+  })
+
+  invalidateWorkersCache(orgId)
+
+  return response?.data ?? response ?? {}
 }

@@ -1,36 +1,34 @@
-﻿import auditsView from './templates/view-audits.html?raw'
-import calendarView from './templates/view-calendar.html?raw'
-import clientProfileView from './templates/view-client-profile.html?raw'
-import clientProfileDetailsView from './templates/view-client-profile-details.html?raw'
-import clientsListView from './templates/view-clients-list.html?raw'
-import eventsView from './templates/view-events.html?raw'
-import individualOrdersView from './templates/view-individual-orders.html?raw'
-import kanbanView from './templates/view-kanban.html?raw'
-import ordersMapView from './templates/view-orders-map.html?raw'
-import ordersView from './templates/view-orders.html?raw'
-import reportsView from './templates/view-reports.html?raw'
-import scheduleView from './templates/view-schedule.html?raw'
-import settingsBackupView from './templates/view-settings-backup.html?raw'
-import workerProfileView from './templates/view-worker-profile.html?raw'
-import workerTimeView from './templates/view-worker-time.html?raw'
-import workerTimeDetailView from './templates/view-worker-time-detail.html?raw'
-import zonesView from './templates/view-zones.html?raw'
+import { template as auditsView } from '../features/objects/audits/index.js'
+import { template as calendarView } from '../features/calendar/index.js'
+import { template as clientProfileView } from '../features/clients/profile/index.js'
+import { template as clientProfileDetailsView } from '../features/clients/profile-details/index.js'
+import { template as eventsView } from '../features/events/index.js'
+import { template as kanbanView } from '../features/kanban/index.js'
+import { template as ordersMapView } from '../features/orders/map/index.js'
+import { template as ordersView } from '../features/orders/list/index.js'
+import { template as reportsView } from '../features/reports/index.js'
+import { template as scheduleView } from '../features/schedule/index.js'
+import { template as settingsView } from '../features/settings/index.js'
+import { template as workerAccountView } from '../features/workers/account/index.js'
+import { template as workerProfileView } from '../features/workers/worker_list_profile/index.js'
+import { template as workerTimeView } from '../features/workers/time/index.js'
+import { template as workerTimeDetailView } from '../features/workers/time-detail/index.js'
+import { template as zonesView } from '../features/objects/zones/index.js'
 
 export const viewTemplates = {
   schedule: scheduleView,
   calendar: calendarView,
   kanban: kanbanView,
-  settings: settingsBackupView,
+  settings: settingsView,
   events: eventsView,
   orders: ordersView,
   ordersMap: ordersMapView,
   zones: zonesView,
   workerProfile: workerProfileView,
+  workerAccount: workerAccountView,
   workerTime: workerTimeView,
   workerTimeDetail: workerTimeDetailView,
-  clientsList: clientsListView,
   audits: auditsView,
-  individualOrders: individualOrdersView,
   clientProfile: clientProfileView,
   clientProfileDetails: clientProfileDetailsView,
   reports: reportsView,

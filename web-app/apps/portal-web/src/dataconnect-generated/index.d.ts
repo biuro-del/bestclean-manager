@@ -195,6 +195,7 @@ export interface ClientsForOrgData {
     contact?: string | null;
     coordinator?: string | null;
     status?: string | null;
+    clientType?: string | null;
     serviceFrequency?: string | null;
     assignees?: string | null;
     chemistry?: string | null;
@@ -242,6 +243,13 @@ export interface ClientsForOrgVariables {
 }
 
 export interface DeleteClientForOrgData {
+  checkListLog_deleteMany: number;
+  checkListExtra_deleteMany: number;
+  checkListDef_deleteMany: number;
+  clientStorage_deleteMany: number;
+  event_deleteMany: number;
+  task_deleteMany: number;
+  zone_deleteMany: number;
   client_delete?: Client_Key | null;
 }
 
@@ -328,6 +336,26 @@ export interface DeleteWorkdayForOrgData {
 export interface DeleteWorkdayForOrgVariables {
   orgId: string;
   workdayId: string;
+}
+
+export interface DeleteWorkerProfileForOrgData {
+  workerCredential_deleteMany: number;
+  workdayPause_deleteMany: number;
+  event_deleteMany: number;
+  checkListLog_deleteMany: number;
+  backupCycle_deleteMany: number;
+  taskLogin_delete: number;
+  taskWorkerId_delete: number;
+  workday_deleteMany: number;
+  organizationMember_deleteMany: number;
+  worker_delete?: Worker_Key | null;
+}
+
+export interface DeleteWorkerProfileForOrgVariables {
+  orgId: string;
+  login: string;
+  workerId?: string;
+  authUid?: string;
 }
 
 export interface DeleteZoneForOrgData {
@@ -442,6 +470,7 @@ export interface InsertClientForOrgVariables {
   address?: string | null;
   contact?: string | null;
   status?: string | null;
+  clientType?: string | null;
   coordinator?: string | null;
   serviceFrequency?: string | null;
   assignees?: string | null;
@@ -680,6 +709,38 @@ export interface Organization_Key {
   __typename?: 'Organization_Key';
 }
 
+export interface RenameWorkerForOrgData {
+  worker_insert: Worker_Key;
+  organizationMember_upsert: OrganizationMember_Key;
+  workdayPause_updateMany: number;
+  event_updateMany: number;
+  workday_updateMany: number;
+  backupCycle_updateMany: number;
+  checkListLog_updateMany: number;
+  taskLogin_update: number;
+  taskWorkerId_update: number;
+  workerCredential_updateMany: number;
+  worker_delete?: Worker_Key | null;
+}
+
+export interface RenameWorkerForOrgVariables {
+  orgId: string;
+  login: string;
+  newLogin: string;
+  workerName?: string | null;
+  loginEmail?: string | null;
+  authUid?: string;
+  role?: string | null;
+  memberRole?: string | null;
+  active?: boolean | null;
+  email?: string | null;
+  phone?: string | null;
+  workerType?: string | null;
+  workerId?: string | null;
+  createdAt?: TimestampString | null;
+  edit?: string | null;
+}
+
 export interface StartWorkdayPauseData {
   workdayPause_insert: WorkdayPause_Key;
   workday_update?: Workday_Key | null;
@@ -841,6 +902,7 @@ export interface UpdateClientForOrgVariables {
   address?: string | null;
   contact?: string | null;
   status?: string | null;
+  clientType?: string | null;
   coordinator?: string | null;
   serviceFrequency?: string | null;
   assignees?: string | null;
@@ -983,6 +1045,27 @@ export interface UpdateWorkerForOrgVariables {
   workerName?: string | null;
   loginEmail?: string | null;
   role?: string | null;
+  active?: boolean | null;
+  email?: string | null;
+  phone?: string | null;
+  workerType?: string | null;
+  workerId?: string | null;
+  edit?: string | null;
+}
+
+export interface UpdateWorkerProfileForOrgData {
+  worker_update?: Worker_Key | null;
+  organizationMember_upsert: OrganizationMember_Key;
+}
+
+export interface UpdateWorkerProfileForOrgVariables {
+  orgId: string;
+  login: string;
+  workerName?: string | null;
+  loginEmail?: string | null;
+  authUid?: string;
+  role?: string | null;
+  memberRole?: string | null;
   active?: boolean | null;
   email?: string | null;
   phone?: string | null;
@@ -1307,6 +1390,42 @@ export const updateWorkerForOrgRef: UpdateWorkerForOrgRef;
 
 export function updateWorkerForOrg(vars: UpdateWorkerForOrgVariables): MutationPromise<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
 export function updateWorkerForOrg(dc: DataConnect, vars: UpdateWorkerForOrgVariables): MutationPromise<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
+
+interface UpdateWorkerProfileForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateWorkerProfileForOrgVariables): MutationRef<UpdateWorkerProfileForOrgData, UpdateWorkerProfileForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateWorkerProfileForOrgVariables): MutationRef<UpdateWorkerProfileForOrgData, UpdateWorkerProfileForOrgVariables>;
+  operationName: string;
+}
+export const updateWorkerProfileForOrgRef: UpdateWorkerProfileForOrgRef;
+
+export function updateWorkerProfileForOrg(vars: UpdateWorkerProfileForOrgVariables): MutationPromise<UpdateWorkerProfileForOrgData, UpdateWorkerProfileForOrgVariables>;
+export function updateWorkerProfileForOrg(dc: DataConnect, vars: UpdateWorkerProfileForOrgVariables): MutationPromise<UpdateWorkerProfileForOrgData, UpdateWorkerProfileForOrgVariables>;
+
+interface RenameWorkerForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: RenameWorkerForOrgVariables): MutationRef<RenameWorkerForOrgData, RenameWorkerForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: RenameWorkerForOrgVariables): MutationRef<RenameWorkerForOrgData, RenameWorkerForOrgVariables>;
+  operationName: string;
+}
+export const renameWorkerForOrgRef: RenameWorkerForOrgRef;
+
+export function renameWorkerForOrg(vars: RenameWorkerForOrgVariables): MutationPromise<RenameWorkerForOrgData, RenameWorkerForOrgVariables>;
+export function renameWorkerForOrg(dc: DataConnect, vars: RenameWorkerForOrgVariables): MutationPromise<RenameWorkerForOrgData, RenameWorkerForOrgVariables>;
+
+interface DeleteWorkerProfileForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteWorkerProfileForOrgVariables): MutationRef<DeleteWorkerProfileForOrgData, DeleteWorkerProfileForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteWorkerProfileForOrgVariables): MutationRef<DeleteWorkerProfileForOrgData, DeleteWorkerProfileForOrgVariables>;
+  operationName: string;
+}
+export const deleteWorkerProfileForOrgRef: DeleteWorkerProfileForOrgRef;
+
+export function deleteWorkerProfileForOrg(vars: DeleteWorkerProfileForOrgVariables): MutationPromise<DeleteWorkerProfileForOrgData, DeleteWorkerProfileForOrgVariables>;
+export function deleteWorkerProfileForOrg(dc: DataConnect, vars: DeleteWorkerProfileForOrgVariables): MutationPromise<DeleteWorkerProfileForOrgData, DeleteWorkerProfileForOrgVariables>;
 
 interface UpsertWorkerCredentialForOrgRef {
   /* Allow users to create refs without passing in DataConnect */

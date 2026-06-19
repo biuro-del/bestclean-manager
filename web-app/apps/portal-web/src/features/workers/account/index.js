@@ -1,0 +1,3512 @@
+import './style.css'
+import template from './template.html?raw'
+import {
+  buildWorkTimeEvidencePdf,
+  createWorkTimeEvidenceColumns,
+  sanitizeWorkTimeEvidenceFilePart,
+  validateWorkTimeEvidenceDateRange,
+  workTimeEvidenceCsvContent,
+  workTimeEvidenceWorkTotal,
+} from '../work_time_evidence_export.js'
+
+export const route = 'workerAccount'
+export const viewId = 'view-workerAccount'
+export { template }
+
+const WORKER_ACCOUNT_TABS = new Set(['account', 'security', 'roles', 'orders', 'activity', 'time', 'files'])
+const WORKER_ACCOUNT_EDITABLE_TABS = new Set(['account', 'security', 'roles'])
+const WORKER_ACCOUNT_PAGE_SIZES = [5, 10, 25, 50]
+const WORKER_ACCOUNT_TIME_PAGE_SIZE = 50
+const WORKER_ACCOUNT_TIME_FETCH_PAGE_SIZE = 1000
+const WORKER_ACCOUNT_ACTIVITY_FETCH_PAGE_SIZE = 200
+const LOGIN_LOCAL_PART_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/
+const WORKER_ACCOUNT_MONTH_NAMES_PL = [
+  'styczen',
+  'luty',
+  'marzec',
+  'kwiecien',
+  'maj',
+  'czerwiec',
+  'lipiec',
+  'sierpien',
+  'wrzesien',
+  'pazdziernik',
+  'listopad',
+  'grudzien',
+]
+const WORKER_ROLE_COPY = {
+  ADMIN: {
+    title: 'Administrator',
+    description: 'Pelny dostep do danych, hasel, rol i statusu konta.',
+  },
+  MANAGER: {
+    title: 'Manager / Kierownik',
+    description: 'Edycja danych podstawowych i nadzor operacyjny.',
+  },
+  COORDINATOR: {
+    title: 'Koordynator',
+    description: 'Koordynacja realizacji zlecen oraz pracy zespolu.',
+  },
+  WORKER: {
+    title: 'Pracownik operacyjny',
+    description: 'Rejestracja czasu pracy i realizacja zlecen.',
+  },
+}
+const WORKER_TYPE_DEFAULT = 'Pracownik'
+const WORKER_TYPE_OPTIONS = [
+  WORKER_TYPE_DEFAULT,
+  'Zespol mobilny',
+  'Staly personel na obiekcie',
+]
+const WORKER_TRAINING_OPTIONS = [
+  'Szkolenie BHP',
+  'Instruktaz stanowiskowy',
+  'Srodki czystosci',
+  'Maszyny czyszczace',
+  'Praca na wysokosci',
+  'Ochrona danych',
+]
+const PASSWORD_EYE_OPEN_ICON = `
+  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"></path>
+    <circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.8"></circle>
+  </svg>`
+const PASSWORD_EYE_CLOSED_ICON = `
+  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M3 3l18 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+    <path d="M10.6 5.2A9.5 9.5 0 0 1 12 5c6 0 9.5 7 9.5 7a15.4 15.4 0 0 1-3.2 3.9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+    <path d="M6.7 6.8A16.4 16.4 0 0 0 2.5 12s3.5 7 9.5 7c1.7 0 3.2-.4 4.5-1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+  </svg>`
+
+export function createWorkerAccountFeature(ctx) {
+  const {
+    appState,
+    canDeleteWorkers,
+    canManageWorkers,
+    canRevealWorkerPasswords,
+    createBindingHelpers,
+    durationSecondsToHm,
+    durationSecondsToHms,
+    ensureJsPdfLoaded,
+    ensurePdfUnicodeFont,
+    escapeHtml,
+    getWorkdays,
+    getWorkers,
+    getWorkerTime,
+    normalizeSearchText,
+    openEventEditor,
+    ordersListSourceOrders,
+    ordersSyncRemoteTimelineOrders,
+    paginate,
+    revealWorkerPassword,
+    setPdfUnicodeFont,
+    setWorkerPassword,
+    showTransientNotice,
+    todayYmd,
+    toIso,
+    updateWorkday,
+    updateWorker,
+    ymdToIsoRangeEnd,
+    ymdToIsoRangeStart,
+  } = ctx
+
+  function setText(id, value) {
+    const node = document.getElementById(id)
+    if (node) node.textContent = String(value ?? '-')
+  }
+
+  function setInputValue(id, value) {
+    const input = document.getElementById(id)
+    if (input) input.value = String(value ?? '')
+  }
+
+  function ensureSelectOption(select, value) {
+    if (!(select instanceof HTMLSelectElement)) return
+    const optionValue = String(value ?? '').trim()
+    if (!optionValue || Array.from(select.options).some((option) => option.value === optionValue)) return
+    const option = document.createElement('option')
+    option.value = optionValue
+    option.textContent = optionValue
+    select.appendChild(option)
+  }
+
+  function normalizeKey(value) {
+    return normalizeSearchText(value).toLowerCase()
+  }
+
+  function addIdentityKey(keys, value) {
+    const raw = String(value ?? '').trim()
+    if (!raw) return
+    const addVariant = (variant) => {
+      const normalized = normalizeKey(variant)
+      if (!normalized) return
+      keys.add(normalized)
+      const spaced = normalized.replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim()
+      if (spaced) {
+        keys.add(spaced)
+        const parts = spaced.split(' ').filter(Boolean)
+        if (parts.length > 1) {
+          keys.add(parts.slice().reverse().join(' '))
+        }
+      }
+      const compact = normalized.replace(/[\s._-]+/g, '')
+      if (compact) keys.add(compact)
+    }
+    addVariant(raw)
+    const localPart = raw.includes('@') ? raw.split('@')[0] : ''
+    if (localPart) {
+      addVariant(localPart)
+    }
+  }
+
+  function workerIdentityKeys(worker = {}) {
+    const keys = new Set()
+    ;[
+      worker.login,
+      worker.workerLogin,
+      worker.id,
+      worker.workerId,
+      worker.email,
+      worker.loginEmail,
+      worker.name,
+      worker.workerName,
+      worker.workername,
+      worker.worker_name,
+      worker.fullName,
+      worker.displayName,
+    ].forEach((value) => addIdentityKey(keys, value))
+    return keys
+  }
+
+  function selectedWorkerKeys() {
+    const keys = new Set()
+    ;[
+      appState.workerAccountTargetKey,
+      appState.selectedWorkerLogin,
+      appState.selectedWorkerName,
+    ].forEach((value) => addIdentityKey(keys, value))
+    if (keys.size) return keys
+
+    ;[
+      appState.workerAccountCurrent?.login,
+      appState.workerAccountCurrent?.workerLogin,
+      appState.workerAccountCurrent?.id,
+      appState.workerAccountCurrent?.workerId,
+      appState.workerAccountCurrent?.email,
+      appState.workerAccountCurrent?.loginEmail,
+      appState.workerAccountCurrent?.name,
+      appState.workerAccountCurrent?.workerName,
+      appState.workerAccountCurrent?.workername,
+      appState.workerAccountCurrent?.worker_name,
+      appState.workerAccountCurrent?.fullName,
+      appState.workerAccountCurrent?.displayName,
+    ].forEach((value) => addIdentityKey(keys, value))
+    return keys
+  }
+
+  function workerLogin(worker = {}) {
+    return String(worker.login ?? worker.workerLogin ?? '').trim()
+  }
+
+  function workerId(worker = {}) {
+    return String(worker.workerId ?? worker.id ?? workerLogin(worker)).trim()
+  }
+
+  function workerName(worker = {}) {
+    return String(worker.name ?? worker.workerName ?? worker.fullName ?? workerLogin(worker) ?? '').trim()
+  }
+
+  function workerRelatedRows(worker = {}) {
+    const baseKeys = workerIdentityKeys(worker)
+    const rows = [
+      worker,
+      appState.workerAccountCurrent,
+      ...(Array.isArray(appState.workerProfileRows) ? appState.workerProfileRows : []),
+      ...(Array.isArray(appState.workerProfileViewRows) ? appState.workerProfileViewRows : []),
+      ...(Array.isArray(appState.workers) ? appState.workers : []),
+      ...(Array.isArray(appState.workerTimeRows) ? appState.workerTimeRows : []),
+      ...(Array.isArray(appState.workerTimeViewRows) ? appState.workerTimeViewRows : []),
+    ].filter(Boolean)
+    const seen = new Set()
+    return rows.filter((row) => {
+      const keys = workerIdentityKeys(row)
+      if (baseKeys.size && ![...keys].some((key) => baseKeys.has(key))) return false
+      const uniqueKey = [...keys].sort().join('|')
+      if (uniqueKey && seen.has(uniqueKey)) return false
+      if (uniqueKey) seen.add(uniqueKey)
+      return true
+    })
+  }
+
+  function workerFetchCandidates(worker = {}) {
+    const values = [
+      appState.selectedWorkerLogin,
+      appState.selectedWorkerName,
+    ]
+    workerRelatedRows(worker).forEach((row) => {
+      values.push(
+        row.login,
+        row.workerLogin,
+        row.worker_login,
+        row.id,
+        row.workerId,
+        row.worker_id,
+        row.employeeId,
+        row.employee_id,
+        row.email,
+        row.loginEmail,
+        row.name,
+        row.workerName,
+        row.workername,
+        row.worker_name,
+        row.fullName,
+        row.displayName,
+      )
+    })
+
+    const seen = new Set()
+    const candidates = []
+    values.forEach((value) => {
+      const raw = String(value ?? '').trim()
+      if (!raw) return
+      ;[raw, raw.includes('@') ? raw.split('@')[0] : ''].forEach((candidate) => {
+        const normalized = normalizeKey(candidate)
+        if (!normalized || seen.has(normalized)) return
+        seen.add(normalized)
+        candidates.push(String(candidate).trim())
+      })
+    })
+    return candidates
+  }
+
+  function workerRole(worker = {}) {
+    return String(worker.role ?? worker.type ?? worker.workerType ?? 'WORKER').trim() || 'WORKER'
+  }
+
+  function roleValue(value) {
+    const normalized = normalizeKey(value)
+    if (normalized.includes('admin') || normalized.includes('owner') || normalized.includes('superadmin')) return 'ADMIN'
+    if (normalized.includes('manager') || normalized.includes('menager') || normalized.includes('kierownik')) return 'MANAGER'
+    if (normalized.includes('koordynator') || normalized.includes('coordinator') || normalized.includes('coordynator')) return 'COORDINATOR'
+    return 'WORKER'
+  }
+
+  function roleLabel(value) {
+    const key = roleValue(value)
+    return WORKER_ROLE_COPY[key]?.title ?? String(value ?? 'Pracownik').trim()
+  }
+
+  function workerTypeValue(value) {
+    const raw = value && typeof value === 'object'
+      ? value.workerType ?? value.profileType ?? value.employeeType ?? value.staffType ?? ''
+      : value
+    const normalized = normalizeKey(raw)
+    if (normalized.includes('mobil') || normalized.includes('zespol')) return 'Zespol mobilny'
+    if (normalized.includes('staly') || normalized.includes('personel') || normalized.includes('obiekt')) {
+      return 'Staly personel na obiekcie'
+    }
+    if (normalized.includes('pracownik') || normalized === 'worker') return WORKER_TYPE_DEFAULT
+    return WORKER_TYPE_OPTIONS.includes(String(raw ?? '').trim()) ? String(raw ?? '').trim() : WORKER_TYPE_DEFAULT
+  }
+
+  function workerField(worker = {}, keys = [], fallback = '') {
+    for (const key of keys) {
+      const value = worker?.[key]
+      if (value !== undefined && value !== null && String(value).trim()) return value
+    }
+    return fallback
+  }
+
+  function dateInputValue(value) {
+    const raw = String(value ?? '').trim()
+    if (!raw) return ''
+    const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
+    const plMatch = raw.match(/^(\d{2})\.(\d{2})\.(\d{4})/)
+    if (plMatch) return `${plMatch[3]}-${plMatch[2]}-${plMatch[1]}`
+    const date = new Date(raw)
+    if (!Number.isFinite(date.getTime())) return ''
+    return date.toISOString().slice(0, 10)
+  }
+
+  function workerTrainingValues(worker = {}) {
+    const raw = worker.trainings ?? worker.trainingList ?? worker.workerTrainings ?? worker.training ?? []
+    const values = Array.isArray(raw)
+      ? raw
+      : String(raw ?? '').split(/[,;\n]+/)
+    return [...new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean))]
+  }
+
+  function trainingOptions(values = []) {
+    const byKey = new Map()
+    ;[...WORKER_TRAINING_OPTIONS, ...values].forEach((value) => {
+      const label = String(value ?? '').trim()
+      if (!label) return
+      const key = normalizeKey(label)
+      if (!byKey.has(key)) byKey.set(key, label)
+    })
+    return Array.from(byKey.values())
+  }
+
+  function selectedTrainingValues() {
+    return Array.from(document.querySelectorAll('#waTrainingMenu [data-wa-training-option]:checked'))
+      .map((input) => String(input.value ?? '').trim())
+      .filter(Boolean)
+  }
+
+  function updateTrainingToggleLabel(values = selectedTrainingValues()) {
+    const label = document.getElementById('waTrainingValue')
+    if (!label) return
+    if (!values.length) {
+      label.textContent = 'Kliknij, aby wybrac przeszkolenia'
+      return
+    }
+    label.textContent = values.length === 1 ? values[0] : `${values.length} wybrane: ${values.join(', ')}`
+  }
+
+  function renderTrainingMenu(values = []) {
+    const menu = document.getElementById('waTrainingMenu')
+    if (!menu) return
+    const selected = new Set(values.map((value) => normalizeKey(value)))
+    const disabled = !canDeleteWorkers()
+    menu.innerHTML = trainingOptions(values).map((option) => {
+      const id = `waTraining-${normalizeKey(option).replace(/[^a-z0-9]+/g, '-') || 'option'}`
+      const checked = selected.has(normalizeKey(option))
+      return `
+        <label class="worker-account-training-option" for="${escapeHtml(id)}" role="option" aria-selected="${checked ? 'true' : 'false'}">
+          <input id="${escapeHtml(id)}" type="checkbox" value="${escapeHtml(option)}" data-wa-training-option ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} />
+          <span>${escapeHtml(option)}</span>
+        </label>
+      `
+    }).join('')
+    updateTrainingToggleLabel(values)
+  }
+
+  function setTrainingValues(values = []) {
+    renderTrainingMenu(values)
+    renderTrainingPreview(values)
+  }
+
+  function positionTrainingDropdown(field, menu, toggle) {
+    field.classList.remove('is-drop-up')
+    menu.style.removeProperty('--wa-training-menu-max')
+
+    const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0
+    const toggleRect = toggle.getBoundingClientRect()
+    const cardRect = field.closest('.worker-account-form-card')?.getBoundingClientRect()
+    const computed = window.getComputedStyle(menu)
+    const maxHeight = Number.parseFloat(computed.maxHeight) || 156
+    const desiredHeight = Math.min(menu.scrollHeight || maxHeight, maxHeight)
+    const softBottom = cardRect ? Math.min(cardRect.bottom, viewportHeight) : viewportHeight
+    const softTop = cardRect ? Math.max(cardRect.top, 0) : 0
+    const spaceBelow = softBottom - toggleRect.bottom - 8
+    const spaceAbove = toggleRect.top - softTop - 8
+    const shouldDropUp = spaceBelow < desiredHeight && spaceAbove > spaceBelow
+    const availableSpace = shouldDropUp ? spaceAbove : spaceBelow
+    const nextMaxHeight = Math.max(96, Math.min(maxHeight, Math.floor(availableSpace)))
+
+    field.classList.toggle('is-drop-up', shouldDropUp)
+    menu.style.setProperty('--wa-training-menu-max', `${nextMaxHeight}px`)
+  }
+
+  function setTrainingDropdownOpen(open) {
+    const field = document.getElementById('waTrainingField')
+    const menu = document.getElementById('waTrainingMenu')
+    const toggle = document.getElementById('waTrainingToggle')
+    if (!field || !menu || !toggle || (toggle.disabled && open)) return
+    if (!open) {
+      menu.hidden = true
+      field.classList.remove('is-open', 'is-drop-up')
+      menu.style.removeProperty('--wa-training-menu-max')
+      toggle.setAttribute('aria-expanded', 'false')
+      return
+    }
+
+    menu.hidden = false
+    field.classList.toggle('is-open', open)
+    toggle.setAttribute('aria-expanded', 'true')
+    positionTrainingDropdown(field, menu, toggle)
+  }
+
+  function toggleTrainingDropdown() {
+    const menu = document.getElementById('waTrainingMenu')
+    if (menu && !menu.querySelector('[data-wa-training-option]')) {
+      renderTrainingMenu(workerTrainingValues(resolveCurrentWorker() || {}))
+    }
+    setTrainingDropdownOpen(Boolean(menu?.hidden))
+  }
+
+  function syncTrainingControlsDisabled(disabled) {
+    const toggle = document.getElementById('waTrainingToggle')
+    if (toggle) toggle.disabled = disabled
+    document.querySelectorAll('#waTrainingMenu [data-wa-training-option]').forEach((input) => {
+      input.disabled = disabled
+    })
+    if (disabled) setTrainingDropdownOpen(false)
+  }
+
+  function renderTrainingPreview(values = selectedTrainingValues()) {
+    const root = document.getElementById('waTrainingPreview')
+    if (!root) return
+    const rows = values.map((value) => String(value ?? '').trim()).filter(Boolean)
+    root.innerHTML = rows.length
+      ? rows.map((value) => `<li>${escapeHtml(value)}</li>`).join('')
+      : '<li>Brak wybranych przeszkolen</li>'
+  }
+
+  function isWorkerActive(worker = {}) {
+    if (worker.active === undefined || worker.active === null) return true
+    return Boolean(worker.active)
+  }
+
+  function isWorkerOnline(worker = {}) {
+    return Boolean(worker.online)
+  }
+
+  function _workerInitials(worker = {}) {
+    const source = workerName(worker) || workerLogin(worker)
+    const parts = String(source).trim().split(/\s+/).filter(Boolean)
+    if (!parts.length) return '--'
+    return parts.slice(0, 2).map((part) => part[0]).join('').toUpperCase()
+  }
+
+  function formatDateTime(value) {
+    const raw = typeof toIso === 'function' ? toIso(value) : String(value ?? '')
+    if (!raw) return '-'
+    const date = new Date(raw)
+    if (!Number.isFinite(date.getTime())) return String(value ?? '-').trim() || '-'
+    const day = String(date.getDate()).padStart(2, '0')
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const year = date.getFullYear()
+    const hour = String(date.getHours()).padStart(2, '0')
+    const minute = String(date.getMinutes()).padStart(2, '0')
+    return `${day}.${month}.${year}, ${hour}:${minute}`
+  }
+
+  function profileCompleteness(worker = {}) {
+    const values = [
+      workerName(worker),
+      workerLogin(worker),
+      worker.email || worker.loginEmail,
+      worker.phone,
+      workerId(worker),
+      workerRole(worker),
+    ]
+    const filled = values.filter((value) => String(value ?? '').trim()).length
+    return Math.round((filled / values.length) * 100)
+  }
+
+  function _renderCompleteness(worker) {
+    const percent = profileCompleteness(worker)
+    setText('waCompletenessText', `${percent}%`)
+    const bar = document.getElementById('waCompletenessBar')
+    if (bar) bar.style.width = `${percent}%`
+    const hint = document.getElementById('waCompletenessHint')
+    if (hint) {
+      hint.textContent = percent >= 100
+        ? 'Profil pracownika jest kompletny.'
+        : 'Uzupelnij telefon, email lub identyfikator, aby zwiekszyc kompletnosc.'
+    }
+  }
+
+  function roleItemHtml(key, primary = false) {
+    const copy = WORKER_ROLE_COPY[key] ?? WORKER_ROLE_COPY.WORKER
+    return `
+      <div class="worker-account-role-item">
+        <i aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v5c0 4.6-2.8 8.2-7 10-4.2-1.8-7-5.4-7-10V6l7-3Z" stroke="currentColor" stroke-width="1.8"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </i>
+        <div>
+          <strong>${escapeHtml(copy.title)}</strong>
+          <span>${escapeHtml(copy.description)}</span>
+          ${primary ? '<em class="badge">Glowna</em>' : ''}
+        </div>
+      </div>
+    `
+  }
+
+  function renderRolePreview(worker) {
+    const primaryRole = roleValue(workerRole(worker))
+    const roles = primaryRole === 'WORKER' ? ['WORKER'] : [primaryRole, 'WORKER']
+    const html = roles.map((role, index) => roleItemHtml(role, index === 0)).join('')
+    ;['waRolePreviewList', 'waRolePanelPreviewList'].forEach((id) => {
+      const root = document.getElementById(id)
+      if (root) root.innerHTML = html
+    })
+  }
+
+  function renderSecuritySummary(worker) {
+    const lastChange = worker.passwordUpdatedAt || worker.passwordChangedAt || worker.passwordSetAt || ''
+    const suffix = lastChange ? formatDateTime(lastChange) : 'brak danych'
+    setText('waSecuritySummaryText', `Konto zabezpieczone. Ostatnia zmiana hasla: ${suffix}.`)
+  }
+
+  function renderRecentActivityPreview() {
+    const root = document.getElementById('waRecentActivityList')
+    if (!root) return
+    const rows = Array.isArray(appState.workerAccountEventsRows) ? appState.workerAccountEventsRows.slice(0, 4) : []
+    if (!rows.length) {
+      root.innerHTML = '<div class="worker-account-empty-mini"><strong>Brak aktywnosci</strong><p>Nie znaleziono zdarzen dla tego pracownika.</p></div>'
+      return
+    }
+    root.innerHTML = rows.map((row) => {
+      const title = row.eventType || row.endReason || row.comment || row.workdayId || row.eventId || 'Zdarzenie uzytkownika'
+      const date = formatDateTime(row.startAt ?? row.createdAt ?? row.updatedAt)
+      const object = [row.clientName, row.zoneName, row.roomName, row.utilityRoomId].filter(Boolean).join(' / ') || 'Brak obiektu'
+      return `
+        <div class="worker-account-timeline-item">
+          <span class="worker-account-timeline-icon" aria-hidden="true">A</span>
+          <div>
+            <strong>${escapeHtml(title)}</strong>
+            <span>${escapeHtml(date)} - ${escapeHtml(object)}</span>
+          </div>
+        </div>
+      `
+    }).join('')
+  }
+
+  function syncTopActions(worker) {
+    const deactivate = document.getElementById('waTopDeactivateBtn')
+    if (deactivate) {
+      deactivate.disabled = !canDeleteWorkers() || !isWorkerActive(worker)
+      deactivate.title = canDeleteWorkers()
+        ? isWorkerActive(worker) ? 'Dezaktywuj konto pracownika' : 'Konto jest juz nieaktywne'
+        : 'Dezaktywacja konta jest dostepna tylko dla Admina'
+    }
+  }
+
+  function resolveCurrentWorker() {
+    const keys = selectedWorkerKeys()
+    const rows = [
+      appState.workerAccountCurrent,
+      ...(Array.isArray(appState.workerProfileRows) ? appState.workerProfileRows : []),
+      ...(Array.isArray(appState.workers) ? appState.workers : []),
+      ...(Array.isArray(appState.workerTimeRows) ? appState.workerTimeRows : []),
+    ].filter(Boolean)
+
+    if (!keys.size && rows[0]) return rows[0]
+    return rows.find((worker) => [...workerIdentityKeys(worker)].some((key) => keys.has(key))) ?? null
+  }
+
+  function updateCurrentWorker(worker) {
+    if (!worker) return
+    appState.workerAccountCurrent = { ...worker }
+    appState.selectedWorkerLogin = workerLogin(worker)
+    appState.selectedWorkerName = workerName(worker)
+    appState.workerAccountTargetKey = workerAccountIdentityKey(worker)
+  }
+
+  function workerAccountIdentityKey(worker = {}) {
+    return [
+      workerLogin(worker),
+      workerId(worker),
+      workerName(worker),
+      worker.email,
+      worker.loginEmail,
+    ].map((value) => normalizeKey(value)).find(Boolean)
+  }
+
+  function workerAccountKey(worker = {}) {
+    const orgKey = normalizeKey(appState.session?.orgId)
+    const identity = workerAccountIdentityKey(worker)
+    return [orgKey, identity].filter(Boolean).join('|')
+  }
+
+  function currentWorkerAccountKey() {
+    const worker = resolveCurrentWorker()
+    return worker ? workerAccountKey(worker) : ''
+  }
+
+  function clearWorkerAccountLoadKeys() {
+    appState.workerAccountDataLoadingKey = ''
+    appState.workerAccountSummaryLoadingKey = ''
+    appState.workerAccountOrdersLoadingKey = ''
+    appState.workerAccountActivityLoadingKey = ''
+    appState.workerAccountTimeLoadingKey = ''
+  }
+
+  function clearWorkerAccountLoadedKeys() {
+    appState.workerAccountLoadedWorkerKey = ''
+    appState.workerAccountSummaryLoadedKey = ''
+    appState.workerAccountOrdersLoadedKey = ''
+    appState.workerAccountActivityLoadedKey = ''
+    appState.workerAccountTimeLoadedKey = ''
+  }
+
+  function resetWorkerAccountRuntimeState({ clearLoadedKey = true, clearLoadingKeys = false } = {}) {
+    appState.workerAccountOrderRows = []
+    appState.workerAccountEventsRows = []
+    appState.workerAccountDaysRows = []
+    appState.workerAccountAllTimeRows = []
+    appState.workerAccountTimeRows = []
+    appState.workerAccountEventsPage = 1
+    appState.workerAccountOrdersPage = 1
+    appState.workerAccountTimePage = 1
+    appState.workerAccountTimeSelectedKeys = new Set()
+    appState.workerAccountTimeCurrentPageKeys = []
+    appState.workerAccountDayEditorItem = null
+    appState.workerAccountEditTab = ''
+    if (clearLoadedKey) clearWorkerAccountLoadedKeys()
+    if (clearLoadingKeys) clearWorkerAccountLoadKeys()
+  }
+
+  function renderWorkerAccountSummaryFromState() {
+    const monthRange = currentMonthRange()
+    const weekRange = currentWeekRange()
+    const timeRows = Array.isArray(appState.workerAccountAllTimeRows) ? appState.workerAccountAllTimeRows : []
+    const eventRows = Array.isArray(appState.workerAccountEventsRows) ? appState.workerAccountEventsRows : []
+    const orderRows = Array.isArray(appState.workerAccountOrderRows) ? appState.workerAccountOrderRows : []
+    renderKpis({
+      completedOrders: orderRows.filter((order) => orderCompleted(order)).length,
+      monthSeconds: sumRowsInRange(timeRows, monthRange),
+      weekSeconds: sumRowsInRange(timeRows, weekRange),
+      eventCount: countEventsInRange(eventRows, monthRange),
+    })
+  }
+
+  function beginWorkerAccountSession(worker) {
+    const accountKey = workerAccountKey(worker)
+    appState.workerAccountRequestSeq = Number(appState.workerAccountRequestSeq ?? 0) + 1
+    appState.workerAccountCurrentKey = accountKey
+    resetWorkerAccountRuntimeState({ clearLoadedKey: true, clearLoadingKeys: true })
+    resetTimeFiltersToCurrentMonth()
+    renderKpis()
+    setTimeMonthCard([])
+    renderRecentActivityPreview()
+    renderAllTables()
+    return {
+      accountKey,
+      requestSeq: Number(appState.workerAccountRequestSeq ?? 0),
+    }
+  }
+
+  function ensureWorkerAccountSession(worker) {
+    const accountKey = workerAccountKey(worker)
+    if (
+      accountKey &&
+      appState.workerAccountCurrentKey === accountKey &&
+      Number(appState.workerAccountRequestSeq ?? 0) > 0
+    ) {
+      return {
+        accountKey,
+        requestSeq: Number(appState.workerAccountRequestSeq ?? 0),
+      }
+    }
+    updateCurrentWorker(worker)
+    setShellVisible(true)
+    renderWorkerCard(worker)
+    renderForms(worker)
+    return beginWorkerAccountSession(worker)
+  }
+
+  function makeWorkerAccountLoadContext(worker, section, options = {}) {
+    return {
+      section,
+      accountKey: String(options.accountKey ?? workerAccountKey(worker)).trim(),
+      requestSeq: Number(options.requestSeq ?? appState.workerAccountRequestSeq ?? 0),
+      rangeKey: String(options.rangeKey ?? '').trim(),
+    }
+  }
+
+  function isWorkerAccountLoadContextCurrent(context = {}) {
+    return Boolean(
+      context.accountKey &&
+      appState.workerAccountCurrentKey === context.accountKey &&
+      Number(appState.workerAccountRequestSeq ?? 0) === Number(context.requestSeq ?? -1),
+    )
+  }
+
+  function resetTimeFiltersToCurrentMonth() {
+    const month = currentMonthRange()
+    const from = document.getElementById('waTimeFrom')
+    const to = document.getElementById('waTimeTo')
+    if (from) from.value = month.from
+    if (to) to.value = month.to
+    syncTimeMonthPickFromRange()
+  }
+
+  function _renderEmptyWorkerAccountData(accountKey = '') {
+    resetWorkerAccountRuntimeState({ clearLoadedKey: false })
+    appState.workerAccountLoadedWorkerKey = accountKey
+    appState.workerAccountSummaryLoadedKey = accountKey
+    appState.workerAccountOrdersLoadedKey = accountKey
+    appState.workerAccountActivityLoadedKey = accountKey
+    appState.workerAccountDataLoadingKey = ''
+    renderKpis()
+    setTimeMonthCard([])
+    renderRecentActivityPreview()
+    renderAllTables()
+  }
+
+  function applyWorkerToCachedRows(previousLogin, worker) {
+    const previousKey = normalizeKey(previousLogin)
+    const nextLogin = workerLogin(worker)
+    ;['workers', 'workerProfileRows', 'workerProfileViewRows', 'workerTimeRows', 'workerTimeViewRows'].forEach((stateKey) => {
+      const rows = Array.isArray(appState[stateKey]) ? appState[stateKey] : []
+      const index = rows.findIndex((row) => {
+        const keys = workerIdentityKeys(row)
+        return keys.has(previousKey) || keys.has(normalizeKey(nextLogin)) || keys.has(normalizeKey(workerId(worker)))
+      })
+      if (index >= 0) rows.splice(index, 1, { ...rows[index], ...worker })
+    })
+  }
+
+  function setShellVisible(hasWorker) {
+    const shell = document.getElementById('waShell')
+    const empty = document.getElementById('waEmpty')
+    if (shell) shell.hidden = !hasWorker
+    if (empty) empty.hidden = hasWorker
+  }
+
+  function renderWorkerCard(worker) {
+    const name = workerName(worker) || '-'
+    const role = workerRole(worker)
+    const active = isWorkerActive(worker)
+    const online = isWorkerOnline(worker)
+    setText('waTitle', name)
+    setText('waCardName', name)
+    setText('waCardRole', roleLabel(role))
+    setText('waCardId', workerId(worker) || '-')
+    setText('waCardLogin', workerLogin(worker) || '-')
+    setText('waCardEmail', worker.email || worker.loginEmail || '-')
+    setText('waCardPhone', worker.phone || '-')
+    setText('waCardAdded', formatDateTime(worker.addedAt || worker.createdAt))
+    setText('waCardEdited', formatDateTime(worker.editedAt || worker.updatedAt))
+
+    const status = document.getElementById('waCardStatus')
+    if (status) {
+      status.textContent = active ? 'Aktywny' : 'Nieaktywny'
+      status.classList.toggle('is-active', active)
+      status.classList.toggle('is-inactive', !active)
+    }
+    const onlineNode = document.getElementById('waCardOnline')
+    if (onlineNode) {
+      onlineNode.textContent = online ? 'Online' : 'Offline'
+      onlineNode.classList.toggle('is-online', online)
+      onlineNode.classList.toggle('is-offline', !online)
+    }
+    renderRolePreview(worker)
+    renderSecuritySummary(worker)
+    syncTopActions(worker)
+  }
+
+  function setPasswordEyeButtonState(inputId, buttonId) {
+    const input = document.getElementById(inputId)
+    const button = document.getElementById(buttonId)
+    if (!(input instanceof HTMLInputElement) || !(button instanceof HTMLButtonElement)) return
+    const visible = input.type === 'text'
+    button.innerHTML = visible ? PASSWORD_EYE_CLOSED_ICON : PASSWORD_EYE_OPEN_ICON
+    button.classList.toggle('is-visible', visible)
+    button.setAttribute('aria-pressed', visible ? 'true' : 'false')
+    button.setAttribute('aria-label', visible ? 'Ukryj haslo' : 'Pokaz haslo')
+    button.title = visible ? 'Ukryj haslo' : 'Pokaz haslo'
+  }
+
+  function resetPasswordFieldVisibility(inputId, buttonId) {
+    const input = document.getElementById(inputId)
+    if (input instanceof HTMLInputElement) input.type = 'password'
+    setPasswordEyeButtonState(inputId, buttonId)
+  }
+
+  function resetNewPasswordVisibility() {
+    resetPasswordFieldVisibility('waNewPassword', 'waNewPasswordEyeBtn')
+    resetPasswordFieldVisibility('waNewPassword2', 'waNewPassword2EyeBtn')
+  }
+
+  function togglePasswordField(inputId, buttonId) {
+    const input = document.getElementById(inputId)
+    const button = document.getElementById(buttonId)
+    if (!(input instanceof HTMLInputElement) || !(button instanceof HTMLButtonElement) || input.disabled || button.disabled) return
+    input.type = input.type === 'password' ? 'text' : 'password'
+    setPasswordEyeButtonState(inputId, buttonId)
+    input.focus()
+  }
+
+  function isWorkerAccountEditableTab(tab) {
+    return WORKER_ACCOUNT_EDITABLE_TABS.has(String(tab ?? '').trim())
+  }
+
+  function isEditingTab(tab) {
+    return appState.workerAccountEditTab === tab
+  }
+
+  function canEditWorkerAccountTab(tab) {
+    if (tab === 'account') return canManageWorkers()
+    if (tab === 'security' || tab === 'roles') return canDeleteWorkers()
+    return false
+  }
+
+  function editableTabTitle(tab) {
+    if (tab === 'account') return 'dane uzytkownika'
+    if (tab === 'security') return 'bezpieczenstwo'
+    if (tab === 'roles') return 'role i dostep'
+    return 'zakladke'
+  }
+
+  function setControlDisabled(id, disabled) {
+    const control = document.getElementById(id)
+    if (control) control.disabled = Boolean(disabled)
+  }
+
+  function syncEditModeControls(worker = resolveCurrentWorker()) {
+    const editTab = isWorkerAccountEditableTab(appState.workerAccountEditTab) ? appState.workerAccountEditTab : ''
+    if (appState.workerAccountEditTab !== editTab) appState.workerAccountEditTab = editTab
+
+    WORKER_ACCOUNT_EDITABLE_TABS.forEach((tab) => {
+      const editing = editTab === tab
+      const canEdit = Boolean(worker) && canEditWorkerAccountTab(tab)
+      const panel = document.querySelector(`[data-wa-panel="${tab}"]`)
+      const editButton = document.querySelector(`[data-wa-edit-tab="${tab}"]`)
+      const saveButton = document.querySelector(`[data-wa-save-tab="${tab}"]`)
+      const cancelButton = document.querySelector(`[data-wa-cancel-tab="${tab}"]`)
+
+      if (panel) panel.classList.toggle('is-editing', editing)
+      if (editButton) {
+        editButton.hidden = editing
+        editButton.disabled = !canEdit
+        editButton.title = canEdit ? `Edytuj ${editableTabTitle(tab)}` : 'Brak uprawnien do edycji'
+      }
+      if (saveButton) {
+        saveButton.hidden = !editing
+        saveButton.disabled = !editing || !canEdit
+      }
+      if (cancelButton) {
+        cancelButton.hidden = !editing
+        cancelButton.disabled = !editing || !canEdit
+      }
+    })
+
+    const accountManagerEdit = isEditingTab('account') && canManageWorkers()
+    const accountAdminEdit = isEditingTab('account') && canDeleteWorkers()
+    ;['waName', 'waEmail', 'waPhone'].forEach((id) => setControlDisabled(id, !accountManagerEdit))
+    ;[
+      'waActive',
+      'waContractType',
+      'waContractFrom',
+      'waContractTo',
+      'waBhpFrom',
+      'waBhpTo',
+      'waMedicalFrom',
+      'waMedicalTo',
+    ].forEach((id) => setControlDisabled(id, !accountAdminEdit))
+    syncTrainingControlsDisabled(!accountAdminEdit)
+    const workerIdInput = document.getElementById('waWorkerId')
+    if (workerIdInput) {
+      workerIdInput.readOnly = !accountAdminEdit
+      workerIdInput.disabled = false
+    }
+
+    const securityAdminEdit = isEditingTab('security') && canDeleteWorkers()
+    ;['waLogin', 'waNewPassword', 'waNewPassword2'].forEach((id) => setControlDisabled(id, !securityAdminEdit))
+    ;['waNewPasswordEyeBtn', 'waNewPassword2EyeBtn'].forEach((id) => setControlDisabled(id, !securityAdminEdit))
+    setControlDisabled('waRevealPasswordBtn', !canRevealWorkerPasswords())
+
+    const rolesAdminEdit = isEditingTab('roles') && canDeleteWorkers()
+    ;['waRole', 'waWorkerType'].forEach((id) => setControlDisabled(id, !rolesAdminEdit))
+  }
+
+  function enterEditMode(tab) {
+    if (!isWorkerAccountEditableTab(tab)) return
+    const worker = resolveCurrentWorker()
+    if (!worker) return
+    if (!canEditWorkerAccountTab(tab)) {
+      showTransientNotice('Brak uprawnien do edycji tej zakladki.', 'warning')
+      return
+    }
+    if (appState.workerAccountEditTab && appState.workerAccountEditTab !== tab) {
+      cancelEditMode(appState.workerAccountEditTab, { silent: true })
+    }
+    appState.workerAccountEditTab = tab
+    syncEditModeControls(worker)
+    const firstFieldByTab = {
+      account: 'waName',
+      security: 'waLogin',
+      roles: 'waRole',
+    }
+    focusField(firstFieldByTab[tab])
+  }
+
+  function exitEditMode(tab) {
+    if (!tab || appState.workerAccountEditTab === tab) {
+      appState.workerAccountEditTab = ''
+      syncEditModeControls()
+    }
+  }
+
+  function cancelEditMode(tab, options = {}) {
+    if (!isWorkerAccountEditableTab(tab)) return
+    const worker = resolveCurrentWorker()
+    if (appState.workerAccountEditTab === tab) appState.workerAccountEditTab = ''
+    if (worker) renderForms(worker)
+    if (options.silent !== true) showTransientNotice('Anulowano edycje.', 'info')
+  }
+
+  function renderForms(worker) {
+    setInputValue('waName', workerName(worker))
+    setInputValue('waEmail', worker.email || worker.loginEmail || '')
+    setInputValue('waPhone', worker.phone || '')
+    setInputValue('waWorkerId', workerId(worker))
+    setInputValue('waEditedBy', worker.editedBy || worker.updatedBy || '')
+    const contractTypeValue = String(workerField(worker, ['contractType', 'agreementType', 'employmentContractType'], '') ?? '').trim()
+    const contractType = document.getElementById('waContractType')
+    if (contractType) {
+      ensureSelectOption(contractType, contractTypeValue)
+      contractType.value = contractTypeValue
+    }
+    setInputValue('waContractFrom', dateInputValue(workerField(worker, ['contractFrom', 'agreementFrom', 'contractStart', 'contractStartDate'])))
+    setInputValue('waContractTo', dateInputValue(workerField(worker, ['contractTo', 'agreementTo', 'contractEnd', 'contractEndDate', 'contractValidTo'])))
+    setInputValue('waBhpFrom', dateInputValue(workerField(worker, ['bhpFrom', 'bhpStart', 'bhpStartDate', 'safetyTrainingFrom'])))
+    setInputValue('waBhpTo', dateInputValue(workerField(worker, ['bhpTo', 'bhpUntil', 'bhpValidTo', 'bhpEnd', 'bhpEndDate', 'safetyTrainingTo'])))
+    setInputValue('waMedicalFrom', dateInputValue(workerField(worker, ['medicalExamFrom', 'occupationalMedicineFrom', 'medicalFrom', 'medicalStartDate'])))
+    setInputValue('waMedicalTo', dateInputValue(workerField(worker, ['medicalExamTo', 'occupationalMedicineTo', 'medicalTo', 'medicalExamValidTo', 'medicalEndDate'])))
+    const trainingValues = workerTrainingValues(worker)
+    setTrainingValues(trainingValues)
+    setInputValue('waLogin', workerLogin(worker))
+    setInputValue('waCurrentPassword', '')
+    setInputValue('waNewPassword', '')
+    setInputValue('waNewPassword2', '')
+    resetNewPasswordVisibility()
+
+    const active = document.getElementById('waActive')
+    if (active) active.value = isWorkerActive(worker) ? '1' : '0'
+    const role = document.getElementById('waRole')
+    if (role) role.value = roleValue(workerRole(worker))
+    const workerType = document.getElementById('waWorkerType')
+    if (workerType) workerType.value = workerTypeValue(worker)
+
+    syncEditModeControls(worker)
+    resetNewPasswordVisibility()
+    syncTopActions(worker)
+  }
+
+  function parseJsonArray(value) {
+    if (Array.isArray(value)) return value
+    if (typeof value !== 'string') return []
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+
+  function collectOrderWorkerKeys(order = {}) {
+    const keys = new Set()
+    ;[
+      order.workerId,
+      order.workerLogin,
+      order.login,
+      order.workerName,
+      order.workerLabel,
+      order.worker,
+      ...(Array.isArray(order.workerIds) ? order.workerIds : parseJsonArray(order.workerIds)),
+    ].forEach((value) => addIdentityKey(keys, value))
+
+    const assignments = [
+      ...(Array.isArray(order.workerAssignments) ? order.workerAssignments : parseJsonArray(order.workerAssignments)),
+      ...(Array.isArray(order.workAllocations) ? order.workAllocations : parseJsonArray(order.workAllocations)),
+      ...(Array.isArray(order.assignedWorkers) ? order.assignedWorkers : parseJsonArray(order.assignedWorkers)),
+      ...(Array.isArray(order.workers) ? order.workers : parseJsonArray(order.workers)),
+    ]
+
+    assignments.forEach((assignment) => {
+      if (typeof assignment === 'string') {
+        addIdentityKey(keys, assignment)
+        return
+      }
+      ;[
+        assignment?.workerId,
+        assignment?.worker_id,
+        assignment?.employeeId,
+        assignment?.workerLogin,
+        assignment?.login,
+        assignment?.workerName,
+        assignment?.name,
+        assignment?.label,
+        assignment?.workerLabel,
+        assignment?.key,
+        assignment?.workerKey,
+      ].forEach((value) => addIdentityKey(keys, value))
+    })
+    return keys
+  }
+
+  function orderCompleted(order = {}) {
+    const status = normalizeKey(order.status ?? order.completionStatus ?? order.taskStatus ?? '')
+    return Boolean(order.completed ?? order.kanbanCompleted ?? order.done) ||
+      ['closed', 'done', 'completed', 'finished', 'complete', 'zakonczone'].includes(status)
+  }
+
+  function orderMatchesWorker(order, worker) {
+    const keys = workerIdentityKeys(worker)
+    const orderKeys = collectOrderWorkerKeys(order)
+    for (const key of keys) {
+      if (orderKeys.has(key)) return true
+    }
+    const name = normalizeKey(workerName(worker))
+    const label = normalizeKey(order.workerLabel ?? order.workerName ?? '')
+    return Boolean(name && name.length > 2 && label.includes(name))
+  }
+
+  function orderDateLabel(order = {}) {
+    return String(
+      order.dateYmd ??
+      order.dayKey ??
+      order.dueDateYmd ??
+      toDayKey(order.startAt ?? order.deadlineAt ?? order.completedAt ?? order.updatedAt ?? order.createdAt) ??
+      '',
+    ).trim() || '-'
+  }
+
+  function orderTitle(order = {}) {
+    return String(
+      order.title ??
+      order.name ??
+      order.taskTitle ??
+      order.orderTitle ??
+      order.description ??
+      order.notes ??
+      order.id ??
+      '',
+    ).trim() || 'Zlecenie'
+  }
+
+  function orderClientLabel(order = {}) {
+    const objects = Array.isArray(order.objects) ? order.objects : parseJsonArray(order.objects)
+    const objectLabel = objects.map((item) => String(item?.label ?? item?.name ?? item?.clientName ?? item ?? '').trim()).filter(Boolean).join(', ')
+    return String(
+      order.clientName ??
+      order.clientLabel ??
+      order.klient ??
+      order.client?.name ??
+      objectLabel ??
+      '',
+    ).trim() || '-'
+  }
+
+  function orderZoneLabel(order = {}) {
+    return String(
+      order.zoneName ??
+      order.zoneLabel ??
+      order.strefa ??
+      order.zone?.label ??
+      order.zone?.name ??
+      order.zone?.zone ??
+      order.place ??
+      '',
+    ).trim() || '-'
+  }
+
+  function orderStatusLabel(order = {}) {
+    if (orderCompleted(order)) return 'Zakonczone'
+    const raw = String(order.completionStatus ?? order.kanbanStatus ?? order.status ?? order.taskStatus ?? '').trim()
+    return raw || 'Aktywne'
+  }
+
+  function orderLatestTime(order = {}) {
+    const candidates = [
+      order.updatedAt,
+      order.completedAt,
+      order.deadlineAt,
+      order.startAt,
+      order.dateYmd,
+      order.dueDateYmd,
+      order.createdAt,
+    ]
+    for (const candidate of candidates) {
+      const time = Date.parse(String(candidate ?? ''))
+      if (Number.isFinite(time)) return time
+    }
+    return 0
+  }
+
+  function sortOrdersByLatest(orders = []) {
+    return [...orders].sort((left, right) => orderLatestTime(right) - orderLatestTime(left))
+  }
+
+  function rowWorkerIdentityKeys(row = {}) {
+    const rowKeys = new Set()
+    ;[
+      row.workerLogin,
+      row.login,
+      row.workerId,
+      row.worker_id,
+      row.employeeId,
+      row.employee_id,
+      row.workerName,
+      row.workername,
+      row.worker_name,
+      row.name,
+      row.fullName,
+      row.displayName,
+      row.email,
+      row.loginEmail,
+    ].forEach((value) => addIdentityKey(rowKeys, value))
+    return rowKeys
+  }
+
+  function rowHasStrongWorkerIdentity(row = {}) {
+    const keys = new Set()
+    ;[
+      row.workerLogin,
+      row.login,
+      row.workerId,
+      row.worker_id,
+      row.employeeId,
+      row.employee_id,
+      row.email,
+      row.loginEmail,
+    ].forEach((value) => addIdentityKey(keys, value))
+    return keys.size > 0
+  }
+
+  function nameKeyVariants(value) {
+    const normalized = normalizeKey(value).replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!normalized) return []
+    const variants = new Set([normalized])
+    const parts = normalized.split(' ').filter(Boolean)
+    if (parts.length > 1) {
+      variants.add(parts.slice().reverse().join(' '))
+    }
+    return [...variants]
+  }
+
+  function looseNameMatch(left, right) {
+    const leftVariants = nameKeyVariants(left)
+    const rightVariants = nameKeyVariants(right)
+    return leftVariants.some((leftValue) => rightVariants.some((rightValue) => {
+      if (!leftValue || !rightValue) return false
+      if (leftValue === rightValue) return true
+      const [shorter, longer] = leftValue.length <= rightValue.length
+        ? [leftValue, rightValue]
+        : [rightValue, leftValue]
+      return shorter.length >= 5 && longer.includes(shorter)
+    }))
+  }
+
+  function rowNameMatchesRelatedWorker(row = {}, worker = {}) {
+    const rowNames = [
+      row.workerName,
+      row.workername,
+      row.worker_name,
+      row.name,
+      row.fullName,
+      row.displayName,
+    ].filter((value) => String(value ?? '').trim())
+    if (!rowNames.length) return false
+
+    const workerNames = workerRelatedRows(worker)
+      .flatMap((relatedWorker) => [
+        relatedWorker.name,
+        relatedWorker.workerName,
+        relatedWorker.workername,
+        relatedWorker.worker_name,
+        relatedWorker.fullName,
+        relatedWorker.displayName,
+      ])
+      .filter((value) => String(value ?? '').trim())
+
+    return rowNames.some((rowName) => workerNames.some((name) => looseNameMatch(rowName, name)))
+  }
+
+  function _rowMatchesWorker(row, worker) {
+    const keys = workerIdentityKeys(worker)
+    const rowKeys = rowWorkerIdentityKeys(row)
+    for (const key of keys) {
+      if (rowKeys.has(key)) return true
+    }
+    return false
+  }
+
+  function rowHasWorkerIdentity(row = {}) {
+    return rowWorkerIdentityKeys(row).size > 0
+  }
+
+  function rowMatchesRelatedWorker(row = {}, worker = {}, options = {}) {
+    const rowKeys = rowWorkerIdentityKeys(row)
+    if (!rowKeys.size) return false
+    const relatedKeys = new Set()
+    workerRelatedRows(worker).forEach((relatedWorker) => {
+      workerIdentityKeys(relatedWorker).forEach((key) => relatedKeys.add(key))
+    })
+    for (const key of relatedKeys) {
+      if (rowKeys.has(key)) return true
+    }
+    if (options.allowLooseName && !rowHasStrongWorkerIdentity(row)) {
+      return rowNameMatchesRelatedWorker(row, worker)
+    }
+    return false
+  }
+
+  function eventRowBelongsToQueriedWorker(row = {}, worker = {}, options = {}) {
+    return !rowHasWorkerIdentity(row) || rowMatchesRelatedWorker(row, worker, options)
+  }
+
+  function stampWorkerIdentity(row = {}, worker = {}) {
+    return {
+      ...row,
+      workerLogin: String(row.workerLogin ?? row.login ?? row.worker_login ?? workerLogin(worker)).trim(),
+      workerName: String(row.workerName ?? row.workername ?? row.worker_name ?? row.name ?? row.fullName ?? row.displayName ?? workerName(worker)).trim(),
+      workerId: String(row.workerId ?? row.worker_id ?? row.employeeId ?? row.employee_id ?? workerId(worker)).trim(),
+    }
+  }
+
+  function toDayKey(value) {
+    const iso = typeof toIso === 'function' ? toIso(value) : String(value ?? '')
+    if (!iso) return ''
+    const date = new Date(iso)
+    if (!Number.isFinite(date.getTime())) return String(iso).slice(0, 10)
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${date.getFullYear()}-${month}-${day}`
+  }
+
+  function dayKeyFromValue(value) {
+    const raw = String(value ?? '').trim()
+    if (!raw) return ''
+    const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
+    const polishMatch = raw.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
+    if (polishMatch) return `${polishMatch[3]}-${polishMatch[2]}-${polishMatch[1]}`
+    return toDayKey(value)
+  }
+
+  function eventDayKey(row = {}) {
+    return dayKeyFromValue(row.dayKey ?? row.dateYmd ?? row.date ?? row.startAt ?? row.endAt ?? row.createdAt ?? row.updatedAt)
+  }
+
+  function rowStartIso(row = {}) {
+    return typeof toIso === 'function' ? toIso(row.startAt ?? row.dayStartAt ?? row.startIso) : String(row.startAt ?? row.startIso ?? '')
+  }
+
+  function rowEndIso(row = {}) {
+    return typeof toIso === 'function' ? toIso(row.endAt ?? row.dayEndAt ?? row.endIso ?? row.stopAt) : String(row.endAt ?? row.endIso ?? '')
+  }
+
+  function secondsFromRow(row = {}) {
+    const value = Number(row.netSec ?? row.workSec ?? row.durationSec ?? row.durationSeconds ?? 0)
+    if (Number.isFinite(value) && value > 0) return Math.floor(value)
+    return timeRangeSeconds(rowStartIso(row), rowEndIso(row))
+  }
+
+  function formatSeconds(seconds) {
+    const value = Number(seconds) || 0
+    if (typeof durationSecondsToHm === 'function') return durationSecondsToHm(value)
+    const hours = Math.floor(value / 3600)
+    const minutes = Math.floor((value % 3600) / 60)
+    return `${hours}h ${String(minutes).padStart(2, '0')}m`
+  }
+
+  function _formatHms(seconds) {
+    const value = Number(seconds) || 0
+    if (typeof durationSecondsToHms === 'function') return durationSecondsToHms(value)
+    const hours = Math.floor(value / 3600)
+    const minutes = Math.floor((value % 3600) / 60)
+    const rest = Math.floor(value % 60)
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`
+  }
+
+  function formatEventDuration(seconds) {
+    const value = Math.max(0, Number(seconds) || 0)
+    const hours = Math.floor(value / 3600)
+    const minutes = Math.floor((value % 3600) / 60)
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+  }
+
+  function formatTimeFromIso(value) {
+    const iso = typeof toIso === 'function' ? toIso(value) : String(value ?? '')
+    if (!iso) return '-'
+    const date = new Date(iso)
+    if (!Number.isFinite(date.getTime())) return '-'
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  }
+
+  function pad2(value) {
+    return String(value).padStart(2, '0')
+  }
+
+  function dateKeyToLabel(dayKey) {
+    const value = String(dayKey ?? '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return '-'
+    return `${value.slice(8, 10)}.${value.slice(5, 7)}.${value.slice(0, 4)}`
+  }
+
+  function monthLabelFromValue(monthValue) {
+    const value = String(monthValue ?? '').trim()
+    if (!/^\d{4}-\d{2}$/.test(value)) return value || '-'
+    const month = Number(value.slice(5, 7))
+    const year = value.slice(0, 4)
+    return `${WORKER_ACCOUNT_MONTH_NAMES_PL[month - 1] ?? value.slice(5, 7)} ${year}`
+  }
+
+  function isoToHm(value) {
+    const iso = typeof toIso === 'function' ? toIso(value) : String(value ?? '')
+    if (!iso) return '-'
+    const date = new Date(iso)
+    if (!Number.isFinite(date.getTime())) return '-'
+    return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+  }
+
+  function isoToDateInput(value) {
+    const raw = String(value ?? '').trim()
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+    const iso = typeof toIso === 'function' ? toIso(raw) : raw
+    if (!iso) return ''
+    const date = new Date(iso)
+    if (!Number.isFinite(date.getTime())) return ''
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+  }
+
+  function isoToTimeInput(value) {
+    const iso = typeof toIso === 'function' ? toIso(value) : String(value ?? '')
+    if (!iso) return ''
+    const date = new Date(iso)
+    if (!Number.isFinite(date.getTime())) return ''
+    return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+  }
+
+  function localDateTimeToIso(dateValue, timeValue) {
+    const dateText = String(dateValue ?? '').trim()
+    const timeText = String(timeValue ?? '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !/^\d{2}:\d{2}(?::\d{2})?$/.test(timeText)) return ''
+    const [year, month, day] = dateText.split('-').map(Number)
+    const [hour, minute, second = 0] = timeText.split(':').map(Number)
+    if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) return ''
+    const date = new Date(year, month - 1, day, hour, minute, second, 0)
+    if (!Number.isFinite(date.getTime())) return ''
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return ''
+    return date.toISOString()
+  }
+
+  function timeRangeSeconds(startAt, endAt) {
+    const startIso = typeof toIso === 'function' ? toIso(startAt) : String(startAt ?? '')
+    const endIso = typeof toIso === 'function' ? toIso(endAt) : String(endAt ?? '')
+    if (!startIso || !endIso) return 0
+    const startMs = new Date(startIso).getTime()
+    const endMs = new Date(endIso).getTime()
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return 0
+    return Math.floor((endMs - startMs) / 1000)
+  }
+
+  function monthValueFromDate(value) {
+    const raw = String(value ?? '').trim()
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw.slice(0, 7) : `${new Date().getFullYear()}-${pad2(new Date().getMonth() + 1)}`
+  }
+
+  function currentWeekRange() {
+    const now = new Date()
+    const day = now.getDay() || 7
+    const start = new Date(now)
+    start.setDate(now.getDate() - day + 1)
+    const ymd = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    return { from: ymd(start), to: ymd(now) }
+  }
+
+  function currentMonthRange() {
+    const now = new Date()
+    return {
+      from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`,
+      to: typeof todayYmd === 'function' ? todayYmd() : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+    }
+  }
+
+  function timeRowDayKey(row = {}) {
+    return dayKeyFromValue(row.dayKey ?? row.dateYmd ?? row.date ?? row.startAt ?? row.endAt ?? row.createdAt ?? row.updatedAt)
+  }
+
+  function timeFilterRangeFromControls() {
+    return {
+      from: String(document.getElementById('waTimeFrom')?.value ?? '').trim(),
+      to: String(document.getElementById('waTimeTo')?.value ?? '').trim(),
+    }
+  }
+
+  function timeRowOverlapsRange(row = {}, range = {}) {
+    const from = String(range.from ?? '').trim()
+    const to = String(range.to ?? '').trim()
+    if (!from && !to) return true
+
+    const day = timeRowDayKey(row)
+    const startDay = dayKeyFromValue(row.startAt ?? row.dayStartAt ?? row.startIso) || day
+    const endDay = dayKeyFromValue(row.endAt ?? row.dayEndAt ?? row.endIso ?? row.stopAt) || day || startDay
+    const days = [day, startDay, endDay].filter(Boolean).sort()
+    const firstDay = days[0] || ''
+    const lastDay = days[days.length - 1] || firstDay
+    if (!firstDay) return false
+    if (from && lastDay < from) return false
+    if (to && firstDay > to) return false
+    return true
+  }
+
+  function filterTimeRowsForRange(rows = [], range = timeFilterRangeFromControls()) {
+    return (Array.isArray(rows) ? rows : []).filter((row) => timeRowOverlapsRange(row, range))
+  }
+
+  function sumRowsInRange(rows, range) {
+    return (Array.isArray(rows) ? rows : []).reduce((sum, row) => {
+      const day = timeRowDayKey(row)
+      if (!day || day < range.from || day > range.to) return sum
+      return sum + secondsFromRow(row)
+    }, 0)
+  }
+
+  function countEventsInRange(rows, range) {
+    return (Array.isArray(rows) ? rows : []).reduce((sum, row) => {
+      const day = eventDayKey(row)
+      if (!day || day < range.from || day > range.to) return sum
+      return sum + 1
+    }, 0)
+  }
+
+  function timeIntervalFromRow(row = {}) {
+    const startIso = rowStartIso(row)
+    const endIso = rowEndIso(row)
+    const durationSec = Number(row.durationSec ?? row.closedSec ?? row.workSec ?? 0)
+    let startTs = startIso ? new Date(startIso).getTime() : 0
+    let endTs = endIso ? new Date(endIso).getTime() : 0
+
+    if (!Number.isFinite(startTs)) startTs = 0
+    if (!Number.isFinite(endTs)) endTs = 0
+    if (endTs <= startTs && startTs > 0 && Number.isFinite(durationSec) && durationSec > 0) {
+      endTs = startTs + Math.floor(durationSec) * 1000
+    }
+    if (!startTs || !endTs || endTs <= startTs) return null
+    return { startTs, endTs }
+  }
+
+  function mergeTimeIntervals(intervals = []) {
+    const sorted = intervals
+      .filter(Boolean)
+      .map((interval) => ({ startTs: Number(interval.startTs), endTs: Number(interval.endTs) }))
+      .filter((interval) => Number.isFinite(interval.startTs) && Number.isFinite(interval.endTs) && interval.endTs > interval.startTs)
+      .sort((left, right) => left.startTs - right.startTs || left.endTs - right.endTs)
+    const merged = []
+    sorted.forEach((interval) => {
+      const last = merged[merged.length - 1]
+      if (!last || interval.startTs > last.endTs) {
+        merged.push({ ...interval })
+        return
+      }
+      last.endTs = Math.max(last.endTs, interval.endTs)
+    })
+    return merged
+  }
+
+  function timeRowsTotalSeconds(rows = []) {
+    const totalMs = mergeTimeIntervals(rows.map((row) => timeIntervalFromRow(row))).reduce(
+      (sum, interval) => sum + Math.max(0, interval.endTs - interval.startTs),
+      0,
+    )
+    return Math.floor(totalMs / 1000)
+  }
+
+  function aggregateTimeRows(rows = [], worker = {}) {
+    const groups = new Map()
+    ;(Array.isArray(rows) ? rows : []).forEach((row) => {
+      const dayKey = timeRowDayKey(row)
+      if (!dayKey) return
+      const startIso = rowStartIso(row)
+      const endIso = rowEndIso(row)
+      const updatedAtIso = typeof toIso === 'function' ? toIso(row.updatedAt) : String(row.updatedAt ?? '')
+      const breakSec = Math.max(0, Number(row.breakSec ?? row.pauseTotalSec ?? 0) || 0)
+      const bucket = groups.get(dayKey) ?? {
+        dayKey,
+        workerName: String(row.workerName ?? workerName(worker) ?? '').trim(),
+        workerType: String(row.workerType ?? row.type ?? roleLabel(workerRole(worker)) ?? '').trim(),
+        startAt: '',
+        endAt: '',
+        breakSec: 0,
+        updatedBy: '',
+        comment: '',
+        latestUpdatedAt: '',
+        sourceRows: [],
+      }
+      bucket.sourceRows.push(row)
+      bucket.breakSec += breakSec
+      if (startIso && (!bucket.startAt || new Date(startIso).getTime() < new Date(bucket.startAt).getTime())) bucket.startAt = startIso
+      if (endIso && (!bucket.endAt || new Date(endIso).getTime() > new Date(bucket.endAt).getTime())) bucket.endAt = endIso
+      if (updatedAtIso && (!bucket.latestUpdatedAt || new Date(updatedAtIso).getTime() >= new Date(bucket.latestUpdatedAt).getTime())) {
+        bucket.latestUpdatedAt = updatedAtIso
+        bucket.updatedBy = String(row.editedBy ?? row.updatedBy ?? '').trim() || bucket.updatedBy
+        bucket.comment = String(row.comment ?? '').trim() || bucket.comment
+      } else {
+        bucket.updatedBy = bucket.updatedBy || String(row.editedBy ?? row.updatedBy ?? '').trim()
+        bucket.comment = bucket.comment || String(row.comment ?? '').trim()
+      }
+      groups.set(dayKey, bucket)
+    })
+
+    return [...groups.values()]
+      .map((bucket) => {
+        const mergedWorkSec = timeRowsTotalSeconds(bucket.sourceRows)
+        const workSec = mergedWorkSec || timeRangeSeconds(bucket.startAt, bucket.endAt)
+        const breakSec = Math.min(workSec, Math.max(0, Math.floor(Number(bucket.breakSec ?? 0))))
+        const netSec = Math.max(0, workSec - breakSec)
+        return {
+          dayKey: bucket.dayKey,
+          workerName: bucket.workerName || workerName(worker) || workerLogin(worker) || '-',
+          workerType: bucket.workerType || roleLabel(workerRole(worker)) || '-',
+          startAt: bucket.startAt,
+          endAt: bucket.endAt,
+          workSec,
+          breakSec,
+          netSec,
+          updatedBy: bucket.updatedBy || '-',
+          comment: bucket.comment || '',
+          sourceRows: bucket.sourceRows,
+        }
+      })
+      .sort((left, right) => String(right.dayKey).localeCompare(String(left.dayKey)))
+  }
+
+  function sortRowsByLatest(rows = []) {
+    return [...rows].sort((left, right) => {
+      const leftTs = new Date(rowStartIso(left) || rowEndIso(left) || left.updatedAt || left.createdAt || 0).getTime()
+      const rightTs = new Date(rowStartIso(right) || rowEndIso(right) || right.updatedAt || right.createdAt || 0).getTime()
+      return (Number.isFinite(rightTs) ? rightTs : 0) - (Number.isFinite(leftTs) ? leftTs : 0)
+    })
+  }
+
+  function rowStableKey(row = {}) {
+    const explicit = [
+      row.workdayId,
+      row.eventId,
+      row.id,
+      row.rowId,
+      row.startEventId,
+      row.endEventId,
+    ].map((value) => String(value ?? '').trim()).find(Boolean)
+    if (explicit) return normalizeKey(explicit)
+    const parts = [
+      timeRowDayKey(row) || eventDayKey(row),
+      rowStartIso(row),
+      rowEndIso(row),
+      row.workerLogin,
+      row.workerId,
+      row.workerName,
+      row.clientId,
+      row.clientName,
+      row.zoneId,
+      row.zoneName,
+      row.roomId,
+      row.roomName,
+      row.eventType,
+      row.comment,
+    ].map((value) => normalizeKey(value)).filter(Boolean)
+    return parts.join('|')
+  }
+
+  function mergeUniqueRows(collections = []) {
+    const seen = new Set()
+    const rows = []
+    collections.flat().forEach((row) => {
+      if (!row || typeof row !== 'object') return
+      const key = rowStableKey(row)
+      if (key) {
+        if (seen.has(key)) return
+        seen.add(key)
+      }
+      rows.push(row)
+    })
+    return rows
+  }
+
+  function responseItems(response) {
+    return Array.isArray(response?.items) ? response.items : []
+  }
+
+  function hasMeaningfulTimePayload(row = {}) {
+    return [
+      row.workdayId,
+      row.id,
+      row.dayKey,
+      row.dateYmd,
+      row.date,
+      row.startAt,
+      row.endAt,
+      row.dayStartAt,
+      row.dayEndAt,
+      row.startIso,
+      row.endIso,
+      row.durationSec,
+      row.workSec,
+      row.netSec,
+    ].some((value) => {
+      if (typeof value === 'number') return Number.isFinite(value) && value > 0
+      const text = String(value ?? '').trim()
+      return Boolean(text && text !== '-')
+    })
+  }
+
+  function hasMeaningfulEventPayload(row = {}) {
+    return [
+      row.eventId,
+      row.workdayId,
+      row.id,
+      row.dayKey,
+      row.dateYmd,
+      row.date,
+      row.startAt,
+      row.endAt,
+      row.start,
+      row.stop,
+      row.durationSec,
+      row.duration,
+      row.clientName,
+      row.klient,
+      row.clientId,
+      row.zoneName,
+      row.strefa,
+      row.zoneId,
+      row.roomName,
+      row.roomId,
+      row.utilityRoomId,
+      row.comment,
+      row.endReason,
+    ].some((value) => {
+      if (typeof value === 'number') return Number.isFinite(value) && value > 0
+      const text = String(value ?? '').trim()
+      return Boolean(text && text !== '-')
+    })
+  }
+
+  function prioritizedWorkerFetchCandidates(worker = {}) {
+    const preferred = [
+      workerLogin(worker),
+      worker.workerLogin,
+      worker.login,
+      workerId(worker),
+      worker.workerId,
+      worker.id,
+    ]
+    const candidates = [...preferred, ...workerFetchCandidates(worker)]
+    const seen = new Set()
+    return candidates
+      .map((value) => String(value ?? '').trim())
+      .filter((value) => {
+        const key = normalizeKey(value)
+        if (!key || seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+  }
+
+  async function fetchWorkerTimeCandidateRows(orgId, worker, candidates = [], range = {}) {
+    const pageSize = Number(range.pageSize) || WORKER_ACCOUNT_TIME_FETCH_PAGE_SIZE
+    const responses = await Promise.all(
+      candidates.flatMap((candidate) => [
+        getWorkerTime(orgId, candidate, { ...range, page: 1, pageSize }).catch(() => ({ items: [] })),
+        getWorkdays(orgId, {
+          source: 'workdays',
+          workerLogin: candidate,
+          ...range,
+          page: 1,
+          pageSize,
+        }).catch(() => ({ items: [] })),
+      ]),
+    )
+    return mergeUniqueRows(responses.map(responseItems))
+      .filter(hasMeaningfulTimePayload)
+      .filter((row) => !rowHasWorkerIdentity(row) || rowMatchesRelatedWorker(row, worker))
+  }
+
+  async function fetchWorkerTimeRows(orgId, worker, range = {}, options = {}) {
+    const candidates = prioritizedWorkerFetchCandidates(worker)
+    const pageSize = Number(range.pageSize) || WORKER_ACCOUNT_TIME_FETCH_PAGE_SIZE
+    const primaryRows = await fetchWorkerTimeCandidateRows(orgId, worker, candidates.slice(0, 1), { ...range, pageSize })
+    let directRows = primaryRows
+
+    if (!directRows.length) {
+      const fallbackResponses = await Promise.all([
+        fetchWorkerTimeCandidateRows(orgId, worker, candidates.slice(1), { ...range, pageSize }),
+        workerName(worker)
+          ? getWorkdays(orgId, {
+            source: 'workdays',
+            worker: workerName(worker),
+            ...range,
+            page: 1,
+            pageSize,
+          }).catch(() => ({ items: [] }))
+          : Promise.resolve({ items: [] }),
+      ])
+      const nameRows = responseItems(fallbackResponses[1])
+        .filter(hasMeaningfulTimePayload)
+        .filter((row) => !rowHasWorkerIdentity(row) || rowMatchesRelatedWorker(row, worker, { allowLooseName: true }))
+      directRows = mergeUniqueRows([fallbackResponses[0], nameRows])
+    }
+
+    if (directRows.length || options.allowBroadFallback === false) {
+      return directRows
+    }
+
+    const broadResponse = await getWorkdays(orgId, {
+      source: 'workdays',
+      ...range,
+      page: 1,
+      pageSize,
+    }).catch(() => ({ items: [] }))
+    const broadRows = responseItems(broadResponse)
+      .filter(hasMeaningfulTimePayload)
+      .filter((row) => rowHasWorkerIdentity(row) && rowMatchesRelatedWorker(row, worker))
+
+    return mergeUniqueRows([directRows, broadRows])
+  }
+
+  async function fetchWorkerEventCandidateRows(orgId, worker, candidates = [], options = {}) {
+    const source = String(options.source ?? 'workdays').trim() || 'workdays'
+    const pageSize = Number(options.pageSize) || WORKER_ACCOUNT_ACTIVITY_FETCH_PAGE_SIZE
+    const responses = await Promise.all(
+      candidates.map((candidate) => getWorkdays(orgId, {
+        source,
+        workerLogin: candidate,
+        page: 1,
+        pageSize,
+      }).catch(() => ({ items: [] }))),
+    )
+    return mergeUniqueRows(responses.map(responseItems))
+      .filter(hasMeaningfulEventPayload)
+      .filter((row) => eventRowBelongsToQueriedWorker(row, worker, { allowLooseName: true }))
+  }
+
+  async function fetchWorkerEventRows(orgId, worker, options = {}) {
+    const pageSize = Number(options.pageSize) || 100
+    const candidates = prioritizedWorkerFetchCandidates(worker)
+    let directRows = await fetchWorkerEventCandidateRows(orgId, worker, candidates.slice(0, 1), { source: 'workdays', pageSize })
+
+    if (!directRows.length) {
+      const fallbackResponses = await Promise.all([
+        fetchWorkerEventCandidateRows(orgId, worker, candidates.slice(0, 1), { source: 'events', pageSize }),
+        fetchWorkerEventCandidateRows(orgId, worker, candidates.slice(1), { source: 'workdays', pageSize }),
+        workerName(worker)
+          ? getWorkdays(orgId, {
+            source: 'workdays',
+            worker: workerName(worker),
+            page: 1,
+            pageSize,
+          }).catch(() => ({ items: [] }))
+          : Promise.resolve({ items: [] }),
+      ])
+      const nameRows = responseItems(fallbackResponses[2])
+        .filter(hasMeaningfulEventPayload)
+        .filter((row) => eventRowBelongsToQueriedWorker(row, worker, { allowLooseName: true }))
+      directRows = mergeUniqueRows([fallbackResponses[0], fallbackResponses[1], nameRows])
+    }
+
+    if (directRows.length || options.allowBroadFallback === false) {
+      return directRows
+    }
+
+    const broadResponses = await Promise.all([
+      getWorkdays(orgId, {
+        source: 'events',
+        page: 1,
+        pageSize,
+      }).catch(() => ({ items: [] })),
+      getWorkdays(orgId, {
+        source: 'workdays',
+        page: 1,
+        pageSize,
+      }).catch(() => ({ items: [] })),
+    ])
+    const broadRows = mergeUniqueRows(broadResponses.map(responseItems))
+      .filter(hasMeaningfulEventPayload)
+      .filter((row) => rowHasWorkerIdentity(row) && rowMatchesRelatedWorker(row, worker))
+
+    return mergeUniqueRows([directRows, broadRows])
+  }
+
+  function renderKpis({ completedOrders = 0, monthSeconds = 0, weekSeconds = 0, eventCount = 0 } = {}) {
+    const month = formatSeconds(monthSeconds)
+    const week = formatSeconds(weekSeconds)
+    setText('waKpiOrders', completedOrders)
+    setText('waKpiMonth', month)
+    setText('waKpiWeek', week)
+    setText('waActivityOrders', completedOrders)
+    setText('waActivityMonth', month)
+    setText('waActivityWeek', week)
+    setText('waActivityEvents', eventCount)
+  }
+
+  function fillTimeMonthPick(year, selectedValue) {
+    const select = document.getElementById('waTimeMonthPick')
+    if (!select || !Number.isFinite(year) || year < 2000 || year > 2100) return
+    select.innerHTML = ''
+    for (let month = 1; month <= 12; month += 1) {
+      const option = document.createElement('option')
+      option.value = `${year}-${pad2(month)}`
+      option.textContent = `${WORKER_ACCOUNT_MONTH_NAMES_PL[month - 1]} ${year}`
+      select.appendChild(option)
+    }
+    const fallback = `${year}-${pad2(new Date().getMonth() + 1)}`
+    select.value = selectedValue && select.querySelector(`option[value="${selectedValue}"]`) ? selectedValue : fallback
+  }
+
+  function syncTimeMonthPickFromRange() {
+    const to = String(document.getElementById('waTimeTo')?.value ?? '').trim()
+    const from = String(document.getElementById('waTimeFrom')?.value ?? '').trim()
+    const selectedMonth = monthValueFromDate(to || from)
+    const year = Number(selectedMonth.slice(0, 4)) || new Date().getFullYear()
+    fillTimeMonthPick(year, selectedMonth)
+  }
+
+  function setTimeMonthCard(rows = appState.workerAccountTimeRows) {
+    const sourceRows = Array.isArray(rows) ? rows : []
+    const totalWorkSec = sourceRows.reduce((sum, row) => sum + Math.max(0, Number(row.workSec ?? 0) || 0), 0)
+    const totalBreakSec = sourceRows.reduce((sum, row) => sum + Math.max(0, Number(row.breakSec ?? 0) || 0), 0)
+    const totalNetSec = sourceRows.reduce((sum, row) => sum + Math.max(0, Number(row.netSec ?? 0) || 0), 0)
+    const fallbackRange = currentMonthRange()
+    const from = String(document.getElementById('waTimeFrom')?.value ?? '').trim() || fallbackRange.from
+    const to = String(document.getElementById('waTimeTo')?.value ?? '').trim() || fallbackRange.to
+    const select = document.getElementById('waTimeMonthPick')
+    const selectedLabel = select?.selectedOptions?.[0]?.textContent?.trim()
+    const selectedMonth = monthValueFromDate(to || from)
+
+    setText('waTimeMonthLabel', selectedLabel || monthLabelFromValue(selectedMonth))
+    setText('waTimeMonthRange', from && to ? `${dateKeyToLabel(from)} - ${dateKeyToLabel(to)}` : '-')
+    setText('waTimeMonthWork', formatSeconds(totalWorkSec))
+    setText('waTimeMonthBreak', formatSeconds(totalBreakSec))
+    setText('waTimeMonthNet', formatSeconds(totalNetSec || Math.max(0, totalWorkSec - totalBreakSec)))
+  }
+
+  function applyTimeMonthPick(monthValue) {
+    const from = document.getElementById('waTimeFrom')
+    const to = document.getElementById('waTimeTo')
+    const value = String(monthValue ?? '').trim()
+    if (!from || !to || !/^\d{4}-\d{2}$/.test(value)) return
+    const year = Number(value.slice(0, 4))
+    const month = Number(value.slice(5, 7))
+    const now = new Date()
+    const isCurrentMonth = now.getFullYear() === year && now.getMonth() + 1 === month
+    const lastDay = isCurrentMonth ? now.getDate() : new Date(year, month, 0).getDate()
+    from.value = `${value}-01`
+    to.value = `${value}-${pad2(lastDay)}`
+  }
+
+  function timeSelectionKey(row = {}) {
+    return String(row.dayKey ?? row.workdayId ?? '').trim()
+  }
+
+  function ensureTimeSelectionState() {
+    if (!(appState.workerAccountTimeSelectedKeys instanceof Set)) appState.workerAccountTimeSelectedKeys = new Set()
+    if (!Array.isArray(appState.workerAccountTimeCurrentPageKeys)) appState.workerAccountTimeCurrentPageKeys = []
+  }
+
+  function syncTimeSelectionUi() {
+    ensureTimeSelectionState()
+    const selectAll = document.getElementById('waTimeSelectAll')
+    if (!(selectAll instanceof HTMLInputElement)) return
+    const pageKeys = appState.workerAccountTimeCurrentPageKeys
+    if (!pageKeys.length) {
+      selectAll.checked = false
+      selectAll.indeterminate = false
+      return
+    }
+    const selected = pageKeys.filter((key) => appState.workerAccountTimeSelectedKeys.has(key)).length
+    selectAll.checked = selected > 0 && selected === pageKeys.length
+    selectAll.indeterminate = selected > 0 && selected < pageKeys.length
+  }
+
+  function setTimeRowsSelected(checked) {
+    ensureTimeSelectionState()
+    appState.workerAccountTimeCurrentPageKeys.forEach((key) => {
+      if (checked) appState.workerAccountTimeSelectedKeys.add(key)
+      else appState.workerAccountTimeSelectedKeys.delete(key)
+    })
+    syncTimeSelectionUi()
+  }
+
+  function _escapeCsvCell(value) {
+    const text = String(value ?? '').replace(/\r?\n/g, ' ')
+    return /[;"\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+  }
+
+  function _sanitizeFilePart(value) {
+    return String(value ?? '')
+      .trim()
+      .replace(/[\\/:*?"<>|]+/g, '-')
+      .replace(/\s+/g, '-')
+      .slice(0, 80) || 'pracownik'
+  }
+
+  function surnameFirstLabel(value) {
+    const raw = String(value ?? '').trim().replace(/\s+/g, ' ')
+    if (!raw) return '-'
+    if (raw.includes(',')) {
+      return raw
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join(' ')
+    }
+    const parts = raw.split(' ').filter(Boolean)
+    if (parts.length < 2) return raw
+    const surname = parts[parts.length - 1]
+    return [surname, ...parts.slice(0, -1)].join(' ')
+  }
+
+  function timeEvidenceWorkerLabel(row = {}, worker = resolveCurrentWorker() || {}) {
+    return surnameFirstLabel(row.workerName || workerName(worker) || workerLogin(worker) || '-')
+  }
+
+  function compareTimeEvidenceRows(left = {}, right = {}) {
+    const leftWorker = normalizeKey(timeEvidenceWorkerLabel(left))
+    const rightWorker = normalizeKey(timeEvidenceWorkerLabel(right))
+    const workerCompare = leftWorker.localeCompare(rightWorker, 'pl')
+    if (workerCompare) return workerCompare
+    return String(left.dayKey).localeCompare(String(right.dayKey))
+  }
+
+  function timeEvidenceWorkTotal(rows = []) {
+    return workTimeEvidenceWorkTotal(rows)
+  }
+
+  function timeExportSourceRows(row = {}) {
+    return Array.isArray(row.sourceRows) ? row.sourceRows : []
+  }
+
+  function _timeExportAlertValue(row = {}) {
+    const levels = [
+      Number(row.alertLevel ?? 0) || 0,
+      ...timeExportSourceRows(row).map((source) => Number(source.alertLevel ?? source.alert ?? 0) || 0),
+    ]
+    return Math.max(0, ...levels)
+  }
+
+  function _timeExportAckValue(row = {}) {
+    const ack = Boolean(row.alertAck ?? row.ack ?? timeExportSourceRows(row).some((source) => source.alertAck || source.ack))
+    return ack ? 'TAK' : 'NIE'
+  }
+
+  function workerAccountEvidenceDeps() {
+    return {
+      dateKeyToLabel,
+      durationSecondsToHm,
+      ensureJsPdfLoaded,
+      ensurePdfUnicodeFont,
+      escapeHtml,
+      formatSeconds,
+      isoToHm,
+      normalizeSearchText,
+      roleLabel,
+      setPdfUnicodeFont,
+      toIso,
+      workerLabel: timeEvidenceWorkerLabel,
+    }
+  }
+
+  function timeEvidenceExportColumns(worker = resolveCurrentWorker() || {}) {
+    return createWorkTimeEvidenceColumns(workerAccountEvidenceDeps(), worker)
+  }
+
+  function timeEvidenceRowsForExport() {
+    const rows = Array.isArray(appState.workerAccountTimeRows) ? appState.workerAccountTimeRows : []
+    return [...rows].sort(compareTimeEvidenceRows)
+  }
+
+  function timeEvidenceFilenameBase() {
+    const worker = resolveCurrentWorker() || {}
+    const from = String(document.getElementById('waExportFrom')?.value ?? document.getElementById('waTimeFrom')?.value ?? '').trim()
+    const to = String(document.getElementById('waExportTo')?.value ?? document.getElementById('waTimeTo')?.value ?? '').trim()
+    return `ewidencja-pracy-${sanitizeWorkTimeEvidenceFilePart(workerName(worker) || workerLogin(worker))}-${from || 'od'}-${to || 'do'}`
+  }
+
+  function syncTimeEvidenceExportRangeFromTimeFilters() {
+    const exportFrom = document.getElementById('waExportFrom')
+    const exportTo = document.getElementById('waExportTo')
+    const fallback = currentMonthRange()
+    const from = String(document.getElementById('waTimeFrom')?.value ?? fallback.from).trim() || fallback.from
+    const to = String(document.getElementById('waTimeTo')?.value ?? fallback.to).trim() || fallback.to
+    if (exportFrom instanceof HTMLInputElement) exportFrom.value = from
+    if (exportTo instanceof HTMLInputElement) exportTo.value = to
+  }
+
+  function resetTimeEvidenceExportOptions() {
+    document.querySelectorAll('[data-wa-export-col]').forEach((checkbox) => {
+      checkbox.checked = checkbox.defaultChecked
+    })
+    const landscape = document.querySelector('input[name="waExportOrientation"][value="l"]')
+    if (landscape) landscape.checked = true
+    syncTimeEvidenceExportRangeFromTimeFilters()
+  }
+
+  function readTimeEvidenceExportOptions({ validate = true } = {}) {
+    const worker = resolveCurrentWorker() || {}
+    const rawRange = {
+      fromYmd: document.getElementById('waExportFrom')?.value,
+      toYmd: document.getElementById('waExportTo')?.value,
+    }
+    const range = validate
+      ? validateWorkTimeEvidenceDateRange(rawRange, alert)
+      : {
+          fromYmd: String(rawRange.fromYmd ?? '').trim(),
+          toYmd: String(rawRange.toYmd ?? '').trim(),
+        }
+    if (!range) return null
+    const selectedIds = new Set(
+      [...document.querySelectorAll('[data-wa-export-col]')]
+        .filter((checkbox) => checkbox.checked)
+        .map((checkbox) => String(checkbox.value ?? '').trim()),
+    )
+    const columns = timeEvidenceExportColumns(worker).filter((column) => selectedIds.has(column.id))
+    const orientationRaw = String(document.querySelector('input[name="waExportOrientation"]:checked')?.value ?? 'l').trim()
+    const orientation = orientationRaw === 'p' ? 'p' : 'l'
+    return { ...range, columns, orientation }
+  }
+
+  async function ensureTimeEvidenceRowsForExportOptions(exportOptions) {
+    if (!exportOptions) return null
+    const fromInput = document.getElementById('waTimeFrom')
+    const toInput = document.getElementById('waTimeTo')
+    const currentFrom = String(fromInput?.value ?? '').trim()
+    const currentTo = String(toInput?.value ?? '').trim()
+    const nextFrom = String(exportOptions.fromYmd ?? '').trim()
+    const nextTo = String(exportOptions.toYmd ?? '').trim()
+    const changed = nextFrom && nextTo && (currentFrom !== nextFrom || currentTo !== nextTo)
+    if (changed) {
+      if (fromInput instanceof HTMLInputElement) fromInput.value = nextFrom
+      if (toInput instanceof HTMLInputElement) toInput.value = nextTo
+      appState.workerAccountTimePage = 1
+      syncTimeMonthPickFromRange()
+      await refreshTimeTab()
+    }
+    return timeEvidenceRowsForExport()
+  }
+
+  function timeEvidenceCsvContent(rows, columns) {
+    return workTimeEvidenceCsvContent({ rows, columns, deps: workerAccountEvidenceDeps() })
+  }
+
+  function revokeTimeEvidencePreviewUrl() {
+    const url = String(appState.workerAccountTimePreviewUrl ?? '').trim()
+    if (url) URL.revokeObjectURL(url)
+    appState.workerAccountTimePreviewUrl = ''
+  }
+
+  function syncTimeEvidenceExportButtons(rows = timeEvidenceRowsForExport(), columns = readTimeEvidenceExportOptions().columns) {
+    const canDownload = rows.length > 0 && columns.length > 0
+    const csvButton = document.getElementById('waExportCsvBtn')
+    const pdfButton = document.getElementById('waExportPdfBtn')
+    const previewButton = document.getElementById('waExportPreviewBtn')
+    if (csvButton) csvButton.disabled = false
+    if (pdfButton) pdfButton.disabled = false
+    if (previewButton) previewButton.disabled = false
+    return canDownload
+  }
+
+  function setTimeEvidencePreviewPlaceholder(message = 'Kliknij "Podgląd pliku", aby zobaczyć podgląd PDF') {
+    revokeTimeEvidencePreviewUrl()
+    const preview = document.getElementById('waExportPreview')
+    const meta = document.getElementById('waExportPreviewMeta')
+    if (!preview) return
+
+    const rows = timeEvidenceRowsForExport()
+    const { columns, orientation } = readTimeEvidenceExportOptions({ validate: false }) ?? { columns: [], orientation: 'l' }
+    syncTimeEvidenceExportButtons(rows, columns)
+    if (meta) {
+      const orientationLabel = orientation === 'l' ? 'PDF poziom' : 'PDF pion'
+      meta.textContent = `${rows.length} rekordow - ${columns.length} kolumn - ${orientationLabel} - suma: ${formatSeconds(timeEvidenceWorkTotal(rows))}`
+    }
+    preview.innerHTML = `<div class="wa-export-empty">${escapeHtml(message)}</div>`
+  }
+
+  async function buildTimeEvidencePdf(exportOptions, rows = timeEvidenceRowsForExport()) {
+    const exportWorker = resolveCurrentWorker() || {}
+    const exportFromYmd = String(exportOptions.fromYmd ?? document.getElementById('waTimeFrom')?.value ?? '').trim()
+    const exportToYmd = String(exportOptions.toYmd ?? document.getElementById('waTimeTo')?.value ?? '').trim()
+    return buildWorkTimeEvidencePdf({
+      deps: workerAccountEvidenceDeps(),
+      rows,
+      columns: exportOptions.columns,
+      orientation: exportOptions.orientation,
+      fromYmd: exportFromYmd,
+      toYmd: exportToYmd,
+      worker: exportWorker,
+      groupByWorker: false,
+    })
+  }
+
+  async function renderTimeEvidencePreview() {
+    const preview = document.getElementById('waExportPreview')
+    const button = document.getElementById('waExportPreviewBtn')
+    const exportOptions = readTimeEvidenceExportOptions()
+    if (!preview) return
+    if (!exportOptions) return
+    if (!exportOptions.columns.length) {
+      alert('Wybierz co najmniej jedna kolumne do eksportu.')
+      setTimeEvidencePreviewPlaceholder('Wybierz co najmniej jedna kolumne do podgladu.')
+      return
+    }
+
+    if (button) {
+      button.disabled = true
+      button.textContent = 'Generowanie...'
+    }
+    preview.innerHTML = '<div class="wa-export-empty">Ladowanie danych dla zakresu...</div>'
+    let rows = []
+    try {
+      rows = await ensureTimeEvidenceRowsForExportOptions(exportOptions) ?? []
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Nie udalo sie pobrac danych dla zakresu.'
+      preview.innerHTML = `<div class="wa-export-empty">${escapeHtml(message)}</div>`
+      showTransientNotice(message, 'error')
+      if (button) {
+        button.textContent = 'Podglad pliku'
+        button.disabled = false
+      }
+      return
+    }
+    syncTimeEvidenceExportButtons(rows, exportOptions.columns)
+    if (!rows.length) {
+      showTransientNotice('Brak danych ewidencji do pobrania', 'error')
+      setTimeEvidencePreviewPlaceholder('Brak danych ewidencji do pobrania')
+      if (button) {
+        button.textContent = 'Podglad pliku'
+        button.disabled = false
+      }
+      return
+    }
+
+    preview.innerHTML = '<div class="wa-export-empty">Generowanie podgladu PDF...</div>'
+    try {
+      const pdf = await buildTimeEvidencePdf(exportOptions, rows)
+      revokeTimeEvidencePreviewUrl()
+      const blob = pdf.output('blob')
+      const url = URL.createObjectURL(blob)
+      appState.workerAccountTimePreviewUrl = url
+      preview.innerHTML = `<iframe class="wa-export-preview-frame" src="${escapeHtml(url)}" title="Podglad PDF ewidencji pracy"></iframe>`
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Nie udalo sie wygenerowac podgladu PDF.'
+      preview.innerHTML = `<div class="wa-export-empty">${escapeHtml(message)}</div>`
+      showTransientNotice(message, 'error')
+    } finally {
+      if (button) {
+        button.textContent = 'Podgląd pliku'
+        button.disabled = false
+      }
+    }
+  }
+
+  function downloadTimeEvidenceCsv(options) {
+    const rows = timeEvidenceRowsForExport()
+    if (!rows.length) {
+      showTransientNotice('Brak danych ewidencji do pobrania', 'error')
+      return
+    }
+    const exportOptions = options ?? readTimeEvidenceExportOptions()
+    if (!exportOptions.columns.length) {
+      alert('Wybierz co najmniej jedna kolumne do eksportu.')
+      return
+    }
+    const blob = new Blob([`\ufeff${timeEvidenceCsvContent(rows, exportOptions.columns)}`], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${timeEvidenceFilenameBase()}.csv`
+    document.body.appendChild(link)
+    link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+    window.setTimeout(() => {
+      URL.revokeObjectURL(url)
+      link.remove()
+    }, 1000)
+    showTransientNotice(`Pobrano CSV ewidencji. Rekordy: ${rows.length}.`, 'success')
+  }
+
+  async function downloadTimeEvidencePdf(options) {
+    const rows = timeEvidenceRowsForExport()
+    if (!rows.length) {
+      showTransientNotice('Brak danych ewidencji do pobrania', 'error')
+      return
+    }
+    const exportOptions = options ?? readTimeEvidenceExportOptions()
+    if (!exportOptions.columns.length) {
+      alert('Wybierz co najmniej jedna kolumne do eksportu.')
+      return
+    }
+    const pdf = await buildTimeEvidencePdf(exportOptions, rows)
+    pdf.save(`${timeEvidenceFilenameBase()}.pdf`)
+    showTransientNotice(`Pobrano PDF ewidencji. Rekordy: ${rows.length}.`, 'success')
+  }
+
+  function openTimeEvidenceExportModal() {
+    resetTimeEvidenceExportOptions()
+    setTimeEvidencePreviewPlaceholder()
+    const overlay = document.getElementById('waExportOverlay')
+    if (overlay) {
+      overlay.hidden = false
+      overlay.style.display = 'flex'
+    }
+  }
+
+  function closeTimeEvidenceExportModal() {
+    revokeTimeEvidencePreviewUrl()
+    const overlay = document.getElementById('waExportOverlay')
+    if (overlay) {
+      overlay.hidden = true
+      overlay.style.display = 'none'
+    }
+  }
+
+  async function downloadTimeEvidence(format = 'csv') {
+    const exportOptions = readTimeEvidenceExportOptions()
+    if (!exportOptions) return
+    if (!exportOptions.columns.length) {
+      alert('Wybierz co najmniej jedna kolumne do eksportu.')
+      setTimeEvidencePreviewPlaceholder('Wybierz co najmniej jedna kolumne do eksportu.')
+      return
+    }
+    let rows = []
+    try {
+      rows = await ensureTimeEvidenceRowsForExportOptions(exportOptions) ?? []
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Nie udalo sie pobrac danych dla zakresu.'
+      alert(message)
+      return
+    }
+    if (!rows.length) {
+      showTransientNotice('Brak danych ewidencji do pobrania', 'error')
+      setTimeEvidencePreviewPlaceholder('Brak danych ewidencji do pobrania')
+      return
+    }
+
+    closeTimeEvidenceExportModal()
+    try {
+      if (format === 'pdf') {
+        await downloadTimeEvidencePdf(exportOptions)
+        return
+      }
+      downloadTimeEvidenceCsv(exportOptions)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Nie udalo sie pobrac ewidencji pracy.'
+      alert(message)
+    }
+  }
+
+  function tableEmptyRow(columns, message, className = 'worker-account-muted', options = {}) {
+    const normalizedMessage = String(message ?? '').replace(/^Brak rekord.*w$/i, 'Brak rekordow')
+    if (options.withoutSelect) {
+      return `<div class="events-row ${className} worker-account-table-empty-row"><div>${escapeHtml(normalizedMessage)}</div></div>`
+    }
+    return `<div class="events-row ${className}"><div class="events-select-col"></div><div>${escapeHtml(normalizedMessage)}</div>${'<div></div>'.repeat(Math.max(0, columns - 2))}</div>`
+  }
+
+  function eventTimePill(label, type = 'duration') {
+    const value = String(label ?? '').trim() || '-'
+    return `<span class="event-time-pill event-time-pill--${escapeHtml(type)}${value === '-' ? ' is-empty' : ''}">${escapeHtml(value)}</span>`
+  }
+
+  function eventCommentText(row = {}) {
+    return String(row.comment ?? row.comments ?? row.commentText ?? row.note ?? row.endReason ?? '').trim()
+  }
+
+  function eventCommentButton(index, hasComment) {
+    const label = hasComment ? 'Pokaz komentarz' : 'Brak komentarza'
+    return `
+      <button class="event-comment-icon-btn${hasComment ? '' : ' is-empty'}" type="button" data-wa-event-comment="${index}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M5 6.8A3.8 3.8 0 0 1 8.8 3h6.4A3.8 3.8 0 0 1 19 6.8v4.4a3.8 3.8 0 0 1-3.8 3.8h-3.7L7 19v-4.1a3.8 3.8 0 0 1-2-3.3V6.8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+          <path d="M8.5 8.5h7M8.5 11.5h4.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+      </button>
+    `
+  }
+
+  function eventMenuButton(index, label) {
+    const disabled = canDeleteWorkers() ? '' : ' disabled'
+    return `
+      <button class="event-menu-icon-btn" type="button" data-wa-event-edit="${index}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"${disabled}>
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="5" r="1.7" fill="currentColor"/>
+          <circle cx="12" cy="12" r="1.7" fill="currentColor"/>
+          <circle cx="12" cy="19" r="1.7" fill="currentColor"/>
+        </svg>
+      </button>
+    `
+  }
+
+  function _editIconButton(attribute, index, label) {
+    const disabled = canDeleteWorkers() ? '' : ' disabled'
+    return `
+      <button class="event-edit-icon-btn" type="button" ${attribute}="${index}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"${disabled}>
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 20h4l10-10-4-4L4 16v4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+          <path d="M13 7l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+      </button>
+    `
+  }
+
+  function renderPagedTable(kind, rows, renderer, columns, options = {}) {
+    const pageKey = `workerAccount${kind}Page`
+    const sizeKey = `workerAccount${kind}PageSize`
+    const tableIds = {
+      Events: ['waEventRows', 'waEventsLabel', 'waEventsPrev', 'waEventsNext'],
+      Orders: ['waOrderRows', 'waOrdersLabel', 'waOrdersPrev', 'waOrdersNext'],
+    }
+    const [rootId, labelId, prevId, nextId] = tableIds[kind] ?? tableIds.Events
+    const root = document.getElementById(rootId)
+    const sourceRows = Array.isArray(rows) ? rows : []
+    const paged = paginate(sourceRows, appState[pageKey], appState[sizeKey])
+    appState[pageKey] = paged.page
+    appState[sizeKey] = paged.pageSize
+
+    if (root) {
+      root.innerHTML = paged.items.length
+        ? paged.items.map((row, index) => renderer(row, index, paged)).join('')
+        : tableEmptyRow(columns, 'Brak rekordów', 'worker-account-muted', options)
+    }
+    setText(labelId, `Wyswietlono: ${paged.items.length} / ${paged.total} | Strona ${paged.page} z ${paged.totalPages}`)
+    const prev = document.getElementById(prevId)
+    const next = document.getElementById(nextId)
+    if (prev) prev.disabled = paged.page <= 1
+    if (next) next.disabled = paged.page >= paged.totalPages
+  }
+
+  function renderEventsTable() {
+    renderPagedTable(
+      'Events',
+      appState.workerAccountEventsRows,
+      (row, index, paged) => {
+        const sourceIndex = (paged.page - 1) * paged.pageSize + index
+        const date = row.date || toDayKey(row.startAt ?? row.createdAt ?? row.updatedAt) || '-'
+        const client = row.clientName || row.klient || row.clientLabel || row.clientId || '-'
+        const zone = row.zoneName || row.strefa || row.zoneLabel || row.zoneId || '-'
+        const location = row.location || row.lokalizacja || row.roomName || row.roomId || row.utilityRoomId || '-'
+        const start = row.start || row.startTime || formatTimeFromIso(row.startAt)
+        const stop = row.stop || row.stopTime || row.endTime || formatTimeFromIso(row.endAt)
+        const duration = row.durationLabel || row.timeLabel || formatEventDuration(row.durationSec ?? row.netSec ?? row.workSec ?? 0)
+        const comment = eventCommentText(row)
+        const editor = row.editedBy || row.updatedBy || row.createdBy || row.authorName || row.modifiedBy || '-'
+        return `<div class="events-row worker-account-event-row"><div>${escapeHtml(client)}</div><div>${escapeHtml(zone)}</div><div>${escapeHtml(location)}</div><div class="mono">${escapeHtml(date)}</div><div>${eventTimePill(start, 'start')}</div><div>${eventTimePill(stop, 'stop')}</div><div>${eventTimePill(duration, 'duration')}</div><div>${eventCommentButton(sourceIndex, Boolean(comment))}</div><div>${escapeHtml(editor)}</div><div>${eventMenuButton(sourceIndex, 'Edytuj zdarzenie')}</div></div>`
+      },
+      10,
+      { withoutSelect: true },
+    )
+  }
+
+  function renderOrdersTable() {
+    renderPagedTable(
+      'Orders',
+      appState.workerAccountOrderRows,
+      (order) => {
+        const date = orderDateLabel(order)
+        const status = orderStatusLabel(order)
+        return `<div class="events-row"><div class="events-select-col"><input type="checkbox" disabled aria-label="Zlecenie ${escapeHtml(date)}" /></div><div class="mono">${escapeHtml(date)}</div><div>${escapeHtml(orderClientLabel(order))}</div><div>${escapeHtml(orderTitle(order))}</div><div>${escapeHtml(orderZoneLabel(order))}</div><div>${eventTimePill(status, orderCompleted(order) ? 'start' : 'duration')}</div><div>-</div></div>`
+      },
+      7,
+    )
+  }
+
+  function renderTimeTable() {
+    ensureTimeSelectionState()
+    const root = document.getElementById('waTimeRows')
+    const rows = Array.isArray(appState.workerAccountTimeRows) ? appState.workerAccountTimeRows : []
+    const paged = paginate(rows, appState.workerAccountTimePage, WORKER_ACCOUNT_TIME_PAGE_SIZE)
+    appState.workerAccountTimePage = paged.page
+    appState.workerAccountTimePageSize = paged.pageSize
+    appState.workerAccountTimeCurrentPageKeys = paged.items.map((row) => timeSelectionKey(row)).filter(Boolean)
+
+    if (root) {
+      root.innerHTML = paged.items.length
+        ? paged.items.map((row) => {
+            const key = timeSelectionKey(row)
+            const selected = key && appState.workerAccountTimeSelectedKeys.has(key)
+            return `
+              <div class="events-row worker-account-time-row${selected ? ' is-selected' : ''}">
+                <div class="events-select-col"><input type="checkbox" data-wa-time-select="${escapeHtml(key)}" ${selected ? 'checked' : ''} aria-label="Zaznacz rekord dnia ${escapeHtml(dateKeyToLabel(row.dayKey))}" /></div>
+                <div class="mono">${escapeHtml(dateKeyToLabel(row.dayKey))}</div>
+                <div>${escapeHtml(row.workerType || '-')}</div>
+                <div class="mono time-start">${escapeHtml(isoToHm(row.startAt))}</div>
+                <div class="mono time-stop">${escapeHtml(isoToHm(row.endAt))}</div>
+                <div class="mono work-brutto">${escapeHtml(formatSeconds(row.workSec))}</div>
+                <div class="mono work-bold">${escapeHtml(formatSeconds(row.netSec))}</div>
+                <div class="mono time-break">${escapeHtml(formatSeconds(row.breakSec))}</div>
+                <div>${escapeHtml(row.updatedBy || '-')}</div>
+                <div><button class="btn2 worker-account-time-edit-btn" type="button" data-wa-time-detail="${escapeHtml(row.dayKey)}">Edytuj</button></div>
+              </div>
+            `
+          }).join('')
+        : tableEmptyRow(10, 'Brak rekordów')
+    }
+
+    setText('waTimePageLabel', `Strona ${paged.page} / ${paged.totalPages}`)
+    setText('waTimeShownLabel', `Wyswietlono: ${paged.items.length} - Wszystkie: ${paged.total} - Na strone: ${paged.pageSize}`)
+    const prev = document.getElementById('waTimePrev')
+    const next = document.getElementById('waTimeNext')
+    if (prev) prev.disabled = paged.page <= 1
+    if (next) next.disabled = paged.page >= paged.totalPages
+    syncTimeSelectionUi()
+  }
+
+  function renderAllTables() {
+    renderOrdersTable()
+    renderEventsTable()
+    renderTimeTable()
+  }
+
+  function setOrdersLoading() {
+    const orders = document.getElementById('waOrderRows')
+    if (orders) orders.innerHTML = tableEmptyRow(7, 'Ladowanie danych...', 'worker-account-loading')
+    setText('waOrdersLabel', 'Ladowanie danych...')
+    ;['waOrdersPrev', 'waOrdersNext'].forEach((id) => {
+      const button = document.getElementById(id)
+      if (button) button.disabled = true
+    })
+  }
+
+  function setActivityLoading() {
+    const events = document.getElementById('waEventRows')
+    if (events) events.innerHTML = tableEmptyRow(10, 'Ladowanie danych...', 'worker-account-loading', { withoutSelect: true })
+    setText('waEventsLabel', 'Ladowanie danych...')
+    ;['waEventsPrev', 'waEventsNext'].forEach((id) => {
+      const button = document.getElementById(id)
+      if (button) button.disabled = true
+    })
+  }
+
+  function setTimeLoading() {
+    const time = document.getElementById('waTimeRows')
+    if (time) time.innerHTML = tableEmptyRow(10, 'Ladowanie danych...', 'worker-account-loading')
+    setText('waTimePageLabel', 'Ladowanie danych...')
+    setText('waTimeShownLabel', `Wyswietlono: 0 - Wszystkie: 0 - Na strone: ${WORKER_ACCOUNT_TIME_PAGE_SIZE}`)
+    ;['waTimePrev', 'waTimeNext'].forEach((id) => {
+      const button = document.getElementById(id)
+      if (button) button.disabled = true
+    })
+  }
+
+  function _setTablesLoading() {
+    setOrdersLoading()
+    setActivityLoading()
+    setTimeLoading()
+  }
+
+  function workerAccountSectionLoadKey(context = {}) {
+    return [context.accountKey, context.rangeKey].filter(Boolean).join('|')
+  }
+
+  function workerAccountTimeRangeKey(range = buildTimeFetchRange()) {
+    return [range.fromIso ?? '', range.toIso ?? ''].join('|')
+  }
+
+  function workerOrdersFromCache(worker) {
+    const orders = typeof ordersListSourceOrders === 'function' && Array.isArray(ordersListSourceOrders())
+      ? ordersListSourceOrders()
+      : []
+    return sortOrdersByLatest(orders.filter((order) => orderMatchesWorker(order, worker)))
+  }
+
+  function applyWorkerAccountOrders(worker, context, orders = workerOrdersFromCache(worker)) {
+    if (!isWorkerAccountLoadContextCurrent(context)) return false
+    appState.workerAccountOrderRows = Array.isArray(orders) ? orders : []
+    appState.workerAccountOrdersLoadedKey = context.accountKey
+    appState.workerAccountLoadedWorkerKey = context.accountKey
+    renderOrdersTable()
+    renderWorkerAccountSummaryFromState()
+    return true
+  }
+
+  function renderWorkerAccountSectionError(section, error, context = {}) {
+    if (context.accountKey && !isWorkerAccountLoadContextCurrent(context)) return
+    const message = error instanceof Error ? error.message : String(error ?? 'Nie udalo sie pobrac danych konta.')
+    if (section === 'orders') {
+      const orders = document.getElementById('waOrderRows')
+      if (orders) orders.innerHTML = tableEmptyRow(7, message, 'worker-account-error')
+      setText('waOrdersLabel', 'Blad pobierania danych')
+    } else if (section === 'activity') {
+      const events = document.getElementById('waEventRows')
+      if (events) events.innerHTML = tableEmptyRow(10, message, 'worker-account-error', { withoutSelect: true })
+      setText('waEventsLabel', 'Blad pobierania danych')
+      renderRecentActivityPreview()
+    } else if (section === 'time') {
+      const time = document.getElementById('waTimeRows')
+      if (time) time.innerHTML = tableEmptyRow(10, message, 'worker-account-error')
+      appState.workerAccountTimeRows = []
+      appState.workerAccountTimeSelectedKeys = new Set()
+      appState.workerAccountTimeCurrentPageKeys = []
+      appState.workerAccountTimePage = 1
+      setTimeMonthCard([])
+      setText('waTimePageLabel', 'Strona 1 / 1')
+      setText('waTimeShownLabel', `Wyswietlono: 0 - Wszystkie: 0 - Na strone: ${WORKER_ACCOUNT_TIME_PAGE_SIZE}`)
+      syncTimeSelectionUi()
+    }
+    showTransientNotice(message, 'error')
+  }
+
+  async function loadWorkerAccountSummary(worker, options = {}) {
+    const context = makeWorkerAccountLoadContext(worker, 'summary', options)
+    if (!isWorkerAccountLoadContextCurrent(context)) return false
+    appState.workerAccountSummaryLoadingKey = context.accountKey
+    appState.workerAccountDataLoadingKey = context.accountKey
+    applyWorkerAccountOrders(worker, context)
+    appState.workerAccountSummaryLoadedKey = context.accountKey
+    if (appState.workerAccountSummaryLoadingKey === context.accountKey) appState.workerAccountSummaryLoadingKey = ''
+    if (appState.workerAccountDataLoadingKey === context.accountKey) appState.workerAccountDataLoadingKey = ''
+    return true
+  }
+
+  async function loadWorkerAccountOrders(worker, options = {}) {
+    const context = makeWorkerAccountLoadContext(worker, 'orders', options)
+    if (!isWorkerAccountLoadContextCurrent(context)) return false
+    if (appState.workerAccountOrdersLoadedKey === context.accountKey && options.force !== true) {
+      renderOrdersTable()
+      return true
+    }
+
+    appState.workerAccountOrdersLoadingKey = context.accountKey
+    if (!appState.workerAccountOrderRows.length) setOrdersLoading()
+    applyWorkerAccountOrders(worker, context)
+
+    if (options.refreshRemote === true && typeof ordersSyncRemoteTimelineOrders === 'function') {
+      void ordersSyncRemoteTimelineOrders({ render: false })
+        .then(() => {
+          applyWorkerAccountOrders(worker, context)
+        })
+        .catch((error) => {
+          if (isWorkerAccountLoadContextCurrent(context)) console.warn('[worker-account/orders] remote refresh failed', error)
+        })
+        .finally(() => {
+          if (appState.workerAccountOrdersLoadingKey === context.accountKey && isWorkerAccountLoadContextCurrent(context)) {
+            appState.workerAccountOrdersLoadingKey = ''
+          }
+        })
+    } else if (appState.workerAccountOrdersLoadingKey === context.accountKey) {
+      appState.workerAccountOrdersLoadingKey = ''
+    }
+
+    return true
+  }
+
+  async function loadWorkerAccountTime(worker, options = {}) {
+    const range = options.range ?? buildTimeFetchRange()
+    const rangeKey = workerAccountTimeRangeKey(range)
+    const context = makeWorkerAccountLoadContext(worker, 'time', { ...options, rangeKey })
+    const loadKey = workerAccountSectionLoadKey(context)
+    if (!isWorkerAccountLoadContextCurrent(context)) return false
+    if (appState.workerAccountTimeLoadedKey === loadKey && options.force !== true) {
+      setTimeMonthCard(appState.workerAccountTimeRows)
+      renderTimeTable()
+      return true
+    }
+
+    appState.workerAccountTimeLoadingKey = loadKey
+    setTimeLoading()
+    try {
+      const sourceRows = sortRowsByLatest(
+        await fetchWorkerTimeRows(appState.session.orgId, worker, range, { allowBroadFallback: options.allowBroadFallback }),
+      ).map((row) => stampWorkerIdentity(row, worker))
+      if (!isWorkerAccountLoadContextCurrent(context) || appState.workerAccountTimeLoadingKey !== loadKey) return false
+
+      const filteredRows = filterTimeRowsForRange(sourceRows, { from: range.from, to: range.to })
+      appState.workerAccountAllTimeRows = filteredRows
+      appState.workerAccountTimeRows = aggregateTimeRows(filteredRows, worker)
+      appState.workerAccountTimeSelectedKeys = new Set()
+      appState.workerAccountTimeCurrentPageKeys = []
+      appState.workerAccountTimePage = 1
+      appState.workerAccountTimeLoadedKey = loadKey
+      appState.workerAccountLoadedWorkerKey = context.accountKey
+      setTimeMonthCard(appState.workerAccountTimeRows)
+      renderTimeTable()
+      renderWorkerAccountSummaryFromState()
+      return true
+    } catch (error) {
+      renderWorkerAccountSectionError('time', error, context)
+      return false
+    } finally {
+      if (appState.workerAccountTimeLoadingKey === loadKey && isWorkerAccountLoadContextCurrent(context)) {
+        appState.workerAccountTimeLoadingKey = ''
+      }
+    }
+  }
+
+  async function loadWorkerAccountEvents(worker, options = {}) {
+    const context = makeWorkerAccountLoadContext(worker, 'activity', options)
+    if (!isWorkerAccountLoadContextCurrent(context)) return false
+    if (appState.workerAccountActivityLoadedKey === context.accountKey && options.force !== true) {
+      renderEventsTable()
+      renderRecentActivityPreview()
+      return true
+    }
+
+    appState.workerAccountActivityLoadingKey = context.accountKey
+    setActivityLoading()
+    try {
+      const eventRows = sortRowsByLatest(
+        await fetchWorkerEventRows(appState.session.orgId, worker, { pageSize: options.pageSize ?? WORKER_ACCOUNT_ACTIVITY_FETCH_PAGE_SIZE }),
+      ).map((row) => stampWorkerIdentity(row, worker))
+      if (!isWorkerAccountLoadContextCurrent(context) || appState.workerAccountActivityLoadingKey !== context.accountKey) return false
+      appState.workerAccountEventsRows = eventRows
+      appState.workerAccountActivityLoadedKey = context.accountKey
+      appState.workerAccountLoadedWorkerKey = context.accountKey
+      renderEventsTable()
+      renderRecentActivityPreview()
+      renderWorkerAccountSummaryFromState()
+      return true
+    } catch (error) {
+      renderWorkerAccountSectionError('activity', error, context)
+      return false
+    } finally {
+      if (appState.workerAccountActivityLoadingKey === context.accountKey && isWorkerAccountLoadContextCurrent(context)) {
+        appState.workerAccountActivityLoadingKey = ''
+      }
+    }
+  }
+
+  async function _loadWorkerAccountData(worker, options = {}) {
+    const context = makeWorkerAccountLoadContext(worker, 'all', options)
+    if (!isWorkerAccountLoadContextCurrent(context)) return false
+    await Promise.allSettled([
+      loadWorkerAccountSummary(worker, context),
+      loadWorkerAccountOrders(worker, { ...context, refreshRemote: options.refreshRemote === true }),
+      loadWorkerAccountTime(worker, context),
+      loadWorkerAccountEvents(worker, context),
+    ])
+    return isWorkerAccountLoadContextCurrent(context)
+  }
+
+  function initializeTimeFilters(options = {}) {
+    if (options.forceDefault) {
+      resetTimeFiltersToCurrentMonth()
+      return
+    }
+    const month = currentMonthRange()
+    const from = document.getElementById('waTimeFrom')
+    const to = document.getElementById('waTimeTo')
+    if (from && !from.value) from.value = month.from
+    if (to && !to.value) to.value = month.to
+    syncTimeMonthPickFromRange()
+  }
+
+  function buildTimeFetchRange() {
+    const from = String(document.getElementById('waTimeFrom')?.value ?? '').trim()
+    const to = String(document.getElementById('waTimeTo')?.value ?? '').trim()
+    return {
+      page: 1,
+      pageSize: WORKER_ACCOUNT_TIME_FETCH_PAGE_SIZE,
+      from,
+      to,
+      fromIso: from && typeof ymdToIsoRangeStart === 'function' ? ymdToIsoRangeStart(from) : undefined,
+      toIso: to && typeof ymdToIsoRangeEnd === 'function' ? ymdToIsoRangeEnd(to) : undefined,
+    }
+  }
+
+  async function refreshTimeTab() {
+    const worker = resolveCurrentWorker()
+    if (!worker || !appState.session?.orgId) return
+    const sessionContext = ensureWorkerAccountSession(worker)
+    syncTimeMonthPickFromRange()
+    await loadWorkerAccountTime(worker, { ...sessionContext, force: true })
+  }
+
+  async function refreshTimeAfterWorkdayChange(options = {}) {
+    const changedWorkerLogin = String(options?.workerLogin ?? options?.login ?? '').trim().toLowerCase()
+    const worker = resolveCurrentWorker()
+    if (!worker || !appState.session?.orgId) return false
+
+    const currentLogin = String(workerLogin(worker) ?? '').trim().toLowerCase()
+    if (changedWorkerLogin && currentLogin && changedWorkerLogin !== currentLogin) {
+      return false
+    }
+
+    appState.workerAccountTimeLoadedKey = ''
+    appState.workerAccountTimeLoadingKey = ''
+
+    if (appState.workerAccountActiveTab !== 'time') {
+      return true
+    }
+
+    const sessionContext = ensureWorkerAccountSession(worker)
+    syncTimeMonthPickFromRange()
+    await loadWorkerAccountTime(worker, { ...sessionContext, force: true })
+    return true
+  }
+
+  function _renderWorkerAccountLoadError(error, accountKey = '') {
+    const currentKey = currentWorkerAccountKey()
+    if (accountKey && currentKey && currentKey !== accountKey) return
+    const message = error instanceof Error ? error.message : String(error ?? 'Nie udalo sie pobrac danych konta.')
+    resetWorkerAccountRuntimeState({ clearLoadingKeys: true })
+    const events = document.getElementById('waEventRows')
+    const orders = document.getElementById('waOrderRows')
+    const time = document.getElementById('waTimeRows')
+    if (events) events.innerHTML = tableEmptyRow(10, message, 'worker-account-error', { withoutSelect: true })
+    if (orders) orders.innerHTML = tableEmptyRow(7, message, 'worker-account-error')
+    if (time) time.innerHTML = tableEmptyRow(10, message, 'worker-account-error')
+    setText('waEventsLabel', 'Blad pobierania danych')
+    setText('waOrdersLabel', 'Blad pobierania danych')
+    setText('waTimePageLabel', 'Strona 1 / 1')
+    setText('waTimeShownLabel', `Wyswietlono: 0 - Wszystkie: 0 - Na strone: ${WORKER_ACCOUNT_TIME_PAGE_SIZE}`)
+    setTimeMonthCard([])
+    renderRecentActivityPreview()
+    syncTimeSelectionUi()
+    showTransientNotice(message, 'error')
+  }
+
+  function ensureWorkerAccountTabData(tab) {
+    if (tab !== 'account' && tab !== 'activity' && tab !== 'time' && tab !== 'orders') return
+    const worker = resolveCurrentWorker()
+    const accountKey = worker ? workerAccountKey(worker) : ''
+    if (!worker || !accountKey) return
+    const sessionContext = ensureWorkerAccountSession(worker)
+    if (tab === 'time') syncTimeMonthPickFromRange()
+    startWorkerAccountSectionLoads(worker, sessionContext, { tab })
+  }
+
+  function activateTab(tab, options = {}) {
+    const nextTab = WORKER_ACCOUNT_TABS.has(tab) ? tab : 'account'
+    const previousEditTab = appState.workerAccountEditTab
+    if (previousEditTab && previousEditTab !== nextTab) {
+      cancelEditMode(previousEditTab, { silent: true })
+    }
+    appState.workerAccountActiveTab = nextTab
+    document.querySelectorAll('[data-wa-tab]').forEach((button) => {
+      button.classList.toggle('is-active', button.getAttribute('data-wa-tab') === nextTab)
+    })
+    document.querySelectorAll('[data-wa-panel]').forEach((panel) => {
+      panel.classList.toggle('is-active', panel.getAttribute('data-wa-panel') === nextTab)
+    })
+    if (options.refresh !== false) ensureWorkerAccountTabData(nextTab)
+  }
+
+  function focusField(id) {
+    window.requestAnimationFrame(() => {
+      const input = document.getElementById(id)
+      if (input && typeof input.focus === 'function' && !input.disabled) {
+        input.focus()
+        if (typeof input.select === 'function') input.select()
+      }
+    })
+  }
+
+  function readAccountPayload(worker) {
+    const admin = canDeleteWorkers()
+    const nextLogin = admin ? sanitizeLogin(document.getElementById('waLogin')?.value) : workerLogin(worker)
+    const nextWorkerId = admin
+      ? String(document.getElementById('waWorkerId')?.value ?? '').trim() || workerId(worker)
+      : workerId(worker)
+    const nextRole = admin ? String(document.getElementById('waRole')?.value ?? workerRole(worker)).trim() : workerRole(worker)
+    const nextWorkerType = admin
+      ? workerTypeValue(document.getElementById('waWorkerType')?.value ?? worker)
+      : workerTypeValue(worker)
+    const contractType = admin
+      ? String(document.getElementById('waContractType')?.value ?? '').trim()
+      : String(workerField(worker, ['contractType', 'agreementType', 'employmentContractType'], '') ?? '').trim()
+    const contractFrom = admin
+      ? String(document.getElementById('waContractFrom')?.value ?? '').trim()
+      : dateInputValue(workerField(worker, ['contractFrom', 'agreementFrom', 'contractStart', 'contractStartDate']))
+    const contractTo = admin
+      ? String(document.getElementById('waContractTo')?.value ?? '').trim()
+      : dateInputValue(workerField(worker, ['contractTo', 'agreementTo', 'contractEnd', 'contractEndDate', 'contractValidTo']))
+    const bhpFrom = admin
+      ? String(document.getElementById('waBhpFrom')?.value ?? '').trim()
+      : dateInputValue(workerField(worker, ['bhpFrom', 'bhpStart', 'bhpStartDate', 'safetyTrainingFrom']))
+    const bhpTo = admin
+      ? String(document.getElementById('waBhpTo')?.value ?? '').trim()
+      : dateInputValue(workerField(worker, ['bhpTo', 'bhpUntil', 'bhpValidTo', 'bhpEnd', 'bhpEndDate', 'safetyTrainingTo']))
+    const medicalFrom = admin
+      ? String(document.getElementById('waMedicalFrom')?.value ?? '').trim()
+      : dateInputValue(workerField(worker, ['medicalExamFrom', 'occupationalMedicineFrom', 'medicalFrom', 'medicalStartDate']))
+    const medicalTo = admin
+      ? String(document.getElementById('waMedicalTo')?.value ?? '').trim()
+      : dateInputValue(workerField(worker, ['medicalExamTo', 'occupationalMedicineTo', 'medicalTo', 'medicalExamValidTo', 'medicalEndDate']))
+    const trainings = admin ? selectedTrainingValues() : workerTrainingValues(worker)
+    return {
+      workerId: nextWorkerId,
+      name: String(document.getElementById('waName')?.value ?? '').trim(),
+      workerName: String(document.getElementById('waName')?.value ?? '').trim(),
+      login: workerLogin(worker),
+      newLogin: nextLogin,
+      email: String(document.getElementById('waEmail')?.value ?? '').trim(),
+      loginEmail: String(document.getElementById('waEmail')?.value ?? '').trim(),
+      phone: String(document.getElementById('waPhone')?.value ?? '').trim(),
+      role: nextRole,
+      workerType: nextWorkerType,
+      contractType,
+      agreementType: contractType,
+      contractFrom,
+      contractTo,
+      bhpFrom,
+      bhpTo,
+      medicalExamFrom: medicalFrom,
+      medicalExamTo: medicalTo,
+      occupationalMedicineFrom: medicalFrom,
+      occupationalMedicineTo: medicalTo,
+      trainings,
+      trainingList: trainings,
+      active: admin ? String(document.getElementById('waActive')?.value ?? '1') === '1' : isWorkerActive(worker),
+      editedBy: String(appState.session?.name ?? appState.session?.email ?? '').trim(),
+      authUid: worker.authUid ?? '',
+    }
+  }
+
+  async function saveWorkerPatch(payload, successMessage, options = {}) {
+    const worker = resolveCurrentWorker()
+    if (!worker || !appState.session?.orgId) return null
+    const currentLogin = workerLogin(worker)
+    if (!payload.name || !payload.email) {
+      alert('Uzupelnij imie i email pracownika.')
+      return null
+    }
+    if (canDeleteWorkers() && !LOGIN_LOCAL_PART_PATTERN.test(String(payload.newLogin ?? '').trim())) {
+      alert('Login musi byc lokalna czescia emaila bez @ i moze zawierac litery, cyfry, ".", "-" oraz "_".')
+      return null
+    }
+    const updated = await updateWorker(appState.session.orgId, currentLogin, payload)
+    const updatedLogin = updated?.loginChangeSkipped
+      ? currentLogin
+      : String(updated?.login ?? payload.newLogin ?? currentLogin).trim() || currentLogin
+    const nextWorker = {
+      ...worker,
+      ...updated,
+      ...payload,
+      login: updatedLogin,
+      workerLogin: updatedLogin,
+      id: String(updated?.workerId ?? payload.workerId ?? workerId(worker)).trim() || updatedLogin,
+      workerId: String(updated?.workerId ?? payload.workerId ?? workerId(worker)).trim() || updatedLogin,
+      name: updated?.name ?? payload.name,
+      workerName: updated?.workerName ?? payload.workerName ?? payload.name,
+      role: updated?.role ?? payload.role,
+      type: updated?.type ?? payload.role,
+      workerType: workerTypeValue(updated?.workerType ?? payload.workerType ?? worker),
+      active: payload.active,
+      email: updated?.email ?? payload.email,
+      loginEmail: updated?.loginEmail ?? payload.loginEmail ?? payload.email,
+      phone: updated?.phone ?? payload.phone,
+      editedBy: payload.editedBy,
+    }
+    updateCurrentWorker(nextWorker)
+    applyWorkerToCachedRows(currentLogin, nextWorker)
+    renderWorkerCard(nextWorker)
+    renderForms(nextWorker)
+    if (successMessage && options.silent !== true) showTransientNotice(successMessage, 'success')
+    return nextWorker
+  }
+
+  async function saveAccount() {
+    if (!canManageWorkers()) {
+      alert('Brak uprawnien do edycji danych pracownika.')
+      return
+    }
+    const worker = resolveCurrentWorker()
+    if (!worker) return
+    const updated = await saveWorkerPatch(readAccountPayload(worker), 'Dane uzytkownika zapisane.')
+    if (updated) exitEditMode('account')
+    return updated
+  }
+
+  async function deactivateWorkerAccount() {
+    if (!canDeleteWorkers()) {
+      alert('Dezaktywacja konta jest dostepna tylko dla Admina.')
+      return
+    }
+    const worker = resolveCurrentWorker()
+    if (!worker) return
+    if (!isWorkerActive(worker)) {
+      showTransientNotice('Konto pracownika jest juz nieaktywne.', 'info')
+      return
+    }
+    const confirmed = window.confirm(`Dezaktywowac konto pracownika ${workerName(worker) || workerLogin(worker)}?`)
+    if (!confirmed) return
+    await saveWorkerPatch(
+      {
+        ...readAccountPayload(worker),
+        active: false,
+      },
+      'Konto pracownika zostalo dezaktywowane.',
+    )
+  }
+
+  function sanitizeLogin(value) {
+    return String(value ?? '').trim().toLowerCase()
+  }
+
+  async function saveSecurity() {
+    if (!canDeleteWorkers()) {
+      alert('Login i haslo moze zmienic tylko Admin.')
+      return
+    }
+    const worker = resolveCurrentWorker()
+    if (!worker || !appState.session?.orgId) return
+    const button = document.getElementById('waSaveSecurityBtn')
+    const currentLogin = workerLogin(worker)
+    const nextLogin = sanitizeLogin(document.getElementById('waLogin')?.value)
+    if (!LOGIN_LOCAL_PART_PATTERN.test(nextLogin)) {
+      alert('Login musi byc lokalna czescia emaila bez @ i moze zawierac litery, cyfry, ".", "-" oraz "_".')
+      return
+    }
+    const newPassword = String(document.getElementById('waNewPassword')?.value ?? '').trim()
+    const repeatPassword = String(document.getElementById('waNewPassword2')?.value ?? '').trim()
+    if (newPassword || repeatPassword) {
+      if (newPassword !== repeatPassword) {
+        alert('Hasla nie sa takie same.')
+        return
+      }
+      if (newPassword.length < 6) {
+        alert('Haslo musi miec co najmniej 6 znakow.')
+        return
+      }
+    }
+
+    const loginChanged = nextLogin !== currentLogin
+    const passwordChanged = Boolean(newPassword)
+    if (!loginChanged && !passwordChanged) {
+      showTransientNotice('Brak zmian w sekcji bezpieczenstwa.', 'info')
+      exitEditMode('security')
+      return true
+    }
+
+    if (button) button.disabled = true
+    try {
+      let updatedWorker = worker
+      if (loginChanged) {
+        updatedWorker = await saveWorkerPatch(
+          {
+            ...readAccountPayload(worker),
+            login: currentLogin,
+            newLogin: nextLogin,
+          },
+          '',
+          { silent: true },
+        )
+        if (!updatedWorker) return
+      }
+
+      const effectiveLogin = workerLogin(updatedWorker || worker)
+      if (passwordChanged) {
+        await setWorkerPassword(appState.session.orgId, effectiveLogin, newPassword)
+        setInputValue('waNewPassword', '')
+        setInputValue('waNewPassword2', '')
+        resetNewPasswordVisibility()
+      }
+
+      if (updatedWorker?.loginChangeSkipped || updatedWorker?.authWarning) {
+        const warning = String(updatedWorker.authWarning ?? '').trim()
+        showTransientNotice(
+          warning || 'Dane zapisano, ale backend zglosil ostrzezenie przy zmianie loginu.',
+          'warning',
+        )
+        exitEditMode('security')
+        return true
+      }
+
+      if (loginChanged && passwordChanged) {
+        showTransientNotice('Zapisano login i haslo pracownika.', 'success')
+      } else if (loginChanged) {
+        showTransientNotice('Zapisano nowy login pracownika.', 'success')
+      } else {
+        showTransientNotice('Zapisano nowe haslo pracownika.', 'success')
+      }
+      exitEditMode('security')
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? 'Nie udalo sie zapisac ustawien bezpieczenstwa.')
+      showTransientNotice(message, 'error')
+      return false
+    } finally {
+      syncEditModeControls(resolveCurrentWorker())
+    }
+  }
+
+  async function saveRole() {
+    if (!canDeleteWorkers()) {
+      alert('Role moze zmienic tylko Admin.')
+      return
+    }
+    const worker = resolveCurrentWorker()
+    if (!worker) return
+    const nextRole = String(document.getElementById('waRole')?.value ?? 'WORKER').trim()
+    const nextWorkerType = workerTypeValue(document.getElementById('waWorkerType')?.value ?? worker)
+    const updated = await saveWorkerPatch(
+      {
+        ...readAccountPayload(worker),
+        role: nextRole,
+        workerType: nextWorkerType,
+      },
+      'Rola i typ pracownika zapisane.',
+    )
+    if (updated) exitEditMode('roles')
+    return updated
+  }
+
+  async function revealPassword() {
+    if (!canRevealWorkerPasswords()) {
+      alert('Haslo moze pobrac tylko Admin.')
+      return
+    }
+    const worker = resolveCurrentWorker()
+    if (!worker || !appState.session?.orgId) return
+    const input = document.getElementById('waCurrentPassword')
+    const button = document.getElementById('waRevealPasswordBtn')
+    if (button) button.disabled = true
+    try {
+      const response = await revealWorkerPassword(appState.session.orgId, workerLogin(worker))
+      const password = String(response?.password ?? '').trim()
+      if (input) {
+        input.value = password
+        input.type = password ? 'text' : 'password'
+        input.placeholder = password ? '' : String(response?.message ?? 'Brak hasla w sejfie.')
+      }
+      if (!password) {
+        showTransientNotice(String(response?.message ?? 'Brak hasla w sejfie.'), 'warning')
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? 'Nie udalo sie pobrac hasla.')
+      showTransientNotice(message, 'error')
+    } finally {
+      if (button) button.disabled = !canRevealWorkerPasswords()
+    }
+  }
+
+  function workerAccountCurrentUserName() {
+    return String(appState.session?.name ?? appState.session?.login ?? appState.session?.email ?? '').trim()
+  }
+
+  function findWorkerAccountTimeRow(dayKey) {
+    const key = String(dayKey ?? '').trim()
+    if (!key) return null
+    const rows = Array.isArray(appState.workerAccountTimeRows) ? appState.workerAccountTimeRows : []
+    return rows.find((row) => String(row.dayKey ?? '').trim() === key) ?? null
+  }
+
+  function setWorkerAccountDayEditorOpen(open) {
+    const overlay = document.getElementById('waDayEditorOverlay')
+    if (!overlay) return
+    overlay.hidden = !open
+    overlay.style.display = open ? 'flex' : 'none'
+  }
+
+  function updateWorkerAccountDayPreview() {
+    const dateValue = String(document.getElementById('waDayDateInput')?.value ?? '').trim()
+    const startValue = String(document.getElementById('waDayStartTime')?.value ?? '').trim()
+    const endValue = String(document.getElementById('waDayEndTime')?.value ?? '').trim()
+    const workInput = document.getElementById('waDayWork')
+    const startAt = localDateTimeToIso(dateValue, startValue)
+    const endAt = localDateTimeToIso(dateValue, endValue)
+    const durationSec = startAt && endAt ? timeRangeSeconds(startAt, endAt) : 0
+    if (workInput) workInput.value = durationSec > 0 ? formatEventDuration(durationSec) : '00:00'
+    return { dateValue, startValue, endValue, startAt, endAt, durationSec }
+  }
+
+  function closeWorkerAccountDayEditor() {
+    appState.workerAccountDayEditorItem = null
+    setWorkerAccountDayEditorOpen(false)
+    const saveButton = document.getElementById('waDaySaveBtn')
+    if (saveButton) {
+      saveButton.disabled = false
+      saveButton.textContent = 'Zapisz'
+    }
+  }
+
+  function openWorkerAccountDayEditor(dayKey) {
+    if (!canDeleteWorkers()) return
+    const worker = resolveCurrentWorker()
+    if (!worker) return
+    const item = findWorkerAccountTimeRow(dayKey)
+    const sourceRows = Array.isArray(item?.sourceRows) ? item.sourceRows : []
+    if (!item || !sourceRows.length) {
+      showTransientNotice('Nie znaleziono rekordow Workday dla tego dnia.', 'error')
+      return
+    }
+
+    appState.workerAccountDayEditorItem = { ...item, mode: 'edit', sourceRows }
+    setInputValue('waDayDateInput', isoToDateInput(item.dayKey || item.startAt || item.endAt))
+    setInputValue('waDayStartTime', isoToTimeInput(item.startAt) || '00:00')
+    setInputValue('waDayEndTime', isoToTimeInput(item.endAt))
+    setInputValue('waDayComment', item.comment || '')
+    updateWorkerAccountDayPreview()
+    setWorkerAccountDayEditorOpen(true)
+    setTimeout(() => document.getElementById('waDayDateInput')?.focus?.(), 0)
+  }
+
+  async function saveWorkerAccountDayEditor() {
+    const item = appState.workerAccountDayEditorItem
+    const worker = resolveCurrentWorker()
+    if (!item || !worker || !appState.session?.orgId) {
+      showTransientNotice('Brak aktywnego dnia pracy do zapisania.', 'error')
+      return
+    }
+    if (typeof updateWorkday !== 'function') {
+      showTransientNotice('Brak funkcji zapisu Workday w kontekscie portalu.', 'error')
+      return
+    }
+
+    const sourceRows = Array.isArray(item.sourceRows) ? item.sourceRows : []
+    if (!sourceRows.length) {
+      showTransientNotice('Nie znaleziono rekordow Workday do aktualizacji.', 'error')
+      return
+    }
+
+    const rowsWithIds = sourceRows.map((source) => ({
+      source,
+      workdayId: String(source?.workdayId ?? source?.id ?? '').trim(),
+    }))
+    if (rowsWithIds.some((entry) => !entry.workdayId)) {
+      showTransientNotice('Nie znaleziono poprawnego WorkdayID do aktualizacji.', 'error')
+      return
+    }
+
+    const { dateValue, startAt, endAt, durationSec } = updateWorkerAccountDayPreview()
+    if (!dateValue || !startAt || !endAt) {
+      showTransientNotice('Uzupelnij date oraz godzine startu i konca pracy.', 'error')
+      return
+    }
+    if (durationSec <= 0) {
+      showTransientNotice('Koniec pracy musi byc pozniejszy niz start pracy.', 'error')
+      return
+    }
+    if (durationSec > 24 * 60 * 60) {
+      showTransientNotice('Zakres dnia pracy nie moze przekraczac 24 godzin.', 'error')
+      return
+    }
+
+    const comment = String(document.getElementById('waDayComment')?.value ?? '').trim()
+    const saveButton = document.getElementById('waDaySaveBtn')
+    if (saveButton) {
+      saveButton.disabled = true
+      saveButton.textContent = 'Zapisywanie...'
+    }
+
+    try {
+      const editorName = workerAccountCurrentUserName()
+      for (const { source, workdayId } of rowsWithIds) {
+        await updateWorkday(appState.session.orgId, workdayId, {
+          workerLogin: workerLogin(worker),
+          workerName: workerName(worker) || workerLogin(worker),
+          utilityRoomId: source.utilityRoomId || source.roomId || null,
+          startAt,
+          endAt,
+          durationSec,
+          status: 'CLOSED',
+          comment,
+          updatedBy: editorName,
+        })
+      }
+      closeWorkerAccountDayEditor()
+      appState.workerAccountTimeLoadedKey = ''
+      appState.workerAccountTimeLoadingKey = ''
+      await refreshTimeTab()
+      showTransientNotice('Zapisano dzien pracy i odswiezono tabele.', 'success')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? 'Nie udalo sie zapisac dnia pracy.')
+      showTransientNotice(message, 'error')
+    } finally {
+      if (saveButton) {
+        saveButton.disabled = false
+        saveButton.textContent = 'Zapisz'
+      }
+    }
+  }
+
+  function startWorkerAccountSectionLoads(worker, sessionContext, options = {}) {
+    const accountKey = String(sessionContext?.accountKey ?? workerAccountKey(worker)).trim()
+    const requestSeq = Number(sessionContext?.requestSeq ?? appState.workerAccountRequestSeq ?? 0)
+    const baseContext = { accountKey, requestSeq }
+    if (!accountKey || !isWorkerAccountLoadContextCurrent(baseContext)) return
+
+    const activeTab = WORKER_ACCOUNT_TABS.has(options.tab) ? options.tab : appState.workerAccountActiveTab
+    const range = options.range ?? buildTimeFetchRange()
+    const timeLoadKey = workerAccountSectionLoadKey({
+      accountKey,
+      rangeKey: workerAccountTimeRangeKey(range),
+    })
+
+    if (
+      appState.workerAccountSummaryLoadedKey !== accountKey &&
+      appState.workerAccountSummaryLoadingKey !== accountKey
+    ) {
+      void loadWorkerAccountSummary(worker, baseContext)
+    } else {
+      renderWorkerAccountSummaryFromState()
+    }
+
+    if (appState.workerAccountTimeLoadedKey === timeLoadKey && options.forceTime !== true) {
+      if (activeTab === 'time') {
+        setTimeMonthCard(appState.workerAccountTimeRows)
+        renderTimeTable()
+      }
+      renderWorkerAccountSummaryFromState()
+    } else if (appState.workerAccountTimeLoadingKey !== timeLoadKey) {
+      void loadWorkerAccountTime(worker, {
+        ...baseContext,
+        range,
+        force: options.forceTime === true,
+      })
+    }
+
+    if (activeTab === 'account' || activeTab === 'activity') {
+      if (appState.workerAccountActivityLoadedKey === accountKey && options.forceActivity !== true) {
+        if (activeTab === 'activity') renderEventsTable()
+        renderRecentActivityPreview()
+        renderWorkerAccountSummaryFromState()
+      } else if (appState.workerAccountActivityLoadingKey !== accountKey) {
+        void loadWorkerAccountEvents(worker, {
+          ...baseContext,
+          force: options.forceActivity === true,
+        })
+      }
+    }
+
+    if (activeTab === 'orders') {
+      if (appState.workerAccountOrdersLoadedKey === accountKey && options.forceOrders !== true) {
+        renderOrdersTable()
+      } else if (appState.workerAccountOrdersLoadingKey !== accountKey) {
+        void loadWorkerAccountOrders(worker, {
+          ...baseContext,
+          force: options.forceOrders === true,
+          refreshRemote: true,
+        })
+      }
+    }
+  }
+
+  function renderWorkerAccountForWorker(worker, options = {}) {
+    if (!worker) return null
+    updateCurrentWorker(worker)
+    const accountKey = workerAccountKey(worker)
+    const canReuseSession = Boolean(
+      accountKey &&
+      appState.workerAccountCurrentKey === accountKey &&
+      Number(appState.workerAccountRequestSeq ?? 0) > 0 &&
+      options.forceSession !== true,
+    )
+    const sessionContext = canReuseSession
+      ? {
+          accountKey,
+          requestSeq: Number(appState.workerAccountRequestSeq ?? 0),
+        }
+      : beginWorkerAccountSession(worker)
+
+    setShellVisible(true)
+    renderWorkerCard(worker)
+    renderForms(worker)
+    initializeTimeFilters()
+    activateTab(appState.workerAccountActiveTab, { refresh: false })
+    startWorkerAccountSectionLoads(worker, sessionContext, options)
+    return sessionContext
+  }
+
+  async function fetchWorkerAccountForCurrentSession(force = false) {
+    if (!appState.session?.orgId) {
+      appState.workerAccountCurrentKey = ''
+      appState.workerAccountRequestSeq = Number(appState.workerAccountRequestSeq ?? 0) + 1
+      resetWorkerAccountRuntimeState({ clearLoadingKeys: true })
+      setShellVisible(false)
+      return
+    }
+
+    let worker = resolveCurrentWorker()
+    if (force || !worker) {
+      const rows = await getWorkers(appState.session.orgId, { forceRefresh: force }).catch(() => [])
+      if (Array.isArray(rows) && rows.length) {
+        appState.workers = rows
+        worker = resolveCurrentWorker()
+      }
+    }
+
+    if (!worker) {
+      appState.workerAccountCurrentKey = ''
+      appState.workerAccountRequestSeq = Number(appState.workerAccountRequestSeq ?? 0) + 1
+      resetWorkerAccountRuntimeState({ clearLoadingKeys: true })
+      setShellVisible(false)
+      return
+    }
+
+    renderWorkerAccountForWorker(worker, { forceSession: force })
+  }
+
+  function bindWorkerAccountViewFunctions(router) {
+    const binding = createBindingHelpers()
+    binding.add(window, 'worker-account-select', (event) => {
+      const worker = event?.detail?.worker
+      if (!worker) return
+      appState.workerAccountActiveTab = String(event?.detail?.tab ?? 'account').trim() || 'account'
+      renderWorkerAccountForWorker(worker, { forceSession: true })
+    })
+    binding.add(document.getElementById('waBackBtn'), 'click', () => router?.go?.('workerProfile'))
+    binding.add(document.getElementById('waEmptyBackBtn'), 'click', () => router?.go?.('workerProfile'))
+    binding.add(document.querySelector('#view-workerAccount .worker-account-tabs'), 'click', (event) => {
+      const button = event.target?.closest?.('[data-wa-tab]')
+      if (!button) return
+      activateTab(button.getAttribute('data-wa-tab'))
+    })
+    binding.add(document.getElementById('waEditAccountBtn'), 'click', () => enterEditMode('account'))
+    binding.add(document.getElementById('waEditSecurityBtn'), 'click', () => enterEditMode('security'))
+    binding.add(document.getElementById('waEditRolesBtn'), 'click', () => enterEditMode('roles'))
+    binding.add(document.getElementById('waCancelAccountBtn'), 'click', () => cancelEditMode('account'))
+    binding.add(document.getElementById('waCancelSecurityBtn'), 'click', () => cancelEditMode('security'))
+    binding.add(document.getElementById('waCancelRoleBtn'), 'click', () => cancelEditMode('roles'))
+    binding.add(document.getElementById('waSaveAccountBtn'), 'click', () => {
+      void saveAccount()
+    })
+    binding.add(document.getElementById('waSaveSecurityBtn'), 'click', () => {
+      void saveSecurity()
+    })
+    binding.add(document.getElementById('waSaveRoleBtn'), 'click', () => {
+      void saveRole()
+    })
+    binding.add(document.getElementById('waTopDeactivateBtn'), 'click', () => {
+      void deactivateWorkerAccount()
+    })
+    binding.add(document.getElementById('waRevealPasswordBtn'), 'click', () => {
+      void revealPassword()
+    })
+    binding.add(document.getElementById('waNewPasswordEyeBtn'), 'click', () => {
+      togglePasswordField('waNewPassword', 'waNewPasswordEyeBtn')
+    })
+    binding.add(document.getElementById('waNewPassword2EyeBtn'), 'click', () => {
+      togglePasswordField('waNewPassword2', 'waNewPassword2EyeBtn')
+    })
+    binding.add(document.getElementById('waTrainingToggle'), 'click', toggleTrainingDropdown)
+    binding.add(document.getElementById('waTrainingMenu'), 'change', (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      if (!target?.matches?.('[data-wa-training-option]')) return
+      const values = selectedTrainingValues()
+      updateTrainingToggleLabel(values)
+      renderTrainingPreview(values)
+      const option = target.closest('.worker-account-training-option')
+      if (option) option.setAttribute('aria-selected', target.checked ? 'true' : 'false')
+    })
+    binding.add(document, 'click', (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      if (!target || target.closest('#waTrainingField')) return
+      setTrainingDropdownOpen(false)
+    })
+    binding.add(document, 'keydown', (event) => {
+      if (event.key !== 'Escape') return
+      const dayOverlay = document.getElementById('waDayEditorOverlay')
+      if (dayOverlay && !dayOverlay.hidden) {
+        closeWorkerAccountDayEditor()
+        return
+      }
+      setTrainingDropdownOpen(false)
+    })
+    binding.add(document.getElementById('waRefreshTimeBtn'), 'click', () => {
+      void refreshTimeTab()
+    })
+    binding.add(document.getElementById('waApplyTimeBtn'), 'click', () => {
+      appState.workerAccountTimePage = 1
+      void refreshTimeTab()
+    })
+    binding.add(document.getElementById('waDownloadTimeBtn'), 'click', openTimeEvidenceExportModal)
+    binding.add(document.getElementById('waExportCloseBtn'), 'click', closeTimeEvidenceExportModal)
+    binding.add(document.getElementById('waExportCancelBtn'), 'click', closeTimeEvidenceExportModal)
+    binding.add(document.getElementById('waExportPreviewBtn'), 'click', () => {
+      void renderTimeEvidencePreview()
+    })
+    binding.add(document.getElementById('waExportCsvBtn'), 'click', () => {
+      void downloadTimeEvidence('csv')
+    })
+    binding.add(document.getElementById('waExportPdfBtn'), 'click', () => {
+      void downloadTimeEvidence('pdf')
+    })
+    binding.add(document.getElementById('waExportOverlay'), 'click', (event) => {
+      if (event.target === event.currentTarget) closeTimeEvidenceExportModal()
+    })
+    binding.add(document.getElementById('waExportOverlay'), 'change', (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      if (!target?.matches?.('[data-wa-export-col], input[name="waExportOrientation"], #waExportFrom, #waExportTo')) return
+      setTimeEvidencePreviewPlaceholder('Zmieniono ustawienia. Kliknij "Podgląd pliku", aby odswiezyc podglad PDF.')
+    })
+    binding.add(document.getElementById('waDayEditorOverlay'), 'click', (event) => {
+      if (event.target === event.currentTarget) closeWorkerAccountDayEditor()
+    })
+    binding.add(document.getElementById('waDayEditorClose'), 'click', closeWorkerAccountDayEditor)
+    binding.add(document.getElementById('waDayCancelBtn'), 'click', closeWorkerAccountDayEditor)
+    binding.add(document.getElementById('waDaySaveBtn'), 'click', () => {
+      void saveWorkerAccountDayEditor()
+    })
+    ;['waDayDateInput', 'waDayStartTime', 'waDayEndTime'].forEach((id) => {
+      binding.add(document.getElementById(id), 'input', updateWorkerAccountDayPreview)
+      binding.add(document.getElementById(id), 'change', updateWorkerAccountDayPreview)
+    })
+    binding.add(document.getElementById('waTimeMonthPick'), 'change', (event) => {
+      applyTimeMonthPick(event.target?.value)
+      appState.workerAccountTimePage = 1
+      void refreshTimeTab()
+    })
+    binding.add(document.getElementById('waTimeSelectAll'), 'change', (event) => {
+      setTimeRowsSelected(Boolean(event.target?.checked))
+      renderTimeTable()
+    })
+    binding.add(document.getElementById('waShell'), 'click', (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      const button = target?.closest('[data-wa-tab-shortcut]')
+      if (!button || button.disabled) return
+      activateTab(button.getAttribute('data-wa-tab-shortcut'))
+    })
+    binding.add(document.getElementById('waEventRows'), 'click', (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      const commentButton = target?.closest('[data-wa-event-comment]')
+      if (commentButton) {
+        const index = Number(commentButton.getAttribute('data-wa-event-comment'))
+        const row = Number.isInteger(index) ? appState.workerAccountEventsRows[index] : null
+        const comment = eventCommentText(row)
+        alert(comment || 'Brak komentarza dla tego zdarzenia.')
+        return
+      }
+      const button = target?.closest('[data-wa-event-edit]')
+      if (!button || !canDeleteWorkers()) return
+      const index = Number(button.getAttribute('data-wa-event-edit'))
+      const row = Number.isInteger(index) ? appState.workerAccountEventsRows[index] : null
+      if (row && typeof openEventEditor === 'function') {
+        void openEventEditor(row)
+      }
+    })
+    binding.add(document.getElementById('waTimeRows'), 'change', (event) => {
+      const checkbox = event.target?.closest?.('[data-wa-time-select]')
+      if (!(checkbox instanceof HTMLInputElement)) return
+      ensureTimeSelectionState()
+      const key = String(checkbox.getAttribute('data-wa-time-select') ?? '').trim()
+      if (!key) return
+      if (checkbox.checked) appState.workerAccountTimeSelectedKeys.add(key)
+      else appState.workerAccountTimeSelectedKeys.delete(key)
+      syncTimeSelectionUi()
+    })
+    binding.add(document.getElementById('waTimeRows'), 'click', (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      const button = target?.closest('[data-wa-time-detail]')
+      if (!button) return
+      openWorkerAccountDayEditor(button.getAttribute('data-wa-time-detail'))
+    })
+    ;[
+      ['waEventsPageSize', 'Events'],
+      ['waOrdersPageSize', 'Orders'],
+    ].forEach(([id, kind]) => {
+      binding.add(document.getElementById(id), 'change', (event) => {
+        const nextSize = Number(event.target?.value)
+        appState[`workerAccount${kind}PageSize`] = WORKER_ACCOUNT_PAGE_SIZES.includes(nextSize) ? nextSize : 5
+        appState[`workerAccount${kind}Page`] = 1
+        renderAllTables()
+      })
+    })
+    ;[
+      ['waEventsPrev', 'Events', -1],
+      ['waEventsNext', 'Events', 1],
+      ['waOrdersPrev', 'Orders', -1],
+      ['waOrdersNext', 'Orders', 1],
+      ['waTimePrev', 'Time', -1],
+      ['waTimeNext', 'Time', 1],
+    ].forEach(([id, kind, delta]) => {
+      binding.add(document.getElementById(id), 'click', () => {
+        appState[`workerAccount${kind}Page`] = Math.max(1, Number(appState[`workerAccount${kind}Page`] ?? 1) + delta)
+        renderAllTables()
+      })
+    })
+    ;['waTimeFrom', 'waTimeTo'].forEach((id) => {
+      binding.add(document.getElementById(id), 'keydown', (event) => {
+        if (event.key !== 'Enter') return
+        appState.workerAccountTimePage = 1
+        void refreshTimeTab()
+      })
+    })
+
+    return () => binding.done()
+  }
+
+  return {
+    fetch: fetchWorkerAccountForCurrentSession,
+    bind: bindWorkerAccountViewFunctions,
+    activateTab,
+    refreshTimeAfterWorkdayChange,
+  }
+}

@@ -1,0 +1,281 @@
+<h1 class="welcome zones-title">Strefy</h1>
+<p class="subwelcome zones-subtitle">Lista stref z szybkim filtrowaniem i edycją rekordów.</p>
+
+<div class="zones-kpi-grid" aria-label="Podsumowanie stref">
+  <article class="zones-kpi-card zones-kpi-card--all">
+    <div>
+      <p class="zones-kpi-label">Wszystkie strefy</p>
+      <strong id="znKpiAll">0</strong>
+      <span>Cały zakres filtrów</span>
+    </div>
+    <i class="zones-kpi-icon" aria-hidden="true"></i>
+  </article>
+
+  <article class="zones-kpi-card zones-kpi-card--clients">
+    <div>
+      <p class="zones-kpi-label">Klienci</p>
+      <strong id="znKpiClients">0</strong>
+      <span>Unikalni klienci</span>
+    </div>
+    <i class="zones-kpi-icon" aria-hidden="true"></i>
+  </article>
+
+  <article class="zones-kpi-card zones-kpi-card--clean">
+    <div>
+      <p class="zones-kpi-label">Funkcja CLEAN</p>
+      <strong id="znKpiClean">0</strong>
+      <span>Liczba stref CLEAN</span>
+    </div>
+    <i class="zones-kpi-icon" aria-hidden="true"></i>
+  </article>
+
+  <article class="zones-kpi-card zones-kpi-card--special">
+    <div>
+      <p class="zones-kpi-label">Strefa specjalna</p>
+      <strong id="znKpiSpecial">0</strong>
+      <span>Liczba stref specjalnych</span>
+    </div>
+    <i class="zones-kpi-icon" aria-hidden="true"></i>
+  </article>
+</div>
+
+<div class="toolbar zones-filter-panel" aria-label="Filtry stref">
+  <div class="tool">
+    <label for="znQr">Numer QR</label>
+    <input id="znQr" type="text" placeholder="np. BC0001 lub 123" />
+  </div>
+
+  <div class="tool">
+    <label for="znClientText">Klient</label>
+    <div class="zones-combo" data-zone-combo="znClient">
+      <input id="znClient" type="hidden" />
+      <div class="zones-combo-control">
+        <input
+          class="zones-combo-input"
+          id="znClientText"
+          type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls="znClientList"
+          aria-expanded="false"
+          placeholder="np. TS"
+        />
+        <button class="zones-combo-toggle" type="button" aria-label="Rozwin liste klientow" tabindex="-1"></button>
+      </div>
+      <div class="zones-combo-list" id="znClientList" role="listbox"></div>
+    </div>
+  </div>
+
+  <div class="tool">
+    <label for="znStrefaText">Strefa</label>
+    <div class="zones-combo" data-zone-combo="znStrefa">
+      <input id="znStrefa" type="hidden" />
+      <div class="zones-combo-control">
+        <input
+          class="zones-combo-input"
+          id="znStrefaText"
+          type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls="znStrefaList"
+          aria-expanded="false"
+          placeholder="Wybierz..."
+        />
+        <button class="zones-combo-toggle" type="button" aria-label="Rozwin liste stref" tabindex="-1"></button>
+      </div>
+      <div class="zones-combo-list" id="znStrefaList" role="listbox"></div>
+    </div>
+  </div>
+
+  <div class="tool">
+    <label for="znLoc">Lokalizacja</label>
+    <input id="znLoc" type="text" placeholder="np. Biurowiec" />
+  </div>
+
+  <div class="tool">
+    <label for="znFunkcjaText">Funkcja</label>
+    <div class="zones-combo" data-zone-combo="znFunkcja">
+      <input id="znFunkcja" type="hidden" />
+      <div class="zones-combo-control">
+        <input
+          class="zones-combo-input"
+          id="znFunkcjaText"
+          type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls="znFunkcjaList"
+          aria-expanded="false"
+          placeholder="np. CLEAN / START"
+        />
+        <button class="zones-combo-toggle" type="button" aria-label="Rozwin liste funkcji" tabindex="-1"></button>
+      </div>
+      <div class="zones-combo-list" id="znFunkcjaList" role="listbox"></div>
+    </div>
+  </div>
+
+  <div class="tool">
+    <label for="znEditedBy">Edytował</label>
+    <input id="znEditedBy" type="text" placeholder="np. Rafał" />
+  </div>
+
+  <div class="tool">
+    <label for="znQ">Szukaj</label>
+    <input id="znQ" type="text" placeholder="szukaj po tekście..." />
+  </div>
+
+  <div class="tool-actions">
+    <div class="zones-combo zones-combo--page-size" data-zone-combo="znPageSize">
+      <input id="znPageSize" type="hidden" />
+      <div class="zones-combo-control">
+        <input
+          class="zones-combo-input"
+          id="znPageSizeText"
+          type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls="znPageSizeList"
+          aria-expanded="false"
+          aria-label="Liczba rekordów na stronie"
+          readonly
+        />
+        <button class="zones-combo-toggle" type="button" aria-label="Rozwiń listę liczby rekordów" tabindex="-1"></button>
+      </div>
+      <div class="zones-combo-list" id="znPageSizeList" role="listbox"></div>
+    </div>
+    <button class="btn2" id="znAddBtn" type="button">Dodaj strefę</button>
+    <button class="btn2" id="znResetBtn" type="button">Odśwież</button>
+    <button class="btn2 primary" id="znSearchBtn" type="button">Szukaj</button>
+  </div>
+</div>
+
+<div class="zones-table" aria-label="Tabela stref">
+  <div class="zones-head">
+    <div>QR</div>
+    <div>Klient</div>
+    <div>Strefa</div>
+    <div>Lokalizacja</div>
+    <div>Funkcja</div>
+    <div>Data</div>
+    <div>Edytował</div>
+    <div>Akcja</div>
+  </div>
+
+  <div id="znRows"></div>
+
+  <div class="pager">
+    <div class="pager-left">
+      <span class="pager-label" id="znPageLabel">Strona 1 / 1</span>
+      <span id="znShownLabel">Wyświetlono: —</span>
+    </div>
+    <div class="pager-right">
+      <button class="btn2 pager-btn" id="znPrevBtn" type="button" aria-label="Poprzednia strona">←</button>
+      <button class="btn2 pager-btn" id="znNextBtn" type="button" aria-label="Następna strona">→</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="znEditorOverlay" aria-label="Edytuj strefę" role="dialog" aria-modal="true">
+  <div class="modal">
+    <h3>Edytuj / dodaj strefę</h3>
+    <p class="meta">
+      QR: <span class="mono" id="znQrLabel">—</span>
+      | Wiersz: <span class="mono" id="znRowNumberLabel">—</span>
+    </p>
+
+    <div class="grid">
+      <div class="field">
+        <label for="znEditQr">Numer QR (A) - blokada</label>
+        <input id="znEditQr" type="text" disabled />
+      </div>
+
+      <div class="field">
+        <label for="znEditClientText">Klient (B)</label>
+        <div class="zones-combo" data-zone-combo="znEditClient">
+          <input id="znEditClient" type="hidden" />
+          <div class="zones-combo-control">
+            <input
+              class="zones-combo-input"
+              id="znEditClientText"
+              type="text"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls="znEditClientList"
+              aria-expanded="false"
+              placeholder="-- wybierz --"
+            />
+            <button class="zones-combo-toggle" type="button" aria-label="Rozwin liste klientow" tabindex="-1"></button>
+          </div>
+          <div class="zones-combo-list" id="znEditClientList" role="listbox"></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="znEditStrefaText">Strefa (C)</label>
+        <div class="zones-combo" data-zone-combo="znEditStrefa">
+          <input id="znEditStrefa" type="hidden" />
+          <div class="zones-combo-control">
+            <input
+              class="zones-combo-input"
+              id="znEditStrefaText"
+              type="text"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls="znEditStrefaList"
+              aria-expanded="false"
+              placeholder="Wybierz..."
+              maxlength="300"
+            />
+            <button class="zones-combo-toggle" type="button" aria-label="Rozwin liste stref" tabindex="-1"></button>
+          </div>
+          <div class="zones-combo-list" id="znEditStrefaList" role="listbox"></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="znEditLoc">Lokalizacja (G)</label>
+        <input id="znEditLoc" type="text" maxlength="300" />
+      </div>
+
+      <div class="field">
+        <label for="znEditFunkcjaText">Funkcja kodu (D)</label>
+        <div class="zones-combo" data-zone-combo="znEditFunkcja">
+          <input id="znEditFunkcja" type="hidden" />
+          <div class="zones-combo-control">
+            <input
+              class="zones-combo-input"
+              id="znEditFunkcjaText"
+              type="text"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls="znEditFunkcjaList"
+              aria-expanded="false"
+              placeholder="-- wybierz --"
+            />
+            <button class="zones-combo-toggle" type="button" aria-label="Rozwin liste funkcji" tabindex="-1"></button>
+          </div>
+          <div class="zones-combo-list" id="znEditFunkcjaList" role="listbox"></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="znEditData">Data (F) - AUTO</label>
+        <input id="znEditData" type="text" disabled />
+      </div>
+
+      <div class="field">
+        <label for="znEditEdytowal">Edytował (E) - AUTO</label>
+        <input id="znEditEdytowal" type="text" disabled />
+      </div>
+    </div>
+
+    <div class="row-actions">
+      <div class="left">
+        <button class="btn2 danger" id="znDeleteBtn" type="button" style="display:none;">Usuń</button>
+      </div>
+      <div class="right">
+        <button class="btn2" id="znCancelBtn" type="button">Zamknij</button>
+        <button class="btn2 primary" id="znSaveBtn" type="button">Zapisz</button>
+      </div>
+    </div>
+  </div>
+</div>

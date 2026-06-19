@@ -13,11 +13,11 @@ env:
     availability:
       - BUILD
   - variable: API_PROXY_TARGET
-    value: https://europe-central2-iclean-room.cloudfunctions.net
+    value: https://cleanzi-01.web.app
     availability:
       - RUNTIME
   - variable: API_PROXY_FORWARDED_HOST
-    value: iclean-room.web.app
+    value: cleanzi-01.web.app
     availability:
       - RUNTIME
   - variable: FIREBASE_PROJECT_ID

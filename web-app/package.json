@@ -8,10 +8,8 @@
     },
     "scripts": {
         "dev": "vite",
-        "build": "vite build --mode both",
+        "build": "vite build --mode portal",
         "build:portal": "vite build --mode portal",
-        "build:mobile": "vite build --mode mobile",
-        "build:both": "vite build --mode both",
         "lint": "eslint .",
         "preview": "vite preview"
     },

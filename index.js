@@ -2,11 +2,12 @@ const fs = require('node:fs')
 const path = require('node:path')
 const http = require('node:http')
 const crypto = require('node:crypto')
+const { execFileSync } = require('node:child_process')
 const dotenv = require('dotenv')
 const admin = require('firebase-admin')
 const { Pool } = require('pg')
 const { AuthTypes, Connector, IpAddressTypes } = require('@google-cloud/cloud-sql-connector')
-const { Compute, GoogleAuth } = require('google-auth-library')
+const { Compute, GoogleAuth, OAuth2Client } = require('google-auth-library')
 
 function isTrue(value) {
   return ['1', 'true', 'yes', 'tak'].includes(
@@ -14,6 +15,26 @@ function isTrue(value) {
       .trim()
       .toLowerCase(),
   )
+}
+
+function normalizeApiProxyTarget(value) {
+  const target = String(value || 'https://cleanzi-01.web.app').trim().replace(/\/+$/, '')
+  try {
+    if (new URL(target).hostname.endsWith('.cloudfunctions.net')) {
+      return 'https://cleanzi-01.web.app'
+    }
+  } catch {
+    // Fall back to text matching below.
+  }
+  if (target.toLowerCase().includes('cloudfunctions.net')) {
+    return 'https://cleanzi-01.web.app'
+  }
+  return target
+}
+
+function normalizeApiProxyForwardedHost(value) {
+  const host = String(value || 'cleanzi-01.web.app').trim()
+  return host === 'iclean-room.web.app' ? 'cleanzi-01.web.app' : host
 }
 
 const NODE_ENV = String(process.env.NODE_ENV || '').trim().toLowerCase()
@@ -33,17 +54,22 @@ const HOST = '0.0.0.0'
 const DIST_DIR = path.join(__dirname, 'web-app', 'dist')
 const LOCAL_PORTAL_DATA_DIR = path.join(__dirname, '.local-data')
 const APP_TARGET = String(process.env.APP_TARGET || '').trim().toLowerCase()
-const API_PROXY_TARGET = String(process.env.API_PROXY_TARGET || 'https://europe-central2-iclean-room.cloudfunctions.net').trim().replace(/\/+$/, '')
-const API_PROXY_FORWARDED_HOST = String(process.env.API_PROXY_FORWARDED_HOST || 'iclean-room.web.app').trim()
+const API_PROXY_TARGET = normalizeApiProxyTarget(process.env.API_PROXY_TARGET)
+const API_PROXY_FORWARDED_HOST = normalizeApiProxyForwardedHost(process.env.API_PROXY_FORWARDED_HOST)
 const API_PROXY_TIMEOUT_MS = Number(process.env.API_PROXY_TIMEOUT_MS || 15000)
 const ADMIN_USERS_PATH = '/api/admin/users'
 const AUTH_PROVISION_WORKER_PATH = '/api/auth/provision-worker'
 const AUTH_ROLLBACK_WORKER_PATH = '/api/auth/rollback-worker'
 const ADMIN_WORKER_PASSWORD_REVEAL_PATH = '/api/admin/worker-password/reveal'
 const ADMIN_WORKER_PASSWORD_SET_PATH = '/api/admin/worker-password/set'
+const ADMIN_WORKER_PROFILE_UPDATE_PATH = '/api/admin/worker-profile/update'
+const ADMIN_WORKER_PROFILE_DELETE_PATH = '/api/admin/worker-profile/delete'
 const AUTH_SESSION_CONTEXT_PATH = '/api/auth/session-context'
 const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
+const PORTAL_EVENTS_PATH = '/api/portal/events'
+const MOBILE_STATE_PATH = '/api/mobile/state'
+const MOBILE_SCAN_PATH = '/api/mobile/scan'
 const DATACONNECT_LOCATION = String(process.env.FIREBASE_DATACONNECT_LOCATION || process.env.DATACONNECT_LOCATION || 'europe-west3').trim()
 const DATACONNECT_SERVICE = String(process.env.FIREBASE_DATACONNECT_SERVICE || process.env.DATACONNECT_SERVICE || 'iclean-room-service').trim()
 const DATACONNECT_CONNECTOR = String(process.env.FIREBASE_DATACONNECT_CONNECTOR || process.env.DATACONNECT_CONNECTOR || 'example').trim()
@@ -130,12 +156,8 @@ function normalizeTarget(value) {
   return ''
 }
 
-function resolveSpaEntryFile(target) {
-  const normalized = normalizeTarget(target)
-  const candidates =
-    normalized === 'mobile'
-      ? ['mobile.html', 'index.html', path.join('apps', 'mobile-web', 'mobile.html')]
-      : ['index.html', 'mobile.html', path.join('apps', 'portal-web', 'index.html')]
+function resolveSpaEntryFile() {
+  const candidates = ['index.html', path.join('apps', 'portal-web', 'index.html')]
 
   for (const candidate of candidates) {
     const fullPath = path.join(DIST_DIR, candidate)
@@ -215,6 +237,28 @@ function sendApiError(res, statusCode, code, message, details = undefined) {
   })
 }
 
+function sendMobileJson(res, statusCode, payload) {
+  res.writeHead(statusCode, withSecurityHeaders({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  }))
+  res.end(JSON.stringify(payload))
+}
+
+function sendMobileApiError(res, statusCode, code, message, details = undefined) {
+  sendMobileJson(res, statusCode, {
+    ok: false,
+    error: {
+      code,
+      message,
+      ...(details ? { details } : {}),
+    },
+  })
+}
+
 function isLocalDevelopmentRuntime() {
   return NODE_ENV !== 'production'
 }
@@ -255,6 +299,19 @@ function isDatabaseSslBadCertificateError(error) {
     code === 'ERR_SSL_SSLV3_ALERT_BAD_CERTIFICATE' ||
     message.includes('sslv3 alert bad certificate') ||
     message.includes('alert bad certificate')
+  )
+}
+
+function isDatabaseTlsVerificationError(error) {
+  const code = normalizeText(error?.code).toUpperCase()
+  const message = normalizeText(error?.message).toLowerCase()
+  return (
+    code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' ||
+    code === 'UNABLE_TO_GET_ISSUER_CERT' ||
+    code === 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY' ||
+    message.includes('unable to verify the first certificate') ||
+    message.includes('unable to verify') ||
+    message.includes('norton web/mail shield')
   )
 }
 
@@ -299,6 +356,15 @@ function mapDatabaseConnectionError(error) {
     }
   }
 
+  if (isDatabaseTlsVerificationError(error)) {
+    return {
+      status: 503,
+      code: 'DB_TLS_CERT_VERIFY_FAILED',
+      message:
+        'Cloud SQL auth dziala, ale lokalne polaczenie TLS do bazy jest przechwytywane albo podmieniane przez antivirus/proxy (na tym komputerze wykryto Norton Web/Mail Shield). Wylacz skanowanie SSL/TLS dla Node/Cloud SQL albo testuj worker-profile przez wdrozony Firebase Hosting.',
+    }
+  }
+
   if (code === 'ECONNREFUSED') {
     return {
       status: 503,
@@ -328,6 +394,15 @@ function mapDatabaseConnectionError(error) {
       status: 500,
       code: 'DB_NOT_FOUND',
       message: 'Skonfigurowana baza danych nie istnieje.',
+    }
+  }
+
+  if (code === '23503') {
+    return {
+      status: 409,
+      code: 'DB_FOREIGN_KEY_CONFLICT',
+      message:
+        'Baza danych blokuje usuniecie profilu, bo istnieja powiazane rekordy historyczne. Historia nie zostala usunieta; sprawdz ograniczenia FK dla worker albo uzyj trybu dezaktywacji.',
     }
   }
 
@@ -501,6 +576,52 @@ function isFirebaseCredentialError(error) {
   )
 }
 
+function isFirebaseTlsCertError(error) {
+  const values = [
+    error?.code,
+    error?.message,
+    error?.cause?.code,
+    error?.cause?.message,
+    error?.cause?.cause?.code,
+    error?.cause?.cause?.message,
+    error?.errorInfo?.code,
+    error?.errorInfo?.message,
+  ]
+  const text = normalizeText(values.filter(Boolean).join(' ')).toLowerCase()
+  return (
+    text.includes('unable_to_verify_leaf_signature') ||
+    text.includes('unable_to_get_issuer_cert') ||
+    text.includes('unable_to_get_issuer_cert_locally') ||
+    text.includes('self_signed_cert_in_chain') ||
+    text.includes('depth_zero_self_signed_cert') ||
+    text.includes('cert_has_expired') ||
+    text.includes('unable to verify the first certificate') ||
+    text.includes('unable to verify') ||
+    text.includes('self-signed certificate') ||
+    text.includes('--use-system-ca')
+  )
+}
+
+function isFirebaseNetworkError(error) {
+  const code = normalizeText(error?.code || error?.cause?.code).toLowerCase()
+  const message = normalizeText(error?.message || error?.cause?.message).toLowerCase()
+  return (
+    message.includes('fetch failed') ||
+    message.includes('network') ||
+    message.includes('socket') ||
+    message.includes('timeout') ||
+    message.includes('econnreset') ||
+    message.includes('etimedout') ||
+    message.includes('enotfound') ||
+    message.includes('eai_again') ||
+    code.includes('und_err') ||
+    code.includes('econnreset') ||
+    code.includes('etimedout') ||
+    code.includes('enotfound') ||
+    code.includes('eai_again')
+  )
+}
+
 function mapFirebaseAdminError(error) {
   const code = normalizeText(error?.code).toLowerCase()
   const restMessage = normalizeText(error?.firebaseRestMessage || error?.message).toUpperCase()
@@ -569,11 +690,46 @@ function mapFirebaseAdminError(error) {
     }
   }
 
+  if (isFirebaseTlsCertError(error)) {
+    return {
+      status: 503,
+      code: 'FIREBASE_TLS_CERT_ERROR',
+      message:
+        'Node backend nie ufa certyfikatowi Google/Firebase. Zrestartuj root npm run dev; dev-local uruchamia backend z NODE_OPTIONS=--use-system-ca. Jesli blad zostaje, dodaj firmowy CA przez NODE_EXTRA_CA_CERTS.',
+    }
+  }
+
+  if (isFirebaseCredentialError(error)) {
+    return {
+      status: 500,
+      code: 'FIREBASE_ADMIN_CREDENTIALS_MISSING',
+      message:
+        'Backend nie ma poswiadczen Firebase Admin. Dodaj serviceAccountKey.json obok index.js albo ustaw GOOGLE_APPLICATION_CREDENTIALS w root .env.local i zrestartuj npm run dev.',
+    }
+  }
+
   if (isFirebaseCredentialError(error)) {
     return {
       status: 500,
       code: 'FIREBASE_ADMIN_CREDENTIALS_MISSING',
       message: 'Backend nie ma lokalnych poĹ›wiadczeĹ„ Firebase Admin.',
+    }
+  }
+
+  if (isFirebaseNetworkError(error)) {
+    return {
+      status: 503,
+      code: 'FIREBASE_AUTH_UNAVAILABLE',
+      message:
+        'Lokalny backend nie moze polaczyc sie z Firebase Auth. Sprawdz dostep do internetu/proxy dla Node. Jesli to blad certyfikatu, uruchom backend z NODE_OPTIONS=--use-system-ca.',
+    }
+  }
+
+  if (isFirebaseNetworkError(error)) {
+    return {
+      status: 503,
+      code: 'FIREBASE_AUTH_UNAVAILABLE',
+      message: 'Lokalny backend nie moze polaczyc sie z Firebase Auth. Sprawdz dostep do internetu/proxy dla Node oraz lokalne poswiadczenia Firebase Admin, np. GOOGLE_APPLICATION_CREDENTIALS.',
     }
   }
 
@@ -586,16 +742,106 @@ function mapFirebaseAdminError(error) {
   }
 }
 
+function sendFirebaseVerificationError(res, error) {
+  const mapped = mapFirebaseAdminError(error)
+  const status = Number(error?.statusCode ?? mapped.status ?? 401)
+  const safeStatus = Number.isFinite(status) ? status : 401
+  sendApiError(
+    res,
+    safeStatus,
+    normalizeText(error?.publicCode) || mapped.code || 'UNAUTHENTICATED',
+    normalizeText(error?.publicMessage) || mapped.message || 'Token Firebase jest niepoprawny albo wygasl.',
+    publicErrorDetails(error),
+  )
+}
+
 function parseBearerToken(req) {
   const auth = normalizeText(req.headers.authorization)
   const match = /^Bearer\s+(.+)$/i.exec(auth)
   return match ? match[1].trim() : ''
 }
 
+function parseFirebaseServiceAccountFromEnv() {
+  const jsonValue = normalizeText(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON)
+  const base64Value = normalizeText(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64)
+  const defaultServiceAccountPath = path.join(__dirname, 'serviceAccountKey.json')
+  const fileValue = normalizeText(
+    process.env.FIREBASE_SERVICE_ACCOUNT_FILE ||
+      process.env.FIREBASE_SERVICE_ACCOUNT_PATH ||
+      process.env.GOOGLE_APPLICATION_CREDENTIALS,
+  )
+  const filePath = fileValue || (fs.existsSync(defaultServiceAccountPath) ? defaultServiceAccountPath : '')
+  const rawValue = jsonValue || (base64Value ? Buffer.from(base64Value, 'base64').toString('utf8') : '')
+  if (!rawValue && !filePath) {
+    return null
+  }
+
+  try {
+    const source = rawValue || fs.readFileSync(path.resolve(__dirname, filePath), 'utf8')
+    const serviceAccount = JSON.parse(source)
+    if (serviceAccount && typeof serviceAccount === 'object' && typeof serviceAccount.private_key === 'string') {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
+    }
+    return serviceAccount
+  } catch (error) {
+    console.error(`[firebase-admin] Invalid Firebase service account config: ${error?.message || error}`)
+    return null
+  }
+}
+
+function detectApplicationDefaultCredentialsPath() {
+  const candidates = []
+  if (process.env.APPDATA) {
+    candidates.push(path.join(process.env.APPDATA, 'gcloud', 'application_default_credentials.json'))
+  }
+  if (process.env.HOME) {
+    candidates.push(path.join(process.env.HOME, '.config', 'gcloud', 'application_default_credentials.json'))
+  }
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) || ''
+}
+
+function buildFirebaseAdminOptions() {
+  const serviceAccount = parseFirebaseServiceAccountFromEnv()
+  const options = {}
+  if (FIREBASE_PROJECT_ID) {
+    options.projectId = FIREBASE_PROJECT_ID
+  }
+  if (serviceAccount) {
+    options.credential = admin.credential.cert(serviceAccount)
+    if (!options.projectId && serviceAccount.project_id) {
+      options.projectId = serviceAccount.project_id
+    }
+  } else if (shouldUseGcloudFirebaseAdminCredential()) {
+    options.credential = createGcloudFirebaseAdminCredential()
+  } else if (detectApplicationDefaultCredentialsPath()) {
+    options.credential = admin.credential.applicationDefault()
+  }
+  return Object.keys(options).length ? options : undefined
+}
+
+function shouldUseGcloudFirebaseAdminCredential() {
+  const mode = normalizeText(
+    process.env.FIREBASE_ADMIN_AUTH_CLIENT ||
+      process.env.FIREBASE_ADMIN_CREDENTIAL ||
+      process.env.FIREBASE_AUTH_CLIENT,
+  ).toLowerCase()
+  return mode === 'gcloud' || mode === 'gcloud-auth'
+}
+
+function createGcloudFirebaseAdminCredential() {
+  return {
+    getAccessToken: async () => ({
+      access_token: readGcloudAccessToken(),
+      expires_in: 3600,
+    }),
+  }
+}
+
 function ensureFirebaseAdmin() {
   if (!firebaseAdminInitialized) {
     if (!admin.apps.length) {
-      admin.initializeApp(FIREBASE_PROJECT_ID ? { projectId: FIREBASE_PROJECT_ID } : undefined)
+      admin.initializeApp(buildFirebaseAdminOptions())
     }
     firebaseAdminInitialized = true
   }
@@ -832,6 +1078,7 @@ function buildProvisionWorkerPayload(body, requester = {}) {
   const role = roleInput ? normalizeUserRole(roleInput) : 'WORKER'
   const password = normalizeText(body?.password)
   const active = asPayloadBoolean(body?.active, true)
+  const workerId = normalizeText(body?.workerId || body?.id).slice(0, 64)
 
   const validationErrors = []
   if (!orgId) validationErrors.push('Brak poprawnego orgId.')
@@ -843,7 +1090,7 @@ function buildProvisionWorkerPayload(body, requester = {}) {
   if (password.length < 6) validationErrors.push('Haslo tymczasowe musi miec co najmniej 6 znakow.')
 
   return {
-    value: { orgId, loginLocalPart, email, workerName, role, password, active },
+    value: { orgId, loginLocalPart, email, workerName, role, password, active, workerId },
     validationErrors,
   }
 }
@@ -1191,12 +1438,27 @@ function buildWorkerAlreadyExistsError(existingWorker, login, email) {
   return error
 }
 
+function findExistingWorkerIdInRows(rows, workerId) {
+  const normalizedWorkerId = normalizeLower(workerId)
+  if (!normalizedWorkerId) return null
+  return (Array.isArray(rows) ? rows : []).find((row) => normalizeLower(row?.workerId ?? row?.worker_id ?? row?.id) === normalizedWorkerId) || null
+}
+
+function resolveWorkerIdForCreate(rows, requestedWorkerId) {
+  const workerId = normalizeText(requestedWorkerId).slice(0, 64)
+  if (workerId && findExistingWorkerIdInRows(rows, workerId)) {
+    throw createWorkerProfilePublicError(409, 'WORKER_ID_ALREADY_EXISTS', 'Ten ID pracownika jest juz zajety w tej organizacji.')
+  }
+  return workerId || resolveNextWorkerId(rows)
+}
+
 async function createAdminManagedUserViaDataConnect(payload, decodedToken, firebaseIdToken) {
   const rows = await queryWorkersForOrgViaDataConnect(payload.orgId, firebaseIdToken)
   const existingWorker = findExistingWorkerInRows(rows, payload.login, payload.email)
   if (existingWorker) {
     throw buildWorkerAlreadyExistsError(existingWorker, payload.login, payload.email)
   }
+  const workerId = resolveWorkerIdForCreate(rows, payload.workerId)
 
   const provisionedUser = await provisionWorkerAuthUser(
     {
@@ -1210,7 +1472,6 @@ async function createAdminManagedUserViaDataConnect(payload, decodedToken, fireb
     },
     decodedToken,
   )
-  const workerId = resolveNextWorkerId(rows)
 
   try {
     await executeDataConnectOperation(
@@ -1277,6 +1538,39 @@ function isGoogleServerlessRuntime() {
   return Boolean(process.env.K_SERVICE || process.env.K_REVISION || process.env.FUNCTION_TARGET || process.env.FUNCTION_NAME)
 }
 
+function readGcloudAccessToken() {
+  const command = normalizeText(process.env.GCLOUD_COMMAND) || 'gcloud'
+  const commandArgs = ['auth', 'print-access-token', '--quiet']
+  const executable = process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : command
+  const args = process.platform === 'win32' ? ['/d', '/s', '/c', command, ...commandArgs] : commandArgs
+  return execFileSync(executable, args, {
+    cwd: __dirname,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  })
+    .trim()
+    .split(/\r?\n/)
+    .pop()
+}
+
+function createGcloudAccessTokenAuthClient() {
+  const token = readGcloudAccessToken()
+
+  if (!token) {
+    const error = new Error('GCLOUD_ACCESS_TOKEN_MISSING')
+    error.publicCode = 'GOOGLE_AUTH_REAUTH_REQUIRED'
+    error.publicMessage = 'Nie udalo sie pobrac access token z gcloud. Uruchom gcloud auth login i sprobuj ponownie.'
+    throw error
+  }
+
+  const auth = new OAuth2Client()
+  auth.setCredentials({
+    access_token: token,
+    expiry_date: Date.now() + 50 * 60 * 1000,
+  })
+  return auth
+}
+
 function createCloudSqlConnectorAuth() {
   const mode = normalizeText(process.env.CLOUD_SQL_AUTH_CLIENT || process.env.DB_CLOUD_SQL_AUTH_CLIENT).toLowerCase()
   if (mode === 'compute' || (!mode && isGoogleServerlessRuntime())) {
@@ -1284,6 +1578,9 @@ function createCloudSqlConnectorAuth() {
   }
   if (mode === 'google-auth' || mode === 'adc') {
     return new GoogleAuth({ scopes: [CLOUD_SQL_ADMIN_SCOPE] })
+  }
+  if (mode === 'gcloud' || mode === 'gcloud-auth') {
+    return createGcloudAccessTokenAuthClient()
   }
   return undefined
 }
@@ -1456,6 +1753,42 @@ function shouldProxyPortalScheduleOrdersRequest() {
   return shouldProxyDatabaseBackedRequest()
 }
 
+function shouldProxyPortalEventsRequest() {
+  const mode = normalizeText(
+    process.env.PORTAL_EVENTS_MODE || process.env.PORTAL_DB_ROUTES_MODE || process.env.API_DB_ROUTES_MODE,
+  ).toLowerCase()
+  if (['local', 'direct'].includes(mode)) {
+    return false
+  }
+  if (['proxy', 'remote'].includes(mode)) {
+    return true
+  }
+  if (NODE_ENV !== 'production') {
+    return false
+  }
+  return shouldProxyDatabaseBackedRequest()
+}
+
+function shouldProxyWorkerProfileRequest() {
+  const mode = normalizeText(process.env.WORKER_PROFILE_MODE).toLowerCase()
+  if (['local', 'direct'].includes(mode)) {
+    return false
+  }
+  if (['proxy', 'remote'].includes(mode)) {
+    return true
+  }
+  return false
+}
+
+function shouldUseWorkerProfileDataConnectStorage() {
+  const mode = normalizeText(
+    process.env.WORKER_PROFILE_STORAGE_MODE ||
+      process.env.WORKER_PROFILE_DB_MODE ||
+      process.env.WORKER_PROFILE_DATA_MODE,
+  ).toLowerCase()
+  return ['dataconnect', 'data-connect', 'firebase', 'https'].includes(mode)
+}
+
 async function resetDbConnectionCache() {
   const currentPool = dbPool
   const currentConnector = cloudSqlConnector
@@ -1495,6 +1828,1020 @@ async function connectDbClient() {
   }
 }
 
+let mobileWorkflowTablesAttempted = false
+let mobileWorkflowTablesReady = false
+const MOBILE_GPS_COLUMN_MAX_LEN = 255
+
+function makeMobileId(prefix) {
+  try {
+    return `${prefix}-${crypto.randomUUID()}`
+  } catch {
+    return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000000)}`
+  }
+}
+
+function normalizeMobileQr(value) {
+  return normalizeText(value).replace(/\s+/g, '')
+}
+
+function compactMobileKey(value) {
+  return normalizeText(value).toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function mobileIso(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isFinite(date.getTime()) ? date.toISOString() : ''
+}
+
+function mobileElapsedSec(fromValue, toValue = new Date()) {
+  const from = new Date(fromValue || 0).getTime()
+  const to = new Date(toValue || 0).getTime()
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return 0
+  return Math.floor((to - from) / 1000)
+}
+
+function normalizeMobileGpsData(value) {
+  const source = value && typeof value === 'object' ? value : {}
+  const lat = Number(source.lat ?? source.latitude)
+  const lon = Number(source.lon ?? source.lng ?? source.longitude)
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return null
+  }
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    return null
+  }
+
+  const accM = Number(source.accM ?? source.accuracy ?? source.accuracyM)
+  const at = new Date(source.atIso || source.timestamp || Date.now())
+  const tzOffsetMin = Number(source.tzOffsetMin)
+  return {
+    lat,
+    lon,
+    accM: Number.isFinite(accM) ? Math.round(accM) : null,
+    atIso: Number.isFinite(at.getTime()) ? at.toISOString() : new Date().toISOString(),
+    tzOffsetMin: Number.isFinite(tzOffsetMin) ? tzOffsetMin : null,
+  }
+}
+
+function mobileGpsActionToken(value) {
+  return normalizeText(value).toUpperCase().replace(/[^A-Z0-9_]/g, '') || 'GPS'
+}
+
+function mobileGpsColumnValue(gpsData, actionLabel) {
+  const data = normalizeMobileGpsData(gpsData)
+  if (!data) {
+    return ''
+  }
+
+  const action = mobileGpsActionToken(actionLabel)
+  const acc = Number.isFinite(Number(data.accM)) ? `${Math.round(Number(data.accM))}m` : 'NA'
+  const tz = Number.isFinite(Number(data.tzOffsetMin))
+    ? `UTC${Number(data.tzOffsetMin) >= 0 ? '+' : ''}${Number(data.tzOffsetMin) / 60}`
+    : 'UTC?'
+  return `${action}_GPS lat=${data.lat.toFixed(6)} lon=${data.lon.toFixed(6)} acc=${acc} at=${data.atIso} tz=${tz}`
+}
+
+function fitMobileGpsColumn(value) {
+  const text = normalizeText(value)
+  if (!text) return null
+  return text.length <= MOBILE_GPS_COLUMN_MAX_LEN ? text : text.slice(0, MOBILE_GPS_COLUMN_MAX_LEN)
+}
+
+function appendMobileComment(base, addition) {
+  const left = normalizeText(base)
+  const right = normalizeText(addition)
+  if (!right) return left || null
+  if (!left) return right
+  if (left.includes(right)) return left
+  return `${left} | ${right}`
+}
+
+function mergeMobileGpsColumn(base, latest) {
+  const merged = appendMobileComment(base, latest)
+  if (!merged) return null
+  if (merged.length <= MOBILE_GPS_COLUMN_MAX_LEN) return merged
+  return fitMobileGpsColumn(latest) || fitMobileGpsColumn(merged)
+}
+
+function mobileFunctionToken(value) {
+  const raw = normalizeText(value)
+  if (!raw) return ''
+  let normalized = raw
+  try {
+    normalized = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  } catch {
+    normalized = raw
+  }
+  return normalized.toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function classifyMobileZone(functionValue) {
+  const token = mobileFunctionToken(functionValue)
+  if (token === 'START' || token === 'STARTCZASPRACY') {
+    return { kind: 'START', stopGraceMin: null }
+  }
+  if (token.startsWith('STOP')) {
+    const explicitGrace = token.match(/STOP(?:CZASPRACY)?(15|10|5|0)/)
+    return { kind: 'STOP', stopGraceMin: explicitGrace ? Number(explicitGrace[1]) : 0 }
+  }
+  if (token === 'SPRZATANIEINDYWIDUALNE' || token === 'ZLECENIEINDYWIDUALNE') {
+    return { kind: 'INDIVIDUAL', stopGraceMin: null }
+  }
+  return { kind: 'CLEAN', stopGraceMin: null }
+}
+
+function mobileZoneAllowsAutoWorkday(zone) {
+  const token = mobileFunctionToken(zone?.function_name || zone?.functionName)
+  return (
+    token.includes('SPRZATANIEINDYWIDUALNE') ||
+    token.includes('ZLECENIEINDYWIDUALNE') ||
+    token.includes('STREFASPECJALNA') ||
+    token.includes('KODSPECJALNY')
+  )
+}
+
+function isMobileSpecialZone(zone) {
+  const token = mobileFunctionToken(zone?.function_name || zone?.functionName)
+  return token.includes('STREFASPECJALNA') || token.includes('KODSPECJALNY')
+}
+
+function isMobileSpecialEventRow(row) {
+  return isMobileSpecialZone({ function_name: row?.function_name, functionName: row?.functionName })
+}
+
+function createMobileGpsRequiredError(actionLabel, zone) {
+  const action = mobileGpsActionToken(actionLabel)
+  const error = new Error('MOBILE_GPS_REQUIRED')
+  error.statusCode = 428
+  error.publicCode = 'GPS_REQUIRED'
+  error.publicMessage = 'Ten kod QR wymaga lokalizacji GPS. Zezwol na lokalizacje i sprobuj ponownie.'
+  error.publicDetails = {
+    gpsAction: action || 'CLEAN',
+    qrCode: normalizeText(zone?.id || zone?.zone_id),
+  }
+  return error
+}
+
+function mapMobileZoneRow(row) {
+  if (!row) return null
+  const classified = classifyMobileZone(row.function_name)
+  const functionName = normalizeText(row.function_name)
+  return {
+    id: normalizeText(row.zone_id),
+    zoneId: normalizeText(row.zone_id),
+    clientId: normalizeText(row.client_id),
+    clientName: normalizeText(row.client_name),
+    name: normalizeText(row.zone_name),
+    functionName,
+    isSpecialZone: isMobileSpecialZone({ functionName }),
+    location: normalizeText(row.location),
+    kind: classified.kind,
+    stopGraceMin: classified.stopGraceMin,
+  }
+}
+
+function mapMobileWorkdayRow(row) {
+  if (!row) return null
+  return {
+    workdayId: normalizeText(row.workday_id),
+    workerLogin: normalizeText(row.worker_login),
+    workerName: normalizeText(row.worker_name),
+    utilityRoomId: normalizeText(row.utility_room_id),
+    startObject: normalizeText(row.start_object),
+    stopObject: normalizeText(row.stop_object),
+    startAt: mobileIso(row.start_at),
+    endAt: mobileIso(row.end_at),
+    durationSec: Number.isFinite(Number(row.duration_sec)) ? Number(row.duration_sec) : 0,
+    pauseTotalSec: Number.isFinite(Number(row.pause_total_sec)) ? Number(row.pause_total_sec) : 0,
+    pauseOpenId: normalizeText(row.pause_open_id),
+    pauseOpenAt: mobileIso(row.pause_open_at),
+    status: normalizeText(row.status) || (row.end_at ? 'CLOSED' : 'RUNNING'),
+    comment: normalizeText(row.comment),
+    gps: normalizeText(row.gps),
+    updatedAt: mobileIso(row.updated_at),
+  }
+}
+
+function mapMobileEventRow(row) {
+  if (!row) return null
+  const classified = classifyMobileZone(row.function_name)
+  const functionName = normalizeText(row.function_name)
+  return {
+    eventId: normalizeText(row.event_id),
+    zoneId: normalizeText(row.zone_id),
+    zoneName: normalizeText(row.zone_name),
+    zoneKind: classified.kind,
+    functionName,
+    isSpecialZone: isMobileSpecialEventRow(row),
+    location: normalizeText(row.location),
+    clientId: normalizeText(row.client_id),
+    clientName: normalizeText(row.client_name),
+    workerLogin: normalizeText(row.worker_login),
+    workerName: normalizeText(row.worker_name),
+    workdayId: normalizeText(row.workday_id),
+    startAt: mobileIso(row.start_at),
+    endAt: mobileIso(row.end_at),
+    status: normalizeText(row.status) || (row.end_at ? 'CLOSED' : 'RUNNING'),
+    durationSec: Number.isFinite(Number(row.duration_sec)) ? Number(row.duration_sec) : 0,
+    comment: normalizeText(row.comment),
+    endReason: normalizeText(row.end_reason),
+  }
+}
+
+function isMobileWorkdayOpen(row) {
+  if (!row) return false
+  if (normalizeText(row.status).toUpperCase() === 'CLOSED') return false
+  return !row.end_at
+}
+
+function isMobileEventOpen(row) {
+  if (!row) return false
+  if (normalizeText(row.status).toUpperCase() === 'CLOSED') return false
+  return !row.end_at
+}
+
+function isPostgresMissingRelationError(error) {
+  const code = normalizeText(error?.code).toUpperCase()
+  const message = normalizeText(error?.message).toLowerCase()
+  return code === '42P01' || code === '42703' || message.includes('does not exist')
+}
+
+async function ensureMobileWorkflowTables(client) {
+  if (mobileWorkflowTablesReady) return true
+  if (mobileWorkflowTablesAttempted && !mobileWorkflowTablesReady) return false
+  mobileWorkflowTablesAttempted = true
+  let savepointCreated = false
+  try {
+    await client.query('savepoint mobile_workflow_tables')
+    savepointCreated = true
+    await client.query(`
+      create table if not exists public.worker_runtime_state (
+        org_id varchar(64) not null,
+        worker_login varchar(80) not null,
+        worker_name text,
+        active_workday_id varchar(64),
+        workday_start_at timestamptz,
+        active_event_id varchar(64),
+        active_zone_id varchar(64),
+        zone_start_at timestamptz,
+        status varchar(32),
+        version integer not null default 1,
+        updated_at timestamptz not null default now(),
+        primary key (org_id, worker_login)
+      )
+    `)
+    await client.query(`
+      create table if not exists public.mobile_scan_command (
+        org_id varchar(64) not null,
+        worker_login varchar(80) not null,
+        client_action_id varchar(128) not null,
+        qr_code varchar(128),
+        action varchar(40),
+        result jsonb,
+        created_at timestamptz not null default now(),
+        primary key (org_id, worker_login, client_action_id)
+      )
+    `)
+    await client.query('release savepoint mobile_workflow_tables')
+    mobileWorkflowTablesReady = true
+  } catch (error) {
+    if (savepointCreated) {
+      try {
+        await client.query('rollback to savepoint mobile_workflow_tables')
+        await client.query('release savepoint mobile_workflow_tables')
+      } catch {
+        // Ignore optional-table cleanup errors.
+      }
+    }
+    console.warn(`[mobile/workflow] optional runtime tables unavailable: ${normalizeText(error?.message).slice(0, 200)}`)
+    mobileWorkflowTablesReady = false
+  }
+  return mobileWorkflowTablesReady
+}
+
+async function assertMobileRequester(client, orgId, decodedToken) {
+  const membership = await getRequesterMembership(client, orgId, normalizeText(decodedToken?.uid))
+  if (!membership) {
+    const error = new Error('MOBILE_ORG_FORBIDDEN')
+    error.statusCode = 403
+    error.publicCode = 'FORBIDDEN'
+    error.publicMessage = 'Brak dostepu do tej organizacji.'
+    throw error
+  }
+  return membership
+}
+
+async function resolveMobileWorker(client, orgId, body, decodedToken) {
+  const requestedLogin = normalizeText(body?.workerLogin || body?.login)
+  const requestedWorkerId = normalizeText(body?.workerId).toUpperCase()
+  const email = normalizeEmail(decodedToken?.email) || normalizeText(decodedToken?.email).toLowerCase()
+  const emailLocal = email.includes('@') ? email.split('@')[0] : ''
+  const lookupLogin = requestedLogin || emailLocal
+
+  const result = await client.query(
+    `select login, worker_id, full_name, login_email, email, auth_uid, role, worker_type, active
+       from public.worker
+      where org_id = $1
+        and (
+          lower(login) = lower($2)
+          or upper(coalesce(worker_id, '')) = upper($3)
+          or lower(coalesce(login_email, '')) = lower($4)
+          or lower(coalesce(email, '')) = lower($4)
+        )
+      order by case when lower(login) = lower($2) then 0 else 1 end, login asc
+      limit 1`,
+    [orgId, lookupLogin, requestedWorkerId || lookupLogin, email],
+  )
+
+  const row = result.rows[0]
+  if (!row) {
+    const error = new Error('MOBILE_WORKER_NOT_FOUND')
+    error.statusCode = 404
+    error.publicCode = 'WORKER_NOT_FOUND'
+    error.publicMessage = 'Nie znaleziono pracownika dla tej sesji.'
+    throw error
+  }
+  if (row.active === false) {
+    const error = new Error('MOBILE_WORKER_INACTIVE')
+    error.statusCode = 403
+    error.publicCode = 'WORKER_INACTIVE'
+    error.publicMessage = 'Konto pracownika jest nieaktywne.'
+    throw error
+  }
+
+  return {
+    login: normalizeText(row.login),
+    workerId: normalizeText(row.worker_id),
+    name: normalizeText(row.full_name || row.login),
+    role: normalizeRequesterRole(row.role || row.worker_type) || 'WORKER',
+    type: normalizeText(row.worker_type || row.role || 'WORKER'),
+  }
+}
+
+async function fetchMobileZones(client, orgId) {
+  const result = await client.query(
+    `select z.id as zone_id, z.client_id, z.zone as zone_name, z.function as function_name, z.location,
+            c.name as client_name
+       from public.zone z
+       left join public.client c on c.org_id = z.org_id and c.client_id = z.client_id
+      where z.org_id = $1
+      order by z.id asc`,
+    [orgId],
+  )
+  return result.rows.map(mapMobileZoneRow).filter(Boolean)
+}
+
+async function findMobileZoneByQr(client, orgId, qrCode) {
+  const code = normalizeMobileQr(qrCode)
+  const compact = compactMobileKey(code)
+  const result = await client.query(
+    `select z.id as zone_id, z.client_id, z.zone as zone_name, z.function as function_name, z.location,
+            c.name as client_name
+       from public.zone z
+       left join public.client c on c.org_id = z.org_id and c.client_id = z.client_id
+      where z.org_id = $1
+        and (
+          lower(z.id) = lower($2)
+          or regexp_replace(lower(z.id), '[^a-z0-9]+', '', 'g') = $3
+        )
+      order by z.id asc
+      limit 1`,
+    [orgId, code, compact],
+  )
+  return mapMobileZoneRow(result.rows[0])
+}
+
+async function fetchActiveMobileWorkday(client, orgId, workerLogin) {
+  const result = await client.query(
+    `select *
+       from public.workday
+      where org_id = $1
+        and lower(worker_login) = lower($2)
+        and coalesce(status, 'RUNNING') <> 'CLOSED'
+        and end_at is null
+        and (start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date
+      order by start_at desc nulls last, updated_at desc nulls last
+      limit 1`,
+    [orgId, workerLogin],
+  )
+  return result.rows[0] ?? null
+}
+
+async function fetchMobileWorkdays(client, orgId, workerLogin) {
+  const result = await client.query(
+    `select *
+       from public.workday
+      where org_id = $1
+        and lower(worker_login) = lower($2)
+      order by start_at desc nulls last, updated_at desc nulls last
+      limit 120`,
+    [orgId, workerLogin],
+  )
+  return result.rows.map(mapMobileWorkdayRow).filter(Boolean)
+}
+
+async function fetchActiveMobileCycle(client, orgId, workerLogin, workdayId) {
+  if (!workdayId) return null
+  const result = await client.query(
+    `select e.*, z.zone as zone_name, z.function as function_name, z.location, z.client_id, c.name as client_name
+       from public.event e
+       left join public.zone z on z.org_id = e.org_id and z.id = e.zone_id
+       left join public.client c on c.org_id = z.org_id and c.client_id = z.client_id
+      where e.org_id = $1
+        and lower(e.worker_login) = lower($2)
+        and e.workday_id = $3
+        and coalesce(e.status, 'RUNNING') <> 'CLOSED'
+        and e.end_at is null
+      order by e.start_at desc nulls last, e.updated_at desc nulls last
+      limit 1`,
+    [orgId, workerLogin, workdayId],
+  )
+  return result.rows[0] ?? null
+}
+
+async function fetchMobileCycleHistory(client, orgId, workerLogin) {
+  const result = await client.query(
+    `select e.*, z.zone as zone_name, z.function as function_name, z.location, z.client_id, c.name as client_name
+       from public.event e
+       left join public.zone z on z.org_id = e.org_id and z.id = e.zone_id
+       left join public.client c on c.org_id = z.org_id and c.client_id = z.client_id
+      where e.org_id = $1
+        and lower(e.worker_login) = lower($2)
+      order by e.start_at desc nulls last, e.updated_at desc nulls last
+      limit 120`,
+    [orgId, workerLogin],
+  )
+  return result.rows.map(mapMobileEventRow).filter(Boolean)
+}
+
+async function fetchActiveMobilePause(client, orgId, workerLogin, workdayId) {
+  if (!workdayId) return null
+  if (!(await databaseRelationExists(client, 'public.workday_pause'))) return null
+  let result
+  let savepointCreated = false
+  try {
+    await client.query('savepoint mobile_pause_lookup')
+    savepointCreated = true
+    result = await client.query(
+      `select *
+         from public.workday_pause
+        where org_id = $1
+          and lower(coalesce(worker_login, '')) = lower($2)
+          and workday_id = $3
+          and coalesce(status, 'RUNNING') <> 'CLOSED'
+          and stop_at is null
+        order by start_at desc nulls last, updated_at desc nulls last
+        limit 1`,
+      [orgId, workerLogin, workdayId],
+    )
+    await client.query('release savepoint mobile_pause_lookup')
+  } catch (error) {
+    if (savepointCreated) {
+      try {
+        await client.query('rollback to savepoint mobile_pause_lookup')
+        await client.query('release savepoint mobile_pause_lookup')
+      } catch {
+        // Ignore optional pause cleanup errors.
+      }
+    }
+    if (isPostgresMissingRelationError(error)) {
+      return null
+    }
+    throw error
+  }
+  const row = result.rows[0]
+  if (!row) return null
+  return {
+    pauseId: normalizeText(row.pause_id),
+    workdayId: normalizeText(row.workday_id),
+    workerLogin: normalizeText(row.worker_login),
+    workerName: normalizeText(row.worker_name),
+    startAt: mobileIso(row.start_at),
+    stopAt: mobileIso(row.stop_at),
+    durationSec: Number.isFinite(Number(row.duration_sec)) ? Number(row.duration_sec) : 0,
+    status: normalizeText(row.status) || 'RUNNING',
+  }
+}
+
+function buildMobileWorkdayEvents(workdays) {
+  const events = []
+  for (const workday of workdays || []) {
+    if (workday.startAt) {
+      events.push({ type: 'START', at: workday.startAt, label: 'START', workdayId: workday.workdayId })
+    }
+    if (workday.endAt) {
+      events.push({ type: 'STOP', at: workday.endAt, label: 'STOP', workdayId: workday.workdayId })
+    }
+  }
+  return events.sort((a, b) => new Date(b.at || 0).getTime() - new Date(a.at || 0).getTime())
+}
+
+function buildMobileSummary(activeWorkday) {
+  const now = new Date()
+  return {
+    todaySeconds: activeWorkday && isMobileWorkdayOpen(activeWorkday) ? mobileElapsedSec(activeWorkday.start_at, now) : 0,
+    todayStart: activeWorkday?.start_at ? mobileIso(activeWorkday.start_at).slice(11, 16) : '--:--',
+    todayStop: activeWorkday?.end_at ? mobileIso(activeWorkday.end_at).slice(11, 16) : '--:--',
+    activeSeconds: activeWorkday && isMobileWorkdayOpen(activeWorkday) ? mobileElapsedSec(activeWorkday.start_at, now) : 0,
+  }
+}
+
+async function upsertMobileRuntimeState(client, orgId, worker, activeWorkday, activeCycle) {
+  if (!(await ensureMobileWorkflowTables(client))) return
+  let savepointCreated = false
+  try {
+    await client.query('savepoint mobile_runtime_state')
+    savepointCreated = true
+    await client.query(
+      `insert into public.worker_runtime_state (
+         org_id, worker_login, worker_name, active_workday_id, workday_start_at,
+         active_event_id, active_zone_id, zone_start_at, status, version, updated_at
+       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,1,now())
+       on conflict (org_id, worker_login) do update set
+         worker_name = excluded.worker_name,
+         active_workday_id = excluded.active_workday_id,
+         workday_start_at = excluded.workday_start_at,
+         active_event_id = excluded.active_event_id,
+         active_zone_id = excluded.active_zone_id,
+         zone_start_at = excluded.zone_start_at,
+         status = excluded.status,
+         version = public.worker_runtime_state.version + 1,
+         updated_at = now()`,
+      [
+        orgId,
+        worker.login,
+        worker.name,
+        activeWorkday?.workday_id || null,
+        activeWorkday?.start_at || null,
+        activeCycle?.event_id || null,
+        activeCycle?.zone_id || null,
+        activeCycle?.start_at || null,
+        activeWorkday ? 'RUNNING' : 'IDLE',
+      ],
+    )
+    await client.query('release savepoint mobile_runtime_state')
+  } catch (error) {
+    if (savepointCreated) {
+      try {
+        await client.query('rollback to savepoint mobile_runtime_state')
+        await client.query('release savepoint mobile_runtime_state')
+      } catch {
+        // Ignore optional runtime-state cleanup errors.
+      }
+    }
+    if (isPostgresMissingRelationError(error)) {
+      console.warn(`[mobile/workflow] runtime state unavailable: ${normalizeText(error?.message).slice(0, 200)}`)
+      return
+    }
+    throw error
+  }
+}
+
+async function buildMobileSnapshotFromDb(client, orgId, worker) {
+  const zones = await fetchMobileZones(client, orgId)
+  const activeWorkdayRaw = await fetchActiveMobileWorkday(client, orgId, worker.login)
+  const workdays = await fetchMobileWorkdays(client, orgId, worker.login)
+  const cycleHistory = await fetchMobileCycleHistory(client, orgId, worker.login)
+  const activeCycleRaw = await fetchActiveMobileCycle(client, orgId, worker.login, activeWorkdayRaw?.workday_id)
+  const activePause = await fetchActiveMobilePause(client, orgId, worker.login, activeWorkdayRaw?.workday_id)
+  await upsertMobileRuntimeState(client, orgId, worker, activeWorkdayRaw, activeCycleRaw)
+
+  const activeWorkday = mapMobileWorkdayRow(activeWorkdayRaw)
+  const activeCycle = mapMobileEventRow(activeCycleRaw)
+  return {
+    orgId,
+    worker,
+    zones,
+    stopRules: zones.filter((zone) => zone.kind === 'STOP').map((zone) => ({
+      roomId: zone.id,
+      graceMin: zone.stopGraceMin,
+      label: zone.name || zone.id,
+    })),
+    startZone: zones.find((zone) => zone.kind === 'START') || null,
+    activeWorkday,
+    activePause,
+    pauseTotalSec: Number(activeWorkday?.pauseTotalSec || 0),
+    activeCycle,
+    summary: buildMobileSummary(activeWorkdayRaw),
+    workdayEvents: buildMobileWorkdayEvents(workdays),
+    workdays,
+    cycleHistory,
+  }
+}
+
+async function closeMobileEvent(client, orgId, eventRow, reason, endAt = new Date(), comment = '', gpsText = '') {
+  if (!eventRow?.event_id) return null
+  const durationSec = mobileElapsedSec(eventRow.start_at, endAt)
+  const nextComment = appendMobileComment(appendMobileComment(eventRow.comment, comment), gpsText)
+  const result = await client.query(
+    `update public.event
+        set end_at = $4,
+            duration_sec = $5,
+            status = 'CLOSED',
+            close_marked_at = $4,
+            end_reason = $6,
+            comment = coalesce(nullif($7, ''), comment),
+            updated_at = now()
+      where org_id = $1 and event_id = $2 and worker_login = $3
+      returning *`,
+    [orgId, eventRow.event_id, eventRow.worker_login, endAt, durationSec, reason || 'CYCLE_STOP', nextComment],
+  )
+  return result.rows[0] ?? null
+}
+
+async function closeMobileOpenCycles(client, orgId, workerLogin, workdayId, reason, endAt = new Date(), comment = '', gpsText = '', options = {}) {
+  const gpsSpecialOnly = options?.gpsSpecialOnly === true
+  const result = await client.query(
+    `select e.*, z.function as function_name
+       from public.event e
+       left join public.zone z on z.org_id = e.org_id and z.id = e.zone_id
+      where e.org_id = $1
+        and lower(e.worker_login) = lower($2)
+        and e.workday_id = $3
+        and coalesce(e.status, 'RUNNING') <> 'CLOSED'
+        and e.end_at is null
+      order by e.start_at asc nulls last`,
+    [orgId, workerLogin, workdayId],
+  )
+  const closed = []
+  for (const row of result.rows) {
+    const rowGpsText = gpsSpecialOnly && !isMobileSpecialEventRow(row) ? '' : gpsText
+    const updated = await closeMobileEvent(client, orgId, row, reason, endAt, comment, rowGpsText)
+    if (updated) closed.push(updated)
+  }
+  return closed
+}
+
+async function createMobileWorkday(client, orgId, worker, zone, startedAt = new Date(), gpsText = '') {
+  const workdayId = makeMobileId('WD')
+  const result = await client.query(
+    `insert into public.workday (
+       org_id, workday_id, worker_login, worker_name, utility_room_id,
+       start_at, end_at, duration_sec, status, gps, start_object, comment, updated_by, created_at, updated_at
+     ) values ($1,$2,$3,$4,$5,$6,null,0,'RUNNING',$7,$8,$9,$10,now(),now())
+     returning *`,
+    [
+      orgId,
+      workdayId,
+      worker.login,
+      worker.name,
+      zone?.id || null,
+      startedAt,
+      fitMobileGpsColumn(gpsText),
+      zone?.id || null,
+      zone?.id ? `QR START ${zone.id}` : 'QR START',
+      worker.login,
+    ],
+  )
+  return result.rows[0]
+}
+
+async function createMobileCycle(client, orgId, worker, workday, zone, startedAt = new Date(), comment = '', gpsText = '') {
+  const eventId = makeMobileId('EV')
+  const eventComment = appendMobileComment(comment, gpsText)
+  const result = await client.query(
+    `insert into public.event (
+       org_id, event_id, workday_id, zone_id, worker_login, worker_name,
+       start_at, end_at, duration_sec, status, comment, start_event_id, created_at, updated_at
+     ) values ($1,$2,$3,$4,$5,$6,$7,null,null,'RUNNING',$8,null,now(),now())
+     returning *`,
+    [
+      orgId,
+      eventId,
+      workday.workday_id,
+      zone.id,
+      worker.login,
+      worker.name,
+      startedAt,
+      eventComment,
+    ],
+  )
+  return result.rows[0]
+}
+
+async function closeMobileWorkday(client, orgId, workday, stopZone, endAt = new Date(), comment = '', gpsText = '') {
+  const durationSec = mobileElapsedSec(workday.start_at, endAt)
+  const nextComment = appendMobileComment(workday.comment, comment)
+  const nextGps = mergeMobileGpsColumn(workday.gps, gpsText)
+  const result = await client.query(
+    `update public.workday
+        set end_at = $4,
+            duration_sec = $5,
+            status = 'CLOSED',
+            stop_object = $6,
+            end_event_id = null,
+            comment = coalesce(nullif($7, ''), comment),
+            gps = coalesce(nullif($9, ''), gps),
+            updated_at = now(),
+            updated_by = $8
+      where org_id = $1 and workday_id = $2 and worker_login = $3
+      returning *`,
+    [
+      orgId,
+      workday.workday_id,
+      workday.worker_login,
+      endAt,
+      durationSec,
+      stopZone?.id || null,
+      nextComment,
+      workday.worker_login,
+      nextGps,
+    ],
+  )
+  return result.rows[0] ?? null
+}
+
+async function storeMobileScanCommand(client, orgId, workerLogin, clientActionId, qrCode, action, resultPayload) {
+  if (!clientActionId || !(await ensureMobileWorkflowTables(client))) return
+  let savepointCreated = false
+  try {
+    await client.query('savepoint mobile_scan_command_store')
+    savepointCreated = true
+    await client.query(
+      `insert into public.mobile_scan_command (org_id, worker_login, client_action_id, qr_code, action, result)
+       values ($1,$2,$3,$4,$5,$6::jsonb)
+       on conflict (org_id, worker_login, client_action_id) do nothing`,
+      [orgId, workerLogin, clientActionId, qrCode, action, JSON.stringify(resultPayload)],
+    )
+    await client.query('release savepoint mobile_scan_command_store')
+  } catch (error) {
+    if (savepointCreated) {
+      try {
+        await client.query('rollback to savepoint mobile_scan_command_store')
+        await client.query('release savepoint mobile_scan_command_store')
+      } catch {
+        // Ignore optional command-cache cleanup errors.
+      }
+    }
+    if (isPostgresMissingRelationError(error)) {
+      console.warn(`[mobile/workflow] scan command store unavailable: ${normalizeText(error?.message).slice(0, 200)}`)
+      return
+    }
+    throw error
+  }
+}
+
+async function readMobileScanCommand(client, orgId, workerLogin, clientActionId) {
+  if (!clientActionId || !(await ensureMobileWorkflowTables(client))) return null
+  let result
+  let savepointCreated = false
+  try {
+    await client.query('savepoint mobile_scan_command_read')
+    savepointCreated = true
+    result = await client.query(
+      `select result
+         from public.mobile_scan_command
+        where org_id = $1 and worker_login = $2 and client_action_id = $3
+        limit 1`,
+      [orgId, workerLogin, clientActionId],
+    )
+    await client.query('release savepoint mobile_scan_command_read')
+  } catch (error) {
+    if (savepointCreated) {
+      try {
+        await client.query('rollback to savepoint mobile_scan_command_read')
+        await client.query('release savepoint mobile_scan_command_read')
+      } catch {
+        // Ignore optional command-cache cleanup errors.
+      }
+    }
+    if (isPostgresMissingRelationError(error)) {
+      console.warn(`[mobile/workflow] scan command read unavailable: ${normalizeText(error?.message).slice(0, 200)}`)
+      return null
+    }
+    throw error
+  }
+  return result.rows[0]?.result || null
+}
+
+async function processMobileWorkflowScan(client, orgId, worker, body) {
+  const qrCode = normalizeMobileQr(body?.qrCode || body?.code)
+  if (!qrCode) {
+    const error = new Error('MOBILE_QR_MISSING')
+    error.statusCode = 400
+    error.publicCode = 'QR_MISSING'
+    error.publicMessage = 'Brak kodu QR.'
+    throw error
+  }
+
+  const clientActionId = normalizeText(body?.clientActionId).slice(0, 128)
+  const existingResult = await readMobileScanCommand(client, orgId, worker.login, clientActionId)
+  if (existingResult) {
+    return { ...existingResult, idempotent: true }
+  }
+
+  const scannedAt = mobileIso(body?.clientScannedAt) ? new Date(body.clientScannedAt) : new Date()
+  const comment = normalizeText(body?.comment)
+  const zone = await findMobileZoneByQr(client, orgId, qrCode)
+  if (!zone) {
+    const error = new Error('MOBILE_ZONE_NOT_FOUND')
+    error.statusCode = 404
+    error.publicCode = 'ZONE_NOT_FOUND'
+    error.publicMessage = 'Nie znaleziono kodu QR w bazie stref.'
+    throw error
+  }
+
+  let activeWorkday = await fetchActiveMobileWorkday(client, orgId, worker.login)
+  let activeCycle = await fetchActiveMobileCycle(client, orgId, worker.login, activeWorkday?.workday_id)
+  let action = 'NOOP'
+  let message = 'Brak zmian.'
+  const zoneIsSpecial = isMobileSpecialZone(zone)
+  const scanGpsData = normalizeMobileGpsData(body?.gpsData ?? body?.clientGps ?? body?.gps ?? body?.location)
+  const scanGpsNote = (actionLabel, allowed = true) => (allowed ? mobileGpsColumnValue(scanGpsData, actionLabel) : '')
+  const requireScanGps = (actionLabel, required = true) => {
+    if (!required || scanGpsData) {
+      return
+    }
+    throw createMobileGpsRequiredError(actionLabel, zone)
+  }
+
+  if (zone.kind === 'START') {
+    if (!activeWorkday) {
+      requireScanGps('START')
+      activeWorkday = await createMobileWorkday(client, orgId, worker, zone, scannedAt, scanGpsNote('START'))
+      action = 'START_WORKDAY'
+      message = 'Zapisano na serwerze. Rozpoczeto dzien pracy.'
+    } else {
+      action = 'NOOP'
+      message = 'Dzien pracy jest juz aktywny.'
+    }
+  } else if (zone.kind === 'STOP') {
+    if (!activeWorkday) {
+      const error = new Error('MOBILE_WORKDAY_NOT_ACTIVE')
+      error.statusCode = 409
+      error.publicCode = 'WORKDAY_NOT_ACTIVE'
+      error.publicMessage = 'Brak aktywnego dnia pracy. Najpierw zeskanuj START.'
+      throw error
+    }
+    requireScanGps('STOP')
+    await closeMobileOpenCycles(
+      client,
+      orgId,
+      worker.login,
+      activeWorkday.workday_id,
+      'STOP_END_DAY',
+      scannedAt,
+      comment,
+      scanGpsNote('CLEAN_STOP'),
+      { gpsSpecialOnly: true },
+    )
+    const graceMs = Math.max(0, Number(zone.stopGraceMin || 0)) * 60 * 1000
+    const endAt = new Date(scannedAt.getTime() + graceMs)
+    await closeMobileWorkday(client, orgId, activeWorkday, zone, endAt, comment, scanGpsNote('STOP'))
+    action = 'STOP_WORKDAY'
+    message = graceMs > 0
+      ? `Zapisano na serwerze. Zakonczono dzien pracy. Doliczono ${zone.stopGraceMin} min.`
+      : 'Zapisano na serwerze. Zakonczono dzien pracy.'
+  } else {
+    if (!activeWorkday) {
+      if (!mobileZoneAllowsAutoWorkday(zone)) {
+        const error = new Error('MOBILE_WORKDAY_NOT_ACTIVE')
+        error.statusCode = 409
+        error.publicCode = 'WORKDAY_NOT_ACTIVE'
+        error.publicMessage = 'Brak aktywnego dnia pracy. Najpierw zeskanuj START.'
+        throw error
+      }
+      requireScanGps('CLEAN', zoneIsSpecial)
+      activeWorkday = await createMobileWorkday(client, orgId, worker, zone, scannedAt, '')
+    }
+
+    if (activeCycle && isMobileEventOpen(activeCycle)) {
+      const activeCycleIsSpecial = isMobileSpecialEventRow(activeCycle)
+      if (normalizeText(activeCycle.zone_id).toLowerCase() === normalizeText(zone.id).toLowerCase()) {
+        requireScanGps('CLEAN', activeCycleIsSpecial || zoneIsSpecial)
+        await closeMobileEvent(client, orgId, activeCycle, 'QR_SAME', scannedAt, comment, scanGpsNote('CLEAN_STOP', activeCycleIsSpecial || zoneIsSpecial))
+        action = 'CLOSE_ZONE'
+        message = 'Zapisano na serwerze. Zakonczono sprzatanie tej strefy.'
+        if (body?.closeWorkdayImmediately) {
+          await closeMobileWorkday(client, orgId, activeWorkday, zone, scannedAt, comment, '')
+          action = 'CLOSE_ZONE_AND_WORKDAY'
+          message = 'Zapisano na serwerze. Zakonczono strefe i dzien pracy.'
+        }
+      } else {
+        requireScanGps('CLEAN', activeCycleIsSpecial || zoneIsSpecial)
+        await closeMobileOpenCycles(
+          client,
+          orgId,
+          worker.login,
+          activeWorkday.workday_id,
+          'QR_SWITCH',
+          scannedAt,
+          comment,
+          scanGpsNote('CLEAN_STOP'),
+          { gpsSpecialOnly: true },
+        )
+        await createMobileCycle(client, orgId, worker, activeWorkday, zone, scannedAt, comment, scanGpsNote('CLEAN_START', zoneIsSpecial))
+        action = 'SWITCH_ZONE'
+        message = `Zapisano na serwerze. Zmiana strefy na: ${zone.name || zone.id}.`
+      }
+    } else {
+      requireScanGps('CLEAN', zoneIsSpecial)
+      await createMobileCycle(client, orgId, worker, activeWorkday, zone, scannedAt, comment, scanGpsNote('CLEAN_START', zoneIsSpecial))
+      action = 'START_ZONE'
+      message = `Zapisano na serwerze. Rozpoczeto sprzatanie: ${zone.name || zone.id}.`
+    }
+  }
+
+  const snapshot = await buildMobileSnapshotFromDb(client, orgId, worker)
+  const resultPayload = {
+    ok: true,
+    action,
+    message,
+    snapshot,
+    serverAt: new Date().toISOString(),
+  }
+  await storeMobileScanCommand(client, orgId, worker.login, clientActionId, qrCode, action, resultPayload)
+  return resultPayload
+}
+
+async function handleMobileWorkflowRequest(req, res, requestUrl) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, withSecurityHeaders({ 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' }))
+    res.end()
+    return
+  }
+  if (req.method !== 'POST') {
+    sendMobileApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  let body
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    sendMobileApiError(res, error?.message === 'REQUEST_BODY_TOO_LARGE' ? 413 : 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendMobileApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendMobileApiError(res, mapped.status === 500 ? 500 : 401, mapped.code, mapped.status === 500 ? mapped.message : 'Token Firebase jest niepoprawny albo wygasl.')
+    return
+  }
+
+  const orgId = normalizeOrgId(body?.orgId)
+  if (!orgId) {
+    sendMobileApiError(res, 400, 'ORG_ID_MISSING', 'Brak poprawnego orgId.')
+    return
+  }
+
+  const client = await connectDbClient()
+  try {
+    await client.query('begin')
+    await assertMobileRequester(client, orgId, decodedToken)
+    const worker = await resolveMobileWorker(client, orgId, body, decodedToken)
+    await client.query('select pg_advisory_xact_lock(hashtext($1), hashtext($2))', [orgId, worker.login])
+
+    let payload
+    if (requestUrl.pathname === MOBILE_SCAN_PATH) {
+      payload = await processMobileWorkflowScan(client, orgId, worker, body)
+    } else {
+      const snapshot = await buildMobileSnapshotFromDb(client, orgId, worker)
+      payload = { ok: true, snapshot, serverAt: new Date().toISOString() }
+    }
+
+    await client.query('commit')
+    sendMobileJson(res, 200, payload)
+  } catch (error) {
+    try {
+      await client.query('rollback')
+    } catch {
+      // Ignore rollback errors.
+    }
+    const dbMapped = mapDatabaseConnectionError(error)
+    const rawDbCode = normalizeText(error?.code).toUpperCase()
+    const rawDbMessage = normalizeText(error?.message).slice(0, 240)
+    const diagnosticMessage = rawDbCode && rawDbMessage
+      ? `Blad bazy ${rawDbCode}: ${rawDbMessage}`
+      : ''
+    const status = Number(error?.statusCode || dbMapped?.status || 500)
+    const details = {
+      ...(error?.publicDetails && typeof error.publicDetails === 'object' ? error.publicDetails : {}),
+      ...(publicErrorDetails(error) || {}),
+      ...(rawDbCode ? { dbCode: rawDbCode } : {}),
+    }
+    sendMobileApiError(
+      res,
+      Number.isFinite(status) ? status : 500,
+      normalizeText(error?.publicCode) || dbMapped?.code || 'MOBILE_WORKFLOW_ERROR',
+      normalizeText(error?.publicMessage) || dbMapped?.message || diagnosticMessage || 'Nie udalo sie obsluzyc mobilnego workflow.',
+      Object.keys(details).length ? details : undefined,
+    )
+  } finally {
+    client.release()
+  }
+}
+
 async function databaseRelationExists(client, relationName) {
   const normalized = normalizeText(relationName)
   if (!normalized) {
@@ -1502,6 +2849,27 @@ async function databaseRelationExists(client, relationName) {
   }
   const result = await client.query('select to_regclass($1::text) as relation_name', [normalized])
   return Boolean(normalizeText(result.rows?.[0]?.relation_name))
+}
+
+async function databaseColumnExists(client, relationName, columnName) {
+  const normalizedRelation = normalizeText(relationName)
+  const normalizedColumn = normalizeText(columnName)
+  if (!normalizedRelation || !normalizedColumn) {
+    return false
+  }
+  const [schemaName, tableName] = normalizedRelation.includes('.')
+    ? normalizedRelation.split('.', 2)
+    : ['public', normalizedRelation]
+  const result = await client.query(
+    `select 1
+       from information_schema.columns
+      where table_schema = $1
+        and table_name = $2
+        and column_name = $3
+      limit 1`,
+    [schemaName, tableName, normalizedColumn],
+  )
+  return result.rowCount > 0
 }
 
 function resolveNextWorkerId(rows = []) {
@@ -1585,6 +2953,7 @@ function buildUserPayload(body, requester = {}) {
   const phone = normalizeText(body?.phone)
   const active = asPayloadBoolean(body?.active, true)
   const emailLogin = emailLocalPart(email)
+  const workerId = normalizeText(body?.workerId || body?.id).slice(0, 64)
 
   const validationErrors = []
   if (!requesterEmail) validationErrors.push('Token Firebase konta dodajacego nie zawiera poprawnego emaila.')
@@ -1602,9 +2971,682 @@ function buildUserPayload(body, requester = {}) {
   if (password.length < 6) validationErrors.push('HasĹ‚o tymczasowe musi mieÄ‡ co najmniej 6 znakĂłw.')
 
   return {
-    value: { orgId, email, displayName, login, role, password, phone, active },
+    value: { orgId, email, displayName, login, role, password, phone, active, workerId },
     validationErrors,
   }
+}
+
+function normalizeWorkerProfileRole(value) {
+  const rawRole = normalizeText(value)
+  const role = rawRole.toUpperCase()
+  const normalized = rawRole
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+
+  if (role === 'ADMIN' || role === 'ADMINISTRATOR' || role === 'OWNER' || role === 'SUPERADMIN' || normalized.includes('admin')) {
+    return 'ADMIN'
+  }
+  if (role === 'MANAGER' || role === 'KIEROWNIK' || normalized.includes('manager') || normalized.includes('kierownik')) {
+    return 'MANAGER'
+  }
+  if (role === 'COORDINATOR' || role === 'KOORDYNATOR' || normalized.includes('koordynator') || normalized.includes('coordinator')) {
+    return 'COORDINATOR'
+  }
+  return 'WORKER'
+}
+
+function buildWorkerProfileUpdatePayload(body) {
+  const orgId = normalizeOrgId(body?.orgId)
+  let login = ''
+  let newLogin = ''
+  const validationErrors = []
+
+  try {
+    login = normalizeLoginLocalPart(body?.login || body?.workerLogin || body?.workerId)
+  } catch (error) {
+    validationErrors.push(error?.message || 'Podaj poprawny login pracownika.')
+  }
+  try {
+    newLogin = normalizeLoginLocalPart(body?.newLogin || body?.nextLogin || body?.loginNew || login)
+  } catch (error) {
+    validationErrors.push(error?.message || 'Podaj poprawny nowy login pracownika.')
+  }
+
+  const workerId = normalizeText(body?.workerId || body?.id).slice(0, 64)
+  const name = normalizeText(body?.name || body?.workerName || body?.fullName).slice(0, 200)
+  const email = normalizeEmail(body?.email || body?.loginEmail)
+  const phone = normalizeText(body?.phone).slice(0, 80)
+  const roleLabel = normalizeText(body?.role || body?.workerType || 'WORKER').slice(0, 32)
+  const workerType = normalizeText(body?.workerType || body?.role || roleLabel || 'WORKER').slice(0, 40)
+  const memberRole = normalizeWorkerProfileRole(roleLabel || workerType)
+  const active = asPayloadBoolean(body?.active, true)
+  const editedBy = normalizeText(body?.editedBy || body?.edit).slice(0, 160)
+  const authUid = normalizeText(body?.authUid || body?.uid).slice(0, 128)
+
+  if (!orgId) validationErrors.push('Brak poprawnego orgId.')
+  if (!login) validationErrors.push('Brak loginu pracownika.')
+  if (!newLogin) validationErrors.push('Podaj poprawny nowy login pracownika.')
+  if (!name) validationErrors.push('Podaj imie i nazwisko pracownika.')
+  if (!email) validationErrors.push('Podaj poprawny email pracownika.')
+
+  return {
+    value: {
+      orgId,
+      login,
+      newLogin,
+      workerId,
+      name,
+      email,
+      phone,
+      roleLabel: roleLabel || memberRole,
+      workerType: workerType || roleLabel || memberRole,
+      memberRole,
+      active,
+      editedBy,
+      authUid,
+    },
+    validationErrors,
+  }
+}
+
+function buildWorkerProfileDeletePayload(body) {
+  const orgId = normalizeOrgId(body?.orgId)
+  let login = ''
+  const validationErrors = []
+
+  try {
+    login = normalizeLoginLocalPart(body?.login || body?.workerLogin || body?.workerId)
+  } catch (error) {
+    validationErrors.push(error?.message || 'Podaj poprawny login pracownika.')
+  }
+
+  const workerId = normalizeText(body?.workerId || body?.id).slice(0, 64)
+  const authUid = normalizeText(body?.authUid || body?.uid).slice(0, 128)
+
+  if (!orgId) validationErrors.push('Brak poprawnego orgId.')
+  if (!login) validationErrors.push('Brak loginu pracownika.')
+
+  return {
+    value: { orgId, login, workerId, authUid },
+    validationErrors,
+  }
+}
+
+function workerProfileAccessError(membership, actionLabel) {
+  const error = new Error(membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING')
+  error.statusCode = membership ? 403 : 404
+  error.publicCode = membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING'
+  error.publicMessage = membership ? `Brak uprawnien do ${actionLabel}.` : 'Brak dostepu do tej organizacji.'
+  return error
+}
+
+async function requireWorkerProfileAccess(client, orgId, requesterUid, allowedRoles, actionLabel) {
+  const membership = await getRequesterMembership(client, orgId, requesterUid)
+  const requesterRole = normalizeRequesterRole(membership?.role)
+  if (!allowedRoles.includes(requesterRole)) {
+    throw workerProfileAccessError(membership, actionLabel)
+  }
+  return requesterRole
+}
+
+async function readWorkerProfileForUpdate(client, orgId, login) {
+  const result = await client.query(
+    `select login,
+            worker_id,
+            full_name,
+            login_email,
+            email,
+            auth_uid,
+            role,
+            worker_type,
+            active,
+            phone,
+            created_at,
+            updated_at,
+            edit
+       from public.worker
+      where org_id = $1
+        and lower(login) = lower($2)
+      limit 1`,
+    [orgId, login],
+  )
+  return result.rows[0] ?? null
+}
+
+function mapWorkerProfileRow(row, orgId) {
+  if (!row) {
+    return null
+  }
+
+  const login = normalizeText(row.login)
+  const workerId = normalizeText(row.worker_id) || login
+  const workerName = normalizeText(row.full_name) || login
+  const loginEmail = normalizeEmail(row.login_email) || normalizeEmail(row.email)
+
+  const role = normalizeText(row.role || 'WORKER')
+  const workerType = normalizeText(row.worker_type || row.role || 'WORKER')
+
+  return {
+    id: workerId,
+    workerId,
+    orgId,
+    login,
+    workerLogin: login,
+    workerName,
+    fullName: workerName,
+    name: workerName,
+    role,
+    type: role,
+    workerType,
+    active: Boolean(row.active),
+    authUid: normalizeText(row.auth_uid),
+    email: loginEmail,
+    loginEmail,
+    phone: normalizeText(row.phone),
+    editedBy: normalizeText(row.edit),
+    addedAt: row.created_at?.toISOString?.() || normalizeText(row.created_at),
+    editedAt: row.updated_at?.toISOString?.() || normalizeText(row.updated_at),
+  }
+}
+
+function mapWorkerProfilePayload(payload, authUid = '') {
+  const login = normalizeText(payload?.newLogin || payload?.login)
+  const workerId = normalizeText(payload?.workerId) || login
+  const workerName = normalizeText(payload?.name) || login
+  const email = normalizeEmail(payload?.email)
+  const role = normalizeText(payload?.roleLabel || payload?.memberRole || 'WORKER')
+  const workerType = normalizeText(payload?.workerType || role)
+  const now = new Date().toISOString()
+
+  return {
+    id: workerId,
+    workerId,
+    orgId: payload?.orgId,
+    login,
+    workerLogin: login,
+    workerName,
+    fullName: workerName,
+    name: workerName,
+    role,
+    type: role,
+    workerType,
+    active: Boolean(payload?.active),
+    authUid: normalizeText(authUid || payload?.authUid),
+    email,
+    loginEmail: email,
+    phone: normalizeText(payload?.phone),
+    editedBy: normalizeText(payload?.editedBy),
+    editedAt: now,
+  }
+}
+
+function createWorkerProfilePublicError(statusCode, publicCode, publicMessage) {
+  const error = new Error(publicCode)
+  error.statusCode = statusCode
+  error.publicCode = publicCode
+  error.publicMessage = publicMessage
+  return error
+}
+
+function appendWorkerProfileWarning(currentWarning, nextWarning) {
+  return [normalizeText(currentWarning), normalizeText(nextWarning)].filter(Boolean).join(' ')
+}
+
+function mapDataConnectWorkerForAuth(worker) {
+  if (!worker) {
+    return null
+  }
+
+  const login = normalizeText(worker.login ?? worker.workerLogin)
+  const workerName = normalizeText(worker.workerName ?? worker.worker_name ?? worker.name ?? worker.fullName)
+  const loginEmail = normalizeEmail(worker.loginEmail ?? worker.login_email ?? worker.email)
+  return {
+    login,
+    worker_id: normalizeText(worker.workerId ?? worker.worker_id) || login,
+    full_name: workerName || login,
+    login_email: loginEmail,
+    email: normalizeEmail(worker.email) || loginEmail,
+    auth_uid: normalizeText(worker.authUid ?? worker.auth_uid),
+    role: normalizeText(worker.role),
+    worker_type: normalizeText(worker.workerType ?? worker.worker_type),
+    active: asPayloadBoolean(worker.active, true),
+    phone: normalizeText(worker.phone),
+    created_at: worker.createdAt ?? worker.created_at,
+    updated_at: worker.updatedAt ?? worker.updated_at,
+    edit: normalizeText(worker.edit),
+  }
+}
+
+function resolveWorkerProfileEmailForLogin(login, payloadEmail, currentWorker) {
+  const loginPart = normalizeLoginLocalPart(login)
+  const domain =
+    emailDomain(currentWorker?.login_email ?? currentWorker?.loginEmail) ||
+    emailDomain(currentWorker?.email) ||
+    emailDomain(payloadEmail)
+  const email = loginPart && domain ? normalizeEmail(`${loginPart}@${domain}`) : ''
+  if (!email) {
+    throw createWorkerProfilePublicError(
+      400,
+      'INVALID_LOGIN_EMAIL',
+      'Nie mozna zbudowac emaila dla nowego loginu. Pracownik musi miec poprawna domene email.',
+    )
+  }
+  return email
+}
+
+async function assertWorkerProfileLoginAvailable(client, orgId, oldLogin, newLogin) {
+  if (normalizeLower(oldLogin) === normalizeLower(newLogin)) {
+    return
+  }
+
+  const duplicate = await client.query(
+    `select login
+       from public.worker
+      where org_id = $1
+        and lower(login) = lower($2)
+        and lower(login) <> lower($3)
+      limit 1`,
+    [orgId, newLogin, oldLogin],
+  )
+  if (duplicate.rows.length) {
+    throw createWorkerProfilePublicError(409, 'WORKER_LOGIN_ALREADY_EXISTS', 'Ten login jest juz zajety w tej organizacji.')
+  }
+}
+
+async function assertWorkerProfileEmailAvailable(client, orgId, oldLogin, email) {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) {
+    return
+  }
+
+  const duplicate = await client.query(
+    `select login
+       from public.worker
+      where org_id = $1
+        and lower(login) <> lower($2)
+        and (
+          lower(coalesce(login_email, '')) = lower($3)
+          or lower(coalesce(email, '')) = lower($3)
+        )
+      limit 1`,
+    [orgId, oldLogin, normalizedEmail],
+  )
+  if (duplicate.rows.length) {
+    throw createWorkerProfilePublicError(409, 'WORKER_EMAIL_ALREADY_EXISTS', 'Ten email jest juz przypisany do innego pracownika.')
+  }
+}
+
+function replaceWorkerLoginTokens(value, oldLogin, newLogin) {
+  const oldNormalized = normalizeLower(oldLogin)
+  if (!oldNormalized) {
+    return String(value ?? '')
+  }
+
+  return String(value ?? '').replace(/[a-z0-9._%+-]+/gi, (token) => {
+    return normalizeLower(token) === oldNormalized ? newLogin : token
+  })
+}
+
+async function updateWorkerProfileTaskTokenLogins(client, orgId, oldLogin, newLogin) {
+  const taskRows = await client.query(
+    `select id_task, worker_ids
+       from public.task
+      where org_id = $1
+        and exists (
+          select 1
+            from regexp_split_to_table(coalesce(worker_ids::text, ''), '[,;|[:space:]]+') token
+           where lower(trim(both ' "[]{}' from token)) = lower($2)
+        )`,
+    [orgId, oldLogin],
+  )
+
+  let updatedCount = 0
+  for (const row of taskRows.rows) {
+    const nextWorkerIds = replaceWorkerLoginTokens(row.worker_ids, oldLogin, newLogin)
+    if (nextWorkerIds === String(row.worker_ids ?? '')) {
+      continue
+    }
+    const updateResult = await client.query(
+      'update public.task set worker_ids = $3 where org_id = $1 and id_task = $2',
+      [orgId, row.id_task, nextWorkerIds],
+    )
+    updatedCount += updateResult.rowCount
+  }
+
+  return updatedCount
+}
+
+async function changeWorkerProfileLogin(client, currentWorker, payload, authUid, updatedBy, finalEmail) {
+  const oldLogin = payload.login
+  const newLogin = payload.newLogin
+  const dependentUpdates = {}
+
+  const inserted = await client.query(
+    `insert into public.worker (
+       org_id,
+       login,
+       worker_id,
+       full_name,
+       login_email,
+       email,
+       phone,
+       role,
+       worker_type,
+       active,
+       auth_uid,
+       created_at,
+       updated_at,
+       edit
+     )
+     select org_id,
+            $3,
+            null,
+            $4,
+            $5,
+            $5,
+            nullif($6, ''),
+            $7,
+            $8,
+            $9,
+            null,
+            created_at,
+            now(),
+            nullif($10, '')
+       from public.worker
+      where org_id = $1
+        and lower(login) = lower($2)`,
+    [
+      payload.orgId,
+      oldLogin,
+      newLogin,
+      payload.name,
+      finalEmail,
+      payload.phone,
+      payload.roleLabel,
+      payload.workerType,
+      payload.active,
+      updatedBy,
+    ],
+  )
+  if (!inserted.rowCount) {
+    throw createWorkerProfilePublicError(404, 'WORKER_NOT_FOUND', 'Nie znaleziono pracownika do edycji.')
+  }
+
+  const commonParams = [payload.orgId, oldLogin, newLogin]
+  dependentUpdates.workday_pause = (
+    await client.query(
+      `update public.workday_pause
+          set worker_login = $3
+        where org_id = $1
+          and lower(coalesce(worker_login, '')) = lower($2)`,
+      commonParams,
+    )
+  ).rowCount
+
+  dependentUpdates.event = (
+    await client.query(
+      `update public.event
+          set worker_login = $3
+        where org_id = $1
+          and lower(coalesce(worker_login, '')) = lower($2)`,
+      commonParams,
+    )
+  ).rowCount
+
+  dependentUpdates.workday = (
+    await client.query(
+      `update public.workday
+          set worker_login = $3,
+              updated_at = now()
+        where org_id = $1
+          and lower(worker_login) = lower($2)`,
+      commonParams,
+    )
+  ).rowCount
+
+  dependentUpdates.backup_cycle = (
+    await client.query(
+      `update public.backup_cycle
+          set worker_login = $3
+        where org_id = $1
+          and lower(coalesce(worker_login, '')) = lower($2)`,
+      commonParams,
+    )
+  ).rowCount
+
+  dependentUpdates.checklist_log = (
+    await client.query(
+      `update public.checklist_log
+          set "worker" = $3
+        where org_id = $1
+          and lower(coalesce("worker", '')) = lower($2)`,
+      commonParams,
+    )
+  ).rowCount
+
+  dependentUpdates.task_login = (
+    await client.query(
+      `update public.task
+          set worker_login = $3
+        where org_id = $1
+          and lower(coalesce(worker_login, '')) = lower($2)`,
+      commonParams,
+    )
+  ).rowCount
+
+  dependentUpdates.task_worker_id = (
+    await client.query(
+      `update public.task
+          set worker_id = $3
+        where org_id = $1
+          and lower(coalesce(worker_id, '')) = lower($2)`,
+      commonParams,
+    )
+  ).rowCount
+
+  dependentUpdates.task_worker_ids = await updateWorkerProfileTaskTokenLogins(client, payload.orgId, oldLogin, newLogin)
+
+  dependentUpdates.worker_credential = (
+    await client.query(
+      `update public.worker_credential
+          set login = $3,
+              updated_at = now(),
+              updated_by = nullif($4, '')
+        where org_id = $1
+          and lower(login) = lower($2)`,
+      [payload.orgId, oldLogin, newLogin, updatedBy],
+    )
+  ).rowCount
+
+  await client.query('delete from public.worker where org_id = $1 and lower(login) = lower($2)', [payload.orgId, oldLogin])
+
+  const updated = await client.query(
+    `update public.worker
+        set worker_id = coalesce(nullif($4, ''), nullif($5, ''), worker_id),
+            auth_uid = coalesce(nullif($6, ''), auth_uid),
+            updated_at = now()
+      where org_id = $1
+        and lower(login) = lower($2)
+      returning login,
+                worker_id,
+                full_name,
+                login_email,
+                email,
+                auth_uid,
+                role,
+                worker_type,
+                active,
+                phone,
+                created_at,
+                updated_at,
+                edit`,
+    [payload.orgId, newLogin, oldLogin, payload.workerId, normalizeText(currentWorker?.worker_id), authUid],
+  )
+
+  return {
+    row: updated.rows[0],
+    dependentUpdates,
+  }
+}
+
+async function findFirebaseUserForWorker(worker, preferredUid = '') {
+  const auth = ensureFirebaseAdmin().auth()
+  const uid = normalizeText(preferredUid || worker?.auth_uid)
+  if (uid) {
+    try {
+      const user = await auth.getUser(uid)
+      return { user, authUid: user.uid, authWarning: '' }
+    } catch (error) {
+      if (!isFirebaseUserNotFound(error)) {
+        throw error
+      }
+    }
+  }
+
+  const emailCandidates = [worker?.login_email, worker?.email].map((value) => normalizeEmail(value)).filter(Boolean)
+  for (const email of emailCandidates) {
+    try {
+      const user = await auth.getUserByEmail(email)
+      return { user, authUid: user.uid, authWarning: uid ? 'UID pracownika nie istnieje w Firebase Auth, konto znaleziono po emailu.' : '' }
+    } catch (error) {
+      if (!isFirebaseUserNotFound(error)) {
+        throw error
+      }
+    }
+  }
+
+  return {
+    user: null,
+    authUid: '',
+    authWarning: 'Nie znaleziono konta Firebase Auth dla tego pracownika.',
+  }
+}
+
+function isRequesterDeletingSelf(worker, authUid, decodedToken) {
+  const requesterUid = normalizeText(decodedToken?.uid)
+  if (authUid && requesterUid && authUid === requesterUid) {
+    return true
+  }
+
+  const requesterEmail = normalizeEmail(decodedToken?.email)
+  const workerEmails = [worker?.login_email, worker?.email].map((value) => normalizeEmail(value)).filter(Boolean)
+  if (requesterEmail && workerEmails.includes(requesterEmail)) {
+    return true
+  }
+
+  const requesterLogin = emailLocalPart(requesterEmail)
+  return Boolean(requesterLogin && normalizeLower(worker?.login) === requesterLogin)
+}
+
+async function deleteWorkerProfileAccessRows(client, orgId, login, workerId, authUid) {
+  const deletedCounts = {}
+
+  const credentialResult = await client.query(
+    'delete from public.worker_credential where org_id = $1 and lower(login) = lower($2)',
+    [orgId, login],
+  )
+  deletedCounts.worker_credential = credentialResult.rowCount
+
+  const workdayPauseResult = await client.query(
+    `delete from public.workday_pause wp
+      where wp.org_id = $1
+        and (
+          lower(coalesce(wp.worker_login, '')) = lower($2)
+          or exists (
+            select 1
+              from public.workday w
+             where w.org_id = wp.org_id
+               and w.workday_id = wp.workday_id
+               and lower(coalesce(w.worker_login, '')) = lower($2)
+          )
+        )`,
+    [orgId, login],
+  )
+  deletedCounts.workday_pause = workdayPauseResult.rowCount
+
+  const eventResult = await client.query(
+    `delete from public.event e
+      where e.org_id = $1
+        and (
+          lower(coalesce(e.worker_login, '')) = lower($2)
+          or exists (
+            select 1
+              from public.workday w
+             where w.org_id = e.org_id
+               and w.workday_id = e.workday_id
+               and lower(coalesce(w.worker_login, '')) = lower($2)
+          )
+        )`,
+    [orgId, login],
+  )
+  deletedCounts.event = eventResult.rowCount
+
+  const checklistLogResult = await client.query(
+    `delete from public.checklist_log cl
+      where cl.org_id = $1
+        and (
+          lower(coalesce(cl."worker", '')) = lower($2)
+          or exists (
+            select 1
+              from public.workday w
+             where w.org_id = cl.org_id
+               and w.workday_id = cl.workday_id
+               and lower(coalesce(w.worker_login, '')) = lower($2)
+          )
+          or exists (
+            select 1
+              from public.backup_cycle bc
+             where bc.org_id = cl.org_id
+               and bc.cycle_id = cl.cycle_id
+               and lower(coalesce(bc.worker_login, '')) = lower($2)
+          )
+        )`,
+    [orgId, login],
+  )
+  deletedCounts.checklist_log = checklistLogResult.rowCount
+
+  const backupCycleResult = await client.query(
+    'delete from public.backup_cycle where org_id = $1 and lower(coalesce(worker_login, \'\')) = lower($2)',
+    [orgId, login],
+  )
+  deletedCounts.backup_cycle = backupCycleResult.rowCount
+
+  const taskResult = await client.query(
+    `delete from public.task
+      where org_id = $1
+        and (
+          lower(coalesce(worker_login, '')) = lower($2)
+          or lower(coalesce(worker_id, '')) = lower($2)
+          or (nullif($3, '') is not null and lower(coalesce(worker_id, '')) = lower($3))
+        )`,
+    [orgId, login, normalizeText(workerId)],
+  )
+  deletedCounts.task = taskResult.rowCount
+
+  const workdayResult = await client.query(
+    'delete from public.workday where org_id = $1 and lower(coalesce(worker_login, \'\')) = lower($2)',
+    [orgId, login],
+  )
+  deletedCounts.workday = workdayResult.rowCount
+
+  if (authUid) {
+    const memberResult = await client.query(
+      'delete from public.organization_member where org_id = $1 and uid = $2',
+      [orgId, authUid],
+    )
+    deletedCounts.organization_member = memberResult.rowCount
+  } else {
+    deletedCounts.organization_member = 0
+  }
+
+  const workerResult = await client.query(
+    'delete from public.worker where org_id = $1 and lower(login) = lower($2)',
+    [orgId, login],
+  )
+  deletedCounts.worker = workerResult.rowCount
+
+  return deletedCounts
 }
 
 async function deleteFirebaseUserQuietly(user) {
@@ -1697,7 +3739,7 @@ async function createAdminManagedUser(payload, requesterUid) {
     )
 
     const workerIdRows = await client.query('select worker_id from public.worker where org_id = $1', [payload.orgId])
-    const workerId = resolveNextWorkerId(workerIdRows.rows)
+    const workerId = resolveWorkerIdForCreate(workerIdRows.rows, payload.workerId)
 
     await client.query(
       `insert into public.worker (
@@ -1794,8 +3836,7 @@ async function handleAuthProvisionWorkerRequest(req, res) {
   try {
     decodedToken = await verifyFirebaseIdToken(token)
   } catch (error) {
-    const mapped = mapFirebaseAdminError(error)
-    sendApiError(res, mapped.status === 500 ? 500 : 401, mapped.code, mapped.status === 500 ? mapped.message : 'Token Firebase jest niepoprawny albo wygasl.')
+    sendFirebaseVerificationError(res, error)
     return
   }
 
@@ -1855,8 +3896,7 @@ async function handleAuthRollbackWorkerRequest(req, res) {
   try {
     decodedToken = await verifyFirebaseIdToken(token)
   } catch (error) {
-    const mapped = mapFirebaseAdminError(error)
-    sendApiError(res, mapped.status === 500 ? 500 : 401, mapped.code, mapped.status === 500 ? mapped.message : 'Token Firebase jest niepoprawny albo wygasl.')
+    sendFirebaseVerificationError(res, error)
     return
   }
 
@@ -1923,8 +3963,7 @@ async function handleAdminWorkerPasswordRevealRequest(req, res) {
   try {
     await verifyFirebaseIdToken(token)
   } catch (error) {
-    const mapped = mapFirebaseAdminError(error)
-    sendApiError(res, mapped.status === 500 ? 500 : 401, mapped.code, mapped.status === 500 ? mapped.message : 'Token Firebase jest niepoprawny albo wygasl.')
+    sendFirebaseVerificationError(res, error)
     return
   }
 
@@ -2050,8 +4089,7 @@ async function handleAdminWorkerPasswordSetRequest(req, res) {
   try {
     decodedToken = await verifyFirebaseIdToken(token)
   } catch (error) {
-    const mapped = mapFirebaseAdminError(error)
-    sendApiError(res, mapped.status === 500 ? 500 : 401, mapped.code, mapped.status === 500 ? mapped.message : 'Token Firebase jest niepoprawny albo wygasl.')
+    sendFirebaseVerificationError(res, error)
     return
   }
 
@@ -2109,13 +4147,745 @@ async function handleAdminWorkerPasswordSetRequest(req, res) {
   } catch (error) {
     const mapped = mapFirebaseAdminError(error)
     const status = Number(error?.statusCode ?? mapped.status ?? 500)
+    const publicCode = normalizeText(error?.publicCode) || mapped.code || 'WORKER_PASSWORD_SET_FAILED'
+    const publicMessage = normalizeText(error?.publicMessage) || mapped.message || error?.message || 'Nie udalo sie zapisac hasla pracownika.'
+    console.warn('[worker-password-set]', publicCode, Number.isFinite(status) ? status : 500, publicMessage)
     sendApiError(
       res,
       Number.isFinite(status) ? status : 500,
-      normalizeText(error?.publicCode) || mapped.code || 'WORKER_PASSWORD_SET_FAILED',
-      normalizeText(error?.publicMessage) || mapped.message || error?.message || 'Nie udalo sie zapisac hasla pracownika.',
+      publicCode,
+      publicMessage,
       publicErrorDetails(error),
     )
+  }
+}
+
+function isWorkerProfileLoginChange(payload) {
+  return normalizeLower(payload?.newLogin) !== normalizeLower(payload?.login)
+}
+
+function findDataConnectWorkerByLogin(rows, login) {
+  const expected = normalizeLower(login)
+  return (Array.isArray(rows) ? rows : []).find((row) => normalizeLower(row?.login ?? row?.workerLogin) === expected) ?? null
+}
+
+function dataConnectWorkerProfileDuplicate(rows, oldLogin, newLogin, email) {
+  const normalizedOldLogin = normalizeLower(oldLogin)
+  const normalizedNewLogin = normalizeLower(newLogin)
+  const normalizedEmail = normalizeEmail(email)
+
+  return (Array.isArray(rows) ? rows : []).find((row) => {
+    const rowLogin = normalizeLower(row?.login ?? row?.workerLogin)
+    if (!rowLogin || rowLogin === normalizedOldLogin) {
+      return false
+    }
+
+    const rowLoginEmail = normalizeEmail(row?.loginEmail ?? row?.login_email)
+    const rowEmail = normalizeEmail(row?.email)
+    return (
+      (normalizedNewLogin && rowLogin === normalizedNewLogin) ||
+      (normalizedEmail && (rowLoginEmail === normalizedEmail || rowEmail === normalizedEmail))
+    )
+  }) ?? null
+}
+
+function assertDataConnectWorkerProfileAvailable(rows, oldLogin, newLogin, email) {
+  const duplicate = dataConnectWorkerProfileDuplicate(rows, oldLogin, newLogin, email)
+  if (!duplicate) {
+    return
+  }
+
+  const sameLogin = normalizeLower(duplicate?.login ?? duplicate?.workerLogin) === normalizeLower(newLogin)
+  const rowLoginEmail = normalizeEmail(duplicate?.loginEmail ?? duplicate?.login_email)
+  const rowEmail = normalizeEmail(duplicate?.email)
+  const sameEmail = normalizeEmail(email) && (rowLoginEmail === normalizeEmail(email) || rowEmail === normalizeEmail(email))
+  if (sameLogin && sameEmail) {
+    throw createWorkerProfilePublicError(
+      409,
+      'WORKER_ALREADY_EXISTS',
+      'Ten uzytkownik juz istnieje w tej organizacji. Login i email musza byc unikalne w obrebie jednej organizacji.',
+    )
+  }
+  if (sameLogin) {
+    throw createWorkerProfilePublicError(409, 'WORKER_LOGIN_ALREADY_EXISTS', 'Ten login jest juz zajety w tej organizacji.')
+  }
+  throw createWorkerProfilePublicError(409, 'WORKER_EMAIL_ALREADY_EXISTS', 'Ten email jest juz przypisany do uzytkownika w tej organizacji.')
+}
+
+async function getRequesterRoleViaDataConnect(orgId, firebaseIdToken) {
+  const response = await executeDataConnectOperation('query', 'MyOrganizations', {}, firebaseIdToken)
+  const memberships = Array.isArray(response?.data?.organizationMembers) ? response.data.organizationMembers : []
+  const membership = memberships.find((item) => normalizeText(item?.orgId) === normalizeText(orgId))
+  return normalizeRequesterRole(membership?.role)
+}
+
+function hasWorkerProfileAuthFieldChange(payload, currentWorker) {
+  if (!currentWorker) {
+    return true
+  }
+
+  const currentName = normalizeText(
+    currentWorker.workerName ?? currentWorker.workername ?? currentWorker.worker_name ?? currentWorker.name ?? currentWorker.fullName,
+  )
+  const currentEmail = normalizeEmail(currentWorker.loginEmail ?? currentWorker.email)
+  const currentActive = asPayloadBoolean(currentWorker.active, true)
+  return (
+    normalizeText(payload.name) !== currentName ||
+    normalizeEmail(payload.email) !== currentEmail ||
+    Boolean(payload.active) !== Boolean(currentActive)
+  )
+}
+
+function dataConnectWorkerAuthSnapshot(currentWorker = null) {
+  const displayName = normalizeText(
+    currentWorker?.workerName ??
+      currentWorker?.workername ??
+      currentWorker?.worker_name ??
+      currentWorker?.name ??
+      currentWorker?.fullName,
+  )
+  const email = normalizeEmail(currentWorker?.loginEmail ?? currentWorker?.login_email ?? currentWorker?.email)
+  const active = asPayloadBoolean(currentWorker?.active, true)
+  return {
+    ...(displayName ? { displayName } : {}),
+    ...(email ? { email } : {}),
+    disabled: !active,
+  }
+}
+
+function resolveWorkerProfileWorkerId(payload, currentWorker = null, loginChanged = false) {
+  const providedWorkerId = normalizeText(payload?.workerId)
+  const oldLogin = normalizeText(payload?.login)
+  const newLogin = normalizeText(payload?.newLogin || payload?.login)
+  if (loginChanged && (!providedWorkerId || normalizeLower(providedWorkerId) === normalizeLower(oldLogin))) {
+    return newLogin
+  }
+  return (
+    providedWorkerId ||
+    normalizeText(currentWorker?.workerId ?? currentWorker?.worker_id) ||
+    newLogin ||
+    oldLogin
+  )
+}
+
+async function updateFirebaseAuthForWorkerProfilePayload(payload, currentWorker = null, options = {}) {
+  if (!hasWorkerProfileAuthFieldChange(payload, currentWorker)) {
+    return {
+      authUid: normalizeText(payload?.authUid || currentWorker?.authUid || currentWorker?.auth_uid),
+      authUpdated: false,
+      authWarning: '',
+    }
+  }
+
+  const authUid = normalizeText(payload?.authUid || currentWorker?.authUid || currentWorker?.auth_uid)
+  if (!authUid) {
+    if (options.strict) {
+      throw createWorkerProfilePublicError(
+        409,
+        'FIREBASE_AUTH_USER_MISSING',
+        'Nie znaleziono konta Firebase Auth dla tego pracownika. Edycja zostala przerwana, zeby nie zapisac tylko czesci danych.',
+      )
+    }
+    return {
+      authUid: '',
+      authUpdated: false,
+      authWarning:
+        'Nie wyslano UID Firebase Auth; baza zostala zaktualizowana przez Data Connect, ale konto Auth nie zostalo zmienione.',
+    }
+  }
+
+  try {
+    await ensureFirebaseAdmin().auth().updateUser(authUid, {
+      displayName: payload.name,
+      email: payload.email,
+      disabled: !payload.active,
+    })
+    return { authUid, authUpdated: true, authWarning: '' }
+  } catch (error) {
+    if (options.strict) {
+      throw error
+    }
+    const mapped = mapFirebaseAdminError(error)
+    const warning = isFirebaseUserNotFound(error)
+      ? 'Nie znaleziono konta Firebase Auth dla tego UID; baza zostala zaktualizowana przez Data Connect.'
+      : `Baza zostala zaktualizowana przez Data Connect, ale Firebase Auth nie zostal zmieniony: ${normalizeText(mapped.message || error?.message)}`
+    return {
+      authUid,
+      authUpdated: false,
+      authWarning: warning.slice(0, 500),
+    }
+  }
+}
+
+async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebaseIdToken, fallbackReason = '') {
+  const loginChanged = isWorkerProfileLoginChange(payload)
+  const rows = await queryWorkersForOrgViaDataConnect(payload.orgId, firebaseIdToken)
+  const currentWorker = findDataConnectWorkerByLogin(rows, payload.login)
+  if (!currentWorker) {
+    throw createWorkerProfilePublicError(404, 'WORKER_NOT_FOUND', 'Nie znaleziono pracownika do edycji.')
+  }
+
+  if (loginChanged) {
+    const requesterRole = await getRequesterRoleViaDataConnect(payload.orgId, firebaseIdToken)
+    if (requesterRole !== 'ADMIN') {
+      throw createWorkerProfilePublicError(403, 'LOGIN_CHANGE_FORBIDDEN', 'Login pracownika moze zmienic tylko Admin.')
+    }
+  }
+
+  const finalEmail = loginChanged
+    ? resolveWorkerProfileEmailForLogin(payload.newLogin, payload.email, currentWorker)
+    : payload.email
+  assertDataConnectWorkerProfileAvailable(rows, payload.login, payload.newLogin, finalEmail)
+
+  const finalPayload = {
+    ...payload,
+    newLogin: payload.newLogin,
+    email: finalEmail,
+    authUid: normalizeText(payload.authUid || currentWorker?.authUid || currentWorker?.auth_uid),
+  }
+  const finalWorkerId = resolveWorkerProfileWorkerId(finalPayload, currentWorker, loginChanged)
+  const updatedBy = payload.editedBy || normalizeEmail(decodedToken?.email) || normalizeText(decodedToken?.uid)
+  const authRollbackPatch = dataConnectWorkerAuthSnapshot(currentWorker)
+  const authResult = await updateFirebaseAuthForWorkerProfilePayload(finalPayload, currentWorker, { strict: true })
+
+  try {
+    if (loginChanged) {
+      await executeDataConnectOperation(
+        'mutation',
+        'RenameWorkerForOrg',
+        {
+          orgId: finalPayload.orgId,
+          login: finalPayload.login,
+          newLogin: finalPayload.newLogin,
+          workerName: finalPayload.name,
+          loginEmail: finalPayload.email,
+          authUid: authResult.authUid || finalPayload.authUid,
+          role: finalPayload.roleLabel,
+          memberRole: finalPayload.memberRole,
+          active: finalPayload.active,
+          email: finalPayload.email,
+          phone: finalPayload.phone || null,
+          workerType: finalPayload.workerType,
+          workerId: finalWorkerId,
+          createdAt: currentWorker?.createdAt ?? currentWorker?.created_at ?? null,
+          edit: updatedBy || null,
+        },
+        firebaseIdToken,
+      )
+    } else {
+      await executeDataConnectOperation(
+        'mutation',
+        'UpdateWorkerProfileForOrg',
+        {
+          orgId: finalPayload.orgId,
+          login: finalPayload.login,
+          workerName: finalPayload.name,
+          loginEmail: finalPayload.email,
+          authUid: authResult.authUid || finalPayload.authUid,
+          role: finalPayload.roleLabel,
+          memberRole: finalPayload.memberRole,
+          active: finalPayload.active,
+          email: finalPayload.email,
+          phone: finalPayload.phone || null,
+          workerType: finalPayload.workerType,
+          workerId: finalWorkerId,
+          edit: updatedBy || null,
+        },
+        firebaseIdToken,
+      )
+    }
+  } catch (error) {
+    if (authResult.authUpdated && Object.keys(authRollbackPatch).length) {
+      try {
+        await ensureFirebaseAdmin().auth().updateUser(authResult.authUid, authRollbackPatch)
+      } catch (rollbackError) {
+        error.authRollbackWarning = normalizeText(mapFirebaseAdminError(rollbackError).message || rollbackError?.message)
+      }
+    }
+    throw error
+  }
+
+  const authWarnings = [authResult.authWarning].filter(Boolean)
+  return {
+    worker: mapWorkerProfilePayload({ ...finalPayload, workerId: finalWorkerId, editedBy: updatedBy }, authResult.authUid),
+    authUpdated: authResult.authUpdated,
+    authWarning: authWarnings.join(' '),
+    loginChanged,
+    loginChangeSkipped: false,
+    storage: 'dataconnect',
+    ...(fallbackReason ? { fallbackReason } : {}),
+  }
+}
+
+async function deleteWorkerProfileViaDataConnect(payload, decodedToken, firebaseIdToken, fallbackReason = '') {
+  const [rows, requesterRole] = await Promise.all([
+    queryWorkersForOrgViaDataConnect(payload.orgId, firebaseIdToken),
+    getRequesterRoleViaDataConnect(payload.orgId, firebaseIdToken),
+  ])
+
+  if (requesterRole !== 'ADMIN') {
+    throw createWorkerProfilePublicError(403, 'FORBIDDEN', 'Brak uprawnien do usuwania pracownikow.')
+  }
+
+  const currentWorkerRaw = findDataConnectWorkerByLogin(rows, payload.login)
+  if (!currentWorkerRaw) {
+    throw createWorkerProfilePublicError(404, 'WORKER_NOT_FOUND', 'Nie znaleziono pracownika do usuniecia.')
+  }
+
+  const currentWorker = mapDataConnectWorkerForAuth(currentWorkerRaw)
+  const storedAuthUid = normalizeText(payload.authUid || currentWorker?.auth_uid)
+  const authMatch = await findFirebaseUserForWorker(currentWorker, storedAuthUid)
+  const authUid = normalizeText(authMatch.authUid || storedAuthUid)
+  let authWarning = normalizeText(authMatch.authWarning)
+
+  if (isRequesterDeletingSelf(currentWorker, authUid, decodedToken)) {
+    throw createWorkerProfilePublicError(400, 'SELF_DELETE_BLOCKED', 'Nie mozesz usunac konta, na ktorym jestes teraz zalogowany.')
+  }
+
+  const workerId = normalizeText(currentWorker?.worker_id || payload.workerId || payload.login)
+  const response = await executeDataConnectOperation(
+    'mutation',
+    'DeleteWorkerProfileForOrg',
+    {
+      orgId: payload.orgId,
+      login: payload.login,
+      workerId,
+      authUid,
+    },
+    firebaseIdToken,
+  )
+
+  let authDeleted = false
+  if (authUid) {
+    try {
+      await ensureFirebaseAdmin().auth().deleteUser(authUid)
+      authDeleted = true
+    } catch (error) {
+      if (isFirebaseUserNotFound(error)) {
+        authWarning = appendWorkerProfileWarning(authWarning, 'Konto Firebase Auth bylo juz usuniete.')
+      } else {
+        const mapped = mapFirebaseAdminError(error)
+        authWarning = appendWorkerProfileWarning(
+          authWarning,
+          `Dane pracownika usunieto, ale nie udalo sie usunac konta Firebase Auth: ${normalizeText(mapped.message || error?.message)}`,
+        )
+      }
+    }
+  } else {
+    authWarning = appendWorkerProfileWarning(authWarning, 'Nie znaleziono UID Firebase Auth; usunieto dane pracownika z bazy.')
+  }
+
+  return {
+    deletedLogin: payload.login,
+    deletedCounts: response?.data ?? {},
+    authDeleted,
+    authWarning,
+    storage: 'dataconnect',
+    ...(fallbackReason ? { fallbackReason } : {}),
+  }
+}
+
+function sendWorkerProfileFailure(res, error, fallbackCode, fallbackMessage, dbConfigMessage) {
+  if (error?.message === 'DB_CONFIG_MISSING') {
+    sendApiError(res, 500, 'DB_CONFIG_MISSING', dbConfigMessage)
+    return
+  }
+
+  const databaseError = mapDatabaseConnectionError(error)
+  if (databaseError) {
+    sendApiError(res, databaseError.status, databaseError.code, databaseError.message)
+    return
+  }
+
+  const mapped = mapFirebaseAdminError(error)
+  const status = Number(error?.statusCode ?? mapped.status ?? 500)
+  const publicCode = normalizeText(error?.publicCode) || mapped.code || fallbackCode
+  const publicMessage = normalizeText(error?.publicMessage) || mapped.message || error?.message || fallbackMessage
+  console.warn('[worker-profile]', publicCode, Number.isFinite(status) ? status : 500, publicMessage)
+  sendApiError(
+    res,
+    Number.isFinite(status) ? status : 500,
+    publicCode,
+    publicMessage,
+    publicErrorDetails(error),
+  )
+}
+
+function sendWorkerProfileDeleteRequiresDb(res) {
+  sendApiError(
+    res,
+    503,
+    'WORKER_PROFILE_DELETE_REQUIRES_DB',
+    'Nie udalo sie usunac pracownika w lokalnym trybie Cloud SQL. Sprobuj ponownie po restarcie dev stacka albo uzyj trybu Data Connect.',
+  )
+}
+
+async function handleAdminWorkerProfileUpdateRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  let body
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
+      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
+      return
+    }
+    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    sendFirebaseVerificationError(res, error)
+    return
+  }
+
+  const { value: payload, validationErrors } = buildWorkerProfileUpdatePayload(body)
+  if (validationErrors.length) {
+    sendApiError(res, 400, 'VALIDATION_ERROR', validationErrors[0], validationErrors)
+    return
+  }
+
+  if (shouldUseWorkerProfileDataConnectStorage()) {
+    try {
+      const data = await updateWorkerProfileViaDataConnect(payload, decodedToken, token)
+      sendJson(res, 200, { ok: true, data })
+    } catch (error) {
+      sendWorkerProfileFailure(
+        res,
+        error,
+        'WORKER_PROFILE_UPDATE_FAILED',
+        'Nie udalo sie zaktualizowac pracownika.',
+        'Lokalna edycja profilu pracownika wymaga konfiguracji DB. Skonfiguruj lokalne DB/Admin SDK i uruchom WORKER_PROFILE_MODE=local/direct albo testuj endpoint przez wdrozony Firebase Hosting.',
+      )
+    }
+    return
+  }
+
+  let client = null
+  try {
+    client = await connectDbClient()
+    await client.query('begin')
+    const requesterRole = await requireWorkerProfileAccess(client, payload.orgId, decodedToken.uid, ['ADMIN', 'MANAGER'], 'edycji pracownikow')
+
+    const currentWorker = await readWorkerProfileForUpdate(client, payload.orgId, payload.login)
+    if (!currentWorker) {
+      throw createWorkerProfilePublicError(404, 'WORKER_NOT_FOUND', 'Nie znaleziono pracownika do edycji.')
+    }
+
+    const loginChanged = isWorkerProfileLoginChange(payload)
+    if (loginChanged && requesterRole !== 'ADMIN') {
+      throw createWorkerProfilePublicError(403, 'LOGIN_CHANGE_FORBIDDEN', 'Login pracownika moze zmienic tylko Admin.')
+    }
+    if (loginChanged) {
+      await client.query('lock table public.worker in share row exclusive mode')
+    }
+    await assertWorkerProfileLoginAvailable(client, payload.orgId, payload.login, payload.newLogin)
+
+    const authMatch = await findFirebaseUserForWorker(currentWorker)
+    const authUid = normalizeText(authMatch.authUid)
+    let authUpdated = false
+    let authWarning = authMatch.authWarning
+    if (!authUid) {
+      throw createWorkerProfilePublicError(
+        409,
+        'FIREBASE_AUTH_USER_MISSING',
+        'Nie znaleziono konta Firebase Auth dla tego pracownika. Edycja zostala przerwana, zeby nie zapisac tylko czesci danych.',
+      )
+    }
+    const updatedBy = payload.editedBy || normalizeEmail(decodedToken?.email) || normalizeText(decodedToken?.uid)
+    const finalEmail = loginChanged ? resolveWorkerProfileEmailForLogin(payload.newLogin, payload.email, currentWorker) : payload.email
+    const finalWorkerId = resolveWorkerProfileWorkerId(payload, currentWorker, loginChanged)
+    const finalPayload = { ...payload, workerId: finalWorkerId }
+    await assertWorkerProfileEmailAvailable(client, payload.orgId, payload.login, finalEmail)
+
+    let updatedRow = null
+    let dependentUpdates = null
+    if (loginChanged) {
+      const loginUpdate = await changeWorkerProfileLogin(client, currentWorker, finalPayload, authUid, updatedBy, finalEmail)
+      updatedRow = loginUpdate.row
+      dependentUpdates = loginUpdate.dependentUpdates
+    } else {
+      const updated = await client.query(
+        `update public.worker
+            set worker_id = coalesce(nullif($3, ''), worker_id),
+                full_name = $4,
+                login_email = $5,
+                email = $5,
+                phone = nullif($6, ''),
+                role = $7,
+                worker_type = $8,
+                active = $9,
+                edit = nullif($10, ''),
+                auth_uid = coalesce(nullif($11, ''), auth_uid),
+                updated_at = now()
+          where org_id = $1
+            and lower(login) = lower($2)
+          returning login,
+                    worker_id,
+                    full_name,
+                    login_email,
+                    email,
+                    auth_uid,
+                    role,
+                    worker_type,
+                    active,
+                    phone,
+                    created_at,
+                    updated_at,
+                    edit`,
+        [
+          finalPayload.orgId,
+          finalPayload.login,
+          finalPayload.workerId,
+          finalPayload.name,
+          finalEmail,
+          finalPayload.phone,
+          finalPayload.roleLabel,
+          finalPayload.workerType,
+          finalPayload.active,
+          updatedBy,
+          authUid,
+        ],
+      )
+      updatedRow = updated.rows[0]
+    }
+
+    if (authUid) {
+      await client.query(
+        `insert into public.organization_member (org_id, uid, role, created_at)
+         values ($1, $2, $3, now())
+         on conflict (org_id, uid) do update set role = excluded.role`,
+        [payload.orgId, authUid, payload.memberRole],
+      )
+    }
+
+    await ensureFirebaseAdmin().auth().updateUser(authUid, {
+      displayName: finalPayload.name,
+      email: finalEmail,
+      disabled: !finalPayload.active,
+    })
+    authUpdated = true
+    authWarning = ''
+
+    await client.query('commit')
+
+    sendJson(res, 200, {
+      ok: true,
+      data: {
+        worker: mapWorkerProfileRow(updatedRow, payload.orgId),
+        authUpdated,
+        authWarning,
+        loginChanged,
+        dependentUpdates,
+      },
+    })
+  } catch (error) {
+    if (client) {
+      try {
+        await client.query('rollback')
+      } catch {
+        // ignore rollback failure
+      }
+    }
+
+    if (isDatabaseTlsVerificationError(error) && !isWorkerProfileLoginChange(payload)) {
+      try {
+        const data = await updateWorkerProfileViaDataConnect(payload, decodedToken, token, 'cloud-sql-tls-cert')
+        sendJson(res, 200, { ok: true, data })
+      } catch (fallbackError) {
+        sendWorkerProfileFailure(
+          res,
+          fallbackError,
+          'WORKER_PROFILE_UPDATE_FAILED',
+          'Nie udalo sie zaktualizowac pracownika.',
+          'Lokalna edycja profilu pracownika wymaga konfiguracji DB. Skonfiguruj lokalne DB/Admin SDK i uruchom WORKER_PROFILE_MODE=local/direct albo testuj endpoint przez wdrozony Firebase Hosting.',
+        )
+      }
+      return
+    }
+
+    sendWorkerProfileFailure(
+      res,
+      error,
+      'WORKER_PROFILE_UPDATE_FAILED',
+      'Nie udalo sie zaktualizowac pracownika.',
+      'Lokalna edycja profilu pracownika wymaga konfiguracji DB. Skonfiguruj lokalne DB/Admin SDK i uruchom WORKER_PROFILE_MODE=local/direct albo testuj endpoint przez wdrozony Firebase Hosting.',
+    )
+  } finally {
+    if (client) client.release()
+  }
+}
+
+async function handleAdminWorkerProfileDeleteRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  let body
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
+      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
+      return
+    }
+    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    sendFirebaseVerificationError(res, error)
+    return
+  }
+
+  const { value: payload, validationErrors } = buildWorkerProfileDeletePayload(body)
+  if (validationErrors.length) {
+    sendApiError(res, 400, 'VALIDATION_ERROR', validationErrors[0], validationErrors)
+    return
+  }
+
+  if (shouldUseWorkerProfileDataConnectStorage()) {
+    try {
+      const data = await deleteWorkerProfileViaDataConnect(payload, decodedToken, token)
+      sendJson(res, 200, { ok: true, data })
+    } catch (error) {
+      sendWorkerProfileFailure(
+        res,
+        error,
+        'WORKER_PROFILE_DELETE_FAILED',
+        'Nie udalo sie usunac pracownika.',
+        'Lokalne usuwanie profilu pracownika wymaga trybu Data Connect albo poprawnej konfiguracji DB/Firebase Admin.',
+      )
+    }
+    return
+  }
+
+  let client = null
+  try {
+    client = await connectDbClient()
+    await client.query('begin')
+    await requireWorkerProfileAccess(client, payload.orgId, decodedToken.uid, ['ADMIN'], 'usuwania pracownikow')
+
+    const currentWorker = await readWorkerProfileForUpdate(client, payload.orgId, payload.login)
+    if (!currentWorker) {
+      const error = new Error('WORKER_NOT_FOUND')
+      error.statusCode = 404
+      error.publicCode = 'WORKER_NOT_FOUND'
+      error.publicMessage = 'Nie znaleziono pracownika do usuniecia.'
+      throw error
+    }
+
+    const storedAuthUid = normalizeText(payload.authUid || currentWorker.auth_uid)
+    const authMatch = await findFirebaseUserForWorker(currentWorker, storedAuthUid)
+    const authUid = normalizeText(authMatch.authUid || storedAuthUid)
+    let authWarning = authMatch.authWarning
+
+    if (isRequesterDeletingSelf(currentWorker, authUid, decodedToken)) {
+      const error = new Error('SELF_DELETE_BLOCKED')
+      error.statusCode = 400
+      error.publicCode = 'SELF_DELETE_BLOCKED'
+      error.publicMessage = 'Nie mozesz usunac konta, na ktorym jestes teraz zalogowany.'
+      throw error
+    }
+
+    const workerId = normalizeText(currentWorker.worker_id || payload.workerId)
+    const deletedCounts = await deleteWorkerProfileAccessRows(client, payload.orgId, payload.login, workerId, authUid)
+    let authDeleted = false
+
+    if (authUid) {
+      try {
+        await ensureFirebaseAdmin().auth().deleteUser(authUid)
+        authDeleted = true
+      } catch (error) {
+        if (!isFirebaseUserNotFound(error)) {
+          throw error
+        }
+        authWarning = appendWorkerProfileWarning(authWarning, 'Konto Firebase Auth bylo juz usuniete.')
+      }
+    } else {
+      authWarning = appendWorkerProfileWarning(authWarning, 'Nie znaleziono UID Firebase Auth; usunieto dane pracownika z bazy.')
+    }
+
+    await client.query('commit')
+
+    sendJson(res, 200, {
+      ok: true,
+      data: {
+        deletedLogin: payload.login,
+        deletedCounts,
+        authDeleted,
+        authWarning,
+      },
+    })
+  } catch (error) {
+    if (client) {
+      try {
+        await client.query('rollback')
+      } catch {
+        // ignore rollback failure
+      }
+    }
+
+    if (isDatabaseTlsVerificationError(error)) {
+      try {
+        const data = await deleteWorkerProfileViaDataConnect(payload, decodedToken, token, 'cloud-sql-tls-cert')
+        sendJson(res, 200, { ok: true, data })
+      } catch (fallbackError) {
+        sendWorkerProfileFailure(
+          res,
+          fallbackError,
+          'WORKER_PROFILE_DELETE_FAILED',
+          'Nie udalo sie usunac pracownika.',
+          'Lokalne usuwanie profilu pracownika wymaga trybu Data Connect albo poprawnej konfiguracji DB/Firebase Admin.',
+        )
+      }
+      return
+    }
+
+    sendWorkerProfileFailure(
+      res,
+      error,
+      'WORKER_PROFILE_DELETE_FAILED',
+      'Nie udalo sie usunac pracownika.',
+      'Lokalne usuwanie profilu pracownika wymaga konfiguracji DB. Skonfiguruj lokalne DB/Admin SDK i uruchom WORKER_PROFILE_MODE=local/direct albo testuj endpoint przez wdrozony Firebase Hosting.',
+    )
+  } finally {
+    if (client) client.release()
   }
 }
 
@@ -2154,8 +4924,7 @@ async function handleAdminUsersRequest(req, res) {
     decodedToken = await verifyFirebaseIdToken(token)
   } catch (error) {
     logAdminUsersError(error, 'verify-token')
-    const mapped = mapFirebaseAdminError(error)
-    sendApiError(res, mapped.status === 500 ? 500 : 401, mapped.code === 'FIREBASE_AUTH_ERROR' ? 'UNAUTHENTICATED' : mapped.code, mapped.status === 500 ? mapped.message : 'Token Firebase jest niepoprawny albo wygasĹ‚.')
+    sendFirebaseVerificationError(res, error)
     return
   }
 
@@ -2839,6 +5608,227 @@ async function requirePortalScheduleOrderAccess(client, orgId, uid, { write = fa
   return role
 }
 
+async function requirePortalEventAccess(client, orgId, uid) {
+  const membership = await getRequesterMembership(client, orgId, uid)
+  const role = normalizeRequesterRole(membership?.role)
+  if (!['ADMIN', 'MANAGER'].includes(role)) {
+    const error = new Error('FORBIDDEN')
+    error.statusCode = membership ? 403 : 404
+    error.publicCode = membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING'
+    error.publicMessage = membership ? 'Brak uprawnien do usuwania zdarzen.' : 'Brak dostepu do tej organizacji.'
+    throw error
+  }
+  return role
+}
+
+function sanitizePortalEventDeleteId(value) {
+  const id = normalizeText(value)
+  if (!id || id.length > 128 || /[\u0000-\u001f\u007f]/.test(id)) {
+    return ''
+  }
+  return id
+}
+
+function collectPortalEventDeleteIds(body = {}) {
+  const ids = []
+  const pushId = (value) => {
+    const id = sanitizePortalEventDeleteId(value)
+    if (id) {
+      ids.push(id)
+    }
+  }
+  const pushRowIds = (row) => {
+    if (!row || typeof row !== 'object') {
+      pushId(row)
+      return
+    }
+
+    ;[
+      row.id,
+      row.eventId,
+      row.workdayId,
+      row.linkedWorkdayId,
+      row.cycleId,
+      row.backupCycleId,
+      row.startEventId,
+      row.endEventId,
+      row.pauseId,
+      row.workday?.workdayId,
+      row.workday?.startEventId,
+      row.workday?.endEventId,
+    ].forEach(pushId)
+  }
+
+  ;[body?.id, body?.eventId, body?.workdayId, body?.linkedWorkdayId, body?.cycleId, body?.backupCycleId].forEach(pushId)
+  ;[body?.ids, body?.eventIds, body?.workdayIds, body?.cycleIds].forEach((list) => {
+    if (Array.isArray(list)) {
+      list.forEach(pushId)
+    }
+  })
+  ;[body?.row, body?.event].forEach(pushRowIds)
+  if (Array.isArray(body?.rows)) {
+    body.rows.forEach(pushRowIds)
+  }
+  if (Array.isArray(body?.events)) {
+    body.events.forEach(pushRowIds)
+  }
+
+  return [...new Set(ids)].slice(0, 300)
+}
+
+async function deletePortalEventsFromTableByColumns(client, orgId, relationName, columns, ids) {
+  if (!ids.length || !(await databaseRelationExists(client, relationName))) {
+    return 0
+  }
+  const existingColumns = []
+  for (const column of columns) {
+    if (await databaseColumnExists(client, relationName, column)) {
+      existingColumns.push(column)
+    }
+  }
+  if (!existingColumns.length) {
+    return 0
+  }
+  const where = existingColumns.map((column) => `${column} = any($2::varchar[])`).join(' or ')
+  const result = await client.query(`delete from ${relationName} where org_id = $1 and (${where})`, [orgId, ids])
+  return result.rowCount || 0
+}
+
+async function deletePortalEventsByIds(client, orgId, ids) {
+  const counts = {
+    workdayPause: 0,
+    event: 0,
+    backupCycle: 0,
+    workday: 0,
+  }
+
+  if (!ids.length) {
+    return counts
+  }
+
+  await client.query('begin')
+  counts.workdayPause = await deletePortalEventsFromTableByColumns(
+    client,
+    orgId,
+    'public.workday_pause',
+    ['workday_id', 'pause_id', 'pause_event_id'],
+    ids,
+  )
+  counts.event = await deletePortalEventsFromTableByColumns(
+    client,
+    orgId,
+    'public.event',
+    ['event_id', 'workday_id', 'start_event_id', 'end_event_id'],
+    ids,
+  )
+  counts.backupCycle = await deletePortalEventsFromTableByColumns(
+    client,
+    orgId,
+    'public.backup_cycle',
+    ['cycle_id', 'start_event_id', 'end_event_id'],
+    ids,
+  )
+  counts.workday = await deletePortalEventsFromTableByColumns(
+    client,
+    orgId,
+    'public.workday',
+    ['workday_id', 'start_event_id', 'end_event_id'],
+    ids,
+  )
+  await client.query('commit')
+  return counts
+}
+
+async function handlePortalEventsRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  const method = String(req.method || 'DELETE').toUpperCase()
+  if (!['DELETE', 'POST'].includes(method)) {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolone metody to DELETE i POST.')
+    return
+  }
+
+  let body = {}
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
+      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
+      return
+    }
+    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
+    return
+  }
+
+  const orgId = normalizeOrgId(body?.orgId)
+  if (!orgId) {
+    sendApiError(res, 400, 'INVALID_ORG_ID', 'Brak poprawnego orgId.')
+    return
+  }
+
+  const eventIds = collectPortalEventDeleteIds(body)
+  if (!eventIds.length) {
+    sendApiError(res, 400, 'INVALID_EVENT_IDS', 'Brak identyfikatorow zdarzen do usuniecia.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status, mapped.code, mapped.message)
+    return
+  }
+
+  const requesterUid = normalizeText(decodedToken?.uid)
+  let client = null
+  try {
+    client = await connectDbClient()
+    await requirePortalEventAccess(client, orgId, requesterUid)
+    const counts = await deletePortalEventsByIds(client, orgId, eventIds)
+    const deletedTotal = Object.values(counts).reduce((sum, value) => sum + (Number(value) || 0), 0)
+    sendJson(res, 200, {
+      ok: true,
+      data: {
+        deletedIds: eventIds,
+        counts,
+        deletedTotal,
+      },
+    })
+  } catch (error) {
+    logPortalStorageError('portal/events', error)
+    try {
+      if (client) await client.query('rollback')
+    } catch {
+      // ignore rollback failure
+    }
+    const mappedDb = mapDatabaseConnectionError(error)
+    if (mappedDb) {
+      sendApiError(res, mappedDb.status, mappedDb.code, mappedDb.message)
+      return
+    }
+    sendApiError(
+      res,
+      error?.statusCode || 500,
+      normalizeText(error?.publicCode) || 'PORTAL_EVENTS_ERROR',
+      normalizeText(error?.publicMessage) || error?.message || 'Nie udalo sie usunac zdarzen.',
+    )
+  } finally {
+    if (client) client.release()
+  }
+}
+
 async function readPortalScheduleOrders(client, orgId) {
   const result = await client.query(
     `select
@@ -3303,14 +6293,22 @@ async function proxyApiRequest(req, res, requestUrl) {
   const targetUrl = new URL(`${requestUrl.pathname}${requestUrl.search || ''}`, `${API_PROXY_TARGET}/`)
   const method = String(req.method || 'GET').toUpperCase()
   const requestBody = isApiMethodWithBody(method) ? await readRequestBody(req, MAX_PROXY_BODY_BYTES) : Buffer.alloc(0)
+  const forwardedHost = normalizeApiProxyForwardedHost(API_PROXY_FORWARDED_HOST || targetUrl.host)
+  const forwardedFor = normalizeText(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '')
 
   const headers = {
-    'x-forwarded-host': API_PROXY_FORWARDED_HOST,
+    origin: `https://${forwardedHost}`,
+    referer: `https://${forwardedHost}/`,
+    'x-forwarded-host': forwardedHost,
     'x-forwarded-proto': 'https',
+    'x-forwarded-port': '443',
+    'x-forwarded-server': forwardedHost,
   }
   if (req.headers['content-type']) headers['content-type'] = req.headers['content-type']
   if (req.headers.authorization) headers.authorization = req.headers.authorization
   if (req.headers.accept) headers.accept = req.headers.accept
+  if (req.headers['user-agent']) headers['user-agent'] = req.headers['user-agent']
+  if (forwardedFor) headers['x-forwarded-for'] = forwardedFor
   if (req.headers['x-firebase-appcheck']) headers['x-firebase-appcheck'] = req.headers['x-firebase-appcheck']
 
   const controller = new AbortController()
@@ -3339,6 +6337,23 @@ async function proxyApiRequest(req, res, requestUrl) {
   clearTimeout(timeout)
 
   const raw = Buffer.from(await upstream.arrayBuffer())
+  const upstreamText = raw.toString('utf8')
+  if (upstreamText.toLowerCase().includes('forbidden_host')) {
+    sendJson(res, upstream.status || 502, {
+      ok: false,
+      error: {
+        code: 'UPSTREAM_FORBIDDEN_HOST',
+        message: `Upstream API odrzucil host. Proxy target: ${targetUrl.origin}, forwarded host: ${forwardedHost}. Zrestartuj root npm run dev; jesli blad zostaje, uruchom worker-profile lokalnie z WORKER_PROFILE_MODE=local/direct oraz lokalna konfiguracja DB/Firebase Admin albo testuj przez wdrozony Firebase Hosting.`,
+        details: {
+          proxyTarget: targetUrl.origin,
+          forwardedHost,
+          workerProfileMode: normalizeText(process.env.WORKER_PROFILE_MODE) || 'auto',
+        },
+      },
+    })
+    return
+  }
+
   const responseHeaders = withSecurityHeaders({
     'Content-Type': upstream.headers.get('content-type') || 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
@@ -3355,6 +6370,13 @@ const server = http.createServer((req, res) => {
   }
 
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+  if (requestUrl.pathname === MOBILE_STATE_PATH || requestUrl.pathname === MOBILE_SCAN_PATH) {
+    handleMobileWorkflowRequest(req, res, requestUrl).catch((error) => {
+      sendMobileApiError(res, 500, 'MOBILE_WORKFLOW_ERROR', error?.message || 'Unexpected mobile workflow error.')
+    })
+    return
+  }
+
   if (requestUrl.pathname === PORTAL_SCHEDULE_ORDERS_PATH) {
     if (shouldProxyPortalScheduleOrdersRequest()) {
       proxyApiRequest(req, res, requestUrl).catch((error) => {
@@ -3395,6 +6417,26 @@ const server = http.createServer((req, res) => {
     return
   }
 
+  if (requestUrl.pathname === PORTAL_EVENTS_PATH) {
+    if (shouldProxyPortalEventsRequest()) {
+      proxyApiRequest(req, res, requestUrl).catch((error) => {
+        sendJson(res, 500, {
+          ok: false,
+          error: {
+            code: 'PORTAL_EVENTS_PROXY_ERROR',
+            message: error?.message || 'Unexpected portal events proxy error.',
+          },
+        })
+      })
+      return
+    }
+
+    handlePortalEventsRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'PORTAL_EVENTS_ERROR', error?.message || 'Unexpected portal events error.')
+    })
+    return
+  }
+
   if (requestUrl.pathname === AUTH_PROVISION_WORKER_PATH || requestUrl.pathname === '/authProvisionWorker') {
     handleAuthProvisionWorkerRequest(req, res).catch((error) => {
       sendApiError(res, 500, 'AUTH_PROVISION_WORKER_ERROR', error?.message || 'Unexpected auth provision worker error.')
@@ -3419,6 +6461,46 @@ const server = http.createServer((req, res) => {
   if (requestUrl.pathname === ADMIN_WORKER_PASSWORD_SET_PATH || requestUrl.pathname === '/adminWorkerPasswordSet') {
     handleAdminWorkerPasswordSetRequest(req, res).catch((error) => {
       sendApiError(res, 500, 'WORKER_PASSWORD_SET_ERROR', error?.message || 'Unexpected worker password set error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === ADMIN_WORKER_PROFILE_UPDATE_PATH || requestUrl.pathname === '/adminWorkerProfileUpdate') {
+    if (shouldProxyWorkerProfileRequest()) {
+      proxyApiRequest(req, res, requestUrl).catch((error) => {
+        sendJson(res, 500, {
+          ok: false,
+          error: {
+            code: 'WORKER_PROFILE_UPDATE_PROXY_ERROR',
+            message: error?.message || 'Unexpected worker profile update proxy error.',
+          },
+        })
+      })
+      return
+    }
+
+    handleAdminWorkerProfileUpdateRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'WORKER_PROFILE_UPDATE_ERROR', error?.message || 'Unexpected worker profile update error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === ADMIN_WORKER_PROFILE_DELETE_PATH || requestUrl.pathname === '/adminWorkerProfileDelete') {
+    if (shouldProxyWorkerProfileRequest()) {
+      proxyApiRequest(req, res, requestUrl).catch((error) => {
+        sendJson(res, 500, {
+          ok: false,
+          error: {
+            code: 'WORKER_PROFILE_DELETE_PROXY_ERROR',
+            message: error?.message || 'Unexpected worker profile delete proxy error.',
+          },
+        })
+      })
+      return
+    }
+
+    handleAdminWorkerProfileDeleteRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'WORKER_PROFILE_DELETE_ERROR', error?.message || 'Unexpected worker profile delete error.')
     })
     return
   }

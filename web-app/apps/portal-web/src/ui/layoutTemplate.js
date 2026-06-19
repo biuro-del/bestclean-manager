@@ -1,105 +1,56 @@
-﻿export const portalLayoutTemplate = `
-<div class="login-screen" id="loginScreen" style="display:flex;">
-  <div class="login-card" role="dialog" aria-label="Logowanie">
-    <div class="login-brand">
-      <div class="login-logo">
-        <img src="/logotyp.jpg" alt="Best Clean" />
+const loginCleaningIllustrationUrl = new URL('../graphics/cleaning service-01.svg', import.meta.url).href
+
+export const portalLayoutTemplate = `
+<div class="login-screen" id="loginScreen" style="display:grid;">
+  <section class="login-visual" aria-hidden="true">
+    <img class="login-illustration" src="${loginCleaningIllustrationUrl}" alt="" />
+  </section>
+  <section class="login-panel">
+    <form class="login-card" id="loginForm" role="dialog" aria-labelledby="loginTitle">
+      <div class="login-brand">
+        <h1 class="login-title" id="loginTitle">Witaj!</h1>
+        <p class="login-copy">Zaloguj si&#281; do portalu Cleanzi.</p>
       </div>
-      <p class="login-claim">Sprz&#261;tanie z nami to czysta przyjemno&#347;&#263;.</p>
-    </div>
 
-    <div class="login-field">
-      <label for="loginLogin">Login</label>
-      <input id="loginLogin" type="text" autocomplete="username" />
-    </div>
+      <div class="login-field">
+        <label for="loginLogin">Login</label>
+        <input id="loginLogin" type="text" autocomplete="username" />
+      </div>
 
-    <div class="login-field">
-      <label for="loginPass">Hasło</label>
-      <input id="loginPass" type="password" autocomplete="current-password" />
-    </div>
+      <div class="login-field">
+        <label for="loginPass">Hasło</label>
+        <input id="loginPass" type="password" autocomplete="current-password" />
+      </div>
 
-    <div class="login-error" id="loginErr" style="display:none;"></div>
+      <div class="login-error" id="loginErr" style="display:none;"></div>
 
-    <button class="btn primary" id="loginBtn" type="button">Zaloguj</button>
-  </div>
+      <button class="btn primary login-submit" id="loginBtn" type="submit">Zaloguj</button>
+    </form>
+  </section>
 </div>
 
 <div class="app-bg" id="portalRoot" style="display:none;">
   <div class="app-shell">
-    <header class="header">
-      <button
-        class="header-left header-home-link"
-        data-route="dashboard"
-        type="button"
-        aria-label="Przejdź do strony głównej"
-        title="Strona główna"
-      >
-        <div class="header-logo-pair" aria-label="Logo Cleanzi i Best Clean">
-          <div class="logo-block logo-block--cleanzi">
-            <img src="/cleanzi-logo.svg" alt="Cleanzi" />
-          </div>
-          <div class="logo-block logo-block--bestclean">
-            <img src="/logotyp.jpg" alt="Best Clean" />
-          </div>
-        </div>
-      </button>
-
-      <div class="topbar-search" id="topbarGlobalSearch" role="search" aria-label="Szukaj w portalu">
-        <span class="topbar-search-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none">
-            <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
-            <path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-          </svg>
-        </span>
-        <input
-          class="topbar-search-input"
-          id="topbarGlobalSearchInput"
-          type="search"
-          placeholder="Szukaj sekcji, zleceń i klientów..."
-          autocomplete="off"
-          aria-label="Szukaj sekcji, zleceń i klientów"
-          aria-expanded="false"
-          aria-controls="topbarGlobalSearchResults"
-        />
-        <button class="topbar-search-clear" id="topbarGlobalSearchClear" type="button" aria-label="Wyczyść wyszukiwanie" hidden>×</button>
-        <div class="topbar-search-results" id="topbarGlobalSearchResults" role="listbox" aria-label="Wyniki wyszukiwania" hidden></div>
-      </div>
-
-      <div class="header-right">
-        <button class="topbar-action-btn" type="button" aria-label="Powiadomienia" title="Powiadomienia">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M6 9a6 6 0 1 1 12 0v4.5l1.4 2.3a1 1 0 0 1-.9 1.5H5.5a1 1 0 0 1-.9-1.5L6 13.5V9z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-            <path d="M10 20a2 2 0 0 0 4 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-          </svg>
-        </button>
-        <button class="topbar-action-btn" type="button" aria-label="Szybkie akcje" title="Szybkie akcje">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 3v18M3 12h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-          </svg>
-        </button>
-        <div class="user-chip" id="userChip" title="Użytkownik">
-          <span class="user-avatar" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/>
-              <path d="M5 21a7 7 0 0 1 14 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-            </svg>
-          </span>
-          <span class="name" id="userName">-</span>
-          <span class="dot" id="userDot" aria-hidden="true"></span>
-        </div>
-        <button class="btn2 danger" id="logoutBtn" type="button" title="Wyloguj">Wyloguj</button>
-      </div>
-    </header>
-
     <div class="app-body">
       <aside class="sidebar" id="portalSidebar">
+        <button
+          class="sidebar-brand"
+          data-route="dashboard"
+          type="button"
+          aria-label="Przejdź do strony głównej"
+        >
+          <span class="sidebar-brand-logo logo-block logo-block--cleanzi">
+            <img src="/cleanzi-logo.svg" alt="Cleanzi" />
+          </span>
+        </button>
+
         <button class="menu-order-add" id="sidebarOrdersAddBtn" type="button">
           <span class="menu-order-add-icon" aria-hidden="true">+</span>
           <span class="mi-label">Dodaj zlecenie</span>
         </button>
 
         <div class="sidebar-head">
-          <div class="sidebar-title">Menu</div>
+          <div class="sidebar-title">G&#321;&#211;WNE</div>
           <button
             class="sidebar-toggle-btn"
             id="sidebarToggleBtn"
@@ -198,12 +149,7 @@
             </span>
             <span class="mi-label">Grafik pracy</span>
           </button>
-          <button class="menu-item" data-route="coordinator" type="button">
-            <span class="mi-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="1.8"/><circle cx="17" cy="8" r="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 20a5 5 0 0 1 10 0M14 20a4 4 0 0 1 8 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-            </span>
-            <span class="mi-label">Koordynator</span>
-          </button>
+          <div class="menu-group-title">OPERACJE</div>
 
           <button class="menu-section" type="button" data-toggle="clients">
             <span class="mi-ico" aria-hidden="true">
@@ -212,18 +158,6 @@
             <span class="mi-label">Klienci</span><span class="chev">▼</span>
           </button>
           <div class="submenu" id="submenu-clients">
-            <button class="submenu-item" data-route="clientsList" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M7 9h10M7 13h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-              </span>
-              <span class="mi-label">Lista klientów</span>
-            </button>
-            <button class="submenu-item" data-route="individualOrders" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="14" height="18" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 8h6M8 12h6M8 16h4M20 14v6M17 17h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-              </span>
-              <span class="mi-label">Zlecenie indywidualne</span>
-            </button>
             <button class="submenu-item" data-route="clientProfile" type="button">
               <span class="mi-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="12" r="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M14 10h4M14 14h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -253,6 +187,8 @@
             </button>
           </div>
 
+          <div class="menu-group-title">ZASOBY</div>
+
           <button class="menu-section" type="button" data-toggle="workers">
             <span class="mi-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 14a4 4 0 0 1 8 0M12 11a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -260,19 +196,15 @@
             <span class="mi-label">Pracownicy</span><span class="chev">▼</span>
           </button>
           <div class="submenu" id="submenu-workers">
-            <button class="submenu-item" data-route="workerTime" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l4 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </span>
-              <span class="mi-label">Czas pracy pracownika</span>
-            </button>
             <button class="submenu-item" data-route="workerProfile" type="button">
               <span class="mi-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M4 20a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
               </span>
-              <span class="mi-label">Profil pracownika</span>
+              <span class="mi-label">Lista pracowników</span>
             </button>
           </div>
+
+          <div class="menu-group-title">RAPORTY</div>
 
           <button class="menu-section" type="button" data-toggle="reports">
             <span class="mi-ico" aria-hidden="true">
@@ -288,6 +220,8 @@
               <span class="mi-label">Zestawienia</span>
             </button>
           </div>
+
+          <div class="menu-group-title">USTAWIENIA</div>
 
           <button class="menu-section" type="button" data-toggle="settings">
             <span class="mi-ico" aria-hidden="true">
@@ -312,7 +246,56 @@
         </div>
       </aside>
 
-      <main class="main">
+      <div class="content-shell">
+        <header class="header">
+          <div class="topbar-search" id="topbarGlobalSearch" role="search" aria-label="Szukaj sekcji, podsekcji i pracowników">
+            <span class="topbar-search-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
+                <path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <input
+              class="topbar-search-input"
+              id="topbarGlobalSearchInput"
+              type="search"
+              placeholder="Szukaj sekcji, podsekcji i pracowników..."
+              autocomplete="off"
+              aria-label="Szukaj sekcji, podsekcji i pracowników"
+              aria-expanded="false"
+              aria-controls="topbarGlobalSearchResults"
+            />
+            <button class="topbar-search-clear" id="topbarGlobalSearchClear" type="button" aria-label="Wyczyść wyszukiwanie" hidden>×</button>
+            <div class="topbar-search-results" id="topbarGlobalSearchResults" role="listbox" aria-label="Wyniki wyszukiwania" hidden></div>
+          </div>
+
+          <div class="header-right">
+            <button class="topbar-action-btn" type="button" aria-label="Powiadomienia" title="Powiadomienia">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M6 9a6 6 0 1 1 12 0v4.5l1.4 2.3a1 1 0 0 1-.9 1.5H5.5a1 1 0 0 1-.9-1.5L6 13.5V9z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                <path d="M10 20a2 2 0 0 0 4 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <button class="topbar-action-btn" type="button" aria-label="Szybkie akcje" title="Szybkie akcje">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 3v18M3 12h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <div class="user-chip" id="userChip" title="Użytkownik">
+              <span class="user-avatar" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/>
+                  <path d="M5 21a7 7 0 0 1 14 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span class="name" id="userName">-</span>
+              <span class="dot" id="userDot" aria-hidden="true"></span>
+            </div>
+            <button class="btn2 danger" id="logoutBtn" type="button" title="Wyloguj">Wyloguj</button>
+          </div>
+        </header>
+
+        <main class="main">
         <section id="view-dashboard">
           <div
             class="dashboard-loading-overlay"
@@ -324,6 +307,7 @@
           >
             <div class="dashboard-loading-card">
               <span class="dashboard-loading-spinner" aria-hidden="true"></span>
+              <span class="dashboard-loading-text">Synchronizuję dane...</span>
             </div>
           </div>
           <div class="dash-grid">
@@ -437,7 +421,7 @@
                   <span class="dash-activity-view-option-note">Dotychczasowy widok aktywnych osób</span>
                 </button>
               </div>
-              <div class="dash-last-refresh" id="dashLastRefresh">Ostatnie odświeżenie: - (autoodświeżenie co 15 min)</div>
+              <div class="dash-last-refresh" id="dashLastRefresh">Ostatnie odświeżenie: - (synchronizacja przy wejściu i powrocie; co 15 min w tle)</div>
 
               <div class="dash-activity-calendar" id="dashActivityCalendar" data-dash-activity-view-panel="today-calendar">
                 <div class="dash-activity-calendar-empty">Ładowanie widoku dnia...</div>
@@ -518,11 +502,10 @@
         <section id="view-ordersMap" style="display:none;"></section>
         <section id="view-zones" style="display:none;"></section>
         <section id="view-workerProfile" style="display:none;"></section>
+        <section id="view-workerAccount" style="display:none;"></section>
         <section id="view-workerTime" style="display:none;"></section>
         <section id="view-workerTimeDetail" style="display:none;"></section>
-        <section id="view-clientsList" style="display:none;"></section>
         <section id="view-audits" style="display:none;"></section>
-        <section id="view-individualOrders" style="display:none;"></section>
         <section id="view-clientProfile" style="display:none;"></section>
         <section id="view-clientProfileDetails" style="display:none;"></section>
         <section id="view-reports" style="display:none;"></section>
@@ -532,7 +515,8 @@
           <h1 class="welcome" id="phTitle">W budowie</h1>
           <p class="subwelcome" id="phText">Ten moduł dodamy w kolejnym etapie.</p>
         </section>
-      </main>
+        </main>
+      </div>
     </div>
   </div>
 </div>

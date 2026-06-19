@@ -1,0 +1,183 @@
+<div class="toolbar cp-filters-card" aria-label="Filtry profilu klienta">
+  <div class="tool">
+    <label for="cpSearchName">Szukaj</label>
+    <input id="cpSearchName" type="text" placeholder="nazwa lub id klienta..." />
+  </div>
+
+  <div class="tool">
+    <label for="cpSearchNip">NIP</label>
+    <input id="cpSearchNip" type="text" placeholder="np. 1234567890" />
+  </div>
+
+  <div class="tool">
+    <label for="cpSearchCity">Miasto</label>
+    <input id="cpSearchCity" type="text" placeholder="np. Raciborz" />
+  </div>
+
+  <div class="tool">
+    <label for="cpSearchCoordinator">Koordynator</label>
+    <input id="cpSearchCoordinator" type="text" placeholder="np. Rafal" />
+  </div>
+
+  <div class="tool">
+    <label for="cpSearchStatus">Status</label>
+    <select id="cpSearchStatus">
+      <option value="">(wszystkie)</option>
+      <option value="Aktywny">Aktywny</option>
+      <option value="Nieaktywny">Nieaktywny</option>
+      <option value="Wstrzymany">Wstrzymany</option>
+      <option value="Archiwalny">Archiwalny</option>
+    </select>
+  </div>
+
+  <div class="tool-actions">
+    <div class="tool-actions-left">
+      <select id="cpPageSize" aria-label="Liczba klientow">
+        <option value="10">10</option>
+        <option value="25">25</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+      </select>
+    </div>
+    <div class="tool-actions-right">
+      <button class="btn2" id="cpAddClientBtn" type="button">Dodaj klienta</button>
+      <button class="btn2" id="cpRefreshBtn" type="button">Odswiez</button>
+      <button class="btn2 primary" id="cpSearchBtn" type="button">Szukaj</button>
+    </div>
+  </div>
+</div>
+
+<div class="cp-cooperation-card" aria-label="Model współpracy">
+  <div class="cp-cooperation-title">Model współpracy</div>
+  <div class="cp-cooperation-options" id="cpCooperationModel">
+    <button class="cp-cooperation-option is-active" type="button" data-client-profile-model="all" aria-pressed="true">
+      <span class="cp-cooperation-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M8.5 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM15.5 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.5 19.5a5 5 0 0 1 10 0M10.5 19.5a5 5 0 0 1 10 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      </span>
+      <span class="cp-cooperation-copy">
+        <strong>Wszyscy</strong>
+        <span>Pokaż wszystkich klientów</span>
+      </span>
+      <span class="cp-cooperation-active">Aktywne</span>
+    </button>
+    <button class="cp-cooperation-option" type="button" data-client-profile-model="regular" aria-pressed="false">
+      <span class="cp-cooperation-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="m8.5 13.5 2.2 2.2a2.2 2.2 0 0 0 3.1 0l4.7-4.7a2 2 0 0 0-2.8-2.8l-2.6 2.6M7.2 12.2 4.6 9.6a2.1 2.1 0 0 1 0-3l.2-.2a2.1 2.1 0 0 1 3 0l2 2M14.2 8.5l2-2a2.1 2.1 0 0 1 3 0l.2.2a2.1 2.1 0 0 1 0 3l-1 1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="m6.5 14 2 2M9 16.5l1.5 1.5M15 16.5l1.5 1.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      </span>
+      <span class="cp-cooperation-copy">
+        <strong>Stała obsługa</strong>
+        <span>Klienci w stałej współpracy</span>
+      </span>
+      <span class="cp-cooperation-active">Aktywne</span>
+    </button>
+    <button class="cp-cooperation-option" type="button" data-client-profile-model="oneoff" aria-pressed="false">
+      <span class="cp-cooperation-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M4 5h2l2.2 10.2a2 2 0 0 0 2 1.6h6.9a2 2 0 0 0 1.9-1.4L21 8H7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM18 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" stroke="currentColor" stroke-width="1.7"/></svg>
+      </span>
+      <span class="cp-cooperation-copy">
+        <strong>Klient detaliczny</strong>
+        <span>Klienci detaliczni</span>
+      </span>
+      <span class="cp-cooperation-active">Aktywne</span>
+    </button>
+  </div>
+</div>
+
+<div class="cp-table" aria-label="Tabela profilu klientow">
+  <div class="cp-head">
+    <div>Klient</div>
+    <div>Aktywny</div>
+    <div>Akcja</div>
+  </div>
+
+  <div id="clientProfileBody">
+    <div class="cp-row cp-row-empty">
+      <div>Ladowanie danych...</div><div></div><div></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="clModal" aria-hidden="true" hidden>
+  <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="clModalTitle">
+    <div class="modal-header">
+      <h2 id="clModalTitle">Edycja/Podglad</h2>
+      <button class="cp-modal-close" id="clModalCloseBtn" type="button" aria-label="Zamknij">&times;</button>
+    </div>
+
+    <div class="modal-body">
+      <input type="hidden" id="clRowNumber" />
+
+      <div class="filter-group">
+        <label for="clId">ID (automatyczne)</label>
+        <input type="text" id="clId" class="fido-input" readonly />
+      </div>
+
+      <div class="filter-group">
+        <label for="clNazwa">Nazwa Klienta</label>
+        <input type="text" id="clNazwa" class="fido-input" />
+      </div>
+
+      <div class="filter-group">
+        <label for="clNip">NIP</label>
+        <input type="text" id="clNip" class="fido-input" />
+      </div>
+
+      <div class="filter-group">
+        <label for="clMiasto">Miasto</label>
+        <input type="text" id="clMiasto" class="fido-input" />
+      </div>
+
+      <div class="filter-group cl-field--wide">
+        <label for="clAdres">Adres</label>
+        <input type="text" id="clAdres" class="fido-input" />
+      </div>
+
+      <div class="filter-group">
+        <label for="clStatus">Status</label>
+        <select id="clStatus" class="fido-input">
+          <option value="Aktywny">Aktywny</option>
+          <option value="Nieaktywny">Nieaktywny</option>
+          <option value="Wstrzymany">Wstrzymany</option>
+          <option value="Archiwalny">Archiwalny</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="clClientType">Typ klienta</label>
+        <select id="clClientType" class="fido-input">
+          <option value="CYKLICZNY">Cykliczny</option>
+          <option value="DETALICZNY">Detaliczny</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="clKoordynator">Koordynator</label>
+        <select id="clKoordynator" class="fido-input">
+          <option value="">-- wybierz --</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-fido btn-outline" id="clCancelBtn" type="button">Anuluj</button>
+      <button class="btn-fido btn-primary" id="clSaveBtn" type="button">Zapisz zmiany</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay cp-delete-confirm" id="cpDeleteConfirmOverlay" aria-hidden="true" hidden>
+  <div class="modal-content" role="alertdialog" aria-modal="true" aria-labelledby="cpDeleteConfirmTitle" aria-describedby="cpDeleteConfirmText">
+    <div class="modal-header">
+      <h2 id="cpDeleteConfirmTitle">Usunac klienta?</h2>
+      <button class="cp-modal-close" id="cpDeleteConfirmCloseBtn" type="button" aria-label="Zamknij">&times;</button>
+    </div>
+    <div class="modal-body cp-delete-confirm-body">
+      <p id="cpDeleteConfirmText"></p>
+      <p class="cp-delete-warning">Ta operacja usunie rowniez powiazane rekordy klienta: strefy/obiekty, zadania/zlecenia, checklisty, magazyn klienta i historie zwiazana z klientem. Nie da sie jej cofnac.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-fido btn-outline" id="cpDeleteConfirmCancelBtn" type="button">Anuluj</button>
+      <button class="btn-fido btn-primary cp-delete-danger" id="cpDeleteConfirmConfirmBtn" type="button">Usun klienta</button>
+    </div>
+  </div>
+</div>

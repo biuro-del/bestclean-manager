@@ -1,8 +1,0 @@
-/**
- * Schedule Service — API-facing wrapper.
- */
-function Schedule_getMyWeekForWorker_(worker) {
-  const workerId = (worker && worker.workerId) ? String(worker.workerId).trim() : '';
-  if (!workerId) return { week: { found: false, days: [] } };
-  return Schedule_getMyWeek_(workerId);
-}

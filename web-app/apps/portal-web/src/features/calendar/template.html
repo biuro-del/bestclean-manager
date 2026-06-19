@@ -1,0 +1,195 @@
+<div class="calendar-page calendar-timeline-prototype" id="calendarTimelinePrototype">
+  <div class="fw-calendar-shell">
+    <section class="fw-timeline-card" aria-label="Kalendarz osi czasu">
+      <div class="fw-calendar-toolbar" aria-label="Sterowanie kalendarzem">
+        <div class="fw-toolbar-left">
+          <button class="fw-toolbar-btn fw-toggle-btn is-active" id="calendarTimelineCompletedToggle" type="button" aria-pressed="true">Zako&#324;czone: poka&#380;</button>
+          <div class="fw-type-filter" id="calendarTimelineTypeFilter">
+            <button class="fw-toolbar-select-btn" id="calendarTimelineTypeBtn" type="button" aria-expanded="false" aria-controls="calendarTimelineTypePanel">
+              Typy zlece&#324;
+              <span aria-hidden="true">&#9662;</span>
+            </button>
+            <div class="fw-type-panel" id="calendarTimelineTypePanel" hidden>
+              <label><input type="checkbox" data-calendar-timeline-type="individual" checked /><span></span>Zlecenia indywidualne</label>
+              <label><input type="checkbox" data-calendar-timeline-type="cyclic" checked /><span></span>Zlecenie cykliczne</label>
+              <label><input type="checkbox" data-calendar-timeline-type="renovation" checked /><span></span>Zlecenie poremontowe</label>
+              <label><input type="checkbox" data-calendar-timeline-type="windows" checked /><span></span>Mycie okien</label>
+              <label><input type="checkbox" data-calendar-timeline-type="other" checked /><span></span>Inne zlecenie</label>
+            </div>
+          </div>
+          <button class="fw-toolbar-icon" id="calendarTimelineRefreshBtn" type="button" aria-label="Od&#347;wie&#380;" title="Od&#347;wie&#380;">&#8635;</button>
+        </div>
+
+        <div class="fw-toolbar-right">
+          <button class="fw-view-btn" id="calendarTodayBtn" type="button">Dzisiaj</button>
+          <button class="fw-view-btn is-active" type="button" data-calendar-view="three">3 dni</button>
+          <button class="fw-view-btn" type="button" data-calendar-view="week">Tydzie&#324;</button>
+          <button class="fw-view-btn" type="button" data-calendar-view="month">Miesi&#261;c</button>
+          <button class="fw-toolbar-icon" id="calendarPrevBtn" type="button" aria-label="Poprzedni zakres">&lsaquo;</button>
+          <button class="fw-toolbar-icon" id="calendarNextBtn" type="button" aria-label="Nast&#281;pny zakres">&rsaquo;</button>
+          <span class="fw-date-jump">
+            <button class="fw-date-jump-btn" id="calendarTimelineDateBtn" type="button" aria-label="Wybierz dat&#281;">
+              <span aria-hidden="true">&#128197;</span>
+              <strong id="calendarTimelineDateLabel">-</strong>
+            </button>
+            <input id="calendarTimelineDateInput" type="date" aria-label="Data pocz&#261;tku zakresu" />
+          </span>
+          <span class="fw-range-label"><i aria-hidden="true"></i><strong id="calendarRangeLabel">-</strong></span>
+        </div>
+      </div>
+
+      <div class="fw-timeline-stage" id="calendarPrototypeTimeline" aria-live="polite"></div>
+    </section>
+  </div>
+
+  <div class="calendar-context-panel" hidden>
+    <div class="calendar-mini-month" id="calendarMiniMonth"></div>
+    <div class="calendar-task-filters" id="calendarTaskFilters"></div>
+  </div>
+  <div class="calendar-board" id="calendarBoard" hidden></div>
+
+  <div class="modal-overlay calendar-editor-overlay" id="calendarEditorOverlay" style="display:none;">
+    <div class="modal calendar-editor-modal calendar-task-editor" role="dialog" aria-modal="true" aria-labelledby="calendarEditorTitle">
+      <div class="calendar-task-topbar">
+        <button class="calendar-task-complete" type="button" id="calendarTaskCompleteBtn">
+          <span aria-hidden="true">&#10003;</span>
+          Oznacz jako uko&#324;czone
+        </button>
+        <div class="calendar-task-top-actions">
+          <span class="calendar-task-avatar" id="calendarTaskOwnerAvatar">RD</span>
+          <button class="calendar-task-icon-btn" type="button" title="Dodaj osob&#281;" aria-label="Dodaj osob&#281;" data-calendar-add-picker="workers">+</button>
+          <button class="calendar-task-share" type="button">Udost&#281;pnij</button>
+          <button class="calendar-task-icon-btn" type="button" id="calendarTaskDuplicateBtn" title="Duplikuj" aria-label="Duplikuj">&#x2398;</button>
+          <button class="calendar-task-icon-btn calendar-task-icon-btn--danger" type="button" id="calendarTaskDeleteBtn" title="Usu&#324;" aria-label="Usu&#324;">&#128465;</button>
+          <button class="calendar-task-icon-btn" type="button" id="calendarEditorCloseBtn" aria-label="Zamknij">&times;</button>
+        </div>
+      </div>
+
+      <div class="calendar-task-private">
+        <span aria-hidden="true">&#9679;</span>
+        <strong>To zadanie jest prywatne dla Ciebie.</strong>
+        <button type="button">Ustaw jako publiczne</button>
+      </div>
+
+      <div class="calendar-task-editor-body">
+        <p class="calendar-task-kicker" id="calendarEditorTitle">Zadanie</p>
+        <input id="calendarTaskTitle" class="calendar-task-title-input" type="text" placeholder="Wpisz nazw&#281; zadania" />
+
+        <div class="calendar-task-properties">
+          <div class="calendar-task-property">
+            <span class="calendar-task-property-label">Osoby odpowiedzialne</span>
+            <div class="calendar-picker calendar-picker--plain">
+              <div class="calendar-picker-head">
+                <span id="calendarTaskOwnerName">Osoby</span>
+                <button class="calendar-picker-add" type="button" data-calendar-add-picker="workers">+ Dodaj osob&#281;</button>
+              </div>
+              <div class="calendar-picker-rows" id="calendarWorkerPickerRows"></div>
+              <datalist id="calendarWorkerOptions"></datalist>
+            </div>
+          </div>
+
+          <div class="calendar-task-property calendar-task-property--date">
+            <span class="calendar-task-property-label">Data wykonania</span>
+            <div class="calendar-task-date-grid">
+              <label>
+                <span>Data</span>
+                <input id="calendarTaskDate" type="date" />
+              </label>
+              <label>
+                <span>START</span>
+                <input id="calendarTaskTime" type="time" />
+              </label>
+              <label>
+                <span>STOP</span>
+                <input id="calendarTaskEndTime" type="time" />
+              </label>
+            </div>
+          </div>
+
+          <div class="calendar-task-property">
+            <span class="calendar-task-property-label">Typ</span>
+            <select id="calendarTaskTone">
+              <option value="blue">Standard</option>
+              <option value="green">Gotowe / kontrola</option>
+              <option value="amber">Pilne</option>
+              <option value="red">Problem</option>
+              <option value="message">Wiadomo&#347;&#263; pracownika</option>
+            </select>
+          </div>
+
+          <div class="calendar-task-property">
+            <span class="calendar-task-property-label">Projekty / klienci</span>
+            <div class="calendar-picker calendar-picker--plain">
+              <div class="calendar-picker-head">
+                <span>Klienci</span>
+                <button class="calendar-picker-add" type="button" data-calendar-add-picker="objects">+ Dodaj klienta</button>
+              </div>
+              <div class="calendar-picker-rows" id="calendarObjectPickerRows"></div>
+              <datalist id="calendarObjectOptions"></datalist>
+            </div>
+          </div>
+
+          <div class="calendar-task-property">
+            <span class="calendar-task-property-label">Strefa</span>
+            <select id="calendarTaskZone">
+              <option value="">Najpierw wybierz klienta</option>
+            </select>
+          </div>
+        </div>
+
+        <label class="calendar-task-description">
+          <span>Opis</span>
+          <textarea id="calendarTaskNotes" rows="6" placeholder="Czego dotyczy to zadanie?"></textarea>
+        </label>
+
+        <div class="calendar-task-section">
+          <div class="calendar-task-section-head">
+            <strong>Podzadania</strong>
+            <button type="button" aria-label="Dodaj podzadanie">+</button>
+          </div>
+          <button class="calendar-task-muted-action" type="button">Dodaj podzadanie</button>
+        </div>
+
+        <div class="calendar-task-section">
+          <div class="calendar-task-section-head">
+            <strong>Aplikacje <span>1</span></strong>
+          </div>
+          <button class="calendar-task-app-link" type="button">
+            <span>Google Drive</span>
+            <strong aria-hidden="true">A</strong>
+            Dodaj plik z Dysku Google
+          </button>
+        </div>
+
+        <div class="calendar-task-section">
+          <div class="calendar-task-section-head">
+            <strong>Za&#322;&#261;czniki</strong>
+            <button type="button" aria-label="Dodaj za&#322;&#261;cznik">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="calendar-task-comments">
+        <div class="calendar-task-comment-tabs">
+          <button class="is-active" type="button" data-calendar-task-tab="comments">Komentarze</button>
+          <button type="button" data-calendar-task-tab="activity">Ca&#322;a aktywno&#347;&#263;</button>
+          <span>Najstarsze</span>
+        </div>
+        <div class="calendar-task-tab-panel" id="calendarTaskCommentsPanel">
+          <div class="calendar-task-comment-box">
+            <span class="calendar-task-avatar" id="calendarTaskCommentAvatar">RD</span>
+            <textarea rows="2" placeholder="Dodaj komentarz"></textarea>
+          </div>
+        </div>
+        <div class="calendar-task-tab-panel calendar-task-activity-panel" id="calendarTaskActivityPanel" hidden>
+          <div class="calendar-task-assigned-summary" id="calendarTaskAssignedSummary"></div>
+          <div class="calendar-task-activity-list" id="calendarTaskActivityList"></div>
+        </div>
+        <div class="calendar-task-editor-actions">
+          <button class="btn2" type="button" id="calendarTaskCancelBtn">Anuluj</button>
+          <button class="btn2 primary" type="button" id="calendarTaskSaveBtn">Zapisz</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
