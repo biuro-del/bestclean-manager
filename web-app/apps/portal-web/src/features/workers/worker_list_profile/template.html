@@ -112,10 +112,22 @@
       <input id="wkQ" type="text" placeholder="Szukaj pracownika..." />
     </div>
 
-    <button class="btn2" id="wkResetBtn" type="button">Odśwież</button>
-    <button class="btn2" id="wkOpenExportBtn" type="button">Pobierz ewidencj&#281; pracy</button>
-    <button class="btn2" id="wkAddBtn" type="button">Dodaj pracownika</button>
-    <button class="btn2 primary" id="wkSearchBtn" type="button">Szukaj</button>
+    <button class="btn2 worker-profile-filter-btn" id="wkResetBtn" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.7"></path><path d="M18 3v5h-5"></path><path d="M20 12a8 8 0 0 1-13.7 5.7"></path><path d="M6 21v-5h5"></path></svg>
+      <span>Od&#347;wie&#380;</span>
+    </button>
+    <button class="btn2 worker-profile-filter-btn" id="wkOpenExportBtn" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"></path><path d="m7 10 5 5 5-5"></path><path d="M5 20h14"></path></svg>
+      <span>Pobierz ewidencj&#281; pracy</span>
+    </button>
+    <button class="btn2 worker-profile-filter-btn" id="wkAddBtn" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+      <span>Dodaj pracownika</span>
+    </button>
+    <button class="btn2 primary worker-profile-filter-btn" id="wkSearchBtn" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg>
+      <span>Szukaj</span>
+    </button>
   </div>
 </div>
 
@@ -196,10 +208,10 @@
     </div>
     <div>Użytkownik</div>
     <div>Rola</div>
-    <div>Login</div>
     <div>Kontakt</div>
     <div>Status</div>
     <div>Online</div>
+    <div class="worker-profile-actions-spacer" aria-hidden="true"></div>
     <div>Akcje</div>
   </div>
 

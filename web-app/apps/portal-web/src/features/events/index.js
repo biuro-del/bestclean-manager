@@ -176,6 +176,19 @@ export function createEventsFeature(ctx) {
       .filter(Boolean)
   }
 
+  const EVENT_GPS_TECH_TOKEN_REGEX = /\[\[\s*GPS\b[\s\S]*?\]\]/gi
+
+  function stripEventGpsTechTokens(value) {
+    return String(value ?? '')
+      .replace(EVENT_GPS_TECH_TOKEN_REGEX, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  function isEventGpsTechToken(value) {
+    return /^\[\[\s*GPS\b[\s\S]*?\]\]$/i.test(String(value ?? '').trim())
+  }
+
   function isSystemGeneratedEventCommentToken(value) {
     const token = String(value ?? '').trim()
     if (!token) {
@@ -185,6 +198,9 @@ export function createEventsFeature(ctx) {
     const normalized = token.toUpperCase()
     const qrCodePattern = '(?=[A-Z0-9_-]*\\d)[A-Z0-9_-]+'
 
+    if (isEventGpsTechToken(token)) {
+      return true
+    }
     if (/^\[EDITEDBY:[^\]]+\]$/.test(normalized)) {
       return true
     }
@@ -203,7 +219,10 @@ export function createEventsFeature(ctx) {
     if (!parts.length) {
       return false
     }
-    return parts.every((part) => isSystemGeneratedEventCommentToken(part))
+    return parts.every((part) => {
+      const visiblePart = stripEventGpsTechTokens(part)
+      return !visiblePart || isSystemGeneratedEventCommentToken(visiblePart)
+    })
   }
 
   function normalizeVisibleEventComment(value) {
@@ -217,7 +236,9 @@ export function createEventsFeature(ctx) {
     }
 
     const parts = splitEventCommentParts(comment)
-    const visibleParts = parts.filter((part) => !isSystemGeneratedEventCommentToken(part))
+    const visibleParts = parts
+      .map((part) => stripEventGpsTechTokens(part))
+      .filter((part) => part && !isSystemGeneratedEventCommentToken(part))
     if (!visibleParts.length) {
       return ''
     }
@@ -2688,7 +2709,10 @@ export function createEventsFeature(ctx) {
         const index = Number(commentButton.getAttribute('data-event-comment'))
         const row = Number.isInteger(index) ? appState.eventRows[index] : null
         if (row) {
-          openEventCommentModal(row.comment)
+          const visibleComment = normalizeVisibleEventComment(row.comment)
+          if (visibleComment) {
+            openEventCommentModal(visibleComment)
+          }
         }
         return
       }

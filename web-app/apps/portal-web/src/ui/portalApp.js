@@ -2835,6 +2835,10 @@ function renderKanbanView(...args) {
   return getKanbanFeature().render(...args)
 }
 
+function renderKanbanViewIfReady(...args) {
+  return kanbanFeature ? kanbanFeature.render(...args) : null
+}
+
 function bindKanbanViewFunctions(...args) {
   return getKanbanFeature().bind(...args)
 }
@@ -2876,7 +2880,7 @@ function kanbanSetDataLoading(...args) {
 }
 
 function renderKanbanSyncStatus(...args) {
-  return getKanbanFeature().renderSyncStatus(...args)
+  return kanbanFeature ? kanbanFeature.renderSyncStatus(...args) : null
 }
 
 function kanbanColumnLabel(...args) {
@@ -5549,12 +5553,17 @@ async function syncRouteDataNow(normalizedRoute, options = {}) {
   }
 
   if (normalizedRoute === 'kanban') {
+    await ensurePortalFeatureReady('kanban')
     await Promise.allSettled([
-      calendarSyncRemoteTasks({ render: true }),
-      fetchClientsForCurrentSession(force).then(renderKanbanView),
-      fetchWorkersForCurrentSession(force).then(renderKanbanView),
-      fetchZonesForCurrentSession(force).then(renderKanbanView),
+      calendarSyncRemoteTasks({ render: false }),
+      fetchClientsForCurrentSession(force),
+      fetchWorkersForCurrentSession(force),
+      fetchZonesForCurrentSession(force),
     ])
+    if (appState.currentRoute === 'kanban') {
+      renderDashboardKanbanTasks()
+      renderKanbanViewIfReady()
+    }
     return
   }
 

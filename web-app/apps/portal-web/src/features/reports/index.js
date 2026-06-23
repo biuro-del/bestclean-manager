@@ -1704,15 +1704,60 @@ export function createReportsFeature(ctx) {
     }
 
     const entries = []
-    const regex = /(CLEAN_START_GPS|CLEAN_STOP_GPS|START_GPS|STOP_GPS)[^|]*?lat\s*=\s*(-?\d+(?:\.\d+)?)\s*lon\s*=\s*(-?\d+(?:\.\d+)?)/gi
-    let match = regex.exec(raw)
-    while (match) {
+    const parseGpsAttributes = (value) => {
+      const attrs = {}
+      const sourceText = String(value ?? '')
+      const attrRegex = /([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("[^"]*"|'[^']*'|[^\s\]]+)/g
+      let attrMatch = attrRegex.exec(sourceText)
+      while (attrMatch) {
+        const key = String(attrMatch[1] ?? '').trim().toLowerCase()
+        const rawValue = String(attrMatch[2] ?? '').trim()
+        attrs[key] = rawValue.replace(/^["']|["']$/g, '')
+        attrMatch = attrRegex.exec(sourceText)
+      }
+      return attrs
+    }
+    const normalizeGpsEntryPhase = (label, attrs = {}) => {
+      const sourceLabel = String(attrs.src ?? attrs.source ?? attrs.phase ?? '').trim().toUpperCase()
+      const normalizedLabel = String(label ?? '').trim().toUpperCase()
+      if (normalizedLabel.includes('START') || sourceLabel === 'START') {
+        return 'start'
+      }
+      if (normalizedLabel.includes('STOP') || sourceLabel === 'STOP') {
+        return 'stop'
+      }
+      return ''
+    }
+    const pushGpsEntry = (label, attrs = {}) => {
+      const lat = String(attrs.lat ?? '').trim()
+      const lon = String(attrs.lon ?? attrs.lng ?? '').trim()
+      if (!lat || !lon) {
+        return
+      }
+
+      const entryPhase = normalizeGpsEntryPhase(label, attrs)
+      const normalizedLabel =
+        String(label ?? '').trim().toUpperCase() || (entryPhase ? `${entryPhase.toUpperCase()}_GPS` : 'GPS')
       entries.push({
-        label: String(match[1] ?? '').toUpperCase(),
-        lat: String(match[2] ?? '').trim(),
-        lon: String(match[3] ?? '').trim(),
+        label: normalizedLabel,
+        phase: entryPhase,
+        lat,
+        lon,
       })
-      match = regex.exec(raw)
+    }
+
+    const bracketRegex = /\[\[\s*GPS\b([\s\S]*?)\]\]/gi
+    let bracketMatch = bracketRegex.exec(raw)
+    while (bracketMatch) {
+      pushGpsEntry('GPS', parseGpsAttributes(bracketMatch[1]))
+      bracketMatch = bracketRegex.exec(raw)
+    }
+
+    const labeledRegex = /\b(CLEAN_START_GPS|CLEAN_STOP_GPS|START_GPS|STOP_GPS)\b([^\r\n|]*)/gi
+    let match = labeledRegex.exec(raw)
+    while (match) {
+      pushGpsEntry(match[1], parseGpsAttributes(match[2]))
+      match = labeledRegex.exec(raw)
     }
 
     const normalizedPhase = String(phase ?? '').trim().toLowerCase() === 'start' ? 'start' : 'stop'
@@ -1728,13 +1773,25 @@ export function createReportsFeature(ctx) {
       }
     }
 
+    const matchingPhaseEntry = entries.find((item) => item.phase === normalizedPhase && item.lat && item.lon)
+    if (matchingPhaseEntry) {
+      return `${matchingPhaseEntry.lat}, ${matchingPhaseEntry.lon}`
+    }
+
+    const genericEntry = entries.find((item) => !item.phase && item.lat && item.lon)
+    if (genericEntry) {
+      return `${genericEntry.lat}, ${genericEntry.lon}`
+    }
+
     if (entries.length) {
       return ''
     }
 
-    const fallback = raw.match(/lat\s*=\s*(-?\d+(?:\.\d+)?)\s*lon\s*=\s*(-?\d+(?:\.\d+)?)/i)
-    if (fallback?.[1] && fallback?.[2]) {
-      return `${fallback[1]}, ${fallback[2]}`
+    const fallbackAttrs = parseGpsAttributes(raw)
+    const fallbackLat = String(fallbackAttrs.lat ?? '').trim()
+    const fallbackLon = String(fallbackAttrs.lon ?? fallbackAttrs.lng ?? '').trim()
+    if (fallbackLat && fallbackLon) {
+      return `${fallbackLat}, ${fallbackLon}`
     }
 
     return ''

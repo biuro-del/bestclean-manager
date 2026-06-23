@@ -49,9 +49,9 @@ const WORKER_ROLE_ICONS = {
 
 const WORKER_ACTION_ICONS = {
   delete:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M8 7l1-3h6l1 3"></path><path d="M7 7l1 13h8l1-13"></path></svg>',
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><path d="M3.8 19a5.2 5.2 0 0 1 10.4 0"></path><path d="m17 9 4 4"></path><path d="m21 9-4 4"></path></svg>',
   edit:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"></path></svg>',
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M4 17h16"></path><circle cx="8" cy="7" r="2"></circle><circle cx="16" cy="17" r="2"></circle></svg>',
   eye:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>',
   eyeOff:
@@ -59,7 +59,7 @@ const WORKER_ACTION_ICONS = {
   more:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>',
   view:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>',
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"></rect><circle cx="9" cy="12" r="2.2"></circle><path d="M13.5 10h4"></path><path d="M13.5 14h3"></path><path d="M6.4 16c.7-1.4 4.5-1.4 5.2 0"></path></svg>',
 }
 
 const OPTIMISTIC_WORKER_PROFILE_TTL_MS = 15000
@@ -90,7 +90,6 @@ export function createWorkerProfileFeature(ctx) {
     revealWorkerPassword,
     setSubwelcomeMetric,
     setWorkerPassword,
-    setupResizableGridTable,
     showTransientNotice,
     todayYmd,
     toIso,
@@ -1078,7 +1077,7 @@ export function createWorkerProfileFeature(ctx) {
     if (!rows.length) {
       root.innerHTML = `
         <div class="workers-row worker-profile-empty-row">
-          <div></div><div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div></div>
+          <div></div><div>Brak wyników</div><div></div><div></div><div></div><div></div><div class="worker-profile-actions-spacer" aria-hidden="true"></div><div></div>
         </div>
       `
       syncWorkerProfileSelectionUi()
@@ -1092,15 +1091,13 @@ export function createWorkerProfileFeature(ctx) {
           const key = workerProfileKey(worker)
           const selected = key && selectedWorkerProfileKeys.has(key)
           const name = worker.name || '-'
-          const emailOrLogin = worker.email || worker.login || worker.workerLogin || '-'
-          const login = worker.login || worker.workerLogin || '-'
           const role = worker.role || worker.type || '-'
           const roleVisual = workerRoleVisualMeta(role)
           const phone = worker.phone || '-'
           const active = workerProfileBoolean(worker, 'active')
           const online = workerProfileBoolean(worker, 'online')
           const deleteAction = canDeleteWorkers()
-            ? `<button class="worker-profile-action-icon worker-profile-action-danger" type="button" data-worker-profile-delete-index="${index}" title="Usuń" aria-label="Usuń pracownika">${WORKER_ACTION_ICONS.delete}</button>`
+            ? `<button class="worker-profile-action-icon worker-profile-action-delete" type="button" data-worker-profile-delete-index="${index}" title="Usuń" aria-label="Usuń pracownika">${WORKER_ACTION_ICONS.delete}</button>`
             : ''
 
           return `
@@ -1113,7 +1110,6 @@ export function createWorkerProfileFeature(ctx) {
               <span class="worker-profile-avatar ${workerAvatarTone(worker)}">${escapeHtml(workerProfileInitials(worker))}</span>
               <span class="worker-profile-user-copy">
                 <strong>${escapeHtml(name)}</strong>
-                <small>${escapeHtml(emailOrLogin)}</small>
               </span>
             </div>
           </div>
@@ -1123,13 +1119,13 @@ export function createWorkerProfileFeature(ctx) {
               <strong>${escapeHtml(role)}</strong>
             </div>
           </div>
-          <div class="mono">${escapeHtml(login)}</div>
-          <div>${escapeHtml(phone)}</div>
+          <div><span class="worker-profile-contact-cell">${escapeHtml(phone)}</span></div>
           <div><span class="worker-profile-status ${active ? 'is-active' : 'is-inactive'}">${active ? 'Active' : 'Inactive'}</span></div>
           <div><span class="worker-profile-online ${online ? 'is-online' : 'is-offline'}">${online ? 'Online' : 'Offline'}</span></div>
+          <div class="worker-profile-actions-spacer" aria-hidden="true"></div>
           <div class="workers-actions">
-            <button class="worker-profile-action-icon worker-profile-action-primary" type="button" data-worker-account-index="${index}" title="Widok konta" aria-label="Widok konta pracownika">${WORKER_ACTION_ICONS.view}</button>
-            <button class="worker-profile-action-icon worker-profile-action-primary" type="button" data-worker-profile-index="${index}" title="${actionLabel}" aria-label="${actionLabel} pracownika">${WORKER_ACTION_ICONS.edit}</button>
+            <button class="worker-profile-action-icon worker-profile-action-view" type="button" data-worker-account-index="${index}" title="Widok konta" aria-label="Widok konta pracownika">${WORKER_ACTION_ICONS.view}</button>
+            <button class="worker-profile-action-icon worker-profile-action-edit" type="button" data-worker-profile-index="${index}" title="${actionLabel}" aria-label="${actionLabel} pracownika">${WORKER_ACTION_ICONS.edit}</button>
             ${deleteAction}
           </div>
         </div>
@@ -1812,7 +1808,7 @@ export function createWorkerProfileFeature(ctx) {
       if (root) {
         root.innerHTML = `
           <div class="workers-row worker-profile-empty-row">
-            <div></div><div style="color:#ef4444;">Brak aktywnej sesji.</div><div></div><div></div><div></div><div></div><div></div><div></div>
+            <div></div><div style="color:#ef4444;">Brak aktywnej sesji.</div><div></div><div></div><div></div><div></div><div class="worker-profile-actions-spacer" aria-hidden="true"></div><div></div>
           </div>
         `
       }
@@ -1827,7 +1823,7 @@ export function createWorkerProfileFeature(ctx) {
     if (root && !(silent && appState.workerProfileRows.length)) {
       root.innerHTML = `
         <div class="workers-row worker-profile-empty-row">
-          <div></div><div>Ładowanie danych...</div><div></div><div></div><div></div><div></div><div></div><div></div>
+          <div></div><div>Ładowanie danych...</div><div></div><div></div><div></div><div></div><div class="worker-profile-actions-spacer" aria-hidden="true"></div><div></div>
         </div>
       `
     }
@@ -1860,7 +1856,7 @@ export function createWorkerProfileFeature(ctx) {
       if (root && !(silent && appState.workerProfileRows.length)) {
         root.innerHTML = `
           <div class="workers-row worker-profile-empty-row">
-            <div></div><div style="color:#ef4444;">${escapeHtml(message)}</div><div></div><div></div><div></div><div></div><div></div><div></div>
+            <div></div><div style="color:#ef4444;">${escapeHtml(message)}</div><div></div><div></div><div></div><div></div><div class="worker-profile-actions-spacer" aria-hidden="true"></div><div></div>
           </div>
         `
       }
@@ -2159,18 +2155,6 @@ export function createWorkerProfileFeature(ctx) {
 
   function bindWorkerProfileViewFunctions(router) {
     const binding = createBindingHelpers()
-    const cleanupWorkerProfileTableResize = setupResizableGridTable({
-      tableSelector: '#view-workerProfile .workers-table',
-      headSelector: '#view-workerProfile .workers-head',
-      cssVarName: '--workers-grid',
-      storageKey: 'portal.grid.workerProfile.v4',
-      defaultWidths: [54, 250, 220, 170, 160, 130, 130, 146],
-      minWidths: [44, 190, 160, 110, 90, 90, 90, 132],
-      nonResizableIndexes: [0, 7],
-      autoFitToViewport: true,
-      enforceFullWidth: true,
-      maxWidth: 1510,
-    })
 
     syncWorkerProfileAddButtonState()
     syncWorkerProfilePageSizeSelect()
@@ -2439,7 +2423,6 @@ export function createWorkerProfileFeature(ctx) {
     return () => {
       closeWorkerProfileDeleteConfirm(false)
       closeWorkerProfileEvidenceExportModal()
-      cleanupWorkerProfileTableResize()
       binding.done()
     }
   }

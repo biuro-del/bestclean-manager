@@ -3,6 +3,7 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const DEFAULT_REMOTE_API_TARGET = 'https://cleanzi-01.web.app'
+const DEFAULT_LOCAL_API_TARGET = 'http://127.0.0.1:8080'
 
 function normalizeApiProxyTarget(value) {
   const target = String(value || DEFAULT_REMOTE_API_TARGET).trim().replace(/\/+$/, '')
@@ -38,7 +39,11 @@ export default defineConfig(({ mode }) => {
     env.VITE_DEV_API_PROXY_TARGET || process.env.VITE_DEV_API_PROXY_TARGET || DEFAULT_REMOTE_API_TARGET,
   )
   const localAdminApiProxyTarget = normalizeApiProxyTarget(
-    env.VITE_DEV_WORKER_API_PROXY_TARGET || process.env.VITE_DEV_WORKER_API_PROXY_TARGET || apiProxyTarget,
+    env.VITE_DEV_WORKER_API_PROXY_TARGET ||
+      process.env.VITE_DEV_WORKER_API_PROXY_TARGET ||
+      env.VITE_DEV_API_PROXY_TARGET ||
+      process.env.VITE_DEV_API_PROXY_TARGET ||
+      DEFAULT_LOCAL_API_TARGET,
   )
   const localAdminApiProxy = {
     target: localAdminApiProxyTarget,

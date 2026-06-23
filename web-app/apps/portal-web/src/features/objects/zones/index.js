@@ -1,5 +1,6 @@
 import './style.css'
 import template from './template.html?raw'
+import { getClients } from '../../../services/clientService'
 
 export const route = 'zones'
 export const viewId = 'view-zones'
@@ -74,7 +75,6 @@ export function createZonesFeature(ctx) {
     roleLevel,
     setSubwelcomeMetric,
     showTransientNotice,
-    setupResizableGridTable,
     toIso,
     updateZone,
   } = ctx
@@ -82,10 +82,42 @@ export function createZonesFeature(ctx) {
   const zoneComboStates = new Map()
   const deletedZoneIds = new Set()
   let pinnedZoneId = ''
+  let zoneModalOriginalQr = ''
   let zoneModalTypeTouched = false
 
+  function isTechnicalClientId(value) {
+    const text = String(value ?? '').trim()
+    return /^CL-\d+$/i.test(text) || /^LK\d+$/i.test(text)
+  }
+
+  function clientDisplayName(client = {}) {
+    const name = String(client.name ?? client.clientName ?? client.clientLabel ?? '').trim()
+    if (name && !isTechnicalClientId(name)) {
+      return name
+    }
+    return ''
+  }
+
+  function clientOptionValue(client = {}) {
+    return String(client.id ?? client.clientId ?? '').trim()
+  }
+
   function clientNameMap() {
-    return new Map(appState.clients.map((client) => [String(client.id), client.name]))
+    const map = new Map()
+    appState.clients.forEach((client) => {
+      const label = clientDisplayName(client)
+      if (!label) {
+        return
+      }
+
+      ;[client.id, client.clientId].forEach((key) => {
+        const normalizedKey = String(key ?? '').trim()
+        if (normalizedKey) {
+          map.set(normalizedKey, label)
+        }
+      })
+    })
+    return map
   }
 
   function zoneRecordId(zone) {
@@ -94,6 +126,24 @@ export function createZonesFeature(ctx) {
 
   function canDeleteZones() {
     return typeof roleLevel === 'function' && roleLevel(appState.session?.role) >= 3
+  }
+
+  function canManageZoneQr() {
+    return typeof roleLevel === 'function' && roleLevel(appState.session?.role) >= 3
+  }
+
+  function setZoneQrEditState() {
+    const qrInput = document.getElementById('znEditQr')
+    const qrLabel = document.querySelector('label[for="znEditQr"]')
+    const canEdit = canManageZoneQr()
+
+    if (qrInput) {
+      qrInput.disabled = !canEdit
+      qrInput.title = canEdit ? 'Admin moze zmienic numer QR strefy.' : 'Numer QR moze zmienic tylko Admin.'
+    }
+    if (qrLabel) {
+      qrLabel.textContent = canEdit ? 'Numer QR (A)' : 'Numer QR (A) - blokada'
+    }
   }
 
   function normalizeZoneDate(value) {
@@ -109,11 +159,12 @@ export function createZonesFeature(ctx) {
   function mapZoneForView(zone) {
     const map = clientNameMap()
     const clientId = String(zone.clientId ?? '')
+    const resolvedClientName = map.get(clientId) || ''
     return {
       ...zone,
       qr: zone.qr || zone.id || '-',
       clientId,
-      clientName: map.get(clientId) || clientId || '-',
+      clientName: resolvedClientName || '-',
       zoneName: zone.name || zone.zone || '-',
       location: zone.location || '-',
       function: zone.function || '-',
@@ -149,14 +200,29 @@ export function createZonesFeature(ctx) {
     return String(left ?? '').localeCompare(String(right ?? ''), 'pl', { numeric: true, sensitivity: 'base' })
   }
 
+  function zoneHasAssignedClient(zone) {
+    const clientNameKey = normalizeSearchText(zone.clientName)
+    const clientIdKey = normalizeSearchText(zone.clientId)
+    return Boolean(clientNameKey && clientNameKey !== '-' && clientNameKey !== 'unassigned' && clientIdKey !== 'unassigned')
+  }
+
+  function zoneClientSortRank(zone) {
+    return zoneHasAssignedClient(zone) ? 0 : 1
+  }
+
+  function zoneClientSortLabel(zone) {
+    return zoneHasAssignedClient(zone) ? zone.clientName : ''
+  }
+
   function sortZonesForView(zones) {
     const sorted = [...zones]
     sorted.sort(
       (left, right) =>
         (pinnedZoneId && String(right.id ?? '') === pinnedZoneId ? 1 : 0) -
           (pinnedZoneId && String(left.id ?? '') === pinnedZoneId ? 1 : 0) ||
+        zoneClientSortRank(left) - zoneClientSortRank(right) ||
+        compareZoneText(zoneClientSortLabel(left), zoneClientSortLabel(right)) ||
         compareZoneText(left.function, right.function) ||
-        compareZoneText(left.clientName, right.clientName) ||
         compareZoneText(left.zoneName, right.zoneName) ||
         compareZoneText(left.qr, right.qr),
     )
@@ -200,11 +266,20 @@ export function createZonesFeature(ctx) {
   function sortedClientOptions() {
     const map = new Map()
     appState.clients.forEach((client) => {
-      const id = String(client.id ?? '').trim()
-      if (!id) {
+      const value = clientOptionValue(client)
+      const label = clientDisplayName(client)
+      if (!value || !label) {
         return
       }
-      map.set(id, String(client.name ?? id).trim() || id)
+      map.set(value, label)
+    })
+    visiblePortalZones().forEach((zone) => {
+      const value = String(zone.clientId || zone.clientName || '').trim()
+      const label = String(zone.clientName || '').trim()
+      if (!value || value === '-' || map.has(value) || !label || label === '-' || isTechnicalClientId(label)) {
+        return
+      }
+      map.set(value, label)
     })
 
     return [...map.entries()]
@@ -804,6 +879,19 @@ export function createZonesFeature(ctx) {
     appState.zonesLoaded = true
   }
 
+  function zoneQrExists(qr, exceptZoneId = '') {
+    const normalizedQr = String(qr ?? '').trim().toLowerCase()
+    const normalizedExcept = String(exceptZoneId ?? '').trim().toLowerCase()
+    if (!normalizedQr) {
+      return false
+    }
+
+    return (Array.isArray(appState.zones) ? appState.zones : []).some((zone) => {
+      const zoneId = zoneRecordId(zone).toLowerCase()
+      return zoneId === normalizedQr && zoneId !== normalizedExcept
+    })
+  }
+
   function filterZonesTable({ resetPage = true } = {}) {
     syncClientSelects()
     syncZoneSelects()
@@ -826,15 +914,25 @@ export function createZonesFeature(ctx) {
   }
 
   async function ensureClientsForZones() {
-    if (appState.clientsLoaded || typeof fetchClientsForCurrentSession !== 'function') {
+    if (appState.clientsLoaded && Array.isArray(appState.clients) && appState.clients.length) {
       syncClientSelects()
       return
     }
 
     try {
-      await fetchClientsForCurrentSession(false)
+      if (typeof fetchClientsForCurrentSession === 'function') {
+        try {
+          await fetchClientsForCurrentSession(false)
+        } catch {
+          // The client profile feature can be lazy-loaded after Zones.
+        }
+      }
+      if ((!Array.isArray(appState.clients) || !appState.clients.length) && appState.session?.orgId) {
+        appState.clients = await getClients(appState.session.orgId)
+        appState.clientsLoaded = true
+      }
     } catch {
-      // Zones can still render with client IDs if the client list is unavailable.
+      // Zones can still render without client labels if the client list is unavailable.
     } finally {
       syncClientSelects()
     }
@@ -912,6 +1010,7 @@ export function createZonesFeature(ctx) {
 
     appState.zoneModalMode = 'add'
     appState.zoneModalZoneId = ''
+    zoneModalOriginalQr = ''
     zoneModalTypeTouched = false
   }
 
@@ -947,6 +1046,7 @@ export function createZonesFeature(ctx) {
     zoneModalTypeTouched = false
 
     const qr = nextZoneQrCode()
+    zoneModalOriginalQr = qr
     const qrLabel = document.getElementById('znQrLabel')
     const rowLabel = document.getElementById('znRowNumberLabel')
     const qrInput = document.getElementById('znEditQr')
@@ -956,6 +1056,7 @@ export function createZonesFeature(ctx) {
     const saveBtn = document.getElementById('znSaveBtn')
     const deleteBtn = document.getElementById('znDeleteBtn')
 
+    setZoneQrEditState()
     setModalClientValue('')
     setModalZoneValue(DEFAULT_ZONE_TYPE)
     syncFunctionSelect('')
@@ -987,6 +1088,7 @@ export function createZonesFeature(ctx) {
     appState.zoneModalZoneId = String(zoneId)
     zoneModalTypeTouched = false
     const view = mapZoneForView(zone)
+    zoneModalOriginalQr = view.qr
 
     const qrLabel = document.getElementById('znQrLabel')
     const rowLabel = document.getElementById('znRowNumberLabel')
@@ -997,6 +1099,7 @@ export function createZonesFeature(ctx) {
     const saveBtn = document.getElementById('znSaveBtn')
     const deleteBtn = document.getElementById('znDeleteBtn')
 
+    setZoneQrEditState()
     setModalClientValue(view.clientId, view.clientName)
     setModalZoneValue(view.zoneName === '-' ? '' : view.zoneName)
     syncFunctionSelect(view.function === '-' ? '' : view.function)
@@ -1042,9 +1145,24 @@ export function createZonesFeature(ctx) {
     const zoneName = readModalZoneValue()
     const location = String(document.getElementById('znEditLoc')?.value ?? '').trim()
     const functionName = String(document.getElementById('znEditFunkcja')?.value ?? '').trim()
+    const originalZoneId = String(appState.zoneModalZoneId ?? '').trim()
+    const isAddMode = appState.zoneModalMode === 'add'
+    const originalQrValue = String(zoneModalOriginalQr || originalZoneId).trim()
+    const qrInputChanged = Boolean(originalQrValue && qr !== originalQrValue)
+    const qrChanged = !isAddMode && qr !== originalZoneId
 
     if (!qr || !clientRaw || !zoneName) {
       alert('Uzupełnij Numer QR, Klienta i Strefę.')
+      return
+    }
+
+    if (qrInputChanged && !canManageZoneQr()) {
+      alert('Tylko Admin moze zmienic numer QR strefy.')
+      return
+    }
+
+    if ((isAddMode || qrChanged) && zoneQrExists(qr, originalZoneId)) {
+      alert('Taki numer QR juz istnieje.')
       return
     }
 
@@ -1055,23 +1173,22 @@ export function createZonesFeature(ctx) {
     }
 
     try {
-      const isAddMode = appState.zoneModalMode === 'add'
       const editedBy = appState.session?.name ?? null
       const date = new Date().toISOString()
       let localCreatedZone = null
       const defaultZoneWasApplied = isAddMode && !zoneModalTypeTouched && zoneName === DEFAULT_ZONE_TYPE
+      const payload = {
+        id: qr,
+        zoneId: qr,
+        clientId,
+        name: zoneName,
+        function: functionName,
+        location,
+        editedBy,
+        date,
+      }
 
       if (appState.zoneModalMode === 'add') {
-        const payload = {
-          id: qr,
-          zoneId: qr,
-          clientId,
-          name: zoneName,
-          function: functionName,
-          location,
-          editedBy,
-          date,
-        }
         const createdZone = await createZone(appState.session.orgId, payload)
         localCreatedZone = {
           ...createdZone,
@@ -1083,8 +1200,23 @@ export function createZonesFeature(ctx) {
         }
         pinnedZoneId = qr
         upsertLocalZone(localCreatedZone)
+      } else if (qrChanged) {
+        const createdZone = await createZone(appState.session.orgId, payload)
+        await deleteZone(appState.session.orgId, originalZoneId)
+        deletedZoneIds.add(originalZoneId)
+        removeLocalZone(originalZoneId)
+        localCreatedZone = {
+          ...createdZone,
+          ...payload,
+          code: qr,
+          orgId: appState.session.orgId,
+          qr,
+          zone: zoneName,
+        }
+        pinnedZoneId = qr
+        upsertLocalZone(localCreatedZone)
       } else if (appState.zoneModalMode === 'edit') {
-        await updateZone(appState.session.orgId, appState.zoneModalZoneId || qr, {
+        await updateZone(appState.session.orgId, originalZoneId || qr, {
           clientId,
           name: zoneName,
           function: functionName,
@@ -1301,19 +1433,6 @@ export function createZonesFeature(ctx) {
     syncFunctionSelect('')
     bindZoneCombos(binding)
 
-    const cleanupZonesTableResize = setupResizableGridTable({
-      tableSelector: '#view-zones .zones-table',
-      headSelector: '#view-zones .zones-head',
-      cssVarName: '--zones-grid',
-      storageKey: 'portal.grid.zones.v3',
-      defaultWidths: [192, 228, 244, 176, 136, 132, 132, 72],
-      minWidths: [128, 150, 150, 110, 90, 90, 90, 58],
-      nonResizableIndexes: [7],
-      autoFitToViewport: true,
-      enforceFullWidth: true,
-      maxWidth: 1510,
-    })
-
     binding.add(document.getElementById('znSearchBtn'), 'click', () => {
       clearPinnedZone()
       filterZonesTable({ resetPage: true })
@@ -1400,7 +1519,6 @@ export function createZonesFeature(ctx) {
     })
 
     return () => {
-      cleanupZonesTableResize()
       binding.done()
     }
   }

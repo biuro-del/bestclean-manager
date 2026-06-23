@@ -106,7 +106,7 @@
 #portalRoot #view-workerProfile .worker-profile-filter-panel{
   display:block !important;
   margin:0 0 18px !important;
-  padding:22px !important;
+  padding:16px 18px !important;
   border:1px solid #e0e9f7 !important;
   border-radius:8px !important;
   background:#fff !important;
@@ -114,9 +114,9 @@
 }
 
 #portalRoot #view-workerProfile .worker-profile-filter-panel h2{
-  margin:0 0 20px;
+  margin:0 0 14px;
   color:#071f49;
-  font-size:18px;
+  font-size:16px;
   font-weight:900;
   letter-spacing:0;
 }
@@ -124,27 +124,27 @@
 #portalRoot #view-workerProfile .worker-profile-filter-grid{
   display:grid;
   grid-template-columns:repeat(3, minmax(0, 1fr));
-  gap:14px;
-  margin:0 0 20px;
+  gap:10px 12px;
+  margin:0 0 14px;
 }
 
 #portalRoot #view-workerProfile .worker-profile-filter-actions{
   display:grid;
   grid-template-columns:84px minmax(260px, 1fr) auto auto auto auto;
-  gap:10px;
+  gap:9px;
   align-items:end;
-  padding-top:22px;
+  padding-top:16px;
   border-top:1px solid #edf2f9;
 }
 
 #portalRoot #view-workerProfile .tool{
   min-width:0 !important;
-  gap:8px !important;
+  gap:6px !important;
 }
 
 #portalRoot #view-workerProfile :is(.tool label, #wkEditorOverlay .field label){
   color:#506894 !important;
-  font-size:11px !important;
+  font-size:10px !important;
   font-weight:900 !important;
   letter-spacing:.02em !important;
   line-height:1.1 !important;
@@ -153,13 +153,13 @@
 
 #portalRoot #view-workerProfile :is(.worker-profile-filter-panel input, .worker-profile-filter-panel select, #wkEditorOverlay input, #wkEditorOverlay select){
   width:100% !important;
-  min-height:40px !important;
-  padding:9px 14px !important;
+  min-height:36px !important;
+  padding:8px 12px !important;
   border:1px solid #cfe0f8 !important;
   border-radius:8px !important;
   background:#fff !important;
   color:#10264b !important;
-  font-size:14px !important;
+  font-size:13px !important;
   font-weight:600 !important;
   outline:none !important;
   box-shadow:none !important;
@@ -175,21 +175,21 @@
 }
 
 #portalRoot #view-workerProfile #wkPageSize{
-  min-height:42px !important;
-  padding:8px 28px 8px 14px !important;
+  min-height:36px !important;
+  padding:7px 26px 7px 12px !important;
   color:#25436f !important;
-  font-size:17px !important;
+  font-size:14px !important;
   font-weight:900 !important;
 }
 
 #portalRoot #view-workerProfile .btn2{
-  min-height:38px !important;
-  padding:10px 14px !important;
+  min-height:36px !important;
+  padding:9px 12px !important;
   border:1px solid #cfe0f8 !important;
   border-radius:8px !important;
   background:#fff !important;
   color:#12346c !important;
-  font-size:13px !important;
+  font-size:12px !important;
   font-weight:900 !important;
   line-height:1 !important;
   box-shadow:none !important;
@@ -218,6 +218,52 @@
   border-color:#ffc6cf !important;
   background:#fff1f3 !important;
   color:#b91c1c !important;
+}
+
+#portalRoot #view-workerProfile .worker-profile-filter-btn{
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  gap:8px !important;
+  border-color:#b9cff5 !important;
+  background:#f8fbff !important;
+  color:#12346c !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-workerProfile .worker-profile-filter-btn svg{
+  flex:0 0 auto;
+  width:15px;
+  height:15px;
+  display:block;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+
+#portalRoot #view-workerProfile .worker-profile-filter-btn:hover,
+#portalRoot #view-workerProfile .worker-profile-filter-btn:focus-visible{
+  border-color:#8fb2ef !important;
+  background:#eef5ff !important;
+  color:#0f3a82 !important;
+}
+
+#portalRoot #view-workerProfile .worker-profile-filter-btn.primary{
+  border-color:#2f63df !important;
+  background:#2f63df !important;
+  color:#fff !important;
+}
+
+#portalRoot #view-workerProfile #wkEditorOverlay .field label{
+  font-size:11px !important;
+}
+
+#portalRoot #view-workerProfile #wkEditorOverlay :is(input, select){
+  min-height:40px !important;
+  padding:9px 14px !important;
+  font-size:14px !important;
 }
 
 #portalRoot #view-workerProfile #wkExportOverlay[hidden]{
@@ -462,22 +508,23 @@
   border-radius:8px !important;
   background:#fff !important;
   box-shadow:0 8px 18px rgba(11,35,76,.05) !important;
-  overflow:auto !important;
+  overflow:hidden !important;
+  scrollbar-gutter:auto !important;
 }
 
 #portalRoot #view-workerProfile .workers-head,
 #portalRoot #view-workerProfile .workers-row{
-  grid-template-columns:var(--workers-grid, 54px 250px 220px 170px 160px 130px 130px 146px) !important;
-  gap:10px !important;
-  width:max-content !important;
+  grid-template-columns:24px minmax(150px, 240px) minmax(145px, 220px) minmax(72px, 150px) 62px 62px minmax(24px, 1fr) 112px !important;
+  gap:9px !important;
+  width:100% !important;
   min-width:100% !important;
   max-width:none !important;
   box-sizing:border-box !important;
 }
 
 #portalRoot #view-workerProfile .workers-head{
-  min-height:46px;
-  padding:12px 18px !important;
+  min-height:38px;
+  padding:9px 6px !important;
   border-bottom:1px solid #dce8fb;
   background:#eef4ff !important;
   color:#6d7f9c !important;
@@ -495,7 +542,7 @@
 #portalRoot #view-workerProfile .workers-head > div:not(:first-child)::before{
   content:"";
   position:absolute;
-  left:-7px;
+  left:-4px;
   top:2px;
   bottom:2px;
   width:1px;
@@ -503,12 +550,12 @@
 }
 
 #portalRoot #view-workerProfile .workers-row{
-  min-height:68px;
-  padding:12px 18px !important;
+  min-height:52px;
+  padding:8px 6px !important;
   border-top:1px solid #e6eef9 !important;
   background:#fff !important;
   color:#10264b !important;
-  font-size:14px !important;
+  font-size:13px !important;
 }
 
 #portalRoot #view-workerProfile .workers-row:hover,
@@ -536,15 +583,39 @@
   white-space:nowrap !important;
 }
 
+#portalRoot #view-workerProfile :is(.workers-head, .workers-row) > div:nth-child(5),
+#portalRoot #view-workerProfile :is(.workers-head, .workers-row) > div:nth-child(6){
+  justify-content:center !important;
+  text-align:center;
+}
+
+#portalRoot #view-workerProfile :is(.workers-head, .workers-row) > div:nth-child(8){
+  padding-left:10px !important;
+  padding-right:15px !important;
+  box-sizing:border-box;
+  justify-content:flex-end !important;
+  text-align:right;
+}
+
+#portalRoot #view-workerProfile .worker-profile-actions-spacer{
+  min-width:0 !important;
+  visibility:hidden !important;
+  pointer-events:none !important;
+}
+
+#portalRoot #view-workerProfile .worker-profile-actions-spacer::before{
+  display:none !important;
+}
+
 #portalRoot #view-workerProfile .worker-profile-select-cell{
   justify-content:center;
 }
 
 #portalRoot #view-workerProfile input[type="checkbox"]{
-  width:18px !important;
-  min-width:18px !important;
-  height:18px !important;
-  min-height:18px !important;
+  width:14px !important;
+  min-width:14px !important;
+  height:14px !important;
+  min-height:14px !important;
   padding:0 !important;
   border:1px solid #cbd5e1 !important;
   border-radius:3px !important;
@@ -555,7 +626,7 @@
 #portalRoot #view-workerProfile .worker-profile-role-cell{
   display:flex;
   align-items:center;
-  gap:12px;
+  gap:6px;
   min-width:0;
 }
 
@@ -574,9 +645,9 @@
 
 #portalRoot #view-workerProfile .worker-profile-user-copy strong{
   color:#10264b;
-  font-size:16px;
+  font-size:15px;
   font-weight:900;
-  line-height:1.15;
+  line-height:1.12;
 }
 
 #portalRoot #view-workerProfile .worker-profile-user-copy small{
@@ -590,20 +661,20 @@
 #portalRoot #view-workerProfile .worker-profile-avatar,
 #portalRoot #view-workerProfile .worker-profile-role-icon{
   flex:0 0 auto;
-  width:34px;
-  height:34px;
+  width:25px;
+  height:25px;
   display:inline-flex;
   align-items:center;
   justify-content:center;
   border-radius:50%;
-  font-size:12px;
+  font-size:11px;
   font-weight:900;
 }
 
 #portalRoot #view-workerProfile .worker-profile-role-icon{
-  width:30px;
-  height:30px;
-  border-radius:9px;
+  width:25px;
+  height:25px;
+  border-radius:8px;
   background:#eef1f6;
   color:#647895;
 }
@@ -649,8 +720,8 @@
 }
 
 #portalRoot #view-workerProfile .worker-profile-role-icon svg{
-  width:16px;
-  height:16px;
+  width:15px;
+  height:15px;
   display:block;
   fill:none;
   stroke:currentColor;
@@ -660,8 +731,8 @@
 }
 
 #portalRoot #view-workerProfile .worker-profile-action-icon svg{
-  width:17px;
-  height:17px;
+  width:25px;
+  height:25px;
   display:block;
   fill:none;
   stroke:currentColor;
@@ -670,7 +741,8 @@
   stroke-linejoin:round;
 }
 
-#portalRoot #view-workerProfile .worker-profile-role-cell strong{
+#portalRoot #view-workerProfile .worker-profile-role-cell strong,
+#portalRoot #view-workerProfile .worker-profile-contact-cell{
   min-width:0;
   overflow:visible;
   color:#17325d;
@@ -726,9 +798,9 @@
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  min-height:24px;
-  padding:5px 12px;
-  border-radius:8px;
+  min-height:20px;
+  padding:3px 6px;
+  border-radius:7px;
   font-size:13px;
   font-weight:900;
   line-height:1;
@@ -757,10 +829,12 @@
 #portalRoot #view-workerProfile .workers-actions{
   display:flex !important;
   align-items:center !important;
-  gap:10px !important;
+  justify-content:flex-end !important;
+  gap:13px !important;
   flex:0 0 auto !important;
   flex-wrap:nowrap !important;
-  min-width:122px !important;
+  width:100% !important;
+  min-width:0 !important;
   white-space:nowrap !important;
 }
 
@@ -770,10 +844,10 @@
 }
 
 #portalRoot #view-workerProfile .worker-profile-action-icon{
-  width:34px !important;
-  min-width:34px !important;
-  height:34px !important;
-  min-height:34px !important;
+  width:28px !important;
+  min-width:28px !important;
+  height:28px !important;
+  min-height:28px !important;
   display:inline-flex !important;
   align-items:center !important;
   justify-content:center !important;
@@ -790,9 +864,27 @@
   color:#2563eb !important;
 }
 
+#portalRoot #view-workerProfile .worker-profile-action-view{
+  border-color:#a7f3d0 !important;
+  background:#ecfdf5 !important;
+  color:#059669 !important;
+}
+
+#portalRoot #view-workerProfile .worker-profile-action-edit{
+  border-color:#ddd6fe !important;
+  background:#f5f3ff !important;
+  color:#7c3aed !important;
+}
+
 #portalRoot #view-workerProfile .worker-profile-action-danger{
   border-color:#ffcfd6 !important;
   color:#dc2626 !important;
+}
+
+#portalRoot #view-workerProfile .worker-profile-action-delete{
+  border-color:#fecdd3 !important;
+  background:#fff1f2 !important;
+  color:#e11d48 !important;
 }
 
 #portalRoot #view-workerProfile .worker-profile-action-icon:hover,
@@ -803,11 +895,32 @@
   outline:none;
 }
 
+#portalRoot #view-workerProfile .worker-profile-action-view:hover,
+#portalRoot #view-workerProfile .worker-profile-action-view:focus-visible{
+  border-color:#6ee7b7 !important;
+  background:#d1fae5 !important;
+  color:#047857 !important;
+}
+
+#portalRoot #view-workerProfile .worker-profile-action-edit:hover,
+#portalRoot #view-workerProfile .worker-profile-action-edit:focus-visible{
+  border-color:#c4b5fd !important;
+  background:#ede9fe !important;
+  color:#6d28d9 !important;
+}
+
 #portalRoot #view-workerProfile .worker-profile-action-danger:hover,
 #portalRoot #view-workerProfile .worker-profile-action-danger:focus-visible{
   border-color:#ffb7c2 !important;
   background:#fff1f3 !important;
   color:#b91c1c !important;
+}
+
+#portalRoot #view-workerProfile .worker-profile-action-delete:hover,
+#portalRoot #view-workerProfile .worker-profile-action-delete:focus-visible{
+  border-color:#fda4af !important;
+  background:#ffe4e6 !important;
+  color:#be123c !important;
 }
 
 #portalRoot #view-workerProfile .worker-profile-empty-row{
@@ -820,9 +933,9 @@
   align-items:center !important;
   justify-content:space-between !important;
   gap:12px !important;
-  width:max-content !important;
+  width:100% !important;
   min-width:100% !important;
-  padding:12px 18px !important;
+  padding:10px 6px !important;
   border-top:1px solid #e6eef9 !important;
   background:#fff !important;
   color:#6d7f9c !important;
@@ -1104,6 +1217,10 @@
   }
 
   #portalRoot #view-workerProfile #wkPageSize{
+    width:100% !important;
+  }
+
+  #portalRoot #view-workerProfile .worker-profile-filter-btn{
     width:100% !important;
   }
 }
