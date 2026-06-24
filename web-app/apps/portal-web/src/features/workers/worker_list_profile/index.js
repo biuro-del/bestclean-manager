@@ -589,10 +589,15 @@ export function createWorkerProfileFeature(ctx) {
     syncWorkerProfileSelectionUi()
   }
 
-  function selectedWorkerProfileExportWorkers() {
+  function workerProfileExportSkipInactiveSelected() {
+    const checkbox = document.getElementById('wkExportSkipInactive')
+    return checkbox instanceof HTMLInputElement && checkbox.checked
+  }
+
+  function selectedWorkerProfileExportWorkers({ skipInactive = false } = {}) {
     return (appState.workerProfileRows || []).filter((worker) => {
       const key = workerProfileKey(worker)
-      return key && selectedWorkerProfileKeys.has(key)
+      return key && selectedWorkerProfileKeys.has(key) && (!skipInactive || workerProfileBoolean(worker, 'active'))
     })
   }
 
@@ -607,11 +612,19 @@ export function createWorkerProfileFeature(ctx) {
   }
 
   function syncWorkerProfileExportUi() {
-    const workers = selectedWorkerProfileExportWorkers()
+    const skipInactive = workerProfileExportSkipInactiveSelected()
+    const workers = selectedWorkerProfileExportWorkers({ skipInactive })
     const count = workers.length
     const names = workers.map(workerProfileExportDisplayName).filter(Boolean)
     setTextContent('wkExportSelectedCount', count)
-    setTextContent('wkExportSelectedNames', names.length ? names.join(', ') : 'Zaznacz pracownika z listy.')
+    setTextContent(
+      'wkExportSelectedNames',
+      names.length
+        ? names.join(', ')
+        : skipInactive && selectedWorkerProfileExportWorkers().length
+          ? 'Filtr pomija wszystkich zaznaczonych nieaktywnych pracownikow.'
+          : 'Zaznacz pracownika z listy.',
+    )
     const button = document.getElementById('wkOpenExportBtn')
     if (button instanceof HTMLButtonElement) {
       button.title = count
@@ -663,6 +676,10 @@ export function createWorkerProfileFeature(ctx) {
     if (landscape instanceof HTMLInputElement) {
       landscape.checked = true
     }
+    const skipInactive = document.getElementById('wkExportSkipInactive')
+    if (skipInactive instanceof HTMLInputElement) {
+      skipInactive.checked = skipInactive.defaultChecked
+    }
   }
 
   function readWorkerProfileExportOptions({ validate = true } = {}) {
@@ -690,11 +707,13 @@ export function createWorkerProfileFeature(ctx) {
     const orientation = normalizeWorkTimeEvidenceOrientation(
       document.querySelector('input[name="wkExportOrientation"]:checked')?.value,
     )
+    const skipInactive = workerProfileExportSkipInactiveSelected()
 
     return {
       ...range,
       orientation,
       columns,
+      skipInactive,
     }
   }
 
@@ -709,7 +728,7 @@ export function createWorkerProfileFeature(ctx) {
     const preview = document.getElementById('wkExportPreview')
     const meta = document.getElementById('wkExportPreviewMeta')
     const options = readWorkerProfileExportOptions({ validate: false })
-    const workers = selectedWorkerProfileExportWorkers()
+    const workers = selectedWorkerProfileExportWorkers({ skipInactive: options?.skipInactive === true })
     const rows = Array.isArray(appState.workerProfileEvidencePreviewRows) ? appState.workerProfileEvidencePreviewRows : []
     if (meta && options) {
       meta.textContent = workTimeEvidenceSummaryText({
@@ -728,9 +747,13 @@ export function createWorkerProfileFeature(ctx) {
   }
 
   async function buildWorkerProfileEvidenceRows(options) {
-    const workers = selectedWorkerProfileExportWorkers()
+    const workers = selectedWorkerProfileExportWorkers({ skipInactive: options?.skipInactive === true })
     if (!workers.length) {
-      alert('Zaznacz co najmniej jednego pracownika.')
+      alert(
+        options?.skipInactive === true && selectedWorkerProfileExportWorkers().length
+          ? 'Filtr pomija wszystkich zaznaczonych nieaktywnych pracownikow.'
+          : 'Zaznacz co najmniej jednego pracownika.',
+      )
       return null
     }
     if (!options?.columns?.length) {
@@ -823,10 +846,15 @@ export function createWorkerProfileFeature(ctx) {
           rows,
           columns: options.columns,
           orientation: options.orientation,
-          workerCount: selectedWorkerProfileExportWorkers().length,
+          workerCount: selectedWorkerProfileExportWorkers({ skipInactive: options.skipInactive }).length,
         })
       }
-      preview.innerHTML = `<iframe class="wa-export-preview-frame" src="${escapeHtml(url)}" title="Podglad PDF ewidencji pracy"></iframe>`
+      preview.innerHTML = `
+        <iframe class="wa-export-preview-frame" src="${escapeHtml(url)}" title="Podglad PDF ewidencji pracy"></iframe>
+        <div class="wa-export-preview-fallback">
+          <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Otworz PDF w nowym oknie</a>
+        </div>
+      `
     } catch (error) {
       const message = workTimeEvidenceErrorMessage(error)
       preview.innerHTML = workTimeEvidencePreviewPlaceholderHtml(workerProfileExportDeps(), message)
@@ -877,7 +905,7 @@ export function createWorkerProfileFeature(ctx) {
           columns: options.columns,
           filenameBase,
         })
-        showTransientNotice(`Pobrano CSV ewidencji. Osoby: ${selectedWorkerProfileExportWorkers().length}, wpisy: ${rows.length}.`, 'success')
+        showTransientNotice(`Pobrano CSV ewidencji. Osoby: ${selectedWorkerProfileExportWorkers({ skipInactive: options.skipInactive }).length}, wpisy: ${rows.length}.`, 'success')
         return
       }
 
@@ -891,7 +919,7 @@ export function createWorkerProfileFeature(ctx) {
         groupByWorker: true,
         filenameBase,
       })
-      showTransientNotice(`Pobrano PDF ewidencji. Osoby: ${selectedWorkerProfileExportWorkers().length}, wpisy: ${rows.length}.`, 'success')
+      showTransientNotice(`Pobrano PDF ewidencji. Osoby: ${selectedWorkerProfileExportWorkers({ skipInactive: options.skipInactive }).length}, wpisy: ${rows.length}.`, 'success')
     } catch (error) {
       alert(workTimeEvidenceErrorMessage(error))
     } finally {
@@ -2189,8 +2217,9 @@ export function createWorkerProfileFeature(ctx) {
     })
     binding.add(document.getElementById('wkExportOverlay'), 'change', (event) => {
       const target = event.target instanceof Element ? event.target : null
-      if (!target?.matches?.('[data-wk-export-col], input[name="wkExportOrientation"], #wkExportFrom, #wkExportTo')) return
+      if (!target?.matches?.('[data-wk-export-col], input[name="wkExportOrientation"], #wkExportFrom, #wkExportTo, #wkExportSkipInactive')) return
       appState.workerProfileEvidencePreviewRows = []
+      syncWorkerProfileExportUi()
       setWorkerProfileEvidencePreviewPlaceholder('Zmieniono ustawienia. Kliknij "Podglad pliku", aby odswiezyc podglad PDF.')
     })
 

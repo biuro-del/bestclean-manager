@@ -66,6 +66,7 @@ export function createEventsFeature(ctx) {
   let eventsRefreshInFlight = null
   let eventsRefreshQueuedOptions = null
   let eventsPollingTimer = 0
+  let eventPendingSavedRows = []
 
   function mergeEventsRefreshOptions(base = {}, incoming = {}) {
     const merged = {
@@ -562,6 +563,61 @@ export function createEventsFeature(ctx) {
     return eventRowFingerprintKey(left) === eventRowFingerprintKey(right)
   }
 
+  function eventPrunePendingRowsAgainst(rows = []) {
+    const sourceRows = (Array.isArray(rows) ? rows : []).filter((row) => row?.__pendingSavedEvent !== true)
+    if (!eventPendingSavedRows.length || !sourceRows.length) {
+      return
+    }
+
+    eventPendingSavedRows = eventPendingSavedRows.filter(
+      (pendingRow) => !sourceRows.some((row) => eventRowsRepresentSameSavedEvent(pendingRow, row)),
+    )
+  }
+
+  function eventRegisterPendingSavedRow(savedEvent, payload) {
+    const savedRow = eventBuildSavedViewRow(savedEvent, payload)
+    if (!savedRow) {
+      return { row: null, visibility: 'none' }
+    }
+    const pendingRow = { ...savedRow, __pendingSavedEvent: true }
+
+    eventPendingSavedRows = [
+      pendingRow,
+      ...eventPendingSavedRows.filter((row) => !eventRowsRepresentSameSavedEvent(pendingRow, row)),
+    ].slice(0, 20)
+
+    return {
+      row: pendingRow,
+      visibility: eventSavedRowMatchesCurrentFilters(pendingRow) ? 'inserted' : 'hidden',
+    }
+  }
+
+  function eventMergePendingRowsForCurrentView(rows = []) {
+    const sourceRows = Array.isArray(rows) ? rows : []
+    eventPrunePendingRowsAgainst(sourceRows)
+
+    if (!eventPendingSavedRows.length) {
+      return { rows: sourceRows, pendingCount: 0 }
+    }
+
+    const visiblePendingRows = eventPendingSavedRows.filter(
+      (pendingRow) =>
+        eventSavedRowMatchesCurrentFilters(pendingRow) &&
+        !sourceRows.some((row) => eventRowsRepresentSameSavedEvent(pendingRow, row)),
+    )
+
+    if (!visiblePendingRows.length) {
+      return { rows: sourceRows, pendingCount: 0 }
+    }
+
+    const pageSizeRaw = Number(appState.eventsPageSize)
+    const pageSize = Number.isFinite(pageSizeRaw) && pageSizeRaw > 0 ? Math.floor(pageSizeRaw) : 50
+    return {
+      rows: [...visiblePendingRows, ...sourceRows].slice(0, pageSize),
+      pendingCount: visiblePendingRows.length,
+    }
+  }
+
   function eventRowTextIncludes(row, query, fields) {
     const needle = normalizeSearchText(query)
     if (!needle) {
@@ -629,35 +685,24 @@ export function createEventsFeature(ctx) {
   }
 
   function eventEnsureSavedRowVisible(savedEvent, payload) {
-    const savedRow = eventBuildSavedViewRow(savedEvent, payload)
-    if (!savedRow) {
-      return 'none'
+    const { visibility } = eventRegisterPendingSavedRow(savedEvent, payload)
+    if (visibility === 'none' || visibility === 'hidden') {
+      return visibility
     }
 
     const currentRows = Array.isArray(appState.eventRows) ? appState.eventRows : []
-    if (currentRows.some((row) => eventRowsRepresentSameSavedEvent(savedRow, row))) {
-      return 'visible'
-    }
-
-    if (!eventSavedRowMatchesCurrentFilters(savedRow)) {
-      return 'hidden'
-    }
-
+    const merged = eventMergePendingRowsForCurrentView(currentRows)
     const pageSizeRaw = Number(appState.eventsPageSize)
     const pageSize = Number.isFinite(pageSizeRaw) && pageSizeRaw > 0 ? Math.floor(pageSizeRaw) : 50
-    const nextRows = [
-      savedRow,
-      ...currentRows.filter((row) => !eventRowsRepresentSameSavedEvent(savedRow, row)),
-    ].slice(0, pageSize)
     const totalRaw = Number(appState.eventsTotal)
     appState.eventsPage = 1
     appState.eventsPageSize = pageSize
-    appState.eventsTotal = (Number.isFinite(totalRaw) && totalRaw >= 0 ? totalRaw : currentRows.length) + 1
+    appState.eventsTotal = (Number.isFinite(totalRaw) && totalRaw >= 0 ? totalRaw : currentRows.length) + merged.pendingCount
     appState.eventsTotalPages = Math.max(1, Math.ceil(appState.eventsTotal / pageSize))
-    renderEventsRows(nextRows)
-    updateEventsPager(nextRows.length)
+    renderEventsRows(merged.rows)
+    updateEventsPager(merged.rows.length)
     setSubwelcomeMetric('#view-events .subwelcome', appState.eventsTotal)
-    return 'inserted'
+    return merged.pendingCount > 0 ? 'inserted' : 'visible'
   }
 
   function eventQrFunctionToken(value) {
@@ -1156,9 +1201,15 @@ export function createEventsFeature(ctx) {
 
   function eventEditorSetPickerExpanded(config, expanded, optionCount = 0) {
     const select = document.getElementById(config.selectId)
+    const input = document.getElementById(config.inputId)
     if (!select) {
       return
     }
+
+    const picker = select.closest('.ev-editor-picker')
+    picker?.classList.toggle('is-expanded', Boolean(expanded))
+    input?.setAttribute('aria-expanded', expanded ? 'true' : 'false')
+    select.setAttribute('aria-expanded', expanded ? 'true' : 'false')
 
     if (!expanded) {
       select.size = 1
@@ -1354,7 +1405,59 @@ export function createEventsFeature(ctx) {
       return
     }
 
+    eventEditorClearStopHint(endInput)
     endInput.value = isoToLocalDateTimeInput(new Date().toISOString())
+  }
+
+  function eventEditorClearStopHint(input = document.getElementById('evEditStop')) {
+    if (!(input instanceof HTMLInputElement)) {
+      return
+    }
+
+    delete input.dataset.eventStopHint
+    delete input.dataset.eventStopHintValue
+  }
+
+  function eventEditorSetStopValue(input, value = '', { isHint = false } = {}) {
+    if (!(input instanceof HTMLInputElement)) {
+      return
+    }
+
+    input.value = value
+    if (isHint && value) {
+      input.dataset.eventStopHint = '1'
+      input.dataset.eventStopHintValue = value
+    } else {
+      eventEditorClearStopHint(input)
+    }
+  }
+
+  function eventEditorSyncStopHintFromStart() {
+    const startInput = document.getElementById('evEditStart')
+    const stopInput = document.getElementById('evEditStop')
+    if (!(startInput instanceof HTMLInputElement) || !(stopInput instanceof HTMLInputElement)) {
+      return
+    }
+
+    if (stopInput.dataset.eventStopHint !== '1') {
+      return
+    }
+
+    const nextValue = String(startInput.value ?? '').trim()
+    eventEditorSetStopValue(stopInput, nextValue, { isHint: Boolean(nextValue) })
+  }
+
+  function eventEditorReadStopValue(input) {
+    if (!(input instanceof HTMLInputElement)) {
+      return ''
+    }
+
+    const value = String(input.value ?? '').trim()
+    if (input.dataset.eventStopHint === '1' && value === String(input.dataset.eventStopHintValue ?? '').trim()) {
+      return ''
+    }
+
+    return value
   }
 
   function syncEventRoomAndClientFromZone() {
@@ -1441,8 +1544,10 @@ export function createEventsFeature(ctx) {
     if (cycleId) cycleId.textContent = String(item.eventId ?? item.workdayId ?? '-')
     if (rowNumber) rowNumber.textContent = '-'
     if (editedBy) editedBy.textContent = item.editedBy || appState.session?.name || '-'
-    if (startInput) startInput.value = isoToLocalDateTimeInput(item.startAt)
-    if (stopInput) stopInput.value = isoToLocalDateTimeInput(item.endAt)
+    const startValue = isoToLocalDateTimeInput(item.startAt)
+    const stopValue = isoToLocalDateTimeInput(item.endAt)
+    if (startInput) startInput.value = startValue
+    eventEditorSetStopValue(stopInput, stopValue || startValue, { isHint: Boolean(startValue && !stopValue) })
     if (stopNowButton instanceof HTMLButtonElement) stopNowButton.disabled = false
     if (startInput) startInput.disabled = false
     if (stopInput) stopInput.disabled = false
@@ -1503,7 +1608,7 @@ export function createEventsFeature(ctx) {
     if (rowNumber) rowNumber.textContent = '-'
     if (editedBy) editedBy.textContent = appState.session?.name || '-'
     if (startInput) startInput.value = ''
-    if (stopInput) stopInput.value = ''
+    eventEditorSetStopValue(stopInput, '')
     if (commentInput) {
       commentInput.readOnly = true
       commentInput.value = ''
@@ -1564,7 +1669,7 @@ export function createEventsFeature(ctx) {
     const zoneId = String(zoneSelect?.value ?? '').trim()
     const utilityRoomId = zoneId
     const startAt = localDateTimeInputToIso(startInput?.value)
-    const endAt = localDateTimeInputToIso(stopInput?.value)
+    const endAt = localDateTimeInputToIso(eventEditorReadStopValue(stopInput))
     const comment = String(commentInput?.value ?? '').trim()
     const eventKind = resolveEventKindFromTimes(startAt, endAt)
 
@@ -1792,11 +1897,9 @@ export function createEventsFeature(ctx) {
       if (document.getElementById('evRows')) {
         if (isCreateMode) {
           appState.eventsPage = 1
-        }
-        await fetchEventsForCurrentSession({ resetPage: isCreateMode, forceRefresh: true })
-        if (isCreateMode) {
           savedEventVisibility = eventEnsureSavedRowVisible(savedEvent, savedEventPayload)
         }
+        await fetchEventsForCurrentSession({ resetPage: isCreateMode, forceRefresh: true, silent: isCreateMode })
       }
       const savedHistoryItem = {
         ...(editedHistorySource || {}),
@@ -2453,15 +2556,16 @@ export function createEventsFeature(ctx) {
         ...filters,
         forceRefresh,
       })
-
       appState.eventsPage = response.page
-      appState.eventsPageSize = response.pageSize
-      appState.eventsTotal = response.total
-      appState.eventsTotalPages = response.totalPages
+      const responsePageSize = Number(response.pageSize)
+      appState.eventsPageSize = Number.isFinite(responsePageSize) && responsePageSize > 0 ? Math.floor(responsePageSize) : 50
+      const merged = eventMergePendingRowsForCurrentView(response.items)
+      appState.eventsTotal = Number(response.total ?? 0) + merged.pendingCount
+      appState.eventsTotalPages = Math.max(1, Math.ceil(appState.eventsTotal / appState.eventsPageSize))
 
-      renderEventsRows(response.items)
-      updateEventsPager(response.items.length)
-      setSubwelcomeMetric('#view-events .subwelcome', response.total)
+      renderEventsRows(merged.rows)
+      updateEventsPager(merged.rows.length)
+      setSubwelcomeMetric('#view-events .subwelcome', appState.eventsTotal)
     } catch (error) {
       if (silent) {
         console.warn('[events] silent refresh failed', error)
@@ -2770,6 +2874,10 @@ export function createEventsFeature(ctx) {
       void deleteEventEditorItem()
     })
     binding.add(document.getElementById('evStopNowBtn'), 'click', setEventStopNow)
+    binding.add(document.getElementById('evEditStart'), 'input', eventEditorSyncStopHintFromStart)
+    binding.add(document.getElementById('evEditStart'), 'change', eventEditorSyncStopHintFromStart)
+    binding.add(document.getElementById('evEditStop'), 'input', (event) => eventEditorClearStopHint(event.target))
+    binding.add(document.getElementById('evEditStop'), 'change', (event) => eventEditorClearStopHint(event.target))
     binding.add(document.getElementById('evEditPom'), 'change', refreshEventZoneOptionsForClient)
     binding.add(document.getElementById('evEditStrefa'), 'change', syncEventRoomAndClientFromZone)
     ;[
@@ -2789,6 +2897,12 @@ export function createEventsFeature(ctx) {
         }, 120)
       })
       binding.add(document.getElementById(inputId), 'keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          eventEditorCollapsePicker(kind)
+          return
+        }
+
         if (event.key === 'ArrowDown') {
           event.preventDefault()
           const select = document.getElementById(selectId)
@@ -2816,6 +2930,15 @@ export function createEventsFeature(ctx) {
       binding.add(document.getElementById(selectId), 'change', () => {
         eventEditorSyncSearchInput(kind)
         eventEditorCollapsePicker(kind)
+      })
+      binding.add(document.getElementById(selectId), 'keydown', (event) => {
+        if (event.key !== 'Escape') {
+          return
+        }
+
+        event.preventDefault()
+        eventEditorCollapsePicker(kind)
+        document.getElementById(inputId)?.focus()
       })
       binding.add(document.getElementById(selectId), 'blur', () => {
         window.setTimeout(() => {

@@ -5564,6 +5564,50 @@ textarea:focus{
 
 #evEditorOverlay .ev-editor-picker{
   position: relative;
+  width: 100%;
+}
+
+#evEditorOverlay .ev-editor-picker::after{
+  content: "";
+  position: absolute;
+  right: 13px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid #2563eb;
+  border-bottom: 2px solid #2563eb;
+  pointer-events: none;
+  transform: translateY(-65%) rotate(45deg);
+  transition: transform .14s ease;
+}
+
+#evEditorOverlay .ev-editor-picker.is-expanded::after{
+  transform: translateY(-25%) rotate(225deg);
+}
+
+#evEditorOverlay .ev-editor-picker input{
+  width: 100% !important;
+  min-height: 38px !important;
+  padding: 8px 36px 8px 12px !important;
+  border-color: #cfe0ff !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  color: #11285a !important;
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Arial, sans-serif !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.35 !important;
+  letter-spacing: 0 !important;
+  font-kerning: normal;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#evEditorOverlay .ev-editor-picker input:focus{
+  border-color: #73a7ff !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .18) !important;
 }
 
 #evEditorOverlay .ev-editor-picker-list{
@@ -5571,14 +5615,29 @@ textarea:focus{
   position: absolute;
   left: 0;
   right: 0;
-  top: calc(100% + 4px);
-  z-index: 40;
+  top: calc(100% + 5px);
+  z-index: 220;
   min-height: auto !important;
   height: auto;
   max-height: 260px;
-  overflow: auto;
-  border-color: #8eb1ea !important;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16) !important;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 6px !important;
+  border: 1px solid #d8e6ff !important;
+  border-radius: 0 0 10px 10px !important;
+  background: #fff !important;
+  color: #10234f !important;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, .14) !important;
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Arial, sans-serif !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.42 !important;
+  letter-spacing: 0 !important;
+  font-kerning: normal;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #evEditorOverlay .ev-editor-picker-list.is-expanded{
@@ -5588,6 +5647,42 @@ textarea:focus{
 #evEditorOverlay .field select.ev-editor-picker-list{
   min-height: auto !important;
   height: auto;
+}
+
+#evEditorOverlay .ev-editor-picker-list option{
+  min-height: 30px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: #10234f;
+  background: #fff;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  font-weight: 600 !important;
+  line-height: 1.42 !important;
+  letter-spacing: 0 !important;
+}
+
+#evEditorOverlay .ev-editor-picker-list option:checked{
+  background: #e9e3f8 !important;
+  color: #06163e !important;
+  font-weight: 700 !important;
+}
+
+#evEditorOverlay .ev-editor-picker-list option:hover{
+  background: #f2eefb;
+}
+
+#evEditorOverlay .ev-editor-picker-list::-webkit-scrollbar{
+  width: 8px;
+}
+
+#evEditorOverlay .ev-editor-picker-list::-webkit-scrollbar-thumb{
+  border-radius: 999px;
+  background: #c9d2df;
+}
+
+#evEditorOverlay .ev-editor-picker-list::-webkit-scrollbar-track{
+  background: transparent;
 }
 
 #evEditorOverlay .event-scanned-qr{

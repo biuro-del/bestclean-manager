@@ -1234,6 +1234,12 @@ export function createClientProfileFeature(ctx) {
     }
     clientProfileSetText('cpdClientName', client.name)
     clientProfileSetText('cpdClientId', `ID: ${client.id}`)
+    const heroClientType = document.querySelector('[data-cpd-hero-client-type]')
+    if (heroClientType) {
+      const clientType = clientProfileClientTypeLabel(client.clientType)
+      heroClientType.textContent = clientType || 'Brak danych'
+      heroClientType.classList.toggle('is-empty', !clientType)
+    }
     const badge = document.getElementById('cpdStatusBadge')
     if (badge) {
       badge.textContent = normalizeClientStatus(client.status)
@@ -1852,8 +1858,10 @@ export function createClientProfileFeature(ctx) {
     }
     const actions = document.getElementById('cpdEditActions')
     const editButton = document.getElementById('cpdEditMenuBtn')
+    const heroEditButton = document.getElementById('cpdHeroEditBtn')
     if (actions) actions.hidden = !appState.clientProfileEditMode
     if (editButton) editButton.hidden = appState.clientProfileEditMode || !canManageClients()
+    if (heroEditButton) heroEditButton.hidden = appState.clientProfileEditMode || !canManageClients()
 
     if (!appState.clientProfileCurrent) return
 
@@ -2250,6 +2258,9 @@ export function createClientProfileFeature(ctx) {
       clientProfileSetActiveTab(button.getAttribute('data-client-profile-tab'))
     })
     binding.add(document.getElementById('cpdEditMenuBtn'), 'click', () => setClientProfileEditMode(true))
+    binding.add(document.getElementById('cpdHeroEditBtn'), 'click', () => setClientProfileEditMode(true))
+    binding.add(document.getElementById('cpdHeroMessageBtn'), 'click', () => clientProfileSetActiveTab('messages'))
+    binding.add(document.getElementById('cpdHeroExportBtn'), 'click', () => clientProfileSetActiveTab('reports'))
     binding.add(document.getElementById('cpdInlineCancelBtn'), 'click', () => {
       appState.clientProfileEditMode = false
       renderClientProfileDetailView()
