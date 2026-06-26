@@ -403,6 +403,35 @@ Uwagi dla następnej osoby:
 
 Historia zmian dokumentacji i projektu
 --------------------------------------
+Data: 2026-06-26
+Autor: AI Codex
+Dodano:
+- Dodano paginowane zapytania Data Connect dla widoku Zdarzenia: `EventsPageForOrg*` oraz `WorkdaysPageForOrg*`.
+- Dodano lekkie zapytania fingerprint dla pollingu Zdarzen: `EventsFingerprintForOrg` i `WorkdaysFingerprintForOrg`.
+- Dodano indeksy Data Connect/Cloud SQL dla szybkich odczytow `event`, `workday` i fallbackowego `backup_cycle`.
+- Dodano migracje SQL `dataconnect/migrations/20260626_events_read_indexes.sql`.
+Zmieniono:
+- Zoptymalizowano `web-app/apps/portal-web/src/services/workdayService.js`: widok Zdarzenia uzywa teraz szybkiej sciezki z ograniczona paginacja i fallbackiem do starego pelnego pobrania.
+- Zoptymalizowano `web-app/apps/portal-web/src/features/events/index.js`: tabela nie czeka na pelne referencje modala, polling nie robi juz pelnego refreshu co 10 sekund bez wykrycia zmiany, a render pracownikow buduje lookup raz na render.
+- Dodano cache opcji modala dodawania/edycji zdarzen dla pracownikow, klientow i stref.
+- Poprawiono plynnosc panelu dodawania/edycji zdarzen: modal pokazuje sie od razu, pickery maja stan ladowania, lista wynikow jest limitowana, a filtrowanie jest wykonywane lokalnie z cache zamiast przez helper raportow.
+- Dodano selektor liczby rekordow na stronie w sekcji Zdarzenia z opcjami 10/25/50/100 i ustawiono domyslnie 25 rekordow.
+- Zaktualizowano `web-app/apps/portal-web/src/ui/portalApp.js`, aby przekazywal do sekcji Zdarzenia nowy helper fingerprint.
+- Wygenerowano ponownie SDK Data Connect w `web-app/apps/portal-web/src/dataconnect-generated/`.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Uruchomiono `firebase.cmd dataconnect:sdk:generate`; pierwsza proba pokazala, ze Data Connect uzywa operatorow `ge`/`le`, po poprawce generator zakonczyl sie sukcesem.
+- Uruchomiono `node --check web-app/apps/portal-web/src/services/workdayService.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/events/index.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/app/state/index.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/ui/portalApp.js`.
+- Uruchomiono `npm.cmd run build` w `web-app`; build zakonczyl sie sukcesem po optymalizacji tabeli, po poprawce plynnosci panelu edycji oraz po dodaniu selektora liczby rekordow.
+Uwagi dla nastepnej osoby:
+- Pelny efekt wydajnosciowy w produkcji wymaga deployu Data Connect oraz zastosowania migracji indeksow w Cloud SQL.
+- Fast path ma fallback do starego pelnego pobrania, jezeli nowe operacje Data Connect nie sa jeszcze wdrozone albo ograniczony overscan nie wystarczy do bezpiecznego wyniku.
+- Eksport PDF/Excel nadal moze wykonywac ciezszy odczyt na zadanie; optymalizacja dotyczy przede wszystkim tabeli, modala i pollingu.
+
 Data: 2026-06-24
 Autor: AI Codex
 Dodano:

@@ -304,6 +304,161 @@ query WorkdaysForOrg($orgId: String!) @auth(level: USER) {
   }
 }
 
+query WorkdaysPageForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+    }
+
+  workdays(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId }, startAt: { ge: $fromStartAt, le: $toStartAt } }
+    orderBy: [{ startAt: DESC }]
+  ) {
+    workdayId
+    workerLogin
+    workerName
+    utilityRoomId
+    startAt
+    endScanAt
+    autoCloseAt
+    endAt
+    durationSec
+    status
+    deviceId
+    gps
+    startEventId
+    endEventId
+    startObject
+    stopObject
+    comment
+    updatedBy
+    updatedAt
+  }
+}
+
+query WorkdaysPageForOrgByWorker($orgId: String!, $workerLogin: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+    }
+
+  workdays(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $workerLogin }, startAt: { ge: $fromStartAt, le: $toStartAt } }
+    orderBy: [{ startAt: DESC }]
+  ) {
+    workdayId
+    workerLogin
+    workerName
+    utilityRoomId
+    startAt
+    endScanAt
+    autoCloseAt
+    endAt
+    durationSec
+    status
+    deviceId
+    gps
+    startEventId
+    endEventId
+    startObject
+    stopObject
+    comment
+    updatedBy
+    updatedAt
+  }
+}
+
+query WorkdaysPageForOrgByRoom($orgId: String!, $utilityRoomId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+    }
+
+  workdays(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId }, utilityRoomId: { eq: $utilityRoomId }, startAt: { ge: $fromStartAt, le: $toStartAt } }
+    orderBy: [{ startAt: DESC }]
+  ) {
+    workdayId
+    workerLogin
+    workerName
+    utilityRoomId
+    startAt
+    endScanAt
+    autoCloseAt
+    endAt
+    durationSec
+    status
+    deviceId
+    gps
+    startEventId
+    endEventId
+    startObject
+    stopObject
+    comment
+    updatedBy
+    updatedAt
+  }
+}
+
+query WorkdaysPageForOrgByStatus($orgId: String!, $status: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+    }
+
+  workdays(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId }, status: { eq: $status }, startAt: { ge: $fromStartAt, le: $toStartAt } }
+    orderBy: [{ startAt: DESC }]
+  ) {
+    workdayId
+    workerLogin
+    workerName
+    utilityRoomId
+    startAt
+    endScanAt
+    autoCloseAt
+    endAt
+    durationSec
+    status
+    deviceId
+    gps
+    startEventId
+    endEventId
+    startObject
+    stopObject
+    comment
+    updatedBy
+    updatedAt
+  }
+}
+
+query WorkdaysFingerprintForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+    }
+
+  workdays(
+    limit: 1
+    where: { orgId: { eq: $orgId }, startAt: { ge: $fromStartAt, le: $toStartAt } }
+    orderBy: [{ updatedAt: DESC }, { startAt: DESC }, { workdayId: DESC }]
+  ) {
+    workdayId
+    startAt
+    endAt
+    status
+    updatedAt
+  }
+}
+
 query BackupCyclesForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
@@ -360,6 +515,194 @@ query EventsForOrg($orgId: String!) @auth(level: USER) {
         name
       }
     }
+  }
+}
+
+query EventsPageForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+    }
+
+  events(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId }, startAt: { ge: $fromStartAt, le: $toStartAt } }
+    orderBy: [{ startAt: DESC }]
+  ) {
+    eventId
+    workdayId
+    zoneId
+    workerLogin
+    workerName
+    startAt
+    endAt
+    durationSec
+    status
+    closeMarkedAt
+    endReason
+    comment
+    deviceId
+    startEventId
+    endEventId
+    createdAt
+    updatedAt
+    zone {
+      zoneId
+      zone
+      function
+      location
+      client {
+        clientId
+        name
+      }
+    }
+  }
+}
+
+query EventsPageForOrgByWorker($orgId: String!, $workerLogin: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+    }
+
+  events(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $workerLogin }, startAt: { ge: $fromStartAt, le: $toStartAt } }
+    orderBy: [{ startAt: DESC }]
+  ) {
+    eventId
+    workdayId
+    zoneId
+    workerLogin
+    workerName
+    startAt
+    endAt
+    durationSec
+    status
+    closeMarkedAt
+    endReason
+    comment
+    deviceId
+    startEventId
+    endEventId
+    createdAt
+    updatedAt
+    zone {
+      zoneId
+      zone
+      function
+      location
+      client {
+        clientId
+        name
+      }
+    }
+  }
+}
+
+query EventsPageForOrgByZone($orgId: String!, $zoneId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+    }
+
+  events(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId }, zoneId: { eq: $zoneId }, startAt: { ge: $fromStartAt, le: $toStartAt } }
+    orderBy: [{ startAt: DESC }]
+  ) {
+    eventId
+    workdayId
+    zoneId
+    workerLogin
+    workerName
+    startAt
+    endAt
+    durationSec
+    status
+    closeMarkedAt
+    endReason
+    comment
+    deviceId
+    startEventId
+    endEventId
+    createdAt
+    updatedAt
+    zone {
+      zoneId
+      zone
+      function
+      location
+      client {
+        clientId
+        name
+      }
+    }
+  }
+}
+
+query EventsPageForOrgByStatus($orgId: String!, $status: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+    }
+
+  events(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId }, status: { eq: $status }, startAt: { ge: $fromStartAt, le: $toStartAt } }
+    orderBy: [{ startAt: DESC }]
+  ) {
+    eventId
+    workdayId
+    zoneId
+    workerLogin
+    workerName
+    startAt
+    endAt
+    durationSec
+    status
+    closeMarkedAt
+    endReason
+    comment
+    deviceId
+    startEventId
+    endEventId
+    createdAt
+    updatedAt
+    zone {
+      zoneId
+      zone
+      function
+      location
+      client {
+        clientId
+        name
+      }
+    }
+  }
+}
+
+query EventsFingerprintForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+    }
+
+  events(
+    limit: 1
+    where: { orgId: { eq: $orgId }, startAt: { ge: $fromStartAt, le: $toStartAt } }
+    orderBy: [{ updatedAt: DESC }, { startAt: DESC }, { eventId: DESC }]
+  ) {
+    eventId
+    workdayId
+    startAt
+    endAt
+    status
+    updatedAt
   }
 }
 

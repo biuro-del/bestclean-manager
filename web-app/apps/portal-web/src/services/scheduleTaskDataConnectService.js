@@ -876,19 +876,6 @@ async function upsertScheduleTasksViaDataConnect(orgId, orders = []) {
 
   requireFirebaseDataConnect()
   const taskRows = sourceOrders.map((order) => mapScheduleOrderToTaskVariables(normalizedOrgId, order)).filter(Boolean)
-  const nextIds = new Set(taskRows.map((row) => nullableText(row?.idTask ?? row?.id_task, 180)).filter(Boolean))
-  const remoteOrders = await fetchScheduleTasksViaDataConnect(normalizedOrgId)
-  const staleRemoteIds = [
-    ...new Set(
-      remoteOrders
-        .map((order) => nullableText(order?.id ?? order?.idTask, 180))
-        .filter((id) => id && !nextIds.has(id)),
-    ),
-  ]
-  for (const idTask of staleRemoteIds) {
-    await deleteTaskForOrg({ orgId: normalizedOrgId, idTask })
-  }
-
   const savedRows = []
   for (const taskRow of taskRows) {
     const response = await upsertTaskForOrg(taskRow)

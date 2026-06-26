@@ -315,6 +315,17 @@ function isDatabaseTlsVerificationError(error) {
   )
 }
 
+function isDatabaseTransientConnectionError(error) {
+  const code = normalizeText(error?.code).toUpperCase()
+  const message = normalizeText(error?.message).toLowerCase()
+  return (
+    ['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ECONNABORTED'].includes(code) ||
+    message.includes('timeout expired') ||
+    message.includes('connection terminated due to connection timeout') ||
+    message.includes('socket disconnected before secure tls connection was established')
+  )
+}
+
 function mapDatabaseConnectionError(error) {
   const code = normalizeText(error?.code).toUpperCase()
   const message = normalizeText(error?.message)
@@ -373,7 +384,7 @@ function mapDatabaseConnectionError(error) {
     }
   }
 
-  if (code === 'ETIMEDOUT' || code === 'ENOTFOUND' || code === 'EHOSTUNREACH') {
+  if (code === 'ETIMEDOUT' || code === 'ENOTFOUND' || code === 'EHOSTUNREACH' || code === 'ECONNRESET') {
     return {
       status: 503,
       code: 'DB_CONNECTION_FAILED',
@@ -1598,6 +1609,49 @@ function getDbSslOptions(sslEnabled) {
   }
 }
 
+function getDbConnectTimeoutMillis() {
+  const value = Number(process.env.DB_CONNECT_TIMEOUT_MS || process.env.PGCONNECT_TIMEOUT_MS || 30000)
+  return Number.isFinite(value) && value > 0 ? value : 30000
+}
+
+function wrapCloudSqlPostgresStream(streamFactory) {
+  if (typeof streamFactory !== 'function') {
+    return streamFactory
+  }
+
+  return (...args) => {
+    const stream = streamFactory(...args)
+    if (!stream || stream.__cloudSqlPgConnectPatched) {
+      return stream
+    }
+
+    const originalConnect = typeof stream.connect === 'function' ? stream.connect.bind(stream) : null
+
+    Object.defineProperty(stream, '__cloudSqlPgConnectPatched', {
+      value: true,
+      configurable: true,
+    })
+
+    // pg waits for "connect" before sending the PostgreSQL startup packet.
+    // Cloud SQL's TLS stream is already opening before pg attaches listeners,
+    // so emit a pg-visible connect once TLS is definitely established.
+    stream.connect = function connectCloudSqlPostgresStream() {
+      if (originalConnect) {
+        originalConnect()
+      }
+      const emitConnect = () => process.nextTick(() => stream.emit('connect'))
+      if (stream.authorized || stream.readyState === 'open') {
+        emitConnect()
+      } else {
+        stream.once('secureConnect', emitConnect)
+      }
+      return stream
+    }
+
+    return stream
+  }
+}
+
 async function getCloudSqlConnectorOptions() {
   if (!cloudSqlOptionsPromise) {
     cloudSqlConnector = cloudSqlConnector || new Connector({ auth: createCloudSqlConnectorAuth() })
@@ -1607,6 +1661,10 @@ async function getCloudSqlConnectorOptions() {
         ipType: getCloudSqlIpType(),
         authType: getCloudSqlAuthType(),
       })
+      .then((options) => ({
+        ...options,
+        stream: wrapCloudSqlPostgresStream(options?.stream),
+      }))
       .catch((error) => {
         cloudSqlOptionsPromise = null
         throw error
@@ -1628,6 +1686,7 @@ async function getDbPool() {
     dbPool = new Pool({
       connectionString: databaseUrl,
       ssl: getDbSslOptions(sslEnabled),
+      connectionTimeoutMillis: getDbConnectTimeoutMillis(),
     })
     return dbPool
   }
@@ -1655,6 +1714,7 @@ async function getDbPool() {
       user,
       ...(useIamDatabaseAuth ? {} : { password }),
       max: Number(process.env.DB_POOL_MAX || 5),
+      connectionTimeoutMillis: getDbConnectTimeoutMillis(),
     })
     return dbPool
   }
@@ -1670,6 +1730,7 @@ async function getDbPool() {
     user,
     password,
     ssl: getDbSslOptions(sslEnabled),
+    connectionTimeoutMillis: getDbConnectTimeoutMillis(),
   })
   return dbPool
 }
@@ -1814,18 +1875,27 @@ async function resetDbConnectionCache() {
 }
 
 async function connectDbClient() {
-  const pool = await getDbPool()
-  try {
-    return await pool.connect()
-  } catch (error) {
-    if (!isDatabaseSslBadCertificateError(error)) {
-      throw error
-    }
+  const maxAttempts = Math.max(1, Number(process.env.DB_CONNECT_RETRY_ATTEMPTS || 3) || 3)
+  let lastError = null
 
-    await resetDbConnectionCache()
-    const retryPool = await getDbPool()
-    return retryPool.connect()
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const pool = await getDbPool()
+    try {
+      return await pool.connect()
+    } catch (error) {
+      lastError = error
+      const canRetry =
+        attempt < maxAttempts && (isDatabaseSslBadCertificateError(error) || isDatabaseTransientConnectionError(error))
+      if (!canRetry) {
+        throw error
+      }
+
+      await resetDbConnectionCache()
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt))
+    }
   }
+
+  throw lastError || new Error('DB_CONNECTION_FAILED')
 }
 
 let mobileWorkflowTablesAttempted = false
@@ -5240,6 +5310,47 @@ function portalScheduleOrderJsonString(value, fallback = []) {
   return JSON.stringify(portalScheduleOrderJsonValue(value, fallback))
 }
 
+const PORTAL_SCHEDULE_ORDER_SERVICE_BLOCKS_PAYLOAD_MARKER = 'cleanz_service_blocks_v2'
+
+function portalScheduleOrderServicePayloadFromRules(value) {
+  const rules = portalScheduleOrderJsonValue(value, [])
+  const source = Array.isArray(rules) ? rules : []
+  return source.find((item) => item && typeof item === 'object' && item.marker === PORTAL_SCHEDULE_ORDER_SERVICE_BLOCKS_PAYLOAD_MARKER) || null
+}
+
+function portalScheduleOrderRulesWithoutServicePayload(value) {
+  const rules = portalScheduleOrderJsonValue(value, [])
+  return Array.isArray(rules)
+    ? rules.filter((item) => !(item && typeof item === 'object' && item.marker === PORTAL_SCHEDULE_ORDER_SERVICE_BLOCKS_PAYLOAD_MARKER))
+    : []
+}
+
+function portalScheduleOrderServicePayloadFromOrder(order = {}) {
+  const serviceBlocks = portalScheduleOrderFirstJsonValue([], order.serviceBlocks, order.service_blocks)
+  if (!Array.isArray(serviceBlocks) || !serviceBlocks.length) {
+    return null
+  }
+  const objectAccessWindows = portalScheduleOrderFirstJsonValue(
+    [],
+    order.objectAccessWindows,
+    order.object_access_windows,
+    order.accessWindows,
+    order.access_windows,
+  )
+  return {
+    marker: PORTAL_SCHEDULE_ORDER_SERVICE_BLOCKS_PAYLOAD_MARKER,
+    version: portalScheduleOrderInteger(order.serviceModelVersion ?? order.service_model_version, 2) || 2,
+    serviceBlocks,
+    objectAccessWindows: Array.isArray(objectAccessWindows) ? objectAccessWindows : [],
+  }
+}
+
+function portalScheduleOrderWeeklyRulesForDb(order = {}) {
+  const baseRules = portalScheduleOrderRulesWithoutServicePayload(order.weeklyScheduleRules ?? order.weekly_schedule_rules)
+  const servicePayload = portalScheduleOrderServicePayloadFromOrder(order)
+  return servicePayload ? [...baseRules, servicePayload] : baseRules
+}
+
 function portalScheduleOrderDateOrdinal(value) {
   const ymd = normalizePortalScheduleOrderDate(value)
   if (!ymd) return null
@@ -5417,7 +5528,7 @@ function portalScheduleOrderDbRow(order = {}, orgId, requesterUid) {
     type: portalScheduleOrderNullableText(order.type, 40) || 'other',
     updated_at: nowIso,
     updated_by_uid: portalScheduleOrderNullableText(uid || order.updatedByUid || order.updated_by_uid || order.updatedBy, 128),
-    weekly_schedule_rules: portalScheduleOrderJsonString(order.weeklyScheduleRules ?? order.weekly_schedule_rules, []),
+    weekly_schedule_rules: JSON.stringify(portalScheduleOrderWeeklyRulesForDb(order)),
     work_allocations: JSON.stringify(allocations),
     worker_comment: portalScheduleOrderNullableText(order.workerComment ?? order.worker_comment ?? order.workerOnlyComment, 4000),
     worker_id: primaryAllocation?.workerId || portalScheduleOrderNullableText(order.workerId ?? order.worker_id, 64),
@@ -5441,7 +5552,10 @@ function portalScheduleOrderFromDbRow(row = {}) {
   const workerIds = portalScheduleOrderJsonValue(row.worker_ids ?? row.workerIds, [])
   const accessWindows = portalScheduleOrderJsonValue(row.access_windows ?? row.accessWindows, [])
   const repeatWeekdays = portalScheduleOrderJsonValue(row.repeat_weekdays ?? row.repeatWeekdays, [])
-  const weeklyScheduleRules = portalScheduleOrderJsonValue(row.weekly_schedule_rules ?? row.weeklyScheduleRules, [])
+  const servicePayload = portalScheduleOrderServicePayloadFromRules(row.weekly_schedule_rules ?? row.weeklyScheduleRules)
+  const weeklyScheduleRules = portalScheduleOrderRulesWithoutServicePayload(row.weekly_schedule_rules ?? row.weeklyScheduleRules)
+  const serviceBlocks = Array.isArray(servicePayload?.serviceBlocks) ? servicePayload.serviceBlocks : []
+  const objectAccessWindows = Array.isArray(servicePayload?.objectAccessWindows) ? servicePayload.objectAccessWindows : accessWindows
   const supplies = portalScheduleOrderJsonValue(row.supplies, [])
   const objectPlanTasks = portalScheduleOrderJsonValue(row.object_plan_tasks ?? row.objectPlanTasks, [])
   const clientName = portalScheduleOrderNullableText(row.client_name ?? row.joined_client_name ?? row.clientLabel, 500)
@@ -5467,7 +5581,10 @@ function portalScheduleOrderFromDbRow(row = {}) {
     scheduleMode: portalScheduleOrderNullableText(row.schedule_mode ?? row.scheduleMode, 32) || 'once',
     accessStartTime: normalizePortalScheduleOrderTime(row.access_start_time ?? row.accessStartTime),
     accessEndTime: normalizePortalScheduleOrderTime(row.access_end_time ?? row.accessEndTime),
-    accessWindows: Array.isArray(accessWindows) ? accessWindows : [],
+    accessWindows: Array.isArray(objectAccessWindows) ? objectAccessWindows : [],
+    objectAccessWindows: Array.isArray(objectAccessWindows) ? objectAccessWindows : [],
+    accessTimeWindows: Array.isArray(objectAccessWindows) ? objectAccessWindows : [],
+    buildingAccessWindows: Array.isArray(objectAccessWindows) ? objectAccessWindows : [],
     requiredWorkMinutes: portalScheduleOrderInteger(row.required_work_minutes ?? row.requiredWorkMinutes, null),
     requiredPeople: portalScheduleOrderInteger(row.required_people ?? row.requiredPeople, 0),
     workAllocations: allocations,
@@ -5500,6 +5617,11 @@ function portalScheduleOrderFromDbRow(row = {}) {
     repeatUnit: portalScheduleOrderNullableText(row.repeat_unit ?? row.repeatUnit, 16),
     repeatWeekdays: Array.isArray(repeatWeekdays) ? repeatWeekdays : [],
     weeklyScheduleRules: Array.isArray(weeklyScheduleRules) ? weeklyScheduleRules : [],
+    weeklyPattern: Array.isArray(weeklyScheduleRules) ? weeklyScheduleRules : [],
+    repeatDayRules: Array.isArray(weeklyScheduleRules) ? weeklyScheduleRules : [],
+    dayScheduleRules: Array.isArray(weeklyScheduleRules) ? weeklyScheduleRules : [],
+    serviceModelVersion: portalScheduleOrderInteger(servicePayload?.version, serviceBlocks.length ? 2 : null),
+    serviceBlocks,
     title: portalScheduleOrderNullableText(row.title, 500) || clientLabel || 'Zlecenie',
     type: portalScheduleOrderNullableText(row.type, 40) || 'other',
     price: portalScheduleOrderNumber(row.price, 0),
@@ -6022,12 +6144,6 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
     await client.query('begin')
     for (const row of rows) {
       await upsertPortalScheduleOrderTask(client, row)
-    }
-    const rowIds = rows.map((row) => sanitizePortalScheduleOrderId(row?.id_task)).filter(Boolean)
-    if (rowIds.length) {
-      await client.query('delete from public.task where org_id = $1 and id_task <> all($2::varchar[])', [orgId, rowIds])
-    } else {
-      await client.query('delete from public.task where org_id = $1', [orgId])
     }
     await client.query('commit')
     const savedOrders = await readPortalScheduleOrders(client, orgId)

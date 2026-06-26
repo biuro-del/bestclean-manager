@@ -29,7 +29,7 @@ export function createAppState(overrides = {}) {
   workersTotal: 0,
   workersTotalPages: 1,
   eventsPage: 1,
-  eventsPageSize: 50,
+  eventsPageSize: 25,
   eventsTotal: 0,
   eventsTotalPages: 1,
   eventsFilters: null,

@@ -20,7 +20,8 @@ type OrganizationMember @table(
   singular: "organizationMember",
   plural: "organizationMembers",
   key: ["orgId", "uid"]
-) {
+)
+@index(name: "organization_member_uid_org_lookup_idx", fields: ["uid", "orgId"]) {
   orgId: String! @col(name: "org_id", dataType: "varchar(64)")
   organization: Organization! @ref(fields: "orgId", references: "orgId")
 
@@ -353,7 +354,12 @@ type Workday @table(
   singular: "workday",
   plural: "workdays",
   key: ["orgId", "workdayId"]
-) {
+)
+@index(name: "workday_org_start_idx", fields: ["orgId", "startAt"], order: [ASC, DESC])
+@index(name: "workday_org_updated_idx", fields: ["orgId", "updatedAt"], order: [ASC, DESC])
+@index(name: "workday_org_worker_start_idx", fields: ["orgId", "workerLogin", "startAt"])
+@index(name: "workday_org_room_start_idx", fields: ["orgId", "utilityRoomId", "startAt"])
+@index(name: "workday_org_status_start_idx", fields: ["orgId", "status", "startAt"]) {
   orgId: String! @col(name: "org_id", dataType: "varchar(64)")
   organization: Organization! @ref(fields: "orgId", references: "orgId")
 
@@ -430,7 +436,9 @@ type BackupCycle @table(
   singular: "backupCycle",
   plural: "backupCycles",
   key: ["orgId", "cycleId"]
-) {
+)
+@index(name: "backup_cycle_org_start_idx", fields: ["orgId", "startAt"], order: [ASC, DESC])
+@index(name: "backup_cycle_org_edited_idx", fields: ["orgId", "editedAt"], order: [ASC, DESC]) {
   orgId: String! @col(name: "org_id", dataType: "varchar(64)")
   organization: Organization! @ref(fields: "orgId", references: "orgId")
 
@@ -463,7 +471,12 @@ type Event @table(
   singular: "event",
   plural: "events",
   key: ["orgId", "eventId"]
-) {
+)
+@index(name: "event_org_start_idx", fields: ["orgId", "startAt"], order: [ASC, DESC])
+@index(name: "event_org_updated_idx", fields: ["orgId", "updatedAt"], order: [ASC, DESC])
+@index(name: "event_org_worker_start_idx", fields: ["orgId", "workerLogin", "startAt"])
+@index(name: "event_org_zone_start_idx", fields: ["orgId", "zoneId", "startAt"])
+@index(name: "event_org_status_start_idx", fields: ["orgId", "status", "startAt"]) {
   orgId: String! @col(name: "org_id", dataType: "varchar(64)")
   organization: Organization! @ref(fields: "orgId", references: "orgId")
 

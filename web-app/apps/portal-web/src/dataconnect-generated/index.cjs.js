@@ -747,6 +747,81 @@ exports.workdaysForOrg = function workdaysForOrg(dcOrVars, varsOrOptions, option
 }
 ;
 
+const workdaysPageForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'WorkdaysPageForOrg', inputVars);
+}
+workdaysPageForOrgRef.operationName = 'WorkdaysPageForOrg';
+exports.workdaysPageForOrgRef = workdaysPageForOrgRef;
+
+exports.workdaysPageForOrg = function workdaysPageForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysPageForOrgRef(dcInstance, inputVars), inputOpts && inputOpts.fetchPolicy);
+}
+;
+
+const workdaysPageForOrgByWorkerRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'WorkdaysPageForOrgByWorker', inputVars);
+}
+workdaysPageForOrgByWorkerRef.operationName = 'WorkdaysPageForOrgByWorker';
+exports.workdaysPageForOrgByWorkerRef = workdaysPageForOrgByWorkerRef;
+
+exports.workdaysPageForOrgByWorker = function workdaysPageForOrgByWorker(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysPageForOrgByWorkerRef(dcInstance, inputVars), inputOpts && inputOpts.fetchPolicy);
+}
+;
+
+const workdaysPageForOrgByRoomRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'WorkdaysPageForOrgByRoom', inputVars);
+}
+workdaysPageForOrgByRoomRef.operationName = 'WorkdaysPageForOrgByRoom';
+exports.workdaysPageForOrgByRoomRef = workdaysPageForOrgByRoomRef;
+
+exports.workdaysPageForOrgByRoom = function workdaysPageForOrgByRoom(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysPageForOrgByRoomRef(dcInstance, inputVars), inputOpts && inputOpts.fetchPolicy);
+}
+;
+
+const workdaysPageForOrgByStatusRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'WorkdaysPageForOrgByStatus', inputVars);
+}
+workdaysPageForOrgByStatusRef.operationName = 'WorkdaysPageForOrgByStatus';
+exports.workdaysPageForOrgByStatusRef = workdaysPageForOrgByStatusRef;
+
+exports.workdaysPageForOrgByStatus = function workdaysPageForOrgByStatus(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysPageForOrgByStatusRef(dcInstance, inputVars), inputOpts && inputOpts.fetchPolicy);
+}
+;
+
+const workdaysFingerprintForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'WorkdaysFingerprintForOrg', inputVars);
+}
+workdaysFingerprintForOrgRef.operationName = 'WorkdaysFingerprintForOrg';
+exports.workdaysFingerprintForOrgRef = workdaysFingerprintForOrgRef;
+
+exports.workdaysFingerprintForOrg = function workdaysFingerprintForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysFingerprintForOrgRef(dcInstance, inputVars), inputOpts && inputOpts.fetchPolicy);
+}
+;
+
 const backupCyclesForOrgRef = (dcOrVars, vars) => {
   const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
   dcInstance._useGeneratedSdk();
@@ -774,6 +849,81 @@ exports.eventsForOrg = function eventsForOrg(dcOrVars, varsOrOptions, options) {
   
   const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
   return executeQuery(eventsForOrgRef(dcInstance, inputVars), inputOpts && inputOpts.fetchPolicy);
+}
+;
+
+const eventsPageForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'EventsPageForOrg', inputVars);
+}
+eventsPageForOrgRef.operationName = 'EventsPageForOrg';
+exports.eventsPageForOrgRef = eventsPageForOrgRef;
+
+exports.eventsPageForOrg = function eventsPageForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsPageForOrgRef(dcInstance, inputVars), inputOpts && inputOpts.fetchPolicy);
+}
+;
+
+const eventsPageForOrgByWorkerRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'EventsPageForOrgByWorker', inputVars);
+}
+eventsPageForOrgByWorkerRef.operationName = 'EventsPageForOrgByWorker';
+exports.eventsPageForOrgByWorkerRef = eventsPageForOrgByWorkerRef;
+
+exports.eventsPageForOrgByWorker = function eventsPageForOrgByWorker(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsPageForOrgByWorkerRef(dcInstance, inputVars), inputOpts && inputOpts.fetchPolicy);
+}
+;
+
+const eventsPageForOrgByZoneRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'EventsPageForOrgByZone', inputVars);
+}
+eventsPageForOrgByZoneRef.operationName = 'EventsPageForOrgByZone';
+exports.eventsPageForOrgByZoneRef = eventsPageForOrgByZoneRef;
+
+exports.eventsPageForOrgByZone = function eventsPageForOrgByZone(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsPageForOrgByZoneRef(dcInstance, inputVars), inputOpts && inputOpts.fetchPolicy);
+}
+;
+
+const eventsPageForOrgByStatusRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'EventsPageForOrgByStatus', inputVars);
+}
+eventsPageForOrgByStatusRef.operationName = 'EventsPageForOrgByStatus';
+exports.eventsPageForOrgByStatusRef = eventsPageForOrgByStatusRef;
+
+exports.eventsPageForOrgByStatus = function eventsPageForOrgByStatus(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsPageForOrgByStatusRef(dcInstance, inputVars), inputOpts && inputOpts.fetchPolicy);
+}
+;
+
+const eventsFingerprintForOrgRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'EventsFingerprintForOrg', inputVars);
+}
+eventsFingerprintForOrgRef.operationName = 'EventsFingerprintForOrg';
+exports.eventsFingerprintForOrgRef = eventsFingerprintForOrgRef;
+
+exports.eventsFingerprintForOrg = function eventsFingerprintForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsFingerprintForOrgRef(dcInstance, inputVars), inputOpts && inputOpts.fetchPolicy);
 }
 ;
 

@@ -262,6 +262,63 @@ export function createCalendarFeature(ctx) {
     return typeof workerIsAssignable === 'function' ? workerIsAssignable(worker) : worker?.active !== false
   }
 
+  function calendarSafeInitials(name = '') {
+    try {
+      if (typeof kanbanInitials === 'function') {
+        const initials = String(kanbanInitials(name) ?? '').trim()
+        if (initials) {
+          return initials
+        }
+      }
+    } catch {
+      // Calendar can render before the Kanban feature is initialized.
+    }
+    const parts = String(name ?? '').trim().split(/\s+/).filter(Boolean)
+    if (!parts.length) {
+      return '?'
+    }
+    return `${parts[0]?.[0] ?? ''}${parts[1]?.[0] ?? ''}`.toUpperCase() || parts[0].slice(0, 2).toUpperCase()
+  }
+
+  function calendarSafeKanbanTaskIsCompleted(task = {}) {
+    try {
+      if (typeof kanbanTaskIsCompleted === 'function') {
+        return Boolean(kanbanTaskIsCompleted(task))
+      }
+    } catch {
+      // Calendar fallback for lazy-loaded Kanban.
+    }
+    return Boolean(task?.completed ?? task?.kanbanCompleted ?? false)
+  }
+
+  function calendarSafeKanbanColumnsForStatus() {
+    try {
+      return typeof kanbanColumnsForStatus === 'function' ? kanbanColumnsForStatus() : []
+    } catch {
+      return []
+    }
+  }
+
+  function calendarSafeKanbanNormalizeColumnScope(scope = '') {
+    try {
+      return typeof kanbanNormalizeColumnScope === 'function' ? kanbanNormalizeColumnScope(scope) : 'global'
+    } catch {
+      return 'global'
+    }
+  }
+
+  function calendarSafeKanbanDefaultStatusForTask(workers = [], preferredStatus = '') {
+    const preferred = String(preferredStatus ?? '').trim()
+    try {
+      if (typeof kanbanDefaultStatusForTask === 'function') {
+        return kanbanDefaultStatusForTask(workers, preferred)
+      }
+    } catch {
+      // Keep saving calendar tasks usable even before Kanban is opened.
+    }
+    return preferred || 'newTask'
+  }
+
   function calendarAssignableWorkers() {
     return typeof filterAssignableWorkers === 'function'
       ? filterAssignableWorkers(appState.workers)
@@ -319,7 +376,7 @@ export function createCalendarFeature(ctx) {
   }
   
   function calendarTaskMatchesStatusFilters(task = {}, readCommentKeys = null) {
-    if (!appState.calendarShowCompletedTasks && kanbanTaskIsCompleted(task)) {
+    if (!appState.calendarShowCompletedTasks && calendarSafeKanbanTaskIsCompleted(task)) {
       return false
     }
     if (!appState.calendarShowReadTasks && calendarTaskIsRead(task, readCommentKeys)) {
@@ -606,8 +663,8 @@ export function createCalendarFeature(ctx) {
     if (!status) {
       return false
     }
-    const column = kanbanColumnsForStatus().find((item) => item.id === status)
-    const columnScope = kanbanNormalizeColumnScope(column?.scope)
+    const column = calendarSafeKanbanColumnsForStatus().find((item) => item.id === status)
+    const columnScope = calendarSafeKanbanNormalizeColumnScope(column?.scope)
     const ownerValues = [column?.ownerId, column?.ownerLabel, column?.ownerName]
     if (columnScope === 'user' || columnScope === 'person') {
       return calendarValuesMatchAccess(ownerValues, scope.userMatch) || calendarValuesMatchAccess(ownerValues, scope.teamMatch)
@@ -6409,6 +6466,53 @@ export function createCalendarFeature(ctx) {
   
     return scopedTarget(event?.target)
   }
+
+  function calendarTimelineDropSlotFromClientX(clientX) {
+    const x = Number(clientX)
+    const grid = document.querySelector('#calendarPrototypeTimeline .fw-timeline-grid')
+    if (!(grid instanceof HTMLElement) || !Number.isFinite(x)) {
+      return null
+    }
+
+    const totalSlots = Number(grid.getAttribute('data-calendar-timeline-total-slots'))
+    if (!Number.isInteger(totalSlots) || totalSlots <= 0) {
+      return null
+    }
+
+    const resourceWidth = Number(grid.getAttribute('data-calendar-timeline-resource-width')) || 190
+    const styles = window.getComputedStyle(grid)
+    const slotWidthFromCss = Number.parseFloat(styles.getPropertyValue('--slot-width'))
+    const slotWidth = Number.isFinite(slotWidthFromCss) && slotWidthFromCss > 0
+      ? slotWidthFromCss
+      : (grid.scrollWidth - resourceWidth) / totalSlots
+    if (!Number.isFinite(slotWidth) || slotWidth <= 0) {
+      return null
+    }
+
+    const rect = grid.getBoundingClientRect()
+    const offset = x - rect.left - resourceWidth
+    if (offset < 0) {
+      return null
+    }
+
+    return Math.max(0, Math.min(totalSlots - 1, Math.floor(offset / slotWidth)))
+  }
+
+  function calendarTimelineDropInfoFromEvent(event) {
+    const target = calendarTimelineDropTargetFromEvent(event)
+    const info = calendarTimelineDropInfoFromTarget(target)
+    if (!info) {
+      return { target: null, info: null }
+    }
+    const slotIndex = calendarTimelineDropSlotFromClientX(event?.clientX)
+    return {
+      target,
+      info: {
+        ...info,
+        slotIndex: Number.isInteger(slotIndex) ? slotIndex : info.slotIndex,
+      },
+    }
+  }
   
   function calendarTimelineDropInfoFromTarget(target) {
     if (!(target instanceof HTMLElement)) {
@@ -6446,9 +6550,9 @@ export function createCalendarFeature(ctx) {
   
   function calendarTimelineResolveDropInfo(event = null) {
     return (
-      calendarTimelineDropInfoFromTarget(event ? calendarTimelineDropTargetFromEvent(event) : null) ||
-      calendarTimelineHighlightedDropInfo() ||
-      calendarTimelineDropInfoFromState()
+      (event ? calendarTimelineDropInfoFromEvent(event).info : null) ||
+      calendarTimelineDropInfoFromState() ||
+      calendarTimelineHighlightedDropInfo()
     )
   }
   
@@ -9305,7 +9409,7 @@ export function createCalendarFeature(ctx) {
         const gridRow = calendarTimelineGridRowForResource(resource, index)
         const avatar =
           resource.type === 'worker'
-            ? `<b class="fw-resource-avatar ${calendarTimelineResourceAvatarTone(index)}" aria-hidden="true">${escapeHtml(kanbanInitials(resource.name))}</b>`
+            ? `<b class="fw-resource-avatar ${calendarTimelineResourceAvatarTone(index)}" aria-hidden="true">${escapeHtml(calendarSafeInitials(resource.name))}</b>`
             : ''
         return `
           <div class="fw-resource-name${muted}${workerClass}${started}${rowAltClass}${deltaClass}" style="grid-row:${gridRow};" data-calendar-timeline-row="${index}">
@@ -9319,22 +9423,13 @@ export function createCalendarFeature(ctx) {
         `
       })
       .join('')
-    const cells = resources
-      .flatMap((_, rowIndex) =>
-        Array.from({ length: totalSlots }, (_, slotIndex) => {
-          const dayIndex = Math.floor(slotIndex / slotsPerDay)
-          const slotInDay = slotIndex % slotsPerDay
-          const quarterIndex = slotInDay % slotsPerHour
-          const classes = ['fw-grid-cell']
-          const resource = resources[rowIndex] || {}
-          if (resource.type === 'buffer') classes.push('fw-grid-cell--buffer')
-          if (resource.type === 'worker' && rowIndex % 2 === 0) classes.push('fw-grid-cell--row-alt')
-          if (quarterIndex === 0) classes.push('fw-grid-cell--hour-start')
-          if (slotInDay === 0) classes.push('fw-grid-cell--day-start')
-          if (dayIndex % 2) classes.push('fw-grid-cell--alt')
-          return `<div class="${classes.join(' ')}" style="grid-column:${slotIndex + 2}; grid-row:${calendarTimelineGridRowForResource(resource, rowIndex)};" data-calendar-timeline-row="${rowIndex}" data-calendar-timeline-slot="${slotIndex}"></div>`
-        }),
-      )
+    const rowTracks = resources
+      .map((resource = {}, rowIndex) => {
+        const classes = ['fw-grid-row']
+        if (resource.type === 'buffer') classes.push('fw-grid-row--buffer')
+        if (resource.type === 'worker' && rowIndex % 2 === 0) classes.push('fw-grid-row--alt')
+        return `<div class="${classes.join(' ')}" style="grid-column:2 / span ${totalSlots}; grid-row:${calendarTimelineGridRowForResource(resource, rowIndex)};" data-calendar-timeline-row="${rowIndex}"></div>`
+      })
       .join('')
     const statusAlerts = []
     const eventBars = layout.items
@@ -9409,13 +9504,13 @@ export function createCalendarFeature(ctx) {
   
     return `
       <div class="fw-timeline-scroll">
-        <div class="fw-timeline-grid" style="--slot-count:${totalSlots}; --row-count:${resources.length}; --fw-buffer-height:${bufferHeight}px; grid-template-rows:${gridRows};">
+        <div class="fw-timeline-grid" style="--slot-count:${totalSlots}; --row-count:${resources.length}; --fw-buffer-height:${bufferHeight}px; grid-template-rows:${gridRows};" data-calendar-timeline-total-slots="${totalSlots}" data-calendar-timeline-resource-width="190">
           ${bufferPlane}
           ${workerHead}
           ${dayHeaders}
           ${hourHeaders}
           ${rowLabels}
-          ${cells}
+          ${rowTracks}
           ${daySeparators}
           ${currentHour}
           ${deltaData.markerHtml}
@@ -9428,6 +9523,20 @@ export function createCalendarFeature(ctx) {
           <strong>Ładowanie kalendarza...</strong>
           <small>Pobieram zlecenia i zdarzenia pracowników</small>
         </div>
+      </div>
+    `
+  }
+
+  function calendarTimelineRenderErrorHtml(error) {
+    const message = error instanceof Error ? error.message : String(error ?? '')
+    appState.calendarTimelineStatusAlerts = []
+    appState.calendarTimelineVisibleConflictItems = []
+    appState.calendarTimelineStageHeight = 220
+    return `
+      <div class="fw-timeline-render-error" role="status">
+        <strong>Nie udało się wyświetlić kalendarza.</strong>
+        <span>Odśwież widok lub spróbuj ponownie za chwilę.</span>
+        ${message ? `<small>${escapeHtml(message)}</small>` : ''}
       </div>
     `
   }
@@ -9462,7 +9571,13 @@ export function createCalendarFeature(ctx) {
     })
     const slideDirection = Number(appState.calendarTimelineSlideDirection || 0)
     stage.classList.remove('is-slide-next', 'is-slide-prev')
-    stage.innerHTML = calendarTimelinePrototypeHtml()
+    try {
+      stage.innerHTML = calendarTimelinePrototypeHtml()
+    } catch (error) {
+      console.error('[portal/calendar] timeline render failed', error)
+      calendarInvalidateTimelineRenderCaches()
+      stage.innerHTML = calendarTimelineRenderErrorHtml(error)
+    }
     window.requestAnimationFrame(() => {
       stage.querySelectorAll('.fw-event-bar').forEach((bar) => {
         const label = bar.querySelector('.fw-event-label')
@@ -9709,13 +9824,13 @@ export function createCalendarFeature(ctx) {
     if (duplicateButton instanceof HTMLButtonElement) duplicateButton.style.display = task ? '' : 'none'
     if (saveButton instanceof HTMLButtonElement) saveButton.textContent = 'Zapisz'
     if (completeButton instanceof HTMLButtonElement) {
-      const completed = task ? kanbanTaskIsCompleted(task) : false
+      const completed = task ? calendarSafeKanbanTaskIsCompleted(task) : false
       completeButton.disabled = !task
       completeButton.classList.toggle('is-completed', completed)
       completeButton.innerHTML = `<span aria-hidden="true">&#10003;</span>${completed ? 'Cofnij uko&#324;czenie' : 'Oznacz jako uko&#324;czone'}`
     }
     const sessionName = String(appState.session?.name || appState.session?.login || appState.session?.email || 'Użytkownik').trim()
-    const initials = kanbanInitials(sessionName)
+    const initials = calendarSafeInitials(sessionName)
     if (ownerAvatar) ownerAvatar.textContent = initials
     if (commentAvatar) commentAvatar.textContent = initials
     if (ownerName) ownerName.textContent = sessionName
@@ -9844,7 +9959,7 @@ export function createCalendarFeature(ctx) {
       zoneId: zone?.id || '',
       zoneName: zone?.label || '',
       zoneLocation: zone?.location || '',
-      kanbanStatus: kanbanDefaultStatusForTask(workers, preferredKanbanStatus),
+      kanbanStatus: calendarSafeKanbanDefaultStatusForTask(workers, preferredKanbanStatus),
       notes: String(document.getElementById('calendarTaskNotes')?.value ?? '').trim(),
       updatedAt: new Date().toISOString(),
     })
@@ -9890,7 +10005,7 @@ export function createCalendarFeature(ctx) {
       showTransientNotice('Najpierw zapisz zadanie, potem możesz oznaczyć je jako ukończone.', 'info')
       return
     }
-    const completed = !kanbanTaskIsCompleted(task)
+    const completed = !calendarSafeKanbanTaskIsCompleted(task)
     const completedBy = String(appState.session?.name || appState.session?.email || appState.session?.uid || '').trim()
     const changedAt = new Date().toISOString()
     const nextTasks = appState.calendarTasks.map((item) =>
@@ -10250,11 +10365,10 @@ export function createCalendarFeature(ctx) {
       if (!appState.calendarTimelineDragOrderId) {
         return
       }
-      const target = calendarTimelineDropTargetFromEvent(event)
+      const { target, info: dropInfo } = calendarTimelineDropInfoFromEvent(event)
       if (!(target instanceof HTMLElement)) {
         return
       }
-      const dropInfo = calendarTimelineDropInfoFromTarget(target)
       if (!dropInfo) {
         return
       }

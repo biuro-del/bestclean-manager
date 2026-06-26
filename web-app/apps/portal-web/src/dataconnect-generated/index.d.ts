@@ -373,6 +373,23 @@ export interface Event_Key {
   __typename?: 'Event_Key';
 }
 
+export interface EventsFingerprintForOrgData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    status?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+
+export interface EventsFingerprintForOrgVariables {
+  orgId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+}
+
 export interface EventsForOrgData {
   events: ({
     eventId: string;
@@ -407,6 +424,169 @@ export interface EventsForOrgData {
 
 export interface EventsForOrgVariables {
   orgId: string;
+}
+
+export interface EventsPageForOrgByStatusData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+
+export interface EventsPageForOrgByStatusVariables {
+  orgId: string;
+  status: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface EventsPageForOrgByWorkerData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+
+export interface EventsPageForOrgByWorkerVariables {
+  orgId: string;
+  workerLogin: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface EventsPageForOrgByZoneData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+
+export interface EventsPageForOrgByZoneVariables {
+  orgId: string;
+  zoneId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface EventsPageForOrgData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+
+export interface EventsPageForOrgVariables {
+  orgId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
 }
 
 export interface IndividualClientJob_Key {
@@ -726,7 +906,7 @@ export interface RenameWorkerForOrgData {
 export interface RenameWorkerForOrgVariables {
   orgId: string;
   login: string;
-  newLogin: string;
+  newLogin?: string;
   workerName?: string | null;
   loginEmail?: string | null;
   authUid?: string;
@@ -1242,6 +1422,22 @@ export interface Workday_Key {
   __typename?: 'Workday_Key';
 }
 
+export interface WorkdaysFingerprintForOrgData {
+  workdays: ({
+    workdayId: string;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    status?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+
+export interface WorkdaysFingerprintForOrgVariables {
+  orgId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+}
+
 export interface WorkdaysForOrgData {
   workdays: ({
     workdayId: string;
@@ -1268,6 +1464,137 @@ export interface WorkdaysForOrgData {
 
 export interface WorkdaysForOrgVariables {
   orgId: string;
+}
+
+export interface WorkdaysPageForOrgByRoomData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+
+export interface WorkdaysPageForOrgByRoomVariables {
+  orgId: string;
+  utilityRoomId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface WorkdaysPageForOrgByStatusData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+
+export interface WorkdaysPageForOrgByStatusVariables {
+  orgId: string;
+  status: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface WorkdaysPageForOrgByWorkerData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+
+export interface WorkdaysPageForOrgByWorkerVariables {
+  orgId: string;
+  workerLogin: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface WorkdaysPageForOrgData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+
+export interface WorkdaysPageForOrgVariables {
+  orgId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
 }
 
 export interface WorkerCredential_Key {
@@ -1979,6 +2306,66 @@ export const workdaysForOrgRef: WorkdaysForOrgRef;
 export function workdaysForOrg(vars: WorkdaysForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysForOrgData, WorkdaysForOrgVariables>;
 export function workdaysForOrg(dc: DataConnect, vars: WorkdaysForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysForOrgData, WorkdaysForOrgVariables>;
 
+interface WorkdaysPageForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: WorkdaysPageForOrgVariables): QueryRef<WorkdaysPageForOrgData, WorkdaysPageForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: WorkdaysPageForOrgVariables): QueryRef<WorkdaysPageForOrgData, WorkdaysPageForOrgVariables>;
+  operationName: string;
+}
+export const workdaysPageForOrgRef: WorkdaysPageForOrgRef;
+
+export function workdaysPageForOrg(vars: WorkdaysPageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgData, WorkdaysPageForOrgVariables>;
+export function workdaysPageForOrg(dc: DataConnect, vars: WorkdaysPageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgData, WorkdaysPageForOrgVariables>;
+
+interface WorkdaysPageForOrgByWorkerRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: WorkdaysPageForOrgByWorkerVariables): QueryRef<WorkdaysPageForOrgByWorkerData, WorkdaysPageForOrgByWorkerVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: WorkdaysPageForOrgByWorkerVariables): QueryRef<WorkdaysPageForOrgByWorkerData, WorkdaysPageForOrgByWorkerVariables>;
+  operationName: string;
+}
+export const workdaysPageForOrgByWorkerRef: WorkdaysPageForOrgByWorkerRef;
+
+export function workdaysPageForOrgByWorker(vars: WorkdaysPageForOrgByWorkerVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgByWorkerData, WorkdaysPageForOrgByWorkerVariables>;
+export function workdaysPageForOrgByWorker(dc: DataConnect, vars: WorkdaysPageForOrgByWorkerVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgByWorkerData, WorkdaysPageForOrgByWorkerVariables>;
+
+interface WorkdaysPageForOrgByRoomRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: WorkdaysPageForOrgByRoomVariables): QueryRef<WorkdaysPageForOrgByRoomData, WorkdaysPageForOrgByRoomVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: WorkdaysPageForOrgByRoomVariables): QueryRef<WorkdaysPageForOrgByRoomData, WorkdaysPageForOrgByRoomVariables>;
+  operationName: string;
+}
+export const workdaysPageForOrgByRoomRef: WorkdaysPageForOrgByRoomRef;
+
+export function workdaysPageForOrgByRoom(vars: WorkdaysPageForOrgByRoomVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgByRoomData, WorkdaysPageForOrgByRoomVariables>;
+export function workdaysPageForOrgByRoom(dc: DataConnect, vars: WorkdaysPageForOrgByRoomVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgByRoomData, WorkdaysPageForOrgByRoomVariables>;
+
+interface WorkdaysPageForOrgByStatusRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: WorkdaysPageForOrgByStatusVariables): QueryRef<WorkdaysPageForOrgByStatusData, WorkdaysPageForOrgByStatusVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: WorkdaysPageForOrgByStatusVariables): QueryRef<WorkdaysPageForOrgByStatusData, WorkdaysPageForOrgByStatusVariables>;
+  operationName: string;
+}
+export const workdaysPageForOrgByStatusRef: WorkdaysPageForOrgByStatusRef;
+
+export function workdaysPageForOrgByStatus(vars: WorkdaysPageForOrgByStatusVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgByStatusData, WorkdaysPageForOrgByStatusVariables>;
+export function workdaysPageForOrgByStatus(dc: DataConnect, vars: WorkdaysPageForOrgByStatusVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgByStatusData, WorkdaysPageForOrgByStatusVariables>;
+
+interface WorkdaysFingerprintForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: WorkdaysFingerprintForOrgVariables): QueryRef<WorkdaysFingerprintForOrgData, WorkdaysFingerprintForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: WorkdaysFingerprintForOrgVariables): QueryRef<WorkdaysFingerprintForOrgData, WorkdaysFingerprintForOrgVariables>;
+  operationName: string;
+}
+export const workdaysFingerprintForOrgRef: WorkdaysFingerprintForOrgRef;
+
+export function workdaysFingerprintForOrg(vars: WorkdaysFingerprintForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysFingerprintForOrgData, WorkdaysFingerprintForOrgVariables>;
+export function workdaysFingerprintForOrg(dc: DataConnect, vars: WorkdaysFingerprintForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysFingerprintForOrgData, WorkdaysFingerprintForOrgVariables>;
+
 interface BackupCyclesForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
   (vars: BackupCyclesForOrgVariables): QueryRef<BackupCyclesForOrgData, BackupCyclesForOrgVariables>;
@@ -2002,6 +2389,66 @@ export const eventsForOrgRef: EventsForOrgRef;
 
 export function eventsForOrg(vars: EventsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsForOrgData, EventsForOrgVariables>;
 export function eventsForOrg(dc: DataConnect, vars: EventsForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsForOrgData, EventsForOrgVariables>;
+
+interface EventsPageForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: EventsPageForOrgVariables): QueryRef<EventsPageForOrgData, EventsPageForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: EventsPageForOrgVariables): QueryRef<EventsPageForOrgData, EventsPageForOrgVariables>;
+  operationName: string;
+}
+export const eventsPageForOrgRef: EventsPageForOrgRef;
+
+export function eventsPageForOrg(vars: EventsPageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgData, EventsPageForOrgVariables>;
+export function eventsPageForOrg(dc: DataConnect, vars: EventsPageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgData, EventsPageForOrgVariables>;
+
+interface EventsPageForOrgByWorkerRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: EventsPageForOrgByWorkerVariables): QueryRef<EventsPageForOrgByWorkerData, EventsPageForOrgByWorkerVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: EventsPageForOrgByWorkerVariables): QueryRef<EventsPageForOrgByWorkerData, EventsPageForOrgByWorkerVariables>;
+  operationName: string;
+}
+export const eventsPageForOrgByWorkerRef: EventsPageForOrgByWorkerRef;
+
+export function eventsPageForOrgByWorker(vars: EventsPageForOrgByWorkerVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgByWorkerData, EventsPageForOrgByWorkerVariables>;
+export function eventsPageForOrgByWorker(dc: DataConnect, vars: EventsPageForOrgByWorkerVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgByWorkerData, EventsPageForOrgByWorkerVariables>;
+
+interface EventsPageForOrgByZoneRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: EventsPageForOrgByZoneVariables): QueryRef<EventsPageForOrgByZoneData, EventsPageForOrgByZoneVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: EventsPageForOrgByZoneVariables): QueryRef<EventsPageForOrgByZoneData, EventsPageForOrgByZoneVariables>;
+  operationName: string;
+}
+export const eventsPageForOrgByZoneRef: EventsPageForOrgByZoneRef;
+
+export function eventsPageForOrgByZone(vars: EventsPageForOrgByZoneVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgByZoneData, EventsPageForOrgByZoneVariables>;
+export function eventsPageForOrgByZone(dc: DataConnect, vars: EventsPageForOrgByZoneVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgByZoneData, EventsPageForOrgByZoneVariables>;
+
+interface EventsPageForOrgByStatusRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: EventsPageForOrgByStatusVariables): QueryRef<EventsPageForOrgByStatusData, EventsPageForOrgByStatusVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: EventsPageForOrgByStatusVariables): QueryRef<EventsPageForOrgByStatusData, EventsPageForOrgByStatusVariables>;
+  operationName: string;
+}
+export const eventsPageForOrgByStatusRef: EventsPageForOrgByStatusRef;
+
+export function eventsPageForOrgByStatus(vars: EventsPageForOrgByStatusVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgByStatusData, EventsPageForOrgByStatusVariables>;
+export function eventsPageForOrgByStatus(dc: DataConnect, vars: EventsPageForOrgByStatusVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgByStatusData, EventsPageForOrgByStatusVariables>;
+
+interface EventsFingerprintForOrgRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: EventsFingerprintForOrgVariables): QueryRef<EventsFingerprintForOrgData, EventsFingerprintForOrgVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: EventsFingerprintForOrgVariables): QueryRef<EventsFingerprintForOrgData, EventsFingerprintForOrgVariables>;
+  operationName: string;
+}
+export const eventsFingerprintForOrgRef: EventsFingerprintForOrgRef;
+
+export function eventsFingerprintForOrg(vars: EventsFingerprintForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsFingerprintForOrgData, EventsFingerprintForOrgVariables>;
+export function eventsFingerprintForOrg(dc: DataConnect, vars: EventsFingerprintForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsFingerprintForOrgData, EventsFingerprintForOrgVariables>;
 
 interface WorkerWorkdaysForOrgRef {
   /* Allow users to create refs without passing in DataConnect */

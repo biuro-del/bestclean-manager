@@ -134,6 +134,8 @@ mutation UpdateWorkerProfileForOrg(
   $workerType: String
   $workerId: String
   $edit: String
+  $name: String @retired
+  $status: String @retired
 ) @auth(level: USER) @transaction {
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
@@ -169,7 +171,7 @@ mutation UpdateWorkerProfileForOrg(
 mutation RenameWorkerForOrg(
   $orgId: String!
   $login: String!
-  $newLogin: String!
+  $newLogin: String! = ""
   $workerName: String
   $loginEmail: String
   $authUid: String! = ""
@@ -182,6 +184,7 @@ mutation RenameWorkerForOrg(
   $workerId: String
   $createdAt: Timestamp
   $edit: String
+  $name: String @retired
 ) @auth(level: USER) @transaction {
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
@@ -191,11 +194,13 @@ mutation RenameWorkerForOrg(
 
     currentWorker: worker(key: { orgId: $orgId, login: $login })
       @check(expr: "this != null", message: "Nie znaleziono pracownika w tej organizacji.") {
+        orgId @retired
         login
       }
 
     targetWorker: worker(key: { orgId: $orgId, login: $newLogin })
       @check(expr: "this == null", message: "Ten login jest juz zajety w tej organizacji.") {
+        orgId @retired
         login
       }
   }
@@ -310,6 +315,7 @@ mutation DeleteWorkerProfileForOrg(
 
     currentWorker: worker(key: { orgId: $orgId, login: $login })
       @check(expr: "this != null", message: "Nie znaleziono pracownika w tej organizacji.") {
+        orgId @retired
         login
       }
   }

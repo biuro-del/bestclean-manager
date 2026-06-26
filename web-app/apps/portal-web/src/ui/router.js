@@ -38,21 +38,42 @@ const routeGroups = {
   settingsBackup: 'settings',
 }
 
+let activeRoute = ''
+let activeGroup = ''
+let activeSidebarScrollRaf = 0
+
 function normalizeRoute(route) {
   const nextRoute = String(route ?? '').trim()
   return nextRoute === 'clientsList' ? 'clientProfile' : nextRoute
 }
 
 function setActiveRoute(route) {
-  document.querySelectorAll('.menu-item, .submenu-item, .mini-link').forEach((button) => {
-    button.classList.toggle('active', button.dataset.route === route)
+  const currentActive = document.querySelector(
+    `.menu-item.active[data-route="${route}"], .submenu-item.active[data-route="${route}"], .mini-link.active[data-route="${route}"]`
+  )
+  if (activeRoute === route && currentActive) {
+    return
+  }
+
+  document.querySelectorAll('.menu-item.active, .submenu-item.active, .mini-link.active').forEach((button) => {
+    button.classList.remove('active')
   })
+  document.querySelectorAll(`[data-route="${route}"]`).forEach((button) => {
+    if (button.matches('.menu-item, .submenu-item, .mini-link')) {
+      button.classList.add('active')
+    }
+  })
+  activeRoute = route
 }
 
 function keepActiveSidebarItemVisible(route) {
-  window.requestAnimationFrame(() => {
-    const activeItem = [...document.querySelectorAll('#portalSidebar [data-route].active')]
-      .find((item) => item instanceof HTMLElement && item.dataset.route === route)
+  if (activeSidebarScrollRaf) {
+    window.cancelAnimationFrame(activeSidebarScrollRaf)
+    activeSidebarScrollRaf = 0
+  }
+  activeSidebarScrollRaf = window.requestAnimationFrame(() => {
+    activeSidebarScrollRaf = 0
+    const activeItem = document.querySelector(`#portalSidebar [data-route="${route}"].active`)
     const menu = activeItem?.closest?.('.menu')
     if (!(activeItem instanceof HTMLElement) || !(menu instanceof HTMLElement)) {
       return
@@ -72,23 +93,26 @@ function keepActiveSidebarItemVisible(route) {
 }
 
 function setSubmenuState(route) {
-  document.querySelectorAll('.submenu').forEach((submenu) => {
-    submenu.classList.remove('open')
-  })
-  document.querySelectorAll('.menu-section').forEach((section) => {
-    section.classList.remove('open', 'active')
-  })
+  const group = routeGroups[route] || ''
+  const submenu = group ? document.getElementById(`submenu-${group}`) : null
+  const section = group ? document.querySelector(`.menu-section[data-toggle="${group}"]`) : null
+  if (activeGroup === group && (!group || (submenu?.classList.contains('open') && section?.classList.contains('open')))) {
+    return
+  }
 
-  const group = routeGroups[route]
+  if (activeGroup) {
+    document.getElementById(`submenu-${activeGroup}`)?.classList.remove('open')
+    document.querySelector(`.menu-section[data-toggle="${activeGroup}"]`)?.classList.remove('open', 'active')
+  }
+
+  activeGroup = group
   if (!group) {
     return
   }
 
-  const submenu = document.getElementById(`submenu-${group}`)
   if (submenu) {
     submenu.classList.add('open')
   }
-  const section = document.querySelector(`.menu-section[data-toggle="${group}"]`)
   if (section) {
     section.classList.add('open', 'active')
   }
@@ -126,10 +150,25 @@ export function createRouter(onRouteChange) {
   function go(route) {
     const nextRoute = normalizeRoute(route) || 'dashboard'
     const viewId = routeToViewId[nextRoute]
+    const previousRoute = currentRoute
+    const previousViewId = routeToViewId[previousRoute]
 
-    hideAllViews()
+    if (previousViewId && previousViewId !== viewId) {
+      const previousView = document.getElementById(previousViewId)
+      if (previousView) {
+        previousView.style.display = 'none'
+        previousView.style.setProperty('display', 'none', 'important')
+      }
+    } else if (!previousViewId) {
+      hideAllViews()
+    }
 
     if (viewId) {
+      const placeholder = document.getElementById('view-placeholder')
+      if (placeholder) {
+        placeholder.style.display = 'none'
+        placeholder.style.setProperty('display', 'none', 'important')
+      }
       const view = document.getElementById(viewId)
       if (view) {
         view.style.display = ''

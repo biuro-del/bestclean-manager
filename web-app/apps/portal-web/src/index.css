@@ -16794,6 +16794,35 @@ body{
   font:700 11px/1.3 "Manrope", "Segoe UI", Arial, sans-serif;
 }
 
+#view-calendar .fw-timeline-render-error{
+  align-items:center;
+  background:#f8fbff;
+  border:1px dashed #b8c9ea;
+  color:#334267;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  height:100%;
+  justify-content:center;
+  padding:24px;
+  text-align:center;
+}
+
+#view-calendar .fw-timeline-render-error strong{
+  color:#1d4ed8;
+  font:900 14px/1.25 "Manrope", "Segoe UI", Arial, sans-serif;
+}
+
+#view-calendar .fw-timeline-render-error span,
+#view-calendar .fw-timeline-render-error small{
+  color:#64748b;
+  font:700 12px/1.35 "Manrope", "Segoe UI", Arial, sans-serif;
+}
+
+#view-calendar .fw-timeline-render-error small{
+  max-width:min(620px, 100%);
+}
+
 #view-calendar .fw-timeline-spinner{
   border:3px solid #dbeafe;
   border-top-color:#2563eb;
@@ -16907,6 +16936,7 @@ body{
 #view-calendar .fw-date-head,
 #view-calendar .fw-hour-head,
 #view-calendar .fw-resource-name,
+#view-calendar .fw-grid-row,
 #view-calendar .fw-grid-cell{
   border-right:1px solid #e6ebf6;
   border-bottom:1px solid #edf1fa;
@@ -17136,8 +17166,27 @@ body{
   background:#fff;
 }
 
+#view-calendar .fw-grid-row{
+  --fw-slot-line:rgba(230,235,246,.72);
+  --fw-hour-line:rgba(220,229,247,.96);
+  background-color:#fff;
+  background-image:
+    linear-gradient(to right, var(--fw-hour-line) 1px, transparent 1px),
+    linear-gradient(to right, var(--fw-slot-line) 1px, transparent 1px);
+  background-size:
+    calc(var(--slot-width) * 4) 100%,
+    var(--slot-width) 100%;
+  background-position:left top;
+  position:relative;
+  z-index:1;
+}
+
 #view-calendar .fw-grid-cell:nth-of-type(odd){
   background:#fcfdff;
+}
+
+#view-calendar .fw-grid-row--alt{
+  background-color:#f8fbff;
 }
 
 #view-calendar .fw-grid-cell--alt{
@@ -17153,6 +17202,13 @@ body{
   top:0;
   z-index:72;
   background:#fff;
+}
+
+#view-calendar .fw-grid-row--buffer{
+  position:sticky;
+  top:0;
+  z-index:72;
+  background-color:#fff;
 }
 
 #view-calendar .fw-grid-cell--buffer.fw-grid-cell--alt{
@@ -17889,17 +17945,19 @@ body.calendar-events-popup-dragging *{
 }
 
 #view-calendar .fw-resource-name.is-timeline-drop-target,
+#view-calendar .fw-grid-row.is-timeline-drop-target,
 #view-calendar .fw-grid-cell.is-timeline-drop-target{
   outline:2px solid #2f66e8;
   outline-offset:-2px;
-  background:#eaf2ff;
+  background:#eaf2ff !important;
 }
 
 #view-calendar .fw-resource-name.is-timeline-drop-invalid,
+#view-calendar .fw-grid-row.is-timeline-drop-invalid,
 #view-calendar .fw-grid-cell.is-timeline-drop-invalid{
   outline:2px solid #ef4444;
   outline-offset:-2px;
-  background:#fff1f2;
+  background:#fff1f2 !important;
 }
 
 #view-calendar .fw-event-bar.is-timeline-drop-target{
@@ -22491,6 +22549,30 @@ body.calendar-events-popup-dragging *{
   border-top:0 !important;
   margin-top:8px !important;
   padding:8px 4px 2px !important;
+}
+
+#portalRoot #view-events .events-page-size-wrap{
+  align-items:center !important;
+  display:flex !important;
+  gap:8px !important;
+  color:#64748b !important;
+  font-size:12px !important;
+  font-weight:800 !important;
+}
+
+#portalRoot #view-events .events-page-size{
+  appearance:auto !important;
+  background:#ffffff !important;
+  border:1px solid #e0e8f4 !important;
+  border-radius:6px !important;
+  box-shadow:0 1px 2px rgba(15,23,42,.04) !important;
+  color:#10234f !important;
+  font-size:14px !important;
+  font-weight:650 !important;
+  height:36px !important;
+  min-height:36px !important;
+  padding:0 10px !important;
+  width:76px !important;
 }
 
 /* Refined employee time history */
@@ -28793,6 +28875,7 @@ body.calendar-events-popup-dragging *{
 /* GitHub calendar UI parity. */
 #portalRoot #view-calendar .fw-hour-head,
 #portalRoot #view-calendar .fw-resource-name,
+#portalRoot #view-calendar .fw-grid-row,
 #portalRoot #view-calendar .fw-grid-cell{
   border-right:1px solid #e6ebf6 !important;
   border-bottom:1px solid #d6e2f3 !important;
@@ -28877,8 +28960,17 @@ body.calendar-events-popup-dragging *{
   box-shadow:inset 0 -1px 0 rgba(148,163,184,.16) !important;
 }
 
+#portalRoot #view-calendar .fw-grid-row{
+  background-color:#fff !important;
+  box-shadow:inset 0 -1px 0 rgba(148,163,184,.16) !important;
+}
+
 #portalRoot #view-calendar .fw-grid-cell:nth-of-type(odd){
   background:#fcfdff !important;
+}
+
+#portalRoot #view-calendar .fw-grid-row--alt{
+  background-color:#f8fbff !important;
 }
 
 #portalRoot #view-calendar .fw-grid-cell--alt{

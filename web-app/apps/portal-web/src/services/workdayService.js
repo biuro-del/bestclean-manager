@@ -14,7 +14,12 @@ import { getWorkers } from './workerService'
 
 const NINE_HOURS_SECONDS = 9 * 60 * 60
 let eventsForOrgUnavailable = false
+let eventsPageForOrgUnavailable = false
+let eventsFingerprintForOrgUnavailable = false
 const READ_CACHE_MS = 30000
+const EVENTS_FAST_PAGE_MAX_SIZE = 250
+const EVENTS_FAST_PAGE_CHUNK_SIZE = 150
+const EVENTS_FAST_PAGE_MAX_SCAN = 1200
 const workdayCache = new Map()
 const DEPLOY_HINT =
   'Brak wdro\u017conej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean-room.'
@@ -795,6 +800,124 @@ async function getRawBackupCyclesForOrg(orgId) {
     const response = await backupCyclesForOrg({ orgId })
     return response?.data?.backupCycles ?? []
   })
+}
+
+function clampPositiveInteger(value, fallback, maxValue = Number.POSITIVE_INFINITY) {
+  const parsed = Number(value)
+  const normalized = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback
+  return Math.min(Math.max(normalized, 1), maxValue)
+}
+
+function normalizedPageOffset(page, pageSize) {
+  const normalizedPage = clampPositiveInteger(page, 1)
+  return (normalizedPage - 1) * pageSize
+}
+
+function normalizeEventsFastRange(filters = {}) {
+  const fromStartAt = toIso(filters.fromIso)
+  const toStartAt = toIso(filters.toIso)
+  if (!fromStartAt || !toStartAt) {
+    return null
+  }
+
+  return {
+    fromStartAt,
+    toStartAt,
+  }
+}
+
+function normalizeEventsStatusFilter(value) {
+  const normalized = String(value ?? '').trim().toUpperCase()
+  if (!normalized) {
+    return ''
+  }
+  return normalized === 'OPEN' ? 'RUNNING' : normalized
+}
+
+function eventsFastPageShouldFallback(filters = {}) {
+  const pageSize = clampPositiveInteger(filters.pageSize, 50, 100000)
+  if (pageSize > EVENTS_FAST_PAGE_MAX_SIZE) {
+    return true
+  }
+
+  return !normalizeEventsFastRange(filters)
+}
+
+function eventFastPageOperationNames(mode) {
+  switch (mode) {
+    case 'worker':
+      return {
+        events: 'EventsPageForOrgByWorker',
+        workdays: 'WorkdaysPageForOrgByWorker',
+      }
+    case 'room':
+      return {
+        events: 'EventsPageForOrgByZone',
+        workdays: 'WorkdaysPageForOrgByRoom',
+      }
+    case 'status':
+      return {
+        events: 'EventsPageForOrgByStatus',
+        workdays: 'WorkdaysPageForOrgByStatus',
+      }
+    default:
+      return {
+        events: 'EventsPageForOrg',
+        workdays: 'WorkdaysPageForOrg',
+      }
+  }
+}
+
+function buildEventsFastVariables(orgId, filters, mode, extra = {}) {
+  const range = normalizeEventsFastRange(filters)
+  if (!range) {
+    return null
+  }
+
+  const variables = {
+    orgId,
+    ...range,
+    limit: extra.limit,
+    offset: extra.offset,
+  }
+
+  if (mode === 'worker') {
+    variables.workerLogin = String(extra.workerLogin ?? '').trim()
+  } else if (mode === 'room') {
+    variables.zoneId = String(extra.roomId ?? '').trim()
+    variables.utilityRoomId = String(extra.roomId ?? '').trim()
+  } else if (mode === 'status') {
+    variables.status = normalizeEventsStatusFilter(extra.status)
+  }
+
+  return variables
+}
+
+async function runEventsPageQuery(operationName, variables, collectionName) {
+  const response = await runQueryOperation(operationName, variables)
+  return response?.data?.[collectionName] ?? []
+}
+
+function chooseEventsFastMode(filters = {}, workerLoginHint = '') {
+  const normalizedWorkerLogin = String(workerLoginHint ?? '').trim()
+  if (normalizedWorkerLogin) {
+    return {
+      mode: 'worker',
+      workerLogin: normalizedWorkerLogin,
+    }
+  }
+
+  const roomId = String(filters.roomId ?? filters.zoneId ?? filters.utilityRoomId ?? '').trim()
+  if (roomId) {
+    return {
+      mode: 'room',
+      roomId,
+    }
+  }
+
+  return {
+    mode: 'default',
+  }
 }
 
 function applyWorkdayFilters(items, filters = {}) {
@@ -1636,11 +1759,16 @@ function buildEventMutationPayload(payload = {}) {
 
 async function fetchLookupMaps(orgId, options = {}) {
   const includeWorkdays = Boolean(options.includeWorkdays)
+  const explicitWorkdayRows = Array.isArray(options.workdayRows) ? options.workdayRows : null
   const [clients, zones, workers, workdayRows] = await Promise.all([
     getClients(orgId),
     getZones(orgId),
     getWorkers(orgId),
-    includeWorkdays ? getRawWorkdaysForOrg(orgId).catch(() => []) : Promise.resolve([]),
+    explicitWorkdayRows
+      ? Promise.resolve(explicitWorkdayRows)
+      : includeWorkdays
+        ? getRawWorkdaysForOrg(orgId).catch(() => [])
+        : Promise.resolve([]),
   ])
   return buildLookupMaps(clients, zones, workers, workdayRows)
 }
@@ -2052,6 +2180,111 @@ async function getMappedEventsForOrg(orgId) {
   return readWorkdayCached(orgId, 'mapped-events', () => fetchMappedEvents(orgId))
 }
 
+async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '') {
+  if (eventsPageForOrgUnavailable || eventsFastPageShouldFallback(filters)) {
+    return null
+  }
+
+  const pageSize = clampPositiveInteger(filters.pageSize, 50, EVENTS_FAST_PAGE_MAX_SIZE)
+  const page = clampPositiveInteger(filters.page, 1)
+  const pageOffset = normalizedPageOffset(page, pageSize)
+  const desiredCount = pageOffset + pageSize + 1
+  const chunkLimit = Math.min(Math.max(pageSize * 3, EVENTS_FAST_PAGE_CHUNK_SIZE), EVENTS_FAST_PAGE_MAX_SIZE)
+  const modeConfig = chooseEventsFastMode(filters, workerLoginHint)
+  const operations = eventFastPageOperationNames(modeConfig.mode)
+  const scanLimit = EVENTS_FAST_PAGE_MAX_SCAN
+  const eventRows = []
+  const workdayRows = []
+  const [clients, zones, workers] = await Promise.all([
+    getClients(orgId),
+    getZones(orgId),
+    getWorkers(orgId),
+  ])
+  let nextOffset = 0
+  let eventsExhausted = false
+  let workdaysExhausted = false
+  let filteredRows = []
+
+  try {
+    while (nextOffset < scanLimit && filteredRows.length < desiredCount && (!eventsExhausted || !workdaysExhausted)) {
+      const variables = buildEventsFastVariables(orgId, filters, modeConfig.mode, {
+        ...modeConfig,
+        limit: Math.min(chunkLimit, scanLimit - nextOffset),
+        offset: nextOffset,
+      })
+      if (!variables) {
+        return null
+      }
+
+      const [nextEvents, nextWorkdays] = await Promise.all([
+        eventsExhausted
+          ? Promise.resolve([])
+          : runEventsPageQuery(operations.events, variables, 'events'),
+        workdaysExhausted
+          ? Promise.resolve([])
+          : runEventsPageQuery(operations.workdays, variables, 'workdays'),
+      ])
+
+      if (nextEvents.length < variables.limit) {
+        eventsExhausted = true
+      }
+      if (nextWorkdays.length < variables.limit) {
+        workdaysExhausted = true
+      }
+
+      eventRows.push(...nextEvents)
+      workdayRows.push(...nextWorkdays)
+
+      const lookupMaps = buildLookupMaps(clients, zones, workers, workdayRows)
+      const mappedEvents = eventRows
+        .map((row) => mapWorkday(orgId, row, lookupMaps))
+        .filter((item) => isDisplayableMappedItem(item))
+      const mappedWorkdays = workdayRows
+        .map((row) => mapWorkday(orgId, row, lookupMaps))
+        .filter((item) => isDisplayableMappedItem(item))
+      const merged = mappedEvents.length
+        ? mergeMappedEventCollections(mappedEvents, mappedWorkdays)
+        : mappedWorkdays
+      filteredRows = applyWorkdayFilters(
+        sortByLatest(dedupeMappedEventIntervals(merged.filter((item) => isDisplayableMappedItem(item)))),
+        filters,
+      )
+
+      nextOffset += variables.limit
+    }
+  } catch (error) {
+    if (
+      isOperationNotFoundError(error, operations.events) ||
+      isOperationNotFoundError(error, operations.workdays)
+    ) {
+      eventsPageForOrgUnavailable = true
+      return null
+    }
+    throw error
+  }
+
+  const hasMoreSourceRows = !eventsExhausted || !workdaysExhausted
+  if (hasMoreSourceRows && filteredRows.length < desiredCount) {
+    return null
+  }
+
+  const hasNext = filteredRows.length > pageOffset + pageSize || hasMoreSourceRows
+  const items = filteredRows.slice(pageOffset, pageOffset + pageSize)
+  const visibleTotal = pageOffset + items.length + (hasNext ? 1 : 0)
+
+  return {
+    orgId,
+    filters,
+    items,
+    page,
+    pageSize,
+    total: visibleTotal,
+    totalPages: hasNext ? page + 1 : Math.max(1, Math.ceil(Math.max(visibleTotal, 1) / pageSize)),
+    hasNext,
+    estimatedTotal: hasNext,
+  }
+}
+
 async function resolveWorkerLoginHint(orgId, filters = {}) {
   const explicitLogin = String(filters.workerLogin ?? '').trim()
   if (explicitLogin) {
@@ -2109,8 +2342,13 @@ export async function getWorkdays(orgId, filters = {}) {
   const source = String(filters.source ?? '').trim().toLowerCase()
   let mapped
   if (source === 'events' || source === 'event') {
-    mapped = await getMappedEventsForOrg(orgId)
     const workerLoginHint = await resolveWorkerLoginHint(orgId, filters)
+    const fastResponse = await fetchFastEventsPage(orgId, filters, workerLoginHint)
+    if (fastResponse) {
+      return fastResponse
+    }
+
+    mapped = await getMappedEventsForOrg(orgId)
     if (workerLoginHint) {
       try {
         const mappedWorkerRows = await fetchMappedWorkdays(
@@ -2365,6 +2603,59 @@ export async function getTodayWorktimeFingerprint(orgId) {
   return {
     orgId,
     ...buildTodayFingerprint(day, recordsMap),
+  }
+}
+
+export async function getEventsFingerprintForOrg(orgId, filters = {}) {
+  if (!isFirebaseConfigured() || eventsFingerprintForOrgUnavailable) {
+    return null
+  }
+
+  const range = normalizeEventsFastRange(filters)
+  if (!range) {
+    return null
+  }
+
+  ensureFirebase()
+  const variables = {
+    orgId,
+    ...range,
+  }
+
+  try {
+    const [eventResponse, workdayResponse] = await Promise.all([
+      runQueryOperation('EventsFingerprintForOrg', variables),
+      runQueryOperation('WorkdaysFingerprintForOrg', variables),
+    ])
+    const eventRow = eventResponse?.data?.events?.[0] ?? null
+    const workdayRow = workdayResponse?.data?.workdays?.[0] ?? null
+    const eventToken = eventRow
+      ? ['event', eventRow.eventId, eventRow.workdayId, eventRow.updatedAt, eventRow.startAt, eventRow.endAt, eventRow.status]
+          .map((value) => String(value ?? ''))
+          .join(':')
+      : 'event:none'
+    const workdayToken = workdayRow
+      ? ['workday', workdayRow.workdayId, workdayRow.updatedAt, workdayRow.startAt, workdayRow.endAt, workdayRow.status]
+          .map((value) => String(value ?? ''))
+          .join(':')
+      : 'workday:none'
+
+    return {
+      orgId,
+      filters,
+      token: `${range.fromStartAt}|${range.toStartAt}|${eventToken}|${workdayToken}`,
+      eventRow,
+      workdayRow,
+    }
+  } catch (error) {
+    if (
+      isOperationNotFoundError(error, 'EventsFingerprintForOrg') ||
+      isOperationNotFoundError(error, 'WorkdaysFingerprintForOrg')
+    ) {
+      eventsFingerprintForOrgUnavailable = true
+      return null
+    }
+    throw error
   }
 }
 

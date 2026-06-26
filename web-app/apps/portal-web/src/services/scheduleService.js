@@ -317,14 +317,10 @@ function parseScheduleTable(table) {
       const hasMorningShift = hasRealShiftValue(morningStart, morningTask)
       const hasAfternoonShift = hasRealShiftValue(afternoonStart, afternoonTask)
 
-      if (!hasMorningShift && !hasAfternoonShift) {
-        return
-      }
-
       bucket.entries.push({
         workerId: workerId || '-',
         workerName: workerName || workerId || '-',
-        status: 'Praca',
+        status: hasMorningShift || hasAfternoonShift ? 'Praca' : 'Wolne',
         morningStart,
         morningTask,
         afternoonStart,

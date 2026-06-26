@@ -1,5 +1,5 @@
 ﻿<h1 class="welcome">Zdarzenia</h1>
-<p class="subwelcome">Lista + edycja wiersza. Domyślnie: od 1. dnia miesiąca do dziś. 50 rekordów na stronę.</p>
+<p class="subwelcome">Lista + edycja wiersza. Domyślnie: od 1. dnia miesiąca do dziś. 25 rekordow na strone.</p>
 
 <div class="toolbar" aria-label="Filtry">
   <div class="tool">
@@ -83,6 +83,15 @@
       <span id="evShownLabel">Wyświetlono: -</span>
     </div>
     <div class="pager-right">
+      <label class="events-page-size-wrap" for="evPageSize">
+        <span>Na strone</span>
+        <select id="evPageSize" class="events-page-size" aria-label="Liczba rekordow na stronie">
+          <option value="10">10</option>
+          <option value="25" selected>25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </label>
       <button class="btn2 pager-btn" id="evPrevBtn" type="button"><-</button>
       <button class="btn2 pager-btn" id="evNextBtn" type="button">-></button>
     </div>

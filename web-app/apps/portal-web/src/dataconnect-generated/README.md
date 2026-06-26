@@ -22,8 +22,18 @@ This README will guide you through the process of using the generated JavaScript
   - [*TasksForOrg*](#tasksfororg)
   - [*ZonesForOrg*](#zonesfororg)
   - [*WorkdaysForOrg*](#workdaysfororg)
+  - [*WorkdaysPageForOrg*](#workdayspagefororg)
+  - [*WorkdaysPageForOrgByWorker*](#workdayspagefororgbyworker)
+  - [*WorkdaysPageForOrgByRoom*](#workdayspagefororgbyroom)
+  - [*WorkdaysPageForOrgByStatus*](#workdayspagefororgbystatus)
+  - [*WorkdaysFingerprintForOrg*](#workdaysfingerprintfororg)
   - [*BackupCyclesForOrg*](#backupcyclesfororg)
   - [*EventsForOrg*](#eventsfororg)
+  - [*EventsPageForOrg*](#eventspagefororg)
+  - [*EventsPageForOrgByWorker*](#eventspagefororgbyworker)
+  - [*EventsPageForOrgByZone*](#eventspagefororgbyzone)
+  - [*EventsPageForOrgByStatus*](#eventspagefororgbystatus)
+  - [*EventsFingerprintForOrg*](#eventsfingerprintfororg)
   - [*WorkerWorkdaysForOrg*](#workerworkdaysfororg)
   - [*StorageForOrg*](#storagefororg)
   - [*ClientStorageForClient*](#clientstorageforclient)
@@ -1607,6 +1617,700 @@ executeQuery(ref).then((response) => {
 });
 ```
 
+## WorkdaysPageForOrg
+You can execute the `WorkdaysPageForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+workdaysPageForOrg(vars: WorkdaysPageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgData, WorkdaysPageForOrgVariables>;
+
+interface WorkdaysPageForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: WorkdaysPageForOrgVariables): QueryRef<WorkdaysPageForOrgData, WorkdaysPageForOrgVariables>;
+}
+export const workdaysPageForOrgRef: WorkdaysPageForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+workdaysPageForOrg(dc: DataConnect, vars: WorkdaysPageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgData, WorkdaysPageForOrgVariables>;
+
+interface WorkdaysPageForOrgRef {
+  ...
+  (dc: DataConnect, vars: WorkdaysPageForOrgVariables): QueryRef<WorkdaysPageForOrgData, WorkdaysPageForOrgVariables>;
+}
+export const workdaysPageForOrgRef: WorkdaysPageForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the workdaysPageForOrgRef:
+```typescript
+const name = workdaysPageForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `WorkdaysPageForOrg` query requires an argument of type `WorkdaysPageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface WorkdaysPageForOrgVariables {
+  orgId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that executing the `WorkdaysPageForOrg` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `WorkdaysPageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface WorkdaysPageForOrgData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+### Using `WorkdaysPageForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, workdaysPageForOrg, WorkdaysPageForOrgVariables } from '@dataconnect/generated';
+
+// The `WorkdaysPageForOrg` query requires an argument of type `WorkdaysPageForOrgVariables`:
+const workdaysPageForOrgVars: WorkdaysPageForOrgVariables = {
+  orgId: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `workdaysPageForOrg()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await workdaysPageForOrg(workdaysPageForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await workdaysPageForOrg({ orgId: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await workdaysPageForOrg(dataConnect, workdaysPageForOrgVars);
+
+console.log(data.workdays);
+
+// Or, you can use the `Promise` API.
+workdaysPageForOrg(workdaysPageForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.workdays);
+});
+```
+
+### Using `WorkdaysPageForOrg`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, workdaysPageForOrgRef, WorkdaysPageForOrgVariables } from '@dataconnect/generated';
+
+// The `WorkdaysPageForOrg` query requires an argument of type `WorkdaysPageForOrgVariables`:
+const workdaysPageForOrgVars: WorkdaysPageForOrgVariables = {
+  orgId: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `workdaysPageForOrgRef()` function to get a reference to the query.
+const ref = workdaysPageForOrgRef(workdaysPageForOrgVars);
+// Variables can be defined inline as well.
+const ref = workdaysPageForOrgRef({ orgId: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = workdaysPageForOrgRef(dataConnect, workdaysPageForOrgVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.workdays);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.workdays);
+});
+```
+
+## WorkdaysPageForOrgByWorker
+You can execute the `WorkdaysPageForOrgByWorker` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+workdaysPageForOrgByWorker(vars: WorkdaysPageForOrgByWorkerVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgByWorkerData, WorkdaysPageForOrgByWorkerVariables>;
+
+interface WorkdaysPageForOrgByWorkerRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: WorkdaysPageForOrgByWorkerVariables): QueryRef<WorkdaysPageForOrgByWorkerData, WorkdaysPageForOrgByWorkerVariables>;
+}
+export const workdaysPageForOrgByWorkerRef: WorkdaysPageForOrgByWorkerRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+workdaysPageForOrgByWorker(dc: DataConnect, vars: WorkdaysPageForOrgByWorkerVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgByWorkerData, WorkdaysPageForOrgByWorkerVariables>;
+
+interface WorkdaysPageForOrgByWorkerRef {
+  ...
+  (dc: DataConnect, vars: WorkdaysPageForOrgByWorkerVariables): QueryRef<WorkdaysPageForOrgByWorkerData, WorkdaysPageForOrgByWorkerVariables>;
+}
+export const workdaysPageForOrgByWorkerRef: WorkdaysPageForOrgByWorkerRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the workdaysPageForOrgByWorkerRef:
+```typescript
+const name = workdaysPageForOrgByWorkerRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `WorkdaysPageForOrgByWorker` query requires an argument of type `WorkdaysPageForOrgByWorkerVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface WorkdaysPageForOrgByWorkerVariables {
+  orgId: string;
+  workerLogin: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that executing the `WorkdaysPageForOrgByWorker` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `WorkdaysPageForOrgByWorkerData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface WorkdaysPageForOrgByWorkerData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+### Using `WorkdaysPageForOrgByWorker`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, workdaysPageForOrgByWorker, WorkdaysPageForOrgByWorkerVariables } from '@dataconnect/generated';
+
+// The `WorkdaysPageForOrgByWorker` query requires an argument of type `WorkdaysPageForOrgByWorkerVariables`:
+const workdaysPageForOrgByWorkerVars: WorkdaysPageForOrgByWorkerVariables = {
+  orgId: ..., 
+  workerLogin: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `workdaysPageForOrgByWorker()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await workdaysPageForOrgByWorker(workdaysPageForOrgByWorkerVars);
+// Variables can be defined inline as well.
+const { data } = await workdaysPageForOrgByWorker({ orgId: ..., workerLogin: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await workdaysPageForOrgByWorker(dataConnect, workdaysPageForOrgByWorkerVars);
+
+console.log(data.workdays);
+
+// Or, you can use the `Promise` API.
+workdaysPageForOrgByWorker(workdaysPageForOrgByWorkerVars).then((response) => {
+  const data = response.data;
+  console.log(data.workdays);
+});
+```
+
+### Using `WorkdaysPageForOrgByWorker`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, workdaysPageForOrgByWorkerRef, WorkdaysPageForOrgByWorkerVariables } from '@dataconnect/generated';
+
+// The `WorkdaysPageForOrgByWorker` query requires an argument of type `WorkdaysPageForOrgByWorkerVariables`:
+const workdaysPageForOrgByWorkerVars: WorkdaysPageForOrgByWorkerVariables = {
+  orgId: ..., 
+  workerLogin: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `workdaysPageForOrgByWorkerRef()` function to get a reference to the query.
+const ref = workdaysPageForOrgByWorkerRef(workdaysPageForOrgByWorkerVars);
+// Variables can be defined inline as well.
+const ref = workdaysPageForOrgByWorkerRef({ orgId: ..., workerLogin: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = workdaysPageForOrgByWorkerRef(dataConnect, workdaysPageForOrgByWorkerVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.workdays);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.workdays);
+});
+```
+
+## WorkdaysPageForOrgByRoom
+You can execute the `WorkdaysPageForOrgByRoom` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+workdaysPageForOrgByRoom(vars: WorkdaysPageForOrgByRoomVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgByRoomData, WorkdaysPageForOrgByRoomVariables>;
+
+interface WorkdaysPageForOrgByRoomRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: WorkdaysPageForOrgByRoomVariables): QueryRef<WorkdaysPageForOrgByRoomData, WorkdaysPageForOrgByRoomVariables>;
+}
+export const workdaysPageForOrgByRoomRef: WorkdaysPageForOrgByRoomRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+workdaysPageForOrgByRoom(dc: DataConnect, vars: WorkdaysPageForOrgByRoomVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgByRoomData, WorkdaysPageForOrgByRoomVariables>;
+
+interface WorkdaysPageForOrgByRoomRef {
+  ...
+  (dc: DataConnect, vars: WorkdaysPageForOrgByRoomVariables): QueryRef<WorkdaysPageForOrgByRoomData, WorkdaysPageForOrgByRoomVariables>;
+}
+export const workdaysPageForOrgByRoomRef: WorkdaysPageForOrgByRoomRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the workdaysPageForOrgByRoomRef:
+```typescript
+const name = workdaysPageForOrgByRoomRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `WorkdaysPageForOrgByRoom` query requires an argument of type `WorkdaysPageForOrgByRoomVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface WorkdaysPageForOrgByRoomVariables {
+  orgId: string;
+  utilityRoomId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that executing the `WorkdaysPageForOrgByRoom` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `WorkdaysPageForOrgByRoomData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface WorkdaysPageForOrgByRoomData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+### Using `WorkdaysPageForOrgByRoom`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, workdaysPageForOrgByRoom, WorkdaysPageForOrgByRoomVariables } from '@dataconnect/generated';
+
+// The `WorkdaysPageForOrgByRoom` query requires an argument of type `WorkdaysPageForOrgByRoomVariables`:
+const workdaysPageForOrgByRoomVars: WorkdaysPageForOrgByRoomVariables = {
+  orgId: ..., 
+  utilityRoomId: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `workdaysPageForOrgByRoom()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await workdaysPageForOrgByRoom(workdaysPageForOrgByRoomVars);
+// Variables can be defined inline as well.
+const { data } = await workdaysPageForOrgByRoom({ orgId: ..., utilityRoomId: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await workdaysPageForOrgByRoom(dataConnect, workdaysPageForOrgByRoomVars);
+
+console.log(data.workdays);
+
+// Or, you can use the `Promise` API.
+workdaysPageForOrgByRoom(workdaysPageForOrgByRoomVars).then((response) => {
+  const data = response.data;
+  console.log(data.workdays);
+});
+```
+
+### Using `WorkdaysPageForOrgByRoom`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, workdaysPageForOrgByRoomRef, WorkdaysPageForOrgByRoomVariables } from '@dataconnect/generated';
+
+// The `WorkdaysPageForOrgByRoom` query requires an argument of type `WorkdaysPageForOrgByRoomVariables`:
+const workdaysPageForOrgByRoomVars: WorkdaysPageForOrgByRoomVariables = {
+  orgId: ..., 
+  utilityRoomId: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `workdaysPageForOrgByRoomRef()` function to get a reference to the query.
+const ref = workdaysPageForOrgByRoomRef(workdaysPageForOrgByRoomVars);
+// Variables can be defined inline as well.
+const ref = workdaysPageForOrgByRoomRef({ orgId: ..., utilityRoomId: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = workdaysPageForOrgByRoomRef(dataConnect, workdaysPageForOrgByRoomVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.workdays);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.workdays);
+});
+```
+
+## WorkdaysPageForOrgByStatus
+You can execute the `WorkdaysPageForOrgByStatus` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+workdaysPageForOrgByStatus(vars: WorkdaysPageForOrgByStatusVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgByStatusData, WorkdaysPageForOrgByStatusVariables>;
+
+interface WorkdaysPageForOrgByStatusRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: WorkdaysPageForOrgByStatusVariables): QueryRef<WorkdaysPageForOrgByStatusData, WorkdaysPageForOrgByStatusVariables>;
+}
+export const workdaysPageForOrgByStatusRef: WorkdaysPageForOrgByStatusRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+workdaysPageForOrgByStatus(dc: DataConnect, vars: WorkdaysPageForOrgByStatusVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysPageForOrgByStatusData, WorkdaysPageForOrgByStatusVariables>;
+
+interface WorkdaysPageForOrgByStatusRef {
+  ...
+  (dc: DataConnect, vars: WorkdaysPageForOrgByStatusVariables): QueryRef<WorkdaysPageForOrgByStatusData, WorkdaysPageForOrgByStatusVariables>;
+}
+export const workdaysPageForOrgByStatusRef: WorkdaysPageForOrgByStatusRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the workdaysPageForOrgByStatusRef:
+```typescript
+const name = workdaysPageForOrgByStatusRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `WorkdaysPageForOrgByStatus` query requires an argument of type `WorkdaysPageForOrgByStatusVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface WorkdaysPageForOrgByStatusVariables {
+  orgId: string;
+  status: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that executing the `WorkdaysPageForOrgByStatus` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `WorkdaysPageForOrgByStatusData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface WorkdaysPageForOrgByStatusData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+### Using `WorkdaysPageForOrgByStatus`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, workdaysPageForOrgByStatus, WorkdaysPageForOrgByStatusVariables } from '@dataconnect/generated';
+
+// The `WorkdaysPageForOrgByStatus` query requires an argument of type `WorkdaysPageForOrgByStatusVariables`:
+const workdaysPageForOrgByStatusVars: WorkdaysPageForOrgByStatusVariables = {
+  orgId: ..., 
+  status: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `workdaysPageForOrgByStatus()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await workdaysPageForOrgByStatus(workdaysPageForOrgByStatusVars);
+// Variables can be defined inline as well.
+const { data } = await workdaysPageForOrgByStatus({ orgId: ..., status: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await workdaysPageForOrgByStatus(dataConnect, workdaysPageForOrgByStatusVars);
+
+console.log(data.workdays);
+
+// Or, you can use the `Promise` API.
+workdaysPageForOrgByStatus(workdaysPageForOrgByStatusVars).then((response) => {
+  const data = response.data;
+  console.log(data.workdays);
+});
+```
+
+### Using `WorkdaysPageForOrgByStatus`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, workdaysPageForOrgByStatusRef, WorkdaysPageForOrgByStatusVariables } from '@dataconnect/generated';
+
+// The `WorkdaysPageForOrgByStatus` query requires an argument of type `WorkdaysPageForOrgByStatusVariables`:
+const workdaysPageForOrgByStatusVars: WorkdaysPageForOrgByStatusVariables = {
+  orgId: ..., 
+  status: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `workdaysPageForOrgByStatusRef()` function to get a reference to the query.
+const ref = workdaysPageForOrgByStatusRef(workdaysPageForOrgByStatusVars);
+// Variables can be defined inline as well.
+const ref = workdaysPageForOrgByStatusRef({ orgId: ..., status: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = workdaysPageForOrgByStatusRef(dataConnect, workdaysPageForOrgByStatusVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.workdays);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.workdays);
+});
+```
+
+## WorkdaysFingerprintForOrg
+You can execute the `WorkdaysFingerprintForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+workdaysFingerprintForOrg(vars: WorkdaysFingerprintForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysFingerprintForOrgData, WorkdaysFingerprintForOrgVariables>;
+
+interface WorkdaysFingerprintForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: WorkdaysFingerprintForOrgVariables): QueryRef<WorkdaysFingerprintForOrgData, WorkdaysFingerprintForOrgVariables>;
+}
+export const workdaysFingerprintForOrgRef: WorkdaysFingerprintForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+workdaysFingerprintForOrg(dc: DataConnect, vars: WorkdaysFingerprintForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkdaysFingerprintForOrgData, WorkdaysFingerprintForOrgVariables>;
+
+interface WorkdaysFingerprintForOrgRef {
+  ...
+  (dc: DataConnect, vars: WorkdaysFingerprintForOrgVariables): QueryRef<WorkdaysFingerprintForOrgData, WorkdaysFingerprintForOrgVariables>;
+}
+export const workdaysFingerprintForOrgRef: WorkdaysFingerprintForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the workdaysFingerprintForOrgRef:
+```typescript
+const name = workdaysFingerprintForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `WorkdaysFingerprintForOrg` query requires an argument of type `WorkdaysFingerprintForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface WorkdaysFingerprintForOrgVariables {
+  orgId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+}
+```
+### Return Type
+Recall that executing the `WorkdaysFingerprintForOrg` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `WorkdaysFingerprintForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface WorkdaysFingerprintForOrgData {
+  workdays: ({
+    workdayId: string;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    status?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+### Using `WorkdaysFingerprintForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, workdaysFingerprintForOrg, WorkdaysFingerprintForOrgVariables } from '@dataconnect/generated';
+
+// The `WorkdaysFingerprintForOrg` query requires an argument of type `WorkdaysFingerprintForOrgVariables`:
+const workdaysFingerprintForOrgVars: WorkdaysFingerprintForOrgVariables = {
+  orgId: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+};
+
+// Call the `workdaysFingerprintForOrg()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await workdaysFingerprintForOrg(workdaysFingerprintForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await workdaysFingerprintForOrg({ orgId: ..., fromStartAt: ..., toStartAt: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await workdaysFingerprintForOrg(dataConnect, workdaysFingerprintForOrgVars);
+
+console.log(data.workdays);
+
+// Or, you can use the `Promise` API.
+workdaysFingerprintForOrg(workdaysFingerprintForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.workdays);
+});
+```
+
+### Using `WorkdaysFingerprintForOrg`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, workdaysFingerprintForOrgRef, WorkdaysFingerprintForOrgVariables } from '@dataconnect/generated';
+
+// The `WorkdaysFingerprintForOrg` query requires an argument of type `WorkdaysFingerprintForOrgVariables`:
+const workdaysFingerprintForOrgVars: WorkdaysFingerprintForOrgVariables = {
+  orgId: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+};
+
+// Call the `workdaysFingerprintForOrgRef()` function to get a reference to the query.
+const ref = workdaysFingerprintForOrgRef(workdaysFingerprintForOrgVars);
+// Variables can be defined inline as well.
+const ref = workdaysFingerprintForOrgRef({ orgId: ..., fromStartAt: ..., toStartAt: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = workdaysFingerprintForOrgRef(dataConnect, workdaysFingerprintForOrgVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.workdays);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.workdays);
+});
+```
+
 ## BackupCyclesForOrg
 You can execute the `BackupCyclesForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
 ```typescript
@@ -1852,6 +2556,733 @@ const ref = eventsForOrgRef({ orgId: ..., });
 // You can also pass in a `DataConnect` instance to the `QueryRef` function.
 const dataConnect = getDataConnect(connectorConfig);
 const ref = eventsForOrgRef(dataConnect, eventsForOrgVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.events);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.events);
+});
+```
+
+## EventsPageForOrg
+You can execute the `EventsPageForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+eventsPageForOrg(vars: EventsPageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgData, EventsPageForOrgVariables>;
+
+interface EventsPageForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: EventsPageForOrgVariables): QueryRef<EventsPageForOrgData, EventsPageForOrgVariables>;
+}
+export const eventsPageForOrgRef: EventsPageForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+eventsPageForOrg(dc: DataConnect, vars: EventsPageForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgData, EventsPageForOrgVariables>;
+
+interface EventsPageForOrgRef {
+  ...
+  (dc: DataConnect, vars: EventsPageForOrgVariables): QueryRef<EventsPageForOrgData, EventsPageForOrgVariables>;
+}
+export const eventsPageForOrgRef: EventsPageForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the eventsPageForOrgRef:
+```typescript
+const name = eventsPageForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `EventsPageForOrg` query requires an argument of type `EventsPageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface EventsPageForOrgVariables {
+  orgId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that executing the `EventsPageForOrg` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `EventsPageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface EventsPageForOrgData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+```
+### Using `EventsPageForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, eventsPageForOrg, EventsPageForOrgVariables } from '@dataconnect/generated';
+
+// The `EventsPageForOrg` query requires an argument of type `EventsPageForOrgVariables`:
+const eventsPageForOrgVars: EventsPageForOrgVariables = {
+  orgId: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `eventsPageForOrg()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await eventsPageForOrg(eventsPageForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await eventsPageForOrg({ orgId: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await eventsPageForOrg(dataConnect, eventsPageForOrgVars);
+
+console.log(data.events);
+
+// Or, you can use the `Promise` API.
+eventsPageForOrg(eventsPageForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.events);
+});
+```
+
+### Using `EventsPageForOrg`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, eventsPageForOrgRef, EventsPageForOrgVariables } from '@dataconnect/generated';
+
+// The `EventsPageForOrg` query requires an argument of type `EventsPageForOrgVariables`:
+const eventsPageForOrgVars: EventsPageForOrgVariables = {
+  orgId: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `eventsPageForOrgRef()` function to get a reference to the query.
+const ref = eventsPageForOrgRef(eventsPageForOrgVars);
+// Variables can be defined inline as well.
+const ref = eventsPageForOrgRef({ orgId: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = eventsPageForOrgRef(dataConnect, eventsPageForOrgVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.events);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.events);
+});
+```
+
+## EventsPageForOrgByWorker
+You can execute the `EventsPageForOrgByWorker` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+eventsPageForOrgByWorker(vars: EventsPageForOrgByWorkerVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgByWorkerData, EventsPageForOrgByWorkerVariables>;
+
+interface EventsPageForOrgByWorkerRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: EventsPageForOrgByWorkerVariables): QueryRef<EventsPageForOrgByWorkerData, EventsPageForOrgByWorkerVariables>;
+}
+export const eventsPageForOrgByWorkerRef: EventsPageForOrgByWorkerRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+eventsPageForOrgByWorker(dc: DataConnect, vars: EventsPageForOrgByWorkerVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgByWorkerData, EventsPageForOrgByWorkerVariables>;
+
+interface EventsPageForOrgByWorkerRef {
+  ...
+  (dc: DataConnect, vars: EventsPageForOrgByWorkerVariables): QueryRef<EventsPageForOrgByWorkerData, EventsPageForOrgByWorkerVariables>;
+}
+export const eventsPageForOrgByWorkerRef: EventsPageForOrgByWorkerRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the eventsPageForOrgByWorkerRef:
+```typescript
+const name = eventsPageForOrgByWorkerRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `EventsPageForOrgByWorker` query requires an argument of type `EventsPageForOrgByWorkerVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface EventsPageForOrgByWorkerVariables {
+  orgId: string;
+  workerLogin: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that executing the `EventsPageForOrgByWorker` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `EventsPageForOrgByWorkerData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface EventsPageForOrgByWorkerData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+```
+### Using `EventsPageForOrgByWorker`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, eventsPageForOrgByWorker, EventsPageForOrgByWorkerVariables } from '@dataconnect/generated';
+
+// The `EventsPageForOrgByWorker` query requires an argument of type `EventsPageForOrgByWorkerVariables`:
+const eventsPageForOrgByWorkerVars: EventsPageForOrgByWorkerVariables = {
+  orgId: ..., 
+  workerLogin: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `eventsPageForOrgByWorker()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await eventsPageForOrgByWorker(eventsPageForOrgByWorkerVars);
+// Variables can be defined inline as well.
+const { data } = await eventsPageForOrgByWorker({ orgId: ..., workerLogin: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await eventsPageForOrgByWorker(dataConnect, eventsPageForOrgByWorkerVars);
+
+console.log(data.events);
+
+// Or, you can use the `Promise` API.
+eventsPageForOrgByWorker(eventsPageForOrgByWorkerVars).then((response) => {
+  const data = response.data;
+  console.log(data.events);
+});
+```
+
+### Using `EventsPageForOrgByWorker`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, eventsPageForOrgByWorkerRef, EventsPageForOrgByWorkerVariables } from '@dataconnect/generated';
+
+// The `EventsPageForOrgByWorker` query requires an argument of type `EventsPageForOrgByWorkerVariables`:
+const eventsPageForOrgByWorkerVars: EventsPageForOrgByWorkerVariables = {
+  orgId: ..., 
+  workerLogin: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `eventsPageForOrgByWorkerRef()` function to get a reference to the query.
+const ref = eventsPageForOrgByWorkerRef(eventsPageForOrgByWorkerVars);
+// Variables can be defined inline as well.
+const ref = eventsPageForOrgByWorkerRef({ orgId: ..., workerLogin: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = eventsPageForOrgByWorkerRef(dataConnect, eventsPageForOrgByWorkerVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.events);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.events);
+});
+```
+
+## EventsPageForOrgByZone
+You can execute the `EventsPageForOrgByZone` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+eventsPageForOrgByZone(vars: EventsPageForOrgByZoneVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgByZoneData, EventsPageForOrgByZoneVariables>;
+
+interface EventsPageForOrgByZoneRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: EventsPageForOrgByZoneVariables): QueryRef<EventsPageForOrgByZoneData, EventsPageForOrgByZoneVariables>;
+}
+export const eventsPageForOrgByZoneRef: EventsPageForOrgByZoneRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+eventsPageForOrgByZone(dc: DataConnect, vars: EventsPageForOrgByZoneVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgByZoneData, EventsPageForOrgByZoneVariables>;
+
+interface EventsPageForOrgByZoneRef {
+  ...
+  (dc: DataConnect, vars: EventsPageForOrgByZoneVariables): QueryRef<EventsPageForOrgByZoneData, EventsPageForOrgByZoneVariables>;
+}
+export const eventsPageForOrgByZoneRef: EventsPageForOrgByZoneRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the eventsPageForOrgByZoneRef:
+```typescript
+const name = eventsPageForOrgByZoneRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `EventsPageForOrgByZone` query requires an argument of type `EventsPageForOrgByZoneVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface EventsPageForOrgByZoneVariables {
+  orgId: string;
+  zoneId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that executing the `EventsPageForOrgByZone` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `EventsPageForOrgByZoneData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface EventsPageForOrgByZoneData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+```
+### Using `EventsPageForOrgByZone`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, eventsPageForOrgByZone, EventsPageForOrgByZoneVariables } from '@dataconnect/generated';
+
+// The `EventsPageForOrgByZone` query requires an argument of type `EventsPageForOrgByZoneVariables`:
+const eventsPageForOrgByZoneVars: EventsPageForOrgByZoneVariables = {
+  orgId: ..., 
+  zoneId: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `eventsPageForOrgByZone()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await eventsPageForOrgByZone(eventsPageForOrgByZoneVars);
+// Variables can be defined inline as well.
+const { data } = await eventsPageForOrgByZone({ orgId: ..., zoneId: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await eventsPageForOrgByZone(dataConnect, eventsPageForOrgByZoneVars);
+
+console.log(data.events);
+
+// Or, you can use the `Promise` API.
+eventsPageForOrgByZone(eventsPageForOrgByZoneVars).then((response) => {
+  const data = response.data;
+  console.log(data.events);
+});
+```
+
+### Using `EventsPageForOrgByZone`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, eventsPageForOrgByZoneRef, EventsPageForOrgByZoneVariables } from '@dataconnect/generated';
+
+// The `EventsPageForOrgByZone` query requires an argument of type `EventsPageForOrgByZoneVariables`:
+const eventsPageForOrgByZoneVars: EventsPageForOrgByZoneVariables = {
+  orgId: ..., 
+  zoneId: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `eventsPageForOrgByZoneRef()` function to get a reference to the query.
+const ref = eventsPageForOrgByZoneRef(eventsPageForOrgByZoneVars);
+// Variables can be defined inline as well.
+const ref = eventsPageForOrgByZoneRef({ orgId: ..., zoneId: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = eventsPageForOrgByZoneRef(dataConnect, eventsPageForOrgByZoneVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.events);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.events);
+});
+```
+
+## EventsPageForOrgByStatus
+You can execute the `EventsPageForOrgByStatus` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+eventsPageForOrgByStatus(vars: EventsPageForOrgByStatusVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgByStatusData, EventsPageForOrgByStatusVariables>;
+
+interface EventsPageForOrgByStatusRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: EventsPageForOrgByStatusVariables): QueryRef<EventsPageForOrgByStatusData, EventsPageForOrgByStatusVariables>;
+}
+export const eventsPageForOrgByStatusRef: EventsPageForOrgByStatusRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+eventsPageForOrgByStatus(dc: DataConnect, vars: EventsPageForOrgByStatusVariables, options?: ExecuteQueryOptions): QueryPromise<EventsPageForOrgByStatusData, EventsPageForOrgByStatusVariables>;
+
+interface EventsPageForOrgByStatusRef {
+  ...
+  (dc: DataConnect, vars: EventsPageForOrgByStatusVariables): QueryRef<EventsPageForOrgByStatusData, EventsPageForOrgByStatusVariables>;
+}
+export const eventsPageForOrgByStatusRef: EventsPageForOrgByStatusRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the eventsPageForOrgByStatusRef:
+```typescript
+const name = eventsPageForOrgByStatusRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `EventsPageForOrgByStatus` query requires an argument of type `EventsPageForOrgByStatusVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface EventsPageForOrgByStatusVariables {
+  orgId: string;
+  status: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that executing the `EventsPageForOrgByStatus` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `EventsPageForOrgByStatusData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface EventsPageForOrgByStatusData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+```
+### Using `EventsPageForOrgByStatus`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, eventsPageForOrgByStatus, EventsPageForOrgByStatusVariables } from '@dataconnect/generated';
+
+// The `EventsPageForOrgByStatus` query requires an argument of type `EventsPageForOrgByStatusVariables`:
+const eventsPageForOrgByStatusVars: EventsPageForOrgByStatusVariables = {
+  orgId: ..., 
+  status: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `eventsPageForOrgByStatus()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await eventsPageForOrgByStatus(eventsPageForOrgByStatusVars);
+// Variables can be defined inline as well.
+const { data } = await eventsPageForOrgByStatus({ orgId: ..., status: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await eventsPageForOrgByStatus(dataConnect, eventsPageForOrgByStatusVars);
+
+console.log(data.events);
+
+// Or, you can use the `Promise` API.
+eventsPageForOrgByStatus(eventsPageForOrgByStatusVars).then((response) => {
+  const data = response.data;
+  console.log(data.events);
+});
+```
+
+### Using `EventsPageForOrgByStatus`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, eventsPageForOrgByStatusRef, EventsPageForOrgByStatusVariables } from '@dataconnect/generated';
+
+// The `EventsPageForOrgByStatus` query requires an argument of type `EventsPageForOrgByStatusVariables`:
+const eventsPageForOrgByStatusVars: EventsPageForOrgByStatusVariables = {
+  orgId: ..., 
+  status: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+  limit: ..., // optional
+  offset: ..., // optional
+};
+
+// Call the `eventsPageForOrgByStatusRef()` function to get a reference to the query.
+const ref = eventsPageForOrgByStatusRef(eventsPageForOrgByStatusVars);
+// Variables can be defined inline as well.
+const ref = eventsPageForOrgByStatusRef({ orgId: ..., status: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = eventsPageForOrgByStatusRef(dataConnect, eventsPageForOrgByStatusVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.events);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.events);
+});
+```
+
+## EventsFingerprintForOrg
+You can execute the `EventsFingerprintForOrg` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+eventsFingerprintForOrg(vars: EventsFingerprintForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsFingerprintForOrgData, EventsFingerprintForOrgVariables>;
+
+interface EventsFingerprintForOrgRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: EventsFingerprintForOrgVariables): QueryRef<EventsFingerprintForOrgData, EventsFingerprintForOrgVariables>;
+}
+export const eventsFingerprintForOrgRef: EventsFingerprintForOrgRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+eventsFingerprintForOrg(dc: DataConnect, vars: EventsFingerprintForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<EventsFingerprintForOrgData, EventsFingerprintForOrgVariables>;
+
+interface EventsFingerprintForOrgRef {
+  ...
+  (dc: DataConnect, vars: EventsFingerprintForOrgVariables): QueryRef<EventsFingerprintForOrgData, EventsFingerprintForOrgVariables>;
+}
+export const eventsFingerprintForOrgRef: EventsFingerprintForOrgRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the eventsFingerprintForOrgRef:
+```typescript
+const name = eventsFingerprintForOrgRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `EventsFingerprintForOrg` query requires an argument of type `EventsFingerprintForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface EventsFingerprintForOrgVariables {
+  orgId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+}
+```
+### Return Type
+Recall that executing the `EventsFingerprintForOrg` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `EventsFingerprintForOrgData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface EventsFingerprintForOrgData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    status?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+### Using `EventsFingerprintForOrg`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, eventsFingerprintForOrg, EventsFingerprintForOrgVariables } from '@dataconnect/generated';
+
+// The `EventsFingerprintForOrg` query requires an argument of type `EventsFingerprintForOrgVariables`:
+const eventsFingerprintForOrgVars: EventsFingerprintForOrgVariables = {
+  orgId: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+};
+
+// Call the `eventsFingerprintForOrg()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await eventsFingerprintForOrg(eventsFingerprintForOrgVars);
+// Variables can be defined inline as well.
+const { data } = await eventsFingerprintForOrg({ orgId: ..., fromStartAt: ..., toStartAt: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await eventsFingerprintForOrg(dataConnect, eventsFingerprintForOrgVars);
+
+console.log(data.events);
+
+// Or, you can use the `Promise` API.
+eventsFingerprintForOrg(eventsFingerprintForOrgVars).then((response) => {
+  const data = response.data;
+  console.log(data.events);
+});
+```
+
+### Using `EventsFingerprintForOrg`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, eventsFingerprintForOrgRef, EventsFingerprintForOrgVariables } from '@dataconnect/generated';
+
+// The `EventsFingerprintForOrg` query requires an argument of type `EventsFingerprintForOrgVariables`:
+const eventsFingerprintForOrgVars: EventsFingerprintForOrgVariables = {
+  orgId: ..., 
+  fromStartAt: ..., 
+  toStartAt: ..., 
+};
+
+// Call the `eventsFingerprintForOrgRef()` function to get a reference to the query.
+const ref = eventsFingerprintForOrgRef(eventsFingerprintForOrgVars);
+// Variables can be defined inline as well.
+const ref = eventsFingerprintForOrgRef({ orgId: ..., fromStartAt: ..., toStartAt: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = eventsFingerprintForOrgRef(dataConnect, eventsFingerprintForOrgVars);
 
 // Call `executeQuery()` on the reference to execute the query.
 // You can use the `await` keyword to wait for the promise to resolve.
@@ -3254,7 +4685,7 @@ The `RenameWorkerForOrg` mutation requires an argument of type `RenameWorkerForO
 export interface RenameWorkerForOrgVariables {
   orgId: string;
   login: string;
-  newLogin: string;
+  newLogin?: string;
   workerName?: string | null;
   loginEmail?: string | null;
   authUid?: string;
@@ -3298,7 +4729,7 @@ import { connectorConfig, renameWorkerForOrg, RenameWorkerForOrgVariables } from
 const renameWorkerForOrgVars: RenameWorkerForOrgVariables = {
   orgId: ..., 
   login: ..., 
-  newLogin: ..., 
+  newLogin: ..., // optional
   workerName: ..., // optional
   loginEmail: ..., // optional
   authUid: ..., // optional
@@ -3362,7 +4793,7 @@ import { connectorConfig, renameWorkerForOrgRef, RenameWorkerForOrgVariables } f
 const renameWorkerForOrgVars: RenameWorkerForOrgVariables = {
   orgId: ..., 
   login: ..., 
-  newLogin: ..., 
+  newLogin: ..., // optional
   workerName: ..., // optional
   loginEmail: ..., // optional
   authUid: ..., // optional

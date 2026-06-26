@@ -8,6 +8,7 @@ import {
   createWorkday,
   deleteEvent,
   forceDeletePortalEvents,
+  getEventsFingerprintForOrg,
   getTodayActiveWorkers,
   getWorkdays,
   getWorkerTime,
@@ -72,8 +73,8 @@ const DATA_SYNC_OVERLAY_DELAY_MS = 420
 const SIDEBAR_GLOBAL_SEARCH_RENDER_DELAY_MS = 80
 const SIDEBAR_GLOBAL_SEARCH_LAZY_DATA_DELAY_MS = 1600
 const SIDEBAR_GLOBAL_SEARCH_MIN_LAZY_QUERY_LENGTH = 3
-const ROUTE_TRANSITION_OVERLAY_DELAY_MS = 0
-const ROUTE_TRANSITION_MIN_VISIBLE_MS = 180
+const ROUTE_TRANSITION_OVERLAY_DELAY_MS = 160
+const ROUTE_TRANSITION_MIN_VISIBLE_MS = 90
 const ROUTE_SYNC_STALE_MS = 30 * 1000
 const ROUTE_SYNC_POLICY_STALE_FIRST = 'stale-first'
 const ROUTE_SYNC_POLICY_FORCE = 'force'
@@ -185,7 +186,7 @@ const PORTAL_ROUTE_FEATURE_KEYS = {
   orders: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar'],
   ordersMap: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar'],
   schedule: ['dashboard'],
-  zones: ['dashboard', 'zones'],
+  zones: ['zones'],
   workerProfile: ['dashboard', 'workerProfile'],
   workerAccount: ['dashboard', 'workerAccount'],
   workerTime: ['dashboard', 'workerTime'],
@@ -5321,6 +5322,7 @@ function createPortalFeatureContext() {
     getBackupDownload,
     getClients,
     getEffectiveStyle,
+    getEventsFingerprintForOrg,
     getWorkdays,
     getWorkers,
     getWorkerTime,

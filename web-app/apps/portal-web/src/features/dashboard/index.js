@@ -1935,6 +1935,15 @@ export function createDashboardFeature(ctx) {
     return formatDatePl(`${normalizedDay}T12:00:00`)
   }
 
+  function dashboardScheduleDayNameKey(dayName = '') {
+    return String(dayName ?? '')
+      .trim()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .toUpperCase()
+      .replace(/[^A-Z]/g, '')
+  }
+
   function dashboardScheduleSyntheticBucket(dayKey = todayYmd()) {
     const normalizedDay = dashboardActivityDayKey(dayKey)
     const dayStart = new Date(`${normalizedDay}T00:00:00`).getTime()
@@ -1973,9 +1982,26 @@ export function createDashboardFeature(ctx) {
 
   function dashboardScheduleBucketForDay(dayKey = todayYmd()) {
     const normalizedDay = dashboardActivityDayKey(dayKey)
-    const nativeBucket = (Array.isArray(appState.dashboardScheduleDays) ? appState.dashboardScheduleDays : [])
-      .find((day) => String(day?.key ?? '').trim() === normalizedDay)
-    return nativeBucket || dashboardScheduleSyntheticBucket(normalizedDay)
+    const days = Array.isArray(appState.dashboardScheduleDays) ? appState.dashboardScheduleDays : []
+    const nativeBucket = days.find((day) => String(day?.key ?? '').trim() === normalizedDay)
+    if (nativeBucket) {
+      return nativeBucket
+    }
+
+    const expectedDayName = dashboardScheduleDayNameFromYmd(normalizedDay)
+    const expectedDayNameKey = dashboardScheduleDayNameKey(expectedDayName)
+    const weekdayBucket = days.find((day) => dashboardScheduleDayNameKey(day?.dayName) === expectedDayNameKey)
+    if (weekdayBucket) {
+      return {
+        ...weekdayBucket,
+        key: normalizedDay,
+        dayName: expectedDayName,
+        dateLabel: dashboardScheduleDateLabelFromYmd(normalizedDay),
+        weekdayFallback: true,
+      }
+    }
+
+    return dashboardScheduleSyntheticBucket(normalizedDay)
   }
 
   function dashboardScheduleMeaningfulLineText(value = '') {
@@ -4846,6 +4872,8 @@ export function createDashboardFeature(ctx) {
         if (!appState.dashboardScheduleSelectedDay || !selectedExists) {
           appState.dashboardScheduleSelectedDay = String(todayMatch.key)
         }
+      } else if (/^\d{4}-\d{2}-\d{2}$/.test(preferredToday) && (!appState.dashboardScheduleSelectedDay || !selectedExists)) {
+        appState.dashboardScheduleSelectedDay = preferredToday
       } else {
         appState.dashboardScheduleSelectedDay = String(
           dashboardPickNearestScheduleDayKey(scheduleBoard.days, preferredToday),
@@ -5555,7 +5583,8 @@ export function createDashboardFeature(ctx) {
 
     syncDashboardSidePanelHeight()
     requestAnimationFrame(() => syncDashboardSidePanelHeight())
-    appState.dashboardActivityDay = dashboardActivityDayKey(appState.dashboardActivityDay || todayYmd())
+    appState.dashboardActivityDay = dashboardActivityDayKey(todayYmd())
+    appState.dashboardScheduleSelectedDay = appState.dashboardActivityDay
     appState.dashboardActivityView = dashboardReadActivityViewPreference()
     dashboardSetActivityView(appState.dashboardActivityView, { persist: false })
 

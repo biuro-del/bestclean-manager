@@ -22,6 +22,7 @@ export function createEventsFeature(ctx) {
     formatDatePl,
     formatTime,
     getClients,
+    getEventsFingerprintForOrg,
     getWorkdays,
     getWorkers,
     getZones,
@@ -38,7 +39,6 @@ export function createEventsFeature(ctx) {
     reportGeoOpenModal,
     reportGeoReadCoordsFromNode,
     reportGeoShowPreview,
-    reportHistoryFilterOptions,
     reportHistoryExtractGpsCoords,
     reportHistoryRefreshAfterEventSave,
     reportHistoryResolveDayGpsCoords,
@@ -63,9 +63,18 @@ export function createEventsFeature(ctx) {
     zoneQrCodeFromRow,
   } = ctx
   const EVENTS_REFRESH_POLL_MS = 10000
+  const EVENTS_DEFAULT_PAGE_SIZE = 25
+  const EVENTS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
+  const EVENT_EDITOR_PICKER_MAX_OPTIONS = 36
+  const EVENT_EDITOR_PICKER_EMPTY_MAX_OPTIONS = 18
   let eventsRefreshInFlight = null
   let eventsRefreshQueuedOptions = null
   let eventsPollingTimer = 0
+  let eventsLastFingerprintToken = ''
+  let eventReferenceLoadPromise = null
+  let eventEditorOptionsCache = null
+  let eventEditorOptionsCacheKey = ''
+  let eventEditorPickerFilterFrame = 0
   let eventPendingSavedRows = []
 
   function mergeEventsRefreshOptions(base = {}, incoming = {}) {
@@ -611,11 +620,28 @@ export function createEventsFeature(ctx) {
     }
 
     const pageSizeRaw = Number(appState.eventsPageSize)
-    const pageSize = Number.isFinite(pageSizeRaw) && pageSizeRaw > 0 ? Math.floor(pageSizeRaw) : 50
+    const pageSize = normalizeEventsPageSize(pageSizeRaw)
     return {
       rows: [...visiblePendingRows, ...sourceRows].slice(0, pageSize),
       pendingCount: visiblePendingRows.length,
     }
+  }
+
+  function normalizeEventsPageSize(value) {
+    const parsed = Number(value)
+    const normalized = Number.isFinite(parsed) ? Math.floor(parsed) : EVENTS_DEFAULT_PAGE_SIZE
+    return EVENTS_PAGE_SIZE_OPTIONS.includes(normalized) ? normalized : EVENTS_DEFAULT_PAGE_SIZE
+  }
+
+  function syncEventsPageSizeControl() {
+    const select = document.getElementById('evPageSize')
+    if (!(select instanceof HTMLSelectElement)) {
+      return
+    }
+
+    const pageSize = normalizeEventsPageSize(appState.eventsPageSize)
+    appState.eventsPageSize = pageSize
+    select.value = String(pageSize)
   }
 
   function eventRowTextIncludes(row, query, fields) {
@@ -693,7 +719,7 @@ export function createEventsFeature(ctx) {
     const currentRows = Array.isArray(appState.eventRows) ? appState.eventRows : []
     const merged = eventMergePendingRowsForCurrentView(currentRows)
     const pageSizeRaw = Number(appState.eventsPageSize)
-    const pageSize = Number.isFinite(pageSizeRaw) && pageSizeRaw > 0 ? Math.floor(pageSizeRaw) : 50
+    const pageSize = normalizeEventsPageSize(pageSizeRaw)
     const totalRaw = Number(appState.eventsTotal)
     appState.eventsPage = 1
     appState.eventsPageSize = pageSize
@@ -936,31 +962,60 @@ export function createEventsFeature(ctx) {
           worker?.fullName ??
           '',
       ).trim()
+    const workerLookupMap = new Map()
+    const workerNameMap = new Map()
+    const workerSurnameMap = new Map()
+    const ambiguousWorkerNames = new Set()
+    const ambiguousWorkerSurnames = new Set()
+    ;(Array.isArray(appState.workers) ? appState.workers : []).forEach((worker) => {
+      const workerKeys = [
+        worker?.login,
+        worker?.workerLogin,
+        worker?.id,
+        worker?.workerId,
+        worker?.email,
+        worker?.loginEmail,
+      ]
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)
+      workerKeys.forEach((key) => {
+        const normalizedKey = normalizeLookup(key)
+        const localKey = normalizeLookup(toLoginLocalPart(key))
+        if (normalizedKey && !workerLookupMap.has(normalizedKey)) {
+          workerLookupMap.set(normalizedKey, worker)
+        }
+        if (localKey && !workerLookupMap.has(localKey)) {
+          workerLookupMap.set(localKey, worker)
+        }
+      })
+
+      const normalizedName = normalizePersonValue(workerDisplayName(worker))
+      if (!normalizedName) {
+        return
+      }
+      if (workerNameMap.has(normalizedName)) {
+        ambiguousWorkerNames.add(normalizedName)
+      } else {
+        workerNameMap.set(normalizedName, worker)
+      }
+
+      const surname = normalizedName.split(' ').filter(Boolean).pop()
+      if (!surname) {
+        return
+      }
+      if (workerSurnameMap.has(surname)) {
+        ambiguousWorkerSurnames.add(surname)
+      } else {
+        workerSurnameMap.set(surname, worker)
+      }
+    })
     const findWorkerByLogin = (loginText) => {
       const variants = [normalizeLookup(loginText), normalizeLookup(toLoginLocalPart(loginText))].filter(Boolean)
       if (!variants.length) {
         return null
       }
 
-      return (
-        appState.workers.find((worker) => {
-          const workerKeys = [
-            worker?.login,
-            worker?.workerLogin,
-            worker?.id,
-            worker?.workerId,
-            worker?.email,
-            worker?.loginEmail,
-          ]
-            .map((value) => String(value ?? '').trim())
-            .filter(Boolean)
-          const normalizedKeys = new Set([
-            ...workerKeys.map((value) => normalizeLookup(value)),
-            ...workerKeys.map((value) => normalizeLookup(toLoginLocalPart(value))),
-          ])
-          return variants.some((variant) => normalizedKeys.has(variant))
-        }) ?? null
-      )
+      return variants.map((variant) => workerLookupMap.get(variant)).find(Boolean) ?? null
     }
     const findWorkerByName = (nameText) => {
       const normalized = normalizePersonValue(nameText)
@@ -973,21 +1028,13 @@ export function createEventsFeature(ctx) {
         return null
       }
 
-      const exactMatch =
-        appState.workers.find((worker) => normalizePersonValue(workerDisplayName(worker)) === normalized) ?? null
+      const exactMatch = ambiguousWorkerNames.has(normalized) ? null : workerNameMap.get(normalized) ?? null
       if (exactMatch) {
         return exactMatch
       }
 
       const surname = parts[parts.length - 1]
-      const surnameMatches = appState.workers.filter((worker) => {
-        const workerParts = normalizePersonValue(workerDisplayName(worker)).split(' ').filter(Boolean)
-        if (!workerParts.length) {
-          return false
-        }
-        return workerParts[workerParts.length - 1] === surname
-      })
-      return surnameMatches.length === 1 ? surnameMatches[0] : null
+      return ambiguousWorkerSurnames.has(surname) ? null : workerSurnameMap.get(surname) ?? null
     }
     const resolveWorkerNameFromWorkers = (workerLoginCandidate, workerNameCandidate) => {
       const loginText = String(workerLoginCandidate ?? '').trim()
@@ -1248,6 +1295,45 @@ export function createEventsFeature(ctx) {
     input.value = select.value ? String(selectedOption?.textContent ?? '').trim() : ''
   }
 
+  function eventEditorOptionSearchText(option) {
+    const cached = String(option?.searchText ?? '').trim()
+    if (cached) {
+      return cached
+    }
+
+    return normalizeSearchText(`${option?.label ?? ''} ${option?.value ?? ''}`)
+  }
+
+  function eventEditorPickerFilteredOptions(options, query, currentValue, { expandOnEmpty = false } = {}) {
+    const sourceOptions = Array.isArray(options) ? options : []
+    const queryKey = normalizeSearchText(query)
+    const normalizedCurrent = String(currentValue ?? '').trim()
+    const maxOptions = queryKey ? EVENT_EDITOR_PICKER_MAX_OPTIONS : EVENT_EDITOR_PICKER_EMPTY_MAX_OPTIONS
+    const selectedOption = normalizedCurrent
+      ? sourceOptions.find((option) => String(option?.value ?? '').trim() === normalizedCurrent) ?? null
+      : null
+
+    if (!queryKey) {
+      const baseOptions = expandOnEmpty ? sourceOptions.slice(0, maxOptions) : []
+      if (selectedOption && !baseOptions.some((option) => String(option?.value ?? '').trim() === normalizedCurrent)) {
+        return [selectedOption, ...baseOptions].slice(0, maxOptions)
+      }
+      return baseOptions
+    }
+
+    const matches = []
+    for (const option of sourceOptions) {
+      if (matches.length >= maxOptions) {
+        break
+      }
+      if (eventEditorOptionSearchText(option).includes(queryKey)) {
+        matches.push(option)
+      }
+    }
+
+    return matches
+  }
+
   function eventEditorApplyPickerFilter(kind, { expandOnEmpty = false } = {}) {
     const config = eventEditorGetPickerConfig(kind)
     const select = document.getElementById(config.selectId)
@@ -1257,10 +1343,14 @@ export function createEventsFeature(ctx) {
 
     const currentValue = String(select.value ?? '').trim()
     const query = String(document.getElementById(config.inputId)?.value ?? '').trim()
-    const filteredOptions = reportHistoryFilterOptions(config.options, query)
+    const filteredOptions = eventEditorPickerFilteredOptions(config.options, query, currentValue, { expandOnEmpty })
     const placeholderLabel = query && !filteredOptions.length ? '(brak dopasowan)' : config.placeholderLabel
+    const nextOptionsKey = `${query}|${currentValue}|${filteredOptions.map((option) => option.value).join('|')}`
 
-    setSelectOptions(select, filteredOptions, placeholderLabel)
+    if (select.dataset.eventPickerOptionsKey !== nextOptionsKey) {
+      setSelectOptions(select, filteredOptions, placeholderLabel)
+      select.dataset.eventPickerOptionsKey = nextOptionsKey
+    }
     const placeholderOption = select.options[0]
     if (placeholderOption) {
       const hasMatches = filteredOptions.length > 0
@@ -1274,10 +1364,47 @@ export function createEventsFeature(ctx) {
     }
   }
 
+  function eventEditorSchedulePickerFilter(kind, options = {}) {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      eventEditorApplyPickerFilter(kind, options)
+      return
+    }
+
+    if (eventEditorPickerFilterFrame) {
+      window.cancelAnimationFrame(eventEditorPickerFilterFrame)
+    }
+    eventEditorPickerFilterFrame = window.requestAnimationFrame(() => {
+      eventEditorPickerFilterFrame = 0
+      eventEditorApplyPickerFilter(kind, options)
+    })
+  }
+
   function eventEditorApplyAllPickerFilters() {
     eventEditorApplyPickerFilter('worker')
     eventEditorApplyPickerFilter('client')
     eventEditorApplyPickerFilter('zone')
+  }
+
+  function eventEditorSetPickersLoading(isLoading) {
+    ;[
+      { inputId: 'evEditWorkerSearch', selectId: 'evEditWorker', label: 'Ladowanie pracownikow...' },
+      { inputId: 'evEditPomSearch', selectId: 'evEditPom', label: 'Ladowanie klientow...' },
+      { inputId: 'evEditStrefaSearch', selectId: 'evEditStrefa', label: 'Ladowanie stref...' },
+    ].forEach(({ inputId, selectId, label }) => {
+      const input = document.getElementById(inputId)
+      const select = document.getElementById(selectId)
+      if (input instanceof HTMLInputElement) {
+        input.disabled = Boolean(isLoading)
+      }
+      if (select instanceof HTMLSelectElement) {
+        select.disabled = Boolean(isLoading)
+        if (isLoading) {
+          setSelectOptions(select, [], label)
+          select.dataset.eventPickerOptionsKey = ''
+          eventEditorSetPickerExpanded({ inputId, selectId }, false, 0)
+        }
+      }
+    })
   }
 
   function eventEditorEnsureOption(options, value, fallbackLabel) {
@@ -1303,6 +1430,88 @@ export function createEventsFeature(ctx) {
     })
   }
 
+  function eventEditorBuildOptionsCache() {
+    const workerKey = (Array.isArray(appState.workers) ? appState.workers : [])
+      .map((worker) => `${worker?.login ?? worker?.id ?? ''}:${worker?.name ?? worker?.workerName ?? ''}`)
+      .join('|')
+    const clientKey = (Array.isArray(appState.clients) ? appState.clients : [])
+      .map((client) => `${client?.id ?? ''}:${client?.name ?? ''}`)
+      .join('|')
+    const zoneKey = (Array.isArray(appState.zones) ? appState.zones : [])
+      .map((zone) => `${zone?.id ?? ''}:${zone?.clientId ?? ''}:${zone?.name ?? zone?.zone ?? ''}`)
+      .join('|')
+    const cacheKey = `${workerKey}::${clientKey}::${zoneKey}`
+
+    if (eventEditorOptionsCache && eventEditorOptionsCacheKey === cacheKey) {
+      return eventEditorOptionsCache
+    }
+
+    const workerLabelByLogin = new Map()
+    const workerOptions = (Array.isArray(appState.workers) ? appState.workers : [])
+      .map((worker) => {
+        const login = String(worker.login ?? worker.id ?? '').trim()
+        if (!login) {
+          return null
+        }
+
+        const label = worker.name || login
+        workerLabelByLogin.set(login, label)
+        return {
+          value: login,
+          label,
+          searchText: normalizeSearchText(`${label} ${login}`),
+        }
+      })
+      .filter(Boolean)
+
+    const clientLabelById = new Map()
+    const clientOptions = (Array.isArray(appState.clients) ? appState.clients : []).map((client) => {
+      const value = String(client.id)
+      const label = client.name || client.id
+      clientLabelById.set(value, label)
+      return { value, label, searchText: normalizeSearchText(`${label} ${value}`) }
+    })
+    clientOptions.sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
+
+    const zoneLabelById = new Map()
+    const zoneOptions = []
+    const zoneOptionsByClient = new Map()
+    ;(Array.isArray(appState.zones) ? appState.zones : [])
+      .map((zone) => mapZoneForView(zone))
+      .filter((zone) => !isUnassignedCleanZone(zone))
+      .forEach((zone) => {
+        const zoneId = String(zone.id ?? '').trim()
+        if (!zoneId) {
+          return
+        }
+
+        const option = {
+          value: zoneId,
+          label: zone.name || zone.zone || zoneId,
+          searchText: normalizeSearchText(`${zone.name || zone.zone || zoneId} ${zoneId}`),
+        }
+        const clientId = String(zone.clientId ?? '').trim()
+        zoneLabelById.set(zoneId, option.label)
+        zoneOptions.push(option)
+        if (!zoneOptionsByClient.has(clientId)) {
+          zoneOptionsByClient.set(clientId, [])
+        }
+        zoneOptionsByClient.get(clientId).push(option)
+      })
+
+    eventEditorOptionsCacheKey = cacheKey
+    eventEditorOptionsCache = {
+      workerOptions,
+      clientOptions,
+      zoneOptions,
+      zoneOptionsByClient,
+      workerLabelByLogin,
+      clientLabelById,
+      zoneLabelById,
+    }
+    return eventEditorOptionsCache
+  }
+
   function populateEventEditorOptions(selectedWorkerLogin, selectedClientId, selectedZoneId) {
     const workerSelect = document.getElementById('evEditWorker')
     const clientSelect = document.getElementById('evEditPom')
@@ -1312,60 +1521,19 @@ export function createEventsFeature(ctx) {
       return
     }
 
-    const workerOptions = appState.workers
-      .map((worker) => {
-        const login = String(worker.login ?? worker.id ?? '').trim()
-        if (!login) {
-          return null
-        }
-
-        return {
-          value: login,
-          label: worker.name || login,
-        }
-      })
-      .filter(Boolean)
-
-    const clientOptions = appState.clients.map((client) => ({
-      value: String(client.id),
-      label: client.name || client.id,
-    }))
-    clientOptions.sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
-
+    const optionsCache = eventEditorBuildOptionsCache()
     const normalizedClientId = String(selectedClientId ?? '').trim()
-
-    const availableZones = normalizedClientId
-      ? appState.zones.filter((zone) => String(zone.clientId ?? '').trim() === normalizedClientId)
-      : appState.zones
-
-    const zoneOptions = availableZones
-      .map((zone) => mapZoneForView(zone))
-      .filter((zone) => !isUnassignedCleanZone(zone))
-      .map((zone) => {
-        const zoneId = String(zone.id ?? '').trim()
-        if (!zoneId) {
-          return null
-        }
-
-        return {
-          value: zoneId,
-          label: zone.name || zone.zone || zoneId,
-        }
-      })
-      .filter(Boolean)
-
+    const zoneOptions = normalizedClientId
+      ? optionsCache.zoneOptionsByClient.get(normalizedClientId) ?? []
+      : optionsCache.zoneOptions
     const normalizedWorkerLogin = String(selectedWorkerLogin ?? '').trim()
     const normalizedZoneId = String(selectedZoneId ?? '').trim()
-    const fallbackWorkerLabel =
-      appState.workers.find((worker) => String(worker.login ?? worker.id ?? '').trim() === normalizedWorkerLogin)?.name ??
-      normalizedWorkerLogin
-    const fallbackClientLabel =
-      appState.clients.find((client) => String(client.id).trim() === normalizedClientId)?.name ?? normalizedClientId
-    const fallbackZoneLabel =
-      appState.zones.find((zone) => String(zone.id ?? '').trim() === normalizedZoneId)?.name ?? normalizedZoneId
+    const fallbackWorkerLabel = optionsCache.workerLabelByLogin.get(normalizedWorkerLogin) ?? normalizedWorkerLogin
+    const fallbackClientLabel = optionsCache.clientLabelById.get(normalizedClientId) ?? normalizedClientId
+    const fallbackZoneLabel = optionsCache.zoneLabelById.get(normalizedZoneId) ?? normalizedZoneId
 
-    appState.eventEditorWorkerOptions = eventEditorEnsureOption(workerOptions, normalizedWorkerLogin, fallbackWorkerLabel)
-    appState.eventEditorClientOptions = eventEditorEnsureOption(clientOptions, normalizedClientId, fallbackClientLabel)
+    appState.eventEditorWorkerOptions = eventEditorEnsureOption(optionsCache.workerOptions, normalizedWorkerLogin, fallbackWorkerLabel)
+    appState.eventEditorClientOptions = eventEditorEnsureOption(optionsCache.clientOptions, normalizedClientId, fallbackClientLabel)
     appState.eventEditorZoneOptions = eventEditorEnsureOption(zoneOptions, normalizedZoneId, fallbackZoneLabel)
 
     eventEditorApplyAllPickerFilters()
@@ -1508,6 +1676,10 @@ export function createEventsFeature(ctx) {
     ensureSingleOverlayInBody('evCommentOverlay')
   }
 
+  function eventEditorReferencesReady() {
+    return Boolean(appState.workersLoaded && appState.clientsLoaded && appState.zonesLoaded)
+  }
+
   async function openEventEditor(item) {
     ensureEventOverlaysMountedToBody()
     const overlay = document.getElementById('evEditorOverlay')
@@ -1515,7 +1687,6 @@ export function createEventsFeature(ctx) {
       return
     }
 
-    await ensureEventReferenceDataLoaded()
     syncEventModalLogo()
 
     appState.eventEditorMode = 'edit'
@@ -1533,12 +1704,16 @@ export function createEventsFeature(ctx) {
     const deleteButton = document.getElementById('evDeleteBtn')
     const saveButton = document.getElementById('evSaveBtn')
 
-    const zone = getZoneById(item.roomId || item.utilityRoomId)
-    const selectedClientId = zone?.clientId ?? item.clientId
-    const selectedZoneId = zone?.id ?? item.roomId ?? item.utilityRoomId
-
     eventEditorResetSearchInputs()
-    populateEventEditorOptions(item.workerLogin, selectedClientId, selectedZoneId)
+    if (eventEditorReferencesReady()) {
+      const zone = getZoneById(item.roomId || item.utilityRoomId)
+      const selectedClientId = zone?.clientId ?? item.clientId
+      const selectedZoneId = zone?.id ?? item.roomId ?? item.utilityRoomId
+      eventEditorSetPickersLoading(false)
+      populateEventEditorOptions(item.workerLogin, selectedClientId, selectedZoneId)
+    } else {
+      eventEditorSetPickersLoading(true)
+    }
 
     if (title) title.textContent = 'Edytuj zdarzenie'
     if (cycleId) cycleId.textContent = String(item.eventId ?? item.workdayId ?? '-')
@@ -1559,7 +1734,7 @@ export function createEventsFeature(ctx) {
       scannedQrInput.value = eventEditorScannedQrLabel(item)
     }
     if (saveButton) {
-      saveButton.disabled = false
+      saveButton.disabled = !eventEditorReferencesReady()
       saveButton.textContent = 'Zapisz'
     }
     if (deleteButton) {
@@ -1569,6 +1744,28 @@ export function createEventsFeature(ctx) {
     }
 
     overlay.style.display = 'flex'
+
+    if (!eventEditorReferencesReady()) {
+      try {
+        await ensureEventReferenceDataLoaded()
+        if (appState.eventEditorMode !== 'edit' || appState.eventEditorItem !== item) {
+          return
+        }
+        const zone = getZoneById(item.roomId || item.utilityRoomId)
+        const selectedClientId = zone?.clientId ?? item.clientId
+        const selectedZoneId = zone?.id ?? item.roomId ?? item.utilityRoomId
+        eventEditorSetPickersLoading(false)
+        populateEventEditorOptions(item.workerLogin, selectedClientId, selectedZoneId)
+        if (saveButton) {
+          saveButton.disabled = false
+        }
+      } catch (error) {
+        console.warn('[events] editor references failed', error)
+        if (saveButton) {
+          saveButton.disabled = true
+        }
+      }
+    }
   }
 
   async function openCreateEventEditor() {
@@ -1583,7 +1780,6 @@ export function createEventsFeature(ctx) {
       return
     }
 
-    await ensureEventReferenceDataLoaded()
     syncEventModalLogo()
 
     appState.eventEditorMode = 'add'
@@ -1601,7 +1797,12 @@ export function createEventsFeature(ctx) {
     const saveButton = document.getElementById('evSaveBtn')
 
     eventEditorResetSearchInputs()
-    populateEventEditorOptions('', '', '')
+    if (eventEditorReferencesReady()) {
+      eventEditorSetPickersLoading(false)
+      populateEventEditorOptions('', '', '')
+    } else {
+      eventEditorSetPickersLoading(true)
+    }
 
     if (title) title.textContent = 'Dodaj zdarzenie'
     if (cycleId) cycleId.textContent = '-'
@@ -1617,7 +1818,7 @@ export function createEventsFeature(ctx) {
       scannedQrInput.value = '-'
     }
     if (saveButton) {
-      saveButton.disabled = false
+      saveButton.disabled = !eventEditorReferencesReady()
       saveButton.textContent = 'Zapisz'
     }
     if (deleteButton) {
@@ -1627,6 +1828,25 @@ export function createEventsFeature(ctx) {
     }
 
     overlay.style.display = 'flex'
+
+    if (!eventEditorReferencesReady()) {
+      try {
+        await ensureEventReferenceDataLoaded()
+        if (appState.eventEditorMode !== 'add' || appState.eventEditorItem !== null) {
+          return
+        }
+        eventEditorSetPickersLoading(false)
+        populateEventEditorOptions('', '', '')
+        if (saveButton) {
+          saveButton.disabled = false
+        }
+      } catch (error) {
+        console.warn('[events] editor references failed', error)
+        if (saveButton) {
+          saveButton.disabled = true
+        }
+      }
+    }
   }
 
   function closeEventEditor() {
@@ -2184,7 +2404,7 @@ export function createEventsFeature(ctx) {
       status: raw.status,
       q: raw.q,
       page: appState.eventsPage,
-      pageSize: appState.eventsPageSize,
+      pageSize: normalizeEventsPageSize(appState.eventsPageSize),
     }
   }
 
@@ -2193,13 +2413,17 @@ export function createEventsFeature(ctx) {
     const shownLabel = document.getElementById('evShownLabel')
     const prevBtn = document.getElementById('evPrevBtn')
     const nextBtn = document.getElementById('evNextBtn')
+    const hasNext = appState.eventsHasNext === true
+    const estimatedTotal = appState.eventsEstimatedTotal === true
+    const pageTotalLabel = estimatedTotal && hasNext ? `${appState.eventsTotalPages}+` : appState.eventsTotalPages
+    const totalLabel = estimatedTotal ? `${Math.max(0, Number(appState.eventsTotal ?? 0) - 1)}+` : appState.eventsTotal
 
     if (pageLabel) {
-      pageLabel.textContent = `Strona ${appState.eventsPage} / ${appState.eventsTotalPages}`
+      pageLabel.textContent = `Strona ${appState.eventsPage} / ${pageTotalLabel}`
     }
 
     if (shownLabel) {
-      shownLabel.textContent = `Wyświetlono: ${shown} · Wszystkie: ${appState.eventsTotal} · Na stronę: ${appState.eventsPageSize}`
+      shownLabel.textContent = `Wyswietlono: ${shown} - Wszystkie: ${totalLabel} - Na strone: ${appState.eventsPageSize}`
     }
 
     if (prevBtn) {
@@ -2207,7 +2431,7 @@ export function createEventsFeature(ctx) {
     }
 
     if (nextBtn) {
-      nextBtn.disabled = appState.eventsPage >= appState.eventsTotalPages
+      nextBtn.disabled = !hasNext && appState.eventsPage >= appState.eventsTotalPages
     }
   }
 
@@ -2550,7 +2774,9 @@ export function createEventsFeature(ctx) {
     }
 
     try {
-      await ensureEventReferenceDataLoaded()
+      void ensureEventReferenceDataLoaded().catch((error) => {
+        console.warn('[events] reference preload failed', error)
+      })
       const filters = readEventsFilters()
       const response = await getWorkdays(appState.session.orgId, {
         ...filters,
@@ -2558,14 +2784,22 @@ export function createEventsFeature(ctx) {
       })
       appState.eventsPage = response.page
       const responsePageSize = Number(response.pageSize)
-      appState.eventsPageSize = Number.isFinite(responsePageSize) && responsePageSize > 0 ? Math.floor(responsePageSize) : 50
+      appState.eventsPageSize = normalizeEventsPageSize(responsePageSize)
       const merged = eventMergePendingRowsForCurrentView(response.items)
+      appState.eventsHasNext = response.hasNext === true
+      appState.eventsEstimatedTotal = response.estimatedTotal === true
       appState.eventsTotal = Number(response.total ?? 0) + merged.pendingCount
-      appState.eventsTotalPages = Math.max(1, Math.ceil(appState.eventsTotal / appState.eventsPageSize))
+      const responseTotalPages = Number(response.totalPages)
+      appState.eventsTotalPages =
+        Number.isFinite(responseTotalPages) && responseTotalPages > 0
+          ? Math.floor(responseTotalPages)
+          : Math.max(1, Math.ceil(appState.eventsTotal / appState.eventsPageSize))
 
       renderEventsRows(merged.rows)
       updateEventsPager(merged.rows.length)
+      syncEventsPageSizeControl()
       setSubwelcomeMetric('#view-events .subwelcome', appState.eventsTotal)
+      void rememberEventsFingerprintForCurrentFilters()
     } catch (error) {
       if (silent) {
         console.warn('[events] silent refresh failed', error)
@@ -2585,6 +2819,54 @@ export function createEventsFeature(ctx) {
     }
   }
 
+  async function readEventsFingerprintTokenForCurrentFilters() {
+    if (typeof getEventsFingerprintForOrg !== 'function' || !appState.session?.orgId) {
+      return ''
+    }
+
+    const fingerprint = await getEventsFingerprintForOrg(appState.session.orgId, readEventsFilters())
+    return String(fingerprint?.token ?? '').trim()
+  }
+
+  async function rememberEventsFingerprintForCurrentFilters() {
+    try {
+      const token = await readEventsFingerprintTokenForCurrentFilters()
+      if (token) {
+        eventsLastFingerprintToken = token
+      }
+    } catch (error) {
+      console.warn('[events] fingerprint snapshot failed', error)
+    }
+  }
+
+  async function refreshEventsIfFingerprintChanged() {
+    if (!document.getElementById('evRows')) {
+      return
+    }
+
+    let token = ''
+    try {
+      token = await readEventsFingerprintTokenForCurrentFilters()
+    } catch (error) {
+      console.warn('[events] fingerprint polling failed', error)
+    }
+
+    if (!token) {
+      await fetchEventsForCurrentSession({ forceRefresh: true, silent: true })
+      return
+    }
+
+    if (!eventsLastFingerprintToken) {
+      eventsLastFingerprintToken = token
+      return
+    }
+
+    if (eventsLastFingerprintToken !== token) {
+      eventsLastFingerprintToken = token
+      await fetchEventsForCurrentSession({ forceRefresh: true, silent: true })
+    }
+  }
+
   function startEventsPolling() {
     if (typeof window === 'undefined' || eventsPollingTimer) {
       return
@@ -2593,7 +2875,7 @@ export function createEventsFeature(ctx) {
       if (!document.getElementById('evRows')) {
         return
       }
-      void fetchEventsForCurrentSession({ forceRefresh: true, silent: true })
+      void refreshEventsIfFingerprintChanged()
     }, EVENTS_REFRESH_POLL_MS)
   }
 
@@ -2611,42 +2893,53 @@ export function createEventsFeature(ctx) {
       return
     }
 
-    const loaders = []
-
-    if (!appState.workersLoaded) {
-      loaders.push(
-        getWorkers(appState.session.orgId).then((workers) => {
-          appState.workers = workers
-          appState.workersLoaded = true
-        }),
-      )
-    }
-
-    if (!appState.clientsLoaded) {
-      loaders.push(
-        getClients(appState.session.orgId).then((clients) => {
-          appState.clients = clients
-          appState.clientsLoaded = true
-        }),
-      )
-    }
-
-    if (!appState.zonesLoaded) {
-      loaders.push(
-        getZones(appState.session.orgId).then((zones) => {
-          appState.zones = zones
-          appState.zonesLoaded = true
-        }),
-      )
-    }
-
-    if (!loaders.length) {
+    if (appState.workersLoaded && appState.clientsLoaded && appState.zonesLoaded) {
       fillEventsClientFilterDatalist()
       return
     }
 
-    await Promise.all(loaders)
-    fillEventsClientFilterDatalist()
+    if (!eventReferenceLoadPromise) {
+      const loaders = []
+
+      if (!appState.workersLoaded) {
+        loaders.push(
+          getWorkers(appState.session.orgId).then((workers) => {
+            appState.workers = workers
+            appState.workersLoaded = true
+          }),
+        )
+      }
+
+      if (!appState.clientsLoaded) {
+        loaders.push(
+          getClients(appState.session.orgId).then((clients) => {
+            appState.clients = clients
+            appState.clientsLoaded = true
+          }),
+        )
+      }
+
+      if (!appState.zonesLoaded) {
+        loaders.push(
+          getZones(appState.session.orgId).then((zones) => {
+            appState.zones = zones
+            appState.zonesLoaded = true
+          }),
+        )
+      }
+
+      eventReferenceLoadPromise = Promise.all(loaders)
+        .then(() => {
+          eventEditorOptionsCache = null
+          eventEditorOptionsCacheKey = ''
+          fillEventsClientFilterDatalist()
+        })
+        .finally(() => {
+          eventReferenceLoadPromise = null
+        })
+    }
+
+    await eventReferenceLoadPromise
   }
 
 
@@ -2666,9 +2959,17 @@ export function createEventsFeature(ctx) {
       maxWidth: 680,
     })
     syncEventsActionPermissions()
+    syncEventsPageSizeControl()
 
     binding.add(document.getElementById('evSearchBtn'), 'click', () => {
       appState.eventsPage = 1
+      void fetchEventsForCurrentSession({ resetPage: false })
+    })
+
+    binding.add(document.getElementById('evPageSize'), 'change', (event) => {
+      appState.eventsPageSize = normalizeEventsPageSize(event.target?.value)
+      appState.eventsPage = 1
+      syncEventsPageSizeControl()
       void fetchEventsForCurrentSession({ resetPage: false })
     })
 
@@ -2689,7 +2990,7 @@ export function createEventsFeature(ctx) {
     })
 
     binding.add(document.getElementById('evNextBtn'), 'click', () => {
-      if (appState.eventsPage >= appState.eventsTotalPages) return
+      if (appState.eventsHasNext !== true && appState.eventsPage >= appState.eventsTotalPages) return
       appState.eventsPage += 1
       void fetchEventsForCurrentSession()
     })
@@ -2886,7 +3187,7 @@ export function createEventsFeature(ctx) {
       { inputId: 'evEditStrefaSearch', selectId: 'evEditStrefa', kind: 'zone' },
     ].forEach(({ inputId, selectId, kind }) => {
       binding.add(document.getElementById(inputId), 'input', () => {
-        eventEditorApplyPickerFilter(kind, { expandOnEmpty: true })
+        eventEditorSchedulePickerFilter(kind, { expandOnEmpty: true })
       })
       binding.add(document.getElementById(inputId), 'focus', () => {
         eventEditorApplyPickerFilter(kind, { expandOnEmpty: true })

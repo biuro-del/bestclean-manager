@@ -952,10 +952,13 @@ export function createZonesFeature(ctx) {
       return
     }
 
-    await ensureClientsForZones()
-
     if (!force && appState.zonesLoaded) {
       filterZonesTable({ resetPage: false })
+      if (!appState.clientsLoaded || !Array.isArray(appState.clients) || !appState.clients.length) {
+        void ensureClientsForZones()
+          .then(() => filterZonesTable({ resetPage: false }))
+          .catch(() => {})
+      }
       return
     }
 
@@ -963,6 +966,7 @@ export function createZonesFeature(ctx) {
       renderEmptyRow('Ładowanie danych...')
     }
 
+    const clientsPromise = ensureClientsForZones()
     try {
       const zones = await getZones(appState.session.orgId)
       const backendZoneIds = new Set(zones.map((zone) => zoneRecordId(zone)).filter(Boolean))
@@ -982,6 +986,9 @@ export function createZonesFeature(ctx) {
       appState.zonesLoaded = true
       filterZonesTable({ resetPage: true })
       setSubwelcomeMetric('#view-zones .subwelcome', visiblePortalZones().length)
+      void clientsPromise
+        .then(() => filterZonesTable({ resetPage: false }))
+        .catch(() => {})
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Błąd pobierania stref.'
       renderEmptyRow(message, 'is-error')

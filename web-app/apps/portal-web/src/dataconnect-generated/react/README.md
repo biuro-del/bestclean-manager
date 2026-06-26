@@ -29,8 +29,18 @@ You can also follow the instructions from the [Data Connect documentation](https
   - [*TasksForOrg*](#tasksfororg)
   - [*ZonesForOrg*](#zonesfororg)
   - [*WorkdaysForOrg*](#workdaysfororg)
+  - [*WorkdaysPageForOrg*](#workdayspagefororg)
+  - [*WorkdaysPageForOrgByWorker*](#workdayspagefororgbyworker)
+  - [*WorkdaysPageForOrgByRoom*](#workdayspagefororgbyroom)
+  - [*WorkdaysPageForOrgByStatus*](#workdayspagefororgbystatus)
+  - [*WorkdaysFingerprintForOrg*](#workdaysfingerprintfororg)
   - [*BackupCyclesForOrg*](#backupcyclesfororg)
   - [*EventsForOrg*](#eventsfororg)
+  - [*EventsPageForOrg*](#eventspagefororg)
+  - [*EventsPageForOrgByWorker*](#eventspagefororgbyworker)
+  - [*EventsPageForOrgByZone*](#eventspagefororgbyzone)
+  - [*EventsPageForOrgByStatus*](#eventspagefororgbystatus)
+  - [*EventsFingerprintForOrg*](#eventsfingerprintfororg)
   - [*WorkerWorkdaysForOrg*](#workerworkdaysfororg)
   - [*StorageForOrg*](#storagefororg)
   - [*ClientStorageForClient*](#clientstorageforclient)
@@ -1336,6 +1346,544 @@ export default function WorkdaysForOrgComponent() {
 }
 ```
 
+## WorkdaysPageForOrg
+You can execute the `WorkdaysPageForOrg` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useWorkdaysPageForOrg(dc: DataConnect, vars: WorkdaysPageForOrgVariables, options?: useDataConnectQueryOptions<WorkdaysPageForOrgData>): UseDataConnectQueryResult<WorkdaysPageForOrgData, WorkdaysPageForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useWorkdaysPageForOrg(vars: WorkdaysPageForOrgVariables, options?: useDataConnectQueryOptions<WorkdaysPageForOrgData>): UseDataConnectQueryResult<WorkdaysPageForOrgData, WorkdaysPageForOrgVariables>;
+```
+
+### Variables
+The `WorkdaysPageForOrg` Query requires an argument of type `WorkdaysPageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface WorkdaysPageForOrgVariables {
+  orgId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `WorkdaysPageForOrg` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `WorkdaysPageForOrg` Query is of type `WorkdaysPageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface WorkdaysPageForOrgData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `WorkdaysPageForOrg`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, WorkdaysPageForOrgVariables } from '@dataconnect/generated';
+import { useWorkdaysPageForOrg } from '@dataconnect/generated/react'
+
+export default function WorkdaysPageForOrgComponent() {
+  // The `useWorkdaysPageForOrg` Query hook requires an argument of type `WorkdaysPageForOrgVariables`:
+  const workdaysPageForOrgVars: WorkdaysPageForOrgVariables = {
+    orgId: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useWorkdaysPageForOrg(workdaysPageForOrgVars);
+  // Variables can be defined inline as well.
+  const query = useWorkdaysPageForOrg({ orgId: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useWorkdaysPageForOrg(dataConnect, workdaysPageForOrgVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysPageForOrg(workdaysPageForOrgVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysPageForOrg(dataConnect, workdaysPageForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.workdays);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## WorkdaysPageForOrgByWorker
+You can execute the `WorkdaysPageForOrgByWorker` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useWorkdaysPageForOrgByWorker(dc: DataConnect, vars: WorkdaysPageForOrgByWorkerVariables, options?: useDataConnectQueryOptions<WorkdaysPageForOrgByWorkerData>): UseDataConnectQueryResult<WorkdaysPageForOrgByWorkerData, WorkdaysPageForOrgByWorkerVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useWorkdaysPageForOrgByWorker(vars: WorkdaysPageForOrgByWorkerVariables, options?: useDataConnectQueryOptions<WorkdaysPageForOrgByWorkerData>): UseDataConnectQueryResult<WorkdaysPageForOrgByWorkerData, WorkdaysPageForOrgByWorkerVariables>;
+```
+
+### Variables
+The `WorkdaysPageForOrgByWorker` Query requires an argument of type `WorkdaysPageForOrgByWorkerVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface WorkdaysPageForOrgByWorkerVariables {
+  orgId: string;
+  workerLogin: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `WorkdaysPageForOrgByWorker` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `WorkdaysPageForOrgByWorker` Query is of type `WorkdaysPageForOrgByWorkerData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface WorkdaysPageForOrgByWorkerData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `WorkdaysPageForOrgByWorker`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, WorkdaysPageForOrgByWorkerVariables } from '@dataconnect/generated';
+import { useWorkdaysPageForOrgByWorker } from '@dataconnect/generated/react'
+
+export default function WorkdaysPageForOrgByWorkerComponent() {
+  // The `useWorkdaysPageForOrgByWorker` Query hook requires an argument of type `WorkdaysPageForOrgByWorkerVariables`:
+  const workdaysPageForOrgByWorkerVars: WorkdaysPageForOrgByWorkerVariables = {
+    orgId: ..., 
+    workerLogin: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useWorkdaysPageForOrgByWorker(workdaysPageForOrgByWorkerVars);
+  // Variables can be defined inline as well.
+  const query = useWorkdaysPageForOrgByWorker({ orgId: ..., workerLogin: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useWorkdaysPageForOrgByWorker(dataConnect, workdaysPageForOrgByWorkerVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysPageForOrgByWorker(workdaysPageForOrgByWorkerVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysPageForOrgByWorker(dataConnect, workdaysPageForOrgByWorkerVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.workdays);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## WorkdaysPageForOrgByRoom
+You can execute the `WorkdaysPageForOrgByRoom` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useWorkdaysPageForOrgByRoom(dc: DataConnect, vars: WorkdaysPageForOrgByRoomVariables, options?: useDataConnectQueryOptions<WorkdaysPageForOrgByRoomData>): UseDataConnectQueryResult<WorkdaysPageForOrgByRoomData, WorkdaysPageForOrgByRoomVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useWorkdaysPageForOrgByRoom(vars: WorkdaysPageForOrgByRoomVariables, options?: useDataConnectQueryOptions<WorkdaysPageForOrgByRoomData>): UseDataConnectQueryResult<WorkdaysPageForOrgByRoomData, WorkdaysPageForOrgByRoomVariables>;
+```
+
+### Variables
+The `WorkdaysPageForOrgByRoom` Query requires an argument of type `WorkdaysPageForOrgByRoomVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface WorkdaysPageForOrgByRoomVariables {
+  orgId: string;
+  utilityRoomId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `WorkdaysPageForOrgByRoom` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `WorkdaysPageForOrgByRoom` Query is of type `WorkdaysPageForOrgByRoomData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface WorkdaysPageForOrgByRoomData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `WorkdaysPageForOrgByRoom`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, WorkdaysPageForOrgByRoomVariables } from '@dataconnect/generated';
+import { useWorkdaysPageForOrgByRoom } from '@dataconnect/generated/react'
+
+export default function WorkdaysPageForOrgByRoomComponent() {
+  // The `useWorkdaysPageForOrgByRoom` Query hook requires an argument of type `WorkdaysPageForOrgByRoomVariables`:
+  const workdaysPageForOrgByRoomVars: WorkdaysPageForOrgByRoomVariables = {
+    orgId: ..., 
+    utilityRoomId: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useWorkdaysPageForOrgByRoom(workdaysPageForOrgByRoomVars);
+  // Variables can be defined inline as well.
+  const query = useWorkdaysPageForOrgByRoom({ orgId: ..., utilityRoomId: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useWorkdaysPageForOrgByRoom(dataConnect, workdaysPageForOrgByRoomVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysPageForOrgByRoom(workdaysPageForOrgByRoomVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysPageForOrgByRoom(dataConnect, workdaysPageForOrgByRoomVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.workdays);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## WorkdaysPageForOrgByStatus
+You can execute the `WorkdaysPageForOrgByStatus` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useWorkdaysPageForOrgByStatus(dc: DataConnect, vars: WorkdaysPageForOrgByStatusVariables, options?: useDataConnectQueryOptions<WorkdaysPageForOrgByStatusData>): UseDataConnectQueryResult<WorkdaysPageForOrgByStatusData, WorkdaysPageForOrgByStatusVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useWorkdaysPageForOrgByStatus(vars: WorkdaysPageForOrgByStatusVariables, options?: useDataConnectQueryOptions<WorkdaysPageForOrgByStatusData>): UseDataConnectQueryResult<WorkdaysPageForOrgByStatusData, WorkdaysPageForOrgByStatusVariables>;
+```
+
+### Variables
+The `WorkdaysPageForOrgByStatus` Query requires an argument of type `WorkdaysPageForOrgByStatusVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface WorkdaysPageForOrgByStatusVariables {
+  orgId: string;
+  status: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `WorkdaysPageForOrgByStatus` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `WorkdaysPageForOrgByStatus` Query is of type `WorkdaysPageForOrgByStatusData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface WorkdaysPageForOrgByStatusData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `WorkdaysPageForOrgByStatus`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, WorkdaysPageForOrgByStatusVariables } from '@dataconnect/generated';
+import { useWorkdaysPageForOrgByStatus } from '@dataconnect/generated/react'
+
+export default function WorkdaysPageForOrgByStatusComponent() {
+  // The `useWorkdaysPageForOrgByStatus` Query hook requires an argument of type `WorkdaysPageForOrgByStatusVariables`:
+  const workdaysPageForOrgByStatusVars: WorkdaysPageForOrgByStatusVariables = {
+    orgId: ..., 
+    status: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useWorkdaysPageForOrgByStatus(workdaysPageForOrgByStatusVars);
+  // Variables can be defined inline as well.
+  const query = useWorkdaysPageForOrgByStatus({ orgId: ..., status: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useWorkdaysPageForOrgByStatus(dataConnect, workdaysPageForOrgByStatusVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysPageForOrgByStatus(workdaysPageForOrgByStatusVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysPageForOrgByStatus(dataConnect, workdaysPageForOrgByStatusVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.workdays);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## WorkdaysFingerprintForOrg
+You can execute the `WorkdaysFingerprintForOrg` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useWorkdaysFingerprintForOrg(dc: DataConnect, vars: WorkdaysFingerprintForOrgVariables, options?: useDataConnectQueryOptions<WorkdaysFingerprintForOrgData>): UseDataConnectQueryResult<WorkdaysFingerprintForOrgData, WorkdaysFingerprintForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useWorkdaysFingerprintForOrg(vars: WorkdaysFingerprintForOrgVariables, options?: useDataConnectQueryOptions<WorkdaysFingerprintForOrgData>): UseDataConnectQueryResult<WorkdaysFingerprintForOrgData, WorkdaysFingerprintForOrgVariables>;
+```
+
+### Variables
+The `WorkdaysFingerprintForOrg` Query requires an argument of type `WorkdaysFingerprintForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface WorkdaysFingerprintForOrgVariables {
+  orgId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+}
+```
+### Return Type
+Recall that calling the `WorkdaysFingerprintForOrg` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `WorkdaysFingerprintForOrg` Query is of type `WorkdaysFingerprintForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface WorkdaysFingerprintForOrgData {
+  workdays: ({
+    workdayId: string;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    status?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `WorkdaysFingerprintForOrg`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, WorkdaysFingerprintForOrgVariables } from '@dataconnect/generated';
+import { useWorkdaysFingerprintForOrg } from '@dataconnect/generated/react'
+
+export default function WorkdaysFingerprintForOrgComponent() {
+  // The `useWorkdaysFingerprintForOrg` Query hook requires an argument of type `WorkdaysFingerprintForOrgVariables`:
+  const workdaysFingerprintForOrgVars: WorkdaysFingerprintForOrgVariables = {
+    orgId: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useWorkdaysFingerprintForOrg(workdaysFingerprintForOrgVars);
+  // Variables can be defined inline as well.
+  const query = useWorkdaysFingerprintForOrg({ orgId: ..., fromStartAt: ..., toStartAt: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useWorkdaysFingerprintForOrg(dataConnect, workdaysFingerprintForOrgVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysFingerprintForOrg(workdaysFingerprintForOrgVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysFingerprintForOrg(dataConnect, workdaysFingerprintForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.workdays);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
 ## BackupCyclesForOrg
 You can execute the `BackupCyclesForOrg` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
 
@@ -1523,6 +2071,577 @@ export default function EventsForOrgComponent() {
   const dataConnect = getDataConnect(connectorConfig);
   const options = { staleTime: 5 * 1000 };
   const query = useEventsForOrg(dataConnect, eventsForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.events);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## EventsPageForOrg
+You can execute the `EventsPageForOrg` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useEventsPageForOrg(dc: DataConnect, vars: EventsPageForOrgVariables, options?: useDataConnectQueryOptions<EventsPageForOrgData>): UseDataConnectQueryResult<EventsPageForOrgData, EventsPageForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useEventsPageForOrg(vars: EventsPageForOrgVariables, options?: useDataConnectQueryOptions<EventsPageForOrgData>): UseDataConnectQueryResult<EventsPageForOrgData, EventsPageForOrgVariables>;
+```
+
+### Variables
+The `EventsPageForOrg` Query requires an argument of type `EventsPageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface EventsPageForOrgVariables {
+  orgId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `EventsPageForOrg` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `EventsPageForOrg` Query is of type `EventsPageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface EventsPageForOrgData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `EventsPageForOrg`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, EventsPageForOrgVariables } from '@dataconnect/generated';
+import { useEventsPageForOrg } from '@dataconnect/generated/react'
+
+export default function EventsPageForOrgComponent() {
+  // The `useEventsPageForOrg` Query hook requires an argument of type `EventsPageForOrgVariables`:
+  const eventsPageForOrgVars: EventsPageForOrgVariables = {
+    orgId: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useEventsPageForOrg(eventsPageForOrgVars);
+  // Variables can be defined inline as well.
+  const query = useEventsPageForOrg({ orgId: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useEventsPageForOrg(dataConnect, eventsPageForOrgVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsPageForOrg(eventsPageForOrgVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsPageForOrg(dataConnect, eventsPageForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.events);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## EventsPageForOrgByWorker
+You can execute the `EventsPageForOrgByWorker` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useEventsPageForOrgByWorker(dc: DataConnect, vars: EventsPageForOrgByWorkerVariables, options?: useDataConnectQueryOptions<EventsPageForOrgByWorkerData>): UseDataConnectQueryResult<EventsPageForOrgByWorkerData, EventsPageForOrgByWorkerVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useEventsPageForOrgByWorker(vars: EventsPageForOrgByWorkerVariables, options?: useDataConnectQueryOptions<EventsPageForOrgByWorkerData>): UseDataConnectQueryResult<EventsPageForOrgByWorkerData, EventsPageForOrgByWorkerVariables>;
+```
+
+### Variables
+The `EventsPageForOrgByWorker` Query requires an argument of type `EventsPageForOrgByWorkerVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface EventsPageForOrgByWorkerVariables {
+  orgId: string;
+  workerLogin: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `EventsPageForOrgByWorker` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `EventsPageForOrgByWorker` Query is of type `EventsPageForOrgByWorkerData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface EventsPageForOrgByWorkerData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `EventsPageForOrgByWorker`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, EventsPageForOrgByWorkerVariables } from '@dataconnect/generated';
+import { useEventsPageForOrgByWorker } from '@dataconnect/generated/react'
+
+export default function EventsPageForOrgByWorkerComponent() {
+  // The `useEventsPageForOrgByWorker` Query hook requires an argument of type `EventsPageForOrgByWorkerVariables`:
+  const eventsPageForOrgByWorkerVars: EventsPageForOrgByWorkerVariables = {
+    orgId: ..., 
+    workerLogin: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useEventsPageForOrgByWorker(eventsPageForOrgByWorkerVars);
+  // Variables can be defined inline as well.
+  const query = useEventsPageForOrgByWorker({ orgId: ..., workerLogin: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useEventsPageForOrgByWorker(dataConnect, eventsPageForOrgByWorkerVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsPageForOrgByWorker(eventsPageForOrgByWorkerVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsPageForOrgByWorker(dataConnect, eventsPageForOrgByWorkerVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.events);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## EventsPageForOrgByZone
+You can execute the `EventsPageForOrgByZone` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useEventsPageForOrgByZone(dc: DataConnect, vars: EventsPageForOrgByZoneVariables, options?: useDataConnectQueryOptions<EventsPageForOrgByZoneData>): UseDataConnectQueryResult<EventsPageForOrgByZoneData, EventsPageForOrgByZoneVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useEventsPageForOrgByZone(vars: EventsPageForOrgByZoneVariables, options?: useDataConnectQueryOptions<EventsPageForOrgByZoneData>): UseDataConnectQueryResult<EventsPageForOrgByZoneData, EventsPageForOrgByZoneVariables>;
+```
+
+### Variables
+The `EventsPageForOrgByZone` Query requires an argument of type `EventsPageForOrgByZoneVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface EventsPageForOrgByZoneVariables {
+  orgId: string;
+  zoneId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `EventsPageForOrgByZone` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `EventsPageForOrgByZone` Query is of type `EventsPageForOrgByZoneData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface EventsPageForOrgByZoneData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `EventsPageForOrgByZone`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, EventsPageForOrgByZoneVariables } from '@dataconnect/generated';
+import { useEventsPageForOrgByZone } from '@dataconnect/generated/react'
+
+export default function EventsPageForOrgByZoneComponent() {
+  // The `useEventsPageForOrgByZone` Query hook requires an argument of type `EventsPageForOrgByZoneVariables`:
+  const eventsPageForOrgByZoneVars: EventsPageForOrgByZoneVariables = {
+    orgId: ..., 
+    zoneId: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useEventsPageForOrgByZone(eventsPageForOrgByZoneVars);
+  // Variables can be defined inline as well.
+  const query = useEventsPageForOrgByZone({ orgId: ..., zoneId: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useEventsPageForOrgByZone(dataConnect, eventsPageForOrgByZoneVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsPageForOrgByZone(eventsPageForOrgByZoneVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsPageForOrgByZone(dataConnect, eventsPageForOrgByZoneVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.events);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## EventsPageForOrgByStatus
+You can execute the `EventsPageForOrgByStatus` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useEventsPageForOrgByStatus(dc: DataConnect, vars: EventsPageForOrgByStatusVariables, options?: useDataConnectQueryOptions<EventsPageForOrgByStatusData>): UseDataConnectQueryResult<EventsPageForOrgByStatusData, EventsPageForOrgByStatusVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useEventsPageForOrgByStatus(vars: EventsPageForOrgByStatusVariables, options?: useDataConnectQueryOptions<EventsPageForOrgByStatusData>): UseDataConnectQueryResult<EventsPageForOrgByStatusData, EventsPageForOrgByStatusVariables>;
+```
+
+### Variables
+The `EventsPageForOrgByStatus` Query requires an argument of type `EventsPageForOrgByStatusVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface EventsPageForOrgByStatusVariables {
+  orgId: string;
+  status: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `EventsPageForOrgByStatus` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `EventsPageForOrgByStatus` Query is of type `EventsPageForOrgByStatusData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface EventsPageForOrgByStatusData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `EventsPageForOrgByStatus`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, EventsPageForOrgByStatusVariables } from '@dataconnect/generated';
+import { useEventsPageForOrgByStatus } from '@dataconnect/generated/react'
+
+export default function EventsPageForOrgByStatusComponent() {
+  // The `useEventsPageForOrgByStatus` Query hook requires an argument of type `EventsPageForOrgByStatusVariables`:
+  const eventsPageForOrgByStatusVars: EventsPageForOrgByStatusVariables = {
+    orgId: ..., 
+    status: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useEventsPageForOrgByStatus(eventsPageForOrgByStatusVars);
+  // Variables can be defined inline as well.
+  const query = useEventsPageForOrgByStatus({ orgId: ..., status: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useEventsPageForOrgByStatus(dataConnect, eventsPageForOrgByStatusVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsPageForOrgByStatus(eventsPageForOrgByStatusVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsPageForOrgByStatus(dataConnect, eventsPageForOrgByStatusVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.events);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## EventsFingerprintForOrg
+You can execute the `EventsFingerprintForOrg` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useEventsFingerprintForOrg(dc: DataConnect, vars: EventsFingerprintForOrgVariables, options?: useDataConnectQueryOptions<EventsFingerprintForOrgData>): UseDataConnectQueryResult<EventsFingerprintForOrgData, EventsFingerprintForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useEventsFingerprintForOrg(vars: EventsFingerprintForOrgVariables, options?: useDataConnectQueryOptions<EventsFingerprintForOrgData>): UseDataConnectQueryResult<EventsFingerprintForOrgData, EventsFingerprintForOrgVariables>;
+```
+
+### Variables
+The `EventsFingerprintForOrg` Query requires an argument of type `EventsFingerprintForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface EventsFingerprintForOrgVariables {
+  orgId: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+}
+```
+### Return Type
+Recall that calling the `EventsFingerprintForOrg` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `EventsFingerprintForOrg` Query is of type `EventsFingerprintForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface EventsFingerprintForOrgData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    status?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `EventsFingerprintForOrg`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, EventsFingerprintForOrgVariables } from '@dataconnect/generated';
+import { useEventsFingerprintForOrg } from '@dataconnect/generated/react'
+
+export default function EventsFingerprintForOrgComponent() {
+  // The `useEventsFingerprintForOrg` Query hook requires an argument of type `EventsFingerprintForOrgVariables`:
+  const eventsFingerprintForOrgVars: EventsFingerprintForOrgVariables = {
+    orgId: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useEventsFingerprintForOrg(eventsFingerprintForOrgVars);
+  // Variables can be defined inline as well.
+  const query = useEventsFingerprintForOrg({ orgId: ..., fromStartAt: ..., toStartAt: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useEventsFingerprintForOrg(dataConnect, eventsFingerprintForOrgVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsFingerprintForOrg(eventsFingerprintForOrgVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsFingerprintForOrg(dataConnect, eventsFingerprintForOrgVars, options);
 
   // Then, you can render your component dynamically based on the status of the Query.
   if (query.isPending) {
@@ -2642,7 +3761,7 @@ The `RenameWorkerForOrg` Mutation requires an argument of type `RenameWorkerForO
 export interface RenameWorkerForOrgVariables {
   orgId: string;
   login: string;
-  newLogin: string;
+  newLogin?: string;
   workerName?: string | null;
   loginEmail?: string | null;
   authUid?: string;
@@ -2716,7 +3835,7 @@ export default function RenameWorkerForOrgComponent() {
   const renameWorkerForOrgVars: RenameWorkerForOrgVariables = {
     orgId: ..., 
     login: ..., 
-    newLogin: ..., 
+    newLogin: ..., // optional
     workerName: ..., // optional
     loginEmail: ..., // optional
     authUid: ..., // optional

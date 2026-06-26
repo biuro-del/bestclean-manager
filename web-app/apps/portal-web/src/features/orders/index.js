@@ -45,6 +45,8 @@ export function createOrdersFeature(ctx) {
     ordersListSourceOrders,
     ordersSaveRemoteTimelineOrdersNow,
     pad2,
+    renderCalendarView,
+    renderDashboardActivityCalendar,
     showPortalErrorNotice,
     showTransientNotice,
     todayYmd,
@@ -7388,6 +7390,24 @@ export function createOrdersFeature(ctx) {
     button.setAttribute('aria-busy', isRefreshing ? 'true' : 'false')
   }
 
+  function ordersRenderActiveScheduleView() {
+    if (appState.currentRoute === 'orders') {
+      renderOrdersView()
+      return
+    }
+    if (appState.currentRoute === 'ordersMap') {
+      renderOrdersMapView()
+      return
+    }
+    if (appState.currentRoute === 'calendar' && typeof renderCalendarView === 'function') {
+      renderCalendarView()
+      return
+    }
+    if (appState.currentRoute === 'dashboard' && typeof renderDashboardActivityCalendar === 'function') {
+      renderDashboardActivityCalendar(appState.dashboardTodayRows)
+    }
+  }
+
   async function ordersRefreshListFromRemote() {
     if (appState.ordersRefreshing) {
       return
@@ -7753,7 +7773,7 @@ export function createOrdersFeature(ctx) {
     }
   
     const savedRemotely = await ordersSaveRemoteTimelineOrdersNow(nextOrders, {
-      render: false,
+      render: true,
       showError: true,
       retry: false,
       retainLocalOrders: [nextOrder],
@@ -7773,7 +7793,7 @@ export function createOrdersFeature(ctx) {
     }
     appState.ordersEditorMode = 'edit'
     appState.ordersEditingId = ''
-    renderOrdersView()
+    ordersRenderActiveScheduleView()
     showTransientNotice(isAddMode ? 'Zlecenie dodane i zapisane w bazie.' : 'Zlecenie zapisane w bazie.', 'success')
   }
   
