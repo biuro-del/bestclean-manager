@@ -1789,11 +1789,27 @@ export function createDashboardFeature(ctx) {
     return map[normalized] || String(dayName ?? '').trim() || '-'
   }
 
+  function dashboardScheduleTextStartsWithTime(value) {
+    const firstLine = String(value ?? '')
+      .replace(/\r\n?/g, '\n')
+      .split('\n')
+      .map((line) => line.trim())
+      .find(Boolean)
+    const match = String(firstLine ?? '').match(/^(\d{1,2})[.:](\d{2})(?=\D|$)/)
+    if (!match) {
+      return false
+    }
+
+    const hour = Number(match[1])
+    const minute = Number(match[2])
+    return Number.isFinite(hour) && Number.isFinite(minute) && hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59
+  }
+
   function dashboardScheduleShiftText(startRaw, taskRaw) {
     const start = String(startRaw ?? '').trim()
     const task = String(taskRaw ?? '').trim()
     if (start && task) {
-      return `${start} ${task}`
+      return dashboardScheduleTextStartsWithTime(task) ? task : `${start} ${task}`
     }
     if (start) {
       return start

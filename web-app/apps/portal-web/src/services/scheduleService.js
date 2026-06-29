@@ -1,8 +1,8 @@
 ﻿const SCHEDULE_SPREADSHEET_ID = '1fT9pG2HpW9xT8b28d4jbhg2m3izhM08-U0QybwXvkas'
-const SCHEDULE_GID = 2096376868
+const SCHEDULE_GID = 1837558782
 const SCHEDULE_FETCH_TIMEOUT_MS = 30000
 const SCHEDULE_CACHE_TTL_MS = 5 * 60 * 1000
-const SCHEDULE_STORAGE_KEY = 'portal.dashboardSchedule.lastGood'
+const SCHEDULE_STORAGE_KEY = 'portal.dashboardSchedule.lastGood.1837558782'
 
 let scheduleCache = null
 let scheduleCacheAt = 0
@@ -112,6 +112,58 @@ function textFromCell(cell) {
   return String(value).trim()
 }
 
+function normalizeScheduleCellText(value) {
+  const lines = String(value ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\u00a0/g, ' ')
+    .split('\n')
+    .map((line) => line.replace(/[ \t\f\v]+/g, ' ').trim())
+
+  while (lines.length && !lines[0]) {
+    lines.shift()
+  }
+  while (lines.length && !lines[lines.length - 1]) {
+    lines.pop()
+  }
+
+  return lines.join('\n')
+}
+
+function extractScheduleLeadingTime(value) {
+  const firstLine = normalizeScheduleCellText(value).split('\n').find((line) => line.trim())
+  const match = String(firstLine ?? '').trim().match(/^(\d{1,2})[.:](\d{2})(?=\D|$)/)
+  if (!match) {
+    return ''
+  }
+
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return ''
+  }
+
+  return `${hour}.${pad2(minute)}`
+}
+
+function normalizeScheduleStartText(value) {
+  const text = normalizeScheduleCellText(value)
+  const directTime = extractScheduleLeadingTime(text)
+  if (directTime) {
+    return directTime
+  }
+
+  return text.split('\n').find((line) => line.trim()) || ''
+}
+
+function normalizeScheduleShiftParts(startRaw, taskRaw) {
+  const task = normalizeScheduleCellText(taskRaw)
+  const explicitStart = normalizeScheduleStartText(startRaw)
+  return {
+    start: explicitStart || extractScheduleLeadingTime(task),
+    task,
+  }
+}
+
 function parseDateLikeToYmd(value) {
   if (value == null) {
     return ''
@@ -165,7 +217,7 @@ function toDateLabel(ymd) {
 function rowCell(rows, rowIndex, colIndex) {
   const row = rows?.[rowIndex]
   const cell = row?.c?.[colIndex]
-  return textFromCell(cell)
+  return normalizeScheduleCellText(textFromCell(cell))
 }
 
 function isNoShiftCellValue(value) {
@@ -310,10 +362,18 @@ function parseScheduleTable(table) {
         return
       }
 
-      const morningStart = rowCell(rows, morningRowIndex, day.startCol)
-      const morningTask = rowCell(rows, morningRowIndex, day.shiftCol)
-      const afternoonStart = afternoonRowIndex > 0 ? rowCell(rows, afternoonRowIndex, day.startCol) : ''
-      const afternoonTask = afternoonRowIndex > 0 ? rowCell(rows, afternoonRowIndex, day.shiftCol) : ''
+      const morningParts = normalizeScheduleShiftParts(
+        rowCell(rows, morningRowIndex, day.startCol),
+        rowCell(rows, morningRowIndex, day.shiftCol),
+      )
+      const afternoonParts = normalizeScheduleShiftParts(
+        afternoonRowIndex > 0 ? rowCell(rows, afternoonRowIndex, day.startCol) : '',
+        afternoonRowIndex > 0 ? rowCell(rows, afternoonRowIndex, day.shiftCol) : '',
+      )
+      const morningStart = morningParts.start
+      const morningTask = morningParts.task
+      const afternoonStart = afternoonParts.start
+      const afternoonTask = afternoonParts.task
       const hasMorningShift = hasRealShiftValue(morningStart, morningTask)
       const hasAfternoonShift = hasRealShiftValue(afternoonStart, afternoonTask)
 

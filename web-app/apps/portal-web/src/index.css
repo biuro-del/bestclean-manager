@@ -21437,6 +21437,20 @@ body.calendar-events-popup-dragging *{
   color:#1f2937 !important;
 }
 
+#portalRoot #view-dashboard .dash-schedule-start-value{
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-dashboard .dash-schedule-line-text{
+  overflow:visible !important;
+  overflow-wrap:anywhere !important;
+  text-overflow:clip !important;
+  white-space:pre-line !important;
+  word-break:break-word !important;
+}
+
 #portalRoot #view-dashboard .dash-schedule-late{
   border-radius:10px !important;
   font-size:10px !important;

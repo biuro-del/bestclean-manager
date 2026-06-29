@@ -406,6 +406,26 @@ Historia zmian dokumentacji i projektu
 Data: 2026-06-29
 Autor: AI Codex
 Dodano:
+- Dodano normalizacje wieloliniowych komorek grafiku dnia pobieranych z Google Sheets, z zachowaniem podzialow linii i czyszczeniem nadmiarowych spacji.
+- Dodano awaryjne rozpoznawanie godziny START z poczatku wpisu zadania, gdy osobna kolumna `godz. START` jest pusta.
+Zmieniono:
+- Przelaczono zrodlo panelu `Pulpit -> Grafik dnia` na zakladke arkusza Google Sheets `gid=1837558782`.
+- Zmieniono klucz cache grafiku dnia na `portal.dashboardSchedule.lastGood.1837558782`, aby nie mieszac danych ze stara zakladka.
+- Poprawiono renderowanie wpisow `Rano` i `Popoludnie`, aby opisy z godzinami na poczatku linii nie dostawaly zdublowanej godziny START.
+- Poprawiono CSS panelu `Grafik dnia`, aby tresc zmian zawijala sie i zachowywala nowe linie, a pole `Godz. START` pozostalo jednowierszowe.
+- Zaktualizowano link w sekcji `Grafik`, aby otwieral ta sama zakladke arkusza `gid=1837558782`.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Uruchomiono `node --check web-app/apps/portal-web/src/services/scheduleService.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/dashboard/index.js`.
+- Uruchomiono `npm.cmd run build` w `web-app`; build zakonczyl sie sukcesem z istniejacym ostrzezeniem o duzych chunkach Vite.
+Uwagi dla nastepnej osoby:
+- Panel `Grafik dnia` nadal pobiera dane przez Google Visualization API (`gviz/tq`) z pliku `1fT9pG2HpW9xT8b28d4jbhg2m3izhM08-U0QybwXvkas`; aktywna zakladka to teraz `gid=1837558782`.
+
+Data: 2026-06-29
+Autor: AI Codex
+Dodano:
 - Dodano walidacje zgodnosci swiezego odczytu pracownika po zapisie z rekordem potwierdzonym przez backend; jezeli odczyt po `SERVER_ONLY` zwraca stary typ/dane, UI natychmiast uzywa rekordu zwroconego po zapisie.
 Zmieniono:
 - Poprawiono mapowanie `workerType/type/role` w `workerService.js`, aby `type` w portalu oznaczal widoczny typ pracownika, a `role` pozostala rola systemowa/uprawnieniem.
