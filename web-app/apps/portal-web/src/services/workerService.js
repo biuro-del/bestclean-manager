@@ -230,7 +230,7 @@ function formatWorkerRoleLabel(value, fallback = 'Pracownik') {
   }
 
   const upper = raw.toUpperCase()
-  if (upper === 'ADMIN') return 'Admin'
+  if (upper === 'ADMIN') return 'ADMIN'
   if (upper === 'MANAGER') return 'Kierownik'
   if (upper === 'COORDINATOR') return 'Koordynator'
   if (upper === 'WORKER') return 'Pracownik'
@@ -401,15 +401,15 @@ function resolveFunctionErrorMessage(body, rawText = '', statusCode = null, endp
     const text = String(rawText ?? '').trim()
     const lowered = text.toLowerCase()
     if (lowered.includes('forbidden_host')) {
-      return 'FORBIDDEN_HOST: worker-profile nadal trafia w zdalny host guard. Sprawdz, czy nie dziala stary Vite na localhost/::1:5173, otworz portal przez http://127.0.0.1:5173 i uruchom root `npm run dev` z aktualnego katalogu.'
+      return 'FORBIDDEN_HOST: worker-profile trafia bezposrednio w zdalny hosting, ktory odrzuca localhost. Zatrzymaj web-only Vite i uruchom root `npm run dev`, zeby zapis szedl przez lokalny backend.'
     }
     if (isLocalWorkerAdminEndpoint(endpoint) && (lowered.includes('econnrefused') || lowered.includes('proxy error') || lowered.includes('http proxy error'))) {
-      return 'Proxy endpointu pracownika nie odpowiada. Uruchom ponownie Vite; web-only dev powinien kierowac worker-profile do https://cleanzi-01.web.app, a root npm run dev do lokalnego backendu 8080.'
+      return 'Proxy endpointu pracownika nie odpowiada. Uruchom root `npm run dev`, zeby wystartowal lokalny backend dla zapisu pracownikow.'
     }
     const looksLikeHtml = lowered.includes('<html') || lowered.includes('<!doctype html')
     if (statusCode >= 500 && isRelativeApiEndpoint(endpoint) && (!text || looksLikeHtml)) {
       if (isLocalWorkerAdminEndpoint(endpoint)) {
-        return 'Proxy endpointu pracownika nie odpowiada. Uruchom ponownie dev server; jesli uzywasz root npm run dev, sprawdz http://127.0.0.1:8080/healthz.'
+        return 'Proxy endpointu pracownika nie odpowiada. Uruchom root `npm run dev` i sprawdz http://127.0.0.1:8080/healthz.'
       }
       return 'Lokalny backend API nie odpowiada albo uruchomiono samo web-app bez procesu root `npm run dev`. Uruchom `npm run dev` z katalogu projektu albo ustaw VITE_DEV_API_PROXY_TARGET na dzialajacy backend.'
     }
@@ -473,7 +473,7 @@ function resolveFunctionErrorMessage(body, rawText = '', statusCode = null, endp
     message.toUpperCase().includes('FORBIDDEN_HOST') ||
     message.toLowerCase().includes('available only via firebase hosting')
   ) {
-    return 'FORBIDDEN_HOST: worker-profile nadal trafia w zdalny host guard. Sprawdz stary proces Vite na localhost/::1:5173, uzyj http://127.0.0.1:5173 i uruchom swiezy root `npm run dev`, zeby request szedl przez /api do lokalnego backendu.'
+    return 'FORBIDDEN_HOST: worker-profile trafia bezposrednio w zdalny hosting, ktory odrzuca localhost. Uruchom root `npm run dev`, zeby request szedl przez lokalny backend.'
   }
   if (code && message) {
     return `${code}: ${message}`
@@ -621,8 +621,10 @@ function mapWorker(orgId, row) {
   const workerName = String(
     row.workerName ?? row.workername ?? row.worker_name ?? row.name ?? row.displayName ?? row.fullName ?? login,
   ).trim()
-  const role = formatWorkerRoleLabel(row.role ?? row.workerType, 'Pracownik')
-  const workerType = String(row.workerType ?? role).trim()
+  const rawRole = String(row.role ?? '').trim()
+  const workerType = String(row.workerType ?? '').trim()
+  const roleSource = workerType && !['WORKER', 'Pracownik'].includes(workerType) ? workerType : rawRole || workerType
+  const role = formatWorkerRoleLabel(roleSource, 'Pracownik')
   const loginEmail = String(row.loginEmail ?? row.email ?? '').trim()
 
   return {
@@ -764,8 +766,8 @@ async function createWorkerUserViaProvision(orgId, payload) {
 
   const workerName = String(payload?.displayName ?? payload?.workerName ?? payload?.name ?? '').trim() || loginLocalPart
   const role = normalizeWorkerRoleCanonical(payload?.role)
-  if (!role || role === 'ADMIN') {
-    throw new Error('Nowy uzytkownik nie moze byc tworzony z rola Admin.')
+  if (!role) {
+    throw new Error('Wybierz poprawny typ pracownika.')
   }
   const workerType = String(payload?.workerType ?? payload?.role ?? role).trim() || role
   const active = asBoolean(payload?.active, true)
@@ -899,7 +901,12 @@ export async function setWorkerPassword(orgId, login, password, options = {}) {
     skipAuthUpdate: Boolean(options?.skipAuthUpdate),
   })
 
-  return response?.data ?? response ?? {}
+  const data = response?.data ?? response ?? {}
+  if (!data?.hasPassword) {
+    throw new Error('Backend nie potwierdzil zapisu hasla pracownika. Odswiez dane i sprobuj ponownie.')
+  }
+
+  return data
 }
 
 export async function updateWorker(orgId, workerId, payload) {
@@ -927,17 +934,38 @@ export async function updateWorker(orgId, workerId, payload) {
 
   invalidateWorkersCache(orgId)
 
+  const responseWorker = response?.data?.worker
+  if (!responseWorker || typeof responseWorker !== 'object' || !String(responseWorker?.login ?? '').trim()) {
+    throw new Error('Backend nie potwierdzil trwalego zapisu pracownika. Odswiez dane i sprobuj ponownie.')
+  }
+  if (String(response?.data?.storage ?? '').trim() === 'dataconnect' && response?.data?.persistenceVerified !== true) {
+    throw new Error('Backend worker-profile dziala na starej wersji i nie potwierdza zapisu Data Connect. Zrestartuj root npm run dev albo wdroz aktualny backend.')
+  }
+
+  const responseLogin = String(responseWorker?.login ?? newLogin ?? login).trim() || login
+  const responseWorkerId = String(responseWorker?.workerId ?? responseWorker?.id ?? payload?.workerId ?? payload?.id ?? responseLogin).trim() || responseLogin
+  const responseEmail = String(responseWorker?.email ?? responseWorker?.loginEmail ?? '').trim()
+  const responseActive = asBoolean(responseWorker?.active, active)
+
   return {
-    ...payload,
-    ...(response?.data?.worker ?? {}),
-    id: String(payload?.workerId ?? payload?.id ?? login).trim() || login,
-    workerId: String(payload?.workerId ?? payload?.id ?? login).trim() || login,
+    ...responseWorker,
+    id: responseWorkerId,
+    workerId: responseWorkerId,
     orgId,
-    login: String(response?.data?.worker?.login ?? newLogin ?? login).trim() || login,
-    active,
+    login: responseLogin,
+    workerLogin: String(responseWorker?.workerLogin ?? responseWorker?.login ?? responseLogin).trim() || responseLogin,
+    name: String(responseWorker?.name ?? responseWorker?.workerName ?? responseLogin).trim() || responseLogin,
+    workerName: String(responseWorker?.workerName ?? responseWorker?.name ?? responseLogin).trim() || responseLogin,
+    role: String(responseWorker?.role ?? responseWorker?.type ?? 'WORKER').trim() || 'WORKER',
+    type: String(responseWorker?.type ?? responseWorker?.role ?? 'WORKER').trim() || 'WORKER',
+    workerType: String(responseWorker?.workerType ?? responseWorker?.type ?? responseWorker?.role ?? 'WORKER').trim() || 'WORKER',
+    email: responseEmail,
+    loginEmail: String(responseWorker?.loginEmail ?? responseWorker?.email ?? responseEmail).trim(),
+    active: responseActive,
     authUpdated: Boolean(response?.data?.authUpdated),
     authWarning: String(response?.data?.authWarning ?? '').trim(),
     storage: String(response?.data?.storage ?? '').trim(),
+    persistenceVerified: Boolean(response?.data?.persistenceVerified),
     loginChangeSkipped: Boolean(response?.data?.loginChangeSkipped),
   }
 }

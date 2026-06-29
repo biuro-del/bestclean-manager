@@ -403,6 +403,39 @@ Uwagi dla następnej osoby:
 
 Historia zmian dokumentacji i projektu
 --------------------------------------
+Data: 2026-06-29
+Autor: AI Codex
+Dodano:
+- Dodano kontrolowana diagnostyke lokalnych zapytan SQL dla zapisu profilu pracownika w `index.js`, z etykietami krokow typu `update-worker-profile-row` i `rename-worker-finalize-new-row`.
+- Dodano mapowanie bledow SQLSTATE `42P08` i `42P18` na czytelny blad `DB_QUERY_PARAMETER_ERROR`, aby nie byly mylone z Firebase Auth.
+- Dodano obsluge bledow rate limit Firebase Auth (`429`, `auth/too-many-requests`, `TOO_MANY_ATTEMPTS_TRY_LATER`, `RESOURCE_EXHAUSTED`) z czytelnym komunikatem dla uzytkownika.
+Zmieniono:
+- Naprawiono lokalna i hostingowa sciezke zapisu pracownikow uzywana przez Liste pracownikow oraz zakladki konta: `/api/auth/provision-worker`, `/api/admin/worker-profile/update`, `/api/admin/worker-password/set`.
+- W `web-app/vite.config.js` poprawiono domyslny target proxy dla endpointow worker/admin, zeby sam Vite nie kierowal zapisu na niedzialajacy lokalny backend `8080`, gdy nie jest uruchomiony root dev stack.
+- W `scripts/dev-local.js` doprecyzowano wybor lokalnego trybu `WORKER_PROFILE_MODE` i `WORKER_PROFILE_STORAGE_MODE`, tak aby root `npm run dev` uzywal lokalnej bazy, a web-only dev mogl bezpiecznie proxy do hostingu.
+- W `index.js` ograniczono Firebase REST `signUp` jako fallback lokalny; produkcyjna sciezka tworzenia/edycji kont pracownikow ma uzywac Firebase Admin SDK.
+- W `index.js` poprawiono zapis profilu pracownika w Cloud SQL: `role` zapisuje role systemowa, a `worker_type` zapisuje etykiete typu pracownika z UI.
+- W `index.js` poprawiono zapytania SQL przy edycji, zmianie loginu, dodawaniu i usuwaniu pracownika przez jawne typowanie parametrow (`::text`, `::boolean`) oraz usuniecie nieuzywanego parametru w kroku `rename-worker-finalize-new-row`.
+- W `web-app/apps/portal-web/src/services/workerService.js` zapis pracownika uznaje sukces tylko po otrzymaniu zweryfikowanego `response.data.worker` z backendu i preferuje rekord backendu zamiast optymistycznego payloadu formularza.
+- W liscie pracownikow i zakladkach konta wymuszono odswiezanie danych pracownikow po zapisie oraz czyszczenie lokalnych cache, zeby po relogu portal nie wracal do starego rekordu.
+- Ograniczono liste wyboru typu pracownika w dodawaniu/edycji do: `ADMIN`, `Koordynator`, `Staly personel na obiekcie`, `Zespol mobilny`.
+Usunieto:
+- Usunieto mylace komunikaty sugerujace problem z lokalnym `8080/healthz`, gdy request faktycznie szedl do hostingu albo blad pochodzil z bazy danych.
+- Usunieto niekontrolowana produkcyjna probe tworzenia kont pracownikow przez klientowy Firebase REST fallback po bledzie Admin SDK.
+Testy/sprawdzenia:
+- Uruchomiono `node --check index.js`.
+- Uruchomiono `node --check scripts/dev-local.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/services/workerService.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/workers/account/index.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/workers/worker_list_profile/index.js`.
+- Uruchomiono `node --check web-app/vite.config.js`.
+- Uruchomiono `npm.cmd run build`; build zakonczyl sie sukcesem z istniejacym ostrzezeniem o duzych chunkach Vite.
+- Kilkukrotnie zrestartowano lokalny dev stack `5173/8080` i potwierdzono `http://127.0.0.1:8080/healthz` zwracajace `{"ok":true}`.
+Uwagi dla nastepnej osoby:
+- Przy dalszym debugowaniu zapisu pracownikow patrz najpierw na etykiete kroku w komunikacie `DB_QUERY_PARAMETER_ERROR`; wskazuje konkretne zapytanie backendu.
+- Po zmianach w `index.js` trzeba restartowac root `npm run dev`, bo Vite na `5173` proxyuje do procesu backendu na `8080`.
+- Zrodlem prawdy dla danych widocznych po relogu pozostaje rekord pracownika w Data Connect/Cloud SQL, a Firebase Auth jest zrodlem prawdy dla konta auth i hasla.
+
 Data: 2026-06-26
 Autor: AI Codex
 Dodano:

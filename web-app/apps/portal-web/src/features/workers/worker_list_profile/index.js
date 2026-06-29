@@ -64,6 +64,7 @@ const WORKER_ACTION_ICONS = {
 
 const OPTIMISTIC_WORKER_PROFILE_TTL_MS = 15000
 const OPTIMISTIC_WORKER_PROFILE_DELETE_TTL_MS = 60000
+const DASHBOARD_LOCAL_CACHE_PREFIX = 'portal.dashboard.snapshot.'
 
 export function createWorkerProfileFeature(ctx) {
   const {
@@ -351,6 +352,42 @@ export function createWorkerProfileFeature(ctx) {
     })
 
     return [...rowsByKey.values()]
+  }
+
+  function clearDashboardWorkerSnapshotCache() {
+    if (typeof window === 'undefined' || !window.localStorage) return
+    try {
+      for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+        const key = window.localStorage.key(index)
+        if (String(key ?? '').startsWith(DASHBOARD_LOCAL_CACHE_PREFIX)) {
+          window.localStorage.removeItem(key)
+        }
+      }
+    } catch {
+      // Local storage can be unavailable in hardened browser profiles.
+    }
+  }
+
+  function clearWorkerDirectoryStateBeforeFreshRead() {
+    clearDashboardWorkerSnapshotCache()
+    appState.workersLoaded = false
+  }
+
+  function findWorkerProfileRowAfterSave(previousKey, worker) {
+    const expectedLogin = normalizeWorkerProfileIdentity(worker?.login ?? worker?.workerLogin)
+    const previousLogin = normalizeWorkerProfileIdentity(previousKey)
+    const loginChanged = Boolean(expectedLogin && previousLogin && expectedLogin !== previousLogin)
+    const lookupKeys = workerProfileIdentityKeys(worker)
+    if (!loginChanged) {
+      addWorkerProfileIdentityKey(lookupKeys, previousKey)
+    }
+    return (Array.isArray(appState.workerProfileRows) ? appState.workerProfileRows : []).find((row) => {
+      if (loginChanged) {
+        return normalizeWorkerProfileIdentity(row?.login ?? row?.workerLogin) === expectedLogin
+      }
+      const rowKeys = workerProfileIdentityKeys(row)
+      return [...lookupKeys].some((key) => rowKeys.has(key))
+    }) ?? null
   }
 
   function isTodayActiveWorkerRunning(worker) {
@@ -1256,6 +1293,42 @@ export function createWorkerProfileFeature(ctx) {
     return `W${String(maxNumber + 1).padStart(padWidth, '0')}`
   }
 
+  const WORKER_PROFILE_DEFAULT_TYPE = 'Stały personel na obiekcie'
+  const workerProfileAllowedTypeOptionsHtml = `
+        <option value="ADMIN">ADMIN</option>
+        <option value="Koordynator">Koordynator</option>
+        <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
+        <option value="Zespół mobilny">Zespół mobilny</option>
+      `
+
+  function workerProfileAllowedTypeValue(value, fallback = WORKER_PROFILE_DEFAULT_TYPE) {
+    const normalized = normalizeSearchText(value).toLowerCase()
+    if (!normalized) {
+      return fallback
+    }
+    if (normalized.includes('admin') || normalized.includes('owner') || normalized.includes('superadmin')) {
+      return 'ADMIN'
+    }
+    if (
+      normalized.includes('koordynator') ||
+      normalized.includes('coordynator') ||
+      normalized.includes('coordinator') ||
+      normalized.includes('manager') ||
+      normalized.includes('menager') ||
+      normalized.includes('menedzer') ||
+      normalized.includes('kierownik')
+    ) {
+      return 'Koordynator'
+    }
+    if (normalized.includes('mobil') || normalized.includes('zespol')) {
+      return 'Zespół mobilny'
+    }
+    if (normalized.includes('staly') || normalized.includes('personel') || normalized.includes('obiekt')) {
+      return 'Stały personel na obiekcie'
+    }
+    return fallback
+  }
+
   let workerProfileDefaultTypeOptionsHtml = ''
 
   function configureWorkerProfileRoleOptions(typeInput, mode) {
@@ -1267,22 +1340,16 @@ export function createWorkerProfileFeature(ctx) {
       workerProfileDefaultTypeOptionsHtml = typeInput.innerHTML
     }
 
+    if (typeInput.innerHTML !== workerProfileAllowedTypeOptionsHtml) {
+      typeInput.innerHTML = workerProfileAllowedTypeOptionsHtml
+    }
+
     if (mode === 'add') {
-      typeInput.innerHTML = `
-        <option value="Pracownik">Pracownik / WORKER</option>
-        <option value="Kierownik">Kierownik / MANAGER</option>
-        <option value="Koordynator">Koordynator / COORDINATOR</option>
-        <option value="Stażysta">Stażysta</option>
-        <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
-        <option value="Zespół mobilny">Zespół mobilny</option>
-      `
-      typeInput.value = 'Pracownik'
+      typeInput.value = WORKER_PROFILE_DEFAULT_TYPE
       return
     }
 
-    if (typeInput.innerHTML !== workerProfileDefaultTypeOptionsHtml) {
-      typeInput.innerHTML = workerProfileDefaultTypeOptionsHtml
-    }
+    typeInput.value = workerProfileAllowedTypeValue(typeInput.value)
   }
 
   function workerProfileRoleForCreate(value) {
@@ -1292,10 +1359,10 @@ export function createWorkerProfileFeature(ctx) {
       return ''
     }
     if (normalized.includes('admin') || normalized.includes('owner') || normalized.includes('superadmin')) {
-      return ''
+      return 'ADMIN'
     }
     if (normalized.includes('manager') || normalized.includes('menager') || normalized.includes('menedzer') || normalized.includes('kierownik')) {
-      return 'MANAGER'
+      return 'COORDINATOR'
     }
     if (normalized.includes('koordynator') || normalized.includes('coordynator') || normalized.includes('coordinator')) {
       return 'COORDINATOR'
@@ -1565,7 +1632,7 @@ export function createWorkerProfileFeature(ctx) {
         loginInput.readOnly = false
         loginInput.title = ''
       }
-      if (typeInput) typeInput.value = 'Pracownik'
+      if (typeInput) typeInput.value = WORKER_PROFILE_DEFAULT_TYPE
       if (activeInput) activeInput.value = '1'
       if (onlineInput) onlineInput.value = 'NIE'
       if (emailInput) {
@@ -1592,7 +1659,7 @@ export function createWorkerProfileFeature(ctx) {
           ? 'Admin moze zmienic login. Email zostanie dopasowany do nowego loginu.'
           : 'Login moze zmienic tylko Admin.'
       }
-      if (typeInput) typeInput.value = worker?.role || worker?.type || 'Pracownik'
+      if (typeInput) typeInput.value = workerProfileAllowedTypeValue(worker?.workerType || worker?.type || worker?.role)
       if (activeInput) activeInput.value = worker?.active ? '1' : '0'
       if (onlineInput) onlineInput.value = workerBoolLabel(Boolean(worker?.online))
       if (emailInput) {
@@ -1869,7 +1936,7 @@ export function createWorkerProfileFeature(ctx) {
       ])
 
       const visibleWorkers = applyOptimisticWorkerProfileDeletes(workers)
-      const patchedWorkers = applyOptimisticWorkerProfilePatches(visibleWorkers)
+      const patchedWorkers = options?.skipOptimisticPatches ? visibleWorkers : applyOptimisticWorkerProfilePatches(visibleWorkers)
       const rows = applyWorkerProfileOnlineStatus(patchedWorkers, activeWorkers)
       applyWorkerProfileRows(rows, { clearSelection, resetPage })
     } catch (error) {
@@ -1925,7 +1992,7 @@ export function createWorkerProfileFeature(ctx) {
       workerId: String(document.getElementById('wkEditId')?.value ?? '').trim(),
       name: String(document.getElementById('wkEditName')?.value ?? '').trim(),
       login,
-      role: String(document.getElementById('wkEditType')?.value ?? 'Pracownik').trim(),
+      role: workerProfileAllowedTypeValue(document.getElementById('wkEditType')?.value),
       active: readWorkerProfileActiveValue(currentWorker),
       email: isAddingUser
         ? buildWorkerLoginEmailPreview(login)
@@ -1959,6 +2026,11 @@ export function createWorkerProfileFeature(ctx) {
     const createRole = workerProfileRoleForCreate(payload.role)
     const canUpdatePassword = canRevealWorkerPasswords()
 
+    if (createRole === 'ADMIN' && !canDeleteWorkers()) {
+      setWorkerProfileBasicError('Typ ADMIN może nadać tylko Admin.', 'wkEditType')
+      return
+    }
+
     if (isAddingUser) {
       if (!payload.workerId) {
         setWorkerProfileBasicError('Uzupełnij ID pracownika.', 'wkEditId')
@@ -1976,7 +2048,7 @@ export function createWorkerProfileFeature(ctx) {
       }
 
       if (!createRole) {
-        setWorkerProfileBasicError('Nowy użytkownik nie może być tworzony z rolą Admin.', 'wkEditType')
+        setWorkerProfileBasicError('Wybierz poprawny typ pracownika.', 'wkEditType')
         return
       }
 
@@ -2014,6 +2086,7 @@ export function createWorkerProfileFeature(ctx) {
           displayName: payload.name,
           password: newPass,
           role: createRole,
+          workerType: payload.role,
           storePassword: canUpdatePassword,
         })
         const addedName = String(createdUser?.name ?? createdUser?.workerName ?? payload.name).trim()
@@ -2096,19 +2169,27 @@ export function createWorkerProfileFeature(ctx) {
         }
       }
 
-      closeWorkerProfileModal()
       if (optimisticWorker) {
-        registerOptimisticWorkerProfilePatch(optimisticPreviousKey, optimisticWorker)
-        upsertWorkerProfileRow(optimisticPreviousKey, optimisticWorker)
+        const savedKeys = workerProfileIdentityKeys(optimisticWorker)
+        addWorkerProfileIdentityKey(savedKeys, optimisticPreviousKey)
+        clearOptimisticWorkerProfilePatchesForKeys(savedKeys)
       }
-      showTransientNotice(successNotice, 'success', { size: 'large' })
-      void fetchWorkerProfilesForCurrentSession(true, {
+      clearWorkerDirectoryStateBeforeFreshRead()
+      await fetchWorkerProfilesForCurrentSession(true, {
         silent: true,
         clearSelection: false,
         resetPage: false,
-      }).catch((error) => {
-        console.warn('[worker-profile] refresh after save failed', error)
+        skipOptimisticPatches: true,
       })
+      if (optimisticWorker && !findWorkerProfileRowAfterSave(optimisticPreviousKey, optimisticWorker)) {
+        console.warn('[worker-profile] server-only refresh did not include backend-confirmed worker', {
+          previousLogin: optimisticPreviousKey,
+          login: optimisticWorker?.login ?? optimisticWorker?.workerLogin,
+        })
+        upsertWorkerProfileRow(optimisticPreviousKey, optimisticWorker)
+      }
+      closeWorkerProfileModal()
+      showTransientNotice(successNotice, 'success', { size: 'large' })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Błąd zapisu pracownika.'
       if (isAddingUser && /(?:^|\b)(?:WORKER_ID_ALREADY_EXISTS|ID pracownika)(?:\b|$)/i.test(message)) {

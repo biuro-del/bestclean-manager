@@ -41,16 +41,28 @@ export default defineConfig(({ mode }) => {
   const localAdminApiProxyTarget = normalizeApiProxyTarget(
     env.VITE_DEV_WORKER_API_PROXY_TARGET ||
       process.env.VITE_DEV_WORKER_API_PROXY_TARGET ||
-      env.VITE_DEV_API_PROXY_TARGET ||
-      process.env.VITE_DEV_API_PROXY_TARGET ||
       DEFAULT_LOCAL_API_TARGET,
   )
   const localAdminApiProxy = {
     target: localAdminApiProxyTarget,
     changeOrigin: true,
     headers: {
+      origin: DEFAULT_REMOTE_API_TARGET,
+      referer: `${DEFAULT_REMOTE_API_TARGET}/`,
       'x-forwarded-host': 'cleanzi-01.web.app',
       'x-forwarded-proto': 'https',
+      'x-forwarded-port': '443',
+      'x-forwarded-server': 'cleanzi-01.web.app',
+    },
+    configure: (proxy) => {
+      proxy.on('proxyReq', (proxyReq) => {
+        proxyReq.setHeader('origin', DEFAULT_REMOTE_API_TARGET)
+        proxyReq.setHeader('referer', `${DEFAULT_REMOTE_API_TARGET}/`)
+        proxyReq.setHeader('x-forwarded-host', 'cleanzi-01.web.app')
+        proxyReq.setHeader('x-forwarded-proto', 'https')
+        proxyReq.setHeader('x-forwarded-port', '443')
+        proxyReq.setHeader('x-forwarded-server', 'cleanzi-01.web.app')
+      })
     },
   }
 

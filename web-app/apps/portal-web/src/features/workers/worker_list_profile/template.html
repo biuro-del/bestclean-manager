@@ -58,16 +58,13 @@
 
   <div class="worker-profile-filter-grid">
     <div class="tool">
-      <label for="wkType">Rola</label>
+      <label for="wkType">Typ</label>
       <select id="wkType">
         <option value="">(wszystkie)</option>
-        <option value="Admin">Admin</option>
-        <option value="Kierownik">Kierownik</option>
+        <option value="ADMIN">ADMIN</option>
         <option value="Koordynator">Koordynator</option>
-        <option value="Stażysta">Stażysta</option>
         <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
         <option value="Zespół mobilny">Zespół mobilny</option>
-        <option value="Pracownik">Pracownik</option>
       </select>
     </div>
 
@@ -266,16 +263,13 @@
         </div>
 
         <div class="field">
-          <label for="wkEditType">Typ (K)</label>
-          <select id="wkEditType">
-            <option value="Admin">Admin</option>
-            <option value="Kierownik">Kierownik / MANAGER</option>
-            <option value="Koordynator">Koordynator</option>
-            <option value="Stażysta">Stażysta</option>
-            <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
-            <option value="Zespół mobilny">Zespół mobilny</option>
-            <option value="Pracownik">Pracownik / WORKER</option>
-          </select>
+            <label for="wkEditType">Typ (K)</label>
+            <select id="wkEditType">
+              <option value="ADMIN">ADMIN</option>
+              <option value="Koordynator">Koordynator</option>
+              <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
+              <option value="Zespół mobilny">Zespół mobilny</option>
+            </select>
         </div>
 
         <div class="worker-profile-basic-error" id="wkBasicError" role="alert" aria-live="polite" hidden></div>
@@ -344,7 +338,7 @@
     </div>
 
     <div class="hint" id="wkReadOnlyHint" style="display:none;">
-      Ten użytkownik ma uprawnienia tylko do podglądu (Koordynator/Stażysta).
+      Ten użytkownik ma uprawnienia tylko do podglądu.
     </div>
 
     <div class="row-actions">

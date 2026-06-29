@@ -13,13 +13,16 @@ const webPort = process.env.WEB_PORT || '5173'
 const backendNodeOptions = withNodeOption(process.env.NODE_OPTIONS, '--use-system-ca')
 const workerProfileModeState = resolveWorkerProfileMode()
 const workerProfileMode = workerProfileModeState.mode
-const workerProfileStorageMode = String(
+const requestedWorkerProfileStorageMode = String(
   process.env.WORKER_PROFILE_STORAGE_MODE ||
     process.env.WORKER_PROFILE_DB_MODE ||
     'db',
 )
   .trim()
   .toLowerCase()
+const workerProfileStorageMode = ['local', 'direct'].includes(workerProfileMode)
+  ? 'db'
+  : requestedWorkerProfileStorageMode
 
 const processes = []
 let shuttingDown = false
@@ -96,7 +99,7 @@ function resolveWorkerProfileMode() {
   if (hasLocalDbConfig() && hasFirebaseAdminConfig()) {
     return { mode: 'local', reason: 'local DB/Admin config detected' }
   }
-  return { mode: 'local', reason: 'default; local DB/Admin config missing' }
+  return { mode: 'proxy', reason: 'default; local DB/Admin config missing' }
 }
 
 function withNodeOption(value, option) {
@@ -376,6 +379,8 @@ startProcess('api', process.execPath, ['index.js'], {
   PORTAL_DB_ROUTES_MODE: process.env.PORTAL_DB_ROUTES_MODE || 'proxy',
   PORTAL_TASKS_MODE: process.env.PORTAL_TASKS_MODE || 'local',
   WORKER_PROFILE_MODE: workerProfileMode,
+  WORKER_PROFILE_STORAGE_MODE: workerProfileStorageMode,
+  WORKER_PROFILE_DB_MODE: workerProfileStorageMode,
   NODE_OPTIONS: backendNodeOptions,
 })
 

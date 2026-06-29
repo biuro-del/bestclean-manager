@@ -420,6 +420,31 @@ function mapDatabaseConnectionError(error) {
   return null
 }
 
+function mapDatabaseQueryError(error) {
+  const code = normalizeText(error?.code).toUpperCase()
+  if (!/^[0-9A-Z]{5}$/.test(code)) {
+    return null
+  }
+
+  const label = normalizeText(error?.workerProfileQueryLabel)
+  const dbMessage = normalizeText(error?.message)
+  const context = [code, label ? `krok: ${label}` : '', dbMessage].filter(Boolean).join(', ')
+
+  if (code === '42P08' || code === '42P18') {
+    return {
+      status: 500,
+      code: 'DB_QUERY_PARAMETER_ERROR',
+      message: `Backend otrzymal niejednoznaczny parametr SQL podczas zapisu pracownika (${context}).`,
+    }
+  }
+
+  return {
+    status: 500,
+    code: 'DB_QUERY_FAILED',
+    message: `Blad zapisu w bazie danych (${context}).`,
+  }
+}
+
 function readRequestBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     const chunks = []
@@ -533,7 +558,7 @@ function buildManagedUserEmail(login, requesterEmail) {
   return localPart && domain ? normalizeEmail(`${localPart}@${domain}`) : ''
 }
 
-function normalizeUserRole(value) {
+function normalizeUserRole(value, options = {}) {
   const rawRole = normalizeText(value)
   const role = rawRole.toUpperCase()
   const normalized = rawRole
@@ -541,7 +566,9 @@ function normalizeUserRole(value) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
 
-  if (role === 'ADMIN' || role === 'OWNER' || role === 'SUPERADMIN' || normalized.includes('admin')) return ''
+  if (role === 'ADMIN' || role === 'OWNER' || role === 'SUPERADMIN' || normalized.includes('admin')) {
+    return options?.allowAdmin ? 'ADMIN' : ''
+  }
   if (role === 'MANAGER' || role === 'KIEROWNIK' || normalized.includes('manager') || normalized.includes('kierownik')) return 'MANAGER'
   if (role === 'COORDINATOR' || role === 'KOORDYNATOR' || normalized.includes('koordynator') || normalized.includes('coordinator')) return 'COORDINATOR'
   if (rawRole) return 'WORKER'
@@ -633,10 +660,40 @@ function isFirebaseNetworkError(error) {
   )
 }
 
+function isFirebaseQuotaError(error) {
+  const statusCode = Number(error?.statusCode || error?.status || error?.response?.status || 0)
+  const text = normalizeText(
+    [
+      error?.code,
+      error?.message,
+      error?.firebaseRestMessage,
+      error?.errorInfo?.code,
+      error?.errorInfo?.message,
+    ]
+      .filter(Boolean)
+      .join(' '),
+  ).toUpperCase()
+  return (
+    statusCode === 429 ||
+    text.includes('AUTH/TOO-MANY-REQUESTS') ||
+    text.includes('TOO_MANY_ATTEMPTS_TRY_LATER') ||
+    text.includes('RESOURCE_EXHAUSTED') ||
+    /(?:^|[^0-9])429[0-9A-Z_-]*/.test(text)
+  )
+}
+
 function mapFirebaseAdminError(error) {
   const code = normalizeText(error?.code).toLowerCase()
   const restMessage = normalizeText(error?.firebaseRestMessage || error?.message).toUpperCase()
   const firebaseDetail = normalizeText(error?.firebaseRestMessage || error?.code || error?.message)
+  if (isFirebaseQuotaError(error)) {
+    return {
+      status: 429,
+      code: 'FIREBASE_TOO_MANY_ATTEMPTS',
+      message: 'Firebase chwilowo blokuje tworzenie lub aktualizacje kont po zbyt wielu probach. Sprobuj ponownie za kilka minut.',
+    }
+  }
+
   if (isFirebaseDuplicateEmail(error)) {
     return {
       status: 409,
@@ -864,6 +921,21 @@ function canUseFirebaseRest() {
   return Boolean(FIREBASE_WEB_API_KEY) && typeof fetch === 'function'
 }
 
+function shouldAllowFirebaseAuthRestFallback() {
+  const mode = normalizeText(
+    process.env.FIREBASE_AUTH_REST_FALLBACK ||
+      process.env.FIREBASE_REST_FALLBACK ||
+      process.env.AUTH_REST_FALLBACK,
+  ).toLowerCase()
+  if (['1', 'true', 'yes', 'tak', 'local', 'dev', 'development'].includes(mode)) {
+    return true
+  }
+  if (['0', 'false', 'no', 'nie', 'off', 'disabled'].includes(mode)) {
+    return false
+  }
+  return isLocalDevelopmentRuntime()
+}
+
 async function callFirebaseIdentityToolkit(method, payload) {
   if (!canUseFirebaseRest()) {
     const error = new Error('FIREBASE_WEB_API_KEY_MISSING')
@@ -933,7 +1005,7 @@ async function assertFirebaseEmailAvailable(email) {
     if (isFirebaseUserNotFound(error)) {
       return
     }
-    if (isFirebaseCredentialError(error) && canUseFirebaseRest()) {
+    if (isFirebaseCredentialError(error) && canUseFirebaseRest() && shouldAllowFirebaseAuthRestFallback()) {
       return
     }
     throw error
@@ -954,7 +1026,7 @@ async function createFirebaseAuthUser(payload) {
       email: user.email || payload.email,
     }
   } catch (adminError) {
-    if (!canUseFirebaseRest()) {
+    if (!canUseFirebaseRest() || !shouldAllowFirebaseAuthRestFallback()) {
       const mapped = mapFirebaseAdminError(adminError)
       adminError.statusCode = mapped.status
       adminError.publicCode = mapped.code
@@ -1072,7 +1144,7 @@ async function findFirebaseAuthUserByEmail(email) {
     if (isFirebaseUserNotFound(error)) {
       return null
     }
-    if (isFirebaseCredentialError(error) && canUseFirebaseRest()) {
+    if (isFirebaseCredentialError(error) && canUseFirebaseRest() && shouldAllowFirebaseAuthRestFallback()) {
       return null
     }
     throw error
@@ -1086,7 +1158,7 @@ function buildProvisionWorkerPayload(body, requester = {}) {
   const email = buildManagedUserEmail(loginLocalPart, requesterEmail)
   const workerName = normalizeText(body?.workerName || body?.displayName || body?.name) || loginLocalPart
   const roleInput = normalizeText(body?.roleLabel || body?.role)
-  const role = roleInput ? normalizeUserRole(roleInput) : 'WORKER'
+  const role = roleInput ? normalizeUserRole(roleInput, { allowAdmin: true }) : 'WORKER'
   const password = normalizeText(body?.password)
   const active = asPayloadBoolean(body?.active, true)
   const workerId = normalizeText(body?.workerId || body?.id).slice(0, 64)
@@ -1097,7 +1169,7 @@ function buildProvisionWorkerPayload(body, requester = {}) {
   if (!loginLocalPart) validationErrors.push('Podaj poprawny login bez znaku @.')
   if (!email) validationErrors.push('Nie mozna zbudowac emaila z loginu i domeny konta dodajacego.')
   if (!workerName) validationErrors.push('Podaj imie i nazwisko pracownika.')
-  if (!role) validationErrors.push('Nowy uzytkownik nie moze byc tworzony z rola Admin.')
+  if (!role) validationErrors.push('Wybierz poprawny typ pracownika.')
   if (password.length < 6) validationErrors.push('Haslo tymczasowe musi miec co najmniej 6 znakow.')
 
   return {
@@ -1842,6 +1914,11 @@ function shouldProxyWorkerProfileRequest() {
 }
 
 function shouldUseWorkerProfileDataConnectStorage() {
+  const profileMode = normalizeText(process.env.WORKER_PROFILE_MODE).toLowerCase()
+  if (['local', 'direct', 'db', 'database', 'cloudsql', 'cloud-sql'].includes(profileMode)) {
+    return false
+  }
+
   const mode = normalizeText(
     process.env.WORKER_PROFILE_STORAGE_MODE ||
       process.env.WORKER_PROFILE_DB_MODE ||
@@ -2870,7 +2947,7 @@ async function handleMobileWorkflowRequest(req, res, requestUrl) {
     await client.query('begin')
     await assertMobileRequester(client, orgId, decodedToken)
     const worker = await resolveMobileWorker(client, orgId, body, decodedToken)
-    await client.query('select pg_advisory_xact_lock(hashtext($1), hashtext($2))', [orgId, worker.login])
+    await client.query('select pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))', [orgId, worker.login])
 
     let payload
     if (requestUrl.pathname === MOBILE_SCAN_PATH) {
@@ -2933,9 +3010,9 @@ async function databaseColumnExists(client, relationName, columnName) {
   const result = await client.query(
     `select 1
        from information_schema.columns
-      where table_schema = $1
-        and table_name = $2
-        and column_name = $3
+      where table_schema = $1::text
+        and table_name = $2::text
+        and column_name = $3::text
       limit 1`,
     [schemaName, tableName, normalizedColumn],
   )
@@ -2962,8 +3039,10 @@ function resolveNextWorkerId(rows = []) {
 }
 
 async function getRequesterMembership(client, orgId, uid) {
-  const result = await client.query(
-    'select role from public.organization_member where org_id = $1 and uid = $2 limit 1',
+  const result = await runWorkerProfileDbQuery(
+    client,
+    'requester-membership',
+    'select role from public.organization_member where org_id = $1::text and uid = $2::text limit 1',
     [orgId, uid],
   )
   return result.rows[0] ?? null
@@ -2973,7 +3052,7 @@ async function getRequesterMemberships(client, uid) {
   const result = await client.query(
     `select org_id, role
        from public.organization_member
-      where uid = $1
+      where uid = $1::text
       order by created_at asc nulls last, org_id asc`,
     [uid],
   )
@@ -2981,14 +3060,16 @@ async function getRequesterMemberships(client, uid) {
 }
 
 async function findExistingWorker(client, orgId, login, email) {
-  const result = await client.query(
+  const result = await runWorkerProfileDbQuery(
+    client,
+    'find-existing-worker',
     `select login, login_email, email
        from public.worker
-      where org_id = $1
+      where org_id = $1::text
         and (
-          lower(login) = lower($2)
-          or lower(coalesce(login_email, '')) = lower($3)
-          or lower(coalesce(email, '')) = lower($3)
+          lower(login) = lower($2::text)
+          or lower(coalesce(login_email, '')) = lower($3::text)
+          or lower(coalesce(email, '')) = lower($3::text)
         )
       limit 1`,
     [orgId, login, email],
@@ -3161,7 +3242,9 @@ async function requireWorkerProfileAccess(client, orgId, requesterUid, allowedRo
 }
 
 async function readWorkerProfileForUpdate(client, orgId, login) {
-  const result = await client.query(
+  const result = await runWorkerProfileDbQuery(
+    client,
+    'read-worker-for-update',
     `select login,
             worker_id,
             full_name,
@@ -3176,8 +3259,8 @@ async function readWorkerProfileForUpdate(client, orgId, login) {
             updated_at,
             edit
        from public.worker
-      where org_id = $1
-        and lower(login) = lower($2)
+      where org_id = $1::text
+        and lower(login) = lower($2::text)
       limit 1`,
     [orgId, login],
   )
@@ -3220,6 +3303,41 @@ function mapWorkerProfileRow(row, orgId) {
   }
 }
 
+function mapDataConnectWorkerProfileRow(row, orgId) {
+  if (!row) {
+    return null
+  }
+
+  const login = normalizeText(row.login ?? row.workerLogin)
+  const workerId = normalizeText(row.workerId ?? row.worker_id ?? row.id) || login
+  const workerName = normalizeText(row.workerName ?? row.worker_name ?? row.name ?? row.fullName) || login
+  const loginEmail = normalizeEmail(row.loginEmail ?? row.login_email) || normalizeEmail(row.email)
+  const role = normalizeText(row.role || 'WORKER')
+  const workerType = normalizeText(row.workerType ?? row.worker_type ?? row.type ?? row.role ?? 'WORKER')
+
+  return {
+    id: workerId,
+    workerId,
+    orgId,
+    login,
+    workerLogin: login,
+    workerName,
+    fullName: workerName,
+    name: workerName,
+    role,
+    type: role,
+    workerType,
+    active: asPayloadBoolean(row.active, true),
+    authUid: normalizeText(row.authUid ?? row.auth_uid),
+    email: loginEmail,
+    loginEmail,
+    phone: normalizeText(row.phone),
+    editedBy: normalizeText(row.edit ?? row.updatedBy),
+    addedAt: row.createdAt?.toISOString?.() || normalizeText(row.createdAt ?? row.created_at),
+    editedAt: row.updatedAt?.toISOString?.() || normalizeText(row.updatedAt ?? row.updated_at),
+  }
+}
+
 function mapWorkerProfilePayload(payload, authUid = '') {
   const login = normalizeText(payload?.newLogin || payload?.login)
   const workerId = normalizeText(payload?.workerId) || login
@@ -3257,6 +3375,22 @@ function createWorkerProfilePublicError(statusCode, publicCode, publicMessage) {
   error.publicCode = publicCode
   error.publicMessage = publicMessage
   return error
+}
+
+async function runWorkerProfileDbQuery(client, label, queryText, params = []) {
+  try {
+    return await client.query(queryText, params)
+  } catch (error) {
+    error.workerProfileQueryLabel = normalizeText(label)
+    console.warn('[worker-profile:db]', {
+      label: error.workerProfileQueryLabel,
+      code: normalizeText(error?.code),
+      message: normalizeText(error?.message),
+      position: normalizeText(error?.position),
+      routine: normalizeText(error?.routine),
+    })
+    throw error
+  }
 }
 
 function appendWorkerProfileWarning(currentWarning, nextWarning) {
@@ -3310,12 +3444,14 @@ async function assertWorkerProfileLoginAvailable(client, orgId, oldLogin, newLog
     return
   }
 
-  const duplicate = await client.query(
+  const duplicate = await runWorkerProfileDbQuery(
+    client,
+    'assert-login-available',
     `select login
        from public.worker
-      where org_id = $1
-        and lower(login) = lower($2)
-        and lower(login) <> lower($3)
+      where org_id = $1::text
+        and lower(login) = lower($2::text)
+        and lower(login) <> lower($3::text)
       limit 1`,
     [orgId, newLogin, oldLogin],
   )
@@ -3330,14 +3466,16 @@ async function assertWorkerProfileEmailAvailable(client, orgId, oldLogin, email)
     return
   }
 
-  const duplicate = await client.query(
+  const duplicate = await runWorkerProfileDbQuery(
+    client,
+    'assert-email-available',
     `select login
        from public.worker
-      where org_id = $1
-        and lower(login) <> lower($2)
+      where org_id = $1::text
+        and lower(login) <> lower($2::text)
         and (
-          lower(coalesce(login_email, '')) = lower($3)
-          or lower(coalesce(email, '')) = lower($3)
+          lower(coalesce(login_email, '')) = lower($3::text)
+          or lower(coalesce(email, '')) = lower($3::text)
         )
       limit 1`,
     [orgId, oldLogin, normalizedEmail],
@@ -3359,14 +3497,16 @@ function replaceWorkerLoginTokens(value, oldLogin, newLogin) {
 }
 
 async function updateWorkerProfileTaskTokenLogins(client, orgId, oldLogin, newLogin) {
-  const taskRows = await client.query(
+  const taskRows = await runWorkerProfileDbQuery(
+    client,
+    'rename-task-worker-token-select',
     `select id_task, worker_ids
        from public.task
-      where org_id = $1
+      where org_id = $1::text
         and exists (
           select 1
             from regexp_split_to_table(coalesce(worker_ids::text, ''), '[,;|[:space:]]+') token
-           where lower(trim(both ' "[]{}' from token)) = lower($2)
+           where lower(trim(both ' "[]{}' from token)) = lower($2::text)
         )`,
     [orgId, oldLogin],
   )
@@ -3377,8 +3517,10 @@ async function updateWorkerProfileTaskTokenLogins(client, orgId, oldLogin, newLo
     if (nextWorkerIds === String(row.worker_ids ?? '')) {
       continue
     }
-    const updateResult = await client.query(
-      'update public.task set worker_ids = $3 where org_id = $1 and id_task = $2',
+    const updateResult = await runWorkerProfileDbQuery(
+      client,
+      'rename-task-worker-token-update',
+      'update public.task set worker_ids = $3::text where org_id = $1::text and id_task::text = $2::text',
       [orgId, row.id_task, nextWorkerIds],
     )
     updatedCount += updateResult.rowCount
@@ -3392,7 +3534,9 @@ async function changeWorkerProfileLogin(client, currentWorker, payload, authUid,
   const newLogin = payload.newLogin
   const dependentUpdates = {}
 
-  const inserted = await client.query(
+  const inserted = await runWorkerProfileDbQuery(
+    client,
+    'rename-worker-insert-new-row',
     `insert into public.worker (
        org_id,
        login,
@@ -3410,22 +3554,22 @@ async function changeWorkerProfileLogin(client, currentWorker, payload, authUid,
        edit
      )
      select org_id,
-            $3,
+            $3::text,
             null,
-            $4,
-            $5,
-            $5,
-            nullif($6, ''),
-            $7,
-            $8,
-            $9,
+            $4::text,
+            $5::text,
+            $5::text,
+            nullif($6::text, ''),
+            $7::text,
+            $8::text,
+            $9::boolean,
             null,
             created_at,
             now(),
-            nullif($10, '')
+            nullif($10::text, '')
        from public.worker
-      where org_id = $1
-        and lower(login) = lower($2)`,
+      where org_id = $1::text
+        and lower(login) = lower($2::text)`,
     [
       payload.orgId,
       oldLogin,
@@ -3433,7 +3577,7 @@ async function changeWorkerProfileLogin(client, currentWorker, payload, authUid,
       payload.name,
       finalEmail,
       payload.phone,
-      payload.roleLabel,
+      payload.memberRole || normalizeWorkerProfileRole(payload.roleLabel || payload.workerType),
       payload.workerType,
       payload.active,
       updatedBy,
@@ -3445,72 +3589,86 @@ async function changeWorkerProfileLogin(client, currentWorker, payload, authUid,
 
   const commonParams = [payload.orgId, oldLogin, newLogin]
   dependentUpdates.workday_pause = (
-    await client.query(
+    await runWorkerProfileDbQuery(
+      client,
+      'rename-worker-workday-pause',
       `update public.workday_pause
-          set worker_login = $3
-        where org_id = $1
-          and lower(coalesce(worker_login, '')) = lower($2)`,
+          set worker_login = $3::text
+        where org_id = $1::text
+          and lower(coalesce(worker_login, '')) = lower($2::text)`,
       commonParams,
     )
   ).rowCount
 
   dependentUpdates.event = (
-    await client.query(
+    await runWorkerProfileDbQuery(
+      client,
+      'rename-worker-event',
       `update public.event
-          set worker_login = $3
-        where org_id = $1
-          and lower(coalesce(worker_login, '')) = lower($2)`,
+          set worker_login = $3::text
+        where org_id = $1::text
+          and lower(coalesce(worker_login, '')) = lower($2::text)`,
       commonParams,
     )
   ).rowCount
 
   dependentUpdates.workday = (
-    await client.query(
+    await runWorkerProfileDbQuery(
+      client,
+      'rename-worker-workday',
       `update public.workday
-          set worker_login = $3,
+          set worker_login = $3::text,
               updated_at = now()
-        where org_id = $1
-          and lower(worker_login) = lower($2)`,
+        where org_id = $1::text
+          and lower(worker_login) = lower($2::text)`,
       commonParams,
     )
   ).rowCount
 
   dependentUpdates.backup_cycle = (
-    await client.query(
+    await runWorkerProfileDbQuery(
+      client,
+      'rename-worker-backup-cycle',
       `update public.backup_cycle
-          set worker_login = $3
-        where org_id = $1
-          and lower(coalesce(worker_login, '')) = lower($2)`,
+          set worker_login = $3::text
+        where org_id = $1::text
+          and lower(coalesce(worker_login, '')) = lower($2::text)`,
       commonParams,
     )
   ).rowCount
 
   dependentUpdates.checklist_log = (
-    await client.query(
+    await runWorkerProfileDbQuery(
+      client,
+      'rename-worker-checklist-log',
       `update public.checklist_log
-          set "worker" = $3
-        where org_id = $1
-          and lower(coalesce("worker", '')) = lower($2)`,
+          set "worker" = $3::text
+        where org_id = $1::text
+          and lower(coalesce("worker", '')) = lower($2::text)`,
       commonParams,
     )
   ).rowCount
 
   dependentUpdates.task_login = (
-    await client.query(
+    await runWorkerProfileDbQuery(
+      client,
+      'rename-worker-task-login',
       `update public.task
-          set worker_login = $3
-        where org_id = $1
-          and lower(coalesce(worker_login, '')) = lower($2)`,
+          set worker_login = $3::text
+        where org_id = $1::text
+          and lower(coalesce(worker_login, '')) = lower($2::text)`,
       commonParams,
     )
   ).rowCount
 
   dependentUpdates.task_worker_id = (
-    await client.query(
+    await runWorkerProfileDbQuery(
+      client,
+      'rename-worker-task-worker-id',
       `update public.task
-          set worker_id = $3
-        where org_id = $1
-          and lower(coalesce(worker_id, '')) = lower($2)`,
+          set worker_id = $3::text
+        where org_id = $1::text
+          and lower(coalesce(worker_id, '')) = lower($2::text)`,
       commonParams,
     )
   ).rowCount
@@ -3518,26 +3676,35 @@ async function changeWorkerProfileLogin(client, currentWorker, payload, authUid,
   dependentUpdates.task_worker_ids = await updateWorkerProfileTaskTokenLogins(client, payload.orgId, oldLogin, newLogin)
 
   dependentUpdates.worker_credential = (
-    await client.query(
+    await runWorkerProfileDbQuery(
+      client,
+      'rename-worker-credential',
       `update public.worker_credential
-          set login = $3,
+          set login = $3::text,
               updated_at = now(),
-              updated_by = nullif($4, '')
-        where org_id = $1
-          and lower(login) = lower($2)`,
+              updated_by = nullif($4::text, '')
+        where org_id = $1::text
+          and lower(login) = lower($2::text)`,
       [payload.orgId, oldLogin, newLogin, updatedBy],
     )
   ).rowCount
 
-  await client.query('delete from public.worker where org_id = $1 and lower(login) = lower($2)', [payload.orgId, oldLogin])
+  await runWorkerProfileDbQuery(
+    client,
+    'rename-worker-delete-old-row',
+    'delete from public.worker where org_id = $1::text and lower(login) = lower($2::text)',
+    [payload.orgId, oldLogin],
+  )
 
-  const updated = await client.query(
+  const updated = await runWorkerProfileDbQuery(
+    client,
+    'rename-worker-finalize-new-row',
     `update public.worker
-        set worker_id = coalesce(nullif($4, ''), nullif($5, ''), worker_id),
-            auth_uid = coalesce(nullif($6, ''), auth_uid),
+        set worker_id = coalesce(nullif($3::text, ''), nullif($4::text, ''), worker_id),
+            auth_uid = coalesce(nullif($5::text, ''), auth_uid),
             updated_at = now()
-      where org_id = $1
-        and lower(login) = lower($2)
+      where org_id = $1::text
+        and lower(login) = lower($2::text)
       returning login,
                 worker_id,
                 full_name,
@@ -3551,7 +3718,7 @@ async function changeWorkerProfileLogin(client, currentWorker, payload, authUid,
                 created_at,
                 updated_at,
                 edit`,
-    [payload.orgId, newLogin, oldLogin, payload.workerId, normalizeText(currentWorker?.worker_id), authUid],
+    [payload.orgId, newLogin, payload.workerId, normalizeText(currentWorker?.worker_id), authUid],
   )
 
   return {
@@ -3613,22 +3780,22 @@ async function deleteWorkerProfileAccessRows(client, orgId, login, workerId, aut
   const deletedCounts = {}
 
   const credentialResult = await client.query(
-    'delete from public.worker_credential where org_id = $1 and lower(login) = lower($2)',
+    'delete from public.worker_credential where org_id = $1::text and lower(login) = lower($2::text)',
     [orgId, login],
   )
   deletedCounts.worker_credential = credentialResult.rowCount
 
   const workdayPauseResult = await client.query(
     `delete from public.workday_pause wp
-      where wp.org_id = $1
+      where wp.org_id = $1::text
         and (
-          lower(coalesce(wp.worker_login, '')) = lower($2)
+          lower(coalesce(wp.worker_login, '')) = lower($2::text)
           or exists (
             select 1
               from public.workday w
              where w.org_id = wp.org_id
                and w.workday_id = wp.workday_id
-               and lower(coalesce(w.worker_login, '')) = lower($2)
+               and lower(coalesce(w.worker_login, '')) = lower($2::text)
           )
         )`,
     [orgId, login],
@@ -3637,15 +3804,15 @@ async function deleteWorkerProfileAccessRows(client, orgId, login, workerId, aut
 
   const eventResult = await client.query(
     `delete from public.event e
-      where e.org_id = $1
+      where e.org_id = $1::text
         and (
-          lower(coalesce(e.worker_login, '')) = lower($2)
+          lower(coalesce(e.worker_login, '')) = lower($2::text)
           or exists (
             select 1
               from public.workday w
              where w.org_id = e.org_id
                and w.workday_id = e.workday_id
-               and lower(coalesce(w.worker_login, '')) = lower($2)
+               and lower(coalesce(w.worker_login, '')) = lower($2::text)
           )
         )`,
     [orgId, login],
@@ -3654,22 +3821,22 @@ async function deleteWorkerProfileAccessRows(client, orgId, login, workerId, aut
 
   const checklistLogResult = await client.query(
     `delete from public.checklist_log cl
-      where cl.org_id = $1
+      where cl.org_id = $1::text
         and (
-          lower(coalesce(cl."worker", '')) = lower($2)
+          lower(coalesce(cl."worker", '')) = lower($2::text)
           or exists (
             select 1
               from public.workday w
              where w.org_id = cl.org_id
                and w.workday_id = cl.workday_id
-               and lower(coalesce(w.worker_login, '')) = lower($2)
+               and lower(coalesce(w.worker_login, '')) = lower($2::text)
           )
           or exists (
             select 1
               from public.backup_cycle bc
              where bc.org_id = cl.org_id
                and bc.cycle_id = cl.cycle_id
-               and lower(coalesce(bc.worker_login, '')) = lower($2)
+               and lower(coalesce(bc.worker_login, '')) = lower($2::text)
           )
         )`,
     [orgId, login],
@@ -3677,32 +3844,32 @@ async function deleteWorkerProfileAccessRows(client, orgId, login, workerId, aut
   deletedCounts.checklist_log = checklistLogResult.rowCount
 
   const backupCycleResult = await client.query(
-    'delete from public.backup_cycle where org_id = $1 and lower(coalesce(worker_login, \'\')) = lower($2)',
+    'delete from public.backup_cycle where org_id = $1::text and lower(coalesce(worker_login, \'\')) = lower($2::text)',
     [orgId, login],
   )
   deletedCounts.backup_cycle = backupCycleResult.rowCount
 
   const taskResult = await client.query(
     `delete from public.task
-      where org_id = $1
+      where org_id = $1::text
         and (
-          lower(coalesce(worker_login, '')) = lower($2)
-          or lower(coalesce(worker_id, '')) = lower($2)
-          or (nullif($3, '') is not null and lower(coalesce(worker_id, '')) = lower($3))
+          lower(coalesce(worker_login, '')) = lower($2::text)
+          or lower(coalesce(worker_id, '')) = lower($2::text)
+          or (nullif($3::text, '') is not null and lower(coalesce(worker_id, '')) = lower($3::text))
         )`,
     [orgId, login, normalizeText(workerId)],
   )
   deletedCounts.task = taskResult.rowCount
 
   const workdayResult = await client.query(
-    'delete from public.workday where org_id = $1 and lower(coalesce(worker_login, \'\')) = lower($2)',
+    'delete from public.workday where org_id = $1::text and lower(coalesce(worker_login, \'\')) = lower($2::text)',
     [orgId, login],
   )
   deletedCounts.workday = workdayResult.rowCount
 
   if (authUid) {
     const memberResult = await client.query(
-      'delete from public.organization_member where org_id = $1 and uid = $2',
+      'delete from public.organization_member where org_id = $1::text and uid = $2::text',
       [orgId, authUid],
     )
     deletedCounts.organization_member = memberResult.rowCount
@@ -3711,7 +3878,7 @@ async function deleteWorkerProfileAccessRows(client, orgId, login, workerId, aut
   }
 
   const workerResult = await client.query(
-    'delete from public.worker where org_id = $1 and lower(login) = lower($2)',
+    'delete from public.worker where org_id = $1::text and lower(login) = lower($2::text)',
     [orgId, login],
   )
   deletedCounts.worker = workerResult.rowCount
@@ -3801,17 +3968,26 @@ async function createAdminManagedUser(payload, requesterUid) {
       throw error
     }
 
-    await client.query(
+    await runWorkerProfileDbQuery(
+      client,
+      'create-worker-organization-member',
       `insert into public.organization_member (org_id, uid, role, created_at)
-       values ($1, $2, $3, now())
+       values ($1::text, $2::text, $3::text, now())
        on conflict (org_id, uid) do update set role = excluded.role`,
       [payload.orgId, createdAuthUser.uid, payload.role],
     )
 
-    const workerIdRows = await client.query('select worker_id from public.worker where org_id = $1', [payload.orgId])
+    const workerIdRows = await runWorkerProfileDbQuery(
+      client,
+      'create-worker-next-id-source',
+      'select worker_id from public.worker where org_id = $1::text',
+      [payload.orgId],
+    )
     const workerId = resolveWorkerIdForCreate(workerIdRows.rows, payload.workerId)
 
-    await client.query(
+    await runWorkerProfileDbQuery(
+      client,
+      'create-worker-row',
       `insert into public.worker (
          org_id,
          login,
@@ -3828,7 +4004,22 @@ async function createAdminManagedUser(payload, requesterUid) {
          created_at,
          updated_at
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $5, $8, $6, $9, $10, now(), now())`,
+       values (
+         $1::text,
+         $2::text,
+         $3::text,
+         $4::text,
+         $5::text,
+         $6::text,
+         $7::boolean,
+         $5::text,
+         $8::text,
+         $6::text,
+         $9::text,
+         $10::text,
+         now(),
+         now()
+       )`,
       [
         payload.orgId,
         payload.login,
@@ -4203,6 +4394,20 @@ async function handleAdminWorkerPasswordSetRequest(req, res) {
       },
       token,
     )
+    const confirmedCredential = await queryAdminWorkerCredentialForOrg(payload.orgId, resolved.login, token)
+    const credential = confirmedCredential?.workerCredential ?? null
+    if (
+      !credential?.encryptedPassword ||
+      !credential?.iv ||
+      !credential?.authTag ||
+      normalizeText(credential?.algorithm) !== WORKER_PASSWORD_ALGORITHM
+    ) {
+      throw createWorkerProfilePublicError(
+        409,
+        'WORKER_PASSWORD_VAULT_NOT_CONFIRMED',
+        'Firebase Auth przyjal nowe haslo, ale Data Connect nie potwierdzil zapisu hasla w sejfie. Ustaw haslo ponownie po odswiezeniu danych.',
+      )
+    }
 
     sendJson(res, 200, {
       ok: true,
@@ -4210,7 +4415,7 @@ async function handleAdminWorkerPasswordSetRequest(req, res) {
         hasPassword: true,
         login: resolved.login,
         requestedLogin: resolved.requestedLogin,
-        updatedAt: new Date().toISOString(),
+        updatedAt: credential.updatedAt ?? new Date().toISOString(),
         skippedAuthUpdate: payload.skipAuthUpdate,
       },
     })
@@ -4280,6 +4485,146 @@ function assertDataConnectWorkerProfileAvailable(rows, oldLogin, newLogin, email
     throw createWorkerProfilePublicError(409, 'WORKER_LOGIN_ALREADY_EXISTS', 'Ten login jest juz zajety w tej organizacji.')
   }
   throw createWorkerProfilePublicError(409, 'WORKER_EMAIL_ALREADY_EXISTS', 'Ten email jest juz przypisany do uzytkownika w tej organizacji.')
+}
+
+function workerProfilePersistenceDelay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function normalizeWorkerProfileComparable(value) {
+  const raw = normalizeText(value)
+  if (!raw) {
+    return ''
+  }
+  return raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+}
+
+function addWorkerProfileMismatch(mismatches, field, expected, actual) {
+  if (normalizeText(expected) === normalizeText(actual)) {
+    return
+  }
+  mismatches.push({ field, expected: normalizeText(expected), actual: normalizeText(actual) })
+}
+
+function addWorkerProfileRoleMismatch(mismatches, field, expected, actual) {
+  const expectedRole = normalizeWorkerProfileRole(expected)
+  const actualRole = normalizeWorkerProfileRole(actual)
+  if (expectedRole === actualRole) {
+    return
+  }
+  mismatches.push({ field, expected: expectedRole, actual: actualRole })
+}
+
+function addWorkerProfileTypeMismatch(mismatches, field, expected, actual) {
+  if (normalizeWorkerProfileComparable(expected) === normalizeWorkerProfileComparable(actual)) {
+    return
+  }
+  mismatches.push({ field, expected: normalizeText(expected), actual: normalizeText(actual) })
+}
+
+function addWorkerProfileEmailMismatch(mismatches, field, expected, actual) {
+  const expectedEmail = normalizeEmail(expected)
+  const actualEmail = normalizeEmail(actual)
+  if (expectedEmail === actualEmail) {
+    return
+  }
+  mismatches.push({ field, expected: expectedEmail, actual: actualEmail })
+}
+
+function addWorkerProfileBoolMismatch(mismatches, field, expected, actual) {
+  const expectedBool = Boolean(expected)
+  const actualBool = asPayloadBoolean(actual, true)
+  if (expectedBool === actualBool) {
+    return
+  }
+  mismatches.push({ field, expected: String(expectedBool), actual: String(actualBool) })
+}
+
+function createWorkerProfilePersistenceError(mismatches, context = {}) {
+  const error = createWorkerProfilePublicError(
+    409,
+    'WORKER_PROFILE_PERSISTENCE_MISMATCH',
+    'Data Connect nie potwierdzil trwalego zapisu profilu pracownika. Zmiana Firebase Auth zostanie cofnieta; odswiez dane i sprobuj ponownie.',
+  )
+  error.validationMismatches = mismatches
+  error.context = context
+  return error
+}
+
+async function verifyDataConnectWorkerProfilePersistence(
+  payload,
+  expectedWorkerId,
+  expectedAuthUid,
+  loginChanged,
+  firebaseIdToken,
+) {
+  const expectedLogin = normalizeText(payload.newLogin || payload.login)
+  let lastMismatches = []
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (attempt > 0) {
+      await workerProfilePersistenceDelay(250 * attempt)
+    }
+
+    const rows = await queryWorkersForOrgViaDataConnect(payload.orgId, firebaseIdToken)
+    const persisted = findDataConnectWorkerByLogin(rows, expectedLogin)
+    const oldLoginStillExists = loginChanged ? findDataConnectWorkerByLogin(rows, payload.login) : null
+    const mismatches = []
+
+    if (!persisted) {
+      mismatches.push({ field: 'login', expected: expectedLogin, actual: '' })
+    }
+    if (oldLoginStillExists) {
+      mismatches.push({ field: 'oldLogin', expected: '', actual: normalizeText(oldLoginStillExists.login ?? oldLoginStillExists.workerLogin) })
+    }
+
+    if (persisted) {
+      addWorkerProfileMismatch(mismatches, 'login', expectedLogin, persisted.login ?? persisted.workerLogin)
+      addWorkerProfileMismatch(mismatches, 'workerName', payload.name, persisted.workerName ?? persisted.worker_name ?? persisted.name ?? persisted.fullName)
+      addWorkerProfileEmailMismatch(mismatches, 'loginEmail', payload.email, persisted.loginEmail ?? persisted.login_email ?? persisted.email)
+      addWorkerProfileEmailMismatch(mismatches, 'email', payload.email, persisted.email ?? persisted.loginEmail ?? persisted.login_email)
+      addWorkerProfileRoleMismatch(mismatches, 'role', payload.memberRole, persisted.role)
+      addWorkerProfileTypeMismatch(mismatches, 'workerType', payload.workerType, persisted.workerType ?? persisted.worker_type ?? persisted.type)
+      addWorkerProfileBoolMismatch(mismatches, 'active', payload.active, persisted.active)
+      if (normalizeText(expectedWorkerId)) {
+        addWorkerProfileMismatch(mismatches, 'workerId', expectedWorkerId, persisted.workerId ?? persisted.worker_id ?? persisted.id)
+      }
+      if (normalizeText(expectedAuthUid)) {
+        addWorkerProfileMismatch(mismatches, 'authUid', expectedAuthUid, persisted.authUid ?? persisted.auth_uid)
+      }
+    }
+
+    if (!mismatches.length) {
+      console.info('[worker-profile:dataconnect] persistence-verified', {
+        orgId: payload.orgId,
+        login: payload.login,
+        newLogin: expectedLogin,
+        authUid: normalizeText(expectedAuthUid),
+        loginChanged: Boolean(loginChanged),
+        attempt: attempt + 1,
+      })
+      return mapDataConnectWorkerProfileRow(persisted, payload.orgId)
+    }
+
+    lastMismatches = mismatches
+  }
+
+  console.warn('[worker-profile:dataconnect] persistence-mismatch', {
+    orgId: payload.orgId,
+    login: payload.login,
+    newLogin: expectedLogin,
+    authUid: normalizeText(expectedAuthUid),
+    mismatches: lastMismatches,
+  })
+  throw createWorkerProfilePersistenceError(lastMismatches, {
+    orgId: payload.orgId,
+    login: payload.login,
+    newLogin: expectedLogin,
+    authUid: normalizeText(expectedAuthUid),
+  })
 }
 
 async function getRequesterRoleViaDataConnect(orgId, firebaseIdToken) {
@@ -4417,6 +4762,7 @@ async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebase
   const updatedBy = payload.editedBy || normalizeEmail(decodedToken?.email) || normalizeText(decodedToken?.uid)
   const authRollbackPatch = dataConnectWorkerAuthSnapshot(currentWorker)
   const authResult = await updateFirebaseAuthForWorkerProfilePayload(finalPayload, currentWorker, { strict: true })
+  let persistedWorker = null
 
   try {
     if (loginChanged) {
@@ -4430,7 +4776,7 @@ async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebase
           workerName: finalPayload.name,
           loginEmail: finalPayload.email,
           authUid: authResult.authUid || finalPayload.authUid,
-          role: finalPayload.roleLabel,
+          role: finalPayload.memberRole,
           memberRole: finalPayload.memberRole,
           active: finalPayload.active,
           email: finalPayload.email,
@@ -4452,7 +4798,7 @@ async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebase
           workerName: finalPayload.name,
           loginEmail: finalPayload.email,
           authUid: authResult.authUid || finalPayload.authUid,
-          role: finalPayload.roleLabel,
+          role: finalPayload.memberRole,
           memberRole: finalPayload.memberRole,
           active: finalPayload.active,
           email: finalPayload.email,
@@ -4464,6 +4810,14 @@ async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebase
         firebaseIdToken,
       )
     }
+
+    persistedWorker = await verifyDataConnectWorkerProfilePersistence(
+      finalPayload,
+      finalWorkerId,
+      authResult.authUid || finalPayload.authUid,
+      loginChanged,
+      firebaseIdToken,
+    )
   } catch (error) {
     if (authResult.authUpdated && Object.keys(authRollbackPatch).length) {
       try {
@@ -4477,7 +4831,8 @@ async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebase
 
   const authWarnings = [authResult.authWarning].filter(Boolean)
   return {
-    worker: mapWorkerProfilePayload({ ...finalPayload, workerId: finalWorkerId, editedBy: updatedBy }, authResult.authUid),
+    worker: persistedWorker,
+    persistenceVerified: true,
     authUpdated: authResult.authUpdated,
     authWarning: authWarnings.join(' '),
     loginChanged,
@@ -4564,6 +4919,18 @@ function sendWorkerProfileFailure(res, error, fallbackCode, fallbackMessage, dbC
   const databaseError = mapDatabaseConnectionError(error)
   if (databaseError) {
     sendApiError(res, databaseError.status, databaseError.code, databaseError.message)
+    return
+  }
+
+  const databaseQueryError = mapDatabaseQueryError(error)
+  if (databaseQueryError) {
+    sendApiError(
+      res,
+      databaseQueryError.status,
+      databaseQueryError.code,
+      databaseQueryError.message,
+      publicErrorDetails(error),
+    )
     return
   }
 
@@ -4694,21 +5061,23 @@ async function handleAdminWorkerProfileUpdateRequest(req, res) {
       updatedRow = loginUpdate.row
       dependentUpdates = loginUpdate.dependentUpdates
     } else {
-      const updated = await client.query(
+      const updated = await runWorkerProfileDbQuery(
+        client,
+        'update-worker-profile-row',
         `update public.worker
-            set worker_id = coalesce(nullif($3, ''), worker_id),
-                full_name = $4,
-                login_email = $5,
-                email = $5,
-                phone = nullif($6, ''),
-                role = $7,
-                worker_type = $8,
-                active = $9,
-                edit = nullif($10, ''),
-                auth_uid = coalesce(nullif($11, ''), auth_uid),
+            set worker_id = coalesce(nullif($3::text, ''), worker_id),
+                full_name = $4::text,
+                login_email = $5::text,
+                email = $5::text,
+                phone = nullif($6::text, ''),
+                role = $7::text,
+                worker_type = $8::text,
+                active = $9::boolean,
+                edit = nullif($10::text, ''),
+                auth_uid = coalesce(nullif($11::text, ''), auth_uid),
                 updated_at = now()
-          where org_id = $1
-            and lower(login) = lower($2)
+          where org_id = $1::text
+            and lower(login) = lower($2::text)
           returning login,
                     worker_id,
                     full_name,
@@ -4729,7 +5098,7 @@ async function handleAdminWorkerProfileUpdateRequest(req, res) {
           finalPayload.name,
           finalEmail,
           finalPayload.phone,
-          finalPayload.roleLabel,
+          finalPayload.memberRole,
           finalPayload.workerType,
           finalPayload.active,
           updatedBy,
@@ -4740,9 +5109,11 @@ async function handleAdminWorkerProfileUpdateRequest(req, res) {
     }
 
     if (authUid) {
-      await client.query(
+      await runWorkerProfileDbQuery(
+        client,
+        'upsert-worker-organization-member',
         `insert into public.organization_member (org_id, uid, role, created_at)
-         values ($1, $2, $3, now())
+         values ($1::text, $2::text, $3::text, now())
          on conflict (org_id, uid) do update set role = excluded.role`,
         [payload.orgId, authUid, payload.memberRole],
       )

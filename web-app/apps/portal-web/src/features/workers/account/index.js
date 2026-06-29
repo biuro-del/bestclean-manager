@@ -52,12 +52,14 @@ const WORKER_ROLE_COPY = {
     description: 'Rejestracja czasu pracy i realizacja zlecen.',
   },
 }
-const WORKER_TYPE_DEFAULT = 'Pracownik'
+const WORKER_TYPE_DEFAULT = 'Stały personel na obiekcie'
 const WORKER_TYPE_OPTIONS = [
+  'ADMIN',
+  'Koordynator',
   WORKER_TYPE_DEFAULT,
-  'Zespol mobilny',
-  'Staly personel na obiekcie',
+  'Zespół mobilny',
 ]
+const DASHBOARD_LOCAL_CACHE_PREFIX = 'portal.dashboard.snapshot.'
 const WORKER_TRAINING_OPTIONS = [
   'Szkolenie BHP',
   'Instruktaz stanowiskowy',
@@ -299,12 +301,23 @@ export function createWorkerAccountFeature(ctx) {
 
   function workerTypeValue(value) {
     const raw = value && typeof value === 'object'
-      ? value.workerType ?? value.profileType ?? value.employeeType ?? value.staffType ?? ''
+      ? value.workerType ?? value.profileType ?? value.employeeType ?? value.staffType ?? value.role ?? ''
       : value
     const normalized = normalizeKey(raw)
-    if (normalized.includes('mobil') || normalized.includes('zespol')) return 'Zespol mobilny'
+    if (normalized.includes('admin') || normalized.includes('owner') || normalized.includes('superadmin')) return 'ADMIN'
+    if (
+      normalized.includes('koordynator') ||
+      normalized.includes('coordinator') ||
+      normalized.includes('coordynator') ||
+      normalized.includes('manager') ||
+      normalized.includes('menager') ||
+      normalized.includes('kierownik')
+    ) {
+      return 'Koordynator'
+    }
+    if (normalized.includes('mobil') || normalized.includes('zespol')) return 'Zespół mobilny'
     if (normalized.includes('staly') || normalized.includes('personel') || normalized.includes('obiekt')) {
-      return 'Staly personel na obiekcie'
+      return WORKER_TYPE_DEFAULT
     }
     if (normalized.includes('pracownik') || normalized === 'worker') return WORKER_TYPE_DEFAULT
     return WORKER_TYPE_OPTIONS.includes(String(raw ?? '').trim()) ? String(raw ?? '').trim() : WORKER_TYPE_DEFAULT
@@ -750,6 +763,76 @@ export function createWorkerAccountFeature(ctx) {
       })
       if (index >= 0) rows.splice(index, 1, { ...rows[index], ...worker })
     })
+  }
+
+  function clearDashboardWorkerSnapshotCache() {
+    if (typeof window === 'undefined' || !window.localStorage) return
+    try {
+      for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+        const key = window.localStorage.key(index)
+        if (String(key ?? '').startsWith(DASHBOARD_LOCAL_CACHE_PREFIX)) {
+          window.localStorage.removeItem(key)
+        }
+      }
+    } catch {
+      // Local storage can be unavailable in hardened browser profiles.
+    }
+  }
+
+  function findWorkerInFreshRows(rows, previousLogin, worker) {
+    const expectedLogin = normalizeKey(worker?.login ?? worker?.workerLogin)
+    const previousKey = normalizeKey(previousLogin)
+    const loginChanged = Boolean(expectedLogin && previousKey && expectedLogin !== previousKey)
+    const lookupKeys = new Set()
+    ;[
+      worker?.login,
+      worker?.workerLogin,
+      worker?.workerId,
+      worker?.id,
+      worker?.email,
+      worker?.loginEmail,
+    ].forEach((value) => addIdentityKey(lookupKeys, value))
+    if (!loginChanged) {
+      addIdentityKey(lookupKeys, previousLogin)
+    }
+
+    return (Array.isArray(rows) ? rows : []).find((row) => {
+      if (loginChanged) {
+        return normalizeKey(row?.login ?? row?.workerLogin) === expectedLogin
+      }
+      const rowKeys = workerIdentityKeys(row)
+      return [...lookupKeys].some((key) => rowKeys.has(key))
+    }) ?? null
+  }
+
+  async function refreshWorkerDirectoryAfterSave(previousLogin, savedWorker) {
+    if (!appState.session?.orgId) return savedWorker
+    clearDashboardWorkerSnapshotCache()
+    appState.workersLoaded = false
+    const rows = await getWorkers(appState.session.orgId, { force: true, fetchPolicy: 'SERVER_ONLY' })
+    const freshRows = Array.isArray(rows) ? rows : []
+    appState.workers = freshRows.map((item) => ({ ...item }))
+    appState.workerProfileRows = freshRows.map((item) => ({ ...item }))
+    appState.workerProfileViewRows = freshRows.map((item) => ({ ...item }))
+    appState.workersLoaded = true
+
+    const freshWorker = findWorkerInFreshRows(freshRows, previousLogin, savedWorker)
+    if (!freshWorker) {
+      console.warn('[worker-account] server-only refresh did not include backend-confirmed worker', {
+        previousLogin,
+        login: savedWorker?.login ?? savedWorker?.workerLogin,
+      })
+      const fallbackWorker = { ...savedWorker }
+      applyWorkerToCachedRows(previousLogin, fallbackWorker)
+      return fallbackWorker
+    }
+    return {
+      ...freshWorker,
+      authUpdated: Boolean(savedWorker?.authUpdated),
+      authWarning: String(savedWorker?.authWarning ?? '').trim(),
+      loginChangeSkipped: Boolean(savedWorker?.loginChangeSkipped),
+      storage: String(savedWorker?.storage ?? '').trim(),
+    }
   }
 
   function setShellVisible(hasWorker) {
@@ -2852,27 +2935,27 @@ export function createWorkerAccountFeature(ctx) {
       return null
     }
     const updated = await updateWorker(appState.session.orgId, currentLogin, payload)
-    const updatedLogin = updated?.loginChangeSkipped
+    const persisted = await refreshWorkerDirectoryAfterSave(currentLogin, updated)
+    const updatedLogin = persisted?.loginChangeSkipped
       ? currentLogin
-      : String(updated?.login ?? payload.newLogin ?? currentLogin).trim() || currentLogin
+      : String(persisted?.login ?? currentLogin).trim() || currentLogin
     const nextWorker = {
       ...worker,
-      ...updated,
-      ...payload,
+      ...persisted,
       login: updatedLogin,
       workerLogin: updatedLogin,
-      id: String(updated?.workerId ?? payload.workerId ?? workerId(worker)).trim() || updatedLogin,
-      workerId: String(updated?.workerId ?? payload.workerId ?? workerId(worker)).trim() || updatedLogin,
-      name: updated?.name ?? payload.name,
-      workerName: updated?.workerName ?? payload.workerName ?? payload.name,
-      role: updated?.role ?? payload.role,
-      type: updated?.type ?? payload.role,
-      workerType: workerTypeValue(updated?.workerType ?? payload.workerType ?? worker),
-      active: payload.active,
-      email: updated?.email ?? payload.email,
-      loginEmail: updated?.loginEmail ?? payload.loginEmail ?? payload.email,
-      phone: updated?.phone ?? payload.phone,
-      editedBy: payload.editedBy,
+      id: String(persisted?.workerId ?? persisted?.id ?? workerId(worker)).trim() || updatedLogin,
+      workerId: String(persisted?.workerId ?? persisted?.id ?? workerId(worker)).trim() || updatedLogin,
+      name: persisted?.name ?? persisted?.workerName ?? workerName(worker),
+      workerName: persisted?.workerName ?? persisted?.name ?? workerName(worker),
+      role: persisted?.role ?? worker.role,
+      type: persisted?.type ?? persisted?.role ?? worker.role,
+      workerType: workerTypeValue(persisted?.workerType ?? persisted?.type ?? persisted?.role ?? worker),
+      active: persisted?.active,
+      email: persisted?.email ?? persisted?.loginEmail ?? worker.email,
+      loginEmail: persisted?.loginEmail ?? persisted?.email ?? worker.loginEmail,
+      phone: persisted?.phone ?? worker.phone,
+      editedBy: persisted?.editedBy ?? payload.editedBy,
     }
     updateCurrentWorker(nextWorker)
     applyWorkerToCachedRows(currentLogin, nextWorker)
@@ -3296,9 +3379,10 @@ export function createWorkerAccountFeature(ctx) {
 
     let worker = resolveCurrentWorker()
     if (force || !worker) {
-      const rows = await getWorkers(appState.session.orgId, { forceRefresh: force }).catch(() => [])
+      const rows = await getWorkers(appState.session.orgId, force ? { force: true, fetchPolicy: 'SERVER_ONLY' } : {}).catch(() => [])
       if (Array.isArray(rows) && rows.length) {
         appState.workers = rows
+        appState.workersLoaded = true
         worker = resolveCurrentWorker()
       }
     }
