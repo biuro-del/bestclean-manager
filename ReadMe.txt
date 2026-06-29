@@ -406,6 +406,24 @@ Historia zmian dokumentacji i projektu
 Data: 2026-06-29
 Autor: AI Codex
 Dodano:
+- Dodano walidacje zgodnosci swiezego odczytu pracownika po zapisie z rekordem potwierdzonym przez backend; jezeli odczyt po `SERVER_ONLY` zwraca stary typ/dane, UI natychmiast uzywa rekordu zwroconego po zapisie.
+Zmieniono:
+- Poprawiono mapowanie `workerType/type/role` w `workerService.js`, aby `type` w portalu oznaczal widoczny typ pracownika, a `role` pozostala rola systemowa/uprawnieniem.
+- Poprawiono filtrowanie, sortowanie i renderowanie typu w Liscie pracownikow tak, aby preferowaly `workerType` zamiast starego `role/type`.
+- Poprawiono zakladki konta pracownika po zapisie roli/typu tak, aby lokalny stan, cache i formularze byly od razu aktualizowane nowym typem.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Uruchomiono `node --check web-app/apps/portal-web/src/services/workerService.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/workers/worker_list_profile/index.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/workers/account/index.js`.
+- Uruchomiono `npm.cmd run build`; build zakonczyl sie sukcesem z istniejacym ostrzezeniem o duzych chunkach Vite.
+Uwagi dla nastepnej osoby:
+- Po zapisie typu pracownika UI nie powinien juz czekac na reczne odswiezenie strony; jezeli odczyt Data Connect chwilowo zwroci stary rekord, portal utrzyma backendowo potwierdzona wartosc.
+
+Data: 2026-06-29
+Autor: AI Codex
+Dodano:
 - Dodano kontrolowana diagnostyke lokalnych zapytan SQL dla zapisu profilu pracownika w `index.js`, z etykietami krokow typu `update-worker-profile-row` i `rename-worker-finalize-new-row`.
 - Dodano mapowanie bledow SQLSTATE `42P08` i `42P18` na czytelny blad `DB_QUERY_PARAMETER_ERROR`, aby nie byly mylone z Firebase Auth.
 - Dodano obsluge bledow rate limit Firebase Auth (`429`, `auth/too-many-requests`, `TOO_MANY_ATTEMPTS_TRY_LATER`, `RESOURCE_EXHAUSTED`) z czytelnym komunikatem dla uzytkownika.

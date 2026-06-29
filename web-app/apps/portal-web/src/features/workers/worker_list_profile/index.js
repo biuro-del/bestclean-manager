@@ -264,7 +264,7 @@ export function createWorkerProfileFeature(ctx) {
   }
 
   function workerProfilePatchRole(worker) {
-    return workerProfilePatchText(worker?.role ?? worker?.type ?? worker?.workerType)
+    return workerProfilePatchText(worker?.workerType ?? worker?.type ?? worker?.role)
   }
 
   function workerProfilePatchEmail(worker) {
@@ -492,8 +492,13 @@ export function createWorkerProfileFeature(ctx) {
   }
 
   function normalizeWorkerProfileRow(worker) {
+    const workerType = workerProfileAllowedTypeValue(worker?.workerType ?? worker?.type ?? worker?.role)
+    const role = String(worker?.role ?? '').trim() || workerType
     return {
       ...worker,
+      role,
+      type: workerType,
+      workerType,
       active: workerProfileBoolean(worker, 'active'),
       online: workerProfileBoolean(worker, 'online'),
       phone: String(worker?.phone ?? ''),
@@ -1040,7 +1045,7 @@ export function createWorkerProfileFeature(ctx) {
       case 'loginDesc':
         return byText((worker) => worker?.login ?? '', -1)
       case 'typeAsc':
-        return byText((worker) => worker?.type ?? worker?.role ?? '')
+        return byText((worker) => worker?.workerType ?? worker?.type ?? worker?.role ?? '')
       case 'activeDesc':
         return byBool((worker) => workerProfileBoolean(worker, 'active'))
       case 'onlineDesc':
@@ -1096,7 +1101,7 @@ export function createWorkerProfileFeature(ctx) {
     appState.workerProfileSort = sortKey
 
     return appState.workerProfileRows.filter((worker) => {
-      const workerType = normalizeSearchText(worker.type ?? worker.role)
+      const workerType = normalizeSearchText(worker.workerType ?? worker.type ?? worker.role)
       if (typeFilter && !workerType.includes(typeFilter)) {
         return false
       }
@@ -1119,6 +1124,7 @@ export function createWorkerProfileFeature(ctx) {
         worker.id,
         worker.name,
         worker.login,
+        worker.workerType,
         worker.type,
         worker.role,
         worker.phone,
@@ -1156,7 +1162,7 @@ export function createWorkerProfileFeature(ctx) {
           const key = workerProfileKey(worker)
           const selected = key && selectedWorkerProfileKeys.has(key)
           const name = worker.name || '-'
-          const role = worker.role || worker.type || '-'
+          const role = worker.workerType || worker.type || worker.role || '-'
           const roleVisual = workerRoleVisualMeta(role)
           const phone = worker.phone || '-'
           const active = workerProfileBoolean(worker, 'active')
@@ -2103,8 +2109,8 @@ export function createWorkerProfileFeature(ctx) {
           name: createdUser?.name ?? createdUser?.workerName ?? payload.name,
           fullName: createdUser?.fullName ?? createdUser?.workerName ?? createdUser?.name ?? payload.name,
           role: createdUser?.role ?? payload.role,
-          type: createdUser?.type ?? createdUser?.role ?? payload.role,
-          workerType: createdUser?.workerType ?? createdUser?.role ?? payload.role,
+          type: createdUser?.workerType ?? createdUser?.type ?? payload.role,
+          workerType: createdUser?.workerType ?? createdUser?.type ?? createdUser?.role ?? payload.role,
           active: payload.active,
           email: createdUser?.email ?? payload.email,
           loginEmail: createdUser?.loginEmail ?? createdUser?.email ?? payload.email,
@@ -2155,8 +2161,8 @@ export function createWorkerProfileFeature(ctx) {
           fullName: payload.name,
           name: payload.name,
           role: updatedWorker?.role ?? payload.role,
-          type: updatedWorker?.type ?? updatedWorker?.role ?? payload.role,
-          workerType: updatedWorker?.workerType ?? updatedWorker?.role ?? payload.role,
+          type: updatedWorker?.workerType ?? updatedWorker?.type ?? payload.role,
+          workerType: updatedWorker?.workerType ?? updatedWorker?.type ?? updatedWorker?.role ?? payload.role,
           active: payload.active,
           email: updatedWorker?.email ?? payload.email,
           loginEmail: updatedWorker?.loginEmail ?? updatedWorker?.email ?? payload.email,
@@ -2181,7 +2187,8 @@ export function createWorkerProfileFeature(ctx) {
         resetPage: false,
         skipOptimisticPatches: true,
       })
-      if (optimisticWorker && !findWorkerProfileRowAfterSave(optimisticPreviousKey, optimisticWorker)) {
+      const refreshedWorker = optimisticWorker ? findWorkerProfileRowAfterSave(optimisticPreviousKey, optimisticWorker) : null
+      if (optimisticWorker && (!refreshedWorker || !workerProfilePatchConfirmed(refreshedWorker, optimisticWorker))) {
         console.warn('[worker-profile] server-only refresh did not include backend-confirmed worker', {
           previousLogin: optimisticPreviousKey,
           login: optimisticWorker?.login ?? optimisticWorker?.workerLogin,

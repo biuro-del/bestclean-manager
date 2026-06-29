@@ -623,8 +623,9 @@ function mapWorker(orgId, row) {
   ).trim()
   const rawRole = String(row.role ?? '').trim()
   const workerType = String(row.workerType ?? '').trim()
-  const roleSource = workerType && !['WORKER', 'Pracownik'].includes(workerType) ? workerType : rawRole || workerType
-  const role = formatWorkerRoleLabel(roleSource, 'Pracownik')
+  const systemRole = normalizeWorkerRoleCanonical(rawRole || workerType)
+  const role = rawRole || systemRole
+  const displayType = workerType || formatWorkerRoleLabel(rawRole || systemRole, 'Pracownik')
   const loginEmail = String(row.loginEmail ?? row.email ?? '').trim()
 
   return {
@@ -637,8 +638,9 @@ function mapWorker(orgId, row) {
     fullName: workerName,
     name: workerName,
     role,
-    type: role,
-    workerType,
+    systemRole,
+    type: displayType,
+    workerType: displayType,
     active: asBoolean(row.active, true),
     authUid: String(row.authUid ?? row.auth_uid ?? '').trim(),
     email: loginEmail,
@@ -676,7 +678,7 @@ export async function getWorkers(orgId, filters = {}) {
   const q = String(filters.q ?? '').trim().toLowerCase()
   if (q) {
     workers = workers.filter((worker) => {
-      const haystack = [worker.id, worker.workerId, worker.login, worker.name, worker.role, worker.phone, worker.email]
+      const haystack = [worker.id, worker.workerId, worker.login, worker.name, worker.role, worker.type, worker.workerType, worker.phone, worker.email]
         .map((value) => String(value ?? '').toLowerCase())
         .join(' ')
       return haystack.includes(q)
@@ -685,7 +687,9 @@ export async function getWorkers(orgId, filters = {}) {
 
   const type = String(filters.type ?? '').trim().toLowerCase()
   if (type) {
-    workers = workers.filter((worker) => String(worker.type ?? '').toLowerCase().includes(type))
+    workers = workers.filter((worker) =>
+      String(worker.workerType ?? worker.type ?? worker.role ?? '').toLowerCase().includes(type),
+    )
   }
 
   return workers
@@ -855,6 +859,7 @@ async function createWorkerUserViaProvision(orgId, payload) {
     name: workerName,
     role,
     type: workerType,
+    workerType,
     active,
     email: loginEmail,
     loginEmail,
@@ -946,6 +951,12 @@ export async function updateWorker(orgId, workerId, payload) {
   const responseWorkerId = String(responseWorker?.workerId ?? responseWorker?.id ?? payload?.workerId ?? payload?.id ?? responseLogin).trim() || responseLogin
   const responseEmail = String(responseWorker?.email ?? responseWorker?.loginEmail ?? '').trim()
   const responseActive = asBoolean(responseWorker?.active, active)
+  const responseRole = String(responseWorker?.role ?? responseWorker?.systemRole ?? 'WORKER').trim() || 'WORKER'
+  const responseDisplayType = String(
+    responseWorker?.workerType ??
+      responseWorker?.type ??
+      formatWorkerRoleLabel(responseRole, 'Pracownik'),
+  ).trim() || formatWorkerRoleLabel(responseRole, 'Pracownik')
 
   return {
     ...responseWorker,
@@ -956,9 +967,10 @@ export async function updateWorker(orgId, workerId, payload) {
     workerLogin: String(responseWorker?.workerLogin ?? responseWorker?.login ?? responseLogin).trim() || responseLogin,
     name: String(responseWorker?.name ?? responseWorker?.workerName ?? responseLogin).trim() || responseLogin,
     workerName: String(responseWorker?.workerName ?? responseWorker?.name ?? responseLogin).trim() || responseLogin,
-    role: String(responseWorker?.role ?? responseWorker?.type ?? 'WORKER').trim() || 'WORKER',
-    type: String(responseWorker?.type ?? responseWorker?.role ?? 'WORKER').trim() || 'WORKER',
-    workerType: String(responseWorker?.workerType ?? responseWorker?.type ?? responseWorker?.role ?? 'WORKER').trim() || 'WORKER',
+    role: responseRole,
+    systemRole: normalizeWorkerRoleCanonical(responseRole),
+    type: responseDisplayType,
+    workerType: responseDisplayType,
     email: responseEmail,
     loginEmail: String(responseWorker?.loginEmail ?? responseWorker?.email ?? responseEmail).trim(),
     active: responseActive,

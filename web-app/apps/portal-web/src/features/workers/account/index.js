@@ -805,6 +805,33 @@ export function createWorkerAccountFeature(ctx) {
     }) ?? null
   }
 
+  function workerAccountSavedText(value) {
+    return String(value ?? '').trim().toLowerCase()
+  }
+
+  function workerAccountFreshMatchesSaved(freshWorker, savedWorker) {
+    if (!freshWorker || !savedWorker) return false
+    const freshLogin = workerAccountSavedText(freshWorker.login ?? freshWorker.workerLogin)
+    const savedLogin = workerAccountSavedText(savedWorker.login ?? savedWorker.workerLogin)
+    const freshName = workerAccountSavedText(freshWorker.name ?? freshWorker.workerName)
+    const savedName = workerAccountSavedText(savedWorker.name ?? savedWorker.workerName)
+    const freshEmail = workerAccountSavedText(freshWorker.email ?? freshWorker.loginEmail)
+    const savedEmail = workerAccountSavedText(savedWorker.email ?? savedWorker.loginEmail)
+    const freshPhone = workerAccountSavedText(freshWorker.phone)
+    const savedPhone = workerAccountSavedText(savedWorker.phone)
+    const freshType = workerAccountSavedText(workerTypeValue(freshWorker))
+    const savedType = workerAccountSavedText(workerTypeValue(savedWorker))
+
+    return (
+      (!savedLogin || freshLogin === savedLogin) &&
+      (!savedName || freshName === savedName) &&
+      (!savedEmail || freshEmail === savedEmail) &&
+      freshPhone === savedPhone &&
+      freshType === savedType &&
+      isWorkerActive(freshWorker) === isWorkerActive(savedWorker)
+    )
+  }
+
   async function refreshWorkerDirectoryAfterSave(previousLogin, savedWorker) {
     if (!appState.session?.orgId) return savedWorker
     clearDashboardWorkerSnapshotCache()
@@ -817,8 +844,8 @@ export function createWorkerAccountFeature(ctx) {
     appState.workersLoaded = true
 
     const freshWorker = findWorkerInFreshRows(freshRows, previousLogin, savedWorker)
-    if (!freshWorker) {
-      console.warn('[worker-account] server-only refresh did not include backend-confirmed worker', {
+    if (!freshWorker || !workerAccountFreshMatchesSaved(freshWorker, savedWorker)) {
+      console.warn('[worker-account] server-only refresh did not include matching backend-confirmed worker', {
         previousLogin,
         login: savedWorker?.login ?? savedWorker?.workerLogin,
       })
@@ -2949,7 +2976,6 @@ export function createWorkerAccountFeature(ctx) {
       name: persisted?.name ?? persisted?.workerName ?? workerName(worker),
       workerName: persisted?.workerName ?? persisted?.name ?? workerName(worker),
       role: persisted?.role ?? worker.role,
-      type: persisted?.type ?? persisted?.role ?? worker.role,
       workerType: workerTypeValue(persisted?.workerType ?? persisted?.type ?? persisted?.role ?? worker),
       active: persisted?.active,
       email: persisted?.email ?? persisted?.loginEmail ?? worker.email,
@@ -2957,6 +2983,7 @@ export function createWorkerAccountFeature(ctx) {
       phone: persisted?.phone ?? worker.phone,
       editedBy: persisted?.editedBy ?? payload.editedBy,
     }
+    nextWorker.type = nextWorker.workerType
     updateCurrentWorker(nextWorker)
     applyWorkerToCachedRows(currentLogin, nextWorker)
     renderWorkerCard(nextWorker)
