@@ -2988,7 +2988,10 @@ export function createWorkerAccountFeature(ctx) {
     applyWorkerToCachedRows(currentLogin, nextWorker)
     renderWorkerCard(nextWorker)
     renderForms(nextWorker)
-    if (successMessage && options.silent !== true) showTransientNotice(successMessage, 'success')
+    if (successMessage && options.silent !== true) {
+      const warning = String(nextWorker?.authWarning ?? '').trim()
+      showTransientNotice(warning ? `${successMessage} Uwaga: ${warning}` : successMessage, 'success')
+    }
     return nextWorker
   }
 

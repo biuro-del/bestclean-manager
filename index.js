@@ -3377,6 +3377,17 @@ function createWorkerProfilePublicError(statusCode, publicCode, publicMessage) {
   return error
 }
 
+const WORKER_PROFILE_DB_ONLY_AUTH_WARNING =
+  'Profil pracownika zapisano w bazie, ale nie znaleziono konta Firebase Auth; Firebase Auth nie zostal zmieniony.'
+
+function createWorkerProfileAuthRequiredError(actionLabel = 'tej operacji') {
+  return createWorkerProfilePublicError(
+    409,
+    'FIREBASE_AUTH_USER_MISSING',
+    `Ten pracownik nie ma konta Firebase Auth. Odtworz konto Firebase Auth przed wykonaniem operacji: ${actionLabel}.`,
+  )
+}
+
 async function runWorkerProfileDbQuery(client, label, queryText, params = []) {
   try {
     return await client.query(queryText, params)
@@ -4698,14 +4709,14 @@ async function updateFirebaseAuthForWorkerProfilePayload(payload, currentWorker 
       throw createWorkerProfilePublicError(
         409,
         'FIREBASE_AUTH_USER_MISSING',
-        'Nie znaleziono konta Firebase Auth dla tego pracownika. Edycja zostala przerwana, zeby nie zapisac tylko czesci danych.',
+        normalizeText(options.authRequiredMessage) ||
+          'Nie znaleziono konta Firebase Auth dla tego pracownika. Edycja zostala przerwana, zeby nie zapisac tylko czesci danych.',
       )
     }
     return {
       authUid: '',
       authUpdated: false,
-      authWarning:
-        'Nie wyslano UID Firebase Auth; baza zostala zaktualizowana przez Data Connect, ale konto Auth nie zostalo zmienione.',
+      authWarning: WORKER_PROFILE_DB_ONLY_AUTH_WARNING,
     }
   }
 
@@ -4761,7 +4772,39 @@ async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebase
   const finalWorkerId = resolveWorkerProfileWorkerId(finalPayload, currentWorker, loginChanged)
   const updatedBy = payload.editedBy || normalizeEmail(decodedToken?.email) || normalizeText(decodedToken?.uid)
   const authRollbackPatch = dataConnectWorkerAuthSnapshot(currentWorker)
-  const authResult = await updateFirebaseAuthForWorkerProfilePayload(finalPayload, currentWorker, { strict: true })
+  let authResult = { authUid: finalPayload.authUid, authUpdated: false, authWarning: '' }
+  let initialAuthWarning = ''
+  let useAuthProfileMutation = false
+
+  if (loginChanged && !finalPayload.authUid) {
+    const authMatch = await findFirebaseUserForWorker(mapDataConnectWorkerForAuth(currentWorker))
+    finalPayload.authUid = normalizeText(authMatch.authUid)
+    authResult.authUid = finalPayload.authUid
+    initialAuthWarning = normalizeText(authMatch.authWarning)
+  }
+
+  if (loginChanged && !finalPayload.authUid) {
+    throw createWorkerProfileAuthRequiredError('zmiana loginu')
+  }
+
+  if (loginChanged) {
+    authResult = await updateFirebaseAuthForWorkerProfilePayload(finalPayload, currentWorker, {
+      strict: true,
+      authRequiredMessage:
+        'Ten pracownik nie ma konta Firebase Auth. Odtworz konto Firebase Auth przed zmiana loginu.',
+    })
+    useAuthProfileMutation = true
+  } else if (finalPayload.authUid) {
+    authResult = await updateFirebaseAuthForWorkerProfilePayload(finalPayload, currentWorker, { strict: false })
+    useAuthProfileMutation = Boolean(authResult.authUpdated || !normalizeText(authResult.authWarning))
+  } else {
+    authResult = {
+      authUid: '',
+      authUpdated: false,
+      authWarning: WORKER_PROFILE_DB_ONLY_AUTH_WARNING,
+    }
+  }
+
   let persistedWorker = null
 
   try {
@@ -4788,7 +4831,7 @@ async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebase
         },
         firebaseIdToken,
       )
-    } else {
+    } else if (useAuthProfileMutation) {
       await executeDataConnectOperation(
         'mutation',
         'UpdateWorkerProfileForOrg',
@@ -4800,6 +4843,25 @@ async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebase
           authUid: authResult.authUid || finalPayload.authUid,
           role: finalPayload.memberRole,
           memberRole: finalPayload.memberRole,
+          active: finalPayload.active,
+          email: finalPayload.email,
+          phone: finalPayload.phone || null,
+          workerType: finalPayload.workerType,
+          workerId: finalWorkerId,
+          edit: updatedBy || null,
+        },
+        firebaseIdToken,
+      )
+    } else {
+      await executeDataConnectOperation(
+        'mutation',
+        'UpdateWorkerForOrg',
+        {
+          orgId: finalPayload.orgId,
+          login: finalPayload.login,
+          workerName: finalPayload.name,
+          loginEmail: finalPayload.email,
+          role: finalPayload.memberRole,
           active: finalPayload.active,
           email: finalPayload.email,
           phone: finalPayload.phone || null,
@@ -4829,7 +4891,7 @@ async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebase
     throw error
   }
 
-  const authWarnings = [authResult.authWarning].filter(Boolean)
+  const authWarnings = [initialAuthWarning, authResult.authWarning].filter(Boolean)
   return {
     worker: persistedWorker,
     persistenceVerified: true,
@@ -5037,17 +5099,33 @@ async function handleAdminWorkerProfileUpdateRequest(req, res) {
     }
     await assertWorkerProfileLoginAvailable(client, payload.orgId, payload.login, payload.newLogin)
 
-    const authMatch = await findFirebaseUserForWorker(currentWorker)
-    const authUid = normalizeText(authMatch.authUid)
+    let authUid = normalizeText(payload.authUid || currentWorker.auth_uid)
     let authUpdated = false
-    let authWarning = authMatch.authWarning
-    if (!authUid) {
-      throw createWorkerProfilePublicError(
-        409,
-        'FIREBASE_AUTH_USER_MISSING',
-        'Nie znaleziono konta Firebase Auth dla tego pracownika. Edycja zostala przerwana, zeby nie zapisac tylko czesci danych.',
-      )
+    let authWarning = ''
+
+    if (authUid || loginChanged) {
+      try {
+        const authMatch = await findFirebaseUserForWorker(currentWorker, authUid)
+        authUid = normalizeText(authMatch.authUid || authUid)
+        authWarning = normalizeText(authMatch.authWarning)
+      } catch (error) {
+        if (loginChanged) {
+          throw error
+        }
+        const mapped = mapFirebaseAdminError(error)
+        authWarning = appendWorkerProfileWarning(
+          authWarning,
+          `Profil zostanie zapisany w bazie, ale nie udalo sie sprawdzic Firebase Auth: ${normalizeText(mapped.message || error?.message)}`,
+        )
+      }
+    } else {
+      authWarning = ''
     }
+
+    if (loginChanged && !authUid) {
+      throw createWorkerProfileAuthRequiredError('zmiana loginu')
+    }
+
     const updatedBy = payload.editedBy || normalizeEmail(decodedToken?.email) || normalizeText(decodedToken?.uid)
     const finalEmail = loginChanged ? resolveWorkerProfileEmailForLogin(payload.newLogin, payload.email, currentWorker) : payload.email
     const finalWorkerId = resolveWorkerProfileWorkerId(payload, currentWorker, loginChanged)
@@ -5117,15 +5195,28 @@ async function handleAdminWorkerProfileUpdateRequest(req, res) {
          on conflict (org_id, uid) do update set role = excluded.role`,
         [payload.orgId, authUid, payload.memberRole],
       )
-    }
 
-    await ensureFirebaseAdmin().auth().updateUser(authUid, {
-      displayName: finalPayload.name,
-      email: finalEmail,
-      disabled: !finalPayload.active,
-    })
-    authUpdated = true
-    authWarning = ''
+      try {
+        await ensureFirebaseAdmin().auth().updateUser(authUid, {
+          displayName: finalPayload.name,
+          email: finalEmail,
+          disabled: !finalPayload.active,
+        })
+        authUpdated = true
+        authWarning = ''
+      } catch (error) {
+        if (loginChanged) {
+          throw error
+        }
+        const mapped = mapFirebaseAdminError(error)
+        authWarning = appendWorkerProfileWarning(
+          authWarning,
+          `Profil zapisano w bazie, ale Firebase Auth nie zostal zmieniony: ${normalizeText(mapped.message || error?.message)}`,
+        )
+      }
+    } else {
+      authWarning = appendWorkerProfileWarning(authWarning, WORKER_PROFILE_DB_ONLY_AUTH_WARNING)
+    }
 
     await client.query('commit')
 
