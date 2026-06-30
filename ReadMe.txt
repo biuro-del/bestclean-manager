@@ -1158,3 +1158,29 @@ Uwagi dla nastepnej osoby:
 - Nie wykonano deploya na produkcje, bo kontrolowany rollout App Hosting wymaga odblokowanego Firebase CLI albo potwierdzonej sciezki GitHub/App Hosting.
 - Nie nalezy uzywac `firebase deploy --only hosting` jako zamiennika bez potwierdzenia, bo produkcyjny adres portalu to `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`, czyli Firebase App Hosting, nie zwykly Firebase Hosting.
 - Nie zmieniano aplikacji mobilnej ani danych w bazie.
+
+Data: 2026-06-30 21:33 +02:00
+Autor: AI Codex
+Dodano:
+- Dopisano raport po bezpiecznym wdrozeniu portalu desktop na produkcje App Hosting.
+- Punkt powrotu przed wdrozeniem: `C:\Users\rafal\Desktop\app-to-react-backups\pre-deploy-portal-20260630-204854`.
+Zmieniono:
+- Wdrozenie wykonano z commita `cb0a329 portal: prepare production sync fixes` z galezi `codex/pre-prod-sync-20260630-112213`.
+- Galaz zostala wypchnieta do remote `cleanzi01/codex/pre-prod-sync-20260630-112213`.
+- Utworzono rollout App Hosting backendu `cleanzi-01` w projekcie `iclean-room`, region `europe-west4`, na adres produkcyjny `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`.
+- Firebase CLI uruchomiono przez Node 24.13.1 z `--use-system-ca`, zeby uzyc systemowego magazynu CA zamiast obchodzic weryfikacje TLS.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed rolloutem uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Przed rolloutem uruchomiono `git diff --check`; pozostaly tylko ostrzezenia CRLF.
+- Po rolloutcie sprawdzono backend `cleanzi-01`: `reconciling=false`, `updateTime=2026-06-30T19:26:59.809587Z`.
+- Produkcyjny adres portalu zwrocil HTTP 200.
+- Produkcyjny HTML laduje zasoby `assets/portal-BE_CiY6A.js` i `assets/portal-DgbxO4e4.css`.
+- W produkcyjnym JS potwierdzono znaczniki nowego kodu: `VITE_ENABLE_DATACONNECT_FINGERPRINT` oraz `portal:workday-updated`.
+- Smoke test w przegladarce produkcyjnej: Pulpit zaladowal dane, Kalendarz pokazal toolbar, BUFOR i wiersze pracownikow.
+- Konsola przegladarki podczas smoke testu Pulpitu i Kalendarza nie pokazala bledow ani ostrzezen aplikacji.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano aplikacji mobilnej.
+- Nie wdrazano Data Connect ani nie zmieniano danych w bazie.
+- Przywrocenie wersji sprzed wdrozenia: uzyc backupu `working-tree.diff` z katalogu `pre-deploy-portal-20260630-204854` albo cofnac rollout App Hosting do commita sprzed `cb0a329`, zgodnie z procedura Firebase App Hosting/GitHub.
