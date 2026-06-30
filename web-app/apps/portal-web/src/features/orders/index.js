@@ -85,6 +85,9 @@ export function createOrdersFeature(ctx) {
   const ORDERS_LIST_ASSIGNMENTS = new Set(['', 'assigned', 'buffer'])
   const ORDERS_LIST_QUICK_FILTERS = new Set(['active_future', 'today', 'overdue', 'completed', 'all'])
   const ORDERS_LIST_SORTS = new Set(['nextAsc', 'nextDesc', 'dateAsc', 'dateDesc', 'clientAsc', 'workerAsc', 'nameAsc'])
+  const ORDERS_LOCATION_GOOGLE_MIN_QUERY = 5
+  const ORDERS_LOCATION_GOOGLE_SUGGESTIONS_DEBOUNCE_MS = 520
+  const ORDERS_LOCAL_LOCATION_SUGGESTIONS_CACHE_MS = 30000
   const ORDERS_WEEKDAY_LABELS = {
     0: 'Niedziela',
     1: 'Poniedziałek',
@@ -100,6 +103,7 @@ export function createOrdersFeature(ctx) {
   let ordersTimePickerMinute = 0
   let ordersServiceBlocksScrollCleanup = null
   let ordersEditorSummaryRefreshTimer = 0
+  let ordersEditorWizardRefreshTimer = 0
 
   function ordersDateTimeFromTimeline(dayKey = '', timeValue = '') {
     const day = String(dayKey ?? '').trim()
@@ -277,7 +281,7 @@ export function createOrdersFeature(ctx) {
   }
   
   function ordersReadExtendedWorkAllowed(order = {}) {
-    return ordersReadCheckboxValue('ordersEditAllowExtendedWork', ordersExtendedWorkAllowed(order))
+    return ordersReadCheckboxValue('ordersEditAllowExtendedWork', false)
   }
   
   function ordersAssignExtendedWorkFlags(target = {}, allowed = false) {
@@ -1084,150 +1088,12 @@ export function createOrdersFeature(ctx) {
     return sources.length ? sources : [ordersFallbackAccessWindow(order)]
   }
   
-  function ordersAccessWindowControlsRows() {
-    return [...document.querySelectorAll('#ordersAccessWindowRows [data-orders-access-window-row]')]
-  }
-  
-  function ordersReadAccessWindowsFromControls(order = {}) {
-    const rows = ordersAccessWindowControlsRows()
-    if (!rows.length) {
-      return []
-    }
-    return rows
-      .map((row, index) => {
-        const dayInput = row.querySelector('[data-orders-access-window-day]')
-        const startInput = row.querySelector('[data-orders-access-window-start]')
-        const endInput = row.querySelector('[data-orders-access-window-end]')
-        return ordersNormalizeAccessWindow(
-          {
-            weekday: dayInput instanceof HTMLSelectElement ? dayInput.value : row.getAttribute('data-orders-access-window-day'),
-            accessStartTime: startInput instanceof HTMLInputElement ? startInput.value : '',
-            accessEndTime: endInput instanceof HTMLInputElement ? endInput.value : '',
-          },
-          order,
-          index,
-        )
-      })
-      .filter(Boolean)
-  }
-  
-  function ordersEnsureAccessWindowsFromControls(order = {}) {
-    const rows = ordersReadAccessWindowsFromControls(order)
-    return rows.length ? rows : ordersAccessWindowsForOrder(order)
-  }
-  
-  function ordersStoreAccessWindows(order = {}, windows = []) {
-    const safe = (Array.isArray(windows) ? windows : [])
-      .map((window, index) => ordersNormalizeAccessWindow(window, order, index))
-      .filter(Boolean)
-    const finalWindows = safe.length ? safe : [ordersFallbackAccessWindow(order)]
-    order.accessWindows = finalWindows
-    order.objectAccessWindows = finalWindows
-    order.accessTimeWindows = finalWindows
-    order.buildingAccessWindows = finalWindows
-    const first = finalWindows[0]
-    if (first) {
-      order.accessStartTime = first.accessStartTime
-      order.accessEndTime = first.accessEndTime
-      if (ordersScheduleModeForOrder(order) === 'repeat') {
-        order.startTime = first.accessStartTime
-        order.endTime = first.accessEndTime
-      }
-    }
-    return finalWindows
-  }
-  
   function ordersClearAccessWindows(order = {}) {
     order.accessWindows = []
     order.objectAccessWindows = []
     order.accessTimeWindows = []
     order.buildingAccessWindows = []
     return []
-  }
-  
-  function ordersAccessWindowDayOptionsHtml(selected = ORDERS_ACCESS_ALL_DAYS) {
-    const normalized = ordersNormalizeAccessWindowWeekday(selected)
-    return [
-      `<option value="${ORDERS_ACCESS_ALL_DAYS}"${normalized === ORDERS_ACCESS_ALL_DAYS ? ' selected' : ''}>Wszystkie dni</option>`,
-      ...[1, 2, 3, 4, 5, 6, 0].map(
-        (weekday) => `<option value="${weekday}"${normalized === weekday ? ' selected' : ''}>${escapeHtml(ordersWeekdayLabel(weekday))}</option>`,
-      ),
-    ].join('')
-  }
-  
-  function ordersRenderAccessWindowsControls(order = {}) {
-    const panel = document.getElementById('ordersAccessWindowsPanel')
-    const rows = document.getElementById('ordersAccessWindowRows')
-    if (!panel || !rows) {
-      return
-    }
-    const isRepeat = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat'
-    panel.hidden = !isRepeat
-    if (!isRepeat) {
-      rows.innerHTML = ''
-      return
-    }
-    const windows = ordersAccessWindowsForOrder(order)
-    rows.innerHTML = windows
-      .map((window, index) => `
-        <div class="orders-access-window-row" data-orders-access-window-row data-orders-access-window-index="${index}">
-          <label>
-            <span>Dzień</span>
-            <select data-orders-access-window-day aria-label="Dzień okna dostępu">
-              ${ordersAccessWindowDayOptionsHtml(window.weekday)}
-            </select>
-          </label>
-          <label>
-            <span>Dostęp od</span>
-            <input type="time" value="${escapeHtml(window.accessStartTime)}" data-orders-access-window-start />
-          </label>
-          <label>
-            <span>Dostęp do</span>
-            <input type="time" value="${escapeHtml(window.accessEndTime)}" data-orders-access-window-end />
-          </label>
-          <button type="button" data-orders-access-window-remove="${index}"${windows.length <= 1 ? ' disabled' : ''}>Usuń</button>
-        </div>
-      `)
-      .join('')
-    ordersEnhanceTimeInputs(rows)
-  }
-  
-  function ordersAddAccessWindowToCurrentOrder() {
-    const order = ordersFindTimelineOrder(appState.ordersEditingId)
-    if (!order) {
-      return
-    }
-    const windows = ordersEnsureAccessWindowsFromControls(order)
-    const last = windows[windows.length - 1] || ordersFallbackAccessWindow(order)
-    const next = ordersNormalizeAccessWindow(
-      {
-        weekday: ORDERS_ACCESS_ALL_DAYS,
-        accessStartTime: last.accessStartTime,
-        accessEndTime: last.accessEndTime,
-      },
-      order,
-      windows.length,
-    )
-    ordersStoreAccessWindows(order, [...windows, next])
-    ordersRenderAccessWindowsControls(order)
-    ordersRenderWorkAllocationControls(order, { forceEven: true })
-    ordersRenderSchedulePreview(order)
-  }
-  
-  function ordersRemoveAccessWindowFromCurrentOrder(index = 0) {
-    const order = ordersFindTimelineOrder(appState.ordersEditingId)
-    if (!order) {
-      return
-    }
-    const removeIndex = Number(index)
-    const windows = ordersEnsureAccessWindowsFromControls(order)
-    if (!Number.isInteger(removeIndex) || windows.length <= 1) {
-      return
-    }
-    ordersStoreAccessWindows(order, windows.filter((_, itemIndex) => itemIndex !== removeIndex))
-    ordersRenderAccessWindowsControls(order)
-    ordersRenderWorkAllocationControls(order, { forceEven: true })
-    ordersRenderSchedulePreview(order)
   }
   
   function ordersFallbackAccessWindowRange(order = {}) {
@@ -1260,7 +1126,7 @@ export function createOrdersFeature(ctx) {
   }
   
   function ordersAccessWindowRanges(order = {}, weekday = null) {
-    const windows = ordersAccessWindowControlsRows().length ? ordersReadAccessWindowsFromControls(order) : ordersAccessWindowsForOrder(order)
+    const windows = [ordersFallbackAccessWindow(order)]
     const normalizedWeekday = ordersNormalizeWeekday(weekday)
     const scopedWindows = normalizedWeekday === null
       ? windows
@@ -1418,10 +1284,10 @@ export function createOrdersFeature(ctx) {
   }
 
   function ordersAvailableAccessWeekdays(order = {}) {
-    return ordersWeeklyAccessWindowsForOrder(order)
-      .filter((window) => window.available)
-      .map((window) => ordersNormalizeWeekday(window.weekday))
+    const selected = ordersRepeatWeekdaysFromOrder(order)
+      .map(ordersNormalizeWeekday)
       .filter((weekday, index, list) => weekday !== null && list.indexOf(weekday) === index)
+    return selected.length ? selected : [...ORDERS_ALL_REPEAT_WEEKDAYS]
   }
 
   function ordersDefaultServiceBlockWeekdays(order = {}) {
@@ -1761,6 +1627,69 @@ export function createOrdersFeature(ctx) {
     return finalBlocks
   }
 
+  function ordersServiceBlocksTotals(blocks = [], fallbackOrder = {}) {
+    const safeBlocks = Array.isArray(blocks) ? blocks : []
+    const totalWorkMinutes = safeBlocks.reduce((sum, block) => {
+      const slots = Array.isArray(block?.slots) ? block.slots : []
+      const slotMinutes = slots.reduce((slotSum, slot) => slotSum + Math.max(0, Number(slot?.minutes) || 0), 0)
+      return sum + Math.max(0, Number(block?.requiredWorkMinutes) || slotMinutes || 0)
+    }, 0)
+    const totalPeople = safeBlocks.reduce((sum, block) => {
+      const slots = Array.isArray(block?.slots) ? block.slots : []
+      return sum + Math.max(
+        0,
+        slots.length ||
+          Math.floor(Number(block?.requiredPeople ?? block?.requiredWorkers ?? block?.workerSlots) || 0),
+      )
+    }, 0)
+    return {
+      totalWorkMinutes: Math.max(
+        0,
+        totalWorkMinutes || Number(fallbackOrder.requiredWorkMinutes ?? fallbackOrder.serviceWorkMinutes ?? 0) || 0,
+      ),
+      totalPeople: Math.max(
+        1,
+        totalPeople ||
+          Math.floor(Number(fallbackOrder.requiredPeople ?? fallbackOrder.requiredWorkers ?? fallbackOrder.workerSlots) || 1),
+      ),
+    }
+  }
+
+  function ordersServiceBlocksWorkerSummary(blocks = []) {
+    const resources = calendarTimelineResources()
+    const names = []
+    let bufferSlots = 0
+    ;(Array.isArray(blocks) ? blocks : []).forEach((block) => {
+      ;(Array.isArray(block?.slots) ? block.slots : []).forEach((slot) => {
+        const row = Number(slot?.row)
+        const isWorker = String(slot?.type ?? '') === 'worker' && Number.isInteger(row) && row >= 0 && !calendarTimelineRowAllowsOverlap(row, resources)
+        if (!isWorker) {
+          bufferSlots += 1
+          return
+        }
+        const label = ordersWorkerRowLabel(row, resources) || String(slot?.name ?? slot?.label ?? '').trim()
+        const key = normalizeSearchText(label)
+        if (label && !names.some((item) => normalizeSearchText(item) === key)) {
+          names.push(label)
+        }
+      })
+    })
+    if (names.length && bufferSlots) {
+      return `${names.join(', ')} + BUFOR`
+    }
+    return names.length ? names.join(', ') : 'BUFOR'
+  }
+
+  function ordersRepeatWeekdaysFromServiceBlocks(order = {}) {
+    const controlBlocks = ordersReadServiceBlocksFromControls(order)
+    const blocks = controlBlocks.length ? controlBlocks : ordersServiceBlocksForOrder(order)
+    const weekdays = (Array.isArray(blocks) ? blocks : [])
+      .flatMap((block) => Array.isArray(block?.weekdays) ? block.weekdays : [])
+      .map(ordersNormalizeWeekday)
+      .filter((weekday, index, list) => weekday !== null && list.indexOf(weekday) === index)
+    return weekdays.length ? weekdays : ordersRepeatWeekdaysFromOrder(order)
+  }
+
   function ordersReadServiceBlocksFromControls(order = {}) {
     const cards = [...document.querySelectorAll('#ordersWorkAllocationRows [data-orders-service-block]')]
     if (!cards.length) {
@@ -1872,6 +1801,26 @@ export function createOrdersFeature(ctx) {
         ordersRefreshEditorSummaryFromDraft(order)
       }
     }, 220)
+  }
+
+  function ordersClearQueuedEditorWizardRefresh() {
+    if (ordersEditorWizardRefreshTimer) {
+      window.clearTimeout(ordersEditorWizardRefreshTimer)
+      ordersEditorWizardRefreshTimer = 0
+    }
+  }
+
+  function ordersQueueEditorWizardRefresh(order = ordersFindTimelineOrder(appState.ordersEditingId) || {}) {
+    if (!order || typeof order !== 'object') {
+      return
+    }
+    ordersClearQueuedEditorWizardRefresh()
+    ordersEditorWizardRefreshTimer = window.setTimeout(() => {
+      ordersEditorWizardRefreshTimer = 0
+      if (appState.ordersEditingId && document.getElementById('ordersEditorPanel')) {
+        ordersRenderEditorWizard(order)
+      }
+    }, 180)
   }
 
   function ordersServiceBlockWeekdaysHtml(block = {}, accessWindows = []) {
@@ -2123,7 +2072,7 @@ export function createOrdersFeature(ctx) {
     if (!rows) {
       return
     }
-    const accessWindows = ordersWeeklyAccessWindowsForOrder(order)
+    const accessWindows = ordersDefaultWeeklyAccessWindows(order)
     const controlBlocks = preferStored ? [] : ordersReadServiceBlocksFromControls(order)
     const blocks = ordersStoreServiceBlocks(order, controlBlocks.length ? controlBlocks : ordersServiceBlocksForOrder(order))
     if (typeof ordersServiceBlocksScrollCleanup === 'function') {
@@ -2132,9 +2081,6 @@ export function createOrdersFeature(ctx) {
     }
     document.getElementById('ordersServiceBlocksStickyScroll')?.remove()
     rows.innerHTML = `
-      <div class="orders-service-blocks-hint">
-        <span>Kolumna to zmiana. Kafelek to jedna osoba do obsadzenia. Przeciągnij uchwyt w nagłówku, aby zmienić kolejność.</span>
-      </div>
       <div class="orders-service-blocks-board" data-orders-service-blocks-board>
         <div class="orders-service-blocks-list" data-orders-service-blocks-list>
           ${blocks.map((block, index) => ordersServiceBlockCardHtml(block, accessWindows, calendarTimelineResources(), index, blocks.length, ordersScheduleModeForOrder(order))).join('')}
@@ -2671,7 +2617,7 @@ export function createOrdersFeature(ctx) {
     const allocations = ordersReadWorkAllocationsFromControls(order)
     const total = ordersWorkTargetTotalMinutes(order)
     const assigned = allocations.reduce((sum, item) => sum + Math.max(0, Number(item.minutes) || 0), 0)
-    const accessMinutes = ordersAccessWindowMinutes(order)
+    const accessMinutes = ordersAccessWindowMinutes(allocationBaseOrder)
     const overAccess = allocations.some((item) => item.minutes > accessMinutes)
     const outsideAccess = allocations.some((item) => !ordersAllocationFitsAccess(order, item))
     const mismatch = Math.abs(assigned - total) > 0
@@ -3946,7 +3892,7 @@ export function createOrdersFeature(ctx) {
           : ordersNormalizeDateField(order.endDateYmd ?? order.validUntil, ''),
       accessStartTime: ordersNormalizeTimeField(order.accessStartTime ?? order.startTime, ''),
       accessEndTime: ordersNormalizeTimeField(order.accessEndTime ?? order.endTime, ''),
-      accessWindows: mode === 'repeat' ? ordersAccessWindowsForOrder(order) : [],
+      accessWindows: [],
       requiredWorkMinutes: Math.max(0, Number(order.requiredWorkMinutes ?? order.serviceWorkMinutes ?? order.standardWorkMinutes) || 0),
       requiredPeople: Math.max(1, Number(order.requiredPeople ?? order.requiredWorkers ?? order.workerSlots) || 1),
       repeatPreset: String(order.repeatPreset ?? '').trim(),
@@ -4734,6 +4680,20 @@ export function createOrdersFeature(ctx) {
   }
   
   function ordersRepeatIntervalFromControls(order = {}) {
+    const hasRepeatControls = Boolean(document.getElementById('ordersEditRepeatPreset'))
+    const mode =
+      document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat' ||
+      ordersScheduleModeForOrder(order) === 'repeat'
+        ? 'repeat'
+        : 'once'
+    if (!hasRepeatControls && mode === 'repeat') {
+      const repeatEvery = Math.max(1, Math.floor(Number(order.repeatEvery) || 1))
+      return {
+        repeatPreset: repeatEvery === 1 ? 'week' : 'interval',
+        repeatEvery,
+        repeatUnit: 'week',
+      }
+    }
     const preset = ordersReadInputValue('ordersEditRepeatPreset') || ordersRepeatPresetFromOrder(order)
     if (preset === 'month') {
       return {
@@ -5023,7 +4983,7 @@ export function createOrdersFeature(ctx) {
     input.dispatchEvent(new Event('input', { bubbles: true }))
     input.dispatchEvent(new Event('change', { bubbles: true }))
     ordersCloseTimePicker()
-    input.focus({ preventScroll: true })
+    input.blur()
   }
   
   function ordersCreateDraftOrder(dayKey = todayYmd()) {
@@ -5217,8 +5177,19 @@ export function createOrdersFeature(ctx) {
       meta: String(meta ?? '').replace(/\s+/g, ' ').trim(),
     })
   }
-  
+
+  let ordersLocalLocationSuggestionsCache = null
+  let ordersLocalLocationSuggestionsCacheAt = 0
+
   function ordersLocalLocationSuggestions() {
+    const now = Date.now()
+    if (
+      Array.isArray(ordersLocalLocationSuggestionsCache) &&
+      now - ordersLocalLocationSuggestionsCacheAt < ORDERS_LOCAL_LOCATION_SUGGESTIONS_CACHE_MS
+    ) {
+      return ordersLocalLocationSuggestionsCache
+    }
+
     const suggestions = new Map()
   
     ;(Array.isArray(appState.clients) ? appState.clients : []).forEach((client) => {
@@ -5245,7 +5216,10 @@ export function createOrdersFeature(ctx) {
       ordersAddLocationSuggestion(suggestions, address, client ? `Zlecenie: ${client}` : 'Zlecenie')
     })
   
-    return [...suggestions.values()].sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
+    const rows = [...suggestions.values()].sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
+    ordersLocalLocationSuggestionsCache = rows
+    ordersLocalLocationSuggestionsCacheAt = now
+    return rows
   }
   
   const ordersGoogleLocationCache = new Map()
@@ -5447,7 +5421,8 @@ export function createOrdersFeature(ctx) {
   
   function ordersQueueGoogleLocationSuggestions(queryValue = '') {
     const query = ordersLocationSuggestionKey(queryValue)
-    if (query.length < 3) {
+    if (query.length < ORDERS_LOCATION_GOOGLE_MIN_QUERY) {
+      window.clearTimeout(ordersGoogleLocationDebounceHandle)
       return
     }
   
@@ -5490,7 +5465,7 @@ export function createOrdersFeature(ctx) {
             ordersRenderLocationSuggestions(input.value)
           }
         })
-    }, 260)
+    }, ORDERS_LOCATION_GOOGLE_SUGGESTIONS_DEBOUNCE_MS)
   }
   
   function ordersQueueGoogleLocationResolve(queryValue = '') {
@@ -5819,9 +5794,15 @@ export function createOrdersFeature(ctx) {
       return Promise.resolve()
     }
   
-    ordersLocationSourcesPromise = Promise.allSettled(loaders).finally(() => {
-      ordersLocationSourcesPromise = null
-    })
+    ordersLocationSourcesPromise = Promise.allSettled(loaders)
+      .then((result) => {
+        ordersLocalLocationSuggestionsCache = null
+        ordersLocalLocationSuggestionsCacheAt = 0
+        return result
+      })
+      .finally(() => {
+        ordersLocationSourcesPromise = null
+      })
     return ordersLocationSourcesPromise
   }
   
@@ -5841,9 +5822,7 @@ export function createOrdersFeature(ctx) {
 
   const ORDERS_EDITOR_STEPS = [
     { id: 'client', label: 'Klient i adres' },
-    { id: 'schedule', label: 'Termin' },
     { id: 'staffing', label: 'Zmiany i osoby' },
-    { id: 'recurrence', label: 'Cykliczność', repeatOnly: true },
     { id: 'details', label: 'Opis i podsumowanie' },
   ]
 
@@ -5858,8 +5837,11 @@ export function createOrdersFeature(ctx) {
     if (steps.some((step) => step.id === normalized)) {
       return normalized
     }
-    if (normalized === 'recurrence' && steps.some((step) => step.id === 'schedule')) {
-      return 'schedule'
+    if (normalized === 'schedule') {
+      return steps.some((step) => step.id === 'staffing') ? 'staffing' : steps[0]?.id || 'client'
+    }
+    if (normalized === 'recurrence' && !steps.some((step) => step.id === 'recurrence')) {
+      return steps.some((step) => step.id === 'staffing') ? 'staffing' : steps[0]?.id || 'client'
     }
     return steps[0]?.id || 'client'
   }
@@ -5876,6 +5858,43 @@ export function createOrdersFeature(ctx) {
     if (field instanceof HTMLElement) {
       window.setTimeout(() => field.focus({ preventScroll: false }), 0)
     }
+  }
+
+  function ordersEditorScheduleFieldsValidation(order = {}, mode = ordersScheduleModeForOrder(order)) {
+    const startDate = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), '')
+    const endDate = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), '')
+    const startTime = calendarNormalizeTimeValue(ordersReadInputValue('ordersEditTime'))
+    const endTime = calendarNormalizeTimeValue(ordersReadInputValue('ordersEditEndTime'))
+    if (!startDate) {
+      return { valid: false, message: 'Podaj datę START.' }
+    }
+    if (mode !== 'repeat' && !endDate) {
+      return { valid: false, message: 'Podaj datę STOP dla zlecenia jednorazowego.' }
+    }
+    if (!startTime || !endTime) {
+      return { valid: false, message: 'Podaj godziny pracy lub dostępu do obiektu.' }
+    }
+    if (mode === 'repeat' && endDate && endDate < startDate) {
+      return { valid: false, message: 'Data końca cyklu nie może być wcześniejsza niż data START.' }
+    }
+    const safeEndDate = mode === 'repeat' ? startDate : endDate
+    if (mode !== 'repeat' && safeEndDate < startDate) {
+      return { valid: false, message: 'Data STOP nie może być wcześniejsza niż data START.' }
+    }
+    if (safeEndDate === startDate && calendarTimelineTimeMinutes(endTime, 0) <= calendarTimelineTimeMinutes(startTime, 0)) {
+      return { valid: false, message: 'Godzina STOP musi być późniejsza niż godzina START.' }
+    }
+    return { valid: true, message: '' }
+  }
+
+  function ordersEditorRecurrenceFieldsValidation(mode = 'once', order = {}) {
+    if (mode !== 'repeat') {
+      return { valid: true, message: '' }
+    }
+    if (!ordersRepeatWeekdaysFromServiceBlocks(order).length) {
+      return { valid: false, message: 'Wybierz co najmniej jeden dzień wykonania.' }
+    }
+    return { valid: true, message: '' }
   }
 
   function ordersEditorStepValidation(stepId = appState.ordersEditorStep, order = ordersFindTimelineOrder(appState.ordersEditingId) || {}) {
@@ -5924,16 +5943,15 @@ export function createOrdersFeature(ctx) {
       }
     }
     if (step === 'staffing') {
+      const scheduleResult = ordersEditorScheduleFieldsValidation(order, mode)
+      if (!scheduleResult.valid) {
+        return scheduleResult
+      }
+      const recurrenceResult = ordersEditorRecurrenceFieldsValidation(mode, order)
+      if (!recurrenceResult.valid) {
+        return recurrenceResult
+      }
       return ordersValidateServiceBlocksForOrder(order)
-    }
-    if (step === 'recurrence' && mode === 'repeat') {
-      const every = Math.floor(Number(ordersReadInputValue('ordersEditRepeatEvery')) || 0)
-      if (!Number.isInteger(every) || every < 1) {
-        return { valid: false, message: 'Podaj co ile ma powtarzać się zlecenie.' }
-      }
-      if (!ordersReadRepeatWeekdaysForMode('repeat').length) {
-        return { valid: false, message: 'Wybierz co najmniej jeden dzień wykonania.' }
-      }
     }
     if (step === 'details' && !ordersEnsureEditorDescription(order)) {
       return { valid: false, message: 'Dodaj opis zlecenia widoczny w systemie.' }
@@ -6032,7 +6050,7 @@ export function createOrdersFeature(ctx) {
     const steps = ordersEditorActiveSteps(order)
     const activeIndex = ordersEditorStepIndex(activeStep, order)
     const activeIds = new Set(steps.map((step) => step.id))
-    const scheduleGroupVisible = ['schedule', 'staffing', 'recurrence'].includes(activeStep)
+    const scheduleGroupVisible = activeStep === 'staffing'
     const isRepeat = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat' ||
       ordersScheduleModeForOrder(order) === 'repeat'
 
@@ -6083,12 +6101,11 @@ export function createOrdersFeature(ctx) {
     const scheduleText = mode === 'repeat'
       ? `Cykliczne od ${formatDatePl(`${startDate}T12:00:00`)}${endDate ? ` do ${formatDatePl(`${endDate}T12:00:00`)}` : ''}, dostęp ${startTime}-${endTime}`
       : `Jednorazowe ${formatDatePl(`${startDate}T12:00:00`)} ${startTime}-${endTime}`
-    const workerSummary = ordersWizardSummaryText(document.getElementById('ordersEditWorkerSummaryText')?.textContent, 'BUFOR')
-    const workHours = Number(ordersReadInputValue('ordersEditWorkHours')) || Math.max(0, Number(order.requiredWorkMinutes || order.serviceWorkMinutes || 0) / 60)
-    const people = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRequiredPeople')) || Number(order.requiredPeople) || 1))
-    const accessMinutes = ordersAccessWindowMinutes(order)
-    const minimumPeople = Math.max(1, Math.ceil(Math.max(1, Math.round(workHours * 60)) / Math.max(1, accessMinutes)))
-    const workText = `${ordersHoursInputValue(Math.round(workHours * 60))} rbh, ${people} os.${minimumPeople > people ? ` (min. ${minimumPeople})` : ''}`
+    const summaryServiceBlocks = ordersReadServiceBlocksFromControls(order)
+    const effectiveSummaryBlocks = summaryServiceBlocks.length ? summaryServiceBlocks : ordersServiceBlocksForOrder(order)
+    const workerSummary = ordersWizardSummaryText(ordersServiceBlocksWorkerSummary(effectiveSummaryBlocks), 'BUFOR')
+    const { totalWorkMinutes, totalPeople } = ordersServiceBlocksTotals(effectiveSummaryBlocks, order)
+    const workText = `${ordersHoursInputValue(totalWorkMinutes)} rbh, ${totalPeople} os.`
 
     const summaryClient = document.getElementById('ordersWizardSummaryClient')
     const summaryAddress = document.getElementById('ordersWizardSummaryAddress')
@@ -6696,9 +6713,7 @@ export function createOrdersFeature(ctx) {
     ordersSetInputValue('ordersEditRepeatUnit', repeatPreset === 'month' ? 'month' : ordersRepeatPresetIsFixed(repeatPreset) ? repeatPreset : order.repeatUnit || 'week')
     ordersSetRepeatWeekdayChecks(ordersRepeatWeekdaysFromOrder(order))
     ordersSyncRepeatSelectPickers()
-    ordersRenderAccessWindowsControls(order)
     ordersRenderWorkAllocationControls(order)
-    ordersRenderWeeklyPatternControls(order)
   }
   
   function ordersApplyRepeatPresetToControls(preset = '') {
@@ -6745,11 +6760,7 @@ export function createOrdersFeature(ctx) {
     order.endTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(order.startTime))
     order.accessStartTime = order.startTime
     order.accessEndTime = order.endTime
-    if (mode === 'repeat') {
-      ordersStoreAccessWindows(order, ordersEnsureAccessWindowsFromControls(order))
-    } else {
-      ordersClearAccessWindows(order)
-    }
+    ordersClearAccessWindows(order)
     order.requiredWorkMinutes = mode === 'repeat' ? ordersReadWorkMinutes(order) : calendarTimelineOrderDurationMinutes(order)
     order.serviceWorkMinutes = order.requiredWorkMinutes
     order.standardWorkMinutes = order.requiredWorkMinutes
@@ -6757,9 +6768,8 @@ export function createOrdersFeature(ctx) {
     order.workerSlots = order.requiredPeople
     ordersAssignExtendedWorkFlags(order, ordersReadExtendedWorkAllowed(order))
     const repeatInterval = ordersRepeatIntervalFromControls(order)
-    const repeatWeekdays = ordersReadRepeatWeekdaysForMode(mode)
-    const weeklyPatternEnabled = mode === 'repeat' && repeatInterval.repeatUnit === 'week'
-    const weeklyRules = weeklyPatternEnabled ? ordersWeeklyPatternRulesFromControlsForWeekdays(order, repeatWeekdays) : []
+    const repeatWeekdays = mode === 'repeat' ? ordersRepeatWeekdaysFromServiceBlocks(order) : ordersReadRepeatWeekdaysForMode(mode)
+    const weeklyRules = []
     if (weeklyRules.length) {
       const firstRule = weeklyRules[0]
       order.startTime = firstRule.accessStartTime
@@ -6790,8 +6800,6 @@ export function createOrdersFeature(ctx) {
     ordersSyncScheduleTimeLabels(mode)
     ordersSetScheduleTimeVisible(mode !== 'repeat')
     ordersSyncRepeatIntervalControls()
-    ordersRenderAccessWindowsControls(order)
-    ordersRenderWeeklyPatternControls(order)
   }
   
   function ordersRenderSchedulePreview(order = {}) {
@@ -6869,25 +6877,29 @@ export function createOrdersFeature(ctx) {
     const repeatEnd = mode === 'repeat' ? rawEnd : ''
     const startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), order.startTime || '08:00')
     const repeatInterval = ordersRepeatIntervalFromControls(order)
-    const repeatWeekdays = ordersReadRepeatWeekdaysForMode(mode)
-    const weeklyRules = mode === 'repeat' && repeatInterval.repeatUnit === 'week'
-      ? ordersWeeklyPatternRulesFromControlsForWeekdays(order, repeatWeekdays)
-      : []
-    const firstWeeklyRule = weeklyRules[0] || null
-    const accessWindows = mode === 'repeat' ? ordersEnsureAccessWindowsFromControls(order) : []
+    const repeatWeekdays = mode === 'repeat' ? ordersRepeatWeekdaysFromServiceBlocks(order) : ordersReadRepeatWeekdaysForMode(mode)
+    const weeklyRules = []
+    const firstWeeklyRule = null
+    const accessWindows = []
     const firstAccessWindow = accessWindows[0] || null
+    const controlServiceBlocks = ordersReadServiceBlocksFromControls(order)
+    const effectiveServiceBlocks = controlServiceBlocks.length ? controlServiceBlocks : ordersServiceBlocksForOrder(order)
+    const serviceBlockTotals = ordersServiceBlocksTotals(effectiveServiceBlocks, order)
+    const serviceBlockAllocations = effectiveServiceBlocks.flatMap((block) => Array.isArray(block.workAllocations) ? block.workAllocations : [])
     const effectiveStartTime = firstWeeklyRule?.accessStartTime || firstAccessWindow?.accessStartTime || startTime
     const effectiveEndTime =
       firstWeeklyRule?.accessEndTime ||
       firstAccessWindow?.accessEndTime ||
       ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(startTime))
-    const effectiveWorkMinutes = firstWeeklyRule?.requiredWorkMinutes || (mode === 'repeat' ? ordersReadWorkMinutes(order) : calendarTimelineOrderDurationMinutes(order))
-    const effectivePeople = firstWeeklyRule?.requiredPeople || Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditRequiredPeople')) || Number(order.requiredPeople) || 1))
+    const effectiveWorkMinutes = firstWeeklyRule?.requiredWorkMinutes || serviceBlockTotals.totalWorkMinutes || (mode === 'repeat' ? ordersReadWorkMinutes(order) : calendarTimelineOrderDurationMinutes(order))
+    const effectivePeople = firstWeeklyRule?.requiredPeople || serviceBlockTotals.totalPeople
     const effectiveAllocations = firstWeeklyRule
       ? ordersWorkAllocationsForWeeklyPatternRule(order, firstWeeklyRule)
-      : mode === 'repeat'
-        ? ordersReadWorkAllocationsFromControls(order)
-        : []
+      : serviceBlockAllocations.length
+        ? serviceBlockAllocations
+        : mode === 'repeat'
+          ? ordersReadWorkAllocationsFromControls(order)
+          : []
     const allowExtendedWork = ordersReadExtendedWorkAllowed(order)
   
     return ordersAssignExtendedWorkFlags({
@@ -6908,6 +6920,9 @@ export function createOrdersFeature(ctx) {
       requiredWorkMinutes: effectiveWorkMinutes,
       serviceWorkMinutes: effectiveWorkMinutes,
       requiredPeople: effectivePeople,
+      requiredWorkers: effectivePeople,
+      workerSlots: effectivePeople,
+      serviceBlocks: effectiveServiceBlocks,
       workAllocations: effectiveAllocations,
       workerAllocations: effectiveAllocations,
       repeatPreset: mode === 'repeat' ? repeatInterval.repeatPreset : 'none',
@@ -7495,12 +7510,10 @@ export function createOrdersFeature(ctx) {
           workerAssignments: selectedWorkerAssignments,
         }
     const type = scheduleMode === 'repeat' ? 'cyclic' : selectedType === 'cyclic' ? 'individual' : selectedType
-    const selectedRepeatWeekdays = ordersReadRepeatWeekdaysForMode(scheduleMode)
-    const weeklyRules = scheduleMode === 'repeat' && repeatInterval.repeatUnit === 'week'
-      ? ordersWeeklyPatternRulesFromControlsForWeekdays(order, selectedRepeatWeekdays)
-      : []
-    const firstWeeklyRule = weeklyRules[0] || null
-    const accessWindows = scheduleMode === 'repeat' ? ordersEnsureAccessWindowsFromControls(order) : []
+    const selectedRepeatWeekdays = scheduleMode === 'repeat' ? ordersRepeatWeekdaysFromServiceBlocks(order) : ordersReadRepeatWeekdaysForMode(scheduleMode)
+    const weeklyRules = []
+    const firstWeeklyRule = null
+    const accessWindows = []
     const firstAccessWindow = accessWindows[0] || null
     const allocationBaseOrder = {
       ...order,
@@ -7588,7 +7601,7 @@ export function createOrdersFeature(ctx) {
         ordersUpdateWorkAllocationSummary(order)
         return
       }
-      if (workAllocations.some((item) => !ordersAllocationFitsAccess(order, item))) {
+      if (workAllocations.some((item) => !ordersAllocationFitsAccess(allocationBaseOrder, item))) {
         showTransientNotice('Nie zapisano: plan pracy osoby musi mieścić się w godzinach dostępu do obiektu.', 'error')
         ordersUpdateWorkAllocationSummary(order)
         return
@@ -8732,18 +8745,12 @@ export function createOrdersFeature(ctx) {
       }
   
       if (event.target?.id === 'ordersEditLocation') {
-        ordersSyncAddressSelectToLocation(String(event.target.value ?? ''))
+        const addressValue = String(event.target.value ?? '')
+        ordersSyncAddressSelectToLocation(addressValue)
         ordersClearLocationGeoFields()
-        ordersRenderLocationSuggestions(String(event.target.value ?? ''))
-        ordersQueueGoogleLocationSuggestions(String(event.target.value ?? ''))
-        ordersQueueGoogleLocationResolve(String(event.target.value ?? ''))
-        void ordersWarmLocationSources().then(() => {
-          const input = document.getElementById('ordersEditLocation')
-          if (input instanceof HTMLInputElement && document.activeElement === input) {
-            ordersRenderLocationSuggestions(input.value)
-          }
-        })
-        ordersRenderEditorWizard(ordersFindTimelineOrder(appState.ordersEditingId) || {})
+        ordersRenderLocationSuggestions(addressValue)
+        ordersQueueGoogleLocationSuggestions(addressValue)
+        ordersQueueEditorWizardRefresh(ordersFindTimelineOrder(appState.ordersEditingId) || {})
         return
       }
 
@@ -8822,6 +8829,14 @@ export function createOrdersFeature(ctx) {
       if (event.target?.id === 'ordersClientPickerInput') {
         ordersCloseRepeatSelectPickers()
         ordersSetClientPickerOpen(true)
+      }
+      if (event.target?.id === 'ordersEditLocation') {
+        void ordersWarmLocationSources().then(() => {
+          const input = document.getElementById('ordersEditLocation')
+          if (input instanceof HTMLInputElement && document.activeElement === input) {
+            ordersRenderLocationSuggestions(input.value)
+          }
+        })
       }
     })
   
@@ -9007,9 +9022,6 @@ export function createOrdersFeature(ctx) {
         event.target?.hasAttribute?.('data-orders-weekly-pattern-end') ||
         event.target?.hasAttribute?.('data-orders-weekly-pattern-hours') ||
         event.target?.hasAttribute?.('data-orders-weekly-pattern-people') ||
-        event.target?.hasAttribute?.('data-orders-access-window-day') ||
-        event.target?.hasAttribute?.('data-orders-access-window-start') ||
-        event.target?.hasAttribute?.('data-orders-access-window-end') ||
         event.target?.hasAttribute?.('data-orders-work-allocation-start') ||
         event.target?.hasAttribute?.('data-orders-work-allocation-end')
       ) {
@@ -9020,14 +9032,8 @@ export function createOrdersFeature(ctx) {
         }
         const order = ordersFindTimelineOrder(appState.ordersEditingId)
         if (order) {
-          const changedAccessWindow =
-            event.target?.hasAttribute?.('data-orders-access-window-day') ||
-            event.target?.hasAttribute?.('data-orders-access-window-start') ||
-            event.target?.hasAttribute?.('data-orders-access-window-end')
           ordersUpdateOrderScheduleFromControls(order)
-          if (changedAccessWindow) {
-            ordersRenderWorkAllocationControls(order, { forceEven: true })
-          } else if (targetId === 'ordersEditTime' || targetId === 'ordersEditEndTime') {
+          if (targetId === 'ordersEditTime' || targetId === 'ordersEditEndTime') {
             ordersRenderWorkAllocationControls(order)
           }
           if (targetId === 'ordersEditStart' || targetId === 'ordersScheduleStartDate') {
@@ -9453,20 +9459,6 @@ export function createOrdersFeature(ctx) {
       if (removeSupply) {
         event.preventDefault()
         ordersRemoveSupplyFromCurrentOrder(removeSupply.getAttribute('data-orders-remove-supply'))
-        return
-      }
-  
-      const addAccessWindow = eventTargetClosest(event, '#ordersAccessWindowAdd')
-      if (addAccessWindow) {
-        event.preventDefault()
-        ordersAddAccessWindowToCurrentOrder()
-        return
-      }
-  
-      const removeAccessWindow = eventTargetClosest(event, '[data-orders-access-window-remove]')
-      if (removeAccessWindow) {
-        event.preventDefault()
-        ordersRemoveAccessWindowFromCurrentOrder(removeAccessWindow.getAttribute('data-orders-access-window-remove'))
         return
       }
   

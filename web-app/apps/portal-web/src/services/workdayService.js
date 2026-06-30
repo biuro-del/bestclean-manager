@@ -16,6 +16,8 @@ const NINE_HOURS_SECONDS = 9 * 60 * 60
 let eventsForOrgUnavailable = false
 let eventsPageForOrgUnavailable = false
 let eventsFingerprintForOrgUnavailable = false
+const EVENTS_FINGERPRINT_FOR_ORG_ENABLED =
+  String(import.meta.env?.VITE_ENABLE_DATACONNECT_FINGERPRINT ?? '').trim().toLowerCase() === 'true'
 const READ_CACHE_MS = 30000
 const EVENTS_FAST_PAGE_MAX_SIZE = 250
 const EVENTS_FAST_PAGE_CHUNK_SIZE = 150
@@ -2607,13 +2609,25 @@ export async function getTodayWorktimeFingerprint(orgId) {
 }
 
 export async function getEventsFingerprintForOrg(orgId, filters = {}) {
+  const unavailable = (reason) => ({
+    orgId,
+    filters,
+    unavailable: true,
+    reason,
+    token: '',
+  })
+
+  if (!EVENTS_FINGERPRINT_FOR_ORG_ENABLED) {
+    return unavailable('disabled')
+  }
+
   if (!isFirebaseConfigured() || eventsFingerprintForOrgUnavailable) {
-    return null
+    return unavailable(eventsFingerprintForOrgUnavailable ? 'operation-unavailable' : 'firebase-not-configured')
   }
 
   const range = normalizeEventsFastRange(filters)
   if (!range) {
-    return null
+    return unavailable('invalid-range')
   }
 
   ensureFirebase()
@@ -2653,7 +2667,7 @@ export async function getEventsFingerprintForOrg(orgId, filters = {}) {
       isOperationNotFoundError(error, 'WorkdaysFingerprintForOrg')
     ) {
       eventsFingerprintForOrgUnavailable = true
-      return null
+      return unavailable('operation-not-found')
     }
     throw error
   }

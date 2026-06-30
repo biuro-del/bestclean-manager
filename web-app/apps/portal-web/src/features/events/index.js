@@ -2825,6 +2825,10 @@ export function createEventsFeature(ctx) {
     }
 
     const fingerprint = await getEventsFingerprintForOrg(appState.session.orgId, readEventsFilters())
+    if (fingerprint?.unavailable) {
+      return null
+    }
+
     return String(fingerprint?.token ?? '').trim()
   }
 
@@ -2849,6 +2853,10 @@ export function createEventsFeature(ctx) {
       token = await readEventsFingerprintTokenForCurrentFilters()
     } catch (error) {
       console.warn('[events] fingerprint polling failed', error)
+    }
+
+    if (token === null) {
+      return
     }
 
     if (!token) {

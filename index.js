@@ -763,7 +763,7 @@ function mapFirebaseAdminError(error) {
       status: 503,
       code: 'FIREBASE_TLS_CERT_ERROR',
       message:
-        'Node backend nie ufa certyfikatowi Google/Firebase. Zrestartuj root npm run dev; dev-local uruchamia backend z NODE_OPTIONS=--use-system-ca. Jesli blad zostaje, dodaj firmowy CA przez NODE_EXTRA_CA_CERTS.',
+        'Node backend nie ufa certyfikatowi Google/Firebase. Zrestartuj root npm run dev. Lokalny dev stack wlacza systemowy CA, a gdy Node go nie wspiera, lokalny tryb awaryjny TLS. Jesli blad zostaje, dodaj firmowy CA przez NODE_EXTRA_CA_CERTS.',
     }
   }
 
@@ -4653,13 +4653,46 @@ function hasWorkerProfileAuthFieldChange(payload, currentWorker) {
   const currentName = normalizeText(
     currentWorker.workerName ?? currentWorker.workername ?? currentWorker.worker_name ?? currentWorker.name ?? currentWorker.fullName,
   )
-  const currentEmail = normalizeEmail(currentWorker.loginEmail ?? currentWorker.email)
+  const currentEmail = normalizeEmail(currentWorker.loginEmail ?? currentWorker.login_email ?? currentWorker.email)
   const currentActive = asPayloadBoolean(currentWorker.active, true)
   return (
     normalizeText(payload.name) !== currentName ||
     normalizeEmail(payload.email) !== currentEmail ||
     Boolean(payload.active) !== Boolean(currentActive)
   )
+}
+
+function shouldSyncWorkerProfileMembershipViaDataConnect(payload) {
+  const authUid = normalizeText(payload?.authUid)
+  if (!authUid) {
+    return false
+  }
+
+  const memberRole = normalizeWorkerProfileRole(payload?.memberRole || payload?.roleLabel || payload?.workerType)
+  return ['ADMIN', 'MANAGER', 'COORDINATOR'].includes(memberRole)
+}
+
+function buildWorkerProfileDataConnectUpdateVariables(payload, finalWorkerId, updatedBy, syncMembership = false) {
+  const variables = {
+    orgId: payload.orgId,
+    login: payload.login,
+    workerName: payload.name,
+    loginEmail: payload.email,
+    role: payload.memberRole || payload.roleLabel,
+    active: payload.active,
+    email: payload.email,
+    phone: payload.phone || null,
+    workerType: payload.workerType,
+    workerId: finalWorkerId,
+    edit: updatedBy || null,
+  }
+
+  if (syncMembership) {
+    variables.authUid = normalizeText(payload.authUid)
+    variables.memberRole = payload.memberRole
+  }
+
+  return variables
 }
 
 function dataConnectWorkerAuthSnapshot(currentWorker = null) {
@@ -4750,6 +4783,7 @@ async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebase
   if (!currentWorker) {
     throw createWorkerProfilePublicError(404, 'WORKER_NOT_FOUND', 'Nie znaleziono pracownika do edycji.')
   }
+  const canonicalLogin = normalizeText(currentWorker?.login ?? currentWorker?.workerLogin) || payload.login
 
   if (loginChanged) {
     const requesterRole = await getRequesterRoleViaDataConnect(payload.orgId, firebaseIdToken)
@@ -4765,6 +4799,7 @@ async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebase
 
   const finalPayload = {
     ...payload,
+    login: canonicalLogin,
     newLogin: payload.newLogin,
     email: finalEmail,
     authUid: normalizeText(payload.authUid || currentWorker?.authUid || currentWorker?.auth_uid),
@@ -4831,44 +4866,22 @@ async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebase
         },
         firebaseIdToken,
       )
-    } else if (useAuthProfileMutation) {
-      await executeDataConnectOperation(
-        'mutation',
-        'UpdateWorkerProfileForOrg',
-        {
-          orgId: finalPayload.orgId,
-          login: finalPayload.login,
-          workerName: finalPayload.name,
-          loginEmail: finalPayload.email,
-          authUid: authResult.authUid || finalPayload.authUid,
-          role: finalPayload.memberRole,
-          memberRole: finalPayload.memberRole,
-          active: finalPayload.active,
-          email: finalPayload.email,
-          phone: finalPayload.phone || null,
-          workerType: finalPayload.workerType,
-          workerId: finalWorkerId,
-          edit: updatedBy || null,
-        },
-        firebaseIdToken,
-      )
     } else {
+      const syncMembership =
+        useAuthProfileMutation ||
+        shouldSyncWorkerProfileMembershipViaDataConnect({
+          ...finalPayload,
+          authUid: authResult.authUid || finalPayload.authUid,
+        })
       await executeDataConnectOperation(
         'mutation',
-        'UpdateWorkerForOrg',
-        {
-          orgId: finalPayload.orgId,
-          login: finalPayload.login,
-          workerName: finalPayload.name,
-          loginEmail: finalPayload.email,
-          role: finalPayload.memberRole,
-          active: finalPayload.active,
-          email: finalPayload.email,
-          phone: finalPayload.phone || null,
-          workerType: finalPayload.workerType,
-          workerId: finalWorkerId,
-          edit: updatedBy || null,
-        },
+        syncMembership ? 'UpdateWorkerProfileForOrg' : 'UpdateWorkerForOrg',
+        buildWorkerProfileDataConnectUpdateVariables(
+          { ...finalPayload, authUid: authResult.authUid || finalPayload.authUid },
+          finalWorkerId,
+          updatedBy,
+          syncMembership,
+        ),
         firebaseIdToken,
       )
     }

@@ -428,8 +428,14 @@ function resolveFunctionErrorMessage(body, rawText = '', statusCode = null, endp
     const notFoundHtml =
       statusCode === 404 &&
       lowered.includes('<html') &&
-      (lowered.includes('page not found') || lowered.includes('not found'))
+      (lowered.includes('page not found') ||
+        lowered.includes('not found') ||
+        lowered.includes('nie znaleziono strony') ||
+        lowered.includes('ta strona best clean nie istnieje'))
     if (notFoundHtml) {
+      if (isLocalWorkerAdminEndpoint(endpoint)) {
+        return 'Endpoint zapisu pracownika zwrocil strone 404 HTML zamiast JSON. Najczestsza przyczyna: Vite proxy trafia w zly proces na porcie 8080 albo uruchomiono samo `npm run dev:web`. Uruchom `npm run dev` z katalogu glownego projektu i otworz http://127.0.0.1:5173.'
+      }
       return `Funkcja backendu nie jest wdrozona albo endpoint jest niepoprawny. Endpoint: ${endpoint}.`
     }
 
@@ -454,7 +460,7 @@ function resolveFunctionErrorMessage(body, rawText = '', statusCode = null, endp
     return 'Nie udało się usunąć pracownika w lokalnym trybie Cloud SQL. Odświeżam tę operację przez Data Connect; jeśli błąd wróci, zrestartuj dev stack.'
   }
   if (code.toUpperCase() === 'FIREBASE_TLS_CERT_ERROR') {
-    return `FIREBASE_TLS_CERT_ERROR: lokalny Node backend nie ufa certyfikatowi Google/Firebase. Zrestartuj root npm run dev; dev-local ustawia NODE_OPTIONS=--use-system-ca. Jesli blad zostaje, dodaj firmowy certyfikat CA przez NODE_EXTRA_CA_CERTS. ${message}`.trim()
+    return `FIREBASE_TLS_CERT_ERROR: lokalny Node backend nie ufa certyfikatowi Google/Firebase. Zrestartuj root npm run dev; dev-local wlacza systemowy CA albo lokalny awaryjny tryb TLS, gdy Node tego nie wspiera. Jesli blad zostaje, dodaj firmowy certyfikat CA przez NODE_EXTRA_CA_CERTS. ${message}`.trim()
   }
   if (code.toUpperCase() === 'FIREBASE_ADMIN_CREDENTIALS_MISSING') {
     return `FIREBASE_ADMIN_CREDENTIALS_MISSING: backend nie ma poswiadczen Firebase Admin. Dodaj serviceAccountKey.json obok index.js albo ustaw GOOGLE_APPLICATION_CREDENTIALS w root .env.local i zrestartuj npm run dev. ${message}`.trim()
@@ -622,10 +628,10 @@ function mapWorker(orgId, row) {
     row.workerName ?? row.workername ?? row.worker_name ?? row.name ?? row.displayName ?? row.fullName ?? login,
   ).trim()
   const rawRole = String(row.role ?? '').trim()
-  const workerType = String(row.workerType ?? '').trim()
-  const systemRole = normalizeWorkerRoleCanonical(rawRole || workerType)
+  const rawWorkerType = String(row.workerType ?? row.worker_type ?? row.type ?? '').trim()
+  const systemRole = normalizeWorkerRoleCanonical(rawRole || rawWorkerType)
   const role = rawRole || systemRole
-  const displayType = workerType || formatWorkerRoleLabel(rawRole || systemRole, 'Pracownik')
+  const displayType = rawWorkerType || formatWorkerRoleLabel(rawRole || systemRole, 'Pracownik')
   const loginEmail = String(row.loginEmail ?? row.email ?? '').trim()
 
   return {

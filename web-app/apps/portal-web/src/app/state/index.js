@@ -233,6 +233,7 @@ export function createAppState(overrides = {}) {
   dashboardScheduleStale: false,
   dashboardScheduleSourceRows: [],
   dashboardBackgroundDataLoaded: false,
+  dashboardForceRefreshOnNextOpen: false,
   dashboardScheduleAlertSnoozeUntil: 0,
   dashboardScheduleAlertMuted: false,
   dashboardScheduleAlertLastKey: '',

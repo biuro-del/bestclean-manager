@@ -421,7 +421,7 @@ export const portalLayoutTemplate = `
                   <span class="dash-activity-view-option-note">Dotychczasowy widok aktywnych osób</span>
                 </button>
               </div>
-              <div class="dash-last-refresh" id="dashLastRefresh">Ostatnie odświeżenie: - (synchronizacja przy wejściu i powrocie; co 15 min w tle)</div>
+              <div class="dash-last-refresh" id="dashLastRefresh">Ostatnie odświeżenie: -</div>
 
               <div class="dash-activity-calendar" id="dashActivityCalendar" data-dash-activity-view-panel="today-calendar">
                 <div class="dash-activity-calendar-empty">Ładowanie widoku dnia...</div>

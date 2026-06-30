@@ -1126,6 +1126,7 @@ export function createWorkerProfileFeature(ctx) {
         worker.login,
         worker.workerType,
         worker.type,
+        worker.workerType,
         worker.role,
         worker.phone,
         worker.email,

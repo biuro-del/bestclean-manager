@@ -779,6 +779,23 @@ export function createWorkerAccountFeature(ctx) {
     }
   }
 
+  function notifyWorkerAccountWorkdayChanged(updatedRows = [], worker = resolveCurrentWorker()) {
+    clearDashboardWorkerSnapshotCache()
+    appState.dashboardBackgroundDataLoaded = false
+    if (typeof window === 'undefined') return
+    const rows = Array.isArray(updatedRows) ? updatedRows : []
+    window.dispatchEvent(new CustomEvent('portal:workday-updated', {
+      detail: {
+        workerLogin: workerLogin(worker),
+        workerName: workerName(worker),
+        dayKeys: [...new Set(rows.map((row) => String(row?.dayKey ?? '').trim()).filter(Boolean))],
+        workdayIds: rows
+          .map((row) => String(row?.workdayId ?? row?.id ?? '').trim())
+          .filter(Boolean),
+      },
+    }))
+  }
+
   function findWorkerInFreshRows(rows, previousLogin, worker) {
     const expectedLogin = normalizeKey(worker?.login ?? worker?.workerLogin)
     const previousKey = normalizeKey(previousLogin)
@@ -1960,6 +1977,25 @@ export function createWorkerAccountFeature(ctx) {
     fillTimeMonthPick(year, selectedMonth)
   }
 
+  function normalizeWorkerAccountTimeEditorIntent(intent = {}) {
+    const dayKey = String(intent?.dayKey ?? intent?.date ?? '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) return null
+    return {
+      dayKey,
+      workdayId: String(intent?.workdayId ?? intent?.id ?? '').trim(),
+      source: String(intent?.source ?? '').trim(),
+    }
+  }
+
+  function applyWorkerAccountTimeEditorRange(intent = {}) {
+    const normalized = normalizeWorkerAccountTimeEditorIntent(intent)
+    if (!normalized) return null
+    setInputValue('waTimeFrom', normalized.dayKey)
+    setInputValue('waTimeTo', normalized.dayKey)
+    syncTimeMonthPickFromRange()
+    return normalized
+  }
+
   function setTimeMonthCard(rows = appState.workerAccountTimeRows) {
     const sourceRows = Array.isArray(rows) ? rows : []
     const totalWorkSec = sourceRows.reduce((sum, row) => sum + Math.max(0, Number(row.workSec ?? 0) || 0), 0)
@@ -2696,6 +2732,8 @@ export function createWorkerAccountFeature(ctx) {
     if (appState.workerAccountTimeLoadedKey === loadKey && options.force !== true) {
       setTimeMonthCard(appState.workerAccountTimeRows)
       renderTimeTable()
+      renderWorkerAccountSummaryFromState()
+      maybeOpenWorkerAccountPendingTimeEditor()
       return true
     }
 
@@ -2718,6 +2756,7 @@ export function createWorkerAccountFeature(ctx) {
       setTimeMonthCard(appState.workerAccountTimeRows)
       renderTimeTable()
       renderWorkerAccountSummaryFromState()
+      maybeOpenWorkerAccountPendingTimeEditor()
       return true
     } catch (error) {
       renderWorkerAccountSectionError('time', error, context)
@@ -3231,6 +3270,125 @@ export function createWorkerAccountFeature(ctx) {
     setTimeout(() => document.getElementById('waDayDateInput')?.focus?.(), 0)
   }
 
+  function workerAccountSourceRowsContainWorkdayId(row = {}, workdayId = '') {
+    const normalizedWorkdayId = String(workdayId ?? '').trim()
+    if (!normalizedWorkdayId) return true
+    const sourceRows = Array.isArray(row?.sourceRows) ? row.sourceRows : []
+    return sourceRows.some((source) => {
+      const sourceId = String(source?.workdayId ?? source?.id ?? '').trim()
+      return sourceId && sourceId === normalizedWorkdayId
+    })
+  }
+
+  function maybeOpenWorkerAccountPendingTimeEditor() {
+    const intent = normalizeWorkerAccountTimeEditorIntent(appState.workerAccountPendingTimeEditor)
+    if (!intent || appState.workerAccountActiveTab !== 'time') return false
+
+    const rows = Array.isArray(appState.workerAccountTimeRows) ? appState.workerAccountTimeRows : []
+    const item =
+      rows.find((row) => String(row?.dayKey ?? '').trim() === intent.dayKey && workerAccountSourceRowsContainWorkdayId(row, intent.workdayId)) ??
+      rows.find((row) => String(row?.dayKey ?? '').trim() === intent.dayKey) ??
+      null
+
+    appState.workerAccountPendingTimeEditor = null
+    if (!item) {
+      showTransientNotice('Nie znaleziono dnia pracy do ręcznej korekty.', 'error')
+      return false
+    }
+
+    openWorkerAccountDayEditor(item.dayKey)
+    return true
+  }
+
+  function workerAccountWorkdayId(row = {}) {
+    return String(row?.workdayId ?? row?.id ?? '').trim()
+  }
+
+  function workerAccountUpdatedWorkdayRow(source = {}, updated = {}, worker = {}) {
+    const startAt = typeof toIso === 'function'
+      ? toIso(updated?.startAt ?? source?.startAt ?? source?.dayStartAt ?? source?.startIso)
+      : String(updated?.startAt ?? source?.startAt ?? source?.dayStartAt ?? source?.startIso ?? '')
+    const endAt = typeof toIso === 'function'
+      ? toIso(updated?.endAt ?? source?.endAt ?? source?.dayEndAt ?? source?.endIso ?? source?.stopAt)
+      : String(updated?.endAt ?? source?.endAt ?? source?.dayEndAt ?? source?.endIso ?? source?.stopAt ?? '')
+    const dayKey = dayKeyFromValue(updated?.dayKey || updated?.dateYmd || updated?.date || startAt || endAt || source?.dayKey || source?.dateYmd || source?.date)
+    const workdayId = String(updated?.workdayId ?? source?.workdayId ?? source?.id ?? '').trim()
+    const durationSec = Math.max(
+      0,
+      Number(updated?.durationSec ?? updated?.durationSeconds ?? source?.durationSec ?? source?.durationSeconds ?? timeRangeSeconds(startAt, endAt)) || 0,
+    )
+    const updatedBy = String(updated?.editedBy ?? updated?.updatedBy ?? source?.editedBy ?? source?.updatedBy ?? workerAccountCurrentUserName()).trim()
+    return stampWorkerIdentity({
+      ...source,
+      ...updated,
+      id: String(source?.id ?? updated?.id ?? workdayId).trim(),
+      workdayId,
+      dayKey,
+      dateYmd: dayKey,
+      date: dayKey,
+      startAt,
+      dayStartAt: startAt,
+      startIso: startAt,
+      endAt,
+      dayEndAt: endAt,
+      endIso: endAt,
+      durationSec,
+      durationSeconds: durationSec,
+      status: String(updated?.status ?? source?.status ?? 'CLOSED').trim() || 'CLOSED',
+      comment: String(updated?.comment ?? source?.comment ?? '').trim(),
+      editedBy: updatedBy,
+      updatedBy,
+      updatedAt: new Date().toISOString(),
+      workerType: String(source?.workerType ?? source?.type ?? roleLabel(workerRole(worker)) ?? '').trim(),
+    }, worker)
+  }
+
+  function applyWorkerAccountLocalWorkdayUpdates(updatedRows = [], worker = resolveCurrentWorker()) {
+    const cleanUpdates = (Array.isArray(updatedRows) ? updatedRows : []).filter((row) => row && typeof row === 'object')
+    if (!cleanUpdates.length || !worker) return false
+
+    const baseRows = Array.isArray(appState.workerAccountAllTimeRows) && appState.workerAccountAllTimeRows.length
+      ? appState.workerAccountAllTimeRows
+      : (Array.isArray(appState.workerAccountTimeRows) ? appState.workerAccountTimeRows : [])
+        .flatMap((row) => (Array.isArray(row?.sourceRows) ? row.sourceRows : []))
+
+    const updatesById = new Map()
+    cleanUpdates.forEach((row) => {
+      const id = workerAccountWorkdayId(row)
+      if (id) updatesById.set(id, row)
+    })
+
+    const appliedIds = new Set()
+    const nextRows = baseRows.map((row) => {
+      const id = workerAccountWorkdayId(row)
+      if (id && updatesById.has(id)) {
+        appliedIds.add(id)
+        return updatesById.get(id)
+      }
+      return row
+    })
+
+    cleanUpdates.forEach((row) => {
+      const id = workerAccountWorkdayId(row)
+      if (id && appliedIds.has(id)) return
+      nextRows.push(row)
+    })
+
+    const range = buildTimeFetchRange()
+    const filteredRows = filterTimeRowsForRange(sortRowsByLatest(nextRows), { from: range.from, to: range.to })
+    appState.workerAccountAllTimeRows = filteredRows
+    appState.workerAccountTimeRows = aggregateTimeRows(filteredRows, worker)
+    appState.workerAccountTimeSelectedKeys = new Set()
+    appState.workerAccountTimeCurrentPageKeys = []
+    appState.workerAccountTimePage = 1
+    appState.workerAccountTimeLoadedKey = ''
+    appState.workerAccountTimeLoadingKey = ''
+    setTimeMonthCard(appState.workerAccountTimeRows)
+    renderTimeTable()
+    renderWorkerAccountSummaryFromState()
+    return true
+  }
+
   async function saveWorkerAccountDayEditor() {
     const item = appState.workerAccountDayEditorItem
     const worker = resolveCurrentWorker()
@@ -3281,8 +3439,9 @@ export function createWorkerAccountFeature(ctx) {
 
     try {
       const editorName = workerAccountCurrentUserName()
+      const updatedRows = []
       for (const { source, workdayId } of rowsWithIds) {
-        await updateWorkday(appState.session.orgId, workdayId, {
+        const updated = await updateWorkday(appState.session.orgId, workdayId, {
           workerLogin: workerLogin(worker),
           workerName: workerName(worker) || workerLogin(worker),
           utilityRoomId: source.utilityRoomId || source.roomId || null,
@@ -3293,12 +3452,12 @@ export function createWorkerAccountFeature(ctx) {
           comment,
           updatedBy: editorName,
         })
+        updatedRows.push(workerAccountUpdatedWorkdayRow(source, updated, worker))
       }
       closeWorkerAccountDayEditor()
-      appState.workerAccountTimeLoadedKey = ''
-      appState.workerAccountTimeLoadingKey = ''
-      await refreshTimeTab()
-      showTransientNotice('Zapisano dzien pracy i odswiezono tabele.', 'success')
+      applyWorkerAccountLocalWorkdayUpdates(updatedRows, worker)
+      notifyWorkerAccountWorkdayChanged(updatedRows, worker)
+      showTransientNotice('Zapisano dzien pracy. Widok zaktualizowany.', 'success')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? 'Nie udalo sie zapisac dnia pracy.')
       showTransientNotice(message, 'error')
@@ -3336,6 +3495,7 @@ export function createWorkerAccountFeature(ctx) {
       if (activeTab === 'time') {
         setTimeMonthCard(appState.workerAccountTimeRows)
         renderTimeTable()
+        maybeOpenWorkerAccountPendingTimeEditor()
       }
       renderWorkerAccountSummaryFromState()
     } else if (appState.workerAccountTimeLoadingKey !== timeLoadKey) {
@@ -3374,6 +3534,7 @@ export function createWorkerAccountFeature(ctx) {
 
   function renderWorkerAccountForWorker(worker, options = {}) {
     if (!worker) return null
+    const timeEditorIntent = normalizeWorkerAccountTimeEditorIntent(options.timeEditorIntent ?? appState.workerAccountPendingTimeEditor)
     updateCurrentWorker(worker)
     const accountKey = workerAccountKey(worker)
     const canReuseSession = Boolean(
@@ -3393,8 +3554,18 @@ export function createWorkerAccountFeature(ctx) {
     renderWorkerCard(worker)
     renderForms(worker)
     initializeTimeFilters()
+    if (timeEditorIntent) {
+      appState.workerAccountPendingTimeEditor = timeEditorIntent
+      appState.workerAccountActiveTab = 'time'
+      applyWorkerAccountTimeEditorRange(timeEditorIntent)
+    }
     activateTab(appState.workerAccountActiveTab, { refresh: false })
-    startWorkerAccountSectionLoads(worker, sessionContext, options)
+    startWorkerAccountSectionLoads(worker, sessionContext, {
+      ...options,
+      tab: appState.workerAccountActiveTab,
+      range: timeEditorIntent ? buildTimeFetchRange() : options.range,
+      forceTime: options.forceTime === true || Boolean(timeEditorIntent),
+    })
     return sessionContext
   }
 
@@ -3434,7 +3605,12 @@ export function createWorkerAccountFeature(ctx) {
       const worker = event?.detail?.worker
       if (!worker) return
       appState.workerAccountActiveTab = String(event?.detail?.tab ?? 'account').trim() || 'account'
-      renderWorkerAccountForWorker(worker, { forceSession: true })
+      const timeEditorIntent = normalizeWorkerAccountTimeEditorIntent(event?.detail?.timeEditorIntent)
+      if (timeEditorIntent) {
+        appState.workerAccountPendingTimeEditor = timeEditorIntent
+        appState.workerAccountActiveTab = 'time'
+      }
+      renderWorkerAccountForWorker(worker, { forceSession: true, timeEditorIntent })
     })
     binding.add(document.getElementById('waBackBtn'), 'click', () => router?.go?.('workerProfile'))
     binding.add(document.getElementById('waEmptyBackBtn'), 'click', () => router?.go?.('workerProfile'))

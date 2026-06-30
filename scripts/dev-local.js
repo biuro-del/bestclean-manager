@@ -3,26 +3,23 @@ const fs = require('node:fs')
 const http = require('node:http')
 const path = require('node:path')
 
+const DEFAULT_REMOTE_API_TARGET = 'https://cleanzi-01--iclean-room.europe-west4.hosted.app'
+const DEFAULT_REMOTE_API_HOST = 'cleanzi-01--iclean-room.europe-west4.hosted.app'
+
 loadRootEnvFile()
 
 const isWindows = process.platform === 'win32'
 const npmCommand = isWindows ? 'npm.cmd' : 'npm'
-const backendPort = process.env.PORT || '8080'
+const requestedBackendPort = process.env.PORT || '8080'
+const backendPort = resolveBackendPort(requestedBackendPort)
 const webHost = process.env.WEB_HOST || '127.0.0.1'
 const webPort = process.env.WEB_PORT || '5173'
-const backendNodeOptions = withNodeOption(process.env.NODE_OPTIONS, '--use-system-ca')
+const workerProfileStorageMode = resolveWorkerProfileStorageMode()
 const workerProfileModeState = resolveWorkerProfileMode()
 const workerProfileMode = workerProfileModeState.mode
-const requestedWorkerProfileStorageMode = String(
-  process.env.WORKER_PROFILE_STORAGE_MODE ||
-    process.env.WORKER_PROFILE_DB_MODE ||
-    'db',
-)
-  .trim()
-  .toLowerCase()
-const workerProfileStorageMode = ['local', 'direct'].includes(workerProfileMode)
-  ? 'db'
-  : requestedWorkerProfileStorageMode
+const backendSystemCaSupported = nodeSupportsOption('--use-system-ca')
+const backendNodeOptions = resolveBackendNodeOptions(process.env.NODE_OPTIONS, backendSystemCaSupported)
+const backendTlsRejectUnauthorized = resolveBackendTlsRejectUnauthorized(backendSystemCaSupported)
 
 const processes = []
 let shuttingDown = false
@@ -53,6 +50,30 @@ function loadRootEnvFile() {
 
     process.env[key] = rawValue.replace(/^(['"])(.*)\1$/, '$2')
   })
+}
+
+function normalizePort(value, fallback = 8080) {
+  const port = Number(value)
+  if (Number.isInteger(port) && port > 0 && port < 65536) {
+    return port
+  }
+  return fallback
+}
+
+function resolveBackendPort(value) {
+  const requestedPort = normalizePort(value)
+  let candidatePort = requestedPort
+  while (parseWindowsNetstatListeners(String(candidatePort)).length) {
+    candidatePort += 1
+  }
+
+  if (candidatePort !== requestedPort) {
+    console.warn(
+      `[dev] Backend port ${requestedPort} is already in use; using ${candidatePort} and passing it to Vite proxy.`,
+    )
+  }
+
+  return String(candidatePort)
 }
 
 function hasEnvValue(name) {
@@ -96,10 +117,28 @@ function resolveWorkerProfileMode() {
   if (requestedMode === 'proxy' || requestedMode === 'remote') {
     return { mode: requestedMode, reason: 'requested' }
   }
+  if (['dataconnect', 'data-connect', 'firebase', 'https'].includes(workerProfileStorageMode)) {
+    return { mode: 'local', reason: `local ${workerProfileStorageMode} storage` }
+  }
   if (hasLocalDbConfig() && hasFirebaseAdminConfig()) {
     return { mode: 'local', reason: 'local DB/Admin config detected' }
   }
   return { mode: 'proxy', reason: 'default; local DB/Admin config missing' }
+}
+
+function resolveWorkerProfileStorageMode() {
+  const requestedMode = String(
+    process.env.WORKER_PROFILE_STORAGE_MODE ||
+      process.env.WORKER_PROFILE_DB_MODE ||
+      process.env.WORKER_PROFILE_DATA_MODE ||
+      '',
+  )
+    .trim()
+    .toLowerCase()
+  if (requestedMode) {
+    return requestedMode
+  }
+  return hasLocalDbConfig() ? 'db' : 'dataconnect'
 }
 
 function withNodeOption(value, option) {
@@ -113,6 +152,52 @@ function withNodeOption(value, option) {
   }
 
   return parts.join(' ')
+}
+
+function withoutNodeOption(value, option) {
+  return String(value || '')
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter((part) => part && part !== option)
+    .join(' ')
+}
+
+function nodeSupportsOption(option) {
+  try {
+    execFileSync(process.execPath, [option, '--version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+function resolveBackendNodeOptions(value, systemCaSupported = nodeSupportsOption('--use-system-ca')) {
+  const option = '--use-system-ca'
+  if (systemCaSupported) {
+    return withNodeOption(value, option)
+  }
+
+  const normalized = withoutNodeOption(value, option)
+  console.warn(`[dev] Current Node does not support ${option}; backend will start without that NODE_OPTIONS flag.`)
+  return normalized
+}
+
+function resolveBackendTlsRejectUnauthorized(systemCaSupported) {
+  const explicit = String(process.env.NODE_TLS_REJECT_UNAUTHORIZED || '').trim()
+  if (explicit) {
+    return explicit
+  }
+
+  if (systemCaSupported || hasEnvValue('NODE_EXTRA_CA_CERTS')) {
+    return ''
+  }
+
+  const strictFallback = String(process.env.DEV_LOCAL_TLS_FALLBACK || '').trim().toLowerCase()
+  if (strictFallback === 'strict' || strictFallback === 'off' || strictFallback === '0') {
+    return ''
+  }
+
+  return '0'
 }
 
 function detectServiceAccountSource() {
@@ -180,7 +265,7 @@ function checkBackendHealth(port) {
   })
 }
 
-function checkFirebaseTls(nodeOptions) {
+function checkFirebaseTls(nodeOptions, tlsRejectUnauthorized) {
   const script = [
     "const https = require('node:https')",
     'let done = false',
@@ -195,6 +280,7 @@ function checkFirebaseTls(nodeOptions) {
     env: {
       ...process.env,
       NODE_OPTIONS: nodeOptions,
+      ...(tlsRejectUnauthorized ? { NODE_TLS_REJECT_UNAUTHORIZED: tlsRejectUnauthorized } : {}),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: false,
@@ -223,7 +309,7 @@ function checkFirebaseTls(nodeOptions) {
       lowered.includes('certificate')
     ) {
       console.warn(
-        `[dev] Firebase TLS -> certificate error (${output}). Backend uses NODE_OPTIONS="${nodeOptions}". If it still fails, add the corporate CA with NODE_EXTRA_CA_CERTS.`,
+        `[dev] Firebase TLS -> certificate error (${output}). Backend uses NODE_OPTIONS="${nodeOptions}" and NODE_TLS_REJECT_UNAUTHORIZED="${tlsRejectUnauthorized || ''}". If it still fails, add the corporate CA with NODE_EXTRA_CA_CERTS.`,
       )
       return
     }
@@ -244,7 +330,12 @@ function parseWindowsNetstatListeners(port) {
     .split(/\r?\n/)
     .map((line) => line.trim().split(/\s+/))
     .filter((parts) => parts.length >= 5 && parts[0] === 'TCP' && parts[3] === 'LISTENING')
-    .filter((parts) => parts[1] === `127.0.0.1:${port}` || parts[1] === `[::1]:${port}`)
+    .filter((parts) =>
+      parts[1] === `127.0.0.1:${port}` ||
+      parts[1] === `0.0.0.0:${port}` ||
+      parts[1] === `[::1]:${port}` ||
+      parts[1] === `[::]:${port}`,
+    )
     .map((parts) => ({
       address: parts[1],
       pid: parts[4],
@@ -350,10 +441,10 @@ console.log(`[dev] worker-profile -> ${workerProfileMode} (${workerProfileModeSt
 console.log(`[dev] worker-profile storage -> ${workerProfileStorageMode}`)
 if (workerProfileMode === 'proxy') {
   console.warn(
-    '[dev] worker-profile proxy -> https://cleanzi-01.web.app. If you see UPSTREAM_FORBIDDEN_HOST, stop old dev processes or use WORKER_PROFILE_MODE=local with local DB/Firebase Admin config.',
+    `[dev] worker-profile proxy -> ${DEFAULT_REMOTE_API_TARGET}. If you see UPSTREAM_FORBIDDEN_HOST, stop old dev processes or use WORKER_PROFILE_MODE=local with local DB/Firebase Admin config.`,
   )
 } else {
-  if (!hasLocalDbConfig()) {
+  if (!hasLocalDbConfig() && !['dataconnect', 'data-connect', 'firebase', 'https'].includes(workerProfileStorageMode)) {
     console.warn('[dev] worker-profile local DB config -> missing; edit/delete returns DB_CONFIG_MISSING until DB env is set.')
   }
   if (!hasFirebaseAdminConfig()) {
@@ -362,8 +453,11 @@ if (workerProfileMode === 'proxy') {
     )
   }
 }
-console.log('[dev] generic DB proxy -> https://cleanzi-01.web.app')
+console.log(`[dev] generic DB proxy -> ${DEFAULT_REMOTE_API_TARGET}`)
 console.log(`[dev] backend NODE_OPTIONS -> ${backendNodeOptions}`)
+if (backendTlsRejectUnauthorized === '0' && String(process.env.NODE_TLS_REJECT_UNAUTHORIZED || '').trim() !== '0') {
+  console.warn('[dev] Backend local Google/Firebase TLS verification -> disabled because this Node cannot use the system CA. This applies only to this local dev stack; use NODE_EXTRA_CA_CERTS for a stricter setup.')
+}
 const serviceAccountSource = detectServiceAccountSource()
 if (serviceAccountSource) {
   console.log(`[dev] Firebase Admin service account -> ${serviceAccountSource}`)
@@ -373,8 +467,8 @@ if (serviceAccountSource) {
 startProcess('api', process.execPath, ['index.js'], {
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: backendPort,
-  API_PROXY_TARGET: 'https://cleanzi-01.web.app',
-  API_PROXY_FORWARDED_HOST: 'cleanzi-01.web.app',
+  API_PROXY_TARGET: process.env.API_PROXY_TARGET || DEFAULT_REMOTE_API_TARGET,
+  API_PROXY_FORWARDED_HOST: process.env.API_PROXY_FORWARDED_HOST || DEFAULT_REMOTE_API_HOST,
   ADMIN_USERS_MODE: process.env.ADMIN_USERS_MODE || 'dataconnect',
   PORTAL_DB_ROUTES_MODE: process.env.PORTAL_DB_ROUTES_MODE || 'proxy',
   PORTAL_TASKS_MODE: process.env.PORTAL_TASKS_MODE || 'local',
@@ -382,6 +476,7 @@ startProcess('api', process.execPath, ['index.js'], {
   WORKER_PROFILE_STORAGE_MODE: workerProfileStorageMode,
   WORKER_PROFILE_DB_MODE: workerProfileStorageMode,
   NODE_OPTIONS: backendNodeOptions,
+  ...(backendTlsRejectUnauthorized ? { NODE_TLS_REJECT_UNAUTHORIZED: backendTlsRejectUnauthorized } : {}),
 })
 
 console.log(`[dev] Starting portal web on http://${webHost}:${webPort}`)
@@ -397,4 +492,4 @@ startProcess('web', npmCommand, ['--prefix', 'web-app', 'run', 'dev', '--', '--h
 })
 
 setTimeout(() => checkBackendHealth(backendPort), 1500)
-setTimeout(() => checkFirebaseTls(backendNodeOptions), 1800)
+setTimeout(() => checkFirebaseTls(backendNodeOptions, backendTlsRejectUnauthorized), 1800)

@@ -1466,7 +1466,12 @@ function markRouteSyncLoaded(route) {
   const meta = getRouteSyncMeta(route)
   meta.loadedAt = Date.now()
 }
-
+function markDashboardRouteStale() {
+  const meta = getRouteSyncMeta('dashboard')
+  meta.loadedAt = 0
+  appState.dashboardBackgroundDataLoaded = false
+  appState.dashboardForceRefreshOnNextOpen = true
+}
 function shouldRefreshRoute(route, staleMs = ROUTE_SYNC_STALE_MS) {
   const meta = getRouteSyncMeta(route)
   if (meta.inFlight) {
@@ -2824,12 +2829,55 @@ function eventEditorScannedQrLabel(...args) {
 }
 
 let kanbanFeature = null
+const KANBAN_FALLBACK_COLUMNS = Object.freeze([
+  Object.freeze({ id: 'newTask', label: 'Nowe zadanie', scope: 'global' }),
+  Object.freeze({ id: 'inProgress', label: 'W trakcie', scope: 'global' }),
+  Object.freeze({ id: 'done', label: 'Zakonczone', scope: 'global' }),
+])
 
 function getKanbanFeature() {
   if (!kanbanFeature) {
     throw new Error('Kanban feature is not initialized.')
   }
   return kanbanFeature
+}
+
+function fallbackKanbanColumns() {
+  return Array.isArray(appState.kanbanColumns) && appState.kanbanColumns.length
+    ? appState.kanbanColumns
+    : KANBAN_FALLBACK_COLUMNS.map((column) => ({ ...column }))
+}
+
+function fallbackKanbanNormalizeScope(scope = '') {
+  const value = String(scope ?? '').trim()
+  const normalized = value === 'client' ? 'object' : value
+  return ['global', 'user', 'person', 'object'].includes(normalized) ? normalized : 'global'
+}
+
+function fallbackKanbanNormalizeStatus(status = '') {
+  const value = String(status ?? '').trim()
+  const columns = fallbackKanbanColumns()
+  return columns.some((column) => column.id === value) ? value : columns[0]?.id || 'newTask'
+}
+
+function fallbackKanbanInitials(name = '') {
+  const parts = String(name ?? '').trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return '?'
+  return `${parts[0]?.[0] ?? ''}${parts[1]?.[0] ?? ''}`.toUpperCase() || parts[0].slice(0, 2).toUpperCase()
+}
+
+function fallbackKanbanCurrentUserOption() {
+  const label =
+    String(appState.session?.name ?? '').trim() ||
+    String(appState.session?.login ?? '').trim() ||
+    String(appState.session?.email ?? '').trim()
+  const id =
+    String(appState.session?.uid ?? '').trim() ||
+    String(appState.session?.userId ?? '').trim() ||
+    String(appState.session?.login ?? '').trim() ||
+    String(appState.session?.email ?? '').trim() ||
+    label
+  return label ? { id: `user:${id}`, label } : null
 }
 
 function renderKanbanView(...args) {
@@ -2845,27 +2893,36 @@ function bindKanbanViewFunctions(...args) {
 }
 
 function kanbanColumnsForStatus(...args) {
-  return getKanbanFeature().columnsForStatus(...args)
+  return kanbanFeature ? kanbanFeature.columnsForStatus(...args) : fallbackKanbanColumns()
 }
 
 function kanbanNewTaskStatus(...args) {
-  return getKanbanFeature().newTaskStatus(...args)
+  return kanbanFeature ? kanbanFeature.newTaskStatus(...args) : fallbackKanbanNormalizeStatus('')
 }
 
 function kanbanDefaultStatusForTask(...args) {
-  return getKanbanFeature().defaultStatusForTask(...args)
+  if (kanbanFeature) {
+    return kanbanFeature.defaultStatusForTask(...args)
+  }
+  const preferred = String(args[1] ?? '').trim()
+  return preferred ? fallbackKanbanNormalizeStatus(preferred) : fallbackKanbanNormalizeStatus('')
 }
 
 function kanbanNormalizeColumnScope(...args) {
-  return getKanbanFeature().normalizeColumnScope(...args)
+  return kanbanFeature ? kanbanFeature.normalizeColumnScope(...args) : fallbackKanbanNormalizeScope(args[0])
 }
 
 function kanbanTaskIsCompleted(...args) {
-  return getKanbanFeature().taskIsCompleted(...args)
+  if (kanbanFeature) {
+    return kanbanFeature.taskIsCompleted(...args)
+  }
+  const task = args[0] ?? {}
+  const status = String(task.completionStatus ?? task.taskStatus ?? '').trim().toUpperCase()
+  return Boolean(task.completed ?? task.kanbanCompleted ?? task.done ?? status === 'ZAKONCZONE')
 }
 
 function kanbanInitials(...args) {
-  return getKanbanFeature().initials(...args)
+  return kanbanFeature ? kanbanFeature.initials(...args) : fallbackKanbanInitials(args[0])
 }
 
 function kanbanOpenCalendarTask(...args) {
@@ -2877,7 +2934,7 @@ function kanbanCreateTask(...args) {
 }
 
 function kanbanSetDataLoading(...args) {
-  return getKanbanFeature().setDataLoading(...args)
+  return kanbanFeature ? kanbanFeature.setDataLoading(...args) : null
 }
 
 function renderKanbanSyncStatus(...args) {
@@ -2885,15 +2942,19 @@ function renderKanbanSyncStatus(...args) {
 }
 
 function kanbanColumnLabel(...args) {
-  return getKanbanFeature().columnLabel(...args)
+  if (kanbanFeature) {
+    return kanbanFeature.columnLabel(...args)
+  }
+  const status = fallbackKanbanNormalizeStatus(args[0])
+  return fallbackKanbanColumns().find((column) => column.id === status)?.label || status || 'Kanban'
 }
 
 function kanbanNormalizeStatus(...args) {
-  return getKanbanFeature().normalizeStatus(...args)
+  return kanbanFeature ? kanbanFeature.normalizeStatus(...args) : fallbackKanbanNormalizeStatus(args[0])
 }
 
 function kanbanCurrentUserOption(...args) {
-  return getKanbanFeature().currentUserOption(...args)
+  return kanbanFeature ? kanbanFeature.currentUserOption(...args) : fallbackKanbanCurrentUserOption()
 }
 
 function kanbanNormalizeSection(...args) {
@@ -5529,12 +5590,14 @@ async function syncRouteDataNow(normalizedRoute, options = {}) {
   const background = options.background === true
 
   if (normalizedRoute === 'dashboard') {
+    const forceDashboardRefresh = force || appState.dashboardForceRefreshOnNextOpen === true
     await refreshDashboardWidgets({
-      forceRefresh: force,
-      syncWorktimeToken: force,
+      forceRefresh: forceDashboardRefresh,
+      syncWorktimeToken: forceDashboardRefresh,
       preloadReferences: false,
       showLoadingOverlay: !background,
     })
+    appState.dashboardForceRefreshOnNextOpen = false
     return
   }
 
@@ -5899,6 +5962,17 @@ export function mountPortalApp() {
     }
   }
   window.addEventListener('pageshow', handlePageShow)
+  const handlePortalWorkdayUpdated = () => {
+    markDashboardRouteStale()
+    if (normalizeNavigationRoute(appState.currentRoute) === 'dashboard') {
+      void syncRouteData('dashboard', {
+        forceRefresh: true,
+        noticeOnError: false,
+        showOverlay: false,
+      })
+    }
+  }
+  window.addEventListener('portal:workday-updated', handlePortalWorkdayUpdated)
   const handlePortalInteractionSettled = () => schedulePortalDeferredNotificationFlush(250)
   document.addEventListener('focusout', handlePortalInteractionSettled)
   document.addEventListener('change', handlePortalInteractionSettled)
@@ -5916,6 +5990,7 @@ export function mountPortalApp() {
     cleanupPortalLazyRoutes,
     () => document.removeEventListener('visibilitychange', handleVisibilityChange),
     () => window.removeEventListener('pageshow', handlePageShow),
+    () => window.removeEventListener('portal:workday-updated', handlePortalWorkdayUpdated),
     () => document.removeEventListener('focusout', handlePortalInteractionSettled),
     () => document.removeEventListener('change', handlePortalInteractionSettled),
     calendarStopTimelineWorkerStatusRefresh,

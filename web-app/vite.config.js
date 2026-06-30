@@ -2,8 +2,7 @@ import { resolve } from 'node:path'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
-const DEFAULT_REMOTE_API_TARGET = 'https://cleanzi-01.web.app'
-const DEFAULT_LOCAL_API_TARGET = 'http://127.0.0.1:8080'
+const DEFAULT_REMOTE_API_TARGET = 'https://cleanzi-01--iclean-room.europe-west4.hosted.app'
 
 function normalizeApiProxyTarget(value) {
   const target = String(value || DEFAULT_REMOTE_API_TARGET).trim().replace(/\/+$/, '')
@@ -25,6 +24,14 @@ function normalizeTarget(value) {
   return 'portal'
 }
 
+function resolveForwardedHost(target) {
+  try {
+    return new URL(target).host
+  } catch {
+    return 'cleanzi-01--iclean-room.europe-west4.hosted.app'
+  }
+}
+
 function resolveInputHtmlMap() {
   const portalInput = resolve(__dirname, 'index.html')
 
@@ -39,9 +46,11 @@ export default defineConfig(({ mode }) => {
     env.VITE_DEV_API_PROXY_TARGET || process.env.VITE_DEV_API_PROXY_TARGET || DEFAULT_REMOTE_API_TARGET,
   )
   const localAdminApiProxyTarget = normalizeApiProxyTarget(
-    env.VITE_DEV_WORKER_API_PROXY_TARGET ||
+      env.VITE_DEV_WORKER_API_PROXY_TARGET ||
       process.env.VITE_DEV_WORKER_API_PROXY_TARGET ||
-      DEFAULT_LOCAL_API_TARGET,
+      env.VITE_DEV_API_PROXY_TARGET ||
+      process.env.VITE_DEV_API_PROXY_TARGET ||
+      apiProxyTarget,
   )
   const localAdminApiProxy = {
     target: localAdminApiProxyTarget,
@@ -49,7 +58,7 @@ export default defineConfig(({ mode }) => {
     headers: {
       origin: DEFAULT_REMOTE_API_TARGET,
       referer: `${DEFAULT_REMOTE_API_TARGET}/`,
-      'x-forwarded-host': 'cleanzi-01.web.app',
+      'x-forwarded-host': resolveForwardedHost(localAdminApiProxyTarget),
       'x-forwarded-proto': 'https',
       'x-forwarded-port': '443',
       'x-forwarded-server': 'cleanzi-01.web.app',
@@ -83,7 +92,7 @@ export default defineConfig(({ mode }) => {
           target: apiProxyTarget,
           changeOrigin: true,
           headers: {
-            'x-forwarded-host': 'cleanzi-01.web.app',
+            'x-forwarded-host': resolveForwardedHost(apiProxyTarget),
             'x-forwarded-proto': 'https',
           },
         },

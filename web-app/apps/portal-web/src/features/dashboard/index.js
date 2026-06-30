@@ -2,18 +2,23 @@ export const route = 'dashboard'
 export const viewId = 'view-dashboard'
 
 export function createDashboardFeature(ctx) {
-  let dashboardRefreshTimer = null
+  let dashboardChangePollTimer = null
+  let dashboardActivitySimulationTimer = 0
   let dashboardBackgroundRefreshPromise = null
   let dashboardReferencePreloadPromise = null
   let dashboardScheduleRefreshPromise = null
   let dashboardWidgetsRefreshPromise = null
+  let dashboardTimelineFingerprintToken = ''
+  let dashboardTimelineFingerprintPromise = null
   let dashboardLoadingOverlayTimer = 0
   let dashboardMetricPopoverHideTimer = null
   let dashboardScheduleLimitRaf = 0
   let dashboardScheduleLimitTimerA = 0
   let dashboardScheduleLimitTimerB = 0
 
-  const DASHBOARD_REFRESH_INTERVAL_MS = 15 * 60 * 1000
+  const DASHBOARD_ACTIVITY_SIMULATION_INTERVAL_MS = 5 * 60 * 1000
+  const DASHBOARD_CHANGE_POLL_INTERVAL_MS = 60 * 1000
+  const DASHBOARD_TIMELINE_SNAP_MINUTES = 5
   const DASHBOARD_ACTIVITY_VIEW_STORAGE_KEY = 'portal.dashboard.activityView.v2'
   const DASHBOARD_SCHEDULE_SOON_WINDOW_MINUTES = 60
   const DASHBOARD_SCHEDULE_LATE_ALERT_MINUTES = 10
@@ -24,7 +29,7 @@ export function createDashboardFeature(ctx) {
   const DASHBOARD_OPEN_WORKDAYS_PAGE_SIZE = 12000
   const DASHBOARD_LOADING_STAGES = ['overview', 'tasks', 'active', 'schedule']
   const DASHBOARD_POST_LOAD_DELAY_MS = 900
-  const DASHBOARD_LOCAL_CACHE_VERSION = 1
+  const DASHBOARD_LOCAL_CACHE_VERSION = 2
   const DASHBOARD_LOCAL_CACHE_TTL_MS = 8 * 60 * 60 * 1000
   const DASHBOARD_LOCAL_CACHE_PREFIX = 'portal.dashboard.snapshot'
   const DASHBOARD_COMMENT_READ_STORAGE_PREFIX = 'portal.dashboardComments.read'
@@ -88,6 +93,7 @@ export function createDashboardFeature(ctx) {
     formatDatePl,
     formatTime,
     getClients,
+    getEventsFingerprintForOrg,
     getScheduleBoard,
     getTodayActiveWorkers,
     getWorkdays,
@@ -188,6 +194,14 @@ export function createDashboardFeature(ctx) {
       .sort(byPastThenDateDesc)
 
     return String(past[0]?.key ?? source[0]?.key ?? '')
+  }
+
+  function dashboardSystemIssueRangeFrom() {
+    const date = new Date()
+    date.setHours(0, 0, 0, 0)
+    date.setDate(1)
+    date.setMonth(date.getMonth() - 1)
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-01`
   }
 
   function dashboardClockLabelToHm(value, fallback = '--:--') {
@@ -861,6 +875,68 @@ export function createDashboardFeature(ctx) {
     return [workerKey, startAt, endAt, zoneKey, clientKey, durationSec, status, endReason].join('|')
   }
 
+  function dashboardRowHasWorkdayStop(row = {}) {
+    const stopIso = dashboardActivityRowEditStopIso(row) || toIso(row?.closeMarkedAt)
+    if (stopIso) {
+      return true
+    }
+
+    const stopLabel = dashboardClockLabelToHm(
+      row?.qrStop ?? row?.stop ?? row?.stopTime ?? row?.endTime ?? row?.dayStopTime,
+      '',
+    )
+    if (stopLabel) {
+      return true
+    }
+
+    const endReason = String(row?.endReason ?? '').trim().toUpperCase()
+    const status = normalizeEventStatus(row?.status, false)
+    return (
+      status === 'CLOSED' ||
+      endReason === 'WORKDAY_STOP' ||
+      endReason === 'STOP_END_DAY' ||
+      endReason === 'MANUAL_CLOSE'
+    )
+  }
+
+  function dashboardOpenStartStopMatchKeys(row = {}) {
+    const keys = new Set()
+    dashboardEventIdentityCandidateIds(row).forEach((id) => {
+      if (id) {
+        keys.add(`id:${id}`)
+      }
+    })
+
+    const dayKey = dashboardResolveDayKey(row)
+    const workerKey = normalizeSearchText(row?.workerLogin ?? row?.login ?? row?.workerName ?? row?.name)
+    const startIso = dashboardActivityRowEditStartIso(row)
+    const startLabel = dashboardClockLabelToHm(row?.qrStart ?? row?.start ?? row?.startTime, '')
+    const startKey = startIso || startLabel
+    if (dayKey && workerKey && startKey) {
+      keys.add(`worker-start:${dayKey}:${workerKey}:${startKey}`)
+    }
+
+    return keys
+  }
+
+  function dashboardClosedStartStopKeys(rows = []) {
+    const keys = new Set()
+    ;(Array.isArray(rows) ? rows : []).forEach((row) => {
+      if (!dashboardRowHasWorkdayStop(row)) {
+        return
+      }
+      dashboardOpenStartStopMatchKeys(row).forEach((key) => keys.add(key))
+    })
+    return keys
+  }
+
+  function dashboardRowMatchesClosedStartStop(row = {}, closedKeys = new Set()) {
+    if (!(closedKeys instanceof Set) || !closedKeys.size) {
+      return false
+    }
+    return [...dashboardOpenStartStopMatchKeys(row)].some((key) => closedKeys.has(key))
+  }
+
   function dashboardActivityEditRowsForDay(dayKey = dashboardActivityDayKey()) {
     const rows = [
       ...dashboardActivityRowsForDay(appState.dashboardTodayRows, dayKey),
@@ -1416,7 +1492,7 @@ export function createDashboardFeature(ctx) {
     const rangeEnd = rangeEndDate.getTime()
     const nowTs = isToday ? now.getTime() : rangeEnd
     const snappedNow = new Date(now)
-    snappedNow.setMinutes(Math.floor(snappedNow.getMinutes() / 30) * 30, 0, 0)
+    snappedNow.setMinutes(Math.floor(snappedNow.getMinutes() / DASHBOARD_TIMELINE_SNAP_MINUTES) * DASHBOARD_TIMELINE_SNAP_MINUTES, 0, 0)
     const nowLeft = Math.max(0, Math.min(100, dashboardTimelinePercent(snappedNow.getTime(), rangeStart, rangeEnd)))
     const hourLabel = (timestamp) => {
       const date = new Date(timestamp)
@@ -4137,7 +4213,7 @@ export function createDashboardFeature(ctx) {
 
   function dashboardBuildSummary(todayRows = [], eventRows = [], periodHourValues = {}, openHistoricalWorkdays = []) {
     const today = todayYmd()
-    const yesterday = daysAgoYmd(1)
+    const systemIssueRangeFrom = dashboardSystemIssueRangeFrom()
     const normalizedTodayRows = Array.isArray(todayRows) ? todayRows : []
     const normalizedEventRows = Array.isArray(eventRows) ? eventRows : []
     const normalizedOpenHistoricalRows = Array.isArray(openHistoricalWorkdays) ? openHistoricalWorkdays : []
@@ -4202,9 +4278,87 @@ export function createDashboardFeature(ctx) {
         })),
     }
 
+    const closedStartStopKeys = dashboardClosedStartStopKeys([
+      ...normalizedEventRows,
+      ...normalizedTodayRows,
+      ...normalizedOpenHistoricalRows,
+    ])
+    const historicalOpenWorkdayRows = normalizedOpenHistoricalRows.filter((row) => {
+      const dayKey = dashboardResolveDayKey(row)
+      if (!dayKey || dayKey < systemIssueRangeFrom || dayKey >= today) {
+        return false
+      }
+      if (dashboardRowHasWorkdayStop(row) || dashboardRowMatchesClosedStartStop(row, closedStartStopKeys)) {
+        return false
+      }
+      return (
+        normalizeEventStatus(row?.status, Boolean(toIso(row?.endAt) || toIso(row?.dayEndAt))) === 'RUNNING' &&
+        !toIso(row?.endAt) &&
+        !toIso(row?.dayEndAt)
+      )
+    })
+    const openStartStopWorkerDayGroups = new Map()
+    historicalOpenWorkdayRows.forEach((row) => {
+      const dayKey = dashboardResolveDayKey(row)
+      if (!dayKey) {
+        return
+      }
+      const keySource = String(row?.workerLogin ?? row?.workerName ?? '').trim()
+      const workerKey = normalizeSearchText(keySource) || String(row?.workdayId ?? row?.id ?? '').trim() || 'unknown'
+      const groupKey = `${dayKey}::${workerKey}`
+      if (!openStartStopWorkerDayGroups.has(groupKey)) {
+        openStartStopWorkerDayGroups.set(groupKey, {
+          dayKey,
+          workerLogin: String(row?.workerLogin ?? '').trim(),
+          workerName: dashboardResolveWorkerLabel(row),
+          rows: [],
+        })
+      }
+      const bucket = openStartStopWorkerDayGroups.get(groupKey)
+      if (String(row?.workerLogin ?? '').trim() && !bucket.workerLogin) {
+        bucket.workerLogin = String(row.workerLogin).trim()
+      }
+      const candidateName = dashboardResolveWorkerLabel(row)
+      if (candidateName.split(/\s+/).length > String(bucket.workerName ?? '').split(/\s+/).length) {
+        bucket.workerName = candidateName
+      }
+      bucket.rows.push(row)
+    })
+    const openStartStopYesterdayIssues = [...openStartStopWorkerDayGroups.values()]
+      .sort((left, right) => {
+        if (left.dayKey !== right.dayKey) {
+          return left.dayKey < right.dayKey ? 1 : -1
+        }
+        return String(left.workerName ?? '').localeCompare(String(right.workerName ?? ''), 'pl', {
+          sensitivity: 'base',
+        })
+      })
+      .map((bucket) => {
+        const rows = Array.isArray(bucket.rows) ? bucket.rows : []
+        const probe = rows[0] ?? {}
+        return {
+          action: 'workday-day-editor',
+          dayKey: bucket.dayKey,
+          workerLogin: bucket.workerLogin || probe?.workerLogin,
+          workerName: bucket.workerName || probe?.workerName,
+          workdayId: String(probe?.workdayId ?? probe?.id ?? '').trim(),
+          title: bucket.workerName || dashboardResolveWorkerLabel(probe),
+          subtitle: `Data: ${formatDatePl(`${bucket.dayKey}T00:00:00.000Z`)} Â· Klient: ${dashboardResolveClientLabel(probe)} Â· Strefa: ${dashboardResolveZoneLabel(probe)}`,
+          tab: 'workers',
+          row: dashboardBuildHistoryRow(
+            {
+              ...probe,
+              workerLogin: bucket.workerLogin || probe?.workerLogin,
+              workerName: bucket.workerName || probe?.workerName,
+            },
+            bucket.dayKey,
+          ),
+        }
+      })
+
     const historicalRows = normalizedEventRows.filter((row) => {
       const dayKey = dashboardResolveDayKey(row)
-      return Boolean(dayKey) && dayKey < today
+      return Boolean(dayKey) && dayKey >= systemIssueRangeFrom && dayKey < today
     })
     const historicalWorkerDayGroups = new Map()
     historicalRows.forEach((row) => {
@@ -4242,7 +4396,6 @@ export function createDashboardFeature(ctx) {
       })
     })
 
-    const openStartStopYesterdayIssues = []
     const openCleanYesterdayIssues = []
     historicalBuckets.forEach((bucket) => {
       const rows = Array.isArray(bucket.rows) ? bucket.rows : []
@@ -4262,20 +4415,6 @@ export function createDashboardFeature(ctx) {
       }
 
       if (!hasQrStop) {
-        const probe = runningRows[0]
-        openStartStopYesterdayIssues.push({
-          title: bucket.workerName || dashboardResolveWorkerLabel(probe),
-          subtitle: `Data: ${formatDatePl(`${bucket.dayKey}T00:00:00.000Z`)} · Klient: ${dashboardResolveClientLabel(probe)} · Strefa: ${dashboardResolveZoneLabel(probe)}`,
-          tab: 'workers',
-          row: dashboardBuildHistoryRow(
-            {
-              ...probe,
-              workerLogin: bucket.workerLogin || probe?.workerLogin,
-              workerName: bucket.workerName || probe?.workerName,
-            },
-            bucket.dayKey,
-          ),
-        })
         return
       }
 
@@ -4302,9 +4441,11 @@ export function createDashboardFeature(ctx) {
       }
     })
 
-    const trackedDays = new Set([today, yesterday])
     const cleanTooLongRows = normalizedEventRows
-      .filter((row) => trackedDays.has(dashboardResolveDayKey(row)))
+      .filter((row) => {
+        const dayKey = dashboardResolveDayKey(row)
+        return Boolean(dayKey) && dayKey >= systemIssueRangeFrom && dayKey <= today
+      })
       .filter((row) => !dashboardRowIsIndividual(row))
       .filter((row) => !dashboardRowIsSpecial(row))
       .filter((row) => normalizeEventStatus(row?.status, Boolean(toIso(row?.endAt) || toIso(row?.dayEndAt))) === 'CLOSED')
@@ -4854,6 +4995,120 @@ export function createDashboardFeature(ctx) {
     popover.style.visibility = 'visible'
   }
 
+  function dashboardMetricWorkerSearchKeys(detail = {}) {
+    const row = detail?.row ?? {}
+    const keys = new Set()
+    ;[
+      detail?.workerLogin,
+      detail?.workerName,
+      detail?.workerId,
+      row?.workerLogin,
+      row?.login,
+      row?.workerName,
+      row?.name,
+      row?.workerId,
+      row?.id,
+    ].forEach((value) => {
+      const normalized = normalizeSearchText(value)
+      if (!normalized) return
+      keys.add(normalized)
+      const spaced = normalized.replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim()
+      if (spaced) {
+        keys.add(spaced)
+        const parts = spaced.split(' ').filter(Boolean)
+        if (parts.length > 1) keys.add(parts.slice().reverse().join(' '))
+      }
+      const compact = normalized.replace(/[\s._-]+/g, '')
+      if (compact) keys.add(compact)
+    })
+    return keys
+  }
+
+  function dashboardWorkerMatchesSearchKeys(worker = {}, keys = new Set()) {
+    if (!keys.size) return false
+    return [
+      worker?.login,
+      worker?.workerLogin,
+      worker?.id,
+      worker?.workerId,
+      worker?.email,
+      worker?.loginEmail,
+      worker?.name,
+      worker?.workerName,
+      worker?.workername,
+      worker?.worker_name,
+      worker?.fullName,
+      worker?.displayName,
+    ].some((value) => {
+      const normalized = normalizeSearchText(value)
+      if (!normalized) return false
+      const spaced = normalized.replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim()
+      const compact = normalized.replace(/[\s._-]+/g, '')
+      return keys.has(normalized) || (spaced && keys.has(spaced)) || (compact && keys.has(compact))
+    })
+  }
+
+  async function dashboardResolveMetricWorker(detail = {}) {
+    const keys = dashboardMetricWorkerSearchKeys(detail)
+    const localWorkers = Array.isArray(appState.workers) ? appState.workers : []
+    const localMatch = localWorkers.find((worker) => dashboardWorkerMatchesSearchKeys(worker, keys))
+    if (localMatch) return localMatch
+
+    const orgId = String(appState.session?.orgId ?? '').trim()
+    if (!orgId || typeof getWorkers !== 'function') return null
+
+    const remoteWorkers = await getWorkers(orgId, { forceRefresh: false }).catch(() => [])
+    if (Array.isArray(remoteWorkers) && remoteWorkers.length) {
+      appState.workers = remoteWorkers
+      return remoteWorkers.find((worker) => dashboardWorkerMatchesSearchKeys(worker, keys)) ?? null
+    }
+    return null
+  }
+
+  function dashboardMetricDetailDayKey(detail = {}) {
+    const row = detail?.row ?? {}
+    const direct = String(detail?.dayKey ?? row?.dayKey ?? '').trim()
+    if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) return direct
+    return dashboardResolveDayKey(row)
+  }
+
+  async function openDashboardWorkdayDayEditor(detail = {}) {
+    const dayKey = dashboardMetricDetailDayKey(detail)
+    const worker = await dashboardResolveMetricWorker(detail)
+    if (!worker || !dayKey) {
+      showTransientNotice('Nie udało się znaleźć pracownika lub dnia pracy do edycji.', 'error')
+      return false
+    }
+
+    const row = detail?.row ?? {}
+    appState.workerAccountCurrent = worker
+    appState.workerAccountActiveTab = 'time'
+    appState.workerAccountTargetKey = String(worker.login ?? worker.workerLogin ?? worker.id ?? worker.workerId ?? '').trim()
+    appState.selectedWorkerLogin = String(worker.login ?? worker.workerLogin ?? row.workerLogin ?? '').trim()
+    appState.selectedWorkerName = String(worker.name ?? worker.workerName ?? row.workerName ?? '').trim()
+    appState.workerAccountPendingTimeEditor = {
+      dayKey,
+      workdayId: String(detail?.workdayId ?? row?.workdayId ?? row?.id ?? '').trim(),
+      source: 'dashboard-open-start-stop',
+    }
+
+    if (typeof window !== 'undefined' && typeof window.go === 'function') {
+      window.go('workerAccount')
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('worker-account-select', {
+          detail: {
+            worker,
+            tab: 'time',
+            timeEditorIntent: appState.workerAccountPendingTimeEditor,
+          },
+        }),
+      )
+    }
+    return true
+  }
+
   async function openDashboardMetricDetail(metricKey, detailIndex) {
     const details = dashboardMetricDetailsOrEmpty(metricKey)
     const detail = details[Number(detailIndex)]
@@ -4862,6 +5117,11 @@ export function createDashboardFeature(ctx) {
     }
 
     dashboardHideMetricPopover()
+    if (metricKey === 'openStartStopYesterday' || detail?.action === 'workday-day-editor') {
+      const opened = await openDashboardWorkdayDayEditor(detail)
+      if (opened) return
+    }
+
     const row = detail?.row ?? {}
     const tab = String(detail?.tab ?? '').trim() || 'workers'
     await openEventHistoryFromRow(row, tab)
@@ -4915,6 +5175,7 @@ export function createDashboardFeature(ctx) {
     return getWorkdays(activeOrgId, {
       source: 'workdays',
       status: 'RUNNING',
+      fromIso: dashboardSystemIssueRangeFrom(),
       toIso: daysAgoYmd(1),
       page: 1,
       pageSize: DASHBOARD_OPEN_WORKDAYS_PAGE_SIZE,
@@ -4927,10 +5188,19 @@ export function createDashboardFeature(ctx) {
 
   async function dashboardLoadFastRows(orgId, options = {}) {
     const rangeTo = todayYmd()
-    const fastEventsFrom = daysAgoYmd(1)
+    const systemIssueEventsFrom = dashboardSystemIssueRangeFrom()
+    const fastEventsFrom = daysAgoYmd(DASHBOARD_COMMENT_SYNC_LOOKBACK_DAYS)
     const forceRefresh = options.forceRefresh === true
-    const [todayActive, recentEvents, todayWorkdays, openHistoricalWorkdays] = await Promise.all([
+    const [todayActive, systemIssueEvents, recentEvents, todayWorkdays, openHistoricalWorkdays] = await Promise.all([
       getTodayActiveWorkers(orgId, { forceRefresh }),
+      getWorkdays(orgId, {
+        source: 'events',
+        fromIso: systemIssueEventsFrom,
+        toIso: rangeTo,
+        page: 1,
+        pageSize: 12000,
+        forceRefresh,
+      }).catch(() => ({ items: [] })),
       getWorkdays(orgId, {
         source: 'events',
         fromIso: fastEventsFrom,
@@ -4959,7 +5229,7 @@ export function createDashboardFeature(ctx) {
       appState.dashboardScheduleDays,
     )
 
-    return { todayRows, recentEvents, todayWorkdays, openHistoricalWorkdays }
+    return { todayRows, recentEvents, systemIssueEvents, todayWorkdays, openHistoricalWorkdays }
   }
 
   async function dashboardRefreshBackgroundData(orgId, options = {}) {
@@ -4969,9 +5239,10 @@ export function createDashboardFeature(ctx) {
     }
 
     const rangeFrom = dashboardCommentSyncRangeFrom(orgId, { forceFull: options.forceFull === true })
+    const systemIssueRangeFrom = dashboardSystemIssueRangeFrom()
     const rangeTo = todayYmd()
     let fetchFailed = false
-    const [recentEvents, openHistoricalWorkdays] = await Promise.all([
+    const [recentEvents, systemIssueEvents, openHistoricalWorkdays] = await Promise.all([
       getWorkdays(orgId, {
         source: 'events',
         fromIso: rangeFrom,
@@ -4983,7 +5254,19 @@ export function createDashboardFeature(ctx) {
         console.warn('[portal/dashboard] comment sync fetch failed', error)
         return { items: [] }
       }),
-      dashboardLoadHistoricalOpenWorkdays(orgId),
+      getWorkdays(orgId, {
+        source: 'events',
+        fromIso: systemIssueRangeFrom,
+        toIso: rangeTo,
+        page: 1,
+        pageSize: 12000,
+        forceRefresh: options.forceRefresh === true,
+      }).catch((error) => {
+        fetchFailed = true
+        console.warn('[portal/dashboard] system issue fetch failed', error)
+        return { items: [] }
+      }),
+      dashboardLoadHistoricalOpenWorkdays(orgId, { forceRefresh: options.forceRefresh === true }),
     ])
 
     if (String(appState.session?.orgId ?? '').trim() !== orgId) {
@@ -4996,7 +5279,7 @@ export function createDashboardFeature(ctx) {
 
     const summary = dashboardBuildSummary(
       appState.dashboardTodayRows,
-      recentEvents.items ?? [],
+      systemIssueEvents.items ?? [],
       dashboardBuildPeriodHourValues(appState.dashboardTodayRows),
       openHistoricalWorkdays.items ?? [],
     )
@@ -5289,12 +5572,12 @@ export function createDashboardFeature(ctx) {
         dashboardBeginLoading()
       }
       try {
-        const { todayRows, recentEvents, openHistoricalWorkdays } = await dashboardLoadFastRows(orgId, {
+        const { todayRows, recentEvents, systemIssueEvents, openHistoricalWorkdays } = await dashboardLoadFastRows(orgId, {
           forceRefresh: options.forceRefresh === true,
         })
         const summary = dashboardBuildSummary(
           todayRows,
-          recentEvents.items ?? [],
+          systemIssueEvents.items ?? [],
           dashboardBuildPeriodHourValues(todayRows),
           openHistoricalWorkdays.items ?? [],
         )
@@ -5309,6 +5592,7 @@ export function createDashboardFeature(ctx) {
         renderDashboardSchedulePanel()
         await dashboardRevealLoadingStage('schedule')
         setDashboardLastRefresh(new Date())
+        void rememberDashboardTimelineFingerprint(orgId)
         dashboardWriteLocalSnapshot(orgId, {
           summary,
           todayRows,
@@ -5335,19 +5619,14 @@ export function createDashboardFeature(ctx) {
   }
 
   function setDashboardLastRefresh(dateValue) {
-    const node = document.getElementById('dashLastRefresh')
-    if (!node) {
+    const refreshIso = toIso(dateValue)
+    const refreshNode = document.getElementById('dashLastRefresh')
+    if (!refreshNode) {
       return
     }
-    const autoRefreshLabel = ' (synchronizacja przy wejściu i powrocie; co 15 min w tle)'
-
-    const iso = toIso(dateValue)
-    if (!iso) {
-      node.textContent = `Ostatnie odświeżenie: -${autoRefreshLabel}`
-      return
-    }
-
-    node.textContent = `Ostatnie odświeżenie: ${formatDatePl(iso)} ${formatTime(iso)}${autoRefreshLabel}`
+    refreshNode.textContent = refreshIso
+      ? `Ostatnie odświeżenie: ${formatDatePl(refreshIso)} ${formatTime(refreshIso)}`
+      : 'Ostatnie odświeżenie: -'
   }
 
   function canAutoRefreshDashboard() {
@@ -5370,12 +5649,108 @@ export function createDashboardFeature(ctx) {
     void refreshDashboardWidgets().catch(() => {})
   }
 
-  async function autoRefreshDashboardIfNewRecords() {
+  function dashboardTimelineFingerprintRange(dayKey = todayYmd()) {
+    const normalizedDay = dashboardActivityDayKey(dayKey || todayYmd())
+    const rangeStart = new Date(`${normalizedDay}T00:00:00`)
+    const rangeEnd = new Date(`${normalizedDay}T23:59:59.999`)
+    if (!Number.isFinite(rangeStart.getTime()) || !Number.isFinite(rangeEnd.getTime())) {
+      return null
+    }
+
+    return {
+      source: 'events',
+      fromIso: rangeStart.toISOString(),
+      toIso: rangeEnd.toISOString(),
+      page: 1,
+      pageSize: 1,
+    }
+  }
+
+  async function readDashboardTimelineFingerprintToken(orgId = appState.session?.orgId) {
+    const activeOrgId = String(orgId ?? '').trim()
+    if (!activeOrgId || typeof getEventsFingerprintForOrg !== 'function') {
+      return ''
+    }
+
+    const filters = dashboardTimelineFingerprintRange(todayYmd())
+    if (!filters) {
+      return ''
+    }
+
+    if (dashboardTimelineFingerprintPromise) {
+      return dashboardTimelineFingerprintPromise
+    }
+
+    dashboardTimelineFingerprintPromise = getEventsFingerprintForOrg(activeOrgId, filters)
+      .then((fingerprint) => String(fingerprint?.token ?? '').trim())
+      .finally(() => {
+        dashboardTimelineFingerprintPromise = null
+      })
+    return dashboardTimelineFingerprintPromise
+  }
+
+  async function rememberDashboardTimelineFingerprint(orgId = appState.session?.orgId) {
+    try {
+      const token = await readDashboardTimelineFingerprintToken(orgId)
+      if (token) {
+        dashboardTimelineFingerprintToken = token
+      }
+    } catch (error) {
+      console.warn('[portal/dashboard] timeline fingerprint snapshot failed', error)
+    }
+  }
+
+  async function refreshDashboardTimelineIfChanged() {
     if (!canAutoRefreshDashboard()) {
       return
     }
 
-    await refreshDashboardWidgets({ forceRefresh: true, syncWorktimeToken: true })
+    let token = ''
+    try {
+      token = await readDashboardTimelineFingerprintToken()
+    } catch (error) {
+      console.warn('[portal/dashboard] timeline fingerprint polling failed', error)
+      return
+    }
+
+    if (!token) {
+      return
+    }
+
+    if (!dashboardTimelineFingerprintToken) {
+      dashboardTimelineFingerprintToken = token
+      return
+    }
+
+    if (dashboardTimelineFingerprintToken !== token) {
+      dashboardTimelineFingerprintToken = token
+      await refreshDashboardWidgets({ forceRefresh: true, syncWorktimeToken: true, showLoadingOverlay: false })
+    }
+  }
+
+  function dashboardRerenderSimulatedTimeline() {
+    if (!canAutoRefreshDashboard()) {
+      return
+    }
+
+    if (dashboardActivityDayKey(appState.dashboardActivityDay || todayYmd()) !== todayYmd()) {
+      return
+    }
+
+    renderDashboardActivityCalendar(appState.dashboardTodayRows)
+    renderDashboardSchedulePanel()
+    dashboardApplyActivityView()
+  }
+
+  function dashboardTimelineMillisecondsToNextTick() {
+    const now = new Date()
+    const next = new Date(now)
+    next.setMinutes(
+      Math.floor(now.getMinutes() / DASHBOARD_TIMELINE_SNAP_MINUTES) * DASHBOARD_TIMELINE_SNAP_MINUTES + DASHBOARD_TIMELINE_SNAP_MINUTES,
+      0,
+      0,
+    )
+    return Math.max(1000, Math.min(DASHBOARD_ACTIVITY_SIMULATION_INTERVAL_MS, next.getTime() - now.getTime()))
   }
 
   function dashboardEventSavePatchMatcher(updatedItem = null, previousItem = null) {
@@ -5568,17 +5943,35 @@ export function createDashboardFeature(ctx) {
   }
 
   function stopDashboardAutoRefresh() {
-    if (dashboardRefreshTimer) {
-      window.clearInterval(dashboardRefreshTimer)
-      dashboardRefreshTimer = null
+    if (dashboardChangePollTimer) {
+      window.clearInterval(dashboardChangePollTimer)
+      dashboardChangePollTimer = null
     }
+    if (dashboardActivitySimulationTimer) {
+      window.clearTimeout(dashboardActivitySimulationTimer)
+      dashboardActivitySimulationTimer = 0
+    }
+  }
+
+  function scheduleDashboardActivitySimulationTick() {
+    if (dashboardActivitySimulationTimer) {
+      window.clearTimeout(dashboardActivitySimulationTimer)
+      dashboardActivitySimulationTimer = 0
+    }
+
+    dashboardActivitySimulationTimer = window.setTimeout(() => {
+      dashboardActivitySimulationTimer = 0
+      dashboardRerenderSimulatedTimeline()
+      scheduleDashboardActivitySimulationTick()
+    }, dashboardTimelineMillisecondsToNextTick())
   }
 
   function startDashboardAutoRefresh() {
     stopDashboardAutoRefresh()
-    dashboardRefreshTimer = window.setInterval(() => {
-      void autoRefreshDashboardIfNewRecords().catch(() => {})
-    }, DASHBOARD_REFRESH_INTERVAL_MS)
+    scheduleDashboardActivitySimulationTick()
+    dashboardChangePollTimer = window.setInterval(() => {
+      void refreshDashboardTimelineIfChanged().catch(() => {})
+    }, DASHBOARD_CHANGE_POLL_INTERVAL_MS)
   }
 
   function bindDashboardViewFunctions() {

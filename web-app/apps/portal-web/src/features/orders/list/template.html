@@ -235,26 +235,14 @@
                 </button>
               </li>
               <li>
-                <button type="button" data-orders-step-target="schedule">
-                  <span>2</span>
-                  <strong>Termin</strong>
-                </button>
-              </li>
-              <li>
                 <button type="button" data-orders-step-target="staffing">
-                  <span>3</span>
+                  <span>2</span>
                   <strong>Zmiany i osoby</strong>
                 </button>
               </li>
               <li>
-                <button type="button" data-orders-step-target="recurrence">
-                  <span>4</span>
-                  <strong>Cykliczno&#347;&#263;</strong>
-                </button>
-              </li>
-              <li>
                 <button type="button" data-orders-step-target="details">
-                  <span>5</span>
+                  <span>3</span>
                   <strong>Opis i podsumowanie</strong>
                 </button>
               </li>
@@ -355,14 +343,14 @@
               </section>
 
               <section class="orders-editor-section orders-editor-section--assignment" data-orders-step-group="schedule-flow">
-                <div class="orders-schedule-mode" data-orders-step-panel="schedule">
+                <div class="orders-schedule-mode" data-orders-step-panel="staffing">
                     <label><input type="radio" name="ordersScheduleMode" value="once" checked /> Jednorazowe</label>
                     <label><input type="radio" name="ordersScheduleMode" value="repeat" /> Cykliczne</label>
                 </div>
 
-                <h3 data-orders-step-panel="schedule">Kiedy i częstotliwość</h3>
+                <h3 data-orders-step-panel="staffing">Kiedy i częstotliwość</h3>
 
-                <div class="orders-form-two" data-orders-step-panel="schedule">
+                <div class="orders-form-two" data-orders-step-panel="staffing">
                   <label class="orders-field">
                     <span>Data START *</span>
                     <input id="ordersEditStart" type="date" />
@@ -373,7 +361,7 @@
                   </label>
                 </div>
 
-                <div class="orders-form-two" id="ordersScheduleTimeGrid" data-orders-step-panel="schedule">
+                <div class="orders-form-two" id="ordersScheduleTimeGrid" data-orders-step-panel="staffing">
                   <label class="orders-field">
                     <span id="ordersStartTimeLabel">Godzina START *</span>
                     <input id="ordersEditTime" type="time" />
@@ -384,135 +372,10 @@
                   </label>
                 </div>
 
-                <label class="orders-extended-work-toggle" data-orders-step-panel="schedule">
-                  <input id="ordersEditAllowExtendedWork" type="checkbox" />
-                  <span>
-                    <strong>Pracownik może wydłużyć czas pracy, jeśli sytuacja na obiekcie tego wymaga</strong>
-                    <small>Informacja pojawi się w aplikacji pracownika, np. gdy po imprezie trzeba posprzątać dodatkowe zabrudzenia.</small>
-                  </span>
-                </label>
-
                 <div class="orders-schedule-rules" id="ordersScheduleRulesPanel" hidden>
-                  <div class="orders-access-windows" id="ordersAccessWindowsPanel" data-orders-step-panel="schedule" data-orders-repeat-only="true" hidden>
-                    <div class="orders-access-windows-head">
-                      <div>
-                        <strong>Dni dost&#281;pu i wyj&#261;tki</strong>
-                        <span>Godziny powy&#380;ej s&#261; domy&#347;lne. Tutaj wy&#322;&#261;cz dni bez dost&#281;pu albo ustaw inne godziny tylko dla wybranego dnia.</span>
-                      </div>
-                    </div>
-                    <div class="orders-access-window-rows" id="ordersAccessWindowRows"></div>
-                  </div>
-
                   <div class="orders-workload-panel" id="ordersWorkloadPanel" data-orders-step-panel="staffing">
-                    <div class="orders-workload-head">
-                      <div>
-                        <strong>Zespo&#322;y i zmiany</strong>
-                        <span>Dodaj zmiany, godziny pracy oraz osoby potrzebne do wykonania zlecenia.</span>
-                      </div>
-                    </div>
-                    <div class="orders-field orders-worker-field">
-                      <span>Pracownik/pracownicy</span>
-                      <select id="ordersEditWorker" hidden aria-hidden="true"></select>
-                      <details class="orders-worker-picker" id="ordersEditWorkerPicker">
-                        <summary id="ordersEditWorkerSummary">
-                          <span id="ordersEditWorkerSummaryText">BUFOR</span>
-                        </summary>
-                        <div class="orders-worker-checklist" id="ordersEditWorkerChecklist"></div>
-                      </details>
-                      <p class="orders-field-hint">Brak wybranej osoby oznacza przypisanie do BUFORA.</p>
-                    </div>
-                    <div class="orders-workload-grid">
-                      <label class="orders-field">
-                        <span id="ordersEditWorkHoursLabel">Wymagany czas pracy (rbh) *</span>
-                        <input id="ordersEditWorkHours" type="number" min="0.25" step="0.25" value="2" />
-                      </label>
-                      <label class="orders-field">
-                        <span>Liczba osób do obsadzenia</span>
-                        <input id="ordersEditRequiredPeople" type="number" min="1" step="1" value="1" />
-                      </label>
-                    </div>
-                    <p class="orders-workload-hint" id="ordersWorkloadHint">
-                      Nieobsadzone osoby trafi&#261; do BUFORU. Wpisane rbh okre&#347;la czas pracy dla danej osoby.
-                    </p>
                     <div class="orders-work-allocation" id="ordersWorkAllocationRows"></div>
                     <div class="orders-work-summary" id="ordersWorkAllocationSummary"></div>
-                  </div>
-
-                  <div class="orders-schedule-repeat" id="ordersScheduleRepeatPanel" data-orders-step-panel="recurrence">
-                    <div class="orders-repeat-config">
-                      <label class="orders-field">
-                        <span>Powtarza się</span>
-                        <select id="ordersEditRepeatPreset" hidden aria-hidden="true">
-                          <option value="week">Co tydzień</option>
-                          <option value="interval">Okresowo</option>
-                        </select>
-                        <div class="orders-repeat-select-picker" data-orders-repeat-select="ordersEditRepeatPreset">
-                          <button id="ordersRepeatPresetPickerButton" class="orders-repeat-select-toggle" type="button" data-orders-repeat-select-toggle aria-haspopup="listbox" aria-expanded="false" aria-controls="ordersRepeatPresetPickerList">
-                            <span data-orders-repeat-select-label>Co tydzień</span>
-                          </button>
-                          <div id="ordersRepeatPresetPickerList" class="orders-repeat-select-list" role="listbox" hidden></div>
-                        </div>
-                      </label>
-                      <div class="orders-schedule-custom">
-                        <span>Co</span>
-                        <input id="ordersEditRepeatEvery" type="number" min="1" step="1" />
-                        <select id="ordersEditRepeatUnit" hidden aria-hidden="true">
-                          <option value="week">Tydzień</option>
-                        </select>
-                        <div class="orders-repeat-select-picker" data-orders-repeat-select="ordersEditRepeatUnit">
-                          <button id="ordersRepeatUnitPickerButton" class="orders-repeat-select-toggle" type="button" data-orders-repeat-select-toggle aria-haspopup="listbox" aria-expanded="false" aria-controls="ordersRepeatUnitPickerList">
-                            <span data-orders-repeat-select-label>Tydzień</span>
-                          </button>
-                          <div id="ordersRepeatUnitPickerList" class="orders-repeat-select-list" role="listbox" hidden></div>
-                        </div>
-                        <span class="orders-repeat-month-suffix" data-orders-repeat-month-suffix hidden>miesięcy</span>
-                      </div>
-                    </div>
-
-                    <div class="orders-schedule-weekdays">
-                      <span>W następujące dni:</span>
-                      <div class="orders-weekday-grid">
-                        <label><input type="checkbox" data-orders-repeat-weekday="1" /> P</label>
-                        <label><input type="checkbox" data-orders-repeat-weekday="2" /> W</label>
-                        <label><input type="checkbox" data-orders-repeat-weekday="3" /> Ś</label>
-                        <label><input type="checkbox" data-orders-repeat-weekday="4" /> C</label>
-                        <label><input type="checkbox" data-orders-repeat-weekday="5" /> P</label>
-                        <label><input type="checkbox" data-orders-repeat-weekday="6" /> S</label>
-                        <label><input type="checkbox" data-orders-repeat-weekday="0" /> N</label>
-                      </div>
-                    </div>
-
-                    <div class="orders-weekly-pattern" id="ordersWeeklyPatternPanel" hidden>
-                      <div class="orders-weekly-pattern-head">
-                        <div>
-                          <strong>Wzorzec tygodnia</strong>
-                          <span>Ustaw osobne okno dostępu, roboczogodziny i obsadę dla każdego dnia cyklu.</span>
-                        </div>
-                        <div class="orders-weekly-pattern-actions">
-                          <button id="ordersWeeklyPatternApplyAll" type="button">Zastosuj do wszystkich</button>
-                          <em id="ordersWeeklyPatternSummary">-</em>
-                        </div>
-                      </div>
-                      <div class="orders-weekly-pattern-rows" id="ordersWeeklyPatternRows"></div>
-                    </div>
-
-                    <div class="orders-repeat-calendar" id="ordersRepeatCalendar" aria-live="polite">
-                      <div class="orders-repeat-calendar-head">
-                        <button type="button" data-orders-repeat-calendar-nav="-1" aria-label="Poprzedni miesiąc">&lsaquo;</button>
-                        <strong id="ordersRepeatCalendarLabel">-</strong>
-                        <button type="button" data-orders-repeat-calendar-nav="1" aria-label="Następny miesiąc">&rsaquo;</button>
-                      </div>
-                      <div class="orders-repeat-calendar-weekdays" aria-hidden="true">
-                        <span>P</span><span>W</span><span>Ś</span><span>C</span><span>P</span><span>S</span><span>N</span>
-                      </div>
-                      <div class="orders-repeat-calendar-grid" id="ordersRepeatCalendarGrid"></div>
-                      <div class="orders-repeat-calendar-foot">
-                        <span><i class="orders-repeat-calendar-dot orders-repeat-calendar-dot--start"></i> Start</span>
-                        <span><i class="orders-repeat-calendar-dot"></i> Dni wykonania</span>
-                        <strong id="ordersRepeatCalendarSummary">-</strong>
-                      </div>
-                    </div>
-
                   </div>
 
                 </div>

@@ -2333,9 +2333,68 @@ export function createCalendarFeature(ctx) {
       worker?.workerId ?? worker?.id ?? index,
       worker?.workerName ?? worker?.fullName ?? worker?.name ?? '',
       worker?.workerLogin ?? worker?.login ?? '',
+      worker?.workerType ?? worker?.type ?? worker?.role ?? '',
       worker?.status ?? worker?.workerStatus ?? worker?.state ?? '',
       worker?.active ?? worker?.isActive ?? '',
     ].map((value) => String(value ?? '').trim()).join(',')).join('|')}`
+  }
+
+  function calendarTimelineWorkerSortPriority(worker = {}) {
+    const kind = calendarTimelineWorkerTypeKind(worker)
+    if (kind === 'mobile') {
+      return 0
+    }
+    if (kind === 'coordinator') {
+      return 1
+    }
+    if (kind === 'site') {
+      return 2
+    }
+    if (kind === 'admin') {
+      return 3
+    }
+    return 4
+  }
+
+  function calendarTimelineWorkerTypeKind(worker = {}) {
+    const typeText = normalizeSearchText([
+      worker?.workerType,
+      worker?.type,
+      worker?.role,
+      worker?.profileRole,
+      worker?.permissions,
+      worker?.permission,
+    ].filter((value) => String(value ?? '').trim()).join(' '))
+    if (typeText.includes('mobil') || typeText.includes('zespol')) {
+      return 'mobile'
+    }
+    if (typeText.includes('koord') || typeText.includes('coordinator')) {
+      return 'coordinator'
+    }
+    if (typeText.includes('personel') && (typeText.includes('obiek') || typeText.includes('sta'))) {
+      return 'site'
+    }
+    if (typeText.includes('admin') || typeText.includes('administrator')) {
+      return 'admin'
+    }
+    return 'standard'
+  }
+
+  function calendarTimelineWorkerTypeBadge(worker = {}) {
+    const kind = calendarTimelineWorkerTypeKind(worker)
+    if (kind === 'mobile') {
+      return { className: 'mobile', label: 'MOB', title: 'Zespol mobilny' }
+    }
+    if (kind === 'coordinator') {
+      return { className: 'coordinator', label: 'KOO', title: 'Koordynator' }
+    }
+    if (kind === 'site') {
+      return { className: 'site', label: 'STA', title: 'Staly personel na obiekcie' }
+    }
+    if (kind === 'admin') {
+      return { className: 'admin', label: 'ADM', title: 'Admin' }
+    }
+    return null
   }
   
   function calendarTimelineResources() {
@@ -2366,7 +2425,13 @@ export function createCalendarFeature(ctx) {
         seen.add(resource.key)
         return true
       })
-      .sort((first, second) => first.name.localeCompare(second.name, 'pl', { sensitivity: 'base' }))
+      .sort((first, second) => {
+        const priorityDiff = calendarTimelineWorkerSortPriority(first.worker) - calendarTimelineWorkerSortPriority(second.worker)
+        if (priorityDiff) {
+          return priorityDiff
+        }
+        return first.name.localeCompare(second.name, 'pl', { sensitivity: 'base' })
+      })
   
     if (workers.length) {
       const resources = [{ name: 'BUFOR', key: 'buffer', type: 'buffer' }, ...workers]
@@ -6479,7 +6544,7 @@ export function createCalendarFeature(ctx) {
       return null
     }
 
-    const resourceWidth = Number(grid.getAttribute('data-calendar-timeline-resource-width')) || 190
+    const resourceWidth = Number(grid.getAttribute('data-calendar-timeline-resource-width')) || 260
     const styles = window.getComputedStyle(grid)
     const slotWidthFromCss = Number.parseFloat(styles.getPropertyValue('--slot-width'))
     const slotWidth = Number.isFinite(slotWidthFromCss) && slotWidthFromCss > 0
@@ -9407,18 +9472,26 @@ export function createCalendarFeature(ctx) {
           .join('')
         const deltaClass = deltaBadges ? ' has-deltas' : ''
         const gridRow = calendarTimelineGridRowForResource(resource, index)
+        const typeBadge = resource.type === 'worker' ? calendarTimelineWorkerTypeBadge(resource.worker) : null
+        const typeClass = typeBadge ? ` is-worker-type-${escapeHtml(typeBadge.className)}` : ''
+        const typeBadgeHtml = typeBadge
+          ? `<span class="fw-resource-type-badge fw-resource-type-badge--${escapeHtml(typeBadge.className)} ${resource.started ? 'is-worker-status-started' : 'is-worker-status-idle'}" title="${escapeHtml(typeBadge.title)}">${escapeHtml(typeBadge.label)}</span>`
+          : ''
         const avatar =
           resource.type === 'worker'
             ? `<b class="fw-resource-avatar ${calendarTimelineResourceAvatarTone(index)}" aria-hidden="true">${escapeHtml(calendarSafeInitials(resource.name))}</b>`
             : ''
         return `
-          <div class="fw-resource-name${muted}${workerClass}${started}${rowAltClass}${deltaClass}" style="grid-row:${gridRow};" data-calendar-timeline-row="${index}">
+          <div class="fw-resource-name${muted}${workerClass}${started}${rowAltClass}${deltaClass}${typeClass}" style="grid-row:${gridRow};" data-calendar-timeline-row="${index}">
             ${avatar}
             <span class="fw-resource-label">
-              <span class="fw-resource-label-name">${escapeHtml(resource.name)}</span>
+              <span class="fw-resource-label-main">
+                <span class="fw-resource-label-name">${escapeHtml(resource.name)}</span>
+                ${typeBadgeHtml}
+              </span>
               ${deltaBadges ? `<span class="fw-resource-deltas">${deltaBadges}</span>` : ''}
             </span>
-            ${resource.type === 'worker' ? '<i aria-hidden="true"></i>' : ''}
+            ${resource.type === 'worker' && !typeBadge ? '<i aria-hidden="true"></i>' : ''}
           </div>
         `
       })
@@ -9428,6 +9501,13 @@ export function createCalendarFeature(ctx) {
         const classes = ['fw-grid-row']
         if (resource.type === 'buffer') classes.push('fw-grid-row--buffer')
         if (resource.type === 'worker' && rowIndex % 2 === 0) classes.push('fw-grid-row--alt')
+        if (resource.type === 'worker') {
+          const kind = calendarTimelineWorkerTypeKind(resource.worker)
+          if (kind === 'mobile') classes.push('fw-grid-row--worker-mobile')
+          if (kind === 'coordinator') classes.push('fw-grid-row--worker-coordinator')
+          if (kind === 'site') classes.push('fw-grid-row--worker-site')
+          if (kind === 'admin') classes.push('fw-grid-row--worker-admin')
+        }
         return `<div class="${classes.join(' ')}" style="grid-column:2 / span ${totalSlots}; grid-row:${calendarTimelineGridRowForResource(resource, rowIndex)};" data-calendar-timeline-row="${rowIndex}"></div>`
       })
       .join('')
@@ -9504,7 +9584,7 @@ export function createCalendarFeature(ctx) {
   
     return `
       <div class="fw-timeline-scroll">
-        <div class="fw-timeline-grid" style="--slot-count:${totalSlots}; --row-count:${resources.length}; --fw-buffer-height:${bufferHeight}px; grid-template-rows:${gridRows};" data-calendar-timeline-total-slots="${totalSlots}" data-calendar-timeline-resource-width="190">
+        <div class="fw-timeline-grid" style="--slot-count:${totalSlots}; --row-count:${resources.length}; --fw-buffer-height:${bufferHeight}px; grid-template-rows:${gridRows};" data-calendar-timeline-total-slots="${totalSlots}" data-calendar-timeline-resource-width="260">
           ${bufferPlane}
           ${workerHead}
           ${dayHeaders}
