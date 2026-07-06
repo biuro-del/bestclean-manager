@@ -419,6 +419,16 @@ function disableScheduleOrdersEndpoint(action, message) {
   console.warn(`[portal/schedule-orders] ${action} uses DataConnect fallback; backend unavailable`, message)
 }
 
+function isScheduleOrdersLocalFileResponse(body) {
+  const storage = normalizeText(body?.data?.storage ?? body?.storage).toLowerCase()
+  return storage === 'local-file'
+}
+
+function disableScheduleOrdersInvalidPayload(action, message) {
+  disableScheduleOrdersEndpoint(action, message)
+  return null
+}
+
 async function parseScheduleOrdersApiError(response, fallbackMessage) {
   let rawText = ''
   try {
@@ -502,7 +512,13 @@ async function fetchScheduleTasksViaBackend(orgId) {
     throw new Error(error.message)
   }
   const body = await response.json().catch(() => ({}))
-  return Array.isArray(body?.data?.orders) ? sortScheduleOrders(body.data.orders) : []
+  if (isScheduleOrdersLocalFileResponse(body)) {
+    return disableScheduleOrdersInvalidPayload('load', 'Backend zlecen zwrocil lokalny plik zamiast danych z bazy.')
+  }
+  if (!Array.isArray(body?.data?.orders)) {
+    return disableScheduleOrdersInvalidPayload('load', 'Endpoint zlecen nie zwrocil data.orders.')
+  }
+  return sortScheduleOrders(body.data.orders)
 }
 
 async function upsertScheduleTasksViaBackend(orgId, orders = []) {
@@ -531,7 +547,13 @@ async function upsertScheduleTasksViaBackend(orgId, orders = []) {
     throw new Error(error.message)
   }
   const body = await response.json().catch(() => ({}))
-  return Array.isArray(body?.data?.orders) ? sortScheduleOrders(body.data.orders) : sourceOrders
+  if (isScheduleOrdersLocalFileResponse(body)) {
+    return disableScheduleOrdersInvalidPayload('save', 'Backend zlecen zapisal lokalny plik zamiast bazy.')
+  }
+  if (!Array.isArray(body?.data?.orders)) {
+    return disableScheduleOrdersInvalidPayload('save', 'Endpoint zlecen nie zwrocil potwierdzenia data.orders.')
+  }
+  return sortScheduleOrders(body.data.orders)
 }
 
 async function deleteScheduleTasksViaBackend(orgId, orderIds = []) {
@@ -563,7 +585,13 @@ async function deleteScheduleTasksViaBackend(orgId, orderIds = []) {
     throw new Error(error.message)
   }
   const body = await response.json().catch(() => ({}))
-  return Array.isArray(body?.data?.deletedOrderIds) ? body.data.deletedOrderIds : ids
+  if (isScheduleOrdersLocalFileResponse(body)) {
+    return disableScheduleOrdersInvalidPayload('delete', 'Backend zlecen usunal lokalny plik zamiast rekordu z bazy.')
+  }
+  if (!Array.isArray(body?.data?.deletedOrderIds)) {
+    return disableScheduleOrdersInvalidPayload('delete', 'Endpoint zlecen nie zwrocil potwierdzenia data.deletedOrderIds.')
+  }
+  return body.data.deletedOrderIds
 }
 
 function normalizeTaskRow(row = {}) {

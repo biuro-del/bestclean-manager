@@ -6477,7 +6477,9 @@ async function upsertPortalScheduleOrderTask(client, dbRow) {
 }
 
 function shouldUseLocalPortalScheduleOrderFileStorage() {
-  return NODE_ENV !== 'production' && !hasDatabaseConnectionConfig()
+  const mode = normalizeText(process.env.PORTAL_SCHEDULE_ORDERS_MODE).toLowerCase()
+  const explicitAllow = normalizeText(process.env.ALLOW_LOCAL_PORTAL_SCHEDULE_ORDERS_FILE_STORAGE) === '1'
+  return explicitAllow && NODE_ENV !== 'production' && ['local', 'direct', 'file'].includes(mode)
 }
 
 function portalScheduleOrderFilePath(orgId) {
@@ -6647,7 +6649,9 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
 }
 
 function shouldUseLocalPortalTaskFileStorage() {
-  return NODE_ENV !== 'production' && !hasDatabaseConnectionConfig()
+  const mode = normalizeText(process.env.PORTAL_TASKS_MODE).toLowerCase()
+  const explicitAllow = normalizeText(process.env.ALLOW_LOCAL_PORTAL_TASK_FILE_STORAGE) === '1'
+  return explicitAllow && NODE_ENV !== 'production' && ['local', 'direct', 'file'].includes(mode)
 }
 
 function portalTaskFilePath(orgId) {

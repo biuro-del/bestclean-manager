@@ -1184,3 +1184,296 @@ Uwagi dla nastepnej osoby:
 - Nie wdrazano aplikacji mobilnej.
 - Nie wdrazano Data Connect ani nie zmieniano danych w bazie.
 - Przywrocenie wersji sprzed wdrozenia: uzyc backupu `working-tree.diff` z katalogu `pre-deploy-portal-20260630-204854` albo cofnac rollout App Hosting do commita sprzed `cb0a329`, zgodnie z procedura Firebase App Hosting/GitHub.
+
+Data: 2026-07-01 12:59 +02:00
+Autor: AI Codex
+Dodano:
+- Dodano bardziej uporzadkowany uklad karty zmiany w formularzu zlecenia: czytelniejszy licznik osob, szersza karta, sekcja dni pracy jako kompaktowa siatka oraz spokojniejszy blok podsumowania obsady.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/orders/index.js` licznik zmiany pokazuje teraz `X os.` zamiast samej cyfry, a formularz zmiany dostal dodatkowe klasy ukladu dla trybu jednorazowego i cyklicznego.
+- W `web-app/apps/portal-web/src/index.css` poprawiono szerokosc karty zmiany, wyglad nazwy zmiany, licznika osob, siatki czasu, dni tygodnia oraz podsumowania obsady.
+- Dni tygodnia w karcie zmiany sa teraz prostokatnymi przelacznikami zamiast okraglych pol z checkboxem, z wyraznym stanem zaznaczenia.
+Usunieto:
+- Nic z logiki zapisu ani danych; zmiana dotyczy warstwy HTML/CSS formularza zlecenia.
+Testy/sprawdzenia:
+- Przed praca uruchomiono `git fetch cleanzi01` i sprawdzono `git rev-list --left-right --count HEAD...cleanzi01/main`; lokalna galaz byla 2 commity do przodu i 0 commitow za `cleanzi01/main`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Sprawdzono lokalny adres `http://127.0.0.1:5173/`, otwarto modal `Dodaj zlecenie`, wybrano klienta `Best Clean` i obejrzano lokalnie karte zmiany bez zapisywania zlecenia.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect ani danych w bazie.
+- Przywrocenie poprzedniego wygladu: cofnac zmiany w `ordersServiceBlockCardHtml`, nowe klasy `orders-shift-*`, wrapper `orders-service-weekdays-wrap` oraz powiazane style `orders-service-*` / `orders-kanban-*` dodane w tym wpisie.
+
+Data: 2026-07-02 09:50 +02:00
+Autor: AI Codex
+Dodano:
+- Dodano rozwijana liste pracownikow w slocie osoby w formularzu zlecenia, w polu `Opis / rola osoby`.
+- Dodano automatyczne dociaganie listy pracownikow po wejsciu w krok `Zmiany i osoby`, jesli formularz zlecenia nie ma jeszcze zasobow pracownikow z kalendarza.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/orders/index.js` pole roli osoby w slocie jest teraz selectem z opcjami `BUFOR` oraz pracownikami.
+- Nowy select synchronizuje wybor z technicznym polem `Pracownik opcjonalnie`, zeby zapis nadal korzystal z dotychczasowego mechanizmu obsady.
+- W `web-app/apps/portal-web/src/ui/portalApp.js` `fetchWorkersForCurrentSession` najpierw inicjalizuje modul `workerTime`, dzieki czemu pobieranie pracownikow dziala rowniez wtedy, gdy uzytkownik nie otwieral wczesniej widoku pracownikow/kalendarza.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed praca uruchomiono `git fetch cleanzi01` i sprawdzono `git rev-list --left-right --count HEAD...cleanzi01/main`; lokalna galaz byla 2 commity do przodu i 0 commitow za `cleanzi01/main`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/ui/portalApp.js`.
+- Uruchomiono `git diff --check`; pozostaly tylko ostrzezenia CRLF.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Sprawdzono lokalnie `http://localhost:5173/`: otwarto `Dodaj zlecenie`, wybrano klienta `Best Clean`, przejscie do `Zmiany i osoby` pokazalo 55 opcji w liscie osoby.
+- Sprawdzono, ze wybor pracownika w nowej liscie ustawia to samo nazwisko w polu `Pracownik opcjonalnie`, a powrot na `BUFOR` resetuje pole pracownika. Nie zapisano zlecenia.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: w `ordersServiceBlockSlotsHtml` przywrocic input `data-orders-service-slot-label`, usunac helpery `ordersServiceSlotPersonOptionsHtml`, `ordersReadServiceSlotLabel`, `ordersApplyServiceSlotPersonSelection`, `ordersSyncServiceSlotPersonLabelFromWorker`, `ordersEnsureWorkerResourcesForEditor`, zmiany w handlerze `data-orders-service-slot-label` oraz linie inicjalizacji `workerTime` w `fetchWorkersForCurrentSession`.
+
+Data: 2026-07-02 10:12 +02:00
+Autor: AI Codex
+Dodano:
+- Dodano nakladanie aktualnych `workAllocations` na sloty `serviceBlocks` przy otwieraniu/normalizacji formularza zlecenia.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/orders/index.js` formularz `Zmiany i osoby` traktuje teraz `workAllocations` jako zrodlo prawdy dla obsady slotu, takze gdy zapisane `serviceBlocks.slots` nadal maja stare `BUFOR`.
+- Dopasowanie slotu korzysta z klucza alokacji, `slotId`, indeksu slotu oraz kontekstu bloku zmiany, zeby po przypisaniu z kalendarza pole `Opis / rola osoby` i `Pracownik opcjonalnie` pokazywaly tego samego pracownika.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed praca uruchomiono `git fetch cleanzi01` i sprawdzono `git rev-list --left-right --count HEAD...cleanzi01/main`; lokalna galaz byla 2 commity do przodu i 0 commitow za `cleanzi01/main`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Uruchomiono `git diff --check`; pozostaly tylko ostrzezenia CRLF.
+- Sprawdzono lokalnie w otwartym formularzu edycji zlecenia, ze slot przypisany z BUFORU do `Dudek Rafal` pokazuje `Dudek Rafal` w polu `Opis / rola osoby` oraz w polu `Pracownik opcjonalnie`. Nie zapisano formularza.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: usunac helpery `ordersServiceBlockAllocationSource`, `ordersServiceSlotKeyCandidates`, `ordersServiceSlotMatchesAllocation`, `ordersServiceSlotWithAllocation`, `ordersServiceSlotsWithAllocations` oraz przywrocic bezposrednie normalizowanie `block.slots` w `ordersServiceBlockSlots`.
+
+Data: 2026-07-02 11:31 +02:00
+Autor: AI Codex
+Dodano:
+- Dodano synchronizacje zlecen kalendarza podczas odswiezania Pulpitu, zeby os dnia mogla pokazac zaplanowane zadania bez koniecznosci wchodzenia najpierw w Kalendarz.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/dashboard/index.js` `refreshDashboardWidgets` pobiera teraz rownolegle dane aktywnych pracownikow/zdarzen oraz zlecenia z `ordersSyncRemoteTimelineOrders`.
+- Render osi dnia korzysta dzieki temu z aktualnych `ordersListSourceOrders`, a komunikat `Brak aktywnosci do pokazania na osi dnia` nie powinien pojawiac sie tylko dlatego, ze modul kalendarza nie byl jeszcze otwierany.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed praca uruchomiono `git fetch cleanzi01` i sprawdzono `git rev-list --left-right --count HEAD...cleanzi01/main`; lokalna galaz byla 2 commity do przodu i 0 commitow za `cleanzi01/main`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/dashboard/index.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: usunac `ordersSyncRemoteTimelineOrders` z destrukturyzacji kontekstu Pulpitu, helper `dashboardSyncCalendarOrdersForTimeline` oraz rownolegle wywolanie tego helpera w `refreshDashboardWidgets`.
+
+Data: 2026-07-02 13:35 +02:00
+Autor: AI Codex
+Dodano:
+- Dodano rozpoznawanie aktualnego wiersza pracownika dla slotow zlecenia na podstawie stabilnych danych obsady: `workerId`, `workerLogin`, `workerKey` oraz nazwy pracownika.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` `calendarTimelineVisualOrderSlots` nie ufa juz bezwarunkowo zapisanemu numerowi `row`, tylko przed renderem probuje przeliczyc go na aktualny wiersz pracownika z listy zasobow.
+- Klucze techniczne slotow typu `slot:*`, `workslot*`, `service-slot*`, `buffer` i `BUFOR` nie sa traktowane jako identyfikator pracownika.
+- Dzieki tej zmianie Pulpit i Kalendarz korzystaja z tego samego rozpoznania obsady po zmianie kolejnosci/sortowania pracownikow.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed praca sprawdzono `git rev-list --left-right --count HEAD...cleanzi01/main`; lokalna galaz byla 2 commity do przodu i 0 commitow za `cleanzi01/main`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/calendar/index.js`.
+- Uruchomiono `git diff --check`; pozostaly tylko ostrzezenia CRLF.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Sprawdzono lokalnie `http://localhost:5173/`: po przejsciu na Pulpit wiersz `Dudek Rafal` pokazuje jednoczesnie realny START oraz planowane zlecenie `11:00-14:00 Best Clean`.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: usunac helpery `calendarTimelineAllocationStoredRow`, `calendarTimelineAllocationKeyLooksLikeSlot`, `calendarTimelineAllocationWorkerKey`, `calendarTimelineAllocationWorkerAssignment`, `calendarTimelineResolveAllocationRow` oraz przywrocic bezposrednie ustawienie `row` w `safeAllocations` na wartosc `Number(item.row)`.
+
+Data: 2026-07-02 14:22 +02:00
+Autor: AI Codex
+Dodano:
+- Dodano wspolne oczekiwanie na trwajaca synchronizacje zlecen kalendarza w module kalendarza.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` `ordersSyncRemoteTimelineOrders` nie zwraca juz lokalnego snapshotu, gdy inne pobieranie zlecen juz trwa.
+- Kolejne wywolania synchronizacji czekaja na ten sam request do bazy i dopiero po nim renderuja aktualny widok, co ma usunac przypadek, w ktorym Pulpit po pelnym odswiezeniu strony nie pokazuje zlecenia widocznego pozniej w Kalendarzu.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Proba `git fetch cleanzi01` oraz `git ls-remote cleanzi01 refs/heads/main` przekroczyla limit czasu; lokalny `cleanzi01/main` pozostaje referencja porownawcza z poprzedniego pobrania.
+- Sprawdzono `git rev-parse HEAD` i `git rev-parse cleanzi01/main`; lokalna galaz pozostaje przed lokalnie znanym `cleanzi01/main`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/calendar/index.js`.
+- Uruchomiono `git diff --check`; pozostaly tylko ostrzezenia CRLF.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Proba automatycznego testu pelnego odswiezenia w przegladarce Codexa zostala przerwana przez timeout polaczenia z karta, mimo ze lokalny Vite odpowiadal HTTP 200; test wizualny po tej poprawce wymaga jeszcze recznego potwierdzenia w LH.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: usunac `calendarTimelineOrdersRemotePromise` i przywrocic warunek `if (!orgId || appState.calendarTimelineOrdersRemoteLoading) return ordersListSourceOrders()` w `ordersSyncRemoteTimelineOrders`.
+
+Data: 2026-07-02 22:59 +02:00
+Autor: AI Codex
+Dodano:
+- Dodano mocniejsze dopasowanie pracownika na osi dnia Pulpitu po `workerId`, loginie oraz wariantach imienia i nazwiska, np. `Dudek Rafal` i `Rafal Dudek`.
+- Dodano awaryjne wyswietlanie kodu QR/strefy jako etykiety aktywnego paska, gdy nie da sie rozpoznac nazwy klienta po tym kodzie.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/dashboard/index.js` aktywne paski na Pulpicie preferuja najnowszy event QR tego samego pracownika i dnia przed ogolna etykieta z workday.
+- Pulpit pobiera zdarzenia z biezacego dnia w zakresie do nastepnego dnia, aby nie tracic eventow przy filtrowaniu po koncu zakresu.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Sprawdzono, ze lokalny Vite serwuje najnowszy modul `web-app/apps/portal-web/src/features/dashboard/index.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/dashboard/index.js`.
+- Uruchomiono `git diff --check`; pozostaly tylko ostrzezenia CRLF.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Sprawdzono lokalnie `http://localhost:5173/`: po kliknieciu `Pulpit` wiersz `Dudek Rafal` pokazuje aktywny START oraz pozycje kalendarzowa `11:00-14:00 Best Clean`.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: usunac helpery `dashboardActivityWorkerMatchKeys` i `dashboardActivityRowsShareWorker`, usunac fallback `rawQrLabel` w `dashboardActivityLatestQrCompanyLabelForRow` oraz przywrocic porownanie po samym `dashboardResolveWorkerIdValue`.
+
+Data: 2026-07-06 11:05 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/orders/index.js` zmieniono odswiezanie kart zmian po zmianie trybu, dnia, godzin lub obsady tak, aby render korzystali z aktualnych kontrolek formularza (`preferStored: false`), a nie ze starego zapisanego stanu.
+- Celem jest naprawa cofania wyboru dni pracy i pracownika w formularzu dodawania/edycji zlecenia, np. przy probie ustawienia cyklicznego zlecenia Best Clean dla Rafala Dudka pon.-pt. 08:00-16:00.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano poczatek `ReadMe.txt` i sprawdzono `git status -sb`.
+- Proba `git fetch --all --prune` przekroczyla limit czasu, wiec praca jest prowadzona na aktualnym stanie lokalnym bez cofania istniejacych zmian.
+- Test przegladarkowy na `http://localhost:5173/` jest kontynuowany po tej zmianie.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: w obsludze zmiany kontrolek `data-orders-service-*` przywrocic `ordersRenderWorkAllocationControls(order, { forceEven: true, preferStored: true })`.
+
+Data: 2026-07-06 12:26 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/orders/index.js` odblokowano wybor trybu zmiany w karcie zmiany, tak aby ustawienie `Cyklicznie co tydzien` na zmianie ustawialo cale zlecenie jako cykliczne.
+- W `web-app/apps/portal-web/src/features/orders/index.js` zmieniono normalizacje kart zmian podczas odczytu i zapisu formularza tak, aby biezace kontrolki formularza nie byly nadpisywane starym `workAllocations` z rekordu zlecenia. Naprawia to przypadek, w ktorym po wyborze `Dudek Rafal` formularz wracal do `BUFOR`.
+- W `web-app/apps/portal-web/src/features/orders/index.js` pominieto synchronizacje planu obiektu do danych klienta, jezeli zlecenie nie ma zadan obiektowych ani wyposazenia. Dzieki temu proste zlecenie nie jest blokowane bledem zapisu pustego planu klienta.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `git diff --check`; pozostaly tylko ostrzezenia CRLF.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Sprawdzono lokalnie `http://localhost:5173/`: dodano testowe zlecenie cykliczne Best Clean od 06.07.2026, pon.-pt., 08:00-16:00, przypisane do `Dudek Rafal`.
+- Po zapisie ponownie otwarto edycje tego zlecenia i potwierdzono, ze widoczne sa `Dudek Rafal`, tryb cykliczny, dni pon.-pt. oraz godziny 08:00-16:00.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect ani schematow bazy.
+- Przywrocenie poprzedniego zachowania: ponownie zablokowac `data-orders-service-mode` dla zlecen niecyklicznych, usunac blok synchronizujacy tryb zmiany z `order.scheduleMode`, przywrocic przekazywanie oryginalnego `order` do `ordersNormalizeServiceBlock` w `ordersStoreServiceBlocks` i `ordersReadServiceBlocksFromControls`, oraz przywrocic bezwarunkowy zapis `ordersSyncObjectDataToClient`.
+
+Data: 2026-07-06 14:26 +02:00
+Autor: AI Codex
+Dodano:
+- Dodano rozpoznawanie uprawnienia administratora przy usuwaniu zlecen historycznych w module zlecen.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/orders/index.js` funkcja `ordersTimelineOrderCanBeDeleted` pozwala teraz uzytkownikom z poziomem roli `roleLevel >= 3` albo rola `admin` / `administrator` / `owner` / `superadmin` usuwac prawdziwe zlecenia niezaleznie od tego, czy sa historyczne, rozpoczete albo zakonczone.
+- Dla pozostalych uzytkownikow zostaje dotychczasowa blokada: usuwac mozna tylko zaplanowane zlecenia, ktore jeszcze sie nie rozpoczely.
+- W `ordersConfirmTimelineOrderDelete` dodano osobny komunikat potwierdzenia dla administratora informujacy, ze operacja moze dotyczyc rowniez zlecen historycznych/rozpoczetych i jest nieodwracalna.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `git diff --check`; pozostaly tylko ostrzezenia CRLF.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect, backendowego endpointu DELETE ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: usunac helper `ordersCurrentUserCanDeleteHistoricalOrders`, usunac `roleLevel` z destrukturyzacji kontekstu w `createOrdersFeature`, przywrocic warunek `if (!order || order.completed || order.isDraft) return false` w `ordersTimelineOrderCanBeDeleted` oraz usunac administratorska galaz potwierdzenia w `ordersConfirmTimelineOrderDelete`.
+
+Data: 2026-07-06 14:42 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/orders/index.js` zmieniono logike dostepnych dni w karcie zmiany. Po usunieciu osobnej sekcji "Dni dostepu i wyjatki" poprzednie `repeatWeekdays` nie jest juz traktowane jako limit dni, tylko jako aktualny wybor uzytkownika.
+- W `ordersNormalizeServiceBlock` usunieto filtrowanie dni zmiany przez stary zestaw dni z rekordu zlecenia. Dzieki temu po przelaczeniu zlecenia/zmiany na tryb cykliczny mozna zaznaczyc wiele dni pracy, a formularz nie cofa wyboru do samego poniedzialku.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano poczatek `ReadMe.txt`.
+- Sprawdzono zdalne repozytorium: `git fetch cleanzi01 main --prune`; lokalna galaz nie jest za GitHubem (`HEAD...cleanzi01/main` = `2 0`, czyli 2 commity lokalnie do przodu, 0 zdalnych brakujacych lokalnie).
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Uruchomiono `git diff --check`; pozostaly tylko ostrzezenia CRLF.
+- Sprawdzono, ze lokalny Vite odpowiada HTTP 200 pod `http://localhost:5173/`.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect, backendu ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: w `ordersAvailableAccessWeekdays` przywrocic odczyt `ordersRepeatWeekdaysFromOrder(order)`, a w `ordersNormalizeServiceBlock` ponownie filtrowac dni przez `availableWeekdays`.
+
+Data: 2026-07-06 14:58 +02:00
+Autor: AI Codex
+Dodano:
+- Dodano helper `ordersAssignableWorkerResourceOptions` w `web-app/apps/portal-web/src/features/orders/index.js`, ktory buduje liste pracownikow do obsady w kolejnosci alfabetycznej po nazwie.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/orders/index.js` lista `Opis / rola osoby` w slocie zmiany pokazuje teraz `BUFOR` jako pierwsza opcje, a nastepnie pracownikow alfabetycznie.
+- W tym samym pliku lista `Pracownik opcjonalnie` uzywa tej samej kolejnosci alfabetycznej, zeby oba pola obsady byly spojne.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano poczatek `ReadMe.txt`.
+- Sprawdzono zdalne repozytorium: `git fetch cleanzi01 main --prune`; lokalna galaz nie jest za GitHubem (`HEAD...cleanzi01/main` = `2 0`, czyli 2 commity lokalnie do przodu, 0 zdalnych brakujacych lokalnie).
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Uruchomiono `git diff --check`; pozostaly tylko ostrzezenia CRLF.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect, backendu ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: usunac helper `ordersAssignableWorkerResourceOptions` i przywrocic bezposrednie mapowanie `resources` w `ordersServiceSlotWorkerOptionsHtml` oraz `ordersServiceSlotPersonOptionsHtml`.
+
+Data: 2026-07-06 15:46 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` kalendarz dla zlecen posiadajacych `serviceBlocks` priorytetowo korzysta teraz z alokacji z blokow zmian, zamiast ze starszych top-level `workAllocations`.
+- W `calendarTimelineServiceBlockAllocations` alokacje zapisane bezposrednio w zmianie dziedzicza godziny `startTime` / `endTime` z bloku zmiany. Dzieki temu stara alokacja 08:00-16:00 nie nadpisuje poprawnego planu zmiany 07:00-15:00.
+- W `calendarTimelineVisualOrderSlots` warstwa wizualna planowanych paskow rowniez preferuje `serviceBlocks`, aby lista, edycja i kalendarz nie rozjezdzaly sie przy nowych zleceniach zmianowych.
+- W `web-app/apps/portal-web/src/features/orders/index.js` scalanie slotu z alokacja (`ordersServiceSlotWithAllocation`) nie nadpisuje juz godzin slotu godzinami z alokacji. Slot/zmiana okresla czas, alokacja okresla osobe.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Sprawdzono zdalne repozytorium: `git fetch cleanzi01 main --prune`; lokalna galaz nie jest za GitHubem (`HEAD...cleanzi01/main` = `2 0`, czyli 2 commity lokalnie do przodu, 0 zdalnych brakujacych lokalnie).
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/calendar/index.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Po odswiezeniu `http://localhost:5173/` sprawdzono w przegladarce, ze wiersze `Cisak Marta` i `Dudek Sabina` maja planowane paski `07:00-15:00 Best Clean`.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect, backendu ani danych w bazie.
+- Dla zlecen z `serviceBlocks` godziny bloku zmiany sa zrodlem prawdy dla kalendarza, a `workAllocations` przenosi przede wszystkim osobe/slot.
+
+Data: 2026-07-06 16:29 +02:00
+Autor: AI Codex
+Dodano:
+- Dodano zabezpieczenie frontendu w `web-app/apps/portal-web/src/services/scheduleTaskDataConnectService.js`, ktore traktuje odpowiedz `/api/portal/schedule-orders` z `storage: local-file` albo bez `data.orders` / `data.deletedOrderIds` jako niedostepny endpoint i przechodzi do Data Connect zamiast przyjmowac lokalny plik jako prawde.
+Zmieniono:
+- W `index.js` lokalny zapis plikowy zlecen grafiku (`.local-data/portal-schedule-orders`) nie wlacza sie juz automatycznie przy braku konfiguracji bazy. Wymaga jawnej zmiennej `ALLOW_LOCAL_PORTAL_SCHEDULE_ORDERS_FILE_STORAGE=1` oraz trybu `PORTAL_SCHEDULE_ORDERS_MODE=local/direct/file`.
+- W `index.js` lokalny zapis plikowy zadan portalowych/Kanban (`.local-data/portal-tasks`) rowniez wymaga jawnej zmiennej `ALLOW_LOCAL_PORTAL_TASK_FILE_STORAGE=1` oraz trybu `PORTAL_TASKS_MODE=local/direct/file`.
+- W `scripts/dev-local.js` domyslny `npm run dev` ustawia `PORTAL_SCHEDULE_ORDERS_MODE=proxy` oraz `PORTAL_TASKS_MODE=proxy`, zeby localhost uzywal zdalnej bazy/proxy zamiast lokalnych plikow.
+- W `.env.example` opisano, ze zlecenia grafiku nie powinny byc zapisywane w lokalnym fallbacku i dodano przyklady zmiennych proxy oraz awaryjnego opt-in dla file fixtures.
+Usunieto:
+- Nic. Istniejace pliki `.local-data` zostaly zachowane, ale nie powinny byc juz uzywane automatycznie jako miejsce zapisu zlecen.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Sprawdzono zdalne repozytorium: `git fetch cleanzi01 main --prune`; lokalna galaz nie jest za GitHubem (`HEAD...cleanzi01/main` = `2 0`, czyli 2 commity lokalnie do przodu, 0 zdalnych brakujacych lokalnie).
+- Utworzono backup aktualnego stanu: `.codex-backups/pre-local-write-lock-20260706-162928` z `git-status.txt`, `HEAD.txt`, `working-tree.diff` oraz kopia `.local-data`.
+- Uruchomiono `node --check index.js`.
+- Uruchomiono `node --check scripts/dev-local.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/services/scheduleTaskDataConnectService.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Uruchomiono swiezy `npm run dev`; poniewaz port 8080 byl zajety, backend wystartowal na 8081, a Vite na `http://127.0.0.1:5173/`.
+- Sprawdzono HTTP 200 dla `http://127.0.0.1:5173/` oraz `{"ok":true}` dla `http://127.0.0.1:8081/healthz`.
+Uwagi dla nastepnej osoby:
+- Nie wdrazano tej zmiany na produkcje w ramach tego wpisu.
+- Nie migrowano ani nie usuwano danych z `.local-data`; jesli sa tam testowe lub omylkowe zlecenia, trzeba osobno zdecydowac, czy je przeniesc do `public.task`, czy odrzucic.
+- Przywrocenie poprzedniego zachowania: przywrocic automatyczne `return NODE_ENV !== 'production' && !hasDatabaseConnectionConfig()` w `shouldUseLocalPortalScheduleOrderFileStorage` i `shouldUseLocalPortalTaskFileStorage`, ustawic w `scripts/dev-local.js` `PORTAL_TASKS_MODE` na `local` i usunac obsluge lokalnego payloadu w `scheduleTaskDataConnectService.js`.

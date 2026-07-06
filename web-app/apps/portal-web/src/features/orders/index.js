@@ -34,6 +34,7 @@ export function createOrdersFeature(ctx) {
     escapeHtml,
     eventTargetClosest,
     fetchClientsForCurrentSession,
+    fetchWorkersForCurrentSession,
     fetchZonesForCurrentSession,
     formatBytes,
     formatDatePl,
@@ -47,6 +48,7 @@ export function createOrdersFeature(ctx) {
     pad2,
     renderCalendarView,
     renderDashboardActivityCalendar,
+    roleLevel,
     showPortalErrorNotice,
     showTransientNotice,
     todayYmd,
@@ -104,6 +106,7 @@ export function createOrdersFeature(ctx) {
   let ordersServiceBlocksScrollCleanup = null
   let ordersEditorSummaryRefreshTimer = 0
   let ordersEditorWizardRefreshTimer = 0
+  let ordersWorkerResourcesLoadPromise = null
 
   function ordersDateTimeFromTimeline(dayKey = '', timeValue = '') {
     const day = String(dayKey ?? '').trim()
@@ -198,9 +201,24 @@ export function createOrdersFeature(ctx) {
     const timestamp = iso ? new Date(iso).getTime() : NaN
     return Number.isFinite(timestamp) ? timestamp : null
   }
+
+  function ordersCurrentUserCanDeleteHistoricalOrders() {
+    const role = appState.session?.role
+    if (typeof roleLevel === 'function' && roleLevel(role) >= 3) {
+      return true
+    }
+    const normalized = normalizeSearchText(role)
+    return normalized === 'admin' || normalized === 'administrator' || normalized === 'owner' || normalized === 'superadmin'
+  }
   
   function ordersTimelineOrderCanBeDeleted(order = {}) {
-    if (!order || order.completed || order.isDraft) {
+    if (!order || order.isDraft) {
+      return false
+    }
+    if (ordersCurrentUserCanDeleteHistoricalOrders()) {
+      return true
+    }
+    if (order.completed) {
       return false
     }
     const startTs = ordersTimelineOrderStartTimestamp(order)
@@ -213,6 +231,17 @@ export function createOrdersFeature(ctx) {
   
   function ordersConfirmTimelineOrderDelete(order = {}) {
     const label = ordersTimelineOrderDeleteLabel(order)
+    if (ordersCurrentUserCanDeleteHistoricalOrders()) {
+      return window.confirm(
+        [
+          `Czy na pewno chcesz usun\u0105\u0107 zlecenie: ${label}?`,
+          '',
+          'Ta operacja jest nieodwracalna.',
+          '',
+          'Jako administrator mo\u017cesz usun\u0105\u0107 tak\u017ce zlecenie historyczne, rozpocz\u0119te albo aktualnie realizowane.',
+        ].join('\n'),
+      )
+    }
     return window.confirm(
       [
         `Czy na pewno chcesz usunąć zlecenie: ${label}?`,
@@ -1284,10 +1313,8 @@ export function createOrdersFeature(ctx) {
   }
 
   function ordersAvailableAccessWeekdays(order = {}) {
-    const selected = ordersRepeatWeekdaysFromOrder(order)
-      .map(ordersNormalizeWeekday)
-      .filter((weekday, index, list) => weekday !== null && list.indexOf(weekday) === index)
-    return selected.length ? selected : [...ORDERS_ALL_REPEAT_WEEKDAYS]
+    void order
+    return [...ORDERS_ALL_REPEAT_WEEKDAYS]
   }
 
   function ordersDefaultServiceBlockWeekdays(order = {}) {
@@ -1414,17 +1441,142 @@ export function createOrdersFeature(ctx) {
     }
   }
 
-  function ordersServiceBlockSlots(block = {}, resources = calendarTimelineResources(), order = {}) {
-    const directSlots = Array.isArray(block?.slots) ? block.slots : []
-    if (directSlots.length) {
-      return directSlots.map((slot, index) => ordersNormalizeServiceSlot(slot, block, resources, index))
+  function ordersServiceBlockAllocationSource(block = {}, order = {}) {
+    const orderAllocations = Array.isArray(order?.workAllocations) && order.workAllocations.length
+      ? order.workAllocations
+      : Array.isArray(order?.workerAllocations) && order.workerAllocations.length
+        ? order.workerAllocations
+        : []
+    const blockId = String(block?.id ?? block?.serviceBlockId ?? block?.teamId ?? '').trim()
+    const blockKind = String(block?.kind ?? block?.serviceBlockKind ?? '').trim()
+    const matchesBlock = (allocation = {}) => {
+      const allocationBlockId = String(allocation?.serviceBlockId ?? allocation?.teamId ?? '').trim()
+      const allocationBlockKind = String(allocation?.serviceBlockKind ?? '').trim()
+      return Boolean(
+        (blockId && allocationBlockId && allocationBlockId === blockId) ||
+          (blockKind && allocationBlockKind && allocationBlockKind === blockKind),
+      )
     }
 
-    const allocationSource = Array.isArray(block?.workAllocations) && block.workAllocations.length
+    const matchedOrderAllocations = orderAllocations.filter(matchesBlock)
+    if (matchedOrderAllocations.length) {
+      return matchedOrderAllocations
+    }
+
+    const orderBlocks = Array.isArray(order?.serviceBlocks) ? order.serviceBlocks : []
+    if (orderAllocations.length && orderBlocks.length <= 1) {
+      return orderAllocations
+    }
+
+    return Array.isArray(block?.workAllocations) && block.workAllocations.length
       ? block.workAllocations
       : Array.isArray(block?.workerAllocations) && block.workerAllocations.length
         ? block.workerAllocations
         : []
+  }
+
+  function ordersServiceSlotKeyCandidates(slot = {}, block = {}, index = 0) {
+    const slotId = String(slot?.slotId ?? slot?.id ?? `${ORDERS_SERVICE_SLOT_PREFIX}-${index + 1}`).trim()
+    const blockId = String(block?.id ?? '').trim()
+    const blockKind = String(block?.kind ?? '').trim()
+    return [
+      slot?.key,
+      slotId,
+      blockId && slotId ? `${ORDERS_SERVICE_SLOT_PREFIX}:${blockId}:${slotId}` : '',
+      blockKind && slotId ? `${ORDERS_SERVICE_SLOT_PREFIX}:${blockKind}:${slotId}` : '',
+    ].map((value) => String(value ?? '').trim()).filter(Boolean)
+  }
+
+  function ordersServiceSlotMatchesAllocation(slot = {}, allocation = {}, block = {}, slotIndex = 0) {
+    const allocationKeys = [
+      allocation?.key,
+      allocation?.slotId,
+      allocation?.workSlotId,
+      allocation?.id,
+    ].map((value) => String(value ?? '').trim()).filter(Boolean)
+    const slotKeys = ordersServiceSlotKeyCandidates(slot, block, slotIndex)
+    if (allocationKeys.some((key) => slotKeys.includes(key))) {
+      return true
+    }
+
+    const allocationIndex = Number(allocation?.index ?? allocation?.slotIndex)
+    return Number.isInteger(allocationIndex) && allocationIndex === slotIndex
+  }
+
+  function ordersServiceSlotWithAllocation(slot = {}, allocation = {}, block = {}, resources = calendarTimelineResources(), index = 0) {
+    const allocationRow = Number(allocation?.row ?? allocation?.rowIndex)
+    const rowIsWorker = Number.isInteger(allocationRow) && resources[allocationRow]?.type === 'worker'
+    const allocationType = String(allocation?.type ?? '').trim().toLowerCase()
+    const hasWorker = allocationType === 'worker' || (
+      rowIsWorker &&
+      allocationType !== 'buffer' &&
+      allocationType !== 'bufor' &&
+      allocationType !== 'unassigned'
+    )
+    const slotId = String(slot?.slotId ?? slot?.id ?? allocation?.slotId ?? `${ORDERS_SERVICE_SLOT_PREFIX}-${index + 1}`).trim()
+    const label = String(
+      hasWorker
+        ? allocation?.label ?? allocation?.name ?? slot?.label ?? slot?.name ?? ''
+        : slot?.label ?? slot?.name ?? allocation?.label ?? allocation?.name ?? '',
+    ).trim()
+    return {
+      ...slot,
+      id: slot?.id || slotId,
+      slotId,
+      key: String(allocation?.key ?? slot?.key ?? '').trim(),
+      row: Number.isInteger(allocationRow) ? allocationRow : slot?.row,
+      type: hasWorker ? 'worker' : 'unassigned',
+      label,
+      name: String(allocation?.name ?? label ?? slot?.name ?? '').trim(),
+      workerId: hasWorker ? String(allocation?.workerId ?? slot?.workerId ?? '').trim() : '',
+      workerLogin: hasWorker ? String(allocation?.workerLogin ?? slot?.workerLogin ?? '').trim() : '',
+      workerKey: hasWorker ? String(allocation?.workerKey ?? slot?.workerKey ?? '').trim() : '',
+      minutes: allocation?.minutes ?? allocation?.workMinutes ?? slot?.minutes,
+      dateYmd: slot?.dateYmd ?? slot?.planDateYmd ?? allocation?.dateYmd ?? allocation?.planDateYmd ?? allocation?.startDateYmd,
+      planDateYmd: slot?.planDateYmd ?? slot?.dateYmd ?? allocation?.planDateYmd ?? allocation?.dateYmd,
+      startDateYmd: slot?.startDateYmd ?? slot?.dateYmd ?? allocation?.startDateYmd ?? allocation?.dateYmd,
+      endDateYmd: slot?.endDateYmd ?? slot?.planEndDateYmd ?? allocation?.endDateYmd ?? allocation?.planEndDateYmd,
+      planEndDateYmd: slot?.planEndDateYmd ?? slot?.endDateYmd ?? allocation?.planEndDateYmd ?? allocation?.endDateYmd,
+      startTime: slot?.startTime ?? slot?.planStartTime ?? allocation?.startTime ?? allocation?.planStartTime,
+      endTime: slot?.endTime ?? slot?.planEndTime ?? allocation?.endTime ?? allocation?.planEndTime,
+      planStartTime: slot?.planStartTime ?? slot?.startTime ?? allocation?.planStartTime ?? allocation?.startTime,
+      planEndTime: slot?.planEndTime ?? slot?.endTime ?? allocation?.planEndTime ?? allocation?.endTime,
+    }
+  }
+
+  function ordersServiceSlotsWithAllocations(slots = [], allocations = [], block = {}, resources = calendarTimelineResources()) {
+    const sourceSlots = Array.isArray(slots) ? slots : []
+    const sourceAllocations = Array.isArray(allocations) ? allocations.filter(Boolean) : []
+    if (!sourceSlots.length || !sourceAllocations.length) {
+      return sourceSlots
+    }
+    const used = new Set()
+    return sourceSlots.map((slot, index) => {
+      let allocationIndex = sourceAllocations.findIndex((allocation, candidateIndex) =>
+        !used.has(candidateIndex) && ordersServiceSlotMatchesAllocation(slot, allocation, block, index),
+      )
+      if (allocationIndex < 0 && sourceAllocations.length === sourceSlots.length && !used.has(index)) {
+        allocationIndex = index
+      }
+      if (allocationIndex < 0 && sourceAllocations.length === 1 && sourceSlots.length === 1) {
+        allocationIndex = 0
+      }
+      if (allocationIndex < 0) {
+        return slot
+      }
+      used.add(allocationIndex)
+      return ordersServiceSlotWithAllocation(slot, sourceAllocations[allocationIndex], block, resources, index)
+    })
+  }
+
+  function ordersServiceBlockSlots(block = {}, resources = calendarTimelineResources(), order = {}) {
+    const directSlots = Array.isArray(block?.slots) ? block.slots : []
+    const allocationSource = ordersServiceBlockAllocationSource(block, order)
+    if (directSlots.length) {
+      return ordersServiceSlotsWithAllocations(directSlots, allocationSource, block, resources)
+        .map((slot, index) => ordersNormalizeServiceSlot(slot, block, resources, index))
+    }
+
     if (allocationSource.length) {
       return allocationSource.map((slot, index) => ordersNormalizeServiceSlot(slot, block, resources, index))
     }
@@ -1507,10 +1659,9 @@ export function createOrdersFeature(ctx) {
       : scheduleMode === 'repeat'
         ? ordersDefaultServiceBlockWeekdays(order)
         : [ordersWeekdayFromDateKey(dateYmd)]
-    const availableWeekdays = ordersAvailableAccessWeekdays(order)
     const weekdays = weekdaysSource
       .map(ordersNormalizeWeekday)
-      .filter((weekday, itemIndex, list) => weekday !== null && list.indexOf(weekday) === itemIndex && (scheduleMode !== 'repeat' || !availableWeekdays.length || availableWeekdays.includes(weekday)))
+      .filter((weekday, itemIndex, list) => weekday !== null && list.indexOf(weekday) === itemIndex)
     const startTime = ordersNormalizeTimeField(block?.startTime ?? block?.accessStartTime, order.startTime || '08:00')
     const endTime = ordersNormalizeTimeField(block?.endTime ?? block?.accessEndTime, order.endTime || ordersDefaultEndTime(startTime))
     const blockBase = { ...block, id, kind, label, startTime, endTime, scheduleMode, dateYmd }
@@ -1583,11 +1734,12 @@ export function createOrdersFeature(ctx) {
   }
 
   function ordersStoreServiceBlocks(order = {}, blocks = []) {
+    const normalizationOrder = { ...order, workAllocations: [], workerAllocations: [] }
     const safe = (Array.isArray(blocks) ? blocks : [])
-      .map((block, index) => ordersNormalizeServiceBlock({ ...block, sortIndex: index, orderIndex: index }, order, index))
+      .map((block, index) => ordersNormalizeServiceBlock({ ...block, sortIndex: index, orderIndex: index }, normalizationOrder, index))
       .filter((block) => ordersServiceBlockKindIsValid(block.kind))
     const hasMain = safe.some((block) => block.kind === 'main')
-    const finalBlocks = (hasMain ? safe : [ordersNormalizeServiceBlock({ kind: 'main', label: 'Pierwsza zmiana' }, order, 0), ...safe])
+    const finalBlocks = (hasMain ? safe : [ordersNormalizeServiceBlock({ kind: 'main', label: 'Pierwsza zmiana' }, normalizationOrder, 0), ...safe])
       .sort((left, right) => ordersServiceBlockSortIndex(left) - ordersServiceBlockSortIndex(right))
       .map((block, index) => ({ ...block, sortIndex: index, orderIndex: index }))
     const allAllocations = finalBlocks.flatMap((block) => Array.isArray(block.workAllocations) ? block.workAllocations : [])
@@ -1695,6 +1847,7 @@ export function createOrdersFeature(ctx) {
     if (!cards.length) {
       return []
     }
+    const controlOrder = { ...order, workAllocations: [], workerAllocations: [] }
     return cards
       .map((card, index) => {
         const kind = String(card.getAttribute('data-orders-service-block') ?? '').trim()
@@ -1730,7 +1883,7 @@ export function createOrdersFeature(ctx) {
             return {
               id: slotId,
               slotId,
-              label: slotLabel instanceof HTMLInputElement ? slotLabel.value : `Osoba ${slotIndex + 1}`,
+              label: ordersReadServiceSlotLabel(slotLabel, slotIndex),
               row: Number.isInteger(row) ? row : ordersServiceBlockBufferRow(),
               type: Number.isInteger(row) ? 'worker' : 'unassigned',
               workerId: Number.isInteger(row) ? assignment.workerId || '' : '',
@@ -1755,7 +1908,7 @@ export function createOrdersFeature(ctx) {
             requiredPeople: slots.length || 1,
             slots,
           },
-          order,
+          controlOrder,
           index,
         )
       })
@@ -1840,19 +1993,101 @@ export function createOrdersFeature(ctx) {
     }).join('')
   }
 
+  function ordersAssignableWorkerResourceOptions(resources = calendarTimelineResources()) {
+    const sourceResources = Array.isArray(resources) ? resources : []
+    return sourceResources
+      .map((resource, row) => ({
+        resource,
+        row,
+        label: String(resource?.name || `Pracownik ${row + 1}`).trim(),
+      }))
+      .filter(({ resource, row }) => resource?.type === 'worker' && !calendarTimelineRowAllowsOverlap(row, sourceResources))
+      .sort((left, right) =>
+        left.label.localeCompare(right.label, 'pl', { sensitivity: 'base', numeric: true }) || left.row - right.row,
+      )
+  }
+
   function ordersServiceSlotWorkerOptionsHtml(slot = {}, resources = calendarTimelineResources(), unavailableRows = new Set()) {
     const selectedRow = slot?.type === 'worker' ? Number(slot.row) : null
     return [
       `<option value=""${Number.isInteger(selectedRow) ? '' : ' selected'}>Do obsadzenia</option>`,
-      ...resources
-        .map((resource, row) => ({ resource, row }))
-        .filter(({ resource, row }) => resource?.type === 'worker' && !calendarTimelineRowAllowsOverlap(row, resources))
-        .map(({ resource, row }) => {
-          const disabled = unavailableRows.has(row) && selectedRow !== row
-          const label = `${resource.name || `Pracownik ${row + 1}`}${disabled ? ' - już wybrany' : ''}`
-          return `<option value="${row}"${selectedRow === row ? ' selected' : ''}${disabled ? ' disabled' : ''}>${escapeHtml(label)}</option>`
-        }),
+      ...ordersAssignableWorkerResourceOptions(resources).map(({ row, label }) => {
+        const disabled = unavailableRows.has(row) && selectedRow !== row
+        const optionLabel = `${label}${disabled ? ' - ju\u017c wybrany' : ''}`
+        return `<option value="${row}"${selectedRow === row ? ' selected' : ''}${disabled ? ' disabled' : ''}>${escapeHtml(optionLabel)}</option>`
+      }),
     ].join('')
+  }
+
+  function ordersServiceSlotPersonOptionsHtml(slot = {}, resources = calendarTimelineResources(), unavailableRows = new Set(), index = 0) {
+    const selectedRow = slot?.type === 'worker' ? Number(slot.row) : null
+    const currentLabel = String(slot?.label ?? '').trim()
+    const selectedValue = Number.isInteger(selectedRow) ? `row:${selectedRow}` : 'buffer'
+    const workerLabels = new Set()
+    const workerOptions = ordersAssignableWorkerResourceOptions(resources)
+      .map(({ row, label }) => {
+        workerLabels.add(normalizeSearchText(label))
+        const disabled = unavailableRows.has(row) && selectedRow !== row
+        return `<option value="row:${row}"${selectedValue === `row:${row}` ? ' selected' : ''}${disabled ? ' disabled' : ''}>${escapeHtml(label)}${disabled ? ' - ju\u017c wybrany' : ''}</option>`
+      })
+    const isCustomLabel =
+      currentLabel &&
+      normalizeSearchText(currentLabel) !== normalizeSearchText('BUFOR') &&
+      !workerLabels.has(normalizeSearchText(currentLabel)) &&
+      !/^osoba\s+\d+/i.test(currentLabel)
+    return [
+      `<option value="buffer"${selectedValue === 'buffer' && !isCustomLabel ? ' selected' : ''}>BUFOR</option>`,
+      ...workerOptions,
+      isCustomLabel ? `<option value="custom"${selectedValue === 'buffer' ? ' selected' : ''}>${escapeHtml(currentLabel)}</option>` : '',
+    ].join('')
+  }
+
+  function ordersReadServiceSlotLabel(labelControl, slotIndex = 0) {
+    if (labelControl instanceof HTMLSelectElement) {
+      const value = String(labelControl.value ?? '').trim()
+      if (value === 'buffer' || value === '') {
+        return 'BUFOR'
+      }
+      const selectedText = String(labelControl.selectedOptions?.[0]?.textContent ?? '')
+        .replace(/\s+-\s+już wybrany\s*$/i, '')
+        .trim()
+      return selectedText || `Osoba ${slotIndex + 1}`
+    }
+    if (labelControl instanceof HTMLInputElement) {
+      return labelControl.value
+    }
+    return `Osoba ${slotIndex + 1}`
+  }
+
+  function ordersApplyServiceSlotPersonSelection(select) {
+    if (!(select instanceof HTMLSelectElement) || !select.hasAttribute('data-orders-service-slot-label')) {
+      return false
+    }
+    const slotNode = select.closest('[data-orders-service-slot]')
+    const workerSelect = slotNode?.querySelector('[data-orders-service-slot-worker]')
+    if (!(workerSelect instanceof HTMLSelectElement)) {
+      return false
+    }
+    const value = String(select.value ?? '').trim()
+    workerSelect.value = value.startsWith('row:') ? value.slice(4) : ''
+    return true
+  }
+
+  function ordersSyncServiceSlotPersonLabelFromWorker(select) {
+    if (!(select instanceof HTMLSelectElement) || !select.hasAttribute('data-orders-service-slot-worker')) {
+      return false
+    }
+    const slotNode = select.closest('[data-orders-service-slot]')
+    const labelSelect = slotNode?.querySelector('[data-orders-service-slot-label]')
+    if (!(labelSelect instanceof HTMLSelectElement)) {
+      return false
+    }
+    const nextValue = select.value === '' ? 'buffer' : `row:${select.value}`
+    if ([...labelSelect.options].some((option) => option.value === nextValue)) {
+      labelSelect.value = nextValue
+      return true
+    }
+    return false
   }
 
   function ordersRejectDuplicateServiceSlotWorker(select) {
@@ -1874,6 +2109,7 @@ export function createOrdersFeature(ctx) {
     }
     const resource = calendarTimelineResources()[row]
     select.value = ''
+    ordersSyncServiceSlotPersonLabelFromWorker(select)
     showTransientNotice(`${resource?.name || 'Ten pracownik'} jest już przypisany w tej zmianie. Wybierz inną osobę.`, 'error')
     return true
   }
@@ -1924,7 +2160,7 @@ export function createOrdersFeature(ctx) {
           </div>
           <label class="orders-field orders-kanban-slot-name">
             <span>Opis / rola osoby</span>
-            <input type="text" value="${escapeHtml(slotLabel)}" data-orders-service-slot-label />
+            <select data-orders-service-slot-label>${ordersServiceSlotPersonOptionsHtml(slot, resources, unavailableRows, index)}</select>
           </label>
           <div class="orders-kanban-slot-controls">
             <label class="orders-field">
@@ -1969,19 +2205,19 @@ export function createOrdersFeature(ctx) {
             <span class="orders-kanban-column-dot" aria-hidden="true"></span>
             <input type="text" value="${escapeHtml(block.label)}" data-orders-service-label aria-label="Nazwa zmiany" placeholder="Nazwa zmiany" />
           </div>
-          <span class="orders-kanban-column-count" title="${escapeHtml(slotCountLabel)}">${escapeHtml(String(slots.length))}</span>
+          <span class="orders-kanban-column-count" title="${escapeHtml(slotCountLabel)}">${escapeHtml(String(slots.length))} os.</span>
           <span class="orders-kanban-column-drag" role="button" tabindex="0" draggable="true" data-orders-service-drag-handle="${escapeHtml(block.kind)}" aria-label="Przeciągnij zmianę" title="Przeciągnij, aby zmienić kolejność">&#8596;</span>
           <button type="button" class="orders-kanban-column-menu" data-orders-service-remove="${escapeHtml(block.kind)}" ${count <= 1 || block.kind === 'main' ? 'disabled' : ''} aria-label="Usuń zmianę">&#8942;</button>
         </div>
-        <div class="orders-kanban-column-meta">
-          <label class="orders-field">
+        <div class="orders-kanban-column-meta orders-shift-form">
+          <label class="orders-field orders-shift-mode">
             <span>Tryb</span>
-            <select data-orders-service-mode${parentIsRepeat ? '' : ' disabled'}>
+            <select data-orders-service-mode>
               <option value="once"${block.scheduleMode === 'once' ? ' selected' : ''}>Jednorazowo</option>
               <option value="repeat"${block.scheduleMode === 'once' ? '' : ' selected'}>Cyklicznie co tydzień</option>
             </select>
           </label>
-          <div class="orders-kanban-time-grid">
+          <div class="orders-kanban-time-grid orders-shift-time-grid${isRepeat ? ' is-repeat' : ' is-once'}">
             <label class="orders-field">
               <span>START</span>
               <input type="time" value="${escapeHtml(block.startTime)}" data-orders-service-start />
@@ -2002,7 +2238,12 @@ export function createOrdersFeature(ctx) {
             `}
           </div>
         </div>
-        ${isRepeat ? `<div class="orders-service-weekdays">${ordersServiceBlockWeekdaysHtml(block, accessWindows)}</div>` : ''}
+        ${isRepeat ? `
+          <div class="orders-service-weekdays-wrap">
+            <span class="orders-shift-section-label">Dni pracy</span>
+            <div class="orders-service-weekdays">${ordersServiceBlockWeekdaysHtml(block, accessWindows)}</div>
+          </div>
+        ` : ''}
         <div class="orders-kanban-people-summary">
           <strong>Potrzeba ${escapeHtml(peopleLabel)}</strong>
           <span>${escapeHtml(assignedPeopleLabel)} obsadzone · ${escapeHtml(bufferPeopleLabel)} do BUFORU</span>
@@ -2289,6 +2530,37 @@ export function createOrdersFeature(ctx) {
     if (hours instanceof HTMLInputElement) {
       hours.value = ordersHoursInputValue(minutes)
     }
+  }
+
+  function ordersHasAssignableWorkerResources(resources = calendarTimelineResources()) {
+    return Array.isArray(resources) && resources.some((resource, row) => resource?.type === 'worker' && !calendarTimelineRowAllowsOverlap(row, resources))
+  }
+
+  async function ordersEnsureWorkerResourcesForEditor(order = ordersFindTimelineOrder(appState.ordersEditingId) || {}) {
+    if (ordersHasAssignableWorkerResources() || typeof fetchWorkersForCurrentSession !== 'function') {
+      return false
+    }
+    if (!ordersWorkerResourcesLoadPromise) {
+      ordersWorkerResourcesLoadPromise = Promise.resolve(fetchWorkersForCurrentSession(false))
+        .catch((error) => {
+          console.warn('[orders] Nie udalo sie pobrac listy pracownikow dla obsady zlecenia.', error)
+          return []
+        })
+        .finally(() => {
+          ordersWorkerResourcesLoadPromise = null
+        })
+    }
+    await ordersWorkerResourcesLoadPromise
+    if (!ordersHasAssignableWorkerResources()) {
+      return false
+    }
+    const editor = document.getElementById('ordersEditorPanel')
+    const staffingPanel = editor?.querySelector('[data-orders-step-panel="staffing"]')
+    if (editor && (!staffingPanel || staffingPanel.hidden === false)) {
+      ordersRenderWorkAllocationControls(order, { forceEven: true, preferStored: false })
+      ordersRenderEditorWizard(order)
+    }
+    return true
   }
   
   function ordersRenderWorkAllocationControls(order = {}, { forceEven = false, preferStored = false } = {}) {
@@ -5991,6 +6263,9 @@ export function createOrdersFeature(ctx) {
       ordersEnsureEditorDescription(order)
     }
     ordersRenderEditorWizard(order)
+    if (nextStep === 'staffing') {
+      void ordersEnsureWorkerResourcesForEditor(order)
+    }
     if (options.focus) {
       ordersFocusFirstEditorStepField(nextStep)
     }
@@ -7776,7 +8051,7 @@ export function createOrdersFeature(ctx) {
     const nextOrders = nextOrder.recurrenceOverride
       ? calendarTimelineOrdersWithSingleOccurrenceOverride(sourceOrders, nextOrder)
       : sourceOrders.map((item) => (item.id === nextOrder.id ? nextOrder : item))
-    if (!nextOrder.recurrenceOverride && !isIndividualClient) {
+    if (!nextOrder.recurrenceOverride && !isIndividualClient && (objectPlanTasks.length || supplies.length)) {
       try {
         await ordersSyncObjectDataToClient(nextOrder, selectedClient, supplies, objectPlanTasks)
       } catch (error) {
@@ -8943,16 +9218,33 @@ export function createOrdersFeature(ctx) {
         event.target?.hasAttribute?.('data-orders-service-start') ||
         event.target?.hasAttribute?.('data-orders-service-end') ||
         event.target?.hasAttribute?.('data-orders-service-weekday') ||
+        event.target?.hasAttribute?.('data-orders-service-slot-label') ||
         event.target?.hasAttribute?.('data-orders-service-slot-worker') ||
         event.target?.hasAttribute?.('data-orders-service-slot-hours')
       ) {
         const order = ordersFindTimelineOrder(appState.ordersEditingId)
         if (order) {
+          if (event.target?.hasAttribute?.('data-orders-service-mode')) {
+            const nextServiceMode = event.target?.value === 'repeat' ? 'repeat' : 'once'
+            const allServiceModesOnce = [...document.querySelectorAll('#ordersWorkAllocationRows [data-orders-service-mode]')]
+              .every((node) => node instanceof HTMLSelectElement && node.value === 'once')
+            const nextOrderMode = nextServiceMode === 'repeat' || !allServiceModesOnce ? 'repeat' : 'once'
+            if (ordersScheduleModeForOrder(order) !== nextOrderMode) {
+              ordersApplyScheduleModeDateDefaults(order, nextOrderMode)
+              order.scheduleMode = nextOrderMode
+              order.type = nextOrderMode === 'repeat' ? 'cyclic' : String(order.type ?? '').trim() === 'cyclic' ? 'individual' : order.type
+              ordersSetScheduleModeValue(nextOrderMode)
+            }
+          }
+          if (event.target?.hasAttribute?.('data-orders-service-slot-label')) {
+            ordersApplyServiceSlotPersonSelection(event.target)
+          }
           if (event.target?.hasAttribute?.('data-orders-service-slot-worker')) {
             ordersRejectDuplicateServiceSlotWorker(event.target)
+            ordersSyncServiceSlotPersonLabelFromWorker(event.target)
           }
           ordersSyncServiceBlockDraftFromControls(order)
-          ordersRenderWorkAllocationControls(order, { forceEven: true, preferStored: true })
+          ordersRenderWorkAllocationControls(order, { forceEven: true, preferStored: false })
           ordersRenderSchedulePreview(order)
           ordersRenderEditorWizard(order)
         }

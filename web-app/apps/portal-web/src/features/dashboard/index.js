@@ -121,6 +121,7 @@ export function createDashboardFeature(ctx) {
     openEventEditor,
     openEventHistoryFromRow,
     ordersListSourceOrders,
+    ordersSyncRemoteTimelineOrders,
     ordersNormalizeOrderRows,
     ordersTimelineAddressLabel,
     ordersTimelineClientLabel,
@@ -791,9 +792,74 @@ export function createDashboardFeature(ctx) {
     return timestamps.length ? Math.max(...timestamps) : 0
   }
 
+  function dashboardActivityWorkerMatchKeys(row = {}) {
+    const keys = new Set()
+    dashboardWorkerIdIdentityKeys(dashboardResolveWorkerIdValue(row)).forEach((key) => keys.add(key))
+
+    const addNameKeys = (value = '') => {
+      const normalized = normalizeSearchText(value).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+      if (!normalized) {
+        return
+      }
+      keys.add(`n:${normalized}`)
+
+      const parts = normalized.split(' ').filter(Boolean)
+      if (parts.length > 1) {
+        keys.add(`n:${parts.slice().reverse().join(' ')}`)
+        const first = parts[0]
+        const last = parts[parts.length - 1]
+        if (first && last) {
+          keys.add(`sig:${first.charAt(0)}|${last}`)
+          keys.add(`sig:${last.charAt(0)}|${first}`)
+        }
+      }
+    }
+
+    const addLoginKeys = (value = '') => {
+      const normalized = normalizeSearchText(value)
+      if (!normalized) {
+        return
+      }
+      keys.add(`l:${normalized}`)
+      const localPart = normalized.split('@')[0]?.trim()
+      if (localPart) {
+        keys.add(`l:${localPart}`)
+      }
+    }
+
+    const login = normalizeSearchText(
+      row?.workerLogin ??
+        row?.login ??
+        row?.worker?.workerLogin ??
+        row?.worker?.login ??
+        '',
+    )
+    const name = normalizeSearchText(
+      row?.workerName ??
+        row?.name ??
+        row?.worker?.workerName ??
+        row?.worker?.name ??
+        '',
+    )
+
+    addLoginKeys(login)
+    addNameKeys(name)
+
+    return keys
+  }
+
+  function dashboardActivityRowsShareWorker(row = {}, sourceRow = {}) {
+    const rowKeys = dashboardActivityWorkerMatchKeys(row)
+    const sourceKeys = dashboardActivityWorkerMatchKeys(sourceRow)
+    if (!rowKeys.size || !sourceKeys.size) {
+      return false
+    }
+    return [...rowKeys].some((key) => sourceKeys.has(key))
+  }
+
   function dashboardActivityLatestQrCompanyLabelForRow(row = {}, dayKey = '', sourceRows = []) {
-    const workerId = dashboardResolveWorkerIdValue(row)
-    if (!workerId) {
+    const rowKeys = dashboardActivityWorkerMatchKeys(row)
+    if (!rowKeys.size) {
       return ''
     }
 
@@ -805,8 +871,7 @@ export function createDashboardFeature(ctx) {
 
     const matches = (Array.isArray(sourceRows) ? sourceRows : [])
       .map((sourceRow) => {
-        const sourceWorkerId = dashboardResolveWorkerIdValue(sourceRow)
-        if (!sourceWorkerId || sourceWorkerId !== workerId) {
+        if (!dashboardActivityRowsShareWorker(row, sourceRow)) {
           return null
         }
 
@@ -820,9 +885,11 @@ export function createDashboardFeature(ctx) {
           return null
         }
 
+        const rawQrLabel = qrCodes.find(Boolean) || ''
         const label =
           dashboardActivityCleanCompanyLabel(dashboardActivityCompanyLabel(sourceRow)) ||
           qrCodes.map((code) => dashboardActivityResolveClientByQr(code)).find(Boolean) ||
+          rawQrLabel ||
           ''
         if (!label) {
           return null
@@ -1142,10 +1209,13 @@ export function createDashboardFeature(ctx) {
         const rowKeys = dashboardResolveTodayRowAliasKeys(row)
         const linkedWorker = dashboardFindWorkerByAliasKeys(rowKeys)
         const identity = dashboardActivityWorkerIdentity(row, linkedWorker)
-        const companyLabel =
-          dashboardActivityCleanCompanyLabel(dashboardActivityCompanyLabel(row)) ||
-          dashboardActivityLatestQrCompanyLabelForRow(row, dayKey, sourceRows) ||
-          '-'
+        const latestQrCompanyLabel =
+          dashboardActivityLatestQrCompanyLabelForRow(linkedWorker || row, dayKey, sourceRows) ||
+          dashboardActivityLatestQrCompanyLabelForRow(row, dayKey, sourceRows)
+        const rowCompanyLabel = dashboardActivityCleanCompanyLabel(dashboardActivityCompanyLabel(row))
+        const companyLabel = isRunning
+          ? latestQrCompanyLabel || rowCompanyLabel || '-'
+          : rowCompanyLabel || latestQrCompanyLabel || '-'
         const elapsedSeconds = Math.max(0, Math.floor((stopTs - startTs) / 1000))
         const durationLabel = isRunning ? durationSecondsToHm(elapsedSeconds) : dashboardDurationLabelToHm(row?.duration, durationSecondsToHm(elapsedSeconds))
         const eventId = String(row?.eventId ?? row?.id ?? '').trim()
@@ -5188,15 +5258,16 @@ export function createDashboardFeature(ctx) {
 
   async function dashboardLoadFastRows(orgId, options = {}) {
     const rangeTo = todayYmd()
+    const eventsRangeTo = calendarAddDays(rangeTo, 1)
     const systemIssueEventsFrom = dashboardSystemIssueRangeFrom()
     const fastEventsFrom = daysAgoYmd(DASHBOARD_COMMENT_SYNC_LOOKBACK_DAYS)
     const forceRefresh = options.forceRefresh === true
-    const [todayActive, systemIssueEvents, recentEvents, todayWorkdays, openHistoricalWorkdays] = await Promise.all([
+    const [todayActive, systemIssueEvents, recentEvents, todayEvents, todayWorkdays, openHistoricalWorkdays] = await Promise.all([
       getTodayActiveWorkers(orgId, { forceRefresh }),
       getWorkdays(orgId, {
         source: 'events',
         fromIso: systemIssueEventsFrom,
-        toIso: rangeTo,
+        toIso: eventsRangeTo,
         page: 1,
         pageSize: 12000,
         forceRefresh,
@@ -5204,9 +5275,17 @@ export function createDashboardFeature(ctx) {
       getWorkdays(orgId, {
         source: 'events',
         fromIso: fastEventsFrom,
-        toIso: rangeTo,
+        toIso: eventsRangeTo,
         page: 1,
         pageSize: 5000,
+        forceRefresh,
+      }).catch(() => ({ items: [] })),
+      getWorkdays(orgId, {
+        source: 'events',
+        fromIso: rangeTo,
+        toIso: eventsRangeTo,
+        page: 1,
+        pageSize: 8000,
         forceRefresh,
       }).catch(() => ({ items: [] })),
       getWorkdays(orgId, {
@@ -5220,7 +5299,7 @@ export function createDashboardFeature(ctx) {
       dashboardLoadHistoricalOpenWorkdays(orgId, { forceRefresh }),
     ])
 
-    const todayStartSourceRows = [...(recentEvents.items ?? []), ...(todayWorkdays.items ?? [])]
+    const todayStartSourceRows = [...(todayEvents.items ?? []), ...(todayWorkdays.items ?? [])]
     appState.dashboardScheduleSourceRows = todayStartSourceRows
     appState.dashboardActivityWorkdayRows = Array.isArray(todayWorkdays.items) ? todayWorkdays.items : []
     const todayRows = dashboardApplyFirstQrStartToday(
@@ -5232,6 +5311,22 @@ export function createDashboardFeature(ctx) {
     return { todayRows, recentEvents, systemIssueEvents, todayWorkdays, openHistoricalWorkdays }
   }
 
+  async function dashboardSyncCalendarOrdersForTimeline(options = {}) {
+    if (typeof ordersSyncRemoteTimelineOrders !== 'function') {
+      return ordersListSourceOrders()
+    }
+
+    try {
+      return await ordersSyncRemoteTimelineOrders({
+        render: false,
+        forceRefresh: options.forceRefresh === true,
+      })
+    } catch (error) {
+      console.warn('[portal/dashboard] schedule orders refresh failed', error)
+      return ordersListSourceOrders()
+    }
+  }
+
   async function dashboardRefreshBackgroundData(orgId, options = {}) {
     const activeOrgId = String(appState.session?.orgId ?? '').trim()
     if (!orgId || orgId !== activeOrgId) {
@@ -5241,12 +5336,13 @@ export function createDashboardFeature(ctx) {
     const rangeFrom = dashboardCommentSyncRangeFrom(orgId, { forceFull: options.forceFull === true })
     const systemIssueRangeFrom = dashboardSystemIssueRangeFrom()
     const rangeTo = todayYmd()
+    const eventsRangeTo = calendarAddDays(rangeTo, 1)
     let fetchFailed = false
     const [recentEvents, systemIssueEvents, openHistoricalWorkdays] = await Promise.all([
       getWorkdays(orgId, {
         source: 'events',
         fromIso: rangeFrom,
-        toIso: rangeTo,
+        toIso: eventsRangeTo,
         page: 1,
         pageSize: 12000,
       }).catch((error) => {
@@ -5257,7 +5353,7 @@ export function createDashboardFeature(ctx) {
       getWorkdays(orgId, {
         source: 'events',
         fromIso: systemIssueRangeFrom,
-        toIso: rangeTo,
+        toIso: eventsRangeTo,
         page: 1,
         pageSize: 12000,
         forceRefresh: options.forceRefresh === true,
@@ -5572,9 +5668,14 @@ export function createDashboardFeature(ctx) {
         dashboardBeginLoading()
       }
       try {
-        const { todayRows, recentEvents, systemIssueEvents, openHistoricalWorkdays } = await dashboardLoadFastRows(orgId, {
-          forceRefresh: options.forceRefresh === true,
-        })
+        const [{ todayRows, recentEvents, systemIssueEvents, openHistoricalWorkdays }] = await Promise.all([
+          dashboardLoadFastRows(orgId, {
+            forceRefresh: options.forceRefresh === true,
+          }),
+          dashboardSyncCalendarOrdersForTimeline({
+            forceRefresh: options.forceRefresh === true,
+          }),
+        ])
         const summary = dashboardBuildSummary(
           todayRows,
           systemIssueEvents.items ?? [],

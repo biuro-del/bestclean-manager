@@ -3913,6 +3913,7 @@ async function refreshWorkerAccountTimeAfterWorkdaySave(workerLogin = '') {
 }
 
 async function fetchWorkersForCurrentSession(force = false) {
+  await ensurePortalFeatureReady('workerTime')
   return getWorkerTimeFeature().fetch(force)
 }
 

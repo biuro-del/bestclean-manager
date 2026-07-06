@@ -171,6 +171,7 @@ export function createCalendarFeature(ctx) {
   let calendarTimelineEventsPopupDragState = null
   let calendarRenderRaf = 0
   let calendarTimelineWorkerStateLoadPromise = null
+  let calendarTimelineOrdersRemotePromise = null
   const calendarTimelineEventsPopupRegistry = new Map()
   const calendarTimelineWorkerStateMapCache = { key: '', value: new Map() }
   const calendarTimelineResourcesCache = { key: '', value: [] }
@@ -3189,31 +3190,41 @@ export function createCalendarFeature(ctx) {
   
   async function ordersSyncRemoteTimelineOrders({ render = false } = {}) {
     const orgId = String(appState.session?.orgId ?? '').trim()
-    if (!orgId || appState.calendarTimelineOrdersRemoteLoading) {
+    if (!orgId) {
       return ordersListSourceOrders()
     }
-  
-    appState.calendarTimelineOrdersRemoteLoading = true
-    try {
-      const remoteOrders = await fetchScheduleTasks(orgId)
-      const canonicalOrders = ordersMergeWithPendingLocalOrders(remoteOrders)
-      ordersSaveTimelineOrders(canonicalOrders, { syncRemote: false })
-      appState.calendarTimelineOrdersRemoteLoaded = true
+
+    if (calendarTimelineOrdersRemotePromise) {
+      const syncedOrders = await calendarTimelineOrdersRemotePromise
       if (render) {
-        if (appState.currentRoute === 'dashboard') renderDashboardActivityCalendar(appState.dashboardTodayRows)
-        if (appState.currentRoute === 'calendar') renderCalendarView()
-        if (appState.currentRoute === 'orders') renderOrdersView()
-        if (appState.currentRoute === 'ordersMap') renderOrdersMapView()
+        ordersRenderScheduleOrderViews()
       }
-      return appState.calendarTimelineDemoOrders
-    } catch (error) {
-      appState.calendarTimelineOrdersRemoteLoaded = false
-      console.warn('[portal/schedule-orders] remote load failed', error)
-      showPortalErrorNotice('Nie udało się pobrać zleceń z Firebase', error)
-      return ordersListSourceOrders()
-    } finally {
-      appState.calendarTimelineOrdersRemoteLoading = false
+      return syncedOrders
     }
+
+    appState.calendarTimelineOrdersRemoteLoading = true
+    calendarTimelineOrdersRemotePromise = (async () => {
+      try {
+        const remoteOrders = await fetchScheduleTasks(orgId)
+        const canonicalOrders = ordersMergeWithPendingLocalOrders(remoteOrders)
+        ordersSaveTimelineOrders(canonicalOrders, { syncRemote: false })
+        appState.calendarTimelineOrdersRemoteLoaded = true
+        return appState.calendarTimelineDemoOrders
+      } catch (error) {
+        appState.calendarTimelineOrdersRemoteLoaded = false
+        console.warn('[portal/schedule-orders] remote load failed', error)
+        showPortalErrorNotice('Nie udało się pobrać zleceń z Firebase', error)
+        return ordersListSourceOrders()
+      } finally {
+        appState.calendarTimelineOrdersRemoteLoading = false
+        calendarTimelineOrdersRemotePromise = null
+      }
+    })()
+    const syncedOrders = await calendarTimelineOrdersRemotePromise
+    if (render) {
+      ordersRenderScheduleOrderViews()
+    }
+    return syncedOrders
   }
   
   async function ordersDeleteTimelineOrdersById(orderIds = [], options = {}) {
@@ -6698,7 +6709,10 @@ export function createCalendarFeature(ctx) {
 
   function calendarTimelineOrderWorkAllocations(order = {}) {
     const serviceBlockAllocations = calendarTimelineServiceBlockAllocations(order)
-    return Array.isArray(order.workAllocations) && order.workAllocations.length
+    const hasServiceBlocks = Array.isArray(order?.serviceBlocks) && order.serviceBlocks.length > 0
+    return hasServiceBlocks && serviceBlockAllocations.length
+      ? serviceBlockAllocations
+      : Array.isArray(order.workAllocations) && order.workAllocations.length
       ? order.workAllocations
       : Array.isArray(order.workerAllocations) && order.workerAllocations.length
         ? order.workerAllocations
@@ -8260,12 +8274,16 @@ export function createCalendarFeature(ctx) {
             ? block.workerAllocations
             : []
         if (direct.length) {
+          const blockStart = ordersNormalizeTimeField(block?.startTime ?? block?.planStartTime ?? block?.accessStartTime, '')
+          const blockEnd = ordersNormalizeTimeField(block?.endTime ?? block?.planEndTime ?? block?.accessEndTime, '')
           return direct.map((allocation, index) => ({
             ...allocation,
             serviceBlockId: allocation.serviceBlockId || block.id || `service-${blockIndex + 1}`,
             serviceBlockKind: allocation.serviceBlockKind || block.kind || `team-${blockIndex + 1}`,
             serviceBlockLabel: allocation.serviceBlockLabel || block.label || `Zmiana ${blockIndex + 1}`,
             slotId: allocation.slotId || allocation.id || `slot-${index + 1}`,
+            ...(blockStart ? { startTime: blockStart, planStartTime: blockStart } : {}),
+            ...(blockEnd ? { endTime: blockEnd, planEndTime: blockEnd } : {}),
           }))
         }
         const slots = Array.isArray(block?.slots) ? block.slots : []
@@ -8290,6 +8308,136 @@ export function createCalendarFeature(ctx) {
       .filter(Boolean)
   }
 
+  function calendarTimelineServiceBlockTimingForAllocation(order = {}, allocation = {}) {
+    const serviceBlocks = Array.isArray(order?.serviceBlocks) ? order.serviceBlocks : []
+    if (!serviceBlocks.length || !allocation) {
+      return null
+    }
+    const allocationBlockId = String(allocation?.serviceBlockId ?? allocation?.teamId ?? '').trim()
+    const allocationBlockKind = String(allocation?.serviceBlockKind ?? '').trim()
+    const allocationSlotId = String(allocation?.slotId ?? allocation?.id ?? '').trim()
+    const allocationKey = String(allocation?.key ?? '').trim()
+
+    for (let blockIndex = 0; blockIndex < serviceBlocks.length; blockIndex += 1) {
+      const block = serviceBlocks[blockIndex]
+      const blockId = String(block?.id ?? `service-${blockIndex + 1}`).trim()
+      const blockKind = String(block?.kind ?? `team-${blockIndex + 1}`).trim()
+      const blockAliases = new Set(
+        [blockId, blockKind, block?.teamId, `service-${blockIndex + 1}`, `team-${blockIndex + 1}`]
+          .map((value) => String(value ?? '').trim())
+          .filter(Boolean),
+      )
+      const blockMatches =
+        (!allocationBlockId && !allocationBlockKind) ||
+        (allocationBlockId && blockAliases.has(allocationBlockId)) ||
+        (allocationBlockKind && blockAliases.has(allocationBlockKind))
+      if (!blockMatches) {
+        continue
+      }
+
+      const slotCandidates = [
+        ...(Array.isArray(block?.slots) ? block.slots : []),
+        ...(Array.isArray(block?.workAllocations) ? block.workAllocations : []),
+        ...(Array.isArray(block?.workerAllocations) ? block.workerAllocations : []),
+      ]
+      const matchingSlot = slotCandidates.find((slot, slotIndex) => {
+        const slotId = String(slot?.slotId ?? slot?.id ?? `slot-${slotIndex + 1}`).trim()
+        const slotKey = String(slot?.key ?? '').trim()
+        const generatedKey = `slot:${block?.id || block?.kind || blockIndex + 1}:${slot?.slotId || slot?.id || slotIndex + 1}`
+        return (
+          (allocationSlotId && slotId && allocationSlotId === slotId) ||
+          (allocationKey && (allocationKey === slotKey || allocationKey === generatedKey))
+        )
+      }) || null
+
+      const blockStart = ordersNormalizeTimeField(block?.startTime ?? block?.planStartTime ?? block?.accessStartTime, '')
+      const blockEnd = ordersNormalizeTimeField(block?.endTime ?? block?.planEndTime ?? block?.accessEndTime, '')
+      const slotStart = ordersNormalizeTimeField(matchingSlot?.startTime ?? matchingSlot?.planStartTime, '')
+      const slotEnd = ordersNormalizeTimeField(matchingSlot?.endTime ?? matchingSlot?.planEndTime, '')
+      const dateYmd = ordersNormalizeDateField(
+        matchingSlot?.dateYmd ?? matchingSlot?.planDateYmd ?? block?.dateYmd ?? block?.planDateYmd,
+        '',
+      )
+      const endDateYmd = ordersNormalizeDateField(
+        matchingSlot?.endDateYmd ?? matchingSlot?.planEndDateYmd ?? block?.endDateYmd ?? block?.planEndDateYmd,
+        dateYmd,
+      )
+      const minutes = Math.max(
+        0,
+        Math.round(Number(matchingSlot?.minutes ?? matchingSlot?.workMinutes ?? allocation?.minutes ?? allocation?.workMinutes) || 0),
+      )
+      const startTime = blockStart || slotStart
+      const endTime = blockEnd || slotEnd
+      return {
+        ...(dateYmd ? { dateYmd, planDateYmd: dateYmd, startDateYmd: dateYmd } : {}),
+        ...(endDateYmd ? { endDateYmd, planEndDateYmd: endDateYmd } : {}),
+        ...(startTime ? { startTime, planStartTime: startTime } : {}),
+        ...(endTime ? { endTime, planEndTime: endTime } : {}),
+        ...(minutes > 0 ? { minutes } : {}),
+      }
+    }
+
+    return null
+  }
+
+  function calendarTimelineAllocationStoredRow(allocation = {}) {
+    const row = Number(allocation?.row)
+    return Number.isInteger(row) && row >= 0 ? row : 0
+  }
+
+  function calendarTimelineAllocationKeyLooksLikeSlot(value = '') {
+    const key = normalizeSearchText(value)
+    return (
+      !key ||
+      key === 'buffer' ||
+      key === 'bufor' ||
+      key === 'unassigned' ||
+      key.startsWith('slot') ||
+      key.startsWith('workslot') ||
+      key.startsWith('service-slot') ||
+      key.startsWith('buffer:')
+    )
+  }
+
+  function calendarTimelineAllocationWorkerKey(allocation = {}) {
+    const workerKey = String(allocation?.workerKey ?? '').trim()
+    if (workerKey) {
+      return workerKey
+    }
+    const rawKey = String(allocation?.key ?? '').trim()
+    return calendarTimelineAllocationKeyLooksLikeSlot(rawKey) ? '' : rawKey
+  }
+
+  function calendarTimelineAllocationWorkerAssignment(allocation = {}, row = 0) {
+    const name = String(allocation?.name ?? allocation?.workerName ?? allocation?.label ?? '').trim()
+    return {
+      row,
+      name,
+      label: name,
+      key: calendarTimelineAllocationWorkerKey(allocation),
+      workerId: String(allocation?.workerId ?? '').trim(),
+      workerLogin: String(allocation?.workerLogin ?? allocation?.login ?? '').trim(),
+    }
+  }
+
+  function calendarTimelineResolveAllocationRow(allocation = {}, resources = calendarTimelineResources()) {
+    const fallbackRow = calendarTimelineAllocationStoredRow(allocation)
+    const assignment = calendarTimelineAllocationWorkerAssignment(allocation, fallbackRow)
+    const resolvedRows = ordersNormalizeOrderRows(
+      {
+        row: fallbackRow,
+        assignedRows: [fallbackRow],
+        workerAssignments: [assignment],
+      },
+      resources,
+    )
+    const workerRow = resolvedRows.find((row) => resources[Number(row)]?.type === 'worker')
+    if (Number.isInteger(Number(workerRow))) {
+      return Number(workerRow)
+    }
+    return resources[fallbackRow] ? fallbackRow : 0
+  }
+
   function calendarTimelineVisualOrderSlots(order = {}, resources = calendarTimelineResources()) {
     const serviceBlockAllocations = calendarTimelineServiceBlockAllocations(order)
     const hasServiceBlocksV2 =
@@ -8310,28 +8458,32 @@ export function createCalendarFeature(ctx) {
       }))
     }
   
-    const allocations = Array.isArray(order.workAllocations) && order.workAllocations.length
-      ? order.workAllocations
-      : serviceBlockAllocations.length
-        ? serviceBlockAllocations
+    const allocations = serviceBlockAllocations.length
+      ? serviceBlockAllocations
+      : Array.isArray(order.workAllocations) && order.workAllocations.length
+        ? order.workAllocations
         : ordersWorkAllocationsForSubjects(order, [], Number(order.requiredWorkMinutes) || calendarTimelineOrderDurationMinutes(order), false)
     const startDay = String(order.dateYmd ?? todayYmd()).trim()
     const accessStart = ordersNormalizeTimeField(order.accessStartTime || order.startTime, '08:00')
     const safeAllocations = allocations
       .map((item, index) => {
-        const startTime = ordersNormalizeTimeField(item?.startTime ?? item?.planStartTime, accessStart)
-        const endTime = ordersNormalizeTimeField(item?.endTime ?? item?.planEndTime, '')
-        const dateYmd = ordersNormalizeDateField(item?.dateYmd ?? item?.planDateYmd ?? item?.startDateYmd, startDay)
-        const endDateYmd = ordersNormalizeDateField(item?.endDateYmd ?? item?.planEndDateYmd, dateYmd)
-        const minutes = calendarTimelineAllocationDurationMinutes(order, { ...item, dateYmd, endDateYmd, startTime, endTime }, startTime)
+        const serviceBlockTiming = calendarTimelineServiceBlockTimingForAllocation(order, item)
+        const startTime = ordersNormalizeTimeField(serviceBlockTiming?.startTime ?? item?.startTime ?? item?.planStartTime, accessStart)
+        const endTime = ordersNormalizeTimeField(serviceBlockTiming?.endTime ?? item?.endTime ?? item?.planEndTime, '')
+        const dateYmd = ordersNormalizeDateField(item?.dateYmd ?? item?.planDateYmd ?? item?.startDateYmd ?? serviceBlockTiming?.dateYmd, startDay)
+        const endDateYmd = ordersNormalizeDateField(item?.endDateYmd ?? item?.planEndDateYmd ?? serviceBlockTiming?.endDateYmd, dateYmd)
+        const timedAllocation = { ...item, ...(serviceBlockTiming || {}), dateYmd, endDateYmd, startTime, endTime }
+        const minutes = calendarTimelineAllocationDurationMinutes(order, timedAllocation, startTime)
+        const row = calendarTimelineResolveAllocationRow(item, resources)
+        const assignment = calendarTimelineAllocationWorkerAssignment(item, row)
         return {
           key: String(item?.key ?? `slot:${index + 1}`).trim(),
-          row: Number.isInteger(Number(item?.row)) ? Number(item.row) : 0,
+          row,
           label: String(item?.label ?? '').trim(),
-          name: String(item?.name ?? item?.label ?? '').trim(),
-          workerId: String(item?.workerId ?? '').trim(),
-          workerLogin: String(item?.workerLogin ?? '').trim(),
-          workerKey: String(item?.workerKey ?? '').trim(),
+          name: assignment.name,
+          workerId: assignment.workerId,
+          workerLogin: assignment.workerLogin,
+          workerKey: assignment.key,
           slotId: String(item?.slotId ?? '').trim(),
           teamId: String(item?.teamId ?? '').trim(),
           serviceBlockId: String(item?.serviceBlockId ?? '').trim(),
@@ -8364,7 +8516,7 @@ export function createCalendarFeature(ctx) {
           ? [{
               row: allocation.row,
               name: allocation.name || allocation.label,
-              key: allocation.workerKey || allocation.key,
+              key: allocation.workerKey,
               workerId: allocation.workerId,
               workerLogin: allocation.workerLogin,
             }]
