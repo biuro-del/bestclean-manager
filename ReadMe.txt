@@ -1477,3 +1477,29 @@ Uwagi dla nastepnej osoby:
 - Nie wdrazano tej zmiany na produkcje w ramach tego wpisu.
 - Nie migrowano ani nie usuwano danych z `.local-data`; jesli sa tam testowe lub omylkowe zlecenia, trzeba osobno zdecydowac, czy je przeniesc do `public.task`, czy odrzucic.
 - Przywrocenie poprzedniego zachowania: przywrocic automatyczne `return NODE_ENV !== 'production' && !hasDatabaseConnectionConfig()` w `shouldUseLocalPortalScheduleOrderFileStorage` i `shouldUseLocalPortalTaskFileStorage`, ustawic w `scripts/dev-local.js` `PORTAL_TASKS_MODE` na `local` i usunac obsluge lokalnego payloadu w `scheduleTaskDataConnectService.js`.
+
+Data: 2026-07-06 17:37 +02:00
+Autor: AI Codex
+Dodano:
+- Wdrozenie produkcyjne portalu Best Clean / Cleanzi na App Hosting backend `cleanzi-01` w projekcie `iclean-room`.
+- Commit wdrozeniowy: `d1a65caccd24f3c7e70547c0d823a7317bc476eb` (`portal: harden schedule persistence and calendar flows`).
+- Rollout App Hosting: `build-2026-07-06-002`; Cloud Build: `c17a1cbf-a2bd-4dc1-80fb-b71083ae0161`.
+Zmieniono:
+- Na produkcje wyslano dotychczasowe poprawki portalu dotyczace m.in. zabezpieczenia przed lokalnym zapisem zlecen, spojnosci `serviceBlocks` / `workAllocations`, synchronizacji osi dnia z kalendarzem, list pracownikow w obsadzie, widoku rol pracownikow w kalendarzu oraz poprawek formularza zlecen.
+- Nie wdrazano zmian aplikacji mobilnej w tym kroku.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed wdrozeniem sprawdzono zdalne repozytorium: `git fetch cleanzi01 main --prune`; lokalna galaz nie byla za GitHubem (`HEAD...cleanzi01/main` = `3 0`, czyli 3 commity lokalnie do przodu, 0 zdalnych brakujacych lokalnie).
+- Utworzono backup przed wdrozeniem: `C:\Users\rafal\Desktop\app-to-react-backups\pre-deploy-portal-20260706-164917`.
+- Uruchomiono `git diff --check`; wynik bez bledow, pozostaly tylko ostrzezenia CRLF.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Wypchnieto branch `codex/pre-prod-sync-20260630-112213` do GitHub.
+- Utworzono rollout App Hosting dla commita `d1a65ca`; rollout zakonczyl sie statusem `SUCCEEDED`.
+- Sprawdzono Cloud Run: rewizja `cleanzi-01-build-2026-07-06-002` ma 100% ruchu.
+- Sprawdzono produkcyjny URL `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`; zwrocil HTTP 200.
+- Sprawdzono serwowane assety produkcyjne; marker nowej logiki `ordersSyncRemoteTimelineOrders` jest obecny w `/assets/portal-Bv5O1e79.js`.
+Uwagi dla nastepnej osoby:
+- Jesli trzeba wycofac wdrozenie, punktem odniesienia sprzed tego rollouta jest poprzedni commit `cb0a329` / poprzedni build App Hosting sprzed `build-2026-07-06-002`.
+- Backup lokalnego stanu przed deployem znajduje sie w `C:\Users\rafal\Desktop\app-to-react-backups\pre-deploy-portal-20260706-164917`.
+- Po deployu w szybkim smoke tescie HTML nadal wskazywal asset `/assets/portal-Bv5O1e79.js`, ale App Hosting i Cloud Run potwierdzaja rollout `build-2026-07-06-002`, a marker nowej logiki jest w tym assetcie.
