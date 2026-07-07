@@ -1864,3 +1864,22 @@ Testy/sprawdzenia:
 - Uruchomiono `git diff --check` - brak bledow diffu, tylko istniejace ostrzezenia CRLF.
 Uwagi dla nastepnej osoby:
 - Pola techniczne `accessStartTime`, `accessEndTime` i puste `accessWindows` pozostaja przy zapisie tylko dla zgodnosci ze starymi rekordami. Nie steruja juz formularzem ani walidacja czasu zlecenia; ich wartosc jest kopia czasu wynikajacego z kart zmian.
+
+Data: 2026-07-07 22:59 +02:00
+Autor: AI Codex
+Dodano:
+- Utworzono commit produkcyjny `89c72a9` z aktualnymi poprawkami portalu desktop i wypchnieto go do repozytorium `cleanzi01` na galaz `codex/pre-prod-sync-20260630-112213`.
+Zmieniono:
+- Wdrozenie produkcyjne App Hosting dla backendu `cleanzi-01` w projekcie `iclean-room` wykonano z commita `89c72a9f62c2050327124f1b3d9992d26b0dc2d4`.
+Usunieto:
+- Nic w tym wpisie dokumentacyjnym.
+Testy/sprawdzenia:
+- Przed wdrozeniem uruchomiono `npm.cmd run build` - build przeszedl poprawnie ze standardowymi ostrzezeniami Vite o duzych chunkach.
+- Uruchomiono `git diff --check` - brak bledow diffu, tylko ostrzezenia CRLF.
+- Utworzono kopie stanu sprzed deploya w `C:\Users\rafal\Desktop\app-to-react-backups\pre-deploy-portal-20260707-223134`.
+- Wykonano App Hosting rollout: `firebase apphosting:rollouts:create cleanzi-01 --project iclean-room --git-commit 89c72a9f62c2050327124f1b3d9992d26b0dc2d4 --force`.
+- Sprawdzono backend `cleanzi-01`: `updateTime` ustawiony na `2026-07-07T20:53:17.271413Z`, `reconciling: false`.
+- Sprawdzono produkcyjny adres `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`: HTTP 200, tytul `Best Clean Portal`, aktywny bundle `/assets/portal-CVeiTFYw.js`, brak bledow `console.error` w smoke tescie przegladarki.
+Uwagi dla nastepnej osoby:
+- Firebase CLI lokalnie wymagal jednorazowego obejscia problemu certyfikatu TLS przez `NODE_TLS_REJECT_UNAUTHORIZED=0`; nie zapisano tego ustawienia na stale.
+- W razie cofniecia aplikacji uzyc kopii backupu powyzej oraz commita sprzed deploya `5960962`.
