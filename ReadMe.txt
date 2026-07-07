@@ -1900,6 +1900,26 @@ Testy/sprawdzenia:
 Uwagi dla nastepnej osoby:
 - Pulpit korzysta z `calendarTimelineVisualOrderSlots`, dlatego ta sama poprawka obejmuje widok `Os dnia dzisiejszego` i glowny kalendarz.
 - Cofniecie zmiany wymaga przywrocenia poprzedniego priorytetu godzin w `calendarTimelineServiceBlockAllocations`, `calendarTimelineServiceBlockTimingForAllocation` i `calendarTimelineVisualOrderSlots`.
+
+Data: 2026-07-07 23:49 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- Wdrozenie produkcyjne App Hosting dla backendu `cleanzi-01` w projekcie `iclean-room` wykonano z commita `5ecd9683c94dd144b85b10b46c4479b0556f4c17`.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed wdrozeniem utworzono kopie stanu w `C:\Users\rafal\Desktop\app-to-react-backups\pre-deploy-service-block-times-20260707-233725`.
+- Przed wdrozeniem uruchomiono `node --check web-app/apps/portal-web/src/features/calendar/index.js`.
+- Przed wdrozeniem uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+- Przed wdrozeniem uruchomiono `git diff --check` - brak bledow diffu, tylko ostrzezenia CRLF.
+- Przed wdrozeniem wykonano `git fetch cleanzi01 main`; remote `main` nie mial nowszych commitow wzgledem lokalnej bazy pracy.
+- Wykonano App Hosting rollout: `firebase apphosting:rollouts:create cleanzi-01 --project iclean-room --git-commit 5ecd9683c94dd144b85b10b46c4479b0556f4c17 --force`.
+- Sprawdzono backend `cleanzi-01`: `updateTime` ustawiony na `2026-07-07T21:43:47.974721Z`, `reconciling: false`.
+- Sprawdzono produkcyjny adres `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`: HTTP 200, tytul `Best Clean Portal`, aktywny bundle `/assets/portal-D1gtF6au.js`.
+Uwagi dla nastepnej osoby:
+- Firebase CLI lokalnie wymagal jednorazowego obejscia problemu certyfikatu TLS przez `NODE_TLS_REJECT_UNAUTHORIZED=0`; nie zapisano tego ustawienia na stale.
 - W razie cofniecia aplikacji uzyc kopii backupu powyzej oraz commita sprzed deploya `5960962`.
 
 Data: 2026-07-07 23:12 +02:00
