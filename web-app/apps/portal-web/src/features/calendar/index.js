@@ -8376,8 +8376,8 @@ export function createCalendarFeature(ctx) {
           return direct.map((allocation, index) => {
             const allocationStart = ordersNormalizeTimeField(allocation?.startTime ?? allocation?.planStartTime, '')
             const allocationEnd = ordersNormalizeTimeField(allocation?.endTime ?? allocation?.planEndTime, '')
-            const startTime = allocationStart || blockStart
-            const endTime = allocationEnd || blockEnd
+            const startTime = blockStart || allocationStart
+            const endTime = blockEnd || allocationEnd
             return {
               ...allocation,
               serviceBlockId: allocation.serviceBlockId || block.id || `service-${blockIndex + 1}`,
@@ -8452,6 +8452,9 @@ export function createCalendarFeature(ctx) {
           (allocationKey && (allocationKey === slotKey || allocationKey === generatedKey))
         )
       }) || null
+      if (!allocationBlockId && !allocationBlockKind && !matchingSlot) {
+        continue
+      }
 
       const blockStart = ordersNormalizeTimeField(block?.startTime ?? block?.planStartTime ?? block?.accessStartTime, '')
       const blockEnd = ordersNormalizeTimeField(block?.endTime ?? block?.planEndTime ?? block?.accessEndTime, '')
@@ -8469,9 +8472,13 @@ export function createCalendarFeature(ctx) {
         0,
         Math.round(Number(matchingSlot?.minutes ?? matchingSlot?.workMinutes ?? allocation?.minutes ?? allocation?.workMinutes) || 0),
       )
-      const startTime = slotStart || blockStart
-      const endTime = slotEnd || blockEnd
+      const startTime = blockStart || slotStart
+      const endTime = blockEnd || slotEnd
       return {
+        serviceBlockId: blockId,
+        serviceBlockKind: blockKind,
+        serviceBlockLabel: String(block?.label ?? `Zmiana ${blockIndex + 1}`).trim(),
+        ...(matchingSlot ? { slotId: String(matchingSlot?.slotId ?? matchingSlot?.id ?? '').trim() } : {}),
         ...(dateYmd ? { dateYmd, planDateYmd: dateYmd, startDateYmd: dateYmd } : {}),
         ...(endDateYmd ? { endDateYmd, planEndDateYmd: endDateYmd } : {}),
         ...(startTime ? { startTime, planStartTime: startTime } : {}),
@@ -8541,6 +8548,24 @@ export function createCalendarFeature(ctx) {
     return resources[fallbackRow] ? fallbackRow : 0
   }
 
+  function calendarTimelineAllocationHasServiceAnchor(allocation = {}) {
+    const directAnchor = [
+      allocation?.serviceBlockId,
+      allocation?.teamId,
+      allocation?.serviceBlockKind,
+      allocation?.slotId,
+      allocation?.workSlotKey,
+      allocation?.workSlotId,
+    ]
+      .map((value) => String(value ?? '').trim())
+      .some(Boolean)
+    if (directAnchor) {
+      return true
+    }
+    const key = String(allocation?.key ?? '').trim().toLowerCase()
+    return key.startsWith('slot:') || key.startsWith('workslot:') || key.startsWith('service-slot:')
+  }
+
   function calendarTimelineVisualOrderSlots(order = {}, resources = calendarTimelineResources()) {
     const serviceBlockAllocations = calendarTimelineServiceBlockAllocations(order)
     const hasServiceBlocksV2 =
@@ -8566,7 +8591,8 @@ export function createCalendarFeature(ctx) {
       : Array.isArray(order.workerAllocations) && order.workerAllocations.length
         ? order.workerAllocations
         : []
-    const allocations = orderAllocations.length
+    const hasAnchoredOrderAllocations = orderAllocations.some((item) => calendarTimelineAllocationHasServiceAnchor(item))
+    const allocations = orderAllocations.length && (!serviceBlockAllocations.length || hasAnchoredOrderAllocations)
       ? orderAllocations
       : serviceBlockAllocations.length
         ? serviceBlockAllocations
@@ -8576,10 +8602,10 @@ export function createCalendarFeature(ctx) {
     const safeAllocations = allocations
       .map((item, index) => {
         const serviceBlockTiming = calendarTimelineServiceBlockTimingForAllocation(order, item)
-        const startTime = ordersNormalizeTimeField(item?.startTime ?? item?.planStartTime ?? serviceBlockTiming?.startTime, accessStart)
-        const endTime = ordersNormalizeTimeField(item?.endTime ?? item?.planEndTime ?? serviceBlockTiming?.endTime, '')
-        const dateYmd = ordersNormalizeDateField(item?.dateYmd ?? item?.planDateYmd ?? item?.startDateYmd ?? serviceBlockTiming?.dateYmd, startDay)
-        const endDateYmd = ordersNormalizeDateField(item?.endDateYmd ?? item?.planEndDateYmd ?? serviceBlockTiming?.endDateYmd, dateYmd)
+        const startTime = ordersNormalizeTimeField(serviceBlockTiming?.startTime ?? item?.planStartTime ?? item?.startTime, accessStart)
+        const endTime = ordersNormalizeTimeField(serviceBlockTiming?.endTime ?? item?.planEndTime ?? item?.endTime, '')
+        const dateYmd = ordersNormalizeDateField(serviceBlockTiming?.dateYmd ?? item?.planDateYmd ?? item?.dateYmd ?? item?.startDateYmd, startDay)
+        const endDateYmd = ordersNormalizeDateField(serviceBlockTiming?.endDateYmd ?? item?.planEndDateYmd ?? item?.endDateYmd, dateYmd)
         const timedAllocation = { ...item, ...(serviceBlockTiming || {}), dateYmd, endDateYmd, startTime, endTime }
         const minutes = calendarTimelineAllocationDurationMinutes(order, timedAllocation, startTime)
         const row = calendarTimelineResolveAllocationRow(item, resources)
@@ -8592,11 +8618,11 @@ export function createCalendarFeature(ctx) {
           workerId: assignment.workerId,
           workerLogin: assignment.workerLogin,
           workerKey: assignment.key,
-          slotId: String(item?.slotId ?? '').trim(),
+          slotId: String(item?.slotId ?? serviceBlockTiming?.slotId ?? '').trim(),
           teamId: String(item?.teamId ?? '').trim(),
-          serviceBlockId: String(item?.serviceBlockId ?? '').trim(),
-          serviceBlockKind: String(item?.serviceBlockKind ?? '').trim(),
-          serviceBlockLabel: String(item?.serviceBlockLabel ?? '').trim(),
+          serviceBlockId: String(item?.serviceBlockId ?? serviceBlockTiming?.serviceBlockId ?? '').trim(),
+          serviceBlockKind: String(item?.serviceBlockKind ?? serviceBlockTiming?.serviceBlockKind ?? '').trim(),
+          serviceBlockLabel: String(item?.serviceBlockLabel ?? serviceBlockTiming?.serviceBlockLabel ?? '').trim(),
           minutes,
           dateYmd,
           endDateYmd,

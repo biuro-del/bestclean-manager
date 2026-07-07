@@ -1882,6 +1882,24 @@ Testy/sprawdzenia:
 - Sprawdzono produkcyjny adres `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`: HTTP 200, tytul `Best Clean Portal`, aktywny bundle `/assets/portal-CVeiTFYw.js`, brak bledow `console.error` w smoke tescie przegladarki.
 Uwagi dla nastepnej osoby:
 - Firebase CLI lokalnie wymagal jednorazowego obejscia problemu certyfikatu TLS przez `NODE_TLS_REJECT_UNAUTHORIZED=0`; nie zapisano tego ustawienia na stale.
+
+Data: 2026-07-07 23:35 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` poprawiono dobor godzin planowanych paskow w kalendarzu i na pulpicie.
+- Generator osi czasu bierze teraz godziny z konkretnej karty zmiany/serviceBlock, do ktorej nalezy dana osoba, zamiast splaszczac obsade do pierwszej zmiany albo do ogolnych godzin zlecenia.
+- Dla zlecen z wieloma zmianami w jednym dniu niezakotwiczone, plaskie `workAllocations` nie sa juz traktowane jako zrodlo godzin, jesli dostepne sa obsady zagniezdzone w `serviceBlocks`.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/calendar/index.js`.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+- Uruchomiono `git diff --check` - brak bledow diffu, tylko ostrzezenie CRLF.
+Uwagi dla nastepnej osoby:
+- Pulpit korzysta z `calendarTimelineVisualOrderSlots`, dlatego ta sama poprawka obejmuje widok `Os dnia dzisiejszego` i glowny kalendarz.
+- Cofniecie zmiany wymaga przywrocenia poprzedniego priorytetu godzin w `calendarTimelineServiceBlockAllocations`, `calendarTimelineServiceBlockTimingForAllocation` i `calendarTimelineVisualOrderSlots`.
 - W razie cofniecia aplikacji uzyc kopii backupu powyzej oraz commita sprzed deploya `5960962`.
 
 Data: 2026-07-07 23:12 +02:00
