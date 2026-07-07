@@ -2604,169 +2604,19 @@ export function createDashboardFeature(ctx) {
     }
   }
 
-  function dashboardShouldDeferScheduleAlert() {
-    const busy =
-      typeof isPortalInteractionBusy === 'function'
-        ? isPortalInteractionBusy()
-        : typeof isBlockingModalOpen === 'function' && isBlockingModalOpen()
-    return appState.currentRoute !== 'dashboard' || document.visibilityState !== 'visible' || Boolean(busy)
-  }
-
-  function dashboardQueueScheduleAlert(key, callback) {
-    if (typeof queuePortalDeferredNotification === 'function') {
-      queuePortalDeferredNotification(key, callback, { requiredRoute: 'dashboard' })
-    }
-  }
-
   function dashboardClearQueuedScheduleAlert(key) {
     if (typeof clearPortalDeferredNotification === 'function') {
       clearPortalDeferredNotification(key)
     }
   }
 
-  function dashboardLateStartEntryKey(dayKey, entry) {
-    const day = String(dayKey ?? '').trim()
-    const worker = normalizeSearchText(entry?.workerName)
-    const start = String(entry?.startTime ?? '').trim()
-    const late = Number(entry?.lateMinutes ?? 0)
-    return `${day}|${worker}|${start}|${late}`
-  }
-
   function dashboardShowScheduleLateStartAlert(dayKey, lateEntries = []) {
-    const normalizedDayKey = String(dayKey ?? '').trim()
-    const entries = Array.isArray(lateEntries) ? lateEntries : []
+    void dayKey
+    void lateEntries
     const queueKey = 'dashboard:schedule-late'
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey) || !entries.length) {
-      dashboardClearQueuedScheduleAlert(queueKey)
-      appState.dashboardScheduleLatePendingKeys = []
-      dashboardHideScheduleLateStartAlert()
-      return
-    }
-
-    if (dashboardShouldDeferScheduleAlert()) {
-      dashboardHideScheduleLateStartAlert()
-      dashboardQueueScheduleAlert(queueKey, () => dashboardShowScheduleLateStartAlert(normalizedDayKey, entries))
-      return
-    }
-
-    if (!(appState.dashboardScheduleLateShownKeys instanceof Set)) {
-      appState.dashboardScheduleLateShownKeys = new Set()
-    }
-
-    const seen = appState.dashboardScheduleLateShownKeys
-    const dedupMap = new Map()
-    entries.forEach((entry) => {
-      const alertKey = dashboardLateStartEntryKey(normalizedDayKey, entry)
-      if (!alertKey || seen.has(alertKey) || dedupMap.has(alertKey)) {
-        return
-      }
-      dedupMap.set(alertKey, {
-        ...entry,
-        alertKey,
-      })
-    })
-
-    const unseenEntries = [...dedupMap.values()]
-    if (!unseenEntries.length) {
-      dashboardClearQueuedScheduleAlert(queueKey)
-      appState.dashboardScheduleLatePendingKeys = []
-      dashboardHideScheduleLateStartAlert()
-      return
-    }
-
-    appState.dashboardScheduleLatePendingKeys = unseenEntries.map((entry) => entry.alertKey)
-
-    let node = document.getElementById('dashScheduleLateAlert')
-    if (!node) {
-      node = document.createElement('div')
-      node.id = 'dashScheduleLateAlert'
-      node.className = 'dash-schedule-alert dash-schedule-alert--late'
-      node.setAttribute('role', 'alertdialog')
-      node.setAttribute('aria-modal', 'true')
-      node.setAttribute('aria-labelledby', 'dashScheduleLateAlertTitle')
-      node.innerHTML = `
-        <div class="dash-schedule-alert-header">
-          <span class="dash-schedule-alert-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none">
-              <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke="currentColor" stroke-width="2"/>
-            </svg>
-          </span>
-          <div class="dash-schedule-alert-heading">
-            <div class="dash-schedule-alert-signal" aria-hidden="true">INFO</div>
-            <div class="dash-schedule-alert-title" id="dashScheduleLateAlertTitle">Pracownicy pojawili się po czasie</div>
-            <div class="dash-schedule-alert-text" id="dashScheduleLateAlertText"></div>
-          </div>
-        </div>
-        <div class="dash-schedule-alert-list-wrap">
-          <div class="dash-schedule-alert-list-title">Lista osób:</div>
-          <ul class="dash-schedule-alert-list" id="dashScheduleLateAlertList"></ul>
-        </div>
-        <div class="dash-schedule-alert-actions">
-          <button type="button" class="btn2 primary" data-alert-action="ok">OK</button>
-        </div>
-      `
-      document.body.appendChild(node)
-      node.addEventListener('click', (event) => {
-        const button = event.target.closest('[data-alert-action]')
-        if (!button) {
-          return
-        }
-
-        const action = String(button.getAttribute('data-alert-action') ?? '').trim()
-        if (action === 'ok') {
-          if (!(appState.dashboardScheduleLateShownKeys instanceof Set)) {
-            appState.dashboardScheduleLateShownKeys = new Set()
-          }
-          appState.dashboardScheduleLatePendingKeys.forEach((key) => {
-            if (key) {
-              appState.dashboardScheduleLateShownKeys.add(String(key))
-            }
-          })
-          appState.dashboardScheduleLatePendingKeys = []
-          dashboardClearQueuedScheduleAlert(queueKey)
-          dashboardHideScheduleLateStartAlert()
-        }
-      })
-    }
-
-    const textNode = node.querySelector('#dashScheduleLateAlertText')
-    if (textNode) {
-      textNode.textContent =
-        unseenEntries.length === 1
-          ? '1 osoba rozpoczęła pracę z opóźnieniem.'
-          : `${unseenEntries.length} osób rozpoczęło pracę z opóźnieniem.`
-    }
-
-    const listNode = node.querySelector('#dashScheduleLateAlertList')
-    if (listNode) {
-      const normalized = [...unseenEntries].sort((left, right) => {
-        const leftLate = Number(left?.lateMinutes ?? 0)
-        const rightLate = Number(right?.lateMinutes ?? 0)
-        if (leftLate !== rightLate) {
-          return rightLate - leftLate
-        }
-        return String(left?.workerName ?? '').localeCompare(String(right?.workerName ?? ''), 'pl', {
-          sensitivity: 'base',
-        })
-      })
-
-      listNode.innerHTML = normalized
-        .map((entry) => {
-          const name = escapeHtml(String(entry.workerName ?? '-'))
-          const lateLabel = dashboardLateMinutesToHm(entry?.lateMinutes)
-          const start = String(entry?.startTime ?? '').trim()
-          const startLabel = start && start !== '-' ? escapeHtml(start) : '-'
-          return `
-            <li>
-              <span class="dash-schedule-alert-person">${name}</span>
-              <span class="dash-schedule-alert-meta">START: ${startLabel}</span>
-              <span class="dash-schedule-alert-status">Spóźnienie: ${lateLabel}</span>
-            </li>
-          `
-        })
-        .join('')
-    }
+    dashboardClearQueuedScheduleAlert(queueKey)
+    appState.dashboardScheduleLatePendingKeys = []
+    dashboardHideScheduleLateStartAlert()
   }
 
   function dashboardShowScheduleMissingStartAlert(dayKey, missingEntries = []) {

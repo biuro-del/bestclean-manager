@@ -1883,3 +1883,19 @@ Testy/sprawdzenia:
 Uwagi dla nastepnej osoby:
 - Firebase CLI lokalnie wymagal jednorazowego obejscia problemu certyfikatu TLS przez `NODE_TLS_REJECT_UNAUTHORIZED=0`; nie zapisano tego ustawienia na stale.
 - W razie cofniecia aplikacji uzyc kopii backupu powyzej oraz commita sprzed deploya `5960962`.
+
+Data: 2026-07-07 23:12 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/dashboard/index.js` wylaczono modalny popup pulpitu `Pracownicy pojawili sie po czasie`.
+- Dane o spoznionym rozpoczeciu pracy pozostaja widoczne w kartach/grafiku pulpitu, ale system nie zaslania juz ekranu dodatkowym oknem informacyjnym.
+Usunieto:
+- Z modulu pulpitu usunieto tworzenie elementu `dashScheduleLateAlert` oraz nieuzywane helpery kolejki/deduplikacji tego popupu.
+Testy/sprawdzenia:
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/dashboard/index.js`.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+- Uruchomiono `git diff --check` - brak bledow diffu, tylko ostrzezenie CRLF.
+Uwagi dla nastepnej osoby:
+- Cofniecie tej zmiany wymaga przywrocenia funkcji tworzacej modal `dashScheduleLateAlert` w `dashboardShowScheduleLateStartAlert`.
