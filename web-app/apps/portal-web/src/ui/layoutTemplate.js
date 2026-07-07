@@ -375,11 +375,11 @@ export const portalLayoutTemplate = `
                 <div class="card-title" id="dashActivityTitle">Widok dnia dzisiejszego</div>
                 <div class="dash-activity-actions">
                   <button
-                    class="btn2 secondary dash-refresh-btn dash-refresh-btn--icon"
+                    class="btn2 secondary dash-refresh-btn dash-refresh-btn--source"
                     id="dashRefreshBtn"
                     type="button"
-                    aria-label="Odśwież pulpit"
-                    title="Odśwież pulpit"
+                    aria-label="Odśwież dane pulpitu u źródła"
+                    title="Odśwież dane pulpitu u źródła"
                   >
                     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                       <path d="M20 11a8 8 0 0 0-14.2-5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
@@ -387,6 +387,7 @@ export const portalLayoutTemplate = `
                       <path d="M4 13a8 8 0 0 0 14.2 5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
                       <path d="M18 19h3v3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
+                    <span>Odśwież</span>
                   </button>
                   <button
                     class="btn2 secondary dash-refresh-btn dash-refresh-btn--icon"

@@ -67,7 +67,6 @@ export function createOrdersFeature(ctx) {
   const ORDERS_CLIENT_OBJECT_CHEMISTRY_MARKER = 'PORTAL_OBJECT_CHEMISTRY_JSON'
   const ORDERS_DEFAULT_REPEAT_WEEKDAYS = [1, 2, 3, 4, 5]
   const ORDERS_ALL_REPEAT_WEEKDAYS = [1, 2, 3, 4, 5, 6, 0]
-  const ORDERS_ACCESS_ALL_DAYS = 'all'
   const ORDERS_SERVICE_MODEL_VERSION = 2
   const ORDERS_DEFAULT_ACCESS_START = '06:00'
   const ORDERS_DEFAULT_ACCESS_END = '21:00'
@@ -382,7 +381,7 @@ export function createOrdersFeature(ctx) {
   }
 
   function ordersRowsFromWorkerAssignments(order = {}, resources = calendarTimelineResources()) {
-    const source = Array.isArray(order?.workerAssignments) ? order.workerAssignments : []
+    const source = ordersStoredWorkerAssignments(order)
     const pool = Array.isArray(resources) ? resources : []
     const rows = []
     source.forEach((assignment) => {
@@ -394,6 +393,21 @@ export function createOrdersFeature(ctx) {
     return rows
   }
 
+  function ordersAllocationIsUnassigned(item = {}) {
+    const type = normalizeSearchText(item?.type)
+    if (['buffer', 'bufor', 'unassigned', 'empty'].includes(type)) {
+      return true
+    }
+    const label = normalizeSearchText(
+      item?.label ??
+        item?.name ??
+        item?.workerName ??
+        item?.workerLabel ??
+        '',
+    )
+    return label === 'bufor' || label === 'buffer' || label.startsWith('do obsadzenia')
+  }
+
   function ordersAssignmentHasWorkerDetails(assignment = {}) {
     const keys = ordersAssignmentValueKeys(assignment).filter((key) => key !== 'buffer' && key !== 'bufor')
     return keys.length > 0
@@ -401,7 +415,7 @@ export function createOrdersFeature(ctx) {
 
   function ordersSavedWorkerAssignmentLabels(order = {}) {
     const seen = new Set()
-    return (Array.isArray(order?.workerAssignments) ? order.workerAssignments : [])
+    return ordersStoredWorkerAssignments(order)
       .map((assignment) =>
         String(
           assignment?.name ??
@@ -426,7 +440,7 @@ export function createOrdersFeature(ctx) {
 
   function ordersOrderHasInactiveOnlyWorkerAssignments(order = {}, resources = calendarTimelineResources()) {
     const pool = Array.isArray(resources) ? resources : []
-    const assignments = Array.isArray(order?.workerAssignments) ? order.workerAssignments : []
+    const assignments = ordersStoredWorkerAssignments(order)
     if (!assignments.some((assignment) => ordersAssignmentHasWorkerDetails(assignment))) {
       return false
     }
@@ -483,6 +497,9 @@ export function createOrdersFeature(ctx) {
     const stableRows = ordersStoredAssignmentRows(order, resources)
     if (stableRows.length) {
       return stableRows
+    }
+    if (ordersHasCanonicalWorkAllocations(order)) {
+      return [ordersServiceBlockBufferRow(resources)]
     }
     if (Array.isArray(resources) && resources.length && ordersStoredWorkerAssignments(order).some((item) => ordersAssignmentHasStableIdentity(item))) {
       return [0]
@@ -644,14 +661,60 @@ export function createOrdersFeature(ctx) {
     }
   }
 
-  function ordersStoredWorkerAssignments(order = {}) {
+  function ordersDedupeStoredWorkerAssignments(assignments = []) {
+    const seen = new Set()
+    return (Array.isArray(assignments) ? assignments : []).filter((assignment) => {
+      const identityKey = normalizeSearchText(
+        assignment.workerId || assignment.workerLogin || ordersAssignmentStableKey(assignment) || assignment.name,
+      )
+      if (!identityKey || seen.has(identityKey)) {
+        return false
+      }
+      seen.add(identityKey)
+      return true
+    })
+  }
+
+  function ordersAssignmentRepresentsWorker(source = {}, assignment = {}) {
+    if (!assignment || ordersAllocationIsUnassigned(source) || ordersAllocationIsUnassigned(assignment)) {
+      return false
+    }
+    const type = normalizeSearchText(source?.type ?? assignment?.type)
+    const name = normalizeSearchText(ordersAssignmentDisplayName(assignment))
+    return Boolean(
+      type === 'worker' ||
+        assignment.workerId ||
+        assignment.workerLogin ||
+        ordersAssignmentStableKey(assignment) ||
+        (name && name !== 'bufor' && name !== 'buffer'),
+    )
+  }
+
+  function ordersCanonicalAllocationItems(order = {}) {
     const sources = [
-      order?.workerAssignments,
-      order?.assignedWorkers,
-      order?.workers,
       order?.workAllocations,
       order?.workerAllocations,
     ]
+    return sources.flatMap((source) => ordersParseAssignmentList(source))
+  }
+
+  function ordersHasCanonicalWorkAllocations(order = {}) {
+    return ordersCanonicalAllocationItems(order).length > 0
+  }
+
+  function ordersStoredWorkerAssignments(order = {}) {
+    const canonicalItems = ordersCanonicalAllocationItems(order)
+    if (canonicalItems.length) {
+      const canonicalAssignments = canonicalItems
+        .map((item, index) => {
+          const assignment = ordersNormalizeStoredWorkerAssignment(item, index)
+          return ordersAssignmentRepresentsWorker(item, assignment) ? assignment : null
+        })
+        .filter(Boolean)
+      return ordersDedupeStoredWorkerAssignments(canonicalAssignments)
+    }
+
+    const sources = [order?.workerAssignments, order?.assignedWorkers, order?.workers]
     const result = []
     sources.forEach((source) => {
       ordersParseAssignmentList(source).forEach((item, index) => {
@@ -690,17 +753,7 @@ export function createOrdersFeature(ctx) {
       result.push(singleWorker)
     }
 
-    const seen = new Set()
-    return result.filter((assignment) => {
-      const identityKey = normalizeSearchText(
-        assignment.workerId || assignment.workerLogin || ordersAssignmentStableKey(assignment) || assignment.name,
-      )
-      if (!identityKey || seen.has(identityKey)) {
-        return false
-      }
-      seen.add(identityKey)
-      return true
-    })
+    return ordersDedupeStoredWorkerAssignments(result)
   }
 
   function ordersAssignmentHasStableIdentity(assignment = {}) {
@@ -724,6 +777,61 @@ export function createOrdersFeature(ctx) {
       worker?.email,
     ]
     return new Set(values.map((value) => normalizeSearchText(value)).filter(Boolean))
+  }
+
+  function ordersWorkerRowFromAssignmentLike(assignment = {}, resources = calendarTimelineResources()) {
+    const resourceList = Array.isArray(resources) ? resources : []
+    if (!resourceList.length || !assignment || typeof assignment !== 'object') {
+      return null
+    }
+
+    const identityValues = [
+      ordersAssignmentWorkerId(assignment),
+      ordersAssignmentWorkerLogin(assignment),
+      ordersAssignmentStableKey(assignment),
+    ].map((value) => normalizeSearchText(value)).filter(Boolean)
+
+    if (identityValues.length) {
+      const identityRow = resourceList.findIndex((resource) => {
+        if (!ordersResourceCanBeAssigned(resource)) {
+          return false
+        }
+        const resourceValues = ordersResourceStableIdentitySet(resource)
+        return identityValues.some((value) => resourceValues.has(value))
+      })
+      if (identityRow >= 0) {
+        return identityRow
+      }
+    }
+
+    const nameKey = normalizeSearchText(
+      ordersAssignmentDisplayName(assignment) ||
+        assignment?.label ||
+        assignment?.name ||
+        assignment?.workerName ||
+        assignment?.workerLabel,
+    )
+    if (nameKey && !['bufor', 'buffer', 'do obsadzenia', 'unassigned', 'empty'].includes(nameKey)) {
+      const matches = resourceList
+        .map((resource, index) => ({ resource, index }))
+        .filter(({ resource }) => ordersResourceCanBeAssigned(resource) && normalizeSearchText(resource?.name) === nameKey)
+      if (matches.length === 1) {
+        return matches[0].index
+      }
+    }
+
+    const directRow = Number(assignment?.row ?? assignment?.rowIndex)
+    const directResource = resourceList[directRow]
+    if (
+      Number.isInteger(directRow) &&
+      directRow >= 0 &&
+      directRow < resourceList.length &&
+      ordersResourceCanBeAssigned(directResource)
+    ) {
+      return directRow
+    }
+
+    return null
   }
 
   function ordersStoredAssignmentRows(order = {}, resources = calendarTimelineResources()) {
@@ -762,6 +870,19 @@ export function createOrdersFeature(ctx) {
           if (matches.length === 1) {
             rowIndex = matches[0].index
           }
+        }
+      }
+
+      if (rowIndex < 0) {
+        const directRow = Number(assignment?.row ?? assignment?.rowIndex)
+        const directResource = resourceList[directRow]
+        if (
+          Number.isInteger(directRow) &&
+          directRow >= 0 &&
+          directRow < resourceList.length &&
+          ordersResourceCanBeAssigned(directResource)
+        ) {
+          rowIndex = directRow
         }
       }
 
@@ -936,185 +1057,26 @@ export function createOrdersFeature(ctx) {
     return ordersStoredWorkMinutes(order)
   }
   
-  function ordersAccessWindowSources(order = {}) {
-    return [
-      order?.accessWindows,
-      order?.objectAccessWindows,
-      order?.accessTimeWindows,
-      order?.buildingAccessWindows,
-    ].find((value) => Array.isArray(value) && value.length) || []
-  }
-  
-  function ordersNormalizeAccessWindowWeekday(value = ORDERS_ACCESS_ALL_DAYS) {
-    const raw = String(value ?? '').trim().toLowerCase()
-    if (!raw || raw === ORDERS_ACCESS_ALL_DAYS || raw === '*' || raw === 'every' || raw === 'all_days' || raw === 'alldays') {
-      return ORDERS_ACCESS_ALL_DAYS
-    }
-    const weekday = ordersNormalizeWeekday(value)
-    return weekday === null ? ORDERS_ACCESS_ALL_DAYS : weekday
-  }
-  
-  function ordersNormalizeAccessWindowWeekdays(value = ORDERS_ACCESS_ALL_DAYS) {
-    const source = Array.isArray(value) && value.length ? value : [value]
-    const weekdays = source.map(ordersNormalizeAccessWindowWeekday)
-    if (weekdays.includes(ORDERS_ACCESS_ALL_DAYS)) {
-      return [ORDERS_ACCESS_ALL_DAYS]
-    }
-    return weekdays.filter((weekday, index, list) => Number.isInteger(weekday) && list.indexOf(weekday) === index)
-  }
-  
-  function ordersNormalizeAccessWindow(window = {}, order = {}, index = 0) {
-    const fallbackStart = ordersNormalizeTimeField(
-      order?.accessStartTime ?? order?.startTime ?? ordersReadInputValue('ordersEditTime'),
-      '08:00',
-    )
-    const fallbackEnd = ordersNormalizeTimeField(
-      order?.accessEndTime ?? order?.endTime ?? ordersReadInputValue('ordersEditEndTime'),
-      ordersDefaultEndTime(fallbackStart),
-    )
-    const weekdays = ordersNormalizeAccessWindowWeekdays(
-      Array.isArray(window?.weekdays) && window.weekdays.length
-        ? window.weekdays
-        : window?.weekday ?? window?.day ?? window?.repeatWeekday ?? ORDERS_ACCESS_ALL_DAYS,
-    )
-    const startTime = ordersNormalizeTimeField(
-      window?.accessStartTime ?? window?.startTime ?? window?.fromTime ?? window?.accessFrom,
-      fallbackStart,
-    )
-    const endTime = ordersNormalizeTimeField(
-      window?.accessEndTime ?? window?.endTime ?? window?.toTime ?? window?.accessTo,
-      fallbackEnd || ordersDefaultEndTime(startTime),
-    )
-    const firstWeekday = weekdays[0] ?? ORDERS_ACCESS_ALL_DAYS
-    const available = window?.available === false || window?.isAvailable === false || window?.closed === true || window?.disabled === true
-      ? false
-      : true
+  function ordersPrimaryServiceBlockTiming(order = {}, blocks = null) {
+    const controlBlocks = Array.isArray(blocks) ? [] : ordersReadServiceBlocksFromControls(order)
+    const sourceBlocks = Array.isArray(blocks)
+      ? blocks
+      : controlBlocks.length
+        ? controlBlocks
+        : ordersServiceBlocksForOrder(order)
+    const primaryBlock = Array.isArray(sourceBlocks)
+      ? sourceBlocks.find((block) => block && (block.startTime || block.accessStartTime || block.endTime || block.accessEndTime)) || sourceBlocks[0] || {}
+      : {}
+    const fallbackStart = ordersNormalizeTimeField(order?.startTime ?? order?.accessStartTime, '08:00')
+    const startTime = ordersNormalizeTimeField(primaryBlock.startTime ?? primaryBlock.accessStartTime, fallbackStart)
+    const fallbackEnd = ordersNormalizeTimeField(order?.endTime ?? order?.accessEndTime, ordersDefaultEndTime(startTime))
+    const endTime = ordersNormalizeTimeField(primaryBlock.endTime ?? primaryBlock.accessEndTime, fallbackEnd)
     return {
-      id: String(window?.id ?? `access-window-${index + 1}`).trim() || `access-window-${index + 1}`,
-      weekdays,
-      weekday: firstWeekday,
-      day: firstWeekday,
-      label: firstWeekday === ORDERS_ACCESS_ALL_DAYS ? 'Wszystkie dni' : ordersWeekdayLabel(firstWeekday),
-      available,
+      block: primaryBlock,
+      blocks: Array.isArray(sourceBlocks) ? sourceBlocks : [],
       startTime,
       endTime,
-      accessStartTime: startTime,
-      accessEndTime: endTime,
     }
-  }
-  
-  function ordersFallbackAccessWindow(order = {}) {
-    return ordersNormalizeAccessWindow(
-      {
-        weekday: ORDERS_ACCESS_ALL_DAYS,
-        accessStartTime: ordersReadInputValue('ordersEditTime') || order.accessStartTime || order.startTime || '08:00',
-        accessEndTime:
-          ordersReadInputValue('ordersEditEndTime') ||
-          order.accessEndTime ||
-          order.endTime ||
-          ordersDefaultEndTime(order.accessStartTime || order.startTime || '08:00'),
-      },
-      order,
-      0,
-    )
-  }
-
-  function ordersDefaultWeeklyAccessWindows(order = {}) {
-    const accessRange = ordersFallbackAccessWindowRange(order)
-    return ORDERS_ALL_REPEAT_WEEKDAYS.map((weekday, index) =>
-      ordersNormalizeAccessWindow(
-        {
-          id: `access-weekday-${weekday}`,
-          weekday,
-          weekdays: [weekday],
-          available: true,
-          accessStartTime: accessRange.accessStartTime || accessRange.startTime,
-          accessEndTime: accessRange.accessEndTime || accessRange.endTime,
-        },
-        order,
-        index,
-      ),
-    )
-  }
-
-  function ordersWeeklyAccessWindowsForOrder(order = {}) {
-    const sources = ordersAccessWindowSources(order)
-      .map((window, index) => ordersNormalizeAccessWindow(window, order, index))
-      .filter(Boolean)
-
-    if (!sources.length) {
-      return ordersDefaultWeeklyAccessWindows(order)
-    }
-
-    const byWeekday = new Map()
-    const allDaysSource = sources.find((window) =>
-      ordersNormalizeAccessWindowWeekdays(window.weekdays ?? window.weekday).includes(ORDERS_ACCESS_ALL_DAYS),
-    )
-
-    if (allDaysSource) {
-      ORDERS_ALL_REPEAT_WEEKDAYS.forEach((weekday, index) => {
-        byWeekday.set(
-          weekday,
-          ordersNormalizeAccessWindow(
-            {
-              ...allDaysSource,
-              id: `access-weekday-${weekday}`,
-              weekday,
-              weekdays: [weekday],
-            },
-            order,
-            index,
-          ),
-        )
-      })
-    }
-
-    sources.forEach((window) => {
-      ordersNormalizeAccessWindowWeekdays(window.weekdays ?? window.weekday).forEach((weekday) => {
-        if (weekday === ORDERS_ACCESS_ALL_DAYS) {
-          return
-        }
-        byWeekday.set(
-          weekday,
-          ordersNormalizeAccessWindow(
-            {
-              ...window,
-              id: `access-weekday-${weekday}`,
-              weekday,
-              weekdays: [weekday],
-            },
-            order,
-            byWeekday.size,
-          ),
-        )
-      })
-    })
-
-    return ORDERS_ALL_REPEAT_WEEKDAYS.map((weekday, index) =>
-      byWeekday.get(weekday) ||
-      ordersNormalizeAccessWindow(
-        {
-          id: `access-weekday-${weekday}`,
-          weekday,
-          weekdays: [weekday],
-          available: false,
-          accessStartTime: ORDERS_DEFAULT_ACCESS_START,
-          accessEndTime: ORDERS_DEFAULT_ACCESS_END,
-        },
-        order,
-        index,
-      ),
-    )
-  }
-
-  function ordersAccessWindowsForOrder(order = {}) {
-    if (ordersScheduleModeForOrder(order) === 'repeat') {
-      return ordersWeeklyAccessWindowsForOrder(order)
-    }
-    const sources = ordersAccessWindowSources(order)
-      .map((window, index) => ordersNormalizeAccessWindow(window, order, index))
-      .filter(Boolean)
-    return sources.length ? sources : [ordersFallbackAccessWindow(order)]
   }
   
   function ordersClearAccessWindows(order = {}) {
@@ -1125,12 +1087,10 @@ export function createOrdersFeature(ctx) {
     return []
   }
   
-  function ordersFallbackAccessWindowRange(order = {}) {
-    const startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), order.accessStartTime || order.startTime || '08:00')
-    const endTime = ordersNormalizeTimeField(
-      ordersReadInputValue('ordersEditEndTime'),
-      order.accessEndTime || order.endTime || ordersDefaultEndTime(startTime),
-    )
+  function ordersPrimaryTimeWindowRange(order = {}) {
+    const primaryTiming = ordersPrimaryServiceBlockTiming(order)
+    const startTime = primaryTiming.startTime
+    const endTime = primaryTiming.endTime
     const startMinutes = calendarTimelineTimeMinutes(startTime, 8 * 60)
     let endMinutes = calendarTimelineTimeMinutes(endTime, startMinutes + 60)
     if (endMinutes <= startMinutes) {
@@ -1143,57 +1103,6 @@ export function createOrdersFeature(ctx) {
       endMinutes,
       minutes: Math.max(15, endMinutes - startMinutes),
     }
-  }
-  
-  function ordersAccessWindowAppliesToWeekday(window = {}, weekday = null) {
-    const normalizedWeekday = ordersNormalizeWeekday(weekday)
-    if (normalizedWeekday === null) {
-      return true
-    }
-    const weekdays = ordersNormalizeAccessWindowWeekdays(window.weekdays ?? window.weekday ?? window.day)
-    return weekdays.includes(ORDERS_ACCESS_ALL_DAYS) || weekdays.includes(normalizedWeekday)
-  }
-  
-  function ordersAccessWindowRanges(order = {}, weekday = null) {
-    const windows = [ordersFallbackAccessWindow(order)]
-    const normalizedWeekday = ordersNormalizeWeekday(weekday)
-    const scopedWindows = normalizedWeekday === null
-      ? windows
-      : windows.filter((window) => ordersAccessWindowAppliesToWeekday(window, normalizedWeekday))
-    const ranges = scopedWindows
-      .map((window) => {
-        const startTime = ordersNormalizeTimeField(window.accessStartTime || window.startTime, '08:00')
-        const endTime = ordersNormalizeTimeField(window.accessEndTime || window.endTime, ordersDefaultEndTime(startTime))
-        const startMinutes = calendarTimelineTimeMinutes(startTime, 8 * 60)
-        let endMinutes = calendarTimelineTimeMinutes(endTime, startMinutes + 60)
-        if (endMinutes <= startMinutes) {
-          endMinutes += 1440
-        }
-        return {
-          ...window,
-          startTime,
-          endTime,
-          accessStartTime: startTime,
-          accessEndTime: endTime,
-          startMinutes,
-          endMinutes,
-          minutes: Math.max(15, endMinutes - startMinutes),
-        }
-      })
-      .filter((range) => range.minutes > 0)
-    if (ranges.length) {
-      return ranges
-    }
-    return normalizedWeekday === null ? [ordersFallbackAccessWindowRange(order)] : []
-  }
-  
-  function ordersAccessWindowMinutes(order = {}, weekday = null) {
-    const ranges = ordersAccessWindowRanges(order, weekday)
-    return ranges.length ? Math.max(15, ...ranges.map((range) => range.minutes)) : 0
-  }
-  
-  function ordersAccessWindowRange(order = {}) {
-    return ordersAccessWindowRanges(order)[0] || ordersFallbackAccessWindowRange(order)
   }
   
   function ordersAllocationEndTimeFromMinutes(startTime = '08:00', minutes = 60) {
@@ -1209,18 +1118,6 @@ export function createOrdersFeature(ctx) {
       end += 1440
     }
     return Math.max(15, end - start)
-  }
-  
-  function ordersAllocationFitsAccess(order = {}, allocation = {}, weekday = null) {
-    const duration = Math.max(15, Math.round(Number(allocation.minutes) || 0))
-    return ordersAccessWindowRanges(order, weekday).some((access) => {
-      let start = calendarTimelineTimeMinutes(ordersNormalizeTimeField(allocation.startTime || allocation.planStartTime, access.startTime), access.startMinutes)
-      if (access.endMinutes > 1440 && start < access.startMinutes) {
-        start += 1440
-      }
-      const end = start + duration
-      return start >= access.startMinutes && end <= access.endMinutes
-    })
   }
   
   function ordersSelectedWorkSubjects(order = {}) {
@@ -1312,13 +1209,8 @@ export function createOrdersFeature(ctx) {
     return 100 + (Number.isFinite(numeric) ? numeric : 0)
   }
 
-  function ordersAvailableAccessWeekdays(order = {}) {
-    void order
-    return [...ORDERS_ALL_REPEAT_WEEKDAYS]
-  }
-
   function ordersDefaultServiceBlockWeekdays(order = {}) {
-    const available = ordersAvailableAccessWeekdays(order)
+    const available = [...ORDERS_ALL_REPEAT_WEEKDAYS]
     const selected = ordersRepeatWeekdaysFromOrder(order).filter((weekday) => available.includes(weekday))
     if (selected.length) {
       return selected
@@ -1373,7 +1265,26 @@ export function createOrdersFeature(ctx) {
     const explicitWorkerLogin = String(slot?.workerLogin ?? slot?.login ?? '').trim()
     const explicitWorkerKey = String(slot?.workerKey ?? '').trim()
     const slotType = String(slot?.type ?? '').trim().toLowerCase()
-    const hasWorker = Boolean(explicitWorkerId || explicitWorkerLogin || explicitWorkerKey || (rowIsWorker && !['buffer', 'bufor', 'unassigned', 'empty'].includes(slotType)))
+    const unassignedTypes = ['buffer', 'bufor', 'unassigned', 'empty']
+    const resolvedWorkerRow = ordersWorkerRowFromAssignmentLike(
+      {
+        ...slot,
+        workerId: explicitWorkerId,
+        workerLogin: explicitWorkerLogin,
+        workerKey: explicitWorkerKey,
+        key: explicitWorkerKey || slot?.key,
+        name: slot?.name ?? slot?.workerName ?? slot?.label,
+        label: slot?.label ?? slot?.name ?? slot?.workerName,
+      },
+      resources,
+    )
+    const hasWorker = Boolean(
+      explicitWorkerId ||
+        explicitWorkerLogin ||
+        explicitWorkerKey ||
+        (rowIsWorker && !unassignedTypes.includes(slotType)) ||
+        (!unassignedTypes.includes(slotType) && Number.isInteger(resolvedWorkerRow)),
+    )
     const identityRows = hasWorker
       ? ordersStoredAssignmentRows(
           {
@@ -1394,11 +1305,13 @@ export function createOrdersFeature(ctx) {
       : []
     const identityRow = identityRows.find((rowIndex) => !calendarTimelineRowAllowsOverlap(rowIndex, resources))
     const row = hasWorker
-      ? rowIsWorker
-        ? rawRow
+      ? Number.isInteger(resolvedWorkerRow)
+        ? resolvedWorkerRow
         : Number.isInteger(identityRow)
           ? identityRow
-          : bufferRow
+          : rowIsWorker
+            ? rawRow
+            : bufferRow
       : bufferRow
     const assignment = hasWorker ? ordersWorkerAssignmentsFromRows([row], resources)[0] ?? {} : {}
     const slotId = ordersServiceSlotId(slot, index)
@@ -1418,7 +1331,11 @@ export function createOrdersFeature(ctx) {
         ? calendarAddDays(dateYmd, 1)
         : dateYmd
     const endDateYmd = ordersNormalizeDateField(slot?.endDateYmd ?? slot?.planEndDateYmd, fallbackEndDateYmd)
-    const label = String(slot?.label ?? slot?.name ?? '').trim() || (hasWorker ? assignment.name || ordersWorkerRowLabel(row, resources) : `Osoba ${index + 1}`)
+    const rawLabel = String(slot?.label ?? slot?.name ?? '').trim()
+    const rawLabelKey = normalizeSearchText(rawLabel)
+    const label = hasWorker
+      ? assignment.name || (!['bufor', 'buffer', 'do obsadzenia'].includes(rawLabelKey) ? rawLabel : '') || ordersWorkerRowLabel(row, resources)
+      : rawLabel || `Osoba ${index + 1}`
     return {
       id: slotId,
       slotId,
@@ -1468,6 +1385,27 @@ export function createOrdersFeature(ctx) {
       return orderAllocations
     }
 
+    const blockSlots = Array.isArray(block?.slots) ? block.slots : []
+    const blockSlotKeys = new Set(
+      blockSlots.flatMap((slot, index) => ordersServiceSlotKeyCandidates(slot, block, index)),
+    )
+    if (blockSlotKeys.size) {
+      const matchedBySlot = orderAllocations.filter((allocation) => {
+        const allocationKeys = [
+          allocation?.key,
+          allocation?.slotId,
+          allocation?.workSlotId,
+          allocation?.id,
+        ]
+          .map((value) => String(value ?? '').trim())
+          .filter(Boolean)
+        return allocationKeys.some((key) => blockSlotKeys.has(key))
+      })
+      if (matchedBySlot.length) {
+        return matchedBySlot
+      }
+    }
+
     return Array.isArray(block?.workAllocations) && block.workAllocations.length
       ? block.workAllocations
       : Array.isArray(block?.workerAllocations) && block.workerAllocations.length
@@ -1507,16 +1445,33 @@ export function createOrdersFeature(ctx) {
     const allocationRow = Number(allocation?.row ?? allocation?.rowIndex)
     const rowIsWorker = Number.isInteger(allocationRow) && resources[allocationRow]?.type === 'worker'
     const allocationType = String(allocation?.type ?? '').trim().toLowerCase()
+    const unassignedTypes = ['buffer', 'bufor', 'unassigned', 'empty']
+    const resolvedWorkerRow = ordersWorkerRowFromAssignmentLike(
+      {
+        ...allocation,
+        name: allocation?.name ?? allocation?.workerName ?? allocation?.label,
+        label: allocation?.label ?? allocation?.name ?? allocation?.workerName,
+      },
+      resources,
+    )
     const hasWorker = allocationType === 'worker' || (
       rowIsWorker &&
-      allocationType !== 'buffer' &&
-      allocationType !== 'bufor' &&
-      allocationType !== 'unassigned'
-    )
+      !unassignedTypes.includes(allocationType)
+    ) || (!unassignedTypes.includes(allocationType) && Number.isInteger(resolvedWorkerRow))
+    const row = hasWorker
+      ? Number.isInteger(resolvedWorkerRow)
+        ? resolvedWorkerRow
+        : Number.isInteger(allocationRow)
+          ? allocationRow
+          : slot?.row
+      : Number.isInteger(allocationRow)
+        ? allocationRow
+        : slot?.row
+    const assignment = hasWorker ? ordersWorkerAssignmentsFromRows([row], resources)[0] ?? {} : {}
     const slotId = String(slot?.slotId ?? slot?.id ?? allocation?.slotId ?? `${ORDERS_SERVICE_SLOT_PREFIX}-${index + 1}`).trim()
     const label = String(
       hasWorker
-        ? allocation?.label ?? allocation?.name ?? slot?.label ?? slot?.name ?? ''
+        ? assignment.name ?? allocation?.label ?? allocation?.name ?? slot?.label ?? slot?.name ?? ''
         : slot?.label ?? slot?.name ?? allocation?.label ?? allocation?.name ?? '',
     ).trim()
     return {
@@ -1524,13 +1479,13 @@ export function createOrdersFeature(ctx) {
       id: slot?.id || slotId,
       slotId,
       key: String(allocation?.key ?? slot?.key ?? '').trim(),
-      row: Number.isInteger(allocationRow) ? allocationRow : slot?.row,
+      row,
       type: hasWorker ? 'worker' : 'unassigned',
       label,
-      name: String(allocation?.name ?? label ?? slot?.name ?? '').trim(),
-      workerId: hasWorker ? String(allocation?.workerId ?? slot?.workerId ?? '').trim() : '',
-      workerLogin: hasWorker ? String(allocation?.workerLogin ?? slot?.workerLogin ?? '').trim() : '',
-      workerKey: hasWorker ? String(allocation?.workerKey ?? slot?.workerKey ?? '').trim() : '',
+      name: String(assignment.name ?? allocation?.name ?? label ?? slot?.name ?? '').trim(),
+      workerId: hasWorker ? String(allocation?.workerId ?? slot?.workerId ?? assignment.workerId ?? '').trim() : '',
+      workerLogin: hasWorker ? String(allocation?.workerLogin ?? slot?.workerLogin ?? assignment.workerLogin ?? '').trim() : '',
+      workerKey: hasWorker ? String(allocation?.workerKey ?? slot?.workerKey ?? assignment.key ?? '').trim() : '',
       minutes: allocation?.minutes ?? allocation?.workMinutes ?? slot?.minutes,
       dateYmd: slot?.dateYmd ?? slot?.planDateYmd ?? allocation?.dateYmd ?? allocation?.planDateYmd ?? allocation?.startDateYmd,
       planDateYmd: slot?.planDateYmd ?? slot?.dateYmd ?? allocation?.planDateYmd ?? allocation?.dateYmd,
@@ -1569,23 +1524,63 @@ export function createOrdersFeature(ctx) {
     })
   }
 
+  function ordersServiceSlotsHaveAssignedWorker(slots = []) {
+    return Array.isArray(slots) && slots.some((slot) => String(slot?.type ?? '') === 'worker')
+  }
+
+  function ordersFillEmptyServiceSlotsFromOrderAssignments(slots = [], order = {}, resources = calendarTimelineResources()) {
+    const normalizedSlots = Array.isArray(slots) ? slots : []
+    if (!normalizedSlots.length || ordersServiceSlotsHaveAssignedWorker(normalizedSlots)) {
+      return normalizedSlots
+    }
+
+    const assignmentRows = ordersStoredAssignmentRows(order, resources)
+      .filter((row) => Number.isInteger(row) && ordersResourceCanBeAssigned(resources[row]))
+    if (!assignmentRows.length) {
+      return normalizedSlots
+    }
+
+    let cursor = 0
+    return normalizedSlots.map((slot) => {
+      const row = assignmentRows[cursor]
+      if (!Number.isInteger(row)) {
+        return slot
+      }
+      cursor += 1
+      const assignment = ordersWorkerAssignmentsFromRows([row], resources)[0] ?? {}
+      const workerLabel = assignment.name || ordersWorkerRowLabel(row, resources) || slot?.label || ''
+      return {
+        ...slot,
+        row,
+        type: 'worker',
+        label: workerLabel,
+        name: workerLabel,
+        workerId: assignment.workerId || slot?.workerId || '',
+        workerLogin: assignment.workerLogin || slot?.workerLogin || '',
+        workerKey: assignment.key || slot?.workerKey || '',
+      }
+    })
+  }
+
   function ordersServiceBlockSlots(block = {}, resources = calendarTimelineResources(), order = {}) {
     const directSlots = Array.isArray(block?.slots) ? block.slots : []
     const allocationSource = ordersServiceBlockAllocationSource(block, order)
     if (directSlots.length) {
-      return ordersServiceSlotsWithAllocations(directSlots, allocationSource, block, resources)
+      const slots = ordersServiceSlotsWithAllocations(directSlots, allocationSource, block, resources)
         .map((slot, index) => ordersNormalizeServiceSlot(slot, block, resources, index))
+      return ordersFillEmptyServiceSlotsFromOrderAssignments(slots, order, resources)
     }
 
     if (allocationSource.length) {
-      return allocationSource.map((slot, index) => ordersNormalizeServiceSlot(slot, block, resources, index))
+      const slots = allocationSource.map((slot, index) => ordersNormalizeServiceSlot(slot, block, resources, index))
+      return ordersFillEmptyServiceSlotsFromOrderAssignments(slots, order, resources)
     }
 
     const rows = ordersServiceBlockWorkerRows(block, resources, null)
     const requiredPeople = Math.max(1, Math.min(20, Math.floor(Number(block?.requiredPeople ?? block?.requiredWorkers ?? block?.workerSlots) || Number(order?.requiredPeople) || 1)))
     const totalMinutes = Math.max(15, Math.round(Number(block?.requiredWorkMinutes ?? block?.serviceWorkMinutes) || ordersServiceBlockDurationMinutes(block) * requiredPeople))
     const split = ordersSplitMinutesEvenly(totalMinutes, requiredPeople)
-    return Array.from({ length: requiredPeople }, (_, index) => {
+    const slots = Array.from({ length: requiredPeople }, (_, index) => {
       const row = rows[index]
       return ordersNormalizeServiceSlot(
         {
@@ -1601,6 +1596,7 @@ export function createOrdersFeature(ctx) {
         index,
       )
     })
+    return ordersFillEmptyServiceSlotsFromOrderAssignments(slots, order, resources)
   }
 
   function ordersServiceBlockAllocations(block = {}, resources = calendarTimelineResources(), fallbackOrder = null) {
@@ -1763,8 +1759,8 @@ export function createOrdersFeature(ctx) {
     if (firstBlock) {
       order.startTime = firstBlock.startTime
       order.endTime = firstBlock.endTime
-      order.accessStartTime = ordersWeeklyAccessWindowsForOrder(order).find((window) => window.available)?.accessStartTime || ORDERS_DEFAULT_ACCESS_START
-      order.accessEndTime = ordersWeeklyAccessWindowsForOrder(order).find((window) => window.available)?.accessEndTime || ORDERS_DEFAULT_ACCESS_END
+      order.accessStartTime = firstBlock.startTime
+      order.accessEndTime = firstBlock.endTime
       order.requiredPeople = Math.max(1, totalPeople || firstBlock.requiredPeople)
       order.requiredWorkers = order.requiredPeople
       order.workerSlots = order.requiredPeople
@@ -1842,9 +1838,38 @@ export function createOrdersFeature(ctx) {
     return weekdays.length ? weekdays : ordersRepeatWeekdaysFromOrder(order)
   }
 
+  function ordersEditorControlOrderId(order = {}) {
+    return String(order?.id ?? order?.sourceOrderId ?? order?.orderId ?? appState.ordersEditingId ?? '').trim()
+  }
+
+  function ordersEditorPanelIsVisible() {
+    const panel = document.getElementById('ordersEditorPanel')
+    if (!(panel instanceof HTMLElement) || panel.hidden) {
+      return false
+    }
+    const rect = panel.getBoundingClientRect()
+    return rect.width > 0 && rect.height > 0
+  }
+
+  function ordersEditorControlsBelongToOrder(order = {}) {
+    if (!ordersEditorPanelIsVisible()) {
+      return false
+    }
+    const rows = document.getElementById('ordersWorkAllocationRows')
+    if (!(rows instanceof HTMLElement)) {
+      return false
+    }
+    const currentOrderId = ordersEditorControlOrderId(order)
+    const controlsOrderId = String(rows.getAttribute('data-orders-editor-order-id') ?? '').trim()
+    return Boolean(currentOrderId && controlsOrderId && currentOrderId === controlsOrderId)
+  }
+
   function ordersReadServiceBlocksFromControls(order = {}) {
     const cards = [...document.querySelectorAll('#ordersWorkAllocationRows [data-orders-service-block]')]
     if (!cards.length) {
+      return []
+    }
+    if (!ordersEditorControlsBelongToOrder(order)) {
       return []
     }
     const controlOrder = { ...order, workAllocations: [], workerAllocations: [] }
@@ -1873,7 +1898,10 @@ export function createOrdersFeature(ctx) {
             const slotLabel = slotNode.querySelector('[data-orders-service-slot-label]')
             const slotHours = slotNode.querySelector('[data-orders-service-slot-hours]')
             const slotWorker = slotNode.querySelector('[data-orders-service-slot-worker]')
-            const row = slotWorker instanceof HTMLSelectElement && slotWorker.value !== '' ? Number(slotWorker.value) : null
+            const workerRow = slotWorker instanceof HTMLSelectElement && slotWorker.value !== '' ? Number(slotWorker.value) : null
+            const labelValue = slotLabel instanceof HTMLSelectElement ? String(slotLabel.value ?? '').trim() : ''
+            const labelRow = labelValue.startsWith('row:') ? Number(labelValue.slice(4)) : null
+            const row = Number.isInteger(workerRow) ? workerRow : Number.isInteger(labelRow) ? labelRow : null
             const rawMinutes = Math.max(0, Math.round((Number(slotHours instanceof HTMLInputElement ? slotHours.value : 0) || 0) * 60))
             const previousDefaultMinutes = Number(slotHours instanceof HTMLInputElement ? slotHours.getAttribute('data-orders-service-slot-default-minutes') : 0)
             const minutes = Number.isFinite(previousDefaultMinutes) && previousDefaultMinutes > 0 && rawMinutes === previousDefaultMinutes
@@ -1976,17 +2004,14 @@ export function createOrdersFeature(ctx) {
     }, 180)
   }
 
-  function ordersServiceBlockWeekdaysHtml(block = {}, accessWindows = []) {
+  function ordersServiceBlockWeekdaysHtml(block = {}, _accessWindows = []) {
     const selected = new Set((Array.isArray(block.weekdays) ? block.weekdays : []).map((weekday) => Number(weekday)))
-    const accessByDay = new Map(accessWindows.map((window) => [Number(window.weekday), window]))
     const shortLabels = { 0: 'Nd', 1: 'Pn', 2: 'Wt', 3: 'Śr', 4: 'Cz', 5: 'Pt', 6: 'So' }
     return ORDERS_ALL_REPEAT_WEEKDAYS.map((weekday) => {
-      const access = accessByDay.get(weekday)
-      const available = Boolean(access?.available)
-      const checked = available && selected.has(weekday)
+      const checked = selected.has(weekday)
       return `
-        <label class="orders-service-weekday${available ? '' : ' is-disabled'}" title="${escapeHtml(ordersWeekdayLabel(weekday))}">
-          <input type="checkbox" data-orders-service-weekday="${weekday}"${checked ? ' checked' : ''}${available ? '' : ' disabled'} />
+        <label class="orders-service-weekday" title="${escapeHtml(ordersWeekdayLabel(weekday))}">
+          <input type="checkbox" data-orders-service-weekday="${weekday}"${checked ? ' checked' : ''} />
           <span>${escapeHtml(shortLabels[weekday] || ordersWeekdayLabel(weekday).slice(0, 2))}</span>
         </label>
       `
@@ -2152,10 +2177,15 @@ export function createOrdersFeature(ctx) {
       const slotKey = slot.slotId || slot.id || `${ORDERS_SERVICE_SLOT_PREFIX}-${index + 1}`
       const peopleCount = slots.length
       const slotMinutes = Math.max(15, Math.round(Number(slot.minutes ?? blockDuration) || blockDuration))
+      const statusLabel = occupied ? 'Obsadzone' : `Osoba ${index + 1} z ${peopleCount}`
+      const summaryLabel = occupied ? workerLabel || 'Przypisany pracownik' : 'Trafi do BUFORU'
       return `
         <article class="orders-team-slot-card orders-kanban-slot-card${occupied ? ' is-filled' : ' is-empty'}" data-orders-service-slot="${escapeHtml(slotKey)}">
           <div class="orders-kanban-slot-top">
-            <span class="orders-kanban-slot-badge">${occupied ? 'Obsadzone' : `Osoba ${index + 1} z ${peopleCount}`}</span>
+            <div class="orders-kanban-slot-title">
+              <span class="orders-kanban-slot-badge">${escapeHtml(statusLabel)}</span>
+              <span class="orders-kanban-slot-hours-pill">${escapeHtml(ordersHoursInputValue(slotMinutes))} rbh</span>
+            </div>
             <span class="orders-kanban-slot-check${occupied ? ' is-assigned' : ' is-open'}" aria-hidden="true">${occupied ? '&#10003;' : '&#9675;'}</span>
           </div>
           <label class="orders-field orders-kanban-slot-name">
@@ -2173,8 +2203,8 @@ export function createOrdersFeature(ctx) {
             </label>
           </div>
           <div class="orders-kanban-slot-foot">
-            <span>${escapeHtml(ordersHoursInputValue(slotMinutes))} rbh</span>
-            <span class="orders-kanban-slot-avatar" title="${escapeHtml(workerLabel || 'Nieobsadzone')}">${escapeHtml(occupied ? ordersWorkerInitials(workerLabel) : '?')}</span>
+            <span class="orders-kanban-slot-summary">${escapeHtml(summaryLabel)}</span>
+            <span class="orders-kanban-slot-avatar" title="${escapeHtml(workerLabel || 'Nieobsadzone')}">${escapeHtml(occupied ? ordersWorkerInitials(workerLabel) : 'BUF')}</span>
             <button type="button" class="orders-team-slot-remove" data-orders-service-slot-remove="${escapeHtml(slotKey)}" ${slots.length <= 1 ? 'disabled' : ''}>Usuń</button>
           </div>
         </article>
@@ -2313,7 +2343,6 @@ export function createOrdersFeature(ctx) {
     if (!rows) {
       return
     }
-    const accessWindows = ordersDefaultWeeklyAccessWindows(order)
     const controlBlocks = preferStored ? [] : ordersReadServiceBlocksFromControls(order)
     const blocks = ordersStoreServiceBlocks(order, controlBlocks.length ? controlBlocks : ordersServiceBlocksForOrder(order))
     if (typeof ordersServiceBlocksScrollCleanup === 'function') {
@@ -2321,10 +2350,16 @@ export function createOrdersFeature(ctx) {
       ordersServiceBlocksScrollCleanup = null
     }
     document.getElementById('ordersServiceBlocksStickyScroll')?.remove()
+    const controlOrderId = ordersEditorControlOrderId(order)
+    if (controlOrderId) {
+      rows.setAttribute('data-orders-editor-order-id', controlOrderId)
+    } else {
+      rows.removeAttribute('data-orders-editor-order-id')
+    }
     rows.innerHTML = `
       <div class="orders-service-blocks-board" data-orders-service-blocks-board>
         <div class="orders-service-blocks-list" data-orders-service-blocks-list>
-          ${blocks.map((block, index) => ordersServiceBlockCardHtml(block, accessWindows, calendarTimelineResources(), index, blocks.length, ordersScheduleModeForOrder(order))).join('')}
+          ${blocks.map((block, index) => ordersServiceBlockCardHtml(block, [], calendarTimelineResources(), index, blocks.length, ordersScheduleModeForOrder(order))).join('')}
           <button type="button" class="orders-kanban-add-column" data-orders-service-add>
             <span>+</span>
             <strong>Dodaj zmianę</strong>
@@ -2372,7 +2407,7 @@ export function createOrdersFeature(ctx) {
       : Array.isArray(order.workerAllocations)
         ? order.workerAllocations
         : []
-    const access = ordersAccessWindowRange(order)
+    const access = ordersPrimaryTimeWindowRange(order)
     const map = new Map()
     rows.forEach((item) => {
       const key = String(item?.key ?? '').trim()
@@ -2404,7 +2439,7 @@ export function createOrdersFeature(ctx) {
     const values = canUseExisting
       ? safeSubjects.map((subject) => existing.get(subject.key)?.minutes || 0)
       : ordersSplitMinutesEvenly(total, safeSubjects.length)
-    const access = ordersAccessWindowRange(order)
+    const access = ordersPrimaryTimeWindowRange(order)
     return safeSubjects.map((subject, index) => {
       const minutes = Math.max(0, Math.round(Number(values[index]) || 0))
       const startTime = access.startTime
@@ -2457,19 +2492,19 @@ export function createOrdersFeature(ctx) {
     return subjects.map((subject) => ({
       ...subject,
       minutes: values.has(subject.key) ? values.get(subject.key) : fallback.find((item) => item.key === subject.key)?.minutes || 0,
-      startTime: starts.get(subject.key) || fallback.find((item) => item.key === subject.key)?.startTime || ordersAccessWindowRange(order).startTime,
+      startTime: starts.get(subject.key) || fallback.find((item) => item.key === subject.key)?.startTime || ordersPrimaryTimeWindowRange(order).startTime,
       endTime:
         ends.get(subject.key) ||
         fallback.find((item) => item.key === subject.key)?.endTime ||
         ordersAllocationEndTimeFromMinutes(
-          starts.get(subject.key) || fallback.find((item) => item.key === subject.key)?.startTime || ordersAccessWindowRange(order).startTime,
+          starts.get(subject.key) || fallback.find((item) => item.key === subject.key)?.startTime || ordersPrimaryTimeWindowRange(order).startTime,
           values.get(subject.key) || fallback.find((item) => item.key === subject.key)?.minutes || 60,
         ),
     }))
   }
   
   function ordersStoreWorkAllocations(order = {}, allocations = []) {
-    const access = ordersAccessWindowRange(order)
+    const access = ordersPrimaryTimeWindowRange(order)
     const safe = (Array.isArray(allocations) ? allocations : [])
       .map((item) => {
         const minutes = Math.max(0, Math.round(Number(item?.minutes) || 0))
@@ -2769,19 +2804,6 @@ export function createOrdersFeature(ctx) {
     ordersRenderEditorWizard(order)
   }
 
-  function ordersServiceBlockFitsAccess(order = {}, block = {}) {
-    return (Array.isArray(block.weekdays) ? block.weekdays : []).every((weekday) =>
-      ordersAllocationFitsAccess(
-        order,
-        {
-          startTime: block.startTime,
-          minutes: ordersServiceBlockDurationMinutes(block),
-        },
-        weekday,
-      ),
-    )
-  }
-
   function ordersServiceBlocksOverlap(left = {}, right = {}) {
     const leftIsOnce = String(left?.scheduleMode ?? '').trim() === 'once'
     const rightIsOnce = String(right?.scheduleMode ?? '').trim() === 'once'
@@ -2823,15 +2845,10 @@ export function createOrdersFeature(ctx) {
   }
 
   function ordersValidateServiceBlocksForOrder(order = {}) {
-    const mode = ordersScheduleModeForOrder(order)
     const controlBlocks = ordersReadServiceBlocksFromControls(order)
     const blocks = controlBlocks.length ? controlBlocks : ordersServiceBlocksForOrder(order)
     if (!blocks.length) {
       return { valid: false, message: 'Dodaj co najmniej jeden zespół lub zmianę.' }
-    }
-    const accessDays = mode === 'repeat' ? ordersAvailableAccessWeekdays(order) : []
-    if (mode === 'repeat' && !accessDays.length) {
-      return { valid: false, message: 'W ogólnym dostępie do obiektu musi być co najmniej jeden dzień dostępny.' }
     }
     for (const block of blocks) {
       const blockLabel = String(block.label ?? '').trim() || 'Zespół'
@@ -2867,12 +2884,6 @@ export function createOrdersFeature(ctx) {
       if (workerSlotRows.some((row, rowIndex) => workerSlotRows.indexOf(row) !== rowIndex)) {
         return { valid: false, message: `${block.label}: ten sam pracownik jest przypisany do więcej niż jednego slotu.` }
       }
-      if (mode === 'repeat' && block.scheduleMode !== 'once' && !block.weekdays.every((weekday) => accessDays.includes(weekday))) {
-        return { valid: false, message: `${block.label}: wybrano dzień bez dostępu do obiektu.` }
-      }
-      if (mode === 'repeat' && block.scheduleMode !== 'once' && !ordersServiceBlockFitsAccess(order, block)) {
-        return { valid: false, message: `${block.label}: godziny serwisu są poza ogólnym dostępem do obiektu.` }
-      }
     }
     const conflict = ordersServiceBlockWorkerConflict(blocks)
     if (conflict) {
@@ -2889,16 +2900,9 @@ export function createOrdersFeature(ctx) {
     const allocations = ordersReadWorkAllocationsFromControls(order)
     const total = ordersWorkTargetTotalMinutes(order)
     const assigned = allocations.reduce((sum, item) => sum + Math.max(0, Number(item.minutes) || 0), 0)
-    const accessMinutes = ordersAccessWindowMinutes(allocationBaseOrder)
-    const overAccess = allocations.some((item) => item.minutes > accessMinutes)
-    const outsideAccess = allocations.some((item) => !ordersAllocationFitsAccess(order, item))
     const mismatch = Math.abs(assigned - total) > 0
-    summary.classList.toggle('is-error', mismatch || overAccess || outsideAccess)
-    summary.textContent = outsideAccess
-      ? 'Plan pracy osoby musi mieścić się w godzinach dostępu do obiektu.'
-      : overAccess
-      ? `Przydział jednej osoby przekracza okno dostępu (${ordersFormatWorkMinutes(accessMinutes)}).`
-      : `Przydzielono ${ordersFormatWorkMinutes(assigned)} / ${ordersFormatWorkMinutes(total)}.`
+    summary.classList.toggle('is-error', mismatch)
+    summary.textContent = `Przydzielono ${ordersFormatWorkMinutes(assigned)} / ${ordersFormatWorkMinutes(total)}.`
     ordersStoreWorkAllocations(order, allocations)
   }
   
@@ -4734,7 +4738,11 @@ export function createOrdersFeature(ctx) {
     const selected = ordersReadInputValue('ordersEditClient')
     const selectedKey = normalizeSearchText(selected)
     const rawQuery = String(queryValue ?? '').trim()
-    const query = normalizeSearchText(rawQuery) === selectedKey ? '' : normalizeSearchText(rawQuery)
+    const rawQueryKey = normalizeSearchText(rawQuery)
+    const selectedDisplayKey = ordersIsIndividualClientSelection(selected)
+      ? normalizeSearchText(ORDERS_INDIVIDUAL_CLIENT_LABEL)
+      : selectedKey
+    const query = rawQueryKey === selectedKey || rawQueryKey === selectedDisplayKey ? '' : rawQueryKey
     const rows = ordersClientPickerRows().filter((row) => {
       if (!query) {
         return true
@@ -5261,12 +5269,12 @@ export function createOrdersFeature(ctx) {
   function ordersCreateDraftOrder(dayKey = todayYmd()) {
     const draftDay = ordersNormalizeDateField(dayKey, todayYmd())
     const startTime = ordersDefaultStartTime()
-    const row = 0
+    const row = ordersServiceBlockBufferRow()
     return {
       id: ordersNextOrderId(),
       row,
-      assignedRows: [row],
-      workerAssignments: ordersWorkerAssignmentsFromRows([row]),
+      assignedRows: [],
+      workerAssignments: [],
       dateYmd: draftDay,
       startTime,
       endDateYmd: draftDay,
@@ -5287,7 +5295,11 @@ export function createOrdersFeature(ctx) {
       validUntil: draftDay,
       nextDate: draftDay,
       title: 'Nowe zlecenie',
+      clientId: '',
       clientLabel: '',
+      clientName: '',
+      clientType: 'individual',
+      customerType: 'individual',
       addressLabel: '',
       type: 'individual',
       tone: ordersTimelineToneForType('individual'),
@@ -6135,16 +6147,11 @@ export function createOrdersFeature(ctx) {
   function ordersEditorScheduleFieldsValidation(order = {}, mode = ordersScheduleModeForOrder(order)) {
     const startDate = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), '')
     const endDate = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), '')
-    const startTime = calendarNormalizeTimeValue(ordersReadInputValue('ordersEditTime'))
-    const endTime = calendarNormalizeTimeValue(ordersReadInputValue('ordersEditEndTime'))
     if (!startDate) {
       return { valid: false, message: 'Podaj datę START.' }
     }
     if (mode !== 'repeat' && !endDate) {
       return { valid: false, message: 'Podaj datę STOP dla zlecenia jednorazowego.' }
-    }
-    if (!startTime || !endTime) {
-      return { valid: false, message: 'Podaj godziny pracy lub dostępu do obiektu.' }
     }
     if (mode === 'repeat' && endDate && endDate < startDate) {
       return { valid: false, message: 'Data końca cyklu nie może być wcześniejsza niż data START.' }
@@ -6152,9 +6159,6 @@ export function createOrdersFeature(ctx) {
     const safeEndDate = mode === 'repeat' ? startDate : endDate
     if (mode !== 'repeat' && safeEndDate < startDate) {
       return { valid: false, message: 'Data STOP nie może być wcześniejsza niż data START.' }
-    }
-    if (safeEndDate === startDate && calendarTimelineTimeMinutes(endTime, 0) <= calendarTimelineTimeMinutes(startTime, 0)) {
-      return { valid: false, message: 'Godzina STOP musi być późniejsza niż godzina START.' }
     }
     return { valid: true, message: '' }
   }
@@ -6190,29 +6194,7 @@ export function createOrdersFeature(ctx) {
       }
     }
     if (step === 'schedule') {
-      const startDate = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), '')
-      const endDate = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), '')
-      const startTime = calendarNormalizeTimeValue(ordersReadInputValue('ordersEditTime'))
-      const endTime = calendarNormalizeTimeValue(ordersReadInputValue('ordersEditEndTime'))
-      if (!startDate) {
-        return { valid: false, message: 'Podaj datę START.' }
-      }
-      if (mode !== 'repeat' && !endDate) {
-        return { valid: false, message: 'Podaj datę STOP dla zlecenia jednorazowego.' }
-      }
-      if (!startTime || !endTime) {
-        return { valid: false, message: 'Podaj godziny pracy lub dostępu do obiektu.' }
-      }
-      if (mode === 'repeat' && endDate && endDate < startDate) {
-        return { valid: false, message: 'Data końca cyklu nie może być wcześniejsza niż data START.' }
-      }
-      const safeEndDate = mode === 'repeat' ? startDate : endDate
-      if (mode !== 'repeat' && safeEndDate < startDate) {
-        return { valid: false, message: 'Data STOP nie może być wcześniejsza niż data START.' }
-      }
-      if (safeEndDate === startDate && calendarTimelineTimeMinutes(endTime, 0) <= calendarTimelineTimeMinutes(startTime, 0)) {
-        return { valid: false, message: 'Godzina STOP musi być późniejsza niż godzina START.' }
-      }
+      return ordersEditorScheduleFieldsValidation(order, mode)
     }
     if (step === 'staffing') {
       const scheduleResult = ordersEditorScheduleFieldsValidation(order, mode)
@@ -6371,13 +6353,14 @@ export function createOrdersFeature(ctx) {
     const mode = document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat' ? 'repeat' : ordersScheduleModeForOrder(order)
     const startDate = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), order.dateYmd || todayYmd())
     const endDate = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), '')
-    const startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), order.startTime || '08:00')
-    const endTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(startTime))
-    const scheduleText = mode === 'repeat'
-      ? `Cykliczne od ${formatDatePl(`${startDate}T12:00:00`)}${endDate ? ` do ${formatDatePl(`${endDate}T12:00:00`)}` : ''}, dostęp ${startTime}-${endTime}`
-      : `Jednorazowe ${formatDatePl(`${startDate}T12:00:00`)} ${startTime}-${endTime}`
     const summaryServiceBlocks = ordersReadServiceBlocksFromControls(order)
     const effectiveSummaryBlocks = summaryServiceBlocks.length ? summaryServiceBlocks : ordersServiceBlocksForOrder(order)
+    const summaryTiming = ordersPrimaryServiceBlockTiming(order, effectiveSummaryBlocks)
+    const startTime = summaryTiming.startTime
+    const endTime = summaryTiming.endTime
+    const scheduleText = mode === 'repeat'
+      ? `Cykliczne od ${formatDatePl(`${startDate}T12:00:00`)}${endDate ? ` do ${formatDatePl(`${endDate}T12:00:00`)}` : ''}, plan ${startTime}-${endTime}`
+      : `Jednorazowe ${formatDatePl(`${startDate}T12:00:00`)} ${startTime}-${endTime}`
     const workerSummary = ordersWizardSummaryText(ordersServiceBlocksWorkerSummary(effectiveSummaryBlocks), 'BUFOR')
     const { totalWorkMinutes, totalPeople } = ordersServiceBlocksTotals(effectiveSummaryBlocks, order)
     const workText = `${ordersHoursInputValue(totalWorkMinutes)} rbh, ${totalPeople} os.`
@@ -6471,23 +6454,15 @@ export function createOrdersFeature(ctx) {
       endDateLabel.textContent = isRepeat ? 'Data końca cyklu' : 'Data STOP *'
     }
     if (startLabel) {
-      startLabel.textContent = isRepeat ? 'Dostęp do obiektu od *' : 'Godzina START *'
+      startLabel.textContent = 'Godzina START *'
     }
     if (endLabel) {
-      endLabel.textContent = isRepeat ? 'Dostęp do obiektu do *' : 'Godzina STOP *'
+      endLabel.textContent = 'Godzina STOP *'
     }
   }
   
-  function ordersSetScheduleTimeVisible(visible = true) {
-    const grid = document.getElementById('ordersScheduleTimeGrid')
-    const button = document.getElementById('ordersScheduleTimeToggle')
-    if (grid) {
-      grid.hidden = !visible
-    }
-    if (button) {
-      button.setAttribute('aria-pressed', visible ? 'true' : 'false')
-      button.classList.toggle('is-active', Boolean(visible))
-    }
+  function ordersSetScheduleTimeVisible(_visible = false) {
+    // Czas realizacji zlecenia wyznaczaja teraz wylacznie karty zmian.
   }
   
   function ordersRepeatUnitLabel(unit = 'day', every = 1) {
@@ -6745,46 +6720,9 @@ export function createOrdersFeature(ctx) {
     return ordersWeeklyPatternRulesForWeekdays(sourceOrder, weekdays)
   }
   
-  function ordersWeeklyPatternAccessMinutes(rule = {}) {
-    return ordersTimeWindowMinutes(rule.accessStartTime || rule.startTime, rule.accessEndTime || rule.endTime)
-  }
-  
-  function ordersWeeklyPatternMinPeople(rule = {}) {
-    const accessMinutes = ordersWeeklyPatternAccessMinutes(rule)
-    const workMinutes = Math.max(15, Math.round(Number(rule.requiredWorkMinutes ?? rule.workMinutes) || 0))
-    return Math.max(1, Math.ceil(workMinutes / Math.max(15, accessMinutes)))
-  }
-  
-  function ordersWeeklyPatternFitsObjectAccess(order = {}, rule = {}) {
-    const weekday = ordersNormalizeWeekday(rule.weekday ?? rule.day)
-    if (weekday === null) {
-      return true
-    }
-    return ordersAllocationFitsAccess(
-      order,
-      {
-        startTime: rule.accessStartTime || rule.startTime,
-        minutes: ordersTimeWindowMinutes(rule.accessStartTime || rule.startTime, rule.accessEndTime || rule.endTime),
-      },
-      weekday,
-    )
-  }
-  
   function ordersWeeklyPatternStatus(rule = {}, order = {}) {
+    void order
     const people = Math.max(1, Math.floor(Number(rule.requiredPeople ?? rule.workerSlots) || 1))
-    const minPeople = ordersWeeklyPatternMinPeople(rule)
-    if (people < minPeople) {
-      return {
-        kind: 'error',
-        text: `Minimum ${minPeople} os. przy oknie ${ordersFormatWorkMinutes(ordersWeeklyPatternAccessMinutes(rule))}.`,
-      }
-    }
-    if (!ordersWeeklyPatternFitsObjectAccess(order, rule)) {
-      return {
-        kind: 'error',
-        text: 'Poza ogólnym dostępem do obiektu.',
-      }
-    }
     return {
       kind: 'ok',
       text: `${people} os. po ok. ${ordersFormatWorkMinutes(Math.ceil((Number(rule.requiredWorkMinutes) || 0) / people))}.`,
@@ -6828,11 +6766,11 @@ export function createOrdersFeature(ctx) {
           <div class="orders-weekly-pattern-row${status.kind === 'error' ? ' is-invalid' : ''}" data-orders-weekly-pattern-row data-orders-weekday="${rule.weekday}">
             <strong>${escapeHtml(rule.label)}</strong>
             <label>
-              <span>Dostęp od</span>
+              <span>START</span>
               <input type="time" value="${escapeHtml(rule.accessStartTime)}" data-orders-weekly-pattern-start />
             </label>
             <label>
-              <span>Dostęp do</span>
+              <span>STOP</span>
               <input type="time" value="${escapeHtml(rule.accessEndTime)}" data-orders-weekly-pattern-end />
             </label>
             <label>
@@ -6962,6 +6900,7 @@ export function createOrdersFeature(ctx) {
   
   function ordersSyncScheduleMirrorFields(order = {}) {
     const mode = ordersScheduleModeForOrder(order)
+    const timing = ordersPrimaryServiceBlockTiming(order)
     ordersSetInputValue('ordersScheduleStartDate', ordersNormalizeDateField(order.dateYmd, todayYmd()))
     ordersSetInputValue(
       'ordersScheduleEndDate',
@@ -6969,8 +6908,8 @@ export function createOrdersFeature(ctx) {
         ? ordersRepeatEndDateForOrder(order)
         : ordersNormalizeDateField(order.endDateYmd || order.validUntil || order.dateYmd, order.dateYmd || todayYmd()),
     )
-    ordersSetInputValue('ordersScheduleStartTime', ordersNormalizeTimeField(order.startTime, '08:00'))
-    ordersSetInputValue('ordersScheduleEndTime', ordersNormalizeTimeField(order.endTime, ordersDefaultEndTime(order.startTime)))
+    ordersSetInputValue('ordersScheduleStartTime', timing.startTime)
+    ordersSetInputValue('ordersScheduleEndTime', timing.endTime)
   }
   
   function ordersSyncScheduleControls(order = {}) {
@@ -6978,7 +6917,7 @@ export function createOrdersFeature(ctx) {
     ordersSetScheduleModeValue(mode)
     ordersSetScheduleRepeatDisabled(mode !== 'repeat')
     ordersSyncScheduleTimeLabels(mode)
-    ordersSetScheduleTimeVisible(mode !== 'repeat')
+    ordersSetScheduleTimeVisible(false)
     ordersSyncScheduleMirrorFields(order)
     ordersSetInputValue('ordersEditWorkHours', ordersHoursInputValue(ordersStoredWorkMinutes(order)))
     ordersSetInputValue('ordersEditRequiredPeople', order.requiredPeople || order.requiredWorkers || order.workerSlots || 1)
@@ -7004,12 +6943,8 @@ export function createOrdersFeature(ctx) {
     const pairs = {
       ordersScheduleStartDate: 'ordersEditStart',
       ordersScheduleEndDate: 'ordersEditEnd',
-      ordersScheduleStartTime: 'ordersEditTime',
-      ordersScheduleEndTime: 'ordersEditEndTime',
       ordersEditStart: 'ordersScheduleStartDate',
       ordersEditEnd: 'ordersScheduleEndDate',
-      ordersEditTime: 'ordersScheduleStartTime',
-      ordersEditEndTime: 'ordersScheduleEndTime',
     }
     const pairedId = pairs[targetId]
     if (pairedId) {
@@ -7031,8 +6966,9 @@ export function createOrdersFeature(ctx) {
     order.repeatEndDate = mode === 'repeat' ? rawEndDate : ''
     order.recurrenceEndDate = mode === 'repeat' ? rawEndDate : ''
     order.seriesEndDate = mode === 'repeat' ? rawEndDate : ''
-    order.startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), order.startTime || '08:00')
-    order.endTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(order.startTime))
+    const primaryTiming = ordersPrimaryServiceBlockTiming(order)
+    order.startTime = primaryTiming.startTime
+    order.endTime = primaryTiming.endTime
     order.accessStartTime = order.startTime
     order.accessEndTime = order.endTime
     ordersClearAccessWindows(order)
@@ -7073,7 +7009,7 @@ export function createOrdersFeature(ctx) {
     ordersSetInputValue('ordersEditType', order.type)
     ordersSetScheduleRepeatDisabled(mode !== 'repeat')
     ordersSyncScheduleTimeLabels(mode)
-    ordersSetScheduleTimeVisible(mode !== 'repeat')
+    ordersSetScheduleTimeVisible(false)
     ordersSyncRepeatIntervalControls()
   }
   
@@ -7091,7 +7027,7 @@ export function createOrdersFeature(ctx) {
       const cadenceLabel = isRepeat ? ordersRepeatUnitLabel(order.repeatUnit, order.repeatEvery) : 'Bez powtarzania'
       const workerLabel = ordersPreviewWorkerLabel(order)
       const workLabel = isRepeat
-        ? `Dostęp ${startTime}-${endTime} · praca ${ordersFormatWorkMinutes(ordersReadWorkMinutes(order))} rbh`
+        ? `Plan ${startTime}-${endTime} · praca ${ordersFormatWorkMinutes(ordersReadWorkMinutes(order))} rbh`
         : ''
       const repeatEndLabel = isRepeat ? (repeatEnd ? `do ${repeatEnd}` : 'bez daty końca') : ''
       preview.innerHTML = `
@@ -7150,7 +7086,6 @@ export function createOrdersFeature(ctx) {
     const rawEnd = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), '')
     const end = mode === 'repeat' ? start : ordersNormalizeDateField(rawEnd, order.endDateYmd || order.validUntil || start)
     const repeatEnd = mode === 'repeat' ? rawEnd : ''
-    const startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), order.startTime || '08:00')
     const repeatInterval = ordersRepeatIntervalFromControls(order)
     const repeatWeekdays = mode === 'repeat' ? ordersRepeatWeekdaysFromServiceBlocks(order) : ordersReadRepeatWeekdaysForMode(mode)
     const weeklyRules = []
@@ -7159,13 +7094,11 @@ export function createOrdersFeature(ctx) {
     const firstAccessWindow = accessWindows[0] || null
     const controlServiceBlocks = ordersReadServiceBlocksFromControls(order)
     const effectiveServiceBlocks = controlServiceBlocks.length ? controlServiceBlocks : ordersServiceBlocksForOrder(order)
+    const primaryTiming = ordersPrimaryServiceBlockTiming(order, effectiveServiceBlocks)
     const serviceBlockTotals = ordersServiceBlocksTotals(effectiveServiceBlocks, order)
     const serviceBlockAllocations = effectiveServiceBlocks.flatMap((block) => Array.isArray(block.workAllocations) ? block.workAllocations : [])
-    const effectiveStartTime = firstWeeklyRule?.accessStartTime || firstAccessWindow?.accessStartTime || startTime
-    const effectiveEndTime =
-      firstWeeklyRule?.accessEndTime ||
-      firstAccessWindow?.accessEndTime ||
-      ordersNormalizeTimeField(ordersReadInputValue('ordersEditEndTime'), order.endTime || ordersDefaultEndTime(startTime))
+    const effectiveStartTime = firstWeeklyRule?.accessStartTime || firstAccessWindow?.accessStartTime || primaryTiming.startTime
+    const effectiveEndTime = firstWeeklyRule?.accessEndTime || firstAccessWindow?.accessEndTime || primaryTiming.endTime
     const effectiveWorkMinutes = firstWeeklyRule?.requiredWorkMinutes || serviceBlockTotals.totalWorkMinutes || (mode === 'repeat' ? ordersReadWorkMinutes(order) : calendarTimelineOrderDurationMinutes(order))
     const effectivePeople = firstWeeklyRule?.requiredPeople || serviceBlockTotals.totalPeople
     const effectiveAllocations = firstWeeklyRule
@@ -7470,11 +7403,18 @@ export function createOrdersFeature(ctx) {
       title.textContent = appState.ordersEditorMode === 'add' ? 'Dodaj zlecenie' : 'Edycja zlecenia'
     }
   
-    const renderClientLabel = ordersTimelineClientLabel(order)
-    const selectedClientForRender = ordersFindClientBySelection(order.clientId || order.clientLabel || renderClientLabel)
-    const isIndividualOrder =
+    const orderClientType = String(order.clientType ?? order.customerType ?? '').trim().toLowerCase()
+    const isOrderIndividualClient = orderClientType === 'individual'
+    const renderClientLabel = isOrderIndividualClient && order.isDraft
+      ? ORDERS_INDIVIDUAL_CLIENT_LABEL
+      : ordersTimelineClientLabel(order)
+    const selectedClientForRender = isOrderIndividualClient
+      ? null
+      : ordersFindClientBySelection(order.clientId || order.clientLabel || renderClientLabel)
+    const isIndividualOrder = isOrderIndividualClient || (
       !selectedClientForRender &&
-      String(order.clientType ?? order.customerType ?? '').trim().toLowerCase() === 'individual'
+      ordersIsIndividualClientSelection(renderClientLabel)
+    )
     const clientSelect = document.getElementById('ordersEditClient')
     if (clientSelect instanceof HTMLSelectElement) {
       clientSelect.innerHTML = ordersClientOptionsHtml(isIndividualOrder ? ORDERS_INDIVIDUAL_CLIENT_VALUE : renderClientLabel)
@@ -7513,15 +7453,16 @@ export function createOrdersFeature(ctx) {
     ordersSetInputValue('ordersEditClient', isIndividualOrder ? ORDERS_INDIVIDUAL_CLIENT_VALUE : orderClientLabel)
     ordersSyncClientPicker(isIndividualOrder ? ORDERS_INDIVIDUAL_CLIENT_VALUE : orderClientLabel)
     ordersSetIndividualClientFieldsVisible(isIndividualOrder)
-    ordersSetInputValue('ordersIndividualName', isIndividualOrder ? order.clientName || order.clientLabel || orderClientLabel : '')
+    const individualClientNameValue = isIndividualOrder
+      ? order.clientName || (ordersIsIndividualClientSelection(order.clientLabel) ? '' : order.clientLabel || '')
+      : ''
+    ordersSetInputValue('ordersIndividualName', individualClientNameValue)
     ordersSetInputValue('ordersIndividualNip', isIndividualOrder ? order.clientNip || order.nip || '' : '')
     ordersSetInputValue('ordersIndividualPhone', isIndividualOrder ? order.phone || order.clientPhone || '' : '')
     ordersSetInputValue('ordersIndividualEmail', isIndividualOrder ? order.email || order.clientEmail || '' : '')
     ordersSetInputValue('ordersEditStart', startDay)
     ordersSetInputValue('ordersEditNext', nextDate)
-    ordersSetInputValue('ordersEditTime', ordersNormalizeTimeField(order.startTime, '08:00'))
     ordersSetInputValue('ordersEditEnd', validUntil)
-    ordersSetInputValue('ordersEditEndTime', ordersNormalizeTimeField(order.endTime, ordersDefaultEndTime(order.startTime)))
     ordersSetInputValue('ordersEditDurationHours', duration)
     ordersSetInputValue('ordersEditLocation', explicitExecutionAddress)
     ordersRenderClientAddressSelect(selectedClient, explicitExecutionAddress)
@@ -7544,7 +7485,7 @@ export function createOrdersFeature(ctx) {
     ordersSetInputValue('ordersEditDescription', descriptionValue)
     ordersSetInputValue('ordersEditWorkerComment', ordersWorkerOnlyComment(order))
     ordersSetCheckboxValue('ordersEditAllowExtendedWork', ordersExtendedWorkAllowed(order))
-    ordersSetInputValue('ordersEditClientName', order.clientName || order.clientLabel || selectedClientData.clientName || '')
+    ordersSetInputValue('ordersEditClientName', isIndividualOrder ? ORDERS_INDIVIDUAL_CLIENT_LABEL : order.clientName || order.clientLabel || selectedClientData.clientName || '')
     ordersSetInputValue('ordersEditNip', order.nip || order.clientNip || selectedClientData.nip || '')
     ordersSetInputValue('ordersEditStreet', order.street || order.clientStreet || selectedClientData.street || '')
     ordersSetInputValue('ordersEditCity', order.city || order.clientCity || selectedClientData.city || '')
@@ -7607,8 +7548,49 @@ export function createOrdersFeature(ctx) {
       void ordersWarmLocationSources()
     }, 0)
   }
+
+  function ordersWorkSlotKeyFromOrderId(orderId = '') {
+    const raw = String(orderId ?? '').trim()
+    const marker = '__workslot__'
+    const index = raw.lastIndexOf(marker)
+    return index >= 0 ? raw.slice(index + marker.length).trim() : ''
+  }
+
+  function ordersAllocationKeyCandidates(allocation = {}) {
+    return [
+      allocation?.key,
+      allocation?.slotId,
+      allocation?.workSlotId,
+      allocation?.id,
+    ]
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean)
+  }
+
+  function ordersOrderContainsWorkSlotKey(order = {}, workSlotKey = '') {
+    const key = String(workSlotKey ?? '').trim()
+    if (!key) {
+      return true
+    }
+    const matchesAllocation = (allocation = {}) => ordersAllocationKeyCandidates(allocation).includes(key)
+    const orderAllocations = [
+      ...(Array.isArray(order?.workAllocations) ? order.workAllocations : []),
+      ...(Array.isArray(order?.workerAllocations) ? order.workerAllocations : []),
+    ]
+    if (orderAllocations.some(matchesAllocation)) {
+      return true
+    }
+    const serviceBlocks = Array.isArray(order?.serviceBlocks) ? order.serviceBlocks : []
+    return serviceBlocks.some((block) => {
+      const blockAllocations = [
+        ...(Array.isArray(block?.workAllocations) ? block.workAllocations : []),
+        ...(Array.isArray(block?.workerAllocations) ? block.workerAllocations : []),
+      ]
+      return blockAllocations.some(matchesAllocation)
+    })
+  }
   
-  function ordersOpenRecurringOccurrenceEditorFromCalendar(sourceOrderId = '', occurrenceDateYmd = '') {
+  function ordersOpenRecurringOccurrenceEditorFromCalendar(sourceOrderId = '', occurrenceDateYmd = '', options = {}) {
     const sourceId = String(sourceOrderId ?? '').trim()
     const occurrenceDay = String(occurrenceDateYmd ?? '').trim()
     const sourceOrder = calendarTimelineSourceOrderById(sourceId)
@@ -7619,18 +7601,22 @@ export function createOrdersFeature(ctx) {
   
     const overrideId = calendarTimelineRecurringOverrideId(sourceId, occurrenceDay)
     const existingOverride = ordersFindTimelineOrder(overrideId)
-    const overrideOrder =
-      existingOverride ||
-      calendarTimelineBuildSingleOccurrenceOverride(sourceOrder, occurrenceDay, {
-        isDraft: true,
-        updatedAt: new Date().toISOString(),
-      })
+    const requestedWorkSlotKey = String(options?.workSlotKey ?? '').trim() || ordersWorkSlotKeyFromOrderId(options?.orderId)
+    const builtOverride = calendarTimelineBuildSingleOccurrenceOverride(sourceOrder, occurrenceDay, {
+      isDraft: true,
+      updatedAt: new Date().toISOString(),
+    })
+    const existingMatchesRequestedSlot = !requestedWorkSlotKey || ordersOrderContainsWorkSlotKey(existingOverride, requestedWorkSlotKey)
+    const shouldReplaceExistingOverride = Boolean(existingOverride && builtOverride && !existingMatchesRequestedSlot)
+    const overrideOrder = shouldReplaceExistingOverride
+      ? builtOverride
+      : existingOverride || builtOverride
     if (!overrideOrder) {
       showTransientNotice('Nie udało się przygotować edycji tego dnia.', 'error')
       return
     }
   
-    if (!existingOverride) {
+    if (!existingOverride || shouldReplaceExistingOverride) {
       appState.calendarTimelineDemoOrders = [
         overrideOrder,
         ...ordersListSourceOrders().filter((order) => String(order?.id ?? '') !== overrideId),
@@ -7734,35 +7720,34 @@ export function createOrdersFeature(ctx) {
       return
     }
   
-    const dateYmd = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), ordersNormalizeDateField(order.dateYmd, todayYmd()))
-    const startTime = ordersNormalizeTimeField(ordersReadInputValue('ordersEditTime'), ordersNormalizeTimeField(order.startTime, '08:00'))
-    const startMinutes = calendarTimelineTimeMinutes(startTime, 8 * 60)
     const selectedType = String(ordersReadInputValue('ordersEditType') || order.type || 'individual').trim()
     const scheduleMode =
       document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat' ||
       selectedType === 'cyclic'
         ? 'repeat'
         : 'once'
+    const dateYmd = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), ordersNormalizeDateField(order.dateYmd, todayYmd()))
+    const editorServiceBlocksFromControls = ordersReadServiceBlocksFromControls(order)
+    const editorServiceBlocksForTiming = editorServiceBlocksFromControls.length ? editorServiceBlocksFromControls : ordersServiceBlocksForOrder(order)
+    const editorPrimaryTiming = ordersPrimaryServiceBlockTiming(order, editorServiceBlocksForTiming)
+    const startTime = editorPrimaryTiming.startTime
+    const endTime = editorPrimaryTiming.endTime
+    const startMinutes = calendarTimelineTimeMinutes(startTime, 8 * 60)
+    const endMinutes = calendarTimelineTimeMinutes(endTime, startMinutes + 60)
     const repeatInterval = ordersRepeatIntervalFromControls(order)
-    const usesWeeklyPattern = scheduleMode === 'repeat' && repeatInterval.repeatUnit === 'week'
     const rawEndDate = ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), '')
     const repeatEndDate = scheduleMode === 'repeat' ? rawEndDate : ''
     const explicitEndDate = scheduleMode === 'repeat' ? dateYmd : ordersNormalizeDateField(rawEndDate, dateYmd)
-    const explicitEndTime = calendarNormalizeTimeValue(ordersReadInputValue('ordersEditEndTime'))
-    const durationHours = Math.max(1, Math.floor(Number(ordersReadInputValue('ordersEditDurationHours')) || ordersDurationHours(order)))
-    const totalEndMinutes = startMinutes + durationHours * 60
-    let endDateYmd = explicitEndTime ? explicitEndDate : calendarAddDays(dateYmd, Math.floor(totalEndMinutes / 1440))
-    let endTime = explicitEndTime || calendarMinutesToTime(totalEndMinutes % 1440) || '23:59'
+    let endDateYmd = explicitEndDate
+    if (scheduleMode !== 'repeat' && endDateYmd === dateYmd && endMinutes <= startMinutes) {
+      endDateYmd = calendarAddDays(dateYmd, 1)
+    }
     if (scheduleMode === 'repeat' && repeatEndDate && repeatEndDate < dateYmd) {
       showTransientNotice('Data końca cyklu nie może być wcześniejsza niż data START.', 'error')
       return
     }
     if (scheduleMode !== 'repeat' && explicitEndDate < dateYmd) {
       showTransientNotice('Data zakończenia pierwszego zlecenia nie może być wcześniejsza niż data rozpoczęcia.', 'error')
-      return
-    }
-    if (!usesWeeklyPattern && endDateYmd === dateYmd && calendarTimelineTimeMinutes(endTime, startMinutes + 60) <= startMinutes) {
-      showTransientNotice('Godzina STOP musi być późniejsza niż godzina START.', 'error')
       return
     }
     const assignmentResources = calendarTimelineResources()
@@ -7804,7 +7789,9 @@ export function createOrdersFeature(ctx) {
       assignedRows: workerAssignmentState.assignedRows,
       row: workerAssignmentState.row,
     }
-    const controlServiceBlocks = ordersReadServiceBlocksFromControls(allocationBaseOrder)
+    const controlServiceBlocks = editorServiceBlocksFromControls.length
+      ? editorServiceBlocksFromControls
+      : ordersReadServiceBlocksFromControls(allocationBaseOrder)
     const serviceBlocks = ordersStoreServiceBlocks(
       allocationBaseOrder,
       controlServiceBlocks.length ? controlServiceBlocks : ordersServiceBlocksForOrder(allocationBaseOrder),
@@ -7845,39 +7832,9 @@ export function createOrdersFeature(ctx) {
       : workerAssignmentState.workerAssignments
     const assignedWorkMinutes = workAllocations.reduce((sum, item) => sum + Math.max(0, Number(item.minutes) || 0), 0)
     const requiredWorkTotalMinutes = requiredWorkMinutes
-    const accessMinutes = ordersAccessWindowMinutes(order)
-    if (scheduleMode === 'repeat' && weeklyRules.length && !hasServiceBlocksV2) {
-      const invalidRule = weeklyRules.find((rule) => Math.max(1, Number(rule.requiredPeople) || 1) < ordersWeeklyPatternMinPeople(rule))
-      if (invalidRule) {
-        showTransientNotice(
-          `Nie zapisano: ${ordersWeekdayLabel(invalidRule.weekday)} wymaga minimum ${ordersWeeklyPatternMinPeople(invalidRule)} osób w podanym oknie dostępu.`,
-          'error',
-        )
-        ordersRenderWeeklyPatternControls(order)
-        return
-      }
-      const outsideAccessRule = weeklyRules.find((rule) => !ordersWeeklyPatternFitsObjectAccess(allocationBaseOrder, rule))
-      if (outsideAccessRule) {
-        showTransientNotice(
-          `Nie zapisano: ${ordersWeekdayLabel(outsideAccessRule.weekday)} jest poza ogólnym dostępem do obiektu.`,
-          'error',
-        )
-        ordersRenderWeeklyPatternControls(allocationBaseOrder)
-        return
-      }
-    } else if (scheduleMode === 'repeat' && !hasServiceBlocksV2) {
+    if (scheduleMode === 'repeat' && !hasServiceBlocksV2 && !weeklyRules.length) {
       if (Math.abs(assignedWorkMinutes - requiredWorkTotalMinutes) > 0) {
         showTransientNotice('Nie zapisano: suma godzin osób musi być równa wymaganym roboczogodzinom.', 'error')
-        ordersUpdateWorkAllocationSummary(order)
-        return
-      }
-      if (workAllocations.some((item) => Number(item.minutes) > accessMinutes)) {
-        showTransientNotice('Nie zapisano: przydział osoby przekracza okno dostępu do obiektu.', 'error')
-        ordersUpdateWorkAllocationSummary(order)
-        return
-      }
-      if (workAllocations.some((item) => !ordersAllocationFitsAccess(allocationBaseOrder, item))) {
-        showTransientNotice('Nie zapisano: plan pracy osoby musi mieścić się w godzinach dostępu do obiektu.', 'error')
         ordersUpdateWorkAllocationSummary(order)
         return
       }
@@ -9301,8 +9258,6 @@ export function createOrdersFeature(ctx) {
           'ordersScheduleEndTime',
           'ordersEditStart',
           'ordersEditEnd',
-          'ordersEditTime',
-          'ordersEditEndTime',
           'ordersEditRepeatPreset',
           'ordersEditRepeatEvery',
           'ordersEditRepeatUnit',
@@ -9325,9 +9280,6 @@ export function createOrdersFeature(ctx) {
         const order = ordersFindTimelineOrder(appState.ordersEditingId)
         if (order) {
           ordersUpdateOrderScheduleFromControls(order)
-          if (targetId === 'ordersEditTime' || targetId === 'ordersEditEndTime') {
-            ordersRenderWorkAllocationControls(order)
-          }
           if (targetId === 'ordersEditStart' || targetId === 'ordersScheduleStartDate') {
             const checkedWeekdays = ordersReadRepeatWeekdays()
             if (!checkedWeekdays.length) {
@@ -9754,14 +9706,6 @@ export function createOrdersFeature(ctx) {
         return
       }
   
-      const timeToggle = eventTargetClosest(event, '#ordersScheduleTimeToggle')
-      if (timeToggle) {
-        event.preventDefault()
-        const grid = document.getElementById('ordersScheduleTimeGrid')
-        ordersSetScheduleTimeVisible(Boolean(grid?.hidden))
-        return
-      }
-  
       const addDeviceNote = eventTargetClosest(event, '#ordersDeviceNoteAdd')
       if (addDeviceNote) {
         event.preventDefault()
@@ -9801,7 +9745,7 @@ export function createOrdersFeature(ctx) {
       if (action) {
         event.preventDefault()
         const row = eventTargetClosest(event, '[data-order-id]')
-        const orderId = row?.getAttribute('data-order-source-id') || row?.getAttribute('data-order-id') || ''
+        const orderId = row?.getAttribute('data-order-id') || row?.getAttribute('data-order-source-id') || ''
         const actionName = action.getAttribute('data-orders-list-action')
         if (actionName === 'edit') {
           ordersOpenEditor(orderId)

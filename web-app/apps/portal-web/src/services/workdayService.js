@@ -1437,16 +1437,27 @@ function mapWorkday(orgId, row, lookupMaps) {
   const dayComment = sanitizeTextValue(row?.workday?.comment ?? linkedWorkday?.comment ?? row?.comment)
   const dayStartObject = sanitizeTextValue(dayStartObjectRaw)
   const dayStopObject = sanitizeTextValue(dayStopObjectRaw)
-  const explicitEventQrCode = firstExplicitQrCode([row?.zoneId, row?.utilityRoomId, row?.roomId])
-  const workdayStartQrCode = firstExplicitQrCode([
+  const explicitEventQrCode = firstAssignedQrCode([
+    row?.zoneId,
+    row?.utilityRoomId,
+    row?.roomId,
+    rawStartObject,
+    rawStopObject,
+    row?.comment,
+  ])
+  const workdayStartQrCode = firstAssignedQrCode([
     dayStartObjectRaw,
     rawStartObject,
     workdayUtilityRoomId,
     row?.utilityRoomId,
     row?.roomId,
+    dayComment,
+    row?.comment,
   ])
-  const workdayStopQrCode = firstExplicitQrCode([dayStopObjectRaw, rawStopObject])
-  const authoritativeQrCode = rawEventId ? explicitEventQrCode : workdayStartQrCode
+  const workdayStopQrCode = firstAssignedQrCode([dayStopObjectRaw, rawStopObject, dayComment, row?.comment])
+  const authoritativeQrCode = rawEventId
+    ? explicitEventQrCode || workdayStartQrCode || workdayStopQrCode
+    : workdayStartQrCode || workdayStopQrCode
   roomId = sanitizeTextValue(
     pickFirstText(
       authoritativeQrCode,
@@ -1543,6 +1554,9 @@ function mapWorkday(orgId, row, lookupMaps) {
     authoritativeQrCode
       ? pickFirstText(currentQrMeta.functionName, zone?.functionName, zone?.function)
       : pickFirstText(zone?.functionName, zone?.function, row?.zoneFunction, row?.functionName, row?.function),
+  )
+  const resolvedScanObjectLabel = sanitizeTextValue(
+    pickFirstText(resolvedClientName, resolvedZoneLocation, resolvedZoneName, roomId),
   )
   const resolvedIsSpecialZone = Boolean(
     currentQrMeta.isSpecialZone ||
@@ -1658,6 +1672,7 @@ function mapWorkday(orgId, row, lookupMaps) {
     klient: sanitizeTextValue(resolvedClientName || '-'),
     clientName: sanitizeTextValue(resolvedClientName || '-'),
     lokalizacja: sanitizeTextValue(resolvedZoneLocation || '-'),
+    scanObjectLabel: sanitizeTextValue(resolvedScanObjectLabel || '-'),
     startAt,
     endAt,
     dayStartAt,
@@ -2893,14 +2908,17 @@ async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
     const status = normalizeStatus(item?.status, hasStop)
     const startObjectLabel = String(item?.dayStartObject ?? '').trim()
     const zoneCode = resolveZoneCode(item)
+    const scanObjectLabelRaw = String(item?.scanObjectLabel ?? item?.objectLabelAtScan ?? '').trim()
     const clientLabelRaw = String(item?.clientName ?? item?.klient ?? item?.clientId ?? '').trim()
     const zoneLabelRaw = String(item?.zoneName ?? item?.strefa ?? '').trim()
     const locationLabelRaw = String(item?.lokalizacja ?? item?.location ?? '').trim()
     const clientLabel = hasReadableClientLabel(clientLabelRaw)
       ? clientLabelRaw
-      : hasReadableLabel(startObjectLabel)
-        ? startObjectLabel
-        : '-'
+      : hasReadableClientLabel(scanObjectLabelRaw)
+        ? scanObjectLabelRaw
+        : hasReadableLabel(startObjectLabel)
+          ? startObjectLabel
+          : '-'
     const zoneLabel = hasReadableLabel(zoneLabelRaw) ? zoneLabelRaw : '-'
     const locationLabel = hasReadableLabel(locationLabelRaw) ? locationLabelRaw : '-'
     const eventTs = toTimestamp(item?.updatedAt || endIso || startIso)
@@ -2996,6 +3014,13 @@ async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
       const resolvedLocation = isRunning
         ? activeCandidate?.locationLabel ?? bucket.firstStartLocation ?? '-'
         : bucket.firstStartLocation ?? '-'
+      const resolvedScanObjectLabel = hasReadableClientLabel(resolvedClient)
+        ? resolvedClient
+        : hasReadableLabel(resolvedLocation)
+          ? resolvedLocation
+          : hasReadableLabel(resolvedZone)
+            ? resolvedZone
+            : resolvedZoneId || '-'
 
       return {
         id: bucket.workerId || bucket.id,
@@ -3010,6 +3035,7 @@ async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
         roomId: resolvedZoneId,
         utilityRoomId: resolvedZoneId,
         activeLocation: hasReadableLabel(resolvedLocation) ? resolvedLocation : '-',
+        scanObjectLabel: hasReadableLabel(resolvedScanObjectLabel) ? resolvedScanObjectLabel : '-',
         qrStart: formatTime(startIso),
         qrStop: stopIso ? formatTime(stopIso) : '-',
         duration,
@@ -3404,14 +3430,17 @@ export async function getTodayActiveWorkers(orgId, options = {}) {
       const isDurationRelevant = isIndividual || isSpecial || isDayStartMarker || isDayStopMarker || (hasStop && !isClean)
       const startObjectLabel = String(item.dayStartObject ?? '').trim()
       const zoneCode = resolveZoneCode(item)
+      const scanObjectLabelRaw = String(item?.scanObjectLabel ?? item?.objectLabelAtScan ?? '').trim()
       const clientLabelRaw = String(item.clientName ?? item.klient ?? item.clientId ?? '').trim()
       const zoneLabelRaw = String(item.zoneName ?? item.strefa ?? '').trim()
       const locationLabelRaw = String(item.lokalizacja ?? item.location ?? '').trim()
       const clientLabel = hasReadableClientLabel(clientLabelRaw)
         ? clientLabelRaw
-        : hasReadableLabel(startObjectLabel)
-          ? startObjectLabel
-          : '-'
+        : hasReadableClientLabel(scanObjectLabelRaw)
+          ? scanObjectLabelRaw
+          : hasReadableLabel(startObjectLabel)
+            ? startObjectLabel
+            : '-'
       const zoneLabel = hasReadableLabel(zoneLabelRaw) ? zoneLabelRaw : '-'
       const locationLabel = hasReadableLabel(locationLabelRaw) ? locationLabelRaw : '-'
       const eventTs = toTimestamp(item.updatedAt || item.createdAt || endIso || startIso)
@@ -3513,6 +3542,13 @@ export async function getTodayActiveWorkers(orgId, options = {}) {
       const resolvedLocation = isRunning
         ? activeCandidate?.locationLabel ?? bucket.firstStartLocation ?? '-'
         : bucket.firstStartLocation ?? '-'
+      const resolvedScanObjectLabel = hasReadableClientLabel(resolvedClient)
+        ? resolvedClient
+        : hasReadableLabel(resolvedLocation)
+          ? resolvedLocation
+          : hasReadableLabel(resolvedZone)
+            ? resolvedZone
+            : resolvedZoneId || '-'
 
       return {
         id: bucket.workerId || bucket.id,
@@ -3527,6 +3563,7 @@ export async function getTodayActiveWorkers(orgId, options = {}) {
         roomId: resolvedZoneId,
         utilityRoomId: resolvedZoneId,
         activeLocation: hasReadableLabel(resolvedLocation) ? resolvedLocation : '-',
+        scanObjectLabel: hasReadableLabel(resolvedScanObjectLabel) ? resolvedScanObjectLabel : '-',
         qrStart: formatTime(startIso),
         qrStop: stopIso ? formatTime(stopIso) : '-',
         duration,

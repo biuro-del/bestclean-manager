@@ -3515,7 +3515,18 @@ export function createCalendarFeature(ctx) {
     return Number.isInteger(weekday) ? weekday : -1
   }
   
+  function calendarTimelineServiceBlockRepeatWeekdays(order = {}) {
+    return (Array.isArray(order?.serviceBlocks) ? order.serviceBlocks : [])
+      .flatMap((block) => (Array.isArray(block?.weekdays) ? block.weekdays : []))
+      .map((value) => Number(value))
+      .filter((value, index, list) => Number.isInteger(value) && value >= 0 && value <= 6 && list.indexOf(value) === index)
+  }
+
   function calendarTimelineRepeatWeekdays(order = {}) {
+    const serviceBlockWeekdays = calendarTimelineServiceBlockRepeatWeekdays(order)
+    if (serviceBlockWeekdays.length) {
+      return serviceBlockWeekdays
+    }
     const values = Array.isArray(order?.repeatWeekdays) ? order.repeatWeekdays : []
     const weekdays = values
       .map((value) => Number(value))
@@ -3592,11 +3603,68 @@ export function createCalendarFeature(ctx) {
     const fallbackDay = ordersNormalizeDateField(order?.dateYmd, occurrenceDay || todayYmd())
     return allocations.map((allocation) => calendarTimelineOccurrenceAllocationDateShift(allocation, occurrenceDay, fallbackDay))
   }
+
+  function calendarTimelineOccurrenceServiceBlocks(order = {}, occurrenceDay = '') {
+    const serviceBlocks = Array.isArray(order?.serviceBlocks) ? order.serviceBlocks : []
+    const targetDay = ordersNormalizeDateField(occurrenceDay, '')
+    if (!serviceBlocks.length || !targetDay) {
+      return serviceBlocks
+    }
+    const targetWeekday = calendarTimelineDateWeekday(targetDay)
+    const fallbackDay = ordersNormalizeDateField(order?.dateYmd, targetDay)
+
+    return serviceBlocks
+      .filter((block) => {
+        const mode = String(block?.scheduleMode ?? block?.mode ?? '').trim()
+        if (mode === 'once') {
+          const blockDay = ordersNormalizeDateField(block?.dateYmd ?? block?.planDateYmd ?? block?.startDateYmd, fallbackDay)
+          return !blockDay || blockDay === targetDay
+        }
+        const weekdays = (Array.isArray(block?.weekdays) ? block.weekdays : [])
+          .map((value) => Number(value))
+          .filter((value, index, list) => Number.isInteger(value) && value >= 0 && value <= 6 && list.indexOf(value) === index)
+        return !weekdays.length || targetWeekday < 0 || weekdays.includes(targetWeekday)
+      })
+      .map((block) => {
+        const blockSourceDay = ordersNormalizeDateField(
+          block?.dateYmd ?? block?.planDateYmd ?? block?.startDateYmd,
+          fallbackDay,
+        )
+        const blockSourceEndDay = ordersNormalizeDateField(
+          block?.endDateYmd ?? block?.planEndDateYmd,
+          blockSourceDay,
+        )
+        const blockDaySpan = Math.max(0, calendarTimelineDayDiff(blockSourceDay, blockSourceEndDay))
+        const blockEndDay = calendarAddDays(targetDay, blockDaySpan)
+        const shiftItems = (items) =>
+          Array.isArray(items)
+            ? items.map((item) => calendarTimelineOccurrenceAllocationDateShift(item, targetDay, blockSourceDay))
+            : items
+
+        return {
+          ...block,
+          dateYmd: targetDay,
+          planDateYmd: targetDay,
+          startDateYmd: targetDay,
+          endDateYmd: blockEndDay,
+          planEndDateYmd: blockEndDay,
+          slots: shiftItems(block?.slots),
+          workAllocations: shiftItems(block?.workAllocations),
+          workerAllocations: shiftItems(block?.workerAllocations),
+        }
+      })
+  }
   
   function calendarTimelineRecurringInstance(order = {}, occurrenceDay = '', index = 0) {
     const baseDay = String(order?.dateYmd ?? '').trim()
     const scheduledOrder = ordersApplyWeeklyPatternRuleToOccurrence(order, occurrenceDay)
-    const occurrenceAllocations = calendarTimelineRecurringOccurrenceAllocations(scheduledOrder, occurrenceDay)
+    const occurrenceServiceBlocks = calendarTimelineOccurrenceServiceBlocks(scheduledOrder, occurrenceDay)
+    const serviceBlockFields = occurrenceServiceBlocks.length
+      ? {
+          serviceBlocks: occurrenceServiceBlocks,
+        }
+      : {}
+    const occurrenceAllocations = calendarTimelineRecurringOccurrenceAllocations({ ...scheduledOrder, ...serviceBlockFields }, occurrenceDay)
     const allocationFields = occurrenceAllocations.length
       ? {
           workAllocations: occurrenceAllocations,
@@ -3606,6 +3674,7 @@ export function createCalendarFeature(ctx) {
     if (occurrenceDay === baseDay) {
       return {
         ...scheduledOrder,
+        ...serviceBlockFields,
         ...allocationFields,
         isRecurringSeries: true,
         sourceOrderId: String(order?.sourceOrderId ?? order?.id ?? '').trim(),
@@ -3616,6 +3685,7 @@ export function createCalendarFeature(ctx) {
     const sourceOrderId = String(order?.sourceOrderId ?? order?.id ?? '').trim()
     return {
       ...scheduledOrder,
+      ...serviceBlockFields,
       ...allocationFields,
       id: `${sourceOrderId || 'order'}__repeat__${occurrenceDay}`,
       sourceOrderId,
@@ -6709,16 +6779,16 @@ export function createCalendarFeature(ctx) {
 
   function calendarTimelineOrderWorkAllocations(order = {}) {
     const serviceBlockAllocations = calendarTimelineServiceBlockAllocations(order)
-    const hasServiceBlocks = Array.isArray(order?.serviceBlocks) && order.serviceBlocks.length > 0
-    return hasServiceBlocks && serviceBlockAllocations.length
-      ? serviceBlockAllocations
-      : Array.isArray(order.workAllocations) && order.workAllocations.length
+    const orderAllocations = Array.isArray(order.workAllocations) && order.workAllocations.length
       ? order.workAllocations
       : Array.isArray(order.workerAllocations) && order.workerAllocations.length
         ? order.workerAllocations
-        : serviceBlockAllocations.length
-          ? serviceBlockAllocations
-          : []
+        : []
+    return orderAllocations.length
+      ? orderAllocations
+      : serviceBlockAllocations.length
+        ? serviceBlockAllocations
+        : []
   }
 
   function calendarTimelineServiceBlocksWithAllocations(serviceBlocks = [], allocations = []) {
@@ -7487,6 +7557,13 @@ export function createCalendarFeature(ctx) {
     }
     return { dayKey, time: `${pad2(Number(hour))}:${pad2(minute)}` }
   }
+
+  function calendarTimelineWorkSlotKeyFromOrderId(orderId = '') {
+    const raw = String(orderId ?? '').trim()
+    const marker = '__workslot__'
+    const index = raw.lastIndexOf(marker)
+    return index >= 0 ? raw.slice(index + marker.length).trim() : ''
+  }
   
   function calendarTimelineRecurringContextFromBar(bar) {
     if (!(bar instanceof HTMLElement)) {
@@ -7494,6 +7571,14 @@ export function createCalendarFeature(ctx) {
     }
     const orderId = String(bar.getAttribute('data-calendar-timeline-order-id') || '').trim()
     const sourceOrderId = String(bar.getAttribute('data-calendar-timeline-source-order-id') || orderId).trim()
+    const workSlotKey = String(
+      bar.getAttribute('data-calendar-timeline-work-slot-key') ||
+        calendarTimelineWorkSlotKeyFromOrderId(orderId) ||
+        '',
+    ).trim()
+    const serviceBlockId = String(bar.getAttribute('data-calendar-timeline-service-block-id') || '').trim()
+    const serviceBlockKind = String(bar.getAttribute('data-calendar-timeline-service-block-kind') || '').trim()
+    const serviceBlockLabel = String(bar.getAttribute('data-calendar-timeline-service-block-label') || '').trim()
     const occurrenceDateYmd = String(
       bar.getAttribute('data-calendar-timeline-occurrence-date') ||
         bar.getAttribute('data-calendar-timeline-date') ||
@@ -7506,6 +7591,10 @@ export function createCalendarFeature(ctx) {
       orderId,
       sourceOrderId,
       occurrenceDateYmd,
+      workSlotKey,
+      serviceBlockId,
+      serviceBlockKind,
+      serviceBlockLabel,
       isRecurringSeries,
       isRecurrenceOverride,
       sourceOrder,
@@ -7634,6 +7723,10 @@ export function createCalendarFeature(ctx) {
       orderId,
       sourceOrderId: recurringContext?.sourceOrderId || orderId,
       occurrenceDateYmd: recurringContext?.occurrenceDateYmd || '',
+      workSlotKey: recurringContext?.workSlotKey || calendarTimelineWorkSlotKeyFromOrderId(orderId),
+      serviceBlockId: recurringContext?.serviceBlockId || '',
+      serviceBlockKind: recurringContext?.serviceBlockKind || '',
+      serviceBlockLabel: recurringContext?.serviceBlockLabel || '',
       isRealEvent: bar.getAttribute('data-calendar-timeline-real-event') === '1',
       isRecurringSeries: Boolean(recurringContext?.isRecurringSeries),
       isRecurrenceOverride: Boolean(recurringContext?.isRecurrenceOverride),
@@ -7668,14 +7761,18 @@ export function createCalendarFeature(ctx) {
       void calendarTimelineOpenRealEventEditorFromBar(context.bar)
       return
     }
-    if (context.shouldAskScope && context.sourceOrder) {
-      calendarTimelineShowRecurringScopeDialog({
-        sourceOrderId: context.sourceOrderId,
-        occurrenceDateYmd: context.occurrenceDateYmd,
-        title: calendarTimelineOrderTitle(context.sourceOrder),
-        time: calendarTimelineOrderRangeLabel(calendarTimelineRecurringInstance(context.sourceOrder, context.occurrenceDateYmd, 0)),
-        onSingle: () => ordersOpenRecurringOccurrenceEditorFromCalendar(context.sourceOrderId, context.occurrenceDateYmd),
-        onSeries: () => ordersOpenEditorFromCalendar(context.sourceOrderId),
+    if (
+      context.shouldAskScope &&
+      context.sourceOrder &&
+      typeof ordersOpenRecurringOccurrenceEditorFromCalendar === 'function' &&
+      /^\d{4}-\d{2}-\d{2}$/.test(String(context.occurrenceDateYmd ?? '').trim())
+    ) {
+      ordersOpenRecurringOccurrenceEditorFromCalendar(context.sourceOrderId, context.occurrenceDateYmd, {
+        orderId: context.orderId,
+        workSlotKey: context.workSlotKey,
+        serviceBlockId: context.serviceBlockId,
+        serviceBlockKind: context.serviceBlockKind,
+        serviceBlockLabel: context.serviceBlockLabel,
       })
       return
     }
@@ -8276,15 +8373,21 @@ export function createCalendarFeature(ctx) {
         if (direct.length) {
           const blockStart = ordersNormalizeTimeField(block?.startTime ?? block?.planStartTime ?? block?.accessStartTime, '')
           const blockEnd = ordersNormalizeTimeField(block?.endTime ?? block?.planEndTime ?? block?.accessEndTime, '')
-          return direct.map((allocation, index) => ({
-            ...allocation,
-            serviceBlockId: allocation.serviceBlockId || block.id || `service-${blockIndex + 1}`,
-            serviceBlockKind: allocation.serviceBlockKind || block.kind || `team-${blockIndex + 1}`,
-            serviceBlockLabel: allocation.serviceBlockLabel || block.label || `Zmiana ${blockIndex + 1}`,
-            slotId: allocation.slotId || allocation.id || `slot-${index + 1}`,
-            ...(blockStart ? { startTime: blockStart, planStartTime: blockStart } : {}),
-            ...(blockEnd ? { endTime: blockEnd, planEndTime: blockEnd } : {}),
-          }))
+          return direct.map((allocation, index) => {
+            const allocationStart = ordersNormalizeTimeField(allocation?.startTime ?? allocation?.planStartTime, '')
+            const allocationEnd = ordersNormalizeTimeField(allocation?.endTime ?? allocation?.planEndTime, '')
+            const startTime = allocationStart || blockStart
+            const endTime = allocationEnd || blockEnd
+            return {
+              ...allocation,
+              serviceBlockId: allocation.serviceBlockId || block.id || `service-${blockIndex + 1}`,
+              serviceBlockKind: allocation.serviceBlockKind || block.kind || `team-${blockIndex + 1}`,
+              serviceBlockLabel: allocation.serviceBlockLabel || block.label || `Zmiana ${blockIndex + 1}`,
+              slotId: allocation.slotId || allocation.id || `slot-${index + 1}`,
+              ...(startTime ? { startTime, planStartTime: startTime } : {}),
+              ...(endTime ? { endTime, planEndTime: endTime } : {}),
+            }
+          })
         }
         const slots = Array.isArray(block?.slots) ? block.slots : []
         return slots.map((slot, index) => ({
@@ -8366,8 +8469,8 @@ export function createCalendarFeature(ctx) {
         0,
         Math.round(Number(matchingSlot?.minutes ?? matchingSlot?.workMinutes ?? allocation?.minutes ?? allocation?.workMinutes) || 0),
       )
-      const startTime = blockStart || slotStart
-      const endTime = blockEnd || slotEnd
+      const startTime = slotStart || blockStart
+      const endTime = slotEnd || blockEnd
       return {
         ...(dateYmd ? { dateYmd, planDateYmd: dateYmd, startDateYmd: dateYmd } : {}),
         ...(endDateYmd ? { endDateYmd, planEndDateYmd: endDateYmd } : {}),
@@ -8458,18 +8561,23 @@ export function createCalendarFeature(ctx) {
       }))
     }
   
-    const allocations = serviceBlockAllocations.length
-      ? serviceBlockAllocations
-      : Array.isArray(order.workAllocations) && order.workAllocations.length
-        ? order.workAllocations
+    const orderAllocations = Array.isArray(order.workAllocations) && order.workAllocations.length
+      ? order.workAllocations
+      : Array.isArray(order.workerAllocations) && order.workerAllocations.length
+        ? order.workerAllocations
+        : []
+    const allocations = orderAllocations.length
+      ? orderAllocations
+      : serviceBlockAllocations.length
+        ? serviceBlockAllocations
         : ordersWorkAllocationsForSubjects(order, [], Number(order.requiredWorkMinutes) || calendarTimelineOrderDurationMinutes(order), false)
     const startDay = String(order.dateYmd ?? todayYmd()).trim()
     const accessStart = ordersNormalizeTimeField(order.accessStartTime || order.startTime, '08:00')
     const safeAllocations = allocations
       .map((item, index) => {
         const serviceBlockTiming = calendarTimelineServiceBlockTimingForAllocation(order, item)
-        const startTime = ordersNormalizeTimeField(serviceBlockTiming?.startTime ?? item?.startTime ?? item?.planStartTime, accessStart)
-        const endTime = ordersNormalizeTimeField(serviceBlockTiming?.endTime ?? item?.endTime ?? item?.planEndTime, '')
+        const startTime = ordersNormalizeTimeField(item?.startTime ?? item?.planStartTime ?? serviceBlockTiming?.startTime, accessStart)
+        const endTime = ordersNormalizeTimeField(item?.endTime ?? item?.planEndTime ?? serviceBlockTiming?.endTime, '')
         const dateYmd = ordersNormalizeDateField(item?.dateYmd ?? item?.planDateYmd ?? item?.startDateYmd ?? serviceBlockTiming?.dateYmd, startDay)
         const endDateYmd = ordersNormalizeDateField(item?.endDateYmd ?? item?.planEndDateYmd ?? serviceBlockTiming?.endDateYmd, dateYmd)
         const timedAllocation = { ...item, ...(serviceBlockTiming || {}), dateYmd, endDateYmd, startTime, endTime }
@@ -9330,6 +9438,7 @@ export function createCalendarFeature(ctx) {
       if (!fallbackOrder) {
         return
       }
+      const fallbackBounds = calendarTimelineOrderPlannedBounds(fallbackOrder)
   
       for (let index = result.length - 1; index >= 0; index -= 1) {
         const order = result[index]
@@ -9339,6 +9448,16 @@ export function createCalendarFeature(ctx) {
           Number(order?.row) === rowIndex &&
           String(order?.dateYmd ?? '').trim() === today
         ) {
+          const orderBounds = calendarTimelineOrderPlannedBounds(order)
+          const orderClosed = Boolean(order?.completed || toIso(order?.actualEndAt) || String(order?.status ?? '').trim().toUpperCase() === 'CLOSED')
+          const closedBeforeFallback =
+            orderClosed &&
+            orderBounds?.endTs &&
+            fallbackBounds?.startTs &&
+            orderBounds.endTs <= fallbackBounds.startTs + 60 * 1000
+          if (closedBeforeFallback) {
+            continue
+          }
           result.splice(index, 1)
         }
       }
@@ -9710,6 +9829,9 @@ export function createCalendarFeature(ctx) {
           const workdayId = String(bar.workdayId ?? '').trim()
           const sourceStartAt = toIso(bar.sourceStartAt ?? bar.actualStartAt ?? '')
           const workSlotKey = String(bar.workSlotKey ?? '').trim()
+          const serviceBlockId = String(bar.serviceBlockId ?? '').trim()
+          const serviceBlockKind = String(bar.serviceBlockKind ?? '').trim()
+          const serviceBlockLabel = String(bar.serviceBlockLabel ?? '').trim()
           const barMetaAttrs = [
             `data-calendar-timeline-date="${escapeHtml(bar.dateYmd || '')}"`,
             `data-calendar-timeline-start="${escapeHtml(bar.startTime || '')}"`,
@@ -9717,6 +9839,9 @@ export function createCalendarFeature(ctx) {
             workdayId ? `data-calendar-timeline-workday-id="${escapeHtml(workdayId)}"` : '',
             sourceStartAt ? `data-calendar-timeline-source-start="${escapeHtml(sourceStartAt)}"` : '',
             workSlotKey ? `data-calendar-timeline-work-slot-key="${escapeHtml(workSlotKey)}"` : '',
+            serviceBlockId ? `data-calendar-timeline-service-block-id="${escapeHtml(serviceBlockId)}"` : '',
+            serviceBlockKind ? `data-calendar-timeline-service-block-kind="${escapeHtml(serviceBlockKind)}"` : '',
+            serviceBlockLabel ? `data-calendar-timeline-service-block-label="${escapeHtml(serviceBlockLabel)}"` : '',
           ].filter(Boolean).join(' ')
         const gridRow = calendarTimelineGridRowForResource(resources[bar.row] || {}, bar.row)
         return `
@@ -10468,14 +10593,17 @@ export function createCalendarFeature(ctx) {
       event.preventDefault()
       event.stopPropagation()
       const recurringContext = calendarTimelineRecurringContextFromBar(bar)
-      if (recurringContext?.shouldAskScope) {
-        calendarTimelineShowRecurringScopeDialog({
-          sourceOrderId: recurringContext.sourceOrderId,
-          occurrenceDateYmd: recurringContext.occurrenceDateYmd,
-          title: calendarTimelineOrderTitle(recurringContext.sourceOrder),
-          time: calendarTimelineOrderRangeLabel(calendarTimelineRecurringInstance(recurringContext.sourceOrder, recurringContext.occurrenceDateYmd, 0)),
-          onSingle: () => ordersOpenRecurringOccurrenceEditorFromCalendar(recurringContext.sourceOrderId, recurringContext.occurrenceDateYmd),
-          onSeries: () => ordersOpenEditorFromCalendar(recurringContext.sourceOrderId),
+      if (
+        recurringContext?.shouldAskScope &&
+        typeof ordersOpenRecurringOccurrenceEditorFromCalendar === 'function' &&
+        /^\d{4}-\d{2}-\d{2}$/.test(String(recurringContext.occurrenceDateYmd ?? '').trim())
+      ) {
+        ordersOpenRecurringOccurrenceEditorFromCalendar(recurringContext.sourceOrderId, recurringContext.occurrenceDateYmd, {
+          orderId: recurringContext.orderId,
+          workSlotKey: recurringContext.workSlotKey,
+          serviceBlockId: recurringContext.serviceBlockId,
+          serviceBlockKind: recurringContext.serviceBlockKind,
+          serviceBlockLabel: recurringContext.serviceBlockLabel,
         })
         return
       }

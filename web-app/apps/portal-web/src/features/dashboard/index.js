@@ -503,6 +503,7 @@ export function createDashboardFeature(ctx) {
           pageSize: 8000,
           forceRefresh,
         }).catch(() => ({ items: [] })),
+        dashboardSyncCalendarTimelineInputs({ forceRefresh }),
       ])
 
       if (appState.dashboardActivityDayRequestKey !== requestKey || appState.dashboardActivityDay !== normalizedDay) {
@@ -637,6 +638,9 @@ export function createDashboardFeature(ctx) {
     if (!label || generic.has(normalized)) {
       return ''
     }
+    if (/^\d{1,2}:\d{2}(\s*[-–]\s*\d{1,2}:\d{2})?$/.test(label)) {
+      return ''
+    }
     if (/^qr\s+[a-z0-9-]+$/i.test(label) || /^w\d+$/i.test(label) || dashboardIsQrCodeLike(label)) {
       return ''
     }
@@ -671,6 +675,67 @@ export function createDashboardFeature(ctx) {
     }
 
     return dashboardActivityCleanCompanyLabel(reportHistoryResolveClientByZoneCode(code, ''))
+  }
+
+  function dashboardActivityResolveObjectLabelByQr(value = '') {
+    const code = reportHistoryNormalizeQrCode(value)
+    if (!code || calendarTimelineIsTechnicalEventCode(code)) {
+      return ''
+    }
+
+    const clientLabel = dashboardActivityResolveClientByQr(code)
+    if (clientLabel) {
+      return clientLabel
+    }
+
+    const zone = resolveZoneByQrCandidate(code)
+    const zoneLabel = dashboardActivityCleanCompanyLabel(
+      zone?.location ?? zone?.name ?? zone?.zone ?? zone?.zoneName ?? zone?.strefa,
+    )
+    return zoneLabel || ''
+  }
+
+  function dashboardActivityScannedObjectLabel(row = {}) {
+    const scanObjectCandidates = [
+      row?.scanObjectLabel,
+      row?.objectLabelAtScan,
+      row?.activeObjectLabel,
+      row?.activeClientLabel,
+      row?.activeClient,
+      row?.activeLocation,
+      row?.locationLabel,
+      row?.lokalizacja,
+      row?.location,
+      row?.zone?.location,
+      row?.activeZone,
+      row?.zoneName,
+      row?.strefa,
+      row?.zone?.zone,
+      row?.zone?.name,
+      row?.qrStartSourceItem?.scanObjectLabel,
+      row?.qrStartSourceItem?.objectLabelAtScan,
+      row?.qrStartSourceItem?.activeObjectLabel,
+      row?.qrStartSourceItem?.activeClient,
+      row?.qrStartSourceItem?.activeLocation,
+      row?.qrStartSourceItem?.zoneName,
+      row?.qrStartSourceItem?.strefa,
+      row?.qrStopSourceItem?.scanObjectLabel,
+      row?.qrStopSourceItem?.objectLabelAtScan,
+      row?.qrStopSourceItem?.activeObjectLabel,
+      row?.qrStopSourceItem?.activeClient,
+      row?.qrStopSourceItem?.activeLocation,
+      row?.qrStopSourceItem?.zoneName,
+      row?.qrStopSourceItem?.strefa,
+    ]
+
+    for (const candidate of scanObjectCandidates) {
+      const label = dashboardActivityCleanCompanyLabel(candidate)
+      if (label) {
+        return label
+      }
+    }
+
+    return ''
   }
 
   function dashboardActivityQrCodesFromRow(row = {}) {
@@ -711,6 +776,11 @@ export function createDashboardFeature(ctx) {
   }
 
   function dashboardActivityCompanyLabel(row = {}) {
+    const scannedLabel = dashboardActivityScannedObjectLabel(row)
+    if (scannedLabel) {
+      return scannedLabel
+    }
+
     const directCandidates = [
       row?.clientName,
       row?.clientLabel,
@@ -737,7 +807,7 @@ export function createDashboardFeature(ctx) {
     }
 
     for (const candidate of dashboardActivityQrCodesFromRow(row)) {
-      const resolvedByQr = dashboardActivityResolveClientByQr(candidate)
+      const resolvedByQr = dashboardActivityResolveObjectLabelByQr(candidate)
       if (resolvedByQr) {
         return resolvedByQr
       }
@@ -754,7 +824,7 @@ export function createDashboardFeature(ctx) {
     const cleanBars = (Array.isArray(bars) ? bars : [])
       .map((bar) => ({
         bar,
-        label: dashboardActivityCleanCompanyLabel(bar?.companyLabel ?? bar?.locationLabel),
+        label: dashboardActivityCleanCompanyLabel(dashboardActivityCompanyLabel(bar)),
         startTs: Number(bar?.startTs ?? 0),
         stopTs: Number(bar?.stopTs ?? 0),
         isRunning: Boolean(bar?.isRunning),
@@ -881,14 +951,14 @@ export function createDashboardFeature(ctx) {
         }
 
         const qrCodes = dashboardActivityQrCodesFromRow(sourceRow)
-        if (!qrCodes.length) {
+        const scannedLabel = dashboardActivityScannedObjectLabel(sourceRow)
+        if (!qrCodes.length && !scannedLabel) {
           return null
         }
-
         const rawQrLabel = qrCodes.find(Boolean) || ''
         const label =
-          dashboardActivityCleanCompanyLabel(dashboardActivityCompanyLabel(sourceRow)) ||
-          qrCodes.map((code) => dashboardActivityResolveClientByQr(code)).find(Boolean) ||
+          scannedLabel ||
+          qrCodes.map((code) => dashboardActivityResolveObjectLabelByQr(code)).find(Boolean) ||
           rawQrLabel ||
           ''
         if (!label) {
@@ -1111,6 +1181,91 @@ export function createDashboardFeature(ctx) {
     await openEventEditor(row)
   }
 
+  function dashboardActivityWorkdayDetailFromBar(bar) {
+    if (!(bar instanceof HTMLElement)) {
+      return null
+    }
+
+    const dayKey = dashboardActivityDayKey(bar.getAttribute('data-dash-activity-event-day') || appState.dashboardActivityDay)
+    if (!dayKey) {
+      return null
+    }
+
+    const matchedRow = dashboardActivityEventRowFromBar(bar) ?? {}
+    const workdayId = String(
+      bar.getAttribute('data-dash-activity-workday-id') ||
+        matchedRow?.workdayId ||
+        matchedRow?.linkedWorkdayId ||
+        matchedRow?.id ||
+        '',
+    ).trim()
+    const startAt = toIso(bar.getAttribute('data-dash-activity-source-start') || matchedRow?.startAt || matchedRow?.dayStartAt || '')
+    const endAt = toIso(bar.getAttribute('data-dash-activity-source-stop') || matchedRow?.endAt || matchedRow?.dayEndAt || '')
+    const workerLogin = String(
+      bar.getAttribute('data-dash-activity-worker-login') ||
+        matchedRow?.workerLogin ||
+        matchedRow?.login ||
+        '',
+    ).trim()
+    const workerName = String(
+      bar.getAttribute('data-dash-activity-worker-name') ||
+        matchedRow?.workerName ||
+        matchedRow?.name ||
+        '',
+    ).trim()
+
+    return {
+      dayKey,
+      workdayId,
+      workerLogin,
+      workerName,
+      source: 'dashboard-activity-bar',
+      row: {
+        ...matchedRow,
+        dayKey,
+        workdayId,
+        id: workdayId || String(matchedRow?.id ?? '').trim(),
+        startAt,
+        endAt,
+        workerLogin,
+        workerName,
+      },
+    }
+  }
+
+  function dashboardActivityWorkdayClickKeyFromBar(bar) {
+    if (!(bar instanceof HTMLElement)) {
+      return ''
+    }
+    return [
+      dashboardActivityDayKey(bar.getAttribute('data-dash-activity-event-day') || appState.dashboardActivityDay),
+      String(bar.getAttribute('data-dash-activity-workday-id') || '').trim(),
+      String(bar.getAttribute('data-dash-activity-worker-login') || '').trim(),
+      String(bar.getAttribute('data-dash-activity-worker-name') || '').trim(),
+      String(bar.getAttribute('data-dash-activity-source-start') || '').trim(),
+    ].filter(Boolean).join('|')
+  }
+
+  async function openDashboardActivityWorkdayDayEditor(bar) {
+    const detail = dashboardActivityWorkdayDetailFromBar(bar)
+    if (!detail) {
+      showTransientNotice('Nie znaleziono dnia pracy do edycji.', 'error')
+      return
+    }
+    const intentKey = [detail.dayKey, detail.workdayId, detail.workerLogin, detail.workerName].filter(Boolean).join('|')
+    const nowTs = Date.now()
+    const lastIntent = appState.dashboardActivityLastWorkdayEditIntent ?? {}
+    if (
+      intentKey &&
+      lastIntent.key === intentKey &&
+      nowTs - Number(lastIntent.at ?? 0) < 800
+    ) {
+      return
+    }
+    appState.dashboardActivityLastWorkdayEditIntent = { key: intentKey, at: nowTs }
+    await openDashboardWorkdayDayEditor(detail)
+  }
+
   function dashboardActivityRowStartTimestamp(row = {}, dayKey = todayYmd()) {
     const direct = calendarTimelineEventTimestamp(
       row?.startAt ??
@@ -1237,6 +1392,7 @@ export function createDashboardFeature(ctx) {
           label: durationLabel,
           locationLabel: companyLabel,
           companyLabel,
+          scanObjectLabel: companyLabel,
           isRunning,
           sourceKind: String(row?.historySourceKind ?? '').trim().toLowerCase(),
         }
@@ -1681,7 +1837,7 @@ export function createDashboardFeature(ctx) {
             const clickTitle = bar.kind === 'planned'
               ? ' · Kliknij dwukrotnie: edytuj zlecenie'
               : bar.kind === 'workday'
-                ? ' · Kliknij dwukrotnie: edytuj zdarzenie'
+                ? ' · Kliknij dwukrotnie: edytuj dzień pracy'
                 : ''
             const title = `${group.workerDisplayName}: ${barStatus} ${timeRange}${durationTitle}${displayCompanyLabel ? ` · ${displayCompanyLabel}` : ''}${missingStartTitle}${startDeltaTitle}${endDeltaTitle}${clickTitle}`
             const isCompletedWorkdayBar = bar.kind === 'workday' && !bar.isRunning
@@ -1700,6 +1856,10 @@ export function createDashboardFeature(ctx) {
                   `data-calendar-timeline-source-order-id="${escapeHtml(bar.sourceOrderId || bar.orderId)}"`,
                   `data-calendar-timeline-date="${escapeHtml(bar.dateYmd || dayKey)}"`,
                   bar.occurrenceDateYmd ? `data-calendar-timeline-occurrence-date="${escapeHtml(bar.occurrenceDateYmd)}"` : '',
+                  bar.workSlotKey ? `data-calendar-timeline-work-slot-key="${escapeHtml(bar.workSlotKey)}"` : '',
+                  bar.serviceBlockId ? `data-calendar-timeline-service-block-id="${escapeHtml(bar.serviceBlockId)}"` : '',
+                  bar.serviceBlockKind ? `data-calendar-timeline-service-block-kind="${escapeHtml(bar.serviceBlockKind)}"` : '',
+                  bar.serviceBlockLabel ? `data-calendar-timeline-service-block-label="${escapeHtml(bar.serviceBlockLabel)}"` : '',
                   bar.isRecurringSeries ? 'data-calendar-timeline-recurring-series="1"' : '',
                   bar.isRecurringInstance ? 'data-calendar-timeline-recurring-instance="1"' : '',
                   bar.recurrenceOverride ? 'data-calendar-timeline-recurrence-override="1"' : '',
@@ -1709,8 +1869,8 @@ export function createDashboardFeature(ctx) {
               ? [
                   'role="button"',
                   'tabindex="0"',
-                  'data-dash-activity-event-edit="1"',
-                  `aria-label="${escapeHtml(`Edytuj zdarzenie ${barLabel || timeRange}`)}"`,
+                  'data-dash-activity-workday-edit="1"',
+                  `aria-label="${escapeHtml(`Edytuj dzień pracy ${barLabel || timeRange}`)}"`,
                   `data-dash-activity-event-day="${escapeHtml(dayKey)}"`,
                   bar.eventId ? `data-dash-activity-event-id="${escapeHtml(bar.eventId)}"` : '',
                   bar.workdayId ? `data-dash-activity-workday-id="${escapeHtml(bar.workdayId)}"` : '',
@@ -2514,13 +2674,6 @@ export function createDashboardFeature(ctx) {
       return
     }
 
-    // Priorytet: najpierw popup o braku START, dopiero potem popup informacyjny o spóźnieniu.
-    if (document.getElementById('dashScheduleMissingAlert')) {
-      dashboardHideScheduleLateStartAlert()
-      dashboardQueueScheduleAlert(queueKey, () => dashboardShowScheduleLateStartAlert(normalizedDayKey, entries))
-      return
-    }
-
     appState.dashboardScheduleLatePendingKeys = unseenEntries.map((entry) => entry.alertKey)
 
     let node = document.getElementById('dashScheduleLateAlert')
@@ -2617,161 +2770,12 @@ export function createDashboardFeature(ctx) {
   }
 
   function dashboardShowScheduleMissingStartAlert(dayKey, missingEntries = []) {
-    const normalizedDayKey = String(dayKey ?? '').trim()
-    const entries = Array.isArray(missingEntries) ? missingEntries : []
+    void dayKey
+    void missingEntries
     const queueKey = 'dashboard:schedule-missing'
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey) || !entries.length) {
-      dashboardClearQueuedScheduleAlert(queueKey)
-      dashboardHideScheduleMissingStartAlert()
-      if (!entries.length) {
-        appState.dashboardScheduleAlertLastKey = ''
-      }
-      return
-    }
-
-    if (dashboardShouldDeferScheduleAlert()) {
-      dashboardHideScheduleMissingStartAlert()
-      dashboardQueueScheduleAlert(queueKey, () => dashboardShowScheduleMissingStartAlert(normalizedDayKey, entries))
-      return
-    }
-
-    if (appState.dashboardScheduleAlertMuted) {
-      dashboardClearQueuedScheduleAlert(queueKey)
-      return
-    }
-
-    const now = Date.now()
-    if (Number(appState.dashboardScheduleAlertSnoozeUntil ?? 0) > now) {
-      dashboardClearQueuedScheduleAlert(queueKey)
-      return
-    }
-
-    const signature = entries
-      .map((entry) => normalizeSearchText(entry?.workerName))
-      .filter(Boolean)
-      .sort((left, right) => left.localeCompare(right, 'pl', { sensitivity: 'base' }))
-      .join('|')
-    if (!signature) {
-      dashboardClearQueuedScheduleAlert(queueKey)
-      dashboardHideScheduleMissingStartAlert()
-      return
-    }
-
-    appState.dashboardScheduleAlertLastKey = signature
-
-    let node = document.getElementById('dashScheduleMissingAlert')
-    if (!node) {
-      node = document.createElement('div')
-      node.id = 'dashScheduleMissingAlert'
-      node.className = 'dash-schedule-alert'
-      node.setAttribute('role', 'alertdialog')
-      node.setAttribute('aria-modal', 'true')
-      node.setAttribute('aria-labelledby', 'dashScheduleMissingAlertTitle')
-      node.innerHTML = `
-        <div class="dash-schedule-alert-header">
-          <span class="dash-schedule-alert-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none">
-              <path d="M12 8v5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-              <path d="M12 17h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-              <path d="M10.3 4.3 2.7 18a2 2 0 0 0 1.75 3h15.1a2 2 0 0 0 1.75-3L13.7 4.3a2 2 0 0 0-3.4 0Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-            </svg>
-          </span>
-          <div class="dash-schedule-alert-heading">
-            <div class="dash-schedule-alert-signal" aria-hidden="true">UWAGA</div>
-            <div class="dash-schedule-alert-title" id="dashScheduleMissingAlertTitle">Brak QR START</div>
-            <div class="dash-schedule-alert-text" id="dashScheduleMissingAlertText"></div>
-          </div>
-        </div>
-        <div class="dash-schedule-alert-list-wrap">
-          <div class="dash-schedule-alert-list-title">Lista osób:</div>
-          <ul class="dash-schedule-alert-list" id="dashScheduleMissingAlertList"></ul>
-        </div>
-        <div class="dash-schedule-alert-actions">
-          <div class="dash-schedule-alert-snooze">
-            <label for="dashScheduleMissingSnooze">Przypomnij za</label>
-            <select id="dashScheduleMissingSnooze" data-alert-snooze-minutes>
-              <option value="15">15 min</option>
-              <option value="30">30 min</option>
-              <option value="60">1 h</option>
-            </select>
-            <button type="button" class="btn2 secondary" data-alert-action="snooze">Odłóż</button>
-          </div>
-          <button type="button" class="btn2 danger" data-alert-action="mute">Nie pokazuj</button>
-        </div>
-      `
-      document.body.appendChild(node)
-      node.addEventListener('click', (event) => {
-        const button = event.target.closest('[data-alert-action]')
-        if (!button) {
-          return
-        }
-
-        const action = String(button.getAttribute('data-alert-action') ?? '').trim()
-        if (action === 'snooze') {
-          const snoozeSelect = node.querySelector('[data-alert-snooze-minutes]')
-          const selectedMinutes = Number(snoozeSelect?.value ?? 15)
-          const allowedMinutes = [15, 30, 60]
-          const snoozeMinutes = allowedMinutes.includes(selectedMinutes) ? selectedMinutes : 15
-          appState.dashboardScheduleAlertSnoozeUntil = Date.now() + snoozeMinutes * 60 * 1000
-          dashboardClearQueuedScheduleAlert(queueKey)
-          dashboardHideScheduleMissingStartAlert()
-          return
-        }
-
-        if (action === 'mute') {
-          appState.dashboardScheduleAlertMuted = true
-          dashboardClearQueuedScheduleAlert(queueKey)
-          dashboardHideScheduleMissingStartAlert()
-        }
-      })
-    }
-
-    const textNode = node.querySelector('#dashScheduleMissingAlertText')
-    if (textNode) {
-      textNode.textContent =
-        entries.length === 1
-          ? '1 osoba nie rozpoczęła pracy (brak QR START).'
-          : `${entries.length} osób nie rozpoczęło pracy (brak QR START).`
-    }
-
-    const listNode = node.querySelector('#dashScheduleMissingAlertList')
-    if (listNode) {
-      const normalized = [...entries]
-        .filter((entry) => String(entry?.workerName ?? '').trim())
-        .sort((left, right) => {
-          const leftStart = Number.isFinite(left?.startMinutes) ? Number(left.startMinutes) : Number.POSITIVE_INFINITY
-          const rightStart = Number.isFinite(right?.startMinutes) ? Number(right.startMinutes) : Number.POSITIVE_INFINITY
-          if (leftStart !== rightStart) {
-            return leftStart - rightStart
-          }
-          return String(left?.workerName ?? '').localeCompare(String(right?.workerName ?? ''), 'pl', {
-            sensitivity: 'base',
-          })
-        })
-
-      const seen = new Set()
-      listNode.innerHTML = normalized
-        .filter((entry) => {
-          const key = `${normalizeSearchText(entry?.workerName)}|${String(entry?.startTime ?? '').trim()}`
-          if (!key || seen.has(key)) {
-            return false
-          }
-          seen.add(key)
-          return true
-        })
-        .map((entry) => {
-          const name = escapeHtml(String(entry.workerName ?? '-'))
-          const start = String(entry.startTime ?? '').trim()
-          const startLabel = start && start !== '-' ? escapeHtml(start) : '-'
-          return `
-            <li>
-              <span class="dash-schedule-alert-person">${name}</span>
-              <span class="dash-schedule-alert-meta">Planowany START: ${startLabel}</span>
-            </li>
-          `
-        })
-        .join('')
-    }
+    dashboardClearQueuedScheduleAlert(queueKey)
+    dashboardHideScheduleMissingStartAlert()
+    appState.dashboardScheduleAlertLastKey = ''
   }
 
   function dashboardApplyScheduleVisibleLimit() {
@@ -5327,6 +5331,47 @@ export function createDashboardFeature(ctx) {
     }
   }
 
+  async function dashboardSyncCalendarTimelineInputs(options = {}) {
+    const orgId = String(appState.session?.orgId ?? '').trim()
+    const forceRefresh = options.forceRefresh === true
+    const loaders = [
+      dashboardSyncCalendarOrdersForTimeline({ forceRefresh }),
+    ]
+
+    const shouldRefreshWorkers =
+      Boolean(orgId) &&
+      typeof getWorkers === 'function' &&
+      (forceRefresh || !appState.workersLoaded || !Array.isArray(appState.workers) || !appState.workers.length)
+
+    if (shouldRefreshWorkers) {
+      loaders.push(
+        getWorkers(orgId, {
+          forceRefresh,
+          fetchPolicy: forceRefresh ? 'SERVER_ONLY' : undefined,
+        })
+          .then((workers) => {
+            if (String(appState.session?.orgId ?? '').trim() !== orgId) {
+              return []
+            }
+            const rows = Array.isArray(workers) ? workers : []
+            appState.workers = rows
+            appState.workerTimeRows = rows
+            appState.workersLoaded = true
+            setSubwelcomeMetric('#view-workerTime .subwelcome', rows.length)
+            setSubwelcomeMetric('#view-workerProfile .subwelcome', rows.length)
+            return rows
+          })
+          .catch((error) => {
+            console.warn('[portal/dashboard] worker timeline preload failed', error)
+            return []
+          }),
+      )
+    }
+
+    await Promise.allSettled(loaders)
+    return ordersListSourceOrders()
+  }
+
   async function dashboardRefreshBackgroundData(orgId, options = {}) {
     const activeOrgId = String(appState.session?.orgId ?? '').trim()
     if (!orgId || orgId !== activeOrgId) {
@@ -5672,7 +5717,7 @@ export function createDashboardFeature(ctx) {
           dashboardLoadFastRows(orgId, {
             forceRefresh: options.forceRefresh === true,
           }),
-          dashboardSyncCalendarOrdersForTimeline({
+          dashboardSyncCalendarTimelineInputs({
             forceRefresh: options.forceRefresh === true,
           }),
         ])
@@ -6116,7 +6161,7 @@ export function createDashboardFeature(ctx) {
 
         try {
           await refreshDashboardWidgets({ forceRefresh: true, syncWorktimeToken: true })
-          showTransientNotice('Pulpit został odświeżony.')
+          showTransientNotice('Dane pulpitu zostały pobrane u źródła.')
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Nie udało się odświeżyć pulpitu.'
           showTransientNotice(message, 'error')
@@ -6345,6 +6390,23 @@ export function createDashboardFeature(ctx) {
     })
 
     binding.add(document.getElementById('dashActivityCalendar'), 'click', (event) => {
+      const workdayBar = event.target.closest('[data-dash-activity-workday-edit]')
+      if (workdayBar instanceof HTMLElement) {
+        event.preventDefault()
+        event.stopPropagation()
+        const clickKey = dashboardActivityWorkdayClickKeyFromBar(workdayBar)
+        const nowTs = Date.now()
+        const lastClick = appState.dashboardActivityLastWorkdayBarClick ?? {}
+        appState.dashboardActivityLastWorkdayBarClick = { key: clickKey, at: nowTs }
+        if (
+          Number(event.detail ?? 0) >= 2 ||
+          (clickKey && lastClick.key === clickKey && nowTs - Number(lastClick.at ?? 0) <= 650)
+        ) {
+          void openDashboardActivityWorkdayDayEditor(workdayBar)
+        }
+        return
+      }
+
       const button = event.target.closest('[data-dash-worker-login], [data-dash-worker-name]')
       if (!button) {
         return
@@ -6371,11 +6433,11 @@ export function createDashboardFeature(ctx) {
         return
       }
 
-      const eventBar = event.target.closest('[data-dash-activity-event-edit]')
-      if (eventBar instanceof HTMLElement) {
+      const workdayBar = event.target.closest('[data-dash-activity-workday-edit]')
+      if (workdayBar instanceof HTMLElement) {
         event.preventDefault()
         event.stopPropagation()
-        void openDashboardActivityEventEditor(eventBar)
+        void openDashboardActivityWorkdayDayEditor(workdayBar)
       }
     })
 
@@ -6383,11 +6445,11 @@ export function createDashboardFeature(ctx) {
       if (event.key !== 'Enter' && event.key !== ' ') {
         return
       }
-      const eventBar = event.target.closest('[data-dash-activity-event-edit]')
-      if (eventBar instanceof HTMLElement) {
+      const workdayBar = event.target.closest('[data-dash-activity-workday-edit]')
+      if (workdayBar instanceof HTMLElement) {
         event.preventDefault()
         event.stopPropagation()
-        void openDashboardActivityEventEditor(eventBar)
+        void openDashboardActivityWorkdayDayEditor(workdayBar)
         return
       }
 

@@ -1503,3 +1503,364 @@ Uwagi dla nastepnej osoby:
 - Jesli trzeba wycofac wdrozenie, punktem odniesienia sprzed tego rollouta jest poprzedni commit `cb0a329` / poprzedni build App Hosting sprzed `build-2026-07-06-002`.
 - Backup lokalnego stanu przed deployem znajduje sie w `C:\Users\rafal\Desktop\app-to-react-backups\pre-deploy-portal-20260706-164917`.
 - Po deployu w szybkim smoke tescie HTML nadal wskazywal asset `/assets/portal-Bv5O1e79.js`, ale App Hosting i Cloud Run potwierdzaja rollout `build-2026-07-06-002`, a marker nowej logiki jest w tym assetcie.
+
+Data: 2026-07-06 20:53 +02:00
+Autor: AI Codex
+Dodano:
+- W `web-app/apps/portal-web/src/services/workdayService.js` dodano pochodne pole `scanObjectLabel` dla mapowanych i agregowanych aktywnych dni pracy.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/dashboard/index.js` etykieta po prawej stronie osi dnia najpierw korzysta z gotowej etykiety skanu/obiektu (`scanObjectLabel`, aktywna lokalizacja/strefa), a dopiero potem z dotychczasowych fallbackow klienta i QR.
+- Resolver QR dla osi dnia potrafi teraz zwrocic etykiete obiektu/strefy z `public.zone`, jesli nie uda sie ustalic nazwy klienta.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Sprawdzono zdalne repozytorium: `git fetch cleanzi01`; lokalna galaz robocza nie byla za zdalna galezia, a `cleanzi01/main` pozostawal na commicie `1a3850a`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/dashboard/index.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/services/workdayService.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu lokalnego; nie wdrazano jej na produkcje.
+- Nie zmieniano aplikacji mobilnej, Data Connect, backendu ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: usunac helper `dashboardActivityResolveObjectLabelByQr`, usunac priorytet `scanObjectCandidates` w `dashboardActivityCompanyLabel` i usunac pole `scanObjectLabel` z `workdayService.js`.
+
+Data: 2026-07-06 22:14 +02:00
+Autor: AI Codex
+Dodano:
+- W `web-app/apps/portal-web/src/features/dashboard/index.js` dodano helper `dashboardActivityScannedObjectLabel`, ktory wydziela pewne etykiety pochodzace z realnego skanu/QR lub danych zapisanych bezposrednio przy zdarzeniu.
+Zmieniono:
+- Ograniczono uzupelnianie etykiety obiektu po prawej stronie osi dnia: nazwa jest pokazywana tylko wtedy, gdy istnieje QR albo jawna etykieta skanu/obiektu.
+- Wpisy dodane recznie bez QR nie sa juz dopasowywane na sile do harmonogramu ani planowanych zlecen; dla takich wpisow zostaje `-`.
+- Usunieto martwe helpery, ktore probowaly dobierac etykiety z planu dnia jako fallback.
+Usunieto:
+- Fallback wymuszajacy etykiety obiektu z grafiku/harmonogramu przy braku QR.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/dashboard/index.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/services/workdayService.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Uruchomiono `git diff --check`; wynik bez bledow, pozostaly tylko ostrzezenia CRLF.
+- W przegladarce na `http://localhost:5173/` odswiezono Pulpit i przewinieto os dnia. Wynik: 36 wierszy, 33 z etykieta obiektu/firmy, 3 reczne wpisy bez QR pozostaly jako `-` (`Nowaczyk-Woda Katarzyna`, `Kustos Szymon`, `Dudek Sabina`).
+Uwagi dla nastepnej osoby:
+- To celowe zachowanie: brak QR oznacza brak wymuszania nazwy obiektu na osi dnia.
+- Zmiana dotyczy tylko portalu lokalnego; nie wdrazano jej na produkcje.
+
+Data: 2026-07-06 22:59 +02:00
+Autor: AI Codex
+Dodano:
+- W `web-app/apps/portal-web/src/features/dashboard/index.js` dodano obsluge otwierania edycji dnia pracy bezposrednio z paska pracy na osi dnia pulpitu.
+Zmieniono:
+- Paski realnego czasu pracy na pulpicie (`data-dash-activity-workday-edit`) po podwojnym kliknieciu otwieraja teraz okno `Edycja dnia pracy` pracownika zamiast starego edytora zdarzenia.
+- Dodano dane pomocnicze do paska pracy: dzien, `workdayId`, login i nazwe pracownika, zeby otwierac dokladny rekord dnia pracy.
+- Dodano wsparcie klawiatury: Enter/Spacja na pasku pracy otwieraja to samo okno edycji dnia.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/dashboard/index.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Uruchomiono `git diff --check`; wynik bez bledow, pozostaly tylko ostrzezenia CRLF.
+- W przegladarce na `http://localhost:5173/` odswiezono pulpit i podwojnie kliknieto pasek pracy Rafala Dudka; otworzylo sie okno `Edycja dnia pracy` z polami daty, startu, konca pracy i komentarza.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu desktop; nie zmieniano aplikacji mobilnej, backendu ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: usunac helpery `dashboardActivityWorkdayDetailFromBar`, `dashboardActivityWorkdayClickKeyFromBar`, `openDashboardActivityWorkdayDayEditor` i przywrocic atrybut/handler `data-dash-activity-event-edit` dla paskow pracy.
+
+Data: 2026-07-06 23:22 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` doprecyzowano deduplikacje realnych paskow dnia pracy na kalendarzu.
+- Aktywny pasek pracownika dodawany z biezacego statusu nie usuwa juz wczesniejszego zamknietego odcinka dnia pracy tego samego pracownika, jesli zamkniety odcinek konczy sie przed startem aktywnego odcinka.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/calendar/index.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- W przegladarce na `http://localhost:5173/` sprawdzono kalendarz dla `Dudek Rafal` na 06.07.2026: widoczny jest zamkniety realny pasek `08:00-17:43` oraz osobny aktywny pasek od `17:43`, zamiast samego aktywnego odcinka.
+Uwagi dla nastepnej osoby:
+- Przywrocenie poprzedniego zachowania: w `calendarTimelineEnsureActiveWorkerStatusOrders` usunac warunek `closedBeforeFallback` i ponownie usuwac wszystkie realne paski `workday` dla tego samego wiersza/dnia przed dodaniem fallbacku aktywnego statusu.
+- Zmiana dotyczy tylko portalu desktop; nie zmieniano aplikacji mobilnej, backendu ani danych w bazie.
+
+Data: 2026-07-06 23:37 +02:00
+Autor: AI Codex
+Dodano:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` dodano helper `calendarTimelineServiceBlockRepeatWeekdays`, ktory wyciaga dni powtarzania bezposrednio ze zmian `serviceBlocks.weekdays`.
+- Dodano helper `calendarTimelineOccurrenceServiceBlocks`, ktory dla kazdego wystapienia cyklicznego przesuwa daty `serviceBlocks`, slotow i alokacji na konkretny dzien kalendarza.
+Zmieniono:
+- Rozwijanie zlecen cyklicznych na kalendarzu preferuje teraz dni zapisane przy zmianach, a nie tylko pochodne pole `repeatWeekdays`.
+- Wystapienia cykliczne zachowuja strukture zmian i obsady, ale dostaja poprawna date wystapienia, dzieki czemu zlecenie pon-pt pokazuje sie takze w kolejnych dniach widoku 3-dniowego.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/calendar/index.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- W przegladarce na `http://localhost:5173/` odswiezono kalendarz i sprawdzono paski `Best Clean`: wystapienia sa widoczne dla `2026-07-06`, `2026-07-07` i `2026-07-08`.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu desktop i sposobu renderowania/rozwijania serii na kalendarzu; nie zmieniano aplikacji mobilnej, backendu ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: usunac helpery `calendarTimelineServiceBlockRepeatWeekdays` i `calendarTimelineOccurrenceServiceBlocks`, a w `calendarTimelineRecurringInstance` wrocic do generowania alokacji bez nadpisywania `serviceBlocks` dla dnia wystapienia.
+
+Data: 2026-07-07 10:50 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/dashboard/index.js` trwale wylaczono modal ostrzegawczy `Brak QR START`.
+- Funkcja `dashboardShowScheduleMissingStartAlert` nie tworzy juz okna, tylko czysci ewentualny stary popup i kolejke powiadomienia `dashboard:schedule-missing`.
+- Popup spoznien `dashboardShowScheduleLateStartAlert` nie czeka juz na popup `Brak QR START`, bo ten popup zostal usuniety z przeplywu.
+Usunieto:
+- Usunieto kod HTML i obsluge przyciskow `Przypomnij za`, `Odloz`, `Nie pokazuj` dla popupu `Brak QR START`.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Sprawdzono zdalne repozytoria przez `git fetch --all --prune`; biezaca galaz `codex/pre-prod-sync-20260630-112213` nie byla za `cleanzi01/main`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/dashboard/index.js`.
+- Sprawdzono, ze tekst `Brak QR START` nie wystepuje juz w `web-app/apps/portal-web/src/features/dashboard/index.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Uruchomiono `git diff --check`; wynik bez bledow, pozostaly tylko ostrzezenia CRLF.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu desktop; nie zmieniano aplikacji mobilnej, backendu ani danych w bazie.
+- Liczenie brakujacego startu i wizualizacja na osi/paskach pozostaja w systemie; usuniety jest tylko modal `Brak QR START`.
+- Przywrocenie poprzedniego zachowania: odtworzyc poprzednia zawartosc `dashboardShowScheduleMissingStartAlert` oraz blok priorytetu w `dashboardShowScheduleLateStartAlert`, ktory kolejkowal popup spoznien po popupie braku START.
+
+Data: 2026-07-07 11:20 +02:00
+Autor: AI Codex
+Dodano:
+- W `web-app/apps/portal-web/src/features/dashboard/index.js` dodano helper `dashboardSyncCalendarTimelineInputs`, ktory dla pulpitu pobiera zrodlo zlecen kalendarza oraz katalog pracownikow przed renderem osi dnia.
+- W `web-app/apps/portal-web/src/ui/layoutTemplate.js` dodano widoczny przycisk `Odswiez u zrodla` w panelu osi dnia pulpitu.
+- W `web-app/apps/portal-web/src/index.css` dodano style przycisku `dash-refresh-btn--source` i zachowano animacje spinnera podczas pobierania.
+Zmieniono:
+- Odświeżenie pulpitu oraz ladowanie osi dla wybranego dnia korzystaja teraz z tego samego zrodla zlecen co kalendarz, bez koniecznosci wejscia w zakladke `Kalendarz`.
+- Klikniecie przycisku odswiezania pulpitu wymusza pobranie danych u zrodla: zlecen grafiku, listy pracownikow, aktywnosci i grafiku dnia.
+- Komunikat po recznym odswiezeniu informuje, ze dane pulpitu zostaly pobrane u zrodla.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Sprawdzono zdalne repozytoria przez `git fetch --all --prune`; biezaca galaz `codex/pre-prod-sync-20260630-112213` nie byla za `cleanzi01/main`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/dashboard/index.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/ui/layoutTemplate.js`.
+- Uruchomiono `npm.cmd run build`; build portalu zakonczyl sie poprawnie.
+- Uruchomiono `git diff --check`; wynik bez bledow, pozostaly tylko ostrzezenia CRLF.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu desktop; nie zmieniano aplikacji mobilnej, backendu ani danych w bazie.
+- Przywrocenie poprzedniego zachowania: w `refreshDashboardWidgets` i `dashboardLoadActivityDay` wrocic z `dashboardSyncCalendarTimelineInputs` do samego `dashboardSyncCalendarOrdersForTimeline`, usunac helper oraz przywrocic przycisk `dashRefreshBtn` jako `dash-refresh-btn--icon`.
+
+Data: 2026-07-07 11:21 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/ui/layoutTemplate.js` skrocono widoczny tekst przycisku odswiezania pulpitu z `Odswiez u zrodla` do `Odswiez`.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Uruchomiono `node --check web-app/apps/portal-web/src/ui/layoutTemplate.js`.
+Uwagi dla nastepnej osoby:
+- Tooltip i opis dostepnosci przycisku nadal informuja, ze odswiezanie pobiera dane u zrodla; zmieniono tylko widoczny napis.
+
+Data: 2026-07-07 11:33 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/orders/index.js` nowy draft zlecenia tworzony przy `Dodaj zlecenie` startuje jako klient jednorazowy (`clientType/customerType: individual`).
+- Renderer formularza odroznia etykiete wyboru `Klient jednorazowy` od wlasciwej nazwy zlecajacego, dzieki czemu pierwszy ekran otwiera sekcje klienta jednorazowego, ale pola danych klienta pozostaja puste do wypelnienia.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Sprawdzono zdalne repozytoria przez `git fetch --all --prune`; biezaca galaz `codex/pre-prod-sync-20260630-112213` nie byla za `cleanzi01/main`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu desktop i tylko sciezki nowego zlecenia; edycja istniejacych zlecen korzysta z dotychczasowego rozpoznania klienta.
+- Przywrocenie poprzedniego zachowania: usunac pola `clientType/customerType: individual` z `ordersCreateDraftOrder` i przywrocic poprzednie wyliczanie `renderClientLabel`, `selectedClientForRender`, `isIndividualOrder`, `ordersIndividualName` oraz `ordersEditClientName` w `ordersRenderEditor`.
+
+Data: 2026-07-07 11:42 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/orders/index.js` poprawiono filtrowanie listy klientow w pickerze klienta na pierwszym kroku formularza zlecenia.
+- Gdy wybrany jest `Klient jednorazowy`, widoczna etykieta pola nie jest juz traktowana jako filtr wyszukiwania, wiec po rozwinieciu listy widac rowniez dotychczasowych klientow posortowanych alfabetycznie.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Sprawdzono zdalne repozytoria przez `git fetch --all --prune`; biezaca galaz `codex/pre-prod-sync-20260630-112213` nie byla za `cleanzi01/main`.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu desktop i tylko zachowania listy klientow w formularzu zlecenia.
+- Przywrocenie poprzedniego zachowania: w `ordersRenderClientPickerList` wrocic do liczenia `query` bez `selectedDisplayKey`.
+
+Data: 2026-07-07 11:54 +02:00
+Autor: AI Codex
+Dodano:
+- W `web-app/apps/portal-web/src/features/orders/index.js` dodano w karcie osoby pomocnicze etykiety `statusLabel` i `summaryLabel`, uzywane tylko do czytelniejszego renderowania slotu osoby.
+- W `web-app/apps/portal-web/src/index.css` dodano style `orders-kanban-slot-title`, `orders-kanban-slot-hours-pill` oraz doprecyzowano wyglad karty `orders-kanban-slot-card`.
+Zmieniono:
+- Poprawiono uklad karty osoby w sekcji `Zmiany i osoby`: naglowek ma teraz czytelny status i chip RBH, pola sa rowniej ulozone, a stopka pokazuje czy slot trafi do BUFORU albo kto jest przypisany.
+- Uporzadkowano odstepy, obramowania, promienie i wysokosci pol w kanbanie slotow, bez zmiany logiki zapisu obsady.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Probowano sprawdzic zdalne repozytoria przez `git fetch --all --prune`, ale komenda przekroczyla limit czasu w tej sesji.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu desktop i tylko warstwy widoku formularza zlecenia; nie zmieniano aplikacji mobilnej, backendu ani danych w bazie.
+- Przywrocenie poprzedniego wygladu: cofnac zmiany w `ordersServiceBlockSlotsHtml` dotyczace `statusLabel/summaryLabel/orders-kanban-slot-title/orders-kanban-slot-hours-pill` oraz usunac odpowiadajace style z `index.css`.
+
+Data: 2026-07-07 12:03 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` zmieniono edycje zlecenia cyklicznego z osi kalendarza: klikniecie `Edytuj` oraz dwuklik na pasku nie wyswietlaja juz popupu wyboru zakresu `Tylko ten jeden dzien / Reguly cyklicznosci`.
+- Dla wystapienia serii cyklicznej portal otwiera teraz bezposrednio edytor zlecenia zrodlowego/serii; dla materializowanego override nadal otwierany jest konkretny rekord override.
+Usunieto:
+- Nic z plikow; pominieto wywolanie popupu zakresu edycji w sciezce edycji z kalendarza.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Sprawdzono zdalny branch przez `git fetch cleanzi01 main --prune`.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu desktop i tylko wejscia do edycji z osi kalendarza; nie zmieniano drag/drop, backendu, aplikacji mobilnej ani danych w bazie.
+- Funkcja `calendarTimelineShowRecurringScopeDialog` zostaje w kodzie, bo nadal moze byc uzywana przez inne sciezki, np. zakres przesuniecia cyklicznego.
+- Przywrocenie poprzedniego zachowania: w `calendarTimelineEditOrderFromContext` i obsludze `dblclick` przywrocic wywolanie `calendarTimelineShowRecurringScopeDialog` z akcjami `ordersOpenRecurringOccurrenceEditorFromCalendar` oraz `ordersOpenEditorFromCalendar`.
+
+Data: 2026-07-07 12:26 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/orders/index.js` zmieniono stan poczatkowy nowego draftu zlecenia: formularz `Dodaj zlecenie` startuje teraz z BUFOR-em zamiast automatycznie przypisywac pierwszy wiersz pracownika.
+- Nowy draft ma `row` ustawiony na techniczny wiersz BUFOR, ale `assignedRows` i `workerAssignments` pozostaja puste do momentu swiadomego wyboru pracownika w formularzu.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Sprawdzono zdalny branch przez `git fetch cleanzi01 main --prune` w tej sesji pracy.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly tylko standardowe ostrzezenia Vite o duzych chunkach.
+- Uruchomiono `git diff --check` - brak bledow diffu, tylko istniejace ostrzezenia CRLF.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu desktop i tylko sciezki dodawania nowego zlecenia; edycja istniejacych zlecen nadal odtwarza zapisane osoby, sloty i zasady z danych zlecenia.
+- Przywrocenie poprzedniego zachowania: w `ordersCreateDraftOrder` ustawic z powrotem `row = 0`, `assignedRows: [row]` i `workerAssignments: ordersWorkerAssignmentsFromRows([row])`.
+
+Data: 2026-07-07 13:30 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` poprawiono otwieranie edycji z paska zlecenia cyklicznego na pulpicie/kalendarzu.
+- Dwuklik w konkretne wystapienie cykliczne nie otwiera juz bezposrednio rekordu zrodlowego calej serii, tylko przygotowuje edycje wystapienia dla wskazanej daty przez `ordersOpenRecurringOccurrenceEditorFromCalendar`.
+- Ta sama zasada obejmuje teraz dwuklik bezposrednio na osi kalendarza oraz wejscie przez kontekst paska.
+- Zachowano brak popupu wyboru zakresu; zmiana dotyczy tylko wyboru poprawnego kontekstu edycji.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/calendar/index.js`.
+- W przegladarce localhost dwukliknieto pasek `Jablonska Ewa: Plan 15:00-18:00 - NZOZ SWIERKLANY`; edytor pokazal sloty `Jablonska Ewa` i `Smolka Justyna`, zamiast poprzednio odtwarzanej zmiany `Radecka Natalia / Ostrowska Agnieszka`.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+- Uruchomiono `git diff --check` - brak bledow diffu, tylko istniejace ostrzezenia CRLF.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu desktop i sciezki otwierania edycji z osi/pulpitu; nie zmieniano zapisu danych, aplikacji mobilnej ani backendu.
+- Przywrocenie poprzedniego zachowania: w `calendarTimelineEditOrderFromContext` przy `context.shouldAskScope && context.sourceOrder` ponownie wywolac `ordersOpenEditorFromCalendar(context.sourceOrderId)`.
+
+Data: 2026-07-07 14:45 +02:00
+Autor: AI Codex
+Dodano:
+- W `web-app/apps/portal-web/src/features/orders/index.js` dodano pomocnicze rozpoznanie kanonicznych alokacji obsady z `workAllocations` / `workerAllocations` oraz deduplikacje pracownikow po stabilnej tozsamosci.
+Zmieniono:
+- Uporzadkowano odczyt obsady zlecenia: jesli rekord ma `workAllocations` albo `workerAllocations`, lista zlecen, etykiety pracownikow i edytor biora pracownikow najpierw z tych pol, bez mieszania ze starymi polami `workerAssignments`, `assignedRows`, `workerLabel` i `workerIds`.
+- Przy mapowaniu obsady na wiersze pracownikow priorytet maja identyfikatory/login/klucz/nazwa, a dopiero na koncu bezposredni numer `row`, zeby stare numery wierszy nie podmienialy osoby.
+- Jesli kanoniczne alokacje istnieja, ale sa faktycznie BUFOR-em, formularz wraca do BUFOR-u zamiast odtwarzac przypadkowa osobe ze starych pol pomocniczych.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt` i sprawdzono `git status`.
+- Probowano wykonac `git fetch --all --prune`, ale komenda przekroczyla limit czasu w tej sesji.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+- Uruchomiono `git diff --check` - brak bledow diffu, tylko istniejace ostrzezenia CRLF.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu desktop i odczytu obsady zlecen w module zlecen; nie zmieniano aplikacji mobilnej, backendu ani schematu bazy.
+- Przy dalszym sprzataniu nalezy utrzymac zasade: `task.work_allocations` / `Task.workAllocations` sa zrodlem prawdy, a pola `workerAssignments`, `assignedRows`, `workerLabel`, `workerIds` sa tylko pomocnicze/fallbackowe dla starych rekordow bez kanonicznych alokacji.
+
+Data: 2026-07-07 17:40 +02:00
+Autor: AI Codex
+Dodano:
+- W `web-app/apps/portal-web/src/features/orders/index.js` dodano zabezpieczenia formularza edycji zlecenia przed odczytem nieaktualnych kontrolek z poprzednio otwartego zlecenia.
+- Dodano pomocnicze dopasowanie slotu obsady do pracownika po stabilnej tozsamosci: `workerId`, `workerLogin`, `workerKey` i nazwa, z numerem wiersza jako ostatnim fallbackiem.
+Zmieniono:
+- Poprawiono priorytet ID przy kliknieciu przycisku edycji na liscie zlecen: edytor otwiera teraz konkretny rekord z kliknietego wiersza, a nie rekord zrodlowy serii, ktory mogl pokazywac innego klienta i inna obsade.
+- Przy odtwarzaniu slotow zmiany zlecenia portal nie miesza juz pustych/starych slotow BUFOR z pomocniczymi danymi poprzedniego edytora.
+- Jesli slot w danych ma pracownika zapisanym identyfikatorem albo nazwa, formularz edycji pokazuje tego pracownika nawet wtedy, gdy stary numer `row` nie pasuje juz do aktualnej kolejnosci listy pracownikow.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana korzystano z aktualnego `ReadMe.txt` jako mapy zmian.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- W przegladarce localhost przeklikano edycje 6 widocznych zlecen z listy: Best Clean, GAPR, Gmina Godow, HOCHTIEF, Nash Tackle Zory i NZOZ SWIERKLANY. Edytor otwieral zgodnego klienta oraz zgodna obsade z wierszem listy.
+- Nie wykonywano zapisu danych w bazie podczas testu.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu desktop i sciezki `Zlecenia -> Lista zlecen -> Edytuj`.
+- Dla `Gmina Godow` edytor pokazuje poprawnego klienta i pracownika `Wuwer Mariola`, ale rekord ma trzy sloty tej samej osoby; to wyglada na osobny temat porzadkowania danych/regul slotow, a nie blad otwierania niewlasciwego rekordu.
+- Przywrocenie poprzedniego zachowania: w `ordersOpenEditorFromRow`/delegacji akcji listy przywrocic priorytet `data-order-source-id` przed `data-order-id` oraz usunac guard `ordersEditorControlsBelongToOrder` i fallbacki dopasowania slotow po stabilnej tozsamosci.
+
+Data: 2026-07-07 19:42 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/index.css` przesunieto dymki roznic czasu na pulpicie poza zewnetrzne krawedzie paskow czasu: START kotwiczy sie po lewej stronie paska, a STOP po prawej.
+- Dla tracka osi dnia na pulpicie wlaczono widocznosc elementow wychodzacych poza obrys, zeby dymki nie byly ucinane po przeniesieniu na zewnatrz paska.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana przeczytano `ReadMe.txt` i sprawdzono aktualny status repozytorium.
+- Wykonano `git fetch cleanzi01 --prune`, zeby upewnic sie, ze lokalny stan widzi aktualny remote.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+- Uruchomiono `git diff --check` - brak bledow diffu, tylko istniejace ostrzezenia CRLF.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko wygladu osi dnia na pulpicie w portalu desktop; nie zmieniano JS, danych, backendu ani aplikacji mobilnej.
+- Przywrocenie poprzedniego zachowania: w `web-app/apps/portal-web/src/index.css` dla `.dash-activity-timeline-track` przywrocic `overflow:hidden`, a dla `.dash-activity-delta-marker--phase-start/end` usunac zewnetrzne kotwiczenie i transformacje.
+
+Data: 2026-07-07 20:48 +02:00
+Autor: AI Codex
+Dodano:
+- W `web-app/apps/portal-web/src/features/orders/index.js` dodano centralne wyznaczanie czasu realizacji zlecenia z pierwszej dostepnej karty zmiany (`ordersPrimaryServiceBlockTiming`).
+Zmieniono:
+- Formularz dodawania/edycji zlecenia przestal uzywac gornych pol godzin/dostepu jako zrodla czasu realizacji; START/STOP sa teraz brane z kart w sekcji `Zmiany i osoby`.
+- Podsumowanie, ukryte pola techniczne, walidacja, zapis zlecenia jednorazowego i zapis zlecenia cyklicznego korzystaja z godzin zmian, a nie z dawnych pol `ordersEditTime` i `ordersEditEndTime`.
+- W `web-app/apps/portal-web/src/features/calendar/index.js` zachowano godziny slotow/alokacji przy budowaniu paskow kalendarza, zeby kalendarz nie wracal do starszych godzin rekordu nadrzednego.
+Usunieto:
+- Z `web-app/apps/portal-web/src/features/orders/list/template.html` usunieto widoczne pola `Godzina START` / `Godzina STOP` oraz ich wariant `Dostep do obiektu od/do` z gornej czesci formularza.
+- Z `web-app/apps/portal-web/src/index.css` usunieto martwy styl dla nieistniejacego panelu `ordersScheduleTimeGrid`.
+Testy/sprawdzenia:
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/calendar/index.js`.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+- Uruchomiono `git diff --check` - brak bledow diffu, tylko istniejace ostrzezenia CRLF.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy tylko portalu desktop i logiki formularza zlecen; nie zmieniano aplikacji mobilnej, backendu ani schematu bazy.
+- Przywrocenie poprzedniego zachowania wymaga przywrocenia pol `ordersEditTime`/`ordersEditEndTime` w template oraz ponownego podpiecia ich w `ordersUpdateOrderScheduleFromControls`, `ordersBuildRepeatCalendarOrder` i `ordersSaveEditor`.
+
+Data: 2026-07-07 21:55 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/orders/index.js` wylaczono aktywna logike godzin dostepu do obiektu w formularzu zlecen.
+- Karty zmian w sekcji `Zmiany i osoby` sa jedynym zrodlem godzin realizacji; checkboxy dni pracy w kartach nie sa juz blokowane przez historyczne okna dostepu.
+- Starsze etykiety formularza i podsumowan zmieniono z tekstow typu `Dostep od/do` na `START`, `STOP` albo `Plan`, zeby nie sugerowac oddzielnego okna dostepu do obiektu.
+Usunieto:
+- Aktywne komunikaty i blokady walidacyjne typu `godziny serwisu sa poza ogolnym dostepem do obiektu`, `dzien bez dostepu do obiektu` oraz blokade przekroczenia okna dostepu.
+- Nieaktywna funkcje `ordersAccessWindowMinutes`.
+- Stare helpery okien dostepu `ordersAccessWindow*` / `ordersWeeklyAccessWindows*`, ktore mogly sugerowac, ze formularz nadal ma osobna logike dostepu do obiektu.
+Testy/sprawdzenia:
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+- Uruchomiono `git diff --check` - brak bledow diffu, tylko istniejace ostrzezenia CRLF.
+Uwagi dla nastepnej osoby:
+- Pola techniczne `accessStartTime`, `accessEndTime` i puste `accessWindows` pozostaja przy zapisie tylko dla zgodnosci ze starymi rekordami. Nie steruja juz formularzem ani walidacja czasu zlecenia; ich wartosc jest kopia czasu wynikajacego z kart zmian.
