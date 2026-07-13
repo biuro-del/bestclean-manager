@@ -2026,3 +2026,27 @@ Testy/sprawdzenia:
 - Przeklikano w przegladarce `Zdarzenia -> filtr Rafal -> Edytuj -> Zapisz` na localhost; po zapisie nie pojawil sie alert `Calendar feature is not initialized`.
 Uwagi dla nastepnej osoby:
 - Cofniecie tej zmiany wymaga przywrocenia bezposrednich wywolan `await reportHistoryRefreshAfterEventSave`, `await refreshWorkerAccountTimeAfterWorkdaySave` oraz `await refreshDashboardAfterEventSave`/`await refreshDashboardWidgets` w bloku zapisu zdarzenia w `events/index.js`.
+
+Data: 2026-07-13 21:44 +02:00
+Autor: AI Codex
+Dodano:
+- Raport wdrozenia produkcyjnego App Hosting dla portalu Cleanzi.
+Zmieniono:
+- Wdrozenie produkcyjne backendu App Hosting `cleanzi-01` w projekcie `iclean-room` wykonano z commita `486c81cb490d1f34a155e232f608bace9b93e6b9` (`portal: harden schedule and event flows`).
+- Commit zawiera dotychczasowe poprawki kalendarza/listy zlecen oraz izolacje bledow pomocniczych odswiezen po zapisie zdarzenia.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed wdrozeniem potwierdzono, ze remote `cleanzi01/main` wskazywal na `1a3850a820ff6f8c9cb02a3f65be378f1ff26562`, czyli nie bylo nowszego commita do zaciagniecia wzgledem lokalnej bazy.
+- Uruchomiono `node --check` dla `web-app/apps/portal-web/src/features/calendar/index.js`, `web-app/apps/portal-web/src/features/orders/index.js` i `web-app/apps/portal-web/src/features/events/index.js`.
+- Uruchomiono `git diff --check` - brak bledow diffu, tylko ostrzezenia CRLF.
+- Uruchomiono `npm.cmd run build` - build portalu zakonczyl sie poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+- Wypchnieto commit `486c81c` na `cleanzi01/main` komenda `git push cleanzi01 HEAD:main`.
+- Wykonano App Hosting rollout: `firebase apphosting:rollouts:create cleanzi-01 --project iclean-room --git-commit 486c81cb490d1f34a155e232f608bace9b93e6b9 --force`.
+- Firebase CLI uruchomiono przez Node 24.13.1 z `--use-system-ca`, zeby uzyc systemowego magazynu CA bez wylaczania weryfikacji TLS.
+- Sprawdzono backend `cleanzi-01`: `updateTime` ustawiony na `2026-07-13T19:38:38.555043Z`, `reconciling: false`.
+- Sprawdzono produkcyjny adres `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`: HTTP 200, tytul `Best Clean Portal`, aktywny bundle `/assets/portal-BG4MpGqV.js`.
+- Sprawdzono produkcyjny lazy chunk `/assets/index-BTTkysu7.js`; zawiera markery poprawki `Zapisano zdarzenie` oraz `failed after event save`.
+Uwagi dla nastepnej osoby:
+- Cofniecie wdrozenia wymaga utworzenia nowego rollouta App Hosting na poprzedni zatwierdzony commit produkcyjny albo commit sprzed `486c81c`, po uprzednim sprawdzeniu aktualnego `cleanzi01/main`.
+- Nie commitowano lokalnych katalogow tymczasowych `.codex-backups/`, `.codex-tmp/`, `_deploy_gps_start_fix/` ani `_deploy_route_sync_refresh/`.
