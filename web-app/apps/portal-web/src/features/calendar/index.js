@@ -7780,6 +7780,14 @@ export function createCalendarFeature(ctx) {
       context.isRecurrenceOverride
         ? context.orderId
         : context.sourceOrderId || context.orderId,
+      {
+        orderId: context.orderId,
+        workSlotKey: context.workSlotKey,
+        serviceBlockId: context.serviceBlockId,
+        serviceBlockKind: context.serviceBlockKind,
+        serviceBlockLabel: context.serviceBlockLabel,
+        occurrenceDateYmd: context.occurrenceDateYmd,
+      },
     )
   }
   
@@ -8373,17 +8381,35 @@ export function createCalendarFeature(ctx) {
         if (direct.length) {
           const blockStart = ordersNormalizeTimeField(block?.startTime ?? block?.planStartTime ?? block?.accessStartTime, '')
           const blockEnd = ordersNormalizeTimeField(block?.endTime ?? block?.planEndTime ?? block?.accessEndTime, '')
+          const blockDate = ordersNormalizeDateField(
+            block?.dateYmd ?? block?.planDateYmd ?? order?.dateYmd ?? order?.startDateYmd,
+            '',
+          )
+          const blockEndDate = ordersNormalizeDateField(
+            block?.endDateYmd ?? block?.planEndDateYmd ?? order?.endDateYmd ?? blockDate,
+            blockDate,
+          )
           return direct.map((allocation, index) => {
             const allocationStart = ordersNormalizeTimeField(allocation?.startTime ?? allocation?.planStartTime, '')
             const allocationEnd = ordersNormalizeTimeField(allocation?.endTime ?? allocation?.planEndTime, '')
+            const allocationDate = ordersNormalizeDateField(
+              allocation?.dateYmd ?? allocation?.planDateYmd ?? allocation?.startDateYmd ?? blockDate,
+              blockDate,
+            )
+            const allocationEndDate = ordersNormalizeDateField(
+              allocation?.endDateYmd ?? allocation?.planEndDateYmd ?? blockEndDate ?? allocationDate,
+              allocationDate,
+            )
             const startTime = blockStart || allocationStart
             const endTime = blockEnd || allocationEnd
             return {
               ...allocation,
-              serviceBlockId: allocation.serviceBlockId || block.id || `service-${blockIndex + 1}`,
-              serviceBlockKind: allocation.serviceBlockKind || block.kind || `team-${blockIndex + 1}`,
-              serviceBlockLabel: allocation.serviceBlockLabel || block.label || `Zmiana ${blockIndex + 1}`,
+              serviceBlockId: block.id || `service-${blockIndex + 1}`,
+              serviceBlockKind: block.kind || `team-${blockIndex + 1}`,
+              serviceBlockLabel: block.label || allocation.serviceBlockLabel || `Zmiana ${blockIndex + 1}`,
               slotId: allocation.slotId || allocation.id || `slot-${index + 1}`,
+              ...(allocationDate ? { dateYmd: allocationDate, planDateYmd: allocationDate } : {}),
+              ...(allocationEndDate ? { endDateYmd: allocationEndDate, planEndDateYmd: allocationEndDate } : {}),
               ...(startTime ? { startTime, planStartTime: startTime } : {}),
               ...(endTime ? { endTime, planEndTime: endTime } : {}),
             }
@@ -8548,22 +8574,76 @@ export function createCalendarFeature(ctx) {
     return resources[fallbackRow] ? fallbackRow : 0
   }
 
-  function calendarTimelineAllocationHasServiceAnchor(allocation = {}) {
-    const directAnchor = [
-      allocation?.serviceBlockId,
-      allocation?.teamId,
-      allocation?.serviceBlockKind,
-      allocation?.slotId,
-      allocation?.workSlotKey,
-      allocation?.workSlotId,
-    ]
-      .map((value) => String(value ?? '').trim())
-      .some(Boolean)
-    if (directAnchor) {
-      return true
+  function calendarTimelineVisualAllocationDedupeKey(allocation = {}) {
+    const row = Number(allocation?.row)
+    if (!Number.isFinite(row) || row <= 0) {
+      return ''
     }
-    const key = String(allocation?.key ?? '').trim().toLowerCase()
-    return key.startsWith('slot:') || key.startsWith('workslot:') || key.startsWith('service-slot:')
+    const workerKey = normalizeSearchText([
+      allocation?.workerId,
+      allocation?.workerLogin,
+      allocation?.workerKey,
+      allocation?.name,
+      allocation?.label,
+    ].filter(Boolean).join('|'))
+    return [
+      row,
+      String(allocation?.dateYmd ?? '').trim(),
+      String(allocation?.endDateYmd ?? '').trim(),
+      String(allocation?.startTime ?? '').trim(),
+      String(allocation?.endTime ?? '').trim(),
+      Number(allocation?.minutes) || 0,
+      workerKey,
+    ].join('|')
+  }
+
+  function calendarTimelineVisualAllocationScore(allocation = {}) {
+    return [
+      allocation?.workerId,
+      allocation?.workerLogin,
+      allocation?.workerKey,
+      allocation?.serviceBlockId,
+      allocation?.serviceBlockKind,
+      allocation?.serviceBlockLabel,
+      allocation?.slotId,
+      allocation?.teamId,
+      allocation?.key,
+      allocation?.label,
+      allocation?.name,
+    ].reduce((score, value) => score + (String(value ?? '').trim() ? 1 : 0), 0)
+  }
+
+  function calendarTimelineDedupeVisualAllocations(allocations = []) {
+    const result = []
+    const indexByKey = new Map()
+    ;(Array.isArray(allocations) ? allocations : []).forEach((allocation) => {
+      const key = calendarTimelineVisualAllocationDedupeKey(allocation)
+      if (!key) {
+        result.push(allocation)
+        return
+      }
+      const existingIndex = indexByKey.get(key)
+      if (typeof existingIndex !== 'number') {
+        indexByKey.set(key, result.length)
+        result.push(allocation)
+        return
+      }
+      const existing = result[existingIndex]
+      if (calendarTimelineVisualAllocationScore(allocation) > calendarTimelineVisualAllocationScore(existing)) {
+        result[existingIndex] = allocation
+      }
+    })
+    return result
+  }
+
+  function calendarTimelineOrderUsesServiceBlockTruth(order = {}, serviceBlockAllocations = []) {
+    return Boolean(
+      serviceBlockAllocations.length &&
+      (
+        Number(order?.serviceModelVersion ?? order?.service_model_version) >= 2 ||
+        (Array.isArray(order?.serviceBlocks) && order.serviceBlocks.length > 0)
+      ),
+    )
   }
 
   function calendarTimelineVisualOrderSlots(order = {}, resources = calendarTimelineResources()) {
@@ -8591,12 +8671,14 @@ export function createCalendarFeature(ctx) {
       : Array.isArray(order.workerAllocations) && order.workerAllocations.length
         ? order.workerAllocations
         : []
-    const hasAnchoredOrderAllocations = orderAllocations.some((item) => calendarTimelineAllocationHasServiceAnchor(item))
-    const allocations = orderAllocations.length && (!serviceBlockAllocations.length || hasAnchoredOrderAllocations)
-      ? orderAllocations
-      : serviceBlockAllocations.length
-        ? serviceBlockAllocations
-        : ordersWorkAllocationsForSubjects(order, [], Number(order.requiredWorkMinutes) || calendarTimelineOrderDurationMinutes(order), false)
+    const useServiceBlockTruth = calendarTimelineOrderUsesServiceBlockTruth(order, serviceBlockAllocations)
+    const allocations = useServiceBlockTruth
+      ? serviceBlockAllocations
+      : orderAllocations.length
+        ? orderAllocations
+        : serviceBlockAllocations.length
+          ? serviceBlockAllocations
+          : ordersWorkAllocationsForSubjects(order, [], Number(order.requiredWorkMinutes) || calendarTimelineOrderDurationMinutes(order), false)
     const startDay = String(order.dateYmd ?? todayYmd()).trim()
     const accessStart = ordersNormalizeTimeField(order.accessStartTime || order.startTime, '08:00')
     const safeAllocations = allocations
@@ -8632,11 +8714,13 @@ export function createCalendarFeature(ctx) {
       })
       .filter((item) => item.minutes > 0)
   
-    if (!safeAllocations.length) {
+    const visualAllocations = calendarTimelineDedupeVisualAllocations(safeAllocations)
+
+    if (!visualAllocations.length) {
       return ordersNormalizeOrderRows(order, resources).map((row) => ({ ...order, row }))
     }
   
-    return safeAllocations.map((allocation, index) => {
+    return visualAllocations.map((allocation, index) => {
       const allocationStart = ordersNormalizeTimeField(allocation.startTime, accessStart)
       const allocationDay = ordersNormalizeDateField(allocation.dateYmd, startDay)
       const end = calendarTimelineWorkSlotEndForAllocation(allocationDay, allocationStart, allocation)
@@ -10637,6 +10721,14 @@ export function createCalendarFeature(ctx) {
         recurringContext?.isRecurrenceOverride
           ? recurringContext.orderId
           : recurringContext?.sourceOrderId || bar.getAttribute('data-calendar-timeline-order-id'),
+        {
+          orderId: recurringContext?.orderId || bar.getAttribute('data-calendar-timeline-order-id'),
+          workSlotKey: recurringContext?.workSlotKey || bar.getAttribute('data-calendar-timeline-work-slot-key'),
+          serviceBlockId: recurringContext?.serviceBlockId || bar.getAttribute('data-calendar-timeline-service-block-id'),
+          serviceBlockKind: recurringContext?.serviceBlockKind || bar.getAttribute('data-calendar-timeline-service-block-kind'),
+          serviceBlockLabel: recurringContext?.serviceBlockLabel || bar.getAttribute('data-calendar-timeline-service-block-label'),
+          occurrenceDateYmd: recurringContext?.occurrenceDateYmd || bar.getAttribute('data-calendar-timeline-date'),
+        },
       )
     })
     binding.add(timelineStage, 'click', (event) => {

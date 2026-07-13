@@ -106,6 +106,7 @@ export function createOrdersFeature(ctx) {
   let ordersEditorSummaryRefreshTimer = 0
   let ordersEditorWizardRefreshTimer = 0
   let ordersWorkerResourcesLoadPromise = null
+  let ordersEditorPreferredServiceBlockContext = null
 
   function ordersDateTimeFromTimeline(dayKey = '', timeValue = '') {
     const day = String(dayKey ?? '').trim()
@@ -1056,6 +1057,74 @@ export function createOrdersFeature(ctx) {
     }
     return ordersStoredWorkMinutes(order)
   }
+
+  function ordersNormalizeEditorServiceBlockContext(options = {}) {
+    const sourceOrderId = String(options?.orderId ?? options?.sourceOrderId ?? '').trim()
+    const workSlotKey = String(options?.workSlotKey ?? '').trim() || ordersWorkSlotKeyFromOrderId(sourceOrderId)
+    const context = {
+      orderId: sourceOrderId,
+      sourceOrderId: String(options?.sourceOrderId ?? '').trim(),
+      workSlotKey,
+      serviceBlockId: String(options?.serviceBlockId ?? '').trim(),
+      serviceBlockKind: String(options?.serviceBlockKind ?? '').trim(),
+      serviceBlockLabel: String(options?.serviceBlockLabel ?? '').trim(),
+      occurrenceDateYmd: String(options?.occurrenceDateYmd ?? options?.dateYmd ?? '').trim(),
+    }
+    return Object.values(context).some(Boolean) ? context : null
+  }
+
+  function ordersSetEditorServiceBlockContext(options = {}) {
+    ordersEditorPreferredServiceBlockContext = ordersNormalizeEditorServiceBlockContext(options)
+  }
+
+  function ordersClearEditorServiceBlockContext() {
+    ordersEditorPreferredServiceBlockContext = null
+  }
+
+  function ordersServiceBlockHasWorkSlotKey(block = {}, workSlotKey = '') {
+    const key = String(workSlotKey ?? '').trim()
+    if (!key) {
+      return false
+    }
+    const blockAllocations = [
+      ...(Array.isArray(block?.workAllocations) ? block.workAllocations : []),
+      ...(Array.isArray(block?.workerAllocations) ? block.workerAllocations : []),
+    ]
+    if (blockAllocations.some((allocation) => ordersAllocationKeyCandidates(allocation).includes(key))) {
+      return true
+    }
+    const slots = Array.isArray(block?.slots) ? block.slots : []
+    return slots.some((slot, index) => ordersServiceSlotKeyCandidates(slot, block, index).includes(key))
+  }
+
+  function ordersServiceBlockMatchesContext(block = {}, context = null) {
+    if (!block || !context) {
+      return false
+    }
+    const blockId = String(block?.id ?? block?.serviceBlockId ?? block?.teamId ?? '').trim()
+    const blockKind = String(block?.kind ?? block?.serviceBlockKind ?? '').trim()
+    const blockLabel = String(block?.label ?? block?.name ?? '').trim()
+    const contextId = String(context.serviceBlockId ?? '').trim()
+    const contextKind = String(context.serviceBlockKind ?? '').trim()
+    const contextLabel = String(context.serviceBlockLabel ?? '').trim()
+    if (contextId && blockId && contextId === blockId) {
+      return true
+    }
+    if (ordersServiceBlockHasWorkSlotKey(block, context.workSlotKey)) {
+      return true
+    }
+    if (contextLabel && blockLabel && normalizeSearchText(contextLabel) === normalizeSearchText(blockLabel)) {
+      return true
+    }
+    return Boolean(contextKind && blockKind && contextKind === blockKind)
+  }
+
+  function ordersPreferredServiceBlock(blocks = [], context = ordersEditorPreferredServiceBlockContext) {
+    if (!Array.isArray(blocks) || !context) {
+      return null
+    }
+    return blocks.find((block) => ordersServiceBlockMatchesContext(block, context)) || null
+  }
   
   function ordersPrimaryServiceBlockTiming(order = {}, blocks = null) {
     const controlBlocks = Array.isArray(blocks) ? [] : ordersReadServiceBlocksFromControls(order)
@@ -1064,8 +1133,9 @@ export function createOrdersFeature(ctx) {
       : controlBlocks.length
         ? controlBlocks
         : ordersServiceBlocksForOrder(order)
-    const primaryBlock = Array.isArray(sourceBlocks)
-      ? sourceBlocks.find((block) => block && (block.startTime || block.accessStartTime || block.endTime || block.accessEndTime)) || sourceBlocks[0] || {}
+    const blockList = Array.isArray(sourceBlocks) ? sourceBlocks : []
+    const primaryBlock = blockList.length
+      ? ordersPreferredServiceBlock(blockList) || blockList.find((block) => block && (block.startTime || block.accessStartTime || block.endTime || block.accessEndTime)) || blockList[0] || {}
       : {}
     const fallbackStart = ordersNormalizeTimeField(order?.startTime ?? order?.accessStartTime, '08:00')
     const startTime = ordersNormalizeTimeField(primaryBlock.startTime ?? primaryBlock.accessStartTime, fallbackStart)
@@ -1073,7 +1143,7 @@ export function createOrdersFeature(ctx) {
     const endTime = ordersNormalizeTimeField(primaryBlock.endTime ?? primaryBlock.accessEndTime, fallbackEnd)
     return {
       block: primaryBlock,
-      blocks: Array.isArray(sourceBlocks) ? sourceBlocks : [],
+      blocks: blockList,
       startTime,
       endTime,
     }
@@ -5340,6 +5410,7 @@ export function createOrdersFeature(ctx) {
   }
   
   function ordersOpenAddEditor(targetDate = todayYmd(), options = {}) {
+    ordersClearEditorServiceBlockContext()
     const dayKey = ordersNormalizeDateField(targetDate, todayYmd())
     void ordersWarmLocationSources().then(() => {
       if (appState.currentRoute === 'orders' && appState.ordersEditorMode === 'add') {
@@ -7511,6 +7582,7 @@ export function createOrdersFeature(ctx) {
       showTransientNotice('Nie znaleziono zlecenia do edycji.', 'error')
       return
     }
+    ordersClearEditorServiceBlockContext()
     void ordersWarmLocationSources()
     appState.ordersEditingId = String(orderId ?? '').trim()
     appState.ordersEditorMode = 'edit'
@@ -7525,13 +7597,14 @@ export function createOrdersFeature(ctx) {
     renderOrdersView()
   }
   
-  function ordersOpenEditorFromCalendar(orderId) {
+  function ordersOpenEditorFromCalendar(orderId, options = {}) {
     const id = String(orderId ?? '').trim()
     if (!ordersFindTimelineOrder(id)) {
       showTransientNotice('Nie znaleziono zlecenia do edycji.', 'error')
       return
     }
   
+    ordersSetEditorServiceBlockContext({ ...options, sourceOrderId: id })
     appState.ordersEditingId = id
     appState.ordersEditorMode = 'edit'
     appState.ordersEditorTab = 'basic'
@@ -7616,6 +7689,12 @@ export function createOrdersFeature(ctx) {
       return
     }
   
+    ordersSetEditorServiceBlockContext({
+      ...options,
+      sourceOrderId: sourceId,
+      orderId: options?.orderId || overrideId,
+      occurrenceDateYmd: occurrenceDay,
+    })
     if (!existingOverride || shouldReplaceExistingOverride) {
       appState.calendarTimelineDemoOrders = [
         overrideOrder,
@@ -7637,6 +7716,7 @@ export function createOrdersFeature(ctx) {
   function ordersShowList() {
     ordersCloseDeviceNoteModal()
     ordersDiscardDraftIfNeeded()
+    ordersClearEditorServiceBlockContext()
     appState.ordersEditingId = ''
     appState.ordersEditorMode = 'edit'
     appState.ordersEditorTab = 'basic'

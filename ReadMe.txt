@@ -1883,6 +1883,25 @@ Testy/sprawdzenia:
 Uwagi dla nastepnej osoby:
 - Firebase CLI lokalnie wymagal jednorazowego obejscia problemu certyfikatu TLS przez `NODE_TLS_REJECT_UNAUTHORIZED=0`; nie zapisano tego ustawienia na stale.
 
+Data: 2026-07-08 00:00 +02:00
+Autor: AI Codex
+Dodano:
+- Dodano helper `calendarTimelineOrderUsesServiceBlockTruth` w `web-app/apps/portal-web/src/features/calendar/index.js`.
+Zmieniono:
+- Kalendarz i pulpit, przez wspolny model `calendarTimelineVisualOrderSlots`, traktuja teraz zagniezdzone `serviceBlocks` jako kanoniczne zrodlo zmian, godzin i obsady.
+- Plaskie pola `workAllocations` / `workerAllocations` sa uzywane tylko jako fallback, gdy zlecenie nie ma kompletnego modelu `serviceBlocks`.
+- Alokacje zagniezdzone w konkretnej zmianie dostaja `serviceBlockId`, `serviceBlockKind`, date i godziny z wlasnego `serviceBlock`, aby nie dziedziczyc przypadkiem danych z innej zmiany albo koszyka `Task`.
+Usunieto:
+- Usunieto nieuzywany helper `calendarTimelineAllocationHasServiceAnchor`, poniewaz nie decyduje juz o wyborze zrodla prawdy dla wyswietlania zmian.
+Testy/sprawdzenia:
+- Wykonano `git fetch --all --prune`; lokalna galaz `codex/pre-prod-sync-20260630-112213` nie byla za `cleanzi01/main` i ma lokalne commity ahead.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/calendar/index.js`.
+- Uruchomiono `git diff --check` - brak bledow diffu, tylko standardowe ostrzezenia CRLF.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+Uwagi dla nastepnej osoby:
+- To jest etap aplikacyjny bez migracji bazy. `public.task` nadal jest koszykiem zapisu, ale widoki czytaja szczegoly zmian z `serviceBlocks`.
+- Kolejny etap powinien zaprojektowac trwały kanoniczny model danych dla pojedynczych zmian/zadan i dopiero potem posprzatac stare pola/fallbacki w bazie.
+
 Data: 2026-07-07 23:35 +02:00
 Autor: AI Codex
 Dodano:
@@ -1922,6 +1941,22 @@ Uwagi dla nastepnej osoby:
 - Firebase CLI lokalnie wymagal jednorazowego obejscia problemu certyfikatu TLS przez `NODE_TLS_REJECT_UNAUTHORIZED=0`; nie zapisano tego ustawienia na stale.
 - W razie cofniecia aplikacji uzyc kopii backupu powyzej oraz commita sprzed deploya `5960962`.
 
+Data: 2026-07-08 00:24 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` dodano deduplikacje gotowych alokacji osi czasu przed narysowaniem paskow kalendarza.
+- Deduplikacja dziala tylko dla wierszy pracownikow i porownuje pracownika, date, godzine start/stop oraz czas trwania, zeby nie rysowac dwa razy tego samego planowanego slotu.
+- Sloty BUFORU nie sa deduplikowane, poniewaz kilka podobnych paskow w BUFORZE moze oznaczac kilka osob do obsadzenia.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/calendar/index.js`.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+Uwagi dla nastepnej osoby:
+- Poprawka nie zmienia danych w bazie i nie robi migracji rekordow; usuwa tylko wizualne podwojne paski wynikajace z rownolegle obecnych alokacji w `serviceBlocks` i `workAllocations`.
+
 Data: 2026-07-07 23:12 +02:00
 Autor: AI Codex
 Dodano:
@@ -1953,3 +1988,41 @@ Testy/sprawdzenia:
 - Sprawdzono produkcyjny adres `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`: HTTP 200, aktywny bundle `/assets/portal-MlN_MvWy.js`, brak tekstu `Pracownicy pojawili` w produkcyjnym JS.
 Uwagi dla nastepnej osoby:
 - Firebase CLI lokalnie wymagal jednorazowego obejscia problemu certyfikatu TLS przez `NODE_TLS_REJECT_UNAUTHORIZED=0`; nie zapisano tego ustawienia na stale.
+
+Data: 2026-07-08 20:47 +02:00
+Autor: AI Codex
+Dodano:
+- W `web-app/apps/portal-web/src/features/orders/index.js` dodano lokalny kontekst otwarcia edytora z kalendarza: `workSlotKey`, `serviceBlockId`, `serviceBlockKind`, `serviceBlockLabel` i data wystapienia.
+- Dodano helpery wyboru preferowanej karty zmiany po `serviceBlock`/`workSlotKey`, aby edytor mogl wskazac konkretna zmiane osoby zamiast pierwszej zmiany zlecenia.
+Zmieniono:
+- `ordersOpenEditorFromCalendar` i `ordersOpenRecurringOccurrenceEditorFromCalendar` przyjmuja teraz kontekst konkretnego paska z kalendarza.
+- `calendarTimelineEditOrderFromContext` oraz podwojne klikniecie paska kalendarza przekazuja do edytora identyfikator slotu i zmiany.
+- Podsumowanie terminu w edytorze wybiera godziny z dopasowanej karty zmiany, np. dla Rafala Dudka z `Druga zmiana 08:00-16:00`, a nie z pierwszej zmiany `07:00-15:00`.
+- Otwarcie nowego zlecenia, zwyklej listy zlecen i standardowej edycji czysci kontekst kalendarza, zeby dane poprzedniego paska nie przechodzily na kolejne okno.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/calendar/index.js`.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+- Uruchomiono `git diff --check` - brak bledow diffu, tylko ostrzezenia CRLF.
+Uwagi dla nastepnej osoby:
+- Cofniecie tej zmiany wymaga usuniecia helperow `orders*ServiceBlockContext` w `orders/index.js` oraz cofniecia przekazywania kontekstu `serviceBlock/workSlotKey` z `calendar/index.js`.
+
+Data: 2026-07-13 19:46 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/events/index.js` rozdzielono krytyczny zapis zdarzenia od pomocniczych odswiezen historii, czasu pracownika i pulpitu.
+- Po udanym zapisie bledy pomocniczych odswiezen nie przerywaja juz procesu zapisu i nie pokazuja alertu `Calendar feature is not initialized`; trafiaja do konsoli jako ostrzezenie.
+- Jesli pomocnicze odswiezenie po zapisie nie powiedzie sie, portal pokazuje neutralny komunikat, ze zdarzenie zapisano i w razie potrzeby nalezy odswiezyc widoki.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/events/index.js`.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+- Sprawdzono `http://localhost:5173/`: lokalny portal odpowiada HTTP 200.
+- Przeklikano w przegladarce `Zdarzenia -> filtr Rafal -> Edytuj -> Zapisz` na localhost; po zapisie nie pojawil sie alert `Calendar feature is not initialized`.
+Uwagi dla nastepnej osoby:
+- Cofniecie tej zmiany wymaga przywrocenia bezposrednich wywolan `await reportHistoryRefreshAfterEventSave`, `await refreshWorkerAccountTimeAfterWorkdaySave` oraz `await refreshDashboardAfterEventSave`/`await refreshDashboardWidgets` w bloku zapisu zdarzenia w `events/index.js`.

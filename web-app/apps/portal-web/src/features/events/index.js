@@ -2127,7 +2127,17 @@ export function createEventsFeature(ctx) {
         startAt: derivedStartAt,
         endAt: derivedEndAt,
       }
-      await reportHistoryRefreshAfterEventSave(savedHistoryItem)
+      let postSaveRefreshFailed = false
+      const markPostSaveRefreshFailed = (label, error) => {
+        postSaveRefreshFailed = true
+        console.warn(`[portal/events] ${label} failed after event save`, error)
+      }
+
+      try {
+        await reportHistoryRefreshAfterEventSave(savedHistoryItem)
+      } catch (refreshError) {
+        markPostSaveRefreshFailed('history refresh', refreshError)
+      }
       if (typeof refreshWorkerAccountTimeAfterWorkdaySave === 'function') {
         const workerLoginsToRefresh = new Set(
           [savedHistoryItem.workerLogin, payload.workerLogin, editedHistorySource?.workerLogin]
@@ -2135,16 +2145,26 @@ export function createEventsFeature(ctx) {
             .filter(Boolean),
         )
         for (const workerLogin of workerLoginsToRefresh) {
-          await refreshWorkerAccountTimeAfterWorkdaySave(workerLogin)
+          try {
+            await refreshWorkerAccountTimeAfterWorkdaySave(workerLogin)
+          } catch (refreshError) {
+            markPostSaveRefreshFailed(`worker time refresh (${workerLogin})`, refreshError)
+          }
         }
       }
-      if (typeof refreshDashboardAfterEventSave === 'function') {
-        await refreshDashboardAfterEventSave(savedHistoryItem, editedHistorySource || null)
-      } else {
-        await refreshDashboardWidgets({ forceRefresh: true, syncWorktimeToken: true })
+      try {
+        if (typeof refreshDashboardAfterEventSave === 'function') {
+          await refreshDashboardAfterEventSave(savedHistoryItem, editedHistorySource || null)
+        } else {
+          await refreshDashboardWidgets({ forceRefresh: true, syncWorktimeToken: true })
+        }
+      } catch (refreshError) {
+        markPostSaveRefreshFailed('dashboard refresh', refreshError)
       }
       if (savedEventVisibility === 'hidden') {
         showTransientNotice('Zapisano, ale aktualne filtry ukrywaja nowy rekord.')
+      } else if (postSaveRefreshFailed) {
+        showTransientNotice('Zapisano zdarzenie. Odswiez widoki, jesli nie widzisz zmian.')
       } else {
         showTransientNotice('Zmiany zostały zapisane.')
       }
