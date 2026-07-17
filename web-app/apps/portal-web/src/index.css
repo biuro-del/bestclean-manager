@@ -17966,6 +17966,40 @@ body.calendar-events-popup-dragging *{
   transform:scale(.985);
 }
 
+#view-calendar .calendar-timeline-drop-preview{
+  align-items:center;
+  align-self:center;
+  background:rgba(219,234,254,.94);
+  border:2px solid #2563eb;
+  border-radius:5px;
+  box-shadow:0 4px 12px rgba(37,99,235,.2);
+  color:#1746a2;
+  display:flex;
+  font-size:11px;
+  font-weight:800;
+  height:calc(100% - 10px);
+  justify-content:center;
+  margin:5px 2px;
+  min-width:0;
+  overflow:hidden;
+  pointer-events:none;
+  position:relative;
+  z-index:12;
+}
+
+#view-calendar .calendar-timeline-drop-preview span{
+  overflow:hidden;
+  padding:0 6px;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+#view-calendar .calendar-timeline-drop-preview.is-invalid{
+  background:rgba(255,241,242,.96);
+  border-color:#ef4444;
+  color:#b91c1c;
+}
+
 #view-calendar .fw-resource-name.is-timeline-drop-target,
 #view-calendar .fw-grid-row.is-timeline-drop-target,
 #view-calendar .fw-grid-cell.is-timeline-drop-target{
@@ -21753,8 +21787,7 @@ body.calendar-events-popup-dragging *{
 #portalRoot .orders-kanban-column-title,
 #portalRoot .orders-kanban-slot-top,
 #portalRoot .orders-kanban-slot-foot,
-#portalRoot .orders-kanban-people-summary,
-#portalRoot .orders-kanban-column-stats{
+#portalRoot .orders-kanban-people-summary{
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -21859,6 +21892,10 @@ body.calendar-events-popup-dragging *{
   grid-template-columns:repeat(2,minmax(0,1fr));
 }
 
+#portalRoot .orders-kanban-slot-controls{
+  grid-template-columns:minmax(84px,.65fr) minmax(0,1.35fr);
+}
+
 #portalRoot .orders-kanban-duration-badge{
   display:grid;
   align-content:center;
@@ -21872,7 +21909,6 @@ body.calendar-events-popup-dragging *{
 
 #portalRoot .orders-kanban-duration-badge span,
 #portalRoot .orders-kanban-people-summary span,
-#portalRoot .orders-kanban-column-stats,
 #portalRoot .orders-kanban-slot-foot{
   color:#64748b;
   font-size:12px;
@@ -21946,11 +21982,11 @@ body.calendar-events-popup-dragging *{
 #portalRoot .orders-kanban-people-summary{
   align-items:flex-start;
   flex-direction:column;
-  gap:3px;
-  padding:10px 12px;
-  border:1px solid #dbeafe;
-  border-radius:10px;
-  background:#f8fbff;
+  gap:4px;
+  padding:11px 12px;
+  border:1px solid #dbe4f0;
+  border-radius:8px;
+  background:#f7f9fc;
 }
 
 #portalRoot .orders-kanban-people-summary strong{
@@ -21966,26 +22002,51 @@ body.calendar-events-popup-dragging *{
 
 #portalRoot .orders-team-slots-grid{
   display:grid;
-  gap:8px;
+  gap:10px;
 }
 
 #portalRoot .orders-kanban-slot-card{
+  position:relative;
   display:grid;
-  gap:9px;
-  padding:10px;
-  border:1px solid #e2e8f0;
-  border-radius:10px;
-  background:#f8fbff;
-  box-shadow:0 1px 0 rgba(15,23,42,.03);
+  gap:11px;
+  padding:12px;
+  overflow:hidden;
+  border:1px solid #d9e2ef;
+  border-radius:8px;
+  background:#fff;
+  box-shadow:0 5px 16px rgba(15,23,42,.05);
+}
+
+#portalRoot .orders-kanban-slot-card::before{
+  position:absolute;
+  inset:0 auto 0 0;
+  width:3px;
+  background:#60a5fa;
+  content:"";
 }
 
 #portalRoot .orders-kanban-slot-card.is-filled{
-  background:#f0fdf4;
-  border-color:#bbf7d0;
+  background:#f7fcf9;
+  border-color:#b8e7ca;
+  box-shadow:0 5px 16px rgba(22,101,52,.06);
+}
+
+#portalRoot .orders-kanban-slot-card.is-filled::before{
+  background:#22a45a;
 }
 
 #portalRoot .orders-kanban-slot-card.is-empty{
-  border-color:#d7e3f3;
+  border-color:#d9e2ef;
+}
+
+#portalRoot .orders-kanban-slot-top{
+  padding-bottom:9px;
+  border-bottom:1px solid #e5ebf3;
+}
+
+#portalRoot .orders-kanban-slot-foot{
+  padding-top:10px;
+  border-top:1px solid #e5ebf3;
 }
 
 #portalRoot .orders-kanban-slot-card .orders-field{
@@ -22001,8 +22062,8 @@ body.calendar-events-popup-dragging *{
 
 #portalRoot .orders-kanban-slot-card select,
 #portalRoot .orders-kanban-slot-card input{
-  min-height:36px;
-  border-radius:8px;
+  min-height:40px;
+  border-radius:7px;
 }
 
 #portalRoot .orders-kanban-slot-check{
@@ -22029,9 +22090,9 @@ body.calendar-events-popup-dragging *{
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  width:28px;
-  height:28px;
-  border-radius:999px;
+  width:32px;
+  height:32px;
+  border-radius:8px;
   background:#e0f2fe;
   color:#0369a1;
   font-size:10px;
@@ -22039,12 +22100,36 @@ body.calendar-events-popup-dragging *{
   flex:0 0 auto;
 }
 
-#portalRoot .orders-kanban-slot-summary{
+#portalRoot .orders-kanban-slot-status{
+  display:flex;
+  align-items:center;
+  flex:1;
+  gap:9px;
   min-width:0;
+}
+
+#portalRoot .orders-kanban-slot-summary{
+  display:grid;
+  gap:1px;
+  min-width:0;
+}
+
+#portalRoot .orders-kanban-slot-summary strong{
   overflow:hidden;
+  color:#26364a;
+  font-size:12px;
+  font-weight:800;
   text-overflow:ellipsis;
   white-space:nowrap;
-  font-weight:800;
+}
+
+#portalRoot .orders-kanban-slot-summary small{
+  overflow:hidden;
+  color:#7b8ba1;
+  font-size:10px;
+  font-weight:600;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 
 #portalRoot .orders-team-slot-remove,
@@ -22059,13 +22144,26 @@ body.calendar-events-popup-dragging *{
 }
 
 #portalRoot .orders-team-slot-remove{
-  padding:6px 8px;
-  min-height:30px;
+  padding:6px 10px;
+  min-height:32px;
   margin-left:auto;
 }
 
+#portalRoot .orders-team-slot-remove:not(:disabled):hover,
+#portalRoot .orders-kanban-add-card:hover{
+  border-color:#8da3be;
+  background:#f1f5f9;
+}
+
+#portalRoot .orders-team-slot-remove:disabled{
+  cursor:not-allowed;
+  opacity:.48;
+}
+
 #portalRoot .orders-kanban-add-card{
-  min-height:38px;
+  min-height:40px;
+  border-style:dashed;
+  background:#f9fbfd;
 }
 
 #portalRoot .orders-kanban-add-column{
@@ -28686,6 +28784,13 @@ body.calendar-events-popup-dragging *{
   width:clamp(336px, 30vw, 380px) !important;
 }
 
+#portalRoot #view-orders .orders-kanban-column{
+  align-self:flex-start !important;
+  box-sizing:border-box !important;
+  height:max-content !important;
+  min-height:100% !important;
+}
+
 #portalRoot #view-orders .orders-kanban-column-head{
   min-height:42px !important;
   padding:6px 8px !important;
@@ -28702,7 +28807,6 @@ body.calendar-events-popup-dragging *{
 #portalRoot #view-orders .orders-kanban-column .orders-service-description,
 #portalRoot #view-orders .orders-service-weekdays-wrap,
 #portalRoot #view-orders .orders-kanban-people-summary,
-#portalRoot #view-orders .orders-kanban-column-stats,
 #portalRoot #view-orders .orders-kanban-cards{
   margin-left:8px !important;
   margin-right:8px !important;

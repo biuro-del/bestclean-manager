@@ -3488,6 +3488,12 @@ export function createCalendarFeature(ctx) {
   function calendarTimelineOrderIsRecurring(order = {}) {
     return ordersScheduleModeForOrder(order) === 'repeat'
   }
+
+  function calendarTimelineOrderCanBeMovedFreely(order = {}) {
+    return Boolean(String(order?.id ?? '').trim()) &&
+      !calendarTimelineOrderIsRecurring(order) &&
+      !calendarTimelineIsMaterializedOverrideOrder(order)
+  }
   
   function calendarTimelineRecurringInterval(order = {}) {
     return Math.max(1, Math.floor(Number(order?.repeatEvery) || 1))
@@ -6659,7 +6665,7 @@ export function createCalendarFeature(ctx) {
       },
     }
   }
-  
+
   function calendarTimelineDropInfoFromTarget(target) {
     if (!(target instanceof HTMLElement)) {
       return null
@@ -6695,8 +6701,9 @@ export function createCalendarFeature(ctx) {
   }
   
   function calendarTimelineResolveDropInfo(event = null) {
+    const eventInfo = event ? calendarTimelineDropInfoFromEvent(event).info : null
     return (
-      (event ? calendarTimelineDropInfoFromEvent(event).info : null) ||
+      eventInfo ||
       calendarTimelineDropInfoFromState() ||
       calendarTimelineHighlightedDropInfo()
     )
@@ -6714,10 +6721,14 @@ export function createCalendarFeature(ctx) {
   
   function calendarTimelineResetDragState() {
     appState.calendarTimelineDragOrderId = ''
+    appState.calendarTimelineDragKind = ''
     appState.calendarTimelineDragSourceRow = null
     appState.calendarTimelineDragSourceOrderId = ''
     appState.calendarTimelineDragOccurrenceDate = ''
     appState.calendarTimelineDragWorkSlotKey = ''
+    appState.calendarTimelineDragWorkSlotId = ''
+    appState.calendarTimelineDragServiceBlockId = ''
+    appState.calendarTimelineDragAllocationIdentity = ''
     appState.calendarTimelineDragRecurringSeries = false
     appState.calendarTimelineDragTargetRow = null
     appState.calendarTimelineDragTargetSlot = null
@@ -6728,6 +6739,9 @@ export function createCalendarFeature(ctx) {
     appState.calendarTimelineDragHoverKey = ''
     appState.calendarTimelineDragHoverInvalid = false
     appState.calendarTimelineDragHoverNode = null
+    appState.calendarTimelineDragBufferContextKey = ''
+    appState.calendarTimelineDragBufferContext = null
+    appState.calendarTimelineDragOccupiedIntervals = new Map()
   }
   
   function calendarTimelineHandleMoveResult(moveResult) {
@@ -6761,7 +6775,9 @@ export function createCalendarFeature(ctx) {
     const minutes = Math.max(0, Math.round(Number(timing?.minutes ?? item?.minutes ?? item?.workMinutes ?? item?.durationMinutes) || 0))
     return {
       ...item,
-      key: String(item?.key ?? assignment.key ?? (targetIsBuffer ? `buffer:${nextRow + 1}` : '')).trim(),
+      key: targetIsBuffer
+        ? String(item?.key ?? `buffer:${nextRow + 1}`).trim()
+        : String(assignment.key ?? assignment.workerId ?? assignment.workerLogin ?? '').trim(),
       row: nextRow,
       type: targetIsBuffer ? 'buffer' : 'worker',
       label,
@@ -6791,6 +6807,51 @@ export function createCalendarFeature(ctx) {
         : []
   }
 
+  function calendarTimelineAllocationIdentity(allocation = {}, fallbackIndex = null) {
+    const blockId = String(allocation?.serviceBlockId ?? allocation?.teamId ?? '').trim()
+    const slotId = String(allocation?.slotId ?? allocation?.id ?? '').trim()
+    const key = String(allocation?.key ?? '').trim()
+    if (blockId && slotId) return `block:${blockId}:slot:${slotId}`
+    if (blockId && key) return `block:${blockId}:key:${key}`
+    if (key) return `key:${key}`
+    return Number.isInteger(fallbackIndex) ? `index:${fallbackIndex}` : ''
+  }
+
+  function calendarTimelineAllocationIndex(allocations = [], sourceRowIndex = null, options = {}) {
+    if (!Array.isArray(allocations) || !allocations.length) return -1
+    const uniqueIndex = (predicate) => {
+      const matches = allocations
+        .map((item, index) => (predicate(item, index) ? index : -1))
+        .filter((index) => index >= 0)
+      return matches.length === 1 ? matches[0] : -1
+    }
+    const identity = String(options?.allocationIdentity ?? options?.workSlotIdentity ?? '').trim()
+    if (identity) {
+      const identityIndex = uniqueIndex((item, index) => calendarTimelineAllocationIdentity(item, index) === identity)
+      if (identityIndex >= 0) return identityIndex
+    }
+    const blockId = String(options?.serviceBlockId ?? '').trim()
+    const slotId = String(options?.workSlotId ?? options?.slotId ?? '').trim()
+    if (blockId && slotId) {
+      const blockSlotIndex = uniqueIndex((item) => (
+        String(item?.serviceBlockId ?? item?.teamId ?? '').trim() === blockId &&
+        String(item?.slotId ?? item?.id ?? '').trim() === slotId
+      ))
+      if (blockSlotIndex >= 0) return blockSlotIndex
+    }
+    const workSlotKey = String(options?.workSlotKey ?? '').trim()
+    if (workSlotKey) {
+      const keyIndex = uniqueIndex((item) => String(item?.key ?? '').trim() === workSlotKey)
+      if (keyIndex >= 0) return keyIndex
+    }
+    const sourceRow = Number(sourceRowIndex)
+    if (Number.isInteger(sourceRow)) {
+      const rowIndex = uniqueIndex((item) => Number(item?.row) === sourceRow)
+      if (rowIndex >= 0) return rowIndex
+    }
+    return allocations.length === 1 ? 0 : -1
+  }
+
   function calendarTimelineServiceBlocksWithAllocations(serviceBlocks = [], allocations = []) {
     if (!Array.isArray(serviceBlocks) || !serviceBlocks.length || !Array.isArray(allocations) || !allocations.length) {
       return serviceBlocks
@@ -6810,7 +6871,7 @@ export function createCalendarFeature(ctx) {
       const nextSlots = slots.map((slot, slotIndex) => {
         const slotId = String(slot?.slotId ?? slot?.id ?? `slot-${slotIndex + 1}`).trim()
         const slotKey = String(slot?.key ?? `slot:${blockId}:${slotId}`).trim()
-        const allocation = byKey.get(slotKey) || byBlockSlot.get(`${blockId}::${slotId}`) || null
+        const allocation = byBlockSlot.get(`${blockId}::${slotId}`) || byKey.get(slotKey) || null
         if (!allocation) {
           return slot
         }
@@ -6943,20 +7004,8 @@ export function createCalendarFeature(ctx) {
 
   function calendarTimelineMovedWorkAllocation(order = {}, sourceRowIndex = null, options = {}) {
     const allocations = calendarTimelineOrderWorkAllocations(order)
-    if (!allocations.length) {
-      return null
-    }
-    const workSlotKey = String(options?.workSlotKey ?? '').trim()
-    const sourceRow = Number(sourceRowIndex)
-    if (workSlotKey) {
-      const match = allocations.find((item) => String(item?.key ?? '').trim() === workSlotKey)
-      if (match) return match
-    }
-    if (Number.isInteger(sourceRow)) {
-      const match = allocations.find((item) => Number(item?.row) === sourceRow)
-      if (match) return match
-    }
-    return allocations.length === 1 ? allocations[0] : null
+    const index = calendarTimelineAllocationIndex(allocations, sourceRowIndex, options)
+    return index >= 0 ? allocations[index] : null
   }
 
   function calendarTimelineSyncMovedWorkAllocations(order = {}, nextOrder = {}, nextRow = 0, sourceRowIndex = null, resources = calendarTimelineResources(), options = {}) {
@@ -6966,21 +7015,9 @@ export function createCalendarFeature(ctx) {
     }
 
     const assignmentScope = options?.assignmentEditScope === 'all' ? 'all' : 'single'
-    const workSlotKey = String(options?.workSlotKey ?? '').trim()
     const sourceRow = Number(sourceRowIndex)
-    const sourceIsBuffer = Number.isInteger(sourceRow) && calendarTimelineRowAllowsOverlap(sourceRow, resources)
-    const targetIsBuffer = calendarTimelineRowAllowsOverlap(nextRow, resources)
     let changed = false
-    let matchIndex = -1
-    if (workSlotKey) {
-      matchIndex = allocations.findIndex((item) => String(item?.key ?? '').trim() === workSlotKey)
-    }
-    if (matchIndex < 0 && Number.isInteger(sourceRow)) {
-      matchIndex = allocations.findIndex((item) => Number(item?.row) === sourceRow)
-    }
-    if (matchIndex < 0 && allocations.length === 1) {
-      matchIndex = 0
-    }
+    const matchIndex = calendarTimelineAllocationIndex(allocations, sourceRow, options)
 
     let nextAllocations = allocations
     if (assignmentScope === 'all') {
@@ -6998,28 +7035,8 @@ export function createCalendarFeature(ctx) {
       })
     } else {
       nextAllocations = allocations.map((item, index) => {
-        const itemKey = String(item?.key ?? '').trim()
-        const matchesKey = Boolean(workSlotKey && itemKey === workSlotKey)
         const matchesSelectedIndex = index === matchIndex
-        if (!matchesKey && !matchesSelectedIndex) {
-          return item
-        }
-        changed = true
-        return calendarTimelineWorkAllocationMovedToRow(item, nextRow, resources, {
-          dateYmd: options?.slotDateYmd,
-          endDateYmd: options?.slotEndDateYmd,
-          startTime: options?.slotStartTime,
-          endTime: options?.slotEndTime,
-          minutes: options?.slotMinutes,
-        })
-      })
-    }
-
-    if (!changed && assignmentScope !== 'all' && sourceIsBuffer && !targetIsBuffer) {
-      const fallbackIndex = allocations.findIndex((item) => calendarTimelineRowAllowsOverlap(Number(item?.row), resources))
-      const indexToMove = fallbackIndex >= 0 ? fallbackIndex : 0
-      nextAllocations = allocations.map((item, index) => {
-        if (index !== indexToMove) {
+        if (!matchesSelectedIndex) {
           return item
         }
         changed = true
@@ -7037,9 +7054,7 @@ export function createCalendarFeature(ctx) {
       return nextOrder
     }
 
-    const finalAllocations = assignmentScope !== 'all' && sourceIsBuffer && !targetIsBuffer
-      ? nextAllocations.filter((item) => !calendarTimelineRowAllowsOverlap(Number(item?.row), resources))
-      : nextAllocations
+    const finalAllocations = nextAllocations
     const allocationRows = finalAllocations
       .map((item) => Number(item?.row))
       .filter((row, index, list) => Number.isInteger(row) && row >= 0 && list.indexOf(row) === index)
@@ -7055,24 +7070,7 @@ export function createCalendarFeature(ctx) {
 
   function calendarTimelineSelectedAllocationIndex(order = {}, sourceRowIndex = null, options = {}) {
     const allocations = calendarTimelineOrderWorkAllocations(order)
-    if (!allocations.length) {
-      return -1
-    }
-    const workSlotKey = String(options?.workSlotKey ?? '').trim()
-    if (workSlotKey) {
-      const keyIndex = allocations.findIndex((item) => String(item?.key ?? '').trim() === workSlotKey)
-      if (keyIndex >= 0) {
-        return keyIndex
-      }
-    }
-    const sourceRow = Number(sourceRowIndex)
-    if (Number.isInteger(sourceRow)) {
-      const rowIndex = allocations.findIndex((item) => Number(item?.row) === sourceRow)
-      if (rowIndex >= 0) {
-        return rowIndex
-      }
-    }
-    return allocations.length === 1 ? 0 : -1
+    return calendarTimelineAllocationIndex(allocations, sourceRowIndex, options)
   }
 
   function calendarTimelineAllocationRows(allocations = []) {
@@ -7361,14 +7359,10 @@ export function createCalendarFeature(ctx) {
     const conflicts = []
     const sourceOrders = Array.isArray(orders) ? orders : []
     const conflictDays = calendarTimelineDaysForOrder(candidate)
-    const realOrders =
-      conflictDays.length && calendarTimelineSourceRowsCoverDays(conflictDays)
-        ? calendarTimelineRealEventOrders(resources, conflictDays, sourceOrders).filter((order) => order?.realTrack && order.realTrack !== 'workday')
-        : []
     const plannedOrders = conflictDays.length
       ? calendarTimelineExpandRecurringOrdersForDays(sourceOrders, conflictDays)
       : sourceOrders
-    const checkedOrders = [...plannedOrders, ...realOrders]
+    const checkedOrders = plannedOrders
   
     checkedOrders.forEach((order) => {
       if (!order) {
@@ -8123,6 +8117,19 @@ export function createCalendarFeature(ctx) {
       showPortalErrorNotice('Nie zapisano przesuniecia. Nie udalo sie potwierdzic aktualnego stanu zlecen z bazy.', error)
       return { moved: false, conflicts: [], candidate: null, errorMessage: 'Nie zapisano przesuniecia. Odswiez dane i sprobuj ponownie.' }
     }
+
+    if (options.oneOffOnly) {
+      const freshSourceOrder = calendarTimelineSourceOrderById(sourceOrderId || orderId)
+      if (!calendarTimelineOrderCanBeMovedFreely(freshSourceOrder || {})) {
+        renderCalendarView()
+        return {
+          moved: false,
+          conflicts: [],
+          candidate: null,
+          errorMessage: 'W kalendarzu mozna teraz przenosic tylko zlecenia jednorazowe.',
+        }
+      }
+    }
   
     const result = calendarTimelineMoveOrder(orderId, rowIndex, slotIndex, sourceRowIndex, resources, options)
     if (!result?.moved && result?.conflicts?.length) {
@@ -8273,8 +8280,482 @@ export function createCalendarFeature(ctx) {
     }
     return [Number(info.rowIndex), info.slotIndex == null ? '' : Number(info.slotIndex)].join('|')
   }
+
+  function calendarTimelineBufferDragOptions(options = {}) {
+    return {
+      ...options,
+      recurringEditScope: 'single',
+      assignmentEditScope: 'single',
+    }
+  }
+
+  function calendarTimelineBufferMoveOptionsFromTransfer(transfer = null) {
+    const read = (type, fallback = '') => String(transfer?.getData?.(type) || fallback || '').trim()
+    return calendarTimelineBufferDragOptions({
+      sourceOrderId: read('application/x-calendar-source-order-id', appState.calendarTimelineDragSourceOrderId),
+      occurrenceDateYmd: read('application/x-calendar-occurrence-date', appState.calendarTimelineDragOccurrenceDate),
+      workSlotKey: read('application/x-calendar-work-slot-key', appState.calendarTimelineDragWorkSlotKey),
+      allocationIdentity: read('application/x-calendar-work-slot-identity', appState.calendarTimelineDragAllocationIdentity),
+      workSlotId: read('application/x-calendar-work-slot-id', appState.calendarTimelineDragWorkSlotId),
+      serviceBlockId: read('application/x-calendar-service-block-id', appState.calendarTimelineDragServiceBlockId),
+      isRecurringSeries:
+        read('application/x-calendar-recurring-series', appState.calendarTimelineDragRecurringSeries ? '1' : '') === '1',
+    })
+  }
+
+  function calendarTimelineAllocationIsBuffer(allocation = {}, resources = calendarTimelineResources()) {
+    const type = String(allocation?.type ?? '').trim().toLowerCase()
+    if (type === 'buffer' || type === 'unassigned') {
+      return true
+    }
+    return calendarTimelineRowAllowsOverlap(Number(allocation?.row), resources)
+  }
+
+  function calendarTimelineBufferAssignmentContext(
+    orders = [],
+    orderId = '',
+    sourceRowIndex = null,
+    resources = calendarTimelineResources(),
+    options = {},
+  ) {
+    const persistedOrders = Array.isArray(orders) ? orders : []
+    const directOrder = persistedOrders.find((order) => String(order?.id ?? '').trim() === String(orderId ?? '').trim()) || null
+    const sourceOrderId = String(options?.sourceOrderId ?? directOrder?.sourceOrderId ?? directOrder?.id ?? '').trim()
+    const sourceOrder =
+      persistedOrders.find((order) => String(order?.id ?? '').trim() === sourceOrderId) || directOrder || null
+    const occurrenceDateYmd = String(
+      options?.occurrenceDateYmd ??
+        directOrder?.occurrenceDateYmd ??
+        directOrder?.dateYmd ??
+        sourceOrder?.dateYmd ??
+        '',
+    ).trim()
+    if (!sourceOrder || !/^\d{4}-\d{2}-\d{2}$/.test(occurrenceDateYmd)) {
+      return null
+    }
+
+    const overrideOrder = persistedOrders.find((order) => {
+      const info = calendarTimelineRecurringOverrideInfo(order)
+      return Boolean(info && info.sourceOrderId === sourceOrderId && info.dateYmd === occurrenceDateYmd)
+    }) || null
+    const recurringSource = calendarTimelineOrderIsRecurring(sourceOrder)
+    const occurrenceOrder =
+      overrideOrder ||
+      (recurringSource ? calendarTimelineRecurringInstance(sourceOrder, occurrenceDateYmd, 0) : directOrder || sourceOrder)
+    const allocations = calendarTimelineOrderWorkAllocations(occurrenceOrder)
+    const allocationIndex = calendarTimelineAllocationIndex(allocations, sourceRowIndex, options)
+    const allocation = allocationIndex >= 0 ? allocations[allocationIndex] : null
+    if (!allocation || !calendarTimelineAllocationIsBuffer(allocation, resources)) {
+      return null
+    }
+
+    const blockId = String(
+      options?.serviceBlockId ?? allocation?.serviceBlockId ?? allocation?.teamId ?? '',
+    ).trim()
+    const relatedAllocationIndexes = allocations
+      .map((item, index) => {
+        const itemBlockId = String(item?.serviceBlockId ?? item?.teamId ?? '').trim()
+        return blockId ? (itemBlockId === blockId ? index : -1) : index === allocationIndex ? index : -1
+      })
+      .filter((index) => index >= 0)
+    const blockCanMove = relatedAllocationIndexes.every((index) =>
+      calendarTimelineAllocationIsBuffer(allocations[index], resources),
+    )
+    const timing =
+      calendarTimelineServiceBlockTimingForAllocation(occurrenceOrder, allocation) ||
+      calendarTimelineAllocationSchedule(allocation, occurrenceOrder)
+    const startTime = ordersNormalizeTimeField(timing?.startTime ?? allocation?.startTime ?? occurrenceOrder?.startTime, '')
+    const durationMinutes = calendarTimelineAllocationDurationMinutes(occurrenceOrder, allocation, startTime || '08:00')
+    if (!startTime || durationMinutes <= 0) {
+      return null
+    }
+
+    return {
+      sourceOrder,
+      sourceOrderId,
+      directOrder,
+      overrideOrder,
+      occurrenceOrder,
+      occurrenceDateYmd,
+      recurringSource,
+      allocations,
+      allocation,
+      allocationIndex,
+      blockId,
+      relatedAllocationIndexes,
+      blockCanMove,
+      startTime,
+      durationMinutes,
+    }
+  }
+
+  function calendarTimelineMinutesToTime(totalMinutes = 0) {
+    const safeMinutes = Math.max(0, Math.min(23 * 60 + 59, Math.round(Number(totalMinutes) || 0)))
+    return `${pad2(Math.floor(safeMinutes / 60))}:${pad2(safeMinutes % 60)}`
+  }
+
+  function calendarTimelineScheduleForDayMinutes(dateYmd = '', startMinutes = 0, durationMinutes = 0) {
+    const start = Math.round(Number(startMinutes) || 0)
+    const duration = Math.max(1, Math.round(Number(durationMinutes) || 0))
+    const end = start + duration
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateYmd ?? '')) || start < 0 || end > 23 * 60 + 59) {
+      return null
+    }
+    const startTime = calendarTimelineMinutesToTime(start)
+    const endTime = calendarTimelineMinutesToTime(end)
+    return {
+      dateYmd,
+      planDateYmd: dateYmd,
+      startDateYmd: dateYmd,
+      endDateYmd: dateYmd,
+      planEndDateYmd: dateYmd,
+      startTime,
+      planStartTime: startTime,
+      endTime,
+      planEndTime: endTime,
+      minutes: duration,
+    }
+  }
+
+  function calendarTimelineWorkerOccupiedIntervals(
+    orders = [],
+    dateYmd = '',
+    rowIndex = null,
+    resources = calendarTimelineResources(),
+  ) {
+    const targetRow = Number(rowIndex)
+    if (!Number.isInteger(targetRow) || calendarTimelineRowAllowsOverlap(targetRow, resources)) {
+      return []
+    }
+    const dayStart = calendarTimelineTimestampFromDayMinutes(dateYmd, 0)
+    const expandedOrders = calendarTimelineExpandRecurringOrdersForDays(orders, [dateYmd])
+    const intervals = expandedOrders
+      .flatMap((order) => calendarTimelineVisualOrderSlots(order, resources))
+      .filter((slot) => Number(slot?.row) === targetRow)
+      .map((slot) => {
+        const schedule = calendarTimelineAllocationSchedule(slot, slot)
+        const startDate = String(schedule?.dateYmd ?? slot?.dateYmd ?? '').trim()
+        const endDate = String(schedule?.endDateYmd ?? startDate).trim()
+        const startTime = ordersNormalizeTimeField(schedule?.startTime ?? slot?.startTime, '')
+        const endTime = ordersNormalizeTimeField(schedule?.endTime ?? slot?.endTime, '')
+        if (!startDate || !startTime || !endTime) return null
+        const startTimestamp = calendarTimelineTimestampFromDayMinutes(startDate, calendarTimelineTimeMinutes(startTime, 0))
+        let endTimestamp = calendarTimelineTimestampFromDayMinutes(endDate || startDate, calendarTimelineTimeMinutes(endTime, 0))
+        if (endTimestamp <= startTimestamp) endTimestamp += 24 * 60 * 60 * 1000
+        return {
+          start: Math.max(0, Math.round((startTimestamp - dayStart) / 60000)),
+          end: Math.min(24 * 60, Math.round((endTimestamp - dayStart) / 60000)),
+        }
+      })
+      .filter((interval) => interval && interval.end > 0 && interval.start < 24 * 60)
+      .sort((left, right) => left.start - right.start || left.end - right.end)
+
+    return intervals.reduce((merged, interval) => {
+      const previous = merged[merged.length - 1]
+      if (!previous || interval.start > previous.end) {
+        merged.push({ ...interval })
+      } else {
+        previous.end = Math.max(previous.end, interval.end)
+      }
+      return merged
+    }, [])
+  }
+
+  function calendarTimelineNearestFreeBufferWindow(
+    orders = [],
+    context = null,
+    targetRowIndex = null,
+    preferredSlotIndex = null,
+    resources = calendarTimelineResources(),
+    knownOccupiedIntervals = null,
+  ) {
+    if (!context) return null
+    const days = Array.from({ length: 3 }, (_, index) => calendarAddDays(appState.calendarCursorDay || todayYmd(), index))
+    const hours = Array.from({ length: 20 }, (_, index) => index + 4)
+    const pointer = calendarTimelineSlotToDayTime(preferredSlotIndex, days, hours)
+    if (!pointer || pointer.dayKey !== context.occurrenceDateYmd) {
+      return null
+    }
+    const preferredStart = calendarTimelineTimeMinutes(pointer.time, calendarTimelineTimeMinutes(context.startTime, 8 * 60))
+    const occupied = Array.isArray(knownOccupiedIntervals)
+      ? knownOccupiedIntervals
+      : calendarTimelineWorkerOccupiedIntervals(
+          orders,
+          context.occurrenceDateYmd,
+          targetRowIndex,
+          resources,
+        )
+    const fits = (start) => {
+      const end = start + context.durationMinutes
+      return end <= 23 * 60 + 59 && occupied.every((interval) => end <= interval.start || start >= interval.end)
+    }
+    let selectedStart = null
+    if (!context.blockCanMove) {
+      const fixedStart = calendarTimelineTimeMinutes(context.startTime, preferredStart)
+      selectedStart = fits(fixedStart) ? fixedStart : null
+    } else {
+      const candidates = []
+      for (let start = 4 * 60; start + context.durationMinutes <= 23 * 60 + 59; start += CALENDAR_TIMELINE_SLOT_MINUTES) {
+        if (fits(start)) candidates.push(start)
+      }
+      candidates.sort((left, right) => Math.abs(left - preferredStart) - Math.abs(right - preferredStart) || left - right)
+      selectedStart = candidates[0] ?? null
+    }
+    if (selectedStart == null) return null
+
+    const schedule = calendarTimelineScheduleForDayMinutes(
+      context.occurrenceDateYmd,
+      selectedStart,
+      context.durationMinutes,
+    )
+    if (!schedule) return null
+    const slotIndex = calendarTimelineSlotIndex(schedule.dateYmd, schedule.startTime, days, hours)
+    return {
+      schedule,
+      slotIndex,
+      candidate: {
+        id: `buffer-preview:${context.sourceOrderId}:${context.allocationIndex}`,
+        row: Number(targetRowIndex),
+        dateYmd: schedule.dateYmd,
+        endDateYmd: schedule.endDateYmd,
+        startTime: schedule.startTime,
+        endTime: schedule.endTime,
+        slotWorkMinutes: context.durationMinutes,
+        title: calendarTimelineOrderTitle(context.occurrenceOrder),
+      },
+    }
+  }
+
+  function calendarTimelineAssignedAllocationSnapshot(allocations = [], resources = calendarTimelineResources()) {
+    return allocations.reduce((snapshot, allocation, index) => {
+      if (calendarTimelineAllocationIsBuffer(allocation, resources)) return snapshot
+      const identity = calendarTimelineAllocationIdentity(allocation, index)
+      snapshot.set(identity, JSON.stringify({
+        row: Number(allocation?.row),
+        type: String(allocation?.type ?? ''),
+        workerId: String(allocation?.workerId ?? ''),
+        workerLogin: String(allocation?.workerLogin ?? ''),
+        workerKey: String(allocation?.workerKey ?? ''),
+        dateYmd: String(allocation?.dateYmd ?? allocation?.planDateYmd ?? ''),
+        startTime: String(allocation?.startTime ?? allocation?.planStartTime ?? ''),
+        endTime: String(allocation?.endTime ?? allocation?.planEndTime ?? ''),
+        minutes: Math.round(Number(allocation?.minutes ?? allocation?.workMinutes) || 0),
+      }))
+      return snapshot
+    }, new Map())
+  }
+
+  function calendarTimelineAssignedAllocationsPreserved(before = new Map(), afterAllocations = [], resources = calendarTimelineResources()) {
+    const after = calendarTimelineAssignedAllocationSnapshot(afterAllocations, resources)
+    return Array.from(before.entries()).every(([identity, signature]) => after.get(identity) === signature)
+  }
+
+  function calendarTimelineServiceBlocksForBufferAssignment(order = {}, allocations = [], context = null, schedule = null) {
+    const synchronized = calendarTimelineServiceBlocksWithAllocations(order?.serviceBlocks, allocations)
+    if (!context?.blockCanMove || !context?.blockId || !schedule) return synchronized
+    return synchronized.map((block, blockIndex) => {
+      const blockId = String(block?.id ?? block?.kind ?? `block-${blockIndex + 1}`).trim()
+      if (blockId !== context.blockId) return block
+      return {
+        ...block,
+        dateYmd: schedule.dateYmd,
+        planDateYmd: schedule.dateYmd,
+        startDateYmd: schedule.dateYmd,
+        endDateYmd: schedule.endDateYmd,
+        planEndDateYmd: schedule.endDateYmd,
+        startTime: schedule.startTime,
+        planStartTime: schedule.startTime,
+        endTime: schedule.endTime,
+        planEndTime: schedule.endTime,
+      }
+    })
+  }
+
+  function calendarTimelineBuildBufferAssignmentOrder(context = null, targetRowIndex = null, schedule = null, resources = calendarTimelineResources()) {
+    if (!context || !schedule) return null
+    const protectedAssignments = calendarTimelineAssignedAllocationSnapshot(context.allocations, resources)
+    const nextAllocations = context.allocations.map((allocation, index) => {
+      const shouldMoveBlock = context.blockCanMove && context.relatedAllocationIndexes.includes(index)
+      const nextTiming = shouldMoveBlock ? schedule : calendarTimelineAllocationSchedule(allocation, context.occurrenceOrder)
+      if (index === context.allocationIndex) {
+        return calendarTimelineWorkAllocationMovedToRow(allocation, targetRowIndex, resources, {
+          ...schedule,
+          minutes: context.durationMinutes,
+        })
+      }
+      return shouldMoveBlock
+        ? calendarTimelineWorkAllocationMovedToRow(allocation, Number(allocation?.row), resources, nextTiming)
+        : allocation
+    })
+    if (!calendarTimelineAssignedAllocationsPreserved(protectedAssignments, nextAllocations, resources)) {
+      return null
+    }
+
+    const serviceBlocks = calendarTimelineServiceBlocksForBufferAssignment(
+      context.occurrenceOrder,
+      nextAllocations,
+      context,
+      schedule,
+    )
+    const occurrencePatch = calendarTimelineOrderWithAllocations(
+      { ...context.occurrenceOrder, serviceBlocks },
+      nextAllocations,
+      resources,
+    )
+    if (context.overrideOrder) {
+      return {
+        ...context.overrideOrder,
+        ...calendarTimelineCleanRecurringGeneratedFields(occurrencePatch),
+        id: context.overrideOrder.id,
+        sourceOrderId: context.sourceOrderId,
+        recurrenceSourceOrderId: context.sourceOrderId,
+        recurrenceOverride: true,
+        recurrenceOverrideKind: 'single-day',
+        recurrenceOriginalDateYmd: context.occurrenceDateYmd,
+        recurrenceOverrideDateYmd: context.occurrenceDateYmd,
+      }
+    }
+    if (context.recurringSource) {
+      return calendarTimelineBuildSingleOccurrenceOverride(
+        context.sourceOrder,
+        context.occurrenceDateYmd,
+        occurrencePatch,
+      )
+    }
+    const persistedOrder = context.directOrder || context.sourceOrder
+    return {
+      ...persistedOrder,
+      ...calendarTimelineCleanRecurringGeneratedFields(occurrencePatch),
+      id: persistedOrder.id,
+    }
+  }
+
+  async function calendarTimelineAssignBufferWithFreshCheck(
+    orderId,
+    targetRowIndex,
+    preferredSlotIndex,
+    sourceRowIndex,
+    resources = calendarTimelineResources(),
+    options = {},
+  ) {
+    let freshOrders = []
+    try {
+      freshOrders = await calendarTimelineRefreshOrdersForVerifiedMove()
+    } catch (error) {
+      console.warn('[portal/calendar] buffer assignment refresh failed', error)
+      renderCalendarView()
+      return { moved: false, errorMessage: 'Nie zapisano zlecenia. Nie udało się potwierdzić aktualnych danych z bazy.' }
+    }
+    const context = calendarTimelineBufferAssignmentContext(
+      freshOrders,
+      orderId,
+      sourceRowIndex,
+      resources,
+      options,
+    )
+    if (!context) {
+      renderCalendarView()
+      return { moved: false, errorMessage: 'Nie znaleziono wskazanego slotu w BUFORZE. Odśwież kalendarz.' }
+    }
+    const freeWindow = calendarTimelineNearestFreeBufferWindow(
+      freshOrders,
+      context,
+      targetRowIndex,
+      preferredSlotIndex,
+      resources,
+    )
+    if (!freeWindow) {
+      renderCalendarView()
+      return {
+        moved: false,
+        errorMessage: context.blockCanMove
+          ? 'Pracownik nie ma w tym dniu pełnego wolnego okna dla tego zlecenia.'
+          : 'Nie można zmienić godzin tej zmiany, ponieważ ma już przypisane osoby. W jej czasie pracownik jest zajęty.',
+      }
+    }
+    const changedOrder = calendarTimelineBuildBufferAssignmentOrder(
+      context,
+      targetRowIndex,
+      freeWindow.schedule,
+      resources,
+    )
+    if (!changedOrder) {
+      renderCalendarView()
+      return { moved: false, errorMessage: 'Zapis zablokowano, ponieważ naruszyłby wcześniejsze przydziały.' }
+    }
+    const saved = await ordersSaveRemoteTimelineOrdersNow([changedOrder], {
+      render: true,
+      retainLocalOrders: [changedOrder],
+    })
+    return saved
+      ? { moved: true, candidate: freeWindow.candidate, schedule: freeWindow.schedule }
+      : { moved: false, errorMessage: 'Nie udało się zapisać przypisania w bazie.' }
+  }
+
+  function calendarTimelineClearDropPreview() {
+    document
+      .querySelectorAll('#calendarPrototypeTimeline .calendar-timeline-drop-preview')
+      .forEach((node) => node.remove())
+  }
+
+  function calendarTimelinePreviewSlot(candidate = {}, rowIndex = null, resources = calendarTimelineResources(), options = {}) {
+    const workSlotKey = String(options?.workSlotKey ?? '').trim()
+    const slots = calendarTimelineVisualOrderSlots(candidate, resources)
+    return (
+      slots.find(
+        (slot) =>
+          Number(slot?.row) === Number(rowIndex) &&
+          (!workSlotKey || String(slot?.workSlotKey ?? '').trim() === workSlotKey),
+      ) ||
+      slots.find((slot) => Number(slot?.row) === Number(rowIndex)) ||
+      candidate
+    )
+  }
+
+  function calendarTimelineShowDropPreview(candidate, dropInfo, resources, invalid = false, options = {}) {
+    calendarTimelineClearDropPreview()
+    const grid = document.querySelector('#calendarPrototypeTimeline .fw-timeline-grid')
+    const rowIndex = Number(dropInfo?.rowIndex)
+    const slotIndex = Number(dropInfo?.slotIndex)
+    const resource = resources[rowIndex]
+    if (
+      !(grid instanceof HTMLElement) ||
+      !Number.isInteger(rowIndex) ||
+      !Number.isInteger(slotIndex) ||
+      resource?.type !== 'worker' ||
+      !candidate
+    ) {
+      return
+    }
+    const totalSlots = Number(grid.getAttribute('data-calendar-timeline-total-slots'))
+    if (!Number.isFinite(totalSlots) || totalSlots <= 0 || slotIndex < 0 || slotIndex >= totalSlots) {
+      return
+    }
+    const previewSlot = calendarTimelinePreviewSlot(candidate, rowIndex, resources, options)
+    const durationMinutes = Math.max(
+      CALENDAR_TIMELINE_SLOT_MINUTES,
+      Math.round(
+        Number(previewSlot?.slotWorkMinutes || calendarTimelineOrderDurationMinutes(previewSlot || candidate)) ||
+          CALENDAR_TIMELINE_SLOT_MINUTES,
+      ),
+    )
+    const span = Math.max(
+      1,
+      Math.min(totalSlots - slotIndex, Math.ceil(durationMinutes / CALENDAR_TIMELINE_SLOT_MINUTES)),
+    )
+    const preview = document.createElement('div')
+    preview.className = `calendar-timeline-drop-preview${invalid ? ' is-invalid' : ''}`
+    preview.style.gridColumnStart = String(slotIndex + 2)
+    preview.style.gridColumnEnd = `span ${span}`
+    preview.style.gridRow = String(calendarTimelineGridRowForResource(resource, rowIndex))
+    const label = document.createElement('span')
+    label.textContent = calendarTimelineOrderTimeRangeLabel(previewSlot || candidate)
+    preview.appendChild(label)
+    grid.appendChild(preview)
+  }
   
   function calendarTimelineClearDropTargets() {
+    calendarTimelineClearDropPreview()
     const hoverNode = appState.calendarTimelineDragHoverNode
     if (hoverNode instanceof HTMLElement) {
       hoverNode.classList.remove('is-timeline-drop-target', 'is-timeline-drop-invalid')
@@ -8671,11 +9152,12 @@ export function createCalendarFeature(ctx) {
       : Array.isArray(order.workerAllocations) && order.workerAllocations.length
         ? order.workerAllocations
         : []
-    const useServiceBlockTruth = calendarTimelineOrderUsesServiceBlockTruth(order, serviceBlockAllocations)
-    const allocations = useServiceBlockTruth
-      ? serviceBlockAllocations
-      : orderAllocations.length
-        ? orderAllocations
+    // The saved top-level allocation is canonical for the assigned worker.
+    // Service blocks still supply the shift structure and timing below.
+    const allocations = orderAllocations.length
+      ? orderAllocations
+      : calendarTimelineOrderUsesServiceBlockTruth(order, serviceBlockAllocations)
+        ? serviceBlockAllocations
         : serviceBlockAllocations.length
           ? serviceBlockAllocations
           : ordersWorkAllocationsForSubjects(order, [], Number(order.requiredWorkMinutes) || calendarTimelineOrderDurationMinutes(order), false)
@@ -8694,6 +9176,7 @@ export function createCalendarFeature(ctx) {
         const assignment = calendarTimelineAllocationWorkerAssignment(item, row)
         return {
           key: String(item?.key ?? `slot:${index + 1}`).trim(),
+          allocationIdentity: calendarTimelineAllocationIdentity(timedAllocation, index),
           row,
           label: String(item?.label ?? '').trim(),
           name: assignment.name,
@@ -8724,7 +9207,7 @@ export function createCalendarFeature(ctx) {
       const allocationStart = ordersNormalizeTimeField(allocation.startTime, accessStart)
       const allocationDay = ordersNormalizeDateField(allocation.dateYmd, startDay)
       const end = calendarTimelineWorkSlotEndForAllocation(allocationDay, allocationStart, allocation)
-      const slotKey = normalizeSearchText(allocation.key || `slot-${index + 1}`).replace(/[^a-z0-9_-]+/g, '-')
+      const slotKey = normalizeSearchText(allocation.allocationIdentity || allocation.key || `slot-${index + 1}`).replace(/[^a-z0-9_-]+/g, '-')
       return {
         ...order,
         id: `${String(order.id ?? 'order')}__workslot__${slotKey || index + 1}`,
@@ -8745,6 +9228,7 @@ export function createCalendarFeature(ctx) {
         endTime: end.endTime,
         validUntil: end.endDateYmd,
         workSlotKey: allocation.key,
+        workSlotIdentity: allocation.allocationIdentity,
         workSlotId: allocation.slotId,
         serviceBlockId: allocation.serviceBlockId,
         serviceBlockKind: allocation.serviceBlockKind,
@@ -9913,12 +10397,26 @@ export function createCalendarFeature(ctx) {
         const stackStyle = isBufferEvent
           ? `--fw-bar-height:22px;--fw-bar-offset:${Math.min(44, 8 + bufferLane * 11)}px;--fw-bar-z:${120 + bufferLane};`
           : `--fw-bar-height:18px;--fw-bar-y:${centeredTimelineOffset}px;--fw-bar-z:${12 + semanticTimelineLane};`
+        const sourceOrderId = String(bar.sourceOrderId || bar.id || '').trim()
+        const sourceOrder = calendarTimelineSourceOrderById(sourceOrderId)
+        const canMoveOneOff = !bar.isRealEvent &&
+          !isBufferEvent &&
+          calendarTimelineOrderCanBeMovedFreely(sourceOrder)
+        const dragKind = isBufferEvent && !bar.isRealEvent
+          ? 'buffer'
+          : canMoveOneOff
+            ? 'one-off'
+            : ''
+        const draggableAttr = dragKind ? 'true' : 'false'
+        const dragKindAttr = dragKind ? ` data-calendar-timeline-drag-kind="${dragKind}"` : ''
         const titleLabel = [
           barClientLabel,
           timeLabel,
           status?.label || '',
           isBufferEvent && !bar.isRealEvent
             ? 'Przeciągnij z bufora do pracownika'
+            : canMoveOneOff
+              ? 'Przeciągnij: zmień osobę, dzień lub godzinę'
             : !bar.isRealEvent
               ? 'Dwuklik: edytuj zlecenie'
               : 'Dwuklik: edytuj zdarzenie',
@@ -9931,14 +10429,14 @@ export function createCalendarFeature(ctx) {
         ].join('')
         const occurrenceDate = String(bar.recurrenceOriginalDateYmd || bar.recurrenceOverrideDateYmd || bar.dateYmd || '').trim()
         const occurrenceDateAttr = occurrenceDate ? ` data-calendar-timeline-occurrence-date="${escapeHtml(occurrenceDate)}"` : ''
-        const sourceOrderId = String(bar.sourceOrderId || bar.id || '').trim()
         const sourceOrderAttr = sourceOrderId ? ` data-calendar-timeline-source-order-id="${escapeHtml(sourceOrderId)}"` : ''
-          const draggableAttr = isBufferEvent && !bar.isRealEvent ? 'true' : 'false'
           const realTrackClass = bar.isRealEvent ? ` fw-event-real--${escapeHtml(bar.realTrack || 'event')}` : ''
           const sourceEventId = String(bar.sourceEventId ?? '').trim()
           const workdayId = String(bar.workdayId ?? '').trim()
           const sourceStartAt = toIso(bar.sourceStartAt ?? bar.actualStartAt ?? '')
           const workSlotKey = String(bar.workSlotKey ?? '').trim()
+          const workSlotIdentity = String(bar.workSlotIdentity ?? '').trim()
+          const workSlotId = String(bar.workSlotId ?? '').trim()
           const serviceBlockId = String(bar.serviceBlockId ?? '').trim()
           const serviceBlockKind = String(bar.serviceBlockKind ?? '').trim()
           const serviceBlockLabel = String(bar.serviceBlockLabel ?? '').trim()
@@ -9949,13 +10447,15 @@ export function createCalendarFeature(ctx) {
             workdayId ? `data-calendar-timeline-workday-id="${escapeHtml(workdayId)}"` : '',
             sourceStartAt ? `data-calendar-timeline-source-start="${escapeHtml(sourceStartAt)}"` : '',
             workSlotKey ? `data-calendar-timeline-work-slot-key="${escapeHtml(workSlotKey)}"` : '',
+            workSlotIdentity ? `data-calendar-timeline-work-slot-identity="${escapeHtml(workSlotIdentity)}"` : '',
+            workSlotId ? `data-calendar-timeline-work-slot-id="${escapeHtml(workSlotId)}"` : '',
             serviceBlockId ? `data-calendar-timeline-service-block-id="${escapeHtml(serviceBlockId)}"` : '',
             serviceBlockKind ? `data-calendar-timeline-service-block-kind="${escapeHtml(serviceBlockKind)}"` : '',
             serviceBlockLabel ? `data-calendar-timeline-service-block-label="${escapeHtml(serviceBlockLabel)}"` : '',
           ].filter(Boolean).join(' ')
         const gridRow = calendarTimelineGridRowForResource(resources[bar.row] || {}, bar.row)
         return `
-          <button class="fw-event-bar fw-event-bar--${escapeHtml(bar.tone)} fw-event-status--${escapeHtml(status.kind)}${bar.completed ? ' is-completed' : ''}${laneCount > 1 ? ' is-stacked' : ''}${bar.isRealEvent ? ' is-real-event' : ''}${bar.isRecurringSeries ? ' is-recurring-series' : ''}${bar.isRecurringInstance ? ' is-recurring-instance' : ''}${bar.recurrenceOverride ? ' is-recurrence-override' : ''}${isBufferEvent ? ' is-buffer-event' : ''}${realTrackClass}" style="grid-column:${position.startColumn} / span ${position.span}; grid-row:${gridRow};${stackStyle}" type="button" title="${escapeHtml(titleLabel)}" draggable="${draggableAttr}" data-calendar-timeline-order-id="${escapeHtml(bar.id)}" data-calendar-timeline-row="${bar.row}" ${barMetaAttrs}${realEventAttr}${recurringAttr}${sourceOrderAttr}${occurrenceDateAttr}>
+          <button class="fw-event-bar fw-event-bar--${escapeHtml(bar.tone)} fw-event-status--${escapeHtml(status.kind)}${bar.completed ? ' is-completed' : ''}${laneCount > 1 ? ' is-stacked' : ''}${bar.isRealEvent ? ' is-real-event' : ''}${bar.isRecurringSeries ? ' is-recurring-series' : ''}${bar.isRecurringInstance ? ' is-recurring-instance' : ''}${bar.recurrenceOverride ? ' is-recurrence-override' : ''}${isBufferEvent ? ' is-buffer-event' : ''}${realTrackClass}" style="grid-column:${position.startColumn} / span ${position.span}; grid-row:${gridRow};${stackStyle}" type="button" title="${escapeHtml(titleLabel)}" draggable="${draggableAttr}" data-calendar-timeline-order-id="${escapeHtml(bar.id)}" data-calendar-timeline-row="${bar.row}"${dragKindAttr} ${barMetaAttrs}${realEventAttr}${recurringAttr}${sourceOrderAttr}${occurrenceDateAttr}>
             <span class="fw-event-label">
               <span class="fw-event-mark" aria-hidden="true">&#9670;</span>
               <span class="fw-event-time">${escapeHtml(barTimeLabel)}</span>
@@ -10793,21 +11293,42 @@ export function createCalendarFeature(ctx) {
       const sourceRow = Number(bar.getAttribute('data-calendar-timeline-row'))
       const dragResources = calendarTimelineResources()
       const isBufferSource = Number.isInteger(sourceRow) && dragResources[sourceRow]?.type === 'buffer'
-      if (bar.getAttribute('data-calendar-timeline-real-event') === '1' || !isBufferSource) {
+      const isWorkerSource = Number.isInteger(sourceRow) && dragResources[sourceRow]?.type === 'worker'
+      const orderId = String(bar.getAttribute('data-calendar-timeline-order-id') ?? '').trim()
+      if (!orderId) {
         event.preventDefault()
         return
       }
-      const orderId = String(bar.getAttribute('data-calendar-timeline-order-id') ?? '').trim()
-      if (!orderId) {
+      const recurringContext = calendarTimelineRecurringContextFromBar(bar)
+      const dragKind = String(bar.getAttribute('data-calendar-timeline-drag-kind') || '').trim()
+      const barSourceOrderId = String(bar.getAttribute('data-calendar-timeline-source-order-id') || '').trim()
+      const sourceOrderId = recurringContext?.sourceOrderId || barSourceOrderId || orderId
+      const sourceOrder = calendarTimelineSourceOrderById(sourceOrderId)
+      const validBufferDrag = dragKind === 'buffer' && isBufferSource
+      const validOneOffDrag =
+        dragKind === 'one-off' &&
+        isWorkerSource &&
+        calendarTimelineOrderCanBeMovedFreely(sourceOrder || {})
+      if (
+        bar.getAttribute('data-calendar-timeline-real-event') === '1' ||
+        (!validBufferDrag && !validOneOffDrag)
+      ) {
+        event.preventDefault()
         return
       }
-      const recurringContext = calendarTimelineRecurringContextFromBar(bar)
       const workSlotKey = String(bar.getAttribute('data-calendar-timeline-work-slot-key') || '').trim()
+      const workSlotIdentity = String(bar.getAttribute('data-calendar-timeline-work-slot-identity') || '').trim()
+      const workSlotId = String(bar.getAttribute('data-calendar-timeline-work-slot-id') || '').trim()
+      const serviceBlockId = String(bar.getAttribute('data-calendar-timeline-service-block-id') || '').trim()
       appState.calendarTimelineDragOrderId = orderId
+      appState.calendarTimelineDragKind = dragKind
       appState.calendarTimelineDragSourceRow = Number.isInteger(sourceRow) ? sourceRow : null
-      appState.calendarTimelineDragSourceOrderId = recurringContext?.sourceOrderId || ''
+      appState.calendarTimelineDragSourceOrderId = sourceOrderId
       appState.calendarTimelineDragOccurrenceDate = recurringContext?.occurrenceDateYmd || ''
       appState.calendarTimelineDragWorkSlotKey = workSlotKey
+      appState.calendarTimelineDragAllocationIdentity = workSlotIdentity
+      appState.calendarTimelineDragWorkSlotId = workSlotId
+      appState.calendarTimelineDragServiceBlockId = serviceBlockId
       appState.calendarTimelineDragRecurringSeries = Boolean(recurringContext?.shouldAskScope)
       appState.calendarTimelineDragTargetRow = null
       appState.calendarTimelineDragTargetSlot = null
@@ -10818,18 +11339,31 @@ export function createCalendarFeature(ctx) {
       appState.calendarTimelineDragHoverKey = ''
       appState.calendarTimelineDragHoverInvalid = false
       appState.calendarTimelineDragHoverNode = null
+      appState.calendarTimelineDragBufferContextKey = ''
+      appState.calendarTimelineDragBufferContext = null
+      appState.calendarTimelineDragOccupiedIntervals = new Map()
       bar.classList.add('is-dragging')
       if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = 'move'
         event.dataTransfer.setData('text/plain', orderId)
-        if (recurringContext?.sourceOrderId) {
-          event.dataTransfer.setData('application/x-calendar-source-order-id', recurringContext.sourceOrderId)
+        event.dataTransfer.setData('application/x-calendar-drag-kind', dragKind)
+        if (sourceOrderId) {
+          event.dataTransfer.setData('application/x-calendar-source-order-id', sourceOrderId)
         }
         if (recurringContext?.occurrenceDateYmd) {
           event.dataTransfer.setData('application/x-calendar-occurrence-date', recurringContext.occurrenceDateYmd)
         }
         if (workSlotKey) {
           event.dataTransfer.setData('application/x-calendar-work-slot-key', workSlotKey)
+        }
+        if (workSlotIdentity) {
+          event.dataTransfer.setData('application/x-calendar-work-slot-identity', workSlotIdentity)
+        }
+        if (workSlotId) {
+          event.dataTransfer.setData('application/x-calendar-work-slot-id', workSlotId)
+        }
+        if (serviceBlockId) {
+          event.dataTransfer.setData('application/x-calendar-service-block-id', serviceBlockId)
         }
         if (recurringContext?.shouldAskScope) {
           event.dataTransfer.setData('application/x-calendar-recurring-series', '1')
@@ -10854,33 +11388,143 @@ export function createCalendarFeature(ctx) {
       const orderId = String(event.dataTransfer?.getData('text/plain') || appState.calendarTimelineDragOrderId || '').trim()
       const sourceRowValue = event.dataTransfer?.getData('application/x-calendar-source-row')
       const sourceRow = sourceRowValue ? Number(sourceRowValue) : appState.calendarTimelineDragSourceRow
-      const recurringMoveOptions = {
-        sourceOrderId: String(event.dataTransfer?.getData('application/x-calendar-source-order-id') || appState.calendarTimelineDragSourceOrderId || '').trim(),
-        occurrenceDateYmd: String(event.dataTransfer?.getData('application/x-calendar-occurrence-date') || appState.calendarTimelineDragOccurrenceDate || '').trim(),
-        workSlotKey: String(event.dataTransfer?.getData('application/x-calendar-work-slot-key') || appState.calendarTimelineDragWorkSlotKey || '').trim(),
-        isRecurringSeries: event.dataTransfer?.getData('application/x-calendar-recurring-series') === '1' || Boolean(appState.calendarTimelineDragRecurringSeries),
+      const bufferMoveOptions = calendarTimelineBufferMoveOptionsFromTransfer(event.dataTransfer)
+      const dragResources = Array.isArray(appState.calendarTimelineDragResources) && appState.calendarTimelineDragResources.length
+        ? appState.calendarTimelineDragResources
+        : calendarTimelineResources()
+      const targetResource = dragResources[dropInfo.rowIndex]
+      const invalidTarget = targetResource?.type !== 'worker'
+      const sourceOrders = ordersListSourceOrders()
+      const dragKind = String(
+        event.dataTransfer?.getData('application/x-calendar-drag-kind') ||
+        appState.calendarTimelineDragKind ||
+        '',
+      ).trim()
+      if (dragKind === 'one-off') {
+        const sourceOrderId = String(
+          event.dataTransfer?.getData('application/x-calendar-source-order-id') ||
+          appState.calendarTimelineDragSourceOrderId ||
+          orderId,
+        ).trim()
+        const sourceOrder = calendarTimelineSourceOrderById(sourceOrderId)
+        const moveOptions = {
+          sourceOrderId,
+          assignmentEditScope: 'single',
+          isRecurringSeries: false,
+          oneOffOnly: true,
+        }
+        const candidate = invalidTarget || !calendarTimelineOrderCanBeMovedFreely(sourceOrder || {})
+          ? null
+          : calendarTimelineMoveCandidateFromOrders(
+              orderId,
+              dropInfo.rowIndex,
+              dropInfo.slotIndex,
+              Number.isInteger(sourceRow) ? sourceRow : null,
+              dragResources,
+              sourceOrders,
+              moveOptions,
+            )
+        const hasConflict = candidate
+          ? calendarTimelineDragConflict(
+              orderId,
+              dropInfo.rowIndex,
+              dropInfo.slotIndex,
+              Number.isInteger(sourceRow) ? sourceRow : null,
+              moveOptions,
+            )
+          : true
+        const invalid = invalidTarget || !candidate || hasConflict
+        const previewKey = calendarTimelineDropInfoKey(dropInfo)
+        const shouldRefreshPreview =
+          previewKey !== appState.calendarTimelineDragHoverKey ||
+          invalid !== Boolean(appState.calendarTimelineDragHoverInvalid) ||
+          !document.querySelector('#calendarPrototypeTimeline .calendar-timeline-drop-preview')
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = invalid ? 'none' : 'move'
+        }
+        calendarTimelineRememberDropInfo(dropInfo)
+        calendarTimelineMarkDropTarget(target, dropInfo, invalid)
+        if (shouldRefreshPreview && !invalidTarget) {
+          calendarTimelineShowDropPreview(
+            candidate,
+            dropInfo,
+            dragResources,
+            invalid,
+            moveOptions,
+          )
+        }
+        return
       }
-      const hasConflict = calendarTimelineDragConflict(
+      const contextKey = JSON.stringify([
         orderId,
-        dropInfo.rowIndex,
-        dropInfo.slotIndex,
         Number.isInteger(sourceRow) ? sourceRow : null,
-        recurringMoveOptions,
-      )
+        bufferMoveOptions.sourceOrderId,
+        bufferMoveOptions.occurrenceDateYmd,
+        bufferMoveOptions.allocationIdentity,
+        bufferMoveOptions.workSlotId,
+        bufferMoveOptions.serviceBlockId,
+      ])
+      if (appState.calendarTimelineDragBufferContextKey !== contextKey) {
+        appState.calendarTimelineDragBufferContextKey = contextKey
+        appState.calendarTimelineDragBufferContext = calendarTimelineBufferAssignmentContext(
+          sourceOrders,
+          orderId,
+          Number.isInteger(sourceRow) ? sourceRow : null,
+          dragResources,
+          bufferMoveOptions,
+        )
+        appState.calendarTimelineDragOccupiedIntervals = new Map()
+      }
+      const bufferContext = appState.calendarTimelineDragBufferContext
+      const occupiedKey = `${bufferContext?.occurrenceDateYmd || ''}:${dropInfo.rowIndex}`
+      let occupiedIntervals = appState.calendarTimelineDragOccupiedIntervals?.get(occupiedKey)
+      if (!invalidTarget && bufferContext && !occupiedIntervals) {
+        occupiedIntervals = calendarTimelineWorkerOccupiedIntervals(
+          sourceOrders,
+          bufferContext.occurrenceDateYmd,
+          dropInfo.rowIndex,
+          dragResources,
+        )
+        appState.calendarTimelineDragOccupiedIntervals.set(occupiedKey, occupiedIntervals)
+      }
+      const freeWindow = invalidTarget || !bufferContext
+        ? null
+        : calendarTimelineNearestFreeBufferWindow(
+            sourceOrders,
+            bufferContext,
+            dropInfo.rowIndex,
+            dropInfo.slotIndex,
+            dragResources,
+            occupiedIntervals,
+          )
+      const invalid = invalidTarget || !freeWindow
+      const previewKey = calendarTimelineDropInfoKey(dropInfo)
+      const shouldRefreshPreview =
+        previewKey !== appState.calendarTimelineDragHoverKey ||
+        invalid !== Boolean(appState.calendarTimelineDragHoverInvalid) ||
+        !document.querySelector('#calendarPrototypeTimeline .calendar-timeline-drop-preview')
       if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = hasConflict ? 'none' : 'move'
+        event.dataTransfer.dropEffect = invalid ? 'none' : 'move'
       }
       calendarTimelineRememberDropInfo(dropInfo)
-      calendarTimelineMarkDropTarget(target, dropInfo, hasConflict)
+      calendarTimelineMarkDropTarget(target, dropInfo, invalid)
+      if (shouldRefreshPreview && !invalidTarget) {
+        calendarTimelineShowDropPreview(
+          freeWindow?.candidate,
+          { ...dropInfo, slotIndex: freeWindow?.slotIndex ?? dropInfo.slotIndex },
+          dragResources,
+          invalid,
+          bufferMoveOptions,
+        )
+      }
     })
     binding.add(timelineStage, 'dragleave', (event) => {
       const target = calendarTimelineDropTargetFromEvent(event)
       if (target instanceof HTMLElement && (!(event.relatedTarget instanceof Node) || !target.contains(event.relatedTarget))) {
-        target.classList.remove('is-timeline-drop-target', 'is-timeline-drop-invalid')
         if (appState.calendarTimelineDragHoverNode === target) {
-          appState.calendarTimelineDragHoverKey = ''
-          appState.calendarTimelineDragHoverInvalid = false
-          appState.calendarTimelineDragHoverNode = null
+          calendarTimelineClearDropTargets()
+        } else {
+          target.classList.remove('is-timeline-drop-target', 'is-timeline-drop-invalid')
         }
       }
     })
@@ -10894,59 +11538,68 @@ export function createCalendarFeature(ctx) {
       const orderId = String(event.dataTransfer?.getData('text/plain') || appState.calendarTimelineDragOrderId || '').trim()
       const sourceRowValue = event.dataTransfer?.getData('application/x-calendar-source-row')
       const sourceRow = sourceRowValue ? Number(sourceRowValue) : appState.calendarTimelineDragSourceRow
-      const recurringMoveOptions = {
-        sourceOrderId: String(event.dataTransfer?.getData('application/x-calendar-source-order-id') || appState.calendarTimelineDragSourceOrderId || '').trim(),
-        occurrenceDateYmd: String(event.dataTransfer?.getData('application/x-calendar-occurrence-date') || appState.calendarTimelineDragOccurrenceDate || '').trim(),
-        workSlotKey: String(event.dataTransfer?.getData('application/x-calendar-work-slot-key') || appState.calendarTimelineDragWorkSlotKey || '').trim(),
-        isRecurringSeries: event.dataTransfer?.getData('application/x-calendar-recurring-series') === '1' || Boolean(appState.calendarTimelineDragRecurringSeries),
-      }
+      const bufferMoveOptions = calendarTimelineBufferMoveOptionsFromTransfer(event.dataTransfer)
+      const dragKind = String(
+        event.dataTransfer?.getData('application/x-calendar-drag-kind') ||
+        appState.calendarTimelineDragKind ||
+        '',
+      ).trim()
       const dragResources = Array.isArray(appState.calendarTimelineDragResources) && appState.calendarTimelineDragResources.length
         ? appState.calendarTimelineDragResources
         : calendarTimelineResources()
-      const hasConflict = calendarTimelineDragConflict(
-        orderId,
-        dropInfo.rowIndex,
-        dropInfo.slotIndex,
-        Number.isInteger(sourceRow) ? sourceRow : null,
-        recurringMoveOptions,
-      )
-      calendarTimelineClearDropTargets()
-      if (hasConflict) {
+      const targetResource = dragResources[dropInfo.rowIndex]
+      if (targetResource?.type !== 'worker') {
+        calendarTimelineClearDropTargets()
         calendarTimelineResetDragState()
+        showTransientNotice('Upuść zlecenie w wierszu pracownika.', 'error')
         return
       }
-      void calendarTimelineMoveOrderWithFreshCheck(
+      calendarTimelineClearDropTargets()
+      if (dragKind === 'one-off') {
+        const sourceOrderId = String(
+          event.dataTransfer?.getData('application/x-calendar-source-order-id') ||
+          appState.calendarTimelineDragSourceOrderId ||
+          orderId,
+        ).trim()
+        const sourceOrder = calendarTimelineSourceOrderById(sourceOrderId)
+        if (!calendarTimelineOrderCanBeMovedFreely(sourceOrder || {})) {
+          calendarTimelineResetDragState()
+          showTransientNotice('W kalendarzu mozna teraz przenosic tylko zlecenia jednorazowe.', 'error')
+          return
+        }
+        const moveOptions = {
+          sourceOrderId,
+          assignmentEditScope: 'single',
+          isRecurringSeries: false,
+          oneOffOnly: true,
+        }
+        const movePromise = calendarTimelineMoveOrderWithFreshCheck(
+          orderId,
+          dropInfo.rowIndex,
+          dropInfo.slotIndex,
+          Number.isInteger(sourceRow) ? sourceRow : null,
+          dragResources,
+          moveOptions,
+        )
+        calendarTimelineResetDragState()
+        void movePromise.then((moveResult) => {
+          calendarTimelineHandleMoveResult(moveResult)
+        })
+        return
+      }
+      void calendarTimelineAssignBufferWithFreshCheck(
         orderId,
         dropInfo.rowIndex,
         dropInfo.slotIndex,
         Number.isInteger(sourceRow) ? sourceRow : null,
         dragResources,
-        recurringMoveOptions,
-      ).then((moveResult) => calendarTimelineHandleMoveResult(moveResult))
+        bufferMoveOptions,
+      ).then((moveResult) => {
+        calendarTimelineHandleMoveResult(moveResult)
+      })
       calendarTimelineResetDragState()
     })
     binding.add(timelineStage, 'dragend', () => {
-      if (!appState.calendarTimelineDropHandled && appState.calendarTimelineDragOrderId) {
-        const dropInfo = calendarTimelineResolveDropInfo()
-        if (dropInfo) {
-          const dragResources = Array.isArray(appState.calendarTimelineDragResources) && appState.calendarTimelineDragResources.length
-            ? appState.calendarTimelineDragResources
-            : calendarTimelineResources()
-          void calendarTimelineMoveOrderWithFreshCheck(
-            appState.calendarTimelineDragOrderId,
-            dropInfo.rowIndex,
-            dropInfo.slotIndex,
-            Number.isInteger(Number(appState.calendarTimelineDragSourceRow)) ? Number(appState.calendarTimelineDragSourceRow) : null,
-            dragResources,
-            {
-              sourceOrderId: appState.calendarTimelineDragSourceOrderId,
-              occurrenceDateYmd: appState.calendarTimelineDragOccurrenceDate,
-              workSlotKey: appState.calendarTimelineDragWorkSlotKey,
-              isRecurringSeries: appState.calendarTimelineDragRecurringSeries,
-            },
-          ).then((moveResult) => calendarTimelineHandleMoveResult(moveResult))
-        }
-      }
       calendarTimelineResetDragState()
       calendarTimelineClearDropTargets()
       document.querySelectorAll('#view-calendar .fw-event-bar.is-dragging').forEach((node) => {

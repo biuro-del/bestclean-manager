@@ -2050,3 +2050,297 @@ Testy/sprawdzenia:
 Uwagi dla nastepnej osoby:
 - Cofniecie wdrozenia wymaga utworzenia nowego rollouta App Hosting na poprzedni zatwierdzony commit produkcyjny albo commit sprzed `486c81c`, po uprzednim sprawdzeniu aktualnego `cleanzi01/main`.
 - Nie commitowano lokalnych katalogow tymczasowych `.codex-backups/`, `.codex-tmp/`, `_deploy_gps_start_fix/` ani `_deploy_route_sync_refresh/`.
+
+Data: 2026-07-14 13:30 +02:00
+Autor: AI Codex
+Dodano:
+- W `web-app/apps/portal-web/src/features/orders/index.js` dodano czytelny status karty osoby: etykiete `BUFOR` lub nazwisko przypisanego pracownika oraz pomocniczy opis stanu przypisania.
+- W `web-app/apps/portal-web/src/index.css` dodano subtelny akcent statusu po lewej stronie karty, uporzadkowana stopke z awatarem i opisem oraz stany hover przyciskow.
+Zmieniono:
+- Uporzadkowano wizualnie karty osob w kroku `Zmiany i osoby`: wyrownano pola, wzmocniono hierarchie naglowka i stopki, ograniczono dekoracje oraz zachowano maksymalny promien naroznikow 8 px.
+- Zmieniono etykiety formularza na krotsze i jednoznaczne: `Osoba / rola` oraz `Pracownik (opcjonalnie)`.
+- Dla slotu nieobsadzonego skrocono glowna etykiete do `BUFOR`, a stan wyjasnia tekst `Oczekuje na przypisanie`.
+- Dopasowano proporcje kolumn RBH i wyboru pracownika oraz responsywne skladanie pol na waskim ekranie.
+Usunieto:
+- Usunieto powtorzony rzad statystyk pod instrukcja zmiany; te same informacje pozostaja w naglowku zmiany i na karcie osoby.
+- Usunieto nieuzywany CSS `.orders-kanban-column-stats` oraz zwiazane z nim nieuzywane zmienne renderowania.
+Testy/sprawdzenia:
+- Potwierdzono przed praca, ze lokalny `HEAD` i `cleanzi01/main` wskazuja ten sam commit `77b6412` i nie ma nowszej wersji do pobrania.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/orders/index.js`.
+- Uruchomiono `git diff --check` - brak bledow diffu, pozostaly jedynie ostrzezenia CRLF.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+- Sprawdzono `http://localhost:5173/` w przegladarce: formularz `Dodaj zlecenie -> Zmiany i osoby` renderuje pelna karte bez poziomego przelewania i bez zapisywania danych.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy wylacznie prezentacji formularza zlecenia; nie zmieniono identyfikatorow pol, obslugi zdarzen, walidacji, zapisu ani zrodla danych.
+- Cofniecie wymaga usuniecia tego wpisu oraz przywrocenia poprzednich fragmentow `ordersServiceBlockSlotsHtml` w `orders/index.js` i stylow `.orders-kanban-slot-*` w `index.css`.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-15 23:33:46 +02:00
+Autor: AI Codex
+Temat: Bezpieczne przypisanie zlecenia z BUFORU do wolnego czasu pracownika
+Dodano:
+- Dedykowana sciezke drag/drop tylko dla zlecen BUFOR -> pracownik. Nie korzysta ona ze starego mechanizmu przesuwania, dzielenia ani przebudowywania zlecen.
+- System wylicza zajete przedzialy pracownika dla wskazanego dnia i szuka najblizszego wolnego okna, w ktorym miesci sie cala dlugosc przeciaganego zlecenia.
+- Podglad upuszczenia wskazuje rzeczywiste wolne miejsce. Jesli pelny czas zlecenia nie miesci sie w dniu pracownika, upuszczenie jest blokowane.
+- Bezposrednio przed zapisem pobierane sa swieze zlecenia i ponownie wykonywana jest kontrola dostepnosci.
+- Dodano kontrole niezmiennosci istniejacych przydzialow: przed zapisem porownywane sa osoba, dzien, godziny, czas i identyfikatory kazdego wczesniej przypisanego slotu.
+Zmieniono:
+- Zapis dotyczy tylko dokladnie wskazanego slotu BUFORU. Pozostale zlecenia i przydzialy sa scalane z pelnym, aktualnym zestawem przed wyslaniem do backendu.
+- Ujednolicono identyfikacje slotu przez allocation identity, serviceBlockId i workSlotId, aby kilka slotow BUFORU nie bylo mylonych ze soba.
+- Dla bloku zawierajacego juz przypisane osoby godziny bloku sa nieruchome. Zmiana godziny jest mozliwa tylko dla bloku skladajacego sie w calosci ze slotow BUFORU.
+Naprawiono:
+- Usunieto filtr, ktory po przypisaniu jednego slotu kasowal pozostale sloty BUFORU z work_allocations.
+- Usunieto awaryjne wybieranie pierwszego slotu z row=0, ktore moglo zmienic inne zlecenie niz przeciagane.
+- Zlecenia przypisane przed operacja sa traktowane jako zajete i nie moga byc przesuwane, nadpisywane, skracane ani usuwane przez ten drag/drop.
+Testy/sprawdzenia:
+- `npm.cmd run build` zakonczyl sie poprawnie (Vite build, pozostalo standardowe ostrzezenie o duzych chunkach).
+- `git diff --check` nie wykazal bledow; pozostaly jedynie ostrzezenia CRLF.
+- `http://localhost:5173/` odpowiada HTTP 200.
+- Pelnego automatycznego dropu w przegladarce nie wykonano, poniewaz narzedzie Browser nie uruchomilo klienta z powodu konfliktu w jego srodowisku runtime. Nie wykonywano zastepczych zapisow na danych firmy.
+Kopia i cofniecie:
+- Kopia stanu sprzed tej poprawki: `.codex-backups/calendar-buffer-safe-drop-20260715-104620`.
+- Aby cofnac tylko te zmiane, przywroc z kopii `web-app/apps/portal-web/src/features/calendar/index.js`; nie przywracaj innych plikow bez porownania, poniewaz zawieraja wczesniejsze zmiany robocze.
+Uwagi:
+- Nie zmieniono danych pracownikow, rekordow czasu pracy ani zdarzen START/STOP.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-14 14:24 +02:00
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/index.css` poprawiono wysokosc zewnetrznej karty zmiany w formularzu `Dodaj/Edytuj zlecenie -> Zmiany i osoby`.
+- Karta zmiany zachowuje dotychczasowa minimalna wysokosc widoku, ale teraz rosnie do wysokosci swojej zawartosci, dzieki czemu biale tlo i obramowanie obejmuja wszystkie karty osob oraz przycisk `Dodaj osobe`.
+- Zmiana jest ograniczona do `.orders-kanban-column`; nie zmienia wygladu pustej kolumny `Dodaj zmiane` ani mechanizmu przewijania formularza.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Przed zmiana wykonano `git fetch cleanzi01 main --prune`; lokalny `HEAD` i `cleanzi01/main` nie wykazaly rozbieznosci (`0 0`).
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostaly standardowe ostrzezenia Vite o duzych chunkach.
+- Uruchomiono `git diff --check` - brak bledow diffu, pozostaly jedynie ostrzezenia CRLF.
+- Sprawdzono `http://localhost:5173/` - lokalny portal odpowiada HTTP 200.
+Uwagi dla nastepnej osoby:
+- Zmiana dotyczy wylacznie ukladu CSS; nie zmieniono formularza, walidacji, danych, API ani zapisu zlecen.
+- Cofniecie wymaga usuniecia reguly `.orders-kanban-column` dodanej obok ustawien szerokosci kolumn w `web-app/apps/portal-web/src/index.css`.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-14 22:21 +02:00
+Autor: AI Codex
+Dodano:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` dodano podglad miejsca upuszczenia zlecenia z BUFORU: wskazuje docelowego pracownika oraz wyliczony zakres godzin po przesunieciu z dokladnoscia do 15 minut.
+- W `web-app/apps/portal-web/src/index.css` dodano czytelny stan podgladu poprawnego i niedozwolonego upuszczenia.
+Zmieniono:
+- Przeciaganie na kalendarzu rozpoczyna sie tylko dla planowanego zlecenia znajdujacego sie w BUFORZE; zielone paski rzeczywistego czasu pracy i zlecenia juz przypisane nie uruchamiaja tej sciezki.
+- Upuszczenie jest dozwolone tylko na wierszu pracownika. Pozycja pozioma wskazuje nowa godzine START, czas trwania pozostaje bez zmian, a STOP jest wyliczany z zachowanej dlugosci zlecenia.
+- Walidacja konfliktu sprawdza inne zaplanowane zlecenia pracownika. Rzeczywiste paski START/STOP nie blokuja przypisania.
+- Dla zlecenia cyklicznego zapis z kalendarza nadal tworzy lub aktualizuje wyjatek tylko dla wskazanego dnia; nie zmienia reguly calej serii.
+- Zapis wykorzystuje istniejacy mechanizm informacji `Przenosze zlecenie...` i odswiezenia danych po powodzeniu.
+Usunieto:
+- Usunieto zapisywanie zlecenia z awaryjnej obslugi `dragend`; zapis nastepuje tylko po rzeczywistym, poprawnym upuszczeniu.
+- W nowej sciezce BUFOR -> pracownik pominieto stare pytania o zakres serii i zakres przypisania.
+Testy/sprawdzenia:
+- Przed praca potwierdzono, ze lokalny `HEAD` i produkcyjny remote `cleanzi01/main` wskazuja ten sam commit `77b6412` (`0 0`). Nowszego kodu produkcyjnego do polaczenia nie bylo.
+- `origin/main` wskazuje inna, niekompatybilna historie projektu (`b88a7d3`) i nie zostal scalony ani pobrany do biezacej galezi.
+- Uruchomiono `node --check web-app/apps/portal-web/src/features/calendar/index.js`.
+- Uruchomiono `npm.cmd run build` - build portalu przeszedl poprawnie; pozostalo standardowe ostrzezenie Vite o duzym chunku.
+- Uruchomiono `git diff --check` - brak bledow diffu, pozostaly jedynie ostrzezenia CRLF.
+- Sprawdzono `http://localhost:5173/` w przegladarce: pasek `12:00-14:00 Best Clean` w BUFORZE jest jedynym przeciagalnym zleceniem, a widok nie pokazuje bledu ani aktywnego zapisu.
+- Nie wykonano pelnego upuszczenia na realnego pracownika, poniewaz testowy Rafal Dudek znajdowal sie daleko na przewijanej liscie, a przegladarka testowa nie przewijala widoku podczas trzymania paska. Pozwolilo to uniknac przypadkowej zmiany danych innej osoby.
+Uwagi dla nastepnej osoby:
+- Zmiana nie modyfikuje rekordow dnia pracy, zdarzen START/STOP ani aplikacji mobilnej. Dotyczy tylko zlecen grafiku w kalendarzu.
+- Cofniecie wymaga usuniecia helperow `calendarTimelineBufferDragOptions`, `calendarTimelineClearDropPreview`, `calendarTimelinePreviewSlot`, `calendarTimelineShowDropPreview`, zmian obslugi `dragstart`/`dragover`/`drop`/`dragend` w `calendar/index.js` oraz stylow `.calendar-timeline-drop-preview` w `index.css`.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-16 12:47:47 +02:00
+Autor: AI Codex
+Temat: Zachowanie punktu zlapanej czesci paska przy BUFOR -> pracownik
+Dodano:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` dodano obliczanie odleglosci kursora od poczatku przeciaganego paska w slotach 15-minutowych.
+- Punkt zaczepienia jest przechowywany w stanie przeciagania oraz w `DataTransfer`, aby podglad i finalny zapis uzywaly tej samej godziny.
+Zmieniono:
+- Pozycja kursora podczas przeciagania nie oznacza juz automatycznie godziny START. System odejmuje miejsce, za ktore uzytkownik zlapal pasek.
+- Upuszczenie pod godzina 18:00 daje START 18:00 niezaleznie od tego, czy pasek zostal zlapany za poczatek, srodek czy koniec.
+- Korekta dotyczy tylko sciezki BUFOR -> pracownik. Nie zmieniono ochrony istniejacych zlecen ani mechanizmu szukania wolnego przedzialu.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- `node --check web-app/apps/portal-web/src/features/calendar/index.js` zakonczyl sie poprawnie.
+- `npm.cmd run build` zakonczyl sie poprawnie; pozostalo standardowe ostrzezenie Vite o duzych chunkach.
+- `git diff --check` nie wykazal bledow; pozostaly jedynie ostrzezenia CRLF.
+- `http://localhost:5173/` odpowiada HTTP 200.
+- Pelnego zapisu drag/drop nie wykonano automatycznie, poniewaz sterowanie przegladarka localhost jest zablokowane polityka srodowiska. Nie wykonywano zastepczych zmian danych firmy.
+Kopia i cofniecie:
+- Kopia stanu sprzed poprawki: `.codex-backups/calendar-buffer-drag-anchor-20260716-123716`.
+- Aby cofnac tylko te zmiane, przywroc `calendar-index.js` z tej kopii do `web-app/apps/portal-web/src/features/calendar/index.js`; przed przywroceniem porownaj pliki, aby zachowac pozniejsze zmiany.
+Uwagi:
+- Nie zmieniono danych pracownikow, rekordow czasu pracy ani zdarzen START/STOP.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-16 14:07:11 +02:00
+Autor: AI Codex
+Temat: Godzina START wskazywana bezposrednio kursorem przy BUFOR -> pracownik
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` uproszczono wyliczanie miejsca upuszczenia zlecenia z BUFORU.
+- Pozycja kursora na osi czasu ponownie oznacza bezposrednio oczekiwana godzine START zlecenia. Podglad i finalny zapis korzystaja z tego samego, nieprzesunietego slotu.
+- Pozostawiono mechanizm wyszukiwania najblizszego pelnego wolnego przedzialu. Istniejace zlecenia pracownika nadal sa traktowane jako zajete i nie moga zostac zastapione ani usuniete przez drop.
+- Czerwone obramowanie nadal oznacza faktyczny wiersz pracownika znajdujacy sie pod kursorem.
+Usunieto:
+- Usunieto stan `calendarTimelineDragGrabOffsetSlots`, helper korekty punktu zaczepienia oraz pole `application/x-calendar-grab-offset-slots` z `DataTransfer`.
+- Usunieto odejmowanie miejsca, za ktore uzytkownik zlapal pasek. Eliminuje to opozniony i przesuniety wzgledem kursora podglad godziny.
+Testy/sprawdzenia:
+- `node --check web-app/apps/portal-web/src/features/calendar/index.js` zakonczyl sie poprawnie.
+- `npm.cmd run build` zakonczyl sie poprawnie; pozostalo standardowe ostrzezenie Vite o duzych chunkach.
+- `git diff --check` nie wykazal bledow; pozostaly jedynie ostrzezenia CRLF.
+- `http://localhost:5173/` odpowiada HTTP 200.
+- Nie wykonano automatycznego zapisu drag/drop na danych firmy; korekta zostala sprawdzona skladniowo, przez build i dzialajacy localhost.
+Kopia i cofniecie:
+- Kopia stanu sprzed tej korekty: `.codex-backups/calendar-buffer-start-at-cursor-20260716-135558/calendar-index.js`.
+- Aby cofnac tylko te zmiane, po porownaniu plikow przywroc wskazana kopie do `web-app/apps/portal-web/src/features/calendar/index.js`.
+Uwagi:
+- Nie zmieniono danych pracownikow, rekordow czasu pracy ani zdarzen START/STOP.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-16 14:56:10 +02:00
+Autor: AI Codex
+Temat: Utrzymanie przypisania BUFOR -> pracownik po zapisie
+Dodano:
+- W wywolaniu zapisu po poprawnym upuszczeniu przekazywane jest teraz swiezo zmienione zlecenie jako `retainLocalOrders`.
+Zmieniono:
+- Odpowiedz backendu po zapisie jest scalana ze swiezszym lokalnym stanem przypisania. Starsza odpowiedz nie moze juz natychmiast przywrocic slotu do BUFORU.
+- Ochrona dotyczy tylko rekordu zmienionego przez konkretne upuszczenie. Nie zmienia innych zlecen, godzin pracy pracownikow ani zdarzen START/STOP.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- `node --check web-app/apps/portal-web/src/features/calendar/index.js` zakonczyl sie poprawnie.
+- `npm.cmd run build` zakonczyl sie poprawnie; pozostalo standardowe ostrzezenie Vite o duzych chunkach.
+- `git diff --check` nie wykazal bledow; pozostaly jedynie ostrzezenia CRLF.
+- `http://localhost:5173/` odpowiada HTTP 200.
+- Pelnego zapisu drag/drop nie wykonano automatycznie, poniewaz narzedzie sterowania przegladarka nie bylo dostepne w tej sesji. Zmiana jest serwowana przez HMR na localhost i wymaga koncowego sprawdzenia przez upuszczenie testowego zlecenia.
+Kopia i cofniecie:
+- Kopia stanu sprzed poprawki: `.codex-backups/calendar-buffer-drop-persistence-20260716-145610/calendar-index.js`.
+- Aby cofnac tylko te zmiane, po porownaniu plikow przywroc wskazana kopie do `web-app/apps/portal-web/src/features/calendar/index.js`.
+Uwagi:
+- Nie zmieniono danych pracownikow, rekordow czasu pracy, aplikacji mobilnej ani mechanizmu planowania istniejacych zlecen.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-16 17:22:40 +02:00
+Autor: AI Codex
+Temat: Spojne przypisanie zlecenia po przeniesieniu z BUFORU do pracownika
+Dodano:
+- Nic.
+Zmieniono:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` kalendarz traktuje zapisane `workAllocations` lub `workerAllocations` jako kanoniczne zrodlo przypisanej osoby.
+- `serviceBlocks` nadal dostarcza strukture zmiany, date i godziny, ale nie moze juz nadpisac swiezego przypisania pracownika starszym slotem `BUFOR`.
+- W `web-app/apps/portal-web/src/features/orders/index.js` normalizacja blokow zmiany zawsze naklada kanoniczne alokacje zlecenia na zapisane sloty przed odbudowaniem danych pochodnych.
+- Usunieto rozbieznosc, w ktorej lista zlecen pokazywala `Kowalski Jan`, a kalendarz po ponownym odczycie nadal umieszczal to samo zlecenie w BUFORZE.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- `node --check web-app/apps/portal-web/src/features/orders/index.js` zakonczyl sie poprawnie.
+- `node --check web-app/apps/portal-web/src/features/calendar/index.js` zakonczyl sie poprawnie.
+- `npm.cmd run build` zakonczyl sie poprawnie; pozostalo standardowe ostrzezenie Vite o duzych chunkach.
+- `git diff --check` nie wykazal bledow; pozostaly jedynie ostrzezenia CRLF.
+- `http://localhost:5173/` odpowiada HTTP 200.
+- W repozytorium nie znaleziono istniejacego testu jednostkowego obejmujacego ten konkretny przeplyw BUFOR -> pracownik.
+Kopia i cofniecie:
+- Kopia kalendarza sprzed korekty: `.codex-backups/calendar-work-allocation-priority-20260716-163456/calendar-index.js`.
+- Kopia normalizacji zlecen sprzed korekty: `.codex-backups/orders-allocation-overlay-20260716-171212/orders-index.js`.
+- Przy cofaniu nalezy najpierw porownac kopie z aktualnymi plikami, aby nie utracic pozniejszych zmian.
+Uwagi:
+- Nie zmieniono danych pracownikow, czasu pracy, zdarzen START/STOP ani aplikacji mobilnej.
+- Nie wykonano zapisu testowego na danych firmy, commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-16 23:57:29 +02:00
+Autor: AI Codex
+Temat: Przenoszenie zlecen jednorazowych miedzy osoba, dniem i godzina w kalendarzu
+Dodano:
+- W `web-app/apps/portal-web/src/features/calendar/index.js` dodano osobna sciezke drag/drop dla juz przypisanych zlecen jednorazowych.
+- Zlecenie jednorazowe mozna w jednym widoku kalendarza przeniesc do innej osoby, na inny dzien oraz na inna godzine.
+- Podczas przenoszenia zachowywany jest pierwotny czas trwania zlecenia.
+- Przed zapisem wykonywany jest swiezy odczyt zrodla oraz ponowna kontrola typu zlecenia i kolizji.
+Zmieniono:
+- Kalendarz rozroznia teraz przeciaganie z BUFORU od zmiany polozenia juz przypisanego zlecenia jednorazowego.
+- Dla zlecen jednorazowych podglad miejsca upuszczenia pokazuje dokladna osobe, dzien i godziny wynikowe.
+- Upuszczenie jest blokowane, gdy wskazany pracownik ma w tym czasie inne zaplanowane zlecenie.
+- Istniejace przypisania pozostaja nietkniete; przy zleceniu wieloosobowym zmieniane jest tylko przeciagane przypisanie.
+- Zlecenia cykliczne i dzienne wyjatki serii nie sa przeciagalne w tej sciezce.
+- Przy zmianie wpisu z BUFORU na pracownika klucz alokacji jest budowany z identyfikatora pracownika zamiast zachowywac klucz `buffer:*`.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- `node --check web-app/apps/portal-web/src/features/calendar/index.js` zakonczyl sie poprawnie.
+- `git diff --check -- web-app/apps/portal-web/src/features/calendar/index.js` nie wykazal bledow; pozostalo tylko standardowe ostrzezenie CRLF.
+- `npm.cmd run build` zakonczyl sie poprawnie (`vite build`, 375 modulow, 22.02 s).
+- `http://127.0.0.1:5173/` odpowiada HTTP 200.
+- Nie wykonano automatycznego zapisu drag/drop na danych firmy, poniewaz narzedzie sterowania przegladarka nie bylo dostepne w tej sesji.
+Kopia i cofniecie:
+- Kopia stanu sprzed zmiany: `.codex-backups/calendar-oneoff-general-drag-20260716-212142/calendar-index.js`.
+- Kopia `ReadMe.txt` sprzed zmiany znajduje sie w tym samym katalogu kopii.
+- Przy cofaniu nalezy najpierw porownac kopie z aktualnym plikiem, aby nie utracic pozniejszych zmian innych osob.
+Uwagi:
+- Zmiana jest dostepna tylko na localhost i dotyczy wylacznie portalu.
+- Nie zmieniono danych pracownikow, czasu pracy, zdarzen START/STOP ani aplikacji mobilnej.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-17 11:59:10 +02:00
+Autor: AI Codex
+Temat: Blokada recznej edycji wlasnego czasu pracy wedlug numeru Workera
+Dodano:
+- Dodano wspolna polityke dostepu w `web-app/apps/portal-web/src/features/workers/workdayEditAccess.js`.
+- Tozsamosc pracownika jest porownywana wylacznie przez kanoniczny numer Workera (`workerId`, np. `W001`). Login, e-mail, UID i imie sluza jedynie do jednoznacznego odnalezienia numeru Workera zalogowanej osoby.
+- Dodano wyjatek administracyjny dla numeru Workera `W001` (Rafal Dudek), ktory moze edytowac czas pracy kazdej osoby, w tym swoj.
+Zmieniono:
+- W `web-app/apps/portal-web/src/auth/authService.js` sesja portalu jest uzupelniana o kanoniczny `workerId` z rekordu pracownika. Dopasowanie pomocnicze po UID, e-mailu, loginie lub nazwie jest akceptowane tylko wtedy, gdy wskazuje jeden rekord.
+- W `web-app/apps/portal-web/src/features/workers/time-detail/index.js` zablokowano otwarcie i zapis recznej edycji wlasnego dnia pracy dla kazdego Workera poza `W001`.
+- W `web-app/apps/portal-web/src/features/workers/account/index.js` zastosowano taka sama blokade przy otwieraniu i zapisie edytora czasu pracy.
+- Przy probie niedozwolonej edycji portal wyswietla komunikat: `Brak dostepu do edycji wlasnego czasu pracy.`
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Targetowany ESLint dla zmienionych plikow zakonczyl sie poprawnie.
+- Macierz testowa polityki dostepu potwierdzila: zwykly Worker nie edytuje siebie, moze edytowac inna osobe, `W001` moze edytowac wszystkich, a sama nazwa Rafal Dudek bez `W001` nie daje wyjatku.
+- `npm.cmd run build` zakonczyl sie poprawnie (Vite, 376 modulow).
+- Nie wykonywano zapisu testowego na danych firmy.
+Kopia i cofniecie:
+- Kopia stanu sprzed zmiany znajduje sie w `.codex-backups/20260717-105932`.
+- Kopia obejmuje wszystkie istniejace pliki zmienione w ramach tej poprawki oraz `ReadMe.txt`.
+- Przy cofaniu nalezy najpierw porownac kopie z aktualnymi plikami, aby nie utracic pozniejszych zmian innych osob.
+Uwagi:
+- Blokada dotyczy tylko recznych formularzy edycji czasu pracy w portalu.
+- Nie zmieniono aplikacji mobilnej ani automatycznych zapisow START/STOP.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-17 14:11:23 +02:00
+Autor: AI Codex
+Temat: Pakiet produkcyjny portalu - kalendarz, zlecenia i kontrola edycji czasu
+Stan bazowy:
+- Przed przygotowaniem wdrozenia wykonano `git fetch cleanzi01 main --prune`.
+- Lokalny HEAD i `cleanzi01/main` wskazywaly ten sam commit bazowy: `77b64129b626dc76c64e98ae42e04377f327235d`.
+- Wynik porownania `HEAD...cleanzi01/main` wynosil `0 0`; nie bylo nowszych zmian innych osob do scalenia.
+Dodano:
+- Wspolna polityke blokady recznej edycji wlasnego czasu pracy oparta o kanoniczny numer Workera.
+- Pelny wyjatek administracyjny tylko dla Workera `W001` (Rafal Dudek).
+Zmieniono:
+- Ujednolicono obsluge przypisan zlecen miedzy lista, edytorem i kalendarzem, z priorytetem kanonicznych alokacji pracownika.
+- Poprawiono zachowanie BUFOR -> pracownik oraz przenoszenie przypisanych zlecen jednorazowych z zachowaniem istniejacych zlecen i kontroli kolizji.
+- Sesja portalu przenosi kanoniczny `workerId`, a formularze czasu pracy kontroluja uprawnienie przed otwarciem i przed zapisem.
+- Uporzadkowano kod formularza zlecen przez usuniecie nieuzywanych funkcji starego wzorca tygodniowego.
+Usunieto:
+- Nieaktywne funkcje starego interfejsu wzorca tygodniowego, ktore nie byly wywolywane przez aktualny formularz.
+Testy/sprawdzenia:
+- Test polityki Worker ID: 4/4 scenariusze zakonczone poprawnie.
+- `node --check` zakonczyl sie poprawnie dla wszystkich zmienionych plikow JavaScript.
+- Targetowany ESLint dla zmienionych modulow portalu zakonczyl sie bez bledow.
+- `git diff --check` nie wykazal bledow; pozostaly jedynie standardowe ostrzezenia CRLF.
+- `npm.cmd run build` zakonczyl sie poprawnie (Vite 7.3.1, 376 modulow, 26.10 s); pozostalo standardowe ostrzezenie o duzych chunkach.
+- Lokalny portal pod `http://localhost:5173/` odpowiedzial HTTP 200, a zalogowany pulpit zostal otwarty w przegladarce bez zapisu danych.
+Kopia i cofniecie:
+- Pelna kopia stanu roboczego przed przygotowaniem wdrozenia: `C:\Users\rafal\Desktop\app to react\.codex-backups\pre-prod-complete-20260717-122739`.
+- Kopia zawiera `worktree.patch`, status, metadane, `ReadMe.txt` oraz poddrzewo `web-app`.
+- W razie potrzeby cofniecia nalezy wdrozyc poprzedni commit App Hosting, a pliki lokalne odtwarzac dopiero po porownaniu z kopia, aby nie utracic pozniejszych zmian.
+Uwagi:
+- Zmiany dotycza portalu desktopowego. Nie zmieniono aplikacji mobilnej.
+- Nie wykonano operacji na rekordach czasu pracy, zdarzeniach START/STOP ani danych pracownikow podczas testow.
+- Do wdrozenia ma trafic dokladnie commit utworzony z tego sprawdzonego zestawu plikow, bez katalogow kopii i plikow tymczasowych.

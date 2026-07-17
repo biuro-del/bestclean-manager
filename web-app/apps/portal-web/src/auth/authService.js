@@ -122,21 +122,38 @@ function isWorkerActiveValue(value) {
   return !['false', '0', 'no', 'nie'].includes(normalized)
 }
 
+function normalizeWorkerId(value) {
+  const normalized = toText(value).toUpperCase()
+  return /^W\d+$/.test(normalized) ? normalized : ''
+}
+
+function workerIdFromRow(row = {}) {
+  return normalizeWorkerId(row.workerId ?? row.worker_id ?? row.workerid ?? row.id)
+}
+
+function findUniqueWorker(rows, predicate) {
+  const matches = rows.filter(predicate)
+  return matches.length === 1 ? matches[0] : null
+}
+
 function resolveWorkerRowForUser(workerRows, firebaseUser) {
   const rows = Array.isArray(workerRows) ? workerRows : []
+  const authUid = toText(firebaseUser?.uid)
   const email = toText(firebaseUser?.email).toLowerCase()
   const loginFromEmail = emailPrefix(email)
   const displayName = normalizePersonName(firebaseUser?.displayName)
 
-  if (loginFromEmail) {
-    const byLogin = rows.find((row) => toText(row?.login).toLowerCase() === loginFromEmail)
-    if (byLogin) {
-      return byLogin
+  if (authUid) {
+    const byAuthUid = findUniqueWorker(rows, (row) => {
+      return toText(row?.authUid ?? row?.auth_uid) === authUid
+    })
+    if (byAuthUid) {
+      return byAuthUid
     }
   }
 
   if (email) {
-    const byEmail = rows.find((row) => {
+    const byEmail = findUniqueWorker(rows, (row) => {
       const workerEmail = toText(row?.email).toLowerCase()
       const workerLoginEmail = toText(row?.loginEmail).toLowerCase()
       return workerEmail === email || workerLoginEmail === email
@@ -146,8 +163,15 @@ function resolveWorkerRowForUser(workerRows, firebaseUser) {
     }
   }
 
+  if (loginFromEmail) {
+    const byLogin = findUniqueWorker(rows, (row) => toText(row?.login).toLowerCase() === loginFromEmail)
+    if (byLogin) {
+      return byLogin
+    }
+  }
+
   if (displayName) {
-    const byName = rows.find((row) => {
+    const byName = findUniqueWorker(rows, (row) => {
       const workerName = normalizePersonName(row?.workerName ?? row?.fullName ?? row?.name)
       return workerName && workerName === displayName
     })
@@ -162,7 +186,7 @@ function resolveWorkerRowForUser(workerRows, firebaseUser) {
 async function assertWorkerIsActive(orgId, firebaseUser) {
   const normalizedOrgId = toText(orgId)
   if (!normalizedOrgId || !firebaseUser) {
-    return
+    return null
   }
 
   const response = await workersForOrg({ orgId: normalizedOrgId })
@@ -170,12 +194,14 @@ async function assertWorkerIsActive(orgId, firebaseUser) {
   const workerRow = resolveWorkerRowForUser(workerRows, firebaseUser)
 
   if (!workerRow) {
-    return
+    return null
   }
 
   if (!isWorkerActiveValue(workerRow.active)) {
     throw new Error('Konto pracownika jest nieaktywne. Skontaktuj sie z administratorem.')
   }
+
+  return workerRow
 }
 
 function isTrue(value) {
@@ -391,8 +417,10 @@ async function resolveOrganizationContext(userEmail, firebaseUser = null) {
   }
 }
 
-function buildSessionFromFirebase(user, context) {
+function buildSessionFromFirebase(user, context, workerRow = null) {
   localStorage.setItem(LAST_ORG_STORAGE_KEY, context.orgId)
+
+  const workerId = workerIdFromRow(workerRow)
 
   return {
     token: `firebase-${user.uid}`,
@@ -403,6 +431,7 @@ function buildSessionFromFirebase(user, context) {
     orgId: context.orgId,
     orgName: context.orgName,
     source: 'firebase',
+    ...(workerId ? { workerId } : {}),
   }
 }
 
@@ -433,6 +462,7 @@ export function getSession() {
     orgId: session?.orgId ?? null,
     orgName: session?.orgName ?? null,
     source: 'firebase',
+    ...(normalizeWorkerId(session?.workerId) ? { workerId: normalizeWorkerId(session.workerId) } : {}),
   }
 
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(rebuiltSession))
@@ -458,8 +488,8 @@ export async function ensureSessionContext(session) {
   try {
     const orgContext = await resolveOrganizationContext(currentUser.email, currentUser)
     assertPortalAccessAllowed(orgContext)
-    await assertWorkerIsActive(orgContext.orgId, currentUser)
-    const normalizedSession = buildSessionFromFirebase(currentUser, orgContext)
+    const workerRow = await assertWorkerIsActive(orgContext.orgId, currentUser)
+    const normalizedSession = buildSessionFromFirebase(currentUser, orgContext, workerRow)
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(normalizedSession))
     return normalizedSession
   } catch (error) {
@@ -496,8 +526,8 @@ export async function login({ login: loginValue, password }) {
   try {
     const orgContext = await resolveOrganizationContext(credential.user.email ?? normalizedLogin, credential.user)
     assertPortalAccessAllowed(orgContext)
-    await assertWorkerIsActive(orgContext.orgId, credential.user)
-    const session = buildSessionFromFirebase(credential.user, orgContext)
+    const workerRow = await assertWorkerIsActive(orgContext.orgId, credential.user)
+    const session = buildSessionFromFirebase(credential.user, orgContext, workerRow)
     saveSession(session)
     return session
   } catch (error) {

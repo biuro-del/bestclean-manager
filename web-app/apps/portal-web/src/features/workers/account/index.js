@@ -8,6 +8,10 @@ import {
   workTimeEvidenceCsvContent,
   workTimeEvidenceWorkTotal,
 } from '../work_time_evidence_export.js'
+import {
+  OWN_WORKDAY_EDIT_DENIED_MESSAGE,
+  isOwnWorkdayEditBlocked,
+} from '../workdayEditAccess.js'
 
 export const route = 'workerAccount'
 export const viewId = 'view-workerAccount'
@@ -777,6 +781,18 @@ export function createWorkerAccountFeature(ctx) {
     } catch {
       // Local storage can be unavailable in hardened browser profiles.
     }
+  }
+
+  function guardWorkerAccountOwnTimeEdit(worker = resolveCurrentWorker()) {
+    const blocked = isOwnWorkdayEditBlocked({
+      session: appState.session,
+      workers: [appState.workerAccountCurrent, ...(appState.workers ?? [])].filter(Boolean),
+      targetWorker: worker,
+    })
+    if (!blocked) return true
+
+    showTransientNotice(OWN_WORKDAY_EDIT_DENIED_MESSAGE, 'error')
+    return false
   }
 
   function notifyWorkerAccountWorkdayChanged(updatedRows = [], worker = resolveCurrentWorker()) {
@@ -3253,6 +3269,7 @@ export function createWorkerAccountFeature(ctx) {
     if (!canDeleteWorkers()) return
     const worker = resolveCurrentWorker()
     if (!worker) return
+    if (!guardWorkerAccountOwnTimeEdit(worker)) return
     const item = findWorkerAccountTimeRow(dayKey)
     const sourceRows = Array.isArray(item?.sourceRows) ? item.sourceRows : []
     if (!item || !sourceRows.length) {
@@ -3396,6 +3413,7 @@ export function createWorkerAccountFeature(ctx) {
       showTransientNotice('Brak aktywnego dnia pracy do zapisania.', 'error')
       return
     }
+    if (!guardWorkerAccountOwnTimeEdit(worker)) return
     if (typeof updateWorkday !== 'function') {
       showTransientNotice('Brak funkcji zapisu Workday w kontekscie portalu.', 'error')
       return

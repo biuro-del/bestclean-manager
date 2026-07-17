@@ -1,4 +1,8 @@
 import template from './template.html?raw'
+import {
+  OWN_WORKDAY_EDIT_DENIED_MESSAGE,
+  isOwnWorkdayEditBlocked,
+} from '../workdayEditAccess.js'
 
 export const route = 'workerTimeDetail'
 export const viewId = 'view-workerTimeDetail'
@@ -295,6 +299,18 @@ export function createWorkerTimeDetailFeature(ctx) {
       appState.workers.find((worker) => String(worker.workerId ?? '').trim() === login) ??
       null
     )
+  }
+
+  function guardWorkerDetailOwnTimeEdit() {
+    const blocked = isOwnWorkdayEditBlocked({
+      session: appState.session,
+      workers: appState.workers,
+      targetWorker: workerDetailFindSelectedWorker(),
+    })
+    if (!blocked) return true
+
+    alert(OWN_WORKDAY_EDIT_DENIED_MESSAGE)
+    return false
   }
 
   function setWorkerDetailHeadings() {
@@ -801,6 +817,7 @@ export function createWorkerTimeDetailFeature(ctx) {
       alert('Brak uprawnień do edycji (ADMIN/Kierownik).')
       return
     }
+    if (!guardWorkerDetailOwnTimeEdit()) return
 
     ensureWorkerDetailModalLogo()
 
@@ -841,6 +858,7 @@ export function createWorkerTimeDetailFeature(ctx) {
       alert('Brak uprawnień do edycji (ADMIN/Kierownik).')
       return
     }
+    if (!guardWorkerDetailOwnTimeEdit()) return
 
     ensureWorkerDetailModalLogo()
 
@@ -895,6 +913,7 @@ export function createWorkerTimeDetailFeature(ctx) {
     if (!appState.session?.orgId || !appState.selectedWorkerLogin) {
       return
     }
+    if (!guardWorkerDetailOwnTimeEdit()) return
 
     const mode = String(appState.workerDetailDayEditorItem?.mode ?? 'edit').trim()
     const dateValue = String(document.getElementById('wtdDayDateInput')?.value ?? '').trim()
