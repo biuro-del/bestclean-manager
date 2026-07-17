@@ -2344,3 +2344,27 @@ Uwagi:
 - Zmiany dotycza portalu desktopowego. Nie zmieniono aplikacji mobilnej.
 - Nie wykonano operacji na rekordach czasu pracy, zdarzeniach START/STOP ani danych pracownikow podczas testow.
 - Do wdrozenia ma trafic dokladnie commit utworzony z tego sprawdzonego zestawu plikow, bez katalogow kopii i plikow tymczasowych.
+
+Data: 2026-07-17 15:08:43 +02:00
+Autor: AI Codex
+Temat: Wynik wdrozenia produkcyjnego portalu i punkt przywracania
+Wdrozenie:
+- Na produkcje wdrozono dokladnie przetestowany commit `d7968f82caaba1661fe8e96d73aa3fdf614e6e16` (`portal: harden calendar scheduling and worktime access`).
+- Bezposrednio przed wdrozeniem i po nim sprawdzono `cleanzi01/main`; nie bylo nowszego commita do scalenia, a lokalny HEAD byl zgodny ze zdalnym `main`.
+- App Hosting backend: `cleanzi-01`, projekt Firebase: `iclean-room`, region: `europe-west4`.
+- Backend zakonczyl uzgadnianie: `reconciling: false`; czas aktualizacji: `2026-07-17T12:34:47.864071Z`.
+- Adresy produkcyjne: `https://portal.cleanzi.pl/` oraz `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`.
+Testy/sprawdzenia produkcji:
+- Oba adresy odpowiedzialy HTTP 200 i wskazaly ten sam zestaw zasobow produkcyjnych: `portal-DbOO2JJe.js` oraz `portal-Bzrdeytm.css`.
+- Produkcyjny bundle laduje modul `workdayEditAccess-DuYL73Op.js` zgodny z lokalnym, przetestowanym buildem.
+- Potwierdzono w bundle polityke oparta na kanonicznym `workerId`, wyjatek dla Workera `W001` i komunikat blokady edycji wlasnego czasu.
+- W przegladarce wykonano test produkcyjny tylko do odczytu: portal otworzyl zalogowany pulpit Rafala Dudka i aktualne dane bez bledu inicjalizacji.
+- Nie klikano operacji zapisujacych i nie modyfikowano danych firmy podczas testu produkcyjnego.
+Kopia i cofniecie:
+- Commit poprzedniej wersji do ponownego wdrozenia w razie regresji: `77b64129b626dc76c64e98ae42e04377f327235d`.
+- Pelna kopia stanu sprzed przygotowania wdrozenia: `C:\Users\rafal\Desktop\app to react\.codex-backups\pre-prod-complete-20260717-122739`.
+- Przywracanie zaczac od ponownego wdrozenia poprzedniego commita App Hosting; lokalne pliki odtwarzac dopiero po porownaniu z kopia.
+Uwagi:
+- Wdrozenie dotyczy wylacznie portalu desktopowego; aplikacja mobilna nie zostala zmieniona.
+- Nie zmieniono rekordow czasu pracy, zdarzen START/STOP ani danych pracownikow.
+- Katalogi kopii, pliki tymczasowe i raporty lokalne pozostaly poza commitem i wdrozeniem.
