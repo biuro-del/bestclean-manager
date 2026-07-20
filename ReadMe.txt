@@ -1,5 +1,5 @@
-Cleanzi 01 v2.5 - dokument techniczny dla programistów i AI
-=============================================================
+Cleanzi version 4.0 - dokument techniczny dla programistów i AI
+===============================================================
 
 Data utworzenia dokumentu: 2026-06-24
 Projekt: Cleanzi / Best Clean Portal
@@ -48,6 +48,26 @@ Najważniejsze komendy z katalogu głównego projektu:
 6. Build bezpośrednio w `web-app`:
    `npm --prefix web-app run build`
 
+7. Testy backendu, polityk i repozytoriów:
+   `npm test`
+
+8. Migracja i kontrola schematu pracowników/platformy:
+   `npm run migrate:workers`
+   `npm run migrate:workers -- --audit`
+
+9. Administracja kontami PLATFORM_OWNER:
+   `npm run platform-admin -- list`
+   `npm run platform-admin -- enable --email adres@example.com --name "Nazwa"`
+   `npm run platform-admin -- disable --email adres@example.com`
+
+10. Regeneracja SDK Data Connect po zmianie schema/queries/mutations:
+    `firebase dataconnect:sdk:generate`
+
+Lokalny backend używa Google Application Default Credentials (ADC), aby pobrać sekrety i połączyć się z usługami Google Cloud. Przed pierwszym uruchomieniem albo po wygaśnięciu sesji wykonaj na Windows:
+`gcloud.cmd auth application-default login`
+
+Jeżeli portal zgłasza `invalid_grant`, `invalid_rapt` albo komunikat `Lokalna sesja Google Cloud wygasla`, ponów powyższe logowanie i zrestartuj `npm run dev`. Jest to sesja lokalnego programisty; App Hosting używa konta serwisowego runtime.
+
 Uwaga: zmiana dokumentacji nie wymaga builda. Przy zmianach w JS/React/API minimum sprawdź `node --check index.js`, `node --check build-webapp.js`, lint lub build frontendu, zależnie od zakresu zmiany.
 
 
@@ -57,13 +77,31 @@ Główne katalogi i pliki
 Główny backend Node.js. To nie jest Express, tylko ręczny serwer HTTP oparty o `http.createServer`. Obsługuje statyczny frontend z `web-app/dist`, endpointy API, proxy do wdrożonego hostingu/API oraz lokalne tryby pracy z Cloud SQL/Firebase Admin.
 
 `package.json`
-Skrypty główne projektu. `npm run dev` uruchamia `scripts/dev-local.js`, a `npm run build` uruchamia `build-webapp.js`.
+Skrypty główne projektu. `npm run dev` uruchamia `scripts/dev.js`, a `npm run build` uruchamia `build-webapp.js`. Dostępne są również `npm test`, `npm run migrate:workers`, `npm run migrate:platform` i `npm run platform-admin`.
 
 `build-webapp.js`
 Wrapper buildu portalu. Normalizuje target do `portal`, sprawdza zależności `web-app` i uruchamia `npm run build:portal`.
 
+`scripts/dev.js`
+Punkt wejścia lokalnego developmentu. Jeśli konfiguracja bazy nie jest podana jawnie, używa ADC do pobrania `PORTAL_DB_USER` i `PORTAL_DB_PASS` z Secret Manager, ustawia bezpośredni tryb Cloud SQL i uruchamia `scripts/dev-local.js`.
+
 `scripts/dev-local.js`
-Lokalny orchestrator developerski. Uruchamia backend na porcie z `.env.local` albo `8080` oraz frontend Vite na `127.0.0.1:5173`. Sprawdza konflikt portu, konfigurację Firebase Admin, lokalną bazę i TLS.
+Lokalny orchestrator developerski. Uruchamia backend na porcie `8080` oraz frontend Vite na `localhost:5173`, sprawdza konflikty portów, Firebase Admin, bazę, healthcheck i TLS. Backend nie ma watchera; po zmianie plików backendowych trzeba zrestartować cały `npm run dev`.
+
+`worker-repository.js`, `worker-id-policy.js`, `auth-session-policy.js`
+Bezpośredni model Cloud SQL pracowników, transakcje rezerwacji ID, polityka ról i ocena dostępu do organizacji.
+
+`platform-api.js`, `platform-repository.js`, `platform-policy.js`, `platform-request-context.js`
+Backend kont `PLATFORM_OWNER`: wybór organizacji, kontekst dostępu, allowlista operacji, prywatny audyt i gateway Data Connect.
+
+`platform-email-mfa.js`
+Opcjonalny aplikacyjny kod email dla kont platformowych. Wymaga sekretu, serwerowej allowlisty adresów i konfiguracji SMTP; nie jest natywnym drugim składnikiem Firebase.
+
+`scripts/migrate-worker-model.js`
+Idempotentnie uruchamia migracje pracowników, ról i tabel platformowych oraz może wykonać audyt schematu przez `--audit`.
+
+`scripts/platform-admin.js`
+Niejawny skrypt provisioningowy `PLATFORM_OWNER`; nie istnieje publiczny endpoint do samodzielnego nadawania tej roli.
 
 `web-app/`
 Aplikacja frontendowa React + Vite.
@@ -110,17 +148,24 @@ Najważniejsze endpointy:
 - `/api/portal/tasks` - zadania portalu, lokalnie lub proxy.
 - `/api/portal/schedule-orders` - zlecenia/grafik, lokalnie lub proxy.
 - `/api/portal/events` - zdarzenia portalu, lokalnie lub proxy.
-- `/api/auth/provision-worker` - tworzenie konta Firebase Auth dla pracownika.
-- `/api/auth/rollback-worker` - rollback tworzenia konta pracownika.
-- `/api/admin/worker-password/reveal` - podgląd zaszyfrowanego hasła pracownika dla admina.
-- `/api/admin/worker-password/set` - zapis/reset hasła pracownika.
+- `GET /api/admin/worker-id/next?orgId=...` - niewiążący podgląd następnego ID pracownika.
+- `POST /api/admin/users` - jedyna aktywna ścieżka tworzenia pracownika, konta Firebase Auth, członkostwa i rezerwacji ID.
+- `/api/auth/provision-worker` - endpoint wycofany; zwraca `410 WORKER_PROVISION_ENDPOINT_REMOVED`.
+- `/api/admin/worker-password/reveal` - endpoint wycofany; zwraca `410 WORKER_PASSWORD_REVEAL_REMOVED`.
+- `/api/admin/worker-password/set` - resetuje hasło wyłącznie w Firebase Auth; hasło nie jest zapisywane w SQL.
 - `/api/admin/worker-profile/update` - aktualizacja profilu pracownika.
 - `/api/admin/worker-profile/delete` - usuwanie profilu pracownika.
-- `/api/auth/session-context` - kontekst sesji i organizacji.
-- `/api/admin/users` - administracyjne operacje/lista użytkowników.
+- `/api/admin/workers/restore` - transakcyjne odtwarzanie pracowników z backupu.
+- `/api/auth/session-context` - kontekst sesji, organizacji, subskrypcji i konta platformowego.
+- `GET /api/platform/organizations` - lista i filtrowanie organizacji dla PLATFORM_OWNER.
+- `POST /api/platform/access-context` i `/api/platform/access-context/close` - otwarcie/zamknięcie audytowanego wejścia do organizacji.
+- `POST /api/platform/data-connect` - allowlistowany gateway danych wybranej organizacji.
+- `GET /api/platform/audit` - prywatny audyt administratorów platformy.
+- `/api/platform/organizations/:orgId` oraz akcje `subscription`, `owner`, `soft-delete`, `restore` - zarządzanie organizacją.
+- `/api/platform/mfa/email/request` i `/api/platform/mfa/email/verify` - opcjonalna aplikacyjna weryfikacja kodem email.
 - `/api/**` - fallback proxy do zdalnego API.
 
-Są też legacy aliasy dla części funkcji, np. `/authProvisionWorker`, `/authRollbackWorker`, `/adminWorkerPasswordReveal`, `/adminWorkerPasswordSet`, `/adminWorkerProfileUpdate`, `/adminWorkerProfileDelete`.
+Są też legacy aliasy dla części funkcji. Alias provisioningowy i podgląd hasła pozostają wyłącznie po to, aby stare klienty otrzymały jednoznaczną odpowiedź `410`.
 
 Ważne zmienne backendu:
 - `PORT` - port backendu, domyślnie `8080`.
@@ -132,8 +177,9 @@ Ważne zmienne backendu:
 - `ADMIN_USERS_MODE` - tryb `/api/admin/users`.
 - `PORTAL_DB_ROUTES_MODE`, `PORTAL_TASKS_MODE`, `PORTAL_SCHEDULE_ORDERS_MODE`, `PORTAL_EVENTS_MODE` - tryby lokalne/proxy dla tras portalu.
 - `WORKER_PROFILE_MODE` - local/direct/proxy/remote dla profilu pracownika.
-- `WORKER_PROFILE_STORAGE_MODE` - np. `db` albo `dataconnect` dla części operacji worker profile.
-- `WORKER_PASSWORD_SECRET` - sekret szyfrowania haseł pracowników. Nie zmieniać bez planu migracji, bo stare hasła mogą przestać być czytelne.
+- `WORKER_PROFILE_STORAGE_MODE` - operacje CRUD pracowników zawsze używają Cloud SQL (`database`).
+- `CLOUD_SQL_CONNECTION_NAME`, `DB_NAME`, `DB_USER`, `DB_PASS` - połączenie z Cloud SQL; lokalnie `scripts/dev.js` może pobrać użytkownika i hasło z Secret Manager przez ADC.
+- `PLATFORM_EMAIL_MFA_SECRET` oraz `PLATFORM_EMAIL_MFA_*` - opcjonalna konfiguracja kodu email/SMTP dla administratorów platformy.
 
 Backend ma własne helpery do:
 - nagłówków security/CSP,
@@ -141,9 +187,13 @@ Backend ma własne helpery do:
 - normalizacji błędów,
 - łączenia z Cloud SQL,
 - Firebase Admin/Auth,
-- szyfrowania/decryptowania haseł pracowników,
+- transakcyjnego CRUD pracowników i kompensacji zmian Firebase Auth,
+- rezerwacji ID i technicznych loginów pracowników,
+- polityk ról organizacyjnych i platformowych,
 - Data Connect REST/GraphQL,
 - lokalnych plików `.local-data`.
+
+Tabela `worker_credential`, kod szyfrowania haseł i `WORKER_PASSWORD_SECRET` zostały wycofane. W repozytorium może występować tylko migracja `DROP TABLE IF EXISTS`; hasła są obsługiwane wyłącznie przez Firebase Auth.
 
 
 Frontend portalowy
@@ -164,8 +214,10 @@ Główne wejścia:
 Stan i helpery:
 - `web-app/apps/portal-web/src/app/state/index.js` - globalny stan aplikacji `appState`, reset sesji i dashboardu.
 - `web-app/apps/portal-web/src/app/shared/index.js` - wspólne helpery: daty, formatowanie, paginacja, selecty, HTML escaping.
-- `web-app/apps/portal-web/src/auth/authService.js` - logowanie, sesja, role, kontekst organizacji, bootstrap membership.
+- `web-app/apps/portal-web/src/auth/authService.js` - logowanie emailem, reset hasła Firebase, TOTP/SMS MFA, opcjonalny kod email, sesja i wybór organizacji.
 - `web-app/apps/portal-web/src/firebase/firebaseClient.js` - klient Firebase/Data Connect i gotowość auth.
+- `web-app/apps/portal-web/src/services/platformDataConnectService.js` - przekierowuje operacje PLATFORM_OWNER do backendowego gatewaya i przekazuje nagłówki kontekstu platformowego.
+- `web-app/apps/portal-web/src/ui/subscriptionBadge.js` - prezentuje pakiet wybranej organizacji i pozostały okres subskrypcji/Trial.
 
 Zasada modułów frontendu:
 - Feature zwykle ma `index.js` z `route`, `viewId` i funkcją `create...Feature(ctx)`.
@@ -242,7 +294,7 @@ Strefy/obiekty klientów.
 Audyty obiektów.
 
 `features/workers/worker_list_profile`
-Lista i profil pracowników, tworzenie/edycja, status online, eksporty ewidencji.
+Lista i profil pracowników, tworzenie/edycja, osobne pola roli oraz typu pracownika, status online i eksporty ewidencji. Formularz pokazuje `Email (login)`; techniczny login nie jest prezentowany użytkownikowi.
 
 `features/workers/account`
 Konto pracownika.
@@ -273,7 +325,7 @@ Serwisy w `web-app/apps/portal-web/src/services/` izolują komunikację z Data C
 Najważniejsze serwisy:
 - `clientService.js` - klienci.
 - `individualOrderService.js` - zlecenia indywidualne.
-- `workerService.js` - pracownicy, konta, hasła, profile.
+- `workerService.js` - pracownicy, konta, profile i reset hasła w Firebase Auth; bez sejfu i podglądu hasła.
 - `workdayService.js` - workdays, eventy, aktywni pracownicy, podsumowania.
 - `zoneService.js` - strefy/obiekty.
 - `scheduleService.js` - board grafiku.
@@ -282,6 +334,7 @@ Najważniejsze serwisy:
 - `backupService.js` - backup/restore/download/automatyzacja.
 - `styleService.js` - style UI organizacji i użytkowników.
 - `orgService.js` - organizacje.
+- `platformDataConnectService.js` - bezpośrednia komunikacja sesji PLATFORM_OWNER z backendowym gatewayem; bez fallbacku do klientowego Data Connect.
 
 Zasada: jeśli kilka feature potrzebuje tej samej operacji danych, dodaj/zmień serwis zamiast kopiować fetch/logikę w widokach.
 
@@ -304,8 +357,9 @@ Wygenerowany SDK:
 
 Główne encje w schemacie:
 - `Organization`, `OrganizationMember`
+- `OrganizationSubscription`
 - `OrgUiStyle`, `UserUiStylePreference`
-- `Worker`, `WorkerCredential`
+- `Worker`, `WorkerIdReservation`
 - `Client`, `ClientInd`, `IndividualClientJob`
 - `Zone`
 - `Storage`, `ClientStorage`
@@ -320,6 +374,53 @@ Większość danych jest zakresowana przez `orgId`. Przy nowych zapytaniach i mu
 
 Ważna zasada Data Connect:
 Nie edytuj ręcznie `dataconnect-generated`. Zmień `schema.gql`, `queries.gql` albo `mutations.gql`, a potem wygeneruj SDK.
+
+CRUD pracowników:
+- lista pozostaje pobierana przez `WorkersForOrg`,
+- podgląd ID, dodawanie, edycja, reset hasła, usuwanie i restore są wykonywane przez backend oraz bezpośrednie transakcje Cloud SQL,
+- brak konfiguracji/gotowości schematu zwraca `503 WORKER_SCHEMA_NOT_READY`; backend nie przełącza automatycznie CRUD pracowników na brakujące operacje Data Connect,
+- brak historycznych/opcjonalnych tabel, np. `worker_credential` albo `checklist_log`, nie może przerwać usuwania ani zmiany loginu.
+
+Migracje uruchamiane przez `scripts/migrate-worker-model.js`:
+- `20260716_worker_id_reservations_and_remove_credentials.sql`,
+- `20260717_worker_roles_and_types.sql`,
+- `20260717_platform_owner.sql`,
+- `20260717_platform_email_mfa.sql`.
+
+
+Pracownicy: ID, email, role i typy
+---------------------------------
+- Nowe ID ma format `worker_<orgId>_<numer>`, np. `worker_orgA_17`.
+- `worker_id_reservation` trwale rezerwuje numer. Usunięcie pracownika nie zwalnia numeru; następny zapis używa kolejnego.
+- Ręczną dodatnią końcówkę ID mogą wskazać tylko `ADMIN`, `OWNER` i `PLATFORM_OWNER`. Backend zawsze konstruuje finalne ID.
+- Techniczny login nowego pracownika ma format `u_<orgId>_<numer>` zapisany małymi literami, np. `u_orga_17`. Login jest wewnętrzny, niewidoczny i niemodyfikowalny.
+- Użytkownik wpisuje dowolny poprawny, globalnie unikalny email. Ten sam email trafia do `worker.email`, `worker.login_email` i Firebase Auth i służy do logowania.
+- Istniejące historyczne ID i loginy nie są automatycznie zmieniane.
+
+Role/uprawnienia:
+- `OWNER` - założyciel/właściciel organizacji wskazany przez `owner_uid` i `owner_worker_id`; pełne uprawnienia, roli nie można przydzielić zwykłym formularzem.
+- `ADMIN` - pełna administracja organizacją. Historyczne `ADMINISTRATOR` i `SUPERADMIN` są normalizowane do `ADMIN` tam, gdzie wymaga tego UI/polityka.
+- `MANAGER` - może oglądać, dodawać i edytować, ale nie może usuwać. Historyczny `KIEROWNIK` jest aliasem `MANAGER`.
+- `COORDINATOR` - dostęp do portalu tylko do odczytu. Historyczny `KOORDYNATOR`/`MEMBER` jest aliasem.
+- `WORKER` - domyślna rola nowego pracownika; dostęp tylko do aplikacji mobilnej, bez dostępu do portalu.
+- Usuwanie pracownika jest dozwolone dokładnie dla `ADMIN`, `OWNER` i backendowej roli `PLATFORM_OWNER`; nadal nie wolno usunąć własnego konta organizacyjnego.
+
+Typ pracownika jest informacją do prezentacji i filtrowania, a nie źródłem uprawnień. Dostępne wartości UI: `Administrator`, `Pracownik Biurowy`, `Stały personel na obiekcie`, `Zespół Mobilny`.
+
+
+Konto PLATFORM_OWNER
+--------------------
+- `PLATFORM_OWNER` jest rolą ponad organizacjami. Konto nie istnieje w `worker` ani `organization_member` i nie jest Ownerem żadnej organizacji.
+- Dostęp wymaga zweryfikowanego emaila Firebase, claimu `platformRole: PLATFORM_OWNER`, aktywnego rekordu `platform_admin` oraz MFA.
+- Po logowaniu użytkownik trafia do Centrum platformy, wybiera organizację i obowiązkowo podaje powód wejścia. Aktywny kontekst jest przesyłany jako `X-Platform-Context-Id`.
+- Dane wybranej organizacji przechodzą przez backendowy allowlistowany gateway `/api/platform/data-connect`; sesja platformowa nie używa klientowego fallbacku Data Connect.
+- Operacje Data Connect zawierają jawne `auth.uid`. Gateway wykorzystuje aktywnego członka organizacji wyłącznie jako kontekst obliczenia tych wyrażeń; rzeczywistym aktorem pozostaje administrator platformy zapisany w prywatnym audycie.
+- Pola tenantowe typu `editedBy`, `updatedBy` i `createdByUid` zachowują poprzednie wartości albo `NULL`; UID/email administratora platformy nie są wpisywane do danych organizacji.
+- Mutacje mają audyt append-only `REQUESTED/SUCCEEDED/FAILED`. Nieudany zapis fazy `REQUESTED` blokuje mutację.
+- Usuwanie, zmiana Ownera, subskrypcji, soft-delete i restore wymagają świeżego uwierzytelnienia MFA.
+- Tabele SQL: `platform_admin`, `platform_access_context`, `platform_admin_audit_log`, opcjonalnie `platform_email_mfa_challenge` i `platform_email_mfa_session`.
+
+Natywne MFA Firebase w tej aplikacji to TOTP lub SMS. TOTP jest podstawową sprawdzoną metodą. Kod email jest osobnym mechanizmem aplikacyjnym i wymaga skonfigurowanego SMTP; nie zastępuje natywnego wyzwania Firebase na koncie, które ma już zapisany TOTP.
 
 
 Konfiguracja i sekrety
@@ -337,6 +438,13 @@ Przykłady konfiguracji są w:
 
 Produkcja/App Hosting:
 - `apphosting.yaml` ustawia m.in. `NODE_ENV=production`, `APP_TARGET=portal`, Cloud SQL i sekrety DB.
+- Produkcja powinna używać konta serwisowego runtime. Nie należy kopiować lokalnego pliku ADC ani uruchamiać `gcloud auth application-default login` na serwerze.
+
+Lokalne Google Cloud/ADC:
+- poświadczenia użytkownika są zapisywane poza repozytorium, standardowo w `%APPDATA%\gcloud\application_default_credentials.json`,
+- `gcloud auth login` i `gcloud auth application-default login` to różne sesje; biblioteki backendu korzystają z ADC,
+- po odświeżeniu ADC zrestartuj `npm run dev`, ponieważ backend nie przeładowuje poświadczeń automatycznie,
+- częste `invalid_rapt` może wynikać z polityki reautoryzacji/MFA konta Google, zmiany hasła albo cofnięcia refresh tokenu.
 
 Firebase Hosting:
 - `firebase.json` hostuje `web-app/dist` i ma rewrites do funkcji/API.
@@ -357,7 +465,7 @@ Podczas zmian:
 - nie przenoś dużej logiki bez potrzeby,
 - nie mieszaj refaktoru z poprawką biznesową,
 - nie usuwaj fallbacków/proxy bez sprawdzenia trybów lokalnych i produkcyjnych,
-- przy zmianach w uprawnieniach sprawdź role: `ADMIN`, `MANAGER`, `COORDINATOR`, `WORKER`.
+- przy zmianach w uprawnieniach sprawdź role: `PLATFORM_OWNER`, `OWNER`, `ADMIN`, `MANAGER`, `COORDINATOR`, `WORKER`; nie mieszaj roli z typem pracownika.
 
 Po zmianach:
 - uruchom adekwatne sprawdzenia,
@@ -407,6 +515,46 @@ Uwagi dla następnej osoby:
 
 Historia zmian dokumentacji i projektu
 --------------------------------------
+Data: 2026-07-20
+Autor: AI Codex
+Dodano:
+- Dodano bezpośredni model Cloud SQL pracowników z tabelą trwałych rezerwacji `worker_id_reservation`, formatem ID `worker_<orgId>_<numer>` oraz technicznym loginem `u_<orgId>_<numer>`.
+- Dodano rozdzielenie roli/uprawnień od informacyjnego typu pracownika oraz kanoniczne role `OWNER`, `ADMIN`, `MANAGER`, `COORDINATOR`, `WORKER`.
+- Dodano logowanie pracownika dowolnym poprawnym emailem; email jest globalnie unikalny w Firebase Auth, a login techniczny pozostaje niewidoczny i niemodyfikowalny.
+- Dodano reset zapomnianego hasła na ekranie logowania przez `sendPasswordResetEmail` Firebase oraz poprawne polskie komunikaty.
+- Dodano rolę `PLATFORM_OWNER`, Centrum platformy, wybór organizacji z wymaganym powodem, tabele administratorów/kontekstów/audytu, provisioning CLI, soft-delete/restore, zarządzanie Ownerem i subskrypcją.
+- Dodano natywne logowanie MFA TOTP/SMS dla administratora platformy oraz opcjonalną infrastrukturę jednorazowego kodu email z HMAC, limitami prób, allowlistą odbiorców i SMTP.
+- Dodano backendowy allowlistowany gateway Data Connect dla sesji platformowej i prywatny audyt faz `REQUESTED/SUCCEEDED/FAILED`.
+- Dodano chip pakietu/subskrypcji aktywnej organizacji w nagłówku portalu.
+- Dodano migracje `20260716_worker_id_reservations_and_remove_credentials.sql`, `20260717_worker_roles_and_types.sql`, `20260717_platform_owner.sql` i `20260717_platform_email_mfa.sql`.
+Zmieniono:
+- CRUD pracowników, reset hasła i restore przeniesiono na backend oraz bezpośrednie transakcje Cloud SQL; lista pracowników nadal używa `WorkersForOrg`.
+- Tworzenie pracownika rezerwuje ID pod blokadą organizacji, tworzy Firebase Auth i kompensuje konto Auth po błędzie SQL. Edycja zachowuje `worker_id` i login techniczny oraz cofa zmianę Firebase po błędzie bazy.
+- Usuwanie pracownika zachowuje rezerwację numeru, pomija nieistniejące tabele historyczne i jest dostępne tylko dla `ADMIN`, `OWNER` oraz backendowego `PLATFORM_OWNER`; pozostaje blokada usunięcia własnego konta.
+- Formularze pracownika pokazują `Email (login)`, osobną rolę i osobny typ. Lista pracowników ma osobne kolumny `Rola` i `Typ pracownika`, a eksporty nie pokazują loginu technicznego.
+- Sesja portalu rozpoznaje `PLATFORM_OWNER` przed członkostwem organizacyjnym i wymaga zweryfikowanego emaila, claimu, aktywnego rekordu SQL oraz MFA.
+- Gateway platformowy wykonuje operacje Data Connect z istniejącym aktywnym członkiem organizacji jako technicznym kontekstem `auth.uid`; usuwa to błąd `Failed to compute String_Expr` bez dodawania konta platformowego do tenantów.
+- Poprawiono wygląd ekranu MFA: ukrywanie przycisku SMS przy wybranym TOTP oraz styl listy drugiego składnika zgodny z pozostałymi polami logowania.
+- Lokalny `npm run dev` uruchamia `scripts/dev.js`, który pobiera dane Cloud SQL z Secret Manager przez ADC i uruchamia bezpośredni backend oraz Vite.
+- Rozszerzono główną część `ReadMe.txt` o aktualne endpointy, pliki, migracje, zasady ról, PLATFORM_OWNER, MFA i rozwiązywanie problemów z ADC; cały plik znormalizowano do poprawnego UTF-8 (naprawiono jeden historyczny bajt Windows-1250).
+Usunięto:
+- Usunięto aktywny model/tabelę `worker_credential`, sejf haseł, szyfrowanie haseł, konfigurację `WORKER_PASSWORD_SECRET` oraz podgląd/kopiowanie przypisanego hasła w UI.
+- Wyłączono `/api/auth/provision-worker` i `/api/admin/worker-password/reveal`; stare klienty otrzymują odpowiednio jednoznaczne odpowiedzi `410`.
+- Usunięto wymóg tworzenia emaila pracownika z loginu i domeny konta administratora.
+Testy/sprawdzenia:
+- Migracje pracowników i platformy wykonano poprawnie na Cloud SQL; readiness `worker-schema` oraz `platform-schema` zwraca `ready`.
+- Uruchomiono `npm test`: 49/49 testów zakończonych sukcesem po dodaniu testów gatewaya platformowego.
+- Uruchomiono `node --check` dla zmienionych plików backendowych oraz produkcyjny `npm run build`; build Vite zakończył się sukcesem ze standardowym ostrzeżeniem o dużych chunkach.
+- Wykonano rzeczywisty test gatewaya Data Connect po poprawce `String_Expr`; `WorkersForOrg` zwróciło 82 rekordy.
+- Zweryfikowano lokalny backend i portal: `/healthz` oraz `http://localhost:5173` zwróciły HTTP 200.
+- 2026-07-20 odświeżono ADC przez `gcloud.cmd auth application-default login`, zrestartowano `npm run dev` i potwierdzono odczyt sekretów, połączenie Cloud SQL oraz gotowość obu schematów.
+Uwagi dla następnej osoby:
+- Te zmiany są w lokalnym, niezacommitowanym stanie repozytorium; ten wpis nie oznacza automatycznego wdrożenia online.
+- TOTP działa i jest podstawową metodą MFA. SMS wymaga włączonego dostawcy w Identity Platform. Kod email jest mechanizmem aplikacyjnym, wymaga konfiguracji SMTP i nie jest natywnym zamiennikiem TOTP po rozpoczęciu wyzwania Firebase.
+- Konto PLATFORM_OWNER nie może zostać dodane do `worker` ani `organization_member`. Rzeczywista tożsamość administratora ma trafiać tylko do prywatnego audytu platformy, nigdy do pól autora danych organizacji.
+- Po zmianach backendu zawsze restartuj cały `npm run dev`; Vite ma HMR, ale `index.js` i moduły backendowe nie mają watchera.
+- Po wygaśnięciu lokalnych poświadczeń wykonaj `gcloud.cmd auth application-default login` i ponownie uruchom `npm run dev`; nie przenoś lokalnego pliku ADC do App Hosting.
+
 Data: 2026-06-29
 Autor: AI Codex
 Dodano:
@@ -674,7 +822,6 @@ Zmieniono:
 - W `index.js` zapis profilu pracownika przez Data Connect używa kanonicznego loginu odczytanego z bazy, a nie wielkości liter z formularza. Naprawia to przypadek, w którym formularz pokazywał `Orzol`, a zapis powinien trafić w rekord loginu z bazy.
 - W `index.js` zwykła zmiana typu pracownika używa mutacji `UpdateWorkerForOrg`, a nie ścieżki `UpdateWorkerProfileForOrg` z aktualizacją `organizationMember`, jeśli nie synchronizujemy roli konta administracyjnego.
 - W `web-app/apps/portal-web/src/services/workerService.js` uaktualniono komunikat `FIREBASE_TLS_CERT_ERROR`, żeby odpowiadał aktualnemu zachowaniu `dev-local.js`.
-- W `scripts/dev-local.js` usunięto mylące ostrzeżenie o braku lokalnej DB, gdy worker-profile działa w trybie Data Connect.
 Usunięto:
 - Usunięto tymczasowy log diagnostyczny z zapisu pracownika po potwierdzeniu przyczyny błędu.
 Testy/sprawdzenia:
