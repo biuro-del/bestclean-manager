@@ -194,14 +194,6 @@ export function createOrdersFeature(ctx) {
     return calendarNormalizeTimeValue(value) || fallback
   }
   
-  function ordersTimelineOrderStartTimestamp(order = {}) {
-    const day = ordersNormalizeDateField(order?.dateYmd ?? order?.dateFrom ?? order?.startDate, '')
-    const time = ordersNormalizeTimeField(order?.startTime ?? order?.time, '00:00')
-    const iso = localDateAndTimeInputToIso(day, time)
-    const timestamp = iso ? new Date(iso).getTime() : NaN
-    return Number.isFinite(timestamp) ? timestamp : null
-  }
-
   function ordersCurrentUserCanDeleteHistoricalOrders() {
     const role = appState.session?.role
     if (typeof roleLevel === 'function' && roleLevel(role) >= 3) {
@@ -215,14 +207,7 @@ export function createOrdersFeature(ctx) {
     if (!order || order.isDraft) {
       return false
     }
-    if (ordersCurrentUserCanDeleteHistoricalOrders()) {
-      return true
-    }
-    if (order.completed) {
-      return false
-    }
-    const startTs = ordersTimelineOrderStartTimestamp(order)
-    return Number.isFinite(startTs) && startTs > Date.now()
+    return ordersCurrentUserCanDeleteHistoricalOrders()
   }
   
   function ordersTimelineOrderDeleteLabel(order = {}) {
@@ -4463,8 +4448,8 @@ export function createOrdersFeature(ctx) {
   }
   
   function ordersClientAddressMemoryKey() {
-    const orgId = String(appState.session?.orgId ?? 'default').trim() || 'default'
-    return `${ORDERS_CLIENT_ADDRESS_MEMORY_PREFIX}:${orgId}`
+    const orgId = String(appState.session?.activeOrgId ?? appState.session?.orgId ?? '').trim()
+    return orgId ? `${ORDERS_CLIENT_ADDRESS_MEMORY_PREFIX}:${orgId}` : ''
   }
   
   function ordersClientAddressMemoryIdentity(client = {}) {
@@ -4473,7 +4458,11 @@ export function createOrdersFeature(ctx) {
   
   function ordersReadClientAddressMemory() {
     try {
-      const raw = window.localStorage?.getItem(ordersClientAddressMemoryKey()) || '{}'
+      const storageKey = ordersClientAddressMemoryKey()
+      if (!storageKey) {
+        return {}
+      }
+      const raw = window.localStorage?.getItem(storageKey) || '{}'
       const parsed = JSON.parse(raw)
       return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
     } catch {
@@ -4483,7 +4472,11 @@ export function createOrdersFeature(ctx) {
   
   function ordersWriteClientAddressMemory(memory = {}) {
     try {
-      window.localStorage?.setItem(ordersClientAddressMemoryKey(), JSON.stringify(memory))
+      const storageKey = ordersClientAddressMemoryKey()
+      if (!storageKey) {
+        return
+      }
+      window.localStorage?.setItem(storageKey, JSON.stringify(memory))
     } catch {
       // Local address memory is a convenience only; order save still works without it.
     }

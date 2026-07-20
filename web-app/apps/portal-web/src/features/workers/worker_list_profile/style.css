@@ -537,7 +537,7 @@
 
 #portalRoot #view-workerProfile .workers-head,
 #portalRoot #view-workerProfile .workers-row{
-  grid-template-columns:24px minmax(150px, 240px) minmax(145px, 220px) minmax(72px, 150px) 62px 62px minmax(24px, 1fr) 112px !important;
+  grid-template-columns:24px minmax(145px, 1.35fr) minmax(135px, 1.2fr) minmax(110px, .9fr) minmax(72px, .8fr) 62px 62px minmax(16px, .3fr) 112px !important;
   gap:9px !important;
   width:100% !important;
   min-width:100% !important;
@@ -606,13 +606,13 @@
   white-space:nowrap !important;
 }
 
-#portalRoot #view-workerProfile :is(.workers-head, .workers-row) > div:nth-child(5),
-#portalRoot #view-workerProfile :is(.workers-head, .workers-row) > div:nth-child(6){
+#portalRoot #view-workerProfile :is(.workers-head, .workers-row) > div:nth-child(6),
+#portalRoot #view-workerProfile :is(.workers-head, .workers-row) > div:nth-child(7){
   justify-content:center !important;
   text-align:center;
 }
 
-#portalRoot #view-workerProfile :is(.workers-head, .workers-row) > div:nth-child(8){
+#portalRoot #view-workerProfile :is(.workers-head, .workers-row) > div:nth-child(9){
   padding-left:10px !important;
   padding-right:15px !important;
   box-sizing:border-box;
@@ -1050,11 +1050,40 @@
   opacity:1 !important;
 }
 
-#portalRoot #view-workerProfile #wkEditorOverlay .pass-inline{
+#portalRoot #view-workerProfile .worker-profile-id-composer{
   display:grid;
-  grid-template-columns:minmax(0, 1fr) auto auto;
-  gap:8px;
+  grid-template-columns:minmax(0, auto) minmax(84px, 1fr);
+  gap:0;
   align-items:center;
+  min-height:42px;
+  border:1px solid #d5deeb;
+  border-radius:8px;
+  overflow:hidden;
+  background:#fff;
+}
+
+#portalRoot #view-workerProfile .worker-profile-id-composer[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-workerProfile .worker-profile-id-prefix{
+  align-self:stretch;
+  display:flex;
+  align-items:center;
+  padding:0 0 0 12px;
+  color:#52657e;
+  background:#f5f7fb;
+  font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space:nowrap;
+}
+
+#portalRoot #view-workerProfile .worker-profile-id-composer #wkEditNumber{
+  height:100% !important;
+  min-width:84px;
+  border:0 !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+  font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 #portalRoot #view-workerProfile .worker-profile-password-input{
@@ -1188,6 +1217,19 @@
   letter-spacing:0;
 }
 
+#portalRoot #view-workerProfile .worker-profile-role-help{
+  min-height:34px;
+  margin-top:6px;
+  padding:7px 9px;
+  border:1px solid #dbe7f7;
+  border-radius:8px;
+  background:#f7faff;
+  color:#526987;
+  font-size:12px;
+  font-weight:600;
+  line-height:1.35;
+}
+
 #portalRoot #view-workerProfile .worker-profile-confirm-modal p{
   margin:0;
   color:#425a82;
@@ -1291,8 +1333,7 @@
     padding:22px 14px 16px !important;
   }
 
-  #portalRoot #view-workerProfile #wkEditorOverlay .grid,
-  #portalRoot #view-workerProfile #wkEditorOverlay .pass-inline{
+  #portalRoot #view-workerProfile #wkEditorOverlay .grid{
     grid-template-columns:1fr !important;
   }
 

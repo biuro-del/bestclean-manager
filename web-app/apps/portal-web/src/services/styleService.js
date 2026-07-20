@@ -1,5 +1,5 @@
-import { executeMutation, executeQuery, mutationRef, queryRef } from 'firebase/data-connect'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
+import { platformContextHeaders } from './platformDataConnectService'
 
 export const STYLE_FALLBACK_ID = 'sneat-iclean'
 
@@ -35,8 +35,6 @@ const STYLE_REGISTRY = Object.freeze([
 ])
 
 const STYLE_ID_SET = new Set(STYLE_REGISTRY.map((item) => String(item?.id ?? '').trim()).filter(Boolean))
-const OPERATION_DEPLOY_HINT =
-  'Brak wdrozonej operacji Data Connect dla modulu Style. Wykonaj deploy dataconnect.'
 
 function asText(value) {
   return String(value ?? '').trim()
@@ -60,96 +58,84 @@ function normalizeKnownStyleId(styleId, fallback = '') {
   return isKnownStyleId(normalized) ? normalized : asText(fallback)
 }
 
-function ensureFirebaseOrThrow() {
+function normalizeApiBase(value) {
+  const raw = asText(value)
+  if (!raw) return '/api'
+  if (raw.startsWith('/')) {
+    const withoutTrailing = raw.replace(/\/+$/, '')
+    return withoutTrailing.endsWith('/api') ? withoutTrailing : `${withoutTrailing}/api`
+  }
+  const withoutTrailing = raw.replace(/\/+$/, '')
+  return withoutTrailing.endsWith('/api') ? withoutTrailing : `${withoutTrailing}/api`
+}
+
+function getPortalApiBase() {
+  return normalizeApiBase(import.meta.env.VITE_ADMIN_API_BASE || '/api')
+}
+
+async function styleAuthHeaders() {
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase/Data Connect. Moduly stylow sa niedostepne.')
+    throw new Error('Brak konfiguracji Firebase. Moduly stylow sa niedostepne.')
   }
 
   const firebase = ensureFirebase()
-  if (!firebase?.dataConnect) {
-    throw new Error('Nie udalo sie zainicjalizowac Data Connect.')
+  const currentUser = firebase?.auth?.currentUser
+  if (!currentUser) {
+    throw new Error('Sesja wygasla. Zaloguj sie ponownie.')
   }
 
-  return firebase.dataConnect
-}
-
-function messageFromError(error) {
-  if (error instanceof Error) {
-    return String(error.message ?? '')
-  }
-  return String(error ?? '')
-}
-
-function extractNestedErrorMessage(rawMessage) {
-  const message = asText(rawMessage)
-  if (!message || !message.startsWith('{')) {
-    return ''
-  }
-
-  try {
-    const parsed = JSON.parse(message)
-    return asText(parsed?.error?.message ?? parsed?.message)
-  } catch {
-    return ''
+  const idToken = await currentUser.getIdToken()
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${idToken}`,
+    ...platformContextHeaders(),
   }
 }
 
-function isOperationNotFoundMessage(rawMessage, operationName) {
-  const message = messageFromError(rawMessage)
-  const nested = extractNestedErrorMessage(message)
-  const fullMessage = `${message} ${nested}`.toLowerCase()
-  const operation = asText(operationName).toLowerCase()
-  if (!operation) {
-    return false
-  }
-
-  return (
-    fullMessage.includes(`operation "${operation}" not found`) ||
-    fullMessage.includes(`operation "${operation}" not found`) ||
-    fullMessage.includes(`operation '${operation}' not found`) ||
-    (fullMessage.includes('operation') && fullMessage.includes('not found') && fullMessage.includes(operation)) ||
-    ((fullMessage.includes('"status":"not_found"') ||
-      fullMessage.includes('"code":404') ||
-      fullMessage.includes('"code":"404"')) &&
-      fullMessage.includes(operation))
-  )
-}
-
-function withOperationHint(error, operationName) {
-  const message = messageFromError(error)
-  if (isOperationNotFoundMessage(message, operationName)) {
-    return new Error(`${OPERATION_DEPLOY_HINT} Brak operacji: ${operationName}.`)
-  }
-
-  return error instanceof Error ? error : new Error(message || OPERATION_DEPLOY_HINT)
-}
-
-function isOperationNotFoundError(error, operationName) {
-  const message = messageFromError(error)
-  return isOperationNotFoundMessage(message, operationName) || message.includes(`Brak operacji: ${operationName}.`)
-}
-
-async function runQueryOperation(operationName, variables = {}, options = {}) {
-  const fallback = options.fallback
-  try {
-    const dataConnect = ensureFirebaseOrThrow()
-    return await executeQuery(queryRef(dataConnect, operationName, variables))
-  } catch (error) {
-    const wrapped = withOperationHint(error, operationName)
-    if (typeof fallback !== 'undefined' && isOperationNotFoundError(wrapped, operationName)) {
-      return fallback
+async function parseStyleApiResponse(response) {
+  const rawText = await response.text().catch(() => '')
+  let payload = {}
+  if (rawText) {
+    try {
+      payload = JSON.parse(rawText)
+    } catch {
+      payload = {}
     }
-    throw wrapped
   }
+
+  if (!response.ok) {
+    const message = asText(payload?.error?.message || payload?.message || rawText)
+    throw new Error(message || `Nie udalo sie obsluzyc ustawien wygladu (HTTP ${response.status}).`)
+  }
+
+  return payload?.data && typeof payload.data === 'object' ? payload.data : payload
 }
 
-async function runMutationOperation(operationName, variables = {}) {
-  try {
-    const dataConnect = ensureFirebaseOrThrow()
-    return await executeMutation(mutationRef(dataConnect, operationName, variables))
-  } catch (error) {
-    throw withOperationHint(error, operationName)
+async function requestStyleApi(method, options = {}) {
+  const orgId = asText(options.orgId)
+  if (!orgId) {
+    throw new Error('Brak orgId dla ustawien wygladu.')
   }
+
+  const headers = await styleAuthHeaders()
+  const normalizedMethod = asText(method).toUpperCase() || 'GET'
+  const search = new URLSearchParams({ orgId })
+  if (options.includeUsers) {
+    search.set('includeUsers', '1')
+  }
+  const requestOptions = { method: normalizedMethod, headers }
+  if (normalizedMethod !== 'GET') {
+    requestOptions.body = JSON.stringify({
+      orgId,
+      scope: asText(options.scope) || 'user',
+      styleId: asText(options.styleId),
+      uid: asText(options.uid),
+      updatedBy: asNullableText(options.updatedBy),
+    })
+  }
+
+  const response = await fetch(`${getPortalApiBase()}/portal/ui-style?${search.toString()}`, requestOptions)
+  return parseStyleApiResponse(response)
 }
 
 function ensureStyleId(styleId) {
@@ -168,34 +154,6 @@ export function listAvailableStyles() {
   )
 }
 
-async function fetchOrgDefaultStyle(orgId) {
-  const normalizedOrgId = asText(orgId)
-  if (!normalizedOrgId) {
-    return null
-  }
-
-  const response = await runQueryOperation(
-    'OrgUiStyleForOrg',
-    { orgId: normalizedOrgId },
-    { fallback: { data: { orgUiStyle: null } } },
-  )
-  return response?.data?.orgUiStyle ?? null
-}
-
-async function fetchMyStylePreference(orgId) {
-  const normalizedOrgId = asText(orgId)
-  if (!normalizedOrgId) {
-    return null
-  }
-
-  const response = await runQueryOperation(
-    'MyUiStylePreference',
-    { orgId: normalizedOrgId },
-    { fallback: { data: { userUiStylePreference: null } } },
-  )
-  return response?.data?.userUiStylePreference ?? null
-}
-
 export async function getEffectiveStyle(orgId, uid = '') {
   const normalizedOrgId = asText(orgId)
   if (!normalizedOrgId) {
@@ -209,7 +167,9 @@ export async function getEffectiveStyle(orgId, uid = '') {
     }
   }
 
-  const [orgStyle, userStyle] = await Promise.all([fetchOrgDefaultStyle(normalizedOrgId), fetchMyStylePreference(normalizedOrgId)])
+  const state = await requestStyleApi('GET', { orgId: normalizedOrgId })
+  const orgStyle = state?.orgDefault ?? null
+  const userStyle = state?.userPreference ?? null
 
   const orgStyleId = normalizeKnownStyleId(orgStyle?.defaultStyleId)
   const userStyleId = normalizeKnownStyleId(userStyle?.styleId)
@@ -253,9 +213,11 @@ export async function setUserStyle(orgId, uid = '', styleId, updatedBy = '-') {
   }
 
   const normalizedStyleId = ensureStyleId(styleId)
-  await runMutationOperation('UpsertMyUiStylePreference', {
+  await requestStyleApi('POST', {
     orgId: normalizedOrgId,
+    scope: 'user',
     styleId: normalizedStyleId,
+    uid: asText(uid),
     updatedBy: asNullableText(updatedBy) ?? '-',
   })
 
@@ -272,8 +234,10 @@ export async function clearUserStyle(orgId, uid = '') {
     throw new Error('Brak orgId dla czyszczenia stylu uzytkownika.')
   }
 
-  await runMutationOperation('DeleteMyUiStylePreference', {
+  await requestStyleApi('DELETE', {
     orgId: normalizedOrgId,
+    scope: 'user',
+    uid: asText(uid),
   })
 
   return {
@@ -290,8 +254,9 @@ export async function setOrgDefaultStyle(orgId, styleId, updatedBy = '-') {
   }
 
   const normalizedStyleId = ensureStyleId(styleId)
-  await runMutationOperation('UpsertOrgUiStyleForOrg', {
+  await requestStyleApi('POST', {
     orgId: normalizedOrgId,
+    scope: 'organization',
     styleId: normalizedStyleId,
     updatedBy: asNullableText(updatedBy) ?? '-',
   })
@@ -311,22 +276,10 @@ export async function getOrgAndUserStylesForBackup(orgId) {
     }
   }
 
-  const [orgResponse, userResponse] = await Promise.all([
-    runQueryOperation(
-      'OrgUiStyleForOrg',
-      { orgId: normalizedOrgId },
-      { fallback: { data: { orgUiStyle: null } } },
-    ),
-    runQueryOperation(
-      'UserUiStylePreferencesForOrg',
-      { orgId: normalizedOrgId },
-      { fallback: { data: { userUiStylePreferences: [] } } },
-    ),
-  ])
-
-  const orgDefault = orgResponse?.data?.orgUiStyle ?? null
-  const userPreferences = Array.isArray(userResponse?.data?.userUiStylePreferences)
-    ? userResponse.data.userUiStylePreferences
+  const state = await requestStyleApi('GET', { orgId: normalizedOrgId, includeUsers: true })
+  const orgDefault = state?.orgDefault ?? null
+  const userPreferences = Array.isArray(state?.userPreferences)
+    ? state.userPreferences
     : []
 
   return {
@@ -342,8 +295,9 @@ export async function upsertOrgStyleForBackup({ orgId, styleId, updatedBy = '-' 
   }
 
   const normalizedStyleId = ensureStyleId(styleId)
-  await runMutationOperation('UpsertOrgUiStyleForOrg', {
+  await requestStyleApi('POST', {
     orgId: normalizedOrgId,
+    scope: 'organization',
     styleId: normalizedStyleId,
     updatedBy: asNullableText(updatedBy) ?? '-',
   })
@@ -360,8 +314,9 @@ export async function deleteOrgStyleForBackup({ orgId }) {
     return null
   }
 
-  await runMutationOperation('DeleteOrgUiStyleForOrg', {
+  await requestStyleApi('DELETE', {
     orgId: normalizedOrgId,
+    scope: 'organization',
   })
 
   return {
@@ -378,8 +333,9 @@ export async function upsertUserStyleForBackup({ orgId, uid, styleId, updatedBy 
   }
 
   const normalizedStyleId = ensureStyleId(styleId)
-  await runMutationOperation('UpsertUserUiStylePreferenceForOrg', {
+  await requestStyleApi('POST', {
     orgId: normalizedOrgId,
+    scope: 'user',
     uid: normalizedUid,
     styleId: normalizedStyleId,
     updatedBy: asNullableText(updatedBy) ?? '-',
@@ -399,8 +355,9 @@ export async function deleteUserStyleForBackup({ orgId, uid }) {
     return null
   }
 
-  await runMutationOperation('DeleteUserUiStylePreferenceForOrg', {
+  await requestStyleApi('DELETE', {
     orgId: normalizedOrgId,
+    scope: 'user',
     uid: normalizedUid,
   })
 

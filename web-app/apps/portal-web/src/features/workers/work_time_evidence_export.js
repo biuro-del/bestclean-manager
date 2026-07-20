@@ -158,7 +158,7 @@ export function sanitizeWorkTimeEvidenceFilePart(value) {
 
 export function workTimeEvidenceWorkerLabel(row = {}, worker = {}, deps = {}) {
   if (typeof deps.workerLabel === 'function') return deps.workerLabel(row, worker)
-  const value = row.workerName || workerNameValue(worker) || worker.login || worker.workerLogin || '-'
+  const value = row.workerName || workerNameValue(worker) || worker.workerId || worker.id || '-'
   return surnameFirstLabel(value)
 }
 
@@ -438,7 +438,7 @@ export async function buildWorkTimeEvidencePdf({
     const totalWorkLabel = formatSeconds(deps, workTimeEvidenceWorkTotal(groupRows))
     const title = groupByWorker ? 'Ewidencja pracy pracownika' : 'Ewidencja pracy'
     const subtitle = groupByWorker
-      ? `${group.workerName} | Login: ${group.workerLogin} | ID: ${group.workerId} | Zakres: ${fromLabel} - ${toLabel} | Rekordy: ${groupRows.length}`
+      ? `${group.workerName} | ID: ${group.workerId} | Zakres: ${fromLabel} - ${toLabel} | Rekordy: ${groupRows.length}`
       : `${group.workerName} | Zakres: ${fromLabel} - ${toLabel} | Rekordy: ${groupRows.length}`
 
     const drawHeader = (continued = false) => {
@@ -502,9 +502,9 @@ function buildWorkerLookups(deps = {}, workerRows = []) {
   workerRows.forEach((worker) => {
     const login = String(worker.login ?? worker.workerLogin ?? worker.workerId ?? worker.id ?? '').trim()
     const name = workerNameValue(worker)
-    const workerId = String(worker.workerId ?? worker.id ?? login).trim() || login || '-'
+    const workerId = String(worker.workerId ?? worker.id ?? '').trim() || '-'
     const workerType = String(worker.type ?? worker.role ?? worker.workerType ?? '').trim() || '-'
-    const displayName = name || login || '-'
+    const displayName = name || workerId
     const entry = { workerId, workerName: displayName, workerLogin: login || '-', workerType }
 
     workerIdentityValues(worker).forEach((value) => {
@@ -616,7 +616,9 @@ export async function buildWorkTimeEvidenceRowsForWorkers({
       const loginKey = normalizeText(deps, item?.workerLogin)
       const nameKey = normalizeText(deps, item?.workerName)
       const resolvedWorker = workerLookupByLogin.get(loginKey) || workerLookupByName.get(nameKey) || null
-      const sourceWorkerName = String(resolvedWorker?.workerName ?? item?.workerName ?? item?.workerLogin ?? '').trim() || '-'
+      const sourceWorkerName = String(
+        resolvedWorker?.workerName ?? item?.workerName ?? resolvedWorker?.workerId ?? item?.workerId ?? '',
+      ).trim() || '-'
       const startAt = toIsoValue(deps, item?.startAt)
       const endAt = toIsoValue(deps, item?.endAt)
       const rangeSec = computeRangeSeconds(deps, startAt, endAt)
@@ -625,7 +627,7 @@ export async function buildWorkTimeEvidenceRowsForWorkers({
       const netSec = positiveNumber(item?.netSec, item?.realSec) || Math.max(0, workSec - breakSec)
       return {
         ...item,
-        workerId: String(resolvedWorker?.workerId ?? item?.workerId ?? item?.id ?? item?.workerLogin ?? '').trim() || '-',
+        workerId: String(resolvedWorker?.workerId ?? item?.workerId ?? item?.id ?? '').trim() || '-',
         workerName: sourceWorkerName,
         workerLogin: String(resolvedWorker?.workerLogin ?? item?.workerLogin ?? item?.workerId ?? '').trim() || '-',
         workerType: String(resolvedWorker?.workerType ?? item?.workerType ?? item?.role ?? '').trim() || '-',

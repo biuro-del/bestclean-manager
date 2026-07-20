@@ -6,12 +6,16 @@ function mapRole(dcRole) {
     .trim()
     .toUpperCase()
 
-  if (normalized === 'ADMIN' || normalized === 'OWNER' || normalized === 'SUPERADMIN') {
+  if (normalized === 'OWNER') {
+    return 'Owner'
+  }
+
+  if (normalized === 'ADMIN' || normalized === 'SUPERADMIN') {
     return 'Admin'
   }
 
   if (normalized === 'MANAGER' || normalized === 'KIEROWNIK') {
-    return 'Kierownik'
+    return 'Manager'
   }
 
   if (normalized === 'WORKER' || normalized === 'PRACOWNIK') {
@@ -38,12 +42,14 @@ export async function getOrganizations() {
   const response = await myOrganizations()
   const memberships = response?.data?.organizationMembers ?? []
 
-  return memberships.map((membership) => ({
-    id: membership.orgId,
-    name: membership.organization?.name ?? membership.orgId,
-    status: membership.organization?.status ?? 'ACTIVE',
-    role: mapRole(membership.role),
-  }))
+  return memberships
+    .map((membership) => ({
+      id: membership.orgId,
+      name: String(membership.organization?.name ?? '').trim(),
+      status: membership.organization?.status ?? null,
+      role: mapRole(membership.role),
+    }))
+    .filter((organization) => organization.id && organization.name)
 }
 
 export async function getOrg(orgId) {

@@ -6,30 +6,164 @@ export const portalLayoutTemplate = `
     <img class="login-illustration" src="${loginCleaningIllustrationUrl}" alt="" />
   </section>
   <section class="login-panel">
-    <form class="login-card" id="loginForm" role="dialog" aria-labelledby="loginTitle">
+    <form class="login-card" id="loginForm" role="dialog" aria-labelledby="loginTitle" novalidate>
       <div class="login-brand">
         <h1 class="login-title" id="loginTitle">Witaj!</h1>
-        <p class="login-copy">Zaloguj si&#281; do portalu Cleanzi.</p>
+        <p class="login-copy" id="loginCopy">Zaloguj si&#281; do portalu Cleanzi.</p>
       </div>
 
-      <div class="login-field">
-        <label for="loginLogin">Login</label>
-        <input id="loginLogin" type="text" autocomplete="username" />
+      <div id="loginCredentialsPanel">
+        <div class="login-field">
+          <label for="loginLogin">Email</label>
+          <input id="loginLogin" type="email" maxlength="160" autocomplete="username" inputmode="email" spellcheck="false" />
+        </div>
+
+        <div class="login-field">
+          <label for="loginPass">Hasło</label>
+          <input id="loginPass" type="password" autocomplete="current-password" />
+        </div>
+
+        <button class="btn primary login-submit" id="loginBtn" type="submit">Zaloguj</button>
       </div>
 
-      <div class="login-field">
-        <label for="loginPass">Hasło</label>
-        <input id="loginPass" type="password" autocomplete="current-password" />
+      <div class="login-reset-panel" id="loginResetPanel" hidden>
+        <div class="login-field">
+          <label for="loginResetEmail">Email</label>
+          <input id="loginResetEmail" type="email" maxlength="160" autocomplete="email" inputmode="email" spellcheck="false" />
+        </div>
+
+        <button class="btn primary login-submit" id="loginResetSend" type="submit">Wyślij link</button>
+        <button class="login-reset-back" id="loginResetBack" type="button">Wróć do logowania</button>
       </div>
 
-      <div class="login-error" id="loginErr" style="display:none;"></div>
+      <div class="login-organization-panel" id="loginOrganizationPanel" hidden>
+        <div class="login-organization-list" id="loginOrganizationList" role="list"></div>
+        <button class="login-organization-cancel" id="loginOrganizationCancel" type="button">Anuluj i wyloguj</button>
+      </div>
 
-      <button class="btn primary login-submit" id="loginBtn" type="submit">Zaloguj</button>
+      <div class="login-mfa-panel" id="loginMfaChallengePanel" hidden>
+        <div class="login-field">
+          <label for="loginMfaFactor">Drugi składnik</label>
+          <select id="loginMfaFactor"></select>
+        </div>
+        <button class="login-reset-back" id="loginMfaSendCode" type="button">Wyślij kod SMS</button>
+        <div class="login-field">
+          <label for="loginMfaCode">Kod weryfikacyjny</label>
+          <input id="loginMfaCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" />
+        </div>
+        <button class="btn primary login-submit" id="loginMfaConfirm" type="button">Potwierdź</button>
+        <button class="login-reset-back" id="loginMfaCancel" type="button">Anuluj i wyloguj</button>
+        <div id="loginMfaRecaptcha"></div>
+      </div>
+
+      <div class="login-mfa-panel" id="loginMfaEnrollmentPanel" hidden>
+        <div class="login-mfa-methods">
+          <button class="login-reset-back" id="loginMfaChooseTotp" type="button">Aplikacja TOTP</button>
+          <button class="login-reset-back" id="loginMfaChooseSms" type="button">Kod SMS</button>
+          <button class="login-reset-back" id="loginMfaChooseEmail" type="button">Kod email</button>
+        </div>
+        <div id="loginMfaTotpSetup" hidden>
+          <p class="login-mfa-help">Dodaj klucz w aplikacji uwierzytelniającej, a następnie wpisz wygenerowany kod.</p>
+          <code class="login-mfa-secret" id="loginMfaTotpSecret"></code>
+        </div>
+        <div id="loginMfaPhoneSetup" hidden>
+          <div class="login-field">
+            <label for="loginMfaPhone">Telefon z kodem kraju</label>
+            <input id="loginMfaPhone" type="tel" autocomplete="tel" placeholder="+48123123123" />
+          </div>
+          <button class="login-reset-back" id="loginMfaPhoneSend" type="button">Wyślij kod SMS</button>
+          <div id="loginMfaEnrollRecaptcha"></div>
+        </div>
+        <div id="loginMfaEmailSetup" hidden>
+          <p class="login-mfa-help">Na razie możesz podać dowolny adres. Docelowo kod będzie wysyłany wyłącznie na email konta Firebase.</p>
+          <div class="login-field">
+            <label for="loginMfaEmail">Email do kodu</label>
+            <input id="loginMfaEmail" type="email" maxlength="160" autocomplete="email" inputmode="email" spellcheck="false" />
+          </div>
+          <button class="login-reset-back" id="loginMfaEmailSend" type="button">Wyślij kod email</button>
+        </div>
+        <div class="login-field">
+          <label for="loginMfaEnrollCode">Kod weryfikacyjny</label>
+          <input id="loginMfaEnrollCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" />
+        </div>
+        <button class="btn primary login-submit" id="loginMfaEnrollConfirm" type="button">Potwierdź kod</button>
+        <button class="login-reset-back" id="loginMfaEnrollCancel" type="button">Anuluj i wyloguj</button>
+      </div>
+
+      <div class="login-error" id="loginErr" aria-live="polite" aria-atomic="true" style="display:none;"></div>
+      <button class="login-reset-open" id="loginResetOpen" type="button" hidden>Zresetuj hasło</button>
     </form>
   </section>
 </div>
 
 <div class="app-bg" id="portalRoot" style="display:none;">
+  <section class="platform-center" id="platformCenter" hidden aria-labelledby="platformCenterTitle">
+    <div class="platform-center-shell">
+      <header class="platform-center-header">
+        <div>
+          <span class="platform-center-kicker">Cleanzi</span>
+          <h1 id="platformCenterTitle">Centrum platformy</h1>
+          <p>Wybierz organizację i podaj powód wejścia. Dostęp zostanie zapisany w prywatnym audycie platformy.</p>
+        </div>
+        <button class="btn2 danger" id="platformCenterLogout" type="button">Wyloguj</button>
+      </header>
+      <div class="platform-center-filters">
+        <label>Wyszukaj<input id="platformOrganizationSearch" type="search" placeholder="Nazwa lub ID organizacji" /></label>
+        <label>Status<select id="platformOrganizationStatus"><option value="">Wszystkie</option><option value="ACTIVE">Aktywne</option><option value="SUSPENDED">Zawieszone</option><option value="EXPIRED">Wygasłe</option></select></label>
+        <label>Pakiet<select id="platformOrganizationPlan"><option value="">Wszystkie</option><option value="TRIAL">Trial</option><option value="START">Start</option><option value="PRO">Pro</option></select></label>
+        <label>Usunięcie<select id="platformOrganizationDeletion"><option value="">Wszystkie</option><option value="active">Nieusunięte</option><option value="deleted">Usunięte</option></select></label>
+      </div>
+      <label class="platform-center-reason">Powód wejścia do organizacji<textarea id="platformAccessReason" maxlength="1000" rows="2" placeholder="Np. zgłoszenie #1234 – korekta konfiguracji"></textarea></label>
+      <div class="platform-center-message" id="platformCenterMessage" aria-live="polite"></div>
+      <section class="platform-organization-editor" id="platformOrganizationEditor" hidden aria-labelledby="platformOrganizationEditorTitle">
+        <div class="platform-organization-editor-header">
+          <div>
+            <span class="platform-center-kicker">Aktywny kontekst</span>
+            <h2 id="platformOrganizationEditorTitle">Zarządzaj organizacją</h2>
+            <p id="platformOrganizationEditorSubtitle"></p>
+          </div>
+          <button class="btn2" id="platformOrganizationEditorClose" type="button">Zamknij kontekst</button>
+        </div>
+        <div class="platform-organization-editor-grid">
+          <label>ID organizacji<input id="platformEditorOrgId" type="text" readonly /></label>
+          <label>Nazwa<input id="platformEditorName" type="text" maxlength="120" /></label>
+          <label>Status organizacji
+            <select id="platformEditorStatus">
+              <option value="ACTIVE">Aktywna</option>
+              <option value="SUSPENDED">Zawieszona</option>
+              <option value="EXPIRED">Wygasła</option>
+            </select>
+          </label>
+          <label>Status onboardingu<input id="platformEditorOnboardingStatus" type="text" maxlength="30" placeholder="np. COMPLETED" /></label>
+          <label>Pakiet
+            <select id="platformEditorPlanCode">
+              <option value="TRIAL">Trial</option>
+              <option value="START">Start</option>
+              <option value="PRO">Pro</option>
+            </select>
+          </label>
+          <label>Status subskrypcji<input id="platformEditorSubscriptionStatus" type="text" maxlength="30" placeholder="np. ACTIVE" /></label>
+          <label>Koniec Trial<input id="platformEditorTrialEndsAt" type="datetime-local" /></label>
+          <label>Koniec okresu płatnego<input id="platformEditorCurrentPeriodEndsAt" type="datetime-local" /></label>
+          <label>Worker ID nowego Ownera<input id="platformEditorOwnerWorkerId" type="text" maxlength="128" /></label>
+        </div>
+        <div class="platform-organization-editor-message" id="platformOrganizationEditorMessage" aria-live="polite"></div>
+        <div class="platform-organization-editor-actions">
+          <button class="btn2 primary" id="platformEditorSaveOrganization" type="button">Zapisz organizację</button>
+          <button class="btn2 primary" id="platformEditorSaveSubscription" type="button">Zapisz subskrypcję</button>
+          <button class="btn2" id="platformEditorTransferOwner" type="button">Przekaż własność</button>
+          <button class="btn2 danger" id="platformEditorToggleDeletion" type="button">Usuń organizację</button>
+          <button class="btn2" id="platformEditorEnter" type="button">Wejdź do organizacji</button>
+        </div>
+      </section>
+      <div class="platform-organization-list" id="platformOrganizationList"></div>
+      <div class="platform-center-pagination">
+        <button class="btn2" id="platformOrganizationsPrev" type="button">Poprzednia</button>
+        <span id="platformOrganizationsPage">Strona 1</span>
+        <button class="btn2" id="platformOrganizationsNext" type="button">Następna</button>
+      </div>
+    </div>
+  </section>
   <div class="app-shell">
     <div class="app-body">
       <aside class="sidebar" id="portalSidebar">
@@ -281,6 +415,26 @@ export const portalLayoutTemplate = `
                 <path d="M12 3v18M3 12h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
               </svg>
             </button>
+            <div class="subscription-chip" id="subscriptionChip" data-tone="active" title="Pakiet organizacji" hidden>
+              <span class="subscription-chip-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M4 7.5 8.2 4l3.8 3.5L15.8 4 20 7.5 18.2 18H5.8L4 7.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                  <path d="M7 14.5h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span class="subscription-chip-copy">
+                <span class="subscription-chip-label">Pakiet</span>
+                <span class="subscription-chip-plan" id="subscriptionPlanName">-</span>
+              </span>
+              <span class="subscription-chip-remaining">
+                <strong id="subscriptionRemainingValue">-</strong>
+                <span id="subscriptionRemainingLabel">dni</span>
+              </span>
+            </div>
+            <div class="organization-chip" id="organizationChip" title="Aktywna organizacja" hidden>
+              <span class="organization-chip-label">Organizacja</span>
+              <span class="organization-chip-name" id="organizationName"></span>
+            </div>
             <div class="user-chip" id="userChip" title="Użytkownik">
               <span class="user-avatar" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none">

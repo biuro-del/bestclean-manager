@@ -1,7 +1,32 @@
-import { ensureSessionContext, login, logout, getSession, requireAuth } from '../auth/authService'
+import {
+  acceptPlatformContext,
+  beginMfaSignInChallenge,
+  beginPhoneMfaEnrollment,
+  beginTotpEnrollment,
+  clearPlatformContextSession,
+  completeMfaSignIn,
+  completePhoneMfaEnrollment,
+  completeTotpEnrollment,
+  ensureSessionContext,
+  getSession,
+  login,
+  logout,
+  requestPasswordReset,
+  requestPlatformEmailMfaCode,
+  requireAuth,
+  selectOrganization,
+  verifyPlatformEmailMfaCode,
+} from '../auth/authService'
 import { getDataSourceLabel, waitForFirebaseAuthReady } from '../firebase/firebaseClient'
 import { createClient, deleteClient, getClients, updateClient } from '../services/clientService'
-import { createWorkerUser, deleteWorker, getWorkers, revealWorkerPassword, setWorkerPassword, updateWorker } from '../services/workerService'
+import {
+  createWorkerUser,
+  deleteWorker,
+  getNextWorkerIdPreview,
+  getWorkers,
+  setWorkerPassword,
+  updateWorker,
+} from '../services/workerService'
 import { createZone, deleteZone, getZones, updateZone } from '../services/zoneService'
 import {
   createEvent,
@@ -37,6 +62,12 @@ import {
 } from '../services/styleService'
 import { deletePortalTasks, fetchPortalTasks, upsertPortalTasks } from '../services/portalTaskService'
 import { deleteScheduleTasks, fetchScheduleTasks, upsertScheduleTasks } from '../services/scheduleTaskDataConnectService'
+import {
+  closePlatformOrganization,
+  listPlatformOrganizations,
+  openPlatformOrganization,
+  updatePlatformOrganization,
+} from '../services/platformDataConnectService'
 import { portalLayoutTemplate } from './layoutTemplate'
 import { createRouter } from './router'
 
@@ -58,6 +89,13 @@ import {
 } from '../app/shared/index.js'
 
 let portalNoticeTimer = null
+let platformOrganizationsPage = 1
+let platformOrganizationsTotalPages = 1
+let platformOrganizationsLoading = false
+let platformSelectedOrganization = null
+let pendingMfaChallenge = null
+let pendingMfaEnrollmentType = ''
+let pendingEmailMfaChallengeId = ''
 let calendarRemoteSaveTimer = 0
 let sidebarGlobalSearchResults = []
 let sidebarGlobalSearchActiveIndex = -1
@@ -89,26 +127,26 @@ const SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS = [
   { id: 'section-dashboard', kind: 'section', label: 'Pulpit', meta: 'Sekcja', route: 'dashboard' },
   { id: 'section-events', kind: 'section', label: 'Zdarzenia', meta: 'Sekcja', route: 'events' },
   { id: 'section-orders', kind: 'section', label: 'Zlecenia', meta: 'Sekcja', route: 'orders' },
-  { id: 'sub-orders-list', kind: 'subsection', label: 'Lista zleceñ', meta: 'Podsekcja dzia³ "Zlecenia"', route: 'orders' },
-  { id: 'sub-orders-map', kind: 'subsection', label: 'Mapa', meta: 'Podsekcja dzia³ "Zlecenia"', route: 'ordersMap' },
+  { id: 'sub-orders-list', kind: 'subsection', label: 'Lista zleceÅ„', meta: 'Podsekcja dziaÅ‚ "Zlecenia"', route: 'orders' },
+  { id: 'sub-orders-map', kind: 'subsection', label: 'Mapa', meta: 'Podsekcja dziaÅ‚ "Zlecenia"', route: 'ordersMap' },
   { id: 'section-calendar', kind: 'section', label: 'Kalendarz', meta: 'Sekcja', route: 'calendar' },
   { id: 'section-kanban', kind: 'section', label: 'Kanban', meta: 'Sekcja', route: 'kanban', kanbanSection: 'home' },
-  { id: 'sub-kanban-home', kind: 'subsection', label: 'Strona g³ówna', meta: 'Podsekcja dzia³ "Kanban"', route: 'kanban', kanbanSection: 'home' },
-  { id: 'sub-kanban-tasks', kind: 'subsection', label: 'Moje zadania', meta: 'Podsekcja dzia³ "Kanban"', route: 'kanban', kanbanSection: 'tasks' },
-  { id: 'sub-kanban-inbox', kind: 'subsection', label: 'Skrzynka odbiorcza', meta: 'Podsekcja dzia³ "Kanban"', route: 'kanban', kanbanSection: 'inbox' },
+  { id: 'sub-kanban-home', kind: 'subsection', label: 'Strona gÅ‚Ã³wna', meta: 'Podsekcja dziaÅ‚ "Kanban"', route: 'kanban', kanbanSection: 'home' },
+  { id: 'sub-kanban-tasks', kind: 'subsection', label: 'Moje zadania', meta: 'Podsekcja dziaÅ‚ "Kanban"', route: 'kanban', kanbanSection: 'tasks' },
+  { id: 'sub-kanban-inbox', kind: 'subsection', label: 'Skrzynka odbiorcza', meta: 'Podsekcja dziaÅ‚ "Kanban"', route: 'kanban', kanbanSection: 'inbox' },
   { id: 'section-schedule', kind: 'section', label: 'Grafik pracy', meta: 'Sekcja', route: 'schedule' },
   { id: 'section-clients', kind: 'section', label: 'Klienci', meta: 'Sekcja', route: 'clientProfile' },
-  { id: 'sub-client-profile', kind: 'subsection', label: 'Profil klienta', meta: 'Podsekcja dzia³ "Klienci"', route: 'clientProfile' },
+  { id: 'sub-client-profile', kind: 'subsection', label: 'Profil klienta', meta: 'Podsekcja dziaÅ‚ "Klienci"', route: 'clientProfile' },
   { id: 'section-objects', kind: 'section', label: 'Obiekty', meta: 'Sekcja', route: 'zones' },
-  { id: 'sub-objects-zones', kind: 'subsection', label: 'Strefy / obiekty', meta: 'Podsekcja dzia³ "Obiekty"', route: 'zones' },
-  { id: 'sub-objects-audits', kind: 'subsection', label: 'Audyty', meta: 'Podsekcja dzia³ "Obiekty"', route: 'audits' },
+  { id: 'sub-objects-zones', kind: 'subsection', label: 'Strefy / obiekty', meta: 'Podsekcja dziaÅ‚ "Obiekty"', route: 'zones' },
+  { id: 'sub-objects-audits', kind: 'subsection', label: 'Audyty', meta: 'Podsekcja dziaÅ‚ "Obiekty"', route: 'audits' },
   { id: 'section-workers', kind: 'section', label: 'Pracownicy', meta: 'Sekcja', route: 'workerProfile' },
-  { id: 'sub-worker-profile', kind: 'subsection', label: 'Lista pracowników', meta: 'Podsekcja dzia³ "Pracownicy"', route: 'workerProfile' },
+  { id: 'sub-worker-profile', kind: 'subsection', label: 'Lista pracownikÃ³w', meta: 'Podsekcja dziaÅ‚ "Pracownicy"', route: 'workerProfile' },
   { id: 'section-reports', kind: 'section', label: 'Raporty', meta: 'Sekcja', route: 'reports' },
-  { id: 'sub-reports-summary', kind: 'subsection', label: 'Zestawienia', meta: 'Podsekcja dzia³ "Raporty"', route: 'reports' },
+  { id: 'sub-reports-summary', kind: 'subsection', label: 'Zestawienia', meta: 'Podsekcja dziaÅ‚ "Raporty"', route: 'reports' },
   { id: 'section-settings', kind: 'section', label: 'Ustawienia', meta: 'Sekcja', route: 'settingsStyles' },
-  { id: 'sub-settings-styles', kind: 'subsection', label: 'Style', meta: 'Podsekcja dzia³ "Ustawienia"', route: 'settingsStyles' },
-  { id: 'sub-settings-backup', kind: 'subsection', label: 'Kopia zapasowa', meta: 'Podsekcja dzia³ "Ustawienia"', route: 'settingsBackup' },
+  { id: 'sub-settings-styles', kind: 'subsection', label: 'Style', meta: 'Podsekcja dziaÅ‚ "Ustawienia"', route: 'settingsStyles' },
+  { id: 'sub-settings-backup', kind: 'subsection', label: 'Kopia zapasowa', meta: 'Podsekcja dziaÅ‚ "Ustawienia"', route: 'settingsBackup' },
 ]
 const WORKER_DETAIL_COLUMN_WIDTHS_STORAGE_KEY = 'portal.workerDetailColumnWidths'
 const GRID_COLUMN_RESIZE_CLASS = 'grid-col-resize-active'
@@ -126,7 +164,7 @@ const CALENDAR_TONE_OPTIONS = [
   { value: 'green', label: 'Gotowe / kontrola', css: 'green' },
   { value: 'amber', label: 'Pilne', css: 'amber' },
   { value: 'red', label: 'Problem', css: 'red' },
-  { value: 'message', label: 'Wiadomoœæ pracownika', css: 'message' },
+  { value: 'message', label: 'WiadomoÅ›Ä‡ pracownika', css: 'message' },
 ]
 const FLOATING_TABLE_SCROLL_SELECTOR =
   '#portalRoot :is(.events-table, .workers-table, .zones-table, .rep-tablewrap, .backup-table-wrap)'
@@ -745,7 +783,7 @@ function setupResizableGridTable(options = {}) {
     handle.setAttribute(GRID_COLUMN_RESIZE_ATTR, String(colIndex))
     handle.setAttribute('role', 'separator')
     handle.setAttribute('aria-orientation', 'vertical')
-    handle.setAttribute('aria-label', 'Zmieñ szerokoœæ kolumny')
+    handle.setAttribute('aria-label', 'ZmieÅ„ szerokoÅ›Ä‡ kolumny')
     cell.appendChild(handle)
   })
 
@@ -1257,7 +1295,7 @@ function showTransientNotice(message, type = 'success', options = {}) {
   }, type === 'error' ? 7000 : options?.size === 'large' ? 4500 : 3000)
 }
 
-function formatErrorNoticeMessage(error, fallback = 'Wyst¹pi³ nieoczekiwany b³¹d.') {
+function formatErrorNoticeMessage(error, fallback = 'WystÄ…piÅ‚ nieoczekiwany bÅ‚Ä…d.') {
   const candidates = [
     error instanceof Error ? error.message : '',
     typeof error === 'string' ? error : '',
@@ -1267,7 +1305,7 @@ function formatErrorNoticeMessage(error, fallback = 'Wyst¹pi³ nieoczekiwany b³¹d
   if (message) {
     const normalized = message.toLowerCase()
     if (normalized.includes('operation') && normalized.includes('not found') && normalized.includes('tasksfororg')) {
-      return 'Operacja Data Connect TasksForOrg nie jest jeszcze wdro¿ona w Firebase. Wdró¿ connector Data Connect i odœwie¿ portal.'
+      return 'Operacja Data Connect TasksForOrg nie jest jeszcze wdroÅ¼ona w Firebase. WdrÃ³Å¼ connector Data Connect i odÅ›wieÅ¼ portal.'
     }
 
     if (message.startsWith('{')) {
@@ -1277,7 +1315,7 @@ function formatErrorNoticeMessage(error, fallback = 'Wyst¹pi³ nieoczekiwany b³¹d
         const parsedStatus = String(parsed?.error?.status ?? parsed?.status ?? '').trim()
         const parsedNormalized = parsedMessage.toLowerCase()
         if (parsedNormalized.includes('operation') && parsedNormalized.includes('not found')) {
-          return `Operacja Data Connect ${parsedMessage.replace(/^operation\s+/i, '')} nie jest jeszcze wdro¿ona w Firebase. Wdró¿ connector Data Connect i odœwie¿ portal.`
+          return `Operacja Data Connect ${parsedMessage.replace(/^operation\s+/i, '')} nie jest jeszcze wdroÅ¼ona w Firebase. WdrÃ³Å¼ connector Data Connect i odÅ›wieÅ¼ portal.`
         }
         if (parsedMessage) {
           return parsedStatus ? `${parsedMessage} (${parsedStatus})` : parsedMessage
@@ -1291,7 +1329,7 @@ function formatErrorNoticeMessage(error, fallback = 'Wyst¹pi³ nieoczekiwany b³¹d
 }
 
 function showPortalErrorNotice(prefix, error, fallback) {
-  const intro = String(prefix ?? '').trim() || 'Wyst¹pi³ b³¹d.'
+  const intro = String(prefix ?? '').trim() || 'WystÄ…piÅ‚ bÅ‚Ä…d.'
   const detail = formatErrorNoticeMessage(error, fallback)
   const normalizedIntro = /[.!?]$/.test(intro) ? intro : `${intro}.`
   showTransientNotice(`${normalizedIntro} ${detail}`, 'error')
@@ -1392,7 +1430,7 @@ async function runRouteSync(task, options = {}) {
   } catch (error) {
     console.warn('[portal/sync] route data sync failed', error)
     if (options.noticeOnError !== false) {
-      showPortalErrorNotice('Nie uda³o siê zsynchronizowaæ danych widoku', error)
+      showPortalErrorNotice('Nie udaÅ‚o siÄ™ zsynchronizowaÄ‡ danych widoku', error)
     }
     return null
   } finally {
@@ -2057,7 +2095,7 @@ function calendarCurrentActorLabel() {
     String(appState.session?.name ?? '').trim() ||
     String(appState.session?.login ?? '').trim() ||
     String(appState.session?.email ?? '').trim() ||
-    'U¿ytkownik'
+    'UÅ¼ytkownik'
   )
 }
 
@@ -2137,7 +2175,7 @@ function calendarAppendTaskActivity(task = {}, action = '', details = '', option
 
 function calendarTaskChangeDetails(beforeTask = {}, afterTask = {}) {
   const fields = [
-    ['Tytu³', beforeTask.title, afterTask.title],
+    ['TytuÅ‚', beforeTask.title, afterTask.title],
     ['Data', calendarDateLabelFromYmd(beforeTask.dateYmd), calendarDateLabelFromYmd(afterTask.dateYmd)],
     ['START', calendarNormalizeTimeValue(beforeTask.startTime ?? beforeTask.time) || '-', calendarNormalizeTimeValue(afterTask.startTime ?? afterTask.time) || '-'],
     ['STOP', calendarNormalizeTimeValue(beforeTask.endTime) || '-', calendarNormalizeTimeValue(afterTask.endTime) || '-'],
@@ -2148,7 +2186,7 @@ function calendarTaskChangeDetails(beforeTask = {}, afterTask = {}) {
     ['Strefa', calendarTaskZoneText(beforeTask), calendarTaskZoneText(afterTask)],
   ]
   if (String(beforeTask.notes ?? '').trim() !== String(afterTask.notes ?? '').trim()) {
-    fields.push(['Opis', beforeTask.notes ? 'uzupe³niony' : 'pusty', afterTask.notes ? 'uzupe³niony' : 'pusty'])
+    fields.push(['Opis', beforeTask.notes ? 'uzupeÅ‚niony' : 'pusty', afterTask.notes ? 'uzupeÅ‚niony' : 'pusty'])
   }
   const changes = fields
     .map(([label, beforeValue, afterValue]) => {
@@ -2329,7 +2367,7 @@ function calendarQueueRemoteTaskSave(tasks = appState.calendarTasks) {
     calendarRemoteSaveTimer = 0
     void upsertPortalTasks(orgId, snapshot).catch((error) => {
       console.warn('[portal/tasks] remote save failed', error)
-      showPortalErrorNotice('Nie uda³o siê zapisaæ zadañ kalendarza w bazie', error)
+      showPortalErrorNotice('Nie udaÅ‚o siÄ™ zapisaÄ‡ zadaÅ„ kalendarza w bazie', error)
     })
   }, 350)
 }
@@ -2340,7 +2378,7 @@ function calendarSaveTasks(tasks = appState.calendarTasks, options = {}) {
   try {
     window.localStorage.setItem(calendarStorageKey(), JSON.stringify(appState.calendarTasks))
   } catch {
-    showTransientNotice('Nie uda³o siê zapisaæ kalendarza w przegl¹darce.', 'error')
+    showTransientNotice('Nie udaÅ‚o siÄ™ zapisaÄ‡ kalendarza w przeglÄ…darce.', 'error')
   }
   if (options.syncRemote !== false) {
     calendarQueueRemoteTaskSave(appState.calendarTasks)
@@ -2374,7 +2412,7 @@ async function calendarSyncRemoteTasks({ render = false } = {}) {
   } catch (error) {
     appState.calendarRemoteTasksLoaded = false
     console.warn('[portal/tasks] remote load failed', error)
-    showPortalErrorNotice('Nie uda³o siê pobraæ zadañ kalendarza z bazy', error)
+    showPortalErrorNotice('Nie udaÅ‚o siÄ™ pobraÄ‡ zadaÅ„ kalendarza z bazy', error)
     return appState.calendarTasks
   } finally {
     appState.calendarRemoteTasksLoading = false
@@ -2393,7 +2431,7 @@ function calendarDeleteRemoteTasksById(taskIds = []) {
 
   void deletePortalTasks(orgId, ids).catch((error) => {
     console.warn('[portal/tasks] remote delete failed', error)
-    showPortalErrorNotice('Nie uda³o siê usun¹æ zadañ kalendarza z bazy', error)
+    showPortalErrorNotice('Nie udaÅ‚o siÄ™ usunÄ…Ä‡ zadaÅ„ kalendarza z bazy', error)
   })
 }
 
@@ -2453,6 +2491,10 @@ function roleLevel(role) {
     return 0
   }
 
+  if (normalized === 'platform owner' || normalized === 'platform_owner') {
+    return 4
+  }
+
   if (normalized === 'admin' || normalized === 'administrator' || normalized === 'owner' || normalized === 'superadmin') {
     return 3
   }
@@ -2462,7 +2504,7 @@ function roleLevel(role) {
     normalized.includes('manager') ||
     normalized.includes('menager') ||
     normalized.includes('menedzer') ||
-    normalized.includes('mened¿er')
+    normalized.includes('menedÅ¼er')
   ) {
     return 2
   }
@@ -2473,7 +2515,7 @@ function roleLevel(role) {
     normalized.includes('koordynator') ||
     normalized.includes('coordynator') ||
     normalized.includes('coordinator') ||
-    normalized.includes('sta¿ysta') ||
+    normalized.includes('staÅ¼ysta') ||
     normalized.includes('stazysta') ||
     normalized.includes('intern') ||
     normalized.includes('member')
@@ -2488,16 +2530,17 @@ function canManageWorkers() {
   return roleLevel(appState.session?.role) >= 2
 }
 
+function canAdministerWorkers() {
+  return roleLevel(appState.session?.role) >= 3
+}
+
 function canDeleteWorkers() {
-  return roleLevel(appState.session?.role) >= 3
+  const roleCode = String(appState.session?.roleCode ?? '').trim().toUpperCase()
+  return roleCode === 'ADMIN' || roleCode === 'OWNER' || roleCode === 'PLATFORM_OWNER'
 }
 
-function canRevealWorkerPasswords() {
-  return roleLevel(appState.session?.role) >= 3
-}
-
-function workerPasswordVaultMissingMessage() {
-  return 'Nie ma jeszcze has³a w sejfie. Wpisz nowe has³o poni¿ej i zapisz profil. Has³o zostanie ustawione w Firebase Auth i zapisane do podgl¹du.'
+function canResetWorkerPasswords() {
+  return canAdministerWorkers()
 }
 
 function canManageClients() {
@@ -2505,11 +2548,20 @@ function canManageClients() {
 }
 
 function canDeleteClients() {
-  return roleLevel(appState.session?.role) >= 3
+  return canDeleteOrganizationRecords()
 }
 
 function canManageEvents() {
   return roleLevel(appState.session?.role) >= 2
+}
+
+function canDeleteOrganizationRecords() {
+  const roleCode = String(appState.session?.roleCode ?? '').trim().toUpperCase()
+  return roleCode === 'ADMIN' || roleCode === 'OWNER' || roleCode === 'PLATFORM_OWNER'
+}
+
+function canDeleteEvents() {
+  return canDeleteOrganizationRecords()
 }
 
 function canManageBackupSettings() {
@@ -3148,7 +3200,7 @@ async function ensurePortalFeatureReady(featureKey) {
     .then((module) => {
       const feature = assignPortalFeature(key, module)
       if (!feature && !portalFeatureIsReady(key)) {
-        throw new Error(`Nie uda³o siê utworzyæ modu³u ${key}.`)
+        throw new Error(`Nie udaÅ‚o siÄ™ utworzyÄ‡ moduÅ‚u ${key}.`)
       }
       return feature
     })
@@ -3358,6 +3410,8 @@ function cleanupPortalLazyRoutes() {
 function setUserChip(session) {
   const userName = document.getElementById('userName')
   const userDot = document.getElementById('userDot')
+  const organizationChip = document.getElementById('organizationChip')
+  const organizationName = document.getElementById('organizationName')
 
   if (userName) {
     userName.textContent = session?.name ?? '-'
@@ -3365,6 +3419,18 @@ function setUserChip(session) {
 
   if (userDot) {
     userDot.style.opacity = session ? '1' : '0.25'
+  }
+
+  const activeOrganizationName = String(session?.organizationName ?? '').trim()
+  if (organizationName) {
+    organizationName.textContent = activeOrganizationName
+  }
+  if (organizationChip) {
+    organizationChip.hidden = !activeOrganizationName
+    organizationChip.dataset.platform = String(session?.roleCode ?? '').toUpperCase() === 'PLATFORM_OWNER' ? 'true' : 'false'
+    organizationChip.title = organizationChip.dataset.platform === 'true'
+      ? 'WrÃ³Ä‡ do Centrum platformy'
+      : 'Aktywna organizacja'
   }
 }
 
@@ -3395,29 +3461,285 @@ function showPortal() {
   }
 }
 
-function setLoginError(message = '') {
+function setLoginError(message = '', tone = 'error') {
   const errorNode = document.getElementById('loginErr')
   if (!errorNode) {
     return
   }
 
   errorNode.textContent = message
+  errorNode.dataset.tone = message ? tone : ''
   errorNode.style.display = message ? 'block' : 'none'
+}
+
+function setLoginResetActionVisible(isVisible) {
+  const resetOpen = document.getElementById('loginResetOpen')
+  if (resetOpen) {
+    resetOpen.hidden = !isVisible
+  }
+}
+
+function showLoginCredentials({ showResetAction = false } = {}) {
+  const credentialsPanel = document.getElementById('loginCredentialsPanel')
+  const resetPanel = document.getElementById('loginResetPanel')
+  const organizationPanel = document.getElementById('loginOrganizationPanel')
+  const mfaChallengePanel = document.getElementById('loginMfaChallengePanel')
+  const mfaEnrollmentPanel = document.getElementById('loginMfaEnrollmentPanel')
+  const loginTitle = document.getElementById('loginTitle')
+  const loginCopy = document.getElementById('loginCopy')
+
+  if (credentialsPanel) {
+    credentialsPanel.hidden = false
+  }
+  if (resetPanel) {
+    resetPanel.hidden = true
+  }
+  if (organizationPanel) {
+    organizationPanel.hidden = true
+  }
+  if (mfaChallengePanel) mfaChallengePanel.hidden = true
+  if (mfaEnrollmentPanel) mfaEnrollmentPanel.hidden = true
+  setLoginResetActionVisible(showResetAction)
+  if (loginTitle) {
+    loginTitle.textContent = 'Witaj!'
+  }
+  if (loginCopy) {
+    loginCopy.textContent = 'Zaloguj si\u0119 do portalu Cleanzi.'
+  }
+}
+
+function showLoginPasswordReset(email = '') {
+  const credentialsPanel = document.getElementById('loginCredentialsPanel')
+  const resetPanel = document.getElementById('loginResetPanel')
+  const organizationPanel = document.getElementById('loginOrganizationPanel')
+  const mfaChallengePanel = document.getElementById('loginMfaChallengePanel')
+  const mfaEnrollmentPanel = document.getElementById('loginMfaEnrollmentPanel')
+  const resetEmail = document.getElementById('loginResetEmail')
+  const loginTitle = document.getElementById('loginTitle')
+  const loginCopy = document.getElementById('loginCopy')
+
+  if (credentialsPanel) {
+    credentialsPanel.hidden = true
+  }
+  if (resetPanel) {
+    resetPanel.hidden = false
+  }
+  if (organizationPanel) {
+    organizationPanel.hidden = true
+  }
+  if (mfaChallengePanel) mfaChallengePanel.hidden = true
+  if (mfaEnrollmentPanel) mfaEnrollmentPanel.hidden = true
+  setLoginResetActionVisible(false)
+  if (resetEmail) {
+    resetEmail.value = String(email ?? '').trim().toLowerCase()
+  }
+  if (loginTitle) {
+    loginTitle.textContent = 'Zresetuj hasÅ‚o'
+  }
+  if (loginCopy) {
+    loginCopy.textContent = 'Aby zresetowaÄ‡ hasÅ‚o, wpisz adres email przypisany do konta.'
+  }
+}
+
+function showLoginOrganizationSelection(organizations = []) {
+  const credentialsPanel = document.getElementById('loginCredentialsPanel')
+  const resetPanel = document.getElementById('loginResetPanel')
+  const organizationPanel = document.getElementById('loginOrganizationPanel')
+  const organizationList = document.getElementById('loginOrganizationList')
+  const mfaChallengePanel = document.getElementById('loginMfaChallengePanel')
+  const mfaEnrollmentPanel = document.getElementById('loginMfaEnrollmentPanel')
+  const loginTitle = document.getElementById('loginTitle')
+  const loginCopy = document.getElementById('loginCopy')
+
+  if (credentialsPanel) {
+    credentialsPanel.hidden = true
+  }
+  if (resetPanel) {
+    resetPanel.hidden = true
+  }
+  if (organizationPanel) {
+    organizationPanel.hidden = false
+  }
+  if (mfaChallengePanel) mfaChallengePanel.hidden = true
+  if (mfaEnrollmentPanel) mfaEnrollmentPanel.hidden = true
+  setLoginResetActionVisible(false)
+  if (loginTitle) {
+    loginTitle.textContent = 'Wybierz organizacj\u0119'
+  }
+  if (loginCopy) {
+    loginCopy.textContent = 'To konto ma dost\u0119p do kilku organizacji.'
+  }
+  if (!organizationList) {
+    return
+  }
+
+  organizationList.replaceChildren()
+  organizations.forEach((organization) => {
+    const orgId = String(organization?.orgId ?? '').trim()
+    const name = String(organization?.organizationName ?? '').trim()
+    if (!orgId || !name) {
+      return
+    }
+
+    const button = document.createElement('button')
+    button.className = 'login-organization-option'
+    button.type = 'button'
+    button.dataset.orgId = orgId
+    button.setAttribute('role', 'listitem')
+
+    const copy = document.createElement('span')
+    copy.className = 'login-organization-option-copy'
+
+    const nameNode = document.createElement('span')
+    nameNode.className = 'login-organization-option-name'
+    nameNode.textContent = name
+
+    const idNode = document.createElement('span')
+    idNode.className = 'login-organization-option-id'
+    idNode.textContent = orgId
+
+    const arrow = document.createElement('span')
+    arrow.className = 'login-organization-option-arrow'
+    arrow.setAttribute('aria-hidden', 'true')
+    arrow.textContent = '\u203a'
+
+    copy.append(nameNode, idNode)
+    button.append(copy, arrow)
+    organizationList.append(button)
+  })
+}
+
+function showLoginMfaChallenge(factors = []) {
+  const credentialsPanel = document.getElementById('loginCredentialsPanel')
+  const resetPanel = document.getElementById('loginResetPanel')
+  const organizationPanel = document.getElementById('loginOrganizationPanel')
+  const challengePanel = document.getElementById('loginMfaChallengePanel')
+  const enrollmentPanel = document.getElementById('loginMfaEnrollmentPanel')
+  const factorSelect = document.getElementById('loginMfaFactor')
+  const sendCode = document.getElementById('loginMfaSendCode')
+  const title = document.getElementById('loginTitle')
+  const copy = document.getElementById('loginCopy')
+  if (credentialsPanel) credentialsPanel.hidden = true
+  if (resetPanel) resetPanel.hidden = true
+  if (organizationPanel) organizationPanel.hidden = true
+  if (challengePanel) challengePanel.hidden = false
+  if (enrollmentPanel) enrollmentPanel.hidden = true
+  setLoginResetActionVisible(false)
+  if (title) title.textContent = 'PotwierdÅº logowanie'
+  if (copy) copy.textContent = 'Wpisz kod z drugiego skÅ‚adnika uwierzytelniania.'
+  if (factorSelect) {
+    factorSelect.replaceChildren()
+    factors.forEach((factor) => {
+      const option = document.createElement('option')
+      option.value = String(factor?.uid ?? '')
+      option.dataset.factorId = String(factor?.factorId ?? '')
+      option.textContent = factor?.factorId === 'phone'
+        ? `SMS ${factor?.phoneNumber || factor?.displayName || ''}`.trim()
+        : factor?.displayName || 'Aplikacja TOTP'
+      factorSelect.append(option)
+    })
+    factorSelect.dispatchEvent(new Event('change'))
+  }
+  if (sendCode) sendCode.hidden = factorSelect?.selectedOptions?.[0]?.dataset?.factorId !== 'phone'
+}
+
+function showLoginMfaEnrollment() {
+  const credentialsPanel = document.getElementById('loginCredentialsPanel')
+  const resetPanel = document.getElementById('loginResetPanel')
+  const organizationPanel = document.getElementById('loginOrganizationPanel')
+  const challengePanel = document.getElementById('loginMfaChallengePanel')
+  const enrollmentPanel = document.getElementById('loginMfaEnrollmentPanel')
+  const title = document.getElementById('loginTitle')
+  const copy = document.getElementById('loginCopy')
+  const totpSetup = document.getElementById('loginMfaTotpSetup')
+  const phoneSetup = document.getElementById('loginMfaPhoneSetup')
+  const emailSetup = document.getElementById('loginMfaEmailSetup')
+  if (credentialsPanel) credentialsPanel.hidden = true
+  if (resetPanel) resetPanel.hidden = true
+  if (organizationPanel) organizationPanel.hidden = true
+  if (challengePanel) challengePanel.hidden = true
+  if (enrollmentPanel) enrollmentPanel.hidden = false
+  if (totpSetup) totpSetup.hidden = true
+  if (phoneSetup) phoneSetup.hidden = true
+  if (emailSetup) emailSetup.hidden = true
+  setLoginResetActionVisible(false)
+  if (title) title.textContent = 'Zabezpiecz konto'
+  if (copy) copy.textContent = 'Konto administratora platformy wymaga TOTP, kodu SMS albo kodu email.'
+  pendingMfaEnrollmentType = ''
+  pendingEmailMfaChallengeId = ''
+}
+
+function setLoginControlsBusy(isBusy, label = '') {
+  const loginButton = document.getElementById('loginBtn')
+  const resetSend = document.getElementById('loginResetSend')
+  const resetBack = document.getElementById('loginResetBack')
+  const resetOpen = document.getElementById('loginResetOpen')
+  const loginInput = document.getElementById('loginLogin')
+  const passwordInput = document.getElementById('loginPass')
+  const resetEmail = document.getElementById('loginResetEmail')
+  const organizationCancel = document.getElementById('loginOrganizationCancel')
+  const organizationButtons = document.querySelectorAll('.login-organization-option')
+
+  if (loginButton) {
+    loginButton.disabled = isBusy
+    loginButton.textContent = isBusy ? label || 'Logowanie...' : 'Zaloguj'
+  }
+  if (resetSend) {
+    resetSend.disabled = isBusy
+    resetSend.textContent = isBusy ? label || 'WysyÅ‚anie...' : 'WyÅ›lij link'
+  }
+  if (resetBack) {
+    resetBack.disabled = isBusy
+  }
+  if (resetOpen) {
+    resetOpen.disabled = isBusy
+  }
+  if (loginInput) {
+    loginInput.disabled = isBusy
+  }
+  if (passwordInput) {
+    passwordInput.disabled = isBusy
+  }
+  if (resetEmail) {
+    resetEmail.disabled = isBusy
+  }
+  if (organizationCancel) {
+    organizationCancel.disabled = isBusy
+  }
+  organizationButtons.forEach((button) => {
+    button.disabled = isBusy
+  })
+  ;[
+    'loginMfaFactor', 'loginMfaSendCode', 'loginMfaCode', 'loginMfaConfirm', 'loginMfaCancel',
+    'loginMfaChooseTotp', 'loginMfaChooseSms', 'loginMfaChooseEmail', 'loginMfaPhone', 'loginMfaPhoneSend',
+    'loginMfaEmail', 'loginMfaEmailSend',
+    'loginMfaEnrollCode', 'loginMfaEnrollConfirm', 'loginMfaEnrollCancel',
+  ].forEach((id) => {
+    const control = document.getElementById(id)
+    if (control) control.disabled = isBusy
+  })
 }
 
 function formatLoginError(error) {
   const authErrorText = `${error?.code ?? ''} ${error?.message ?? error ?? ''}`.toLowerCase()
-  const isCredentialError =
-    authErrorText.includes('auth/invalid-email') ||
+  if (authErrorText.includes('auth/invalid-email')) {
+    return 'Podaj poprawny adres email.'
+  }
+
+  if (isPasswordResetEligibleLoginError(error)) {
+    return 'NieprawidÅ‚owy email lub hasÅ‚o.'
+  }
+
+  return error instanceof Error ? error.message : 'BÅ‚Ä…d logowania.'
+}
+
+function isPasswordResetEligibleLoginError(error) {
+  const authErrorText = `${error?.code ?? ''} ${error?.message ?? error ?? ''}`.toLowerCase()
+  return (
     authErrorText.includes('auth/invalid-credential') ||
     authErrorText.includes('auth/wrong-password') ||
     authErrorText.includes('auth/user-not-found')
-
-  if (isCredentialError) {
-    return 'B³êdny login lub has³o.'
-  }
-
-  return error instanceof Error ? error.message : 'B³¹d logowania.'
+  )
 }
 
 function calendarCurrentUserTaskIdentity() {
@@ -3478,7 +3800,7 @@ function calendarMarkTaskRead(taskId = '', options = {}) {
   const readAt = new Date().toISOString()
   const actor = calendarCurrentUserTaskIdentity()
   const receipt = { id: actor.id, label: actor.label, at: readAt }
-  const details = `Przeczyta³: ${actor.label}`
+  const details = `PrzeczytaÅ‚: ${actor.label}`
   const nextTasks = tasksBefore.map((item) =>
     item.id === id
       ? calendarNormalizeTask(
@@ -3724,7 +4046,7 @@ async function loadPdfExportFontVfs() {
     pdfExportFontVfsPromise = import('pdfmake/build/vfs_fonts.js').then((module) => {
       const vfs = module?.default ?? module?.pdfMake?.vfs ?? module?.vfs ?? module
       if (!vfs || typeof vfs !== 'object') {
-        throw new Error('Nie uda³o siê przygotowaæ fontów PDF.')
+        throw new Error('Nie udaÅ‚o siÄ™ przygotowaÄ‡ fontÃ³w PDF.')
       }
       return vfs
     })
@@ -3739,7 +4061,7 @@ async function ensurePdfMakeLoaded() {
       ([module, vfs]) => {
         const pdfMake = module?.default ?? module?.pdfMake ?? module
         if (!pdfMake || typeof pdfMake.createPdf !== 'function') {
-          throw new Error('Biblioteka PDF nie jest dostêpna.')
+          throw new Error('Biblioteka PDF nie jest dostÄ™pna.')
         }
         if (typeof pdfMake.addVirtualFileSystem === 'function') {
           pdfMake.addVirtualFileSystem(vfs)
@@ -3762,7 +4084,7 @@ async function ensureJsPdfLoaded() {
   const module = await import('jspdf')
   const jsPdf = module?.jsPDF ?? module?.default?.jsPDF ?? module?.default
   if (typeof jsPdf !== 'function') {
-    throw new Error('Biblioteka jsPDF nie jest dostêpna.')
+    throw new Error('Biblioteka jsPDF nie jest dostÄ™pna.')
   }
 
   window.jspdf = { ...(window.jspdf ?? {}), jsPDF: jsPdf }
@@ -3771,14 +4093,14 @@ async function ensureJsPdfLoaded() {
 
 async function ensurePdfUnicodeFont(pdf) {
   if (!pdf || typeof pdf.addFileToVFS !== 'function' || typeof pdf.addFont !== 'function') {
-    throw new Error('Ta wersja jsPDF nie obs³uguje osadzania fontów Unicode.')
+    throw new Error('Ta wersja jsPDF nie obsÅ‚uguje osadzania fontÃ³w Unicode.')
   }
 
   const vfs = await loadPdfExportFontVfs()
   const regularFont = String(vfs[PDF_EXPORT_FONT_REGULAR_FILE] ?? '').trim()
   const boldFont = String(vfs[PDF_EXPORT_FONT_BOLD_FILE] ?? vfs['Roboto-Bold.ttf'] ?? '').trim()
   if (!regularFont || !boldFont) {
-    throw new Error('Brak plików fontów PDF z polskimi znakami.')
+    throw new Error('Brak plikÃ³w fontÃ³w PDF z polskimi znakami.')
   }
 
   pdf.addFileToVFS(PDF_EXPORT_FONT_REGULAR_FILE, regularFont)
@@ -4333,12 +4655,13 @@ function sidebarGlobalSearchWorkerRoleLabel(worker = {}) {
   const raw = String(worker?.role ?? worker?.type ?? worker?.workerType ?? '').trim()
   const normalized = normalizeSearchText(raw).toLowerCase()
   if (!normalized) return ''
-  if (normalized.includes('admin') || normalized.includes('owner') || normalized.includes('superadmin')) return 'Administrator'
-  if (normalized.includes('kierownik') || normalized.includes('manager') || normalized.includes('menager')) return 'Kierownik'
+  if (normalized.includes('owner') || normalized.includes('wlasciciel')) return 'Owner'
+  if (normalized.includes('admin') || normalized.includes('superadmin')) return 'Administrator'
+  if (normalized.includes('kierownik') || normalized.includes('manager') || normalized.includes('menager')) return 'Manager'
   if (normalized.includes('koordynator') || normalized.includes('coordynator') || normalized.includes('coordinator')) return 'Koordynator'
-  if (normalized.includes('stazysta') || normalized.includes('intern')) return 'Sta¿ysta'
-  if (normalized.includes('mobil') || normalized.includes('teren')) return 'Zespó³ mobilny'
-  if (normalized.includes('staly') || normalized.includes('personel')) return 'Sta³y personel na obiekcie'
+  if (normalized.includes('stazysta') || normalized.includes('intern')) return 'StaÅ¼ysta'
+  if (normalized.includes('mobil') || normalized.includes('teren')) return 'ZespÃ³Å‚ mobilny'
+  if (normalized.includes('staly') || normalized.includes('personel')) return 'StaÅ‚y personel na obiekcie'
   if (normalized.includes('pracownik') || normalized.includes('worker')) return 'Pracownik'
   return raw
 }
@@ -4471,7 +4794,7 @@ function sidebarGlobalSearchRender() {
   }
 
   if (!sidebarGlobalSearchResults.length) {
-    results.innerHTML = '<div class="topbar-search-empty">Brak wyników</div>'
+    results.innerHTML = '<div class="topbar-search-empty">Brak wynikÃ³w</div>'
     results.hidden = false
     input.setAttribute('aria-expanded', 'true')
     input.removeAttribute('aria-activedescendant')
@@ -4812,7 +5135,7 @@ function bindRouteButtons(router) {
 
     const kanbanTeamAddButton = eventTargetClosest(event, '#kanbanPortalTeamAddBtn')
     if (kanbanTeamAddButton) {
-      showTransientNotice('Zespo³y bêd¹ zarz¹dzane z poziomu organizacji.')
+      showTransientNotice('ZespoÅ‚y bÄ™dÄ… zarzÄ…dzane z poziomu organizacji.')
       return
     }
 
@@ -5098,8 +5421,8 @@ function createBindingHelpers() {
 }
 
 function calendarCompletionNoteForTask(task = {}, completedBy = '') {
-  const actor = String(completedBy ?? '').trim() || 'u¿ytkownika'
-  return task.generatedFromComment ? `Za³atwione przez ${actor}` : ''
+  const actor = String(completedBy ?? '').trim() || 'uÅ¼ytkownika'
+  return task.generatedFromComment ? `ZaÅ‚atwione przez ${actor}` : ''
 }
 
 function calendarCompletionActivityDetails(task = {}, note = '', completedBy = '') {
@@ -5107,12 +5430,12 @@ function calendarCompletionActivityDetails(task = {}, note = '', completedBy = '
   const cleanNote = String(note ?? '').trim()
   const actor = String(completedBy ?? '').trim()
   if (actor) {
-    parts.push(`Ukoñczy³: ${actor}`)
+    parts.push(`UkoÅ„czyÅ‚: ${actor}`)
   }
   if (cleanNote) {
     parts.push(`Komentarz: ${cleanNote}`)
   } else if (task.generatedFromComment && actor) {
-    parts.push(`Komentarz: zadanie zosta³o za³atwione przez ${actor}.`)
+    parts.push(`Komentarz: zadanie zostaÅ‚o zaÅ‚atwione przez ${actor}.`)
   }
   if (task.generatedFromComment) {
     const assignees = calendarSelectionText(task.workers)
@@ -5342,13 +5665,15 @@ function createPortalFeatureContext() {
     SETTINGS_TAB_STYLES,
     STYLE_FALLBACK_ID,
     applyPortalTheme,
+    canAdministerWorkers,
     canDeleteWorkers,
     canDeleteClients,
+    canDeleteEvents,
     canManageBackupSettings,
     canManageClients,
     canManageEvents,
     canManageWorkers,
-    canRevealWorkerPasswords,
+    canResetWorkerPasswords,
     clearUserStyle,
     createBackup,
     createBindingHelpers,
@@ -5385,6 +5710,7 @@ function createPortalFeatureContext() {
     getClients,
     getEffectiveStyle,
     getEventsFingerprintForOrg,
+    getNextWorkerIdPreview,
     getWorkdays,
     getWorkers,
     getWorkerTime,
@@ -5414,7 +5740,6 @@ function createPortalFeatureContext() {
     restoreBackupById,
     restoreBackupFromFile,
     restoreLatestPreRestore,
-    revealWorkerPassword,
     setOrgDefaultStyle,
     setPdfUnicodeFont,
     setSelectOptions,
@@ -5440,7 +5765,6 @@ function createPortalFeatureContext() {
     workerDetailIsoToHm,
     workerDetailIsoToTime,
     workerDetailSanitizeFilename,
-    workerPasswordVaultMissingMessage,
     workerTimeSyncSelectionUi,
     workStatusIntervalFromRow,
     workStatusIntervalFromTimes,
@@ -5485,13 +5809,434 @@ function createPortalFeatureContext() {
   }
 }
 
-function bindLogin(router) {
+function setPlatformCenterMessage(message = '', tone = 'error') {
+  const node = document.getElementById('platformCenterMessage')
+  if (!node) return
+  node.textContent = String(message ?? '')
+  node.dataset.tone = message ? tone : ''
+}
+
+function setPlatformCenterVisible(visible) {
+  const center = document.getElementById('platformCenter')
+  const shell = document.querySelector('#portalRoot > .app-shell')
+  if (center) center.hidden = !visible
+  if (shell) {
+    if (visible) shell.setAttribute('inert', '')
+    else shell.removeAttribute('inert')
+  }
+}
+
+function setPlatformEditorMessage(message = '', tone = 'error') {
+  const node = document.getElementById('platformOrganizationEditorMessage')
+  if (!node) return
+  node.textContent = String(message ?? '')
+  node.dataset.tone = message ? tone : ''
+}
+
+function platformDateTimeInput(value) {
+  const date = value ? new Date(value) : null
+  if (!date || Number.isNaN(date.getTime())) return ''
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 16)
+}
+
+function platformDateTimePayload(input) {
+  const value = String(input?.value ?? '').trim()
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
+function populatePlatformOrganizationEditor(organization) {
+  platformSelectedOrganization = { ...organization }
+  const setValue = (id, value) => {
+    const node = document.getElementById(id)
+    if (node) node.value = String(value ?? '')
+  }
+  setValue('platformEditorOrgId', organization.orgId)
+  setValue('platformEditorName', organization.name)
+  setValue('platformEditorStatus', organization.status || 'ACTIVE')
+  setValue('platformEditorOnboardingStatus', organization.onboardingStatus)
+  setValue('platformEditorPlanCode', organization.planCode || 'TRIAL')
+  setValue('platformEditorSubscriptionStatus', organization.subscriptionStatus || 'ACTIVE')
+  setValue('platformEditorTrialEndsAt', platformDateTimeInput(organization.trialEndsAt))
+  setValue('platformEditorCurrentPeriodEndsAt', platformDateTimeInput(organization.currentPeriodEndsAt))
+  setValue('platformEditorOwnerWorkerId', organization.ownerWorkerId)
+  const subtitle = document.getElementById('platformOrganizationEditorSubtitle')
+  if (subtitle) subtitle.textContent = `${organization.name || organization.orgId} Â· ${organization.orgId}`
+  const toggleDeletion = document.getElementById('platformEditorToggleDeletion')
+  if (toggleDeletion) toggleDeletion.textContent = organization.deletedAt ? 'PrzywrÃ³Ä‡ organizacjÄ™' : 'UsuÅ„ organizacjÄ™'
+  const editor = document.getElementById('platformOrganizationEditor')
+  if (editor) editor.hidden = false
+  setPlatformEditorMessage('')
+  editor?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+}
+
+async function openPlatformOrganizationSession(organization) {
+  const reason = String(document.getElementById('platformAccessReason')?.value ?? '').trim()
+  if (reason.length < 3) {
+    setPlatformCenterMessage('Podaj powÃ³d wejÅ›cia do organizacji (minimum 3 znaki).')
+    document.getElementById('platformAccessReason')?.focus()
+    return null
+  }
+  const result = await openPlatformOrganization(organization.orgId, reason)
+  if (result?.status !== 'READY' || !result?.context) throw new Error('Backend nie zwrÃ³ciÅ‚ kontekstu organizacji.')
+  const ready = await acceptPlatformContext(result.context)
+  if (ready?.status !== 'READY' || !ready.session) throw new Error('Nie udaÅ‚o siÄ™ zapisaÄ‡ kontekstu platformowego.')
+  return ready.session
+}
+
+function renderPlatformOrganizations(data, router) {
+  const list = document.getElementById('platformOrganizationList')
+  const pageNode = document.getElementById('platformOrganizationsPage')
+  const previous = document.getElementById('platformOrganizationsPrev')
+  const next = document.getElementById('platformOrganizationsNext')
+  if (!list) return
+  list.replaceChildren()
+  const items = Array.isArray(data?.items) ? data.items : []
+  if (!items.length) {
+    const empty = document.createElement('p')
+    empty.className = 'platform-organization-meta'
+    empty.textContent = 'Nie znaleziono organizacji dla wybranych filtrÃ³w.'
+    list.append(empty)
+  }
+  items.forEach((organization) => {
+    const row = document.createElement('article')
+    row.className = 'platform-organization-row'
+    const identity = document.createElement('div')
+    const name = document.createElement('div')
+    name.className = 'platform-organization-name'
+    name.textContent = organization.name || organization.orgId
+    const id = document.createElement('div')
+    id.className = 'platform-organization-id'
+    id.textContent = organization.orgId
+    identity.append(name, id)
+    const status = document.createElement('span')
+    status.className = `platform-organization-badge${organization.deletedAt ? ' is-deleted' : ''}`
+    status.textContent = organization.deletedAt ? 'UsuniÄ™ta' : organization.status || 'Brak statusu'
+    const plan = document.createElement('div')
+    plan.className = 'platform-organization-meta'
+    plan.textContent = `${organization.planCode || 'Bez pakietu'} Â· ${organization.subscriptionStatus || 'bez statusu'}`
+    const owner = document.createElement('div')
+    owner.className = 'platform-organization-meta'
+    owner.textContent = organization.ownerWorkerId ? `Owner: ${organization.ownerWorkerId}` : 'Brak Ownera'
+    const actions = document.createElement('div')
+    actions.className = 'platform-organization-actions'
+    const manage = document.createElement('button')
+    manage.className = 'platform-organization-manage'
+    manage.type = 'button'
+    manage.textContent = 'ZarzÄ…dzaj'
+    manage.addEventListener('click', async () => {
+      manage.disabled = true
+      setPlatformCenterMessage('Otwieranie bezpiecznego kontekstu...', 'success')
+      try {
+        const session = await openPlatformOrganizationSession(organization)
+        if (!session) return
+        resetPortalState({ session })
+        setUserChip(session)
+        populatePlatformOrganizationEditor(organization)
+        setPlatformCenterMessage('Kontekst organizacji zostaÅ‚ otwarty.', 'success')
+      } catch (error) {
+        setPlatformCenterMessage(error instanceof Error ? error.message : 'Nie udaÅ‚o siÄ™ otworzyÄ‡ organizacji.')
+      } finally {
+        manage.disabled = false
+      }
+    })
+    const open = document.createElement('button')
+    open.className = 'platform-organization-open'
+    open.type = 'button'
+    open.dataset.orgId = organization.orgId
+    open.textContent = 'WejdÅº do organizacji'
+    open.addEventListener('click', async () => {
+      open.disabled = true
+      setPlatformCenterMessage('Otwieranie bezpiecznego kontekstu...', 'success')
+      try {
+        const session = await openPlatformOrganizationSession(organization)
+        if (!session) return
+        setPlatformCenterVisible(false)
+        await activatePortalSession(session, router)
+      } catch (error) {
+        setPlatformCenterMessage(error instanceof Error ? error.message : 'Nie udaÅ‚o siÄ™ wejÅ›Ä‡ do organizacji.')
+      } finally {
+        open.disabled = false
+      }
+    })
+    actions.append(manage, open)
+    row.append(identity, status, plan, owner, actions)
+    list.append(row)
+  })
+  platformOrganizationsPage = Number(data?.page) || 1
+  platformOrganizationsTotalPages = Number(data?.totalPages) || 1
+  if (pageNode) pageNode.textContent = `Strona ${platformOrganizationsPage} z ${platformOrganizationsTotalPages}`
+  if (previous) previous.disabled = platformOrganizationsPage <= 1
+  if (next) next.disabled = platformOrganizationsPage >= platformOrganizationsTotalPages
+}
+
+async function loadPlatformOrganizationCenter(router) {
+  if (platformOrganizationsLoading) return
+  platformOrganizationsLoading = true
+  const list = document.getElementById('platformOrganizationList')
+  if (list) list.textContent = 'Åadowanie organizacji...'
+  setPlatformCenterMessage('')
+  try {
+    const data = await listPlatformOrganizations({
+      search: document.getElementById('platformOrganizationSearch')?.value,
+      status: document.getElementById('platformOrganizationStatus')?.value,
+      planCode: document.getElementById('platformOrganizationPlan')?.value,
+      deletion: document.getElementById('platformOrganizationDeletion')?.value,
+      page: platformOrganizationsPage,
+      pageSize: 25,
+    })
+    renderPlatformOrganizations(data, router)
+  } catch (error) {
+    if (list) list.replaceChildren()
+    setPlatformCenterMessage(error instanceof Error ? error.message : 'Nie udaÅ‚o siÄ™ pobraÄ‡ organizacji.')
+  } finally {
+    platformOrganizationsLoading = false
+  }
+}
+
+async function showPlatformOrganizationCenter(router, { closeCurrent = false } = {}) {
+  if (closeCurrent && String(appState.session?.roleCode ?? '').toUpperCase() === 'PLATFORM_OWNER') {
+    await closePlatformOrganization()
+    clearPlatformContextSession()
+    resetPortalState()
+  }
+  showPortal()
+  const editor = document.getElementById('platformOrganizationEditor')
+  if (editor) editor.hidden = true
+  platformSelectedOrganization = null
+  setPlatformCenterVisible(true)
+  platformOrganizationsPage = 1
+  await loadPlatformOrganizationCenter(router)
+}
+
+function bindPlatformCenter(router) {
+  const search = document.getElementById('platformOrganizationSearch')
+  const filters = [
+    document.getElementById('platformOrganizationStatus'),
+    document.getElementById('platformOrganizationPlan'),
+    document.getElementById('platformOrganizationDeletion'),
+  ].filter(Boolean)
+  const previous = document.getElementById('platformOrganizationsPrev')
+  const next = document.getElementById('platformOrganizationsNext')
+  const logoutButton = document.getElementById('platformCenterLogout')
+  const organizationChip = document.getElementById('organizationChip')
+  const editor = document.getElementById('platformOrganizationEditor')
+  const editorClose = document.getElementById('platformOrganizationEditorClose')
+  const saveOrganization = document.getElementById('platformEditorSaveOrganization')
+  const saveSubscription = document.getElementById('platformEditorSaveSubscription')
+  const transferOwner = document.getElementById('platformEditorTransferOwner')
+  const toggleDeletion = document.getElementById('platformEditorToggleDeletion')
+  const enterOrganization = document.getElementById('platformEditorEnter')
+  let searchTimer = null
+  const refreshFirstPage = () => {
+    platformOrganizationsPage = 1
+    void loadPlatformOrganizationCenter(router)
+  }
+  const handleSearch = () => {
+    window.clearTimeout(searchTimer)
+    searchTimer = window.setTimeout(refreshFirstPage, 250)
+  }
+  const handlePrevious = () => {
+    if (platformOrganizationsPage <= 1) return
+    platformOrganizationsPage -= 1
+    void loadPlatformOrganizationCenter(router)
+  }
+  const handleNext = () => {
+    if (platformOrganizationsPage >= platformOrganizationsTotalPages) return
+    platformOrganizationsPage += 1
+    void loadPlatformOrganizationCenter(router)
+  }
+  const handleCenterLogout = async () => {
+    if (getSession()?.platformContextId) await closePlatformOrganization().catch(() => {})
+    logout()
+    resetPortalState()
+    setPlatformCenterVisible(false)
+    showLoginScreen()
+    showLoginCredentials()
+    setUserChip(null)
+  }
+  const closeEditorContext = async () => {
+    if (!platformSelectedOrganization) return
+    editorClose.disabled = true
+    try {
+      await closePlatformOrganization()
+      clearPlatformContextSession()
+      resetPortalState()
+      platformSelectedOrganization = null
+      if (editor) editor.hidden = true
+      setUserChip(null)
+      setPlatformCenterMessage('Kontekst organizacji zostaÅ‚ zamkniÄ™ty.', 'success')
+      await loadPlatformOrganizationCenter(router)
+    } catch (error) {
+      setPlatformEditorMessage(error instanceof Error ? error.message : 'Nie udaÅ‚o siÄ™ zamknÄ…Ä‡ kontekstu.')
+    } finally {
+      editorClose.disabled = false
+    }
+  }
+  const runEditorAction = async (button, action) => {
+    if (!platformSelectedOrganization) return
+    button.disabled = true
+    setPlatformEditorMessage('Zapisywanie...', 'success')
+    try {
+      const completed = await action()
+      if (completed === false) {
+        setPlatformEditorMessage('')
+        return
+      }
+      setPlatformEditorMessage('Zmiany zapisano.', 'success')
+      await loadPlatformOrganizationCenter(router)
+    } catch (error) {
+      const message = error?.code === 'PLATFORM_REAUTH_REQUIRED'
+        ? 'Ta zmiana wymaga Å›wieÅ¼ego logowania z MFA. Wyloguj siÄ™ i zaloguj ponownie.'
+        : (error instanceof Error ? error.message : 'Nie udaÅ‚o siÄ™ zapisaÄ‡ zmian.')
+      setPlatformEditorMessage(message)
+    } finally {
+      button.disabled = false
+    }
+  }
+  const handleSaveOrganization = () => runEditorAction(saveOrganization, async () => {
+    const result = await updatePlatformOrganization(platformSelectedOrganization.orgId, '', {
+      name: document.getElementById('platformEditorName')?.value,
+      status: document.getElementById('platformEditorStatus')?.value,
+      onboardingStatus: document.getElementById('platformEditorOnboardingStatus')?.value,
+    })
+    platformSelectedOrganization = {
+      ...platformSelectedOrganization,
+      name: result?.name || document.getElementById('platformEditorName')?.value,
+      status: result?.status || document.getElementById('platformEditorStatus')?.value,
+      onboardingStatus: result?.onboarding_status || document.getElementById('platformEditorOnboardingStatus')?.value,
+    }
+    populatePlatformOrganizationEditor(platformSelectedOrganization)
+  })
+  const handleSaveSubscription = () => runEditorAction(saveSubscription, async () => {
+    await updatePlatformOrganization(platformSelectedOrganization.orgId, 'subscription', {
+      planCode: document.getElementById('platformEditorPlanCode')?.value,
+      status: document.getElementById('platformEditorSubscriptionStatus')?.value,
+      trialEndsAt: platformDateTimePayload(document.getElementById('platformEditorTrialEndsAt')),
+      currentPeriodEndsAt: platformDateTimePayload(document.getElementById('platformEditorCurrentPeriodEndsAt')),
+    })
+    platformSelectedOrganization = {
+      ...platformSelectedOrganization,
+      planCode: document.getElementById('platformEditorPlanCode')?.value,
+      subscriptionStatus: document.getElementById('platformEditorSubscriptionStatus')?.value,
+      trialEndsAt: platformDateTimePayload(document.getElementById('platformEditorTrialEndsAt')),
+      currentPeriodEndsAt: platformDateTimePayload(document.getElementById('platformEditorCurrentPeriodEndsAt')),
+    }
+  })
+  const handleTransferOwner = () => runEditorAction(transferOwner, async () => {
+    const newOwnerWorkerId = String(document.getElementById('platformEditorOwnerWorkerId')?.value ?? '').trim()
+    if (!newOwnerWorkerId) throw new Error('Podaj Worker ID nowego Ownera.')
+    await updatePlatformOrganization(platformSelectedOrganization.orgId, 'owner', { newOwnerWorkerId })
+    platformSelectedOrganization = { ...platformSelectedOrganization, ownerWorkerId: newOwnerWorkerId }
+  })
+  const handleToggleDeletion = () => runEditorAction(toggleDeletion, async () => {
+    const deleting = !platformSelectedOrganization.deletedAt
+    if (
+      deleting &&
+      !window.confirm(`Czy na pewno chcesz oznaczyÄ‡ organizacjÄ™ ${platformSelectedOrganization.name || platformSelectedOrganization.orgId} jako usuniÄ™tÄ…?`)
+    ) return false
+    const result = await updatePlatformOrganization(
+      platformSelectedOrganization.orgId,
+      deleting ? 'soft-delete' : 'restore',
+      {},
+    )
+    platformSelectedOrganization = { ...platformSelectedOrganization, deletedAt: result?.deleted_at || null }
+    populatePlatformOrganizationEditor(platformSelectedOrganization)
+    return true
+  })
+  const handleEnterOrganization = async () => {
+    const session = getSession()
+    if (!session || String(session.roleCode ?? '').toUpperCase() !== 'PLATFORM_OWNER') return
+    setPlatformCenterVisible(false)
+    await activatePortalSession(session, router)
+  }
+  const handleOrganizationChip = async () => {
+    if (String(appState.session?.roleCode ?? '').toUpperCase() !== 'PLATFORM_OWNER') return
+    try {
+      await showPlatformOrganizationCenter(router, { closeCurrent: true })
+    } catch (error) {
+      showTransientNotice(error instanceof Error ? error.message : 'Nie udaÅ‚o siÄ™ zamknÄ…Ä‡ kontekstu organizacji.', 'error')
+    }
+  }
+  search?.addEventListener('input', handleSearch)
+  filters.forEach((filter) => filter.addEventListener('change', refreshFirstPage))
+  previous?.addEventListener('click', handlePrevious)
+  next?.addEventListener('click', handleNext)
+  logoutButton?.addEventListener('click', handleCenterLogout)
+  organizationChip?.addEventListener('click', handleOrganizationChip)
+  editorClose?.addEventListener('click', closeEditorContext)
+  saveOrganization?.addEventListener('click', handleSaveOrganization)
+  saveSubscription?.addEventListener('click', handleSaveSubscription)
+  transferOwner?.addEventListener('click', handleTransferOwner)
+  toggleDeletion?.addEventListener('click', handleToggleDeletion)
+  enterOrganization?.addEventListener('click', handleEnterOrganization)
+  return () => {
+    window.clearTimeout(searchTimer)
+    search?.removeEventListener('input', handleSearch)
+    filters.forEach((filter) => filter.removeEventListener('change', refreshFirstPage))
+    previous?.removeEventListener('click', handlePrevious)
+    next?.removeEventListener('click', handleNext)
+    logoutButton?.removeEventListener('click', handleCenterLogout)
+    organizationChip?.removeEventListener('click', handleOrganizationChip)
+    editorClose?.removeEventListener('click', closeEditorContext)
+    saveOrganization?.removeEventListener('click', handleSaveOrganization)
+    saveSubscription?.removeEventListener('click', handleSaveSubscription)
+    transferOwner?.removeEventListener('click', handleTransferOwner)
+    toggleDeletion?.removeEventListener('click', handleToggleDeletion)
+    enterOrganization?.removeEventListener('click', handleEnterOrganization)
+  }
+}
+
+async function activatePortalSession(session, router, { restoreRoute = false } = {}) {
+  const activeOrgId = String(session?.activeOrgId ?? session?.orgId ?? '').trim()
+  const organizationName = String(session?.organizationName ?? '').trim()
+  if (!activeOrgId || !organizationName) {
+    throw new Error('Backend nie zwr\u00f3ci\u0142 kompletnego kontekstu organizacji.')
+  }
+
+  resetPortalState({ session })
+  showPortal()
+  setUserChip(session)
+  await ensurePortalSessionCoreReady()
+  syncSettingsPermissions()
+  await settingsRefreshStyleState({ silent: true })
+
+  if (restoreRoute) {
+    await router.go(readStoredCurrentRoute())
+  } else {
+    clearStoredCurrentRoute()
+    await router.go('dashboard')
+    await hydrateSections(activeOrgId)
+  }
+
+  startDashboardAutoRefresh()
+}
+
+function OLD_bindLogin(router) {
   const loginForm = document.getElementById('loginForm')
   const loginButton = document.getElementById('loginBtn')
   const loginInput = document.getElementById('loginLogin')
   const passwordInput = document.getElementById('loginPass')
+  const resetPanel = document.getElementById('loginResetPanel')
+  const resetEmailInput = document.getElementById('loginResetEmail')
+  const resetSend = document.getElementById('loginResetSend')
+  const resetBack = document.getElementById('loginResetBack')
+  const resetOpen = document.getElementById('loginResetOpen')
+  const organizationList = document.getElementById('loginOrganizationList')
+  const organizationCancel = document.getElementById('loginOrganizationCancel')
 
-  if (!loginButton || !loginInput || !passwordInput) {
+  if (
+    !loginButton ||
+    !loginInput ||
+    !passwordInput ||
+    !resetPanel ||
+    !resetEmailInput ||
+    !resetSend ||
+    !resetBack ||
+    !resetOpen
+  ) {
     return () => {}
   }
 
@@ -5502,60 +6247,433 @@ function bindLogin(router) {
     }
 
     stopDashboardAutoRefresh()
-    loginButton.disabled = true
-    loginButton.textContent = 'Logowanie...'
+    setLoginControlsBusy(true, 'Logowanie...')
     setLoginError('')
 
     try {
-      const session = await login({
+      const result = await login({
         login: loginInput.value,
         password: passwordInput.value,
       })
-      const normalizedSession = await ensureSessionContext(session)
-
-      if (!normalizedSession?.orgId) {
-        throw new Error('Brak orgId w sesji. SprawdŸ OrganizationMember w Data Connect.')
+      if (result?.status === 'ORG_SELECTION_REQUIRED') {
+        showLoginOrganizationSelection(result.organizations)
+        return
       }
-
-      resetPortalState({ session: normalizedSession })
-
-      showPortal()
-      setUserChip(normalizedSession)
-      await ensurePortalSessionCoreReady()
-      syncSettingsPermissions()
-      await settingsRefreshStyleState({ silent: true })
-      clearStoredCurrentRoute()
-      await router.go('dashboard')
-      await hydrateSections(normalizedSession.orgId)
-      startDashboardAutoRefresh()
+      if (result?.status !== 'READY' || !result.session) {
+        throw new Error('Nie uda\u0142o si\u0119 utworzy\u0107 bezpiecznej sesji aplikacji.')
+      }
+      await activatePortalSession(result.session, router)
     } catch (error) {
+      logout()
+      resetPortalState()
+      showLoginScreen()
+      showLoginCredentials({ showResetAction: isPasswordResetEligibleLoginError(error) })
+      setUserChip(null)
       setLoginError(formatLoginError(error))
     } finally {
-      loginButton.disabled = false
-      loginButton.textContent = 'Zaloguj'
+      setLoginControlsBusy(false)
     }
   }
 
-  const handlePasswordKeydown = (event) => {
-    if (event.key === 'Enter') {
-      handleLogin()
+  const handlePasswordReset = async (event) => {
+    event?.preventDefault?.()
+    if (resetSend.disabled) {
+      return
     }
+
+    const email = String(resetEmailInput.value ?? '').trim().toLowerCase()
+    resetEmailInput.value = email
+    setLoginControlsBusy(true, 'WysyÅ‚anie...')
+    setLoginError('')
+    let resetError = null
+
+    try {
+      await requestPasswordReset(email)
+      setLoginError(
+        'JeÅ›li konto z tym adresem istnieje, wysÅ‚aliÅ›my link do zresetowania hasÅ‚a. SprawdÅº rÃ³wnieÅ¼ folder spam.',
+        'success',
+      )
+    } catch (error) {
+      resetError = error
+      setLoginError(
+        error instanceof Error
+          ? error.message
+          : 'Nie udaÅ‚o siÄ™ wysÅ‚aÄ‡ linku do zresetowania hasÅ‚a. SprÃ³buj ponownie.',
+      )
+    } finally {
+      setLoginControlsBusy(false)
+      if (resetError) {
+        resetEmailInput.focus()
+      } else {
+        resetBack.focus()
+      }
+    }
+  }
+
+  const handleResetOpen = () => {
+    passwordInput.value = ''
+    setLoginError('')
+    showLoginPasswordReset(loginInput.value)
+    resetEmailInput.focus()
+  }
+
+  const handleResetBack = () => {
+    loginInput.value = String(resetEmailInput.value ?? '').trim().toLowerCase()
+    setLoginError('')
+    showLoginCredentials()
+    loginInput.focus()
+  }
+
+  const handleLoginFormSubmit = (event) => {
+    if (!resetPanel.hidden) {
+      void handlePasswordReset(event)
+      return
+    }
+    void handleLogin(event)
+  }
+
+  const handleOrganizationSelection = async (event) => {
+    const button = event.target?.closest?.('.login-organization-option')
+    if (!button || button.disabled) {
+      return
+    }
+
+    setLoginControlsBusy(true, 'Wybieranie...')
+    setLoginError('')
+    let contextConfirmed = false
+    try {
+      const result = await selectOrganization(button.dataset.orgId)
+      if (result?.status !== 'READY' || !result.session) {
+        throw new Error('Nie uda\u0142o si\u0119 zatwierdzi\u0107 wybranej organizacji.')
+      }
+      contextConfirmed = true
+      await activatePortalSession(result.session, router)
+    } catch (error) {
+      if (contextConfirmed) {
+        logout()
+        resetPortalState()
+        showLoginScreen()
+        showLoginCredentials()
+        setUserChip(null)
+      }
+      setLoginError(formatLoginError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+
+  const handleOrganizationCancel = () => {
+    logout()
+    setLoginError('')
+    showLoginCredentials()
+    passwordInput.value = ''
+    loginInput.focus()
   }
 
   if (loginForm) {
-    loginForm.addEventListener('submit', handleLogin)
+    loginForm.addEventListener('submit', handleLoginFormSubmit)
   } else {
     loginButton.addEventListener('click', handleLogin)
-    passwordInput.addEventListener('keydown', handlePasswordKeydown)
+    resetSend.addEventListener('click', handlePasswordReset)
   }
+  resetOpen.addEventListener('click', handleResetOpen)
+  resetBack.addEventListener('click', handleResetBack)
+  organizationList?.addEventListener('click', handleOrganizationSelection)
+  organizationCancel?.addEventListener('click', handleOrganizationCancel)
 
   return () => {
     if (loginForm) {
-      loginForm.removeEventListener('submit', handleLogin)
+      loginForm.removeEventListener('submit', handleLoginFormSubmit)
     } else {
       loginButton.removeEventListener('click', handleLogin)
-      passwordInput.removeEventListener('keydown', handlePasswordKeydown)
+      resetSend.removeEventListener('click', handlePasswordReset)
     }
+    resetOpen.removeEventListener('click', handleResetOpen)
+    resetBack.removeEventListener('click', handleResetBack)
+    organizationList?.removeEventListener('click', handleOrganizationSelection)
+    organizationCancel?.removeEventListener('click', handleOrganizationCancel)
+  }
+}
+
+function bindPlatformLogin(router) {
+  const byId = (id) => document.getElementById(id)
+  const loginForm = byId('loginForm')
+  const loginButton = byId('loginBtn')
+  const loginInput = byId('loginLogin')
+  const passwordInput = byId('loginPass')
+  const resetPanel = byId('loginResetPanel')
+  const resetEmail = byId('loginResetEmail')
+  const resetSend = byId('loginResetSend')
+  const resetBack = byId('loginResetBack')
+  const resetOpen = byId('loginResetOpen')
+  const organizationList = byId('loginOrganizationList')
+  const organizationCancel = byId('loginOrganizationCancel')
+  const challengePanel = byId('loginMfaChallengePanel')
+  const enrollmentPanel = byId('loginMfaEnrollmentPanel')
+  const factor = byId('loginMfaFactor')
+  const sendMfaCode = byId('loginMfaSendCode')
+  const mfaCode = byId('loginMfaCode')
+  const confirmMfa = byId('loginMfaConfirm')
+  const cancelMfa = byId('loginMfaCancel')
+  const chooseTotp = byId('loginMfaChooseTotp')
+  const chooseSms = byId('loginMfaChooseSms')
+  const chooseEmail = byId('loginMfaChooseEmail')
+  const totpSetup = byId('loginMfaTotpSetup')
+  const totpSecret = byId('loginMfaTotpSecret')
+  const phoneSetup = byId('loginMfaPhoneSetup')
+  const phone = byId('loginMfaPhone')
+  const sendPhone = byId('loginMfaPhoneSend')
+  const emailSetup = byId('loginMfaEmailSetup')
+  const emailInput = byId('loginMfaEmail')
+  const sendEmailCode = byId('loginMfaEmailSend')
+  const enrollCode = byId('loginMfaEnrollCode')
+  const confirmEnrollment = byId('loginMfaEnrollConfirm')
+  const cancelEnrollment = byId('loginMfaEnrollCancel')
+  if (!loginButton || !loginInput || !passwordInput || !resetPanel || !resetEmail || !resetSend || !resetBack || !resetOpen) return () => {}
+
+  const continueResult = async (result) => {
+    if (result?.status === 'MFA_CHALLENGE_REQUIRED') {
+      pendingMfaChallenge = { factors: result.factors || [], verificationId: '' }
+      showLoginMfaChallenge(result.factors)
+      return
+    }
+    if (result?.status === 'PLATFORM_MFA_ENROLLMENT_REQUIRED') {
+      showLoginMfaEnrollment()
+      return
+    }
+    if (result?.status === 'PLATFORM_SELECTION_REQUIRED') {
+      resetPortalState()
+      await showPlatformOrganizationCenter(router)
+      return
+    }
+    if (result?.status === 'ORG_SELECTION_REQUIRED') {
+      showLoginOrganizationSelection(result.organizations)
+      return
+    }
+    if (result?.status !== 'READY' || !result.session) throw new Error('Nie udaÅ‚o siÄ™ utworzyÄ‡ bezpiecznej sesji aplikacji.')
+    await activatePortalSession(result.session, router)
+  }
+
+  const cancelFlow = () => {
+    logout()
+    pendingMfaChallenge = null
+    pendingMfaEnrollmentType = ''
+    pendingEmailMfaChallengeId = ''
+    setLoginError('')
+    showLoginCredentials()
+    passwordInput.value = ''
+    loginInput.focus()
+  }
+  const handleLogin = async (event) => {
+    event?.preventDefault?.()
+    setLoginControlsBusy(true, 'Logowanie...')
+    setLoginError('')
+    try {
+      await continueResult(await login({ login: loginInput.value, password: passwordInput.value }))
+    } catch (error) {
+      logout()
+      resetPortalState()
+      showLoginScreen()
+      showLoginCredentials({ showResetAction: isPasswordResetEligibleLoginError(error) })
+      setLoginError(formatLoginError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const handleReset = async (event) => {
+    event?.preventDefault?.()
+    setLoginControlsBusy(true, 'WysyÅ‚anie...')
+    setLoginError('')
+    try {
+      await requestPasswordReset(resetEmail.value)
+      setLoginError('JeÅ›li konto z tym adresem istnieje, wysÅ‚aliÅ›my link do zresetowania hasÅ‚a. SprawdÅº rÃ³wnieÅ¼ folder spam.', 'success')
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Nie udaÅ‚o siÄ™ wysÅ‚aÄ‡ linku.')
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const handleOrganization = async (event) => {
+    const button = event.target?.closest?.('.login-organization-option')
+    if (!button) return
+    setLoginControlsBusy(true, 'Wybieranie...')
+    try {
+      await continueResult(await selectOrganization(button.dataset.orgId))
+    } catch (error) {
+      setLoginError(formatLoginError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const updateFactor = () => {
+    const selected = factor?.selectedOptions?.[0]
+    if (sendMfaCode) sendMfaCode.hidden = selected?.dataset?.factorId !== 'phone'
+    pendingMfaChallenge = { ...(pendingMfaChallenge || {}), verificationId: '' }
+  }
+  const requestMfaCode = async () => {
+    setLoginControlsBusy(true, 'WysyÅ‚anie...')
+    try {
+      pendingMfaChallenge = { ...(pendingMfaChallenge || {}), ...(await beginMfaSignInChallenge(factor?.value)) }
+      setLoginError('Kod SMS zostaÅ‚ wysÅ‚any.', 'success')
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Nie udaÅ‚o siÄ™ wysÅ‚aÄ‡ kodu.')
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const resolveMfa = async (event) => {
+    event?.preventDefault?.()
+    setLoginControlsBusy(true, 'Weryfikowanie...')
+    try {
+      if (factor?.selectedOptions?.[0]?.dataset?.factorId === 'phone' && !pendingMfaChallenge?.verificationId) {
+        pendingMfaChallenge = {
+          ...(pendingMfaChallenge || {}),
+          ...(await beginMfaSignInChallenge(factor?.value)),
+        }
+      }
+      await continueResult(await completeMfaSignIn({
+        factorUid: factor?.value,
+        verificationCode: mfaCode?.value,
+        verificationId: pendingMfaChallenge?.verificationId,
+      }))
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Nie udaÅ‚o siÄ™ potwierdziÄ‡ MFA.')
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const setupTotp = async () => {
+    setLoginControlsBusy(true, 'Konfigurowanie...')
+    try {
+      const setup = await beginTotpEnrollment()
+      pendingMfaEnrollmentType = 'totp'
+      if (totpSetup) totpSetup.hidden = false
+      if (phoneSetup) phoneSetup.hidden = true
+      if (emailSetup) emailSetup.hidden = true
+      if (totpSecret) totpSecret.textContent = setup.secretKey
+      setLoginError('Dodaj klucz do aplikacji TOTP i wpisz kod.', 'success')
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Nie udaÅ‚o siÄ™ skonfigurowaÄ‡ TOTP.')
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const setupSms = () => {
+    pendingMfaEnrollmentType = 'phone'
+    if (totpSetup) totpSetup.hidden = true
+    if (phoneSetup) phoneSetup.hidden = false
+    if (emailSetup) emailSetup.hidden = true
+    phone?.focus()
+  }
+  const setupEmail = () => {
+    pendingMfaEnrollmentType = 'email'
+    pendingEmailMfaChallengeId = ''
+    if (totpSetup) totpSetup.hidden = true
+    if (phoneSetup) phoneSetup.hidden = true
+    if (emailSetup) emailSetup.hidden = false
+    if (emailInput && !emailInput.value) emailInput.value = loginInput.value
+    emailInput?.focus()
+    setLoginError('Wpisz adres, na ktÃ³ry chcesz otrzymaÄ‡ jednorazowy kod.', 'success')
+  }
+  const requestEnrollmentSms = async () => {
+    setLoginControlsBusy(true, 'WysyÅ‚anie...')
+    try {
+      await beginPhoneMfaEnrollment(phone?.value, 'loginMfaEnrollRecaptcha')
+      setLoginError('Kod SMS zostaÅ‚ wysÅ‚any.', 'success')
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Nie udaÅ‚o siÄ™ wysÅ‚aÄ‡ kodu.')
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const requestEnrollmentEmail = async () => {
+    setLoginControlsBusy(true, 'WysyÅ‚anie...')
+    try {
+      const challenge = await requestPlatformEmailMfaCode(emailInput?.value)
+      pendingEmailMfaChallengeId = String(challenge?.challengeId ?? '')
+      setLoginError(`Kod zostaÅ‚ wysÅ‚any na ${challenge?.emailMasked || 'podany email'}.`, 'success')
+      enrollCode?.focus()
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Nie udaÅ‚o siÄ™ wysÅ‚aÄ‡ kodu email.')
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const finishEnrollment = async (event) => {
+    event?.preventDefault?.()
+    setLoginControlsBusy(true, 'Potwierdzanie...')
+    try {
+      let result
+      if (pendingMfaEnrollmentType === 'totp') {
+        result = await completeTotpEnrollment(enrollCode?.value)
+      } else if (pendingMfaEnrollmentType === 'phone') {
+        result = await completePhoneMfaEnrollment(enrollCode?.value)
+      } else if (pendingMfaEnrollmentType === 'email') {
+        if (!pendingEmailMfaChallengeId) throw new Error('Najpierw wyÅ›lij kod na email.')
+        result = await verifyPlatformEmailMfaCode({
+          challengeId: pendingEmailMfaChallengeId,
+          code: enrollCode?.value,
+        })
+      } else {
+        throw new Error('Najpierw wybierz metodÄ™ potwierdzenia.')
+      }
+      await continueResult(result)
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Nie udaÅ‚o siÄ™ wÅ‚Ä…czyÄ‡ MFA.')
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const submit = (event) => {
+    if (!resetPanel.hidden) return void handleReset(event)
+    if (challengePanel && !challengePanel.hidden) return void resolveMfa(event)
+    if (enrollmentPanel && !enrollmentPanel.hidden) return void finishEnrollment(event)
+    void handleLogin(event)
+  }
+  const openReset = () => {
+    passwordInput.value = ''
+    showLoginPasswordReset(loginInput.value)
+    resetEmail.focus()
+  }
+  const closeReset = () => {
+    loginInput.value = resetEmail.value
+    showLoginCredentials()
+    loginInput.focus()
+  }
+
+  loginForm?.addEventListener('submit', submit)
+  resetOpen.addEventListener('click', openReset)
+  resetBack.addEventListener('click', closeReset)
+  organizationList?.addEventListener('click', handleOrganization)
+  organizationCancel?.addEventListener('click', cancelFlow)
+  factor?.addEventListener('change', updateFactor)
+  sendMfaCode?.addEventListener('click', requestMfaCode)
+  confirmMfa?.addEventListener('click', resolveMfa)
+  cancelMfa?.addEventListener('click', cancelFlow)
+  chooseTotp?.addEventListener('click', setupTotp)
+  chooseSms?.addEventListener('click', setupSms)
+  chooseEmail?.addEventListener('click', setupEmail)
+  sendPhone?.addEventListener('click', requestEnrollmentSms)
+  sendEmailCode?.addEventListener('click', requestEnrollmentEmail)
+  confirmEnrollment?.addEventListener('click', finishEnrollment)
+  cancelEnrollment?.addEventListener('click', cancelFlow)
+  return () => {
+    loginForm?.removeEventListener('submit', submit)
+    resetOpen.removeEventListener('click', openReset)
+    resetBack.removeEventListener('click', closeReset)
+    organizationList?.removeEventListener('click', handleOrganization)
+    organizationCancel?.removeEventListener('click', cancelFlow)
+    factor?.removeEventListener('change', updateFactor)
+    sendMfaCode?.removeEventListener('click', requestMfaCode)
+    confirmMfa?.removeEventListener('click', resolveMfa)
+    cancelMfa?.removeEventListener('click', cancelFlow)
+    chooseTotp?.removeEventListener('click', setupTotp)
+    chooseSms?.removeEventListener('click', setupSms)
+    chooseEmail?.removeEventListener('click', setupEmail)
+    sendPhone?.removeEventListener('click', requestEnrollmentSms)
+    sendEmailCode?.removeEventListener('click', requestEnrollmentEmail)
+    confirmEnrollment?.removeEventListener('click', finishEnrollment)
+    cancelEnrollment?.removeEventListener('click', cancelFlow)
   }
 }
 
@@ -5565,10 +6683,11 @@ function bindLogout() {
     return () => {}
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     stopEventsPolling()
     stopDashboardAutoRefresh()
     dashboardHideMetricPopover()
+    if (getSession()?.platformContextId) await closePlatformOrganization().catch(() => {})
     resetPortalState()
     clearStoredCurrentRoute()
 
@@ -5577,6 +6696,8 @@ function bindLogout() {
     syncSettingsPermissions()
     applyPortalTheme(STYLE_FALLBACK_ID)
     showLoginScreen()
+    showLoginCredentials()
+    setLoginError('')
   }
 
   logoutButton.addEventListener('click', handleLogout)
@@ -5925,7 +7046,7 @@ export function mountPortalApp() {
     } catch (error) {
       console.warn('[portal/route] failed to load route', nextRoute, error)
       showPortalRouteLoadError(nextRoute, error)
-      showPortalErrorNotice('Nie uda³o siê wczytaæ sekcji', error)
+      showPortalErrorNotice('Nie udaÅ‚o siÄ™ wczytaÄ‡ sekcji', error)
       return false
     } finally {
       if (showTransition) {
@@ -5986,7 +7107,8 @@ export function mountPortalApp() {
     bindSubmenuToggles(),
     bindSidebarGlobalSearch(navigation),
     bindRouteButtons(navigation),
-    bindLogin(navigation),
+    bindPlatformLogin(navigation),
+    bindPlatformCenter(navigation),
     bindLogout(),
     cleanupPortalLazyRoutes,
     () => document.removeEventListener('visibilitychange', handleVisibilityChange),
@@ -6001,37 +7123,44 @@ export function mountPortalApp() {
   window.go = navigatePortalRoute
 
   void (async () => {
-  await waitForFirebaseAuthReady()
-  if (portalDisposed) {
-    return
-  }
+    showLoginScreen()
+    showLoginCredentials()
+    setUserChip(null)
+    setLoginControlsBusy(true, 'Sprawdzanie sesji...')
+    const firebaseUser = await waitForFirebaseAuthReady()
+    if (portalDisposed) {
+      return
+    }
 
-  const session = requireAuth() ?? getSession()
+    const session = requireAuth() ?? getSession()
 
-  if (session) {
-    appState.session = session
-
-    showPortal()
-    setUserChip(session)
-
-    void (async () => {
+    if (firebaseUser) {
       try {
-        const normalizedSession = await ensureSessionContext(session)
-        if (!normalizedSession?.orgId) {
-          throw new Error('Brak orgId w sesji. Zaloguj siê ponownie.')
+        const result = await ensureSessionContext(session)
+        if (result?.status === 'PLATFORM_MFA_ENROLLMENT_REQUIRED') {
+          resetPortalState()
+          showLoginMfaEnrollment()
+          setLoginControlsBusy(false)
+          return
         }
-
-        appState.session = normalizedSession
-        setUserChip(normalizedSession)
-        await ensurePortalSessionCoreReady()
-        syncSettingsPermissions()
-        await settingsRefreshStyleState({ silent: true })
-        await navigation.go(readStoredCurrentRoute())
-        if (dashboardFeature) {
-          startDashboardAutoRefresh()
+        if (result?.status === 'PLATFORM_SELECTION_REQUIRED') {
+          resetPortalState()
+          await showPlatformOrganizationCenter(navigation)
+          setLoginControlsBusy(false)
+          return
         }
+        if (result?.status === 'ORG_SELECTION_REQUIRED') {
+          resetPortalState()
+          showLoginOrganizationSelection(result.organizations)
+          setLoginControlsBusy(false)
+          return
+        }
+        if (result?.status !== 'READY' || !result.session) {
+          throw new Error('Nie uda\u0142o si\u0119 odtworzy\u0107 bezpiecznej sesji aplikacji.')
+        }
+        await activatePortalSession(result.session, navigation, { restoreRoute: true })
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'B³¹d inicjalizacji sesji.'
+        const message = error instanceof Error ? error.message : 'BÅ‚Ä…d inicjalizacji sesji.'
         console.error(message)
         stopDashboardAutoRefresh()
         logout()
@@ -6045,18 +7174,19 @@ export function mountPortalApp() {
         syncSettingsPermissions()
         setLoginError(message)
       }
-    })()
-  } else {
-    stopDashboardAutoRefresh()
-    resetPortalState()
-    clearStoredCurrentRoute()
-    dashboardHideScheduleMissingStartAlert()
-    dashboardHideScheduleLateStartAlert()
-    showLoginScreen()
-    setUserChip(null)
-    applyPortalTheme(STYLE_FALLBACK_ID)
-    syncSettingsPermissions()
-  }
+    } else {
+      stopDashboardAutoRefresh()
+      resetPortalState()
+      clearStoredCurrentRoute()
+      dashboardHideScheduleMissingStartAlert()
+      dashboardHideScheduleLateStartAlert()
+      showLoginScreen()
+      showLoginCredentials()
+      setUserChip(null)
+      applyPortalTheme(STYLE_FALLBACK_ID)
+      syncSettingsPermissions()
+    }
+    setLoginControlsBusy(false)
   })()
 
   return () => {

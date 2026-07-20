@@ -12,6 +12,10 @@ type Organization @table(
   orgId: String! @col(name: "org_id", dataType: "varchar(64)")
   name: String! @col(name: "name", dataType: "varchar(120)")
   status: String @col(name: "status", dataType: "varchar(30)")
+  onboardingStatus: String @col(name: "onboarding_status", dataType: "varchar(30)")
+  ownerUid: String @col(name: "owner_uid", dataType: "varchar(128)")
+  ownerWorkerId: String @col(name: "owner_worker_id", dataType: "varchar(128)")
+  deletedAt: Timestamp @col(name: "deleted_at")
   createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
 }
 
@@ -27,7 +31,22 @@ type OrganizationMember @table(
 
   uid: String! @col(name: "uid", dataType: "varchar(128)")
   role: String! @col(name: "role", dataType: "varchar(30)") # ADMIN / MANAGER / WORKER
+  workerId: String @col(name: "worker_id", dataType: "varchar(128)")
+  status: String @col(name: "status", dataType: "varchar(30)")
   createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
+}
+
+type OrganizationSubscription @table(
+  name: "organization_subscription",
+  singular: "organizationSubscription",
+  plural: "organizationSubscriptions",
+  key: "orgId"
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+  planCode: String @col(name: "plan_code", dataType: "varchar(30)")
+  status: String @col(name: "status", dataType: "varchar(30)")
+  trialEndsAt: Timestamp @col(name: "trial_ends_at")
 }
 
 type OrgUiStyle @table(
@@ -69,7 +88,7 @@ type Worker @table(
   organization: Organization! @ref(fields: "orgId", references: "orgId")
 
   login: String! @col(name: "login", dataType: "varchar(80)")
-  workerId: String @col(name: "worker_id", dataType: "varchar(64)")
+  workerId: String @col(name: "worker_id", dataType: "varchar(128)")
   workerName: String @col(name: "full_name")
 
   # Login email do aplikacji: np. franosz@bestclean.pl
@@ -82,6 +101,7 @@ type Worker @table(
   role: String @col(name: "role", dataType: "varchar(32)")
 
   active: Boolean @col(name: "active")
+  status: String @col(name: "status", dataType: "varchar(30)")
   email: String @col(name: "email")
   phone: String @col(name: "phone")
   workerType: String @col(name: "worker_type", dataType: "varchar(40)")
@@ -91,25 +111,19 @@ type Worker @table(
   edit: String @col(name: "edit")
 }
 
-type WorkerCredential @table(
-  name: "worker_credential",
-  singular: "workerCredential",
-  plural: "workerCredentials",
-  key: ["orgId", "login"]
-) {
+type WorkerIdReservation @table(
+  name: "worker_id_reservation",
+  singular: "workerIdReservation",
+  plural: "workerIdReservations",
+  key: ["orgId", "workerNumber"]
+)
+@index(name: "worker_id_reservation_org_worker_id_idx", fields: ["orgId", "workerId"]) {
   orgId: String! @col(name: "org_id", dataType: "varchar(64)")
   organization: Organization! @ref(fields: "orgId", references: "orgId")
-
-  login: String! @col(name: "login", dataType: "varchar(80)")
-  worker: Worker! @ref(fields: ["orgId", "login"], references: ["orgId", "login"])
-
-  encryptedPassword: String! @col(name: "encrypted_password")
-  iv: String! @col(name: "iv", dataType: "varchar(64)")
-  authTag: String! @col(name: "auth_tag", dataType: "varchar(64)")
-  algorithm: String! @col(name: "algorithm", dataType: "varchar(40)")
-
-  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
-  updatedBy: String @col(name: "updated_by", dataType: "varchar(160)")
+  workerNumber: Int! @col(name: "worker_number")
+  workerId: String! @col(name: "worker_id", dataType: "varchar(128)")
+  createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
+  createdByUid: String @col(name: "created_by_uid", dataType: "varchar(128)")
 }
 
 
@@ -305,7 +319,7 @@ type Task @table(
   requiredPeople: Int @col(name: "required_people")
   workAllocations: String @col(name: "work_allocations")
 
-  workerId: String @col(name: "worker_id", dataType: "varchar(64)")
+  workerId: String @col(name: "worker_id", dataType: "varchar(128)")
   workerIds: String @col(name: "worker_ids")
   workerLabel: String @col(name: "worker_label")
   workerName: String @col(name: "worker_name")

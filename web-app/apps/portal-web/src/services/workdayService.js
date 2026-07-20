@@ -5,9 +5,10 @@
   updateWorkdayForOrg,
   workdaysForOrg,
   workerWorkdaysForOrg,
-} from '@dataconnect/generated'
+} from './platformDataConnectService'
 import { executeMutation, executeQuery, mutationRef, queryRef } from 'firebase/data-connect'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
+import { executePlatformDataConnect, isPlatformSession, platformContextHeaders } from './platformDataConnectService'
 import { getClients } from './clientService'
 import { getZones } from './zoneService'
 import { getWorkers } from './workerService'
@@ -112,6 +113,7 @@ async function portalEventAuthHeaders() {
   return {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${idToken}`,
+    ...platformContextHeaders(),
   }
 }
 
@@ -769,6 +771,7 @@ function getDataConnectInstance() {
 
 async function runQueryOperation(operationName, variables) {
   try {
+    if (isPlatformSession()) return await executePlatformDataConnect('query', operationName, variables)
     return await executeQuery(queryRef(getDataConnectInstance(), operationName, variables))
   } catch (error) {
     throw withOperationNotFoundHint(error, operationName)
@@ -777,6 +780,7 @@ async function runQueryOperation(operationName, variables) {
 
 async function runMutationOperation(operationName, variables) {
   try {
+    if (isPlatformSession()) return await executePlatformDataConnect('mutation', operationName, variables)
     return await executeMutation(mutationRef(getDataConnectInstance(), operationName, variables))
   } catch (error) {
     throw withOperationNotFoundHint(error, operationName)

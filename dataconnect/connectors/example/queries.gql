@@ -6,11 +6,16 @@
 
 query MyOrganizations @auth(level: USER) {
   organizationMembers(
-    where: { uid: { eq_expr: "auth.uid" } }
+    where: {
+      uid: { eq_expr: "auth.uid" }
+      status: { eq: "ACTIVE" }
+    }
     orderBy: [{ orgId: ASC }]
   ) {
     orgId
     role
+    workerId
+    status
     organization { orgId name status }
   }
 }
@@ -18,7 +23,8 @@ query MyOrganizations @auth(level: USER) {
 query OrgUiStyleForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   orgUiStyle(key: { orgId: $orgId }) {
@@ -32,7 +38,8 @@ query OrgUiStyleForOrg($orgId: String!) @auth(level: USER) {
 query MyUiStylePreference($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   userUiStylePreference(key: { orgId: $orgId, uid_expr: "auth.uid" }) {
@@ -47,7 +54,8 @@ query MyUiStylePreference($orgId: String!) @auth(level: USER) {
 query UserUiStylePreferencesForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN']", message: "Brak uprawnien do odczytu preferencji stylow.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do odczytu preferencji stylow.")
     }
 
   userUiStylePreferences(
@@ -65,15 +73,21 @@ query UserUiStylePreferencesForOrg($orgId: String!) @auth(level: USER) {
 query CanManageWorkersForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do dodawania pracownikow.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do dodawania pracownikow.")
     }
 }
 
 query WorkersForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
+
+  organization(key: { orgId: $orgId }) {
+    ownerWorkerId
+  }
 
   workers(where: { orgId: { eq: $orgId } }, orderBy: [{ workerName: ASC }]) {
     login
@@ -92,37 +106,11 @@ query WorkersForOrg($orgId: String!) @auth(level: USER) {
   }
 }
 
-query AdminWorkerCredentialForOrg($orgId: String!, $login: String!) @auth(level: USER) {
-  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
-    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN']", message: "Brak uprawnien do podgladu hasla pracownika.")
-    }
-
-  worker(key: { orgId: $orgId, login: $login })
-    @check(expr: "this != null", message: "Nie znaleziono pracownika w tej organizacji.") {
-      login
-      workerName
-      loginEmail
-      email
-      authUid
-  }
-
-  workerCredential(key: { orgId: $orgId, login: $login }) {
-    orgId
-    login
-    encryptedPassword
-    iv
-    authTag
-    algorithm
-    updatedAt
-    updatedBy
-  }
-}
-
 query ClientsForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   clients(where: { orgId: { eq: $orgId } }, orderBy: [{ name: ASC }]) {
@@ -180,7 +168,8 @@ query ClientsForOrg($orgId: String!) @auth(level: USER) {
 query IndividualJobsForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   individualClientJobs(where: { orgId: { eq: $orgId } }, orderBy: [{ date: DESC }, { clientIndId: ASC }]) {
@@ -199,7 +188,8 @@ query IndividualJobsForOrg($orgId: String!) @auth(level: USER) {
 query TasksForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   tasks(
@@ -261,7 +251,8 @@ query TasksForOrg($orgId: String!) @auth(level: USER) {
 query ZonesForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   zones(limit: 5000, where: { orgId: { eq: $orgId } }, orderBy: [{ zone: ASC }]) {
@@ -278,7 +269,8 @@ query ZonesForOrg($orgId: String!) @auth(level: USER) {
 query WorkdaysForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   workdays(limit: 5000, where: { orgId: { eq: $orgId } }, orderBy: [{ startAt: DESC }]) {
@@ -307,7 +299,8 @@ query WorkdaysForOrg($orgId: String!) @auth(level: USER) {
 query WorkdaysPageForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   workdays(
@@ -341,7 +334,8 @@ query WorkdaysPageForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: 
 query WorkdaysPageForOrgByWorker($orgId: String!, $workerLogin: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   workdays(
@@ -375,7 +369,8 @@ query WorkdaysPageForOrgByWorker($orgId: String!, $workerLogin: String!, $fromSt
 query WorkdaysPageForOrgByRoom($orgId: String!, $utilityRoomId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   workdays(
@@ -409,7 +404,8 @@ query WorkdaysPageForOrgByRoom($orgId: String!, $utilityRoomId: String!, $fromSt
 query WorkdaysPageForOrgByStatus($orgId: String!, $status: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   workdays(
@@ -443,7 +439,8 @@ query WorkdaysPageForOrgByStatus($orgId: String!, $status: String!, $fromStartAt
 query WorkdaysFingerprintForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   workdays(
@@ -462,7 +459,8 @@ query WorkdaysFingerprintForOrg($orgId: String!, $fromStartAt: Timestamp!, $toSt
 query BackupCyclesForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   backupCycles(limit: 5000, where: { orgId: { eq: $orgId } }, orderBy: [{ startAt: DESC }]) {
@@ -484,7 +482,8 @@ query BackupCyclesForOrg($orgId: String!) @auth(level: USER) {
 query EventsForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   events(limit: 5000, where: { orgId: { eq: $orgId } }, orderBy: [{ startAt: DESC }]) {
@@ -521,7 +520,8 @@ query EventsForOrg($orgId: String!) @auth(level: USER) {
 query EventsPageForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   events(
@@ -563,7 +563,8 @@ query EventsPageForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: Ti
 query EventsPageForOrgByWorker($orgId: String!, $workerLogin: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   events(
@@ -605,7 +606,8 @@ query EventsPageForOrgByWorker($orgId: String!, $workerLogin: String!, $fromStar
 query EventsPageForOrgByZone($orgId: String!, $zoneId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   events(
@@ -647,7 +649,8 @@ query EventsPageForOrgByZone($orgId: String!, $zoneId: String!, $fromStartAt: Ti
 query EventsPageForOrgByStatus($orgId: String!, $status: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   events(
@@ -689,7 +692,8 @@ query EventsPageForOrgByStatus($orgId: String!, $status: String!, $fromStartAt: 
 query EventsFingerprintForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   events(
@@ -709,7 +713,8 @@ query EventsFingerprintForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStar
 query WorkerWorkdaysForOrg($orgId: String!, $workerLogin: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   workdays(
@@ -742,7 +747,8 @@ query WorkerWorkdaysForOrg($orgId: String!, $workerLogin: String!) @auth(level: 
 query StorageForOrg($orgId: String!, $limit: Int, $offset: Int) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   storages(
@@ -767,7 +773,8 @@ query StorageForOrg($orgId: String!, $limit: Int, $offset: Int) @auth(level: USE
 query ClientStorageForClient($orgId: String!, $clientId: String!, $limit: Int, $offset: Int) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   clientStorages(
@@ -793,7 +800,8 @@ query ClientStorageForClient($orgId: String!, $clientId: String!, $limit: Int, $
 query ClientStorageForOrg($orgId: String!, $limit: Int, $offset: Int) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   clientStorages(
@@ -817,7 +825,8 @@ query ClientStorageForOrg($orgId: String!, $limit: Int, $offset: Int) @auth(leve
 query WorkdayPausesForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   workdayPauses(
@@ -843,7 +852,8 @@ query WorkdayPausesForOrg($orgId: String!) @auth(level: USER) {
 query ActiveWorkdayPauseForWorker($orgId: String!, $workerLogin: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
     }
 
   workdayPauses(

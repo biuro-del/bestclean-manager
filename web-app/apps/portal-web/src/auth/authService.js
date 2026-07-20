@@ -1,17 +1,45 @@
-import { clientsForOrg, myOrganizations, workersForOrg } from '@dataconnect/generated'
-import { signInWithEmailAndPassword, signOut } from 'firebase/auth'
+import {
+  PhoneAuthProvider,
+  PhoneMultiFactorGenerator,
+  RecaptchaVerifier,
+  TotpMultiFactorGenerator,
+  getMultiFactorResolver,
+  multiFactor,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut,
+} from 'firebase/auth'
 import {
   ensureFirebase,
   ensureFirebaseAuthPersistence,
   isFirebaseConfigured,
   waitForFirebaseAuthReady,
 } from '../firebase/firebaseClient'
+import { renderSubscriptionBadge } from '../ui/subscriptionBadge'
 
 const AUTH_STORAGE_KEY = 'iclean.portal.auth'
 const LAST_ORG_STORAGE_KEY = 'iclean.portal.lastOrgId'
+const PLATFORM_CONTEXT_STORAGE_KEY = 'iclean.portal.platformContextId'
+const PLATFORM_EMAIL_MFA_TOKEN_KEY = 'iclean.portal.platformEmailMfaToken'
+const AUTH_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const AUTH_EMAIL_MAX_LENGTH = 160
+let pendingMfaResolver = null
+let pendingMfaEnrollment = null
+let pendingRecaptchaVerifier = null
 
 function toText(value) {
   return String(value ?? '').trim()
+}
+
+function createPublicAuthError(code, message) {
+  const error = new Error(message)
+  error.code = code
+  return error
+}
+
+function normalizeAuthEmail(value) {
+  const email = toText(value).toLowerCase()
+  return email.length <= AUTH_EMAIL_MAX_LENGTH && AUTH_EMAIL_PATTERN.test(email) ? email : ''
 }
 
 function parseSession(raw) {
@@ -27,16 +55,22 @@ function parseSession(raw) {
 }
 
 function mapRole(dcRole) {
-  const normalized = String(dcRole ?? '')
-    .trim()
-    .toUpperCase()
+  const normalized = toText(dcRole).toUpperCase()
 
-  if (normalized === 'ADMIN' || normalized === 'OWNER' || normalized === 'SUPERADMIN') {
+  if (normalized === 'OWNER') {
+    return 'Owner'
+  }
+
+  if (normalized === 'PLATFORM_OWNER') {
+    return 'Platform owner'
+  }
+
+  if (normalized === 'ADMIN' || normalized === 'SUPERADMIN') {
     return 'Admin'
   }
 
   if (normalized === 'MANAGER' || normalized === 'KIEROWNIK') {
-    return 'Kierownik'
+    return 'Manager'
   }
 
   if (normalized === 'WORKER' || normalized === 'PRACOWNIK') {
@@ -71,152 +105,8 @@ function assertPortalAccessAllowed(context) {
   }
 }
 
-function extractOrgIdFromEmail(email) {
-  const normalized = String(email ?? '').trim().toLowerCase()
-  const parts = normalized.split('@')
-  if (parts.length !== 2) {
-    return ''
-  }
-
-  const domain = parts[1]
-  const domainMain = domain.split('.')[0] ?? ''
-  return domainMain.replace(/[^a-z0-9_-]/g, '')
-}
-
-function emailPrefix(value) {
-  const normalized = toText(value).toLowerCase()
-  if (!normalized || !normalized.includes('@')) {
-    return ''
-  }
-  return normalized.split('@')[0]
-}
-
-function normalizePersonName(value) {
-  const raw = toText(value)
-  if (!raw) {
-    return ''
-  }
-
-  try {
-    return raw
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim()
-  } catch {
-    return raw.toLowerCase().replace(/\s+/g, ' ').trim()
-  }
-}
-
-function isWorkerActiveValue(value) {
-  if (typeof value === 'boolean') {
-    return value
-  }
-
-  const normalized = toText(value).toLowerCase()
-  if (!normalized) {
-    return true
-  }
-
-  return !['false', '0', 'no', 'nie'].includes(normalized)
-}
-
-function normalizeWorkerId(value) {
-  const normalized = toText(value).toUpperCase()
-  return /^W\d+$/.test(normalized) ? normalized : ''
-}
-
-function workerIdFromRow(row = {}) {
-  return normalizeWorkerId(row.workerId ?? row.worker_id ?? row.workerid ?? row.id)
-}
-
-function findUniqueWorker(rows, predicate) {
-  const matches = rows.filter(predicate)
-  return matches.length === 1 ? matches[0] : null
-}
-
-function resolveWorkerRowForUser(workerRows, firebaseUser) {
-  const rows = Array.isArray(workerRows) ? workerRows : []
-  const authUid = toText(firebaseUser?.uid)
-  const email = toText(firebaseUser?.email).toLowerCase()
-  const loginFromEmail = emailPrefix(email)
-  const displayName = normalizePersonName(firebaseUser?.displayName)
-
-  if (authUid) {
-    const byAuthUid = findUniqueWorker(rows, (row) => {
-      return toText(row?.authUid ?? row?.auth_uid) === authUid
-    })
-    if (byAuthUid) {
-      return byAuthUid
-    }
-  }
-
-  if (email) {
-    const byEmail = findUniqueWorker(rows, (row) => {
-      const workerEmail = toText(row?.email).toLowerCase()
-      const workerLoginEmail = toText(row?.loginEmail).toLowerCase()
-      return workerEmail === email || workerLoginEmail === email
-    })
-    if (byEmail) {
-      return byEmail
-    }
-  }
-
-  if (loginFromEmail) {
-    const byLogin = findUniqueWorker(rows, (row) => toText(row?.login).toLowerCase() === loginFromEmail)
-    if (byLogin) {
-      return byLogin
-    }
-  }
-
-  if (displayName) {
-    const byName = findUniqueWorker(rows, (row) => {
-      const workerName = normalizePersonName(row?.workerName ?? row?.fullName ?? row?.name)
-      return workerName && workerName === displayName
-    })
-    if (byName) {
-      return byName
-    }
-  }
-
-  return null
-}
-
-async function assertWorkerIsActive(orgId, firebaseUser) {
-  const normalizedOrgId = toText(orgId)
-  if (!normalizedOrgId || !firebaseUser) {
-    return null
-  }
-
-  const response = await workersForOrg({ orgId: normalizedOrgId })
-  const workerRows = response?.data?.workers ?? []
-  const workerRow = resolveWorkerRowForUser(workerRows, firebaseUser)
-
-  if (!workerRow) {
-    return null
-  }
-
-  if (!isWorkerActiveValue(workerRow.active)) {
-    throw new Error('Konto pracownika jest nieaktywne. Skontaktuj sie z administratorem.')
-  }
-
-  return workerRow
-}
-
-function isTrue(value) {
-  return String(value ?? '')
-    .trim()
-    .toLowerCase() === 'true'
-}
-
-function isLocalHttpEndpoint(value) {
-  const endpoint = String(value ?? '').trim().toLowerCase()
-  return endpoint.includes('://127.0.0.1') || endpoint.includes('://localhost')
-}
-
 function normalizeApiBase(value) {
-  const raw = String(value ?? '').trim()
+  const raw = toText(value)
   if (!raw) return '/api'
   if (raw.startsWith('/')) {
     const withoutTrailing = raw.replace(/\/+$/, '')
@@ -231,208 +121,154 @@ function getAuthApiBase() {
   return normalizeApiBase(import.meta.env.VITE_ADMIN_API_BASE || '/api')
 }
 
-function isDataConnectOrganizationFailure(error) {
-  const message = String(error?.message ?? error ?? '').toLowerCase()
-  return (
-    message.includes('organizationmembers') ||
-    message.includes('organizationmember') ||
-    message.includes('sql execution failed') ||
-    message.includes('"code":"internal"') ||
-    message.includes('code":"internal')
-  )
+export function platformEmailMfaHeaders() {
+  const token = toText(sessionStorage.getItem(PLATFORM_EMAIL_MFA_TOKEN_KEY))
+  return token ? { 'X-Platform-Email-Mfa-Token': token } : {}
 }
 
-async function fetchBackendOrganizationMemberships(firebaseUser, orgIdHint = '') {
+function createBackendError(response, body) {
+  const message =
+    toText(body?.error?.message) ||
+    (response.status === 403
+      ? 'Brak uprawnień do portalu dla tego konta.'
+      : 'Nie udało się zweryfikować dostępu do organizacji.')
+  const error = new Error(message)
+  error.code = toText(body?.error?.code) || 'AUTH_CONTEXT_ERROR'
+  error.status = response.status
+  return error
+}
+
+async function requestSessionContext(firebaseUser, { orgId = '', method = 'GET' } = {}) {
   if (!firebaseUser) {
-    return []
+    throw new Error('Brak aktywnej sesji Firebase.')
   }
 
+  const normalizedOrgId = toText(orgId)
+  const normalizedMethod = normalizedOrgId && method === 'POST' ? 'POST' : 'GET'
   const idToken = await firebaseUser.getIdToken()
-  const hint = String(orgIdHint ?? '').trim()
-  const url = `${getAuthApiBase()}/auth/session-context${hint ? `?orgId=${encodeURIComponent(hint)}` : ''}`
+  const url =
+    normalizedMethod === 'GET' && normalizedOrgId
+      ? `${getAuthApiBase()}/auth/session-context?orgId=${encodeURIComponent(normalizedOrgId)}`
+      : `${getAuthApiBase()}/auth/session-context`
   const response = await fetch(url, {
-    method: 'GET',
+    method: normalizedMethod,
     headers: {
       Authorization: `Bearer ${idToken}`,
       Accept: 'application/json',
+      ...(toText(localStorage.getItem(PLATFORM_CONTEXT_STORAGE_KEY))
+        ? { 'X-Platform-Context-Id': toText(localStorage.getItem(PLATFORM_CONTEXT_STORAGE_KEY)) }
+        : {}),
+      ...platformEmailMfaHeaders(),
+      ...(normalizedMethod === 'POST' ? { 'Content-Type': 'application/json' } : {}),
     },
+    ...(normalizedMethod === 'POST' ? { body: JSON.stringify({ orgId: normalizedOrgId }) } : {}),
   })
-
-  if (!response.ok) {
-    let message = ''
-    try {
-      const body = await response.json()
-      message = String(body?.error?.message ?? '').trim()
-    } catch {
-      message = ''
-    }
-    throw new Error(message || 'Nie udało się pobrać organizacji użytkownika z backendu.')
-  }
-
   const body = await response.json().catch(() => ({}))
-  return Array.isArray(body?.data?.organizationMembers) ? body.data.organizationMembers : []
-}
-
-function getBootstrapMembershipEndpoint() {
-  const fromEnv = String(import.meta.env.VITE_AUTH_BOOTSTRAP_MEMBERSHIP_ENDPOINT ?? '').trim()
-  const useEmulators = isTrue(import.meta.env.VITE_USE_EMULATORS)
-  if (fromEnv && (!isLocalHttpEndpoint(fromEnv) || useEmulators)) {
-    return fromEnv
-  }
-
-  if (!useEmulators) {
-    return '/authBootstrapMembership'
-  }
-
-  const projectId = String(import.meta.env.VITE_FIREBASE_PROJECT_ID ?? 'iclean-room').trim() || 'iclean-room'
-  const host = String(import.meta.env.VITE_FUNCTIONS_EMULATOR_HOST ?? '').trim()
-  const port = Number(import.meta.env.VITE_FUNCTIONS_EMULATOR_PORT ?? 5001)
-  if (useEmulators && host) {
-    return `http://${host}:${port}/${projectId}/europe-west3/authBootstrapMembership`
-  }
-
-  return '/authBootstrapMembership'
-}
-
-async function bootstrapMembershipIfNeeded(firebaseUser, orgIdHint) {
-  const endpoint = getBootstrapMembershipEndpoint()
-  if (!endpoint || !firebaseUser) {
-    return false
-  }
-
-  const idToken = await firebaseUser.getIdToken(true)
-  const payload = {}
-  const normalizedOrgId = String(orgIdHint ?? '').trim()
-  if (normalizedOrgId) {
-    payload.orgId = normalizedOrgId
-  }
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify(payload),
-  })
 
   if (!response.ok) {
-    let message = ''
-    try {
-      const body = await response.json()
-      message = String(body?.error?.message ?? '').trim()
-    } catch {
-      message = ''
-    }
-    throw new Error(message || 'Nie udalo sie przypisac organizacji do konta Firebase.')
+    throw createBackendError(response, body)
   }
 
-  return true
-}
+  const payload = body?.data && typeof body.data === 'object' ? body.data : body
+  const status = toText(payload?.status).toUpperCase()
 
-async function resolveOrganizationContext(userEmail, firebaseUser = null) {
-  const orgFromEmailHint = extractOrgIdFromEmail(userEmail)
-  let memberships = []
-
-  try {
-    const response = await myOrganizations()
-    memberships = response?.data?.organizationMembers ?? []
-  } catch (error) {
-    if (!firebaseUser || !isDataConnectOrganizationFailure(error)) {
-      throw error
+  if (status === 'READY') {
+    const context = payload?.context ?? {}
+    const platformActor = toText(context.actorType).toUpperCase() === 'PLATFORM'
+    if (
+      toText(context.uid) !== toText(firebaseUser.uid) ||
+      !toText(context.activeOrgId) ||
+      !toText(context.organizationName) ||
+      (!platformActor && !toText(context.workerId)) ||
+      !toText(context.role) ||
+      !toText(context.planCode)
+    ) {
+      throw new Error('Backend zwrócił niepełny kontekst sesji.')
     }
-
-    memberships = await fetchBackendOrganizationMemberships(firebaseUser, orgFromEmailHint)
+    assertPortalAccessAllowed(context)
+    return { status: 'READY', context }
   }
 
-  if (!memberships.length) {
-    if (firebaseUser) {
-      await bootstrapMembershipIfNeeded(firebaseUser, orgFromEmailHint)
-      try {
-        const response = await myOrganizations()
-        memberships = response?.data?.organizationMembers ?? []
-      } catch (error) {
-        if (!isDataConnectOrganizationFailure(error)) {
-          throw error
-        }
-        memberships = await fetchBackendOrganizationMemberships(firebaseUser, orgFromEmailHint)
-      }
-    }
-
-    if (!memberships.length) {
-      throw new Error('Brak organizacji przypisanej do konta Firebase.')
-    }
-  }
-
-  const orgFromEmail = extractOrgIdFromEmail(userEmail)
-  if (orgFromEmail) {
-    const membershipFromEmail = memberships.find((membership) => membership.orgId === orgFromEmail)
-    if (!membershipFromEmail) {
-      throw new Error(`Uzytkownik ${userEmail} nie ma dostepu do orgId ${orgFromEmail}.`)
-    }
-
+  if (status === 'PLATFORM_SELECTION_REQUIRED' || status === 'PLATFORM_MFA_ENROLLMENT_REQUIRED') {
     return {
-      orgId: membershipFromEmail.orgId,
-      role: mapRole(membershipFromEmail.role),
-      orgName: membershipFromEmail.organization?.name ?? membershipFromEmail.orgId,
+      status,
+      context: payload?.context && typeof payload.context === 'object' ? payload.context : {},
     }
   }
 
-  const preferredFromEnv = String(import.meta.env.VITE_DEFAULT_ORG_ID ?? '').trim()
-  const preferredFromStorage = String(localStorage.getItem(LAST_ORG_STORAGE_KEY) ?? '').trim()
-  const preferredOrgId = preferredFromEnv || preferredFromStorage
+  if (status === 'ORG_SELECTION_REQUIRED') {
+    const organizations = (Array.isArray(payload?.organizations) ? payload.organizations : [])
+      .map((organization) => ({
+        orgId: toText(organization?.orgId),
+        organizationName: toText(organization?.organizationName),
+        role: toText(organization?.role).toUpperCase(),
+      }))
+      .filter((organization) => organization.orgId && organization.organizationName && organization.role)
 
-  if (preferredOrgId) {
-    const preferredMembership = memberships.find((membership) => membership.orgId === preferredOrgId)
-    if (preferredMembership) {
-      return {
-        orgId: preferredMembership.orgId,
-        role: mapRole(preferredMembership.role),
-        orgName: preferredMembership.organization?.name ?? preferredMembership.orgId,
-      }
+    if (organizations.length < 2) {
+      throw new Error('Backend zwrócił niepoprawną listę organizacji.')
     }
+
+    return { status: 'ORG_SELECTION_REQUIRED', organizations }
   }
 
-  for (const membership of memberships) {
-    try {
-      const clientsResponse = await clientsForOrg({ orgId: membership.orgId })
-      const clients = clientsResponse?.data?.clients ?? []
-      if (clients.length > 0) {
-        return {
-          orgId: membership.orgId,
-          role: mapRole(membership.role),
-          orgName: membership.organization?.name ?? membership.orgId,
-        }
-      }
-    } catch {
-      // Ignore failed probe and continue.
-    }
-  }
-
-  const firstMembership = memberships[0]
-  return {
-    orgId: firstMembership.orgId,
-    role: mapRole(firstMembership.role),
-    orgName: firstMembership.organization?.name ?? firstMembership.orgId,
-  }
+  throw new Error('Backend zwrócił nieznany status kontekstu sesji.')
 }
 
-function buildSessionFromFirebase(user, context, workerRow = null) {
-  localStorage.setItem(LAST_ORG_STORAGE_KEY, context.orgId)
-
-  const workerId = workerIdFromRow(workerRow)
+function buildSessionFromFirebase(user, context) {
+  const activeOrgId = toText(context.activeOrgId)
+  const organizationName = toText(context.organizationName)
+  localStorage.setItem(LAST_ORG_STORAGE_KEY, activeOrgId)
+  if (toText(context.platformContextId)) {
+    localStorage.setItem(PLATFORM_CONTEXT_STORAGE_KEY, toText(context.platformContextId))
+  }
 
   return {
     token: `firebase-${user.uid}`,
     uid: user.uid,
     login: user.email ?? user.uid,
     name: user.displayName ?? user.email ?? user.uid,
-    role: context.role,
-    orgId: context.orgId,
-    orgName: context.orgName,
+    role: mapRole(context.role),
+    roleCode: toText(context.role).toUpperCase(),
+    workerId: toText(context.workerId),
+    actorType: toText(context.actorType).toUpperCase() || 'ORGANIZATION',
+    roleLevel: Number(context.roleLevel) || undefined,
+    planCode: toText(context.planCode).toUpperCase(),
+    subscriptionStatus: toText(context.subscriptionStatus).toUpperCase(),
+    subscriptionEndsAt: toText(context.subscriptionEndsAt),
+    activeOrgId,
+    organizationName,
+    orgId: activeOrgId,
+    orgName: organizationName,
+    platformContextId: toText(context.platformContextId),
+    platformReason: toText(context.platformReason),
     source: 'firebase',
-    ...(workerId ? { workerId } : {}),
   }
+}
+
+function storeReadySession(firebaseUser, context) {
+  const session = buildSessionFromFirebase(firebaseUser, context)
+  saveSession(session)
+  renderSubscriptionBadge(session)
+  return { status: 'READY', session }
+}
+
+async function resolveAuthenticatedContext(firebaseUser, options = {}) {
+  const result = await requestSessionContext(firebaseUser, options)
+  if (result.status === 'READY') {
+    return storeReadySession(firebaseUser, result.context)
+  }
+
+  localStorage.removeItem(AUTH_STORAGE_KEY)
+  if (result.status === 'PLATFORM_SELECTION_REQUIRED') {
+    localStorage.removeItem(LAST_ORG_STORAGE_KEY)
+    localStorage.removeItem(PLATFORM_CONTEXT_STORAGE_KEY)
+  }
+  return result
+}
+
+function isAccessDeniedError(error) {
+  return Number(error?.status) === 403 || toText(error?.code) === 'ORG_ACCESS_DENIED'
 }
 
 export function getSession() {
@@ -444,56 +280,40 @@ export function getSession() {
 
   const firebase = ensureFirebase()
   const currentUser = firebase?.auth?.currentUser ?? null
-
-  if (!currentUser) {
-    return session
-  }
-
-  if (session?.uid === currentUser.uid) {
-    return session
-  }
-
-  const rebuiltSession = {
-    token: `firebase-${currentUser.uid}`,
-    uid: currentUser.uid,
-    login: currentUser.email ?? currentUser.uid,
-    name: currentUser.displayName ?? currentUser.email ?? currentUser.uid,
-    role: session?.role ?? 'Pracownik',
-    orgId: session?.orgId ?? null,
-    orgName: session?.orgName ?? null,
-    source: 'firebase',
-    ...(normalizeWorkerId(session?.workerId) ? { workerId: normalizeWorkerId(session.workerId) } : {}),
-  }
-
-  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(rebuiltSession))
-  return rebuiltSession
-}
-
-export async function ensureSessionContext(session) {
-  if (!session) {
+  if (!currentUser || session?.uid !== currentUser.uid || !toText(session?.activeOrgId ?? session?.orgId)) {
     return null
   }
 
+  return session
+}
+
+export async function ensureSessionContext(session = null) {
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
   const firebase = ensureFirebase()
   const currentUser = firebase?.auth?.currentUser || (await waitForFirebaseAuthReady())
-
   if (!currentUser) {
     return null
   }
 
+  const rememberedOrgId = toText(session?.activeOrgId ?? session?.orgId ?? localStorage.getItem(LAST_ORG_STORAGE_KEY))
+
   try {
-    const orgContext = await resolveOrganizationContext(currentUser.email, currentUser)
-    assertPortalAccessAllowed(orgContext)
-    const workerRow = await assertWorkerIsActive(orgContext.orgId, currentUser)
-    const normalizedSession = buildSessionFromFirebase(currentUser, orgContext, workerRow)
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(normalizedSession))
-    return normalizedSession
+    if (rememberedOrgId) {
+      try {
+        return await resolveAuthenticatedContext(currentUser, { orgId: rememberedOrgId })
+      } catch (error) {
+        if (!isAccessDeniedError(error)) {
+          throw error
+        }
+        localStorage.removeItem(LAST_ORG_STORAGE_KEY)
+      }
+    }
+
+    return await resolveAuthenticatedContext(currentUser)
   } catch (error) {
-    await signOut(firebase.auth)
     localStorage.removeItem(AUTH_STORAGE_KEY)
     throw error
   }
@@ -504,15 +324,15 @@ export function saveSession(session) {
 }
 
 export async function login({ login: loginValue, password }) {
-  const normalizedLogin = String(loginValue ?? '').trim()
-  const normalizedPassword = String(password ?? '').trim()
+  const normalizedLogin = toText(loginValue)
+  const normalizedPassword = toText(password)
 
   if (!normalizedLogin || !normalizedPassword) {
-    throw new Error('Podaj login i haslo.')
+    throw new Error('Podaj email i hasło.')
   }
 
   if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
   const firebase = ensureFirebase()
@@ -521,19 +341,276 @@ export async function login({ login: loginValue, password }) {
   }
 
   await ensureFirebaseAuthPersistence()
-  const credential = await signInWithEmailAndPassword(firebase.auth, normalizedLogin, normalizedPassword)
+  let credential
+  try {
+    credential = await signInWithEmailAndPassword(firebase.auth, normalizedLogin, normalizedPassword)
+  } catch (error) {
+    if (toText(error?.code).toLowerCase() !== 'auth/multi-factor-auth-required') throw error
+    pendingMfaResolver = getMultiFactorResolver(firebase.auth, error)
+    return {
+      status: 'MFA_CHALLENGE_REQUIRED',
+      factors: pendingMfaResolver.hints.map((hint) => ({
+        uid: toText(hint.uid),
+        factorId: toText(hint.factorId),
+        displayName: toText(hint.displayName),
+        phoneNumber: toText(hint.phoneNumber),
+      })),
+    }
+  }
+  localStorage.removeItem(AUTH_STORAGE_KEY)
+  sessionStorage.removeItem(PLATFORM_EMAIL_MFA_TOKEN_KEY)
 
   try {
-    const orgContext = await resolveOrganizationContext(credential.user.email ?? normalizedLogin, credential.user)
-    assertPortalAccessAllowed(orgContext)
-    const workerRow = await assertWorkerIsActive(orgContext.orgId, credential.user)
-    const session = buildSessionFromFirebase(credential.user, orgContext, workerRow)
-    saveSession(session)
-    return session
+    // Provisioning or role changes update custom claims outside the browser.
+    // Always obtain a fresh token before resolving the backend session.
+    await credential.user.getIdToken(true)
+    return await resolveAuthenticatedContext(credential.user)
   } catch (error) {
     await signOut(firebase.auth)
+    localStorage.removeItem(AUTH_STORAGE_KEY)
+    localStorage.removeItem(LAST_ORG_STORAGE_KEY)
     throw error
   }
+}
+
+function clearRecaptchaVerifier() {
+  try {
+    pendingRecaptchaVerifier?.clear?.()
+  } catch {
+    // Firebase may already have disposed the verifier.
+  }
+  pendingRecaptchaVerifier = null
+}
+
+function createRecaptchaVerifier(auth, containerId) {
+  clearRecaptchaVerifier()
+  pendingRecaptchaVerifier = new RecaptchaVerifier(auth, containerId, { size: 'invisible' })
+  return pendingRecaptchaVerifier
+}
+
+export async function beginMfaSignInChallenge(factorUid, recaptchaContainerId = 'loginMfaRecaptcha') {
+  if (!pendingMfaResolver) throw new Error('Brak oczekującego logowania MFA.')
+  const hint = pendingMfaResolver.hints.find((item) => toText(item.uid) === toText(factorUid)) || pendingMfaResolver.hints[0]
+  if (!hint) throw new Error('Nie znaleziono drugiego składnika.')
+  if (toText(hint.factorId) !== 'phone') {
+    return { factorUid: toText(hint.uid), factorId: toText(hint.factorId), verificationId: '' }
+  }
+  const firebase = ensureFirebase()
+  const verifier = createRecaptchaVerifier(firebase.auth, recaptchaContainerId)
+  const verificationId = await new PhoneAuthProvider(firebase.auth).verifyPhoneNumber(
+    { multiFactorHint: hint, session: pendingMfaResolver.session },
+    verifier,
+  )
+  return { factorUid: toText(hint.uid), factorId: toText(hint.factorId), verificationId }
+}
+
+export async function completeMfaSignIn({ factorUid, verificationCode, verificationId = '' }) {
+  if (!pendingMfaResolver) throw new Error('Brak oczekującego logowania MFA.')
+  const hint = pendingMfaResolver.hints.find((item) => toText(item.uid) === toText(factorUid)) || pendingMfaResolver.hints[0]
+  if (!hint || !toText(verificationCode)) throw new Error('Podaj kod drugiego składnika.')
+  const assertion = toText(hint.factorId) === 'phone'
+    ? PhoneMultiFactorGenerator.assertion(PhoneAuthProvider.credential(verificationId, toText(verificationCode)))
+    : TotpMultiFactorGenerator.assertionForSignIn(toText(hint.uid), toText(verificationCode))
+  const credential = await pendingMfaResolver.resolveSignIn(assertion)
+  pendingMfaResolver = null
+  clearRecaptchaVerifier()
+  return resolveAuthenticatedContext(credential.user)
+}
+
+export async function beginTotpEnrollment() {
+  const user = ensureFirebase()?.auth?.currentUser || (await waitForFirebaseAuthReady())
+  if (!user) throw new Error('Sesja Firebase wygasła.')
+  const session = await multiFactor(user).getSession()
+  const secret = await TotpMultiFactorGenerator.generateSecret(session)
+  pendingMfaEnrollment = { type: 'totp', secret }
+  return {
+    secretKey: toText(secret.secretKey),
+    qrCodeUrl: secret.generateQrCodeUrl(user.email || 'cleanzi', 'Cleanzi'),
+  }
+}
+
+export async function completeTotpEnrollment(verificationCode) {
+  if (pendingMfaEnrollment?.type !== 'totp') throw new Error('Najpierw rozpocznij konfigurację TOTP.')
+  const user = ensureFirebase()?.auth?.currentUser
+  if (!user) throw new Error('Sesja Firebase wygasła.')
+  const assertion = TotpMultiFactorGenerator.assertionForEnrollment(
+    pendingMfaEnrollment.secret,
+    toText(verificationCode),
+  )
+  await multiFactor(user).enroll(assertion, 'Cleanzi TOTP')
+  pendingMfaEnrollment = null
+  await user.getIdToken(true)
+  return resolveAuthenticatedContext(user)
+}
+
+export async function beginPhoneMfaEnrollment(phoneNumber, recaptchaContainerId = 'loginMfaRecaptcha') {
+  const firebase = ensureFirebase()
+  const user = firebase?.auth?.currentUser || (await waitForFirebaseAuthReady())
+  const phone = toText(phoneNumber)
+  if (!user || !/^\+[1-9]\d{7,14}$/.test(phone)) throw new Error('Podaj numer telefonu z kodem kraju, np. +48123123123.')
+  const session = await multiFactor(user).getSession()
+  const verifier = createRecaptchaVerifier(firebase.auth, recaptchaContainerId)
+  const verificationId = await new PhoneAuthProvider(firebase.auth).verifyPhoneNumber(
+    { phoneNumber: phone, session },
+    verifier,
+  )
+  pendingMfaEnrollment = { type: 'phone', verificationId, phoneNumber: phone }
+  return { verificationId, phoneNumber: phone }
+}
+
+export async function completePhoneMfaEnrollment(verificationCode) {
+  if (pendingMfaEnrollment?.type !== 'phone') throw new Error('Najpierw wyślij kod SMS.')
+  const user = ensureFirebase()?.auth?.currentUser
+  if (!user) throw new Error('Sesja Firebase wygasła.')
+  const credential = PhoneAuthProvider.credential(pendingMfaEnrollment.verificationId, toText(verificationCode))
+  await multiFactor(user).enroll(PhoneMultiFactorGenerator.assertion(credential), 'Cleanzi SMS')
+  pendingMfaEnrollment = null
+  clearRecaptchaVerifier()
+  await user.getIdToken(true)
+  return resolveAuthenticatedContext(user)
+}
+
+export async function requestPasswordReset(emailValue) {
+  const email = normalizeAuthEmail(emailValue)
+  if (!email) {
+    throw createPublicAuthError('INVALID_RESET_EMAIL', 'Podaj poprawny adres email.')
+  }
+
+  if (!isFirebaseConfigured()) {
+    throw createPublicAuthError(
+      'FIREBASE_NOT_CONFIGURED',
+      'Resetowanie hasła jest chwilowo niedostępne z powodu braku konfiguracji Firebase.',
+    )
+  }
+
+  const firebase = ensureFirebase()
+  if (!firebase?.auth) {
+    throw createPublicAuthError(
+      'FIREBASE_AUTH_UNAVAILABLE',
+      'Resetowanie hasła jest chwilowo niedostępne.',
+    )
+  }
+
+  try {
+    await sendPasswordResetEmail(firebase.auth, email)
+  } catch (error) {
+    const code = toText(error?.code).toLowerCase()
+
+    // Nie ujawniamy, czy podany adres należy do istniejącego konta.
+    if (code === 'auth/user-not-found') {
+      return
+    }
+    if (code === 'auth/invalid-email') {
+      throw createPublicAuthError('INVALID_RESET_EMAIL', 'Podaj poprawny adres email.')
+    }
+    if (code === 'auth/too-many-requests') {
+      throw createPublicAuthError(
+        'PASSWORD_RESET_RATE_LIMITED',
+        'Wysłano zbyt wiele próśb. Spróbuj ponownie później.',
+      )
+    }
+    if (code === 'auth/network-request-failed') {
+      throw createPublicAuthError(
+        'PASSWORD_RESET_NETWORK_ERROR',
+        'Nie udało się połączyć z Firebase. Sprawdź połączenie z internetem i spróbuj ponownie.',
+      )
+    }
+    if (
+      code === 'auth/operation-not-allowed' ||
+      code === 'auth/unauthorized-domain' ||
+      code === 'auth/invalid-api-key' ||
+      code === 'auth/app-not-authorized'
+    ) {
+      throw createPublicAuthError(
+        'PASSWORD_RESET_NOT_CONFIGURED',
+        'Resetowanie hasła nie jest poprawnie skonfigurowane w Firebase.',
+      )
+    }
+
+    throw createPublicAuthError(
+      'PASSWORD_RESET_FAILED',
+      'Nie udało się wysłać linku do zresetowania hasła. Spróbuj ponownie.',
+    )
+  }
+}
+
+async function currentFirebaseUserWithToken() {
+  const user = ensureFirebase()?.auth?.currentUser || (await waitForFirebaseAuthReady())
+  if (!user) throw new Error('Sesja Firebase wygasła. Zaloguj się ponownie.')
+  return { user, idToken: await user.getIdToken() }
+}
+
+async function platformEmailMfaRequest(pathname, payload) {
+  const { user, idToken } = await currentFirebaseUserWithToken()
+  const response = await fetch(`${getAuthApiBase()}/platform/mfa/email/${pathname}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw createBackendError(response, body)
+  return { user, data: body?.data && typeof body.data === 'object' ? body.data : {} }
+}
+
+export async function requestPlatformEmailMfaCode(emailValue) {
+  const email = normalizeAuthEmail(emailValue)
+  if (!email) throw createPublicAuthError('INVALID_MFA_EMAIL', 'Podaj poprawny adres email.')
+  const { data } = await platformEmailMfaRequest('request', { email })
+  if (!toText(data.challengeId)) throw new Error('Backend nie zwrócił identyfikatora kodu email.')
+  return data
+}
+
+export async function verifyPlatformEmailMfaCode({ challengeId, code }) {
+  const normalizedCode = toText(code)
+  if (!toText(challengeId) || !/^\d{6}$/.test(normalizedCode)) {
+    throw createPublicAuthError('INVALID_EMAIL_MFA_CODE', 'Podaj sześciocyfrowy kod z wiadomości email.')
+  }
+  const { user, data } = await platformEmailMfaRequest('verify', {
+    challengeId: toText(challengeId),
+    code: normalizedCode,
+  })
+  const token = toText(data.emailMfaToken)
+  if (!token) throw new Error('Backend nie zwrócił bezpiecznej sesji email MFA.')
+  sessionStorage.setItem(PLATFORM_EMAIL_MFA_TOKEN_KEY, token)
+  return resolveAuthenticatedContext(user)
+}
+
+export async function selectOrganization(orgId) {
+  const normalizedOrgId = toText(orgId)
+  if (!normalizedOrgId) {
+    throw new Error('Wybierz organizację.')
+  }
+
+  const firebase = ensureFirebase()
+  const currentUser = firebase?.auth?.currentUser || (await waitForFirebaseAuthReady())
+  if (!currentUser) {
+    throw new Error('Sesja Firebase wygasła. Zaloguj się ponownie.')
+  }
+
+  const result = await resolveAuthenticatedContext(currentUser, { orgId: normalizedOrgId, method: 'POST' })
+  if (result.status !== 'READY') {
+    throw new Error('Nie udało się zatwierdzić wybranej organizacji.')
+  }
+  return result
+}
+
+export async function acceptPlatformContext(context) {
+  const user = ensureFirebase()?.auth?.currentUser || (await waitForFirebaseAuthReady())
+  if (!user || toText(context?.actorType).toUpperCase() !== 'PLATFORM' || !toText(context?.platformContextId)) {
+    throw new Error('Backend zwrócił niepoprawny kontekst administratora platformy.')
+  }
+  return storeReadySession(user, context)
+}
+
+export function clearPlatformContextSession() {
+  localStorage.removeItem(AUTH_STORAGE_KEY)
+  localStorage.removeItem(LAST_ORG_STORAGE_KEY)
+  localStorage.removeItem(PLATFORM_CONTEXT_STORAGE_KEY)
+  renderSubscriptionBadge(null)
 }
 
 export function logout() {
@@ -544,6 +621,13 @@ export function logout() {
   }
 
   localStorage.removeItem(AUTH_STORAGE_KEY)
+  localStorage.removeItem(LAST_ORG_STORAGE_KEY)
+  localStorage.removeItem(PLATFORM_CONTEXT_STORAGE_KEY)
+  sessionStorage.removeItem(PLATFORM_EMAIL_MFA_TOKEN_KEY)
+  pendingMfaResolver = null
+  pendingMfaEnrollment = null
+  clearRecaptchaVerifier()
+  renderSubscriptionBadge(null)
 }
 
 export function requireAuth() {

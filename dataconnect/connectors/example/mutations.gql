@@ -4,393 +4,6 @@
 # In Firebase Console -> Authentication -> Claims:
 # { "sub": "<USER_UID>" }
 
-mutation InsertWorkerForOrg(
-  $orgId: String!
-  $login: String!
-  $workerName: String
-  $loginEmail: String
-  $role: String
-  $active: Boolean
-  $email: String
-  $phone: String
-  $workerType: String
-  $workerId: String
-) @auth(level: USER) @transaction {
-  query @redact {
-    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
-      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do dodawania pracownik w.")
-      }
-  }
-
-  worker_insert(data: {
-    orgId: $orgId
-    login: $login
-    workerName: $workerName
-    loginEmail: $loginEmail
-    role: $role
-    active: $active
-    email: $email
-    phone: $phone
-    workerType: $workerType
-    workerId: $workerId
-    createdAt_expr: "request.time"
-    updatedAt_expr: "request.time"
-  })
-}
-
-mutation InsertWorkerWithMembershipForOrg(
-  $orgId: String!
-  $login: String!
-  $workerName: String
-  $loginEmail: String
-  $authUid: String!
-  $role: String
-  $active: Boolean
-  $email: String
-  $phone: String
-  $workerType: String
-  $workerId: String
-) @auth(level: USER) @transaction {
-  query @redact {
-    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
-      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do dodawania pracownikow.")
-      }
-  }
-
-  worker_insert(data: {
-    orgId: $orgId
-    login: $login
-    workerName: $workerName
-    loginEmail: $loginEmail
-    authUid: $authUid
-    role: $role
-    active: $active
-    email: $email
-    phone: $phone
-    workerType: $workerType
-    workerId: $workerId
-    createdAt_expr: "request.time"
-    updatedAt_expr: "request.time"
-  })
-
-  organizationMember_upsert(data: {
-    orgId: $orgId
-    uid: $authUid
-    role: $role
-  })
-}
-
-mutation UpdateWorkerForOrg(
-  $orgId: String!
-  $login: String!
-  $newLogin: String @retired(reason: "Login changes are handled by RenameWorkerForOrg.")
-  $workerName: String
-  $loginEmail: String
-  $role: String
-  $active: Boolean
-  $email: String
-  $phone: String
-  $workerType: String
-  $workerId: String
-  $edit: String
-) @auth(level: USER) @transaction {
-  query @redact {
-    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
-      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do edycji pracownik w.")
-      }
-  }
-
-  worker_update(
-    key: { orgId: $orgId, login: $login }
-    data: {
-      workerName: $workerName
-      loginEmail: $loginEmail
-      role: $role
-      active: $active
-      email: $email
-      phone: $phone
-      workerType: $workerType
-      workerId: $workerId
-      edit: $edit
-      updatedAt_expr: "request.time"
-    }
-  )
-}
-
-mutation UpdateWorkerProfileForOrg(
-  $orgId: String!
-  $login: String!
-  $workerName: String
-  $loginEmail: String
-  $authUid: String! = ""
-  $role: String
-  $memberRole: String
-  $active: Boolean
-  $email: String
-  $phone: String
-  $workerType: String
-  $workerId: String
-  $edit: String
-  $name: String @retired
-  $status: String @retired
-) @auth(level: USER) @transaction {
-  query @redact {
-    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
-      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do edycji pracownikow.")
-      }
-  }
-
-  worker_update(
-    key: { orgId: $orgId, login: $login }
-    data: {
-      workerName: $workerName
-      loginEmail: $loginEmail
-      authUid: $authUid
-      role: $role
-      active: $active
-      email: $email
-      phone: $phone
-      workerType: $workerType
-      workerId: $workerId
-      edit: $edit
-      updatedAt_expr: "request.time"
-    }
-  )
-
-  organizationMember_upsert(data: {
-    orgId: $orgId
-    uid: $authUid
-    role: $memberRole
-  })
-}
-
-mutation RenameWorkerForOrg(
-  $orgId: String!
-  $login: String!
-  $newLogin: String! = ""
-  $workerName: String
-  $loginEmail: String
-  $authUid: String! = ""
-  $role: String
-  $memberRole: String
-  $active: Boolean
-  $email: String
-  $phone: String
-  $workerType: String
-  $workerId: String
-  $createdAt: Timestamp
-  $edit: String
-  $name: String @retired
-) @auth(level: USER) @transaction {
-  query @redact {
-    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
-      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN']", message: "Login pracownika moze zmienic tylko Admin.")
-      }
-
-    currentWorker: worker(key: { orgId: $orgId, login: $login })
-      @check(expr: "this != null", message: "Nie znaleziono pracownika w tej organizacji.") {
-        orgId @retired
-        login
-      }
-
-    targetWorker: worker(key: { orgId: $orgId, login: $newLogin })
-      @check(expr: "this == null", message: "Ten login jest juz zajety w tej organizacji.") {
-        orgId @retired
-        login
-      }
-  }
-
-  worker_insert(data: {
-    orgId: $orgId
-    login: $newLogin
-    workerName: $workerName
-    loginEmail: $loginEmail
-    authUid: $authUid
-    role: $role
-    active: $active
-    email: $email
-    phone: $phone
-    workerType: $workerType
-    workerId: $workerId
-    createdAt: $createdAt
-    updatedAt_expr: "request.time"
-    edit: $edit
-  })
-
-  organizationMember_upsert(data: {
-    orgId: $orgId
-    uid: $authUid
-    role: $memberRole
-  })
-
-  workdayPause_updateMany(
-    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
-    data: {
-      workerLogin: $newLogin
-      workerName: $workerName
-      updatedAt_expr: "request.time"
-    }
-  )
-
-  event_updateMany(
-    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
-    data: {
-      workerLogin: $newLogin
-      workerName: $workerName
-      updatedAt_expr: "request.time"
-    }
-  )
-
-  workday_updateMany(
-    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
-    data: {
-      workerLogin: $newLogin
-      workerName: $workerName
-      updatedAt_expr: "request.time"
-    }
-  )
-
-  backupCycle_updateMany(
-    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
-    data: {
-      workerLogin: $newLogin
-      workerName: $workerName
-      editedAt_expr: "request.time"
-    }
-  )
-
-  checkListLog_updateMany(
-    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
-    data: {
-      workerLogin: $newLogin
-    }
-  )
-
-  taskLogin_update: task_updateMany(
-    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
-    data: {
-      workerLogin: $newLogin
-      workerName: $workerName
-      workerLabel: $workerName
-      updatedAt_expr: "request.time"
-    }
-  )
-
-  taskWorkerId_update: task_updateMany(
-    where: { orgId: { eq: $orgId }, workerId: { eq: $login } }
-    data: {
-      workerId: $newLogin
-      updatedAt_expr: "request.time"
-    }
-  )
-
-  workerCredential_updateMany(
-    where: { orgId: { eq: $orgId }, login: { eq: $login } }
-    data: {
-      login: $newLogin
-      updatedBy: $edit
-      updatedAt_expr: "request.time"
-    }
-  )
-
-  worker_delete(key: { orgId: $orgId, login: $login })
-}
-
-mutation DeleteWorkerProfileForOrg(
-  $orgId: String!
-  $login: String!
-  $workerId: String! = ""
-  $authUid: String! = ""
-) @auth(level: USER) @transaction {
-  query @redact {
-    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
-      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN']", message: "Pracownika moze usunac tylko Admin.")
-      }
-
-    currentWorker: worker(key: { orgId: $orgId, login: $login })
-      @check(expr: "this != null", message: "Nie znaleziono pracownika w tej organizacji.") {
-        orgId @retired
-        login
-      }
-  }
-
-  workerCredential_deleteMany(
-    where: { orgId: { eq: $orgId }, login: { eq: $login } }
-  )
-
-  workdayPause_deleteMany(
-    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
-  )
-
-  event_deleteMany(
-    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
-  )
-
-  checkListLog_deleteMany(
-    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
-  )
-
-  backupCycle_deleteMany(
-    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
-  )
-
-  taskLogin_delete: task_deleteMany(
-    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
-  )
-
-  taskWorkerId_delete: task_deleteMany(
-    where: { orgId: { eq: $orgId }, workerId: { eq: $workerId } }
-  )
-
-  workday_deleteMany(
-    where: { orgId: { eq: $orgId }, workerLogin: { eq: $login } }
-  )
-
-  organizationMember_deleteMany(
-    where: { orgId: { eq: $orgId }, uid: { eq: $authUid } }
-  )
-
-  worker_delete(key: { orgId: $orgId, login: $login })
-}
-
-mutation UpsertWorkerCredentialForOrg(
-  $orgId: String!
-  $login: String!
-  $encryptedPassword: String!
-  $iv: String!
-  $authTag: String!
-  $algorithm: String!
-  $updatedBy: String
-) @auth(level: USER) @transaction {
-  query @redact {
-    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
-      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN']", message: "Brak uprawnien do zapisu hasla pracownika.")
-      }
-    worker(key: { orgId: $orgId, login: $login })
-      @check(expr: "this != null", message: "Nie znaleziono pracownika w tej organizacji.") {
-        login
-      }
-  }
-
-  workerCredential_upsert(data: {
-    orgId: $orgId
-    login: $login
-    encryptedPassword: $encryptedPassword
-    iv: $iv
-    authTag: $authTag
-    algorithm: $algorithm
-    updatedBy: $updatedBy
-    updatedAt_expr: "request.time"
-  })
-}
-
 mutation UpsertOrgUiStyleForOrg(
   $orgId: String!
   $styleId: String!
@@ -399,7 +12,8 @@ mutation UpsertOrgUiStyleForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN']", message: "Brak uprawnien do zmiany stylu domyslnego organizacji.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do zmiany stylu domyslnego organizacji.")
       }
   }
 
@@ -417,7 +31,8 @@ mutation DeleteOrgUiStyleForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN']", message: "Brak uprawnien do zmiany stylu domyslnego organizacji.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do zmiany stylu domyslnego organizacji.")
       }
   }
 
@@ -432,7 +47,8 @@ mutation UpsertMyUiStylePreference(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
       }
   }
 
@@ -451,7 +67,8 @@ mutation DeleteMyUiStylePreference(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR','WORKER']", message: "Brak roli w organizacji.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
       }
   }
 
@@ -467,7 +84,8 @@ mutation UpsertUserUiStylePreferenceForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN']", message: "Brak uprawnien do zapisu preferencji stylow.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do zapisu preferencji stylow.")
       }
   }
 
@@ -487,7 +105,8 @@ mutation DeleteUserUiStylePreferenceForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN']", message: "Brak uprawnien do usuwania preferencji stylow.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do usuwania preferencji stylow.")
       }
   }
 
@@ -546,7 +165,8 @@ mutation InsertClientForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do dodawania klient w.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do dodawania klient w.")
       }
   }
 
@@ -655,7 +275,8 @@ mutation UpdateClientForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do edycji klient w.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do edycji klient w.")
       }
   }
 
@@ -719,7 +340,8 @@ mutation DeleteClientForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN']", message: "Klienta moze usunac tylko Admin.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Klienta moze usunac tylko Admin.")
       }
 
     currentClient: client(key: { orgId: $orgId, clientId: $clientId })
@@ -774,7 +396,8 @@ mutation InsertIndividualJobForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do dodawania zlecen indywidualnych.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do dodawania zlecen indywidualnych.")
       }
   }
 
@@ -807,7 +430,8 @@ mutation UpdateIndividualJobForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do edycji zlecen indywidualnych.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do edycji zlecen indywidualnych.")
       }
   }
 
@@ -833,7 +457,8 @@ mutation DeleteIndividualJobForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do usuwania zlecen indywidualnych.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do usuwania zlecen indywidualnych.")
       }
   }
 
@@ -893,7 +518,8 @@ mutation UpsertTaskForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR']", message: "Brak uprawnien do zapisu zlecen grafiku.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do zapisu zlecen grafiku.")
       }
   }
 
@@ -956,7 +582,8 @@ mutation DeleteTaskForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR']", message: "Brak uprawnien do usuwania zlecen grafiku.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do usuwania zlecen grafiku.")
       }
   }
 
@@ -976,7 +603,8 @@ mutation InsertZoneForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do dodawania stref.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do dodawania stref.")
       }
   }
 
@@ -1005,7 +633,8 @@ mutation UpdateZoneForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do edycji stref.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do edycji stref.")
       }
   }
 
@@ -1029,7 +658,8 @@ mutation DeleteZoneForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do usuwania stref.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do usuwania stref.")
       }
   }
 
@@ -1053,7 +683,8 @@ mutation InsertWorkdayForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do dodawania zdarzen.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK'] || (this in ['WORKER','PRACOWNIK'] && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do dodawania zdarzen.")
       }
     targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
       authUid
@@ -1094,7 +725,8 @@ mutation UpdateWorkdayForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do edycji zdarzen.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK'] || (this in ['WORKER','PRACOWNIK'] && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do edycji zdarzen.")
       }
     targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
       authUid
@@ -1126,7 +758,8 @@ mutation DeleteWorkdayForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do usuwania zdarzen.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do usuwania zdarzen.")
       }
   }
 
@@ -1154,7 +787,8 @@ mutation InsertEventForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do dodawania zdarzen stref.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK'] || (this in ['WORKER','PRACOWNIK'] && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do dodawania zdarzen stref.")
       }
     targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
       authUid
@@ -1204,7 +838,8 @@ mutation UpdateEventForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do edycji zdarzen stref.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK'] || (this in ['WORKER','PRACOWNIK'] && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do edycji zdarzen stref.")
       }
     targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
       authUid
@@ -1240,7 +875,8 @@ mutation DeleteEventForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR']", message: "Brak uprawnien do usuwania zdarzen stref.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do usuwania zdarzen stref.")
       }
   }
 
@@ -1269,7 +905,8 @@ mutation InsertBackupCycleForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do zapisu backup cyklu.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK'] || (this in ['WORKER','PRACOWNIK'] && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do zapisu backup cyklu.")
       }
     targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
       authUid
@@ -1321,7 +958,8 @@ mutation UpdateBackupCycleForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do aktualizacji backup cyklu.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK'] || (this in ['WORKER','PRACOWNIK'] && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do aktualizacji backup cyklu.")
       }
     targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
       authUid
@@ -1366,7 +1004,8 @@ mutation InsertStorageForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do edycji magazynu.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do edycji magazynu.")
       }
   }
 
@@ -1399,7 +1038,8 @@ mutation UpdateStorageForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do edycji magazynu.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do edycji magazynu.")
       }
   }
 
@@ -1425,7 +1065,8 @@ mutation DeleteStorageForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do edycji magazynu.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do usuwania z magazynu.")
       }
   }
 
@@ -1446,7 +1087,8 @@ mutation InsertClientStorageForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do edycji magazynu klienta.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do edycji magazynu klienta.")
       }
   }
 
@@ -1477,7 +1119,8 @@ mutation UpdateClientStorageForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do edycji magazynu klienta.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do edycji magazynu klienta.")
       }
   }
 
@@ -1502,7 +1145,8 @@ mutation DeleteClientStorageForOrg(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER']", message: "Brak uprawnien do edycji magazynu klienta.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do usuwania z magazynu klienta.")
       }
   }
 
@@ -1525,7 +1169,8 @@ mutation StartWorkdayPause(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do zapisu pauzy.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK'] || (this in ['WORKER','PRACOWNIK'] && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do zapisu pauzy.")
       }
     targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
       authUid
@@ -1576,7 +1221,8 @@ mutation StopWorkdayPause(
   query @redact {
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        role @check(expr: "this in ['ADMIN','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do zapisu pauzy.")
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK'] || (this in ['WORKER','PRACOWNIK'] && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do zapisu pauzy.")
       }
     targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
       authUid

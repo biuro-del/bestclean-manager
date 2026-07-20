@@ -125,11 +125,12 @@ export function createZonesFeature(ctx) {
   }
 
   function canDeleteZones() {
-    return typeof roleLevel === 'function' && roleLevel(appState.session?.role) >= 3
+    const roleCode = String(appState.session?.roleCode ?? '').trim().toUpperCase()
+    return roleCode === 'ADMIN' || roleCode === 'OWNER' || roleCode === 'PLATFORM_OWNER'
   }
 
   function canManageZoneQr() {
-    return typeof roleLevel === 'function' && roleLevel(appState.session?.role) >= 3
+    return typeof roleLevel === 'function' && roleLevel(appState.session?.role) >= 2
   }
 
   function setZoneQrEditState() {
@@ -139,11 +140,22 @@ export function createZonesFeature(ctx) {
 
     if (qrInput) {
       qrInput.disabled = !canEdit
-      qrInput.title = canEdit ? 'Admin moze zmienic numer QR strefy.' : 'Numer QR moze zmienic tylko Admin.'
+      qrInput.title = canEdit ? 'ADMIN, Owner lub Manager może zmienić numer QR strefy.' : 'Brak uprawnień do edycji numeru QR.'
     }
     if (qrLabel) {
       qrLabel.textContent = canEdit ? 'Numer QR (A)' : 'Numer QR (A) - blokada'
     }
+  }
+
+  function setZoneEditorMutationState() {
+    const canEdit = canManageZoneQr()
+    ;['znEditClientText', 'znEditStrefaText', 'znEditLoc', 'znEditFunkcjaText'].forEach((id) => {
+      const control = document.getElementById(id)
+      if (control) control.disabled = !canEdit
+    })
+    document.querySelectorAll('#znEditorOverlay .zones-combo-toggle').forEach((button) => {
+      button.disabled = !canEdit
+    })
   }
 
   function normalizeZoneDate(value) {
@@ -1043,6 +1055,10 @@ export function createZonesFeature(ctx) {
   }
 
   function openZoneAddModal() {
+    if (!canManageZoneQr()) {
+      alert('Brak uprawnień do dodawania stref.')
+      return
+    }
     const overlay = document.getElementById('znEditorOverlay')
     if (!overlay) {
       return
@@ -1064,6 +1080,7 @@ export function createZonesFeature(ctx) {
     const deleteBtn = document.getElementById('znDeleteBtn')
 
     setZoneQrEditState()
+    setZoneEditorMutationState()
     setModalClientValue('')
     setModalZoneValue(DEFAULT_ZONE_TYPE)
     syncFunctionSelect('')
@@ -1074,7 +1091,7 @@ export function createZonesFeature(ctx) {
     if (locationInput) locationInput.value = ''
     if (dateInput) dateInput.value = formatDatePl(new Date().toISOString())
     if (editedByInput) editedByInput.value = appState.session?.name ?? '-'
-    if (saveBtn) saveBtn.style.display = ''
+    if (saveBtn) saveBtn.style.display = canManageZoneQr() ? '' : 'none'
     if (deleteBtn) deleteBtn.style.display = 'none'
 
     overlay.style.display = 'flex'
@@ -1107,6 +1124,7 @@ export function createZonesFeature(ctx) {
     const deleteBtn = document.getElementById('znDeleteBtn')
 
     setZoneQrEditState()
+    setZoneEditorMutationState()
     setModalClientValue(view.clientId, view.clientName)
     setModalZoneValue(view.zoneName === '-' ? '' : view.zoneName)
     syncFunctionSelect(view.function === '-' ? '' : view.function)
@@ -1117,7 +1135,7 @@ export function createZonesFeature(ctx) {
     if (locationInput) locationInput.value = view.location === '-' ? '' : view.location
     if (dateInput) dateInput.value = view.dateLabel
     if (editedByInput) editedByInput.value = view.editedBy
-    if (saveBtn) saveBtn.style.display = ''
+    if (saveBtn) saveBtn.style.display = canManageZoneQr() ? '' : 'none'
     if (deleteBtn) deleteBtn.style.display = canDeleteZones() ? '' : 'none'
 
     overlay.style.display = 'flex'
@@ -1146,6 +1164,10 @@ export function createZonesFeature(ctx) {
     if (!appState.session?.orgId) {
       return
     }
+    if (!canManageZoneQr()) {
+      alert('Brak uprawnień do zapisu stref.')
+      return
+    }
 
     const qr = String(document.getElementById('znEditQr')?.value ?? '').trim()
     const clientRaw = String(document.getElementById('znEditClient')?.value ?? '').trim()
@@ -1164,7 +1186,7 @@ export function createZonesFeature(ctx) {
     }
 
     if (qrInputChanged && !canManageZoneQr()) {
-      alert('Tylko Admin moze zmienic numer QR strefy.')
+      alert('Brak uprawnień do zmiany numeru QR strefy.')
       return
     }
 
@@ -1505,7 +1527,12 @@ export function createZonesFeature(ctx) {
       filterZonesTable({ resetPage: false })
     })
 
-    binding.add(document.getElementById('znAddBtn'), 'click', openZoneAddModal)
+    const addButton = document.getElementById('znAddBtn')
+    if (addButton instanceof HTMLButtonElement) {
+      addButton.disabled = !canManageZoneQr()
+      addButton.title = canManageZoneQr() ? 'Dodaj strefę' : 'Brak uprawnień do dodawania stref.'
+    }
+    binding.add(addButton, 'click', openZoneAddModal)
     binding.add(document.getElementById('znRows'), 'click', (event) => {
       const button = event.target.closest('[data-zone-id]')
       if (!button) return

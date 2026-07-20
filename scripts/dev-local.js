@@ -12,7 +12,7 @@ const isWindows = process.platform === 'win32'
 const npmCommand = isWindows ? 'npm.cmd' : 'npm'
 const requestedBackendPort = process.env.PORT || '8080'
 const backendPort = resolveBackendPort(requestedBackendPort)
-const webHost = process.env.WEB_HOST || '127.0.0.1'
+const webHost = process.env.WEB_HOST || 'localhost'
 const webPort = process.env.WEB_PORT || '5173'
 const workerProfileStorageMode = resolveWorkerProfileStorageMode()
 const workerProfileModeState = resolveWorkerProfileMode()
@@ -138,7 +138,7 @@ function resolveWorkerProfileStorageMode() {
   if (requestedMode) {
     return requestedMode
   }
-  return hasLocalDbConfig() ? 'db' : 'dataconnect'
+  return 'database'
 }
 
 function withNodeOption(value, option) {
@@ -366,8 +366,8 @@ function assertDevWebPortAvailable(port) {
     return
   }
 
-  console.error(`[dev] Cannot start portal web on 127.0.0.1:${port}; the dev port is already in use.`)
-  console.error(`[dev] This can make http://localhost:${port} resolve to an old Vite process and send worker security requests through stale proxy config.`)
+  console.error(`[dev] Cannot start portal web on ${webHost}:${port}; the dev port is already in use.`)
+  console.error(`[dev] This can make http://${webHost}:${port} resolve to an old Vite process and send requests through stale proxy config.`)
   for (const listener of listeners) {
     const processInfo = readWindowsProcessInfo(listener.pid)
     const commandLine = String(processInfo?.CommandLine || '').trim()
@@ -376,7 +376,7 @@ function assertDevWebPortAvailable(port) {
     if (executablePath) console.error(`[dev] Executable: ${executablePath}`)
     if (commandLine) console.error(`[dev] Command: ${commandLine}`)
   }
-  console.error(`[dev] Stop the conflicting process, then run root npm run dev again. Use http://127.0.0.1:${port}, not http://localhost:${port}.`)
+  console.error(`[dev] Stop the conflicting process, then run root npm run dev again. Use http://${webHost}:${port}.`)
   process.exit(1)
 }
 
@@ -469,11 +469,11 @@ startProcess('api', process.execPath, ['index.js'], {
   PORT: backendPort,
   API_PROXY_TARGET: process.env.API_PROXY_TARGET || DEFAULT_REMOTE_API_TARGET,
   API_PROXY_FORWARDED_HOST: process.env.API_PROXY_FORWARDED_HOST || DEFAULT_REMOTE_API_HOST,
-  ADMIN_USERS_MODE: process.env.ADMIN_USERS_MODE || 'dataconnect',
-  PORTAL_DB_ROUTES_MODE: process.env.PORTAL_DB_ROUTES_MODE || 'proxy',
-  PORTAL_SCHEDULE_ORDERS_MODE: process.env.PORTAL_SCHEDULE_ORDERS_MODE || 'proxy',
-  PORTAL_TASKS_MODE: process.env.PORTAL_TASKS_MODE || 'proxy',
-  WORKER_PROFILE_MODE: workerProfileMode,
+  ADMIN_USERS_MODE: process.env.ADMIN_USERS_MODE || 'direct',
+  PORTAL_DB_ROUTES_MODE: process.env.PORTAL_DB_ROUTES_MODE || 'direct',
+  PORTAL_SCHEDULE_ORDERS_MODE: process.env.PORTAL_SCHEDULE_ORDERS_MODE || 'direct',
+  PORTAL_TASKS_MODE: process.env.PORTAL_TASKS_MODE || 'direct',
+  WORKER_PROFILE_MODE: workerProfileMode === 'proxy' ? 'direct' : workerProfileMode,
   WORKER_PROFILE_STORAGE_MODE: workerProfileStorageMode,
   WORKER_PROFILE_DB_MODE: workerProfileStorageMode,
   NODE_OPTIONS: backendNodeOptions,
@@ -484,7 +484,6 @@ console.log(`[dev] Starting portal web on http://${webHost}:${webPort}`)
 startProcess('web', npmCommand, ['--prefix', 'web-app', 'run', 'dev', '--', '--host', webHost, '--port', webPort], {
   VITE_DEV_API_PROXY_TARGET: `http://127.0.0.1:${backendPort}`,
   VITE_DEV_WORKER_API_PROXY_TARGET: `http://127.0.0.1:${backendPort}`,
-  VITE_WORKER_PASSWORD_REVEAL_ENDPOINT: '',
   VITE_WORKER_PASSWORD_SET_ENDPOINT: '',
   VITE_WORKER_PROFILE_UPDATE_ENDPOINT: '',
   VITE_WORKER_PROFILE_DELETE_ENDPOINT: '',

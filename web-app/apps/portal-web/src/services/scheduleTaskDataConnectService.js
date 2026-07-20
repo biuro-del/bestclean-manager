@@ -1,4 +1,5 @@
-import { deleteTaskForOrg, tasksForOrg, upsertTaskForOrg } from '@dataconnect/generated'
+import { deleteTaskForOrg, platformContextHeaders, tasksForOrg, upsertTaskForOrg } from './platformDataConnectService'
+import { getSession } from '../auth/authService'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
 function normalizeText(value) {
@@ -371,7 +372,7 @@ function getPortalApiBase() {
   return normalizeApiBase(import.meta.env.VITE_ADMIN_API_BASE || '/api')
 }
 
-let scheduleOrdersEndpointUnavailable = false
+let scheduleOrdersEndpointUnavailableKey = ''
 
 const SCHEDULE_ORDERS_FALLBACK_CODES = new Set([
   'DB_CONFIG_MISSING',
@@ -384,8 +385,43 @@ function isLocalDevScheduleOrdersRemoteDisabled() {
   return import.meta.env.DEV && normalizeText(import.meta.env.VITE_DISABLE_PORTAL_SCHEDULE_ORDERS_REMOTE) === '1'
 }
 
-function shouldSkipScheduleOrdersEndpoint() {
-  return isLocalDevScheduleOrdersRemoteDisabled() || scheduleOrdersEndpointUnavailable
+function currentScheduleSession(orgId = '') {
+  const firebase = ensureFirebase()
+  const uid = normalizeText(firebase?.auth?.currentUser?.uid)
+  const session = getSession()
+  const activeOrgId = normalizeText(session?.activeOrgId ?? session?.orgId)
+  const requestedOrgId = normalizeText(orgId)
+
+  return {
+    activeOrgId,
+    key: uid && requestedOrgId ? `${uid}:${requestedOrgId}` : '',
+    matches: Boolean(uid && requestedOrgId && activeOrgId === requestedOrgId && normalizeText(session?.uid) === uid),
+    requestedOrgId,
+    uid,
+  }
+}
+
+function staleOrganizationError(orgId) {
+  const error = new Error('Żądanie dotyczy nieaktywnej organizacji i zostało pominięte.')
+  error.code = 'STALE_ORG_CONTEXT'
+  error.orgId = normalizeText(orgId)
+  return error
+}
+
+function requireCurrentScheduleOrganization(orgId) {
+  const state = currentScheduleSession(orgId)
+  if (!state.matches) {
+    throw staleOrganizationError(orgId)
+  }
+  return state
+}
+
+function shouldSkipScheduleOrdersEndpoint(orgId) {
+  const key = currentScheduleSession(orgId).key
+  return (
+    isLocalDevScheduleOrdersRemoteDisabled() ||
+    Boolean(key && scheduleOrdersEndpointUnavailableKey === key)
+  )
 }
 
 function isScheduleOrdersRouteUnavailable(message, status) {
@@ -414,8 +450,8 @@ function isScheduleOrdersBackendUnavailable({ code = '', isHtml = false, message
   return SCHEDULE_ORDERS_FALLBACK_CODES.has(normalizeText(code).toUpperCase())
 }
 
-function disableScheduleOrdersEndpoint(action, message) {
-  scheduleOrdersEndpointUnavailable = true
+function disableScheduleOrdersEndpoint(action, message, orgId = '') {
+  scheduleOrdersEndpointUnavailableKey = currentScheduleSession(orgId).key
   console.warn(`[portal/schedule-orders] ${action} uses DataConnect fallback; backend unavailable`, message)
 }
 
@@ -424,8 +460,8 @@ function isScheduleOrdersLocalFileResponse(body) {
   return storage === 'local-file'
 }
 
-function disableScheduleOrdersInvalidPayload(action, message) {
-  disableScheduleOrdersEndpoint(action, message)
+function disableScheduleOrdersInvalidPayload(action, message, orgId = '') {
+  disableScheduleOrdersEndpoint(action, message, orgId)
   return null
 }
 
@@ -443,6 +479,7 @@ async function parseScheduleOrdersApiError(response, fallbackMessage) {
       backendUnavailable: isScheduleOrdersBackendUnavailable({ message, status: response?.status }),
       message,
       routeUnavailable: isScheduleOrdersRouteUnavailable(message, response?.status),
+      status: response?.status,
     }
   }
 
@@ -452,6 +489,7 @@ async function parseScheduleOrdersApiError(response, fallbackMessage) {
       backendUnavailable: isScheduleOrdersBackendUnavailable({ isHtml: true, message: rawText, status: response?.status }),
       message,
       routeUnavailable: isScheduleOrdersRouteUnavailable(rawText, response?.status),
+      status: response?.status,
     }
   }
 
@@ -464,6 +502,7 @@ async function parseScheduleOrdersApiError(response, fallbackMessage) {
       code,
       message,
       routeUnavailable: isScheduleOrdersRouteUnavailable(message, response?.status),
+      status: response?.status,
     }
   } catch {
     const message = rawText.slice(0, 500) || fallbackMessage
@@ -471,11 +510,12 @@ async function parseScheduleOrdersApiError(response, fallbackMessage) {
       backendUnavailable: isScheduleOrdersBackendUnavailable({ message, status: response?.status }),
       message,
       routeUnavailable: isScheduleOrdersRouteUnavailable(message, response?.status),
+      status: response?.status,
     }
   }
 }
 
-async function scheduleOrderAuthHeaders() {
+async function scheduleOrderAuthHeaders({ forceRefresh = false } = {}) {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase.')
   }
@@ -484,41 +524,96 @@ async function scheduleOrderAuthHeaders() {
   if (!currentUser) {
     throw new Error('Sesja wygasla. Zaloguj sie ponownie.')
   }
-  const idToken = await currentUser.getIdToken()
+  const idToken = await currentUser.getIdToken(Boolean(forceRefresh))
   return {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${idToken}`,
+    ...platformContextHeaders(),
   }
 }
 
-async function fetchScheduleTasksViaBackend(orgId) {
-  const headers = await scheduleOrderAuthHeaders()
-  let response
-  try {
-    response = await fetch(`${getPortalApiBase()}/portal/schedule-orders?orgId=${encodeURIComponent(orgId)}`, {
+async function confirmActiveOrganizationContext(orgId) {
+  const state = requireCurrentScheduleOrganization(orgId)
+  const headers = await scheduleOrderAuthHeaders({ forceRefresh: true })
+  const response = await fetch(
+    `${getPortalApiBase()}/auth/session-context?orgId=${encodeURIComponent(state.requestedOrgId)}`,
+    {
       method: 'GET',
       headers,
-    })
-  } catch (error) {
-    disableScheduleOrdersEndpoint('load', error?.message || error)
-    return null
-  }
+    },
+  )
   if (!response.ok) {
-    const error = await parseScheduleOrdersApiError(response, 'Nie udalo sie pobrac zlecen.')
-    if (error.backendUnavailable) {
-      disableScheduleOrdersEndpoint('load', error.message)
+    return false
+  }
+
+  const body = await response.json().catch(() => ({}))
+  const payload = body?.data && typeof body.data === 'object' ? body.data : body
+  const context = payload?.context ?? {}
+  return (
+    normalizeText(payload?.status).toUpperCase() === 'READY' &&
+    normalizeText(context?.uid) === state.uid &&
+    normalizeText(context?.activeOrgId) === state.requestedOrgId
+  )
+}
+
+function isMissingScheduleMembership(error = {}) {
+  return Number(error?.status) === 404 && normalizeText(error?.code).toUpperCase() === 'ORG_ACCESS_MISSING'
+}
+
+async function fetchScheduleTasksViaBackend(orgId) {
+  requireCurrentScheduleOrganization(orgId)
+  let membershipConfirmed = false
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const headers = await scheduleOrderAuthHeaders({ forceRefresh: attempt > 0 })
+    let response
+    try {
+      response = await fetch(`${getPortalApiBase()}/portal/schedule-orders?orgId=${encodeURIComponent(orgId)}`, {
+        method: 'GET',
+        headers,
+      })
+    } catch (error) {
+      disableScheduleOrdersEndpoint('load', error?.message || error, orgId)
       return null
     }
-    throw new Error(error.message)
+
+    if (!response.ok) {
+      const error = await parseScheduleOrdersApiError(response, 'Nie udalo sie pobrac zlecen.')
+      if (attempt === 0 && isMissingScheduleMembership(error)) {
+        membershipConfirmed = await confirmActiveOrganizationContext(orgId)
+        if (membershipConfirmed) {
+          continue
+        }
+      }
+      if (attempt > 0 && membershipConfirmed && isMissingScheduleMembership(error)) {
+        disableScheduleOrdersEndpoint('load', error.message, orgId)
+        return null
+      }
+      if (error.backendUnavailable) {
+        disableScheduleOrdersEndpoint('load', error.message, orgId)
+        return null
+      }
+      const requestError = new Error(error.message)
+      requestError.code = error.code
+      requestError.status = error.status
+      throw requestError
+    }
+
+    const body = await response.json().catch(() => ({}))
+    if (isScheduleOrdersLocalFileResponse(body)) {
+      return disableScheduleOrdersInvalidPayload(
+        'load',
+        'Backend zlecen zwrocil lokalny plik zamiast danych z bazy.',
+        orgId,
+      )
+    }
+    if (!Array.isArray(body?.data?.orders)) {
+      return disableScheduleOrdersInvalidPayload('load', 'Endpoint zlecen nie zwrocil data.orders.', orgId)
+    }
+    return sortScheduleOrders(body.data.orders)
   }
-  const body = await response.json().catch(() => ({}))
-  if (isScheduleOrdersLocalFileResponse(body)) {
-    return disableScheduleOrdersInvalidPayload('load', 'Backend zlecen zwrocil lokalny plik zamiast danych z bazy.')
-  }
-  if (!Array.isArray(body?.data?.orders)) {
-    return disableScheduleOrdersInvalidPayload('load', 'Endpoint zlecen nie zwrocil data.orders.')
-  }
-  return sortScheduleOrders(body.data.orders)
+
+  return null
 }
 
 async function upsertScheduleTasksViaBackend(orgId, orders = []) {
@@ -535,23 +630,27 @@ async function upsertScheduleTasksViaBackend(orgId, orders = []) {
       }),
     })
   } catch (error) {
-    disableScheduleOrdersEndpoint('save', error?.message || error)
+    disableScheduleOrdersEndpoint('save', error?.message || error, orgId)
     return null
   }
   if (!response.ok) {
     const error = await parseScheduleOrdersApiError(response, 'Nie udalo sie zapisac zlecen.')
     if (error.backendUnavailable) {
-      disableScheduleOrdersEndpoint('save', error.message)
+      disableScheduleOrdersEndpoint('save', error.message, orgId)
       return null
     }
     throw new Error(error.message)
   }
   const body = await response.json().catch(() => ({}))
   if (isScheduleOrdersLocalFileResponse(body)) {
-    return disableScheduleOrdersInvalidPayload('save', 'Backend zlecen zapisal lokalny plik zamiast bazy.')
+    return disableScheduleOrdersInvalidPayload('save', 'Backend zlecen zapisal lokalny plik zamiast bazy.', orgId)
   }
   if (!Array.isArray(body?.data?.orders)) {
-    return disableScheduleOrdersInvalidPayload('save', 'Endpoint zlecen nie zwrocil potwierdzenia data.orders.')
+    return disableScheduleOrdersInvalidPayload(
+      'save',
+      'Endpoint zlecen nie zwrocil potwierdzenia data.orders.',
+      orgId,
+    )
   }
   return sortScheduleOrders(body.data.orders)
 }
@@ -573,20 +672,24 @@ async function deleteScheduleTasksViaBackend(orgId, orderIds = []) {
       }),
     })
   } catch (error) {
-    disableScheduleOrdersEndpoint('delete', error?.message || error)
+    disableScheduleOrdersEndpoint('delete', error?.message || error, orgId)
     return null
   }
   if (!response.ok) {
     const error = await parseScheduleOrdersApiError(response, 'Nie udalo sie usunac zlecenia.')
     if (error.backendUnavailable) {
-      disableScheduleOrdersEndpoint('delete', error.message)
+      disableScheduleOrdersEndpoint('delete', error.message, orgId)
       return null
     }
     throw new Error(error.message)
   }
   const body = await response.json().catch(() => ({}))
   if (isScheduleOrdersLocalFileResponse(body)) {
-    return disableScheduleOrdersInvalidPayload('delete', 'Backend zlecen usunal lokalny plik zamiast rekordu z bazy.')
+    return disableScheduleOrdersInvalidPayload(
+      'delete',
+      'Backend zlecen usunal lokalny plik zamiast rekordu z bazy.',
+      orgId,
+    )
   }
   if (!Array.isArray(body?.data?.deletedOrderIds)) {
     return disableScheduleOrdersInvalidPayload('delete', 'Endpoint zlecen nie zwrocil potwierdzenia data.deletedOrderIds.')
@@ -790,7 +893,7 @@ function mapTaskRowToScheduleOrder(row = {}) {
     requiredWorkMinutes: finiteInteger(task.requiredWorkMinutes, null),
     requiredPeople: finiteInteger(task.requiredPeople, 0),
     workAllocations: allocations,
-    workerId: nullableText(task.workerId, 64),
+    workerId: nullableText(task.workerId, 128),
     workerIds: Array.isArray(workerIds) ? workerIds : [],
     workerLabel: nullableText(task.workerLabel, 500) || 'BUFOR',
     workerName: nullableText(task.workerName, 240),
@@ -936,7 +1039,16 @@ export async function fetchScheduleTasks(orgId) {
   const normalizedOrgId = normalizeText(orgId)
   if (!normalizedOrgId) return []
 
-  if (!shouldSkipScheduleOrdersEndpoint()) {
+  try {
+    requireCurrentScheduleOrganization(normalizedOrgId)
+  } catch (error) {
+    if (error?.code === 'STALE_ORG_CONTEXT') {
+      return []
+    }
+    throw error
+  }
+
+  if (!shouldSkipScheduleOrdersEndpoint(normalizedOrgId)) {
     const backendOrders = await fetchScheduleTasksViaBackend(normalizedOrgId)
     if (backendOrders) return backendOrders
   }
@@ -949,7 +1061,9 @@ export async function upsertScheduleTasks(orgId, orders = []) {
   const sourceOrders = Array.isArray(orders) ? orders : []
   if (!normalizedOrgId) return sourceOrders
 
-  if (!shouldSkipScheduleOrdersEndpoint()) {
+  requireCurrentScheduleOrganization(normalizedOrgId)
+
+  if (!shouldSkipScheduleOrdersEndpoint(normalizedOrgId)) {
     const backendOrders = await upsertScheduleTasksViaBackend(normalizedOrgId, sourceOrders)
     if (backendOrders) return backendOrders
   }
@@ -964,7 +1078,9 @@ export async function deleteScheduleTasks(orgId, orderIds = []) {
     .filter(Boolean)
   if (!normalizedOrgId || !ids.length) return []
 
-  if (!shouldSkipScheduleOrdersEndpoint()) {
+  requireCurrentScheduleOrganization(normalizedOrgId)
+
+  if (!shouldSkipScheduleOrdersEndpoint(normalizedOrgId)) {
     const deletedIds = await deleteScheduleTasksViaBackend(normalizedOrgId, ids)
     if (deletedIds) return deletedIds
   }
