@@ -7,6 +7,7 @@ export { template }
 export function createEventsFeature(ctx) {
   const {
     appState,
+    canDeleteEvents,
     canManageEvents,
     createBindingHelpers,
     createEvent,
@@ -904,7 +905,7 @@ export function createEventsFeature(ctx) {
   function syncEventsSelectionUi() {
     const selectAll = document.getElementById('evSelectAll')
     const deleteButton = document.getElementById('evDeleteSelectedBtn')
-    const selectionEnabled = canManageEvents()
+    const selectionEnabled = canDeleteEvents()
     const rowKeys = appState.eventRows
       .map((row, index) => (eventCanDelete(row) ? eventSelectionKey(row, index) : ''))
       .filter(Boolean)
@@ -1106,7 +1107,7 @@ export function createEventsFeature(ctx) {
       .map((row, index) => {
         const rowKey = eventSelectionKey(row, index)
         const isSelected = appState.eventsSelectedKeys.has(rowKey)
-        const canSelect = canManageEvents() && eventCanDelete(row)
+        const canSelect = canDeleteEvents() && eventCanDelete(row)
         const selectTitle = eventCanDelete(row) ? 'Zaznacz zdarzenie' : 'Rekord dnia pracy bez osobnego zdarzenia'
         const comment = normalizeVisibleEventComment(row.comment)
         const commentCell = comment
@@ -1738,7 +1739,7 @@ export function createEventsFeature(ctx) {
       saveButton.textContent = 'Zapisz'
     }
     if (deleteButton) {
-      deleteButton.style.display = canManageEvents() ? '' : 'none'
+      deleteButton.style.display = canDeleteEvents() ? '' : 'none'
       deleteButton.disabled = !eventCanDelete(item)
       deleteButton.textContent = 'Usuń'
     }
@@ -2184,7 +2185,7 @@ export function createEventsFeature(ctx) {
       return
     }
 
-    if (!canManageEvents()) {
+    if (!canDeleteEvents()) {
       alert('Brak uprawnień do usuwania zdarzeń.')
       return
     }
@@ -2239,7 +2240,7 @@ export function createEventsFeature(ctx) {
       return
     }
 
-    if (!canManageEvents()) {
+    if (!canDeleteEvents()) {
       alert('Brak uprawnien do usuwania zdarzen.')
       return
     }
@@ -3043,7 +3044,7 @@ export function createEventsFeature(ctx) {
       if (!(input instanceof HTMLInputElement)) {
         return
       }
-      if (!canManageEvents()) {
+      if (!canDeleteEvents()) {
         input.checked = false
         input.indeterminate = false
         return
@@ -3076,7 +3077,7 @@ export function createEventsFeature(ctx) {
       if (!(input instanceof HTMLInputElement)) {
         return
       }
-      if (!canManageEvents()) {
+      if (!canDeleteEvents()) {
         input.checked = false
         return
       }

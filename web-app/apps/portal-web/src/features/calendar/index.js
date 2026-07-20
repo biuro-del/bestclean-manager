@@ -172,6 +172,8 @@ export function createCalendarFeature(ctx) {
   let calendarRenderRaf = 0
   let calendarTimelineWorkerStateLoadPromise = null
   let calendarTimelineOrdersRemotePromise = null
+  let calendarTimelineOrdersRemotePromiseKey = ''
+  let calendarTimelineOrdersRemoteGeneration = 0
   const calendarTimelineEventsPopupRegistry = new Map()
   const calendarTimelineWorkerStateMapCache = { key: '', value: new Map() }
   const calendarTimelineResourcesCache = { key: '', value: [] }
@@ -3060,19 +3062,44 @@ export function createCalendarFeature(ctx) {
   function ordersPersistLocalTimelineOrders(orders = []) {
     void orders
   }
+
+  function ordersActiveOrganizationId() {
+    return String(appState.session?.activeOrgId ?? appState.session?.orgId ?? '').trim()
+  }
+
+  function ordersRemoteSessionKey() {
+    const uid = String(appState.session?.uid ?? '').trim()
+    const orgId = ordersActiveOrganizationId()
+    return uid && orgId ? `${uid}:${orgId}` : ''
+  }
+
+  function ordersRemoteRequestIsCurrent(sessionKey, generation) {
+    return (
+      Boolean(sessionKey) &&
+      sessionKey === ordersRemoteSessionKey() &&
+      generation === calendarTimelineOrdersRemoteGeneration
+    )
+  }
+
+  function ordersInvalidateRemoteTimelineRequests() {
+    calendarTimelineOrdersRemoteGeneration += 1
+    calendarTimelineOrdersRemotePromise = null
+    calendarTimelineOrdersRemotePromiseKey = ''
+    appState.calendarTimelineOrdersRemoteLoading = false
+  }
   
   function ordersScheduleRemoteTimelineOrderRetry(delayMs = 15000) {
     if (ordersRemoteRetryTimer || typeof window === 'undefined') {
       return
     }
-    const orgId = String(appState.session?.orgId ?? '').trim()
+    const orgId = ordersActiveOrganizationId()
     if (!orgId) {
       return
     }
   
     ordersRemoteRetryTimer = window.setTimeout(() => {
       ordersRemoteRetryTimer = 0
-      if (String(appState.session?.orgId ?? '').trim() !== orgId) {
+      if (ordersActiveOrganizationId() !== orgId) {
         return
       }
       ordersQueueRemoteTimelineOrderSave(ordersListSourceOrders())
@@ -3087,7 +3114,7 @@ export function createCalendarFeature(ctx) {
   }
   
   function ordersQueueRemoteTimelineOrderSave(orders = ordersListSourceOrders()) {
-    const orgId = String(appState.session?.orgId ?? '').trim()
+    const orgId = ordersActiveOrganizationId()
     if (!orgId) {
       return
     }
@@ -3123,8 +3150,10 @@ export function createCalendarFeature(ctx) {
   }
   
   async function ordersSaveRemoteTimelineOrdersNow(orders = ordersListSourceOrders(), options = {}) {
-    const orgId = String(appState.session?.orgId ?? '').trim()
-    if (!orgId) {
+    const orgId = ordersActiveOrganizationId()
+    const sessionKey = ordersRemoteSessionKey()
+    const generation = calendarTimelineOrdersRemoteGeneration
+    if (!orgId || !sessionKey) {
       return false
     }
   
@@ -3136,6 +3165,9 @@ export function createCalendarFeature(ctx) {
     }
     try {
       const savedOrders = await upsertScheduleTasks(orgId, snapshot)
+      if (!ordersRemoteRequestIsCurrent(sessionKey, generation)) {
+        return false
+      }
       appState.calendarTimelineOrdersRemoteLoaded = true
       ordersClearRemoteTimelineOrderRetryTimer()
       if (Array.isArray(savedOrders)) {
@@ -3154,6 +3186,9 @@ export function createCalendarFeature(ctx) {
       }
       return true
     } catch (error) {
+      if (!ordersRemoteRequestIsCurrent(sessionKey, generation) || error?.code === 'STALE_ORG_CONTEXT') {
+        return false
+      }
       console.warn('[portal/schedule-orders] remote save failed', error)
       if (options.retry !== false) {
         ordersScheduleRemoteTimelineOrderRetry()
@@ -3189,12 +3224,13 @@ export function createCalendarFeature(ctx) {
   }
   
   async function ordersSyncRemoteTimelineOrders({ render = false } = {}) {
-    const orgId = String(appState.session?.orgId ?? '').trim()
-    if (!orgId) {
+    const orgId = ordersActiveOrganizationId()
+    const sessionKey = ordersRemoteSessionKey()
+    if (!orgId || !sessionKey) {
       return ordersListSourceOrders()
     }
 
-    if (calendarTimelineOrdersRemotePromise) {
+    if (calendarTimelineOrdersRemotePromise && calendarTimelineOrdersRemotePromiseKey === sessionKey) {
       const syncedOrders = await calendarTimelineOrdersRemotePromise
       if (render) {
         ordersRenderScheduleOrderViews()
@@ -3202,24 +3238,36 @@ export function createCalendarFeature(ctx) {
       return syncedOrders
     }
 
+    const generation = calendarTimelineOrdersRemoteGeneration
     appState.calendarTimelineOrdersRemoteLoading = true
-    calendarTimelineOrdersRemotePromise = (async () => {
+    const request = (async () => {
       try {
         const remoteOrders = await fetchScheduleTasks(orgId)
+        if (!ordersRemoteRequestIsCurrent(sessionKey, generation)) {
+          return ordersListSourceOrders()
+        }
         const canonicalOrders = ordersMergeWithPendingLocalOrders(remoteOrders)
         ordersSaveTimelineOrders(canonicalOrders, { syncRemote: false })
         appState.calendarTimelineOrdersRemoteLoaded = true
         return appState.calendarTimelineDemoOrders
       } catch (error) {
+        if (!ordersRemoteRequestIsCurrent(sessionKey, generation) || error?.code === 'STALE_ORG_CONTEXT') {
+          return ordersListSourceOrders()
+        }
         appState.calendarTimelineOrdersRemoteLoaded = false
         console.warn('[portal/schedule-orders] remote load failed', error)
         showPortalErrorNotice('Nie udało się pobrać zleceń z Firebase', error)
         return ordersListSourceOrders()
       } finally {
-        appState.calendarTimelineOrdersRemoteLoading = false
-        calendarTimelineOrdersRemotePromise = null
+        if (calendarTimelineOrdersRemotePromise === request) {
+          appState.calendarTimelineOrdersRemoteLoading = false
+          calendarTimelineOrdersRemotePromise = null
+          calendarTimelineOrdersRemotePromiseKey = ''
+        }
       }
     })()
+    calendarTimelineOrdersRemotePromise = request
+    calendarTimelineOrdersRemotePromiseKey = sessionKey
     const syncedOrders = await calendarTimelineOrdersRemotePromise
     if (render) {
       ordersRenderScheduleOrderViews()
@@ -3228,7 +3276,9 @@ export function createCalendarFeature(ctx) {
   }
   
   async function ordersDeleteTimelineOrdersById(orderIds = [], options = {}) {
-    const orgId = String(appState.session?.orgId ?? '').trim()
+    const orgId = ordersActiveOrganizationId()
+    const sessionKey = ordersRemoteSessionKey()
+    const generation = calendarTimelineOrdersRemoteGeneration
     const ids = (Array.isArray(orderIds) ? orderIds : [orderIds])
       .map((value) => String(value ?? '').trim())
       .filter(Boolean)
@@ -3253,6 +3303,9 @@ export function createCalendarFeature(ctx) {
   
     try {
       const result = ids.length ? await deleteScheduleTasks(orgId, ids) : []
+      if (!ordersRemoteRequestIsCurrent(sessionKey, generation)) {
+        return false
+      }
       const confirmedDeletedIds = new Set((Array.isArray(result) ? result : []).map((value) => String(value ?? '').trim()).filter(Boolean))
       const missingIds = ids.filter((value) => !confirmedDeletedIds.has(value))
       if (missingIds.length) {
@@ -3274,6 +3327,9 @@ export function createCalendarFeature(ctx) {
       }
       return true
     } catch (error) {
+      if (!ordersRemoteRequestIsCurrent(sessionKey, generation) || error?.code === 'STALE_ORG_CONTEXT') {
+        return false
+      }
       console.warn('[portal/schedule-orders] remote delete failed', error)
       showPortalErrorNotice('Nie udało się usunąć zlecenia z Firebase', error)
       ordersScheduleRemoteTimelineOrderRetry()
@@ -3305,7 +3361,7 @@ export function createCalendarFeature(ctx) {
   }
   
   function ordersEnsureTimelineOrdersForRoute(routeName, renderAfterLoad, options = {}) {
-    const activeOrgId = String(appState.session?.orgId ?? '').trim()
+    const activeOrgId = ordersActiveOrganizationId()
     if (!activeOrgId) {
       return Promise.resolve(ordersListSourceOrders())
     }
@@ -8075,7 +8131,7 @@ export function createCalendarFeature(ctx) {
   }
   
   async function calendarTimelineRefreshOrdersForVerifiedMove() {
-    const orgId = String(appState.session?.orgId ?? '').trim()
+    const orgId = ordersActiveOrganizationId()
     if (!orgId) {
       return ordersListSourceOrders()
     }
@@ -11246,6 +11302,7 @@ export function createCalendarFeature(ctx) {
     clearRemoteTimelineOrderTimers: () => {
       ordersClearRemoteTimelineOrderSaveTimer()
       ordersClearRemoteTimelineOrderRetryTimer()
+      ordersInvalidateRemoteTimelineRequests()
     },
     cleanup: () => {
       if (calendarRenderRaf && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
@@ -11259,6 +11316,7 @@ export function createCalendarFeature(ctx) {
       calendarHideTaskDeleteConfirm()
       ordersClearRemoteTimelineOrderSaveTimer()
       ordersClearRemoteTimelineOrderRetryTimer()
+      ordersInvalidateRemoteTimelineRequests()
     },
   }
 }

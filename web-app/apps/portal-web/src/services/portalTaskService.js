@@ -1,4 +1,5 @@
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
+import { platformContextHeaders } from './platformDataConnectService'
 
 function normalizeApiBase(value) {
   const raw = String(value ?? '').trim()
@@ -148,6 +149,7 @@ async function portalTaskAuthHeaders() {
   return {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${idToken}`,
+    ...platformContextHeaders(),
   }
 }
 

@@ -17,7 +17,6 @@ import {
   insertIndividualJobForOrg,
   insertStorageForOrg,
   insertWorkdayForOrg,
-  insertWorkerForOrg,
   insertZoneForOrg,
   startWorkdayPause,
   stopWorkdayPause,
@@ -33,8 +32,7 @@ import {
   workdayPausesForOrg,
   workdaysForOrg,
   zonesForOrg,
-} from '@dataconnect/generated'
-import { executeMutation, mutationRef } from 'firebase/data-connect'
+} from './platformDataConnectService'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 import {
   deleteOrgStyleForBackup,
@@ -45,6 +43,7 @@ import {
   upsertUserStyleForBackup,
 } from './styleService'
 import { deletePortalTasks, fetchPortalTasks, upsertPortalTasks } from './portalTaskService'
+import { restoreWorkersFromBackup } from './workerService'
 
 const BACKUP_SCHEMA_VERSION = '1.0.0'
 const BACKUP_DB_NAME = 'portal-backups'
@@ -124,15 +123,6 @@ function ensureFirebaseOrThrow() {
   if (!firebase?.dataConnect) {
     throw new Error('Nie udalo sie zainicjalizowac Data Connect.')
   }
-}
-
-function getDataConnectOrThrow() {
-  ensureFirebaseOrThrow()
-  const firebase = ensureFirebase()
-  if (!firebase?.dataConnect) {
-    throw new Error('Nie udalo sie pobrac instancji Data Connect.')
-  }
-  return firebase.dataConnect
 }
 
 function roleSafeText(value) {
@@ -1279,105 +1269,8 @@ function isKnownStyleId(styleId) {
   return Boolean(normalized) && AVAILABLE_STYLE_IDS.has(normalized)
 }
 
-function normalizeWorkerInsertVars(orgId, row) {
-  const login = roleSafeText(row?.login)
-  if (!login) {
-    return null
-  }
-
-  return {
-    orgId,
-    login,
-    workerName: toNullableText(row?.fullName ?? row?.workerName),
-    loginEmail: toNullableText(row?.loginEmail ?? row?.email),
-    role: toNullableText(row?.role),
-    active: toBoolean(row?.active, true),
-    email: toNullableText(row?.email ?? row?.loginEmail),
-    phone: toNullableText(row?.phone),
-    workerType: toNullableText(row?.workerType ?? row?.role),
-    workerId: toNullableText(row?.workerId ?? row?.id),
-  }
-}
-
-async function updateWorkerViaOperation(orgId, row) {
-  const login = roleSafeText(row?.login)
-  if (!login) {
-    return false
-  }
-
-  const dataConnect = getDataConnectOrThrow()
-  await executeMutation(
-    mutationRef(dataConnect, 'UpdateWorkerForOrg', {
-      orgId,
-      login,
-      workerName: toNullableText(row?.fullName ?? row?.workerName),
-      loginEmail: toNullableText(row?.loginEmail ?? row?.email),
-      role: toNullableText(row?.role ?? row?.workerType) ?? 'Worker',
-      active: toBoolean(row?.active, true),
-      email: toNullableText(row?.email ?? row?.loginEmail),
-      phone: toNullableText(row?.phone),
-      workerType: toNullableText(row?.workerType ?? row?.role),
-      workerId: toNullableText(row?.workerId ?? row?.id) ?? login,
-      edit: toNullableText(row?.edit ?? row?.updatedBy ?? row?.editedBy),
-    }),
-  )
-
-  return true
-}
-
-async function restoreWorkersModule(orgId, rows) {
-  const importedRows = Array.isArray(rows) ? rows : []
-  const currentResponse = await workersForOrg({ orgId })
-  const currentRows = currentResponse?.data?.workers ?? []
-
-  const importedMap = mapRowsByKey(importedRows, 'login')
-  const currentMap = mapRowsByKey(currentRows, 'login')
-
-  let created = 0
-  let updated = 0
-  let deactivated = 0
-  let skipped = 0
-
-  for (const row of importedRows) {
-    const vars = normalizeWorkerInsertVars(orgId, row)
-    if (!vars) {
-      skipped += 1
-      continue
-    }
-
-    if (currentMap.has(vars.login)) {
-      await updateWorkerViaOperation(orgId, row)
-      updated += 1
-      continue
-    }
-
-    await insertWorkerForOrg(vars)
-    created += 1
-  }
-
-  for (const currentRow of currentRows) {
-    const login = roleSafeText(currentRow?.login)
-    if (!login || importedMap.has(login)) {
-      continue
-    }
-
-    const deactivatePayload = {
-      ...currentRow,
-      login,
-      active: false,
-    }
-    await updateWorkerViaOperation(orgId, deactivatePayload)
-    deactivated += 1
-  }
-
-  return {
-    moduleId: 'workers',
-    created,
-    updated,
-    deleted: 0,
-    deactivated,
-    skipped,
-  }
+async function restoreWorkersModule(orgId, rows, context = {}) {
+  return restoreWorkersFromBackup(orgId, Array.isArray(rows) ? rows : [], context)
 }
 
 async function restoreStylesModule(orgId, rows) {
@@ -2192,7 +2085,7 @@ async function restoreFromParsedArchive({ orgId, parsed, restoredBy, sourceLabel
       continue
     }
     const rows = Array.isArray(modulePayloads[moduleId]) ? modulePayloads[moduleId] : []
-    const result = await handler(orgId, rows)
+    const result = await handler(orgId, rows, { restoredBy, sourceLabel })
     moduleResults.push(result)
   }
 

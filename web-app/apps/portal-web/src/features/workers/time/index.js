@@ -388,12 +388,6 @@ export function createWorkerTimeFeature(ctx) {
       getValue: (row) => row.workerId || '-',
     },
     {
-      id: 'login',
-      label: 'Login',
-      weight: 1.3,
-      getValue: (row) => row.workerLogin || '-',
-    },
-    {
       id: 'type',
       label: 'Typ',
       weight: 1.6,

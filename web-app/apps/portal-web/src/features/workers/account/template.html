@@ -61,8 +61,7 @@
         <h2>Informacje podstawowe</h2>
         <dl class="worker-account-details">
           <div><dt><span class="worker-account-detail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 10h3M8 14h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>ID pracownika</dt><dd id="waCardId">-</dd></div>
-          <div><dt><span class="worker-account-detail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="1.7"/><path d="M4 21a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>Login</dt><dd id="waCardLogin">-</dd></div>
-          <div><dt><span class="worker-account-detail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="m5 8 7 5 7-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Email</dt><dd id="waCardEmail">-</dd></div>
+          <div><dt><span class="worker-account-detail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="m5 8 7 5 7-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Email (login)</dt><dd id="waCardEmail">-</dd></div>
           <div><dt><span class="worker-account-detail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 5h3l1.5 4-2 1.2a11 11 0 0 0 4.3 4.3l1.2-2 4 1.5v3a2 2 0 0 1-2.2 2A15 15 0 0 1 5 7.2 2 2 0 0 1 7 5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></span>Telefon</dt><dd id="waCardPhone">-</dd></div>
           <div><dt><span class="worker-account-detail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>Dodano</dt><dd id="waCardAdded">-</dd></div>
           <div><dt><span class="worker-account-detail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Edytowano</dt><dd id="waCardEdited">-</dd></div>
@@ -121,7 +120,7 @@
             <label>ID pracownika<input id="waWorkerId" type="text" /></label>
             <label>Imie i nazwisko<input id="waName" type="text" maxlength="200" /></label>
             <label>Telefon<input id="waPhone" type="text" maxlength="80" placeholder="Dodaj numer telefonu" /></label>
-            <label>Email<input id="waEmail" type="email" maxlength="200" /></label>
+            <label>Email (login)<input id="waEmail" type="email" maxlength="160" autocomplete="email" /></label>
             <label>Status<select id="waActive"><option value="1">Aktywny</option><option value="0">Nieaktywny</option></select></label>
             <label>Ostatnio edytowal<input id="waEditedBy" type="text" readonly /></label>
             <label>Rodzaj umowy<select id="waContractType">
@@ -198,7 +197,7 @@
           <div class="worker-account-panel-head">
             <div>
               <h2>Bezpieczenstwo</h2>
-              <p>Login i haslo moze zmienic tylko Admin.</p>
+              <p>Ustaw nowe hasło logowania pracownika.</p>
             </div>
             <div class="worker-account-edit-actions" data-wa-edit-actions="security">
               <button class="worker-account-edit-icon" id="waEditSecurityBtn" data-wa-edit-tab="security" type="button" aria-label="Edytuj bezpieczenstwo" title="Edytuj bezpieczenstwo">
@@ -208,10 +207,8 @@
               <button class="btn2" id="waCancelSecurityBtn" data-wa-cancel-tab="security" type="button" hidden>Anuluj</button>
             </div>
           </div>
-          <div class="worker-account-warning" id="waSecurityWarning">Minimum 6 znakow dla nowego hasla.</div>
+          <div class="worker-account-warning" id="waSecurityWarning">Nowe haslo ma minimum 6 znakow i jest aktualizowane w Firebase Auth.</div>
           <div class="worker-account-form-grid">
-            <label>Login<input id="waLogin" type="text" maxlength="64" /></label>
-            <label>Obecne haslo<input id="waCurrentPassword" type="password" readonly placeholder="Kliknij Pobierz" /></label>
             <label>Nowe haslo
               <span class="worker-account-password-field">
                 <input id="waNewPassword" type="password" maxlength="120" autocomplete="new-password" />
@@ -224,9 +221,6 @@
                 <button class="worker-account-password-eye" id="waNewPassword2EyeBtn" type="button" aria-label="Pokaz powtorzone haslo"></button>
               </span>
             </label>
-          </div>
-          <div class="worker-account-actions-row">
-            <button class="btn2" id="waRevealPasswordBtn" type="button">Pobierz haslo</button>
           </div>
         </section>
       </div>
@@ -248,16 +242,17 @@
           </div>
           <div class="worker-account-form-grid">
             <label>Rola<select id="waRole">
-              <option value="ADMIN">Admin</option>
-              <option value="MANAGER">Manager / Kierownik</option>
-              <option value="COORDINATOR">Koordynator</option>
-              <option value="WORKER">Pracownik</option>
+              <option value="OWNER" disabled title="Pełny dostęp. Rola wyłącznie dla założyciela organizacji; nie można jej zmienić.">Owner</option>
+              <option value="ADMIN" title="Pełny dostęp: podgląd, dodawanie, edycja i usuwanie.">ADMIN</option>
+              <option value="MANAGER" title="Może przeglądać, dodawać i edytować, ale nie może usuwać.">Manager</option>
+              <option value="COORDINATOR" title="Może logować się do portalu wyłącznie w trybie podglądu.">Koordynator</option>
+              <option value="WORKER" title="Dostęp wyłącznie do aplikacji mobilnej; bez dostępu do portalu.">Worker</option>
             </select></label>
             <label>Typ pracownika<select id="waWorkerType">
-              <option value="ADMIN">ADMIN</option>
-              <option value="Koordynator">Koordynator</option>
+              <option value="Administrator">Administrator</option>
+              <option value="Pracownik Biurowy">Pracownik Biurowy</option>
               <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
-              <option value="Zespół mobilny">Zespół mobilny</option>
+              <option value="Zespół Mobilny">Zespół Mobilny</option>
             </select></label>
           </div>
           <div class="worker-account-role-list worker-account-role-list-wide" id="waRolePanelPreviewList"></div>

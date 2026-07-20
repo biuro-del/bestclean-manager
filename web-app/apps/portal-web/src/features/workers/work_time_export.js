@@ -108,12 +108,6 @@ export function createWorkTimeExportColumns(deps) {
       getValue: (row) => row.workerId || '-',
     },
     {
-      id: 'login',
-      label: 'Login',
-      weight: 1.3,
-      getValue: (row) => row.workerLogin || '-',
-    },
-    {
       id: 'type',
       label: 'Typ',
       weight: 1.6,
@@ -187,9 +181,9 @@ function buildWorkerLookups(deps, workerRows = []) {
   workerRows.forEach((worker) => {
     const login = String(worker.login ?? worker.workerLogin ?? worker.workerId ?? worker.id ?? '').trim()
     const name = workerNameValue(worker)
-    const workerId = String(worker.workerId ?? worker.id ?? login).trim() || login || '-'
+    const workerId = String(worker.workerId ?? worker.id ?? '').trim() || '-'
     const workerType = String(worker.type ?? worker.role ?? worker.workerType ?? '').trim() || '-'
-    const displayName = name || login || '-'
+    const displayName = name || workerId
     const entry = { workerId, workerName: displayName, workerLogin: login || '-', workerType }
 
     workerIdentityValues(worker).forEach((value) => {
@@ -252,7 +246,7 @@ export async function buildWorkTimeExportRowsForWorkers({
       const nameKey = normalizeText(deps, item?.workerName)
       const resolvedWorker = workerLookupByLogin.get(loginKey) || workerLookupByName.get(nameKey) || null
       const sourceWorkerName =
-        String(resolvedWorker?.workerName ?? item?.workerName ?? item?.workerLogin ?? '').trim() || '-'
+        String(resolvedWorker?.workerName ?? item?.workerName ?? resolvedWorker?.workerId ?? item?.workerId ?? '').trim() || '-'
       const dayKey = rowDayKey(deps, item)
       const startIso = deps.toIso(item?.startAt)
       const endIso = deps.toIso(item?.endAt)
@@ -265,7 +259,7 @@ export async function buildWorkTimeExportRowsForWorkers({
       const breakSec = Math.max(0, Number(item?.breakSec ?? item?.pauseTotalSec ?? 0) || 0)
       return {
         workerId:
-          String(resolvedWorker?.workerId ?? item?.workerId ?? item?.id ?? item?.workerLogin ?? '').trim() ||
+          String(resolvedWorker?.workerId ?? item?.workerId ?? item?.id ?? '').trim() ||
           '-',
         workerName: workerDisplayName(deps, sourceWorkerName),
         workerSourceName: sourceWorkerName,
@@ -409,7 +403,7 @@ export async function downloadWorkTimeEwidencjaPdf({
     }
 
     const workerTitle = `${group.workerName} (${group.workerId})`
-    const subtitle = `Login: ${group.workerLogin} | Typ: ${group.workerType} | Zakres: ${fromLabel} - ${toLabel}`
+    const subtitle = `Typ: ${group.workerType} | Zakres: ${fromLabel} - ${toLabel}`
     const summaryLine = `Wpisy: ${group.rows.length} | Czas pracy: ${deps.durationSecondsToHm(group.totalWorkSec)} | Przerwy: ${deps.durationSecondsToHm(group.totalBreakSec)} | Realny: ${deps.durationSecondsToHm(group.totalNetSec)}`
 
     deps.setPdfUnicodeFont(pdf, 'bold')

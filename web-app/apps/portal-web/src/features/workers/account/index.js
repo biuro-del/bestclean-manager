@@ -19,7 +19,6 @@ const WORKER_ACCOUNT_PAGE_SIZES = [5, 10, 25, 50]
 const WORKER_ACCOUNT_TIME_PAGE_SIZE = 50
 const WORKER_ACCOUNT_TIME_FETCH_PAGE_SIZE = 1000
 const WORKER_ACCOUNT_ACTIVITY_FETCH_PAGE_SIZE = 200
-const LOGIN_LOCAL_PART_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/
 const WORKER_ACCOUNT_MONTH_NAMES_PL = [
   'styczen',
   'luty',
@@ -35,29 +34,33 @@ const WORKER_ACCOUNT_MONTH_NAMES_PL = [
   'grudzien',
 ]
 const WORKER_ROLE_COPY = {
+  OWNER: {
+    title: 'Owner',
+    description: 'Pełny dostęp. Rola wyłącznie dla założyciela organizacji i nie można jej zmienić.',
+  },
   ADMIN: {
     title: 'Administrator',
-    description: 'Pelny dostep do danych, hasel, rol i statusu konta.',
+    description: 'Pełny dostęp: podgląd, dodawanie, edycja i usuwanie.',
   },
   MANAGER: {
-    title: 'Manager / Kierownik',
-    description: 'Edycja danych podstawowych i nadzor operacyjny.',
+    title: 'Manager',
+    description: 'Może przeglądać, dodawać i edytować, ale nie może usuwać.',
   },
   COORDINATOR: {
     title: 'Koordynator',
-    description: 'Koordynacja realizacji zlecen oraz pracy zespolu.',
+    description: 'Może logować się do portalu wyłącznie w trybie podglądu.',
   },
   WORKER: {
-    title: 'Pracownik operacyjny',
-    description: 'Rejestracja czasu pracy i realizacja zlecen.',
+    title: 'Worker',
+    description: 'Dostęp wyłącznie do aplikacji mobilnej; bez dostępu do portalu.',
   },
 }
 const WORKER_TYPE_DEFAULT = 'Stały personel na obiekcie'
 const WORKER_TYPE_OPTIONS = [
-  'ADMIN',
-  'Koordynator',
+  'Administrator',
+  'Pracownik Biurowy',
   WORKER_TYPE_DEFAULT,
-  'Zespół mobilny',
+  'Zespół Mobilny',
 ]
 const DASHBOARD_LOCAL_CACHE_PREFIX = 'portal.dashboard.snapshot.'
 const WORKER_TRAINING_OPTIONS = [
@@ -84,9 +87,9 @@ const PASSWORD_EYE_CLOSED_ICON = `
 export function createWorkerAccountFeature(ctx) {
   const {
     appState,
-    canDeleteWorkers,
+    canAdministerWorkers,
     canManageWorkers,
-    canRevealWorkerPasswords,
+    canResetWorkerPasswords,
     createBindingHelpers,
     durationSecondsToHm,
     durationSecondsToHms,
@@ -101,7 +104,6 @@ export function createWorkerAccountFeature(ctx) {
     ordersListSourceOrders,
     ordersSyncRemoteTimelineOrders,
     paginate,
-    revealWorkerPassword,
     setPdfUnicodeFont,
     setWorkerPassword,
     showTransientNotice,
@@ -288,7 +290,8 @@ export function createWorkerAccountFeature(ctx) {
 
   function roleValue(value) {
     const normalized = normalizeKey(value)
-    if (normalized.includes('admin') || normalized.includes('owner') || normalized.includes('superadmin')) return 'ADMIN'
+    if (normalized.includes('owner') || normalized.includes('wlasciciel')) return 'OWNER'
+    if (normalized.includes('admin') || normalized.includes('superadmin')) return 'ADMIN'
     if (normalized.includes('manager') || normalized.includes('menager') || normalized.includes('kierownik')) return 'MANAGER'
     if (normalized.includes('koordynator') || normalized.includes('coordinator') || normalized.includes('coordynator')) return 'COORDINATOR'
     return 'WORKER'
@@ -299,13 +302,18 @@ export function createWorkerAccountFeature(ctx) {
     return WORKER_ROLE_COPY[key]?.title ?? String(value ?? 'Pracownik').trim()
   }
 
+  function isOwnerWorker(worker = {}) {
+    return Boolean(worker?.isOwner || roleValue(workerRole(worker)) === 'OWNER')
+  }
+
   function workerTypeValue(value) {
     const raw = value && typeof value === 'object'
       ? value.workerType ?? value.profileType ?? value.employeeType ?? value.staffType ?? value.role ?? ''
       : value
     const normalized = normalizeKey(raw)
-    if (normalized.includes('admin') || normalized.includes('owner') || normalized.includes('superadmin')) return 'ADMIN'
+    if (normalized.includes('admin') || normalized.includes('owner') || normalized.includes('superadmin')) return 'Administrator'
     if (
+      normalized.includes('biurow') ||
       normalized.includes('koordynator') ||
       normalized.includes('coordinator') ||
       normalized.includes('coordynator') ||
@@ -313,9 +321,9 @@ export function createWorkerAccountFeature(ctx) {
       normalized.includes('menager') ||
       normalized.includes('kierownik')
     ) {
-      return 'Koordynator'
+      return 'Pracownik Biurowy'
     }
-    if (normalized.includes('mobil') || normalized.includes('zespol')) return 'Zespół mobilny'
+    if (normalized.includes('mobil') || normalized.includes('zespol')) return 'Zespół Mobilny'
     if (normalized.includes('staly') || normalized.includes('personel') || normalized.includes('obiekt')) {
       return WORKER_TYPE_DEFAULT
     }
@@ -382,7 +390,7 @@ export function createWorkerAccountFeature(ctx) {
     const menu = document.getElementById('waTrainingMenu')
     if (!menu) return
     const selected = new Set(values.map((value) => normalizeKey(value)))
-    const disabled = !canDeleteWorkers()
+    const disabled = !canAdministerWorkers()
     menu.innerHTML = trainingOptions(values).map((option) => {
       const id = `waTraining-${normalizeKey(option).replace(/[^a-z0-9]+/g, '-') || 'option'}`
       const checked = selected.has(normalizeKey(option))
@@ -582,8 +590,8 @@ export function createWorkerAccountFeature(ctx) {
   function syncTopActions(worker) {
     const deactivate = document.getElementById('waTopDeactivateBtn')
     if (deactivate) {
-      deactivate.disabled = !canDeleteWorkers() || !isWorkerActive(worker)
-      deactivate.title = canDeleteWorkers()
+      deactivate.disabled = !canAdministerWorkers() || !isWorkerActive(worker)
+      deactivate.title = canAdministerWorkers()
         ? isWorkerActive(worker) ? 'Dezaktywuj konto pracownika' : 'Konto jest juz nieaktywne'
         : 'Dezaktywacja konta jest dostepna tylko dla Admina'
     }
@@ -895,7 +903,6 @@ export function createWorkerAccountFeature(ctx) {
     setText('waCardName', name)
     setText('waCardRole', roleLabel(role))
     setText('waCardId', workerId(worker) || '-')
-    setText('waCardLogin', workerLogin(worker) || '-')
     setText('waCardEmail', worker.email || worker.loginEmail || '-')
     setText('waCardPhone', worker.phone || '-')
     setText('waCardAdded', formatDateTime(worker.addedAt || worker.createdAt))
@@ -960,7 +967,7 @@ export function createWorkerAccountFeature(ctx) {
 
   function canEditWorkerAccountTab(tab) {
     if (tab === 'account') return canManageWorkers()
-    if (tab === 'security' || tab === 'roles') return canDeleteWorkers()
+    if (tab === 'security' || tab === 'roles') return canAdministerWorkers()
     return false
   }
 
@@ -1005,7 +1012,7 @@ export function createWorkerAccountFeature(ctx) {
     })
 
     const accountManagerEdit = isEditingTab('account') && canManageWorkers()
-    const accountAdminEdit = isEditingTab('account') && canDeleteWorkers()
+    const accountAdminEdit = isEditingTab('account') && canAdministerWorkers()
     ;['waName', 'waEmail', 'waPhone'].forEach((id) => setControlDisabled(id, !accountManagerEdit))
     ;[
       'waActive',
@@ -1020,17 +1027,17 @@ export function createWorkerAccountFeature(ctx) {
     syncTrainingControlsDisabled(!accountAdminEdit)
     const workerIdInput = document.getElementById('waWorkerId')
     if (workerIdInput) {
-      workerIdInput.readOnly = !accountAdminEdit
+      workerIdInput.readOnly = true
       workerIdInput.disabled = false
     }
 
-    const securityAdminEdit = isEditingTab('security') && canDeleteWorkers()
-    ;['waLogin', 'waNewPassword', 'waNewPassword2'].forEach((id) => setControlDisabled(id, !securityAdminEdit))
-    ;['waNewPasswordEyeBtn', 'waNewPassword2EyeBtn'].forEach((id) => setControlDisabled(id, !securityAdminEdit))
-    setControlDisabled('waRevealPasswordBtn', !canRevealWorkerPasswords())
+    const securityPasswordEdit = isEditingTab('security') && canResetWorkerPasswords()
+    ;['waNewPassword', 'waNewPassword2'].forEach((id) => setControlDisabled(id, !securityPasswordEdit))
+    ;['waNewPasswordEyeBtn', 'waNewPassword2EyeBtn'].forEach((id) => setControlDisabled(id, !securityPasswordEdit))
 
-    const rolesAdminEdit = isEditingTab('roles') && canDeleteWorkers()
-    ;['waRole', 'waWorkerType'].forEach((id) => setControlDisabled(id, !rolesAdminEdit))
+    const rolesAdminEdit = isEditingTab('roles') && canAdministerWorkers()
+    setControlDisabled('waRole', !rolesAdminEdit || isOwnerWorker(worker))
+    setControlDisabled('waWorkerType', !rolesAdminEdit)
   }
 
   function enterEditMode(tab) {
@@ -1048,7 +1055,7 @@ export function createWorkerAccountFeature(ctx) {
     syncEditModeControls(worker)
     const firstFieldByTab = {
       account: 'waName',
-      security: 'waLogin',
+      security: 'waNewPassword',
       roles: 'waRole',
     }
     focusField(firstFieldByTab[tab])
@@ -1089,8 +1096,6 @@ export function createWorkerAccountFeature(ctx) {
     setInputValue('waMedicalTo', dateInputValue(workerField(worker, ['medicalExamTo', 'occupationalMedicineTo', 'medicalTo', 'medicalExamValidTo', 'medicalEndDate'])))
     const trainingValues = workerTrainingValues(worker)
     setTrainingValues(trainingValues)
-    setInputValue('waLogin', workerLogin(worker))
-    setInputValue('waCurrentPassword', '')
     setInputValue('waNewPassword', '')
     setInputValue('waNewPassword2', '')
     resetNewPasswordVisibility()
@@ -1098,7 +1103,10 @@ export function createWorkerAccountFeature(ctx) {
     const active = document.getElementById('waActive')
     if (active) active.value = isWorkerActive(worker) ? '1' : '0'
     const role = document.getElementById('waRole')
-    if (role) role.value = roleValue(workerRole(worker))
+    if (role) {
+      role.value = isOwnerWorker(worker) ? 'OWNER' : roleValue(workerRole(worker))
+      role.title = WORKER_ROLE_COPY[role.value]?.description ?? ''
+    }
     const workerType = document.getElementById('waWorkerType')
     if (workerType) workerType.value = workerTypeValue(worker)
 
@@ -2458,7 +2466,7 @@ export function createWorkerAccountFeature(ctx) {
   }
 
   function eventMenuButton(index, label) {
-    const disabled = canDeleteWorkers() ? '' : ' disabled'
+    const disabled = canAdministerWorkers() ? '' : ' disabled'
     return `
       <button class="event-menu-icon-btn" type="button" data-wa-event-edit="${index}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"${disabled}>
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -2471,7 +2479,7 @@ export function createWorkerAccountFeature(ctx) {
   }
 
   function _editIconButton(attribute, index, label) {
-    const disabled = canDeleteWorkers() ? '' : ' disabled'
+    const disabled = canAdministerWorkers() ? '' : ' disabled'
     return `
       <button class="event-edit-icon-btn" type="button" ${attribute}="${index}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"${disabled}>
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -2928,12 +2936,13 @@ export function createWorkerAccountFeature(ctx) {
   }
 
   function readAccountPayload(worker) {
-    const admin = canDeleteWorkers()
-    const nextLogin = admin ? sanitizeLogin(document.getElementById('waLogin')?.value) : workerLogin(worker)
-    const nextWorkerId = admin
-      ? String(document.getElementById('waWorkerId')?.value ?? '').trim() || workerId(worker)
-      : workerId(worker)
-    const nextRole = admin ? String(document.getElementById('waRole')?.value ?? workerRole(worker)).trim() : workerRole(worker)
+    const admin = canAdministerWorkers()
+    const nextWorkerId = workerId(worker)
+    const nextRole = isOwnerWorker(worker)
+      ? 'OWNER'
+      : admin
+        ? String(document.getElementById('waRole')?.value ?? workerRole(worker)).trim()
+        : workerRole(worker)
     const nextWorkerType = admin
       ? workerTypeValue(document.getElementById('waWorkerType')?.value ?? worker)
       : workerTypeValue(worker)
@@ -2964,7 +2973,6 @@ export function createWorkerAccountFeature(ctx) {
       name: String(document.getElementById('waName')?.value ?? '').trim(),
       workerName: String(document.getElementById('waName')?.value ?? '').trim(),
       login: workerLogin(worker),
-      newLogin: nextLogin,
       email: String(document.getElementById('waEmail')?.value ?? '').trim(),
       loginEmail: String(document.getElementById('waEmail')?.value ?? '').trim(),
       phone: String(document.getElementById('waPhone')?.value ?? '').trim(),
@@ -2996,12 +3004,17 @@ export function createWorkerAccountFeature(ctx) {
       alert('Uzupelnij imie i email pracownika.')
       return null
     }
-    if (canDeleteWorkers() && !LOGIN_LOCAL_PART_PATTERN.test(String(payload.newLogin ?? '').trim())) {
-      alert('Login musi byc lokalna czescia emaila bez @ i moze zawierac litery, cyfry, ".", "-" oraz "_".')
+    let updated
+    try {
+      updated = await updateWorker(appState.session.orgId, currentLogin, payload)
+    } catch (error) {
+      console.error('[worker-account] save failed', error)
+      if (options.silent !== true) {
+        showTransientNotice('Nie udało się zapisać zmian.', 'error')
+      }
       return null
     }
-    const updated = await updateWorker(appState.session.orgId, currentLogin, payload)
-    const persisted = await refreshWorkerDirectoryAfterSave(currentLogin, updated)
+    const persisted = updated
     const updatedLogin = persisted?.loginChangeSkipped
       ? currentLogin
       : String(persisted?.login ?? currentLogin).trim() || currentLogin
@@ -3027,9 +3040,11 @@ export function createWorkerAccountFeature(ctx) {
     applyWorkerToCachedRows(currentLogin, nextWorker)
     renderWorkerCard(nextWorker)
     renderForms(nextWorker)
+    void refreshWorkerDirectoryAfterSave(currentLogin, nextWorker).catch((error) => {
+      console.warn('[worker-account] background WorkersForOrg refresh failed after successful save', error)
+    })
     if (successMessage && options.silent !== true) {
-      const warning = String(nextWorker?.authWarning ?? '').trim()
-      showTransientNotice(warning ? `${successMessage} Uwaga: ${warning}` : successMessage, 'success')
+      showTransientNotice(successMessage, 'success')
     }
     return nextWorker
   }
@@ -3041,13 +3056,13 @@ export function createWorkerAccountFeature(ctx) {
     }
     const worker = resolveCurrentWorker()
     if (!worker) return
-    const updated = await saveWorkerPatch(readAccountPayload(worker), 'Dane uzytkownika zapisane.')
+    const updated = await saveWorkerPatch(readAccountPayload(worker), 'Zmiany zapisano.')
     if (updated) exitEditMode('account')
     return updated
   }
 
   async function deactivateWorkerAccount() {
-    if (!canDeleteWorkers()) {
+    if (!canAdministerWorkers()) {
       alert('Dezaktywacja konta jest dostepna tylko dla Admina.')
       return
     }
@@ -3068,86 +3083,38 @@ export function createWorkerAccountFeature(ctx) {
     )
   }
 
-  function sanitizeLogin(value) {
-    return String(value ?? '').trim().toLowerCase()
-  }
-
   async function saveSecurity() {
-    if (!canDeleteWorkers()) {
-      alert('Login i haslo moze zmienic tylko Admin.')
+    if (!canResetWorkerPasswords()) {
+      alert('Brak uprawnien do resetu hasla pracownika.')
       return
     }
     const worker = resolveCurrentWorker()
     if (!worker || !appState.session?.orgId) return
     const button = document.getElementById('waSaveSecurityBtn')
     const currentLogin = workerLogin(worker)
-    const nextLogin = sanitizeLogin(document.getElementById('waLogin')?.value)
-    if (!LOGIN_LOCAL_PART_PATTERN.test(nextLogin)) {
-      alert('Login musi byc lokalna czescia emaila bez @ i moze zawierac litery, cyfry, ".", "-" oraz "_".')
-      return
-    }
     const newPassword = String(document.getElementById('waNewPassword')?.value ?? '').trim()
     const repeatPassword = String(document.getElementById('waNewPassword2')?.value ?? '').trim()
-    if (newPassword || repeatPassword) {
-      if (newPassword !== repeatPassword) {
-        alert('Hasla nie sa takie same.')
-        return
-      }
-      if (newPassword.length < 6) {
-        alert('Haslo musi miec co najmniej 6 znakow.')
-        return
-      }
-    }
-
-    const loginChanged = nextLogin !== currentLogin
-    const passwordChanged = Boolean(newPassword)
-    if (!loginChanged && !passwordChanged) {
+    if (!newPassword && !repeatPassword) {
       showTransientNotice('Brak zmian w sekcji bezpieczenstwa.', 'info')
       exitEditMode('security')
       return true
     }
+    if (newPassword !== repeatPassword) {
+      alert('Hasla nie sa takie same.')
+      return
+    }
+    if (newPassword.length < 6) {
+      alert('Haslo musi miec co najmniej 6 znakow.')
+      return
+    }
 
     if (button) button.disabled = true
     try {
-      let updatedWorker = worker
-      if (loginChanged) {
-        updatedWorker = await saveWorkerPatch(
-          {
-            ...readAccountPayload(worker),
-            login: currentLogin,
-            newLogin: nextLogin,
-          },
-          '',
-          { silent: true },
-        )
-        if (!updatedWorker) return
-      }
-
-      const effectiveLogin = workerLogin(updatedWorker || worker)
-      if (passwordChanged) {
-        await setWorkerPassword(appState.session.orgId, effectiveLogin, newPassword)
-        setInputValue('waNewPassword', '')
-        setInputValue('waNewPassword2', '')
-        resetNewPasswordVisibility()
-      }
-
-      if (updatedWorker?.loginChangeSkipped || updatedWorker?.authWarning) {
-        const warning = String(updatedWorker.authWarning ?? '').trim()
-        showTransientNotice(
-          warning || 'Dane zapisano, ale backend zglosil ostrzezenie przy zmianie loginu.',
-          'warning',
-        )
-        exitEditMode('security')
-        return true
-      }
-
-      if (loginChanged && passwordChanged) {
-        showTransientNotice('Zapisano login i haslo pracownika.', 'success')
-      } else if (loginChanged) {
-        showTransientNotice('Zapisano nowy login pracownika.', 'success')
-      } else {
-        showTransientNotice('Zapisano nowe haslo pracownika.', 'success')
-      }
+      await setWorkerPassword(appState.session.orgId, currentLogin, newPassword)
+      setInputValue('waNewPassword', '')
+      setInputValue('waNewPassword2', '')
+      resetNewPasswordVisibility()
+      showTransientNotice('Zapisano nowe haslo pracownika.', 'success')
       exitEditMode('security')
       return true
     } catch (error) {
@@ -3160,13 +3127,15 @@ export function createWorkerAccountFeature(ctx) {
   }
 
   async function saveRole() {
-    if (!canDeleteWorkers()) {
+    if (!canAdministerWorkers()) {
       alert('Role moze zmienic tylko Admin.')
       return
     }
     const worker = resolveCurrentWorker()
     if (!worker) return
-    const nextRole = String(document.getElementById('waRole')?.value ?? 'WORKER').trim()
+    const nextRole = isOwnerWorker(worker)
+      ? 'OWNER'
+      : String(document.getElementById('waRole')?.value ?? 'WORKER').trim()
     const nextWorkerType = workerTypeValue(document.getElementById('waWorkerType')?.value ?? worker)
     const updated = await saveWorkerPatch(
       {
@@ -3174,39 +3143,10 @@ export function createWorkerAccountFeature(ctx) {
         role: nextRole,
         workerType: nextWorkerType,
       },
-      'Rola i typ pracownika zapisane.',
+      'Zmiany zapisano.',
     )
     if (updated) exitEditMode('roles')
     return updated
-  }
-
-  async function revealPassword() {
-    if (!canRevealWorkerPasswords()) {
-      alert('Haslo moze pobrac tylko Admin.')
-      return
-    }
-    const worker = resolveCurrentWorker()
-    if (!worker || !appState.session?.orgId) return
-    const input = document.getElementById('waCurrentPassword')
-    const button = document.getElementById('waRevealPasswordBtn')
-    if (button) button.disabled = true
-    try {
-      const response = await revealWorkerPassword(appState.session.orgId, workerLogin(worker))
-      const password = String(response?.password ?? '').trim()
-      if (input) {
-        input.value = password
-        input.type = password ? 'text' : 'password'
-        input.placeholder = password ? '' : String(response?.message ?? 'Brak hasla w sejfie.')
-      }
-      if (!password) {
-        showTransientNotice(String(response?.message ?? 'Brak hasla w sejfie.'), 'warning')
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error ?? 'Nie udalo sie pobrac hasla.')
-      showTransientNotice(message, 'error')
-    } finally {
-      if (button) button.disabled = !canRevealWorkerPasswords()
-    }
   }
 
   function workerAccountCurrentUserName() {
@@ -3250,7 +3190,7 @@ export function createWorkerAccountFeature(ctx) {
   }
 
   function openWorkerAccountDayEditor(dayKey) {
-    if (!canDeleteWorkers()) return
+    if (!canAdministerWorkers()) return
     const worker = resolveCurrentWorker()
     if (!worker) return
     const item = findWorkerAccountTimeRow(dayKey)
@@ -3634,11 +3574,13 @@ export function createWorkerAccountFeature(ctx) {
     binding.add(document.getElementById('waSaveRoleBtn'), 'click', () => {
       void saveRole()
     })
+    binding.add(document.getElementById('waRole'), 'change', (event) => {
+      const role = roleValue(event.currentTarget?.value)
+      if (event.currentTarget) event.currentTarget.title = WORKER_ROLE_COPY[role]?.description ?? ''
+      renderRolePreview({ ...(resolveCurrentWorker() ?? {}), role })
+    })
     binding.add(document.getElementById('waTopDeactivateBtn'), 'click', () => {
       void deactivateWorkerAccount()
-    })
-    binding.add(document.getElementById('waRevealPasswordBtn'), 'click', () => {
-      void revealPassword()
     })
     binding.add(document.getElementById('waNewPasswordEyeBtn'), 'click', () => {
       togglePasswordField('waNewPassword', 'waNewPasswordEyeBtn')
@@ -3735,7 +3677,7 @@ export function createWorkerAccountFeature(ctx) {
         return
       }
       const button = target?.closest('[data-wa-event-edit]')
-      if (!button || !canDeleteWorkers()) return
+      if (!button || !canAdministerWorkers()) return
       const index = Number(button.getAttribute('data-wa-event-edit'))
       const row = Number.isInteger(index) ? appState.workerAccountEventsRows[index] : null
       if (row && typeof openEventEditor === 'function') {

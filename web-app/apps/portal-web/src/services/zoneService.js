@@ -1,4 +1,4 @@
-import { deleteZoneForOrg, insertZoneForOrg, updateZoneForOrg, zonesForOrg } from '@dataconnect/generated'
+import { deleteZoneForOrg, insertZoneForOrg, updateZoneForOrg, zonesForOrg } from './platformDataConnectService'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
 const READ_CACHE_MS = 30000

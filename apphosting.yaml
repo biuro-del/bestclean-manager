@@ -56,3 +56,27 @@ env:
     value: "true"
     availability:
       - RUNTIME
+  - variable: ADMIN_USERS_MODE
+    value: direct
+    availability:
+      - RUNTIME
+  - variable: PORTAL_DB_ROUTES_MODE
+    value: direct
+    availability:
+      - RUNTIME
+  - variable: PORTAL_SCHEDULE_ORDERS_MODE
+    value: direct
+    availability:
+      - RUNTIME
+  - variable: PORTAL_TASKS_MODE
+    value: direct
+    availability:
+      - RUNTIME
+  - variable: WORKER_PROFILE_MODE
+    value: direct
+    availability:
+      - RUNTIME
+  - variable: WORKER_PROFILE_STORAGE_MODE
+    value: database
+    availability:
+      - RUNTIME

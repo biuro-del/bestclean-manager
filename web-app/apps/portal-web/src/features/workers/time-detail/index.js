@@ -798,7 +798,7 @@ export function createWorkerTimeDetailFeature(ctx) {
 
   function openWorkerDetailDayEditor(item) {
     if (!workerDetailCanEdit()) {
-      alert('Brak uprawnień do edycji (ADMIN/Kierownik).')
+      alert('Brak uprawnień do edycji (ADMIN/Manager).')
       return
     }
 
@@ -838,7 +838,7 @@ export function createWorkerTimeDetailFeature(ctx) {
 
   function openWorkerDetailDayEditorNew() {
     if (!workerDetailCanEdit()) {
-      alert('Brak uprawnień do edycji (ADMIN/Kierownik).')
+      alert('Brak uprawnień do edycji (ADMIN/Manager).')
       return
     }
 

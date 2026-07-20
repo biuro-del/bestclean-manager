@@ -4,11 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "node scripts/dev-local.js",
-    "dev:web": "npm --prefix web-app run dev -- --host 127.0.0.1",
+    "dev": "node scripts/dev.js",
+    "dev:web": "npm --prefix web-app run dev -- --host localhost",
     "build": "node build-webapp.js",
     "start": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test",
+    "migrate:workers": "node scripts/migrate-worker-model.js",
+    "migrate:platform": "node scripts/migrate-worker-model.js",
+    "platform-admin": "node scripts/platform-admin.js"
   },
   "keywords": [],
   "author": "",
@@ -23,6 +26,7 @@
     "firebase-admin": "^13.8.0",
     "google-auth-library": "^10.6.2",
     "googleapis": "^171.4.0",
+    "nodemailer": "^7.0.0",
     "pg": "^8.18.0"
   },
   "overrides": {

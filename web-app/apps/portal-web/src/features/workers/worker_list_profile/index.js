@@ -69,9 +69,10 @@ const DASHBOARD_LOCAL_CACHE_PREFIX = 'portal.dashboard.snapshot.'
 export function createWorkerProfileFeature(ctx) {
   const {
     appState,
+    canAdministerWorkers,
     canDeleteWorkers,
     canManageWorkers,
-    canRevealWorkerPasswords,
+    canResetWorkerPasswords,
     createBindingHelpers,
     createWorkerUser,
     dashboardWorkerSurnameDisplayName,
@@ -83,12 +84,12 @@ export function createWorkerProfileFeature(ctx) {
     escapeHtml,
     firstDayOfCurrentMonthYmd,
     getTodayActiveWorkers,
+    getNextWorkerIdPreview,
     getWorkdays,
     getWorkers,
     normalizeSearchText,
     paginate,
     setPdfUnicodeFont,
-    revealWorkerPassword,
     setSubwelcomeMetric,
     setWorkerPassword,
     showTransientNotice,
@@ -99,7 +100,6 @@ export function createWorkerProfileFeature(ctx) {
     workerDetailDateKeyFromIso,
     workerDetailDateKeyToLabel,
     workerDetailIsoToHm,
-    workerPasswordVaultMissingMessage,
     workStatusIntervalFromTimes,
     ymdToIsoRangeEnd,
     ymdToIsoRangeStart,
@@ -264,7 +264,11 @@ export function createWorkerProfileFeature(ctx) {
   }
 
   function workerProfilePatchRole(worker) {
-    return workerProfilePatchText(worker?.workerType ?? worker?.type ?? worker?.role)
+    return workerProfilePatchText(worker?.role ?? worker?.systemRole)
+  }
+
+  function workerProfilePatchWorkerType(worker) {
+    return workerProfilePatchText(worker?.workerType ?? worker?.type)
   }
 
   function workerProfilePatchEmail(worker) {
@@ -278,29 +282,11 @@ export function createWorkerProfileFeature(ctx) {
       workerProfilePatchText(server.login ?? server.workerLogin) === workerProfilePatchText(optimistic.login ?? optimistic.workerLogin) &&
       workerProfilePatchName(server) === workerProfilePatchName(optimistic) &&
       workerProfilePatchRole(server) === workerProfilePatchRole(optimistic) &&
+      workerProfilePatchWorkerType(server) === workerProfilePatchWorkerType(optimistic) &&
       workerProfilePatchEmail(server) === workerProfilePatchEmail(optimistic) &&
       workerProfilePatchText(server.phone) === workerProfilePatchText(optimistic.phone) &&
       workerProfileBoolean(server, 'active') === workerProfileBoolean(optimistic, 'active')
     )
-  }
-
-  function registerOptimisticWorkerProfilePatch(previousKey, worker) {
-    const row = normalizeWorkerProfileRow(worker)
-    const keys = workerProfileIdentityKeys(row)
-    const previous = normalizeWorkerProfileIdentity(previousKey)
-    if (previous) {
-      keys.add(previous)
-    }
-    if (!keys.size) {
-      return
-    }
-
-    const record = {
-      worker: row,
-      keys,
-      expiresAt: Date.now() + OPTIMISTIC_WORKER_PROFILE_TTL_MS,
-    }
-    keys.forEach((key) => optimisticWorkerProfilePatches.set(key, record))
   }
 
   function applyOptimisticWorkerProfilePatches(workers) {
@@ -484,6 +470,19 @@ export function createWorkerProfileFeature(ctx) {
     }
 
     return { className: 'role-tone-generic', iconHtml: WORKER_ROLE_ICONS.worker }
+  }
+
+  function workerProfileRoleLabel(worker) {
+    const role = workerProfileAllowedRoleValue(worker?.role ?? worker?.systemRole, {
+      isOwner: workerProfileIsOwner(worker),
+    })
+    return {
+      OWNER: 'Owner',
+      ADMIN: 'ADMIN',
+      MANAGER: 'Manager',
+      COORDINATOR: 'Koordynator',
+      WORKER: 'Worker',
+    }[role] ?? 'Worker'
   }
 
   function workerProfileBoolean(worker, field) {
@@ -1149,7 +1148,7 @@ export function createWorkerProfileFeature(ctx) {
     if (!rows.length) {
       root.innerHTML = `
         <div class="workers-row worker-profile-empty-row">
-          <div></div><div>Brak wyników</div><div></div><div></div><div></div><div></div><div class="worker-profile-actions-spacer" aria-hidden="true"></div><div></div>
+          <div></div><div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div class="worker-profile-actions-spacer" aria-hidden="true"></div><div></div>
         </div>
       `
       syncWorkerProfileSelectionUi()
@@ -1163,12 +1162,14 @@ export function createWorkerProfileFeature(ctx) {
           const key = workerProfileKey(worker)
           const selected = key && selectedWorkerProfileKeys.has(key)
           const name = worker.name || '-'
-          const role = worker.workerType || worker.type || worker.role || '-'
+          const workerType = worker.workerType || worker.type || '-'
+          const workerTypeVisual = workerRoleVisualMeta(workerType)
+          const role = workerProfileRoleLabel(worker)
           const roleVisual = workerRoleVisualMeta(role)
           const phone = worker.phone || '-'
           const active = workerProfileBoolean(worker, 'active')
           const online = workerProfileBoolean(worker, 'online')
-          const deleteAction = canDeleteWorkers()
+          const deleteAction = canDeleteWorkers() && !workerProfileIsOwner(worker)
             ? `<button class="worker-profile-action-icon worker-profile-action-delete" type="button" data-worker-profile-delete-index="${index}" title="Usuń" aria-label="Usuń pracownika">${WORKER_ACTION_ICONS.delete}</button>`
             : ''
 
@@ -1183,6 +1184,12 @@ export function createWorkerProfileFeature(ctx) {
               <span class="worker-profile-user-copy">
                 <strong>${escapeHtml(name)}</strong>
               </span>
+            </div>
+          </div>
+          <div>
+            <div class="worker-profile-role-cell">
+              <span class="worker-profile-role-icon ${workerTypeVisual.className}">${workerTypeVisual.iconHtml}</span>
+              <strong>${escapeHtml(workerType)}</strong>
             </div>
           </div>
           <div>
@@ -1214,7 +1221,7 @@ export function createWorkerProfileFeature(ctx) {
       hint.style.display = readOnly ? 'block' : 'none'
     }
 
-    ;['wkEditName', 'wkEditLogin', 'wkEditType', 'wkEditActive', 'wkEditPhone', 'wkNewPass', 'wkNewPass2'].forEach(
+    ;['wkEditName', 'wkEditEmail', 'wkEditRole', 'wkEditType', 'wkEditActive', 'wkEditPhone', 'wkNewPass', 'wkNewPass2'].forEach(
       (id) => {
         const input = document.getElementById(id)
         if (input) {
@@ -1226,36 +1233,39 @@ export function createWorkerProfileFeature(ctx) {
     const idInput = document.getElementById('wkEditId')
     if (idInput instanceof HTMLInputElement) {
       const addMode = appState.workerProfileModalMode === 'add'
-      const adminCanChangeId = addMode && canDeleteWorkers()
-      idInput.disabled = readOnly || !adminCanChangeId
-      idInput.readOnly = readOnly || !adminCanChangeId
-      idInput.title = adminCanChangeId
-        ? 'Admin moze zmienic domyslne ID przed dodaniem pracownika.'
-        : addMode
-          ? 'ID pracownika moze zmienic tylko Admin.'
-          : 'ID istniejacego pracownika jest zablokowane.'
+      idInput.disabled = true
+      idInput.readOnly = true
+      idInput.title = addMode
+        ? 'Finalne ID potwierdza backend podczas tworzenia pracownika.'
+        : 'ID istniejacego pracownika jest zablokowane.'
     }
 
-    const loginInput = document.getElementById('wkEditLogin')
-    if (loginInput instanceof HTMLInputElement) {
-      const addMode = appState.workerProfileModalMode === 'add'
-      const adminCanChangeLogin = appState.workerProfileModalMode === 'edit' && canDeleteWorkers()
-      loginInput.disabled = readOnly || (!addMode && !adminCanChangeLogin)
-      loginInput.readOnly = readOnly || (!addMode && !adminCanChangeLogin)
-      loginInput.title = adminCanChangeLogin
-        ? 'Admin moze zmienic login. Email zostanie dopasowany do nowego loginu.'
-        : addMode
-          ? ''
-          : 'Login moze zmienic tylko Admin.'
+    const numberInput = document.getElementById('wkEditNumber')
+    if (numberInput instanceof HTMLInputElement) {
+      const canOverrideNumber =
+        appState.workerProfileModalMode === 'add' &&
+        canDeleteWorkers() &&
+        !readOnly
+      numberInput.disabled = !canOverrideNumber
+      numberInput.readOnly = !canOverrideNumber
+      numberInput.title = canOverrideNumber
+        ? 'ADMIN lub OWNER moze zmienic tylko koncowy numer ID.'
+        : 'Koncowy numer ID jest nadawany automatycznie przez backend.'
     }
 
     const emailInput = document.getElementById('wkEditEmail')
     if (emailInput) {
-      const addMode = appState.workerProfileModalMode === 'add'
-      emailInput.disabled = readOnly || addMode
-      emailInput.title = addMode
-        ? 'Email jest wyliczany z loginu i domeny konta dodającego.'
-        : ''
+      emailInput.disabled = readOnly
+      emailInput.readOnly = readOnly
+      emailInput.title = readOnly ? '' : 'Na ten adres pracownik będzie się logował.'
+    }
+
+    const roleInput = document.getElementById('wkEditRole')
+    if (roleInput instanceof HTMLSelectElement) {
+      const isOwner = workerProfileIsOwner(appState.workerProfileCurrent)
+      roleInput.disabled = readOnly || isOwner || !canAdministerWorkers()
+      if (isOwner) roleInput.value = 'OWNER'
+      syncWorkerProfileRoleHelp()
     }
 
     const saveButton = document.getElementById('wkSaveBtn')
@@ -1277,46 +1287,114 @@ export function createWorkerProfileFeature(ctx) {
     addButton.title = allowed ? 'Dodaj nowego użytkownika' : 'Brak uprawnień do dodawania użytkowników.'
   }
 
-  function getNextWorkerProfileIdPreview() {
+  function workerProfileIdPrefix() {
+    return `worker_${String(appState.session?.orgId ?? '').trim()}_`
+  }
+
+  function getNextWorkerProfileNumberPreview() {
+    const prefix = workerProfileIdPrefix()
     let maxNumber = 0
-    let padWidth = 3
 
     appState.workerProfileRows.forEach((worker) => {
-      const raw = String(worker?.workerId ?? worker?.id ?? '')
-        .trim()
-        .toUpperCase()
-      const match = /^W(\d+)$/.exec(raw)
-      if (!match) {
+      const raw = String(worker?.workerId ?? worker?.id ?? '').trim()
+      if (!raw.startsWith(prefix)) {
         return
       }
-
-      const numeric = Number.parseInt(match[1], 10)
+      const suffix = raw.slice(prefix.length)
+      if (!/^[1-9]\d*$/.test(suffix)) {
+        return
+      }
+      const numeric = Number.parseInt(suffix, 10)
       if (Number.isFinite(numeric) && numeric > maxNumber) {
         maxNumber = numeric
       }
-      padWidth = Math.max(padWidth, match[1].length)
     })
 
-    return `W${String(maxNumber + 1).padStart(padWidth, '0')}`
+    return maxNumber + 1
   }
 
+  function syncWorkerProfileIdComposer() {
+    const prefix = workerProfileIdPrefix()
+    const numberInput = document.getElementById('wkEditNumber')
+    const idInput = document.getElementById('wkEditId')
+    const idLabel = document.getElementById('wkIdLabel')
+    const prefixLabel = document.getElementById('wkEditIdPrefix')
+    const rawNumber = String(numberInput?.value ?? '').trim()
+    const workerId = /^[1-9]\d*$/.test(rawNumber) ? `${prefix}${rawNumber}` : ''
+
+    if (prefixLabel) prefixLabel.textContent = prefix
+    if (idInput instanceof HTMLInputElement) idInput.value = workerId
+    if (idLabel) idLabel.textContent = workerId || '-'
+    return workerId
+  }
+
+  async function refreshWorkerProfileIdPreview() {
+    const numberInput = document.getElementById('wkEditNumber')
+    if (!(numberInput instanceof HTMLInputElement) || appState.workerProfileModalMode !== 'add') {
+      return
+    }
+    try {
+      const preview = await getNextWorkerIdPreview(appState.session?.orgId)
+      if (appState.workerProfileModalMode !== 'add' || numberInput.dataset.manual === '1') {
+        return
+      }
+      numberInput.value = String(preview.workerNumber)
+      syncWorkerProfileIdComposer()
+    } catch (error) {
+      console.warn('[worker-profile] worker ID preview unavailable', error)
+    }
+  }
+
+  const WORKER_PROFILE_DEFAULT_ROLE = 'WORKER'
   const WORKER_PROFILE_DEFAULT_TYPE = 'Stały personel na obiekcie'
+  const WORKER_PROFILE_ROLE_DESCRIPTIONS = {
+    OWNER: 'Pełny dostęp. Rola wyłącznie dla założyciela organizacji i nie można jej zmienić.',
+    ADMIN: 'Pełny dostęp: podgląd, dodawanie, edycja i usuwanie.',
+    MANAGER: 'Może przeglądać, dodawać i edytować, ale nie może usuwać.',
+    COORDINATOR: 'Może logować się do portalu wyłącznie w trybie podglądu.',
+    WORKER: 'Dostęp wyłącznie do aplikacji mobilnej; bez dostępu do portalu.',
+  }
   const workerProfileAllowedTypeOptionsHtml = `
-        <option value="ADMIN">ADMIN</option>
-        <option value="Koordynator">Koordynator</option>
+        <option value="Administrator">Administrator</option>
+        <option value="Pracownik Biurowy">Pracownik Biurowy</option>
         <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
-        <option value="Zespół mobilny">Zespół mobilny</option>
+        <option value="Zespół Mobilny">Zespół Mobilny</option>
       `
+
+  function workerProfileIsOwner(worker = null) {
+    const role = String(worker?.role ?? worker?.systemRole ?? '').trim().toUpperCase()
+    return Boolean(worker?.isOwner || role === 'OWNER')
+  }
+
+  function workerProfileAllowedRoleValue(value, { isOwner = false } = {}) {
+    if (isOwner) return 'OWNER'
+    const normalized = normalizeSearchText(value).toLowerCase()
+    if (normalized.includes('owner') || normalized.includes('wlasciciel')) return 'OWNER'
+    if (normalized.includes('admin') || normalized.includes('superadmin')) return 'ADMIN'
+    if (normalized.includes('manager') || normalized.includes('menager') || normalized.includes('menedzer') || normalized.includes('kierownik')) return 'MANAGER'
+    if (normalized.includes('koordynator') || normalized.includes('coordynator') || normalized.includes('coordinator')) return 'COORDINATOR'
+    return 'WORKER'
+  }
+
+  function syncWorkerProfileRoleHelp() {
+    const roleInput = document.getElementById('wkEditRole')
+    const help = document.getElementById('wkEditRoleHelp')
+    const role = workerProfileAllowedRoleValue(roleInput?.value, {
+      isOwner: workerProfileIsOwner(appState.workerProfileCurrent),
+    })
+    const description = WORKER_PROFILE_ROLE_DESCRIPTIONS[role] ?? ''
+    if (help) help.textContent = description
+    if (roleInput instanceof HTMLSelectElement) roleInput.title = description
+  }
 
   function workerProfileAllowedTypeValue(value, fallback = WORKER_PROFILE_DEFAULT_TYPE) {
     const normalized = normalizeSearchText(value).toLowerCase()
     if (!normalized) {
       return fallback
     }
-    if (normalized.includes('admin') || normalized.includes('owner') || normalized.includes('superadmin')) {
-      return 'ADMIN'
-    }
+    if (normalized.includes('admin') || normalized.includes('owner') || normalized.includes('superadmin')) return 'Administrator'
     if (
+      normalized.includes('biurow') ||
       normalized.includes('koordynator') ||
       normalized.includes('coordynator') ||
       normalized.includes('coordinator') ||
@@ -1325,10 +1403,10 @@ export function createWorkerProfileFeature(ctx) {
       normalized.includes('menedzer') ||
       normalized.includes('kierownik')
     ) {
-      return 'Koordynator'
+      return 'Pracownik Biurowy'
     }
     if (normalized.includes('mobil') || normalized.includes('zespol')) {
-      return 'Zespół mobilny'
+      return 'Zespół Mobilny'
     }
     if (normalized.includes('staly') || normalized.includes('personel') || normalized.includes('obiekt')) {
       return 'Stały personel na obiekcie'
@@ -1338,8 +1416,8 @@ export function createWorkerProfileFeature(ctx) {
 
   let workerProfileDefaultTypeOptionsHtml = ''
 
-  function configureWorkerProfileRoleOptions(typeInput, mode) {
-    if (!(typeInput instanceof HTMLSelectElement)) {
+  function configureWorkerProfileRoleOptions(roleInput, typeInput, mode, worker = null) {
+    if (!(roleInput instanceof HTMLSelectElement) || !(typeInput instanceof HTMLSelectElement)) {
       return
     }
 
@@ -1352,113 +1430,26 @@ export function createWorkerProfileFeature(ctx) {
     }
 
     if (mode === 'add') {
+      roleInput.value = WORKER_PROFILE_DEFAULT_ROLE
       typeInput.value = WORKER_PROFILE_DEFAULT_TYPE
+      syncWorkerProfileRoleHelp()
       return
     }
 
+    roleInput.value = workerProfileAllowedRoleValue(worker?.role ?? worker?.systemRole, {
+      isOwner: workerProfileIsOwner(worker),
+    })
     typeInput.value = workerProfileAllowedTypeValue(typeInput.value)
+    syncWorkerProfileRoleHelp()
   }
 
-  function workerProfileRoleForCreate(value) {
-    const raw = String(value ?? '').trim()
-    const normalized = normalizeSearchText(raw).toLowerCase()
-    if (!normalized) {
-      return ''
-    }
-    if (normalized.includes('admin') || normalized.includes('owner') || normalized.includes('superadmin')) {
-      return 'ADMIN'
-    }
-    if (normalized.includes('manager') || normalized.includes('menager') || normalized.includes('menedzer') || normalized.includes('kierownik')) {
-      return 'COORDINATOR'
-    }
-    if (normalized.includes('koordynator') || normalized.includes('coordynator') || normalized.includes('coordinator')) {
-      return 'COORDINATOR'
-    }
-    return 'WORKER'
-  }
-
-  const WORKER_LOGIN_LOCAL_PART_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,78}[a-z0-9])?$/
-
-  function sanitizeWorkerLoginLocalPart(value) {
+  function normalizeWorkerEmailInput(value) {
     return String(value ?? '').trim().toLowerCase()
   }
 
-  function isValidWorkerLoginLocalPart(value) {
-    const localPart = sanitizeWorkerLoginLocalPart(value)
-    if (!localPart || localPart.includes('@')) {
-      return false
-    }
-
-    return WORKER_LOGIN_LOCAL_PART_PATTERN.test(localPart)
-  }
-
-  function getWorkerCreatorEmailDomain() {
-    const candidates = [appState.session?.email, appState.session?.login]
-    for (const candidate of candidates) {
-      const source = String(candidate ?? '')
-        .trim()
-        .toLowerCase()
-      const atIndex = source.indexOf('@')
-      if (atIndex < 0) {
-        continue
-      }
-
-      const domain = source.slice(atIndex + 1).trim()
-      if (domain && !domain.includes('@')) {
-        return domain
-      }
-    }
-    return ''
-  }
-
-  function getWorkerProfileEmailDomain() {
-    const currentWorker = appState.workerProfileCurrent
-    const emailInput = document.getElementById('wkEditEmail')
-    const candidates = [currentWorker?.email, emailInput?.value, appState.session?.email, appState.session?.login]
-    for (const candidate of candidates) {
-      const source = String(candidate ?? '')
-        .trim()
-        .toLowerCase()
-      const atIndex = source.indexOf('@')
-      if (atIndex < 0) {
-        continue
-      }
-
-      const domain = source.slice(atIndex + 1).trim()
-      if (domain && !domain.includes('@')) {
-        return domain
-      }
-    }
-    return ''
-  }
-
-  function buildWorkerLoginEmailPreview(loginValue, domain = getWorkerCreatorEmailDomain()) {
-    const localPart = sanitizeWorkerLoginLocalPart(loginValue)
-    if (!isValidWorkerLoginLocalPart(localPart)) {
-      return ''
-    }
-
-    if (!domain) {
-      return ''
-    }
-
-    return `${localPart}@${domain}`
-  }
-
-  function syncWorkerProfileEmailPreview() {
-    const canSyncEditLoginEmail = appState.workerProfileModalMode === 'edit' && canDeleteWorkers()
-    if (appState.workerProfileModalMode !== 'add' && !canSyncEditLoginEmail) {
-      return
-    }
-
-    const emailInput = document.getElementById('wkEditEmail')
-    if (!(emailInput instanceof HTMLInputElement)) {
-      return
-    }
-
-    const loginInput = document.getElementById('wkEditLogin')
-    const domain = appState.workerProfileModalMode === 'add' ? getWorkerCreatorEmailDomain() : getWorkerProfileEmailDomain()
-    emailInput.value = buildWorkerLoginEmailPreview(loginInput?.value ?? '', domain)
+  function isValidWorkerEmail(value) {
+    const email = normalizeWorkerEmailInput(value)
+    return Boolean(email && email.length <= 160 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
   }
 
   function getWorkerProfileCurrentLogin() {
@@ -1500,7 +1491,7 @@ export function createWorkerProfileFeature(ctx) {
       error.textContent = ''
       error.hidden = true
     }
-    ;['wkEditId', 'wkEditName', 'wkEditLogin', 'wkEditType'].forEach((id) => {
+    ;['wkEditId', 'wkEditNumber', 'wkEditName', 'wkEditEmail', 'wkEditRole', 'wkEditType'].forEach((id) => {
       document.getElementById(id)?.removeAttribute('aria-invalid')
     })
   }
@@ -1593,8 +1584,11 @@ export function createWorkerProfileFeature(ctx) {
     const editedAtLabel = document.getElementById('wkEditedAt')
     const editedByLabel = document.getElementById('wkEditedBy')
     const idInput = document.getElementById('wkEditId')
+    const idComposer = document.getElementById('wkEditIdComposer')
+    const idNumberInput = document.getElementById('wkEditNumber')
+    const idHint = document.getElementById('wkEditIdHint')
     const nameInput = document.getElementById('wkEditName')
-    const loginInput = document.getElementById('wkEditLogin')
+    const roleInput = document.getElementById('wkEditRole')
     const typeInput = document.getElementById('wkEditType')
     const activeInput = document.getElementById('wkEditActive')
     const onlineInput = document.getElementById('wkOnlineNow')
@@ -1608,11 +1602,6 @@ export function createWorkerProfileFeature(ctx) {
     const newPassLabel = document.querySelector('label[for="wkNewPass"]')
     const newPass2Label = document.querySelector('label[for="wkNewPass2"]')
     const deleteButton = document.getElementById('wkDeleteBtn')
-    const passWrap = document.getElementById('wkCurrentPassWrap')
-    const currentPass = document.getElementById('wkCurrentPass')
-    const showPassButton = document.getElementById('wkShowPassBtn')
-    const copyPassButton = document.getElementById('wkCopyPassBtn')
-    const passHint = document.getElementById('wkCurrentPassHint')
     const saveButton = document.getElementById('wkSaveBtn')
 
     const headerLogo = document.querySelector('.header .logo-block img')
@@ -1621,32 +1610,41 @@ export function createWorkerProfileFeature(ctx) {
       modalLogo.setAttribute('src', headerLogo.getAttribute('src'))
     }
 
-    configureWorkerProfileRoleOptions(typeInput, mode)
+    configureWorkerProfileRoleOptions(roleInput, typeInput, mode, worker)
 
     if (mode === 'add') {
-      const nextWorkerId = getNextWorkerProfileIdPreview()
+      const nextWorkerNumber = getNextWorkerProfileNumberPreview()
+      const nextWorkerId = `${workerProfileIdPrefix()}${nextWorkerNumber}`
       if (modalTitle) modalTitle.textContent = 'Dodaj użytkownika'
       if (saveButton) saveButton.textContent = 'Dodaj użytkownika'
       if (idLabel) idLabel.textContent = nextWorkerId
       if (addedAtLabel) addedAtLabel.textContent = '-'
       if (editedAtLabel) editedAtLabel.textContent = '-'
       if (editedByLabel) editedByLabel.textContent = appState.session?.name ?? '-'
-      if (idInput) idInput.value = nextWorkerId
-      if (nameInput) nameInput.value = ''
-      if (loginInput) {
-        loginInput.value = ''
-        loginInput.dataset.autoFromEmail = '0'
-        loginInput.readOnly = false
-        loginInput.title = ''
+      if (idInput) {
+        idInput.value = nextWorkerId
+        idInput.hidden = true
       }
+      if (idComposer) idComposer.hidden = false
+      if (idNumberInput instanceof HTMLInputElement) {
+        idNumberInput.value = String(nextWorkerNumber)
+        idNumberInput.dataset.manual = '0'
+      }
+      if (idHint) {
+        idHint.textContent = canDeleteWorkers()
+          ? 'Prefiks jest zablokowany. Możesz zmienić wyłącznie dodatni numer końcowy.'
+          : 'Numer jest nadawany automatycznie. Finalne ID potwierdzi backend.'
+      }
+      syncWorkerProfileIdComposer()
+      void refreshWorkerProfileIdPreview()
+      if (nameInput) nameInput.value = ''
+      if (roleInput) roleInput.value = WORKER_PROFILE_DEFAULT_ROLE
       if (typeInput) typeInput.value = WORKER_PROFILE_DEFAULT_TYPE
       if (activeInput) activeInput.value = '1'
       if (onlineInput) onlineInput.value = 'NIE'
       if (emailInput) {
         emailInput.value = ''
-        emailInput.placeholder = getWorkerCreatorEmailDomain()
-          ? `login@${getWorkerCreatorEmailDomain()}`
-          : 'Email zostanie wyliczony z loginu'
+        emailInput.placeholder = 'np. jan.kowalski@gmail.com'
       }
       if (phoneInput) phoneInput.value = ''
     } else {
@@ -1656,15 +1654,21 @@ export function createWorkerProfileFeature(ctx) {
       if (addedAtLabel) addedAtLabel.textContent = worker?.addedAt || '-'
       if (editedAtLabel) editedAtLabel.textContent = worker?.editedAt || '-'
       if (editedByLabel) editedByLabel.textContent = worker?.editedBy || '-'
-      if (idInput) idInput.value = worker?.workerId || worker?.id || '-'
+      if (idInput) {
+        idInput.value = worker?.workerId || worker?.id || '-'
+        idInput.hidden = false
+      }
+      if (idComposer) idComposer.hidden = true
+      if (idNumberInput instanceof HTMLInputElement) {
+        idNumberInput.value = ''
+        idNumberInput.dataset.manual = '0'
+      }
+      if (idHint) idHint.textContent = 'ID istniejącego pracownika jest niemodyfikowalne.'
       if (nameInput) nameInput.value = worker?.name || ''
-      if (loginInput) {
-        loginInput.value = worker?.login || worker?.workerLogin || ''
-        loginInput.dataset.autoFromEmail = '0'
-        loginInput.readOnly = !canDeleteWorkers()
-        loginInput.title = canDeleteWorkers()
-          ? 'Admin moze zmienic login. Email zostanie dopasowany do nowego loginu.'
-          : 'Login moze zmienic tylko Admin.'
+      if (roleInput) {
+        roleInput.value = workerProfileAllowedRoleValue(worker?.role ?? worker?.systemRole, {
+          isOwner: workerProfileIsOwner(worker),
+        })
       }
       if (typeInput) typeInput.value = workerProfileAllowedTypeValue(worker?.workerType || worker?.type || worker?.role)
       if (activeInput) activeInput.value = worker?.active ? '1' : '0'
@@ -1684,58 +1688,35 @@ export function createWorkerProfileFeature(ctx) {
     if (newPassInput) newPassInput.value = ''
     if (newPass2Input) newPass2Input.value = ''
     if (passwordSectionTitle) {
-      passwordSectionTitle.textContent = mode === 'edit' && canRevealWorkerPasswords() ? 'Hasło i sejf' : 'Hasło'
+      passwordSectionTitle.textContent = 'Hasło'
     }
     if (newPassLabel) {
-      newPassLabel.textContent = mode === 'edit' ? 'Ustaw / zapisz hasło w sejfie' : 'Wpisz hasło'
+      newPassLabel.textContent = mode === 'edit' ? 'Ustaw nowe hasło' : 'Wpisz hasło'
     }
     if (newPass2Label) {
-      newPass2Label.textContent = mode === 'edit' ? 'Powtórz hasło do sejfu' : 'Powtórz hasło'
+      newPass2Label.textContent = 'Powtórz hasło'
     }
     if (newPassInput) {
-      newPassInput.placeholder = mode === 'edit' ? 'Wpisz nowe albo znane obecne hasło' : ''
+      newPassInput.placeholder = mode === 'edit' ? 'Wpisz nowe hasło Firebase Auth' : ''
     }
     if (newPass2Input) {
-      newPass2Input.placeholder = mode === 'edit' ? 'Powtórz hasło do zapisania' : ''
-    }
-
-    if (passWrap) {
-      const showPasswordVault = mode === 'edit' && canRevealWorkerPasswords()
-      passWrap.style.display = showPasswordVault ? '' : 'none'
-      passWrap.dataset.loaded = '0'
-      passWrap.dataset.login = showPasswordVault ? String(worker?.login ?? worker?.workerLogin ?? '').trim() : ''
-    }
-    if (currentPass) {
-      currentPass.value = ''
-      currentPass.type = 'password'
-      currentPass.dataset.loaded = '0'
-      currentPass.placeholder = mode === 'edit' && canRevealWorkerPasswords() ? 'Kliknij Pokaż, aby pobrać hasło' : ''
-    }
-    if (showPassButton) {
-      showPassButton.textContent = 'Pokaż'
-      showPassButton.disabled = false
-    }
-    if (copyPassButton) {
-      copyPassButton.disabled = true
-    }
-    if (passHint) {
-      passHint.textContent = 'Hasło jest pobierane z szyfrowanego sejfu tylko dla Admina.'
+      newPass2Input.placeholder = mode === 'edit' ? 'Powtórz nowe hasło' : ''
     }
 
     if (deleteButton) {
-      deleteButton.style.display = mode === 'edit' && canDeleteWorkers() ? '' : 'none'
+      deleteButton.style.display = mode === 'edit' && canDeleteWorkers() && !workerProfileIsOwner(worker) ? '' : 'none'
     }
 
     setWorkerProfileModalReadOnly(mode === 'view' || !canManageWorkers())
-    const showPasswordInputs = mode === 'add' || (mode === 'edit' && canRevealWorkerPasswords())
+    syncWorkerProfileRoleHelp()
+    const showPasswordInputs = mode === 'add' || (mode === 'edit' && canResetWorkerPasswords())
     ;[newPassWrap, newPass2Wrap].forEach((wrap) => {
       if (wrap) wrap.style.display = showPasswordInputs ? '' : 'none'
     })
-    if (mode === 'edit' && !canRevealWorkerPasswords()) {
+    if (mode === 'edit' && !canResetWorkerPasswords()) {
       if (newPassInput) newPassInput.disabled = true
       if (newPass2Input) newPass2Input.disabled = true
     }
-    syncWorkerProfileEmailPreview()
     overlay.style.display = 'flex'
   }
 
@@ -1783,10 +1764,10 @@ export function createWorkerProfileFeature(ctx) {
     }
 
     const name = workerProfileDisplayName(worker) || 'tego pracownika'
-    const login = workerProfileKey(worker)
+    const workerId = String(worker?.workerId ?? worker?.id ?? '').trim()
     if (text) {
-      text.textContent = login
-        ? `Usuniesz profil "${name}" (${login}), jego dostęp do aplikacji oraz konto Firebase Auth.`
+      text.textContent = workerId
+        ? `Usuniesz profil "${name}" (${workerId}), jego dostęp do aplikacji oraz konto Firebase Auth.`
         : `Usuniesz profil "${name}", jego dostęp do aplikacji oraz konto Firebase Auth.`
     }
 
@@ -1795,67 +1776,6 @@ export function createWorkerProfileFeature(ctx) {
     return new Promise((resolve) => {
       workerProfileDeleteConfirmResolve = resolve
     })
-  }
-
-  async function loadWorkerProfilePassword() {
-    if (!canRevealWorkerPasswords()) {
-      alert('Brak uprawnień do podglądu hasła pracownika.')
-      return ''
-    }
-
-    const orgId = String(appState.session?.orgId ?? '').trim()
-    const login = getWorkerProfileCurrentLogin() || String(document.getElementById('wkEditLogin')?.value ?? '').trim()
-    const passInput = document.getElementById('wkCurrentPass')
-    const showButton = document.getElementById('wkShowPassBtn')
-    const copyButton = document.getElementById('wkCopyPassBtn')
-    const hint = document.getElementById('wkCurrentPassHint')
-
-    if (!orgId || !login) {
-      alert('Brak organizacji albo loginu pracownika.')
-      return ''
-    }
-
-    if (passInput?.dataset.loaded === '1' && passInput.value) {
-      return passInput.value
-    }
-
-    if (showButton) showButton.disabled = true
-    if (copyButton) copyButton.disabled = true
-    if (hint) hint.textContent = 'Pobieranie hasła z szyfrowanego sejfu...'
-
-    try {
-      const result = await revealWorkerPassword(orgId, login)
-      if (!result?.hasPassword || !result?.password) {
-        if (passInput) {
-          passInput.value = ''
-          passInput.dataset.loaded = '0'
-        }
-        const message = String(result?.message ?? '').trim() || workerPasswordVaultMissingMessage()
-        if (hint) hint.textContent = message
-        setTimeout(() => document.getElementById('wkNewPass')?.focus?.(), 0)
-        return ''
-      }
-
-      if (passInput) {
-        passInput.value = String(result.password)
-        passInput.dataset.loaded = '1'
-      }
-      if (copyButton) copyButton.disabled = false
-      if (hint) {
-        const updatedAt = String(result.updatedAt ?? '').trim()
-        hint.textContent = updatedAt
-          ? `Hasło zapisane w sejfie. Ostatnia aktualizacja: ${updatedAt}.`
-          : 'Hasło zapisane w sejfie.'
-      }
-      return String(result.password)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Nie udało się pobrać hasła pracownika.'
-      if (hint) hint.textContent = message
-      alert(message)
-      return ''
-    } finally {
-      if (showButton) showButton.disabled = false
-    }
   }
 
   function resetWorkerProfileFilters() {
@@ -1983,79 +1903,67 @@ export function createWorkerProfileFeature(ctx) {
     const isAddingUser = appState.workerProfileModalMode === 'add'
     const currentWorker = appState.workerProfileCurrent
     const currentLogin = isAddingUser ? '' : getWorkerProfileCurrentLogin()
-    const rawLogin = String(document.getElementById('wkEditLogin')?.value ?? '').trim()
-    const requestedLogin = sanitizeWorkerLoginLocalPart(rawLogin)
-    const login = isAddingUser ? requestedLogin : currentLogin
-    const nextLogin = !isAddingUser && canDeleteWorkers() ? requestedLogin : currentLogin
-    if (isAddingUser || (!isAddingUser && canDeleteWorkers())) {
-      const loginInput = document.getElementById('wkEditLogin')
-      if (loginInput instanceof HTMLInputElement) {
-        loginInput.value = isAddingUser ? login : nextLogin
-      }
-      syncWorkerProfileEmailPreview()
-    }
+    const email = normalizeWorkerEmailInput(document.getElementById('wkEditEmail')?.value)
+    const emailInput = document.getElementById('wkEditEmail')
+    if (emailInput instanceof HTMLInputElement) emailInput.value = email
 
     const payload = {
       workerId: String(document.getElementById('wkEditId')?.value ?? '').trim(),
       name: String(document.getElementById('wkEditName')?.value ?? '').trim(),
-      login,
-      role: workerProfileAllowedTypeValue(document.getElementById('wkEditType')?.value),
+      role: workerProfileAllowedRoleValue(document.getElementById('wkEditRole')?.value, {
+        isOwner: !isAddingUser && workerProfileIsOwner(currentWorker),
+      }),
+      workerType: workerProfileAllowedTypeValue(document.getElementById('wkEditType')?.value),
       active: readWorkerProfileActiveValue(currentWorker),
-      email: isAddingUser
-        ? buildWorkerLoginEmailPreview(login)
-        : String(document.getElementById('wkEditEmail')?.value ?? '').trim(),
+      email,
       phone: String(document.getElementById('wkEditPhone')?.value ?? '').trim(),
     }
     clearWorkerProfileBasicError()
     clearWorkerProfilePasswordError()
 
-    if (!isAddingUser && !payload.login) {
-      alert('Brak loginu pracownika do edycji.')
+    if (!isAddingUser && !currentLogin) {
+      alert('Brak danych pracownika do edycji.')
       return
     }
 
-    if (!isAddingUser && canDeleteWorkers() && !isValidWorkerLoginLocalPart(nextLogin)) {
-      alert('Login musi byc lokalna czescia emaila (bez @) i moze zawierac tylko litery, cyfry, ".", "-" oraz "_".')
+    if (!payload.name) {
+      setWorkerProfileBasicError('Uzupełnij imię i nazwisko.', 'wkEditName')
       return
     }
 
-    if (!payload.name || !payload.login) {
-      if (isAddingUser) {
-        setWorkerProfileBasicError('Uzupełnij imię i login.', payload.name ? 'wkEditLogin' : 'wkEditName')
-      } else {
-        alert('Uzupełnij imię i login.')
-      }
+    if (!isValidWorkerEmail(payload.email)) {
+      setWorkerProfileBasicError('Podaj poprawny email, którym pracownik będzie się logował.', 'wkEditEmail')
       return
     }
 
     const newPass = String(document.getElementById('wkNewPass')?.value ?? '').trim()
     const repeatPass = String(document.getElementById('wkNewPass2')?.value ?? '').trim()
-    const createRole = workerProfileRoleForCreate(payload.role)
-    const canUpdatePassword = canRevealWorkerPasswords()
+    const createRole = payload.role
+    const canUpdatePassword = canResetWorkerPasswords()
 
-    if (createRole === 'ADMIN' && !canDeleteWorkers()) {
-      setWorkerProfileBasicError('Typ ADMIN może nadać tylko Admin.', 'wkEditType')
+    if (createRole !== 'WORKER' && !canAdministerWorkers()) {
+      setWorkerProfileBasicError('Tylko ADMIN albo OWNER może nadawać role portalowe.', 'wkEditRole')
       return
     }
 
+    let workerNumberOverride
     if (isAddingUser) {
-      if (!payload.workerId) {
-        setWorkerProfileBasicError('Uzupełnij ID pracownika.', 'wkEditId')
+      const numberInput = document.getElementById('wkEditNumber')
+      const rawWorkerNumber = String(numberInput?.value ?? '').trim()
+      if (!/^[1-9]\d*$/.test(rawWorkerNumber)) {
+        setWorkerProfileBasicError(
+          'Numer ID pracownika musi być dodatnią liczbą całkowitą bez zer wiodących.',
+          'wkEditNumber',
+        )
         return
       }
-
-      if (!isValidWorkerLoginLocalPart(payload.login)) {
-        setWorkerProfileBasicError('Login musi być lokalną częścią emaila (bez @) i może zawierać tylko litery, cyfry, ".", "-" oraz "_".', 'wkEditLogin')
-        return
-      }
-
-      if (!payload.email) {
-        setWorkerProfileBasicError('Nie można zbudować finalnego emaila. Sprawdź login i domenę konta dodającego.', 'wkEditLogin')
-        return
+      payload.workerId = syncWorkerProfileIdComposer()
+      if (canDeleteWorkers() && numberInput?.dataset.manual === '1') {
+        workerNumberOverride = Number(rawWorkerNumber)
       }
 
       if (!createRole) {
-        setWorkerProfileBasicError('Wybierz poprawny typ pracownika.', 'wkEditType')
+        setWorkerProfileBasicError('Wybierz poprawną rolę pracownika.', 'wkEditRole')
         return
       }
 
@@ -2093,25 +2001,26 @@ export function createWorkerProfileFeature(ctx) {
           displayName: payload.name,
           password: newPass,
           role: createRole,
-          workerType: payload.role,
-          storePassword: canUpdatePassword,
+          workerType: payload.workerType,
+          ...(workerNumberOverride ? { workerNumberOverride } : {}),
         })
         const addedName = String(createdUser?.name ?? createdUser?.workerName ?? payload.name).trim()
-        successNotice = `Dodano użytkownika: ${addedName || payload.name || payload.login}.`
+        const createdLogin = String(createdUser?.login ?? createdUser?.workerLogin ?? '').trim()
+        successNotice = `Dodano użytkownika: ${addedName || payload.name || payload.email}.`
         optimisticWorker = {
           ...payload,
           ...createdUser,
           orgId: appState.session.orgId,
-          id: createdUser?.workerId ?? createdUser?.id ?? payload.login,
-          workerId: createdUser?.workerId ?? createdUser?.id ?? payload.login,
-          login: createdUser?.login ?? createdUser?.workerLogin ?? payload.login,
-          workerLogin: createdUser?.login ?? createdUser?.workerLogin ?? payload.login,
+          id: createdUser?.workerId ?? createdUser?.id ?? createdLogin,
+          workerId: createdUser?.workerId ?? createdUser?.id ?? createdLogin,
+          login: createdLogin,
+          workerLogin: createdLogin,
           workerName: createdUser?.workerName ?? createdUser?.name ?? payload.name,
           name: createdUser?.name ?? createdUser?.workerName ?? payload.name,
           fullName: createdUser?.fullName ?? createdUser?.workerName ?? createdUser?.name ?? payload.name,
           role: createdUser?.role ?? payload.role,
-          type: createdUser?.workerType ?? createdUser?.type ?? payload.role,
-          workerType: createdUser?.workerType ?? createdUser?.type ?? createdUser?.role ?? payload.role,
+          type: createdUser?.workerType ?? createdUser?.type ?? payload.workerType,
+          workerType: createdUser?.workerType ?? createdUser?.type ?? payload.workerType,
           active: payload.active,
           email: createdUser?.email ?? payload.email,
           loginEmail: createdUser?.loginEmail ?? createdUser?.email ?? payload.email,
@@ -2127,9 +2036,8 @@ export function createWorkerProfileFeature(ctx) {
           name: payload.name,
           workerName: payload.name,
           login: currentLogin,
-          newLogin: nextLogin,
           role: payload.role,
-          workerType: payload.role,
+          workerType: payload.workerType,
           active: payload.active,
           email: payload.email,
           loginEmail: payload.email,
@@ -2138,18 +2046,8 @@ export function createWorkerProfileFeature(ctx) {
           edit: editedBy,
           authUid: currentWorker?.authUid ?? '',
         })
-        successNotice = updatedWorker?.authUpdated ? 'Zmiany zapisane w bazie i Firebase Auth.' : 'Zmiany zapisane w bazie.'
-        const updatedLogin = String(updatedWorker?.login ?? nextLogin ?? currentLogin).trim() || currentLogin
-        if (updatedLogin && updatedLogin !== currentLogin) {
-          selectedWorkerProfileKeys.delete(currentLogin)
-          successNotice = updatedWorker?.authUpdated
-            ? `Zmiany zapisane w bazie i Firebase Auth. Login zmieniono na ${updatedLogin}.`
-            : `Zmiany zapisane w bazie. Login zmieniono na ${updatedLogin}.`
-        }
-        const authWarning = String(updatedWorker?.authWarning ?? '').trim()
-        if (authWarning) {
-          successNotice += ` Uwaga: ${authWarning}`
-        }
+        successNotice = 'Zmiany zapisano.'
+        const updatedLogin = String(updatedWorker?.login ?? currentLogin).trim() || currentLogin
         optimisticPreviousKey = currentLogin
         optimisticWorker = {
           ...(currentWorker ?? {}),
@@ -2162,8 +2060,8 @@ export function createWorkerProfileFeature(ctx) {
           fullName: payload.name,
           name: payload.name,
           role: updatedWorker?.role ?? payload.role,
-          type: updatedWorker?.workerType ?? updatedWorker?.type ?? payload.role,
-          workerType: updatedWorker?.workerType ?? updatedWorker?.type ?? updatedWorker?.role ?? payload.role,
+          type: updatedWorker?.workerType ?? updatedWorker?.type ?? payload.workerType,
+          workerType: updatedWorker?.workerType ?? updatedWorker?.type ?? payload.workerType,
           active: payload.active,
           email: updatedWorker?.email ?? payload.email,
           loginEmail: updatedWorker?.loginEmail ?? updatedWorker?.email ?? payload.email,
@@ -2172,7 +2070,7 @@ export function createWorkerProfileFeature(ctx) {
         }
         if (newPass) {
           await setWorkerPassword(appState.session.orgId, updatedLogin, newPass)
-          successNotice = 'Hasło ustawiono w Firebase Auth i zapisano w sejfie.'
+          successNotice = 'Hasło ustawiono w Firebase Auth.'
         }
       }
 
@@ -2180,28 +2078,47 @@ export function createWorkerProfileFeature(ctx) {
         const savedKeys = workerProfileIdentityKeys(optimisticWorker)
         addWorkerProfileIdentityKey(savedKeys, optimisticPreviousKey)
         clearOptimisticWorkerProfilePatchesForKeys(savedKeys)
-      }
-      clearWorkerDirectoryStateBeforeFreshRead()
-      await fetchWorkerProfilesForCurrentSession(true, {
-        silent: true,
-        clearSelection: false,
-        resetPage: false,
-        skipOptimisticPatches: true,
-      })
-      const refreshedWorker = optimisticWorker ? findWorkerProfileRowAfterSave(optimisticPreviousKey, optimisticWorker) : null
-      if (optimisticWorker && (!refreshedWorker || !workerProfilePatchConfirmed(refreshedWorker, optimisticWorker))) {
-        console.warn('[worker-profile] server-only refresh did not include backend-confirmed worker', {
-          previousLogin: optimisticPreviousKey,
-          login: optimisticWorker?.login ?? optimisticWorker?.workerLogin,
-        })
         upsertWorkerProfileRow(optimisticPreviousKey, optimisticWorker)
       }
       closeWorkerProfileModal()
       showTransientNotice(successNotice, 'success', { size: 'large' })
+      void (async () => {
+        let refreshedWorker = null
+        try {
+          clearWorkerDirectoryStateBeforeFreshRead()
+          await fetchWorkerProfilesForCurrentSession(true, {
+            silent: true,
+            clearSelection: false,
+            resetPage: false,
+            skipOptimisticPatches: true,
+          })
+          refreshedWorker = optimisticWorker
+            ? findWorkerProfileRowAfterSave(optimisticPreviousKey, optimisticWorker)
+            : null
+        } catch (refreshError) {
+          console.warn(
+            '[worker-profile] zapis zakonczony powodzeniem, ale odswiezenie WorkersForOrg nie powiodlo sie',
+            refreshError,
+          )
+        }
+        if (
+          optimisticWorker &&
+          (!refreshedWorker || !workerProfilePatchConfirmed(refreshedWorker, optimisticWorker))
+        ) {
+          console.warn('[worker-profile] server-only refresh did not include backend-confirmed worker', {
+            previousLogin: optimisticPreviousKey,
+            login: optimisticWorker?.login ?? optimisticWorker?.workerLogin,
+          })
+          upsertWorkerProfileRow(optimisticPreviousKey, optimisticWorker)
+        }
+      })()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Błąd zapisu pracownika.'
-      if (isAddingUser && /(?:^|\b)(?:WORKER_ID_ALREADY_EXISTS|ID pracownika)(?:\b|$)/i.test(message)) {
-        setWorkerProfileBasicError(message, 'wkEditId')
+      if (isAddingUser && /(?:WORKER_NUMBER|WORKER_ID|ID pracownika|numer ID)/i.test(message)) {
+        setWorkerProfileBasicError(message, 'wkEditNumber')
+      } else if (!isAddingUser) {
+        console.error('[worker-profile] save failed', error)
+        showTransientNotice('Nie udało się zapisać zmian.', 'error', { size: 'large' })
       } else {
         alert(message)
       }
@@ -2217,9 +2134,13 @@ export function createWorkerProfileFeature(ctx) {
     }
 
     const targetWorker = worker ?? appState.workerProfileCurrent
+    if (workerProfileIsOwner(targetWorker)) {
+      alert('Nie można usunąć konta założyciela organizacji.')
+      return
+    }
     const login = workerProfileKey(targetWorker)
     if (!appState.session?.orgId || !login) {
-      alert('Brak organizacji albo loginu pracownika do usunięcia.')
+      alert('Brak organizacji albo danych pracownika do usunięcia.')
       return
     }
 
@@ -2257,8 +2178,9 @@ export function createWorkerProfileFeature(ctx) {
       })
 
       const authWarning = String(result?.authWarning ?? '').trim()
+      const deletedLabel = workerProfileDisplayName(targetWorker) || String(targetWorker?.workerId ?? targetWorker?.id ?? '').trim() || 'pracownika'
       showTransientNotice(
-        authWarning ? `Usunięto pracownika ${login}. ${authWarning}` : `Usunięto pracownika ${login}.`,
+        authWarning ? `Usunięto ${deletedLabel}. ${authWarning}` : `Usunięto ${deletedLabel}.`,
         'success',
         { size: 'large' },
       )
@@ -2461,22 +2383,6 @@ export function createWorkerProfileFeature(ctx) {
     binding.add(document.getElementById('wkDeleteBtn'), 'click', () => {
       void deleteWorkerProfileData(appState.workerProfileCurrent)
     })
-    ;['input', 'change', 'blur'].forEach((eventName) => {
-      binding.add(document.getElementById('wkEditLogin'), eventName, () => {
-        const loginInput = document.getElementById('wkEditLogin')
-        if (!(loginInput instanceof HTMLInputElement)) {
-          return
-        }
-
-        loginInput.dataset.autoFromEmail = '0'
-        if (appState.workerProfileModalMode !== 'add' && !canDeleteWorkers()) {
-          return
-        }
-
-        loginInput.value = sanitizeWorkerLoginLocalPart(loginInput.value)
-        syncWorkerProfileEmailPreview()
-      })
-    })
     ;['wkNewPass', 'wkNewPass2'].forEach((id) => {
       const input = document.getElementById(id)
       ;['input', 'change'].forEach((eventName) => {
@@ -2489,54 +2395,31 @@ export function createWorkerProfileFeature(ctx) {
       })
     })
     resetWorkerProfilePasswordVisibility()
-    binding.add(document.getElementById('wkShowPassBtn'), 'click', async () => {
-      const passInput = document.getElementById('wkCurrentPass')
-      const showButton = document.getElementById('wkShowPassBtn')
-      if (!passInput || !showButton) {
+    binding.add(document.getElementById('wkEditNumber'), 'input', (event) => {
+      const input = event.currentTarget
+      if (!(input instanceof HTMLInputElement)) {
         return
       }
-
-      const show = passInput.type === 'password'
-      if (show && !passInput.value) {
-        const loadedPassword = await loadWorkerProfilePassword()
-        if (!loadedPassword) {
-          return
-        }
-      }
-      passInput.type = show ? 'text' : 'password'
-      showButton.textContent = show ? 'Ukryj' : 'Pokaż'
+      input.value = input.value.replace(/\D+/g, '').slice(0, 10)
+      input.dataset.manual = '1'
+      clearWorkerProfileBasicError()
+      syncWorkerProfileIdComposer()
     })
-    ;['wkEditId', 'wkEditName', 'wkEditLogin', 'wkEditType'].forEach((id) => {
+    ;['wkEditId', 'wkEditNumber', 'wkEditName', 'wkEditEmail', 'wkEditRole', 'wkEditType'].forEach((id) => {
       const input = document.getElementById(id)
       ;['input', 'change'].forEach((eventName) => {
         binding.add(input, eventName, () => {
           clearWorkerProfileBasicError()
-          if (id === 'wkEditId') {
+          if (id === 'wkEditRole') syncWorkerProfileRoleHelp()
+          if (id === 'wkEditId' || id === 'wkEditNumber') {
+            if (id === 'wkEditNumber') syncWorkerProfileIdComposer()
             const idLabel = document.getElementById('wkIdLabel')
-            if (idLabel) idLabel.textContent = String(input?.value ?? '').trim() || '-'
+            if (idLabel && id === 'wkEditId') idLabel.textContent = String(input?.value ?? '').trim() || '-'
           }
         })
       })
     })
-    binding.add(document.getElementById('wkCopyPassBtn'), 'click', async () => {
-      const passInput = document.getElementById('wkCurrentPass')
-      if (!passInput) {
-        return
-      }
-      if (!passInput?.value) {
-        const loadedPassword = await loadWorkerProfilePassword()
-        if (!loadedPassword) {
-          return
-        }
-      }
-
-      try {
-        await navigator.clipboard.writeText(passInput.value)
-        alert('Skopiowano hasło do schowka.')
-      } catch {
-        alert('Nie udało się skopiować hasła.')
-      }
-    })
+    binding.add(document.getElementById('wkEditRole'), 'mouseenter', syncWorkerProfileRoleHelp)
 
     return () => {
       closeWorkerProfileDeleteConfirm(false)

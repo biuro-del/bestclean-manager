@@ -3,7 +3,7 @@ import {
   deleteClientForOrg,
   insertClientForOrg,
   updateClientForOrg,
-} from '@dataconnect/generated'
+} from './platformDataConnectService'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
 const READ_CACHE_MS = 30000

@@ -3,7 +3,7 @@ import {
   individualJobsForOrg,
   insertIndividualJobForOrg,
   updateIndividualJobForOrg,
-} from '@dataconnect/generated'
+} from './platformDataConnectService'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
 const DEFAULT_PAGE_SIZE = 200

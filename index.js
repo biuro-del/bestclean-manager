@@ -5,9 +5,42 @@ const crypto = require('node:crypto')
 const { execFileSync } = require('node:child_process')
 const dotenv = require('dotenv')
 const admin = require('firebase-admin')
+const { getDataConnect: getAdminDataConnect } = require('firebase-admin/data-connect')
 const { Pool } = require('pg')
 const { AuthTypes, Connector, IpAddressTypes } = require('@google-cloud/cloud-sql-connector')
 const { Compute, GoogleAuth, OAuth2Client } = require('google-auth-library')
+const {
+  buildOrganizationSummary,
+  buildSessionContext,
+  normalizeOrganizationId,
+  resolveAccessibleOrganizations,
+} = require('./auth-session-policy')
+const {
+  buildWorkerId,
+  buildWorkerLogin,
+  canAssignWorkerRole,
+  isWorkerDeleteRole,
+  isWorkerManagementRole,
+  nextWorkerNumber,
+  normalizeRoleCode,
+  normalizeWorkerRole,
+  normalizeWorkerNumber,
+  parseWorkerNumber,
+} = require('./worker-id-policy')
+const workerRepository = require('./worker-repository')
+const platformRepository = require('./platform-repository')
+const { createPlatformApi } = require('./platform-api')
+const {
+  getPlatformRequestContext,
+  runWithPlatformRequest,
+  setRequestPathname,
+  setVerifiedFirebaseToken,
+} = require('./platform-request-context')
+const {
+  PLATFORM_ROLE,
+  hasPlatformOwnerClaim,
+} = require('./platform-policy')
+const { buildFirebaseRestDecodedToken } = require('./firebase-rest-token-policy')
 
 function isTrue(value) {
   return ['1', 'true', 'yes', 'tak'].includes(
@@ -64,10 +97,13 @@ const ADMIN_WORKER_PASSWORD_REVEAL_PATH = '/api/admin/worker-password/reveal'
 const ADMIN_WORKER_PASSWORD_SET_PATH = '/api/admin/worker-password/set'
 const ADMIN_WORKER_PROFILE_UPDATE_PATH = '/api/admin/worker-profile/update'
 const ADMIN_WORKER_PROFILE_DELETE_PATH = '/api/admin/worker-profile/delete'
+const ADMIN_WORKER_ID_NEXT_PATH = '/api/admin/worker-id/next'
+const ADMIN_WORKERS_RESTORE_PATH = '/api/admin/workers/restore'
 const AUTH_SESSION_CONTEXT_PATH = '/api/auth/session-context'
 const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
 const PORTAL_EVENTS_PATH = '/api/portal/events'
+const PORTAL_UI_STYLE_PATH = '/api/portal/ui-style'
 const MOBILE_STATE_PATH = '/api/mobile/state'
 const MOBILE_SCAN_PATH = '/api/mobile/scan'
 const DATACONNECT_LOCATION = String(process.env.FIREBASE_DATACONNECT_LOCATION || process.env.DATACONNECT_LOCATION || 'europe-west3').trim()
@@ -94,8 +130,6 @@ const CLOUD_SQL_CONNECTION_NAME = String(
 ).trim()
 const CLOUD_SQL_ADMIN_SCOPE = 'https://www.googleapis.com/auth/sqlservice.admin'
 const ROLLBACK_TOKEN_MAX_AGE_MS = Number(process.env.ROLLBACK_TOKEN_MAX_AGE_MS || 15 * 60 * 1000)
-const WORKER_PASSWORD_ALGORITHM = 'aes-256-gcm'
-
 let firebaseAdminInitialized = false
 let dbPool = null
 let cloudSqlConnector = null
@@ -342,11 +376,19 @@ function mapDatabaseConnectionError(error) {
     lowerMessage.includes('invalid_rapt') ||
     responseDescription.includes('invalid_rapt')
   ) {
+    const cloudSqlAuthClient = normalizeText(
+      process.env.CLOUD_SQL_AUTH_CLIENT || process.env.DB_CLOUD_SQL_AUTH_CLIENT,
+    ).toLowerCase()
+    const usesLocalAdc =
+      !isGoogleServerlessRuntime() &&
+      (!cloudSqlAuthClient || cloudSqlAuthClient === 'adc' || cloudSqlAuthClient === 'google-auth')
+
     return {
       status: 500,
       code: 'GOOGLE_AUTH_REAUTH_REQUIRED',
-      message:
-        'Backend nie moze uwierzytelnic polaczenia z Google Cloud (invalid_grant/invalid_rapt). Sprawdz konto serwisowe runtime.',
+      message: usesLocalAdc
+        ? 'Lokalna sesja Google Cloud wygasla. Uruchom "gcloud auth application-default login", a nastepnie zrestartuj "npm run dev".'
+        : 'Backend nie moze uwierzytelnic polaczenia z Google Cloud (invalid_grant/invalid_rapt). Sprawdz konto serwisowe runtime.',
     }
   }
 
@@ -487,11 +529,7 @@ function normalizeLower(value) {
 }
 
 function normalizeOrgId(value) {
-  const orgId = normalizeLower(value)
-  if (!/^[a-z0-9_-]{1,64}$/.test(orgId)) {
-    return ''
-  }
-  return orgId
+  return normalizeOrganizationId(value)
 }
 
 function normalizeEmail(value) {
@@ -521,7 +559,7 @@ function normalizeLoginLocalPart(value) {
   return login
 }
 
-function normalizeWorkerCredentialLogin(value) {
+function normalizeWorkerLogin(value) {
   const login = normalizeText(value)
   if (!login || login.length > 80 || /[\u0000-\u001f\u007f]/.test(login)) {
     return ''
@@ -531,31 +569,6 @@ function normalizeWorkerCredentialLogin(value) {
 
 function emailLocalPart(email) {
   return normalizeLower(email).split('@')[0] || ''
-}
-
-function emailDomain(email) {
-  const normalized = normalizeEmail(email)
-  if (!normalized) {
-    return ''
-  }
-
-  const atIndex = normalized.indexOf('@')
-  if (atIndex < 0) {
-    return ''
-  }
-
-  const domain = normalized.slice(atIndex + 1).trim()
-  if (!domain || domain.includes('@')) {
-    return ''
-  }
-
-  return domain
-}
-
-function buildManagedUserEmail(login, requesterEmail) {
-  const localPart = normalizeLoginLocalPart(login)
-  const domain = emailDomain(requesterEmail)
-  return localPart && domain ? normalizeEmail(`${localPart}@${domain}`) : ''
 }
 
 function normalizeUserRole(value, options = {}) {
@@ -577,6 +590,7 @@ function normalizeUserRole(value, options = {}) {
 
 function normalizeRequesterRole(value) {
   const role = normalizeText(value).toUpperCase()
+  if (role === PLATFORM_ROLE) return 'ADMIN'
   if (role === 'ADMIN' || role === 'ADMINISTRATOR' || role === 'OWNER' || role === 'SUPERADMIN') return 'ADMIN'
   if (role === 'MANAGER' || role === 'KIEROWNIK') return 'MANAGER'
   if (role === 'COORDINATOR' || role === 'KOORDYNATOR') return 'COORDINATOR'
@@ -967,7 +981,9 @@ async function callFirebaseIdentityToolkit(method, payload) {
 
 async function verifyFirebaseIdToken(token) {
   try {
-    return await ensureFirebaseAdmin().auth().verifyIdToken(token)
+    const decodedToken = await ensureFirebaseAdmin().auth().verifyIdToken(token)
+    setVerifiedFirebaseToken(decodedToken)
+    return decodedToken
   } catch (adminError) {
     if (!canUseFirebaseRest()) {
       throw adminError
@@ -982,11 +998,13 @@ async function verifyFirebaseIdToken(token) {
       throw error
     }
 
-    return {
-      uid,
-      email: normalizeEmail(user?.email) || normalizeText(user?.email),
-      name: normalizeText(user?.displayName),
-    }
+    const decodedToken = buildFirebaseRestDecodedToken({
+      token,
+      lookupUser: user,
+      projectId: FIREBASE_PROJECT_ID,
+    })
+    setVerifiedFirebaseToken(decodedToken)
+    return decodedToken
   }
 }
 
@@ -1151,23 +1169,21 @@ async function findFirebaseAuthUserByEmail(email) {
   }
 }
 
-function buildProvisionWorkerPayload(body, requester = {}) {
+function buildProvisionWorkerPayload(body) {
   const orgId = normalizeOrgId(body?.orgId)
   const loginLocalPart = normalizeLoginLocalPart(body?.loginLocalPart || body?.login)
-  const requesterEmail = normalizeEmail(requester?.email)
-  const email = buildManagedUserEmail(loginLocalPart, requesterEmail)
+  const email = normalizeEmail(body?.email)
   const workerName = normalizeText(body?.workerName || body?.displayName || body?.name) || loginLocalPart
   const roleInput = normalizeText(body?.roleLabel || body?.role)
   const role = roleInput ? normalizeUserRole(roleInput, { allowAdmin: true }) : 'WORKER'
   const password = normalizeText(body?.password)
   const active = asPayloadBoolean(body?.active, true)
-  const workerId = normalizeText(body?.workerId || body?.id).slice(0, 64)
+  const workerId = normalizeText(body?.workerId || body?.id).slice(0, 128)
 
   const validationErrors = []
   if (!orgId) validationErrors.push('Brak poprawnego orgId.')
-  if (!requesterEmail) validationErrors.push('Token Firebase konta dodajacego nie zawiera poprawnego emaila.')
   if (!loginLocalPart) validationErrors.push('Podaj poprawny login bez znaku @.')
-  if (!email) validationErrors.push('Nie mozna zbudowac emaila z loginu i domeny konta dodajacego.')
+  if (!email) validationErrors.push('Podaj poprawny email.')
   if (!workerName) validationErrors.push('Podaj imie i nazwisko pracownika.')
   if (!role) validationErrors.push('Wybierz poprawny typ pracownika.')
   if (password.length < 6) validationErrors.push('Haslo tymczasowe musi miec co najmniej 6 znakow.')
@@ -1291,11 +1307,73 @@ async function queryWorkersForOrgViaDataConnect(orgId, firebaseIdToken) {
   return Array.isArray(response?.data?.workers) ? response.data.workers : []
 }
 
+async function executeAdminDataConnectOperation(kind, operationName, variables, operationOptions = {}) {
+  ensureFirebaseAdmin()
+  const dataConnect = getAdminDataConnect({
+    location: DATACONNECT_LOCATION,
+    serviceId: DATACONNECT_SERVICE,
+    connector: DATACONNECT_CONNECTOR,
+  })
+  return kind === 'mutation'
+    ? dataConnect.executeMutation(operationName, variables || {}, operationOptions)
+    : dataConnect.executeQuery(operationName, variables || {}, operationOptions)
+}
+
+function normalizeWorkerType(value) {
+  const raw = normalizeText(value)
+  const normalized = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+
+  if (normalized.includes('admin') || normalized.includes('owner') || normalized.includes('superadmin')) {
+    return 'Administrator'
+  }
+  if (
+    normalized.includes('biurow') ||
+    normalized.includes('koordynator') ||
+    normalized.includes('coordinator') ||
+    normalized.includes('manager') ||
+    normalized.includes('kierownik')
+  ) {
+    return 'Pracownik Biurowy'
+  }
+  if (normalized.includes('mobil') || normalized.includes('zespol')) {
+    return 'Zesp\u00f3\u0142 Mobilny'
+  }
+  return 'Sta\u0142y personel na obiekcie'
+}
+
+function workerRoleAssignmentError(code, message) {
+  return createWorkerProfilePublicError(403, code, message)
+}
+
+function assertWorkerRoleAssignmentAllowed(
+  requesterRole,
+  targetRole,
+  { currentRole = '', targetIsOwner = false, creating = false } = {},
+) {
+  if (canAssignWorkerRole(requesterRole, targetRole, { currentRole, targetIsOwner, creating })) {
+    return targetIsOwner ? 'OWNER' : normalizeWorkerRole(targetRole)
+  }
+  if (targetIsOwner || normalizeWorkerRole(targetRole) === 'OWNER') {
+    throw workerRoleAssignmentError(
+      'OWNER_ROLE_IMMUTABLE',
+      'Rola OWNER jest przypisana wy\u0142\u0105cznie za\u0142o\u017cycielowi organizacji i nie mo\u017ce by\u0107 zmieniona.',
+    )
+  }
+  throw workerRoleAssignmentError(
+    'WORKER_ROLE_CHANGE_FORBIDDEN',
+    creating
+      ? 'Manager mo\u017ce dodawa\u0107 nowych pracownik\u00f3w wy\u0142\u0105cznie z domy\u015bln\u0105 rol\u0105 WORKER.'
+      : 'Tylko ADMIN albo OWNER mo\u017ce zmienia\u0107 role pracownik\u00f3w.',
+  )
+}
+
 function buildWorkerPasswordPayload(body, { requirePassword = false } = {}) {
   const orgId = normalizeOrgId(body?.orgId)
-  const login = normalizeWorkerCredentialLogin(body?.login || body?.workerLogin)
+  const login = normalizeWorkerLogin(body?.login || body?.workerLogin)
   const password = normalizeText(body?.password)
-  const skipAuthUpdate = isTrue(body?.skipAuthUpdate)
   const validationErrors = []
 
   if (!orgId) validationErrors.push('Brak poprawnego orgId.')
@@ -1305,91 +1383,9 @@ function buildWorkerPasswordPayload(body, { requirePassword = false } = {}) {
   }
 
   return {
-    value: { orgId, login, password, skipAuthUpdate },
+    value: { orgId, login, password },
     validationErrors,
   }
-}
-
-function workerPasswordConfigError() {
-  const error = new Error('WORKER_PASSWORD_SECRET_MISSING')
-  error.statusCode = 500
-  error.publicCode = 'WORKER_PASSWORD_SECRET_MISSING'
-  error.publicMessage =
-    'Brak konfiguracji WORKER_PASSWORD_SECRET. Ustaw sekret backendu, aby szyfrowac i odczytywac hasla pracownikow.'
-  return error
-}
-
-function resolveWorkerPasswordKey() {
-  const secret = normalizeText(process.env.WORKER_PASSWORD_SECRET || process.env.PORTAL_WORKER_PASSWORD_SECRET)
-  if (!secret) {
-    throw workerPasswordConfigError()
-  }
-  return crypto.createHash('sha256').update(secret, 'utf8').digest()
-}
-
-function encryptWorkerPassword(password) {
-  const key = resolveWorkerPasswordKey()
-  const iv = crypto.randomBytes(12)
-  const cipher = crypto.createCipheriv(WORKER_PASSWORD_ALGORITHM, key, iv)
-  const encrypted = Buffer.concat([cipher.update(String(password), 'utf8'), cipher.final()])
-  return {
-    encryptedPassword: encrypted.toString('base64url'),
-    iv: iv.toString('base64url'),
-    authTag: cipher.getAuthTag().toString('base64url'),
-    algorithm: WORKER_PASSWORD_ALGORITHM,
-  }
-}
-
-function decryptWorkerPassword(credential) {
-  const algorithm = normalizeText(credential?.algorithm)
-  if (algorithm !== WORKER_PASSWORD_ALGORITHM) {
-    const error = new Error('WORKER_PASSWORD_UNSUPPORTED_ALGORITHM')
-    error.statusCode = 500
-    error.publicCode = 'WORKER_PASSWORD_UNSUPPORTED_ALGORITHM'
-    error.publicMessage = 'Zapisane haslo uzywa nieobslugiwanego algorytmu szyfrowania.'
-    throw error
-  }
-
-  const key = resolveWorkerPasswordKey()
-  const iv = Buffer.from(normalizeText(credential?.iv), 'base64url')
-  const authTag = Buffer.from(normalizeText(credential?.authTag), 'base64url')
-  const encrypted = Buffer.from(normalizeText(credential?.encryptedPassword), 'base64url')
-  const decipher = crypto.createDecipheriv(WORKER_PASSWORD_ALGORITHM, key, iv)
-  decipher.setAuthTag(authTag)
-  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8')
-}
-
-function isWorkerPasswordRevealableConfigError(error) {
-  const code = normalizeText(error?.publicCode || error?.message)
-  const message = normalizeText(error?.message).toLowerCase()
-  return (
-    code === 'WORKER_PASSWORD_SECRET_MISSING' ||
-    code === 'WORKER_PASSWORD_UNSUPPORTED_ALGORITHM' ||
-    message.includes('unable to authenticate data') ||
-    message.includes('invalid initialization vector') ||
-    message.includes('invalid authentication tag')
-  )
-}
-
-function workerPasswordRevealUnavailableMessage(error) {
-  const code = normalizeText(error?.publicCode || error?.message)
-  if (code === 'WORKER_PASSWORD_SECRET_MISSING') {
-    return 'Hasło jest zapisane w sejfie, ale ten backend nie ma ustawionego WORKER_PASSWORD_SECRET, więc nie może go odszyfrować.'
-  }
-  if (code === 'WORKER_PASSWORD_UNSUPPORTED_ALGORITHM') {
-    return normalizeText(error?.publicMessage) || 'Hasło jest zapisane w nieobsługiwanym formacie szyfrowania.'
-  }
-  return 'Hasło jest zapisane w sejfie, ale nie udało się go odszyfrować w tym środowisku. Ustaw poprawny WORKER_PASSWORD_SECRET albo ustaw nowe hasło tymczasowe i zapisz.'
-}
-
-async function queryAdminWorkerCredentialForOrg(orgId, login, firebaseIdToken) {
-  const response = await executeDataConnectOperation(
-    'query',
-    'AdminWorkerCredentialForOrg',
-    { orgId, login },
-    firebaseIdToken,
-  )
-  return response?.data ?? {}
 }
 
 function isDataConnectWorkerNotFound(error) {
@@ -1397,7 +1393,7 @@ function isDataConnectWorkerNotFound(error) {
   return message.includes('nie znaleziono pracownika') || message.includes('worker') && message.includes('not found')
 }
 
-function addWorkerCredentialMatchKey(keys, value) {
+function addWorkerMatchKey(keys, value) {
   const raw = normalizeText(value)
   if (!raw) {
     return
@@ -1409,22 +1405,22 @@ function addWorkerCredentialMatchKey(keys, value) {
   }
 }
 
-function workerCredentialMatchKeys(row) {
+function workerMatchKeys(row) {
   const keys = new Set()
-  addWorkerCredentialMatchKey(keys, row?.login)
-  addWorkerCredentialMatchKey(keys, row?.workerLogin)
-  addWorkerCredentialMatchKey(keys, row?.workerId)
-  addWorkerCredentialMatchKey(keys, row?.loginEmail ?? row?.login_email)
-  addWorkerCredentialMatchKey(keys, row?.email)
-  addWorkerCredentialMatchKey(keys, row?.authUid ?? row?.auth_uid)
+  addWorkerMatchKey(keys, row?.login)
+  addWorkerMatchKey(keys, row?.workerLogin)
+  addWorkerMatchKey(keys, row?.workerId)
+  addWorkerMatchKey(keys, row?.loginEmail ?? row?.login_email)
+  addWorkerMatchKey(keys, row?.email)
+  addWorkerMatchKey(keys, row?.authUid ?? row?.auth_uid)
   return keys
 }
 
-function findWorkerForCredentialLogin(rows, login) {
+function findWorkerForPasswordReset(rows, login) {
   const requested = new Set()
-  addWorkerCredentialMatchKey(requested, login)
+  addWorkerMatchKey(requested, login)
   for (const row of Array.isArray(rows) ? rows : []) {
-    const keys = workerCredentialMatchKeys(row)
+    const keys = workerMatchKeys(row)
     for (const key of requested) {
       if (keys.has(key)) {
         return row
@@ -1432,44 +1428,6 @@ function findWorkerForCredentialLogin(rows, login) {
     }
   }
   return null
-}
-
-async function resolveAdminWorkerCredentialForOrg(orgId, login, firebaseIdToken) {
-  try {
-    return {
-      data: await queryAdminWorkerCredentialForOrg(orgId, login, firebaseIdToken),
-      login,
-      requestedLogin: login,
-      workerMissing: false,
-    }
-  } catch (error) {
-    if (!isDataConnectWorkerNotFound(error)) {
-      throw error
-    }
-  }
-
-  const workers = await queryWorkersForOrgViaDataConnect(orgId, firebaseIdToken)
-  const matchedWorker = findWorkerForCredentialLogin(workers, login)
-  const resolvedLogin = normalizeText(matchedWorker?.login)
-  if (!resolvedLogin) {
-    return {
-      data: { worker: null, workerCredential: null },
-      login,
-      requestedLogin: login,
-      workerMissing: true,
-    }
-  }
-
-  return {
-    data: await queryAdminWorkerCredentialForOrg(orgId, resolvedLogin, firebaseIdToken),
-    login: resolvedLogin,
-    requestedLogin: login,
-    workerMissing: false,
-  }
-}
-
-async function upsertWorkerCredentialForOrg(payload, firebaseIdToken) {
-  await executeDataConnectOperation('mutation', 'UpsertWorkerCredentialForOrg', payload, firebaseIdToken)
 }
 
 async function updateFirebaseAuthPassword(uid, password) {
@@ -1521,77 +1479,55 @@ function buildWorkerAlreadyExistsError(existingWorker, login, email) {
   return error
 }
 
-function findExistingWorkerIdInRows(rows, workerId) {
-  const normalizedWorkerId = normalizeLower(workerId)
-  if (!normalizedWorkerId) return null
-  return (Array.isArray(rows) ? rows : []).find((row) => normalizeLower(row?.workerId ?? row?.worker_id ?? row?.id) === normalizedWorkerId) || null
-}
-
-function resolveWorkerIdForCreate(rows, requestedWorkerId) {
-  const workerId = normalizeText(requestedWorkerId).slice(0, 64)
-  if (workerId && findExistingWorkerIdInRows(rows, workerId)) {
-    throw createWorkerProfilePublicError(409, 'WORKER_ID_ALREADY_EXISTS', 'Ten ID pracownika jest juz zajety w tej organizacji.')
-  }
-  return workerId || resolveNextWorkerId(rows)
-}
-
-async function createAdminManagedUserViaDataConnect(payload, decodedToken, firebaseIdToken) {
-  const rows = await queryWorkersForOrgViaDataConnect(payload.orgId, firebaseIdToken)
-  const existingWorker = findExistingWorkerInRows(rows, payload.login, payload.email)
-  if (existingWorker) {
-    throw buildWorkerAlreadyExistsError(existingWorker, payload.login, payload.email)
-  }
-  const workerId = resolveWorkerIdForCreate(rows, payload.workerId)
-
-  const provisionedUser = await provisionWorkerAuthUser(
-    {
-      orgId: payload.orgId,
-      loginLocalPart: payload.login,
-      email: payload.email,
-      workerName: payload.displayName,
-      role: payload.role,
-      password: payload.password,
-      active: payload.active,
-    },
-    decodedToken,
+function workerNumberOverrideError() {
+  return createWorkerProfilePublicError(
+    400,
+    'INVALID_WORKER_NUMBER_OVERRIDE',
+    'Numer ID pracownika musi byc dodatnia liczba calkowita bez zer wiodacych.',
   )
+}
 
-  try {
-    await executeDataConnectOperation(
-      'mutation',
-      'InsertWorkerWithMembershipForOrg',
-      {
-        orgId: payload.orgId,
-        login: payload.login,
-        workerName: payload.displayName,
-        loginEmail: provisionedUser.email,
-        authUid: provisionedUser.uid,
-        role: payload.role,
-        active: payload.active,
-        email: provisionedUser.email,
-        phone: payload.phone || null,
-        workerType: payload.role,
-        workerId,
-      },
-      firebaseIdToken,
+function assertWorkerNumberOverrideAllowed(requesterRole, workerNumberOverride) {
+  if (workerNumberOverride !== null && !isWorkerDeleteRole(requesterRole)) {
+    throw createWorkerProfilePublicError(
+      403,
+      'WORKER_NUMBER_OVERRIDE_FORBIDDEN',
+      'Tylko ADMIN albo OWNER moze recznie zmienic numer ID pracownika.',
     )
-  } catch (error) {
-    if (!provisionedUser.existing && provisionedUser.rollbackToken) {
-      await deleteFirebaseUserQuietly(provisionedUser.uid)
-    }
-    throw error
   }
+}
 
-  return {
-    uid: provisionedUser.uid,
-    email: provisionedUser.email,
-    login: payload.login,
-    displayName: payload.displayName,
-    role: payload.role,
-    active: payload.active,
-    phone: payload.phone,
-    workerId,
-  }
+function workerReservationConflictError(workerNumber) {
+  return createWorkerProfilePublicError(
+    409,
+    'WORKER_NUMBER_ALREADY_RESERVED',
+    `Numer ID pracownika ${workerNumber} jest juz zarezerwowany w tej organizacji.`,
+  )
+}
+
+function isWorkerReservationConflict(error) {
+  const code = normalizeText(error?.code || error?.publicCode).toUpperCase()
+  const message = normalizeText(error?.message || error?.publicMessage).toLowerCase()
+  return (
+    code === '23505' ||
+    code.includes('ALREADY_EXISTS') ||
+    code.includes('CONFLICT') ||
+    message.includes('duplicate key') ||
+    message.includes('already exists') ||
+    message.includes('juz istnieje') ||
+    message.includes('już istnieje')
+  )
+}
+
+function isWorkerNumberAlreadyUsed(orgId, workerNumber, reservations = [], workers = []) {
+  return (
+    (Array.isArray(reservations) ? reservations : []).some(
+      (row) => normalizeWorkerNumber(row?.workerNumber ?? row?.worker_number, { optional: true }) === workerNumber,
+    ) ||
+    (Array.isArray(workers) ? workers : []).some(
+      (row) => parseWorkerNumber(orgId, row?.workerId ?? row?.worker_id ?? row?.id) === workerNumber,
+    )
+  )
 }
 
 function shouldUseCloudSqlConnector(host) {
@@ -1833,14 +1769,6 @@ function hasDatabaseConnectionConfig() {
 }
 
 function shouldProxyAdminUsersRequest() {
-  const mode = normalizeText(process.env.ADMIN_USERS_MODE || process.env.ADMIN_USERS_PROXY_MODE).toLowerCase()
-  if (mode === 'proxy' || mode === 'remote') {
-    return true
-  }
-  if (mode === 'local' || mode === 'direct') {
-    return false
-  }
-
   return false
 }
 
@@ -1903,13 +1831,6 @@ function shouldProxyPortalEventsRequest() {
 }
 
 function shouldProxyWorkerProfileRequest() {
-  const mode = normalizeText(process.env.WORKER_PROFILE_MODE).toLowerCase()
-  if (['local', 'direct'].includes(mode)) {
-    return false
-  }
-  if (['proxy', 'remote'].includes(mode)) {
-    return true
-  }
   return false
 }
 
@@ -3019,42 +2940,154 @@ async function databaseColumnExists(client, relationName, columnName) {
   return result.rowCount > 0
 }
 
-function resolveNextWorkerId(rows = []) {
-  let maxNumber = 0
-  let padWidth = 3
+async function ensureWorkerIdReservationTable(client) {
+  await client.query(
+    `create table if not exists public.worker_id_reservation (
+       org_id varchar(64) not null,
+       worker_number integer not null check (worker_number > 0),
+       worker_id varchar(128) not null,
+       created_at timestamptz not null default now(),
+       created_by_uid varchar(128),
+       primary key (org_id, worker_number),
+       unique (org_id, worker_id),
+       constraint worker_id_reservation_org_fk
+         foreign key (org_id)
+         references public.organizations (org_id)
+         on delete cascade
+     )`,
+  )
+}
 
-  rows.forEach((row) => {
-    const raw = normalizeText(row?.worker_id ?? row?.workerId).toUpperCase()
-    const match = /^W(\d+)$/.exec(raw)
-    if (!match) return
+async function readWorkerIdSourceRows(client, orgId) {
+  const result = await runWorkerProfileDbQuery(
+    client,
+    'worker-id-source',
+    'select worker_id from public.worker where org_id = $1::text',
+    [orgId],
+  )
+  return result.rows
+}
 
-    const numeric = Number.parseInt(match[1], 10)
-    if (Number.isFinite(numeric) && numeric > maxNumber) {
-      maxNumber = numeric
+async function readWorkerIdReservationRows(client, orgId) {
+  if (!(await databaseRelationExists(client, 'public.worker_id_reservation'))) {
+    return []
+  }
+  const result = await runWorkerProfileDbQuery(
+    client,
+    'worker-id-reservations',
+    `select worker_number, worker_id
+       from public.worker_id_reservation
+      where org_id = $1::text
+      order by worker_number asc`,
+    [orgId],
+  )
+  return result.rows
+}
+
+async function reserveWorkerIdDirect(client, orgId, workerNumberOverride, createdByUid) {
+  await ensureWorkerIdReservationTable(client)
+  await client.query('select pg_advisory_xact_lock(hashtext($1::text))', [`worker-id:${orgId}`])
+
+  const [reservations, workers] = await Promise.all([
+    readWorkerIdReservationRows(client, orgId),
+    readWorkerIdSourceRows(client, orgId),
+  ])
+  const workerNumber = workerNumberOverride ?? nextWorkerNumber(orgId, reservations, workers)
+  if (
+    workerNumberOverride !== null &&
+    isWorkerNumberAlreadyUsed(orgId, workerNumber, reservations, workers)
+  ) {
+    throw workerReservationConflictError(workerNumber)
+  }
+
+  const workerId = buildWorkerId(orgId, workerNumber)
+  try {
+    await runWorkerProfileDbQuery(
+      client,
+      'reserve-worker-id',
+      `insert into public.worker_id_reservation (
+         org_id,
+         worker_number,
+         worker_id,
+         created_at,
+         created_by_uid
+       )
+       values ($1::text, $2::integer, $3::text, now(), nullif($4::text, ''))`,
+      [orgId, workerNumber, workerId, normalizeText(createdByUid)],
+    )
+  } catch (error) {
+    if (isWorkerReservationConflict(error)) {
+      throw workerReservationConflictError(workerNumber)
     }
-    padWidth = Math.max(padWidth, match[1].length)
-  })
+    throw error
+  }
 
-  return `W${String(maxNumber + 1).padStart(padWidth, '0')}`
+  return { workerId, workerNumber }
 }
 
 async function getRequesterMembership(client, orgId, uid) {
+  const platformMembership = await platformRepository.resolvePlatformMembership(client, orgId, uid)
+  if (platformMembership) return platformMembership
   const result = await runWorkerProfileDbQuery(
     client,
     'requester-membership',
-    'select role from public.organization_member where org_id = $1::text and uid = $2::text limit 1',
+    `select case
+              when nullif(o.owner_worker_id, '') is not null
+               and o.owner_worker_id = m.worker_id then 'OWNER'
+              else m.role
+            end as role,
+            m.status
+       from public.organization_member m
+       join public.organizations o on o.org_id = m.org_id
+      where m.org_id = $1::text
+        and m.uid = $2::text
+        and m.status = 'ACTIVE'
+      limit 1`,
     [orgId, uid],
   )
   return result.rows[0] ?? null
 }
 
-async function getRequesterMemberships(client, uid) {
+async function getRequesterMemberships(client, uid, orgId = '') {
+  const requestedOrgId = normalizeOrgId(orgId)
   const result = await client.query(
-    `select org_id, role
-       from public.organization_member
-      where uid = $1::text
-      order by created_at asc nulls last, org_id asc`,
-    [uid],
+    `select
+       m.org_id,
+       case
+         when nullif(o.owner_worker_id, '') is not null
+          and o.owner_worker_id = m.worker_id then 'OWNER'
+         else m.role
+       end as role,
+       m.worker_id as membership_worker_id,
+       m.status as membership_status,
+       o.name as organization_name,
+       o.status as organization_status,
+       o.onboarding_status,
+       o.deleted_at as organization_deleted_at,
+       w.worker_id as worker_record_id,
+       w.auth_uid as worker_auth_uid,
+       w.full_name,
+       w.active as worker_active,
+       w.status as worker_status,
+       s.plan_code,
+       s.status as subscription_status,
+       s.trial_ends_at,
+       s.current_period_ends_at
+     from public.organization_member m
+     join public.organizations o
+       on o.org_id = m.org_id
+     left join public.worker w
+       on w.org_id = m.org_id
+      and w.worker_id = m.worker_id
+      and w.auth_uid = m.uid
+     left join public.organization_subscription s
+       on s.org_id = m.org_id
+    where m.uid = $1::text
+      and m.status = 'ACTIVE'
+      and o.deleted_at is null
+      and ($2::text = '' or m.org_id = $2::text)
+    order by o.name asc, m.org_id asc`,
+    [uid, requestedOrgId],
   )
   return result.rows
 }
@@ -3092,37 +3125,45 @@ function asPayloadBoolean(value, defaultValue = true) {
   return !['false', '0', 'no', 'nie'].includes(normalizeLower(value))
 }
 
-function buildUserPayload(body, requester = {}) {
+function buildUserPayload(body) {
   const orgId = normalizeOrgId(body?.orgId)
-  const requestedEmail = normalizeEmail(body?.email)
+  const email = normalizeEmail(body?.email)
   const displayName = normalizeText(body?.displayName || body?.workerName || body?.name)
-  const login = normalizeLoginLocalPart(body?.login || emailLocalPart(requestedEmail))
-  const requesterEmail = normalizeEmail(requester?.email)
-  const email = buildManagedUserEmail(login, requesterEmail)
-  const role = normalizeUserRole(body?.role)
+  const requestedRole = normalizeWorkerRole(body?.role)
+  const role = requestedRole === 'OWNER' ? '' : requestedRole
+  const workerType = normalizeWorkerType(body?.workerType)
   const password = normalizeText(body?.password)
   const phone = normalizeText(body?.phone)
   const active = asPayloadBoolean(body?.active, true)
-  const emailLogin = emailLocalPart(email)
-  const workerId = normalizeText(body?.workerId || body?.id).slice(0, 64)
+  const rawWorkerNumberOverride = body?.workerNumberOverride
+  const hasWorkerNumberOverride =
+    rawWorkerNumberOverride !== undefined &&
+    rawWorkerNumberOverride !== null &&
+    rawWorkerNumberOverride !== ''
+  const workerNumberOverride = normalizeWorkerNumber(rawWorkerNumberOverride, { optional: true })
 
   const validationErrors = []
-  if (!requesterEmail) validationErrors.push('Token Firebase konta dodajacego nie zawiera poprawnego emaila.')
-  if (requestedEmail && email && requestedEmail !== email) {
-    validationErrors.push('Email musi byc wyliczony z loginu i domeny konta dodajacego.')
-  }
   if (!orgId) validationErrors.push('Brak poprawnego orgId.')
   if (!email) validationErrors.push('Podaj poprawny email.')
   if (!displayName) validationErrors.push('Podaj imiÄ™ i nazwisko.')
-  if (!login) validationErrors.push('Podaj poprawny login.')
-  if (login && emailLogin && login !== emailLogin) {
-    validationErrors.push('Login musi byÄ‡ taki sam jak czÄ™Ĺ›Ä‡ emaila przed @, aby mobile dziaĹ‚aĹ‚ bez aliasĂłw.')
-  }
-  if (!role) validationErrors.push('Rola musi byÄ‡ MANAGER albo WORKER.')
+  if (!role) validationErrors.push('Wybierz rolę ADMIN, MANAGER, COORDINATOR albo WORKER.')
   if (password.length < 6) validationErrors.push('HasĹ‚o tymczasowe musi mieÄ‡ co najmniej 6 znakĂłw.')
+  if (hasWorkerNumberOverride && workerNumberOverride === null) {
+    validationErrors.push(workerNumberOverrideError().publicMessage)
+  }
 
   return {
-    value: { orgId, email, displayName, login, role, password, phone, active, workerId },
+    value: {
+      orgId,
+      email,
+      displayName,
+      role,
+      workerType,
+      password,
+      phone,
+      active,
+      workerNumberOverride,
+    },
     validationErrors,
   }
 }
@@ -3135,7 +3176,10 @@ function normalizeWorkerProfileRole(value) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
 
-  if (role === 'ADMIN' || role === 'ADMINISTRATOR' || role === 'OWNER' || role === 'SUPERADMIN' || normalized.includes('admin')) {
+  if (role === 'OWNER') {
+    return 'OWNER'
+  }
+  if (role === 'ADMIN' || role === 'ADMINISTRATOR' || role === 'SUPERADMIN' || normalized.includes('admin')) {
     return 'ADMIN'
   }
   if (role === 'MANAGER' || role === 'KIEROWNIK' || normalized.includes('manager') || normalized.includes('kierownik')) {
@@ -3164,12 +3208,12 @@ function buildWorkerProfileUpdatePayload(body) {
     validationErrors.push(error?.message || 'Podaj poprawny nowy login pracownika.')
   }
 
-  const workerId = normalizeText(body?.workerId || body?.id).slice(0, 64)
+  const workerId = normalizeText(body?.workerId || body?.id).slice(0, 128)
   const name = normalizeText(body?.name || body?.workerName || body?.fullName).slice(0, 200)
   const email = normalizeEmail(body?.email || body?.loginEmail)
   const phone = normalizeText(body?.phone).slice(0, 80)
-  const roleLabel = normalizeText(body?.role || body?.workerType || 'WORKER').slice(0, 32)
-  const workerType = normalizeText(body?.workerType || body?.role || roleLabel || 'WORKER').slice(0, 40)
+  const roleLabel = normalizeText(body?.role || 'WORKER').slice(0, 32)
+  const workerType = normalizeWorkerType(body?.workerType)
   const memberRole = normalizeWorkerProfileRole(roleLabel || workerType)
   const active = asPayloadBoolean(body?.active, true)
   const editedBy = normalizeText(body?.editedBy || body?.edit).slice(0, 160)
@@ -3212,7 +3256,7 @@ function buildWorkerProfileDeletePayload(body) {
     validationErrors.push(error?.message || 'Podaj poprawny login pracownika.')
   }
 
-  const workerId = normalizeText(body?.workerId || body?.id).slice(0, 64)
+  const workerId = normalizeText(body?.workerId || body?.id).slice(0, 128)
   const authUid = normalizeText(body?.authUid || body?.uid).slice(0, 128)
 
   if (!orgId) validationErrors.push('Brak poprawnego orgId.')
@@ -3277,7 +3321,11 @@ function mapWorkerProfileRow(row, orgId) {
   const workerName = normalizeText(row.full_name) || login
   const loginEmail = normalizeEmail(row.login_email) || normalizeEmail(row.email)
 
-  const role = normalizeText(row.role || 'WORKER')
+  const isOwner = Boolean(
+    normalizeText(row.owner_worker_id) &&
+    normalizeText(row.owner_worker_id) === workerId,
+  )
+  const role = isOwner ? 'OWNER' : normalizeText(row.role || 'WORKER')
   const workerType = normalizeText(row.worker_type || row.role || 'WORKER')
 
   return {
@@ -3290,6 +3338,7 @@ function mapWorkerProfileRow(row, orgId) {
     fullName: workerName,
     name: workerName,
     role,
+    isOwner,
     type: role,
     workerType,
     active: Boolean(row.active),
@@ -3312,7 +3361,12 @@ function mapDataConnectWorkerProfileRow(row, orgId) {
   const workerId = normalizeText(row.workerId ?? row.worker_id ?? row.id) || login
   const workerName = normalizeText(row.workerName ?? row.worker_name ?? row.name ?? row.fullName) || login
   const loginEmail = normalizeEmail(row.loginEmail ?? row.login_email) || normalizeEmail(row.email)
-  const role = normalizeText(row.role || 'WORKER')
+  const isOwner = Boolean(
+    row.isOwner ||
+    (normalizeText(row.ownerWorkerId ?? row.owner_worker_id) &&
+      normalizeText(row.ownerWorkerId ?? row.owner_worker_id) === workerId),
+  )
+  const role = isOwner ? 'OWNER' : normalizeText(row.role || 'WORKER')
   const workerType = normalizeText(row.workerType ?? row.worker_type ?? row.type ?? row.role ?? 'WORKER')
 
   return {
@@ -3325,6 +3379,7 @@ function mapDataConnectWorkerProfileRow(row, orgId) {
     fullName: workerName,
     name: workerName,
     role,
+    isOwner,
     type: role,
     workerType,
     active: asPayloadBoolean(row.active, true),
@@ -3431,23 +3486,6 @@ function mapDataConnectWorkerForAuth(worker) {
     updated_at: worker.updatedAt ?? worker.updated_at,
     edit: normalizeText(worker.edit),
   }
-}
-
-function resolveWorkerProfileEmailForLogin(login, payloadEmail, currentWorker) {
-  const loginPart = normalizeLoginLocalPart(login)
-  const domain =
-    emailDomain(currentWorker?.login_email ?? currentWorker?.loginEmail) ||
-    emailDomain(currentWorker?.email) ||
-    emailDomain(payloadEmail)
-  const email = loginPart && domain ? normalizeEmail(`${loginPart}@${domain}`) : ''
-  if (!email) {
-    throw createWorkerProfilePublicError(
-      400,
-      'INVALID_LOGIN_EMAIL',
-      'Nie mozna zbudowac emaila dla nowego loginu. Pracownik musi miec poprawna domene email.',
-    )
-  }
-  return email
 }
 
 async function assertWorkerProfileLoginAvailable(client, orgId, oldLogin, newLogin) {
@@ -3686,20 +3724,6 @@ async function changeWorkerProfileLogin(client, currentWorker, payload, authUid,
 
   dependentUpdates.task_worker_ids = await updateWorkerProfileTaskTokenLogins(client, payload.orgId, oldLogin, newLogin)
 
-  dependentUpdates.worker_credential = (
-    await runWorkerProfileDbQuery(
-      client,
-      'rename-worker-credential',
-      `update public.worker_credential
-          set login = $3::text,
-              updated_at = now(),
-              updated_by = nullif($4::text, '')
-        where org_id = $1::text
-          and lower(login) = lower($2::text)`,
-      [payload.orgId, oldLogin, newLogin, updatedBy],
-    )
-  ).rowCount
-
   await runWorkerProfileDbQuery(
     client,
     'rename-worker-delete-old-row',
@@ -3790,93 +3814,151 @@ function isRequesterDeletingSelf(worker, authUid, decodedToken) {
 async function deleteWorkerProfileAccessRows(client, orgId, login, workerId, authUid) {
   const deletedCounts = {}
 
-  const credentialResult = await client.query(
-    'delete from public.worker_credential where org_id = $1::text and lower(login) = lower($2::text)',
-    [orgId, login],
+  const relationNames = [
+    'public.workday_pause',
+    'public.event',
+    'public.checklist_log',
+    'public.backup_cycle',
+    'public.task',
+    'public.workday',
+  ]
+  const relationRows = await client.query(
+    `select relation_name,
+            to_regclass(relation_name) is not null as exists
+       from unnest($1::text[]) as relations(relation_name)`,
+    [relationNames],
   )
-  deletedCounts.worker_credential = credentialResult.rowCount
+  const existingRelations = new Set(
+    relationRows.rows
+      .filter((row) => row.exists)
+      .map((row) => normalizeText(row.relation_name)),
+  )
+  const relationExists = (relationName) => existingRelations.has(relationName)
 
-  const workdayPauseResult = await client.query(
-    `delete from public.workday_pause wp
-      where wp.org_id = $1::text
-        and (
-          lower(coalesce(wp.worker_login, '')) = lower($2::text)
-          or exists (
-            select 1
-              from public.workday w
-             where w.org_id = wp.org_id
-               and w.workday_id = wp.workday_id
-               and lower(coalesce(w.worker_login, '')) = lower($2::text)
-          )
+  if (relationExists('public.workday_pause')) {
+    const workdayPauseConditions = [
+      "lower(coalesce(wp.worker_login, '')) = lower($2::text)",
+    ]
+    if (relationExists('public.workday')) {
+      workdayPauseConditions.push(
+        `exists (
+          select 1
+            from public.workday w
+           where w.org_id = wp.org_id
+             and w.workday_id = wp.workday_id
+             and lower(coalesce(w.worker_login, '')) = lower($2::text)
         )`,
-    [orgId, login],
-  )
-  deletedCounts.workday_pause = workdayPauseResult.rowCount
+      )
+    }
+    const result = await client.query(
+      `delete from public.workday_pause wp
+        where wp.org_id = $1::text
+          and (${workdayPauseConditions.join(' or ')})`,
+      [orgId, login],
+    )
+    deletedCounts.workday_pause = result.rowCount
+  } else {
+    deletedCounts.workday_pause = 0
+  }
 
-  const eventResult = await client.query(
-    `delete from public.event e
-      where e.org_id = $1::text
-        and (
-          lower(coalesce(e.worker_login, '')) = lower($2::text)
-          or exists (
-            select 1
-              from public.workday w
-             where w.org_id = e.org_id
-               and w.workday_id = e.workday_id
-               and lower(coalesce(w.worker_login, '')) = lower($2::text)
-          )
+  if (relationExists('public.event')) {
+    const eventConditions = [
+      "lower(coalesce(e.worker_login, '')) = lower($2::text)",
+    ]
+    if (relationExists('public.workday')) {
+      eventConditions.push(
+        `exists (
+          select 1
+            from public.workday w
+           where w.org_id = e.org_id
+             and w.workday_id = e.workday_id
+             and lower(coalesce(w.worker_login, '')) = lower($2::text)
         )`,
-    [orgId, login],
-  )
-  deletedCounts.event = eventResult.rowCount
+      )
+    }
+    const result = await client.query(
+      `delete from public.event e
+        where e.org_id = $1::text
+          and (${eventConditions.join(' or ')})`,
+      [orgId, login],
+    )
+    deletedCounts.event = result.rowCount
+  } else {
+    deletedCounts.event = 0
+  }
 
-  const checklistLogResult = await client.query(
-    `delete from public.checklist_log cl
-      where cl.org_id = $1::text
-        and (
-          lower(coalesce(cl."worker", '')) = lower($2::text)
-          or exists (
-            select 1
-              from public.workday w
-             where w.org_id = cl.org_id
-               and w.workday_id = cl.workday_id
-               and lower(coalesce(w.worker_login, '')) = lower($2::text)
-          )
-          or exists (
-            select 1
-              from public.backup_cycle bc
-             where bc.org_id = cl.org_id
-               and bc.cycle_id = cl.cycle_id
-               and lower(coalesce(bc.worker_login, '')) = lower($2::text)
-          )
+  if (relationExists('public.checklist_log')) {
+    const checklistConditions = [
+      "lower(coalesce(cl.\"worker\", '')) = lower($2::text)",
+    ]
+    if (relationExists('public.workday')) {
+      checklistConditions.push(
+        `exists (
+          select 1
+            from public.workday w
+           where w.org_id = cl.org_id
+             and w.workday_id = cl.workday_id
+             and lower(coalesce(w.worker_login, '')) = lower($2::text)
         )`,
-    [orgId, login],
-  )
-  deletedCounts.checklist_log = checklistLogResult.rowCount
-
-  const backupCycleResult = await client.query(
-    'delete from public.backup_cycle where org_id = $1::text and lower(coalesce(worker_login, \'\')) = lower($2::text)',
-    [orgId, login],
-  )
-  deletedCounts.backup_cycle = backupCycleResult.rowCount
-
-  const taskResult = await client.query(
-    `delete from public.task
-      where org_id = $1::text
-        and (
-          lower(coalesce(worker_login, '')) = lower($2::text)
-          or lower(coalesce(worker_id, '')) = lower($2::text)
-          or (nullif($3::text, '') is not null and lower(coalesce(worker_id, '')) = lower($3::text))
+      )
+    }
+    if (relationExists('public.backup_cycle')) {
+      checklistConditions.push(
+        `exists (
+          select 1
+            from public.backup_cycle bc
+           where bc.org_id = cl.org_id
+             and bc.cycle_id = cl.cycle_id
+             and lower(coalesce(bc.worker_login, '')) = lower($2::text)
         )`,
-    [orgId, login, normalizeText(workerId)],
-  )
-  deletedCounts.task = taskResult.rowCount
+      )
+    }
+    const result = await client.query(
+      `delete from public.checklist_log cl
+        where cl.org_id = $1::text
+          and (${checklistConditions.join(' or ')})`,
+      [orgId, login],
+    )
+    deletedCounts.checklist_log = result.rowCount
+  } else {
+    deletedCounts.checklist_log = 0
+  }
 
-  const workdayResult = await client.query(
-    'delete from public.workday where org_id = $1::text and lower(coalesce(worker_login, \'\')) = lower($2::text)',
-    [orgId, login],
-  )
-  deletedCounts.workday = workdayResult.rowCount
+  if (relationExists('public.backup_cycle')) {
+    const result = await client.query(
+      'delete from public.backup_cycle where org_id = $1::text and lower(coalesce(worker_login, \'\')) = lower($2::text)',
+      [orgId, login],
+    )
+    deletedCounts.backup_cycle = result.rowCount
+  } else {
+    deletedCounts.backup_cycle = 0
+  }
+
+  if (relationExists('public.task')) {
+    const result = await client.query(
+      `delete from public.task
+        where org_id = $1::text
+          and (
+            lower(coalesce(worker_login, '')) = lower($2::text)
+            or lower(coalesce(worker_id, '')) = lower($2::text)
+            or (nullif($3::text, '') is not null and lower(coalesce(worker_id, '')) = lower($3::text))
+          )`,
+      [orgId, login, normalizeText(workerId)],
+    )
+    deletedCounts.task = result.rowCount
+  } else {
+    deletedCounts.task = 0
+  }
+
+  if (relationExists('public.workday')) {
+    const result = await client.query(
+      'delete from public.workday where org_id = $1::text and lower(coalesce(worker_login, \'\')) = lower($2::text)',
+      [orgId, login],
+    )
+    deletedCounts.workday = result.rowCount
+  } else {
+    deletedCounts.workday = 0
+  }
 
   if (authUid) {
     const memberResult = await client.query(
@@ -3927,8 +4009,8 @@ async function createAdminManagedUser(payload, requesterUid) {
 
   try {
     const membership = await getRequesterMembership(client, payload.orgId, requesterUid)
-    const requesterRole = normalizeRequesterRole(membership?.role)
-    if (!['ADMIN', 'MANAGER'].includes(requesterRole)) {
+    const requesterRole = normalizeRoleCode(membership?.role)
+    if (!isWorkerManagementRole(requesterRole)) {
       const error = new Error('FORBIDDEN')
       error.statusCode = membership ? 403 : 404
       error.publicCode = membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING'
@@ -3937,6 +4019,7 @@ async function createAdminManagedUser(payload, requesterUid) {
         : 'Brak dostÄ™pu do tej organizacji.'
       throw error
     }
+    assertWorkerNumberOverrideAllowed(requesterRole, payload.workerNumberOverride)
 
     const existingWorker = await findExistingWorker(client, payload.orgId, payload.login, payload.email)
     if (existingWorker) {
@@ -3958,14 +4041,15 @@ async function createAdminManagedUser(payload, requesterUid) {
     await client.query('lock table public.worker in share row exclusive mode')
 
     const currentMembership = await getRequesterMembership(client, payload.orgId, requesterUid)
-    const currentRole = normalizeRequesterRole(currentMembership?.role)
-    if (!['ADMIN', 'MANAGER'].includes(currentRole)) {
+    const currentRole = normalizeRoleCode(currentMembership?.role)
+    if (!isWorkerManagementRole(currentRole)) {
       const error = new Error('FORBIDDEN')
       error.statusCode = 403
       error.publicCode = 'FORBIDDEN'
       error.publicMessage = 'Brak uprawnieĹ„ do dodawania uĹĽytkownikĂłw.'
       throw error
     }
+    assertWorkerNumberOverrideAllowed(currentRole, payload.workerNumberOverride)
 
     const duplicateWorker = await findExistingWorker(client, payload.orgId, payload.login, payload.email)
     if (duplicateWorker) {
@@ -3979,22 +4063,24 @@ async function createAdminManagedUser(payload, requesterUid) {
       throw error
     }
 
+    const { workerId, workerNumber } = await reserveWorkerIdDirect(
+      client,
+      payload.orgId,
+      payload.workerNumberOverride,
+      requesterUid,
+    )
+
     await runWorkerProfileDbQuery(
       client,
       'create-worker-organization-member',
-      `insert into public.organization_member (org_id, uid, role, created_at)
-       values ($1::text, $2::text, $3::text, now())
-       on conflict (org_id, uid) do update set role = excluded.role`,
-      [payload.orgId, createdAuthUser.uid, payload.role],
+      `insert into public.organization_member (org_id, uid, role, worker_id, status, created_at)
+       values ($1::text, $2::text, $3::text, $4::text, 'ACTIVE', now())
+       on conflict (org_id, uid) do update
+         set role = excluded.role,
+             worker_id = excluded.worker_id,
+             status = 'ACTIVE'`,
+      [payload.orgId, createdAuthUser.uid, payload.role, workerId],
     )
-
-    const workerIdRows = await runWorkerProfileDbQuery(
-      client,
-      'create-worker-next-id-source',
-      'select worker_id from public.worker where org_id = $1::text',
-      [payload.orgId],
-    )
-    const workerId = resolveWorkerIdForCreate(workerIdRows.rows, payload.workerId)
 
     await runWorkerProfileDbQuery(
       client,
@@ -4025,7 +4111,7 @@ async function createAdminManagedUser(payload, requesterUid) {
          $7::boolean,
          $5::text,
          $8::text,
-         $6::text,
+         $11::text,
          $9::text,
          $10::text,
          now(),
@@ -4042,6 +4128,7 @@ async function createAdminManagedUser(payload, requesterUid) {
         payload.phone || null,
         createdAuthUser.uid,
         requesterUid,
+        payload.workerType,
       ],
     )
 
@@ -4055,7 +4142,9 @@ async function createAdminManagedUser(payload, requesterUid) {
       email: payload.email,
       displayName: payload.displayName,
       role: payload.role,
+      workerType: payload.workerType,
       active: payload.active,
+      workerNumber,
     }
   } catch (error) {
     try {
@@ -4074,7 +4163,145 @@ async function createAdminManagedUser(payload, requesterUid) {
   }
 }
 
+async function createAdminManagedUserDatabase(payload, requesterUid) {
+  const client = await connectDbClient()
+  let createdAuthUser = null
+  let transactionStarted = false
+
+  try {
+    await workerRepository.assertWorkerSchemaReady(client)
+
+    const membership = await workerRepository.getRequesterMembership(
+      client,
+      payload.orgId,
+      requesterUid,
+    )
+    const requesterRole = normalizeRoleCode(membership?.role)
+    if (!isWorkerManagementRole(requesterRole)) {
+      throw workerProfileAccessError(membership, 'dodawania pracownikow')
+    }
+    assertWorkerRoleAssignmentAllowed(requesterRole, payload.role, { creating: true })
+    assertWorkerNumberOverrideAllowed(requesterRole, payload.workerNumberOverride)
+
+    const existingWorker = await workerRepository.findExistingWorker(
+      client,
+      payload.orgId,
+      '',
+      payload.email,
+    )
+    if (existingWorker) {
+      throw createWorkerProfilePublicError(
+        409,
+        'WORKER_ALREADY_EXISTS',
+        'Ten email jest juz przypisany do pracownika.',
+      )
+    }
+
+    await assertFirebaseEmailAvailable(payload.email)
+    createdAuthUser = await createFirebaseAuthUser(payload)
+
+    await client.query('begin')
+    transactionStarted = true
+    await client.query(
+      'select pg_advisory_xact_lock(hashtext($1::text))',
+      [`worker-create:${payload.orgId}`],
+    )
+
+    const currentMembership = await workerRepository.getRequesterMembership(
+      client,
+      payload.orgId,
+      requesterUid,
+    )
+    const currentRole = normalizeRoleCode(currentMembership?.role)
+    if (!isWorkerManagementRole(currentRole)) {
+      throw workerProfileAccessError(currentMembership, 'dodawania pracownikow')
+    }
+    assertWorkerRoleAssignmentAllowed(currentRole, payload.role, { creating: true })
+    assertWorkerNumberOverrideAllowed(currentRole, payload.workerNumberOverride)
+    const tenantActorUid = currentRole === PLATFORM_ROLE ? '' : requesterUid
+
+    const { workerId, workerNumber } = await workerRepository.reserveWorkerId(
+      client,
+      payload.orgId,
+      payload.workerNumberOverride,
+      tenantActorUid,
+    )
+    const login = buildWorkerLogin(payload.orgId, workerNumber)
+
+    const duplicateWorker = await workerRepository.findExistingWorker(
+      client,
+      payload.orgId,
+      login,
+      payload.email,
+    )
+    if (duplicateWorker) {
+      throw createWorkerProfilePublicError(
+        409,
+        'WORKER_ALREADY_EXISTS',
+        normalizeLower(duplicateWorker.login) === login
+          ? 'Wygenerowany login techniczny jest juz zajety.'
+          : 'Ten email jest juz przypisany do pracownika.',
+      )
+    }
+
+    await workerRepository.insertWorkerAndMembership(client, {
+      ...payload,
+      login,
+      workerId,
+      authUid: createdAuthUser.uid,
+      createdByUid: tenantActorUid,
+    })
+
+    await client.query('commit')
+    transactionStarted = false
+
+    return {
+      uid: createdAuthUser.uid,
+      authUid: createdAuthUser.uid,
+      orgId: payload.orgId,
+      login,
+      workerId,
+      email: payload.email,
+      loginEmail: payload.email,
+      displayName: payload.displayName,
+      workerName: payload.displayName,
+      fullName: payload.displayName,
+      role: payload.role,
+      workerType: payload.workerType,
+      phone: payload.phone,
+      active: payload.active,
+      workerNumber,
+      storage: 'database',
+      persistenceVerified: true,
+    }
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await client.query('rollback')
+      } catch {
+        // Ignore rollback failure; the original error remains authoritative.
+      }
+    }
+    if (createdAuthUser?.uid) {
+      await deleteFirebaseUserQuietly(createdAuthUser)
+    }
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
 async function handleAuthProvisionWorkerRequest(req, res) {
+  if (req.method !== 'OPTIONS') {
+    sendApiError(
+      res,
+      410,
+      'WORKER_PROVISION_ENDPOINT_REMOVED',
+      'Ten endpoint zostal wycofany. Pracownikow nalezy dodawac przez /api/admin/users.',
+    )
+    return
+  }
+
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
     res.end()
@@ -4214,116 +4441,60 @@ async function handleAdminWorkerPasswordRevealRequest(req, res) {
     return
   }
 
-  let body
+  sendApiError(
+    res,
+    410,
+    'WORKER_PASSWORD_REVEAL_REMOVED',
+    'Podglad zapisanych hasel pracownikow zostal trwale usuniety.',
+  )
+}
+
+async function setWorkerPasswordDatabase(payload, decodedToken) {
+  const client = await connectDbClient()
   try {
-    body = await readJsonBody(req)
-  } catch (error) {
-    if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
-      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
-      return
-    }
-    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
-    return
-  }
-
-  const token = parseBearerToken(req)
-  if (!token) {
-    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
-    return
-  }
-
-  try {
-    await verifyFirebaseIdToken(token)
-  } catch (error) {
-    sendFirebaseVerificationError(res, error)
-    return
-  }
-
-  const { value: payload, validationErrors } = buildWorkerPasswordPayload(body)
-  if (validationErrors.length) {
-    sendApiError(res, 400, 'VALIDATION_ERROR', validationErrors[0], validationErrors)
-    return
-  }
-
-  try {
-    const resolved = await resolveAdminWorkerCredentialForOrg(payload.orgId, payload.login, token)
-    const data = resolved.data
-    if (resolved.workerMissing) {
-      sendJson(res, 200, {
-        ok: true,
-        data: {
-          hasPassword: false,
-          workerMissing: true,
-          login: payload.login,
-          message: 'Nie znaleziono rekordu pracownika dla tego loginu w organizacji.',
-          password: '',
-          updatedAt: null,
-          updatedBy: '',
-        },
-      })
-      return
-    }
-
-    const credential = data?.workerCredential ?? null
-    if (!credential?.encryptedPassword) {
-      sendJson(res, 200, {
-        ok: true,
-        data: {
-          hasPassword: false,
-          login: resolved.login,
-          requestedLogin: resolved.requestedLogin,
-          password: '',
-          updatedAt: null,
-          updatedBy: '',
-        },
-      })
-      return
-    }
-
-    let password = ''
-    try {
-      password = decryptWorkerPassword(credential)
-    } catch (error) {
-      if (!isWorkerPasswordRevealableConfigError(error)) {
-        throw error
-      }
-      sendJson(res, 200, {
-        ok: true,
-        data: {
-          hasPassword: false,
-          passwordVaultUnavailable: true,
-          message: workerPasswordRevealUnavailableMessage(error),
-          password: '',
-          login: resolved.login,
-          requestedLogin: resolved.requestedLogin,
-          updatedAt: credential.updatedAt ?? null,
-          updatedBy: credential.updatedBy ?? '',
-        },
-      })
-      return
-    }
-
-    sendJson(res, 200, {
-      ok: true,
-      data: {
-        hasPassword: true,
-        password,
-        login: resolved.login,
-        requestedLogin: resolved.requestedLogin,
-        updatedAt: credential.updatedAt ?? null,
-        updatedBy: credential.updatedBy ?? '',
-      },
-    })
-  } catch (error) {
-    const mapped = mapFirebaseAdminError(error)
-    const status = Number(error?.statusCode ?? mapped.status ?? 500)
-    sendApiError(
-      res,
-      Number.isFinite(status) ? status : 500,
-      normalizeText(error?.publicCode) || 'WORKER_PASSWORD_REVEAL_FAILED',
-      normalizeText(error?.publicMessage) || error?.message || 'Nie udalo sie odczytac hasla pracownika.',
-      publicErrorDetails(error),
+    await workerRepository.assertWorkerSchemaReady(client)
+    const membership = await workerRepository.getRequesterMembership(
+      client,
+      payload.orgId,
+      decodedToken.uid,
     )
+    const role = normalizeRoleCode(membership?.role)
+    if (!['ADMIN', 'ADMINISTRATOR', 'OWNER', 'SUPERADMIN'].includes(role)) {
+      throw workerProfileAccessError(membership, 'resetowania hasla pracownika')
+    }
+
+    const worker = await workerRepository.readWorkerForPasswordReset(
+      client,
+      payload.orgId,
+      payload.login,
+    )
+    if (!worker) {
+      throw createWorkerProfilePublicError(
+        404,
+        'WORKER_NOT_FOUND',
+        'Nie znaleziono rekordu pracownika dla tego loginu w organizacji.',
+      )
+    }
+
+    const authMatch = await findFirebaseUserForWorker(worker, worker.auth_uid)
+    const authUid = normalizeText(authMatch.authUid)
+    if (!authUid) {
+      throw createWorkerProfilePublicError(
+        409,
+        'FIREBASE_AUTH_USER_MISSING',
+        'Ten pracownik nie ma konta Firebase Auth. Nie mozna ustawic hasla.',
+      )
+    }
+
+    await updateFirebaseAuthPassword(authUid, payload.password)
+    return {
+      passwordUpdated: true,
+      login: normalizeText(worker.login),
+      storage: 'database',
+      persistenceVerified: true,
+    }
+  } finally {
+    client.release()
   }
 }
 
@@ -4372,63 +4543,10 @@ async function handleAdminWorkerPasswordSetRequest(req, res) {
   }
 
   try {
-    const resolved = await resolveAdminWorkerCredentialForOrg(payload.orgId, payload.login, token)
-    const data = resolved.data
-    if (resolved.workerMissing) {
-      const error = new Error('WORKER_NOT_FOUND')
-      error.statusCode = 404
-      error.publicCode = 'WORKER_NOT_FOUND'
-      error.publicMessage = 'Nie znaleziono rekordu pracownika dla tego loginu w organizacji.'
-      throw error
-    }
-
-    const worker = data?.worker ?? null
-    if (!worker?.authUid) {
-      const error = new Error('WORKER_AUTH_UID_MISSING')
-      error.statusCode = 400
-      error.publicCode = 'WORKER_AUTH_UID_MISSING'
-      error.publicMessage = 'Pracownik nie ma zapisanego UID Firebase Auth.'
-      throw error
-    }
-
-    if (!payload.skipAuthUpdate) {
-      await updateFirebaseAuthPassword(worker.authUid, payload.password)
-    }
-
-    const encrypted = encryptWorkerPassword(payload.password)
-    await upsertWorkerCredentialForOrg(
-      {
-        orgId: payload.orgId,
-        login: resolved.login,
-        ...encrypted,
-        updatedBy: normalizeEmail(decodedToken?.email) || normalizeText(decodedToken?.uid) || null,
-      },
-      token,
-    )
-    const confirmedCredential = await queryAdminWorkerCredentialForOrg(payload.orgId, resolved.login, token)
-    const credential = confirmedCredential?.workerCredential ?? null
-    if (
-      !credential?.encryptedPassword ||
-      !credential?.iv ||
-      !credential?.authTag ||
-      normalizeText(credential?.algorithm) !== WORKER_PASSWORD_ALGORITHM
-    ) {
-      throw createWorkerProfilePublicError(
-        409,
-        'WORKER_PASSWORD_VAULT_NOT_CONFIRMED',
-        'Firebase Auth przyjal nowe haslo, ale Data Connect nie potwierdzil zapisu hasla w sejfie. Ustaw haslo ponownie po odswiezeniu danych.',
-      )
-    }
-
+    const data = await setWorkerPasswordDatabase(payload, decodedToken)
     sendJson(res, 200, {
       ok: true,
-      data: {
-        hasPassword: true,
-        login: resolved.login,
-        requestedLogin: resolved.requestedLogin,
-        updatedAt: credential.updatedAt ?? new Date().toISOString(),
-        skippedAuthUpdate: payload.skipAuthUpdate,
-      },
+      data,
     })
   } catch (error) {
     const mapped = mapFirebaseAdminError(error)
@@ -4638,11 +4756,15 @@ async function verifyDataConnectWorkerProfilePersistence(
   })
 }
 
-async function getRequesterRoleViaDataConnect(orgId, firebaseIdToken) {
+async function getRequesterRawRoleViaDataConnect(orgId, firebaseIdToken) {
   const response = await executeDataConnectOperation('query', 'MyOrganizations', {}, firebaseIdToken)
   const memberships = Array.isArray(response?.data?.organizationMembers) ? response.data.organizationMembers : []
   const membership = memberships.find((item) => normalizeText(item?.orgId) === normalizeText(orgId))
-  return normalizeRequesterRole(membership?.role)
+  return normalizeRoleCode(membership?.role)
+}
+
+async function getRequesterRoleViaDataConnect(orgId, firebaseIdToken) {
+  return normalizeRequesterRole(await getRequesterRawRoleViaDataConnect(orgId, firebaseIdToken))
 }
 
 function hasWorkerProfileAuthFieldChange(payload, currentWorker) {
@@ -4651,7 +4773,12 @@ function hasWorkerProfileAuthFieldChange(payload, currentWorker) {
   }
 
   const currentName = normalizeText(
-    currentWorker.workerName ?? currentWorker.workername ?? currentWorker.worker_name ?? currentWorker.name ?? currentWorker.fullName,
+    currentWorker.workerName ??
+      currentWorker.workername ??
+      currentWorker.worker_name ??
+      currentWorker.full_name ??
+      currentWorker.name ??
+      currentWorker.fullName,
   )
   const currentEmail = normalizeEmail(currentWorker.loginEmail ?? currentWorker.login_email ?? currentWorker.email)
   const currentActive = asPayloadBoolean(currentWorker.active, true)
@@ -4776,218 +4903,9 @@ async function updateFirebaseAuthForWorkerProfilePayload(payload, currentWorker 
   }
 }
 
-async function updateWorkerProfileViaDataConnect(payload, decodedToken, firebaseIdToken, fallbackReason = '') {
-  const loginChanged = isWorkerProfileLoginChange(payload)
-  const rows = await queryWorkersForOrgViaDataConnect(payload.orgId, firebaseIdToken)
-  const currentWorker = findDataConnectWorkerByLogin(rows, payload.login)
-  if (!currentWorker) {
-    throw createWorkerProfilePublicError(404, 'WORKER_NOT_FOUND', 'Nie znaleziono pracownika do edycji.')
-  }
-  const canonicalLogin = normalizeText(currentWorker?.login ?? currentWorker?.workerLogin) || payload.login
-
-  if (loginChanged) {
-    const requesterRole = await getRequesterRoleViaDataConnect(payload.orgId, firebaseIdToken)
-    if (requesterRole !== 'ADMIN') {
-      throw createWorkerProfilePublicError(403, 'LOGIN_CHANGE_FORBIDDEN', 'Login pracownika moze zmienic tylko Admin.')
-    }
-  }
-
-  const finalEmail = loginChanged
-    ? resolveWorkerProfileEmailForLogin(payload.newLogin, payload.email, currentWorker)
-    : payload.email
-  assertDataConnectWorkerProfileAvailable(rows, payload.login, payload.newLogin, finalEmail)
-
-  const finalPayload = {
-    ...payload,
-    login: canonicalLogin,
-    newLogin: payload.newLogin,
-    email: finalEmail,
-    authUid: normalizeText(payload.authUid || currentWorker?.authUid || currentWorker?.auth_uid),
-  }
-  const finalWorkerId = resolveWorkerProfileWorkerId(finalPayload, currentWorker, loginChanged)
-  const updatedBy = payload.editedBy || normalizeEmail(decodedToken?.email) || normalizeText(decodedToken?.uid)
-  const authRollbackPatch = dataConnectWorkerAuthSnapshot(currentWorker)
-  let authResult = { authUid: finalPayload.authUid, authUpdated: false, authWarning: '' }
-  let initialAuthWarning = ''
-  let useAuthProfileMutation = false
-
-  if (loginChanged && !finalPayload.authUid) {
-    const authMatch = await findFirebaseUserForWorker(mapDataConnectWorkerForAuth(currentWorker))
-    finalPayload.authUid = normalizeText(authMatch.authUid)
-    authResult.authUid = finalPayload.authUid
-    initialAuthWarning = normalizeText(authMatch.authWarning)
-  }
-
-  if (loginChanged && !finalPayload.authUid) {
-    throw createWorkerProfileAuthRequiredError('zmiana loginu')
-  }
-
-  if (loginChanged) {
-    authResult = await updateFirebaseAuthForWorkerProfilePayload(finalPayload, currentWorker, {
-      strict: true,
-      authRequiredMessage:
-        'Ten pracownik nie ma konta Firebase Auth. Odtworz konto Firebase Auth przed zmiana loginu.',
-    })
-    useAuthProfileMutation = true
-  } else if (finalPayload.authUid) {
-    authResult = await updateFirebaseAuthForWorkerProfilePayload(finalPayload, currentWorker, { strict: false })
-    useAuthProfileMutation = Boolean(authResult.authUpdated || !normalizeText(authResult.authWarning))
-  } else {
-    authResult = {
-      authUid: '',
-      authUpdated: false,
-      authWarning: WORKER_PROFILE_DB_ONLY_AUTH_WARNING,
-    }
-  }
-
-  let persistedWorker = null
-
-  try {
-    if (loginChanged) {
-      await executeDataConnectOperation(
-        'mutation',
-        'RenameWorkerForOrg',
-        {
-          orgId: finalPayload.orgId,
-          login: finalPayload.login,
-          newLogin: finalPayload.newLogin,
-          workerName: finalPayload.name,
-          loginEmail: finalPayload.email,
-          authUid: authResult.authUid || finalPayload.authUid,
-          role: finalPayload.memberRole,
-          memberRole: finalPayload.memberRole,
-          active: finalPayload.active,
-          email: finalPayload.email,
-          phone: finalPayload.phone || null,
-          workerType: finalPayload.workerType,
-          workerId: finalWorkerId,
-          createdAt: currentWorker?.createdAt ?? currentWorker?.created_at ?? null,
-          edit: updatedBy || null,
-        },
-        firebaseIdToken,
-      )
-    } else {
-      const syncMembership =
-        useAuthProfileMutation ||
-        shouldSyncWorkerProfileMembershipViaDataConnect({
-          ...finalPayload,
-          authUid: authResult.authUid || finalPayload.authUid,
-        })
-      await executeDataConnectOperation(
-        'mutation',
-        syncMembership ? 'UpdateWorkerProfileForOrg' : 'UpdateWorkerForOrg',
-        buildWorkerProfileDataConnectUpdateVariables(
-          { ...finalPayload, authUid: authResult.authUid || finalPayload.authUid },
-          finalWorkerId,
-          updatedBy,
-          syncMembership,
-        ),
-        firebaseIdToken,
-      )
-    }
-
-    persistedWorker = await verifyDataConnectWorkerProfilePersistence(
-      finalPayload,
-      finalWorkerId,
-      authResult.authUid || finalPayload.authUid,
-      loginChanged,
-      firebaseIdToken,
-    )
-  } catch (error) {
-    if (authResult.authUpdated && Object.keys(authRollbackPatch).length) {
-      try {
-        await ensureFirebaseAdmin().auth().updateUser(authResult.authUid, authRollbackPatch)
-      } catch (rollbackError) {
-        error.authRollbackWarning = normalizeText(mapFirebaseAdminError(rollbackError).message || rollbackError?.message)
-      }
-    }
-    throw error
-  }
-
-  const authWarnings = [initialAuthWarning, authResult.authWarning].filter(Boolean)
-  return {
-    worker: persistedWorker,
-    persistenceVerified: true,
-    authUpdated: authResult.authUpdated,
-    authWarning: authWarnings.join(' '),
-    loginChanged,
-    loginChangeSkipped: false,
-    storage: 'dataconnect',
-    ...(fallbackReason ? { fallbackReason } : {}),
-  }
-}
-
-async function deleteWorkerProfileViaDataConnect(payload, decodedToken, firebaseIdToken, fallbackReason = '') {
-  const [rows, requesterRole] = await Promise.all([
-    queryWorkersForOrgViaDataConnect(payload.orgId, firebaseIdToken),
-    getRequesterRoleViaDataConnect(payload.orgId, firebaseIdToken),
-  ])
-
-  if (requesterRole !== 'ADMIN') {
-    throw createWorkerProfilePublicError(403, 'FORBIDDEN', 'Brak uprawnien do usuwania pracownikow.')
-  }
-
-  const currentWorkerRaw = findDataConnectWorkerByLogin(rows, payload.login)
-  if (!currentWorkerRaw) {
-    throw createWorkerProfilePublicError(404, 'WORKER_NOT_FOUND', 'Nie znaleziono pracownika do usuniecia.')
-  }
-
-  const currentWorker = mapDataConnectWorkerForAuth(currentWorkerRaw)
-  const storedAuthUid = normalizeText(payload.authUid || currentWorker?.auth_uid)
-  const authMatch = await findFirebaseUserForWorker(currentWorker, storedAuthUid)
-  const authUid = normalizeText(authMatch.authUid || storedAuthUid)
-  let authWarning = normalizeText(authMatch.authWarning)
-
-  if (isRequesterDeletingSelf(currentWorker, authUid, decodedToken)) {
-    throw createWorkerProfilePublicError(400, 'SELF_DELETE_BLOCKED', 'Nie mozesz usunac konta, na ktorym jestes teraz zalogowany.')
-  }
-
-  const workerId = normalizeText(currentWorker?.worker_id || payload.workerId || payload.login)
-  const response = await executeDataConnectOperation(
-    'mutation',
-    'DeleteWorkerProfileForOrg',
-    {
-      orgId: payload.orgId,
-      login: payload.login,
-      workerId,
-      authUid,
-    },
-    firebaseIdToken,
-  )
-
-  let authDeleted = false
-  if (authUid) {
-    try {
-      await ensureFirebaseAdmin().auth().deleteUser(authUid)
-      authDeleted = true
-    } catch (error) {
-      if (isFirebaseUserNotFound(error)) {
-        authWarning = appendWorkerProfileWarning(authWarning, 'Konto Firebase Auth bylo juz usuniete.')
-      } else {
-        const mapped = mapFirebaseAdminError(error)
-        authWarning = appendWorkerProfileWarning(
-          authWarning,
-          `Dane pracownika usunieto, ale nie udalo sie usunac konta Firebase Auth: ${normalizeText(mapped.message || error?.message)}`,
-        )
-      }
-    }
-  } else {
-    authWarning = appendWorkerProfileWarning(authWarning, 'Nie znaleziono UID Firebase Auth; usunieto dane pracownika z bazy.')
-  }
-
-  return {
-    deletedLogin: payload.login,
-    deletedCounts: response?.data ?? {},
-    authDeleted,
-    authWarning,
-    storage: 'dataconnect',
-    ...(fallbackReason ? { fallbackReason } : {}),
-  }
-}
-
 function sendWorkerProfileFailure(res, error, fallbackCode, fallbackMessage, dbConfigMessage) {
   if (error?.message === 'DB_CONFIG_MISSING') {
-    sendApiError(res, 500, 'DB_CONFIG_MISSING', dbConfigMessage)
+    sendApiError(res, 503, 'DB_CONFIG_MISSING', dbConfigMessage)
     return
   }
 
@@ -5032,13 +4950,264 @@ function sendWorkerProfileDeleteRequiresDb(res) {
   )
 }
 
+async function updateWorkerProfileDatabase(payload, decodedToken) {
+  const client = await connectDbClient()
+  let transactionStarted = false
+  let authUid = ''
+  let authUpdated = false
+  let authWarning = ''
+  let authSnapshot = null
+
+  try {
+    await workerRepository.assertWorkerSchemaReady(client)
+    const membership = await workerRepository.getRequesterMembership(
+      client,
+      payload.orgId,
+      decodedToken.uid,
+    )
+    const requesterRole = normalizeRequesterRole(membership?.role)
+    if (!['ADMIN', 'MANAGER'].includes(requesterRole)) {
+      throw workerProfileAccessError(membership, 'edycji pracownikow')
+    }
+
+    let currentWorker = await workerRepository.readWorkerForUpdate(
+      client,
+      payload.orgId,
+      payload.login,
+    )
+    if (!currentWorker) {
+      throw createWorkerProfilePublicError(
+        404,
+        'WORKER_NOT_FOUND',
+        'Nie znaleziono pracownika do edycji.',
+      )
+    }
+
+    let ownerWorkerId = await workerRepository.getOrganizationOwnerWorkerId(
+      client,
+      payload.orgId,
+    )
+    let targetIsOwner = Boolean(
+      ownerWorkerId && normalizeText(currentWorker.worker_id) === ownerWorkerId,
+    )
+    payload.memberRole = assertWorkerRoleAssignmentAllowed(
+      membership?.role,
+      payload.memberRole,
+      {
+        currentRole: currentWorker.role,
+        targetIsOwner,
+      },
+    )
+    payload.roleLabel = payload.memberRole
+
+    const loginChanged = isWorkerProfileLoginChange(payload)
+    if (loginChanged) {
+      throw createWorkerProfilePublicError(
+        400,
+        'WORKER_LOGIN_IMMUTABLE',
+        'Login techniczny pracownika jest niemodyfikowalny.',
+      )
+    }
+
+    const finalEmail = payload.email
+    const knownAuthUid = normalizeText(payload.authUid || currentWorker.auth_uid)
+    const authFieldsChanged = hasWorkerProfileAuthFieldChange(
+      { ...payload, email: finalEmail },
+      currentWorker,
+    )
+    const shouldResolveFirebaseUser = loginChanged || authFieldsChanged
+    const [, , authMatch] = await Promise.all([
+      workerRepository.assertLoginAvailable(
+        client,
+        payload.orgId,
+        payload.login,
+        payload.newLogin,
+      ),
+      workerRepository.assertEmailAvailable(
+        client,
+        payload.orgId,
+        payload.login,
+        finalEmail,
+      ),
+      shouldResolveFirebaseUser
+        ? findFirebaseUserForWorker(currentWorker, knownAuthUid)
+        : Promise.resolve({ user: null, authUid: knownAuthUid, authWarning: '' }),
+    ])
+    authUid = normalizeText(authMatch.authUid)
+    authWarning = ''
+    if (shouldResolveFirebaseUser && (!authUid || !authMatch.user)) {
+      throw createWorkerProfileAuthRequiredError('zmiana danych konta')
+    }
+
+    if (shouldResolveFirebaseUser) {
+      authSnapshot = {
+        displayName: normalizeText(authMatch.user.displayName) || null,
+        disabled: Boolean(authMatch.user.disabled),
+        ...(normalizeEmail(authMatch.user.email)
+          ? { email: normalizeEmail(authMatch.user.email) }
+          : {}),
+      }
+      await ensureFirebaseAdmin().auth().updateUser(authUid, {
+        displayName: payload.name,
+        email: finalEmail,
+        disabled: !payload.active,
+      })
+      authUpdated = true
+    }
+
+    await client.query('begin')
+    transactionStarted = true
+    await client.query(
+      'select pg_advisory_xact_lock(hashtext($1::text))',
+      [`worker-update:${payload.orgId}:${payload.login}`],
+    )
+
+    const currentMembership = await workerRepository.getRequesterMembership(
+      client,
+      payload.orgId,
+      decodedToken.uid,
+    )
+    const currentRequesterRole = normalizeRequesterRole(currentMembership?.role)
+    if (!['ADMIN', 'MANAGER'].includes(currentRequesterRole)) {
+      throw workerProfileAccessError(currentMembership, 'edycji pracownikow')
+    }
+    if (loginChanged) {
+      throw createWorkerProfilePublicError(
+        400,
+        'WORKER_LOGIN_IMMUTABLE',
+        'Login techniczny pracownika jest niemodyfikowalny.',
+      )
+    }
+
+    currentWorker = await workerRepository.readWorkerForUpdate(
+      client,
+      payload.orgId,
+      payload.login,
+    )
+    if (!currentWorker) {
+      throw createWorkerProfilePublicError(
+        404,
+        'WORKER_NOT_FOUND',
+        'Nie znaleziono pracownika do edycji.',
+      )
+    }
+
+    ownerWorkerId = await workerRepository.getOrganizationOwnerWorkerId(
+      client,
+      payload.orgId,
+    )
+    targetIsOwner = Boolean(
+      ownerWorkerId && normalizeText(currentWorker.worker_id) === ownerWorkerId,
+    )
+    payload.memberRole = assertWorkerRoleAssignmentAllowed(
+      currentMembership?.role,
+      payload.memberRole,
+      {
+        currentRole: currentWorker.role,
+        targetIsOwner,
+      },
+    )
+    payload.roleLabel = payload.memberRole
+
+    await workerRepository.assertLoginAvailable(
+      client,
+      payload.orgId,
+      payload.login,
+      payload.newLogin,
+    )
+    await workerRepository.assertEmailAvailable(
+      client,
+      payload.orgId,
+      payload.login,
+      finalEmail,
+    )
+
+    const updatedBy = normalizeRoleCode(currentMembership?.role) === PLATFORM_ROLE
+      ? normalizeText(currentWorker.edit)
+      : payload.editedBy || normalizeEmail(decodedToken?.email) || normalizeText(decodedToken?.uid)
+    const repositoryPayload = {
+      ...payload,
+      email: finalEmail,
+      role: payload.memberRole,
+      authUid,
+      updatedBy,
+    }
+
+    let updatedRow
+    let dependentUpdates = null
+    if (loginChanged) {
+      const renamed = await workerRepository.renameWorker(
+        client,
+        currentWorker,
+        repositoryPayload,
+      )
+      updatedRow = renamed.row
+      dependentUpdates = renamed.dependentUpdates
+    } else {
+      updatedRow = await workerRepository.updateWorkerRow(
+        client,
+        repositoryPayload,
+      )
+      if (!updatedRow) {
+        throw createWorkerProfilePublicError(
+          404,
+          'WORKER_NOT_FOUND',
+          'Nie znaleziono pracownika do edycji.',
+        )
+      }
+      await workerRepository.upsertWorkerMembership(client, {
+        orgId: payload.orgId,
+        authUid,
+        role: payload.memberRole,
+        workerId: normalizeText(currentWorker.worker_id),
+      })
+    }
+
+    await client.query('commit')
+    transactionStarted = false
+
+    return {
+      worker: mapWorkerProfileRow(
+        { ...updatedRow, owner_worker_id: ownerWorkerId },
+        payload.orgId,
+      ),
+      authUpdated,
+      authWarning,
+      loginChanged,
+      dependentUpdates,
+      storage: 'database',
+      persistenceVerified: true,
+    }
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await client.query('rollback')
+      } catch {
+        // Ignore rollback failure; the original error remains authoritative.
+      }
+    }
+
+    if (authUpdated && authUid && authSnapshot) {
+      try {
+        await ensureFirebaseAdmin().auth().updateUser(authUid, authSnapshot)
+      } catch (rollbackError) {
+        error.authRollbackWarning =
+          mapFirebaseAdminError(rollbackError)?.message ||
+          normalizeText(rollbackError?.message)
+      }
+    }
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
 async function handleAdminWorkerProfileUpdateRequest(req, res) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
     res.end()
     return
   }
-
   if (req.method !== 'POST') {
     sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
     return
@@ -5048,11 +5217,14 @@ async function handleAdminWorkerProfileUpdateRequest(req, res) {
   try {
     body = await readJsonBody(req)
   } catch (error) {
-    if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
-      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
-      return
-    }
-    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
+    sendApiError(
+      res,
+      error?.message === 'REQUEST_BODY_TOO_LARGE' ? 413 : 400,
+      error?.message === 'REQUEST_BODY_TOO_LARGE' ? 'REQUEST_TOO_LARGE' : 'INVALID_JSON',
+      error?.message === 'REQUEST_BODY_TOO_LARGE'
+        ? 'Zadanie jest zbyt duze.'
+        : 'Niepoprawny JSON w zadaniu.',
+    )
     return
   }
 
@@ -5076,207 +5248,192 @@ async function handleAdminWorkerProfileUpdateRequest(req, res) {
     return
   }
 
-  if (shouldUseWorkerProfileDataConnectStorage()) {
-    try {
-      const data = await updateWorkerProfileViaDataConnect(payload, decodedToken, token)
-      sendJson(res, 200, { ok: true, data })
-    } catch (error) {
-      sendWorkerProfileFailure(
-        res,
-        error,
-        'WORKER_PROFILE_UPDATE_FAILED',
-        'Nie udalo sie zaktualizowac pracownika.',
-        'Lokalna edycja profilu pracownika wymaga konfiguracji DB. Skonfiguruj lokalne DB/Admin SDK i uruchom WORKER_PROFILE_MODE=local/direct albo testuj endpoint przez wdrozony Firebase Hosting.',
-      )
-    }
-    return
-  }
-
-  let client = null
   try {
-    client = await connectDbClient()
-    await client.query('begin')
-    const requesterRole = await requireWorkerProfileAccess(client, payload.orgId, decodedToken.uid, ['ADMIN', 'MANAGER'], 'edycji pracownikow')
-
-    const currentWorker = await readWorkerProfileForUpdate(client, payload.orgId, payload.login)
-    if (!currentWorker) {
-      throw createWorkerProfilePublicError(404, 'WORKER_NOT_FOUND', 'Nie znaleziono pracownika do edycji.')
-    }
-
-    const loginChanged = isWorkerProfileLoginChange(payload)
-    if (loginChanged && requesterRole !== 'ADMIN') {
-      throw createWorkerProfilePublicError(403, 'LOGIN_CHANGE_FORBIDDEN', 'Login pracownika moze zmienic tylko Admin.')
-    }
-    if (loginChanged) {
-      await client.query('lock table public.worker in share row exclusive mode')
-    }
-    await assertWorkerProfileLoginAvailable(client, payload.orgId, payload.login, payload.newLogin)
-
-    let authUid = normalizeText(payload.authUid || currentWorker.auth_uid)
-    let authUpdated = false
-    let authWarning = ''
-
-    if (authUid || loginChanged) {
-      try {
-        const authMatch = await findFirebaseUserForWorker(currentWorker, authUid)
-        authUid = normalizeText(authMatch.authUid || authUid)
-        authWarning = normalizeText(authMatch.authWarning)
-      } catch (error) {
-        if (loginChanged) {
-          throw error
-        }
-        const mapped = mapFirebaseAdminError(error)
-        authWarning = appendWorkerProfileWarning(
-          authWarning,
-          `Profil zostanie zapisany w bazie, ale nie udalo sie sprawdzic Firebase Auth: ${normalizeText(mapped.message || error?.message)}`,
-        )
-      }
-    } else {
-      authWarning = ''
-    }
-
-    if (loginChanged && !authUid) {
-      throw createWorkerProfileAuthRequiredError('zmiana loginu')
-    }
-
-    const updatedBy = payload.editedBy || normalizeEmail(decodedToken?.email) || normalizeText(decodedToken?.uid)
-    const finalEmail = loginChanged ? resolveWorkerProfileEmailForLogin(payload.newLogin, payload.email, currentWorker) : payload.email
-    const finalWorkerId = resolveWorkerProfileWorkerId(payload, currentWorker, loginChanged)
-    const finalPayload = { ...payload, workerId: finalWorkerId }
-    await assertWorkerProfileEmailAvailable(client, payload.orgId, payload.login, finalEmail)
-
-    let updatedRow = null
-    let dependentUpdates = null
-    if (loginChanged) {
-      const loginUpdate = await changeWorkerProfileLogin(client, currentWorker, finalPayload, authUid, updatedBy, finalEmail)
-      updatedRow = loginUpdate.row
-      dependentUpdates = loginUpdate.dependentUpdates
-    } else {
-      const updated = await runWorkerProfileDbQuery(
-        client,
-        'update-worker-profile-row',
-        `update public.worker
-            set worker_id = coalesce(nullif($3::text, ''), worker_id),
-                full_name = $4::text,
-                login_email = $5::text,
-                email = $5::text,
-                phone = nullif($6::text, ''),
-                role = $7::text,
-                worker_type = $8::text,
-                active = $9::boolean,
-                edit = nullif($10::text, ''),
-                auth_uid = coalesce(nullif($11::text, ''), auth_uid),
-                updated_at = now()
-          where org_id = $1::text
-            and lower(login) = lower($2::text)
-          returning login,
-                    worker_id,
-                    full_name,
-                    login_email,
-                    email,
-                    auth_uid,
-                    role,
-                    worker_type,
-                    active,
-                    phone,
-                    created_at,
-                    updated_at,
-                    edit`,
-        [
-          finalPayload.orgId,
-          finalPayload.login,
-          finalPayload.workerId,
-          finalPayload.name,
-          finalEmail,
-          finalPayload.phone,
-          finalPayload.memberRole,
-          finalPayload.workerType,
-          finalPayload.active,
-          updatedBy,
-          authUid,
-        ],
-      )
-      updatedRow = updated.rows[0]
-    }
-
-    if (authUid) {
-      await runWorkerProfileDbQuery(
-        client,
-        'upsert-worker-organization-member',
-        `insert into public.organization_member (org_id, uid, role, created_at)
-         values ($1::text, $2::text, $3::text, now())
-         on conflict (org_id, uid) do update set role = excluded.role`,
-        [payload.orgId, authUid, payload.memberRole],
-      )
-
-      try {
-        await ensureFirebaseAdmin().auth().updateUser(authUid, {
-          displayName: finalPayload.name,
-          email: finalEmail,
-          disabled: !finalPayload.active,
-        })
-        authUpdated = true
-        authWarning = ''
-      } catch (error) {
-        if (loginChanged) {
-          throw error
-        }
-        const mapped = mapFirebaseAdminError(error)
-        authWarning = appendWorkerProfileWarning(
-          authWarning,
-          `Profil zapisano w bazie, ale Firebase Auth nie zostal zmieniony: ${normalizeText(mapped.message || error?.message)}`,
-        )
-      }
-    } else {
-      authWarning = appendWorkerProfileWarning(authWarning, WORKER_PROFILE_DB_ONLY_AUTH_WARNING)
-    }
-
-    await client.query('commit')
-
-    sendJson(res, 200, {
-      ok: true,
-      data: {
-        worker: mapWorkerProfileRow(updatedRow, payload.orgId),
-        authUpdated,
-        authWarning,
-        loginChanged,
-        dependentUpdates,
-      },
-    })
+    const data = await updateWorkerProfileDatabase(payload, decodedToken)
+    sendJson(res, 200, { ok: true, data })
   } catch (error) {
-    if (client) {
-      try {
-        await client.query('rollback')
-      } catch {
-        // ignore rollback failure
-      }
-    }
-
-    if (isDatabaseTlsVerificationError(error) && !isWorkerProfileLoginChange(payload)) {
-      try {
-        const data = await updateWorkerProfileViaDataConnect(payload, decodedToken, token, 'cloud-sql-tls-cert')
-        sendJson(res, 200, { ok: true, data })
-      } catch (fallbackError) {
-        sendWorkerProfileFailure(
-          res,
-          fallbackError,
-          'WORKER_PROFILE_UPDATE_FAILED',
-          'Nie udalo sie zaktualizowac pracownika.',
-          'Lokalna edycja profilu pracownika wymaga konfiguracji DB. Skonfiguruj lokalne DB/Admin SDK i uruchom WORKER_PROFILE_MODE=local/direct albo testuj endpoint przez wdrozony Firebase Hosting.',
-        )
-      }
-      return
-    }
-
     sendWorkerProfileFailure(
       res,
       error,
       'WORKER_PROFILE_UPDATE_FAILED',
       'Nie udalo sie zaktualizowac pracownika.',
-      'Lokalna edycja profilu pracownika wymaga konfiguracji DB. Skonfiguruj lokalne DB/Admin SDK i uruchom WORKER_PROFILE_MODE=local/direct albo testuj endpoint przez wdrozony Firebase Hosting.',
+      'Operacje pracownikow wymagaja gotowego schematu Cloud SQL.',
     )
+  }
+}
+
+async function deleteWorkerProfileDatabase(payload, decodedToken) {
+  const client = await connectDbClient()
+  let transactionStarted = false
+
+  try {
+    await workerRepository.assertWorkerSchemaReady(client)
+    let membership = await workerRepository.getRequesterMembership(
+      client,
+      payload.orgId,
+      decodedToken.uid,
+    )
+    if (!isWorkerDeleteRole(membership?.role)) {
+      throw workerProfileAccessError(membership, 'usuwania pracownikow')
+    }
+
+    let currentWorker = await workerRepository.readWorkerForUpdate(
+      client,
+      payload.orgId,
+      payload.login,
+    )
+    if (!currentWorker) {
+      throw createWorkerProfilePublicError(
+        404,
+        'WORKER_NOT_FOUND',
+        'Nie znaleziono pracownika do usuniecia.',
+      )
+    }
+
+    let ownerWorkerId = await workerRepository.getOrganizationOwnerWorkerId(
+      client,
+      payload.orgId,
+    )
+    if (ownerWorkerId && normalizeText(currentWorker.worker_id) === ownerWorkerId) {
+      throw createWorkerProfilePublicError(
+        403,
+        'OWNER_WORKER_DELETE_FORBIDDEN',
+        'Nie mo\u017cna usun\u0105\u0107 konta za\u0142o\u017cyciela organizacji.',
+      )
+    }
+
+    let authUid = normalizeText(payload.authUid || currentWorker.auth_uid)
+    let authWarning = ''
+    if (isRequesterDeletingSelf(currentWorker, authUid, decodedToken)) {
+      throw createWorkerProfilePublicError(
+        400,
+        'SELF_DELETE_BLOCKED',
+        'Nie mozesz usunac konta, na ktorym jestes teraz zalogowany.',
+      )
+    }
+
+    await client.query('begin')
+    transactionStarted = true
+    await client.query(
+      'select pg_advisory_xact_lock(hashtext($1::text))',
+      [`worker-delete:${payload.orgId}:${payload.login}`],
+    )
+
+    membership = await workerRepository.getRequesterMembership(
+      client,
+      payload.orgId,
+      decodedToken.uid,
+    )
+    if (!isWorkerDeleteRole(membership?.role)) {
+      throw workerProfileAccessError(membership, 'usuwania pracownikow')
+    }
+
+    currentWorker = await workerRepository.readWorkerForUpdate(
+      client,
+      payload.orgId,
+      payload.login,
+    )
+    if (!currentWorker) {
+      throw createWorkerProfilePublicError(
+        404,
+        'WORKER_NOT_FOUND',
+        'Nie znaleziono pracownika do usuniecia.',
+      )
+    }
+    ownerWorkerId = await workerRepository.getOrganizationOwnerWorkerId(
+      client,
+      payload.orgId,
+    )
+    if (ownerWorkerId && normalizeText(currentWorker.worker_id) === ownerWorkerId) {
+      throw createWorkerProfilePublicError(
+        403,
+        'OWNER_WORKER_DELETE_FORBIDDEN',
+        'Nie mo\u017cna usun\u0105\u0107 konta za\u0142o\u017cyciela organizacji.',
+      )
+    }
+    if (isRequesterDeletingSelf(currentWorker, authUid, decodedToken)) {
+      throw createWorkerProfilePublicError(
+        400,
+        'SELF_DELETE_BLOCKED',
+        'Nie mozesz usunac konta, na ktorym jestes teraz zalogowany.',
+      )
+    }
+
+    const deletedCounts = await workerRepository.deleteWorkerAccessRows(
+      client,
+      payload.orgId,
+      payload.login,
+      normalizeText(currentWorker.worker_id || payload.workerId),
+      authUid,
+    )
+    await client.query('commit')
+    transactionStarted = false
+
+    let authDeleted = false
+    if (!authUid) {
+      try {
+        const authMatch = await findFirebaseUserForWorker(currentWorker)
+        authUid = normalizeText(authMatch.authUid)
+        authWarning = appendWorkerProfileWarning(
+          authWarning,
+          normalizeText(authMatch.authWarning),
+        )
+      } catch (error) {
+        const mapped = mapFirebaseAdminError(error)
+        authWarning = appendWorkerProfileWarning(
+          authWarning,
+          `Profil usunieto z bazy, ale nie udalo sie wyszukac Firebase Auth: ${
+            normalizeText(mapped.message || error?.message)
+          }`,
+        )
+      }
+    }
+    if (authUid) {
+      try {
+        await ensureFirebaseAdmin().auth().deleteUser(authUid)
+        authDeleted = true
+      } catch (error) {
+        if (isFirebaseUserNotFound(error)) {
+          authWarning = appendWorkerProfileWarning(
+            authWarning,
+            'Konto Firebase Auth bylo juz usuniete.',
+          )
+        } else {
+          const mapped = mapFirebaseAdminError(error)
+          authWarning = appendWorkerProfileWarning(
+            authWarning,
+            `Profil usunieto z bazy, ale nie udalo sie usunac Firebase Auth: ${
+              normalizeText(mapped.message || error?.message)
+            }`,
+          )
+        }
+      }
+    } else {
+      authWarning = appendWorkerProfileWarning(
+        authWarning,
+        'Nie znaleziono UID Firebase Auth; usunieto dane pracownika z bazy.',
+      )
+    }
+
+    return {
+      deletedLogin: payload.login,
+      deletedCounts,
+      authDeleted,
+      authWarning,
+      storage: 'database',
+      persistenceVerified: true,
+    }
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await client.query('rollback')
+      } catch {
+        // Ignore rollback failure; the original error remains authoritative.
+      }
+    }
+    throw error
   } finally {
-    if (client) client.release()
+    client.release()
   }
 }
 
@@ -5286,7 +5443,6 @@ async function handleAdminWorkerProfileDeleteRequest(req, res) {
     res.end()
     return
   }
-
   if (req.method !== 'POST') {
     sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
     return
@@ -5296,11 +5452,14 @@ async function handleAdminWorkerProfileDeleteRequest(req, res) {
   try {
     body = await readJsonBody(req)
   } catch (error) {
-    if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
-      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
-      return
-    }
-    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
+    sendApiError(
+      res,
+      error?.message === 'REQUEST_BODY_TOO_LARGE' ? 413 : 400,
+      error?.message === 'REQUEST_BODY_TOO_LARGE' ? 'REQUEST_TOO_LARGE' : 'INVALID_JSON',
+      error?.message === 'REQUEST_BODY_TOO_LARGE'
+        ? 'Zadanie jest zbyt duze.'
+        : 'Niepoprawny JSON w zadaniu.',
+    )
     return
   }
 
@@ -5324,113 +5483,221 @@ async function handleAdminWorkerProfileDeleteRequest(req, res) {
     return
   }
 
-  if (shouldUseWorkerProfileDataConnectStorage()) {
-    try {
-      const data = await deleteWorkerProfileViaDataConnect(payload, decodedToken, token)
-      sendJson(res, 200, { ok: true, data })
-    } catch (error) {
-      sendWorkerProfileFailure(
-        res,
-        error,
-        'WORKER_PROFILE_DELETE_FAILED',
-        'Nie udalo sie usunac pracownika.',
-        'Lokalne usuwanie profilu pracownika wymaga trybu Data Connect albo poprawnej konfiguracji DB/Firebase Admin.',
-      )
-    }
-    return
-  }
-
-  let client = null
   try {
-    client = await connectDbClient()
-    await client.query('begin')
-    await requireWorkerProfileAccess(client, payload.orgId, decodedToken.uid, ['ADMIN'], 'usuwania pracownikow')
-
-    const currentWorker = await readWorkerProfileForUpdate(client, payload.orgId, payload.login)
-    if (!currentWorker) {
-      const error = new Error('WORKER_NOT_FOUND')
-      error.statusCode = 404
-      error.publicCode = 'WORKER_NOT_FOUND'
-      error.publicMessage = 'Nie znaleziono pracownika do usuniecia.'
-      throw error
-    }
-
-    const storedAuthUid = normalizeText(payload.authUid || currentWorker.auth_uid)
-    const authMatch = await findFirebaseUserForWorker(currentWorker, storedAuthUid)
-    const authUid = normalizeText(authMatch.authUid || storedAuthUid)
-    let authWarning = authMatch.authWarning
-
-    if (isRequesterDeletingSelf(currentWorker, authUid, decodedToken)) {
-      const error = new Error('SELF_DELETE_BLOCKED')
-      error.statusCode = 400
-      error.publicCode = 'SELF_DELETE_BLOCKED'
-      error.publicMessage = 'Nie mozesz usunac konta, na ktorym jestes teraz zalogowany.'
-      throw error
-    }
-
-    const workerId = normalizeText(currentWorker.worker_id || payload.workerId)
-    const deletedCounts = await deleteWorkerProfileAccessRows(client, payload.orgId, payload.login, workerId, authUid)
-    let authDeleted = false
-
-    if (authUid) {
-      try {
-        await ensureFirebaseAdmin().auth().deleteUser(authUid)
-        authDeleted = true
-      } catch (error) {
-        if (!isFirebaseUserNotFound(error)) {
-          throw error
-        }
-        authWarning = appendWorkerProfileWarning(authWarning, 'Konto Firebase Auth bylo juz usuniete.')
-      }
-    } else {
-      authWarning = appendWorkerProfileWarning(authWarning, 'Nie znaleziono UID Firebase Auth; usunieto dane pracownika z bazy.')
-    }
-
-    await client.query('commit')
-
-    sendJson(res, 200, {
-      ok: true,
-      data: {
-        deletedLogin: payload.login,
-        deletedCounts,
-        authDeleted,
-        authWarning,
-      },
-    })
+    const data = await deleteWorkerProfileDatabase(payload, decodedToken)
+    sendJson(res, 200, { ok: true, data })
   } catch (error) {
-    if (client) {
-      try {
-        await client.query('rollback')
-      } catch {
-        // ignore rollback failure
-      }
-    }
-
-    if (isDatabaseTlsVerificationError(error)) {
-      try {
-        const data = await deleteWorkerProfileViaDataConnect(payload, decodedToken, token, 'cloud-sql-tls-cert')
-        sendJson(res, 200, { ok: true, data })
-      } catch (fallbackError) {
-        sendWorkerProfileFailure(
-          res,
-          fallbackError,
-          'WORKER_PROFILE_DELETE_FAILED',
-          'Nie udalo sie usunac pracownika.',
-          'Lokalne usuwanie profilu pracownika wymaga trybu Data Connect albo poprawnej konfiguracji DB/Firebase Admin.',
-        )
-      }
-      return
-    }
-
     sendWorkerProfileFailure(
       res,
       error,
       'WORKER_PROFILE_DELETE_FAILED',
       'Nie udalo sie usunac pracownika.',
-      'Lokalne usuwanie profilu pracownika wymaga konfiguracji DB. Skonfiguruj lokalne DB/Admin SDK i uruchom WORKER_PROFILE_MODE=local/direct albo testuj endpoint przez wdrozony Firebase Hosting.',
+      'Operacje pracownikow wymagaja gotowego schematu Cloud SQL.',
+    )
+  }
+}
+
+async function handleAdminWorkersRestoreRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  let body
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    sendApiError(
+      res,
+      error?.message === 'REQUEST_BODY_TOO_LARGE' ? 413 : 400,
+      error?.message === 'REQUEST_BODY_TOO_LARGE' ? 'REQUEST_TOO_LARGE' : 'INVALID_JSON',
+      error?.message === 'REQUEST_BODY_TOO_LARGE'
+        ? 'Zadanie jest zbyt duze.'
+        : 'Niepoprawny JSON w zadaniu.',
+    )
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    sendFirebaseVerificationError(res, error)
+    return
+  }
+
+  const orgId = normalizeOrgId(body?.orgId)
+  const rows = Array.isArray(body?.rows) ? body.rows : null
+  if (!orgId || !rows) {
+    sendApiError(
+      res,
+      400,
+      'VALIDATION_ERROR',
+      'Podaj poprawne orgId oraz tablice rows z pracownikami.',
+    )
+    return
+  }
+
+  const client = await connectDbClient().catch((error) => {
+    sendWorkerProfileFailure(
+      res,
+      error,
+      'WORKER_RESTORE_FAILED',
+      'Nie udalo sie polaczyc z baza podczas odtwarzania pracownikow.',
+      'Odtwarzanie pracownikow wymaga gotowego Cloud SQL.',
+    )
+    return null
+  })
+  if (!client) return
+
+  let transactionStarted = false
+  try {
+    await workerRepository.assertWorkerSchemaReady(client)
+    const membership = await workerRepository.getRequesterMembership(
+      client,
+      orgId,
+      decodedToken.uid,
+    )
+    if (normalizeRequesterRole(membership?.role) !== 'ADMIN') {
+      throw workerProfileAccessError(membership, 'odtwarzania pracownikow z backupu')
+    }
+
+    await client.query('begin')
+    transactionStarted = true
+    const currentMembership = await workerRepository.getRequesterMembership(
+      client,
+      orgId,
+      decodedToken.uid,
+    )
+    if (normalizeRequesterRole(currentMembership?.role) !== 'ADMIN') {
+      throw workerProfileAccessError(
+        currentMembership,
+        'odtwarzania pracownikow z backupu',
+      )
+    }
+
+    const restoredBy = normalizeRoleCode(currentMembership?.role) === PLATFORM_ROLE
+      ? ''
+      : normalizeEmail(decodedToken?.email) || normalizeText(decodedToken?.uid)
+    const result = await workerRepository.restoreWorkers(
+      client,
+      orgId,
+      rows,
+      restoredBy,
+    )
+    await client.query('commit')
+    transactionStarted = false
+
+    sendJson(res, 200, {
+      ok: true,
+      data: {
+        ...result,
+        storage: 'database',
+        persistenceVerified: true,
+      },
+    })
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await client.query('rollback')
+      } catch {
+        // Ignore rollback failure; the original error remains authoritative.
+      }
+    }
+    sendWorkerProfileFailure(
+      res,
+      error,
+      'WORKER_RESTORE_FAILED',
+      'Nie udalo sie odtworzyc pracownikow z backupu.',
+      'Odtwarzanie pracownikow wymaga gotowego schematu Cloud SQL.',
     )
   } finally {
-    if (client) client.release()
+    client.release()
+  }
+}
+
+async function getNextWorkerIdPreviewDirect(orgId, requesterUid) {
+  const client = await connectDbClient()
+  try {
+    await workerRepository.assertWorkerSchemaReady(client)
+    const membership = await workerRepository.getRequesterMembership(client, orgId, requesterUid)
+    if (!isWorkerManagementRole(membership?.role)) {
+      throw workerProfileAccessError(membership, 'dodawania pracownikow')
+    }
+    const { reservations, workers } = await workerRepository.readWorkerIdRows(client, orgId)
+    const ownerWorkerId = await workerRepository.getOrganizationOwnerWorkerId(client, orgId)
+    const workerNumber = nextWorkerNumber(orgId, reservations, workers)
+    return {
+      workerId: buildWorkerId(orgId, workerNumber),
+      workerNumber,
+      ownerWorkerId,
+      storage: 'database',
+      persistenceVerified: true,
+    }
+  } finally {
+    client.release()
+  }
+}
+
+async function handleAdminWorkerIdNextRequest(req, res, requestUrl) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+  if (req.method !== 'GET') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to GET.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    sendFirebaseVerificationError(res, error)
+    return
+  }
+
+  const orgId = normalizeOrgId(requestUrl.searchParams.get('orgId'))
+  if (!orgId) {
+    sendApiError(res, 400, 'INVALID_ORG_ID', 'Brak poprawnego orgId.')
+    return
+  }
+
+  try {
+    const data = await getNextWorkerIdPreviewDirect(orgId, decodedToken.uid)
+    sendJson(res, 200, { ok: true, data })
+  } catch (error) {
+    const databaseError = mapDatabaseConnectionError(error)
+    if (databaseError) {
+      sendApiError(res, databaseError.status, databaseError.code, databaseError.message)
+      return
+    }
+    const status = Number(error?.statusCode ?? 500)
+    sendApiError(
+      res,
+      Number.isFinite(status) ? status : 500,
+      normalizeText(error?.publicCode) || 'WORKER_ID_PREVIEW_FAILED',
+      normalizeText(error?.publicMessage) || 'Nie udalo sie wyznaczyc kolejnego ID pracownika.',
+      publicErrorDetails(error),
+    )
   }
 }
 
@@ -5480,17 +5747,12 @@ async function handleAdminUsersRequest(req, res) {
   }
 
   try {
-    const adminUsersMode = normalizeText(process.env.ADMIN_USERS_MODE || process.env.ADMIN_USERS_PROXY_MODE).toLowerCase()
-    const useDataConnectProvisioning =
-      !hasDatabaseConnectionConfig() || ['dataconnect', 'data-connect', 'auth', 'firebase-auth'].includes(adminUsersMode)
-    const user = useDataConnectProvisioning
-      ? await createAdminManagedUserViaDataConnect(payload, decodedToken, token)
-      : await createAdminManagedUser(payload, decodedToken.uid)
+    const user = await createAdminManagedUserDatabase(payload, decodedToken.uid)
     sendJson(res, 201, { ok: true, data: { user } })
   } catch (error) {
     logAdminUsersError(error, 'create-user')
     if (error?.message === 'DB_CONFIG_MISSING') {
-      sendApiError(res, 500, 'DB_CONFIG_MISSING', 'Brak konfiguracji poĹ‚Ä…czenia z bazÄ… danych.')
+      sendApiError(res, 503, 'DB_CONFIG_MISSING', 'Brak konfiguracji polaczenia z baza danych.')
       return
     }
 
@@ -5553,32 +5815,135 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
     return
   }
 
-  const requestedOrgId = normalizeOrgId(method === 'GET' ? requestUrl.searchParams.get('orgId') : body?.orgId)
+  const rawRequestedOrgId = method === 'GET' ? requestUrl.searchParams.get('orgId') : body?.orgId
+  const requestedOrgId = normalizeOrgId(rawRequestedOrgId)
+  if (method === 'POST' && !requestedOrgId) {
+    sendApiError(res, 400, 'INVALID_ORG_ID', 'Brak poprawnego orgId.')
+    return
+  }
+  if (rawRequestedOrgId && !requestedOrgId) {
+    sendApiError(res, 400, 'INVALID_ORG_ID', 'Brak poprawnego orgId.')
+    return
+  }
+
   const requesterUid = normalizeText(decodedToken?.uid)
   let client = null
 
   try {
     client = await connectDbClient()
-    const rows = await getRequesterMemberships(client, requesterUid)
-    const memberships = rows
-      .filter((row) => !requestedOrgId || normalizeOrgId(row.org_id) === requestedOrgId)
-      .map((row) => {
-        const orgId = normalizeOrgId(row.org_id)
-        return {
-          orgId,
-          role: normalizeText(row.role),
-          organization: {
-            name: orgId,
-            status: 'ACTIVE',
+    if (hasPlatformOwnerClaim(decodedToken)) {
+      const principal = await platformRepository.assertPlatformPrincipal(client, decodedToken, { requireMfa: false })
+      if (!principal.mfaVerified) {
+        sendJson(res, 200, {
+          ok: true,
+          status: 'PLATFORM_MFA_ENROLLMENT_REQUIRED',
+          context: {
+            uid: principal.uid,
+            email: principal.email,
+            name: principal.displayName,
+            actorType: 'PLATFORM',
+            role: PLATFORM_ROLE,
+            roleCode: PLATFORM_ROLE,
+            roleLevel: 4,
+            mfaMethod: '',
           },
+        })
+        return
+      }
+
+      if (requestedOrgId) {
+        const requestContext = getPlatformRequestContext()
+        const accessContext = await platformRepository.getActiveAccessContext(client, {
+          uid: principal.uid,
+          orgId: requestedOrgId,
+          contextId: normalizeText(requestContext?.platformContextId),
+        })
+        if (!accessContext || !normalizeText(requestContext?.platformContextId)) {
+          sendApiError(res, 403, 'PLATFORM_CONTEXT_INVALID', 'Kontekst organizacji jest zamknięty albo nie odpowiada żądaniu.')
+          return
         }
+        const planCode = normalizeText(accessContext.plan_code) || 'PLATFORM'
+        sendJson(res, 200, {
+          ok: true,
+          status: 'READY',
+          context: {
+            uid: principal.uid,
+            actorType: 'PLATFORM',
+            activeOrgId: normalizeText(accessContext.org_id),
+            organizationName: normalizeText(accessContext.organization_name),
+            organizationStatus: normalizeText(accessContext.organization_status),
+            organizationDeletedAt: accessContext.organization_deleted_at || null,
+            workerId: '',
+            role: PLATFORM_ROLE,
+            roleCode: PLATFORM_ROLE,
+            roleLevel: 4,
+            planCode,
+            subscriptionStatus: normalizeText(accessContext.subscription_status),
+            subscriptionEndsAt:
+              planCode === 'TRIAL'
+                ? accessContext.trial_ends_at || null
+                : accessContext.current_period_ends_at || null,
+            platformContextId: normalizeText(accessContext.context_id),
+            platformReason: normalizeText(accessContext.reason),
+            mfaMethod: principal.mfaMethod,
+          },
+        })
+        return
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        status: 'PLATFORM_SELECTION_REQUIRED',
+        context: {
+          uid: principal.uid,
+          email: principal.email,
+          name: principal.displayName,
+          actorType: 'PLATFORM',
+          role: PLATFORM_ROLE,
+          roleCode: PLATFORM_ROLE,
+          roleLevel: 4,
+          mfaMethod: principal.mfaMethod,
+        },
       })
+      return
+    }
+
+    const rows = await getRequesterMemberships(client, requesterUid, requestedOrgId)
+    const accessibleOrganizations = resolveAccessibleOrganizations(rows, new Date())
+
+    if (requestedOrgId) {
+      const selected = accessibleOrganizations.find((row) => normalizeOrgId(row.org_id) === requestedOrgId)
+      if (!selected) {
+        sendApiError(res, 403, 'ORG_ACCESS_DENIED', 'Brak dostepu do wybranej organizacji.')
+        return
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        status: 'READY',
+        context: buildSessionContext(requesterUid, selected),
+      })
+      return
+    }
+
+    if (!accessibleOrganizations.length) {
+      sendApiError(res, 403, 'ORG_ACCESS_DENIED', 'Brak uprawnie\u0144 do portalu dla tego konta.')
+      return
+    }
+
+    if (accessibleOrganizations.length === 1) {
+      sendJson(res, 200, {
+        ok: true,
+        status: 'READY',
+        context: buildSessionContext(requesterUid, accessibleOrganizations[0]),
+      })
+      return
+    }
 
     sendJson(res, 200, {
       ok: true,
-      data: {
-        organizationMembers: memberships,
-      },
+      status: 'ORG_SELECTION_REQUIRED',
+      organizations: accessibleOrganizations.map(buildOrganizationSummary),
     })
   } catch (error) {
     const mappedDb = mapDatabaseConnectionError(error)
@@ -5589,7 +5954,7 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
 
     sendApiError(res, 500, 'AUTH_CONTEXT_ERROR', error?.message || 'Nie udaĹ‚o siÄ™ pobraÄ‡ organizacji uĹĽytkownika.')
   } finally {
-    client.release()
+    client?.release()
   }
 }
 
@@ -5639,10 +6004,15 @@ function sanitizePortalTaskPayload(rawTask) {
   }
 }
 
-async function requirePortalTaskAccess(client, orgId, uid) {
+async function requirePortalTaskAccess(client, orgId, uid, { write = false, remove = false } = {}) {
   const membership = await getRequesterMembership(client, orgId, uid)
   const role = normalizeRequesterRole(membership?.role)
-  if (!['ADMIN', 'MANAGER', 'COORDINATOR'].includes(role)) {
+  const allowed = remove
+    ? ['ADMIN']
+    : write
+      ? ['ADMIN', 'MANAGER']
+      : ['ADMIN', 'MANAGER', 'COORDINATOR']
+  if (!allowed.includes(role)) {
     const error = new Error('FORBIDDEN')
     error.statusCode = membership ? 403 : 404
     error.publicCode = membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING'
@@ -5975,7 +6345,9 @@ function portalScheduleOrderDbRow(order = {}, orgId, requesterUid) {
     client_label: portalScheduleOrderNullableText(order.clientLabel ?? order.client_label ?? order.clientName ?? order.client_name, 500),
     client_name: portalScheduleOrderNullableText(order.clientName ?? order.client_name ?? order.clientLabel ?? order.client_label, 500),
     created_at: portalScheduleOrderTimestamp(order.createdAt ?? order.created_at, nowIso),
-    created_by_uid: portalScheduleOrderNullableText(order.createdByUid ?? order.created_by_uid ?? order.createdBy ?? uid, 128),
+    created_by_uid: uid
+      ? portalScheduleOrderNullableText(order.createdByUid ?? order.created_by_uid ?? order.createdBy ?? uid, 128)
+      : null,
     date_ymd: portalScheduleOrderNullableText(dateYmd, 10),
     description: portalScheduleOrderNullableText(order.description, 4000),
     end_date_ymd: portalScheduleOrderNullableText(endDateYmd, 10),
@@ -6002,11 +6374,11 @@ function portalScheduleOrderDbRow(order = {}, orgId, requesterUid) {
     title: portalScheduleOrderNullableText(order.title ?? order.name, 500) || 'Zlecenie',
     type: portalScheduleOrderNullableText(order.type, 40) || 'other',
     updated_at: nowIso,
-    updated_by_uid: portalScheduleOrderNullableText(uid || order.updatedByUid || order.updated_by_uid || order.updatedBy, 128),
+    updated_by_uid: uid ? portalScheduleOrderNullableText(uid, 128) : null,
     weekly_schedule_rules: JSON.stringify(portalScheduleOrderWeeklyRulesForDb(order)),
     work_allocations: JSON.stringify(allocations),
     worker_comment: portalScheduleOrderNullableText(order.workerComment ?? order.worker_comment ?? order.workerOnlyComment, 4000),
-    worker_id: primaryAllocation?.workerId || portalScheduleOrderNullableText(order.workerId ?? order.worker_id, 64),
+    worker_id: primaryAllocation?.workerId || portalScheduleOrderNullableText(order.workerId ?? order.worker_id, 128),
     worker_ids: JSON.stringify(workerIds),
     worker_label: workerLabel,
     worker_login: primaryAllocation?.workerLogin || portalScheduleOrderNullableText(order.workerLogin ?? order.worker_login, 80),
@@ -6063,7 +6435,7 @@ function portalScheduleOrderFromDbRow(row = {}) {
     requiredWorkMinutes: portalScheduleOrderInteger(row.required_work_minutes ?? row.requiredWorkMinutes, null),
     requiredPeople: portalScheduleOrderInteger(row.required_people ?? row.requiredPeople, 0),
     workAllocations: allocations,
-    workerId: portalScheduleOrderNullableText(row.worker_id ?? row.workerId, 64),
+    workerId: portalScheduleOrderNullableText(row.worker_id ?? row.workerId, 128),
     workerIds: Array.isArray(workerIds) ? workerIds : [],
     workerLabel: portalScheduleOrderNullableText(row.worker_label ?? row.workerLabel ?? workerName, 500) || 'BUFOR',
     workerName,
@@ -6180,7 +6552,7 @@ async function ensurePortalScheduleOrderTable(client) {
       weekly_schedule_rules text,
       work_allocations text,
       worker_comment text,
-      worker_id varchar(64),
+      worker_id varchar(128),
       worker_ids text,
       worker_label text,
       worker_login varchar(80),
@@ -6191,10 +6563,14 @@ async function ensurePortalScheduleOrderTable(client) {
   `)
 }
 
-async function requirePortalScheduleOrderAccess(client, orgId, uid, { write = false } = {}) {
+async function requirePortalScheduleOrderAccess(client, orgId, uid, { write = false, remove = false } = {}) {
   const membership = await getRequesterMembership(client, orgId, uid)
   const role = normalizeRequesterRole(membership?.role)
-  const allowed = write ? ['ADMIN', 'MANAGER', 'COORDINATOR'] : ['ADMIN', 'MANAGER', 'COORDINATOR', 'WORKER']
+  const allowed = remove
+    ? ['ADMIN']
+    : write
+      ? ['ADMIN', 'MANAGER']
+      : ['ADMIN', 'MANAGER', 'COORDINATOR', 'WORKER']
   if (!allowed.includes(role)) {
     const error = new Error('FORBIDDEN')
     error.statusCode = membership ? 403 : 404
@@ -6207,15 +6583,14 @@ async function requirePortalScheduleOrderAccess(client, orgId, uid, { write = fa
 
 async function requirePortalEventAccess(client, orgId, uid) {
   const membership = await getRequesterMembership(client, orgId, uid)
-  const role = normalizeRequesterRole(membership?.role)
-  if (!['ADMIN', 'MANAGER'].includes(role)) {
+  if (!isWorkerDeleteRole(membership?.role)) {
     const error = new Error('FORBIDDEN')
     error.statusCode = membership ? 403 : 404
     error.publicCode = membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING'
     error.publicMessage = membership ? 'Brak uprawnien do usuwania zdarzen.' : 'Brak dostepu do tej organizacji.'
     throw error
   }
-  return role
+  return normalizeRequesterRole(membership?.role)
 }
 
 function sanitizePortalEventDeleteId(value) {
@@ -6426,6 +6801,246 @@ async function handlePortalEventsRequest(req, res) {
   }
 }
 
+async function ensurePortalUiStyleTables(client) {
+  await client.query(
+    `create table if not exists public.org_ui_style (
+       org_id varchar(64) primary key references public.organizations(org_id) on delete cascade,
+       default_style_id varchar(64) not null,
+       updated_at timestamptz not null default now(),
+       updated_by varchar(120)
+     )`,
+  )
+  await client.query(
+    `create table if not exists public.user_ui_style_preference (
+       org_id varchar(64) not null references public.organizations(org_id) on delete cascade,
+       uid varchar(128) not null,
+       style_id varchar(64) not null,
+       updated_at timestamptz not null default now(),
+       updated_by varchar(120),
+       primary key (org_id, uid)
+     )`,
+  )
+}
+
+function portalOrgUiStyleFromRow(row) {
+  if (!row) return null
+  return {
+    orgId: normalizeText(row.org_id),
+    defaultStyleId: normalizeText(row.default_style_id),
+    updatedAt: row.updated_at || null,
+    updatedBy: normalizeText(row.updated_by),
+  }
+}
+
+function portalUserUiStyleFromRow(row) {
+  if (!row) return null
+  return {
+    orgId: normalizeText(row.org_id),
+    uid: normalizeText(row.uid),
+    styleId: normalizeText(row.style_id),
+    updatedAt: row.updated_at || null,
+    updatedBy: normalizeText(row.updated_by),
+  }
+}
+
+function normalizePortalStyleScope(value) {
+  const scope = normalizeText(value).toLowerCase()
+  return scope === 'organization' || scope === 'org' ? 'organization' : 'user'
+}
+
+function normalizePortalStyleId(value) {
+  const styleId = normalizeText(value)
+  return /^[a-z0-9_-]{1,64}$/i.test(styleId) ? styleId : ''
+}
+
+async function readPortalUiStyleState(client, orgId, requesterUid, includeUsers) {
+  const [orgResult, userResult] = await Promise.all([
+    client.query(
+      `select org_id, default_style_id, updated_at, updated_by
+         from public.org_ui_style
+        where org_id = $1::text
+        limit 1`,
+      [orgId],
+    ),
+    client.query(
+      `select org_id, uid, style_id, updated_at, updated_by
+         from public.user_ui_style_preference
+        where org_id = $1::text
+          and uid = $2::text
+        limit 1`,
+      [orgId, requesterUid],
+    ),
+  ])
+
+  let userPreferences = []
+  if (includeUsers) {
+    const allUsersResult = await client.query(
+      `select org_id, uid, style_id, updated_at, updated_by
+         from public.user_ui_style_preference
+        where org_id = $1::text
+        order by uid asc`,
+      [orgId],
+    )
+    userPreferences = allUsersResult.rows.map(portalUserUiStyleFromRow).filter(Boolean)
+  }
+
+  return {
+    orgDefault: portalOrgUiStyleFromRow(orgResult.rows[0]),
+    userPreference: portalUserUiStyleFromRow(userResult.rows[0]),
+    userPreferences,
+    storage: 'database',
+  }
+}
+
+async function handlePortalUiStyleRequest(req, res, requestUrl) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  const method = String(req.method || 'GET').toUpperCase()
+  if (!['GET', 'POST', 'DELETE'].includes(method)) {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolone metody to GET, POST i DELETE.')
+    return
+  }
+
+  let body = {}
+  if (method !== 'GET') {
+    try {
+      body = await readJsonBody(req)
+    } catch (error) {
+      if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
+        sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
+        return
+      }
+      sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
+      return
+    }
+  }
+
+  const orgId = normalizeOrgId(method === 'GET' ? requestUrl.searchParams.get('orgId') : body?.orgId)
+  if (!orgId) {
+    sendApiError(res, 400, 'INVALID_ORG_ID', 'Brak poprawnego orgId.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status, mapped.code, mapped.message)
+    return
+  }
+
+  const requesterUid = normalizeText(decodedToken?.uid)
+  let client = null
+  try {
+    client = await connectDbClient()
+    await ensurePortalUiStyleTables(client)
+
+    const membership = await getRequesterMembership(client, orgId, requesterUid)
+    if (!membership) {
+      throw workerProfileAccessError(null, 'ustawien wygladu organizacji')
+    }
+    const requesterRole = normalizeRequesterRole(membership.role)
+    const isAdmin = requesterRole === 'ADMIN'
+    const isPlatformActor = normalizeRoleCode(membership.role) === PLATFORM_ROLE
+
+    if (method === 'GET') {
+      const includeUsers = requestUrl.searchParams.get('includeUsers') === '1'
+      if (includeUsers && !isAdmin) {
+        throw workerProfileAccessError(membership, 'odczytu preferencji wygladu uzytkownikow')
+      }
+      const state = await readPortalUiStyleState(client, orgId, isPlatformActor ? '' : requesterUid, includeUsers)
+      sendJson(res, 200, { ok: true, data: state })
+      return
+    }
+
+    const scope = isPlatformActor ? 'organization' : normalizePortalStyleScope(body?.scope)
+    const requestedUid = normalizeText(body?.uid).slice(0, 128)
+    const targetUid = requestedUid || requesterUid
+    if (scope === 'organization' && !isAdmin) {
+      throw workerProfileAccessError(membership, 'zmiany domyslnego wygladu organizacji')
+    }
+    if (scope === 'user' && targetUid !== requesterUid && !isAdmin) {
+      throw workerProfileAccessError(membership, 'zmiany wygladu innego uzytkownika')
+    }
+
+    if (method === 'DELETE') {
+      if (scope === 'organization') {
+        await client.query('delete from public.org_ui_style where org_id = $1::text', [orgId])
+      } else {
+        await client.query(
+          'delete from public.user_ui_style_preference where org_id = $1::text and uid = $2::text',
+          [orgId, targetUid],
+        )
+      }
+      sendJson(res, 200, { ok: true, data: { deleted: true, orgId, scope, uid: targetUid } })
+      return
+    }
+
+    const styleId = normalizePortalStyleId(body?.styleId)
+    if (!styleId) {
+      sendApiError(res, 400, 'INVALID_STYLE_ID', 'Brak poprawnego identyfikatora stylu.')
+      return
+    }
+    const updatedBy = isPlatformActor
+      ? ''
+      : normalizeText(body?.updatedBy || decodedToken?.email || requesterUid).slice(0, 120)
+
+    if (scope === 'organization') {
+      await client.query(
+        `insert into public.org_ui_style (org_id, default_style_id, updated_at, updated_by)
+         values ($1::text, $2::text, now(), nullif($3::text, ''))
+         on conflict (org_id)
+         do update set
+           default_style_id = excluded.default_style_id,
+           updated_at = now(),
+           updated_by = coalesce(excluded.updated_by, org_ui_style.updated_by)`,
+        [orgId, styleId, updatedBy],
+      )
+    } else {
+      await client.query(
+        `insert into public.user_ui_style_preference (org_id, uid, style_id, updated_at, updated_by)
+         values ($1::text, $2::text, $3::text, now(), nullif($4::text, ''))
+         on conflict (org_id, uid)
+         do update set
+           style_id = excluded.style_id,
+           updated_at = now(),
+           updated_by = excluded.updated_by`,
+        [orgId, targetUid, styleId, updatedBy],
+      )
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      data: { saved: true, orgId, scope, uid: targetUid, styleId, storage: 'database' },
+    })
+  } catch (error) {
+    const mappedDb = mapDatabaseConnectionError(error)
+    if (mappedDb) {
+      sendApiError(res, mappedDb.status, mappedDb.code, mappedDb.message)
+      return
+    }
+    sendApiError(
+      res,
+      error?.statusCode || 500,
+      normalizeText(error?.publicCode) || 'PORTAL_UI_STYLE_ERROR',
+      normalizeText(error?.publicMessage) || error?.message || 'Nie udalo sie obsluzyc ustawien wygladu.',
+    )
+  } finally {
+    if (client) client.release()
+  }
+}
+
 async function readPortalScheduleOrders(client, orgId) {
   const result = await client.query(
     `select
@@ -6464,7 +7079,11 @@ async function upsertPortalScheduleOrderTask(client, dbRow) {
   const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ')
   const assignments = columns
     .filter((column) => !['org_id', 'id_task', 'created_at', 'created_by_uid'].includes(column))
-    .map((column) => `${column} = excluded.${column}`)
+    .map((column) => (
+      column === 'updated_by_uid'
+        ? `${column} = coalesce(excluded.${column}, task.${column})`
+        : `${column} = excluded.${column}`
+    ))
     .join(', ')
   const values = columns.map((column) => dbRow[column] ?? null)
   await client.query(
@@ -6483,7 +7102,10 @@ function shouldUseLocalPortalScheduleOrderFileStorage() {
 }
 
 function portalScheduleOrderFilePath(orgId) {
-  const safeOrgId = normalizeOrgId(orgId).replace(/[^a-z0-9_-]/gi, '_') || 'default'
+  const safeOrgId = normalizeOrgId(orgId).replace(/[^a-z0-9_-]/gi, '_')
+  if (!safeOrgId) {
+    throw new Error('INVALID_ORG_ID')
+  }
   return path.join(LOCAL_PORTAL_DATA_DIR, 'portal-schedule-orders', `${safeOrgId}.json`)
 }
 
@@ -6590,14 +7212,28 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
   const requesterUid = normalizeText(decodedToken?.uid)
   let client = null
   try {
-    if (shouldUseLocalPortalScheduleOrderFileStorage()) {
+    if (shouldUseLocalPortalScheduleOrderFileStorage() && !hasPlatformOwnerClaim(decodedToken)) {
+      const requesterRole = await getRequesterRoleViaDataConnect(orgId, token)
+      const allowedRoles =
+        method === 'GET'
+          ? ['ADMIN', 'MANAGER', 'COORDINATOR', 'WORKER']
+          : method === 'DELETE'
+            ? ['ADMIN']
+            : ['ADMIN', 'MANAGER']
+      if (!allowedRoles.includes(requesterRole)) {
+        sendApiError(res, 403, 'FORBIDDEN', 'Brak dostepu do tej organizacji.')
+        return
+      }
       await handlePortalScheduleOrdersFileRequest(method, orgId, body, requesterUid, res)
       return
     }
 
     client = await connectDbClient()
     await ensurePortalScheduleOrderTable(client)
-    await requirePortalScheduleOrderAccess(client, orgId, requesterUid, { write: method !== 'GET' })
+    const requesterRole = await requirePortalScheduleOrderAccess(client, orgId, requesterUid, {
+      write: method === 'POST',
+      remove: method === 'DELETE',
+    })
 
     if (method === 'GET') {
       const orders = await readPortalScheduleOrders(client, orgId)
@@ -6617,7 +7253,8 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
     }
 
     const rawOrders = Array.isArray(body?.orders) ? body.orders : []
-    const rows = rawOrders.map((order) => portalScheduleOrderDbRow(order, orgId, requesterUid)).filter(Boolean).slice(0, 2000)
+    const tenantActorUid = requesterRole === 'ADMIN' && hasPlatformOwnerClaim(decodedToken) ? '' : requesterUid
+    const rows = rawOrders.map((order) => portalScheduleOrderDbRow(order, orgId, tenantActorUid)).filter(Boolean).slice(0, 2000)
     await client.query('begin')
     for (const row of rows) {
       await upsertPortalScheduleOrderTask(client, row)
@@ -6655,7 +7292,10 @@ function shouldUseLocalPortalTaskFileStorage() {
 }
 
 function portalTaskFilePath(orgId) {
-  const safeOrgId = normalizeOrgId(orgId).replace(/[^a-z0-9_-]/gi, '_') || 'default'
+  const safeOrgId = normalizeOrgId(orgId).replace(/[^a-z0-9_-]/gi, '_')
+  if (!safeOrgId) {
+    throw new Error('INVALID_ORG_ID')
+  }
   return path.join(LOCAL_PORTAL_DATA_DIR, 'portal-tasks', `${safeOrgId}.json`)
 }
 
@@ -6803,7 +7443,17 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
   let client = null
 
   try {
-    if (shouldUseLocalPortalTaskFileStorage()) {
+    if (shouldUseLocalPortalTaskFileStorage() && !hasPlatformOwnerClaim(decodedToken)) {
+      const requesterRole = await getRequesterRoleViaDataConnect(orgId, token)
+      const allowedRoles = method === 'GET'
+        ? ['ADMIN', 'MANAGER', 'COORDINATOR']
+        : method === 'DELETE'
+          ? ['ADMIN']
+          : ['ADMIN', 'MANAGER']
+      if (!allowedRoles.includes(requesterRole)) {
+        sendApiError(res, 403, 'FORBIDDEN', 'Brak dostepu do tej organizacji.')
+        return
+      }
       await handlePortalTasksFileRequest(method, orgId, body, requesterUid, res)
       return
     }
@@ -6811,7 +7461,10 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
     client = await connectDbClient()
 
     await ensurePortalTaskTable(client)
-    await requirePortalTaskAccess(client, orgId, requesterUid)
+    const requesterRole = await requirePortalTaskAccess(client, orgId, requesterUid, {
+      write: method === 'POST',
+      remove: method === 'DELETE',
+    })
 
     if (method === 'GET') {
       const tasks = await readPortalTasks(client, orgId)
@@ -6835,6 +7488,13 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
 
     const rawTasks = Array.isArray(body?.tasks) ? body.tasks : []
     const tasks = rawTasks.map((task) => sanitizePortalTaskPayload(task)).filter(Boolean).slice(0, 2000)
+    if (requesterRole === 'ADMIN' && hasPlatformOwnerClaim(decodedToken)) {
+      for (const task of tasks) {
+        for (const key of ['updatedBy', 'updatedByUid', 'createdBy', 'createdByUid', 'editedBy', 'edit']) {
+          if (Object.prototype.hasOwnProperty.call(task, key)) task[key] = null
+        }
+      }
+    }
 
     await client.query('begin')
     for (const task of tasks) {
@@ -6845,9 +7505,9 @@ async function handlePortalTasksRequest(req, res, requestUrl) {
          do update set
            source_comment_key = excluded.source_comment_key,
            payload = excluded.payload,
-           updated_by = excluded.updated_by,
+           updated_by = coalesce(excluded.updated_by, portal_task.updated_by),
            updated_at = now()`,
-        [orgId, task.id, task.sourceCommentKey || null, JSON.stringify(task), requesterUid],
+        [orgId, task.id, task.sourceCommentKey || null, JSON.stringify(task), requesterRole === 'ADMIN' && hasPlatformOwnerClaim(decodedToken) ? null : requesterUid],
       )
     }
     await client.query('commit')
@@ -6958,16 +7618,63 @@ async function proxyApiRequest(req, res, requestUrl) {
   res.end(raw)
 }
 
-const server = http.createServer((req, res) => {
+const platformApi = createPlatformApi({
+  connectDbClient,
+  executeAdminDataConnectOperation,
+  verifyFirebaseIdToken,
+})
+
+const server = http.createServer((req, res) => runWithPlatformRequest(req, () => {
+  const scopedRequest = getPlatformRequestContext()
+  res.once('finish', () => {
+    const audit = scopedRequest?.platformAudit
+    if (!audit) return
+    void (async () => {
+      let auditClient = null
+      try {
+        auditClient = await connectDbClient()
+        await platformRepository.appendAudit(auditClient, {
+          requestId: scopedRequest.requestId,
+          phase: res.statusCode < 400 ? 'SUCCEEDED' : 'FAILED',
+          principal: audit.principal,
+          contextId: audit.access?.context_id,
+          orgId: audit.access?.org_id,
+          operation: audit.operation,
+          target: audit.target,
+          payload: null,
+          result: { httpStatus: res.statusCode },
+          request: scopedRequest,
+        })
+      } catch (error) {
+        console.error('[platform-audit] failed to finalize backend request', error)
+      } finally {
+        auditClient?.release?.()
+      }
+    })()
+  })
   if (req.url === '/healthz') {
     sendJson(res, 200, { ok: true })
     return
   }
 
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+  setRequestPathname(requestUrl.pathname)
+  if (requestUrl.pathname.startsWith('/api/platform/')) {
+    platformApi.handle(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'PLATFORM_API_ERROR', error?.message || 'Unexpected platform API error.')
+    })
+    return
+  }
   if (requestUrl.pathname === MOBILE_STATE_PATH || requestUrl.pathname === MOBILE_SCAN_PATH) {
     handleMobileWorkflowRequest(req, res, requestUrl).catch((error) => {
       sendMobileApiError(res, 500, 'MOBILE_WORKFLOW_ERROR', error?.message || 'Unexpected mobile workflow error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === PORTAL_UI_STYLE_PATH) {
+    handlePortalUiStyleRequest(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'PORTAL_UI_STYLE_ERROR', error?.message || 'Unexpected portal UI style error.')
     })
     return
   }
@@ -7100,6 +7807,18 @@ const server = http.createServer((req, res) => {
     return
   }
 
+  if (requestUrl.pathname === ADMIN_WORKERS_RESTORE_PATH) {
+    handleAdminWorkersRestoreRequest(req, res).catch((error) => {
+      sendApiError(
+        res,
+        500,
+        'WORKER_RESTORE_ERROR',
+        error?.message || 'Unexpected worker restore error.',
+      )
+    })
+    return
+  }
+
   if (requestUrl.pathname === AUTH_SESSION_CONTEXT_PATH) {
     handleAuthSessionContextRequest(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'AUTH_CONTEXT_ERROR', error?.message || 'Unexpected auth context error.')
@@ -7123,6 +7842,26 @@ const server = http.createServer((req, res) => {
 
     handleAdminUsersRequest(req, res).catch((error) => {
       sendApiError(res, 500, 'ADMIN_USERS_ERROR', error?.message || 'Unexpected admin users error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === ADMIN_WORKER_ID_NEXT_PATH) {
+    if (shouldProxyAdminUsersRequest()) {
+      proxyApiRequest(req, res, requestUrl).catch((error) => {
+        sendJson(res, 500, {
+          ok: false,
+          error: {
+            code: 'WORKER_ID_PREVIEW_PROXY_ERROR',
+            message: error?.message || 'Unexpected worker ID preview proxy error.',
+          },
+        })
+      })
+      return
+    }
+
+    handleAdminWorkerIdNextRequest(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'WORKER_ID_PREVIEW_ERROR', error?.message || 'Unexpected worker ID preview error.')
     })
     return
   }
@@ -7166,8 +7905,41 @@ const server = http.createServer((req, res) => {
     }
     sendFile(res, spaEntryFile)
   })
-})
+}))
+
+async function checkWorkerSchemaAtStartup() {
+  if (!hasDatabaseConnectionConfig()) {
+    console.warn('[worker-schema] WORKER_SCHEMA_NOT_READY: missing database configuration')
+    return
+  }
+
+  let client = null
+  try {
+    client = await connectDbClient()
+    const readiness = await workerRepository.inspectWorkerSchema(client)
+    if (readiness.ready) {
+      console.info('[worker-schema] ready')
+    } else {
+      console.warn('[worker-schema] WORKER_SCHEMA_NOT_READY', readiness.missing)
+    }
+    const platformReadiness = await platformRepository.inspectPlatformSchema(client)
+    if (platformReadiness.ready) {
+      console.info('[platform-schema] ready')
+    } else {
+      console.warn('[platform-schema] PLATFORM_SCHEMA_NOT_READY', platformReadiness.missing)
+    }
+  } catch (error) {
+    console.warn(
+      '[worker-schema] readiness check failed',
+      normalizeText(error?.code),
+      normalizeText(error?.message),
+    )
+  } finally {
+    if (client) client.release()
+  }
+}
 
 server.listen(PORT, HOST, () => {
   console.log(`Server listening on http://${HOST}:${PORT}`)
+  void checkWorkerSchemaAtStartup()
 })

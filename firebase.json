@@ -4,7 +4,6 @@
     "public": "web-app/dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
-      { "source": "/authBootstrapMembership", "function": { "functionId": "authBootstrapMembership", "region": "europe-west3" } },
       { "source": "/authProvisionWorker", "function": { "functionId": "authProvisionWorker", "region": "europe-west3" } },
       { "source": "/authRollbackWorker", "function": { "functionId": "authRollbackWorker", "region": "europe-west3" } },
       { "source": "/api/**", "function": { "functionId": "api", "region": "europe-central2" } },

@@ -8,5 +8,6 @@ schema:
       database: iclean-room-database
       cloudSql:
         instanceId: iclean-room-instance
+        schemaValidation: "COMPATIBLE"
 connectorDirs:
   - connectors/example

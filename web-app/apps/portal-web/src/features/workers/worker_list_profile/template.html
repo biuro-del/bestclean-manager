@@ -58,13 +58,13 @@
 
   <div class="worker-profile-filter-grid">
     <div class="tool">
-      <label for="wkType">Typ</label>
+      <label for="wkType">Typ pracownika</label>
       <select id="wkType">
         <option value="">(wszystkie)</option>
-        <option value="ADMIN">ADMIN</option>
-        <option value="Koordynator">Koordynator</option>
+        <option value="Administrator">Administrator</option>
+        <option value="Pracownik Biurowy">Pracownik Biurowy</option>
         <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
-        <option value="Zespół mobilny">Zespół mobilny</option>
+        <option value="Zespół Mobilny">Zespół Mobilny</option>
       </select>
     </div>
 
@@ -208,6 +208,7 @@
       <input id="wkSelectAll" type="checkbox" aria-label="Zaznacz widoczne wiersze" />
     </div>
     <div>Użytkownik</div>
+    <div>Typ pracownika</div>
     <div>Rola</div>
     <div>Kontakt</div>
     <div>Status</div>
@@ -248,8 +249,13 @@
       <h4>Dane podstawowe</h4>
       <div class="grid">
         <div class="field">
-          <label for="wkEditId">ID (A) - blokada</label>
-          <input id="wkEditId" type="text" maxlength="64" disabled />
+          <label for="wkEditId">ID pracownika</label>
+          <input id="wkEditId" type="text" maxlength="128" disabled />
+          <div class="worker-profile-id-composer" id="wkEditIdComposer" hidden>
+            <span class="worker-profile-id-prefix" id="wkEditIdPrefix"></span>
+            <input id="wkEditNumber" type="text" inputmode="numeric" maxlength="10" aria-label="Końcowy numer ID pracownika" />
+          </div>
+          <div class="muted" id="wkEditIdHint">ID istniejącego pracownika jest niemodyfikowalne.</div>
         </div>
 
         <div class="field">
@@ -258,18 +264,31 @@
         </div>
 
         <div class="field">
-          <label for="wkEditLogin">Login (C)</label>
-          <input id="wkEditLogin" type="text" maxlength="120" />
+          <label for="wkEditEmail">Email (login)</label>
+          <input id="wkEditEmail" type="email" maxlength="160" autocomplete="email" placeholder="np. jan.kowalski@gmail.com" />
+          <div class="muted">Na ten adres pracownik będzie się logował.</div>
         </div>
 
         <div class="field">
-            <label for="wkEditType">Typ (K)</label>
-            <select id="wkEditType">
-              <option value="ADMIN">ADMIN</option>
-              <option value="Koordynator">Koordynator</option>
-              <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
-              <option value="Zespół mobilny">Zespół mobilny</option>
-            </select>
+          <label for="wkEditRole">Rola (uprawnienia)</label>
+          <select id="wkEditRole" aria-describedby="wkEditRoleHelp">
+            <option value="OWNER" disabled title="Pełny dostęp. Rola wyłącznie dla założyciela organizacji; nie można jej nadać ani zmienić.">Owner</option>
+            <option value="ADMIN" title="Pełny dostęp: podgląd, dodawanie, edycja i usuwanie.">ADMIN</option>
+            <option value="MANAGER" title="Może przeglądać, dodawać i edytować, ale nie może usuwać.">Manager</option>
+            <option value="COORDINATOR" title="Może logować się do portalu wyłącznie w trybie podglądu.">Koordynator</option>
+            <option value="WORKER" title="Dostęp wyłącznie do aplikacji mobilnej; bez dostępu do portalu.">Worker</option>
+          </select>
+          <div class="muted worker-profile-role-help" id="wkEditRoleHelp"></div>
+        </div>
+
+        <div class="field">
+          <label for="wkEditType">Typ pracownika</label>
+          <select id="wkEditType">
+            <option value="Administrator">Administrator</option>
+            <option value="Pracownik Biurowy">Pracownik Biurowy</option>
+            <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
+            <option value="Zespół Mobilny">Zespół Mobilny</option>
+          </select>
         </div>
 
         <div class="worker-profile-basic-error" id="wkBasicError" role="alert" aria-live="polite" hidden></div>
@@ -293,11 +312,6 @@
         </div>
 
         <div class="field">
-          <label for="wkEditEmail">Email (I)</label>
-          <input id="wkEditEmail" type="email" maxlength="200" />
-        </div>
-
-        <div class="field">
           <label for="wkEditPhone">Telefon (J)</label>
           <input id="wkEditPhone" type="text" maxlength="80" />
         </div>
@@ -307,16 +321,6 @@
     <div class="worker-profile-modal-section">
       <h4 id="wkPasswordSectionTitle">Hasło</h4>
       <div class="grid">
-        <div class="field" id="wkCurrentPassWrap" style="grid-column: 1 / -1; display:none;">
-          <label for="wkCurrentPass">Przypisane hasło (D) - tylko Admin</label>
-          <div class="pass-inline">
-            <input id="wkCurrentPass" type="password" readonly />
-            <button class="btn2" id="wkShowPassBtn" type="button">Pokaż</button>
-            <button class="btn2" id="wkCopyPassBtn" type="button">Kopiuj</button>
-          </div>
-          <div class="muted" id="wkCurrentPassHint" style="margin-top:6px;">Hasło jest pobierane z szyfrowanego sejfu tylko dla Admina.</div>
-        </div>
-
         <div class="field" id="wkNewPassWrap">
           <label for="wkNewPass">Hasło tymczasowe (E)</label>
           <div class="worker-profile-password-input">

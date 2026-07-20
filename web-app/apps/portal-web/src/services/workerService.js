@@ -1,11 +1,9 @@
-import { insertWorkerForOrg, workersForOrg } from '@dataconnect/generated'
-import { executeMutation, executeQuery, mutationRef, queryRef } from 'firebase/data-connect'
+import { platformContextHeaders, workersForOrg } from './platformDataConnectService'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
 const READ_CACHE_MS = 30000
 const DEFAULT_FUNCTIONS_REGION = 'europe-west3'
 const DEFAULT_FUNCTIONS_PROJECT = 'iclean-room'
-const LOGIN_LOCAL_PART_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/
 const workersCache = new Map()
 
 function cachedWorkersKey(orgId) {
@@ -54,79 +52,6 @@ async function readWorkersCached(orgId, loader, options = {}) {
   }
 
   return promise
-}
-
-function resolveNextWorkerId(rows = []) {
-  let maxNumber = 0
-  let padWidth = 3
-
-  rows.forEach((row) => {
-    const raw = String(row?.workerId ?? '').trim().toUpperCase()
-    const match = /^W(\d+)$/.exec(raw)
-    if (!match) {
-      return
-    }
-
-    const numeric = Number.parseInt(match[1], 10)
-    if (Number.isFinite(numeric) && numeric > maxNumber) {
-      maxNumber = numeric
-    }
-    padWidth = Math.max(padWidth, match[1].length)
-  })
-
-  return `W${String(maxNumber + 1).padStart(padWidth, '0')}`
-}
-
-const DEPLOY_HINT =
-  'Brak wdrozonej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean-room.'
-
-function extractNestedErrorMessage(rawMessage) {
-  const text = String(rawMessage ?? '')
-  if (!text) {
-    return ''
-  }
-
-  try {
-    const parsed = JSON.parse(text)
-    const topMessage = String(parsed?.error?.message ?? '').trim()
-    if (topMessage) {
-      return topMessage
-    }
-  } catch {
-    // ignore
-  }
-
-  return ''
-}
-
-function isOperationNotFoundMessage(rawMessage, operationName) {
-  const message = String(rawMessage ?? '')
-  const nested = extractNestedErrorMessage(message)
-  const fullMessage = `${message} ${nested}`.toLowerCase()
-  const operation = String(operationName ?? '').trim().toLowerCase()
-  if (!operation) {
-    return false
-  }
-
-  return (
-    fullMessage.includes(`operation "${operation}" not found`) ||
-    fullMessage.includes(`operation \\"${operation}\\" not found`) ||
-    fullMessage.includes(`operation '${operation}' not found`) ||
-    (fullMessage.includes('operation') && fullMessage.includes('not found') && fullMessage.includes(operation)) ||
-    ((fullMessage.includes('"status":"not_found"') ||
-      fullMessage.includes('"code":404') ||
-      fullMessage.includes('"code":"404"')) &&
-      fullMessage.includes(operation))
-  )
-}
-
-function withOperationNotFoundHint(error, operationName) {
-  const message = error instanceof Error ? error.message : String(error ?? '')
-  if (isOperationNotFoundMessage(message, operationName)) {
-    return new Error(`${DEPLOY_HINT} Brak operacji: ${operationName}.`)
-  }
-
-  return error instanceof Error ? error : new Error(message || DEPLOY_HINT)
 }
 
 function asNullableText(value) {
@@ -185,6 +110,7 @@ function isLocalWorkerAdminEndpoint(value) {
   return (
     endpoint.startsWith('/api/admin/worker-profile/') ||
     endpoint.startsWith('/api/admin/worker-password/') ||
+    endpoint.startsWith('/api/admin/workers/') ||
     endpoint === '/api/auth/provision-worker' ||
     endpoint === '/api/auth/rollback-worker'
   )
@@ -211,7 +137,10 @@ function normalizeWorkerRoleCanonical(value) {
   if (!normalized) {
     return 'WORKER'
   }
-  if (normalized.includes('admin') || normalized.includes('administrator') || normalized.includes('owner')) {
+  if (normalized === 'owner' || normalized.includes('wlasciciel')) {
+    return 'OWNER'
+  }
+  if (normalized.includes('admin') || normalized.includes('administrator')) {
     return 'ADMIN'
   }
   if (normalized.includes('kierownik') || normalized.includes('manager') || normalized.includes('menedzer')) {
@@ -230,23 +159,20 @@ function formatWorkerRoleLabel(value, fallback = 'Pracownik') {
   }
 
   const upper = raw.toUpperCase()
+  if (upper === 'OWNER') return 'Owner'
   if (upper === 'ADMIN') return 'ADMIN'
-  if (upper === 'MANAGER') return 'Kierownik'
+  if (upper === 'MANAGER') return 'Manager'
   if (upper === 'COORDINATOR') return 'Koordynator'
   if (upper === 'WORKER') return 'Pracownik'
   return raw
 }
 
-function normalizeLoginLocalPart(value) {
-  const raw = String(value ?? '').trim().toLowerCase()
-  const localPart = raw.includes('@') ? raw.split('@')[0] : raw
-  if (!localPart) {
-    throw new Error('Pole login jest wymagane.')
+function normalizeWorkerEmail(value) {
+  const email = String(value ?? '').trim().toLowerCase()
+  if (!email || email.length > 160 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error('Podaj poprawny email pracownika.')
   }
-  if (!LOGIN_LOCAL_PART_PATTERN.test(localPart)) {
-    throw new Error('Login moze zawierac tylko litery, cyfry, ".", "-" oraz "_" i nie moze zaczynac/konczyc sie znakiem specjalnym.')
-  }
-  return localPart
+  return email
 }
 
 function hasAsciiControlCharacter(value) {
@@ -260,7 +186,7 @@ function hasAsciiControlCharacter(value) {
   return false
 }
 
-function normalizeWorkerCredentialLogin(value) {
+function normalizeWorkerLogin(value) {
   const login = String(value ?? '').trim()
   if (!login) {
     throw new Error('Pole login jest wymagane.')
@@ -271,67 +197,16 @@ function normalizeWorkerCredentialLogin(value) {
   return login
 }
 
-function normalizeUniqueWorkerValue(value) {
-  return String(value ?? '').trim().toLowerCase()
-}
-
-function findExistingWorkerForOrg(rows = [], login, email) {
-  const normalizedLogin = normalizeUniqueWorkerValue(login)
-  const normalizedEmail = normalizeUniqueWorkerValue(email)
-
-  return (Array.isArray(rows) ? rows : []).find((row) => {
-    const rowLogin = normalizeUniqueWorkerValue(row?.login ?? row?.workerLogin)
-    const rowLoginEmail = normalizeUniqueWorkerValue(row?.loginEmail ?? row?.login_email)
-    const rowEmail = normalizeUniqueWorkerValue(row?.email)
-    return (
-      (normalizedLogin && rowLogin === normalizedLogin) ||
-      (normalizedEmail && (rowLoginEmail === normalizedEmail || rowEmail === normalizedEmail))
-    )
-  })
-}
-
-function findExistingWorkerIdForOrg(rows = [], workerId) {
-  const normalizedWorkerId = normalizeUniqueWorkerValue(workerId)
-  if (!normalizedWorkerId) {
-    return null
-  }
-
-  return (Array.isArray(rows) ? rows : []).find((row) => {
-    const rowWorkerId = normalizeUniqueWorkerValue(row?.workerId ?? row?.worker_id ?? row?.id)
-    return rowWorkerId === normalizedWorkerId
-  })
-}
-
-function createDuplicateWorkerError(existingWorker, login, email) {
-  const sameLogin = normalizeUniqueWorkerValue(existingWorker?.login ?? existingWorker?.workerLogin) === normalizeUniqueWorkerValue(login)
-  const rowLoginEmail = normalizeUniqueWorkerValue(existingWorker?.loginEmail ?? existingWorker?.login_email)
-  const rowEmail = normalizeUniqueWorkerValue(existingWorker?.email)
-  const normalizedEmail = normalizeUniqueWorkerValue(email)
-  const sameEmail = normalizedEmail && (rowLoginEmail === normalizedEmail || rowEmail === normalizedEmail)
-
-  if (sameLogin && sameEmail) {
-    return new Error('Ten użytkownik już istnieje w tej organizacji. Login i email muszą być unikalne w obrębie jednej organizacji.')
-  }
-  if (sameLogin) {
-    return new Error('Ten login jest już zajęty w tej organizacji.')
-  }
-  return new Error('Ten email jest już przypisany do użytkownika w tej organizacji.')
-}
-
-function createDuplicateWorkerIdError(workerId) {
-  return new Error(`ID pracownika ${workerId} jest już zajęte w tej organizacji.`)
-}
-
 function resolveFunctionEndpoint(envKey, functionName) {
   const fromEnv = String(import.meta.env?.[envKey] ?? '').trim()
   const useEmulators = isTrue(import.meta.env.VITE_USE_EMULATORS)
   const apiEndpoints = {
-    authProvisionWorker: '/api/auth/provision-worker',
-    authRollbackWorker: '/api/auth/rollback-worker',
-    workerPasswordReveal: '/api/admin/worker-password/reveal',
+    adminUsers: '/api/admin/users',
+    workerIdNext: '/api/admin/worker-id/next',
     workerPasswordSet: '/api/admin/worker-password/set',
     workerProfileUpdate: '/api/admin/worker-profile/update',
     workerProfileDelete: '/api/admin/worker-profile/delete',
+    workerRestore: '/api/admin/workers/restore',
   }
   if (apiEndpoints[functionName] && !useEmulators) {
     return apiEndpoints[functionName]
@@ -343,23 +218,8 @@ function resolveFunctionEndpoint(envKey, functionName) {
     return fromEnv
   }
 
-  if (functionName === 'authProvisionWorker') {
-    return '/api/auth/provision-worker'
-  }
-  if (functionName === 'authRollbackWorker') {
-    return '/api/auth/rollback-worker'
-  }
-  if (functionName === 'workerPasswordReveal') {
-    return '/api/admin/worker-password/reveal'
-  }
-  if (functionName === 'workerPasswordSet') {
-    return '/api/admin/worker-password/set'
-  }
-  if (functionName === 'workerProfileUpdate') {
-    return '/api/admin/worker-profile/update'
-  }
-  if (functionName === 'workerProfileDelete') {
-    return '/api/admin/worker-profile/delete'
+  if (apiEndpoints[functionName]) {
+    return apiEndpoints[functionName]
   }
 
   if (import.meta.env.DEV && !useEmulators) {
@@ -487,41 +347,60 @@ function resolveFunctionErrorMessage(body, rawText = '', statusCode = null, endp
   return message || code
 }
 
-async function callAuthorizedFunction(functionName, envKey, payload, fallbackMessage) {
+async function callAuthorizedFunction(functionName, envKey, payload, fallbackMessage, options = {}) {
   const firebase = ensureFirebase()
   const user = firebase?.auth?.currentUser ?? null
   if (!user) {
     throw new Error('Musisz byc zalogowany, aby wykonac te operacje.')
   }
 
-  const idToken = await user.getIdToken(true)
   const endpoint = resolveFunctionEndpoint(envKey, functionName)
+  const method = String(options?.method ?? 'POST').toUpperCase()
+  const query = new URLSearchParams()
+  Object.entries(options?.query ?? {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      query.set(key, String(value))
+    }
+  })
+  const requestEndpoint = query.size
+    ? `${endpoint}${endpoint.includes('?') ? '&' : '?'}${query.toString()}`
+    : endpoint
+  const requestBody = method === 'GET' ? null : JSON.stringify(payload ?? {})
+
+  const sendRequest = async (forceTokenRefresh = false) => {
+    const idToken = await user.getIdToken(forceTokenRefresh)
+    return fetch(requestEndpoint, {
+      method,
+      headers: {
+        ...(method === 'GET' ? {} : { 'Content-Type': 'application/json' }),
+        Authorization: `Bearer ${idToken}`,
+        ...platformContextHeaders(),
+      },
+      ...(method === 'GET' ? {} : { body: requestBody }),
+    })
+  }
 
   let response
   try {
-    response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
-      },
-      body: JSON.stringify(payload ?? {}),
-    })
+    response = await sendRequest(false)
+    if (response.status === 401) {
+      response = await sendRequest(true)
+    }
   } catch (error) {
     const networkMessage = error instanceof Error ? error.message : String(error ?? '')
-    if (isLocalWorkerAdminEndpoint(endpoint)) {
-      throw new Error(`${fallbackMessage} Proxy endpointu pracownika nie odpowiada dla ${endpoint}. Uruchom ponownie dev server. ${networkMessage}`)
+    if (isLocalWorkerAdminEndpoint(requestEndpoint)) {
+      throw new Error(`${fallbackMessage} Proxy endpointu pracownika nie odpowiada dla ${requestEndpoint}. Uruchom ponownie dev server. ${networkMessage}`)
     }
-    throw new Error(`${fallbackMessage} Blad sieci podczas polaczenia z funkcja "${functionName}" (${endpoint}). ${networkMessage}`)
+    throw new Error(`${fallbackMessage} Blad sieci podczas polaczenia z funkcja "${functionName}" (${requestEndpoint}). ${networkMessage}`)
   }
 
   const { body, rawText } = await readResponsePayload(response)
   if (!response.ok) {
-    const message = resolveFunctionErrorMessage(body, rawText, response.status, endpoint)
+    const message = resolveFunctionErrorMessage(body, rawText, response.status, requestEndpoint)
     const statusLabel = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`
-    const error = new Error(message || `${fallbackMessage} (${statusLabel}). Funkcja: ${functionName}. Endpoint: ${endpoint}.`)
+    const error = new Error(message || `${fallbackMessage} (${statusLabel}). Funkcja: ${functionName}. Endpoint: ${requestEndpoint}.`)
     error.status = response.status
-    error.endpoint = endpoint
+    error.endpoint = requestEndpoint
     error.functionName = functionName
     error.rawText = rawText
     throw error
@@ -530,34 +409,22 @@ async function callAuthorizedFunction(functionName, envKey, payload, fallbackMes
   return body ?? {}
 }
 
-async function authProvisionWorker(payload) {
+async function adminUsersCreate(payload) {
   return callAuthorizedFunction(
-    'authProvisionWorker',
-    'VITE_AUTH_PROVISION_WORKER_ENDPOINT',
+    'adminUsers',
+    'VITE_ADMIN_USERS_ENDPOINT',
     payload,
-    'Nie udalo sie utworzyc lub podpiac konta Firebase Authentication.',
+    'Nie udalo sie utworzyc pracownika.',
   )
 }
 
-async function authRollbackWorker(rollbackToken) {
-  if (!rollbackToken) {
-    return null
-  }
-
+async function workerIdNext(orgId) {
   return callAuthorizedFunction(
-    'authRollbackWorker',
-    'VITE_AUTH_ROLLBACK_WORKER_ENDPOINT',
-    { rollbackToken },
-    'Nie udalo sie wykonac rollback konta Firebase Authentication.',
-  )
-}
-
-async function workerPasswordReveal(payload) {
-  return callAuthorizedFunction(
-    'workerPasswordReveal',
-    'VITE_WORKER_PASSWORD_REVEAL_ENDPOINT',
-    payload,
-    'Nie udalo sie pobrac hasla pracownika.',
+    'workerIdNext',
+    'VITE_WORKER_ID_NEXT_ENDPOINT',
+    null,
+    'Nie udalo sie pobrac kolejnego ID pracownika.',
+    { method: 'GET', query: { orgId } },
   )
 }
 
@@ -588,37 +455,13 @@ async function workerProfileDelete(payload) {
   )
 }
 
-function getDataConnectOrThrow() {
-  if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
-  }
-
-  const firebase = ensureFirebase()
-  if (!firebase?.dataConnect) {
-    throw new Error('Nie udało się zainicjalizować Data Connect.')
-  }
-
-  return firebase.dataConnect
-}
-
-async function insertWorkerWithMembership(vars) {
-  const dataConnect = getDataConnectOrThrow()
-
-  try {
-    await executeMutation(mutationRef(dataConnect, 'InsertWorkerWithMembershipForOrg', vars))
-  } catch (error) {
-    throw withOperationNotFoundHint(error, 'InsertWorkerWithMembershipForOrg')
-  }
-}
-
-async function assertCanManageWorkersForOrg(orgId) {
-  const dataConnect = getDataConnectOrThrow()
-
-  try {
-    await executeQuery(queryRef(dataConnect, 'CanManageWorkersForOrg', { orgId }))
-  } catch (error) {
-    throw withOperationNotFoundHint(error, 'CanManageWorkersForOrg')
-  }
+async function workerRestore(payload) {
+  return callAuthorizedFunction(
+    'workerRestore',
+    'VITE_WORKER_RESTORE_ENDPOINT',
+    payload,
+    'Nie udalo sie odtworzyc pracownikow z backupu.',
+  )
 }
 
 function mapWorker(orgId, row) {
@@ -627,7 +470,12 @@ function mapWorker(orgId, row) {
   const workerName = String(
     row.workerName ?? row.workername ?? row.worker_name ?? row.name ?? row.displayName ?? row.fullName ?? login,
   ).trim()
-  const rawRole = String(row.role ?? '').trim()
+  const isOwner = Boolean(
+    row.isOwner ||
+    (String(row.ownerWorkerId ?? row.owner_worker_id ?? '').trim() &&
+      String(row.ownerWorkerId ?? row.owner_worker_id ?? '').trim() === workerId),
+  )
+  const rawRole = isOwner ? 'OWNER' : String(row.role ?? '').trim()
   const rawWorkerType = String(row.workerType ?? row.worker_type ?? row.type ?? '').trim()
   const systemRole = normalizeWorkerRoleCanonical(rawRole || rawWorkerType)
   const role = rawRole || systemRole
@@ -644,6 +492,7 @@ function mapWorker(orgId, row) {
     fullName: workerName,
     name: workerName,
     role,
+    isOwner,
     systemRole,
     type: displayType,
     workerType: displayType,
@@ -676,7 +525,19 @@ export async function getWorkers(orgId, filters = {}) {
     const response = fetchPolicy
       ? await workersForOrg({ orgId }, { fetchPolicy })
       : await workersForOrg({ orgId })
-    return response?.data?.workers ?? []
+    let ownerWorkerId = String(response?.data?.organization?.ownerWorkerId ?? '').trim()
+    if (!ownerWorkerId) {
+      try {
+        ownerWorkerId = String((await getNextWorkerIdPreview(orgId))?.ownerWorkerId ?? '').trim()
+      } catch {
+        // Read-only roles can still list workers; the backend remains authoritative for OWNER protection.
+      }
+    }
+    return (response?.data?.workers ?? []).map((row) => ({
+      ...row,
+      ownerWorkerId,
+      isOwner: Boolean(ownerWorkerId && String(row?.workerId ?? '').trim() === ownerWorkerId),
+    }))
   }, { force })
 
   let workers = rows.map((row) => mapWorker(orgId, row))
@@ -707,196 +568,82 @@ export async function getWorkerById(orgId, workerId) {
 }
 
 export async function createWorker(orgId, payload) {
-  const login = String(payload?.login ?? payload?.email ?? `worker-${Date.now()}`).trim()
-  if (!login) {
-    throw new Error('Pole login jest wymagane.')
-  }
-
-  if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
-  }
-
-  const workerName = String(payload?.workerName ?? payload?.name ?? payload?.fullName ?? '').trim() || null
-  const workerType = String(payload?.role ?? payload?.workerType ?? '').trim() || null
-  const loginEmail = String(payload?.loginEmail ?? payload?.email ?? '').trim() || null
-  const phone = String(payload?.phone ?? '').trim() || null
-  ensureFirebase()
-  const existingResponse = await workersForOrg({ orgId })
-  const existingRows = existingResponse?.data?.workers ?? []
-  const requestedWorkerId = asNullableText(payload?.workerId ?? payload?.id)
-  if (requestedWorkerId && findExistingWorkerIdForOrg(existingRows, requestedWorkerId)) {
-    throw createDuplicateWorkerIdError(requestedWorkerId)
-  }
-  const workerId = requestedWorkerId || resolveNextWorkerId(existingRows)
-
-  await insertWorkerForOrg({
-    orgId,
-    login,
-    workerName,
-    loginEmail,
-    role: workerType,
-    active: payload?.active ?? true,
-    email: loginEmail,
-    phone,
-    workerType,
-    workerId,
-  })
-  invalidateWorkersCache(orgId)
-
-  return {
-    id: workerId,
-    workerId,
-    orgId,
-    login,
-    name: workerName ?? login,
-    role: workerType ?? 'Pracownik',
-    type: workerType ?? 'Pracownik',
-    active: payload?.active ?? true,
-    email: loginEmail ?? '',
-    phone: phone ?? '',
-    ...payload,
-  }
+  return createWorkerUser(orgId, payload)
 }
 
-async function createWorkerUserViaProvision(orgId, payload) {
+export async function createWorkerUser(orgId, payload) {
   const normalizedOrgId = String(orgId ?? '').trim()
   if (!normalizedOrgId) {
-    throw new Error('Brak orgId podczas dodawania uzytkownika.')
+    throw new Error('Brak orgId podczas dodawania pracownika.')
   }
 
-  if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
-  }
-
-  const loginLocalPart = normalizeLoginLocalPart(payload?.login ?? payload?.email)
+  const email = normalizeWorkerEmail(payload?.email ?? payload?.loginEmail)
   const password = String(payload?.password ?? '').trim()
-  if (!password || password.length < 6) {
+  if (password.length < 6) {
     throw new Error('Haslo tymczasowe musi miec co najmniej 6 znakow.')
   }
 
-  const workerName = String(payload?.displayName ?? payload?.workerName ?? payload?.name ?? '').trim() || loginLocalPart
+  const displayName =
+    String(payload?.displayName ?? payload?.workerName ?? payload?.name ?? '').trim()
+  if (!displayName) {
+    throw new Error('Podaj imie i nazwisko pracownika.')
+  }
   const role = normalizeWorkerRoleCanonical(payload?.role)
   if (!role) {
     throw new Error('Wybierz poprawny typ pracownika.')
   }
-  const workerType = String(payload?.workerType ?? payload?.role ?? role).trim() || role
-  const active = asBoolean(payload?.active, true)
-  const phone = asNullableText(payload?.phone)
 
-  ensureFirebase()
-  await assertCanManageWorkersForOrg(normalizedOrgId)
-
-  const existingResponse = await workersForOrg({ orgId: normalizedOrgId })
-  const existingRows = existingResponse?.data?.workers ?? []
-  const requestedEmail = asNullableText(payload?.email ?? payload?.loginEmail)
-  const existingWorker = findExistingWorkerForOrg(existingRows, loginLocalPart, requestedEmail)
-  if (existingWorker) {
-    throw createDuplicateWorkerError(existingWorker, loginLocalPart, requestedEmail)
-  }
-  const requestedWorkerId = asNullableText(payload?.workerId ?? payload?.id)
-  if (requestedWorkerId && findExistingWorkerIdForOrg(existingRows, requestedWorkerId)) {
-    throw createDuplicateWorkerIdError(requestedWorkerId)
-  }
-  const workerId = requestedWorkerId || resolveNextWorkerId(existingRows)
-
-  const provisionResponse = await authProvisionWorker({
+  const request = {
     orgId: normalizedOrgId,
-    loginLocalPart,
+    email,
+    displayName,
+    role,
+    workerType: String(payload?.workerType ?? payload?.role ?? role).trim() || role,
     password,
-    workerName,
-    roleLabel: workerType,
-    active,
-  })
-
-  const loginEmail = asNullableText(provisionResponse?.email)
-  const authUid = asNullableText(provisionResponse?.uid)
-  const existing = Boolean(provisionResponse?.existing)
-  const rollbackToken = asNullableText(provisionResponse?.rollbackToken)
-
-  if (!loginEmail || !authUid) {
-    throw new Error('Backend authProvisionWorker zwrocil niepelne dane: brakuje emaila albo uid.')
+    phone: asNullableText(payload?.phone),
+    active: asBoolean(payload?.active, true),
+  }
+  if (
+    payload?.workerNumberOverride !== undefined &&
+    payload?.workerNumberOverride !== null &&
+    payload?.workerNumberOverride !== ''
+  ) {
+    request.workerNumberOverride = payload.workerNumberOverride
   }
 
-  try {
-    await insertWorkerWithMembership({
-      orgId: normalizedOrgId,
-      login: loginLocalPart,
-      workerName,
-      loginEmail,
-      authUid,
-      role,
-      active,
-      email: loginEmail,
-      phone,
-      workerType,
-      workerId,
-    })
-  } catch (error) {
-    if (!existing && rollbackToken) {
-      try {
-        await authRollbackWorker(rollbackToken)
-      } catch (rollbackError) {
-        const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError ?? '')
-        const insertMessage = error instanceof Error ? error.message : String(error ?? '')
-        throw new Error(`${insertMessage} Dodatkowo rollback konta Firebase Auth nie powiodl sie: ${rollbackMessage}`)
-      }
-    }
-    throw error
+  const response = await adminUsersCreate(request)
+  const user = response?.data?.user ?? response?.user ?? null
+  if (!user?.workerId) {
+    throw new Error('Backend nie zwrocil finalnego ID pracownika.')
   }
-
-  let passwordVaultWarning = ''
-  if (payload?.storePassword !== false) {
-    try {
-      await setWorkerPassword(normalizedOrgId, loginLocalPart, password, { skipAuthUpdate: true })
-    } catch (error) {
-      passwordVaultWarning = error instanceof Error ? error.message : String(error ?? '')
-    }
+  if (user?.storage !== 'database' || user?.persistenceVerified !== true) {
+    throw new Error('Backend nie potwierdzil zapisu pracownika w Cloud SQL.')
   }
 
   invalidateWorkersCache(normalizedOrgId)
-
-  return {
-    id: workerId,
-    workerId,
-    orgId: normalizedOrgId,
-    login: loginLocalPart,
-    workerLogin: loginLocalPart,
-    workerName,
-    name: workerName,
-    role,
-    type: workerType,
-    workerType,
-    active,
-    email: loginEmail,
-    loginEmail,
-    authUid,
-    phone: phone ?? '',
-    passwordVaultWarning,
-  }
+  return mapWorker(normalizedOrgId, user)
 }
 
-export async function createWorkerUser(orgId, payload) {
-  return createWorkerUserViaProvision(orgId, payload)
-}
-
-export async function revealWorkerPassword(orgId, login) {
+export async function getNextWorkerIdPreview(orgId) {
   const normalizedOrgId = String(orgId ?? '').trim()
-  const normalizedLogin = normalizeWorkerCredentialLogin(login)
   if (!normalizedOrgId) {
-    throw new Error('Brak orgId podczas pobierania hasla pracownika.')
+    throw new Error('Brak orgId podczas pobierania kolejnego ID pracownika.')
   }
-
-  const response = await workerPasswordReveal({
-    orgId: normalizedOrgId,
-    login: normalizedLogin,
-  })
-
-  return response?.data ?? response ?? {}
+  const response = await workerIdNext(normalizedOrgId)
+  const data = response?.data ?? response ?? {}
+  if (!data?.workerId || !Number.isInteger(Number(data?.workerNumber))) {
+    throw new Error('Backend nie zwrocil poprawnego podgladu ID pracownika.')
+  }
+  return {
+    workerId: String(data.workerId),
+    workerNumber: Number(data.workerNumber),
+    ownerWorkerId: String(data.ownerWorkerId ?? '').trim(),
+  }
 }
 
-export async function setWorkerPassword(orgId, login, password, options = {}) {
+export async function setWorkerPassword(orgId, login, password) {
   const normalizedOrgId = String(orgId ?? '').trim()
-  const normalizedLogin = normalizeWorkerCredentialLogin(login)
+  const normalizedLogin = normalizeWorkerLogin(login)
   const normalizedPassword = String(password ?? '').trim()
   if (!normalizedOrgId) {
     throw new Error('Brak orgId podczas zapisu hasla pracownika.')
@@ -909,12 +656,11 @@ export async function setWorkerPassword(orgId, login, password, options = {}) {
     orgId: normalizedOrgId,
     login: normalizedLogin,
     password: normalizedPassword,
-    skipAuthUpdate: Boolean(options?.skipAuthUpdate),
   })
 
   const data = response?.data ?? response ?? {}
-  if (!data?.hasPassword) {
-    throw new Error('Backend nie potwierdzil zapisu hasla pracownika. Odswiez dane i sprobuj ponownie.')
+  if (!data?.passwordUpdated) {
+    throw new Error('Backend nie potwierdzil zmiany hasla pracownika. Odswiez dane i sprobuj ponownie.')
   }
 
   return data
@@ -927,11 +673,9 @@ export async function updateWorker(orgId, workerId, payload) {
   }
 
   const active = asBoolean(payload?.active, true)
-  const newLogin = asNullableText(payload?.newLogin ?? payload?.nextLogin ?? payload?.loginNew)
   const response = await workerProfileUpdate({
     orgId,
     login,
-    newLogin,
     workerId: asNullableText(payload?.workerId ?? payload?.id) ?? login,
     name: asNullableText(payload?.workerName ?? payload?.name ?? payload?.fullName),
     email: asNullableText(payload?.loginEmail ?? payload?.email),
@@ -949,11 +693,14 @@ export async function updateWorker(orgId, workerId, payload) {
   if (!responseWorker || typeof responseWorker !== 'object' || !String(responseWorker?.login ?? '').trim()) {
     throw new Error('Backend nie potwierdzil trwalego zapisu pracownika. Odswiez dane i sprobuj ponownie.')
   }
-  if (String(response?.data?.storage ?? '').trim() === 'dataconnect' && response?.data?.persistenceVerified !== true) {
-    throw new Error('Backend worker-profile dziala na starej wersji i nie potwierdza zapisu Data Connect. Zrestartuj root npm run dev albo wdroz aktualny backend.')
+  if (
+    String(response?.data?.storage ?? '').trim() !== 'database' ||
+    response?.data?.persistenceVerified !== true
+  ) {
+    throw new Error('Backend nie potwierdzil zapisu profilu pracownika w Cloud SQL.')
   }
 
-  const responseLogin = String(responseWorker?.login ?? newLogin ?? login).trim() || login
+  const responseLogin = String(responseWorker?.login ?? login).trim() || login
   const responseWorkerId = String(responseWorker?.workerId ?? responseWorker?.id ?? payload?.workerId ?? payload?.id ?? responseLogin).trim() || responseLogin
   const responseEmail = String(responseWorker?.email ?? responseWorker?.loginEmail ?? '').trim()
   const responseActive = asBoolean(responseWorker?.active, active)
@@ -1001,7 +748,34 @@ export async function deleteWorker(orgId, workerId, payload = {}) {
     authUid: asNullableText(payload?.authUid ?? payload?.uid),
   })
 
+  const data = response?.data ?? response ?? {}
+  if (data?.storage !== 'database' || data?.persistenceVerified !== true) {
+    throw new Error('Backend nie potwierdzil usuniecia pracownika w Cloud SQL.')
+  }
   invalidateWorkersCache(orgId)
 
-  return response?.data ?? response ?? {}
+  return data
+}
+
+export async function restoreWorkersFromBackup(orgId, rows, options = {}) {
+  const normalizedOrgId = String(orgId ?? '').trim()
+  if (!normalizedOrgId) {
+    throw new Error('Brak orgId podczas odtwarzania pracownikow.')
+  }
+  if (!Array.isArray(rows)) {
+    throw new Error('Backup pracownikow musi zawierac tablice rekordow.')
+  }
+
+  const response = await workerRestore({
+    orgId: normalizedOrgId,
+    rows,
+    sourceLabel: asNullableText(options?.sourceLabel),
+  })
+  const data = response?.data ?? response ?? {}
+  if (data?.persistenceVerified !== true || data?.storage !== 'database') {
+    throw new Error('Backend nie potwierdzil odtworzenia pracownikow w Cloud SQL.')
+  }
+
+  invalidateWorkersCache(normalizedOrgId)
+  return data
 }
