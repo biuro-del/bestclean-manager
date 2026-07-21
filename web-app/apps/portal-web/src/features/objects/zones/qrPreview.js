@@ -1,7 +1,13 @@
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist/build/pdf.mjs'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker&inline'
 
-GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+// Firebase App Hosting serves standalone `.mjs` assets as
+// `application/octet-stream`, which browsers reject for module workers.
+// Keeping the PDF.js worker inline avoids a separate `/assets/*.mjs` request
+// while preserving real worker rendering (instead of the fragile fake worker).
+if (!GlobalWorkerOptions.workerPort) {
+  GlobalWorkerOptions.workerPort = new PdfWorker()
+}
 
 function positiveNumber(value, fallback) {
   const number = Number(value)
