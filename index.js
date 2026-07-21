@@ -51,23 +51,11 @@ function isTrue(value) {
 }
 
 function normalizeApiProxyTarget(value) {
-  const target = String(value || 'https://cleanzi-01.web.app').trim().replace(/\/+$/, '')
-  try {
-    if (new URL(target).hostname.endsWith('.cloudfunctions.net')) {
-      return 'https://cleanzi-01.web.app'
-    }
-  } catch {
-    // Fall back to text matching below.
-  }
-  if (target.toLowerCase().includes('cloudfunctions.net')) {
-    return 'https://cleanzi-01.web.app'
-  }
-  return target
+  return String(value || '').trim().replace(/\/+$/, '')
 }
 
 function normalizeApiProxyForwardedHost(value) {
-  const host = String(value || 'cleanzi-01.web.app').trim()
-  return host === 'iclean-room.web.app' ? 'cleanzi-01.web.app' : host
+  return String(value || '').trim()
 }
 
 const NODE_ENV = String(process.env.NODE_ENV || '').trim().toLowerCase()
@@ -104,33 +92,36 @@ const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
 const PORTAL_EVENTS_PATH = '/api/portal/events'
 const PORTAL_UI_STYLE_PATH = '/api/portal/ui-style'
+const PORTAL_ZONE_QR_CODES_PATH = '/api/portal/zones/qr-codes'
 const MOBILE_STATE_PATH = '/api/mobile/state'
 const MOBILE_SCAN_PATH = '/api/mobile/scan'
-const DATACONNECT_LOCATION = String(process.env.FIREBASE_DATACONNECT_LOCATION || process.env.DATACONNECT_LOCATION || 'europe-west3').trim()
-const DATACONNECT_SERVICE = String(process.env.FIREBASE_DATACONNECT_SERVICE || process.env.DATACONNECT_SERVICE || 'iclean-room-service').trim()
-const DATACONNECT_CONNECTOR = String(process.env.FIREBASE_DATACONNECT_CONNECTOR || process.env.DATACONNECT_CONNECTOR || 'example').trim()
+const DATACONNECT_LOCATION = String(process.env.FIREBASE_DATACONNECT_LOCATION || process.env.DATACONNECT_LOCATION || '').trim()
+const DATACONNECT_SERVICE = String(process.env.FIREBASE_DATACONNECT_SERVICE || process.env.DATACONNECT_SERVICE || '').trim()
+const DATACONNECT_CONNECTOR = String(process.env.FIREBASE_DATACONNECT_CONNECTOR || process.env.DATACONNECT_CONNECTOR || '').trim()
 const MAX_JSON_BODY_BYTES = 1024 * 1024
 const MAX_PROXY_BODY_BYTES = Number(process.env.MAX_PROXY_BODY_BYTES || MAX_JSON_BODY_BYTES)
-const DEFAULT_FIREBASE_PROJECT_ID = 'iclean-room'
-const DEFAULT_FIREBASE_WEB_API_KEY = 'AIzaSyCdRVjbPWm6MueCHOwsmmbdkEKZoO6Dy-k'
 const FIREBASE_PROJECT_ID = String(
   process.env.FIREBASE_PROJECT_ID ||
     process.env.GOOGLE_CLOUD_PROJECT ||
     process.env.GCLOUD_PROJECT ||
     process.env.VITE_FIREBASE_PROJECT_ID ||
-    DEFAULT_FIREBASE_PROJECT_ID,
+    '',
 ).trim()
 const FIREBASE_WEB_API_KEY = String(
-  process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || DEFAULT_FIREBASE_WEB_API_KEY,
+  process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || '',
 ).trim()
+const PLATFORM_FIREBASE_PROJECT_ID = String(process.env.PLATFORM_FIREBASE_PROJECT_ID || '').trim()
+const PLATFORM_FIREBASE_WEB_API_KEY = String(process.env.PLATFORM_FIREBASE_WEB_API_KEY || '').trim()
+const PLATFORM_FIREBASE_ADMIN_APP_NAME = 'cleanzi-platform-admin'
 const CLOUD_SQL_CONNECTION_NAME = String(
   process.env.CLOUD_SQL_CONNECTION_NAME ||
     process.env.INSTANCE_CONNECTION_NAME ||
-    (FIREBASE_PROJECT_ID === 'iclean-room' ? 'iclean-room:europe-west3:iclean-room-instance' : ''),
+    '',
 ).trim()
 const CLOUD_SQL_ADMIN_SCOPE = 'https://www.googleapis.com/auth/sqlservice.admin'
 const ROLLBACK_TOKEN_MAX_AGE_MS = Number(process.env.ROLLBACK_TOKEN_MAX_AGE_MS || 15 * 60 * 1000)
 let firebaseAdminInitialized = false
+let platformFirebaseAdminInitialized = false
 let dbPool = null
 let cloudSqlConnector = null
 let cloudSqlOptionsPromise = null
@@ -871,6 +862,29 @@ function parseFirebaseServiceAccountFromEnv() {
   }
 }
 
+function parsePlatformFirebaseServiceAccountFromEnv() {
+  const jsonValue = normalizeText(process.env.PLATFORM_FIREBASE_SERVICE_ACCOUNT_JSON)
+  const base64Value = normalizeText(process.env.PLATFORM_FIREBASE_SERVICE_ACCOUNT_BASE64)
+  const fileValue = normalizeText(
+    process.env.PLATFORM_FIREBASE_SERVICE_ACCOUNT_FILE ||
+      process.env.PLATFORM_FIREBASE_SERVICE_ACCOUNT_PATH,
+  )
+  const rawValue = jsonValue || (base64Value ? Buffer.from(base64Value, 'base64').toString('utf8') : '')
+  if (!rawValue && !fileValue) return null
+
+  try {
+    const source = rawValue || fs.readFileSync(path.resolve(__dirname, fileValue), 'utf8')
+    const serviceAccount = JSON.parse(source)
+    if (serviceAccount && typeof serviceAccount === 'object' && typeof serviceAccount.private_key === 'string') {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
+    }
+    return serviceAccount
+  } catch (error) {
+    console.error(`[platform-firebase-admin] Invalid service account config: ${error?.message || error}`)
+    return null
+  }
+}
+
 function detectApplicationDefaultCredentialsPath() {
   const candidates = []
   if (process.env.APPDATA) {
@@ -902,6 +916,17 @@ function buildFirebaseAdminOptions() {
   return Object.keys(options).length ? options : undefined
 }
 
+function buildPlatformFirebaseAdminOptions() {
+  const serviceAccount = parsePlatformFirebaseServiceAccountFromEnv()
+  const options = {}
+  if (PLATFORM_FIREBASE_PROJECT_ID) options.projectId = PLATFORM_FIREBASE_PROJECT_ID
+  if (serviceAccount) {
+    options.credential = admin.credential.cert(serviceAccount)
+    if (!options.projectId && serviceAccount.project_id) options.projectId = serviceAccount.project_id
+  }
+  return Object.keys(options).length ? options : undefined
+}
+
 function shouldUseGcloudFirebaseAdminCredential() {
   const mode = normalizeText(
     process.env.FIREBASE_ADMIN_AUTH_CLIENT ||
@@ -929,6 +954,18 @@ function ensureFirebaseAdmin() {
   }
 
   return admin
+}
+
+function ensurePlatformFirebaseAdmin() {
+  if (!PLATFORM_FIREBASE_PROJECT_ID) return null
+  if (!platformFirebaseAdminInitialized) {
+    const existingApp = admin.apps.find((app) => app.name === PLATFORM_FIREBASE_ADMIN_APP_NAME)
+    if (!existingApp) {
+      admin.initializeApp(buildPlatformFirebaseAdminOptions(), PLATFORM_FIREBASE_ADMIN_APP_NAME)
+    }
+    platformFirebaseAdminInitialized = true
+  }
+  return admin.app(PLATFORM_FIREBASE_ADMIN_APP_NAME)
 }
 
 function canUseFirebaseRest() {
@@ -979,6 +1016,33 @@ async function callFirebaseIdentityToolkit(method, payload) {
   return body
 }
 
+async function callPlatformFirebaseIdentityToolkit(method, payload) {
+  if (!PLATFORM_FIREBASE_WEB_API_KEY || typeof fetch !== 'function') {
+    const error = new Error('PLATFORM_FIREBASE_WEB_API_KEY_MISSING')
+    error.publicCode = 'PLATFORM_FIREBASE_CONFIG_MISSING'
+    error.publicMessage = 'Brak backendowej konfiguracji Firebase dla Centrum platformy.'
+    error.statusCode = 500
+    throw error
+  }
+
+  const response = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:${method}?key=${encodeURIComponent(PLATFORM_FIREBASE_WEB_API_KEY)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const error = new Error(normalizeText(body?.error?.message) || `PLATFORM_FIREBASE_REST_${method.toUpperCase()}_FAILED`)
+    error.statusCode = response.status
+    error.firebaseRestMessage = normalizeText(body?.error?.message)
+    throw error
+  }
+  return body
+}
+
 async function verifyFirebaseIdToken(token) {
   try {
     const decodedToken = await ensureFirebaseAdmin().auth().verifyIdToken(token)
@@ -1005,6 +1069,45 @@ async function verifyFirebaseIdToken(token) {
     })
     setVerifiedFirebaseToken(decodedToken)
     return decodedToken
+  }
+}
+
+async function verifyPlatformFirebaseIdToken(token) {
+  if (!PLATFORM_FIREBASE_PROJECT_ID) return verifyFirebaseIdToken(token)
+
+  try {
+    const platformApp = ensurePlatformFirebaseAdmin()
+    const decodedToken = await admin.auth(platformApp).verifyIdToken(token)
+    setVerifiedFirebaseToken(decodedToken)
+    return decodedToken
+  } catch (adminError) {
+    if (!PLATFORM_FIREBASE_WEB_API_KEY) throw adminError
+
+    const body = await callPlatformFirebaseIdentityToolkit('lookup', { idToken: token })
+    const user = Array.isArray(body?.users) ? body.users[0] : null
+    const uid = normalizeText(user?.localId)
+    if (!uid) {
+      const error = new Error('INVALID_ID_TOKEN')
+      error.firebaseRestMessage = 'INVALID_ID_TOKEN'
+      throw error
+    }
+
+    const decodedToken = buildFirebaseRestDecodedToken({
+      token,
+      lookupUser: user,
+      projectId: PLATFORM_FIREBASE_PROJECT_ID,
+    })
+    setVerifiedFirebaseToken(decodedToken)
+    return decodedToken
+  }
+}
+
+async function verifySessionContextFirebaseIdToken(token) {
+  try {
+    return await verifyFirebaseIdToken(token)
+  } catch (organizationError) {
+    if (!PLATFORM_FIREBASE_PROJECT_ID) throw organizationError
+    return verifyPlatformFirebaseIdToken(token)
   }
 }
 
@@ -1308,6 +1411,20 @@ async function queryWorkersForOrgViaDataConnect(orgId, firebaseIdToken) {
 }
 
 async function executeAdminDataConnectOperation(kind, operationName, variables, operationOptions = {}) {
+  const missingConfig = [
+    ['FIREBASE_PROJECT_ID', FIREBASE_PROJECT_ID],
+    ['FIREBASE_DATACONNECT_LOCATION', DATACONNECT_LOCATION],
+    ['FIREBASE_DATACONNECT_SERVICE', DATACONNECT_SERVICE],
+    ['FIREBASE_DATACONNECT_CONNECTOR', DATACONNECT_CONNECTOR],
+  ].filter(([, value]) => !normalizeText(value)).map(([name]) => name)
+  if (missingConfig.length) {
+    const error = new Error('DATACONNECT_CONFIG_MISSING')
+    error.statusCode = 503
+    error.publicCode = 'DATACONNECT_CONFIG_MISSING'
+    error.publicMessage = `Brak konfiguracji backendu Data Connect: ${missingConfig.join(', ')}.`
+    error.details = { missing: missingConfig }
+    throw error
+  }
   ensureFirebaseAdmin()
   const dataConnect = getAdminDataConnect({
     location: DATACONNECT_LOCATION,
@@ -4171,7 +4288,7 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
   try {
     await workerRepository.assertWorkerSchemaReady(client)
 
-    const membership = await workerRepository.getRequesterMembership(
+    const membership = await getRequesterMembership(
       client,
       payload.orgId,
       requesterUid,
@@ -4207,7 +4324,7 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
       [`worker-create:${payload.orgId}`],
     )
 
-    const currentMembership = await workerRepository.getRequesterMembership(
+    const currentMembership = await getRequesterMembership(
       client,
       payload.orgId,
       requesterUid,
@@ -4333,7 +4450,7 @@ async function handleAuthProvisionWorkerRequest(req, res) {
 
   let decodedToken
   try {
-    decodedToken = await verifyFirebaseIdToken(token)
+    decodedToken = await verifySessionContextFirebaseIdToken(token)
   } catch (error) {
     sendFirebaseVerificationError(res, error)
     return
@@ -4393,7 +4510,7 @@ async function handleAuthRollbackWorkerRequest(req, res) {
 
   let decodedToken
   try {
-    decodedToken = await verifyFirebaseIdToken(token)
+    decodedToken = await verifySessionContextFirebaseIdToken(token)
   } catch (error) {
     sendFirebaseVerificationError(res, error)
     return
@@ -4453,13 +4570,13 @@ async function setWorkerPasswordDatabase(payload, decodedToken) {
   const client = await connectDbClient()
   try {
     await workerRepository.assertWorkerSchemaReady(client)
-    const membership = await workerRepository.getRequesterMembership(
+    const membership = await getRequesterMembership(
       client,
       payload.orgId,
       decodedToken.uid,
     )
     const role = normalizeRoleCode(membership?.role)
-    if (!['ADMIN', 'ADMINISTRATOR', 'OWNER', 'SUPERADMIN'].includes(role)) {
+    if (!['ADMIN', 'ADMINISTRATOR', 'OWNER', 'SUPERADMIN', PLATFORM_ROLE].includes(role)) {
       throw workerProfileAccessError(membership, 'resetowania hasla pracownika')
     }
 
@@ -4530,7 +4647,7 @@ async function handleAdminWorkerPasswordSetRequest(req, res) {
 
   let decodedToken
   try {
-    decodedToken = await verifyFirebaseIdToken(token)
+    decodedToken = await verifySessionContextFirebaseIdToken(token)
   } catch (error) {
     sendFirebaseVerificationError(res, error)
     return
@@ -4960,7 +5077,7 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
 
   try {
     await workerRepository.assertWorkerSchemaReady(client)
-    const membership = await workerRepository.getRequesterMembership(
+    const membership = await getRequesterMembership(
       client,
       payload.orgId,
       decodedToken.uid,
@@ -5062,7 +5179,7 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
       [`worker-update:${payload.orgId}:${payload.login}`],
     )
 
-    const currentMembership = await workerRepository.getRequesterMembership(
+    const currentMembership = await getRequesterMembership(
       client,
       payload.orgId,
       decodedToken.uid,
@@ -5236,7 +5353,7 @@ async function handleAdminWorkerProfileUpdateRequest(req, res) {
 
   let decodedToken
   try {
-    decodedToken = await verifyFirebaseIdToken(token)
+    decodedToken = await verifySessionContextFirebaseIdToken(token)
   } catch (error) {
     sendFirebaseVerificationError(res, error)
     return
@@ -5268,7 +5385,7 @@ async function deleteWorkerProfileDatabase(payload, decodedToken) {
 
   try {
     await workerRepository.assertWorkerSchemaReady(client)
-    let membership = await workerRepository.getRequesterMembership(
+    let membership = await getRequesterMembership(
       client,
       payload.orgId,
       decodedToken.uid,
@@ -5319,7 +5436,7 @@ async function deleteWorkerProfileDatabase(payload, decodedToken) {
       [`worker-delete:${payload.orgId}:${payload.login}`],
     )
 
-    membership = await workerRepository.getRequesterMembership(
+    membership = await getRequesterMembership(
       client,
       payload.orgId,
       decodedToken.uid,
@@ -5471,7 +5588,7 @@ async function handleAdminWorkerProfileDeleteRequest(req, res) {
 
   let decodedToken
   try {
-    decodedToken = await verifyFirebaseIdToken(token)
+    decodedToken = await verifySessionContextFirebaseIdToken(token)
   } catch (error) {
     sendFirebaseVerificationError(res, error)
     return
@@ -5531,7 +5648,7 @@ async function handleAdminWorkersRestoreRequest(req, res) {
 
   let decodedToken
   try {
-    decodedToken = await verifyFirebaseIdToken(token)
+    decodedToken = await verifySessionContextFirebaseIdToken(token)
   } catch (error) {
     sendFirebaseVerificationError(res, error)
     return
@@ -5564,7 +5681,7 @@ async function handleAdminWorkersRestoreRequest(req, res) {
   let transactionStarted = false
   try {
     await workerRepository.assertWorkerSchemaReady(client)
-    const membership = await workerRepository.getRequesterMembership(
+    const membership = await getRequesterMembership(
       client,
       orgId,
       decodedToken.uid,
@@ -5575,7 +5692,7 @@ async function handleAdminWorkersRestoreRequest(req, res) {
 
     await client.query('begin')
     transactionStarted = true
-    const currentMembership = await workerRepository.getRequesterMembership(
+    const currentMembership = await getRequesterMembership(
       client,
       orgId,
       decodedToken.uid,
@@ -5631,7 +5748,7 @@ async function getNextWorkerIdPreviewDirect(orgId, requesterUid) {
   const client = await connectDbClient()
   try {
     await workerRepository.assertWorkerSchemaReady(client)
-    const membership = await workerRepository.getRequesterMembership(client, orgId, requesterUid)
+    const membership = await getRequesterMembership(client, orgId, requesterUid)
     if (!isWorkerManagementRole(membership?.role)) {
       throw workerProfileAccessError(membership, 'dodawania pracownikow')
     }
@@ -5669,7 +5786,7 @@ async function handleAdminWorkerIdNextRequest(req, res, requestUrl) {
 
   let decodedToken
   try {
-    decodedToken = await verifyFirebaseIdToken(token)
+    decodedToken = await verifySessionContextFirebaseIdToken(token)
   } catch (error) {
     sendFirebaseVerificationError(res, error)
     return
@@ -5733,7 +5850,7 @@ async function handleAdminUsersRequest(req, res) {
 
   let decodedToken
   try {
-    decodedToken = await verifyFirebaseIdToken(token)
+    decodedToken = await verifySessionContextFirebaseIdToken(token)
   } catch (error) {
     logAdminUsersError(error, 'verify-token')
     sendFirebaseVerificationError(res, error)
@@ -5808,7 +5925,7 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
 
   let decodedToken
   try {
-    decodedToken = await verifyFirebaseIdToken(token)
+    decodedToken = await verifySessionContextFirebaseIdToken(token)
   } catch (error) {
     const mapped = mapFirebaseAdminError(error)
     sendApiError(res, mapped.status, mapped.code, mapped.message)
@@ -6001,6 +6118,304 @@ function sanitizePortalTaskPayload(rawTask) {
     sourceCommentKey: normalizeText(rawTask.sourceCommentKey || rawTask.sourceKey).slice(0, 700),
     updatedAt: normalizeText(rawTask.updatedAt) || nowIso,
     createdAt: normalizeText(rawTask.createdAt) || nowIso,
+  }
+}
+
+const PORTAL_ZONE_QR_FUNCTIONS = new Set([
+  'START',
+  'STOP',
+  'STOP0',
+  'STOP5',
+  'STOP10',
+  'STOP15',
+  'CLEAN',
+  'STREFA_SPECJALNA',
+])
+const PORTAL_ZONE_QR_MAX_QUANTITY = 100
+const PORTAL_ZONE_QR_UNASSIGNED_CLIENT_ID = 'UNASSIGNED'
+
+function normalizePortalZoneQrFunctions(value) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > PORTAL_ZONE_QR_FUNCTIONS.size) return []
+  const functions = value.map((entry) => normalizeText(entry).toUpperCase())
+  if (functions.some((entry) => !PORTAL_ZONE_QR_FUNCTIONS.has(entry))) return []
+  if (new Set(functions).size !== functions.length) return []
+  return functions
+}
+
+function normalizePortalZoneQrQuantity(value) {
+  const quantity = Number(value ?? 1)
+  if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > PORTAL_ZONE_QR_MAX_QUANTITY) return 0
+  return quantity
+}
+
+function normalizePortalZoneQrItems(body) {
+  if (Array.isArray(body?.items)) {
+    if (body.items.length < 1 || body.items.length > PORTAL_ZONE_QR_FUNCTIONS.size) return []
+    const items = body.items.map((item) => ({
+      function: normalizeText(item?.function).toUpperCase(),
+      quantity: normalizePortalZoneQrQuantity(item?.quantity),
+    }))
+    if (items.some((item) => !PORTAL_ZONE_QR_FUNCTIONS.has(item.function) || !item.quantity)) return []
+    if (new Set(items.map((item) => item.function)).size !== items.length) return []
+    return items
+  }
+
+  const functions = normalizePortalZoneQrFunctions(body?.functions)
+  const quantity = normalizePortalZoneQrQuantity(body?.quantity)
+  if (!functions.length || !quantity) return []
+  return functions.map((functionName) => ({ function: functionName, quantity }))
+}
+
+function portalZoneQrOrgToken(orgId) {
+  const token = normalizeText(orgId)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, 42)
+  return token || 'org'
+}
+
+function portalZoneQrNullableText(value, maxLength = 500) {
+  const text = normalizeText(value)
+  return text ? text.slice(0, maxLength) : null
+}
+
+async function requirePortalZoneQrAccess(client, orgId, uid) {
+  const membership = await getRequesterMembership(client, orgId, uid)
+  const role = normalizeRequesterRole(membership?.role)
+  if (!['ADMIN', 'MANAGER', 'OWNER', 'PLATFORM_OWNER'].includes(role)) {
+    const error = new Error('FORBIDDEN')
+    error.statusCode = membership ? 403 : 404
+    error.publicCode = membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING'
+    error.publicMessage = membership
+      ? 'Brak uprawnień do generowania kodów QR stref.'
+      : 'Brak dostępu do tej organizacji.'
+    throw error
+  }
+  return { membership, role }
+}
+
+async function insertPortalZoneQrCodes(client, { orgId, items, clientId, zone, editedBy }) {
+  const orgToken = portalZoneQrOrgToken(orgId)
+  const idPrefix = `QRC_${orgToken}_Z`
+  let transactionStarted = false
+
+  try {
+    await client.query('begin')
+    transactionStarted = true
+    await client.query(
+      "select pg_advisory_xact_lock(hashtext('portal-zone-qr'), hashtext($1::text))",
+      [orgId],
+    )
+
+    let clientName = null
+    let storedClientId = clientId
+    if (clientId) {
+      const clientResult = await client.query(
+        `select name
+           from public.client
+          where org_id = $1::text
+            and client_id = $2::text
+          limit 1`,
+        [orgId, clientId],
+      )
+      if (!clientResult.rows[0]) {
+        const error = new Error('INVALID_CLIENT_ID')
+        error.statusCode = 400
+        error.publicCode = 'INVALID_CLIENT_ID'
+        error.publicMessage = 'Wybrany klient nie należy do aktywnej organizacji.'
+        throw error
+      }
+      clientName = portalZoneQrNullableText(clientResult.rows[0].name, 500)
+    } else {
+      const unassignedClientResult = await client.query(
+        `select 1
+           from public.client
+          where org_id = $1::text
+            and client_id = $2::text
+          limit 1`,
+        [orgId, PORTAL_ZONE_QR_UNASSIGNED_CLIENT_ID],
+      )
+      if (unassignedClientResult.rows[0]) {
+        storedClientId = PORTAL_ZONE_QR_UNASSIGNED_CLIENT_ID
+      }
+    }
+
+    const existingResult = await client.query(
+      `select id
+         from public.zone
+        where org_id = $1::text
+          and left(id, length($2::text)) = $2::text`,
+      [orgId, idPrefix],
+    )
+    let maxNumber = 0n
+    for (const row of existingResult.rows) {
+      const suffix = normalizeText(row?.id).slice(idPrefix.length)
+      if (!/^\d+$/.test(suffix)) continue
+      const number = BigInt(suffix)
+      if (number > maxNumber) maxNumber = number
+    }
+
+    const created = []
+    for (const item of items) {
+      for (let copyIndex = 0; copyIndex < item.quantity; copyIndex += 1) {
+        maxNumber += 1n
+        const zoneId = `${idPrefix}${maxNumber.toString()}`
+        if (zoneId.length > 64) {
+          const error = new Error('ZONE_QR_ID_TOO_LONG')
+          error.statusCode = 422
+          error.publicCode = 'ZONE_QR_ID_TOO_LONG'
+          error.publicMessage = 'Nie można przydzielić kolejnego numeru kodu QR.'
+          throw error
+        }
+        const result = await client.query(
+          `insert into public.zone (
+             org_id,
+             id,
+             client_id,
+             zone,
+             function,
+             edited_by,
+             date,
+             location
+           )
+           values ($1::text, $2::text, $3::text, $4::text, $5::text, $6::text, now(), null)
+           returning id, client_id, zone, function, edited_by, date, location`,
+          [orgId, zoneId, storedClientId, zone, item.function, editedBy],
+        )
+        const row = result.rows[0]
+        created.push({
+          id: normalizeText(row?.id),
+          zoneId: normalizeText(row?.id),
+          qr: normalizeText(row?.id),
+          orgId,
+          clientId:
+            normalizeText(row?.client_id).toUpperCase() === PORTAL_ZONE_QR_UNASSIGNED_CLIENT_ID
+              ? ''
+              : normalizeText(row?.client_id),
+          clientName: clientName || '',
+          name: normalizeText(row?.zone),
+          zone: normalizeText(row?.zone),
+          function: normalizeText(row?.function),
+          editedBy: normalizeText(row?.edited_by),
+          date: row?.date instanceof Date ? row.date.toISOString() : normalizeText(row?.date),
+          location: normalizeText(row?.location),
+        })
+      }
+    }
+
+    await client.query('commit')
+    transactionStarted = false
+    return created
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await client.query('rollback')
+      } catch (rollbackError) {
+        console.error('[portal/zones/qr-codes] rollback failed', rollbackError)
+      }
+    }
+    throw error
+  }
+}
+
+async function handlePortalZoneQrCodesRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  if (String(req.method || '').toUpperCase() !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  let body = {}
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
+      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Żądanie jest zbyt duże.')
+      return
+    }
+    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w żądaniu.')
+    return
+  }
+
+  const orgId = normalizeOrgId(body?.orgId)
+  if (!orgId) {
+    sendApiError(res, 400, 'INVALID_ORG_ID', 'Brak poprawnego orgId.')
+    return
+  }
+  const items = normalizePortalZoneQrItems(body)
+  if (!items.length) {
+    sendApiError(
+      res,
+      400,
+      'INVALID_ZONE_QR_ITEMS',
+      `Wybierz obsługiwane funkcje i podaj dla każdej ilość od 1 do ${PORTAL_ZONE_QR_MAX_QUANTITY}.`,
+    )
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status, mapped.code, mapped.message)
+    return
+  }
+
+  const requesterUid = normalizeText(decodedToken?.uid)
+  const clientId = portalZoneQrNullableText(body?.clientId, 64)
+  const zone = portalZoneQrNullableText(body?.zone, 500)
+  const editedBy = portalZoneQrNullableText(decodedToken?.email || requesterUid, 120)
+  let client = null
+  try {
+    client = await connectDbClient()
+    await requirePortalZoneQrAccess(client, orgId, requesterUid)
+    const codes = await insertPortalZoneQrCodes(client, {
+      orgId,
+      items,
+      clientId,
+      zone,
+      editedBy,
+    })
+    sendJson(res, 201, { ok: true, data: { codes } })
+  } catch (error) {
+    logPortalStorageError('portal/zones/qr-codes', error)
+    const mappedDb = mapDatabaseConnectionError(error)
+    if (mappedDb) {
+      sendApiError(res, mappedDb.status, mappedDb.code, mappedDb.message, publicErrorDetails(error))
+      return
+    }
+    const isConflict = error?.code === '23505'
+    const publicMessage = isConflict
+      ? 'Nie udało się przydzielić unikalnego numeru. Spróbuj ponownie.'
+      : normalizeText(error?.publicMessage) ||
+        (isLocalDevelopmentRuntime() && normalizeText(error?.message)
+          ? `Nie udało się wygenerować kodów QR: ${normalizeText(error.message).slice(0, 300)}`
+          : 'Nie udało się wygenerować kodów QR.')
+    sendApiError(
+      res,
+      isConflict ? 409 : error?.statusCode || 500,
+      isConflict ? 'ZONE_QR_CONFLICT' : normalizeText(error?.publicCode) || 'PORTAL_ZONE_QR_ERROR',
+      publicMessage,
+      publicErrorDetails(error),
+    )
+  } finally {
+    client?.release?.()
   }
 }
 
@@ -7621,7 +8036,7 @@ async function proxyApiRequest(req, res, requestUrl) {
 const platformApi = createPlatformApi({
   connectDbClient,
   executeAdminDataConnectOperation,
-  verifyFirebaseIdToken,
+  verifyFirebaseIdToken: verifyPlatformFirebaseIdToken,
 })
 
 const server = http.createServer((req, res) => runWithPlatformRequest(req, () => {
@@ -7675,6 +8090,13 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   if (requestUrl.pathname === PORTAL_UI_STYLE_PATH) {
     handlePortalUiStyleRequest(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PORTAL_UI_STYLE_ERROR', error?.message || 'Unexpected portal UI style error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === PORTAL_ZONE_QR_CODES_PATH) {
+    handlePortalZoneQrCodesRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'PORTAL_ZONE_QR_ERROR', error?.message || 'Unexpected portal zone QR error.')
     })
     return
   }

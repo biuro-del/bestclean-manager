@@ -32,31 +32,6 @@ export interface ActiveWorkdayPauseForWorkerVariables {
   workerLogin: string;
 }
 
-export interface AdminWorkerCredentialForOrgData {
-  worker?: {
-    login: string;
-    workerName?: string | null;
-    loginEmail?: string | null;
-    email?: string | null;
-    authUid?: string | null;
-  };
-    workerCredential?: {
-      orgId: string;
-      login: string;
-      encryptedPassword: string;
-      iv: string;
-      authTag: string;
-      algorithm: string;
-      updatedAt: TimestampString;
-      updatedBy?: string | null;
-    } & WorkerCredential_Key;
-}
-
-export interface AdminWorkerCredentialForOrgVariables {
-  orgId: string;
-  login: string;
-}
-
 export interface BackupCycle_Key {
   orgId: string;
   cycleId: string;
@@ -86,6 +61,7 @@ export interface BackupCyclesForOrgVariables {
 
 export interface CanManageWorkersForOrgData {
   organizationMember?: {
+    status?: string | null;
     role: string;
   };
 }
@@ -138,10 +114,10 @@ export interface ClientStorageForClientData {
       quantityMin: number;
       quantityMax?: number | null;
     };
-      client: {
-        name?: string | null;
-        status?: string | null;
-      };
+    client: {
+      name?: string | null;
+      status?: string | null;
+    };
   } & ClientStorage_Key)[];
 }
 
@@ -338,26 +314,6 @@ export interface DeleteWorkdayForOrgVariables {
   workdayId: string;
 }
 
-export interface DeleteWorkerProfileForOrgData {
-  workerCredential_deleteMany: number;
-  workdayPause_deleteMany: number;
-  event_deleteMany: number;
-  checkListLog_deleteMany: number;
-  backupCycle_deleteMany: number;
-  taskLogin_delete: number;
-  taskWorkerId_delete: number;
-  workday_deleteMany: number;
-  organizationMember_deleteMany: number;
-  worker_delete?: Worker_Key | null;
-}
-
-export interface DeleteWorkerProfileForOrgVariables {
-  orgId: string;
-  login: string;
-  workerId?: string;
-  authUid?: string;
-}
-
 export interface DeleteZoneForOrgData {
   zone_delete?: Zone_Key | null;
 }
@@ -414,7 +370,7 @@ export interface EventsForOrgData {
       zone?: string | null;
       function?: string | null;
       location?: string | null;
-      client: {
+      client?: {
         clientId: string;
         name?: string | null;
       };
@@ -450,7 +406,7 @@ export interface EventsPageForOrgByStatusData {
       zone?: string | null;
       function?: string | null;
       location?: string | null;
-      client: {
+      client?: {
         clientId: string;
         name?: string | null;
       };
@@ -491,7 +447,7 @@ export interface EventsPageForOrgByWorkerData {
       zone?: string | null;
       function?: string | null;
       location?: string | null;
-      client: {
+      client?: {
         clientId: string;
         name?: string | null;
       };
@@ -532,7 +488,7 @@ export interface EventsPageForOrgByZoneData {
       zone?: string | null;
       function?: string | null;
       location?: string | null;
-      client: {
+      client?: {
         clientId: string;
         name?: string | null;
       };
@@ -573,7 +529,7 @@ export interface EventsPageForOrgData {
       zone?: string | null;
       function?: string | null;
       location?: string | null;
-      client: {
+      client?: {
         clientId: string;
         name?: string | null;
       };
@@ -783,42 +739,6 @@ export interface InsertWorkdayForOrgVariables {
   updatedBy?: string | null;
 }
 
-export interface InsertWorkerForOrgData {
-  worker_insert: Worker_Key;
-}
-
-export interface InsertWorkerForOrgVariables {
-  orgId: string;
-  login: string;
-  workerName?: string | null;
-  loginEmail?: string | null;
-  role?: string | null;
-  active?: boolean | null;
-  email?: string | null;
-  phone?: string | null;
-  workerType?: string | null;
-  workerId?: string | null;
-}
-
-export interface InsertWorkerWithMembershipForOrgData {
-  worker_insert: Worker_Key;
-  organizationMember_upsert: OrganizationMember_Key;
-}
-
-export interface InsertWorkerWithMembershipForOrgVariables {
-  orgId: string;
-  login: string;
-  workerName?: string | null;
-  loginEmail?: string | null;
-  authUid: string;
-  role?: string | null;
-  active?: boolean | null;
-  email?: string | null;
-  phone?: string | null;
-  workerType?: string | null;
-  workerId?: string | null;
-}
-
 export interface InsertZoneForOrgData {
   zone_insert: Zone_Key;
 }
@@ -826,7 +746,7 @@ export interface InsertZoneForOrgData {
 export interface InsertZoneForOrgVariables {
   orgId: string;
   zoneId: string;
-  clientId: string;
+  clientId?: string | null;
   zone?: string | null;
   function?: string | null;
   editedBy?: string | null;
@@ -838,6 +758,8 @@ export interface MyOrganizationsData {
   organizationMembers: ({
     orgId: string;
     role: string;
+    workerId?: string | null;
+    status?: string | null;
     organization: {
       orgId: string;
       name: string;
@@ -884,41 +806,14 @@ export interface OrganizationMember_Key {
   __typename?: 'OrganizationMember_Key';
 }
 
+export interface OrganizationSubscription_Key {
+  orgId: string;
+  __typename?: 'OrganizationSubscription_Key';
+}
+
 export interface Organization_Key {
   orgId: string;
   __typename?: 'Organization_Key';
-}
-
-export interface RenameWorkerForOrgData {
-  worker_insert: Worker_Key;
-  organizationMember_upsert: OrganizationMember_Key;
-  workdayPause_updateMany: number;
-  event_updateMany: number;
-  workday_updateMany: number;
-  backupCycle_updateMany: number;
-  checkListLog_updateMany: number;
-  taskLogin_update: number;
-  taskWorkerId_update: number;
-  workerCredential_updateMany: number;
-  worker_delete?: Worker_Key | null;
-}
-
-export interface RenameWorkerForOrgVariables {
-  orgId: string;
-  login: string;
-  newLogin?: string;
-  workerName?: string | null;
-  loginEmail?: string | null;
-  authUid?: string;
-  role?: string | null;
-  memberRole?: string | null;
-  active?: boolean | null;
-  email?: string | null;
-  phone?: string | null;
-  workerType?: string | null;
-  workerId?: string | null;
-  createdAt?: TimestampString | null;
-  edit?: string | null;
 }
 
 export interface StartWorkdayPauseData {
@@ -1215,45 +1110,6 @@ export interface UpdateWorkdayForOrgVariables {
   updatedBy?: string | null;
 }
 
-export interface UpdateWorkerForOrgData {
-  worker_update?: Worker_Key | null;
-}
-
-export interface UpdateWorkerForOrgVariables {
-  orgId: string;
-  login: string;
-  workerName?: string | null;
-  loginEmail?: string | null;
-  role?: string | null;
-  active?: boolean | null;
-  email?: string | null;
-  phone?: string | null;
-  workerType?: string | null;
-  workerId?: string | null;
-  edit?: string | null;
-}
-
-export interface UpdateWorkerProfileForOrgData {
-  worker_update?: Worker_Key | null;
-  organizationMember_upsert: OrganizationMember_Key;
-}
-
-export interface UpdateWorkerProfileForOrgVariables {
-  orgId: string;
-  login: string;
-  workerName?: string | null;
-  loginEmail?: string | null;
-  authUid?: string;
-  role?: string | null;
-  memberRole?: string | null;
-  active?: boolean | null;
-  email?: string | null;
-  phone?: string | null;
-  workerType?: string | null;
-  workerId?: string | null;
-  edit?: string | null;
-}
-
 export interface UpdateZoneForOrgData {
   zone_update?: Zone_Key | null;
 }
@@ -1261,7 +1117,7 @@ export interface UpdateZoneForOrgData {
 export interface UpdateZoneForOrgVariables {
   orgId: string;
   zoneId: string;
-  clientId: string;
+  clientId?: string | null;
   zone?: string | null;
   function?: string | null;
   editedBy?: string | null;
@@ -1352,20 +1208,6 @@ export interface UpsertUserUiStylePreferenceForOrgVariables {
   orgId: string;
   uid: string;
   styleId: string;
-  updatedBy?: string | null;
-}
-
-export interface UpsertWorkerCredentialForOrgData {
-  workerCredential_upsert: WorkerCredential_Key;
-}
-
-export interface UpsertWorkerCredentialForOrgVariables {
-  orgId: string;
-  login: string;
-  encryptedPassword: string;
-  iv: string;
-  authTag: string;
-  algorithm: string;
   updatedBy?: string | null;
 }
 
@@ -1597,10 +1439,10 @@ export interface WorkdaysPageForOrgVariables {
   offset?: number | null;
 }
 
-export interface WorkerCredential_Key {
+export interface WorkerIdReservation_Key {
   orgId: string;
-  login: string;
-  __typename?: 'WorkerCredential_Key';
+  workerNumber: number;
+  __typename?: 'WorkerIdReservation_Key';
 }
 
 export interface WorkerWorkdaysForOrgData {
@@ -1639,6 +1481,9 @@ export interface Worker_Key {
 }
 
 export interface WorkersForOrgData {
+  organization?: {
+    ownerWorkerId?: string | null;
+  };
   workers: ({
     login: string;
     workerId?: string | null;
@@ -1669,7 +1514,7 @@ export interface Zone_Key {
 export interface ZonesForOrgData {
   zones: ({
     zoneId: string;
-    clientId: string;
+    clientId?: string | null;
     zone?: string | null;
     function?: string | null;
     editedBy?: string | null;
@@ -1681,90 +1526,6 @@ export interface ZonesForOrgData {
 export interface ZonesForOrgVariables {
   orgId: string;
 }
-
-interface InsertWorkerForOrgRef {
-  /* Allow users to create refs without passing in DataConnect */
-  (vars: InsertWorkerForOrgVariables): MutationRef<InsertWorkerForOrgData, InsertWorkerForOrgVariables>;
-  /* Allow users to pass in custom DataConnect instances */
-  (dc: DataConnect, vars: InsertWorkerForOrgVariables): MutationRef<InsertWorkerForOrgData, InsertWorkerForOrgVariables>;
-  operationName: string;
-}
-export const insertWorkerForOrgRef: InsertWorkerForOrgRef;
-
-export function insertWorkerForOrg(vars: InsertWorkerForOrgVariables): MutationPromise<InsertWorkerForOrgData, InsertWorkerForOrgVariables>;
-export function insertWorkerForOrg(dc: DataConnect, vars: InsertWorkerForOrgVariables): MutationPromise<InsertWorkerForOrgData, InsertWorkerForOrgVariables>;
-
-interface InsertWorkerWithMembershipForOrgRef {
-  /* Allow users to create refs without passing in DataConnect */
-  (vars: InsertWorkerWithMembershipForOrgVariables): MutationRef<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
-  /* Allow users to pass in custom DataConnect instances */
-  (dc: DataConnect, vars: InsertWorkerWithMembershipForOrgVariables): MutationRef<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
-  operationName: string;
-}
-export const insertWorkerWithMembershipForOrgRef: InsertWorkerWithMembershipForOrgRef;
-
-export function insertWorkerWithMembershipForOrg(vars: InsertWorkerWithMembershipForOrgVariables): MutationPromise<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
-export function insertWorkerWithMembershipForOrg(dc: DataConnect, vars: InsertWorkerWithMembershipForOrgVariables): MutationPromise<InsertWorkerWithMembershipForOrgData, InsertWorkerWithMembershipForOrgVariables>;
-
-interface UpdateWorkerForOrgRef {
-  /* Allow users to create refs without passing in DataConnect */
-  (vars: UpdateWorkerForOrgVariables): MutationRef<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
-  /* Allow users to pass in custom DataConnect instances */
-  (dc: DataConnect, vars: UpdateWorkerForOrgVariables): MutationRef<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
-  operationName: string;
-}
-export const updateWorkerForOrgRef: UpdateWorkerForOrgRef;
-
-export function updateWorkerForOrg(vars: UpdateWorkerForOrgVariables): MutationPromise<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
-export function updateWorkerForOrg(dc: DataConnect, vars: UpdateWorkerForOrgVariables): MutationPromise<UpdateWorkerForOrgData, UpdateWorkerForOrgVariables>;
-
-interface UpdateWorkerProfileForOrgRef {
-  /* Allow users to create refs without passing in DataConnect */
-  (vars: UpdateWorkerProfileForOrgVariables): MutationRef<UpdateWorkerProfileForOrgData, UpdateWorkerProfileForOrgVariables>;
-  /* Allow users to pass in custom DataConnect instances */
-  (dc: DataConnect, vars: UpdateWorkerProfileForOrgVariables): MutationRef<UpdateWorkerProfileForOrgData, UpdateWorkerProfileForOrgVariables>;
-  operationName: string;
-}
-export const updateWorkerProfileForOrgRef: UpdateWorkerProfileForOrgRef;
-
-export function updateWorkerProfileForOrg(vars: UpdateWorkerProfileForOrgVariables): MutationPromise<UpdateWorkerProfileForOrgData, UpdateWorkerProfileForOrgVariables>;
-export function updateWorkerProfileForOrg(dc: DataConnect, vars: UpdateWorkerProfileForOrgVariables): MutationPromise<UpdateWorkerProfileForOrgData, UpdateWorkerProfileForOrgVariables>;
-
-interface RenameWorkerForOrgRef {
-  /* Allow users to create refs without passing in DataConnect */
-  (vars: RenameWorkerForOrgVariables): MutationRef<RenameWorkerForOrgData, RenameWorkerForOrgVariables>;
-  /* Allow users to pass in custom DataConnect instances */
-  (dc: DataConnect, vars: RenameWorkerForOrgVariables): MutationRef<RenameWorkerForOrgData, RenameWorkerForOrgVariables>;
-  operationName: string;
-}
-export const renameWorkerForOrgRef: RenameWorkerForOrgRef;
-
-export function renameWorkerForOrg(vars: RenameWorkerForOrgVariables): MutationPromise<RenameWorkerForOrgData, RenameWorkerForOrgVariables>;
-export function renameWorkerForOrg(dc: DataConnect, vars: RenameWorkerForOrgVariables): MutationPromise<RenameWorkerForOrgData, RenameWorkerForOrgVariables>;
-
-interface DeleteWorkerProfileForOrgRef {
-  /* Allow users to create refs without passing in DataConnect */
-  (vars: DeleteWorkerProfileForOrgVariables): MutationRef<DeleteWorkerProfileForOrgData, DeleteWorkerProfileForOrgVariables>;
-  /* Allow users to pass in custom DataConnect instances */
-  (dc: DataConnect, vars: DeleteWorkerProfileForOrgVariables): MutationRef<DeleteWorkerProfileForOrgData, DeleteWorkerProfileForOrgVariables>;
-  operationName: string;
-}
-export const deleteWorkerProfileForOrgRef: DeleteWorkerProfileForOrgRef;
-
-export function deleteWorkerProfileForOrg(vars: DeleteWorkerProfileForOrgVariables): MutationPromise<DeleteWorkerProfileForOrgData, DeleteWorkerProfileForOrgVariables>;
-export function deleteWorkerProfileForOrg(dc: DataConnect, vars: DeleteWorkerProfileForOrgVariables): MutationPromise<DeleteWorkerProfileForOrgData, DeleteWorkerProfileForOrgVariables>;
-
-interface UpsertWorkerCredentialForOrgRef {
-  /* Allow users to create refs without passing in DataConnect */
-  (vars: UpsertWorkerCredentialForOrgVariables): MutationRef<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
-  /* Allow users to pass in custom DataConnect instances */
-  (dc: DataConnect, vars: UpsertWorkerCredentialForOrgVariables): MutationRef<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
-  operationName: string;
-}
-export const upsertWorkerCredentialForOrgRef: UpsertWorkerCredentialForOrgRef;
-
-export function upsertWorkerCredentialForOrg(vars: UpsertWorkerCredentialForOrgVariables): MutationPromise<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
-export function upsertWorkerCredentialForOrg(dc: DataConnect, vars: UpsertWorkerCredentialForOrgVariables): MutationPromise<UpsertWorkerCredentialForOrgData, UpsertWorkerCredentialForOrgVariables>;
 
 interface UpsertOrgUiStyleForOrgRef {
   /* Allow users to create refs without passing in DataConnect */
@@ -2233,18 +1994,6 @@ export const workersForOrgRef: WorkersForOrgRef;
 
 export function workersForOrg(vars: WorkersForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkersForOrgData, WorkersForOrgVariables>;
 export function workersForOrg(dc: DataConnect, vars: WorkersForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<WorkersForOrgData, WorkersForOrgVariables>;
-
-interface AdminWorkerCredentialForOrgRef {
-  /* Allow users to create refs without passing in DataConnect */
-  (vars: AdminWorkerCredentialForOrgVariables): QueryRef<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
-  /* Allow users to pass in custom DataConnect instances */
-  (dc: DataConnect, vars: AdminWorkerCredentialForOrgVariables): QueryRef<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
-  operationName: string;
-}
-export const adminWorkerCredentialForOrgRef: AdminWorkerCredentialForOrgRef;
-
-export function adminWorkerCredentialForOrg(vars: AdminWorkerCredentialForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
-export function adminWorkerCredentialForOrg(dc: DataConnect, vars: AdminWorkerCredentialForOrgVariables, options?: ExecuteQueryOptions): QueryPromise<AdminWorkerCredentialForOrgData, AdminWorkerCredentialForOrgVariables>;
 
 interface ClientsForOrgRef {
   /* Allow users to create refs without passing in DataConnect */

@@ -2,18 +2,10 @@ import { resolve } from 'node:path'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
-const DEFAULT_REMOTE_API_TARGET = 'https://cleanzi-01--iclean-room.europe-west4.hosted.app'
+const DEFAULT_LOCAL_API_TARGET = 'http://127.0.0.1:8080'
 
 function normalizeApiProxyTarget(value) {
-  const target = String(value || DEFAULT_REMOTE_API_TARGET).trim().replace(/\/+$/, '')
-  try {
-    if (new URL(target).hostname.endsWith('.cloudfunctions.net')) {
-      return DEFAULT_REMOTE_API_TARGET
-    }
-  } catch {
-    // Fall back to text matching below.
-  }
-  return target.toLowerCase().includes('cloudfunctions.net') ? DEFAULT_REMOTE_API_TARGET : target
+  return String(value || DEFAULT_LOCAL_API_TARGET).trim().replace(/\/+$/, '')
 }
 
 function normalizeTarget(value) {
@@ -28,7 +20,15 @@ function resolveForwardedHost(target) {
   try {
     return new URL(target).host
   } catch {
-    return 'cleanzi-01--iclean-room.europe-west4.hosted.app'
+    return '127.0.0.1:8080'
+  }
+}
+
+function resolveForwardedProtocol(target) {
+  try {
+    return new URL(target).protocol.replace(':', '') || 'http'
+  } catch {
+    return 'http'
   }
 }
 
@@ -41,10 +41,12 @@ function resolveInputHtmlMap() {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   normalizeTarget(process.env.APP_TARGET || mode)
-  const projectId = String(env.VITE_FIREBASE_PROJECT_ID || 'iclean-room').trim() || 'iclean-room'
   const apiProxyTarget = normalizeApiProxyTarget(
-    env.VITE_DEV_API_PROXY_TARGET || process.env.VITE_DEV_API_PROXY_TARGET || DEFAULT_REMOTE_API_TARGET,
+    env.VITE_DEV_API_PROXY_TARGET || process.env.VITE_DEV_API_PROXY_TARGET || DEFAULT_LOCAL_API_TARGET,
   )
+  const functionsProxyTarget = String(
+    env.VITE_DEV_FUNCTIONS_PROXY_TARGET || process.env.VITE_DEV_FUNCTIONS_PROXY_TARGET || '',
+  ).trim().replace(/\/+$/, '')
   const localAdminApiProxyTarget = normalizeApiProxyTarget(
       env.VITE_DEV_WORKER_API_PROXY_TARGET ||
       process.env.VITE_DEV_WORKER_API_PROXY_TARGET ||
@@ -56,34 +58,35 @@ export default defineConfig(({ mode }) => {
     target: localAdminApiProxyTarget,
     changeOrigin: true,
     headers: {
-      origin: DEFAULT_REMOTE_API_TARGET,
-      referer: `${DEFAULT_REMOTE_API_TARGET}/`,
+      origin: localAdminApiProxyTarget,
+      referer: `${localAdminApiProxyTarget}/`,
       'x-forwarded-host': resolveForwardedHost(localAdminApiProxyTarget),
-      'x-forwarded-proto': 'https',
-      'x-forwarded-port': '443',
-      'x-forwarded-server': 'cleanzi-01.web.app',
+      'x-forwarded-proto': resolveForwardedProtocol(localAdminApiProxyTarget),
     },
     configure: (proxy) => {
       proxy.on('proxyReq', (proxyReq) => {
-        proxyReq.setHeader('origin', DEFAULT_REMOTE_API_TARGET)
-        proxyReq.setHeader('referer', `${DEFAULT_REMOTE_API_TARGET}/`)
-        proxyReq.setHeader('x-forwarded-host', 'cleanzi-01.web.app')
-        proxyReq.setHeader('x-forwarded-proto', 'https')
-        proxyReq.setHeader('x-forwarded-port', '443')
-        proxyReq.setHeader('x-forwarded-server', 'cleanzi-01.web.app')
+        proxyReq.setHeader('origin', localAdminApiProxyTarget)
+        proxyReq.setHeader('referer', `${localAdminApiProxyTarget}/`)
+        proxyReq.setHeader('x-forwarded-host', resolveForwardedHost(localAdminApiProxyTarget))
+        proxyReq.setHeader('x-forwarded-proto', resolveForwardedProtocol(localAdminApiProxyTarget))
       })
     },
   }
 
   return {
     plugins: [react()],
+    resolve: {
+      dedupe: ['firebase'],
+    },
     server: {
       proxy: {
-        '/__functions': {
-          target: `https://europe-west3-${projectId}.cloudfunctions.net`,
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/__functions/, ''),
-        },
+        ...(functionsProxyTarget ? {
+          '/__functions': {
+            target: functionsProxyTarget,
+            changeOrigin: true,
+            rewrite: (path) => path.replace(/^\/__functions/, ''),
+          },
+        } : {}),
         '/api/admin/worker-profile': localAdminApiProxy,
         '/api/admin/worker-password': localAdminApiProxy,
         '/api/auth/provision-worker': localAdminApiProxy,
@@ -93,7 +96,7 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           headers: {
             'x-forwarded-host': resolveForwardedHost(apiProxyTarget),
-            'x-forwarded-proto': 'https',
+            'x-forwarded-proto': resolveForwardedProtocol(apiProxyTarget),
           },
         },
       },

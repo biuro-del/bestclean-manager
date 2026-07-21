@@ -99,10 +99,7 @@ export function createDashboardFeature(ctx) {
     getWorkdays,
     getWorkers,
     getZones,
-    isBlockingModalOpen,
-    isPortalInteractionBusy,
     workerIsAssignable,
-    queuePortalDeferredNotification,
     clearPortalDeferredNotification,
     kanbanColumnsForStatus,
     kanbanCurrentUserOption,
@@ -118,7 +115,6 @@ export function createDashboardFeature(ctx) {
     normalizeVisibleEventComment,
     openDashboardEntityHistory,
     openDashboardWorkerHistory,
-    openEventEditor,
     openEventHistoryFromRow,
     ordersListSourceOrders,
     ordersSyncRemoteTimelineOrders,
@@ -1170,15 +1166,6 @@ export function createDashboardFeature(ctx) {
       startAt,
       endAt,
     }
-  }
-
-  async function openDashboardActivityEventEditor(bar) {
-    const row = dashboardActivityEventRowFromBar(bar)
-    if (!row) {
-      showTransientNotice('Nie znaleziono zdarzenia do edycji.', 'error')
-      return
-    }
-    await openEventEditor(row)
   }
 
   function dashboardActivityWorkdayDetailFromBar(bar) {

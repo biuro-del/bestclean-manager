@@ -17,6 +17,7 @@ type Organization @table(
   ownerWorkerId: String @col(name: "owner_worker_id", dataType: "varchar(128)")
   deletedAt: Timestamp @col(name: "deleted_at")
   createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
 }
 
 type OrganizationMember @table(
@@ -46,7 +47,17 @@ type OrganizationSubscription @table(
   organization: Organization! @ref(fields: "orgId", references: "orgId")
   planCode: String @col(name: "plan_code", dataType: "varchar(30)")
   status: String @col(name: "status", dataType: "varchar(30)")
+  trialStartedAt: Timestamp @col(name: "trial_started_at")
   trialEndsAt: Timestamp @col(name: "trial_ends_at")
+  currentPeriodStartsAt: Timestamp @col(name: "current_period_starts_at")
+  currentPeriodEndsAt: Timestamp @col(name: "current_period_ends_at")
+  activatedAt: Timestamp @col(name: "activated_at")
+  canceledAt: Timestamp @col(name: "canceled_at")
+  providerCode: String @col(name: "provider_code", dataType: "varchar(40)")
+  providerSubscriptionId: String @col(name: "provider_subscription_id", dataType: "varchar(255)")
+  createdAt: Timestamp @col(name: "created_at")
+  updatedAt: Timestamp @col(name: "updated_at")
+  version: Int! @col(name: "version") @default(value: 0)
 }
 
 type OrgUiStyle @table(
@@ -212,8 +223,8 @@ type Zone @table(
   # RENAMED FIELD: was `id`, now `ZoneId` (DB column stays `id`)
   zoneId: String! @col(name: "id", dataType: "varchar(64)")
 
-  clientId: String! @col(name: "client_id", dataType: "varchar(64)")
-  client: Client! @ref(fields: ["orgId", "clientId"], references: ["orgId", "clientId"])
+  clientId: String @col(name: "client_id", dataType: "varchar(64)")
+  client: Client @ref(fields: ["orgId", "clientId"], references: ["orgId", "clientId"])
 
   zone: String @col(name: "zone")
   function: String @col(name: "function")

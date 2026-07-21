@@ -3,10 +3,10 @@ const fs = require('node:fs')
 const http = require('node:http')
 const path = require('node:path')
 
-const DEFAULT_REMOTE_API_TARGET = 'https://cleanzi-01--iclean-room.europe-west4.hosted.app'
-const DEFAULT_REMOTE_API_HOST = 'cleanzi-01--iclean-room.europe-west4.hosted.app'
-
 loadRootEnvFile()
+
+const configuredRemoteApiTarget = String(process.env.API_PROXY_TARGET || '').trim().replace(/\/+$/, '')
+const configuredRemoteApiHost = String(process.env.API_PROXY_FORWARDED_HOST || '').trim()
 
 const isWindows = process.platform === 'win32'
 const npmCommand = isWindows ? 'npm.cmd' : 'npm'
@@ -441,7 +441,7 @@ console.log(`[dev] worker-profile -> ${workerProfileMode} (${workerProfileModeSt
 console.log(`[dev] worker-profile storage -> ${workerProfileStorageMode}`)
 if (workerProfileMode === 'proxy') {
   console.warn(
-    `[dev] worker-profile proxy -> ${DEFAULT_REMOTE_API_TARGET}. If you see UPSTREAM_FORBIDDEN_HOST, stop old dev processes or use WORKER_PROFILE_MODE=local with local DB/Firebase Admin config.`,
+    `[dev] worker-profile proxy -> ${configuredRemoteApiTarget || 'disabled'}. Set API_PROXY_TARGET or use local DB/Firebase Admin config.`,
   )
 } else {
   if (!hasLocalDbConfig() && !['dataconnect', 'data-connect', 'firebase', 'https'].includes(workerProfileStorageMode)) {
@@ -453,7 +453,7 @@ if (workerProfileMode === 'proxy') {
     )
   }
 }
-console.log(`[dev] generic DB proxy -> ${DEFAULT_REMOTE_API_TARGET}`)
+console.log(`[dev] generic DB proxy -> ${configuredRemoteApiTarget || 'disabled'}`)
 console.log(`[dev] backend NODE_OPTIONS -> ${backendNodeOptions}`)
 if (backendTlsRejectUnauthorized === '0' && String(process.env.NODE_TLS_REJECT_UNAUTHORIZED || '').trim() !== '0') {
   console.warn('[dev] Backend local Google/Firebase TLS verification -> disabled because this Node cannot use the system CA. This applies only to this local dev stack; use NODE_EXTRA_CA_CERTS for a stricter setup.')
@@ -467,8 +467,8 @@ if (serviceAccountSource) {
 startProcess('api', process.execPath, ['index.js'], {
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: backendPort,
-  API_PROXY_TARGET: process.env.API_PROXY_TARGET || DEFAULT_REMOTE_API_TARGET,
-  API_PROXY_FORWARDED_HOST: process.env.API_PROXY_FORWARDED_HOST || DEFAULT_REMOTE_API_HOST,
+  API_PROXY_TARGET: configuredRemoteApiTarget,
+  API_PROXY_FORWARDED_HOST: configuredRemoteApiHost,
   ADMIN_USERS_MODE: process.env.ADMIN_USERS_MODE || 'direct',
   PORTAL_DB_ROUTES_MODE: process.env.PORTAL_DB_ROUTES_MODE || 'direct',
   PORTAL_SCHEDULE_ORDERS_MODE: process.env.PORTAL_SCHEDULE_ORDERS_MODE || 'direct',

@@ -1,12 +1,38 @@
 import './style.css'
 import template from './template.html?raw'
 import { getClients } from '../../../services/clientService'
+import { generateZoneQrCodes } from '../../../services/zoneService'
+import {
+  createZoneQrPdfBlob,
+  downloadZoneQrPdfBlob,
+  printZoneQrPdfUrl,
+  zoneQrPdfFilename,
+} from './qrPrint'
+import {
+  createZoneQrPrintLayout,
+  zoneQrPageMeta,
+} from './qrLayout'
+import { createZoneQrPdfPreviewRenderer } from './qrPreview'
 
 export const route = 'zones'
 export const viewId = 'view-zones'
 export { template }
 
-const DEFAULT_FUNCTION_OPTIONS = ['CLEAN', 'START', 'STOP', 'STOPO', 'Strefa specjalna']
+const GENERATED_ZONE_QR_FUNCTIONS = new Set([
+  'START',
+  'STOP',
+  'STOP0',
+  'STOP5',
+  'STOP10',
+  'STOP15',
+  'CLEAN',
+  'STREFA_SPECJALNA',
+])
+const DEFAULT_FUNCTION_OPTIONS = [
+  ...GENERATED_ZONE_QR_FUNCTIONS,
+  'STOPO',
+  'Strefa specjalna',
+]
 const PAGE_SIZE_OPTIONS = [50, 100, 200]
 const DEFAULT_ZONE_TYPE = 'Biuro'
 const FALLBACK_ZONE_TYPE = 'Inne'
@@ -84,6 +110,18 @@ export function createZonesFeature(ctx) {
   let pinnedZoneId = ''
   let zoneModalOriginalQr = ''
   let zoneModalTypeTouched = false
+  let zoneQrPreviewBlob = null
+  let zoneQrPreviewUrl = ''
+  let zoneQrPreviewPage = 1
+  let zoneQrPreviewRequest = 0
+  let zoneQrPageRenderRequest = 0
+  let zoneQrPreviewTimer = 0
+  let zoneQrPreviewResizeTimer = 0
+  let zoneQrDocumentPages = []
+  let zoneQrSavedCodes = []
+  let zoneQrGeneratorMode = 'create'
+  const zoneQrPdfPreview = createZoneQrPdfPreviewRenderer()
+  const zoneQrThumbnailPreview = createZoneQrPdfPreviewRenderer()
 
   function isTechnicalClientId(value) {
     const text = String(value ?? '').trim()
@@ -124,6 +162,12 @@ export function createZonesFeature(ctx) {
     return String(zone?.id ?? zone?.zoneId ?? zone?.qr ?? zone?.code ?? '').trim()
   }
 
+  function isGeneratedZoneQr(zone) {
+    const zoneId = zoneRecordId(zone)
+    const functionName = String(zone?.function ?? '').trim().toUpperCase()
+    return /^QRC_[a-z0-9_-]+_Z\d+$/i.test(zoneId) && GENERATED_ZONE_QR_FUNCTIONS.has(functionName)
+  }
+
   function canDeleteZones() {
     const roleCode = String(appState.session?.roleCode ?? '').trim().toUpperCase()
     return roleCode === 'ADMIN' || roleCode === 'OWNER' || roleCode === 'PLATFORM_OWNER'
@@ -137,24 +181,41 @@ export function createZonesFeature(ctx) {
     const qrInput = document.getElementById('znEditQr')
     const qrLabel = document.querySelector('label[for="znEditQr"]')
     const canEdit = canManageZoneQr()
+    const editedZone = (Array.isArray(appState.zones) ? appState.zones : []).find(
+      (zone) => zoneRecordId(zone) === String(appState.zoneModalZoneId ?? '').trim(),
+    )
+    const generatedStartStop = appState.zoneModalMode === 'edit' && isGeneratedZoneQr(editedZone)
 
     if (qrInput) {
-      qrInput.disabled = !canEdit
-      qrInput.title = canEdit ? 'ADMIN, Owner lub Manager może zmienić numer QR strefy.' : 'Brak uprawnień do edycji numeru QR.'
+      qrInput.disabled = !canEdit || generatedStartStop
+      qrInput.title = generatedStartStop
+        ? 'Identyfikator wygenerowanego kodu QR jest niezmienny.'
+        : canEdit
+          ? 'ADMIN, Owner lub Manager może zmienić numer QR strefy.'
+          : 'Brak uprawnień do edycji numeru QR.'
     }
     if (qrLabel) {
-      qrLabel.textContent = canEdit ? 'Numer QR (A)' : 'Numer QR (A) - blokada'
+      qrLabel.textContent = generatedStartStop ? 'Numer QR (niezmienny)' : canEdit ? 'Numer QR (A)' : 'Numer QR (A) - blokada'
     }
   }
 
   function setZoneEditorMutationState() {
     const canEdit = canManageZoneQr()
-    ;['znEditClientText', 'znEditStrefaText', 'znEditLoc', 'znEditFunkcjaText'].forEach((id) => {
+    const editedZone = (Array.isArray(appState.zones) ? appState.zones : []).find(
+      (zone) => zoneRecordId(zone) === String(appState.zoneModalZoneId ?? '').trim(),
+    )
+    const generatedStartStop = appState.zoneModalMode === 'edit' && isGeneratedZoneQr(editedZone)
+    ;['znEditClientText', 'znEditStrefaText', 'znEditLoc'].forEach((id) => {
       const control = document.getElementById(id)
       if (control) control.disabled = !canEdit
     })
-    document.querySelectorAll('#znEditorOverlay .zones-combo-toggle').forEach((button) => {
-      button.disabled = !canEdit
+    const functionControl = document.getElementById('znEditFunkcjaText')
+    if (functionControl) functionControl.disabled = !canEdit || generatedStartStop
+    const functionToggle = document.querySelector('[data-zone-combo="znEditFunkcja"] .zones-combo-toggle')
+    if (functionToggle) functionToggle.disabled = !canEdit || generatedStartStop
+    ;['znEditClient', 'znEditStrefa'].forEach((id) => {
+      const toggle = document.querySelector(`[data-zone-combo="${id}"] .zones-combo-toggle`)
+      if (toggle) toggle.disabled = !canEdit
     })
   }
 
@@ -172,13 +233,15 @@ export function createZonesFeature(ctx) {
     const map = clientNameMap()
     const clientId = String(zone.clientId ?? '')
     const resolvedClientName = map.get(clientId) || ''
+    const generatedStartStop = isGeneratedZoneQr(zone)
+    const unassignedLabel = generatedStartStop ? 'Nieprzypisany' : '-'
     return {
       ...zone,
       qr: zone.qr || zone.id || '-',
       clientId,
-      clientName: resolvedClientName || '-',
-      zoneName: zone.name || zone.zone || '-',
-      location: zone.location || '-',
+      clientName: resolvedClientName || String(zone.clientName ?? '').trim() || unassignedLabel,
+      zoneName: zone.name || zone.zone || unassignedLabel,
+      location: zone.location || unassignedLabel,
       function: zone.function || '-',
       editedBy: zone.editedBy || '-',
       dateLabel: normalizeZoneDate(zone.date),
@@ -215,7 +278,12 @@ export function createZonesFeature(ctx) {
   function zoneHasAssignedClient(zone) {
     const clientNameKey = normalizeSearchText(zone.clientName)
     const clientIdKey = normalizeSearchText(zone.clientId)
-    return Boolean(clientNameKey && clientNameKey !== '-' && clientNameKey !== 'unassigned' && clientIdKey !== 'unassigned')
+    return Boolean(
+      clientNameKey &&
+        clientNameKey !== '-' &&
+        !['unassigned', 'nieprzypisany'].includes(clientNameKey) &&
+        clientIdKey !== 'unassigned',
+    )
   }
 
   function zoneClientSortRank(zone) {
@@ -245,7 +313,7 @@ export function createZonesFeature(ctx) {
     const keys = new Set()
     zones.forEach((zone) => {
       const key = String(zone.clientId || zone.clientName || '').trim()
-      if (key && key !== '-') {
+      if (key && key !== '-' && normalizeSearchText(key) !== 'nieprzypisany') {
         keys.add(key)
       }
     })
@@ -552,6 +620,10 @@ export function createZonesFeature(ctx) {
       placeholder: '-- wybierz --',
       selected: readComboValue('znEditClient'),
     })
+    fillCombo('znQrClient', options, {
+      placeholder: 'Nieprzypisany',
+      selected: readComboValue('znQrClient'),
+    })
   }
 
   function zoneTypeOptions() {
@@ -584,6 +656,12 @@ export function createZonesFeature(ctx) {
       allowFreeText: false,
       placeholder: 'Wybierz...',
       selected: editSelected,
+    })
+    const qrSelected = closedZoneTypeValue(readComboValue('znQrZone')) || closedZoneTypeValue(readComboText('znQrZone'))
+    fillCombo('znQrZone', options, {
+      allowFreeText: false,
+      placeholder: 'Nieprzypisana',
+      selected: qrSelected,
     })
   }
 
@@ -792,7 +870,8 @@ export function createZonesFeature(ctx) {
         const toneClass = zoneToneClass(zone)
         const clientVisual = clientVisualMeta(zone)
         const zoneVisual = zoneVisualMeta(zone)
-        const clientInitials = zoneInitials(zone.clientName)
+        const clientInitials = normalizeSearchText(zone.clientName) === 'nieprzypisany' ? 'QR' : zoneInitials(zone.clientName)
+        const clientIdLabel = zone.clientId || (normalizeSearchText(zone.clientName) === 'nieprzypisany' ? 'Brak klienta' : '-')
         return `
           <div class="zones-row">
             <div class="zones-qr-cell">
@@ -806,7 +885,7 @@ export function createZonesFeature(ctx) {
               <span class="zones-client-avatar ${clientVisual.className}">${escapeHtml(clientInitials)}</span>
               <span>
                 <strong>${escapeHtml(zone.clientName)}</strong>
-                <small>${escapeHtml(zone.clientId || '-')}</small>
+                <small>${escapeHtml(clientIdLabel)}</small>
               </span>
             </div>
             <div class="zones-zone-cell">
@@ -1054,6 +1133,588 @@ export function createZonesFeature(ctx) {
     })
   }
 
+  function zoneQrQuantityValue(id) {
+    const rawQuantity = String(document.getElementById(id)?.value ?? '').trim()
+    if (!rawQuantity) return 0
+    const quantity = Number(rawQuantity)
+    return Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= 100 ? quantity : 0
+  }
+
+  function selectedZoneQrItems() {
+    const items = []
+    if (document.getElementById('znQrFunctionStart')?.checked) {
+      items.push({ function: 'START', quantity: zoneQrQuantityValue('znQrStartQuantity') })
+    }
+    if (document.getElementById('znQrFunctionStop')?.checked) {
+      items.push({
+        function: String(document.getElementById('znQrStopVariant')?.value || 'STOP').toUpperCase(),
+        quantity: zoneQrQuantityValue('znQrStopQuantity'),
+      })
+    }
+    if (document.getElementById('znQrFunctionClean')?.checked) {
+      items.push({ function: 'CLEAN', quantity: zoneQrQuantityValue('znQrCleanQuantity') })
+    }
+    if (document.getElementById('znQrFunctionSpecial')?.checked) {
+      items.push({ function: 'STREFA_SPECJALNA', quantity: zoneQrQuantityValue('znQrSpecialQuantity') })
+    }
+    return items.filter((item) => GENERATED_ZONE_QR_FUNCTIONS.has(item.function))
+  }
+
+  function zoneQrPreviewOrgToken() {
+    return String(appState.session?.orgId ?? 'org')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^[-_]+|[-_]+$/g, '')
+      .slice(0, 42) || 'org'
+  }
+
+  function zoneQrSelectedClient() {
+    const clientId = readComboValue('znQrClient')
+    const client = (Array.isArray(appState.clients) ? appState.clients : []).find(
+      (item) => clientOptionValue(item) === clientId,
+    )
+    return {
+      clientId,
+      clientName: client ? clientDisplayName(client) : '',
+    }
+  }
+
+  function zoneQrPreviewCodes() {
+    if (zoneQrSavedCodes.length) return zoneQrSavedCodes
+    const items = selectedZoneQrItems()
+    const client = zoneQrSelectedClient()
+    const zoneName = readClosedZoneComboValue('znQrZone')
+    if (!items.length || items.some((item) => !item.quantity)) return []
+    return items.flatMap((item) => Array.from({ length: item.quantity }, (_, index) => {
+      const previewId = `QRC_${zoneQrPreviewOrgToken()}_Z_PREVIEW_${item.function}_${index + 1}`
+      return {
+        id: previewId,
+        zoneId: previewId,
+        qr: previewId,
+        function: item.function,
+        clientId: client.clientId,
+        clientName: client.clientName,
+        name: zoneName,
+        zone: zoneName,
+      }
+    }))
+  }
+
+  function zoneQrPrintOptions() {
+    const timePosterFormat = document.querySelector('input[name="znQrTimeFormat"]:checked')?.value || 'A4_HALF'
+    const labelSizeMm = Number(document.querySelector('input[name="znQrLabelSize"]:checked')?.value) === 25 ? 25 : 40
+    return { timePosterFormat, labelSizeMm }
+  }
+
+  function resetZoneQrPrintOptions() {
+    const timeFormat = document.querySelector('input[name="znQrTimeFormat"][value="A4_HALF"]')
+    const labelSize = document.querySelector('input[name="znQrLabelSize"][value="40"]')
+    if (timeFormat instanceof HTMLInputElement) timeFormat.checked = true
+    if (labelSize instanceof HTMLInputElement) labelSize.checked = true
+  }
+
+  function syncZoneQrFormatSummary(codes = zoneQrPreviewCodes()) {
+    const layout = createZoneQrPrintLayout(codes, zoneQrPrintOptions())
+    const timeCard = document.getElementById('znQrTimeFormatCard')
+    const zoneCard = document.getElementById('znQrZoneFormatCard')
+    const timeMeta = document.getElementById('znQrTimeFormatMeta')
+    const zoneMeta = document.getElementById('znQrZoneFormatMeta')
+    const summary = document.getElementById('znQrFormatSummary')
+
+    timeCard?.classList.toggle('is-active', layout.timeCodeCount > 0)
+    zoneCard?.classList.toggle('is-active', layout.zoneCodeCount > 0)
+    if (timeMeta) {
+      timeMeta.textContent = layout.timeCodeCount
+        ? `${layout.timeCodeCount} kodów · ${layout.timeCapacity} na stronie · ${layout.timePageCount} ${layout.timePageCount === 1 ? 'strona' : 'strony'}`
+        : 'Aktywuje się dla START lub STOP'
+    }
+    if (zoneMeta) {
+      zoneMeta.textContent = layout.zoneCodeCount
+        ? `${layout.zoneCodeCount} kodów · ${layout.labelGrid.capacity} na stronie · ${layout.zonePageCount} ${layout.zonePageCount === 1 ? 'strona' : 'strony'}`
+        : 'Aktywuje się dla stref'
+    }
+    if (summary) {
+      summary.textContent = layout.totalCodes
+        ? `${layout.totalCodes} kodów · ${layout.totalPages} ${layout.totalPages === 1 ? 'strona PDF' : 'strony PDF'}${layout.isMixed ? ' · układ mieszany' : ''}`
+        : 'Wybierz funkcję, aby zobaczyć liczbę stron.'
+    }
+    return layout
+  }
+
+  function setZoneQrStatus(message = '', tone = '') {
+    const node = document.getElementById('znQrStatus')
+    if (!node) return
+    node.textContent = String(message)
+    node.dataset.tone = message ? tone : ''
+  }
+
+  function setZoneQrOutputButtons(enabled) {
+    const ready = Boolean(enabled && zoneQrPreviewBlob && zoneQrPreviewUrl && zoneQrSavedCodes.length)
+    ;['znQrDownloadBtn', 'znQrPrintBtn'].forEach((id) => {
+      const button = document.getElementById(id)
+      if (button) button.disabled = !ready
+    })
+  }
+
+  function setZoneQrGenerateButtonLabel(label) {
+    const button = document.getElementById('znQrGenerateBtn')
+    const labelNode = button?.querySelector('span:first-child')
+    if (labelNode) labelNode.textContent = String(label)
+  }
+
+  function setZoneQrFormLocked(locked) {
+    ;['znQrFunctionStart', 'znQrFunctionStop', 'znQrFunctionClean', 'znQrFunctionSpecial', 'znQrClientText', 'znQrZoneText'].forEach((id) => {
+      const control = document.getElementById(id)
+      if (control) control.disabled = Boolean(locked)
+    })
+    const stopVariant = document.getElementById('znQrStopVariant')
+    if (stopVariant) stopVariant.disabled = Boolean(locked) || !document.getElementById('znQrFunctionStop')?.checked
+    ;[
+      ['znQrStartQuantity', 'znQrFunctionStart'],
+      ['znQrStopQuantity', 'znQrFunctionStop'],
+      ['znQrCleanQuantity', 'znQrFunctionClean'],
+      ['znQrSpecialQuantity', 'znQrFunctionSpecial'],
+    ].forEach(([quantityId, checkboxId]) => {
+      const quantity = document.getElementById(quantityId)
+      if (quantity) quantity.disabled = Boolean(locked) || !document.getElementById(checkboxId)?.checked
+    })
+    const quantityCheckboxes = {
+      znQrStartQuantity: 'znQrFunctionStart',
+      znQrStopQuantity: 'znQrFunctionStop',
+      znQrCleanQuantity: 'znQrFunctionClean',
+      znQrSpecialQuantity: 'znQrFunctionSpecial',
+    }
+    document.querySelectorAll('[data-zone-qr-quantity-target]').forEach((button) => {
+      const targetId = String(button.dataset.zoneQrQuantityTarget || '')
+      const checkboxId = quantityCheckboxes[targetId]
+      button.disabled = Boolean(locked) || !document.getElementById(checkboxId)?.checked
+    })
+    ;['znQrClient', 'znQrZone'].forEach((id) => {
+      const toggle = document.querySelector(`[data-zone-combo="${id}"] .zones-combo-toggle`)
+      if (toggle) toggle.disabled = Boolean(locked)
+    })
+  }
+
+  function releaseZoneQrPreview() {
+    if (zoneQrPreviewTimer) {
+      window.clearTimeout(zoneQrPreviewTimer)
+      zoneQrPreviewTimer = 0
+    }
+    zoneQrPreviewRequest += 1
+    zoneQrPageRenderRequest += 1
+    if (zoneQrPreviewResizeTimer) {
+      window.clearTimeout(zoneQrPreviewResizeTimer)
+      zoneQrPreviewResizeTimer = 0
+    }
+    if (zoneQrPreviewUrl) {
+      URL.revokeObjectURL(zoneQrPreviewUrl)
+      zoneQrPreviewUrl = ''
+    }
+    zoneQrPreviewBlob = null
+    zoneQrDocumentPages = []
+    void zoneQrPdfPreview.destroy()
+    void zoneQrThumbnailPreview.destroy()
+    const canvas = document.getElementById('znQrPreviewCanvas')
+    const host = document.getElementById('znQrPreviewCanvasHost')
+    const pageStrip = document.getElementById('znQrPageStrip')
+    const pagesOverview = document.getElementById('znQrPreviewPagesOverview')
+    if (canvas instanceof HTMLCanvasElement) {
+      canvas.hidden = true
+      canvas.width = 0
+      canvas.height = 0
+    }
+    pageStrip?.replaceChildren()
+    if (pagesOverview) pagesOverview.hidden = true
+    host?.setAttribute('aria-busy', 'false')
+  }
+
+  function zoneQrPreviewPageLabel(page) {
+    const functionNames = [...new Set((Array.isArray(page?.codes) ? page.codes : []).map((code) => {
+      const functionName = String(code?.function || '').toUpperCase()
+      if (functionName === 'CLEAN') return 'STREFA'
+      if (functionName === 'STREFA_SPECJALNA') return 'STREFA SPECJALNA'
+      return functionName
+    }).filter(Boolean))]
+    return functionNames.join(' + ') || 'KODY QR'
+  }
+
+  function updateZoneQrPageNavigation() {
+    const total = zoneQrDocumentPages.length
+    zoneQrPreviewPage = total ? Math.min(Math.max(zoneQrPreviewPage, 1), total) : 1
+    const page = total ? zoneQrDocumentPages[zoneQrPreviewPage - 1] : null
+    const pageMeta = zoneQrPageMeta(page, total)
+    const meta = document.getElementById('znQrPreviewMeta')
+    const format = document.getElementById('znQrPreviewFormat')
+    const layout = document.getElementById('znQrPreviewLayout')
+    const capacity = document.getElementById('znQrPreviewCapacity')
+    const pages = document.getElementById('znQrPreviewPages')
+    const nav = document.getElementById('znQrPageNav')
+    const prev = document.getElementById('znQrPagePrevBtn')
+    const next = document.getElementById('znQrPageNextBtn')
+    if (meta) meta.textContent = pageMeta.pageLabel
+    if (format) format.textContent = pageMeta.formatLabel
+    if (layout) layout.textContent = pageMeta.layoutLabel
+    if (capacity) capacity.textContent = pageMeta.capacityLabel
+    if (pages) pages.textContent = pageMeta.totalPagesLabel
+    if (nav) nav.hidden = total <= 1
+    if (prev) prev.disabled = zoneQrPreviewPage <= 1
+    if (next) next.disabled = zoneQrPreviewPage >= total
+    document.querySelectorAll('#znQrPageStrip [data-zone-qr-preview-page]').forEach((button) => {
+      const isCurrent = Number(button.dataset.zoneQrPreviewPage) === zoneQrPreviewPage
+      button.classList.toggle('is-active', isCurrent)
+      button.setAttribute('aria-current', isCurrent ? 'page' : 'false')
+    })
+  }
+
+  async function renderZoneQrPageStrip(requestId) {
+    const pageStrip = document.getElementById('znQrPageStrip')
+    const pagesOverview = document.getElementById('znQrPreviewPagesOverview')
+    if (!(pageStrip instanceof HTMLElement) || !(pagesOverview instanceof HTMLElement)) return
+
+    pageStrip.replaceChildren()
+    pagesOverview.hidden = zoneQrDocumentPages.length <= 1
+    if (zoneQrDocumentPages.length <= 1) return
+
+    const thumbnails = zoneQrDocumentPages.map((page, index) => {
+      const pageNumber = index + 1
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'zones-qr-page-thumb'
+      button.dataset.zoneQrPreviewPage = String(pageNumber)
+      button.setAttribute('aria-label', `Pokaż stronę ${pageNumber}: ${zoneQrPreviewPageLabel(page)}`)
+
+      const frame = document.createElement('span')
+      frame.className = `zones-qr-page-thumb-frame is-${page?.orientation === 'portrait' ? 'portrait' : 'landscape'}`
+      const canvas = document.createElement('canvas')
+      canvas.setAttribute('aria-hidden', 'true')
+      frame.appendChild(canvas)
+
+      const description = document.createElement('span')
+      description.className = 'zones-qr-page-thumb-description'
+      const pageLabel = document.createElement('strong')
+      pageLabel.textContent = `Strona ${pageNumber}`
+      const functionLabel = document.createElement('small')
+      functionLabel.textContent = zoneQrPreviewPageLabel(page)
+      description.append(pageLabel, functionLabel)
+      button.append(frame, description)
+      pageStrip.appendChild(button)
+      return { canvas, frame, pageNumber }
+    })
+
+    updateZoneQrPageNavigation()
+    for (const thumbnail of thumbnails) {
+      if (requestId !== zoneQrPreviewRequest) return
+      await zoneQrThumbnailPreview.renderPage({
+        canvas: thumbnail.canvas,
+        container: thumbnail.frame,
+        pageNumber: thumbnail.pageNumber,
+        maxWidth: 84,
+        maxHeight: 58,
+      })
+    }
+  }
+
+  async function showZoneQrPreviewPage(page, { showLoading = true } = {}) {
+    zoneQrPreviewPage = page
+    updateZoneQrPageNavigation()
+    const canvas = document.getElementById('znQrPreviewCanvas')
+    const host = document.getElementById('znQrPreviewCanvasHost')
+    const loading = document.getElementById('znQrPreviewLoading')
+    if (!(canvas instanceof HTMLCanvasElement) || !(host instanceof HTMLElement) || !zoneQrPreviewBlob) return
+    const renderRequestId = ++zoneQrPageRenderRequest
+    host.setAttribute('aria-busy', 'true')
+    if (showLoading) {
+      canvas.hidden = true
+      if (loading) {
+        loading.hidden = false
+        loading.textContent = `Renderowanie strony ${zoneQrPreviewPage}…`
+      }
+    }
+    try {
+      await zoneQrPdfPreview.renderPage({ canvas, container: host, pageNumber: zoneQrPreviewPage })
+      if (renderRequestId !== zoneQrPageRenderRequest) return
+      canvas.hidden = false
+      if (loading) loading.hidden = true
+      host.setAttribute('aria-busy', 'false')
+    } catch (error) {
+      if (renderRequestId !== zoneQrPageRenderRequest) return
+      const message = error instanceof Error ? error.message : 'Nie udało się wyrenderować strony PDF.'
+      canvas.hidden = true
+      if (loading) {
+        loading.hidden = false
+        loading.textContent = message
+      }
+      host.setAttribute('aria-busy', 'false')
+      throw error
+    }
+  }
+
+  async function renderZoneQrPreview() {
+    const codes = zoneQrPreviewCodes()
+    const loading = document.getElementById('znQrPreviewLoading')
+    const canvas = document.getElementById('znQrPreviewCanvas')
+    const host = document.getElementById('znQrPreviewCanvasHost')
+    const requestId = ++zoneQrPreviewRequest
+    setZoneQrOutputButtons(false)
+    if (!codes.length) {
+      releaseZoneQrPreview()
+      syncZoneQrFormatSummary([])
+      if (loading) {
+        const items = selectedZoneQrItems()
+        loading.hidden = false
+        loading.textContent = items.length
+          ? 'Dla każdej wybranej funkcji podaj ilość kodów od 1 do 100.'
+          : 'Wybierz co najmniej jedną funkcję kodu QR.'
+      }
+      updateZoneQrPageNavigation()
+      return
+    }
+
+    if (loading) {
+      loading.hidden = false
+      loading.textContent = 'Przygotowywanie podglądu PDF…'
+    }
+    if (canvas) canvas.hidden = true
+    host?.setAttribute('aria-busy', 'true')
+
+    try {
+      const documentLayout = syncZoneQrFormatSummary(codes)
+      const blob = await createZoneQrPdfBlob(codes, zoneQrPrintOptions())
+      if (requestId !== zoneQrPreviewRequest) return
+      const nextUrl = URL.createObjectURL(blob)
+      if (zoneQrPreviewUrl) URL.revokeObjectURL(zoneQrPreviewUrl)
+      zoneQrPreviewBlob = blob
+      zoneQrPreviewUrl = nextUrl
+      zoneQrDocumentPages = documentLayout.pages
+      const [pdfPageCount, thumbnailPageCount] = await Promise.all([
+        zoneQrPdfPreview.load(blob),
+        zoneQrThumbnailPreview.load(blob),
+      ])
+      if (requestId !== zoneQrPreviewRequest) return
+      if (pdfPageCount !== zoneQrDocumentPages.length || thumbnailPageCount !== zoneQrDocumentPages.length) {
+        throw new Error('Liczba stron podglądu nie zgadza się z dokumentem PDF.')
+      }
+      zoneQrPreviewPage = Math.min(zoneQrPreviewPage, zoneQrDocumentPages.length) || 1
+      await showZoneQrPreviewPage(zoneQrPreviewPage)
+      await renderZoneQrPageStrip(requestId)
+      setZoneQrOutputButtons(true)
+    } catch (error) {
+      if (requestId !== zoneQrPreviewRequest) return
+      const message = error instanceof Error ? error.message : 'Nie udało się przygotować podglądu PDF.'
+      if (loading) {
+        loading.hidden = false
+        loading.textContent = message
+      }
+      if (canvas) canvas.hidden = true
+      host?.setAttribute('aria-busy', 'false')
+      setZoneQrStatus(message, 'error')
+    }
+  }
+
+  function scheduleZoneQrPreview() {
+    if (zoneQrPreviewTimer) window.clearTimeout(zoneQrPreviewTimer)
+    zoneQrPreviewTimer = window.setTimeout(() => {
+      zoneQrPreviewTimer = 0
+      void renderZoneQrPreview()
+    }, 180)
+  }
+
+  function configureZoneQrGeneratorMode(mode) {
+    zoneQrGeneratorMode = mode === 'reprint' ? 'reprint' : 'create'
+    const generatorView = document.getElementById('znQrGeneratorView')
+    const title = document.getElementById('znQrGeneratorTitle')
+    const description = document.getElementById('znQrGeneratorDescription')
+    const generateButton = document.getElementById('znQrGenerateBtn')
+    const reprint = zoneQrGeneratorMode === 'reprint'
+    generatorView?.classList.toggle('is-reprint', reprint)
+    if (title) title.textContent = reprint ? 'Ponowny wydruk kodu QR' : 'Generowanie kodów QR'
+    if (description) {
+      description.textContent = reprint
+        ? 'Kod i funkcja są niezmienne. Układ wydruku zostanie dobrany automatycznie.'
+        : 'Wybierz funkcje i ilość. Format stron oraz paginacja zostaną dobrane automatycznie.'
+    }
+    if (generateButton) generateButton.hidden = reprint
+    setZoneQrFormLocked(reprint)
+  }
+
+  function resetZoneQrGenerator() {
+    releaseZoneQrPreview()
+    zoneQrSavedCodes = []
+    zoneQrPreviewPage = 1
+    clearCombo('znQrClient')
+    clearCombo('znQrZone')
+    const start = document.getElementById('znQrFunctionStart')
+    const stop = document.getElementById('znQrFunctionStop')
+    const clean = document.getElementById('znQrFunctionClean')
+    const special = document.getElementById('znQrFunctionSpecial')
+    const stopVariant = document.getElementById('znQrStopVariant')
+    const quantities = ['znQrStartQuantity', 'znQrStopQuantity', 'znQrCleanQuantity', 'znQrSpecialQuantity']
+    if (start) start.checked = true
+    if (stop) stop.checked = false
+    if (clean) clean.checked = false
+    if (special) special.checked = false
+    if (stopVariant) stopVariant.value = 'STOP'
+    resetZoneQrPrintOptions()
+    quantities.forEach((id) => {
+      const input = document.getElementById(id)
+      if (input) input.value = '1'
+    })
+    syncZoneQrFormatSummary()
+    setZoneQrGenerateButtonLabel('Wygeneruj i zapisz PDF')
+    setZoneQrStatus('Podgląd układu używa oznaczenia roboczego. Dokładny numer pojawi się po zapisie.', 'info')
+    setZoneQrOutputButtons(false)
+    setZoneQrFormLocked(false)
+  }
+
+  async function openZoneQrGenerator() {
+    if (!canManageZoneQr()) {
+      alert('Brak uprawnień do generowania kodów QR.')
+      return
+    }
+    const generatorView = document.getElementById('znQrGeneratorView')
+    const zonesView = document.getElementById('view-zones')
+    if (!generatorView || !zonesView) return
+    configureZoneQrGeneratorMode('create')
+    resetZoneQrGenerator()
+    generatorView.hidden = false
+    zonesView.classList.add('is-qr-generator-active')
+    generatorView.scrollIntoView({ block: 'start' })
+    await ensureClientsForZones()
+    syncClientSelects()
+    syncZoneSelects()
+    void renderZoneQrPreview()
+  }
+
+  function closeZoneQrGenerator() {
+    const generatorView = document.getElementById('znQrGeneratorView')
+    const zonesView = document.getElementById('view-zones')
+    if (generatorView) generatorView.hidden = true
+    zonesView?.classList.remove('is-qr-generator-active')
+    releaseZoneQrPreview()
+    zoneQrSavedCodes = []
+    document.getElementById('znQrGeneratorBtn')?.focus()
+  }
+
+  function openZoneQrReprint(zone) {
+    if (!canManageZoneQr() || !isGeneratedZoneQr(zone)) return
+    const generatorView = document.getElementById('znQrGeneratorView')
+    const zonesView = document.getElementById('view-zones')
+    if (!generatorView || !zonesView) return
+    closeZoneModal()
+    releaseZoneQrPreview()
+    const clientId = String(zone?.clientId ?? '').trim()
+    const clientName = clientNameMap().get(clientId) || String(zone?.clientName ?? '').trim()
+    const zoneName = String(zone?.name ?? zone?.zone ?? '').trim()
+    zoneQrSavedCodes = [{ ...zone, clientId, clientName, name: zoneName, zone: zoneName }]
+    const functionName = String(zone?.function ?? '').trim().toUpperCase()
+    const start = document.getElementById('znQrFunctionStart')
+    const stop = document.getElementById('znQrFunctionStop')
+    const clean = document.getElementById('znQrFunctionClean')
+    const special = document.getElementById('znQrFunctionSpecial')
+    const stopVariant = document.getElementById('znQrStopVariant')
+    if (start) start.checked = functionName === 'START'
+    if (stop) stop.checked = functionName.startsWith('STOP')
+    if (clean) clean.checked = functionName === 'CLEAN'
+    if (special) special.checked = functionName === 'STREFA_SPECJALNA'
+    if (stopVariant && functionName.startsWith('STOP')) stopVariant.value = functionName
+    resetZoneQrPrintOptions()
+    ;['znQrStartQuantity', 'znQrStopQuantity', 'znQrCleanQuantity', 'znQrSpecialQuantity'].forEach((id) => {
+      const input = document.getElementById(id)
+      if (input) input.value = '1'
+    })
+    fillCombo('znQrClient', sortedClientOptions(), {
+      placeholder: 'Nieprzypisany',
+      selected: clientId,
+      fallbackLabel: clientName || clientId,
+    })
+    fillCombo('znQrZone', zoneTypeOptions(), {
+      placeholder: 'Nieprzypisana',
+      selected: closedZoneTypeValue(zoneName),
+    })
+    syncZoneQrFormatSummary(zoneQrSavedCodes)
+    zoneQrPreviewPage = 1
+    configureZoneQrGeneratorMode('reprint')
+    setZoneQrStatus(`Kod ${zoneRecordId(zone)} jest gotowy do ponownego wydruku.`, 'success')
+    generatorView.hidden = false
+    zonesView.classList.add('is-qr-generator-active')
+    generatorView.scrollIntoView({ block: 'start' })
+    void renderZoneQrPreview()
+  }
+
+  async function generateAndSaveZoneQrCodes() {
+    if (!appState.session?.orgId || !canManageZoneQr() || zoneQrGeneratorMode !== 'create') return
+    const items = selectedZoneQrItems()
+    if (!items.length) {
+      setZoneQrStatus('Wybierz co najmniej jedną funkcję kodu QR.', 'error')
+      document.getElementById('znQrFunctionsFieldset')?.classList.add('has-error')
+      return
+    }
+    document.getElementById('znQrFunctionsFieldset')?.classList.remove('has-error')
+    if (items.some((item) => !item.quantity)) {
+      setZoneQrStatus('Dla każdej wybranej funkcji podaj ilość od 1 do 100.', 'error')
+      return
+    }
+
+    const clientId = readComboValue('znQrClient')
+    if (readComboText('znQrClient') && !clientId) {
+      setZoneQrStatus('Wybierz klienta z listy albo pozostaw pole puste.', 'error')
+      return
+    }
+    const zoneName = readClosedZoneComboValue('znQrZone')
+    const generateButton = document.getElementById('znQrGenerateBtn')
+    if (generateButton) {
+      generateButton.disabled = true
+      setZoneQrGenerateButtonLabel('Generowanie…')
+    }
+    setZoneQrOutputButtons(false)
+    setZoneQrStatus('Zapisywanie kodów QR…', 'info')
+
+    try {
+      const codes = await generateZoneQrCodes(appState.session.orgId, {
+        items,
+        clientId: clientId || null,
+        zone: zoneName || null,
+      })
+      if (!codes.length) throw new Error('Serwer nie zwrócił wygenerowanych kodów QR.')
+      const selectedClient = zoneQrSelectedClient()
+      zoneQrSavedCodes = codes.map((code) => ({
+        ...code,
+        clientName: code.clientName || selectedClient.clientName,
+      }))
+      zoneQrPreviewPage = 1
+      setZoneQrFormLocked(true)
+      setZoneQrStatus(`Zapisano ${codes.length} ${codes.length === 1 ? 'kod QR' : 'kodów QR'}.`, 'success')
+      zoneQrSavedCodes.forEach((code) => upsertLocalZone(code))
+      filterZonesTable({ resetPage: true })
+      await renderZoneQrPreview()
+      await fetchZonesForCurrentSession(true)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Nie udało się wygenerować kodów QR.'
+      setZoneQrStatus(message, 'error')
+    } finally {
+      if (generateButton) {
+        generateButton.disabled = Boolean(zoneQrSavedCodes.length)
+        setZoneQrGenerateButtonLabel(zoneQrSavedCodes.length ? 'Kody zapisane' : 'Wygeneruj i zapisz PDF')
+      }
+    }
+  }
+
+  function downloadCurrentZoneQrPdf() {
+    if (!zoneQrPreviewBlob || !zoneQrSavedCodes.length) return
+    downloadZoneQrPdfBlob(zoneQrPreviewBlob, zoneQrPdfFilename(zoneQrSavedCodes))
+  }
+
+  async function printCurrentZoneQrPdf() {
+    if (!zoneQrPreviewUrl || !zoneQrSavedCodes.length) return
+    try {
+      await printZoneQrPdfUrl(zoneQrPreviewUrl)
+    } catch (error) {
+      setZoneQrStatus(error instanceof Error ? error.message : 'Nie udało się rozpocząć drukowania.', 'error')
+    }
+  }
+
   function openZoneAddModal() {
     if (!canManageZoneQr()) {
       alert('Brak uprawnień do dodawania stref.')
@@ -1078,6 +1739,7 @@ export function createZonesFeature(ctx) {
     const editedByInput = document.getElementById('znEditEdytowal')
     const saveBtn = document.getElementById('znSaveBtn')
     const deleteBtn = document.getElementById('znDeleteBtn')
+    const reprintBtn = document.getElementById('znReprintBtn')
 
     setZoneQrEditState()
     setZoneEditorMutationState()
@@ -1093,6 +1755,7 @@ export function createZonesFeature(ctx) {
     if (editedByInput) editedByInput.value = appState.session?.name ?? '-'
     if (saveBtn) saveBtn.style.display = canManageZoneQr() ? '' : 'none'
     if (deleteBtn) deleteBtn.style.display = 'none'
+    if (reprintBtn) reprintBtn.style.display = 'none'
 
     overlay.style.display = 'flex'
   }
@@ -1122,21 +1785,23 @@ export function createZonesFeature(ctx) {
     const editedByInput = document.getElementById('znEditEdytowal')
     const saveBtn = document.getElementById('znSaveBtn')
     const deleteBtn = document.getElementById('znDeleteBtn')
+    const reprintBtn = document.getElementById('znReprintBtn')
 
     setZoneQrEditState()
     setZoneEditorMutationState()
     setModalClientValue(view.clientId, view.clientName)
-    setModalZoneValue(view.zoneName === '-' ? '' : view.zoneName)
+    setModalZoneValue(['-', 'Nieprzypisany'].includes(view.zoneName) ? '' : view.zoneName)
     syncFunctionSelect(view.function === '-' ? '' : view.function)
 
     if (qrLabel) qrLabel.textContent = view.qr
     if (rowLabel) rowLabel.textContent = '-'
     if (qrInput) qrInput.value = view.qr
-    if (locationInput) locationInput.value = view.location === '-' ? '' : view.location
+    if (locationInput) locationInput.value = ['-', 'Nieprzypisany'].includes(view.location) ? '' : view.location
     if (dateInput) dateInput.value = view.dateLabel
     if (editedByInput) editedByInput.value = view.editedBy
     if (saveBtn) saveBtn.style.display = canManageZoneQr() ? '' : 'none'
     if (deleteBtn) deleteBtn.style.display = canDeleteZones() ? '' : 'none'
+    if (reprintBtn) reprintBtn.style.display = canManageZoneQr() && isGeneratedZoneQr(zone) ? '' : 'none'
 
     overlay.style.display = 'flex'
   }
@@ -1171,17 +1836,28 @@ export function createZonesFeature(ctx) {
 
     const qr = String(document.getElementById('znEditQr')?.value ?? '').trim()
     const clientRaw = String(document.getElementById('znEditClient')?.value ?? '').trim()
+    const clientText = String(document.getElementById('znEditClientText')?.value ?? '').trim()
     const zoneName = readModalZoneValue()
     const location = String(document.getElementById('znEditLoc')?.value ?? '').trim()
     const functionName = String(document.getElementById('znEditFunkcja')?.value ?? '').trim()
     const originalZoneId = String(appState.zoneModalZoneId ?? '').trim()
     const isAddMode = appState.zoneModalMode === 'add'
     const originalQrValue = String(zoneModalOriginalQr || originalZoneId).trim()
+    const originalZone = (Array.isArray(appState.zones) ? appState.zones : []).find(
+      (zone) => zoneRecordId(zone) === originalZoneId,
+    )
+    const generatedStartStop = !isAddMode && isGeneratedZoneQr(originalZone)
+    const immutableFunction = generatedStartStop ? String(originalZone?.function ?? '').trim().toUpperCase() : functionName
     const qrInputChanged = Boolean(originalQrValue && qr !== originalQrValue)
     const qrChanged = !isAddMode && qr !== originalZoneId
 
-    if (!qr || !clientRaw || !zoneName) {
-      alert('Uzupełnij Numer QR, Klienta i Strefę.')
+    if (!qr || (!generatedStartStop && (!clientRaw || !zoneName))) {
+      alert(generatedStartStop ? 'Numer QR jest wymagany.' : 'Uzupełnij Numer QR, Klienta i Strefę.')
+      return
+    }
+
+    if (generatedStartStop && (qr !== originalZoneId || functionName.toUpperCase() !== immutableFunction)) {
+      alert('Identyfikator i funkcja wygenerowanego kodu QR są niezmienne.')
       return
     }
 
@@ -1196,7 +1872,7 @@ export function createZonesFeature(ctx) {
     }
 
     const clientId = resolveClientIdForZone(clientRaw)
-    if (!clientId) {
+    if (clientText && !clientId) {
       alert('Nie znaleziono klienta. Wybierz klienta z listy.')
       return
     }
@@ -1211,7 +1887,7 @@ export function createZonesFeature(ctx) {
         zoneId: qr,
         clientId,
         name: zoneName,
-        function: functionName,
+        function: immutableFunction,
         location,
         editedBy,
         date,
@@ -1246,9 +1922,9 @@ export function createZonesFeature(ctx) {
         upsertLocalZone(localCreatedZone)
       } else if (appState.zoneModalMode === 'edit') {
         await updateZone(appState.session.orgId, originalZoneId || qr, {
-          clientId,
-          name: zoneName,
-          function: functionName,
+          clientId: clientId || null,
+          name: zoneName || null,
+          function: immutableFunction,
           location,
           editedBy,
           date,
@@ -1443,7 +2119,17 @@ export function createZonesFeature(ctx) {
   }
 
   function bindZoneCombos(binding) {
-    const comboIds = ['znClient', 'znStrefa', 'znFunkcja', 'znPageSize', 'znEditClient', 'znEditStrefa', 'znEditFunkcja']
+    const comboIds = [
+      'znClient',
+      'znStrefa',
+      'znFunkcja',
+      'znPageSize',
+      'znEditClient',
+      'znEditStrefa',
+      'znEditFunkcja',
+      'znQrClient',
+      'znQrZone',
+    ]
     comboIds.forEach((id) => bindZoneCombo(binding, id))
     binding.add(document, 'click', (event) => {
       const isComboClick = comboIds.some((id) => comboElements(id)?.root.contains(event.target))
@@ -1533,6 +2219,15 @@ export function createZonesFeature(ctx) {
       addButton.title = canManageZoneQr() ? 'Dodaj strefę' : 'Brak uprawnień do dodawania stref.'
     }
     binding.add(addButton, 'click', openZoneAddModal)
+    const generatorButton = document.getElementById('znQrGeneratorBtn')
+    if (generatorButton instanceof HTMLButtonElement) {
+      generatorButton.hidden = !canManageZoneQr()
+      generatorButton.disabled = !canManageZoneQr()
+      generatorButton.title = canManageZoneQr() ? 'Wygeneruj kody QR stref' : 'Brak uprawnień do generowania kodów QR.'
+    }
+    binding.add(generatorButton, 'click', () => {
+      void openZoneQrGenerator()
+    })
     binding.add(document.getElementById('znRows'), 'click', (event) => {
       const button = event.target.closest('[data-zone-id]')
       if (!button) return
@@ -1545,14 +2240,94 @@ export function createZonesFeature(ctx) {
       if (event.target?.id === 'znEditorOverlay') closeZoneModal()
     })
     binding.add(document.getElementById('znCancelBtn'), 'click', closeZoneModal)
+    binding.add(document.getElementById('znQrCloseBtn'), 'click', closeZoneQrGenerator)
+    binding.add(document.getElementById('znQrCancelBtn'), 'click', closeZoneQrGenerator)
     binding.add(document.getElementById('znSaveBtn'), 'click', () => {
       void saveZoneData()
     })
     binding.add(document.getElementById('znDeleteBtn'), 'click', () => {
       void deleteZoneData()
     })
+    binding.add(document.getElementById('znReprintBtn'), 'click', () => {
+      const zoneId = String(appState.zoneModalZoneId ?? '').trim()
+      const zone = (Array.isArray(appState.zones) ? appState.zones : []).find((item) => zoneRecordId(item) === zoneId)
+      if (zone) openZoneQrReprint(zone)
+    })
+    binding.add(document.getElementById('znQrGenerateBtn'), 'click', () => {
+      void generateAndSaveZoneQrCodes()
+    })
+    binding.add(document.getElementById('znQrDownloadBtn'), 'click', downloadCurrentZoneQrPdf)
+    binding.add(document.getElementById('znQrPrintBtn'), 'click', () => {
+      void printCurrentZoneQrPdf()
+    })
+    binding.add(document.getElementById('znQrPagePrevBtn'), 'click', () => {
+      void showZoneQrPreviewPage(zoneQrPreviewPage - 1)
+    })
+    binding.add(document.getElementById('znQrPageNextBtn'), 'click', () => {
+      void showZoneQrPreviewPage(zoneQrPreviewPage + 1)
+    })
+    binding.add(document.getElementById('znQrPageStrip'), 'click', (event) => {
+      if (!(event.target instanceof Element)) return
+      const button = event.target.closest('[data-zone-qr-preview-page]')
+      if (!(button instanceof HTMLButtonElement)) return
+      void showZoneQrPreviewPage(Number(button.dataset.zoneQrPreviewPage))
+    })
+    ;['znQrFunctionStart', 'znQrFunctionStop', 'znQrFunctionClean', 'znQrFunctionSpecial'].forEach((id) => {
+      binding.add(document.getElementById(id), 'change', () => {
+        document.getElementById('znQrFunctionsFieldset')?.classList.remove('has-error')
+        setZoneQrFormLocked(false)
+        syncZoneQrFormatSummary()
+        zoneQrPreviewPage = 1
+        scheduleZoneQrPreview()
+      })
+    })
+    ;['znQrStopVariant', 'znQrStartQuantity', 'znQrStopQuantity', 'znQrCleanQuantity', 'znQrSpecialQuantity'].forEach((id) => {
+      binding.add(document.getElementById(id), 'change', () => {
+        syncZoneQrFormatSummary()
+        zoneQrPreviewPage = 1
+        scheduleZoneQrPreview()
+      })
+    })
+    document.querySelectorAll('input[name="znQrTimeFormat"], input[name="znQrLabelSize"]').forEach((input) => {
+      binding.add(input, 'change', () => {
+        syncZoneQrFormatSummary()
+        zoneQrPreviewPage = 1
+        scheduleZoneQrPreview()
+      })
+    })
+    document.querySelectorAll('[data-zone-qr-quantity-target]').forEach((button) => {
+      binding.add(button, 'click', () => {
+        const input = document.getElementById(String(button.dataset.zoneQrQuantityTarget || ''))
+        if (!input || input.disabled) return
+        const delta = Number(button.dataset.zoneQrQuantityDelta || 0)
+        const current = Number(input.value || 1)
+        input.value = String(Math.min(100, Math.max(1, (Number.isFinite(current) ? current : 1) + delta)))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+    })
+    ;['znQrClient', 'znQrZone'].forEach((id) => {
+      binding.add(document.getElementById(id), 'change', scheduleZoneQrPreview)
+    })
+    binding.add(window, 'resize', () => {
+      if (zoneQrPreviewResizeTimer) window.clearTimeout(zoneQrPreviewResizeTimer)
+      zoneQrPreviewResizeTimer = window.setTimeout(() => {
+        zoneQrPreviewResizeTimer = 0
+        const generatorView = document.getElementById('znQrGeneratorView')
+        if (generatorView && !generatorView.hidden && zoneQrPreviewBlob && zoneQrDocumentPages.length) {
+          void showZoneQrPreviewPage(zoneQrPreviewPage, { showLoading: false })
+        }
+      }, 140)
+    })
+    binding.add(document, 'keydown', (event) => {
+      if (event.key !== 'Escape') return
+      const generatorView = document.getElementById('znQrGeneratorView')
+      if (generatorView && !generatorView.hidden && ![...zoneComboStates.values()].some((state) => state.open)) {
+        closeZoneQrGenerator()
+      }
+    })
 
     return () => {
+      closeZoneQrGenerator()
       binding.done()
     }
   }

@@ -593,7 +593,7 @@ mutation DeleteTaskForOrg(
 mutation InsertZoneForOrg(
   $orgId: String!
   $zoneId: String!
-  $clientId: String!
+  $clientId: String
   $zone: String
   $function: String
   $editedBy: String
@@ -623,7 +623,7 @@ mutation InsertZoneForOrg(
 mutation UpdateZoneForOrg(
   $orgId: String!
   $zoneId: String!
-  $clientId: String!
+  $clientId: String
   $zone: String
   $function: String
   $editedBy: String

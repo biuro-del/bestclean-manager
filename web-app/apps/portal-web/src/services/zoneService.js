@@ -1,4 +1,10 @@
-import { deleteZoneForOrg, insertZoneForOrg, updateZoneForOrg, zonesForOrg } from './platformDataConnectService'
+import {
+  deleteZoneForOrg,
+  insertZoneForOrg,
+  platformAuthHeaders,
+  updateZoneForOrg,
+  zonesForOrg,
+} from './platformDataConnectService'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
 const READ_CACHE_MS = 30000
@@ -55,8 +61,49 @@ function toText(value) {
   return String(value ?? '').trim()
 }
 
+function portalApiBase() {
+  const raw = toText(import.meta.env.VITE_ADMIN_API_BASE || '/api').replace(/\/+$/, '')
+  if (!raw) return '/api'
+  return raw.endsWith('/api') ? raw : `${raw}/api`
+}
+
+const GENERATED_ZONE_QR_FUNCTIONS = new Set([
+  'START',
+  'STOP',
+  'STOP0',
+  'STOP5',
+  'STOP10',
+  'STOP15',
+  'CLEAN',
+  'STREFA_SPECJALNA',
+])
+const LEGACY_UNASSIGNED_CLIENT_ID = 'UNASSIGNED'
+
+function normalizedZoneClientId(value) {
+  const clientId = toText(value)
+  return clientId.toUpperCase() === LEGACY_UNASSIGNED_CLIENT_ID ? '' : clientId
+}
+
+function isGeneratedZoneQr(zone) {
+  const zoneId = toText(zone?.zoneId ?? zone?.id ?? zone?.qr)
+  const functionName = toText(zone?.function).toUpperCase()
+  return /^QRC_[a-z0-9_-]+_Z\d+$/i.test(zoneId) && GENERATED_ZONE_QR_FUNCTIONS.has(functionName)
+}
+
+async function parsePortalApiResponse(response) {
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const error = new Error(toText(body?.error?.message) || 'Operacja na kodach QR nie powiodła się.')
+    error.code = toText(body?.error?.code) || 'PORTAL_ZONE_QR_ERROR'
+    error.status = response.status
+    throw error
+  }
+  return body?.data ?? {}
+}
+
 function mapZone(orgId, row) {
   const zoneId = toText(row?.ZoneId ?? row?.zoneId ?? row?.id)
+  const clientId = normalizedZoneClientId(row?.clientId)
   const workerLogin = toText(row?.workerLogin)
   const workerName = toText(
     row?.worker?.workerName ?? row?.worker?.workername ?? row?.worker?.worker_name ?? row?.worker?.name ?? row?.worker?.fullName,
@@ -68,7 +115,8 @@ function mapZone(orgId, row) {
     qr: zoneId,
     code: zoneId,
     orgId,
-    clientId: toText(row?.clientId),
+    clientId,
+    clientName: toText(row?.clientName ?? row?.client?.name),
     name: toText(row?.zone),
     zone: toText(row?.zone),
     function: toText(row?.function),
@@ -147,8 +195,10 @@ export async function createZone(orgId, payload) {
 
 export async function updateZone(orgId, zoneId, payload) {
   const clientId = toText(payload?.clientId)
+  const existingZone = await getZoneById(orgId, zoneId)
+  const generatedZoneQr = isGeneratedZoneQr(existingZone)
 
-  if (!clientId) {
+  if (!clientId && !generatedZoneQr) {
     throw new Error('Pole clientId jest wymagane dla updateZone(orgId, zoneId).')
   }
 
@@ -160,9 +210,9 @@ export async function updateZone(orgId, zoneId, payload) {
   await updateZoneForOrg({
     orgId,
     zoneId: toText(zoneId),
-    clientId,
+    clientId: clientId || (generatedZoneQr ? LEGACY_UNASSIGNED_CLIENT_ID : null),
     zone: payload?.name ?? payload?.zone ?? null,
-    function: payload?.function ?? null,
+    function: generatedZoneQr ? existingZone.function : payload?.function ?? null,
     location: payload?.location ?? null,
     editedBy: payload?.editedBy ?? null,
     date: payload?.date ?? null,
@@ -174,13 +224,61 @@ export async function updateZone(orgId, zoneId, payload) {
     orgId,
     clientId,
     name: toText(payload?.name ?? payload?.zone),
-    function: toText(payload?.function),
+    function: generatedZoneQr ? existingZone.function : toText(payload?.function),
     location: toText(payload?.location),
     workerLogin: toText(payload?.workerLogin),
     workerName: toText(payload?.workerName),
     editedBy: toText(payload?.editedBy),
     date: toText(payload?.date),
   }
+}
+
+export async function generateZoneQrCodes(orgId, payload = {}) {
+  const supportedFunctions = GENERATED_ZONE_QR_FUNCTIONS
+  const fallbackQuantity = Number(payload?.quantity ?? 1)
+  const rawItems = Array.isArray(payload?.items)
+    ? payload.items
+    : (Array.isArray(payload?.functions) ? payload.functions : []).map((functionName) => ({
+        function: functionName,
+        quantity: fallbackQuantity,
+      }))
+  const items = rawItems.map((item) => ({
+    function: toText(item?.function).toUpperCase(),
+    quantity: Number(item?.quantity),
+  }))
+  if (
+    items.length < 1 ||
+    items.length > supportedFunctions.size ||
+    new Set(items.map((item) => item.function)).size !== items.length ||
+    items.some(
+      (item) =>
+        !supportedFunctions.has(item.function) ||
+        !Number.isSafeInteger(item.quantity) ||
+        item.quantity < 1 ||
+        item.quantity > 100,
+    )
+  ) {
+    throw new Error('Wybierz obsługiwane funkcje i podaj dla każdej ilość od 1 do 100.')
+  }
+
+  const response = await fetch(`${portalApiBase()}/portal/zones/qr-codes`, {
+    method: 'POST',
+    headers: {
+      ...(await platformAuthHeaders({ requireContext: false })),
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      orgId: toText(orgId),
+      items,
+      clientId: toText(payload?.clientId) || null,
+      zone: toText(payload?.zone ?? payload?.name) || null,
+    }),
+  })
+  const data = await parsePortalApiResponse(response)
+  const codes = (Array.isArray(data?.codes) ? data.codes : []).map((row) => mapZone(orgId, row))
+  invalidateZonesCache(orgId)
+  return codes
 }
 
 export async function deleteZone(orgId, zoneId) {

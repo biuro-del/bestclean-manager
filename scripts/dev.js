@@ -4,9 +4,11 @@ const { spawn } = require('node:child_process')
 const path = require('node:path')
 const { GoogleAuth } = require('google-auth-library')
 
-const DEFAULT_PROJECT_ID = 'iclean-room'
-const DEFAULT_CONNECTION_NAME = 'iclean-room:europe-west3:iclean-room-instance'
-const DEFAULT_DATABASE_NAME = 'iclean-room-database'
+require('dotenv').config({
+  path: path.resolve(__dirname, '..', '.env.local'),
+  quiet: true,
+})
+
 const DEFAULT_DB_USER_SECRET = 'PORTAL_DB_USER'
 const DEFAULT_DB_PASS_SECRET = 'PORTAL_DB_PASS'
 const SECRET_MANAGER_SCOPE = 'https://www.googleapis.com/auth/cloud-platform'
@@ -85,11 +87,18 @@ async function loadLocalCloudSqlConfig() {
   }
 
   const projectId = String(
-    process.env.FIREBASE_PROJECT_ID ||
+      process.env.DEV_SECRET_PROJECT_ID ||
+      process.env.PLATFORM_FIREBASE_PROJECT_ID ||
+      process.env.FIREBASE_PROJECT_ID ||
       process.env.GOOGLE_CLOUD_PROJECT ||
       process.env.GCLOUD_PROJECT ||
-      DEFAULT_PROJECT_ID,
+      '',
   ).trim()
+  const connectionName = String(process.env.CLOUD_SQL_CONNECTION_NAME || process.env.INSTANCE_CONNECTION_NAME || '').trim()
+  const databaseName = String(process.env.DB_NAME || process.env.PGDATABASE || '').trim()
+  if (!projectId || !connectionName || !databaseName) {
+    throw new Error('DEV_DATABASE_CONFIG_MISSING: ustaw FIREBASE_PROJECT_ID, CLOUD_SQL_CONNECTION_NAME i DB_NAME')
+  }
   const dbUserSecret = String(process.env.DEV_DB_USER_SECRET || DEFAULT_DB_USER_SECRET).trim()
   const dbPassSecret = String(process.env.DEV_DB_PASS_SECRET || DEFAULT_DB_PASS_SECRET).trim()
   const authorization = await getGoogleAuthorizationHeader()
@@ -98,12 +107,11 @@ async function loadLocalCloudSqlConfig() {
     accessSecret(projectId, dbPassSecret, authorization),
   ])
 
-  process.env.FIREBASE_PROJECT_ID ||= projectId
-  process.env.CLOUD_SQL_CONNECTION_NAME ||= DEFAULT_CONNECTION_NAME
+  process.env.CLOUD_SQL_CONNECTION_NAME ||= connectionName
   process.env.DB_CONNECTOR ||= 'cloudsql'
   process.env.CLOUD_SQL_AUTH_CLIENT ||= 'adc'
   process.env.CLOUD_SQL_AUTH_TYPE ||= 'PASSWORD'
-  process.env.DB_NAME ||= DEFAULT_DATABASE_NAME
+  process.env.DB_NAME ||= databaseName
   process.env.DB_USER = dbUser
   process.env.DB_PASS = dbPass
   process.env.DB_SSL_REJECT_UNAUTHORIZED ||= 'true'

@@ -142,6 +142,9 @@
       </div>
       <div class="zones-combo-list" id="znPageSizeList" role="listbox"></div>
     </div>
+    <button class="btn2 zones-filter-btn zones-filter-btn--generate" id="znQrGeneratorBtn" type="button" hidden>
+      <span>Generuj kody QR</span>
+    </button>
     <button class="btn2 zones-filter-btn zones-filter-btn--add" id="znAddBtn" type="button">
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M12 5v14"></path>
@@ -167,6 +170,257 @@
     </button>
   </div>
 </div>
+
+<section class="zones-qr-page" id="znQrGeneratorView" aria-labelledby="znQrGeneratorTitle" hidden>
+  <div class="zones-qr-modal zones-qr-page-shell">
+    <div class="zones-qr-modal-header">
+      <div class="zones-qr-title-group">
+        <span class="zones-qr-icon zones-qr-icon--qrcode zones-qr-title-icon" aria-hidden="true"></span>
+        <div>
+          <p class="zones-qr-eyebrow">Strefy / kody QR</p>
+          <h2 id="znQrGeneratorTitle">Generowanie kodów QR</h2>
+          <p id="znQrGeneratorDescription">Wybierz funkcje, przypisz obiekt oraz dopasuj format wydruku. Podgląd aktualizuje się automatycznie.</p>
+        </div>
+      </div>
+      <button class="btn2 zones-qr-close" id="znQrCloseBtn" type="button">
+        <span class="zones-qr-icon zones-qr-icon--arrow-left" aria-hidden="true"></span>
+        <span>Wróć do stref</span>
+      </button>
+    </div>
+
+    <div class="zones-qr-layout">
+      <section class="zones-qr-config" aria-label="Konfiguracja kodów QR">
+        <fieldset class="zones-qr-panel-section zones-qr-functions-section" id="znQrFunctionsFieldset">
+          <legend><span class="zones-qr-section-number">1.</span> Funkcja kodu</legend>
+          <p class="zones-qr-section-intro">Wybierz funkcje kodów, które chcesz wygenerować.</p>
+          <div class="zones-qr-function-options zones-qr-function-options--extended">
+            <div class="zones-qr-function-card zones-qr-function-card--start">
+              <label class="zones-qr-function-choice">
+                <input id="znQrFunctionStart" type="checkbox" value="START" checked />
+                <span class="zones-qr-function-icon zones-qr-icon zones-qr-icon--play" aria-hidden="true"></span>
+                <span class="zones-qr-function-copy">
+                  <strong>START</strong>
+                  <small>Rozpoczęcie czasu pracy</small>
+                </span>
+              </label>
+              <div class="zones-qr-card-controls zones-qr-card-controls--single">
+                <span class="zones-qr-control-label">Ilość</span>
+                <div class="zones-qr-stepper">
+                  <button type="button" data-zone-qr-quantity-target="znQrStartQuantity" data-zone-qr-quantity-delta="-1" aria-label="Zmniejsz liczbę kodów START">−</button>
+                  <input id="znQrStartQuantity" type="number" inputmode="numeric" min="1" max="100" step="1" value="1" aria-label="Ilość kodów START" />
+                  <button type="button" data-zone-qr-quantity-target="znQrStartQuantity" data-zone-qr-quantity-delta="1" aria-label="Zwiększ liczbę kodów START">+</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="zones-qr-function-card zones-qr-function-card--stop">
+              <label class="zones-qr-function-choice">
+                <input id="znQrFunctionStop" type="checkbox" value="STOP" />
+                <span class="zones-qr-function-icon zones-qr-icon zones-qr-icon--square" aria-hidden="true"></span>
+                <span class="zones-qr-function-copy">
+                  <strong>STOP</strong>
+                  <small>Zakończenie czasu pracy</small>
+                </span>
+              </label>
+              <div class="zones-qr-card-controls">
+                <label class="zones-qr-variant-field" for="znQrStopVariant">
+                  <span>Wariant</span>
+                  <select id="znQrStopVariant" disabled>
+                    <option value="STOP">STOP</option>
+                    <option value="STOP0">STOP0</option>
+                    <option value="STOP5">STOP5</option>
+                    <option value="STOP10">STOP10</option>
+                    <option value="STOP15">STOP15</option>
+                  </select>
+                </label>
+                <div>
+                  <span class="zones-qr-control-label">Ilość</span>
+                  <div class="zones-qr-stepper">
+                    <button type="button" data-zone-qr-quantity-target="znQrStopQuantity" data-zone-qr-quantity-delta="-1" aria-label="Zmniejsz liczbę kodów STOP" disabled>−</button>
+                    <input id="znQrStopQuantity" type="number" inputmode="numeric" min="1" max="100" step="1" value="1" aria-label="Ilość kodów STOP" disabled />
+                    <button type="button" data-zone-qr-quantity-target="znQrStopQuantity" data-zone-qr-quantity-delta="1" aria-label="Zwiększ liczbę kodów STOP" disabled>+</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="zones-qr-function-card zones-qr-function-card--clean">
+              <label class="zones-qr-function-choice">
+                <input id="znQrFunctionClean" type="checkbox" value="CLEAN" />
+                <span class="zones-qr-function-icon zones-qr-icon zones-qr-icon--sparkles" aria-hidden="true"></span>
+                <span class="zones-qr-function-copy">
+                  <strong>Strefa (CLEAN)</strong>
+                  <small>Zwykły kod przypisany do strefy</small>
+                </span>
+              </label>
+              <div class="zones-qr-card-controls zones-qr-card-controls--single">
+                <span class="zones-qr-control-label">Ilość</span>
+                <div class="zones-qr-stepper">
+                  <button type="button" data-zone-qr-quantity-target="znQrCleanQuantity" data-zone-qr-quantity-delta="-1" aria-label="Zmniejsz liczbę kodów CLEAN" disabled>−</button>
+                  <input id="znQrCleanQuantity" type="number" inputmode="numeric" min="1" max="100" step="1" value="1" aria-label="Ilość kodów CLEAN" disabled />
+                  <button type="button" data-zone-qr-quantity-target="znQrCleanQuantity" data-zone-qr-quantity-delta="1" aria-label="Zwiększ liczbę kodów CLEAN" disabled>+</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="zones-qr-function-card zones-qr-function-card--special">
+              <label class="zones-qr-function-choice">
+                <input id="znQrFunctionSpecial" type="checkbox" value="STREFA_SPECJALNA" />
+                <span class="zones-qr-function-icon zones-qr-icon zones-qr-icon--shield" aria-hidden="true"></span>
+                <span class="zones-qr-function-copy">
+                  <strong>Strefa specjalna</strong>
+                  <small>Kod dla specjalnej strefy pracy</small>
+                </span>
+              </label>
+              <div class="zones-qr-card-controls zones-qr-card-controls--single">
+                <span class="zones-qr-control-label">Ilość</span>
+                <div class="zones-qr-stepper">
+                  <button type="button" data-zone-qr-quantity-target="znQrSpecialQuantity" data-zone-qr-quantity-delta="-1" aria-label="Zmniejsz liczbę kodów strefy specjalnej" disabled>−</button>
+                  <input id="znQrSpecialQuantity" type="number" inputmode="numeric" min="1" max="100" step="1" value="1" aria-label="Ilość kodów strefy specjalnej" disabled />
+                  <button type="button" data-zone-qr-quantity-target="znQrSpecialQuantity" data-zone-qr-quantity-delta="1" aria-label="Zwiększ liczbę kodów strefy specjalnej" disabled>+</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="zones-qr-help"><span class="zones-qr-icon zones-qr-icon--info" aria-hidden="true"></span>Możesz wybrać kilka funkcji i ustawić dla każdej inną ilość.</p>
+        </fieldset>
+
+        <section class="zones-qr-panel-section zones-qr-assignment-section" aria-labelledby="znQrAssignmentTitle">
+          <h3 id="znQrAssignmentTitle"><span class="zones-qr-section-number">2.</span> Przypisanie kodów</h3>
+          <p class="zones-qr-section-intro">Kody można przypisać teraz lub później w aplikacji mobilnej.</p>
+          <div class="zones-qr-assignment-grid">
+            <div class="zones-qr-field">
+              <label for="znQrClientText">Klient <span>opcjonalnie</span></label>
+              <div class="zones-combo" data-zone-combo="znQrClient">
+                <input id="znQrClient" type="hidden" />
+                <div class="zones-combo-control">
+                  <input class="zones-combo-input" id="znQrClientText" type="text" role="combobox" aria-autocomplete="list" aria-controls="znQrClientList" aria-expanded="false" placeholder="Nieprzypisany" />
+                  <button class="zones-combo-toggle" type="button" aria-label="Rozwiń listę klientów" tabindex="-1"></button>
+                </div>
+                <div class="zones-combo-list" id="znQrClientList" role="listbox"></div>
+              </div>
+            </div>
+
+            <div class="zones-qr-field">
+              <label for="znQrZoneText">Strefa <span>opcjonalnie</span></label>
+              <div class="zones-combo" data-zone-combo="znQrZone">
+                <input id="znQrZone" type="hidden" />
+                <div class="zones-combo-control">
+                  <input class="zones-combo-input" id="znQrZoneText" type="text" role="combobox" aria-autocomplete="list" aria-controls="znQrZoneList" aria-expanded="false" placeholder="Nieprzypisana" />
+                  <button class="zones-combo-toggle" type="button" aria-label="Rozwiń listę stref" tabindex="-1"></button>
+                </div>
+                <div class="zones-combo-list" id="znQrZoneList" role="listbox"></div>
+              </div>
+            </div>
+          </div>
+          <p class="zones-qr-assignment-note"><span class="zones-qr-icon zones-qr-icon--info" aria-hidden="true"></span>Nieprzypisane kody będzie można później przypisać w aplikacji.</p>
+        </section>
+
+        <fieldset class="zones-qr-panel-section zones-qr-format-section">
+          <legend><span class="zones-qr-section-number">3.</span> Format wydruku</legend>
+          <p class="zones-qr-section-intro">Wybierz układ i format stron dla każdego rodzaju kodów.</p>
+          <div class="zones-qr-format-groups">
+            <article class="zones-qr-format-group" id="znQrTimeFormatCard">
+              <div class="zones-qr-format-group-heading">
+                <span class="zones-qr-format-group-icon zones-qr-icon zones-qr-icon--layout-columns" aria-hidden="true"></span>
+                <div>
+                  <strong>START / STOP</strong>
+                  <small>Plakaty czasu pracy</small>
+                </div>
+              </div>
+              <div class="zones-qr-format-options" role="radiogroup" aria-label="Rozmiar plakatów START i STOP">
+                <label class="zones-qr-format-option">
+                  <input type="radio" name="znQrTimeFormat" value="A4_HALF" checked />
+                  <span><strong>Duży plakat</strong><small>A4 poziomo · 2 na stronie</small></span>
+                </label>
+                <label class="zones-qr-format-option">
+                  <input type="radio" name="znQrTimeFormat" value="100X120" />
+                  <span><strong>10 × 12 cm</strong><small>A4 pionowo · 4 na stronie</small></span>
+                </label>
+              </div>
+              <span class="zones-qr-auto-format-meta" id="znQrTimeFormatMeta">Aktywuje się dla START lub STOP</span>
+            </article>
+
+            <article class="zones-qr-format-group" id="znQrZoneFormatCard">
+              <div class="zones-qr-format-group-heading">
+                <span class="zones-qr-format-group-icon zones-qr-icon zones-qr-icon--grid-dots" aria-hidden="true"></span>
+                <div>
+                  <strong>Strefy</strong>
+                  <small>Etykiety na arkuszu A4</small>
+                </div>
+              </div>
+              <div class="zones-qr-format-options" role="radiogroup" aria-label="Rozmiar etykiet stref">
+                <label class="zones-qr-format-option">
+                  <input type="radio" name="znQrLabelSize" value="40" checked />
+                  <span><strong>4 × 4 cm</strong><small>35 etykiet na stronie</small></span>
+                </label>
+                <label class="zones-qr-format-option">
+                  <input type="radio" name="znQrLabelSize" value="25" />
+                  <span><strong>2,5 × 2,5 cm</strong><small>88 etykiet na stronie</small></span>
+                </label>
+              </div>
+              <span class="zones-qr-auto-format-meta" id="znQrZoneFormatMeta">Aktywuje się dla stref</span>
+            </article>
+          </div>
+          <p class="zones-qr-format-summary"><span>Aktualnie wygenerujesz:</span><strong id="znQrFormatSummary">1 kod · 1 strona PDF</strong><span class="zones-qr-icon zones-qr-icon--info" aria-hidden="true"></span></p>
+        </fieldset>
+
+        <section class="zones-qr-panel-section zones-qr-actions-section" aria-labelledby="znQrActionsTitle">
+          <h3 id="znQrActionsTitle"><span class="zones-qr-section-number">4.</span> Akcje</h3>
+          <p class="zones-qr-section-intro">Wygeneruj plik PDF lub wyślij go od razu do drukarki.</p>
+          <div class="zones-qr-status" id="znQrStatus" role="status" aria-live="polite"></div>
+          <div class="zones-qr-actions">
+            <button class="btn2 primary" id="znQrGenerateBtn" type="button"><span>Wygeneruj i zapisz PDF</span><span class="zones-qr-icon zones-qr-icon--file-pdf" aria-hidden="true"></span></button>
+            <button class="btn2" id="znQrDownloadBtn" type="button" disabled><span class="zones-qr-icon zones-qr-icon--file-download" aria-hidden="true"></span><span>Pobierz PDF</span></button>
+            <button class="btn2" id="znQrPrintBtn" type="button" disabled><span class="zones-qr-icon zones-qr-icon--printer" aria-hidden="true"></span><span>Drukuj</span></button>
+            <button class="btn2 zones-qr-cancel" id="znQrCancelBtn" type="button">Anuluj</button>
+          </div>
+        </section>
+      </section>
+
+      <section class="zones-qr-preview" aria-label="Podgląd dokumentu PDF">
+        <div class="zones-qr-preview-header">
+          <div>
+            <strong>Podgląd wydruku</strong>
+            <small>Podgląd aktualizuje się automatycznie.</small>
+            <span id="znQrPreviewMeta">Strona 1 z 1</span>
+          </div>
+          <div class="zones-qr-page-nav" id="znQrPageNav" hidden>
+            <button class="btn2" id="znQrPagePrevBtn" type="button">Poprzednia</button>
+            <button class="btn2" id="znQrPageNextBtn" type="button">Następna</button>
+          </div>
+        </div>
+        <dl class="zones-qr-preview-stats">
+          <div class="zones-qr-preview-stat zones-qr-preview-stat--format">
+            <dt>Format strony</dt>
+            <dd id="znQrPreviewFormat">A4 poziomo</dd>
+          </div>
+          <div class="zones-qr-preview-stat zones-qr-preview-stat--layout">
+            <dt>Typ układu</dt>
+            <dd id="znQrPreviewLayout">Duże plakaty START/STOP</dd>
+          </div>
+          <div class="zones-qr-preview-stat zones-qr-preview-stat--capacity">
+            <dt>Na stronę</dt>
+            <dd id="znQrPreviewCapacity">2 plakaty na stronę</dd>
+          </div>
+          <div class="zones-qr-preview-stat zones-qr-preview-stat--pages">
+            <dt>Wszystkie strony</dt>
+            <dd id="znQrPreviewPages">1</dd>
+          </div>
+        </dl>
+        <div class="zones-qr-preview-pages" id="znQrPreviewPagesOverview" hidden>
+          <span class="zones-qr-preview-pages-label">Wszystkie strony dokumentu</span>
+          <div class="zones-qr-page-strip" id="znQrPageStrip" aria-label="Wybierz stronę podglądu"></div>
+        </div>
+        <div class="zones-qr-preview-canvas" id="znQrPreviewCanvasHost" aria-busy="true">
+          <div class="zones-qr-preview-loading" id="znQrPreviewLoading">Przygotowywanie podglądu PDF…</div>
+          <canvas id="znQrPreviewCanvas" role="img" aria-label="Podgląd wygenerowanych kodów QR" hidden></canvas>
+        </div>
+        <p class="zones-qr-preview-note">Podgląd, pobrany plik i wydruk korzystają z tego samego dokumentu.</p>
+      </section>
+    </div>
+  </div>
+</section>
 
 <div class="zones-table" aria-label="Tabela stref">
   <div class="zones-head">
@@ -291,6 +545,7 @@
     <div class="row-actions">
       <div class="left">
         <button class="btn2 danger" id="znDeleteBtn" type="button" style="display:none;">Usuń</button>
+        <button class="btn2" id="znReprintBtn" type="button" style="display:none;">Drukuj kod QR</button>
       </div>
       <div class="right">
         <button class="btn2" id="znCancelBtn" type="button">Zamknij</button>
