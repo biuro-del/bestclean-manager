@@ -1,0 +1,303 @@
+SKRÓT KONCEPCJI NOWEJ BAZY „ZDARZEŃ”
+
+1. PROBLEM OBECNEJ STRUKTURY
+
+Aktualnie dane dotyczące czasu pracy są rozproszone pomiędzy:
+
+- Event,
+- Workday,
+- WorkdayPause,
+- BackupCycle.
+
+Panel „Zdarzenia” pobiera i łączy dane z kilku źródeł. Podczas dodawania lub edycji zapis może odbywać się oddzielnie do Event i Workday. Jeżeli jeden zapis się powiedzie, a drugi nie, powstają rozbieżności.
+
+Może to powodować:
+
+- znikające lub błędnie przypisane strefy,
+- różne godziny w Event i Workday,
+- duplikaty zdarzeń,
+- nieprawidłowe przypisanie klienta,
+- skomplikowane wyszukiwanie danych zapasowych,
+- problemy z sumowaniem czasu pracy.
+
+
+2. GŁÓWNY CEL ZMIAN
+
+Event powinien zostać jedynym źródłem prawdy dla okresów pracy.
+
+Docelowo można usunąć:
+
+- BackupCycle,
+- Workday,
+- WorkdayPause.
+
+Tabele podstawowe pozostają bez zmian:
+
+- Worker,
+- Client,
+- Zone.
+
+Usunięcie starych tabel może nastąpić dopiero po migracji i sprawdzeniu wszystkich danych.
+
+
+3. PROPONOWANA STRUKTURA
+
+Worker ─────────────────┐
+                        ├── Event ─── EventPause
+Client ─── Zone ────────┘      │
+                               └── EventScan
+
+Event + EventPause + EventScan
+              │
+              ▼
+       DailyWorkSummary
+       (wyliczony widok)
+
+Relacje:
+
+Event.workerLogin  → Worker.login
+Event.zoneId       → Zone.zoneId
+Zone.clientId      → Client.clientId
+EventPause.eventId → Event.eventId
+EventScan.eventId  → Event.eventId
+
+Worker nie ma bezpośredniej relacji ze strefą. Informacja o tym, gdzie pracował, wynika z rekordu Event.
+
+
+4. EVENT – GŁÓWNY OKRES PRACY
+
+Jeden rekord Event oznacza jeden ciągły okres pracy START–STOP.
+
+Przykład:
+
+Event 1: 07:00–10:00
+Event 2: 17:00–20:00
+
+Łączny czas: 6 godzin.
+
+Luka między zdarzeniami nie jest liczona jako czas pracy ani jako przerwa.
+
+Najważniejsze pola:
+
+- eventId,
+- orgId,
+- workerLogin,
+- zoneId,
+- eventType,
+- startAt,
+- endAt,
+- durationSec,
+- status,
+- startScanId,
+- endScanId,
+- deviceId,
+- comment,
+- editedBy,
+- createdAt,
+- updatedAt.
+
+Możliwe statusy:
+
+- RUNNING,
+- CLOSED,
+- CANCELLED.
+
+Nazwy powinny być pobierane przez relacje:
+
+Event → Worker → nazwa pracownika
+Event → Zone → nazwa strefy
+Event → Zone → Client → nazwa klienta
+
+Warto dodatkowo zachować snapshot nazw, aby stare zdarzenia pozostały czytelne po zmianie lub usunięciu klienta albo strefy:
+
+- workerNameSnapshot,
+- zoneNameSnapshot,
+- clientNameSnapshot.
+
+
+5. EVENTSCAN – ORYGINALNE SKANOWANIA
+
+EventScan jest proponowaną nową tabelą. Przechowuje każdy faktycznie zeskanowany kod QR wraz z godziną i GPS.
+
+Przykład:
+
+Event EV-001
+├── EventScan START 07:47
+└── EventScan STOP  13:54
+
+Przy trzech okresach pracy powstają trzy rekordy Event i sześć rekordów EventScan.
+
+Najważniejsze pola:
+
+- scanId,
+- eventId,
+- workerLogin,
+- zoneId,
+- scanType,
+- scannedAt,
+- qrCode,
+- latitude,
+- longitude,
+- gpsAccuracy,
+- deviceId,
+- source,
+- createdAt.
+
+Możliwe wartości scanType:
+
+- START,
+- STOP,
+- CLEAN,
+- SPECIAL_ZONE,
+- PAUSE_START,
+- PAUSE_STOP.
+
+EventScan stanowi historię źródłową. Ręczna edycja godziny w Event nie powinna zmieniać oryginalnego skanu.
+
+Nie ma potrzeby tworzenia osobnych tabel EventStart, EventStop czy EventClean.
+
+
+6. EVENTPAUSE – PRZERWY
+
+EventPause zastępuje WorkdayPause i przechowuje przerwy wewnątrz konkretnego okresu pracy.
+
+Event
+└── EventPause
+    ├── pauseId
+    ├── eventId
+    ├── startAt
+    ├── endAt
+    ├── durationSec
+    ├── status
+    ├── reason
+    └── deviceId
+
+Obliczenie:
+
+realny czas Event = (endAt − startAt) − suma EventPause
+
+Przerwa pomiędzy dwoma osobnymi zdarzeniami nie wymaga rekordu EventPause.
+
+
+7. DAILYWORKSUMMARY – PODSUMOWANIE DNIA
+
+Nie powinno się tworzyć ręcznie edytowalnej tabeli Day, ponieważ mogłaby stać się kolejnym niespójnym źródłem danych.
+
+Lepszym rozwiązaniem jest widok:
+
+DailyWorkSummary
+
+Grupowanie:
+
+orgId + workerLogin + workDate
+
+Przykładowe dane:
+
+- workDate,
+- workerLogin,
+- firstStartAt,
+- lastEndAt,
+- eventCount,
+- scanCount,
+- workedSec,
+- pauseSec,
+- realWorkedSec,
+- openEventCount.
+
+DailyWorkSummary powinien być zawsze wyliczany z:
+
+- Event,
+- EventPause,
+- opcjonalnie EventScan.
+
+Dopiero przy problemach z wydajnością można utworzyć materializowane podsumowanie lub cache. Musi być możliwe do całkowitego odbudowania i nie może być ręcznie edytowane.
+
+
+8. BACKUPCYCLE
+
+BackupCycle jest mechanizmem awaryjnego odczytu, a nie pełną kopią bazy.
+
+Można go docelowo usunąć, jeżeli:
+
+- żadna aplikacja mobilna ani integracja już do niego nie zapisuje,
+- dane zostały przeniesione,
+- panel korzysta wyłącznie z nowego Event.
+
+Google Cloud Backup zabezpiecza bazę po awarii, ale nie zastępuje migracji ani kontroli spójności.
+
+
+9. MIGRACJA ISTNIEJĄCYCH DANYCH
+
+stary Event ────────────────┐
+                            ├── nowy Event
+Workday ────────────────────┘
+
+WorkdayPause ─────────────────→ EventPause
+dane START/STOP/GPS ─────────→ EventScan
+
+BackupCycle ─────────────────→ tylko gdy brakuje
+                               Event i Workday
+
+Kolejność wiarygodności:
+
+1. Event z poprawnymi relacjami i godzinami.
+2. Workday, jeśli nie ma odpowiadającego Event.
+3. BackupCycle, jeśli nie ma Event ani Workday.
+
+Jeżeli Event i Workday opisują ten sam okres, nie można tworzyć dwóch rekordów. Należy zachować Event i uzupełnić brakujące dane z Workday.
+
+Konflikty, np. różne strefy, powinny trafiać do raportu kontroli, a nie być automatycznie nadpisywane.
+
+W nowym Event warto tymczasowo zachować informacje migracyjne:
+
+- legacySource,
+- legacyId,
+- migratedAt,
+- migrationStatus.
+
+Zalecana unikalność migracji:
+
+orgId + legacySource + legacyId
+
+Dzięki temu ponowne uruchomienie migracji nie utworzy tych samych rekordów drugi raz.
+
+Jeżeli stary rekord zawiera zoneId, którego nie ma już w Zone, należy zachować:
+
+- legacyZoneId,
+- zoneNameSnapshot,
+- clientNameSnapshot,
+- migrationStatus = MISSING_ZONE.
+
+Nie należy automatycznie przypisywać przypadkowej strefy na podstawie podobnej nazwy.
+
+
+10. BEZPIECZNA KOLEJNOŚĆ WDROŻENIA
+
+1. Wykonanie pełnej kopii i eksportu starych danych.
+2. Analiza duplikatów i uszkodzonych relacji.
+3. Utworzenie nowego modelu.
+4. Migracja do Event, EventPause i EventScan.
+5. Porównanie czasów i stref dzień po dniu.
+6. Przełączenie panelu na nowe Event.
+7. Pozostawienie starych tabel tylko do odczytu.
+8. Usunięcie ich po okresie kontrolnym.
+
+Kontrola powinna porównywać dla każdego pracownika i dnia:
+
+- liczbę okresów pracy,
+- pierwszą i ostatnią godzinę,
+- sumę czasu,
+- liczbę przerw,
+- przypisane strefy i klientów,
+- otwarte zdarzenia,
+- brakujące relacje.
+
+
+11. NAJWAŻNIEJSZA ZASADA NOWEJ STRUKTURY
+
+Event            = jedyne źródło czasu pracy
+EventScan        = oryginalne skany QR i GPS
+EventPause       = przerwy
+DailyWorkSummary = wyliczone podsumowanie dnia
+
+Nowy panel „Zdarzenia” powinien pobierać dane wyłącznie z Event oraz jego jednoznacznych relacji. Nie powinien już łączyć różnych wersji tego samego okresu pracy z Event, Workday i BackupCycle.

@@ -3344,7 +3344,8 @@ export function createDashboardFeature(ctx) {
 
   function eventEditorNormalizeScannedQr(value = '') {
     const code = reportHistoryNormalizeQrCode(value)
-    if (!code || calendarTimelineIsTechnicalEventCode(code)) {
+    const technicalCode = String(code ?? '').trim().toUpperCase().replace(/^QR\s+/, '')
+    if (!code || /^EV-\d+(?:-\d+)?$/.test(technicalCode)) {
       return ''
     }
     return code

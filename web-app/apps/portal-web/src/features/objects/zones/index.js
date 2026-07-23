@@ -36,7 +36,7 @@ const DEFAULT_FUNCTION_OPTIONS = [
 const PAGE_SIZE_OPTIONS = [50, 100, 200]
 const DEFAULT_ZONE_TYPE = 'Biuro'
 const FALLBACK_ZONE_TYPE = 'Inne'
-const DEFAULT_ZONE_TYPE_OPTIONS = [
+export const DEFAULT_ZONE_TYPE_OPTIONS = [
   DEFAULT_ZONE_TYPE,
   'Aneks kuchenny',
   'WC / Prysznic',

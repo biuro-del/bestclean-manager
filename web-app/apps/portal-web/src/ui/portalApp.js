@@ -900,6 +900,9 @@ function setupFloatingTableScrollbar() {
     if (!(node instanceof HTMLElement)) {
       return false
     }
+    if (node.matches('#view-events .events-table')) {
+      return false
+    }
     const root = document.getElementById('portalRoot')
     if (!root?.contains(node)) {
       return false
@@ -5371,8 +5374,12 @@ function calendarTimelineOrderPlannedBounds(...args) {
   return getCalendarFeature().calendarTimelineOrderPlannedBounds(...args)
 }
 
-function calendarTimelineIsTechnicalEventCode(...args) {
-  return getCalendarFeature().calendarTimelineIsTechnicalEventCode(...args)
+function calendarTimelineIsTechnicalEventCode(value = '') {
+  if (calendarFeature?.calendarTimelineIsTechnicalEventCode) {
+    return calendarFeature.calendarTimelineIsTechnicalEventCode(value)
+  }
+  const normalized = String(value ?? '').trim().toUpperCase().replace(/^QR\s+/, '')
+  return /^EV-\d+(?:-\d+)?$/.test(normalized)
 }
 
 function calendarTimelineHideStatusAlert(...args) {

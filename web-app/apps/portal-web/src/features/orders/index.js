@@ -39,7 +39,6 @@ export function createOrdersFeature(ctx) {
     formatBytes,
     formatDatePl,
     formatTime,
-    localDateAndTimeInputToIso,
     normalizeSearchText,
     openClientModal,
     ordersDeleteTimelineOrderFromList,

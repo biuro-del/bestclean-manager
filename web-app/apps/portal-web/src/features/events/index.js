@@ -1,4 +1,6 @@
+import './style.css'
 import template from './template.html?raw'
+import { DEFAULT_ZONE_TYPE_OPTIONS } from '../objects/zones/index.js'
 
 export const route = 'events'
 export const viewId = 'view-events'
@@ -60,7 +62,6 @@ export function createEventsFeature(ctx) {
     workStatusYmdFromTimestamp,
     ymdToIsoRangeEnd,
     ymdToIsoRangeStart,
-    zoneNameWithQrHtml,
     zoneQrCodeFromRow,
   } = ctx
   const EVENTS_REFRESH_POLL_MS = 10000
@@ -68,6 +69,7 @@ export function createEventsFeature(ctx) {
   const EVENTS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
   const EVENT_EDITOR_PICKER_MAX_OPTIONS = 36
   const EVENT_EDITOR_PICKER_EMPTY_MAX_OPTIONS = 18
+  const EVENT_FILTER_COMBO_MAX_OPTIONS = 60
   let eventsRefreshInFlight = null
   let eventsRefreshQueuedOptions = null
   let eventsPollingTimer = 0
@@ -77,6 +79,8 @@ export function createEventsFeature(ctx) {
   let eventEditorOptionsCacheKey = ''
   let eventEditorPickerFilterFrame = 0
   let eventPendingSavedRows = []
+  let eventsSummaryRequestId = 0
+  const eventFilterComboStates = new Map()
 
   function mergeEventsRefreshOptions(base = {}, incoming = {}) {
     const merged = {
@@ -645,6 +649,97 @@ export function createEventsFeature(ctx) {
     select.value = String(pageSize)
   }
 
+  function eventSummaryDateLabel(dayKey) {
+    const match = String(dayKey ?? '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    return match ? `${match[3]}.${match[2]}.${match[1]}` : String(dayKey ?? '').trim()
+  }
+
+  function setEventsSummaryValue(id, value) {
+    const element = document.getElementById(id)
+    if (element) {
+      element.textContent = String(value ?? '0')
+    }
+  }
+
+  function setEventsSummaryLoading() {
+    ;['evSummaryTotal', 'evSummaryClosed', 'evSummaryOpen', 'evSummaryToday'].forEach((id) => {
+      setEventsSummaryValue(id, '…')
+    })
+    const todayMeta = document.getElementById('evSummaryTodayMeta')
+    if (todayMeta) {
+      todayMeta.textContent = `Dzisiaj, ${eventSummaryDateLabel(todayYmd())}`
+    }
+  }
+
+  function renderEventsSummary(rangeRows = [], todayRows = []) {
+    const normalizedRangeRows = Array.isArray(rangeRows) ? rangeRows : []
+    const normalizedTodayRows = Array.isArray(todayRows) ? todayRows : []
+    let closedCount = 0
+    let openCount = 0
+
+    normalizedRangeRows.forEach((row) => {
+      const status = normalizeEventStatus(row?.status, Boolean(row?.endAt))
+      if (status === 'CLOSED') {
+        closedCount += 1
+      } else if (status === 'RUNNING' || status === 'OPEN') {
+        openCount += 1
+      }
+    })
+
+    setEventsSummaryValue('evSummaryTotal', normalizedRangeRows.length)
+    setEventsSummaryValue('evSummaryClosed', closedCount)
+    setEventsSummaryValue('evSummaryOpen', openCount)
+    setEventsSummaryValue('evSummaryToday', normalizedTodayRows.length)
+    const todayMeta = document.getElementById('evSummaryTodayMeta')
+    if (todayMeta) {
+      todayMeta.textContent = `Dzisiaj, ${eventSummaryDateLabel(todayYmd())}`
+    }
+  }
+
+  async function refreshEventsSummaryCards(filters = {}) {
+    if (!appState.session?.orgId) {
+      renderEventsSummary([], [])
+      return
+    }
+
+    const requestId = ++eventsSummaryRequestId
+    const todayKey = todayYmd()
+    const baseFilters = {
+      ...filters,
+      status: '',
+      page: 1,
+      pageSize: 100000,
+      forceRefresh: false,
+    }
+    const todayFilters = {
+      ...baseFilters,
+      fromIso: ymdToIsoRangeStart(todayKey),
+      toIso: ymdToIsoRangeEnd(todayKey),
+    }
+
+    setEventsSummaryLoading()
+    try {
+      const [rangeResponse, todayResponse] = await Promise.all([
+        getWorkdays(appState.session.orgId, baseFilters),
+        getWorkdays(appState.session.orgId, todayFilters),
+      ])
+      if (requestId !== eventsSummaryRequestId) {
+        return
+      }
+      renderEventsSummary(rangeResponse?.items, todayResponse?.items)
+    } catch (error) {
+      if (requestId !== eventsSummaryRequestId) {
+        return
+      }
+      console.warn('[events] summary refresh failed', error)
+      const currentRows = Array.isArray(appState.eventRows) ? appState.eventRows : []
+      const todayRows = currentRows.filter(
+        (row) => String(row?.dayKey ?? eventLocalDayKeyFromIso(row?.startAt || row?.endAt)).trim() === todayKey,
+      )
+      renderEventsSummary(currentRows, todayRows)
+    }
+  }
+
   function eventRowTextIncludes(row, query, fields) {
     const needle = normalizeSearchText(query)
     if (!needle) {
@@ -925,6 +1020,59 @@ export function createEventsFeature(ctx) {
     }
   }
 
+  function eventWorkerInitials(value = '') {
+    const parts = String(value ?? '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+    if (!parts.length) return '?'
+    return (parts.length === 1 ? parts[0].slice(0, 2) : `${parts[0][0]}${parts[parts.length - 1][0]}`).toUpperCase()
+  }
+
+  function eventDateWeekdayLabel(row = {}) {
+    const dayKey = String(row?.dayKey ?? '').trim()
+    const source = dayKey ? `${dayKey}T12:00:00` : row?.startAt || row?.endAt || ''
+    const date = new Date(source)
+    if (!Number.isFinite(date.getTime())) return ''
+    const label = date.toLocaleDateString('pl-PL', { weekday: 'long' })
+    return label ? `${label.charAt(0).toUpperCase()}${label.slice(1)}` : ''
+  }
+
+  function eventEditedAtLabel(value = '') {
+    const date = new Date(value)
+    if (!Number.isFinite(date.getTime())) return ''
+    const dateLabel = date.toLocaleDateString('pl-PL')
+    const timeLabel = date.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })
+    return `${dateLabel}, ${timeLabel}`
+  }
+
+  function eventRowVisualState(row = {}, normalizedStatus = 'RUNNING', editedBy = '') {
+    const startTs = new Date(row?.startAt ?? '').getTime()
+    const endTs = new Date(row?.endAt ?? '').getTime()
+    const rawStatus = String(row?.status ?? '').trim().toUpperCase()
+    const requiresReview =
+      row?.requiresReview === true ||
+      row?.needsReview === true ||
+      row?.hasError === true ||
+      row?.isInvalid === true ||
+      ['ERROR', 'INVALID', 'REVIEW', 'ALERT'].some((token) => rawStatus.includes(token)) ||
+      (Number.isFinite(startTs) && Number.isFinite(endTs) && endTs < startTs)
+
+    if (requiresReview) {
+      return { className: 'events-row--review', label: 'Wymaga sprawdzenia' }
+    }
+    if (normalizedStatus === 'CLOSED') {
+      return { className: 'events-row--completed', label: 'Zdarzenie zakończone' }
+    }
+    if (normalizedStatus === 'RUNNING' || normalizedStatus === 'OPEN') {
+      return { className: 'events-row--running', label: 'Zdarzenie aktywne' }
+    }
+    if (String(editedBy ?? '').trim() && String(editedBy ?? '').trim() !== '-') {
+      return { className: 'events-row--corrected', label: 'Ręczna korekta' }
+    }
+    return { className: 'events-row--running', label: 'Zdarzenie aktywne' }
+  }
+
   function renderEventsRows(rows) {
     const root = document.getElementById('evRows')
     if (!root) {
@@ -1095,8 +1243,12 @@ export function createEventsFeature(ctx) {
 
     if (!safeRows.length) {
       root.innerHTML = `
-        <div class="events-row">
-          <div></div><div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+        <div class="events-row events-row--empty">
+          <div class="events-empty-state">
+            <span aria-hidden="true"><i class="ph ph-magnifying-glass"></i></span>
+            <strong>Brak zdarzeń dla tych filtrów</strong>
+            <small>Zmień kryteria wyszukiwania lub wyczyść filtry.</small>
+          </div>
         </div>
       `
       syncEventsSelectionUi()
@@ -1111,74 +1263,113 @@ export function createEventsFeature(ctx) {
         const selectTitle = eventCanDelete(row) ? 'Zaznacz zdarzenie' : 'Rekord dnia pracy bez osobnego zdarzenia'
         const comment = normalizeVisibleEventComment(row.comment)
         const commentCell = comment
-          ? `<button class="event-comment-btn" type="button" data-event-comment="${index}" title="Pokaż komentarz" aria-label="Pokaż komentarz">i</button>`
-          : '<span class="event-empty">-</span>'
+          ? `<button class="event-comment-btn" type="button" data-event-comment="${index}" title="${escapeHtml(comment)}" aria-label="Pokaż komentarz">
+              <i class="ph ph-chat-circle-text" aria-hidden="true"></i>
+              <span>${escapeHtml(comment)}</span>
+            </button>`
+          : '<span class="event-empty">—</span>'
         const workerLogin = String(row.workerLogin ?? '').trim()
         const workerName = resolveWorkerNameFromWorkers(workerLogin, row.workerName)
         const workerPrimary = workerName || workerLogin || '-'
+        const workerIdentifier = String(row?.workerId ?? workerLogin).trim()
         const workerCard = `
           <div class="events-worker-cell">
-            <div class="events-worker-name">${escapeHtml(workerPrimary)}</div>
+            <span class="events-worker-avatar" aria-hidden="true">${escapeHtml(eventWorkerInitials(workerPrimary))}</span>
+            <span class="events-worker-copy">
+              <strong class="events-worker-name">${escapeHtml(workerPrimary)}</strong>
+              ${workerIdentifier ? `<small>ID: ${escapeHtml(workerIdentifier)}</small>` : ''}
+            </span>
           </div>
         `
         const workerCell =
           workerPrimary === '-'
             ? workerCard
-            : `<button class="events-cell-link" type="button" data-event-history-worker="${index}" title="Pokaz historie osoby">${workerCard}</button>`
+            : `<button class="events-cell-link event-worker-link" type="button" data-event-history-worker="${index}" title="Pokaż historię osoby">${workerCard}</button>`
 
         const clientQrCandidate = eventActualQrCodeFromRow(row) || zoneQrCodeFromRow(row)
         const clientLabel = resolveClientLabelWithQrFallback(String(row?.clientName ?? row?.klient ?? '-').trim() || '-', clientQrCandidate)
+        const clientIdLabel = String(row?.clientId ?? '').trim()
+        const zoneLabel = eventResolveZoneLabel(row)
+        const qrLabel = String(clientQrCandidate ?? '').trim()
         const clientCell =
           clientLabel === '-'
-            ? '-'
-            : `<button class="events-cell-link" type="button" data-event-history-client="${index}" title="Pokaz historie klienta">${escapeHtml(clientLabel)}</button>`
-
-        const zoneLabel = eventResolveZoneLabel(row)
+            ? '<span class="event-entity-empty">—</span>'
+            : `<button class="event-entity-cell event-client-cell" type="button" data-event-history-client="${index}" title="Pokaż historię klienta">
+                <span class="event-entity-icon" aria-hidden="true"><i class="ph ph-buildings"></i></span>
+                <span class="event-entity-copy">
+                  <strong>${escapeHtml(clientLabel)}</strong>
+                  ${clientIdLabel ? `<small>ID: ${escapeHtml(clientIdLabel)}</small>` : ''}
+                </span>
+              </button>`
         const zoneCell =
           zoneLabel === '-'
-            ? '-'
-            : `<button class="events-cell-link" type="button" data-event-history-zone="${index}" title="Pokaz historie strefy">${zoneNameWithQrHtml(zoneLabel, row)}</button>`
+            ? '<span class="event-entity-empty">—</span>'
+            : `<button class="event-entity-cell event-zone-cell" type="button" data-event-history-zone="${index}" title="Pokaż historię strefy">
+                <span class="event-entity-icon" aria-hidden="true"><i class="ph ph-stack"></i></span>
+                <span class="event-entity-copy">
+                  <strong>${escapeHtml(zoneLabel)}</strong>
+                  <small>QR: ${escapeHtml(qrLabel || '-')}</small>
+                </span>
+              </button>`
         const startLabel = dashboardClockLabelToHm(row.start, '-')
         const stopLabel = dashboardClockLabelToHm(row.stop, '-')
         const durationLabel = dashboardDurationLabelToHm(row.duration, '00:00')
         const locationLabel = String(row.lokalizacja || '-').trim() || '-'
         const editedByLabel = String(row.editedBy || '-').trim() || '-'
+        const editedAtLabel = eventEditedAtLabel(row?.updatedAt)
+        const weekdayLabel = eventDateWeekdayLabel(row)
         const timePill = (label, type) =>
-          `<span class="event-time-pill event-time-pill--${type}${label === '-' ? ' is-empty' : ''}">${escapeHtml(label)}</span>`
+          `<span class="event-time-pill event-time-pill--${type}${label === '-' ? ' is-empty' : ''}">
+            <i class="ph ${type === 'start' ? 'ph-play-circle' : type === 'stop' ? 'ph-stop-circle' : 'ph-clock'}" aria-hidden="true"></i>
+            <span>${escapeHtml(label === '-' ? '—' : label)}</span>
+          </span>`
         const gpsCoords = eventRowGpsCoords(row)
         const gpsCell = gpsCoords
           ? `<button class="event-gps-icon-btn" type="button" data-event-gps="${index}" data-rep-geo-lat="${escapeHtml(gpsCoords.lat)}" data-rep-geo-lon="${escapeHtml(gpsCoords.lon)}" title="Pokaz GPS" aria-label="Pokaz GPS">
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 21s6-5.1 6-11a6 6 0 0 0-12 0c0 5.9 6 11 6 11z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-                <circle cx="12" cy="10" r="2.2" stroke="currentColor" stroke-width="1.8"/>
-              </svg>
+              <i class="ph ph-map-pin" aria-hidden="true"></i>
             </button>`
-          : '<span class="event-empty">-</span>'
+          : '<span class="event-empty">—</span>'
         const eventStatus = normalizeEventStatus(row.status, Boolean(row.endAt))
-        const rowStatusClass = eventStatus === 'CLOSED' ? 'events-row--completed' : 'events-row--running'
+        const rowVisualState = eventRowVisualState(row, eventStatus, editedByLabel)
 
         return `
-          <div class="events-row ${rowStatusClass}${isSelected ? ' is-selected' : ''}">
+          <div class="events-row ${rowVisualState.className}${isSelected ? ' is-selected' : ''}">
             <div class="events-select-col">
               <input type="checkbox" data-event-select-index="${index}" aria-label="${escapeHtml(selectTitle)}" title="${escapeHtml(selectTitle)}" ${isSelected ? 'checked' : ''} ${canSelect ? '' : 'disabled'} />
+              <span class="events-visually-hidden">${escapeHtml(rowVisualState.label)}</span>
             </div>
             <div>${workerCell}</div>
             <div>${clientCell}</div>
             <div>${zoneCell}</div>
-            <div><span class="${locationLabel === '-' ? 'event-empty' : 'event-location'}">${escapeHtml(locationLabel)}</span></div>
-            <div><span class="event-date-pill mono">${escapeHtml(row.date || '-')}</span></div>
+            <div>
+              <span class="event-location-cell${locationLabel === '-' ? ' is-empty' : ''}">
+                <i class="ph ph-map-pin" aria-hidden="true"></i>
+                <span>${escapeHtml(locationLabel === '-' ? '—' : locationLabel)}</span>
+              </span>
+            </div>
+            <div>
+              <span class="event-date-cell">
+                <i class="ph ph-calendar-blank" aria-hidden="true"></i>
+                <span>
+                  <strong>${escapeHtml(row.date || '—')}</strong>
+                  ${weekdayLabel ? `<small>${escapeHtml(weekdayLabel)}</small>` : ''}
+                </span>
+              </span>
+            </div>
             <div class="mono time-start">${timePill(startLabel, 'start')}</div>
             <div class="mono time-stop">${timePill(stopLabel, 'stop')}</div>
             <div class="mono time-duration">${timePill(durationLabel, 'duration')}</div>
             <div class="event-gps-cell">${gpsCell}</div>
             <div class="event-comment-cell">${commentCell}</div>
-            <div><span class="${editedByLabel === '-' ? 'event-empty' : 'event-edited-by'}">${escapeHtml(editedByLabel)}</span></div>
             <div>
-              <button class="event-edit-icon-btn" type="button" data-event-edit="${index}" aria-label="Edytuj zdarzenie" title="Edytuj zdarzenie">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M4 20h4l10-10-4-4L4 16v4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-                  <path d="M13 7l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                </svg>
+              <span class="event-edited-cell${editedByLabel === '-' ? ' is-empty' : ''}">
+                <strong>${escapeHtml(editedByLabel === '-' ? '—' : editedByLabel)}</strong>
+                ${editedAtLabel && editedByLabel !== '-' ? `<small>${escapeHtml(editedAtLabel)}</small>` : ''}
+              </span>
+            </div>
+            <div>
+              <button class="event-edit-icon-btn" type="button" data-event-edit="${index}" aria-label="Otwórz akcje zdarzenia" title="Otwórz akcje zdarzenia">
+                <i class="ph ph-dots-three-vertical" aria-hidden="true"></i>
               </button>
             </div>
           </div>
@@ -1212,6 +1403,85 @@ export function createEventsFeature(ctx) {
     const cleanziLogo = document.querySelector('.sidebar-brand-logo img, .sidebar .logo-block--cleanzi img')
     const src = cleanziLogo?.getAttribute('src') || '/cleanzi-logo.svg'
     modalLogo.setAttribute('src', src)
+  }
+
+  function setEventEditorButtonLabel(button, label) {
+    if (!(button instanceof HTMLButtonElement)) return
+    const labelNode = button.querySelector('[data-event-button-label]')
+    if (labelNode) {
+      labelNode.textContent = label
+      return
+    }
+    button.textContent = label
+  }
+
+  function eventEditorClockLabel(value = '') {
+    return String(value ?? '').match(/T(\d{2}:\d{2})/)?.[1] ?? '--:--'
+  }
+
+  function eventEditorDurationLabel(startAt, endAt) {
+    const startTs = new Date(startAt ?? '').getTime()
+    const endTs = new Date(endAt ?? '').getTime()
+    if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || endTs < startTs) return '--:--'
+    const totalMinutes = Math.floor((endTs - startTs) / 60000)
+    const hours = Math.floor(totalMinutes / 60)
+    const minutes = totalMinutes % 60
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+  }
+
+  function eventEditorSyncTimeSummary() {
+    const startInput = document.getElementById('evEditStart')
+    const stopInput = document.getElementById('evEditStop')
+    const summary = document.getElementById('evEditorTimeSummary')
+    const label = document.getElementById('evEditorTimeSummaryLabel')
+    const text = document.getElementById('evEditorTimeSummaryText')
+    const duration = document.getElementById('evEditorDuration')
+    const icon = summary?.querySelector('.ev-editor-summary-icon i')
+    if (!(startInput instanceof HTMLInputElement) || !(stopInput instanceof HTMLInputElement) || !summary) return
+
+    const startValue = String(startInput.value ?? '').trim()
+    const stopValue = eventEditorReadStopValue(stopInput)
+    const startAt = localDateTimeInputToIso(startValue)
+    const endAt = localDateTimeInputToIso(stopValue)
+    const eventKind = resolveEventKindFromTimes(startAt, endAt)
+    let state = eventKind === 'start_stop' ? 'complete' : eventKind
+    let labelText = 'Status zdarzenia'
+    let description = 'Uzupełnij START, STOP lub oba pola.'
+    let durationText = '--:--'
+    let iconClass = 'ph ph-clock'
+
+    if (eventKind === 'start') {
+      labelText = 'Zdarzenie START'
+      description = 'Praca pozostanie otwarta do czasu dodania STOP.'
+      durationText = eventEditorClockLabel(startValue)
+      iconClass = 'ph ph-play'
+    } else if (eventKind === 'stop') {
+      labelText = 'Zdarzenie STOP'
+      description = 'Zapis zostanie dodany jako sam koniec pracy.'
+      durationText = eventEditorClockLabel(stopValue)
+      iconClass = 'ph ph-stop'
+    } else if (eventKind === 'start_stop') {
+      const startTs = new Date(startAt).getTime()
+      const endTs = new Date(endAt).getTime()
+      if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || endTs < startTs) {
+        state = 'invalid'
+        labelText = 'Sprawdź godziny'
+        description = 'STOP musi być późniejszy niż START.'
+        durationText = 'Błąd'
+        iconClass = 'ph ph-warning-circle'
+      } else {
+        labelText = 'Łączny czas pracy'
+        description = `${eventEditorClockLabel(startValue)} → ${eventEditorClockLabel(stopValue)}`
+        durationText = eventEditorDurationLabel(startAt, endAt)
+        iconClass = 'ph ph-timer'
+      }
+    }
+
+    summary.dataset.state = state === 'none' ? 'empty' : state
+    if (label) label.textContent = labelText
+    if (text) text.textContent = description
+    if (duration) duration.textContent = durationText
+    if (icon) icon.className = iconClass
   }
 
   function getZoneById(zoneId) {
@@ -1272,6 +1542,25 @@ export function createEventsFeature(ctx) {
 
   function eventEditorCollapsePicker(kind) {
     eventEditorSetPickerExpanded(eventEditorGetPickerConfig(kind), false, 0)
+  }
+
+  function eventEditorCancelScheduledPickerFilter() {
+    if (!eventEditorPickerFilterFrame || typeof window === 'undefined') {
+      return
+    }
+
+    window.cancelAnimationFrame?.(eventEditorPickerFilterFrame)
+    eventEditorPickerFilterFrame = 0
+  }
+
+  function eventEditorCollapseOtherPickers(activeKind = '') {
+    const normalizedActiveKind = String(activeKind ?? '').trim().toLowerCase()
+    eventEditorCancelScheduledPickerFilter()
+    ;['worker', 'client', 'zone'].forEach((kind) => {
+      if (kind !== normalizedActiveKind) {
+        eventEditorCollapsePicker(kind)
+      }
+    })
   }
 
   function eventEditorMaybeCollapsePicker(kind) {
@@ -1335,7 +1624,7 @@ export function createEventsFeature(ctx) {
     return matches
   }
 
-  function eventEditorApplyPickerFilter(kind, { expandOnEmpty = false } = {}) {
+  function eventEditorApplyPickerFilter(kind, { expandOnEmpty = false, open = false } = {}) {
     const config = eventEditorGetPickerConfig(kind)
     const select = document.getElementById(config.selectId)
     if (!select) {
@@ -1359,7 +1648,7 @@ export function createEventsFeature(ctx) {
       placeholderOption.disabled = hasMatches
     }
 
-    eventEditorSetPickerExpanded(config, Boolean(query) || expandOnEmpty, filteredOptions.length)
+    eventEditorSetPickerExpanded(config, Boolean(open) && (Boolean(query) || expandOnEmpty), filteredOptions.length)
     if (currentValue && filteredOptions.some((option) => option.value === currentValue)) {
       select.value = currentValue
     }
@@ -1371,9 +1660,7 @@ export function createEventsFeature(ctx) {
       return
     }
 
-    if (eventEditorPickerFilterFrame) {
-      window.cancelAnimationFrame(eventEditorPickerFilterFrame)
-    }
+    eventEditorCancelScheduledPickerFilter()
     eventEditorPickerFilterFrame = window.requestAnimationFrame(() => {
       eventEditorPickerFilterFrame = 0
       eventEditorApplyPickerFilter(kind, options)
@@ -1546,25 +1833,417 @@ export function createEventsFeature(ctx) {
     eventEditorSyncSearchInput('zone')
   }
 
-  function fillEventsClientFilterDatalist() {
-    const list = document.getElementById('evPomList')
-    if (!list) {
+  function setEventsFilterSelectValue(select, filterValue = '', workerLogin = '') {
+    if (!(select instanceof HTMLSelectElement)) return false
+    const normalizedValue = String(filterValue ?? '').trim()
+    const normalizedLogin = String(workerLogin ?? '').trim()
+    const options = [...select.options]
+    const match =
+      (normalizedLogin
+        ? options.find((option) => String(option.dataset.workerLogin ?? '').trim() === normalizedLogin)
+        : null) ??
+      options.find((option) => String(option.value ?? '').trim() === normalizedValue) ??
+      null
+
+    if (match) {
+      select.value = match.value
+      delete select.dataset.pendingFilterValue
+      delete select.dataset.pendingWorkerLogin
+      return true
+    }
+
+    const fallbackValue = normalizedValue || normalizedLogin
+    if (fallbackValue) {
+      const fallbackOption = document.createElement('option')
+      fallbackOption.value = fallbackValue
+      fallbackOption.textContent = fallbackValue
+      if (normalizedLogin) {
+        fallbackOption.dataset.workerLogin = normalizedLogin
+      }
+      select.appendChild(fallbackOption)
+      select.value = fallbackValue
+      delete select.dataset.pendingFilterValue
+      delete select.dataset.pendingWorkerLogin
+      return true
+    }
+
+    select.value = ''
+    delete select.dataset.pendingFilterValue
+    delete select.dataset.pendingWorkerLogin
+    return false
+  }
+
+  function eventsFilterComboConfig(kind) {
+    const configs = {
+      worker: { hiddenId: 'evWorker', textId: 'evWorkerText', listId: 'evWorkerList' },
+      zone: { hiddenId: 'evStrefa', textId: 'evStrefaText', listId: 'evStrefaList' },
+      client: { hiddenId: 'evPom', textId: 'evPomText', listId: 'evPomList' },
+    }
+    return configs[String(kind ?? '').trim().toLowerCase()] ?? null
+  }
+
+  function eventsFilterComboElements(kind) {
+    const config = eventsFilterComboConfig(kind)
+    if (!config) return null
+    const hidden = document.getElementById(config.hiddenId)
+    const text = document.getElementById(config.textId)
+    const list = document.getElementById(config.listId)
+    const root = text?.closest?.('[data-events-filter-combo]')
+    if (!root || !(hidden instanceof HTMLInputElement) || !(text instanceof HTMLInputElement) || !list) {
+      return null
+    }
+    return {
+      config,
+      root,
+      hidden,
+      text,
+      list,
+      toggle: root.querySelector('.events-filter-combo-toggle'),
+    }
+  }
+
+  function eventsFilterComboState(kind) {
+    const normalizedKind = String(kind ?? '').trim().toLowerCase()
+    if (!eventFilterComboStates.has(normalizedKind)) {
+      eventFilterComboStates.set(normalizedKind, {
+        options: [],
+        filteredOptions: [],
+        selectedValue: '',
+        selectedWorkerLogin: '',
+        query: '',
+        open: false,
+        activeIndex: -1,
+      })
+    }
+    return eventFilterComboStates.get(normalizedKind)
+  }
+
+  function eventsFilterComboFilteredOptions(kind) {
+    const state = eventsFilterComboState(kind)
+    const query = normalizeSearchText(state.query)
+    const matches = query
+      ? state.options.filter((option) => normalizeSearchText(option.searchText).includes(query))
+      : state.options
+    return matches.slice(0, EVENT_FILTER_COMBO_MAX_OPTIONS)
+  }
+
+  function eventsFilterComboRender(kind) {
+    const elements = eventsFilterComboElements(kind)
+    if (!elements) return
+    const state = eventsFilterComboState(kind)
+    const options = eventsFilterComboFilteredOptions(kind)
+    const compactZoneList = kind === 'zone'
+    state.filteredOptions = options
+
+    if (!options.length) {
+      state.activeIndex = -1
+      elements.list.innerHTML = `
+        <div class="events-filter-combo-empty">
+          <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
+          <span>Brak pasujących wyników</span>
+        </div>
+      `
+      elements.text.removeAttribute('aria-activedescendant')
       return
     }
 
-    const uniqueNames = [
-      ...new Set(
-        appState.clients
-          .map((client) => String(client.name ?? '').trim())
-          .filter(Boolean),
-      ),
-    ].sort((left, right) => left.localeCompare(right, 'pl', { sensitivity: 'base' }))
+    if (state.activeIndex < 0 || state.activeIndex >= options.length) {
+      const selectedIndex = options.findIndex((option) => option.value === state.selectedValue)
+      state.activeIndex = selectedIndex >= 0 ? selectedIndex : 0
+    }
 
-    list.innerHTML = ''
-    uniqueNames.forEach((name) => {
-      const option = document.createElement('option')
-      option.value = name
-      list.appendChild(option)
+    elements.list.innerHTML = options
+      .map((option, index) => {
+        const optionId = `${elements.config.listId}-option-${index}`
+        const classes = ['events-filter-combo-option']
+        if (index === state.activeIndex) classes.push('is-active')
+        if (option.value === state.selectedValue) classes.push('is-selected')
+        return `
+          <button
+            class="${classes.join(' ')}"
+            id="${optionId}"
+            type="button"
+            role="option"
+            aria-selected="${option.value === state.selectedValue ? 'true' : 'false'}"
+            data-events-filter-option="${index}"
+            data-events-filter-kind="${escapeHtml(kind)}"
+          >
+            ${
+              compactZoneList
+                ? `<span class="events-filter-combo-option-copy"><strong>${escapeHtml(option.label)}</strong></span>`
+                : `
+                  <span class="events-filter-combo-option-icon" aria-hidden="true"><i class="ph ${option.icon || 'ph-magnifying-glass'}"></i></span>
+                  <span class="events-filter-combo-option-copy">
+                    <strong>${escapeHtml(option.label)}</strong>
+                    ${option.meta ? `<small>${escapeHtml(option.meta)}</small>` : ''}
+                  </span>
+                  ${option.value === state.selectedValue ? '<i class="ph ph-check" aria-hidden="true"></i>' : ''}
+                `
+            }
+          </button>
+        `
+      })
+      .join('')
+
+    const activeOption = elements.list.querySelector(`[data-events-filter-option="${state.activeIndex}"]`)
+    if (activeOption?.id) {
+      elements.text.setAttribute('aria-activedescendant', activeOption.id)
+    }
+  }
+
+  function eventsFilterComboOpen(kind) {
+    const elements = eventsFilterComboElements(kind)
+    if (!elements) return
+    eventFilterComboStates.forEach((state, otherKind) => {
+      if (otherKind !== kind && state.open) {
+        eventsFilterComboClose(otherKind)
+      }
+    })
+    const state = eventsFilterComboState(kind)
+    state.open = true
+    state.activeIndex = -1
+    elements.root.classList.add('is-open')
+    elements.text.setAttribute('aria-expanded', 'true')
+    eventsFilterComboRender(kind)
+  }
+
+  function eventsFilterComboClose(kind, { restoreSelection = false } = {}) {
+    const elements = eventsFilterComboElements(kind)
+    if (!elements) return
+    const state = eventsFilterComboState(kind)
+    state.open = false
+    state.activeIndex = -1
+    elements.root.classList.remove('is-open')
+    elements.text.setAttribute('aria-expanded', 'false')
+    elements.text.removeAttribute('aria-activedescendant')
+    if (!restoreSelection) return
+    const selected = state.options.find((option) => option.value === state.selectedValue)
+    elements.text.value = selected?.label ?? ''
+    state.query = ''
+  }
+
+  function eventsFilterComboSelect(kind, option) {
+    const elements = eventsFilterComboElements(kind)
+    if (!elements || !option) return
+    const state = eventsFilterComboState(kind)
+    state.selectedValue = String(option.value ?? '').trim()
+    state.selectedWorkerLogin = String(option.workerLogin ?? '').trim()
+    state.query = ''
+    elements.hidden.value = state.selectedValue
+    elements.text.value = String(option.label ?? option.value ?? '').trim()
+    if (state.selectedWorkerLogin) {
+      elements.hidden.dataset.pendingWorkerLogin = state.selectedWorkerLogin
+    } else {
+      delete elements.hidden.dataset.pendingWorkerLogin
+    }
+    delete elements.hidden.dataset.pendingFilterValue
+    eventsFilterComboClose(kind)
+    elements.hidden.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+
+  function eventsFilterComboSetValue(kind, value = '', workerLogin = '') {
+    const elements = eventsFilterComboElements(kind)
+    if (!elements) return
+    const state = eventsFilterComboState(kind)
+    const normalizedValue = String(value ?? '').trim()
+    const normalizedWorkerLogin = String(workerLogin ?? '').trim()
+    const selected =
+      (normalizedWorkerLogin
+        ? state.options.find((option) => String(option.workerLogin ?? '').trim() === normalizedWorkerLogin)
+        : null) ??
+      state.options.find((option) => String(option.value ?? '').trim() === normalizedValue) ??
+      null
+
+    state.selectedValue = selected?.value ?? normalizedValue
+    state.selectedWorkerLogin = selected?.workerLogin ?? normalizedWorkerLogin
+    state.query = ''
+    elements.hidden.value = state.selectedValue
+    elements.text.value = selected?.label ?? normalizedValue
+    if (state.selectedWorkerLogin) {
+      elements.hidden.dataset.pendingWorkerLogin = state.selectedWorkerLogin
+    } else {
+      delete elements.hidden.dataset.pendingWorkerLogin
+    }
+    eventsFilterComboClose(kind)
+  }
+
+  function eventsFilterComboFill(kind, entries = []) {
+    const elements = eventsFilterComboElements(kind)
+    if (!elements) return
+    const state = eventsFilterComboState(kind)
+    const currentValue = String(elements.hidden.value ?? state.selectedValue ?? '').trim()
+    const currentWorkerLogin = String(
+      elements.hidden.dataset.pendingWorkerLogin ?? state.selectedWorkerLogin ?? '',
+    ).trim()
+    const unique = new Map()
+    entries.forEach((entry) => {
+      const label = String(entry?.label ?? entry?.value ?? '').trim()
+      const value = String(entry?.value ?? label).trim()
+      if (!label || !value) return
+      const key = `${normalizeSearchText(entry?.key ?? value)}|${normalizeSearchText(entry?.workerLogin)}`
+      if (!unique.has(key)) {
+        unique.set(key, {
+          value,
+          label,
+          meta: String(entry?.meta ?? '').trim(),
+          icon: String(entry?.icon ?? '').trim(),
+          workerLogin: String(entry?.workerLogin ?? '').trim(),
+          searchText: String(entry?.searchText ?? `${label} ${value} ${entry?.meta ?? ''}`).trim(),
+        })
+      }
+    })
+    state.options = [...unique.values()]
+    if (kind !== 'zone') {
+      state.options.sort((left, right) =>
+        left.label.localeCompare(right.label, 'pl', { numeric: true, sensitivity: 'base' }),
+      )
+    }
+    eventsFilterComboSetValue(kind, currentValue, currentWorkerLogin)
+    eventsFilterComboRender(kind)
+  }
+
+  function fillEventsClientFilterDatalist() {
+    const clients = Array.isArray(appState.clients) ? appState.clients : []
+
+    eventsFilterComboFill(
+      'worker',
+      (Array.isArray(appState.workers) ? appState.workers : []).map((worker) => {
+        const login = String(worker?.login ?? worker?.workerLogin ?? worker?.id ?? '').trim()
+        const label = String(worker?.name ?? worker?.workerName ?? login).trim()
+        return {
+          key: login || label,
+          value: label,
+          label,
+          workerLogin: login,
+          meta: login && login !== label ? login : '',
+          icon: 'ph-user',
+          searchText: `${label} ${login}`,
+        }
+      }),
+    )
+
+    eventsFilterComboFill(
+      'client',
+      clients.map((client) => {
+        const id = String(client?.id ?? client?.clientId ?? '').trim()
+        const label = String(client?.name ?? client?.clientName ?? id).trim()
+        return {
+          key: id || label,
+          value: label,
+          label,
+          meta: id && id !== label ? `ID: ${id}` : '',
+          icon: 'ph-buildings',
+          searchText: `${label} ${id}`,
+        }
+      }),
+    )
+
+    eventsFilterComboFill(
+      'zone',
+      DEFAULT_ZONE_TYPE_OPTIONS.map((label) => ({
+        key: label,
+        value: label,
+        label,
+        meta: '',
+        icon: '',
+        searchText: label,
+      })),
+    )
+  }
+
+  function bindEventsFilterCombo(binding, kind) {
+    const elements = eventsFilterComboElements(kind)
+    if (!elements) return
+    const state = eventsFilterComboState(kind)
+
+    binding.add(elements.text, 'focus', () => {
+      state.query = ''
+      eventsFilterComboOpen(kind)
+    })
+
+    binding.add(elements.text, 'input', () => {
+      state.query = String(elements.text.value ?? '')
+      state.selectedValue = ''
+      state.selectedWorkerLogin = ''
+      elements.hidden.value = ''
+      delete elements.hidden.dataset.pendingWorkerLogin
+      delete elements.hidden.dataset.pendingFilterValue
+      if (!state.open) {
+        eventsFilterComboOpen(kind)
+      } else {
+        state.activeIndex = -1
+        eventsFilterComboRender(kind)
+      }
+    })
+
+    binding.add(elements.text, 'keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        eventsFilterComboClose(kind, { restoreSelection: true })
+        return
+      }
+
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        if (!state.open) {
+          eventsFilterComboOpen(kind)
+        }
+        const options = state.filteredOptions
+        if (!options.length) return
+        const direction = event.key === 'ArrowDown' ? 1 : -1
+        state.activeIndex =
+          state.activeIndex < 0
+            ? direction > 0
+              ? 0
+              : options.length - 1
+            : (state.activeIndex + direction + options.length) % options.length
+        eventsFilterComboRender(kind)
+        return
+      }
+
+      if (event.key !== 'Enter') return
+      if (state.open && state.filteredOptions.length) {
+        event.preventDefault()
+        const option = state.filteredOptions[Math.max(0, state.activeIndex)] ?? state.filteredOptions[0]
+        eventsFilterComboSelect(kind, option)
+        appState.eventsPage = 1
+        void fetchEventsForCurrentSession({ resetPage: false })
+      }
+    })
+
+    binding.add(elements.toggle, 'pointerdown', (event) => {
+      event.preventDefault()
+    })
+    binding.add(elements.toggle, 'click', () => {
+      if (state.open) {
+        eventsFilterComboClose(kind, { restoreSelection: true })
+      } else {
+        elements.text.focus()
+        eventsFilterComboOpen(kind)
+      }
+    })
+
+    binding.add(elements.list, 'pointerdown', (event) => {
+      if (event.target.closest('[data-events-filter-option]')) {
+        event.preventDefault()
+      }
+    })
+    binding.add(elements.list, 'click', (event) => {
+      const optionButton = event.target.closest('[data-events-filter-option]')
+      if (!optionButton) return
+      const index = Number(optionButton.getAttribute('data-events-filter-option'))
+      const option = Number.isInteger(index) ? state.filteredOptions[index] : null
+      if (!option) return
+      eventsFilterComboSelect(kind, option)
+    })
+
+    binding.add(elements.text, 'blur', () => {
+      window.setTimeout(() => {
+        const active = document.activeElement
+        if (!active || !elements.root.contains(active)) {
+          eventsFilterComboClose(kind, { restoreSelection: true })
+        }
+      }, 120)
     })
   }
 
@@ -1576,6 +2255,7 @@ export function createEventsFeature(ctx) {
 
     eventEditorClearStopHint(endInput)
     endInput.value = isoToLocalDateTimeInput(new Date().toISOString())
+    eventEditorSyncTimeSummary()
   }
 
   function eventEditorClearStopHint(input = document.getElementById('evEditStop')) {
@@ -1681,6 +2361,15 @@ export function createEventsFeature(ctx) {
     return Boolean(appState.workersLoaded && appState.clientsLoaded && appState.zonesLoaded)
   }
 
+  function eventEditorSafeScannedQrLabel(item = {}) {
+    try {
+      return eventEditorScannedQrLabel(item)
+    } catch (error) {
+      console.warn('[events] scanned QR label fallback', error)
+      return '-'
+    }
+  }
+
   async function openEventEditor(item) {
     ensureEventOverlaysMountedToBody()
     const overlay = document.getElementById('evEditorOverlay')
@@ -1694,6 +2383,8 @@ export function createEventsFeature(ctx) {
     appState.eventEditorItem = item
 
     const title = document.getElementById('evEditorTitle')
+    const subtitle = document.getElementById('evEditorSubtitle')
+    const cycleMeta = document.getElementById('evCycleMeta')
     const cycleId = document.getElementById('evCycleId')
     const rowNumber = document.getElementById('evRowNumber')
     const editedBy = document.getElementById('evEditedBy')
@@ -1716,14 +2407,24 @@ export function createEventsFeature(ctx) {
       eventEditorSetPickersLoading(true)
     }
 
+    overlay.dataset.mode = 'edit'
     if (title) title.textContent = 'Edytuj zdarzenie'
+    if (subtitle) subtitle.textContent = 'Zmień przypisanie lub godziny zdarzenia pracownika.'
+    if (cycleMeta) cycleMeta.hidden = false
     if (cycleId) cycleId.textContent = String(item.eventId ?? item.workdayId ?? '-')
     if (rowNumber) rowNumber.textContent = '-'
     if (editedBy) editedBy.textContent = item.editedBy || appState.session?.name || '-'
-    const startValue = isoToLocalDateTimeInput(item.startAt)
-    const stopValue = isoToLocalDateTimeInput(item.endAt)
+    const eventType = eventTypeInfo(item).label
+    let startValue = isoToLocalDateTimeInput(item.startAt)
+    let stopValue = isoToLocalDateTimeInput(item.endAt)
+    if (eventType === 'QR START') {
+      stopValue = ''
+    } else if (eventType === 'QR STOP') {
+      stopValue = isoToLocalDateTimeInput(item.endAt || item.startAt)
+      startValue = ''
+    }
     if (startInput) startInput.value = startValue
-    eventEditorSetStopValue(stopInput, stopValue || startValue, { isHint: Boolean(startValue && !stopValue) })
+    eventEditorSetStopValue(stopInput, stopValue)
     if (stopNowButton instanceof HTMLButtonElement) stopNowButton.disabled = false
     if (startInput) startInput.disabled = false
     if (stopInput) stopInput.disabled = false
@@ -1732,19 +2433,21 @@ export function createEventsFeature(ctx) {
       commentInput.value = normalizeVisibleEventComment(item.comment)
     }
     if (scannedQrInput) {
-      scannedQrInput.value = eventEditorScannedQrLabel(item)
+      scannedQrInput.value = eventEditorSafeScannedQrLabel(item)
     }
     if (saveButton) {
       saveButton.disabled = !eventEditorReferencesReady()
-      saveButton.textContent = 'Zapisz'
+      setEventEditorButtonLabel(saveButton, 'Zapisz zmiany')
     }
     if (deleteButton) {
       deleteButton.style.display = canDeleteEvents() ? '' : 'none'
       deleteButton.disabled = !eventCanDelete(item)
-      deleteButton.textContent = 'Usuń'
+      setEventEditorButtonLabel(deleteButton, 'Usuń zdarzenie')
     }
 
+    eventEditorSyncTimeSummary()
     overlay.style.display = 'flex'
+    window.requestAnimationFrame(() => title?.focus?.())
 
     if (!eventEditorReferencesReady()) {
       try {
@@ -1787,6 +2490,8 @@ export function createEventsFeature(ctx) {
     appState.eventEditorItem = null
 
     const title = document.getElementById('evEditorTitle')
+    const subtitle = document.getElementById('evEditorSubtitle')
+    const cycleMeta = document.getElementById('evCycleMeta')
     const cycleId = document.getElementById('evCycleId')
     const rowNumber = document.getElementById('evRowNumber')
     const editedBy = document.getElementById('evEditedBy')
@@ -1805,7 +2510,10 @@ export function createEventsFeature(ctx) {
       eventEditorSetPickersLoading(true)
     }
 
+    overlay.dataset.mode = 'add'
     if (title) title.textContent = 'Dodaj zdarzenie'
+    if (subtitle) subtitle.textContent = 'Dodaj START, STOP albo pełne zdarzenie pracownika.'
+    if (cycleMeta) cycleMeta.hidden = true
     if (cycleId) cycleId.textContent = '-'
     if (rowNumber) rowNumber.textContent = '-'
     if (editedBy) editedBy.textContent = appState.session?.name || '-'
@@ -1820,15 +2528,17 @@ export function createEventsFeature(ctx) {
     }
     if (saveButton) {
       saveButton.disabled = !eventEditorReferencesReady()
-      saveButton.textContent = 'Zapisz'
+      setEventEditorButtonLabel(saveButton, 'Dodaj zdarzenie')
     }
     if (deleteButton) {
       deleteButton.style.display = 'none'
       deleteButton.disabled = false
-      deleteButton.textContent = 'Usuń'
+      setEventEditorButtonLabel(deleteButton, 'Usuń zdarzenie')
     }
 
+    eventEditorSyncTimeSummary()
     overlay.style.display = 'flex'
+    window.requestAnimationFrame(() => title?.focus?.())
 
     if (!eventEditorReferencesReady()) {
       try {
@@ -1859,6 +2569,7 @@ export function createEventsFeature(ctx) {
     eventEditorCollapsePicker('worker')
     eventEditorCollapsePicker('client')
     eventEditorCollapsePicker('zone')
+    if (overlay) delete overlay.dataset.mode
     appState.eventEditorMode = 'add'
     appState.eventEditorItem = null
   }
@@ -2062,7 +2773,7 @@ export function createEventsFeature(ctx) {
     const editedHistorySource = appState.eventEditorMode === 'edit' ? { ...(appState.eventEditorItem || {}) } : null
     if (saveButton) {
       saveButton.disabled = true
-      saveButton.textContent = 'Zapisywanie...'
+      setEventEditorButtonLabel(saveButton, 'Zapisywanie...')
     }
 
     try {
@@ -2175,7 +2886,10 @@ export function createEventsFeature(ctx) {
     } finally {
       if (saveButton) {
         saveButton.disabled = false
-        saveButton.textContent = 'Zapisz'
+        setEventEditorButtonLabel(
+          saveButton,
+          appState.eventEditorMode === 'edit' ? 'Zapisz zmiany' : 'Dodaj zdarzenie',
+        )
       }
     }
   }
@@ -2210,7 +2924,7 @@ export function createEventsFeature(ctx) {
     const deleteButton = document.getElementById('evDeleteBtn')
     if (deleteButton) {
       deleteButton.disabled = true
-      deleteButton.textContent = 'Usuwanie...'
+      setEventEditorButtonLabel(deleteButton, 'Usuwanie...')
     }
 
     try {
@@ -2230,7 +2944,7 @@ export function createEventsFeature(ctx) {
     } finally {
       if (deleteButton) {
         deleteButton.disabled = false
-        deleteButton.textContent = 'Usuń'
+        setEventEditorButtonLabel(deleteButton, 'Usuń zdarzenie')
       }
     }
   }
@@ -2344,6 +3058,36 @@ export function createEventsFeature(ctx) {
     syncEventsSelectionUi()
   }
 
+  function syncEventsMonthControl() {
+    const month = document.getElementById('evMonth')
+    const fromValue = String(document.getElementById('evFrom')?.value ?? '').trim()
+    const toValue = String(document.getElementById('evTo')?.value ?? '').trim()
+    if (!(month instanceof HTMLInputElement)) {
+      return
+    }
+
+    const fromMonth = fromValue.match(/^(\d{4}-\d{2})-\d{2}$/)?.[1] ?? ''
+    const toMonth = toValue.match(/^(\d{4}-\d{2})-\d{2}$/)?.[1] ?? ''
+    month.value = fromMonth && fromMonth === toMonth ? fromMonth : ''
+  }
+
+  function applyEventsMonthControl() {
+    const monthValue = String(document.getElementById('evMonth')?.value ?? '').trim()
+    const match = monthValue.match(/^(\d{4})-(\d{2})$/)
+    if (!match) {
+      return false
+    }
+
+    const year = Number(match[1])
+    const month = Number(match[2])
+    const lastDay = new Date(year, month, 0).getDate()
+    const from = document.getElementById('evFrom')
+    const to = document.getElementById('evTo')
+    if (from) from.value = `${match[1]}-${match[2]}-01`
+    if (to) to.value = `${match[1]}-${match[2]}-${String(lastDay).padStart(2, '0')}`
+    return true
+  }
+
   function ensureEventsDefaultDates() {
     const from = document.getElementById('evFrom')
     const to = document.getElementById('evTo')
@@ -2358,6 +3102,7 @@ export function createEventsFeature(ctx) {
     if (!String(to.value ?? '').trim()) {
       to.value = todayYmd()
     }
+    syncEventsMonthControl()
   }
 
   function readEventsFilterInputs() {
@@ -2369,19 +3114,23 @@ export function createEventsFeature(ctx) {
     const room = document.getElementById('evRoomId')
     const status = document.getElementById('evStatus')
     const q = document.getElementById('evQ')
-    const workerValue = String(worker?.value ?? '').trim()
+    const selectedWorkerOption = worker instanceof HTMLSelectElement ? worker.selectedOptions[0] : null
+    const workerValue = String(
+      selectedWorkerOption?.value || worker?.dataset?.pendingFilterValue || worker?.value || '',
+    ).trim()
     const workerLogin =
-      workerValue && workerValue === String(appState.eventsWorkerLoginFilterText ?? '').trim()
+      String(selectedWorkerOption?.dataset?.workerLogin ?? worker?.dataset?.pendingWorkerLogin ?? '').trim() ||
+      (workerValue && workerValue === String(appState.eventsWorkerLoginFilterText ?? '').trim()
         ? String(appState.eventsWorkerLoginFilter ?? '').trim()
-        : ''
+        : '')
 
     return {
       from: String(from?.value ?? '').trim(),
       to: String(to?.value ?? '').trim(),
       worker: workerValue,
       workerLogin,
-      strefa: String(zone?.value ?? '').trim(),
-      pomieszczenie: String(client?.value ?? '').trim(),
+      strefa: String(zone?.value || zone?.dataset?.pendingFilterValue || '').trim(),
+      pomieszczenie: String(client?.value || client?.dataset?.pendingFilterValue || '').trim(),
       roomId: String(room?.value ?? '').trim(),
       status: String(status?.value ?? '').trim(),
       q: String(q?.value ?? '').trim(),
@@ -2400,14 +3149,27 @@ export function createEventsFeature(ctx) {
 
     if (from) from.value = String(filters.from ?? '')
     if (to) to.value = String(filters.to ?? '')
-    if (worker) worker.value = String(filters.worker ?? '')
+    if (worker instanceof HTMLSelectElement) {
+      setEventsFilterSelectValue(worker, filters.worker, filters.workerLogin)
+    } else if (worker) {
+      eventsFilterComboSetValue('worker', filters.worker, filters.workerLogin)
+    }
     appState.eventsWorkerLoginFilter = String(filters.workerLogin ?? '').trim()
     appState.eventsWorkerLoginFilterText = String(filters.worker ?? '').trim()
-    if (zone) zone.value = String(filters.strefa ?? '')
-    if (client) client.value = String(filters.pomieszczenie ?? '')
+    if (zone instanceof HTMLSelectElement) {
+      setEventsFilterSelectValue(zone, filters.strefa)
+    } else if (zone) {
+      eventsFilterComboSetValue('zone', filters.strefa)
+    }
+    if (client instanceof HTMLSelectElement) {
+      setEventsFilterSelectValue(client, filters.pomieszczenie)
+    } else if (client) {
+      eventsFilterComboSetValue('client', filters.pomieszczenie)
+    }
     if (room) room.value = String(filters.roomId ?? '')
     if (status) status.value = String(filters.status ?? '')
     if (q) q.value = String(filters.q ?? '')
+    syncEventsMonthControl()
   }
 
   function readEventsFilters() {
@@ -2432,6 +3194,7 @@ export function createEventsFeature(ctx) {
   function updateEventsPager(shown) {
     const pageLabel = document.getElementById('evPageLabel')
     const shownLabel = document.getElementById('evShownLabel')
+    const tableCount = document.getElementById('evTableCount')
     const prevBtn = document.getElementById('evPrevBtn')
     const nextBtn = document.getElementById('evNextBtn')
     const hasNext = appState.eventsHasNext === true
@@ -2444,7 +3207,22 @@ export function createEventsFeature(ctx) {
     }
 
     if (shownLabel) {
-      shownLabel.textContent = `Wyswietlono: ${shown} - Wszystkie: ${totalLabel} - Na strone: ${appState.eventsPageSize}`
+      shownLabel.textContent = `Wyświetlono: ${shown} · Wszystkie: ${totalLabel} · Na stronie: ${appState.eventsPageSize}`
+    }
+
+    if (tableCount) {
+      const count = estimatedTotal ? totalLabel : Number(appState.eventsTotal ?? shown)
+      const numericCount = Number(count)
+      const pluralLabel =
+        numericCount === 1
+          ? 'zdarzenie'
+          : Number.isFinite(numericCount) &&
+              numericCount % 10 >= 2 &&
+              numericCount % 10 <= 4 &&
+              (numericCount % 100 < 12 || numericCount % 100 > 14)
+            ? 'zdarzenia'
+            : 'zdarzeń'
+      tableCount.textContent = `${count} ${pluralLabel}`
     }
 
     if (prevBtn) {
@@ -2760,10 +3538,15 @@ export function createEventsFeature(ctx) {
 
     if (!appState.session?.orgId) {
       appState.eventsSelectedKeys = new Set()
+      renderEventsSummary([], [])
       if (root && !silent) {
         root.innerHTML = `
-          <div class="events-row">
-            <div></div><div>Brak aktywnej sesji.</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+          <div class="events-row events-row--empty">
+            <div class="events-empty-state is-error">
+              <span aria-hidden="true"><i class="ph ph-warning-circle"></i></span>
+              <strong>Brak aktywnej sesji</strong>
+              <small>Zaloguj się ponownie, aby pobrać zdarzenia.</small>
+            </div>
           </div>
         `
       }
@@ -2788,8 +3571,12 @@ export function createEventsFeature(ctx) {
 
     if (root && !silent) {
       root.innerHTML = `
-        <div class="events-row">
-          <div></div><div>Ładowanie danych...</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+        <div class="events-row events-row--empty">
+          <div class="events-empty-state is-loading">
+            <span aria-hidden="true"><i class="ph ph-spinner-gap"></i></span>
+            <strong>Ładowanie zdarzeń</strong>
+            <small>Aktualizujemy wyniki dla wybranych filtrów.</small>
+          </div>
         </div>
       `
     }
@@ -2820,6 +3607,9 @@ export function createEventsFeature(ctx) {
       updateEventsPager(merged.rows.length)
       syncEventsPageSizeControl()
       setSubwelcomeMetric('#view-events .subwelcome', appState.eventsTotal)
+      if (!silent || forceRefresh) {
+        void refreshEventsSummaryCards(filters)
+      }
       void rememberEventsFingerprintForCurrentFilters()
     } catch (error) {
       if (silent) {
@@ -2831,8 +3621,12 @@ export function createEventsFeature(ctx) {
       appState.eventsSelectedKeys = new Set()
       if (root) {
         root.innerHTML = `
-          <div class="events-row">
-            <div></div><div style="color:#ef4444;">${escapeHtml(message)}</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+          <div class="events-row events-row--empty">
+            <div class="events-empty-state is-error">
+              <span aria-hidden="true"><i class="ph ph-warning-circle"></i></span>
+              <strong>Nie udało się pobrać zdarzeń</strong>
+              <small>${escapeHtml(message)}</small>
+            </div>
           </div>
         `
       }
@@ -2979,9 +3773,9 @@ export function createEventsFeature(ctx) {
       tableSelector: '#view-events .events-table',
       headSelector: '#view-events .events-head',
       cssVarName: '--events-grid',
-      storageKey: 'portal.grid.events.v3',
-      defaultWidths: [28, 90, 90, 94, 94, 78, 56, 56, 64, 44, 72, 74, 38],
-      minWidths: [26, 62, 62, 64, 64, 66, 44, 44, 48, 40, 56, 58, 34],
+      storageKey: 'portal.grid.events.v11',
+      defaultWidths: [34, 150, 130, 145, 115, 110, 80, 80, 84, 64, 92, 116, 56],
+      minWidths: [30, 128, 116, 130, 100, 100, 74, 74, 76, 58, 78, 102, 56],
       nonResizableIndexes: [0, 12],
       autoFitToViewport: true,
       enforceFullWidth: true,
@@ -2989,8 +3783,10 @@ export function createEventsFeature(ctx) {
     })
     syncEventsActionPermissions()
     syncEventsPageSizeControl()
+    ;['worker', 'zone', 'client'].forEach((kind) => bindEventsFilterCombo(binding, kind))
 
     binding.add(document.getElementById('evSearchBtn'), 'click', () => {
+      ;['worker', 'zone', 'client'].forEach((kind) => eventsFilterComboClose(kind, { restoreSelection: true }))
       appState.eventsPage = 1
       void fetchEventsForCurrentSession({ resetPage: false })
     })
@@ -3028,9 +3824,21 @@ export function createEventsFeature(ctx) {
       appState.eventsPage = 1
       void fetchEventsForCurrentSession({ resetPage: false })
     })
-    binding.add(document.getElementById('evWorker'), 'input', () => {
-      appState.eventsWorkerLoginFilter = ''
-      appState.eventsWorkerLoginFilterText = ''
+    binding.add(document.getElementById('evMonth'), 'change', () => {
+      if (!applyEventsMonthControl()) return
+      appState.eventsPage = 1
+      void fetchEventsForCurrentSession({ resetPage: false })
+    })
+    ;['evFrom', 'evTo'].forEach((id) => {
+      binding.add(document.getElementById(id), 'change', syncEventsMonthControl)
+    })
+    binding.add(document.getElementById('evWorker'), 'change', (event) => {
+      const control = event.currentTarget
+      const option = control instanceof HTMLSelectElement ? control.selectedOptions[0] : null
+      appState.eventsWorkerLoginFilter = String(
+        option?.dataset?.workerLogin ?? control?.dataset?.pendingWorkerLogin ?? '',
+      ).trim()
+      appState.eventsWorkerLoginFilterText = String(option?.value ?? control?.value ?? '').trim()
     })
 
     binding.add(document.getElementById('evAddBtn'), 'click', () => {
@@ -3064,12 +3872,18 @@ export function createEventsFeature(ctx) {
       renderEventsRows(appState.eventRows)
     })
 
-    ;['evFrom', 'evTo', 'evWorker', 'evStrefa', 'evPom', 'evRoomId', 'evQ'].forEach((id) => {
+    ;['evFrom', 'evTo', 'evRoomId', 'evQ'].forEach((id) => {
       binding.add(document.getElementById(id), 'keydown', (event) => {
         if (event.key !== 'Enter') return
         appState.eventsPage = 1
         void fetchEventsForCurrentSession({ resetPage: false })
       })
+    })
+
+    binding.add(document, 'pointerdown', (event) => {
+      const insideCombo = event.target?.closest?.('[data-events-filter-combo]')
+      if (insideCombo) return
+      ;['worker', 'zone', 'client'].forEach((kind) => eventsFilterComboClose(kind, { restoreSelection: true }))
     })
 
     binding.add(document.getElementById('evRows'), 'change', (event) => {
@@ -3196,6 +4010,7 @@ export function createEventsFeature(ctx) {
     binding.add(document.getElementById('evEditorOverlay'), 'click', (event) => {
       if (event.target?.id === 'evEditorOverlay') closeEventEditor()
     })
+    binding.add(document.getElementById('evEditorCloseBtn'), 'click', closeEventEditor)
     binding.add(document.getElementById('evCancelBtn'), 'click', closeEventEditor)
     binding.add(document.getElementById('evSaveBtn'), 'click', () => {
       void saveEventEditor()
@@ -3204,10 +4019,22 @@ export function createEventsFeature(ctx) {
       void deleteEventEditorItem()
     })
     binding.add(document.getElementById('evStopNowBtn'), 'click', setEventStopNow)
-    binding.add(document.getElementById('evEditStart'), 'input', eventEditorSyncStopHintFromStart)
-    binding.add(document.getElementById('evEditStart'), 'change', eventEditorSyncStopHintFromStart)
-    binding.add(document.getElementById('evEditStop'), 'input', (event) => eventEditorClearStopHint(event.target))
-    binding.add(document.getElementById('evEditStop'), 'change', (event) => eventEditorClearStopHint(event.target))
+    binding.add(document.getElementById('evEditStart'), 'input', () => {
+      eventEditorSyncStopHintFromStart()
+      eventEditorSyncTimeSummary()
+    })
+    binding.add(document.getElementById('evEditStart'), 'change', () => {
+      eventEditorSyncStopHintFromStart()
+      eventEditorSyncTimeSummary()
+    })
+    binding.add(document.getElementById('evEditStop'), 'input', (event) => {
+      eventEditorClearStopHint(event.target)
+      eventEditorSyncTimeSummary()
+    })
+    binding.add(document.getElementById('evEditStop'), 'change', (event) => {
+      eventEditorClearStopHint(event.target)
+      eventEditorSyncTimeSummary()
+    })
     binding.add(document.getElementById('evEditPom'), 'change', refreshEventZoneOptionsForClient)
     binding.add(document.getElementById('evEditStrefa'), 'change', syncEventRoomAndClientFromZone)
     ;[
@@ -3216,10 +4043,15 @@ export function createEventsFeature(ctx) {
       { inputId: 'evEditStrefaSearch', selectId: 'evEditStrefa', kind: 'zone' },
     ].forEach(({ inputId, selectId, kind }) => {
       binding.add(document.getElementById(inputId), 'input', () => {
-        eventEditorSchedulePickerFilter(kind, { expandOnEmpty: true })
+        eventEditorCollapseOtherPickers(kind)
+        eventEditorSchedulePickerFilter(kind, { expandOnEmpty: true, open: true })
+      })
+      binding.add(document.getElementById(inputId), 'pointerdown', () => {
+        eventEditorCollapseOtherPickers(kind)
       })
       binding.add(document.getElementById(inputId), 'focus', () => {
-        eventEditorApplyPickerFilter(kind, { expandOnEmpty: true })
+        eventEditorCollapseOtherPickers(kind)
+        eventEditorApplyPickerFilter(kind, { expandOnEmpty: true, open: true })
       })
       binding.add(document.getElementById(inputId), 'blur', () => {
         window.setTimeout(() => {
@@ -3255,7 +4087,8 @@ export function createEventsFeature(ctx) {
         eventEditorCollapsePicker(kind)
       })
       binding.add(document.getElementById(selectId), 'focus', () => {
-        eventEditorApplyPickerFilter(kind, { expandOnEmpty: true })
+        eventEditorCollapseOtherPickers(kind)
+        eventEditorApplyPickerFilter(kind, { expandOnEmpty: true, open: true })
       })
       binding.add(document.getElementById(selectId), 'change', () => {
         eventEditorSyncSearchInput(kind)
@@ -3279,6 +4112,7 @@ export function createEventsFeature(ctx) {
 
     return () => {
       cleanupEventsTableResize()
+      eventFilterComboStates.clear()
       binding.done()
     }
   }

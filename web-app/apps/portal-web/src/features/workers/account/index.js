@@ -12,6 +12,12 @@ import {
   OWN_WORKDAY_EDIT_DENIED_MESSAGE,
   isOwnWorkdayEditBlocked,
 } from '../workdayEditAccess.js'
+import {
+  workIntervalCodes,
+  workIntervalGpsCoordinates,
+  workIntervalsFromRow,
+  workIntervalsTotalSeconds,
+} from '../workIntervals.js'
 
 export const route = 'workerAccount'
 export const viewId = 'view-workerAccount'
@@ -113,6 +119,7 @@ export function createWorkerAccountFeature(ctx) {
     showTransientNotice,
     todayYmd,
     toIso,
+    updateEvent,
     updateWorkday,
     updateWorker,
     ymdToIsoRangeEnd,
@@ -671,6 +678,7 @@ export function createWorkerAccountFeature(ctx) {
     appState.workerAccountTimeSelectedKeys = new Set()
     appState.workerAccountTimeCurrentPageKeys = []
     appState.workerAccountDayEditorItem = null
+    appState.workerAccountTimeCodeEditorItem = null
     appState.workerAccountEditTab = ''
     if (clearLoadedKey) clearWorkerAccountLoadedKeys()
     if (clearLoadingKeys) clearWorkerAccountLoadKeys()
@@ -1645,7 +1653,14 @@ export function createWorkerAccountFeature(ctx) {
   }
 
   function timeRowsTotalSeconds(rows = []) {
-    const totalMs = mergeTimeIntervals(rows.map((row) => timeIntervalFromRow(row))).reduce(
+    const intervals = rows.flatMap((row) => {
+      if (Array.isArray(row?.workIntervals) && row.workIntervals.length) {
+        return workIntervalsFromRow(row)
+      }
+      const interval = timeIntervalFromRow(row)
+      return interval ? [interval] : []
+    })
+    const totalMs = mergeTimeIntervals(intervals).reduce(
       (sum, interval) => sum + Math.max(0, interval.endTs - interval.startTs),
       0,
     )
@@ -2481,6 +2496,170 @@ export function createWorkerAccountFeature(ctx) {
     `
   }
 
+  function workerAccountTimeIntervals(row = {}) {
+    const sourceRows = Array.isArray(row?.sourceRows) && row.sourceRows.length ? row.sourceRows : [row]
+    return sourceRows.flatMap((sourceRow) => workIntervalsFromRow(sourceRow))
+  }
+
+  function workerAccountTimeCodes(row = {}) {
+    return workIntervalCodes(workerAccountTimeIntervals(row))
+  }
+
+  function workerAccountTimeIntervalClient(interval = {}) {
+    return String(
+      interval?.clientName ?? interval?.klient ?? interval?.clientLabel ?? interval?.clientId ?? '',
+    ).trim() || 'Brak klienta'
+  }
+
+  function workerAccountTimeIntervalZone(interval = {}) {
+    return String(
+      interval?.zoneName ?? interval?.strefa ?? interval?.zoneLabel ?? interval?.zoneId ??
+      interval?.utilityRoomId ?? interval?.roomId ?? '',
+    ).trim() || 'Brak strefy'
+  }
+
+  function workerAccountTimeIntervalInfoValue(...values) {
+    const value = values
+      .map((entry) => String(entry ?? '').trim())
+      .find((entry) => entry && entry !== '-')
+    return value || 'Brak danych'
+  }
+
+  function workerAccountTimeIntervalQrCode(interval = {}) {
+    return workerAccountTimeIntervalInfoValue(
+      interval?.qrCode,
+      interval?.scannedQrCode,
+      interval?.zoneQrCode,
+      interval?.zoneId,
+      interval?.utilityRoomId,
+      interval?.roomId,
+    )
+  }
+
+  function workerAccountTimeIntervalFunction(interval = {}, codeType = '') {
+    const rawValue = workerAccountTimeIntervalInfoValue(
+      interval?.functionName,
+      interval?.zoneFunction,
+      interval?.function,
+      interval?.qrFunction,
+      codeType,
+    )
+    const normalized = rawValue.toUpperCase().replace(/[\s_-]+/g, ' ').trim()
+    const isSpecial = interval?.isSpecialZone === true || /SPECJAL|SPECIAL/.test(normalized)
+    if (isSpecial) return { label: 'STREFA SPECJALNA', className: 'is-special' }
+    if (/^START$/.test(normalized)) return { label: 'START', className: 'is-start' }
+    if (/^STOP$/.test(normalized)) return { label: 'STOP', className: 'is-stop' }
+    if (/CLEAN|SPRZ/.test(normalized)) return { label: 'CLEAN', className: 'is-clean' }
+    if (/STREFA|ZONE/.test(normalized)) return { label: 'STREFA', className: 'is-zone' }
+    return { label: rawValue, className: 'is-default' }
+  }
+
+  function workerAccountTimeCodeZoneIndicator(code = {}, index = 0) {
+    const interval = code?.interval ?? {}
+    const clientLabel = workerAccountTimeIntervalClient(interval)
+    const zoneLabel = workerAccountTimeIntervalZone(interval)
+    const qrCode = workerAccountTimeIntervalQrCode(interval)
+    const functionInfo = workerAccountTimeIntervalFunction(interval, code?.type)
+    const locationLabel = workerAccountTimeIntervalInfoValue(
+      interval?.lokalizacja,
+      interval?.location,
+      interval?.zoneLocation,
+    )
+    const tooltipId = `waTimeCodeZoneTooltip-${Math.max(0, Number(index) || 0)}`
+    const label = `Informacje o strefie ${zoneLabel}`
+    return `
+      <span class="wa-time-code-zone-wrap">
+        <button class="wa-time-code-zone-trigger" type="button" aria-label="${escapeHtml(label)}" aria-describedby="${escapeHtml(tooltipId)}">
+          <span>${escapeHtml(zoneLabel)}</span>
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 10.7v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="7.6" r="1" fill="currentColor"/></svg>
+        </button>
+        <span class="wa-time-code-zone-tooltip" id="${escapeHtml(tooltipId)}" role="tooltip">
+          <span class="wa-time-code-zone-tooltip-heading">
+            <span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 21s6-5.1 6-11a6 6 0 0 0-12 0c0 5.9 6 11 6 11Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.2" stroke="currentColor" stroke-width="1.8"/></svg></span>
+            <strong>Informacje o strefie</strong>
+          </span>
+          <span class="wa-time-code-zone-details">
+            <span><small>Klient</small><b>${escapeHtml(clientLabel)}</b></span>
+            <span><small>Nazwa strefy</small><b>${escapeHtml(zoneLabel)}</b></span>
+            <span><small>Kod QR</small><b class="mono">${escapeHtml(qrCode)}</b></span>
+            <span><small>Funkcja</small><b class="wa-time-code-zone-function ${escapeHtml(functionInfo.className)}">${escapeHtml(functionInfo.label)}</b></span>
+            <span class="is-wide"><small>Lokalizacja</small><b>${escapeHtml(locationLabel)}</b></span>
+          </span>
+        </span>
+      </span>
+    `
+  }
+
+  function workerAccountTimeCodeEditButton(code = {}, index = 0, dayKey = '') {
+    if (!canAdministerWorkers()) return ''
+    const label = `Edytuj godzinę ${code.type} sesji ${code.session}`
+    return `
+      <button class="wa-time-code-edit-btn" type="button" data-wa-time-code-edit="${index}" data-wa-time-code-day="${escapeHtml(dayKey)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6.5h9M17 6.5h3M4 12h3M11 12h9M4 17.5h8M16 17.5h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="15" cy="6.5" r="2" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="12" r="2" stroke="currentColor" stroke-width="1.8"/><circle cx="14" cy="17.5" r="2" stroke="currentColor" stroke-width="1.8"/></svg>
+      </button>
+    `
+  }
+
+  function workerAccountTimeCodeGpsIndicator(code = {}) {
+    const interval = code?.interval ?? {}
+    const coords = workIntervalGpsCoordinates(interval, code.type)
+    const locationRaw = String(interval?.lokalizacja ?? interval?.location ?? '').trim()
+    const locationLabel = locationRaw && locationRaw !== '-' ? locationRaw : ''
+    const hasGps = Boolean(coords)
+    const stateClass = hasGps ? 'has-gps' : 'no-gps'
+    const mapQuery = hasGps ? `${coords.lat},${coords.lon}` : ''
+    const googleMapsUrl = hasGps
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`
+      : ''
+    const googleMapsEmbedUrl = hasGps
+      ? `https://maps.google.com/maps?q=${encodeURIComponent(mapQuery)}&z=17&hl=pl&output=embed`
+      : ''
+    const ariaLabel = hasGps
+      ? `Lokalizacja GPS ${code.type}: ${locationLabel || `${coords.lat}, ${coords.lon}`}`
+      : `Brak lokalizacji GPS dla ${code.type}`
+    const icon = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s6-5.1 6-11a6 6 0 0 0-12 0c0 5.9 6 11 6 11Z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.2" stroke="currentColor" stroke-width="1.9"/></svg>`
+    return `
+      <span class="wa-time-code-gps-wrap ${stateClass}">
+        ${hasGps
+          ? `<a class="wa-time-code-gps-icon" href="${escapeHtml(googleMapsUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtml(`${ariaLabel}. Otwórz w Google Maps`)}">${icon}</a>`
+          : `<span class="wa-time-code-gps-icon" tabindex="0" role="img" aria-label="${escapeHtml(ariaLabel)}">${icon}</span>`}
+        <span class="wa-time-code-gps-tooltip" role="tooltip">
+          <strong>${hasGps ? 'Lokalizacja GPS' : 'Brak lokalizacji GPS'}</strong>
+          ${hasGps && locationLabel ? `<span>${escapeHtml(locationLabel)}</span>` : ''}
+          ${hasGps ? `<iframe class="wa-time-code-gps-map" src="${escapeHtml(googleMapsEmbedUrl)}" title="${escapeHtml(`Mapa lokalizacji ${code.type}`)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>` : ''}
+          <small>${hasGps ? `${escapeHtml(coords.lat)}, ${escapeHtml(coords.lon)}` : 'Zdarzenie nie zawiera współrzędnych.'}</small>
+          ${hasGps ? `<a class="wa-time-code-gps-map-link" href="${escapeHtml(googleMapsUrl)}" target="_blank" rel="noopener noreferrer">Otwórz w Google Maps <span aria-hidden="true">↗</span></a>` : ''}
+        </span>
+      </span>
+    `
+  }
+
+  function workerAccountTimeCodeCountLabel(count) {
+    const value = Math.max(0, Number(count) || 0)
+    const lastTwo = value % 100
+    const last = value % 10
+    if (value === 1) return '1 kod'
+    if (last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14)) return `${value} kody`
+    return `${value} kodów`
+  }
+
+  function workerAccountTimeCodesButton(row = {}) {
+    const codes = workerAccountTimeCodes(row)
+    if (!codes.length) return ''
+    const dayKey = String(row?.dayKey ?? '').trim()
+    const dayLabel = dateKeyToLabel(dayKey)
+    const label = `Pokaż kody START i STOP z dnia ${dayLabel}`
+    return `
+      <button class="wa-time-codes-btn" type="button" data-wa-time-codes="${escapeHtml(dayKey)}" aria-haspopup="dialog" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M7 5h10M7 12h10M7 19h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <circle cx="4" cy="5" r="1.2" fill="currentColor"/><circle cx="4" cy="12" r="1.2" fill="currentColor"/><circle cx="4" cy="19" r="1.2" fill="currentColor"/>
+        </svg>
+        <span aria-hidden="true">${codes.length}</span>
+      </button>
+    `
+  }
+
   function eventMenuButton(index, label) {
     const disabled = canAdministerWorkers() ? '' : ' disabled'
     return `
@@ -2588,15 +2767,14 @@ export function createWorkerAccountFeature(ctx) {
                 <div>${escapeHtml(row.workerType || '-')}</div>
                 <div class="mono time-start">${escapeHtml(isoToHm(row.startAt))}</div>
                 <div class="mono time-stop">${escapeHtml(isoToHm(row.endAt))}</div>
-                <div class="mono work-brutto">${escapeHtml(formatSeconds(row.workSec))}</div>
+                <div class="wa-time-work-cell"><span class="mono work-brutto">${escapeHtml(formatSeconds(row.workSec))}</span>${workerAccountTimeCodesButton(row)}</div>
                 <div class="mono work-bold">${escapeHtml(formatSeconds(row.netSec))}</div>
                 <div class="mono time-break">${escapeHtml(formatSeconds(row.breakSec))}</div>
                 <div>${escapeHtml(row.updatedBy || '-')}</div>
-                <div><button class="btn2 worker-account-time-edit-btn" type="button" data-wa-time-detail="${escapeHtml(row.dayKey)}">Edytuj</button></div>
               </div>
             `
           }).join('')
-        : tableEmptyRow(10, 'Brak rekordów')
+        : tableEmptyRow(9, 'Brak rekordów')
     }
 
     setText('waTimePageLabel', `Strona ${paged.page} / ${paged.totalPages}`)
@@ -2636,7 +2814,7 @@ export function createWorkerAccountFeature(ctx) {
 
   function setTimeLoading() {
     const time = document.getElementById('waTimeRows')
-    if (time) time.innerHTML = tableEmptyRow(10, 'Ladowanie danych...', 'worker-account-loading')
+    if (time) time.innerHTML = tableEmptyRow(9, 'Ladowanie danych...', 'worker-account-loading')
     setText('waTimePageLabel', 'Ladowanie danych...')
     setText('waTimeShownLabel', `Wyswietlono: 0 - Wszystkie: 0 - Na strone: ${WORKER_ACCOUNT_TIME_PAGE_SIZE}`)
     ;['waTimePrev', 'waTimeNext'].forEach((id) => {
@@ -2690,7 +2868,7 @@ export function createWorkerAccountFeature(ctx) {
       renderRecentActivityPreview()
     } else if (section === 'time') {
       const time = document.getElementById('waTimeRows')
-      if (time) time.innerHTML = tableEmptyRow(10, message, 'worker-account-error')
+      if (time) time.innerHTML = tableEmptyRow(9, message, 'worker-account-error')
       appState.workerAccountTimeRows = []
       appState.workerAccountTimeSelectedKeys = new Set()
       appState.workerAccountTimeCurrentPageKeys = []
@@ -2904,7 +3082,7 @@ export function createWorkerAccountFeature(ctx) {
     const time = document.getElementById('waTimeRows')
     if (events) events.innerHTML = tableEmptyRow(10, message, 'worker-account-error', { withoutSelect: true })
     if (orders) orders.innerHTML = tableEmptyRow(7, message, 'worker-account-error')
-    if (time) time.innerHTML = tableEmptyRow(10, message, 'worker-account-error')
+    if (time) time.innerHTML = tableEmptyRow(9, message, 'worker-account-error')
     setText('waEventsLabel', 'Blad pobierania danych')
     setText('waOrdersLabel', 'Blad pobierania danych')
     setText('waTimePageLabel', 'Strona 1 / 1')
@@ -3174,6 +3352,266 @@ export function createWorkerAccountFeature(ctx) {
     if (!key) return null
     const rows = Array.isArray(appState.workerAccountTimeRows) ? appState.workerAccountTimeRows : []
     return rows.find((row) => String(row.dayKey ?? '').trim() === key) ?? null
+  }
+
+  function setWorkerAccountTimeCodesOpen(open) {
+    const overlay = document.getElementById('waTimeCodesOverlay')
+    if (!overlay) return
+    overlay.hidden = !open
+    overlay.style.display = open ? 'flex' : 'none'
+  }
+
+  function positionWorkerAccountTimeCodeTooltip(trigger) {
+    if (!(trigger instanceof Element)) return
+    const isZoneTooltip = trigger.classList.contains('wa-time-code-zone-wrap')
+    const tooltip = trigger.querySelector(
+      isZoneTooltip ? '.wa-time-code-zone-tooltip' : '.wa-time-code-gps-tooltip',
+    )
+    if (!tooltip) return
+
+    tooltip.style.visibility = 'hidden'
+    tooltip.style.left = '0px'
+    tooltip.style.top = '0px'
+    tooltip.classList.remove('is-above')
+
+    const triggerRect = trigger.getBoundingClientRect()
+    const tooltipRect = tooltip.getBoundingClientRect()
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight
+    const viewportGap = 12
+    const triggerGap = 10
+    const tooltipWidth = tooltipRect.width || (isZoneTooltip ? 340 : 290)
+    const tooltipHeight = tooltipRect.height || (isZoneTooltip ? 260 : 220)
+    const maxLeft = Math.max(viewportGap, viewportWidth - tooltipWidth - viewportGap)
+    const left = Math.min(
+      Math.max(viewportGap, triggerRect.left + (triggerRect.width / 2) - (tooltipWidth / 2)),
+      maxLeft,
+    )
+    const roomBelow = viewportHeight - triggerRect.bottom - viewportGap
+    const showAbove = roomBelow < tooltipHeight + triggerGap && triggerRect.top > roomBelow
+    const preferredTop = showAbove
+      ? triggerRect.top - tooltipHeight - triggerGap
+      : triggerRect.bottom + triggerGap
+    const maxTop = Math.max(viewportGap, viewportHeight - tooltipHeight - viewportGap)
+    const top = Math.min(Math.max(viewportGap, preferredTop), maxTop)
+    const arrowLeft = Math.min(
+      Math.max(12, triggerRect.left + (triggerRect.width / 2) - left - 5),
+      Math.max(12, tooltipWidth - 22),
+    )
+
+    tooltip.style.left = `${Math.round(left)}px`
+    tooltip.style.top = `${Math.round(top)}px`
+    tooltip.style.setProperty(
+      isZoneTooltip ? '--wa-time-code-zone-arrow-left' : '--wa-time-code-gps-arrow-left',
+      `${Math.round(arrowLeft)}px`,
+    )
+    tooltip.classList.toggle('is-above', showAbove)
+    tooltip.style.removeProperty('visibility')
+  }
+
+  function setWorkerAccountTimeCodeEditorOpen(open) {
+    const editor = document.getElementById('waTimeCodeEditor')
+    if (!editor) return
+    editor.hidden = !open
+  }
+
+  function closeWorkerAccountTimeCodeEditor() {
+    appState.workerAccountTimeCodeEditorItem = null
+    setWorkerAccountTimeCodeEditorOpen(false)
+    const saveButton = document.getElementById('waTimeCodeSave')
+    if (saveButton) {
+      saveButton.disabled = false
+      saveButton.textContent = 'Zapisz godzinę'
+    }
+  }
+
+  function closeWorkerAccountTimeCodes() {
+    closeWorkerAccountTimeCodeEditor()
+    setWorkerAccountTimeCodesOpen(false)
+  }
+
+  function openWorkerAccountTimeCodes(dayKey) {
+    const row = findWorkerAccountTimeRow(dayKey)
+    const intervals = workerAccountTimeIntervals(row)
+    const codes = workIntervalCodes(intervals)
+    if (!row || !codes.length) {
+      showTransientNotice('Brak kodów START/STOP dla wybranego dnia.', 'error')
+      return
+    }
+
+    closeWorkerAccountTimeCodeEditor()
+
+    const dateLabel = dateKeyToLabel(row.dayKey)
+    const title = document.getElementById('waTimeCodesTitle')
+    const meta = document.getElementById('waTimeCodesMeta')
+    const list = document.getElementById('waTimeCodesList')
+    const total = document.getElementById('waTimeCodesTotal')
+    if (title) title.textContent = `Start i stop - ${dateLabel}`
+    if (meta) meta.textContent = `${workerAccountTimeCodeCountLabel(codes.length)} START/STOP`
+    if (total) total.textContent = formatSeconds(workIntervalsTotalSeconds(intervals))
+    if (list) {
+      list.innerHTML = codes.map((code, index) => {
+        const isStart = code.type === 'START'
+        const typeClass = isStart ? 'is-start' : 'is-stop'
+        const timeLabel = isoToHm(code.at)
+        const clientLabel = workerAccountTimeIntervalClient(code.interval)
+        return `
+          <div class="wa-time-code-item ${typeClass}">
+            <span class="wa-time-code-index" aria-hidden="true">${index + 1}</span>
+            <span class="wa-time-code-marker" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="${isStart ? 'M7 12h10M13 8l4 4-4 4' : 'M17 12H7m4-4-4 4 4 4'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+            <span class="wa-time-code-copy">
+              <strong>${code.type}</strong>
+              <small>Sesja ${code.session}</small>
+              <span class="wa-time-code-location"><span><b>Klient:</b> ${escapeHtml(clientLabel)}</span><span><b>Strefa:</b> ${workerAccountTimeCodeZoneIndicator(code, index)}</span></span>
+            </span>
+            <span class="wa-time-code-controls">
+              <time class="mono" datetime="${escapeHtml(code.at)}">${escapeHtml(timeLabel)}</time>
+              ${workerAccountTimeCodeGpsIndicator(code)}
+              ${workerAccountTimeCodeEditButton(code, index, row.dayKey)}
+            </span>
+          </div>
+        `
+      }).join('')
+    }
+
+    setWorkerAccountTimeCodesOpen(true)
+    window.requestAnimationFrame(() => document.getElementById('waTimeCodesClose')?.focus?.())
+  }
+
+  function openWorkerAccountTimeCodeEditor(dayKey, codeIndex) {
+    if (!canAdministerWorkers()) return
+    const worker = resolveCurrentWorker()
+    if (!worker || !guardWorkerAccountOwnTimeEdit(worker)) return
+
+    const row = findWorkerAccountTimeRow(dayKey)
+    const codes = workerAccountTimeCodes(row)
+    const index = Number(codeIndex)
+    const code = Number.isInteger(index) ? codes[index] : null
+    const interval = code?.interval ?? null
+    const workdayId = String(interval?.linkedWorkdayId ?? interval?.workdayId ?? interval?.id ?? '').trim()
+    if (!row || !code || !interval || !workdayId) {
+      showTransientNotice('Nie znaleziono zapisu, który można edytować.', 'error')
+      return
+    }
+
+    appState.workerAccountTimeCodeEditorItem = {
+      dayKey: String(row.dayKey ?? dayKey ?? '').trim(),
+      code,
+      interval,
+      workdayId,
+    }
+    setText('waTimeCodeEditorTitle', `Edytuj ${code.type} - sesja ${code.session}`)
+    setText(
+      'waTimeCodeEditorContext',
+      `${workerAccountTimeIntervalClient(interval)} / ${workerAccountTimeIntervalZone(interval)}`,
+    )
+    setInputValue('waTimeCodeTimeInput', isoToTimeInput(code.at))
+    setWorkerAccountTimeCodeEditorOpen(true)
+    window.requestAnimationFrame(() => document.getElementById('waTimeCodeTimeInput')?.focus?.())
+  }
+
+  async function saveWorkerAccountTimeCodeEditor() {
+    const item = appState.workerAccountTimeCodeEditorItem
+    const worker = resolveCurrentWorker()
+    if (!item || !worker || !appState.session?.orgId) return
+    if (!guardWorkerAccountOwnTimeEdit(worker)) return
+
+    const timeValue = String(document.getElementById('waTimeCodeTimeInput')?.value ?? '').trim()
+    const dateValue = isoToDateInput(item.code.at)
+    const editedAt = localDateTimeToIso(dateValue, timeValue)
+    if (!timeValue || !editedAt) {
+      showTransientNotice('Podaj poprawną godzinę.', 'error')
+      return
+    }
+
+    const interval = item.interval
+    const originalStartAt = typeof toIso === 'function' ? toIso(interval.startAt) : String(interval.startAt ?? '')
+    const originalEndAt = interval.isOpen
+      ? ''
+      : (typeof toIso === 'function' ? toIso(interval.endAt) : String(interval.endAt ?? ''))
+    const startAt = item.code.type === 'START' ? editedAt : originalStartAt
+    const endAt = item.code.type === 'STOP' ? editedAt : originalEndAt
+    if (!startAt || (endAt && timeRangeSeconds(startAt, endAt) <= 0)) {
+      showTransientNotice('Godzina STOP musi być późniejsza niż godzina START.', 'error')
+      return
+    }
+
+    const durationSec = endAt ? timeRangeSeconds(startAt, endAt) : 0
+    const eventId = String(interval.eventId ?? '').trim()
+    const workdayId = String(item.workdayId ?? '').trim()
+    const editorName = workerAccountCurrentUserName()
+    const payload = {
+      workdayId,
+      linkedWorkdayId: String(interval.linkedWorkdayId ?? '').trim() || workdayId,
+      zoneId: interval.zoneId ?? interval.utilityRoomId ?? interval.roomId ?? null,
+      clientId: interval.clientId ?? null,
+      workerLogin: String(interval.workerLogin ?? workerLogin(worker)).trim(),
+      workerName: String(interval.workerName ?? workerName(worker) ?? workerLogin(worker)).trim(),
+      startAt,
+      endAt: endAt || null,
+      durationSec,
+      status: endAt ? 'CLOSED' : (String(interval.status ?? 'RUNNING').trim() || 'RUNNING'),
+      closeMarkedAt: endAt
+        ? (item.code.type === 'STOP' ? endAt : (interval.closeMarkedAt ?? endAt))
+        : null,
+      endReason: interval.endReason ?? null,
+      comment: interval.comment ?? null,
+      deviceId: interval.deviceId ?? null,
+      startEventId: interval.startEventId ?? null,
+      endEventId: interval.endEventId ?? null,
+      updatedBy: editorName,
+      editedBy: editorName,
+    }
+
+    const saveButton = document.getElementById('waTimeCodeSave')
+    if (saveButton) {
+      saveButton.disabled = true
+      saveButton.textContent = 'Zapisywanie...'
+    }
+
+    try {
+      let updated
+      if (eventId && typeof updateEvent === 'function') {
+        updated = await updateEvent(appState.session.orgId, eventId, payload)
+      } else if (typeof updateWorkday === 'function') {
+        updated = await updateWorkday(appState.session.orgId, workdayId, {
+          workerLogin: payload.workerLogin,
+          workerName: payload.workerName,
+          utilityRoomId: payload.zoneId,
+          startAt,
+          endAt: endAt || null,
+          durationSec,
+          status: payload.status,
+          comment: payload.comment,
+          updatedBy: editorName,
+        })
+      } else {
+        throw new Error('Brak funkcji zapisu czasu pracy.')
+      }
+
+      closeWorkerAccountTimeCodeEditor()
+      notifyWorkerAccountWorkdayChanged([updated ?? { workdayId, startAt, endAt }], worker)
+      const refreshed = await loadWorkerAccountTime(worker, {
+        force: true,
+        range: buildTimeFetchRange(),
+        allowBroadFallback: true,
+      })
+      if (refreshed) openWorkerAccountTimeCodes(item.dayKey)
+      else closeWorkerAccountTimeCodes()
+      showTransientNotice(`Zapisano godzinę ${item.code.type}.`, 'success')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? 'Nie udało się zapisać godziny.')
+      showTransientNotice(message, 'error')
+    } finally {
+      if (saveButton) {
+        saveButton.disabled = false
+        saveButton.textContent = 'Zapisz godzinę'
+      }
+    }
   }
 
   function setWorkerAccountDayEditorOpen(open) {
@@ -3623,6 +4061,16 @@ export function createWorkerAccountFeature(ctx) {
     })
     binding.add(document, 'keydown', (event) => {
       if (event.key !== 'Escape') return
+      const timeCodesOverlay = document.getElementById('waTimeCodesOverlay')
+      if (timeCodesOverlay && !timeCodesOverlay.hidden) {
+        const timeCodeEditor = document.getElementById('waTimeCodeEditor')
+        if (timeCodeEditor && !timeCodeEditor.hidden) {
+          closeWorkerAccountTimeCodeEditor()
+          return
+        }
+        closeWorkerAccountTimeCodes()
+        return
+      }
       const dayOverlay = document.getElementById('waDayEditorOverlay')
       if (dayOverlay && !dayOverlay.hidden) {
         closeWorkerAccountDayEditor()
@@ -3664,6 +4112,40 @@ export function createWorkerAccountFeature(ctx) {
     binding.add(document.getElementById('waDayCancelBtn'), 'click', closeWorkerAccountDayEditor)
     binding.add(document.getElementById('waDaySaveBtn'), 'click', () => {
       void saveWorkerAccountDayEditor()
+    })
+    binding.add(document.getElementById('waTimeCodesOverlay'), 'click', (event) => {
+      if (event.target === event.currentTarget) closeWorkerAccountTimeCodes()
+    })
+    binding.add(document.getElementById('waTimeCodesClose'), 'click', closeWorkerAccountTimeCodes)
+    binding.add(document.getElementById('waTimeCodesDone'), 'click', closeWorkerAccountTimeCodes)
+    binding.add(document.getElementById('waTimeCodeCancel'), 'click', closeWorkerAccountTimeCodeEditor)
+    binding.add(document.getElementById('waTimeCodeSave'), 'click', () => {
+      void saveWorkerAccountTimeCodeEditor()
+    })
+    binding.add(document.getElementById('waTimeCodeTimeInput'), 'keydown', (event) => {
+      if (event.key !== 'Enter') return
+      event.preventDefault()
+      void saveWorkerAccountTimeCodeEditor()
+    })
+    binding.add(document.getElementById('waTimeCodesList'), 'click', (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      const editButton = target?.closest('[data-wa-time-code-edit]')
+      if (!editButton) return
+      openWorkerAccountTimeCodeEditor(
+        editButton.getAttribute('data-wa-time-code-day'),
+        editButton.getAttribute('data-wa-time-code-edit'),
+      )
+    })
+    binding.add(document.getElementById('waTimeCodesList'), 'pointerover', (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      const trigger = target?.closest('.wa-time-code-gps-wrap, .wa-time-code-zone-wrap')
+      if (!trigger || trigger.contains(event.relatedTarget)) return
+      positionWorkerAccountTimeCodeTooltip(trigger)
+    })
+    binding.add(document.getElementById('waTimeCodesList'), 'focusin', (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      const trigger = target?.closest('.wa-time-code-gps-wrap, .wa-time-code-zone-wrap')
+      if (trigger) positionWorkerAccountTimeCodeTooltip(trigger)
     })
     ;['waDayDateInput', 'waDayStartTime', 'waDayEndTime'].forEach((id) => {
       binding.add(document.getElementById(id), 'input', updateWorkerAccountDayPreview)
@@ -3714,9 +4196,10 @@ export function createWorkerAccountFeature(ctx) {
     })
     binding.add(document.getElementById('waTimeRows'), 'click', (event) => {
       const target = event.target instanceof Element ? event.target : null
-      const button = target?.closest('[data-wa-time-detail]')
-      if (!button) return
-      openWorkerAccountDayEditor(button.getAttribute('data-wa-time-detail'))
+      const codesButton = target?.closest('[data-wa-time-codes]')
+      if (codesButton) {
+        openWorkerAccountTimeCodes(codesButton.getAttribute('data-wa-time-codes'))
+      }
     })
     ;[
       ['waEventsPageSize', 'Events'],

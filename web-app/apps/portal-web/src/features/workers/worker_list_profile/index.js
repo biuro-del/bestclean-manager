@@ -764,7 +764,7 @@ export function createWorkerProfileFeature(ctx) {
     return sanitizeWorkTimeEvidenceFilePart(`ewidencja-pracy-pracownicy-${from}-${to}`)
   }
 
-  function setWorkerProfileEvidencePreviewPlaceholder(message = 'Kliknij "Podglad pliku", aby zobaczyc podglad PDF') {
+  function setWorkerProfileEvidencePreviewPlaceholder(message = 'Kliknij „Wygeneruj podgląd”, aby zobaczyć plik PDF') {
     revokeWorkerProfileEvidencePreviewUrl()
     const preview = document.getElementById('wkExportPreview')
     const meta = document.getElementById('wkExportPreviewMeta')
@@ -790,10 +790,11 @@ export function createWorkerProfileFeature(ctx) {
   async function buildWorkerProfileEvidenceRows(options) {
     const workers = selectedWorkerProfileExportWorkers({ skipInactive: options?.skipInactive === true })
     if (!workers.length) {
-      alert(
+      showTransientNotice(
         options?.skipInactive === true && selectedWorkerProfileExportWorkers().length
           ? 'Filtr pomija wszystkich zaznaczonych nieaktywnych pracownikow.'
           : 'Zaznacz co najmniej jednego pracownika.',
+        'error',
       )
       return null
     }
@@ -817,7 +818,7 @@ export function createWorkerProfileFeature(ctx) {
   function openWorkerProfileEvidenceExportModal() {
     const workers = selectedWorkerProfileExportWorkers()
     if (!workers.length) {
-      alert('Zaznacz co najmniej jednego pracownika.')
+      showTransientNotice('Zaznacz co najmniej jednego pracownika.', 'error')
       return
     }
     resetWorkerProfileExportRange()
@@ -830,14 +831,22 @@ export function createWorkerProfileFeature(ctx) {
       overlay.hidden = false
       overlay.style.display = 'flex'
     }
+    document.getElementById('wkOpenExportBtn')?.setAttribute('aria-expanded', 'true')
+    window.requestAnimationFrame(() => document.getElementById('wkExportCloseBtn')?.focus?.())
   }
 
-  function closeWorkerProfileEvidenceExportModal() {
+  function closeWorkerProfileEvidenceExportModal(restoreFocus = true) {
     revokeWorkerProfileEvidencePreviewUrl()
     const overlay = document.getElementById('wkExportOverlay')
+    const wasOpen = Boolean(overlay && !overlay.hidden)
     if (overlay) {
       overlay.hidden = true
       overlay.style.display = 'none'
+    }
+    const openButton = document.getElementById('wkOpenExportBtn')
+    openButton?.setAttribute('aria-expanded', 'false')
+    if (wasOpen && restoreFocus !== false) {
+      window.requestAnimationFrame(() => openButton?.focus?.())
     }
   }
 
@@ -903,7 +912,7 @@ export function createWorkerProfileFeature(ctx) {
     } finally {
       if (button instanceof HTMLButtonElement) {
         button.disabled = false
-        button.textContent = 'Podglad pliku'
+        button.textContent = 'Wygeneruj podgląd'
       }
     }
   }
@@ -2231,7 +2240,13 @@ export function createWorkerProfileFeature(ctx) {
       if (!target?.matches?.('[data-wk-export-col], input[name="wkExportOrientation"], #wkExportFrom, #wkExportTo, #wkExportSkipInactive')) return
       appState.workerProfileEvidencePreviewRows = []
       syncWorkerProfileExportUi()
-      setWorkerProfileEvidencePreviewPlaceholder('Zmieniono ustawienia. Kliknij "Podglad pliku", aby odswiezyc podglad PDF.')
+      setWorkerProfileEvidencePreviewPlaceholder('Zmieniono ustawienia. Kliknij „Wygeneruj podgląd”, aby odświeżyć plik PDF.')
+    })
+
+    binding.add(document, 'keydown', (event) => {
+      if (event.key !== 'Escape') return
+      const overlay = document.getElementById('wkExportOverlay')
+      if (overlay && !overlay.hidden) closeWorkerProfileEvidenceExportModal()
     })
 
     binding.add(document.getElementById('wkResetBtn'), 'click', () => {
@@ -2423,7 +2438,7 @@ export function createWorkerProfileFeature(ctx) {
 
     return () => {
       closeWorkerProfileDeleteConfirm(false)
-      closeWorkerProfileEvidenceExportModal()
+      closeWorkerProfileEvidenceExportModal(false)
       binding.done()
     }
   }

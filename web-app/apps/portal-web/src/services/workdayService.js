@@ -12,6 +12,7 @@ import { executePlatformDataConnect, isPlatformSession, platformContextHeaders }
 import { getClients } from './clientService'
 import { getZones } from './zoneService'
 import { getWorkers } from './workerService'
+import { enrichWorkdaysWithEventIntervals } from '../features/workers/workIntervals.js'
 
 const NINE_HOURS_SECONDS = 9 * 60 * 60
 let eventsForOrgUnavailable = false
@@ -2387,6 +2388,16 @@ export async function getWorkdays(orgId, filters = {}) {
         }
       }
     }
+  } else if (source === 'worktime' || source === 'work_time') {
+    const [mappedWorkdays, mappedEvents] = await Promise.all([
+      getMappedWorkdaysForOrg(orgId),
+      getMappedEventsForOrg(orgId).catch(() => []),
+    ])
+    mapped = enrichWorkdaysWithEventIntervals(mappedWorkdays, mappedEvents)
+      .map((item) => ({
+        ...item,
+        duration: durationToHms(item?.durationSec),
+      }))
   } else if (source === 'backupcycle' || source === 'backup_cycle') {
     mapped = await getMappedBackupCyclesForOrg(orgId)
   } else {
@@ -2419,11 +2430,27 @@ export async function getWorkerTime(orgId, workerId, range = {}) {
     }
   }
 
-  const mapped = await fetchMappedWorkdays(
-    orgId,
-    workerWorkdaysForOrg({ orgId, workerLogin }),
-    'WorkerWorkdaysForOrg',
-  )
+  const [mappedWorkdays, eventResponse] = await Promise.all([
+    fetchMappedWorkdays(
+      orgId,
+      workerWorkdaysForOrg({ orgId, workerLogin }),
+      'WorkerWorkdaysForOrg',
+    ),
+    getWorkdays(orgId, {
+      source: 'events',
+      workerLogin,
+      fromIso: range.fromIso,
+      toIso: range.toIso,
+      page: 1,
+      pageSize: 100000,
+      forceRefresh: range.forceRefresh === true,
+    }).catch(() => ({ items: [] })),
+  ])
+  const mapped = enrichWorkdaysWithEventIntervals(mappedWorkdays, eventResponse.items)
+    .map((item) => ({
+      ...item,
+      duration: durationToHms(item?.durationSec),
+    }))
   const sorted = sortByLatest(mapped)
   const filtered = applyWorkdayFilters(sorted, range)
   const paged = paginate(filtered, range.page, range.pageSize)
@@ -2695,7 +2722,7 @@ export async function getEventsFingerprintForOrg(orgId, filters = {}) {
 async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
   const day = currentDayYmd()
   const [workdayResponse, workerDirectory] = await Promise.all([
-    getWorkdays(orgId, { source: 'workdays', fromIso: day, toIso: day, page: 1, pageSize: 100000, forceRefresh: options.forceRefresh === true }),
+    getWorkdays(orgId, { source: 'worktime', fromIso: day, toIso: day, page: 1, pageSize: 100000, forceRefresh: options.forceRefresh === true }),
     getWorkers(orgId).catch(() => []),
   ])
   const nowTs = Date.now()
@@ -2961,6 +2988,7 @@ async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
       bucket.runningCandidates.push({
         startTs,
         startIso,
+        workSec: Math.max(0, Math.floor(Number(item?.durationSec ?? 0) || 0)),
         clientLabel,
         zoneLabel,
         zoneId: zoneCode,
@@ -2997,8 +3025,10 @@ async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
       const startIso = bucket.firstStartIso || activeCandidate?.startIso || ''
       const stopIso = isRunning ? '' : bucket.latestStopIso || ''
       const activeSec =
-        isRunning && activeCandidate?.startTs > 0 && nowTs > activeCandidate.startTs
-          ? Math.floor((nowTs - activeCandidate.startTs) / 1000)
+        isRunning && Number(activeCandidate?.workSec) > 0
+          ? Math.floor(Number(activeCandidate.workSec))
+          : isRunning && activeCandidate?.startTs > 0 && nowTs > activeCandidate.startTs
+            ? Math.floor((nowTs - activeCandidate.startTs) / 1000)
           : 0
       const totalSec = Math.max(0, bucket.closedSec + activeSec)
       let duration = durationToHms(totalSec)

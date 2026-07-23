@@ -1,3 +1,5 @@
+import { workIntervalsFromRow, workIntervalsTotalSeconds } from './workIntervals.js'
+
 export const WORK_TIME_EXPORT_DEFAULT_COLUMN_IDS = ['date', 'worker', 'start', 'stop', 'work', 'break']
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -45,6 +47,19 @@ function applyOverlapAccounting(deps, rows = []) {
 
   rows.forEach((row) => {
     const next = { ...row }
+    if (Array.isArray(row?.workIntervals) && row.workIntervals.length) {
+      const workIntervals = workIntervalsFromRow(row)
+      const durationSec = workIntervalsTotalSeconds(workIntervals)
+      if (durationSec <= 0) return
+
+      next.workIntervals = workIntervals
+      next.rawDurationSec = Math.max(0, Math.floor(Number(row.durationSec ?? 0) || 0))
+      next.durationSec = durationSec
+      next.breakSec = Math.min(Math.max(0, Number(row.breakSec ?? 0) || 0), durationSec)
+      next.netSec = Math.max(0, durationSec - next.breakSec)
+      output.push(next)
+      return
+    }
     const interval = deps.workStatusIntervalFromTimes(row.startIso, row.endIso, row.durationSec)
     if (!interval) {
       if (Math.max(0, Number(next.durationSec ?? 0) || 0) > 0) {
@@ -225,7 +240,7 @@ export async function buildWorkTimeExportRowsForWorkers({
   const { workerLookupByLogin, workerLookupByName } = buildWorkerLookups(deps, workerRows)
 
   const response = await deps.getWorkdays(orgId, {
-    source: 'workdays',
+    source: 'worktime',
     fromIso: deps.ymdToIsoRangeStart(fromYmd),
     toIso: deps.ymdToIsoRangeEnd(toYmd),
     page: 1,
@@ -270,6 +285,7 @@ export async function buildWorkTimeExportRowsForWorkers({
         startIso,
         endIso,
         durationSec: Math.max(0, computedSec),
+        workIntervals: Array.isArray(item?.workIntervals) ? item.workIntervals : [],
         breakSec,
         netSec: Math.max(0, computedSec - breakSec),
         status: String(item?.status ?? '').trim() || '-',

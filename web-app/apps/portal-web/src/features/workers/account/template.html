@@ -338,9 +338,9 @@
           <div class="worker-account-time-list-card">
             <div class="worker-account-table events-table worker-account-time-table" aria-label="Czas pracy - podsumowanie dzienne">
               <div class="events-head">
-                <div class="events-select-col"><input id="waTimeSelectAll" type="checkbox" aria-label="Zaznacz wszystkie rekordy na stronie" /></div><div>Data</div><div>Typ</div><div>Start pracy</div><div>Koniec pracy</div><div>Czas pracy</div><div>Realny czas pracy</div><div>Przerwa</div><div>Edytowal</div><div></div>
+                <div class="events-select-col"><input id="waTimeSelectAll" type="checkbox" aria-label="Zaznacz wszystkie rekordy na stronie" /></div><div>Data</div><div>Typ</div><div>Start pracy</div><div>Koniec pracy</div><div>Czas pracy</div><div>Realny czas pracy</div><div>Przerwa</div><div>Edytowal</div>
               </div>
-              <div id="waTimeRows"><div class="events-row worker-account-muted"><div class="events-select-col"></div><div>Brak rekordow</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div></div>
+              <div id="waTimeRows"><div class="events-row worker-account-muted"><div class="events-select-col"></div><div>Brak rekordow</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div></div>
             </div>
 
             <div class="worker-account-time-pager">
@@ -407,6 +407,43 @@
     <div class="row-actions wa-day-editor-actions">
       <button class="btn2 danger" id="waDayCancelBtn" type="button">Zamknij</button>
       <button class="btn2 primary" id="waDaySaveBtn" type="button">Zapisz</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay wa-time-codes-overlay" id="waTimeCodesOverlay" aria-labelledby="waTimeCodesTitle" role="dialog" aria-modal="true" hidden>
+  <div class="modal wa-time-codes-modal">
+    <button class="wa-time-codes-close" id="waTimeCodesClose" type="button" aria-label="Zamknij">&times;</button>
+    <div class="wa-time-codes-heading">
+      <span class="wa-time-codes-heading-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 5h10M7 12h10M7 19h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="4" cy="5" r="1.2" fill="currentColor"/><circle cx="4" cy="12" r="1.2" fill="currentColor"/><circle cx="4" cy="19" r="1.2" fill="currentColor"/></svg>
+      </span>
+      <div>
+        <h3 id="waTimeCodesTitle">Start i stop</h3>
+        <p id="waTimeCodesMeta">Kody START/STOP z wybranego dnia</p>
+      </div>
+    </div>
+    <div class="wa-time-codes-list" id="waTimeCodesList"></div>
+    <div class="wa-time-code-editor" id="waTimeCodeEditor" hidden>
+      <div>
+        <strong id="waTimeCodeEditorTitle">Edytuj godzinę</strong>
+        <small id="waTimeCodeEditorContext">Klient / strefa</small>
+      </div>
+      <label>Nowa godzina<input class="mono" id="waTimeCodeTimeInput" type="time" required /></label>
+      <div class="wa-time-code-editor-actions">
+        <button class="btn2" id="waTimeCodeCancel" type="button">Anuluj</button>
+        <button class="btn2 primary" id="waTimeCodeSave" type="button">Zapisz godzinę</button>
+      </div>
+    </div>
+    <div class="wa-time-codes-total" aria-live="polite">
+      <span>
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Łączny czas pracy
+      </span>
+      <strong class="mono" id="waTimeCodesTotal">00:00</strong>
+    </div>
+    <div class="wa-time-codes-actions">
+      <button class="btn2 primary" id="waTimeCodesDone" type="button">Gotowe</button>
     </div>
   </div>
 </div>

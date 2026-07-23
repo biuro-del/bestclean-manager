@@ -3,6 +3,7 @@ import {
   OWN_WORKDAY_EDIT_DENIED_MESSAGE,
   isOwnWorkdayEditBlocked,
 } from '../workdayEditAccess.js'
+import { workIntervalsFromRow } from '../workIntervals.js'
 
 export const route = 'workerTimeDetail'
 export const viewId = 'view-workerTimeDetail'
@@ -250,7 +251,14 @@ export function createWorkerTimeDetailFeature(ctx) {
   }
 
   function workStatusRowsTotalSeconds(rows = []) {
-    return workStatusIntervalsTotalSeconds(rows.map((row) => workStatusIntervalFromRow(row)))
+    const intervals = rows.flatMap((row) => {
+      if (Array.isArray(row?.workIntervals) && row.workIntervals.length) {
+        return workIntervalsFromRow(row)
+      }
+      const interval = workStatusIntervalFromRow(row)
+      return interval ? [interval] : []
+    })
+    return workStatusIntervalsTotalSeconds(intervals)
   }
 
     function workerDetailAlertLevelFromWorkSec(workSec) {

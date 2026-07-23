@@ -113,7 +113,7 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.7"></path><path d="M18 3v5h-5"></path><path d="M20 12a8 8 0 0 1-13.7 5.7"></path><path d="M6 21v-5h5"></path></svg>
       <span>Od&#347;wie&#380;</span>
     </button>
-    <button class="btn2 worker-profile-filter-btn" id="wkOpenExportBtn" type="button">
+    <button class="btn2 worker-profile-filter-btn worker-profile-evidence-btn" id="wkOpenExportBtn" type="button" aria-haspopup="dialog" aria-controls="wkExportOverlay" aria-expanded="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"></path><path d="m7 10 5 5 5-5"></path><path d="M5 20h14"></path></svg>
       <span>Pobierz ewidencj&#281; pracy</span>
     </button>
@@ -128,75 +128,92 @@
   </div>
 </div>
 
-<div class="overlay wa-export-overlay" id="wkExportOverlay" aria-label="Pobierz ewidencje pracy" role="dialog" aria-modal="true" hidden>
+<div class="overlay wa-export-overlay" id="wkExportOverlay" aria-labelledby="wkExportTitle" aria-describedby="wkExportDescription" role="dialog" aria-modal="true" hidden>
   <div class="modal wa-export-modal">
     <button class="wa-export-close" id="wkExportCloseBtn" type="button" aria-label="Zamknij">&times;</button>
-    <h3>Pobierz ewidencj&#281; pracy</h3>
-    <p class="meta">Wybierz zakres dat, kolumny i format pliku do pobrania.</p>
-
-    <div class="wk-export-summary">
+    <header class="wk-export-header">
+      <span class="wk-export-header-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 3.5h7l3 3V20H7V3.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3.5V7h3.5M9.5 11h5M9.5 14.5h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </span>
       <div>
+        <span class="wk-export-eyebrow">Raport czasu pracy</span>
+        <h3 id="wkExportTitle">Pobierz ewidencj&#281; pracy</h3>
+        <p class="meta" id="wkExportDescription">Wybierz pracownik&#243;w, zakres dat i format gotowego pliku.</p>
+      </div>
+    </header>
+
+    <section class="wk-export-summary" aria-label="Zakres raportu">
+      <div class="wk-export-selection-summary" aria-live="polite">
         <span>Wybrano pracownik&#243;w</span>
         <strong id="wkExportSelectedCount">0</strong>
         <p id="wkExportSelectedNames">Zaznacz pracownika z listy.</p>
       </div>
       <label>
-        Od
+        <span>Data od</span>
         <input id="wkExportFrom" type="date" />
       </label>
       <label>
-        Do
+        <span>Data do</span>
         <input id="wkExportTo" type="date" />
       </label>
-    </div>
+    </section>
 
     <div class="wa-export-grid">
-      <div class="wa-export-block">
-        <div class="wa-export-title">Kolumny</div>
-        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="date" checked /> Data</label>
-        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="worker" checked /> Pracownik</label>
-        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="type" /> Typ</label>
-        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="start" checked /> Start pracy</label>
-        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="stop" checked /> Koniec pracy</label>
-        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="work" checked /> Czas pracy</label>
-        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="net" checked /> Realny czas pracy</label>
-        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="break" checked /> Przerwa</label>
-        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="editedBy" /> Edytowa&#322;</label>
-        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="comment" /> Komentarz</label>
-        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="alert" /> Alert</label>
-        <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="ack" /> ACK</label>
-      </div>
+      <section class="wa-export-block wk-export-columns" aria-labelledby="wkExportColumnsTitle">
+        <h4 class="wa-export-title" id="wkExportColumnsTitle"><span>1</span> Wybierz kolumny</h4>
+        <p class="wa-export-section-description">Zaznacz informacje, kt&#243;re maj&#261; znale&#378;&#263; si&#281; w raporcie.</p>
+        <div class="wk-export-check-grid">
+          <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="date" checked /> Data</label>
+          <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="worker" checked /> Pracownik</label>
+          <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="type" /> Typ</label>
+          <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="start" checked /> Start pracy</label>
+          <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="stop" checked /> Koniec pracy</label>
+          <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="work" checked /> Czas pracy</label>
+          <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="net" checked /> Realny czas pracy</label>
+          <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="break" checked /> Przerwa</label>
+          <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="editedBy" /> Edytowa&#322;</label>
+          <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="comment" /> Komentarz</label>
+          <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="alert" /> Alert</label>
+          <label class="wa-export-check"><input type="checkbox" data-wk-export-col value="ack" /> ACK</label>
+        </div>
+      </section>
 
-      <div class="wa-export-block">
-        <div class="wa-export-title">Filtry</div>
-        <label class="wa-export-check"><input id="wkExportSkipInactive" type="checkbox" /> Pomi&#324; nieaktywnych</label>
-        <p class="wa-export-hint">Po zaznaczeniu eksport i podgl&#261;d nie obejmuj&#261; pracownik&#243;w ze statusem Inactive.</p>
+      <div class="wk-export-options">
+        <section class="wa-export-block" aria-labelledby="wkExportFiltersTitle">
+          <h4 class="wa-export-title" id="wkExportFiltersTitle"><span>2</span> Filtry pracownik&#243;w</h4>
+          <label class="wa-export-check wk-export-wide-option"><input id="wkExportSkipInactive" type="checkbox" /> Pomi&#324; nieaktywnych</label>
+          <p class="wa-export-hint">Nieaktywni pracownicy nie pojawi&#261; si&#281; w podgl&#261;dzie ani pobranym pliku.</p>
+        </section>
 
-        <div class="wa-export-title wa-export-title--spaced">Orientacja PDF</div>
-        <label class="wa-export-radio"><input type="radio" name="wkExportOrientation" value="p" /> Pion</label>
-        <label class="wa-export-radio"><input type="radio" name="wkExportOrientation" value="l" checked /> Poziom</label>
-        <p class="wa-export-hint">Domy&#347;lnie: poziom. Opcja dotyczy tylko pliku PDF.</p>
+        <section class="wa-export-block" aria-labelledby="wkExportOrientationTitle">
+          <h4 class="wa-export-title" id="wkExportOrientationTitle"><span>3</span> Uk&#322;ad pliku PDF</h4>
+          <div class="wk-export-orientation-grid">
+            <label class="wa-export-radio"><input type="radio" name="wkExportOrientation" value="p" /> <span><b>Pion</b><small>Portret</small></span></label>
+            <label class="wa-export-radio"><input type="radio" name="wkExportOrientation" value="l" checked /> <span><b>Poziom</b><small>Wi&#281;cej kolumn</small></span></label>
+          </div>
+          <p class="wa-export-hint">Ustawienie dotyczy wy&#322;&#261;cznie pliku PDF.</p>
+        </section>
       </div>
     </div>
 
     <div class="wa-export-preview-block">
       <div class="wa-export-preview-head">
         <div>
-          <div class="wa-export-title">Podgl&#261;d pliku</div>
+          <h4 class="wa-export-title"><span>4</span> Sprawd&#378; podgl&#261;d</h4>
           <p id="wkExportPreviewMeta">-</p>
         </div>
-        <button class="btn2" id="wkExportPreviewBtn" type="button">Podgl&#261;d pliku</button>
+        <button class="btn2 wk-export-preview-btn" id="wkExportPreviewBtn" type="button">Wygeneruj podgl&#261;d</button>
       </div>
       <div class="wa-export-preview" id="wkExportPreview" aria-live="polite"></div>
     </div>
 
     <div class="row-actions wa-export-actions">
       <div class="left">
-        <button class="btn2 primary" id="wkExportCsvBtn" type="button">Pobierz CSV</button>
-        <button class="btn2" id="wkExportPdfBtn" type="button">Pobierz PDF</button>
+        <button class="btn2 wk-export-download wk-export-download--csv" id="wkExportCsvBtn" type="button">Pobierz CSV</button>
+        <button class="btn2 wk-export-download wk-export-download--pdf" id="wkExportPdfBtn" type="button">Pobierz PDF</button>
       </div>
       <div class="right">
-        <button class="btn2 danger" id="wkExportCancelBtn" type="button">Anuluj</button>
+        <button class="btn2 wk-export-cancel" id="wkExportCancelBtn" type="button">Anuluj</button>
       </div>
     </div>
   </div>
