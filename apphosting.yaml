@@ -80,3 +80,7 @@ env:
     value: database
     availability:
       - RUNTIME
+  - variable: MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED
+    value: "false"
+    availability:
+      - RUNTIME

@@ -16,12 +16,14 @@ const PLATFORM_QUERY_ALLOWLIST = new Set([
   'ZonesForOrg',
   'WorkdaysForOrg',
   'WorkdaysPageForOrg',
+  'WorkdaysIntegrityPageForOrg',
   'WorkdaysPageForOrgByWorker',
   'WorkdaysPageForOrgByRoom',
   'WorkdaysPageForOrgByStatus',
   'WorkdaysFingerprintForOrg',
   'BackupCyclesForOrg',
   'EventsForOrg',
+  'EventsIntegrityPageForOrg',
   'EventsPageForOrg',
   'EventsPageForOrgByWorker',
   'EventsPageForOrgByZone',
@@ -56,6 +58,7 @@ const PLATFORM_MUTATION_ALLOWLIST = new Set([
   'DeleteWorkdayForOrg',
   'InsertEventForOrg',
   'UpdateEventForOrg',
+  'ReidentifyEventForOrg',
   'DeleteEventForOrg',
   'InsertBackupCycleForOrg',
   'UpdateBackupCycleForOrg',
@@ -116,7 +119,7 @@ function isSensitivePlatformOperation(operationName, pathname = '') {
   const operation = text(operationName)
   const path = text(pathname).toLowerCase()
   return (
-    /^Delete/.test(operation) ||
+    /^(Delete|Restore|Reidentify)/.test(operation) ||
     /password|owner|subscription|soft-delete|restore|delete/.test(path)
   )
 }
