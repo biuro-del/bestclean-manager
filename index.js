@@ -59,6 +59,7 @@ const {
   resolveSingleOpenCycle,
 } = require('./mobile-open-cycle-policy')
 const { resolveSingleOpenWorkday } = require('./mobile-open-workday-policy')
+const { mobileCorrelationRolloutDecision } = require('./mobile-correlation-rollout-policy')
 
 function isTrue(value) {
   return ['1', 'true', 'yes', 'tak'].includes(
@@ -2822,11 +2823,19 @@ async function createMobileCycle(client, orgId, worker, workday, zone, startedAt
   )
 }
 
-function assertMobileCorrelationEnabled() {
-  if (!isTrue(process.env.MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED)) {
+function assertMobileCorrelationEnabled(worker) {
+  const rollout = mobileCorrelationRolloutDecision({
+    enabled: process.env.MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED,
+    canaryWorkerIds: process.env.MOBILE_SERVICE_EXECUTION_CORRELATION_CANARY_WORKER_IDS,
+    worker,
+  })
+  if (!rollout.allowed) {
     const error = new Error('MOBILE_CORRELATION_NOT_ENABLED')
     error.statusCode = 503
-    error.publicCode = 'MOBILE_CORRELATION_NOT_ENABLED'
+    error.publicCode =
+      rollout.reason === 'CANARY_RESTRICTED'
+        ? 'MOBILE_CORRELATION_CANARY_RESTRICTED'
+        : 'MOBILE_CORRELATION_NOT_ENABLED'
     error.publicMessage =
       'Mobilny zapis CLEAN jest chwilowo wstrzymany do czasu kontrolowanego uruchomienia korelacji z planem.'
     throw error
@@ -3035,7 +3044,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
         throw error
       }
       requireScanGps('CLEAN', zoneIsSpecial)
-      assertMobileCorrelationEnabled()
+      assertMobileCorrelationEnabled(worker)
       activeWorkday = await createMobileWorkday(client, orgId, worker, zone, scannedAt, '')
     }
 
@@ -3058,7 +3067,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
         }
       } else {
         requireScanGps('CLEAN', activeCycleIsSpecial || zoneIsSpecial)
-        assertMobileCorrelationEnabled()
+        assertMobileCorrelationEnabled(worker)
         await closeMobileEvent(
           client,
           orgId,
@@ -3074,7 +3083,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
       }
     } else {
       requireScanGps('CLEAN', zoneIsSpecial)
-      assertMobileCorrelationEnabled()
+      assertMobileCorrelationEnabled(worker)
       await createMobileCycle(client, orgId, worker, activeWorkday, zone, scannedAt, comment, scanGpsNote('CLEAN_START', zoneIsSpecial))
       action = 'START_ZONE'
       message = `Zapisano na serwerze. Rozpoczeto sprzatanie: ${zone.name || zone.id}.`

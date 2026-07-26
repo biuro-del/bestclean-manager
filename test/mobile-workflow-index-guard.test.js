@@ -92,6 +92,8 @@ test('mobilny runtime wymaga schematu dla CLEAN, ale flagą blokuje wyłącznie 
 
   assert.ok(enabledGuardStart >= 0 && enabledGuardEnd > enabledGuardStart)
   assert.match(enabledGuard, /MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED/)
+  assert.match(enabledGuard, /MOBILE_SERVICE_EXECUTION_CORRELATION_CANARY_WORKER_IDS/)
+  assert.match(enabledGuard, /mobileCorrelationRolloutDecision/)
   assert.match(enabledGuard, /MOBILE_CORRELATION_NOT_ENABLED/)
   assert.match(enabledGuard, /statusCode = 503/)
   assert.match(schemaGuard, /readPublicEventColumns\(client\)/)
@@ -103,15 +105,15 @@ test('mobilny runtime wymaga schematu dla CLEAN, ale flagą blokuje wyłącznie 
   assert.match(scan, /else \{\s*await assertMobileCorrelationSchemaReady\(client\)/)
   assert.match(
     scan,
-    /assertMobileCorrelationEnabled\(\)\s*activeWorkday = await createMobileWorkday/,
+    /assertMobileCorrelationEnabled\(worker\)\s*activeWorkday = await createMobileWorkday/,
   )
   assert.match(
     scan,
-    /assertMobileCorrelationEnabled\(\)\s*await closeMobileEvent\([\s\S]*?'QR_SWITCH'[\s\S]*?await createMobileCycle/,
+    /assertMobileCorrelationEnabled\(worker\)\s*await closeMobileEvent\([\s\S]*?'QR_SWITCH'[\s\S]*?await createMobileCycle/,
   )
   assert.match(
     scan,
-    /else \{\s*requireScanGps\('CLEAN', zoneIsSpecial\)\s*assertMobileCorrelationEnabled\(\)\s*await createMobileCycle/,
+    /else \{\s*requireScanGps\('CLEAN', zoneIsSpecial\)\s*assertMobileCorrelationEnabled\(worker\)\s*await createMobileCycle/,
   )
   const sameZoneBranchStart = scan.indexOf(
     "if (normalizeText(activeCycle.zone_id).toLowerCase() === normalizeText(zone.id).toLowerCase())",

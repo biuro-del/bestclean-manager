@@ -81,6 +81,10 @@ env:
     availability:
       - RUNTIME
   - variable: MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED
-    value: "false"
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: MOBILE_SERVICE_EXECUTION_CORRELATION_CANARY_WORKER_IDS
+    value: "W001"
     availability:
       - RUNTIME
