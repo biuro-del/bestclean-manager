@@ -1,4 +1,9 @@
 import template from './template.html?raw'
+import { isScheduleOrderActive } from '../../services/scheduleOrderLifecycle'
+import {
+  SCHEDULE_START_GRACE_MINUTES,
+  isScheduleStartOverdue,
+} from '../../services/scheduleStartStatusPolicy'
 
 export const route = 'calendar'
 export const viewId = 'view-calendar'
@@ -154,6 +159,7 @@ export function createCalendarFeature(ctx) {
     reportHistoryResolveDayQrCode,
     resolveZoneByQrCandidate,
     roleLevel,
+    setScheduleTaskLifecycleStatus,
     showPortalErrorNotice,
     showTransientNotice,
     toIso,
@@ -3160,6 +3166,11 @@ export function createCalendarFeature(ctx) {
     ordersClearRemoteTimelineOrderSaveTimer()
   
     const snapshot = ordersMergeTimelineOrderLists(orders)
+    const scheduleConflicts = calendarTimelineFindAllOrderConflicts(snapshot, calendarTimelineResources())
+    if (scheduleConflicts.length) {
+      calendarTimelineShowConflictDialog(scheduleConflicts)
+      return false
+    }
     if (options.retainLocalOrders) {
       ordersRememberPendingLocalOrders(options.retainLocalOrders)
     }
@@ -3190,7 +3201,11 @@ export function createCalendarFeature(ctx) {
         return false
       }
       console.warn('[portal/schedule-orders] remote save failed', error)
-      if (options.retry !== false) {
+      if (
+        options.retry !== false &&
+        Number(error?.status) !== 409 &&
+        String(error?.code ?? '').trim() !== 'WORKER_SCHEDULE_LOCATION_CONFLICT'
+      ) {
         ordersScheduleRemoteTimelineOrderRetry()
       }
       if (options.showError !== false) {
@@ -3336,6 +3351,61 @@ export function createCalendarFeature(ctx) {
       return false
     }
   }
+
+  async function ordersSetTimelineOrderLifecycleStatus(orderIds = [], lifecycleStatus = 'CANCELLED', options = {}) {
+    const orgId = ordersActiveOrganizationId()
+    const sessionKey = ordersRemoteSessionKey()
+    const generation = calendarTimelineOrdersRemoteGeneration
+    const ids = [...new Set(
+      (Array.isArray(orderIds) ? orderIds : [orderIds])
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean),
+    )]
+    if (!orgId || !ids.length) {
+      showTransientNotice('Brak organizacji lub zlecenia do zmiany statusu.', 'error')
+      return false
+    }
+
+    ordersClearRemoteTimelineOrderSaveTimer()
+    try {
+      const result = await setScheduleTaskLifecycleStatus(orgId, ids, lifecycleStatus)
+      if (!ordersRemoteRequestIsCurrent(sessionKey, generation)) {
+        return false
+      }
+      const confirmedIds = new Set(
+        (Array.isArray(result?.updatedOrderIds) ? result.updatedOrderIds : [])
+          .map((value) => String(value ?? '').trim())
+          .filter(Boolean),
+      )
+      const missingIds = ids.filter((id) => !confirmedIds.has(id))
+      if (missingIds.length || !Array.isArray(result?.orders)) {
+        throw new Error('Backend nie potwierdził zmiany statusu zlecenia.')
+      }
+
+      ordersForgetPendingLocalOrders(ids)
+      ordersSaveTimelineOrders(
+        ordersMergeWithPendingLocalOrders(result.orders),
+        { syncRemote: false, preserveDrafts: false },
+      )
+      appState.calendarTimelineOrdersRemoteLoaded = true
+      ordersClearRemoteTimelineOrderRetryTimer()
+      if (options.render !== false) {
+        ordersRenderScheduleOrderViews()
+      }
+      showTransientNotice(
+        options.notice || (lifecycleStatus === 'ARCHIVED' ? 'Zlecenie zarchiwizowane.' : 'Zlecenie anulowane.'),
+        'success',
+      )
+      return true
+    } catch (error) {
+      if (!ordersRemoteRequestIsCurrent(sessionKey, generation) || error?.code === 'STALE_ORG_CONTEXT') {
+        return false
+      }
+      console.warn('[portal/schedule-orders] lifecycle update failed', error)
+      showPortalErrorNotice('Nie udało się zmienić statusu zlecenia.', error)
+      return false
+    }
+  }
   
   async function ordersDeleteTimelineOrderFromList(orderId = '') {
     const id = String(orderId ?? '').trim()
@@ -3455,6 +3525,26 @@ export function createCalendarFeature(ctx) {
       String(order?.title ?? order?.name ?? order?.clientLabel ?? order?.client ?? order?.addressLabel ?? '').trim() ||
       'Zlecenie'
     )
+  }
+
+  function calendarTimelineOrderLocationKey(order = {}) {
+    const clientId = String(order?.clientId ?? order?.client_id ?? '').trim().toLocaleLowerCase('pl')
+    if (clientId) {
+      return `client:${clientId}`
+    }
+    const address = String(
+      order?.executionAddressLabel ??
+      order?.execution_address_label ??
+      order?.addressLabel ??
+      order?.address_label ??
+      '',
+    ).trim().toLocaleLowerCase('pl')
+    if (address) {
+      return `address:${address}`
+    }
+    const lat = Number(order?.lat ?? order?.latitude)
+    const lng = Number(order?.lng ?? order?.longitude)
+    return Number.isFinite(lat) && Number.isFinite(lng) ? `gps:${lat.toFixed(5)},${lng.toFixed(5)}` : ''
   }
   
   function calendarTimelineTimeLabel(value, fallback = '--:--') {
@@ -4419,17 +4509,20 @@ export function createCalendarFeature(ctx) {
     const actualEndLabel = calendarTimelineHmFromTimestamp(actual?.endTs)
   
     if (kind === 'missing-start') {
+      const alarmAtLabel = calendarTimelineHmFromTimestamp(
+        Number(planned.startTs) + SCHEDULE_START_GRACE_MINUTES * 60 * 1000,
+      )
       return {
         key: `${kind}|${id}|${planned.startTs}`,
         kind,
-        signal: 'UWAGA',
+        signal: 'ALARM',
         title: 'Zlecenie nie wystartowało',
-        text: `Zlecenie nie rozpoczęło się o planowanej godzinie ${planned.startLabel}.`,
+        text: `Minęło ${SCHEDULE_START_GRACE_MINUTES} minut od planowanej godziny rozpoczęcia, a system nie potwierdził START.`,
         rows: [
           {
             person: title,
             meta: worker ? `Pracownik: ${worker}` : 'Pracownik: -',
-            status: `Plan START: ${planned.startLabel}`,
+            status: `Plan START: ${planned.startLabel} · alarm: ${alarmAtLabel}`,
           },
         ],
       }
@@ -6495,7 +6588,14 @@ export function createCalendarFeature(ctx) {
     }
   
     const now = Date.now()
-    if (!completed && now > planned.startTs) {
+    if (
+      isScheduleStartOverdue({
+        plannedStartTs: planned.startTs,
+        actualStartTs: actual.startTs,
+        completed,
+        nowTs: now,
+      })
+    ) {
       return {
         kind: 'missing-start',
         label: 'Brak startu',
@@ -6864,10 +6964,29 @@ export function createCalendarFeature(ctx) {
   }
 
   function calendarTimelineAllocationIdentity(allocation = {}, fallbackIndex = null) {
-    const blockId = String(allocation?.serviceBlockId ?? allocation?.teamId ?? '').trim()
-    const slotId = String(allocation?.slotId ?? allocation?.id ?? '').trim()
+    const blockId = String(
+      allocation?.serviceBlockId ??
+        allocation?.service_block_id ??
+        allocation?.teamId ??
+        allocation?.team_id ??
+        '',
+    ).trim()
+    const allocationId = String(
+      allocation?.allocationId ??
+        allocation?.allocation_id ??
+        allocation?.slotId ??
+        allocation?.slot_id ??
+        allocation?.workSlotId ??
+        allocation?.work_slot_id ??
+        allocation?.id ??
+        '',
+    ).trim()
+    const workSlotKey = String(allocation?.workSlotKey ?? allocation?.work_slot_key ?? '').trim()
     const key = String(allocation?.key ?? '').trim()
-    if (blockId && slotId) return `block:${blockId}:slot:${slotId}`
+    if (blockId && allocationId) return `block:${blockId}:allocation:${allocationId}`
+    if (blockId && workSlotKey) return `block:${blockId}:workslot:${workSlotKey}`
+    if (allocationId) return `allocation:${allocationId}`
+    if (workSlotKey) return `workslot:${workSlotKey}`
     if (blockId && key) return `block:${blockId}:key:${key}`
     if (key) return `key:${key}`
     return Number.isInteger(fallbackIndex) ? `index:${fallbackIndex}` : ''
@@ -7401,10 +7520,14 @@ export function createCalendarFeature(ctx) {
   }
   
   function calendarTimelineFindOrderConflicts(candidate = {}, orders = [], resources = calendarTimelineResources()) {
+    if (!isScheduleOrderActive(candidate)) {
+      return []
+    }
     const candidateSlots = calendarTimelineVisualOrderSlots(candidate, resources)
       .map((slot) => ({
         order: slot,
         interval: calendarTimelineOrderInterval(slot),
+        locationKey: calendarTimelineOrderLocationKey(slot),
         rows: new Set(
           ordersNormalizeOrderRows(slot, resources).filter((row) => !calendarTimelineRowAllowsOverlap(row, resources)),
         ),
@@ -7413,7 +7536,7 @@ export function createCalendarFeature(ctx) {
     if (!candidateSlots.length) return []
   
     const conflicts = []
-    const sourceOrders = Array.isArray(orders) ? orders : []
+    const sourceOrders = (Array.isArray(orders) ? orders : []).filter((order) => isScheduleOrderActive(order))
     const conflictDays = calendarTimelineDaysForOrder(candidate)
     const plannedOrders = conflictDays.length
       ? calendarTimelineExpandRecurringOrdersForDays(sourceOrders, conflictDays)
@@ -7433,9 +7556,13 @@ export function createCalendarFeature(ctx) {
         if (!interval) {
           return
         }
+        const locationKey = calendarTimelineOrderLocationKey(orderSlot)
         const rows = ordersNormalizeOrderRows(orderSlot, resources)
         candidateSlots.forEach((candidateSlot) => {
           if (!(candidateSlot.interval.start < interval.end && interval.start < candidateSlot.interval.end)) {
+            return
+          }
+          if (candidateSlot.locationKey && locationKey && candidateSlot.locationKey === locationKey) {
             return
           }
           rows.forEach((row) => {
@@ -7464,6 +7591,28 @@ export function createCalendarFeature(ctx) {
   
   function calendarTimelineFindOrderConflict(candidate = {}, orders = [], resources = calendarTimelineResources()) {
     return calendarTimelineFindOrderConflicts(candidate, orders, resources)[0]?.order ?? null
+  }
+
+  function calendarTimelineFindAllOrderConflicts(orders = [], resources = calendarTimelineResources()) {
+    const sourceOrders = Array.isArray(orders)
+      ? orders.filter((order) => order && isScheduleOrderActive(order))
+      : []
+    const conflicts = []
+    const seen = new Set()
+    sourceOrders.forEach((candidate) => {
+      calendarTimelineFindOrderConflicts(candidate, sourceOrders, resources).forEach((conflict) => {
+        const candidateKey = calendarTimelineOrderSourceKeys(candidate)[0] || String(candidate?.id ?? '').trim()
+        const conflictKey = calendarTimelineOrderSourceKeys(conflict?.order)[0] || String(conflict?.order?.id ?? '').trim()
+        const pair = [candidateKey, conflictKey].filter(Boolean).sort().join('::')
+        const key = `${pair}::${Number(conflict?.row ?? -1)}::${String(conflict?.time ?? '')}`
+        if (!pair || seen.has(key)) {
+          return
+        }
+        seen.add(key)
+        conflicts.push(conflict)
+      })
+    })
+    return conflicts
   }
 
   function calendarTimelineConflictItemsFromLayout(layoutItems = [], resources = calendarTimelineResources()) {
@@ -7984,12 +8133,61 @@ export function createCalendarFeature(ctx) {
     document.body.appendChild(overlay)
   }
   
+  function calendarShowTaskLifecycleConfirm({ title = 'Zlecenie', onConfirm = null } = {}) {
+    document.getElementById('calendarTaskLifecycleConfirmDialog')?.remove()
+    const overlay = document.createElement('div')
+    overlay.id = 'calendarTaskLifecycleConfirmDialog'
+    overlay.className = 'calendar-conflict-overlay calendar-task-delete-confirm-overlay'
+    overlay.innerHTML = `
+      <section class="calendar-conflict-dialog calendar-task-delete-confirm" role="dialog" aria-modal="true" aria-labelledby="calendarTaskLifecycleConfirmTitle">
+        <button class="calendar-conflict-close" type="button" data-calendar-task-lifecycle-confirm="cancel" aria-label="Zamknij">×</button>
+        <div class="calendar-conflict-icon calendar-task-delete-confirm-icon">!</div>
+        <div class="calendar-conflict-copy">
+          <p class="calendar-conflict-kicker">Anulowanie zlecenia</p>
+          <h2 id="calendarTaskLifecycleConfirmTitle">Anulować to zlecenie?</h2>
+          <p><strong>${escapeHtml(title || 'Zlecenie')}</strong></p>
+          <p>Zlecenie zniknie z aktywnego grafiku, ale pozostanie w bazie jako zapis audytowy. Operację można odwrócić przez ponowną aktywację, o ile nie spowoduje kolizji.</p>
+        </div>
+        <div class="calendar-task-delete-confirm-actions">
+          <button class="btn secondary" type="button" data-calendar-task-lifecycle-confirm="cancel">Wróć</button>
+          <button class="btn danger" type="button" data-calendar-task-lifecycle-confirm="confirm">Anuluj zlecenie</button>
+        </div>
+      </section>
+    `
+    overlay.addEventListener('click', async (event) => {
+      const target = event.target
+      const button = target?.closest?.('[data-calendar-task-lifecycle-confirm]')
+      if (target !== overlay && !button) {
+        return
+      }
+      const action = String(button?.getAttribute?.('data-calendar-task-lifecycle-confirm') || 'cancel')
+      if (action !== 'confirm') {
+        overlay.remove()
+        return
+      }
+      const confirmButton = button instanceof HTMLButtonElement ? button : null
+      if (confirmButton) {
+        confirmButton.disabled = true
+        confirmButton.textContent = 'Anulowanie...'
+      }
+      const succeeded = await Promise.resolve(typeof onConfirm === 'function' ? onConfirm() : false)
+      if (succeeded !== false) {
+        overlay.remove()
+      } else if (confirmButton) {
+        confirmButton.disabled = false
+        confirmButton.textContent = 'Anuluj zlecenie'
+      }
+    })
+    document.body.appendChild(overlay)
+  }
+
   function calendarShowTaskContextMenu(context = {}, x = 0, y = 0) {
     calendarHideTaskContextMenu()
     if (!context || !context.kind) {
       return
     }
     const isRealEvent = Boolean(context.isRealEvent)
+    const canCancelOrder = context.kind === 'timeline-order' && !isRealEvent && !context.shouldAskScope
     const menu = document.createElement('div')
     menu.id = 'calendarTaskContextMenu'
     menu.className = 'calendar-task-context-menu'
@@ -7997,6 +8195,7 @@ export function createCalendarFeature(ctx) {
     menu.innerHTML = `
       <button type="button" role="menuitem" data-calendar-task-context-action="edit">Edytuj</button>
       <button type="button" role="menuitem" data-calendar-task-context-action="duplicate"${isRealEvent ? ' disabled' : ''}>Duplikuj</button>
+      ${canCancelOrder ? '<button type="button" role="menuitem" data-calendar-task-context-action="cancel-order">Anuluj zlecenie</button>' : ''}
       <button type="button" role="menuitem" class="is-danger" data-calendar-task-context-action="delete"${isRealEvent ? ' disabled' : ''}>Usuń</button>
     `
     menu.addEventListener('click', (event) => {
@@ -8039,6 +8238,24 @@ export function createCalendarFeature(ctx) {
         }
         if (action === 'duplicate') {
           calendarTimelineDuplicateOrderFromContext(context)
+          return
+        }
+        if (action === 'cancel-order') {
+          const targetId = context.isRecurrenceOverride
+            ? String(context.orderId ?? '').trim()
+            : String(context.sourceOrderId || context.orderId || '').trim()
+          if (!targetId) {
+            showTransientNotice('Nie znaleziono zlecenia do anulowania.', 'error')
+            return
+          }
+          calendarShowTaskLifecycleConfirm({
+            title,
+            onConfirm: () => ordersSetTimelineOrderLifecycleStatus(
+              [targetId],
+              'CANCELLED',
+              { notice: 'Zlecenie anulowane i pozostawione w historii.' },
+            ),
+          })
           return
         }
         if (action === 'delete') {
@@ -8308,11 +8525,12 @@ export function createCalendarFeature(ctx) {
         <div class="calendar-conflict-icon">!</div>
         <div class="calendar-conflict-copy">
           <p class="calendar-conflict-kicker">Kolizja terminu</p>
-          <h2 id="calendarConflictTitle">Nie można przenieść zlecenia</h2>
-          <p>
-            Zlecenie <strong>${escapeHtml(title)}</strong>${time ? ` na ${escapeHtml(time)}` : ''}
-            nakłada się na inne zlecenie u jednej lub kilku przypisanych osób.
-          </p>
+          <h2 id="calendarConflictTitle">Nie można zapisać kolidującego planu</h2>
+          <p>${
+            candidate
+              ? `Zlecenie <strong>${escapeHtml(title)}</strong>${time ? ` na ${escapeHtml(time)}` : ''} nakłada się na inne zlecenie u jednej lub kilku przypisanych osób.`
+              : 'Co najmniej dwa zlecenia nakładają się u tej samej osoby. Zmień pracownika albo godziny realizacji.'
+          }</p>
         </div>
         <ul class="calendar-conflict-list">${detailsHtml}</ul>
         ${extraCount ? `<p class="calendar-conflict-more">I jeszcze ${extraCount} konfliktów.</p>` : ''}
@@ -9112,26 +9330,22 @@ export function createCalendarFeature(ctx) {
   }
 
   function calendarTimelineVisualAllocationDedupeKey(allocation = {}) {
-    const row = Number(allocation?.row)
-    if (!Number.isFinite(row) || row <= 0) {
+    const serviceBlockId = String(
+      allocation?.serviceBlockId ?? allocation?.service_block_id ?? '',
+    ).trim()
+    const workSlotIdentity = String(
+      allocation?.workSlotIdentity || allocation?.allocationIdentity || '',
+    ).trim()
+    const identityIsWeak =
+      workSlotIdentity.startsWith('index:') ||
+      workSlotIdentity.startsWith('key:') ||
+      workSlotIdentity.includes(':key:')
+
+    if (!serviceBlockId || !workSlotIdentity || identityIsWeak) {
       return ''
     }
-    const workerKey = normalizeSearchText([
-      allocation?.workerId,
-      allocation?.workerLogin,
-      allocation?.workerKey,
-      allocation?.name,
-      allocation?.label,
-    ].filter(Boolean).join('|'))
-    return [
-      row,
-      String(allocation?.dateYmd ?? '').trim(),
-      String(allocation?.endDateYmd ?? '').trim(),
-      String(allocation?.startTime ?? '').trim(),
-      String(allocation?.endTime ?? '').trim(),
-      Number(allocation?.minutes) || 0,
-      workerKey,
-    ].join('|')
+
+    return JSON.stringify([serviceBlockId, workSlotIdentity])
   }
 
   function calendarTimelineVisualAllocationScore(allocation = {}) {
@@ -9239,11 +9453,33 @@ export function createCalendarFeature(ctx) {
           workerId: assignment.workerId,
           workerLogin: assignment.workerLogin,
           workerKey: assignment.key,
-          slotId: String(item?.slotId ?? serviceBlockTiming?.slotId ?? '').trim(),
-          teamId: String(item?.teamId ?? '').trim(),
-          serviceBlockId: String(item?.serviceBlockId ?? serviceBlockTiming?.serviceBlockId ?? '').trim(),
-          serviceBlockKind: String(item?.serviceBlockKind ?? serviceBlockTiming?.serviceBlockKind ?? '').trim(),
-          serviceBlockLabel: String(item?.serviceBlockLabel ?? serviceBlockTiming?.serviceBlockLabel ?? '').trim(),
+          slotId: String(
+            timedAllocation?.allocationId ||
+              timedAllocation?.allocation_id ||
+              timedAllocation?.slotId ||
+              timedAllocation?.slot_id ||
+              timedAllocation?.workSlotId ||
+              timedAllocation?.work_slot_id ||
+              '',
+          ).trim(),
+          teamId: String(timedAllocation?.teamId || timedAllocation?.team_id || '').trim(),
+          serviceBlockId: String(
+            timedAllocation?.serviceBlockId ||
+              timedAllocation?.service_block_id ||
+              timedAllocation?.teamId ||
+              timedAllocation?.team_id ||
+              '',
+          ).trim(),
+          serviceBlockKind: String(
+            timedAllocation?.serviceBlockKind ||
+              timedAllocation?.service_block_kind ||
+              '',
+          ).trim(),
+          serviceBlockLabel: String(
+            timedAllocation?.serviceBlockLabel ||
+              timedAllocation?.service_block_label ||
+              '',
+          ).trim(),
           minutes,
           dateYmd,
           endDateYmd,
@@ -9285,6 +9521,7 @@ export function createCalendarFeature(ctx) {
         validUntil: end.endDateYmd,
         workSlotKey: allocation.key,
         workSlotIdentity: allocation.allocationIdentity,
+        allocationId: allocation.slotId,
         workSlotId: allocation.slotId,
         serviceBlockId: allocation.serviceBlockId,
         serviceBlockKind: allocation.serviceBlockKind,

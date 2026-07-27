@@ -1,4 +1,5 @@
 import template from './template.html?raw'
+import { createClientProfitabilityFeature } from '../profitability/index.js'
 
 export const route = 'clientProfile'
 export const viewId = 'view-clientProfile'
@@ -26,7 +27,9 @@ export function createClientProfileFeature(ctx) {
     calendarDateToYmd,
     calendarNormalizeSelectionList,
     calendarTaskToneValue,
+    canEditProfitability,
     canManageClients,
+    canReadProfitability,
     canDeleteClients,
     createBindingHelpers,
     createClient,
@@ -53,9 +56,21 @@ export function createClientProfileFeature(ctx) {
     { value: 'DETALICZNY', label: 'Detaliczny' },
   ]
   const CLIENT_PROFILE_COOPERATION_MODELS = new Set(['all', 'regular', 'oneoff'])
-  const CLIENT_PROFILE_DETAIL_TABS = ['profile', 'orders', 'calendar', 'contacts', 'messages', 'additional', 'offers', 'files', 'locations', 'reports']
+  const CLIENT_PROFILE_DETAIL_TABS = ['profile', 'operations', 'documents', 'profitability']
+  const CLIENT_PROFILE_OPERATION_TABS = ['orders', 'calendar', 'locations', 'reports']
+  const CLIENT_PROFILE_DOCUMENT_TABS = ['contacts', 'messages', 'additional', 'offers', 'files']
   const CLIENT_PROFILE_AVATAR_CLASSES = ['violet', 'blue', 'green', 'cyan', 'amber', 'rose']
   let clientProfileDeleteConfirmResolve = null
+  const profitabilityFeature = createClientProfitabilityFeature({
+    appState,
+    canEditProfitability,
+    canReadProfitability,
+    escapeHtml,
+    showTransientNotice,
+  })
+  if (import.meta.env.DEV) {
+    window.ClientProfitabilityModule = profitabilityFeature
+  }
   const CLIENT_PROFILE_ACTION_ICONS = {
     profile:
       '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.8"/></svg>',
@@ -1194,17 +1209,59 @@ export function createClientProfileFeature(ctx) {
       .filter(Boolean).length
   }
 
+  function clientProfileActivePanelForGroup(group) {
+    if (group === 'operations') {
+      return CLIENT_PROFILE_OPERATION_TABS.includes(appState.clientProfileOperationsTab)
+        ? appState.clientProfileOperationsTab
+        : 'orders'
+    }
+    if (group === 'documents') {
+      return CLIENT_PROFILE_DOCUMENT_TABS.includes(appState.clientProfileDocumentsTab)
+        ? appState.clientProfileDocumentsTab
+        : 'contacts'
+    }
+    return group
+  }
+
+  function clientProfileSetActiveSubtab(group, tab) {
+    if (group === 'operations' && CLIENT_PROFILE_OPERATION_TABS.includes(tab)) {
+      appState.clientProfileOperationsTab = tab
+    } else if (group === 'documents' && CLIENT_PROFILE_DOCUMENT_TABS.includes(tab)) {
+      appState.clientProfileDocumentsTab = tab
+    } else {
+      return
+    }
+    clientProfileSetActiveTab(group)
+  }
+
   function clientProfileSetActiveTab(tab = 'profile') {
     const nextTab = CLIENT_PROFILE_DETAIL_TABS.includes(tab) ? tab : 'profile'
+    const activePanel = clientProfileActivePanelForGroup(nextTab)
     appState.clientProfileActiveTab = nextTab
 
     document.querySelectorAll('[data-client-profile-tab]').forEach((button) => {
       const active = button.getAttribute('data-client-profile-tab') === nextTab
       button.classList.toggle('is-active', active)
       button.setAttribute('aria-selected', active ? 'true' : 'false')
+      button.setAttribute('tabindex', active ? '0' : '-1')
+    })
+    const subtabs = document.getElementById('cpdSubtabs')
+    if (subtabs) {
+      subtabs.hidden = !['operations', 'documents'].includes(nextTab)
+    }
+    document.querySelectorAll('[data-client-profile-subtabs]').forEach((groupNode) => {
+      const active = groupNode.getAttribute('data-client-profile-subtabs') === nextTab
+      groupNode.hidden = !active
+    })
+    document.querySelectorAll('[data-client-profile-subtab]').forEach((button) => {
+      const group = button.getAttribute('data-client-profile-subtab-group')
+      const active = group === nextTab && button.getAttribute('data-client-profile-subtab') === activePanel
+      button.classList.toggle('is-active', active)
+      button.setAttribute('aria-selected', active ? 'true' : 'false')
+      button.setAttribute('tabindex', active ? '0' : '-1')
     })
     document.querySelectorAll('[data-client-profile-panel]').forEach((panel) => {
-      const active = panel.getAttribute('data-client-profile-panel') === nextTab
+      const active = panel.getAttribute('data-client-profile-panel') === activePanel
       panel.classList.toggle('is-active', active)
       panel.hidden = !active
     })
@@ -1213,11 +1270,14 @@ export function createClientProfileFeature(ctx) {
       editToolbar.hidden = nextTab !== 'profile'
     }
 
-    if (nextTab === 'calendar') {
+    if (activePanel === 'calendar') {
       void (async () => {
         await clientProfileCalendarEnsureInitialized()
         clientProfileCalendarRenderEvents()
       })()
+    }
+    if (activePanel === 'profitability') {
+      void profitabilityFeature.open(appState.clientProfileCurrent)
     }
   }
 
@@ -1234,24 +1294,37 @@ export function createClientProfileFeature(ctx) {
     }
     clientProfileSetText('cpdClientName', client.name)
     clientProfileSetText('cpdClientId', `ID: ${client.id}`)
+    clientProfileSetText('cpdHeroClientId', client.id)
     const heroClientType = document.querySelector('[data-cpd-hero-client-type]')
+    const inlineHeroClientType = document.querySelector('[data-cpd-hero-client-type-inline]')
     if (heroClientType) {
       const clientType = clientProfileClientTypeLabel(client.clientType)
       heroClientType.textContent = clientType || 'Brak danych'
       heroClientType.classList.toggle('is-empty', !clientType)
+      if (inlineHeroClientType) {
+        inlineHeroClientType.textContent = clientType || 'Brak danych'
+        inlineHeroClientType.classList.toggle('is-empty', !clientType)
+      }
     }
     const badge = document.getElementById('cpdStatusBadge')
+    const inlineBadge = document.getElementById('cpdHeroStatusBadge')
     if (badge) {
       badge.textContent = normalizeClientStatus(client.status)
       badge.className = `BadgeStatus cpd-status-badge is-${statusClass}`
+    }
+    if (inlineBadge) {
+      inlineBadge.textContent = normalizeClientStatus(client.status)
+      inlineBadge.className = `BadgeStatus cpd-status-badge is-${statusClass}`
     }
     clientProfileSetText('cpdStatZones', zones.length, '0')
     clientProfileSetText('cpdStatActiveTasks', activeTasks.length, '0')
     clientProfileSetText('cpdStatWorkers', clientProfileWorkerCount(client), '0')
     clientProfileSetText('cpdStatLastExecution', clientProfileDateTimeLabel(client.lastExecutionAt))
     clientProfileSetText('cpdQuickCoordinator', client.coordinator)
+    clientProfileSetText('cpdHeroCoordinator', client.coordinator)
     clientProfileSetText('cpdQuickContact', client.contactPerson || client.phone || client.email || client.contact)
     clientProfileSetText('cpdQuickCity', client.city)
+    clientProfileSetText('cpdHeroCity', client.city)
     clientProfileSetText('cpdQuickFrequency', client.serviceFrequency)
   }
 
@@ -1983,6 +2056,8 @@ export function createClientProfileFeature(ctx) {
     appState.clientProfileCurrent = mapClientForProfileView(client)
     appState.clientProfileEditMode = false
     appState.clientProfileActiveTab = 'profile'
+    appState.clientProfileOperationsTab = 'orders'
+    appState.clientProfileDocumentsTab = 'contacts'
     if (typeof window.go === 'function') {
       window.go('clientProfileDetails')
     } else {
@@ -2257,10 +2332,18 @@ export function createClientProfileFeature(ctx) {
       if (!button) return
       clientProfileSetActiveTab(button.getAttribute('data-client-profile-tab'))
     })
+    binding.add(document.getElementById('cpdSubtabs'), 'click', (event) => {
+      const button = event.target.closest('[data-client-profile-subtab]')
+      if (!button) return
+      clientProfileSetActiveSubtab(
+        button.getAttribute('data-client-profile-subtab-group'),
+        button.getAttribute('data-client-profile-subtab'),
+      )
+    })
     binding.add(document.getElementById('cpdEditMenuBtn'), 'click', () => setClientProfileEditMode(true))
     binding.add(document.getElementById('cpdHeroEditBtn'), 'click', () => setClientProfileEditMode(true))
-    binding.add(document.getElementById('cpdHeroMessageBtn'), 'click', () => clientProfileSetActiveTab('messages'))
-    binding.add(document.getElementById('cpdHeroExportBtn'), 'click', () => clientProfileSetActiveTab('reports'))
+    binding.add(document.getElementById('cpdHeroMessageBtn'), 'click', () => clientProfileSetActiveSubtab('documents', 'messages'))
+    binding.add(document.getElementById('cpdHeroExportBtn'), 'click', () => clientProfileSetActiveSubtab('operations', 'reports'))
     binding.add(document.getElementById('cpdInlineCancelBtn'), 'click', () => {
       appState.clientProfileEditMode = false
       renderClientProfileDetailView()
@@ -2329,6 +2412,8 @@ export function createClientProfileFeature(ctx) {
     })
 
     return () => {
+      profitabilityFeature.destroy()
+      if (!import.meta.env.DEV) delete window.ClientProfitabilityModule
       binding.done()
     }
   }

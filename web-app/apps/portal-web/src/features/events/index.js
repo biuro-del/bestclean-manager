@@ -1,4 +1,14 @@
 import template from './template.html?raw'
+import {
+  findBlockingOpenEventForWorker,
+  groupLegacyOpenEventCandidates,
+  groupOpenCleanEventConflicts,
+  groupOrphanOpenCleanEvents,
+  groupUnresolvedLegacyOpenEvents,
+  openEventRecordKey,
+  openEventWorkerKey,
+} from '../../services/openEventIntegrity'
+import { preserveUnchangedEventTimestamp } from './eventTimePolicy'
 
 export const route = 'events'
 export const viewId = 'view-events'
@@ -77,6 +87,14 @@ export function createEventsFeature(ctx) {
   let eventEditorOptionsCacheKey = ''
   let eventEditorPickerFilterFrame = 0
   let eventPendingSavedRows = []
+  let eventsOpenIntegrityGroups = []
+  let eventsOpenCleanOrphanGroups = []
+  let eventsUnresolvedLegacyGroups = []
+  let eventsLegacyOpenGroups = []
+  let eventsOpenIntegrityRefreshPromise = null
+  let eventsOpenIntegrityRefreshOrgId = ''
+  let eventsOpenIntegrityRefreshGeneration = 0
+  let eventsOpenIntegrityFocus = null
 
   function mergeEventsRefreshOptions(base = {}, incoming = {}) {
     const merged = {
@@ -137,6 +155,331 @@ export function createEventsFeature(ctx) {
     }
 
     return ''
+  }
+
+  function eventOpenIntegrityGroupByRecordId() {
+    const result = new Map()
+    const addGroups = (groups, integrityKind) => {
+      groups.forEach((group) => {
+        ;(Array.isArray(group?.recordIds) ? group.recordIds : []).forEach((recordId) => {
+          if (recordId) {
+            result.set(recordId, { ...group, integrityKind })
+          }
+        })
+      })
+    }
+    addGroups(eventsOpenIntegrityGroups, 'conflict')
+    addGroups(eventsOpenCleanOrphanGroups, 'orphan')
+    addGroups(eventsUnresolvedLegacyGroups, 'unresolved')
+    addGroups(eventsLegacyOpenGroups, 'legacy')
+    return result
+  }
+
+  function eventOpenIntegrityAllGroups() {
+    return [
+      ...eventsOpenIntegrityGroups.map((group) => ({ ...group, integrityKind: 'conflict' })),
+      ...eventsOpenCleanOrphanGroups.map((group) => ({ ...group, integrityKind: 'orphan' })),
+      ...eventsUnresolvedLegacyGroups.map((group) => ({ ...group, integrityKind: 'unresolved' })),
+      ...eventsLegacyOpenGroups.map((group) => ({ ...group, integrityKind: 'legacy' })),
+    ]
+  }
+
+  function eventOpenIntegrityFocusedGroup() {
+    const workerKey = String(eventsOpenIntegrityFocus?.workerKey ?? '').trim()
+    if (!workerKey) {
+      return null
+    }
+
+    const integrityKind = String(eventsOpenIntegrityFocus?.integrityKind ?? '').trim()
+    return (
+      eventOpenIntegrityAllGroups().find((group) => {
+        const groupWorkerKey = String(
+          group?.workerKey ?? openEventWorkerKey(Array.isArray(group?.rows) ? group.rows[0] : {}),
+        ).trim()
+        return groupWorkerKey === workerKey && (!integrityKind || group?.integrityKind === integrityKind)
+      }) ?? null
+    )
+  }
+
+  function clearOpenEventIntegrityFocus({ renderAlert = true } = {}) {
+    const previousPage = Number(eventsOpenIntegrityFocus?.previousPage)
+    eventsOpenIntegrityFocus = null
+    if (Number.isFinite(previousPage) && previousPage > 0) {
+      appState.eventsPage = Math.floor(previousPage)
+    }
+    if (renderAlert) {
+      renderOpenEventIntegrity()
+    }
+  }
+
+  function renderOpenIntegrityFocusPage() {
+    const group = eventOpenIntegrityFocusedGroup()
+    if (!group) {
+      clearOpenEventIntegrityFocus()
+      void fetchEventsForCurrentSession({ forceRefresh: true })
+      return
+    }
+
+    const rows = Array.isArray(group.rows) ? group.rows : []
+    const pageSize = normalizeEventsPageSize(appState.eventsPageSize)
+    const totalPages = Math.max(1, Math.ceil(rows.length / pageSize))
+    appState.eventsPage = Math.min(Math.max(1, Number(appState.eventsPage) || 1), totalPages)
+    appState.eventsPageSize = pageSize
+    appState.eventsHasNext = appState.eventsPage < totalPages
+    appState.eventsEstimatedTotal = false
+    appState.eventsTotal = rows.length
+    appState.eventsTotalPages = totalPages
+
+    const startIndex = (appState.eventsPage - 1) * pageSize
+    const pageRows = rows.slice(startIndex, startIndex + pageSize)
+    renderEventsRows(pageRows)
+    updateEventsPager(pageRows.length)
+    syncEventsPageSizeControl()
+    setSubwelcomeMetric('#view-events .subwelcome', rows.length)
+  }
+
+  function eventOpenIntegrityPlaceLabels(group = {}) {
+    return [
+      ...new Set(
+        (Array.isArray(group.rows) ? group.rows : [])
+          .map((row) => {
+            const qrCode = eventNormalizeQrCode(
+              row?.qrCode ??
+                row?.zoneId ??
+                row?.roomId ??
+                row?.utilityRoomId ??
+                zoneQrCodeFromRow(row),
+            )
+            const place = String(
+              row?.clientName ??
+                row?.klient ??
+                row?.zoneName ??
+                row?.strefa ??
+                '',
+            ).trim()
+            return [place, qrCode].filter(Boolean).join(' / ')
+          })
+          .filter(Boolean),
+      ),
+    ]
+  }
+
+  function renderOpenEventIntegrity(error = null) {
+    const root = document.getElementById('evOpenStatusIntegrity')
+    if (!root) {
+      return
+    }
+
+    if (error) {
+      const focusBackAction = eventsOpenIntegrityFocus
+        ? '<button class="btn2" type="button" data-event-open-back>Wróć do wszystkich zdarzeń</button>'
+        : ''
+      root.hidden = false
+      root.className = 'events-integrity-alert events-integrity-alert--unavailable'
+      root.innerHTML = `
+        <div>
+          <strong>Kontrola otwartych statusów jest chwilowo niedostępna.</strong>
+          <span>${escapeHtml(error instanceof Error ? error.message : 'Nie udało się pobrać danych kontrolnych.')}</span>
+          ${focusBackAction}
+        </div>
+      `
+      return
+    }
+
+    const allGroups = eventOpenIntegrityAllGroups()
+    if (!allGroups.length) {
+      root.hidden = true
+      root.className = 'events-integrity-alert'
+      root.innerHTML = ''
+      return
+    }
+
+    const focusedWorkerKey = String(eventsOpenIntegrityFocus?.workerKey ?? '').trim()
+    const focusedIntegrityKind = String(eventsOpenIntegrityFocus?.integrityKind ?? '').trim()
+    const conflictRecordCount = eventsOpenIntegrityGroups.reduce((sum, group) => sum + Number(group?.count ?? 0), 0)
+    const orphanRecordCount = eventsOpenCleanOrphanGroups.reduce((sum, group) => sum + Number(group?.count ?? 0), 0)
+    const unresolvedRecordCount = eventsUnresolvedLegacyGroups.reduce((sum, group) => sum + Number(group?.count ?? 0), 0)
+    const legacyRecordCount = eventsLegacyOpenGroups.reduce((sum, group) => sum + Number(group?.count ?? 0), 0)
+    const renderGroupDetails = (groups, integrityKind) =>
+      groups.map((group) => {
+        const places = eventOpenIntegrityPlaceLabels(group)
+        const isFocused =
+          focusedWorkerKey &&
+          group.workerKey === focusedWorkerKey &&
+          (!focusedIntegrityKind || focusedIntegrityKind === integrityKind)
+        const countLabel =
+          integrityKind === 'conflict'
+            ? 'otwarte CLEAN'
+            : integrityKind === 'orphan'
+              ? 'CLEAN bez aktywnego dnia'
+            : integrityKind === 'unresolved'
+              ? 'nierozstrzygnięte'
+              : 'historyczne'
+        return `
+          <li class="events-integrity-item events-integrity-item--${escapeHtml(integrityKind)}">
+            <span>
+              <strong>${escapeHtml(group.workerLabel)}</strong>
+              <small>${escapeHtml(places.join(', ') || 'Brak przypisanego kodu QR')}</small>
+            </span>
+            <span class="events-integrity-count">${escapeHtml(group.count)} ${escapeHtml(countLabel)}</span>
+            ${
+              isFocused
+                ? '<span class="events-integrity-count">Wyświetlane</span>'
+                : `<button class="btn2" type="button" data-event-open-worker-key="${escapeHtml(group.workerKey)}" data-event-open-kind="${escapeHtml(integrityKind)}" aria-label="${escapeHtml(`Pokaż wpisy: ${group.workerLabel} — ${countLabel}`)}">Pokaż</button>`
+            }
+          </li>
+        `
+      })
+      .join('')
+
+    const conflictSection = eventsOpenIntegrityGroups.length
+      ? `
+        <div class="events-integrity-summary">
+          <strong>Wykryto równoległe otwarte statusy CLEAN.</strong>
+          <span>${escapeHtml(eventsOpenIntegrityGroups.length)} pracownik(ów), ${escapeHtml(conflictRecordCount)} rekordów. To bieżące konflikty wymagające zamknięcia przed kolejnym CLEAN.</span>
+        </div>
+        <ul>${renderGroupDetails(eventsOpenIntegrityGroups, 'conflict')}</ul>
+      `
+      : ''
+    const legacySection = eventsLegacyOpenGroups.length
+      ? `
+        <div class="events-integrity-summary">
+          <strong>Historyczne wpisy bez typu zdarzenia wymagają klasyfikacji.</strong>
+          <span>${escapeHtml(eventsLegacyOpenGroups.length)} pracownik(ów), ${escapeHtml(legacyRecordCount)} rekordów. Nie są automatycznie uznawane za bieżący CLEAN i system niczego nie zamknął.</span>
+        </div>
+        <ul>${renderGroupDetails(eventsLegacyOpenGroups, 'legacy')}</ul>
+      `
+      : ''
+    const orphanSection = eventsOpenCleanOrphanGroups.length
+      ? `
+        <div class="events-integrity-summary">
+          <strong>Jawny otwarty CLEAN nie ma aktywnego, jednoznacznie powiązanego dnia pracy.</strong>
+          <span>${escapeHtml(eventsOpenCleanOrphanGroups.length)} pracownik(ów), ${escapeHtml(orphanRecordCount)} rekordów. Wpis blokuje kolejny CLEAN i wymaga sprawdzenia przed ponowieniem zapisu.</span>
+        </div>
+        <ul>${renderGroupDetails(eventsOpenCleanOrphanGroups, 'orphan')}</ul>
+      `
+      : ''
+    const unresolvedSection = eventsUnresolvedLegacyGroups.length
+      ? `
+        <div class="events-integrity-summary">
+          <strong>Nierozstrzygnięte otwarte wpisy bez typu zdarzenia.</strong>
+          <span>${escapeHtml(eventsUnresolvedLegacyGroups.length)} pracownik(ów), ${escapeHtml(unresolvedRecordCount)} rekordów. Brak zamkniętego, jednoznacznie powiązanego dnia pracy — te wpisy blokują nowy CLEAN do czasu weryfikacji.</span>
+        </div>
+        <ul>${renderGroupDetails(eventsUnresolvedLegacyGroups, 'unresolved')}</ul>
+      `
+      : ''
+
+    root.hidden = false
+    root.className = eventsOpenIntegrityGroups.length || eventsOpenCleanOrphanGroups.length || eventsUnresolvedLegacyGroups.length
+      ? 'events-integrity-alert events-integrity-alert--conflict'
+      : 'events-integrity-alert events-integrity-alert--review'
+    root.innerHTML = `
+      ${
+        focusedWorkerKey
+          ? '<div class="events-integrity-toolbar"><button class="btn2" type="button" data-event-open-back>Wróć do wszystkich zdarzeń</button></div>'
+          : ''
+      }
+      ${conflictSection}
+      ${orphanSection}
+      ${unresolvedSection}
+      ${legacySection}
+    `
+  }
+
+  async function readAllOpenCleanEvents(orgId, { forceRefresh = false } = {}) {
+    const normalizedOrgId = String(orgId ?? '').trim()
+    if (!normalizedOrgId) {
+      return []
+    }
+
+    const rows = []
+    const maxPages = 20
+    for (let page = 1; page <= maxPages; page += 1) {
+      const response = await getWorkdays(normalizedOrgId, {
+        source: 'events-integrity',
+        page,
+        pageSize: 250,
+        forceRefresh: forceRefresh && page === 1,
+      })
+      rows.push(...(Array.isArray(response?.items) ? response.items : []))
+      if (response?.hasNext !== true) {
+        break
+      }
+      if (page === maxPages) {
+        throw new Error('Kontrola otwartych CLEAN przekroczyla bezpieczny limit 5000 rekordow.')
+      }
+    }
+    return rows
+  }
+
+  async function refreshOpenEventIntegrity({ forceRefresh = false, rerenderRows = true } = {}) {
+    const requestOrgId = String(appState.session?.orgId ?? '').trim()
+    if (!requestOrgId) {
+      eventsOpenIntegrityRefreshGeneration += 1
+      eventsOpenIntegrityRefreshPromise = null
+      eventsOpenIntegrityRefreshOrgId = ''
+      eventsOpenIntegrityGroups = []
+      eventsOpenCleanOrphanGroups = []
+      eventsUnresolvedLegacyGroups = []
+      eventsLegacyOpenGroups = []
+      renderOpenEventIntegrity()
+      return []
+    }
+
+    if (eventsOpenIntegrityRefreshPromise && eventsOpenIntegrityRefreshOrgId === requestOrgId) {
+      return eventsOpenIntegrityRefreshPromise
+    }
+
+    const generation = ++eventsOpenIntegrityRefreshGeneration
+    const refreshPromise = (async () => {
+      try {
+        const rows = await readAllOpenCleanEvents(requestOrgId, { forceRefresh })
+        if (
+          generation !== eventsOpenIntegrityRefreshGeneration ||
+          String(appState.session?.orgId ?? '').trim() !== requestOrgId
+        ) {
+          return rows
+        }
+        eventsOpenIntegrityGroups = groupOpenCleanEventConflicts(rows)
+        eventsOpenCleanOrphanGroups = groupOrphanOpenCleanEvents(rows)
+        eventsUnresolvedLegacyGroups = groupUnresolvedLegacyOpenEvents(rows)
+        eventsLegacyOpenGroups = groupLegacyOpenEventCandidates(rows)
+        renderOpenEventIntegrity()
+        if (rerenderRows && document.getElementById('evRows')) {
+          if (eventsOpenIntegrityFocus) {
+            renderOpenIntegrityFocusPage()
+          } else {
+            renderEventsRows(appState.eventRows)
+          }
+        }
+        return rows
+      } catch (error) {
+        if (
+          generation !== eventsOpenIntegrityRefreshGeneration ||
+          String(appState.session?.orgId ?? '').trim() !== requestOrgId
+        ) {
+          throw error
+        }
+        eventsOpenIntegrityGroups = []
+        eventsOpenCleanOrphanGroups = []
+        eventsUnresolvedLegacyGroups = []
+        eventsLegacyOpenGroups = []
+        if (rerenderRows && document.getElementById('evRows')) {
+          renderEventsRows(appState.eventRows)
+        }
+        renderOpenEventIntegrity(error)
+        throw error
+      } finally {
+        if (eventsOpenIntegrityRefreshPromise === refreshPromise) {
+          eventsOpenIntegrityRefreshPromise = null
+          eventsOpenIntegrityRefreshOrgId = ''
+        }
+      }
+    })()
+
+    eventsOpenIntegrityRefreshPromise = refreshPromise
+    eventsOpenIntegrityRefreshOrgId = requestOrgId
+    return refreshPromise
   }
 
   function eventResolveZoneNameByQrCode(qrCode = '') {
@@ -1103,9 +1446,11 @@ export function createEventsFeature(ctx) {
       return
     }
 
+    const openIntegrityByRecordId = eventOpenIntegrityGroupByRecordId()
     root.innerHTML = safeRows
       .map((row, index) => {
         const rowKey = eventSelectionKey(row, index)
+        const openIntegrityGroup = openIntegrityByRecordId.get(openEventRecordKey(row)) ?? null
         const isSelected = appState.eventsSelectedKeys.has(rowKey)
         const canSelect = canDeleteEvents() && eventCanDelete(row)
         const selectTitle = eventCanDelete(row) ? 'Zaznacz zdarzenie' : 'Rekord dnia pracy bez osobnego zdarzenia'
@@ -1116,9 +1461,19 @@ export function createEventsFeature(ctx) {
         const workerLogin = String(row.workerLogin ?? '').trim()
         const workerName = resolveWorkerNameFromWorkers(workerLogin, row.workerName)
         const workerPrimary = workerName || workerLogin || '-'
+        const integrityKind = String(openIntegrityGroup?.integrityKind ?? '').trim()
+        const integrityBadgeLabel =
+          integrityKind === 'legacy'
+            ? `${Number(openIntegrityGroup?.count ?? 0)} historyczne`
+            : integrityKind === 'orphan'
+              ? `${Number(openIntegrityGroup?.count ?? 0)} CLEAN bez dnia`
+            : integrityKind === 'unresolved'
+              ? `${Number(openIntegrityGroup?.count ?? 0)} nierozstrzygnięte`
+              : `${Number(openIntegrityGroup?.count ?? 0)} otwarte CLEAN`
         const workerCard = `
           <div class="events-worker-cell">
             <div class="events-worker-name">${escapeHtml(workerPrimary)}</div>
+            ${openIntegrityGroup ? `<span class="events-open-conflict-badge events-open-conflict-badge--${escapeHtml(integrityKind)}">${escapeHtml(integrityBadgeLabel)}</span>` : ''}
           </div>
         `
         const workerCell =
@@ -1158,7 +1513,7 @@ export function createEventsFeature(ctx) {
         const rowStatusClass = eventStatus === 'CLOSED' ? 'events-row--completed' : 'events-row--running'
 
         return `
-          <div class="events-row ${rowStatusClass}${isSelected ? ' is-selected' : ''}">
+          <div class="events-row ${rowStatusClass}${integrityKind === 'conflict' || integrityKind === 'orphan' || integrityKind === 'unresolved' ? ' events-row--open-conflict' : ''}${integrityKind === 'legacy' ? ' events-row--legacy-open' : ''}${isSelected ? ' is-selected' : ''}">
             <div class="events-select-col">
               <input type="checkbox" data-event-select-index="${index}" aria-label="${escapeHtml(selectTitle)}" title="${escapeHtml(selectTitle)}" ${isSelected ? 'checked' : ''} ${canSelect ? '' : 'disabled'} />
             </div>
@@ -1889,8 +2244,27 @@ export function createEventsFeature(ctx) {
     const clientId = String(clientSelect?.value ?? '').trim()
     const zoneId = String(zoneSelect?.value ?? '').trim()
     const utilityRoomId = zoneId
-    const startAt = localDateTimeInputToIso(startInput?.value)
-    const endAt = localDateTimeInputToIso(eventEditorReadStopValue(stopInput))
+    const startInputValue = String(startInput?.value ?? '').trim()
+    const stopInputValue = eventEditorReadStopValue(stopInput)
+    const originalEvent = appState.eventEditorMode === 'edit' ? appState.eventEditorItem : null
+    const parsedStartAt = localDateTimeInputToIso(startInputValue)
+    const parsedEndAt = localDateTimeInputToIso(stopInputValue)
+    const startAt = originalEvent
+      ? preserveUnchangedEventTimestamp({
+          inputValue: startInputValue,
+          parsedInputTimestamp: parsedStartAt,
+          originalTimestamp: toIso(originalEvent.startAt),
+          formattedOriginalValue: isoToLocalDateTimeInput(originalEvent.startAt),
+        })
+      : parsedStartAt
+    const endAt = originalEvent
+      ? preserveUnchangedEventTimestamp({
+          inputValue: stopInputValue,
+          parsedInputTimestamp: parsedEndAt,
+          originalTimestamp: toIso(originalEvent.endAt),
+          formattedOriginalValue: isoToLocalDateTimeInput(originalEvent.endAt),
+        })
+      : parsedEndAt
     const comment = String(commentInput?.value ?? '').trim()
     const eventKind = resolveEventKindFromTimes(startAt, endAt)
 
@@ -1998,6 +2372,46 @@ export function createEventsFeature(ctx) {
     return null
   }
 
+  async function eventEditorFindOtherOpenStatus(payload) {
+    const orgId = String(appState.session?.orgId ?? '').trim()
+    if (!orgId) {
+      const error = new Error('Brak aktywnej organizacji podczas kontroli otwartych statusów.')
+      error.code = 'INTEGRITY_CHECK_INCOMPLETE'
+      throw error
+    }
+    const rows = await readAllOpenCleanEvents(orgId, { forceRefresh: true })
+    const excludeRecordIds =
+      appState.eventEditorMode === 'edit' && appState.eventEditorItem
+        ? eventIdentityCandidateIds(appState.eventEditorItem)
+        : []
+    return findBlockingOpenEventForWorker(rows, payload, { excludeRecordIds })
+  }
+
+  function eventEditorOpenStatusMessage(payload, conflict) {
+    const workerLabel = String(payload?.workerName || payload?.workerLogin || 'Pracownik').trim()
+    const isUnresolvedLegacy = !String(conflict?.eventType ?? conflict?.event_type ?? '').trim()
+    const startLabel = workerDetailIsoToHm(conflict?.startAt)
+    const qrCode = eventNormalizeQrCode(
+      conflict?.qrCode ??
+        conflict?.zoneId ??
+        conflict?.roomId ??
+        conflict?.utilityRoomId ??
+        zoneQrCodeFromRow(conflict),
+    )
+    const place = String(
+      conflict?.clientName ??
+        conflict?.klient ??
+        conflict?.zoneName ??
+        conflict?.strefa ??
+        '',
+    ).trim()
+    const details = [place, qrCode, startLabel ? `od ${startLabel}` : ''].filter(Boolean).join(', ')
+    if (isUnresolvedLegacy) {
+      return `Nie można zapisać nowego CLEAN. ${workerLabel} ma nierozstrzygnięty otwarty wpis historyczny${details ? ` (${details})` : ''}. Najpierw zweryfikuj jego powiązanie z dniem pracy.`
+    }
+    return `Nie można zapisać drugiego otwartego statusu. ${workerLabel} ma już aktywny CLEAN${details ? ` (${details})` : ''}. Najpierw uzupełnij STOP.`
+  }
+
   function eventEditorOverlapMessage(payload, overlap) {
     const workerLabel = String(payload?.workerName || payload?.workerLogin || 'Pracownik').trim()
     const startLabel = workerDetailIsoToHm(overlap?.interval?.startIso)
@@ -2083,6 +2497,13 @@ export function createEventsFeature(ctx) {
         }
       }
 
+      if (derivedStatus === 'RUNNING') {
+        const openConflict = await eventEditorFindOtherOpenStatus(payload)
+        if (openConflict) {
+          throw new Error(eventEditorOpenStatusMessage(payload, openConflict))
+        }
+      }
+
       if (isCreateMode) {
         const newEventId = `EV-${Date.now()}-${Math.floor(Math.random() * 1000)}`
         savedEventPayload = {
@@ -2105,6 +2526,7 @@ export function createEventsFeature(ctx) {
         await updateEvent(appState.session.orgId, eventId, {
           ...appState.eventEditorItem,
           ...eventPayload,
+          correlationIdentityBaseline: appState.eventEditorItem,
           startAt: derivedStartAt,
           endAt: derivedEndAt,
           durationSec: derivedDurationSec,
@@ -2560,6 +2982,13 @@ export function createEventsFeature(ctx) {
   }
 
   function eventsExportFilenameBase() {
+    const focusedGroup = eventOpenIntegrityFocusedGroup()
+    if (focusedGroup) {
+      const worker = workerDetailSanitizeFilename(focusedGroup.workerLabel || focusedGroup.workerKey) || 'pracownik'
+      const kind = workerDetailSanitizeFilename(focusedGroup.integrityKind) || 'diagnostyka'
+      return `zdarzenia-${kind}-${worker}`
+    }
+
     const filters = readEventsFilterInputs()
     const from = workerDetailSanitizeFilename(filters.from || firstDayOfCurrentMonthYmd()) || 'od'
     const to = workerDetailSanitizeFilename(filters.to || todayYmd()) || 'do'
@@ -2567,6 +2996,19 @@ export function createEventsFeature(ctx) {
   }
 
   function eventsExportFiltersSummary() {
+    const focusedGroup = eventOpenIntegrityFocusedGroup()
+    if (focusedGroup) {
+      const typeLabel =
+        focusedGroup.integrityKind === 'conflict'
+          ? 'otwarte CLEAN'
+          : focusedGroup.integrityKind === 'orphan'
+            ? 'otwarty CLEAN bez aktywnego dnia pracy'
+          : focusedGroup.integrityKind === 'unresolved'
+            ? 'nierozstrzygnięte wpisy bez typu'
+            : 'historyczne wpisy do klasyfikacji'
+      return `Widok diagnostyczny: ${typeLabel} | Pracownik: ${focusedGroup.workerLabel} | Rekordy: ${focusedGroup.count}`
+    }
+
     const filters = readEventsFilterInputs()
     const entries = [
       ['Od', filters.from || '-'],
@@ -2582,6 +3024,11 @@ export function createEventsFeature(ctx) {
   }
 
   async function fetchEventsExportRows() {
+    const focusedGroup = eventOpenIntegrityFocusedGroup()
+    if (focusedGroup) {
+      return normalizeEventsExportRows(focusedGroup.rows)
+    }
+
     if (!appState.session?.orgId) {
       throw new Error('Brak aktywnej sesji.')
     }
@@ -2758,8 +3205,20 @@ export function createEventsFeature(ctx) {
   async function fetchEventsForCurrentSessionNow({ resetPage = false, applyStoredFilters = false, forceRefresh = false, silent = false } = {}) {
     const root = document.getElementById('evRows')
 
+    if (eventsOpenIntegrityFocus) {
+      clearOpenEventIntegrityFocus()
+    }
+
     if (!appState.session?.orgId) {
       appState.eventsSelectedKeys = new Set()
+      eventsOpenIntegrityRefreshGeneration += 1
+      eventsOpenIntegrityRefreshPromise = null
+      eventsOpenIntegrityRefreshOrgId = ''
+      eventsOpenIntegrityGroups = []
+      eventsOpenCleanOrphanGroups = []
+      eventsUnresolvedLegacyGroups = []
+      eventsLegacyOpenGroups = []
+      renderOpenEventIntegrity()
       if (root && !silent) {
         root.innerHTML = `
           <div class="events-row">
@@ -2821,6 +3280,9 @@ export function createEventsFeature(ctx) {
       syncEventsPageSizeControl()
       setSubwelcomeMetric('#view-events .subwelcome', appState.eventsTotal)
       void rememberEventsFingerprintForCurrentFilters()
+      void refreshOpenEventIntegrity({ forceRefresh }).catch((error) => {
+        console.warn('[events] open status integrity refresh failed', error)
+      })
     } catch (error) {
       if (silent) {
         console.warn('[events] silent refresh failed', error)
@@ -2866,6 +3328,15 @@ export function createEventsFeature(ctx) {
 
   async function refreshEventsIfFingerprintChanged() {
     if (!document.getElementById('evRows')) {
+      return
+    }
+
+    if (eventsOpenIntegrityFocus) {
+      try {
+        await refreshOpenEventIntegrity({ forceRefresh: true, rerenderRows: true })
+      } catch (error) {
+        console.warn('[events] focused open status refresh failed', error)
+      }
       return
     }
 
@@ -2991,6 +3462,7 @@ export function createEventsFeature(ctx) {
     syncEventsPageSizeControl()
 
     binding.add(document.getElementById('evSearchBtn'), 'click', () => {
+      clearOpenEventIntegrityFocus()
       appState.eventsPage = 1
       void fetchEventsForCurrentSession({ resetPage: false })
     })
@@ -2999,10 +3471,15 @@ export function createEventsFeature(ctx) {
       appState.eventsPageSize = normalizeEventsPageSize(event.target?.value)
       appState.eventsPage = 1
       syncEventsPageSizeControl()
+      if (eventsOpenIntegrityFocus) {
+        renderOpenIntegrityFocusPage()
+        return
+      }
       void fetchEventsForCurrentSession({ resetPage: false })
     })
 
     binding.add(document.getElementById('evResetBtn'), 'click', () => {
+      clearOpenEventIntegrityFocus()
       void fetchEventsForCurrentSession({ resetPage: true, forceRefresh: true })
     })
     binding.add(document.getElementById('evExportPdfBtn'), 'click', () => {
@@ -3015,16 +3492,25 @@ export function createEventsFeature(ctx) {
     binding.add(document.getElementById('evPrevBtn'), 'click', () => {
       if (appState.eventsPage <= 1) return
       appState.eventsPage -= 1
+      if (eventsOpenIntegrityFocus) {
+        renderOpenIntegrityFocusPage()
+        return
+      }
       void fetchEventsForCurrentSession()
     })
 
     binding.add(document.getElementById('evNextBtn'), 'click', () => {
       if (appState.eventsHasNext !== true && appState.eventsPage >= appState.eventsTotalPages) return
       appState.eventsPage += 1
+      if (eventsOpenIntegrityFocus) {
+        renderOpenIntegrityFocusPage()
+        return
+      }
       void fetchEventsForCurrentSession()
     })
 
     binding.add(document.getElementById('evStatus'), 'change', () => {
+      clearOpenEventIntegrityFocus()
       appState.eventsPage = 1
       void fetchEventsForCurrentSession({ resetPage: false })
     })
@@ -3035,6 +3521,42 @@ export function createEventsFeature(ctx) {
 
     binding.add(document.getElementById('evAddBtn'), 'click', () => {
       void openCreateEventEditor()
+    })
+    binding.add(document.getElementById('evOpenStatusIntegrity'), 'click', (event) => {
+      const backButton = event.target?.closest?.('[data-event-open-back]')
+      if (backButton) {
+        clearOpenEventIntegrityFocus()
+        void fetchEventsForCurrentSession({ resetPage: false, forceRefresh: true })
+        return
+      }
+
+      const button = event.target?.closest?.('[data-event-open-worker-key]')
+      if (!button) {
+        return
+      }
+
+      const workerKey = String(button.getAttribute('data-event-open-worker-key') ?? '').trim()
+      const integrityKind = String(button.getAttribute('data-event-open-kind') ?? '').trim()
+      const group =
+        eventOpenIntegrityAllGroups().find(
+          (item) =>
+            item?.workerKey === workerKey &&
+            (!integrityKind || item?.integrityKind === integrityKind),
+        ) ?? null
+      if (!group) {
+        return
+      }
+
+      const previousPage = Number(eventsOpenIntegrityFocus?.previousPage ?? appState.eventsPage)
+      eventsOpenIntegrityFocus = {
+        workerKey,
+        integrityKind: group.integrityKind,
+        previousPage: Number.isFinite(previousPage) && previousPage > 0 ? Math.floor(previousPage) : 1,
+      }
+      appState.eventsPage = 1
+      renderOpenEventIntegrity()
+      renderOpenIntegrityFocusPage()
+      document.querySelector('#evOpenStatusIntegrity [data-event-open-back]')?.focus()
     })
     binding.add(document.getElementById('evDeleteSelectedBtn'), 'click', () => {
       void deleteSelectedEvents()
@@ -3067,6 +3589,7 @@ export function createEventsFeature(ctx) {
     ;['evFrom', 'evTo', 'evWorker', 'evStrefa', 'evPom', 'evRoomId', 'evQ'].forEach((id) => {
       binding.add(document.getElementById(id), 'keydown', (event) => {
         if (event.key !== 'Enter') return
+        clearOpenEventIntegrityFocus()
         appState.eventsPage = 1
         void fetchEventsForCurrentSession({ resetPage: false })
       })

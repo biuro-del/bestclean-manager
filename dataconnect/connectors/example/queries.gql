@@ -199,6 +199,9 @@ query TasksForOrg($orgId: String!) @auth(level: USER) {
   ) {
     orgId
     idTask
+    lifecycleStatus
+    cancelledAt
+    archivedAt
     dateYmd
     startTime
     endDateYmd
@@ -308,6 +311,41 @@ query WorkdaysPageForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: 
     offset: $offset
     where: { orgId: { eq: $orgId }, startAt: { ge: $fromStartAt, le: $toStartAt } }
     orderBy: [{ startAt: DESC }]
+  ) {
+    workdayId
+    workerLogin
+    workerName
+    utilityRoomId
+    startAt
+    endScanAt
+    autoCloseAt
+    endAt
+    durationSec
+    status
+    deviceId
+    gps
+    startEventId
+    endEventId
+    startObject
+    stopObject
+    comment
+    updatedBy
+    updatedAt
+  }
+}
+
+query WorkdaysIntegrityPageForOrg($orgId: String!, $limit: Int, $offset: Int) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR']", message: "Brak uprawnien do kontroli integralnosci dni pracy.")
+    }
+
+  workdays(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId } }
+    orderBy: [{ updatedAt: DESC }, { workdayId: DESC }]
   ) {
     workdayId
     workerLogin
@@ -490,6 +528,21 @@ query EventsForOrg($orgId: String!) @auth(level: USER) {
     eventId
     workdayId
     zoneId
+    taskId
+    occurrenceDateYmd
+    serviceBlockId
+    allocationId
+    workSlotKey
+    eventType
+    matchStatus
+    matchMethod
+    matchReason
+    matchedAt
+    planSnapshotVersion
+    plannedStartAt
+    plannedEndAt
+    plannedDurationMinutes
+    taskUpdatedAtSnapshot
     workerLogin
     workerName
     startAt
@@ -517,6 +570,64 @@ query EventsForOrg($orgId: String!) @auth(level: USER) {
   }
 }
 
+query EventsIntegrityPageForOrg($orgId: String!, $limit: Int, $offset: Int) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR']", message: "Brak uprawnien do kontroli integralnosci zdarzen.")
+    }
+
+  events(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId } }
+    orderBy: [{ updatedAt: DESC }, { eventId: DESC }]
+  ) {
+    eventId
+    workdayId
+    eventType
+    zoneId
+    workerLogin
+    workerName
+    startAt
+    endAt
+    durationSec
+    status
+    closeMarkedAt
+    endReason
+    comment
+    deviceId
+    startEventId
+    endEventId
+    taskId
+    occurrenceDateYmd
+    serviceBlockId
+    allocationId
+    workSlotKey
+    matchStatus
+    matchMethod
+    matchReason
+    matchedAt
+    planSnapshotVersion
+    plannedStartAt
+    plannedEndAt
+    plannedDurationMinutes
+    taskUpdatedAtSnapshot
+    updatedAt
+    zone {
+      zoneId
+      zone
+      function
+      location
+      clientId
+      client {
+        clientId
+        name
+      }
+    }
+  }
+}
+
 query EventsPageForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
@@ -533,6 +644,21 @@ query EventsPageForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: Ti
     eventId
     workdayId
     zoneId
+    taskId
+    occurrenceDateYmd
+    serviceBlockId
+    allocationId
+    workSlotKey
+    eventType
+    matchStatus
+    matchMethod
+    matchReason
+    matchedAt
+    planSnapshotVersion
+    plannedStartAt
+    plannedEndAt
+    plannedDurationMinutes
+    taskUpdatedAtSnapshot
     workerLogin
     workerName
     startAt
@@ -576,6 +702,21 @@ query EventsPageForOrgByWorker($orgId: String!, $workerLogin: String!, $fromStar
     eventId
     workdayId
     zoneId
+    taskId
+    occurrenceDateYmd
+    serviceBlockId
+    allocationId
+    workSlotKey
+    eventType
+    matchStatus
+    matchMethod
+    matchReason
+    matchedAt
+    planSnapshotVersion
+    plannedStartAt
+    plannedEndAt
+    plannedDurationMinutes
+    taskUpdatedAtSnapshot
     workerLogin
     workerName
     startAt
@@ -619,6 +760,21 @@ query EventsPageForOrgByZone($orgId: String!, $zoneId: String!, $fromStartAt: Ti
     eventId
     workdayId
     zoneId
+    taskId
+    occurrenceDateYmd
+    serviceBlockId
+    allocationId
+    workSlotKey
+    eventType
+    matchStatus
+    matchMethod
+    matchReason
+    matchedAt
+    planSnapshotVersion
+    plannedStartAt
+    plannedEndAt
+    plannedDurationMinutes
+    taskUpdatedAtSnapshot
     workerLogin
     workerName
     startAt
@@ -662,6 +818,152 @@ query EventsPageForOrgByStatus($orgId: String!, $status: String!, $fromStartAt: 
     eventId
     workdayId
     zoneId
+    taskId
+    occurrenceDateYmd
+    serviceBlockId
+    allocationId
+    workSlotKey
+    eventType
+    matchStatus
+    matchMethod
+    matchReason
+    matchedAt
+    planSnapshotVersion
+    plannedStartAt
+    plannedEndAt
+    plannedDurationMinutes
+    taskUpdatedAtSnapshot
+    workerLogin
+    workerName
+    startAt
+    endAt
+    durationSec
+    status
+    closeMarkedAt
+    endReason
+    comment
+    deviceId
+    startEventId
+    endEventId
+    createdAt
+    updatedAt
+    zone {
+      zoneId
+      zone
+      function
+      location
+      client {
+        clientId
+        name
+      }
+    }
+  }
+}
+
+query EventsPageForOrgByTaskOccurrence(
+  $orgId: String!
+  $taskId: String!
+  $occurrenceDateYmd: String!
+  $limit: Int
+  $offset: Int
+) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR']", message: "Brak uprawnien do analizy korelacji zdarzen.")
+    }
+
+  events(
+    limit: $limit
+    offset: $offset
+    where: {
+      orgId: { eq: $orgId }
+      taskId: { eq: $taskId }
+      occurrenceDateYmd: { eq: $occurrenceDateYmd }
+    }
+    orderBy: [{ startAt: DESC }]
+  ) {
+    eventId
+    workdayId
+    zoneId
+    taskId
+    occurrenceDateYmd
+    serviceBlockId
+    allocationId
+    workSlotKey
+    eventType
+    matchStatus
+    matchMethod
+    matchReason
+    matchedAt
+    planSnapshotVersion
+    plannedStartAt
+    plannedEndAt
+    plannedDurationMinutes
+    taskUpdatedAtSnapshot
+    workerLogin
+    workerName
+    startAt
+    endAt
+    durationSec
+    status
+    closeMarkedAt
+    endReason
+    comment
+    deviceId
+    startEventId
+    endEventId
+    createdAt
+    updatedAt
+    zone {
+      zoneId
+      zone
+      function
+      location
+      client {
+        clientId
+        name
+      }
+    }
+  }
+}
+
+query EventsPageForOrgByPlanMatchStatus(
+  $orgId: String!
+  $matchStatus: String!
+  $limit: Int
+  $offset: Int
+) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR']", message: "Brak uprawnien do kolejki wyjatkow korelacji.")
+    }
+
+  events(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId }, matchStatus: { eq: $matchStatus } }
+    orderBy: [{ updatedAt: DESC }]
+  ) {
+    eventId
+    workdayId
+    zoneId
+    taskId
+    occurrenceDateYmd
+    serviceBlockId
+    allocationId
+    workSlotKey
+    eventType
+    matchStatus
+    matchMethod
+    matchReason
+    matchedAt
+    planSnapshotVersion
+    plannedStartAt
+    plannedEndAt
+    plannedDurationMinutes
+    taskUpdatedAtSnapshot
     workerLogin
     workerName
     startAt
@@ -703,6 +1005,21 @@ query EventsFingerprintForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStar
   ) {
     eventId
     workdayId
+    taskId
+    occurrenceDateYmd
+    serviceBlockId
+    allocationId
+    workSlotKey
+    eventType
+    matchStatus
+    matchMethod
+    matchReason
+    matchedAt
+    planSnapshotVersion
+    plannedStartAt
+    plannedEndAt
+    plannedDurationMinutes
+    taskUpdatedAtSnapshot
     startAt
     endAt
     status

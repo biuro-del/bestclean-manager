@@ -4,38 +4,36 @@
 
 <div class="cpd-layout" id="cpdLayout">
   <div class="cpd-profile-shell">
-    <div class="cpd-tabs" id="cpdTabs" role="tablist" aria-label="Zakładki szczegółów klienta">
+    <div class="cpd-tabs" id="cpdTabs" role="tablist" aria-label="Główne sekcje profilu klienta">
       <button class="cpd-tab is-active" type="button" role="tab" data-client-profile-tab="profile" aria-selected="true">
-        Profil
+        Podsumowanie
       </button>
-      <button class="cpd-tab" type="button" role="tab" data-client-profile-tab="orders" aria-selected="false">
-        Zlecenia
+      <button class="cpd-tab" type="button" role="tab" data-client-profile-tab="operations" aria-selected="false">
+        Operacje
       </button>
-      <button class="cpd-tab" type="button" role="tab" data-client-profile-tab="calendar" aria-selected="false">
-        Kalendarz
+      <button class="cpd-tab" type="button" role="tab" data-client-profile-tab="documents" aria-selected="false">
+        Dokumenty i kontakt
       </button>
-      <button class="cpd-tab" type="button" role="tab" data-client-profile-tab="contacts" aria-selected="false">
-        Kontakty
-      </button>
-      <button class="cpd-tab" type="button" role="tab" data-client-profile-tab="messages" aria-selected="false">
-        Wiadomości
-      </button>
-      <button class="cpd-tab" type="button" role="tab" data-client-profile-tab="additional" aria-selected="false">
-        Dodatkowe informacje
-      </button>
-      <button class="cpd-tab" type="button" role="tab" data-client-profile-tab="offers" aria-selected="false">
-        Oferty
-      </button>
-      <button class="cpd-tab" type="button" role="tab" data-client-profile-tab="files" aria-selected="false">
-        Pliki
-      </button>
-      <button class="cpd-tab" type="button" role="tab" data-client-profile-tab="locations" aria-selected="false">
-        Strefy
-      </button>
-      <button class="cpd-tab" type="button" role="tab" data-client-profile-tab="reports" aria-selected="false">
-        Raporty
+      <button class="cpd-tab" type="button" role="tab" data-client-profile-tab="profitability" aria-selected="false">
+        Koszty i rentowność
       </button>
     </div>
+
+    <nav class="cpd-subtabs" id="cpdSubtabs" aria-label="Podsekcje profilu klienta" hidden>
+      <div class="cpd-subtab-group" data-client-profile-subtabs="operations" role="tablist" aria-label="Podsekcje operacyjne" hidden>
+        <button class="cpd-subtab is-active" type="button" role="tab" data-client-profile-subtab="orders" data-client-profile-subtab-group="operations" aria-selected="true">Zlecenia</button>
+        <button class="cpd-subtab" type="button" role="tab" data-client-profile-subtab="calendar" data-client-profile-subtab-group="operations" aria-selected="false">Kalendarz</button>
+        <button class="cpd-subtab" type="button" role="tab" data-client-profile-subtab="locations" data-client-profile-subtab-group="operations" aria-selected="false">Strefy</button>
+        <button class="cpd-subtab" type="button" role="tab" data-client-profile-subtab="reports" data-client-profile-subtab-group="operations" aria-selected="false">Raporty</button>
+      </div>
+      <div class="cpd-subtab-group" data-client-profile-subtabs="documents" role="tablist" aria-label="Podsekcje dokumentów i kontaktu" hidden>
+        <button class="cpd-subtab is-active" type="button" role="tab" data-client-profile-subtab="contacts" data-client-profile-subtab-group="documents" aria-selected="true">Kontakty</button>
+        <button class="cpd-subtab" type="button" role="tab" data-client-profile-subtab="messages" data-client-profile-subtab-group="documents" aria-selected="false">Wiadomości</button>
+        <button class="cpd-subtab" type="button" role="tab" data-client-profile-subtab="additional" data-client-profile-subtab-group="documents" aria-selected="false">Informacje dodatkowe</button>
+        <button class="cpd-subtab" type="button" role="tab" data-client-profile-subtab="offers" data-client-profile-subtab-group="documents" aria-selected="false">Oferty</button>
+        <button class="cpd-subtab" type="button" role="tab" data-client-profile-subtab="files" data-client-profile-subtab-group="documents" aria-selected="false">Pliki</button>
+      </div>
+    </nav>
 
     <section class="SummaryCard cpd-summary-card cpd-profile-hero">
       <div class="cpd-summary-profile">
@@ -43,6 +41,28 @@
         <div class="cpd-summary-header">
           <span class="cpd-summary-kicker">Profil klienta</span>
           <h2 id="cpdClientName">Brak danych</h2>
+          <div class="cpd-summary-submeta" aria-label="Najważniejsze dane klienta">
+            <span class="cpd-summary-submeta-item">
+              <span>ID:</span>
+              <strong id="cpdHeroClientId">Brak danych</strong>
+            </span>
+            <span class="cpd-summary-submeta-item">
+              <span>Status:</span>
+              <span class="BadgeStatus cpd-status-badge is-active" id="cpdHeroStatusBadge">Aktywny</span>
+            </span>
+            <span class="cpd-summary-submeta-item">
+              <span>Typ:</span>
+              <strong data-cpd-hero-client-type-inline>Brak danych</strong>
+            </span>
+            <span class="cpd-summary-submeta-item">
+              <span>Miasto:</span>
+              <strong id="cpdHeroCity">Brak danych</strong>
+            </span>
+            <span class="cpd-summary-submeta-item">
+              <span>Koordynator:</span>
+              <strong id="cpdHeroCoordinator">Brak danych</strong>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -433,6 +453,22 @@
 
     </div>
 
+    <div class="cpd-panel cpd-panel--calendar cpd-data-panel" data-client-profile-panel="calendar" role="tabpanel" hidden>
+      <div class="cpd-data-toolbar cpd-calendar-toolbar">
+        <div>
+          <h3>Kalendarz</h3>
+          <p>Terminy realizacji i zaplanowane zlecenia klienta.</p>
+        </div>
+        <span class="cpd-data-count" id="cpdCalendarSyncMeta">Oczekiwanie na synchronizację</span>
+      </div>
+      <div class="cpd-calendar-shell">
+        <div class="cpd-calendar-mount" id="cpdCalendarMount" aria-label="Kalendarz zleceń klienta"></div>
+        <div class="cpd-calendar-empty" id="cpdCalendarEmpty" hidden>
+          Brak zaplanowanych zleceń w wybranym okresie.
+        </div>
+      </div>
+    </div>
+
     <div class="cpd-panel cpd-data-panel" data-client-profile-panel="contacts" role="tabpanel" hidden>
       <div class="cpd-data-toolbar">
         <div>
@@ -598,6 +634,10 @@
         <article class="cpd-data-stat"><span>Strefy</span><strong id="cpdReportsZones">0</strong></article>
       </div>
       <div class="cpd-report-list" id="cpdReportsRows"></div>
+    </div>
+
+    <div class="cpd-panel cpd-panel--profitability" data-client-profile-panel="profitability" role="tabpanel" hidden>
+      <div id="cpdProfitabilityMount"></div>
     </div>
     </section>
   </div>

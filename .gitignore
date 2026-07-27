@@ -97,5 +97,13 @@ _mobileweb_hotfix/
 _portalweb_hotfix/
 _portalweb_main/
 
+# Local Codex working copies, QA renders and release scratch directories
+/.codex-backups/
+/.codex-tmp/
+/_deploy_*/
+/output/
+/tmp/
+/codex-shell-test.txt
+
 # dataconnect generated files
 .dataconnect

@@ -6,8 +6,8 @@ schema:
   datasource:
     postgresql:
       database: iclean-room-database
+      schemaValidation: "COMPATIBLE"
       cloudSql:
         instanceId: iclean-room-instance
-        schemaValidation: "COMPATIBLE"
 connectorDirs:
   - connectors/example

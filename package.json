@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "node scripts/dev.js",
+    "dev:auth-proxy": "node scripts/dev.js --auth-session-proxy",
     "dev:web": "npm --prefix web-app run dev -- --host localhost",
     "build": "node build-webapp.js",
     "start": "node index.js",

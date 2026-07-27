@@ -29,16 +29,20 @@ You can also follow the instructions from the [Data Connect documentation](https
   - [*ZonesForOrg*](#zonesfororg)
   - [*WorkdaysForOrg*](#workdaysfororg)
   - [*WorkdaysPageForOrg*](#workdayspagefororg)
+  - [*WorkdaysIntegrityPageForOrg*](#workdaysintegritypagefororg)
   - [*WorkdaysPageForOrgByWorker*](#workdayspagefororgbyworker)
   - [*WorkdaysPageForOrgByRoom*](#workdayspagefororgbyroom)
   - [*WorkdaysPageForOrgByStatus*](#workdayspagefororgbystatus)
   - [*WorkdaysFingerprintForOrg*](#workdaysfingerprintfororg)
   - [*BackupCyclesForOrg*](#backupcyclesfororg)
   - [*EventsForOrg*](#eventsfororg)
+  - [*EventsIntegrityPageForOrg*](#eventsintegritypagefororg)
   - [*EventsPageForOrg*](#eventspagefororg)
   - [*EventsPageForOrgByWorker*](#eventspagefororgbyworker)
   - [*EventsPageForOrgByZone*](#eventspagefororgbyzone)
   - [*EventsPageForOrgByStatus*](#eventspagefororgbystatus)
+  - [*EventsPageForOrgByTaskOccurrence*](#eventspagefororgbytaskoccurrence)
+  - [*EventsPageForOrgByPlanMatchStatus*](#eventspagefororgbyplanmatchstatus)
   - [*EventsFingerprintForOrg*](#eventsfingerprintfororg)
   - [*WorkerWorkdaysForOrg*](#workerworkdaysfororg)
   - [*StorageForOrg*](#storagefororg)
@@ -69,6 +73,7 @@ You can also follow the instructions from the [Data Connect documentation](https
   - [*DeleteWorkdayForOrg*](#deleteworkdayfororg)
   - [*InsertEventForOrg*](#inserteventfororg)
   - [*UpdateEventForOrg*](#updateeventfororg)
+  - [*ReidentifyEventForOrg*](#reidentifyeventfororg)
   - [*DeleteEventForOrg*](#deleteeventfororg)
   - [*InsertBackupCycleForOrg*](#insertbackupcyclefororg)
   - [*UpdateBackupCycleForOrg*](#updatebackupcyclefororg)
@@ -298,7 +303,7 @@ import { useOrgUiStyleForOrg } from '@dataconnect/generated/react'
 export default function OrgUiStyleForOrgComponent() {
   // The `useOrgUiStyleForOrg` Query hook requires an argument of type `OrgUiStyleForOrgVariables`:
   const orgUiStyleForOrgVars: OrgUiStyleForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -386,7 +391,7 @@ import { useMyUiStylePreference } from '@dataconnect/generated/react'
 export default function MyUiStylePreferenceComponent() {
   // The `useMyUiStylePreference` Query hook requires an argument of type `MyUiStylePreferenceVariables`:
   const myUiStylePreferenceVars: MyUiStylePreferenceVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -474,7 +479,7 @@ import { useUserUiStylePreferencesForOrg } from '@dataconnect/generated/react'
 export default function UserUiStylePreferencesForOrgComponent() {
   // The `useUserUiStylePreferencesForOrg` Query hook requires an argument of type `UserUiStylePreferencesForOrgVariables`:
   const userUiStylePreferencesForOrgVars: UserUiStylePreferencesForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -559,7 +564,7 @@ import { useCanManageWorkersForOrg } from '@dataconnect/generated/react'
 export default function CanManageWorkersForOrgComponent() {
   // The `useCanManageWorkersForOrg` Query hook requires an argument of type `CanManageWorkersForOrgVariables`:
   const canManageWorkersForOrgVars: CanManageWorkersForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -628,21 +633,21 @@ export interface WorkersForOrgData {
   organization?: {
     ownerWorkerId?: string | null;
   };
-  workers: ({
-    login: string;
-    workerId?: string | null;
-    workerName?: string | null;
-    loginEmail?: string | null;
-    authUid?: string | null;
-    role?: string | null;
-    active?: boolean | null;
-    email?: string | null;
-    phone?: string | null;
-    workerType?: string | null;
-    edit?: string | null;
-    createdAt?: TimestampString | null;
-    updatedAt?: TimestampString | null;
-  })[];
+    workers: ({
+      login: string;
+      workerId?: string | null;
+      workerName?: string | null;
+      loginEmail?: string | null;
+      authUid?: string | null;
+      role?: string | null;
+      active?: boolean | null;
+      email?: string | null;
+      phone?: string | null;
+      workerType?: string | null;
+      edit?: string | null;
+      createdAt?: TimestampString | null;
+      updatedAt?: TimestampString | null;
+    })[];
 }
 ```
 
@@ -658,7 +663,7 @@ import { useWorkersForOrg } from '@dataconnect/generated/react'
 export default function WorkersForOrgComponent() {
   // The `useWorkersForOrg` Query hook requires an argument of type `WorkersForOrgVariables`:
   const workersForOrgVars: WorkersForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -790,7 +795,7 @@ import { useClientsForOrg } from '@dataconnect/generated/react'
 export default function ClientsForOrgComponent() {
   // The `useClientsForOrg` Query hook requires an argument of type `ClientsForOrgVariables`:
   const clientsForOrgVars: ClientsForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -882,7 +887,7 @@ import { useIndividualJobsForOrg } from '@dataconnect/generated/react'
 export default function IndividualJobsForOrgComponent() {
   // The `useIndividualJobsForOrg` Query hook requires an argument of type `IndividualJobsForOrgVariables`:
   const individualJobsForOrgVars: IndividualJobsForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -951,6 +956,9 @@ export interface TasksForOrgData {
   tasks: ({
     orgId: string;
     idTask: string;
+    lifecycleStatus: string;
+    cancelledAt?: TimestampString | null;
+    archivedAt?: TimestampString | null;
     dateYmd?: string | null;
     startTime?: string | null;
     endDateYmd?: string | null;
@@ -1013,7 +1021,7 @@ import { useTasksForOrg } from '@dataconnect/generated/react'
 export default function TasksForOrgComponent() {
   // The `useTasksForOrg` Query hook requires an argument of type `TasksForOrgVariables`:
   const tasksForOrgVars: TasksForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1103,7 +1111,7 @@ import { useZonesForOrg } from '@dataconnect/generated/react'
 export default function ZonesForOrgComponent() {
   // The `useZonesForOrg` Query hook requires an argument of type `ZonesForOrgVariables`:
   const zonesForOrgVars: ZonesForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1205,7 +1213,7 @@ import { useWorkdaysForOrg } from '@dataconnect/generated/react'
 export default function WorkdaysForOrgComponent() {
   // The `useWorkdaysForOrg` Query hook requires an argument of type `WorkdaysForOrgVariables`:
   const workdaysForOrgVars: WorkdaysForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1311,9 +1319,9 @@ import { useWorkdaysPageForOrg } from '@dataconnect/generated/react'
 export default function WorkdaysPageForOrgComponent() {
   // The `useWorkdaysPageForOrg` Query hook requires an argument of type `WorkdaysPageForOrgVariables`:
   const workdaysPageForOrgVars: WorkdaysPageForOrgVariables = {
-    orgId: ..., 
-    fromStartAt: ..., 
-    toStartAt: ..., 
+    orgId: ...,
+    fromStartAt: ...,
+    toStartAt: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -1336,6 +1344,112 @@ export default function WorkdaysPageForOrgComponent() {
   const dataConnect = getDataConnect(connectorConfig);
   const options = { staleTime: 5 * 1000 };
   const query = useWorkdaysPageForOrg(dataConnect, workdaysPageForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.workdays);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## WorkdaysIntegrityPageForOrg
+You can execute the `WorkdaysIntegrityPageForOrg` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useWorkdaysIntegrityPageForOrg(dc: DataConnect, vars: WorkdaysIntegrityPageForOrgVariables, options?: useDataConnectQueryOptions<WorkdaysIntegrityPageForOrgData>): UseDataConnectQueryResult<WorkdaysIntegrityPageForOrgData, WorkdaysIntegrityPageForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useWorkdaysIntegrityPageForOrg(vars: WorkdaysIntegrityPageForOrgVariables, options?: useDataConnectQueryOptions<WorkdaysIntegrityPageForOrgData>): UseDataConnectQueryResult<WorkdaysIntegrityPageForOrgData, WorkdaysIntegrityPageForOrgVariables>;
+```
+
+### Variables
+The `WorkdaysIntegrityPageForOrg` Query requires an argument of type `WorkdaysIntegrityPageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface WorkdaysIntegrityPageForOrgVariables {
+  orgId: string;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `WorkdaysIntegrityPageForOrg` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `WorkdaysIntegrityPageForOrg` Query is of type `WorkdaysIntegrityPageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface WorkdaysIntegrityPageForOrgData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `WorkdaysIntegrityPageForOrg`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, WorkdaysIntegrityPageForOrgVariables } from '@dataconnect/generated';
+import { useWorkdaysIntegrityPageForOrg } from '@dataconnect/generated/react'
+
+export default function WorkdaysIntegrityPageForOrgComponent() {
+  // The `useWorkdaysIntegrityPageForOrg` Query hook requires an argument of type `WorkdaysIntegrityPageForOrgVariables`:
+  const workdaysIntegrityPageForOrgVars: WorkdaysIntegrityPageForOrgVariables = {
+    orgId: ...,
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useWorkdaysIntegrityPageForOrg(workdaysIntegrityPageForOrgVars);
+  // Variables can be defined inline as well.
+  const query = useWorkdaysIntegrityPageForOrg({ orgId: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useWorkdaysIntegrityPageForOrg(dataConnect, workdaysIntegrityPageForOrgVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysIntegrityPageForOrg(workdaysIntegrityPageForOrgVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysIntegrityPageForOrg(dataConnect, workdaysIntegrityPageForOrgVars, options);
 
   // Then, you can render your component dynamically based on the status of the Query.
   if (query.isPending) {
@@ -1422,10 +1536,10 @@ import { useWorkdaysPageForOrgByWorker } from '@dataconnect/generated/react'
 export default function WorkdaysPageForOrgByWorkerComponent() {
   // The `useWorkdaysPageForOrgByWorker` Query hook requires an argument of type `WorkdaysPageForOrgByWorkerVariables`:
   const workdaysPageForOrgByWorkerVars: WorkdaysPageForOrgByWorkerVariables = {
-    orgId: ..., 
-    workerLogin: ..., 
-    fromStartAt: ..., 
-    toStartAt: ..., 
+    orgId: ...,
+    workerLogin: ...,
+    fromStartAt: ...,
+    toStartAt: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -1534,10 +1648,10 @@ import { useWorkdaysPageForOrgByRoom } from '@dataconnect/generated/react'
 export default function WorkdaysPageForOrgByRoomComponent() {
   // The `useWorkdaysPageForOrgByRoom` Query hook requires an argument of type `WorkdaysPageForOrgByRoomVariables`:
   const workdaysPageForOrgByRoomVars: WorkdaysPageForOrgByRoomVariables = {
-    orgId: ..., 
-    utilityRoomId: ..., 
-    fromStartAt: ..., 
-    toStartAt: ..., 
+    orgId: ...,
+    utilityRoomId: ...,
+    fromStartAt: ...,
+    toStartAt: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -1646,10 +1760,10 @@ import { useWorkdaysPageForOrgByStatus } from '@dataconnect/generated/react'
 export default function WorkdaysPageForOrgByStatusComponent() {
   // The `useWorkdaysPageForOrgByStatus` Query hook requires an argument of type `WorkdaysPageForOrgByStatusVariables`:
   const workdaysPageForOrgByStatusVars: WorkdaysPageForOrgByStatusVariables = {
-    orgId: ..., 
-    status: ..., 
-    fromStartAt: ..., 
-    toStartAt: ..., 
+    orgId: ...,
+    status: ...,
+    fromStartAt: ...,
+    toStartAt: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -1741,9 +1855,9 @@ import { useWorkdaysFingerprintForOrg } from '@dataconnect/generated/react'
 export default function WorkdaysFingerprintForOrgComponent() {
   // The `useWorkdaysFingerprintForOrg` Query hook requires an argument of type `WorkdaysFingerprintForOrgVariables`:
   const workdaysFingerprintForOrgVars: WorkdaysFingerprintForOrgVariables = {
-    orgId: ..., 
-    fromStartAt: ..., 
-    toStartAt: ..., 
+    orgId: ...,
+    fromStartAt: ...,
+    toStartAt: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1838,7 +1952,7 @@ import { useBackupCyclesForOrg } from '@dataconnect/generated/react'
 export default function BackupCyclesForOrgComponent() {
   // The `useBackupCyclesForOrg` Query hook requires an argument of type `BackupCyclesForOrgVariables`:
   const backupCyclesForOrgVars: BackupCyclesForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1908,6 +2022,21 @@ export interface EventsForOrgData {
     eventId: string;
     workdayId?: string | null;
     zoneId?: string | null;
+    taskId?: string | null;
+    occurrenceDateYmd?: string | null;
+    serviceBlockId?: string | null;
+    allocationId?: string | null;
+    workSlotKey?: string | null;
+    eventType?: string | null;
+    matchStatus?: string | null;
+    matchMethod?: string | null;
+    matchReason?: string | null;
+    matchedAt?: TimestampString | null;
+    planSnapshotVersion?: number | null;
+    plannedStartAt?: TimestampString | null;
+    plannedEndAt?: TimestampString | null;
+    plannedDurationMinutes?: number | null;
+    taskUpdatedAtSnapshot?: TimestampString | null;
     workerLogin?: string | null;
     workerName?: string | null;
     startAt?: TimestampString | null;
@@ -1948,7 +2077,7 @@ import { useEventsForOrg } from '@dataconnect/generated/react'
 export default function EventsForOrgComponent() {
   // The `useEventsForOrg` Query hook requires an argument of type `EventsForOrgVariables`:
   const eventsForOrgVars: EventsForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1969,6 +2098,135 @@ export default function EventsForOrgComponent() {
   const dataConnect = getDataConnect(connectorConfig);
   const options = { staleTime: 5 * 1000 };
   const query = useEventsForOrg(dataConnect, eventsForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.events);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## EventsIntegrityPageForOrg
+You can execute the `EventsIntegrityPageForOrg` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useEventsIntegrityPageForOrg(dc: DataConnect, vars: EventsIntegrityPageForOrgVariables, options?: useDataConnectQueryOptions<EventsIntegrityPageForOrgData>): UseDataConnectQueryResult<EventsIntegrityPageForOrgData, EventsIntegrityPageForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useEventsIntegrityPageForOrg(vars: EventsIntegrityPageForOrgVariables, options?: useDataConnectQueryOptions<EventsIntegrityPageForOrgData>): UseDataConnectQueryResult<EventsIntegrityPageForOrgData, EventsIntegrityPageForOrgVariables>;
+```
+
+### Variables
+The `EventsIntegrityPageForOrg` Query requires an argument of type `EventsIntegrityPageForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface EventsIntegrityPageForOrgVariables {
+  orgId: string;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `EventsIntegrityPageForOrg` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `EventsIntegrityPageForOrg` Query is of type `EventsIntegrityPageForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface EventsIntegrityPageForOrgData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    eventType?: string | null;
+    zoneId?: string | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    taskId?: string | null;
+    occurrenceDateYmd?: string | null;
+    serviceBlockId?: string | null;
+    allocationId?: string | null;
+    workSlotKey?: string | null;
+    matchStatus?: string | null;
+    matchMethod?: string | null;
+    matchReason?: string | null;
+    matchedAt?: TimestampString | null;
+    planSnapshotVersion?: number | null;
+    plannedStartAt?: TimestampString | null;
+    plannedEndAt?: TimestampString | null;
+    plannedDurationMinutes?: number | null;
+    taskUpdatedAtSnapshot?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      clientId?: string | null;
+      client?: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `EventsIntegrityPageForOrg`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, EventsIntegrityPageForOrgVariables } from '@dataconnect/generated';
+import { useEventsIntegrityPageForOrg } from '@dataconnect/generated/react'
+
+export default function EventsIntegrityPageForOrgComponent() {
+  // The `useEventsIntegrityPageForOrg` Query hook requires an argument of type `EventsIntegrityPageForOrgVariables`:
+  const eventsIntegrityPageForOrgVars: EventsIntegrityPageForOrgVariables = {
+    orgId: ...,
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useEventsIntegrityPageForOrg(eventsIntegrityPageForOrgVars);
+  // Variables can be defined inline as well.
+  const query = useEventsIntegrityPageForOrg({ orgId: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useEventsIntegrityPageForOrg(dataConnect, eventsIntegrityPageForOrgVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsIntegrityPageForOrg(eventsIntegrityPageForOrgVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsIntegrityPageForOrg(dataConnect, eventsIntegrityPageForOrgVars, options);
 
   // Then, you can render your component dynamically based on the status of the Query.
   if (query.isPending) {
@@ -2022,6 +2280,21 @@ export interface EventsPageForOrgData {
     eventId: string;
     workdayId?: string | null;
     zoneId?: string | null;
+    taskId?: string | null;
+    occurrenceDateYmd?: string | null;
+    serviceBlockId?: string | null;
+    allocationId?: string | null;
+    workSlotKey?: string | null;
+    eventType?: string | null;
+    matchStatus?: string | null;
+    matchMethod?: string | null;
+    matchReason?: string | null;
+    matchedAt?: TimestampString | null;
+    planSnapshotVersion?: number | null;
+    plannedStartAt?: TimestampString | null;
+    plannedEndAt?: TimestampString | null;
+    plannedDurationMinutes?: number | null;
+    taskUpdatedAtSnapshot?: TimestampString | null;
     workerLogin?: string | null;
     workerName?: string | null;
     startAt?: TimestampString | null;
@@ -2062,9 +2335,9 @@ import { useEventsPageForOrg } from '@dataconnect/generated/react'
 export default function EventsPageForOrgComponent() {
   // The `useEventsPageForOrg` Query hook requires an argument of type `EventsPageForOrgVariables`:
   const eventsPageForOrgVars: EventsPageForOrgVariables = {
-    orgId: ..., 
-    fromStartAt: ..., 
-    toStartAt: ..., 
+    orgId: ...,
+    fromStartAt: ...,
+    toStartAt: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -2141,6 +2414,21 @@ export interface EventsPageForOrgByWorkerData {
     eventId: string;
     workdayId?: string | null;
     zoneId?: string | null;
+    taskId?: string | null;
+    occurrenceDateYmd?: string | null;
+    serviceBlockId?: string | null;
+    allocationId?: string | null;
+    workSlotKey?: string | null;
+    eventType?: string | null;
+    matchStatus?: string | null;
+    matchMethod?: string | null;
+    matchReason?: string | null;
+    matchedAt?: TimestampString | null;
+    planSnapshotVersion?: number | null;
+    plannedStartAt?: TimestampString | null;
+    plannedEndAt?: TimestampString | null;
+    plannedDurationMinutes?: number | null;
+    taskUpdatedAtSnapshot?: TimestampString | null;
     workerLogin?: string | null;
     workerName?: string | null;
     startAt?: TimestampString | null;
@@ -2181,10 +2469,10 @@ import { useEventsPageForOrgByWorker } from '@dataconnect/generated/react'
 export default function EventsPageForOrgByWorkerComponent() {
   // The `useEventsPageForOrgByWorker` Query hook requires an argument of type `EventsPageForOrgByWorkerVariables`:
   const eventsPageForOrgByWorkerVars: EventsPageForOrgByWorkerVariables = {
-    orgId: ..., 
-    workerLogin: ..., 
-    fromStartAt: ..., 
-    toStartAt: ..., 
+    orgId: ...,
+    workerLogin: ...,
+    fromStartAt: ...,
+    toStartAt: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -2261,6 +2549,21 @@ export interface EventsPageForOrgByZoneData {
     eventId: string;
     workdayId?: string | null;
     zoneId?: string | null;
+    taskId?: string | null;
+    occurrenceDateYmd?: string | null;
+    serviceBlockId?: string | null;
+    allocationId?: string | null;
+    workSlotKey?: string | null;
+    eventType?: string | null;
+    matchStatus?: string | null;
+    matchMethod?: string | null;
+    matchReason?: string | null;
+    matchedAt?: TimestampString | null;
+    planSnapshotVersion?: number | null;
+    plannedStartAt?: TimestampString | null;
+    plannedEndAt?: TimestampString | null;
+    plannedDurationMinutes?: number | null;
+    taskUpdatedAtSnapshot?: TimestampString | null;
     workerLogin?: string | null;
     workerName?: string | null;
     startAt?: TimestampString | null;
@@ -2301,10 +2604,10 @@ import { useEventsPageForOrgByZone } from '@dataconnect/generated/react'
 export default function EventsPageForOrgByZoneComponent() {
   // The `useEventsPageForOrgByZone` Query hook requires an argument of type `EventsPageForOrgByZoneVariables`:
   const eventsPageForOrgByZoneVars: EventsPageForOrgByZoneVariables = {
-    orgId: ..., 
-    zoneId: ..., 
-    fromStartAt: ..., 
-    toStartAt: ..., 
+    orgId: ...,
+    zoneId: ...,
+    fromStartAt: ...,
+    toStartAt: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -2381,6 +2684,21 @@ export interface EventsPageForOrgByStatusData {
     eventId: string;
     workdayId?: string | null;
     zoneId?: string | null;
+    taskId?: string | null;
+    occurrenceDateYmd?: string | null;
+    serviceBlockId?: string | null;
+    allocationId?: string | null;
+    workSlotKey?: string | null;
+    eventType?: string | null;
+    matchStatus?: string | null;
+    matchMethod?: string | null;
+    matchReason?: string | null;
+    matchedAt?: TimestampString | null;
+    planSnapshotVersion?: number | null;
+    plannedStartAt?: TimestampString | null;
+    plannedEndAt?: TimestampString | null;
+    plannedDurationMinutes?: number | null;
+    taskUpdatedAtSnapshot?: TimestampString | null;
     workerLogin?: string | null;
     workerName?: string | null;
     startAt?: TimestampString | null;
@@ -2421,10 +2739,10 @@ import { useEventsPageForOrgByStatus } from '@dataconnect/generated/react'
 export default function EventsPageForOrgByStatusComponent() {
   // The `useEventsPageForOrgByStatus` Query hook requires an argument of type `EventsPageForOrgByStatusVariables`:
   const eventsPageForOrgByStatusVars: EventsPageForOrgByStatusVariables = {
-    orgId: ..., 
-    status: ..., 
-    fromStartAt: ..., 
-    toStartAt: ..., 
+    orgId: ...,
+    status: ...,
+    fromStartAt: ...,
+    toStartAt: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -2447,6 +2765,270 @@ export default function EventsPageForOrgByStatusComponent() {
   const dataConnect = getDataConnect(connectorConfig);
   const options = { staleTime: 5 * 1000 };
   const query = useEventsPageForOrgByStatus(dataConnect, eventsPageForOrgByStatusVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.events);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## EventsPageForOrgByTaskOccurrence
+You can execute the `EventsPageForOrgByTaskOccurrence` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useEventsPageForOrgByTaskOccurrence(dc: DataConnect, vars: EventsPageForOrgByTaskOccurrenceVariables, options?: useDataConnectQueryOptions<EventsPageForOrgByTaskOccurrenceData>): UseDataConnectQueryResult<EventsPageForOrgByTaskOccurrenceData, EventsPageForOrgByTaskOccurrenceVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useEventsPageForOrgByTaskOccurrence(vars: EventsPageForOrgByTaskOccurrenceVariables, options?: useDataConnectQueryOptions<EventsPageForOrgByTaskOccurrenceData>): UseDataConnectQueryResult<EventsPageForOrgByTaskOccurrenceData, EventsPageForOrgByTaskOccurrenceVariables>;
+```
+
+### Variables
+The `EventsPageForOrgByTaskOccurrence` Query requires an argument of type `EventsPageForOrgByTaskOccurrenceVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface EventsPageForOrgByTaskOccurrenceVariables {
+  orgId: string;
+  taskId: string;
+  occurrenceDateYmd: string;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `EventsPageForOrgByTaskOccurrence` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `EventsPageForOrgByTaskOccurrence` Query is of type `EventsPageForOrgByTaskOccurrenceData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface EventsPageForOrgByTaskOccurrenceData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    taskId?: string | null;
+    occurrenceDateYmd?: string | null;
+    serviceBlockId?: string | null;
+    allocationId?: string | null;
+    workSlotKey?: string | null;
+    eventType?: string | null;
+    matchStatus?: string | null;
+    matchMethod?: string | null;
+    matchReason?: string | null;
+    matchedAt?: TimestampString | null;
+    planSnapshotVersion?: number | null;
+    plannedStartAt?: TimestampString | null;
+    plannedEndAt?: TimestampString | null;
+    plannedDurationMinutes?: number | null;
+    taskUpdatedAtSnapshot?: TimestampString | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client?: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `EventsPageForOrgByTaskOccurrence`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, EventsPageForOrgByTaskOccurrenceVariables } from '@dataconnect/generated';
+import { useEventsPageForOrgByTaskOccurrence } from '@dataconnect/generated/react'
+
+export default function EventsPageForOrgByTaskOccurrenceComponent() {
+  // The `useEventsPageForOrgByTaskOccurrence` Query hook requires an argument of type `EventsPageForOrgByTaskOccurrenceVariables`:
+  const eventsPageForOrgByTaskOccurrenceVars: EventsPageForOrgByTaskOccurrenceVariables = {
+    orgId: ...,
+    taskId: ...,
+    occurrenceDateYmd: ...,
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useEventsPageForOrgByTaskOccurrence(eventsPageForOrgByTaskOccurrenceVars);
+  // Variables can be defined inline as well.
+  const query = useEventsPageForOrgByTaskOccurrence({ orgId: ..., taskId: ..., occurrenceDateYmd: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useEventsPageForOrgByTaskOccurrence(dataConnect, eventsPageForOrgByTaskOccurrenceVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsPageForOrgByTaskOccurrence(eventsPageForOrgByTaskOccurrenceVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsPageForOrgByTaskOccurrence(dataConnect, eventsPageForOrgByTaskOccurrenceVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.events);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## EventsPageForOrgByPlanMatchStatus
+You can execute the `EventsPageForOrgByPlanMatchStatus` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useEventsPageForOrgByPlanMatchStatus(dc: DataConnect, vars: EventsPageForOrgByPlanMatchStatusVariables, options?: useDataConnectQueryOptions<EventsPageForOrgByPlanMatchStatusData>): UseDataConnectQueryResult<EventsPageForOrgByPlanMatchStatusData, EventsPageForOrgByPlanMatchStatusVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useEventsPageForOrgByPlanMatchStatus(vars: EventsPageForOrgByPlanMatchStatusVariables, options?: useDataConnectQueryOptions<EventsPageForOrgByPlanMatchStatusData>): UseDataConnectQueryResult<EventsPageForOrgByPlanMatchStatusData, EventsPageForOrgByPlanMatchStatusVariables>;
+```
+
+### Variables
+The `EventsPageForOrgByPlanMatchStatus` Query requires an argument of type `EventsPageForOrgByPlanMatchStatusVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface EventsPageForOrgByPlanMatchStatusVariables {
+  orgId: string;
+  matchStatus: string;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `EventsPageForOrgByPlanMatchStatus` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `EventsPageForOrgByPlanMatchStatus` Query is of type `EventsPageForOrgByPlanMatchStatusData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface EventsPageForOrgByPlanMatchStatusData {
+  events: ({
+    eventId: string;
+    workdayId?: string | null;
+    zoneId?: string | null;
+    taskId?: string | null;
+    occurrenceDateYmd?: string | null;
+    serviceBlockId?: string | null;
+    allocationId?: string | null;
+    workSlotKey?: string | null;
+    eventType?: string | null;
+    matchStatus?: string | null;
+    matchMethod?: string | null;
+    matchReason?: string | null;
+    matchedAt?: TimestampString | null;
+    planSnapshotVersion?: number | null;
+    plannedStartAt?: TimestampString | null;
+    plannedEndAt?: TimestampString | null;
+    plannedDurationMinutes?: number | null;
+    taskUpdatedAtSnapshot?: TimestampString | null;
+    workerLogin?: string | null;
+    workerName?: string | null;
+    startAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    durationSec?: number | null;
+    status?: string | null;
+    closeMarkedAt?: TimestampString | null;
+    endReason?: string | null;
+    comment?: string | null;
+    deviceId?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+    zone?: {
+      zoneId: string;
+      zone?: string | null;
+      function?: string | null;
+      location?: string | null;
+      client?: {
+        clientId: string;
+        name?: string | null;
+      };
+    };
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `EventsPageForOrgByPlanMatchStatus`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, EventsPageForOrgByPlanMatchStatusVariables } from '@dataconnect/generated';
+import { useEventsPageForOrgByPlanMatchStatus } from '@dataconnect/generated/react'
+
+export default function EventsPageForOrgByPlanMatchStatusComponent() {
+  // The `useEventsPageForOrgByPlanMatchStatus` Query hook requires an argument of type `EventsPageForOrgByPlanMatchStatusVariables`:
+  const eventsPageForOrgByPlanMatchStatusVars: EventsPageForOrgByPlanMatchStatusVariables = {
+    orgId: ...,
+    matchStatus: ...,
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useEventsPageForOrgByPlanMatchStatus(eventsPageForOrgByPlanMatchStatusVars);
+  // Variables can be defined inline as well.
+  const query = useEventsPageForOrgByPlanMatchStatus({ orgId: ..., matchStatus: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useEventsPageForOrgByPlanMatchStatus(dataConnect, eventsPageForOrgByPlanMatchStatusVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsPageForOrgByPlanMatchStatus(eventsPageForOrgByPlanMatchStatusVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useEventsPageForOrgByPlanMatchStatus(dataConnect, eventsPageForOrgByPlanMatchStatusVars, options);
 
   // Then, you can render your component dynamically based on the status of the Query.
   if (query.isPending) {
@@ -2497,6 +3079,21 @@ export interface EventsFingerprintForOrgData {
   events: ({
     eventId: string;
     workdayId?: string | null;
+    taskId?: string | null;
+    occurrenceDateYmd?: string | null;
+    serviceBlockId?: string | null;
+    allocationId?: string | null;
+    workSlotKey?: string | null;
+    eventType?: string | null;
+    matchStatus?: string | null;
+    matchMethod?: string | null;
+    matchReason?: string | null;
+    matchedAt?: TimestampString | null;
+    planSnapshotVersion?: number | null;
+    plannedStartAt?: TimestampString | null;
+    plannedEndAt?: TimestampString | null;
+    plannedDurationMinutes?: number | null;
+    taskUpdatedAtSnapshot?: TimestampString | null;
     startAt?: TimestampString | null;
     endAt?: TimestampString | null;
     status?: string | null;
@@ -2517,9 +3114,9 @@ import { useEventsFingerprintForOrg } from '@dataconnect/generated/react'
 export default function EventsFingerprintForOrgComponent() {
   // The `useEventsFingerprintForOrg` Query hook requires an argument of type `EventsFingerprintForOrgVariables`:
   const eventsFingerprintForOrgVars: EventsFingerprintForOrgVariables = {
-    orgId: ..., 
-    fromStartAt: ..., 
-    toStartAt: ..., 
+    orgId: ...,
+    fromStartAt: ...,
+    toStartAt: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -2622,8 +3219,8 @@ import { useWorkerWorkdaysForOrg } from '@dataconnect/generated/react'
 export default function WorkerWorkdaysForOrgComponent() {
   // The `useWorkerWorkdaysForOrg` Query hook requires an argument of type `WorkerWorkdaysForOrgVariables`:
   const workerWorkdaysForOrgVars: WorkerWorkdaysForOrgVariables = {
-    orgId: ..., 
-    workerLogin: ..., 
+    orgId: ...,
+    workerLogin: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -2718,7 +3315,7 @@ import { useStorageForOrg } from '@dataconnect/generated/react'
 export default function StorageForOrgComponent() {
   // The `useStorageForOrg` Query hook requires an argument of type `StorageForOrgVariables`:
   const storageForOrgVars: StorageForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -2805,10 +3402,10 @@ export interface ClientStorageForClientData {
       quantityMin: number;
       quantityMax?: number | null;
     };
-    client: {
-      name?: string | null;
-      status?: string | null;
-    };
+      client: {
+        name?: string | null;
+        status?: string | null;
+      };
   } & ClientStorage_Key)[];
 }
 ```
@@ -2825,8 +3422,8 @@ import { useClientStorageForClient } from '@dataconnect/generated/react'
 export default function ClientStorageForClientComponent() {
   // The `useClientStorageForClient` Query hook requires an argument of type `ClientStorageForClientVariables`:
   const clientStorageForClientVars: ClientStorageForClientVariables = {
-    orgId: ..., 
-    clientId: ..., 
+    orgId: ...,
+    clientId: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -2922,7 +3519,7 @@ import { useClientStorageForOrg } from '@dataconnect/generated/react'
 export default function ClientStorageForOrgComponent() {
   // The `useClientStorageForOrg` Query hook requires an argument of type `ClientStorageForOrgVariables`:
   const clientStorageForOrgVars: ClientStorageForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -3019,7 +3616,7 @@ import { useWorkdayPausesForOrg } from '@dataconnect/generated/react'
 export default function WorkdayPausesForOrgComponent() {
   // The `useWorkdayPausesForOrg` Query hook requires an argument of type `WorkdayPausesForOrgVariables`:
   const workdayPausesForOrgVars: WorkdayPausesForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -3115,8 +3712,8 @@ import { useActiveWorkdayPauseForWorker } from '@dataconnect/generated/react'
 export default function ActiveWorkdayPauseForWorkerComponent() {
   // The `useActiveWorkdayPauseForWorker` Query hook requires an argument of type `ActiveWorkdayPauseForWorkerVariables`:
   const activeWorkdayPauseForWorkerVars: ActiveWorkdayPauseForWorkerVariables = {
-    orgId: ..., 
-    workerLogin: ..., 
+    orgId: ...,
+    workerLogin: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -3247,8 +3844,8 @@ export default function UpsertOrgUiStyleForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpsertOrgUiStyleForOrg` Mutation requires an argument of type `UpsertOrgUiStyleForOrgVariables`:
   const upsertOrgUiStyleForOrgVars: UpsertOrgUiStyleForOrgVariables = {
-    orgId: ..., 
-    styleId: ..., 
+    orgId: ...,
+    styleId: ...,
     updatedBy: ..., // optional
   };
   mutation.mutate(upsertOrgUiStyleForOrgVars);
@@ -3343,7 +3940,7 @@ export default function DeleteOrgUiStyleForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteOrgUiStyleForOrg` Mutation requires an argument of type `DeleteOrgUiStyleForOrgVariables`:
   const deleteOrgUiStyleForOrgVars: DeleteOrgUiStyleForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
   mutation.mutate(deleteOrgUiStyleForOrgVars);
   // Variables can be defined inline as well.
@@ -3439,8 +4036,8 @@ export default function UpsertMyUiStylePreferenceComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpsertMyUiStylePreference` Mutation requires an argument of type `UpsertMyUiStylePreferenceVariables`:
   const upsertMyUiStylePreferenceVars: UpsertMyUiStylePreferenceVariables = {
-    orgId: ..., 
-    styleId: ..., 
+    orgId: ...,
+    styleId: ...,
     updatedBy: ..., // optional
   };
   mutation.mutate(upsertMyUiStylePreferenceVars);
@@ -3535,7 +4132,7 @@ export default function DeleteMyUiStylePreferenceComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteMyUiStylePreference` Mutation requires an argument of type `DeleteMyUiStylePreferenceVariables`:
   const deleteMyUiStylePreferenceVars: DeleteMyUiStylePreferenceVariables = {
-    orgId: ..., 
+    orgId: ...,
   };
   mutation.mutate(deleteMyUiStylePreferenceVars);
   // Variables can be defined inline as well.
@@ -3632,9 +4229,9 @@ export default function UpsertUserUiStylePreferenceForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpsertUserUiStylePreferenceForOrg` Mutation requires an argument of type `UpsertUserUiStylePreferenceForOrgVariables`:
   const upsertUserUiStylePreferenceForOrgVars: UpsertUserUiStylePreferenceForOrgVariables = {
-    orgId: ..., 
-    uid: ..., 
-    styleId: ..., 
+    orgId: ...,
+    uid: ...,
+    styleId: ...,
     updatedBy: ..., // optional
   };
   mutation.mutate(upsertUserUiStylePreferenceForOrgVars);
@@ -3730,8 +4327,8 @@ export default function DeleteUserUiStylePreferenceForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteUserUiStylePreferenceForOrg` Mutation requires an argument of type `DeleteUserUiStylePreferenceForOrgVariables`:
   const deleteUserUiStylePreferenceForOrgVars: DeleteUserUiStylePreferenceForOrgVariables = {
-    orgId: ..., 
-    uid: ..., 
+    orgId: ...,
+    uid: ...,
   };
   mutation.mutate(deleteUserUiStylePreferenceForOrgVars);
   // Variables can be defined inline as well.
@@ -3871,8 +4468,8 @@ export default function InsertClientForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertClientForOrg` Mutation requires an argument of type `InsertClientForOrgVariables`:
   const insertClientForOrgVars: InsertClientForOrgVariables = {
-    orgId: ..., 
-    clientId: ..., 
+    orgId: ...,
+    clientId: ...,
     name: ..., // optional
     nip: ..., // optional
     city: ..., // optional
@@ -4057,8 +4654,8 @@ export default function UpdateClientForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateClientForOrg` Mutation requires an argument of type `UpdateClientForOrgVariables`:
   const updateClientForOrgVars: UpdateClientForOrgVariables = {
-    orgId: ..., 
-    clientId: ..., 
+    orgId: ...,
+    clientId: ...,
     name: ..., // optional
     nip: ..., // optional
     city: ..., // optional
@@ -4205,8 +4802,8 @@ export default function DeleteClientForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteClientForOrg` Mutation requires an argument of type `DeleteClientForOrgVariables`:
   const deleteClientForOrgVars: DeleteClientForOrgVariables = {
-    orgId: ..., 
-    clientId: ..., 
+    orgId: ...,
+    clientId: ...,
   };
   mutation.mutate(deleteClientForOrgVars);
   // Variables can be defined inline as well.
@@ -4316,8 +4913,8 @@ export default function InsertIndividualJobForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertIndividualJobForOrg` Mutation requires an argument of type `InsertIndividualJobForOrgVariables`:
   const insertIndividualJobForOrgVars: InsertIndividualJobForOrgVariables = {
-    orgId: ..., 
-    clientIndId: ..., 
+    orgId: ...,
+    clientIndId: ...,
     date: ..., // optional
     name: ..., // optional
     nip: ..., // optional
@@ -4428,8 +5025,8 @@ export default function UpdateIndividualJobForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateIndividualJobForOrg` Mutation requires an argument of type `UpdateIndividualJobForOrgVariables`:
   const updateIndividualJobForOrgVars: UpdateIndividualJobForOrgVariables = {
-    orgId: ..., 
-    clientIndId: ..., 
+    orgId: ...,
+    clientIndId: ...,
     date: ..., // optional
     name: ..., // optional
     nip: ..., // optional
@@ -4532,8 +5129,8 @@ export default function DeleteIndividualJobForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteIndividualJobForOrg` Mutation requires an argument of type `DeleteIndividualJobForOrgVariables`:
   const deleteIndividualJobForOrgVars: DeleteIndividualJobForOrgVariables = {
-    orgId: ..., 
-    clientIndId: ..., 
+    orgId: ...,
+    clientIndId: ...,
   };
   mutation.mutate(deleteIndividualJobForOrgVars);
   // Variables can be defined inline as well.
@@ -4579,6 +5176,9 @@ The `UpsertTaskForOrg` Mutation requires an argument of type `UpsertTaskForOrgVa
 export interface UpsertTaskForOrgVariables {
   orgId: string;
   idTask: string;
+  lifecycleStatus?: string | null;
+  cancelledAt?: TimestampString | null;
+  archivedAt?: TimestampString | null;
   dateYmd?: string | null;
   startTime?: string | null;
   endDateYmd?: string | null;
@@ -4674,8 +5274,11 @@ export default function UpsertTaskForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpsertTaskForOrg` Mutation requires an argument of type `UpsertTaskForOrgVariables`:
   const upsertTaskForOrgVars: UpsertTaskForOrgVariables = {
-    orgId: ..., 
-    idTask: ..., 
+    orgId: ...,
+    idTask: ...,
+    lifecycleStatus: ..., // optional
+    cancelledAt: ..., // optional
+    archivedAt: ..., // optional
     dateYmd: ..., // optional
     startTime: ..., // optional
     endDateYmd: ..., // optional
@@ -4725,7 +5328,7 @@ export default function UpsertTaskForOrgComponent() {
   };
   mutation.mutate(upsertTaskForOrgVars);
   // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., idTask: ..., dateYmd: ..., startTime: ..., endDateYmd: ..., endTime: ..., scheduleMode: ..., accessStartTime: ..., accessEndTime: ..., accessWindows: ..., requiredWorkMinutes: ..., requiredPeople: ..., workAllocations: ..., workerId: ..., workerIds: ..., workerLabel: ..., workerName: ..., workerLogin: ..., clientId: ..., clientLabel: ..., clientName: ..., nip: ..., street: ..., city: ..., postCode: ..., addressLabel: ..., executionAddressLabel: ..., lat: ..., lng: ..., zoneId: ..., zoneLabel: ..., repeatPreset: ..., repeatEvery: ..., repeatUnit: ..., repeatWeekdays: ..., weeklyScheduleRules: ..., title: ..., type: ..., price: ..., description: ..., workerComment: ..., supplies: ..., objectPlanTasks: ..., allowExtendedWork: ..., createdByUid: ..., updatedByUid: ..., createdAt: ..., updatedAt: ..., });
+  mutation.mutate({ orgId: ..., idTask: ..., lifecycleStatus: ..., cancelledAt: ..., archivedAt: ..., dateYmd: ..., startTime: ..., endDateYmd: ..., endTime: ..., scheduleMode: ..., accessStartTime: ..., accessEndTime: ..., accessWindows: ..., requiredWorkMinutes: ..., requiredPeople: ..., workAllocations: ..., workerId: ..., workerIds: ..., workerLabel: ..., workerName: ..., workerLogin: ..., clientId: ..., clientLabel: ..., clientName: ..., nip: ..., street: ..., city: ..., postCode: ..., addressLabel: ..., executionAddressLabel: ..., lat: ..., lng: ..., zoneId: ..., zoneLabel: ..., repeatPreset: ..., repeatEvery: ..., repeatUnit: ..., repeatWeekdays: ..., weeklyScheduleRules: ..., title: ..., type: ..., price: ..., description: ..., workerComment: ..., supplies: ..., objectPlanTasks: ..., allowExtendedWork: ..., createdByUid: ..., updatedByUid: ..., createdAt: ..., updatedAt: ..., });
 
   // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
   const options = {
@@ -4816,8 +5419,8 @@ export default function DeleteTaskForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteTaskForOrg` Mutation requires an argument of type `DeleteTaskForOrgVariables`:
   const deleteTaskForOrgVars: DeleteTaskForOrgVariables = {
-    orgId: ..., 
-    idTask: ..., 
+    orgId: ...,
+    idTask: ...,
   };
   mutation.mutate(deleteTaskForOrgVars);
   // Variables can be defined inline as well.
@@ -4918,8 +5521,8 @@ export default function InsertZoneForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertZoneForOrg` Mutation requires an argument of type `InsertZoneForOrgVariables`:
   const insertZoneForOrgVars: InsertZoneForOrgVariables = {
-    orgId: ..., 
-    zoneId: ..., 
+    orgId: ...,
+    zoneId: ...,
     clientId: ..., // optional
     zone: ..., // optional
     function: ..., // optional
@@ -5026,8 +5629,8 @@ export default function UpdateZoneForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateZoneForOrg` Mutation requires an argument of type `UpdateZoneForOrgVariables`:
   const updateZoneForOrgVars: UpdateZoneForOrgVariables = {
-    orgId: ..., 
-    zoneId: ..., 
+    orgId: ...,
+    zoneId: ...,
     clientId: ..., // optional
     zone: ..., // optional
     function: ..., // optional
@@ -5128,8 +5731,8 @@ export default function DeleteZoneForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteZoneForOrg` Mutation requires an argument of type `DeleteZoneForOrgVariables`:
   const deleteZoneForOrgVars: DeleteZoneForOrgVariables = {
-    orgId: ..., 
-    zoneId: ..., 
+    orgId: ...,
+    zoneId: ...,
   };
   mutation.mutate(deleteZoneForOrgVars);
   // Variables can be defined inline as well.
@@ -5234,9 +5837,9 @@ export default function InsertWorkdayForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertWorkdayForOrg` Mutation requires an argument of type `InsertWorkdayForOrgVariables`:
   const insertWorkdayForOrgVars: InsertWorkdayForOrgVariables = {
-    orgId: ..., 
-    workdayId: ..., 
-    workerLogin: ..., 
+    orgId: ...,
+    workdayId: ...,
+    workerLogin: ...,
     workerName: ..., // optional
     utilityRoomId: ..., // optional
     startAt: ..., // optional
@@ -5350,9 +5953,9 @@ export default function UpdateWorkdayForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateWorkdayForOrg` Mutation requires an argument of type `UpdateWorkdayForOrgVariables`:
   const updateWorkdayForOrgVars: UpdateWorkdayForOrgVariables = {
-    orgId: ..., 
-    workdayId: ..., 
-    workerLogin: ..., 
+    orgId: ...,
+    workdayId: ...,
+    workerLogin: ...,
     workerName: ..., // optional
     utilityRoomId: ..., // optional
     startAt: ..., // optional
@@ -5456,8 +6059,8 @@ export default function DeleteWorkdayForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteWorkdayForOrg` Mutation requires an argument of type `DeleteWorkdayForOrgVariables`:
   const deleteWorkdayForOrgVars: DeleteWorkdayForOrgVariables = {
-    orgId: ..., 
-    workdayId: ..., 
+    orgId: ...,
+    workdayId: ...,
   };
   mutation.mutate(deleteWorkdayForOrgVars);
   // Variables can be defined inline as well.
@@ -5566,8 +6169,8 @@ export default function InsertEventForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertEventForOrg` Mutation requires an argument of type `InsertEventForOrgVariables`:
   const insertEventForOrgVars: InsertEventForOrgVariables = {
-    orgId: ..., 
-    eventId: ..., 
+    orgId: ...,
+    eventId: ...,
     workdayId: ..., // optional
     zoneId: ..., // optional
     workerLogin: ..., // optional
@@ -5627,11 +6230,7 @@ The `UpdateEventForOrg` Mutation requires an argument of type `UpdateEventForOrg
 export interface UpdateEventForOrgVariables {
   orgId: string;
   eventId: string;
-  workdayId?: string | null;
-  zoneId?: string | null;
-  workerLogin?: string | null;
   workerName?: string | null;
-  startAt?: TimestampString | null;
   endAt?: TimestampString | null;
   durationSec?: number | null;
   status?: string | null;
@@ -5690,8 +6289,128 @@ export default function UpdateEventForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateEventForOrg` Mutation requires an argument of type `UpdateEventForOrgVariables`:
   const updateEventForOrgVars: UpdateEventForOrgVariables = {
-    orgId: ..., 
-    eventId: ..., 
+    orgId: ...,
+    eventId: ...,
+    workerName: ..., // optional
+    endAt: ..., // optional
+    durationSec: ..., // optional
+    status: ..., // optional
+    closeMarkedAt: ..., // optional
+    endReason: ..., // optional
+    comment: ..., // optional
+    deviceId: ..., // optional
+    startEventId: ..., // optional
+    endEventId: ..., // optional
+  };
+  mutation.mutate(updateEventForOrgVars);
+  // Variables can be defined inline as well.
+  mutation.mutate({ orgId: ..., eventId: ..., workerName: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
+
+  // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  mutation.mutate(updateEventForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Mutation.
+  if (mutation.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (mutation.isError) {
+    return <div>Error: {mutation.error.message}</div>;
+  }
+
+  // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
+  if (mutation.isSuccess) {
+    console.log(mutation.data.event_update);
+  }
+  return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## ReidentifyEventForOrg
+You can execute the `ReidentifyEventForOrg` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
+```javascript
+useReidentifyEventForOrg(options?: useDataConnectMutationOptions<ReidentifyEventForOrgData, FirebaseError, ReidentifyEventForOrgVariables>): UseDataConnectMutationResult<ReidentifyEventForOrgData, ReidentifyEventForOrgVariables>;
+```
+You can also pass in a `DataConnect` instance to the Mutation hook function.
+```javascript
+useReidentifyEventForOrg(dc: DataConnect, options?: useDataConnectMutationOptions<ReidentifyEventForOrgData, FirebaseError, ReidentifyEventForOrgVariables>): UseDataConnectMutationResult<ReidentifyEventForOrgData, ReidentifyEventForOrgVariables>;
+```
+
+### Variables
+The `ReidentifyEventForOrg` Mutation requires an argument of type `ReidentifyEventForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface ReidentifyEventForOrgVariables {
+  orgId: string;
+  eventId: string;
+  workdayId?: string | null;
+  zoneId?: string | null;
+  workerLogin?: string | null;
+  workerName?: string | null;
+  startAt?: TimestampString | null;
+  endAt?: TimestampString | null;
+  durationSec?: number | null;
+  status?: string | null;
+  closeMarkedAt?: TimestampString | null;
+  endReason?: string | null;
+  comment?: string | null;
+  deviceId?: string | null;
+  startEventId?: string | null;
+  endEventId?: string | null;
+}
+```
+### Return Type
+Recall that calling the `ReidentifyEventForOrg` Mutation hook function returns a `UseMutationResult` object. This object holds the state of your Mutation, including whether the Mutation is loading, has completed, or has succeeded/failed, among other things.
+
+To check the status of a Mutation, use the `UseMutationResult.status` field. You can also check for pending / success / error status using the `UseMutationResult.isPending`, `UseMutationResult.isSuccess`, and `UseMutationResult.isError` fields.
+
+To execute the Mutation, call `UseMutationResult.mutate()`. This function executes the Mutation, but does not return the data from the Mutation.
+
+To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `ReidentifyEventForOrg` Mutation is of type `ReidentifyEventForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface ReidentifyEventForOrgData {
+  event_update?: Event_Key | null;
+}
+```
+
+To learn more about the `UseMutationResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useMutation).
+
+### Using `ReidentifyEventForOrg`'s Mutation hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, ReidentifyEventForOrgVariables } from '@dataconnect/generated';
+import { useReidentifyEventForOrg } from '@dataconnect/generated/react'
+
+export default function ReidentifyEventForOrgComponent() {
+  // Call the Mutation hook function to get a `UseMutationResult` object which holds the state of your Mutation.
+  const mutation = useReidentifyEventForOrg();
+
+  // You can also pass in a `DataConnect` instance to the Mutation hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const mutation = useReidentifyEventForOrg(dataConnect);
+
+  // You can also pass in a `useDataConnectMutationOptions` object to the Mutation hook function.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useReidentifyEventForOrg(options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectMutationOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useReidentifyEventForOrg(dataConnect, options);
+
+  // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
+  // The `useReidentifyEventForOrg` Mutation requires an argument of type `ReidentifyEventForOrgVariables`:
+  const reidentifyEventForOrgVars: ReidentifyEventForOrgVariables = {
+    orgId: ...,
+    eventId: ...,
     workdayId: ..., // optional
     zoneId: ..., // optional
     workerLogin: ..., // optional
@@ -5707,7 +6426,7 @@ export default function UpdateEventForOrgComponent() {
     startEventId: ..., // optional
     endEventId: ..., // optional
   };
-  mutation.mutate(updateEventForOrgVars);
+  mutation.mutate(reidentifyEventForOrgVars);
   // Variables can be defined inline as well.
   mutation.mutate({ orgId: ..., eventId: ..., workdayId: ..., zoneId: ..., workerLogin: ..., workerName: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
 
@@ -5715,7 +6434,7 @@ export default function UpdateEventForOrgComponent() {
   const options = {
     onSuccess: () => { console.log('Mutation succeeded!'); }
   };
-  mutation.mutate(updateEventForOrgVars, options);
+  mutation.mutate(reidentifyEventForOrgVars, options);
 
   // Then, you can render your component dynamically based on the status of the Mutation.
   if (mutation.isPending) {
@@ -5800,8 +6519,8 @@ export default function DeleteEventForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteEventForOrg` Mutation requires an argument of type `DeleteEventForOrgVariables`:
   const deleteEventForOrgVars: DeleteEventForOrgVariables = {
-    orgId: ..., 
-    eventId: ..., 
+    orgId: ...,
+    eventId: ...,
   };
   mutation.mutate(deleteEventForOrgVars);
   // Variables can be defined inline as well.
@@ -5911,8 +6630,8 @@ export default function InsertBackupCycleForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertBackupCycleForOrg` Mutation requires an argument of type `InsertBackupCycleForOrgVariables`:
   const insertBackupCycleForOrgVars: InsertBackupCycleForOrgVariables = {
-    orgId: ..., 
-    cycleId: ..., 
+    orgId: ...,
+    cycleId: ...,
     workerLogin: ..., // optional
     workerName: ..., // optional
     roomId: ..., // optional
@@ -6037,8 +6756,8 @@ export default function UpdateBackupCycleForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateBackupCycleForOrg` Mutation requires an argument of type `UpdateBackupCycleForOrgVariables`:
   const updateBackupCycleForOrgVars: UpdateBackupCycleForOrgVariables = {
-    orgId: ..., 
-    cycleId: ..., 
+    orgId: ...,
+    cycleId: ...,
     workerLogin: ..., // optional
     workerName: ..., // optional
     roomId: ..., // optional
@@ -6156,11 +6875,11 @@ export default function InsertStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertStorageForOrg` Mutation requires an argument of type `InsertStorageForOrgVariables`:
   const insertStorageForOrgVars: InsertStorageForOrgVariables = {
-    orgId: ..., 
-    productIndex: ..., 
-    productId: ..., 
-    name: ..., 
-    productType: ..., 
+    orgId: ...,
+    productIndex: ...,
+    productId: ...,
+    name: ...,
+    productType: ...,
     quantity: ..., // optional
     quantityMin: ..., // optional
     quantityMax: ..., // optional
@@ -6268,8 +6987,8 @@ export default function UpdateStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateStorageForOrg` Mutation requires an argument of type `UpdateStorageForOrgVariables`:
   const updateStorageForOrgVars: UpdateStorageForOrgVariables = {
-    orgId: ..., 
-    productIndex: ..., 
+    orgId: ...,
+    productIndex: ...,
     productId: ..., // optional
     name: ..., // optional
     productType: ..., // optional
@@ -6372,8 +7091,8 @@ export default function DeleteStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteStorageForOrg` Mutation requires an argument of type `DeleteStorageForOrgVariables`:
   const deleteStorageForOrgVars: DeleteStorageForOrgVariables = {
-    orgId: ..., 
-    productIndex: ..., 
+    orgId: ...,
+    productIndex: ...,
   };
   mutation.mutate(deleteStorageForOrgVars);
   // Variables can be defined inline as well.
@@ -6475,11 +7194,11 @@ export default function InsertClientStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertClientStorageForOrg` Mutation requires an argument of type `InsertClientStorageForOrgVariables`:
   const insertClientStorageForOrgVars: InsertClientStorageForOrgVariables = {
-    orgId: ..., 
-    clientId: ..., 
-    productIndex: ..., 
-    name: ..., 
-    productType: ..., 
+    orgId: ...,
+    clientId: ...,
+    productIndex: ...,
+    name: ...,
+    productType: ...,
     quantity: ..., // optional
     quantityMin: ..., // optional
     quantityMax: ..., // optional
@@ -6585,9 +7304,9 @@ export default function UpdateClientStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateClientStorageForOrg` Mutation requires an argument of type `UpdateClientStorageForOrgVariables`:
   const updateClientStorageForOrgVars: UpdateClientStorageForOrgVariables = {
-    orgId: ..., 
-    clientId: ..., 
-    productIndex: ..., 
+    orgId: ...,
+    clientId: ...,
+    productIndex: ...,
     name: ..., // optional
     productType: ..., // optional
     quantity: ..., // optional
@@ -6689,9 +7408,9 @@ export default function DeleteClientStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteClientStorageForOrg` Mutation requires an argument of type `DeleteClientStorageForOrgVariables`:
   const deleteClientStorageForOrgVars: DeleteClientStorageForOrgVariables = {
-    orgId: ..., 
-    clientId: ..., 
-    productIndex: ..., 
+    orgId: ...,
+    clientId: ...,
+    productIndex: ...,
   };
   mutation.mutate(deleteClientStorageForOrgVars);
   // Variables can be defined inline as well.
@@ -6796,10 +7515,10 @@ export default function StartWorkdayPauseComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useStartWorkdayPause` Mutation requires an argument of type `StartWorkdayPauseVariables`:
   const startWorkdayPauseVars: StartWorkdayPauseVariables = {
-    orgId: ..., 
-    pauseId: ..., 
-    workdayId: ..., 
-    workerLogin: ..., 
+    orgId: ...,
+    pauseId: ...,
+    workdayId: ...,
+    workerLogin: ...,
     workerName: ..., // optional
     startAt: ..., // optional
     stopAt: ..., // optional
@@ -6908,9 +7627,9 @@ export default function StopWorkdayPauseComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useStopWorkdayPause` Mutation requires an argument of type `StopWorkdayPauseVariables`:
   const stopWorkdayPauseVars: StopWorkdayPauseVariables = {
-    orgId: ..., 
-    pauseId: ..., 
-    workdayId: ..., 
+    orgId: ...,
+    pauseId: ...,
+    workdayId: ...,
     workerLogin: ..., // optional
     stopAt: ..., // optional
     durationSec: ..., // optional

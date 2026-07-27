@@ -12,6 +12,11 @@ import {
   OWN_WORKDAY_EDIT_DENIED_MESSAGE,
   isOwnWorkdayEditBlocked,
 } from '../workdayEditAccess.js'
+import {
+  findPendingTimeEditorItem,
+  preciseTimeInputValue,
+  timeEditorSourceRows,
+} from './workdayTimeEditorModel.js'
 
 export const route = 'workerAccount'
 export const viewId = 'view-workerAccount'
@@ -1511,10 +1516,7 @@ export function createWorkerAccountFeature(ctx) {
 
   function isoToTimeInput(value) {
     const iso = typeof toIso === 'function' ? toIso(value) : String(value ?? '')
-    if (!iso) return ''
-    const date = new Date(iso)
-    if (!Number.isFinite(date.getTime())) return ''
-    return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+    return iso ? preciseTimeInputValue(iso) : ''
   }
 
   function localDateTimeToIso(dateValue, timeValue) {
@@ -3205,36 +3207,35 @@ export function createWorkerAccountFeature(ctx) {
     }
   }
 
-  function openWorkerAccountDayEditor(dayKey) {
+  function openWorkerAccountDayEditor(dayKey, options = {}) {
     if (!canAdministerWorkers()) return
     const worker = resolveCurrentWorker()
     if (!worker) return
     if (!guardWorkerAccountOwnTimeEdit(worker)) return
     const item = findWorkerAccountTimeRow(dayKey)
-    const sourceRows = Array.isArray(item?.sourceRows) ? item.sourceRows : []
+    const requestedWorkdayId = String(options?.workdayId ?? '').trim()
+    const sourceRows = timeEditorSourceRows(item, requestedWorkdayId)
     if (!item || !sourceRows.length) {
       showTransientNotice('Nie znaleziono rekordow Workday dla tego dnia.', 'error')
       return
     }
 
-    appState.workerAccountDayEditorItem = { ...item, mode: 'edit', sourceRows }
-    setInputValue('waDayDateInput', isoToDateInput(item.dayKey || item.startAt || item.endAt))
-    setInputValue('waDayStartTime', isoToTimeInput(item.startAt) || '00:00')
-    setInputValue('waDayEndTime', isoToTimeInput(item.endAt))
-    setInputValue('waDayComment', item.comment || '')
+    const editorItem = requestedWorkdayId
+      ? aggregateTimeRows(sourceRows, worker)[0] ?? item
+      : item
+    appState.workerAccountDayEditorItem = {
+      ...editorItem,
+      mode: 'edit',
+      requestedWorkdayId,
+      sourceRows,
+    }
+    setInputValue('waDayDateInput', isoToDateInput(editorItem.dayKey || editorItem.startAt || editorItem.endAt))
+    setInputValue('waDayStartTime', isoToTimeInput(editorItem.startAt) || '00:00')
+    setInputValue('waDayEndTime', isoToTimeInput(editorItem.endAt))
+    setInputValue('waDayComment', editorItem.comment || '')
     updateWorkerAccountDayPreview()
     setWorkerAccountDayEditorOpen(true)
     setTimeout(() => document.getElementById('waDayDateInput')?.focus?.(), 0)
-  }
-
-  function workerAccountSourceRowsContainWorkdayId(row = {}, workdayId = '') {
-    const normalizedWorkdayId = String(workdayId ?? '').trim()
-    if (!normalizedWorkdayId) return true
-    const sourceRows = Array.isArray(row?.sourceRows) ? row.sourceRows : []
-    return sourceRows.some((source) => {
-      const sourceId = String(source?.workdayId ?? source?.id ?? '').trim()
-      return sourceId && sourceId === normalizedWorkdayId
-    })
   }
 
   function maybeOpenWorkerAccountPendingTimeEditor() {
@@ -3242,10 +3243,7 @@ export function createWorkerAccountFeature(ctx) {
     if (!intent || appState.workerAccountActiveTab !== 'time') return false
 
     const rows = Array.isArray(appState.workerAccountTimeRows) ? appState.workerAccountTimeRows : []
-    const item =
-      rows.find((row) => String(row?.dayKey ?? '').trim() === intent.dayKey && workerAccountSourceRowsContainWorkdayId(row, intent.workdayId)) ??
-      rows.find((row) => String(row?.dayKey ?? '').trim() === intent.dayKey) ??
-      null
+    const item = findPendingTimeEditorItem(rows, intent)
 
     appState.workerAccountPendingTimeEditor = null
     if (!item) {
@@ -3253,7 +3251,7 @@ export function createWorkerAccountFeature(ctx) {
       return false
     }
 
-    openWorkerAccountDayEditor(item.dayKey)
+    openWorkerAccountDayEditor(item.dayKey, { workdayId: intent.workdayId })
     return true
   }
 

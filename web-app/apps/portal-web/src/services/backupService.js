@@ -4,7 +4,6 @@ import {
   clientsForOrg,
   deleteClientStorageForOrg,
   deleteClientForOrg,
-  deleteEventForOrg,
   deleteIndividualJobForOrg,
   deleteStorageForOrg,
   deleteWorkdayForOrg,
@@ -13,7 +12,6 @@ import {
   individualJobsForOrg,
   insertClientStorageForOrg,
   insertClientForOrg,
-  insertEventForOrg,
   insertIndividualJobForOrg,
   insertStorageForOrg,
   insertWorkdayForOrg,
@@ -23,7 +21,6 @@ import {
   storageForOrg,
   updateClientStorageForOrg,
   updateClientForOrg,
-  updateEventForOrg,
   updateIndividualJobForOrg,
   updateStorageForOrg,
   updateWorkdayForOrg,
@@ -44,8 +41,9 @@ import {
 } from './styleService'
 import { deletePortalTasks, fetchPortalTasks, upsertPortalTasks } from './portalTaskService'
 import { restoreWorkersFromBackup } from './workerService'
+import { validateEventRestoreRows } from './eventBackupPolicy'
 
-const BACKUP_SCHEMA_VERSION = '1.0.0'
+const BACKUP_SCHEMA_VERSION = '1.1.0'
 const BACKUP_DB_NAME = 'portal-backups'
 const BACKUP_DB_VERSION = 1
 const BACKUP_STORE_NAME = 'archives'
@@ -87,7 +85,7 @@ const PROVIDER_REGISTRY = [
   { id: 'events', label: 'Zdarzenia', types: ['full', 'workers', 'objects'] },
   { id: 'portalTasks', label: 'Zadania portalu', types: ['full'] },
   { id: 'calendarTasks', label: 'Kalendarz lokalny', types: ['full'] },
-  { id: 'kanbanColumns', label: 'Kolumny Kanban', types: ['full'] },
+  { id: 'kanbanColumns', label: 'Kolumny Centrum zadań', types: ['full'] },
   { id: 'uiPreferences', label: 'Preferencje widoku', types: ['full'] },
 ]
 
@@ -1844,68 +1842,11 @@ async function restoreWorkdayPausesModule(orgId, rows) {
 }
 
 async function restoreEventsModule(orgId, rows) {
-  const importedRows = Array.isArray(rows) ? rows : []
-  const currentResponse = await eventsForOrg({ orgId })
-  const currentRows = currentResponse?.data?.events ?? []
-  const currentMap = mapRowsByKey(currentRows, 'eventId')
-  const importedMap = mapRowsByKey(importedRows, 'eventId')
-
-  let created = 0
-  let updated = 0
-  let deleted = 0
-  let skipped = 0
-
-  for (const row of importedRows) {
-    const eventId = roleSafeText(row?.eventId)
-    if (!eventId) {
-      skipped += 1
-      continue
-    }
-
-    const payload = {
-      orgId,
-      eventId,
-      workdayId: toNullableText(row?.workdayId),
-      zoneId: toNullableText(row?.zoneId),
-      workerLogin: toNullableText(row?.workerLogin),
-      workerName: toNullableText(row?.workerName),
-      startAt: toNullableText(row?.startAt),
-      endAt: toNullableText(row?.endAt),
-      durationSec: Number.isFinite(Number(row?.durationSec)) ? Number(row.durationSec) : null,
-      status: toNullableText(row?.status),
-      closeMarkedAt: toNullableText(row?.closeMarkedAt),
-      endReason: toNullableText(row?.endReason),
-      comment: toNullableText(row?.comment),
-      deviceId: toNullableText(row?.deviceId),
-      startEventId: toNullableText(row?.startEventId),
-      endEventId: toNullableText(row?.endEventId),
-    }
-
-    if (currentMap.has(eventId)) {
-      await updateEventForOrg(payload)
-      updated += 1
-    } else {
-      await insertEventForOrg(payload)
-      created += 1
-    }
-  }
-
-  for (const row of currentRows) {
-    const eventId = roleSafeText(row?.eventId)
-    if (!eventId || importedMap.has(eventId)) {
-      continue
-    }
-    await deleteEventForOrg({ orgId, eventId })
-    deleted += 1
-  }
-
-  return {
-    moduleId: 'events',
-    created,
-    updated,
-    deleted,
-    skipped,
-  }
+  void orgId
+  void rows
+  throw new Error(
+    'Odtwarzanie modułu Zdarzenia jest chwilowo zablokowane. Korelacja z planem musi zostać zweryfikowana atomowo po stronie serwera; nie wykonano żadnych zmian.',
+  )
 }
 
 async function restorePortalTasksModule(orgId, rows) {
@@ -2074,6 +2015,18 @@ async function restoreFromParsedArchive({ orgId, parsed, restoredBy, sourceLabel
   const moduleIds = sortRestoreModules(Object.keys(modulePayloads).filter((id) => RESTORE_HANDLERS[id]))
   if (!moduleIds.length) {
     throw new Error('Backup nie zawiera wspieranych modułów do odtworzenia.')
+  }
+
+  if (moduleIds.includes('events')) {
+    const eventIntegrityIssues = validateEventRestoreRows(modulePayloads.events)
+    if (eventIntegrityIssues.length) {
+      throw new Error(
+        `Nie można bezpiecznie odtworzyć zdarzeń: ${eventIntegrityIssues.join(' ')}`,
+      )
+    }
+    throw new Error(
+      'Odtwarzanie modułu Zdarzenia jest chwilowo zablokowane. Korelacja z planem musi zostać zweryfikowana atomowo po stronie serwera; nie wykonano żadnych zmian.',
+    )
   }
 
   const preRestore = await createPreRestoreSnapshot(orgId, restoredBy, sourceLabel || 'restore')

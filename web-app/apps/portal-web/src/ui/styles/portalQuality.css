@@ -1,0 +1,689 @@
+/* =========================================================
+   Cleanzi portal quality layer
+   Uses Contract Profitability as the visual reference.
+   This file is loaded last so feature logic and DOM hooks stay untouched.
+   ========================================================= */
+
+#portalRoot {
+  --portal-quality-bg: #f5f7fb;
+  --portal-quality-surface: #ffffff;
+  --portal-quality-surface-soft: #fbfcff;
+  --portal-quality-border: #dce4f1;
+  --portal-quality-border-soft: #e7ebf2;
+  --portal-quality-heading: #162035;
+  --portal-quality-text: #34405a;
+  --portal-quality-muted: #69758c;
+  --portal-quality-primary: #6567ed;
+  --portal-quality-primary-hover: #5558dc;
+  --portal-quality-primary-soft: #f3f0ff;
+  --portal-quality-success: #12835a;
+  --portal-quality-warning: #b36a10;
+  --portal-quality-danger: #d13f48;
+  --portal-quality-radius: 17px;
+  --portal-quality-control-radius: 10px;
+  --portal-quality-shadow: 0 10px 28px rgba(28, 46, 78, 0.055);
+}
+
+#portalRoot .content-shell {
+  background:
+    radial-gradient(circle at 9% 2%, rgba(95, 99, 255, 0.055), transparent 26%),
+    var(--portal-quality-bg);
+}
+
+#portalRoot .header {
+  border-color: rgba(215, 223, 237, 0.86) !important;
+  box-shadow: 0 8px 24px rgba(28, 46, 78, 0.075) !important;
+}
+
+#portalRoot .main > section:not(#view-contractProfitability),
+#portalRoot #view-calendar .calendar-page,
+#portalRoot #view-ordersMap .orders-map-page,
+#portalRoot #view-reports .reports-wrap {
+  width: min(100%, 1540px);
+  margin-right: auto !important;
+  margin-left: auto !important;
+}
+
+#portalRoot :is(
+  #view-dashboard,
+  #view-events,
+  #view-orders,
+  #view-ordersMap,
+  #view-calendar,
+  #view-clientProfile,
+  #view-workerProfile,
+  #view-workerTime,
+  #view-zones,
+  #view-audits,
+  #view-reports,
+  #view-settings
+) {
+  color: var(--portal-quality-text);
+}
+
+#portalRoot :is(
+  #view-dashboard,
+  #view-events,
+  #view-orders,
+  #view-ordersMap,
+  #view-calendar,
+  #view-clientProfile,
+  #view-workerProfile,
+  #view-workerTime,
+  #view-zones,
+  #view-audits,
+  #view-reports,
+  #view-settings
+) > :first-child,
+#portalRoot #view-calendar .calendar-page,
+#portalRoot #view-ordersMap .orders-map-page,
+#portalRoot #view-reports .reports-wrap {
+  box-sizing: border-box;
+}
+
+#portalRoot .portal-page-legacy-heading {
+  display: none !important;
+}
+
+#portalRoot .portal-page-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 104px;
+  margin: 0 0 16px;
+  padding: 20px 22px;
+  border: 1px solid var(--portal-quality-border);
+  border-radius: 18px;
+  background: var(--portal-quality-surface);
+  box-shadow: var(--portal-quality-shadow);
+}
+
+#portalRoot .portal-page-hero--compact {
+  min-height: 92px;
+}
+
+#portalRoot .portal-page-hero__copy {
+  min-width: 0;
+}
+
+#portalRoot .portal-page-hero__title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+#portalRoot .portal-page-hero h1 {
+  margin: 0;
+  color: var(--portal-quality-heading);
+  font-size: clamp(23px, 2.1vw, 31px);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+}
+
+#portalRoot .portal-page-hero p {
+  max-width: 780px;
+  margin: 6px 0 0;
+  color: var(--portal-quality-muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+#portalRoot .portal-page-hero__badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 4px 9px;
+  border: 1px solid #d8d1ff;
+  border-radius: 999px;
+  background: var(--portal-quality-primary-soft);
+  color: #6654d9;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+#portalRoot :is(
+  .card,
+  .toolbar,
+  .fido-card,
+  .events-table,
+  .workers-table,
+  .zones-table,
+  .io-table,
+  .rep-panel,
+  .rep-kpi-card,
+  .rep-chart-panel,
+  .rep-chart-card,
+  .rep-tablewrap,
+  .report-tile,
+  .orders-card,
+  .orders-map-filters,
+  .orders-map-search-card,
+  .cp-cooperation-card,
+  .cp-table,
+  .settings-style-status,
+  .settings-style-card
+) {
+  border-color: var(--portal-quality-border) !important;
+  border-radius: var(--portal-quality-radius) !important;
+  background: var(--portal-quality-surface) !important;
+  box-shadow: var(--portal-quality-shadow) !important;
+}
+
+#portalRoot :is(
+  input,
+  select,
+  textarea,
+  .fido-input,
+  .rep-row input,
+  .rep-row select,
+  .orders-tool input,
+  .orders-tool select
+):not([type="checkbox"]):not([type="radio"]) {
+  border-color: #d8e0ed !important;
+  border-radius: var(--portal-quality-control-radius) !important;
+  background: var(--portal-quality-surface-soft) !important;
+}
+
+#portalRoot :is(
+  input,
+  select,
+  textarea,
+  .fido-input,
+  .rep-row input,
+  .rep-row select,
+  .orders-tool input,
+  .orders-tool select
+):not([type="checkbox"]):not([type="radio"]):focus {
+  border-color: #7779ed !important;
+  box-shadow: 0 0 0 3px rgba(100, 103, 234, 0.11) !important;
+}
+
+#portalRoot :is(
+  .btn,
+  .btn2,
+  .btn-fido,
+  .mini-btn,
+  .rep-btn,
+  .reports-back,
+  .icon-btn,
+  .orders-filter-clear,
+  .orders-refresh-btn,
+  .orders-search-btn
+) {
+  border-radius: var(--portal-quality-control-radius) !important;
+}
+
+#portalRoot :is(
+  .btn.primary,
+  .btn2.primary,
+  .btn-primary,
+  .rep-btn.primary,
+  .orders-search-btn
+) {
+  border-color: var(--portal-quality-primary) !important;
+  background: var(--portal-quality-primary) !important;
+  color: #fff !important;
+  box-shadow: 0 7px 16px rgba(83, 87, 220, 0.2) !important;
+}
+
+#portalRoot :is(
+  .btn.primary,
+  .btn2.primary,
+  .btn-primary,
+  .rep-btn.primary,
+  .orders-search-btn
+):hover {
+  border-color: var(--portal-quality-primary-hover) !important;
+  background: var(--portal-quality-primary-hover) !important;
+}
+
+#portalRoot :is(
+  button,
+  input,
+  select,
+  textarea,
+  [tabindex]:not([tabindex="-1"])
+):focus-visible {
+  outline: 3px solid rgba(88, 92, 225, 0.24);
+  outline-offset: 2px;
+}
+
+/* KPI cards share the same proportion and hierarchy as profitability metrics. */
+#portalRoot :is(
+  .orders-kpi-grid,
+  .worker-profile-kpi-grid,
+  .zones-kpi-grid,
+  .rep-kpi-grid
+) {
+  gap: 10px !important;
+  margin-bottom: 16px !important;
+}
+
+#portalRoot :is(
+  .orders-kpi-card,
+  .worker-profile-kpi-card,
+  .zones-kpi-card,
+  .rep-kpi-card
+) {
+  min-height: 116px !important;
+  padding: 16px !important;
+  border: 1px solid var(--portal-quality-border) !important;
+  border-radius: 15px !important;
+  background: var(--portal-quality-surface) !important;
+  box-shadow: var(--portal-quality-shadow) !important;
+}
+
+#portalRoot :is(
+  .orders-kpi-label,
+  .worker-profile-kpi-label,
+  .zones-kpi-label,
+  .rep-kpi-card .k
+) {
+  color: #59657c !important;
+  font-size: 11px !important;
+  font-weight: 750 !important;
+}
+
+#portalRoot :is(
+  .orders-kpi-card,
+  .worker-profile-kpi-card,
+  .zones-kpi-card,
+  .rep-kpi-card
+) strong,
+#portalRoot .rep-kpi-card .v {
+  color: var(--portal-quality-heading) !important;
+  font-size: clamp(20px, 2vw, 28px) !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  letter-spacing: -0.035em !important;
+}
+
+#portalRoot :is(
+  .orders-kpi-card,
+  .worker-profile-kpi-card,
+  .zones-kpi-card,
+  .rep-kpi-card
+) span {
+  color: #657087 !important;
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+}
+
+/* Filters and data panels. */
+#portalRoot #view-events > .toolbar {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(150px, 1fr)) !important;
+  gap: 10px !important;
+  padding: 14px !important;
+  border-radius: 16px !important;
+}
+
+#portalRoot #view-events > .toolbar .tool,
+#portalRoot #view-events > .toolbar .tool[style*="min-width"] {
+  min-width: 0 !important;
+  max-width: none !important;
+}
+
+#portalRoot #view-events > .toolbar .tool-actions {
+  grid-column: 1 / -1 !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  flex-wrap: wrap !important;
+  padding-top: 3px !important;
+}
+
+#portalRoot :is(
+  #view-events .events-table,
+  #view-workerTime .events-table,
+  #view-clientProfile .cp-table,
+  #view-orders .orders-table-card
+) {
+  overflow: hidden !important;
+  border-radius: 17px !important;
+}
+
+#portalRoot :is(
+  #view-events .events-head,
+  #view-workerTime .events-head,
+  #view-clientProfile .cp-head,
+  #view-orders .orders-head
+) {
+  background: #f8f9fc !important;
+  color: #5f6a7e !important;
+  font-size: 11px !important;
+  font-weight: 850 !important;
+  letter-spacing: 0.035em !important;
+  text-transform: uppercase !important;
+}
+
+#portalRoot :is(
+  #view-events .events-row,
+  #view-workerTime .events-row,
+  #view-clientProfile .cp-row,
+  #view-orders .orders-row
+) {
+  border-color: #edf0f5 !important;
+}
+
+#portalRoot :is(
+  #view-events .events-row,
+  #view-workerTime .events-row,
+  #view-clientProfile .cp-row,
+  #view-orders .orders-row
+):hover {
+  background: #f6f7ff !important;
+}
+
+#portalRoot #view-clientProfile .cp-cooperation-card,
+#portalRoot #view-orders .orders-model-card {
+  padding: 17px !important;
+}
+
+#portalRoot :is(
+  #view-clientProfile .cp-cooperation-option,
+  #view-orders .orders-model-option
+) {
+  border-radius: 12px !important;
+}
+
+#portalRoot :is(
+  #view-clientProfile .cp-cooperation-option.is-active,
+  #view-orders .orders-model-option.is-active
+) {
+  border-color: #8b8df0 !important;
+  background: #f8f7ff !important;
+  box-shadow: 0 0 0 3px rgba(100, 103, 234, 0.08) !important;
+}
+
+#portalRoot #view-reports .reports-grid--dashboard {
+  gap: 12px !important;
+}
+
+#portalRoot #view-reports .report-tile {
+  min-height: 132px !important;
+  padding: 18px !important;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease !important;
+}
+
+#portalRoot #view-reports .report-tile:hover {
+  border-color: #cfd4ff !important;
+  box-shadow: 0 14px 32px rgba(28, 46, 78, 0.09) !important;
+  transform: translateY(-2px);
+}
+
+#portalRoot #view-settings .settings-tabs {
+  display: inline-flex !important;
+  gap: 3px !important;
+  padding: 4px !important;
+  border: 1px solid var(--portal-quality-border-soft) !important;
+  border-radius: 12px !important;
+  background: #eef1f6 !important;
+}
+
+#portalRoot #view-settings .settings-tab {
+  min-height: 36px !important;
+  padding: 0 13px !important;
+  border: 0 !important;
+  border-radius: 9px !important;
+  background: transparent !important;
+}
+
+#portalRoot #view-settings .settings-tab.active {
+  background: #fff !important;
+  color: #5255d4 !important;
+  box-shadow: 0 2px 7px rgba(26, 39, 65, 0.1) !important;
+}
+
+#portalRoot #view-calendar .fw-timeline-card {
+  overflow: hidden !important;
+  border: 1px solid var(--portal-quality-border) !important;
+  border-radius: 17px !important;
+  background: var(--portal-quality-surface) !important;
+  box-shadow: var(--portal-quality-shadow) !important;
+}
+
+#portalRoot #view-calendar .fw-calendar-toolbar {
+  border-color: var(--portal-quality-border-soft) !important;
+  background: #fbfcff !important;
+}
+
+#portalRoot #view-kanban .kanban-home-card,
+#portalRoot #view-kanban .kanban-workbar,
+#portalRoot #view-kanban .kanban-board-header,
+#portalRoot #view-kanban .kanban-board {
+  border-color: var(--portal-quality-border) !important;
+  border-radius: var(--portal-quality-radius) !important;
+  box-shadow: var(--portal-quality-shadow) !important;
+}
+
+#portalRoot #view-dashboard {
+  display: grid;
+  gap: 16px;
+}
+
+#portalRoot #view-dashboard .portal-page-hero {
+  margin-bottom: 0;
+}
+
+#portalRoot #view-dashboard :is(
+  .dash-overview-panel,
+  .dash-insights-panel,
+  .dash-contract-profitability
+) {
+  border-color: var(--portal-quality-border) !important;
+  border-radius: var(--portal-quality-radius) !important;
+  box-shadow: var(--portal-quality-shadow) !important;
+}
+
+@media (max-width: 1280px) {
+  #portalRoot #view-events > .toolbar {
+    grid-template-columns: repeat(3, minmax(150px, 1fr)) !important;
+  }
+}
+
+@media (max-width: 900px) {
+  #portalRoot .portal-page-hero {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  #portalRoot #view-events > .toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  #portalRoot :is(
+    .orders-kpi-grid,
+    .worker-profile-kpi-grid,
+    .zones-kpi-grid,
+    .rep-kpi-grid
+  ) {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  #portalRoot .content-shell {
+    padding: 8px !important;
+  }
+
+  #portalRoot .header {
+    margin-bottom: 8px !important;
+    border-radius: 14px !important;
+  }
+
+  #portalRoot .topbar-action-btn,
+  #portalRoot .subscription-chip,
+  #portalRoot .organization-chip {
+    display: none !important;
+  }
+
+  #portalRoot .user-chip {
+    max-width: 42px !important;
+    padding-right: 5px !important;
+  }
+
+  #portalRoot .user-chip .name,
+  #portalRoot .user-chip .dot {
+    display: none !important;
+  }
+
+  #portalRoot.sidebar-collapsed .sidebar {
+    display: grid !important;
+    grid-template-columns: minmax(74px, 1fr) auto auto !important;
+    align-items: center !important;
+    gap: 8px !important;
+    margin: 8px !important;
+    max-width: calc(100% - 16px) !important;
+    width: calc(100% - 16px) !important;
+    padding: 8px 10px !important;
+  }
+
+  #portalRoot.sidebar-collapsed .sidebar-brand {
+    justify-content: flex-start !important;
+    margin: 0 !important;
+  }
+
+  #portalRoot.sidebar-collapsed .sidebar-brand-logo,
+  #portalRoot.sidebar-collapsed .sidebar .logo-block--cleanzi {
+    max-width: 104px !important;
+  }
+
+  #portalRoot.sidebar-collapsed .sidebar-brand-logo img,
+  #portalRoot.sidebar-collapsed .sidebar .logo-block--cleanzi img {
+    max-height: 30px !important;
+    max-width: 104px !important;
+  }
+
+  #portalRoot.sidebar-collapsed .menu-order-add,
+  #portalRoot.sidebar-collapsed .sidebar > .menu-order-add {
+    grid-column: 2;
+    margin: 0 !important;
+    width: 42px !important;
+  }
+
+  #portalRoot.sidebar-collapsed .sidebar-head {
+    grid-column: 3;
+    margin: 0 !important;
+  }
+
+  #portalRoot.sidebar-collapsed .sidebar .menu {
+    display: none !important;
+  }
+
+  #portalRoot :is(
+    #view-dashboard,
+    #view-events,
+    #view-orders,
+    #view-ordersMap,
+    #view-calendar,
+    #view-clientProfile,
+    #view-workerProfile,
+    #view-workerTime,
+    #view-zones,
+    #view-audits,
+    #view-reports,
+    #view-settings
+  ) {
+    padding-right: 2px !important;
+    padding-left: 2px !important;
+  }
+
+  #portalRoot .portal-page-hero {
+    min-height: 0;
+    margin-bottom: 12px;
+    padding: 17px;
+    border-radius: 14px;
+  }
+
+  #portalRoot .portal-page-hero h1 {
+    font-size: 23px;
+  }
+
+  #portalRoot .portal-page-hero p {
+    font-size: 12px;
+  }
+
+  #portalRoot #view-calendar .fw-calendar-toolbar {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+
+  #portalRoot #view-calendar :is(.fw-toolbar-left, .fw-toolbar-right) {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+  }
+
+  #portalRoot #view-events > .toolbar {
+    grid-template-columns: minmax(0, 1fr) !important;
+    padding: 12px !important;
+  }
+
+  #portalRoot #view-events > .toolbar .tool-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  #portalRoot #view-events > .toolbar .tool-actions .btn2 {
+    width: 100% !important;
+  }
+
+  #portalRoot :is(
+    .orders-kpi-grid,
+    .worker-profile-kpi-grid,
+    .zones-kpi-grid,
+    .rep-kpi-grid
+  ) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #portalRoot :is(
+    .orders-kpi-card,
+    .worker-profile-kpi-card,
+    .zones-kpi-card,
+    .rep-kpi-card
+  ) {
+    min-height: 96px !important;
+  }
+
+  #portalRoot :is(
+    #view-events .events-table,
+    #view-workerTime .events-table,
+    #view-clientProfile .cp-table,
+    #view-orders .orders-table-card
+  ) {
+    overflow-x: auto !important;
+  }
+
+  #portalRoot #view-reports .reports-grid--dashboard {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 480px) {
+  #portalRoot .header-right {
+    gap: 5px !important;
+  }
+
+  #portalRoot #logoutBtn {
+    min-height: 38px !important;
+    padding: 7px 9px !important;
+    font-size: 12px !important;
+  }
+
+  #portalRoot #view-events > .toolbar .tool-actions {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #portalRoot .portal-page-hero__title-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+  }
+}

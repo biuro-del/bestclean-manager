@@ -315,6 +315,9 @@ type Task @table(
   organization: Organization! @ref(fields: "orgId", references: "orgId")
 
   idTask: String! @col(name: "id_task", dataType: "varchar(180)")
+  lifecycleStatus: String! @col(name: "lifecycle_status", dataType: "varchar(20)") @default(value: "ACTIVE")
+  cancelledAt: Timestamp @col(name: "cancelled_at")
+  archivedAt: Timestamp @col(name: "archived_at")
 
   dateYmd: String @col(name: "date_ymd", dataType: "varchar(10)")
   startTime: String @col(name: "start_time", dataType: "varchar(5)")
@@ -382,6 +385,7 @@ type Workday @table(
 )
 @index(name: "workday_org_start_idx", fields: ["orgId", "startAt"], order: [ASC, DESC])
 @index(name: "workday_org_updated_idx", fields: ["orgId", "updatedAt"], order: [ASC, DESC])
+@index(name: "workday_org_updated_id_idx", fields: ["orgId", "updatedAt", "workdayId"], order: [ASC, DESC, DESC])
 @index(name: "workday_org_worker_start_idx", fields: ["orgId", "workerLogin", "startAt"])
 @index(name: "workday_org_room_start_idx", fields: ["orgId", "utilityRoomId", "startAt"])
 @index(name: "workday_org_status_start_idx", fields: ["orgId", "status", "startAt"]) {
@@ -499,9 +503,13 @@ type Event @table(
 )
 @index(name: "event_org_start_idx", fields: ["orgId", "startAt"], order: [ASC, DESC])
 @index(name: "event_org_updated_idx", fields: ["orgId", "updatedAt"], order: [ASC, DESC])
+@index(name: "event_org_updated_id_idx", fields: ["orgId", "updatedAt", "eventId"], order: [ASC, DESC, DESC])
 @index(name: "event_org_worker_start_idx", fields: ["orgId", "workerLogin", "startAt"])
 @index(name: "event_org_zone_start_idx", fields: ["orgId", "zoneId", "startAt"])
-@index(name: "event_org_status_start_idx", fields: ["orgId", "status", "startAt"]) {
+@index(name: "event_org_status_start_idx", fields: ["orgId", "status", "startAt"])
+@index(name: "event_org_task_occurrence_idx", fields: ["orgId", "taskId", "occurrenceDateYmd", "startAt"], order: [ASC, ASC, ASC, DESC])
+@index(name: "event_org_plan_slot_idx", fields: ["orgId", "taskId", "occurrenceDateYmd", "serviceBlockId", "allocationId", "workSlotKey"])
+@index(name: "event_org_match_status_updated_idx", fields: ["orgId", "matchStatus", "updatedAt"], order: [ASC, ASC, DESC]) {
   orgId: String! @col(name: "org_id", dataType: "varchar(64)")
   organization: Organization! @ref(fields: "orgId", references: "orgId")
 
@@ -512,6 +520,23 @@ type Event @table(
 
   zoneId: String @col(name: "zone_id", dataType: "varchar(64)")
   zone: Zone @ref(fields: ["orgId", "zoneId"], references: ["orgId", "zoneId"])
+
+  taskId: String @col(name: "task_id", dataType: "varchar(180)")
+  occurrenceDateYmd: String @col(name: "occurrence_date_ymd", dataType: "varchar(10)")
+  serviceBlockId: String @col(name: "service_block_id", dataType: "varchar(180)")
+  allocationId: String @col(name: "allocation_id", dataType: "varchar(180)")
+  workSlotKey: String @col(name: "work_slot_key", dataType: "varchar(255)")
+  eventType: String @col(name: "event_type", dataType: "varchar(32)")
+
+  matchStatus: String @col(name: "match_status", dataType: "varchar(16)")
+  matchMethod: String @col(name: "match_method", dataType: "varchar(64)")
+  matchReason: String @col(name: "match_reason")
+  matchedAt: Timestamp @col(name: "matched_at")
+  planSnapshotVersion: Int @col(name: "plan_snapshot_version")
+  plannedStartAt: Timestamp @col(name: "planned_start_at")
+  plannedEndAt: Timestamp @col(name: "planned_end_at")
+  plannedDurationMinutes: Int @col(name: "planned_duration_minutes")
+  taskUpdatedAtSnapshot: Timestamp @col(name: "task_updated_at_snapshot")
 
   workerLogin: String @col(name: "worker_login", dataType: "varchar(80)")
   workerName: String @col(name: "worker_name")

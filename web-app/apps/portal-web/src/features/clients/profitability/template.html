@@ -1,0 +1,216 @@
+<section class="cpf-shell" aria-labelledby="cpfTitle">
+  <div class="cpf-access" id="cpfAccessState" hidden></div>
+
+  <div class="cpf-workspace" id="cpfWorkspace">
+    <header class="cpf-toolbar">
+      <div>
+        <h3 id="cpfTitle">Koszty i rentowność</h3>
+        <p>Wynik klienta i porównanie obiektów w wybranym okresie.</p>
+      </div>
+      <div class="cpf-toolbar-controls">
+        <label class="cpf-control">
+          <span>Okres</span>
+          <input id="cpfPeriod" type="month" autocomplete="off" />
+        </label>
+        <label class="cpf-control cpf-control--object">
+          <span>Obiekt</span>
+          <select id="cpfObjectFilter">
+            <option value="">Wszystkie obiekty</option>
+          </select>
+        </label>
+        <button class="cpf-refresh" id="cpfRefreshBtn" type="button">Odśwież</button>
+      </div>
+    </header>
+
+    <div class="cpf-loading" id="cpfLoadingState" role="status" aria-live="polite" hidden>
+      <span class="cpf-spinner" aria-hidden="true"></span>
+      <span>Ładowanie danych finansowych…</span>
+    </div>
+
+    <div class="cpf-error" id="cpfErrorState" role="alert" hidden>
+      <strong>Nie udało się wczytać danych.</strong>
+      <span id="cpfErrorMessage"></span>
+      <button id="cpfErrorRetryBtn" type="button">Spróbuj ponownie</button>
+    </div>
+
+    <div class="cpf-content" id="cpfContent" hidden>
+      <div class="cpf-context-row">
+        <span class="cpf-quality-badge" id="cpfQualityBadge">Sprawdzanie kompletności</span>
+        <span class="cpf-context-note" id="cpfContextNote"></span>
+      </div>
+
+      <div class="cpf-metrics" aria-label="Podsumowanie finansowe klienta">
+        <article class="cpf-metric">
+          <span>Przychód netto</span>
+          <strong id="cpfMetricRevenue">—</strong>
+          <small id="cpfMetricRevenueMeta">Wybrany okres</small>
+        </article>
+        <article class="cpf-metric">
+          <span>Koszt całkowity</span>
+          <strong id="cpfMetricCost">—</strong>
+          <small id="cpfMetricCostMeta">Bez brakujących danych</small>
+        </article>
+        <article class="cpf-metric">
+          <span>Koszt pracy</span>
+          <strong id="cpfMetricLabor">—</strong>
+          <small id="cpfMetricLaborMeta">Na podstawie START/STOP</small>
+        </article>
+        <article class="cpf-metric">
+          <span>Marża</span>
+          <strong id="cpfMetricMargin">—</strong>
+          <small id="cpfMetricMarginMeta">Przychód minus koszty</small>
+        </article>
+        <article class="cpf-metric">
+          <span>Rentowność</span>
+          <strong id="cpfMetricProfitability">—</strong>
+          <small id="cpfMetricProfitabilityMeta">Nie można obliczyć</small>
+        </article>
+        <article class="cpf-metric">
+          <span>Kompletność danych</span>
+          <strong id="cpfMetricCompleteness">—</strong>
+          <small id="cpfMetricCompletenessMeta">Weryfikacja danych źródłowych</small>
+        </article>
+      </div>
+
+      <section class="cpf-warning" id="cpfWarningPanel" aria-labelledby="cpfWarningTitle" hidden>
+        <div>
+          <strong id="cpfWarningTitle">Dane wymagają uzupełnienia</strong>
+          <p id="cpfWarningSummary"></p>
+        </div>
+        <button id="cpfWarningDetailsBtn" type="button">Zobacz szczegóły</button>
+      </section>
+
+      <div class="cpf-grid">
+        <section class="cpf-panel cpf-panel--comparison" aria-labelledby="cpfComparisonTitle">
+          <header class="cpf-panel-head">
+            <div>
+              <h4 id="cpfComparisonTitle">Porównanie obiektów</h4>
+              <p id="cpfObjectCount">0 obiektów</p>
+            </div>
+          </header>
+          <div class="cpf-table-wrap">
+            <table class="cpf-table">
+              <thead>
+                <tr>
+                  <th scope="col">Obiekt</th>
+                  <th scope="col">Przychód</th>
+                  <th scope="col">Praca</th>
+                  <th scope="col">Materiały</th>
+                  <th scope="col">Inne koszty</th>
+                  <th scope="col">Marża</th>
+                  <th scope="col">Jakość danych</th>
+                </tr>
+              </thead>
+              <tbody id="cpfObjectRows"></tbody>
+              <tfoot id="cpfObjectTotals"></tfoot>
+            </table>
+          </div>
+          <div class="cpf-empty" id="cpfObjectsEmpty" hidden>
+            <strong>Brak obiektów finansowych.</strong>
+            <p>Najpierw dodaj obiekt klienta lub powiąż istniejącą lokalizację z obiektem rozliczeniowym.</p>
+          </div>
+        </section>
+
+        <section class="cpf-panel cpf-panel--breakdown" aria-labelledby="cpfBreakdownTitle">
+          <header class="cpf-panel-head cpf-panel-head--actions">
+            <div>
+              <h4 id="cpfBreakdownTitle">Szczegóły obiektu</h4>
+              <p id="cpfSelectedObjectMeta">Wybierz obiekt z tabeli.</p>
+            </div>
+            <button class="cpf-secondary-action" id="cpfContractBtn" type="button">Umowa</button>
+          </header>
+          <div class="cpf-breakdown-list" id="cpfBreakdownRows"></div>
+          <div class="cpf-empty cpf-empty--compact" id="cpfBreakdownEmpty">
+            <strong>Nie wybrano obiektu.</strong>
+            <p>Wybierz wiersz po lewej, aby zobaczyć strukturę kosztów.</p>
+          </div>
+          <footer class="cpf-panel-actions">
+            <button class="cpf-primary-action" id="cpfAddCostBtn" type="button">Dodaj koszt</button>
+            <button class="cpf-secondary-action" id="cpfAddRevenueBtn" type="button">Dodaj przychód</button>
+            <button class="cpf-secondary-action" id="cpfWorkerRateBtn" type="button">Stawka pracownika</button>
+            <button class="cpf-secondary-action" id="cpfAssetBtn" type="button">Dodaj sprzęt</button>
+            <button class="cpf-link-action" id="cpfHistoryBtn" type="button">Historia zmian</button>
+            <button class="cpf-link-action" id="cpfObjectDetailsBtn" type="button">Szczegóły obiektu</button>
+          </footer>
+        </section>
+      </div>
+
+      <div class="cpf-analysis-grid">
+        <section class="cpf-panel" aria-labelledby="cpfPlanTitle">
+          <header class="cpf-panel-head cpf-panel-head--compact">
+            <div>
+              <h4 id="cpfPlanTitle">Plan a wykonanie</h4>
+              <p id="cpfPlanMeta">Czas i koszt pracy wybranego obiektu</p>
+            </div>
+          </header>
+          <div class="cpf-insight-body" id="cpfPlanExecution"></div>
+        </section>
+
+        <section class="cpf-panel" aria-labelledby="cpfTrendTitle">
+          <header class="cpf-panel-head cpf-panel-head--compact">
+            <div>
+              <h4 id="cpfTrendTitle">Trend rentowności</h4>
+              <p>Ostatnie 12 zamkniętych okresów</p>
+            </div>
+          </header>
+          <div class="cpf-insight-body" id="cpfTrendContent"></div>
+        </section>
+
+        <section class="cpf-panel" aria-labelledby="cpfRankingTitle">
+          <header class="cpf-panel-head cpf-panel-head--compact">
+            <div>
+              <h4 id="cpfRankingTitle">Ranking obiektów</h4>
+              <p id="cpfRankingMeta">Rentowne, poniżej celu i niepoliczalne</p>
+            </div>
+          </header>
+          <div class="cpf-insight-body" id="cpfRankingContent"></div>
+        </section>
+      </div>
+
+      <div class="cpf-detail-grid">
+        <section class="cpf-panel" aria-labelledby="cpfCostsTitle">
+          <header class="cpf-panel-head cpf-panel-head--compact">
+            <div>
+              <h4 id="cpfCostsTitle">Koszty obiektu</h4>
+              <p>Materiały, transport i pozostałe wpisy</p>
+            </div>
+          </header>
+          <div class="cpf-table-scroll" id="cpfCostsContent"></div>
+        </section>
+
+        <section class="cpf-panel" aria-labelledby="cpfPeriodicTitle">
+          <header class="cpf-panel-head cpf-panel-head--compact">
+            <div>
+              <h4 id="cpfPeriodicTitle">Prace okresowe i dodatkowe</h4>
+              <p>Przychód, koszt i marża bez podwójnego naliczania pracy</p>
+            </div>
+          </header>
+          <div class="cpf-table-scroll" id="cpfPeriodicContent"></div>
+        </section>
+      </div>
+
+      <p class="cpf-footnote" id="cpfFootnote">Kwoty netto. Obliczenia wykonuje backend.</p>
+    </div>
+  </div>
+</section>
+
+<div class="cpf-modal-layer" id="cpfModalLayer" hidden>
+  <div class="cpf-modal-backdrop" data-cpf-close-modal></div>
+  <section class="cpf-modal" role="dialog" aria-modal="true" aria-labelledby="cpfModalTitle">
+    <header class="cpf-modal-head">
+      <div>
+        <h3 id="cpfModalTitle">Edycja danych</h3>
+        <p id="cpfModalDescription"></p>
+      </div>
+      <button class="cpf-modal-close" type="button" data-cpf-close-modal aria-label="Zamknij">Zamknij</button>
+    </header>
+    <form id="cpfModalForm" novalidate>
+      <div class="cpf-modal-body" id="cpfModalBody"></div>
+      <p class="cpf-form-error" id="cpfModalError" role="alert" hidden></p>
+      <footer class="cpf-modal-actions">
+        <button class="cpf-secondary-action" type="button" data-cpf-close-modal>Anuluj</button>
+        <button class="cpf-primary-action" id="cpfModalSubmitBtn" type="submit">Zapisz</button>
+      </footer>
+    </form>
+  </section>
+</div>

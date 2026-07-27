@@ -241,7 +241,7 @@ function kanbanSaveColumns(columns = appState.kanbanColumns) {
   try {
     window.localStorage.setItem(kanbanColumnsStorageKey(), JSON.stringify(normalized))
   } catch {
-    showTransientNotice('Nie udało się zapisać kolumn Kanban w przeglądarce.', 'error')
+    showTransientNotice('Nie udało się zapisać kolumn Centrum zadań w przeglądarce.', 'error')
   }
   return normalized
 }
@@ -1121,7 +1121,7 @@ function kanbanMoveTask(taskId, status) {
       ? calendarNormalizeTask(
           calendarAppendTaskActivity(
             { ...task, kanbanStatus: nextStatus, updatedAt: changedAt },
-            'Przeniesiono w Kanbanie',
+            'Przeniesiono w Centrum zadań',
             `Kolumna: ${kanbanColumnLabel(task.kanbanStatus)} -> ${kanbanColumnLabel(nextStatus)}`,
             { at: changedAt },
           ),
@@ -1352,7 +1352,7 @@ function kanbanCreateTask(status = '') {
     if (toneInput && normalizedStatus === 'done') {
       toneInput.value = 'green'
     }
-    showTransientNotice('Dodaj zadanie w kalendarzu. Po zapisie pojawi się też w Kanbanie.')
+    showTransientNotice('Dodaj zadanie w kalendarzu. Po zapisie pojawi się też w Centrum zadań.')
   }, 0)
 }
 

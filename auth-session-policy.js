@@ -1,5 +1,7 @@
 'use strict'
 
+const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
+
 function toText(value) {
   return String(value ?? '').trim()
 }
@@ -98,7 +100,7 @@ function evaluateOrganizationAccess(row, now = new Date()) {
     ) {
       return deny('TRIAL_INACTIVE')
     }
-  } else if (planCode === 'START' || planCode === 'PRO') {
+  } else if (planCode === 'START' || planCode === 'PRO' || planCode === 'ENTERPRISE') {
     if (subscriptionStatus !== 'ACTIVE') {
       return deny('SUBSCRIPTION_INACTIVE')
     }
@@ -133,6 +135,23 @@ function buildSessionContext(uid, row) {
       ? toIsoTimestamp(row.trial_ends_at)
       : toIsoTimestamp(row.current_period_ends_at)
 
+  const profitabilityInput = {
+    requestOrgId: toText(row.org_id),
+    actor: {
+      uid: toText(uid),
+      role: toStatus(row.role),
+      activeOrgId: toText(row.org_id),
+      isFinanceAdmin: row.is_finance_admin === true,
+    },
+    subscription: {
+      planCode,
+      status: toStatus(row.subscription_status),
+    },
+    grants: row.profitability_grants,
+  }
+  const profitabilityRead = resolveProfitabilityAccess({ ...profitabilityInput, action: 'read' })
+  const profitabilityEdit = resolveProfitabilityAccess({ ...profitabilityInput, action: 'edit' })
+
   return {
     uid: toText(uid),
     activeOrgId: toText(row.org_id),
@@ -142,6 +161,15 @@ function buildSessionContext(uid, row) {
     planCode,
     subscriptionStatus: toStatus(row.subscription_status),
     subscriptionEndsAt,
+    capabilities: {
+      profitabilityModule: {
+        enabled: ['PRO', 'ENTERPRISE'].includes(planCode),
+        canRead: profitabilityRead.allowed,
+        canEdit: profitabilityEdit.allowed,
+        readCode: profitabilityRead.code,
+        editCode: profitabilityEdit.code,
+      },
+    },
   }
 }
 

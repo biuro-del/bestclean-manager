@@ -244,7 +244,7 @@ Aktualny wzorzec folderów:
 - `features/objects/zones`, `features/objects/audits`, `features/objects/checklists` - podsekcje obiektów.
 - `features/workers/worker_list_profile`, `features/workers/account`, `features/workers/time`, `features/workers/time-detail` - podsekcje pracowników.
 - `features/settings/styles` i `features/settings/backup` - podsekcje ustawień.
-- `features/dashboard`, `features/calendar`, `features/kanban`, `features/events`, `features/reports`, `features/schedule` - sekcje samodzielne.
+- `features/dashboard`, `features/calendar`, `features/kanban`, `features/events`, `features/reports` - sekcje samodzielne.
 
 Przy dodawaniu nowej sekcji lub podsekcji:
 - utwórz osobny folder w odpowiednim miejscu pod `features`;
@@ -271,9 +271,6 @@ Lista zleceń.
 
 `features/orders/map`
 Mapa zleceń/adresów. Może używać Google Maps, jeśli skonfigurowano `VITE_GOOGLE_MAPS_API_KEY`.
-
-`features/schedule`
-Grafik pracy / board harmonogramu.
 
 `features/events`
 Zdarzenia, workdays, eventy strefowe, komentarze i operacje na zdarzeniach.
@@ -2515,3 +2512,1352 @@ Uwagi:
 - Wdrozenie dotyczy wylacznie portalu desktopowego; aplikacja mobilna nie zostala zmieniona.
 - Nie zmieniono rekordow czasu pracy, zdarzen START/STOP ani danych pracownikow.
 - Katalogi kopii, pliki tymczasowe i raporty lokalne pozostaly poza commitem i wdrozeniem.
+Data: 2026-07-21
+Autor: AI Codex
+Dodano:
+- Nic.
+Zmieniono:
+- Usunięto z pulpitu stary panel „Grafik dnia” oparty na Google Sheets.
+- Pulpit nie inicjalizuje już odświeżania ani nie porównuje godzin START z danymi Google Sheets.
+- „Oś dnia” nadal korzysta z rzeczywistych zdarzeń i czasu pracy pobieranych przez API, a kalendarz zleceń nadal korzysta z `task` / Data Connect.
+Usunięto:
+- Widoczny panel starego grafiku dnia na pulpicie.
+- Zakładkę „Grafik pracy”, jej pozycję w menu i wyszukiwarce, route `schedule`, pusty widok oraz link do edytora Google Sheets.
+- Moduł `features/schedule` i style `.schedule-embed-*` używane wyłącznie przez usuniętą zakładkę.
+- Usługę `scheduleService.js` z odczytem JSONP `gviz/tq`, parserem i lokalnym cache arkusza.
+- Stan, odświeżanie, alerty, listenery i CSS używane wyłącznie przez stary panel.
+- Wyjątki `docs.google.com` z polityki CSP dla skryptów i ramek.
+Testy/sprawdzenia:
+- `node --check` dla serwera, dashboardu, layoutu, aplikacji portalu, routera, szablonów widoków i stanu: OK.
+- `npm.cmd --prefix web-app run build`: OK (Vite, 375 modulow).
+- `npm.cmd test`: OK, ale repozytorium nie zawiera obecnie testow automatycznych (0 testow).
+- ESLint plikow objetych zmiana: pozostaje 1 wczesniejszy, niezwiązany z grafikiem blad `no-unused-vars` dla `openDashboardActivityEventEditor` w dashboardzie.
+- Kontrola źródeł: brak `Grafik pracy`, `view-schedule`, `features/schedule`, `.schedule-embed-*`, adresu arkusza i odczytu `gviz/tq` w kanonicznym portalu.
+- Localhost po pełnym przeładowaniu: brak aktywnej sesji i widoczny ekran logowania; w zamontowanym DOM 0 elementów starej zakładki, brak zasobów Google Sheets oraz brak nowych błędów i ostrzeżeń konsoli.
+Uwagi dla następnej osoby:
+- Nie przywracać starego panelu ani pustej zakładki Google Sheets. Grafik zleceń pozostaje oparty na danych `task` / Data Connect.
+- Nie wykonano wdrożenia ani żadnej operacji na danych produkcyjnych.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Nowy modul Przeglad na pulpicie
+Dodano:
+- Cztery responsywne, nieinteraktywne karty informacyjne: Pracownicy, Obiekty, Zaplanowane zlecenia i Postep ogolny.
+- Pasek najblizszego zaplanowanego zlecenia z godzina, nazwa, przypisanymi pracownikami i liczba pozostalych zlecen.
+Zmieniono:
+- Pracownicy licza unikalne osoby z dzisiejszym aktywnym dniem pracy; stare niezamkniete dni nie zawyzaja wyniku.
+- Obiekty licza unikalne miejsca z rzeczywistych, rozpoczetych lub zakonczonych dzis prac widocznych na Osi dnia.
+- Zaplanowane zlecenia sa pobierane z kalendarza/Data Connect, rozwijaja cykle i sa deduplikowane po wystapieniu zlecenia, wiec wielu przypisanych pracownikow nie zawyza licznika.
+- Postep ogolny pozostaje jako neutralne `—%` do czasu ustalenia wzoru w kolejnym module; nie pokazuje wymyslonej wartosci.
+- Etapy ladowania pulpitu uproszczono po usunieciu starego panelu zadan, a wersje lokalnego snapshotu podniesiono do 3.
+Testy/sprawdzenia:
+- `node --check` dla dashboardu i layoutu: OK.
+- `git diff --check`: OK; tylko standardowe ostrzezenia CRLF.
+- `npm.cmd test`: OK, repozytorium nadal nie zawiera testow automatycznych (0 testow).
+- `npm.cmd --prefix web-app run build`: OK (Vite, 375 modulow).
+- Localhost na realnym odczycie tylko do odczytu pokazal: 6 aktywnych pracownikow, 2 aktywne/wysprzatane obiekty i 5 unikalnych zaplanowanych zlecen.
+- Sprawdzono desktop oraz breakpointy 1181/1180, 761/760 i 390 px; siatka kart nie powoduje wlasnego przewijania poziomego.
+- Targetowany ESLint nie wykazal nowych problemow; pozostaje wczesniejszy, niezalezny blad `no-unused-vars` dla `openDashboardActivityEventEditor`.
+Uwagi:
+- Nie zmieniono danych firmy, zlecen, czasu pracy ani zdarzen START/STOP.
+- Nie wykonano commita, pusha, wdrozenia ani zadnej operacji zapisujacej na produkcji.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Licznik historycznych dni bez QR STOP w module Przeglad
+Dodano:
+- Karte `Brak QR STOP` pomiedzy kartami `Pracownicy` i `Obiekty`.
+- Licznik wszystkich niezamknietych dni pracy sprzed dzisiaj; dzisiejszy dzien jest zawsze wykluczony.
+Zmieniono:
+- Licznik jest liczony jako pracownik-dzien, a nie jako liczba unikalnych osob: jedna osoba z trzema roznymi niezamknietymi dniami daje wynik 3.
+- Wiele rekordow tej samej osoby z tego samego dnia jest deduplikowane do jednego dnia.
+- Zakres pobierania nie jest juz ograniczony do ostatniego miesiaca; obejmuje dostepna historie starsza niz dzisiaj.
+- Wersje lokalnego snapshotu pulpitu podniesiono do 4, aby stara wartosc nie byla wyswietlana z cache.
+- Responsywna siatka ma 5 kolumn na szerokim ekranie, 3 kolumny do 1280 px, 2 kolumny do 820 px i 1 kolumne do 760 px.
+Testy/sprawdzenia:
+- `node --check` dla dashboardu i layoutu: OK.
+- `git diff --check`: OK; tylko standardowe ostrzezenia CRLF.
+- `npm.cmd test`: OK, repozytorium nadal nie zawiera testow automatycznych (0 testow).
+- `npm.cmd run build` w `web-app`: OK (Vite, 375 modulow).
+- Targetowany ESLint nie wykazal nowych problemow; pozostaje wczesniejszy, niezalezny blad `no-unused-vars` dla `openDashboardActivityEventEditor`.
+- Localhost na odczycie tylko do odczytu pokazal 3 niezamkniete historyczne dni bez QR STOP.
+- Sprawdzono progi 1281/1280, 821/820, 761/760 i 390 px; siatka kart nie powoduje wlasnego przewijania poziomego.
+Uwagi:
+- Nie zmieniono zadnych rekordow firmy ani statusow START/STOP.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Profil klienta - wariant 1 oraz modul Koszty i rentownosc
+Dodano:
+- Nowa organizacja profilu klienta w czterech glownych sekcjach: `Podsumowanie`, `Operacje`, `Dokumenty i kontakt` oraz `Koszty i rentownosc`, z kompaktowym naglowkiem klienta i najwazniejszymi danymi w jednym wierszu.
+- Modul finansowy per obiekt z agregatem klienta, szescioma KPI, porownaniem obiektow, struktura kosztow, planem i wykonaniem pracy, trendem 12 miesiecy, rankingiem, tabela kosztow, tabela prac okresowych, ostrzezeniami i historia zmian.
+- Formularze umowy dla modeli `MONTHLY_FIXED`, `HOURLY`, `PER_SERVICE` i `MIXED`, a takze formularze kosztu, przychodu zmiennego, pelnego kosztu godziny pracownika oraz sprzetu.
+- Backendowa domene rentownosci z kwotami w integer minor units, wyliczeniem kosztu pracy z START/STOP i historycznej stawki, ochrona przed podwojnym naliczeniem pracy okresowej, snapshotami, audytem oraz niezmiennoscia zamknietych okresow.
+- Centralne uprawnienie `profitabilityModule` dla PRO i ENTERPRISE oraz rozdzielenie praw odczytu, edycji i zamykania okresu. Pracownik liniowy pozostaje bez dostepu; koordynator wymaga osobnego grantu.
+- Migracja `dataconnect/migrations/20260722_profitability_domain.sql` zostala przygotowana wylacznie do przegladu. Nie zostala uruchomiona.
+Zmieniono:
+- Brak stawki, brak STOP, brak przychodu wymaganego przez model lub starsza obecnosc bez mapowania do obiektu oznaczaja `Niepelne dane`; nie sa zamieniane na sztuczne zero.
+- Trend korzysta wylacznie z najnowszych snapshotow lub korekt w zamknietych okresach. Bez historii interfejs pokazuje jawny stan pusty.
+- Konfiguracja ESLint pomija wygenerowane katalogi `dist*`; usunieto dwa osierocone, nieuzywane odniesienia w zrodlach, dzieki czemu lint kodu zrodlowego przechodzi.
+- Lokalny fixture testowy jest dostepny tylko w `import.meta.env.DEV` na localhost i nie trafia do produkcyjnego buildu.
+Testy/sprawdzenia:
+- `npm.cmd test`: OK, 60/60 testow, w tym wzorzec 30 000 / 23 500 / 6 500 / 21,67%, wiele obiektow, zmiana stawki w polowie miesiaca, brak stawki, otwarty START, amortyzacja, prace okresowe, role i separacja organizacji.
+- `npm.cmd --prefix web-app run lint`: OK.
+- `npm.cmd --prefix web-app run build`: OK; pozostaje informacyjne ostrzezenie Vite o duzych istniejacych chunkach.
+- `node --check` dla kluczowych plikow backendu i frontendu oraz `git diff --check`: OK.
+- Produkcyjny `dist` nie zawiera tekstu podgladu, fixture ani danych przykladowych.
+- QA przegladarkowe objelo zakladki, wybieranie obiektu, formularze umowy/przychodu/stawki, dynamiczne modele rozliczen, puste stany oraz porownanie implementacji z wybranym wariantem 1. Szczegoly sa w `design-qa.md`.
+Uwagi:
+- Nie uruchomiono migracji, nie zmieniono bazy ani danych firmy, nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+- Po uruchomieniu migracji w osobnym, zatwierdzonym etapie modul zacznie czytac rzeczywiste dane finansowe; do tego czasu schemat nie jest aktywowany na produkcji.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Interaktywna lista dni bez QR STOP i przejscie do edytora
+Dodano:
+- Kafelek `Brak QR STOP` jest natywnym przyciskiem dostepnym z myszy oraz klawiatury.
+- Klikniecie otwiera pelna, przewijana liste wszystkich wczytanych historycznych dni bez STOP; nie otwiera juz automatycznie pierwszego rekordu.
+- Kazdy wiersz listy ma akcje `Uzupelnij STOP i zamknij dzien` i prowadzi do istniejacego edytora czasu pracy wybranego pracownika oraz dnia.
+- Obsluge `aria-expanded`, focusu pierwszego rekordu, klawisza Escape i zamykania po kliknieciu poza lista.
+Zmieniono:
+- Dla metryki `openStartStopYesterday` usunieto limit 24 pozycji w widoku listy; wysokosc pozostaje ograniczona, a lista jest przewijana.
+- Tytul listy wyjasnia, ze nalezy wybrac dzien do uzupelnienia.
+- Poprawiono separator danych w wierszach listy oraz dodano jednoznaczny opis akcji.
+- Zachowano istniejacy mechanizm edycji: wpisanie konca pracy i zapis ustawia Workday jako `CLOSED`; nie tworzy historycznego skanu QR STOP.
+Testy/sprawdzenia:
+- `node --check` dla dashboardu i layoutu: OK.
+- `git diff --check`: OK; tylko standardowe ostrzezenia CRLF.
+- `npm.cmd test`: OK, repozytorium nadal nie zawiera testow automatycznych (0 testow).
+- `npm.cmd run build` w `web-app`: OK (Vite, 375 modulow).
+- Targetowany ESLint nie wykazal nowych problemow; pozostaje wczesniejszy, niezalezny blad `no-unused-vars` dla `openDashboardActivityEventEditor`.
+- Localhost pokazal 3 pozycje listy. Wybranie pierwszej otworzylo edytor dnia 21.07.2026 z istniejacym START i pustym STOP.
+- Edytor zamknieto przyciskiem anulowania, a na pulpit wrocono bez zapisu; licznik pozostal 3.
+- Sprawdzono widok 904 x 698 oraz mobilny 390 x 844; kafelek i lista nie powoduja poziomego overflow.
+- Po calej interakcji konsola przegladarki nie zawierala bledow ani ostrzezen.
+Uwagi:
+- Test byl tylko do odczytu. Nie klikano `Zapisz` i nie zmieniono danych firmy.
+- Faktyczny zapis jest dostepny tylko dla uprawnionej roli i recznie zamyka Workday; nie falszuje zdarzenia skanowania QR.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Interaktywne listy Pracownicy, Obiekty i Zaplanowane zlecenia
+Dodano:
+- Kafelki `Pracownicy`, `Obiekty` i `Zaplanowane zlecenia` sa natywnymi przyciskami i analogicznie do `Brak QR STOP` otwieraja pelne, przewijane listy odpowiadajacych im pozycji.
+- Lista pracownikow pokazuje aktywne teraz osoby i prowadzi do dzisiejszego raportu czasu wybranej osoby.
+- Lista obiektow pokazuje obiekty sprzatane albo wysprzatane dzisiaj i prowadzi do historii wybranego klienta/obiektu.
+- Lista zaplanowanych zlecen pokazuje dzisiejsze zlecenia z godzinami, obiektem i obsada oraz otwiera istniejacy edytor konkretnego zlecenia.
+- Dialog list ma jawny przycisk zamkniecia, cykl fokusu, obsluge Escape i przywracanie fokusu na kafelek.
+Zmieniono:
+- Licznik kazdego interaktywnego kafelka jest wyprowadzany z tej samej kolekcji co jego lista, dlatego liczba zawsze odpowiada liczbie widocznych pozycji.
+- Dla obiektow ujednolicono grupowanie po nazwie i kanonicznym ID, a komunikat `od` dla trwajacej pracy korzysta tylko z aktualnie aktywnej sesji.
+- Dla zlecen oddzielono prawdziwe ID edytowanego zlecenia od klucza slotu; zachowany jest kontekst dnia, cyklu, wystapienia i bloku uslugi.
+- Blad pobrania zlecen nie jest juz przedstawiany jako wiarygodne `0`; kafelek pokazuje `—`, a lista wylacznie komunikat bledu i nie pozwala otworzyc nieaktualnych danych z cache.
+- Przejscie z kafelka do raportu oczekuje na zakonczenie zmiany trasy, dzieki czemu raport obiektu nie pozostaje w poprzednim trybie pracownika.
+- `Postep ogolny` pozostaje nieinteraktywnym elementem z `—%` do czasu zdefiniowania wzoru w kolejnym module.
+- Poprawiono kontrast drobnych opisow i wskaznika fokusu oraz dodano `aria-haspopup="dialog"` i spojne `aria-expanded`.
+Testy/sprawdzenia:
+- `node --check` dla dashboardu, raportow, layoutu, aplikacji portalu i stanu: OK.
+- `git diff --check`: OK; tylko standardowe ostrzezenia LF/CRLF.
+- `npm.cmd test`: OK, ale repozytorium nadal nie zawiera testow automatycznych (0 testow).
+- `npm.cmd --prefix web-app run build`: OK (Vite, 375 modulow); pozostalo standardowe ostrzezenie o duzych chunkach.
+- Targetowany ESLint nie wykazal nowych problemow; pozostaje wczesniejszy, niezalezny blad `no-unused-vars` dla `openDashboardActivityEventEditor` w dashboardzie.
+- Localhost na zywych danych pokazal w chwili testu: 9 aktywnych pracownikow, 3 historyczne dni bez QR STOP, 6 obiektow i 5 zaplanowanych zlecen; kazda otwarta lista miala dokladnie tyle samo wierszy co licznik.
+- Sprawdzono przejscie: pracownik -> dzisiejszy raport osoby, obiekt -> historia klienta NZOZ SWIERKLANY, zlecenie -> edytor Best Clean z terminem i obsada. Wszystkie formularze zamknieto bez zapisu.
+- Escape zamyka liste i oddaje fokus kafelkowi; Tab i Shift+Tab pozostaja w otwartym dialogu.
+- Przy 390 x 844 px dialog zlecen mial szerokosc 370,4 px, miescil sie miedzy 10 a 380,4 px, a dokument nie mial poziomego overflow.
+Uwagi:
+- Gdy aktywnosci QR nie da sie powiazac z kanonicznym `clientId`, historia obiektu korzysta z istniejacego dopasowania nazwy; przy identycznych nazwach klientow potrzebne bedzie wzbogacenie danych QR o jednoznaczne ID.
+- Test byl tylko do odczytu. Nie zapisano zadnych zmian w danych firmy, zleceniach ani statusach START/STOP.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Trzy panele operacyjne i mapa aktywnych pracownikow
+Dodano:
+- Nowy wiersz trzech paneli pomiedzy modulem `Przeglad` i `Osia dnia dzisiejszego`.
+- Lewy panel `Obiekty` z mala interaktywna mapa, zielonymi pinezkami aktywnych pracownikow, licznikiem `X / Y z GPS` oraz tekstowa lista wszystkich osob majacych pozycje.
+- Obsluge przyblizania i oddalania mapa rolka myszy, przeciagania mapy, klawiatury i natywnych kontrolek zoomu.
+- Klikniecie pracownika na liscie centruje jego pinezke, ustawia czytelne przyblizenie i otwiera dymek z osoba, obiektem oraz godzina ostatniego GPS.
+- Dwa neutralne placeholdery: `Postep uslug` i `Potwierdzone ukonczenie zadan`; nie dodano jeszcze logiki ani sztucznych wskaznikow.
+Zmieniono:
+- Mapa korzysta z juz istniejacego loadera Google Maps z modulu zlecen; nie dodano drugiego skryptu mapy ani nowej zaleznosci produkcyjnej.
+- Pinezki sa tworzone wylacznie dla unikalnych osob z dzisiejszym aktywnym dniem pracy (`isRunning`) i prawidlowa pozycja GPS. Brak GPS nie tworzy wspolrzednych zastepczych.
+- Dopasowanie osoby do surowego wpisu GPS jest hierarchiczne: najpierw kanoniczne ID, potem login, a nazwa tylko wtedy, gdy jest jednoznaczna wsrod aktywnych pracownikow.
+- Parser przeglada wszystkie wpisy GPS w polach dnia i komentarza, wybiera najnowszy prawidlowy znacznik `at`, odrzuca wspolrzedne poza zakresem oraz `0,0`.
+- Interfejs jawnie opisuje pozycje jako ostatni zapis GPS z dnia pracy, a nie lokalizacje sledzona na zywo.
+- Lista alternatywna zawiera wszystkie osoby z GPS w przewijanym obszarze; mapa ma `aria-describedby`, aktualizowane `aria-busy` i wyrazny stan fokusu.
+- Uklad jest responsywny: 3 kolumny na desktopie, 2 + 1 do 1080 px i 1 kolumna do 760 px.
+Testy/sprawdzenia:
+- `node --check` dla dashboardu, zlecen, aplikacji portalu i layoutu: OK.
+- `git diff --check`: OK; tylko standardowe ostrzezenia LF/CRLF.
+- `npm.cmd test`: OK, ale repozytorium nadal nie zawiera testow automatycznych (0 testow).
+- `npm.cmd run build` w `web-app`: OK (Vite, 375 modulow); pozostaje standardowe ostrzezenie o duzych chunkach.
+- Targetowany ESLint nie wykazal nowych problemow; pozostaja dwa wczesniejsze bledy `no-unused-vars` dla `openDashboardActivityEventEditor` oraz `localDateAndTimeInputToIso`.
+- W kontrolowanym lokalnym podgladzie rolka zmienila zoom z 11 do 13, przeciagniecie zmienilo srodek mapy, a klikniecie wiersza otworzylo prawidlowy dymek pinezki.
+- Przy viewportcie 390 x 844 px karty mialy szerokosc 359,2 px, a dokument mial `scrollWidth` rowny `clientWidth` (390 px), bez poziomego overflow.
+- Referencje, zrzuty desktop/mobile i wspolny obraz porownawczy opisano w `design-qa.md`; wynik QA: `passed`.
+Uwagi:
+- To nie jest sledzenie na zywo. Pinezka moze byc starsza, a jej dokladnosc zalezy od urzadzenia i zapisu wykonanego podczas dnia pracy.
+- Lokalne sesje portalu byly wylogowane, dlatego wizualny test komponentu wykonano w tymczasowym harnessie z produkcyjnym HTML/CSS i kontrolowanymi punktami; build oraz kod integracji sprawdzono osobno.
+- Nie zmieniono danych firmy, czasu pracy, zlecen ani zdarzen START/STOP. Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Zmiana nazwy Kanban na Centrum zadan
+Zmieniono:
+- Widoczna nazwe sekcji `Kanban` w menu bocznym na `Centrum zadan`, bez zmiany trasy ani logiki modulu.
+- Powiazane etykiety wyszukiwarki globalnej, komunikaty interfejsu, opis narzedzi dla czytnikow ekranu i nazwe kolumn w module kopii zapasowej.
+Testy/sprawdzenia:
+- `node --check` dla zmienionych plikow JavaScript: OK.
+- `git diff --check`: OK; tylko standardowe ostrzezenia LF/CRLF.
+- `npm.cmd test`: OK, repozytorium nadal nie zawiera testow automatycznych (0 testow).
+- `npm.cmd run build` w `web-app`: OK; pozostalo standardowe ostrzezenie o duzych chunkach.
+Uwagi:
+- Techniczne identyfikatory `kanban`, nazwy funkcji i klucze danych pozostaly bez zmian, aby nie naruszyc kompatybilnosci.
+- Nie zmieniono zadan ani danych firmy. Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Statusy pracownikow na mapie i powiekszenie mapy w popupie
+Dodano:
+- Zielone pinezki dla osob z trwajacym dzisiaj dniem pracy oraz czerwone pinezki dla osob, ktore zakonczyly dzien rzeczywistym statusem STOP.
+- Legende `W pracy` / `Dzien zakonczony`, kolory statusow na liscie pracownikow oraz informacje o statusie i godzinie STOP w dymku pinezki.
+- Powiekszana wersje tej samej interaktywnej mapy w modalnym popupie. Popup otwiera klikniecie tla mapy, pinezki, przycisku `Powieksz mape` oraz Enter lub Spacja na fokusie mapy.
+- Zamykanie przez przycisk `Zamknij`, Escape i klikniecie przyciemnionego tla, z blokada przewijania strony, cyklem fokusu i oddaniem fokusu do elementu otwierajacego.
+Zmieniono:
+- Zrodlo mapy obejmuje dzisiejsze osoby aktywne oraz osoby z potwierdzonym STOP. Rekord bez trwajacego dnia i bez rzeczywistego STOP nie jest oznaczany na czerwono.
+- Przy kilku wpisach tej samej osoby aktywny dzien ma pierwszenstwo przed zakonczonym; przy tym samym statusie wybierany jest najnowszy START albo STOP.
+- Sygnatura markerow obejmuje status, dzieki czemu zmiana zielonej pinezki na czerwona odswieza sie nawet bez zmiany wspolrzednych GPS.
+- Do popupu przenoszona jest istniejaca instancja mapy, a nie jej kopia, dlatego zachowane sa zoom, przesuniecie i otwarty dymek.
+Testy/sprawdzenia:
+- `node --check` dla zmienionych modulow JavaScript: OK.
+- `npm.cmd test`: OK, repozytorium nadal nie zawiera testow automatycznych (0 testow).
+- `npm.cmd run build` w `web-app`: OK (Vite, 375 modulow); pozostaje standardowe ostrzezenie o duzych chunkach.
+- Targetowany ESLint nie wykazal nowych problemow; pozostaje wczesniejszy `no-unused-vars` dla `openDashboardActivityEventEditor`.
+- `git diff --check`: OK; tylko standardowe ostrzezenia LF/CRLF.
+- Kontrolowany test pokazal dokladnie 3 zielone i 3 czerwone pinezki. Klikniecie tla mapy oraz pinezki otwieralo powiekszony popup; pinezka zachowala dymek ze statusem.
+- Rolkowanie zmienilo poziom kafelkow OpenStreetMap z 9 na 12, przeciaganie przesunelo mape, a zamkniecie i ponowne umieszczenie mapy w malej karcie zachowalo jej stan.
+- Przy 390 x 844 px popup mial szerokosc 374 px, miescil sie w ekranie z marginesem 8 px, nie powodowal poziomego overflow i pozostawial przycisk zamkniecia dostepny.
+- Konsola kontrolowanego podgladu nie zawierala bledow ani ostrzezen. Zrzuty oraz porownanie z referencja sa opisane w `design-qa.md`.
+Uwagi:
+- Koncowa sesja wlasciwego portalu na localhost byla wylogowana. Widok i interakcje sprawdzono w kontrolowanym lokalnym podgladzie z produkcyjnym CSS, a reguly statusow zweryfikowano w kodzie.
+- Nie zmieniono danych firmy ani statusow START/STOP. Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Niebieskie pinezki pracownikow z zadaniem na dzis
+Dodano:
+- Trzeci status mapy `Zadanie na dzis` oznaczony niebieska pinezka, niebieskim wskaznikiem na liscie oraz pozycja w legendzie malej i powiekszonej mapy.
+- Informacje o dzisiejszym zleceniu w dymku: nazwa zadania, planowane godziny i obiekt.
+- Zachowanie rzeczywistego stanu dnia pracy w dymku i na liscie, dlatego niebieska osoba nadal ma opis `W pracy` albo `Dzien zakonczony`.
+Zmieniono:
+- Zrodlo mapy laczy dzisiejsze dni pracy z tym samym kanonicznym zestawem planowanych zlecen, ktory zasila podglad dnia.
+- Przydzial do zadania ma pierwszenstwo kolorystyczne, aby pracownik z dzisiejszym zleceniem byl niebieski rowniez po START lub STOP.
+- Dla kilku przydzialow jednej osoby wybierane jest aktualne zadanie, a nastepnie najblizsze nadchodzace; pracownicy sa deduplikowani.
+- Przy istniejacym GPS pinezka pozostaje na ostatniej pozycji dnia pracy. Bez GPS moze wykorzystac zapisane w zleceniu `lat/lng`, jawnie opisane jako lokalizacja zadania.
+- Brak GPS i brak wspolrzednych zlecenia nie tworzy sztucznej lokalizacji ani nie uruchamia geokodowania; osoba pozostaje uwzgledniona w mianowniku licznika.
+- Licznik i komunikaty mapy zostaly uogolnione z samego GPS na pozycje GPS lub lokalizacje zadania.
+- Po przeniesieniu mapy do modala wybrana pinezka jest centrowana ponownie, dzieki czemu dymek nie nachodzi na sterowanie zoomem.
+Testy/sprawdzenia:
+- Na aktualnych danych localhost odczytano 5 grup zlecen i 10 unikalnych przydzielonych osob; koncowy widok pokazal 16 zielonych, 5 niebieskich i 5 czerwonych pozycji (`26 / 35 na mapie`).
+- Piec przydzielonych osob mialo dostepna pozycje mapowa. Dla pozostalych nie utworzono atrap wspolrzednych.
+- Klikniecie niebieskiego wiersza otwieralo jego pinezke; powiekszona mapa zachowala dymek w obrebie mapy i bez kolizji z zoomem.
+- Po pelnym odswiezeniu strony konsola testowanej sciezki nie zawierala bledow ani ostrzezen.
+- `node --check`: OK. `npm.cmd test`: OK (`0 tests`). `npm.cmd run build` w `web-app`: OK (Vite, 375 modulow).
+- Targetowany ESLint nie wykazal nowego problemu; pozostaje wczesniejszy `no-unused-vars` dla `openDashboardActivityEventEditor`.
+- `git diff --check`: OK; tylko standardowe ostrzezenia LF/CRLF.
+Uwagi:
+- Test byl tylko do odczytu. Nie zmieniono danych firmy, zlecen ani statusow START/STOP.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Modul rentownosci kontraktow na pulpicie
+Dodano:
+- Szeroka karte `Rentownosc kontraktow` pod trzema panelami operacyjnymi i bezposrednio nad `Widokiem dnia dzisiejszego`.
+- Uklad zgodny z przekazanym wzorcem: srednia marza i zmiana `+/-` po lewej, obszar trendu ponizej oraz `Top kontrakty` po prawej.
+- Gotowe semantyczne warianty zmiany: dodatni zielony, ujemny czerwony i neutralny szary.
+- Dynamiczne etykiety czterech ostatnich miesiecy, wyliczane wzgledem aktualnej daty.
+Zmieniono:
+- Glowna siatka dashboardu ma kolejnosc `overview -> insights -> profitability -> activity`.
+- Karta jest responsywna: dwie kolumny na desktopie, jedna kolumna ponizej 900 px oraz mniejszy padding ponizej 760 px.
+- Nie skopiowano wartosci `23,8%`, trendu ani nazw kontraktow ze wzorca. W aktualnym modelu istnieje tylko niejednoznaczne `Task.price`, domyslnie `0`, bez waluty, kosztow pracy i materialow, powiazania czasu z kontraktem oraz jednoznacznego `contractId`.
+- Do czasu zdefiniowania modelu finansowego karta pokazuje uczciwy stan pusty: brak procentu, neutralne `+/-`, brak wykresu i brak rankingu. `Zobacz wszystkie kontrakty` nie udaje aktywnej nawigacji do nieistniejacego raportu.
+Testy/sprawdzenia:
+- Localhost przy `1280 x 720` pokazal karte o szerokosci 946 px dokladnie pomiedzy panelem obiektow a osia dnia; dokument nie mial poziomego overflow.
+- Po pelnym odswiezeniu etykiety miesiecy wynosily `Kwi / Maj / Cze / Lip`, a konsola testowanej sciezki byla bez bledow i ostrzezen.
+- Porownanie referencji i implementacji zapisano w `.codex-tmp\qa-profitability-comparison.png`; raport `design-qa.md` zakonczyl sie wynikiem `passed`.
+- `node --check`: OK. `git diff --check`: OK. `npm.cmd test`: OK (`0 tests`). `npm.cmd run build` w `web-app`: OK (Vite, 375 modulow).
+- Targetowany ESLint nadal zglasza tylko wczesniejszy `no-unused-vars` dla `openDashboardActivityEventEditor`.
+Uwagi:
+- Do realnego wyliczenia marzy potrzebne sa co najmniej: wartosc i waluta kontraktu z okresem obowiazywania, koszty godzinowe pracownikow, zuzycie materialow z cena jednostkowa oraz powiazanie czasu i kosztow z kontraktem.
+- Nie zapisano zadnych danych firmy i nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Przykladowe dane w module rentownosci kontraktow
+Dodano:
+- Widoczne oznaczenie `Przykladowe dane` oraz komunikat, ze wartosci demonstracyjne nie pochodza z danych firmy.
+- Przykladowe wartosci: marza srednia `23,8%`, zmiana `+3,2 p.p.`, trend czterech ostatnich miesiecy oraz ranking pieciu kontraktow demonstracyjnych.
+- Responsywny wykres `canvas`, ktory zachowuje ostrosc po zmianie szerokosci karty.
+Zmieniono:
+- Stan pusty modulu zostal zastapiony kompletnym podgladem demonstracyjnym zgodnym z przekazanym wzorcem.
+- Ranking jest arytmetycznie spojny: srednia wartosci `28,5 / 25,4 / 23,9 / 21,8 / 19,4%` wynosi `23,8%`.
+- Trend `18,4 / 21,2 / 20,6 / 23,8%` jest spojny ze zmiana miesiac do miesiaca `+3,2 p.p.`.
+- `Zobacz wszystkie kontrakty` pozostaje elementem tylko do wyswietlania z `aria-disabled=true`, poniewaz raport rentownosci nie ma jeszcze osobnej trasy.
+Testy/sprawdzenia:
+- Localhost przy `1280 x 720` pokazal karte `946 x 405,8 px`; dokument nie mial poziomego overflow, a konsola byla bez bledow i ostrzezen.
+- Przy `390 x 844` karta miala `355 x 701 px`, uklad przeszedl w jedna kolumne i nie powstal poziomy scroll.
+- Porownanie ze wzorcem zapisano w `.codex-tmp\qa-profitability-sample-reference-comparison.png`; raport `design-qa.md` ma wynik `passed`.
+- `node --check`, `git diff --check`, `npm.cmd test` (`0 tests`) i `npm.cmd run build` w `web-app`: OK.
+- Targetowany ESLint nadal zglasza tylko wczesniejszy `no-unused-vars` dla `openDashboardActivityEventEditor`.
+Uwagi:
+- Dane sa stale i demonstracyjne. Nie sa odczytywane z bazy ani laczone z realnymi wynikami firmy.
+- Nie zapisano danych firmy i nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Wyrownanie imion i nazwisk w liscie pod mapa
+Zmieniono:
+- Wiersz pracownika pod mapa korzysta teraz z trzech jawnych kolumn: znacznik statusu, elastyczna kolumna tekstu oraz czas GPS.
+- Imie i nazwisko zaczyna sie 8 px za znacznikiem statusu zamiast byc odsuwane przez `justify-content: space-between`.
+- Czas GPS pozostaje przy prawej krawedzi, a dlugie nazwy nadal sa bezpiecznie skracane wielokropkiem.
+Testy/sprawdzenia:
+- Przy viewportcie `1280 x 720` tekst zaczynal sie 20 px od lewej krawedzi calego wiersza, bez poziomego overflow.
+- Klikniecie wiersza `Paulina Fojcik` nadal ustawialo odpowiednia pinezke i otwieralo dymek mapy.
+- Konsola po odswiezeniu i kliknieciu wiersza byla bez bledow i ostrzezen.
+- `git diff --check` oraz `npm.cmd run build` w `web-app`: OK; Vite przetworzyl 375 modulow.
+Uwagi:
+- Zmiana dotyczy tylko CSS. Nie zmieniono danych firmy, logiki mapy ani statusow pracownikow.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Kompaktowy modul Przeglad na pulpicie
+Zmieniono:
+- Piec kafelkow `Przegladu` miesci sie w jednym rzedzie przy standardowym viewportcie `1280 x 720`, zamiast ukladu `3 + 2`.
+- Wysokosc calego panelu spadla z `388,9 px` do `201,4 px`, czyli o `48,2%`.
+- Zachowano oryginalne rozmiary podstawowej typografii (`12 / 30 / 11 / 10 px`), aby mniejszy modul pozostal czytelny.
+- Kafelek `Zaplanowane zlecenia` ma zwarty uklad siatkowy: nazwa, liczba z opisem, podglad zlecenia i link akcji.
+- `Postep ogolny` zachowuje wartosc `-%` w jednym wierszu; status dopasowuje sie do dostepnego miejsca.
+- Breakpoint trzech kolumn przesunieto do `1120 px`; ponizej `820 px` pozostaja dwie kolumny, a ponizej `760 px` jedna.
+Testy/sprawdzenia:
+- Localhost przy `1280 x 720`, `devicePixelRatio=1`: panel `946 x 201,4 px`, piec kolumn po okolo `174,4 px`, brak poziomego overflow i brak ucietej tresci kafelkow.
+- Klikniecie kafelka `Pracownicy` nadal otwieralo liste aktywnych osob; po tescie przywrocono czysty widok pulpitu.
+- Porownanie przed/po zapisano w `.codex-tmp\qa-overview-compact-comparison.png`; raport `design-qa.md` ma wynik `passed`.
+- Konsola localhost nie zawierala bledow ani ostrzezen. `npm.cmd run build` w `web-app`: OK (Vite, 375 modulow); pozostaje istniejace ostrzezenie o duzych chunkach.
+- `git diff --check`: OK; tylko standardowe ostrzezenia LF/CRLF.
+Uwagi:
+- Zmiana dotyczy wylacznie CSS. Nie zmieniono danych, obliczen ani nawigacji kafelkow.
+- Nie zapisano danych firmy i nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Aktywny postep uslug i potwierdzone zakonczenia na pulpicie
+Dodano:
+- Panel `Postep uslug` zasilany wylacznie rozpoczetymi i nadal otwartymi zdarzeniami sprzatania `CLEAN`. Przyszle zlecenia oraz zakonczone zdarzenia nie trafiaja do tej listy.
+- Procent realizacji oparty na rzeczywistym czasie od START-u i wiarygodnym planie godzinowym tej samej osoby na tym samym obiekcie. Bez zapisanych godzin poczatku i konca planu panel pokazuje jawnie orientacyjne `50%` oraz opis `W trakcie - brak planu czasowego`.
+- Panel `Potwierdzone ukonczenie zadan` z obiektami, na ktorych dzisiejsze jawne zdarzenia sprzatania maja rzeczywisty START i STOP.
+- Grupowanie po jednoznacznym `clientId`, z kontrolowanym rozwiazaniem strefy lub unikalnej nazwy klienta. Niejednoznaczne rekordy sa pomijane zamiast byc przypisywane do przypadkowego obiektu.
+- Obsluge kilku pracownikow na jednym obiekcie: obiekt pozostaje aktywny, gdy przynajmniej jedno zdarzenie nadal trwa, i trafia do zakonczonych dopiero po STOP-ie ostatniej osoby.
+- Uwzglednianie otwartych zdarzen `CLEAN` rozpoczetych przed dzisiaj, pobranych z istniejacego szerszego zakresu zdarzen, aby nocna praca nie tworzyla falszywego zakonczenia.
+Zmieniono:
+- Zrodlem obu paneli sa jawne rekordy `Event`, a nie zagregowane dni pracy. Zamkniety `Workday` ani sama pozycja GPS nie sa dowodem zakonczenia sprzatania.
+- Jawne zdarzenie obiektowe zamkniete przez `STOP_END_DAY` jest uznawane za zakonczenie sprzatania tylko wtedy, gdy zachowuje konkretna strefe i dodatni rzeczywisty czas; zwykly marker STOP dnia nie przechodzi filtra explicit event.
+- Deduplikacja tego samego `eventId` wybiera najnowsza rewizje po `updatedAt`; kompletnosc START/STOP jest tylko rozstrzygajacym kryterium przy tym samym czasie aktualizacji.
+- Dopasowanie planu jest ograniczone najpierw do tego samego pracownika i obiektu. Sztuczne godziny tworzone przez fallback kalendarza nie sa traktowane jako prawdziwy plan.
+- Oba panele maja liczniki, przewijane listy, semantyczne elementy `time`, dostepne paski `progressbar`, widoczny fokus i responsywny uklad `3 / 2 / 1` kolumn.
+- Teksty pomocnicze maja co najmniej 10 px; stan orientacyjnego `50%` jest dodatkowo opisany przez `aria-valuetext` i nie udaje pomiaru.
+Testy/sprawdzenia:
+- Na zalogowanym localhost panel pokazal 1 rzeczywista usluge w toku (`Urzad Miasta Rybnik (UM)`) i 4 obiekty zakonczone po STOP-ie ostatniej osoby. Wartosci pochodzily z odczytu aktualnych danych, bez ich modyfikowania.
+- Reczne odswiezenie pulpitu zachowalo te same reguly i liczby. Konsola nie zawierala bledow ani ostrzezen.
+- Przy viewportcie CSS `1075 x 687` dwa pierwsze panele mialy po `454 px`, trzeci zajmowal kolejny pelny rzad `924 px`; dokument i listy nie mialy poziomego overflow.
+- Porownanie wzorcow i implementacji zapisano w `.codex-tmp\qa-service-panels-comparison.png`, a pelny zrzut w `.codex-tmp\qa-service-panels-live.png`.
+- `node --check`, `git diff --check`, `npm.cmd test` (`0 tests`) i `npm.cmd run build` w `web-app`: OK; Vite przetworzyl 375 modulow i pokazal tylko istniejace ostrzezenie o duzych chunkach.
+- Targetowany ESLint nie wykazal nowego problemu; nadal zatrzymuje sie na wczesniejszym `no-unused-vars` dla `openDashboardActivityEventEditor`.
+Uwagi:
+- Nie zapisano danych firmy, zdarzen, zlecen ani statusow START/STOP. Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-22
+Autor: AI Codex
+Temat: Obiekt pinezki z tego samego odbicia QR i GPS
+Zmieniono:
+- Nazwa obiektu na mapie nie jest juz pobierana niezaleznie z najpozniejszego zdarzenia QR pracownika z calego dnia.
+- Kazdy wpis GPS zachowuje teraz rekord zrodlowy, pole pochodzenia, faze START/STOP oraz rodzaj odbicia (`START_GPS`, `STOP_GPS`, `CLEAN_START_GPS`, `CLEAN_STOP_GPS`).
+- Przy jednakowym czasie pierwszenstwo ma rozpoczecie nowego sprzatania przed automatycznym zamknieciem poprzedniego; zwykly `STOP_GPS` ma pierwszenstwo przed syntetycznym `CLEAN_STOP_GPS`.
+- Obiekt jest rozwiazywany z QR, strefy lub klienta nalezacego do tego samego rekordu co wybrana pozycja GPS. Brak jednoznacznego powiazania daje komunikat `Brak obiektu przy ostatnim odbiciu` zamiast nazwy z innego zdarzenia.
+- Dla zakonczonego dnia zachowano bezpieczny fallback do klienta z wybranego rekordu dnia pracy, ale usunieto przeszukiwanie wszystkich innych zdarzen pracownika.
+- Opis czasu w popupie brzmi `Ostatnie odbicie GPS`, aby jasno wskazywal zrodlo informacji.
+Testy/sprawdzenia:
+- Na zalogowanym localhost pinezki `Katarzyna Rapacz` i `Malgorzata Piprek` pokazaly `Gmina Godow` oraz `Ostatnie odbicie GPS: 17:14` zamiast blednego `Heliosz Med`.
+- Po pojawieniu sie nowszego odbicia widok automatycznie zmienil obie osoby na `Best Clean`, `Dzien zakonczony`, `STOP 21:12` i `Ostatnie odbicie GPS: 21:12`, co potwierdzilo korzystanie z aktualnego rekordu.
+- `Jolanta Wachowicz` nadal byla prawidlowo powiazana z `Neuro-Med Raciborz`, a zakonczeni pracownicy zachowali rozpoznane obiekty, gdy wystepowaly w ich wlasnym rekordzie dnia pracy.
+- Czyste przeladowanie localhost nie wykazalo bledow ani ostrzezen konsoli. `node --check`, `git diff --check`, `npm.cmd test` (`0 tests`) oraz `npm.cmd run build` w `web-app`: OK; Vite przetworzyl 375 modulow.
+- Targetowany ESLint nadal zatrzymuje sie tylko na wczesniejszym `no-unused-vars` dla `openDashboardActivityEventEditor`.
+- Nie wykonano zapisu danych firmy; weryfikacja korzystala wylacznie z odczytu aktualnego widoku localhost.
+Uwagi:
+- Zmiana dotyczy logiki prezentacji mapy. Nie modyfikuje zdarzen, pozycji GPS, klientow ani stref w bazie.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-23
+Autor: AI Codex
+Temat: Osobny modul Rentownosc kontraktow pod Centrum zadan
+Dodano:
+- Samodzielna pozycje `Rentownosc kontraktow` w menu glownym, bezposrednio pod `Centrum zadan` i przed sekcja `OPERACJE`.
+- Osobna trase `contractProfitability` oraz leniwie ladowany modul w `web-app/apps/portal-web/src/features/profitability/`.
+- Pelny ekran demonstracyjny z filtrami okresu, klienta, statusu, kompletnosci i wyszukiwaniem.
+- Szesc kart KPI: przychod netto, koszt calkowity, marza, wazona rentownosc portfela, koszt pracy wraz z udzialem w przychodzie oraz kompletnosc danych.
+- Trend 12 miesiecy z przelaczaniem rentownosci, marzy i przychodu, liste kontraktow wymagajacych uwagi, porownawcza tabele obiektow oraz szczegoly struktury kosztow i planu wzgledem wykonania.
+- Aktywne przejscie do modulu z dotychczasowej karty `Rentownosc kontraktow` na pulpicie oraz wynik w globalnej wyszukiwarce portalu.
+Zmieniono:
+- Dane pogladowe sa ladowane dynamicznie tylko w trybie developerskim na `localhost`, `127.0.0.1` lub `::1`. Produkcyjny build nie zawiera fixture ani nazw demonstracyjnych.
+- W produkcji modul respektuje centralne uprawnienie `profitabilityModule.canRead`; bez uprawnienia pozycja menu, karta pulpitu i wynik wyszukiwania sa ukryte, a sam widok nie ujawnia danych finansowych.
+- Brak stawki, kosztu albo przychodu nie jest zamieniany na zero. Niepelny kontrakt pokazuje `—` i status tekstowy.
+- Rentownosc portfela jest liczona jako suma marz podzielona przez sume przychodow kontraktow z kompletnym wynikiem. Kontrakt z zerowym przychodem obniza marze portfela, ale nie dostaje mylacego indywidualnego procentu.
+- Koszt pracy i jego udzial korzystaja tylko z kontraktow z jawnie znanym kosztem pracy; brak stawki nie zaniza procentu jak koszt rowny zero.
+- Statusy maja tekst i symbol, a nie tylko kolor; dodano stany fokusu, `aria-pressed`, opis danych wykresu i czytelniejsza typografie.
+Dane wejsciowe potrzebne do realnego uruchomienia:
+- Kontrakt i obiekt: `organizationId`, `clientId`, `objectId`, numer kontraktu, daty obowiazywania, przychod netto w minor units, waluta ISO 4217, model rozliczenia i docelowa rentownosc.
+- Praca: planowane godziny, rzeczywiste START/STOP QR lub NFC przypisane do obiektu i strefy oraz wersjonowany pelny koszt godziny pracownika z zakresem dat.
+- Koszty: materialy, srodki, sprzet lub amortyzacja, podwykonawcy, transport, prace okresowe, uslugi dodatkowe i pozostale koszty bezposrednie, zawsze z okresem, zrodlem i kwota netto.
+- Jakosc i audyt: brakujace stawki, otwarte START/STOP, dokumenty zrodlowe, autor i czas zmiany, powod korekty oraz snapshot zamknietego okresu.
+Testy/sprawdzenia:
+- `npm.cmd --prefix web-app run lint`: OK.
+- `npm.cmd test`: OK, 60 z 60 testow, w tym test wzorcowy 30 000 / 23 500 / 6 500 / 21,67%, brak stawki, otwarty START/STOP, brak przychodu, wersjonowanie stawek, amortyzacja, brak podwojnego naliczania oraz uprawnienia i separacja organizacji.
+- `npm.cmd --prefix web-app run build`: OK, Vite przetworzyl 383 moduly; pozostaje tylko istniejace ostrzezenie o duzych chunkach.
+- Skan `web-app/dist` nie znalazl identyfikatorow ani nazw z fixture demonstracyjnego.
+- Zalogowany localhost pokazal pozycje menu w wymaganym miejscu, aktywna trase, oznaczenie `Dane pogladowe`, 7 kontraktow, przychod wszystkich kontraktow 508 000 zl oraz koszt 403 400 zl, marze 52 600 zl i rentownosc 11,54% dla 6 kontraktow z kompletnym wynikiem, a takze szczegoly wybranego kontraktu.
+Uwagi:
+- To etap demonstracyjny widoku calego portfela. Aktualne API rentownosci jest klientowe i wymaga `clientId`; przed podlaczeniem realnych danych potrzebny jest bezpieczny endpoint portfela organizacji albo zatwierdzona strategia agregacji bez zapytan N+1.
+- Migracja `20260722_profitability_domain.sql` nie zostala uruchomiona. Nie zapisano ani nie zmieniono danych firmy.
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-23
+Autor: AI Codex
+Temat: Zwijana miniatura panelu Rentownosc kontraktow na pulpicie
+Dodano:
+- Przycisk `Zwin panel` w prawym gornym rogu karty rentownosci oraz stan `Rozwin panel` po zwinieciu.
+- Kompaktowa miniatura zawierajaca tylko najwazniejsze informacje: srednia marze, zmiane miesiac do miesiaca, najlepszy kontrakt, jego wynik oraz przejscie `Otworz analize`.
+- Natywna semantyke przycisku z `aria-controls`, aktualizowanym `aria-expanded`, etykieta i tytulem odpowiadajacym biezacemu stanowi.
+Zmieniono:
+- Po zwinieciu pelny wykres i ranking sa faktycznie ukrywane atrybutem `hidden`; miniatura stanowi osobny, czytelny skrot, zamiast wizualnie sciskac pelna zawartosc.
+- W stanie pelnym panel zachowuje dotychczasowy uklad, wykres, ranking i aktywne przejscie do calego modulu.
+- Preferencja zwiniecia jest zapisywana lokalnie osobno dla organizacji i uzytkownika. Brak dostepu do `localStorage` nie blokuje dzialania przycisku.
+- Po ponownym rozwinieciu wykres jest przerysowywany, aby odzyskac poprawny rozmiar po wczesniejszym ukryciu.
+- Uklad miniatury jest responsywny: jeden kompaktowy rzad na szerokim ekranie i bezpieczne skladanie sekcji na telefonie.
+Testy/sprawdzenia:
+- Zalogowany localhost: pelna karta miala `1413 x 405,8 px`, a miniatura `1413 x 130 px`; ponowne rozwiniecie przywrocilo pelny widok.
+- Telefon `390 x 844`: miniatura miala `355 x 271,3 px`, bez poziomego overflow dokumentu.
+- Zweryfikowano oba stany, aktualizacje `aria-expanded`, ukrywanie pelnej zawartosci, widocznosc podsumowania i zachowanie fokusu na przycisku. Konsola nie zawierala bledow ani ostrzezen.
+- Porownania wizualne zapisano w `.codex-tmp\qa-profitability-collapse\comparison-reference-expanded.png` i `.codex-tmp\qa-profitability-collapse\comparison-reference-collapsed.png`.
+- `npm.cmd --prefix web-app run lint`: OK.
+- `npm.cmd test`: OK, 60 z 60 testow.
+- `npm.cmd --prefix web-app run build`: OK, Vite przetworzyl 383 moduly; pozostaje tylko istniejace ostrzezenie o duzych chunkach.
+- `node --check` i `git diff --check`: OK; tylko standardowe ostrzezenia LF/CRLF.
+Uwagi:
+- Zmiana dotyczy wylacznie prezentacji i lokalnej preferencji interfejsu. Nie zmienia danych ani obliczen rentownosci.
+- Nie zapisano danych firmy. Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-23
+Autor: AI Codex
+Temat: Zwijane miniatury paneli Obiekty, Postep uslug i Potwierdzone ukonczenie zadan
+Dodano:
+- Osobny maly przycisk `Zwin` / `Rozwin` w kazdym z trzech paneli operacyjnych pulpitu.
+- Kompaktowy stan `Obiektow` z liczba osob na mapie oraz rozkladem statusow `W pracy`, `Zadanie na dzis` i `Dzien zakonczony`.
+- Kompaktowy stan `Postepu uslug` z najbardziej zaawansowana usluga sposrod sprzatan realizowanych w tej chwili.
+- Kompaktowy stan `Potwierdzonego ukonczenia zadan` z ostatnim zamknietym obiektem albo jednoznacznym stanem pustym.
+- Niezalezne zapamietywanie stanu kazdej karty w `localStorage`, rozdzielone wedlug organizacji i uzytkownika.
+Zmieniono:
+- Widoczny przycisk zwijania ma teraz `28 px` wysokosci i krotka etykiete; niewidoczny obszar klikniecia pozostaje powiekszony do co najmniej `44 px`.
+- Przycisk w panelu `Rentownosc kontraktow` korzysta z tej samej malej kontrolki i tekstu `Zwin` / `Rozwin` zamiast `Zwin panel` / `Rozwin panel`.
+- Pelna zawartosc zwijanej karty jest rzeczywiscie ukrywana atrybutem `hidden`, a osobne podsumowanie pozostaje czytelne i aktualizowane z tego samego renderu danych live.
+- Po rozwinieciu panelu `Obiekty` mapa jest ponownie przeliczana, aby odzyskac poprawny rozmiar.
+Testy/sprawdzenia:
+- Zalogowany localhost: kazda rozwinieta karta miala okolo `460,3 x 517,6 px`, a zwinieta `460,3 x 121,4 px`; rzad zmniejszyl wysokosc o okolo `76,5%`.
+- Klikniecia zmienialy `aria-expanded`, widocznosc body i miniatury. Ponowne zaladowanie zachowalo osobny stan wszystkich trzech kart.
+- Telefon `390 x 844`: karty mialy `355 px` szerokosci, a rzad paneli nie mial poziomego overflow.
+- Porownanie wizualne zapisano w `.codex-tmp\qa-insight-collapse\comparison-source-and-implementation.png`; raport w `design-qa.md` konczy sie wynikiem `passed`.
+- `node --check`, `git diff --check` i `npm.cmd --prefix web-app run lint`: OK.
+- `npm.cmd test`: OK, 60 z 60 testow.
+- `npm.cmd --prefix web-app run build`: OK, Vite przetworzyl 383 moduly; pozostaje tylko istniejace ostrzezenie o duzych chunkach.
+Uwagi:
+- Dane skrotow pochodza z aktualnego renderu mapy i paneli uslug; nie dodano danych demonstracyjnych.
+- Nie zmieniono danych firmy, zdarzen, pozycji GPS ani logiki obliczania postepu. Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-23
+Autor: AI Codex
+Temat: Audytowalna korelacja zdarzen QR z planem zlecen i scisly postep uslug
+Dodano:
+- Trwaly kontrakt korelacji zdarzenia `CLEAN` z planem: `taskId`, `occurrenceDateYmd`, `serviceBlockId`, `allocationId`, `workSlotKey`, `matchStatus`, `matchMethod`, `matchReason`, `matchedAt`, `planSnapshotVersion`, planowany przedzial i czas oraz rewizje zrodlowego zadania.
+- Serwerowy korelator korzystajacy z kanonicznych ID organizacji, zadania, klienta, strefy, pracownika, bloku uslugi i alokacji. Nazwy klientow, obiektow i pracownikow sa tylko etykietami prezentacyjnymi.
+- Jawny stan `UNMATCHED` z przyczyna dla zdarzen, ktorych nie da sie polaczyc jednoznacznie. Brak dopasowania i kilka kandydatow nie sa automatycznie przypisywane do przypadkowego planu.
+- Migracje `dataconnect/migrations/20260723_service_execution_correlation.sql` z kolumnami, ograniczeniami integralnosci, kluczem obcym do zadania, kontrola pelnego klucza dopasowania oraz uniewaznianiem korelacji po zmianie danych zrodlowych.
+- Testy kontraktowe dla korelatora, repozytorium, polityki bezpieczenstwa i modelu pulpitu, w tym niejednoznacznosc, rozne organizacje, powtarzalnosc, pominiete terminy, nadpisania, stare rewizje i kilka wizualnie identycznych alokacji.
+Zmieniono:
+- Utworzenie zdarzenia QR ustala pracownika wylacznie z potwierdzonego tokenu Firebase, przypisania `membership.worker_id` albo jednoznacznego adresu e-mail tokenu. `workerId` i login z body sa tylko kontrola spojnosci i nie moga wybrac innej osoby.
+- Czas zdarzenia i dzien wystapienia sa wyznaczane z czasu serwera w strefie `Europe/Warsaw`. Pole `clientScannedAt` nie moze cofnac ani przesunac zdarzenia i nie bierze udzialu w korelacji.
+- Ogolne mutacje zdarzen nie pozwalaja klientowi zapisac stanu `MATCHED` ani pol korelacji. Zapis dopasowania przechodzi przez waska, serwerowa metode z lista dozwolonych algorytmow.
+- Korelator nie uzywa nazw ani heurystyki najblizszego czasu. Dokladne ID sa warunkiem; przedzial czasu rozstrzyga tylko pomiedzy kilkoma kandydatami, ktorzy juz maja ten sam pelny zestaw ID.
+- Panel `Postep uslug` przyjmuje tylko jawne zdarzenia `CLEAN` ze stanem `MATCHED`, pelnym kluczem planu i rewizja identyczna z aktualnym zadaniem. Stara korelacja trafia do wyjatkow zamiast do wyniku.
+- Procent jest liczony tylko wtedy, gdy kazda wymagana alokacja ma kompletny i spojny snapshot planowanego czasu. Brak planu daje stan `Nieokreslony`, a nie umowne `50%`.
+- `Potwierdzone ukonczenie zadan` uznaje obiekt za zakonczony dopiero po zamknieciu wszystkich wymaganych alokacji prawidlowym `endAt`. Sam status tekstowy ani zamkniecie dnia pracy nie wystarcza.
+- Zachowano pelne dane cyklu przy zapisie zadania: koniec powtarzalnosci, pominiete daty, zrodlo, nadpisanie, rodzaj nadpisania i pierwotna data wystapienia.
+- Wygenerowano ponownie oficjalny SDK Firebase Data Connect po zmianie schematu i operacji.
+Testy/sprawdzenia:
+- `npm.cmd test`: OK, 118 z 118 testow.
+- `npm.cmd --prefix web-app run lint`: OK.
+- `npm.cmd --prefix web-app run build`: OK, Vite przetworzyl 390 modulow; pozostaja tylko ostrzezenia o rozmiarze chunkow.
+- `node --check`: OK dla backendu, korelatora, repozytorium, polityki bezpieczenstwa i modelu pulpitu.
+- `firebase.cmd dataconnect:sdk:generate`: OK.
+- `git diff --check`: OK; tylko standardowe ostrzezenia LF/CRLF.
+- Swiezy lokalny backend odpowiedzial `200` na `http://127.0.0.1:8081/healthz`, a Vite `200` na `http://127.0.0.1:5173/`. Ekran logowania zaladowal sie bez bledow i ostrzezen konsoli.
+- Lokalny runtime uruchomiono na Node.js 24.13.1. Brakujacy lokalnie, lecz juz zadeklarowany `nodemailer@7.0.0` zostal odtworzony bez zmiany `package-lock.json`.
+Uwagi:
+- Migracja `20260723_service_execution_correlation.sql` ma status `REVIEW-ONLY` i nie zostala uruchomiona. Bez wdrozonego schematu backend zachowuje zgodnosc ze starym zapisem, ale pulpit nie udaje dopasowania, ktorego baza nie potwierdzila.
+- Widoki za logowaniem zostaly sprawdzone testami modelu i kontraktu; w tej sesji nie wykonywano logowania ani nie odczytywano hasla uzytkownika.
+- Nie odczytano ani nie zmieniono danych realnej firmy. Nie wykonano migracji, commita, pusha ani wdrozenia produkcyjnego.
+- Galaz pozostaje zgodna z `cleanzi01/main`, a `stash@{0}` zachowuje kopie bezpieczenstwa stanu sprzed tej korelacji.
+
+Data: 2026-07-23
+Autor: AI Codex
+Temat: Naprawa lokalnego bootstrapu logowania i komunikatu DB_CONFIG_MISSING
+Przyczyna:
+- Localhost zostal uruchomiony bezposrednio przez `scripts/dev-local.js`, z pominieciem `scripts/dev.js`, ktory pobiera dane uwierzytelniajace Cloud SQL z Secret Manager.
+- Firebase Auth przyjal email i haslo, ale `/api/auth/session-context` nie mogl sprawdzic czlonkostwa w organizacji bez polaczenia z baza i zwrocil techniczny tekst `DB_CONFIG_MISSING`.
+Zmieniono:
+- `scripts/dev.js` rozpoznaje teraz `VITE_FIREBASE_PROJECT_ID`. Dla kanonicznego projektu `iclean-room` odtwarza niesekretne wspolrzedne Cloud SQL zgodne z `apphosting.yaml`: nazwe instancji i bazy.
+- Jawne zmienne srodowiskowe nadal maja pierwszenstwo, a inny projekt Firebase nie dziedziczy ustawien bazy Cleanzi.
+- Login i haslo bazy nadal sa pobierane wylacznie z Secret Manager przez ADC. Nie sa zapisywane w repozytorium, `.env.local`, komendzie ani logach.
+- `mapDatabaseConnectionError` mapuje brak konfiguracji na kontrolowane `503 DB_CONFIG_MISSING` z czytelnym komunikatem o koniecznosci uruchomienia pelnego `npm run dev`.
+Testy/sprawdzenia:
+- `node --check scripts/dev.js`: OK.
+- `node --check index.js`: OK.
+- Testy `test/dev-config.test.js`: OK, 3 z 3. Sprawdzono fallback dla Cleanzi, pierwszenstwo jawnych ustawien oraz brak przenoszenia konfiguracji do obcego projektu.
+- Stan ADC sprawdzono bez wyswietlania tokenu i sekretow: `REAUTH_REQUIRED`.
+Uwagi:
+- Do zakonczenia testu logowania potrzebne jest interaktywne odswiezenie lokalnych Google Application Default Credentials poleceniem `gcloud.cmd auth application-default login`.
+- Nie uruchomiono jeszcze backendu z dostepem do Cloud SQL i nie wykonano zadnego zapytania do danych firmy.
+- Nie zmieniono hasla uzytkownika ani danych Firebase Auth. Nie wykonano migracji, commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-23
+Autor: AI Codex
+Temat: Odswiezenie ADC i bezpieczne rozpoznanie blokady TLS Cloud SQL
+Zrobiono:
+- Za zgoda uzytkownika uruchomiono interaktywne `gcloud auth application-default login`; konto i haslo byly obslugiwane wylacznie przez strone Google.
+- Google Cloud SDK nie potrafil zakonczyc wymiany tokenu przez certyfikat `Norton Web/Mail Shield Root`. Zamiast wylaczac SSL uzyto tymczasowo systemowego magazynu zaufanych certyfikatow Windows.
+- Po autoryzacji sprawdzono ADC bez wyswietlania tokenu: klient Google Cloud SDK oraz backendowy `google-auth-library` zwrocily status `OK`.
+- Tymczasowy pakiet CA, log autoryzacji i pomocniczy plik integracji z magazynem Windows zostaly usuniete po zakonczeniu testu. Globalne `core/custom_ca_certs_file` zostalo przywrocone do stanu pustego.
+- Stary stack uruchomiony przez `scripts/dev-local.js` zostal zatrzymany. Pelny bootstrap `scripts/dev.js` pobral sekrety z Secret Manager i uruchomil frontend na `127.0.0.1:5173` oraz backend na `8081`.
+Sprawdzenia:
+- Frontend i `/healthz` backendu odpowiadaja. Ekran logowania laduje sie bez bledow i ostrzezen konsoli.
+- Minimalne, tylko odczytowe `select 1` nie dotarlo do bazy. Cloud SQL Connector odrzucil polaczenie kodem `UNABLE_TO_VERIFY_LEAF_SIGNATURE`.
+- Analiza biblioteki potwierdzila, ze Cloud SQL Connector celowo przypina certyfikat konkretnej instancji. Skanowanie TLS przez Norton podmienia ten certyfikat, wiec dodanie lokalnego CA albo wylaczenie weryfikacji nie jest bezpiecznym rozwiazaniem.
+Uwagi:
+- Aby lokalny backend mogl sprawdzic organizacje, Norton musi pominac skanowanie TLS dla procesu Node.js lub polaczenia Cloud SQL. Alternatywnie skanowanie HTTPS mozna wylaczyc tylko na czas lokalnego testu i od razu ponownie wlaczyc.
+- Nie wylaczono weryfikacji TLS, nie oslabiono pinningu Cloud SQL i nie wykonano zapytania do danych firmy.
+- Nie wykonano migracji, commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-23
+Autor: AI Codex
+Temat: Bezpieczny lokalny proxy kontekstu sesji bez oslabiania TLS
+Przyczyna:
+- Firebase Auth dzialal lokalnie, ale po zalogowaniu `/api/auth/session-context` probowal laczyc sie z Cloud SQL przez lokalnie przechwytywane polaczenie TLS. Cloud SQL Connector prawidlowo odrzucal podmieniony certyfikat kodem `UNABLE_TO_VERIFY_LEAF_SIGNATURE`.
+- Stary host `https://cleanzi-01.web.app` zwracal dla tego endpointu `403 FORBIDDEN_HOST`. Kanoniczny `https://portal.cleanzi.pl` zwraca poprawna odpowiedz API.
+Dodano:
+- Jawny skrypt `npm run dev:auth-proxy`, ktory wlacza proxy tylko po fladze `--auth-session-proxy`.
+- Dokladna allowliste `https://portal.cleanzi.pl`; odrzucane sa inne hosty, HTTP, credentials, sciezki, query i fragmenty.
+- Waski regex obejmujacy wylacznie `/api/auth/session-context` z opcjonalnym query. Pozostale `/api` nadal trafiaja do lokalnego backendu.
+- Dodatkowy gate serwerowy, przez co sam wpis targetu w `.env.local` albo powloce nie moze wlaczyc proxy.
+- Testy konfiguracji bootstrapu i proxy Vite, w tym kolejnosc przed ogolnym `/api`, allowlista, gate, dozwolone metody oraz filtrowanie naglowkow.
+Zabezpieczenia:
+- Dozwolone sa tylko `GET`, `POST` i `OPTIONS`. W aktualnym handlerze GET i POST sa odczytowe; POST sluzy do wyboru organizacji przez `orgId`.
+- Token Firebase oraz wymagane naglowki kontekstu platformy sa przekazywane bez logowania. Usuwane sa Cookie, Proxy-Authorization, naglowki Forwarded/X-Forwarded i Set-Cookie.
+- Wymuszono `secure: true`, brak sledzenia przekierowan oraz `Cache-Control: no-store`.
+- Nie wylaczono TLS, nie dodano `secure: false` i nie oslabiono pinningu Cloud SQL.
+Testy/sprawdzenia:
+- `npm.cmd test`: OK, 127 z 127 testow.
+- `npm.cmd --prefix web-app run lint`: OK.
+- `npm.cmd --prefix web-app run build`: OK, Vite przetworzyl 390 modulow; pozostaja tylko istniejace ostrzezenia o rozmiarze chunkow.
+- `git diff --check` dla zmienionych plikow: OK; tylko standardowe ostrzezenia LF/CRLF.
+- Runtime: frontend `127.0.0.1:5173` odpowiedzial `200`, backend `8081/healthz` odpowiedzial `200`, a lokalny `/api/auth/session-context` bez tokenu zwrocil poprawne `401 UNAUTHENTICATED` z `Cache-Control: no-store`.
+- Niedozwolona metoda na lokalnym endpointcie zwrocila `405` i `Allow: GET, POST, OPTIONS`, co potwierdzilo aktywny waski proxy.
+- Ekran logowania zostal odswiezony i przekazany uzytkownikowi bez odczytania pol formularza ani wyslania hasla.
+Uwagi:
+- Ten tryb naprawia lokalne sprawdzenie organizacji, ale nie tworzy sandboxa ani calego portalu read-only. Pozostale lokalne endpointy i bezposrednie polaczenia Firebase/Data Connect moga korzystac z realnych danych firmy; akcje mutujace wymagaja takiej samej ostroznosci jak produkcja.
+- Lokalny Cloud SQL nadal jest blokowany przez Norton dla tras, ktore probuja laczyc sie bezposrednio z baza. Poprawka celowo nie obchodzi tej ochrony.
+- Nie wykonano logowania za uzytkownika, zapisu danych firmy, migracji, commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-23
+Autor: AI Codex
+Temat: Integralnosc Event/Workday bez zgadywania oraz plan bezpiecznego wdrozenia
+Przyczyna:
+- Lista zdarzen i mobilny workflow nie mialy jednego, wspolnego invariantu dla otwartego `Event CLEAN` i otwartego `Workday`.
+- Historyczne otwarte Eventy z pustym `event_type` nie moga byc bez dowodu uznane ani za aktywny CLEAN, ani za bezpiecznie zamknieta historie.
+- Dotychczasowe zapytania ograniczone do 5000 rekordow lub zakresu `startAt` nie byly wystarczajacym dowodem braku starego konfliktu.
+Dodano lokalnie:
+- Osobne klasy diagnostyczne: wielokrotny jawny CLEAN, pojedynczy jawny CLEAN bez aktywnego powiazanego Workday, nierozstrzygniety otwarty Event bez `event_type` oraz historyczny Event bez typu powiazany dokladnie z zamknietym Workday tej samej osoby.
+- Klikalne grupy `Pokaz` otwieraja dokladnie sklasyfikowane rekordy, maja lokalna paginacje, prawidlowy eksport, powrot i obsluge klawiatury. Zmiana organizacji podczas odczytu nie moze wstawic wyniku starej sesji.
+- Portalowy precheck jawnego CLEAN i Workday przed zapisem. Brak kompletnego wyniku daje `INTEGRITY_CHECK_INCOMPLETE`; system nie przechodzi do zapisu na podstawie ograniczonego fallbacku.
+- Dwie kompletne operacje `EventsIntegrityPageForOrg` i `WorkdaysIntegrityPageForOrg`. Paginacja obejmuje cala organizacje, ma stabilny tie-breaker po ID, nie filtruje po case loginu ani po `startAt`, a normalizacja `trim/lower` i definicja open sa zgodne z SQL.
+- Operacje integrity sa w allowliscie sesji platformowej oraz w wygenerowanym SDK Data Connect.
+- Polityke jednego otwartego Workday w mobile: stary lub wielokrotny otwarty dzien zwraca kontrolowane 409; system nie wybiera arbitralnie najnowszego rekordu.
+- START i STOP pozostaja dostepne przy niepelnym schemacie korelacji. Tylko nowy CLEAN wymaga pelnych 15 kolumn korelacji; stan mobilny pokazuje wtedy jawny problem schematu zamiast zgadywac.
+- Mapowanie bledow triggerow Event i Workday na stabilne odpowiedzi 409.
+- Dwie migracje `REVIEW-ONLY`: `20260723_single_open_clean_event_guard.sql` i `20260723_single_open_workday_guard.sql`. Zawieraja preflight, blokade tabeli, advisory lock, triggery, wymagane klucze pracownika i czesciowe indeksy zgodne z predykatami open. Migracji nie uruchomiono.
+- Dual-write nie jest raportowany jako sukces, gdy drugi zapis jest niepewny. Portal zwraca `PARTIAL_EVENT_WORKDAY_*_UNKNOWN`, a pojedynczy osierocony jawny CLEAN jest widoczny w diagnostyce.
+Stan danych odczytany bez modyfikacji:
+- Pulpit localhost podczas finalnej kontroli pokazal `Brak QR STOP: 1`, 5 aktywnych osob, 15 obiektow i 6 zaplanowanych zlecen. Sa to wartosci dynamiczne z chwili odczytu.
+- Wczesniejszy pelny odczyt diagnostyczny pokazal 85 otwartych Eventow bez `event_type` u 7 pracownikow. To nie jest 85 otwartych dni pracy i nie ma jeszcze dowodu, ze wszystkie sa bezpiecznymi orphanami zamknietych Workday.
+- Bezposrednie zapytanie kontrolne Cloud SQL nie zostalo wykonane, poniewaz lokalny Connector nadal prawidlowo odrzuca certyfikat podmieniany przez skanowanie TLS Norton. Nie obchodzono tej ochrony.
+- Po przelaczeniu UI na nowa operacje integrity localhost pokazuje kontrolowany komunikat o jej niedostepnosci, bo zapytanie jest przygotowane lokalnie, ale nie zostalo wdrozone do Data Connect. Zwykla lista zdarzen nadal dziala.
+Testy/sprawdzenia:
+- Niezalezny koncowy re-review: brak P0 i P1 w przejrzanym zakresie; osobny zestaw 45 z 45 testow przeszedl.
+- Pelne `npm.cmd test`: OK, 176 z 176 testow.
+- `npm.cmd --prefix web-app run lint`: OK.
+- `npm.cmd --prefix web-app run build`: OK; pozostaja tylko istniejace ostrzezenia o rozmiarze chunkow.
+- `firebase.cmd dataconnect:sdk:generate`: OK; pozostaje istniejace ostrzezenie o aliasie `cycleId/workdayId`.
+- `node --check index.js`: OK.
+Uwagi:
+- Nie zmieniono, nie zamknieto ani nie sklasyfikowano zadnego realnego Eventu lub Workday. Nie wykonano migracji, commita, pusha ani wdrozenia produkcyjnego.
+- Wymagana kolejnosc wdrozenia: najpierw read-only klasyfikacja historycznych danych i pelny schemat/operacje Data Connect, potem review-only guardy SQL po czystym preflight, nastepnie runtime backend/mobile i na koncu portal.
+- Pusty `event_type` nie jest automatycznie traktowany jako CLEAN. Klasyfikacja musi wynikac z dokladnego powiazania ID i stanu Workday albo z decyzji operacyjnej potwierdzonej na danych.
+
+Data: 2026-07-24
+Autor: AI Codex
+Temat: Produkcyjny etap 1 - bezpieczne operacje diagnostyczne Data Connect
+Wdrożono:
+- Do produkcyjnego connectora `example` w usłudze `iclean-room-service` wdrożono wyłącznie dwie operacje tylko do odczytu: `WorkdaysIntegrityPageForOrg` i `EventsIntegrityPageForOrg`.
+- Operacje wymagają zalogowanego użytkownika, aktywnego członkostwa w organizacji i jednej z ról zarządczych: `ADMIN`, `ADMINISTRATOR`, `OWNER`, `SUPERADMIN`, `MANAGER`, `KIEROWNIK`, `COORDINATOR` albo `KOORDYNATOR`.
+- Zwykłe role pracownicze nie otrzymały dostępu do pełnej historii organizacji.
+Bezpieczeństwo wdrożenia:
+- Przed wdrożeniem pobrano świeży connector produkcyjny. Schemat, mutacje i konfiguracja były identyczne z pakietem wdrożeniowym; logiczny diff zapytań wynosił `+78/-0` i dodawał tylko wskazane dwie operacje.
+- Użyto celu `dataconnect:iclean-room-service:example`. Produkcyjny `Schema Last Updated` pozostał bez zmiany (`2026-07-14T09:46:35.828265807Z`), a `Connector Last Updated` zmienił się na `2026-07-24T07:29:00.284925465Z`.
+- Źródło pobrane ponownie po wdrożeniu miało identyczne SHA-256 jak przygotowany pakiet dla `schema.gql`, `queries.gql` i `mutations.gql`.
+- Nie użyto `--force`. Nie uruchomiono żadnego pliku SQL, migracji, triggera, backfillu ani klasyfikacji danych. Nie zmieniono Eventów, Workday, zleceń ani statusów START/STOP.
+Weryfikacja na zalogowanym localhost:
+- `WorkdaysIntegrityPageForOrg` działa: kafelek `Brak QR STOP` pokazał 4 niezamknięte dni starsze niż dzisiaj i otworzył dokładnie cztery pozycje do uzupełnienia.
+- `EventsIntegrityPageForOrg` działa: zamiast błędu `operation not found` portal pokazał pełną kontrolę historycznych wpisów. W chwili odczytu było 90 nierozstrzygniętych otwartych wpisów bez `event_type` u 10 pracowników oraz 37 historycznych wpisów wymagających klasyfikacji u 16 pracowników.
+- Są to wartości dynamiczne z chwili odczytu. Sam odczyt niczego nie zamknął i nie uznał automatycznie za CLEAN.
+Zmiany lokalnego źródła po audycie:
+- Ograniczono role w trzech pełnych zapytaniach diagnostycznych/korelacyjnych do ról zarządczych, zgodnie z wdrożonym connector-em.
+- `matchStatus` pozostaje lokalnie polem nullable bez automatycznego defaultu, aby przyszły etap schematu nie klasyfikował istniejących rekordów przez samo wdrożenie.
+- Poprawiono położenie `schemaValidation: "COMPATIBLE"` w `dataconnect.yaml`, aby Firebase CLI faktycznie odczytywał tę opcję.
+Testy/sprawdzenia lokalne:
+- `npm.cmd test`: OK, 176 z 176 testów.
+- `npm.cmd --prefix web-app run lint`: OK.
+- `npm.cmd --prefix web-app run build`: OK, Vite przetworzył 392 moduły; pozostało tylko istniejące ostrzeżenie o dużych chunkach.
+- Kontrolny dry-run lokalnego pełnego źródła zatrzymał się bez wdrożenia na wymaganym potwierdzeniu zmian breaking. Nie użyto `--force`.
+Blokada pełnego schematu korelacji:
+- Pełny dry-run schematu wykazał niezależny dryf istniejącej bazy: próbę zwężenia kilku `worker_id`, usunięcia dwóch unikalnych indeksów pracownika i ustawienia `zone.client_id` na `NOT NULL`. Taki deploy został przerwany.
+- Pełny schemat korelacji, guardy SQL, runtime backend/mobile i automatyczna korelacja planu nadal nie zostały wdrożone. Wymagają osobnego, kontrolowanego etapu po przygotowaniu wyłącznie addytywnej migracji i preflight bazy.
+
+Data: 2026-07-24
+Autor: AI Codex
+Temat: Lokalny pakiet bezpiecznej aktywacji korelacji CLEAN bez zmian produkcyjnych
+Dodano lokalnie:
+- Addytywną migrację `dataconnect/migrations/20260724_service_execution_correlation_additive.sql`: 15 nullable kolumn bez defaultów, backfillu, klasyfikacji historii, triggerów i zmian istniejących rekordów. Indeksy korelacji są tworzone `CONCURRENTLY`; migracja ma timeouty, advisory lock i kontrole metadanych.
+- Osobną mutację `ReidentifyEventForOrg`. Jawna zmiana powiązanego dnia, obiektu, pracownika lub czasu START unieważnia poprzedni link i snapshot planu oraz ustawia `UNMATCHED`; zwykłe dopisanie STOP korzysta z `UpdateEventForOrg` i nie dotyka tożsamości korelacji.
+- Jawny bezpiecznik restore: connector nie wystawia `RestoreEventForOrg`, a backup zawierający moduł `Zdarzenia` jest zatrzymywany przed migawką wstępną i przed jakimkolwiek zapisem. Pola korelacji pozostają w eksporcie, ale ich odtworzenie wymaga przyszłej atomowej walidacji serwerowej planu, alokacji i snapshotu.
+- Walidację integralności danych Event w backupie: brak lub duplikat `eventId`, niepoprawny otwarty typ, kilka otwartych CLEAN tej samej osoby, nieznany `matchStatus`, niekompletny MATCHED i obca wersja snapshotu są raportowane przed blokadą restore.
+- Testy behawioralne zachowania sekund/milisekund START, rozróżniania wielkości liter w identyfikatorach planu oraz blokady niezweryfikowanego restore.
+Zmieniono:
+- `InsertEventForOrg` nie przyjmuje już od klienta typu zdarzenia do zapisu. Typ jest wymuszony w operacji jako `CLEAN`, więc rola pracownicza nie może ominąć invariantu innym `eventType`.
+- Flaga `MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED` blokuje tylko utworzenie nowego CLEAN. Nadal można zamknąć już otwarty CLEAN; przy zmianie strefy flaga jest sprawdzana przed zamknięciem poprzedniego cyklu.
+- Edytor Eventu zachowuje dokładny pierwotny START i STOP, jeżeli pole widoczne z dokładnością do minuty nie zostało świadomie zmienione. Samo dopisanie STOP nie obcina sekund START i nie kasuje poprawnej korelacji.
+- Brak jawnego baseline przy aktualizacji Eventu działa fail-closed i wybiera rekorelację. Znane ścieżki edytora i raportu przekazują pełny rekord źródłowy; porównanie obejmuje również `workdayId`.
+- `ReidentifyEventForOrg` jest na allowliście sesji platformowej i wymaga świeżego uwierzytelnienia MFA. `RestoreEventForOrg` usunięto z connectora, SDK i allowlisty.
+- Wersję formatu backupu podniesiono do `1.1.0`, a SDK Firebase Data Connect wygenerowano ponownie.
+Testy/sprawdzenia:
+- `npm test`: OK, 191 z 191 testów.
+- `npm --prefix web-app run lint`: OK.
+- `npm run build`: OK, Vite przetworzył 395 modułów; pozostaje tylko istniejące ostrzeżenie o dużych chunkach.
+- `firebase dataconnect:sdk:generate` uruchomione przez Node.js 24 z systemowym magazynem CA: OK; pozostaje istniejące ostrzeżenie o aliasie `cycleId/workdayId`.
+- Targetowane testy zabezpieczeń korelacji, mobile, migracji, kolejności dual-write i backupu: OK, 27 z 27.
+Stan produkcji i granice:
+- Produkcyjny `public.event` ma już 15 addytywnych kolumn korelacji. Wszystkie są nullable, nie mają defaultów i zostały dodane bez backfillu, triggerów, kluczy obcych ani klasyfikacji historii.
+- Utworzono współbieżnie trzy indeksy: `event_org_task_occurrence_idx`, `event_org_plan_slot_idx` i `event_org_match_status_updated_idx`. Końcowy postflight potwierdził dla wszystkich `indisvalid=true` oraz `indisready=true`, a definicje i kolejność kolumn są zgodne z migracją.
+- Nie zmieniono żadnego istniejącego Eventu, Workday, zlecenia ani statusu START/STOP. Postflight wykazał `0` rekordów z automatycznie wpisanymi danymi korelacji.
+- Flaga aktywacyjna pozostaje `false`. Nie wykonano deployu aplikacji/connectora, commita ani pusha.
+- Odczytowy preflight Cloud SQL Studio wykonano 2026-07-24 na `iclean-room-database` jako `biuro@bestclean.pl`: PostgreSQL `17.10`, `public.event` ma `8051` rekordów i rozmiar `6736 kB`.
+- W preflighcie wszystkie 15 planowanych kolumn korelacji oraz trzy planowane indeksy były nieobecne. Nie było kolizji nazw ani śladów częściowego wdrożenia.
+- W chwili preflightu nie było oczekujących blokad tabeli `public.event` ani innych aktywnych sesji w bazie. Zapytania zakończyły się odpowiednio w `43,6 ms` i `8,9 ms`.
+- Addytywną migrację wykonano 2026-07-24 w Cloud SQL Studio na `iclean-room-database` jako `biuro@bestclean.pl`. Transakcja dodająca i walidująca kolumny trwała `7,1 ms`; indeksy współbieżne trwały kolejno `18,0 ms`, `13,8 ms` i `16,0 ms`.
+- Końcowy postflight wykazał `15/15` bezpiecznych kolumn, `3/3` poprawne indeksy, `8056` rekordów Event, `0` rekordów z danymi korelacji i `0` oczekujących blokad. W czasie migracji aktywna aplikacja dopisała pięć normalnych zdarzeń (`8051 -> 8056`); migracja nie uzupełniła w nich nowych pól.
+- Cloud SQL Data API pozostaje wyłączone i nie zmieniano konfiguracji instancji. Pełny diff Data Connect nadal nie został uruchomiony z powodu niezależnego dryfu istniejącego schematu.
+- Bezpieczny kolejny krok produkcyjny to osobny deploy przygotowanego connectora/runtime z flagą nadal ustawioną na `false`, a następnie test zapisu i odczytu przed jakąkolwiek aktywacją korelacji. Odtwarzanie Eventów pozostaje celowo wyłączone do czasu wdrożenia zaufanej, atomowej ścieżki serwerowej.
+
+Data: 2026-07-24
+Autor: AI Codex
+Temat: Minimalny pakiet Data Connect korelacji zatrzymany na bezpiecznym dry-runie
+Przygotowano:
+- Pobrano świeże produkcyjne źródło schematu i connectora `example`, a następnie utworzono izolowany pakiet `.codex-tmp/dataconnect-stage1-correlation-baseline-20260724b`.
+- Do pakietu dodano wyłącznie 15 pól i trzy indeksy modelu Event, pola korelacji w istniejących odczytach Event, dwa nowe zapytania korelacyjne oraz osobną mutację `ReidentifyEventForOrg`.
+- Nie zmieniono produkcyjnych definicji `InsertEventForOrg` ani `UpdateEventForOrg`, aby sam etap connectora nie zmienił zachowania obecnego portalu.
+- Diff izolowanego pakietu względem ponownie pobranego produkcyjnego baseline wynosi `319` dodanych linii i jedną techniczną zmianę linii indeksu w trzech plikach Data Connect. Nie zawiera zmian rentowności, UI, runtime, aplikacji mobilnej ani innych lokalnych modułów.
+Weryfikacja:
+- `dataconnect:compile` dla `iclean-room-service` zakończył się sukcesem.
+- Pełny `firebase deploy --dry-run --only dataconnect:iclean-room-service` zakończył kompilację schematu i connectora, ale pokazał siedem niezależnych zmian SQL spoza zakresu korelacji.
+- Odczyt w Cloud SQL Studio potwierdził, że `organization_member.worker_id`, `organizations.owner_worker_id`, `task.worker_id` i `worker.worker_id` mają rzeczywiście `varchar(128)` i są nullable, podczas gdy produkcyjne źródło Data Connect nadal deklaruje `varchar(64)`.
+- `zone.client_id` ma rzeczywiście `varchar(64)` i jest nullable, podczas gdy źródło Data Connect deklaruje pole wymagane.
+- Indeksy `worker_org_login_ci_uidx` i `worker_org_worker_id_ci_uidx` są unikalnymi indeksami funkcyjnymi `lower(...)`; drugi jest dodatkowo indeksem częściowym. Zwykła dyrektywa indeksu Data Connect nie odwzorowuje tych definicji.
+Decyzja bezpieczeństwa:
+- Deploy nie został wykonany. Nie użyto `--force`, nie wyłączono walidacji schematu, nie usunięto indeksów i nie wykonano żadnego `ALTER TABLE`.
+- Nie zmieniono produkcyjnego schematu Data Connect, connectora, runtime, flag, danych firmy ani statusów START/STOP. Wykonana wcześniej addytywna migracja Cloud SQL pozostaje bez zmian.
+- Przed deployem trzeba osobno uzgodnić i wdrożyć bezpieczne rozwiązanie dryfu produkcyjnego schematu Data Connect, które zachowa oba indeksy unikalności i szerokość `varchar(128)`. Dopiero czysty dry-run bez `DROP`, zwężeń typów i `SET NOT NULL` pozwoli wrócić do wdrożenia connectora korelacji.
+
+Data: 2026-07-24
+Autor: AI Codex
+Temat: Audyt dryfu Worker/Zone i lokalny zamiennik indeksow funkcyjnych
+Stan produkcji odczytany bez zmian:
+- `public.worker` ma 86 rekordow. Nie ma ani jednej grupy duplikatow po `org_id + lower(btrim(login))` ani po `org_id + lower(btrim(worker_id))`.
+- `login_normalized` jest puste w 63 rekordach, a jeden niepusty rekord ma niepoprawna wielkosc liter. Loginy i `worker_id` nie maja zewnetrznych spacji; maksymalne dlugosci wynosza odpowiednio 37 i 36 znakow.
+- Tabela Worker nie ma triggera utrzymujacego pola znormalizowane. Oba dotychczasowe indeksy `worker_org_login_ci_uidx` i `worker_org_worker_id_ci_uidx` sa unikalne, valid i ready.
+- `public.zone` ma 1342 rekordy, w tym 0 pustych/null `client_id` i 0 osieroconych powiazan z klientem. Nie przywrocono jednak `NOT NULL`, bo migracja `20260720_zone_qr_optional_assignment.sql` celowo dopuszcza nieprzypisane kody QR.
+Przygotowano lokalnie:
+- Kontrolowana migracje `dataconnect/migrations/20260724_worker_identity_normalization_additive.sql`. Dodaje nullable `worker_id_normalized`, uzupelnia tylko dwa pola pochodne, instaluje trigger utrzymujacy normalizacje i dwa nowe indeksy unikalne na jawnych kolumnach.
+- Migracja nigdy nie przepisuje `login` ani `worker_id`, zatrzymuje sie na duplikatach lub niezgodnym schemacie i nie usuwa starych indeksow funkcyjnych. Stare i nowe zabezpieczenia maja dzialac rownolegle do osobnej decyzji o deployu Data Connect.
+- W izolowanym pakiecie `.codex-tmp/dataconnect-stage1-correlation-baseline-20260724b` skorygowano cztery szerokosci `worker_id` do `varchar(128)`, dodano `workerIdNormalized` oraz deklaratywne `@unique` dla obu jawnych pol normalizowanych. Wariant kompiluje sie poprawnie pod technicznym ID audytowym.
+Weryfikacja:
+- Targetowane testy migracji: 3 z 3 OK.
+- Pelne `npm test`: 194 z 194 OK.
+- Produkcyjna migracja Worker nie zostala uruchomiona. Nie wykonano backfillu, triggera, indeksu, deployu, `--force`, commita ani pusha.
+Blokada:
+- Firebase CLI wymaga interaktywnego `firebase login --reauth` przed ponownym `dataconnect:sql:diff`. Oficjalne logowanie zostalo uruchomione, ale do czasu jego zakonczenia nie wolno wykonywac produkcyjnego etapu ani uznawac diffu za czysty.
+- Prawdziwy model Zone jest nullable z powodu opcjonalnych, jeszcze nieprzypisanych kodow QR. Aktualizacja kontraktu Data Connect z non-null na nullable jest przez Firebase klasyfikowana jako breaking API i wymaga osobnej, jawnej decyzji; nie wolno maskowac tego przez przywrocenie `NOT NULL`.
+
+Data: 2026-07-24
+Autor: AI Codex
+Temat: Produkcyjna normalizacja Worker zakonczona, connector korelacji nadal fail-closed
+Wdrozone w Cloud SQL:
+- Uruchomiono w jednej transakcji migracje `dataconnect/migrations/20260724_worker_identity_normalization_additive.sql`.
+- Dodano nullable `worker_id_normalized varchar(128)`, uzupelniono wylacznie pola pochodne `login_normalized` i `worker_id_normalized`, dodano trigger `worker_identity_normalized_biu` oraz dwa nowe indeksy unikalne na jawnych polach normalizowanych.
+- Nie przepisano `login` ani `worker_id`. Zachowano oba stare indeksy funkcyjne `worker_org_login_ci_uidx` i `worker_org_worker_id_ci_uidx`; nie wykonano zadnego `DROP`.
+Postflight produkcji:
+- `86` rekordow Worker, `0` rozbieznosci `login_normalized`, `0` rozbieznosci `worker_id_normalized`.
+- Stary i nowy komplet indeksow jest obecny, a nowa kolumna i trigger sa aktywne.
+- Ponowny `dataconnect:sql:diff` nie proponuje juz dodania kolumny ani nowych indeksow. Pozostaly tylko dwa niezatwierdzone `DROP INDEX` starych zabezpieczen oraz osobna zmiana FK Zone z `ON DELETE CASCADE` na `ON DELETE SET NULL`.
+Weryfikacja connectora:
+- Oficjalna dokumentacja Firebase potwierdza, ze opcjonalne `@ref` generuje `ON DELETE SET NULL`, a wymagane `@ref` generuje `ON DELETE CASCADE`; dyrektywa nie ma parametru pozwalajacego niezaleznie ustawic akcje usuwania.
+- Dry-run connectora z prawdziwym nullable Zone zostal poprawnie zatrzymany jako breaking API: `ZonesForOrg.zones.clientId` i `EventsIntegrityPageForOrg.events.zone.clientId` zmieniaja typ z non-null na nullable.
+- W izolowanym wariancie zachowujacym dotychczasowy non-null kontrakt connector kompiluje sie, a dry-run przechodzi bez breaking assessments. Rzeczywisty deploy samego connectora zostal jednak odrzucony przez API przed publikacja jako `invalid connector sources`, poniewaz nowy connector odwoluje sie do pol korelacji, ktore nie sa jeszcze udostepnione przez produkcyjny schemat aplikacyjny Data Connect.
+Granice bezpieczenstwa:
+- Nie wdrozono schematu Data Connect ani connectora korelacji, nie uzyto `--force`, nie ustawiono `schemaValidation: NONE`, nie zmieniono FK Zone i nie usunieto zadnego indeksu.
+- Flaga korelacji pozostaje wylaczona. Nie zmieniono Eventow, Workday, zlecen, statusow START/STOP ani danych planu.
+- Kolejny etap musi osobno rozwiazac rollout nullable `Zone.clientId` dla istniejacych klientow API albo utworzyc odseparowany kontrakt/usluge korelacji. Nie wolno laczyc tej decyzji z usuwaniem starych indeksow Worker.
+
+Data: 2026-07-24
+Autor: AI Codex
+Temat: Produkcyjny schemat i connector korelacji wdrozone z zachowaniem zgodnosci
+Wdrozone w Cloud SQL:
+- Uruchomiono addytywna migracje `dataconnect/migrations/20260724_zone_client_fk_set_null_additive.sql`. Jedyna zmiana definicji to kontrolowane przejscie FK `zone_org_id_client_id_fkey` z `ON DELETE CASCADE` na `ON DELETE SET NULL`; kolumna pozostala nullable, a dane Zone nie zostaly przepisane.
+- Po niezaleznej kontroli nowych zabezpieczen uruchomiono `dataconnect/migrations/20260724_worker_legacy_guard_retirement.sql`, ktora usunela tylko dwa redundantne indeksy funkcyjne Worker wskazane przez `sql:diff`.
+- Postflight: `86` rekordow Worker, `0` rozbieznosci obu pol normalizowanych, aktywny trigger i oba nowe indeksy unikalne; `1342` rekordy Zone, `0` osieroconych powiazan, FK jest validated i ma akcje `SET NULL`.
+Wdrozone w Firebase Data Connect:
+- Izolowany pakiet `.codex-tmp/dataconnect-stage1-correlation-baseline-20260724b` przeszedl schema validate-only, a nastepnie zostal opublikowany oficjalnym API Data Connect bez wykonywania dodatkowego SQL. Zastosowano te sciezke, poniewaz lokalny Norton Web/Mail Shield przechwytuje polaczenie TLS uzywane przez standardowy connector Cloud SQL.
+- Koncowy schema etag: `6oy5hfv7mUxwkt9hR8dLk8LTk7FB0pelWd5JO7FGG0M`; connector etag: `kDN-yHgLDCA9IB1UwlgSQ8lXV1x-7wOe5eZ1Rl66z8I`.
+- Zweryfikowane fingerprinty: schema `a854fb83bbf5c1d91bdf5d14c3d6576817ec2294b4ba28a78216c669fb84526f`, mutations `4adbbbfce54cd25df28823f2ad07d7f44e3ae33177ec35fd232cc039f5464217`, queries `a34bd40f740a87a4df49a73dd4a321482dfb312ff1e382a2975a2ba641d8a502`.
+Zgodnosc i kontrola regresji:
+- Connector zachowuje wszystkie `42` operacje ze swiezego produkcyjnego baseline sprzed wdrozenia i ma teraz lacznie `45` operacji, w tym wymagane `ZonesForOrg`, `EventsIntegrityPageForOrg` i `WorkdaysIntegrityPageForOrg`.
+- Produkcyjny bundle portalu zawiera nazwy 12 operacji magazynu i zlecen indywidualnych, ktorych nie bylo juz w baseline przed wdrozeniem. Produkcyjna baza nie ma tabel `storage`, `client_storage` ani `individual_job`; nie tworzono ich w ramach korelacji i nie maskowano tego starego dlugu technicznego nieautoryzowana migracja.
+- Koncowy `dataconnect:sql:diff` wynosi zero. Pelny dry-run kompiluje schemat i connector, potwierdza zgodnosc bazy i konczy sie komunikatem `Dry run complete`.
+- Pelne `npm test`: `200/200` OK. `npm run build`: OK; pozostaje tylko istniejace ostrzezenie Vite o duzych chunkach.
+Granice rollout:
+- `MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED=false` pozostaje zarowno w `.env.example`, jak i `apphosting.yaml`. Nie aktywowano automatycznej korelacji dla pracownikow i nie zmieniono zadnego Eventu, Workday, statusu START/STOP ani zlecenia.
+- Lokalny portal dziala pod `http://localhost:5173/`. Do kontrolowanego testu E2E zapisu i odczytu potrzebna jest zalogowana sesja portalu; dopiero po takim tescie mozna osobno zdecydowac o wlaczeniu flagi.
+
+Data: 2026-07-24
+Autor: AI Codex
+Temat: Izolowany lokalny fallback TLS dla pelnego stosu developerskiego
+Zmieniono lokalnie:
+- `scripts/dev-local.js` przyjmuje teraz opcjonalne `DEV_BACKEND_TLS_REJECT_UNAUTHORIZED`, stosowane wylacznie do procesu lokalnego backendu. Pobranie sekretow, frontend i konfiguracja App Hosting nie dziedzicza tego ustawienia.
+- `.env.example` dokumentuje, ze wartosc `0` jest tymczasowym wyjatkiem tylko dla komputera, na ktorym skaner HTTPS przechwytuje tunel Cloud SQL i systemowy magazyn CA nie wystarcza.
+- `worker-repository.js` sprawdza aktualne kolumny `login_normalized`, `worker_id_normalized` oraz ich indeksy unikalne. Nie wymaga juz dwoch starych indeksow funkcyjnych, ktore zostaly wycofane po kontrolowanej migracji.
+- Dodano test regresji gotowosci schematu Worker dla nowego kompletu zabezpieczen oraz odrzucenia powrotu do starych indeksow.
+Granice:
+- Nie zmieniono `apphosting.yaml`, flagi korelacji ani danych firmy.
+- Ustawienie nie jest przeznaczone do produkcji i nie moze byc wlaczane w App Hosting.
+
+Data: 2026-07-24
+Autor: AI Codex
+Temat: Kafelek Brak QR STOP zgodny z rzeczywistym stanem Workday
+Diagnoza:
+- Odczyt produkcyjnych danych przez lokalny portal wykazal `7` otwartych dni pracy starszych niz dzis, podczas gdy pulpit pokazywal tylko `3`.
+- Pulpit uznawal kazde zamkniete zdarzenie CLEAN za zamkniecie calego dnia, jezeli zdarzenie bylo powiazane z tym samym `workdayId`. Przykladem byl dzien Rafala Dudka z `2026-07-06`: Workday nadal mial `RUNNING` i brak `endAt`, ale osiem sekund trwajace zdarzenie zakonczone jako `QR_SAME` ukrywalo go z listy.
+- Aplikacja mobilna prawidlowo traktowala ten Workday jako otwarty i zatrzymywala kolejny skan kodem `MULTIPLE_OPEN_WORKDAYS`.
+Zmieniono lokalnie:
+- Dodano czysty model `historicalOpenWorkdayModel.js`, ktory rozroznia STOP uslugi od STOP dnia pracy.
+- Kafelek `Brak QR STOP` opiera sie teraz na rzeczywistym stanie rekordu Workday. Zamkniete zdarzenie uslugi nie ukrywa otwartego dnia; dzisiejszy otwarty dzien nadal nie jest liczony jako zaleglosc.
+- Po poprawce licznik i lista pokazuja komplet `7` otwartych dni sprzed dzis, w tym Rafala Dudka z `2026-07-06`.
+Weryfikacja i granice:
+- Testy regresji modelu rozrozniaja `QR_SAME` od `STOP_END_DAY`, zamkniety Workday, otwarty stary Workday i otwarty dzien dzisiejszy.
+- Pelne `npm test`: `207/207` OK. `npm --prefix web-app run lint`: OK. `npm run build`: OK; pozostaje tylko istniejace ostrzezenie Vite o duzych chunkach.
+- Nie zamknieto ani nie zmieniono zadnego Workday, Eventu, statusu START/STOP ani zlecenia. Flaga korelacji pozostaje wylaczona do czasu uporzadkowania konfliktu danych.
+
+Data: 2026-07-24
+Autor: AI Codex
+Temat: Edycja zaleglego dnia przypieta do dokladnego workdayId
+Diagnoza:
+- Klikniecie zaleglego dnia Rafala z `2026-07-06` poprawnie przekazywalo `WD-4bfe2b2e-a515-4def-afcf-0094db709da1`, ale ekran czasu pracy ponownie wybieral zagregowany wiersz tylko po dacie.
+- W tej samej dacie istnial juz zamkniety Workday `08:00-17:43` oraz osobny otwarty Workday od `17:43:48`. Formularz pokazywal dane zamknietego rekordu, a zapis zagregowanego dnia moglby zaktualizowac kilka rekordow jednoczesnie.
+Zmieniono lokalnie:
+- Intencja otwarcia edytora z `workdayId` wyszukuje teraz tylko dzien zawierajacy dokladny rekord i nie wraca do innego rekordu tej samej daty.
+- Formularz z intencji zaleglego STOP otrzymuje tylko wskazany rekord z `sourceRows`; zwykla reczna edycja dnia bez `workdayId` zachowuje dotychczasowe zachowanie.
+- Dodano czysty model wyboru rekordow oraz testy: dokladny wybor, zatrzymanie przy brakujacym ID i niezmieniona zwykla edycja dnia.
+Granice:
+- Blednie otwarty formularz zostal anulowany bez zapisu. Na tym etapie nie zmieniono zadnego produkcyjnego Workday ani Eventu.
+- Pelne `npm test`: `210/210` OK. `npm --prefix web-app run lint`: OK. `npm run build`: OK; pozostaje tylko istniejace ostrzezenie Vite o duzych chunkach.
+
+Data: 2026-07-25
+Autor: AI Codex
+Temat: Dokladne zamkniecie zaleglego Workday Rafala i obsluga sekund
+Zmieniono lokalnie:
+- Edytor czasu Workday pokazuje i zapisuje czas z dokladnoscia do sekund (`step="1"`), zamiast obcinac zaakceptowany STOP do pelnej minuty.
+- Wspolny model edytora zawiera testowalny formatter `HH:MM:SS`; dodano regresje potwierdzajaca zachowanie sekund.
+Zmiana danych produkcyjnych:
+- Po jawnej akceptacji operatora zamknieto tylko rekord `WD-4bfe2b2e-a515-4def-afcf-0094db709da1` dla Rafala Dudka z `2026-07-06`.
+- Zapisano START `17:43:48`, STOP `17:44:06`, `duration_sec=18`, `status=CLOSED` i `updated_by=Rafal Dudek`.
+- Bezposredni odczyt Cloud SQL potwierdzil zapis. Po pelnym odswiezeniu portal zmniejszyl licznik `Brak QR STOP` z `8` do `7`, a pozycja Rafala z `06.07.2026` zniknela z listy.
+- Dla loginu `Rafal` pozostal jeden otwarty Workday: `WD-18bff3ae-e927-43af-970a-51e96d978407` rozpociety `2026-07-24 09:10:48` czasu Europe/Warsaw.
+Weryfikacja i granice:
+- Targetowane testy edytora: `4/4` OK. Pelne `npm test`: `211/211` OK. `npm --prefix web-app run lint`: OK. `npm run build`: OK; pozostaje tylko istniejace ostrzezenie Vite o duzych chunkach.
+- `git diff --check` dla zmienionych plikow: brak bledow, tylko standardowe ostrzezenia LF/CRLF.
+- `MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED` pozostaje wylaczone. Nie utworzono testowego CLEAN ani zlecenia; 25.07.2026 portal nie pokazuje zadnego zaplanowanego zlecenia, wiec nie bylo poprawnego planu do kontrolowanego dopasowania.
+
+Data: 2026-07-25
+Autor: AI Codex
+Temat: Deduplikacja produkcyjnych reprezentacji przydzialu przed korelacja CLEAN
+Diagnoza:
+- Odczytowy preflight produkcji znalazl `11` zlecen oraz `9` unikalnych wykonan zaplanowanych na poniedzialek `2026-07-27`.
+- Ten sam rzeczywisty przydzial byl przechowywany rownolegle jako `slots`, `workAllocations`, `workerAllocations`, `workerAssignments` oraz globalny skrot przydzialu. Parser tworzyl z nich od `2` do `3` kandydatow, dlatego suchy test wszystkich `9` wykonan konczyl sie `AMBIGUOUS`.
+- Dopasowanie strefy nadal nie korzysta z nazwy klienta. Skan QR dostarcza dokladne `zoneId` i powiazane `clientId`; plan bez opcjonalnego `zoneId` moze pasowac tylko przez zgodne kanoniczne `clientId`.
+Zmieniono lokalnie:
+- Szczegolowe sloty i przydzialy maja pierwszenstwo przed pomocniczym `workerAssignments`.
+- Globalny przydzial bez `serviceBlockId` jest pomijany tylko wtedy, gdy ten sam pracownik ma juz szczegolowy przydzial w aktywnym bloku. Jawne rozne bloki i przydzialy zachowuja osobne tozsamosci.
+- Dodano test odtwarzajacy dokladna wielowarstwowa strukture z produkcyjnego zlecenia.
+Weryfikacja i granice:
+- Po poprawce suchy test tych samych danych produkcyjnych daje `9/9 MATCHED` dla `2026-07-27`, kazdy z jednym dokladnym `taskId`, `serviceBlockId`, `allocationId` i `workSlotKey`.
+- Rozszerzony test wszystkich wystapien w okresie 35 dni od `2026-07-25` sprawdzil `225` unikalnych planowanych wykonan i uzyskal `225/225 MATCHED`, bez `AMBIGUOUS`, `UNMATCHED` ani nieprzetestowalnych pozycji.
+- Testy korelacji, repozytorium i modelu: `52/52` OK. Pelne `npm test`: `212/212` OK. `npm --prefix web-app run lint`: OK. `npm run build`: OK; pozostaje tylko istniejace ostrzezenie Vite o duzych chunkach.
+- Preflight i suchy test byly tylko do odczytu. Nie zmieniono zadnego zlecenia, Eventu, Workday ani statusu START/STOP. Flaga `MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED` pozostaje wylaczona.
+
+Data: 2026-07-25
+Autor: AI Codex
+Temat: Produkcyjny rollout runtime korelacji z flaga nadal wylaczona
+Wdrozenie:
+- Potwierdzono, ze `portal.cleanzi.pl` korzysta z backendu Firebase App Hosting `cleanzi-01`, repozytorium `biuro-del/Cleanzi-01` i lokalizacji `europe-west4`.
+- Od produkcyjnego commita `f8098b6d4fdcd3367700b56e0844bda589d00975` utworzono izolowany kandydat wydania bez lokalnych zmian rentownosci i UI.
+- Commit wydania `e7aa7188c15350f2c0f995a77115cd71f68f918f` wypchnieto na osobna galaz `release/service-correlation-safe-20260725`.
+- App Hosting utworzyl `build-2026-07-25-001` i `rollout-2026-07-25-001`. Build zakonczyl sie stanem `READY`, rollout stanem `SUCCEEDED`, a aktywny ruch wskazuje w 100% ten build.
+Zakres i bezpieczenstwo:
+- Wdrożono runtime korelacji CLEAN, repozytorium zapisu snapshotu planu, jednoznaczna identyfikacje pracownika/QR, kontrole otwartych Workday/CLEAN oraz zgodnosc gotowosci schematu Worker.
+- Build App Hosting potwierdza dokladny commit `e7aa7188...` oraz efektywna wartosc `MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED=false` pochodzaca z `apphosting.yaml`.
+- Nie wdrazano ponownie Data Connect ani migracji. Nie wykonano zapisu do Cloud SQL, backfillu, zmiany Eventu, Workday, zlecenia ani statusu START/STOP.
+- Automatyczna korelacja i tworzenie nowego CLEAN pozostaja wylaczone. START i STOP dnia pozostaja dostepne.
+Weryfikacja:
+- Izolowany kandydat: `npm test` 65/65 OK, kontrola skladni backendu OK, `npm run build` OK, lokalny backend odpowiedzial `200 {"ok":true}`.
+- Produkcja: `/` odpowiada HTTP 200; `/api/auth/session-context` i `/api/mobile/state` bez tokenu odpowiadaja oczekiwanym HTTP 401 z kodem `UNAUTHENTICATED`, co potwierdza dzialanie nowego runtime.
+- Sciezka `/healthz` jest odrzucana na warstwie App Hosting przed aplikacja (HTTP 404), dlatego postflight oparto na aktywnym buildzie, 100% ruchu i rzeczywistych trasach API.
+- Pelny lint izolowanego drzewa zatrzymuje jeden istniejacy blad `no-unused-vars` w niezmienionym pliku `web-app/apps/portal-web/src/features/orders/index.js`; rollout nie zawiera zmian `web-app`.
+Kolejny etap:
+- Osobnej decyzji wymaga czasowe lub stale ustawienie flagi na `true` i kontrolowany test E2E na rzeczywistym zaplanowanym wykonaniu. Do tego czasu system nie zapisze nowej korelacji CLEAN.
+
+Data: 2026-07-26
+Autor: AI Codex
+Temat: Canary korelacji CLEAN dla W001 i przygotowanie testu E2E
+Wdrozenie:
+- W izolowanym worktree `app-to-react-correlation-release-20260725` dodano polityke canary po exact worker ID/login.
+- Commit `d5a6f6e6bfb271ad5a683d21c57d93848c880810` wypchnieto na `release/service-correlation-safe-20260725`.
+- App Hosting utworzyl `build-2026-07-26-001` i `rollout-2026-07-26-001`; build ma stan `READY`, rollout `SUCCEEDED`, a ruch produkcyjny wskazuje w 100% nowy build.
+- Efektywne zmienne z `apphosting.yaml`: `MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED=true` oraz `MOBILE_SERVICE_EXECUTION_CORRELATION_CANARY_WORKER_IDS=W001`.
+Zakres bezpieczenstwa:
+- Nowy CLEAN moze utworzyc tylko pracownik `W001` (Rafal Dudek). Inni pracownicy otrzymuja blokade canary. START i STOP pozostaja niezalezne od flagi.
+- Testy polityki, runtime i korelacji: `69/69` OK. `npm run build`: OK; pozostaje tylko istniejace ostrzezenie Vite o duzych chunkach.
+Zlecenie testowe:
+- Dodano jednorazowe zlecenie produkcyjne `codex-e2e-20260726-w001-best-clean-bc0071` na `2026-07-26`, godziny `12:14-14:29`, klient `Best Clean`, strefa `BC0071`, pracownik `W001`.
+- Suchy test po zapisie: `MATCHED`, powod `EXACT_IDS_UNIQUE`, dokladnie jeden kandydat, `serviceBlockId=e2e-service-20260726`, `allocationId=slot-w001`, `workSlotKey=slot:e2e-service-20260726:slot-w001`.
+Porzadkowanie danych przed testem:
+- Piec osieroconych wpisow Rafala z `2026-06-17`, bez Workday i bez `event_type`, domknieto metoda `DATA_REPAIR_NEXT_SCAN`: end_at kazdego wpisu jest czasem kolejnego rzeczywistego skanu tego pracownika. Po transakcji liczba nierozstrzygnietych blockerow Event wynosi `0`.
+- Nadal otwarty jest Workday `WD-18bff3ae-e927-43af-970a-51e96d978407` rozpoczety `2026-07-24T07:10:48.869Z`. Nie ustawiono fikcyjnego STOP; przed testem potrzebna jest faktyczna godzina zakonczenia pracy 24.07.
+Postflight:
+- `https://cleanzi-01--iclean-room.europe-west4.hosted.app/` i `https://portal.cleanzi.pl/` odpowiadaja HTTP 200.
+- `/api/mobile/scan` bez tokenu odpowiada oczekiwanym HTTP 401 `UNAUTHENTICATED`.
+
+Uzupelnienie 2026-07-26:
+- Rafal Dudek podal faktyczna godzine zakonczenia pracy 24.07: `20:00` Europe/Warsaw.
+- Exact Workday `WD-18bff3ae-e927-43af-970a-51e96d978407` zamknieto z `end_at=2026-07-24T18:00:00.000Z`, `status=CLOSED` i `duration_sec=38952`.
+- Postcheck po transakcji: `0` otwartych Workday Rafala i `0` nierozstrzygnietych Eventow blokujacych nowy CLEAN.
+- Ponowny preflight zlecenia testowego pozostaje `MATCHED`, `EXACT_IDS_UNIQUE`, dokladnie jeden kandydat.
+
+Uzupelnienie E2E 2026-07-26:
+- Skan START utworzyl exact Workday `WD-3ee39b5c-eb81-4bd5-b1d5-03912a5d10d1` dla loginu `Rafal`.
+- Workday ma `start_at=2026-07-26T17:21:13.615Z` (`19:21:13` Europe/Warsaw), `status=RUNNING` i brak `end_at`.
+- Ze wzgledu na pozniejszy rzeczywisty START zmieniono tylko jednorazowe zlecenie testowe `codex-e2e-20260726-w001-best-clean-bc0071` na okno `19:21-21:21`; zsynchronizowano czasy bloku uslugi i przydzialu W001.
+- Transakcyjny postcheck po zmianie: `MATCHED`, powod `EXACT_IDS_UNIQUE`, dokladnie jeden kandydat, `serviceBlockId=e2e-service-20260726`, `allocationId=slot-w001`, `workSlotKey=slot:e2e-service-20260726:slot-w001`.
+- Niezalezny odczyt potwierdzil aktywny Workday i brak utworzonego CLEAN przed skanem strefy `BC0071`.
+- Test negatywny zwyklej strefy `BC0995` utworzyl Event `EV-5aa737ac-aee4-44b1-8619-cb1b42be0b1d` od `19:39:16` do `19:41:44` Europe/Warsaw.
+- Ponowny skan `BC0995` poprawnie zamknal Event (`status=CLOSED`). Wpis nie otrzymal `task_id` ani danych dopasowania, wiec nie zostal blednie powiazany z planem `BC0071`.
+- Po zamknieciu `BC0995` Workday `WD-3ee39b5c-eb81-4bd5-b1d5-03912a5d10d1` nadal ma `status=RUNNING`.
+- Skan testowego QR `BC0071` utworzyl Event `EV-b18985a0-444e-4555-adb3-db2fd24d139a` od `20:05:23` do `20:10:22` Europe/Warsaw; ponowny skan poprawnie zamknal wpis z `end_reason=QR_SAME` i `duration_sec=299`.
+- Test E2E korelacji nie przeszedl: Event `BC0071` ma puste `event_type`, `task_id`, `occurrence_date_ymd`, `service_block_id`, `allocation_id`, `work_slot_key` i `match_status`.
+- Tabela `mobile_scan_command` nie zawiera polecenia dla tych skanow. Analiza czystego repozytorium `C:\Users\rafal\Desktop\mobile-web` potwierdzila, ze aplikacja zapisuje strefe bezposrednio przez Data Connect `InsertEventForOrg` w `mobileWorkflowService.js`, a nie przez `/api/mobile/scan` z wdrozona korelacja.
+- Przed kolejnym E2E trzeba za zgoda wlasciciela zmienic rzeczywista sciezke zapisu `mobile-web`, przetestowac ja lokalnie i osobno zatwierdzic wdrozenie produkcyjne.
+
+Uzupelnienie produkcyjne mobile-web 2026-07-26:
+- W repozytorium `C:\Users\rafal\Desktop\mobile-web` utworzono galaz `agent/route-w001-scans-through-correlation-api` i draft PR `biuro-del/mobile-web#1`.
+- Commit `9beca403623a7bd499dda862a6be2c108d4a319a` dodal sciezke `/api/mobile/scan`, dokladna polityke canary `W001`, idempotentny `clientActionId`, proxy z tokenem Firebase oraz brak cichego fallbacku do starego `InsertEventForOrg`.
+- Postflight pierwszego rolloutu wykazal, ze uzytkownicy pobieraja aplikacje z Firebase Hosting (`app.cleanzi.pl`), a nie bezposrednio z domeny App Hosting. Dlatego dodano commit korygujacy `c83f4e7040c022fbb4f229251a8de2d160d5afd6`: staly endpoint App Hosting i scisly CORS tylko dla jawnych domen Cleanzi.
+- Finalny App Hosting build `build-2026-07-26-w001-scan-002` ma stan `READY`, rollout `roll-2026-07-26-w001-scan-002` ma stan `SUCCEEDED`, a 100% ruchu backendu `mobile-web` wskazuje ten build i dokladny commit `c83f4e7040c022fbb4f229251a8de2d160d5afd6`.
+- Firebase Hosting site `iclean-room` wdrozono jako wersje `bba1b7a4f120f91c`; `app.cleanzi.pl` i `iclean-room.web.app` serwuja bundle `mobile-dU12ScV8.js`.
+- Produkcyjny bundle na obu domenach zawiera dokladny canary `W001`, adres bezpiecznego endpointu i prefiks idempotencji `mobile-scan-`. Pozostali pracownicy nadal korzystaja z dotychczasowej sciezki Data Connect.
+- Produkcyjny preflight CORS z `https://app.cleanzi.pl` do backendu App Hosting odpowiada HTTP 204 i dopuszcza naglowki `Authorization, Content-Type`. POST bez tokenu odpowiada HTTP 401 `UNAUTHENTICATED`; obce originy sa odrzucane przed proxy.
+- Weryfikacja lokalna finalnego commita: testy `11/11` OK, lint zmienionych modulow OK, build `APP_TARGET=mobile` OK, lokalny smoke test strony 200 i endpointu bez tokenu 401.
+- W czasie wdrozenia nie zmieniono zadnego Workday, Eventu, zlecenia ani statusu START/STOP. Kolejny krok to pojedynczy skan `BC0071` przez odswiezona aplikacje W001 i natychmiastowy odczyt nowych pol korelacji przed ponownym skanem.
+
+Korekta kontraktu orgId 2026-07-26:
+- Pierwszy skan po wdrozeniu zatrzymal sie komunikatem `ORG_ID_MISSING` / `Brak poprawnego orgId.`. Produkcyjny endpoint wymaga `orgId` przed rozpoczeciem transakcji, a klient canary wysylal token i QR bez tego pola.
+- Odczyt tylko do odczytu potwierdzil, ze bledne zadanie nie utworzylo Eventu ani wpisu `mobile_scan_command`; ostatni Event `BC0071` pozostal starym, zamknietym wpisem `EV-b18985a0-444e-4555-adb3-db2fd24d139a`.
+- Commit `a6655cc80de37c3ca9073888a964a0d321280f63` przekazuje dokladne `orgId` z aktywnej sesji. Backend nadal weryfikuje czlonkostwo tej organizacji przed transakcja; orgId nie jest zgadywane z nazwy ani loginu.
+- Testy finalnej poprawki: `12/12` OK, lint zmienionych modulow OK, build `APP_TARGET=mobile` OK i smoke test OK.
+- App Hosting build `build-2026-07-26-w001-scan-003` ma stan `READY`, rollout `roll-2026-07-26-w001-scan-003` ma stan `SUCCEEDED`, a 100% ruchu wskazuje commit `a6655cc80de37c3ca9073888a964a0d321280f63`.
+- Firebase Hosting wdrozono jako wersje `08d7cc49fb72bece`. `app.cleanzi.pl` i `iclean-room.web.app` serwuja bundle `mobile-BhBfFYaO.js` zawierajacy kontrakt orgId, canary W001 i idempotentny endpoint skanowania.
+
+Weryfikacja START korelacji W001 2026-07-26:
+- Produkcyjny skan `BC0071` o `21:11:42` Europe/Warsaw utworzyl Event `EV-c0b82e3a-09a9-4aa9-be86-434be1e438ff`.
+- Event ma `event_type=CLEAN`, `status=RUNNING`, `task_id=codex-e2e-20260726-w001-best-clean-bc0071` oraz `match_status=MATCHED`.
+- Powiazanie jest jednoznaczne: `match_method=EXACT_IDS_UNIQUE`, `service_block_id=e2e-service-20260726`, `allocation_id=slot-w001`, `work_slot_key=slot:e2e-service-20260726:slot-w001`.
+- Komenda idempotentna zostala zapisana jako `mobile-scan-1785093102327-e2b76b3b-b0b8-4fa2-9237-6881bdd672d2` z akcja `START_ZONE`.
+- Workday `WD-3ee39b5c-eb81-4bd5-b1d5-03912a5d10d1` pozostaje aktywny. Kolejny krok testu to drugi skan `BC0071`, ktory powinien zamknac tylko ten Event jako STOP strefy.
+- Odczyt ujawnil dwa stare otwarte Eventy Rafala (`BC0838` z 18.06 i `BC0021` z 24.06), bez danych korelacji. Nie sa czescia dzisiejszego testu i nie zostaly zmienione.
+
+Poprawka wybudzania aplikacji mobile W001 2026-07-26:
+- Po zgloszeniu bledu `Nie znaleziono kodu QR` przy bardzo szybkim skanie po odblokowaniu telefonu potwierdzono w kodzie, ze chwilowy blad zapytania Data Connect byl zamieniany na pusta liste stref i mogl nadpisac poprzedni poprawny snapshot.
+- Commit `d4d9027c432e74df9c3a2f9dd409976caa964770` dodal dla exact canary `W001`: rygorystyczne pobieranie wymaganych danych bez zamiany bledu na pusta liste, synchronizacje po `visibilitychange/pageshow`, blokade skanera na czas odswiezenia oraz bezpieczne zatrzymanie i restart strumienia kamery.
+- Pozostali pracownicy zachowuja dotychczasowa polityke odswiezania i zapisu. Canary nadal jest wyznaczany przez dokladny worker ID `W001`, a nie login lub nazwe.
+- Walidacja przed wdrozeniem: testy `15/15` OK, lint zmienionych plikow OK, build mobilny OK, pelny proces `npm ci + build` OK i lokalny smoke test OK.
+- App Hosting build `build-2026-07-26-w001-wake-004` ma stan `READY`, rollout `roll-2026-07-26-w001-wake-004` ma stan `SUCCEEDED`, a 100% ruchu wskazuje dokladny commit `d4d9027c432e74df9c3a2f9dd409976caa964770`.
+- Firebase Hosting site `iclean-room` wdrozono jako wersje `1b22809b4bc234bc`. `app.cleanzi.pl` i `iclean-room.web.app` serwuja bundle `mobile-BJT2j3ib.js`; App Hosting serwuje `mobile-Hz-23h0T.js`.
+- Postflight na wszystkich trzech domenach: HTTP 200, obecne `W001`, endpoint skanowania, idempotencja, `visibilitychange`, `pageshow` i zabezpieczenie snapshotu. CORS z `app.cleanzi.pl` odpowiada HTTP 204, a POST bez tokenu HTTP 401 `UNAUTHENTICATED`.
+- Odczyt bazy po wdrozeniu: Event `EV-c0b82e3a-09a9-4aa9-be86-434be1e438ff` pozostaje `CLOSED`, `CLEAN`, `MATCHED`, `EXACT_IDS_UNIQUE`; nie powstal nowy `mobile_scan_command`. Workday `WD-3ee39b5c-eb81-4bd5-b1d5-03912a5d10d1` nadal ma `status=RUNNING`.
+- Wymagany ostatni test urzadzeniowy: zablokowac telefon z otwarta aplikacja W001, odblokowac go i od razu uruchomic skan QR. Oczekiwane zachowanie: krotka synchronizacja, automatyczny restart kamery i brak falszywego komunikatu o nieznalezionym kodzie.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Poprawne pokazanie zakonczonego CLEAN w panelach pulpitu
+Test E2E W001:
+- Jednorazowe zlecenie `codex-e2e-20260727-w001-lk003-bc1234` zostalo wykonane przez Rafala Dudka (`W001`) dla klienta `LK003` i strefy `BC1234`.
+- Workday `WD-3d44deb5-7fe2-4be6-96cb-4a3ca4537f35` zostal poprawnie zamkniety: START `10:52:36`, STOP `13:38:54` Europe/Warsaw, czas `9978 s`.
+- Event `EV-03b20cd6-d86a-4665-a1cf-fe39083eb2ec` zostal poprawnie zamkniety: CLEAN `10:52:51-11:08:48`, czas `956 s`, `MATCHED`, metoda `EXACT_IDS_UNIQUE`.
+Diagnoza pulpitu:
+- Portal odrzucal prawidlowy Event jako `STALE_PLAN_REVISION`, poniewaz aktualne `Task.updated_at` mialo milisekundy `.026`, a zapisany snapshot rewizji planu byl reprezentowany z dokladnoscia do sekundy `.000`.
+- Osobny czysto legacyjny plan bez `serviceBlockId`, `allocationId` i `workSlotKey` byl blednie raportowany jako wyjatek korelacji, mimo ze nie mogl byc kandydatem do nowego modelu wykonania.
+Zmieniono lokalnie:
+- `serviceExecutionModel.js` porownuje rewizje planu z dokladnoscia odpowiadajaca utrwalonemu snapshotowi (sekunda). Nadal odrzuca rzeczywiste zmiany rewizji z innej sekundy i nie rozluznia dopasowania `taskId`, `serviceBlockId`, `allocationId` ani `workSlotKey`.
+- Adapter pulpitu pomija tylko plany bez jakiejkolwiek utrwalonej tozsamosci wykonania. Czesciowo wypelnione lub sprzeczne plany nowego modelu nadal trafiaja do wyjatkow.
+- Dodano dwa testy regresyjne: snapshot rewizji zaokraglony do sekundy oraz czysto legacyjny plan bez tozsamosci wykonania.
+Weryfikacja:
+- Po poprawce lokalny pulpit na rzeczywistych danych testu pokazuje `1 dzisiaj` oraz wpis `TEST E2E - AS Michal Herman [Activ Space] - Rafal Dudek`, godziny `10:52-11:08`.
+- Panel `Postep uslug` poprawnie pokazuje `0 w toku` bez ostrzezen, poniewaz CLEAN zostal zakonczony.
+- Test modułu: `18/18` OK. Pelne `npm test`: `214/214` OK. `npm --prefix web-app run lint`: OK. `npm run build`: OK; pozostaje tylko istniejace ostrzezenie Vite o duzych chunkach.
+Granice:
+- Poprawka jest lokalna. Nie wykonano commita ani wdrozenia portalu na produkcje.
+- Nie zmieniano ponownie danych produkcyjnych po zakonczeniu kontrolowanego testu W001.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Ochrona przed planowaniem pracownika w roznych obiektach w tym samym czasie
+Problem:
+- Oś dnia nakladala dwa zaplanowane zlecenia Rafala Dudka (`W001`): staly plan Best Clean 08:30-16:30 oraz jednorazowy test E2E w innym obiekcie 10:27-11:37.
+- Dotychczasowa kontrola kolizji dzialala tylko podczas przesuwania elementow w kalendarzu. Zapis formularza, import albo bezposredni zapis API mogly ominac te kontrole.
+- Pasek dnia pracy byl pokazywany jak kolejna lokalizacja, chociaz START dnia potwierdza tylko miejsce rozpoczecia dnia, a nie nieprzerwana obecnosc w tym obiekcie.
+Zmieniono lokalnie:
+- Dodano wspolna polityke serwerowa `worker-schedule-conflict-policy.js`. Porownuje przydzialy po kanonicznym Worker ID, rozwija cykle oraz bloki uslug i wykrywa rzeczywiste nakladanie przedzialow czasu.
+- Zapis jest blokowany kodem `WORKER_SCHEDULE_LOCATION_CONFLICT`, gdy ta sama osoba ma w tym samym czasie rozne albo niejednoznaczne lokalizacje. Sasiednie przedzialy sa dozwolone. Nakladajace sie wpisy z tym samym pewnym `clientId`, adresem albo GPS nie sa falszywa kolizja lokalizacji.
+- Produkcyjny zapis API odbywa walidacje wewnatrz transakcji po blokadzie organizacji i przed UPSERT-em. Lokalny zapis plikowy rowniez waliduje caly wynikowy harmonogram przed zapisem.
+- Frontend nie ma juz awaryjnej sciezki zapisu przez Data Connect, ktora moglaby ominac walidacje. Brak serwera walidujacego zatrzymuje zapis w trybie fail-closed.
+- Kalendarz wykonuje preflight calego harmonogramu przed zapisem i pokazuje dialog z pracownikiem, terminem oraz kolidujacym zleceniem.
+- Oś dnia rozklada nakladajace sie plany na osobnych torach, oznacza je jako `KOLIZJA PLANU`, a pasek Workday opisuje jako `Dzien pracy` z informacja, gdzie zeskanowano START dnia. Nie przedstawia juz obiektu START jako stalej lokalizacji pracownika.
+Weryfikacja:
+- Test polityki regresyjnej: `7/7` OK, w tym przypadek W001 Best Clean kontra test E2E, cykle, dni pominiete, sasiednie terminy i ten sam obiekt.
+- Pelne `npm test`: `221/221` OK.
+- `npm --prefix web-app run lint`: OK.
+- `npm run build`: OK; pozostaje tylko istniejace ostrzezenie Vite o duzych chunkach.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita ani wdrozenia produkcyjnego.
+- Nie usunieto i nie zmieniono istniejacego testowego zlecenia ani zadnych danych produkcyjnych. Jego ewentualne usuniecie wymaga osobnej, jednoznacznej zgody.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Cykl zycia zlecenia bez utraty historii
+Powod:
+- Audyt wykazal, ze tabela `Task` nie miala stanu anulowania ani archiwizacji. Dotychczas interfejs mogl jedynie fizycznie usunac zlecenie, wiec pomijanie rzekomo anulowanych rekordow w kontroli kolizji nie byloby mozliwe.
+Zmieniono lokalnie:
+- Dodano addytywny stan `lifecycleStatus`: `ACTIVE`, `CANCELLED`, `ARCHIVED` oraz znaczniki czasu `cancelledAt` i `archivedAt`.
+- Istniejace rekordy otrzymuja bezpieczny status domyslny `ACTIVE`; migracja nie usuwa ani nie nadpisuje danych biznesowych.
+- Endpoint zlecen obsluguje `PATCH` po dokladnych `id_task`. Zmiana statusu jest wykonywana w transakcji po blokadzie organizacji.
+- Ponowna aktywacja zlecenia przechodzi pelna kontrole kolizji przed zatwierdzeniem. W razie konfliktu transakcja jest wycofywana.
+- `CANCELLED` i `ARCHIVED` pozostaja w bazie jako historia, ale nie sa wyswietlane jako aktywny plan i nie blokuja innych zlecen.
+- W menu zlecenia na osi kalendarza dodano osobna akcje `Anuluj zlecenie`. Nie jest ona twardym usunieciem. Dla generowanego wystapienia serii pozostaje dotychczasowa, osobna obsluga pominiecia dnia.
+- Twarde usuwanie pozostalo osobna akcja i nie zostalo automatycznie zastapione, aby nie zmieniac istniejacej semantyki bez decyzji biznesowej.
+- Dodano migracje `dataconnect/migrations/20260727_task_lifecycle_additive.sql`, rozszerzono schema i operacje Data Connect oraz ponownie wygenerowano SDK.
+Weryfikacja:
+- Generator Data Connect 15.8.0: OK dla `iclean-room-service`.
+- Testy polityki i cyklu zycia: `14/14` OK.
+- Pelne `npm test`: `228/228` OK.
+- `npm --prefix web-app run lint`: OK.
+- `npm run build`: OK; pozostaja tylko istniejace ostrzezenia o rozmiarze duzych modulow i chunkow.
+Granice:
+- Nie uruchomiono migracji na produkcji.
+- Nie zmieniono statusu testowego zlecenia E2E ani zadnych innych danych produkcyjnych.
+- Nie wykonano commita ani wdrozenia.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Ujednolicenie jakosci i responsywnosci portalu do wzorca Rentownosci kontraktow
+Powod:
+- Modul `Rentownosc kontraktow` mial najbardziej spojny jezyk wizualny portalu, natomiast pozostale widoki korzystaly z roznych naglowkow, promieni, cieni, ukladow filtrow i zachowan mobilnych.
+Zmieniono lokalnie:
+- Dodano koncowa, wspolna warstwe stylow `portalQuality.css`, ktora definiuje tokeny powierzchni, obramowan, promieni, cieni, akcji glownej, fokusu, KPI, filtrow, tabel i kart.
+- Dodano jednolite naglowki stron dla pulpitu, zdarzen, zlecen, mapy zlecen, kalendarza, profilu klienta, profili i czasu pracownikow, stref, audytow, raportow oraz ustawien.
+- Ujednolicono szerokosc tresci, rytm pionowy, karty KPI, pola formularzy, przyciski, tabele i panele danych bez zmiany istniejacych selektorow funkcjonalnych.
+- Przy ekranach mobilnych panel boczny startuje zwiniety i zmienia sie w kompaktowy pasek z logo, akcja dodawania i przyciskiem rozwiniecia. Naglowki, filtry i KPI skladaja sie do jednej kolumny.
+Weryfikacja:
+- Porownanie wzorca z pulpitem: `output/portal-design-audit-20260727/14-reference-vs-dashboard.png`.
+- Widok mobilny 390 x 844 px: `output/portal-design-audit-20260727/11-dashboard-mobile-390.png`.
+- Pelny raport: `design-qa.md`, sekcja `Ujednolicenie portalu do jakosci Rentownosci kontraktow (2026-07-27)`.
+- `npm test`: 228/228 OK.
+- `npm --prefix web-app run lint`: OK.
+- `npm --prefix web-app run build`: OK; pozostaje tylko istniejace ostrzezenie o duzych chunkach.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+- Nie zmieniano logiki biznesowej, bazy ani realnych danych firmy.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Centrum dowodzenia jako pierwszy ekran Pulpitu
+Powod:
+- Gorna czesc Pulpitu zostala dostosowana 1:1 do przekazanego wzorca „Dzien pod kontrola”, bez przebudowy modulow znajdujacych sie nizej.
+Zmieniono lokalnie:
+- Dodano nowy pierwszy ekran „Centrum dowodzenia”: naglowek LIVE, cztery KPI, duza mape operacyjna, panel „Operacje na zywo” oraz pasek „Insights AI”.
+- Istniejace moduly nie zostaly zastapione atrapami. Mapa nadal korzysta z bieżących statusow pracownikow i lokalizacji GPS/planu, a operacje oraz zakonczenia nadal respektuja bezpieczna korelacje planu z Eventami CLEAN.
+- KPI jakosci pokazuje udzial faktycznie potwierdzonych zakonczen w dzisiejszym planie. Przy braku bezpiecznego mianownika lub korelacji pokazuje jawny brak wyniku zamiast zgadywanej wartosci.
+- Marza pozostaje oznaczona jako „wartosc pogladowa” i jest synchronizowana z istniejacym demonstracyjnym panelem rentownosci.
+- Dodano dzialajace filtry statusow pinezek, przelacznik mapa/lista, wycentrowanie mapy, legendę, przejscie do kalendarza i rozwijane szczegoly potwierdzonych zadan.
+- Dotychczasowy panel rentownosci, os dnia i wszystkie dalsze sekcje pozostaly ponizej bez zmian.
+- Dodano responsywny uklad dla telefonow i tabletow.
+Weryfikacja:
+- Porownanie wzorca i implementacji: `output/command-center-qa-20260727/04-source-vs-implementation.png`.
+- Desktop: `output/command-center-qa-20260727/02-command-center-desktop.png`.
+- Widok listy: `output/command-center-qa-20260727/03-command-center-list.png`.
+- Mobilny podglad 390 x 844 px: `output/command-center-qa-20260727/05-command-center-mobile-390.png`.
+- Filtry faktycznie ukrywaja odpowiadajace im pinezki; przelacznik mapa/lista i panel szczegolow zostaly przeklikane na zalogowanym localhost.
+- Brak zduplikowanych identyfikatorow DOM.
+- `npm test`: 228/228 OK.
+- `npm --prefix web-app run lint`: OK.
+- `npm --prefix web-app run build`: OK; pozostaje tylko istniejace ostrzezenie o duzych chunkach.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+- Nie zapisano ani nie zmieniono zadnych realnych danych firmy.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Mapa operacyjna wariant 3 z alarmem START na mapie
+Powod:
+- Wybrano wariant 3 wizualizacji: obiekt jest centralnym markerem, a pracownicy rozwijaja sie wokol niego. Alarm ma byc widoczny bezposrednio na mapie, a nie w osobnym, duzym oknie.
+Zmieniono lokalnie:
+- Zastapiono proste kropki markerami osob z przygotowanym miejscem na zdjecie profilowe i bezpiecznym fallbackiem inicjalow.
+- Ustalono kolory: szary plan, niebieski praca, zielony zakonczenie, czerwony brak START po przekroczeniu planu o wiecej niz 10 minut.
+- Osoby sa grupowane przy obiekcie tylko po dokladnym `clientId`. Nazwa klienta nie jest uzywana jako zastepczy identyfikator.
+- Korelacja wykonania pobiera `clientId` rowniez z odpowiadajacego zdarzenia QR, co usuwa falszywe alarmy dla zakonczonych prac Best Clean.
+- Klikniecie lub najechanie na obiekt rozwija pracownikow, klikniecie osoby pokazuje szczegoly i akcje `Otworz zadanie`.
+- Filtry obsluguja wszystkie cztery statusy takze wewnatrz grup obiektow; licznik alarmow jest widoczny przy dzwonku.
+- Obiekt pokazuje postep stref tylko przy dostepnym `serviceBlockId` lub `zoneId`; brak identyfikatorow jest jawnie oznaczony i nie jest zgadywany.
+- Dodano wylacznie lokalny tryb QA `?mapAlarmPreview=1`, usuwany z buildu produkcyjnego.
+Weryfikacja:
+- Pelne `npm.cmd test`: `237/237` OK.
+- Testy mapy i 10-minutowego bufora START: `9/9` OK.
+- `npm.cmd --prefix web-app run lint`: OK.
+- `npm.cmd --prefix web-app run build`: OK; pozostaje istniejace ostrzezenie Vite o duzych chunkach.
+- Zalogowany localhost: rozwijanie obiektu, filtr czerwonego alarmu i statusy dzisiejszych danych Best Clean dzialaja.
+- Porownanie wizualne: `output/operational-map-qa-20260727/04-reference-vs-implementation-focused.png`.
+Granice:
+- Nie zmieniono bazy ani realnych danych firmy.
+
+- Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+- Trwaly upload zdjecia w edycji pracownika nie zostal jeszcze dodany; mapa potrafi juz wyswietlic zapisany URL zdjecia.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Domyslne ilustracyjne awatary i blizsze rozmieszczenie osob na mapie
+Powod:
+- Przy braku zdjecia profilowego marker osoby pokazywal inicjaly, a rozwijane markery pracownikow byly zbyt daleko od centralnego markera obiektu.
+Zmieniono lokalnie:
+- Dodano dwie lekkie, niehiperrealistyczne ilustracje domyslne: kobiete i mezczyzne.
+- Zapisane zdjecie pracownika nadal ma pierwszenstwo. Fallback najpierw respektuje jawne pole plci, a przy jego braku dobiera ilustracje na podstawie imienia.
+- Zmniejszono odleglosc siedmiu pozycji osob wokol centralnego markera obiektu, zachowujac czytelny odstep pomiedzy krawedziami markerow.
+- Dodano testy jawnej plci, imienia w obu kolejnosciach oraz meskiego wyjatku `Kuba`.
+Pliki:
+- `web-app/public/assets/avatars/default-female.webp`
+- `web-app/public/assets/avatars/default-male.webp`
+- `web-app/apps/portal-web/src/features/dashboard/operationalMapModel.js`
+- `web-app/apps/portal-web/src/features/dashboard/index.js`
+- `test/operational-map-model.test.js`
+Weryfikacja:
+- `npm.cmd test`: 239/239 OK.
+- `npm.cmd --prefix web-app run lint`: OK.
+- `npm.cmd run build`: OK; pozostaje istniejace ostrzezenie Vite o duzych chunkach.
+- Obie ilustracje sprawdzono w finalnym rozmiarze 256 x 256 px; kazda ma ok. 5,3 KB.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita, pusha ani wdrozenia.
+- Nie zmieniono bazy ani realnych danych firmy.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Rozdzielenie licznika mapy i kontrolek zoomu
+Powod:
+- Etykieta `Mapa operacyjna / liczba osob` oraz kontrolki Leaflet `+/-` zajmowaly ten sam lewy gorny rog i nachodzily na siebie.
+Zmieniono lokalnie:
+- Etykieta mapy zaczyna sie teraz 56 px od lewej krawedzi na desktopie i 54 px na waskich ekranach.
+- Kontrolki zoomu pozostaly w standardowym, latwo dostepnym polozeniu.
+Weryfikacja:
+- Zalogowany localhost: etykieta i zoom sa rozdzielone po zaladowaniu mapy z 25/34 osobami.
+- Nie zmieniono logiki ani danych mapy.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Chronologiczny strumien operacji na zywo
+Powod:
+- Panel `Operacje na zywo` pokazywal tylko prace trwajace i pozostawial duzy pusty obszar. Uzytkownik potrzebuje jednego przebiegu dnia z najnowszymi zdarzeniami u gory oraz zakonczonymi pracami zachowanymi w historii.
+Zmieniono lokalnie:
+- Polaczono operacje aktywne i zakonczone w jeden strumien sortowany malejaco po faktycznym czasie zdarzenia: START dla pracy trwajacej oraz STOP dla pracy zakonczonej.
+- Pierwszy ekran pokazuje maksymalnie piec najnowszych wpisow. Przycisk `Zobacz wszystkie operacje (N)` pojawia sie tylko wtedy, gdy pozostaly dalsze zdarzenia.
+- Dodano pelny, przewijany dialog wszystkich dzisiejszych operacji z licznikiem, obsluga Escape, klikniecia tla, petla fokusu i przywracaniem fokusu.
+- Karty pokazuja obiekt, blok uslugi, pracownikow z ilustracyjnymi miniaturami, czas oraz zmierzony postep. Brak pelnego planu ma animowany stan nieokreslony zamiast wymyslonego procentu.
+- Zakonczone operacje pozostaja na liscie ze statusem STOP i zielonym oznaczeniem.
+- Klikniecie wpisu z kanonicznym `taskId` otwiera istniejace zadanie; brak identyfikatora nie uruchamia zgadywania.
+- Dodano czysty model strumienia oraz testy kolejnosci i limitu podgladu.
+Pliki:
+- `web-app/apps/portal-web/src/features/dashboard/serviceOperationStreamModel.js`
+- `web-app/apps/portal-web/src/features/dashboard/index.js`
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `web-app/apps/portal-web/src/ui/styles/commandCenter.css`
+- `test/dashboard-service-operation-stream.test.js`
+- `design-qa.md`
+Weryfikacja:
+- `npm.cmd test`: 241/241 OK.
+- `npm.cmd --prefix web-app run lint`: OK.
+- `npm.cmd --prefix web-app run build`: OK; pozostaje istniejace ostrzezenie Vite o duzych chunkach.
+- Porownanie wizualne: `output/command-operations-qa-20260727/04-source-vs-implementation.png`.
+- Pelny dialog: `output/command-operations-qa-20260727/03-all-operations-modal.png`.
+Granice:
+- Sesja wlasciwego portalu wygasla przed koncowym podgladem, dlatego stan z wieloma wpisami sprawdzono w kontrolowanym renderze tego samego DOM i produkcyjnych arkuszy CSS. Model kolejnosci ma osobne testy automatyczne.
+- Nie zmieniono bazy ani realnych danych firmy.
+- Nie wykonano commita, pusha ani wdrozenia.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Faktyczna aktywnosc CLEAN niezalezna od planu w Operacjach na zywo
+Powod:
+- Zalogowany pulpit pokazywal aktywnych pracownikow i ich obiekty na mapie oraz osi dnia, ale panel `Operacje na zywo` byl pusty, poniewaz przyjmowal tylko Eventy zaakceptowane przez scisla korelacje ze zleceniem.
+- Obecnosc faktyczna i postep planu to dwa rozne fakty. Brak planu nie moze ukrywac rozpoczetego CLEAN, ale nie pozwala tez wyliczac procentu ani planowanej godziny konca.
+Zmieniono lokalnie:
+- Jawny Event `CLEAN` z dzisiejszym START jest teraz pokazywany jako faktyczna operacja takze bez zlecenia. Obiekt pochodzi z danych Eventu i przypisanego QR/strefy, a pracownik z kanonicznego rekordu zdarzenia.
+- CLEAN bez potwierdzonego planu pokazuje stan `W toku`, godzine `od HH:MM`, informacje o braku planowanej godziny konca i animowany pasek nieokreslony. Nie otrzymuje wymyslonego procentu.
+- CLEAN jednoznacznie powiazany ze zleceniem nadal korzysta ze scislego modelu ID. Tylko taki wpis moze pokazac procent i planowany koniec.
+- Zamkniety CLEAN bez planu pozostaje w historii jako `Zakonczone`, ale nie jest liczony jako 100% wykonania planu ani jako potwierdzone ukończenie zlecenia.
+- Eventy zaakceptowane przez scisly model sa wykluczane z listy obserwowanej po dokladnym `eventId`, aby nie dublowac operacji.
+- KPI potwierdzonych zadan i osobny panel potwierdzonych ukonczen nadal licza tylko bezpiecznie skorelowane zakonczenia.
+- Opis panelu wyjasnia, ze pokazuje faktyczne rozpoczecia i zakonczenia, a procent jest dostepny tylko przy potwierdzonym planie.
+- Otwarty dzien pracy `START` na rozpoznanym obiekcie jest pokazywany jako faktyczna obecnosc nawet bez otwartego CLEAN. Wpis zawiera obiekt, pracownika i godzine rozpoczecia.
+- Obecnosc bez jednoznacznego planu nie ma procentu ani godziny konca. Obecnosc laczy sie z planem tylko po dokladnych identyfikatorach klienta i pracownika oraz co najmniej jednej zapisanej referencji zadania, bloku, przydzialu lub slotu. Sam zgodny pracownik i obiekt nie tworza procentu.
+- Otwarty CLEAN ma pierwszenstwo przed ogolnym dniem pracy tej samej osoby, dlatego aktywny pracownik nie jest pokazywany jednoczesnie w dwoch miejscach.
+- Zamkniety dzien pracy pozostaje w chronologicznej historii, ale sam STOP dnia nie potwierdza wykonania zaplanowanego sprzatania.
+- START bez rozpoznanego obiektu nie jest ukrywany. Panel pokazuje pracownika jako `Obiekt nierozpoznany` i oznacza rekord do uzupelnienia, nadal bez procentu.
+Pliki:
+- `web-app/apps/portal-web/src/features/dashboard/serviceOperationStreamModel.js`
+- `web-app/apps/portal-web/src/features/dashboard/index.js`
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `web-app/apps/portal-web/src/ui/styles/commandCenter.css`
+- `test/dashboard-service-operation-stream.test.js`
+- `design-qa.md`
+Weryfikacja:
+- Zalogowany localhost: panel pokazal faktyczne zakonczone sprzatanie Rafala Dudka na obiekcie `AS Michal Herman [Activ Space]`, mimo ze wpis wymaga weryfikacji korelacji z planem.
+- Stan przed poprawka: `outputs/live-operations-audit-2026-07-27/01-before-empty-live-operations.png`.
+- Stan po poprawce: `outputs/live-operations-audit-2026-07-27/02-after-actual-operations.png`.
+- Stan z obecnosciami START i jednoznacznymi planami: `outputs/live-operations-audit-2026-07-27/03-after-workday-presence-and-plans.png`.
+- Porownanie ze wzorcem: `outputs/live-operations-audit-2026-07-27/04-reference-vs-workday-operations.png`.
+- Koncowy zweryfikowany widok: `outputs/live-operations-audit-2026-07-27/05-final-verified-live-operations.png`.
+- Kompletny widok z brakujacym obiektem oznaczonym jawnie: `outputs/live-operations-audit-2026-07-27/06-final-complete-live-operations.png`.
+- Zalogowany localhost pokazal `16 w toku` i `36` dzisiejszych operacji. Dla jednoznacznych planow widoczne byly procenty i godziny konca, m.in. `94%` dla GAPR; pozostale obecnosci pokazywaly START bez wymyslonego procentu.
+- Test modelu operacji: `11/11` OK.
+- Pelne `npm.cmd test`: `250/250` OK.
+- `npm.cmd --prefix web-app run lint`: OK.
+- `npm.cmd --prefix web-app run build`: OK; pozostaje istniejace ostrzezenie Vite o duzych chunkach.
+Granice:
+- W chwili koncowej kontroli nie bylo otwartego dzisiejszego CLEAN. Panel pokazal jednak faktyczne otwarte dni pracy na rozpoznanych obiektach; nie utozsamia ich z potwierdzonym wykonaniem sprzatania.
+- Nie zmieniono bazy ani realnych danych firmy.
+- Nie wykonano commita, pusha ani wdrozenia.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Ograniczenie czasu synchronizacji zlecen na pulpicie
+Powod:
+- Lokalny endpoint `schedule-orders` potrafil zrywac polaczenie dopiero po okolo 45 sekundach (`ECONNRESET`). Pulpit czekal na ten wynik i przez caly czas zaslanial dane komunikatem `Synchronizuje dane...`.
+Zmieniono lokalnie:
+- Odczyt zlecen z backendu ma limit 12 sekund.
+- Po przekroczeniu limitu zadanie sieciowe jest anulowane, niedostepny endpoint zostaje zapamietany dla biezacej sesji, a system korzysta z istniejacego zrodla zapasowego Firebase Data Connect.
+- Dane operacyjne pulpitu nie czekaja juz na pelne zakonczenie synchronizacji planu. Plan jest dociagany w tle, a po zakonczeniu bezpiecznie przelicza widok.
+- Zapisywanie, zmiana statusu i usuwanie zlecen zachowuja dotychczasowa scisla walidacje; limit dotyczy tylko odczytu listy.
+Pliki:
+- `web-app/apps/portal-web/src/services/scheduleTaskDataConnectService.js`
+- `ReadMe.txt`
+Weryfikacja:
+- W powtornym pomiarze zalogowany localhost pokazal rzeczywiste dane pulpitu po okolo 2,7 s zamiast oczekiwania ponad 45 s.
+- Synchronizacja planu zakonczyla sie w tle bez ponownego zaslaniania pulpitu.
+- Po synchronizacji widoczne sa aktualne dane: 9 aktywnych pracownikow i 38 dzisiejszych operacji.
+- Rafal Dudek jest pokazany jako `W toku` od 19:33 w Best Clean, bez wymyslonego procentu i bez planowanej godziny konca.
+- ESLint dla zmienionego serwisu: OK.
+- Build portalu: OK; pozostaje istniejace ostrzezenie Vite o duzych chunkach.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita, pusha ani wdrozenia.
+- Nie zmieniono bazy ani realnych danych firmy.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Aktywne sesje zawsze nad zakonczonymi operacjami
+Powod:
+- Chronologiczne mieszanie wpisow powodowalo, ze nowsze zakonczenia zaslanialy nadal trwajace sesje w piecioelementowym podgladzie.
+Zmieniono lokalnie:
+- Wszystkie aktywne sesje sa teraz zawsze wyswietlane nad zakonczonymi operacjami.
+- Aktywne sesje sa sortowane od najnowszego START, a zakonczone od najnowszego STOP.
+- Ta sama kolejnosc obowiazuje w podgladzie pieciu pozycji i w pelnej liscie operacji.
+- Opis pelnej listy zostal dostosowany do rzeczywistej zasady sortowania.
+Pliki:
+- `web-app/apps/portal-web/src/features/dashboard/serviceOperationStreamModel.js`
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `test/dashboard-service-operation-stream.test.js`
+- `ReadMe.txt`
+Weryfikacja:
+- Test modelu operacji: 12/12 OK.
+- ESLint zmienionego modelu i interfejsu: OK.
+- Build portalu: OK; pozostaje istniejace ostrzezenie Vite o duzych chunkach.
+- Zalogowany localhost: 38 operacji, pozycje 1-9 aktywne, pierwsza zakonczona na pozycji 10; brak aktywnych wpisow ponizej zakonczonych.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita, pusha ani wdrozenia.
+- Nie zmieniono bazy ani realnych danych firmy.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Pelne kolory i kontrast w Operacjach na zywo
+Powod:
+- Globalna regula portalu dla przyciskow `disabled` wymuszala `opacity: .52 !important`. Wpisy bez przejscia do zadania sa technicznie nieklikalnymi przyciskami, dlatego caly ich wyglad byl przygaszony.
+Zmieniono lokalnie:
+- Wylacznie przyciski wpisow w `Operacjach na zywo` zachowuja teraz 100% krycia, pelne kolory i normalny kontrast, takze gdy nie maja dostepnych szczegolow zadania.
+- Aktywne sesje maja niebieski akcent i jasne niebieskie tlo, a zakonczone zielony akcent i jasne zielone tlo.
+- Przyciemniono kolor nazwy obiektu, opisu, pracownikow, czasu i informacji pod paskiem.
+- Nie zmieniono logiki statusow, kolejnosci ani mozliwosci otwierania zadan.
+Pliki:
+- `web-app/apps/portal-web/src/ui/styles/commandCenter.css`
+- `ReadMe.txt`
+Weryfikacja:
+- Kontrola wizualna na zalogowanym localhost: aktywne wpisy w podgladzie i pelnej liscie nie sa juz wyszarzone; tekst, awatary, status i pasek maja pelne nasycenie.
+- `git diff --check` dla zmienionego CSS: OK.
+- Build portalu: OK; pozostaje istniejace ostrzezenie Vite o duzych chunkach.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita, pusha ani wdrozenia.
+- Nie zmieniono bazy ani realnych danych firmy.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Warstwy markerow i usuniecie czarnego tooltipa mapy
+Powod:
+- Czarny pasek byl natywnym tooltipem przegladarki generowanym z pola `title` markera.
+- Bialy dymek szczegolow mogl znalezc sie pod sasiednimi osobami z tej samej grupy albo pod markerem innego obiektu.
+Zmieniono lokalnie:
+- Usunieto natywne pola `title` z markerow obiektow i osob. Dostepne nazwy i opisy pozostaly w `alt` oraz `aria-label`.
+- Rozwiniety obiekt, wybrana osoba oraz marker z widocznym dymkiem sa podnoszone ponad wszystkie pozostale markery Leaflet.
+- Wybrana lub wskazana osoba ma najwyzsza warstwe wewnatrz grupy, a jej bialy dymek jest rysowany nad pozostalymi osobami i obiektami.
+- Regula obejmuje klikniecie, najechanie myszka i fokus klawiatury.
+Pliki:
+- `web-app/apps/portal-web/src/features/dashboard/index.js`
+- `web-app/apps/portal-web/src/ui/styles/commandCenter.css`
+- `ReadMe.txt`
+Weryfikacja:
+- Zalogowany localhost po kliknieciu osoby: bialy dymek jest widoczny bez czarnego paska.
+- DOM mapy zawiera 0 markerow z natywnym atrybutem `title`; wybrany marker otrzymuje podniesiona warstwe.
+- Testy modelu mapy: 6/6 OK.
+- ESLint dashboardu: OK.
+- `git diff --check`: OK poza informacja o istniejacym przejsciu LF/CRLF.
+- Build portalu: OK; pozostaje istniejace ostrzezenie Vite o duzych chunkach.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita, pusha ani wdrozenia.
+- Nie zmieniono bazy ani realnych danych firmy.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Nazwy pracownikow po najechaniu i dane live obiektu po kliknieciu
+Powod:
+- Po rozwinieciu obiektu na mapie widoczne byly awatary pracownikow, ale bez stalej informacji, kto znajduje sie przy obiekcie.
+- Klikniecie markera obiektu nie pokazywalo jednego, uporzadkowanego podsumowania jego aktualnej sytuacji.
+Zmieniono lokalnie:
+- Najechanie myszka, fokus klawiatury lub rozwiniecie obiektu pokazuje przy kazdym awatarze imie i nazwisko pracownika.
+- Po wskazaniu konkretnej osoby jej krotka etykieta jest zastepowana pelnym bialym dymkiem szczegolow.
+- Klikniecie obiektu otwiera przypiety bialy panel `Na zywo` z nazwa obiektu, liczba osob w pracy, zaplanowanych, zakonczonych i spoznionych oraz lista osob z aktualnym statusem i czasem.
+- Panel pokazuje postep stref wyliczony wylacznie z zapisanych identyfikatorow stref. Strefa jest zakonczona dopiero wtedy, gdy wszystkie przypisane do niej osoby zakonczyly prace.
+- Ponowne klikniecie obiektu zamyka panel; otwarcie innego obiektu lub osoby zamyka poprzedni panel.
+- Otwarty panel i dymki sa podnoszone ponad pozostale markery, a mapa przesuwa wybrany obiekt tak, aby panel miescil sie w widoku.
+Pliki:
+- `web-app/apps/portal-web/src/features/dashboard/index.js`
+- `web-app/apps/portal-web/src/features/dashboard/operationalMapModel.js`
+- `web-app/apps/portal-web/src/ui/styles/commandCenter.css`
+- `test/operational-map-model.test.js`
+- `ReadMe.txt`
+Weryfikacja:
+- Testy modelu mapy i podsumowania live: 8/8 OK.
+- ESLint zmienionego dashboardu i modelu: OK.
+- `git diff --check`: OK poza informacja o istniejacym przejsciu LF/CRLF w dashboardzie.
+- Build portalu: OK; pozostaje istniejace ostrzezenie Vite o duzych chunkach.
+- Zautomatyzowana kontrola zalogowanego widoku nie byla mozliwa, poniewaz wszystkie siedem otwartych kart localhost bylo wylogowanych.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita, pusha ani wdrozenia.
+- Nie zmieniono bazy ani realnych danych firmy.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Przygotowanie kontrolowanego wydania portalu bez publikacji produkcyjnej
+Zakres:
+- Sklasyfikowano caly lokalny zakres zmian portalu, backendu, polityk integralnosci, korelacji realizacji uslug, rentownosci, migracji i testow.
+- Dodano ignorowanie lokalnych kopii Codex, katalogow wdrozen roboczych, renderow QA oraz plikow tymczasowych, aby nie trafily do commita wydaniowego.
+- Potwierdzono po `git fetch cleanzi01 main --prune`, ze lokalny HEAD i `cleanzi01/main` wskazuja ten sam commit bazowy.
+Weryfikacja:
+- Pelny zestaw testow wydania po dodaniu bezpiecznego lokalnego gate TLS: 254/254 OK.
+- ESLint aplikacji portalowej: OK.
+- Build produkcyjny portalu: OK; pozostaje informacyjne ostrzezenie Vite o duzych chunkach.
+- `git diff --check`: brak bledow tresci; widoczne sa tylko ostrzezenia Windows o przyszlej normalizacji LF/CRLF.
+Warunki przed publikacja:
+- Migracja `dataconnect/migrations/20260727_task_lifecycle_additive.sql` musi zostac potwierdzona na produkcji przed uruchomieniem zapisu lub zmiany statusu zlecen przez nowy backend.
+- Modul rentownosci pozostaje fail-closed: bez schematu i jawnych uprawnien zwraca `PROFITABILITY_SCHEMA_NOT_READY` i nie udostepnia danych.
+- Wymagany jest czysty test commita oraz test zalogowanego portalu na kontrolowanym podgladzie.
+Granice:
+- Na tym etapie nie wykonano migracji, pusha ani wdrozenia produkcyjnego.
+- Nie zmieniono bazy ani realnych danych firmy.
+
+Data: 2026-07-27
+Autor: AI Codex
+Temat: Jawny lokalny wyjątek TLS dla proxy sesji Vite
+Powod:
+- Lokalny backend potrafil korzystac z jawnego wyjatku TLS przy skanowaniu HTTPS przez Norton, ale waskie proxy `/api/auth/session-context` nadal wymuszalo `secure: true` i blokowalo zalogowany podglad.
+Zmieniono lokalnie:
+- Dodano `DEV_AUTH_SESSION_PROXY_TLS_REJECT_UNAUTHORIZED`, domyslnie rygorystyczne.
+- Tylko jawna wartosc `0` lub `false` w lokalnym procesie Vite ustawia `secure: false` dla kanonicznego celu `https://portal.cleanzi.pl`.
+- Niepoprawna wartosc zatrzymuje start stabilnym bledem; proxy nadal wymaga osobnego gate i nadal akceptuje wyłącznie kanoniczny host Cleanzi.
+- Ustawienie nie jest konfigurowane w App Hosting i nie zmienia produkcyjnego transportu TLS.
+Pliki:
+- `.env.example`
+- `web-app/vite.config.js`
+- `test/vite-auth-session-proxy.test.js`
+- `ReadMe.txt`
+Granice:
+- Wyjatek jest przeznaczony wylacznie do tymczasowego podgladu localhost, gdy lokalny skaner HTTPS zastepuje certyfikat.
+- Nie zmieniono bazy, danych firmy ani produkcji.
