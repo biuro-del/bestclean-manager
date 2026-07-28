@@ -643,6 +643,7 @@ export interface WorkersForOrgData {
       active?: boolean | null;
       email?: string | null;
       phone?: string | null;
+      photoUrl?: string | null;
       workerType?: string | null;
       edit?: string | null;
       createdAt?: TimestampString | null;

@@ -99,6 +99,7 @@ query WorkersForOrg($orgId: String!) @auth(level: USER) {
     active
     email
     phone
+    photoUrl
     workerType
     edit
     createdAt

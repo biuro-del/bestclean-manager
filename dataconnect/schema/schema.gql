@@ -115,6 +115,7 @@ type Worker @table(
   status: String @col(name: "status", dataType: "varchar(30)")
   email: String @col(name: "email")
   phone: String @col(name: "phone")
+  photoUrl: String @col(name: "photo_url")
   workerType: String @col(name: "worker_type", dataType: "varchar(40)")
 
   createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")

@@ -20557,6 +20557,790 @@ body.calendar-events-popup-dragging *{
   box-shadow:0 5px 12px rgba(59,130,246,.15) !important;
 }
 
+/* Cleanzi premium login — 2026-07-28 */
+#loginScreen.login-screen{
+  grid-template-columns:minmax(520px, 1.16fr) minmax(430px, .84fr) !important;
+  min-height:100vh !important;
+  min-height:100dvh !important;
+  background:#f2f6fd !important;
+}
+
+#loginScreen .login-visual{
+  position:relative !important;
+  display:block !important;
+  min-height:100vh !important;
+  min-height:100dvh !important;
+  padding:0 !important;
+  overflow:hidden !important;
+  background:#0a2245 !important;
+}
+
+#loginScreen .login-hero-image{
+  position:absolute;
+  inset:0;
+  display:block;
+  width:100% !important;
+  height:100% !important;
+  max-width:none !important;
+  max-height:none !important;
+  object-fit:cover !important;
+  object-position:52% center !important;
+}
+
+#loginScreen .login-visual-overlay{
+  position:absolute;
+  inset:0;
+  background:rgba(4, 18, 43, .12);
+  pointer-events:none;
+}
+
+#loginScreen .login-visual-brand{
+  position:absolute;
+  top:clamp(24px, 3.6vw, 52px);
+  left:clamp(24px, 3.6vw, 52px);
+  z-index:2;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:7px 14px 7px 8px;
+  border:1px solid rgba(255, 255, 255, .74);
+  border-radius:16px;
+  background:rgba(255, 255, 255, .94);
+  box-shadow:0 12px 30px rgba(3, 19, 45, .16);
+}
+
+#loginScreen .login-visual-brand img{
+  display:block;
+  width:142px;
+  height:auto;
+}
+
+#loginScreen .login-visual-brand span{
+  padding-left:12px;
+  border-left:1px solid #dce5f2;
+  color:#526176;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.04em;
+  line-height:1.2;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+
+#loginScreen .login-visual-story{
+  position:absolute;
+  right:clamp(26px, 4vw, 58px);
+  bottom:clamp(26px, 4vw, 58px);
+  left:clamp(26px, 4vw, 58px);
+  z-index:2;
+  width:min(520px, calc(100% - 52px));
+  padding:26px 28px 24px;
+  border:1px solid rgba(255, 255, 255, .24);
+  border-radius:24px;
+  background:rgba(4, 22, 52, .82);
+  box-shadow:0 24px 58px rgba(3, 16, 39, .24);
+  color:#fff;
+  backdrop-filter:blur(14px);
+}
+
+#loginScreen .login-visual-kicker{
+  display:block;
+  margin-bottom:11px;
+  color:#70ebcf;
+  font-size:11px;
+  font-weight:850;
+  letter-spacing:.13em;
+  line-height:1.2;
+}
+
+#loginScreen .login-visual-story h2{
+  margin:0;
+  color:#fff;
+  font-family:"Inter", "Public Sans", "Manrope", "Segoe UI", system-ui, sans-serif;
+  font-size:clamp(38px, 4vw, 58px);
+  font-weight:850;
+  letter-spacing:-.045em;
+  line-height:.98;
+}
+
+#loginScreen .login-visual-story p{
+  max-width:440px;
+  margin:16px 0 0;
+  color:rgba(255, 255, 255, .8);
+  font-size:15px;
+  font-weight:550;
+  line-height:1.55;
+}
+
+#loginScreen .login-visual-points{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:19px;
+}
+
+#loginScreen .login-visual-points span{
+  padding:7px 11px;
+  border:1px solid rgba(255, 255, 255, .22);
+  border-radius:999px;
+  background:rgba(255, 255, 255, .1);
+  color:#fff;
+  font-size:11px;
+  font-weight:750;
+  line-height:1;
+}
+
+#loginScreen .login-panel{
+  position:relative !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  min-height:100vh !important;
+  min-height:100dvh !important;
+  padding:clamp(28px, 5vw, 74px) !important;
+  background:#f2f6fd !important;
+}
+
+#loginScreen .login-card{
+  width:min(430px, 100%) !important;
+  margin:0 !important;
+  padding:clamp(34px, 4vw, 48px) !important;
+  border:1px solid #e2e9f4 !important;
+  border-radius:28px !important;
+  background:#fff !important;
+  box-shadow:0 28px 74px rgba(28, 59, 110, .14) !important;
+  font-family:"Inter", "Public Sans", "Manrope", "Segoe UI", system-ui, sans-serif !important;
+}
+
+#loginScreen .login-card-brand{
+  display:none;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:30px;
+}
+
+#loginScreen .login-card-brand img{
+  display:block;
+  width:132px;
+  height:auto;
+}
+
+#loginScreen .login-card-brand span{
+  color:#64748b;
+  font-size:10px;
+  font-weight:850;
+  letter-spacing:.06em;
+  line-height:1.2;
+  text-transform:uppercase;
+}
+
+#loginScreen .login-brand{
+  display:grid !important;
+  gap:0 !important;
+  margin:0 0 31px !important;
+}
+
+#loginScreen .login-card-kicker{
+  display:block;
+  margin-bottom:12px;
+  color:#1752ff;
+  font-size:11px;
+  font-weight:850;
+  letter-spacing:.14em;
+  line-height:1.2;
+}
+
+#loginScreen .login-title{
+  margin:0 !important;
+  color:#0d1b38 !important;
+  font-size:clamp(36px, 3.2vw, 46px) !important;
+  font-weight:850 !important;
+  letter-spacing:-.045em !important;
+  line-height:1.04 !important;
+}
+
+#loginScreen .login-copy{
+  max-width:330px;
+  margin:13px 0 0 !important;
+  color:#65748b !important;
+  font-size:15px !important;
+  font-weight:550 !important;
+  line-height:1.55 !important;
+}
+
+#loginScreen .login-field{
+  gap:9px !important;
+  margin:0 0 20px !important;
+}
+
+#loginScreen .login-field label{
+  color:#3e4d64 !important;
+  font-size:12px !important;
+  font-weight:800 !important;
+  line-height:1.2 !important;
+}
+
+#loginScreen .login-field input,
+#loginScreen .login-field select{
+  min-height:54px !important;
+  padding:0 17px !important;
+  border:1px solid #d7e0ed !important;
+  border-radius:14px !important;
+  background:#f8fafd !important;
+  color:#12213e !important;
+  font-size:15px !important;
+  font-weight:600 !important;
+}
+
+#loginScreen .login-field input::placeholder{
+  color:#9aa7b9;
+  font-weight:500;
+}
+
+#loginScreen .login-field input:hover,
+#loginScreen .login-field select:hover{
+  border-color:#b7c5da !important;
+}
+
+#loginScreen .login-field input:focus,
+#loginScreen .login-field select:focus{
+  border-color:#1752ff !important;
+  background:#fff !important;
+  box-shadow:0 0 0 4px rgba(23, 82, 255, .12) !important;
+}
+
+#loginScreen .login-card .login-submit{
+  min-height:52px !important;
+  margin:8px 0 0 !important;
+  border-radius:14px !important;
+  background:#1752ff !important;
+  box-shadow:0 12px 26px rgba(23, 82, 255, .23) !important;
+  font-size:14px !important;
+  font-weight:850 !important;
+  transition:background .16s ease, box-shadow .16s ease, transform .16s ease !important;
+}
+
+#loginScreen .login-card .login-submit:hover{
+  background:#1047df !important;
+  box-shadow:0 14px 30px rgba(23, 82, 255, .28) !important;
+  transform:translateY(-1px);
+}
+
+#loginScreen .login-card .login-submit:focus-visible{
+  outline:3px solid rgba(23, 82, 255, .25) !important;
+  outline-offset:3px !important;
+}
+
+#loginScreen .login-error{
+  margin:16px 0 0 !important;
+  padding:12px 14px !important;
+  border-radius:13px !important;
+  font-size:12px !important;
+  line-height:1.45 !important;
+}
+
+#loginScreen .login-security-note{
+  margin:20px 0 0;
+  color:#8b98aa;
+  font-size:11px;
+  font-weight:600;
+  line-height:1.45;
+  text-align:center;
+}
+
+#loginScreen .login-reset-open,
+#loginScreen .login-reset-back{
+  color:#1752ff;
+}
+
+@media (max-width: 1120px){
+  #loginScreen.login-screen{
+    grid-template-columns:minmax(440px, 1fr) minmax(410px, .86fr) !important;
+  }
+
+  #loginScreen .login-visual-story{
+    width:min(440px, calc(100% - 48px));
+  }
+}
+
+@media (max-width: 920px){
+  #loginScreen.login-screen{
+    grid-template-columns:1fr !important;
+    overflow:auto !important;
+    background:#f2f6fd !important;
+  }
+
+  #loginScreen .login-visual{
+    min-height:270px !important;
+    height:34vh !important;
+    max-height:360px !important;
+  }
+
+  #loginScreen .login-hero-image{
+    object-position:50% 38% !important;
+  }
+
+  #loginScreen .login-visual-brand{
+    top:22px;
+    left:22px;
+  }
+
+  #loginScreen .login-visual-story{
+    right:22px;
+    bottom:20px;
+    left:auto;
+    width:min(410px, calc(100% - 44px));
+    padding:18px 20px;
+    border-radius:18px;
+  }
+
+  #loginScreen .login-visual-story h2{
+    font-size:34px;
+  }
+
+  #loginScreen .login-visual-story p{
+    display:none;
+  }
+
+  #loginScreen .login-visual-points{
+    margin-top:13px;
+  }
+
+  #loginScreen .login-panel{
+    min-height:auto !important;
+    padding:28px 20px 42px !important;
+  }
+
+  #loginScreen .login-card{
+    width:min(520px, 100%) !important;
+  }
+}
+
+@media (max-width: 620px){
+  #loginScreen .login-visual{
+    min-height:210px !important;
+    height:28vh !important;
+  }
+
+  #loginScreen .login-visual-brand{
+    top:16px;
+    left:16px;
+    padding:5px 10px 5px 6px;
+    border-radius:12px;
+  }
+
+  #loginScreen .login-visual-brand img{
+    width:112px;
+  }
+
+  #loginScreen .login-visual-brand span{
+    display:none;
+  }
+
+  #loginScreen .login-visual-story{
+    right:16px;
+    bottom:14px;
+    width:min(310px, calc(100% - 32px));
+    padding:14px 16px;
+  }
+
+  #loginScreen .login-visual-kicker,
+  #loginScreen .login-visual-points{
+    display:none;
+  }
+
+  #loginScreen .login-visual-story h2{
+    font-size:28px;
+    line-height:1;
+  }
+
+  #loginScreen .login-panel{
+    padding:18px 14px 30px !important;
+  }
+
+  #loginScreen .login-card{
+    padding:30px 24px 24px !important;
+    border-radius:22px !important;
+  }
+
+  #loginScreen .login-title{
+    font-size:36px !important;
+  }
+}
+
+@media (max-width: 760px) and (max-height: 700px){
+  #loginScreen .login-visual{
+    display:none !important;
+  }
+
+  #loginScreen .login-panel{
+    min-height:100vh !important;
+    min-height:100dvh !important;
+    padding:18px !important;
+  }
+
+  #loginScreen .login-card-brand{
+    display:flex;
+  }
+}
+
+@media (prefers-reduced-motion: reduce){
+  #loginScreen .login-card .login-submit{
+    transition:none !important;
+  }
+}
+
+/* Additive Job Card source fields and preview. Hidden unless its feature flag is enabled. */
+#portalRoot #view-orders .orders-job-card-source{
+  background:linear-gradient(180deg, #fbfcff 0%, #f7f9ff 100%) !important;
+  border:1px solid rgba(99,91,255,.2) !important;
+  border-radius:10px !important;
+  display:grid !important;
+  gap:16px !important;
+  margin-top:18px !important;
+  padding:16px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__head{
+  align-items:start !important;
+  display:flex !important;
+  gap:18px !important;
+  justify-content:space-between !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__head > div{
+  display:grid !important;
+  flex:0 0 auto !important;
+  gap:3px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__head > div span{
+  color:#635bff !important;
+  font-size:10px !important;
+  font-weight:900 !important;
+  letter-spacing:.05em !important;
+  text-transform:uppercase !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__head > div strong{
+  color:#10233f !important;
+  font-size:16px !important;
+  font-weight:900 !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__head p{
+  color:#607089 !important;
+  font-size:11px !important;
+  font-weight:650 !important;
+  line-height:1.45 !important;
+  margin:0 !important;
+  max-width:520px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__grid{
+  display:grid !important;
+  gap:12px !important;
+  grid-template-columns:repeat(3, minmax(0, 1fr)) !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__grid--commercial{
+  align-items:end !important;
+  border-top:1px solid rgba(67,89,113,.12) !important;
+  padding-top:16px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__notes{
+  display:grid !important;
+  gap:12px !important;
+  grid-template-columns:repeat(2, minmax(0, 1fr)) !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__note{
+  background:#fff !important;
+  border:1px solid rgba(67,89,113,.12) !important;
+  border-radius:8px !important;
+  display:grid !important;
+  gap:8px !important;
+  padding:12px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__note textarea{
+  min-height:72px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__wide{
+  width:100% !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__check{
+  align-items:flex-start !important;
+  color:#53647d !important;
+  cursor:pointer !important;
+  display:flex !important;
+  font-size:11px !important;
+  font-weight:700 !important;
+  gap:8px !important;
+  line-height:1.4 !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__check input{
+  flex:0 0 auto !important;
+  height:16px !important;
+  margin:0 !important;
+  min-height:0 !important;
+  padding:0 !important;
+  width:16px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__check--signature{
+  align-self:center !important;
+  background:#fff !important;
+  border:1px solid rgba(67,89,113,.12) !important;
+  border-radius:8px !important;
+  min-height:38px !important;
+  padding:10px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__check--recurrence{
+  background:#fff8e8 !important;
+  border:1px solid #f3d18b !important;
+  border-radius:8px !important;
+  color:#805600 !important;
+  padding:10px 12px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source__check--recurrence[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-job-card-source :is(input, select, textarea):disabled{
+  background:#eef2f8 !important;
+  color:#8a97aa !important;
+  cursor:not-allowed !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview{
+  background:#fff !important;
+  border:1px solid rgba(99,91,255,.24) !important;
+  border-radius:10px !important;
+  box-shadow:0 10px 26px rgba(42,52,92,.08) !important;
+  display:grid !important;
+  gap:12px !important;
+  margin-top:14px !important;
+  padding:14px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview[hidden]{
+  display:none !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__head{
+  align-items:center !important;
+  display:flex !important;
+  gap:12px !important;
+  justify-content:space-between !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__head > div{
+  display:grid !important;
+  gap:3px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__head span{
+  color:#635bff !important;
+  font-size:10px !important;
+  font-weight:900 !important;
+  letter-spacing:.05em !important;
+  text-transform:uppercase !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__head strong{
+  color:#10233f !important;
+  font-size:15px !important;
+  font-weight:900 !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__head b{
+  background:#fff2dd !important;
+  border:1px solid #f3c878 !important;
+  border-radius:999px !important;
+  color:#8a5a00 !important;
+  font-size:11px !important;
+  font-weight:900 !important;
+  padding:6px 10px !important;
+  white-space:nowrap !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview.is-ready .orders-job-card-preview__head b{
+  background:#e9f9ef !important;
+  border-color:#b9e6c8 !important;
+  color:#087d3a !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__notice{
+  background:#f5f6ff !important;
+  border-radius:7px !important;
+  color:#53647d !important;
+  font-size:11px !important;
+  font-weight:650 !important;
+  line-height:1.45 !important;
+  margin:0 !important;
+  padding:9px 11px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__facts{
+  display:grid !important;
+  gap:8px !important;
+  grid-template-columns:repeat(2, minmax(0, 1fr)) !important;
+  margin:0 !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__facts > div{
+  background:#f8faff !important;
+  border:1px solid rgba(67,89,113,.1) !important;
+  border-radius:7px !important;
+  display:grid !important;
+  gap:3px !important;
+  min-width:0 !important;
+  padding:9px 10px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__facts dt{
+  color:#74849a !important;
+  font-size:10px !important;
+  font-weight:900 !important;
+  text-transform:uppercase !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__facts dd{
+  color:#1f334e !important;
+  font-size:12px !important;
+  font-weight:750 !important;
+  line-height:1.35 !important;
+  margin:0 !important;
+  overflow-wrap:anywhere !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__validation{
+  border-top:1px solid rgba(67,89,113,.12) !important;
+  display:grid !important;
+  gap:9px !important;
+  padding-top:11px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__validation > strong{
+  color:#384b66 !important;
+  font-size:11px !important;
+  font-weight:900 !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__validation ul{
+  display:grid !important;
+  gap:6px !important;
+  list-style:none !important;
+  margin:0 !important;
+  padding:0 !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__validation li{
+  align-items:start !important;
+  border-left:3px solid #f0b43c !important;
+  display:grid !important;
+  gap:2px !important;
+  grid-template-columns:76px minmax(0, 1fr) !important;
+  padding:4px 7px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__validation li.is-error{
+  border-left-color:#e44747 !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__validation li.is-ready{
+  border-left-color:#18a85b !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__validation li strong{
+  color:#25384f !important;
+  font-size:10px !important;
+  font-weight:900 !important;
+}
+
+#portalRoot #view-orders .orders-job-card-preview__validation li span{
+  color:#53647d !important;
+  font-size:11px !important;
+  font-weight:650 !important;
+  line-height:1.35 !important;
+}
+
+#portalRoot #view-orders .orders-job-card-warning{
+  align-items:flex-start !important;
+  cursor:pointer !important;
+  display:grid !important;
+  gap:8px !important;
+  grid-column:1 / -1 !important;
+  grid-template-columns:auto minmax(0, 1fr) !important;
+}
+
+#portalRoot #view-orders .orders-job-card-warning input{
+  accent-color:#635bff !important;
+  margin-top:2px !important;
+}
+
+#portalRoot #view-orders .orders-job-card-warning span{
+  display:grid !important;
+  gap:2px !important;
+}
+
+#portalRoot #view-orders .orders-publish-btn{
+  background:#16a76a !important;
+  border:1px solid #0d8c57 !important;
+  border-radius:8px !important;
+  color:#fff !important;
+  cursor:pointer !important;
+  font-size:13px !important;
+  font-weight:850 !important;
+  min-height:38px !important;
+  padding:0 15px !important;
+}
+
+#portalRoot #view-orders .orders-publish-btn:hover{
+  background:#0d8c57 !important;
+}
+
+#portalRoot #view-orders .orders-publish-btn:disabled{
+  cursor:wait !important;
+  opacity:.7 !important;
+}
+
+#portalRoot #view-orders .orders-publish-btn[hidden]{
+  display:none !important;
+}
+
+@media (max-width:720px){
+  #portalRoot #view-orders .orders-job-card-source__head{
+    display:grid !important;
+  }
+
+  #portalRoot #view-orders .orders-job-card-source__grid,
+  #portalRoot #view-orders .orders-job-card-source__notes{
+    grid-template-columns:1fr !important;
+  }
+
+  #portalRoot #view-orders .orders-job-card-preview__head{
+    align-items:flex-start !important;
+    flex-direction:column !important;
+  }
+
+  #portalRoot #view-orders .orders-job-card-preview__facts{
+    grid-template-columns:1fr !important;
+  }
+}
+
 #portalRoot #view-dashboard .dash-activity-timeline-row.has-plan-conflict .dash-activity-timeline-meta{
   color:#b42318 !important;
   font-weight:900 !important;
@@ -27326,7 +28110,8 @@ body.calendar-events-popup-dragging *{
 #portalRoot #view-orders .orders-modal--simple [data-orders-step-group][hidden],
 #portalRoot #view-orders .orders-modal--simple .orders-main-card[hidden],
 #portalRoot #view-orders .orders-modal--simple .orders-wizard-nav[hidden],
-#portalRoot #view-orders .orders-modal--simple .orders-save-btn[hidden]{
+#portalRoot #view-orders .orders-modal--simple .orders-save-btn[hidden],
+#portalRoot #view-orders .orders-modal--simple .orders-publish-btn[hidden]{
   display:none !important;
 }
 
@@ -27860,7 +28645,8 @@ body.calendar-events-popup-dragging *{
     width:100% !important;
   }
 
-  #portalRoot #view-orders .orders-modal--simple .orders-wizard-actions .orders-save-btn{
+  #portalRoot #view-orders .orders-modal--simple .orders-wizard-actions .orders-save-btn,
+  #portalRoot #view-orders .orders-modal--simple .orders-wizard-actions .orders-publish-btn{
     grid-column:1 / -1 !important;
     width:100% !important;
   }
@@ -30085,5 +30871,152 @@ body.is-dashboard-map-modal-open{
 
   #portalRoot #view-dashboard .dash-contract-profitability-compact-link{
     justify-self:start !important;
+  }
+}
+
+/* Keep the premium login layer last in the legacy cascade. */
+#loginScreen.login-screen{
+  grid-template-columns:minmax(520px, 1.16fr) minmax(430px, .84fr) !important;
+  min-height:100vh !important;
+  min-height:100dvh !important;
+  overflow:hidden !important;
+  background:#f2f6fd !important;
+}
+
+#loginScreen .login-visual{
+  position:relative !important;
+  display:block !important;
+  min-height:100vh !important;
+  min-height:100dvh !important;
+  padding:0 !important;
+  overflow:hidden !important;
+  background:#0a2245 !important;
+}
+
+#loginScreen .login-panel{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  min-height:100vh !important;
+  min-height:100dvh !important;
+  padding:clamp(28px, 5vw, 74px) !important;
+  background:#f2f6fd !important;
+}
+
+#loginScreen .login-card{
+  width:min(430px, 100%) !important;
+  margin:0 !important;
+  padding:clamp(34px, 4vw, 48px) !important;
+  border:1px solid #e2e9f4 !important;
+  border-radius:28px !important;
+  background:#fff !important;
+  box-shadow:0 28px 74px rgba(28, 59, 110, .14) !important;
+}
+
+#loginScreen .login-brand{
+  display:grid !important;
+  gap:0 !important;
+  margin:0 0 31px !important;
+  text-align:left !important;
+}
+
+#loginScreen .login-title{
+  font-size:clamp(36px, 3.2vw, 46px) !important;
+  letter-spacing:-.045em !important;
+}
+
+#loginScreen .login-copy{
+  margin:13px 0 0 !important;
+  font-size:15px !important;
+  line-height:1.55 !important;
+}
+
+#loginScreen .login-field{
+  gap:9px !important;
+  margin:0 0 20px !important;
+}
+
+#loginScreen .login-field input,
+#loginScreen .login-field select{
+  min-height:54px !important;
+  padding:0 17px !important;
+  border-radius:14px !important;
+  background:#f8fafd !important;
+}
+
+#loginScreen .login-card .login-submit{
+  min-height:52px !important;
+  margin:8px 0 0 !important;
+  border-radius:14px !important;
+  background:#1752ff !important;
+  box-shadow:0 12px 26px rgba(23, 82, 255, .23) !important;
+}
+
+#loginScreen .login-card .login-submit:hover{
+  background:#1047df !important;
+}
+
+#loginScreen .login-error{
+  margin:16px 0 0 !important;
+  padding:12px 14px !important;
+  border-radius:13px !important;
+}
+
+@media (max-width: 1120px){
+  #loginScreen.login-screen{
+    grid-template-columns:minmax(440px, 1fr) minmax(410px, .86fr) !important;
+  }
+}
+
+@media (max-width: 920px){
+  #loginScreen.login-screen{
+    grid-template-columns:1fr !important;
+    grid-template-rows:auto minmax(0, 1fr) !important;
+    align-content:start !important;
+    overflow:auto !important;
+  }
+
+  #loginScreen .login-visual{
+    min-height:270px !important;
+    height:34vh !important;
+    max-height:360px !important;
+  }
+
+  #loginScreen .login-panel{
+    min-height:auto !important;
+    padding:28px 20px 42px !important;
+  }
+
+  #loginScreen .login-card{
+    width:min(520px, 100%) !important;
+  }
+}
+
+@media (max-width: 620px){
+  #loginScreen .login-visual{
+    min-height:210px !important;
+    height:28vh !important;
+  }
+
+  #loginScreen .login-panel{
+    padding:18px 14px 30px !important;
+  }
+
+  #loginScreen .login-card{
+    width:100% !important;
+    padding:30px 24px 24px !important;
+    border-radius:22px !important;
+  }
+}
+
+@media (max-width: 760px) and (max-height: 700px){
+  #loginScreen .login-visual{
+    display:none !important;
+  }
+
+  #loginScreen .login-panel{
+    min-height:100vh !important;
+    min-height:100dvh !important;
+    padding:18px !important;
   }
 }

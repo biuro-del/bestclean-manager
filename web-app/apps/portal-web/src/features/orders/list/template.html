@@ -439,6 +439,212 @@
                 <div class="orders-simple-list" id="ordersSupplyRows"></div>
               </div>
             </div>
+
+            <section class="orders-job-card-source" id="ordersJobCardSource" hidden aria-label="Dane operacyjne Karty Zlecenia">
+              <div class="orders-job-card-source__head">
+                <div>
+                  <span>Dane operacyjne</span>
+                  <strong>Karta Zlecenia</strong>
+                </div>
+                <p>To nadal ten sam formularz zlecenia. Te dane trafią do aplikacji pracownika po osobnej publikacji karty.</p>
+              </div>
+
+              <div class="orders-job-card-source__grid">
+                <label class="orders-field">
+                  <span>Miejsce realizacji *</span>
+                  <select id="ordersJobCardSiteMode">
+                    <option value="">Wybierz</option>
+                    <option value="FIXED_CONTRACT_SITE">Stały obiekt kontraktowy</option>
+                    <option value="VISIT_SITE">Adres pojedynczej wizyty</option>
+                  </select>
+                </label>
+
+                <label class="orders-field">
+                  <span>Rodzaj usługi *</span>
+                  <select id="ordersJobCardServiceType">
+                    <option value="">Wybierz</option>
+                    <option value="GENERAL_CLEANING">Sprzątanie ogólne</option>
+                    <option value="DEEP_CLEANING">Sprzątanie gruntowne</option>
+                    <option value="WINDOW_CLEANING">Mycie okien</option>
+                    <option value="POST_RENOVATION">Sprzątanie po remoncie</option>
+                    <option value="MAINTENANCE">Utrzymanie czystości</option>
+                    <option value="OTHER">Inna usługa</option>
+                  </select>
+                </label>
+
+                <label class="orders-field">
+                  <span>Źródło załogi *</span>
+                  <select id="ordersJobCardCrewSource">
+                    <option value="">Wybierz</option>
+                    <option value="SITE">Stała załoga obiektu</option>
+                    <option value="DISPATCHED">Załoga wysyłana</option>
+                    <option value="MIXED">Załoga mieszana</option>
+                  </select>
+                </label>
+
+                <label class="orders-field">
+                  <span>Czy wymagany jest dojazd? *</span>
+                  <select id="ordersJobCardDispatchRequired">
+                    <option value="">Wybierz</option>
+                    <option value="false">Nie</option>
+                    <option value="true">Tak</option>
+                  </select>
+                </label>
+
+                <label class="orders-field">
+                  <span>Lider załogi <small>- brak tylko ostrzega</small></span>
+                  <select id="ordersJobCardLeaderWorker">
+                    <option value="">Nie wyznaczono</option>
+                  </select>
+                </label>
+
+                <label class="orders-field">
+                  <span>Kierowca <small>- brak tylko ostrzega</small></span>
+                  <select id="ordersJobCardDriverWorker">
+                    <option value="">Nie wyznaczono</option>
+                  </select>
+                </label>
+
+                <label class="orders-field">
+                  <span>Pojazd <small>- ID lub numer rejestracyjny</small></span>
+                  <input id="ordersJobCardVehicleId" type="text" autocomplete="off" placeholder="Np. SK 1234A" />
+                </label>
+
+                <label class="orders-field">
+                  <span>Przygotowanie rzeczy do zabrania *</span>
+                  <select id="ordersJobCardPackingRequired">
+                    <option value="">Wybierz</option>
+                    <option value="false">Nie jest wymagane</option>
+                    <option value="true">Wymagane - użyj listy wyposażenia powyżej</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="orders-job-card-source__notes">
+                <div class="orders-job-card-source__note">
+                  <label class="orders-field">
+                    <span>Instrukcja wejścia / dostępu *</span>
+                    <textarea id="ordersJobCardAccessInstruction" placeholder="Kod, klucze, kontakt na miejscu, godziny dostępu..."></textarea>
+                  </label>
+                  <label class="orders-job-card-source__check">
+                    <input id="ordersJobCardAccessNone" type="checkbox" />
+                    <span>Potwierdzam, że nie ma dodatkowej instrukcji wejścia.</span>
+                  </label>
+                </div>
+
+                <div class="orders-job-card-source__note">
+                  <label class="orders-field">
+                    <span>Zasady bezpieczeństwa *</span>
+                    <textarea id="ordersJobCardSafetyInstruction" placeholder="Środki ochrony, alarm, strefy zakazane, szczególne ryzyka..."></textarea>
+                  </label>
+                  <label class="orders-job-card-source__check">
+                    <input id="ordersJobCardSafetyNone" type="checkbox" />
+                    <span>Potwierdzam, że nie ma dodatkowych zasad bezpieczeństwa.</span>
+                  </label>
+                </div>
+              </div>
+
+              <label class="orders-field orders-job-card-source__wide">
+                <span>Pomoc i eskalacja</span>
+                <input id="ordersJobCardEscalationInstruction" type="text" autocomplete="off" placeholder="Z kim skontaktować się w razie problemu?" />
+              </label>
+
+              <div class="orders-job-card-source__grid orders-job-card-source__grid--commercial">
+                <label class="orders-field">
+                  <span>Płatność *</span>
+                  <select id="ordersJobCardPaymentMethod">
+                    <option value="">Wybierz</option>
+                    <option value="PREPAID">Przedpłata</option>
+                    <option value="CASH">Gotówka</option>
+                    <option value="CARD">Karta</option>
+                    <option value="DEFERRED">Termin odroczony</option>
+                  </select>
+                </label>
+
+                <label class="orders-field">
+                  <span>Sposób wyceny *</span>
+                  <select id="ordersJobCardPricingMode">
+                    <option value="">Wybierz</option>
+                    <option value="PER_JOB">Za całe zlecenie</option>
+                    <option value="HOURLY">Godzinowo</option>
+                    <option value="PER_OCCURRENCE">Za wystąpienie</option>
+                    <option value="MONTHLY_CONTRACT">Kontrakt miesięczny</option>
+                  </select>
+                </label>
+
+                <label class="orders-field">
+                  <span>Kwota brutto</span>
+                  <input id="ordersJobCardAmount" type="number" min="0" step="0.01" inputmode="decimal" />
+                </label>
+
+                <label class="orders-field">
+                  <span>ID kontraktu</span>
+                  <input id="ordersJobCardContractId" type="text" autocomplete="off" placeholder="Jeśli rozliczenie wynika z kontraktu" />
+                </label>
+
+                <label class="orders-field">
+                  <span>Termin płatności (dni)</span>
+                  <input id="ordersJobCardPaymentTermDays" type="number" min="0" step="1" inputmode="numeric" />
+                </label>
+
+                <label class="orders-job-card-source__check orders-job-card-source__check--signature">
+                  <input id="ordersJobCardSignatureRequired" type="checkbox" />
+                  <span>Wymagaj potwierdzenia „OK” i podpisu klienta na telefonie.</span>
+                </label>
+              </div>
+
+              <label class="orders-job-card-source__check orders-job-card-source__check--recurrence" id="ordersJobCardRecurrenceConfirmationRow" hidden>
+                <input id="ordersJobCardRecurrenceConfirmed" type="checkbox" />
+                <span>Potwierdzam zakres tworzenia zleceń cyklicznych widoczny w kroku „Termin”.</span>
+              </label>
+            </section>
+
+            <section class="orders-job-card-preview" id="ordersJobCardPreview" hidden aria-label="Podgląd Karty Zlecenia">
+              <div class="orders-job-card-preview__head">
+                <div>
+                  <span>Funkcja testowa</span>
+                  <strong>Karta Zlecenia widoczna w aplikacji</strong>
+                </div>
+                <b id="ordersJobCardPreviewStatus">Wymaga uzupełnienia</b>
+              </div>
+              <p class="orders-job-card-preview__notice">
+                Zapis tworzy edytowalny szkic. Publikacja tworzy niezmienną rewizję widoczną w aplikacji pracownika.
+              </p>
+              <dl class="orders-job-card-preview__facts">
+                <div>
+                  <dt>Klient</dt>
+                  <dd id="ordersJobCardPreviewCustomer">-</dd>
+                </div>
+                <div>
+                  <dt>Miejsce</dt>
+                  <dd id="ordersJobCardPreviewAddress">-</dd>
+                </div>
+                <div>
+                  <dt>Termin</dt>
+                  <dd id="ordersJobCardPreviewSchedule">-</dd>
+                </div>
+                <div>
+                  <dt>Załoga</dt>
+                  <dd id="ordersJobCardPreviewCrew">-</dd>
+                </div>
+                <div>
+                  <dt>Rozliczenie</dt>
+                  <dd id="ordersJobCardPreviewPayment">-</dd>
+                </div>
+                <div>
+                  <dt>Podpis</dt>
+                  <dd id="ordersJobCardPreviewSignature">-</dd>
+                </div>
+                <div>
+                  <dt>Publikacja</dt>
+                  <dd id="ordersJobCardPreviewPublication">Brak opublikowanej rewizji</dd>
+                </div>
+              </dl>
+              <div class="orders-job-card-preview__validation">
+                <strong id="ordersJobCardPreviewValidation">0 braków blokujących · 0 ostrzeżeń</strong>
+                <ul id="ordersJobCardPreviewIssues"></ul>
+              </div>
+            </section>
           </section>
             </div>
           </div>
@@ -474,6 +680,7 @@
             <button class="orders-wizard-nav orders-wizard-nav--back" type="button" data-orders-step-prev>Wstecz</button>
             <button class="orders-wizard-nav orders-wizard-nav--next" type="button" data-orders-step-next>Dalej</button>
             <button class="orders-save-btn" id="ordersEditSave" type="button">Zapisz</button>
+            <button class="orders-publish-btn" id="ordersJobCardPublish" type="button" hidden>Publikuj Kartę</button>
           </div>
         </div>
       </div>

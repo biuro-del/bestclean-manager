@@ -1,26 +1,51 @@
-const loginCleaningIllustrationUrl = new URL('../graphics/cleaning service-01.svg', import.meta.url).href
-
 export const portalLayoutTemplate = `
 <div class="login-screen" id="loginScreen" style="display:grid;">
-  <section class="login-visual" aria-hidden="true">
-    <img class="login-illustration" src="${loginCleaningIllustrationUrl}" alt="" />
+  <section class="login-visual" aria-labelledby="loginHeroTitle">
+    <img
+      class="login-hero-image"
+      src="/login-hero-operations-v1.webp"
+      alt=""
+      width="1536"
+      height="1024"
+      fetchpriority="high"
+    />
+    <div class="login-visual-overlay" aria-hidden="true"></div>
+    <div class="login-visual-brand">
+      <img src="/cleanzi-logo.svg" alt="Cleanzi" width="180" height="50" />
+      <span>Portal operacyjny</span>
+    </div>
+    <div class="login-visual-story">
+      <span class="login-visual-kicker">OPERACJE W CZASIE RZECZYWISTYM</span>
+      <h2 id="loginHeroTitle">Tw&oacute;j zesp&oacute;ł.<br />Jeden rytm pracy.</h2>
+      <p>Zlecenia, obecność, jakość i rentowność w jednym spokojnym widoku.</p>
+      <div class="login-visual-points" aria-label="Najważniejsze obszary portalu">
+        <span>Pracownicy</span>
+        <span>Obiekty</span>
+        <span>Realizacja</span>
+      </div>
+    </div>
   </section>
   <section class="login-panel">
     <form class="login-card" id="loginForm" role="dialog" aria-labelledby="loginTitle" novalidate>
+      <div class="login-card-brand" aria-hidden="true">
+        <img src="/cleanzi-logo.svg" alt="" width="156" height="44" />
+        <span>Portal operacyjny</span>
+      </div>
       <div class="login-brand">
-        <h1 class="login-title" id="loginTitle">Witaj!</h1>
-        <p class="login-copy" id="loginCopy">Zaloguj si&#281; do portalu Cleanzi.</p>
+        <span class="login-card-kicker">PORTAL OPERACYJNY</span>
+        <h1 class="login-title" id="loginTitle">Witaj ponownie</h1>
+        <p class="login-copy" id="loginCopy">Zaloguj si&#281;, aby przej&#347;&#263; do centrum dowodzenia Cleanzi.</p>
       </div>
 
       <div id="loginCredentialsPanel">
         <div class="login-field">
           <label for="loginLogin">Email</label>
-          <input id="loginLogin" type="email" maxlength="160" autocomplete="username" inputmode="email" spellcheck="false" />
+          <input id="loginLogin" type="email" maxlength="160" autocomplete="username" inputmode="email" spellcheck="false" placeholder="np. imie@firma.pl" />
         </div>
 
         <div class="login-field">
           <label for="loginPass">Hasło</label>
-          <input id="loginPass" type="password" autocomplete="current-password" />
+          <input id="loginPass" type="password" autocomplete="current-password" placeholder="Wpisz hasło" />
         </div>
 
         <button class="btn primary login-submit" id="loginBtn" type="submit">Zaloguj</button>
@@ -92,6 +117,7 @@ export const portalLayoutTemplate = `
 
       <div class="login-error" id="loginErr" aria-live="polite" aria-atomic="true" style="display:none;"></div>
       <button class="login-reset-open" id="loginResetOpen" type="button" hidden>Zresetuj hasło</button>
+      <p class="login-security-note">Bezpieczne logowanie do chronionego środowiska Cleanzi.</p>
     </form>
   </section>
 </div>
@@ -555,53 +581,59 @@ export const portalLayoutTemplate = `
               </button>
             </div>
 
-            <div
-              class="dash-command-center__kpis"
-              id="dashCommandKpiGrid"
-              data-dashboard-section="command-center"
-              aria-label="Najważniejsze dane operacyjne dnia"
-            >
-              <button
-                class="dash-command-kpi"
-                id="dashCommandActiveWorkersCard"
-                type="button"
-                data-dash-metric="activeNow"
-                data-dash-metric-view="list"
-                aria-controls="dashMetricPopover"
-                aria-haspopup="dialog"
-                aria-expanded="false"
-              >
-                <span class="dash-command-kpi__icon dash-command-kpi__icon--blue"><i class="ph ph-users-three" aria-hidden="true"></i></span>
-                <span class="dash-command-kpi__value" id="dashCommandActiveWorkersCount">0</span>
-                <span class="dash-command-kpi__copy"><strong>aktywnych</strong><small>pracowników w terenie</small></span>
-              </button>
-
-              <button
-                class="dash-command-kpi"
-                id="dashCommandActiveObjectsCard"
-                type="button"
-                data-dash-metric="activeObjects"
-                data-dash-metric-view="list"
-                aria-controls="dashMetricPopover"
-                aria-haspopup="dialog"
-                aria-expanded="false"
-              >
-                <span class="dash-command-kpi__icon dash-command-kpi__icon--cyan"><i class="ph ph-buildings" aria-hidden="true"></i></span>
-                <span class="dash-command-kpi__value" id="dashCommandActiveObjectsCount">0</span>
-                <span class="dash-command-kpi__copy"><strong>obiektów</strong><small>w realizacji dzisiaj</small></span>
-              </button>
-
-              <article class="dash-command-kpi" aria-labelledby="dashCommandQualityValue">
-                <span class="dash-command-kpi__icon dash-command-kpi__icon--green"><i class="ph ph-shield-check" aria-hidden="true"></i></span>
-                <span class="dash-command-kpi__value" id="dashCommandQualityValue">—%</span>
-                <span class="dash-command-kpi__copy"><strong>potwierdzonych</strong><small id="dashCommandQualityMeta">ukończeń z planu</small></span>
+            <div class="dash-command-overview" data-dashboard-section="command-center">
+              <article class="dash-command-plan" aria-labelledby="dashCommandPlanTitle">
+                <header>
+                  <h2 id="dashCommandPlanTitle">Plan dnia</h2>
+                </header>
+                <div class="dash-command-plan__body">
+                  <div
+                    class="dash-command-plan__ring"
+                    id="dashCommandPlanRing"
+                    role="progressbar"
+                    aria-label="Postęp planu dnia"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-valuenow="0"
+                  >
+                    <strong id="dashCommandPlanPercent">—%</strong>
+                  </div>
+                  <div class="dash-command-plan__summary">
+                    <div class="dash-command-plan__headline">
+                      <strong><span id="dashCommandPlanCompleted">0</span> z <span id="dashCommandPlanTotal">0</span> ukończonych</strong>
+                      <span>Postęp planu na dziś</span>
+                    </div>
+                    <div class="dash-command-plan__progress" aria-hidden="true">
+                      <span id="dashCommandPlanProgress"></span>
+                    </div>
+                    <div class="dash-command-plan__footer">
+                      <dl class="dash-command-plan__states">
+                        <div class="is-active"><dt id="dashCommandPlanActive">0</dt><dd>w toku</dd></div>
+                        <div class="is-waiting"><dt id="dashCommandPlanWaiting">0</dt><dd>oczekuje</dd></div>
+                        <div class="is-cancelled"><dt id="dashCommandPlanCancelled">0</dt><dd>anulowanych</dd></div>
+                      </dl>
+                      <button class="dash-command-plan__calendar" type="button" data-route="calendar">
+                        <i class="ph ph-calendar-blank" aria-hidden="true"></i>
+                        Otwórz kalendarz
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </article>
 
-              <button class="dash-command-kpi" type="button" data-route="contractProfitability">
-                <span class="dash-command-kpi__icon dash-command-kpi__icon--violet"><i class="ph ph-chart-donut" aria-hidden="true"></i></span>
-                <span class="dash-command-kpi__value" id="dashCommandMarginValue">23,8%</span>
-                <span class="dash-command-kpi__copy"><strong>marży</strong><small>wartość poglądowa</small></span>
-              </button>
+              <article class="dash-command-upcoming" aria-labelledby="dashCommandUpcomingTitle">
+                <header>
+                  <span><i class="ph ph-clock" aria-hidden="true"></i></span>
+                  <h2 id="dashCommandUpcomingTitle">Najbliższe 60 minut</h2>
+                </header>
+                <div class="dash-command-upcoming__list" id="dashCommandUpcomingList">
+                  <p>Brak zaplanowanych rozpoczęć w ciągu godziny.</p>
+                </div>
+                <button class="dash-command-upcoming__footer" type="button" data-route="calendar">
+                  Zobacz pełny kalendarz
+                  <i class="ph ph-arrow-right" aria-hidden="true"></i>
+                </button>
+              </article>
             </div>
 
             <div class="dash-command-center__workspace">
@@ -611,11 +643,40 @@ export const portalLayoutTemplate = `
                 aria-labelledby="dashCommandMapTitle"
               >
                 <div class="dash-command-map__topbar">
-                  <div>
-                    <span class="dash-command-map__live-dot" aria-hidden="true"></span>
+                  <div class="dash-command-map__title">
                     <strong id="dashCommandMapTitle">Mapa operacyjna</strong>
+                    <span class="dash-command-map__count" id="dashCommandMapCount">0 / 0 na mapie</span>
                   </div>
-                  <span class="dash-command-map__count" id="dashCommandMapCount">0 / 0 na mapie</span>
+                  <div class="dash-command-map__stats">
+                    <button
+                      class="dash-command-map-stat"
+                      id="dashCommandActiveWorkersCard"
+                      type="button"
+                      data-dash-metric="activeNow"
+                      data-dash-metric-view="list"
+                      aria-controls="dashMetricPopover"
+                      aria-haspopup="dialog"
+                      aria-expanded="false"
+                    >
+                      <i class="ph ph-users-three" aria-hidden="true"></i>
+                      <strong id="dashCommandActiveWorkersCount">0</strong>
+                      <span>aktywnych</span>
+                    </button>
+                    <button
+                      class="dash-command-map-stat"
+                      id="dashCommandActiveObjectsCard"
+                      type="button"
+                      data-dash-metric="activeObjects"
+                      data-dash-metric-view="list"
+                      aria-controls="dashMetricPopover"
+                      aria-haspopup="dialog"
+                      aria-expanded="false"
+                    >
+                      <i class="ph ph-buildings" aria-hidden="true"></i>
+                      <strong id="dashCommandActiveObjectsCount">0</strong>
+                      <span>obiekty</span>
+                    </button>
+                  </div>
                 </div>
                 <div class="dash-command-map__host" id="dashCommandMapHost"></div>
                 <div class="dash-command-map__controls">
@@ -637,37 +698,50 @@ export const portalLayoutTemplate = `
                 </div>
               </article>
 
-              <article
-                class="dash-command-live"
-                id="dashCommandLivePanel"
-                aria-labelledby="dashCommandLiveTitle"
-              >
-                <header class="dash-command-live__header">
-                  <div>
-                    <h2 id="dashCommandLiveTitle">Operacje na żywo</h2>
-                    <p>Faktyczne rozpoczęcia i zakończenia. Procent tylko przy potwierdzonym planie.</p>
+              <div class="dash-command-side">
+                <article class="dash-command-alerts" aria-labelledby="dashCommandAlertsTitle">
+                  <header>
+                    <span><i class="ph ph-warning" aria-hidden="true"></i></span>
+                    <h2 id="dashCommandAlertsTitle">Wymaga reakcji</h2>
+                    <strong id="dashCommandAlertsCount">0</strong>
+                  </header>
+                  <div class="dash-command-alerts__list" id="dashCommandAlertsList">
+                    <p>Brak bieżących alertów operacyjnych.</p>
                   </div>
-                  <span class="dash-command-live__status">
-                    <i aria-hidden="true"></i>
-                    <span id="dashCommandLiveCount">0 w toku</span>
-                  </span>
-                </header>
-                <div class="dash-command-live__body" id="dashCommandOperationsHost"></div>
-                <button
-                  class="dash-command-live__footer"
-                  id="dashCommandAllOperations"
-                  type="button"
-                  aria-haspopup="dialog"
-                  aria-controls="dashCommandOperationsOverlay"
-                  hidden
+                </article>
+
+                <article
+                  class="dash-command-live"
+                  id="dashCommandLivePanel"
+                  aria-labelledby="dashCommandLiveTitle"
                 >
-                  Zobacz wszystkie operacje
-                  <i class="ph ph-arrow-right" aria-hidden="true"></i>
-                </button>
-              </article>
+                  <header class="dash-command-live__header">
+                    <div>
+                      <h2 id="dashCommandLiveTitle">Operacje na żywo</h2>
+                      <p>Faktyczne rozpoczęcia i zakończenia. Procent tylko przy potwierdzonym planie.</p>
+                    </div>
+                    <span class="dash-command-live__status">
+                      <i aria-hidden="true"></i>
+                      <span id="dashCommandLiveCount">0 w toku</span>
+                    </span>
+                  </header>
+                  <div class="dash-command-live__body" id="dashCommandOperationsHost"></div>
+                  <button
+                    class="dash-command-live__footer"
+                    id="dashCommandAllOperations"
+                    type="button"
+                    aria-haspopup="dialog"
+                    aria-controls="dashCommandOperationsOverlay"
+                    hidden
+                  >
+                    Zobacz wszystkie operacje
+                    <i class="ph ph-arrow-right" aria-hidden="true"></i>
+                  </button>
+                </article>
+              </div>
             </div>
 
-            <section class="dash-command-insight" aria-labelledby="dashCommandInsightTitle">
+            <section class="dash-command-insight" aria-labelledby="dashCommandInsightTitle" hidden>
               <div class="dash-command-insight__brand">
                 <span><i class="ph ph-sparkle" aria-hidden="true"></i></span>
                 <strong id="dashCommandInsightTitle">Insights AI</strong>

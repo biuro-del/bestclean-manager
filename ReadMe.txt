@@ -3531,6 +3531,40 @@ Weryfikacja:
 - `npm --prefix web-app run build`: OK; pozostaje tylko istniejace ostrzezenie o duzych chunkach.
 Granice:
 - Zmiana jest lokalna. Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-28
+Autor: AI Codex
+Temat: Pulpit wariant 2 - plan dnia jako pierwszy ekran
+Powod:
+- Wybrany wariant 2 mial uporzadkowac pierwszy ekran wokol planu dnia, najblizszych rozpoczec, mapy operacyjnej, alarmow i operacji na zywo.
+- Dane demonstracyjne ze wzorca nie mogly zastapic rzeczywistych danych portalu ani korelacji po identyfikatorach.
+Zmieniono lokalnie:
+- Dodano model planu dnia laczacy zlecenia, aktywne operacje i zakonczenia po stabilnych identyfikatorach.
+- Na gorze pulpitu umieszczono `Plan dnia` oraz `Najblizsze 60 minut`.
+- Ponizej zachowano funkcjonalna mape operacyjna, panel `Wymaga reakcji` i skrocona liste `Operacje na zywo`.
+- Alarmy obejmuja opozniony START, nierozpoznany obiekt, brak GPS, bledy korelacji oraz brak QR STOP.
+- Podglad operacji pokazuje trzy najnowsze pozycje, a pelna lista pozostaje dostepna z przycisku.
+- Sekcje znajdujace sie nizej na pulpicie pozostaly bez zmian.
+- Uklad jest responsywny i przy szerokosciach 1180 px oraz 760 px nie powoduje poziomego przewijania strony.
+Pliki:
+- `web-app/apps/portal-web/src/features/dashboard/commandCenterPlanModel.js`
+- `web-app/apps/portal-web/src/features/dashboard/index.js`
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `web-app/apps/portal-web/src/ui/styles/commandCenter.css`
+- `test/dashboard-command-center-plan.test.js`
+- `design-qa.md`
+- `ReadMe.txt`
+Weryfikacja:
+- Testy modeli pulpitu i Operacji na zywo: 17/17 OK.
+- Targetowany ESLint: OK.
+- `npm run build`: OK.
+- Zalogowany podglad 1440 x 1024 porownany obok wybranego wzorca: brak bledow P0/P1/P2.
+- Filtry, zmiana widoku, pelna lista operacji, przejscie do kalendarza i powrot na pulpit: OK.
+- Responsywnosc 1180 px i 760 px: OK, bez poziomego overflow.
+- Ograniczenie lokalne: wygasla sesja Google Cloud application-default powoduje fallback zrodla harmonogramu, dlatego aktualny plan moze pokazywac `0 z 0`.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita, pusha, migracji ani wdrozenia produkcyjnego.
+
 - Nie zmieniano logiki biznesowej, bazy ani realnych danych firmy.
 
 Data: 2026-07-27
@@ -3861,3 +3895,374 @@ Pliki:
 Granice:
 - Wyjatek jest przeznaczony wylacznie do tymczasowego podgladu localhost, gdy lokalny skaner HTTPS zastepuje certyfikat.
 - Nie zmieniono bazy, danych firmy ani produkcji.
+
+Data: 2026-07-28
+Autor: AI Codex
+Temat: Zdjecie profilowe pracownika jako wspolna miniatura w portalu
+Powod:
+- Miniatury pracownikow na mapie i w kolejnych miejscach portalu powinny korzystac z jednego pola profilu, zamiast z przypadkowych ikon lub danych tylko lokalnych.
+- Zdjecie ma byc dodawane w edycji pracownika i potem dostepne dla strony glownej, profilu, aplikacji pracownika oraz kolejnych modulow.
+Zmieniono lokalnie:
+- Dodano addytywne pole `photo_url` do modelu pracownika oraz zapytania Data Connect `WorkersForOrg`.
+- Dodano migracje `dataconnect/migrations/20260728_worker_photo_url_additive.sql`.
+- W backendzie tworzenia i edycji pracownika dodano obsluge `photoDataUrl`, `photoUrl` i usuwania zdjecia.
+- Nowe zdjecie jest walidowane, ograniczone rozmiarem, zapisywane przez Admin SDK w Firebase Storage i dopiero jego URL trafia do rekordu pracownika.
+- W profilu pracownika dodano wybor, podglad i usuniecie zdjecia; plik jest lokalnie kompresowany do miniatury WebP przed wyslaniem.
+- Lista pracownikow pokazuje zdjecie, jesli istnieje, a w przeciwnym razie dotychczasowe inicjaly.
+- Service pracownikow mapuje `photoUrl` / `profilePhotoUrl`, aby to samo pole moglo byc wykorzystane na stronie glownej, mapie, profilu i w aplikacji.
+- Dodano regule Storage dla sciezki `orgs/{orgId}/worker-profiles/{workerLogin}/...`; zapisy nadal ida tylko przez backend Admin SDK.
+Pliki:
+- `dataconnect/schema/schema.gql`
+- `dataconnect/connectors/example/queries.gql`
+- `dataconnect/migrations/20260728_worker_photo_url_additive.sql`
+- `index.js`
+- `worker-repository.js`
+- `storage.rules`
+- `web-app/apps/portal-web/src/services/workerService.js`
+- `web-app/apps/portal-web/src/features/workers/worker_list_profile/index.js`
+- `web-app/apps/portal-web/src/features/workers/worker_list_profile/style.css`
+- `web-app/apps/portal-web/src/features/workers/worker_list_profile/template.html`
+- `web-app/apps/portal-web/src/dataconnect-generated/index.d.ts`
+- `web-app/apps/portal-web/src/dataconnect-generated/README.md`
+- `web-app/apps/portal-web/src/dataconnect-generated/react/README.md`
+Weryfikacja:
+- `firebase dataconnect:sdk:generate`: OK, SDK odswiezony z polem `photoUrl`.
+- `node --check` dla zmienionych plikow JS: OK.
+- `node --test --test-reporter=dot`: OK.
+- `npm run build`: OK; pozostaje informacyjne ostrzezenie Vite o duzych chunkach.
+- `git diff --check`: na plikach zrodlowych OK; pelny diff pokazuje jedynie whitespace w README wygenerowanych przez Data Connect.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita, pusha ani wdrozenia.
+- Migracja `20260728_worker_photo_url_additive.sql` musi byc uruchomiona przed uzyciem zapisu zdjec w srodowisku z realna baza.
+- Zdjecia sa przygotowane jako wspolne pole profilu; podpiecie ich we wszystkich widokach mapy/aplikacji moze byc rozwijane etapami na bazie `photoUrl`.
+
+Data: 2026-07-28
+Autor: AI Codex
+Temat: Widoczne dodawanie i zmiana zdjecia na koncie pracownika
+Powod:
+- Lokalny podglad na porcie 5173 byl uruchomiony ze starej kopii `.codex-tmp/release-verify-*`, dlatego gotowa kontrolka zdjecia w formularzu listy pracownikow nie byla widoczna.
+- Szczegolowy profil pracownika nie mial wlasnej, jednoznacznej akcji dodania lub zmiany zdjecia.
+Zmieniono lokalnie:
+- Przy awatarze na karcie pracownika dodano staly przycisk aparatu. Jest dostepny z kazdej zakladki profilu i przenosi bezposrednio do edycji zdjecia.
+- W zakladce `Konto` dodano sekcje `Zdjecie profilowe` z podgladem, wyborem pliku oraz usuwaniem zdjecia.
+- Wybrane zdjecie jest kadrowane do kwadratu 320 x 320, kompresowane do WebP i zapisywane razem z danymi konta przez istniejacy backend profilu.
+- Po zapisie ten sam `photoUrl` aktualizuje awatar profilu, liste pracownikow i przygotowane miniatury mapy/pulpitu.
+- Kontrolki respektuja uprawnienia do edycji pracownikow i tryb edycji zakladki `Konto`.
+Pliki:
+- `web-app/apps/portal-web/src/features/workers/account/index.js`
+- `web-app/apps/portal-web/src/features/workers/account/style.css`
+- `web-app/apps/portal-web/src/features/workers/account/template.html`
+- `ReadMe.txt`
+Weryfikacja:
+- `node --check web-app/apps/portal-web/src/features/workers/account/index.js`: OK.
+- `npm run build`: OK; pozostaje informacyjne ostrzezenie Vite o duzych chunkach.
+- `git diff --check`: OK poza istniejacymi ostrzezeniami Windows o przyszlej normalizacji LF/CRLF.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita, pusha, migracji ani wdrozenia produkcyjnego.
+
+Data: 2026-07-28
+Autor: AI Codex
+Temat: Rzeczywisty czas pracy w Operacjach na zywo
+Powod:
+- Karty aktywnych operacji pokazywaly tylko godzine START lub planowanego konca, bez jasnej informacji jak dlugo osoba juz pracuje.
+- Po zakonczeniu brakowalo jednoczesnie godzin START-STOP, czasu operacji oraz lacznego czasu pracy tej osoby w biezacym dniu.
+Zmieniono lokalnie:
+- Aktywna operacja pokazuje licznik `Pracuje HH:MM`, godzine START, planowana godzine konca (jesli istnieje) i laczny czas dzisiejszej pracy pracownika.
+- Zakonczona operacja pokazuje START, STOP, czas operacji oraz laczny czas dzisiejszej pracy.
+- Dzienne odcinki pracy sa laczone przed zsumowaniem, dlatego nakladajace sie rewizje lub duplikaty nie zawyzaja czasu.
+- Gdy ten sam podpis pracownika wskazuje na rozne identyfikatory, system nie pokazuje wspolnego czasu dziennego zamiast zgadywac.
+- Widok korzysta z istniejacego minutowego zegara pulpitu; aktualizacja licznika nie powoduje dodatkowego odczytu bazy.
+Pliki:
+- `web-app/apps/portal-web/src/features/dashboard/index.js`
+- `web-app/apps/portal-web/src/features/dashboard/serviceOperationStreamModel.js`
+- `web-app/apps/portal-web/src/ui/styles/commandCenter.css`
+- `test/dashboard-service-operation-stream.test.js`
+- `ReadMe.txt`
+Weryfikacja:
+- `node --check` dla zmienionych plikow JS: OK.
+- Testy modelu Operacji na zywo: 14/14 OK.
+- `npm run build`: OK; pozostaje informacyjne ostrzezenie Vite o duzych chunkach.
+- `git diff --check` dla plikow tej zmiany: OK.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-28
+Autor: AI Codex
+Temat: Optymalizacja czytelnosci Operacji na zywo
+Powod:
+- Panel mial duzo wolnej przestrzeni, a najwazniejsze informacje o osobie, statusie i czasie byly wyswietlane zbyt mala czcionka.
+- Status byl powtorzony w dwoch miejscach tego samego wpisu, przez co dolny wiersz nie wykorzystywal calej szerokosci na dane czasu.
+Zmieniono lokalnie:
+- Powiekszono nazwe obiektu, pracownika, status, czas pracy oraz naglowek panelu.
+- Usunieto powtorzony status z dolnego wiersza i przeznaczono cala dostepna szerokosc na START, STOP, plan oraz laczny czas dzisiejszy.
+- Na glownym panelu ukryto drugorzedny opis rodzaju operacji; pozostaje on dostepny na pelnej liscie wszystkich operacji.
+- Powiekszono awatary i pasek postepu, jednoczesnie zmniejszajac puste odstepy naglowka i korpusu.
+- Zachowano piec najnowszych pozycji w podgladzie oraz istniejaca kolejnosc aktywnych i zakonczonych operacji.
+Pliki:
+- `web-app/apps/portal-web/src/features/dashboard/index.js`
+- `web-app/apps/portal-web/src/ui/styles/commandCenter.css`
+- `ReadMe.txt`
+Weryfikacja:
+- `node --check web-app/apps/portal-web/src/features/dashboard/index.js`: OK.
+- Kontrola zalogowanego localhost przy rzeczywistej szerokosci panelu: OK.
+- `npm run build`: OK; pozostaje informacyjne ostrzezenie Vite o duzych chunkach.
+- `git diff --check` dla plikow zmiany: OK.
+Granice:
+- Zmiana jest lokalna. Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-28
+Autor: AI Codex
+Temat: Dane operacyjne i deterministyczny draft Karty Zlecenia
+Powod:
+- Jeden formularz `Dodaj zlecenie` nie zawieral jawnych decyzji potrzebnych do wygenerowania bezpiecznej Karty dla pracownika.
+- Podglad wskazywal braki, ale operator nie mial w tym samym formularzu kontrolek pozwalajacych je uzupelnic.
+Zmieniono lokalnie:
+- W kroku `Opis i podsumowanie` dodano jedna sekcje danych operacyjnych: miejsce realizacji, rodzaj uslugi, zrodlo zalogi, dojazd, lidera, kierowce, pojazd, pakowanie, dostep, bezpieczenstwo, eskalacje, platnosc, wycene, kwote, kontrakt, termin odroczony i podpis.
+- Cykliczny zakres domyslnie konczy sie 31 grudnia roku startowego, ale wymaga jawnego potwierdzenia autora zlecenia.
+- Zwykly zapis utrwala draft i nie publikuje Karty. Kompilator zapisuje addytywny snapshot wraz z bledami blokujacymi publikacje oraz ostrzezeniami.
+- Brak lidera lub kierowcy pozostaje wyraznym ostrzezeniem i nie jest zgadywany ani traktowany jako blad blokujacy.
+- Dostep, zasady bezpieczenstwa i decyzja o pakowaniu musza byc uzupelnione albo jawnie oznaczone jako niewymagane.
+- Podglad oraz zapis draftu korzystaja z tego samego kompilatora danych.
+Pliki:
+- `web-app/apps/portal-web/src/features/orders/jobCardDraftModel.js`
+- `web-app/apps/portal-web/src/features/orders/index.js`
+- `web-app/apps/portal-web/src/features/orders/list/template.html`
+- `web-app/apps/portal-web/src/index.css`
+- `test/job-card-draft-model.test.js`
+- `test/job-card-preview-integration.test.js`
+- `ReadMe.txt`
+Weryfikacja:
+- Testy Karty Zlecenia i integracji formularza: 12/12 OK.
+- Pelne `npm test`: 778/778 OK.
+- `npm --prefix web-app run lint`: OK; jedynie informacyjna uwaga Babel dla istniejacego duzego modulu kalendarza.
+- `npm run build`: OK; pozostaje informacyjne ostrzezenie Vite o duzych chunkach.
+- Zalogowany localhost `http://localhost:5174/?jobCardPreview=1`: sekcja widoczna, zaleznosci kontrolek i walidacja live dzialaja, pracownik wybrany w zmianie jest dostepny jako lider/kierowca, a podglad zalogi nie powiela tej samej osoby; zadnego zlecenia nie zapisano.
+Granice:
+- Funkcja pozostaje ukryta bez flagi `VITE_ENABLE_JOB_CARD_PREVIEW`.
+- Nie wykonano migracji, commita, pusha, publikacji Karty ani wdrozenia produkcyjnego.
+- Backendowa publikacja, numer rewizji, hash, diff i projekcje Mobile sa kolejnym osobnym etapem.
+
+Data: 2026-07-28
+Autor: AI Codex
+Temat: Wersjonowany katalog i kalkulator norm ISSA
+Powod:
+- Czasu uslugi nie wolno wyznaczac bez znajomosci powierzchni albo liczby elementow wymaganych przez konkretna norme.
+- Kazda sugestia czasu musi byc odtwarzalna i wskazywac dokladne zrodlo, strone oraz numer czynnosci.
+Zmieniono lokalnie:
+- Utworzono odseparowany od interfejsu, wersjonowany katalog norm ISSA.
+- Zarejestrowano zrodlo: Ben Walker, `612 oficjalnych norm czasu sprzatania ISSA`, plik `Normy_ISSA_do_druku_A4.pdf`, SHA-256 `7F881D963D82C9B1D0AF35AD6F6F4873455B9037E3BA4601AAECD215A792D612`.
+- Pierwszy aktywny zakres obejmuje 24 rekordy (zadania 50-73) zweryfikowane wzrokowo na drukowanej stronie 12 / stronie PDF 6.
+- Wzor przeliczeniowy zostal zapisany ze wskazaniem drukowanej strony 57 / strony PDF 39.
+- Kalkulator wymaga `areaM2` dla norm powierzchniowych albo `itemCount` dla norm licznikowych. Brak wymaganej wartosci zwraca `INPUT_REQUIRED`, a nie wymyslony czas.
+- Wynik bazowy jest liczony proporcjonalnie do normy zrodlowej. Korekta lub przedzial sa mozliwe tylko po jawnym podaniu wspolczynnikow.
+- Kazdy wynik zawiera autora, tytul, nazwe pliku, strone PDF, strone drukowana i numer zadania.
+- Funkcje katalogu zostaly wyeksportowane z modulu zlecen, aby mozna je bylo pozniej podlaczyc do Karty Zlecenia i innych ekranow bez kopiowania logiki.
+Pliki:
+- `web-app/apps/portal-web/src/features/orders/issa/catalog.v1.js`
+- `web-app/apps/portal-web/src/features/orders/issa/estimator.js`
+- `web-app/apps/portal-web/src/features/orders/issa/index.js`
+- `web-app/apps/portal-web/src/features/orders/issa/README.md`
+- `web-app/apps/portal-web/src/features/orders/index.js`
+- `test/issa-norm-estimator.test.js`
+- `ReadMe.txt`
+Weryfikacja:
+- Testy katalogu, wzoru, wymaganych danych, skalowania, jawnych korekt i cytowania: 8/8 OK.
+- Testy kalkulatora ISSA oraz istniejacego modelu Karty Zlecenia: 16/16 OK.
+- Pelne `npm test`: 786/786 OK.
+- `npm run lint`: OK.
+- `npm run build`: OK; pozostaje informacyjne ostrzezenie Vite o duzych chunkach.
+Granice:
+- Katalog ma status `PARTIAL_VERIFIED`: nie wolno twierdzic, ze wszystkie 612 norm sa juz zdigitalizowane.
+- Pozostale strony PDF wymagaja kontroli wzrokowej i matematycznej przed aktywacja kolejnych rekordow.
+- Oryginalny PDF nie zostal skopiowany do aplikacji; ewentualne rozpowszechnianie zrodla wymaga osobnego potwierdzenia praw.
+- Kalkulator nie zostal jeszcze podlaczony do widocznego formularza. Nie wykonano commita, pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-28
+Autor: AI Codex
+Temat: Obowiazkowy obiekt w recznych zdarzeniach i ochrona edycji wlasnego czasu
+Powod:
+- Biezacy dzien Sabiny Dudek byl widoczny na pulpicie jako `Obiekt nierozpoznany`, poniewaz rekord nie mial identyfikatora strefy prowadzacego do obiektu.
+- Formularz recznego zdarzenia pozwalal zapisac czas bez obiektu i strefy.
+- Wspolna blokada edycji wlasnego czasu nie byla sprawdzana w zakladce `Zdarzenia`.
+Zmieniono:
+- Dokladny, otwarty rekord `EV-1785217209876-211` pracownika `W005` zostal powiazany ze strefa START `BC0873`, ktora w bazie nalezy do obiektu `Best Clean`.
+- Nie zmieniono starszych dni Sabiny ani zadnego rekordu Marty Cisak.
+- Przy dodawaniu recznego zdarzenia obiekt i nalezaca do niego strefa sa obowiazkowe; formularz odrzuca brak strefy oraz strefe z innego obiektu.
+- Etykiete `Klient` zmieniono w tym formularzu na jednoznaczne `Obiekt`.
+- Zakladka `Zdarzenia` korzysta teraz ze wspolnej blokady edycji wlasnego czasu. Obejmuje ona Sabine Dudek (`W005`) i Marte Cisak (`W002`), pozostawiajac mozliwosc korekty przez innego uprawnionego uzytkownika oraz dotychczasowy wyjatek `W001`.
+- Nizsza warstwa `createEvent` rowniez odrzuca nowe reczne zdarzenie bez obiektu albo strefy i ponownie potwierdza, ze wskazana strefa nalezy do wybranego obiektu.
+Pliki:
+- `web-app/apps/portal-web/src/features/events/index.js`
+- `web-app/apps/portal-web/src/features/events/template.html`
+- `web-app/apps/portal-web/src/services/workdayService.js`
+- `test/workday-edit-access.test.js`
+- `test/manual-event-object-requirement.test.js`
+- `ReadMe.txt`
+Weryfikacja:
+- Transakcyjna aktualizacja jednego rekordu i odczyt zwrotny: `utility_room_id=BC0873`, obiekt `Best Clean`, status nadal `RUNNING`.
+- Testy blokady Sabiny/Marty i wymagania obiektu: 7/7 OK.
+Granice:
+- Zmiana rekordu dotyczyla danych biezacego dnia i zostala wykonana na wskazanym polaczeniu Cloud SQL.
+- Zmiany kodu pozostaja lokalne; nie wykonano commita, pusha ani wdrozenia.
+
+Data: 2026-07-28
+Autor: AI Codex
+Temat: Trwaly draft, publikacja i rewizje Karty Zlecenia
+Powod:
+- Formularz tworzyl kompletny `jobCardDraft`, ale dotychczas backend nie utrwalal go jako osobnego, audytowalnego dokumentu i nie istniala bezpieczna granica pomiedzy zapisem szkicu a publikacja.
+- Aplikacja pracownika nie moze otrzymywac roboczych ani finansowych danych Karty przed swiadoma publikacja.
+- Kolejne publikacje musza pozostawiac niezmienna historie rewizji zamiast nadpisywac poprzedni dokument.
+Zmieniono lokalnie:
+- Dodano backendowy model domenowy Karty Zlecenia z kanonicznym JSON, walidacja, deterministycznym SHA-256, lista bledow, ostrzezeniami i przewidywalnym diffem rewizji.
+- Zapis zlecenia utrwala draft w tej samej transakcji co zadanie. Brak wymaganych tabel zatrzymuje zapis kodem `JOB_CARD_SCHEMA_MISSING` zamiast cichego pomijania Karty.
+- Publikacja korzysta wylacznie z draftu zapisanego na serwerze, wymaga zgodnego hasha oraz osobnego potwierdzenia kazdego ostrzezenia.
+- Identyczna tresc nie tworzy kolejnej rewizji. Zmieniona tresc tworzy nowa, niezmienna rewizje z numerem, hashem, diffem, autorem i czasem publikacji.
+- Uprawnienie do publikacji wymaga aktywnego czlonkostwa uzytkownika w tej samej aktywnej organizacji. Nie ma awaryjnego obejscia przez role platformowa.
+- Dodano osobny przycisk `Publikuj Karte`; zwykly `Zapisz` pozostaje zapisem draftu.
+- Aplikacja mobilna otrzymuje tylko ostatnia opublikowana rewizje przypisana do zalogowanego pracownika oraz projekcje jego roli. Drafty, dane handlowe i finansowe nie sa wysylane.
+- Projekcja mobilna jawnie pozostawia `backgroundGps`, `continuousGps` i `routeTracking` wylaczone.
+- Usuniecie zlecenia usuwa tylko jego zmienny draft; opublikowane rewizje pozostaja historia audytowa.
+- Przy zmianie zdjecia pracownika backend usuwa poprzedni plik tylko wtedy, gdy nalezy on do kontrolowanego katalogu profilu tego pracownika i nowy zapis bazy zakonczyl sie powodzeniem.
+Pliki:
+- `job-card/domain.js`
+- `job-card/repository.js`
+- `index.js`
+- `dataconnect/migrations/20260728_job_card_publication_additive.sql`
+- `web-app/apps/portal-web/src/services/jobCardService.js`
+- `web-app/apps/portal-web/src/features/orders/index.js`
+- `web-app/apps/portal-web/src/features/orders/list/template.html`
+- `web-app/apps/portal-web/src/index.css`
+- `test/job-card-api-integration.test.js`
+- `test/job-card-publication-domain.test.js`
+- `test/job-card-publication-migration.test.js`
+- `test/job-card-publication-repository.test.js`
+- `test/job-card-preview-integration.test.js`
+- `test/worker-profile-photo.test.js`
+- `ReadMe.txt`
+Weryfikacja:
+- Testy celowane Karty Zlecenia i zdjec pracownikow: 30/30 OK.
+- Pelne `npm test`: 811/811 OK.
+- `npm --prefix web-app run lint`: OK; pozostaje jedynie informacyjna uwaga Babel o istniejacym duzym module kalendarza.
+- `npm --prefix web-app run build`: OK; pozostaje informacyjne ostrzezenie Vite o duzych chunkach.
+- `git diff --check`: brak bledow bialych znakow; PowerShell/Git informuje jedynie o mozliwej konwersji LF/CRLF.
+Granice i kolejna bramka:
+- Zmiany sa lokalne. Nie wykonano commita, pusha ani wdrozenia.
+- Nie uruchomiono migracji `20260728_job_card_publication_additive.sql` ani `20260728_worker_photo_url_additive.sql`.
+- Przed testem zapisu zdjec i publikacji Karty na realnej bazie trzeba osobno zatwierdzic srodowisko, uruchomic obie migracje addytywne, wykonac test zalogowanego uzytkownika i potwierdzic odczyt opublikowanej rewizji w aplikacji mobilnej.
+- Funkcja podgladu Karty pozostaje za flaga `VITE_ENABLE_JOB_CARD_PREVIEW`.
+
+Data: 2026-07-28
+Autor: AI Codex
+Temat: Bezpieczna bramka migracji Karty Zlecenia i zdjec pracownikow
+Powod:
+- Lokalny portal laczy sie z projektem `iclean-room` i baza `iclean-room-database`; nie ma skonfigurowanej osobnej bazy testowej.
+- Przed zmiana realnego schematu potrzebny jest powtarzalny audyt tylko do odczytu, krotkie limity blokad oraz programowa ochrona przed przypadkowym uruchomieniem zapisu.
+Zmieniono lokalnie:
+- Obie migracje maja teraz `lock_timeout=5s`, `statement_timeout=60s` i osobne blokady doradcze.
+- Migracja zdjec sprawdza istnienie tabeli `worker` oraz wymusza zgodna definicje nullable `text` bez defaultu.
+- Migracja Karty sprawdza tabele nadrzedna, komplet typow i nullability, constrainty, poprawne i gotowe indeksy oraz aktywne triggery niezmiennosci rewizji wskazujace wlasciwa funkcje.
+- Usunieto potrzebe kasowania i ponownego tworzenia triggerow przy bezpiecznym ponownym uruchomieniu migracji.
+- Dodano runner `npm run migrate:job-card-photo`. Domyslnie wykonuje tylko audyt. Zapis wymaga jednoczesnie flagi `--apply`, projektu `iclean-room`, bazy `iclean-room-database` i dokladnego identyfikatora `CLZ-DB-20260728-JOBCARD-PHOTO-01`.
+- Runner nie wyswietla hasla bazy ani sekretow i po zapisie sprawdza gotowosc obu tabel oraz kolumny zdjecia.
+Pliki:
+- `dataconnect/migrations/20260728_job_card_publication_additive.sql`
+- `dataconnect/migrations/20260728_worker_photo_url_additive.sql`
+- `scripts/migrate-job-card-photo.js`
+- `package.json`
+- `test/job-card-photo-migration-runner.test.js`
+- `test/job-card-publication-migration.test.js`
+- `test/worker-profile-photo.test.js`
+- `ReadMe.txt`
+Weryfikacja:
+- Testy celowane migracji i zdjec: 7/7 OK.
+- Pelne `npm test`: 813/813 OK.
+- `node --check scripts/migrate-job-card-photo.js`: OK.
+- `git diff --check` dla pakietu migracyjnego: OK.
+Aktualny stan i blokada:
+- Produkcyjna baza nie zostala zmieniona.
+- ADC konta `biuro@bestclean.pl` zostalo odnowione po dodaniu waskich wylaczen HTTPS Nortona dla wymaganych uslug Google.
+- Audyt tylko do odczytu potwierdzil cel: baza `iclean-room-database`, uzytkownik techniczny `portal_app`, schema `public`.
+- Przed migracja nie istnieja tabele `job_card_draft` ani `job_card_revision`, a tabela `worker` nie ma kolumny `photo_url`. Jest to oczekiwany stan poczatkowy; audyt zwrocil `ready=false`.
+- Nie wylaczono globalnie weryfikacji TLS i nie zmieniono konfiguracji `gcloud`.
+- Przed zapisem na produkcji nadal wymagane jest osobne, dokladne zatwierdzenie `OK PRODUKCJA CLZ-DB-20260728-JOBCARD-PHOTO-01`.
+
+Data: 2026-07-28
+Autor: AI Codex
+Temat: Premium i responsywny ekran logowania Cleanzi
+Powod:
+- Dotychczasowy ekran byl podzielony na dwa puste polpanele, a mala ilustracja nie budowala wiarygodnego obrazu nowoczesnej firmy.
+- Uzytkownik mogl zobaczyc surowy komunikat `Dashboard feature is not initialized.` zamiast zrozumialego stanu aplikacji.
+Zmieniono lokalnie:
+- Zastapiono ilustracje dedykowanym, profesjonalnym zdjeciem operacyjnym z managerka i zespolem w nowoczesnym obiekcie.
+- Zdjecie zapisano jako zoptymalizowany WebP 1536 x 1024 px o rozmiarze 87 774 B.
+- Dodano pelna warstwe marki: logo, komunikat wartosci, obszary produktu i spokojniejszy formularz z czytelna hierarchia.
+- Widok sklada sie responsywnie: desktop korzysta z ukladu 58/42, a telefon z pionowego ukladu bez poziomego przewijania.
+- Automatyczne odswiezanie pulpitu uruchamia sie tylko wtedy, gdy modul pulpitu istnieje i aktywna trasa to pulpit.
+- Techniczny blad niezainicjalizowanej funkcji jest mapowany na zrozumialy komunikat dla uzytkownika.
+Pliki:
+- `web-app/public/login-hero-operations-v1.webp`
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `web-app/apps/portal-web/src/ui/portalApp.js`
+- `web-app/apps/portal-web/src/index.css`
+- `design-qa-login-desktop.png`
+- `design-qa-login-mobile.png`
+- `design-qa-login-comparison.png`
+- `design-qa.md`
+- `ReadMe.txt`
+Weryfikacja:
+- Targeted ESLint dla `layoutTemplate.js` i `portalApp.js`: OK.
+- `npm --prefix web-app run build`: OK; pozostaje informacyjne ostrzezenie Vite o duzych chunkach.
+- Pelne `npm test`: 813/813 OK.
+- Swiezy start lokalnej karty `http://localhost:5174/?jobCardPreview=1`: brak bledow konsoli, obraz zaladowany, pola i CTA aktywne.
+- Desktop 1536 x 912 i mobile 390 x 844: brak poziomego overflow.
+- Wizualne QA `PRZED / PO`: brak otwartych problemow P0, P1 lub P2; `final result: passed`.
+Granice:
+- Zachowano istniejaca logike Firebase, wybor organizacji, reset hasla i MFA.
+- Nie wykonano commita, pusha, wdrozenia ani migracji produkcyjnej.
+- Produkcyjna migracja Karty Zlecenia i zdjec nadal wymaga osobnej, dokladnej zgody wskazanej powyzej.
+
+Data: 2026-07-28 21:00 CEST
+Autor: AI Codex
+Temat: Produkcyjna migracja addytywna Karty Zlecenia i zdjec pracownikow
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-DB-20260728-JOBCARD-PHOTO-01`.
+- Zakres zostal ograniczony do `20260728_job_card_publication_additive.sql` i `20260728_worker_photo_url_additive.sql` w projekcie `iclean-room`, bazie `iclean-room-database`, schemacie `public`.
+Przebieg:
+- Audyt przed zapisem potwierdzil konto Google Cloud `biuro@bestclean.pl`, uzytkownika bazy `portal_app`, brak obu tabel Karty oraz brak `worker.photo_url`.
+- Pierwsze wywolanie przez wrapper `npm run` nie przekazalo flag i wykonalo ponownie tylko audyt; nie zmienilo bazy.
+- Pierwsze bezposrednie wywolanie zapisu zostalo wycofane przez transakcje na bledzie PostgreSQL `42703`.
+- Diagnostyka wskazala brak pola `expected_not_null` w rekordzie walidatora oraz zbyt wczesna walidacje tabeli rewizji.
+- Poprawiono kolejnosc tworzenia tabel i komplet pol walidatora. Testy celowane 7/7, `git diff --check` oraz produkcyjny dry-run zakonczony `ROLLBACK` przeszly poprawnie.
+- Ponowne wywolanie bezposrednie z tym samym zatwierdzonym identyfikatorem zastosowalo obie migracje.
+Wynik produkcyjny:
+- `job_card_draft`: istnieje, 17 kolumn, 4 constrainty, 2 indeksy, 0 rekordow.
+- `job_card_revision`: istnieje, 16 kolumn, 4 constrainty, 4 indeksy, 0 rekordow.
+- Dwa triggery niezmiennosci rewizji sa aktywne.
+- `worker.photo_url`: nullable `text`, bez wartosci domyslnej.
+- Istniejacych pracownikow: 86; rekordow z `photo_url`: 0. Migracja nie uzupelniala ani nie zmieniala danych pracownikow.
+- Niezalezny audyt po migracji zwrocil `ready=true`.
+Granice:
+- Nie wykonano wdrozenia kodu portalu ani aplikacji mobilnej, commita, pusha ani publikacji Karty Zlecenia.
+- Kolejnym krokiem jest wdrozenie kompatybilnego backendu/portalu i kontrolowany test zapisu zdjecia oraz szkicu/publikacji rewizji.
+
+Data: 2026-07-28 21:21 CEST
+Autor: AI Codex
+Temat: Kandydat wydania portalu po migracji Karty Zlecenia i zdjec
+Zakres:
+- Produkcyjny build App Hosting jawnie wlacza interfejs Karty Zlecenia przez `VITE_ENABLE_JOB_CARD_PREVIEW=1`.
+- Lista pracownikow i `photo_url` sa pobierane przez nowy, autoryzowany endpoint `GET /api/admin/workers`, wymagajacy tokenu Firebase, aktywnego czlonkostwa organizacji i dokladnego `orgId`.
+- Portal nie wymaga produkcyjnego wdrozenia Data Connect do odczytu zdjec pracownikow.
+- Dodano obsluge zdjec w profilu pracownika, nowy ekran logowania, Centrum dowodzenia, operacje na zywo, zabezpieczenia edycji czasu, wymaganie obiektu dla zdarzen manualnych oraz Karte Zlecenia.
+Decyzja wdrozeniowa:
+- Suchy przebieg `firebase deploy --dry-run --only dataconnect:iclean-room-service` ujawnil szeroki zestaw dodatkowych, niezaleznych zmian schematu.
+- Data Connect i reguly Storage zostaja poza zakresem tego rolloutu. Backend zapisuje zdjecia przez Admin SDK, a portal czyta adres przez waski endpoint SQL.
+- Docelowa sciezka publikacji to Firebase App Hosting backend `cleanzi-01`, z jednego dokladnego commita Git.
+Weryfikacja:
+- Pelne `npm test`: 815/815 OK, w tym kontrola konfiguracji App Hosting.
+- Pelny ESLint portalu: OK.
+- Produkcyjny build Vite z `VITE_ENABLE_JOB_CARD_PREVIEW=1`: OK.
+- Artefakty builda zawieraja `/portal/job-cards`, tekst Karty Zlecenia i `/api/admin/workers`.
+- `git diff --check`: OK; pozostaja jedynie informacyjne ostrzezenia o konwersji LF/CRLF.
+Granice:
+- Na tym etapie nie wykonano pusha, rolloutu App Hosting ani zmiany ruchu produkcyjnego.
+- Produkcyjne wdrozenie portalu wymaga osobnej dokladnej zgody `OK PRODUKCJA CLZ-PORTAL-20260728-JOBCARD-PHOTO-01`.

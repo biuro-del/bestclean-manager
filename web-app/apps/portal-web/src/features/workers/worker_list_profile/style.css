@@ -694,6 +694,20 @@
   font-weight:900;
 }
 
+#portalRoot #view-workerProfile .worker-profile-avatar.is-photo{
+  overflow:hidden;
+  padding:0;
+  background:#eef4ff;
+  border:1px solid #d6e4ff;
+}
+
+#portalRoot #view-workerProfile .worker-profile-avatar img{
+  width:100%;
+  height:100%;
+  display:block;
+  object-fit:cover;
+}
+
 #portalRoot #view-workerProfile .worker-profile-role-icon{
   width:25px;
   height:25px;
@@ -1031,6 +1045,59 @@
   font-weight:900;
   letter-spacing:.02em;
   text-transform:uppercase;
+}
+
+#portalRoot #view-workerProfile .worker-profile-photo-section{
+  padding:14px;
+  border:1px solid #dce8f7;
+  border-radius:8px;
+  background:#f8fbff;
+}
+
+#portalRoot #view-workerProfile .worker-profile-photo-editor{
+  display:flex;
+  align-items:center;
+  gap:14px;
+}
+
+#portalRoot #view-workerProfile .worker-profile-photo-preview{
+  flex:0 0 auto;
+  width:74px;
+  height:74px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:50%;
+  background:#eef4ff;
+  box-shadow:inset 0 0 0 1px #d3e0f2;
+}
+
+#portalRoot #view-workerProfile .worker-profile-avatar--large{
+  width:64px;
+  height:64px;
+  font-size:20px;
+}
+
+#portalRoot #view-workerProfile .worker-profile-photo-controls{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px;
+  min-width:0;
+}
+
+#portalRoot #view-workerProfile .worker-profile-photo-pick{
+  cursor:pointer;
+}
+
+#portalRoot #view-workerProfile .worker-profile-photo-pick[aria-disabled="true"]{
+  pointer-events:none;
+  opacity:.55;
+}
+
+#portalRoot #view-workerProfile #wkPhotoHint{
+  flex:1 1 100%;
+  margin:0;
 }
 
 #portalRoot #view-workerProfile #wkEditorOverlay .grid{

@@ -3927,9 +3927,36 @@ async function assertNoOtherOpenCleanEvent(orgId, payload = {}, options = {}) {
   throw error
 }
 
+async function assertManualEventZoneBelongsToClient(orgId, clientId, zoneId) {
+  const normalizedClientId = String(clientId ?? '').trim()
+  const normalizedZoneId = String(zoneId ?? '').trim()
+  const zones = await getZones(orgId)
+  const matches = (Array.isArray(zones) ? zones : []).filter(
+    (zone) => String(zone?.id ?? zone?.zoneId ?? '').trim() === normalizedZoneId,
+  )
+
+  if (matches.length !== 1) {
+    throw new Error('Nie można jednoznacznie potwierdzić wybranej strefy.')
+  }
+
+  const zoneClientId = String(matches[0]?.clientId ?? '').trim()
+  if (!zoneClientId || zoneClientId !== normalizedClientId) {
+    throw new Error('Wybrana strefa nie należy do wskazanego obiektu.')
+  }
+}
+
 export async function createEvent(orgId, payload = {}) {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  }
+
+  const manualClientId = String(payload.clientId ?? '').trim()
+  const manualZoneId = String(payload.zoneId ?? payload.utilityRoomId ?? payload.roomId ?? '').trim()
+  if (!manualClientId) {
+    throw new Error('Ręczne zdarzenie wymaga wskazania obiektu.')
+  }
+  if (!manualZoneId) {
+    throw new Error('Ręczne zdarzenie wymaga wskazania strefy należącej do obiektu.')
   }
 
   const eventId = String(payload.eventId ?? payload.id ?? `EV-${Date.now()}`).trim()
@@ -3938,6 +3965,7 @@ export async function createEvent(orgId, payload = {}) {
   }
 
   ensureFirebase()
+  await assertManualEventZoneBelongsToClient(orgId, manualClientId, manualZoneId)
   const mutationPayload = buildEventMutationPayload(payload)
   const canonicalWorkdayId = String(payload.workdayId ?? payload.linkedWorkdayId ?? eventId).trim() || eventId
   await assertNoOtherOpenCleanEvent(orgId, {

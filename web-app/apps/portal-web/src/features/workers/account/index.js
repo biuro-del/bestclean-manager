@@ -92,6 +92,11 @@ const PASSWORD_EYE_CLOSED_ICON = `
     <path d="M6.7 6.8A16.4 16.4 0 0 0 2.5 12s3.5 7 9.5 7c1.7 0 3.2-.4 4.5-1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
     <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
   </svg>`
+const WORKER_ACCOUNT_AVATAR_ICON = `
+  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M12 12a4.4 4.4 0 1 0 0-8.8 4.4 4.4 0 0 0 0 8.8Z" stroke="currentColor" stroke-width="1.8"></path>
+    <path d="M4 21a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+  </svg>`
 
 export function createWorkerAccountFeature(ctx) {
   const {
@@ -132,6 +137,106 @@ export function createWorkerAccountFeature(ctx) {
   function setInputValue(id, value) {
     const input = document.getElementById(id)
     if (input) input.value = String(value ?? '')
+  }
+
+  function workerPhotoUrl(worker = {}) {
+    const raw = String(
+      worker.photoUrl ??
+        worker.profilePhotoUrl ??
+        worker.avatarUrl ??
+        worker.imageUrl ??
+        '',
+    ).trim()
+    return /^(https?:\/\/|data:image\/(?:png|jpe?g|webp);base64,)/i.test(raw) ? raw : ''
+  }
+
+  function workerPhotoMarkup(photoUrl = '') {
+    const safeUrl = String(photoUrl ?? '').trim()
+    if (!safeUrl) return WORKER_ACCOUNT_AVATAR_ICON
+    return `<img src="${escapeHtml(safeUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+  }
+
+  function renderWorkerAvatar(worker = {}, overridePhotoUrl) {
+    const avatar = document.getElementById('waAvatar')
+    if (!avatar) return
+    const photoUrl = overridePhotoUrl === undefined ? workerPhotoUrl(worker) : String(overridePhotoUrl ?? '').trim()
+    avatar.innerHTML = workerPhotoMarkup(photoUrl)
+    avatar.classList.toggle('is-photo', Boolean(photoUrl))
+  }
+
+  function setWorkerAccountPhotoState({ photoUrl = '', photoDataUrl = '', removePhoto = false } = {}) {
+    appState.workerAccountPhotoUrl = String(photoUrl ?? '').trim()
+    appState.workerAccountPhotoDataUrl = String(photoDataUrl ?? '').trim()
+    appState.workerAccountRemovePhoto = Boolean(removePhoto)
+    syncWorkerAccountPhotoUi()
+  }
+
+  function syncWorkerAccountPhotoUi() {
+    const worker = resolveCurrentWorker() ?? {}
+    const storedPhotoUrl = workerPhotoUrl(worker)
+    const previewUrl = appState.workerAccountRemovePhoto
+      ? ''
+      : String(appState.workerAccountPhotoDataUrl || appState.workerAccountPhotoUrl || storedPhotoUrl).trim()
+    const preview = document.getElementById('waPhotoPreview')
+    if (preview) preview.innerHTML = workerPhotoMarkup(previewUrl)
+    renderWorkerAvatar(worker, previewUrl)
+
+    const editing = isEditingTab('account') && canManageWorkers()
+    const selectButton = document.getElementById('waSelectPhotoBtn')
+    const removeButton = document.getElementById('waRemovePhotoBtn')
+    const quickButton = document.getElementById('waPhotoQuickBtn')
+    const fileInput = document.getElementById('waPhotoInput')
+    if (selectButton instanceof HTMLButtonElement) selectButton.disabled = !editing
+    if (removeButton instanceof HTMLButtonElement) {
+      removeButton.disabled = !editing || (!previewUrl && !storedPhotoUrl)
+    }
+    if (quickButton instanceof HTMLButtonElement) {
+      quickButton.disabled = !canManageWorkers()
+      quickButton.title = canManageWorkers()
+        ? 'Dodaj lub zmien zdjecie profilowe'
+        : 'Brak uprawnien do zmiany zdjecia'
+    }
+    if (fileInput instanceof HTMLInputElement) fileInput.disabled = !editing
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result ?? ''))
+      reader.onerror = () => reject(reader.error || new Error('Nie udalo sie odczytac zdjecia.'))
+      reader.readAsDataURL(file)
+    })
+  }
+
+  function loadImageForWorkerPhoto(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const image = new Image()
+      image.onload = () => resolve(image)
+      image.onerror = () => reject(new Error('Nie udalo sie wczytac zdjecia.'))
+      image.src = dataUrl
+    })
+  }
+
+  async function compressWorkerProfilePhoto(file) {
+    if (!file || !/^image\/(?:png|jpe?g|webp)$/i.test(String(file.type ?? ''))) {
+      throw new Error('Wybierz zdjecie PNG, JPG albo WEBP.')
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      throw new Error('Plik jest zbyt duzy. Wybierz zdjecie do 8 MB.')
+    }
+    const dataUrl = await readFileAsDataUrl(file)
+    const image = await loadImageForWorkerPhoto(dataUrl)
+    const size = 320
+    const sourceSize = Math.min(image.naturalWidth || image.width, image.naturalHeight || image.height)
+    const sourceX = Math.max(0, ((image.naturalWidth || image.width) - sourceSize) / 2)
+    const sourceY = Math.max(0, ((image.naturalHeight || image.height) - sourceSize) / 2)
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Przegladarka nie moze przygotowac miniatury.')
+    context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, size, size)
+    return canvas.toDataURL('image/webp', 0.82)
   }
 
   function ensureSelectOption(select, value) {
@@ -928,6 +1033,7 @@ export function createWorkerAccountFeature(ctx) {
     setText('waCardPhone', worker.phone || '-')
     setText('waCardAdded', formatDateTime(worker.addedAt || worker.createdAt))
     setText('waCardEdited', formatDateTime(worker.editedAt || worker.updatedAt))
+    renderWorkerAvatar(worker)
 
     const status = document.getElementById('waCardStatus')
     if (status) {
@@ -1045,6 +1151,7 @@ export function createWorkerAccountFeature(ctx) {
       'waMedicalFrom',
       'waMedicalTo',
     ].forEach((id) => setControlDisabled(id, !accountAdminEdit))
+    syncWorkerAccountPhotoUi()
     syncTrainingControlsDisabled(!accountAdminEdit)
     const workerIdInput = document.getElementById('waWorkerId')
     if (workerIdInput) {
@@ -1103,6 +1210,7 @@ export function createWorkerAccountFeature(ctx) {
     setInputValue('waPhone', worker.phone || '')
     setInputValue('waWorkerId', workerId(worker))
     setInputValue('waEditedBy', worker.editedBy || worker.updatedBy || '')
+    setWorkerAccountPhotoState({ photoUrl: workerPhotoUrl(worker) })
     const contractTypeValue = String(workerField(worker, ['contractType', 'agreementType', 'employmentContractType'], '') ?? '').trim()
     const contractType = document.getElementById('waContractType')
     if (contractType) {
@@ -2986,6 +3094,13 @@ export function createWorkerAccountFeature(ctx) {
       ? String(document.getElementById('waMedicalTo')?.value ?? '').trim()
       : dateInputValue(workerField(worker, ['medicalExamTo', 'occupationalMedicineTo', 'medicalTo', 'medicalExamValidTo', 'medicalEndDate']))
     const trainings = admin ? selectedTrainingValues() : workerTrainingValues(worker)
+    const photoDataUrl = String(appState.workerAccountPhotoDataUrl ?? '').trim()
+    const removePhoto = Boolean(appState.workerAccountRemovePhoto)
+    const photoUrl = removePhoto
+      ? ''
+      : photoDataUrl
+        ? ''
+        : String(appState.workerAccountPhotoUrl || workerPhotoUrl(worker)).trim()
     return {
       workerId: nextWorkerId,
       name: String(document.getElementById('waName')?.value ?? '').trim(),
@@ -3011,6 +3126,9 @@ export function createWorkerAccountFeature(ctx) {
       active: admin ? String(document.getElementById('waActive')?.value ?? '1') === '1' : isWorkerActive(worker),
       editedBy: String(appState.session?.name ?? appState.session?.email ?? '').trim(),
       authUid: worker.authUid ?? '',
+      photoUrl,
+      photoDataUrl,
+      removePhoto,
     }
   }
 
@@ -3036,6 +3154,11 @@ export function createWorkerAccountFeature(ctx) {
     const updatedLogin = persisted?.loginChangeSkipped
       ? currentLogin
       : String(persisted?.login ?? currentLogin).trim() || currentLogin
+    const nextPhotoUrl = String(
+      persisted?.photoUrl ??
+        persisted?.profilePhotoUrl ??
+        (payload.removePhoto ? '' : payload.photoUrl || workerPhotoUrl(worker)),
+    ).trim()
     const nextWorker = {
       ...worker,
       ...persisted,
@@ -3052,6 +3175,8 @@ export function createWorkerAccountFeature(ctx) {
       loginEmail: persisted?.loginEmail ?? persisted?.email ?? worker.loginEmail,
       phone: persisted?.phone ?? worker.phone,
       editedBy: persisted?.editedBy ?? payload.editedBy,
+      photoUrl: nextPhotoUrl,
+      profilePhotoUrl: nextPhotoUrl,
     }
     nextWorker.type = nextWorker.workerType
     updateCurrentWorker(nextWorker)
@@ -3589,6 +3714,45 @@ export function createWorkerAccountFeature(ctx) {
     })
     binding.add(document.getElementById('waSaveRoleBtn'), 'click', () => {
       void saveRole()
+    })
+    binding.add(document.getElementById('waPhotoQuickBtn'), 'click', () => {
+      if (!canManageWorkers()) {
+        showTransientNotice('Brak uprawnien do zmiany zdjecia.', 'warning')
+        return
+      }
+      activateTab('account')
+      enterEditMode('account')
+      const input = document.getElementById('waPhotoInput')
+      if (input instanceof HTMLInputElement && !input.disabled) {
+        input.value = ''
+        input.click()
+      }
+    })
+    binding.add(document.getElementById('waSelectPhotoBtn'), 'click', () => {
+      const input = document.getElementById('waPhotoInput')
+      if (!(input instanceof HTMLInputElement) || input.disabled) return
+      input.value = ''
+      input.click()
+    })
+    binding.add(document.getElementById('waPhotoInput'), 'change', (event) => {
+      const input = event.currentTarget
+      const file = input instanceof HTMLInputElement ? input.files?.[0] : null
+      if (!file) return
+      void compressWorkerProfilePhoto(file)
+        .then((photoDataUrl) => {
+          setWorkerAccountPhotoState({ photoDataUrl, removePhoto: false })
+        })
+        .catch((error) => {
+          console.error('[worker-account] profile photo preparation failed', error)
+          showTransientNotice(error?.message || 'Nie udalo sie przygotowac zdjecia.', 'error')
+          if (input instanceof HTMLInputElement) input.value = ''
+        })
+    })
+    binding.add(document.getElementById('waRemovePhotoBtn'), 'click', () => {
+      if (!isEditingTab('account') || !canManageWorkers()) return
+      setWorkerAccountPhotoState({ removePhoto: true })
+      const input = document.getElementById('waPhotoInput')
+      if (input instanceof HTMLInputElement) input.value = ''
     })
     binding.add(document.getElementById('waRole'), 'change', (event) => {
       const role = roleValue(event.currentTarget?.value)

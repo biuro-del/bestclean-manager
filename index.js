@@ -66,6 +66,7 @@ const {
   isScheduleOrderActive,
   normalizeScheduleOrderLifecycleStatus,
 } = require('./worker-schedule-conflict-policy')
+const { JobCardRepository } = require('./job-card/repository')
 
 function isTrue(value) {
   return ['1', 'true', 'yes', 'tak'].includes(
@@ -111,20 +112,28 @@ const ADMIN_WORKER_PASSWORD_SET_PATH = '/api/admin/worker-password/set'
 const ADMIN_WORKER_PROFILE_UPDATE_PATH = '/api/admin/worker-profile/update'
 const ADMIN_WORKER_PROFILE_DELETE_PATH = '/api/admin/worker-profile/delete'
 const ADMIN_WORKER_ID_NEXT_PATH = '/api/admin/worker-id/next'
+const ADMIN_WORKERS_PATH = '/api/admin/workers'
 const ADMIN_WORKERS_RESTORE_PATH = '/api/admin/workers/restore'
 const AUTH_SESSION_CONTEXT_PATH = '/api/auth/session-context'
 const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
+const PORTAL_JOB_CARDS_PATH = '/api/portal/job-cards'
 const PORTAL_EVENTS_PATH = '/api/portal/events'
 const PORTAL_UI_STYLE_PATH = '/api/portal/ui-style'
 const PORTAL_ZONE_QR_CODES_PATH = '/api/portal/zones/qr-codes'
 const PORTAL_PROFITABILITY_PATH = '/api/portal/profitability'
 const MOBILE_STATE_PATH = '/api/mobile/state'
 const MOBILE_SCAN_PATH = '/api/mobile/scan'
+const MOBILE_JOB_CARDS_PATH = '/api/mobile/job-cards'
 const DATACONNECT_LOCATION = String(process.env.FIREBASE_DATACONNECT_LOCATION || process.env.DATACONNECT_LOCATION || '').trim()
 const DATACONNECT_SERVICE = String(process.env.FIREBASE_DATACONNECT_SERVICE || process.env.DATACONNECT_SERVICE || '').trim()
 const DATACONNECT_CONNECTOR = String(process.env.FIREBASE_DATACONNECT_CONNECTOR || process.env.DATACONNECT_CONNECTOR || '').trim()
 const MAX_JSON_BODY_BYTES = 1024 * 1024
+const MAX_WORKER_PROFILE_PHOTO_BYTES = Number(process.env.MAX_WORKER_PROFILE_PHOTO_BYTES || 1024 * 1024)
+const MAX_WORKER_PROFILE_PHOTO_BODY_BYTES = Math.max(
+  MAX_JSON_BODY_BYTES,
+  Math.ceil(MAX_WORKER_PROFILE_PHOTO_BYTES * 1.5) + 64 * 1024,
+)
 const MAX_PROXY_BODY_BYTES = Number(process.env.MAX_PROXY_BODY_BYTES || MAX_JSON_BODY_BYTES)
 const FIREBASE_PROJECT_ID = String(
   process.env.FIREBASE_PROJECT_ID ||
@@ -135,6 +144,11 @@ const FIREBASE_PROJECT_ID = String(
 ).trim()
 const FIREBASE_WEB_API_KEY = String(
   process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || '',
+).trim()
+const FIREBASE_STORAGE_BUCKET = String(
+  process.env.FIREBASE_STORAGE_BUCKET ||
+    process.env.VITE_FIREBASE_STORAGE_BUCKET ||
+    '',
 ).trim()
 const PLATFORM_FIREBASE_PROJECT_ID = String(process.env.PLATFORM_FIREBASE_PROJECT_ID || '').trim()
 const PLATFORM_FIREBASE_WEB_API_KEY = String(process.env.PLATFORM_FIREBASE_WEB_API_KEY || '').trim()
@@ -531,8 +545,8 @@ function readRequestBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
   })
 }
 
-async function readJsonBody(req) {
-  const raw = await readRequestBody(req)
+async function readJsonBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
+  const raw = await readRequestBody(req, maxBytes)
   if (!raw.length) {
     return {}
   }
@@ -938,6 +952,11 @@ function buildFirebaseAdminOptions() {
   if (FIREBASE_PROJECT_ID) {
     options.projectId = FIREBASE_PROJECT_ID
   }
+  if (FIREBASE_STORAGE_BUCKET) {
+    options.storageBucket = FIREBASE_STORAGE_BUCKET
+  } else if (FIREBASE_PROJECT_ID) {
+    options.storageBucket = `${FIREBASE_PROJECT_ID}.appspot.com`
+  }
   if (serviceAccount) {
     options.credential = admin.credential.cert(serviceAccount)
     if (!options.projectId && serviceAccount.project_id) {
@@ -949,6 +968,118 @@ function buildFirebaseAdminOptions() {
     options.credential = admin.credential.applicationDefault()
   }
   return Object.keys(options).length ? options : undefined
+}
+
+function normalizeWorkerPhotoPayload(body = {}) {
+  const removePhoto = asPayloadBoolean(body?.removePhoto ?? body?.photoRemove, false)
+  const photoDataUrl = normalizeText(body?.photoDataUrl ?? body?.photoDataURI ?? body?.photoBase64)
+  const photoUrl = normalizeText(body?.photoUrl ?? body?.profilePhotoUrl ?? body?.avatarUrl)
+  const changed = Boolean(removePhoto || photoDataUrl || Object.prototype.hasOwnProperty.call(body, 'photoUrl'))
+
+  return {
+    photoDataUrl,
+    photoUrl: removePhoto ? '' : photoUrl.slice(0, 2048),
+    photoUrlChanged: changed,
+    removePhoto,
+  }
+}
+
+function parseWorkerProfilePhotoDataUrl(value) {
+  const raw = normalizeText(value)
+  if (!raw) return null
+  const match = /^data:(image\/(?:png|jpe?g|webp));base64,([a-z0-9+/=\r\n]+)$/i.exec(raw)
+  if (!match) {
+    throw createWorkerProfilePublicError(400, 'WORKER_PHOTO_INVALID', 'Zdjecie pracownika musi byc plikiem PNG, JPG albo WEBP.')
+  }
+  const buffer = Buffer.from(match[2].replace(/\s+/g, ''), 'base64')
+  if (!buffer.length || buffer.length > MAX_WORKER_PROFILE_PHOTO_BYTES) {
+    throw createWorkerProfilePublicError(413, 'WORKER_PHOTO_TOO_LARGE', 'Zdjecie pracownika jest zbyt duze. Dodaj miniaturę do 1 MB.')
+  }
+  return {
+    buffer,
+    contentType: match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase(),
+  }
+}
+
+function workerProfilePhotoExtension(contentType) {
+  if (contentType === 'image/png') return 'png'
+  if (contentType === 'image/webp') return 'webp'
+  return 'jpg'
+}
+
+function workerProfileStorageLogin(login) {
+  return normalizeText(login || 'worker')
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 90) || 'worker'
+}
+
+async function uploadWorkerProfilePhoto(payload, decodedToken = {}) {
+  const parsed = parseWorkerProfilePhotoDataUrl(payload?.photoDataUrl)
+  if (!parsed) {
+    return null
+  }
+
+  const app = ensureFirebaseAdmin()
+  const bucket = app.storage().bucket()
+  const token = crypto.randomUUID()
+  const ext = workerProfilePhotoExtension(parsed.contentType)
+  const objectName = [
+    'orgs',
+    payload.orgId,
+    'worker-profiles',
+    workerProfileStorageLogin(payload.newLogin || payload.login),
+    `avatar-${Date.now()}-${token}.${ext}`,
+  ].join('/')
+  const file = bucket.file(objectName)
+  await file.save(parsed.buffer, {
+    resumable: false,
+    metadata: {
+      contentType: parsed.contentType,
+      cacheControl: 'public, max-age=3600',
+      metadata: {
+        firebaseStorageDownloadTokens: token,
+        orgId: payload.orgId,
+        workerLogin: payload.newLogin || payload.login,
+        source: 'portal-worker-profile',
+        createdByUid: normalizeText(decodedToken?.uid),
+      },
+    },
+  })
+
+  return {
+    objectName,
+    url: `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(objectName)}?alt=media&token=${encodeURIComponent(token)}`,
+  }
+}
+
+async function deleteWorkerProfilePhotoObject(uploadedPhoto) {
+  const objectName = normalizeText(uploadedPhoto?.objectName)
+  if (!objectName) return
+  try {
+    await ensureFirebaseAdmin().storage().bucket().file(objectName).delete({ ignoreNotFound: true })
+  } catch {
+    // Best-effort cleanup after a failed profile write.
+  }
+}
+
+function workerProfilePhotoObjectFromUrl(value, orgId) {
+  const raw = normalizeText(value)
+  if (!raw) return null
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'https:' || url.hostname !== 'firebasestorage.googleapis.com') return null
+    const marker = '/o/'
+    const markerIndex = url.pathname.indexOf(marker)
+    if (markerIndex < 0) return null
+    const objectName = decodeURIComponent(url.pathname.slice(markerIndex + marker.length))
+    const expectedPrefix = `orgs/${normalizeOrgId(orgId)}/worker-profiles/`
+    if (!objectName.startsWith(expectedPrefix)) return null
+    return { objectName }
+  } catch {
+    return null
+  }
 }
 
 function buildPlatformFirebaseAdminOptions() {
@@ -2428,6 +2559,65 @@ async function resolveMobileWorker(client, orgId, body, decodedToken, membership
   }
 }
 
+async function readPublishedMobileJobCards(client, orgId, worker) {
+  const schemaResult = await client.query(
+    `select to_regclass('public.job_card_revision') is not null as revision_ready`,
+  )
+  if (schemaResult.rows[0]?.revision_ready !== true) {
+    const error = new Error('JOB_CARD_SCHEMA_MISSING')
+    error.statusCode = 503
+    error.publicCode = 'JOB_CARD_SCHEMA_MISSING'
+    error.publicMessage = 'Moduł opublikowanych Kart Zleceń nie jest jeszcze gotowy.'
+    throw error
+  }
+  const identities = [...new Set([worker?.workerId, worker?.login].map((value) => normalizeText(value).toLowerCase()).filter(Boolean))]
+  const result = await client.query(
+    `with latest as (
+       select distinct on (r.source_order_id)
+              r.source_order_id,
+              r.revision,
+              r.revision_id,
+              r.published_at,
+              r.mobile_projection,
+              r.payload
+         from public.job_card_revision r
+        where r.org_id = $1
+        order by r.source_order_id, r.revision desc
+     )
+     select latest.*,
+            assignment.assignment_role
+       from latest
+       join public.task t
+         on t.org_id = $1
+        and t.id_task = latest.source_order_id
+       join lateral (
+         select upper(coalesce(item->>'role', 'WORKER')) as assignment_role
+           from jsonb_array_elements(coalesce(latest.payload #> '{fulfillment,assignments}', '[]'::jsonb)) item
+          where lower(coalesce(item->>'workerId', '')) = any($2::text[])
+          limit 1
+      ) assignment on true
+      where upper(coalesce(t.lifecycle_status, 'ACTIVE')) = 'ACTIVE'
+        and case
+              when t.date_ymd ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then t.date_ymd::date
+              else null
+            end >= (current_date - interval '1 day')::date
+      order by t.date_ymd asc, t.start_time asc, latest.source_order_id asc`,
+    [orgId, identities],
+  )
+  return result.rows.map((row) => {
+    const projections = portalScheduleOrderJsonValue(row.mobile_projection, {})
+    const assignmentRole = normalizeText(row.assignment_role).toUpperCase()
+    const projectionKey = ['LEADER', 'DRIVER'].includes(assignmentRole) ? assignmentRole.toLowerCase() : 'worker'
+    return {
+      card: projections?.[projectionKey] || projections?.worker || null,
+      publishedAt: row.published_at,
+      revision: Number(row.revision || 0),
+      revisionId: normalizeText(row.revision_id),
+      sourceOrderId: normalizeText(row.source_order_id),
+    }
+  }).filter((entry) => entry.card)
+}
+
 async function fetchMobileZones(client, orgId) {
   const result = await client.query(
     `select z.id as zone_id, z.client_id, z.zone as zone_name, z.function as function_name, z.location,
@@ -3214,6 +3404,12 @@ async function handleMobileWorkflowRequest(req, res, requestUrl) {
     let payload
     if (requestUrl.pathname === MOBILE_SCAN_PATH) {
       payload = await processMobileWorkflowScan(client, orgId, worker, body)
+    } else if (requestUrl.pathname === MOBILE_JOB_CARDS_PATH) {
+      payload = {
+        jobCards: await readPublishedMobileJobCards(client, orgId, worker),
+        ok: true,
+        serverAt: new Date().toISOString(),
+      }
     } else {
       const snapshot = await buildMobileSnapshotFromDb(client, orgId, worker)
       payload = { ok: true, snapshot, serverAt: new Date().toISOString() }
@@ -3517,6 +3713,7 @@ function buildUserPayload(body) {
   const password = normalizeText(body?.password)
   const phone = normalizeText(body?.phone)
   const active = asPayloadBoolean(body?.active, true)
+  const photo = normalizeWorkerPhotoPayload(body)
   const rawWorkerNumberOverride = body?.workerNumberOverride
   const hasWorkerNumberOverride =
     rawWorkerNumberOverride !== undefined &&
@@ -3545,6 +3742,7 @@ function buildUserPayload(body) {
       phone,
       active,
       workerNumberOverride,
+      ...photo,
     },
     validationErrors,
   }
@@ -3600,6 +3798,7 @@ function buildWorkerProfileUpdatePayload(body) {
   const active = asPayloadBoolean(body?.active, true)
   const editedBy = normalizeText(body?.editedBy || body?.edit).slice(0, 160)
   const authUid = normalizeText(body?.authUid || body?.uid).slice(0, 128)
+  const photo = normalizeWorkerPhotoPayload(body)
 
   if (!orgId) validationErrors.push('Brak poprawnego orgId.')
   if (!login) validationErrors.push('Brak loginu pracownika.')
@@ -3622,6 +3821,7 @@ function buildWorkerProfileUpdatePayload(body) {
       active,
       editedBy,
       authUid,
+      ...photo,
     },
     validationErrors,
   }
@@ -3681,6 +3881,7 @@ async function readWorkerProfileForUpdate(client, orgId, login) {
             worker_type,
             active,
             phone,
+            photo_url,
             created_at,
             updated_at,
             edit
@@ -3728,9 +3929,57 @@ function mapWorkerProfileRow(row, orgId) {
     email: loginEmail,
     loginEmail,
     phone: normalizeText(row.phone),
+    photoUrl: normalizeText(row.photo_url),
+    profilePhotoUrl: normalizeText(row.photo_url),
     editedBy: normalizeText(row.edit),
     addedAt: row.created_at?.toISOString?.() || normalizeText(row.created_at),
     editedAt: row.updated_at?.toISOString?.() || normalizeText(row.updated_at),
+  }
+}
+
+async function listWorkersDirect(orgId, requesterUid) {
+  const client = await connectDbClient()
+  try {
+    await workerRepository.assertWorkerSchemaReady(client)
+    const membership = await getRequesterMembership(client, orgId, requesterUid)
+    if (!membership) {
+      throw workerProfileAccessError(null, 'odczytu pracownikow')
+    }
+
+    const result = await runWorkerProfileDbQuery(
+      client,
+      'list-workers-direct',
+      `select
+         w.login,
+         w.worker_id,
+         w.full_name,
+         w.login_email,
+         w.email,
+         w.auth_uid,
+         w.role,
+         w.worker_type,
+         coalesce(w.active, true) as active,
+         w.phone,
+         w.photo_url,
+         w.created_at,
+         w.updated_at,
+         w.edit,
+         o.owner_worker_id
+       from public.worker w
+       join public.organizations o
+         on o.org_id = w.org_id
+      where w.org_id = $1::text
+      order by lower(coalesce(nullif(w.full_name, ''), w.login)), lower(w.login)`,
+      [orgId],
+    )
+
+    return {
+      workers: result.rows.map((row) => mapWorkerProfileRow(row, orgId)),
+      ownerWorkerId: normalizeText(result.rows[0]?.owner_worker_id),
+      storage: 'database',
+    }
+  } finally {
+    client.release()
   }
 }
 
@@ -3769,6 +4018,8 @@ function mapDataConnectWorkerProfileRow(row, orgId) {
     email: loginEmail,
     loginEmail,
     phone: normalizeText(row.phone),
+    photoUrl: normalizeText(row.photoUrl ?? row.photo_url),
+    profilePhotoUrl: normalizeText(row.photoUrl ?? row.photo_url),
     editedBy: normalizeText(row.edit ?? row.updatedBy),
     addedAt: row.createdAt?.toISOString?.() || normalizeText(row.createdAt ?? row.created_at),
     editedAt: row.updatedAt?.toISOString?.() || normalizeText(row.updatedAt ?? row.updated_at),
@@ -3801,6 +4052,8 @@ function mapWorkerProfilePayload(payload, authUid = '') {
     email,
     loginEmail: email,
     phone: normalizeText(payload?.phone),
+    photoUrl: normalizeText(payload?.photoUrl),
+    profilePhotoUrl: normalizeText(payload?.photoUrl),
     editedBy: normalizeText(payload?.editedBy),
     editedAt: now,
   }
@@ -3976,6 +4229,7 @@ async function changeWorkerProfileLogin(client, currentWorker, payload, authUid,
        login_email,
        email,
        phone,
+       photo_url,
        role,
        worker_type,
        active,
@@ -3991,6 +4245,7 @@ async function changeWorkerProfileLogin(client, currentWorker, payload, authUid,
             $5::text,
             $5::text,
             nullif($6::text, ''),
+            nullif($11::text, ''),
             $7::text,
             $8::text,
             $9::boolean,
@@ -4012,6 +4267,7 @@ async function changeWorkerProfileLogin(client, currentWorker, payload, authUid,
       payload.workerType,
       payload.active,
       updatedBy,
+      payload.photoUrl,
     ],
   )
   if (!inserted.rowCount) {
@@ -4132,6 +4388,7 @@ async function changeWorkerProfileLogin(client, currentWorker, payload, authUid,
                 worker_type,
                 active,
                 phone,
+                photo_url,
                 created_at,
                 updated_at,
                 edit`,
@@ -4549,6 +4806,7 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
   const client = await connectDbClient()
   let createdAuthUser = null
   let transactionStarted = false
+  let uploadedPhoto = null
 
   try {
     await workerRepository.assertWorkerSchemaReady(client)
@@ -4581,6 +4839,11 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
 
     await assertFirebaseEmailAvailable(payload.email)
     createdAuthUser = await createFirebaseAuthUser(payload)
+    uploadedPhoto = await uploadWorkerProfilePhoto(payload, { uid: requesterUid })
+    if (uploadedPhoto?.url) {
+      payload.photoUrl = uploadedPhoto.url
+      payload.photoUrlChanged = true
+    }
 
     await client.query('begin')
     transactionStarted = true
@@ -4636,6 +4899,14 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
 
     await client.query('commit')
     transactionStarted = false
+    if (
+      normalizeText(currentWorker?.photo_url) &&
+      normalizeText(currentWorker.photo_url) !== normalizeText(updatedRow?.photo_url)
+    ) {
+      await deleteWorkerProfilePhotoObject(
+        workerProfilePhotoObjectFromUrl(currentWorker.photo_url, payload.orgId),
+      )
+    }
 
     return {
       uid: createdAuthUser.uid,
@@ -4651,6 +4922,7 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
       role: payload.role,
       workerType: payload.workerType,
       phone: payload.phone,
+      photoUrl: payload.photoUrl,
       active: payload.active,
       workerNumber,
       storage: 'database',
@@ -4667,6 +4939,7 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
     if (createdAuthUser?.uid) {
       await deleteFirebaseUserQuietly(createdAuthUser)
     }
+    await deleteWorkerProfilePhotoObject(uploadedPhoto)
     throw error
   } finally {
     client.release()
@@ -5339,6 +5612,7 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
   let authUpdated = false
   let authWarning = ''
   let authSnapshot = null
+  let uploadedPhoto = null
 
   try {
     await workerRepository.assertWorkerSchemaReady(client)
@@ -5435,6 +5709,12 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
         disabled: !payload.active,
       })
       authUpdated = true
+    }
+
+    uploadedPhoto = await uploadWorkerProfilePhoto(payload, decodedToken)
+    if (uploadedPhoto?.url) {
+      payload.photoUrl = uploadedPhoto.url
+      payload.photoUrlChanged = true
     }
 
     await client.query('begin')
@@ -5578,6 +5858,7 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
           normalizeText(rollbackError?.message)
       }
     }
+    await deleteWorkerProfilePhotoObject(uploadedPhoto)
     throw error
   } finally {
     client.release()
@@ -5597,7 +5878,7 @@ async function handleAdminWorkerProfileUpdateRequest(req, res) {
 
   let body
   try {
-    body = await readJsonBody(req)
+    body = await readJsonBody(req, MAX_WORKER_PROFILE_PHOTO_BODY_BYTES)
   } catch (error) {
     sendApiError(
       res,
@@ -6083,6 +6364,57 @@ async function handleAdminWorkerIdNextRequest(req, res, requestUrl) {
   }
 }
 
+async function handleAdminWorkersRequest(req, res, requestUrl) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+  if (req.method !== 'GET') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to GET.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifySessionContextFirebaseIdToken(token)
+  } catch (error) {
+    sendFirebaseVerificationError(res, error)
+    return
+  }
+
+  const orgId = normalizeOrgId(requestUrl.searchParams.get('orgId'))
+  if (!orgId) {
+    sendApiError(res, 400, 'INVALID_ORG_ID', 'Brak poprawnego orgId.')
+    return
+  }
+
+  try {
+    const data = await listWorkersDirect(orgId, decodedToken.uid)
+    sendJson(res, 200, { ok: true, data })
+  } catch (error) {
+    const databaseError = mapDatabaseConnectionError(error)
+    if (databaseError) {
+      sendApiError(res, databaseError.status, databaseError.code, databaseError.message)
+      return
+    }
+    const status = Number(error?.statusCode ?? 500)
+    sendApiError(
+      res,
+      Number.isFinite(status) ? status : 500,
+      normalizeText(error?.publicCode) || 'WORKERS_LIST_FAILED',
+      normalizeText(error?.publicMessage) || 'Nie udalo sie pobrac pracownikow.',
+      publicErrorDetails(error),
+    )
+  }
+}
+
 async function handleAdminUsersRequest(req, res) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
@@ -6097,7 +6429,7 @@ async function handleAdminUsersRequest(req, res) {
 
   let body
   try {
-    body = await readJsonBody(req)
+    body = await readJsonBody(req, MAX_WORKER_PROFILE_PHOTO_BODY_BYTES)
   } catch (error) {
     if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
       sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Ĺ»Ä…danie jest zbyt duĹĽe.')
@@ -7984,6 +8316,49 @@ async function readPortalScheduleOrders(client, orgId) {
   return sortPortalScheduleOrders(result.rows.map((row) => portalScheduleOrderFromDbRow(row)).filter(Boolean))
 }
 
+async function attachPortalJobCardState(client, orgId, orders = []) {
+  const sourceOrders = Array.isArray(orders) ? orders : []
+  if (!sourceOrders.length) return sourceOrders
+  const repository = new JobCardRepository(client)
+  let states
+  try {
+    states = await repository.readStatesForOrders({
+      orgId,
+      sourceOrderIds: sourceOrders.map((order) => order?.id ?? order?.idTask),
+    })
+  } catch (error) {
+    if (error?.publicCode === 'JOB_CARD_SCHEMA_MISSING') return sourceOrders
+    throw error
+  }
+  return sourceOrders.map((order) => {
+    const orderId = sanitizePortalScheduleOrderId(order?.id ?? order?.idTask)
+    const state = states.get(orderId)
+    if (!state?.draft && !state?.latestRevision) return order
+    return {
+      ...order,
+      ...(state?.draft
+        ? {
+            jobCardDraft: state.draft.payload,
+            jobCardDraftHash: state.draft.draftHash,
+            jobCardDraftStatus: state.draft.generationStatus,
+            jobCardDraftUpdatedAt: state.draft.updatedAt,
+            jobCardSchemaVersion: state.draft.schemaVersion,
+            jobCardValidation: state.draft.validation,
+          }
+        : {}),
+      jobCardPublication: state?.latestRevision
+        ? {
+            outputHash: state.latestRevision.outputHash,
+            publishedAt: state.latestRevision.publishedAt,
+            publishedByUid: state.latestRevision.publishedByUid,
+            revision: state.latestRevision.revision,
+            revisionId: state.latestRevision.revisionId,
+          }
+        : null,
+    }
+  })
+}
+
 async function upsertPortalScheduleOrderTask(client, dbRow) {
   const columns = PORTAL_SCHEDULE_ORDER_COLUMNS
   const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ')
@@ -8191,7 +8566,10 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
     })
 
     if (method === 'GET') {
-      const orders = await readPortalScheduleOrders(client, orgId)
+      const storedOrders = await readPortalScheduleOrders(client, orgId)
+      const orders = requesterRole === 'WORKER'
+        ? storedOrders
+        : await attachPortalJobCardState(client, orgId, storedOrders)
       sendJson(res, 200, { ok: true, data: { orders: activePortalScheduleOrders(orders) } })
       return
     }
@@ -8202,7 +8580,22 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
         sendJson(res, 200, { ok: true, data: { deletedOrderIds: [] } })
         return
       }
+      await client.query('begin')
+      await client.query(
+        `select pg_advisory_xact_lock(hashtext($1), hashtext('portal_schedule_orders'))`,
+        [orgId],
+      )
+      const jobCardSchemaResult = await client.query(
+        `select to_regclass('public.job_card_draft') is not null as draft_ready`,
+      )
+      if (jobCardSchemaResult.rows[0]?.draft_ready === true) {
+        await client.query(
+          'delete from public.job_card_draft where org_id = $1 and source_order_id = any($2::varchar[])',
+          [orgId, orderIds],
+        )
+      }
       await client.query('delete from public.task where org_id = $1 and id_task = any($2::varchar[])', [orgId, orderIds])
+      await client.query('commit')
       sendJson(res, 200, { ok: true, data: { deletedOrderIds: orderIds } })
       return
     }
@@ -8256,7 +8649,7 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
         error.publicMessage = `Nie znaleziono zlecenia: ${missingIds[0]}.`
         throw error
       }
-      const savedOrders = await readPortalScheduleOrders(client, orgId)
+      const savedOrders = await attachPortalJobCardState(client, orgId, await readPortalScheduleOrders(client, orgId))
       assertNoWorkerScheduleLocationConflicts(savedOrders)
       await client.query('commit')
       sendJson(res, 200, {
@@ -8283,11 +8676,36 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
     assertNoWorkerScheduleLocationConflicts(
       mergePortalScheduleOrders(existingOrders, incomingOrders),
     )
+    const jobCardRepository = new JobCardRepository(client)
+    const rawOrdersById = new Map(
+      rawOrders.map((order) => [
+        sanitizePortalScheduleOrderId(order?.id ?? order?.idTask),
+        order,
+      ]),
+    )
+    const containsJobCardDraft = rows.some((row) => {
+      const source = rawOrdersById.get(sanitizePortalScheduleOrderId(row?.id_task))
+      return source?.jobCardDraft && typeof source.jobCardDraft === 'object' && !Array.isArray(source.jobCardDraft)
+    })
+    if (containsJobCardDraft) {
+      await jobCardRepository.assertActiveOrganizationMember({ orgId, uid: requesterUid })
+      await jobCardRepository.assertSchemaReady()
+    }
     for (const row of rows) {
       await upsertPortalScheduleOrderTask(client, row)
+      const source = rawOrdersById.get(sanitizePortalScheduleOrderId(row?.id_task))
+      if (source?.jobCardDraft && typeof source.jobCardDraft === 'object' && !Array.isArray(source.jobCardDraft)) {
+        await jobCardRepository.saveDraft({
+          actorUid: requesterUid,
+          card: source.jobCardDraft,
+          orgId,
+          sourceOrderId: row.id_task,
+          sourceSnapshot: source,
+        })
+      }
     }
     await client.query('commit')
-    const savedOrders = await readPortalScheduleOrders(client, orgId)
+    const savedOrders = await attachPortalJobCardState(client, orgId, await readPortalScheduleOrders(client, orgId))
     sendJson(res, 200, { ok: true, data: { orders: activePortalScheduleOrders(savedOrders) } })
   } catch (error) {
     logPortalStorageError('portal/schedule-orders', error)
@@ -8306,6 +8724,110 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
       error?.statusCode || 500,
       normalizeText(error?.publicCode) || 'PORTAL_SCHEDULE_ORDERS_ERROR',
       normalizeText(error?.publicMessage) || error?.message || 'Nie udalo sie obsluzyc zlecen.',
+      error?.details,
+    )
+  } finally {
+    if (client) client.release()
+  }
+}
+
+async function handlePortalJobCardsRequest(req, res, requestUrl) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+  const method = String(req.method || 'GET').toUpperCase()
+  if (!['GET', 'POST'].includes(method)) {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolone metody to GET i POST.')
+    return
+  }
+  if (shouldUseLocalPortalScheduleOrderFileStorage()) {
+    sendApiError(
+      res,
+      503,
+      'JOB_CARD_DURABLE_STORAGE_REQUIRED',
+      'Publikacja Karty Zlecenia wymaga połączenia z trwałą bazą danych.',
+    )
+    return
+  }
+
+  let body = {}
+  if (method === 'POST') {
+    try {
+      body = await readJsonBody(req)
+    } catch (error) {
+      sendApiError(
+        res,
+        error?.message === 'REQUEST_BODY_TOO_LARGE' ? 413 : 400,
+        error?.message === 'REQUEST_BODY_TOO_LARGE' ? 'REQUEST_TOO_LARGE' : 'INVALID_JSON',
+        error?.message === 'REQUEST_BODY_TOO_LARGE' ? 'Żądanie jest zbyt duże.' : 'Niepoprawny JSON w żądaniu.',
+      )
+      return
+    }
+  }
+
+  const orgId = normalizeOrgId(method === 'GET' ? requestUrl.searchParams.get('orgId') : body?.orgId)
+  const sourceOrderId = sanitizePortalScheduleOrderId(
+    method === 'GET' ? requestUrl.searchParams.get('orderId') : body?.orderId,
+  )
+  if (!orgId || !sourceOrderId) {
+    sendApiError(res, 400, 'JOB_CARD_SCOPE_REQUIRED', 'Brak poprawnego orgId lub orderId.')
+    return
+  }
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status, mapped.code, mapped.message)
+    return
+  }
+
+  let client = null
+  try {
+    const requesterUid = normalizeText(decodedToken?.uid)
+    client = await connectDbClient()
+    const repository = new JobCardRepository(client)
+    await repository.assertActiveOrganizationMember({ orgId, uid: requesterUid })
+
+    if (method === 'GET') {
+      const state = await repository.readState({ orgId, sourceOrderId })
+      sendJson(res, 200, { ok: true, data: state })
+      return
+    }
+
+    if (normalizeText(body?.action).toUpperCase() !== 'PUBLISH') {
+      sendApiError(res, 400, 'JOB_CARD_ACTION_UNSUPPORTED', 'Obsługiwana akcja to PUBLISH.')
+      return
+    }
+    const result = await repository.publishStoredDraft({
+      acknowledgements: body?.acknowledgements,
+      actorUid: requesterUid,
+      expectedDraftHash: body?.expectedDraftHash,
+      orgId,
+      sourceOrderId,
+    })
+    sendJson(res, result.idempotent ? 200 : 201, { ok: true, data: result })
+  } catch (error) {
+    logPortalStorageError('portal/job-cards', error)
+    const mappedDb = mapDatabaseConnectionError(error)
+    if (mappedDb) {
+      sendApiError(res, mappedDb.status, mappedDb.code, mappedDb.message)
+      return
+    }
+    sendApiError(
+      res,
+      error?.statusCode || 500,
+      normalizeText(error?.publicCode) || 'PORTAL_JOB_CARD_ERROR',
+      normalizeText(error?.publicMessage) || error?.message || 'Nie udało się obsłużyć Karty Zlecenia.',
+      error?.details,
     )
   } finally {
     if (client) client.release()
@@ -8708,7 +9230,11 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
     })
     return
   }
-  if (requestUrl.pathname === MOBILE_STATE_PATH || requestUrl.pathname === MOBILE_SCAN_PATH) {
+  if (
+    requestUrl.pathname === MOBILE_STATE_PATH ||
+    requestUrl.pathname === MOBILE_SCAN_PATH ||
+    requestUrl.pathname === MOBILE_JOB_CARDS_PATH
+  ) {
     handleMobileWorkflowRequest(req, res, requestUrl).catch((error) => {
       sendMobileApiError(res, 500, 'MOBILE_WORKFLOW_ERROR', error?.message || 'Unexpected mobile workflow error.')
     })
@@ -8745,6 +9271,13 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
 
     handlePortalScheduleOrdersRequest(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PORTAL_SCHEDULE_ORDERS_ERROR', error?.message || 'Unexpected portal schedule orders error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === PORTAL_JOB_CARDS_PATH) {
+    handlePortalJobCardsRequest(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'PORTAL_JOB_CARD_ERROR', error?.message || 'Unexpected portal job-card error.')
     })
     return
   }
@@ -8853,6 +9386,13 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
 
     handleAdminWorkerProfileDeleteRequest(req, res).catch((error) => {
       sendApiError(res, 500, 'WORKER_PROFILE_DELETE_ERROR', error?.message || 'Unexpected worker profile delete error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === ADMIN_WORKERS_PATH) {
+    handleAdminWorkersRequest(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'WORKERS_LIST_ERROR', error?.message || 'Unexpected workers list error.')
     })
     return
   }

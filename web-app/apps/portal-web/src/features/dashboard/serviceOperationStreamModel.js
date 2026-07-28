@@ -111,6 +111,118 @@ function normalizedIdentity(value) {
   return text(value).toLowerCase()
 }
 
+function workdayDurationIdentity(row = {}) {
+  const workerId = text(row?.workerId ?? row?.worker_id)
+  if (workerId) return `id:${workerId}`
+
+  const workerLogin = normalizedIdentity(row?.workerLogin ?? row?.worker_login)
+  if (workerLogin) return `login:${workerLogin}`
+
+  const workerName = normalizedIdentity(
+    row?.workerDisplayName ?? row?.workerName ?? row?.worker_name,
+  )
+  return workerName ? `name:${workerName}` : ''
+}
+
+function mergedIntervalSeconds(intervals = []) {
+  const sorted = (Array.isArray(intervals) ? intervals : [])
+    .map((interval) => ({
+      startTs: timestamp(interval?.startTs),
+      stopTs: timestamp(interval?.stopTs),
+    }))
+    .filter((interval) => interval.startTs > 0 && interval.stopTs >= interval.startTs)
+    .sort((left, right) => left.startTs - right.startTs || left.stopTs - right.stopTs)
+
+  let totalMilliseconds = 0
+  let currentStart = 0
+  let currentStop = 0
+  sorted.forEach((interval) => {
+    if (!currentStart) {
+      currentStart = interval.startTs
+      currentStop = interval.stopTs
+      return
+    }
+    if (interval.startTs <= currentStop) {
+      currentStop = Math.max(currentStop, interval.stopTs)
+      return
+    }
+    totalMilliseconds += Math.max(0, currentStop - currentStart)
+    currentStart = interval.startTs
+    currentStop = interval.stopTs
+  })
+  if (currentStart) {
+    totalMilliseconds += Math.max(0, currentStop - currentStart)
+  }
+  return Math.max(0, Math.floor(totalMilliseconds / 1000))
+}
+
+/**
+ * Builds factual work time totals for the current day. Intervals that overlap
+ * are merged so duplicate revisions never increase a worker's displayed time.
+ * A duplicated display name that points at different persisted identities is
+ * marked ambiguous and must not be presented as one person's total.
+ */
+export function buildWorkerDayDurationIndex({
+  workdays = [],
+  nowTs = Date.now(),
+} = {}) {
+  const safeNowTs = timestamp(nowTs)
+  const workersByName = new Map()
+
+  ;(Array.isArray(workdays) ? workdays : []).forEach((row) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return
+    const workerName = text(
+      row?.workerDisplayName ?? row?.workerName ?? row?.worker_name,
+    )
+    const normalizedName = normalizedIdentity(workerName)
+    const identity = workdayDurationIdentity(row)
+    if (!normalizedName || !identity) return
+
+    const startTs = timestamp(row?.clippedStart ?? row?.startTs ?? row?.sourceStartAt)
+    const persistedStopTs = timestamp(
+      row?.clippedStop ?? row?.stopTs ?? row?.sourceStopAt,
+    )
+    const stopTs = row?.isRunning === true
+      ? Math.max(startTs, safeNowTs)
+      : persistedStopTs
+    if (!(startTs > 0) || stopTs < startTs) return
+
+    if (!workersByName.has(normalizedName)) {
+      workersByName.set(normalizedName, {
+        workerName,
+        identities: new Map(),
+      })
+    }
+    const entry = workersByName.get(normalizedName)
+    if (!entry.identities.has(identity)) {
+      entry.identities.set(identity, [])
+    }
+    entry.identities.get(identity).push({ startTs, stopTs })
+  })
+
+  const index = {}
+  workersByName.forEach((entry, normalizedName) => {
+    const identityDurations = [...entry.identities.entries()].map(
+      ([identity, intervals]) => ({
+        identity,
+        seconds: mergedIntervalSeconds(intervals),
+      }),
+    )
+    index[normalizedName] = identityDurations.length === 1
+      ? {
+          workerName: entry.workerName,
+          seconds: identityDurations[0].seconds,
+          ambiguous: false,
+        }
+      : {
+          workerName: entry.workerName,
+          seconds: null,
+          ambiguous: true,
+        }
+  })
+  return index
+}
+
 function observedWorkdayId(row = {}, startTs = 0) {
   const persistedId = text(row?.workdayId ?? row?.workday_id ?? row?.eventId ?? row?.event_id ?? row?.id)
   if (persistedId) return persistedId

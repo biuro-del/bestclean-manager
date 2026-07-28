@@ -12,6 +12,7 @@
     "test": "node --test",
     "migrate:workers": "node scripts/migrate-worker-model.js",
     "migrate:platform": "node scripts/migrate-worker-model.js",
+    "migrate:job-card-photo": "node scripts/migrate-job-card-photo.js",
     "platform-admin": "node scripts/platform-admin.js"
   },
   "keywords": [],

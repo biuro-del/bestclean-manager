@@ -32,6 +32,12 @@ service firebase.storage {
       allow update, delete: if false;
     }
 
+    match /orgs/{orgId}/worker-profiles/{workerLogin}/{fileName} {
+      allow read: if hasOrgAccess(orgId)
+        || (signedIn() && resource.metadata.createdByUid == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

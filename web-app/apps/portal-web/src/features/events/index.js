@@ -9,6 +9,10 @@ import {
   openEventWorkerKey,
 } from '../../services/openEventIntegrity'
 import { preserveUnchangedEventTimestamp } from './eventTimePolicy'
+import {
+  isOwnWorkdayEditBlocked,
+  OWN_WORKDAY_EDIT_DENIED_MESSAGE,
+} from '../workers/workdayEditAccess.js'
 
 export const route = 'events'
 export const viewId = 'view-events'
@@ -2372,6 +2376,53 @@ export function createEventsFeature(ctx) {
     return null
   }
 
+  function eventEditorSelectedWorker(workerLogin) {
+    const normalizedLogin = normalizeSearchText(workerLogin)
+    if (!normalizedLogin) {
+      return null
+    }
+
+    const matches = (Array.isArray(appState.workers) ? appState.workers : []).filter((worker) => {
+      const login = normalizeSearchText(worker?.login ?? worker?.workerLogin ?? worker?.id)
+      return Boolean(login && login === normalizedLogin)
+    })
+    return matches.length === 1 ? matches[0] : null
+  }
+
+  function eventEditorSelectedZone(zoneId) {
+    const normalizedZoneId = String(zoneId ?? '').trim()
+    if (!normalizedZoneId) {
+      return null
+    }
+
+    return (
+      (Array.isArray(appState.zones) ? appState.zones : [])
+        .map((zone) => mapZoneForView(zone))
+        .find((zone) => String(zone?.id ?? '').trim() === normalizedZoneId) || null
+    )
+  }
+
+  function eventEditorManualObjectValidationMessage(payload = {}) {
+    if (!payload.clientId) {
+      return 'Wybierz obiekt. Ręczne zdarzenie nie może zostać zapisane bez obiektu.'
+    }
+    if (!payload.zoneId) {
+      return 'Wybierz strefę należącą do obiektu. To ona zapisuje powiązanie zdarzenia z obiektem.'
+    }
+
+    const selectedZone = eventEditorSelectedZone(payload.zoneId)
+    if (!selectedZone) {
+      return 'Wybrana strefa nie istnieje lub nie została załadowana. Odśwież dane i wybierz ją ponownie.'
+    }
+
+    const zoneClientId = String(selectedZone?.clientId ?? '').trim()
+    if (!zoneClientId || zoneClientId !== String(payload.clientId).trim()) {
+      return 'Wybrana strefa nie należy do wskazanego obiektu. Wybierz właściwą strefę.'
+    }
+
+    return ''
+  }
+
   async function eventEditorFindOtherOpenStatus(payload) {
     const orgId = String(appState.session?.orgId ?? '').trim()
     if (!orgId) {
@@ -2454,6 +2505,25 @@ export function createEventsFeature(ctx) {
     if (!payload.workerLogin) {
       alert('Wybierz pracownika.')
       return
+    }
+    const targetWorker = eventEditorSelectedWorker(payload.workerLogin)
+    if (
+      targetWorker &&
+      isOwnWorkdayEditBlocked({
+        session: appState.session,
+        workers: appState.workers,
+        targetWorker,
+      })
+    ) {
+      alert(OWN_WORKDAY_EDIT_DENIED_MESSAGE)
+      return
+    }
+    if (isCreateMode) {
+      const objectValidationMessage = eventEditorManualObjectValidationMessage(payload)
+      if (objectValidationMessage) {
+        alert(objectValidationMessage)
+        return
+      }
     }
     if (payload.eventKind === 'none') {
       alert('Podaj Start, Stop albo oba pola jednoczesnie.')

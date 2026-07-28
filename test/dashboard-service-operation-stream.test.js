@@ -40,6 +40,60 @@ test('podglad ogranicza liczbe pozycji bez zmiany kolejnosci', async () => {
   )
 })
 
+test('czas dzienny pracownika nie jest zawyzany przez nakladajace sie zapisy', async () => {
+  const { buildWorkerDayDurationIndex } = await modelModule
+  const index = buildWorkerDayDurationIndex({
+    nowTs: new Date('2026-07-27T12:00:00+02:00').getTime(),
+    workdays: [
+      {
+        workerId: 'WORKER-1',
+        workerName: 'Jan Kowalski',
+        startTs: new Date('2026-07-27T08:00:00+02:00').getTime(),
+        stopTs: new Date('2026-07-27T10:00:00+02:00').getTime(),
+      },
+      {
+        workerId: 'WORKER-1',
+        workerName: 'Jan Kowalski',
+        startTs: new Date('2026-07-27T09:30:00+02:00').getTime(),
+        stopTs: new Date('2026-07-27T11:00:00+02:00').getTime(),
+      },
+      {
+        workerId: 'WORKER-1',
+        workerName: 'Jan Kowalski',
+        startTs: new Date('2026-07-27T11:30:00+02:00').getTime(),
+        stopTs: 0,
+        isRunning: true,
+      },
+    ],
+  })
+
+  assert.equal(index['jan kowalski'].ambiguous, false)
+  assert.equal(index['jan kowalski'].seconds, 3.5 * 60 * 60)
+})
+
+test('ten sam podpis dla roznych identyfikatorow nie udaje jednego czasu dziennego', async () => {
+  const { buildWorkerDayDurationIndex } = await modelModule
+  const index = buildWorkerDayDurationIndex({
+    workdays: [
+      {
+        workerId: 'WORKER-1',
+        workerName: 'Jan Kowalski',
+        startTs: 1000,
+        stopTs: 2000,
+      },
+      {
+        workerId: 'WORKER-2',
+        workerName: 'Jan Kowalski',
+        startTs: 3000,
+        stopTs: 4000,
+      },
+    ],
+  })
+
+  assert.equal(index['jan kowalski'].ambiguous, true)
+  assert.equal(index['jan kowalski'].seconds, null)
+})
+
 test('otwarty CLEAN bez planu staje sie aktywnoscia faktyczna bez wymyslonego postepu', async () => {
   const { buildObservedServiceOperationCandidates } = await modelModule
   const result = buildObservedServiceOperationCandidates({

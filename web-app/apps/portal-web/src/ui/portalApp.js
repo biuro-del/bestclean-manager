@@ -3564,10 +3564,10 @@ function showLoginCredentials({ showResetAction = false } = {}) {
   if (mfaEnrollmentPanel) mfaEnrollmentPanel.hidden = true
   setLoginResetActionVisible(showResetAction)
   if (loginTitle) {
-    loginTitle.textContent = 'Witaj!'
+    loginTitle.textContent = 'Witaj ponownie'
   }
   if (loginCopy) {
-    loginCopy.textContent = 'Zaloguj si\u0119 do portalu Cleanzi.'
+    loginCopy.textContent = 'Zaloguj si\u0119, aby przej\u015b\u0107 do centrum dowodzenia Cleanzi.'
   }
 }
 
@@ -3791,6 +3791,10 @@ function formatLoginError(error) {
 
   if (isPasswordResetEligibleLoginError(error)) {
     return 'Nieprawidłowy email lub hasło.'
+  }
+
+  if (authErrorText.includes('feature is not initialized')) {
+    return 'Portal nie dokończył uruchamiania. Odśwież stronę i spróbuj ponownie.'
   }
 
   return error instanceof Error ? error.message : 'Błąd logowania.'
@@ -6285,7 +6289,9 @@ async function activatePortalSession(session, router, { restoreRoute = false } =
     await hydrateSections(activeOrgId)
   }
 
-  startDashboardAutoRefresh()
+  if (dashboardFeature && normalizeNavigationRoute(appState.currentRoute) === 'dashboard') {
+    startDashboardAutoRefresh()
+  }
 }
 
 function OLD_bindLogin(router) {
@@ -7242,7 +7248,7 @@ export function mountPortalApp() {
         applyPortalTheme(STYLE_FALLBACK_ID)
         syncSettingsPermissions()
         syncProfitabilityEntryPermissions()
-        setLoginError(message)
+        setLoginError(formatLoginError(error))
       }
     } else {
       stopDashboardAutoRefresh()
