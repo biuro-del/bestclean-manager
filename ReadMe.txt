@@ -4420,3 +4420,31 @@ Weryfikacja:
 Granice:
 - Zmiana jest lokalnym kandydatem i nie zostala wdrozona na produkcje.
 - Produkcyjny rollout wymaga osobnej dokladnej zgody `OK PRODUKCJA CLZ-PORTAL-20260729-LOGIN-HERO-CARD-03`.
+
+Data: 2026-07-29 12:54 CEST
+Autor: AI Codex
+Temat: Produkcyjny rollout kompaktowej planszy i jednoznacznego przekazu logowania
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-PORTAL-20260729-LOGIN-HERO-CARD-03`.
+- Zakres ograniczono do frontendu Firebase App Hosting backendu `cleanzi-01` w projekcie `iclean-room`, regionie `europe-west4`.
+Wydanie:
+- Branch: `codex/portal-release-20260727`.
+- Commit produkcyjny: `c6e580881cd9f5e67826f07b1207e6233ce5dc04` (`style(portal): rebalance login hero card`).
+- Commit wypchnieto do repozytorium `biuro-del/Cleanzi-01`, powiazanego z App Hosting.
+- Build App Hosting: `build-2026-07-29-004`, stan `READY`.
+- Rollout App Hosting: `build-2026-07-29-004`, stan `SUCCEEDED`.
+- Ruch produkcyjny: 100% na `build-2026-07-29-004`.
+- Norton przechwytywal lokalne polaczenia TLS narzedzi Google. Nie wylaczano weryfikacji TLS; publiczny certyfikat `Norton Web/Mail Shield Root` przekazano tylko procesowi Firebase w tej sesji.
+Weryfikacja:
+- `npm --prefix web-app run lint` - OK.
+- `npm --prefix web-app run build` - OK.
+- `https://portal.cleanzi.pl/`: HTTP 200.
+- `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`: HTTP 200.
+- Produkcyjny DOM zawiera jednoznaczny przekaz: `SYSTEM DO ZARZADZANIA PROCESEM SPRZATANIA`, `Sprzatanie. Pod kontrola.` oraz opis planowania, monitoringu realizacji i kontroli jakosci.
+- Widok 1280 x 720: plansza 400 x 167 px, formularz 410 x 547 px, brak poziomego przewijania.
+- Widok 390 x 844: plansza 250 x 67 px, formularz 362 x 500 px, brak poziomego przewijania.
+- Ekran sprawdzono wizualnie w przegladarce na produkcji w wariancie desktopowym i mobilnym.
+- Konsola produkcyjnego ekranu logowania: 0 bledow i 0 ostrzezen.
+- Logi Cloud Run backendu `cleanzi-01` z 30 minut obejmujacych rollout: 0 wpisow o poziomie `ERROR` lub wyzszym.
+Rollback:
+- Poprzedni zatwierdzony build to `build-2026-07-29-003`, commit `14f7a955869bb60d6cb69483c4942d1450d21ba0`.
