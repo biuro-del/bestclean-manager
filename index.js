@@ -41,6 +41,25 @@ const {
   hasPlatformOwnerClaim,
 } = require('./platform-policy')
 const { buildFirebaseRestDecodedToken } = require('./firebase-rest-token-policy')
+const { correlateCleanStartToPlan } = require('./service-execution-correlation')
+const {
+  eventCorrelationSchema,
+  insertMobileCleanEvent,
+  readPublicEventColumns,
+  readRawTaskPlansForOrganization,
+  resolveMobileZoneQrRows,
+  warsawOccurrenceDateYmd,
+} = require('./service-execution-repository')
+const {
+  resolveAuthenticatedMobileWorker,
+  resolveAuthoritativeMobileScanAt,
+} = require('./mobile-workflow-security-policy')
+const {
+  assertNoUnresolvedOpenEvents,
+  resolveSingleOpenCycle,
+} = require('./mobile-open-cycle-policy')
+const { resolveSingleOpenWorkday } = require('./mobile-open-workday-policy')
+const { mobileCorrelationRolloutDecision } = require('./mobile-correlation-rollout-policy')
 
 function isTrue(value) {
   return ['1', 'true', 'yes', 'tak'].includes(
@@ -2212,8 +2231,31 @@ function mapMobileEventRow(row) {
   if (!row) return null
   const classified = classifyMobileZone(row.function_name)
   const functionName = normalizeText(row.function_name)
+  const plannedDurationMinutes =
+    row.planned_duration_minutes == null || row.planned_duration_minutes === ''
+      ? null
+      : Number(row.planned_duration_minutes)
+  const planSnapshotVersion =
+    row.plan_snapshot_version == null || row.plan_snapshot_version === ''
+      ? null
+      : Number(row.plan_snapshot_version)
   return {
     eventId: normalizeText(row.event_id),
+    eventType: normalizeText(row.event_type),
+    matchStatus: normalizeText(row.match_status),
+    matchMethod: normalizeText(row.match_method),
+    matchReason: normalizeText(row.match_reason),
+    taskId: normalizeText(row.task_id),
+    occurrenceDateYmd: normalizeText(row.occurrence_date_ymd),
+    serviceBlockId: normalizeText(row.service_block_id),
+    allocationId: normalizeText(row.allocation_id),
+    workSlotKey: normalizeText(row.work_slot_key),
+    matchedAt: mobileIso(row.matched_at),
+    planSnapshotVersion: Number.isFinite(planSnapshotVersion) ? planSnapshotVersion : null,
+    plannedStartAt: mobileIso(row.planned_start_at),
+    plannedEndAt: mobileIso(row.planned_end_at),
+    plannedDurationMinutes: Number.isFinite(plannedDurationMinutes) ? plannedDurationMinutes : null,
+    taskUpdatedAtSnapshot: mobileIso(row.task_updated_at_snapshot),
     zoneId: normalizeText(row.zone_id),
     zoneName: normalizeText(row.zone_name),
     zoneKind: classified.kind,
@@ -2317,36 +2359,42 @@ async function assertMobileRequester(client, orgId, decodedToken) {
   return membership
 }
 
-async function resolveMobileWorker(client, orgId, body, decodedToken) {
-  const requestedLogin = normalizeText(body?.workerLogin || body?.login)
-  const requestedWorkerId = normalizeText(body?.workerId).toUpperCase()
-  const email = normalizeEmail(decodedToken?.email) || normalizeText(decodedToken?.email).toLowerCase()
-  const emailLocal = email.includes('@') ? email.split('@')[0] : ''
-  const lookupLogin = requestedLogin || emailLocal
-
+async function resolveMobileWorker(client, orgId, body, decodedToken, membership) {
+  const uid = normalizeText(decodedToken?.uid)
+  const email = normalizeEmail(decodedToken?.email)
+  const membershipWorkerId = normalizeText(
+    membership?.worker_id ??
+      membership?.membership_worker_id ??
+      membership?.workerId,
+  )
   const result = await client.query(
     `select login, worker_id, full_name, login_email, email, auth_uid, role, worker_type, active
        from public.worker
       where org_id = $1
         and (
-          lower(login) = lower($2)
-          or upper(coalesce(worker_id, '')) = upper($3)
-          or lower(coalesce(login_email, '')) = lower($4)
-          or lower(coalesce(email, '')) = lower($4)
+          (nullif($2::text, '') is not null and auth_uid = $2::text)
+          or (nullif($3::text, '') is not null and upper(coalesce(worker_id, '')) = upper($3::text))
+          or (
+            nullif($4::text, '') is not null
+            and (
+              lower(coalesce(login_email, '')) = lower($4::text)
+              or lower(coalesce(email, '')) = lower($4::text)
+              or lower(login) = lower($4::text)
+            )
+          )
         )
-      order by case when lower(login) = lower($2) then 0 else 1 end, login asc
-      limit 1`,
-    [orgId, lookupLogin, requestedWorkerId || lookupLogin, email],
+      order by login asc`,
+    [orgId, uid, membershipWorkerId, email],
   )
 
-  const row = result.rows[0]
-  if (!row) {
-    const error = new Error('MOBILE_WORKER_NOT_FOUND')
-    error.statusCode = 404
-    error.publicCode = 'WORKER_NOT_FOUND'
-    error.publicMessage = 'Nie znaleziono pracownika dla tej sesji.'
-    throw error
-  }
+  const row = resolveAuthenticatedMobileWorker({
+    rows: result.rows,
+    tokenUid: uid,
+    tokenEmail: email,
+    membershipWorkerId,
+    requestedWorkerId: body?.workerId,
+    requestedLogin: body?.workerLogin ?? body?.login,
+  })
   if (row.active === false) {
     const error = new Error('MOBILE_WORKER_INACTIVE')
     error.statusCode = 403
@@ -2390,27 +2438,27 @@ async function findMobileZoneByQr(client, orgId, qrCode) {
           lower(z.id) = lower($2)
           or regexp_replace(lower(z.id), '[^a-z0-9]+', '', 'g') = $3
         )
-      order by z.id asc
-      limit 1`,
+      order by z.id asc`,
     [orgId, code, compact],
   )
-  return mapMobileZoneRow(result.rows[0])
+  return mapMobileZoneRow(resolveMobileZoneQrRows(result.rows, code))
 }
 
 async function fetchActiveMobileWorkday(client, orgId, workerLogin) {
   const result = await client.query(
-    `select *
-       from public.workday
+    `select w.*,
+            ((w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date) as is_today_warsaw
+       from public.workday w
       where org_id = $1
-        and lower(worker_login) = lower($2)
-        and coalesce(status, 'RUNNING') <> 'CLOSED'
+        and lower(btrim(worker_login)) = lower(btrim($2))
+        and upper(btrim(coalesce(status, 'RUNNING'))) <> 'CLOSED'
         and end_at is null
-        and (start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date
       order by start_at desc nulls last, updated_at desc nulls last
-      limit 1`,
+      limit 2
+      for update`,
     [orgId, workerLogin],
   )
-  return result.rows[0] ?? null
+  return resolveSingleOpenWorkday(result.rows)
 }
 
 async function fetchMobileWorkdays(client, orgId, workerLogin) {
@@ -2426,23 +2474,51 @@ async function fetchMobileWorkdays(client, orgId, workerLogin) {
   return result.rows.map(mapMobileWorkdayRow).filter(Boolean)
 }
 
-async function fetchActiveMobileCycle(client, orgId, workerLogin, workdayId) {
-  if (!workdayId) return null
+async function fetchOpenMobileCycles(client, orgId, workerLogin) {
   const result = await client.query(
     `select e.*, z.zone as zone_name, z.function as function_name, z.location, z.client_id, c.name as client_name
        from public.event e
        left join public.zone z on z.org_id = e.org_id and z.id = e.zone_id
        left join public.client c on c.org_id = z.org_id and c.client_id = z.client_id
       where e.org_id = $1
-        and lower(e.worker_login) = lower($2)
-        and e.workday_id = $3
-        and coalesce(e.status, 'RUNNING') <> 'CLOSED'
+        and lower(btrim(e.worker_login)) = lower(btrim($2))
+        and upper(btrim(coalesce(e.status, 'RUNNING'))) <> 'CLOSED'
         and e.end_at is null
+        and upper(btrim(coalesce(e.event_type, ''))) = 'CLEAN'
       order by e.start_at desc nulls last, e.updated_at desc nulls last
-      limit 1`,
-    [orgId, workerLogin, workdayId],
+      limit 20`,
+    [orgId, workerLogin],
   )
-  return result.rows[0] ?? null
+  return Array.isArray(result.rows) ? result.rows : []
+}
+
+async function fetchUnresolvedMobileCycles(client, orgId, workerLogin) {
+  const result = await client.query(
+    `select e.*, z.zone as zone_name, z.function as function_name, z.location, z.client_id, c.name as client_name
+       from public.event e
+       left join public.workday w
+         on w.org_id = e.org_id
+        and w.workday_id = e.workday_id
+        and lower(btrim(w.worker_login)) = lower(btrim(e.worker_login))
+       left join public.zone z on z.org_id = e.org_id and z.id = e.zone_id
+       left join public.client c on c.org_id = z.org_id and c.client_id = z.client_id
+      where e.org_id = $1
+        and lower(btrim(e.worker_login)) = lower(btrim($2))
+        and upper(btrim(coalesce(e.status, 'RUNNING'))) <> 'CLOSED'
+        and e.end_at is null
+        and nullif(btrim(e.event_type), '') is null
+        and (
+          w.workday_id is null
+          or (
+            w.end_at is null
+            and upper(btrim(coalesce(w.status, 'RUNNING'))) <> 'CLOSED'
+          )
+        )
+      order by e.start_at desc nulls last, e.updated_at desc nulls last
+      limit 20`,
+    [orgId, workerLogin],
+  )
+  return Array.isArray(result.rows) ? result.rows : []
 }
 
 async function fetchMobileCycleHistory(client, orgId, workerLogin) {
@@ -2588,7 +2664,36 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
   const activeWorkdayRaw = await fetchActiveMobileWorkday(client, orgId, worker.login)
   const workdays = await fetchMobileWorkdays(client, orgId, worker.login)
   const cycleHistory = await fetchMobileCycleHistory(client, orgId, worker.login)
-  const activeCycleRaw = await fetchActiveMobileCycle(client, orgId, worker.login, activeWorkdayRaw?.workday_id)
+  const availableEventColumns = await readPublicEventColumns(client)
+  const eventTypeReadable = availableEventColumns.has('event_type')
+  const openCycleRows = eventTypeReadable
+    ? await fetchOpenMobileCycles(client, orgId, worker.login)
+    : []
+  const unresolvedCycleRows = eventTypeReadable
+    ? await fetchUnresolvedMobileCycles(client, orgId, worker.login)
+    : []
+  let activeCycleRaw = null
+  let openCycleIntegrity = eventTypeReadable
+    ? null
+    : {
+        code: 'MOBILE_CORRELATION_SCHEMA_INCOMPLETE',
+        message: 'Status CLEAN jest niedostępny do czasu wdrożenia jawnego event_type. START i STOP pozostają dostępne.',
+      }
+  if (eventTypeReadable) {
+    try {
+      assertNoUnresolvedOpenEvents(unresolvedCycleRows)
+      activeCycleRaw = resolveSingleOpenCycle(openCycleRows, activeWorkdayRaw?.workday_id)
+    } catch (error) {
+      if (Number(error?.statusCode) !== 409) {
+        throw error
+      }
+      openCycleIntegrity = {
+        code: normalizeText(error?.publicCode) || 'OPEN_CLEAN_INTEGRITY_CONFLICT',
+        message: normalizeText(error?.publicMessage) || 'Wykryto niespojne otwarte statusy CLEAN.',
+        ...(error?.publicDetails && typeof error.publicDetails === 'object' ? error.publicDetails : {}),
+      }
+    }
+  }
   const activePause = await fetchActiveMobilePause(client, orgId, worker.login, activeWorkdayRaw?.workday_id)
   await upsertMobileRuntimeState(client, orgId, worker, activeWorkdayRaw, activeCycleRaw)
 
@@ -2608,6 +2713,7 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
     activePause,
     pauseTotalSec: Number(activeWorkday?.pauseTotalSec || 0),
     activeCycle,
+    openCycleIntegrity,
     summary: buildMobileSummary(activeWorkdayRaw),
     workdayEvents: buildMobileWorkdayEvents(workdays),
     workdays,
@@ -2642,9 +2748,9 @@ async function closeMobileOpenCycles(client, orgId, workerLogin, workdayId, reas
        from public.event e
        left join public.zone z on z.org_id = e.org_id and z.id = e.zone_id
       where e.org_id = $1
-        and lower(e.worker_login) = lower($2)
+        and lower(btrim(e.worker_login)) = lower(btrim($2))
         and e.workday_id = $3
-        and coalesce(e.status, 'RUNNING') <> 'CLOSED'
+        and upper(btrim(coalesce(e.status, 'RUNNING'))) <> 'CLOSED'
         and e.end_at is null
       order by e.start_at asc nulls last`,
     [orgId, workerLogin, workdayId],
@@ -2685,24 +2791,73 @@ async function createMobileWorkday(client, orgId, worker, zone, startedAt = new 
 async function createMobileCycle(client, orgId, worker, workday, zone, startedAt = new Date(), comment = '', gpsText = '') {
   const eventId = makeMobileId('EV')
   const eventComment = appendMobileComment(comment, gpsText)
-  const result = await client.query(
-    `insert into public.event (
-       org_id, event_id, workday_id, zone_id, worker_login, worker_name,
-       start_at, end_at, duration_sec, status, comment, start_event_id, created_at, updated_at
-     ) values ($1,$2,$3,$4,$5,$6,$7,null,null,'RUNNING',$8,null,now(),now())
-     returning *`,
-    [
+  const occurrenceDateYmd = warsawOccurrenceDateYmd(startedAt)
+  const rawTaskPlans = await readRawTaskPlansForOrganization(client, orgId)
+  const correlation = correlateCleanStartToPlan({
+    cleanStart: {
+      orgId,
+      workerId: worker.workerId,
+      workerLogin: worker.login,
+      occurrenceDateYmd,
+      clientId: zone.clientId,
+      zoneId: zone.id,
+      scannedAt: startedAt,
+      timeZone: 'Europe/Warsaw',
+    },
+    tasks: rawTaskPlans,
+  })
+
+  return insertMobileCleanEvent(
+    client,
+    {
       orgId,
       eventId,
-      workday.workday_id,
-      zone.id,
-      worker.login,
-      worker.name,
+      workdayId: workday.workday_id,
+      zoneId: zone.id,
+      workerLogin: worker.login,
+      workerName: worker.name,
       startedAt,
-      eventComment,
-    ],
+      comment: eventComment,
+    },
+    correlation,
   )
-  return result.rows[0]
+}
+
+function assertMobileCorrelationEnabled(worker) {
+  const rollout = mobileCorrelationRolloutDecision({
+    enabled: process.env.MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED,
+    canaryWorkerIds: process.env.MOBILE_SERVICE_EXECUTION_CORRELATION_CANARY_WORKER_IDS,
+    worker,
+  })
+  if (!rollout.allowed) {
+    const error = new Error('MOBILE_CORRELATION_NOT_ENABLED')
+    error.statusCode = 503
+    error.publicCode =
+      rollout.reason === 'CANARY_RESTRICTED'
+        ? 'MOBILE_CORRELATION_CANARY_RESTRICTED'
+        : 'MOBILE_CORRELATION_NOT_ENABLED'
+    error.publicMessage =
+      'Mobilny zapis CLEAN jest chwilowo wstrzymany do czasu kontrolowanego uruchomienia korelacji z planem.'
+    throw error
+  }
+}
+
+async function assertMobileCorrelationSchemaReady(client) {
+  const availableColumns = await readPublicEventColumns(client)
+  const schema = eventCorrelationSchema(availableColumns)
+  if (schema.supported) {
+    return
+  }
+
+  const error = new Error('MOBILE_CORRELATION_SCHEMA_INCOMPLETE')
+  error.statusCode = 503
+  error.publicCode = 'MOBILE_CORRELATION_SCHEMA_INCOMPLETE'
+  error.publicMessage =
+    'Mobilny zapis CLEAN jest chwilowo wstrzymany, ponieważ baza nie ma kompletnego modelu korelacji. Najpierw trzeba wdrożyć migrację schematu.'
+  error.publicDetails = {
+    missingColumns: schema.missingColumns,
+  }
+  throw error
 }
 
 async function closeMobileWorkday(client, orgId, workday, stopZone, endAt = new Date(), comment = '', gpsText = '') {
@@ -2816,7 +2971,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
     return { ...existingResult, idempotent: true }
   }
 
-  const scannedAt = mobileIso(body?.clientScannedAt) ? new Date(body.clientScannedAt) : new Date()
+  const scannedAt = resolveAuthoritativeMobileScanAt({ serverNow: new Date() })
   const comment = normalizeText(body?.comment)
   const zone = await findMobileZoneByQr(client, orgId, qrCode)
   if (!zone) {
@@ -2828,7 +2983,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
   }
 
   let activeWorkday = await fetchActiveMobileWorkday(client, orgId, worker.login)
-  let activeCycle = await fetchActiveMobileCycle(client, orgId, worker.login, activeWorkday?.workday_id)
+  let activeCycle = null
   let action = 'NOOP'
   let message = 'Brak zmian.'
   const zoneIsSpecial = isMobileSpecialZone(zone)
@@ -2879,6 +3034,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
       ? `Zapisano na serwerze. Zakonczono dzien pracy. Doliczono ${zone.stopGraceMin} min.`
       : 'Zapisano na serwerze. Zakonczono dzien pracy.'
   } else {
+    await assertMobileCorrelationSchemaReady(client)
     if (!activeWorkday) {
       if (!mobileZoneAllowsAutoWorkday(zone)) {
         const error = new Error('MOBILE_WORKDAY_NOT_ACTIVE')
@@ -2888,8 +3044,14 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
         throw error
       }
       requireScanGps('CLEAN', zoneIsSpecial)
+      assertMobileCorrelationEnabled(worker)
       activeWorkday = await createMobileWorkday(client, orgId, worker, zone, scannedAt, '')
     }
+
+    const unresolvedCycleRows = await fetchUnresolvedMobileCycles(client, orgId, worker.login)
+    assertNoUnresolvedOpenEvents(unresolvedCycleRows)
+    const openCycleRows = await fetchOpenMobileCycles(client, orgId, worker.login)
+    activeCycle = resolveSingleOpenCycle(openCycleRows, activeWorkday?.workday_id)
 
     if (activeCycle && isMobileEventOpen(activeCycle)) {
       const activeCycleIsSpecial = isMobileSpecialEventRow(activeCycle)
@@ -2905,16 +3067,15 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
         }
       } else {
         requireScanGps('CLEAN', activeCycleIsSpecial || zoneIsSpecial)
-        await closeMobileOpenCycles(
+        assertMobileCorrelationEnabled(worker)
+        await closeMobileEvent(
           client,
           orgId,
-          worker.login,
-          activeWorkday.workday_id,
+          activeCycle,
           'QR_SWITCH',
           scannedAt,
           comment,
-          scanGpsNote('CLEAN_STOP'),
-          { gpsSpecialOnly: true },
+          scanGpsNote('CLEAN_STOP', activeCycleIsSpecial),
         )
         await createMobileCycle(client, orgId, worker, activeWorkday, zone, scannedAt, comment, scanGpsNote('CLEAN_START', zoneIsSpecial))
         action = 'SWITCH_ZONE'
@@ -2922,6 +3083,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
       }
     } else {
       requireScanGps('CLEAN', zoneIsSpecial)
+      assertMobileCorrelationEnabled(worker)
       await createMobileCycle(client, orgId, worker, activeWorkday, zone, scannedAt, comment, scanGpsNote('CLEAN_START', zoneIsSpecial))
       action = 'START_ZONE'
       message = `Zapisano na serwerze. Rozpoczeto sprzatanie: ${zone.name || zone.id}.`
@@ -2938,6 +3100,60 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
   }
   await storeMobileScanCommand(client, orgId, worker.login, clientActionId, qrCode, action, resultPayload)
   return resultPayload
+}
+
+function mapMobileIntegrityDatabaseError(error) {
+  const dbCode = normalizeText(error?.code).toUpperCase()
+  const constraint = normalizeText(error?.constraint)
+  const message = normalizeText(error?.message).toUpperCase()
+
+  if (
+    dbCode === '23505' &&
+    (constraint === 'event_single_open_clean_per_worker' || message.includes('OPEN_CLEAN_EVENT_EXISTS'))
+  ) {
+    return {
+      status: 409,
+      code: 'OPEN_CLEAN_EVENT_EXISTS',
+      message: 'Pracownik ma już otwarty status CLEAN. Najpierw uzupełnij STOP albo rozstrzygnij konflikt.',
+    }
+  }
+
+  if (
+    dbCode === '23505' &&
+    (constraint === 'workday_single_open_per_worker' || message.includes('OPEN_WORKDAY_EXISTS'))
+  ) {
+    return {
+      status: 409,
+      code: 'OPEN_WORKDAY_EXISTS',
+      message: 'Pracownik ma już otwarty dzień pracy. Najpierw uzupełnij STOP.',
+    }
+  }
+
+  if (dbCode === '23514' && message.includes('OPEN_EVENT_TYPE_REQUIRED')) {
+    return {
+      status: 409,
+      code: 'OPEN_EVENT_TYPE_REQUIRED',
+      message: 'Nie można zapisać otwartego zdarzenia bez jawnego typu. Wymagana jest weryfikacja danych.',
+    }
+  }
+
+  if (dbCode === '23514' && message.includes('OPEN_EVENT_WORKER_REQUIRED')) {
+    return {
+      status: 409,
+      code: 'OPEN_EVENT_WORKER_REQUIRED',
+      message: 'Nie można zapisać otwartego CLEAN bez jednoznacznie przypisanego pracownika.',
+    }
+  }
+
+  if (dbCode === '23514' && message.includes('OPEN_WORKDAY_WORKER_REQUIRED')) {
+    return {
+      status: 409,
+      code: 'OPEN_WORKDAY_WORKER_REQUIRED',
+      message: 'Nie można otworzyć dnia pracy bez jednoznacznie przypisanego pracownika.',
+    }
+  }
+
+  return null
 }
 
 async function handleMobileWorkflowRequest(req, res, requestUrl) {
@@ -2983,8 +3199,8 @@ async function handleMobileWorkflowRequest(req, res, requestUrl) {
   const client = await connectDbClient()
   try {
     await client.query('begin')
-    await assertMobileRequester(client, orgId, decodedToken)
-    const worker = await resolveMobileWorker(client, orgId, body, decodedToken)
+    const membership = await assertMobileRequester(client, orgId, decodedToken)
+    const worker = await resolveMobileWorker(client, orgId, body, decodedToken, membership)
     await client.query('select pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))', [orgId, worker.login])
 
     let payload
@@ -3004,12 +3220,13 @@ async function handleMobileWorkflowRequest(req, res, requestUrl) {
       // Ignore rollback errors.
     }
     const dbMapped = mapDatabaseConnectionError(error)
+    const integrityMapped = mapMobileIntegrityDatabaseError(error)
     const rawDbCode = normalizeText(error?.code).toUpperCase()
     const rawDbMessage = normalizeText(error?.message).slice(0, 240)
     const diagnosticMessage = rawDbCode && rawDbMessage
       ? `Blad bazy ${rawDbCode}: ${rawDbMessage}`
       : ''
-    const status = Number(error?.statusCode || dbMapped?.status || 500)
+    const status = Number(error?.statusCode || integrityMapped?.status || dbMapped?.status || 500)
     const details = {
       ...(error?.publicDetails && typeof error.publicDetails === 'object' ? error.publicDetails : {}),
       ...(publicErrorDetails(error) || {}),
@@ -3018,8 +3235,8 @@ async function handleMobileWorkflowRequest(req, res, requestUrl) {
     sendMobileApiError(
       res,
       Number.isFinite(status) ? status : 500,
-      normalizeText(error?.publicCode) || dbMapped?.code || 'MOBILE_WORKFLOW_ERROR',
-      normalizeText(error?.publicMessage) || dbMapped?.message || diagnosticMessage || 'Nie udalo sie obsluzyc mobilnego workflow.',
+      normalizeText(error?.publicCode) || integrityMapped?.code || dbMapped?.code || 'MOBILE_WORKFLOW_ERROR',
+      normalizeText(error?.publicMessage) || integrityMapped?.message || dbMapped?.message || diagnosticMessage || 'Nie udalo sie obsluzyc mobilnego workflow.',
       Object.keys(details).length ? details : undefined,
     )
   } finally {
@@ -3153,7 +3370,8 @@ async function getRequesterMembership(client, orgId, uid) {
                and o.owner_worker_id = m.worker_id then 'OWNER'
               else m.role
             end as role,
-            m.status
+            m.status,
+            m.worker_id
        from public.organization_member m
        join public.organizations o on o.org_id = m.org_id
       where m.org_id = $1::text
@@ -6590,6 +6808,30 @@ function portalScheduleOrderServicePayloadFromOrder(order = {}) {
   if (!Array.isArray(serviceBlocks) || !serviceBlocks.length) {
     return null
   }
+  const recurrenceEndDate = normalizePortalScheduleOrderDate(
+    order.repeatUntil ??
+      order.repeatEndDate ??
+      order.recurrenceEndDate ??
+      order.seriesEndDate ??
+      order.repeatUntilYmd,
+  )
+  const recurrenceSkippedDates = [
+    ...(Array.isArray(order.recurrenceSkippedDates) ? order.recurrenceSkippedDates : []),
+    ...(Array.isArray(order.recurrenceExceptionDates) ? order.recurrenceExceptionDates : []),
+    ...(Array.isArray(order.skipDates) ? order.skipDates : []),
+  ]
+    .map((value) => normalizePortalScheduleOrderDate(value))
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .sort()
+  const recurrenceSourceOrderId = portalScheduleOrderNullableText(
+    order.sourceOrderId ?? order.recurrenceSourceOrderId ?? order.parentOrderId,
+    180,
+  )
+  const recurrenceOriginalDateYmd = normalizePortalScheduleOrderDate(
+    order.recurrenceOriginalDateYmd ??
+      order.recurrenceOverrideDateYmd ??
+      order.occurrenceDateYmd,
+  )
   const objectAccessWindows = portalScheduleOrderFirstJsonValue(
     [],
     order.objectAccessWindows,
@@ -6600,6 +6842,12 @@ function portalScheduleOrderServicePayloadFromOrder(order = {}) {
   return {
     marker: PORTAL_SCHEDULE_ORDER_SERVICE_BLOCKS_PAYLOAD_MARKER,
     version: portalScheduleOrderInteger(order.serviceModelVersion ?? order.service_model_version, 2) || 2,
+    recurrenceEndDate: recurrenceEndDate || null,
+    recurrenceSkippedDates,
+    recurrenceSourceOrderId,
+    recurrenceOverride: Boolean(order.recurrenceOverride),
+    recurrenceOverrideKind: portalScheduleOrderNullableText(order.recurrenceOverrideKind, 40),
+    recurrenceOriginalDateYmd: recurrenceOriginalDateYmd || null,
     serviceBlocks,
     objectAccessWindows: Array.isArray(objectAccessWindows) ? objectAccessWindows : [],
   }
@@ -6669,8 +6917,52 @@ function portalScheduleOrderAllocationFromItem(item, index = 0) {
   }
   if (!item || typeof item !== 'object' || Array.isArray(item)) return null
   const rawKey = portalScheduleOrderNullableText(item.key ?? item.workerKey ?? item.id, 128)
-  const workerId = portalScheduleOrderWorkerId(item.workerId ?? item.worker_id ?? item.id ?? rawKey)
+  const hasExplicitSlotIdentity = Boolean(normalizeText(
+    item.serviceBlockId ??
+      item.service_block_id ??
+      item.teamId ??
+      item.team_id ??
+      item.slotId ??
+      item.slot_id ??
+      item.workSlotId ??
+      item.work_slot_id ??
+      item.allocationId ??
+      item.allocation_id,
+  ))
+  const workerId = portalScheduleOrderWorkerId(
+    item.workerId ?? item.worker_id ?? (hasExplicitSlotIdentity ? '' : item.id ?? rawKey),
+  )
   const name = portalScheduleOrderNullableText(item.name ?? item.workerName ?? item.worker_label ?? item.workerLabel ?? item.label, 240)
+  const serviceBlockId =
+    portalScheduleOrderNullableText(item.serviceBlockId ?? item.service_block_id ?? item.teamId ?? item.team_id, 180) || ''
+  const slotId =
+    portalScheduleOrderNullableText(
+      item.slotId ??
+        item.slot_id ??
+        item.workSlotId ??
+        item.work_slot_id ??
+        item.allocationId ??
+        item.allocation_id ??
+        (serviceBlockId ? item.id : ''),
+      180,
+    ) || ''
+  const allocationId =
+    portalScheduleOrderNullableText(item.allocationId ?? item.allocation_id ?? slotId, 180) || ''
+  const workSlotKey =
+    portalScheduleOrderNullableText(
+      item.workSlotKey ??
+        item.work_slot_key ??
+        item.slotKey ??
+        item.slot_key ??
+        ((serviceBlockId || slotId) ? rawKey : ''),
+      255,
+    ) || ''
+  const startTime = normalizePortalScheduleOrderTime(item.startTime ?? item.start_time ?? item.planStartTime ?? item.plan_start_time)
+  const endTime = normalizePortalScheduleOrderTime(item.endTime ?? item.end_time ?? item.planEndTime ?? item.plan_end_time)
+  const dateYmd = normalizePortalScheduleOrderDate(item.dateYmd ?? item.date_ymd ?? item.planDateYmd ?? item.plan_date_ymd)
+  const endDateYmd = normalizePortalScheduleOrderDate(
+    item.endDateYmd ?? item.end_date_ymd ?? item.planEndDateYmd ?? item.plan_end_date_ymd,
+  )
   const loweredKey = normalizeText(rawKey || workerId || name).toLowerCase()
   const isBuffer = loweredKey === 'buffer' || loweredKey === 'bufor' || normalizeText(name).toLowerCase() === 'bufor'
   const row = portalScheduleOrderInteger(item.row ?? item.rowIndex, index)
@@ -6680,7 +6972,20 @@ function portalScheduleOrderAllocationFromItem(item, index = 0) {
     key: isBuffer ? 'buffer' : portalScheduleOrderWorkerKey(rawKey || workerId),
     name: name || (isBuffer ? 'BUFOR' : workerId),
     workerLogin: portalScheduleOrderNullableText(item.workerLogin ?? item.worker_login ?? item.login, 80) || '',
-    allocationMinutes: portalScheduleOrderInteger(item.allocationMinutes ?? item.minutes, null),
+    workerKey: portalScheduleOrderNullableText(item.workerKey ?? item.worker_key, 128) || '',
+    serviceBlockId,
+    allocationId,
+    slotId,
+    workSlotKey,
+    dateYmd,
+    planDateYmd: dateYmd,
+    endDateYmd,
+    planEndDateYmd: endDateYmd,
+    startTime,
+    planStartTime: startTime,
+    endTime,
+    planEndTime: endTime,
+    allocationMinutes: portalScheduleOrderInteger(item.allocationMinutes ?? item.allocation_minutes ?? item.minutes ?? item.workMinutes, null),
   }
 }
 
@@ -6815,6 +7120,25 @@ function portalScheduleOrderFromDbRow(row = {}) {
   const accessWindows = portalScheduleOrderJsonValue(row.access_windows ?? row.accessWindows, [])
   const repeatWeekdays = portalScheduleOrderJsonValue(row.repeat_weekdays ?? row.repeatWeekdays, [])
   const servicePayload = portalScheduleOrderServicePayloadFromRules(row.weekly_schedule_rules ?? row.weeklyScheduleRules)
+  const recurrenceEndDate = normalizePortalScheduleOrderDate(
+    row.recurrence_end_date ??
+      row.recurrenceEndDate ??
+      row.repeat_until ??
+      row.repeatUntil ??
+      row.repeat_end_date ??
+      row.repeatEndDate ??
+      servicePayload?.recurrenceEndDate ??
+      servicePayload?.recurrence_end_date,
+  )
+  const recurrenceSkippedDates = (Array.isArray(servicePayload?.recurrenceSkippedDates)
+    ? servicePayload.recurrenceSkippedDates
+    : []
+  )
+    .map((value) => normalizePortalScheduleOrderDate(value))
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .sort()
+  const recurrenceSourceOrderId = portalScheduleOrderNullableText(servicePayload?.recurrenceSourceOrderId, 180)
+  const recurrenceOriginalDateYmd = normalizePortalScheduleOrderDate(servicePayload?.recurrenceOriginalDateYmd)
   const weeklyScheduleRules = portalScheduleOrderRulesWithoutServicePayload(row.weekly_schedule_rules ?? row.weeklyScheduleRules)
   const serviceBlocks = Array.isArray(servicePayload?.serviceBlocks) ? servicePayload.serviceBlocks : []
   const objectAccessWindows = Array.isArray(servicePayload?.objectAccessWindows) ? servicePayload.objectAccessWindows : accessWindows
@@ -6878,6 +7202,22 @@ function portalScheduleOrderFromDbRow(row = {}) {
     repeatEvery: portalScheduleOrderInteger(row.repeat_every ?? row.repeatEvery, null),
     repeatUnit: portalScheduleOrderNullableText(row.repeat_unit ?? row.repeatUnit, 16),
     repeatWeekdays: Array.isArray(repeatWeekdays) ? repeatWeekdays : [],
+    repeatUntil: recurrenceEndDate,
+    repeatEndDate: recurrenceEndDate,
+    recurrenceEndDate,
+    seriesEndDate: recurrenceEndDate,
+    repeatUntilYmd: recurrenceEndDate,
+    recurrenceSkippedDates,
+    recurrenceExceptionDates: recurrenceSkippedDates,
+    skipDates: recurrenceSkippedDates,
+    sourceOrderId: recurrenceSourceOrderId,
+    recurrenceSourceOrderId,
+    parentOrderId: recurrenceSourceOrderId,
+    recurrenceOverride: Boolean(servicePayload?.recurrenceOverride),
+    recurrenceOverrideKind: portalScheduleOrderNullableText(servicePayload?.recurrenceOverrideKind, 40),
+    recurrenceOriginalDateYmd,
+    recurrenceOverrideDateYmd: recurrenceOriginalDateYmd,
+    occurrenceDateYmd: recurrenceOriginalDateYmd,
     weeklyScheduleRules: Array.isArray(weeklyScheduleRules) ? weeklyScheduleRules : [],
     weeklyPattern: Array.isArray(weeklyScheduleRules) ? weeklyScheduleRules : [],
     repeatDayRules: Array.isArray(weeklyScheduleRules) ? weeklyScheduleRules : [],

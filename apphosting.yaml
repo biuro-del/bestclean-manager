@@ -80,3 +80,11 @@ env:
     value: database
     availability:
       - RUNTIME
+  - variable: MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: MOBILE_SERVICE_EXECUTION_CORRELATION_CANARY_WORKER_IDS
+    value: "W001"
+    availability:
+      - RUNTIME

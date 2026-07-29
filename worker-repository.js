@@ -16,7 +16,9 @@ const REQUIRED_WORKER_SCHEMA = {
   worker: {
     org_id: null,
     login: 80,
+    login_normalized: 80,
     worker_id: 128,
+    worker_id_normalized: 128,
     full_name: null,
     login_email: null,
     auth_uid: 128,
@@ -47,8 +49,8 @@ const REQUIRED_WORKER_SCHEMA = {
 }
 
 const REQUIRED_WORKER_INDEXES = [
-  'worker_org_login_ci_uidx',
-  'worker_org_worker_id_ci_uidx',
+  'worker_org_login_normalized_uidx',
+  'worker_org_worker_id_normalized_uidx',
 ]
 
 const OPTIONAL_WORKER_RELATIONS = [
