@@ -3,7 +3,7 @@ export const portalLayoutTemplate = `
   <section class="login-visual" aria-labelledby="loginHeroTitle">
     <img
       class="login-hero-image"
-      src="/login-hero-operations-v1.webp"
+      src="/login-hero-beach-v2.webp"
       alt=""
       width="1536"
       height="1024"

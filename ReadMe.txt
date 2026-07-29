@@ -4291,3 +4291,26 @@ Postflight:
 Granice testu:
 - Nie wykonywano produkcyjnej mutacji zdjecia, szkicu ani rewizji Karty Zlecenia, aby nie tworzyc danych demonstracyjnych w realnej firmie.
 - Kolejnym bezpiecznym testem jest kontrolowany zapis na wskazanym pracowniku i wskazanym zleceniu po zalogowaniu uzytkownika portalu.
+
+Data: 2026-07-29
+Autor: AI Codex
+Temat: Testowa fotografia wakacyjna ekranu logowania
+Powod:
+- Uzytkownik poprosil o tymczasowa, wyraznie wakacyjna grafike do testow wizualnych ekranu logowania.
+Zmieniono lokalnie:
+- Wygenerowano premium fotografie doroslej kobiety w eleganckim stroju kapielowym, odpoczywajacej z koktajlem na tropikalnej plazy pod palmami.
+- Pierwszy, zbyt seksualizowany prompt zostal odrzucony przez system bezpieczenstwa generatora; finalny obraz zachowuje atrakcyjny charakter w estetyce luksusowej kampanii wakacyjnej bez erotycznego kadrowania.
+- Obraz zapisano jako `login-hero-beach-v2.webp`, 1536 x 1024 px, 138 032 B.
+- Ekran logowania wskazuje nowy, wersjonowany asset. Poprzedni `login-hero-operations-v1.webp` pozostaje w repozytorium jako bezpieczny rollback.
+Pliki:
+- `web-app/public/login-hero-beach-v2.webp`
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `ReadMe.txt`
+Weryfikacja:
+- `npm --prefix web-app run lint` - OK.
+- `npm --prefix web-app run build` - OK.
+- `git diff --check` - OK (wylacznie informacyjne ostrzezenia o konwersji LF/CRLF).
+- Plik WebP zostal odczytany i sprawdzony wizualnie w rozdzielczosci 1536 x 1024 px.
+- Automatyczne otwarcie lokalnego ekranu logowania zostalo zablokowane przez polityke bezpieczenstwa przegladarki; nie stosowano obejsc.
+Granice:
+- Zmiana pozostaje kandydatem lokalnym. Nie wykonano pusha ani wdrozenia produkcyjnego.
