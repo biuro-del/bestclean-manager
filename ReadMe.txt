@@ -4266,3 +4266,28 @@ Weryfikacja:
 Granice:
 - Na tym etapie nie wykonano pusha, rolloutu App Hosting ani zmiany ruchu produkcyjnego.
 - Produkcyjne wdrozenie portalu wymaga osobnej dokladnej zgody `OK PRODUKCJA CLZ-PORTAL-20260728-JOBCARD-PHOTO-01`.
+
+Data: 2026-07-29 09:23 CEST
+Autor: AI Codex
+Temat: Produkcyjny rollout portalu Karty Zlecenia i zdjec pracownikow
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-PORTAL-20260728-JOBCARD-PHOTO-01`.
+- Zakres ograniczono do Firebase App Hosting backendu `cleanzi-01` w projekcie `iclean-room`, regionie `europe-west4`.
+- Poza zakresem pozostaly Data Connect, reguly Storage, aplikacja mobilna oraz jakiekolwiek dodatkowe zmiany bazy.
+Wydanie:
+- Branch: `codex/portal-release-20260727`.
+- Commit: `8fed73b11507df446bf53934495df0ae61e22733`.
+- Build: `build-2026-07-29-001`, stan `READY`.
+- Rollout: `build-2026-07-29-001`, stan `SUCCEEDED`.
+- Rewizja Cloud Run: `cleanzi-01-build-2026-07-29-001`, stan `CONDITION_SUCCEEDED`.
+- Najnowsza gotowa rewizja jest rowna najnowszej utworzonej rewizji i obsluguje 100% ruchu.
+Postflight:
+- `https://portal.cleanzi.pl/`: HTTP 200.
+- `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`: HTTP 200.
+- Produkcyjny ekran logowania renderuje nowy widok, obraz `login-hero-operations-v1.webp` ma naturalna szerokosc 1536 px, a konsola przegladarki nie zawiera bledow.
+- `GET /api/admin/workers` bez tokenu zwraca 401 `UNAUTHENTICATED`.
+- `GET /api/portal/job-cards` z pelnym zakresem i bez tokenu zwraca 401 `UNAUTHENTICATED`.
+- Logi nowej rewizji od momentu wdrozenia: 0 wpisow o poziomie `ERROR` lub wyzszym.
+Granice testu:
+- Nie wykonywano produkcyjnej mutacji zdjecia, szkicu ani rewizji Karty Zlecenia, aby nie tworzyc danych demonstracyjnych w realnej firmie.
+- Kolejnym bezpiecznym testem jest kontrolowany zapis na wskazanym pracowniku i wskazanym zleceniu po zalogowaniu uzytkownika portalu.
