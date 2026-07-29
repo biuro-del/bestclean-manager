@@ -20629,25 +20629,25 @@ body.calendar-events-popup-dragging *{
 
 #loginScreen .login-visual-story{
   position:absolute;
-  right:clamp(26px, 4vw, 58px);
-  bottom:clamp(26px, 4vw, 58px);
-  left:clamp(26px, 4vw, 58px);
+  right:auto;
+  bottom:clamp(22px, 3vw, 38px);
+  left:clamp(22px, 3vw, 38px);
   z-index:2;
-  width:min(520px, calc(100% - 52px));
-  padding:26px 28px 24px;
+  width:min(360px, calc(100% - 44px));
+  padding:15px 17px 14px;
   border:1px solid rgba(255, 255, 255, .36);
-  border-radius:24px;
-  background:linear-gradient(135deg, rgba(4, 22, 52, .54), rgba(4, 22, 52, .38));
-  box-shadow:0 20px 48px rgba(3, 16, 39, .18);
+  border-radius:18px;
+  background:linear-gradient(135deg, rgba(4, 22, 52, .46), rgba(4, 22, 52, .28));
+  box-shadow:0 16px 36px rgba(3, 16, 39, .16);
   color:#fff;
-  backdrop-filter:blur(8px) saturate(115%);
+  backdrop-filter:blur(6px) saturate(112%);
 }
 
 #loginScreen .login-visual-kicker{
   display:block;
-  margin-bottom:11px;
+  margin-bottom:7px;
   color:#70ebcf;
-  font-size:11px;
+  font-size:10px;
   font-weight:850;
   letter-spacing:.13em;
   line-height:1.2;
@@ -20657,37 +20657,19 @@ body.calendar-events-popup-dragging *{
   margin:0;
   color:#fff;
   font-family:"Inter", "Public Sans", "Manrope", "Segoe UI", system-ui, sans-serif;
-  font-size:clamp(38px, 4vw, 58px);
+  font-size:clamp(28px, 2.5vw, 34px);
   font-weight:850;
   letter-spacing:-.045em;
-  line-height:.98;
+  line-height:1.01;
 }
 
 #loginScreen .login-visual-story p{
-  max-width:440px;
-  margin:16px 0 0;
-  color:rgba(255, 255, 255, .8);
-  font-size:15px;
-  font-weight:550;
-  line-height:1.55;
-}
-
-#loginScreen .login-visual-points{
-  display:flex;
-  flex-wrap:wrap;
-  gap:8px;
-  margin-top:19px;
-}
-
-#loginScreen .login-visual-points span{
-  padding:7px 11px;
-  border:1px solid rgba(255, 255, 255, .22);
-  border-radius:999px;
-  background:rgba(255, 255, 255, .1);
-  color:#fff;
+  max-width:320px;
+  margin:8px 0 0;
+  color:rgba(255, 255, 255, .84);
   font-size:11px;
-  font-weight:750;
-  line-height:1;
+  font-weight:550;
+  line-height:1.42;
 }
 
 #loginScreen .login-panel{
@@ -20860,7 +20842,7 @@ body.calendar-events-popup-dragging *{
   }
 
   #loginScreen .login-visual-story{
-    width:min(440px, calc(100% - 48px));
+    width:min(340px, calc(100% - 44px));
   }
 }
 
@@ -20890,21 +20872,17 @@ body.calendar-events-popup-dragging *{
     right:22px;
     bottom:20px;
     left:auto;
-    width:min(410px, calc(100% - 44px));
-    padding:18px 20px;
-    border-radius:18px;
+    width:min(330px, calc(100% - 44px));
+    padding:14px 16px;
+    border-radius:16px;
   }
 
   #loginScreen .login-visual-story h2{
-    font-size:34px;
+    font-size:28px;
   }
 
   #loginScreen .login-visual-story p{
     display:none;
-  }
-
-  #loginScreen .login-visual-points{
-    margin-top:13px;
   }
 
   #loginScreen .login-panel{
@@ -20939,20 +20917,20 @@ body.calendar-events-popup-dragging *{
   }
 
   #loginScreen .login-visual-story{
-    right:16px;
-    bottom:14px;
-    width:min(310px, calc(100% - 32px));
-    padding:14px 16px;
+    right:12px;
+    bottom:12px;
+    width:min(250px, calc(100% - 24px));
+    padding:10px 12px;
+    border-radius:14px;
   }
 
-  #loginScreen .login-visual-kicker,
-  #loginScreen .login-visual-points{
+  #loginScreen .login-visual-kicker{
     display:none;
   }
 
   #loginScreen .login-visual-story h2{
-    font-size:28px;
-    line-height:1;
+    font-size:22px;
+    line-height:1.02;
   }
 
   #loginScreen .login-panel{

@@ -4394,3 +4394,29 @@ Weryfikacja:
 - Logi rewizji `cleanzi-01-build-2026-07-29-003`: 0 wpisow o poziomie `ERROR` lub wyzszym.
 Rollback:
 - Poprzedni zatwierdzony build to `build-2026-07-29-002`, commit `ced87258738dc4fe8bc577ace70fe186a528c3f2`.
+
+Data: 2026-07-29 12:20 CEST
+Autor: AI Codex
+Temat: Lokalny kandydat kompaktowej planszy i jednoznacznego przekazu ekranu logowania
+Zakres:
+- Plansza na fotografii zostala zmniejszona z okolo 520 x 285 px do okolo 360 x 154 px w widoku 1280 x 720.
+- Powierzchnia planszy spadla o okolo 63%, dzieki czemu odslania wiecej brzucha, bioder i nog postaci.
+- Usunieto drugorzedne etykiety `Pracownicy`, `Obiekty`, `Realizacja`.
+- Nowy przekaz: `SYSTEM DO ZARZADZANIA PROCESEM SPRZATANIA`, `Sprzatanie. Pod kontrola.` oraz krotki opis planowania, monitoringu realizacji i kontroli jakosci.
+- Opis formularza logowania wskazuje wprost, ze Cleanzi jest systemem do zarzadzania procesem sprzatania.
+- Dla 390 x 844 plansza ma okolo 250 x 67 px i nie powoduje poziomego przewijania.
+Pliki:
+- `web-app/apps/portal-web/src/index.css`
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `design-qa.md`
+Weryfikacja:
+- Produkcyjny widok i lokalnego kandydata porownano 1:1 przy 1280 x 720.
+- Design QA: passed; brak problemow P0/P1/P2.
+- Konsola lokalnego ekranu logowania: 0 bledow.
+- `npm --prefix web-app run lint` - OK.
+- `npm --prefix web-app run build` - OK.
+- `npm test` - 815/815 OK.
+- Zmiana nie dotyka backendu, bazy, autoryzacji ani danych firmy.
+Granice:
+- Zmiana jest lokalnym kandydatem i nie zostala wdrozona na produkcje.
+- Produkcyjny rollout wymaga osobnej dokladnej zgody `OK PRODUKCJA CLZ-PORTAL-20260729-LOGIN-HERO-CARD-03`.

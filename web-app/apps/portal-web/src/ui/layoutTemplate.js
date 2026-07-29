@@ -15,14 +15,9 @@ export const portalLayoutTemplate = `
       <span>Portal operacyjny</span>
     </div>
     <div class="login-visual-story">
-      <span class="login-visual-kicker">SYSTEM, KT&Oacute;RY PROWADZI DZIE&#323;</span>
-      <h2 id="loginHeroTitle">Wszystko idzie.<br />W dobrym kierunku.</h2>
-      <p>Cleanzi porz&#261;dkuje zlecenia, obecno&#347;&#263; i post&#281;p na bie&#380;&#261;co, aby praca p&#322;ynnie realizowa&#322;a si&#281; zgodnie z planem.</p>
-      <div class="login-visual-points" aria-label="Najważniejsze obszary portalu">
-        <span>Pracownicy</span>
-        <span>Obiekty</span>
-        <span>Realizacja</span>
-      </div>
+      <span class="login-visual-kicker">SYSTEM DO ZARZ&#260;DZANIA PROCESEM SPRZ&#260;TANIA</span>
+      <h2 id="loginHeroTitle">Sprz&#261;tanie.<br />Pod kontrol&#261;.</h2>
+      <p>Planuj zlecenia, monitoruj realizacj&#281; i kontroluj jako&#347;&#263; &mdash; wszystko w jednym miejscu.</p>
     </div>
   </section>
   <section class="login-panel">
@@ -34,7 +29,7 @@ export const portalLayoutTemplate = `
       <div class="login-brand">
         <span class="login-card-kicker">PORTAL OPERACYJNY</span>
         <h1 class="login-title" id="loginTitle">Witaj ponownie</h1>
-        <p class="login-copy" id="loginCopy">Zaloguj si&#281;, aby przej&#347;&#263; do centrum dowodzenia Cleanzi.</p>
+        <p class="login-copy" id="loginCopy">Zaloguj si&#281; do systemu zarz&#261;dzania procesem sprz&#261;tania Cleanzi.</p>
       </div>
 
       <div id="loginCredentialsPanel">

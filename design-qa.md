@@ -45,6 +45,55 @@ final result: passed
 
 ---
 
+# Design QA — kompaktowa karta logowania Cleanzi
+
+- Source visual truth: `C:\Users\rafal\Desktop\app to react\artifacts\login-card-qa\production-before-1280x720.jpg`
+- Implementation URL: `http://127.0.0.1:5173/`
+- Implementation screenshot: `C:\Users\rafal\Desktop\app to react\artifacts\login-card-qa\local-final-1280x720.jpg`
+- Full-view comparison: `C:\Users\rafal\Desktop\app to react\artifacts\login-card-qa\comparison-production-left-local-right.jpg`
+- Focused card comparison: `C:\Users\rafal\Desktop\app to react\artifacts\login-card-qa\comparison-card-focus-production-left-local-right.jpg`
+- Viewport and state: niezalogowany ekran portalu, 1280 × 720 CSS px.
+- Source and implementation pixels: 1280 × 720.
+- Density normalization: bez skalowania; lokalny `devicePixelRatio = 1`, a oba obrazy porównawcze mają identyczny rozmiar pikselowy.
+
+## Findings
+
+- Brak aktywnych problemów P0, P1 lub P2.
+- Karta komunikatu zmalała z około 520 × 285 px do około 360 × 154 px. Jej powierzchnia jest mniejsza o około 63%, dlatego odsłania brzuch, biodra i nogi postaci.
+- Zastąpiono ogólny slogan jednoznacznym komunikatem `SYSTEM DO ZARZĄDZANIA PROCESEM SPRZĄTANIA` oraz krótkim opisem planowania, monitoringu realizacji i kontroli jakości.
+- Usunięto trzy drugorzędne etykiety, które powiększały kartę bez dodawania kluczowej informacji.
+
+## Required fidelity surfaces
+
+- Fonts and typography: zachowano rodzinę, wagę i hierarchię Cleanzi; mniejszy nagłówek pozostaje czytelny i mieści się w dwóch liniach.
+- Spacing and layout rhythm: karta ma mniejsze wymiary, padding, promień i cień; nie powoduje poziomego przepełnienia.
+- Colors and visual tokens: zachowano paletę Cleanzi oraz szklaną kartę; obniżona opacity lepiej odsłania fotografię bez utraty kontrastu tekstu.
+- Image quality and asset fidelity: fotografia hero, jej proporcje, ostrość i kadrowanie pozostają bez zmian.
+- Copy and content: przekaz opisuje produkt wprost jako system do zarządzania procesem sprzątania.
+
+## Responsive evidence
+
+- 900 × 900: karta około 330 × 118 px, brak poziomego przepełnienia.
+- 390 × 844: karta około 250 × 67 px, brak poziomego przepełnienia; fotografia zajmuje mniej miejsca, ale twarz i sylwetka pozostają widoczne.
+
+## Interaction and technical QA
+
+- Główne pola email i hasła oraz przycisk `Zaloguj` są pojedyncze, widoczne i aktywne.
+- Konsola lokalnego ekranu logowania: 0 błędów.
+- ESLint: passed.
+- Production build: passed.
+- Pełny zestaw testów: 815/815 passed.
+
+## Comparison history
+
+- Pierwszy wariant po zwężeniu: P2 — nagłówek nadal łamał się na trzy linie, więc karta zajmowała zbyt dużą wysokość i częściowo zasłaniała biodro.
+- Fix: szerokość ograniczono do 360 px, nagłówek do 34 px, opis do 11 px, a drugorzędne etykiety usunięto.
+- Kontrola po poprawce: karta ma około 37% pierwotnej powierzchni, nagłówek mieści się w dwóch liniach, sylwetka jest wyraźnie bardziej odsłonięta, a przekaz produktu jest jednoznaczny.
+
+final result: passed
+
+---
+
 # Design QA — premium ekran logowania
 
 - Source visual truth: `C:\Users\rafal\AppData\Local\Temp\codex-clipboard-07baf063-d121-442d-9ff2-55e45f4f09e3.png` oraz wygenerowany asset hero `C:\Users\rafal\.codex\generated_images\019f8611-d2eb-7520-afe2-15652be5b2cf\call_L2yU7OG0REGOqIDdZXAs3E2x.png`.
