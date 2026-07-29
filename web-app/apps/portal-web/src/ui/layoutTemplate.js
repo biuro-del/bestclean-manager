@@ -15,9 +15,9 @@ export const portalLayoutTemplate = `
       <span>Portal operacyjny</span>
     </div>
     <div class="login-visual-story">
-      <span class="login-visual-kicker">OPERACJE W CZASIE RZECZYWISTYM</span>
-      <h2 id="loginHeroTitle">Tw&oacute;j zesp&oacute;ł.<br />Jeden rytm pracy.</h2>
-      <p>Zlecenia, obecność, jakość i rentowność w jednym spokojnym widoku.</p>
+      <span class="login-visual-kicker">SYSTEM, KT&Oacute;RY PROWADZI DZIE&#323;</span>
+      <h2 id="loginHeroTitle">Wszystko idzie.<br />W dobrym kierunku.</h2>
+      <p>Cleanzi porz&#261;dkuje zlecenia, obecno&#347;&#263; i post&#281;p na bie&#380;&#261;co, aby praca p&#322;ynnie realizowa&#322;a si&#281; zgodnie z planem.</p>
       <div class="login-visual-points" aria-label="Najważniejsze obszary portalu">
         <span>Pracownicy</span>
         <span>Obiekty</span>

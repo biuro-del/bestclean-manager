@@ -4346,3 +4346,24 @@ Postflight:
 Rollback:
 - Poprzedni zatwierdzony build to `build-2026-07-29-001`, commit `8fed73b11507df446bf53934495df0ae61e22733`.
 - Plik `login-hero-operations-v1.webp` pozostaje w repozytorium i moze zostac ponownie podpiety w osobnym, autoryzowanym wydaniu.
+
+Data: 2026-07-29 11:45 CEST
+Autor: AI Codex
+Temat: Bardziej przezroczysta plansza i nowe haslo ekranu logowania
+Zakres lokalnego kandydata:
+- Zmieniono ciemne tlo planszy tekstowej z krycia 82% na polprzezroczysty gradient o kryciu 54-38%, aby fotografia pozostawala wyraznie widoczna.
+- Zmniejszono rozmycie tla z 14 px do 8 px, dodano delikatna saturacje i lzejszy cien przy zachowaniu kontrastu bialego tekstu.
+- Nowe haslo: `Wszystko idzie. W dobrym kierunku.`
+- Nowy opis: `Cleanzi porzadkuje zlecenia, obecnosc i postep na biezaco, aby praca plynnie realizowala sie zgodnie z planem.`
+- Nowy kicker: `SYSTEM, KTORY PROWADZI DZIEN`.
+Pliki:
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `web-app/apps/portal-web/src/index.css`
+- `ReadMe.txt`
+Weryfikacja:
+- `npm --prefix web-app run lint` - OK.
+- `npm --prefix web-app run build` - OK.
+- Zmiana nie dotyka backendu, bazy, logowania ani danych organizacji.
+Granice:
+- Zmiana jest lokalnym kandydatem i nie zostala wdrozona na produkcje.
+- Produkcyjny rollout wymaga osobnej dokladnej zgody `OK PRODUKCJA CLZ-PORTAL-20260729-LOGIN-HERO-COPY-02`.
