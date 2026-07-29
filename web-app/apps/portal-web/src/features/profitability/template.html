@@ -1,0 +1,215 @@
+<section class="contract-profitability" aria-labelledby="contractProfitabilityTitle">
+  <header class="contract-profitability__hero">
+    <div>
+      <div class="contract-profitability__title-row">
+        <h1 id="contractProfitabilityTitle">Rentowność kontraktów</h1>
+        <span class="contract-profitability__demo-badge" id="contractProfitabilityDemoBadge" hidden>
+          Dane poglądowe
+        </span>
+      </div>
+      <p>Monitoruj przychody, koszty i marżę wszystkich kontraktów w jednym miejscu.</p>
+    </div>
+    <div class="contract-profitability__hero-actions">
+      <button class="contract-profitability__secondary-btn" id="contractProfitabilityResetBtn" type="button">
+        Wyczyść filtry
+      </button>
+      <button
+        class="contract-profitability__primary-btn"
+        type="button"
+        data-route="clientProfile"
+        id="contractProfitabilityCompleteDataBtn"
+      >
+        Uzupełnij dane
+      </button>
+    </div>
+  </header>
+
+  <div class="contract-profitability__demo-note" id="contractProfitabilityDemoNote" hidden>
+    <strong>To bezpieczny podgląd modułu.</strong>
+    <span>Wartości nie pochodzą z danych firmy i nie są zapisywane w bazie.</span>
+  </div>
+
+  <div class="contract-profitability__access" id="contractProfitabilityAccess" hidden></div>
+
+  <div class="contract-profitability__workspace" id="contractProfitabilityWorkspace" hidden>
+    <section class="contract-profitability__filters" aria-label="Filtry rentowności kontraktów">
+      <label class="contract-profitability__field contract-profitability__field--search">
+        <span>Szukaj</span>
+        <input
+          id="contractProfitabilitySearch"
+          type="search"
+          autocomplete="off"
+          placeholder="Klient, kontrakt, obiekt lub koordynator"
+        />
+      </label>
+      <label class="contract-profitability__field">
+        <span>Okres</span>
+        <input id="contractProfitabilityPeriod" type="month" value="2026-07" />
+      </label>
+      <label class="contract-profitability__field">
+        <span>Klient</span>
+        <select id="contractProfitabilityClient">
+          <option value="">Wszyscy klienci</option>
+        </select>
+      </label>
+      <label class="contract-profitability__field">
+        <span>Status wyniku</span>
+        <select id="contractProfitabilityStatus">
+          <option value="">Wszystkie statusy</option>
+          <option value="ABOVE_TARGET">Powyżej celu</option>
+          <option value="BELOW_TARGET">Poniżej celu</option>
+          <option value="NEGATIVE">Wynik ujemny</option>
+          <option value="INCOMPLETE">Niepełne dane</option>
+          <option value="NOT_CALCULABLE">Nie można obliczyć</option>
+        </select>
+      </label>
+      <label class="contract-profitability__field">
+        <span>Kompletność</span>
+        <select id="contractProfitabilityQuality">
+          <option value="">Każda</option>
+          <option value="complete">Kompletne</option>
+          <option value="incomplete">Wymagają uzupełnienia</option>
+        </select>
+      </label>
+    </section>
+
+    <p class="contract-profitability__filter-summary" id="contractProfitabilityFilterSummary" aria-live="polite"></p>
+
+    <section class="contract-profitability__metrics" aria-label="Podsumowanie portfela kontraktów">
+      <article class="contract-profitability__metric">
+        <span>Przychód netto</span>
+        <strong id="contractProfitabilityMetricRevenue">—</strong>
+        <small id="contractProfitabilityMetricRevenueMeta">Wybrany okres</small>
+      </article>
+      <article class="contract-profitability__metric">
+        <span>Koszt całkowity</span>
+        <strong id="contractProfitabilityMetricCost">—</strong>
+        <small id="contractProfitabilityMetricCostMeta">Zweryfikowane kontrakty</small>
+      </article>
+      <article class="contract-profitability__metric">
+        <span>Marża</span>
+        <strong id="contractProfitabilityMetricMargin">—</strong>
+        <small id="contractProfitabilityMetricMarginMeta">Przychód minus koszty</small>
+      </article>
+      <article class="contract-profitability__metric">
+        <span>Rentowność portfela</span>
+        <strong id="contractProfitabilityMetricProfitability">—</strong>
+        <small id="contractProfitabilityMetricProfitabilityMeta">Ważona przychodem</small>
+      </article>
+      <article class="contract-profitability__metric">
+        <span>Koszt pracy</span>
+        <strong id="contractProfitabilityMetricLaborShare">—</strong>
+        <small id="contractProfitabilityMetricLaborShareMeta">Kwota i udział w przychodzie netto</small>
+      </article>
+      <article class="contract-profitability__metric">
+        <span>Kompletność danych</span>
+        <strong id="contractProfitabilityMetricCompleteness">—</strong>
+        <small id="contractProfitabilityMetricCompletenessMeta">Wiarygodność wyniku</small>
+      </article>
+    </section>
+
+    <div class="contract-profitability__overview-grid">
+      <section class="contract-profitability__panel contract-profitability__panel--trend" aria-labelledby="contractProfitabilityTrendTitle">
+        <header class="contract-profitability__panel-head contract-profitability__panel-head--actions">
+          <div>
+            <h2 id="contractProfitabilityTrendTitle">Trend portfela</h2>
+            <p>Ostatnie 12 miesięcy na danych zamkniętych lub poglądowych.</p>
+          </div>
+          <div class="contract-profitability__segmented" aria-label="Wybór wskaźnika wykresu">
+            <button type="button" data-profitability-metric="profitabilityBps" class="is-active">Rentowność</button>
+            <button type="button" data-profitability-metric="marginMinor">Marża</button>
+            <button type="button" data-profitability-metric="revenueMinor">Przychód</button>
+          </div>
+        </header>
+        <div class="contract-profitability__chart-wrap">
+          <canvas
+            id="contractProfitabilityTrendCanvas"
+            role="img"
+            aria-label="Trend rentowności kontraktów"
+          ></canvas>
+        </div>
+        <div class="contract-profitability__trend-foot" id="contractProfitabilityTrendFoot"></div>
+      </section>
+
+      <section class="contract-profitability__panel" aria-labelledby="contractProfitabilityAttentionTitle">
+        <header class="contract-profitability__panel-head">
+          <div>
+            <h2 id="contractProfitabilityAttentionTitle">Wymagają uwagi</h2>
+            <p>Kontrakty z ryzykiem finansowym lub brakującymi danymi.</p>
+          </div>
+        </header>
+        <div class="contract-profitability__attention" id="contractProfitabilityAttention"></div>
+      </section>
+    </div>
+
+    <section class="contract-profitability__panel contract-profitability__panel--table" aria-labelledby="contractProfitabilityTableTitle">
+      <header class="contract-profitability__panel-head contract-profitability__panel-head--actions">
+        <div>
+          <h2 id="contractProfitabilityTableTitle">Kontrakty i obiekty</h2>
+          <p id="contractProfitabilityTableMeta">Porównanie wyników w wybranym okresie.</p>
+        </div>
+        <div class="contract-profitability__legend" aria-label="Legenda statusów">
+          <span><i class="is-positive" aria-hidden="true"></i>Powyżej celu</span>
+          <span><i class="is-warning" aria-hidden="true"></i>Poniżej celu</span>
+          <span><i class="is-negative" aria-hidden="true"></i>Strata</span>
+          <span><i class="is-incomplete" aria-hidden="true"></i>Braki danych</span>
+        </div>
+      </header>
+      <div class="contract-profitability__table-wrap">
+        <table class="contract-profitability__table">
+          <thead>
+            <tr>
+              <th scope="col">Klient / kontrakt</th>
+              <th scope="col">Przychód</th>
+              <th scope="col">Koszt pracy</th>
+              <th scope="col">Koszt całkowity</th>
+              <th scope="col">Marża</th>
+              <th scope="col">Rentowność</th>
+              <th scope="col">Plan / wykonanie</th>
+              <th scope="col">Dane</th>
+              <th scope="col">Status</th>
+              <th scope="col"><span class="sr-only">Akcje</span></th>
+            </tr>
+          </thead>
+          <tbody id="contractProfitabilityRows"></tbody>
+        </table>
+      </div>
+      <div class="contract-profitability__empty" id="contractProfitabilityEmpty" hidden>
+        <strong>Brak kontraktów dla wybranych filtrów.</strong>
+        <p>Wyczyść filtry albo wybierz inny okres.</p>
+      </div>
+    </section>
+
+    <section class="contract-profitability__panel contract-profitability__details" id="contractProfitabilityDetails" hidden>
+      <header class="contract-profitability__details-head">
+        <div>
+          <span class="contract-profitability__eyebrow">Analiza kontraktu</span>
+          <h2 id="contractProfitabilityDetailsTitle">—</h2>
+          <p id="contractProfitabilityDetailsMeta"></p>
+        </div>
+        <button
+          class="contract-profitability__secondary-btn"
+          type="button"
+          data-route="clientProfile"
+        >
+          Otwórz listę klientów
+        </button>
+      </header>
+
+      <div class="contract-profitability__details-grid">
+        <section aria-labelledby="contractProfitabilityBreakdownTitle">
+          <h3 id="contractProfitabilityBreakdownTitle">Struktura kosztów</h3>
+          <div class="contract-profitability__breakdown" id="contractProfitabilityBreakdown"></div>
+        </section>
+        <section aria-labelledby="contractProfitabilityExecutionTitle">
+          <h3 id="contractProfitabilityExecutionTitle">Plan a wykonanie</h3>
+          <div class="contract-profitability__execution" id="contractProfitabilityExecution"></div>
+        </section>
+        <section aria-labelledby="contractProfitabilityIssuesTitle">
+          <h3 id="contractProfitabilityIssuesTitle">Wnioski i braki danych</h3>
+          <div class="contract-profitability__issues" id="contractProfitabilityIssues"></div>
+        </section>
+      </div>
+    </section>
+  </div>
+</section>

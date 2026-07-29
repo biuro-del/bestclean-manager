@@ -26,6 +26,7 @@ const REQUIRED_WORKER_SCHEMA = {
     active: null,
     email: null,
     phone: null,
+    photo_url: null,
     worker_type: null,
     created_at: null,
     updated_at: null,
@@ -303,6 +304,7 @@ async function readWorkerForUpdate(client, orgId, login) {
             worker_type,
             active,
             phone,
+            photo_url,
             created_at,
             updated_at,
             edit,
@@ -451,6 +453,7 @@ async function insertWorkerAndMembership(client, payload) {
        active,
        email,
        phone,
+       photo_url,
        worker_type,
        auth_uid,
        edit,
@@ -467,9 +470,10 @@ async function insertWorkerAndMembership(client, payload) {
        $7::boolean,
        $5::text,
        nullif($8::text, ''),
-       $9::text,
+       nullif($9::text, ''),
        $10::text,
        nullif($11::text, ''),
+       nullif($12::text, ''),
        now(),
        now()
      )
@@ -483,6 +487,7 @@ async function insertWorkerAndMembership(client, payload) {
       payload.role,
       payload.active,
       payload.phone,
+      payload.photoUrl,
       payload.workerType,
       payload.authUid,
       payload.createdByUid,
@@ -561,6 +566,10 @@ async function updateWorkerRow(client, payload) {
             active = $8::boolean,
             edit = nullif($9::text, ''),
             auth_uid = coalesce(nullif($10::text, ''), auth_uid),
+            photo_url = case
+              when $11::boolean then nullif($12::text, '')
+              else photo_url
+            end,
             updated_at = now()
       where org_id = $1::text
         and lower(login) = lower($2::text)
@@ -576,6 +585,8 @@ async function updateWorkerRow(client, payload) {
       payload.active,
       payload.updatedBy,
       payload.authUid,
+      Boolean(payload.photoUrlChanged),
+      payload.photoUrl,
     ],
   )
   return result.rows[0] ?? null
@@ -639,6 +650,7 @@ async function renameWorker(client, currentWorker, payload) {
        worker_type,
        active,
        auth_uid,
+       photo_url,
        created_at,
        updated_at,
        edit
@@ -654,6 +666,10 @@ async function renameWorker(client, currentWorker, payload) {
             $8::text,
             $9::boolean,
             null,
+            case
+              when $11::boolean then nullif($12::text, '')
+              else photo_url
+            end,
             created_at,
             now(),
             nullif($10::text, '')
@@ -671,6 +687,8 @@ async function renameWorker(client, currentWorker, payload) {
       payload.workerType,
       payload.active,
       payload.updatedBy,
+      Boolean(payload.photoUrlChanged),
+      payload.photoUrl,
     ],
   )
   if (!inserted.rowCount) {

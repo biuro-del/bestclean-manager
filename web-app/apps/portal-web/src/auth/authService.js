@@ -242,6 +242,7 @@ function buildSessionFromFirebase(user, context) {
     orgName: organizationName,
     platformContextId: toText(context.platformContextId),
     platformReason: toText(context.platformReason),
+    capabilities: context.capabilities && typeof context.capabilities === 'object' ? context.capabilities : {},
     source: 'firebase',
   }
 }

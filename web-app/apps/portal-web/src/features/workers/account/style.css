@@ -190,6 +190,11 @@
   align-items: center;
 }
 
+.worker-account-avatar-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
 .worker-account-avatar {
   width: 78px;
   height: 78px;
@@ -203,9 +208,56 @@
   box-shadow: 0 12px 28px rgba(79, 70, 255, .12);
 }
 
+.worker-account-avatar.is-photo {
+  overflow: hidden;
+  background: #fff;
+}
+
+.worker-account-avatar img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
 .worker-account-avatar svg {
   width: 40px;
   height: 40px;
+}
+
+.worker-account-avatar-action {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--wa-blue);
+  box-shadow: 0 8px 20px rgba(79, 70, 255, .28);
+  cursor: pointer;
+}
+
+.worker-account-avatar-action svg {
+  width: 17px;
+  height: 17px;
+}
+
+.worker-account-avatar-action:hover,
+.worker-account-avatar-action:focus-visible {
+  background: #4038e6;
+  outline: 3px solid rgba(79, 70, 255, .16);
+}
+
+.worker-account-avatar-action:disabled {
+  color: #a5afc1;
+  background: #edf1f7;
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 .worker-account-identity {
@@ -674,6 +726,69 @@
 .worker-account-form-card {
   padding: 28px;
   overflow: visible;
+}
+
+.worker-account-photo-editor {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  margin: 0 0 22px;
+  padding: 16px;
+  border: 1px solid #dfe6f1;
+  border-radius: 12px;
+  background: #f8faff;
+}
+
+.worker-account-photo-preview {
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #d7dcff;
+  border-radius: 18px;
+  color: var(--wa-blue);
+  background: var(--wa-blue-soft);
+}
+
+.worker-account-photo-preview img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.worker-account-photo-preview svg {
+  width: 36px;
+  height: 36px;
+}
+
+.worker-account-photo-copy {
+  min-width: 0;
+}
+
+.worker-account-photo-copy strong {
+  display: block;
+  color: var(--wa-ink);
+  font-size: 15px;
+}
+
+.worker-account-photo-copy p {
+  max-width: 640px;
+}
+
+.worker-account-photo-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.worker-account-photo-actions .btn2:disabled {
+  opacity: .55;
+  cursor: not-allowed;
 }
 
 .worker-account-form-grid,
@@ -2942,6 +3057,15 @@
 
   .worker-account-form-card {
     padding: 18px;
+  }
+
+  .worker-account-photo-editor {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .worker-account-photo-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
   }
 
   .worker-account-range-field > div {

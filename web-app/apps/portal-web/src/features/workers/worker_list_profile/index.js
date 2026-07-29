@@ -438,6 +438,92 @@ export function createWorkerProfileFeature(ctx) {
     return WORKER_AVATAR_TONES[workerProfileHash(key) % WORKER_AVATAR_TONES.length]
   }
 
+  function workerProfilePhotoUrl(worker) {
+    const raw = String(
+      worker?.photoUrl ??
+        worker?.profilePhotoUrl ??
+        worker?.avatarUrl ??
+        worker?.imageUrl ??
+        '',
+    ).trim()
+    return /^(https?:\/\/|data:image\/(?:png|jpe?g|webp);base64,)/i.test(raw) ? raw : ''
+  }
+
+  function workerProfileAvatarHtml(worker, className = '') {
+    const photoUrl = workerProfilePhotoUrl(worker)
+    const classes = ['worker-profile-avatar', workerAvatarTone(worker), className].filter(Boolean).join(' ')
+    if (photoUrl) {
+      return `<span class="${escapeHtml(classes)} is-photo"><img src="${escapeHtml(photoUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" /></span>`
+    }
+    return `<span class="${escapeHtml(classes)}">${escapeHtml(workerProfileInitials(worker))}</span>`
+  }
+
+  function setWorkerProfilePhotoState({ photoUrl = '', photoDataUrl = '', removePhoto = false } = {}) {
+    appState.workerProfilePhotoUrl = String(photoUrl ?? '').trim()
+    appState.workerProfilePhotoDataUrl = String(photoDataUrl ?? '').trim()
+    appState.workerProfileRemovePhoto = Boolean(removePhoto)
+    syncWorkerProfilePhotoPreview()
+  }
+
+  function syncWorkerProfilePhotoPreview() {
+    const preview = document.getElementById('wkPhotoPreview')
+    const removeButton = document.getElementById('wkRemovePhotoBtn')
+    const currentWorker = appState.workerProfileCurrent ?? {}
+    const previewUrl = String(appState.workerProfilePhotoDataUrl || appState.workerProfilePhotoUrl || '').trim()
+    const workerForAvatar = {
+      ...currentWorker,
+      photoUrl: appState.workerProfileRemovePhoto ? '' : previewUrl,
+    }
+    if (preview) {
+      preview.innerHTML = workerProfileAvatarHtml(workerForAvatar, 'worker-profile-avatar--large')
+    }
+    if (removeButton instanceof HTMLButtonElement) {
+      removeButton.disabled = appState.workerProfileModalMode === 'view' || (!previewUrl && !workerProfilePhotoUrl(currentWorker))
+    }
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result ?? ''))
+      reader.onerror = () => reject(reader.error || new Error('Nie udalo sie odczytac zdjecia.'))
+      reader.readAsDataURL(file)
+    })
+  }
+
+  function loadImageForWorkerPhoto(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const image = new Image()
+      image.onload = () => resolve(image)
+      image.onerror = () => reject(new Error('Nie udalo sie wczytac zdjecia.'))
+      image.src = dataUrl
+    })
+  }
+
+  async function compressWorkerProfilePhoto(file) {
+    if (!file || !/^image\/(?:png|jpe?g|webp)$/i.test(String(file.type ?? ''))) {
+      throw new Error('Wybierz zdjecie PNG, JPG albo WEBP.')
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      throw new Error('Plik jest zbyt duzy. Wybierz zdjecie do 8 MB.')
+    }
+    const dataUrl = await readFileAsDataUrl(file)
+    const image = await loadImageForWorkerPhoto(dataUrl)
+    const size = 320
+    const sourceSize = Math.min(image.naturalWidth || image.width, image.naturalHeight || image.height)
+    const sourceX = Math.max(0, ((image.naturalWidth || image.width) - sourceSize) / 2)
+    const sourceY = Math.max(0, ((image.naturalHeight || image.height) - sourceSize) / 2)
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const context = canvas.getContext('2d')
+    if (!context) {
+      throw new Error('Przegladarka nie moze przygotowac miniatury.')
+    }
+    context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, size, size)
+    return canvas.toDataURL('image/webp', 0.82)
+  }
+
   function workerRoleVisualMeta(roleValue) {
     const normalized = normalizeSearchText(roleValue).toLowerCase()
 
@@ -493,6 +579,7 @@ export function createWorkerProfileFeature(ctx) {
   function normalizeWorkerProfileRow(worker) {
     const workerType = workerProfileAllowedTypeValue(worker?.workerType ?? worker?.type ?? worker?.role)
     const role = String(worker?.role ?? '').trim() || workerType
+    const photoUrl = workerProfilePhotoUrl(worker)
     return {
       ...worker,
       role,
@@ -502,6 +589,8 @@ export function createWorkerProfileFeature(ctx) {
       online: workerProfileBoolean(worker, 'online'),
       phone: String(worker?.phone ?? ''),
       email: String(worker?.email ?? worker?.loginEmail ?? ''),
+      photoUrl,
+      profilePhotoUrl: photoUrl,
     }
   }
 
@@ -1189,7 +1278,7 @@ export function createWorkerProfileFeature(ctx) {
           </div>
           <div>
             <div class="worker-profile-user-cell">
-              <span class="worker-profile-avatar ${workerAvatarTone(worker)}">${escapeHtml(workerProfileInitials(worker))}</span>
+              ${workerProfileAvatarHtml(worker)}
               <span class="worker-profile-user-copy">
                 <strong>${escapeHtml(name)}</strong>
               </span>
@@ -1280,6 +1369,19 @@ export function createWorkerProfileFeature(ctx) {
     const saveButton = document.getElementById('wkSaveBtn')
     if (saveButton) {
       saveButton.style.display = readOnly ? 'none' : ''
+    }
+
+    const photoInput = document.getElementById('wkEditPhoto')
+    if (photoInput instanceof HTMLInputElement) {
+      photoInput.disabled = readOnly
+    }
+    const photoPick = document.querySelector('#wkEditorOverlay .worker-profile-photo-pick')
+    if (photoPick instanceof HTMLElement) {
+      photoPick.setAttribute('aria-disabled', readOnly ? 'true' : 'false')
+    }
+    const removePhotoButton = document.getElementById('wkRemovePhotoBtn')
+    if (removePhotoButton instanceof HTMLButtonElement) {
+      removePhotoButton.disabled = readOnly || (!String(appState.workerProfilePhotoDataUrl || appState.workerProfilePhotoUrl || '').trim() && !workerProfilePhotoUrl(appState.workerProfileCurrent))
     }
 
   }
@@ -1656,6 +1758,7 @@ export function createWorkerProfileFeature(ctx) {
         emailInput.placeholder = 'np. jan.kowalski@gmail.com'
       }
       if (phoneInput) phoneInput.value = ''
+      setWorkerProfilePhotoState({ photoUrl: '' })
     } else {
       if (modalTitle) modalTitle.textContent = canManageWorkers() ? 'Edytuj pracownika' : 'Podgląd pracownika'
       if (saveButton) saveButton.textContent = 'Zapisz'
@@ -1687,6 +1790,7 @@ export function createWorkerProfileFeature(ctx) {
         emailInput.placeholder = ''
       }
       if (phoneInput) phoneInput.value = worker?.phone || ''
+      setWorkerProfilePhotoState({ photoUrl: workerProfilePhotoUrl(worker) })
     }
 
     if (saveButton) saveButton.disabled = false
@@ -1739,6 +1843,7 @@ export function createWorkerProfileFeature(ctx) {
     clearWorkerProfilePasswordError()
     appState.workerProfileCurrent = null
     appState.workerProfileModalMode = 'view'
+    setWorkerProfilePhotoState({ photoUrl: '' })
   }
 
   function workerProfileDisplayName(worker) {
@@ -1927,6 +2032,12 @@ export function createWorkerProfileFeature(ctx) {
       email,
       phone: String(document.getElementById('wkEditPhone')?.value ?? '').trim(),
     }
+    if (String(appState.workerProfilePhotoDataUrl ?? '').trim()) {
+      payload.photoDataUrl = String(appState.workerProfilePhotoDataUrl).trim()
+    } else if (appState.workerProfileRemovePhoto) {
+      payload.removePhoto = true
+      payload.photoUrl = ''
+    }
     clearWorkerProfileBasicError()
     clearWorkerProfilePasswordError()
 
@@ -2034,6 +2145,8 @@ export function createWorkerProfileFeature(ctx) {
           email: createdUser?.email ?? payload.email,
           loginEmail: createdUser?.loginEmail ?? createdUser?.email ?? payload.email,
           phone: createdUser?.phone ?? payload.phone,
+          photoUrl: createdUser?.photoUrl ?? createdUser?.profilePhotoUrl ?? '',
+          profilePhotoUrl: createdUser?.profilePhotoUrl ?? createdUser?.photoUrl ?? '',
           authUid: createdUser?.authUid ?? '',
         }
       } else {
@@ -2075,6 +2188,8 @@ export function createWorkerProfileFeature(ctx) {
           email: updatedWorker?.email ?? payload.email,
           loginEmail: updatedWorker?.loginEmail ?? updatedWorker?.email ?? payload.email,
           phone: updatedWorker?.phone ?? payload.phone,
+          photoUrl: updatedWorker?.photoUrl ?? updatedWorker?.profilePhotoUrl ?? (payload.removePhoto ? '' : workerProfilePhotoUrl(currentWorker)),
+          profilePhotoUrl: updatedWorker?.profilePhotoUrl ?? updatedWorker?.photoUrl ?? (payload.removePhoto ? '' : workerProfilePhotoUrl(currentWorker)),
           editedBy,
         }
         if (newPass) {
@@ -2397,6 +2512,28 @@ export function createWorkerProfileFeature(ctx) {
     })
     binding.add(document.getElementById('wkDeleteBtn'), 'click', () => {
       void deleteWorkerProfileData(appState.workerProfileCurrent)
+    })
+    binding.add(document.getElementById('wkEditPhoto'), 'change', (event) => {
+      const input = event.currentTarget
+      const file = input instanceof HTMLInputElement ? input.files?.[0] : null
+      if (!file) {
+        return
+      }
+      void (async () => {
+        try {
+          const photoDataUrl = await compressWorkerProfilePhoto(file)
+          setWorkerProfilePhotoState({ photoDataUrl, photoUrl: '', removePhoto: false })
+          clearWorkerProfileBasicError()
+        } catch (error) {
+          setWorkerProfilePhotoState({ photoUrl: workerProfilePhotoUrl(appState.workerProfileCurrent) })
+          setWorkerProfileBasicError(error instanceof Error ? error.message : 'Nie udalo sie przygotowac zdjecia.', 'wkEditName')
+        } finally {
+          if (input instanceof HTMLInputElement) input.value = ''
+        }
+      })()
+    })
+    binding.add(document.getElementById('wkRemovePhotoBtn'), 'click', () => {
+      setWorkerProfilePhotoState({ photoUrl: '', photoDataUrl: '', removePhoto: true })
     })
     ;['wkNewPass', 'wkNewPass2'].forEach((id) => {
       const input = document.getElementById(id)

@@ -1,6 +1,10 @@
-import { deleteTaskForOrg, platformContextHeaders, tasksForOrg, upsertTaskForOrg } from './platformDataConnectService'
+import { deleteTaskForOrg, platformContextHeaders, tasksForOrg } from './platformDataConnectService'
 import { getSession } from '../auth/authService'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
+import {
+  filterActiveScheduleOrders,
+  normalizeScheduleOrderLifecycleStatus,
+} from './scheduleOrderLifecycle'
 
 function normalizeText(value) {
   return String(value ?? '').trim()
@@ -67,21 +71,6 @@ function parseJsonValue(value, fallback = []) {
   }
 }
 
-function jsonString(value, fallback = []) {
-  return JSON.stringify(parseJsonValue(value, fallback))
-}
-
-function firstJsonValue(fallback, ...values) {
-  for (const value of values) {
-    if (Array.isArray(value) || (value && typeof value === 'object')) return value
-    const text = normalizeText(value)
-    if (!text) continue
-    const parsed = parseJsonValue(text, null)
-    if (parsed != null) return parsed
-  }
-  return fallback
-}
-
 const SERVICE_BLOCKS_PAYLOAD_MARKER = 'cleanz_service_blocks_v2'
 
 function serviceBlocksPayloadFromRules(value) {
@@ -94,51 +83,6 @@ function weeklyRulesWithoutServicePayload(value) {
   const rules = parseJsonValue(value, [])
   if (!Array.isArray(rules)) return []
   return rules.filter((item) => !(item && typeof item === 'object' && item.marker === SERVICE_BLOCKS_PAYLOAD_MARKER))
-}
-
-function serviceBlocksPayloadFromOrder(order = {}) {
-  const serviceBlocks = firstJsonValue([], order.serviceBlocks, order.service_blocks)
-  if (!Array.isArray(serviceBlocks) || !serviceBlocks.length) {
-    return null
-  }
-  const accessWindows = firstJsonValue([], order.objectAccessWindows, order.accessWindows, order.access_windows)
-  return {
-    marker: SERVICE_BLOCKS_PAYLOAD_MARKER,
-    version: finiteInteger(order.serviceModelVersion ?? order.service_model_version, 2) || 2,
-    serviceBlocks,
-    objectAccessWindows: Array.isArray(accessWindows) ? accessWindows : [],
-  }
-}
-
-function dateOrdinal(ymd) {
-  const value = normalizeDateYmd(ymd)
-  if (!value) return null
-  return Math.floor(Date.UTC(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, Number(value.slice(8, 10))) / 86400000)
-}
-
-function timeMinutes(value) {
-  const time = normalizeTime(value)
-  if (!time) return null
-  return Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5))
-}
-
-function durationMinutes(order = {}) {
-  const explicit = finiteInteger(order.requiredWorkMinutes ?? order.durationMinutes, null)
-  if (Number.isFinite(explicit) && explicit > 0) return explicit
-
-  const startDay = normalizeDateYmd(order.dateYmd)
-  const endDay = normalizeDateYmd(order.endDateYmd, startDay)
-  const startMinute = timeMinutes(order.startTime)
-  const endMinute = timeMinutes(order.endTime)
-  const startOrdinal = dateOrdinal(startDay)
-  const endOrdinal = dateOrdinal(endDay)
-  if (startOrdinal == null || endOrdinal == null || startMinute == null || endMinute == null || endOrdinal < startOrdinal) {
-    const hours = finiteNumber(order.durationHours, null)
-    return Number.isFinite(hours) && hours > 0 ? Math.round(hours * 60) : null
-  }
-
-  const total = (endOrdinal - startOrdinal) * 1440 + endMinute - startMinute
-  return total > 0 ? total : null
 }
 
 function normalizeWorkerId(value) {
@@ -240,116 +184,6 @@ function allocationFromItem(item, index = 0) {
   }
 }
 
-function allocationHasStableWorkerIdentity(item = {}) {
-  const type = normalizeText(item.type ?? item.workerType ?? item.kind).toLowerCase()
-  const key = normalizeText(item.key ?? item.workerKey ?? item.id).toLowerCase()
-  const workerId = normalizeWorkerId(item.workerId ?? item.worker_id ?? item.employeeId)
-  const workerLogin = nullableText(item.workerLogin ?? item.login, 80)
-  const workerKeyValue = nullableText(item.workerKey, 128)
-  const hasWorkerIdentity = Boolean(type === 'worker' || workerId || workerLogin || workerKeyValue)
-  if (!hasWorkerIdentity && (['buffer', 'bufor', 'unassigned', 'empty'].includes(type) || /^slot(:|$)/.test(key))) {
-    return true
-  }
-  return hasWorkerIdentity
-}
-
-function mergeAllocationIdentity(item = {}, fallback = null) {
-  if (!fallback || typeof fallback !== 'object' || Array.isArray(fallback)) {
-    return item
-  }
-  return {
-    ...item,
-    workerId: item.workerId || item.worker_id || fallback.workerId || fallback.worker_id || fallback.employeeId,
-    workerLogin: item.workerLogin || item.login || fallback.workerLogin || fallback.login,
-    name: item.name || item.workerName || item.label || fallback.name || fallback.workerName || fallback.label || fallback.workerLabel,
-    label: item.label || item.name || fallback.label || fallback.name || fallback.workerName || fallback.workerLabel,
-    workerKey: item.workerKey || fallback.workerKey || fallback.key,
-  }
-}
-
-function allocationsFromOrder(order = {}) {
-  const allocationSource = firstJsonValue([], order.workAllocations, order.workerAllocations)
-  const assignmentSource = firstJsonValue([], order.workerAssignments, order.assignedWorkers, order.workers)
-  let source = Array.isArray(allocationSource) && allocationSource.length
-    ? allocationSource
-    : firstJsonValue([], order.workerAssignments, order.assignedWorkers, order.workers)
-
-  if (Array.isArray(source) && source.length && Array.isArray(assignmentSource) && assignmentSource.length) {
-    source = source.map((item, index) => {
-      if (allocationHasStableWorkerIdentity(item)) {
-        return item
-      }
-      const row = finiteInteger(item?.row ?? item?.rowIndex, index)
-      const fallback =
-        assignmentSource.find((assignment, assignmentIndex) => finiteInteger(assignment?.row ?? assignment?.rowIndex, assignmentIndex) === row) ||
-        assignmentSource[index] ||
-        null
-      return mergeAllocationIdentity(item, fallback)
-    })
-  }
-
-  const allocations = (Array.isArray(source) ? source : [])
-    .map((item, index) => allocationFromItem(item, index))
-    .filter(Boolean)
-
-  if (!allocations.some((item) => normalizeWorkerId(item.workerId)) && Array.isArray(assignmentSource) && assignmentSource.length) {
-    const assignmentAllocations = assignmentSource
-      .map((item, index) => allocationFromItem(item, index))
-      .filter(Boolean)
-      .filter((item) => normalizeWorkerId(item.workerId))
-    if (assignmentAllocations.length) {
-      return assignmentAllocations
-    }
-  }
-
-  if (!allocations.length && Array.isArray(order.assignedRows) && order.assignedRows.length) {
-    order.assignedRows.forEach((row, index) => {
-      const numericRow = finiteInteger(row, index)
-      allocations.push({
-        row: Number.isInteger(numericRow) && numericRow >= 0 ? numericRow : index,
-        workerId: '',
-        key: 'buffer',
-        name: normalizeText(order.workerLabel) || 'BUFOR',
-        workerLogin: '',
-        allocationMinutes: null,
-      })
-    })
-  }
-
-  if (!allocations.length) {
-    const workerId = normalizeWorkerId(order.workerId)
-    const workerLabel = nullableText(order.workerLabel ?? order.workerName, 240)
-    if (workerId || workerLabel) {
-      allocations.push({
-        row: finiteInteger(order.row, 0) ?? 0,
-        workerId,
-        key: workerId ? workerKey(workerId) : 'buffer',
-        name: workerLabel || workerId || 'BUFOR',
-        workerLogin: nullableText(order.workerLogin, 80) || '',
-        allocationMinutes: finiteInteger(order.requiredWorkMinutes, null),
-      })
-    }
-  }
-
-  if (!allocations.length) {
-    allocations.push({
-      row: finiteInteger(order.row, 0) ?? 0,
-      workerId: '',
-      key: 'buffer',
-      name: 'BUFOR',
-      workerLogin: '',
-      allocationMinutes: null,
-    })
-  }
-
-  return allocations
-}
-
-function currentUserUid() {
-  const firebase = ensureFirebase()
-  return normalizeText(firebase?.auth?.currentUser?.uid)
-}
-
 function requireFirebaseDataConnect() {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase Data Connect.')
@@ -373,6 +207,7 @@ function getPortalApiBase() {
 }
 
 let scheduleOrdersEndpointUnavailableKey = ''
+const SCHEDULE_ORDERS_LOAD_TIMEOUT_MS = 12_000
 
 const SCHEDULE_ORDERS_FALLBACK_CODES = new Set([
   'DB_CONFIG_MISSING',
@@ -380,6 +215,22 @@ const SCHEDULE_ORDERS_FALLBACK_CODES = new Set([
   'PORTAL_SCHEDULE_ORDERS_PROXY_ERROR',
   'UPSTREAM_UNAVAILABLE',
 ])
+
+async function fetchScheduleOrdersWithTimeout(url, options = {}) {
+  const controller = new AbortController()
+  const timeoutId = globalThis.setTimeout(
+    () => controller.abort(),
+    SCHEDULE_ORDERS_LOAD_TIMEOUT_MS,
+  )
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
+  } finally {
+    globalThis.clearTimeout(timeoutId)
+  }
+}
 
 function isLocalDevScheduleOrdersRemoteDisabled() {
   return import.meta.env.DEV && normalizeText(import.meta.env.VITE_DISABLE_PORTAL_SCHEDULE_ORDERS_REMOTE) === '1'
@@ -500,6 +351,7 @@ async function parseScheduleOrdersApiError(response, fallbackMessage) {
     return {
       backendUnavailable: isScheduleOrdersBackendUnavailable({ code, message, status: response?.status }),
       code,
+      details: body?.error?.details ?? body?.details ?? null,
       message,
       routeUnavailable: isScheduleOrdersRouteUnavailable(message, response?.status),
       status: response?.status,
@@ -568,10 +420,13 @@ async function fetchScheduleTasksViaBackend(orgId) {
     const headers = await scheduleOrderAuthHeaders({ forceRefresh: attempt > 0 })
     let response
     try {
-      response = await fetch(`${getPortalApiBase()}/portal/schedule-orders?orgId=${encodeURIComponent(orgId)}`, {
-        method: 'GET',
-        headers,
-      })
+      response = await fetchScheduleOrdersWithTimeout(
+        `${getPortalApiBase()}/portal/schedule-orders?orgId=${encodeURIComponent(orgId)}`,
+        {
+          method: 'GET',
+          headers,
+        },
+      )
     } catch (error) {
       disableScheduleOrdersEndpoint('load', error?.message || error, orgId)
       return null
@@ -610,7 +465,7 @@ async function fetchScheduleTasksViaBackend(orgId) {
     if (!Array.isArray(body?.data?.orders)) {
       return disableScheduleOrdersInvalidPayload('load', 'Endpoint zlecen nie zwrocil data.orders.', orgId)
     }
-    return sortScheduleOrders(body.data.orders)
+    return sortScheduleOrders(filterActiveScheduleOrders(body.data.orders))
   }
 
   return null
@@ -630,16 +485,28 @@ async function upsertScheduleTasksViaBackend(orgId, orders = []) {
       }),
     })
   } catch (error) {
-    disableScheduleOrdersEndpoint('save', error?.message || error, orgId)
-    return null
+    const requestError = new Error(
+      'Nie mozna bezpiecznie sprawdzic kolizji pracownikow. Zlecenie nie zostalo zapisane.',
+    )
+    requestError.code = 'SCHEDULE_CONFLICT_VALIDATION_UNAVAILABLE'
+    requestError.cause = error
+    throw requestError
   }
   if (!response.ok) {
     const error = await parseScheduleOrdersApiError(response, 'Nie udalo sie zapisac zlecen.')
     if (error.backendUnavailable) {
-      disableScheduleOrdersEndpoint('save', error.message, orgId)
-      return null
+      const requestError = new Error(
+        'Nie mozna bezpiecznie sprawdzic kolizji pracownikow. Zlecenie nie zostalo zapisane.',
+      )
+      requestError.code = 'SCHEDULE_CONFLICT_VALIDATION_UNAVAILABLE'
+      requestError.status = error.status
+      throw requestError
     }
-    throw new Error(error.message)
+    const requestError = new Error(error.message)
+    requestError.code = error.code
+    requestError.details = error.details
+    requestError.status = error.status
+    throw requestError
   }
   const body = await response.json().catch(() => ({}))
   if (isScheduleOrdersLocalFileResponse(body)) {
@@ -652,7 +519,65 @@ async function upsertScheduleTasksViaBackend(orgId, orders = []) {
       orgId,
     )
   }
-  return sortScheduleOrders(body.data.orders)
+  return sortScheduleOrders(filterActiveScheduleOrders(body.data.orders))
+}
+
+async function setScheduleTaskLifecycleStatusViaBackend(orgId, orderIds = [], lifecycleStatus = '') {
+  const ids = [...new Set(
+    (Array.isArray(orderIds) ? orderIds : [])
+      .map((value) => nullableText(value, 180))
+      .filter(Boolean),
+  )]
+  if (!ids.length) {
+    throw new Error('Brak identyfikatora zlecenia do zmiany statusu.')
+  }
+  const rawStatus = normalizeText(lifecycleStatus).toUpperCase()
+  const normalizedStatus = rawStatus === 'CANCELED' ? 'CANCELLED' : rawStatus
+  if (!['ACTIVE', 'CANCELLED', 'ARCHIVED'].includes(normalizedStatus)) {
+    throw new Error('Dozwolone statusy zlecenia to ACTIVE, CANCELLED i ARCHIVED.')
+  }
+
+  const headers = await scheduleOrderAuthHeaders()
+  let response
+  try {
+    response = await fetch(`${getPortalApiBase()}/portal/schedule-orders`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({
+        orgId,
+        orderIds: ids,
+        lifecycleStatus: normalizedStatus,
+      }),
+    })
+  } catch (error) {
+    const requestError = new Error('Nie udało się bezpiecznie zmienić statusu zlecenia.')
+    requestError.code = 'SCHEDULE_LIFECYCLE_UPDATE_UNAVAILABLE'
+    requestError.cause = error
+    throw requestError
+  }
+  if (!response.ok) {
+    const error = await parseScheduleOrdersApiError(response, 'Nie udało się zmienić statusu zlecenia.')
+    const requestError = new Error(error.message)
+    requestError.code = error.code
+    requestError.details = error.details
+    requestError.status = error.status
+    throw requestError
+  }
+
+  const body = await response.json().catch(() => ({}))
+  const updatedOrderIds = Array.isArray(body?.data?.updatedOrderIds)
+    ? body.data.updatedOrderIds.map((value) => nullableText(value, 180)).filter(Boolean)
+    : []
+  const updatedSet = new Set(updatedOrderIds)
+  const missingIds = ids.filter((id) => !updatedSet.has(id))
+  if (missingIds.length || !Array.isArray(body?.data?.orders)) {
+    throw new Error('Backend nie potwierdził dokładnej zmiany statusu wszystkich zleceń.')
+  }
+  return {
+    lifecycleStatus: normalizeScheduleOrderLifecycleStatus(body?.data?.lifecycleStatus, normalizedStatus),
+    updatedOrderIds,
+    orders: sortScheduleOrders(filterActiveScheduleOrders(body.data.orders)),
+  }
 }
 
 async function deleteScheduleTasksViaBackend(orgId, orderIds = []) {
@@ -702,6 +627,9 @@ function normalizeTaskRow(row = {}) {
   return {
     orgId: value('orgId', 'org_id'),
     idTask: value('idTask', 'id_task', 'id'),
+    lifecycleStatus: value('lifecycleStatus', 'lifecycle_status', 'planningStatus', 'planning_status'),
+    cancelledAt: value('cancelledAt', 'cancelled_at', 'canceledAt', 'canceled_at'),
+    archivedAt: value('archivedAt', 'archived_at'),
     dateYmd: value('dateYmd', 'date_ymd', 'dateFrom', 'startDate'),
     startTime: value('startTime', 'start_time', 'time'),
     endDateYmd: value('endDateYmd', 'end_date_ymd', 'validUntil', 'dateTo', 'endDate'),
@@ -754,87 +682,6 @@ function normalizeTaskRow(row = {}) {
   }
 }
 
-function mapScheduleOrderToTaskVariables(orgId, rawOrder = {}) {
-  if (!rawOrder || typeof rawOrder !== 'object' || Array.isArray(rawOrder)) return null
-
-  const idTask = nullableText(rawOrder.idTask ?? rawOrder.id, 180)
-  if (!idTask || rawOrder.isDraft) return null
-
-  const nowIso = new Date().toISOString()
-  const dateYmd = normalizeDateYmd(rawOrder.dateYmd ?? rawOrder.dateFrom ?? rawOrder.startDate)
-  const startTime = normalizeTime(rawOrder.startTime ?? rawOrder.time)
-  const endDateYmd = normalizeDateYmd(rawOrder.endDateYmd ?? rawOrder.validUntil ?? rawOrder.dateTo ?? rawOrder.endDate, dateYmd)
-  const endTime = normalizeTime(rawOrder.endTime ?? rawOrder.stopTime)
-  const allocations = allocationsFromOrder(rawOrder)
-  const realAllocations = allocations.filter((item) => normalizeWorkerId(item.workerId))
-  const workerIds = uniqueTextValues(realAllocations.map((item) => normalizeWorkerId(item.workerId)))
-  const primaryAllocation = realAllocations[0] || null
-  const workerLabel = realAllocations.length
-    ? realAllocations.map((item) => item.name || item.workerId).filter(Boolean).join(', ')
-    : nullableText(rawOrder.workerLabel ?? rawOrder.workerName, 240) || 'BUFOR'
-  const objectPlanTasks = firstJsonValue([], rawOrder.objectPlanTasks, rawOrder.tasks, rawOrder.subtasks, rawOrder.activities)
-  const supplies = firstJsonValue([], rawOrder.supplies, rawOrder.itemsToTake, rawOrder.suppliesForWorkers)
-  const servicePayload = serviceBlocksPayloadFromOrder(rawOrder)
-  const weeklyScheduleRules = servicePayload
-    ? [servicePayload]
-    : weeklyRulesWithoutServicePayload(rawOrder.weeklyScheduleRules)
-  const uid = currentUserUid()
-  const updatedAt = toIsoTimestamp(rawOrder.updatedAt, nowIso)
-  const updatedByUid = nullableText(rawOrder.updatedByUid ?? rawOrder.updatedBy ?? uid, 128)
-
-  return {
-    orgId,
-    idTask,
-    dateYmd: nullableText(dateYmd, 10),
-    startTime: nullableText(startTime, 5),
-    endDateYmd: nullableText(endDateYmd, 10),
-    endTime: nullableText(endTime, 5),
-    scheduleMode:
-      nullableText(rawOrder.scheduleMode, 32) || (normalizeText(rawOrder.type) === 'cyclic' || normalizeText(rawOrder.repeatPreset) !== 'none' ? 'repeat' : 'once'),
-    accessStartTime: nullableText(normalizeTime(rawOrder.accessStartTime, startTime), 5),
-    accessEndTime: nullableText(normalizeTime(rawOrder.accessEndTime, endTime), 5),
-    accessWindows: jsonString(rawOrder.accessWindows, []),
-    requiredWorkMinutes: durationMinutes({ ...rawOrder, dateYmd, startTime, endDateYmd, endTime }),
-    requiredPeople: finiteInteger(rawOrder.requiredPeople, workerIds.length),
-    workAllocations: JSON.stringify(allocations),
-    workerId: primaryAllocation?.workerId || null,
-    workerIds: JSON.stringify(workerIds),
-    workerLabel,
-    workerName: primaryAllocation?.name || nullableText(rawOrder.workerName, 240),
-    workerLogin: primaryAllocation?.workerLogin || nullableText(rawOrder.workerLogin, 80),
-    clientId: nullableText(rawOrder.clientId, 64),
-    clientLabel: nullableText(rawOrder.clientLabel ?? rawOrder.clientName, 500),
-    clientName: nullableText(rawOrder.clientName ?? rawOrder.clientLabel, 500),
-    nip: nullableText(rawOrder.nip ?? rawOrder.clientNip, 80),
-    street: nullableText(rawOrder.street ?? rawOrder.clientStreet, 500),
-    city: nullableText(rawOrder.city ?? rawOrder.clientCity, 160),
-    postCode: nullableText(rawOrder.postCode ?? rawOrder.postalCode ?? rawOrder.clientPostCode, 32),
-    addressLabel: nullableText(rawOrder.addressLabel, 800),
-    executionAddressLabel: nullableText(rawOrder.executionAddressLabel ?? rawOrder.customAddressLabel, 800),
-    lat: finiteNumber(rawOrder.lat ?? rawOrder.latitude, null),
-    lng: finiteNumber(rawOrder.lng ?? rawOrder.longitude, null),
-    zoneId: nullableText(rawOrder.zoneId, 64),
-    zoneLabel: nullableText(rawOrder.zoneLabel ?? rawOrder.zoneName, 240),
-    repeatPreset: nullableText(rawOrder.repeatPreset, 32),
-    repeatEvery: finiteInteger(rawOrder.repeatEvery, null),
-    repeatUnit: nullableText(rawOrder.repeatUnit, 16),
-    repeatWeekdays: jsonString(rawOrder.repeatWeekdays, []),
-    weeklyScheduleRules: JSON.stringify(weeklyScheduleRules),
-    title: nullableText(rawOrder.title ?? rawOrder.name, 500) || 'Zlecenie',
-    type: nullableText(rawOrder.type, 40) || 'other',
-    price: finiteNumber(rawOrder.price, 0),
-    description: nullableText(rawOrder.description, 4000),
-    workerComment: nullableText(rawOrder.workerComment ?? rawOrder.workerOnlyComment, 4000),
-    supplies: JSON.stringify(Array.isArray(supplies) ? supplies : []),
-    objectPlanTasks: JSON.stringify(Array.isArray(objectPlanTasks) ? objectPlanTasks : []),
-    allowExtendedWork: Boolean(rawOrder.allowExtendedWork),
-    createdByUid: nullableText(rawOrder.createdByUid ?? rawOrder.createdBy ?? uid, 128),
-    updatedByUid,
-    createdAt: toIsoTimestamp(rawOrder.createdAt, nowIso),
-    updatedAt,
-  }
-}
-
 function mapTaskRowToScheduleOrder(row = {}) {
   const task = normalizeTaskRow(row)
   const id = nullableText(task.idTask, 180)
@@ -848,7 +695,7 @@ function mapTaskRowToScheduleOrder(row = {}) {
   const workerIds = parseJsonValue(task.workerIds, [])
   const repeatWeekdays = parseJsonValue(task.repeatWeekdays, [])
   const servicePayload = serviceBlocksPayloadFromRules(task.weeklyScheduleRules)
-  const weeklyScheduleRules = servicePayload ? [] : parseJsonValue(task.weeklyScheduleRules, [])
+  const weeklyScheduleRules = weeklyRulesWithoutServicePayload(task.weeklyScheduleRules)
   const accessWindows = parseJsonValue(task.accessWindows, [])
   const serviceBlocksFromColumn = parseJsonValue(task.serviceBlocks, [])
   const objectAccessWindowsFromColumn = parseJsonValue(task.objectAccessWindows, [])
@@ -866,6 +713,17 @@ function mapTaskRowToScheduleOrder(row = {}) {
   const objectPlanTasks = parseJsonValue(task.objectPlanTasks, [])
   const dateYmd = normalizeDateYmd(task.dateYmd)
   const endDateYmd = normalizeDateYmd(task.endDateYmd, dateYmd)
+  const scheduleMode = nullableText(task.scheduleMode, 32) || 'once'
+  const recurrenceEndDate = normalizeDateYmd(servicePayload?.recurrenceEndDate)
+  const recurrenceSkippedDates = (Array.isArray(servicePayload?.recurrenceSkippedDates)
+    ? servicePayload.recurrenceSkippedDates
+    : []
+  )
+    .map((value) => normalizeDateYmd(value))
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .sort()
+  const recurrenceSourceOrderId = nullableText(servicePayload?.recurrenceSourceOrderId, 180)
+  const recurrenceOriginalDateYmd = normalizeDateYmd(servicePayload?.recurrenceOriginalDateYmd)
   const createdAt = toIsoTimestamp(task.createdAt)
   const updatedAt = toIsoTimestamp(task.updatedAt, createdAt)
 
@@ -874,6 +732,10 @@ function mapTaskRowToScheduleOrder(row = {}) {
     idTask: id,
     isDraft: false,
     recordKind: 'portal-schedule-order',
+    lifecycleStatus: normalizeScheduleOrderLifecycleStatus(task.lifecycleStatus),
+    cancelledAt: toIsoTimestamp(task.cancelledAt),
+    canceledAt: toIsoTimestamp(task.cancelledAt),
+    archivedAt: toIsoTimestamp(task.archivedAt),
     row: assignedRows[0] ?? 0,
     assignedRows: assignedRows.length ? assignedRows : [0],
     workerAssignments: allocations,
@@ -881,9 +743,24 @@ function mapTaskRowToScheduleOrder(row = {}) {
     startTime: normalizeTime(task.startTime, '08:00'),
     endDateYmd,
     endTime: normalizeTime(task.endTime, '09:00'),
-    validUntil: endDateYmd,
+    validUntil: scheduleMode === 'repeat' ? '' : endDateYmd,
+    repeatUntil: recurrenceEndDate,
+    repeatEndDate: recurrenceEndDate,
+    recurrenceEndDate,
+    seriesEndDate: recurrenceEndDate,
+    recurrenceSkippedDates,
+    recurrenceExceptionDates: recurrenceSkippedDates,
+    skipDates: recurrenceSkippedDates,
+    sourceOrderId: recurrenceSourceOrderId,
+    recurrenceSourceOrderId,
+    parentOrderId: recurrenceSourceOrderId,
+    recurrenceOverride: Boolean(servicePayload?.recurrenceOverride),
+    recurrenceOverrideKind: nullableText(servicePayload?.recurrenceOverrideKind, 40),
+    recurrenceOriginalDateYmd,
+    recurrenceOverrideDateYmd: recurrenceOriginalDateYmd,
+    occurrenceDateYmd: recurrenceOriginalDateYmd,
     nextDate: dateYmd,
-    scheduleMode: nullableText(task.scheduleMode, 32) || 'once',
+    scheduleMode,
     accessStartTime: normalizeTime(task.accessStartTime),
     accessEndTime: normalizeTime(task.accessEndTime),
     accessWindows: Array.isArray(objectAccessWindows) ? objectAccessWindows : [],
@@ -982,7 +859,7 @@ function mapTaskRowsToScheduleOrders(rows = [], context = 'fetch') {
       sample: taskRowDebugSample(rows[0]),
     })
   }
-  return sortScheduleOrders(mapped)
+  return sortScheduleOrders(filterActiveScheduleOrders(mapped))
 }
 
 async function fetchScheduleTasksViaDataConnect(orgId) {
@@ -998,26 +875,6 @@ async function fetchScheduleTasksViaDataConnect(orgId) {
     })
   }
   return mapTaskRowsToScheduleOrders(rows, 'fetch')
-}
-
-async function upsertScheduleTasksViaDataConnect(orgId, orders = []) {
-  const normalizedOrgId = normalizeText(orgId)
-  const sourceOrders = Array.isArray(orders) ? orders : []
-  if (!normalizedOrgId) return sourceOrders
-
-  requireFirebaseDataConnect()
-  const taskRows = sourceOrders.map((order) => mapScheduleOrderToTaskVariables(normalizedOrgId, order)).filter(Boolean)
-  const savedRows = []
-  for (const taskRow of taskRows) {
-    const response = await upsertTaskForOrg(taskRow)
-    const returnedRow = response?.data?.task_upsert
-    const returnedHasScheduleFields = normalizeText(returnedRow?.dateYmd ?? returnedRow?.date_ymd) || normalizeText(returnedRow?.startTime ?? returnedRow?.start_time)
-    savedRows.push(returnedHasScheduleFields ? returnedRow : taskRow)
-  }
-
-  const fetchedOrders = await fetchScheduleTasksViaDataConnect(normalizedOrgId)
-  if (Array.isArray(fetchedOrders)) return fetchedOrders
-  return mapTaskRowsToScheduleOrders(savedRows, 'upsert')
 }
 
 async function deleteScheduleTasksViaDataConnect(orgId, orderIds = []) {
@@ -1063,12 +920,16 @@ export async function upsertScheduleTasks(orgId, orders = []) {
 
   requireCurrentScheduleOrganization(normalizedOrgId)
 
-  if (!shouldSkipScheduleOrdersEndpoint(normalizedOrgId)) {
-    const backendOrders = await upsertScheduleTasksViaBackend(normalizedOrgId, sourceOrders)
-    if (backendOrders) return backendOrders
-  }
+  return upsertScheduleTasksViaBackend(normalizedOrgId, sourceOrders)
+}
 
-  return upsertScheduleTasksViaDataConnect(normalizedOrgId, sourceOrders)
+export async function setScheduleTaskLifecycleStatus(orgId, orderIds = [], lifecycleStatus = '') {
+  const normalizedOrgId = normalizeText(orgId)
+  if (!normalizedOrgId) {
+    throw new Error('Brak organizacji do zmiany statusu zlecenia.')
+  }
+  requireCurrentScheduleOrganization(normalizedOrgId)
+  return setScheduleTaskLifecycleStatusViaBackend(normalizedOrgId, orderIds, lifecycleStatus)
 }
 
 export async function deleteScheduleTasks(orgId, orderIds = []) {

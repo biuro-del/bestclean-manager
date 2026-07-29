@@ -40,7 +40,6 @@ import {
   updateEvent,
   updateWorkday,
 } from '../services/workdayService'
-import { getScheduleBoard } from '../services/scheduleService'
 import {
   createBackup,
   deleteBackup,
@@ -61,7 +60,12 @@ import {
   setUserStyle,
 } from '../services/styleService'
 import { deletePortalTasks, fetchPortalTasks, upsertPortalTasks } from '../services/portalTaskService'
-import { deleteScheduleTasks, fetchScheduleTasks, upsertScheduleTasks } from '../services/scheduleTaskDataConnectService'
+import {
+  deleteScheduleTasks,
+  fetchScheduleTasks,
+  setScheduleTaskLifecycleStatus,
+  upsertScheduleTasks,
+} from '../services/scheduleTaskDataConnectService'
 import {
   closePlatformOrganization,
   listPlatformOrganizations,
@@ -130,11 +134,11 @@ const SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS = [
   { id: 'sub-orders-list', kind: 'subsection', label: 'Lista zleceń', meta: 'Podsekcja dział "Zlecenia"', route: 'orders' },
   { id: 'sub-orders-map', kind: 'subsection', label: 'Mapa', meta: 'Podsekcja dział "Zlecenia"', route: 'ordersMap' },
   { id: 'section-calendar', kind: 'section', label: 'Kalendarz', meta: 'Sekcja', route: 'calendar' },
-  { id: 'section-kanban', kind: 'section', label: 'Kanban', meta: 'Sekcja', route: 'kanban', kanbanSection: 'home' },
-  { id: 'sub-kanban-home', kind: 'subsection', label: 'Strona główna', meta: 'Podsekcja dział "Kanban"', route: 'kanban', kanbanSection: 'home' },
-  { id: 'sub-kanban-tasks', kind: 'subsection', label: 'Moje zadania', meta: 'Podsekcja dział "Kanban"', route: 'kanban', kanbanSection: 'tasks' },
-  { id: 'sub-kanban-inbox', kind: 'subsection', label: 'Skrzynka odbiorcza', meta: 'Podsekcja dział "Kanban"', route: 'kanban', kanbanSection: 'inbox' },
-  { id: 'section-schedule', kind: 'section', label: 'Grafik pracy', meta: 'Sekcja', route: 'schedule' },
+  { id: 'section-kanban', kind: 'section', label: 'Centrum zadań', meta: 'Sekcja', route: 'kanban', kanbanSection: 'home' },
+  { id: 'sub-kanban-home', kind: 'subsection', label: 'Strona główna', meta: 'Podsekcja dział "Centrum zadań"', route: 'kanban', kanbanSection: 'home' },
+  { id: 'sub-kanban-tasks', kind: 'subsection', label: 'Moje zadania', meta: 'Podsekcja dział "Centrum zadań"', route: 'kanban', kanbanSection: 'tasks' },
+  { id: 'sub-kanban-inbox', kind: 'subsection', label: 'Skrzynka odbiorcza', meta: 'Podsekcja dział "Centrum zadań"', route: 'kanban', kanbanSection: 'inbox' },
+  { id: 'section-contract-profitability', kind: 'section', label: 'Rentowność kontraktów', meta: 'Sekcja', route: 'contractProfitability' },
   { id: 'section-clients', kind: 'section', label: 'Klienci', meta: 'Sekcja', route: 'clientProfile' },
   { id: 'sub-client-profile', kind: 'subsection', label: 'Profil klienta', meta: 'Podsekcja dział "Klienci"', route: 'clientProfile' },
   { id: 'section-objects', kind: 'section', label: 'Obiekty', meta: 'Sekcja', route: 'zones' },
@@ -184,8 +188,6 @@ const BLOCKING_MODAL_SELECTORS = [
   '#repGeoOverlay',
 ]
 const PORTAL_NOTIFICATION_ALERT_SELECTORS = [
-  '#dashScheduleMissingAlert',
-  '#dashScheduleLateAlert',
   '#calendarTimelineStatusAlert',
   '#portalNotice',
 ]
@@ -195,7 +197,7 @@ const PORTAL_ROUTE_VIEW_IDS = {
   dashboard: 'view-dashboard',
   calendar: 'view-calendar',
   kanban: 'view-kanban',
-  schedule: 'view-schedule',
+  contractProfitability: 'view-contractProfitability',
   events: 'view-events',
   orders: 'view-orders',
   ordersMap: 'view-ordersMap',
@@ -220,10 +222,10 @@ const PORTAL_ROUTE_FEATURE_KEYS = {
   dashboard: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'workerProfile', 'orders', 'kanban', 'calendar'],
   calendar: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar'],
   kanban: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar', 'kanban'],
+  contractProfitability: ['contractProfitability'],
   events: ['dashboard', 'reports', 'zones', 'clientProfile', 'workerTime', 'events'],
   orders: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar'],
   ordersMap: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar'],
-  schedule: ['dashboard'],
   zones: ['zones'],
   workerProfile: ['dashboard', 'workerProfile'],
   workerAccount: ['dashboard', 'workerAccount'],
@@ -240,6 +242,7 @@ const PORTAL_ROUTE_BIND_KEYS = {
   dashboard: 'dashboard',
   calendar: 'calendar',
   kanban: 'kanban',
+  contractProfitability: 'contractProfitability',
   events: 'events',
   orders: 'orders:list',
   ordersMap: 'orders:map',
@@ -280,6 +283,9 @@ function normalizePortalRoute(route) {
 function portalRouteExists(route) {
   const normalizedRoute = normalizePortalRoute(route)
   if (!normalizedRoute) {
+    return false
+  }
+  if (normalizedRoute === 'contractProfitability' && !canOpenContractProfitability()) {
     return false
   }
 
@@ -1187,6 +1193,11 @@ function sidebarIsTabletViewport() {
   return width >= 761 && width <= 1180
 }
 
+function sidebarIsMobileViewport() {
+  const width = Number(window.innerWidth || document.documentElement?.clientWidth || 0)
+  return width > 0 && width <= 760
+}
+
 function applySidebarRouteTitles() {
   document.querySelectorAll('#portalSidebar [data-route], #portalSidebar [data-toggle]').forEach((button) => {
     const label = String(button.querySelector('.mi-label')?.textContent ?? '').trim()
@@ -1238,7 +1249,7 @@ function bindSidebarCollapseToggle() {
   applySidebarRouteTitles()
 
   const stored = readStoredSidebarCollapsed()
-  const defaultCollapsed = stored == null ? sidebarIsTabletViewport() : stored
+  const defaultCollapsed = sidebarIsMobileViewport() || (stored == null ? sidebarIsTabletViewport() : stored)
   setSidebarCollapsed(defaultCollapsed, { persist: false })
 
   if (!(toggleButton instanceof HTMLButtonElement)) {
@@ -1252,6 +1263,11 @@ function bindSidebarCollapseToggle() {
   }
 
   const handleResize = () => {
+    if (sidebarIsMobileViewport()) {
+      setSidebarCollapsed(true, { persist: false })
+      return
+    }
+
     if (readStoredSidebarCollapsed() != null) {
       return
     }
@@ -1537,8 +1553,8 @@ function routeHasUsableData(route) {
     case 'calendar':
     case 'kanban':
       return appState.calendarRemoteTasksLoaded === true || (Array.isArray(appState.calendarTasks) && appState.calendarTasks.length > 0)
-    case 'schedule':
-      return Array.isArray(appState.dashboardScheduleDays) && appState.dashboardScheduleDays.length > 0
+    case 'contractProfitability':
+      return Boolean(contractProfitabilityFeature)
     case 'events':
       return Array.isArray(appState.eventRows) && appState.eventRows.length > 0
     case 'orders':
@@ -2550,6 +2566,39 @@ function canManageClients() {
   return roleLevel(appState.session?.role) >= 2
 }
 
+function profitabilityCapability() {
+  const capability = appState.session?.capabilities?.profitabilityModule
+  return capability && typeof capability === 'object' ? capability : {}
+}
+
+function canReadProfitability() {
+  return profitabilityCapability().canRead === true
+}
+
+function canEditProfitability() {
+  return profitabilityCapability().canEdit === true
+}
+
+function profitabilityPreviewIsAvailable() {
+  if (!import.meta.env.DEV || typeof window === 'undefined') {
+    return false
+  }
+  return ['localhost', '127.0.0.1', '::1'].includes(String(window.location.hostname ?? '').toLowerCase())
+}
+
+function canOpenContractProfitability() {
+  return canReadProfitability() || profitabilityPreviewIsAvailable()
+}
+
+function syncProfitabilityEntryPermissions() {
+  const visible = canOpenContractProfitability()
+  document.querySelectorAll('[data-profitability-entry]').forEach((node) => {
+    if (node instanceof HTMLElement) {
+      node.hidden = !visible
+    }
+  })
+}
+
 function canDeleteClients() {
   return canDeleteOrganizationRecords()
 }
@@ -2731,20 +2780,6 @@ function dashboardHideMetricPopover(...args) {
     return undefined
   }
   return getDashboardFeature().hideMetricPopover(...args)
-}
-
-function dashboardHideScheduleMissingStartAlert(...args) {
-  if (!dashboardFeature) {
-    return undefined
-  }
-  return getDashboardFeature().hideScheduleMissingStartAlert(...args)
-}
-
-function dashboardHideScheduleLateStartAlert(...args) {
-  if (!dashboardFeature) {
-    return undefined
-  }
-  return getDashboardFeature().hideScheduleLateStartAlert(...args)
 }
 
 async function hydrateSections(...args) {
@@ -3001,7 +3036,7 @@ function kanbanColumnLabel(...args) {
     return kanbanFeature.columnLabel(...args)
   }
   const status = fallbackKanbanNormalizeStatus(args[0])
-  return fallbackKanbanColumns().find((column) => column.id === status)?.label || status || 'Kanban'
+  return fallbackKanbanColumns().find((column) => column.id === status)?.label || status || 'Centrum zadań'
 }
 
 function kanbanNormalizeStatus(...args) {
@@ -3014,6 +3049,23 @@ function kanbanCurrentUserOption(...args) {
 
 function kanbanNormalizeSection(...args) {
   return getKanbanFeature().normalizeSection(...args)
+}
+
+let contractProfitabilityFeature = null
+
+function getContractProfitabilityFeature() {
+  if (!contractProfitabilityFeature) {
+    throw new Error('Contract profitability feature is not initialized.')
+  }
+  return contractProfitabilityFeature
+}
+
+function renderContractProfitabilityView(...args) {
+  return getContractProfitabilityFeature().render(...args)
+}
+
+function bindContractProfitabilityViewFunctions(...args) {
+  return getContractProfitabilityFeature().bind(...args)
 }
 
 function portalRouteTemplateKey(route) {
@@ -3045,14 +3097,14 @@ function loadPortalTemplateModule(route) {
       return import('../features/events/index.js')
     case 'kanban':
       return import('../features/kanban/index.js')
+    case 'contractProfitability':
+      return import('../features/profitability/index.js')
     case 'orders':
       return import('../features/orders/list/index.js')
     case 'ordersMap':
       return import('../features/orders/map/index.js')
     case 'reports':
       return import('../features/reports/index.js')
-    case 'schedule':
-      return import('../features/schedule/index.js')
     case 'settings':
       return import('../features/settings/index.js')
     case 'workerAccount':
@@ -3082,6 +3134,8 @@ function loadPortalFeatureModule(featureKey) {
       return import('../features/events/index.js')
     case 'kanban':
       return import('../features/kanban/index.js')
+    case 'contractProfitability':
+      return import('../features/profitability/index.js')
     case 'orders':
       return import('../features/orders/index.js')
     case 'reports':
@@ -3115,6 +3169,8 @@ function portalFeatureIsReady(featureKey) {
       return Boolean(eventsFeature)
     case 'kanban':
       return Boolean(kanbanFeature)
+    case 'contractProfitability':
+      return Boolean(contractProfitabilityFeature)
     case 'orders':
       return Boolean(ordersFeature)
     case 'reports':
@@ -3157,6 +3213,10 @@ function assignPortalFeature(featureKey, module) {
     case 'kanban':
       kanbanFeature = kanbanFeature || module.createKanbanFeature(portalFeatureContext)
       return kanbanFeature
+    case 'contractProfitability':
+      contractProfitabilityFeature =
+        contractProfitabilityFeature || module.createContractProfitabilityFeature(portalFeatureContext)
+      return contractProfitabilityFeature
     case 'orders':
       ordersFeature = ordersFeature || module.createOrdersFeature(portalFeatureContext)
       return ordersFeature
@@ -3321,6 +3381,9 @@ function bindPortalRouteOnce(route, navigation = portalNavigation) {
       break
     case 'kanban':
       cleanup = bindKanbanViewFunctions()
+      break
+    case 'contractProfitability':
+      cleanup = bindContractProfitabilityViewFunctions()
       break
     case 'events':
       cleanup = bindEventsViewFunctions()
@@ -3504,10 +3567,10 @@ function showLoginCredentials({ showResetAction = false } = {}) {
   if (mfaEnrollmentPanel) mfaEnrollmentPanel.hidden = true
   setLoginResetActionVisible(showResetAction)
   if (loginTitle) {
-    loginTitle.textContent = 'Witaj!'
+    loginTitle.textContent = 'Witaj ponownie'
   }
   if (loginCopy) {
-    loginCopy.textContent = 'Zaloguj si\u0119 do portalu Cleanzi.'
+    loginCopy.textContent = 'Zaloguj si\u0119, aby przej\u015b\u0107 do centrum dowodzenia Cleanzi.'
   }
 }
 
@@ -3731,6 +3794,10 @@ function formatLoginError(error) {
 
   if (isPasswordResetEligibleLoginError(error)) {
     return 'Nieprawidłowy email lub hasło.'
+  }
+
+  if (authErrorText.includes('feature is not initialized')) {
+    return 'Portal nie dokończył uruchamiania. Odśwież stronę i spróbuj ponownie.'
   }
 
   return error instanceof Error ? error.message : 'Błąd logowania.'
@@ -4014,12 +4081,12 @@ function ordersOpenEditor(orderId) {
   return getOrdersFeature().openEditor(orderId)
 }
 
-function ordersOpenEditorFromCalendar(orderId) {
-  return getOrdersFeature().openEditorFromCalendar(orderId)
+function ordersOpenEditorFromCalendar(orderId, options = {}) {
+  return getOrdersFeature().openEditorFromCalendar(orderId, options)
 }
 
-function ordersOpenRecurringOccurrenceEditorFromCalendar(sourceOrderId = '', occurrenceDateYmd = '') {
-  return getOrdersFeature().openRecurringOccurrenceEditorFromCalendar(sourceOrderId, occurrenceDateYmd)
+function ordersOpenRecurringOccurrenceEditorFromCalendar(sourceOrderId = '', occurrenceDateYmd = '', options = {}) {
+  return getOrdersFeature().openRecurringOccurrenceEditorFromCalendar(sourceOrderId, occurrenceDateYmd, options)
 }
 
 function renderOrdersView() {
@@ -4028,6 +4095,10 @@ function renderOrdersView() {
 
 function renderOrdersMapView() {
   return getOrdersFeature().renderMap()
+}
+
+function ordersLoadGoogleMaps(...args) {
+  return getOrdersFeature().loadGoogleMaps(...args)
 }
 
 function bindOrdersViewFunctions() {
@@ -4545,10 +4616,12 @@ function sidebarGlobalSearchTextFromParts(...parts) {
 }
 
 function sidebarGlobalSearchStaticItems() {
-  return SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS.map((item) => ({
-    ...item,
-    searchText: sidebarGlobalSearchTextFromParts(item.label, item.meta),
-  }))
+  return SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS
+    .filter((item) => item.route !== 'contractProfitability' || canOpenContractProfitability())
+    .map((item) => ({
+      ...item,
+      searchText: sidebarGlobalSearchTextFromParts(item.label, item.meta),
+    }))
 }
 
 function sidebarGlobalSearchClientLabel(client = {}) {
@@ -5592,6 +5665,7 @@ function createPortalFeatureContext() {
     reportHistoryResolveDayQrCode,
     resolveZoneByQrCandidate,
     roleLevel,
+    setScheduleTaskLifecycleStatus,
     isBlockingModalOpen,
     isPortalInteractionBusy,
     queuePortalDeferredNotification,
@@ -5666,6 +5740,7 @@ function createPortalFeatureContext() {
     fetchWorkersForCurrentSession,
     fetchZonesForCurrentSession,
     ordersListSourceOrders,
+    ordersLoadGoogleMaps,
     ordersSyncRemoteTimelineOrders,
     SETTINGS_TAB_BACKUP,
     SETTINGS_TAB_STORAGE_KEY,
@@ -5676,10 +5751,12 @@ function createPortalFeatureContext() {
     canDeleteWorkers,
     canDeleteClients,
     canDeleteEvents,
+    canEditProfitability,
     canManageBackupSettings,
     canManageClients,
     canManageEvents,
     canManageWorkers,
+    canReadProfitability,
     canResetWorkerPasswords,
     clearUserStyle,
     createBackup,
@@ -5801,7 +5878,6 @@ function createPortalFeatureContext() {
     calendarZoneAccessValues,
     fillClientProfileCoordinatorOptions,
     fillClientsCoordinatorSelect,
-    getScheduleBoard,
     getTodayActiveWorkers,
     kanbanCurrentUserOption,
     kanbanNewTaskStatus,
@@ -6204,10 +6280,12 @@ async function activatePortalSession(session, router, { restoreRoute = false } =
   }
 
   resetPortalState({ session })
+  syncProfitabilityEntryPermissions()
   showPortal()
   setUserChip(session)
   await ensurePortalSessionCoreReady()
   syncSettingsPermissions()
+  syncProfitabilityEntryPermissions()
   await settingsRefreshStyleState({ silent: true })
 
   if (restoreRoute) {
@@ -6218,7 +6296,9 @@ async function activatePortalSession(session, router, { restoreRoute = false } =
     await hydrateSections(activeOrgId)
   }
 
-  startDashboardAutoRefresh()
+  if (dashboardFeature && normalizeNavigationRoute(appState.currentRoute) === 'dashboard') {
+    startDashboardAutoRefresh()
+  }
 }
 
 function OLD_bindLogin(router) {
@@ -6701,6 +6781,7 @@ function bindLogout() {
     logout()
     setUserChip(null)
     syncSettingsPermissions()
+    syncProfitabilityEntryPermissions()
     applyPortalTheme(STYLE_FALLBACK_ID)
     showLoginScreen()
     showLoginCredentials()
@@ -6761,8 +6842,8 @@ async function syncRouteDataNow(normalizedRoute, options = {}) {
     return
   }
 
-  if (normalizedRoute === 'schedule') {
-    await getDashboardFeature().startScheduleRefresh?.(appState.session.orgId, { forceRefresh: force })
+  if (normalizedRoute === 'contractProfitability') {
+    await renderContractProfitabilityView({ force })
     return
   }
 
@@ -6900,8 +6981,6 @@ export function mountPortalApp() {
     writeStoredCurrentRoute(appState.currentRoute)
     if (dashboardFeature && appState.currentRoute !== 'dashboard') {
       dashboardHideMetricPopover()
-      dashboardHideScheduleMissingStartAlert()
-      dashboardHideScheduleLateStartAlert()
     }
     if (calendarFeature && appState.currentRoute !== 'calendar') {
       calendarTimelineHideStatusAlert()
@@ -6938,7 +7017,7 @@ export function mountPortalApp() {
       return
     }
 
-    if (routeName === 'schedule') {
+    if (routeName === 'contractProfitability') {
       await syncRouteData(routeName)
       return
     }
@@ -7069,8 +7148,6 @@ export function mountPortalApp() {
 
   const handleVisibilityChange = () => {
     if (document.visibilityState !== 'visible') {
-      dashboardHideScheduleMissingStartAlert()
-      dashboardHideScheduleLateStartAlert()
       return
     }
     flushPortalDeferredNotifications()
@@ -7173,25 +7250,23 @@ export function mountPortalApp() {
         logout()
         resetPortalState()
         clearStoredCurrentRoute()
-        dashboardHideScheduleMissingStartAlert()
-        dashboardHideScheduleLateStartAlert()
         showLoginScreen()
         setUserChip(null)
         applyPortalTheme(STYLE_FALLBACK_ID)
         syncSettingsPermissions()
-        setLoginError(message)
+        syncProfitabilityEntryPermissions()
+        setLoginError(formatLoginError(error))
       }
     } else {
       stopDashboardAutoRefresh()
       resetPortalState()
       clearStoredCurrentRoute()
-      dashboardHideScheduleMissingStartAlert()
-      dashboardHideScheduleLateStartAlert()
       showLoginScreen()
       showLoginCredentials()
       setUserChip(null)
       applyPortalTheme(STYLE_FALLBACK_ID)
       syncSettingsPermissions()
+      syncProfitabilityEntryPermissions()
     }
     setLoginControlsBusy(false)
   })()
@@ -7200,8 +7275,6 @@ export function mountPortalApp() {
     portalDisposed = true
     stopEventsPolling()
     stopDashboardAutoRefresh()
-    dashboardHideScheduleMissingStartAlert()
-    dashboardHideScheduleLateStartAlert()
     portalDeferredNotifications.clear()
     if (portalDeferredNotificationTimer) {
       window.clearTimeout(portalDeferredNotificationTimer)

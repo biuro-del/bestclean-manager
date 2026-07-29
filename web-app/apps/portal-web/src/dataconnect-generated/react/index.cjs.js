@@ -1,4 +1,4 @@
-const { upsertOrgUiStyleForOrgRef, deleteOrgUiStyleForOrgRef, upsertMyUiStylePreferenceRef, deleteMyUiStylePreferenceRef, upsertUserUiStylePreferenceForOrgRef, deleteUserUiStylePreferenceForOrgRef, insertClientForOrgRef, updateClientForOrgRef, deleteClientForOrgRef, insertIndividualJobForOrgRef, updateIndividualJobForOrgRef, deleteIndividualJobForOrgRef, upsertTaskForOrgRef, deleteTaskForOrgRef, insertZoneForOrgRef, updateZoneForOrgRef, deleteZoneForOrgRef, insertWorkdayForOrgRef, updateWorkdayForOrgRef, deleteWorkdayForOrgRef, insertEventForOrgRef, updateEventForOrgRef, deleteEventForOrgRef, insertBackupCycleForOrgRef, updateBackupCycleForOrgRef, insertStorageForOrgRef, updateStorageForOrgRef, deleteStorageForOrgRef, insertClientStorageForOrgRef, updateClientStorageForOrgRef, deleteClientStorageForOrgRef, startWorkdayPauseRef, stopWorkdayPauseRef, myOrganizationsRef, orgUiStyleForOrgRef, myUiStylePreferenceRef, userUiStylePreferencesForOrgRef, canManageWorkersForOrgRef, workersForOrgRef, clientsForOrgRef, individualJobsForOrgRef, tasksForOrgRef, zonesForOrgRef, workdaysForOrgRef, workdaysPageForOrgRef, workdaysPageForOrgByWorkerRef, workdaysPageForOrgByRoomRef, workdaysPageForOrgByStatusRef, workdaysFingerprintForOrgRef, backupCyclesForOrgRef, eventsForOrgRef, eventsPageForOrgRef, eventsPageForOrgByWorkerRef, eventsPageForOrgByZoneRef, eventsPageForOrgByStatusRef, eventsFingerprintForOrgRef, workerWorkdaysForOrgRef, storageForOrgRef, clientStorageForClientRef, clientStorageForOrgRef, workdayPausesForOrgRef, activeWorkdayPauseForWorkerRef, connectorConfig } = require('../index.cjs.js');
+const { upsertOrgUiStyleForOrgRef, deleteOrgUiStyleForOrgRef, upsertMyUiStylePreferenceRef, deleteMyUiStylePreferenceRef, upsertUserUiStylePreferenceForOrgRef, deleteUserUiStylePreferenceForOrgRef, insertClientForOrgRef, updateClientForOrgRef, deleteClientForOrgRef, insertIndividualJobForOrgRef, updateIndividualJobForOrgRef, deleteIndividualJobForOrgRef, upsertTaskForOrgRef, deleteTaskForOrgRef, insertZoneForOrgRef, updateZoneForOrgRef, deleteZoneForOrgRef, insertWorkdayForOrgRef, updateWorkdayForOrgRef, deleteWorkdayForOrgRef, insertEventForOrgRef, updateEventForOrgRef, reidentifyEventForOrgRef, deleteEventForOrgRef, insertBackupCycleForOrgRef, updateBackupCycleForOrgRef, insertStorageForOrgRef, updateStorageForOrgRef, deleteStorageForOrgRef, insertClientStorageForOrgRef, updateClientStorageForOrgRef, deleteClientStorageForOrgRef, startWorkdayPauseRef, stopWorkdayPauseRef, myOrganizationsRef, orgUiStyleForOrgRef, myUiStylePreferenceRef, userUiStylePreferencesForOrgRef, canManageWorkersForOrgRef, workersForOrgRef, clientsForOrgRef, individualJobsForOrgRef, tasksForOrgRef, zonesForOrgRef, workdaysForOrgRef, workdaysPageForOrgRef, workdaysIntegrityPageForOrgRef, workdaysPageForOrgByWorkerRef, workdaysPageForOrgByRoomRef, workdaysPageForOrgByStatusRef, workdaysFingerprintForOrgRef, backupCyclesForOrgRef, eventsForOrgRef, eventsIntegrityPageForOrgRef, eventsPageForOrgRef, eventsPageForOrgByWorkerRef, eventsPageForOrgByZoneRef, eventsPageForOrgByStatusRef, eventsPageForOrgByTaskOccurrenceRef, eventsPageForOrgByPlanMatchStatusRef, eventsFingerprintForOrgRef, workerWorkdaysForOrgRef, storageForOrgRef, clientStorageForClientRef, clientStorageForOrgRef, workdayPausesForOrgRef, activeWorkdayPauseForWorkerRef, connectorConfig } = require('../index.cjs.js');
 const { validateArgs, CallerSdkTypeEnum } = require('firebase/data-connect');
 const { useDataConnectQuery, useDataConnectMutation, validateReactArgs } = require('@tanstack-query-firebase/react/data-connect');
 
@@ -178,6 +178,14 @@ exports.useUpdateEventForOrg = function useUpdateEventForOrg(dcOrOptions, option
   return useDataConnectMutation(refFactory, inputOpts, CallerSdkTypeEnum.GeneratedReact);
 }
 
+exports.useReidentifyEventForOrg = function useReidentifyEventForOrg(dcOrOptions, options) {
+  const { dc: dcInstance, vars: inputOpts } = validateArgs(connectorConfig, dcOrOptions, options);
+  function refFactory(vars) {
+    return reidentifyEventForOrgRef(dcInstance, vars);
+  }
+  return useDataConnectMutation(refFactory, inputOpts, CallerSdkTypeEnum.GeneratedReact);
+}
+
 exports.useDeleteEventForOrg = function useDeleteEventForOrg(dcOrOptions, options) {
   const { dc: dcInstance, vars: inputOpts } = validateArgs(connectorConfig, dcOrOptions, options);
   function refFactory(vars) {
@@ -339,6 +347,12 @@ exports.useWorkdaysPageForOrg = function useWorkdaysPageForOrg(dcOrVars, varsOrO
   return useDataConnectQuery(ref, inputOpts, CallerSdkTypeEnum.GeneratedReact);
 }
 
+exports.useWorkdaysIntegrityPageForOrg = function useWorkdaysIntegrityPageForOrg(dcOrVars, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateReactArgs(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  const ref = workdaysIntegrityPageForOrgRef(dcInstance, inputVars);
+  return useDataConnectQuery(ref, inputOpts, CallerSdkTypeEnum.GeneratedReact);
+}
+
 exports.useWorkdaysPageForOrgByWorker = function useWorkdaysPageForOrgByWorker(dcOrVars, varsOrOptions, options) {
   const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateReactArgs(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
   const ref = workdaysPageForOrgByWorkerRef(dcInstance, inputVars);
@@ -375,6 +389,12 @@ exports.useEventsForOrg = function useEventsForOrg(dcOrVars, varsOrOptions, opti
   return useDataConnectQuery(ref, inputOpts, CallerSdkTypeEnum.GeneratedReact);
 }
 
+exports.useEventsIntegrityPageForOrg = function useEventsIntegrityPageForOrg(dcOrVars, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateReactArgs(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  const ref = eventsIntegrityPageForOrgRef(dcInstance, inputVars);
+  return useDataConnectQuery(ref, inputOpts, CallerSdkTypeEnum.GeneratedReact);
+}
+
 exports.useEventsPageForOrg = function useEventsPageForOrg(dcOrVars, varsOrOptions, options) {
   const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateReactArgs(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
   const ref = eventsPageForOrgRef(dcInstance, inputVars);
@@ -396,6 +416,18 @@ exports.useEventsPageForOrgByZone = function useEventsPageForOrgByZone(dcOrVars,
 exports.useEventsPageForOrgByStatus = function useEventsPageForOrgByStatus(dcOrVars, varsOrOptions, options) {
   const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateReactArgs(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
   const ref = eventsPageForOrgByStatusRef(dcInstance, inputVars);
+  return useDataConnectQuery(ref, inputOpts, CallerSdkTypeEnum.GeneratedReact);
+}
+
+exports.useEventsPageForOrgByTaskOccurrence = function useEventsPageForOrgByTaskOccurrence(dcOrVars, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateReactArgs(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  const ref = eventsPageForOrgByTaskOccurrenceRef(dcInstance, inputVars);
+  return useDataConnectQuery(ref, inputOpts, CallerSdkTypeEnum.GeneratedReact);
+}
+
+exports.useEventsPageForOrgByPlanMatchStatus = function useEventsPageForOrgByPlanMatchStatus(dcOrVars, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateReactArgs(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  const ref = eventsPageForOrgByPlanMatchStatusRef(dcInstance, inputVars);
   return useDataConnectQuery(ref, inputOpts, CallerSdkTypeEnum.GeneratedReact);
 }
 

@@ -468,6 +468,9 @@ mutation DeleteIndividualJobForOrg(
 mutation UpsertTaskForOrg(
   $orgId: String!
   $idTask: String!
+  $lifecycleStatus: String = "ACTIVE"
+  $cancelledAt: Timestamp
+  $archivedAt: Timestamp
   $dateYmd: String
   $startTime: String
   $endDateYmd: String
@@ -526,6 +529,9 @@ mutation UpsertTaskForOrg(
   task_upsert(data: {
     orgId: $orgId
     idTask: $idTask
+    lifecycleStatus: $lifecycleStatus
+    cancelledAt: $cancelledAt
+    archivedAt: $archivedAt
     dateYmd: $dateYmd
     startTime: $startTime
     endDateYmd: $endDateYmd
@@ -771,6 +777,7 @@ mutation InsertEventForOrg(
   $eventId: String!
   $workdayId: String
   $zoneId: String
+  $eventType: String @retired
   $workerLogin: String
   $workerName: String
   $startAt: Timestamp
@@ -788,7 +795,7 @@ mutation InsertEventForOrg(
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
         status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK'] || (this in ['WORKER','PRACOWNIK'] && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do dodawania zdarzen stref.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK'] || (this in ['WORKER','PRACOWNIK'] && response.query.targetWorker.authUid == auth.uid)", message: "Brak uprawnien do dodawania zdarzen stref.")
       }
     targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
       authUid
@@ -800,6 +807,9 @@ mutation InsertEventForOrg(
     eventId: $eventId
     workdayId: $workdayId
     zoneId: $zoneId
+    eventType: "CLEAN"
+    matchStatus: "UNMATCHED"
+    matchReason: "EVENT_REQUIRES_SERVER_CORRELATION"
     workerLogin: $workerLogin
     workerName: $workerName
     startAt: $startAt
@@ -818,6 +828,55 @@ mutation InsertEventForOrg(
 }
 
 mutation UpdateEventForOrg(
+  $orgId: String!
+  $eventId: String!
+  $workdayId: String @retired
+  $zoneId: String @retired
+  $workerLogin: String @retired
+  $workerName: String
+  $startAt: Timestamp @retired
+  $endAt: Timestamp
+  $durationSec: Int
+  $status: String
+  $closeMarkedAt: Timestamp
+  $endReason: String
+  $comment: String
+  $deviceId: String
+  $startEventId: String
+  $endEventId: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK'] || (this in ['WORKER','PRACOWNIK'] && response.query.targetEvent.worker.authUid == auth.uid)", message: "Brak uprawnien do edycji zdarzen stref.")
+      }
+    targetEvent: event(key: { orgId: $orgId, eventId: $eventId }) {
+      worker {
+        authUid
+      }
+    }
+  }
+
+  event_update(
+    key: { orgId: $orgId, eventId: $eventId }
+    data: {
+      workerName: $workerName
+      endAt: $endAt
+      durationSec: $durationSec
+      status: $status
+      closeMarkedAt: $closeMarkedAt
+      endReason: $endReason
+      comment: $comment
+      deviceId: $deviceId
+      startEventId: $startEventId
+      endEventId: $endEventId
+      updatedAt_expr: "request.time"
+    }
+  )
+}
+
+mutation ReidentifyEventForOrg(
   $orgId: String!
   $eventId: String!
   $workdayId: String
@@ -839,11 +898,8 @@ mutation UpdateEventForOrg(
     organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
         status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK'] || (this in ['WORKER','PRACOWNIK'] && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do edycji zdarzen stref.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do zmiany tozsamosci zdarzenia.")
       }
-    targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
-      authUid
-    }
   }
 
   event_update(
@@ -863,6 +919,20 @@ mutation UpdateEventForOrg(
       deviceId: $deviceId
       startEventId: $startEventId
       endEventId: $endEventId
+      matchStatus: "UNMATCHED"
+      matchMethod: null
+      matchReason: "EVENT_IDENTITY_CHANGED_REQUIRES_RECORRELATION"
+      taskId: null
+      occurrenceDateYmd: null
+      serviceBlockId: null
+      allocationId: null
+      workSlotKey: null
+      matchedAt: null
+      planSnapshotVersion: null
+      plannedStartAt: null
+      plannedEndAt: null
+      plannedDurationMinutes: null
+      taskUpdatedAtSnapshot: null
       updatedAt_expr: "request.time"
     }
   )

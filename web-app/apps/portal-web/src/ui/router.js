@@ -2,7 +2,7 @@
   dashboard: 'view-dashboard',
   calendar: 'view-calendar',
   kanban: 'view-kanban',
-  schedule: 'view-schedule',
+  contractProfitability: 'view-contractProfitability',
   events: 'view-events',
   orders: 'view-orders',
   ordersMap: 'view-ordersMap',

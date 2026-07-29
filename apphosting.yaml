@@ -12,6 +12,10 @@ env:
     secret: GOOGLE_MAPS_API_KEY
     availability:
       - BUILD
+  - variable: VITE_ENABLE_JOB_CARD_PREVIEW
+    value: "1"
+    availability:
+      - BUILD
   - variable: API_PROXY_TARGET
     value: https://cleanzi-01.web.app
     availability:

@@ -28,8 +28,13 @@
     <aside class="worker-account-left" aria-label="Karta pracownika">
       <section class="worker-account-card worker-account-profile-card">
         <div class="worker-account-profile-row">
-          <div class="worker-account-avatar" id="waAvatar" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M12 12a4.4 4.4 0 1 0 0-8.8 4.4 4.4 0 0 0 0 8.8Z" stroke="currentColor" stroke-width="1.8"/><path d="M4 21a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <div class="worker-account-avatar-wrap">
+            <div class="worker-account-avatar" id="waAvatar" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M12 12a4.4 4.4 0 1 0 0-8.8 4.4 4.4 0 0 0 0 8.8Z" stroke="currentColor" stroke-width="1.8"/><path d="M4 21a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </div>
+            <button class="worker-account-avatar-action" id="waPhotoQuickBtn" type="button" aria-label="Dodaj lub zmie&#324; zdj&#281;cie profilowe" title="Dodaj lub zmie&#324; zdj&#281;cie">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 7.5 9.4 5h5.2L16 7.5h2A2.5 2.5 0 0 1 20.5 10v7A2.5 2.5 0 0 1 18 19.5H6A2.5 2.5 0 0 1 3.5 17v-7A2.5 2.5 0 0 1 6 7.5h2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.2" stroke="currentColor" stroke-width="1.8"/></svg>
+            </button>
           </div>
           <div class="worker-account-identity">
             <h2 id="waCardName">-</h2>
@@ -114,6 +119,18 @@
               </button>
               <button class="btn2 primary" id="waSaveAccountBtn" data-wa-save-tab="account" type="button" hidden>Zapisz</button>
               <button class="btn2" id="waCancelAccountBtn" data-wa-cancel-tab="account" type="button" hidden>Anuluj</button>
+            </div>
+          </div>
+          <div class="worker-account-photo-editor" id="waPhotoEditor">
+            <div class="worker-account-photo-preview" id="waPhotoPreview" aria-hidden="true"></div>
+            <div class="worker-account-photo-copy">
+              <strong>Zdj&#281;cie profilowe</strong>
+              <p>Miniatura b&#281;dzie u&#380;ywana na mapie, pulpicie, w profilu i w aplikacji pracownika.</p>
+            </div>
+            <div class="worker-account-photo-actions">
+              <input id="waPhotoInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+              <button class="btn2" id="waSelectPhotoBtn" type="button">Wybierz zdj&#281;cie</button>
+              <button class="btn2 danger" id="waRemovePhotoBtn" type="button">Usu&#324; zdj&#281;cie</button>
             </div>
           </div>
           <div class="worker-account-form-grid">
@@ -388,11 +405,11 @@
       </label>
       <label>
         Start pracy (czas)
-        <input id="waDayStartTime" type="time" />
+        <input id="waDayStartTime" type="time" step="1" />
       </label>
       <label>
         Koniec pracy (czas)
-        <input id="waDayEndTime" type="time" />
+        <input id="waDayEndTime" type="time" step="1" />
       </label>
       <label class="wa-day-editor-wide">
         Przepracowano (HH:MM)

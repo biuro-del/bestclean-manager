@@ -1,0 +1,2785 @@
+#portalRoot #view-dashboard > .portal-page-hero,
+#portalRoot #view-dashboard .dash-overview-panel,
+#portalRoot #view-dashboard .dash-insights-row {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dash-command-center {
+  position: relative;
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+  min-height: 710px;
+  padding: 22px;
+  overflow: hidden;
+  border: 1px solid #dfe5ef;
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 96% -10%, rgba(93, 79, 255, 0.07), transparent 26%),
+    #ffffff;
+  box-shadow: 0 14px 42px rgba(25, 37, 64, 0.09);
+  color: #101b36;
+  font-family: "Manrope", "Segoe UI", Arial, sans-serif;
+}
+
+#portalRoot #view-dashboard .dash-command-center button {
+  font-family: inherit;
+}
+
+#portalRoot #view-dashboard .dash-command-center__header {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 2px 2px 16px;
+  border-bottom: 1px solid #edf0f5;
+}
+
+#portalRoot #view-dashboard .dash-command-center__heading {
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-center__eyebrow {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 7px;
+  color: #5c6880;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+#portalRoot #view-dashboard .dash-command-center__live {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 5px 8px;
+  border: 1px solid #d9eee4;
+  border-radius: 999px;
+  background: #f2fbf6;
+  color: #138052;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+}
+
+#portalRoot #view-dashboard .dash-command-center__live i {
+  font-size: 11px;
+}
+
+#portalRoot #view-dashboard .dash-command-center__heading h1 {
+  margin: 0;
+  color: #111a39;
+  font-size: clamp(32px, 3.1vw, 45px);
+  font-weight: 850;
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+}
+
+#portalRoot #view-dashboard .dash-command-center__heading p {
+  margin: 8px 0 0;
+  color: #778197;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+#portalRoot #view-dashboard .dash-command-center__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 9px;
+  align-items: center;
+}
+
+#portalRoot #view-dashboard .dash-command-center__action,
+#portalRoot #view-dashboard .dash-command-center__notification {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid #e2e7ef;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 3px 12px rgba(27, 40, 70, 0.04);
+  color: #394761;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+#portalRoot #view-dashboard .dash-command-center__action:hover,
+#portalRoot #view-dashboard .dash-command-center__notification:hover {
+  border-color: #c8cdfd;
+  background: #f8f7ff;
+  color: #5148e8;
+}
+
+#portalRoot #view-dashboard .dash-command-center__action--primary {
+  border-color: #5d54ef;
+  background: linear-gradient(145deg, #665cf7, #5147e8);
+  box-shadow: 0 8px 18px rgba(83, 72, 232, 0.23);
+  color: #ffffff;
+}
+
+#portalRoot #view-dashboard .dash-command-center__action--primary:hover {
+  border-color: #4840d4;
+  background: linear-gradient(145deg, #5d53eb, #473ecf);
+  color: #ffffff;
+}
+
+#portalRoot #view-dashboard .dash-command-center__notification {
+  position: relative;
+  width: 38px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  font-size: 20px;
+}
+
+#portalRoot #view-dashboard .dash-command-center__notification > span {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+#portalRoot #view-dashboard .dash-command-center__filters {
+  position: absolute;
+  top: 74px;
+  right: 22px;
+  z-index: 1200;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) repeat(4, auto);
+  gap: 10px 15px;
+  align-items: center;
+  width: min(760px, calc(100% - 44px));
+  padding: 14px;
+  border: 1px solid #dfe5ef;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 46px rgba(22, 33, 58, 0.16);
+  backdrop-filter: blur(12px);
+}
+
+#portalRoot #view-dashboard .dash-command-center__filters[hidden] {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dash-command-center__filter-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-center__filter-copy strong {
+  color: #1e2942;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+#portalRoot #view-dashboard .dash-command-center__filter-copy span {
+  color: #7a8599;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+#portalRoot #view-dashboard .dash-command-center__filter {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  color: #45526b;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-center__filter input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-center__filter > span,
+#portalRoot #view-dashboard .dash-command-map__legend i {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #ccd4e1;
+}
+
+#portalRoot #view-dashboard .dash-command-center__filter input:not(:checked) + span {
+  background: #d6dce6 !important;
+  box-shadow: 0 0 0 1px #bbc4d2;
+}
+
+#portalRoot #view-dashboard :is(.dash-command-center__filter > span, .dash-command-map__legend i).is-active {
+  background: #2563eb;
+}
+
+#portalRoot #view-dashboard :is(.dash-command-center__filter > span, .dash-command-map__legend i).is-planned {
+  background: #94a3b8;
+}
+
+#portalRoot #view-dashboard :is(.dash-command-center__filter > span, .dash-command-map__legend i).is-finished {
+  background: #16a36a;
+}
+
+#portalRoot #view-dashboard :is(.dash-command-center__filter > span, .dash-command-map__legend i).is-late {
+  background: #dc2626;
+}
+
+#portalRoot #view-dashboard .dash-command-center__quick-alert {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid #e5e9f1;
+  border-radius: 10px;
+  background: #fafbfe;
+  color: #44516a;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 750;
+  text-align: left;
+}
+
+#portalRoot #view-dashboard .dash-command-center__quick-alert:first-of-type {
+  grid-column: 1 / 3;
+}
+
+#portalRoot #view-dashboard .dash-command-center__quick-alert:last-of-type {
+  grid-column: 3 / 5;
+}
+
+#portalRoot #view-dashboard .dash-command-center__quick-alert > i {
+  color: #635be8;
+  font-size: 15px;
+}
+
+#portalRoot #view-dashboard .dash-command-center__quick-alert > strong {
+  color: #111b38;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+#portalRoot #view-dashboard .dash-command-center__plan-data {
+  min-width: 0;
+  overflow: hidden;
+  color: #778197;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-center__plan-data .dash-overview-plan-item {
+  display: inline-flex;
+  gap: 5px;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-center__plan-data :is(.dash-overview-plan-worker, .dash-overview-plan-more) {
+  display: none;
+}
+
+#portalRoot #view-dashboard .dash-command-center__kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+  padding: 0 2px;
+}
+
+#portalRoot #view-dashboard .dash-command-kpi {
+  display: grid;
+  grid-template-columns: 46px auto minmax(0, 1fr);
+  gap: 13px;
+  align-items: center;
+  min-width: 0;
+  min-height: 64px;
+  padding: 3px 22px;
+  border: 0;
+  border-left: 1px solid #e7ebf2;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+#portalRoot #view-dashboard .dash-command-kpi:first-child {
+  padding-left: 4px;
+  border-left: 0;
+}
+
+#portalRoot #view-dashboard article.dash-command-kpi {
+  cursor: default;
+}
+
+#portalRoot #view-dashboard button.dash-command-kpi:hover {
+  background: #fafbff;
+}
+
+#portalRoot #view-dashboard .dash-command-kpi__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  font-size: 21px;
+}
+
+#portalRoot #view-dashboard .dash-command-kpi__icon--blue {
+  background: #eef4ff;
+  color: #3974ee;
+}
+
+#portalRoot #view-dashboard .dash-command-kpi__icon--cyan {
+  background: #eef8ff;
+  color: #3e79ea;
+}
+
+#portalRoot #view-dashboard .dash-command-kpi__icon--green {
+  background: #edfaf2;
+  color: #1d9b68;
+}
+
+#portalRoot #view-dashboard .dash-command-kpi__icon--violet {
+  background: #f1f2ff;
+  color: #5a57df;
+}
+
+#portalRoot #view-dashboard .dash-command-kpi__value {
+  color: #101937;
+  font-size: clamp(24px, 2vw, 31px);
+  font-weight: 850;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-kpi__copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-kpi__copy strong {
+  overflow: hidden;
+  color: #3a4660;
+  font-size: 10px;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-kpi__copy small {
+  overflow: hidden;
+  color: #8a93a6;
+  font-size: 9px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-center__workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(310px, 0.96fr);
+  min-width: 0;
+  min-height: 390px;
+  overflow: hidden;
+  border: 1px solid #dfe5ef;
+  border-radius: 17px;
+  background: #ffffff;
+  box-shadow: 0 7px 22px rgba(29, 43, 74, 0.06);
+}
+
+#portalRoot #view-dashboard .dash-command-map {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 390px;
+  overflow: hidden;
+  background: #edf3ef;
+}
+
+#portalRoot #view-dashboard .dash-command-map__topbar {
+  position: absolute;
+  top: 13px;
+  left: 56px;
+  z-index: 610;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  max-width: calc(100% - 28px);
+  padding: 8px 11px;
+  border: 1px solid rgba(222, 228, 237, 0.94);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.93);
+  box-shadow: 0 5px 16px rgba(19, 34, 59, 0.11);
+  backdrop-filter: blur(8px);
+}
+
+#portalRoot #view-dashboard .dash-command-map__topbar > div {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-map__topbar strong {
+  overflow: hidden;
+  color: #23304a;
+  font-size: 10px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-map__live-dot,
+#portalRoot #view-dashboard .dash-command-live__status i {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #19a56b;
+  box-shadow: 0 0 0 4px rgba(25, 165, 107, 0.12);
+}
+
+#portalRoot #view-dashboard .dash-command-map__count {
+  color: #6b768b;
+  font-size: 9px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-map__host {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-map__host > .dash-insights-panel-body {
+  display: flex !important;
+  width: 100%;
+  min-height: 0 !important;
+}
+
+#portalRoot #view-dashboard .dash-command-map .dash-active-workers-map-shell {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 390px !important;
+}
+
+#portalRoot #view-dashboard .dash-command-map .dash-active-workers-map {
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+#portalRoot #view-dashboard .dash-command-map .dash-active-workers-map-expand {
+  top: auto !important;
+  right: 16px !important;
+  bottom: 16px !important;
+  min-height: 36px !important;
+  padding: 8px 12px !important;
+  border-radius: 10px !important;
+}
+
+#portalRoot #view-dashboard .dash-command-map .dash-active-workers-map-legend,
+#portalRoot #view-dashboard .dash-command-map .dash-active-workers-map-status,
+#portalRoot #view-dashboard .dash-command-map .dash-active-workers-location-list {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dash-command-map__controls {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 610;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+#portalRoot #view-dashboard .dash-command-map__controls button {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 7px 11px;
+  border: 1px solid rgba(215, 222, 232, 0.94);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 5px 16px rgba(19, 34, 59, 0.12);
+  color: #334159;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+#portalRoot #view-dashboard .dash-command-map__controls button:hover {
+  border-color: #b8c3f6;
+  color: #5149df;
+}
+
+#portalRoot #view-dashboard .dash-command-map__legend {
+  position: absolute;
+  bottom: 59px;
+  left: 16px;
+  z-index: 620;
+  display: grid;
+  gap: 8px;
+  padding: 11px 12px;
+  border: 1px solid #e0e6ef;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 12px 28px rgba(20, 34, 60, 0.15);
+  color: #45526a;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+#portalRoot #view-dashboard .dash-command-map__legend[hidden] {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dash-command-map__legend span {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+}
+
+#portalRoot #view-dashboard .dash-command-center__notification > span[hidden] {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dash-command-map-marker-wrap {
+  width: 1px !important;
+  height: 1px !important;
+  overflow: visible !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+#portalRoot #view-dashboard .dash-command-map .leaflet-tile-pane {
+  filter: saturate(0.68) brightness(1.07) contrast(0.91);
+}
+
+#portalRoot #view-dashboard .leaflet-marker-icon.dash-command-map-marker-wrap:has(.is-expanded),
+#portalRoot #view-dashboard .leaflet-marker-icon.dash-command-map-marker-wrap:has(.is-selected),
+#portalRoot #view-dashboard .leaflet-marker-icon.dash-command-map-marker-wrap:has(.dash-command-map-object:hover),
+#portalRoot #view-dashboard .leaflet-marker-icon.dash-command-map-marker-wrap:has(.dash-command-map-object:focus-within),
+#portalRoot #view-dashboard .leaflet-marker-icon.dash-command-map-marker-wrap:has(.dash-command-map-person:hover),
+#portalRoot #view-dashboard .leaflet-marker-icon.dash-command-map-marker-wrap:has(.dash-command-map-person:focus-within) {
+  z-index: 10000 !important;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person {
+  --dash-map-status: #94a3b8;
+  --dash-map-x: 0px;
+  --dash-map-y: 0px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+  width: 48px;
+  transform: translate(
+    calc(-50% + var(--dash-map-x)),
+    calc(-50% + var(--dash-map-y))
+  );
+  color: #1f2a44;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person.is-active {
+  --dash-map-status: #2563eb;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person.is-planned {
+  --dash-map-status: #94a3b8;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person.is-finished {
+  --dash-map-status: #16a36a;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person.is-late {
+  --dash-map-status: #dc2626;
+  z-index: 6;
+}
+
+#portalRoot #view-dashboard
+  .dash-command-map-person:is(:hover, :focus-within, .is-selected) {
+  z-index: 40;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person__bubble {
+  position: relative;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  padding: 4px;
+  overflow: visible;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background:
+    conic-gradient(
+      var(--dash-map-status) calc(var(--dash-map-remaining, 100) * 1%),
+      #dbe3ed 0
+    );
+  box-shadow:
+    0 0 0 2px var(--dash-map-status),
+    0 0 0 5px color-mix(in srgb, var(--dash-map-status) 17%, transparent),
+    0 8px 18px rgba(22, 37, 68, 0.3);
+  color: #334155;
+  cursor: pointer;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person__bubble > :is(img, span) {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #3b475f;
+  font-size: 11px;
+  font-weight: 900;
+  object-fit: cover;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person__name {
+  position: absolute;
+  top: 55px;
+  left: 50%;
+  z-index: 45;
+  display: none;
+  max-width: 116px;
+  padding: 3px 7px;
+  overflow: hidden;
+  border: 1px solid #dce4ef;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 5px 13px rgba(20, 34, 60, 0.16);
+  color: #17223b;
+  font-size: 8px;
+  font-weight: 850;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+#portalRoot #view-dashboard .dash-command-map-person.is-late .dash-command-map-person__name {
+  top: 77px;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person__warning {
+  position: absolute;
+  top: -8px;
+  right: -9px;
+  display: grid;
+  place-items: center;
+  width: 21px;
+  height: 21px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #dc2626;
+  box-shadow: 0 5px 12px rgba(185, 28, 28, 0.3);
+  color: #ffffff;
+  font-size: 14px;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person__alarm {
+  position: absolute;
+  top: 55px;
+  left: 50%;
+  padding: 4px 8px;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  background: rgba(255, 247, 247, 0.97);
+  box-shadow: 0 5px 14px rgba(153, 27, 27, 0.14);
+  color: #b91c1c;
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+#portalRoot #view-dashboard .dash-command-map-person__details {
+  position: absolute;
+  top: 99px;
+  left: 50%;
+  z-index: 60;
+  display: none;
+  gap: 3px;
+  min-width: 172px;
+  padding: 10px 11px;
+  border: 1px solid #e1e7f0;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 12px 30px rgba(20, 34, 60, 0.2);
+  text-align: left;
+  transform: translateX(-50%);
+}
+
+#portalRoot #view-dashboard .dash-command-map-person:not(.is-late) .dash-command-map-person__details {
+  top: 76px;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person:is(:hover, :focus-within, .is-selected) .dash-command-map-person__details {
+  display: grid;
+}
+
+#portalRoot #view-dashboard
+  .dash-command-map-person:is(:hover, :focus-within, .is-selected)
+  .dash-command-map-person__name {
+  visibility: hidden;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person__details strong {
+  overflow: hidden;
+  color: #17223b;
+  font-size: 10px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person__details > span {
+  color: #758198;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person__task {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  margin-top: 4px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: #eef2ff;
+  color: #4f46e5;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 850;
+}
+
+#portalRoot #view-dashboard .dash-command-map-standalone {
+  position: relative;
+  width: 1px;
+  height: 1px;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 1px;
+  height: 1px;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__button {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  justify-items: center;
+  width: 74px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #26334e;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__ring {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  padding: 5px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background:
+    conic-gradient(
+      #16a36a calc(var(--dash-object-progress, 0) * 1%),
+      #2563eb 0
+    );
+  box-shadow:
+    0 0 0 5px rgba(37, 99, 235, 0.12),
+    0 9px 22px rgba(25, 42, 75, 0.28);
+  color: #416080;
+  font-size: 23px;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__ring::before {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #ffffff;
+  content: "";
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__ring i {
+  position: relative;
+  z-index: 1;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object.has-late .dash-command-map-object__ring {
+  box-shadow:
+    0 0 0 6px rgba(220, 38, 38, 0.18),
+    0 9px 22px rgba(25, 42, 75, 0.28);
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__label,
+#portalRoot #view-dashboard .dash-command-map-object__zones {
+  max-width: 160px;
+  overflow: hidden;
+  padding: 3px 7px;
+  border: 1px solid rgba(221, 228, 238, 0.95);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 4px 12px rgba(24, 39, 69, 0.1);
+  font-size: 9px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__label {
+  margin-top: 7px;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__zones {
+  margin-top: 3px;
+  color: #66738b;
+  font-size: 8px;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__alert,
+#portalRoot #view-dashboard .dash-command-map-object__overflow {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+#portalRoot #view-dashboard
+  :is(.dash-command-map-person, .dash-command-map-object__alert)[hidden] {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__alert {
+  top: -7px;
+  right: 1px;
+  background: #dc2626;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__overflow {
+  top: 36px;
+  right: -5px;
+  background: #475569;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__people {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 4;
+}
+
+#portalRoot #view-dashboard
+  .dash-command-map-object:is(:hover, :focus-within, .is-expanded)
+  .dash-command-map-person__name {
+  display: block;
+}
+
+#portalRoot #view-dashboard
+  .dash-command-map-object:is(:hover, :focus-within, .is-expanded) {
+  z-index: 30;
+}
+
+#portalRoot #view-dashboard
+  .dash-command-map-object:is(:hover, :focus-within, .is-expanded)
+  .dash-command-map-object__people {
+  z-index: 35;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live {
+  position: absolute;
+  top: 110px;
+  left: 50%;
+  z-index: 80;
+  display: none;
+  width: 248px;
+  padding: 11px;
+  border: 1px solid #dce4ef;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.99);
+  box-shadow: 0 18px 42px rgba(20, 34, 60, 0.25);
+  color: #17223b;
+  transform: translateX(-50%);
+}
+
+#portalRoot #view-dashboard .dash-command-map-object.is-live-open .dash-command-map-object__live {
+  display: grid;
+  gap: 8px;
+}
+
+#portalRoot #view-dashboard
+  .dash-command-map-object.is-live-open
+  .dash-command-map-person__name {
+  display: none;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live-head {
+  display: grid;
+  gap: 2px;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live-head > span {
+  color: #4f46e5;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live-head > strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live-statuses > span {
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 8px;
+  font-weight: 850;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live-statuses > .is-active {
+  background: #e8f0ff;
+  color: #1d4ed8;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live-statuses > .is-finished {
+  background: #e8f8f0;
+  color: #08734a;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live-statuses > .is-late {
+  background: #fff0f0;
+  color: #b91c1c;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live-zones {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: #f7f8fc;
+  color: #5f6c82;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live-zones strong {
+  color: #26334e;
+  font-weight: 900;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live ul {
+  display: grid;
+  gap: 5px;
+  max-height: 82px;
+  margin: 0;
+  padding: 0 2px 0 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live li {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live li > i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live li > i.is-active {
+  background: #2563eb;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live li > i.is-finished {
+  background: #16a36a;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live li > i.is-late {
+  background: #dc2626;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live li > strong {
+  overflow: hidden;
+  color: #253149;
+  font-size: 8px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__live li > span {
+  color: #68758c;
+  font-size: 7px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object__people .dash-command-map-person {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  scale: 0.72;
+  transition:
+    opacity 160ms ease,
+    scale 190ms ease;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object:is(:hover, :focus-within, .is-expanded)
+  .dash-command-map-object__people .dash-command-map-person {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  scale: 1;
+}
+
+#portalRoot #view-dashboard .dash-command-map-object.has-late:not(:hover, :focus-within, .is-expanded)
+  .dash-command-map-person.is-late {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  scale: 1;
+}
+
+#portalRoot #view-dashboard .dash-command-map-person.is-late .dash-command-map-person__bubble,
+#portalRoot #view-dashboard .dash-command-map-object.has-late .dash-command-map-object__ring {
+  animation: dash-command-map-alert-pulse 1.9s ease-in-out infinite;
+}
+
+#portalRoot #view-dashboard .dash-active-workers-location.is-active .dash-active-workers-location-indicator,
+#portalRoot #view-dashboard .dash-active-workers-map-info-status.is-active {
+  background: #2563eb !important;
+}
+
+#portalRoot #view-dashboard .dash-active-workers-location.is-planned .dash-active-workers-location-indicator,
+#portalRoot #view-dashboard .dash-active-workers-map-info-status.is-planned {
+  background: #94a3b8 !important;
+}
+
+#portalRoot #view-dashboard .dash-active-workers-location.is-finished .dash-active-workers-location-indicator,
+#portalRoot #view-dashboard .dash-active-workers-map-info-status.is-finished {
+  background: #16a36a !important;
+}
+
+#portalRoot #view-dashboard .dash-active-workers-location.is-late .dash-active-workers-location-indicator,
+#portalRoot #view-dashboard .dash-active-workers-map-info-status.is-late {
+  background: #dc2626 !important;
+}
+
+#portalRoot #view-dashboard .dash-active-workers-location.is-late .dash-active-workers-location-time {
+  color: #b91c1c !important;
+}
+
+@keyframes dash-command-map-alert-pulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 rgba(220, 38, 38, 0));
+  }
+
+  50% {
+    filter: drop-shadow(0 0 8px rgba(220, 38, 38, 0.55));
+  }
+}
+
+#portalRoot #view-dashboard .dash-command-live {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 390px;
+  padding: 14px 14px 10px;
+  border-left: 1px solid #e4e9f1;
+  background: #ffffff;
+}
+
+#portalRoot #view-dashboard .dash-command-live__header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0 2px 9px;
+  border-bottom: 1px solid #edf0f5;
+}
+
+#portalRoot #view-dashboard .dash-command-live__header h2 {
+  margin: 0;
+  color: #19243d;
+  font-size: 16px;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+}
+
+#portalRoot #view-dashboard .dash-command-live__header p {
+  max-width: 280px;
+  margin: 3px 0 0;
+  color: #667085;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+#portalRoot #view-dashboard .dash-command-live__status {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  color: #18865c;
+  font-size: 10.5px;
+  font-weight: 820;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-live__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding-top: 6px;
+}
+
+#portalRoot #view-dashboard .dash-command-live__body > .dash-insights-panel-body {
+  width: 100%;
+  min-height: 0 !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-operational-list {
+  max-height: 300px !important;
+  padding-right: 5px !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-service-correlation-status {
+  margin-bottom: 7px !important;
+  padding: 7px 8px !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-operational-empty {
+  min-height: 245px !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-service-progress-item {
+  padding: 10px 2px 11px !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-service-progress-note {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live__footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 34px;
+  margin-top: 6px;
+  padding: 8px 2px 2px;
+  border: 0;
+  border-top: 1px solid #edf0f5;
+  background: transparent;
+  color: #5149df;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 850;
+}
+
+#portalRoot #view-dashboard .dash-command-live__footer:hover {
+  color: #352dc4;
+}
+
+#portalRoot #view-dashboard .dash-command-live__footer[hidden] {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-operational-list {
+  gap: 0 !important;
+  max-height: none !important;
+  overflow: hidden !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-operational-empty {
+  min-height: 245px !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-command-operation__copy small {
+  display: none;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-command-operation__copy strong {
+  font-size: 12.5px;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-command-operation__workers {
+  color: #475467;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-command-operation__result strong {
+  font-size: 12.5px;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-command-operation__result time {
+  font-size: 10px;
+}
+
+#portalRoot #view-dashboard .dash-command-operation {
+  min-width: 0;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid #edf0f5;
+  background: #ffffff;
+  list-style: none;
+}
+
+#portalRoot #view-dashboard .dash-command-operation.is-active {
+  border-left-color: #5b52e8;
+  background: linear-gradient(90deg, #f2f3ff 0%, #ffffff 72%);
+}
+
+#portalRoot #view-dashboard .dash-command-operation:last-child {
+  border-bottom: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  width: 100%;
+  padding: 10px 7px 11px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 150ms ease;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__button:hover {
+  background: #f8f9ff;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__button:disabled {
+  color: #18233a;
+  cursor: default !important;
+  filter: none;
+  opacity: 1 !important;
+  -webkit-text-fill-color: currentColor;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__main {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__avatars {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding-left: 4px;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__avatars > span {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-left: -5px;
+  overflow: hidden;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #e8edff;
+  box-shadow: 0 3px 9px rgba(52, 70, 116, 0.16);
+}
+
+#portalRoot #view-dashboard .dash-command-operation__avatars img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__avatars .is-overflow {
+  z-index: 4;
+  background: #e9edff;
+  color: #4f46e5;
+  font-size: 8px;
+  font-weight: 850;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__copy strong,
+#portalRoot #view-dashboard .dash-command-operation__copy small,
+#portalRoot #view-dashboard .dash-command-operation__workers {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__copy strong {
+  color: #111827;
+  font-size: 11.5px;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__copy small {
+  color: #344054;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__workers {
+  color: #667085;
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__result {
+  display: grid;
+  gap: 2px;
+  align-content: center;
+  justify-items: end;
+  min-width: 76px;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__result strong {
+  color: #4f46e5;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__result time {
+  color: #344054;
+  font-size: 9.5px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__timeline {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-left: 46px;
+  color: #344054;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__timing {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress {
+  grid-column: 1 / -1;
+  height: 5px;
+  margin-left: 46px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7ebf3;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #5850e6, #736bff);
+  transition: width 220ms ease;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress.is-indeterminate > span {
+  width: 42%;
+  background: linear-gradient(90deg, transparent, #736bff, transparent);
+  animation: dash-command-operation-progress 1.8s ease-in-out infinite;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress.is-complete > span {
+  width: 100%;
+}
+
+#portalRoot #view-dashboard .dash-command-operation.is-completed {
+  border-left-color: #20a66f;
+  background: linear-gradient(90deg, #edfbf4 0%, #ffffff 72%);
+}
+
+#portalRoot #view-dashboard .dash-command-operation.is-completed .dash-command-operation__result strong {
+  color: #16865b;
+}
+
+#portalRoot #view-dashboard .dash-command-operation.is-completed .dash-command-operation__progress > span {
+  background: linear-gradient(90deg, #20a66f, #35bd82);
+}
+
+@keyframes dash-command-operation-progress {
+  0% {
+    transform: translateX(-110%);
+  }
+
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+html.is-dashboard-operations-modal-open,
+body.is-dashboard-operations-modal-open {
+  overflow: hidden !important;
+}
+
+#portalRoot #view-dashboard .dash-command-operations-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 14600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+#portalRoot #view-dashboard .dash-command-operations-overlay[hidden] {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, calc(100vw - 48px));
+  max-height: min(760px, calc(100dvh - 48px));
+  overflow: hidden;
+  border: 1px solid rgba(212, 220, 233, 0.96);
+  border-radius: 19px;
+  background: #ffffff;
+  box-shadow: 0 34px 100px rgba(15, 23, 42, 0.38);
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog__header {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 19px 21px 16px;
+  border-bottom: 1px solid #e7ebf2;
+  background: linear-gradient(120deg, #f8f8ff, #ffffff 55%);
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog__eyebrow {
+  display: block;
+  margin-bottom: 5px;
+  color: #5951e8;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog__header h2 {
+  margin: 0;
+  color: #17213a;
+  font-size: 21px;
+  font-weight: 850;
+  letter-spacing: -0.025em;
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog__header p {
+  max-width: 500px;
+  margin: 5px 0 0;
+  color: #69758b;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog__actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog__actions > span {
+  padding: 6px 9px;
+  border: 1px solid #d9ddfb;
+  border-radius: 999px;
+  background: #f3f3ff;
+  color: #5149df;
+  font-size: 9px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog__actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid #d8dfeb;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #253149;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog__list {
+  max-height: none !important;
+  padding: 5px 18px 14px !important;
+  overflow-y: auto !important;
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog__list .dash-command-operation__button {
+  padding: 13px 4px 14px;
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog__list .dash-command-operation__avatars > span {
+  width: 35px;
+  height: 35px;
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog__list .dash-command-operation__timeline,
+#portalRoot #view-dashboard .dash-command-operations-dialog__list .dash-command-operation__progress {
+  margin-left: 48px;
+  padding-left: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog__list .dash-command-operation__copy strong {
+  font-size: 12px;
+}
+
+#portalRoot #view-dashboard .dash-command-operations-dialog__list .dash-command-operation__copy small,
+#portalRoot #view-dashboard .dash-command-operations-dialog__list .dash-command-operation__workers,
+#portalRoot #view-dashboard .dash-command-operations-dialog__list .dash-command-operation__timeline {
+  font-size: 9px;
+}
+
+#portalRoot #view-dashboard .dash-command-insight {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  min-width: 0;
+  min-height: 62px;
+  padding: 10px 13px;
+  border: 1px solid #dfe5ef;
+  border-radius: 15px;
+  background: linear-gradient(90deg, #f6f7ff, #ffffff 45%);
+}
+
+#portalRoot #view-dashboard .dash-command-insight__brand {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding-right: 18px;
+  border-right: 1px solid #e1e5ef;
+  color: #5951e8;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+#portalRoot #view-dashboard .dash-command-insight__brand > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #6c62fc, #4e45df);
+  box-shadow: 0 8px 18px rgba(81, 72, 226, 0.2);
+  color: #ffffff;
+  font-size: 18px;
+}
+
+#portalRoot #view-dashboard .dash-command-insight__copy {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-insight__copy > i {
+  flex: 0 0 auto;
+  color: #1ca168;
+  font-size: 29px;
+}
+
+#portalRoot #view-dashboard .dash-command-insight__copy > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-insight__copy strong,
+#portalRoot #view-dashboard .dash-command-insight__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-insight__copy strong {
+  color: #16905e;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+#portalRoot #view-dashboard .dash-command-insight__copy small {
+  color: #7c879a;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+#portalRoot #view-dashboard .dash-command-insight[data-tone="warning"] .dash-command-insight__copy > i,
+#portalRoot #view-dashboard .dash-command-insight[data-tone="warning"] .dash-command-insight__copy strong {
+  color: #b87514;
+}
+
+#portalRoot #view-dashboard .dash-command-insight[data-tone="danger"] .dash-command-insight__copy > i,
+#portalRoot #view-dashboard .dash-command-insight[data-tone="danger"] .dash-command-insight__copy strong {
+  color: #c93a3a;
+}
+
+#portalRoot #view-dashboard .dash-command-insight > button {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 16px;
+  border: 1px solid #7a71ef;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 5px 14px rgba(77, 68, 218, 0.1);
+  color: #564ce1;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+#portalRoot #view-dashboard .dash-command-details {
+  padding: 16px;
+  border: 1px solid #e0e6ef;
+  border-radius: 15px;
+  background: #fbfcfe;
+}
+
+#portalRoot #view-dashboard .dash-command-details[hidden] {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dash-command-details article,
+#portalRoot #view-dashboard .dash-command-details header {
+  display: grid;
+  gap: 10px;
+}
+
+#portalRoot #view-dashboard .dash-command-details header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+#portalRoot #view-dashboard .dash-command-details h2 {
+  margin: 0;
+  color: #1c2841;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+#portalRoot #view-dashboard .dash-command-details p {
+  margin: 4px 0 0;
+  color: #78849a;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+#portalRoot #view-dashboard .dash-command-details header > span {
+  padding: 5px 9px;
+  border: 1px solid #bfe8d6;
+  border-radius: 999px;
+  background: #eefaf4;
+  color: #167f56;
+  font-size: 9px;
+  font-weight: 820;
+}
+
+#portalRoot #view-dashboard .dash-command-details .dash-operational-list {
+  max-height: 300px !important;
+}
+
+#portalRoot #view-dashboard .dash-command-details .dash-operational-empty {
+  min-height: 100px !important;
+}
+
+#portalRoot #view-dashboard .dash-command-center.is-list-view .dash-command-map .dash-active-workers-map-shell,
+#portalRoot #view-dashboard .dash-command-center.is-list-view .dash-command-map__controls,
+#portalRoot #view-dashboard .dash-command-center.is-list-view .dash-command-map__legend {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dash-command-center.is-list-view .dash-command-map {
+  background: #ffffff;
+}
+
+#portalRoot #view-dashboard .dash-command-center.is-list-view .dash-command-map__host {
+  padding: 60px 16px 16px;
+}
+
+#portalRoot #view-dashboard .dash-command-center.is-list-view .dash-command-map .dash-active-workers-location-list {
+  display: grid !important;
+  width: 100%;
+  max-height: 314px !important;
+}
+
+#portalRoot #view-dashboard .dash-command-center :is(button, [tabindex]):focus-visible {
+  outline: 3px solid rgba(79, 70, 229, 0.42);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1180px) {
+  #portalRoot #view-dashboard .dash-command-kpi {
+    grid-template-columns: 40px auto minmax(0, 1fr);
+    gap: 9px;
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-kpi__icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__workspace {
+    grid-template-columns: minmax(0, 1.7fr) minmax(290px, 1fr);
+  }
+}
+
+@media (max-width: 940px) {
+  #portalRoot #view-dashboard .dash-command-center {
+    min-height: 0;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
+  }
+
+  #portalRoot #view-dashboard .dash-command-kpi:nth-child(3) {
+    border-left: 0;
+  }
+
+  #portalRoot #view-dashboard .dash-command-kpi:nth-child(n + 3) {
+    padding-top: 12px;
+    border-top: 1px solid #e7ebf2;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #portalRoot #view-dashboard .dash-command-live {
+    min-height: 330px;
+    border-top: 1px solid #e4e9f1;
+    border-left: 0;
+  }
+
+  #portalRoot #view-dashboard .dash-command-live .dash-operational-list {
+    max-height: 245px !important;
+  }
+
+  #portalRoot #view-dashboard .dash-command-live .dash-operational-empty {
+    min-height: 190px !important;
+  }
+}
+
+@media (max-width: 700px) {
+  #portalRoot #view-dashboard .dash-command-center {
+    gap: 14px;
+    padding: 15px;
+    border-radius: 16px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__header {
+    align-items: center;
+    padding-bottom: 13px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__heading h1 {
+    font-size: 28px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__heading p {
+    font-size: 11px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__actions {
+    gap: 5px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__action {
+    width: 38px;
+    padding: 0;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__action span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__notification {
+    display: none;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__filters {
+    top: 81px;
+    right: 15px;
+    grid-template-columns: minmax(0, 1fr);
+    width: calc(100% - 30px);
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__quick-alert:first-of-type,
+  #portalRoot #view-dashboard .dash-command-center__quick-alert:last-of-type {
+    grid-column: 1;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__kpis {
+    margin: 0 -5px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-kpi {
+    grid-template-columns: 35px minmax(0, 1fr);
+    grid-template-areas:
+      "icon value"
+      "copy copy";
+    gap: 7px 9px;
+    min-height: 92px;
+    padding: 10px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-kpi__icon {
+    grid-area: icon;
+    width: 34px;
+    height: 34px;
+    font-size: 17px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-kpi__value {
+    grid-area: value;
+    font-size: 24px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-kpi__copy {
+    grid-area: copy;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__workspace {
+    min-height: 330px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map,
+  #portalRoot #view-dashboard .dash-command-map .dash-active-workers-map-shell {
+    min-height: 330px !important;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map__topbar {
+    right: 12px;
+    left: 54px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map__count {
+    overflow: hidden;
+    max-width: 110px;
+    text-overflow: ellipsis;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map__controls {
+    bottom: 14px;
+    left: 12px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map__controls button {
+    width: 36px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map__controls i {
+    font-size: 15px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map .dash-active-workers-map-expand {
+    right: 12px !important;
+    bottom: 14px !important;
+    width: 36px !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+    font-size: 0 !important;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map .dash-active-workers-map-expand::before {
+    content: "\2197";
+    font-size: 16px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map-object {
+    scale: 0.82;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map-standalone {
+    scale: 0.88;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map-person__details {
+    min-width: 154px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-insight {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-insight__brand {
+    display: none;
+  }
+
+  #portalRoot #view-dashboard .dash-command-insight__copy small {
+    white-space: normal;
+  }
+
+  #portalRoot #view-dashboard .dash-command-insight > button {
+    width: 38px;
+    overflow: hidden;
+    padding: 0;
+    font-size: 0;
+  }
+
+  #portalRoot #view-dashboard .dash-command-insight > button i {
+    font-size: 14px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-live__header {
+    gap: 8px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-live__status {
+    max-width: 132px;
+    white-space: normal;
+    text-align: right;
+  }
+
+  #portalRoot #view-dashboard .dash-command-operations-overlay {
+    align-items: flex-end;
+    padding: 10px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-operations-dialog {
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+    border-radius: 18px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-operations-dialog__header {
+    padding: 16px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-operations-dialog__actions > span {
+    display: none;
+  }
+
+  #portalRoot #view-dashboard .dash-command-operations-dialog__list {
+    padding-right: 12px !important;
+    padding-left: 12px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #portalRoot #view-dashboard .dash-command-center *,
+  #portalRoot #view-dashboard .dash-command-center *::before,
+  #portalRoot #view-dashboard .dash-command-center *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map-person.is-late .dash-command-map-person__bubble,
+  #portalRoot #view-dashboard .dash-command-map-object.has-late .dash-command-map-object__ring,
+  #portalRoot #view-dashboard .dash-command-operation__progress.is-indeterminate > span {
+    animation: none !important;
+  }
+}
+
+/* Plan-first command center — selected dashboard direction 2. */
+#portalRoot #view-dashboard .dash-command-center {
+  gap: 16px;
+  min-height: 0;
+  padding: 4px 2px 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+#portalRoot #view-dashboard .dash-command-center__header {
+  align-items: center;
+  padding: 2px 2px 4px;
+  border-bottom: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-center__eyebrow {
+  display: none;
+}
+
+#portalRoot #view-dashboard .dash-command-center__heading {
+  display: flex;
+  gap: 26px;
+  align-items: center;
+}
+
+#portalRoot #view-dashboard .dash-command-center__heading h1 {
+  font-size: clamp(29px, 2.5vw, 39px);
+}
+
+#portalRoot #view-dashboard .dash-command-center__heading p {
+  position: relative;
+  margin: 2px 0 0;
+  padding-left: 15px;
+  color: #6d7890;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-center__heading p::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #18a76f;
+  box-shadow: 0 0 0 3px #e9f8f1;
+  content: "";
+  translate: 0 -50%;
+}
+
+#portalRoot #view-dashboard .dash-command-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.48fr) minmax(330px, 1fr);
+  gap: 16px;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard :is(.dash-command-plan, .dash-command-upcoming, .dash-command-alerts) {
+  min-width: 0;
+  border: 1px solid #dfe5ef;
+  border-radius: 17px;
+  background: #ffffff;
+  box-shadow: 0 7px 22px rgba(29, 43, 74, 0.055);
+}
+
+#portalRoot #view-dashboard :is(.dash-command-plan, .dash-command-upcoming) {
+  min-height: 204px;
+  padding: 16px;
+}
+
+#portalRoot #view-dashboard :is(.dash-command-plan, .dash-command-upcoming, .dash-command-alerts) h2 {
+  margin: 0;
+  color: #19243d;
+  font-size: 16px;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+}
+
+#portalRoot #view-dashboard .dash-command-plan > header {
+  margin-bottom: 12px;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__body {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 22px;
+  align-items: center;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__ring {
+  --dash-plan-progress: 0%;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 116px;
+  height: 116px;
+  border-radius: 50%;
+  background: conic-gradient(
+    #5b52eb var(--dash-plan-progress),
+    #e5e8ef var(--dash-plan-progress)
+  );
+  color: #111a39;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__ring::before {
+  position: absolute;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: #ffffff;
+  content: "";
+}
+
+#portalRoot #view-dashboard .dash-command-plan__ring strong {
+  position: relative;
+  z-index: 1;
+  font-size: 30px;
+  font-weight: 880;
+  letter-spacing: -0.045em;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__summary {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__headline {
+  display: grid;
+  gap: 5px;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__headline > strong {
+  color: #111a39;
+  font-size: clamp(23px, 2vw, 29px);
+  font-weight: 860;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__headline > span {
+  color: #68758e;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__progress {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8ebf1;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__progress > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #5b52eb;
+  transition: width 240ms ease;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__footer {
+  display: flex;
+  gap: 18px;
+  align-items: end;
+  justify-content: space-between;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__states {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(62px, auto));
+  gap: 14px;
+  margin: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__states > div {
+  position: relative;
+  display: grid;
+  gap: 1px;
+  padding-left: 16px;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__states > div::before {
+  position: absolute;
+  top: 5px;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3b82f6;
+  content: "";
+}
+
+#portalRoot #view-dashboard .dash-command-plan__states > .is-waiting::before {
+  background: #f28b18;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__states > .is-cancelled::before {
+  background: #aab2c0;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__states dt {
+  color: #17213a;
+  font-size: 16px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__states dd {
+  margin: 0;
+  color: #68758e;
+  font-size: 9px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-plan__calendar,
+#portalRoot #view-dashboard .dash-command-upcoming__go,
+#portalRoot #view-dashboard .dash-command-alert__go {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  min-height: 33px;
+  padding: 7px 12px;
+  border: 1px solid #c8c7fb;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #5149df;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-upcoming {
+  display: flex;
+  flex-direction: column;
+}
+
+#portalRoot #view-dashboard .dash-command-upcoming > header {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding-bottom: 11px;
+  border-bottom: 1px solid #edf0f5;
+}
+
+#portalRoot #view-dashboard .dash-command-upcoming > header > span,
+#portalRoot #view-dashboard .dash-command-alerts > header > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #f0efff;
+  color: #5b52eb;
+  font-size: 15px;
+}
+
+#portalRoot #view-dashboard .dash-command-upcoming__list {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 92px;
+}
+
+#portalRoot #view-dashboard .dash-command-upcoming__list > p,
+#portalRoot #view-dashboard .dash-command-alerts__list > p {
+  align-self: center;
+  margin: 0;
+  color: #8190a7;
+  font-size: 10px;
+  font-weight: 650;
+  text-align: center;
+}
+
+#portalRoot #view-dashboard .dash-command-upcoming__item {
+  display: grid;
+  grid-template-columns: 54px 12px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 0;
+  border: 0;
+  border-bottom: 1px solid #edf0f5;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+#portalRoot #view-dashboard .dash-command-upcoming__item > time {
+  color: #111a39;
+  font-size: 17px;
+  font-weight: 850;
+  letter-spacing: -0.025em;
+}
+
+#portalRoot #view-dashboard .dash-command-upcoming__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #5b52eb;
+  box-shadow: 0 0 0 4px #efefff;
+}
+
+#portalRoot #view-dashboard .dash-command-upcoming__copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-upcoming__copy strong {
+  overflow: hidden;
+  color: #253149;
+  font-size: 11px;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-upcoming__copy small {
+  overflow: hidden;
+  color: #738097;
+  font-size: 9px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-upcoming__go,
+#portalRoot #view-dashboard .dash-command-alert__go {
+  min-height: 30px;
+  padding: 6px 10px;
+}
+
+#portalRoot #view-dashboard .dash-command-upcoming__footer {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  align-self: flex-start;
+  min-height: 28px;
+  padding: 6px 0 0;
+  border: 0;
+  background: transparent;
+  color: #5149df;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 850;
+}
+
+#portalRoot #view-dashboard .dash-command-center__workspace {
+  grid-template-columns: minmax(0, 1.48fr) minmax(330px, 1fr);
+  gap: 16px;
+  min-height: 516px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+#portalRoot #view-dashboard .dash-command-map {
+  min-height: 516px;
+  overflow: hidden;
+  border: 1px solid #dfe5ef;
+  border-radius: 17px;
+  background: #ffffff;
+  box-shadow: 0 7px 22px rgba(29, 43, 74, 0.055);
+}
+
+#portalRoot #view-dashboard .dash-command-map__topbar {
+  position: relative;
+  inset: auto;
+  z-index: 1;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: none;
+  min-height: 68px;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid #edf0f5;
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+#portalRoot #view-dashboard .dash-command-map__title {
+  display: grid !important;
+  gap: 2px !important;
+  align-items: start !important;
+}
+
+#portalRoot #view-dashboard .dash-command-map__topbar strong {
+  font-size: 16px;
+}
+
+#portalRoot #view-dashboard .dash-command-map__count {
+  color: #7a869b;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+#portalRoot #view-dashboard .dash-command-map__stats {
+  display: flex;
+  gap: 8px;
+}
+
+#portalRoot #view-dashboard .dash-command-map-stat {
+  display: grid;
+  grid-template-columns: 24px auto;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  min-width: 92px;
+  min-height: 43px;
+  padding: 6px 10px;
+  border: 1px solid #e0e6ef;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #243149;
+  cursor: pointer;
+  text-align: left;
+}
+
+#portalRoot #view-dashboard .dash-command-map-stat > i {
+  grid-row: 1 / 3;
+  align-self: center;
+  color: #2b80ee;
+  font-size: 22px;
+}
+
+#portalRoot #view-dashboard .dash-command-map-stat > strong {
+  align-self: end;
+  color: #17213a;
+  font-size: 15px;
+  line-height: 1;
+}
+
+#portalRoot #view-dashboard .dash-command-map-stat > span {
+  align-self: start;
+  color: #758199;
+  font-size: 8px;
+  font-weight: 650;
+}
+
+#portalRoot #view-dashboard .dash-command-map__host {
+  flex: 1 1 auto;
+  min-height: 448px;
+}
+
+#portalRoot #view-dashboard .dash-command-map .dash-active-workers-map-shell,
+#portalRoot #view-dashboard .dash-command-map .dash-active-workers-map {
+  height: 100% !important;
+  min-height: 448px !important;
+}
+
+#portalRoot #view-dashboard .dash-command-side {
+  display: grid;
+  grid-template-rows: minmax(205px, auto) minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-alerts {
+  padding: 13px 14px 10px;
+}
+
+#portalRoot #view-dashboard .dash-command-alerts > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #edf0f5;
+}
+
+#portalRoot #view-dashboard .dash-command-alerts > header > span {
+  background: #fff5e9;
+  color: #e26a17;
+}
+
+#portalRoot #view-dashboard .dash-command-alerts > header > strong {
+  color: #e26a17;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+#portalRoot #view-dashboard .dash-command-alerts__list {
+  display: grid;
+}
+
+#portalRoot #view-dashboard .dash-command-alert {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid #edf0f5;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+#portalRoot #view-dashboard .dash-command-alert:last-child {
+  border-bottom: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-alert__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #fff5e9;
+  color: #e26a17;
+  font-size: 16px;
+}
+
+#portalRoot #view-dashboard .dash-command-alert.is-danger .dash-command-alert__icon {
+  background: #fff0ef;
+  color: #d63b35;
+}
+
+#portalRoot #view-dashboard .dash-command-alert__copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-alert__copy strong {
+  overflow: hidden;
+  color: #dc6518;
+  font-size: 10.5px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-alert.is-danger .dash-command-alert__copy strong {
+  color: #c73632;
+}
+
+#portalRoot #view-dashboard .dash-command-alert__copy small {
+  overflow: hidden;
+  color: #7a869c;
+  font-size: 8.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-live {
+  min-height: 0;
+  padding: 13px 14px 9px;
+  overflow: hidden;
+  border: 1px solid #dfe5ef;
+  border-radius: 17px;
+  background: #ffffff;
+  box-shadow: 0 7px 22px rgba(29, 43, 74, 0.055);
+}
+
+#portalRoot #view-dashboard .dash-command-live__header p {
+  display: none;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-service-correlation-status {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-operational-list {
+  max-height: 230px !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-operational-empty {
+  min-height: 185px !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-service-progress-item {
+  padding-block: 7px !important;
+}
+
+#portalRoot #view-dashboard .dash-command-insight[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 1220px) {
+  #portalRoot #view-dashboard .dash-command-overview,
+  #portalRoot #view-dashboard .dash-command-center__workspace {
+    grid-template-columns: 1fr;
+  }
+
+  #portalRoot #view-dashboard .dash-command-side {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  #portalRoot #view-dashboard .dash-command-center__header,
+  #portalRoot #view-dashboard .dash-command-center__heading,
+  #portalRoot #view-dashboard .dash-command-plan__footer {
+    align-items: stretch;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__heading {
+    display: grid;
+    gap: 5px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__heading p {
+    margin-top: 0;
+  }
+
+  #portalRoot #view-dashboard .dash-command-plan__body {
+    grid-template-columns: 96px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-plan__ring {
+    width: 90px;
+    height: 90px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-plan__ring::before {
+    width: 68px;
+    height: 68px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-plan__ring strong {
+    font-size: 23px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-plan__footer,
+  #portalRoot #view-dashboard .dash-command-side {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map__topbar {
+    align-items: flex-start;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map__stats {
+    display: grid;
+  }
+
+  #portalRoot #view-dashboard .dash-command-map-stat {
+    min-width: 82px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-upcoming__item {
+    grid-template-columns: 50px 10px minmax(0, 1fr);
+  }
+
+  #portalRoot #view-dashboard .dash-command-upcoming__go,
+  #portalRoot #view-dashboard .dash-command-alert__go {
+    display: none;
+  }
+}

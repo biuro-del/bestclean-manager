@@ -183,6 +183,11 @@ function resolveBackendNodeOptions(value, systemCaSupported = nodeSupportsOption
 }
 
 function resolveBackendTlsRejectUnauthorized(systemCaSupported) {
+  const backendExplicit = String(process.env.DEV_BACKEND_TLS_REJECT_UNAUTHORIZED || '').trim()
+  if (backendExplicit) {
+    return backendExplicit
+  }
+
   const explicit = String(process.env.NODE_TLS_REJECT_UNAUTHORIZED || '').trim()
   if (explicit) {
     return explicit
@@ -456,7 +461,7 @@ if (workerProfileMode === 'proxy') {
 console.log(`[dev] generic DB proxy -> ${configuredRemoteApiTarget || 'disabled'}`)
 console.log(`[dev] backend NODE_OPTIONS -> ${backendNodeOptions}`)
 if (backendTlsRejectUnauthorized === '0' && String(process.env.NODE_TLS_REJECT_UNAUTHORIZED || '').trim() !== '0') {
-  console.warn('[dev] Backend local Google/Firebase TLS verification -> disabled because this Node cannot use the system CA. This applies only to this local dev stack; use NODE_EXTRA_CA_CERTS for a stricter setup.')
+  console.warn('[dev] Backend local Google/Firebase TLS verification -> disabled only for the backend process by an explicit local override or legacy fallback. Use NODE_EXTRA_CA_CERTS or disable local HTTPS scanning for a stricter setup.')
 }
 const serviceAccountSource = detectServiceAccountSource()
 if (serviceAccountSource) {
@@ -476,6 +481,8 @@ startProcess('api', process.execPath, ['index.js'], {
   WORKER_PROFILE_MODE: workerProfileMode === 'proxy' ? 'direct' : workerProfileMode,
   WORKER_PROFILE_STORAGE_MODE: workerProfileStorageMode,
   WORKER_PROFILE_DB_MODE: workerProfileStorageMode,
+  MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED:
+    process.env.MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED || 'false',
   NODE_OPTIONS: backendNodeOptions,
   ...(backendTlsRejectUnauthorized ? { NODE_TLS_REJECT_UNAUTHORIZED: backendTlsRejectUnauthorized } : {}),
 })

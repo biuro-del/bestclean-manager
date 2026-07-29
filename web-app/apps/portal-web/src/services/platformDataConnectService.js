@@ -154,6 +154,7 @@ export const updateWorkdayForOrg = wrap('mutation', 'UpdateWorkdayForOrg', gener
 export const deleteWorkdayForOrg = wrap('mutation', 'DeleteWorkdayForOrg', generated.deleteWorkdayForOrg)
 export const insertEventForOrg = wrap('mutation', 'InsertEventForOrg', generated.insertEventForOrg)
 export const updateEventForOrg = wrap('mutation', 'UpdateEventForOrg', generated.updateEventForOrg)
+export const reidentifyEventForOrg = wrap('mutation', 'ReidentifyEventForOrg', generated.reidentifyEventForOrg)
 export const deleteEventForOrg = wrap('mutation', 'DeleteEventForOrg', generated.deleteEventForOrg)
 export const insertBackupCycleForOrg = wrap('mutation', 'InsertBackupCycleForOrg', generated.insertBackupCycleForOrg)
 export const updateBackupCycleForOrg = wrap('mutation', 'UpdateBackupCycleForOrg', generated.updateBackupCycleForOrg)

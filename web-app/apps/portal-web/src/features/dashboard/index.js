@@ -1,3 +1,24 @@
+import { buildServiceExecutionModel } from './serviceExecutionModel.js'
+import { isHistoricalOpenWorkday } from './historicalOpenWorkdayModel.js'
+import { isScheduleOrderActive } from '../../services/scheduleOrderLifecycle'
+import { isScheduleStartOverdue } from '../../services/scheduleStartStatusPolicy'
+import {
+  buildOperationalMapObjectLiveSummary,
+  groupOperationalMapLocations,
+  resolveOperationalMapAvatarKind,
+  resolveOperationalMapStatus,
+} from './operationalMapModel.js'
+import {
+  buildObservedServiceOperationCandidates,
+  buildObservedWorkdayOperationCandidates,
+  buildServiceOperationStream,
+  buildWorkerDayDurationIndex,
+  matchObservedWorkdayToPlan,
+  serviceOperationPreview,
+  SERVICE_OPERATION_STATE,
+} from './serviceOperationStreamModel.js'
+import { buildCommandCenterPlanModel } from './commandCenterPlanModel.js'
+
 export const route = 'dashboard'
 export const viewId = 'view-dashboard'
 
@@ -6,36 +27,77 @@ export function createDashboardFeature(ctx) {
   let dashboardActivitySimulationTimer = 0
   let dashboardBackgroundRefreshPromise = null
   let dashboardReferencePreloadPromise = null
-  let dashboardScheduleRefreshPromise = null
   let dashboardWidgetsRefreshPromise = null
   let dashboardTimelineFingerprintToken = ''
   let dashboardTimelineFingerprintPromise = null
   let dashboardLoadingOverlayTimer = 0
   let dashboardMetricPopoverHideTimer = null
-  let dashboardScheduleLimitRaf = 0
-  let dashboardScheduleLimitTimerA = 0
-  let dashboardScheduleLimitTimerB = 0
+  let dashboardActiveWorkersMapInstance = null
+  let dashboardActiveWorkersMapInfoWindow = null
+  let dashboardActiveWorkersMapMarkers = []
+  let dashboardActiveWorkersMapMarkersByKey = new Map()
+  let dashboardActiveWorkersMapSelectedMarker = null
+  let dashboardActiveWorkersMapRenderSeq = 0
+  let dashboardActiveWorkersMapSignature = ''
+  let dashboardActiveWorkersMapProvider = ''
+  let dashboardOpenStreetMapLoaderPromise = null
+  let dashboardActiveWorkersMapRestoreFocus = null
+  let dashboardActiveWorkersMapExpandedGroupKey = ''
+  let dashboardActiveWorkersMapLiveGroupKey = ''
+  let dashboardServiceOperationStream = []
+  let dashboardOperationsDialogRestoreFocus = null
+  let dashboardContractProfitabilityResizeObserver = null
+  let dashboardContractProfitabilityObservedCanvas = null
 
-  const DASHBOARD_ACTIVITY_SIMULATION_INTERVAL_MS = 5 * 60 * 1000
+  const DASHBOARD_ACTIVITY_SIMULATION_INTERVAL_MS = 60 * 1000
   const DASHBOARD_CHANGE_POLL_INTERVAL_MS = 60 * 1000
   const DASHBOARD_TIMELINE_SNAP_MINUTES = 5
   const DASHBOARD_ACTIVITY_VIEW_STORAGE_KEY = 'portal.dashboard.activityView.v2'
-  const DASHBOARD_SCHEDULE_SOON_WINDOW_MINUTES = 60
-  const DASHBOARD_SCHEDULE_LATE_ALERT_MINUTES = 10
   const DASHBOARD_ACTIVITY_START_DELTA_THRESHOLD_MINUTES = 10
   const DASHBOARD_LONG_CLEAN_SECONDS = 90 * 60
   const DASHBOARD_NEW_COMMENTS_LIMIT = 5
   const DASHBOARD_DUE_TASKS_PREVIEW_LIMIT = 10
+  const DASHBOARD_OVERVIEW_PLANNED_PREVIEW_LIMIT = 1
+  const DASHBOARD_SERVICE_OPERATIONS_PREVIEW_LIMIT = 3
   const DASHBOARD_OPEN_WORKDAYS_PAGE_SIZE = 12000
-  const DASHBOARD_LOADING_STAGES = ['overview', 'tasks', 'active', 'schedule']
+  const DASHBOARD_LOADING_STAGES = ['overview', 'active']
   const DASHBOARD_POST_LOAD_DELAY_MS = 900
-  const DASHBOARD_LOCAL_CACHE_VERSION = 2
+  const DASHBOARD_SERVICE_EXECUTION_MODEL_VERSION = 'persisted-plan-v1'
+  const DASHBOARD_LOCAL_CACHE_VERSION = 4
   const DASHBOARD_LOCAL_CACHE_TTL_MS = 8 * 60 * 60 * 1000
   const DASHBOARD_LOCAL_CACHE_PREFIX = 'portal.dashboard.snapshot'
   const DASHBOARD_COMMENT_READ_STORAGE_PREFIX = 'portal.dashboardComments.read'
   const DASHBOARD_COMMENT_SYNC_STORAGE_PREFIX = 'portal.dashboardComments.sync'
+  const DASHBOARD_CONTRACT_PROFITABILITY_COLLAPSE_STORAGE_PREFIX =
+    'portal.dashboard.contractProfitabilityCollapsed.v1'
+  const DASHBOARD_INSIGHT_PANEL_COLLAPSE_STORAGE_PREFIX =
+    'portal.dashboard.insightPanelCollapsed.v1'
   const DASHBOARD_COMMENT_SYNC_LOOKBACK_DAYS = 3
   const DATA_SYNC_OVERLAY_DELAY_MS = 420
+  const DASHBOARD_CONTRACT_PROFITABILITY_SAMPLE_TREND = [18.4, 21.2, 20.6, 23.8]
+  const DASHBOARD_INSIGHT_PANEL_CONFIG = Object.freeze({
+    objects: Object.freeze({
+      cardId: 'dashActiveWorkersPanel',
+      buttonId: 'dashActiveWorkersPanelToggle',
+      bodyId: 'dashActiveWorkersPanelBody',
+      compactId: 'dashActiveWorkersPanelCompact',
+      label: 'obiektów',
+    }),
+    progress: Object.freeze({
+      cardId: 'dashServiceProgressPanel',
+      buttonId: 'dashServiceProgressPanelToggle',
+      bodyId: 'dashServiceProgressPanelBody',
+      compactId: 'dashServiceProgressPanelCompact',
+      label: 'postępu usług',
+    }),
+    completed: Object.freeze({
+      cardId: 'dashConfirmedTasksPanel',
+      buttonId: 'dashConfirmedTasksPanelToggle',
+      bodyId: 'dashConfirmedTasksPanelBody',
+      compactId: 'dashConfirmedTasksPanelCompact',
+      label: 'ukończonych zadań',
+    }),
+  })
 
   const {
     appState,
@@ -94,13 +156,11 @@ export function createDashboardFeature(ctx) {
     formatTime,
     getClients,
     getEventsFingerprintForOrg,
-    getScheduleBoard,
     getTodayActiveWorkers,
     getWorkdays,
     getWorkers,
     getZones,
     workerIsAssignable,
-    clearPortalDeferredNotification,
     kanbanColumnsForStatus,
     kanbanCurrentUserOption,
     kanbanNewTaskStatus,
@@ -117,6 +177,7 @@ export function createDashboardFeature(ctx) {
     openDashboardWorkerHistory,
     openEventHistoryFromRow,
     ordersListSourceOrders,
+    ordersLoadGoogleMaps,
     ordersSyncRemoteTimelineOrders,
     ordersNormalizeOrderRows,
     ordersTimelineAddressLabel,
@@ -125,6 +186,7 @@ export function createDashboardFeature(ctx) {
     renderCalendarView,
     reportHistoryExtractQrFromComment,
     reportHistoryNormalizeQrCode,
+    reportHistoryParseGeoPair,
     reportHistoryResolveClientByZoneCode,
     roleLevel,
     setSubwelcomeMetric,
@@ -132,65 +194,10 @@ export function createDashboardFeature(ctx) {
     toIso,
     todayYmd,
     workerDetailIsoToTime,
-    ymdToDayTimestamp,
   } = ctx
 
   function dashboardWorkerIsAssignable(worker = {}) {
     return typeof workerIsAssignable === 'function' ? workerIsAssignable(worker) : worker?.active !== false
-  }
-
-  function dashboardPickNearestScheduleDayKey(days = [], targetDayKey = todayYmd()) {
-    const source = Array.isArray(days) ? days : []
-    if (!source.length) {
-      return ''
-    }
-
-    const targetTs = ymdToDayTimestamp(targetDayKey)
-    if (!targetTs) {
-      return String(source[0]?.key ?? '')
-    }
-
-    const candidates = source
-      .map((day, index) => {
-        const key = String(day?.key ?? '').trim()
-        const ts = ymdToDayTimestamp(key)
-        if (!key || !ts) {
-          return null
-        }
-        return { key, ts, index }
-      })
-      .filter(Boolean)
-
-    if (!candidates.length) {
-      return String(source[0]?.key ?? '')
-    }
-
-    const byFutureThenDateAsc = (left, right) => {
-      if (left.ts !== right.ts) {
-        return left.ts - right.ts
-      }
-      return left.index - right.index
-    }
-
-    const byPastThenDateDesc = (left, right) => {
-      if (left.ts !== right.ts) {
-        return right.ts - left.ts
-      }
-      return left.index - right.index
-    }
-
-    const future = candidates
-      .filter((candidate) => candidate.ts >= targetTs)
-      .sort(byFutureThenDateAsc)
-    if (future.length) {
-      return String(future[0]?.key ?? source[0]?.key ?? '')
-    }
-
-    const past = candidates
-      .filter((candidate) => candidate.ts < targetTs)
-      .sort(byPastThenDateDesc)
-
-    return String(past[0]?.key ?? source[0]?.key ?? '')
   }
 
   function dashboardSystemIssueRangeFrom() {
@@ -363,6 +370,219 @@ export function createDashboardFeature(ctx) {
     }
   }
 
+  function dashboardInsightPanelCollapseStorageKey(panelKey = '') {
+    const normalizedPanelKey = String(panelKey ?? '').trim()
+    if (!DASHBOARD_INSIGHT_PANEL_CONFIG[normalizedPanelKey]) {
+      return ''
+    }
+    const orgPart = dashboardLocalCachePart(appState.session?.orgId, 'org')
+    const userPart = dashboardLocalCachePart(
+      appState.session?.uid ??
+        appState.session?.userId ??
+        appState.session?.email ??
+        appState.session?.login ??
+        appState.session?.name,
+      'user',
+    )
+    return `${DASHBOARD_INSIGHT_PANEL_COLLAPSE_STORAGE_PREFIX}.${orgPart}.${userPart}.${normalizedPanelKey}`
+  }
+
+  function dashboardReadInsightPanelCollapsed(panelKey = '') {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return false
+    }
+
+    try {
+      const storageKey = dashboardInsightPanelCollapseStorageKey(panelKey)
+      return storageKey ? window.localStorage.getItem(storageKey) === '1' : false
+    } catch {
+      return false
+    }
+  }
+
+  function dashboardWriteInsightPanelCollapsed(panelKey = '', collapsed = false) {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return
+    }
+
+    try {
+      const storageKey = dashboardInsightPanelCollapseStorageKey(panelKey)
+      if (storageKey) {
+        window.localStorage.setItem(storageKey, collapsed ? '1' : '0')
+      }
+    } catch {
+      // The panels still work when localStorage is unavailable.
+    }
+  }
+
+  function dashboardSetInsightPanelCompactCopy(panelKey = '', headline = '', meta = '') {
+    const config = DASHBOARD_INSIGHT_PANEL_CONFIG[String(panelKey ?? '').trim()]
+    const compact = config ? document.getElementById(config.compactId) : null
+    if (!(compact instanceof HTMLElement)) {
+      return
+    }
+    const headlineNode = compact.querySelector('strong')
+    const metaNode = compact.querySelector('span')
+    if (headlineNode) {
+      headlineNode.textContent = String(headline ?? '').trim()
+    }
+    if (metaNode) {
+      metaNode.textContent = String(meta ?? '').trim()
+    }
+  }
+
+  function dashboardSetInsightPanelCollapsed(panelKey = '', collapsed = false, { persist = true } = {}) {
+    const normalizedPanelKey = String(panelKey ?? '').trim()
+    const config = DASHBOARD_INSIGHT_PANEL_CONFIG[normalizedPanelKey]
+    if (!config) {
+      return
+    }
+
+    const card = document.getElementById(config.cardId)
+    const button = document.getElementById(config.buttonId)
+    const body = document.getElementById(config.bodyId)
+    const compact = document.getElementById(config.compactId)
+    const nextCollapsed = Boolean(collapsed)
+
+    if (card instanceof HTMLElement) {
+      card.classList.toggle('is-collapsed', nextCollapsed)
+      card.dataset.collapsed = nextCollapsed ? '1' : '0'
+    }
+    if (body instanceof HTMLElement) {
+      body.hidden = nextCollapsed
+    }
+    if (compact instanceof HTMLElement) {
+      compact.hidden = !nextCollapsed
+    }
+    if (button instanceof HTMLButtonElement) {
+      const action = nextCollapsed ? 'Rozwiń' : 'Zwiń'
+      const label = `${action} panel ${config.label}`
+      button.textContent = action
+      button.setAttribute('aria-expanded', nextCollapsed ? 'false' : 'true')
+      button.setAttribute('aria-label', label)
+      button.setAttribute('title', label)
+    }
+
+    if (persist) {
+      dashboardWriteInsightPanelCollapsed(normalizedPanelKey, nextCollapsed)
+    }
+
+    if (normalizedPanelKey === 'objects' && !nextCollapsed) {
+      dashboardResizeActiveWorkerMap()
+    }
+  }
+
+  function dashboardContractProfitabilityCollapseStorageKey() {
+    const orgPart = dashboardLocalCachePart(appState.session?.orgId, 'org')
+    const userPart = dashboardLocalCachePart(
+      appState.session?.uid ??
+        appState.session?.userId ??
+        appState.session?.email ??
+        appState.session?.login ??
+        appState.session?.name,
+      'user',
+    )
+    return `${DASHBOARD_CONTRACT_PROFITABILITY_COLLAPSE_STORAGE_PREFIX}.${orgPart}.${userPart}`
+  }
+
+  function dashboardReadContractProfitabilityCollapsed() {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return false
+    }
+
+    try {
+      return window.localStorage.getItem(dashboardContractProfitabilityCollapseStorageKey()) === '1'
+    } catch {
+      return false
+    }
+  }
+
+  function dashboardWriteContractProfitabilityCollapsed(collapsed) {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return
+    }
+
+    try {
+      window.localStorage.setItem(
+        dashboardContractProfitabilityCollapseStorageKey(),
+        collapsed ? '1' : '0',
+      )
+    } catch {
+      // The panel still works when localStorage is unavailable.
+    }
+  }
+
+  function dashboardSyncContractProfitabilityCompactSummary() {
+    const sourceAverage = document.getElementById('dashContractProfitabilityAverage')
+    const compactAverage = document.getElementById('dashContractProfitabilityCompactAverage')
+    const commandAverage = document.getElementById('dashCommandMarginValue')
+    const sourceDelta = document.getElementById('dashContractProfitabilityDelta')
+    const compactDelta = document.getElementById('dashContractProfitabilityCompactDelta')
+    const firstContract = document.querySelector('#dashContractProfitabilityList li')
+    const compactContractName = document.getElementById('dashContractProfitabilityCompactContractName')
+    const compactContractValue = document.getElementById('dashContractProfitabilityCompactContractValue')
+
+    if (compactAverage) {
+      compactAverage.textContent = sourceAverage?.textContent?.trim() || '—'
+    }
+    if (commandAverage) {
+      commandAverage.textContent = sourceAverage?.textContent?.trim() || '—'
+    }
+    if (compactDelta) {
+      const deltaText = sourceDelta?.textContent?.trim() || 'Brak porównania'
+      compactDelta.textContent = deltaText.replace('w porównaniu z poprzednim miesiącem', 'miesiąc do miesiąca')
+      compactDelta.classList.toggle('is-positive', sourceDelta?.classList.contains('is-positive') === true)
+      compactDelta.classList.toggle('is-negative', sourceDelta?.classList.contains('is-negative') === true)
+      compactDelta.classList.toggle('is-neutral', sourceDelta?.classList.contains('is-neutral') === true)
+    }
+    if (compactContractName) {
+      compactContractName.textContent = firstContract?.querySelector('span')?.textContent?.trim() || 'Brak danych'
+    }
+    if (compactContractValue) {
+      compactContractValue.textContent = firstContract?.querySelector('strong')?.textContent?.trim() || '—'
+    }
+  }
+
+  function dashboardSetContractProfitabilityCollapsed(collapsed, { persist = true } = {}) {
+    const card = document.getElementById('dashContractProfitabilityCard')
+    const button = document.getElementById('dashContractProfitabilityToggle')
+    const body = document.getElementById('dashContractProfitabilityBody')
+    const compactSummary = document.getElementById('dashContractProfitabilityCompact')
+    const nextCollapsed = Boolean(collapsed)
+
+    dashboardSyncContractProfitabilityCompactSummary()
+
+    if (card instanceof HTMLElement) {
+      card.classList.toggle('is-collapsed', nextCollapsed)
+      card.dataset.collapsed = nextCollapsed ? '1' : '0'
+    }
+
+    if (body instanceof HTMLElement) {
+      body.hidden = nextCollapsed
+    }
+    if (compactSummary instanceof HTMLElement) {
+      compactSummary.hidden = !nextCollapsed
+    }
+
+    if (button instanceof HTMLButtonElement) {
+      const label = nextCollapsed
+        ? 'Rozwiń panel rentowności kontraktów'
+        : 'Zwiń panel rentowności kontraktów'
+      button.textContent = nextCollapsed ? 'Rozwiń' : 'Zwiń'
+      button.setAttribute('aria-expanded', nextCollapsed ? 'false' : 'true')
+      button.setAttribute('aria-label', label)
+      button.setAttribute('title', label)
+    }
+
+    if (persist) {
+      dashboardWriteContractProfitabilityCollapsed(nextCollapsed)
+    }
+
+    if (!nextCollapsed) {
+      window.requestAnimationFrame(() => dashboardDrawContractProfitabilitySampleChart())
+    }
+  }
+
   function dashboardSetActivitySettingsOpen(isOpen) {
     const popover = document.getElementById('dashActivityViewPopover')
     const button = document.getElementById('dashActivitySettingsBtn')
@@ -516,7 +736,6 @@ export function createDashboardFeature(ctx) {
       if (appState.dashboardActivityDayRequestKey === requestKey) {
         appState.dashboardActivityDayLoading = false
         renderDashboardActivityCalendar(appState.dashboardTodayRows)
-        renderDashboardSchedulePanel()
         dashboardApplyActivityView()
       }
     }
@@ -525,9 +744,7 @@ export function createDashboardFeature(ctx) {
   function dashboardSetActivityDay(dayKey, options = {}) {
     const normalizedDay = dashboardActivityDayKey(dayKey)
     appState.dashboardActivityDay = normalizedDay
-    appState.dashboardScheduleSelectedDay = normalizedDay
     dashboardApplyActivityView()
-    renderDashboardSchedulePanel()
     if (normalizedDay === todayYmd()) {
       appState.dashboardActivityDayLoading = false
       appState.dashboardActivityDayRows = []
@@ -601,6 +818,7 @@ export function createDashboardFeature(ctx) {
 
     return {
       workerKey,
+      workerId,
       workerName: displaySource,
       workerDisplayName,
       workerSortKey,
@@ -1008,68 +1226,6 @@ export function createDashboardFeature(ctx) {
     return [workerKey, startAt, endAt, zoneKey, clientKey, durationSec, status, endReason].join('|')
   }
 
-  function dashboardRowHasWorkdayStop(row = {}) {
-    const stopIso = dashboardActivityRowEditStopIso(row) || toIso(row?.closeMarkedAt)
-    if (stopIso) {
-      return true
-    }
-
-    const stopLabel = dashboardClockLabelToHm(
-      row?.qrStop ?? row?.stop ?? row?.stopTime ?? row?.endTime ?? row?.dayStopTime,
-      '',
-    )
-    if (stopLabel) {
-      return true
-    }
-
-    const endReason = String(row?.endReason ?? '').trim().toUpperCase()
-    const status = normalizeEventStatus(row?.status, false)
-    return (
-      status === 'CLOSED' ||
-      endReason === 'WORKDAY_STOP' ||
-      endReason === 'STOP_END_DAY' ||
-      endReason === 'MANUAL_CLOSE'
-    )
-  }
-
-  function dashboardOpenStartStopMatchKeys(row = {}) {
-    const keys = new Set()
-    dashboardEventIdentityCandidateIds(row).forEach((id) => {
-      if (id) {
-        keys.add(`id:${id}`)
-      }
-    })
-
-    const dayKey = dashboardResolveDayKey(row)
-    const workerKey = normalizeSearchText(row?.workerLogin ?? row?.login ?? row?.workerName ?? row?.name)
-    const startIso = dashboardActivityRowEditStartIso(row)
-    const startLabel = dashboardClockLabelToHm(row?.qrStart ?? row?.start ?? row?.startTime, '')
-    const startKey = startIso || startLabel
-    if (dayKey && workerKey && startKey) {
-      keys.add(`worker-start:${dayKey}:${workerKey}:${startKey}`)
-    }
-
-    return keys
-  }
-
-  function dashboardClosedStartStopKeys(rows = []) {
-    const keys = new Set()
-    ;(Array.isArray(rows) ? rows : []).forEach((row) => {
-      if (!dashboardRowHasWorkdayStop(row)) {
-        return
-      }
-      dashboardOpenStartStopMatchKeys(row).forEach((key) => keys.add(key))
-    })
-    return keys
-  }
-
-  function dashboardRowMatchesClosedStartStop(row = {}, closedKeys = new Set()) {
-    if (!(closedKeys instanceof Set) || !closedKeys.size) {
-      return false
-    }
-    return [...dashboardOpenStartStopMatchKeys(row)].some((key) => closedKeys.has(key))
-  }
-
   function dashboardActivityEditRowsForDay(dayKey = dashboardActivityDayKey()) {
     const rows = [
       ...dashboardActivityRowsForDay(appState.dashboardTodayRows, dayKey),
@@ -1358,6 +1514,9 @@ export function createDashboardFeature(ctx) {
         const companyLabel = isRunning
           ? latestQrCompanyLabel || rowCompanyLabel || '-'
           : rowCompanyLabel || latestQrCompanyLabel || '-'
+        const rowClientId = String(row?.clientId ?? row?.client?.id ?? '').trim()
+        const clientIdMatchesVisibleLabel = normalizeSearchText(companyLabel) === normalizeSearchText(rowCompanyLabel)
+        const clientId = clientIdMatchesVisibleLabel ? rowClientId : ''
         const elapsedSeconds = Math.max(0, Math.floor((stopTs - startTs) / 1000))
         const durationLabel = isRunning ? durationSecondsToHm(elapsedSeconds) : dashboardDurationLabelToHm(row?.duration, durationSecondsToHm(elapsedSeconds))
         const eventId = String(row?.eventId ?? row?.id ?? '').trim()
@@ -1380,8 +1539,10 @@ export function createDashboardFeature(ctx) {
           locationLabel: companyLabel,
           companyLabel,
           scanObjectLabel: companyLabel,
+          clientId,
           isRunning,
           sourceKind: String(row?.historySourceKind ?? '').trim().toLowerCase(),
+          sourceRow: row,
         }
       })
       .filter(Boolean)
@@ -1481,7 +1642,12 @@ export function createDashboardFeature(ctx) {
     }
 
     const plannedStartTs = Number(plannedBar?.startTs ?? 0)
-    if (!Number.isFinite(plannedStartTs) || plannedStartTs <= 0 || Number(nowTs) < plannedStartTs) {
+    if (
+      !isScheduleStartOverdue({
+        plannedStartTs,
+        nowTs,
+      })
+    ) {
       return false
     }
 
@@ -1604,17 +1770,119 @@ export function createDashboardFeature(ctx) {
     return result
   }
 
-  function dashboardBuildPlannedOrderActivityItems(dayKey = todayYmd(), rangeStart = 0, rangeEnd = 0) {
+  function dashboardServicePlanAllocationId(allocation = {}, allowIdFallback = false) {
+    return String(
+      allocation?.allocationId ??
+        allocation?.allocation_id ??
+        allocation?.slotId ??
+        allocation?.slot_id ??
+        allocation?.workSlotId ??
+        allocation?.work_slot_id ??
+        (allowIdFallback ? allocation?.id : '') ??
+        '',
+    ).trim()
+  }
+
+  function dashboardServicePlanBlockId(block = {}) {
+    return String(
+      block?.serviceBlockId ??
+        block?.service_block_id ??
+        block?.id ??
+        block?.teamId ??
+        block?.team_id ??
+        '',
+    ).trim()
+  }
+
+  function dashboardServiceSourceAllocation(order = {}, serviceBlockId = '', allocationId = '') {
+    const normalizedBlockId = String(serviceBlockId ?? '').trim()
+    const normalizedAllocationId = String(allocationId ?? '').trim()
+    if (!normalizedBlockId || !normalizedAllocationId) {
+      return null
+    }
+
+    const serviceBlocks = Array.isArray(order?.serviceBlocks) ? order.serviceBlocks : []
+    const block = serviceBlocks.find(
+      (candidate) => dashboardServicePlanBlockId(candidate) === normalizedBlockId,
+    ) ?? null
+    const localAllocations = [
+      ...(Array.isArray(block?.workAllocations) ? block.workAllocations : []),
+      ...(Array.isArray(block?.workerAllocations) ? block.workerAllocations : []),
+    ].map((allocation) => ({ allocation, allowIdFallback: false }))
+    const localSlots = (Array.isArray(block?.slots) ? block.slots : [])
+      .map((allocation) => ({ allocation, allowIdFallback: true }))
+    const globalAllocations = [
+      ...(Array.isArray(order?.workAllocations) ? order.workAllocations : []),
+      ...(Array.isArray(order?.workerAllocations) ? order.workerAllocations : []),
+    ]
+      .filter((allocation) => {
+        const allocationBlockId = String(
+          allocation?.serviceBlockId ??
+            allocation?.service_block_id ??
+            allocation?.teamId ??
+            allocation?.team_id ??
+            '',
+        ).trim()
+        return allocationBlockId === normalizedBlockId
+      })
+      .map((allocation) => ({ allocation, allowIdFallback: false }))
+
+    const match = [...localAllocations, ...localSlots, ...globalAllocations].find(
+      (candidate) =>
+        dashboardServicePlanAllocationId(candidate.allocation, candidate.allowIdFallback) ===
+        normalizedAllocationId,
+    )
+    return match?.allocation ?? null
+  }
+
+  function dashboardServiceCanonicalWorkSlotKey(
+    allocation = null,
+    serviceBlockId = '',
+    allocationId = '',
+  ) {
+    if (!allocation || typeof allocation !== 'object') {
+      return ''
+    }
+    const direct = String(
+      allocation?.workSlotKey ??
+        allocation?.work_slot_key ??
+        allocation?.key ??
+        allocation?.slotId ??
+        allocation?.slot_id ??
+        allocation?.allocationId ??
+        allocation?.allocation_id ??
+        '',
+    ).trim()
+    if (direct) {
+      return direct
+    }
+    const blockId = String(serviceBlockId ?? '').trim()
+    const slotId = String(allocationId ?? '').trim()
+    return blockId && slotId ? `block:${blockId}:slot:${slotId}` : slotId
+  }
+
+  function dashboardBuildPlannedOrderActivityItems(
+    dayKey = todayYmd(),
+    rangeStart = 0,
+    rangeEnd = 0,
+    options = {},
+  ) {
     const resources = calendarTimelineResources()
-    const plannedOrders = calendarTimelineExpandRecurringOrdersForDays(ordersListSourceOrders(), [dayKey])
+    const plannedOrders = calendarTimelineExpandRecurringOrdersForDays(
+      ordersListSourceOrders().filter((order) => isScheduleOrderActive(order)),
+      [dayKey],
+    )
     return plannedOrders
-      .filter((order) => !order?.completed)
+      .filter((order) => options.includeCompleted === true || !order?.completed)
       .flatMap((order) => {
         const slots = typeof calendarTimelineVisualOrderSlots === 'function'
           ? calendarTimelineVisualOrderSlots(order, resources)
           : ordersNormalizeOrderRows(order, resources).map((row) => ({ ...order, row }))
         return (Array.isArray(slots) ? slots : [])
-          .filter((slot) => resources[Number(slot?.row)]?.type === 'worker')
+          .filter((slot) =>
+            options.includeAllAllocations === true ||
+            resources[Number(slot?.row)]?.type === 'worker',
+          )
           .flatMap((slot) => {
             const planned = calendarTimelineOrderPlannedBounds(slot)
             if (!planned) {
@@ -1638,10 +1906,71 @@ export function createDashboardFeature(ctx) {
           )
           const title = calendarTimelineOrderTitle(order)
           const clientLabel = ordersTimelineClientLabel(order)
-          const companyLabel = dashboardActivityCleanCompanyLabel(clientLabel) || dashboardActivityCleanCompanyLabel(ordersTimelineAddressLabel(order))
-          const orderId = String(slot?.id ?? order?.id ?? '').trim()
-          const sourceOrderId = String(slot?.sourceOrderId ?? order?.sourceOrderId ?? order?.orderId ?? order?.id ?? '').trim()
-          const occurrenceDateYmd = String(
+          const addressLabel = ordersTimelineAddressLabel(order)
+          const companyLabel = dashboardActivityCleanCompanyLabel(clientLabel) || dashboardActivityCleanCompanyLabel(addressLabel)
+          const plannedCoordinates =
+            dashboardActiveWorkerMapCoordinates(slot) ||
+            dashboardActiveWorkerMapCoordinates(order)
+            const orderId = String(slot?.id ?? order?.id ?? '').trim()
+            const sourceOrderId = String(slot?.sourceOrderId ?? order?.sourceOrderId ?? order?.orderId ?? order?.id ?? '').trim()
+            const taskId = String(
+              slot?.taskId ??
+                slot?.idTask ??
+                order?.taskId ??
+                order?.idTask ??
+                order?.orderId ??
+                order?.sourceOrderId ??
+                order?.id ??
+                '',
+            ).trim()
+            const allocationId = String(
+              slot?.allocationId ??
+                slot?.workSlotId ??
+                slot?.slotId ??
+                '',
+            ).trim()
+            const serviceBlockId = String(slot?.serviceBlockId ?? '').trim()
+            const sourceAllocation = dashboardServiceSourceAllocation(order, serviceBlockId, allocationId)
+            const workSlotKey = dashboardServiceCanonicalWorkSlotKey(
+              sourceAllocation,
+              serviceBlockId,
+              allocationId,
+            )
+            const sourceRequiredMinutes = Math.max(
+              0,
+              Number(order?.requiredWorkMinutes ?? order?.serviceWorkMinutes ?? order?.standardWorkMinutes) || 0,
+            )
+            const allocationMinutes = Math.max(
+              0,
+              Number(slot?.slotWorkMinutes ?? slot?.minutes ?? slot?.workMinutes ?? slot?.durationMinutes) || 0,
+            )
+            const sourceStartTime = String(order?.startTime ?? order?.planStartTime ?? '').trim()
+            const sourceEndTime = String(order?.endTime ?? order?.planEndTime ?? '').trim()
+            const hasExplicitTimeRange = Boolean(
+              calendarNormalizeTimeValue(sourceStartTime) && calendarNormalizeTimeValue(sourceEndTime),
+            )
+            const sourceAllocations = [
+              ...(Array.isArray(order?.workAllocations) ? order.workAllocations : []),
+              ...(Array.isArray(order?.workerAllocations) ? order.workerAllocations : []),
+            ]
+            const sourceServiceBlocks = Array.isArray(order?.serviceBlocks) ? order.serviceBlocks : []
+            const hasExplicitAllocationTimeRange = [...sourceAllocations, ...sourceServiceBlocks].some(
+              (allocation) => Boolean(
+                calendarNormalizeTimeValue(allocation?.startTime ?? allocation?.planStartTime) &&
+                calendarNormalizeTimeValue(allocation?.endTime ?? allocation?.planEndTime),
+              ),
+            )
+            const hasReliablePlan = Boolean(
+              sourceRequiredMinutes > 0 ||
+                (sourceServiceBlocks.length > 0 && allocationMinutes > 0) ||
+                hasExplicitTimeRange ||
+                hasExplicitAllocationTimeRange,
+            )
+            const boundsDurationMinutes = Math.max(0, Math.round((planned.endTs - planned.startTs) / 60000))
+            const plannedDurationMinutes = hasReliablePlan
+              ? Math.max(1, Math.round(allocationMinutes || sourceRequiredMinutes || boundsDurationMinutes))
+              : 0
+            const occurrenceDateYmd = String(
             slot?.recurrenceOriginalDateYmd ||
               slot?.recurrenceOverrideDateYmd ||
               slot?.dateYmd ||
@@ -1654,7 +1983,17 @@ export function createDashboardFeature(ctx) {
           return {
             ...identity,
             kind: 'planned',
+            orgId: String(appState.session?.orgId ?? '').trim(),
+            taskId,
+            taskUpdatedAt: String(
+              order?.updatedAt ??
+                order?.updated_at ??
+                slot?.updatedAt ??
+                slot?.updated_at ??
+                '',
+            ).trim(),
             orderId,
+            editorOrderId: String(order?.id ?? orderId).trim(),
             sourceOrderId,
             occurrenceDateYmd,
             dateYmd: String(slot?.dateYmd || order?.dateYmd || dayKey).trim(),
@@ -1662,7 +2001,9 @@ export function createDashboardFeature(ctx) {
             isRecurringInstance: Boolean(order?.isRecurringInstance),
             recurrenceOverride: Boolean(order?.recurrenceOverride || calendarTimelineRecurringOverrideInfo(order)),
             workSlotKey: String(slot?.workSlotKey ?? '').trim(),
-            serviceBlockId: String(slot?.serviceBlockId ?? '').trim(),
+            executionWorkSlotKey: workSlotKey,
+            allocationId,
+            serviceBlockId,
             serviceBlockKind: String(slot?.serviceBlockKind ?? '').trim(),
             serviceBlockLabel: String(slot?.serviceBlockLabel ?? '').trim(),
             startTs: planned.startTs,
@@ -1672,6 +2013,13 @@ export function createDashboardFeature(ctx) {
             label: title,
             locationLabel: companyLabel,
             companyLabel,
+            addressLabel,
+            clientId: String(slot?.clientId ?? order?.clientId ?? '').trim(),
+            zoneId: String(slot?.zoneId ?? slot?.roomId ?? order?.zoneId ?? order?.roomId ?? '').trim(),
+            hasReliablePlan,
+            plannedDurationMinutes,
+            plannedLat: plannedCoordinates?.lat ?? null,
+            plannedLng: plannedCoordinates?.lng ?? null,
             isRunning: false,
           }
         })
@@ -1682,11 +2030,57 @@ export function createDashboardFeature(ctx) {
     const sortedBars = bars
       .slice()
       .sort((left, right) => left.clippedStart - right.clippedStart || left.clippedStop - right.clippedStop)
+    const laneByBar = new Map()
+    const plannedLaneEnds = []
+    const workdayLaneEnds = []
+
+    sortedBars
+      .filter((bar) => bar?.kind === 'planned')
+      .forEach((bar) => {
+        const lane = plannedLaneEnds.findIndex((laneEnd) => Number(bar.clippedStart) >= laneEnd)
+        const resolvedLane = lane >= 0 ? lane : plannedLaneEnds.length
+        plannedLaneEnds[resolvedLane] = Number(bar.clippedStop)
+        laneByBar.set(bar, resolvedLane)
+      })
+
+    const workdayLaneOffset = Math.max(1, plannedLaneEnds.length)
+    sortedBars
+      .filter((bar) => bar?.kind !== 'planned')
+      .forEach((bar) => {
+        const lane = workdayLaneEnds.findIndex((laneEnd) => Number(bar.clippedStart) >= laneEnd)
+        const resolvedLane = lane >= 0 ? lane : workdayLaneEnds.length
+        workdayLaneEnds[resolvedLane] = Number(bar.clippedStop)
+        laneByBar.set(bar, workdayLaneOffset + resolvedLane)
+      })
 
     return sortedBars.map((bar) => ({
       ...bar,
-      lane: bar?.kind === 'workday' ? 1 : 0,
+      lane: laneByBar.get(bar) ?? 0,
     }))
+  }
+
+  function dashboardActivityPlannedConflictLabels(bar = {}, bars = []) {
+    if (bar?.kind !== 'planned') {
+      return []
+    }
+    const companyKey = dashboardActivityBarCompanyKey(bar)
+    return (Array.isArray(bars) ? bars : [])
+      .filter((candidate) => {
+        if (!candidate || candidate === bar || candidate.kind !== 'planned') {
+          return false
+        }
+        const candidateCompanyKey = dashboardActivityBarCompanyKey(candidate)
+        const differentLocation = companyKey && candidateCompanyKey
+          ? companyKey !== candidateCompanyKey
+          : dashboardActivityCleanCompanyLabel(bar.companyLabel) !== dashboardActivityCleanCompanyLabel(candidate.companyLabel)
+        return (
+          differentLocation &&
+          Number(bar.startTs) < Number(candidate.stopTs) &&
+          Number(candidate.startTs) < Number(bar.stopTs)
+        )
+      })
+      .map((candidate) => dashboardActivityCleanCompanyLabel(candidate.companyLabel))
+      .filter((label, index, labels) => label && labels.indexOf(label) === index)
   }
 
   function renderDashboardActivityCalendar(rows = []) {
@@ -1752,7 +2146,16 @@ export function createDashboardFeature(ctx) {
           ...bar,
           startDelta: dashboardActivityStartDeltaInfo(bar, laneBars),
           endDelta: dashboardActivityEndDeltaInfo(bar, laneBars),
+          planConflictLabels: dashboardActivityPlannedConflictLabels(bar, laneBars),
         }))
+        const planConflictLabels = bars
+          .flatMap((bar) => (
+            bar.planConflictLabels?.length
+              ? [dashboardActivityCleanCompanyLabel(bar.companyLabel), ...bar.planConflictLabels]
+              : []
+          ))
+          .filter((label, index, labels) => label && labels.indexOf(label) === index)
+        const hasPlanConflict = planConflictLabels.length > 1
         const missingStartBars = bars.filter((bar) => dashboardActivityPlannedStartMissing(bar, bars, nowTs, isToday))
         const workdayBars = bars.filter((bar) => bar?.kind === 'workday')
         const runningWorkdayBars = workdayBars.filter((bar) => bar?.isRunning)
@@ -1809,24 +2212,31 @@ export function createDashboardFeature(ctx) {
             const classes = ['dash-activity-timeline-bar']
             if (bar.isRunning) classes.push('is-running')
             if (bar.kind === 'planned') classes.push('is-planned')
+            if (bar.planConflictLabels?.length) classes.push('is-plan-conflict')
             const isMissingStart = dashboardActivityPlannedStartMissing(bar, bars, nowTs, isToday)
             if (isMissingStart) classes.push('is-missing-start')
             const timeRange = bar.isRunning ? `${hourLabel(bar.startTs)}-` : `${hourLabel(bar.startTs)}-${hourLabel(bar.stopTs)}`
             const companyLabel = dashboardActivityCleanCompanyLabel(bar.companyLabel || bar.locationLabel) || ''
-            const showCompanyOnBar = !(bar.kind === 'workday' && bar.isRunning)
+            const showCompanyOnBar = bar.kind === 'planned'
             const displayCompanyLabel = showCompanyOnBar ? companyLabel : ''
             const workDurationLabel = bar.kind === 'workday' ? String(bar.label ?? '').trim() : ''
-            const barStatus = bar.kind === 'planned' ? 'Plan' : 'Realizacja'
+            const barStatus = bar.kind === 'planned' ? 'Plan' : 'Dzień pracy'
             const startDeltaTitle = bar.startDelta ? ` · ${bar.startDelta.label}` : ''
             const endDeltaTitle = bar.endDelta ? ` · ${bar.endDelta.label}` : ''
             const durationTitle = workDurationLabel ? ` · czas ${workDurationLabel}` : ''
             const missingStartTitle = isMissingStart ? ' · BRAK START: pracownik powinien być już na obiekcie' : ''
+            const workdayStartTitle = bar.kind === 'workday' && companyLabel
+              ? ` · START dnia zeskanowany w: ${companyLabel}`
+              : ''
+            const planConflictTitle = bar.planConflictLabels?.length
+              ? ` · KOLIZJA PLANU z: ${bar.planConflictLabels.join(', ')}`
+              : ''
             const clickTitle = bar.kind === 'planned'
               ? ' · Kliknij dwukrotnie: edytuj zlecenie'
               : bar.kind === 'workday'
                 ? ' · Kliknij dwukrotnie: edytuj dzień pracy'
                 : ''
-            const title = `${group.workerDisplayName}: ${barStatus} ${timeRange}${durationTitle}${displayCompanyLabel ? ` · ${displayCompanyLabel}` : ''}${missingStartTitle}${startDeltaTitle}${endDeltaTitle}${clickTitle}`
+            const title = `${group.workerDisplayName}: ${barStatus} ${timeRange}${durationTitle}${displayCompanyLabel ? ` · ${displayCompanyLabel}` : ''}${workdayStartTitle}${missingStartTitle}${planConflictTitle}${startDeltaTitle}${endDeltaTitle}${clickTitle}`
             const isCompletedWorkdayBar = bar.kind === 'workday' && !bar.isRunning
             const barLabel = bar.kind === 'planned'
               ? timeRange
@@ -1879,7 +2289,12 @@ export function createDashboardFeature(ctx) {
             `
           })
           .join('')
-        const companyLabel = dashboardActivityCompanyLabelForGroup(bars, group.companyLabels)
+        const companyLabel = hasPlanConflict
+          ? `Kolizja planu: ${planConflictLabels.length} obiekty`
+          : dashboardActivityCompanyLabelForGroup(bars, group.companyLabels)
+        const companyMetaTitle = hasPlanConflict
+          ? `Kolidujące obiekty: ${planConflictLabels.join(' · ')}`
+          : companyLabel
         return {
           startTs: bars.length ? Math.min(...bars.map((bar) => bar.startTs)) : Number.MAX_SAFE_INTEGER,
           hasMissingStart: missingStartBars.length > 0,
@@ -1891,13 +2306,13 @@ export function createDashboardFeature(ctx) {
           companyLabel,
           workerSortKey: group.workerSortKey,
           html: `
-            <div class="dash-activity-timeline-row" style="--dash-lane-count:${laneCount};--dash-row-height:${laneCount * 22 + (hasDeltaMarkers ? 36 : 14)}px;--dash-track-height:${laneCount * 22 + (hasDeltaMarkers ? 28 : 6)}px;">
+            <div class="dash-activity-timeline-row${hasPlanConflict ? ' has-plan-conflict' : ''}" style="--dash-lane-count:${laneCount};--dash-row-height:${laneCount * 22 + (hasDeltaMarkers ? 36 : 14)}px;--dash-track-height:${laneCount * 22 + (hasDeltaMarkers ? 28 : 6)}px;">
               <div class="dash-activity-timeline-person">${workerButton}</div>
               <div class="dash-activity-timeline-track">
                 ${deltaMarkersHtml}
                 ${barsHtml}
               </div>
-              <div class="dash-activity-timeline-meta" title="${escapeHtml(companyLabel || '')}">${escapeHtml(companyLabel || '')}</div>
+              <div class="dash-activity-timeline-meta" title="${escapeHtml(companyMetaTitle || '')}">${escapeHtml(companyLabel || '')}</div>
             </div>
           `,
         }
@@ -1999,8 +2414,6 @@ export function createDashboardFeature(ctx) {
           const startValue = dashboardClockLabelToHm(row.qrStart, '--:--')
           const stopValue = row?.isRunning ? '--:--' : dashboardClockLabelToHm(row.qrStop, '--:--')
           const workValue = dashboardDurationLabelToHm(row.duration, '00:00')
-          const lateMinutes = Number(row?.lateMinutes ?? 0)
-          const lateValue = dashboardLateMinutesToHm(lateMinutes)
           const workerName = String(row.workerName ?? '').trim() || '-'
           const workerDisplayName = dashboardWorkerSurnameDisplayName(workerName)
           const workerLogin = String(row.workerLogin ?? row.id ?? '').trim()
@@ -2015,15 +2428,14 @@ export function createDashboardFeature(ctx) {
           const zoneCell = zoneLabel === '-'
             ? '<span class="muted">-</span>'
             : `<button class="dash-entity-link" type="button" data-dash-history-kind="zones" data-dash-row-index="${sourceIndex}">${zoneNameWithQrHtml(zoneLabel, row)}</button>`
-          const rowClass = lateMinutes > 0 ? 'list-row dash-events-row dash-events-row--has-late' : 'list-row dash-events-row'
           return `
-        <div class="${rowClass}">
+        <div class="list-row dash-events-row">
           <div>${workerCell}</div>
           <div>${escapeHtml(String(row.entriesCount ?? 0))}</div>
           <div>${clientCell}</div>
           <div>${zoneCell}</div>
           <div class="ta-right">
-            <div class="dash-time-stack${lateMinutes > 0 ? ' dash-time-stack--has-late' : ''}">
+            <div class="dash-time-stack">
               <div class="dash-time-line dash-time-line--start">
                 <span class="dash-time-label">Godzina START</span>
                 <span class="dash-time-colon">:</span>
@@ -2039,17 +2451,6 @@ export function createDashboardFeature(ctx) {
                 <span class="dash-time-colon">:</span>
                 <span class="dash-time-value time-duration">${escapeHtml(workValue)}</span>
               </div>
-              ${
-                lateMinutes > 0
-                  ? `
-              <div class="dash-time-line dash-time-line--late">
-                <span class="dash-time-label">Spóźnienie</span>
-                <span class="dash-time-colon">:</span>
-                <span class="dash-time-value">${escapeHtml(lateValue)}</span>
-              </div>
-              `
-                  : ''
-              }
             </div>
           </div>
         </div>
@@ -2061,140 +2462,6 @@ export function createDashboardFeature(ctx) {
     window.requestAnimationFrame(() => {
       eventsList.scrollTop = 0
     })
-  }
-
-  function dashboardScheduleDayDisplayName(dayName) {
-    const normalized = String(dayName ?? '')
-      .trim()
-      .normalize('NFD')
-      .replace(/\p{M}/gu, '')
-      .toUpperCase()
-      .replace(/[^A-Z]/g, '')
-    const map = {
-      PONIEDZIALEK: 'Poniedziałek',
-      WTOREK: 'Wtorek',
-      SRODA: 'Środa',
-      CZWARTEK: 'Czwartek',
-      PIATEK: 'Piątek',
-      SOBOTA: 'Sobota',
-      NIEDZIELA: 'Niedziela',
-    }
-    return map[normalized] || String(dayName ?? '').trim() || '-'
-  }
-
-  function dashboardScheduleTextStartsWithTime(value) {
-    const firstLine = String(value ?? '')
-      .replace(/\r\n?/g, '\n')
-      .split('\n')
-      .map((line) => line.trim())
-      .find(Boolean)
-    const match = String(firstLine ?? '').match(/^(\d{1,2})[.:](\d{2})(?=\D|$)/)
-    if (!match) {
-      return false
-    }
-
-    const hour = Number(match[1])
-    const minute = Number(match[2])
-    return Number.isFinite(hour) && Number.isFinite(minute) && hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59
-  }
-
-  function dashboardScheduleShiftText(startRaw, taskRaw) {
-    const start = String(startRaw ?? '').trim()
-    const task = String(taskRaw ?? '').trim()
-    if (start && task) {
-      return dashboardScheduleTextStartsWithTime(task) ? task : `${start} ${task}`
-    }
-    if (start) {
-      return start
-    }
-    if (task) {
-      return task
-    }
-    return 'Brak zmiany'
-  }
-
-  function dashboardScheduleStartTime(entry) {
-    const morningStart = String(entry?.morningStart ?? '').trim()
-    if (morningStart) {
-      return morningStart
-    }
-
-    const afternoonStart = String(entry?.afternoonStart ?? '').trim()
-    if (afternoonStart) {
-      return afternoonStart
-    }
-
-    return '-'
-  }
-
-  function dashboardScheduleWorkerDisplayName(value) {
-    const raw = String(value ?? '').trim()
-    if (!raw) {
-      return '-'
-    }
-
-    const normalized = raw.replace(/\s+/g, ' ')
-    const letterMatches = normalized.match(/\p{L}/gu) || []
-    const upperMatches = normalized.match(/\p{Lu}/gu) || []
-    const isMostlyUpper = letterMatches.length > 2 && upperMatches.length / letterMatches.length > 0.75
-    if (!isMostlyUpper) {
-      return normalized
-    }
-
-    return normalized
-      .toLocaleLowerCase('pl')
-      .replace(/(^|[\s-])\p{L}/gu, (fragment) => fragment.toLocaleUpperCase('pl'))
-  }
-
-  function dashboardResolveWorkerById(workerId, workers = []) {
-    const pool = Array.isArray(workers) ? workers : []
-    if (!pool.length) {
-      return null
-    }
-
-    const normalizedId = normalizeSearchText(workerId)
-    if (!normalizedId) {
-      return null
-    }
-
-    const directMatch = pool.find((worker) => {
-      const workerIdKey = normalizeSearchText(worker?.workerId ?? worker?.id)
-      return Boolean(workerIdKey) && workerIdKey === normalizedId
-    })
-    if (directMatch) {
-      return directMatch
-    }
-
-    const scheduleIdDigits = normalizedId.replace(/[^0-9]/g, '').replace(/^0+/, '')
-    if (!scheduleIdDigits) {
-      return null
-    }
-
-    return (
-      pool.find((worker) => {
-        const workerIdKey = normalizeSearchText(worker?.workerId ?? worker?.id)
-        if (!workerIdKey) {
-          return false
-        }
-        const workerDigits = workerIdKey.replace(/[^0-9]/g, '').replace(/^0+/, '')
-        return Boolean(workerDigits) && workerDigits === scheduleIdDigits
-      }) ?? null
-    )
-  }
-
-  function dashboardResolveScheduleDayKey(dayBucket) {
-    const direct = String(dayBucket?.key ?? '').trim()
-    if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) {
-      return direct
-    }
-
-    const dateLabel = String(dayBucket?.dateLabel ?? '').trim()
-    const match = dateLabel.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
-    if (match) {
-      return `${match[3]}-${match[2]}-${match[1]}`
-    }
-
-    return ''
   }
 
   function dashboardScheduleTimeToMinutes(value) {
@@ -2231,210 +2498,6 @@ export function createDashboardFeature(ctx) {
     }
 
     return dayStartMs + Math.floor(minutes) * 60 * 1000
-  }
-
-  function dashboardScheduleDayNameFromYmd(dayKey = todayYmd()) {
-    const normalizedDay = dashboardActivityDayKey(dayKey)
-    const weekday = calendarDateFromYmd(normalizedDay).toLocaleDateString('pl-PL', { weekday: 'long' })
-    return weekday ? weekday.charAt(0).toLocaleUpperCase('pl') + weekday.slice(1) : '-'
-  }
-
-  function dashboardScheduleDateLabelFromYmd(dayKey = todayYmd()) {
-    const normalizedDay = dashboardActivityDayKey(dayKey)
-    return formatDatePl(`${normalizedDay}T12:00:00`)
-  }
-
-  function dashboardScheduleDayNameKey(dayName = '') {
-    return String(dayName ?? '')
-      .trim()
-      .normalize('NFD')
-      .replace(/\p{M}/gu, '')
-      .toUpperCase()
-      .replace(/[^A-Z]/g, '')
-  }
-
-  function dashboardScheduleSyntheticBucket(dayKey = todayYmd()) {
-    const normalizedDay = dashboardActivityDayKey(dayKey)
-    const dayStart = new Date(`${normalizedDay}T00:00:00`).getTime()
-    const dayEnd = new Date(`${normalizedDay}T23:59:59`).getTime()
-    const hourLabel = (timestamp) => {
-      const date = new Date(timestamp)
-      return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
-    }
-    const plannedEntries = dashboardBuildPlannedOrderActivityItems(normalizedDay, dayStart, dayEnd)
-      .map((bar) => {
-        const startTime = hourLabel(bar.startTs)
-        const stopTime = hourLabel(bar.stopTs)
-        const companyLabel = dashboardActivityCleanCompanyLabel(bar.companyLabel || bar.locationLabel || bar.label) || ''
-        const taskLabel = [stopTime ? `${startTime}-${stopTime}` : startTime, companyLabel].filter(Boolean).join(' · ')
-        const isMorning = new Date(bar.startTs).getHours() < 12
-        return {
-          workerId: String(bar.workerKey ?? ''),
-          workerLogin: String(bar.workerLogin ?? ''),
-          workerName: String(bar.workerDisplayName || bar.workerName || '-'),
-          status: 'Praca',
-          morningStart: isMorning ? startTime : '',
-          morningTask: isMorning ? taskLabel : '',
-          afternoonStart: isMorning ? '' : startTime,
-          afternoonTask: isMorning ? '' : taskLabel,
-        }
-      })
-
-    return {
-      key: normalizedDay,
-      dayName: dashboardScheduleDayNameFromYmd(normalizedDay),
-      dateLabel: dashboardScheduleDateLabelFromYmd(normalizedDay),
-      entries: plannedEntries,
-      generated: true,
-    }
-  }
-
-  function dashboardScheduleBucketForDay(dayKey = todayYmd()) {
-    const normalizedDay = dashboardActivityDayKey(dayKey)
-    const days = Array.isArray(appState.dashboardScheduleDays) ? appState.dashboardScheduleDays : []
-    const nativeBucket = days.find((day) => String(day?.key ?? '').trim() === normalizedDay)
-    if (nativeBucket) {
-      return nativeBucket
-    }
-
-    const expectedDayName = dashboardScheduleDayNameFromYmd(normalizedDay)
-    const expectedDayNameKey = dashboardScheduleDayNameKey(expectedDayName)
-    const weekdayBucket = days.find((day) => dashboardScheduleDayNameKey(day?.dayName) === expectedDayNameKey)
-    if (weekdayBucket) {
-      return {
-        ...weekdayBucket,
-        key: normalizedDay,
-        dayName: expectedDayName,
-        dateLabel: dashboardScheduleDateLabelFromYmd(normalizedDay),
-        weekdayFallback: true,
-      }
-    }
-
-    return dashboardScheduleSyntheticBucket(normalizedDay)
-  }
-
-  function dashboardScheduleMeaningfulLineText(value = '') {
-    const text = String(value ?? '').replace(/\s+/g, ' ').trim()
-    return text && normalizeSearchText(text) !== 'brak zmiany' ? text : ''
-  }
-
-  function dashboardMergeScheduleLineText(current = '', next = '') {
-    const left = dashboardScheduleMeaningfulLineText(current)
-    const right = dashboardScheduleMeaningfulLineText(next)
-    if (!left) {
-      return right || 'Brak zmiany'
-    }
-    if (!right) {
-      return left
-    }
-
-    const leftKey = normalizeSearchText(left)
-    const rightKey = normalizeSearchText(right)
-    if (leftKey === rightKey) {
-      return left
-    }
-    if (leftKey.includes(rightKey)) {
-      return left
-    }
-    if (rightKey.includes(leftKey)) {
-      return right
-    }
-    return `${left} / ${right}`
-  }
-
-  function dashboardScheduleEntryDedupeKey(entry = {}) {
-    const direct = String(entry?.workerKey ?? '').trim()
-    if (direct) {
-      return direct
-    }
-    const login = normalizeSearchText(entry?.workerLogin)
-    if (login) {
-      return `l:${login}`
-    }
-    const historyName = normalizeSearchText(entry?.workerHistoryName)
-    if (historyName) {
-      return `n:${historyName}`
-    }
-    const workerName = normalizeSearchText(entry?.workerName)
-    return workerName ? `n:${workerName}` : ''
-  }
-
-  function dashboardPreferredScheduleEntry(left = {}, right = {}) {
-    const leftHasStart = dashboardScheduleTimeToMinutes(left?.startTime) >= 0
-    const rightHasStart = dashboardScheduleTimeToMinutes(right?.startTime) >= 0
-    if (leftHasStart !== rightHasStart) {
-      return leftHasStart ? left : right
-    }
-
-    const leftIsWork = String(left?.status ?? '').trim() === 'Praca'
-    const rightIsWork = String(right?.status ?? '').trim() === 'Praca'
-    if (leftIsWork !== rightIsWork) {
-      return leftIsWork ? left : right
-    }
-
-    const leftPriority = Number(left?.priority ?? Number.POSITIVE_INFINITY)
-    const rightPriority = Number(right?.priority ?? Number.POSITIVE_INFINITY)
-    if (leftPriority !== rightPriority) {
-      return leftPriority < rightPriority ? left : right
-    }
-
-    const leftStart = Number(left?.startMinutes ?? Number.POSITIVE_INFINITY)
-    const rightStart = Number(right?.startMinutes ?? Number.POSITIVE_INFINITY)
-    if (leftStart !== rightStart) {
-      return leftStart < rightStart ? left : right
-    }
-
-    return left
-  }
-
-  function dashboardMergeScheduleEntries(entries = []) {
-    const rows = Array.isArray(entries) ? entries : []
-    const byWorker = new Map()
-    rows.forEach((entry) => {
-      const key = dashboardScheduleEntryDedupeKey(entry)
-      if (!key) {
-        byWorker.set(`row:${byWorker.size}`, entry)
-        return
-      }
-
-      const existing = byWorker.get(key)
-      if (!existing) {
-        byWorker.set(key, entry)
-        return
-      }
-
-      const preferred = dashboardPreferredScheduleEntry(existing, entry)
-      const other = preferred === existing ? entry : existing
-      const hasQrStartAny = Boolean(existing.hasQrStartAny || entry.hasQrStartAny)
-      const hasQrStartActive = Boolean(existing.hasQrStartActive || entry.hasQrStartActive)
-      const isMissingStart = !hasQrStartAny && Boolean(existing.isMissingStart || entry.isMissingStart)
-      const priority = hasQrStartActive ? 2 : isMissingStart ? 0 : Math.min(Number(existing.priority ?? 4), Number(entry.priority ?? 4))
-      const toneClass = isMissingStart
-        ? 'is-missing-start'
-        : hasQrStartActive
-          ? 'is-started'
-          : preferred.toneClass || other.toneClass || ''
-
-      byWorker.set(key, {
-        ...preferred,
-        workerLogin: preferred.workerLogin || other.workerLogin || '',
-        workerHistoryName: preferred.workerHistoryName || other.workerHistoryName || preferred.workerName,
-        workerDisplayName: preferred.workerDisplayName || dashboardWorkerSurnameDisplayName(preferred.workerName),
-        status: String(existing.status ?? '').trim() === 'Praca' || String(entry.status ?? '').trim() === 'Praca' ? 'Praca' : preferred.status,
-        statusClass: String(existing.status ?? '').trim() === 'Praca' || String(entry.status ?? '').trim() === 'Praca' ? 'is-work' : preferred.statusClass,
-        morningText: dashboardMergeScheduleLineText(existing.morningText, entry.morningText),
-        afternoonText: dashboardMergeScheduleLineText(existing.afternoonText, entry.afternoonText),
-        hasQrStartAny,
-        hasQrStartActive,
-        lateMinutes: Math.max(Number(existing.lateMinutes ?? 0), Number(entry.lateMinutes ?? 0)),
-        hasScheduleStart: Boolean(existing.hasScheduleStart || entry.hasScheduleStart),
-        isMissingStart,
-        priority,
-        toneClass,
-      })
-    })
-
-    return [...byWorker.values()]
   }
 
   function dashboardCanonicalWorkerId(value) {
@@ -2475,475 +2538,6 @@ export function createDashboardFeature(ctx) {
     }
 
     return ''
-  }
-
-  function dashboardBuildTodayWorkerStateById(dayKey) {
-    const normalizedDayKey = String(dayKey ?? '').trim()
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey)) {
-      return new Map()
-    }
-
-    if (normalizedDayKey !== todayYmd()) {
-      return new Map()
-    }
-
-    const rows = Array.isArray(appState.dashboardTodayRows) ? appState.dashboardTodayRows : []
-    const sourceRows = Array.isArray(appState.dashboardScheduleSourceRows) ? appState.dashboardScheduleSourceRows : []
-    const workersPool = Array.isArray(appState.workers) ? appState.workers : []
-    const stateMap = new Map()
-    const isoToMinutes = (isoValue) => {
-      const iso = toIso(isoValue)
-      if (!iso) {
-        return -1
-      }
-
-      const date = new Date(iso)
-      if (!Number.isFinite(date.getTime())) {
-        return -1
-      }
-
-      return date.getHours() * 60 + date.getMinutes()
-    }
-
-    const upsertState = (key, row) => {
-      if (!key) {
-        return
-      }
-
-      const existing = stateMap.get(key) || {
-        hasStart: false,
-        isRunning: false,
-        startMinutes: -1,
-      }
-
-      const rowStartMinutes = dashboardScheduleTimeToMinutes(row?.qrStart)
-      const hasStart = Number.isFinite(rowStartMinutes) && rowStartMinutes >= 0
-      const merged = {
-        hasStart: existing.hasStart || hasStart,
-        isRunning: existing.isRunning || Boolean(row?.isRunning),
-        startMinutes:
-          existing.startMinutes >= 0 && rowStartMinutes >= 0
-            ? Math.min(existing.startMinutes, rowStartMinutes)
-            : existing.startMinutes >= 0
-              ? existing.startMinutes
-              : rowStartMinutes >= 0
-                ? rowStartMinutes
-                : -1,
-      }
-      stateMap.set(key, merged)
-    }
-
-    rows.forEach((row) => {
-      const resolvedWorkerId = dashboardResolveWorkerIdValue(row, workersPool)
-      const workerIdKey = normalizeSearchText(resolvedWorkerId)
-      if (workerIdKey) {
-        upsertState(`id:${workerIdKey}`, row)
-      }
-    })
-
-    // Fallback for schedule colors: include all today's source rows (events/workdays),
-    // so workers who already started and then closed are still recognized as "started today".
-    sourceRows.forEach((row) => {
-      if ((dashboardResolveDayKey(row) || calendarTimelineRealEventRowDay(row)) !== normalizedDayKey) {
-        return
-      }
-
-      const resolvedWorkerId = dashboardResolveWorkerIdValue(row, workersPool)
-      if (!resolvedWorkerId) {
-        return
-      }
-
-      const rowStartMinutes = isoToMinutes(row?.startAt ?? row?.dayStartAt)
-      const status = String(row?.status ?? '').trim().toUpperCase()
-      const hasEnd = Boolean(toIso(row?.endAt ?? row?.dayEndAt))
-      const rowLike = {
-        qrStart:
-          rowStartMinutes >= 0
-            ? `${pad2(Math.floor(rowStartMinutes / 60))}:${pad2(rowStartMinutes % 60)}:00`
-            : '',
-        isRunning: !hasEnd && (status === 'RUNNING' || status === 'OPEN'),
-      }
-
-      const workerIdKey = normalizeSearchText(resolvedWorkerId)
-      if (workerIdKey) {
-        upsertState(`id:${workerIdKey}`, rowLike)
-      }
-    })
-
-    return stateMap
-  }
-
-  function dashboardResolveScheduleWorkerAliasKeys(entry) {
-    return dashboardWorkerIdIdentityKeys(dashboardResolveWorkerIdValue(entry))
-  }
-
-  function dashboardHideScheduleMissingStartAlert() {
-    const node = document.getElementById('dashScheduleMissingAlert')
-    if (node) {
-      node.remove()
-    }
-  }
-
-  function dashboardHideScheduleLateStartAlert() {
-    const node = document.getElementById('dashScheduleLateAlert')
-    if (node) {
-      node.remove()
-    }
-  }
-
-  function dashboardClearQueuedScheduleAlert(key) {
-    if (typeof clearPortalDeferredNotification === 'function') {
-      clearPortalDeferredNotification(key)
-    }
-  }
-
-  function dashboardShowScheduleLateStartAlert(dayKey, lateEntries = []) {
-    void dayKey
-    void lateEntries
-    const queueKey = 'dashboard:schedule-late'
-    dashboardClearQueuedScheduleAlert(queueKey)
-    appState.dashboardScheduleLatePendingKeys = []
-    dashboardHideScheduleLateStartAlert()
-  }
-
-  function dashboardShowScheduleMissingStartAlert(dayKey, missingEntries = []) {
-    void dayKey
-    void missingEntries
-    const queueKey = 'dashboard:schedule-missing'
-    dashboardClearQueuedScheduleAlert(queueKey)
-    dashboardHideScheduleMissingStartAlert()
-    appState.dashboardScheduleAlertLastKey = ''
-  }
-
-  function dashboardApplyScheduleVisibleLimit() {
-    const cardsRoot = document.getElementById('dashScheduleCards')
-    if (!(cardsRoot instanceof HTMLElement)) {
-      return
-    }
-
-    cardsRoot.style.removeProperty('height')
-    cardsRoot.style.removeProperty('max-height')
-    cardsRoot.style.removeProperty('min-height')
-  }
-
-  function dashboardQueueScheduleVisibleLimit() {
-    if (dashboardScheduleLimitRaf) {
-      window.cancelAnimationFrame(dashboardScheduleLimitRaf)
-      dashboardScheduleLimitRaf = 0
-    }
-    if (dashboardScheduleLimitTimerA) {
-      window.clearTimeout(dashboardScheduleLimitTimerA)
-      dashboardScheduleLimitTimerA = 0
-    }
-    if (dashboardScheduleLimitTimerB) {
-      window.clearTimeout(dashboardScheduleLimitTimerB)
-      dashboardScheduleLimitTimerB = 0
-    }
-
-    dashboardScheduleLimitRaf = window.requestAnimationFrame(() => {
-      dashboardScheduleLimitRaf = 0
-      dashboardApplyScheduleVisibleLimit()
-    })
-    dashboardScheduleLimitTimerA = window.setTimeout(() => {
-      dashboardScheduleLimitTimerA = 0
-      dashboardApplyScheduleVisibleLimit()
-    }, 90)
-    dashboardScheduleLimitTimerB = window.setTimeout(() => {
-      dashboardScheduleLimitTimerB = 0
-      dashboardApplyScheduleVisibleLimit()
-    }, 260)
-  }
-
-  function dashboardRenderScheduleCards(dayBucket) {
-    const cardsRoot = document.getElementById('dashScheduleCards')
-    if (!cardsRoot) {
-      return
-    }
-
-    const dayKey = dashboardResolveScheduleDayKey(dayBucket)
-    const entries = Array.isArray(dayBucket?.entries) ? dayBucket.entries : []
-    if (!entries.length) {
-      const message = appState.dashboardScheduleLoading
-        ? 'Wczytywanie grafiku...'
-        : appState.dashboardScheduleError
-          ? 'Nie udało się pobrać grafiku.'
-          : 'Brak danych grafiku dla wybranego dnia.'
-      cardsRoot.innerHTML = `<div class="dash-schedule-empty">${escapeHtml(message)}</div>`
-      cardsRoot.style.removeProperty('max-height')
-      cardsRoot.scrollTop = 0
-      window.requestAnimationFrame(() => {
-        cardsRoot.scrollTop = 0
-      })
-      dashboardShowScheduleMissingStartAlert(dayKey, [])
-      return
-    }
-
-    const nowTs = Date.now()
-    const todayWorkerStateMap = dashboardBuildTodayWorkerStateById(dayKey)
-    const workersPool = Array.isArray(appState.workers) ? appState.workers : []
-
-    const enrichedRows = entries
-      .map((entry) => {
-        const linkedWorkerById = dashboardResolveWorkerById(entry?.workerId, workersPool)
-        const linkedWorkerForLabel = linkedWorkerById
-        const isWorkerAssignable = linkedWorkerForLabel
-          ? dashboardWorkerIsAssignable(linkedWorkerForLabel)
-          : dashboardWorkerIsAssignable(entry)
-        const workerName = dashboardScheduleWorkerDisplayName(
-          linkedWorkerForLabel?.workerName ?? linkedWorkerForLabel?.name ?? entry?.workerName ?? entry?.workerId,
-        )
-        const workerDisplayName = dashboardWorkerSurnameDisplayName(workerName)
-        const workerLogin = String(entry?.workerLogin ?? linkedWorkerForLabel?.workerLogin ?? linkedWorkerForLabel?.login ?? '').trim()
-        const workerHistoryName =
-          String(linkedWorkerForLabel?.workerName ?? linkedWorkerForLabel?.name ?? workerName).trim() || workerName
-        const status = String(entry?.status ?? '').trim() || 'Brak zmiany'
-        const morningText = dashboardScheduleShiftText(entry?.morningStart, entry?.morningTask)
-        const afternoonText = dashboardScheduleShiftText(entry?.afternoonStart, entry?.afternoonTask)
-        const startTime = dashboardScheduleStartTime(entry)
-        const statusClass = status === 'Praca' ? 'is-work' : 'is-off'
-        const startMinutes = dashboardScheduleTimeToMinutes(startTime)
-        const startTs = dashboardScheduleStartTimestamp(dayKey, startMinutes)
-        const hasScheduleStart = startTs > 0
-        const activeIdSource =
-          dashboardResolveWorkerIdValue(
-            {
-              workerId: entry?.workerId,
-              workerLogin:
-                workerLogin || linkedWorkerForLabel?.workerLogin || linkedWorkerForLabel?.login || entry?.workerLogin,
-              workerName: workerName || entry?.workerName,
-            },
-            workersPool,
-          ) ||
-          dashboardResolveWorkerIdValue(linkedWorkerForLabel, workersPool) ||
-          ''
-        const activeIdKey = normalizeSearchText(activeIdSource)
-        const workerKey =
-          activeIdKey
-            ? `id:${activeIdKey}`
-            : `unresolved:${normalizeSearchText(workerLogin || workerHistoryName || workerName) || 'worker'}`
-        const todayState = activeIdKey ? todayWorkerStateMap.get(`id:${activeIdKey}`) : null
-
-        const actualStartMinutes = Number(todayState?.startMinutes ?? -1)
-        const hasQrStartAny = Boolean(todayState?.hasStart) && actualStartMinutes >= 0
-        const hasQrStartActive = isWorkerAssignable && hasQrStartAny
-        const lateMinutes =
-          isWorkerAssignable && hasQrStartAny && hasScheduleStart && actualStartMinutes > startMinutes
-            ? Math.max(1, actualStartMinutes - startMinutes)
-            : 0
-        const minutesToStart = hasScheduleStart ? Math.floor((startTs - nowTs) / (60 * 1000)) : null
-        const isUpcomingSoon =
-          isWorkerAssignable &&
-          !hasQrStartAny &&
-          status === 'Praca' &&
-          hasScheduleStart &&
-          Number.isFinite(minutesToStart) &&
-          minutesToStart >= 0 &&
-          minutesToStart <= DASHBOARD_SCHEDULE_SOON_WINDOW_MINUTES
-        const isMissingStart =
-          isWorkerAssignable &&
-          !hasQrStartAny &&
-          status === 'Praca' &&
-          hasScheduleStart &&
-          Number.isFinite(minutesToStart) &&
-          minutesToStart < 0
-        const isLaterToday =
-          isWorkerAssignable &&
-          !hasQrStartAny &&
-          status === 'Praca' &&
-          hasScheduleStart &&
-          Number.isFinite(minutesToStart) &&
-          minutesToStart > DASHBOARD_SCHEDULE_SOON_WINDOW_MINUTES
-
-        // Priorytet kart:
-        // 0) czerwony: brak START (po czasie)
-        // 1) pomarańczowy: start do 1h
-        // 2) zielony: już rozpoczął (QR START)
-        // 3) domyślny: start dziś, ale za >1h
-        // 4) pozostałe
-        const priority = isMissingStart ? 0 : isUpcomingSoon ? 1 : hasQrStartActive ? 2 : isLaterToday ? 3 : 4
-        let toneClass = ''
-        if (isMissingStart) {
-          toneClass = 'is-missing-start'
-        } else if (isUpcomingSoon) {
-          toneClass = 'is-upcoming'
-        } else if (hasQrStartActive) {
-          toneClass = 'is-started'
-        }
-
-        return {
-          workerKey,
-          workerName,
-          workerDisplayName,
-          workerLogin,
-          workerHistoryName,
-          status,
-          morningText,
-          afternoonText,
-          startTime,
-          statusClass,
-          hasQrStartAny,
-          hasQrStartActive,
-          lateMinutes,
-          startMinutes,
-          hasScheduleStart,
-          isWorkerAssignable,
-          isMissingStart,
-          priority,
-          toneClass,
-        }
-      })
-    const enrichedEntries = dashboardMergeScheduleEntries(enrichedRows)
-      .sort((left, right) => {
-        if (left.priority !== right.priority) {
-          return left.priority - right.priority
-        }
-
-        const leftStart = left.hasScheduleStart ? left.startMinutes : Number.POSITIVE_INFINITY
-        const rightStart = right.hasScheduleStart ? right.startMinutes : Number.POSITIVE_INFINITY
-        if (leftStart !== rightStart) {
-          return leftStart - rightStart
-        }
-
-        return left.workerName.localeCompare(right.workerName, 'pl', { sensitivity: 'base' })
-      })
-
-    cardsRoot.innerHTML = enrichedEntries
-      .map((entry) => {
-        const cardClass = entry.toneClass ? `dash-schedule-card ${entry.toneClass}` : 'dash-schedule-card'
-        const workerButton = `
-          <button
-            type="button"
-            class="dash-schedule-worker-name dash-schedule-worker-link"
-            title="Pokaż historię czasu: ${escapeHtml(entry.workerHistoryName)}"
-            data-dash-worker-login="${escapeHtml(entry.workerLogin)}"
-            data-dash-worker-name="${escapeHtml(entry.workerHistoryName)}"
-          >${escapeHtml(entry.workerDisplayName || dashboardWorkerSurnameDisplayName(entry.workerName))}</button>
-        `
-        return `
-          <article class="${cardClass}">
-            <div class="dash-schedule-top">
-              <span class="dash-schedule-worker-meta">
-                ${workerButton}
-                ${entry.hasQrStartActive ? '<span class="dash-schedule-start-icon" title="Pracownik rozpoczął dzień (QR START)" aria-label="Pracownik rozpoczął dzień (QR START)">✓</span>' : ''}
-              </span>
-              <span class="dash-schedule-status-badge ${entry.statusClass}">${escapeHtml(entry.status)}</span>
-            </div>
-            <div class="dash-schedule-startline">
-              <div class="dash-schedule-line-label">Godz. START</div>
-              <div class="dash-schedule-start-value" title="${escapeHtml(entry.startTime)}">${escapeHtml(entry.startTime)}</div>
-            </div>
-            ${entry.lateMinutes > 0 ? `<div class="dash-schedule-late">Spóźnienie - ${escapeHtml(dashboardLateMinutesToHm(entry.lateMinutes))}</div>` : ''}
-            <div class="dash-schedule-shifts">
-              <div class="dash-schedule-line">
-                <div class="dash-schedule-line-label">Rano</div>
-                <div class="dash-schedule-line-text" title="${escapeHtml(entry.morningText)}">${escapeHtml(entry.morningText)}</div>
-              </div>
-              <div class="dash-schedule-line">
-                <div class="dash-schedule-line-label">Popołudnie</div>
-                <div class="dash-schedule-line-text" title="${escapeHtml(entry.afternoonText)}">${escapeHtml(entry.afternoonText)}</div>
-              </div>
-            </div>
-          </article>
-        `
-      })
-      .join('')
-    cardsRoot.scrollTop = 0
-    window.requestAnimationFrame(() => {
-      cardsRoot.scrollTop = 0
-    })
-
-    dashboardQueueScheduleVisibleLimit()
-    const missingStartEntries = enrichedEntries.filter((entry) => entry.isWorkerAssignable && entry.isMissingStart)
-    dashboardShowScheduleMissingStartAlert(dayKey, missingStartEntries)
-    const lateStartedEntries = enrichedEntries.filter(
-      (entry) =>
-        entry.isWorkerAssignable &&
-        entry.hasQrStartAny &&
-        Number(entry.lateMinutes) >= DASHBOARD_SCHEDULE_LATE_ALERT_MINUTES,
-    )
-    dashboardShowScheduleLateStartAlert(dayKey, lateStartedEntries)
-  }
-
-  function renderDashboardSchedulePanel() {
-    const dayNameNode = document.getElementById('dashScheduleDayName')
-    const dayDateNode = document.getElementById('dashScheduleDayDate')
-    const syncNode = document.getElementById('dashScheduleSync')
-    const prevButton = document.getElementById('dashSchedulePrevBtn')
-    const nextButton = document.getElementById('dashScheduleNextBtn')
-
-    const days = Array.isArray(appState.dashboardScheduleDays) ? appState.dashboardScheduleDays : []
-    if (!days.length) {
-      const selectedDay = dashboardActivityDayKey(appState.dashboardScheduleSelectedDay || appState.dashboardActivityDay || todayYmd())
-      const generatedBucket = dashboardScheduleSyntheticBucket(selectedDay)
-      const isLoading = Boolean(appState.dashboardScheduleLoading)
-      const errorMessage = String(appState.dashboardScheduleError ?? '').trim()
-      if (dayNameNode) dayNameNode.textContent = isLoading ? 'Ładowanie' : generatedBucket.dayName
-      if (dayDateNode) dayDateNode.textContent = generatedBucket.dateLabel
-      if (syncNode) {
-        syncNode.textContent = isLoading
-          ? 'Pobieranie grafiku...'
-          : errorMessage
-            ? `Nie udało się pobrać grafiku: ${errorMessage}`
-            : 'Ostatnia synchronizacja: -'
-      }
-      if (prevButton) prevButton.disabled = false
-      if (nextButton) nextButton.disabled = false
-      dashboardRenderScheduleCards(generatedBucket)
-      return
-    }
-
-    const todayKey = todayYmd()
-    const selectedDayKey = String(appState.dashboardScheduleSelectedDay || appState.dashboardActivityDay || todayKey).trim()
-    const selectedIsDate = /^\d{4}-\d{2}-\d{2}$/.test(selectedDayKey)
-    const selectedExists = days.some((day) => day.key === selectedDayKey)
-    if (!selectedExists && !selectedIsDate) {
-      const todayBucket = days.find((day) => day.key === todayKey)
-      appState.dashboardScheduleSelectedDay = String(todayBucket?.key ?? dashboardPickNearestScheduleDayKey(days, todayKey))
-    } else if (selectedIsDate) {
-      appState.dashboardScheduleSelectedDay = selectedDayKey
-    }
-
-    const currentIndex = days.findIndex((day) => day.key === appState.dashboardScheduleSelectedDay)
-    const bucket = currentIndex >= 0
-      ? days[currentIndex]
-      : dashboardScheduleBucketForDay(appState.dashboardScheduleSelectedDay || todayKey)
-    appState.dashboardScheduleSelectedDay = String(bucket?.key ?? '')
-
-    if (dayNameNode) {
-      dayNameNode.textContent = dashboardScheduleDayDisplayName(bucket?.dayName || '')
-    }
-    if (dayDateNode) {
-      dayDateNode.textContent = String(bucket?.dateLabel ?? '-')
-    }
-
-    const fetchedAtIso = toIso(appState.dashboardScheduleFetchedAt)
-    if (syncNode) {
-      syncNode.textContent = fetchedAtIso
-        ? `Ostatnia synchronizacja: ${formatDatePl(fetchedAtIso)} ${formatTime(fetchedAtIso)}${
-            appState.dashboardScheduleStale ? ' (ostatnie zapisane dane)' : ''
-          }`
-        : 'Ostatnia synchronizacja: -'
-    }
-
-    if (prevButton) prevButton.disabled = false
-    if (nextButton) nextButton.disabled = false
-
-    dashboardRenderScheduleCards(bucket)
-  }
-
-  function dashboardMoveScheduleDay(offset = 0) {
-    const current = dashboardActivityDayKey(appState.dashboardScheduleSelectedDay || appState.dashboardActivityDay || todayYmd())
-    dashboardSetActivityDay(calendarAddDays(current, Number(offset || 0)))
-  }
-
-  function syncDashboardSidePanelHeight() {
-    const panel = document.querySelector('#view-dashboard .dash-side-panel')
-    if (!(panel instanceof HTMLElement)) {
-      return
-    }
-
-    panel.style.removeProperty('--dash-side-target-height')
-    dashboardQueueScheduleVisibleLimit()
   }
 
   function dashboardParseDurationLabelToSeconds(value) {
@@ -3015,82 +2609,11 @@ export function createDashboardFeature(ctx) {
     return firstMarker || firstAny || ''
   }
 
-  function dashboardBuildScheduleStartMinutesMapForDay(scheduleDays = [], dayKey = '') {
-    const normalizedDayKey = String(dayKey ?? '').trim()
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey)) {
-      return new Map()
-    }
-
-    const buckets = Array.isArray(scheduleDays) ? scheduleDays : []
-    const dayBucket = buckets.find((bucket) => String(bucket?.key ?? '').trim() === normalizedDayKey)
-    const entries = Array.isArray(dayBucket?.entries) ? dayBucket.entries : []
-    if (!entries.length) {
-      return new Map()
-    }
-
-    const startByWorker = new Map()
-    entries.forEach((entry) => {
-      const status = String(entry?.status ?? '').trim()
-      if (status && status !== 'Praca') {
-        return
-      }
-
-      const startTime = dashboardScheduleStartTime(entry)
-      const startMinutes = dashboardScheduleTimeToMinutes(startTime)
-      if (!Number.isFinite(startMinutes) || startMinutes < 0) {
-        return
-      }
-
-      const keys = dashboardResolveScheduleWorkerAliasKeys(entry)
-      keys.forEach((key) => {
-        const previous = Number(startByWorker.get(key) ?? Number.POSITIVE_INFINITY)
-        if (!Number.isFinite(previous) || startMinutes < previous) {
-          startByWorker.set(key, startMinutes)
-        }
-      })
-    })
-
-    return startByWorker
-  }
-
   function dashboardResolveTodayRowAliasKeys(row) {
     return dashboardWorkerIdIdentityKeys(dashboardResolveWorkerIdValue(row))
   }
 
-  function dashboardResolveLateMinutesForTodayRow(row, scheduleStartMap) {
-    if (!(scheduleStartMap instanceof Map) || !scheduleStartMap.size) {
-      return 0
-    }
-
-    const rowKeys = dashboardResolveTodayRowAliasKeys(row)
-    if (!(rowKeys instanceof Set) || !rowKeys.size) {
-      return 0
-    }
-
-    let plannedStartMinutes = Number.POSITIVE_INFINITY
-    rowKeys.forEach((key) => {
-      const candidate = Number(scheduleStartMap.get(key) ?? Number.POSITIVE_INFINITY)
-      if (Number.isFinite(candidate) && candidate >= 0 && candidate < plannedStartMinutes) {
-        plannedStartMinutes = candidate
-      }
-    })
-    if (!Number.isFinite(plannedStartMinutes) || plannedStartMinutes === Number.POSITIVE_INFINITY) {
-      return 0
-    }
-
-    const actualStartMinutes = dashboardScheduleTimeToMinutes(row?.qrStart)
-    if (!Number.isFinite(actualStartMinutes) || actualStartMinutes < 0) {
-      return 0
-    }
-
-    if (actualStartMinutes <= plannedStartMinutes) {
-      return 0
-    }
-
-    return Math.max(1, actualStartMinutes - plannedStartMinutes)
-  }
-
-  function dashboardApplyFirstQrStartToday(todayRows = [], eventRows = [], scheduleDays = appState.dashboardScheduleDays) {
+  function dashboardApplyFirstQrStartToday(todayRows = [], eventRows = []) {
     const rows = Array.isArray(todayRows) ? todayRows : []
     const sourceEvents = Array.isArray(eventRows) ? eventRows : []
     if (!rows.length) {
@@ -3098,7 +2621,6 @@ export function createDashboardFeature(ctx) {
     }
 
     const todayKey = todayYmd()
-    const scheduleStartMap = dashboardBuildScheduleStartMinutesMapForDay(scheduleDays, todayKey)
     const firstMarkerByWorker = new Map()
     const firstAnyStartByWorker = new Map()
 
@@ -3149,19 +2671,12 @@ export function createDashboardFeature(ctx) {
         }
       }
 
-      const rowWithStart = qrStart
+      return qrStart
         ? {
             ...row,
             qrStart,
           }
         : row
-
-      const lateMinutes = dashboardResolveLateMinutesForTodayRow(rowWithStart, scheduleStartMap)
-
-      return {
-        ...rowWithStart,
-        lateMinutes,
-      }
     })
   }
 
@@ -4123,6 +3638,3724 @@ export function createDashboardFeature(ctx) {
     }
   }
 
+  function dashboardOverviewWorkerKey(row = {}) {
+    const workerId = dashboardResolveWorkerIdValue(row)
+    if (workerId) {
+      return `id:${normalizeSearchText(workerId)}`
+    }
+
+    const workerLogin = normalizeSearchText(row?.workerLogin ?? row?.login)
+    if (workerLogin) {
+      return `login:${workerLogin}`
+    }
+
+    const workerName = normalizeSearchText(row?.workerName ?? row?.name)
+    return workerName ? `name:${workerName}` : ''
+  }
+
+  function dashboardOverviewActiveWorkerDetails(rows = [], dayKey = todayYmd()) {
+    const workerRows = new Map()
+    ;(Array.isArray(rows) ? rows : []).forEach((row) => {
+      if (!row?.isRunning) {
+        return
+      }
+      const key = dashboardOverviewWorkerKey(row)
+      if (!key || workerRows.has(key)) {
+        return
+      }
+      workerRows.set(key, row)
+    })
+
+    return [...workerRows.values()].map((row) => {
+      const rowDay = dashboardResolveDayKey(row, dayKey)
+      const datePrefix = rowDay && rowDay !== dayKey ? `Data: ${formatDatePl(`${rowDay}T00:00:00.000Z`)} · ` : ''
+      const workerLogin = String(row?.workerLogin ?? row?.login ?? '').trim()
+      const workerName = dashboardResolveWorkerLabel(row)
+      return {
+        action: 'worker-history',
+        workerLogin,
+        workerName,
+        title: workerName,
+        subtitle: `${datePrefix}START: ${dashboardClockLabelToHm(row?.qrStart, '--:--')} · Klient: ${dashboardResolveClientLabel(row)} · Strefa: ${dashboardResolveZoneLabel(row)}`,
+        tab: 'workers',
+        row: dashboardBuildHistoryRow(row, rowDay || dayKey),
+      }
+    })
+  }
+
+  function dashboardActiveWorkerMapIdentity(row = {}) {
+    const explicitWorkerId =
+      dashboardResolveWorkerIdValue(row) ||
+      row?.workerId ||
+      row?.worker?.workerId ||
+      row?.employeeId ||
+      row?.employee?.workerId
+    return {
+      workerId: normalizeSearchText(explicitWorkerId),
+      login: normalizeSearchText(
+        row?.workerLogin ?? row?.login ?? row?.worker?.login ?? row?.email ?? row?.worker?.email,
+      ),
+      name: normalizeSearchText(row?.workerName ?? row?.name ?? row?.worker?.name),
+    }
+  }
+
+  function dashboardActiveWorkerMapKey(row = {}) {
+    const identity = dashboardActiveWorkerMapIdentity(row)
+    if (identity.workerId) {
+      return `id:${identity.workerId}`
+    }
+    if (identity.login) {
+      return `login:${identity.login}`
+    }
+    return identity.name ? `name:${identity.name}` : ''
+  }
+
+  function dashboardActiveWorkerMapRowsMatch(left = {}, right = {}, activeNameCounts = new Map()) {
+    const leftIdentity = dashboardActiveWorkerMapIdentity(left)
+    const rightIdentity = dashboardActiveWorkerMapIdentity(right)
+
+    if (leftIdentity.workerId && rightIdentity.workerId) {
+      return leftIdentity.workerId === rightIdentity.workerId
+    }
+    if (leftIdentity.login && rightIdentity.login) {
+      return leftIdentity.login === rightIdentity.login
+    }
+
+    const normalizedName = leftIdentity.name
+    return Boolean(
+      normalizedName &&
+      normalizedName === rightIdentity.name &&
+      Number(activeNameCounts.get(normalizedName) ?? 0) === 1,
+    )
+  }
+
+  function dashboardActiveWorkerMapParseGpsAttributes(value = '') {
+    const attributes = {}
+    const source = String(value ?? '')
+    const attributeRegex = /([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("[^"]*"|'[^']*'|[^\s\]]+)/g
+    let match = attributeRegex.exec(source)
+    while (match) {
+      const key = String(match[1] ?? '').trim().toLowerCase()
+      attributes[key] = String(match[2] ?? '').trim().replace(/^["']|["']$/g, '')
+      match = attributeRegex.exec(source)
+    }
+    return attributes
+  }
+
+  function dashboardActiveWorkerMapGpsTimestamp(value) {
+    const raw = String(value ?? '').trim()
+    if (!raw) {
+      return 0
+    }
+
+    if (/^\d+(?:\.\d+)?$/.test(raw)) {
+      const numeric = Number(raw)
+      if (Number.isFinite(numeric) && numeric > 0) {
+        return numeric < 100000000000 ? Math.round(numeric * 1000) : Math.round(numeric)
+      }
+    }
+
+    const iso = toIso(raw)
+    const timestamp = iso ? new Date(iso).getTime() : new Date(raw).getTime()
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0
+  }
+
+  function dashboardActiveWorkerMapGpsEntries(row = {}, dayKey = todayYmd()) {
+    if (typeof reportHistoryParseGeoPair !== 'function') {
+      return []
+    }
+
+    const entries = []
+    const seen = new Set()
+    const pushEntry = (label, attributeSource, sourceIndex, origin = '') => {
+      const attributes = dashboardActiveWorkerMapParseGpsAttributes(attributeSource)
+      const coords = reportHistoryParseGeoPair(`${attributes.lat ?? ''}, ${attributes.lon ?? attributes.lng ?? ''}`)
+      if (!coords) {
+        return
+      }
+
+      const lat = Number(coords.lat)
+      const lng = Number(coords.lon)
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+        return
+      }
+
+      const phaseLabel = `${String(label ?? '').toUpperCase()} ${String(
+        attributes.src ?? attributes.source ?? attributes.phase ?? '',
+      ).toUpperCase()}`
+      const phase = phaseLabel.includes('STOP') ? 'stop' : 'start'
+      const gpsAction = phaseLabel.includes('CLEAN_START')
+        ? 'CLEAN_START_GPS'
+        : phaseLabel.includes('CLEAN_STOP')
+          ? 'CLEAN_STOP_GPS'
+          : phaseLabel.includes('START')
+            ? 'START_GPS'
+            : phaseLabel.includes('STOP')
+              ? 'STOP_GPS'
+              : 'GPS'
+      const explicitTimestamp = dashboardActiveWorkerMapGpsTimestamp(
+        attributes.at ?? attributes.timestamp ?? attributes.recorded_at ?? attributes.recordedat,
+      )
+      const fallbackTimestamp = phase === 'stop'
+        ? dashboardActivityRowStopTimestamp(row, dayKey)
+        : dashboardActivityRowStartTimestamp(row, dayKey)
+      const timestamp = explicitTimestamp || fallbackTimestamp || 0
+      const dedupeKey = `${lat.toFixed(6)}:${lng.toFixed(6)}:${timestamp}:${phase}:${gpsAction}`
+      if (seen.has(dedupeKey)) {
+        return
+      }
+      seen.add(dedupeKey)
+      entries.push({
+        lat,
+        lng,
+        timestamp,
+        explicitTimestamp: Boolean(explicitTimestamp),
+        sourceIndex,
+        origin,
+        phase,
+        gpsAction,
+      })
+    }
+
+    ;[
+      { origin: 'dayGps', value: row?.dayGps },
+      { origin: 'gps', value: row?.gps },
+      { origin: 'dayComment', value: row?.dayComment },
+      { origin: 'comment', value: row?.comment },
+    ].forEach((sourceItem, sourceIndex) => {
+      const rawSource = sourceItem.value
+      const source = String(rawSource ?? '').trim()
+      if (!source) {
+        return
+      }
+
+      let foundStructuredEntry = false
+      const bracketRegex = /\[\[\s*GPS\b([\s\S]*?)\]\]/gi
+      let bracketMatch = bracketRegex.exec(source)
+      while (bracketMatch) {
+        foundStructuredEntry = true
+        pushEntry('GPS', bracketMatch[1], sourceIndex, sourceItem.origin)
+        bracketMatch = bracketRegex.exec(source)
+      }
+
+      const labeledRegex = /\b(CLEAN_START_GPS|CLEAN_STOP_GPS|START_GPS|STOP_GPS)\b([^\r\n|]*)/gi
+      let labeledMatch = labeledRegex.exec(source)
+      while (labeledMatch) {
+        foundStructuredEntry = true
+        pushEntry(labeledMatch[1], labeledMatch[2], sourceIndex, sourceItem.origin)
+        labeledMatch = labeledRegex.exec(source)
+      }
+
+      if (!foundStructuredEntry) {
+        pushEntry('GPS', source, sourceIndex, sourceItem.origin)
+      }
+    })
+
+    return entries
+  }
+
+  function dashboardActiveWorkerMapGpsEntrySourcePriority(row = {}, entry = {}) {
+    const explicitEvent = row?.historySourceKind === 'event' || row?.hasExplicitEventId === true
+    const origin = String(entry?.origin ?? '').trim()
+    if (explicitEvent && origin === 'comment') {
+      return 50
+    }
+    if (!explicitEvent && origin === 'gps') {
+      return 40
+    }
+    if (!explicitEvent && origin === 'comment') {
+      return 30
+    }
+    if (!explicitEvent && (origin === 'dayGps' || origin === 'dayComment')) {
+      return 20
+    }
+    return 10
+  }
+
+  function dashboardActiveWorkerMapGpsActionPriority(entry = {}) {
+    const action = String(entry?.gpsAction ?? '').trim().toUpperCase()
+    if (action === 'CLEAN_START_GPS') {
+      return 50
+    }
+    if (action === 'START_GPS') {
+      return 40
+    }
+    if (action === 'STOP_GPS') {
+      return 30
+    }
+    if (action === 'CLEAN_STOP_GPS') {
+      return 20
+    }
+    return 10
+  }
+
+  function dashboardActiveWorkerMapObjectLabelForGpsEntry(row = {}, entry = {}) {
+    const explicitEvent = row?.historySourceKind === 'event' || row?.hasExplicitEventId === true
+    const origin = String(entry?.origin ?? '').trim()
+    const phase = String(entry?.phase ?? '').trim().toLowerCase()
+    const eventGpsIsDirect = explicitEvent && origin === 'comment'
+    const phaseQrCandidates = eventGpsIsDirect
+      ? [row?.zoneId, row?.roomId, row?.utilityRoomId, row?.qrCode]
+      : phase === 'stop'
+        ? [row?.dayStopObject, row?.stopObject]
+        : phase === 'start'
+          ? [row?.dayStartObject, row?.startObject, row?.workdayUtilityRoomId]
+          : []
+
+    const resolvedFromQr = phaseQrCandidates
+      .map((candidate) => dashboardActivityResolveObjectLabelByQr(candidate))
+      .find(Boolean)
+    if (resolvedFromQr) {
+      return resolvedFromQr
+    }
+
+    const directCandidates = [
+      row?.scanObjectLabel,
+      row?.objectLabelAtScan,
+      row?.activeObjectLabel,
+      row?.activeClientLabel,
+      row?.activeClient,
+      row?.clientName,
+      row?.clientLabel,
+      row?.klient,
+      row?.companyName,
+      row?.client?.name,
+    ]
+
+    if (!eventGpsIsDirect) {
+      const exactReadableLabel = phaseQrCandidates
+        .map((candidate) => dashboardActivityCleanCompanyLabel(candidate))
+        .find((candidate) => candidate && !dashboardIsQrCodeLike(candidate))
+      if (exactReadableLabel) {
+        return exactReadableLabel
+      }
+      if (explicitEvent) {
+        return ''
+      }
+    }
+
+    for (const candidate of directCandidates) {
+      const label = dashboardActivityCleanCompanyLabel(candidate)
+      if (label && !dashboardIsQrCodeLike(label)) {
+        return label
+      }
+    }
+
+    return ''
+  }
+
+  function dashboardActiveWorkerMapCoordinates(source = {}) {
+    const parseCoordinate = (value) => {
+      const raw = String(value ?? '').replace(',', '.').trim()
+      if (!raw) {
+        return null
+      }
+      const number = Number(raw)
+      return Number.isFinite(number) ? number : null
+    }
+    const lat = parseCoordinate(
+      source?.plannedLat ?? source?.lat ?? source?.latitude ?? source?.location?.lat ?? source?.location?.latitude,
+    )
+    const lng = parseCoordinate(
+      source?.plannedLng ??
+        source?.lng ??
+        source?.lon ??
+        source?.longitude ??
+        source?.location?.lng ??
+        source?.location?.lon ??
+        source?.location?.longitude,
+    )
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      return null
+    }
+    if (lat === 0 && lng === 0) {
+      return null
+    }
+    return { lat, lng }
+  }
+
+  function dashboardActiveWorkerMapRecordsMatch(left = {}, right = {}) {
+    const leftStoredKey = String(left?.workerKey ?? '').trim()
+    const rightStoredKey = String(right?.workerKey ?? '').trim()
+    const leftMapKey = dashboardActiveWorkerMapKey(left)
+    const rightMapKey = dashboardActiveWorkerMapKey(right)
+    if (
+      (leftStoredKey && (leftStoredKey === rightStoredKey || leftStoredKey === rightMapKey)) ||
+      (rightStoredKey && rightStoredKey === leftMapKey) ||
+      (leftMapKey && leftMapKey === rightMapKey)
+    ) {
+      return true
+    }
+    const leftIdentity = dashboardActiveWorkerMapIdentity(left)
+    const rightIdentity = dashboardActiveWorkerMapIdentity(right)
+    if (leftIdentity.workerId && rightIdentity.workerId) {
+      return leftIdentity.workerId === rightIdentity.workerId
+    }
+    if (leftIdentity.login && rightIdentity.login) {
+      return leftIdentity.login === rightIdentity.login
+    }
+    const leftNameKey = dashboardWorkerSurnameSortKey(
+      left?.workerDisplayName ?? left?.workerName ?? left?.name ?? leftIdentity.name,
+    )
+    const rightNameKey = dashboardWorkerSurnameSortKey(
+      right?.workerDisplayName ?? right?.workerName ?? right?.name ?? rightIdentity.name,
+    )
+    if (!leftNameKey || leftNameKey !== rightNameKey) {
+      return false
+    }
+    const matchingWorkers = (Array.isArray(appState.workers) ? appState.workers : []).filter(
+      (worker) => dashboardWorkerSurnameSortKey(worker?.workerName ?? worker?.name ?? '') === leftNameKey,
+    )
+    return matchingWorkers.length <= 1
+  }
+
+  function dashboardActiveWorkerMapPlannedItemPriority(item = {}, nowTimestamp = Date.now()) {
+    const startTimestamp = Number(item?.startTs ?? 0)
+    const stopTimestamp = Number(item?.stopTs ?? 0)
+    if (startTimestamp > 0 && startTimestamp <= nowTimestamp && stopTimestamp >= nowTimestamp) {
+      return { bucket: 0, timestamp: startTimestamp }
+    }
+    if (startTimestamp > nowTimestamp) {
+      return { bucket: 1, timestamp: startTimestamp }
+    }
+    if (startTimestamp > 0) {
+      return { bucket: 2, timestamp: -startTimestamp }
+    }
+    return { bucket: 3, timestamp: Number.MAX_SAFE_INTEGER }
+  }
+
+  function dashboardActiveWorkerMapPlannedCandidates(items = [], nowTimestamp = Date.now()) {
+    const groups = new Map()
+    ;(Array.isArray(items) ? items : []).forEach((item) => {
+      const workerKey = dashboardActiveWorkerMapKey(item)
+      if (!workerKey) {
+        return
+      }
+      if (!groups.has(workerKey)) {
+        groups.set(workerKey, [])
+      }
+      groups.get(workerKey).push(item)
+    })
+
+    return [...groups.values()].map((workerItems) => {
+      const locatedItems = workerItems.filter((item) => dashboardActiveWorkerMapCoordinates(item))
+      const candidates = locatedItems.length ? locatedItems : workerItems
+      return candidates.slice().sort((left, right) => {
+        const leftPriority = dashboardActiveWorkerMapPlannedItemPriority(left, nowTimestamp)
+        const rightPriority = dashboardActiveWorkerMapPlannedItemPriority(right, nowTimestamp)
+        return leftPriority.bucket - rightPriority.bucket || leftPriority.timestamp - rightPriority.timestamp
+      })[0]
+    })
+  }
+
+  function dashboardActiveWorkerMapStatus(value = '') {
+    const normalized = String(value ?? '').trim().toLowerCase()
+    return ['finished', 'planned', 'late'].includes(normalized) ? normalized : 'active'
+  }
+
+  function dashboardActiveWorkerMapStatusLabel(status = '') {
+    return {
+      active: 'W pracy',
+      planned: 'Zaplanowany',
+      finished: 'Zakończony',
+      late: 'Nie rozpoczął w czasie',
+    }[dashboardActiveWorkerMapStatus(status)] || 'W pracy'
+  }
+
+  function dashboardActiveWorkerMapStrictClientId(row = {}) {
+    return String(row?.clientId ?? row?.client?.id ?? '').trim()
+  }
+
+  function dashboardActiveWorkerMapExactPlanExecution(activeRow = {}, plannedRow = {}, dayKey = todayYmd()) {
+    const plannedClientId = dashboardActiveWorkerMapStrictClientId(plannedRow)
+    const activeClientId = dashboardActiveWorkerMapStrictClientId(activeRow)
+    const sameWorker = dashboardActiveWorkerMapRecordsMatch(activeRow, plannedRow)
+    const exactClient = Boolean(plannedClientId && activeClientId && plannedClientId === activeClientId)
+    if (!sameWorker || !exactClient) {
+      return {
+        hasExactExecutionMatch: false,
+        actualStartTs: 0,
+        actualStopTs: 0,
+      }
+    }
+
+    const actualStartTs = dashboardActivityRowStartTimestamp(activeRow, dayKey)
+    const actualStopTs = activeRow?.isRunning
+      ? 0
+      : dashboardActivityRowStopTimestamp(activeRow, dayKey)
+    return {
+      hasExactExecutionMatch: actualStartTs > 0,
+      actualStartTs,
+      actualStopTs,
+    }
+  }
+
+  function dashboardActiveWorkerMapWorkerRecord(row = {}) {
+    return (Array.isArray(appState.workers) ? appState.workers : []).find((worker) =>
+      dashboardActiveWorkerMapRecordsMatch(worker, row),
+    ) ?? null
+  }
+
+  function dashboardActiveWorkerMapPhotoUrl(row = {}) {
+    const worker = dashboardActiveWorkerMapWorkerRecord(row)
+    const raw = String(
+      worker?.photoUrl ??
+        worker?.profilePhotoUrl ??
+        worker?.avatarUrl ??
+        worker?.imageUrl ??
+        row?.photoUrl ??
+        row?.profilePhotoUrl ??
+        row?.avatarUrl ??
+        '',
+    ).trim()
+    return /^(https?:\/\/|data:image\/(?:png|jpe?g|webp);base64,)/i.test(raw) ? raw : ''
+  }
+
+  function dashboardActiveWorkerMapAvatarKind(row = {}) {
+    const worker = dashboardActiveWorkerMapWorkerRecord(row)
+    return resolveOperationalMapAvatarKind({
+      ...row,
+      ...worker,
+      workerName: String(
+        worker?.name ??
+          worker?.workerName ??
+          worker?.fullName ??
+          row?.workerDisplayName ??
+          row?.workerName ??
+          row?.name ??
+          '',
+      ).trim(),
+    })
+  }
+
+  function dashboardActiveWorkerMapPlanContext(plannedRow = {}) {
+    if (!plannedRow) {
+      return {}
+    }
+    return {
+      taskId: String(plannedRow?.taskId ?? '').trim(),
+      orderId: String(plannedRow?.orderId ?? '').trim(),
+      editorOrderId: String(plannedRow?.editorOrderId ?? plannedRow?.orderId ?? '').trim(),
+      sourceOrderId: String(plannedRow?.sourceOrderId ?? plannedRow?.orderId ?? '').trim(),
+      occurrenceDateYmd: String(plannedRow?.occurrenceDateYmd ?? plannedRow?.dateYmd ?? '').trim(),
+      dateYmd: String(plannedRow?.dateYmd ?? plannedRow?.occurrenceDateYmd ?? '').trim(),
+      workSlotKey: String(plannedRow?.workSlotKey ?? '').trim(),
+      serviceBlockId: String(plannedRow?.serviceBlockId ?? '').trim(),
+      serviceBlockKind: String(plannedRow?.serviceBlockKind ?? '').trim(),
+      serviceBlockLabel: String(plannedRow?.serviceBlockLabel ?? '').trim(),
+      isRecurringSeries: Boolean(plannedRow?.isRecurringSeries),
+      isRecurringInstance: Boolean(plannedRow?.isRecurringInstance),
+      recurrenceOverride: Boolean(plannedRow?.recurrenceOverride),
+    }
+  }
+
+  function dashboardActiveWorkerMapExecutionSourceForPlan(
+    plannedRow = {},
+    sourceRows = [],
+    dayKey = todayYmd(),
+    activeNameCounts = new Map(),
+  ) {
+    const plannedClientId = dashboardActiveWorkerMapStrictClientId(plannedRow)
+    if (!plannedClientId) {
+      return null
+    }
+    return (Array.isArray(sourceRows) ? sourceRows : []).find((sourceRow) =>
+      dashboardResolveDayKey(sourceRow, dayKey) === dayKey &&
+      dashboardActiveWorkerMapStrictClientId(sourceRow) === plannedClientId &&
+      dashboardActiveWorkerMapRowsMatch(plannedRow, sourceRow, activeNameCounts),
+    ) ?? null
+  }
+
+  function dashboardActiveWorkerMapCandidateRows(rows = [], dayKey = todayYmd()) {
+    const normalizedDay = dashboardActivityDayKey(dayKey)
+    const rowsByWorker = new Map()
+    ;(Array.isArray(rows) ? rows : []).forEach((row) => {
+      const isRunning = Boolean(row?.isRunning)
+      const stopTimestamp = dashboardActivityRowStopTimestamp(row, normalizedDay)
+      if (!isRunning && stopTimestamp <= 0) {
+        return
+      }
+
+      const workerKey = dashboardActiveWorkerMapKey(row)
+      if (!workerKey) {
+        return
+      }
+
+      const activityTimestamp = isRunning
+        ? dashboardActivityRowStartTimestamp(row, normalizedDay)
+        : stopTimestamp
+      const current = rowsByWorker.get(workerKey)
+      const shouldReplace =
+        !current ||
+        (isRunning && !current.isRunning) ||
+        (isRunning === current.isRunning && activityTimestamp > current.activityTimestamp)
+      if (shouldReplace) {
+        rowsByWorker.set(workerKey, { row, isRunning, activityTimestamp })
+      }
+    })
+
+    return [...rowsByWorker.values()].map((entry) => entry.row)
+  }
+
+  function dashboardActiveWorkerMapLocations(activeRows = [], dayKey = todayYmd(), plannedRows = []) {
+    if (typeof reportHistoryParseGeoPair !== 'function') {
+      return []
+    }
+
+    const normalizedDay = dashboardActivityDayKey(dayKey)
+    const nowTimestamp = Date.now()
+    const activeByWorker = new Map()
+    const activeNameCounts = new Map()
+    dashboardActiveWorkerMapCandidateRows(activeRows, normalizedDay).forEach((row) => {
+      const key = dashboardActiveWorkerMapKey(row)
+      if (key && !activeByWorker.has(key)) {
+        activeByWorker.set(key, row)
+      }
+    })
+    activeByWorker.forEach((row) => {
+      const workerNameKey = dashboardActiveWorkerMapIdentity(row).name
+      if (workerNameKey) {
+        activeNameCounts.set(workerNameKey, Number(activeNameCounts.get(workerNameKey) ?? 0) + 1)
+      }
+    })
+
+    const sourceRows = [
+      ...(Array.isArray(appState.dashboardScheduleSourceRows) ? appState.dashboardScheduleSourceRows : []),
+      ...(Array.isArray(appState.dashboardActivityWorkdayRows) ? appState.dashboardActivityWorkdayRows : []),
+    ]
+    const plannedCandidates = Array.isArray(plannedRows) ? plannedRows : []
+    const usedPlannedIndexes = new Set()
+
+    const workdayLocations = [...activeByWorker.entries()]
+      .map(([workerKey, activeRow]) => {
+        let latestLocation = null
+        sourceRows.forEach((sourceRow) => {
+          if (dashboardResolveDayKey(sourceRow, normalizedDay) !== normalizedDay) {
+            return
+          }
+          if (!dashboardActiveWorkerMapRowsMatch(activeRow, sourceRow, activeNameCounts)) {
+            return
+          }
+
+          dashboardActiveWorkerMapGpsEntries(sourceRow, normalizedDay).forEach((entry) => {
+            const normalizedTimestamp = entry.timestamp > 0
+              ? entry.timestamp
+              : dashboardActivityRowStartTimestamp(activeRow, normalizedDay)
+            const actionPriority = dashboardActiveWorkerMapGpsActionPriority(entry)
+            const sourcePriority = dashboardActiveWorkerMapGpsEntrySourcePriority(sourceRow, entry)
+            if (
+              !latestLocation ||
+              normalizedTimestamp > latestLocation.timestamp ||
+              (normalizedTimestamp === latestLocation.timestamp && entry.explicitTimestamp && !latestLocation.explicitTimestamp) ||
+              (normalizedTimestamp === latestLocation.timestamp && entry.explicitTimestamp === latestLocation.explicitTimestamp && actionPriority > latestLocation.actionPriority) ||
+              (normalizedTimestamp === latestLocation.timestamp &&
+                entry.explicitTimestamp === latestLocation.explicitTimestamp &&
+                actionPriority === latestLocation.actionPriority &&
+                sourcePriority > latestLocation.sourcePriority) ||
+              (normalizedTimestamp === latestLocation.timestamp &&
+                entry.explicitTimestamp === latestLocation.explicitTimestamp &&
+                actionPriority === latestLocation.actionPriority &&
+                sourcePriority === latestLocation.sourcePriority &&
+                entry.sourceIndex > latestLocation.sourceIndex)
+            ) {
+              latestLocation = {
+                lat: entry.lat,
+                lng: entry.lng,
+                timestamp: normalizedTimestamp,
+                explicitTimestamp: entry.explicitTimestamp,
+                sourceIndex: entry.sourceIndex,
+                actionPriority,
+                sourcePriority,
+                sourceRow,
+                origin: entry.origin,
+                phase: entry.phase,
+                gpsAction: entry.gpsAction,
+              }
+            }
+          })
+        })
+
+        if (!latestLocation) {
+          return null
+        }
+
+        const isActive = Boolean(activeRow?.isRunning)
+        const currentObject =
+          dashboardActiveWorkerMapObjectLabelForGpsEntry(latestLocation.sourceRow, latestLocation) ||
+          (!isActive ? dashboardActivityCleanCompanyLabel(dashboardResolveClientLabel(activeRow)) : '') ||
+          'Brak obiektu przy ostatnim odbiciu'
+        const stopLabel = isActive ? '' : dashboardClockLabelToHm(activeRow?.qrStop, '--:--')
+        const gpsTimeLabel = latestLocation.timestamp > 0 ? dashboardOverviewTimeLabel(latestLocation.timestamp) : '--:--'
+        const actualClientId =
+          dashboardActiveWorkerMapStrictClientId(latestLocation.sourceRow) ||
+          dashboardActiveWorkerMapStrictClientId(activeRow)
+        const exactPlannedIndex = plannedCandidates.findIndex((plannedRow) =>
+          dashboardActiveWorkerMapRecordsMatch(plannedRow, activeRow) &&
+          actualClientId &&
+          dashboardActiveWorkerMapStrictClientId(plannedRow) === actualClientId,
+        )
+        const plannedIndex = exactPlannedIndex >= 0
+          ? exactPlannedIndex
+          : plannedCandidates.findIndex((plannedRow) =>
+              dashboardActiveWorkerMapRecordsMatch(plannedRow, activeRow),
+            )
+        const plannedRow = plannedIndex >= 0 ? plannedCandidates[plannedIndex] : null
+        if (plannedIndex >= 0) {
+          usedPlannedIndexes.add(plannedIndex)
+        }
+        const plannedStartLabel = plannedRow ? dashboardOverviewTimeLabel(plannedRow?.startTs) : ''
+        const plannedStopLabel = plannedRow ? dashboardOverviewTimeLabel(plannedRow?.stopTs) : ''
+        const plannedTimeLabel = plannedRow
+          ? plannedStopLabel && plannedStopLabel !== '--:--'
+            ? `${plannedStartLabel}–${plannedStopLabel}`
+            : plannedStartLabel
+          : ''
+        const plannedObjectLabel = plannedRow
+          ? dashboardActivityCleanCompanyLabel(plannedRow?.companyLabel ?? plannedRow?.locationLabel) ||
+            String(plannedRow?.addressLabel ?? '').trim() ||
+            'Zaplanowany obiekt'
+          : ''
+        const actualWorkStatus = isActive ? 'active' : 'finished'
+        const actualWorkStatusLabel = isActive ? 'W pracy' : 'Dzień zakończony'
+        const executionSourceRow = plannedRow
+          ? dashboardActiveWorkerMapExecutionSourceForPlan(
+              plannedRow,
+              sourceRows,
+              normalizedDay,
+              activeNameCounts,
+            )
+          : null
+        const exactExecution = plannedRow
+          ? dashboardActiveWorkerMapExactPlanExecution(
+              {
+                ...activeRow,
+                clientId:
+                  dashboardActiveWorkerMapStrictClientId(executionSourceRow) ||
+                  dashboardActiveWorkerMapStrictClientId(activeRow),
+              },
+              plannedRow,
+              normalizedDay,
+            )
+          : {
+              hasExactExecutionMatch: false,
+              actualStartTs: 0,
+              actualStopTs: 0,
+            }
+        const plannedMapState = plannedRow
+          ? resolveOperationalMapStatus({
+              plannedStartTs: Number(plannedRow?.startTs ?? 0),
+              actualStartTs: exactExecution.actualStartTs,
+              actualStopTs: exactExecution.actualStopTs,
+              nowTs: nowTimestamp,
+              hasExactExecutionMatch: exactExecution.hasExactExecutionMatch,
+            })
+          : null
+        const workStatus = plannedMapState?.status ?? actualWorkStatus
+        const workStatusLabel = dashboardActiveWorkerMapStatusLabel(workStatus)
+        const clientId = String(
+          exactExecution.hasExactExecutionMatch
+            ? plannedRow?.clientId
+            : actualClientId || activeRow?.clientId,
+        ).trim()
+        const plannedCoordinates = plannedRow
+          ? dashboardActiveWorkerMapCoordinates(plannedRow)
+          : null
+        return {
+          workerKey,
+          workerName: dashboardResolveWorkerLabel(activeRow),
+          photoUrl: dashboardActiveWorkerMapPhotoUrl(activeRow),
+          avatarKind: dashboardActiveWorkerMapAvatarKind(activeRow),
+          objectLabel: currentObject,
+          plannedObjectLabel,
+          taskLabel: plannedRow ? String(plannedRow?.label ?? '').trim() || 'Zaplanowane zadanie' : '',
+          plannedTimeLabel,
+          workStatus,
+          workStatusLabel,
+          actualWorkStatus,
+          actualWorkStatusLabel,
+          clientId,
+          zoneId: String(plannedRow?.zoneId ?? activeRow?.zoneId ?? '').trim(),
+          delayMinutes: Number(plannedMapState?.delayMinutes ?? 0),
+          plannedStartTs: Number(plannedRow?.startTs ?? 0),
+          plannedStopTs: Number(plannedRow?.stopTs ?? 0),
+          plannedLat: plannedCoordinates?.lat ?? null,
+          plannedLng: plannedCoordinates?.lng ?? null,
+          startLabel: dashboardClockLabelToHm(activeRow?.qrStart, '--:--'),
+          stopLabel,
+          positionKind: 'gps',
+          positionLabel: `GPS ${gpsTimeLabel}`,
+          positionDetailLabel: `Ostatnie odbicie GPS: ${gpsTimeLabel}`,
+          positionTimestamp: latestLocation.timestamp,
+          gpsTimeLabel,
+          gpsTimestamp: latestLocation.timestamp,
+          lat: latestLocation.lat,
+          lng: latestLocation.lng,
+          ...dashboardActiveWorkerMapPlanContext(plannedRow),
+        }
+      })
+      .filter(Boolean)
+
+    const plannedLocations = plannedCandidates
+      .map((plannedRow, plannedIndex) => {
+        if (usedPlannedIndexes.has(plannedIndex)) {
+          return null
+        }
+        const coordinates = dashboardActiveWorkerMapCoordinates(plannedRow)
+        const workerKey = dashboardActiveWorkerMapKey(plannedRow)
+        if (!coordinates || !workerKey) {
+          return null
+        }
+        const startTimestamp = Number(plannedRow?.startTs ?? 0)
+        const stopTimestamp = Number(plannedRow?.stopTs ?? 0)
+        const startLabel = dashboardOverviewTimeLabel(startTimestamp)
+        const stopLabel = dashboardOverviewTimeLabel(stopTimestamp)
+        const plannedTimeLabel = stopLabel !== '--:--' ? `${startLabel}–${stopLabel}` : startLabel
+        const objectLabel =
+          dashboardActivityCleanCompanyLabel(plannedRow?.companyLabel ?? plannedRow?.locationLabel) ||
+          String(plannedRow?.addressLabel ?? '').trim() ||
+          'Zaplanowany obiekt'
+        const matchedWorkdayRow = [...activeByWorker.values()].find((activeRow) =>
+          dashboardActiveWorkerMapRecordsMatch(plannedRow, activeRow),
+        )
+        const executionSourceRow = dashboardActiveWorkerMapExecutionSourceForPlan(
+          plannedRow,
+          sourceRows,
+          normalizedDay,
+          activeNameCounts,
+        )
+        const actualWorkStatus = matchedWorkdayRow
+          ? matchedWorkdayRow?.isRunning
+            ? 'active'
+            : 'finished'
+          : ''
+        const actualWorkStatusLabel = actualWorkStatus === 'active'
+          ? 'W pracy'
+          : actualWorkStatus === 'finished'
+            ? 'Dzień zakończony'
+            : 'Jeszcze bez statusu dnia pracy'
+        const currentObjectLabel = matchedWorkdayRow
+          ? dashboardActivityCleanCompanyLabel(dashboardResolveClientLabel(matchedWorkdayRow)) ||
+            'Brak obiektu przy ostatnim odbiciu'
+          : objectLabel
+        const exactExecution = matchedWorkdayRow
+          ? dashboardActiveWorkerMapExactPlanExecution(
+              {
+                ...matchedWorkdayRow,
+                clientId:
+                  dashboardActiveWorkerMapStrictClientId(executionSourceRow) ||
+                  dashboardActiveWorkerMapStrictClientId(matchedWorkdayRow),
+              },
+              plannedRow,
+              normalizedDay,
+            )
+          : {
+              hasExactExecutionMatch: false,
+              actualStartTs: 0,
+              actualStopTs: 0,
+            }
+        const plannedMapState = resolveOperationalMapStatus({
+          plannedStartTs: startTimestamp,
+          actualStartTs: exactExecution.actualStartTs,
+          actualStopTs: exactExecution.actualStopTs,
+          nowTs: nowTimestamp,
+          hasExactExecutionMatch: exactExecution.hasExactExecutionMatch,
+        })
+        return {
+          workerKey,
+          workerName: String(plannedRow?.workerDisplayName ?? plannedRow?.workerName ?? '').trim() || 'Nieznany pracownik',
+          photoUrl: dashboardActiveWorkerMapPhotoUrl(plannedRow),
+          avatarKind: dashboardActiveWorkerMapAvatarKind(plannedRow),
+          objectLabel: currentObjectLabel,
+          taskLabel: String(plannedRow?.label ?? '').trim() || 'Zaplanowane zadanie',
+          plannedObjectLabel: objectLabel,
+          plannedTimeLabel,
+          workStatus: plannedMapState.status,
+          workStatusLabel: dashboardActiveWorkerMapStatusLabel(plannedMapState.status),
+          actualWorkStatus,
+          actualWorkStatusLabel,
+          clientId: String(plannedRow?.clientId ?? '').trim(),
+          zoneId: String(plannedRow?.zoneId ?? '').trim(),
+          delayMinutes: Number(plannedMapState.delayMinutes ?? 0),
+          plannedStartTs: startTimestamp,
+          plannedStopTs: stopTimestamp,
+          plannedLat: coordinates.lat,
+          plannedLng: coordinates.lng,
+          startLabel,
+          stopLabel,
+          positionKind: 'plan',
+          positionLabel: `Plan ${startLabel}`,
+          positionDetailLabel: 'Lokalizacja zaplanowanego zadania',
+          positionTimestamp: startTimestamp,
+          gpsTimeLabel: '',
+          gpsTimestamp: 0,
+          lat: coordinates.lat,
+          lng: coordinates.lng,
+          ...dashboardActiveWorkerMapPlanContext(plannedRow),
+        }
+      })
+      .filter(Boolean)
+
+    const statusPriority = { late: 0, active: 1, planned: 2, finished: 3 }
+    return [...workdayLocations, ...plannedLocations]
+      .sort((left, right) => {
+        if (left.workStatus !== right.workStatus) {
+          return Number(statusPriority[left.workStatus] ?? 9) - Number(statusPriority[right.workStatus] ?? 9)
+        }
+        return dashboardWorkerSurnameSortKey(left.workerName).localeCompare(
+          dashboardWorkerSurnameSortKey(right.workerName),
+          'pl',
+        )
+      })
+  }
+
+  function dashboardClearActiveWorkerMapMarkers() {
+    dashboardActiveWorkersMapMarkers.forEach((marker) => {
+      if (dashboardActiveWorkersMapProvider === 'openstreetmap' && typeof marker?.remove === 'function') {
+        marker.remove()
+      } else if (marker && typeof marker.setMap === 'function') {
+        marker.setMap(null)
+      }
+    })
+    dashboardActiveWorkersMapMarkers = []
+    dashboardActiveWorkersMapMarkersByKey = new Map()
+    dashboardActiveWorkersMapSelectedMarker = null
+  }
+
+  function dashboardDestroyActiveWorkerMap() {
+    dashboardCloseActiveWorkerMapDialog({ restoreFocus: false })
+    dashboardActiveWorkersMapRenderSeq += 1
+    dashboardClearActiveWorkerMapMarkers()
+    dashboardActiveWorkersMapExpandedGroupKey = ''
+    dashboardActiveWorkersMapLiveGroupKey = ''
+    if (dashboardActiveWorkersMapProvider === 'openstreetmap') {
+      dashboardActiveWorkersMapInstance?.off?.()
+      dashboardActiveWorkersMapInstance?.remove?.()
+    } else {
+      dashboardActiveWorkersMapInfoWindow?.close?.()
+    }
+    if (
+      dashboardActiveWorkersMapProvider === 'google' &&
+      dashboardActiveWorkersMapInstance &&
+      window.google?.maps?.event?.clearInstanceListeners
+    ) {
+      window.google.maps.event.clearInstanceListeners(dashboardActiveWorkersMapInstance)
+    }
+    dashboardActiveWorkersMapInfoWindow = null
+    dashboardActiveWorkersMapInstance = null
+    dashboardActiveWorkersMapSignature = ''
+    dashboardActiveWorkersMapProvider = ''
+  }
+
+  function dashboardActiveWorkerMapCanvas() {
+    if (dashboardActiveWorkersMapProvider === 'openstreetmap') {
+      return dashboardActiveWorkersMapInstance?.getContainer?.() ?? null
+    }
+    return dashboardActiveWorkersMapInstance?.getDiv?.() ?? null
+  }
+
+  function dashboardActiveWorkerMapDialogIsOpen() {
+    const overlay = document.getElementById('dashActiveWorkersMapOverlay')
+    return Boolean(overlay && !overlay.hidden)
+  }
+
+  function dashboardResizeActiveWorkerMap() {
+    window.requestAnimationFrame(() => {
+      if (dashboardActiveWorkersMapProvider === 'openstreetmap') {
+        dashboardActiveWorkersMapInstance?.invalidateSize?.({ pan: false })
+        if (dashboardActiveWorkerMapDialogIsOpen() && dashboardActiveWorkersMapSelectedMarker) {
+          window.requestAnimationFrame(() => {
+            if (!dashboardActiveWorkerMapDialogIsOpen() || !dashboardActiveWorkersMapSelectedMarker) {
+              return
+            }
+            const position = dashboardActiveWorkersMapSelectedMarker.getLatLng?.()
+            if (position) {
+              dashboardActiveWorkersMapInstance?.panTo?.(position, { animate: false })
+            }
+            dashboardActiveWorkersMapSelectedMarker.openPopup?.()
+          })
+        }
+        return
+      }
+      if (dashboardActiveWorkersMapProvider === 'google' && dashboardActiveWorkersMapInstance) {
+        window.google?.maps?.event?.trigger?.(dashboardActiveWorkersMapInstance, 'resize')
+        if (dashboardActiveWorkerMapDialogIsOpen() && dashboardActiveWorkersMapSelectedMarker) {
+          dashboardOpenActiveWorkerMapMarker(dashboardActiveWorkersMapSelectedMarker)
+        }
+      }
+    })
+  }
+
+  function dashboardSetActiveWorkerMapExpandAvailability(isAvailable) {
+    const button = document.getElementById('dashActiveWorkersMapExpand')
+    if (!(button instanceof HTMLButtonElement)) {
+      return
+    }
+    button.disabled = !isAvailable
+    button.setAttribute('aria-disabled', isAvailable ? 'false' : 'true')
+  }
+
+  function dashboardOpenActiveWorkerMapDialog(trigger = null) {
+    if (!dashboardActiveWorkersMapInstance || dashboardActiveWorkerMapDialogIsOpen()) {
+      return
+    }
+
+    const overlay = document.getElementById('dashActiveWorkersMapOverlay')
+    const modalHost = document.getElementById('dashActiveWorkersMapModalHost')
+    const canvas = document.getElementById('dashActiveWorkersMap')
+    const closeButton = document.getElementById('dashActiveWorkersMapClose')
+    if (!(overlay instanceof HTMLElement) || !(modalHost instanceof HTMLElement) || !(canvas instanceof HTMLElement)) {
+      return
+    }
+
+    dashboardActiveWorkersMapRestoreFocus = trigger instanceof HTMLElement
+      ? trigger
+      : document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
+    modalHost.appendChild(canvas)
+    canvas.classList.add('is-expanded')
+    overlay.hidden = false
+    overlay.setAttribute('aria-hidden', 'false')
+    document.documentElement.classList.add('is-dashboard-map-modal-open')
+    document.body.classList.add('is-dashboard-map-modal-open')
+    document.getElementById('dashActiveWorkersMapExpand')?.setAttribute('aria-expanded', 'true')
+    dashboardResizeActiveWorkerMap()
+    window.requestAnimationFrame(() => closeButton?.focus?.())
+  }
+
+  function dashboardCloseActiveWorkerMapDialog(options = {}) {
+    const overlay = document.getElementById('dashActiveWorkersMapOverlay')
+    if (!(overlay instanceof HTMLElement) || overlay.hidden) {
+      return
+    }
+
+    const miniHost = document.getElementById('dashActiveWorkersMapHome')
+    const canvas = document.getElementById('dashActiveWorkersMap')
+    if (miniHost instanceof HTMLElement && canvas instanceof HTMLElement) {
+      canvas.classList.remove('is-expanded')
+      miniHost.insertBefore(canvas, miniHost.firstChild)
+    }
+
+    overlay.hidden = true
+    overlay.setAttribute('aria-hidden', 'true')
+    document.documentElement.classList.remove('is-dashboard-map-modal-open')
+    document.body.classList.remove('is-dashboard-map-modal-open')
+    document.getElementById('dashActiveWorkersMapExpand')?.setAttribute('aria-expanded', 'false')
+    dashboardResizeActiveWorkerMap()
+
+    const restoreTarget = dashboardActiveWorkersMapRestoreFocus
+    dashboardActiveWorkersMapRestoreFocus = null
+    if (options.restoreFocus !== false && restoreTarget?.isConnected) {
+      window.requestAnimationFrame(() => restoreTarget.focus?.())
+    }
+  }
+
+  function dashboardTrapActiveWorkerMapDialogFocus(event) {
+    if (event.key !== 'Tab') {
+      return
+    }
+    const overlay = document.getElementById('dashActiveWorkersMapOverlay')
+    if (!(overlay instanceof HTMLElement) || overlay.hidden) {
+      return
+    }
+    const focusable = [...overlay.querySelectorAll(
+      'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+    )].filter((node) => node instanceof HTMLElement && !node.hidden)
+    if (!focusable.length) {
+      event.preventDefault()
+      return
+    }
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+
+  function dashboardOperationsDialogIsOpen() {
+    const overlay = document.getElementById('dashCommandOperationsOverlay')
+    return Boolean(overlay && !overlay.hidden)
+  }
+
+  function dashboardOpenOperationsDialog(trigger = null) {
+    const overlay = document.getElementById('dashCommandOperationsOverlay')
+    const closeButton = document.getElementById('dashCommandOperationsClose')
+    const list = document.getElementById('dashCommandAllOperationsList')
+    if (
+      !(overlay instanceof HTMLElement) ||
+      dashboardOperationsDialogIsOpen() ||
+      !dashboardServiceOperationStream.length
+    ) {
+      return
+    }
+
+    if (dashboardActiveWorkerMapDialogIsOpen()) {
+      dashboardCloseActiveWorkerMapDialog({ restoreFocus: false })
+    }
+    dashboardOperationsDialogRestoreFocus = trigger instanceof HTMLElement
+      ? trigger
+      : document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
+    overlay.hidden = false
+    overlay.setAttribute('aria-hidden', 'false')
+    document.documentElement.classList.add('is-dashboard-operations-modal-open')
+    document.body.classList.add('is-dashboard-operations-modal-open')
+    window.requestAnimationFrame(() => {
+      closeButton?.focus?.()
+      if (list instanceof HTMLElement) {
+        list.scrollTop = 0
+      }
+    })
+  }
+
+  function dashboardCloseOperationsDialog(options = {}) {
+    const overlay = document.getElementById('dashCommandOperationsOverlay')
+    if (!(overlay instanceof HTMLElement) || overlay.hidden) {
+      return
+    }
+
+    overlay.hidden = true
+    overlay.setAttribute('aria-hidden', 'true')
+    document.documentElement.classList.remove('is-dashboard-operations-modal-open')
+    document.body.classList.remove('is-dashboard-operations-modal-open')
+
+    const restoreTarget = dashboardOperationsDialogRestoreFocus
+    dashboardOperationsDialogRestoreFocus = null
+    if (options.restoreFocus !== false && restoreTarget?.isConnected) {
+      window.requestAnimationFrame(() => restoreTarget.focus?.())
+    }
+  }
+
+  function dashboardTrapOperationsDialogFocus(event) {
+    if (event.key !== 'Tab') {
+      return
+    }
+    const overlay = document.getElementById('dashCommandOperationsOverlay')
+    if (!(overlay instanceof HTMLElement) || overlay.hidden) {
+      return
+    }
+    const focusable = [...overlay.querySelectorAll(
+      'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+    )].filter((node) => node instanceof HTMLElement && !node.hidden)
+    if (!focusable.length) {
+      event.preventDefault()
+      return
+    }
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+
+  function dashboardLoadOpenStreetMap() {
+    if (window.L?.map && window.L?.tileLayer && window.L?.marker) {
+      return Promise.resolve(window.L)
+    }
+    if (dashboardOpenStreetMapLoaderPromise) {
+      return dashboardOpenStreetMapLoaderPromise
+    }
+
+    dashboardOpenStreetMapLoaderPromise = new Promise((resolve, reject) => {
+      const stylesheetId = 'cleanzi-leaflet-css'
+      if (!document.getElementById(stylesheetId)) {
+        const stylesheet = document.createElement('link')
+        stylesheet.id = stylesheetId
+        stylesheet.rel = 'stylesheet'
+        stylesheet.href = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css'
+        stylesheet.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY='
+        stylesheet.crossOrigin = 'anonymous'
+        document.head.appendChild(stylesheet)
+      }
+
+      const scriptId = 'cleanzi-leaflet-js'
+      const existingScript = document.getElementById(scriptId)
+      const handleLoaded = () => {
+        if (window.L?.map && window.L?.tileLayer && window.L?.marker) {
+          resolve(window.L)
+          return
+        }
+        reject(new Error('OpenStreetMap loader did not expose Leaflet.'))
+      }
+      const handleError = () => reject(new Error('Nie udało się pobrać lokalnego fallbacku OpenStreetMap.'))
+
+      if (existingScript) {
+        existingScript.addEventListener('load', handleLoaded, { once: true })
+        existingScript.addEventListener('error', handleError, { once: true })
+        return
+      }
+
+      const script = document.createElement('script')
+      script.id = scriptId
+      script.src = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js'
+      script.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo='
+      script.crossOrigin = 'anonymous'
+      script.addEventListener('load', handleLoaded, { once: true })
+      script.addEventListener('error', handleError, { once: true })
+      document.head.appendChild(script)
+    }).catch((error) => {
+      dashboardOpenStreetMapLoaderPromise = null
+      throw error
+    })
+
+    return dashboardOpenStreetMapLoaderPromise
+  }
+
+  function dashboardActiveWorkerMapInfoHtml(location = {}) {
+    const workStatus = dashboardActiveWorkerMapStatus(location?.workStatus)
+    const statusDetails = workStatus === 'planned'
+      ? [location?.workStatusLabel ?? 'Zaplanowany', location?.actualWorkStatusLabel].filter(Boolean).join(' · ')
+      : workStatus === 'late'
+        ? `${location?.workStatusLabel ?? 'Nie rozpoczął w czasie'} · ${Number(location?.delayMinutes ?? 0)} min po czasie`
+      : workStatus === 'finished' && location?.stopLabel && location.stopLabel !== '--:--'
+        ? `${location.workStatusLabel} · STOP ${location.stopLabel}`
+        : location?.workStatusLabel ?? 'W pracy'
+    const taskHtml = workStatus === 'planned' && location?.taskLabel
+      ? `<span>${escapeHtml(location.taskLabel)}</span>`
+      : ''
+    const plannedDetailsHtml = workStatus === 'planned' && location?.plannedTimeLabel
+      ? `<span>Plan: ${escapeHtml(location.plannedTimeLabel)} · ${escapeHtml(location?.plannedObjectLabel ?? location?.objectLabel ?? 'Zaplanowany obiekt')}</span>`
+      : ''
+    const currentObjectHtml = workStatus === 'planned' && location?.positionKind === 'plan' && !location?.actualWorkStatus
+      ? ''
+      : `<span>${escapeHtml(`${workStatus === 'planned' ? 'Aktualnie: ' : ''}${location?.objectLabel ?? 'Brak rozpoznanego obiektu'}`)}</span>`
+    return `
+      <div class="dash-active-workers-map-info">
+        <strong>${escapeHtml(location?.workerName ?? 'Pracownik')}</strong>
+        <span class="dash-active-workers-map-info-status is-${workStatus}">${escapeHtml(statusDetails)}</span>
+        ${taskHtml}
+        ${plannedDetailsHtml}
+        ${currentObjectHtml}
+        <small>${escapeHtml(location?.positionDetailLabel ?? `Ostatni GPS: ${location?.gpsTimeLabel ?? '--:--'}`)}</small>
+      </div>
+    `
+  }
+
+  function dashboardActiveWorkerMapAvatarHtml(location = {}) {
+    const photoUrl = String(location?.photoUrl ?? '').trim()
+    if (photoUrl) {
+      return `<img src="${escapeHtml(photoUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+    }
+    const avatarKind = location?.avatarKind === 'female' ? 'female' : 'male'
+    return `<img src="/assets/avatars/default-${avatarKind}.webp" alt="" loading="lazy" />`
+  }
+
+  function dashboardActiveWorkerMapTaskAvailable(location = {}) {
+    return Boolean(
+      String(location?.editorOrderId ?? location?.sourceOrderId ?? location?.orderId ?? '').trim(),
+    )
+  }
+
+  function dashboardActiveWorkerMapPersonHtml(location = {}, options = {}) {
+    const workStatus = dashboardActiveWorkerMapStatus(location?.workStatus)
+    const delayMinutes = Math.max(0, Number(location?.delayMinutes ?? 0) || 0)
+    const plannedStartTs = Number(location?.plannedStartTs ?? 0)
+    const plannedStopTs = Number(location?.plannedStopTs ?? 0)
+    const nowTs = Date.now()
+    const remainingPercent = workStatus === 'finished'
+      ? 0
+      : workStatus === 'active' && plannedStopTs > plannedStartTs
+        ? Math.max(0, Math.min(100, ((plannedStopTs - nowTs) / (plannedStopTs - plannedStartTs)) * 100))
+        : 100
+    const plannedStartLabel = Number(location?.plannedStartTs) > 0
+      ? dashboardOverviewTimeLabel(Number(location.plannedStartTs))
+      : location?.startLabel ?? '--:--'
+    const isLate = workStatus === 'late'
+    const positionStyle = Number.isFinite(options?.x) && Number.isFinite(options?.y)
+      ? `--dash-map-x:${Number(options.x)}px;--dash-map-y:${Number(options.y)}px;`
+      : ''
+    const style = ` style="${positionStyle}--dash-map-remaining:${Math.round(remainingPercent)}"`
+    const selectedClass = options?.selected ? ' is-selected' : ''
+    const lateLabel = isLate
+      ? `<span class="dash-command-map-person__alarm">${escapeHtml(`${delayMinutes} min po czasie`)}</span>`
+      : ''
+    const taskButton = dashboardActiveWorkerMapTaskAvailable(location)
+      ? `
+          <button
+            class="dash-command-map-person__task"
+            type="button"
+            data-dashboard-map-open-task="${escapeHtml(location.workerKey)}"
+          >
+            <i class="ph ph-note-pencil" aria-hidden="true"></i>
+            Otwórz zadanie
+          </button>
+        `
+      : ''
+
+    return `
+      <div class="dash-command-map-person is-${workStatus}${selectedClass}"${style} data-dashboard-map-person="${escapeHtml(location.workerKey)}">
+        <button
+          class="dash-command-map-person__bubble"
+          type="button"
+          data-dashboard-map-select-worker="${escapeHtml(location.workerKey)}"
+          aria-label="${escapeHtml(`${location.workerName}. ${location.workStatusLabel}. ${location.plannedObjectLabel || location.objectLabel}`)}"
+        >
+          ${dashboardActiveWorkerMapAvatarHtml(location)}
+          ${isLate ? '<i class="ph ph-warning-circle dash-command-map-person__warning" aria-hidden="true"></i>' : ''}
+        </button>
+        <span class="dash-command-map-person__name">${escapeHtml(location.workerName)}</span>
+        ${lateLabel}
+        <div class="dash-command-map-person__details" role="group" aria-label="${escapeHtml(`Szczegóły: ${location.workerName}`)}">
+          <strong>${escapeHtml(location.workerName)}</strong>
+          <span>${escapeHtml(`Plan ${plannedStartLabel}`)}</span>
+          ${taskButton}
+        </div>
+      </div>
+    `
+  }
+
+  function dashboardActiveWorkerMapGroupCenter(group = {}) {
+    const coordinates = (Array.isArray(group?.locations) ? group.locations : [])
+      .map((location) => ({
+        lat: Number(location?.plannedLat ?? location?.lat),
+        lng: Number(location?.plannedLng ?? location?.lng),
+      }))
+      .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng))
+    if (!coordinates.length) {
+      return null
+    }
+    return {
+      lat: coordinates.reduce((sum, point) => sum + point.lat, 0) / coordinates.length,
+      lng: coordinates.reduce((sum, point) => sum + point.lng, 0) / coordinates.length,
+    }
+  }
+
+  function dashboardActiveWorkerMapGroupHtml(group = {}, options = {}) {
+    const locations = Array.isArray(group?.locations) ? group.locations : []
+    const orderedLocations = locations
+      .slice()
+      .sort((left, right) =>
+        Number(dashboardActiveWorkerMapStatus(right?.workStatus) === 'late') -
+          Number(dashboardActiveWorkerMapStatus(left?.workStatus) === 'late') ||
+        Number(right?.delayMinutes ?? 0) - Number(left?.delayMinutes ?? 0),
+      )
+    const slots = [
+      { x: -64, y: -52 },
+      { x: 64, y: -52 },
+      { x: -72, y: 4 },
+      { x: 72, y: 4 },
+      { x: -58, y: 58 },
+      { x: 58, y: 58 },
+      { x: 0, y: 76 },
+    ]
+    const visibleLocations = orderedLocations.slice(0, slots.length)
+    const lateLocations = orderedLocations.filter(
+      (location) => dashboardActiveWorkerMapStatus(location?.workStatus) === 'late',
+    )
+    const selectedWorkerKey = String(options?.selectedWorkerKey ?? lateLocations[0]?.workerKey ?? '').trim()
+    const expandedClass = options?.expanded ? ' is-expanded' : ''
+    const lateClass = lateLocations.length ? ' has-late' : ''
+    const peopleHtml = visibleLocations
+      .map((location, index) =>
+        dashboardActiveWorkerMapPersonHtml(location, {
+          ...slots[index],
+          selected: String(location?.workerKey ?? '') === selectedWorkerKey,
+        }),
+      )
+      .join('')
+    const overflowCount = Math.max(0, orderedLocations.length - visibleLocations.length)
+    const overflowHtml = overflowCount
+      ? `<span class="dash-command-map-object__overflow">+${overflowCount}</span>`
+      : ''
+    const alertCountHtml = lateLocations.length
+      ? `<span class="dash-command-map-object__alert" aria-label="${lateLocations.length} alarmów">${lateLocations.length}</span>`
+      : ''
+    const {
+      objectProgress,
+      statusCounts,
+      zoneSummary,
+    } = buildOperationalMapObjectLiveSummary(orderedLocations)
+    const liveStatusHtml = [
+      statusCounts.active
+        ? `<span class="is-active">${statusCounts.active} w pracy</span>`
+        : '',
+      statusCounts.planned
+        ? `<span class="is-planned">${statusCounts.planned} zaplanowanych</span>`
+        : '',
+      statusCounts.finished
+        ? `<span class="is-finished">${statusCounts.finished} zakończonych</span>`
+        : '',
+      statusCounts.late
+        ? `<span class="is-late">${statusCounts.late} alarm</span>`
+        : '',
+    ].filter(Boolean).join('')
+    const livePeopleHtml = orderedLocations.map((location) => {
+      const status = dashboardActiveWorkerMapStatus(location?.workStatus)
+      const statusLabel = location?.workStatusLabel ?? {
+        active: 'W pracy',
+        planned: 'Zaplanowany',
+        finished: 'Zakończony',
+        late: 'Nie rozpoczął w czasie',
+      }[status]
+      const timeLabel = status === 'finished'
+        ? location?.stopLabel && location.stopLabel !== '--:--'
+          ? `STOP ${location.stopLabel}`
+          : ''
+        : status === 'active'
+          ? location?.startLabel && location.startLabel !== '--:--'
+            ? `od ${location.startLabel}`
+            : ''
+          : location?.plannedTimeLabel ?? ''
+      return `
+        <li>
+          <i class="is-${status}" aria-hidden="true"></i>
+          <strong>${escapeHtml(location?.workerName ?? 'Pracownik')}</strong>
+          <span>${escapeHtml([statusLabel, timeLabel].filter(Boolean).join(' · '))}</span>
+        </li>
+      `
+    }).join('')
+    const liveOpenClass = options?.liveOpen ? ' is-live-open' : ''
+
+    return `
+      <div
+        class="dash-command-map-object${expandedClass}${lateClass}${liveOpenClass}"
+        data-dashboard-map-group="${escapeHtml(group.key)}"
+        style="--dash-object-progress:${objectProgress}"
+      >
+        <button
+          class="dash-command-map-object__button"
+          type="button"
+          data-dashboard-map-object-toggle="${escapeHtml(group.key)}"
+          aria-expanded="${options?.expanded ? 'true' : 'false'}"
+          aria-label="${escapeHtml(`${group.objectLabel}. ${locations.length} osób. Pokaż pracowników`)}"
+        >
+          <span class="dash-command-map-object__ring">
+            <i class="ph ph-buildings" aria-hidden="true"></i>
+          </span>
+          ${alertCountHtml}
+          ${overflowHtml}
+          <span class="dash-command-map-object__label">${escapeHtml(`${group.objectLabel} · ${locations.length} osób`)}</span>
+          <span class="dash-command-map-object__zones">${escapeHtml(zoneSummary)}</span>
+        </button>
+        <div class="dash-command-map-object__people" aria-label="${escapeHtml(`Pracownicy: ${group.objectLabel}`)}">
+          ${peopleHtml}
+        </div>
+        <div
+          class="dash-command-map-object__live"
+          role="group"
+          aria-label="${escapeHtml(`Dane na żywo: ${group.objectLabel}`)}"
+        >
+          <div class="dash-command-map-object__live-head">
+            <span>Na żywo</span>
+            <strong>${escapeHtml(group.objectLabel)}</strong>
+          </div>
+          <div class="dash-command-map-object__live-statuses">${liveStatusHtml}</div>
+          <div class="dash-command-map-object__live-zones">
+            <span>Postęp stref</span>
+            <strong>${escapeHtml(zoneSummary)}</strong>
+          </div>
+          <ul>${livePeopleHtml}</ul>
+        </div>
+      </div>
+    `
+  }
+
+  function dashboardActiveWorkerMapStandaloneHtml(location = {}) {
+    return `
+      <div class="dash-command-map-standalone">
+        ${dashboardActiveWorkerMapPersonHtml(location, {
+          selected: dashboardActiveWorkerMapStatus(location?.workStatus) === 'late',
+        })}
+      </div>
+    `
+  }
+
+  async function dashboardOpenActiveWorkerMapTask(location = {}) {
+    if (!dashboardActiveWorkerMapTaskAvailable(location)) {
+      showTransientNotice('To zadanie nie ma kompletnego identyfikatora edycji.', 'error')
+      return
+    }
+
+    await dashboardSyncCalendarOrdersForTimeline({ forceRefresh: false })
+    const orderBar = document.createElement('span')
+    const attributes = {
+      'data-calendar-timeline-order-id': location?.editorOrderId || location?.sourceOrderId || location?.orderId,
+      'data-calendar-timeline-source-order-id': location?.sourceOrderId || location?.editorOrderId || location?.orderId,
+      'data-calendar-timeline-date': location?.dateYmd || location?.occurrenceDateYmd,
+      'data-calendar-timeline-occurrence-date': location?.occurrenceDateYmd,
+      'data-calendar-timeline-work-slot-key': location?.workSlotKey,
+      'data-calendar-timeline-service-block-id': location?.serviceBlockId,
+      'data-calendar-timeline-service-block-kind': location?.serviceBlockKind,
+      'data-calendar-timeline-service-block-label': location?.serviceBlockLabel,
+    }
+    Object.entries(attributes).forEach(([name, value]) => {
+      const normalized = String(value ?? '').trim()
+      if (normalized) {
+        orderBar.setAttribute(name, normalized)
+      }
+    })
+    if (location?.isRecurringSeries) orderBar.setAttribute('data-calendar-timeline-recurring-series', '1')
+    if (location?.isRecurringInstance) orderBar.setAttribute('data-calendar-timeline-recurring-instance', '1')
+    if (location?.recurrenceOverride) orderBar.setAttribute('data-calendar-timeline-recurrence-override', '1')
+
+    const context = calendarTimelineContextFromBar(orderBar)
+    if (!context) {
+      showTransientNotice('Nie udało się odnaleźć zlecenia do edycji.', 'error')
+      return
+    }
+    calendarTimelineEditOrderFromContext(context)
+  }
+
+  function dashboardActiveWorkerMapLocationForMarker(marker, workerKey = '') {
+    const normalizedKey = String(workerKey ?? '').trim()
+    const locations = Array.isArray(marker?.__cleanziWorkerLocations)
+      ? marker.__cleanziWorkerLocations
+      : marker?.__cleanziWorkerLocation
+        ? [marker.__cleanziWorkerLocation]
+        : []
+    return locations.find((location) => String(location?.workerKey ?? '').trim() === normalizedKey) ?? locations[0] ?? null
+  }
+
+  function dashboardBindActiveWorkerMapMarkerElement(marker) {
+    const element = marker?.getElement?.()
+    if (!(element instanceof HTMLElement) || element.dataset.cleanziMapBound === '1') {
+      return
+    }
+    element.dataset.cleanziMapBound = '1'
+    element.addEventListener('click', (event) => {
+      const taskButton = event.target?.closest?.('[data-dashboard-map-open-task]')
+      if (taskButton instanceof HTMLButtonElement) {
+        event.preventDefault()
+        event.stopPropagation()
+        const location = dashboardActiveWorkerMapLocationForMarker(
+          marker,
+          taskButton.getAttribute('data-dashboard-map-open-task'),
+        )
+        if (location) {
+          void dashboardOpenActiveWorkerMapTask(location)
+        }
+        return
+      }
+
+      const personButton = event.target?.closest?.('[data-dashboard-map-select-worker]')
+      if (personButton instanceof HTMLButtonElement) {
+        event.preventDefault()
+        event.stopPropagation()
+        const workerKey = String(personButton.getAttribute('data-dashboard-map-select-worker') ?? '').trim()
+        const cluster = element.querySelector('.dash-command-map-object')
+        if (cluster instanceof HTMLElement) {
+          document.querySelectorAll('.dash-command-map-object').forEach((node) => {
+            if (node !== cluster) {
+              node.classList.remove('is-expanded', 'is-live-open')
+              node.querySelector('[data-dashboard-map-object-toggle]')?.setAttribute('aria-expanded', 'false')
+            }
+          })
+          cluster.classList.remove('is-live-open')
+          cluster.classList.add('is-expanded')
+          cluster.querySelector('[data-dashboard-map-object-toggle]')?.setAttribute('aria-expanded', 'true')
+          dashboardActiveWorkersMapExpandedGroupKey = String(cluster.dataset.dashboardMapGroup ?? '').trim()
+          dashboardActiveWorkersMapLiveGroupKey = ''
+        }
+        element.querySelectorAll('.dash-command-map-person').forEach((node) => {
+          node.classList.toggle(
+            'is-selected',
+            String(node.getAttribute('data-dashboard-map-person') ?? '') === workerKey,
+          )
+        })
+        dashboardActiveWorkersMapSelectedMarker = marker
+        return
+      }
+
+      const objectButton = event.target?.closest?.('[data-dashboard-map-object-toggle]')
+      if (objectButton instanceof HTMLButtonElement) {
+        event.preventDefault()
+        event.stopPropagation()
+        const cluster = objectButton.closest('.dash-command-map-object')
+        if (!(cluster instanceof HTMLElement)) {
+          return
+        }
+        const nextLiveOpen = !cluster.classList.contains('is-live-open')
+        document.querySelectorAll('.dash-command-map-object').forEach((node) => {
+          if (node !== cluster) {
+            node.classList.remove('is-expanded', 'is-live-open')
+            node.querySelector('[data-dashboard-map-object-toggle]')?.setAttribute('aria-expanded', 'false')
+          }
+        })
+        document.querySelectorAll('.dash-command-map-person.is-selected').forEach((node) => {
+          node.classList.remove('is-selected')
+        })
+        cluster.classList.toggle('is-expanded', nextLiveOpen)
+        cluster.classList.toggle('is-live-open', nextLiveOpen)
+        objectButton.setAttribute('aria-expanded', nextLiveOpen ? 'true' : 'false')
+        dashboardActiveWorkersMapExpandedGroupKey = nextLiveOpen
+          ? String(cluster.dataset.dashboardMapGroup ?? '').trim()
+          : ''
+        dashboardActiveWorkersMapLiveGroupKey = dashboardActiveWorkersMapExpandedGroupKey
+        dashboardActiveWorkersMapSelectedMarker = marker
+        if (nextLiveOpen && dashboardActiveWorkersMapProvider === 'openstreetmap') {
+          const position = marker.getLatLng?.()
+          if (position) {
+            dashboardActiveWorkersMapInstance?.panTo?.(position)
+            window.requestAnimationFrame(() => {
+              dashboardActiveWorkersMapInstance?.panBy?.([0, 70], { animate: true })
+            })
+          }
+        }
+      }
+    })
+  }
+
+  function dashboardOpenActiveWorkerMapMarker(marker, workerKey = '') {
+    if (!marker || !dashboardActiveWorkersMapInstance) {
+      return
+    }
+    dashboardActiveWorkersMapSelectedMarker = marker
+    if (dashboardActiveWorkersMapProvider === 'openstreetmap') {
+      const element = marker.getElement?.()
+      const cluster = element?.querySelector?.('.dash-command-map-object')
+      if (cluster instanceof HTMLElement) {
+        document.querySelectorAll('.dash-command-map-object').forEach((node) => {
+          if (node !== cluster) {
+            node.classList.remove('is-expanded', 'is-live-open')
+            node.querySelector('[data-dashboard-map-object-toggle]')?.setAttribute('aria-expanded', 'false')
+          }
+        })
+        cluster.classList.remove('is-live-open')
+        cluster.classList.add('is-expanded')
+        cluster.querySelector('[data-dashboard-map-object-toggle]')?.setAttribute('aria-expanded', 'true')
+        dashboardActiveWorkersMapExpandedGroupKey = String(cluster.dataset.dashboardMapGroup ?? '').trim()
+        dashboardActiveWorkersMapLiveGroupKey = ''
+      }
+      if (workerKey && element instanceof HTMLElement) {
+        element.querySelectorAll('.dash-command-map-person').forEach((node) => {
+          node.classList.toggle(
+            'is-selected',
+            String(node.getAttribute('data-dashboard-map-person') ?? '') === String(workerKey),
+          )
+        })
+      }
+      marker.openPopup?.()
+      return
+    }
+    if (!dashboardActiveWorkersMapInfoWindow) {
+      return
+    }
+    const location = dashboardActiveWorkerMapLocationForMarker(marker, workerKey) ?? {}
+    dashboardActiveWorkersMapInfoWindow.setContent(dashboardActiveWorkerMapInfoHtml(location))
+    dashboardActiveWorkersMapInfoWindow.open({
+      anchor: marker,
+      map: dashboardActiveWorkersMapInstance,
+    })
+  }
+
+  function dashboardFocusActiveWorkerMapMarker(workerKey = '') {
+    const marker = dashboardActiveWorkersMapMarkersByKey.get(String(workerKey ?? '').trim())
+    if (!marker || !dashboardActiveWorkersMapInstance) {
+      return
+    }
+    const position = dashboardActiveWorkersMapProvider === 'openstreetmap'
+      ? marker.getLatLng?.()
+      : marker.getPosition?.()
+    if (position) {
+      dashboardActiveWorkersMapInstance.panTo(position)
+    }
+    if (Number(dashboardActiveWorkersMapInstance.getZoom?.() ?? 0) < 14) {
+      dashboardActiveWorkersMapInstance.setZoom(14)
+    }
+    dashboardOpenActiveWorkerMapMarker(marker, workerKey)
+  }
+
+  function dashboardRenderActiveWorkerLocationList(locations = [], totalWorkers = 0) {
+    const countNode = document.getElementById('dashActiveWorkersMapCount')
+    const dialogCountNode = document.getElementById('dashActiveWorkersMapDialogCount')
+    const commandCountNode = document.getElementById('dashCommandMapCount')
+    const listNode = document.getElementById('dashActiveWorkersLocationList')
+    const validLocations = Array.isArray(locations) ? locations : []
+    const normalizedTotal = Math.max(Number(totalWorkers) || 0, validLocations.length)
+    const countLabel = `${validLocations.length} / ${normalizedTotal} na mapie`
+    const statusCounts = validLocations.reduce(
+      (counts, location) => {
+        const status = dashboardActiveWorkerMapStatus(location?.workStatus)
+        counts[status] += 1
+        return counts
+      },
+      { active: 0, planned: 0, finished: 0, late: 0 },
+    )
+    if (countNode) countNode.textContent = countLabel
+    if (dialogCountNode) dialogCountNode.textContent = countLabel
+    if (commandCountNode) commandCountNode.textContent = countLabel
+    dashboardSetInsightPanelCompactCopy(
+      'objects',
+      normalizedTotal > 0
+        ? `${validLocations.length} z ${normalizedTotal} osób na mapie`
+        : 'Brak dzisiejszych pracowników',
+      `W pracy ${statusCounts.active} · Zaplanowani ${statusCounts.planned} · Zakończeni ${statusCounts.finished} · Alarm ${statusCounts.late}`,
+    )
+    const notificationCount = document.getElementById('dashCommandNotificationCount')
+    if (notificationCount) {
+      notificationCount.textContent = String(statusCounts.late)
+      notificationCount.hidden = statusCounts.late <= 0
+    }
+    if (!listNode) {
+      return
+    }
+    if (!validLocations.length) {
+      listNode.innerHTML = `<li class="dash-active-workers-location-empty">${escapeHtml(
+        normalizedTotal > 0
+          ? 'Brak pozycji GPS i lokalizacji zaplanowanych zadań.'
+          : 'Brak dzisiejszych pracowników do pokazania.',
+      )}</li>`
+      return
+    }
+
+    listNode.innerHTML = validLocations.map((location) => {
+      const workStatus = dashboardActiveWorkerMapStatus(location?.workStatus)
+      const taskTitle = ['planned', 'late'].includes(workStatus) && location?.taskLabel ? ` ${location.taskLabel}.` : ''
+      const statusSummary = workStatus === 'planned'
+        ? [location.workStatusLabel, location.actualWorkStatusLabel].filter(Boolean).join(' · ')
+        : workStatus === 'late'
+          ? `${location.workStatusLabel} · ${Number(location.delayMinutes ?? 0)} min po czasie`
+        : location.workStatusLabel
+      const listObjectLabel = ['planned', 'late'].includes(workStatus)
+        ? location.plannedObjectLabel || location.objectLabel
+        : location.objectLabel
+      const timeLabel = workStatus === 'late'
+        ? `+${Number(location.delayMinutes ?? 0)} min`
+        : location.positionLabel ?? `GPS ${location.gpsTimeLabel ?? '--:--'}`
+      return `
+        <li>
+          <button
+            class="dash-active-workers-location is-${workStatus}"
+            type="button"
+            data-dash-active-worker-map-key="${escapeHtml(location.workerKey)}"
+            title="${escapeHtml(`${location.workStatusLabel}.${taskTitle} Pokaż pracownika na mapie`)}"
+          >
+            <span class="dash-active-workers-location-indicator" aria-hidden="true"></span>
+            <span class="dash-active-workers-location-copy">
+              <strong>${escapeHtml(location.workerName)}</strong>
+              <small>${escapeHtml(`${listObjectLabel} · ${statusSummary}`)}</small>
+            </span>
+            <span class="dash-active-workers-location-time">${escapeHtml(timeLabel)}</span>
+          </button>
+        </li>
+      `
+    }).join('')
+    dashboardApplyCommandCenterMapFilters()
+  }
+
+  function dashboardActiveWorkerMapStatusCopy(locations = [], totalWorkers = 0) {
+    const validLocations = Array.isArray(locations) ? locations : []
+    const normalizedTotal = Math.max(Number(totalWorkers) || 0, validLocations.length)
+    const missing = Math.max(0, normalizedTotal - validLocations.length)
+    if (missing > 0) {
+      return `${validLocations.length} z ${normalizedTotal} dzisiejszych pracowników ma pozycję GPS lub lokalizację zadania. Kliknij mapę, aby ją powiększyć.`
+    }
+    return 'Szary oznacza plan, niebieski pracę w toku, zielony zakończenie, a czerwony brak rozpoczęcia ponad 10 minut po planie. Kliknij obiekt, aby zobaczyć jego pracowników.'
+  }
+
+  function dashboardActiveWorkerMapPreviewLocations(locations = []) {
+    const previewEnabled =
+      import.meta.env.DEV &&
+      ['localhost', '127.0.0.1'].includes(String(window.location?.hostname ?? '').toLowerCase()) &&
+      new URLSearchParams(window.location.search).get('mapAlarmPreview') === '1'
+    const source = Array.isArray(locations) ? locations : []
+    if (!previewEnabled) {
+      return source
+    }
+
+    const groupedByClient = new Map()
+    source.forEach((location) => {
+      const clientId = String(location?.clientId ?? '').trim()
+      if (!clientId) return
+      if (!groupedByClient.has(clientId)) groupedByClient.set(clientId, [])
+      groupedByClient.get(clientId).push(location)
+    })
+    const previewGroup = [...groupedByClient.values()]
+      .filter((group) => group.length >= 2)
+      .sort((left, right) => right.length - left.length)[0]
+    const previewWorkerKey = String(previewGroup?.[0]?.workerKey ?? '').trim()
+    if (!previewWorkerKey) {
+      return source
+    }
+    return source.map((location) =>
+      String(location?.workerKey ?? '').trim() === previewWorkerKey
+        ? {
+            ...location,
+            workStatus: 'late',
+            workStatusLabel: 'Nie rozpoczął w czasie',
+            delayMinutes: 18,
+            positionDetailLabel: 'Podgląd wizualny alarmu na localhost',
+          }
+        : location,
+    )
+  }
+
+  async function dashboardRenderActiveWorkersMap(locations = [], totalWorkers = 0) {
+    const canvas = document.getElementById('dashActiveWorkersMap')
+    const statusNode = document.getElementById('dashActiveWorkersMapStatus')
+    const validLocations = dashboardActiveWorkerMapPreviewLocations(locations)
+    dashboardRenderActiveWorkerLocationList(validLocations, totalWorkers)
+    if (!canvas) {
+      return
+    }
+
+    if (
+      dashboardActiveWorkersMapInstance &&
+      dashboardActiveWorkerMapCanvas() !== canvas
+    ) {
+      dashboardDestroyActiveWorkerMap()
+    }
+
+    if (!validLocations.length) {
+      dashboardDestroyActiveWorkerMap()
+      dashboardSetActiveWorkerMapExpandAvailability(false)
+      canvas.classList.remove('is-loading')
+      canvas.classList.add('is-empty')
+      canvas.setAttribute('aria-busy', 'false')
+      canvas.innerHTML = '<div class="dash-active-workers-map-empty">Brak pozycji GPS i lokalizacji zaplanowanych zadań.</div>'
+      if (statusNode) {
+        statusNode.textContent = Number(totalWorkers) > 0
+          ? 'Dzisiejsi pracownicy nie mają pozycji GPS ani zapisanej lokalizacji zadania.'
+          : 'Brak dzisiejszych pracowników do pokazania na mapie.'
+      }
+      return
+    }
+
+    const targetProvider = 'openstreetmap'
+    if (dashboardActiveWorkersMapInstance && dashboardActiveWorkersMapProvider !== targetProvider) {
+      dashboardDestroyActiveWorkerMap()
+    }
+
+    const signature = [targetProvider, ...validLocations
+      .map((location) => JSON.stringify([
+        location.workerKey,
+        location.workerName,
+        location.objectLabel,
+        location.plannedObjectLabel,
+        location.taskLabel,
+        location.plannedTimeLabel,
+        location.clientId,
+        location.workStatus,
+        location.delayMinutes,
+        location.actualWorkStatus,
+        location.photoUrl,
+        location.avatarKind,
+        location.editorOrderId,
+        location.sourceOrderId,
+        location.positionTimestamp ?? location.gpsTimestamp,
+        location.positionDetailLabel,
+        location.lat.toFixed(6),
+        location.lng.toFixed(6),
+      ]))
+      .sort()]
+      .join('|')
+    if (dashboardActiveWorkersMapInstance && signature === dashboardActiveWorkersMapSignature) {
+      canvas.classList.remove('is-loading', 'is-empty')
+      canvas.setAttribute('aria-busy', 'false')
+      dashboardSetActiveWorkerMapExpandAvailability(true)
+      window.requestAnimationFrame(() => {
+        if (dashboardActiveWorkersMapProvider === 'openstreetmap') {
+          dashboardActiveWorkersMapInstance?.invalidateSize?.({ pan: false })
+        } else if (dashboardActiveWorkersMapInstance?.getDiv?.() === canvas) {
+          window.google?.maps?.event?.trigger?.(dashboardActiveWorkersMapInstance, 'resize')
+        }
+      })
+      if (statusNode) {
+        statusNode.textContent = dashboardActiveWorkerMapStatusCopy(validLocations, totalWorkers)
+      }
+      dashboardApplyCommandCenterMapFilters()
+      return
+    }
+
+    const renderSeq = ++dashboardActiveWorkersMapRenderSeq
+    canvas.classList.add('is-loading')
+    canvas.classList.remove('is-empty')
+    canvas.setAttribute('aria-busy', 'true')
+    dashboardSetActiveWorkerMapExpandAvailability(false)
+    if (statusNode) {
+      statusNode.textContent = 'Ładowanie pozycji i zaplanowanych zadań dzisiejszych pracowników...'
+    }
+
+    try {
+      if (targetProvider === 'openstreetmap') {
+        const leaflet = await dashboardLoadOpenStreetMap()
+        if (renderSeq !== dashboardActiveWorkersMapRenderSeq || appState.currentRoute !== 'dashboard' || !canvas.isConnected) {
+          return
+        }
+
+        canvas.innerHTML = ''
+        if (!dashboardActiveWorkersMapInstance) {
+          const coarsePointer = window.matchMedia?.('(pointer: coarse)')?.matches === true
+          dashboardActiveWorkersMapInstance = leaflet.map(canvas, {
+            center: [51.9, 19.15],
+            zoom: 6,
+            dragging: true,
+            keyboard: true,
+            scrollWheelZoom: !coarsePointer,
+            tap: true,
+            zoomControl: true,
+          })
+          dashboardActiveWorkersMapProvider = 'openstreetmap'
+          leaflet.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+            maxZoom: 19,
+          }).addTo(dashboardActiveWorkersMapInstance)
+          dashboardActiveWorkersMapInstance.on('click', () => {
+            dashboardOpenActiveWorkerMapDialog(canvas)
+          })
+        }
+
+        dashboardClearActiveWorkerMapMarkers()
+        const bounds = leaflet.latLngBounds()
+        const groupedLocations = groupOperationalMapLocations(validLocations)
+        const groups = groupedLocations.groups
+          .map((group) => ({
+            ...group,
+            center: dashboardActiveWorkerMapGroupCenter(group),
+          }))
+          .filter((group) => group.center)
+        const groupKeys = new Set(groups.map((group) => group.key))
+        if (!groupKeys.has(dashboardActiveWorkersMapExpandedGroupKey)) {
+          dashboardActiveWorkersMapExpandedGroupKey = ''
+        }
+        if (!groupKeys.has(dashboardActiveWorkersMapLiveGroupKey)) {
+          dashboardActiveWorkersMapLiveGroupKey = ''
+        }
+
+        groups.forEach((group) => {
+          const liveOpen = dashboardActiveWorkersMapLiveGroupKey === group.key
+          const expanded = liveOpen || dashboardActiveWorkersMapExpandedGroupKey === group.key
+          const marker = leaflet.marker([group.center.lat, group.center.lng], {
+            alt: `${group.objectLabel}. ${group.locations.length} osób`,
+            icon: leaflet.divIcon({
+              className: 'dash-command-map-marker-wrap',
+              html: dashboardActiveWorkerMapGroupHtml(group, { expanded, liveOpen }),
+              iconAnchor: [0, 0],
+              iconSize: [1, 1],
+            }),
+            keyboard: false,
+          }).addTo(dashboardActiveWorkersMapInstance)
+          marker.__cleanziWorkerLocations = group.locations
+          marker.__cleanziGroupKey = group.key
+          marker.on('add', () => window.requestAnimationFrame(() => dashboardBindActiveWorkerMapMarkerElement(marker)))
+          window.requestAnimationFrame(() => dashboardBindActiveWorkerMapMarkerElement(marker))
+          dashboardActiveWorkersMapMarkers.push(marker)
+          group.locations.forEach((location) => {
+            dashboardActiveWorkersMapMarkersByKey.set(location.workerKey, marker)
+          })
+          bounds.extend([group.center.lat, group.center.lng])
+        })
+
+        groupedLocations.standalone.forEach((location) => {
+          const marker = leaflet.marker([location.lat, location.lng], {
+            alt: `${location.workerName} · ${location.workStatusLabel} · ${location.objectLabel}`,
+            icon: leaflet.divIcon({
+              className: 'dash-command-map-marker-wrap',
+              html: dashboardActiveWorkerMapStandaloneHtml(location),
+              iconAnchor: [0, 0],
+              iconSize: [1, 1],
+            }),
+            keyboard: false,
+          }).addTo(dashboardActiveWorkersMapInstance)
+          marker.__cleanziWorkerLocation = location
+          marker.on('add', () => window.requestAnimationFrame(() => dashboardBindActiveWorkerMapMarkerElement(marker)))
+          window.requestAnimationFrame(() => dashboardBindActiveWorkerMapMarkerElement(marker))
+          dashboardActiveWorkersMapMarkers.push(marker)
+          dashboardActiveWorkersMapMarkersByKey.set(location.workerKey, marker)
+          bounds.extend([location.lat, location.lng])
+        })
+
+        const renderedMarkerCount = groups.length + groupedLocations.standalone.length
+        const firstMarkerPosition = dashboardActiveWorkersMapMarkers[0]?.getLatLng?.()
+        if (renderedMarkerCount === 1 && firstMarkerPosition) {
+          dashboardActiveWorkersMapInstance.setView(firstMarkerPosition, 14)
+        } else {
+          dashboardActiveWorkersMapInstance.fitBounds(bounds, { maxZoom: 15, padding: [96, 96] })
+        }
+        dashboardActiveWorkersMapSignature = signature
+        dashboardApplyCommandCenterMapFilters()
+        window.requestAnimationFrame(() => dashboardActiveWorkersMapInstance?.invalidateSize?.({ pan: false }))
+        canvas.classList.remove('is-loading', 'is-empty')
+        canvas.setAttribute('aria-busy', 'false')
+        dashboardSetActiveWorkerMapExpandAvailability(true)
+        if (statusNode) {
+          statusNode.textContent = dashboardActiveWorkerMapStatusCopy(validLocations, totalWorkers)
+        }
+        return
+      }
+
+      if (typeof ordersLoadGoogleMaps !== 'function') {
+        throw new Error('Google Maps loader is unavailable.')
+      }
+      const maps = await ordersLoadGoogleMaps()
+      if (renderSeq !== dashboardActiveWorkersMapRenderSeq || appState.currentRoute !== 'dashboard' || !canvas.isConnected) {
+        return
+      }
+
+      canvas.innerHTML = ''
+      if (!dashboardActiveWorkersMapInstance) {
+        const coarsePointer = window.matchMedia?.('(pointer: coarse)')?.matches === true
+        dashboardActiveWorkersMapInstance = new maps.Map(canvas, {
+          center: { lat: 51.9, lng: 19.15 },
+          zoom: 6,
+          gestureHandling: coarsePointer ? 'cooperative' : 'greedy',
+          scrollwheel: !coarsePointer,
+          draggable: true,
+          keyboardShortcuts: true,
+          zoomControl: true,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+          clickableIcons: false,
+          styles: [
+            { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+            { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+            { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#f3f6f2' }] },
+            { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#dceaf4' }] },
+            { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
+            { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#7b8794' }] },
+          ],
+        })
+        dashboardActiveWorkersMapProvider = 'google'
+        dashboardActiveWorkersMapInfoWindow = new maps.InfoWindow()
+        dashboardActiveWorkersMapInstance.addListener('click', () => {
+          dashboardOpenActiveWorkerMapDialog(canvas)
+        })
+      }
+
+      dashboardClearActiveWorkerMapMarkers()
+      const bounds = new maps.LatLngBounds()
+      validLocations.forEach((location) => {
+        const marker = new maps.Marker({
+          map: dashboardActiveWorkersMapInstance,
+          position: { lat: location.lat, lng: location.lng },
+          icon: {
+            url: {
+              active: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png',
+              planned: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+              finished: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png',
+            }[dashboardActiveWorkerMapStatus(location.workStatus)],
+            scaledSize: new maps.Size(34, 34),
+          },
+        })
+        marker.__cleanziWorkerLocation = location
+        marker.addListener('click', () => {
+          dashboardOpenActiveWorkerMapDialog(canvas)
+          window.requestAnimationFrame(() => dashboardOpenActiveWorkerMapMarker(marker))
+        })
+        dashboardActiveWorkersMapMarkers.push(marker)
+        dashboardActiveWorkersMapMarkersByKey.set(location.workerKey, marker)
+        bounds.extend({ lat: location.lat, lng: location.lng })
+      })
+
+      if (validLocations.length === 1) {
+        dashboardActiveWorkersMapInstance.setCenter({ lat: validLocations[0].lat, lng: validLocations[0].lng })
+        dashboardActiveWorkersMapInstance.setZoom(14)
+      } else {
+        dashboardActiveWorkersMapInstance.fitBounds(bounds, 42)
+      }
+      dashboardActiveWorkersMapSignature = signature
+      dashboardApplyCommandCenterMapFilters()
+      canvas.classList.remove('is-loading', 'is-empty')
+      canvas.setAttribute('aria-busy', 'false')
+      dashboardSetActiveWorkerMapExpandAvailability(true)
+      if (statusNode) {
+        statusNode.textContent = dashboardActiveWorkerMapStatusCopy(validLocations, totalWorkers)
+      }
+    } catch (error) {
+      if (renderSeq !== dashboardActiveWorkersMapRenderSeq) {
+        return
+      }
+      console.warn('[portal/dashboard] active workers map failed', error)
+      dashboardDestroyActiveWorkerMap()
+      dashboardSetActiveWorkerMapExpandAvailability(false)
+      canvas.classList.remove('is-loading')
+      canvas.classList.add('is-empty')
+      canvas.setAttribute('aria-busy', 'false')
+      canvas.innerHTML = '<div class="dash-active-workers-map-empty">Mapa jest chwilowo niedostępna.</div>'
+      if (statusNode) {
+        statusNode.textContent = 'Nie udało się uruchomić mapy. Lista pozycji pozostaje dostępna poniżej.'
+      }
+    }
+  }
+
+  function dashboardServiceIsExplicitEvent(row = {}) {
+    const eventId = String(row?.eventId ?? row?.id ?? '').trim()
+    const workdayId = String(row?.workdayId ?? row?.linkedWorkdayId ?? '').trim()
+    const sourceKind = String(row?.historySourceKind ?? '').trim().toLowerCase()
+    return Boolean(
+      eventId &&
+        (
+          row?.hasExplicitEventId === true ||
+          (sourceKind === 'event' && (!workdayId || eventId !== workdayId))
+        ),
+    )
+  }
+
+
+
+  function dashboardServiceExecutionIdentityKey(source = {}) {
+    return [
+      String(source?.orgId ?? '').trim(),
+      String(source?.taskId ?? '').trim(),
+      String(source?.occurrenceDateYmd ?? '').trim(),
+      String(source?.serviceBlockId ?? '').trim(),
+    ].join('\u001f')
+  }
+
+  function dashboardBuildServiceExecutionPlannedBlocks(plannedItems = []) {
+    const blocks = new Map()
+    const invalid = []
+
+    ;(Array.isArray(plannedItems) ? plannedItems : []).forEach((item) => {
+      const orgId = String(item?.orgId ?? appState.session?.orgId ?? '').trim()
+      const taskId = String(item?.taskId ?? '').trim()
+      const occurrenceDateYmd = String(item?.occurrenceDateYmd ?? '').trim()
+      const serviceBlockId = String(item?.serviceBlockId ?? '').trim()
+      const allocationId = String(item?.allocationId ?? '').trim()
+      const workSlotKey = String(item?.executionWorkSlotKey ?? '').trim()
+      const taskUpdatedAt = String(item?.taskUpdatedAt ?? '').trim()
+      const allocation = {
+        allocationId,
+        workSlotKey,
+        workerName: String(item?.workerDisplayName ?? item?.workerName ?? '').trim(),
+        workerId: String(item?.workerId ?? '').trim(),
+        workerLogin: String(item?.workerLogin ?? '').trim(),
+        plannedStartAt: Number(item?.startTs) > 0 ? new Date(Number(item.startTs)).toISOString() : null,
+        plannedEndAt: Number(item?.stopTs) > 0 ? new Date(Number(item.stopTs)).toISOString() : null,
+      }
+      const plan = {
+        orgId,
+        taskId,
+        taskUpdatedAt,
+        occurrenceDateYmd,
+        serviceBlockId,
+        taskLabel: String(item?.label ?? '').trim(),
+        serviceBlockLabel: String(item?.serviceBlockLabel ?? '').trim(),
+        clientId: String(item?.clientId ?? '').trim(),
+        clientLabel: String(item?.companyLabel ?? item?.locationLabel ?? '').trim(),
+        allocations: [allocation],
+      }
+
+      const hasExecutionIdentity = Boolean(serviceBlockId || allocationId || workSlotKey)
+      if (!hasExecutionIdentity) {
+        return
+      }
+
+      if (!orgId || !taskId || !occurrenceDateYmd || !serviceBlockId || !allocationId || !workSlotKey) {
+        invalid.push(plan)
+        return
+      }
+
+      const key = dashboardServiceExecutionIdentityKey(plan)
+      if (!blocks.has(key)) {
+        blocks.set(key, plan)
+        return
+      }
+
+      const current = blocks.get(key)
+      if (current.taskUpdatedAt !== taskUpdatedAt) {
+        current.taskUpdatedAt = ''
+      }
+      const alreadyIncluded = current.allocations.some((candidate) =>
+        candidate.allocationId === allocationId && candidate.workSlotKey === workSlotKey,
+      )
+      if (!alreadyIncluded) {
+        current.allocations.push(allocation)
+      }
+    })
+
+    return [...blocks.values(), ...invalid]
+  }
+
+  function dashboardPersistedServiceEventRows(
+    rows = appState.dashboardScheduleSourceRows,
+    orgId = appState.session?.orgId,
+  ) {
+    const normalizedOrgId = String(orgId ?? '').trim()
+    return (Array.isArray(rows) ? rows : []).filter((row) => {
+      const rowOrgId = String(row?.orgId ?? row?.org_id ?? '').trim()
+      const persistedEventType = String(row?.eventType ?? row?.event_type ?? '')
+        .trim()
+        .toUpperCase()
+        .replace(/[\s-]+/g, '_')
+      return (
+        normalizedOrgId &&
+        rowOrgId === normalizedOrgId &&
+        dashboardServiceIsExplicitEvent(row) &&
+        (persistedEventType === 'CLEAN' || persistedEventType.startsWith('CLEAN_'))
+      )
+    })
+  }
+
+  function dashboardServiceExecutionPlanForBlock(plannedBlocks = [], block = {}) {
+    const key = dashboardServiceExecutionIdentityKey(block)
+    return (Array.isArray(plannedBlocks) ? plannedBlocks : []).find(
+      (plan) => dashboardServiceExecutionIdentityKey(plan) === key,
+    ) ?? null
+  }
+
+  function dashboardServiceExecutionWorkerNames(block = {}, plan = null) {
+    const visibleAllocationIds = new Set(
+      block.status === 'ACTIVE'
+        ? block.activeAllocationIds
+        : block.requiredAllocationIds,
+    )
+    return [...new Set(
+      (Array.isArray(plan?.allocations) ? plan.allocations : [])
+        .filter((allocation) => visibleAllocationIds.has(String(allocation?.allocationId ?? '').trim()))
+        .map((allocation) => String(allocation?.workerName ?? '').trim())
+        .filter(Boolean),
+    )]
+  }
+
+  function dashboardServiceExecutionTitle(block = {}) {
+    const taskLabel = String(block?.taskLabel ?? '').trim() || `Zadanie ${String(block?.taskId ?? '').trim()}`
+    const blockLabel = String(block?.serviceBlockLabel ?? '').trim() || `Blok ${String(block?.serviceBlockId ?? '').trim()}`
+    return normalizeSearchText(taskLabel) === normalizeSearchText(blockLabel)
+      ? taskLabel
+      : `${taskLabel} · ${blockLabel}`
+  }
+
+  function dashboardBuildStrictServiceProgressItems(model = {}, plannedBlocks = []) {
+    return (Array.isArray(model?.active) ? model.active : [])
+      .map((block) => {
+        const plan = dashboardServiceExecutionPlanForBlock(plannedBlocks, block)
+        const openEvents = (Array.isArray(block?.events) ? block.events : []).filter(
+          (event) => event?.state === 'OPEN',
+        )
+        const startTsValues = openEvents
+          .map((event) => new Date(String(event?.startAt ?? '')).getTime())
+          .filter((value) => Number.isFinite(value) && value > 0)
+        const startTs = startTsValues.length ? Math.min(...startTsValues) : 0
+        const measured = Number.isFinite(block?.progressPercent)
+        const isPlanUsed = measured && Number(block.progressPercent) >= 100
+        const clientLabel = String(block?.clientLabel ?? '').trim()
+        const plannedDurationMinutes = measured
+          ? Math.max(0, Number(block?.plannedDurationMinutes) || 0)
+          : null
+        const activeAllocationIds = new Set(
+          (Array.isArray(block?.activeAllocationIds) ? block.activeAllocationIds : [])
+            .map((value) => String(value ?? '').trim())
+            .filter(Boolean),
+        )
+        const plannedStopTsValues = (Array.isArray(plan?.allocations) ? plan.allocations : [])
+          .filter((allocation) => activeAllocationIds.has(String(allocation?.allocationId ?? '').trim()))
+          .map((allocation) => new Date(String(allocation?.plannedEndAt ?? '')).getTime())
+          .filter((value) => Number.isFinite(value) && value > 0)
+        const expectedStopTs = plannedStopTsValues.length
+          ? Math.max(...plannedStopTsValues)
+          : startTs > 0 && plannedDurationMinutes > 0
+            ? startTs + plannedDurationMinutes * 60 * 1000
+            : 0
+        const planSummary = measured
+          ? `${Math.round(Number(block.actualDurationMinutes) || 0)} z ${Math.round(Number(block.plannedDurationMinutes) || 0)} min planu`
+          : 'Postęp czasowy nieokreślony · niepełny plan czasu'
+
+        return {
+          key: block.key,
+          taskId: String(block?.taskId ?? '').trim(),
+          clientId: String(block?.clientId ?? '').trim(),
+          serviceBlockId: String(block?.serviceBlockId ?? '').trim(),
+          title: dashboardServiceExecutionTitle(block),
+          clientLabel,
+          progress: measured ? Number(block.progressPercent) : null,
+          measured,
+          isPlanUsed,
+          note: measured && isPlanUsed
+            ? `${planSummary} · CLEAN nadal otwarty`
+            : planSummary,
+          workerNames: dashboardServiceExecutionWorkerNames(block, plan),
+          startTs,
+          startIso: startTs > 0 ? new Date(startTs).toISOString() : '',
+          plannedDurationMinutes,
+          actualDurationMinutes: Math.max(0, Number(block?.actualDurationMinutes) || 0),
+          expectedStopTs,
+          expectedStopIso: expectedStopTs > 0 ? new Date(expectedStopTs).toISOString() : '',
+          eventIds: openEvents
+            .map((event) => String(event?.eventId ?? '').trim())
+            .filter(Boolean),
+          planned: true,
+          completionConfirmed: false,
+        }
+      })
+      .sort((left, right) => left.startTs - right.startTs || left.title.localeCompare(right.title, 'pl', { sensitivity: 'base' }))
+  }
+
+  function dashboardBuildStrictCompletedServiceItems(model = {}, plannedBlocks = []) {
+    return (Array.isArray(model?.completed) ? model.completed : [])
+      .map((block) => {
+        const plan = dashboardServiceExecutionPlanForBlock(plannedBlocks, block)
+        const events = Array.isArray(block?.events) ? block.events : []
+        const startTsValues = events
+          .map((event) => new Date(String(event?.startAt ?? '')).getTime())
+          .filter((value) => Number.isFinite(value) && value > 0)
+        const stopTsValues = events
+          .map((event) => new Date(String(event?.endAt ?? '')).getTime())
+          .filter((value) => Number.isFinite(value) && value > 0)
+        const startTs = startTsValues.length ? Math.min(...startTsValues) : 0
+        const stopTs = stopTsValues.length ? Math.max(...stopTsValues) : 0
+        return {
+          key: block.key,
+          taskId: String(block?.taskId ?? '').trim(),
+          clientId: String(block?.clientId ?? '').trim(),
+          serviceBlockId: String(block?.serviceBlockId ?? '').trim(),
+          title: dashboardServiceExecutionTitle(block),
+          clientLabel: String(block?.clientLabel ?? '').trim(),
+          startTs,
+          stopTs,
+          stopIso: stopTs > 0 ? new Date(stopTs).toISOString() : '',
+          workerNames: dashboardServiceExecutionWorkerNames(block, plan),
+          actualDurationMinutes: startTs > 0 && stopTs >= startTs
+            ? Math.max(0, Math.round(((stopTs - startTs) / 60000) * 10) / 10)
+            : 0,
+          eventCount: events.length,
+          eventIds: events
+            .map((event) => String(event?.eventId ?? '').trim())
+            .filter(Boolean),
+          planned: true,
+          completionConfirmed: true,
+        }
+      })
+      .filter((item) => item.startTs > 0 && item.stopTs >= item.startTs)
+      .sort((left, right) => right.stopTs - left.stopTs || left.title.localeCompare(right.title, 'pl', { sensitivity: 'base' }))
+  }
+
+  function dashboardBuildObservedServiceOperationItems(
+    events = [],
+    strictActive = [],
+    strictCompleted = [],
+    dayKey = todayYmd(),
+    nowTs = Date.now(),
+  ) {
+    const consumedEventIds = [...strictActive, ...strictCompleted]
+      .flatMap((item) => Array.isArray(item?.eventIds) ? item.eventIds : [])
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean)
+    const candidates = buildObservedServiceOperationCandidates({
+      events,
+      consumedEventIds,
+      dayYmd: dayKey,
+    })
+
+    const toVisibleItem = (candidate = {}) => {
+      const row = candidate?.sourceEvent ?? {}
+      const workerName = dashboardResolveWorkerLabel(row)
+      const clientLabel =
+        dashboardActivityCleanCompanyLabel(dashboardActivityCompanyLabel(row)) ||
+        'Obiekt nierozpoznany'
+      const hasPlanReference = Boolean(
+        String(row?.taskId ?? row?.task_id ?? '').trim() ||
+        String(row?.serviceBlockId ?? row?.service_block_id ?? '').trim() ||
+        String(row?.allocationId ?? row?.allocation_id ?? '').trim() ||
+        String(row?.workSlotKey ?? row?.work_slot_key ?? '').trim(),
+      )
+      const startTs = Math.max(0, Number(candidate?.startTs) || 0)
+      const stopTs = Math.max(0, Number(candidate?.stopTs) || 0)
+      const isCompleted = candidate?.operationState === SERVICE_OPERATION_STATE.COMPLETED
+      const durationMinutes = startTs > 0
+        ? Math.max(0, Math.round((((isCompleted ? stopTs : nowTs) - startTs) / 60000) * 10) / 10)
+        : 0
+
+      return {
+        key: candidate.key,
+        eventIds: candidate.eventIds,
+        taskId: '',
+        clientId: String(row?.clientId ?? row?.client_id ?? '').trim(),
+        serviceBlockId: '',
+        title: hasPlanReference
+          ? 'Plan wymaga weryfikacji'
+          : 'Praca bez zaplanowanego zadania',
+        clientLabel,
+        progress: null,
+        measured: false,
+        isPlanUsed: false,
+        note: isCompleted
+          ? hasPlanReference
+            ? 'Zakończono · powiązanie z planem wymaga weryfikacji'
+            : 'Zakończono bez zaplanowanego zadania'
+          : hasPlanReference
+            ? 'Brak potwierdzonej godziny końca'
+            : 'Brak planowanej godziny końca',
+        workerNames: [workerName].filter(Boolean),
+        startTs,
+        startIso: startTs > 0 ? new Date(startTs).toISOString() : '',
+        stopTs,
+        stopIso: stopTs > 0 ? new Date(stopTs).toISOString() : '',
+        actualDurationMinutes: durationMinutes,
+        expectedStopTs: 0,
+        expectedStopIso: '',
+        planned: false,
+        planningState: hasPlanReference ? 'unverified' : 'unplanned',
+        completionConfirmed: false,
+      }
+    }
+
+    return {
+      active: candidates.active.map(toVisibleItem),
+      completed: candidates.completed.map(toVisibleItem),
+    }
+  }
+
+  function dashboardObservedWorkdayIsShadowed(candidate = {}, specificItems = []) {
+    const workerName = normalizeSearchText(candidate?.workerName)
+    if (!workerName) {
+      return false
+    }
+
+    return (Array.isArray(specificItems) ? specificItems : []).some((item) => {
+      const sameWorker = (Array.isArray(item?.workerNames) ? item.workerNames : [])
+        .some((name) => normalizeSearchText(name) === workerName)
+      if (!sameWorker) {
+        return false
+      }
+
+      const candidateStart = Number(candidate?.startTs ?? 0)
+      const candidateStop = candidate?.operationState === SERVICE_OPERATION_STATE.ACTIVE
+        ? Number.POSITIVE_INFINITY
+        : Number(candidate?.stopTs ?? 0)
+      const itemStart = Number(item?.startTs ?? 0)
+      const itemStop = Number(item?.stopTs ?? 0) > 0
+        ? Number(item.stopTs)
+        : Number.POSITIVE_INFINITY
+      return candidateStart <= itemStop && itemStart <= candidateStop
+    })
+  }
+
+  function dashboardBuildObservedWorkdayOperationItems(
+    workdayItems = [],
+    plannedItems = [],
+    specificActive = [],
+    specificCompleted = [],
+    dayKey = todayYmd(),
+    nowTs = Date.now(),
+  ) {
+    const candidates = buildObservedWorkdayOperationCandidates({
+      workdays: workdayItems,
+      dayYmd: dayKey,
+    })
+
+    const toVisibleItem = (candidate = {}) => {
+      const isCompleted = candidate?.operationState === SERVICE_OPERATION_STATE.COMPLETED
+      const plan = matchObservedWorkdayToPlan(candidate, plannedItems)
+      const startTs = Math.max(0, Number(candidate?.startTs) || 0)
+      const stopTs = Math.max(0, Number(candidate?.stopTs) || 0)
+      const actualStopTs = isCompleted ? stopTs : nowTs
+      const actualDurationMinutes = startTs > 0
+        ? Math.max(0, Math.round((((actualStopTs - startTs) / 60000) * 10)) / 10)
+        : 0
+      const plannedStartTs = Math.max(0, Number(plan?.startTs) || 0)
+      const plannedStopTs = Math.max(0, Number(plan?.stopTs) || 0)
+      const plannedDurationMinutes = plannedStopTs > plannedStartTs
+        ? Math.max(0, Math.round(((plannedStopTs - plannedStartTs) / 60000) * 10) / 10)
+        : 0
+      const measured = !isCompleted && Boolean(plan && plannedDurationMinutes > 0)
+      const progress = measured
+        ? Math.max(0, Math.min(100, Math.round((actualDurationMinutes / plannedDurationMinutes) * 100)))
+        : null
+      const planTitle = String(
+        plan?.serviceBlockLabel ??
+          plan?.label ??
+          plan?.taskLabel ??
+          '',
+      ).trim()
+      const clientLabel = String(candidate?.clientLabel ?? '').trim()
+      const hasRecognizedObject = Boolean(clientLabel)
+
+      return {
+        key: candidate.key,
+        workdayId: String(candidate?.workdayId ?? '').trim(),
+        eventIds: [],
+        taskId: String(plan?.taskId ?? '').trim(),
+        clientId: String(candidate?.clientId ?? '').trim(),
+        serviceBlockId: String(plan?.serviceBlockId ?? '').trim(),
+        title: plan
+          ? planTitle || 'Praca według zaplanowanego zadania'
+          : !hasRecognizedObject
+            ? 'Nie rozpoznano obiektu rozpoczęcia'
+          : isCompleted
+            ? 'Zakończona praca bez zaplanowanego zadania'
+            : 'Praca bez zaplanowanego zadania',
+        clientLabel: clientLabel || 'Obiekt nierozpoznany',
+        progress,
+        measured,
+        isPlanUsed: measured && progress >= 100,
+        note: isCompleted
+          ? plan
+            ? 'Zakończono obecność · ukończenie zadania wymaga potwierdzenia CLEAN'
+            : !hasRecognizedObject
+              ? 'Zakończono dzień · obiekt START wymaga uzupełnienia'
+            : 'Zakończono pracę bez zaplanowanego zadania'
+          : plan
+            ? `${Math.round(actualDurationMinutes)} z ${Math.round(plannedDurationMinutes)} min planu`
+            : !hasRecognizedObject
+              ? 'Praca trwa · nie udało się rozpoznać obiektu ze START'
+            : 'Praca na obiekcie bez zaplanowanej godziny końca',
+        workerNames: [String(candidate?.workerName ?? '').trim()].filter(Boolean),
+        startTs,
+        startIso: startTs > 0 ? new Date(startTs).toISOString() : '',
+        stopTs,
+        stopIso: stopTs > 0 ? new Date(stopTs).toISOString() : '',
+        plannedDurationMinutes: plan ? plannedDurationMinutes : null,
+        actualDurationMinutes,
+        expectedStopTs: measured ? plannedStopTs : 0,
+        expectedStopIso: measured ? new Date(plannedStopTs).toISOString() : '',
+        planned: Boolean(plan),
+        planningState: plan ? 'matched' : 'unplanned',
+        completionConfirmed: false,
+        operationKind: 'workday',
+      }
+    }
+
+    return {
+      active: candidates.active
+        .filter((candidate) => !dashboardObservedWorkdayIsShadowed(candidate, specificActive))
+        .map(toVisibleItem),
+      completed: candidates.completed
+        .filter((candidate) => !dashboardObservedWorkdayIsShadowed(candidate, specificCompleted))
+        .map(toVisibleItem),
+    }
+  }
+
+  function dashboardBuildOperationalServicePanels(dayKey = todayYmd(), nowTs = Date.now()) {
+    const orgId = String(appState.session?.orgId ?? '').trim()
+    if (!orgId) {
+      return {
+        active: [],
+        completed: [],
+        confirmedCompleted: [],
+        correlation: {
+          modelVersion: DASHBOARD_SERVICE_EXECUTION_MODEL_VERSION,
+          exceptionCount: 0,
+          unavailable: true,
+          message: 'Brak kontekstu organizacji. Korelacja wykonania jest niedostępna.',
+        },
+      }
+    }
+    if (appState.dashboardOverviewPlannedOrdersError === true) {
+      return {
+        active: [],
+        completed: [],
+        confirmedCompleted: [],
+        correlation: {
+          modelVersion: DASHBOARD_SERVICE_EXECUTION_MODEL_VERSION,
+          exceptionCount: 0,
+          unavailable: true,
+          message: 'Nie udało się odczytać planu. Korelacja wykonania została wstrzymana.',
+        },
+      }
+    }
+
+    try {
+      const rangeStart = new Date(`${dayKey}T00:00:00`).getTime()
+      const rangeEnd = new Date(`${calendarAddDays(dayKey, 1)}T00:00:00`).getTime() - 1
+      const plannedItems = dashboardBuildPlannedOrderActivityItems(
+        dayKey,
+        rangeStart,
+        rangeEnd,
+        { includeCompleted: true, includeAllAllocations: true },
+      )
+      const plannedBlocks = dashboardBuildServiceExecutionPlannedBlocks(plannedItems)
+      const eventRows = dashboardPersistedServiceEventRows(appState.dashboardScheduleSourceRows, orgId)
+      const model = buildServiceExecutionModel({
+        orgId,
+        dayYmd: dayKey,
+        plannedBlocks,
+        events: eventRows,
+        now: nowTs,
+        requireWorkSlotKey: true,
+      })
+      const eventExceptionCount = model.exceptions.filter((item) => item?.source === 'event').length
+      const planExceptionCount = model.exceptions.filter((item) => item?.source === 'plan').length
+      const strictActive = dashboardBuildStrictServiceProgressItems(model, plannedBlocks)
+      const strictCompleted = dashboardBuildStrictCompletedServiceItems(model, plannedBlocks)
+      const observed = dashboardBuildObservedServiceOperationItems(
+        eventRows,
+        strictActive,
+        strictCompleted,
+        dayKey,
+        nowTs,
+      )
+      const workdayRows = dashboardActivityRowsForDay(
+        appState.dashboardActivityWorkdayRows,
+        dayKey,
+      )
+      const workdayItems = dashboardBuildWorkdayActivityItems(
+        workdayRows,
+        dayKey,
+        rangeStart,
+        rangeEnd,
+        nowTs,
+        appState.dashboardScheduleSourceRows,
+      )
+      const observedWorkdays = dashboardBuildObservedWorkdayOperationItems(
+        workdayItems,
+        plannedItems,
+        [...strictActive, ...observed.active],
+        [...strictCompleted, ...observed.completed],
+        dayKey,
+        nowTs,
+      )
+      const workerDayDurationIndex = buildWorkerDayDurationIndex({
+        workdays: workdayItems,
+        nowTs,
+      })
+      const withWorkerDayDuration = (items = []) => (
+        (Array.isArray(items) ? items : []).map((item) => {
+          const workerNames = (Array.isArray(item?.workerNames) ? item.workerNames : [])
+            .map((workerName) => String(workerName ?? '').trim())
+            .filter(Boolean)
+          const uniqueWorkerNames = [...new Set(workerNames.map((workerName) => workerName.toLowerCase()))]
+          if (uniqueWorkerNames.length !== 1) {
+            return {
+              ...item,
+              todayDurationSeconds: null,
+            }
+          }
+          const dayDuration = workerDayDurationIndex[uniqueWorkerNames[0]]
+          return {
+            ...item,
+            todayDurationSeconds:
+              dayDuration && dayDuration.ambiguous !== true && Number.isFinite(dayDuration.seconds)
+                ? Math.max(0, Number(dayDuration.seconds))
+                : null,
+          }
+        })
+      )
+
+      return {
+        active: withWorkerDayDuration([
+          ...strictActive,
+          ...observed.active,
+          ...observedWorkdays.active,
+        ]),
+        completed: withWorkerDayDuration([
+          ...strictCompleted,
+          ...observed.completed,
+          ...observedWorkdays.completed,
+        ]),
+        confirmedCompleted: withWorkerDayDuration(strictCompleted),
+        correlation: {
+          modelVersion: DASHBOARD_SERVICE_EXECUTION_MODEL_VERSION,
+          exceptionCount: model.exceptions.length,
+          eventExceptionCount,
+          planExceptionCount,
+          unavailable: false,
+          message: '',
+        },
+      }
+    } catch (error) {
+      console.warn('[portal/dashboard] strict service execution model failed', error)
+      return {
+        active: [],
+        completed: [],
+        confirmedCompleted: [],
+        correlation: {
+          modelVersion: DASHBOARD_SERVICE_EXECUTION_MODEL_VERSION,
+          exceptionCount: 0,
+          unavailable: true,
+          message: 'Nie udało się zbudować bezpiecznej korelacji planu z wykonaniem.',
+        },
+      }
+    }
+  }
+
+  function dashboardSetOperationalListContent(list, signature, html) {
+    if (!list || list.dataset.renderSignature === signature) {
+      return
+    }
+    const scrollTop = list.scrollTop
+    list.innerHTML = html
+    list.dataset.renderSignature = signature
+    list.scrollTop = scrollTop
+  }
+
+  function dashboardMountCommandCenterPanels() {
+    const commandCenter = document.getElementById('dashCommandCenter')
+    if (!(commandCenter instanceof HTMLElement)) {
+      return
+    }
+
+    ;[
+      ['dashActiveWorkersPanelBody', 'dashCommandMapHost'],
+      ['dashServiceProgressPanelBody', 'dashCommandOperationsHost'],
+      ['dashConfirmedTasksPanelBody', 'dashCommandCompletedHost'],
+    ].forEach(([bodyId, hostId]) => {
+      const body = document.getElementById(bodyId)
+      const host = document.getElementById(hostId)
+      if (body instanceof HTMLElement && host instanceof HTMLElement && body.parentElement !== host) {
+        body.hidden = false
+        host.appendChild(body)
+      }
+    })
+
+    const dateNode = document.getElementById('dashCommandCenterDate')
+    if (dateNode) {
+      const now = new Date()
+      dateNode.textContent = `Dane aktualne · ${pad2(now.getHours())}:${pad2(now.getMinutes())}`
+    }
+
+    Object.keys(DASHBOARD_INSIGHT_PANEL_CONFIG).forEach((panelKey) => {
+      dashboardSetInsightPanelCollapsed(panelKey, false, { persist: false })
+    })
+  }
+
+  function dashboardCommandMapFilterIsEnabled(status = '') {
+    const normalizedStatus = dashboardActiveWorkerMapStatus(status)
+    const checkbox = document.querySelector(`[data-command-map-filter="${normalizedStatus}"]`)
+    return !(checkbox instanceof HTMLInputElement) || checkbox.checked
+  }
+
+  function dashboardApplyCommandCenterMapFilters() {
+    document.querySelectorAll('#dashActiveWorkersLocationList .dash-active-workers-location').forEach((button) => {
+      const status = ['active', 'planned', 'finished', 'late'].find((value) => button.classList.contains(`is-${value}`)) || 'active'
+      const listItem = button.closest('li')
+      if (listItem instanceof HTMLElement) {
+        listItem.hidden = !dashboardCommandMapFilterIsEnabled(status)
+      }
+    })
+
+    dashboardActiveWorkersMapMarkers.forEach((marker) => {
+      const markerLocations = Array.isArray(marker?.__cleanziWorkerLocations)
+        ? marker.__cleanziWorkerLocations
+        : marker?.__cleanziWorkerLocation
+          ? [marker.__cleanziWorkerLocation]
+          : []
+      const visible = markerLocations.some((location) =>
+        dashboardCommandMapFilterIsEnabled(location?.workStatus),
+      )
+      if (dashboardActiveWorkersMapProvider === 'openstreetmap') {
+        const element = marker?.getElement?.()
+        if (element instanceof HTMLElement) {
+          element.querySelectorAll('[data-dashboard-map-person]').forEach((person) => {
+            const workerKey = String(person.getAttribute('data-dashboard-map-person') ?? '').trim()
+            const location = markerLocations.find(
+              (candidate) => String(candidate?.workerKey ?? '').trim() === workerKey,
+            )
+            const personVisible = location
+              ? dashboardCommandMapFilterIsEnabled(location?.workStatus)
+              : true
+            person.hidden = !personVisible
+            person.setAttribute('aria-hidden', personVisible ? 'false' : 'true')
+          })
+          const lateAlert = element.querySelector('.dash-command-map-object__alert')
+          if (lateAlert instanceof HTMLElement) {
+            lateAlert.hidden = !dashboardCommandMapFilterIsEnabled('late')
+          }
+          element.hidden = !visible
+          element.setAttribute('aria-hidden', visible ? 'false' : 'true')
+        }
+        marker.setOpacity?.(visible ? 1 : 0)
+        return
+      }
+      marker?.setVisible?.(visible)
+    })
+  }
+
+  function dashboardCenterCommandMap() {
+    const visibleMarkers = dashboardActiveWorkersMapMarkers.filter((marker) =>
+      (Array.isArray(marker?.__cleanziWorkerLocations)
+        ? marker.__cleanziWorkerLocations
+        : marker?.__cleanziWorkerLocation
+          ? [marker.__cleanziWorkerLocation]
+          : []
+      ).some((location) => dashboardCommandMapFilterIsEnabled(location?.workStatus)),
+    )
+    if (!dashboardActiveWorkersMapInstance || !visibleMarkers.length) {
+      return
+    }
+
+    if (dashboardActiveWorkersMapProvider === 'openstreetmap') {
+      const positions = visibleMarkers.map((marker) => marker?.getLatLng?.()).filter(Boolean)
+      if (positions.length === 1) {
+        dashboardActiveWorkersMapInstance.setView?.(positions[0], 14)
+      } else if (positions.length > 1) {
+        dashboardActiveWorkersMapInstance.fitBounds?.(positions, { maxZoom: 16, padding: [42, 42] })
+      }
+      dashboardActiveWorkersMapInstance.invalidateSize?.({ pan: false })
+      return
+    }
+
+    const maps = window.google?.maps
+    if (!maps?.LatLngBounds) {
+      return
+    }
+    const bounds = new maps.LatLngBounds()
+    visibleMarkers.forEach((marker) => {
+      const position = marker?.getPosition?.()
+      if (position) {
+        bounds.extend(position)
+      }
+    })
+    if (visibleMarkers.length === 1) {
+      dashboardActiveWorkersMapInstance.setCenter?.(visibleMarkers[0].getPosition?.())
+      dashboardActiveWorkersMapInstance.setZoom?.(14)
+    } else {
+      dashboardActiveWorkersMapInstance.fitBounds?.(bounds, 42)
+    }
+  }
+
+  function dashboardSetCommandCenterListView(listView = false) {
+    const commandCenter = document.getElementById('dashCommandCenter')
+    const button = document.getElementById('dashCommandViewBtn')
+    const nextListView = Boolean(listView)
+    commandCenter?.classList.toggle('is-list-view', nextListView)
+    if (button instanceof HTMLButtonElement) {
+      button.setAttribute('aria-pressed', nextListView ? 'true' : 'false')
+      button.setAttribute('aria-label', nextListView ? 'Pokaż widok mapy' : 'Pokaż widok listy')
+      const label = button.querySelector('span')
+      const icon = button.querySelector('i')
+      if (label) {
+        label.textContent = nextListView ? 'Mapa' : 'Widok'
+      }
+      if (icon) {
+        icon.className = nextListView ? 'ph ph-map-trifold' : 'ph ph-squares-four'
+      }
+    }
+    if (!nextListView) {
+      dashboardResizeActiveWorkerMap()
+    }
+  }
+
+  function dashboardSyncCommandCenterPlannedOrders() {
+    const source = document.getElementById('dashOverviewPlannedOrdersStrip')
+    const target = document.getElementById('dashCommandPlannedOrdersStrip')
+    if (!(source instanceof HTMLElement) || !(target instanceof HTMLElement)) {
+      return
+    }
+    target.innerHTML = source.innerHTML
+    target.classList.toggle('is-empty', source.classList.contains('is-empty'))
+    const sourceLabel = source.getAttribute('aria-label')
+    if (sourceLabel) {
+      target.setAttribute('aria-label', sourceLabel)
+    }
+  }
+
+  function dashboardRenderCommandCenterPlan(
+    plannedOrders = [],
+    operationalServices = {},
+    options = {},
+  ) {
+    const activeItems = Array.isArray(operationalServices?.active)
+      ? operationalServices.active
+      : []
+    const completedItems = Array.isArray(operationalServices?.confirmedCompleted)
+      ? operationalServices.confirmedCompleted
+      : (Array.isArray(operationalServices?.completed) ? operationalServices.completed : [])
+          .filter((item) => item?.completionConfirmed === true)
+    const loadError = options?.loadError === true
+    const model = buildCommandCenterPlanModel({
+      plannedOrders: loadError ? [] : plannedOrders,
+      activeOperations: activeItems,
+      completedOperations: completedItems,
+      nowTs: Date.now(),
+      horizonMinutes: 60,
+    })
+    const setValue = (id, value) => {
+      const node = document.getElementById(id)
+      if (node) {
+        node.textContent = String(value)
+      }
+    }
+    const percentLabel = loadError || model.progressPercent === null
+      ? '—%'
+      : `${model.progressPercent}%`
+    const percentValue = loadError || model.progressPercent === null
+      ? 0
+      : model.progressPercent
+
+    setValue('dashCommandPlanPercent', percentLabel)
+    setValue('dashCommandPlanCompleted', loadError ? '—' : model.completedCount)
+    setValue('dashCommandPlanTotal', loadError ? '—' : model.totalCount)
+    setValue('dashCommandPlanActive', loadError ? '—' : model.activeCount)
+    setValue('dashCommandPlanWaiting', loadError ? '—' : model.waitingCount)
+    setValue('dashCommandPlanCancelled', loadError ? '—' : model.cancelledCount)
+
+    const ring = document.getElementById('dashCommandPlanRing')
+    if (ring instanceof HTMLElement) {
+      ring.style.setProperty('--dash-plan-progress', `${percentValue}%`)
+      ring.setAttribute('aria-valuenow', String(percentValue))
+      ring.setAttribute(
+        'aria-valuetext',
+        loadError
+          ? 'Nie udało się wczytać planu dnia'
+          : model.progressPercent === null
+            ? 'Brak zaplanowanych zleceń'
+            : `${model.progressPercent}% planu ukończone`,
+      )
+    }
+    const progress = document.getElementById('dashCommandPlanProgress')
+    if (progress instanceof HTMLElement) {
+      progress.style.width = `${percentValue}%`
+    }
+
+    const upcomingList = document.getElementById('dashCommandUpcomingList')
+    if (!(upcomingList instanceof HTMLElement)) {
+      return model
+    }
+    if (loadError) {
+      upcomingList.innerHTML = `<p>${escapeHtml(
+        String(options?.unavailableMessage ?? '').trim() ||
+          'Nie udało się wczytać planu na dziś.',
+      )}</p>`
+      return model
+    }
+    const upcomingPreview = model.upcoming.slice(0, 2)
+    if (!upcomingPreview.length) {
+      upcomingList.innerHTML = '<p>Brak zaplanowanych rozpoczęć w ciągu godziny.</p>'
+      return model
+    }
+    upcomingList.innerHTML = upcomingPreview.map((item) => {
+      const title =
+        String(item?.title ?? '').trim() ||
+        String(item?.companyLabel ?? '').trim() ||
+        'Zaplanowane zlecenie'
+      const workerNames = Array.isArray(item?.workerNames)
+        ? item.workerNames.filter(Boolean).join(', ')
+        : ''
+      const companyLabel = String(item?.companyLabel ?? '').trim()
+      const meta = workerNames || companyLabel || 'Przypisane zadanie'
+      return `
+        <button class="dash-command-upcoming__item" type="button" data-route="calendar">
+          <time datetime="${escapeHtml(new Date(Number(item?.startTs) || 0).toISOString())}">
+            ${escapeHtml(dashboardOverviewTimeLabel(item?.startTs))}
+          </time>
+          <span class="dash-command-upcoming__dot" aria-hidden="true"></span>
+          <span class="dash-command-upcoming__copy">
+            <strong>${escapeHtml(title)}</strong>
+            <small>${escapeHtml(meta)}</small>
+          </span>
+          <span class="dash-command-upcoming__go">
+            Przejdź
+            <i class="ph ph-caret-right" aria-hidden="true"></i>
+          </span>
+        </button>
+      `
+    }).join('')
+    return model
+  }
+
+  function dashboardRenderCommandCenterAlerts({
+    values = {},
+    operationalServices = {},
+    locations = [],
+    activeRows = [],
+  } = {}) {
+    const alerts = []
+    const normalizedLocations = Array.isArray(locations) ? locations : []
+    const lateLocations = normalizedLocations.filter((item) => item?.workStatus === 'late')
+    if (lateLocations.length > 0) {
+      const first = lateLocations[0] ?? {}
+      const delayMinutes = Math.max(
+        0,
+        ...lateLocations.map((item) => Number(item?.delayMinutes) || 0),
+      )
+      alerts.push({
+        tone: 'danger',
+        icon: 'ph-timer',
+        title: `Spóźniony START${delayMinutes > 0 ? ` ${delayMinutes} min` : ''}`,
+        meta: [
+          String(first?.plannedObjectLabel ?? first?.objectLabel ?? '').trim(),
+          String(first?.workerName ?? '').trim(),
+        ].filter(Boolean).join(' · ') || `${lateLocations.length} osób po czasie`,
+        route: 'events',
+      })
+    }
+
+    const activeOperations = Array.isArray(operationalServices?.active)
+      ? operationalServices.active
+      : []
+    const unrecognizedOperations = activeOperations.filter((item) => {
+      const label = normalizeSearchText(item?.clientLabel ?? item?.title)
+      return !label || label.includes('obiekt nierozpoznany')
+    })
+    if (unrecognizedOperations.length > 0) {
+      const first = unrecognizedOperations[0] ?? {}
+      alerts.push({
+        tone: 'warning',
+        icon: 'ph-question',
+        title: 'Obiekt nierozpoznany',
+        meta: (
+          Array.isArray(first?.workerNames) ? first.workerNames.join(', ') : ''
+        ) || `${unrecognizedOperations.length} aktywna operacja`,
+        route: 'events',
+      })
+    }
+
+    const activeWorkerRows = (Array.isArray(activeRows) ? activeRows : [])
+      .filter((row) => Boolean(row?.isRunning))
+    const gpsWorkerKeys = new Set(
+      normalizedLocations
+        .filter((location) => location?.positionKind === 'gps' && location?.actualWorkStatus === 'active')
+        .map((location) => String(location?.workerKey ?? '').trim())
+        .filter(Boolean),
+    )
+    const missingGpsRows = activeWorkerRows.filter((row) => {
+      const workerKey = dashboardActiveWorkerMapKey(row)
+      return workerKey && !gpsWorkerKeys.has(workerKey)
+    })
+    if (missingGpsRows.length > 0) {
+      alerts.push({
+        tone: 'warning',
+        icon: 'ph-map-pin-slash',
+        title: `Brak GPS ${missingGpsRows.length} ${missingGpsRows.length === 1 ? 'osoba' : 'osoby'}`,
+        meta: missingGpsRows.length === 1
+          ? dashboardResolveWorkerLabel(missingGpsRows[0])
+          : 'Aktywni pracownicy bez bieżącej lokalizacji',
+        route: 'events',
+      })
+    }
+
+    const correlation = operationalServices?.correlation ?? {}
+    const exceptionCount = Math.max(0, Number(correlation?.exceptionCount) || 0)
+    if (correlation?.unavailable === true || exceptionCount > 0) {
+      alerts.push({
+        tone: correlation?.unavailable === true ? 'danger' : 'warning',
+        icon: 'ph-link-break',
+        title: correlation?.unavailable === true
+          ? 'Korelacja danych niedostępna'
+          : `Do weryfikacji korelacji: ${exceptionCount}`,
+        meta: String(correlation?.message ?? '').trim() || 'Plan i wykonanie wymagają sprawdzenia.',
+        route: 'events',
+      })
+    }
+
+    const openQrStopCount = Math.max(
+      0,
+      Number(values?.openQrStopDays ?? values?.openStartStopYesterday) || 0,
+    )
+    if (openQrStopCount > 0) {
+      alerts.push({
+        tone: 'warning',
+        icon: 'ph-warning-circle',
+        title: `Brak QR STOP: ${openQrStopCount}`,
+        meta: 'Niezamknięte dni pracy sprzed dzisiaj',
+        route: 'events',
+      })
+    }
+
+    const count = document.getElementById('dashCommandAlertsCount')
+    if (count) {
+      count.textContent = String(alerts.length)
+      count.hidden = alerts.length === 0
+    }
+    const host = document.getElementById('dashCommandAlertsList')
+    if (!(host instanceof HTMLElement)) {
+      return alerts
+    }
+    if (!alerts.length) {
+      host.innerHTML = '<p>Brak bieżących alertów operacyjnych.</p>'
+      return alerts
+    }
+    host.innerHTML = alerts.slice(0, 3).map((alert) => `
+      <button class="dash-command-alert is-${escapeHtml(alert.tone)}" type="button" data-route="${escapeHtml(alert.route)}">
+        <span class="dash-command-alert__icon"><i class="ph ${escapeHtml(alert.icon)}" aria-hidden="true"></i></span>
+        <span class="dash-command-alert__copy">
+          <strong>${escapeHtml(alert.title)}</strong>
+          <small>${escapeHtml(alert.meta)}</small>
+        </span>
+        <span class="dash-command-alert__go">
+          Przejdź
+          <i class="ph ph-caret-right" aria-hidden="true"></i>
+        </span>
+      </button>
+    `).join('')
+    return alerts
+  }
+
+  function dashboardSyncCommandCenterSummary(values = {}, operationalServices = {}) {
+    const activeItems = Array.isArray(operationalServices?.active) ? operationalServices.active : []
+    const completedItems = Array.isArray(operationalServices?.completed) ? operationalServices.completed : []
+    const confirmedCompletedItems = Array.isArray(operationalServices?.confirmedCompleted)
+      ? operationalServices.confirmedCompleted
+      : completedItems.filter((item) => item?.completionConfirmed === true)
+    const correlation = operationalServices?.correlation ?? {}
+    const plannedOrders = Math.max(0, Number(values?.plannedOrders) || 0)
+    const exceptionCount = Math.max(0, Number(correlation?.exceptionCount) || 0)
+    const unavailable = correlation?.unavailable === true
+
+    const setValue = (id, value) => {
+      const node = document.getElementById(id)
+      if (node) {
+        node.textContent = String(value)
+      }
+    }
+    setValue('dashCommandActiveWorkersCount', Math.max(0, Number(values?.activeNow) || 0))
+    setValue('dashCommandOpenQrStopCount', Math.max(0, Number(values?.openQrStopDays ?? values?.openStartStopYesterday) || 0))
+    setValue('dashCommandActiveObjectsCount', Math.max(0, Number(values?.activeObjects) || 0))
+    setValue('dashCommandPlannedOrdersCount', plannedOrders)
+    setValue('dashCommandLiveCount', `${activeItems.length} w toku`)
+    setValue('dashCommandCompletedCount', `${completedItems.length} dzisiaj`)
+
+    const qualityValue = document.getElementById('dashCommandQualityValue')
+    const qualityMeta = document.getElementById('dashCommandQualityMeta')
+    if (qualityValue && qualityMeta) {
+      if (!unavailable && plannedOrders > 0) {
+        const confirmedPercent = Math.min(100, Math.round((confirmedCompletedItems.length / plannedOrders) * 100))
+        qualityValue.textContent = `${confirmedPercent}%`
+        qualityMeta.textContent = `${confirmedCompletedItems.length} z ${plannedOrders} ukończonych`
+      } else {
+        qualityValue.textContent = '—%'
+        qualityMeta.textContent = unavailable ? 'korelacja niedostępna' : 'brak bezpiecznego mianownika'
+      }
+    }
+
+    const insight = document.querySelector('.dash-command-insight')
+    const headline = document.getElementById('dashCommandInsightHeadline')
+    const meta = document.getElementById('dashCommandInsightMeta')
+    let tone = 'success'
+    let headlineText = 'Dzień przebiega zgodnie z planem'
+    let metaText = activeItems.length > 0
+      ? `${activeItems.length} ${activeItems.length === 1 ? 'operacja jest' : 'operacje są'} teraz w realizacji.`
+      : 'Brak krytycznych odchyleń w bezpiecznie skorelowanych danych.'
+
+    if (unavailable) {
+      tone = 'danger'
+      headlineText = 'Nie można potwierdzić postępu'
+      metaText = String(correlation?.message ?? '').trim() || 'Korelacja planu z wykonaniem jest chwilowo niedostępna.'
+    } else if (exceptionCount > 0) {
+      tone = 'warning'
+      headlineText = 'Część danych wymaga weryfikacji'
+      metaText = `${exceptionCount} ${exceptionCount === 1 ? 'wyjątek nie potwierdza' : 'wyjątki nie potwierdzają'} samodzielnie postępu.`
+    } else if (!activeItems.length && completedItems.length > 0) {
+      headlineText = 'Potwierdzone zadania zostały zakończone'
+      metaText = `${completedItems.length} ${completedItems.length === 1 ? 'blok został zamknięty' : 'bloki zostały zamknięte'} dzisiaj.`
+    }
+
+    insight?.setAttribute('data-tone', tone)
+    if (headline) headline.textContent = headlineText
+    if (meta) meta.textContent = metaText
+    dashboardSyncCommandCenterPlannedOrders()
+  }
+
+  function dashboardRenderServiceCorrelationStatus(correlation = {}) {
+    const status = document.getElementById('dashServiceCorrelationStatus')
+    if (!status) {
+      return
+    }
+
+    const exceptionCount = Math.max(0, Number(correlation?.exceptionCount) || 0)
+    const unavailable = correlation?.unavailable === true
+    if (!unavailable && exceptionCount === 0) {
+      status.hidden = true
+      status.textContent = ''
+      status.removeAttribute('data-tone')
+      return
+    }
+
+    status.hidden = false
+    status.setAttribute('data-tone', unavailable ? 'error' : 'warning')
+    if (unavailable) {
+      status.textContent = String(correlation?.message ?? '').trim() || 'Korelacja wykonania jest niedostępna.'
+      return
+    }
+
+    const eventCount = Math.max(0, Number(correlation?.eventExceptionCount) || 0)
+    const planCount = Math.max(0, Number(correlation?.planExceptionCount) || 0)
+    const details = [
+      eventCount > 0 ? `${eventCount} zdarzeń` : '',
+      planCount > 0 ? `${planCount} pozycji planu` : '',
+    ].filter(Boolean).join(' · ')
+    status.textContent =
+      `Do weryfikacji korelacji: ${exceptionCount}${details ? ` (${details})` : ''}. ` +
+      'Wyjątki nie potwierdzają samodzielnie postępu ani ukończenia.'
+  }
+
+  function dashboardServiceOperationAvatarHtml(workerName = '') {
+    const avatarKind = resolveOperationalMapAvatarKind({ workerName })
+    return `
+      <img
+        src="/assets/avatars/default-${avatarKind}.webp"
+        alt=""
+        loading="lazy"
+      />
+    `
+  }
+
+  function dashboardServiceOperationWorkersHtml(workerNames = []) {
+    const workers = Array.isArray(workerNames) ? workerNames.filter(Boolean) : []
+    const visibleWorkers = workers.slice(0, 3)
+    const overflowCount = Math.max(0, workers.length - visibleWorkers.length)
+    return `
+      <span class="dash-command-operation__avatars" aria-hidden="true">
+        ${visibleWorkers.map((workerName) => `
+          <span>${dashboardServiceOperationAvatarHtml(workerName)}</span>
+        `).join('')}
+        ${overflowCount > 0 ? `<span class="is-overflow">+${overflowCount}</span>` : ''}
+      </span>
+    `
+  }
+
+  function dashboardServiceOperationMarkup(item = {}, options = {}) {
+    const isCompleted = item.operationState === SERVICE_OPERATION_STATE.COMPLETED
+    const isPlanned = item.planned !== false
+    const completionConfirmed = item.completionConfirmed === true
+    const workers = Array.isArray(item.workerNames) && item.workerNames.length
+      ? item.workerNames
+      : ['Brak rozpoznanego pracownika']
+    const primaryLabel = String(item.clientLabel ?? '').trim() || String(item.title ?? '').trim() || 'Operacja'
+    const secondaryLabel = normalizeSearchText(primaryLabel) === normalizeSearchText(item.title)
+      ? (isCompleted ? 'Sprzątanie zakończone' : 'Sprzątanie w toku')
+      : String(item.title ?? '').trim()
+    const startLabel = dashboardOverviewTimeLabel(item.startTs)
+    const stopLabel = dashboardOverviewTimeLabel(item.stopTs)
+    const expectedStopLabel = dashboardOverviewTimeLabel(item.expectedStopTs)
+    const statusLabel = isCompleted ? 'Zakończone' : 'W toku'
+    const startTs = Math.max(0, Number(item.startTs) || 0)
+    const stopTs = Math.max(0, Number(item.stopTs) || 0)
+    const actualStopTs = isCompleted ? stopTs : Date.now()
+    const timestampDurationSeconds = startTs > 0 && actualStopTs >= startTs
+      ? Math.max(0, Math.floor((actualStopTs - startTs) / 1000))
+      : 0
+    const declaredDurationSeconds = Math.max(
+      0,
+      Math.round((Number(item.actualDurationMinutes) || 0) * 60),
+    )
+    const operationDurationSeconds = timestampDurationSeconds || declaredDurationSeconds
+    const operationDurationLabel = durationSecondsToHm(operationDurationSeconds)
+    const hasTodayDuration = Number.isFinite(item.todayDurationSeconds)
+    const todayDurationSeconds = hasTodayDuration
+      ? Math.max(0, Math.floor(Number(item.todayDurationSeconds)))
+      : 0
+    const todayDurationLabel = hasTodayDuration
+      ? durationSecondsToHm(todayDurationSeconds)
+      : ''
+    const progress = isCompleted
+      ? completionConfirmed
+        ? 100
+        : null
+      : item.measured
+        ? Math.max(0, Math.min(100, Math.round(Number(item.progress) || 0)))
+        : null
+    const timeLabel = isCompleted
+      ? hasTodayDuration
+        ? `Dzisiaj ${todayDurationLabel}`
+        : `Czas ${operationDurationLabel}`
+      : `Pracuje ${operationDurationLabel}`
+    const timelineParts = []
+    if (startTs > 0) {
+      timelineParts.push(`START ${startLabel}`)
+    }
+    if (isCompleted && stopTs >= startTs && stopTs > 0) {
+      timelineParts.push(`STOP ${stopLabel}`)
+      timelineParts.push(`czas ${operationDurationLabel}`)
+      if (hasTodayDuration && todayDurationSeconds !== operationDurationSeconds) {
+        timelineParts.push(`łącznie dziś ${todayDurationLabel}`)
+      }
+    } else {
+      if (item.expectedStopTs > 0) {
+        timelineParts.push(`plan do ${expectedStopLabel}`)
+      }
+      if (hasTodayDuration) {
+        timelineParts.push(`łącznie dziś ${todayDurationLabel}`)
+      }
+    }
+    const stateDetail = timelineParts.join(' · ') || String(item.note ?? '').trim()
+    const progressMarkup = isCompleted && progress == null
+      ? `
+        <div
+          class="dash-command-operation__progress is-complete"
+          aria-label="${escapeHtml(
+            isPlanned
+              ? `Operacja ${primaryLabel} została zakończona, ale zakończenie obecności nie potwierdza ukończenia zadania.`
+              : `Operacja ${primaryLabel} została zakończona. Nie wyliczono procentu bez planu.`,
+          )}"
+        >
+          <span></span>
+        </div>
+      `
+      : progress == null
+      ? `
+        <div
+          class="dash-command-operation__progress is-indeterminate"
+          aria-label="${escapeHtml(`Operacja ${primaryLabel} trwa. Brak pełnego planu czasu.`)}"
+        >
+          <span></span>
+        </div>
+      `
+      : `
+        <div
+          class="dash-command-operation__progress"
+          role="progressbar"
+          aria-label="${escapeHtml(`Postęp operacji ${primaryLabel}`)}"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="${progress}"
+        >
+          <span style="width:${progress}%"></span>
+        </div>
+      `
+    const taskId = String(item.taskId ?? '').trim()
+    const interactiveAttributes = taskId
+      ? `data-dashboard-operation-task-id="${escapeHtml(taskId)}" aria-label="${escapeHtml(`Otwórz zadanie: ${primaryLabel}`)}"`
+      : 'aria-label="Szczegóły operacji niedostępne"'
+    const compactClass = options?.full ? ' is-full' : ''
+
+    return `
+      <li class="dash-command-operation is-${isCompleted ? 'completed' : 'active'}${compactClass}">
+        <button class="dash-command-operation__button" type="button" ${interactiveAttributes}${taskId ? '' : ' disabled'}>
+          <span class="dash-command-operation__main">
+            ${dashboardServiceOperationWorkersHtml(workers)}
+            <span class="dash-command-operation__copy">
+              <strong>${escapeHtml(primaryLabel)}</strong>
+              <small>${escapeHtml(secondaryLabel || statusLabel)}</small>
+              <span class="dash-command-operation__workers">${escapeHtml(workers.join(', '))}</span>
+            </span>
+          </span>
+          <span class="dash-command-operation__result">
+            <strong>${escapeHtml(progress == null ? statusLabel : `${progress}%`)}</strong>
+            <time datetime="${escapeHtml(isCompleted ? item.stopIso : item.startIso)}">${escapeHtml(timeLabel)}</time>
+          </span>
+          <span class="dash-command-operation__timeline">
+            <span class="dash-command-operation__timing">${escapeHtml(stateDetail)}</span>
+          </span>
+          ${progressMarkup}
+        </button>
+      </li>
+    `
+  }
+
+  function dashboardRenderServiceOperationStream(activeItems = [], completedItems = []) {
+    const stream = buildServiceOperationStream({
+      active: activeItems,
+      completed: completedItems,
+    })
+    const previewItems = serviceOperationPreview(stream, DASHBOARD_SERVICE_OPERATIONS_PREVIEW_LIMIT)
+    const list = document.getElementById('dashServiceProgressList')
+    const allList = document.getElementById('dashCommandAllOperationsList')
+    const allButton = document.getElementById('dashCommandAllOperations')
+    const allCount = document.getElementById('dashCommandOperationsDialogCount')
+    dashboardServiceOperationStream = stream
+
+    if (allButton instanceof HTMLButtonElement) {
+      allButton.hidden = stream.length <= previewItems.length
+      allButton.textContent = ''
+      allButton.insertAdjacentHTML(
+        'beforeend',
+        `Zobacz wszystkie operacje (${stream.length}) <i class="ph ph-arrow-right" aria-hidden="true"></i>`,
+      )
+    }
+    if (allCount) {
+      allCount.textContent = `${stream.length} ${stream.length === 1 ? 'operacja' : 'operacji'}`
+    }
+
+    const activeClockMinute = stream.some(
+      (item) => item.operationState === SERVICE_OPERATION_STATE.ACTIVE,
+    )
+      ? Math.floor(Date.now() / 60000)
+      : 0
+    const signature = JSON.stringify({
+      activeClockMinute,
+      items: stream.map((item) => [
+        item.key,
+        item.operationState,
+        item.occurredAtTs,
+        item.startTs,
+        item.stopTs,
+        item.progress,
+        item.workerNames,
+        item.todayDurationSeconds,
+      ]),
+    })
+    const emptyMarkup = '<li class="dash-operational-empty">Brak rozpoczętych i zakończonych operacji dzisiaj.</li>'
+    dashboardSetOperationalListContent(
+      list,
+      `preview:${signature}`,
+      previewItems.length
+        ? previewItems.map((item) => dashboardServiceOperationMarkup(item)).join('')
+        : emptyMarkup,
+    )
+    dashboardSetOperationalListContent(
+      allList,
+      `all:${signature}`,
+      stream.length
+        ? stream.map((item) => dashboardServiceOperationMarkup(item, { full: true })).join('')
+        : emptyMarkup,
+    )
+  }
+
+  function dashboardRenderServiceProgress(items = [], correlation = {}, completedItems = []) {
+    const activeItems = Array.isArray(items) ? items : []
+    const finishedItems = Array.isArray(completedItems) ? completedItems : []
+    const count = document.getElementById('dashServiceProgressCount')
+    const commandCount = document.getElementById('dashCommandLiveCount')
+    const highlightedItem = activeItems
+      .slice()
+      .sort((left, right) =>
+        Number(right?.measured === true) - Number(left?.measured === true) ||
+        Number(right?.progress ?? 0) - Number(left?.progress ?? 0),
+      )[0]
+    const correlationCount = Math.max(0, Number(correlation?.exceptionCount) || 0)
+    const correlationMeta = correlation?.unavailable === true
+      ? ' · korelacja niedostępna'
+      : correlationCount
+        ? ` · do weryfikacji: ${correlationCount}`
+        : ''
+    if (count) {
+      count.textContent = `${activeItems.length} w toku`
+    }
+    if (commandCount) {
+      commandCount.textContent = finishedItems.length
+        ? `${activeItems.length} w toku · ${finishedItems.length} zakończone`
+        : `${activeItems.length} w toku`
+    }
+    dashboardSetInsightPanelCompactCopy(
+      'progress',
+      highlightedItem
+        ? `${String(highlightedItem.title ?? 'Usługa').trim() || 'Usługa'} · ${
+            highlightedItem.measured ? `${Number(highlightedItem.progress)}%` : 'stan nieokreślony'
+          }`
+        : 'Brak usług realizowanych teraz',
+      highlightedItem
+        ? `W toku: ${activeItems.length} · ${highlightedItem.measured ? 'postęp według planu' : 'niepełny plan czasu'}${
+            correlationMeta
+          }`
+        : `W toku: 0${correlationMeta}`,
+    )
+    dashboardRenderServiceOperationStream(activeItems, finishedItems)
+  }
+
+  function dashboardRenderCompletedServices(items = [], correlation = {}) {
+    const completedItems = Array.isArray(items) ? items : []
+    const count = document.getElementById('dashConfirmedTasksCount')
+    const commandCount = document.getElementById('dashCommandCompletedCount')
+    const list = document.getElementById('dashConfirmedTasksList')
+    const latestItem = completedItems[0] ?? null
+    const correlationCount = Math.max(0, Number(correlation?.exceptionCount) || 0)
+    const correlationMeta = correlation?.unavailable === true
+      ? ' · korelacja niedostępna'
+      : correlationCount
+        ? ` · do weryfikacji: ${correlationCount}`
+        : ''
+    if (count) {
+      count.textContent = `${completedItems.length} dzisiaj`
+    }
+    if (commandCount) {
+      commandCount.textContent = `${completedItems.length} dzisiaj`
+    }
+    dashboardSetInsightPanelCompactCopy(
+      'completed',
+      latestItem
+        ? String(latestItem.title ?? 'Obiekt').trim() || 'Obiekt'
+        : 'Brak ukończonych zadań dzisiaj',
+      latestItem
+        ? `Potwierdzone bloki: ${completedItems.length} · ostatnie zakończenie ${dashboardOverviewTimeLabel(latestItem.stopTs)}`
+        : `Potwierdzone bloki: 0${correlationMeta}`,
+    )
+    if (!list) {
+      return
+    }
+    const signature = JSON.stringify(completedItems.map((item) => [
+      item.key,
+      item.startTs,
+      item.stopTs,
+      item.workerNames,
+      item.eventCount,
+    ]))
+    if (!completedItems.length) {
+      dashboardSetOperationalListContent(
+        list,
+        signature,
+        correlation?.unavailable === true || Number(correlation?.exceptionCount) > 0
+          ? '<li class="dash-operational-empty">Brak bloków potwierdzonych bezpieczną korelacją jako ukończone dzisiaj.</li>'
+          : '<li class="dash-operational-empty">Brak zakończonych sprzątań dzisiaj.</li>',
+      )
+      return
+    }
+
+    const html = completedItems.map((item) => {
+      const startLabel = dashboardOverviewTimeLabel(item.startTs)
+      const stopLabel = dashboardOverviewTimeLabel(item.stopTs)
+      const workers = item.workerNames.length ? item.workerNames.join(', ') : 'Brak rozpoznanego pracownika'
+      const workerAndClient = [item.clientLabel, workers].filter(Boolean).join(' · ')
+      return `
+        <li class="dash-completed-task-item">
+          <div class="dash-completed-task-head">
+            <strong>${escapeHtml(item.title)}</strong>
+            <time class="dash-completed-task-time" datetime="${escapeHtml(item.stopIso)}">${escapeHtml(stopLabel)}</time>
+          </div>
+          <span class="dash-completed-task-status">Potwierdzono wszystkie przydziały bloku</span>
+          <p class="dash-completed-task-meta">${escapeHtml(`${startLabel}–${stopLabel} · ${workerAndClient || workers}`)}</p>
+        </li>
+      `
+    }).join('')
+    dashboardSetOperationalListContent(list, signature, html)
+  }
+
+  function dashboardRenderOperationalServicePanels(panels = null) {
+    const source = panels?.correlation?.modelVersion === DASHBOARD_SERVICE_EXECUTION_MODEL_VERSION
+      ? panels
+      : dashboardBuildOperationalServicePanels(todayYmd())
+    dashboardRenderServiceCorrelationStatus(source?.correlation ?? {})
+    dashboardRenderServiceProgress(
+      source?.active ?? [],
+      source?.correlation ?? {},
+      source?.completed ?? [],
+    )
+    dashboardRenderCompletedServices(
+      source?.confirmedCompleted ?? (source?.completed ?? []).filter((item) => item?.completionConfirmed === true),
+      source?.correlation ?? {},
+    )
+  }
+
+  function dashboardOverviewActiveObjectGroups(rows = appState.dashboardActivityWorkdayRows) {
+    const today = todayYmd()
+    const rangeStart = new Date(`${today}T00:00:00`).getTime()
+    const rangeEnd = new Date(`${calendarAddDays(today, 1)}T00:00:00`).getTime() - 1
+    const workdayItems = dashboardBuildWorkdayActivityItems(
+      rows,
+      today,
+      rangeStart,
+      rangeEnd,
+      Date.now(),
+      appState.dashboardScheduleSourceRows,
+    )
+    const groups = new Map()
+    const preferredRepresentative = (current, candidate) => {
+      if (!current) return candidate
+      if (!candidate) return current
+      if (candidate?.isRunning && !current?.isRunning) return candidate
+      if (!candidate?.isRunning && !current?.isRunning && Number(candidate?.stopTs ?? 0) > Number(current?.stopTs ?? 0)) {
+        return candidate
+      }
+      return current
+    }
+
+    workdayItems.forEach((item) => {
+      const clientId = String(item?.clientId ?? '').trim()
+      const clientLabel = dashboardActivityCleanCompanyLabel(item?.companyLabel ?? item?.locationLabel)
+      const normalizedLabel = normalizeSearchText(clientLabel)
+      const key = clientId ? `id:${normalizeSearchText(clientId)}` : normalizedLabel ? `label:${normalizedLabel}` : ''
+      if (!key) {
+        return
+      }
+
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          clientId,
+          clientLabel: clientLabel || 'Obiekt',
+          normalizedLabel,
+          items: [],
+          workerNames: new Set(),
+          representative: null,
+        })
+      }
+
+      const group = groups.get(key)
+      if (clientId) {
+        group.clientId = group.clientId || clientId
+      }
+      if (clientLabel && group.clientLabel === 'Obiekt') {
+        group.clientLabel = clientLabel
+      }
+      group.items.push(item)
+      const workerName = String(item?.workerDisplayName ?? item?.workerName ?? '').trim()
+      if (workerName && workerName !== '-') {
+        group.workerNames.add(workerName)
+      }
+
+      group.representative = preferredRepresentative(group.representative, item)
+    })
+
+    const labelToIdKeys = new Map()
+    groups.forEach((group, key) => {
+      if (!String(key).startsWith('id:') || !group?.normalizedLabel) {
+        return
+      }
+      if (!labelToIdKeys.has(group.normalizedLabel)) {
+        labelToIdKeys.set(group.normalizedLabel, new Set())
+      }
+      labelToIdKeys.get(group.normalizedLabel).add(key)
+    })
+    ;[...groups.entries()].forEach(([key, group]) => {
+      if (!String(key).startsWith('label:') || !group?.normalizedLabel) {
+        return
+      }
+      const candidateKeys = labelToIdKeys.get(group.normalizedLabel)
+      if (!(candidateKeys instanceof Set) || candidateKeys.size !== 1) {
+        return
+      }
+      const [targetKey] = candidateKeys
+      const target = groups.get(targetKey)
+      if (!target) {
+        return
+      }
+      target.items.push(...group.items)
+      group.workerNames.forEach((workerName) => target.workerNames.add(workerName))
+      target.representative = preferredRepresentative(target.representative, group.representative)
+      if (target.clientLabel === 'Obiekt' && group.clientLabel) {
+        target.clientLabel = group.clientLabel
+      }
+      groups.delete(key)
+    })
+
+    return [...groups.values()].map((group) => ({
+      ...group,
+      workerNames: [...group.workerNames],
+    }))
+  }
+
+  function dashboardOverviewActiveObjectDetails(groups = [], dayKey = todayYmd()) {
+    return (Array.isArray(groups) ? groups : []).map((group) => {
+      const items = Array.isArray(group?.items) ? group.items : []
+      const representative = group?.representative ?? items[0] ?? {}
+      const runningItems = items.filter((item) => Boolean(item?.isRunning))
+      const isRunning = runningItems.length > 0
+      const timeItems = isRunning ? runningItems : representative ? [representative] : items
+      const startTsValues = timeItems.map((item) => Number(item?.startTs) || 0).filter((value) => value > 0)
+      const stopTsValues = timeItems.map((item) => Number(item?.stopTs) || 0).filter((value) => value > 0)
+      const startLabel = startTsValues.length ? dashboardOverviewTimeLabel(Math.min(...startTsValues)) : '--:--'
+      const stopLabel = stopTsValues.length ? dashboardOverviewTimeLabel(Math.max(...stopTsValues)) : '--:--'
+      const workerItems = isRunning ? runningItems : items
+      const workers = [...new Set(workerItems.map((item) => String(item?.workerDisplayName ?? item?.workerName ?? '').trim()).filter((value) => value && value !== '-'))]
+      const workerLabel = workers.length ? `Pracownicy: ${workers.join(', ')}` : 'Brak rozpoznanego pracownika'
+      const statusLabel = isRunning ? 'Sprzątany teraz' : 'Wysprzątany dziś'
+      const timeLabel = isRunning ? `od ${startLabel}` : `${startLabel}–${stopLabel}`
+      const sourceRow = representative?.sourceRow ?? {}
+      const row = dashboardBuildHistoryRow(
+        {
+          ...sourceRow,
+          clientId: String(group?.clientId ?? sourceRow?.clientId ?? '').trim(),
+          clientName: String(group?.clientLabel ?? sourceRow?.clientName ?? '').trim(),
+          klient: String(group?.clientLabel ?? sourceRow?.klient ?? '').trim(),
+        },
+        dayKey,
+      )
+      return {
+        action: 'object-history',
+        title: String(group?.clientLabel ?? '').trim() || 'Obiekt',
+        subtitle: `${statusLabel} · ${timeLabel} · ${workerLabel}`,
+        tab: 'objects',
+        row,
+      }
+    })
+  }
+
+  function dashboardOverviewPlannedOrderGroups(dayKey = todayYmd()) {
+    const normalizedDay = dashboardActivityDayKey(dayKey)
+    const rangeStart = new Date(`${normalizedDay}T00:00:00`).getTime()
+    const rangeEnd = new Date(`${calendarAddDays(normalizedDay, 1)}T00:00:00`).getTime() - 1
+    let plannedItems = []
+
+    try {
+      plannedItems = dashboardBuildPlannedOrderActivityItems(normalizedDay, rangeStart, rangeEnd)
+      appState.dashboardOverviewPlannedOrdersError = appState.dashboardOverviewPlannedOrdersSyncError === true
+    } catch (error) {
+      appState.dashboardOverviewPlannedOrdersError = true
+      console.warn('[portal/dashboard] planned order overview build failed', error)
+      plannedItems = []
+    }
+
+    const groups = new Map()
+    ;(Array.isArray(plannedItems) ? plannedItems : []).forEach((item) => {
+      const sourceOrderId = String(
+        item?.sourceOrderId ||
+          item?.orderId ||
+          item?.taskId ||
+          '',
+      ).trim()
+      if (!sourceOrderId) {
+        return
+      }
+      const occurrenceDateYmd = String(item?.occurrenceDateYmd ?? item?.dateYmd ?? normalizedDay).trim() || normalizedDay
+      const key = `${sourceOrderId}::${occurrenceDateYmd}`
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          editorOrderId: String(item?.editorOrderId ?? item?.orderId ?? '').trim(),
+          sourceOrderId,
+          taskId: String(item?.taskId ?? sourceOrderId).trim(),
+          occurrenceDateYmd,
+          dateYmd: String(item?.dateYmd ?? occurrenceDateYmd).trim() || occurrenceDateYmd,
+          isRecurringSeries: Boolean(item?.isRecurringSeries),
+          isRecurringInstance: Boolean(item?.isRecurringInstance),
+          recurrenceOverride: Boolean(item?.recurrenceOverride),
+          workSlotKey: String(item?.workSlotKey ?? '').trim(),
+          serviceBlockId: String(item?.serviceBlockId ?? '').trim(),
+          serviceBlockKind: String(item?.serviceBlockKind ?? '').trim(),
+          serviceBlockLabel: String(item?.serviceBlockLabel ?? '').trim(),
+          title: String(item?.label ?? '').trim() || 'Zlecenie',
+          companyLabel: dashboardActivityCleanCompanyLabel(item?.companyLabel ?? item?.locationLabel),
+          startTs: Number(item?.startTs) || 0,
+          stopTs: Number(item?.stopTs) || 0,
+          workerNames: new Set(),
+        })
+      }
+
+      const group = groups.get(key)
+      if (!group.taskId && String(item?.taskId ?? '').trim()) {
+        group.taskId = String(item.taskId).trim()
+      }
+      const startTs = Number(item?.startTs) || 0
+      const stopTs = Number(item?.stopTs) || 0
+      if (startTs > 0 && (!group.startTs || startTs < group.startTs)) {
+        group.startTs = startTs
+      }
+      if (stopTs > group.stopTs) {
+        group.stopTs = stopTs
+      }
+      const workerName = String(item?.workerDisplayName ?? item?.workerName ?? '').trim()
+      if (workerName && workerName !== '-') {
+        group.workerNames.add(workerName)
+      }
+    })
+
+    return [...groups.values()]
+      .map((group) => ({ ...group, workerNames: [...group.workerNames] }))
+      .sort((left, right) => left.startTs - right.startTs || left.title.localeCompare(right.title, 'pl', { sensitivity: 'base' }))
+  }
+
+  function dashboardOverviewTimeLabel(timestamp) {
+    const date = new Date(Number(timestamp) || 0)
+    if (!Number.isFinite(date.getTime()) || date.getTime() <= 0) {
+      return '--:--'
+    }
+    return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+  }
+
+  function renderDashboardOverviewPlannedOrders(groups = [], options = {}) {
+    const plannedOrders = Array.isArray(groups) ? groups : []
+    const strip = document.getElementById('dashOverviewPlannedOrdersStrip')
+    if (!strip) {
+      return
+    }
+
+    const loadError = options.loadError === true
+    strip.classList.toggle('is-empty', plannedOrders.length === 0 || loadError)
+    if (loadError) {
+      strip.setAttribute('aria-label', 'Nie udało się wczytać zaplanowanych zleceń na dziś')
+      strip.innerHTML = '<span class="dash-overview-plan-empty">Nie udało się wczytać zleceń.</span>'
+      return
+    }
+    if (!plannedOrders.length) {
+      strip.setAttribute('aria-label', 'Brak zaplanowanych zleceń przypisanych pracownikom na dziś')
+      strip.innerHTML = '<span class="dash-overview-plan-empty">Brak przypisanych zleceń.</span>'
+      return
+    }
+
+    const preview = plannedOrders.slice(0, DASHBOARD_OVERVIEW_PLANNED_PREVIEW_LIMIT)
+    const remaining = Math.max(0, plannedOrders.length - preview.length)
+    strip.setAttribute('aria-label', `${plannedOrders.length} zaplanowanych zleceń przypisanych pracownikom na dziś`)
+    strip.innerHTML = [
+      ...preview.map((item) => {
+        const timeLabel = dashboardOverviewTimeLabel(item.startTs)
+        const title = String(item.title ?? '').trim() || String(item.companyLabel ?? '').trim() || 'Zlecenie'
+        const workers = Array.isArray(item.workerNames) ? item.workerNames.join(', ') : ''
+        const secondary = workers || String(item.companyLabel ?? '').trim() || 'Przypisany pracownik'
+        return `
+          <span class="dash-overview-plan-item">
+            <span class="dash-overview-plan-time">${escapeHtml(timeLabel)}</span>
+            <span class="dash-overview-plan-copy">
+              <span class="dash-overview-plan-title">${escapeHtml(title)}</span>
+              <span class="dash-overview-plan-worker">${escapeHtml(secondary)}</span>
+            </span>
+          </span>
+        `
+      }),
+      remaining > 0 ? `<span class="dash-overview-plan-more">+${remaining}</span>` : '',
+    ].join('')
+  }
+
   function dashboardBuildSummary(todayRows = [], eventRows = [], periodHourValues = {}, openHistoricalWorkdays = []) {
     const today = todayYmd()
     const systemIssueRangeFrom = dashboardSystemIssueRangeFrom()
@@ -4131,26 +7364,27 @@ export function createDashboardFeature(ctx) {
     const normalizedOpenHistoricalRows = Array.isArray(openHistoricalWorkdays) ? openHistoricalWorkdays : []
 
     const activeNowRows = normalizedTodayRows.filter((row) => Boolean(row?.isRunning))
-    const activeNowKeys = new Set(
-      activeNowRows
-        .map((row) => dashboardEventIdentityCandidateIds(row).join('|') || dashboardEventRowFingerprintKey(row))
-        .filter(Boolean),
-    )
-    const historicalOpenRows = normalizedOpenHistoricalRows.filter((row) => {
-      const dayKey = dashboardResolveDayKey(row)
-      if (dayKey === today) {
-        return false
+    const activeWorkerDetails = dashboardOverviewActiveWorkerDetails(activeNowRows, today)
+    const activeWorkersCount = activeWorkerDetails.length
+    const activeObjectGroups = dashboardOverviewActiveObjectGroups()
+    const activeObjectDetails = dashboardOverviewActiveObjectDetails(activeObjectGroups, today)
+    const activeObjectsCount = activeObjectDetails.length
+    const plannedOrderGroups = dashboardOverviewPlannedOrderGroups(today)
+    const plannedOrdersLoadError = appState.dashboardOverviewPlannedOrdersError === true
+    const operationalServices = dashboardBuildOperationalServicePanels(today)
+    const plannedOrderDetails = plannedOrderGroups.map((group) => {
+      const startLabel = dashboardOverviewTimeLabel(group?.startTs)
+      const stopLabel = dashboardOverviewTimeLabel(group?.stopTs)
+      const timeLabel = stopLabel !== '--:--' ? `${startLabel}–${stopLabel}` : startLabel
+      const workers = Array.isArray(group?.workerNames) ? group.workerNames.join(', ') : ''
+      const contextLabel = [timeLabel, group?.companyLabel, workers ? `Pracownicy: ${workers}` : ''].filter(Boolean).join(' · ')
+      return {
+        ...group,
+        action: 'planned-order-editor',
+        title: String(group?.title ?? '').trim() || String(group?.companyLabel ?? '').trim() || 'Zlecenie',
+        subtitle: contextLabel || 'Zaplanowane na dziś',
       }
-      const key = dashboardEventIdentityCandidateIds(row).join('|') || dashboardEventRowFingerprintKey(row)
-      if (key && activeNowKeys.has(key)) {
-        return false
-      }
-      if (key) {
-        activeNowKeys.add(key)
-      }
-      return true
     })
-    const allActiveNowRows = [...activeNowRows, ...historicalOpenRows]
     const finishedRows = normalizedTodayRows.filter((row) => {
       const stopValue = String(row?.qrStop ?? '').trim()
       const hasStop = Boolean(stopValue) && stopValue !== '--:--:--' && stopValue !== '-:-:-' && stopValue !== '-'
@@ -4159,16 +7393,7 @@ export function createDashboardFeature(ctx) {
     const totalTodaySec = normalizedTodayRows.reduce((sum, row) => sum + dashboardParseDurationLabelToSeconds(row?.duration), 0)
 
     const table1Details = {
-      activeNow: allActiveNowRows.map((row) => {
-        const rowDay = dashboardResolveDayKey(row, today)
-        const datePrefix = rowDay && rowDay !== today ? `Data: ${formatDatePl(`${rowDay}T00:00:00.000Z`)} · ` : ''
-        return {
-        title: dashboardResolveWorkerLabel(row),
-        subtitle: `${datePrefix}START: ${dashboardClockLabelToHm(row?.qrStart, '--:--')} · Klient: ${dashboardResolveClientLabel(row)} · Strefa: ${dashboardResolveZoneLabel(row)}`,
-        tab: 'workers',
-        row: dashboardBuildHistoryRow(row, rowDay || today),
-        }
-      }),
+      activeNow: activeWorkerDetails,
       finishedToday: finishedRows.map((row) => ({
         title: dashboardResolveWorkerLabel(row),
         subtitle: `START: ${dashboardClockLabelToHm(row?.qrStart, '--:--')} · STOP: ${dashboardClockLabelToHm(row?.qrStop, '--:--')} · Czas: ${dashboardDurationLabelToHm(row?.duration, '00:00')}`,
@@ -4190,24 +7415,9 @@ export function createDashboardFeature(ctx) {
         })),
     }
 
-    const closedStartStopKeys = dashboardClosedStartStopKeys([
-      ...normalizedEventRows,
-      ...normalizedTodayRows,
-      ...normalizedOpenHistoricalRows,
-    ])
     const historicalOpenWorkdayRows = normalizedOpenHistoricalRows.filter((row) => {
       const dayKey = dashboardResolveDayKey(row)
-      if (!dayKey || dayKey < systemIssueRangeFrom || dayKey >= today) {
-        return false
-      }
-      if (dashboardRowHasWorkdayStop(row) || dashboardRowMatchesClosedStartStop(row, closedStartStopKeys)) {
-        return false
-      }
-      return (
-        normalizeEventStatus(row?.status, Boolean(toIso(row?.endAt) || toIso(row?.dayEndAt))) === 'RUNNING' &&
-        !toIso(row?.endAt) &&
-        !toIso(row?.dayEndAt)
-      )
+      return isHistoricalOpenWorkday(row, today, dayKey)
     })
     const openStartStopWorkerDayGroups = new Map()
     historicalOpenWorkdayRows.forEach((row) => {
@@ -4215,8 +7425,8 @@ export function createDashboardFeature(ctx) {
       if (!dayKey) {
         return
       }
-      const keySource = String(row?.workerLogin ?? row?.workerName ?? '').trim()
-      const workerKey = normalizeSearchText(keySource) || String(row?.workdayId ?? row?.id ?? '').trim() || 'unknown'
+      const recordKey = normalizeSearchText(row?.workdayId ?? row?.id)
+      const workerKey = dashboardOverviewWorkerKey(row) || (recordKey ? `record:${recordKey}` : 'unknown')
       const groupKey = `${dayKey}::${workerKey}`
       if (!openStartStopWorkerDayGroups.has(groupKey)) {
         openStartStopWorkerDayGroups.set(groupKey, {
@@ -4255,7 +7465,7 @@ export function createDashboardFeature(ctx) {
           workerName: bucket.workerName || probe?.workerName,
           workdayId: String(probe?.workdayId ?? probe?.id ?? '').trim(),
           title: bucket.workerName || dashboardResolveWorkerLabel(probe),
-          subtitle: `Data: ${formatDatePl(`${bucket.dayKey}T00:00:00.000Z`)} Â· Klient: ${dashboardResolveClientLabel(probe)} Â· Strefa: ${dashboardResolveZoneLabel(probe)}`,
+          subtitle: `Data: ${formatDatePl(`${bucket.dayKey}T00:00:00.000Z`)} \u00b7 Klient: ${dashboardResolveClientLabel(probe)} \u00b7 Strefa: ${dashboardResolveZoneLabel(probe)}`,
           tab: 'workers',
           row: dashboardBuildHistoryRow(
             {
@@ -4379,7 +7589,9 @@ export function createDashboardFeature(ctx) {
 
     return {
       values: {
-        activeNow: allActiveNowRows.length,
+        activeNow: activeWorkersCount,
+        activeObjects: activeObjectsCount,
+        plannedOrders: plannedOrdersLoadError ? '—' : plannedOrderGroups.length,
         finishedToday: finishedRows.length,
         totalHoursToday: durationSecondsToHm(totalTodaySec),
         totalHoursCurrentWeek: periodHourValues.totalHoursCurrentWeek ?? '00:00',
@@ -4387,22 +7599,136 @@ export function createDashboardFeature(ctx) {
         totalHoursCurrentMonth: periodHourValues.totalHoursCurrentMonth ?? '00:00',
         totalHoursPreviousMonth: periodHourValues.totalHoursPreviousMonth ?? '00:00',
         openStartStopYesterday: openStartStopYesterdayIssues.length,
+        openQrStopDays: openStartStopYesterdayIssues.length,
         openCleanYesterday: openCleanYesterdayIssues.length,
         cleanTooLong: cleanTooLongDetails.length,
       },
       details: {
         activeNow: table1Details.activeNow,
+        activeObjects: activeObjectDetails,
+        plannedOrders: plannedOrderDetails,
         finishedToday: table1Details.finishedToday,
         totalHoursToday: table1Details.totalHoursToday,
         openStartStopYesterday: openStartStopYesterdayIssues,
         openCleanYesterday: openCleanYesterdayIssues,
         cleanTooLong: cleanTooLongDetails,
       },
+      overview: {
+        plannedOrders: plannedOrderGroups,
+        plannedOrdersLoadError,
+      },
+      operationalServices,
     }
   }
 
-  function renderDashboardSummary(summary) {
+  function dashboardRenderContractProfitabilityMonths(referenceDate = new Date()) {
+    const formatter = new Intl.DateTimeFormat('pl-PL', { month: 'short' })
+    document.querySelectorAll('[data-dash-contract-profitability-month-offset]').forEach((node) => {
+      const offset = Math.max(0, Number(node.getAttribute('data-dash-contract-profitability-month-offset')) || 0)
+      const monthDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth() - offset, 1)
+      const rawLabel = formatter.format(monthDate).replace('.', '').trim()
+      node.textContent = rawLabel ? `${rawLabel.charAt(0).toUpperCase()}${rawLabel.slice(1)}` : '—'
+    })
+  }
+
+  function dashboardDrawContractProfitabilitySampleChart() {
+    const canvas = document.getElementById('dashContractProfitabilityCanvas')
+    if (!(canvas instanceof HTMLCanvasElement)) {
+      return
+    }
+
+    const width = Math.max(1, Math.round(canvas.getBoundingClientRect().width))
+    const height = Math.max(1, Math.round(canvas.getBoundingClientRect().height))
+    if (width <= 1 || height <= 1) {
+      return
+    }
+
+    const pixelRatio = Math.max(1, Math.min(2, Number(window.devicePixelRatio) || 1))
+    canvas.width = Math.round(width * pixelRatio)
+    canvas.height = Math.round(height * pixelRatio)
+
+    const context = canvas.getContext('2d')
+    if (!context) {
+      return
+    }
+
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
+    context.clearRect(0, 0, width, height)
+
+    const chartPadding = { top: 8, right: 8, bottom: 8, left: 8 }
+    const plotWidth = Math.max(1, width - chartPadding.left - chartPadding.right)
+    const plotHeight = Math.max(1, height - chartPadding.top - chartPadding.bottom)
+    const maximumValue = 30
+    const coordinates = DASHBOARD_CONTRACT_PROFITABILITY_SAMPLE_TREND.map((value, index, values) => ({
+      x: chartPadding.left + (plotWidth * index) / Math.max(1, values.length - 1),
+      y: chartPadding.top + plotHeight - (plotHeight * value) / maximumValue,
+    }))
+
+    context.strokeStyle = '#e8ecf3'
+    context.lineWidth = 1
+    ;[0, 10, 20, 30].forEach((value) => {
+      const y = chartPadding.top + plotHeight - (plotHeight * value) / maximumValue
+      context.beginPath()
+      context.moveTo(chartPadding.left, y)
+      context.lineTo(width - chartPadding.right, y)
+      context.stroke()
+    })
+
+    const drawTrendPath = () => {
+      context.beginPath()
+      context.moveTo(coordinates[0].x, coordinates[0].y)
+      coordinates.slice(1).forEach((point, index) => {
+        const previous = coordinates[index]
+        const midpoint = (previous.x + point.x) / 2
+        context.bezierCurveTo(midpoint, previous.y, midpoint, point.y, point.x, point.y)
+      })
+    }
+
+    drawTrendPath()
+    context.lineTo(coordinates[coordinates.length - 1].x, chartPadding.top + plotHeight)
+    context.lineTo(coordinates[0].x, chartPadding.top + plotHeight)
+    context.closePath()
+    context.fillStyle = 'rgba(105, 97, 242, 0.09)'
+    context.fill()
+
+    drawTrendPath()
+    context.strokeStyle = '#6961f2'
+    context.lineWidth = 3
+    context.lineCap = 'round'
+    context.lineJoin = 'round'
+    context.stroke()
+  }
+
+  function dashboardRenderContractProfitabilitySample() {
+    dashboardRenderContractProfitabilityMonths()
+    dashboardSyncContractProfitabilityCompactSummary()
+    window.requestAnimationFrame(() => dashboardDrawContractProfitabilitySampleChart())
+
+    const canvas = document.getElementById('dashContractProfitabilityCanvas')
+    if (!(canvas instanceof HTMLCanvasElement) || canvas === dashboardContractProfitabilityObservedCanvas) {
+      return
+    }
+
+    dashboardContractProfitabilityResizeObserver?.disconnect?.()
+    dashboardContractProfitabilityObservedCanvas = canvas
+    if (typeof ResizeObserver === 'function') {
+      dashboardContractProfitabilityResizeObserver = new ResizeObserver(() => {
+        window.requestAnimationFrame(() => dashboardDrawContractProfitabilitySampleChart())
+      })
+      dashboardContractProfitabilityResizeObserver.observe(canvas)
+    }
+  }
+
+  function renderDashboardSummary(summary, todayRows = appState.dashboardTodayRows) {
+    dashboardMountCommandCenterPanels()
+    dashboardRenderContractProfitabilitySample()
     const values = summary?.values ?? {}
+    const operationalServices =
+      summary?.operationalServices?.correlation?.modelVersion === DASHBOARD_SERVICE_EXECUTION_MODEL_VERSION
+        ? summary.operationalServices
+        : dashboardBuildOperationalServicePanels(todayYmd())
+    appState.dashboardOverviewPlannedOrdersError = summary?.overview?.plannedOrdersLoadError === true
+    appState.dashboardOverviewPlannedOrdersSyncError = appState.dashboardOverviewPlannedOrdersError
     appState.dashboardMetricDetails = summary?.details ?? {}
     appState.dashboardMetricValues = values
 
@@ -4414,11 +7740,61 @@ export function createDashboardFeature(ctx) {
     }
 
     setValue('sumActiveNowCount', values.activeNow ?? 0)
+    setValue('dashOverviewOpenQrStopCount', values.openQrStopDays ?? values.openStartStopYesterday ?? 0)
+    setValue('dashOverviewActiveObjectsCount', values.activeObjects ?? 0)
+    setValue('dashOverviewPlannedOrdersCount', values.plannedOrders ?? 0)
     setValue('sumFinishedTodayCount', values.finishedToday ?? 0)
     setValue('sumTotalHoursToday', values.totalHoursToday ?? '00:00')
     setValue('sumOpenStartStopYesterdayCount', values.openStartStopYesterday ?? 0)
     setValue('sumOpenCleanYesterdayCount', values.openCleanYesterday ?? 0)
     setValue('sumCleanTooLongCount', values.cleanTooLong ?? 0)
+    renderDashboardOverviewPlannedOrders(summary?.overview?.plannedOrders ?? [], {
+      loadError: appState.dashboardOverviewPlannedOrdersError,
+    })
+    dashboardRenderOperationalServicePanels(operationalServices)
+    dashboardRenderCommandCenterPlan(
+      summary?.overview?.plannedOrders ?? [],
+      operationalServices,
+      { loadError: appState.dashboardOverviewPlannedOrdersError },
+    )
+    dashboardSyncCommandCenterSummary(values, operationalServices)
+
+    const mapDayKey = todayYmd()
+    const mapRows = dashboardActiveWorkerMapCandidateRows(todayRows, mapDayKey)
+    let plannedMapItems = []
+    if (appState.dashboardOverviewPlannedOrdersError !== true) {
+      try {
+        const mapRangeStart = new Date(`${mapDayKey}T00:00:00`).getTime()
+        const mapRangeEnd = new Date(`${calendarAddDays(mapDayKey, 1)}T00:00:00`).getTime() - 1
+        plannedMapItems = dashboardBuildPlannedOrderActivityItems(mapDayKey, mapRangeStart, mapRangeEnd)
+      } catch (error) {
+        console.warn('[portal/dashboard] planned worker map build failed', error)
+      }
+    }
+    const plannedMapRows = dashboardActiveWorkerMapPlannedCandidates(plannedMapItems)
+    const plannedOnlyMapRows = plannedMapRows.filter(
+      (plannedRow) => !mapRows.some((workdayRow) => dashboardActiveWorkerMapRecordsMatch(plannedRow, workdayRow)),
+    )
+    const locations = dashboardActiveWorkerMapLocations(mapRows, mapDayKey, plannedMapRows)
+    if (
+      !Array.isArray(summary?.overview?.plannedOrders) ||
+      (
+        summary.overview.plannedOrders.length === 0 &&
+        plannedMapItems.length > 0
+      )
+    ) {
+      dashboardRenderCommandCenterPlan([], operationalServices, {
+        loadError: true,
+        unavailableMessage: 'Plan źródłowy chwilowo niedostępny.',
+      })
+    }
+    dashboardRenderCommandCenterAlerts({
+      values,
+      operationalServices,
+      locations,
+      activeRows: mapRows,
+    })
+    void dashboardRenderActiveWorkersMap(locations, mapRows.length + plannedOnlyMapRows.length)
   }
 
   function dashboardAddUserMatchKey(target, rawValue = '') {
@@ -4554,7 +7930,7 @@ export function createDashboardFeature(ctx) {
     const zoneLocation = String(task.zone?.location ?? task.zoneLocation ?? '').trim()
     const zoneDisplay = zoneLabel ? calendarZoneDisplayLabel({ label: zoneLabel, location: zoneLocation }) : ''
     const status = kanbanNormalizeStatus(task.kanbanStatus)
-    const columnLabel = kanbanColumnsForStatus().find((column) => column.id === status)?.label || 'Kanban'
+    const columnLabel = kanbanColumnsForStatus().find((column) => column.id === status)?.label || 'Centrum zadań'
     const dueDate = String(task.dueDateYmd ?? '').trim()
     const dueTime = calendarNormalizeTimeValue(task.dueTime)
     const dueLabel = dueDate ? `Termin: ${formatDatePl(`${dueDate}T12:00:00.000Z`)}${dueTime ? ` ${dueTime}` : ''}` : ''
@@ -4694,12 +8070,12 @@ export function createDashboardFeature(ctx) {
       appState.workers = snapshot.workers
       appState.workerTimeRows = snapshot.workers
     }
-    if (snapshot.summary) {
-      renderDashboardSummary(snapshot.summary)
-    }
     if (Array.isArray(snapshot.todayRows)) {
       appState.dashboardTodayRows = snapshot.todayRows
       renderDashboardEvents(snapshot.todayRows)
+    }
+    if (snapshot.summary) {
+      renderDashboardSummary(snapshot.summary, snapshot.todayRows)
     }
     if (Array.isArray(snapshot.comments)) {
       renderDashboardNewComments(snapshot.comments)
@@ -4810,7 +8186,7 @@ export function createDashboardFeature(ctx) {
     dashboardSyncLoadingOverlay()
   }
 
-  function dashboardHideMetricPopover() {
+  function dashboardHideMetricPopover(options = {}) {
     if (dashboardMetricPopoverHideTimer) {
       window.clearTimeout(dashboardMetricPopoverHideTimer)
       dashboardMetricPopoverHideTimer = null
@@ -4821,8 +8197,17 @@ export function createDashboardFeature(ctx) {
       return
     }
 
+    const anchorId = String(popover.getAttribute('data-anchor-id') ?? '').trim()
+    document.querySelectorAll('[data-dash-metric][aria-expanded]').forEach((button) => {
+      button.setAttribute('aria-expanded', 'false')
+    })
     popover.style.display = 'none'
     popover.removeAttribute('data-metric')
+    popover.removeAttribute('data-pinned')
+    popover.removeAttribute('data-anchor-id')
+    if (options.restoreFocus === true && anchorId) {
+      document.getElementById(anchorId)?.focus?.()
+    }
   }
 
   function dashboardScheduleMetricPopoverHide() {
@@ -4843,11 +8228,60 @@ export function createDashboardFeature(ctx) {
 
   function dashboardMetricTitle(metricKey) {
     const button = document.querySelector(`[data-dash-metric="${metricKey}"]`)
-    const label = String(button?.querySelector('.dash-summary-row-label')?.textContent ?? '').trim()
+    const label = String(
+      button?.querySelector('.dash-summary-row-label, .dash-overview-kpi-label')?.textContent ?? '',
+    ).trim()
+    if (metricKey === 'openStartStopYesterday') {
+      return `${label || 'Brak QR STOP'} — wybierz dzień do uzupełnienia`
+    }
+    if (metricKey === 'activeNow') {
+      return `${label || 'Pracownicy'} — wybierz aktywną osobę`
+    }
+    if (metricKey === 'activeObjects') {
+      return `${label || 'Obiekty'} — wybierz obiekt`
+    }
+    if (metricKey === 'plannedOrders') {
+      return `${label || 'Zaplanowane zlecenia'} — wybierz zlecenie`
+    }
     return label || 'Szczegóły'
   }
 
-  function dashboardShowMetricPopover(metricKey, anchorButton) {
+  function dashboardMetricListCopy(metricKey) {
+    const metricCopy = {
+      openStartStopYesterday: {
+        itemAriaPrefix: 'Otwórz dzień pracy do uzupełnienia',
+        itemTitle: 'Otwórz dzień pracy do uzupełnienia',
+        actionLabel: 'Uzupełnij STOP i zamknij dzień',
+        emptyLabel: 'Brak niezamkniętych dni bez QR STOP.',
+      },
+      activeNow: {
+        itemAriaPrefix: 'Otwórz dzisiejszą historię pracownika',
+        itemTitle: 'Otwórz dzisiejszą historię pracownika',
+        actionLabel: 'Otwórz historię pracownika',
+        emptyLabel: 'Brak aktywnych pracowników.',
+      },
+      activeObjects: {
+        itemAriaPrefix: 'Otwórz historię obiektu',
+        itemTitle: 'Otwórz historię obiektu',
+        actionLabel: 'Otwórz historię obiektu',
+        emptyLabel: 'Brak sprzątanych lub wysprzątanych dziś obiektów.',
+      },
+      plannedOrders: {
+        itemAriaPrefix: 'Otwórz zlecenie',
+        itemTitle: 'Otwórz zlecenie',
+        actionLabel: 'Otwórz zlecenie',
+        emptyLabel: 'Brak zaplanowanych zleceń na dziś.',
+      },
+    }
+    return metricCopy[metricKey] ?? {
+      itemAriaPrefix: 'Otwórz szczegóły',
+      itemTitle: 'Otwórz szczegóły',
+      actionLabel: '',
+      emptyLabel: 'Brak szczegółów.',
+    }
+  }
+
+  function dashboardShowMetricPopover(metricKey, anchorButton, options = {}) {
     const popover = document.getElementById('dashMetricPopover')
     const titleNode = document.getElementById('dashMetricPopoverTitle')
     const listNode = document.getElementById('dashMetricPopoverList')
@@ -4856,8 +8290,11 @@ export function createDashboardFeature(ctx) {
     }
 
     dashboardCancelMetricPopoverHide()
-    const details = dashboardMetricDetailsOrEmpty(metricKey)
-    const maxRows = 24
+    const plannedOrdersLoadError = metricKey === 'plannedOrders' && appState.dashboardOverviewPlannedOrdersError === true
+    const details = plannedOrdersLoadError ? [] : dashboardMetricDetailsOrEmpty(metricKey)
+    const copy = dashboardMetricListCopy(metricKey)
+    const fullListMetrics = new Set(['openStartStopYesterday', 'activeNow', 'activeObjects', 'plannedOrders'])
+    const maxRows = fullListMetrics.has(metricKey) ? details.length : 24
     const visibleRows = details.slice(0, maxRows)
     const hiddenCount = Math.max(0, details.length - visibleRows.length)
 
@@ -4872,10 +8309,12 @@ export function createDashboardFeature(ctx) {
                 type="button"
                 data-dash-metric-detail="${index}"
                 data-dash-metric-key="${escapeHtml(String(metricKey ?? ''))}"
-                title="Przejdz do rekordu"
+                aria-label="${escapeHtml(copy.itemAriaPrefix)}: ${escapeHtml(detail?.title ?? '-')}. ${escapeHtml(detail?.subtitle ?? '-')}"
+                title="${escapeHtml(copy.itemTitle)}"
               >
                 <span class="dash-metric-popover-item-title">${escapeHtml(detail?.title ?? '-')}</span>
                 <span class="dash-metric-popover-item-subtitle">${escapeHtml(detail?.subtitle ?? '-')}</span>
+                ${copy.actionLabel ? `<span class="dash-metric-popover-item-action">${escapeHtml(copy.actionLabel)}</span>` : ''}
               </button>
             `,
           )
@@ -4886,11 +8325,22 @@ export function createDashboardFeature(ctx) {
             : ''
         }
       `
-      : '<div class="dash-metric-popover-empty">Brak szczegółów.</div>'
+      : `<div class="dash-metric-popover-empty">${escapeHtml(
+          plannedOrdersLoadError ? 'Nie udało się wczytać zaplanowanych zleceń.' : copy.emptyLabel,
+        )}</div>`
 
     popover.style.display = 'block'
     popover.style.visibility = 'hidden'
     popover.setAttribute('data-metric', String(metricKey ?? ''))
+    popover.setAttribute('data-pinned', options.pinned === true ? 'true' : 'false')
+    if (anchorButton.id) {
+      popover.setAttribute('data-anchor-id', anchorButton.id)
+    } else {
+      popover.removeAttribute('data-anchor-id')
+    }
+    document.querySelectorAll('[data-dash-metric][aria-expanded]').forEach((button) => {
+      button.setAttribute('aria-expanded', button === anchorButton ? 'true' : 'false')
+    })
 
     const anchorRect = anchorButton.getBoundingClientRect()
     const popoverRect = popover.getBoundingClientRect()
@@ -4905,6 +8355,7 @@ export function createDashboardFeature(ctx) {
     popover.style.left = `${Math.round(left)}px`
     popover.style.top = `${Math.round(top)}px`
     popover.style.visibility = 'visible'
+    return popover
   }
 
   function dashboardMetricWorkerSearchKeys(detail = {}) {
@@ -5035,6 +8486,55 @@ export function createDashboardFeature(ctx) {
     }
 
     const row = detail?.row ?? {}
+    if (metricKey === 'activeNow' || detail?.action === 'worker-history') {
+      const workerLogin = String(detail?.workerLogin ?? row?.workerLogin ?? '').trim()
+      const workerName = String(detail?.workerName ?? row?.workerName ?? '').trim()
+      await openDashboardWorkerHistory(workerLogin, workerName)
+      return
+    }
+
+    if (metricKey === 'activeObjects' || detail?.action === 'object-history') {
+      await openEventHistoryFromRow(row, 'objects')
+      return
+    }
+
+    if (metricKey === 'plannedOrders' || detail?.action === 'planned-order-editor') {
+      await dashboardSyncCalendarOrdersForTimeline({ forceRefresh: false })
+      const orderBar = document.createElement('span')
+      const attributes = {
+        'data-calendar-timeline-order-id': detail?.editorOrderId || detail?.sourceOrderId,
+        'data-calendar-timeline-source-order-id': detail?.sourceOrderId || detail?.editorOrderId,
+        'data-calendar-timeline-date': detail?.dateYmd || detail?.occurrenceDateYmd,
+        'data-calendar-timeline-occurrence-date': detail?.occurrenceDateYmd,
+        'data-calendar-timeline-work-slot-key': detail?.workSlotKey,
+        'data-calendar-timeline-service-block-id': detail?.serviceBlockId,
+        'data-calendar-timeline-service-block-kind': detail?.serviceBlockKind,
+        'data-calendar-timeline-service-block-label': detail?.serviceBlockLabel,
+      }
+      Object.entries(attributes).forEach(([name, value]) => {
+        const normalized = String(value ?? '').trim()
+        if (normalized) {
+          orderBar.setAttribute(name, normalized)
+        }
+      })
+      if (detail?.isRecurringSeries) {
+        orderBar.setAttribute('data-calendar-timeline-recurring-series', '1')
+      }
+      if (detail?.isRecurringInstance) {
+        orderBar.setAttribute('data-calendar-timeline-recurring-instance', '1')
+      }
+      if (detail?.recurrenceOverride) {
+        orderBar.setAttribute('data-calendar-timeline-recurrence-override', '1')
+      }
+      const context = calendarTimelineContextFromBar(orderBar)
+      if (!context) {
+        showTransientNotice('Nie udało się odnaleźć zlecenia do edycji.', 'error')
+        return
+      }
+      calendarTimelineEditOrderFromContext(context)
+      return
+    }
+
     const tab = String(detail?.tab ?? '').trim() || 'workers'
     await openEventHistoryFromRow(row, tab)
   }
@@ -5043,39 +8543,6 @@ export function createDashboardFeature(ctx) {
     const minutes = Number(value ?? 0)
     const normalizedMinutes = Number.isFinite(minutes) && minutes > 0 ? Math.floor(minutes) : 0
     return durationSecondsToHm(normalizedMinutes * 60)
-  }
-
-  function dashboardApplyScheduleBoard(scheduleBoard) {
-    if (scheduleBoard && Array.isArray(scheduleBoard.days)) {
-      appState.dashboardScheduleDays = scheduleBoard.days
-      if (scheduleBoard.fetchedAtIso !== undefined) {
-        appState.dashboardScheduleFetchedAt = String(scheduleBoard.fetchedAtIso ?? '')
-      }
-      appState.dashboardScheduleStale = Boolean(scheduleBoard.stale)
-      appState.dashboardScheduleError = scheduleBoard.stale ? String(scheduleBoard.staleReason ?? '').trim() : ''
-      const preferredToday = String(scheduleBoard.todayKey ?? '').trim()
-      const selectedExists = scheduleBoard.days.some((day) => day.key === appState.dashboardScheduleSelectedDay)
-      const todayMatch = scheduleBoard.days.find((day) => day.key === preferredToday)
-      if (todayMatch?.key) {
-        if (!appState.dashboardScheduleSelectedDay || !selectedExists) {
-          appState.dashboardScheduleSelectedDay = String(todayMatch.key)
-        }
-      } else if (/^\d{4}-\d{2}-\d{2}$/.test(preferredToday) && (!appState.dashboardScheduleSelectedDay || !selectedExists)) {
-        appState.dashboardScheduleSelectedDay = preferredToday
-      } else {
-        appState.dashboardScheduleSelectedDay = String(
-          dashboardPickNearestScheduleDayKey(scheduleBoard.days, preferredToday),
-        )
-      }
-    } else if (!appState.dashboardScheduleDays.length) {
-      appState.dashboardScheduleDays = []
-      appState.dashboardScheduleStale = false
-      if (!appState.dashboardScheduleFetchedAt) {
-        appState.dashboardScheduleFetchedAt = ''
-      }
-    }
-
-    renderDashboardSchedulePanel()
   }
 
   async function dashboardLoadHistoricalOpenWorkdays(orgId, options = {}) {
@@ -5087,7 +8554,6 @@ export function createDashboardFeature(ctx) {
     return getWorkdays(activeOrgId, {
       source: 'workdays',
       status: 'RUNNING',
-      fromIso: dashboardSystemIssueRangeFrom(),
       toIso: daysAgoYmd(1),
       page: 1,
       pageSize: DASHBOARD_OPEN_WORKDAYS_PAGE_SIZE,
@@ -5141,29 +8607,54 @@ export function createDashboardFeature(ctx) {
       dashboardLoadHistoricalOpenWorkdays(orgId, { forceRefresh }),
     ])
 
-    const todayStartSourceRows = [...(todayEvents.items ?? []), ...(todayWorkdays.items ?? [])]
+    const todayEventIds = new Set(
+      (todayEvents.items ?? [])
+        .map((row) => normalizeSearchText(row?.eventId ?? row?.id))
+        .filter(Boolean),
+    )
+    const historicalOpenServiceRows = (systemIssueEvents.items ?? []).filter((row) => {
+      const eventId = normalizeSearchText(row?.eventId ?? row?.id)
+      const persistedEventType = String(row?.eventType ?? row?.event_type ?? '')
+        .trim()
+        .toUpperCase()
+        .replace(/[\s-]+/g, '_')
+      return (
+        dashboardServiceIsExplicitEvent(row) &&
+        (!eventId || !todayEventIds.has(eventId)) &&
+        Boolean(toIso(row?.startAt)) &&
+        !toIso(row?.endAt) &&
+        normalizeEventStatus(row?.status, false) === 'RUNNING' &&
+        (persistedEventType === 'CLEAN' || persistedEventType.startsWith('CLEAN_'))
+      )
+    })
+    const todayStartSourceRows = [
+      ...(todayEvents.items ?? []),
+      ...(todayWorkdays.items ?? []),
+      ...historicalOpenServiceRows,
+    ]
     appState.dashboardScheduleSourceRows = todayStartSourceRows
     appState.dashboardActivityWorkdayRows = Array.isArray(todayWorkdays.items) ? todayWorkdays.items : []
-    const todayRows = dashboardApplyFirstQrStartToday(
-      todayActive.items ?? [],
-      todayWorkdays.items ?? [],
-      appState.dashboardScheduleDays,
-    )
+    const todayRows = dashboardApplyFirstQrStartToday(todayActive.items ?? [], todayWorkdays.items ?? [])
 
     return { todayRows, recentEvents, systemIssueEvents, todayWorkdays, openHistoricalWorkdays }
   }
 
   async function dashboardSyncCalendarOrdersForTimeline(options = {}) {
     if (typeof ordersSyncRemoteTimelineOrders !== 'function') {
+      appState.dashboardOverviewPlannedOrdersSyncError = false
       return ordersListSourceOrders()
     }
 
     try {
-      return await ordersSyncRemoteTimelineOrders({
+      const orders = await ordersSyncRemoteTimelineOrders({
         render: false,
         forceRefresh: options.forceRefresh === true,
       })
+      appState.dashboardOverviewPlannedOrdersSyncError = false
+      return orders
     } catch (error) {
+      appState.dashboardOverviewPlannedOrdersSyncError = true
+      appState.dashboardOverviewPlannedOrdersError = true
       console.warn('[portal/dashboard] schedule orders refresh failed', error)
       return ordersListSourceOrders()
     }
@@ -5307,46 +8798,6 @@ export function createDashboardFeature(ctx) {
     return dashboardBackgroundRefreshPromise
   }
 
-  function dashboardStartScheduleRefresh(orgId, options = {}) {
-    const activeOrgId = String(orgId ?? appState.session?.orgId ?? '').trim()
-    if (!activeOrgId) {
-      return null
-    }
-
-    if (dashboardScheduleRefreshPromise) {
-      return dashboardScheduleRefreshPromise
-    }
-
-    appState.dashboardScheduleLoading = true
-    appState.dashboardScheduleError = ''
-    appState.dashboardScheduleStale = false
-    renderDashboardSchedulePanel()
-
-    dashboardScheduleRefreshPromise = getScheduleBoard({ forceRefresh: options.forceRefresh === true })
-      .then((scheduleBoard) => {
-        if (String(appState.session?.orgId ?? '').trim() === activeOrgId) {
-          appState.dashboardScheduleLoading = false
-          dashboardApplyScheduleBoard(scheduleBoard)
-        }
-      })
-      .catch((error) => {
-        console.warn('[portal/dashboard] schedule refresh failed', error)
-        if (String(appState.session?.orgId ?? '').trim() === activeOrgId) {
-          appState.dashboardScheduleLoading = false
-          appState.dashboardScheduleError = error instanceof Error ? error.message : 'Błąd pobierania danych.'
-          dashboardApplyScheduleBoard(null)
-        }
-      })
-      .finally(() => {
-        dashboardScheduleRefreshPromise = null
-        if (String(appState.session?.orgId ?? '').trim() === activeOrgId) {
-          appState.dashboardScheduleLoading = false
-          renderDashboardSchedulePanel()
-        }
-      })
-    return dashboardScheduleRefreshPromise
-  }
-
   function dashboardStartReferencePreload(orgId) {
     const activeOrgId = String(orgId ?? appState.session?.orgId ?? '').trim()
     if (!activeOrgId) {
@@ -5380,9 +8831,6 @@ export function createDashboardFeature(ctx) {
           setSubwelcomeMetric('#view-workerTime .subwelcome', workers.length)
           setSubwelcomeMetric('#view-workerProfile .subwelcome', workers.length)
           dashboardWriteLocalSnapshot(activeOrgId, { workers })
-          if (appState.dashboardScheduleDays.length) {
-            renderDashboardSchedulePanel()
-          }
           if (appState.currentRoute === 'dashboard') {
             renderDashboardActivityCalendar(appState.dashboardTodayRows)
           }
@@ -5546,19 +8994,46 @@ export function createDashboardFeature(ctx) {
     dashboardWidgetsRefreshPromise = (async () => {
       const orgId = String(appState.session.orgId)
       const showLoadingOverlay = options.showLoadingOverlay !== false
-      dashboardStartScheduleRefresh(orgId, { forceRefresh: options.forceRefresh === true })
+      let fastRows = null
+      let initialDashboardRenderFinished = false
+      const scheduleSyncPromise = dashboardSyncCalendarTimelineInputs({
+        forceRefresh: options.forceRefresh === true,
+      })
+        .catch((error) => {
+          console.warn('[portal/dashboard] non-blocking schedule sync failed', error)
+        })
+        .finally(() => {
+          if (
+            !initialDashboardRenderFinished ||
+            !fastRows ||
+            String(appState.session?.orgId ?? '').trim() !== orgId ||
+            appState.currentRoute !== 'dashboard'
+          ) {
+            return
+          }
+
+          const refreshedSummary = dashboardBuildSummary(
+            fastRows.todayRows,
+            fastRows.systemIssueEvents.items ?? [],
+            dashboardBuildPeriodHourValues(fastRows.todayRows),
+            fastRows.openHistoricalWorkdays.items ?? [],
+          )
+          renderDashboardSummary(refreshedSummary, fastRows.todayRows)
+          dashboardWriteLocalSnapshot(orgId, {
+            summary: refreshedSummary,
+            todayRows: fastRows.todayRows,
+            activityWorkdayRows: appState.dashboardActivityWorkdayRows,
+            scheduleSourceRows: appState.dashboardScheduleSourceRows,
+          })
+        })
       if (showLoadingOverlay) {
         dashboardBeginLoading()
       }
       try {
-        const [{ todayRows, recentEvents, systemIssueEvents, openHistoricalWorkdays }] = await Promise.all([
-          dashboardLoadFastRows(orgId, {
-            forceRefresh: options.forceRefresh === true,
-          }),
-          dashboardSyncCalendarTimelineInputs({
-            forceRefresh: options.forceRefresh === true,
-          }),
-        ])
+        fastRows = await dashboardLoadFastRows(orgId, {
+          forceRefresh: options.forceRefresh === true,
+        })
+        const { todayRows, recentEvents, systemIssueEvents, openHistoricalWorkdays } = fastRows
         const summary = dashboardBuildSummary(
           todayRows,
           systemIssueEvents.items ?? [],
@@ -5566,15 +9041,12 @@ export function createDashboardFeature(ctx) {
           openHistoricalWorkdays.items ?? [],
         )
         const comments = dashboardBuildNewComments(recentEvents.items ?? [], [])
-        renderDashboardSummary(summary)
+        renderDashboardSummary(summary, todayRows)
         await dashboardRevealLoadingStage('overview')
         renderDashboardKanbanTasks()
         renderDashboardNewComments(comments)
-        await dashboardRevealLoadingStage('tasks')
         renderDashboardEvents(todayRows)
         await dashboardRevealLoadingStage('active')
-        renderDashboardSchedulePanel()
-        await dashboardRevealLoadingStage('schedule')
         setDashboardLastRefresh(new Date())
         void rememberDashboardTimelineFingerprint(orgId)
         dashboardWriteLocalSnapshot(orgId, {
@@ -5584,12 +9056,14 @@ export function createDashboardFeature(ctx) {
           scheduleSourceRows: appState.dashboardScheduleSourceRows,
           comments,
         })
+        initialDashboardRenderFinished = true
       } finally {
         if (showLoadingOverlay) {
           dashboardEndLoading()
         }
       }
 
+      void scheduleSyncPromise
       dashboardStartPostLoadRefresh(orgId, {
         preloadReferences: options.preloadReferences !== false,
         backgroundData: options.backgroundData === true,
@@ -5722,8 +9196,8 @@ export function createDashboardFeature(ctx) {
     }
 
     renderDashboardActivityCalendar(appState.dashboardTodayRows)
-    renderDashboardSchedulePanel()
     dashboardApplyActivityView()
+    dashboardRenderOperationalServicePanels()
   }
 
   function dashboardTimelineMillisecondsToNextTick() {
@@ -5862,8 +9336,8 @@ export function createDashboardFeature(ctx) {
 
     if (changed && appState.currentRoute === 'dashboard') {
       renderDashboardEvents(appState.dashboardTodayRows)
-      renderDashboardSchedulePanel()
       dashboardApplyActivityView()
+      dashboardRenderOperationalServicePanels()
       setDashboardLastRefresh(new Date())
     }
 
@@ -5919,7 +9393,6 @@ export function createDashboardFeature(ctx) {
 
     if (appState.currentRoute === 'dashboard' && dashboardActivityDayKey(appState.dashboardActivityDay) === dayKey) {
       renderDashboardActivityCalendar(appState.dashboardTodayRows)
-      renderDashboardSchedulePanel()
       dashboardApplyActivityView()
       setDashboardLastRefresh(new Date())
     }
@@ -5961,6 +9434,7 @@ export function createDashboardFeature(ctx) {
   function bindDashboardViewFunctions() {
     const binding = createBindingHelpers()
     const cleanupDashboardTableResize = () => {}
+    dashboardMountCommandCenterPanels()
 
     // Dashboard active list uses fixed responsive layout, not column drag-resize.
     const dashboardEventsRoot = document.querySelector('#view-dashboard .dash-events')
@@ -5974,12 +9448,181 @@ export function createDashboardFeature(ctx) {
       dashboardEventsHead.querySelectorAll('.grid-resize-handle').forEach((node) => node.remove())
     }
 
-    syncDashboardSidePanelHeight()
-    requestAnimationFrame(() => syncDashboardSidePanelHeight())
     appState.dashboardActivityDay = dashboardActivityDayKey(todayYmd())
-    appState.dashboardScheduleSelectedDay = appState.dashboardActivityDay
     appState.dashboardActivityView = dashboardReadActivityViewPreference()
     dashboardSetActivityView(appState.dashboardActivityView, { persist: false })
+    const commandCenterMounted = document.getElementById('dashCommandCenter') instanceof HTMLElement
+    Object.entries(DASHBOARD_INSIGHT_PANEL_CONFIG).forEach(([panelKey, config]) => {
+      dashboardSetInsightPanelCollapsed(
+        panelKey,
+        commandCenterMounted ? false : dashboardReadInsightPanelCollapsed(panelKey),
+        {
+        persist: false,
+        },
+      )
+      binding.add(document.getElementById(config.buttonId), 'click', () => {
+        const card = document.getElementById(config.cardId)
+        dashboardSetInsightPanelCollapsed(panelKey, !card?.classList.contains('is-collapsed'))
+      })
+    })
+    dashboardSetContractProfitabilityCollapsed(dashboardReadContractProfitabilityCollapsed(), {
+      persist: false,
+    })
+
+    binding.add(document.getElementById('dashContractProfitabilityToggle'), 'click', () => {
+      const card = document.getElementById('dashContractProfitabilityCard')
+      dashboardSetContractProfitabilityCollapsed(!card?.classList.contains('is-collapsed'))
+    })
+
+    binding.add(document.getElementById('dashActiveWorkersLocationList'), 'click', (event) => {
+      const button = event.target?.closest?.('[data-dash-active-worker-map-key]')
+      if (!button) {
+        return
+      }
+      dashboardFocusActiveWorkerMapMarker(button.getAttribute('data-dash-active-worker-map-key'))
+    })
+
+    binding.add(document.getElementById('dashActiveWorkersMapExpand'), 'click', (event) => {
+      dashboardOpenActiveWorkerMapDialog(event.currentTarget)
+    })
+
+    binding.add(document.getElementById('dashCommandFiltersBtn'), 'click', (event) => {
+      event.stopPropagation()
+      const panel = document.getElementById('dashCommandFiltersPanel')
+      const button = event.currentTarget
+      if (!(panel instanceof HTMLElement) || !(button instanceof HTMLButtonElement)) {
+        return
+      }
+      const nextOpen = panel.hidden
+      panel.hidden = !nextOpen
+      button.setAttribute('aria-expanded', nextOpen ? 'true' : 'false')
+    })
+
+    document.querySelectorAll('[data-command-map-filter]').forEach((checkbox) => {
+      binding.add(checkbox, 'change', () => {
+        dashboardApplyCommandCenterMapFilters()
+        dashboardCenterCommandMap()
+      })
+    })
+
+    binding.add(document.getElementById('dashCommandViewBtn'), 'click', () => {
+      const commandCenter = document.getElementById('dashCommandCenter')
+      dashboardSetCommandCenterListView(!commandCenter?.classList.contains('is-list-view'))
+    })
+
+    binding.add(document.getElementById('dashCommandLegendBtn'), 'click', (event) => {
+      const legend = document.getElementById('dashCommandLegend')
+      const button = event.currentTarget
+      if (!(legend instanceof HTMLElement) || !(button instanceof HTMLButtonElement)) {
+        return
+      }
+      const nextOpen = legend.hidden
+      legend.hidden = !nextOpen
+      button.setAttribute('aria-expanded', nextOpen ? 'true' : 'false')
+    })
+
+    binding.add(document.getElementById('dashCommandLocateBtn'), 'click', () => {
+      dashboardCenterCommandMap()
+    })
+
+    binding.add(document.getElementById('dashCommandDetailsBtn'), 'click', (event) => {
+      const panel = document.getElementById('dashCommandDetailsPanel')
+      const button = event.currentTarget
+      if (!(panel instanceof HTMLElement) || !(button instanceof HTMLButtonElement)) {
+        return
+      }
+      const nextOpen = panel.hidden
+      panel.hidden = !nextOpen
+      button.setAttribute('aria-expanded', nextOpen ? 'true' : 'false')
+      const label = button.firstChild
+      if (label?.nodeType === Node.TEXT_NODE) {
+        label.textContent = nextOpen ? ' Ukryj ' : ' Szczegóły '
+      }
+      if (nextOpen) {
+        window.requestAnimationFrame(() => panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' }))
+      }
+    })
+
+    binding.add(document, 'click', (event) => {
+      const target = event.target
+      const filters = document.getElementById('dashCommandFiltersPanel')
+      const filtersButton = document.getElementById('dashCommandFiltersBtn')
+      if (
+        target instanceof Node &&
+        filters instanceof HTMLElement &&
+        !filters.hidden &&
+        !filters.contains(target) &&
+        !filtersButton?.contains(target)
+      ) {
+        filters.hidden = true
+        filtersButton?.setAttribute('aria-expanded', 'false')
+      }
+    })
+
+    binding.add(document.getElementById('dashActiveWorkersMap'), 'keydown', (event) => {
+      if ((event.key !== 'Enter' && event.key !== ' ') || dashboardActiveWorkerMapDialogIsOpen()) {
+        return
+      }
+      if (event.target !== event.currentTarget) {
+        return
+      }
+      event.preventDefault()
+      dashboardOpenActiveWorkerMapDialog(event.currentTarget)
+    })
+
+    binding.add(document.getElementById('dashActiveWorkersMapClose'), 'click', () => {
+      dashboardCloseActiveWorkerMapDialog()
+    })
+
+    binding.add(document.getElementById('dashActiveWorkersMapOverlay'), 'click', (event) => {
+      if (event.target === event.currentTarget) {
+        dashboardCloseActiveWorkerMapDialog()
+      }
+    })
+
+    binding.add(document.getElementById('dashActiveWorkersMapOverlay'), 'keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        dashboardCloseActiveWorkerMapDialog()
+        return
+      }
+      dashboardTrapActiveWorkerMapDialogFocus(event)
+    })
+
+    binding.add(document.getElementById('dashCommandAllOperations'), 'click', (event) => {
+      dashboardOpenOperationsDialog(event.currentTarget)
+    })
+
+    binding.add(document.getElementById('dashCommandOperationsClose'), 'click', () => {
+      dashboardCloseOperationsDialog()
+    })
+
+    binding.add(document.getElementById('dashCommandOperationsOverlay'), 'click', (event) => {
+      if (event.target === event.currentTarget) {
+        dashboardCloseOperationsDialog()
+      }
+    })
+
+    binding.add(document.getElementById('dashCommandOperationsOverlay'), 'keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        dashboardCloseOperationsDialog()
+        return
+      }
+      dashboardTrapOperationsDialogFocus(event)
+    })
+
+    ;['dashServiceProgressList', 'dashCommandAllOperationsList'].forEach((listId) => {
+      binding.add(document.getElementById(listId), 'click', (event) => {
+        const button = event.target?.closest?.('[data-dashboard-operation-task-id]')
+        const taskId = String(button?.getAttribute?.('data-dashboard-operation-task-id') ?? '').trim()
+        if (!taskId) {
+          return
+        }
+        dashboardCloseOperationsDialog({ restoreFocus: false })
+        kanbanOpenCalendarTask(taskId)
+      })
+    })
 
     binding.add(document.getElementById('dashRefreshBtn'), 'click', (event) => {
       void (async () => {
@@ -6065,14 +9708,6 @@ export function createDashboardFeature(ctx) {
       dashboardSetActivitySettingsOpen(false)
     })
 
-    binding.add(document.getElementById('dashSchedulePrevBtn'), 'click', () => {
-      dashboardMoveScheduleDay(-1)
-    })
-
-    binding.add(document.getElementById('dashScheduleNextBtn'), 'click', () => {
-      dashboardMoveScheduleDay(1)
-    })
-
     binding.add(document.getElementById('dashCommentsAckAll'), 'click', () => {
       dashboardMarkAllCommentsRead()
     })
@@ -6093,67 +9728,76 @@ export function createDashboardFeature(ctx) {
       kanbanOpenCalendarTask(button.getAttribute('data-dash-kanban-task-id'))
     })
 
-    binding.add(document.getElementById('dashScheduleRefreshBtn'), 'click', (event) => {
-      void (async () => {
-        if (!appState.session?.orgId) {
-          return
-        }
-
-        const button =
-          event.currentTarget instanceof HTMLButtonElement
-            ? event.currentTarget
-            : document.getElementById('dashScheduleRefreshBtn')
-        if (!button || button.disabled) {
-          return
-        }
-
-        button.disabled = true
-        button.classList.add('is-loading')
-        button.setAttribute('aria-busy', 'true')
-
-        try {
-          await refreshDashboardWidgets({ forceRefresh: true, syncWorktimeToken: true })
-          showTransientNotice('Grafik dnia został odświeżony.')
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Nie udało się odświeżyć grafiku dnia.'
-          showTransientNotice(message, 'error')
-        } finally {
-          button.disabled = false
-          button.classList.remove('is-loading')
-          button.setAttribute('aria-busy', 'false')
-        }
-      })()
-    })
 
     const metricButtons = [...document.querySelectorAll('[data-dash-metric]')]
     metricButtons.forEach((button) => {
       const metricKey = String(button.getAttribute('data-dash-metric') ?? '').trim()
+      const opensList = button.getAttribute('data-dash-metric-view') === 'list'
       if (!metricKey) {
         return
       }
 
-      binding.add(button, 'mouseenter', () => {
-        dashboardShowMetricPopover(metricKey, button)
-      })
+      if (!opensList) {
+        binding.add(button, 'mouseenter', () => {
+          dashboardShowMetricPopover(metricKey, button)
+        })
 
-      binding.add(button, 'focus', () => {
-        dashboardShowMetricPopover(metricKey, button)
-      })
+        binding.add(button, 'focus', () => {
+          dashboardShowMetricPopover(metricKey, button)
+        })
 
-      binding.add(button, 'mouseleave', (event) => {
-        const related = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null
-        const popover = document.getElementById('dashMetricPopover')
-        if (related && (button.contains(related) || popover?.contains(related))) {
+        binding.add(button, 'mouseleave', (event) => {
+          const related = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null
+          const popover = document.getElementById('dashMetricPopover')
+          if (related && (button.contains(related) || popover?.contains(related))) {
+            return
+          }
+          dashboardScheduleMetricPopoverHide()
+        })
+
+        binding.add(button, 'blur', (event) => {
+          const related = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null
+          const popover = document.getElementById('dashMetricPopover')
+          if (related && popover?.contains(related)) {
+            return
+          }
+          dashboardScheduleMetricPopoverHide()
+        })
+      }
+
+      binding.add(button, 'click', (event) => {
+        if (opensList) {
+          event.preventDefault()
+          const popover = document.getElementById('dashMetricPopover')
+          const isOpen =
+            popover?.style.display !== 'none' &&
+            popover?.getAttribute('data-metric') === metricKey &&
+            popover?.getAttribute('data-pinned') === 'true'
+          if (isOpen) {
+            dashboardHideMetricPopover()
+            return
+          }
+
+          const openedPopover = dashboardShowMetricPopover(metricKey, button, { pinned: true })
+          window.setTimeout(() => {
+            const firstItem = openedPopover?.querySelector?.('[data-dash-metric-detail]')
+            if (firstItem instanceof HTMLElement) {
+              firstItem.focus()
+              return
+            }
+            const closeButton = openedPopover?.querySelector?.('#dashMetricPopoverClose')
+            if (closeButton instanceof HTMLElement) {
+              closeButton.focus()
+              return
+            }
+            if (openedPopover instanceof HTMLElement) {
+              openedPopover.tabIndex = -1
+              openedPopover.focus()
+            }
+          }, 0)
           return
         }
-        dashboardScheduleMetricPopoverHide()
-      })
 
-      binding.add(button, 'blur', () => {
-        dashboardScheduleMetricPopoverHide()
-      })
-
-      binding.add(button, 'click', () => {
         const details = dashboardMetricDetailsOrEmpty(metricKey)
         if (!details.length) {
           return
@@ -6169,11 +9813,56 @@ export function createDashboardFeature(ctx) {
     })
 
     binding.add(document.getElementById('dashMetricPopover'), 'mouseleave', (event) => {
+      const popover = document.getElementById('dashMetricPopover')
+      if (popover?.getAttribute('data-pinned') === 'true') {
+        return
+      }
       const related = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null
       if (related?.closest?.('[data-dash-metric]')) {
         return
       }
       dashboardScheduleMetricPopoverHide()
+    })
+
+    binding.add(document.getElementById('dashMetricPopover'), 'focusin', () => {
+      dashboardCancelMetricPopoverHide()
+    })
+
+    binding.add(document.getElementById('dashMetricPopover'), 'focusout', (event) => {
+      const popover = document.getElementById('dashMetricPopover')
+      const related = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null
+      if (related && (popover?.contains(related) || related.closest?.('[data-dash-metric]'))) {
+        return
+      }
+      dashboardHideMetricPopover()
+    })
+
+    binding.add(document.getElementById('dashMetricPopoverClose'), 'click', () => {
+      dashboardHideMetricPopover({ restoreFocus: true })
+    })
+
+    binding.add(document.getElementById('dashMetricPopover'), 'keydown', (event) => {
+      if (event.key !== 'Tab') {
+        return
+      }
+      const popover = document.getElementById('dashMetricPopover')
+      const focusable = [...(popover?.querySelectorAll?.('button:not(:disabled)') ?? [])].filter(
+        (node) => node instanceof HTMLElement && node.offsetParent !== null,
+      )
+      if (!focusable.length) {
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+        return
+      }
+      if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     })
 
     binding.add(document.getElementById('dashMetricPopover'), 'click', (event) => {
@@ -6193,12 +9882,36 @@ export function createDashboardFeature(ctx) {
       })
     })
 
-    binding.add(window, 'resize', () => {
+    binding.add(document, 'click', (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      const popover = document.getElementById('dashMetricPopover')
+      if (!target || !popover || popover.style.display === 'none') {
+        return
+      }
+      if (popover.contains(target) || target.closest('[data-dash-metric]')) {
+        return
+      }
       dashboardHideMetricPopover()
-      syncDashboardSidePanelHeight()
+    })
+
+    binding.add(document, 'keydown', (event) => {
+      if (event.key !== 'Escape') {
+        return
+      }
+      const popover = document.getElementById('dashMetricPopover')
+      if (!popover || popover.style.display === 'none') {
+        return
+      }
+      dashboardHideMetricPopover({ restoreFocus: true })
+    })
+
+    binding.add(window, 'resize', () => {
+      const popover = document.getElementById('dashMetricPopover')
+      dashboardHideMetricPopover({ restoreFocus: Boolean(popover?.contains(document.activeElement)) })
     })
     binding.add(window, 'scroll', () => {
-      dashboardHideMetricPopover()
+      const popover = document.getElementById('dashMetricPopover')
+      dashboardHideMetricPopover({ restoreFocus: Boolean(popover?.contains(document.activeElement)) })
     })
 
     binding.add(document.getElementById('dashEventsList'), 'click', (event) => {
@@ -6303,21 +10016,6 @@ export function createDashboardFeature(ctx) {
       }
     })
 
-    binding.add(document.getElementById('dashScheduleCards'), 'click', (event) => {
-      const button = event.target.closest('[data-dash-worker-login], [data-dash-worker-name]')
-      if (!button) {
-        return
-      }
-
-      const workerLogin = String(button.getAttribute('data-dash-worker-login') ?? '').trim()
-      const workerName = String(button.getAttribute('data-dash-worker-name') ?? '').trim()
-      if (!workerLogin && !workerName) {
-        return
-      }
-
-      void openDashboardWorkerHistory(workerLogin, workerName)
-    })
-
     return () => {
       dashboardHideMetricPopover()
       cleanupDashboardTableResize()
@@ -6332,28 +10030,19 @@ export function createDashboardFeature(ctx) {
   function cleanup() {
     stopDashboardAutoRefresh()
     dashboardHideMetricPopover()
-    dashboardHideScheduleMissingStartAlert()
-    dashboardHideScheduleLateStartAlert()
-    if (dashboardScheduleLimitRaf) {
-      window.cancelAnimationFrame(dashboardScheduleLimitRaf)
-      dashboardScheduleLimitRaf = 0
-    }
-    if (dashboardScheduleLimitTimerA) {
-      window.clearTimeout(dashboardScheduleLimitTimerA)
-      dashboardScheduleLimitTimerA = 0
-    }
-    if (dashboardScheduleLimitTimerB) {
-      window.clearTimeout(dashboardScheduleLimitTimerB)
-      dashboardScheduleLimitTimerB = 0
-    }
+    dashboardCloseOperationsDialog({ restoreFocus: false })
+    dashboardServiceOperationStream = []
+    dashboardDestroyActiveWorkerMap()
     if (dashboardLoadingOverlayTimer) {
       window.clearTimeout(dashboardLoadingOverlayTimer)
       dashboardLoadingOverlayTimer = 0
     }
     dashboardBackgroundRefreshPromise = null
     dashboardReferencePreloadPromise = null
-    dashboardScheduleRefreshPromise = null
     dashboardWidgetsRefreshPromise = null
+    dashboardContractProfitabilityResizeObserver?.disconnect?.()
+    dashboardContractProfitabilityResizeObserver = null
+    dashboardContractProfitabilityObservedCanvas = null
   }
 
   const helpers = {
@@ -6397,14 +10086,11 @@ export function createDashboardFeature(ctx) {
     refreshAfterEventSave: refreshDashboardAfterEventSave,
     triggerRefreshIfAllowed: triggerDashboardRefreshIfAllowed,
     startAutoRefresh: startDashboardAutoRefresh,
-    startScheduleRefresh: dashboardStartScheduleRefresh,
     stopAutoRefresh: stopDashboardAutoRefresh,
     syncLoadingOverlay: dashboardSyncLoadingOverlay,
     renderActivityCalendar: renderDashboardActivityCalendar,
     renderKanbanTasks: renderDashboardKanbanTasks,
     hideMetricPopover: dashboardHideMetricPopover,
-    hideScheduleMissingStartAlert: dashboardHideScheduleMissingStartAlert,
-    hideScheduleLateStartAlert: dashboardHideScheduleLateStartAlert,
     deferRouteTaskDataRefresh,
     hydrate: hydrateSections,
     loadFastRows: dashboardLoadFastRows,

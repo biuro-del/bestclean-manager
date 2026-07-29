@@ -1,4 +1,4 @@
-import { platformContextHeaders, workersForOrg } from './platformDataConnectService'
+import { platformContextHeaders } from './platformDataConnectService'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
 const READ_CACHE_MS = 30000
@@ -111,6 +111,7 @@ function isLocalWorkerAdminEndpoint(value) {
     endpoint.startsWith('/api/admin/worker-profile/') ||
     endpoint.startsWith('/api/admin/worker-password/') ||
     endpoint.startsWith('/api/admin/workers/') ||
+    endpoint === '/api/admin/workers' ||
     endpoint === '/api/auth/provision-worker' ||
     endpoint === '/api/auth/rollback-worker'
   )
@@ -202,6 +203,7 @@ function resolveFunctionEndpoint(envKey, functionName) {
   const useEmulators = isTrue(import.meta.env.VITE_USE_EMULATORS)
   const apiEndpoints = {
     adminUsers: '/api/admin/users',
+    workersList: '/api/admin/workers',
     workerIdNext: '/api/admin/worker-id/next',
     workerPasswordSet: '/api/admin/worker-password/set',
     workerProfileUpdate: '/api/admin/worker-profile/update',
@@ -418,6 +420,16 @@ async function adminUsersCreate(payload) {
   )
 }
 
+async function workersList(orgId) {
+  return callAuthorizedFunction(
+    'workersList',
+    'VITE_WORKERS_LIST_ENDPOINT',
+    null,
+    'Nie udalo sie pobrac pracownikow.',
+    { method: 'GET', query: { orgId } },
+  )
+}
+
 async function workerIdNext(orgId) {
   return callAuthorizedFunction(
     'workerIdNext',
@@ -481,6 +493,7 @@ function mapWorker(orgId, row) {
   const role = rawRole || systemRole
   const displayType = rawWorkerType || formatWorkerRoleLabel(rawRole || systemRole, 'Pracownik')
   const loginEmail = String(row.loginEmail ?? row.email ?? '').trim()
+  const photoUrl = String(row.photoUrl ?? row.profilePhotoUrl ?? row.avatarUrl ?? row.photo_url ?? '').trim()
 
   return {
     id: workerId,
@@ -500,6 +513,8 @@ function mapWorker(orgId, row) {
     authUid: String(row.authUid ?? row.auth_uid ?? '').trim(),
     email: loginEmail,
     phone: String(row.phone ?? '').trim(),
+    photoUrl,
+    profilePhotoUrl: photoUrl,
     editedBy: String(row.updatedBy ?? row.edit ?? '').trim(),
     addedAt: String(row.createdAt ?? '').trim(),
     editedAt: String(row.updatedAt ?? '').trim(),
@@ -520,19 +535,9 @@ export async function getWorkers(orgId, filters = {}) {
       filters?.noCache ||
       filters?.fetchPolicy === 'SERVER_ONLY',
   )
-  const fetchPolicy = String(filters?.fetchPolicy ?? (force ? 'SERVER_ONLY' : '')).trim()
   const rows = await readWorkersCached(orgId, async () => {
-    const response = fetchPolicy
-      ? await workersForOrg({ orgId }, { fetchPolicy })
-      : await workersForOrg({ orgId })
-    let ownerWorkerId = String(response?.data?.organization?.ownerWorkerId ?? '').trim()
-    if (!ownerWorkerId) {
-      try {
-        ownerWorkerId = String((await getNextWorkerIdPreview(orgId))?.ownerWorkerId ?? '').trim()
-      } catch {
-        // Read-only roles can still list workers; the backend remains authoritative for OWNER protection.
-      }
-    }
+    const response = await workersList(orgId)
+    const ownerWorkerId = String(response?.data?.ownerWorkerId ?? '').trim()
     return (response?.data?.workers ?? []).map((row) => ({
       ...row,
       ownerWorkerId,
@@ -601,6 +606,9 @@ export async function createWorkerUser(orgId, payload) {
     workerType: String(payload?.workerType ?? payload?.role ?? role).trim() || role,
     password,
     phone: asNullableText(payload?.phone),
+    photoUrl: asNullableText(payload?.photoUrl),
+    photoDataUrl: asNullableText(payload?.photoDataUrl),
+    removePhoto: Boolean(payload?.removePhoto),
     active: asBoolean(payload?.active, true),
   }
   if (
@@ -685,6 +693,9 @@ export async function updateWorker(orgId, workerId, payload) {
     active,
     editedBy: asNullableText(payload?.edit ?? payload?.editedBy),
     authUid: asNullableText(payload?.authUid ?? payload?.uid),
+    photoUrl: asNullableText(payload?.photoUrl),
+    photoDataUrl: asNullableText(payload?.photoDataUrl),
+    removePhoto: Boolean(payload?.removePhoto),
   })
 
   invalidateWorkersCache(orgId)
@@ -732,6 +743,8 @@ export async function updateWorker(orgId, workerId, payload) {
     storage: String(response?.data?.storage ?? '').trim(),
     persistenceVerified: Boolean(response?.data?.persistenceVerified),
     loginChangeSkipped: Boolean(response?.data?.loginChangeSkipped),
+    photoUrl: String(responseWorker?.photoUrl ?? responseWorker?.profilePhotoUrl ?? '').trim(),
+    profilePhotoUrl: String(responseWorker?.profilePhotoUrl ?? responseWorker?.photoUrl ?? '').trim(),
   }
 }
 

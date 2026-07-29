@@ -1426,6 +1426,7 @@ export function createReportsFeature(ctx) {
 
         await updateEvent(appState.session.orgId, eventId, {
           ...source,
+          correlationIdentityBaseline: source,
           eventId,
           workdayId: String(source?.workdayId ?? eventId).trim() || eventId,
           workerLogin: sourceWorkerLogin,
@@ -2788,7 +2789,10 @@ export function createReportsFeature(ctx) {
     const scopeFilter = options?.scopeFilter && typeof options.scopeFilter === 'object' ? options.scopeFilter : null
     reportHistoryScopedFilter = scopeFilter
 
-    go('reports')
+    const routeReady = await go('reports')
+    if (routeReady === false) {
+      return false
+    }
     await ensureReportsViewReady()
     openReportBuilder(reportHistoryKindForTab(normalizedTab))
     reportHistorySetTab(normalizedTab)
@@ -2872,7 +2876,10 @@ export function createReportsFeature(ctx) {
       return
     }
 
-    go('reports')
+    const routeReady = await go('reports')
+    if (routeReady === false) {
+      return
+    }
     await ensureReportsViewReady()
     openReportBuilder('workerTime')
     reportHistorySetTab('workers')

@@ -11,6 +11,10 @@ require('dotenv').config({
 
 const DEFAULT_DB_USER_SECRET = 'PORTAL_DB_USER'
 const DEFAULT_DB_PASS_SECRET = 'PORTAL_DB_PASS'
+const CLEANZI_PROJECT_ID = 'iclean-room'
+const CLEANZI_CLOUD_SQL_CONNECTION_NAME = 'iclean-room:europe-west3:iclean-room-instance'
+const CLEANZI_DATABASE_NAME = 'iclean-room-database'
+const CLEANZI_AUTH_SESSION_PROXY_TARGET = 'https://portal.cleanzi.pl'
 const SECRET_MANAGER_SCOPE = 'https://www.googleapis.com/auth/cloud-platform'
 
 function hasText(value) {
@@ -39,6 +43,62 @@ function hasDatabaseConnectionConfig() {
 
 function isDisabled(value) {
   return ['0', 'false', 'no', 'off'].includes(String(value ?? '').trim().toLowerCase())
+}
+
+function resolveLocalCloudSqlCoordinates(env = process.env) {
+  const projectId = String(
+    env.DEV_SECRET_PROJECT_ID ||
+      env.PLATFORM_FIREBASE_PROJECT_ID ||
+      env.FIREBASE_PROJECT_ID ||
+      env.GOOGLE_CLOUD_PROJECT ||
+      env.GCLOUD_PROJECT ||
+      env.VITE_FIREBASE_PROJECT_ID ||
+      '',
+  ).trim()
+  const isCleanziProject = projectId === CLEANZI_PROJECT_ID
+
+  return {
+    projectId,
+    connectionName: String(
+      env.CLOUD_SQL_CONNECTION_NAME ||
+        env.INSTANCE_CONNECTION_NAME ||
+        (isCleanziProject ? CLEANZI_CLOUD_SQL_CONNECTION_NAME : ''),
+    ).trim(),
+    databaseName: String(
+      env.DB_NAME ||
+        env.PGDATABASE ||
+        (isCleanziProject ? CLEANZI_DATABASE_NAME : ''),
+    ).trim(),
+  }
+}
+
+function configureAuthSessionProxy(env = process.env, args = process.argv.slice(2)) {
+  if (!args.includes('--auth-session-proxy')) {
+    delete env.DEV_AUTH_SESSION_PROXY_ENABLED
+    delete env.VITE_DEV_AUTH_API_PROXY_TARGET
+    return { enabled: false, target: '' }
+  }
+
+  const { projectId } = resolveLocalCloudSqlCoordinates(env)
+  if (projectId !== CLEANZI_PROJECT_ID) {
+    throw new Error('DEV_AUTH_SESSION_PROXY_PROJECT_MISMATCH')
+  }
+
+  const target = String(
+    env.VITE_DEV_AUTH_API_PROXY_TARGET ||
+      env.AUTH_SESSION_PROXY_TARGET ||
+      CLEANZI_AUTH_SESSION_PROXY_TARGET,
+  )
+    .trim()
+    .replace(/\/+$/, '')
+
+  if (target !== CLEANZI_AUTH_SESSION_PROXY_TARGET) {
+    throw new Error('DEV_AUTH_SESSION_PROXY_TARGET_NOT_ALLOWED')
+  }
+
+  env.VITE_DEV_AUTH_API_PROXY_TARGET = target
+  env.DEV_AUTH_SESSION_PROXY_ENABLED = '1'
+  return { enabled: true, target }
 }
 
 async function getGoogleAuthorizationHeader() {
@@ -86,18 +146,11 @@ async function loadLocalCloudSqlConfig() {
     return
   }
 
-  const projectId = String(
-      process.env.DEV_SECRET_PROJECT_ID ||
-      process.env.PLATFORM_FIREBASE_PROJECT_ID ||
-      process.env.FIREBASE_PROJECT_ID ||
-      process.env.GOOGLE_CLOUD_PROJECT ||
-      process.env.GCLOUD_PROJECT ||
-      '',
-  ).trim()
-  const connectionName = String(process.env.CLOUD_SQL_CONNECTION_NAME || process.env.INSTANCE_CONNECTION_NAME || '').trim()
-  const databaseName = String(process.env.DB_NAME || process.env.PGDATABASE || '').trim()
+  const { projectId, connectionName, databaseName } = resolveLocalCloudSqlCoordinates()
   if (!projectId || !connectionName || !databaseName) {
-    throw new Error('DEV_DATABASE_CONFIG_MISSING: ustaw FIREBASE_PROJECT_ID, CLOUD_SQL_CONNECTION_NAME i DB_NAME')
+    throw new Error(
+      'DEV_DATABASE_CONFIG_MISSING: ustaw VITE_FIREBASE_PROJECT_ID lub FIREBASE_PROJECT_ID oraz CLOUD_SQL_CONNECTION_NAME i DB_NAME',
+    )
   }
   const dbUserSecret = String(process.env.DEV_DB_USER_SECRET || DEFAULT_DB_USER_SECRET).trim()
   const dbPassSecret = String(process.env.DEV_DB_PASS_SECRET || DEFAULT_DB_PASS_SECRET).trim()
@@ -151,12 +204,23 @@ function startDevStack() {
 }
 
 async function main() {
+  const authSessionProxy = configureAuthSessionProxy()
+  if (authSessionProxy.enabled) {
+    console.log(`[dev] auth-session -> trusted deployed backend ${authSessionProxy.target}`)
+  }
   await loadLocalCloudSqlConfig()
   startDevStack()
 }
 
-main().catch((error) => {
-  console.error(`[dev] Cloud SQL local config -> failed (${error?.message || error})`)
-  console.error('[dev] Odśwież poświadczenia ADC: gcloud auth application-default login')
-  process.exit(1)
-})
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(`[dev] Cloud SQL local config -> failed (${error?.message || error})`)
+    console.error('[dev] Odśwież poświadczenia ADC: gcloud auth application-default login')
+    process.exit(1)
+  })
+}
+
+module.exports = {
+  configureAuthSessionProxy,
+  resolveLocalCloudSqlCoordinates,
+}

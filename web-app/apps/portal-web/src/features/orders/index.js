@@ -1,3 +1,20 @@
+import {
+  compileOrderDraftToJobCardDraft,
+  defaultJobCardRecurrenceUntil,
+  validateJobCardDraft,
+} from './jobCardDraftModel.js'
+import { fetchJobCardState, publishJobCard } from '../../services/jobCardService.js'
+
+export {
+  deriveIssaProductivityM2PerHour,
+  estimateIssaDuration,
+  findVerifiedIssaNorm,
+  formatIssaNormCitation,
+  ISSA_NORM_CATALOG_V1,
+  listVerifiedIssaNorms,
+  validateIssaNormCatalog,
+} from './issa/index.js'
+
 export const section = 'orders'
 export const routes = ['orders', 'ordersMap']
 
@@ -106,6 +123,8 @@ export function createOrdersFeature(ctx) {
   let ordersEditorWizardRefreshTimer = 0
   let ordersWorkerResourcesLoadPromise = null
   let ordersEditorPreferredServiceBlockContext = null
+  let ordersJobCardWarningAcknowledgements = new Set()
+  const ordersJobCardPublicationState = new Map()
 
   function ordersDateTimeFromTimeline(dayKey = '', timeValue = '') {
     const day = String(dayKey ?? '').trim()
@@ -5403,6 +5422,7 @@ export function createOrdersFeature(ctx) {
   
   function ordersOpenAddEditor(targetDate = todayYmd(), options = {}) {
     ordersClearEditorServiceBlockContext()
+    ordersJobCardWarningAcknowledgements = new Set()
     const dayKey = ordersNormalizeDateField(targetDate, todayYmd())
     void ordersWarmLocationSources().then(() => {
       if (appState.currentRoute === 'orders' && appState.ordersEditorMode === 'add') {
@@ -6332,6 +6352,347 @@ export function createOrdersFeature(ctx) {
     return text || fallback
   }
 
+  function ordersJobCardPreviewEnabled() {
+    const enabledByEnvironment = String(import.meta.env.VITE_ENABLE_JOB_CARD_PREVIEW ?? '').trim() === '1'
+    const enabledForLocalQa =
+      import.meta.env.DEV &&
+      typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('jobCardPreview') === '1'
+    return enabledByEnvironment || enabledForLocalQa
+  }
+
+  function ordersReadBooleanChoice(id) {
+    const value = ordersReadInputValue(id)
+    if (value === 'true') return true
+    if (value === 'false') return false
+    return undefined
+  }
+
+  function ordersJobCardStoredDraft(order = {}) {
+    return order?.jobCardDraft && typeof order.jobCardDraft === 'object' ? order.jobCardDraft : {}
+  }
+
+  function ordersJobCardWorkerIdentity(assignment = {}) {
+    return String(
+      assignment.workerId ||
+        assignment.workerLogin ||
+        assignment.key ||
+        (Number.isInteger(Number(assignment.row)) ? `row:${Number(assignment.row)}` : ''),
+    ).trim()
+  }
+
+  function ordersRenderJobCardRolePickers(order = {}, options = {}) {
+    const storedCard = ordersJobCardStoredDraft(order)
+    const selectedLeader = options.preserve
+      ? ordersReadInputValue('ordersJobCardLeaderWorker')
+      : String(order.leaderWorkerId || storedCard?.fulfillment?.leaderWorkerId || '').trim()
+    const selectedDriver = options.preserve
+      ? ordersReadInputValue('ordersJobCardDriverWorker')
+      : String(order.driverWorkerId || storedCard?.fulfillment?.driverWorkerId || '').trim()
+    const serviceAssignments = ordersReadServiceBlocksFromControls(order)
+      .flatMap((block) => Array.isArray(block?.slots) ? block.slots : [])
+      .map((slot) => {
+        const row = Number(slot?.row)
+        if (Number.isInteger(row) && row >= 0) {
+          return ordersWorkerAssignmentsFromRows([row])[0] || slot
+        }
+        return slot
+      })
+    const assignmentMap = new Map()
+    ;[
+      ...ordersWorkerAssignmentsFromRows(ordersReadSelectedWorkerRows()),
+      ...serviceAssignments,
+    ]
+      .filter((assignment) => assignment?.workerId || assignment?.workerLogin)
+      .forEach((assignment) => {
+        const identity = ordersJobCardWorkerIdentity(assignment)
+        if (identity && !assignmentMap.has(identity)) {
+          assignmentMap.set(identity, assignment)
+        }
+      })
+    const assignments = [...assignmentMap.values()]
+    const optionsHtml = [
+      '<option value="">Nie wyznaczono</option>',
+      ...assignments.map((assignment) => {
+        const identity = ordersJobCardWorkerIdentity(assignment)
+        return `<option value="${escapeHtml(identity)}">${escapeHtml(assignment.name || identity)}</option>`
+      }),
+    ].join('')
+
+    ;[
+      ['ordersJobCardLeaderWorker', selectedLeader],
+      ['ordersJobCardDriverWorker', selectedDriver],
+    ].forEach(([id, selected]) => {
+      const control = document.getElementById(id)
+      if (!(control instanceof HTMLSelectElement)) return
+      control.innerHTML = optionsHtml
+      control.value = [...control.options].some((option) => option.value === selected) ? selected : ''
+    })
+  }
+
+  function ordersReadJobCardOperationalFields(order = {}) {
+    const dispatchRequired = ordersReadBooleanChoice('ordersJobCardDispatchRequired')
+    const packingRequired = ordersReadBooleanChoice('ordersJobCardPackingRequired')
+    const amountValue = ordersReadInputValue('ordersJobCardAmount')
+    const fallbackPrice = Number(order.price) || 0
+    return {
+      siteMode: ordersReadInputValue('ordersJobCardSiteMode'),
+      serviceType: ordersReadInputValue('ordersJobCardServiceType'),
+      crewSource: ordersReadInputValue('ordersJobCardCrewSource'),
+      dispatchRequired,
+      leaderWorkerId: ordersReadInputValue('ordersJobCardLeaderWorker'),
+      driverWorkerId: ordersReadInputValue('ordersJobCardDriverWorker'),
+      vehicleId: ordersReadInputValue('ordersJobCardVehicleId'),
+      vehicleLabel: ordersReadInputValue('ordersJobCardVehicleId'),
+      vehicleRegistrationNumber: ordersReadInputValue('ordersJobCardVehicleId'),
+      packingRequired,
+      accessInstruction: ordersReadInputValue('ordersJobCardAccessInstruction'),
+      accessInstructionConfirmedNone: ordersReadCheckboxValue('ordersJobCardAccessNone'),
+      safetyInstruction: ordersReadInputValue('ordersJobCardSafetyInstruction'),
+      safetyInstructionConfirmedNone: ordersReadCheckboxValue('ordersJobCardSafetyNone'),
+      escalationInstruction: ordersReadInputValue('ordersJobCardEscalationInstruction'),
+      paymentMethod: ordersReadInputValue('ordersJobCardPaymentMethod'),
+      pricingMode: ordersReadInputValue('ordersJobCardPricingMode'),
+      price: amountValue === '' ? fallbackPrice : Math.max(0, Number(amountValue) || 0),
+      contractId: ordersReadInputValue('ordersJobCardContractId'),
+      paymentTermDays: Math.max(0, Math.floor(Number(ordersReadInputValue('ordersJobCardPaymentTermDays')) || 0)),
+      signatureRequired: ordersReadCheckboxValue('ordersJobCardSignatureRequired', true),
+      recurrenceHorizonConfirmed: ordersReadCheckboxValue('ordersJobCardRecurrenceConfirmed'),
+    }
+  }
+
+  function ordersSyncJobCardOperationalDependencies(order = {}) {
+    const accessNone = ordersReadCheckboxValue('ordersJobCardAccessNone')
+    const safetyNone = ordersReadCheckboxValue('ordersJobCardSafetyNone')
+    const dispatchRequired = ordersReadBooleanChoice('ordersJobCardDispatchRequired')
+    const deferredPayment = ordersReadInputValue('ordersJobCardPaymentMethod') === 'DEFERRED'
+    const recurrence =
+      document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat' ||
+      ordersScheduleModeForOrder(order) === 'repeat'
+
+    const access = document.getElementById('ordersJobCardAccessInstruction')
+    const safety = document.getElementById('ordersJobCardSafetyInstruction')
+    const driver = document.getElementById('ordersJobCardDriverWorker')
+    const vehicle = document.getElementById('ordersJobCardVehicleId')
+    const paymentTerm = document.getElementById('ordersJobCardPaymentTermDays')
+    const recurrenceRow = document.getElementById('ordersJobCardRecurrenceConfirmationRow')
+    if (access instanceof HTMLTextAreaElement) access.disabled = accessNone
+    if (safety instanceof HTMLTextAreaElement) safety.disabled = safetyNone
+    if (driver instanceof HTMLSelectElement) driver.disabled = dispatchRequired !== true
+    if (vehicle instanceof HTMLInputElement) vehicle.disabled = dispatchRequired !== true
+    if (paymentTerm instanceof HTMLInputElement) paymentTerm.disabled = !deferredPayment
+    if (recurrenceRow instanceof HTMLElement) recurrenceRow.hidden = !recurrence
+  }
+
+  function ordersRenderJobCardOperationalFields(order = {}) {
+    const storedCard = ordersJobCardStoredDraft(order)
+    const storedPacking = order.packingRequired ?? storedCard?.resources?.packingRequired
+    const storedDispatch = order.dispatchRequired ?? storedCard?.fulfillment?.dispatchRequired
+    const storedSignature = order.signatureRequired ?? storedCard?.completion?.signatureRequired
+    ordersSetInputValue('ordersJobCardSiteMode', order.siteMode || storedCard?.site?.mode || '')
+    ordersSetInputValue('ordersJobCardServiceType', order.serviceType || storedCard?.service?.serviceType || '')
+    ordersSetInputValue('ordersJobCardCrewSource', order.crewSource || storedCard?.fulfillment?.crewSource || '')
+    ordersSetInputValue(
+      'ordersJobCardDispatchRequired',
+      typeof storedDispatch === 'boolean' ? String(storedDispatch) : '',
+    )
+    ordersSetInputValue(
+      'ordersJobCardVehicleId',
+      order.vehicleId ||
+        order.vehicleRegistrationNumber ||
+        storedCard?.fulfillment?.vehicle?.vehicleId ||
+        storedCard?.fulfillment?.vehicle?.registrationNumber ||
+        '',
+    )
+    ordersSetInputValue(
+      'ordersJobCardPackingRequired',
+      typeof storedPacking === 'boolean' ? String(storedPacking) : '',
+    )
+    ordersSetInputValue('ordersJobCardAccessInstruction', order.accessInstruction || storedCard?.site?.accessInstruction || '')
+    ordersSetCheckboxValue(
+      'ordersJobCardAccessNone',
+      order.accessInstructionConfirmedNone === true || storedCard?.site?.accessInstructionConfirmedNone === true,
+    )
+    ordersSetInputValue('ordersJobCardSafetyInstruction', order.safetyInstruction || storedCard?.service?.safetyInstruction || '')
+    ordersSetCheckboxValue(
+      'ordersJobCardSafetyNone',
+      order.safetyInstructionConfirmedNone === true || storedCard?.service?.safetyInstructionConfirmedNone === true,
+    )
+    ordersSetInputValue(
+      'ordersJobCardEscalationInstruction',
+      order.escalationInstruction || storedCard?.service?.escalationInstruction || '',
+    )
+    ordersSetInputValue('ordersJobCardPaymentMethod', order.paymentMethod || storedCard?.commercial?.paymentMethod || '')
+    ordersSetInputValue('ordersJobCardPricingMode', order.pricingMode || storedCard?.commercial?.pricingMode || '')
+    ordersSetInputValue('ordersJobCardAmount', order.price ?? storedCard?.commercial?.amount ?? 0)
+    ordersSetInputValue('ordersJobCardContractId', order.contractId || storedCard?.commercial?.contractId || '')
+    ordersSetInputValue(
+      'ordersJobCardPaymentTermDays',
+      order.paymentTermDays ?? storedCard?.commercial?.paymentTermDays ?? 0,
+    )
+    ordersSetCheckboxValue('ordersJobCardSignatureRequired', typeof storedSignature === 'boolean' ? storedSignature : true)
+    ordersSetCheckboxValue(
+      'ordersJobCardRecurrenceConfirmed',
+      order.recurrenceHorizonConfirmed === true || storedCard?.schedule?.recurrenceHorizonConfirmed === true,
+    )
+    ordersRenderJobCardRolePickers(order)
+    ordersSyncJobCardOperationalDependencies(order)
+  }
+
+  function ordersJobCardPreviewSource(order = {}) {
+    const clientSelection = ordersReadInputValue('ordersEditClient')
+    const isIndividualClient = ordersIsIndividualClientSelection(clientSelection)
+    const individualClient = isIndividualClient ? ordersReadIndividualClientDraft() : null
+    const selectedClient = isIndividualClient ? null : ordersFindClientBySelection(clientSelection)
+    const selectedClientData = selectedClient ? ordersClientFormData(selectedClient) : {}
+    const serviceBlocksFromControls = ordersReadServiceBlocksFromControls(order)
+    const serviceBlocks = serviceBlocksFromControls.length ? serviceBlocksFromControls : ordersServiceBlocksForOrder(order)
+    const scheduleMode =
+      document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat'
+        ? 'repeat'
+        : ordersScheduleModeForOrder(order)
+    const executionAddress = ordersEditorExecutionAddressLabel()
+    const clientName =
+      individualClient?.name ||
+      ordersReadInputValue('ordersEditClientName') ||
+      selectedClientData.clientName ||
+      order.clientName ||
+      order.clientLabel
+    const workerComment = ordersReadInputValue('ordersEditWorkerComment') || ordersWorkerOnlyComment(order)
+    const explicitCustomerType = isIndividualClient
+      ? 'B2C'
+      : order.customerType || selectedClientData.customerType || selectedClientData.clientType || (selectedClient ? 'B2B' : '')
+    const operationalFields = ordersReadJobCardOperationalFields(order)
+
+    return {
+      ...order,
+      ...operationalFields,
+      customerType: explicitCustomerType,
+      clientId: isIndividualClient ? '' : selectedClientData.clientId || order.clientId,
+      clientName,
+      clientLabel: clientName,
+      clientNip: individualClient?.nip || ordersReadInputValue('ordersEditNip') || selectedClientData.nip || order.clientNip,
+      phone: individualClient?.phone || ordersReadInputValue('ordersEditPhone') || selectedClientData.phone || order.phone,
+      email: individualClient?.email || ordersReadInputValue('ordersEditEmail') || selectedClientData.email || order.email,
+      executionAddressLabel: executionAddress,
+      customAddressLabel: executionAddress,
+      addressLabel: executionAddress || order.addressLabel,
+      googlePlaceId: ordersReadInputValue('ordersEditLocationPlaceId') || order.googlePlaceId,
+      lat: ordersReadInputValue('ordersEditLocationLat') || order.lat,
+      lng: ordersReadInputValue('ordersEditLocationLng') || order.lng,
+      scheduleMode,
+      dateYmd: ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), order.dateYmd || todayYmd()),
+      repeatUntil: scheduleMode === 'repeat'
+        ? ordersNormalizeDateField(ordersReadInputValue('ordersEditEnd'), ordersRepeatEndDateForOrder(order))
+        : '',
+      serviceBlocks,
+      description: ordersReadInputValue('ordersEditDescription') || order.description,
+      workerComment,
+      objectPlanTasks: ordersObjectPlanTasks(order),
+      supplies: ordersReadEditorSupplies(order),
+      price: operationalFields.price,
+    }
+  }
+
+  function ordersJobCardPreviewScheduleLabel(card = {}) {
+    const mode = card?.schedule?.mode === 'RECURRING' ? 'Cykliczne' : card?.schedule?.mode === 'ONE_OFF' ? 'Jednorazowe' : 'Nie wybrano'
+    const date = card?.schedule?.startDateYmd ? formatDatePl(`${card.schedule.startDateYmd}T12:00:00`) : '-'
+    const firstBlock = card?.schedule?.serviceBlocks?.[0]
+    const time = firstBlock?.startTime && firstBlock?.endTime ? `${firstBlock.startTime}-${firstBlock.endTime}` : 'brak godzin'
+    const recurrence = card?.schedule?.mode === 'RECURRING'
+      ? `, do ${card.schedule.recurrenceUntilYmd ? formatDatePl(`${card.schedule.recurrenceUntilYmd}T12:00:00`) : 'potwierdzenia'}`
+      : ''
+    return `${mode}: ${date}, ${time}${recurrence}`
+  }
+
+  function ordersJobCardPreviewCrewLabel(card = {}) {
+    const uniquePeople = new Map()
+    ;(Array.isArray(card?.fulfillment?.assignments) ? card.fulfillment.assignments : [])
+      .forEach((assignment) => {
+        const identity = String(assignment?.workerId || assignment?.name || '').trim()
+        if (!identity || uniquePeople.has(identity)) {
+          return
+        }
+        uniquePeople.set(identity, String(assignment?.name || assignment?.workerId || '').trim())
+      })
+    return uniquePeople.size ? [...uniquePeople.values()].join(', ') : 'Nie przypisano pracowników'
+  }
+
+  function ordersRenderJobCardPreview(order = {}) {
+    const root = document.getElementById('ordersJobCardPreview')
+    if (!(root instanceof HTMLElement)) {
+      return
+    }
+    const enabled = ordersJobCardPreviewEnabled()
+    const source = document.getElementById('ordersJobCardSource')
+    if (source instanceof HTMLElement) {
+      source.hidden = !enabled
+    }
+    root.hidden = !enabled
+    if (!enabled) {
+      return
+    }
+
+    ordersSyncJobCardOperationalDependencies(order)
+    const card = compileOrderDraftToJobCardDraft(ordersJobCardPreviewSource(order))
+    const validation = validateJobCardDraft(card)
+    const orderId = String(order?.id ?? order?.idTask ?? '').trim()
+    const publication = ordersJobCardPublicationState.get(orderId) || order?.jobCardPublication || null
+    const setText = (id, value) => {
+      const node = document.getElementById(id)
+      if (node) {
+        node.textContent = String(value ?? '')
+      }
+    }
+
+    root.classList.toggle('is-ready', validation.valid)
+    root.classList.toggle('has-errors', !validation.valid)
+    root.classList.toggle('is-published', Boolean(publication?.revision))
+    setText('ordersJobCardPreviewStatus', validation.valid ? 'Gotowa do publikacji' : 'Wymaga uzupełnienia')
+    setText('ordersJobCardPreviewCustomer', card.customer.name || 'Nie wybrano klienta')
+    setText('ordersJobCardPreviewAddress', card.site.address || 'Nie uzupełniono adresu')
+    setText('ordersJobCardPreviewSchedule', ordersJobCardPreviewScheduleLabel(card))
+    setText('ordersJobCardPreviewCrew', ordersJobCardPreviewCrewLabel(card))
+    setText(
+      'ordersJobCardPreviewPayment',
+      card.commercial.paymentMethod
+        ? `${card.commercial.paymentMethod} · ${card.commercial.pricingMode || 'brak sposobu wyceny'}`
+        : 'Nie wybrano płatności',
+    )
+    setText('ordersJobCardPreviewSignature', card.completion.signatureRequired ? 'Wymagany' : 'Niewymagany')
+    setText(
+      'ordersJobCardPreviewPublication',
+      publication?.revision
+        ? `Rewizja ${publication.revision} · ${publication.publishedAt ? formatDatePl(publication.publishedAt) : 'opublikowana'}`
+        : 'Brak opublikowanej rewizji',
+    )
+    setText(
+      'ordersJobCardPreviewValidation',
+      `${validation.errors.length} braków blokujących · ${validation.warnings.length} ostrzeżeń`,
+    )
+
+    const issues = document.getElementById('ordersJobCardPreviewIssues')
+    if (issues) {
+      const visibleIssues = validation.issues.slice(0, 8)
+      issues.innerHTML = visibleIssues.length
+        ? visibleIssues.map((item) => `
+            <li class="${item.severity === 'ERROR' ? 'is-error' : 'is-warning'}">
+              ${item.severity === 'WARNING'
+                ? `<label class="orders-job-card-warning">
+                    <input
+                      type="checkbox"
+                      data-job-card-warning-code="${escapeHtml(item.code)}"
+                      ${ordersJobCardWarningAcknowledgements.has(item.code) ? 'checked' : ''}
+                    />
+                    <span><strong>Potwierdzam ostrzeżenie</strong>${escapeHtml(item.message)}</span>
+                  </label>`
+                : `<strong>Uzupełnij</strong><span>${escapeHtml(item.message)}</span>`}
+            </li>
+          `).join('')
+        : '<li class="is-ready"><strong>Gotowe</strong><span>Karta zawiera wszystkie dane wymagane do publikacji.</span></li>'
+    }
+  }
+
   function ordersEditorGeneratedDescription(order = {}) {
     const rawTitle = ordersReadInputValue('ordersEditName')
     const manualTitle =
@@ -6401,6 +6762,7 @@ export function createOrdersFeature(ctx) {
     const prevButton = root.querySelector('[data-orders-step-prev]')
     const nextButton = root.querySelector('[data-orders-step-next]')
     const saveButton = root.querySelector('#ordersEditSave')
+    const publishButton = root.querySelector('#ordersJobCardPublish')
     if (prevButton instanceof HTMLButtonElement) {
       prevButton.disabled = activeIndex <= 0
     }
@@ -6409,6 +6771,9 @@ export function createOrdersFeature(ctx) {
     }
     if (saveButton instanceof HTMLButtonElement) {
       saveButton.hidden = activeIndex < steps.length - 1
+    }
+    if (publishButton instanceof HTMLButtonElement) {
+      publishButton.hidden = activeIndex < steps.length - 1 || !ordersJobCardPreviewEnabled()
     }
 
     const client = ordersWizardSummaryText(ordersReadInputValue('ordersEditClientName') || ordersReadInputValue('ordersEditClient'))
@@ -6443,6 +6808,7 @@ export function createOrdersFeature(ctx) {
     if (validation) {
       validation.textContent = activeIndex >= steps.length - 1 ? 'Sprawdź podsumowanie przed zapisem.' : '* Pola wymagane'
     }
+    ordersRenderJobCardPreview(order)
   }
   
   function ordersScheduleModeForOrder(order = {}) {
@@ -6470,20 +6836,22 @@ export function createOrdersFeature(ctx) {
     const today = todayYmd()
     const currentStart = ordersNormalizeDateField(ordersReadInputValue('ordersEditStart'), order.dateYmd || today)
     const nextStart = normalized === 'repeat' ? currentStart : today
-    const nextEnd = normalized === 'repeat' ? '' : today
+    const nextEnd = normalized === 'repeat' ? defaultJobCardRecurrenceUntil(nextStart) : today
   
     ordersSetInputValue('ordersEditStart', nextStart)
     ordersSetInputValue('ordersScheduleStartDate', nextStart)
     ordersSetInputValue('ordersEditEnd', nextEnd)
     ordersSetInputValue('ordersScheduleEndDate', nextEnd)
+    ordersSetCheckboxValue('ordersJobCardRecurrenceConfirmed', false)
   
     order.dateYmd = nextStart
     order.endDateYmd = normalized === 'repeat' ? nextStart : nextEnd
     order.validUntil = normalized === 'repeat' ? '' : nextEnd
-    order.repeatUntil = ''
-    order.repeatEndDate = ''
-    order.recurrenceEndDate = ''
-    order.seriesEndDate = ''
+    order.repeatUntil = normalized === 'repeat' ? nextEnd : ''
+    order.repeatEndDate = normalized === 'repeat' ? nextEnd : ''
+    order.recurrenceEndDate = normalized === 'repeat' ? nextEnd : ''
+    order.seriesEndDate = normalized === 'repeat' ? nextEnd : ''
+    order.recurrenceHorizonConfirmed = false
   }
   
   function ordersSetScheduleRepeatDisabled(disabled = true) {
@@ -7436,6 +7804,7 @@ export function createOrdersFeature(ctx) {
     ordersRenderObjectPlan(order)
     ordersRenderSubtasksAndSupplies(order)
     ordersSyncScheduleControls(order)
+    ordersRenderJobCardOperationalFields(order)
     ordersRenderSchedulePreview(order)
     ordersRenderCoworkerRows(order)
     ordersRenderEditorTabs()
@@ -7450,6 +7819,7 @@ export function createOrdersFeature(ctx) {
       return
     }
     ordersClearEditorServiceBlockContext()
+    ordersJobCardWarningAcknowledgements = new Set()
     void ordersWarmLocationSources()
     appState.ordersEditingId = String(orderId ?? '').trim()
     appState.ordersEditorMode = 'edit'
@@ -7472,6 +7842,7 @@ export function createOrdersFeature(ctx) {
     }
   
     ordersSetEditorServiceBlockContext({ ...options, sourceOrderId: id })
+    ordersJobCardWarningAcknowledgements = new Set()
     appState.ordersEditingId = id
     appState.ordersEditorMode = 'edit'
     appState.ordersEditorTab = 'basic'
@@ -7531,6 +7902,7 @@ export function createOrdersFeature(ctx) {
   }
   
   function ordersOpenRecurringOccurrenceEditorFromCalendar(sourceOrderId = '', occurrenceDateYmd = '', options = {}) {
+    ordersJobCardWarningAcknowledgements = new Set()
     const sourceId = String(sourceOrderId ?? '').trim()
     const occurrenceDay = String(occurrenceDateYmd ?? '').trim()
     const sourceOrder = calendarTimelineSourceOrderById(sourceId)
@@ -7584,6 +7956,7 @@ export function createOrdersFeature(ctx) {
     ordersCloseDeviceNoteModal()
     ordersDiscardDraftIfNeeded()
     ordersClearEditorServiceBlockContext()
+    ordersJobCardWarningAcknowledgements = new Set()
     appState.ordersEditingId = ''
     appState.ordersEditorMode = 'edit'
     appState.ordersEditorTab = 'basic'
@@ -7655,7 +8028,7 @@ export function createOrdersFeature(ctx) {
     }
   }
   
-  async function ordersSaveEditor() {
+  async function ordersSaveEditor(options = {}) {
     const order = ordersFindTimelineOrder(appState.ordersEditingId)
     if (!order) {
       showTransientNotice('Nie znaleziono zlecenia do zapisu.', 'error')
@@ -7820,6 +8193,7 @@ export function createOrdersFeature(ctx) {
     const subtasks = ordersReadEditorSubtasks(order)
     const supplies = ordersReadEditorSupplies(order)
     const objectPlanTasks = ordersObjectPlanTasks(order)
+    const jobCardOperationalFields = ordersReadJobCardOperationalFields(order)
     const equipmentToTake = supplies.filter((item) => ordersSupplyKind(item.kind) === 'equipment')
     const chemicalsToTake = supplies.filter((item) => ordersSupplyKind(item.kind) === 'chemical')
     const allowExtendedWork = ordersReadExtendedWorkAllowed()
@@ -7877,6 +8251,7 @@ export function createOrdersFeature(ctx) {
       clientId: isIndividualClient ? '' : selectedClientData.clientId || order.clientId || '',
       clientLabel: clientName || clientLabel,
       clientName,
+      customerType: isIndividualClient ? 'B2C' : 'B2B',
       clientType: isIndividualClient ? 'individual' : order.clientType,
       nip: individualClientDraft?.nip || ordersReadInputValue('ordersEditNip') || selectedClientData.nip,
       clientNip: individualClientDraft?.nip || ordersReadInputValue('ordersEditNip') || selectedClientData.nip,
@@ -7915,7 +8290,7 @@ export function createOrdersFeature(ctx) {
         : Math.max(0, Math.floor(Number(order.advanceDays) || 0)),
       type: ['individual', 'cyclic', 'renovation', 'windows', 'other'].includes(type) ? type : 'other',
       tone: ordersTimelineToneForType(type),
-      price: Math.max(0, Number(ordersReadInputValue('ordersEditPrice')) || 0),
+      price: jobCardOperationalFields.price,
       taskName: subtasks[0]?.name || ordersReadInputValue('ordersEditTaskName'),
       tasks: subtasks,
       subtasks,
@@ -7943,7 +8318,22 @@ export function createOrdersFeature(ctx) {
       commentForWorkers: workerComment,
       deviceNotes: ordersDeviceNotes(order),
       deviceMessages: ordersDeviceNotes(order),
+      ...jobCardOperationalFields,
     }, allowExtendedWork)
+
+    if (ordersJobCardPreviewEnabled()) {
+      const compiledJobCard = compileOrderDraftToJobCardDraft(nextOrder)
+      const jobCardValidation = validateJobCardDraft(compiledJobCard)
+      nextOrder.jobCardDraft = compiledJobCard
+      nextOrder.jobCardSchemaVersion = compiledJobCard.schemaVersion
+      nextOrder.jobCardDraftStatus = 'DRAFT'
+      nextOrder.jobCardDraftUpdatedAt = nowIso
+      nextOrder.jobCardValidation = {
+        validForPublication: jobCardValidation.valid,
+        errors: jobCardValidation.errors,
+        warnings: jobCardValidation.warnings,
+      }
+    }
   
     const conflict = calendarTimelineFindOrderConflict(nextOrder, ordersListSourceOrders(), calendarTimelineResources())
     if (conflict) {
@@ -7984,9 +8374,83 @@ export function createOrdersFeature(ctx) {
       appState.ordersListQuickFilter = 'all'
     }
     appState.ordersEditorMode = 'edit'
-    appState.ordersEditingId = ''
+    appState.ordersEditingId = options.keepEditorOpen === true ? nextOrder.id : ''
     ordersRenderActiveScheduleView()
-    showTransientNotice(isAddMode ? 'Zlecenie dodane i zapisane w bazie.' : 'Zlecenie zapisane w bazie.', 'success')
+    if (options.showSuccess !== false) {
+      showTransientNotice(isAddMode ? 'Zlecenie dodane i zapisane w bazie.' : 'Zlecenie zapisane w bazie.', 'success')
+    }
+    return nextOrder
+  }
+
+  async function ordersPublishJobCard() {
+    const order = ordersFindTimelineOrder(appState.ordersEditingId)
+    if (!order || !ordersJobCardPreviewEnabled()) {
+      showTransientNotice('Nie znaleziono Karty Zlecenia do publikacji.', 'error')
+      return
+    }
+    const card = compileOrderDraftToJobCardDraft(ordersJobCardPreviewSource(order))
+    const validation = validateJobCardDraft(card)
+    ordersRenderJobCardPreview(order)
+    if (!validation.valid) {
+      showTransientNotice('Uzupełnij braki blokujące przed publikacją Karty Zlecenia.', 'error')
+      return
+    }
+    const missingWarningCodes = validation.warnings
+      .map((warning) => warning.code)
+      .filter((code) => !ordersJobCardWarningAcknowledgements.has(code))
+    if (missingWarningCodes.length) {
+      showTransientNotice('Potwierdź osobno każde ostrzeżenie widoczne w podglądzie Karty Zlecenia.', 'error')
+      return
+    }
+
+    const publishButton = document.getElementById('ordersJobCardPublish')
+    if (publishButton instanceof HTMLButtonElement) {
+      publishButton.disabled = true
+      publishButton.textContent = 'Publikowanie...'
+    }
+    try {
+      const savedOrder = await ordersSaveEditor({ keepEditorOpen: true, showSuccess: false })
+      if (!savedOrder) return
+      const orgId = String(appState.session?.activeOrgId ?? appState.session?.orgId ?? '').trim()
+      const state = await fetchJobCardState(orgId, savedOrder.id)
+      const draftHash = String(state?.draft?.draftHash ?? '').trim()
+      if (!draftHash) {
+        throw new Error('Backend nie zwrócił trwałej wersji zapisanego szkicu.')
+      }
+      const result = await publishJobCard(orgId, savedOrder.id, {
+        acknowledgements: validation.warnings.map((warning) => ({
+          accepted: true,
+          code: warning.code,
+        })),
+        expectedDraftHash: draftHash,
+      })
+      const revision = result?.revision
+      if (revision?.revision) {
+        ordersJobCardPublicationState.set(savedOrder.id, {
+          outputHash: revision.outputHash,
+          publishedAt: revision.publishedAt,
+          publishedByUid: revision.publishedByUid,
+          revision: revision.revision,
+          revisionId: revision.revisionId,
+        })
+      }
+      const currentOrder = ordersFindTimelineOrder(savedOrder.id) || savedOrder
+      ordersRenderJobCardPreview(currentOrder)
+      showTransientNotice(
+        result?.idempotent
+          ? `Karta Zlecenia jest już opublikowana jako rewizja ${revision?.revision || ''}.`
+          : `Opublikowano Kartę Zlecenia — rewizja ${revision?.revision || 1}.`,
+        'success',
+      )
+    } catch (error) {
+      showPortalErrorNotice('Nie udało się opublikować Karty Zlecenia.', error)
+    } finally {
+      const currentButton = document.getElementById('ordersJobCardPublish')
+      if (currentButton instanceof HTMLButtonElement) {
+        currentButton.disabled = false
+        currentButton.textContent = 'Publikuj Kartę'
+      }
+    }
   }
   
   function ordersRowsFromCalendarTimeline() {
@@ -8917,6 +9381,9 @@ export function createOrdersFeature(ctx) {
     })
   
     binding.add(root, 'input', (event) => {
+      if (event.target?.closest?.('#ordersEditorPanel')) {
+        ordersJobCardWarningAcknowledgements.clear()
+      }
       if (event.target?.id === 'ordersClientPickerInput') {
         ordersSetClientPickerOpen(true)
         ordersRenderClientPickerList(String(event.target.value ?? ''))
@@ -8990,6 +9457,23 @@ export function createOrdersFeature(ctx) {
           ordersRenderSchedulePreview(order)
           ordersRenderEditorWizard(order)
         }
+        return
+      }
+
+      if (
+        [
+          'ordersEditDescription',
+          'ordersEditWorkerComment',
+          'ordersJobCardAccessInstruction',
+          'ordersJobCardSafetyInstruction',
+          'ordersJobCardEscalationInstruction',
+          'ordersJobCardVehicleId',
+          'ordersJobCardAmount',
+          'ordersJobCardContractId',
+          'ordersJobCardPaymentTermDays',
+        ].includes(String(event.target?.id ?? ''))
+      ) {
+        ordersQueueEditorWizardRefresh(ordersFindTimelineOrder(appState.ordersEditingId) || {})
         return
       }
   
@@ -9067,6 +9551,42 @@ export function createOrdersFeature(ctx) {
     })
   
     binding.add(root, 'change', (event) => {
+      const warningCode = String(event.target?.getAttribute?.('data-job-card-warning-code') ?? '').trim()
+      if (warningCode) {
+        if (event.target?.checked === true) {
+          ordersJobCardWarningAcknowledgements.add(warningCode)
+        } else {
+          ordersJobCardWarningAcknowledgements.delete(warningCode)
+        }
+        return
+      }
+      if (event.target?.closest?.('#ordersEditorPanel')) {
+        ordersJobCardWarningAcknowledgements.clear()
+      }
+
+      if (
+        [
+          'ordersJobCardSiteMode',
+          'ordersJobCardServiceType',
+          'ordersJobCardCrewSource',
+          'ordersJobCardDispatchRequired',
+          'ordersJobCardLeaderWorker',
+          'ordersJobCardDriverWorker',
+          'ordersJobCardPackingRequired',
+          'ordersJobCardAccessNone',
+          'ordersJobCardSafetyNone',
+          'ordersJobCardPaymentMethod',
+          'ordersJobCardPricingMode',
+          'ordersJobCardSignatureRequired',
+          'ordersJobCardRecurrenceConfirmed',
+        ].includes(String(event.target?.id ?? ''))
+      ) {
+        const order = ordersFindTimelineOrder(appState.ordersEditingId) || {}
+        ordersSyncJobCardOperationalDependencies(order)
+        ordersRenderEditorWizard(order)
+        return
+      }
+
       if (
         [
           'ordersListDateFrom',
@@ -9148,6 +9668,7 @@ export function createOrdersFeature(ctx) {
             ordersSyncServiceSlotPersonLabelFromWorker(event.target)
           }
           ordersSyncServiceBlockDraftFromControls(order)
+          ordersRenderJobCardRolePickers(order, { preserve: true })
           ordersRenderWorkAllocationControls(order, { forceEven: true, preferStored: false })
           ordersRenderSchedulePreview(order)
           ordersRenderEditorWizard(order)
@@ -9164,6 +9685,7 @@ export function createOrdersFeature(ctx) {
           ordersSyncScheduleControls(order)
           ordersRefreshObjectPlanScheduleWindow(order, { syncMonth: true })
           ordersRenderSchedulePreview(order)
+          ordersSyncJobCardOperationalDependencies(order)
           ordersRenderEditorWizard(order)
         } else {
           ordersSetScheduleRepeatDisabled(event.target?.value !== 'repeat')
@@ -9184,6 +9706,7 @@ export function createOrdersFeature(ctx) {
           ordersSyncScheduleControls(order)
           ordersRefreshObjectPlanScheduleWindow(order, { syncMonth: true })
           ordersRenderSchedulePreview(order)
+          ordersSyncJobCardOperationalDependencies(order)
           ordersRenderEditorWizard(order)
         }
         return
@@ -9220,6 +9743,12 @@ export function createOrdersFeature(ctx) {
         event.target?.hasAttribute?.('data-orders-work-allocation-end')
       ) {
         const targetId = String(event.target?.id ?? '')
+        if (
+          ['ordersScheduleStartDate', 'ordersScheduleEndDate', 'ordersEditStart', 'ordersEditEnd'].includes(targetId) &&
+          document.querySelector('#ordersEditorPanel input[name="ordersScheduleMode"]:checked')?.value === 'repeat'
+        ) {
+          ordersSetCheckboxValue('ordersJobCardRecurrenceConfirmed', false)
+        }
         ordersSyncMainScheduleFromMirror(targetId)
         if (targetId === 'ordersEditStart' || targetId === 'ordersScheduleStartDate') {
           ordersSetRepeatCalendarMonthFromDate(ordersReadInputValue(targetId))
@@ -9319,6 +9848,7 @@ export function createOrdersFeature(ctx) {
           order.row = row
           order.assignedRows = ordersReadSelectedWorkerRows()
           ordersRenderWorkerChecklist(order)
+          ordersRenderJobCardRolePickers(order, { preserve: true })
           ordersRenderWorkAllocationControls(order, { forceEven: true })
           ordersRenderSchedulePreview(order)
           ordersRenderEditorWizard(order)
@@ -9332,6 +9862,7 @@ export function createOrdersFeature(ctx) {
         if (order) {
           order.row = rows[0] ?? 0
           order.assignedRows = rows
+          ordersRenderJobCardRolePickers(order, { preserve: true })
           ordersRenderWorkAllocationControls(order, { forceEven: true })
           ordersRenderSchedulePreview(order)
           ordersRenderEditorWizard(order)
@@ -9518,6 +10049,13 @@ export function createOrdersFeature(ctx) {
       if (event.target?.id === 'ordersEditorPanel') {
         event.preventDefault()
         ordersShowList()
+        return
+      }
+
+      const publish = eventTargetClosest(event, '#ordersJobCardPublish')
+      if (publish) {
+        event.preventDefault()
+        void ordersPublishJobCard()
         return
       }
   
@@ -10018,6 +10556,7 @@ export function createOrdersFeature(ctx) {
     bindMap: bindOrdersMapViewFunctions,
     renderList: renderOrdersView,
     renderMap: renderOrdersMapView,
+    loadGoogleMaps: ordersLoadGoogleMaps,
     openEditor: ordersOpenEditor,
     openEditorFromCalendar: ordersOpenEditorFromCalendar,
     openRecurringOccurrenceEditorFromCalendar: ordersOpenRecurringOccurrenceEditorFromCalendar,

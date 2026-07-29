@@ -1,5 +1,14 @@
-﻿<h1 class="welcome">Zdarzenia</h1>
-<p class="subwelcome">Przeglądaj, filtruj i edytuj zdarzenia pracowników.</p>
+﻿<header class="portal-page-hero">
+  <div class="portal-page-hero__copy">
+    <div class="portal-page-hero__title-row">
+      <h1>Zdarzenia</h1>
+      <span class="portal-page-hero__badge">Historia operacyjna</span>
+    </div>
+    <p>Przeglądaj statusy QR, czas pracy i lokalizacje w jednym uporządkowanym widoku.</p>
+  </div>
+</header>
+<h1 class="welcome portal-page-legacy-heading">Zdarzenia</h1>
+<p class="subwelcome portal-page-legacy-heading">Lista + edycja wiersza. Domyślnie: od 1. dnia miesiąca do dziś. 25 rekordow na strone.</p>
 
 <section class="events-summary-grid" aria-label="Podsumowanie zdarzeń" aria-live="polite">
   <article class="events-summary-card is-all">
@@ -164,6 +173,14 @@
     </div>
   </div>
 </section>
+
+<section
+  class="events-integrity-alert"
+  id="evOpenStatusIntegrity"
+  aria-live="polite"
+  aria-label="Kontrola otwartych statusów CLEAN"
+  hidden
+></section>
 
 <div class="events-table" aria-label="Tabela zdarzeń">
   <div class="events-table-toolbar">

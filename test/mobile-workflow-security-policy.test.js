@@ -52,7 +52,6 @@ test('UID tokenu wybiera pracownika, a zgodne dane body tylko potwierdzaja tozsa
   assert.equal(resolved.worker_id, 'WORKER-A')
   assert.equal(resolved.login, 'worker.a')
 })
-
 test('body nie moze podszyc sesji pod innego pracownika', () => {
   assertPolicyCode(MOBILE_WORKER_ERROR.CLAIM_MISMATCH, () =>
     resolveAuthenticatedMobileWorker({
