@@ -3567,7 +3567,8 @@ function showLoginCredentials({ showResetAction = false } = {}) {
     loginTitle.textContent = 'Witaj ponownie'
   }
   if (loginCopy) {
-    loginCopy.textContent = 'Zaloguj si\u0119, aby przej\u015b\u0107 do centrum dowodzenia Cleanzi.'
+    loginCopy.textContent =
+      'Zaloguj si\u0119 do systemu, kt\u00f3ry upraszcza zarz\u0105dzanie ca\u0142\u0105 firm\u0105 sprz\u0105taj\u0105c\u0105.'
   }
 }
 
