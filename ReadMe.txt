@@ -4314,3 +4314,35 @@ Weryfikacja:
 - Automatyczne otwarcie lokalnego ekranu logowania zostalo zablokowane przez polityke bezpieczenstwa przegladarki; nie stosowano obejsc.
 Granice:
 - Zmiana pozostaje kandydatem lokalnym. Nie wykonano pusha ani wdrozenia produkcyjnego.
+
+Data: 2026-07-29 11:39 CEST
+Autor: AI Codex
+Temat: Produkcyjny rollout testowej fotografii wakacyjnej ekranu logowania
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-PORTAL-20260729-LOGIN-HERO-BEACH-01`.
+- Zakres ograniczono do Firebase App Hosting backendu `cleanzi-01` w projekcie `iclean-room`, regionie `europe-west4`.
+- Konto Firebase CLI: `biuro@bestclean.pl`.
+Preflight:
+- Branch: `codex/portal-release-20260727`.
+- Commit produkcyjny: `ced87258738dc4fe8bc577ace70fe186a528c3f2` (`feat(portal): add beach login hero`).
+- `npm test`: 815/815 OK.
+- `npm --prefix web-app run lint`: OK.
+- `npm --prefix web-app run build`: OK.
+- Commit wypchnieto do repozytorium `biuro-del/Cleanzi-01`, powiazanego z App Hosting.
+- Norton przechwytywal lokalne polaczenia TLS narzedzi Google. Nie wylaczano weryfikacji TLS; publiczny certyfikat `Norton Web/Mail Shield Root` przekazano tylko procesom Firebase w tej sesji przez `NODE_EXTRA_CA_CERTS`.
+Wydanie:
+- Build App Hosting: `build-2026-07-29-002`, stan `READY`.
+- Rollout App Hosting: `build-2026-07-29-002`, stan `SUCCEEDED`.
+- Rewizja Cloud Run: `cleanzi-01-build-2026-07-29-002`.
+- Najnowsza gotowa rewizja jest rowna najnowszej utworzonej rewizji, warunek `Ready=True`, a rewizja obsluguje 100% ruchu.
+Postflight:
+- `https://portal.cleanzi.pl/`: HTTP 200.
+- `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`: HTTP 200.
+- `https://portal.cleanzi.pl/login-hero-beach-v2.webp`: HTTP 200, `image/webp`, 138 032 B.
+- Produkcyjny plik ma ten sam SHA-256 co asset z commita: `D84A7B80032DFB26779BDC38D98CE2620C4C35F69B5B1C5E098425E943125921`.
+- Ekran logowania sprawdzono w przegladarce: obraz jest zaladowany, ma naturalny rozmiar 1536 x 1024 px i renderuje sie poprawnie w nowym ukladzie.
+- `GET /api/admin/workers` bez tokenu nadal zwraca oczekiwane 401 `UNAUTHENTICATED`.
+- Logi rewizji `cleanzi-01-build-2026-07-29-002` od wdrozenia: 0 wpisow o poziomie `ERROR` lub wyzszym.
+Rollback:
+- Poprzedni zatwierdzony build to `build-2026-07-29-001`, commit `8fed73b11507df446bf53934495df0ae61e22733`.
+- Plik `login-hero-operations-v1.webp` pozostaje w repozytorium i moze zostac ponownie podpiety w osobnym, autoryzowanym wydaniu.
