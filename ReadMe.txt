@@ -4367,3 +4367,30 @@ Weryfikacja:
 Granice:
 - Zmiana jest lokalnym kandydatem i nie zostala wdrozona na produkcje.
 - Produkcyjny rollout wymaga osobnej dokladnej zgody `OK PRODUKCJA CLZ-PORTAL-20260729-LOGIN-HERO-COPY-02`.
+
+Data: 2026-07-29 11:55 CEST
+Autor: AI Codex
+Temat: Produkcyjny rollout przezroczystej planszy i nowego hasla logowania
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-PORTAL-20260729-LOGIN-HERO-COPY-02`.
+- Zakres ograniczono do frontendu Firebase App Hosting backendu `cleanzi-01` w projekcie `iclean-room`, regionie `europe-west4`.
+Wydanie:
+- Branch: `codex/portal-release-20260727`.
+- Commit produkcyjny: `14f7a955869bb60d6cb69483c4942d1450d21ba0` (`feat(portal): refine login hero message`).
+- Build App Hosting: `build-2026-07-29-003`, stan `READY`.
+- Rollout App Hosting: `build-2026-07-29-003`, stan `SUCCEEDED`.
+- Rewizja Cloud Run: `cleanzi-01-build-2026-07-29-003`.
+- Rewizja jest jednoczesnie najnowsza utworzona i gotowa, ma `Ready=True` i obsluguje 100% ruchu.
+Weryfikacja:
+- `npm test`: 815/815 OK.
+- Wczesniejsze kontrole dokladnego commita: ESLint i produkcyjny build Vite - OK.
+- `https://portal.cleanzi.pl/`: HTTP 200.
+- `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`: HTTP 200.
+- Produkcyjny DOM zawiera haslo `Wszystko idzie. W dobrym kierunku.` oraz pelny nowy opis.
+- Wyliczony styl planszy: gradient `rgba(4, 22, 52, 0.54)` do `rgba(4, 22, 52, 0.38)`, `backdrop-filter: blur(8px) saturate(1.15)`.
+- Zdjecie `login-hero-beach-v2.webp` jest kompletne i ma naturalny rozmiar 1536 x 1024 px.
+- Widok sprawdzono wizualnie w przegladarce; fotografia jest widoczna przez plansze, a bialy tekst zachowuje czytelnosc.
+- `GET /api/admin/workers` bez tokenu nadal zwraca oczekiwane 401 `UNAUTHENTICATED`.
+- Logi rewizji `cleanzi-01-build-2026-07-29-003`: 0 wpisow o poziomie `ERROR` lub wyzszym.
+Rollback:
+- Poprzedni zatwierdzony build to `build-2026-07-29-002`, commit `ced87258738dc4fe8bc577ace70fe186a528c3f2`.
