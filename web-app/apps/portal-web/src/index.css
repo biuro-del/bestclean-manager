@@ -20633,8 +20633,8 @@ body.calendar-events-popup-dragging *{
   bottom:clamp(22px, 3vw, 38px);
   left:clamp(22px, 3vw, 38px);
   z-index:2;
-  width:min(360px, calc(100% - 44px));
-  padding:15px 17px 14px;
+  width:min(400px, calc(100% - 44px));
+  padding:17px 19px 16px;
   border:1px solid rgba(255, 255, 255, .36);
   border-radius:18px;
   background:linear-gradient(135deg, rgba(4, 22, 52, .46), rgba(4, 22, 52, .28));
@@ -20657,17 +20657,17 @@ body.calendar-events-popup-dragging *{
   margin:0;
   color:#fff;
   font-family:"Inter", "Public Sans", "Manrope", "Segoe UI", system-ui, sans-serif;
-  font-size:clamp(28px, 2.5vw, 34px);
+  font-size:clamp(30px, 2.7vw, 38px);
   font-weight:850;
   letter-spacing:-.045em;
   line-height:1.01;
 }
 
 #loginScreen .login-visual-story p{
-  max-width:320px;
-  margin:8px 0 0;
+  max-width:350px;
+  margin:9px 0 0;
   color:rgba(255, 255, 255, .84);
-  font-size:11px;
+  font-size:12px;
   font-weight:550;
   line-height:1.42;
 }
@@ -20842,7 +20842,7 @@ body.calendar-events-popup-dragging *{
   }
 
   #loginScreen .login-visual-story{
-    width:min(340px, calc(100% - 44px));
+    width:min(370px, calc(100% - 44px));
   }
 }
 
@@ -20872,13 +20872,13 @@ body.calendar-events-popup-dragging *{
     right:22px;
     bottom:20px;
     left:auto;
-    width:min(330px, calc(100% - 44px));
-    padding:14px 16px;
+    width:min(340px, calc(100% - 44px));
+    padding:15px 17px;
     border-radius:16px;
   }
 
   #loginScreen .login-visual-story h2{
-    font-size:28px;
+    font-size:29px;
   }
 
   #loginScreen .login-visual-story p{

@@ -59,7 +59,7 @@ final result: passed
 ## Findings
 
 - Brak aktywnych problemów P0, P1 lub P2.
-- Karta komunikatu zmalała z około 520 × 285 px do około 360 × 154 px. Jej powierzchnia jest mniejsza o około 63%, dlatego odsłania brzuch, biodra i nogi postaci.
+- Karta komunikatu zmalała z około 520 × 285 px do około 400 × 167 px. Jej powierzchnia jest mniejsza o około 55%, dlatego nadal odsłania brzuch, biodra i nogi postaci, a tekst jest czytelniejszy.
 - Zastąpiono ogólny slogan jednoznacznym komunikatem `SYSTEM DO ZARZĄDZANIA PROCESEM SPRZĄTANIA` oraz krótkim opisem planowania, monitoringu realizacji i kontroli jakości.
 - Usunięto trzy drugorzędne etykiety, które powiększały kartę bez dodawania kluczowej informacji.
 
@@ -87,8 +87,8 @@ final result: passed
 ## Comparison history
 
 - Pierwszy wariant po zwężeniu: P2 — nagłówek nadal łamał się na trzy linie, więc karta zajmowała zbyt dużą wysokość i częściowo zasłaniała biodro.
-- Fix: szerokość ograniczono do 360 px, nagłówek do 34 px, opis do 11 px, a drugorzędne etykiety usunięto.
-- Kontrola po poprawce: karta ma około 37% pierwotnej powierzchni, nagłówek mieści się w dwóch liniach, sylwetka jest wyraźnie bardziej odsłonięta, a przekaz produktu jest jednoznaczny.
+- Fix: po korekcie użytkownika dobrano kompromis 400 px szerokości, nagłówek do 38 px i opis 12 px; drugorzędne etykiety pozostają usunięte.
+- Kontrola po poprawce: karta ma około 45% pierwotnej powierzchni, nagłówek mieści się w dwóch liniach, sylwetka pozostaje odsłonięta, a przekaz produktu jest jednoznaczny i wygodniejszy do odczytania.
 
 final result: passed
 

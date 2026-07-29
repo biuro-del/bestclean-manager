@@ -4399,8 +4399,8 @@ Data: 2026-07-29 12:20 CEST
 Autor: AI Codex
 Temat: Lokalny kandydat kompaktowej planszy i jednoznacznego przekazu ekranu logowania
 Zakres:
-- Plansza na fotografii zostala zmniejszona z okolo 520 x 285 px do okolo 360 x 154 px w widoku 1280 x 720.
-- Powierzchnia planszy spadla o okolo 63%, dzieki czemu odslania wiecej brzucha, bioder i nog postaci.
+- Plansza na fotografii zostala zmniejszona z okolo 520 x 285 px do okolo 400 x 167 px w widoku 1280 x 720.
+- Powierzchnia planszy spadla o okolo 55%, dzieki czemu nadal odslania brzuch, biodra i nogi postaci, a tekst jest wyraznie czytelniejszy.
 - Usunieto drugorzedne etykiety `Pracownicy`, `Obiekty`, `Realizacja`.
 - Nowy przekaz: `SYSTEM DO ZARZADZANIA PROCESEM SPRZATANIA`, `Sprzatanie. Pod kontrola.` oraz krotki opis planowania, monitoringu realizacji i kontroli jakosci.
 - Opis formularza logowania wskazuje wprost, ze Cleanzi jest systemem do zarzadzania procesem sprzatania.
