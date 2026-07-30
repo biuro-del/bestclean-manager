@@ -16,10 +16,11 @@ const servicePath = path.join(
   'workdayService.js',
 )
 
-test('nowy Event tworzony w portalu ma jawny typ CLEAN', () => {
+test('nowy Event nie wysyła wycofanej zmiennej eventType', () => {
   const source = fs.readFileSync(servicePath, 'utf8')
-  const insertCallStart = source.indexOf("runMutationOperation('InsertEventForOrg'")
+  const insertCallStart = source.indexOf('await insertEventForOrg(')
   assert.notEqual(insertCallStart, -1)
   const insertCall = source.slice(insertCallStart, insertCallStart + 500)
-  assert.match(insertCall, /eventType:\s*'CLEAN'/)
+  assert.doesNotMatch(insertCall, /\beventType\s*:/)
+  assert.match(insertCall, /\bworkerName:\s*payload\.workerName\s*\?\?\s*null/)
 })

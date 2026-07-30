@@ -2,7 +2,7 @@ import './style.css'
 import template from './template.html?raw'
 import { DEFAULT_ZONE_TYPE_OPTIONS } from '../objects/zones/index.js'
 import {
-  findBlockingOpenEventForWorker,
+  filterVisibleUnresolvedLegacyGroups,
   groupLegacyOpenEventCandidates,
   groupOpenCleanEventConflicts,
   groupOrphanOpenCleanEvents,
@@ -84,6 +84,41 @@ export function createEventsFeature(ctx) {
   const EVENT_EDITOR_PICKER_MAX_OPTIONS = 36
   const EVENT_EDITOR_PICKER_EMPTY_MAX_OPTIONS = 18
   const EVENT_FILTER_COMBO_MAX_OPTIONS = 60
+  const EVENT_DELETION_TOMBSTONE_TTL_MS = 5 * 60 * 1000
+  const EVENT_INTEGRITY_CATEGORY_META = Object.freeze({
+    conflict: {
+      title: 'Równoległe otwarte CLEAN',
+      description:
+        'Wykryto więcej niż jeden otwarty status CLEAN u tej samej osoby. Konflikty trzeba zamknąć przed rozpoczęciem kolejnego CLEAN.',
+      countLabel: 'otwarte CLEAN',
+      icon: 'ph-warning-octagon',
+      tone: 'danger',
+    },
+    orphan: {
+      title: 'CLEAN bez aktywnego dnia pracy',
+      description:
+        'Jawny otwarty CLEAN nie ma aktywnego, jednoznacznie powiązanego dnia pracy. Wpis blokuje kolejny CLEAN i wymaga sprawdzenia.',
+      countLabel: 'CLEAN bez aktywnego dnia',
+      icon: 'ph-link-break',
+      tone: 'danger',
+    },
+    unresolved: {
+      title: 'Nierozstrzygnięte wpisy',
+      description:
+        'Nierozstrzygnięte otwarte wpisy bez typu zdarzenia blokują nowy CLEAN do czasu ręcznej weryfikacji powiązanego dnia pracy.',
+      countLabel: 'nierozstrzygnięte',
+      icon: 'ph-question',
+      tone: 'danger',
+    },
+    legacy: {
+      title: 'Historyczne do klasyfikacji',
+      description:
+        'Historyczne wpisy bez typu zdarzenia wymagają klasyfikacji. Nie są automatycznie uznawane za bieżący CLEAN.',
+      countLabel: 'historyczne',
+      icon: 'ph-clock-counter-clockwise',
+      tone: 'review',
+    },
+  })
   let eventsRefreshInFlight = null
   let eventsRefreshQueuedOptions = null
   let eventsPollingTimer = 0
@@ -93,6 +128,8 @@ export function createEventsFeature(ctx) {
   let eventEditorOptionsCacheKey = ''
   let eventEditorPickerFilterFrame = 0
   let eventPendingSavedRows = []
+  let eventDeletedRowTombstones = []
+  let eventDeleteConfirmResolver = null
   let eventsSummaryRequestId = 0
   const eventFilterComboStates = new Map()
   let eventsOpenIntegrityGroups = []
@@ -103,6 +140,8 @@ export function createEventsFeature(ctx) {
   let eventsOpenIntegrityRefreshOrgId = ''
   let eventsOpenIntegrityRefreshGeneration = 0
   let eventsOpenIntegrityFocus = null
+  let eventsIntegrityModalKind = ''
+  let eventsIntegrityModalTrigger = null
 
   function mergeEventsRefreshOptions(base = {}, incoming = {}) {
     const merged = {
@@ -192,6 +231,44 @@ export function createEventsFeature(ctx) {
     ]
   }
 
+  function eventOpenIntegrityGroupsForKind(integrityKind) {
+    switch (String(integrityKind ?? '').trim()) {
+      case 'conflict':
+        return eventsOpenIntegrityGroups
+      case 'orphan':
+        return eventsOpenCleanOrphanGroups
+      case 'unresolved':
+        return eventsUnresolvedLegacyGroups
+      case 'legacy':
+        return eventsLegacyOpenGroups
+      default:
+        return []
+    }
+  }
+
+  function eventOpenIntegrityCategory(integrityKind) {
+    const kind = String(integrityKind ?? '').trim()
+    const meta = EVENT_INTEGRITY_CATEGORY_META[kind]
+    if (!meta) {
+      return null
+    }
+
+    const groups = eventOpenIntegrityGroupsForKind(kind)
+    return {
+      ...meta,
+      kind,
+      groups,
+      workerCount: groups.length,
+      recordCount: groups.reduce((sum, group) => sum + Number(group?.count ?? 0), 0),
+    }
+  }
+
+  function eventOpenIntegrityCategories() {
+    return ['conflict', 'orphan', 'unresolved', 'legacy']
+      .map((kind) => eventOpenIntegrityCategory(kind))
+      .filter((category) => category?.groups?.length)
+  }
+
   function eventOpenIntegrityFocusedGroup() {
     const workerKey = String(eventsOpenIntegrityFocus?.workerKey ?? '').trim()
     if (!workerKey) {
@@ -272,6 +349,157 @@ export function createEventsFeature(ctx) {
     ]
   }
 
+  function eventOpenIntegrityPlaceSummary(group = {}) {
+    const places = eventOpenIntegrityPlaceLabels(group)
+    if (!places.length) {
+      return 'Brak przypisanego kodu QR'
+    }
+
+    const visiblePlaces = places.slice(0, 2)
+    const remainingCount = places.length - visiblePlaces.length
+    return `${visiblePlaces.join(' · ')}${remainingCount > 0 ? ` · +${remainingCount} kolejnych` : ''}`
+  }
+
+  function eventIntegrityModalIsOpen() {
+    return document.getElementById('evIntegrityModalOverlay')?.style.display === 'flex'
+  }
+
+  function eventIntegrityModalFocusableElements() {
+    const overlay = document.getElementById('evIntegrityModalOverlay')
+    if (!overlay) {
+      return []
+    }
+
+    return [...overlay.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      .filter((node) => node instanceof HTMLElement && node.getClientRects().length > 0)
+  }
+
+  function closeEventIntegrityModal({ restoreFocus = true } = {}) {
+    const overlay = document.getElementById('evIntegrityModalOverlay')
+    const closingKind = eventsIntegrityModalKind
+    const storedTrigger = eventsIntegrityModalTrigger
+
+    if (overlay) {
+      overlay.style.display = 'none'
+      overlay.setAttribute('aria-hidden', 'true')
+      delete overlay.dataset.tone
+    }
+
+    eventsIntegrityModalKind = ''
+    eventsIntegrityModalTrigger = null
+
+    if (!restoreFocus) {
+      return
+    }
+
+    const fallbackTrigger = closingKind
+      ? document.querySelector(`[data-event-integrity-kind="${closingKind}"]`)
+      : null
+    const focusTarget = storedTrigger?.isConnected ? storedTrigger : fallbackTrigger
+    window.requestAnimationFrame(() => focusTarget?.focus?.())
+  }
+
+  function renderEventIntegrityModal(integrityKind = eventsIntegrityModalKind) {
+    const category = eventOpenIntegrityCategory(integrityKind)
+    const overlay = document.getElementById('evIntegrityModalOverlay')
+    const title = document.getElementById('evIntegrityModalTitle')
+    const description = document.getElementById('evIntegrityModalDescription')
+    const icon = document.querySelector('#evIntegrityModalIcon i')
+    const workerCount = document.getElementById('evIntegrityModalWorkerCount')
+    const recordCount = document.getElementById('evIntegrityModalRecordCount')
+    const list = document.getElementById('evIntegrityModalList')
+
+    if (!category?.groups?.length || !overlay || !title || !description || !list) {
+      if (eventIntegrityModalIsOpen()) {
+        closeEventIntegrityModal()
+      }
+      return
+    }
+
+    overlay.dataset.tone = category.tone
+    title.textContent = category.title
+    description.textContent = category.description
+    if (icon) {
+      icon.className = `ph ${category.icon}`
+    }
+    if (workerCount) {
+      workerCount.textContent = String(category.workerCount)
+    }
+    if (recordCount) {
+      recordCount.textContent = String(category.recordCount)
+    }
+
+    list.innerHTML = category.groups
+      .map((group) => {
+        const placeSummary = eventOpenIntegrityPlaceSummary(group)
+        return `
+          <li class="ev-integrity-modal-item">
+            <span class="ev-integrity-modal-worker-icon" aria-hidden="true">
+              <i class="ph ph-user"></i>
+            </span>
+            <span class="ev-integrity-modal-worker">
+              <strong>${escapeHtml(group.workerLabel)}</strong>
+              <small>${escapeHtml(placeSummary)}</small>
+            </span>
+            <span class="ev-integrity-modal-count">${escapeHtml(group.count)} ${escapeHtml(category.countLabel)}</span>
+            <button
+              class="btn2 ev-integrity-modal-show"
+              type="button"
+              data-event-open-worker-key="${escapeHtml(group.workerKey)}"
+              data-event-open-kind="${escapeHtml(category.kind)}"
+              aria-label="${escapeHtml(`Pokaż zdarzenia: ${group.workerLabel} — ${category.countLabel}`)}"
+            >
+              <span>Pokaż zdarzenia</span>
+              <i class="ph ph-arrow-right" aria-hidden="true"></i>
+            </button>
+          </li>
+        `
+      })
+      .join('')
+  }
+
+  function openEventIntegrityModal(integrityKind, trigger = null) {
+    const category = eventOpenIntegrityCategory(integrityKind)
+    if (!category?.groups?.length) {
+      return
+    }
+
+    ensureEventOverlaysMountedToBody()
+    eventsIntegrityModalKind = category.kind
+    eventsIntegrityModalTrigger = trigger instanceof HTMLElement ? trigger : null
+    renderEventIntegrityModal(category.kind)
+
+    const overlay = document.getElementById('evIntegrityModalOverlay')
+    const title = document.getElementById('evIntegrityModalTitle')
+    if (!overlay) {
+      return
+    }
+
+    overlay.style.display = 'flex'
+    overlay.setAttribute('aria-hidden', 'false')
+    window.requestAnimationFrame(() => title?.focus?.())
+  }
+
+  function focusEventIntegrityGroup(group) {
+    if (!group) {
+      return
+    }
+
+    const previousPage = Number(eventsOpenIntegrityFocus?.previousPage ?? appState.eventsPage)
+    eventsOpenIntegrityFocus = {
+      workerKey: group.workerKey,
+      integrityKind: group.integrityKind,
+      previousPage: Number.isFinite(previousPage) && previousPage > 0 ? Math.floor(previousPage) : 1,
+    }
+    appState.eventsPage = 1
+    closeEventIntegrityModal({ restoreFocus: false })
+    renderOpenEventIntegrity()
+    renderOpenIntegrityFocusPage()
+    window.requestAnimationFrame(() => {
+      document.querySelector('#evOpenStatusIntegrity [data-event-open-back]')?.focus()
+    })
+  }
+
   function renderOpenEventIntegrity(error = null) {
     const root = document.getElementById('evOpenStatusIntegrity')
     if (!root) {
@@ -282,116 +510,94 @@ export function createEventsFeature(ctx) {
       const focusBackAction = eventsOpenIntegrityFocus
         ? '<button class="btn2" type="button" data-event-open-back>Wróć do wszystkich zdarzeń</button>'
         : ''
+      closeEventIntegrityModal({ restoreFocus: false })
       root.hidden = false
       root.className = 'events-integrity-alert events-integrity-alert--unavailable'
       root.innerHTML = `
-        <div>
-          <strong>Kontrola otwartych statusów jest chwilowo niedostępna.</strong>
-          <span>${escapeHtml(error instanceof Error ? error.message : 'Nie udało się pobrać danych kontrolnych.')}</span>
+        <div class="events-integrity-unavailable">
+          <span class="events-integrity-unavailable-icon" aria-hidden="true"><i class="ph ph-info"></i></span>
+          <span>
+            <strong>Kontrola problemów jest chwilowo niedostępna.</strong>
+            <small>${escapeHtml(error instanceof Error ? error.message : 'Nie udało się pobrać danych kontrolnych.')}</small>
+          </span>
           ${focusBackAction}
         </div>
       `
       return
     }
 
-    const allGroups = eventOpenIntegrityAllGroups()
-    if (!allGroups.length) {
+    const categories = eventOpenIntegrityCategories()
+    if (!categories.length) {
+      closeEventIntegrityModal({ restoreFocus: false })
       root.hidden = true
       root.className = 'events-integrity-alert'
       root.innerHTML = ''
       return
     }
 
-    const focusedWorkerKey = String(eventsOpenIntegrityFocus?.workerKey ?? '').trim()
-    const focusedIntegrityKind = String(eventsOpenIntegrityFocus?.integrityKind ?? '').trim()
-    const conflictRecordCount = eventsOpenIntegrityGroups.reduce((sum, group) => sum + Number(group?.count ?? 0), 0)
-    const orphanRecordCount = eventsOpenCleanOrphanGroups.reduce((sum, group) => sum + Number(group?.count ?? 0), 0)
-    const unresolvedRecordCount = eventsUnresolvedLegacyGroups.reduce((sum, group) => sum + Number(group?.count ?? 0), 0)
-    const legacyRecordCount = eventsLegacyOpenGroups.reduce((sum, group) => sum + Number(group?.count ?? 0), 0)
-    const renderGroupDetails = (groups, integrityKind) =>
-      groups.map((group) => {
-        const places = eventOpenIntegrityPlaceLabels(group)
-        const isFocused =
-          focusedWorkerKey &&
-          group.workerKey === focusedWorkerKey &&
-          (!focusedIntegrityKind || focusedIntegrityKind === integrityKind)
-        const countLabel =
-          integrityKind === 'conflict'
-            ? 'otwarte CLEAN'
-            : integrityKind === 'orphan'
-              ? 'CLEAN bez aktywnego dnia'
-            : integrityKind === 'unresolved'
-              ? 'nierozstrzygnięte'
-              : 'historyczne'
+    const focusedGroup = eventOpenIntegrityFocusedGroup()
+    const focusedCategory = focusedGroup
+      ? eventOpenIntegrityCategory(focusedGroup.integrityKind)
+      : null
+    const categoryCards = categories
+      .map((category) => {
+        const isActive = focusedGroup?.integrityKind === category.kind
         return `
-          <li class="events-integrity-item events-integrity-item--${escapeHtml(integrityKind)}">
-            <span>
-              <strong>${escapeHtml(group.workerLabel)}</strong>
-              <small>${escapeHtml(places.join(', ') || 'Brak przypisanego kodu QR')}</small>
+          <button
+            class="events-integrity-card events-integrity-card--${escapeHtml(category.tone)}${isActive ? ' is-active' : ''}"
+            type="button"
+            data-event-integrity-kind="${escapeHtml(category.kind)}"
+            aria-haspopup="dialog"
+            aria-controls="evIntegrityModalOverlay"
+            aria-label="${escapeHtml(`Otwórz problem: ${category.title}. ${category.workerCount} pracowników, ${category.recordCount} rekordów.`)}"
+          >
+            <span class="events-integrity-card-icon" aria-hidden="true"><i class="ph ${escapeHtml(category.icon)}"></i></span>
+            <span class="events-integrity-card-copy">
+              <strong>${escapeHtml(category.title)}</strong>
+              <small>${escapeHtml(category.workerCount)} pracowników</small>
             </span>
-            <span class="events-integrity-count">${escapeHtml(group.count)} ${escapeHtml(countLabel)}</span>
-            ${
-              isFocused
-                ? '<span class="events-integrity-count">Wyświetlane</span>'
-                : `<button class="btn2" type="button" data-event-open-worker-key="${escapeHtml(group.workerKey)}" data-event-open-kind="${escapeHtml(integrityKind)}" aria-label="${escapeHtml(`Pokaż wpisy: ${group.workerLabel} — ${countLabel}`)}">Pokaż</button>`
-            }
-          </li>
+            <span class="events-integrity-card-count">
+              <strong>${escapeHtml(category.recordCount)}</strong>
+              <small>rekordów</small>
+            </span>
+            <i class="ph ph-caret-right events-integrity-card-arrow" aria-hidden="true"></i>
+          </button>
         `
       })
       .join('')
-
-    const conflictSection = eventsOpenIntegrityGroups.length
+    const focusedBar = focusedGroup && focusedCategory
       ? `
-        <div class="events-integrity-summary">
-          <strong>Wykryto równoległe otwarte statusy CLEAN.</strong>
-          <span>${escapeHtml(eventsOpenIntegrityGroups.length)} pracownik(ów), ${escapeHtml(conflictRecordCount)} rekordów. To bieżące konflikty wymagające zamknięcia przed kolejnym CLEAN.</span>
+        <div class="events-integrity-focus" role="status">
+          <span class="events-integrity-focus-icon" aria-hidden="true"><i class="ph ph-funnel"></i></span>
+          <span>
+            <small>Widok problemu</small>
+            <strong>${escapeHtml(focusedCategory.title)} · ${escapeHtml(focusedGroup.workerLabel)} · ${escapeHtml(focusedGroup.count)} rekordów</strong>
+          </span>
+          <button class="btn2" type="button" data-event-open-back>
+            <i class="ph ph-arrow-left" aria-hidden="true"></i>
+            <span>Wróć do wszystkich zdarzeń</span>
+          </button>
         </div>
-        <ul>${renderGroupDetails(eventsOpenIntegrityGroups, 'conflict')}</ul>
-      `
-      : ''
-    const legacySection = eventsLegacyOpenGroups.length
-      ? `
-        <div class="events-integrity-summary">
-          <strong>Historyczne wpisy bez typu zdarzenia wymagają klasyfikacji.</strong>
-          <span>${escapeHtml(eventsLegacyOpenGroups.length)} pracownik(ów), ${escapeHtml(legacyRecordCount)} rekordów. Nie są automatycznie uznawane za bieżący CLEAN i system niczego nie zamknął.</span>
-        </div>
-        <ul>${renderGroupDetails(eventsLegacyOpenGroups, 'legacy')}</ul>
-      `
-      : ''
-    const orphanSection = eventsOpenCleanOrphanGroups.length
-      ? `
-        <div class="events-integrity-summary">
-          <strong>Jawny otwarty CLEAN nie ma aktywnego, jednoznacznie powiązanego dnia pracy.</strong>
-          <span>${escapeHtml(eventsOpenCleanOrphanGroups.length)} pracownik(ów), ${escapeHtml(orphanRecordCount)} rekordów. Wpis blokuje kolejny CLEAN i wymaga sprawdzenia przed ponowieniem zapisu.</span>
-        </div>
-        <ul>${renderGroupDetails(eventsOpenCleanOrphanGroups, 'orphan')}</ul>
-      `
-      : ''
-    const unresolvedSection = eventsUnresolvedLegacyGroups.length
-      ? `
-        <div class="events-integrity-summary">
-          <strong>Nierozstrzygnięte otwarte wpisy bez typu zdarzenia.</strong>
-          <span>${escapeHtml(eventsUnresolvedLegacyGroups.length)} pracownik(ów), ${escapeHtml(unresolvedRecordCount)} rekordów. Brak zamkniętego, jednoznacznie powiązanego dnia pracy — te wpisy blokują nowy CLEAN do czasu weryfikacji.</span>
-        </div>
-        <ul>${renderGroupDetails(eventsUnresolvedLegacyGroups, 'unresolved')}</ul>
       `
       : ''
 
     root.hidden = false
-    root.className = eventsOpenIntegrityGroups.length || eventsOpenCleanOrphanGroups.length || eventsUnresolvedLegacyGroups.length
-      ? 'events-integrity-alert events-integrity-alert--conflict'
-      : 'events-integrity-alert events-integrity-alert--review'
+    root.className = 'events-integrity-alert events-integrity-alert--compact'
     root.innerHTML = `
-      ${
-        focusedWorkerKey
-          ? '<div class="events-integrity-toolbar"><button class="btn2" type="button" data-event-open-back>Wróć do wszystkich zdarzeń</button></div>'
-          : ''
-      }
-      ${conflictSection}
-      ${orphanSection}
-      ${unresolvedSection}
-      ${legacySection}
+      <div class="events-integrity-panel-head">
+        <span class="events-integrity-panel-icon" aria-hidden="true"><i class="ph ph-warning-circle"></i></span>
+        <span>
+          <strong>Problemy do sprawdzenia</strong>
+          <small>Kliknij kategorię, aby zobaczyć osoby i powiązane wpisy.</small>
+        </span>
+      </div>
+      <div class="events-integrity-card-grid">${categoryCards}</div>
+      ${focusedBar}
     `
+
+    if (eventsIntegrityModalKind) {
+      renderEventIntegrityModal(eventsIntegrityModalKind)
+    }
   }
 
   async function readAllOpenCleanEvents(orgId, { forceRefresh = false } = {}) {
@@ -450,7 +656,13 @@ export function createEventsFeature(ctx) {
         }
         eventsOpenIntegrityGroups = groupOpenCleanEventConflicts(rows)
         eventsOpenCleanOrphanGroups = groupOrphanOpenCleanEvents(rows)
-        eventsUnresolvedLegacyGroups = groupUnresolvedLegacyOpenEvents(rows)
+        eventsUnresolvedLegacyGroups = filterVisibleUnresolvedLegacyGroups(
+          groupUnresolvedLegacyOpenEvents(rows),
+          {
+            currentDayKey: todayYmd(),
+            dayKeyFromValue: eventLocalDayKeyFromIso,
+          },
+        )
         eventsLegacyOpenGroups = groupLegacyOpenEventCandidates(rows)
         renderOpenEventIntegrity()
         if (rerenderRows && document.getElementById('evRows')) {
@@ -924,6 +1136,99 @@ export function createEventsFeature(ctx) {
     return eventRowFingerprintKey(left) === eventRowFingerprintKey(right)
   }
 
+  function eventDeletionIdentity(row = {}) {
+    const ids = [
+      ...eventDeletionCandidateIds(row),
+      row?.id,
+      row?.eventId,
+      row?.workdayId,
+      row?.linkedWorkdayId,
+      row?.startEventId,
+      row?.endEventId,
+    ]
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean)
+
+    return {
+      ids: [...new Set(ids)],
+      fingerprint: eventRowFingerprintKey(row),
+    }
+  }
+
+  function eventPruneDeletionTombstones() {
+    const now = Date.now()
+    eventDeletedRowTombstones = eventDeletedRowTombstones.filter(
+      (entry) => Number(entry?.expiresAt ?? 0) > now,
+    )
+  }
+
+  function eventDeletionTombstoneMatchesRow(entry, row = {}) {
+    const rowIdentity = eventDeletionIdentity(row)
+    const tombstoneIds = new Set(Array.isArray(entry?.ids) ? entry.ids : [])
+    if (rowIdentity.ids.some((id) => tombstoneIds.has(id))) {
+      return true
+    }
+    if (tombstoneIds.size && rowIdentity.ids.length) {
+      return false
+    }
+
+    const fingerprint = String(entry?.fingerprint ?? '')
+    return Boolean(fingerprint && fingerprint === rowIdentity.fingerprint)
+  }
+
+  function eventSuppressDeletedRows(rows = []) {
+    eventPruneDeletionTombstones()
+    const sourceRows = Array.isArray(rows) ? rows : []
+    if (!eventDeletedRowTombstones.length) {
+      return sourceRows
+    }
+
+    return sourceRows.filter(
+      (row) => !eventDeletedRowTombstones.some((entry) => eventDeletionTombstoneMatchesRow(entry, row)),
+    )
+  }
+
+  function eventRegisterDeletedRows(rows = []) {
+    const deletedRows = (Array.isArray(rows) ? rows : [rows]).filter(Boolean)
+    if (!deletedRows.length) {
+      return 0
+    }
+
+    const expiresAt = Date.now() + EVENT_DELETION_TOMBSTONE_TTL_MS
+    const entries = deletedRows.map((row) => ({
+      ...eventDeletionIdentity(row),
+      expiresAt,
+    }))
+    eventPruneDeletionTombstones()
+    eventDeletedRowTombstones = [
+      ...entries,
+      ...eventDeletedRowTombstones.filter(
+        (existing) => !deletedRows.some((row) => eventDeletionTombstoneMatchesRow(existing, row)),
+      ),
+    ].slice(0, 100)
+
+    eventPendingSavedRows = eventSuppressDeletedRows(eventPendingSavedRows)
+    const currentRows = Array.isArray(appState.eventRows) ? appState.eventRows : []
+    const visibleRows = eventSuppressDeletedRows(currentRows)
+    const removedCount = Math.max(0, currentRows.length - visibleRows.length)
+    if (!removedCount) {
+      return 0
+    }
+
+    if (!visibleRows.length && Number(appState.eventsPage) > 1) {
+      appState.eventsPage = Math.max(1, Number(appState.eventsPage) - 1)
+    }
+    appState.eventsTotal = Math.max(0, Number(appState.eventsTotal ?? currentRows.length) - removedCount)
+    appState.eventsTotalPages = Math.max(
+      1,
+      Math.ceil(appState.eventsTotal / normalizeEventsPageSize(appState.eventsPageSize)),
+    )
+    renderEventsRows(visibleRows)
+    updateEventsPager(visibleRows.length)
+    setSubwelcomeMetric('#view-events .subwelcome', appState.eventsTotal)
+    return removedCount
+  }
+
   function eventPrunePendingRowsAgainst(rows = []) {
     const sourceRows = (Array.isArray(rows) ? rows : []).filter((row) => row?.__pendingSavedEvent !== true)
     if (!eventPendingSavedRows.length || !sourceRows.length) {
@@ -954,7 +1259,8 @@ export function createEventsFeature(ctx) {
   }
 
   function eventMergePendingRowsForCurrentView(rows = []) {
-    const sourceRows = Array.isArray(rows) ? rows : []
+    const sourceRows = eventSuppressDeletedRows(Array.isArray(rows) ? rows : [])
+    eventPendingSavedRows = eventSuppressDeletedRows(eventPendingSavedRows)
     eventPrunePendingRowsAgainst(sourceRows)
 
     if (!eventPendingSavedRows.length) {
@@ -1019,8 +1325,8 @@ export function createEventsFeature(ctx) {
   }
 
   function renderEventsSummary(rangeRows = [], todayRows = []) {
-    const normalizedRangeRows = Array.isArray(rangeRows) ? rangeRows : []
-    const normalizedTodayRows = Array.isArray(todayRows) ? todayRows : []
+    const normalizedRangeRows = eventSuppressDeletedRows(Array.isArray(rangeRows) ? rangeRows : [])
+    const normalizedTodayRows = eventSuppressDeletedRows(Array.isArray(todayRows) ? todayRows : [])
     let closedCount = 0
     let openCount = 0
 
@@ -1056,7 +1362,7 @@ export function createEventsFeature(ctx) {
       status: '',
       page: 1,
       pageSize: 100000,
-      forceRefresh: false,
+      forceRefresh: filters.forceRefresh === true,
     }
     const todayFilters = {
       ...baseFilters,
@@ -1172,6 +1478,57 @@ export function createEventsFeature(ctx) {
     updateEventsPager(merged.rows.length)
     setSubwelcomeMetric('#view-events .subwelcome', appState.eventsTotal)
     return merged.pendingCount > 0 ? 'inserted' : 'visible'
+  }
+
+  function eventApplyUpdatedRow(savedEvent, payload, originalRow) {
+    const savedRow = eventBuildSavedViewRow(
+      { ...(originalRow || {}), ...(savedEvent || {}) },
+      { ...(originalRow || {}), ...(payload || {}) },
+    )
+    if (!savedRow) {
+      return 'none'
+    }
+
+    const currentRows = Array.isArray(appState.eventRows) ? appState.eventRows : []
+    const matchesFilters = eventSavedRowMatchesCurrentFilters(savedRow)
+    let replaced = false
+    const nextRows = []
+
+    currentRows.forEach((row) => {
+      const isEditedRow =
+        eventRowsRepresentSameSavedEvent(row, originalRow || {}) ||
+        eventRowsRepresentSameSavedEvent(row, savedRow)
+      if (!isEditedRow) {
+        nextRows.push(row)
+        return
+      }
+
+      if (!replaced && matchesFilters) {
+        nextRows.push({
+          ...row,
+          ...savedRow,
+          __pendingSavedEvent: true,
+        })
+      }
+      replaced = true
+    })
+
+    if (!replaced && matchesFilters) {
+      nextRows.unshift({ ...savedRow, __pendingSavedEvent: true })
+    }
+
+    if (replaced && !matchesFilters) {
+      appState.eventsTotal = Math.max(0, Number(appState.eventsTotal || currentRows.length) - 1)
+      appState.eventsTotalPages = Math.max(
+        1,
+        Math.ceil(appState.eventsTotal / normalizeEventsPageSize(appState.eventsPageSize)),
+      )
+    }
+
+    renderEventsRows(nextRows)
+    updateEventsPager(nextRows.length)
+    setSubwelcomeMetric('#view-events .subwelcome', appState.eventsTotal)
+    return matchesFilters ? 'visible' : 'hidden'
   }
 
   function eventQrFunctionToken(value) {
@@ -1843,11 +2200,6 @@ export function createEventsFeature(ctx) {
     if (icon) icon.className = iconClass
   }
 
-  function getZoneById(zoneId) {
-    const id = String(zoneId ?? '').trim()
-    return appState.zones.find((zone) => String(zone.id) === id) ?? null
-  }
-
   function eventEditorGetPickerConfig(kind) {
     const normalizedKind = String(kind ?? '').trim().toLowerCase()
     if (normalizedKind === 'worker' || normalizedKind === 'workers') {
@@ -1865,6 +2217,15 @@ export function createEventsFeature(ctx) {
         selectId: 'evEditStrefa',
         placeholderLabel: '(wybierz strefe)',
         options: appState.eventEditorZoneOptions,
+      }
+    }
+
+    if (normalizedKind === 'location' || normalizedKind === 'locations') {
+      return {
+        inputId: 'evEditLocationSearch',
+        selectId: 'evEditLocation',
+        placeholderLabel: '(wybierz lokalizacje)',
+        options: appState.eventEditorLocationOptions,
       }
     }
 
@@ -1915,7 +2276,7 @@ export function createEventsFeature(ctx) {
   function eventEditorCollapseOtherPickers(activeKind = '') {
     const normalizedActiveKind = String(activeKind ?? '').trim().toLowerCase()
     eventEditorCancelScheduledPickerFilter()
-    ;['worker', 'client', 'zone'].forEach((kind) => {
+    ;['worker', 'client', 'location', 'zone'].forEach((kind) => {
       if (kind !== normalizedActiveKind) {
         eventEditorCollapsePicker(kind)
       }
@@ -2029,6 +2390,7 @@ export function createEventsFeature(ctx) {
   function eventEditorApplyAllPickerFilters() {
     eventEditorApplyPickerFilter('worker')
     eventEditorApplyPickerFilter('client')
+    eventEditorApplyPickerFilter('location')
     eventEditorApplyPickerFilter('zone')
   }
 
@@ -2036,6 +2398,7 @@ export function createEventsFeature(ctx) {
     ;[
       { inputId: 'evEditWorkerSearch', selectId: 'evEditWorker', label: 'Ladowanie pracownikow...' },
       { inputId: 'evEditPomSearch', selectId: 'evEditPom', label: 'Ladowanie klientow...' },
+      { inputId: 'evEditLocationSearch', selectId: 'evEditLocation', label: 'Ladowanie lokalizacji...' },
       { inputId: 'evEditStrefaSearch', selectId: 'evEditStrefa', label: 'Ladowanie stref...' },
     ].forEach(({ inputId, selectId, label }) => {
       const input = document.getElementById(inputId)
@@ -2069,12 +2432,20 @@ export function createEventsFeature(ctx) {
   }
 
   function eventEditorResetSearchInputs() {
-    ;['evEditWorkerSearch', 'evEditPomSearch', 'evEditStrefaSearch'].forEach((id) => {
+    ;['evEditWorkerSearch', 'evEditPomSearch', 'evEditLocationSearch', 'evEditStrefaSearch'].forEach((id) => {
       const input = document.getElementById(id)
       if (input) {
         input.value = ''
       }
     })
+  }
+
+  function eventEditorReadableZoneLocation(zone = {}) {
+    const location = String(zone?.location ?? zone?.lokalizacja ?? '').trim()
+    const locationKey = normalizeSearchText(location)
+    return locationKey && locationKey !== '-' && locationKey !== 'nieprzypisany'
+      ? location
+      : ''
   }
 
   function eventEditorBuildOptionsCache() {
@@ -2085,7 +2456,10 @@ export function createEventsFeature(ctx) {
       .map((client) => `${client?.id ?? ''}:${client?.name ?? ''}`)
       .join('|')
     const zoneKey = (Array.isArray(appState.zones) ? appState.zones : [])
-      .map((zone) => `${zone?.id ?? ''}:${zone?.clientId ?? ''}:${zone?.name ?? zone?.zone ?? ''}`)
+      .map(
+        (zone) =>
+          `${zone?.id ?? ''}:${zone?.clientId ?? ''}:${zone?.name ?? zone?.zone ?? ''}:${zone?.location ?? zone?.lokalizacja ?? ''}`,
+      )
       .join('|')
     const cacheKey = `${workerKey}::${clientKey}::${zoneKey}`
 
@@ -2123,6 +2497,8 @@ export function createEventsFeature(ctx) {
     const zoneLabelById = new Map()
     const zoneOptions = []
     const zoneOptionsByClient = new Map()
+    const locationOptionsByKey = new Map()
+    const locationOptionsByClientKey = new Map()
     ;(Array.isArray(appState.zones) ? appState.zones : [])
       .map((zone) => mapZoneForView(zone))
       .filter((zone) => !isUnassignedCleanZone(zone))
@@ -2132,10 +2508,12 @@ export function createEventsFeature(ctx) {
           return
         }
 
+        const location = eventEditorReadableZoneLocation(zone)
         const option = {
           value: zoneId,
           label: zone.name || zone.zone || zoneId,
-          searchText: normalizeSearchText(`${zone.name || zone.zone || zoneId} ${zoneId}`),
+          location,
+          searchText: normalizeSearchText(`${zone.name || zone.zone || zoneId} ${zoneId} ${location}`),
         }
         const clientId = String(zone.clientId ?? '').trim()
         zoneLabelById.set(zoneId, option.label)
@@ -2144,12 +2522,50 @@ export function createEventsFeature(ctx) {
           zoneOptionsByClient.set(clientId, [])
         }
         zoneOptionsByClient.get(clientId).push(option)
+
+        const locationKey = normalizeSearchText(location)
+        if (locationKey && !locationOptionsByKey.has(locationKey)) {
+          locationOptionsByKey.set(locationKey, {
+            value: location,
+            label: location,
+            searchText: locationKey,
+          })
+        }
+        if (clientId && locationKey) {
+          if (!locationOptionsByClientKey.has(clientId)) {
+            locationOptionsByClientKey.set(clientId, new Map())
+          }
+          const clientLocations = locationOptionsByClientKey.get(clientId)
+          if (!clientLocations.has(locationKey)) {
+            clientLocations.set(locationKey, {
+              value: location,
+              label: location,
+              searchText: locationKey,
+            })
+          }
+        }
       })
+
+    const sortOptions = (options) =>
+      options.sort((left, right) =>
+        left.label.localeCompare(right.label, 'pl', { numeric: true, sensitivity: 'base' }),
+      )
+    sortOptions(zoneOptions)
+    zoneOptionsByClient.forEach(sortOptions)
+    const locationOptions = sortOptions([...locationOptionsByKey.values()])
+    const locationOptionsByClient = new Map(
+      [...locationOptionsByClientKey.entries()].map(([clientId, optionsByKey]) => [
+        clientId,
+        sortOptions([...optionsByKey.values()]),
+      ]),
+    )
 
     eventEditorOptionsCacheKey = cacheKey
     eventEditorOptionsCache = {
       workerOptions,
       clientOptions,
+      locationOptions,
+      locationOptionsByClient,
       zoneOptions,
       zoneOptionsByClient,
       workerLabelByLogin,
@@ -2159,36 +2575,58 @@ export function createEventsFeature(ctx) {
     return eventEditorOptionsCache
   }
 
-  function populateEventEditorOptions(selectedWorkerLogin, selectedClientId, selectedZoneId) {
+  function populateEventEditorOptions(
+    selectedWorkerLogin,
+    selectedClientId,
+    selectedZoneId,
+    selectedLocation = '',
+  ) {
     const workerSelect = document.getElementById('evEditWorker')
     const clientSelect = document.getElementById('evEditPom')
+    const locationSelect = document.getElementById('evEditLocation')
     const zoneSelect = document.getElementById('evEditStrefa')
 
-    if (!workerSelect || !clientSelect || !zoneSelect) {
+    if (!workerSelect || !clientSelect || !locationSelect || !zoneSelect) {
       return
     }
 
     const optionsCache = eventEditorBuildOptionsCache()
     const normalizedClientId = String(selectedClientId ?? '').trim()
-    const zoneOptions = normalizedClientId
+    const normalizedZoneId = String(selectedZoneId ?? '').trim()
+    const zoneLocation = eventEditorReadableZoneLocation(eventEditorSelectedZone(normalizedZoneId) || {})
+    const normalizedLocation = String(selectedLocation || zoneLocation || '').trim()
+    const locationKey = normalizeSearchText(normalizedLocation)
+    const baseZoneOptions = normalizedClientId
       ? optionsCache.zoneOptionsByClient.get(normalizedClientId) ?? []
       : optionsCache.zoneOptions
+    const zoneOptions = locationKey
+      ? baseZoneOptions.filter((option) => normalizeSearchText(option?.location) === locationKey)
+      : baseZoneOptions
+    const locationOptions = normalizedClientId
+      ? optionsCache.locationOptionsByClient.get(normalizedClientId) ?? []
+      : optionsCache.locationOptions
     const normalizedWorkerLogin = String(selectedWorkerLogin ?? '').trim()
-    const normalizedZoneId = String(selectedZoneId ?? '').trim()
     const fallbackWorkerLabel = optionsCache.workerLabelByLogin.get(normalizedWorkerLogin) ?? normalizedWorkerLogin
     const fallbackClientLabel = optionsCache.clientLabelById.get(normalizedClientId) ?? normalizedClientId
     const fallbackZoneLabel = optionsCache.zoneLabelById.get(normalizedZoneId) ?? normalizedZoneId
 
     appState.eventEditorWorkerOptions = eventEditorEnsureOption(optionsCache.workerOptions, normalizedWorkerLogin, fallbackWorkerLabel)
     appState.eventEditorClientOptions = eventEditorEnsureOption(optionsCache.clientOptions, normalizedClientId, fallbackClientLabel)
+    appState.eventEditorLocationOptions = eventEditorEnsureOption(
+      locationOptions,
+      normalizedLocation,
+      normalizedLocation,
+    )
     appState.eventEditorZoneOptions = eventEditorEnsureOption(zoneOptions, normalizedZoneId, fallbackZoneLabel)
 
     eventEditorApplyAllPickerFilters()
     ensureSelectValue(workerSelect, normalizedWorkerLogin, fallbackWorkerLabel)
     ensureSelectValue(clientSelect, normalizedClientId, fallbackClientLabel)
+    ensureSelectValue(locationSelect, normalizedLocation, normalizedLocation)
     ensureSelectValue(zoneSelect, normalizedZoneId, fallbackZoneLabel)
     eventEditorSyncSearchInput('worker')
     eventEditorSyncSearchInput('client')
+    eventEditorSyncSearchInput('location')
     eventEditorSyncSearchInput('zone')
   }
 
@@ -2291,7 +2729,6 @@ export function createEventsFeature(ctx) {
     if (!elements) return
     const state = eventsFilterComboState(kind)
     const options = eventsFilterComboFilteredOptions(kind)
-    const compactZoneList = kind === 'zone'
     state.filteredOptions = options
 
     if (!options.length) {
@@ -2327,18 +2764,12 @@ export function createEventsFeature(ctx) {
             data-events-filter-option="${index}"
             data-events-filter-kind="${escapeHtml(kind)}"
           >
-            ${
-              compactZoneList
-                ? `<span class="events-filter-combo-option-copy"><strong>${escapeHtml(option.label)}</strong></span>`
-                : `
-                  <span class="events-filter-combo-option-icon" aria-hidden="true"><i class="ph ${option.icon || 'ph-magnifying-glass'}"></i></span>
-                  <span class="events-filter-combo-option-copy">
-                    <strong>${escapeHtml(option.label)}</strong>
-                    ${option.meta ? `<small>${escapeHtml(option.meta)}</small>` : ''}
-                  </span>
-                  ${option.value === state.selectedValue ? '<i class="ph ph-check" aria-hidden="true"></i>' : ''}
-                `
-            }
+            <span class="events-filter-combo-option-icon" aria-hidden="true"><i class="ph ${option.icon || 'ph-magnifying-glass'}"></i></span>
+            <span class="events-filter-combo-option-copy">
+              <strong>${escapeHtml(option.label)}</strong>
+              ${option.meta ? `<small>${escapeHtml(option.meta)}</small>` : ''}
+            </span>
+            ${option.value === state.selectedValue ? '<i class="ph ph-check" aria-hidden="true"></i>' : ''}
           </button>
         `
       })
@@ -2504,7 +2935,7 @@ export function createEventsFeature(ctx) {
         value: label,
         label,
         meta: '',
-        icon: '',
+        icon: 'ph-stack',
         searchText: label,
       })),
     )
@@ -2670,25 +3101,32 @@ export function createEventsFeature(ctx) {
 
   function syncEventRoomAndClientFromZone() {
     const zoneSelect = document.getElementById('evEditStrefa')
-    const clientSelect = document.getElementById('evEditPom')
     if (!zoneSelect) {
       return
     }
 
-    const zone = getZoneById(zoneSelect.value)
+    const zone = eventEditorSelectedZone(zoneSelect.value)
     if (!zone) {
       return
     }
 
-    if (clientSelect) {
-      clientSelect.value = String(zone.clientId ?? '')
-    }
+    const selectedWorker = String(document.getElementById('evEditWorker')?.value ?? '').trim()
+    const clientId = String(zone.clientId ?? '').trim()
+    const location = eventEditorReadableZoneLocation(zone)
+    populateEventEditorOptions(selectedWorker, clientId, zoneSelect.value, location)
   }
 
   function refreshEventZoneOptionsForClient() {
     const clientId = String(document.getElementById('evEditPom')?.value ?? '').trim()
     const selectedWorker = String(document.getElementById('evEditWorker')?.value ?? '').trim()
-    populateEventEditorOptions(selectedWorker, clientId, '')
+    populateEventEditorOptions(selectedWorker, clientId, '', '')
+  }
+
+  function refreshEventZoneOptionsForLocation() {
+    const clientId = String(document.getElementById('evEditPom')?.value ?? '').trim()
+    const selectedWorker = String(document.getElementById('evEditWorker')?.value ?? '').trim()
+    const location = String(document.getElementById('evEditLocation')?.value ?? '').trim()
+    populateEventEditorOptions(selectedWorker, clientId, '', location)
   }
 
   function ensureSingleOverlayInBody(id) {
@@ -2712,8 +3150,10 @@ export function createEventsFeature(ctx) {
   }
 
   function ensureEventOverlaysMountedToBody() {
+    ensureSingleOverlayInBody('evIntegrityModalOverlay')
     ensureSingleOverlayInBody('evEditorOverlay')
     ensureSingleOverlayInBody('evCommentOverlay')
+    ensureSingleOverlayInBody('evDeleteConfirmOverlay')
   }
 
   function eventEditorReferencesReady() {
@@ -2742,6 +3182,7 @@ export function createEventsFeature(ctx) {
     appState.eventEditorItem = item
 
     const title = document.getElementById('evEditorTitle')
+    const modeIcon = document.getElementById('evEditorModeIcon')
     const subtitle = document.getElementById('evEditorSubtitle')
     const cycleMeta = document.getElementById('evCycleMeta')
     const cycleId = document.getElementById('evCycleId')
@@ -2757,16 +3198,25 @@ export function createEventsFeature(ctx) {
 
     eventEditorResetSearchInputs()
     if (eventEditorReferencesReady()) {
-      const zone = getZoneById(item.roomId || item.utilityRoomId)
+      const zone = eventEditorSelectedZone(item.roomId || item.utilityRoomId)
       const selectedClientId = zone?.clientId ?? item.clientId
       const selectedZoneId = zone?.id ?? item.roomId ?? item.utilityRoomId
+      const selectedLocation =
+        eventEditorReadableZoneLocation(zone || {}) ||
+        String(item.lokalizacja ?? item.location ?? '').trim()
       eventEditorSetPickersLoading(false)
-      populateEventEditorOptions(item.workerLogin, selectedClientId, selectedZoneId)
+      populateEventEditorOptions(
+        item.workerLogin,
+        selectedClientId,
+        selectedZoneId,
+        selectedLocation,
+      )
     } else {
       eventEditorSetPickersLoading(true)
     }
 
     overlay.dataset.mode = 'edit'
+    if (modeIcon) modeIcon.className = 'ph ph-pencil-simple-line'
     if (title) title.textContent = 'Edytuj zdarzenie'
     if (subtitle) subtitle.textContent = 'Zmień przypisanie lub godziny zdarzenia pracownika.'
     if (cycleMeta) cycleMeta.hidden = false
@@ -2814,11 +3264,19 @@ export function createEventsFeature(ctx) {
         if (appState.eventEditorMode !== 'edit' || appState.eventEditorItem !== item) {
           return
         }
-        const zone = getZoneById(item.roomId || item.utilityRoomId)
+        const zone = eventEditorSelectedZone(item.roomId || item.utilityRoomId)
         const selectedClientId = zone?.clientId ?? item.clientId
         const selectedZoneId = zone?.id ?? item.roomId ?? item.utilityRoomId
+        const selectedLocation =
+          eventEditorReadableZoneLocation(zone || {}) ||
+          String(item.lokalizacja ?? item.location ?? '').trim()
         eventEditorSetPickersLoading(false)
-        populateEventEditorOptions(item.workerLogin, selectedClientId, selectedZoneId)
+        populateEventEditorOptions(
+          item.workerLogin,
+          selectedClientId,
+          selectedZoneId,
+          selectedLocation,
+        )
         if (saveButton) {
           saveButton.disabled = false
         }
@@ -2849,6 +3307,7 @@ export function createEventsFeature(ctx) {
     appState.eventEditorItem = null
 
     const title = document.getElementById('evEditorTitle')
+    const modeIcon = document.getElementById('evEditorModeIcon')
     const subtitle = document.getElementById('evEditorSubtitle')
     const cycleMeta = document.getElementById('evCycleMeta')
     const cycleId = document.getElementById('evCycleId')
@@ -2870,6 +3329,7 @@ export function createEventsFeature(ctx) {
     }
 
     overlay.dataset.mode = 'add'
+    if (modeIcon) modeIcon.className = 'ph ph-plus-circle'
     if (title) title.textContent = 'Dodaj zdarzenie'
     if (subtitle) subtitle.textContent = 'Dodaj START, STOP albo pełne zdarzenie pracownika.'
     if (cycleMeta) cycleMeta.hidden = true
@@ -2927,6 +3387,7 @@ export function createEventsFeature(ctx) {
 
     eventEditorCollapsePicker('worker')
     eventEditorCollapsePicker('client')
+    eventEditorCollapsePicker('location')
     eventEditorCollapsePicker('zone')
     if (overlay) delete overlay.dataset.mode
     appState.eventEditorMode = 'add'
@@ -2949,6 +3410,7 @@ export function createEventsFeature(ctx) {
   function readEventEditorPayload() {
     const workerSelect = document.getElementById('evEditWorker')
     const clientSelect = document.getElementById('evEditPom')
+    const locationSelect = document.getElementById('evEditLocation')
     const zoneSelect = document.getElementById('evEditStrefa')
     const startInput = document.getElementById('evEditStart')
     const stopInput = document.getElementById('evEditStop')
@@ -2959,6 +3421,12 @@ export function createEventsFeature(ctx) {
     const clientId = String(clientSelect?.value ?? '').trim()
     const zoneId = String(zoneSelect?.value ?? '').trim()
     const utilityRoomId = zoneId
+    const selectedZone = eventEditorSelectedZone(zoneId)
+    const location = String(
+      locationSelect?.value ||
+        eventEditorReadableZoneLocation(selectedZone || {}) ||
+        '',
+    ).trim()
     const startInputValue = String(startInput?.value ?? '').trim()
     const stopInputValue = eventEditorReadStopValue(stopInput)
     const originalEvent = appState.eventEditorMode === 'edit' ? appState.eventEditorItem : null
@@ -2997,6 +3465,8 @@ export function createEventsFeature(ctx) {
       zoneId: utilityRoomId || null,
       utilityRoomId: utilityRoomId || null,
       roomId: utilityRoomId || null,
+      location: location || null,
+      lokalizacja: location || null,
       startAt: startAt || null,
       endAt: endAt || null,
       durationSec,
@@ -3131,47 +3601,13 @@ export function createEventsFeature(ctx) {
       return 'Wybrana strefa nie należy do wskazanego obiektu. Wybierz właściwą strefę.'
     }
 
+    const selectedLocation = normalizeSearchText(payload.location ?? payload.lokalizacja)
+    const zoneLocation = normalizeSearchText(eventEditorReadableZoneLocation(selectedZone))
+    if (selectedLocation && selectedLocation !== zoneLocation) {
+      return 'Wybrana lokalizacja nie należy do wskazanej strefy. Wybierz lokalizację i strefę ponownie.'
+    }
+
     return ''
-  }
-
-  async function eventEditorFindOtherOpenStatus(payload) {
-    const orgId = String(appState.session?.orgId ?? '').trim()
-    if (!orgId) {
-      const error = new Error('Brak aktywnej organizacji podczas kontroli otwartych statusów.')
-      error.code = 'INTEGRITY_CHECK_INCOMPLETE'
-      throw error
-    }
-    const rows = await readAllOpenCleanEvents(orgId, { forceRefresh: true })
-    const excludeRecordIds =
-      appState.eventEditorMode === 'edit' && appState.eventEditorItem
-        ? eventIdentityCandidateIds(appState.eventEditorItem)
-        : []
-    return findBlockingOpenEventForWorker(rows, payload, { excludeRecordIds })
-  }
-
-  function eventEditorOpenStatusMessage(payload, conflict) {
-    const workerLabel = String(payload?.workerName || payload?.workerLogin || 'Pracownik').trim()
-    const isUnresolvedLegacy = !String(conflict?.eventType ?? conflict?.event_type ?? '').trim()
-    const startLabel = workerDetailIsoToHm(conflict?.startAt)
-    const qrCode = eventNormalizeQrCode(
-      conflict?.qrCode ??
-        conflict?.zoneId ??
-        conflict?.roomId ??
-        conflict?.utilityRoomId ??
-        zoneQrCodeFromRow(conflict),
-    )
-    const place = String(
-      conflict?.clientName ??
-        conflict?.klient ??
-        conflict?.zoneName ??
-        conflict?.strefa ??
-        '',
-    ).trim()
-    const details = [place, qrCode, startLabel ? `od ${startLabel}` : ''].filter(Boolean).join(', ')
-    if (isUnresolvedLegacy) {
-      return `Nie można zapisać nowego CLEAN. ${workerLabel} ma nierozstrzygnięty otwarty wpis historyczny${details ? ` (${details})` : ''}. Najpierw zweryfikuj jego powiązanie z dniem pracy.`
-    }
-    return `Nie można zapisać drugiego otwartego statusu. ${workerLabel} ma już aktywny CLEAN${details ? ` (${details})` : ''}. Najpierw uzupełnij STOP.`
   }
 
   function eventEditorOverlapMessage(payload, overlap) {
@@ -3218,6 +3654,14 @@ export function createEventsFeature(ctx) {
       return
     }
     const targetWorker = eventEditorSelectedWorker(payload.workerLogin)
+    if (targetWorker) {
+      eventPayload.workerLogin = String(
+        targetWorker.login ?? targetWorker.workerLogin ?? targetWorker.id ?? payload.workerLogin,
+      ).trim()
+      eventPayload.workerName = String(
+        targetWorker.name ?? targetWorker.workerName ?? payload.workerName ?? eventPayload.workerLogin,
+      ).trim()
+    }
     if (
       targetWorker &&
       isOwnWorkdayEditBlocked({
@@ -3278,13 +3722,6 @@ export function createEventsFeature(ctx) {
         }
       }
 
-      if (derivedStatus === 'RUNNING') {
-        const openConflict = await eventEditorFindOtherOpenStatus(payload)
-        if (openConflict) {
-          throw new Error(eventEditorOpenStatusMessage(payload, openConflict))
-        }
-      }
-
       if (isCreateMode) {
         const newEventId = `EV-${Date.now()}-${Math.floor(Math.random() * 1000)}`
         savedEventPayload = {
@@ -3304,7 +3741,7 @@ export function createEventsFeature(ctx) {
           throw new Error('Brak eventId dla edycji zdarzenia.')
         }
 
-        await updateEvent(appState.session.orgId, eventId, {
+        savedEventPayload = {
           ...appState.eventEditorItem,
           ...eventPayload,
           correlationIdentityBaseline: appState.eventEditorItem,
@@ -3314,16 +3751,32 @@ export function createEventsFeature(ctx) {
           status: derivedStatus,
           closeMarkedAt: derivedCloseMarkedAt,
           endReason: derivedEndReason,
-        })
+        }
+        savedEvent = await updateEvent(appState.session.orgId, eventId, savedEventPayload)
       }
 
       closeEventEditor()
+      const postSaveRefreshes = []
       if (document.getElementById('evRows')) {
         if (isCreateMode) {
           appState.eventsPage = 1
           savedEventVisibility = eventEnsureSavedRowVisible(savedEvent, savedEventPayload)
+        } else {
+          savedEventVisibility = eventApplyUpdatedRow(
+            savedEvent,
+            savedEventPayload,
+            editedHistorySource,
+          )
         }
-        await fetchEventsForCurrentSession({ resetPage: isCreateMode, forceRefresh: true, silent: isCreateMode })
+        postSaveRefreshes.push({
+          label: 'events refresh',
+          promise: Promise.resolve().then(() =>
+            fetchEventsForCurrentSession({
+              resetPage: isCreateMode,
+              forceRefresh: true,
+              silent: true,
+            })),
+        })
       }
       const savedHistoryItem = {
         ...(editedHistorySource || {}),
@@ -3331,17 +3784,10 @@ export function createEventsFeature(ctx) {
         startAt: derivedStartAt,
         endAt: derivedEndAt,
       }
-      let postSaveRefreshFailed = false
-      const markPostSaveRefreshFailed = (label, error) => {
-        postSaveRefreshFailed = true
-        console.warn(`[portal/events] ${label} failed after event save`, error)
-      }
-
-      try {
-        await reportHistoryRefreshAfterEventSave(savedHistoryItem)
-      } catch (refreshError) {
-        markPostSaveRefreshFailed('history refresh', refreshError)
-      }
+      postSaveRefreshes.push({
+        label: 'history refresh',
+        promise: Promise.resolve().then(() => reportHistoryRefreshAfterEventSave(savedHistoryItem)),
+      })
       if (typeof refreshWorkerAccountTimeAfterWorkdaySave === 'function') {
         const workerLoginsToRefresh = new Set(
           [savedHistoryItem.workerLogin, payload.workerLogin, editedHistorySource?.workerLogin]
@@ -3349,29 +3795,44 @@ export function createEventsFeature(ctx) {
             .filter(Boolean),
         )
         for (const workerLogin of workerLoginsToRefresh) {
-          try {
-            await refreshWorkerAccountTimeAfterWorkdaySave(workerLogin)
-          } catch (refreshError) {
-            markPostSaveRefreshFailed(`worker time refresh (${workerLogin})`, refreshError)
-          }
+          postSaveRefreshes.push({
+            label: `worker time refresh (${workerLogin})`,
+            promise: Promise.resolve().then(() => refreshWorkerAccountTimeAfterWorkdaySave(workerLogin)),
+          })
         }
       }
-      try {
-        if (typeof refreshDashboardAfterEventSave === 'function') {
-          await refreshDashboardAfterEventSave(savedHistoryItem, editedHistorySource || null)
-        } else {
-          await refreshDashboardWidgets({ forceRefresh: true, syncWorktimeToken: true })
-        }
-      } catch (refreshError) {
-        markPostSaveRefreshFailed('dashboard refresh', refreshError)
-      }
+      postSaveRefreshes.push({
+        label: 'dashboard refresh',
+        promise: Promise.resolve().then(() =>
+          typeof refreshDashboardAfterEventSave === 'function'
+            ? refreshDashboardAfterEventSave(savedHistoryItem, editedHistorySource || null)
+            : refreshDashboardWidgets({ forceRefresh: true, syncWorktimeToken: true })),
+      })
+
       if (savedEventVisibility === 'hidden') {
-        showTransientNotice('Zapisano, ale aktualne filtry ukrywaja nowy rekord.')
-      } else if (postSaveRefreshFailed) {
-        showTransientNotice('Zapisano zdarzenie. Odswiez widoki, jesli nie widzisz zmian.')
+        showTransientNotice(
+          isCreateMode
+            ? 'Zapisano, ale aktualne filtry ukrywaja nowy rekord.'
+            : 'Zapisano, ale aktualne filtry ukrywaja edytowany rekord.',
+        )
       } else {
         showTransientNotice('Zmiany zostały zapisane.')
       }
+      void Promise.allSettled(postSaveRefreshes.map((entry) => entry.promise)).then((results) => {
+        let refreshFailed = false
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            refreshFailed = true
+            console.warn(
+              `[portal/events] ${postSaveRefreshes[index]?.label || 'post-save refresh'} failed after event save`,
+              result.reason,
+            )
+          }
+        })
+        if (refreshFailed) {
+          showTransientNotice('Zapisano zdarzenie. Odswiez widoki, jesli nie widzisz zmian.')
+        }
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Błąd zapisu zdarzenia.'
       alert(message)
@@ -3384,6 +3845,62 @@ export function createEventsFeature(ctx) {
         )
       }
     }
+  }
+
+  function closeEventDeleteConfirmation(confirmed = false) {
+    const overlay = document.getElementById('evDeleteConfirmOverlay')
+    if (overlay) {
+      overlay.style.display = 'none'
+    }
+
+    const resolver = eventDeleteConfirmResolver
+    eventDeleteConfirmResolver = null
+    resolver?.(Boolean(confirmed))
+  }
+
+  function openEventDeleteConfirmation({
+    count = 1,
+    displayId = '',
+    skippedCount = 0,
+  } = {}) {
+    ensureEventOverlaysMountedToBody()
+    const overlay = document.getElementById('evDeleteConfirmOverlay')
+    const title = document.getElementById('evDeleteConfirmTitle')
+    const description = document.getElementById('evDeleteConfirmDescription')
+    const detailLabel = document.getElementById('evDeleteConfirmDetailLabel')
+    const detailValue = document.getElementById('evDeleteConfirmDetailValue')
+    const warning = document.querySelector('#evDeleteConfirmWarning span')
+    const acceptButton = document.getElementById('evDeleteConfirmAcceptBtn')
+
+    if (!overlay || !title || !description || !detailLabel || !detailValue || !acceptButton) {
+      return Promise.resolve(false)
+    }
+
+    if (eventDeleteConfirmResolver) {
+      closeEventDeleteConfirmation(false)
+    }
+
+    const normalizedCount = Math.max(1, Number(count) || 1)
+    const isBulk = normalizedCount > 1
+    title.textContent = isBulk ? 'Usunąć wybrane zdarzenia?' : 'Usunąć zdarzenie?'
+    description.textContent = isBulk
+      ? `${normalizedCount} zaznaczonych zdarzeń zostanie trwale usuniętych z ewidencji pracy.`
+      : 'Zdarzenie zostanie trwale usunięte z ewidencji pracy.'
+    detailLabel.textContent = isBulk ? 'Liczba wybranych rekordów' : 'Identyfikator zdarzenia'
+    detailValue.textContent = isBulk ? String(normalizedCount) : String(displayId || '-')
+    if (warning) {
+      warning.textContent =
+        Number(skippedCount) > 0
+          ? `Tej operacji nie można cofnąć. Pominięte rekordy bez identyfikatora: ${skippedCount}.`
+          : 'Tej operacji nie można cofnąć.'
+    }
+    setEventEditorButtonLabel(acceptButton, isBulk ? `Usuń ${normalizedCount} zdarzenia` : 'Usuń zdarzenie')
+    overlay.style.display = 'flex'
+
+    return new Promise((resolve) => {
+      eventDeleteConfirmResolver = resolve
+      window.requestAnimationFrame(() => title.focus())
+    })
   }
 
   async function deleteEventEditorItem() {
@@ -3408,7 +3925,7 @@ export function createEventsFeature(ctx) {
     const targetFingerprint = eventRowFingerprintKey(editedRow)
     const targetDisplayId = eventId || eventDeletionCandidateIds(editedRow)[0] || '-'
 
-    const confirmed = window.confirm(`Usunąć zdarzenie ${targetDisplayId}?`)
+    const confirmed = await openEventDeleteConfirmation({ displayId: targetDisplayId })
     if (!confirmed) {
       return
     }
@@ -3421,6 +3938,7 @@ export function createEventsFeature(ctx) {
 
     try {
       await deleteEventByCandidateIds(appState.session.orgId, editedRow)
+      eventRegisterDeletedRows([editedRow])
       closeEventEditor()
       await fetchEventsForCurrentSession({ resetPage: false, forceRefresh: true })
       await refreshDashboardWidgets({ forceRefresh: true, syncWorktimeToken: true })
@@ -3467,19 +3985,19 @@ export function createEventsFeature(ctx) {
     const selectedFingerprintKeys = new Set(selectedRows.map((row) => eventRowFingerprintKey(row)).filter(Boolean))
     const selectedIds = new Set(selectedRows.flatMap((row) => eventDeletionCandidateIds(row)))
 
-    const skippedNotice = skippedCount > 0 ? `\n\n${skippedCount} wiersz(y) bez identyfikatora zostanie pominiete.` : ''
-    const confirmed = window.confirm(
-      `Czy na pewno chcesz usunac ${selectedRows.length} rekord(y)? Ta zmiana jest nieodwracalna.${skippedNotice}`,
-    )
+    const confirmed = await openEventDeleteConfirmation({
+      count: selectedRows.length,
+      skippedCount,
+    })
     if (!confirmed) {
       return
     }
 
     const deleteButton = document.getElementById('evDeleteSelectedBtn')
-    const defaultLabel = 'Usun'
+    const defaultLabel = 'Usuń'
     if (deleteButton instanceof HTMLButtonElement) {
       deleteButton.disabled = true
-      deleteButton.textContent = 'Usuwanie...'
+      setEventEditorButtonLabel(deleteButton, 'Usuwanie...')
     }
 
     try {
@@ -3487,6 +4005,7 @@ export function createEventsFeature(ctx) {
         await deleteEventByCandidateIds(appState.session.orgId, row)
       }
 
+      eventRegisterDeletedRows(selectedRows)
       appState.eventsSelectedKeys = new Set()
       await fetchEventsForCurrentSession({ resetPage: false, forceRefresh: true })
       await refreshDashboardWidgets({ forceRefresh: true, syncWorktimeToken: true })
@@ -3510,7 +4029,7 @@ export function createEventsFeature(ctx) {
     } finally {
       if (deleteButton instanceof HTMLButtonElement) {
         deleteButton.disabled = false
-        deleteButton.textContent = defaultLabel
+        setEventEditorButtonLabel(deleteButton, defaultLabel)
       }
       syncEventsSelectionUi()
     }
@@ -3662,6 +4181,28 @@ export function createEventsFeature(ctx) {
     if (status) status.value = String(filters.status ?? '')
     if (q) q.value = String(filters.q ?? '')
     syncEventsMonthControl()
+  }
+
+  function resetEventsFilters() {
+    ;['worker', 'zone', 'client'].forEach((kind) => {
+      eventsFilterComboClose(kind)
+    })
+    clearOpenEventIntegrityFocus()
+    applyEventsFilterInputs({
+      from: firstDayOfCurrentMonthYmd(),
+      to: todayYmd(),
+      worker: '',
+      workerLogin: '',
+      strefa: '',
+      pomieszczenie: '',
+      roomId: '',
+      status: '',
+      q: '',
+    })
+    appState.eventsPage = 1
+    appState.eventsSelectedKeys = new Set()
+    syncEventsSelectionUi()
+    void fetchEventsForCurrentSession({ resetPage: false })
   }
 
   function readEventsFilters() {
@@ -4137,7 +4678,7 @@ export function createEventsFeature(ctx) {
       syncEventsPageSizeControl()
       setSubwelcomeMetric('#view-events .subwelcome', appState.eventsTotal)
       if (!silent || forceRefresh) {
-        void refreshEventsSummaryCards(filters)
+        void refreshEventsSummaryCards({ ...filters, forceRefresh })
       }
       void rememberEventsFingerprintForCurrentFilters()
       void refreshOpenEventIntegrity({ forceRefresh }).catch((error) => {
@@ -4348,6 +4889,7 @@ export function createEventsFeature(ctx) {
       clearOpenEventIntegrityFocus()
       void fetchEventsForCurrentSession({ resetPage: true, forceRefresh: true })
     })
+    binding.add(document.getElementById('evClearFiltersBtn'), 'click', resetEventsFilters)
     binding.add(document.getElementById('evExportPdfBtn'), 'click', () => {
       void downloadEventsExport('pdf')
     })
@@ -4408,6 +4950,20 @@ export function createEventsFeature(ctx) {
         return
       }
 
+      const categoryButton = event.target?.closest?.('[data-event-integrity-kind]')
+      if (!categoryButton) {
+        return
+      }
+
+      const integrityKind = String(categoryButton.getAttribute('data-event-integrity-kind') ?? '').trim()
+      openEventIntegrityModal(integrityKind, categoryButton)
+    })
+    binding.add(document.getElementById('evIntegrityModalOverlay'), 'click', (event) => {
+      if (event.target?.id === 'evIntegrityModalOverlay') {
+        closeEventIntegrityModal()
+        return
+      }
+
       const button = event.target?.closest?.('[data-event-open-worker-key]')
       if (!button) {
         return
@@ -4425,16 +4981,13 @@ export function createEventsFeature(ctx) {
         return
       }
 
-      const previousPage = Number(eventsOpenIntegrityFocus?.previousPage ?? appState.eventsPage)
-      eventsOpenIntegrityFocus = {
-        workerKey,
-        integrityKind: group.integrityKind,
-        previousPage: Number.isFinite(previousPage) && previousPage > 0 ? Math.floor(previousPage) : 1,
-      }
-      appState.eventsPage = 1
-      renderOpenEventIntegrity()
-      renderOpenIntegrityFocusPage()
-      document.querySelector('#evOpenStatusIntegrity [data-event-open-back]')?.focus()
+      focusEventIntegrityGroup(group)
+    })
+    binding.add(document.getElementById('evIntegrityModalCloseBtn'), 'click', () => {
+      closeEventIntegrityModal()
+    })
+    binding.add(document.getElementById('evIntegrityModalCancelBtn'), 'click', () => {
+      closeEventIntegrityModal()
     })
     binding.add(document.getElementById('evDeleteSelectedBtn'), 'click', () => {
       void deleteSelectedEvents()
@@ -4600,6 +5153,62 @@ export function createEventsFeature(ctx) {
     binding.add(document.getElementById('evCommentOverlay'), 'click', (event) => {
       if (event.target?.id === 'evCommentOverlay') closeEventCommentModal()
     })
+    binding.add(document, 'keydown', (event) => {
+      if (!eventIntegrityModalIsOpen()) {
+        return
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeEventIntegrityModal()
+        return
+      }
+
+      if (event.key !== 'Tab') {
+        return
+      }
+
+      const focusableElements = eventIntegrityModalFocusableElements()
+      if (!focusableElements.length) {
+        event.preventDefault()
+        document.getElementById('evIntegrityModalTitle')?.focus()
+        return
+      }
+
+      const firstElement = focusableElements[0]
+      const lastElement = focusableElements[focusableElements.length - 1]
+      if (event.shiftKey && (document.activeElement === firstElement || document.activeElement === document.getElementById('evIntegrityModalTitle'))) {
+        event.preventDefault()
+        lastElement.focus()
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault()
+        firstElement.focus()
+      }
+    })
+    binding.add(document.getElementById('evDeleteConfirmCloseBtn'), 'click', () => {
+      closeEventDeleteConfirmation(false)
+    })
+    binding.add(document.getElementById('evDeleteConfirmCancelBtn'), 'click', () => {
+      closeEventDeleteConfirmation(false)
+    })
+    binding.add(document.getElementById('evDeleteConfirmAcceptBtn'), 'click', () => {
+      closeEventDeleteConfirmation(true)
+    })
+    binding.add(document.getElementById('evDeleteConfirmOverlay'), 'click', (event) => {
+      if (event.target?.id === 'evDeleteConfirmOverlay') {
+        closeEventDeleteConfirmation(false)
+      }
+    })
+    binding.add(document, 'keydown', (event) => {
+      if (event.key !== 'Escape') {
+        return
+      }
+      const overlay = document.getElementById('evDeleteConfirmOverlay')
+      if (overlay?.style.display === 'flex') {
+        event.preventDefault()
+        closeEventDeleteConfirmation(false)
+      }
+    })
     binding.add(document.getElementById('evEditorOverlay'), 'click', (event) => {
       if (event.target?.id === 'evEditorOverlay') closeEventEditor()
     })
@@ -4629,10 +5238,12 @@ export function createEventsFeature(ctx) {
       eventEditorSyncTimeSummary()
     })
     binding.add(document.getElementById('evEditPom'), 'change', refreshEventZoneOptionsForClient)
+    binding.add(document.getElementById('evEditLocation'), 'change', refreshEventZoneOptionsForLocation)
     binding.add(document.getElementById('evEditStrefa'), 'change', syncEventRoomAndClientFromZone)
     ;[
       { inputId: 'evEditWorkerSearch', selectId: 'evEditWorker', kind: 'worker' },
       { inputId: 'evEditPomSearch', selectId: 'evEditPom', kind: 'client' },
+      { inputId: 'evEditLocationSearch', selectId: 'evEditLocation', kind: 'location' },
       { inputId: 'evEditStrefaSearch', selectId: 'evEditStrefa', kind: 'zone' },
     ].forEach(({ inputId, selectId, kind }) => {
       binding.add(document.getElementById(inputId), 'input', () => {
@@ -4675,6 +5286,7 @@ export function createEventsFeature(ctx) {
         if (select && select.options.length > 1) {
           const firstMatch = select.options[1]
           select.value = String(firstMatch?.value ?? '')
+          select.dispatchEvent(new Event('change', { bubbles: true }))
         }
         eventEditorSyncSearchInput(kind)
         eventEditorCollapsePicker(kind)
@@ -4705,6 +5317,8 @@ export function createEventsFeature(ctx) {
 
     return () => {
       cleanupEventsTableResize()
+      closeEventIntegrityModal({ restoreFocus: false })
+      closeEventDeleteConfirmation(false)
       eventFilterComboStates.clear()
       binding.done()
     }

@@ -1,4 +1,5 @@
-﻿<header class="portal-page-hero">
+﻿<div class="events-command-surface">
+<header class="portal-page-hero">
   <div class="portal-page-hero__copy">
     <div class="portal-page-hero__title-row">
       <h1>Zdarzenia</h1>
@@ -45,7 +46,15 @@
   </article>
 </section>
 
-<section class="events-filter-panel" aria-label="Filtry zdarzeń">
+<section class="events-filter-panel" aria-labelledby="evFiltersTitle">
+  <header class="events-filter-heading">
+    <span class="events-filter-heading__icon" aria-hidden="true"><i class="ph ph-funnel-simple"></i></span>
+    <div>
+      <h2 id="evFiltersTitle">Filtry zdarzeń</h2>
+      <p>Zawęź listę według czasu, pracownika, obiektu lub statusu.</p>
+    </div>
+  </header>
+
   <div class="events-filter-date-row">
     <div class="events-filter-field">
       <label for="evFrom">Od (start)</label>
@@ -101,7 +110,7 @@
             aria-controls="evStrefaList"
             aria-expanded="false"
             autocomplete="off"
-            placeholder="Wybierz..."
+            placeholder="Wpisz lub wybierz..."
           />
           <button class="events-filter-combo-toggle" type="button" aria-label="Rozwiń listę stref" tabindex="-1">
             <i class="ph ph-caret-down" aria-hidden="true"></i>
@@ -155,7 +164,7 @@
 
   <div class="events-filter-footer">
     <label class="events-filter-page-size" for="evPageSize">
-      <span class="events-visually-hidden">Liczba rekordów na stronie</span>
+      <span class="events-filter-page-size-label">Na stronie</span>
       <select id="evPageSize" aria-label="Liczba rekordów na stronie">
         <option value="10">10</option>
         <option value="25" selected>25</option>
@@ -165,9 +174,10 @@
     </label>
     <div class="events-filter-actions">
       <button class="btn2 secondary" id="evAddBtn" type="button"><i class="ph ph-plus" aria-hidden="true"></i><span>Dodaj zdarzenie</span></button>
-      <button class="btn2 danger" id="evDeleteSelectedBtn" type="button" disabled><i class="ph ph-trash" aria-hidden="true"></i><span>Usuń</span></button>
+      <button class="btn2 danger" id="evDeleteSelectedBtn" type="button" disabled><i class="ph ph-trash-simple" aria-hidden="true"></i><span data-event-button-label>Usuń</span></button>
       <button class="btn2 events-export-action" id="evExportPdfBtn" type="button"><i class="ph ph-file-pdf" aria-hidden="true"></i><span>PDF</span></button>
       <button class="btn2 events-export-action" id="evExportExcelBtn" type="button"><i class="ph ph-file-xls" aria-hidden="true"></i><span>Excel</span></button>
+      <button class="btn2" id="evClearFiltersBtn" type="button"><i class="ph ph-funnel-x" aria-hidden="true"></i><span>Resetuj filtry</span></button>
       <button class="btn2" id="evResetBtn" type="button"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i><span>Odśwież</span></button>
       <button class="btn2 primary" id="evSearchBtn" type="button"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span>Szukaj</span></button>
     </div>
@@ -178,7 +188,7 @@
   class="events-integrity-alert"
   id="evOpenStatusIntegrity"
   aria-live="polite"
-  aria-label="Kontrola otwartych statusów CLEAN"
+  aria-label="Problemy do sprawdzenia"
   hidden
 ></section>
 
@@ -214,9 +224,58 @@
       <span id="evShownLabel">Wyświetlono: -</span>
     </div>
     <div class="pager-right">
-      <button class="btn2 pager-btn" id="evPrevBtn" type="button"><-</button>
-      <button class="btn2 pager-btn" id="evNextBtn" type="button">-></button>
+      <button class="btn2 pager-btn" id="evPrevBtn" type="button" aria-label="Poprzednia strona" title="Poprzednia strona">
+        <i class="ph ph-caret-left" aria-hidden="true"></i>
+        <span class="events-visually-hidden">Poprzednia strona</span>
+      </button>
+      <button class="btn2 pager-btn" id="evNextBtn" type="button" aria-label="Następna strona" title="Następna strona">
+        <i class="ph ph-caret-right" aria-hidden="true"></i>
+        <span class="events-visually-hidden">Następna strona</span>
+      </button>
     </div>
+  </div>
+</div>
+</div>
+
+<div
+  class="overlay ev-integrity-modal-overlay"
+  id="evIntegrityModalOverlay"
+  role="dialog"
+  aria-modal="true"
+  aria-hidden="true"
+  aria-labelledby="evIntegrityModalTitle"
+  aria-describedby="evIntegrityModalDescription"
+>
+  <div class="modal ev-integrity-modal">
+    <header class="ev-integrity-modal-header">
+      <span class="ev-integrity-modal-icon" id="evIntegrityModalIcon" aria-hidden="true">
+        <i class="ph ph-warning-circle"></i>
+      </span>
+      <div>
+        <span class="ev-integrity-modal-eyebrow">Problem do sprawdzenia</span>
+        <h3 id="evIntegrityModalTitle" tabindex="-1">Szczegóły problemu</h3>
+      </div>
+      <button class="ev-integrity-modal-close" id="evIntegrityModalCloseBtn" type="button" aria-label="Zamknij okno problemu">
+        <i class="ph ph-x" aria-hidden="true"></i>
+      </button>
+    </header>
+
+    <div class="ev-integrity-modal-summary">
+      <p id="evIntegrityModalDescription">Wybierz pracownika, aby zobaczyć powiązane zdarzenia w głównej tabeli.</p>
+      <div class="ev-integrity-modal-stats" aria-label="Podsumowanie problemu">
+        <span><strong id="evIntegrityModalWorkerCount">0</strong> pracowników</span>
+        <span><strong id="evIntegrityModalRecordCount">0</strong> rekordów</span>
+      </div>
+    </div>
+
+    <div class="ev-integrity-modal-body">
+      <ul class="ev-integrity-modal-list" id="evIntegrityModalList"></ul>
+    </div>
+
+    <footer class="ev-integrity-modal-footer">
+      <span>Po wybraniu osoby wrócisz do tabeli zdarzeń.</span>
+      <button class="btn2" id="evIntegrityModalCancelBtn" type="button">Zamknij</button>
+    </footer>
   </div>
 </div>
 
@@ -224,7 +283,7 @@
   <div class="modal ev-editor-modal">
     <header class="ev-editor-header">
       <div class="ev-editor-title-wrap">
-        <span class="ev-editor-title-icon" aria-hidden="true"><i class="ph ph-clock-counter-clockwise"></i></span>
+        <span class="ev-editor-title-icon" aria-hidden="true"><i class="ph ph-pencil-simple-line" id="evEditorModeIcon"></i></span>
         <div>
           <h3 id="evEditorTitle" tabindex="-1">Edytuj zdarzenie</h3>
           <p id="evEditorSubtitle">Zmień przypisanie lub godziny zdarzenia pracownika.</p>
@@ -256,6 +315,7 @@
             <label for="evEditWorkerSearch"><i class="ph ph-user" aria-hidden="true"></i> Pracownik <span aria-hidden="true">*</span></label>
             <div class="ev-editor-picker">
               <input id="evEditWorkerSearch" type="text" placeholder="Wpisz imię i nazwisko..." autocomplete="off" aria-haspopup="listbox" aria-expanded="false" aria-required="true" />
+              <i class="ph ph-caret-down ev-editor-picker-caret" aria-hidden="true"></i>
               <select id="evEditWorker" class="ev-editor-picker-list" aria-label="Lista pracowników">
                 <option value="">(wybierz)</option>
               </select>
@@ -263,20 +323,33 @@
           </div>
 
           <div class="field">
-            <label for="evEditPomSearch"><i class="ph ph-buildings" aria-hidden="true"></i> Klient</label>
+            <label for="evEditPomSearch"><i class="ph ph-buildings" aria-hidden="true"></i> Obiekt <span aria-hidden="true">*</span></label>
             <div class="ev-editor-picker">
-              <input id="evEditPomSearch" type="text" placeholder="Wpisz nazwę klienta..." autocomplete="off" aria-haspopup="listbox" aria-expanded="false" />
-              <select id="evEditPom" class="ev-editor-picker-list" aria-label="Lista klientów">
+              <input id="evEditPomSearch" type="text" placeholder="Wpisz nazwę obiektu..." autocomplete="off" aria-haspopup="listbox" aria-expanded="false" aria-required="true" />
+              <i class="ph ph-caret-down ev-editor-picker-caret" aria-hidden="true"></i>
+              <select id="evEditPom" class="ev-editor-picker-list" aria-label="Lista obiektów">
                 <option value="">(wybierz)</option>
               </select>
             </div>
           </div>
 
           <div class="field">
-            <label for="evEditStrefaSearch"><i class="ph ph-map-pin" aria-hidden="true"></i> Strefa</label>
+            <label for="evEditStrefaSearch"><i class="ph ph-stack" aria-hidden="true"></i> Strefa obiektu <span aria-hidden="true">*</span></label>
             <div class="ev-editor-picker">
-              <input id="evEditStrefaSearch" type="text" placeholder="Wpisz nazwę strefy..." autocomplete="off" aria-haspopup="listbox" aria-expanded="false" />
+              <input id="evEditStrefaSearch" type="text" placeholder="Wpisz nazwę strefy..." autocomplete="off" aria-haspopup="listbox" aria-expanded="false" aria-required="true" />
+              <i class="ph ph-caret-down ev-editor-picker-caret" aria-hidden="true"></i>
               <select id="evEditStrefa" class="ev-editor-picker-list" aria-label="Lista stref">
+                <option value="">(wybierz)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="evEditLocationSearch"><i class="ph ph-map-pin" aria-hidden="true"></i> Lokalizacja strefy</label>
+            <div class="ev-editor-picker">
+              <input id="evEditLocationSearch" type="text" placeholder="Wpisz lub wybierz lokalizację..." autocomplete="off" aria-haspopup="listbox" aria-expanded="false" />
+              <i class="ph ph-caret-down ev-editor-picker-caret" aria-hidden="true"></i>
+              <select id="evEditLocation" class="ev-editor-picker-list" aria-label="Lista lokalizacji stref">
                 <option value="">(wybierz)</option>
               </select>
             </div>
@@ -302,7 +375,7 @@
         <div class="ev-editor-time-grid">
           <div class="ev-editor-time-card ev-editor-time-card--start">
             <div class="ev-editor-time-card-head">
-              <span class="ev-editor-time-icon" aria-hidden="true"><i class="ph ph-play"></i></span>
+              <span class="ev-editor-time-icon" aria-hidden="true"><i class="ph ph-play-circle"></i></span>
               <div>
                 <label for="evEditStart">START</label>
                 <small>Początek pracy</small>
@@ -313,7 +386,7 @@
 
           <div class="ev-editor-time-card ev-editor-time-card--stop">
             <div class="ev-editor-time-card-head">
-              <span class="ev-editor-time-icon" aria-hidden="true"><i class="ph ph-stop"></i></span>
+              <span class="ev-editor-time-icon" aria-hidden="true"><i class="ph ph-stop-circle"></i></span>
               <div>
                 <label for="evEditStop">STOP <em>opcjonalnie</em></label>
                 <small>Koniec pracy</small>
@@ -352,17 +425,61 @@
 
     <footer class="ev-editor-footer">
       <button class="btn2 danger ev-editor-delete" id="evDeleteBtn" type="button">
-        <i class="ph ph-trash" aria-hidden="true"></i><span data-event-button-label>Usuń</span>
+        <i class="ph ph-trash-simple" aria-hidden="true"></i><span data-event-button-label>Usuń</span>
       </button>
       <div class="ev-editor-footer-actions">
-        <button class="btn2" id="evCancelBtn" type="button">Anuluj</button>
+        <button class="btn2" id="evCancelBtn" type="button"><i class="ph ph-x-circle" aria-hidden="true"></i><span>Anuluj</span></button>
         <button class="btn2 primary" id="evSaveBtn" type="button">
-          <i class="ph ph-floppy-disk" aria-hidden="true"></i><span data-event-button-label>Zapisz</span>
+          <i class="ph ph-check-circle" aria-hidden="true"></i><span data-event-button-label>Zapisz</span>
         </button>
       </div>
     </footer>
   </div>
 </div>
+
+<div
+  class="overlay ev-delete-confirm-overlay"
+  id="evDeleteConfirmOverlay"
+  role="alertdialog"
+  aria-modal="true"
+  aria-labelledby="evDeleteConfirmTitle"
+  aria-describedby="evDeleteConfirmDescription evDeleteConfirmWarning"
+>
+  <div class="modal ev-delete-confirm-modal">
+    <header class="ev-delete-confirm-header">
+      <span class="ev-delete-confirm-icon" aria-hidden="true"><i class="ph ph-trash-simple"></i></span>
+      <div>
+        <span class="ev-delete-confirm-eyebrow">Potwierdzenie usunięcia</span>
+        <h3 id="evDeleteConfirmTitle" tabindex="-1">Usunąć zdarzenie?</h3>
+      </div>
+      <button class="ev-delete-confirm-close" id="evDeleteConfirmCloseBtn" type="button" aria-label="Zamknij okno potwierdzenia">
+        <i class="ph ph-x" aria-hidden="true"></i>
+      </button>
+    </header>
+
+    <div class="ev-delete-confirm-body">
+      <p id="evDeleteConfirmDescription">Zdarzenie zostanie trwale usunięte z ewidencji pracy.</p>
+      <div class="ev-delete-confirm-detail">
+        <span id="evDeleteConfirmDetailLabel">Identyfikator zdarzenia</span>
+        <strong class="mono" id="evDeleteConfirmDetailValue">-</strong>
+      </div>
+      <div class="ev-delete-confirm-warning" id="evDeleteConfirmWarning">
+        <i class="ph ph-warning-circle" aria-hidden="true"></i>
+        <span>Tej operacji nie można cofnąć.</span>
+      </div>
+    </div>
+
+    <footer class="ev-delete-confirm-actions">
+      <button class="btn2" id="evDeleteConfirmCancelBtn" type="button">
+        <i class="ph ph-x-circle" aria-hidden="true"></i><span>Anuluj</span>
+      </button>
+      <button class="btn2 danger" id="evDeleteConfirmAcceptBtn" type="button">
+        <i class="ph ph-trash-simple" aria-hidden="true"></i><span data-event-button-label>Usuń zdarzenie</span>
+      </button>
+    </footer>
+  </div>
+</div>
+
 <div class="overlay" id="evCommentOverlay" aria-label="Komentarz" role="dialog" aria-modal="true">
   <div class="modal modal-sm">
     <div class="modal-header">

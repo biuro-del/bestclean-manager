@@ -124,7 +124,12 @@ test('portal rozdziela zwykłe zamknięcie od jawnej zmiany tożsamości', () =>
   )
   assert.match(
     workdayService,
-    /shouldReidentify \? 'ReidentifyEventForOrg' : 'UpdateEventForOrg'/,
+    /if \(shouldReidentify\) \{\s+await reidentifyEventForOrg\(/s,
+  )
+  assert.match(workdayService, /await updateEventForOrg\(/)
+  assert.match(
+    workdayService,
+    /runMutationOperation\('UpdateEventForOrg', \{\s+orgId,\s+eventId: normalizedEventId,\s+workerLogin,/s,
   )
   assert.match(eventFeature, /correlationIdentityBaseline:\s*appState\.eventEditorItem/)
   assert.match(reportsFeature, /correlationIdentityBaseline:\s*source/)

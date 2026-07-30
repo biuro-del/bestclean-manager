@@ -22,42 +22,63 @@ const updateStart = source.indexOf('export async function updateEvent')
 const createSource = source.slice(createStart, updateStart)
 const updateSource = source.slice(updateStart)
 
-test('createEvent nie zapisuje Workday przed kanonicznym Event', () => {
-  const workdayGuard = createSource.indexOf('await assertNoOtherOpenWorkday')
-  const eventWrite = createSource.indexOf("runMutationOperation('InsertEventForOrg'")
+test('createEvent zapisuje Event bez przedwczesnego FK i łączy go dopiero po utworzeniu Workday', () => {
+  const workdayGuard = createSource.indexOf('assertNoOtherOpenWorkday(')
+  const eventWrite = createSource.indexOf('await insertEventForOrg(')
   const workdayWrite = createSource.indexOf('await createWorkday')
+  const linkWrite = createSource.indexOf('await reidentifyEventForOrg(')
 
   assert.ok(workdayGuard >= 0)
   assert.ok(eventWrite > workdayGuard)
   assert.ok(eventWrite >= 0)
   assert.ok(workdayWrite > eventWrite)
+  assert.ok(linkWrite > workdayWrite)
+  assert.match(createSource.slice(eventWrite, workdayWrite), /workdayId:\s*null/)
+  assert.match(createSource.slice(linkWrite), /workdayId:\s*canonicalWorkdayId/)
   assert.match(createSource, /PARTIAL_EVENT_WORKDAY_WRITE_UNKNOWN/)
+  assert.match(createSource, /PARTIAL_EVENT_WORKDAY_LINK_UNKNOWN/)
   assert.doesNotMatch(createSource, /if \(!isOperationNotFoundError\(error, 'InsertEventForOrg'\)\)/)
 })
 
 test('updateEvent nie zmienia Workday, gdy kanoniczny Event zostanie odrzucony', () => {
-  const workdayGuard = updateSource.indexOf('await assertNoOtherOpenWorkday')
-  const eventWrite = updateSource.indexOf('await runMutationOperation(eventOperation')
+  const workdayGuard = updateSource.indexOf('assertNoOtherOpenWorkday(')
+  const eventWrite = updateSource.indexOf('await updateEventForOrg(')
   const workdayWrite = updateSource.indexOf('await updateWorkday')
 
   assert.ok(workdayGuard >= 0)
   assert.ok(eventWrite > workdayGuard)
   assert.ok(eventWrite >= 0)
   assert.ok(workdayWrite > eventWrite)
-  assert.match(
-    updateSource,
-    /shouldReidentify \? 'ReidentifyEventForOrg' : 'UpdateEventForOrg'/,
-  )
+  assert.match(updateSource, /if \(shouldReidentify\) \{\s+await reidentifyEventForOrg\(/s)
+  assert.match(updateSource, /isMissingDataConnectVariable\(error, 'workerLogin'\)/)
   assert.match(updateSource, /PARTIAL_EVENT_WORKDAY_UPDATE_UNKNOWN/)
   assert.doesNotMatch(updateSource, /if \(!isOperationNotFoundError\(error, 'UpdateEventForOrg'\)\)/)
 })
 
-test('kontrole integralności wymagają kompletnych operacji paginowanych zamiast fallbacku 5000', () => {
+test('kontrole integralności używają kompletnych operacji paginowanych wybranego pracownika', () => {
   assert.match(source, /requireCompletePagedSource === true/)
   assert.match(source, /error\.code = 'INTEGRITY_CHECK_INCOMPLETE'/)
   assert.match(source, /EventsIntegrityPageForOrg/)
+  assert.match(source, /EventsPageForOrgByWorker/)
+  assert.match(source, /WorkdaysPageForOrgByWorker/)
   assert.match(source, /WorkdaysIntegrityPageForOrg/)
+  assert.match(source, /readOrganizationIntegrityRows/)
   assert.match(source, /readAllWorkdaysForWorkerIntegrity/)
+})
+
+test('ręczny zapis kontroluje tylko historię wybranego pracownika i nie czeka na polling widoczności', () => {
+  assert.match(source, /EventsPageForOrgByWorker/)
+  assert.match(source, /WorkdaysPageForOrgByWorker/)
+  assert.match(source, /async function readWorkerIntegritySnapshot/)
+  assert.match(source, /const \[eventRows, workdayRows, clients, zones, workers\] = await Promise\.all/)
+  assert.match(createSource, /const \[, integritySnapshot\] = await Promise\.all/)
+  assert.match(createSource, /rows:\s*integritySnapshot\?\.events/)
+  assert.match(createSource, /rows:\s*integritySnapshot\?\.workdays/)
+  assert.match(createSource, /mutationPayload\.workerLogin = workerLogin/)
+  assert.match(updateSource, /mutationPayload\.workerLogin = workerLogin/)
+  assert.match(source, /fetchPolicy: 'SERVER_ONLY'/)
+  assert.match(source, /forceRefresh: filters\.forceRefresh === true/)
+  assert.doesNotMatch(source, /assertWorkdayVisibleAfterSave/)
 })
 
 test('merge zachowuje kanoniczne pola jawnego Eventu zamiast nadpisywać je nowszym Workday', () => {

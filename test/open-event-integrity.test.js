@@ -110,6 +110,104 @@ test('pusty eventType bez zamknietego, jednoznacznego Workday blokuje nowy CLEAN
   )
 })
 
+test('ręczny zapis zarządczy może pominąć nierozstrzygnięty wpis, ale nie jawny aktywny CLEAN', async () => {
+  const { findBlockingOpenEventForWorker } = await integrityModule
+  const unresolved = openEvent({
+    eventId: 'EV-LEGACY',
+    eventType: null,
+    linkedWorkdayFound: false,
+    linkedWorkdayStatus: '',
+    linkedWorkdayEndAt: null,
+  })
+  const activeClean = openEvent({ eventId: 'EV-ACTIVE' })
+  const options = { blockUnresolvedLegacy: false }
+
+  assert.equal(
+    findBlockingOpenEventForWorker([unresolved], { workerLogin: 'marta.cisak' }, options),
+    null,
+  )
+  assert.equal(
+    findBlockingOpenEventForWorker(
+      [unresolved, activeClean],
+      { workerLogin: 'marta.cisak' },
+      options,
+    )?.eventId,
+    'EV-ACTIVE',
+  )
+})
+
+test('pojedynczy nierozstrzygniety wpis z obecnego dnia nie jest pokazywany jako problem', async () => {
+  const {
+    filterVisibleUnresolvedLegacyGroups,
+    groupUnresolvedLegacyOpenEvents,
+  } = await integrityModule
+  const unresolvedToday = openEvent({
+    eventType: null,
+    startAt: '2026-07-30T06:35:00.000Z',
+    linkedWorkdayFound: false,
+    linkedWorkdayStatus: '',
+    linkedWorkdayEndAt: null,
+  })
+  const groups = groupUnresolvedLegacyOpenEvents([unresolvedToday])
+
+  assert.equal(groups[0]?.count, 1)
+  assert.deepEqual(
+    filterVisibleUnresolvedLegacyGroups(groups, {
+      currentDayKey: '2026-07-30',
+      dayKeyFromValue: () => '2026-07-30',
+    }),
+    [],
+  )
+})
+
+test('wiecej niz jeden dzisiejszy nierozstrzygniety wpis nadal jest problemem', async () => {
+  const {
+    filterVisibleUnresolvedLegacyGroups,
+    groupUnresolvedLegacyOpenEvents,
+  } = await integrityModule
+  const groups = groupUnresolvedLegacyOpenEvents([
+    openEvent({
+      eventType: null,
+      startAt: '2026-07-30T06:35:00.000Z',
+      linkedWorkdayFound: false,
+    }),
+    openEvent({
+      eventId: 'EV-2',
+      eventType: null,
+      startAt: '2026-07-30T08:10:00.000Z',
+      linkedWorkdayFound: false,
+    }),
+  ])
+  const visibleGroups = filterVisibleUnresolvedLegacyGroups(groups, {
+    currentDayKey: '2026-07-30',
+    dayKeyFromValue: () => '2026-07-30',
+  })
+
+  assert.equal(visibleGroups.length, 1)
+  assert.equal(visibleGroups[0].count, 2)
+})
+
+test('pojedynczy historyczny nierozstrzygniety wpis nadal jest problemem', async () => {
+  const {
+    filterVisibleUnresolvedLegacyGroups,
+    groupUnresolvedLegacyOpenEvents,
+  } = await integrityModule
+  const groups = groupUnresolvedLegacyOpenEvents([
+    openEvent({
+      eventType: null,
+      startAt: '2026-07-29T06:35:00.000Z',
+      linkedWorkdayFound: false,
+    }),
+  ])
+  const visibleGroups = filterVisibleUnresolvedLegacyGroups(groups, {
+    currentDayKey: '2026-07-30',
+    dayKeyFromValue: () => '2026-07-29',
+  })
+
+  assert.equal(visibleGroups.length, 1)
+  assert.equal(visibleGroups[0].count, 1)
+})
+
 test('zamkniety Workday innej osoby nie zwalnia nierozstrzygnietego Eventu', async () => {
   const { isUnresolvedLegacyOpenEvent } = await integrityModule
   const wrongWorkerLink = openEvent({

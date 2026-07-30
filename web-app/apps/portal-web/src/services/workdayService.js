@@ -1,7 +1,10 @@
 ﻿import {
   backupCyclesForOrg,
   deleteWorkdayForOrg,
+  insertEventForOrg,
   insertWorkdayForOrg,
+  reidentifyEventForOrg,
+  updateEventForOrg,
   updateWorkdayForOrg,
   workdaysForOrg,
   workerWorkdaysForOrg,
@@ -779,10 +782,14 @@ function getDataConnectInstance() {
   return dataConnect
 }
 
-async function runQueryOperation(operationName, variables) {
+async function runQueryOperation(operationName, variables, options = {}) {
   try {
     if (isPlatformSession()) return await executePlatformDataConnect('query', operationName, variables)
-    return await executeQuery(queryRef(getDataConnectInstance(), operationName, variables))
+    const reference = queryRef(getDataConnectInstance(), operationName, variables)
+    return await executeQuery(
+      reference,
+      options.forceRefresh === true ? { fetchPolicy: 'SERVER_ONLY' } : undefined,
+    )
   } catch (error) {
     throw withOperationNotFoundHint(error, operationName)
   }
@@ -909,8 +916,8 @@ function buildEventsFastVariables(orgId, filters, mode, extra = {}) {
   return variables
 }
 
-async function runEventsPageQuery(operationName, variables, collectionName) {
-  const response = await runQueryOperation(operationName, variables)
+async function runEventsPageQuery(operationName, variables, collectionName, options = {}) {
+  const response = await runQueryOperation(operationName, variables, options)
   return response?.data?.[collectionName] ?? []
 }
 
@@ -1936,53 +1943,6 @@ function mappedItemStamp(item) {
   return bestTs
 }
 
-function delayMs(durationMs) {
-  const ms = Number(durationMs)
-  const normalized = Number.isFinite(ms) && ms > 0 ? Math.floor(ms) : 0
-  if (!normalized) {
-    return Promise.resolve()
-  }
-
-  return new Promise((resolve) => {
-    setTimeout(resolve, normalized)
-  })
-}
-
-async function assertWorkdayVisibleAfterSave(orgId, workdayId, options = {}) {
-  const targetId = String(workdayId ?? '').trim()
-  if (!targetId) {
-    return
-  }
-
-  const attempts = Math.max(Number(options.attempts) || 4, 1)
-  const waitMs = Math.max(Number(options.waitMs) || 200, 0)
-
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const response = await getWorkdays(orgId, {
-      source: 'events',
-      q: targetId,
-      page: 1,
-      pageSize: 20,
-      forceRefresh: true,
-    })
-    const found = (response.items ?? []).some((item) => {
-      const candidate = String(item?.workdayId ?? item?.eventId ?? item?.id ?? '').trim()
-      return candidate === targetId
-    })
-    if (found) {
-      return
-    }
-
-    if (attempt < attempts - 1 && waitMs > 0) {
-      await delayMs(waitMs)
-    }
-  }
-
-  throw new Error(
-    `Zdarzenie ${targetId} nie zostalo potwierdzone w bazie po zapisie. Sprobuj ponownie lub odswiez liste.`,
-  )
-}
-
 export function mergeMappedEventCollections(primaryItems, secondaryItems) {
   const mergedById = new Map()
 
@@ -2310,6 +2270,7 @@ async function fetchMappedOpenEventIntegrityRows(orgId) {
           offset: (page - 1) * pageSize,
         },
         'events',
+        { forceRefresh: true },
       )
     } catch (cause) {
       const error = new Error(
@@ -2386,10 +2347,14 @@ async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '') {
       const [nextEvents, nextWorkdays] = await Promise.all([
         eventsExhausted
           ? Promise.resolve([])
-          : runEventsPageQuery(operations.events, variables, 'events'),
+          : runEventsPageQuery(operations.events, variables, 'events', {
+              forceRefresh: filters.forceRefresh === true,
+            }),
         workdaysExhausted
           ? Promise.resolve([])
-          : runEventsPageQuery(operations.workdays, variables, 'workdays'),
+          : runEventsPageQuery(operations.workdays, variables, 'workdays', {
+              forceRefresh: filters.forceRefresh === true,
+            }),
       ])
 
       if (nextEvents.length < variables.limit) {
@@ -3823,33 +3788,74 @@ export async function getDashboardSummary(orgId) {
   }
 }
 
-async function readOpenCleanEventsForWorker(orgId, workerLogin, options = {}) {
-  const normalizedWorkerLogin = String(workerLogin ?? '').trim()
-  if (!normalizedWorkerLogin) {
+const WORKER_INTEGRITY_FROM_START_AT = '2000-01-01T00:00:00.000Z'
+const WORKER_INTEGRITY_TO_START_AT = '2100-01-01T00:00:00.000Z'
+
+async function readOrganizationIntegrityRows(collectionName, orgId, workerLogin) {
+  const normalizedOrgId = String(orgId ?? '').trim()
+  const normalizedWorkerLogin = String(workerLogin ?? '').trim().toLowerCase()
+  if (!normalizedOrgId || !normalizedWorkerLogin) {
     return []
   }
 
+  const operationName =
+    collectionName === 'events'
+      ? 'EventsIntegrityPageForOrg'
+      : 'WorkdaysIntegrityPageForOrg'
   const rows = []
-  const maxPages = 20
+  const pageSize = EVENTS_FAST_PAGE_MAX_SIZE
+  const maxPages = 80
   for (let page = 1; page <= maxPages; page += 1) {
-    const response = await getWorkdays(orgId, {
-      source: 'events-integrity',
-      page,
-      pageSize: EVENTS_FAST_PAGE_MAX_SIZE,
-      forceRefresh: page === 1 && options.forceRefresh === true,
-    })
-    rows.push(...(Array.isArray(response?.items) ? response.items : []))
-    if (response?.hasNext !== true) {
-      break
-    }
-    if (page === maxPages) {
-      throw new Error('Nie mozna bezpiecznie zweryfikowac otwartych CLEAN: przekroczono limit 5000 rekordow.')
+    const nextRows = await runEventsPageQuery(
+      operationName,
+      {
+        orgId: normalizedOrgId,
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+      },
+      collectionName,
+      { forceRefresh: true },
+    )
+    rows.push(
+      ...nextRows.filter(
+        (row) => String(row?.workerLogin ?? '').trim().toLowerCase() === normalizedWorkerLogin,
+      ),
+    )
+    if (nextRows.length < pageSize) {
+      return rows
     }
   }
-  return rows
+
+  const error = new Error(
+    'Nie można bezpiecznie zweryfikować otwartych rekordów: historia organizacji przekracza limit 20000 wpisów.',
+  )
+  error.code = 'INTEGRITY_CHECK_INCOMPLETE'
+  throw error
 }
 
-async function readAllWorkdaysForWorkerIntegrity(orgId, workerLogin) {
+function isMissingDataConnectVariable(error, variableName) {
+  const expected = `$${String(variableName ?? '').trim()} is missing`.toLowerCase()
+  if (!expected || expected === '$ is missing') {
+    return false
+  }
+
+  let current = error
+  for (let depth = 0; current && depth < 5; depth += 1) {
+    const message = messageFromError(current).toLowerCase()
+    if (message.includes(expected)) {
+      return true
+    }
+    current = current?.cause
+  }
+  return false
+}
+
+async function readWorkerIntegrityOperationRows(
+  operationName,
+  collectionName,
+  orgId,
+  workerLogin,
+) {
   const normalizedOrgId = String(orgId ?? '').trim()
   const normalizedWorkerLogin = String(workerLogin ?? '').trim()
   if (!normalizedOrgId || !normalizedWorkerLogin) {
@@ -3863,21 +3869,34 @@ async function readAllWorkdaysForWorkerIntegrity(orgId, workerLogin) {
     let nextRows
     try {
       nextRows = await runEventsPageQuery(
-        'WorkdaysIntegrityPageForOrg',
+        operationName,
         {
           orgId: normalizedOrgId,
+          workerLogin: normalizedWorkerLogin,
+          fromStartAt: WORKER_INTEGRITY_FROM_START_AT,
+          toStartAt: WORKER_INTEGRITY_TO_START_AT,
           limit: pageSize,
           offset: (page - 1) * pageSize,
         },
-        'workdays',
+        collectionName,
+        { forceRefresh: true },
       )
     } catch (cause) {
-      const error = new Error(
-        'Nie można potwierdzić, czy pracownik ma inny otwarty dzień pracy. Wymagana kompletna operacja WorkdaysIntegrityPageForOrg jest niedostępna.',
-      )
-      error.code = 'INTEGRITY_CHECK_INCOMPLETE'
-      error.cause = cause
-      throw error
+      try {
+        return await readOrganizationIntegrityRows(
+          collectionName,
+          normalizedOrgId,
+          normalizedWorkerLogin,
+        )
+      } catch (fallbackCause) {
+        const error = new Error(
+          `Nie można potwierdzić otwartych rekordów pracownika. Wymagana operacja ${operationName} jest niedostępna.`,
+        )
+        error.code = 'INTEGRITY_CHECK_INCOMPLETE'
+        error.cause = fallbackCause
+        error.primaryCause = cause
+        throw error
+      }
     }
 
     rows.push(...nextRows)
@@ -3887,10 +3906,60 @@ async function readAllWorkdaysForWorkerIntegrity(orgId, workerLogin) {
   }
 
   const error = new Error(
-    'Nie można bezpiecznie zweryfikować otwartych dni pracy: historia organizacji przekracza limit 20000 rekordów.',
+    'Nie można bezpiecznie zweryfikować otwartych rekordów: historia pracownika przekracza limit 20000 wpisów.',
   )
   error.code = 'INTEGRITY_CHECK_INCOMPLETE'
   throw error
+}
+
+async function readWorkerIntegritySnapshot(orgId, workerLogin) {
+  const normalizedOrgId = String(orgId ?? '').trim()
+  const normalizedWorkerLogin = String(workerLogin ?? '').trim()
+  if (!normalizedOrgId || !normalizedWorkerLogin) {
+    return { events: [], workdays: [] }
+  }
+
+  const [eventRows, workdayRows, clients, zones, workers] = await Promise.all([
+    readWorkerIntegrityOperationRows(
+      'EventsPageForOrgByWorker',
+      'events',
+      normalizedOrgId,
+      normalizedWorkerLogin,
+    ),
+    readWorkerIntegrityOperationRows(
+      'WorkdaysPageForOrgByWorker',
+      'workdays',
+      normalizedOrgId,
+      normalizedWorkerLogin,
+    ),
+    getClients(normalizedOrgId),
+    getZones(normalizedOrgId),
+    getWorkers(normalizedOrgId),
+  ])
+  const lookupMaps = buildLookupMaps(clients, zones, workers, workdayRows)
+
+  return {
+    events: eventRows
+      .map((row) => mapWorkday(normalizedOrgId, row, lookupMaps))
+      .filter((item) => isDisplayableMappedItem(item)),
+    workdays: workdayRows
+      .map((row) => mapWorkday(normalizedOrgId, row, lookupMaps))
+      .filter((item) => isDisplayableMappedItem(item)),
+  }
+}
+
+async function readOpenCleanEventsForWorker(orgId, workerLogin) {
+  const snapshot = await readWorkerIntegritySnapshot(orgId, workerLogin)
+  return snapshot.events
+}
+
+async function readAllWorkdaysForWorkerIntegrity(orgId, workerLogin) {
+  return readWorkerIntegrityOperationRows(
+    'WorkdaysPageForOrgByWorker',
+    'workdays',
+    orgId,
+    workerLogin,
+  )
 }
 
 async function assertNoOtherOpenWorkday(orgId, payload = {}, options = {}) {
@@ -3901,7 +3970,9 @@ async function assertNoOtherOpenWorkday(orgId, payload = {}, options = {}) {
     return
   }
 
-  const rows = await readAllWorkdaysForWorkerIntegrity(orgId, workerLogin)
+  const rows = Array.isArray(options.rows)
+    ? options.rows
+    : await readAllWorkdaysForWorkerIntegrity(orgId, workerLogin)
   const conflict = findOpenWorkdayForWorker(rows, { workerLogin }, {
     excludeRecordIds: options.excludeRecordIds,
   })
@@ -3927,9 +3998,12 @@ async function assertNoOtherOpenCleanEvent(orgId, payload = {}, options = {}) {
     return
   }
 
-  const openRows = await readOpenCleanEventsForWorker(orgId, workerLogin, { forceRefresh: true })
+  const openRows = Array.isArray(options.rows)
+    ? options.rows
+    : await readOpenCleanEventsForWorker(orgId, workerLogin)
   const conflict = findBlockingOpenEventForWorker(openRows, { workerLogin }, {
     excludeRecordIds: options.excludeRecordIds,
+    blockUnresolvedLegacy: options.blockUnresolvedLegacy,
   })
   if (!conflict) {
     return
@@ -3955,6 +4029,13 @@ async function assertNoOtherOpenCleanEvent(orgId, payload = {}, options = {}) {
   error.code = isUnresolvedLegacy ? 'UNRESOLVED_LEGACY_OPEN_EVENT' : 'OPEN_CLEAN_EVENT_EXISTS'
   error.conflictingEventId = conflictId
   throw error
+}
+
+function requiresOpenIntegrityCheck(payload = {}) {
+  const workerLogin = String(payload.workerLogin ?? '').trim()
+  const status = String(payload.status ?? '').trim().toUpperCase()
+  const hasEnd = Boolean(String(payload.endAt ?? '').trim())
+  return Boolean(workerLogin && !hasEnd && (status === 'RUNNING' || status === 'OPEN'))
 }
 
 async function assertManualEventZoneBelongsToClient(orgId, clientId, zoneId) {
@@ -3993,24 +4074,41 @@ export async function createEvent(orgId, payload = {}) {
   if (!eventId) {
     throw new Error('Pole eventId jest wymagane dla createEvent(orgId).')
   }
+  const workerLogin = String(payload.workerLogin ?? '').trim()
+  if (!workerLogin) {
+    throw new Error('Wybierz pracownika przed zapisaniem zdarzenia.')
+  }
 
   ensureFirebase()
-  await assertManualEventZoneBelongsToClient(orgId, manualClientId, manualZoneId)
   const mutationPayload = buildEventMutationPayload(payload)
+  mutationPayload.workerLogin = workerLogin
   const canonicalWorkdayId = String(payload.workdayId ?? payload.linkedWorkdayId ?? eventId).trim() || eventId
-  await assertNoOtherOpenCleanEvent(orgId, {
-    workerLogin: mutationPayload.workerLogin ?? payload.workerLogin,
+  const integrityPayload = {
+    workerLogin,
     status: mutationPayload.status,
     endAt: mutationPayload.endAt,
-  })
-  await assertNoOtherOpenWorkday(orgId, {
-    workerLogin: mutationPayload.workerLogin ?? payload.workerLogin,
-    status: mutationPayload.status,
-    endAt: mutationPayload.endAt,
-  })
+  }
+  const [, integritySnapshot] = await Promise.all([
+    assertManualEventZoneBelongsToClient(orgId, manualClientId, manualZoneId),
+    requiresOpenIntegrityCheck(integrityPayload)
+      ? readWorkerIntegritySnapshot(orgId, integrityPayload.workerLogin)
+      : Promise.resolve(null),
+  ])
+  await Promise.all([
+    assertNoOtherOpenCleanEvent(orgId, integrityPayload, {
+      rows: integritySnapshot?.events,
+      // Ręczny zapis zarządczy może współistnieć z nierozstrzygniętym wpisem
+      // historycznym. Jawny aktywny CLEAN nadal pozostaje blockerem.
+      blockUnresolvedLegacy: false,
+    }),
+    assertNoOtherOpenWorkday(orgId, integrityPayload, {
+      rows: integritySnapshot?.workdays,
+    }),
+  ])
   const eventMutationPayload = {
     zoneId: mutationPayload.zoneId,
-    workerLogin: mutationPayload.workerLogin,
+    workerLogin,
+    workerName: payload.workerName ?? null,
     startAt: mutationPayload.startAt,
     endAt: mutationPayload.endAt,
     durationSec: mutationPayload.durationSec,
@@ -4024,18 +4122,19 @@ export async function createEvent(orgId, payload = {}) {
   }
   // Event jest rekordem kanonicznym dla ochrony pojedynczego otwartego CLEAN.
   // Nie zapisuj lustrzanego Workday, gdy Event nie zostal jednoznacznie potwierdzony.
-  await runMutationOperation('InsertEventForOrg', {
+  await insertEventForOrg({
     orgId,
     eventId: canonicalWorkdayId,
-    workdayId: canonicalWorkdayId,
-    eventType: 'CLEAN',
+    // Workday jeszcze nie istnieje, więc przedwczesne powiązanie narusza FK
+    // event(org_id, workday_id) -> workday(org_id, workday_id).
+    workdayId: null,
     ...eventMutationPayload,
   })
 
   try {
     await createWorkday(orgId, {
       workdayId: canonicalWorkdayId,
-      workerLogin: mutationPayload.workerLogin ?? payload.workerLogin ?? null,
+      workerLogin,
       workerName: payload.workerName ?? null,
       utilityRoomId: mutationPayload.zoneId ?? payload.utilityRoomId ?? payload.roomId ?? null,
       startAt: mutationPayload.startAt,
@@ -4055,18 +4154,24 @@ export async function createEvent(orgId, payload = {}) {
     throw partialError
   }
 
-  invalidateWorkdayCache(orgId)
-
   try {
-    await assertWorkdayVisibleAfterSave(orgId, canonicalWorkdayId)
-  } catch (error) {
-    // Best-effort visibility probe: mutation already succeeded, eventual consistency may delay query results.
-    console.warn('[workdayService] visibility probe after createEvent failed', {
+    await reidentifyEventForOrg({
       orgId,
+      eventId: canonicalWorkdayId,
       workdayId: canonicalWorkdayId,
-      message: error instanceof Error ? error.message : String(error ?? ''),
+      ...eventMutationPayload,
     })
+  } catch (error) {
+    const partialError = new Error(
+      'Event i dzień pracy zostały zapisane, ale ich powiązanie nie zostało potwierdzone. Odśwież dane i zweryfikuj rekord przed ponowieniem.',
+    )
+    partialError.code = 'PARTIAL_EVENT_WORKDAY_LINK_UNKNOWN'
+    partialError.eventId = canonicalWorkdayId
+    partialError.workdayId = canonicalWorkdayId
+    partialError.cause = error
+    throw partialError
   }
+
   invalidateWorkdayCache(orgId)
 
   return {
@@ -4096,32 +4201,34 @@ export async function updateEvent(orgId, eventId, payload = {}) {
   if (!normalizedEventId) {
     throw new Error('Pole eventId jest wymagane dla updateEvent(orgId, eventId).')
   }
+  const workerLogin = String(payload.workerLogin ?? '').trim()
+  if (!workerLogin) {
+    throw new Error('Wybierz pracownika przed zapisaniem zdarzenia.')
+  }
 
   ensureFirebase()
   const mutationPayload = buildEventMutationPayload(payload)
+  mutationPayload.workerLogin = workerLogin
   const canonicalWorkdayId = String(payload.workdayId ?? payload.linkedWorkdayId ?? normalizedEventId).trim() || normalizedEventId
-  await assertNoOtherOpenCleanEvent(
-    orgId,
-    {
-      workerLogin: mutationPayload.workerLogin ?? payload.workerLogin,
-      status: mutationPayload.status,
-      endAt: mutationPayload.endAt,
-    },
-    {
+  const integrityPayload = {
+    workerLogin,
+    status: mutationPayload.status,
+    endAt: mutationPayload.endAt,
+  }
+  const integritySnapshot = requiresOpenIntegrityCheck(integrityPayload)
+    ? await readWorkerIntegritySnapshot(orgId, integrityPayload.workerLogin)
+    : null
+  await Promise.all([
+    assertNoOtherOpenCleanEvent(orgId, integrityPayload, {
+      rows: integritySnapshot?.events,
       excludeRecordIds: [normalizedEventId, canonicalWorkdayId],
-    },
-  )
-  await assertNoOtherOpenWorkday(
-    orgId,
-    {
-      workerLogin: mutationPayload.workerLogin ?? payload.workerLogin,
-      status: mutationPayload.status,
-      endAt: mutationPayload.endAt,
-    },
-    {
+      blockUnresolvedLegacy: false,
+    }),
+    assertNoOtherOpenWorkday(orgId, integrityPayload, {
+      rows: integritySnapshot?.workdays,
       excludeRecordIds: [canonicalWorkdayId],
-    },
-  )
+    }),
+  ])
   const operationalMutationPayload = {
     workerName: payload.workerName ?? null,
     endAt: mutationPayload.endAt,
@@ -4146,7 +4253,6 @@ export async function updateEvent(orgId, eventId, payload = {}) {
         workerLogin: mutationPayload.workerLogin,
         startAt: mutationPayload.startAt,
       })
-  const eventOperation = shouldReidentify ? 'ReidentifyEventForOrg' : 'UpdateEventForOrg'
   const eventOperationPayload = shouldReidentify
     ? {
         workdayId: canonicalWorkdayId,
@@ -4158,11 +4264,31 @@ export async function updateEvent(orgId, eventId, payload = {}) {
     : operationalMutationPayload
 
   // Nie aktualizuj Workday, jezeli kanoniczny Event nie zostal jednoznacznie potwierdzony.
-  await runMutationOperation(eventOperation, {
-    orgId,
-    eventId: normalizedEventId,
-    ...eventOperationPayload,
-  })
+  if (shouldReidentify) {
+    await reidentifyEventForOrg({
+      orgId,
+      eventId: normalizedEventId,
+      ...eventOperationPayload,
+    })
+  } else {
+    try {
+      await updateEventForOrg({
+        orgId,
+        eventId: normalizedEventId,
+        ...eventOperationPayload,
+      })
+    } catch (error) {
+      if (!isMissingDataConnectVariable(error, 'workerLogin')) {
+        throw error
+      }
+      await runMutationOperation('UpdateEventForOrg', {
+        orgId,
+        eventId: normalizedEventId,
+        workerLogin,
+        ...operationalMutationPayload,
+      })
+    }
+  }
 
   try {
     await updateWorkday(orgId, canonicalWorkdayId, {

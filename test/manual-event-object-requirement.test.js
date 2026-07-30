@@ -60,7 +60,12 @@ test('ręczne dodanie zdarzenia wymaga obiektu i należącej do niego strefy', (
   assert.match(workdayService, /function assertManualEventZoneBelongsToClient\(/)
   assert.match(
     workdayService,
-    /await assertManualEventZoneBelongsToClient\(orgId, manualClientId, manualZoneId\)/,
+    /const \[, integritySnapshot\] = await Promise\.all\(\[\s+assertManualEventZoneBelongsToClient\(orgId, manualClientId, manualZoneId\),/s,
+  )
+  assert.match(workdayService, /mutationPayload\.workerLogin = workerLogin/)
+  assert.match(
+    eventFeature,
+    /eventPayload\.workerLogin = String\(\s+targetWorker\.login \?\? targetWorker\.workerLogin \?\? targetWorker\.id \?\? payload\.workerLogin,/s,
   )
 })
 
@@ -74,4 +79,16 @@ test('zakładka zdarzeń respektuje wspólną blokadę edycji własnego czasu', 
   assert.match(eventFeature, /isOwnWorkdayEditBlocked/)
   assert.match(eventFeature, /OWN_WORKDAY_EDIT_DENIED_MESSAGE/)
   assert.match(eventFeature, /targetWorker,\s+\}\)/)
+})
+
+test('formularz pozwala wybrac lokalizacje pochodzaca ze strefy', () => {
+  assert.match(eventTemplate, /id="evEditLocationSearch"/)
+  assert.match(eventTemplate, /id="evEditLocation"/)
+  assert.match(eventTemplate, /aria-label="Lista lokalizacji stref"/)
+  assert.match(eventFeature, /function eventEditorReadableZoneLocation\(/)
+  assert.match(eventFeature, /locationOptionsByClient/)
+  assert.match(eventFeature, /baseZoneOptions\.filter\(\(option\) => normalizeSearchText\(option\?\.location\) === locationKey\)/)
+  assert.match(eventFeature, /function refreshEventZoneOptionsForLocation\(/)
+  assert.match(eventFeature, /location:\s*location \|\| null/)
+  assert.match(eventFeature, /lokalizacja:\s*location \|\| null/)
 })

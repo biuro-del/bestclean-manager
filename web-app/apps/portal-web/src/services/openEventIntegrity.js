@@ -306,6 +306,33 @@ export function groupUnresolvedLegacyOpenEvents(rows = []) {
     .sort((left, right) => left.workerLabel.localeCompare(right.workerLabel, 'pl', { sensitivity: 'base' }))
 }
 
+export function filterVisibleUnresolvedLegacyGroups(groups = [], options = {}) {
+  const currentDayKey = text(options.currentDayKey)
+  const dayKeyFromValue =
+    typeof options.dayKeyFromValue === 'function'
+      ? options.dayKeyFromValue
+      : () => ''
+
+  return (Array.isArray(groups) ? groups : []).filter((group) => {
+    const rows = Array.isArray(group?.rows) ? group.rows : []
+    const count = Number(group?.count ?? rows.length)
+
+    if (count !== 1 || rows.length !== 1 || !currentDayKey) {
+      return true
+    }
+
+    const row = rows[0]
+    const startAt =
+      row?.startAt ??
+      row?.start_at ??
+      row?.date ??
+      row?.eventDate
+    const eventDayKey = text(dayKeyFromValue(startAt))
+
+    return !eventDayKey || eventDayKey !== currentDayKey
+  })
+}
+
 export function findOpenCleanEventForWorker(rows = [], worker = {}, options = {}) {
   const workerKey = openEventWorkerKey(worker)
   if (!workerKey) {
@@ -333,6 +360,7 @@ export function findBlockingOpenEventForWorker(rows = [], worker = {}, options =
   if (!workerKey) {
     return null
   }
+  const blockUnresolvedLegacy = options.blockUnresolvedLegacy !== false
 
   const excludedRecordIds = new Set(
     (Array.isArray(options.excludeRecordIds) ? options.excludeRecordIds : [])
@@ -343,7 +371,7 @@ export function findBlockingOpenEventForWorker(rows = [], worker = {}, options =
   return (
     (Array.isArray(rows) ? rows : []).find(
       (row) =>
-        (isOpenCleanEvent(row) || isUnresolvedLegacyOpenEvent(row)) &&
+        (isOpenCleanEvent(row) || (blockUnresolvedLegacy && isUnresolvedLegacyOpenEvent(row))) &&
         openEventWorkerKey(row) === workerKey &&
         !excludedRecordIds.has(openEventRecordKey(row)),
     ) ?? null
