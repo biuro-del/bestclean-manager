@@ -18,6 +18,7 @@ import {
   SERVICE_OPERATION_STATE,
 } from './serviceOperationStreamModel.js'
 import { buildCommandCenterPlanModel } from './commandCenterPlanModel.js'
+import 'leaflet/dist/leaflet.css'
 
 export const route = 'dashboard'
 export const viewId = 'view-dashboard'
@@ -4558,6 +4559,19 @@ export function createDashboardFeature(ctx) {
     return Boolean(overlay && !overlay.hidden)
   }
 
+  function dashboardClearActiveWorkerMapSelection() {
+    document.querySelectorAll('.dash-command-map-object').forEach((node) => {
+      node.classList.remove('is-expanded', 'is-live-open')
+      node.querySelector('[data-dashboard-map-object-toggle]')?.setAttribute('aria-expanded', 'false')
+    })
+    document.querySelectorAll('.dash-command-map-person.is-selected').forEach((node) => {
+      node.classList.remove('is-selected')
+    })
+    dashboardActiveWorkersMapExpandedGroupKey = ''
+    dashboardActiveWorkersMapLiveGroupKey = ''
+    dashboardActiveWorkersMapSelectedMarker = null
+  }
+
   function dashboardResizeActiveWorkerMap() {
     window.requestAnimationFrame(() => {
       if (dashboardActiveWorkersMapProvider === 'openstreetmap') {
@@ -4765,47 +4779,18 @@ export function createDashboardFeature(ctx) {
       return dashboardOpenStreetMapLoaderPromise
     }
 
-    dashboardOpenStreetMapLoaderPromise = new Promise((resolve, reject) => {
-      const stylesheetId = 'cleanzi-leaflet-css'
-      if (!document.getElementById(stylesheetId)) {
-        const stylesheet = document.createElement('link')
-        stylesheet.id = stylesheetId
-        stylesheet.rel = 'stylesheet'
-        stylesheet.href = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css'
-        stylesheet.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY='
-        stylesheet.crossOrigin = 'anonymous'
-        document.head.appendChild(stylesheet)
-      }
-
-      const scriptId = 'cleanzi-leaflet-js'
-      const existingScript = document.getElementById(scriptId)
-      const handleLoaded = () => {
-        if (window.L?.map && window.L?.tileLayer && window.L?.marker) {
-          resolve(window.L)
-          return
+    dashboardOpenStreetMapLoaderPromise = import('leaflet')
+      .then((module) => {
+        const leaflet = module?.default ?? module
+        if (leaflet?.map && leaflet?.tileLayer && leaflet?.marker) {
+          return leaflet
         }
-        reject(new Error('OpenStreetMap loader did not expose Leaflet.'))
-      }
-      const handleError = () => reject(new Error('Nie udało się pobrać lokalnego fallbacku OpenStreetMap.'))
-
-      if (existingScript) {
-        existingScript.addEventListener('load', handleLoaded, { once: true })
-        existingScript.addEventListener('error', handleError, { once: true })
-        return
-      }
-
-      const script = document.createElement('script')
-      script.id = scriptId
-      script.src = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js'
-      script.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo='
-      script.crossOrigin = 'anonymous'
-      script.addEventListener('load', handleLoaded, { once: true })
-      script.addEventListener('error', handleError, { once: true })
-      document.head.appendChild(script)
-    }).catch((error) => {
-      dashboardOpenStreetMapLoaderPromise = null
-      throw error
-    })
+        throw new Error('Lokalny moduł OpenStreetMap nie udostępnił Leaflet.')
+      })
+      .catch((error) => {
+        dashboardOpenStreetMapLoaderPromise = null
+        throw error
+      })
 
     return dashboardOpenStreetMapLoaderPromise
   }
@@ -4951,7 +4936,7 @@ export function createDashboardFeature(ctx) {
     const lateLocations = orderedLocations.filter(
       (location) => dashboardActiveWorkerMapStatus(location?.workStatus) === 'late',
     )
-    const selectedWorkerKey = String(options?.selectedWorkerKey ?? lateLocations[0]?.workerKey ?? '').trim()
+    const selectedWorkerKey = String(options?.selectedWorkerKey ?? '').trim()
     const expandedClass = options?.expanded ? ' is-expanded' : ''
     const lateClass = lateLocations.length ? ' has-late' : ''
     const peopleHtml = visibleLocations
@@ -5063,7 +5048,7 @@ export function createDashboardFeature(ctx) {
     return `
       <div class="dash-command-map-standalone">
         ${dashboardActiveWorkerMapPersonHtml(location, {
-          selected: dashboardActiveWorkerMapStatus(location?.workStatus) === 'late',
+          selected: false,
         })}
       </div>
     `
@@ -5500,6 +5485,10 @@ export function createDashboardFeature(ctx) {
             maxZoom: 19,
           }).addTo(dashboardActiveWorkersMapInstance)
           dashboardActiveWorkersMapInstance.on('click', () => {
+            if (dashboardActiveWorkerMapDialogIsOpen()) {
+              dashboardClearActiveWorkerMapSelection()
+              return
+            }
             dashboardOpenActiveWorkerMapDialog(canvas)
           })
         }

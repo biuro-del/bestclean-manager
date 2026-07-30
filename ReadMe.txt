@@ -4448,3 +4448,37 @@ Weryfikacja:
 - Logi Cloud Run backendu `cleanzi-01` z 30 minut obejmujacych rollout: 0 wpisow o poziomie `ERROR` lub wyzszym.
 Rollback:
 - Poprzedni zatwierdzony build to `build-2026-07-29-003`, commit `14f7a955869bb60d6cb69483c4942d1450d21ba0`.
+
+Data: 2026-07-29 22:44 CEST
+Autor: AI Codex
+Temat: Lokalny kandydat niezawodnej i uporzadkowanej mapy operacyjnej oraz prostszego przekazu logowania
+Zakres:
+- Leaflet 1.9.4 jest teraz wersjonowana zaleznoscia lokalnego builda zamiast skryptu pobieranego w runtime z jsDelivr.
+- CSP dopuszcza kafelki OpenStreetMap jako obrazy, ale nie rozszerza `script-src` o zewnetrzny CDN.
+- Mapa w spoczynku pokazuje tylko markery; etykiety obiektow, osoby i szczegoly nie otwieraja sie automatycznie.
+- Alarm pozostaje widoczny jako czerwony pierscien i licznik, bez samoczynnego otwierania duzego dymka pracownika.
+- Klikniecie obiektu pokazuje jedna karte danych live i ukrywa orbite osob, a klikniecie pustej mapy zamyka aktywne szczegoly.
+- Przekaz logowania wskazuje wprost, ze Cleanzi jest systemem do zarzadzania firma sprzatajaca i upraszcza zarzadzanie pracownikami, obiektami, zleceniami oraz jakoscia.
+Pliki:
+- `index.js`
+- `web-app/package.json`
+- `web-app/package-lock.json`
+- `web-app/apps/portal-web/src/features/dashboard/index.js`
+- `web-app/apps/portal-web/src/ui/styles/commandCenter.css`
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `web-app/apps/portal-web/src/ui/portalApp.js`
+- `test/operational-map-delivery.test.js`
+- `ReadMe.txt`
+Weryfikacja:
+- `npm test`: 821/821 OK.
+- `npm --prefix web-app run lint`: OK.
+- `npm --prefix web-app run build`: OK.
+- Lokalna mapa: 33/37 osob, 17 markerow i 7 grup obiektow wyrenderowanych z danych firmy.
+- Stan spoczynkowy: 0 rozwinietych grup, 0 widocznych etykiet obiektow, 0 automatycznie pokazanych osob.
+- Klikniecie obiektu: dokladnie 1 aktywna karta danych live, 0 dodatkowych orbit i etykiet.
+- Klikniecie pustej mapy: 0 aktywnych kart, grup i zaznaczonych osob.
+- Widok logowania sprawdzono wizualnie na desktopie oraz przy 592 x 816 px; brak poziomego przewijania.
+Granice:
+- Zmiany sa lokalnym kandydatem i nie zostaly wdrozone na produkcje.
+- Katalog `artifacts/` pozostaje poza zakresem i nie moze trafic do commita.
+- Produkcyjny rollout wymaga osobnej dokladnej zgody.
