@@ -4470,3 +4470,23 @@ Uwagi dla nastepnej osoby:
 - Osobny canary klienta `mobile-web` musi rowniez kierowac `W005` przez `/api/mobile/scan`; sama zmiana backendu nie stanowi pelnego E2E canary W005.
 - W chwili przygotowania wpisu nie wykonano jeszcze pushu ani wdrozenia produkcyjnego.
 - Rollback polega na przywroceniu wartosci `W001` albo skierowaniu ruchu na poprzedni build oparty na `fddc25dc9a844565f62494e63c40c624c980cb07`.
+
+Data: 2026-07-31
+Autor: AI Codex
+Temat: Produkcyjny rollout backendowego canary W005
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-MOBILE-SABINA-W005-20260731`.
+Wydanie:
+- Commit: `2d18462880c98ae2175c3c71987915eb72c7e1e4`.
+- App Hosting backend `cleanzi-01`: `build-2026-07-31-001`, stan `READY`.
+- Rollout `build-2026-07-31-001`: stan `SUCCEEDED`, 100% ruchu.
+- Efektywna konfiguracja builda potwierdza `MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED=true` oraz dokladna liste `W001,W005`.
+Weryfikacja:
+- `https://portal.cleanzi.pl/`: HTTP 200.
+- `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`: HTTP 200.
+- `/api/mobile/scan` bez tokenu na obu domenach: kontrolowane HTTP 401 JSON.
+- Proxy `mobile-web` dopuszcza origin W005 dla skanu, statusu i planu dnia; obcy origin otrzymuje HTTP 403.
+- Nie wykonano logowania jako Sabina, skanu produkcyjnego ani zapisu testowego do bazy.
+Rollback:
+- Skierowac 100% ruchu na `build-2026-07-30-001` (`fddc25dc9a844565f62494e63c40c624c980cb07`) albo wdrozyc revert przywracajacy `W001`.
+- Nie usuwac ani nie modyfikowac historii Workday, Event ani `mobile_scan_command`.
