@@ -4482,3 +4482,32 @@ Granice:
 - Zmiany sa lokalnym kandydatem i nie zostaly wdrozone na produkcje.
 - Katalog `artifacts/` pozostaje poza zakresem i nie moze trafic do commita.
 - Produkcyjny rollout wymaga osobnej dokladnej zgody.
+
+Data: 2026-07-31 CEST
+Autor: AI Codex
+Temat: Domkniecie spojnego logo i hierarchii komunikatu logowania
+Zakres:
+- Wszystkie widoczne uzycia marki na ekranie logowania, w menu portalu i w eksporcie zdarzen korzystaja z jednego assetu `cleanzi-logo-primary.png`.
+- Glownym komunikatem banera jest `SYSTEM DO ZARZADZANIA FIRMA SPRZATAJACA`.
+- Haslo wspierajace brzmi `Zarzadzanie procesami. Proste i zautomatyzowane.`.
+- Uklad, typografia i rozmiar planszy sa responsywne; na telefonie zachowana jest pelna czytelnosc bez poziomego przewijania.
+- Tytul strony i favicon zostaly ujednolicone z marka Cleanzi.
+Pliki wydaniowe:
+- `web-app/public/cleanzi-logo-primary.png`
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `web-app/apps/portal-web/src/index.css`
+- `web-app/apps/portal-web/src/features/events/index.js`
+- `web-app/index.html`
+- `design-qa.md`
+Weryfikacja:
+- `git fetch --all --prune --tags`: brak nowych zdalnych referencji; branch `Poprawki-zdarzenia-czas-prac-2026-07-30` jest juz przodkiem aktualnego HEAD.
+- `npm test`: 846/846 OK.
+- `npm --prefix web-app run lint`: OK.
+- `npm --prefix web-app run build`: OK; pozostaje informacyjne ostrzezenie Vite o duzych chunkach.
+- Lokalny ekran logowania: desktop i 390 x 844 px, oba logo zaladowane z poprawnym naturalnym rozmiarem, brak poziomego przewijania.
+- Konsola przegladarki: 0 bledow i 0 ostrzezen.
+- `git diff --check`: OK.
+Granice:
+- `artifacts/` i `design-qa-assets/` sa materialami roboczymi i nie moga trafic do commita wydaniowego.
+- Nie wykonano pusha, migracji, wdrozenia ani zmiany danych produkcyjnych.
+- Produkcyjny rollout wymaga osobnej dokladnej zgody.
