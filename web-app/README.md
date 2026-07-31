@@ -1,4 +1,15 @@
-# React + Vite
+# Cleanzi Portal Web
+
+Portal tenantowy Cleanzi jest budowany przez Vite. Kontrakt planów, logowania Google, weryfikacji e-mail, onboardingu organizacji oraz konfigurację GUS/Stripe opisuje [`../docs/portal-plans-onboarding.md`](../docs/portal-plans-onboarding.md).
+
+Podstawowe sprawdzenia:
+
+```text
+npm run lint
+npm run build
+```
+
+## Informacje o szkielecie React + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

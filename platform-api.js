@@ -144,6 +144,20 @@ function createPlatformApi(dependencies) {
       await platformRepository.assertPlatformSchemaReady(client)
       const method = text(req.method).toUpperCase()
 
+      if (pathname === '/api/platform/dashboard' && method === 'GET') {
+        await authenticate(req, client)
+        const data = await platformRepository.getPlatformDashboard(client)
+        json(res, 200, { ok: true, data })
+        return true
+      }
+
+      if (pathname === '/api/platform/plans' && method === 'GET') {
+        await authenticate(req, client)
+        const data = await platformRepository.listPlans(client)
+        json(res, 200, { ok: true, data: { items: data } })
+        return true
+      }
+
       if (pathname === '/api/platform/mfa/email/request' && method === 'POST') {
         const { principal } = await authenticate(req, client, { requireMfa: false })
         const body = await readJson(req)
@@ -188,8 +202,13 @@ function createPlatformApi(dependencies) {
         const data = await platformRepository.listOrganizations(client, {
           search: requestUrl.searchParams.get('search'),
           status: requestUrl.searchParams.get('status'),
+          onboardingStatus: requestUrl.searchParams.get('onboardingStatus'),
           planCode: requestUrl.searchParams.get('planCode'),
+          subscriptionStatus: requestUrl.searchParams.get('subscriptionStatus'),
           deletion: requestUrl.searchParams.get('deletion'),
+          endingWithinDays: requestUrl.searchParams.get('endingWithinDays'),
+          sortBy: requestUrl.searchParams.get('sortBy'),
+          sortDirection: requestUrl.searchParams.get('sortDirection'),
           page: requestUrl.searchParams.get('page'),
           pageSize: requestUrl.searchParams.get('pageSize'),
         })
@@ -312,6 +331,104 @@ function createPlatformApi(dependencies) {
         })
         json(res, 200, { ok: true, data: { items: data } })
         return true
+      }
+
+      const platformDetailsMatch = /^\/api\/platform\/organizations\/([a-z0-9_-]{1,64})(?:\/(subscription-history|transactions|documents|operations(?:\/preview)?))?$/i.exec(pathname)
+      if (platformDetailsMatch) {
+        const orgId = normalizeOrgId(platformDetailsMatch[1])
+        const resource = text(platformDetailsMatch[2]).toLowerCase()
+        const { principal, decodedToken } = await authenticate(req, client)
+        const context = await requireContext(client, principal, orgId)
+
+        if (!resource && method === 'GET') {
+          const data = await platformRepository.getOrganizationDetails(client, orgId)
+          json(res, 200, { ok: true, data })
+          return true
+        }
+        if (resource === 'subscription-history' && method === 'GET') {
+          const data = await platformRepository.listSubscriptionHistory(client, orgId, {
+            page: requestUrl.searchParams.get('page'),
+            pageSize: requestUrl.searchParams.get('pageSize'),
+          })
+          json(res, 200, { ok: true, data })
+          return true
+        }
+        if (resource === 'transactions' && method === 'GET') {
+          const data = await platformRepository.listBillingTransactions(client, orgId, {
+            page: requestUrl.searchParams.get('page'),
+            pageSize: requestUrl.searchParams.get('pageSize'),
+          })
+          json(res, 200, { ok: true, data })
+          return true
+        }
+        if (resource === 'documents' && method === 'GET') {
+          const data = await platformRepository.listBillingDocuments(client, orgId, {
+            page: requestUrl.searchParams.get('page'),
+            pageSize: requestUrl.searchParams.get('pageSize'),
+          })
+          json(res, 200, { ok: true, data })
+          return true
+        }
+        if (resource === 'operations/preview' && method === 'POST') {
+          const body = await readJson(req)
+          const data = await platformRepository.previewPlatformOperation(client, {
+            orgId,
+            operation: body?.operation,
+            reason: body?.reason,
+            payload: body?.payload,
+          })
+          json(res, 200, { ok: true, data })
+          return true
+        }
+        if (resource === 'operations' && method === 'POST') {
+          if (!platformRepository.hasFreshPlatformAuthentication(decodedToken, principal)) {
+            throw platformRepository.publicError(
+              403,
+              'PLATFORM_REAUTH_REQUIRED',
+              'Ta operacja wymaga ponownego logowania z MFA w ciągu ostatnich 5 minut.',
+            )
+          }
+          const body = await readJson(req)
+          const operation = text(body?.operation).toUpperCase()
+          const target = `organization:${orgId}`
+          await appendPhase(client, 'REQUESTED', principal, context, operation, target, {
+            reason: body?.reason,
+            payload: body?.payload,
+            expectedVersion: body?.expectedVersion,
+          }, null)
+          try {
+            const request = getPlatformRequestContext() || {}
+            const data = await platformRepository.executePlatformOperation(client, {
+              orgId,
+              operation,
+              reason: body?.reason,
+              payload: body?.payload,
+              expectedVersion: body?.expectedVersion,
+              principal,
+              requestId: request.requestId,
+              appendSucceeded: (result) => appendPhase(
+                client,
+                'SUCCEEDED',
+                principal,
+                context,
+                operation,
+                target,
+                null,
+                result,
+              ),
+            })
+            json(res, 200, { ok: true, data })
+            return true
+          } catch (error) {
+            await appendPhase(client, 'FAILED', principal, context, operation, target, null, {
+              code: text(error?.publicCode || error?.code),
+              message: text(error?.publicMessage || error?.message),
+            }).catch((auditError) => {
+              console.error('[platform-audit] failed to append FAILED phase', auditError)
+            })
+            throw error
+          }
+        }
       }
 
       const organizationMatch = /^\/api\/platform\/organizations\/([a-z0-9_-]{1,64})(?:\/(subscription|owner|soft-delete|restore))?$/i.exec(pathname)

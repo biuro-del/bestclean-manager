@@ -21475,15 +21475,6 @@ body.calendar-events-popup-dragging *{
   line-height:1.45 !important;
 }
 
-#loginScreen .login-security-note{
-  margin:20px 0 0;
-  color:#8b98aa;
-  font-size:11px;
-  font-weight:600;
-  line-height:1.45;
-  text-align:center;
-}
-
 #loginScreen .login-reset-open,
 #loginScreen .login-reset-back{
   color:#1752ff;
@@ -31939,5 +31930,303 @@ body.is-dashboard-map-modal-open{
     min-height:100vh !important;
     min-height:100dvh !important;
     padding:18px !important;
+  }
+}
+
+.login-provider-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 10px;
+  color: #718096;
+  font-size: 12px;
+}
+
+.login-provider-divider::before,
+.login-provider-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #dbe4f0;
+}
+
+#loginScreen .login-google {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  min-height: 64px !important;
+  padding: 0 24px !important;
+  gap: 13px !important;
+  border: 1px solid #747775 !important;
+  border-radius: 999px !important;
+  background: #fff !important;
+  box-shadow: none !important;
+  color: #0b0b0b !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  letter-spacing: 0 !important;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 120ms ease !important;
+}
+
+#loginScreen .login-google:hover {
+  border-color: #5f6368 !important;
+  background: #f8faff !important;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, .18) !important;
+}
+
+#loginScreen .login-google:focus-visible {
+  outline: 3px solid rgba(66, 133, 244, .34) !important;
+  outline-offset: 2px !important;
+}
+
+#loginScreen .login-google:active {
+  transform: translateY(1px);
+  background: #f1f3f4 !important;
+}
+
+#loginScreen .login-google:disabled {
+  cursor: wait;
+  opacity: .62;
+}
+
+#loginScreen .login-google-logo {
+  display: block;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+}
+
+#loginScreen .login-google-label {
+  display: inline-block;
+  min-width: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.login-provider-note {
+  margin: 8px 0 0;
+  color: #718096;
+  font-size: 12px;
+  text-align: center;
+}
+
+.organization-chip {
+  cursor: pointer;
+  font: inherit;
+}
+
+.company-profile-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 24px;
+  background: rgba(8, 24, 48, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.company-profile-overlay[hidden] {
+  display: none;
+}
+
+.company-profile-card {
+  width: min(780px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  display: grid;
+  gap: 20px;
+  padding: 28px;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(4, 20, 45, 0.35);
+}
+
+.company-profile-card h2 {
+  margin: 6px 0;
+  color: #102d55;
+}
+
+.company-profile-card p {
+  margin: 0;
+  color: #607089;
+}
+
+.company-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.company-profile-grid label {
+  display: grid;
+  gap: 6px;
+  color: #17345d;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.company-profile-grid input {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid #cad7e7;
+  border-radius: 10px;
+  font: inherit;
+}
+
+.company-profile-wide {
+  grid-column: 1 / -1;
+}
+
+.company-profile-message {
+  min-height: 20px;
+  color: #b42318;
+  font-size: 13px;
+}
+
+.company-profile-message[data-tone='success'] {
+  color: #087a55;
+}
+
+.company-profile-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 680px) {
+  .company-profile-overlay {
+    padding: 0;
+  }
+
+  .company-profile-card {
+    width: 100%;
+    min-height: 100vh;
+    max-height: none;
+    border-radius: 0;
+    padding: 20px;
+  }
+
+  .company-profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .company-profile-wide {
+    grid-column: auto;
+  }
+}
+
+.login-registration-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.login-registration-panel[hidden] {
+  display: none;
+}
+
+.login-registration-plan {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #eef4ff;
+  color: #17469b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.login-registration-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #17345d;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.login-registration-consent input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: #1752ff;
+}
+
+.login-registration-consent a {
+  color: #1752ff;
+  font-weight: 700;
+}
+
+.login-registration-existing {
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: #1752ff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.login-registration-grid,
+.login-registration-billing {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+
+.login-registration-billing[hidden] {
+  display: none;
+}
+
+.login-registration-wide {
+  grid-column: 1 / -1;
+}
+
+#loginScreen .login-registration-lookup {
+  min-height: 54px;
+  margin: 0 0 20px;
+  border: 1px solid #b8c8dd;
+  border-radius: 14px;
+  background: #fff;
+  color: #17469b;
+  font-weight: 700;
+}
+
+#loginScreen .login-panel:has(#loginRegistrationCompanyPanel:not([hidden])) {
+  align-items: flex-start !important;
+  overflow-y: auto !important;
+  padding-block: 28px !important;
+}
+
+#loginScreen .login-card:has(#loginRegistrationCompanyPanel:not([hidden])) {
+  width: min(720px, 100%) !important;
+  padding: 30px !important;
+}
+
+#loginScreen .login-card:has(#loginRegistrationCompanyPanel:not([hidden])) .login-brand {
+  margin-bottom: 20px !important;
+}
+
+#loginScreen .login-card:has(#loginRegistrationCompanyPanel:not([hidden])) .login-title {
+  font-size: clamp(30px, 3vw, 40px) !important;
+}
+
+@media (max-width: 620px) {
+  .login-registration-grid,
+  .login-registration-billing {
+    grid-template-columns: 1fr;
+  }
+
+  .login-registration-wide {
+    grid-column: auto;
+  }
+
+  #loginScreen .login-card:has(#loginRegistrationCompanyPanel:not([hidden])) {
+    padding: 24px 20px !important;
   }
 }

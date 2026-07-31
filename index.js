@@ -45,6 +45,20 @@ const { createProfitabilityApi } = require('./profitability-api')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
 const {
+  createOrganizationWithTrial,
+  readOrganizationProfile,
+  updateOrganizationProfile,
+} = require('./organization-onboarding')
+const { lookupCompanyByNip } = require('./gus-company-registry')
+const { processStripeEvent, verifyStripeSignature } = require('./stripe-webhook')
+const {
+  calculateMeteredOverage,
+  evaluateSubscriptionAccess,
+  hasPlanCapability,
+  normalizePlanCode,
+  resolvePlanEntitlements,
+} = require('./plan-policy')
+const {
   eventCorrelationSchema,
   insertMobileCleanEvent,
   readPublicEventColumns,
@@ -116,6 +130,10 @@ const ADMIN_WORKER_ID_NEXT_PATH = '/api/admin/worker-id/next'
 const ADMIN_WORKERS_PATH = '/api/admin/workers'
 const ADMIN_WORKERS_RESTORE_PATH = '/api/admin/workers/restore'
 const AUTH_SESSION_CONTEXT_PATH = '/api/auth/session-context'
+const PORTAL_ORGANIZATIONS_PATH = '/api/portal/organizations'
+const PORTAL_ORGANIZATION_PROFILE_PATH = '/api/portal/organization-profile'
+const PORTAL_COMPANY_REGISTRY_PATH = '/api/portal/company-registry/lookup'
+const STRIPE_WEBHOOK_PATH = '/api/billing/stripe/webhook'
 const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
 const PORTAL_JOB_CARDS_PATH = '/api/portal/job-cards'
@@ -3572,7 +3590,7 @@ async function reserveWorkerIdDirect(client, orgId, workerNumberOverride, create
   return { workerId, workerNumber }
 }
 
-async function getRequesterMembership(client, orgId, uid) {
+async function getRequesterMembership(client, orgId, uid, options = {}) {
   const platformMembership = await platformRepository.resolvePlatformMembership(client, orgId, uid)
   if (platformMembership) return platformMembership
   const result = await runWorkerProfileDbQuery(
@@ -3584,16 +3602,83 @@ async function getRequesterMembership(client, orgId, uid) {
               else m.role
             end as role,
             m.status,
-            m.worker_id
+            m.worker_id,
+            o.status as organization_status,
+            o.onboarding_status,
+            o.deleted_at as organization_deleted_at,
+            s.plan_code,
+            s.status as subscription_status,
+            s.trial_ends_at,
+            s.current_period_ends_at
        from public.organization_member m
        join public.organizations o on o.org_id = m.org_id
+       left join public.organization_subscription s on s.org_id = m.org_id
       where m.org_id = $1::text
         and m.uid = $2::text
         and m.status = 'ACTIVE'
       limit 1`,
     [orgId, uid],
   )
-  return result.rows[0] ?? null
+  const membership = result.rows[0] ?? null
+  if (!membership || options.allowOnboarding === true) return membership
+
+  const organizationStatus = normalizeText(membership.organization_status).toUpperCase()
+  const onboardingStatus = normalizeText(membership.onboarding_status).toUpperCase()
+  const subscriptionAccess = evaluateSubscriptionAccess({
+    planCode: membership.plan_code,
+    status: membership.subscription_status,
+    trialEndsAt: membership.trial_ends_at,
+  })
+  if (
+    !['ACTIVE', 'TRIAL'].includes(organizationStatus)
+    || onboardingStatus !== 'COMPLETED'
+    || membership.organization_deleted_at
+    || !subscriptionAccess.allowed
+  ) {
+    return null
+  }
+  return membership
+}
+
+function assertMembershipPlanCapability(membership, capability) {
+  if (!membership) {
+    const error = new Error('ORG_ACCESS_MISSING')
+    error.statusCode = 404
+    error.publicCode = 'ORG_ACCESS_MISSING'
+    error.publicMessage = 'Brak dostępu do tej organizacji.'
+    throw error
+  }
+  if (normalizeRoleCode(membership.role) === PLATFORM_ROLE) return membership
+  if (!['ACTIVE', 'TRIAL'].includes(normalizeText(membership.organization_status).toUpperCase()) || membership.organization_deleted_at) {
+    const error = new Error('ORGANIZATION_UNAVAILABLE')
+    error.statusCode = 403
+    error.publicCode = 'ORGANIZATION_UNAVAILABLE'
+    error.publicMessage = 'Organizacja jest nieaktywna.'
+    throw error
+  }
+  const subscriptionAccess = evaluateSubscriptionAccess({
+    planCode: membership.plan_code,
+    status: membership.subscription_status,
+    trialEndsAt: membership.trial_ends_at,
+  })
+  if (!subscriptionAccess.allowed) {
+    const error = new Error(subscriptionAccess.code)
+    error.statusCode = 403
+    error.publicCode = subscriptionAccess.code
+    error.publicMessage = subscriptionAccess.code === 'TRIAL_INACTIVE'
+      ? 'Okres próbny wygasł.'
+      : 'Subskrypcja organizacji nie jest aktywna.'
+    throw error
+  }
+  if (!hasPlanCapability(normalizePlanCode(membership.plan_code), capability)) {
+    const error = new Error('PLAN_CAPABILITY_REQUIRED')
+    error.statusCode = 403
+    error.publicCode = 'PLAN_CAPABILITY_REQUIRED'
+    error.publicMessage = `Ta funkcja nie jest dostępna w planie ${normalizePlanCode(membership.plan_code)}.`
+    error.details = { capability, planCode: normalizePlanCode(membership.plan_code) }
+    throw error
+  }
+  return membership
 }
 
 async function getRequesterMemberships(client, uid, orgId = '') {
@@ -3645,7 +3730,7 @@ function profitabilityCapabilities(input) {
   const edit = resolveProfitabilityAccess({ ...input, action: 'edit' })
   return {
     profitabilityModule: {
-      enabled: ['PRO', 'ENTERPRISE'].includes(read.planCode),
+      enabled: hasPlanCapability(read.planCode, 'profitabilityModule'),
       canRead: read.allowed,
       canEdit: edit.allowed,
       readCode: read.code,
@@ -3676,7 +3761,83 @@ async function buildOrganizationSessionContext(client, uid, row) {
       profitabilityModule: canRead || canEdit ? { read: canRead, edit: canEdit } : false,
     }
   }
-  return buildSessionContext(uid, enriched)
+  const context = buildSessionContext(uid, enriched)
+  context.usage = await buildPlanUsage(client, row?.org_id, context.planCode, context.limits)
+  return context
+}
+
+function numericCount(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : 0
+}
+
+async function buildPlanUsage(client, orgIdValue, planCodeValue, limitsValue = {}) {
+  const orgId = normalizeOrgId(orgIdValue)
+  const planCode = normalizePlanCode(planCodeValue)
+  const limits = limitsValue && typeof limitsValue === 'object' ? limitsValue : {}
+  const includedWorkerSlots = numericCount(limits.includedWorkerSlots)
+  const workerResult = await client.query(
+    `select count(*)::integer as used
+       from public.worker
+      where org_id = $1::text
+        and coalesce(active, true) is true
+        and upper(coalesce(status, 'ACTIVE')) <> 'DELETED'`,
+    [orgId],
+  )
+  const workerSlotsUsed = numericCount(workerResult.rows?.[0]?.used)
+  const usage = {
+    workerSlots: calculateMeteredOverage(workerSlotsUsed, includedWorkerSlots),
+    proObjects: {
+      applicable: planCode === 'PRO',
+      ...calculateMeteredOverage(0, limits.includedProObjects),
+    },
+    zonesPerProObject: {
+      applicable: planCode === 'PRO',
+      included: numericCount(limits.includedZonesPerProObject),
+      objects: [],
+    },
+  }
+
+  if (planCode !== 'PRO' || !(await databaseRelationExists(client, 'public.service_object'))) {
+    return usage
+  }
+
+  const objectResult = await client.query(
+    `select object_id
+       from public.service_object
+      where org_id = $1::text
+        and upper(coalesce(status, 'ACTIVE')) = 'ACTIVE'
+        and archived_at is null
+      order by object_id asc`,
+    [orgId],
+  )
+  const objectIds = objectResult.rows.map((row) => normalizeText(row.object_id)).filter(Boolean)
+  Object.assign(usage.proObjects, calculateMeteredOverage(objectIds.length, usage.proObjects.included))
+
+  if (!objectIds.length || !(await databaseColumnExists(client, 'public.zone', 'object_id'))) {
+    return usage
+  }
+
+  const zoneResult = await client.query(
+    `select object_id, count(*)::integer as used
+       from public.zone
+      where org_id = $1::text
+        and object_id = any($2::text[])
+      group by object_id
+      order by object_id asc`,
+    [orgId, objectIds],
+  )
+  const zonesByObject = new Map(
+    zoneResult.rows.map((row) => [normalizeText(row.object_id), numericCount(row.used)]),
+  )
+  usage.zonesPerProObject.objects = objectIds.map((objectId) => {
+    const used = zonesByObject.get(objectId) || 0
+    return {
+      objectId,
+      ...calculateMeteredOverage(used, usage.zonesPerProObject.included),
+    }
+  })
+  return usage
 }
 
 async function findExistingWorker(client, orgId, login, email) {
@@ -3869,6 +4030,7 @@ function workerProfileAccessError(membership, actionLabel) {
 
 async function requireWorkerProfileAccess(client, orgId, requesterUid, allowedRoles, actionLabel) {
   const membership = await getRequesterMembership(client, orgId, requesterUid)
+  assertMembershipPlanCapability(membership, 'timeTracking')
   const requesterRole = normalizeRequesterRole(membership?.role)
   if (!allowedRoles.includes(requesterRole)) {
     throw workerProfileAccessError(membership, actionLabel)
@@ -3954,6 +4116,7 @@ async function listWorkersDirect(orgId, requesterUid) {
     if (!membership) {
       throw workerProfileAccessError(null, 'odczytu pracownikow')
     }
+    assertMembershipPlanCapability(membership, 'timeTracking')
 
     const result = await runWorkerProfileDbQuery(
       client,
@@ -6496,6 +6659,179 @@ async function handleAdminUsersRequest(req, res) {
   }
 }
 
+function assertVerifiedTenantEmail(decodedToken) {
+  if (decodedToken?.email_verified !== true || !normalizeEmail(decodedToken?.email)) {
+    const error = new Error('EMAIL_VERIFICATION_REQUIRED')
+    error.statusCode = 403
+    error.publicCode = 'EMAIL_VERIFICATION_REQUIRED'
+    error.publicMessage = 'Potwierdź adres email przed wejściem do portalu Cleanzi.'
+    throw error
+  }
+  return decodedToken
+}
+
+function sendPortalServiceError(res, error, fallbackCode, fallbackMessage) {
+  const databaseError = mapDatabaseConnectionError(error)
+  if (databaseError) {
+    sendApiError(res, databaseError.status, databaseError.code, databaseError.message)
+    return
+  }
+  sendApiError(
+    res,
+    Number(error?.statusCode) || 500,
+    normalizeText(error?.publicCode) || fallbackCode,
+    normalizeText(error?.publicMessage) || fallbackMessage,
+    publicErrorDetails(error),
+  )
+}
+
+async function authenticateVerifiedTenantRequest(req) {
+  const token = parseBearerToken(req)
+  if (!token) {
+    const error = new Error('UNAUTHENTICATED')
+    error.statusCode = 401
+    error.publicCode = 'UNAUTHENTICATED'
+    error.publicMessage = 'Brak tokenu Firebase.'
+    throw error
+  }
+  return assertVerifiedTenantEmail(await verifyFirebaseIdToken(token))
+}
+
+async function handlePortalOrganizationsRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  let client = null
+  try {
+    const decodedToken = await authenticateVerifiedTenantRequest(req)
+    const body = await readJsonBody(req)
+    client = await connectDbClient()
+    const organization = await createOrganizationWithTrial(client, {
+      uid: decodedToken.uid,
+      email: decodedToken.email,
+      organizationName: body?.organizationName ?? body?.name,
+      ownerFullName: body?.ownerFullName ?? decodedToken.name,
+    })
+    sendJson(res, 201, { ok: true, data: { organization } })
+  } catch (error) {
+    sendPortalServiceError(res, error, 'ORGANIZATION_CREATE_FAILED', 'Nie udało się utworzyć organizacji.')
+  } finally {
+    client?.release?.()
+  }
+}
+
+async function handlePortalOrganizationProfileRequest(req, res, requestUrl) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+  const method = String(req.method || 'GET').toUpperCase()
+  if (!['GET', 'PUT'].includes(method)) {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolone metody to GET i PUT.')
+    return
+  }
+
+  let client = null
+  try {
+    const decodedToken = await authenticateVerifiedTenantRequest(req)
+    const body = method === 'PUT' ? await readJsonBody(req) : {}
+    const orgId = normalizeOrgId(method === 'GET' ? requestUrl.searchParams.get('orgId') : body?.orgId)
+    if (!orgId) throw Object.assign(new Error('INVALID_ORG_ID'), {
+      statusCode: 400,
+      publicCode: 'INVALID_ORG_ID',
+      publicMessage: 'Brak poprawnego orgId.',
+    })
+    client = await connectDbClient()
+    const membership = await getRequesterMembership(client, orgId, decodedToken.uid, { allowOnboarding: true })
+    const role = normalizeRoleCode(membership?.role)
+    if (!['OWNER', 'ADMIN', 'ADMINISTRATOR', 'SUPERADMIN'].includes(role)) {
+      throw Object.assign(new Error('FORBIDDEN'), {
+        statusCode: membership ? 403 : 404,
+        publicCode: membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING',
+        publicMessage: 'Profil firmy może odczytać i edytować tylko Owner lub administrator.',
+      })
+    }
+    if (normalizeText(membership.organization_status).toUpperCase() !== 'ACTIVE' || membership.organization_deleted_at) {
+      throw Object.assign(new Error('ORGANIZATION_UNAVAILABLE'), {
+        statusCode: 403,
+        publicCode: 'ORGANIZATION_UNAVAILABLE',
+        publicMessage: 'Organizacja jest nieaktywna.',
+      })
+    }
+    const data = method === 'GET'
+      ? await readOrganizationProfile(client, orgId)
+      : await updateOrganizationProfile(client, {
+          orgId,
+          uid: decodedToken.uid,
+          version: body?.version,
+          profile: body?.profile,
+        })
+    sendJson(res, 200, { ok: true, data })
+  } catch (error) {
+    sendPortalServiceError(res, error, 'ORGANIZATION_PROFILE_FAILED', 'Nie udało się obsłużyć profilu firmy.')
+  } finally {
+    client?.release?.()
+  }
+}
+
+async function handlePortalCompanyRegistryRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+  try {
+    const decodedToken = await authenticateVerifiedTenantRequest(req)
+    const body = await readJsonBody(req)
+    const company = await lookupCompanyByNip(body?.nip, {
+      apiKey: process.env.GUS_BIR1_API_KEY,
+      endpoint: process.env.GUS_BIR1_ENDPOINT,
+      rateLimitKey: decodedToken.uid,
+    })
+    sendJson(res, 200, { ok: true, data: { company } })
+  } catch (error) {
+    sendPortalServiceError(res, error, 'COMPANY_LOOKUP_FAILED', 'Nie udało się pobrać danych firmy.')
+  }
+}
+
+async function handleStripeWebhookRequest(req, res) {
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+  let client = null
+  try {
+    const rawBody = await readRequestBody(req, 512 * 1024)
+    const event = verifyStripeSignature(
+      rawBody,
+      req.headers['stripe-signature'],
+      process.env.STRIPE_WEBHOOK_SECRET,
+    )
+    client = await connectDbClient()
+    const result = await processStripeEvent(client, event, {
+      secretKey: process.env.STRIPE_SECRET_KEY,
+      env: process.env,
+    })
+    sendJson(res, 200, { ok: true, data: result })
+  } catch (error) {
+    sendPortalServiceError(res, error, 'STRIPE_WEBHOOK_FAILED', 'Nie udało się przetworzyć webhooka Stripe.')
+  } finally {
+    client?.release?.()
+  }
+}
+
 async function handleAuthSessionContextRequest(req, res, requestUrl) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
@@ -6552,6 +6888,19 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
   const requesterUid = normalizeText(decodedToken?.uid)
   let client = null
 
+  if (!hasPlatformOwnerClaim(decodedToken) && decodedToken?.email_verified !== true) {
+    sendJson(res, 200, {
+      ok: true,
+      status: 'EMAIL_VERIFICATION_REQUIRED',
+      context: {
+        uid: requesterUid,
+        email: normalizeEmail(decodedToken?.email),
+        actorType: 'ORGANIZATION',
+      },
+    })
+    return
+  }
+
   try {
     client = await connectDbClient()
     if (hasPlatformOwnerClaim(decodedToken)) {
@@ -6585,7 +6934,9 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
           sendApiError(res, 403, 'PLATFORM_CONTEXT_INVALID', 'Kontekst organizacji jest zamknięty albo nie odpowiada żądaniu.')
           return
         }
-        const planCode = normalizeText(accessContext.plan_code) || 'PLATFORM'
+        const rawPlanCode = normalizeText(accessContext.plan_code).toUpperCase()
+        const planCode = normalizePlanCode(rawPlanCode)
+        const entitlements = resolvePlanEntitlements(planCode)
         const capabilities = profitabilityCapabilities({
           requestOrgId: normalizeText(accessContext.org_id),
           actor: {
@@ -6622,7 +6973,9 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
             role: PLATFORM_ROLE,
             roleCode: PLATFORM_ROLE,
             roleLevel: 4,
+            rawPlanCode,
             planCode,
+            planName: entitlements.planName,
             subscriptionStatus: normalizeText(accessContext.subscription_status),
             subscriptionEndsAt:
               planCode === 'TRIAL'
@@ -6631,7 +6984,11 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
             platformContextId: normalizeText(accessContext.context_id),
             platformReason: normalizeText(accessContext.reason),
             mfaMethod: principal.mfaMethod,
-            capabilities,
+            limits: entitlements.limits,
+            capabilities: {
+              ...entitlements.capabilities,
+              ...capabilities,
+            },
           },
         })
         return
@@ -6654,8 +7011,9 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
       return
     }
 
-    const rows = await getRequesterMemberships(client, requesterUid, requestedOrgId)
+    const rows = await getRequesterMemberships(client, requesterUid)
     const accessibleOrganizations = resolveAccessibleOrganizations(rows, new Date())
+    const organizationSummaries = accessibleOrganizations.map(buildOrganizationSummary)
 
     if (requestedOrgId) {
       const selected = accessibleOrganizations.find((row) => normalizeOrgId(row.org_id) === requestedOrgId)
@@ -6664,24 +7022,32 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
         return
       }
 
+      const context = await buildOrganizationSessionContext(client, requesterUid, selected)
+      context.organizations = organizationSummaries
       sendJson(res, 200, {
         ok: true,
         status: 'READY',
-        context: await buildOrganizationSessionContext(client, requesterUid, selected),
+        context,
       })
       return
     }
 
     if (!accessibleOrganizations.length) {
-      sendApiError(res, 403, 'ORG_ACCESS_DENIED', 'Brak uprawnie\u0144 do portalu dla tego konta.')
+      sendJson(res, 200, {
+        ok: true,
+        status: 'ORGANIZATION_ONBOARDING_REQUIRED',
+        organizations: [],
+      })
       return
     }
 
     if (accessibleOrganizations.length === 1) {
+      const context = await buildOrganizationSessionContext(client, requesterUid, accessibleOrganizations[0])
+      context.organizations = organizationSummaries
       sendJson(res, 200, {
         ok: true,
         status: 'READY',
-        context: await buildOrganizationSessionContext(client, requesterUid, accessibleOrganizations[0]),
+        context,
       })
       return
     }
@@ -6689,7 +7055,7 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
     sendJson(res, 200, {
       ok: true,
       status: 'ORG_SELECTION_REQUIRED',
-      organizations: accessibleOrganizations.map(buildOrganizationSummary),
+      organizations: organizationSummaries,
     })
   } catch (error) {
     const mappedDb = mapDatabaseConnectionError(error)
@@ -6814,6 +7180,7 @@ function portalZoneQrNullableText(value, maxLength = 500) {
 
 async function requirePortalZoneQrAccess(client, orgId, uid) {
   const membership = await getRequesterMembership(client, orgId, uid)
+  assertMembershipPlanCapability(membership, 'timeQrNfc')
   const role = normalizeRequesterRole(membership?.role)
   if (!['ADMIN', 'MANAGER', 'OWNER', 'PLATFORM_OWNER'].includes(role)) {
     const error = new Error('FORBIDDEN')
@@ -7013,7 +7380,10 @@ async function handlePortalZoneQrCodesRequest(req, res) {
   let client = null
   try {
     client = await connectDbClient()
-    await requirePortalZoneQrAccess(client, orgId, requesterUid)
+    const access = await requirePortalZoneQrAccess(client, orgId, requesterUid)
+    if (items.some((item) => item.function === 'CLEAN' || item.function === 'STREFA_SPECJALNA')) {
+      assertMembershipPlanCapability(access.membership, 'zoneTasks')
+    }
     const codes = await insertPortalZoneQrCodes(client, {
       orgId,
       items,
@@ -7050,6 +7420,7 @@ async function handlePortalZoneQrCodesRequest(req, res) {
 
 async function requirePortalTaskAccess(client, orgId, uid, { write = false, remove = false } = {}) {
   const membership = await getRequesterMembership(client, orgId, uid)
+  assertMembershipPlanCapability(membership, 'zoneTasks')
   const role = normalizeRequesterRole(membership?.role)
   const allowed = remove
     ? ['ADMIN']
@@ -7816,6 +8187,7 @@ async function ensurePortalScheduleOrderTable(client) {
 
 async function requirePortalScheduleOrderAccess(client, orgId, uid, { write = false, remove = false } = {}) {
   const membership = await getRequesterMembership(client, orgId, uid)
+  assertMembershipPlanCapability(membership, 'scheduling')
   const role = normalizeRequesterRole(membership?.role)
   const allowed = remove
     ? ['ADMIN']
@@ -7834,6 +8206,7 @@ async function requirePortalScheduleOrderAccess(client, orgId, uid, { write = fa
 
 async function requirePortalEventAccess(client, orgId, uid) {
   const membership = await getRequesterMembership(client, orgId, uid)
+  assertMembershipPlanCapability(membership, 'timeTracking')
   if (!isWorkerDeleteRole(membership?.role)) {
     const error = new Error('FORBIDDEN')
     error.statusCode = membership ? 403 : 404
@@ -8803,6 +9176,8 @@ async function handlePortalJobCardsRequest(req, res, requestUrl) {
   try {
     const requesterUid = normalizeText(decodedToken?.uid)
     client = await connectDbClient()
+    const membership = await getRequesterMembership(client, orgId, requesterUid)
+    assertMembershipPlanCapability(membership, 'checklistProof')
     const repository = new JobCardRepository(client)
     await repository.assertActiveOrganizationMember({ orgId, uid: requesterUid })
 
@@ -9227,6 +9602,12 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
 
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
   setRequestPathname(requestUrl.pathname)
+  if (requestUrl.pathname === STRIPE_WEBHOOK_PATH) {
+    handleStripeWebhookRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'STRIPE_WEBHOOK_FAILED', error?.message || 'Unexpected Stripe webhook error.')
+    })
+    return
+  }
   if (requestUrl.pathname.startsWith('/api/platform/')) {
     platformApi.handle(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PLATFORM_API_ERROR', error?.message || 'Unexpected platform API error.')
@@ -9236,6 +9617,24 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   if (requestUrl.pathname === PORTAL_PROFITABILITY_PATH) {
     profitabilityApi.handle(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PROFITABILITY_API_ERROR', error?.message || 'Unexpected profitability API error.')
+    })
+    return
+  }
+  if (requestUrl.pathname === PORTAL_ORGANIZATIONS_PATH) {
+    handlePortalOrganizationsRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'ORGANIZATION_CREATE_FAILED', error?.message || 'Unexpected organization error.')
+    })
+    return
+  }
+  if (requestUrl.pathname === PORTAL_ORGANIZATION_PROFILE_PATH) {
+    handlePortalOrganizationProfileRequest(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'ORGANIZATION_PROFILE_FAILED', error?.message || 'Unexpected organization profile error.')
+    })
+    return
+  }
+  if (requestUrl.pathname === PORTAL_COMPANY_REGISTRY_PATH) {
+    handlePortalCompanyRegistryRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'COMPANY_LOOKUP_FAILED', error?.message || 'Unexpected company lookup error.')
     })
     return
   }

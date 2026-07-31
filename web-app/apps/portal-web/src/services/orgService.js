@@ -38,8 +38,9 @@ export async function getOrganizations() {
     throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
   }
 
-  ensureFirebase()
-  const response = await myOrganizations()
+  const dataConnect = ensureFirebase()?.dataConnect
+  if (!dataConnect) throw new Error('Brak konfiguracji Data Connect. Uzupełnij zmienne VITE_DATACONNECT_*.')
+  const response = await myOrganizations(dataConnect)
   const memberships = response?.data?.organizationMembers ?? []
 
   return memberships

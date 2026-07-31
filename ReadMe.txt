@@ -331,6 +331,7 @@ Najważniejsze serwisy:
 - `backupService.js` - backup/restore/download/automatyzacja.
 - `styleService.js` - style UI organizacji i użytkowników.
 - `orgService.js` - organizacje.
+- `registrationOnboardingService.js` - portalowe wznowienie próby Registration API: bezpieczny bind Firebase, zgody, weryfikacja, lookup polskiego NIP, `complete-company`, idempotencja oraz walidacja Stripe Checkout.
 - `platformDataConnectService.js` - bezpośrednia komunikacja sesji PLATFORM_OWNER z backendowym gatewayem; bez fallbacku do klientowego Data Connect.
 
 Zasada: jeśli kilka feature potrzebuje tej samej operacji danych, dodaj/zmień serwis zamiast kopiować fetch/logikę w widokach.
@@ -435,6 +436,7 @@ Przykłady konfiguracji są w:
 
 Produkcja/App Hosting:
 - `apphosting.yaml` ustawia m.in. `NODE_ENV=production`, `APP_TARGET=portal`, Cloud SQL i sekrety DB.
+- `VITE_REGISTRATION_API_BASE_URL` jest publicznym bazowym adresem osobnego Registration API; produkcja używa `https://registration-cleanzi.web.app`, a lokalny Vite może wskazać emulator. `VITE_REGISTRATION_PAGE_URL` wskazuje stronę rozpoczęcia/wznowienia rejestracji.
 - Produkcja powinna używać konta serwisowego runtime. Nie należy kopiować lokalnego pliku ADC ani uruchamiać `gcloud auth application-default login` na serwerze.
 
 Lokalne Google Cloud/ADC:
@@ -4448,3 +4450,80 @@ Weryfikacja:
 - Logi Cloud Run backendu `cleanzi-01` z 30 minut obejmujacych rollout: 0 wpisow o poziomie `ERROR` lub wyzszym.
 Rollback:
 - Poprzedni zatwierdzony build to `build-2026-07-29-003`, commit `14f7a955869bb60d6cb69483c4942d1450d21ba0`.
+
+Data: 2026-07-31 CEST
+Autor: AI Codex
+Temat: Lokalna implementacja planów, logowania tenantowego i onboardingu organizacji
+Zakres:
+- Dodano centralną politykę kanonicznych planów `TRIAL`, `GO_PLUS`, `PLUS`, `PRO` z aliasami tylko do odczytu; Trial ma dokładnie funkcje GO+ przez 14 dni.
+- Backend sesji zwraca znormalizowany plan, możliwości, limity i użycie ponad pakiet oraz blokuje nieaktywne subskrypcje i organizacje.
+- Dodano Google Auth dla tenantów, wymóg zweryfikowanego emaila, bezpieczny reset hasła, wybór wielu organizacji i transakcyjne utworzenie własnej firmy.
+- Dodano profil organizacji, backendowy adapter GUS BIR1 i edycję profilu dla OWNER/ADMIN.
+- Dodano `PENDING_PAYMENT` i podpisany, idempotentny webhook Stripe; ręczna aktywacja płatnego planu jest zabroniona.
+- Dodano addytywną migrację `20260731_portal_plans_onboarding.sql`, testy kontraktów oraz dokument `docs/portal-plans-onboarding.md`.
+Weryfikacja:
+- `npm test` - 423/423 OK.
+- `npm --prefix web-app run lint` - OK.
+- `npm run build` - OK; pozostały wyłącznie zastane ostrzeżenia Vite o dużych chunkach i Node DEP0190.
+- `git diff --check` - bez błędów; tylko ostrzeżenia o przyszłej normalizacji LF/CRLF.
+- Read-only `npm run migrate:cleanzi-admin:audit` nie połączył się z Google OAuth: `invalid_grant / invalid_rapt`; przed audytem trzeba odświeżyć ADC.
+Granice:
+- Migracja nie została zastosowana, a aplikacja nie została wdrożona.
+- Sekrety GUS, Stripe, Firebase i Cloud SQL pozostają do skonfigurowania w Secret Manager.
+
+Data: 2026-07-31 CEST
+Autor: AI Codex
+Temat: Odświeżenie lokalnej sesji ADC i wygląd przycisku logowania Google
+Zakres:
+- Odświeżono Application Default Credentials poleceniem `gcloud auth application-default login` dla projektu `iclean-room`.
+- Ponowiono read-only audyt bazy; uwierzytelnienie działa, a raport wskazuje brakujące elementy schematu wymagające osobnej migracji.
+- Zrestartowano lokalne `npm run dev`; backend i portal ponownie odpowiadają.
+- Przycisk `Zaloguj się przez Google` otrzymał białą, zaokrągloną formę z cienką ramką, prawdziwym logo Google oraz stanami hover, focus, active i disabled.
+- Zachowano istniejącą logikę logowania Google; zmiana dotyczy warstwy prezentacji.
+Weryfikacja:
+- `GET http://localhost:8080/healthz` - HTTP 200.
+- `GET http://localhost:5174/` - HTTP 200.
+- `npm --prefix web-app run lint` - OK.
+- `npm run build` - OK; pozostały zastane ostrzeżenia Vite o dużych chunkach i Node DEP0190.
+- `node --test test/portal-auth-onboarding-contract.test.js` - 3/3 OK.
+
+Data: 2026-07-31 CEST
+Autor: AI Codex
+Temat: Portalowa kontynuacja Registration API i polityka Trial v7
+Zakres:
+- Portal przejmuje probe z `registrationId` i jednorazowym `registrationToken`, przechowuje token wyłącznie we fragmencie URL oraz `sessionStorage`, a dane autoryzacyjne natychmiast usuwa z adresu.
+- Rozdzielono bind konta od zapisu zgód i weryfikacji emaila; wznowienie `AUTH_CREATED` z zapisanymi zgodami przechodzi bezpośrednio do verify/company i nie wymaga ponownego zaznaczania zgód.
+- Zachowano wybór istniejącej organizacji. Nowa organizacja jest finalizowana wyłącznie przez Registration API, z danymi ownera, firmy, adresu i billing oraz opcjonalnym lookupem polskiego NIP.
+- Dla planu Trial portal otwiera utworzoną organizację, a dla planów płatnych akceptuje wyłącznie bezpieczny URL Stripe Checkout i blokuje wejście przy `PAYMENT_PENDING` do czasu potwierdzenia webhookiem.
+- Ustawiono publiczny produkcyjny base URL `https://registration-cleanzi.web.app` oraz jawny URL strony rejestracji; lokalny emulator pozostaje konfigurowalny przez zmienne Vite.
+- Trial dla nowych rejestracji trwa 7 dni (168 godzin). Polityka planów v7 zastępuje wcześniejszy okres 14 dni dla nowych Triali; test polityki chroni wartość `trialDays: 7`.
+- Uzupełniono dokument `docs/portal-plans-onboarding.md`, konfigurację przykładową, kontrakty portalu i historię zmian.
+Weryfikacja:
+- `node --check` dla serwisu Registration, auth i warstwy UI portalu - OK.
+- `node --test test/portal-auth-onboarding-contract.test.js test/plan-policy.test.js` - 11/11 OK.
+- `npm.cmd --prefix web-app run lint` - OK.
+- `npm.cmd run build` - OK; pozostały zastane ostrzeżenia Vite o dużych chunkach i Node DEP0190.
+- `git diff --check` - bez błędów; możliwe są wyłącznie ostrzeżenia o przyszłej normalizacji LF/CRLF.
+Granice:
+- Nie wykonano migracji, wdrożenia, commita ani publikacji zmian.
+
+Data: 2026-07-31 CEST
+Autor: AI Codex
+Temat: Usunięcie dodatkowej informacji z resetu hasła
+Zakres:
+- Usunięto tekst `Link dotyczy tylko kont logowanych hasłem. Hasłem konta Google zarządzasz w Google.` z panelu resetowania hasła.
+- Mechanizm resetowania hasła pozostał bez zmian.
+- Design QA dla widoku desktopowego i mobilnego - passed; konsola przeglądarki bez błędów.
+Granice:
+- Migracja nie została zastosowana, a aplikacja nie została wdrożona.
+
+Data: 2026-07-31 CEST
+Autor: AI Codex
+Temat: Uproszczenie treści ekranu logowania
+Zakres:
+- Usunięto tekst o zarządzaniu hasłem konta Google.
+- Usunięto tekst `Bezpieczne logowanie do chronionego środowiska Cleanzi.`.
+- Zachowano warunkowy link `Zresetuj hasło`, który pozostaje ukryty do czasu kwalifikującego się błędu logowania email/hasło.
+Weryfikacja:
+- `npm --prefix web-app run lint` - OK.
+- `node --test test/portal-auth-onboarding-contract.test.js` - 3/3 OK.

@@ -1,12 +1,17 @@
 import {
+  GoogleAuthProvider,
   PhoneAuthProvider,
   PhoneMultiFactorGenerator,
   RecaptchaVerifier,
   TotpMultiFactorGenerator,
   getMultiFactorResolver,
   multiFactor,
+  reload,
+  sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  signInWithPopup,
+  signInWithRedirect,
   signOut,
 } from 'firebase/auth'
 import {
@@ -15,20 +20,66 @@ import {
   isFirebaseConfigured,
   waitForFirebaseAuthReady,
 } from '../firebase/firebaseClient'
+import {
+  ensurePlatformFirebase,
+  ensurePlatformFirebaseAuthPersistence,
+  isPlatformFirebaseConfigured,
+  waitForPlatformFirebaseAuthReady,
+} from '../../../../../Cleanzi-admin/frontend/platformFirebaseClient'
 import { renderSubscriptionBadge } from '../ui/subscriptionBadge'
 
 const AUTH_STORAGE_KEY = 'iclean.portal.auth'
 const LAST_ORG_STORAGE_KEY = 'iclean.portal.lastOrgId'
 const PLATFORM_CONTEXT_STORAGE_KEY = 'iclean.portal.platformContextId'
 const PLATFORM_EMAIL_MFA_TOKEN_KEY = 'iclean.portal.platformEmailMfaToken'
+const AUTH_SCOPE_STORAGE_KEY = 'iclean.portal.authScope'
+const AUTH_SCOPE_ORGANIZATION = 'organization'
+const AUTH_SCOPE_PLATFORM = 'platform'
 const AUTH_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const AUTH_EMAIL_MAX_LENGTH = 160
 let pendingMfaResolver = null
 let pendingMfaEnrollment = null
 let pendingRecaptchaVerifier = null
+let pendingAuthScope = ''
 
 function toText(value) {
   return String(value ?? '').trim()
+}
+
+function normalizeAuthScope(value) {
+  return toText(value).toLowerCase() === AUTH_SCOPE_PLATFORM ? AUTH_SCOPE_PLATFORM : AUTH_SCOPE_ORGANIZATION
+}
+
+function resolveAuthScope(session = null) {
+  if (toText(session?.actorType).toUpperCase() === 'PLATFORM') return AUTH_SCOPE_PLATFORM
+  if (toText(session?.authScope)) return normalizeAuthScope(session.authScope)
+  if (pendingAuthScope) return normalizeAuthScope(pendingAuthScope)
+  return normalizeAuthScope(localStorage.getItem(AUTH_SCOPE_STORAGE_KEY))
+}
+
+function isAuthScopeConfigured(scope) {
+  return normalizeAuthScope(scope) === AUTH_SCOPE_PLATFORM ? isPlatformFirebaseConfigured() : isFirebaseConfigured()
+}
+
+function ensureFirebaseForScope(scope) {
+  return normalizeAuthScope(scope) === AUTH_SCOPE_PLATFORM ? ensurePlatformFirebase() : ensureFirebase()
+}
+
+function ensurePersistenceForScope(scope) {
+  return normalizeAuthScope(scope) === AUTH_SCOPE_PLATFORM
+    ? ensurePlatformFirebaseAuthPersistence()
+    : ensureFirebaseAuthPersistence()
+}
+
+function waitForAuthReadyForScope(scope) {
+  return normalizeAuthScope(scope) === AUTH_SCOPE_PLATFORM
+    ? waitForPlatformFirebaseAuthReady()
+    : waitForFirebaseAuthReady()
+}
+
+async function currentUserForScope(scope) {
+  const firebase = ensureFirebaseForScope(scope)
+  return firebase?.auth?.currentUser || (await waitForAuthReadyForScope(scope))
 }
 
 function createPublicAuthError(code, message) {
@@ -212,13 +263,28 @@ async function requestSessionContext(firebaseUser, { orgId = '', method = 'GET' 
     return { status: 'ORG_SELECTION_REQUIRED', organizations }
   }
 
+  if (status === 'ORGANIZATION_ONBOARDING_REQUIRED') {
+    return { status: 'ORGANIZATION_ONBOARDING_REQUIRED', organizations: [] }
+  }
+
+  if (status === 'EMAIL_VERIFICATION_REQUIRED') {
+    return {
+      status: 'EMAIL_VERIFICATION_REQUIRED',
+      context: payload?.context && typeof payload.context === 'object' ? payload.context : {},
+    }
+  }
+
   throw new Error('Backend zwrócił nieznany status kontekstu sesji.')
 }
 
 function buildSessionFromFirebase(user, context) {
   const activeOrgId = toText(context.activeOrgId)
   const organizationName = toText(context.organizationName)
+  const authScope = toText(context.actorType).toUpperCase() === 'PLATFORM'
+    ? AUTH_SCOPE_PLATFORM
+    : AUTH_SCOPE_ORGANIZATION
   localStorage.setItem(LAST_ORG_STORAGE_KEY, activeOrgId)
+  localStorage.setItem(AUTH_SCOPE_STORAGE_KEY, authScope)
   if (toText(context.platformContextId)) {
     localStorage.setItem(PLATFORM_CONTEXT_STORAGE_KEY, toText(context.platformContextId))
   }
@@ -234,6 +300,8 @@ function buildSessionFromFirebase(user, context) {
     actorType: toText(context.actorType).toUpperCase() || 'ORGANIZATION',
     roleLevel: Number(context.roleLevel) || undefined,
     planCode: toText(context.planCode).toUpperCase(),
+    rawPlanCode: toText(context.rawPlanCode).toUpperCase(),
+    planName: toText(context.planName),
     subscriptionStatus: toText(context.subscriptionStatus).toUpperCase(),
     subscriptionEndsAt: toText(context.subscriptionEndsAt),
     activeOrgId,
@@ -243,6 +311,12 @@ function buildSessionFromFirebase(user, context) {
     platformContextId: toText(context.platformContextId),
     platformReason: toText(context.platformReason),
     capabilities: context.capabilities && typeof context.capabilities === 'object' ? context.capabilities : {},
+    limits: context.limits && typeof context.limits === 'object' ? context.limits : {},
+    usage: context.usage && typeof context.usage === 'object' ? context.usage : {},
+    onboardingStatus: toText(context.onboardingStatus).toUpperCase(),
+    onboardingRequired: context.onboardingRequired === true,
+    organizations: Array.isArray(context.organizations) ? context.organizations : [],
+    authScope,
     source: 'firebase',
   }
 }
@@ -274,12 +348,13 @@ function isAccessDeniedError(error) {
 
 export function getSession() {
   const session = parseSession(localStorage.getItem(AUTH_STORAGE_KEY))
+  const authScope = resolveAuthScope(session)
 
-  if (!isFirebaseConfigured()) {
+  if (!isAuthScopeConfigured(authScope)) {
     return session
   }
 
-  const firebase = ensureFirebase()
+  const firebase = ensureFirebaseForScope(authScope)
   const currentUser = firebase?.auth?.currentUser ?? null
   if (!currentUser || session?.uid !== currentUser.uid || !toText(session?.activeOrgId ?? session?.orgId)) {
     return null
@@ -289,12 +364,16 @@ export function getSession() {
 }
 
 export async function ensureSessionContext(session = null) {
-  if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  const authScope = resolveAuthScope(session)
+  if (!isAuthScopeConfigured(authScope)) {
+    throw new Error(
+      authScope === AUTH_SCOPE_PLATFORM
+        ? 'Brak konfiguracji Firebase dla Panelu admina.'
+        : 'Brak konfiguracji Firebase. Uzupełnij web-app/.env.',
+    )
   }
 
-  const firebase = ensureFirebase()
-  const currentUser = firebase?.auth?.currentUser || (await waitForFirebaseAuthReady())
+  const currentUser = await currentUserForScope(authScope)
   if (!currentUser) {
     return null
   }
@@ -324,24 +403,41 @@ export function saveSession(session) {
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session))
 }
 
-export async function login({ login: loginValue, password }) {
+export function setOrganizationAuthScope() {
+  pendingAuthScope = AUTH_SCOPE_ORGANIZATION
+  localStorage.setItem(AUTH_SCOPE_STORAGE_KEY, AUTH_SCOPE_ORGANIZATION)
+}
+
+export async function login({
+  login: loginValue,
+  password,
+  authScope = AUTH_SCOPE_ORGANIZATION,
+  deferContext = false,
+}) {
   const normalizedLogin = toText(loginValue)
   const normalizedPassword = toText(password)
+  const normalizedAuthScope = normalizeAuthScope(authScope)
 
   if (!normalizedLogin || !normalizedPassword) {
     throw new Error('Podaj email i hasło.')
   }
 
-  if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  if (!isAuthScopeConfigured(normalizedAuthScope)) {
+    throw new Error(
+      normalizedAuthScope === AUTH_SCOPE_PLATFORM
+        ? 'Brak konfiguracji Firebase dla Panelu admina.'
+        : 'Brak konfiguracji Firebase. Uzupełnij web-app/.env.',
+    )
   }
 
-  const firebase = ensureFirebase()
+  const firebase = ensureFirebaseForScope(normalizedAuthScope)
   if (!firebase) {
     throw new Error('Brak konfiguracji Firebase.')
   }
 
-  await ensureFirebaseAuthPersistence()
+  pendingAuthScope = normalizedAuthScope
+  localStorage.setItem(AUTH_SCOPE_STORAGE_KEY, normalizedAuthScope)
+  await ensurePersistenceForScope(normalizedAuthScope)
   let credential
   try {
     credential = await signInWithEmailAndPassword(firebase.auth, normalizedLogin, normalizedPassword)
@@ -365,6 +461,9 @@ export async function login({ login: loginValue, password }) {
     // Provisioning or role changes update custom claims outside the browser.
     // Always obtain a fresh token before resolving the backend session.
     await credential.user.getIdToken(true)
+    if (deferContext && normalizedAuthScope === AUTH_SCOPE_ORGANIZATION) {
+      return { status: 'AUTHENTICATED' }
+    }
     return await resolveAuthenticatedContext(credential.user)
   } catch (error) {
     await signOut(firebase.auth)
@@ -372,6 +471,87 @@ export async function login({ login: loginValue, password }) {
     localStorage.removeItem(LAST_ORG_STORAGE_KEY)
     throw error
   }
+}
+
+export async function loginWithGoogle({ deferContext = false, forceRedirect = false } = {}) {
+  if (!isFirebaseConfigured()) {
+    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
+  }
+  const firebase = ensureFirebase()
+  if (!firebase?.auth) throw new Error('Brak konfiguracji Firebase.')
+  pendingAuthScope = AUTH_SCOPE_ORGANIZATION
+  localStorage.setItem(AUTH_SCOPE_STORAGE_KEY, AUTH_SCOPE_ORGANIZATION)
+  await ensureFirebaseAuthPersistence()
+  const provider = new GoogleAuthProvider()
+  provider.setCustomParameters({ prompt: 'select_account' })
+  const prefersRedirect = typeof window !== 'undefined' && (
+    window.matchMedia?.('(max-width: 760px)')?.matches ||
+    /Android|iPhone|iPad|iPod/i.test(window.navigator?.userAgent || '')
+  )
+  if (forceRedirect || prefersRedirect) {
+    await signInWithRedirect(firebase.auth, provider)
+    return { status: 'REDIRECTING' }
+  }
+  const credential = await signInWithPopup(firebase.auth, provider)
+  localStorage.removeItem(AUTH_STORAGE_KEY)
+  sessionStorage.removeItem(PLATFORM_EMAIL_MFA_TOKEN_KEY)
+  await credential.user.getIdToken(true)
+  if (deferContext) return { status: 'AUTHENTICATED' }
+  return resolveAuthenticatedContext(credential.user)
+}
+
+export async function requestEmailVerification() {
+  const user = await currentUserForScope(AUTH_SCOPE_ORGANIZATION)
+  if (!user) throw new Error('Sesja Firebase wygasła. Zaloguj się ponownie.')
+  if (user.emailVerified) return { verified: true }
+  await sendEmailVerification(user)
+  return { verified: false }
+}
+
+export async function refreshEmailVerification({ deferContext = false } = {}) {
+  const user = await currentUserForScope(AUTH_SCOPE_ORGANIZATION)
+  if (!user) throw new Error('Sesja Firebase wygasła. Zaloguj się ponownie.')
+  await reload(user)
+  if (!user.emailVerified) return { status: 'EMAIL_VERIFICATION_REQUIRED' }
+  await user.getIdToken(true)
+  if (deferContext) return { status: 'AUTHENTICATED' }
+  return resolveAuthenticatedContext(user)
+}
+
+async function authenticatedTenantRequest(pathname, options = {}) {
+  const user = await currentUserForScope(AUTH_SCOPE_ORGANIZATION)
+  if (!user) throw new Error('Sesja Firebase wygasła. Zaloguj się ponownie.')
+  const response = await fetch(`${getAuthApiBase()}${pathname}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${await user.getIdToken()}`,
+      Accept: 'application/json',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {}),
+    },
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw createBackendError(response, body)
+  return body?.data && typeof body.data === 'object' ? body.data : body
+}
+
+export function getOrganizationProfile(orgId) {
+  return authenticatedTenantRequest(`/portal/organization-profile?orgId=${encodeURIComponent(toText(orgId))}`)
+}
+
+export function saveOrganizationProfile(orgId, version, profile) {
+  return authenticatedTenantRequest('/portal/organization-profile', {
+    method: 'PUT',
+    body: JSON.stringify({ orgId: toText(orgId), version, profile }),
+  })
+}
+
+export async function lookupCompanyByNip(nip) {
+  const data = await authenticatedTenantRequest('/portal/company-registry/lookup', {
+    method: 'POST',
+    body: JSON.stringify({ nip: toText(nip) }),
+  })
+  return data?.company || null
 }
 
 function clearRecaptchaVerifier() {
@@ -396,7 +576,8 @@ export async function beginMfaSignInChallenge(factorUid, recaptchaContainerId = 
   if (toText(hint.factorId) !== 'phone') {
     return { factorUid: toText(hint.uid), factorId: toText(hint.factorId), verificationId: '' }
   }
-  const firebase = ensureFirebase()
+  const firebase = ensureFirebaseForScope(pendingAuthScope)
+  if (!firebase?.auth) throw new Error('Brak konfiguracji Firebase dla tego logowania.')
   const verifier = createRecaptchaVerifier(firebase.auth, recaptchaContainerId)
   const verificationId = await new PhoneAuthProvider(firebase.auth).verifyPhoneNumber(
     { multiFactorHint: hint, session: pendingMfaResolver.session },
@@ -405,7 +586,7 @@ export async function beginMfaSignInChallenge(factorUid, recaptchaContainerId = 
   return { factorUid: toText(hint.uid), factorId: toText(hint.factorId), verificationId }
 }
 
-export async function completeMfaSignIn({ factorUid, verificationCode, verificationId = '' }) {
+export async function completeMfaSignIn({ factorUid, verificationCode, verificationId = '', deferContext = false }) {
   if (!pendingMfaResolver) throw new Error('Brak oczekującego logowania MFA.')
   const hint = pendingMfaResolver.hints.find((item) => toText(item.uid) === toText(factorUid)) || pendingMfaResolver.hints[0]
   if (!hint || !toText(verificationCode)) throw new Error('Podaj kod drugiego składnika.')
@@ -415,11 +596,15 @@ export async function completeMfaSignIn({ factorUid, verificationCode, verificat
   const credential = await pendingMfaResolver.resolveSignIn(assertion)
   pendingMfaResolver = null
   clearRecaptchaVerifier()
+  await credential.user.getIdToken(true)
+  if (deferContext && normalizeAuthScope(pendingAuthScope) === AUTH_SCOPE_ORGANIZATION) {
+    return { status: 'AUTHENTICATED' }
+  }
   return resolveAuthenticatedContext(credential.user)
 }
 
 export async function beginTotpEnrollment() {
-  const user = ensureFirebase()?.auth?.currentUser || (await waitForFirebaseAuthReady())
+  const user = await currentUserForScope(resolveAuthScope())
   if (!user) throw new Error('Sesja Firebase wygasła.')
   const session = await multiFactor(user).getSession()
   const secret = await TotpMultiFactorGenerator.generateSecret(session)
@@ -432,7 +617,7 @@ export async function beginTotpEnrollment() {
 
 export async function completeTotpEnrollment(verificationCode) {
   if (pendingMfaEnrollment?.type !== 'totp') throw new Error('Najpierw rozpocznij konfigurację TOTP.')
-  const user = ensureFirebase()?.auth?.currentUser
+  const user = ensureFirebaseForScope(resolveAuthScope())?.auth?.currentUser
   if (!user) throw new Error('Sesja Firebase wygasła.')
   const assertion = TotpMultiFactorGenerator.assertionForEnrollment(
     pendingMfaEnrollment.secret,
@@ -445,8 +630,9 @@ export async function completeTotpEnrollment(verificationCode) {
 }
 
 export async function beginPhoneMfaEnrollment(phoneNumber, recaptchaContainerId = 'loginMfaRecaptcha') {
-  const firebase = ensureFirebase()
-  const user = firebase?.auth?.currentUser || (await waitForFirebaseAuthReady())
+  const authScope = resolveAuthScope()
+  const firebase = ensureFirebaseForScope(authScope)
+  const user = firebase?.auth?.currentUser || (await waitForAuthReadyForScope(authScope))
   const phone = toText(phoneNumber)
   if (!user || !/^\+[1-9]\d{7,14}$/.test(phone)) throw new Error('Podaj numer telefonu z kodem kraju, np. +48123123123.')
   const session = await multiFactor(user).getSession()
@@ -461,7 +647,7 @@ export async function beginPhoneMfaEnrollment(phoneNumber, recaptchaContainerId 
 
 export async function completePhoneMfaEnrollment(verificationCode) {
   if (pendingMfaEnrollment?.type !== 'phone') throw new Error('Najpierw wyślij kod SMS.')
-  const user = ensureFirebase()?.auth?.currentUser
+  const user = ensureFirebaseForScope(resolveAuthScope())?.auth?.currentUser
   if (!user) throw new Error('Sesja Firebase wygasła.')
   const credential = PhoneAuthProvider.credential(pendingMfaEnrollment.verificationId, toText(verificationCode))
   await multiFactor(user).enroll(PhoneMultiFactorGenerator.assertion(credential), 'Cleanzi SMS')
@@ -471,20 +657,21 @@ export async function completePhoneMfaEnrollment(verificationCode) {
   return resolveAuthenticatedContext(user)
 }
 
-export async function requestPasswordReset(emailValue) {
+export async function requestPasswordReset(emailValue, authScope = AUTH_SCOPE_ORGANIZATION) {
   const email = normalizeAuthEmail(emailValue)
+  const normalizedAuthScope = normalizeAuthScope(authScope)
   if (!email) {
     throw createPublicAuthError('INVALID_RESET_EMAIL', 'Podaj poprawny adres email.')
   }
 
-  if (!isFirebaseConfigured()) {
+  if (!isAuthScopeConfigured(normalizedAuthScope)) {
     throw createPublicAuthError(
       'FIREBASE_NOT_CONFIGURED',
       'Resetowanie hasła jest chwilowo niedostępne z powodu braku konfiguracji Firebase.',
     )
   }
 
-  const firebase = ensureFirebase()
+  const firebase = ensureFirebaseForScope(normalizedAuthScope)
   if (!firebase?.auth) {
     throw createPublicAuthError(
       'FIREBASE_AUTH_UNAVAILABLE',
@@ -536,7 +723,7 @@ export async function requestPasswordReset(emailValue) {
 }
 
 async function currentFirebaseUserWithToken() {
-  const user = ensureFirebase()?.auth?.currentUser || (await waitForFirebaseAuthReady())
+  const user = await currentUserForScope(AUTH_SCOPE_PLATFORM)
   if (!user) throw new Error('Sesja Firebase wygasła. Zaloguj się ponownie.')
   return { user, idToken: await user.getIdToken() }
 }
@@ -586,8 +773,7 @@ export async function selectOrganization(orgId) {
     throw new Error('Wybierz organizację.')
   }
 
-  const firebase = ensureFirebase()
-  const currentUser = firebase?.auth?.currentUser || (await waitForFirebaseAuthReady())
+  const currentUser = await currentUserForScope(AUTH_SCOPE_ORGANIZATION)
   if (!currentUser) {
     throw new Error('Sesja Firebase wygasła. Zaloguj się ponownie.')
   }
@@ -600,7 +786,7 @@ export async function selectOrganization(orgId) {
 }
 
 export async function acceptPlatformContext(context) {
-  const user = ensureFirebase()?.auth?.currentUser || (await waitForFirebaseAuthReady())
+  const user = await currentUserForScope(AUTH_SCOPE_PLATFORM)
   if (!user || toText(context?.actorType).toUpperCase() !== 'PLATFORM' || !toText(context?.platformContextId)) {
     throw new Error('Backend zwrócił niepoprawny kontekst administratora platformy.')
   }
@@ -615,7 +801,7 @@ export function clearPlatformContextSession() {
 }
 
 export function logout() {
-  const firebase = ensureFirebase()
+  const firebase = ensureFirebaseForScope(resolveAuthScope(getSession()))
 
   if (firebase?.auth?.currentUser) {
     void signOut(firebase.auth)
@@ -624,9 +810,11 @@ export function logout() {
   localStorage.removeItem(AUTH_STORAGE_KEY)
   localStorage.removeItem(LAST_ORG_STORAGE_KEY)
   localStorage.removeItem(PLATFORM_CONTEXT_STORAGE_KEY)
+  localStorage.removeItem(AUTH_SCOPE_STORAGE_KEY)
   sessionStorage.removeItem(PLATFORM_EMAIL_MFA_TOKEN_KEY)
   pendingMfaResolver = null
   pendingMfaEnrollment = null
+  pendingAuthScope = ''
   clearRecaptchaVerifier()
   renderSubscriptionBadge(null)
 }

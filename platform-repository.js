@@ -12,6 +12,8 @@ const {
 } = require('./platform-policy')
 const { getPlatformRequestContext } = require('./platform-request-context')
 const { getValidEmailMfaSession } = require('./platform-email-mfa')
+const cleanziAdminRepository = require('./Cleanzi-admin/backend/platform-admin-repository')
+const { PAID_PLAN_CODES, assertCanonicalPlanCode } = require('./plan-policy')
 
 const PLATFORM_TABLES = [
   'public.platform_admin',
@@ -222,62 +224,7 @@ async function resolvePlatformMembership(client, orgId, uid) {
 }
 
 async function listOrganizations(client, filters = {}) {
-  const page = Math.max(1, Math.trunc(Number(filters.page) || 1))
-  const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(filters.pageSize) || 25)))
-  const offset = (page - 1) * pageSize
-  const search = text(filters.search).slice(0, 160)
-  const status = text(filters.status).toUpperCase().slice(0, 30)
-  const planCode = text(filters.planCode).toUpperCase().slice(0, 30)
-  const deletion = text(filters.deletion).toLowerCase()
-
-  const result = await client.query(
-    `select o.org_id,
-            o.name,
-            o.status,
-            o.onboarding_status,
-            o.owner_uid,
-            o.owner_worker_id,
-            o.deleted_at,
-            o.created_at,
-            coalesce(s.plan_code, '') as plan_code,
-            coalesce(s.status, '') as subscription_status,
-            s.trial_ends_at,
-            nullif(to_jsonb(s)->>'current_period_ends_at', '')::timestamptz as current_period_ends_at,
-            count(*) over()::integer as total_count
-       from public.organizations o
-       left join public.organization_subscription s on s.org_id = o.org_id
-      where ($1::text = '' or o.name ilike '%' || $1::text || '%' or o.org_id ilike '%' || $1::text || '%')
-        and ($2::text = '' or upper(coalesce(o.status, '')) = $2::text)
-        and ($3::text = '' or upper(coalesce(s.plan_code, '')) = $3::text)
-        and ($4::text not in ('active', 'deleted')
-             or ($4::text = 'active' and o.deleted_at is null)
-             or ($4::text = 'deleted' and o.deleted_at is not null))
-      order by o.deleted_at nulls first, lower(o.name), o.org_id
-      limit $5::integer offset $6::integer`,
-    [search, status, planCode, deletion, pageSize, offset],
-  )
-
-  const total = Number(result.rows[0]?.total_count || 0)
-  return {
-    items: result.rows.map((row) => ({
-      orgId: text(row.org_id),
-      name: text(row.name),
-      status: text(row.status),
-      onboardingStatus: text(row.onboarding_status),
-      ownerUid: text(row.owner_uid),
-      ownerWorkerId: text(row.owner_worker_id),
-      deletedAt: row.deleted_at || null,
-      createdAt: row.created_at || null,
-      planCode: text(row.plan_code),
-      subscriptionStatus: text(row.subscription_status),
-      trialEndsAt: row.trial_ends_at || null,
-      currentPeriodEndsAt: row.current_period_ends_at || null,
-    })),
-    page,
-    pageSize,
-    total,
-    totalPages: Math.max(1, Math.ceil(total / pageSize)),
-  }
+  return cleanziAdminRepository.listOrganizations(client, filters)
 }
 
 async function getDataConnectOperationOptions(client, { orgId, kind }) {
@@ -470,8 +417,18 @@ async function updateOrganization(client, orgId, payload) {
 }
 
 async function updateSubscription(client, orgId, payload) {
-  const planCode = text(payload.planCode).toUpperCase().slice(0, 30)
+  const planCode = assertCanonicalPlanCode(payload.planCode)
   const status = text(payload.status).toUpperCase().slice(0, 30)
+  if (PAID_PLAN_CODES.includes(planCode) && status === 'ACTIVE') {
+    throw publicError(
+      409,
+      'PAID_ACTIVATION_WEBHOOK_REQUIRED',
+      'Płatny plan może aktywować wyłącznie zweryfikowany webhook operatora płatności.',
+    )
+  }
+  if (planCode === 'TRIAL' && status !== 'TRIALING') {
+    throw publicError(400, 'INVALID_TRIAL_STATUS', 'Plan TRIAL wymaga statusu TRIALING.')
+  }
   const trialEndsAt = payload.trialEndsAt || null
   const currentPeriodEndsAt = payload.currentPeriodEndsAt || null
   if (!planCode || !status) throw publicError(400, 'INVALID_SUBSCRIPTION', 'Pakiet i status subskrypcji są wymagane.')
@@ -616,6 +573,7 @@ async function preserveTenantMutationAuthors(client, operationName, variables) {
 }
 
 module.exports = {
+  ...cleanziAdminRepository,
   PLATFORM_TABLES,
   appendAudit,
   assertPlatformPrincipal,

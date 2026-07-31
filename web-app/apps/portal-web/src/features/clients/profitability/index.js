@@ -335,7 +335,7 @@ export function createClientProfitabilityFeature(ctx) {
     const planCode = text(appState.session?.planCode) || 'obecnego pakietu'
     access.innerHTML = `
       <strong>Moduł finansów nie jest dostępny.</strong>
-      <span>„Koszty i rentowność” wymagają pakietu PRO lub ENTERPRISE oraz uprawnienia finansowego. Aktywny pakiet: ${escapeHtml(planCode)}.</span>
+      <span>„Koszty i rentowność” wymagają pakietu PRO oraz uprawnienia finansowego. Aktywny pakiet: ${escapeHtml(planCode)}.</span>
     `
     access.hidden = false
     workspace.hidden = true

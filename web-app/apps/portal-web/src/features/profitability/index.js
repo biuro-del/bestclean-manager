@@ -155,7 +155,7 @@ export function createContractProfitabilityFeature(ctx) {
         `
         : `
           <strong>Brak dostępu do danych finansowych.</strong>
-          <span>Moduł rentowności wymaga centralnego uprawnienia profitabilityModule w pakiecie PRO lub ENTERPRISE.</span>
+          <span>Moduł rentowności wymaga centralnego uprawnienia profitabilityModule w pakiecie PRO.</span>
         `
     }
   }

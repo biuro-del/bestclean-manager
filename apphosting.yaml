@@ -16,20 +16,86 @@ env:
     value: "1"
     availability:
       - BUILD
+  - variable: VITE_REGISTRATION_API_BASE_URL
+    value: https://registration-cleanzi.web.app
+    availability:
+      - BUILD
+  - variable: VITE_REGISTRATION_PAGE_URL
+    value: https://registration-cleanzi.web.app/rejestracja/
+    availability:
+      - BUILD
   - variable: API_PROXY_TARGET
-    value: https://cleanzi-01.web.app
+    secret: CLEANZI_API_PROXY_TARGET
+  - variable: VITE_FIREBASE_API_KEY
+    secret: CLEANZI_FIREBASE_WEB_API_KEY
+    availability:
+      - BUILD
+  - variable: VITE_FIREBASE_AUTH_DOMAIN
+    secret: CLEANZI_FIREBASE_AUTH_DOMAIN
+    availability:
+      - BUILD
+  - variable: VITE_FIREBASE_PROJECT_ID
+    secret: CLEANZI_FIREBASE_PROJECT_ID
+    availability:
+      - BUILD
+  - variable: VITE_FIREBASE_APP_ID
+    secret: CLEANZI_FIREBASE_APP_ID
+    availability:
+      - BUILD
+  - variable: VITE_DATACONNECT_LOCATION
+    secret: CLEANZI_DATACONNECT_LOCATION
+    availability:
+      - BUILD
+  - variable: VITE_DATACONNECT_SERVICE
+    secret: CLEANZI_DATACONNECT_SERVICE
+    availability:
+      - BUILD
+  - variable: VITE_DATACONNECT_CONNECTOR
+    secret: CLEANZI_DATACONNECT_CONNECTOR
+    availability:
+      - BUILD
+  - variable: FIREBASE_DATACONNECT_LOCATION
+    secret: CLEANZI_DATACONNECT_LOCATION
     availability:
       - RUNTIME
-  - variable: API_PROXY_FORWARDED_HOST
-    value: cleanzi-01.web.app
+  - variable: FIREBASE_DATACONNECT_SERVICE
+    secret: CLEANZI_DATACONNECT_SERVICE
     availability:
       - RUNTIME
-  - variable: FIREBASE_PROJECT_ID
-    value: iclean-room
+  - variable: FIREBASE_DATACONNECT_CONNECTOR
+    secret: CLEANZI_DATACONNECT_CONNECTOR
+    availability:
+      - RUNTIME
+  - variable: BILLING_PROVIDER
+    value: NONE
+    availability:
+      - RUNTIME
+  - variable: GUS_BIR1_API_KEY
+    secret: CLEANZI_GUS_BIR1_API_KEY
+    availability:
+      - RUNTIME
+  - variable: STRIPE_SECRET_KEY
+    secret: CLEANZI_STRIPE_SECRET_KEY
+    availability:
+      - RUNTIME
+  - variable: STRIPE_WEBHOOK_SECRET
+    secret: CLEANZI_STRIPE_WEBHOOK_SECRET
+    availability:
+      - RUNTIME
+  - variable: STRIPE_PRICE_GO_PLUS
+    secret: CLEANZI_STRIPE_PRICE_GO_PLUS
+    availability:
+      - RUNTIME
+  - variable: STRIPE_PRICE_PLUS
+    secret: CLEANZI_STRIPE_PRICE_PLUS
+    availability:
+      - RUNTIME
+  - variable: STRIPE_PRICE_PRO
+    secret: CLEANZI_STRIPE_PRICE_PRO
     availability:
       - RUNTIME
   - variable: CLOUD_SQL_CONNECTION_NAME
-    value: iclean-room:europe-west3:iclean-room-instance
+    secret: CLEANZI_CLOUD_SQL_CONNECTION_NAME
     availability:
       - RUNTIME
   - variable: DB_CONNECTOR
@@ -45,7 +111,7 @@ env:
     availability:
       - RUNTIME
   - variable: DB_NAME
-    value: iclean-room-database
+    secret: CLEANZI_DB_NAME
     availability:
       - RUNTIME
   - variable: DB_USER

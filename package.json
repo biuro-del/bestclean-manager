@@ -10,6 +10,8 @@
     "build": "node build-webapp.js",
     "start": "node index.js",
     "test": "node --test",
+    "migrate:cleanzi-admin:audit": "node Cleanzi-admin/scripts/migrate.js --audit",
+    "migrate:cleanzi-admin:apply": "node Cleanzi-admin/scripts/migrate.js --apply",
     "migrate:workers": "node scripts/migrate-worker-model.js",
     "migrate:platform": "node scripts/migrate-worker-model.js",
     "migrate:job-card-photo": "node scripts/migrate-job-card-photo.js",

@@ -45,6 +45,220 @@ final result: passed
 
 ---
 
+# Design QA — przycisk „Zaloguj się przez Google” (2026-07-31)
+
+- Source visual truth: `C:\Users\dosta\AppData\Local\Temp\codex-clipboard-66cdba5f-29d0-4165-adf5-961e21d74d4f.png`.
+- Source pixels: 320 × 89 px; widoczny przycisk około 285 × 69 px.
+- Implementation URL: `http://localhost:5174/`.
+- Implementation full screenshot: `C:\Users\dosta\.codex\visualizations\2026\07\31\019fb74a-1278-7c20-b857-753058ada7e4\login-screen-google-button.png`.
+- Implementation focused screenshot: `C:\Users\dosta\.codex\visualizations\2026\07\31\019fb74a-1278-7c20-b857-753058ada7e4\google-button-implementation.png`.
+- Mobile screenshot: `C:\Users\dosta\.codex\visualizations\2026\07\31\019fb74a-1278-7c20-b857-753058ada7e4\login-google-mobile.png`.
+- Desktop viewport: 1280 × 720 CSS px, density 1; przycisk 311.59 × 64 px.
+- Mobile viewport: 390 × 844 CSS px, density 1; przycisk 312 × 64 px, bez poziomego overflow.
+- State: publiczny formularz logowania, przycisk widoczny i aktywny.
+
+## Findings
+
+- Brak rozbieżności P0, P1 i P2 w zakresie wskazanego komponentu.
+- Fonts and typography: 16 px, waga 600, czarny tekst; dłuższa polska etykieta zachowuje czytelność i nie zawija się.
+- Spacing and layout rhythm: kapsułowy promień, wysokość 64 px, logo 24 px i odstęp 13 px odpowiadają proporcjom wzorca.
+- Colors and visual tokens: białe tło oraz cienkie obramowanie `#747775` odpowiadają neutralnej stylistyce Google; focus używa czytelnego niebieskiego obrysu.
+- Image quality and asset fidelity: prawdziwy wielokolorowy znak Google jest pobierany z `gstatic.com`; renderuje się ostro w rozmiarze 24 × 24 px i nie został zastąpiony literą ani rysunkiem CSS.
+- Copy and content: zachowano jednoznaczną polską akcję „Zaloguj się przez Google”.
+
+## Comparison evidence
+
+- Focused comparison otworzył źródło i kadr implementacji razem. Kształt, obramowanie, białe tło, wyśrodkowanie znaku oraz rytm ikona–tekst są zgodne; różnica szerokości wynika z dłuższej polskiej etykiety i jest akceptowalna.
+- Pełny widok potwierdza spójność komponentu z kartą logowania Cleanzi.
+- Wersja mobilna nie zawija tekstu i nie powoduje overflow.
+
+## Interaction and technical QA
+
+- Przycisk ma pojedynczą nazwę dostępną, jest widoczny i aktywny.
+- Zachowano istniejący handler Google Auth; zmiana dotyczy wyłącznie znacznika ikony i stylów.
+- Zweryfikowano stany hover, active, disabled i focus-visible w arkuszu stylów.
+- Konsola lokalnego ekranu logowania: 0 błędów.
+
+## Comparison history
+
+- Pierwsza kontrola: zgodność bez P0/P1/P2; nie była potrzebna iteracja naprawcza.
+- P3: implementacja ma dłuższą etykietę niż krótki napis „Google” ze wzorca, lecz lepiej opisuje działanie i mieści się na 390 px.
+
+final result: passed
+
+---
+
+# Design QA — „Zdarzenia” w stylu „Pulpitu”
+
+- Source visual truth: `C:\Users\dosta\.codex\visualizations\2026\07\29\019faded-51e7-7d82-8029-b49b6261728d\events-dashboard-source.png`.
+- Browser-rendered implementation: `http://localhost:5173/qa-events-style.html` podczas kontroli; tymczasowy harness został po QA usunięty, a właściwy portal pozostaje pod `http://localhost:5173/`.
+- Desktop screenshot: `C:\Users\dosta\.codex\visualizations\2026\07\29\019faded-51e7-7d82-8029-b49b6261728d\events-dashboard-style-desktop-viewport.jpg`.
+- Focused table screenshot: `C:\Users\dosta\.codex\visualizations\2026\07\29\019faded-51e7-7d82-8029-b49b6261728d\events-dashboard-style-table-final.jpg`.
+- Tablet screenshot: `C:\Users\dosta\.codex\visualizations\2026\07\29\019faded-51e7-7d82-8029-b49b6261728d\events-dashboard-style-tablet-stage.jpg`.
+- Mobile screenshot: `C:\Users\dosta\.codex\visualizations\2026\07\29\019faded-51e7-7d82-8029-b49b6261728d\events-dashboard-style-mobile-final.jpg`.
+- Modal screenshot: `C:\Users\dosta\.codex\visualizations\2026\07\29\019faded-51e7-7d82-8029-b49b6261728d\events-dashboard-style-modal.jpg`.
+- Combined comparison: `C:\Users\dosta\.codex\visualizations\2026\07\29\019faded-51e7-7d82-8029-b49b6261728d\events-dashboard-style-comparison.jpg`.
+- Source pixels: 646 × 794.
+- Implementation pixels: desktop 1265 × 712; tablet and mobile stages 1280 × 720.
+- CSS viewports: desktop 1280 × 720, tablet frame 768 × 680, mobile frame 390 × 680.
+- Density normalization: `devicePixelRatio = 1`; porównanie zestawia pełny wzorzec z nieskalowanym, browser-rendered regionem wdrożenia.
+- State: wypełnione metryki i filtry, dwie kategorie problemów, reprezentatywne wiersze tabeli oraz otwarty modal kategorii.
+
+## Findings
+
+- Brak aktywnych problemów P0, P1 lub P2.
+- Fonts and typography: Manrope, ciemnogranatowe nagłówki, wagi 650–860 i mniejsze teksty pomocnicze odpowiadają hierarchii „Pulpitu”; nie ma obciętych nagłówków tabeli.
+- Spacing and layout rhythm: powierzchnia 20 px, karty 15–17 px, odstępy 12–16 px i lekkie cienie tworzą ten sam spokojny rytm co wzorzec.
+- Colors and visual tokens: wdrożenie używa `#19243d`, `#253149`, `#68758e`, `#dfe5ef`, `#edf0f5` i `#5b52eb`; semantyczna czerwień, zieleń i bursztyn pozostały stonowane.
+- Image and icon fidelity: widok nie wymaga nowych rasterów; wszystkie ikony pochodzą z używanej już biblioteki Phosphor i mają spójne rozmiary 14–16 px oraz okrągłe, lekkie tła.
+- Copy and content: zachowano terminologię modułu, dodając jedynie czytelny nagłówek i opis filtrów oraz dostępne etykiety paginacji.
+- Responsiveness: tablet przechodzi na metryki 2 × 2 i trzy pola filtrów w rzędzie; przy 390 px metryki pozostają 2 × 2, akcje są jednokolumnowe, a poziome przewijanie jest ograniczone do tabeli.
+
+## Full-view and focused comparison evidence
+
+- Wspólne porównanie potwierdza tę samą białą powierzchnię, cienkie obramowania, promienie, gęstość, akcent fioletowy i semantyczne kolory co na „Pulpicie”.
+- Focused table check potwierdza kompletne nagłówki `Pracownik`–`Akcje`, płaskie wiersze z separatorami, czytelne znaczniki czasu i zintegrowaną paginację.
+- Focused modal check potwierdza ten sam język kart: biała powierzchnia, delikatna ramka, mała ikonografia, przyciski obrysowane i czytelne liczniki.
+
+## Interaction and technical QA
+
+- Rozwinięcie filtra strefy pokazało listę i prawidłowy stan `aria-expanded`.
+- Kliknięcie kafelka problemu otworzyło właściwy dialog; X zamknął go i przywrócił `aria-hidden="true"`. Kontrakt Escape, tła i powrotu fokusu pozostaje pokryty testem modułu.
+- Mobile modal ma 374 px szerokości w widoku 390 px i zachowuje 8 px marginesu.
+- Desktop page overflow X: 0 px.
+- Mobile page overflow X: 0 px; tabela: 331 px viewport / 1142 px przewijalnej treści.
+- Browser console: 0 błędów; wyłącznie komunikaty debug połączenia Vite.
+- Targeted Events tests: 10/10 passed.
+- Targeted ESLint: passed.
+- Production portal build: passed.
+- Pełne `npm test`: jedna istniejąca, niezwiązana porażka `Cleanzi-admin/test/portability-contract.test.js` dotycząca obecnego identyfikatora projektu; testy „Zdarzeń” przeszły.
+
+## Comparison history
+
+- Pierwsza kontrola tabeli: P2 — suma szerokości kolumn przekraczała kartę, przez co przyklejona kolumna akcji zasłaniała część nagłówka `Edytował`.
+- Fix: dopasowano lokalny kontrakt szerokości kolumn do 1142 px i usunięto wtórne ramki z komórek klienta, strefy i lokalizacji.
+- Kontrola po poprawce: wszystkie nagłówki mieszczą się, `scrollWidth` i `clientWidth` tabeli na desktopie wynoszą 1181 px, a wiersze są płaskie i czytelne.
+- Pierwsza kontrola mobile: P2 — breakpoint 420 px składał cztery metryki w jedną kolumnę również na typowym telefonie 390 px.
+- Fix: układ 2 × 2 pozostaje do 341 px, a jedna kolumna włącza się dopiero poniżej 340 px.
+- Kontrola po poprawce: przy 390 px siatka ma dwie kolumny po 162,5 px, strona nie ma poziomego overflow, a filtry pozostają jednokolumnowe.
+
+final result: passed
+
+---
+
+# Design QA — kompaktowy panel problemów w „Zdarzeniach”
+
+- Source visual truth: `C:\Users\dosta\AppData\Local\Temp\codex-clipboard-5161fcb3-c791-4d79-b85e-6e3035ef0544.png`.
+- Source pixels: 1308 × 707.
+- Implementation URL: `http://localhost:5173/qa-events-integrity.html` — odizolowany stan QA korzystający z produkcyjnego szablonu i arkuszy stylów modułu „Zdarzenia”.
+- Desktop implementation:
+  - `C:\Users\dosta\.codex\visualizations\2026\07\29\019faded-51e7-7d82-8029-b49b6261728d\events-integrity-compact-desktop.png`
+  - `C:\Users\dosta\.codex\visualizations\2026\07\29\019faded-51e7-7d82-8029-b49b6261728d\events-integrity-modal-desktop.png`
+- Mobile implementation:
+  - `C:\Users\dosta\.codex\visualizations\2026\07\29\019faded-51e7-7d82-8029-b49b6261728d\events-integrity-compact-mobile.png`
+  - `C:\Users\dosta\.codex\visualizations\2026\07\29\019faded-51e7-7d82-8029-b49b6261728d\events-integrity-modal-mobile.png`
+- Combined comparison:
+  - `C:\Users\dosta\.codex\visualizations\2026\07\29\019faded-51e7-7d82-8029-b49b6261728d\events-integrity-comparison.png`
+  - `C:\Users\dosta\.codex\visualizations\2026\07\29\019faded-51e7-7d82-8029-b49b6261728d\events-integrity-modal-comparison.png`
+- Viewports: 1308 × 739 CSS px oraz 390 × 844 CSS px; zrzuty zapisano przy density 1, bez skalowania implementacji.
+- State: dwie kategorie z danych referencyjnych (`83` nierozstrzygnięte, `38` historyczne), otwarty modal nierozstrzygniętych oraz zamknięcie okna.
+
+## Findings
+
+- Brak aktywnych rozbieżności P0, P1 lub P2.
+- Panel zajmuje jeden kompaktowy blok i od razu odsłania nagłówek oraz pierwszy wiersz tabeli, zamiast renderować wszystkie grupy pracowników na stronie.
+- Czerwony i bursztynowy kolor pozostały semantycznymi akcentami; duże, intensywne powierzchnie alarmowe zostały usunięte.
+- Modal zachowuje hierarchię problem → podsumowanie → pracownik → akcja, a lista ma własny scroll i stałą stopkę.
+
+## Required fidelity surfaces
+
+- Fonts and typography: istniejący Manrope i dotychczasowe wagi portalu zostały zachowane; tytuły, metadane i liczniki nie nachodzą na siebie.
+- Spacing and layout rhythm: desktop mieści dwa kafelki w jednym rzędzie, a mobile układa je pionowo; panel, tabela i modal nie kolidują.
+- Colors and visual tokens: zastosowano istniejącą paletę Cleanzi, subtelne neutralne powierzchnie oraz czerwone/bursztynowe akcenty o czytelnym kontraście.
+- Image quality and asset fidelity: moduł nie wymaga nowych rasterów; wszystkie ikony pochodzą z używanej już biblioteki Phosphor.
+- Copy and content: nazwy czterech kategorii, liczby pracowników/rekordów i opis wpływu problemu są spójne z istniejącą klasyfikacją danych.
+
+## Focused-region and responsive evidence
+
+- Porównanie pełnego regionu potwierdza istotne skrócenie sekcji i zachowanie tabeli nad foldem.
+- Porównanie modalne potwierdza, że dotychczasowe informacje o pracowniku, obiekcie/QR oraz liczniku pozostały dostępne po kliknięciu kategorii.
+- Przy 390 × 844 modal ma niemal pełną wysokość, przewijaną listę, pełnoszerokie akcje i nie powoduje poziomego overflow.
+
+## Interaction and technical QA
+
+- Kafelki mają semantykę przycisku, `aria-haspopup="dialog"` i jednoznaczne etykiety.
+- Modal otwiera właściwą kategorię, zamyka się przez Escape i kliknięcie tła, a fokus wraca do kafelka.
+- Przycisk `Pokaż zdarzenia` korzysta z istniejącej dokładnej grupy diagnostycznej; kontrakt powrotu, strony i filtrów jest objęty testem modułu.
+- Browser console: 0 błędów w stanie QA.
+- Test panelu: 9/9 passed.
+- Targeted ESLint modułu: passed.
+- Production build portalu: passed.
+- Pełny lint pozostaje czerwony przez pięć istniejących, niezwiązanych błędów `no-unused-vars` w `workerService.js` i `portalApp.js`.
+- Pełny `npm test` dochodzi do testów panelu, lecz całość pozostaje czerwona przez istniejący test przenośności Cleanzi Admin wykrywający identyfikator aktualnego projektu.
+
+## Comparison history
+
+- Pierwsza próba pełnego portalu: zablokowana na ekranie logowania, bez używania danych logowania lub obchodzenia autoryzacji.
+- Kontrola komponentu: produkcyjny szablon i CSS wyrenderowano z reprezentatywnymi danymi ze screena; nie wykryto problemów P0/P1/P2.
+- Kontrola mobilna i interakcyjna: modal, scroll, Escape, kliknięcie tła, fokus i konsola przeszły weryfikację.
+
+final result: passed
+
+---
+
+# Design QA — lista stref i edytor zdarzeń
+
+- Source visual truth:
+  - `C:\Users\dosta\AppData\Local\Temp\codex-clipboard-4331352e-1218-4bb1-b3e9-434fdd3ebbf3.png` — dotychczasowa lista stref, 465 × 309 px.
+  - `C:\Users\dosta\AppData\Local\Temp\codex-clipboard-6d0a3a52-86f6-4fab-95e6-eb132408db6f.png` — docelowy wzorzec listy klienta, 491 × 252 px.
+  - `C:\Users\dosta\AppData\Local\Temp\codex-clipboard-e25c4149-6165-4866-9dc3-0062d932b9b1.png` — edytor zdarzenia przed dopracowaniem, 1146 × 879 px.
+- Implementation URL: `http://localhost:5174/`
+- Implementation screenshot: unavailable — local application requires an authenticated portal session in the in-app browser.
+- Viewport: unavailable before authentication.
+- CSS size and density normalization: not evaluated because the implementation state could not be opened.
+- State reached: portal login screen.
+
+## Full-view comparison evidence
+
+The source visuals were opened at original resolution. The implementation could not be captured in the corresponding Events view because the local in-app browser has no authenticated portal session.
+
+## Focused-region comparison evidence
+
+Focused comparison of the zone dropdown and event editor is blocked by the same authentication requirement.
+
+## Findings
+
+- [P1] Browser verification is blocked by authentication.
+  - Location: local portal, Events view.
+  - Evidence: the browser reaches the Cleanzi login dialog instead of the Events screen.
+  - Impact: typography, spacing, icons, open dropdown state, add mode and edit mode cannot yet be visually approved.
+  - Fix: sign in to the local portal in the open in-app browser, then capture and compare the zone dropdown plus add/edit modal states.
+
+## Required fidelity surfaces
+
+- Fonts and typography: implemented with the existing Manrope family; browser comparison pending.
+- Spacing and layout rhythm: updated in CSS; browser comparison pending.
+- Colors and visual tokens: existing Cleanzi blue, green and red semantic tokens retained; browser comparison pending.
+- Image quality and asset fidelity: no raster assets were added; icons use the existing Phosphor icon library.
+- Copy and content: existing Polish labels and application behavior retained; zone placeholder now matches the client picker.
+
+## Comparison history
+
+- Initial pass: blocked at the portal login screen. No implementation screenshot was available for a valid same-state comparison.
+
+## Implementation checklist
+
+- Sign in to the local portal.
+- Open Events and expand the zone filter.
+- Capture the zone and client dropdowns in the same viewport.
+- Open both Add event and Edit event states.
+- Check focus, hover, keyboard selection and responsive layout.
+- Review browser console errors.
+
+final result: blocked
+
+---
+
 # Design QA — kompaktowa karta logowania Cleanzi
 
 - Source visual truth: `C:\Users\rafal\Desktop\app to react\artifacts\login-card-qa\production-before-1280x720.jpg`

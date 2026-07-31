@@ -1,5 +1,7 @@
+import { platformAdminTemplate } from '../../../../../Cleanzi-admin/frontend/template.js'
+
 export const portalLayoutTemplate = `
-<div class="login-screen" id="loginScreen" style="display:grid;">
+<div class="login-screen" id="loginScreen" data-auth-scope="organization" style="display:grid;">
   <section class="login-visual" aria-labelledby="loginHeroTitle">
     <img
       class="login-hero-image"
@@ -21,11 +23,16 @@ export const portalLayoutTemplate = `
     </div>
   </section>
   <section class="login-panel">
-    <form class="login-card" id="loginForm" role="dialog" aria-labelledby="loginTitle" novalidate>
-      <div class="login-card-brand" aria-hidden="true">
-        <img src="/cleanzi-logo.svg" alt="" width="156" height="44" />
-        <span>Portal operacyjny</span>
+    <div class="login-panel__stack">
+      <div class="platform-login-heading" id="platformLoginHeading" aria-hidden="true">
+        <strong>Cleanzi</strong>
+        <span>Admin Panel</span>
       </div>
+      <form class="login-card" id="loginForm" role="dialog" aria-labelledby="loginTitle" novalidate>
+        <div class="login-card-brand" aria-hidden="true">
+          <img src="/cleanzi-logo.svg" alt="" width="156" height="44" />
+          <span>Portal operacyjny</span>
+        </div>
       <div class="login-brand">
         <span class="login-card-kicker">PORTAL OPERACYJNY</span>
         <h1 class="login-title" id="loginTitle">Witaj ponownie</h1>
@@ -33,6 +40,14 @@ export const portalLayoutTemplate = `
       </div>
 
       <div id="loginCredentialsPanel">
+        <div class="login-field" id="loginAuthScopeField">
+          <label for="loginAuthScope">Obszar logowania</label>
+          <select id="loginAuthScope" autocomplete="off">
+            <option value="organization">Portal organizacji</option>
+            <option value="platform">Panel admina</option>
+          </select>
+        </div>
+
         <div class="login-field">
           <label for="loginLogin">Email</label>
           <input id="loginLogin" type="email" maxlength="160" autocomplete="username" inputmode="email" spellcheck="false" placeholder="np. imie@firma.pl" />
@@ -44,6 +59,18 @@ export const portalLayoutTemplate = `
         </div>
 
         <button class="btn primary login-submit" id="loginBtn" type="submit">Zaloguj</button>
+        <div class="login-provider-divider" id="loginProviderDivider"><span>lub</span></div>
+        <button class="btn login-google" id="loginGoogleBtn" type="button">
+          <img
+            class="login-google-logo"
+            src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+            width="24"
+            height="24"
+            alt=""
+            aria-hidden="true"
+          />
+          <span class="login-google-label">Zaloguj się przez Google</span>
+        </button>
       </div>
 
       <div class="login-reset-panel" id="loginResetPanel" hidden>
@@ -58,7 +85,129 @@ export const portalLayoutTemplate = `
 
       <div class="login-organization-panel" id="loginOrganizationPanel" hidden>
         <div class="login-organization-list" id="loginOrganizationList" role="list"></div>
+        <button class="btn primary login-submit" id="loginOrganizationCreateOpen" type="button">Zarejestruj nową firmę</button>
         <button class="login-organization-cancel" id="loginOrganizationCancel" type="button">Anuluj i wyloguj</button>
+      </div>
+
+      <div class="login-registration-panel" id="loginRegistrationConsentsPanel" hidden>
+        <p class="login-registration-plan" id="loginRegistrationPlan"></p>
+        <label class="login-registration-consent">
+          <input id="loginRegistrationTerms" type="checkbox" />
+          <span>Akceptuję <a href="https://registration-cleanzi.web.app/regulamin" target="_blank" rel="noopener noreferrer">regulamin Cleanzi</a>.</span>
+        </label>
+        <label class="login-registration-consent">
+          <input id="loginRegistrationPrivacy" type="checkbox" />
+          <span>Potwierdzam zapoznanie się z <a href="https://registration-cleanzi.web.app/polityka-prywatnosci" target="_blank" rel="noopener noreferrer">polityką prywatności</a>.</span>
+        </label>
+        <label class="login-registration-consent">
+          <input id="loginRegistrationMarketing" type="checkbox" />
+          <span>Chcę otrzymywać informacje marketingowe (opcjonalnie).</span>
+        </label>
+        <button class="btn primary login-submit" id="loginRegistrationConsentsSave" type="button">Zapisz zgody i kontynuuj</button>
+        <button class="login-registration-existing" id="loginRegistrationChooseExisting" type="button">Wybierz istniejącą organizację</button>
+        <button class="login-organization-cancel" id="loginRegistrationCancel" type="button">Anuluj i wyloguj</button>
+      </div>
+
+      <div class="login-registration-panel login-registration-company" id="loginRegistrationCompanyPanel" hidden>
+        <p class="login-registration-plan" id="loginRegistrationCompanyPlan"></p>
+        <div class="login-registration-grid">
+          <div class="login-field">
+            <label for="loginRegistrationOwnerFirstName">Imię właściciela</label>
+            <input id="loginRegistrationOwnerFirstName" type="text" maxlength="80" autocomplete="given-name" />
+          </div>
+          <div class="login-field">
+            <label for="loginRegistrationOwnerLastName">Nazwisko właściciela</label>
+            <input id="loginRegistrationOwnerLastName" type="text" maxlength="80" autocomplete="family-name" />
+          </div>
+          <div class="login-field login-registration-wide">
+            <label for="loginRegistrationOwnerPhone">Telefon właściciela (opcjonalnie)</label>
+            <input id="loginRegistrationOwnerPhone" type="tel" maxlength="40" autocomplete="tel" />
+          </div>
+          <div class="login-field login-registration-wide">
+            <label for="loginRegistrationLegalName">Pełna nazwa prawna</label>
+            <input id="loginRegistrationLegalName" type="text" maxlength="180" autocomplete="organization" />
+          </div>
+          <div class="login-field">
+            <label for="loginRegistrationCountry">Kraj rejestracji i adresu</label>
+            <select id="loginRegistrationCountry">
+              <option value="PL">Polska</option>
+              <option value="DE">Niemcy</option>
+              <option value="GB">Wielka Brytania</option>
+              <option value="US">Stany Zjednoczone</option>
+            </select>
+          </div>
+          <div class="login-field">
+            <label for="loginRegistrationTaxType">Typ identyfikatora podatkowego</label>
+            <select id="loginRegistrationTaxType">
+              <option value="NIP">NIP</option>
+              <option value="TIN">TIN / Tax ID</option>
+              <option value="EIN">EIN</option>
+              <option value="VAT_ID">VAT ID</option>
+              <option value="OTHER">Inny</option>
+            </select>
+          </div>
+          <div class="login-field">
+            <label for="loginRegistrationTaxId">NIP / identyfikator podatkowy</label>
+            <input id="loginRegistrationTaxId" type="text" maxlength="64" autocomplete="off" />
+          </div>
+          <button class="btn login-registration-lookup" id="loginRegistrationLookup" type="button">Pobierz dane po NIP</button>
+          <div class="login-field login-registration-wide">
+            <label for="loginRegistrationAddress">Ulica i numer</label>
+            <input id="loginRegistrationAddress" type="text" maxlength="180" autocomplete="street-address" />
+          </div>
+          <div class="login-field">
+            <label for="loginRegistrationPostalCode">Kod pocztowy</label>
+            <input id="loginRegistrationPostalCode" type="text" maxlength="20" autocomplete="postal-code" />
+          </div>
+          <div class="login-field">
+            <label for="loginRegistrationLocality">Miasto / miejscowość</label>
+            <input id="loginRegistrationLocality" type="text" maxlength="100" autocomplete="address-level2" />
+          </div>
+          <div id="loginRegistrationBillingFields" class="login-registration-billing login-registration-wide" hidden>
+            <div class="login-field">
+              <label for="loginRegistrationBillingEmail">E-mail rozliczeniowy</label>
+              <input id="loginRegistrationBillingEmail" type="email" maxlength="180" autocomplete="email" />
+            </div>
+            <div class="login-field">
+              <label for="loginRegistrationInvoiceEmail">E-mail do faktur (opcjonalnie)</label>
+              <input id="loginRegistrationInvoiceEmail" type="email" maxlength="180" autocomplete="email" />
+            </div>
+            <div class="login-field login-registration-wide">
+              <label for="loginRegistrationBillingPhone">Telefon rozliczeniowy (opcjonalnie)</label>
+              <input id="loginRegistrationBillingPhone" type="tel" maxlength="40" autocomplete="tel" />
+            </div>
+          </div>
+        </div>
+        <button class="btn primary login-submit" id="loginRegistrationCompanySave" type="button">Utwórz firmę</button>
+        <button class="login-registration-existing" id="loginRegistrationCompanyExisting" type="button">Wybierz istniejącą organizację</button>
+        <button class="login-organization-cancel" id="loginRegistrationCompanyCancel" type="button">Anuluj i wyloguj</button>
+      </div>
+
+      <div class="login-registration-panel" id="loginRegistrationPaymentPanel" hidden>
+        <p class="login-mfa-help">Firma została utworzona, ale dostęp pozostaje zablokowany do potwierdzenia płatności przez Stripe.</p>
+        <button class="btn primary login-submit" id="loginRegistrationPaymentCheck" type="button">Sprawdź status płatności</button>
+        <button class="login-registration-existing" id="loginRegistrationPaymentExisting" type="button">Wybierz istniejącą organizację</button>
+        <button class="login-organization-cancel" id="loginRegistrationPaymentCancel" type="button">Anuluj i wyloguj</button>
+      </div>
+
+      <div class="login-registration-panel" id="loginRegistrationUnavailablePanel" hidden>
+        <p class="login-mfa-help">Nie znaleziono aktywnej próby rejestracji. Rozpocznij lub wznów rejestrację na stronie Cleanzi.</p>
+        <button class="btn primary login-submit" id="loginRegistrationRestart" type="button">Przejdź do rejestracji</button>
+        <button class="login-registration-existing" id="loginRegistrationUnavailableExisting" type="button">Wybierz istniejącą organizację</button>
+        <button class="login-organization-cancel" id="loginRegistrationUnavailableCancel" type="button">Anuluj i wyloguj</button>
+      </div>
+
+      <div class="login-registration-panel" id="loginOrganizationCreatePanel" hidden>
+        <p class="login-mfa-help">Nowa firma wymaga prawidłowej próby rejestracji. Portal nie tworzy organizacji ani Triala bez tego procesu.</p>
+        <button class="btn primary login-submit" id="loginOrganizationCreate" type="button">Przejdź do rejestracji</button>
+        <button class="login-reset-back" id="loginOrganizationCreateBack" type="button">Wróć</button>
+      </div>
+
+      <div class="login-organization-panel" id="loginEmailVerificationPanel" hidden>
+        <p class="login-mfa-help">Potwierdź adres email, aby bezpiecznie korzystać z organizacji Cleanzi.</p>
+        <button class="btn primary login-submit" id="loginEmailVerificationCheck" type="button">Sprawdź ponownie</button>
+        <button class="login-reset-back" id="loginEmailVerificationSend" type="button">Wyślij wiadomość ponownie</button>
+        <button class="login-organization-cancel" id="loginEmailVerificationCancel" type="button">Anuluj i wyloguj</button>
       </div>
 
       <div class="login-mfa-panel" id="loginMfaChallengePanel" hidden>
@@ -112,79 +261,44 @@ export const portalLayoutTemplate = `
 
       <div class="login-error" id="loginErr" aria-live="polite" aria-atomic="true" style="display:none;"></div>
       <button class="login-reset-open" id="loginResetOpen" type="button" hidden>Zresetuj hasło</button>
-      <p class="login-security-note">Bezpieczne logowanie do chronionego środowiska Cleanzi.</p>
-    </form>
+      </form>
+    </div>
   </section>
 </div>
 
 <div class="app-bg" id="portalRoot" style="display:none;">
-  <section class="platform-center" id="platformCenter" hidden aria-labelledby="platformCenterTitle">
-    <div class="platform-center-shell">
-      <header class="platform-center-header">
-        <div>
-          <span class="platform-center-kicker">Cleanzi</span>
-          <h1 id="platformCenterTitle">Centrum platformy</h1>
-          <p>Wybierz organizację i podaj powód wejścia. Dostęp zostanie zapisany w prywatnym audycie platformy.</p>
-        </div>
-        <button class="btn2 danger" id="platformCenterLogout" type="button">Wyloguj</button>
-      </header>
-      <div class="platform-center-filters">
-        <label>Wyszukaj<input id="platformOrganizationSearch" type="search" placeholder="Nazwa lub ID organizacji" /></label>
-        <label>Status<select id="platformOrganizationStatus"><option value="">Wszystkie</option><option value="ACTIVE">Aktywne</option><option value="SUSPENDED">Zawieszone</option><option value="EXPIRED">Wygasłe</option></select></label>
-        <label>Pakiet<select id="platformOrganizationPlan"><option value="">Wszystkie</option><option value="TRIAL">Trial</option><option value="START">Start</option><option value="PRO">Pro</option></select></label>
-        <label>Usunięcie<select id="platformOrganizationDeletion"><option value="">Wszystkie</option><option value="active">Nieusunięte</option><option value="deleted">Usunięte</option></select></label>
+  <div class="company-profile-overlay" id="companyProfileOverlay" role="dialog" aria-modal="true" aria-labelledby="companyProfileTitle" hidden>
+    <form class="company-profile-card" id="companyProfileForm">
+      <div>
+        <span class="login-card-kicker">PROFIL FIRMY</span>
+        <h2 id="companyProfileTitle">Uzupełnij dane organizacji</h2>
+        <p id="companyProfileCopy">Dane są wymagane od Ownera. Możesz wrócić do formularza po ponownym zalogowaniu.</p>
       </div>
-      <label class="platform-center-reason">Powód wejścia do organizacji<textarea id="platformAccessReason" maxlength="1000" rows="2" placeholder="Np. zgłoszenie #1234 – korekta konfiguracji"></textarea></label>
-      <div class="platform-center-message" id="platformCenterMessage" aria-live="polite"></div>
-      <section class="platform-organization-editor" id="platformOrganizationEditor" hidden aria-labelledby="platformOrganizationEditorTitle">
-        <div class="platform-organization-editor-header">
-          <div>
-            <span class="platform-center-kicker">Aktywny kontekst</span>
-            <h2 id="platformOrganizationEditorTitle">Zarządzaj organizacją</h2>
-            <p id="platformOrganizationEditorSubtitle"></p>
-          </div>
-          <button class="btn2" id="platformOrganizationEditorClose" type="button">Zamknij kontekst</button>
-        </div>
-        <div class="platform-organization-editor-grid">
-          <label>ID organizacji<input id="platformEditorOrgId" type="text" readonly /></label>
-          <label>Nazwa<input id="platformEditorName" type="text" maxlength="120" /></label>
-          <label>Status organizacji
-            <select id="platformEditorStatus">
-              <option value="ACTIVE">Aktywna</option>
-              <option value="SUSPENDED">Zawieszona</option>
-              <option value="EXPIRED">Wygasła</option>
-            </select>
-          </label>
-          <label>Status onboardingu<input id="platformEditorOnboardingStatus" type="text" maxlength="30" placeholder="np. COMPLETED" /></label>
-          <label>Pakiet
-            <select id="platformEditorPlanCode">
-              <option value="TRIAL">Trial</option>
-              <option value="START">Start</option>
-              <option value="PRO">Pro</option>
-            </select>
-          </label>
-          <label>Status subskrypcji<input id="platformEditorSubscriptionStatus" type="text" maxlength="30" placeholder="np. ACTIVE" /></label>
-          <label>Koniec Trial<input id="platformEditorTrialEndsAt" type="datetime-local" /></label>
-          <label>Koniec okresu płatnego<input id="platformEditorCurrentPeriodEndsAt" type="datetime-local" /></label>
-          <label>Worker ID nowego Ownera<input id="platformEditorOwnerWorkerId" type="text" maxlength="128" /></label>
-        </div>
-        <div class="platform-organization-editor-message" id="platformOrganizationEditorMessage" aria-live="polite"></div>
-        <div class="platform-organization-editor-actions">
-          <button class="btn2 primary" id="platformEditorSaveOrganization" type="button">Zapisz organizację</button>
-          <button class="btn2 primary" id="platformEditorSaveSubscription" type="button">Zapisz subskrypcję</button>
-          <button class="btn2" id="platformEditorTransferOwner" type="button">Przekaż własność</button>
-          <button class="btn2 danger" id="platformEditorToggleDeletion" type="button">Usuń organizację</button>
-          <button class="btn2" id="platformEditorEnter" type="button">Wejdź do organizacji</button>
-        </div>
-      </section>
-      <div class="platform-organization-list" id="platformOrganizationList"></div>
-      <div class="platform-center-pagination">
-        <button class="btn2" id="platformOrganizationsPrev" type="button">Poprzednia</button>
-        <span id="platformOrganizationsPage">Strona 1</span>
-        <button class="btn2" id="platformOrganizationsNext" type="button">Następna</button>
+      <div class="company-profile-grid">
+        <label>NIP<input id="companyProfileNip" name="nip" inputmode="numeric" maxlength="13" required /></label>
+        <button class="btn2" id="companyProfileLookup" type="button">Pobierz z GUS</button>
+        <label class="company-profile-wide">Nazwa prawna<input id="companyProfileLegalName" name="legalName" maxlength="300" required /></label>
+        <label class="company-profile-wide">Pełny adres<input id="companyProfileAddress" name="registeredAddress" maxlength="1000" required /></label>
+        <label>REGON<input id="companyProfileRegon" name="regon" maxlength="14" /></label>
+        <label>Kod pocztowy<input id="companyProfilePostalCode" name="postalCode" maxlength="12" /></label>
+        <label>Miasto<input id="companyProfileCity" name="city" maxlength="120" /></label>
+        <label class="company-profile-wide">Imię i nazwisko właściciela<input id="companyProfileOwnerName" name="ownerFullName" maxlength="200" required /></label>
+        <label class="company-profile-wide">Nazwa do rozliczeń<input id="companyProfileBillingName" name="billingName" maxlength="300" /></label>
+        <label>NIP do rozliczeń<input id="companyProfileBillingNip" name="billingNip" maxlength="13" /></label>
+        <label>Email rozliczeniowy<input id="companyProfileBillingEmail" name="billingEmail" type="email" maxlength="160" /></label>
+        <label class="company-profile-wide">Adres rozliczeniowy<input id="companyProfileBillingAddress" name="billingAddress" maxlength="1000" /></label>
+        <label>Kod pocztowy rozliczeń<input id="companyProfileBillingPostalCode" name="billingPostalCode" maxlength="12" /></label>
+        <label>Miasto rozliczeń<input id="companyProfileBillingCity" name="billingCity" maxlength="120" /></label>
       </div>
-    </div>
-  </section>
+      <div class="company-profile-message" id="companyProfileMessage" aria-live="polite"></div>
+      <div class="company-profile-actions">
+        <button class="btn primary" id="companyProfileSave" type="submit">Zapisz profil firmy</button>
+        <button class="btn2" id="companyProfileClose" type="button">Zamknij</button>
+        <button class="btn2" id="companyProfileLogout" type="button">Wyloguj</button>
+      </div>
+    </form>
+  </div>
+  ${platformAdminTemplate}
   <div class="app-shell">
     <div class="app-body">
       <aside class="sidebar" id="portalSidebar">
@@ -452,10 +566,11 @@ export const portalLayoutTemplate = `
                 <span id="subscriptionRemainingLabel">dni</span>
               </span>
             </div>
-            <div class="organization-chip" id="organizationChip" title="Aktywna organizacja" hidden>
+            <button class="organization-chip" id="organizationChip" type="button" title="Aktywna organizacja" hidden>
               <span class="organization-chip-label">Organizacja</span>
               <span class="organization-chip-name" id="organizationName"></span>
-            </div>
+            </button>
+            <button class="btn2" id="companyProfileOpen" type="button" hidden>Profil firmy</button>
             <div class="user-chip" id="userChip" title="Użytkownik">
               <span class="user-avatar" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none">

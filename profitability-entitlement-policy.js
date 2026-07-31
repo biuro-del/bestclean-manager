@@ -1,5 +1,12 @@
 'use strict'
 
+const {
+  hasPlanCapability,
+  normalizeIdentifier,
+  normalizePlanCode,
+  resolvePlanEntitlements,
+} = require('./plan-policy')
+
 // Security boundary: actor, subscription, grants and accessContext must come
 // from authenticated server-side state, never directly from the request body.
 
@@ -7,25 +14,6 @@ const PROFITABILITY_CAPABILITY = 'profitabilityModule'
 const PROFITABILITY_ACTIONS = Object.freeze({
   READ: 'read',
   EDIT: 'edit',
-})
-
-const PLAN_ALIASES = Object.freeze({
-  TRIAL: 'TRIAL',
-  START: 'START',
-  PLUS: 'PLUS',
-  GO_PLUS: 'GO_PLUS',
-  PRO: 'PRO',
-  ENTERPRISE: 'ENTERPRISE',
-})
-
-const PLAN_CAPABILITIES = Object.freeze({
-  TRIAL: Object.freeze({ [PROFITABILITY_CAPABILITY]: false }),
-  START: Object.freeze({ [PROFITABILITY_CAPABILITY]: false }),
-  GO_PLUS: Object.freeze({ [PROFITABILITY_CAPABILITY]: false }),
-  PLUS: Object.freeze({ [PROFITABILITY_CAPABILITY]: false }),
-  PRO: Object.freeze({ [PROFITABILITY_CAPABILITY]: true }),
-  ENTERPRISE: Object.freeze({ [PROFITABILITY_CAPABILITY]: true }),
-  UNKNOWN: Object.freeze({ [PROFITABILITY_CAPABILITY]: false }),
 })
 
 const ROLE_ALIASES = Object.freeze({
@@ -55,24 +43,6 @@ function text(value) {
   return String(value ?? '').trim()
 }
 
-function normalizeIdentifier(value, { preservePlus = false } = {}) {
-  const raw = text(value)
-  if (!raw) return ''
-
-  const withoutDiacritics = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  const withPlus = preservePlus ? withoutDiacritics.replace(/\+/g, ' PLUS ') : withoutDiacritics
-  return withPlus
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .replace(/_+/g, '_')
-}
-
-function normalizePlanCode(value) {
-  const key = normalizeIdentifier(value, { preservePlus: true })
-  return PLAN_ALIASES[key] || 'UNKNOWN'
-}
-
 function normalizeProfitabilityRole(value) {
   const key = normalizeIdentifier(value)
   return ROLE_ALIASES[key] || 'UNKNOWN'
@@ -88,17 +58,8 @@ function normalizeAction(value) {
   return action === PROFITABILITY_ACTIONS.READ || action === PROFITABILITY_ACTIONS.EDIT ? action : ''
 }
 
-function resolvePlanEntitlements(planCode) {
-  const normalizedPlanCode = normalizePlanCode(planCode)
-  const capabilities = PLAN_CAPABILITIES[normalizedPlanCode] || PLAN_CAPABILITIES.UNKNOWN
-  return {
-    planCode: normalizedPlanCode,
-    capabilities,
-  }
-}
-
 function hasProfitabilityCapability(planCode) {
-  return resolvePlanEntitlements(planCode).capabilities[PROFITABILITY_CAPABILITY] === true
+  return hasPlanCapability(planCode, PROFITABILITY_CAPABILITY)
 }
 
 function profitabilityGrantValue(grants) {
@@ -406,7 +367,6 @@ function canEditProfitability(input = {}) {
 }
 
 module.exports = {
-  PLAN_CAPABILITIES,
   PROFITABILITY_ACTIONS,
   PROFITABILITY_CAPABILITY,
   ProfitabilityAccessError,

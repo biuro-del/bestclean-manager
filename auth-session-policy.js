@@ -1,6 +1,11 @@
 'use strict'
 
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
+const {
+  evaluateSubscriptionAccess,
+  normalizePlanCode,
+  resolvePlanEntitlements,
+} = require('./plan-policy')
 
 function toText(value) {
   return String(value ?? '').trim()
@@ -69,7 +74,7 @@ function evaluateOrganizationAccess(row, now = new Date()) {
     return deny('WORKER_DELETED')
   }
 
-  if (toStatus(row.organization_status) === 'SUSPENDED' || row.organization_deleted_at) {
+  if (!['ACTIVE', 'TRIAL'].includes(toStatus(row.organization_status)) || row.organization_deleted_at) {
     return deny('ORGANIZATION_UNAVAILABLE')
   }
 
@@ -85,30 +90,14 @@ function evaluateOrganizationAccess(row, now = new Date()) {
     return deny('PORTAL_ROLE_MISSING')
   }
 
-  const planCode = toStatus(row.plan_code)
-  const subscriptionStatus = toStatus(row.subscription_status)
-
-  if (planCode === 'TRIAL') {
-    const trialEndsAt = row.trial_ends_at ? new Date(row.trial_ends_at) : null
-    const nowDate = now instanceof Date ? now : new Date(now)
-    if (
-      subscriptionStatus !== 'TRIALING' ||
-      !trialEndsAt ||
-      !Number.isFinite(trialEndsAt.getTime()) ||
-      !Number.isFinite(nowDate.getTime()) ||
-      trialEndsAt.getTime() <= nowDate.getTime()
-    ) {
-      return deny('TRIAL_INACTIVE')
-    }
-  } else if (planCode === 'START' || planCode === 'PRO' || planCode === 'ENTERPRISE') {
-    if (subscriptionStatus !== 'ACTIVE') {
-      return deny('SUBSCRIPTION_INACTIVE')
-    }
-  } else {
-    return deny('SUBSCRIPTION_MISSING')
-  }
-
-  return { allowed: true, code: 'ACCESS_ALLOWED' }
+  const subscriptionAccess = evaluateSubscriptionAccess({
+    planCode: row.plan_code,
+    status: row.subscription_status,
+    trialEndsAt: row.trial_ends_at,
+  }, now)
+  return subscriptionAccess.allowed
+    ? { allowed: true, code: 'ACCESS_ALLOWED' }
+    : deny(subscriptionAccess.code)
 }
 
 function buildOrganizationSummary(row) {
@@ -116,6 +105,8 @@ function buildOrganizationSummary(row) {
     orgId: toText(row.org_id),
     organizationName: toText(row.organization_name),
     role: toStatus(row.role),
+    onboardingStatus: toStatus(row.onboarding_status),
+    planCode: normalizePlanCode(row.plan_code),
   }
 }
 
@@ -129,7 +120,9 @@ function toIsoTimestamp(value) {
 }
 
 function buildSessionContext(uid, row) {
-  const planCode = toStatus(row.plan_code)
+  const rawPlanCode = toStatus(row.plan_code)
+  const planCode = normalizePlanCode(rawPlanCode)
+  const entitlements = resolvePlanEntitlements(planCode)
   const subscriptionEndsAt =
     planCode === 'TRIAL'
       ? toIsoTimestamp(row.trial_ends_at)
@@ -151,19 +144,28 @@ function buildSessionContext(uid, row) {
   }
   const profitabilityRead = resolveProfitabilityAccess({ ...profitabilityInput, action: 'read' })
   const profitabilityEdit = resolveProfitabilityAccess({ ...profitabilityInput, action: 'edit' })
+  const role = toStatus(row.role)
+  const onboardingStatus = toStatus(row.onboarding_status) || 'IN_PROGRESS'
 
   return {
     uid: toText(uid),
     activeOrgId: toText(row.org_id),
     organizationName: toText(row.organization_name),
     workerId: toText(row.worker_record_id),
-    role: toStatus(row.role),
+    role,
+    organizationStatus: toStatus(row.organization_status),
+    onboardingStatus,
+    onboardingRequired: role === 'OWNER' && onboardingStatus !== 'COMPLETED',
+    rawPlanCode,
     planCode,
+    planName: entitlements.planName,
     subscriptionStatus: toStatus(row.subscription_status),
     subscriptionEndsAt,
+    limits: entitlements.limits,
     capabilities: {
+      ...entitlements.capabilities,
       profitabilityModule: {
-        enabled: ['PRO', 'ENTERPRISE'].includes(planCode),
+        enabled: entitlements.capabilities.profitabilityModule === true,
         canRead: profitabilityRead.allowed,
         canEdit: profitabilityEdit.allowed,
         readCode: profitabilityRead.code,
