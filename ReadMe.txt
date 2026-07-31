@@ -4448,3 +4448,25 @@ Weryfikacja:
 - Logi Cloud Run backendu `cleanzi-01` z 30 minut obejmujacych rollout: 0 wpisow o poziomie `ERROR` lub wyzszym.
 Rollback:
 - Poprzedni zatwierdzony build to `build-2026-07-29-003`, commit `14f7a955869bb60d6cb69483c4942d1450d21ba0`.
+
+Data: 2026-07-31
+Autor: AI Codex
+Temat: Rozszerzenie backendowego canary korelacji CLEAN na W005
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-MOBILE-SABINA-W005-20260731`.
+Dodano:
+- Nic.
+Zmieniono:
+- W `apphosting.yaml` pozostawiono `MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED=true` i rozszerzono `MOBILE_SERVICE_EXECUTION_CORRELATION_CANARY_WORKER_IDS` z `W001` do `W001,W005`.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Potwierdzono przed zmiana, ze 100% ruchu backendu `cleanzi-01` obsluguje dokladny commit `fddc25dc9a844565f62494e63c40c624c980cb07`.
+- Testy polityki korelacji i guardow mobile: 12/12 OK.
+- Jawna kontrola polityki: `W001` i `W005` otrzymuja `CANARY_MATCH`, a pracownik spoza listy `CANARY_RESTRICTED`.
+- `git diff --check`: OK; wylacznie standardowe ostrzezenie LF/CRLF.
+Uwagi dla nastepnej osoby:
+- Zmiana rozszerza wylacznie backendowa allowliste tworzenia nowego `CLEAN`. Nie zmienia Data Connect, bazy, Eventow, Workday ani dzialania START/STOP.
+- Osobny canary klienta `mobile-web` musi rowniez kierowac `W005` przez `/api/mobile/scan`; sama zmiana backendu nie stanowi pelnego E2E canary W005.
+- W chwili przygotowania wpisu nie wykonano jeszcze pushu ani wdrozenia produkcyjnego.
+- Rollback polega na przywroceniu wartosci `W001` albo skierowaniu ruchu na poprzedni build oparty na `fddc25dc9a844565f62494e63c40c624c980cb07`.
