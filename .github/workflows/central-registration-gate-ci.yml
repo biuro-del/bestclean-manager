@@ -1,0 +1,59 @@
+name: Central registration gate CI
+
+on:
+  pull_request:
+    paths:
+      - "registration-functions/**"
+      - "docs/central-registration-gate.md"
+      - ".github/workflows/central-registration-gate-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: central-registration-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test central registration gate foundation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: registration-functions/package-lock.json
+
+      - name: Use Java 21 for the Firestore emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install dependencies
+        working-directory: registration-functions
+        run: npm ci
+
+      - name: Check syntax
+        working-directory: registration-functions
+        run: npm run check
+
+      - name: Run unit tests
+        working-directory: registration-functions
+        run: npm run test:unit
+
+      - name: Run Firestore emulator tests
+        working-directory: registration-functions
+        run: npm run test:emulator
+
+      - name: Audit production dependencies
+        working-directory: registration-functions
+        run: npm audit --omit=dev --audit-level=high
