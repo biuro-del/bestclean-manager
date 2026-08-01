@@ -125,6 +125,7 @@ const PORTAL_ZONE_QR_CODES_PATH = '/api/portal/zones/qr-codes'
 const PORTAL_PROFITABILITY_PATH = '/api/portal/profitability'
 const MOBILE_STATE_PATH = '/api/mobile/state'
 const MOBILE_SCAN_PATH = '/api/mobile/scan'
+const MOBILE_SCAN_STATUS_PATH = '/api/mobile/scan/status'
 const MOBILE_JOB_CARDS_PATH = '/api/mobile/job-cards'
 const DATACONNECT_LOCATION = String(process.env.FIREBASE_DATACONNECT_LOCATION || process.env.DATACONNECT_LOCATION || '').trim()
 const DATACONNECT_SERVICE = String(process.env.FIREBASE_DATACONNECT_SERVICE || process.env.DATACONNECT_SERVICE || '').trim()
@@ -3426,6 +3427,46 @@ function mapMobileIntegrityDatabaseError(error) {
   }
 
   return null
+}
+
+function handleMobileScanStatusRequest(req, res) {
+  const headers = withSecurityHeaders({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  })
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, headers)
+    res.end()
+    return
+  }
+
+  if (req.method !== 'GET') {
+    res.writeHead(405, headers)
+    res.end(JSON.stringify({
+      ok: false,
+      error: {
+        code: 'METHOD_NOT_ALLOWED',
+        message: 'Dozwolona metoda to GET.',
+      },
+    }))
+    return
+  }
+
+  // The current mobile client treats 501 as an unavailable receipt endpoint
+  // and safely replays the exact idempotent POST with the same clientActionId.
+  // Owning this route prevents it from leaking into the generic /api proxy.
+  res.writeHead(501, headers)
+  res.end(JSON.stringify({
+    ok: false,
+    error: {
+      code: 'MOBILE_SCAN_STATUS_UNAVAILABLE',
+      message: 'Status skanu nie jest jeszcze udostepniony. Bezpiecznie ponow identyczny zapis.',
+    },
+  }))
 }
 
 async function handleMobileWorkflowRequest(req, res, requestUrl) {
@@ -9302,6 +9343,10 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
     profitabilityApi.handle(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PROFITABILITY_API_ERROR', error?.message || 'Unexpected profitability API error.')
     })
+    return
+  }
+  if (requestUrl.pathname === MOBILE_SCAN_STATUS_PATH) {
+    handleMobileScanStatusRequest(req, res)
     return
   }
   if (
