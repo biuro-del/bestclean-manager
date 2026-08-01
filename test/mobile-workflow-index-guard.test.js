@@ -136,7 +136,7 @@ test('mobilny runtime wymaga schematu dla CLEAN, ale flagą blokuje wyłącznie 
   )
   assert.match(
     scan,
-    /else \{\s*requireScanGps\('CLEAN', zoneIsSpecial\)\s*assertMobileCorrelationEnabled\(worker\)\s*await createMobileCycle/,
+    /else \{\s*const startsIndividualOrder = zone\.kind === 'INDIVIDUAL'\s*requireScanGps\('CLEAN_START', startsIndividualOrder\)\s*assertMobileCorrelationEnabled\(worker\)\s*await createMobileCycle/,
   )
   const sameZoneBranchStart = scan.indexOf(
     "if (normalizeText(activeCycle.zone_id).toLowerCase() === normalizeText(zone.id).toLowerCase())",
@@ -150,4 +150,38 @@ test('mobilny runtime wymaga schematu dla CLEAN, ale flagą blokuje wyłącznie 
   assert.doesNotMatch(request, /await assertMobileCorrelationSchemaReady\(client\)/)
   assert.match(snapshot, /availableEventColumns\.has\('event_type'\)/)
   assert.match(snapshot, /START i STOP pozostają dostępne/)
+})
+
+test('GPS jest wymagany i zapisywany tylko dla nowego START oraz startu zlecenia indywidualnego', () => {
+  const scan = functionSource('processMobileWorkflowScan', 'handleMobileWorkflowRequest')
+  const branchStart = scan.indexOf("if (zone.kind === 'START')")
+  const branchStop = scan.indexOf("} else if (zone.kind === 'STOP')", branchStart)
+  const branchClean = scan.indexOf('} else {', branchStop)
+  const sameZoneStart = scan.indexOf(
+    "if (normalizeText(activeCycle.zone_id).toLowerCase() === normalizeText(zone.id).toLowerCase())",
+    branchClean,
+  )
+  const switchStart = scan.indexOf('} else {', sameZoneStart)
+
+  assert.ok(branchStart >= 0 && branchStop > branchStart && branchClean > branchStop)
+  assert.ok(sameZoneStart > branchClean && switchStart > sameZoneStart)
+
+  const requirements = [...scan.matchAll(/requireScanGps\('([^']+)'(?:,\s*([^)]+))?\)/g)].map((match) => ({
+    action: match[1],
+    condition: match[2] || '',
+  }))
+  assert.deepEqual(requirements, [
+    { action: 'START', condition: '' },
+    { action: 'CLEAN_START', condition: 'startsIndividualOrder' },
+    { action: 'CLEAN_START', condition: 'startsIndividualOrder' },
+  ])
+
+  const stopBranch = scan.slice(branchStop, branchClean)
+  const sameZoneBranch = scan.slice(sameZoneStart, switchStart)
+  assert.doesNotMatch(stopBranch, /requireScanGps|scanGpsNote/)
+  assert.doesNotMatch(sameZoneBranch, /requireScanGps|scanGpsNote/)
+  assert.doesNotMatch(scan, /zoneIsSpecial|activeCycleIsSpecial|CLEAN_STOP|STOP_GPS/)
+
+  assert.equal((scan.match(/scanGpsNote\('START'\)/g) || []).length, 1)
+  assert.equal((scan.match(/scanGpsNote\('CLEAN_START', startsIndividualOrder\)/g) || []).length, 3)
 })

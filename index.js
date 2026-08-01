@@ -3247,7 +3247,6 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
   let activeCycle = null
   let action = 'NOOP'
   let message = 'Brak zmian.'
-  const zoneIsSpecial = isMobileSpecialZone(zone)
   const scanGpsData = normalizeMobileGpsData(body?.gpsData ?? body?.clientGps ?? body?.gps ?? body?.location)
   const scanGpsNote = (actionLabel, allowed = true) => (allowed ? mobileGpsColumnValue(scanGpsData, actionLabel) : '')
   const requireScanGps = (actionLabel, required = true) => {
@@ -3275,7 +3274,6 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
       error.publicMessage = 'Brak aktywnego dnia pracy. Najpierw zeskanuj START.'
       throw error
     }
-    requireScanGps('STOP')
     await closeMobileOpenCycles(
       client,
       orgId,
@@ -3284,12 +3282,11 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
       'STOP_END_DAY',
       scannedAt,
       comment,
-      scanGpsNote('CLEAN_STOP'),
-      { gpsSpecialOnly: true },
+      '',
     )
     const graceMs = Math.max(0, Number(zone.stopGraceMin || 0)) * 60 * 1000
     const endAt = new Date(scannedAt.getTime() + graceMs)
-    await closeMobileWorkday(client, orgId, activeWorkday, zone, endAt, comment, scanGpsNote('STOP'))
+    await closeMobileWorkday(client, orgId, activeWorkday, zone, endAt, comment, '')
     action = 'STOP_WORKDAY'
     message = graceMs > 0
       ? `Zapisano na serwerze. Zakonczono dzien pracy. Doliczono ${zone.stopGraceMin} min.`
@@ -3304,9 +3301,16 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
         error.publicMessage = 'Brak aktywnego dnia pracy. Najpierw zeskanuj START.'
         throw error
       }
-      requireScanGps('CLEAN', zoneIsSpecial)
+      const startsIndividualOrder = zone.kind === 'INDIVIDUAL'
       assertMobileCorrelationEnabled(worker)
-      activeWorkday = await createMobileWorkday(client, orgId, worker, zone, scannedAt, '')
+      activeWorkday = await createMobileWorkday(
+        client,
+        orgId,
+        worker,
+        zone,
+        scannedAt,
+        scanGpsNote('CLEAN_START', startsIndividualOrder),
+      )
     }
 
     const unresolvedCycleRows = await fetchUnresolvedMobileCycles(client, orgId, worker.login)
@@ -3319,10 +3323,8 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
     activeCycle = resolveOpenCycleState(openCycleRows, activeWorkday?.workday_id).activeCycle
 
     if (activeCycle && isMobileEventOpen(activeCycle)) {
-      const activeCycleIsSpecial = isMobileSpecialEventRow(activeCycle)
       if (normalizeText(activeCycle.zone_id).toLowerCase() === normalizeText(zone.id).toLowerCase()) {
-        requireScanGps('CLEAN', activeCycleIsSpecial || zoneIsSpecial)
-        await closeMobileEvent(client, orgId, activeCycle, 'QR_SAME', scannedAt, comment, scanGpsNote('CLEAN_STOP', activeCycleIsSpecial || zoneIsSpecial))
+        await closeMobileEvent(client, orgId, activeCycle, 'QR_SAME', scannedAt, comment, '')
         action = 'CLOSE_ZONE'
         message = 'Zapisano na serwerze. Zakonczono sprzatanie tej strefy.'
         if (body?.closeWorkdayImmediately) {
@@ -3331,7 +3333,8 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
           message = 'Zapisano na serwerze. Zakonczono strefe i dzien pracy.'
         }
       } else {
-        requireScanGps('CLEAN', activeCycleIsSpecial || zoneIsSpecial)
+        const startsIndividualOrder = zone.kind === 'INDIVIDUAL'
+        requireScanGps('CLEAN_START', startsIndividualOrder)
         assertMobileCorrelationEnabled(worker)
         await closeMobileEvent(
           client,
@@ -3340,16 +3343,35 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
           'QR_SWITCH',
           scannedAt,
           comment,
-          scanGpsNote('CLEAN_STOP', activeCycleIsSpecial),
+          '',
         )
-        await createMobileCycle(client, orgId, worker, activeWorkday, zone, scannedAt, comment, scanGpsNote('CLEAN_START', zoneIsSpecial))
+        await createMobileCycle(
+          client,
+          orgId,
+          worker,
+          activeWorkday,
+          zone,
+          scannedAt,
+          comment,
+          scanGpsNote('CLEAN_START', startsIndividualOrder),
+        )
         action = 'SWITCH_ZONE'
         message = `Zapisano na serwerze. Zmiana strefy na: ${zone.name || zone.id}.`
       }
     } else {
-      requireScanGps('CLEAN', zoneIsSpecial)
+      const startsIndividualOrder = zone.kind === 'INDIVIDUAL'
+      requireScanGps('CLEAN_START', startsIndividualOrder)
       assertMobileCorrelationEnabled(worker)
-      await createMobileCycle(client, orgId, worker, activeWorkday, zone, scannedAt, comment, scanGpsNote('CLEAN_START', zoneIsSpecial))
+      await createMobileCycle(
+        client,
+        orgId,
+        worker,
+        activeWorkday,
+        zone,
+        scannedAt,
+        comment,
+        scanGpsNote('CLEAN_START', startsIndividualOrder),
+      )
       action = 'START_ZONE'
       message = `Zapisano na serwerze. Rozpoczeto sprzatanie: ${zone.name || zone.id}.`
     }
