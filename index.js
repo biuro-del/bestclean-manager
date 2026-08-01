@@ -58,9 +58,9 @@ const {
 } = require('./mobile-workflow-security-policy')
 const {
   assertNoUnresolvedOpenEvents,
-  resolveSingleOpenCycle,
+  resolveOpenCycleState,
 } = require('./mobile-open-cycle-policy')
-const { resolveSingleOpenWorkday } = require('./mobile-open-workday-policy')
+const { resolveOpenWorkdayState } = require('./mobile-open-workday-policy')
 const { mobileCorrelationRolloutDecision } = require('./mobile-correlation-rollout-policy')
 const {
   assertNoWorkerScheduleLocationConflicts,
@@ -2651,9 +2651,14 @@ async function findMobileZoneByQr(client, orgId, qrCode) {
   return mapMobileZoneRow(resolveMobileZoneQrRows(result.rows, code))
 }
 
-async function fetchActiveMobileWorkday(client, orgId, workerLogin) {
+async function fetchMobileOpenWorkdayState(client, orgId, workerLogin) {
   const result = await client.query(
     `select w.*,
+            case
+              when (w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date then 'TODAY'
+              when (w.start_at at time zone 'Europe/Warsaw')::date < (now() at time zone 'Europe/Warsaw')::date then 'PRIOR'
+              else 'FUTURE'
+            end as business_day_relation,
             ((w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date) as is_today_warsaw
        from public.workday w
       where org_id = $1
@@ -2661,11 +2666,10 @@ async function fetchActiveMobileWorkday(client, orgId, workerLogin) {
         and upper(btrim(coalesce(status, 'RUNNING'))) <> 'CLOSED'
         and end_at is null
       order by start_at desc nulls last, updated_at desc nulls last
-      limit 2
       for update`,
     [orgId, workerLogin],
   )
-  return resolveSingleOpenWorkday(result.rows)
+  return resolveOpenWorkdayState(result.rows)
 }
 
 async function fetchMobileWorkdays(client, orgId, workerLogin) {
@@ -2726,6 +2730,23 @@ async function fetchUnresolvedMobileCycles(client, orgId, workerLogin) {
     [orgId, workerLogin],
   )
   return Array.isArray(result.rows) ? result.rows : []
+}
+
+function partitionMobileUnresolvedCycles(rows = [], activeWorkdayId = '') {
+  const normalizedActiveWorkdayId = normalizeText(activeWorkdayId)
+  const blocking = []
+  const prior = []
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const rowWorkdayId = normalizeText(row?.workday_id ?? row?.workdayId)
+    if (!rowWorkdayId || (normalizedActiveWorkdayId && rowWorkdayId === normalizedActiveWorkdayId)) {
+      blocking.push(row)
+    } else {
+      prior.push(row)
+    }
+  }
+
+  return { blocking, prior }
 }
 
 async function fetchMobileCycleHistory(client, orgId, workerLogin) {
@@ -2868,7 +2889,8 @@ async function upsertMobileRuntimeState(client, orgId, worker, activeWorkday, ac
 
 async function buildMobileSnapshotFromDb(client, orgId, worker) {
   const zones = await fetchMobileZones(client, orgId)
-  const activeWorkdayRaw = await fetchActiveMobileWorkday(client, orgId, worker.login)
+  const openWorkdayState = await fetchMobileOpenWorkdayState(client, orgId, worker.login)
+  const activeWorkdayRaw = openWorkdayState.activeWorkday
   const workdays = await fetchMobileWorkdays(client, orgId, worker.login)
   const cycleHistory = await fetchMobileCycleHistory(client, orgId, worker.login)
   const availableEventColumns = await readPublicEventColumns(client)
@@ -2880,6 +2902,8 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
     ? await fetchUnresolvedMobileCycles(client, orgId, worker.login)
     : []
   let activeCycleRaw = null
+  let priorOpenCycleRows = []
+  let priorUnresolvedCycleRows = []
   let openCycleIntegrity = eventTypeReadable
     ? null
     : {
@@ -2888,8 +2912,15 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
       }
   if (eventTypeReadable) {
     try {
-      assertNoUnresolvedOpenEvents(unresolvedCycleRows)
-      activeCycleRaw = resolveSingleOpenCycle(openCycleRows, activeWorkdayRaw?.workday_id)
+      const unresolvedState = partitionMobileUnresolvedCycles(
+        unresolvedCycleRows,
+        activeWorkdayRaw?.workday_id,
+      )
+      priorUnresolvedCycleRows = unresolvedState.prior
+      assertNoUnresolvedOpenEvents(unresolvedState.blocking)
+      const openCycleState = resolveOpenCycleState(openCycleRows, activeWorkdayRaw?.workday_id)
+      activeCycleRaw = openCycleState.activeCycle
+      priorOpenCycleRows = openCycleState.staleCycles
     } catch (error) {
       if (Number(error?.statusCode) !== 409) {
         throw error
@@ -2906,6 +2937,25 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
 
   const activeWorkday = mapMobileWorkdayRow(activeWorkdayRaw)
   const activeCycle = mapMobileEventRow(activeCycleRaw)
+  const staleOpenWorkdays = openWorkdayState.staleWorkdays.map(mapMobileWorkdayRow).filter(Boolean)
+  const staleOpenCycles = priorOpenCycleRows.map(mapMobileEventRow).filter(Boolean)
+  const unresolvedPriorCycles = priorUnresolvedCycleRows.map(mapMobileEventRow).filter(Boolean)
+  const repairRequired = {
+    required: Boolean(
+      staleOpenWorkdays.length ||
+      staleOpenCycles.length ||
+      unresolvedPriorCycles.length ||
+      openCycleIntegrity
+    ),
+    blockStart: false,
+    workdayCount: staleOpenWorkdays.length,
+    cleanEventCount: staleOpenCycles.length,
+    unresolvedEventCount: unresolvedPriorCycles.length,
+    workdays: staleOpenWorkdays,
+    cleanEvents: staleOpenCycles,
+    unresolvedEvents: unresolvedPriorCycles,
+    integrity: openCycleIntegrity,
+  }
   return {
     orgId,
     worker,
@@ -2917,6 +2967,8 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
     })),
     startZone: zones.find((zone) => zone.kind === 'START') || null,
     activeWorkday,
+    staleOpenWorkday: staleOpenWorkdays[0] || null,
+    repairRequired,
     activePause,
     pauseTotalSec: Number(activeWorkday?.pauseTotalSec || 0),
     activeCycle,
@@ -3189,7 +3241,8 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
     throw error
   }
 
-  let activeWorkday = await fetchActiveMobileWorkday(client, orgId, worker.login)
+  const openWorkdayState = await fetchMobileOpenWorkdayState(client, orgId, worker.login)
+  let activeWorkday = openWorkdayState.activeWorkday
   let activeCycle = null
   let action = 'NOOP'
   let message = 'Brak zmian.'
@@ -3256,9 +3309,13 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
     }
 
     const unresolvedCycleRows = await fetchUnresolvedMobileCycles(client, orgId, worker.login)
-    assertNoUnresolvedOpenEvents(unresolvedCycleRows)
+    const unresolvedCycleState = partitionMobileUnresolvedCycles(
+      unresolvedCycleRows,
+      activeWorkday?.workday_id,
+    )
+    assertNoUnresolvedOpenEvents(unresolvedCycleState.blocking)
     const openCycleRows = await fetchOpenMobileCycles(client, orgId, worker.login)
-    activeCycle = resolveSingleOpenCycle(openCycleRows, activeWorkday?.workday_id)
+    activeCycle = resolveOpenCycleState(openCycleRows, activeWorkday?.workday_id).activeCycle
 
     if (activeCycle && isMobileEventOpen(activeCycle)) {
       const activeCycleIsSpecial = isMobileSpecialEventRow(activeCycle)
@@ -3316,7 +3373,11 @@ function mapMobileIntegrityDatabaseError(error) {
 
   if (
     dbCode === '23505' &&
-    (constraint === 'event_single_open_clean_per_worker' || message.includes('OPEN_CLEAN_EVENT_EXISTS'))
+    (
+      constraint === 'event_single_open_clean_per_worker' ||
+      constraint === 'event_single_open_clean_per_workday' ||
+      message.includes('OPEN_CLEAN_EVENT_EXISTS')
+    )
   ) {
     return {
       status: 409,
@@ -3327,7 +3388,11 @@ function mapMobileIntegrityDatabaseError(error) {
 
   if (
     dbCode === '23505' &&
-    (constraint === 'workday_single_open_per_worker' || message.includes('OPEN_WORKDAY_EXISTS'))
+    (
+      constraint === 'workday_single_open_per_worker' ||
+      constraint === 'workday_single_open_per_worker_day' ||
+      message.includes('OPEN_WORKDAY_EXISTS')
+    )
   ) {
     return {
       status: 409,

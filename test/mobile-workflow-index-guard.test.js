@@ -16,11 +16,17 @@ function functionSource(name, nextName) {
   return source.slice(start, end)
 }
 
-test('otwarty Workday jest sprawdzany globalnie i bez wyboru jednego z duplikatow', () => {
-  const body = functionSource('fetchActiveMobileWorkday', 'fetchMobileWorkdays')
-  assert.doesNotMatch(body, /and\s+\(w?\.?start_at at time zone/i)
-  assert.match(body, /limit 2\s+for update/i)
-  assert.match(body, /resolveSingleOpenWorkday\(result\.rows\)/)
+test('otwarte Workday sa dzielone na dzisiejszy aktywny i starsze do naprawy', () => {
+  const body = functionSource('fetchMobileOpenWorkdayState', 'fetchMobileWorkdays')
+  assert.match(body, /start_at at time zone 'Europe\/Warsaw'/i)
+  assert.match(body, /business_day_relation/i)
+  assert.match(body, /then 'TODAY'/i)
+  assert.match(body, /then 'PRIOR'/i)
+  assert.match(body, /else 'FUTURE'/i)
+  assert.match(body, /now\(\) at time zone 'Europe\/Warsaw'/i)
+  assert.match(body, /for update/i)
+  assert.match(body, /resolveOpenWorkdayState\(result\.rows\)/)
+  assert.doesNotMatch(body, /limit\s+1/i)
 })
 
 test('jawny otwarty CLEAN jest globalnym blockerem niezaleznie od stanu Workday', () => {
@@ -48,15 +54,30 @@ test('START i STOP nie sa blokowane przez odczyt Eventow; kontrola cyklu jest ty
   assert.ok(branchStart >= 0 && branchStop > branchStart && branchClean > branchStop)
   assert.ok(unresolvedRead > branchClean && cycleRead > unresolvedRead)
   assert.doesNotMatch(body.slice(0, branchClean), /fetchOpenMobileCycles|fetchUnresolvedMobileCycles|resolveSingleOpenCycle/)
-  assert.match(body.slice(branchClean), /assertNoUnresolvedOpenEvents\(unresolvedCycleRows\)/)
-  assert.match(body.slice(branchClean), /resolveSingleOpenCycle\(openCycleRows, activeWorkday\?\.workday_id\)/)
+  assert.match(body.slice(branchClean), /partitionMobileUnresolvedCycles/)
+  assert.match(body.slice(branchClean), /assertNoUnresolvedOpenEvents\(unresolvedCycleState\.blocking\)/)
+  assert.match(body.slice(branchClean), /resolveOpenCycleState\(openCycleRows, activeWorkday\?\.workday_id\)\.activeCycle/)
 })
 
-test('snapshot nie wybiera arbitralnie pierwszego Eventu przy konflikcie', () => {
+test('snapshot wybiera tylko dzisiejszy Workday i raportuje stare rekordy bez ich modyfikacji', () => {
   const body = functionSource('buildMobileSnapshotFromDb', 'closeMobileEvent')
-  assert.match(body, /resolveSingleOpenCycle\(openCycleRows, activeWorkdayRaw\?\.workday_id\)/)
+  assert.match(body, /fetchMobileOpenWorkdayState/)
+  assert.match(body, /openWorkdayState\.activeWorkday/)
+  assert.match(body, /resolveOpenCycleState\(openCycleRows, activeWorkdayRaw\?\.workday_id\)/)
+  assert.match(body, /staleOpenWorkday:/)
+  assert.match(body, /repairRequired/)
+  assert.match(body, /blockStart:\s*false/)
   assert.match(body, /openCycleIntegrity/)
   assert.doesNotMatch(body, /openCycleRows\.find/)
+  assert.doesNotMatch(body, /update\s+public\.workday/i)
+})
+
+test('scan opiera START CLEAN i STOP wylacznie na dzisiejszym Workday', () => {
+  const body = functionSource('processMobileWorkflowScan', 'handleMobileWorkflowRequest')
+  assert.match(body, /const openWorkdayState = await fetchMobileOpenWorkdayState/)
+  assert.match(body, /let activeWorkday = openWorkdayState\.activeWorkday/)
+  assert.match(body, /resolveOpenCycleState\(openCycleRows, activeWorkday\?\.workday_id\)\.activeCycle/)
+  assert.doesNotMatch(body, /openWorkdayState\.staleWorkdays\[[^\]]+\]/)
 })
 
 test('STOP zamyka wszystkie otwarte Eventy aktywnego dnia wedlug tej samej normalizacji', () => {
@@ -71,11 +92,13 @@ test('triggerowe konflikty Event i Workday mają stabilne odpowiedzi 409', () =>
   const body = source.slice(start, end)
   assert.match(body, /23505/)
   assert.match(body, /event_single_open_clean_per_worker/)
+  assert.match(body, /event_single_open_clean_per_workday/)
   assert.match(body, /OPEN_CLEAN_EVENT_EXISTS/)
   assert.match(body, /23514/)
   assert.match(body, /OPEN_EVENT_TYPE_REQUIRED/)
   assert.match(body, /OPEN_EVENT_WORKER_REQUIRED/)
   assert.match(body, /workday_single_open_per_worker/)
+  assert.match(body, /workday_single_open_per_worker_day/)
   assert.match(body, /OPEN_WORKDAY_EXISTS/)
   assert.match(body, /OPEN_WORKDAY_WORKER_REQUIRED/)
   assert.match(body, /status:\s*409/g)
