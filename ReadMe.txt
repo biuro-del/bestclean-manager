@@ -4490,3 +4490,27 @@ Weryfikacja:
 Rollback:
 - Skierowac 100% ruchu na `build-2026-07-30-001` (`fddc25dc9a844565f62494e63c40c624c980cb07`) albo wdrozyc revert przywracajacy `W001`.
 - Nie usuwac ani nie modyfikowac historii Workday, Event ani `mobile_scan_command`.
+
+Data: 2026-08-01
+Autor: AI Codex
+Temat: Produkcyjna obsluga starego Workday i oczekujacego skanu W005
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-MOBILE-W005-WORKDAY-AND-PENDING-SCAN-20260801`.
+Wydanie:
+- Backend commit: `a4dfd9763bb52d84ee4112db247ed4679a884577`.
+- App Hosting `cleanzi-01`: `build-2026-08-01-001`, stan `SUCCEEDED`, `reconciling=false`, 100% ruchu.
+- Poprzedni build backendu: `build-2026-07-31-001`.
+- Frontend W005 commit: `66e55df560ae8f52a7efa9f110f7b8631f4d0c9b`.
+- Hosting: wylacznie `cleanzi-mobile-w005-20260731`; `mobile-web`, `app.cleanzi.pl` i ogolny pilot pozostaly bez zmian.
+Weryfikacja:
+- Backend: 344/344 testow; frontend: polityka 24/24 i klient API 14/14.
+- `GET /api/mobile/scan/status` przez `mobile-web`: kontrolowane HTTP 501 `MOBILE_SCAN_STATUS_UNAVAILABLE`.
+- `POST /api/mobile/scan` bez tokenu: kontrolowane HTTP 401 `UNAUTHENTICATED`.
+- Blad `UPSTREAM_FORBIDDEN_HOST` nie wystepuje po wdrozeniu.
+- Produkcyjny bundle W005: `assets/mobile-C8g3oJzH.js`, SHA-256 `DC2C11B8C059E8CB4ABC861D7A03E65D380AE72D523090998BD9C77B6D6129AF`.
+- Widok 390 x 844: brak poziomego przewijania; konsola: 0 bledow i 0 ostrzezen.
+- Trzy wpisy logow o poziomie ERROR byly celowymi probami statusu HTTP 501; brak innych bledow w oknie wydania.
+- Nie wykonano migracji, testowego skanu ani zapisu do bazy.
+Rollback:
+- Po utworzeniu nowego dnia pracy przy pozostawionym starym Workday nie wykonywac slepego rollbacku backendu, bo poprzednia regula moze ponownie zablokowac pracownika.
+- Preferowac roll-forward; jesli rollback jest konieczny, najpierw zamknac stary Workday przez autoryzowana korekte biurowa.
