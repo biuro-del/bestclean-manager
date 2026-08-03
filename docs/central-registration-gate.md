@@ -3,8 +3,8 @@
 Status: lokalny kontrakt integracyjny, bez eksportu funkcji blokującej, wdrożenia,
 zmiany Firebase Authentication, migracji danych ani publikacji.
 
-Punkt odniesienia: `cleanzi01/main` na commicie
-`fddc25dc9a844565f62494e63c40c624c980cb07`.
+Punkt odniesienia: `cleanzi01/main` po scaleniu PR #3, commit
+`d0770889ff889f19f9442d0db6f51717c8f1fc24`.
 
 ## Cel i granica
 
@@ -16,14 +16,17 @@ i pełnionych ról. Rejestracja ma dwa rozdzielone kanały:
 
 Kanały mogą mieć osobne formularze, endpointy, zgody, onboarding i payloady, ale
 utworzenie nowego konta w jednym projekcie Firebase musi przechodzić przez jedną
-centralną funkcję `beforeUserCreated`. Funkcja wybiera kanał wyłącznie na podstawie
-ważnego, krótkotrwałego grantu utworzonego przez zaufany backend. Metadana kanału
-nie jest rolą ani uprawnieniem.
+centralną warstwę zaufaną. Dla zdarzeń obsługiwanych przez Identity Platform jest to
+`beforeUserCreated` z krótkotrwałym grantem. Dla e-mail/hasło oraz custom auth jest
+to centralny broker tworzący użytkownika przez Firebase Admin, ponieważ te metody
+nie uruchamiają `beforeCreate`. Tworzenie kont przez użytkowników końcowych musi być
+wyłączone, aby nie dało się ominąć brokera. Metadana kanału nie jest rolą ani
+uprawnieniem.
 
 Logowanie istniejącego użytkownika pozostaje poza tą bramą. Nie wolno zastępować
 kontroli nowej rejestracji globalnym wymaganiem Turnstile podczas logowania.
 
-Po zużyciu grantu `beforeUserCreated` może zapisać trwałe claimy
+Po zużyciu grantu `beforeUserCreated` lub broker może zapisać trwałe claimy
 `cleanziInitialRegistrationChannel` i `cleanziRegistrationGrantVersion`. Są one
 wyłącznie dowodem pochodzenia pierwszej rejestracji. Mogą zostać użyte jeden raz przez
 zaufany backend do bootstrapu pierwszego workspace, ale nie są rolą, członkostwem ani
@@ -48,14 +51,32 @@ mapowanie tożsamości oraz idempotentnie utworzyć konto przed wydaniem custom 
 
 ### Firma sprzątająca
 
-Adapter rejestracyjny nie jest jeszcze dostępny. Backend zaproszeń klienta do firmy
-sprzątającej nie zastępuje onboardingu firmy. Docelowy onboarding musi co najmniej:
+Lokalny adapter centralnej bramy jest dostępny w
+`registration-functions/src/cleaning-company-adapter.js`. Używa wyłącznie akcji
+`registration_cleaning_company`, osobnego klucza HMAC i tego samego
+privacy-minimalnego kontraktu grantu co kanał zarządcy. Claim po konsumpcji grantu
+jest wyłącznie dowodem pochodzenia pierwszej rejestracji i nie nadaje roli ani
+członkostwa.
+
+Identity Platform nie uruchamia `beforeCreate` dla dostawcy e-mail/hasło. Z tego
+powodu klientowe `createUserWithEmailAndPassword` nie może być chronione tym grantem
+i jest odrzucane kontraktem jako `PASSWORD_BROKER_REQUIRED`. Nowe konto hasłowe musi
+utworzyć centralny zaufany broker po weryfikacji Turnstile, próby rejestracji i zgód.
+Projekt musi mieć wyłączone tworzenie kont przez użytkowników końcowych, aby nie dało
+się ominąć brokera bezpośrednim wywołaniem Firebase Auth. Nie wyłącza to logowania
+istniejących kont. Weryfikacja e-mail nadal jest wymagana przed wejściem do portalu
+i dostępem operacyjnym. Broker może wcześniej utworzyć izolowaną organizację ze
+statusem `IN_PROGRESS`, ale nie nadaje jej operacyjnego dostępu.
+
+Adapter nie zastępuje zaufanego endpointu wydającego grant ani onboardingu firmy.
+Backend zaproszeń klienta do firmy sprzątającej również nie zastępuje onboardingu.
+Docelowy przepływ musi co najmniej:
 
 - używać akcji `registration_cleaning_company`;
 - weryfikować e-mail wyłącznie przy nowej rejestracji;
 - po rejestracji administratora natychmiast utworzyć organizację
   `kind: cleaning_provider` i członkostwo ownera;
-- uruchomić 14-dniowy trial;
+- uruchomić dokładnie 14-dniowy trial bez wymagania karty;
 - obsłużyć GO+, PLUS i PRO, rozliczenie miesięczne lub roczne z rabatem 20%;
 - zachować ENTERPRISE poza publicznym wyborem pakietu;
 - utworzyć sesję Stripe po zaufanej stronie serwera;
@@ -66,7 +87,7 @@ sprzątającej nie zastępuje onboardingu firmy. Docelowy onboarding musi co naj
 
 Nie wolno eksportować ani wdrażać funkcji `beforeUserCreated`, dopóki:
 
-1. oba adaptery nie są zaimplementowane i niezależnie przetestowane;
+1. oba adaptery centralnej bramy nie są zaimplementowane i niezależnie przetestowane;
 2. centralny router nie odrzuca zera oraz więcej niż jednego pasującego grantu;
 3. konsumpcja dokładnie jednego grantu nie jest transakcją Firestore;
 4. test równoległy nie potwierdzi, że tylko jedno zdarzenie może skonsumować grant;
@@ -74,7 +95,9 @@ Nie wolno eksportować ani wdrażać funkcji `beforeUserCreated`, dopóki:
 6. nie ma udokumentowanego rollbacku oraz procedury wyrejestrowania funkcji
    blokującej; samo usunięcie wdrożonej funkcji może zablokować Authentication;
 7. oba frontendowe przepływy nie tworzą konta przed wydaniem grantu;
-8. Microsoft pozostaje wyłączony dla nowej rejestracji albo ma gotowy broker.
+8. Microsoft pozostaje wyłączony dla nowej rejestracji albo ma gotowy broker;
+9. tworzenie kont przez użytkowników końcowych nadal jest włączone lub centralny
+   broker nie obsługuje bezpiecznie e-mail/hasło i nowych kont Google.
 
 Preflight kodu musi wymagać pełnego zbioru kanałów `FACILITY_MANAGER` i
 `CLEANING_COMPANY`. Obecność tylko adaptera zarządcy ma kończyć się błędem i nie
@@ -119,6 +142,49 @@ osobny panel firmy sprzątającej oraz kompletny onboarding `cleaning_provider`.
 
 ## Następny bezpieczny krok
 
-Po otrzymaniu kompletnego adaptera firmy sprzątającej należy przeprowadzić wspólny
-review tożsamości i atomowości, uzupełnić centralny router, uruchomić testy emulatorowe
-obu kanałów, a dopiero potem przygotować osobny plan wdrożenia do projektu testowego.
+Gałąź `Rejestracja-31-07-2026` zawiera lokalny portalowy onboarding organizacji,
+politykę planów, GUS i webhook Stripe, ale nie może być scalona bez korekty. Jej
+trial ma 7 dni zamiast zatwierdzonych 14 dni, a frontend nie pobiera jeszcze grantu
+`CLEANING_COMPANY` przed utworzeniem nowego konta. Nie zawiera też produkcyjnego
+endpointu wydającego grant po poprawnej weryfikacji Turnstile.
+
+Lokalny adapter źródłowej próby, provisioner Cloud SQL, dokładny 14-dniowy trial,
+App Check, Resend, wdrażalny host brokera i worker outboxa są przygotowane w
+izolowanym codebase. Następny etap to selektywne podłączenie publicznego formularza
+i portalowego końca onboardingu oraz konfiguracja prawdziwego projektu testowego.
+Dopiero po testach obu frontendów, App Check/Turnstile, Stripe i rollbacku można
+zatwierdzić zakresowe wdrożenie testowe.
+Dokładny kontrakt między repozytoriami opisuje
+[`cleaning-company-registration-integration-handoff.md`](cleaning-company-registration-integration-handoff.md).
+
+## Lokalna implementacja brokera hasłowego
+
+Izolowany codebase `registration-functions` zawiera obecnie:
+
+- `password-registration-contract.js` — kanoniczny payload, trzy publiczne plany,
+  dwa cykle, wersjonowane zgody, privacy-minimalny fingerprint i dokładne 14 dni;
+- `password-registration-broker.js` — kolejność Turnstile → źródłowa próba i zgody
+  → Firebase Admin → organizacja → e-mail weryfikacyjny;
+- `firestore-password-registration-operation-store.js` — transakcyjną rezerwację
+  operacji bez surowego e-maila, hasła, tokenu Turnstile, IP ani User-Agent;
+- `cleaning-company-access-policy.js` — blokadę przed weryfikacją e-maila,
+  ograniczenie do onboardingu po weryfikacji i dostęp operacyjny dopiero po
+  ukończeniu profilu oraz przy aktywnym trialu.
+- `postgres-registration-attempt-authority.js` — zgodność źródłowej próby, hasha
+  tokenu i zgód przed Firebase Auth;
+- `postgres-cleaning-company-provisioner.js` — transakcję organizacji, ownera,
+  jednorazowego triala i outboxa;
+- `postgres-registration-projection-outbox.js` oraz
+  `firestore-cleaning-provider-projector.js` — retry, rekonsyliację i aktywację
+  profilu zaproszeń dopiero po ukończeniu onboardingu.
+
+UID i `orgId` są deterministyczne dla prywatnego identyfikatora operacji. Dzięki
+temu retry po zerwaniu połączenia nie tworzy kolejnego konta ani organizacji.
+Provisioner musi rozróżniać błąd sprzed transakcji, przy którym wolno usunąć nowego
+użytkownika Auth, od nieznanego wyniku commita. W drugim przypadku broker zatrzymuje
+operację jako `RECOVERY_REQUIRED`; nie usuwa użytkownika w ciemno i wymaga
+rekonsyliacji. Wysyłka e-mail używa identyfikatora operacji jako klucza idempotencji.
+
+Implementacja nadal nie jest eksportowana jako Function ani podłączona do root
+`firebase.json`. Nie zmienia konfiguracji Firebase i nie może zostać wdrożona przez
+obecne skrypty projektu.

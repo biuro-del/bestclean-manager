@@ -9,9 +9,9 @@ import {
   RegistrationGateError,
   identityFromBeforeCreate,
   issueRegistrationGrant,
-  registrationGrantCandidate,
 } from "../src/registration-contract.js";
 import { facilityManagerRegistrationAdapter } from "../src/facility-manager-adapter.js";
+import { cleaningCompanyRegistrationAdapter } from "../src/cleaning-company-adapter.js";
 import {
   assertCentralGateActivationReady,
   authorizeCentralBeforeCreate,
@@ -43,6 +43,27 @@ function emailBeforeCreate(email = "Zarządca@Przykład.pl") {
   };
 }
 
+function passwordBeforeCreate(email = "owner@firma-sprzatajaca.test") {
+  return {
+    eventId: "before-create-password-1",
+    eventType: "providers/cloud.auth/eventTypes/user.beforeCreate:password",
+    resource: {
+      service: FIREBASE_AUTH_EVENT_SERVICE,
+      name: "projects/iclean-room",
+    },
+    credential: {
+      providerId: "password",
+      signInMethod: "password",
+    },
+    data: {
+      uid: "firebase-password-user-1",
+      email,
+      emailVerified: false,
+      providerData: [],
+    },
+  };
+}
+
 function federatedBeforeCreate(providerId, subject) {
   return {
     eventId: `before-create-${providerId}`,
@@ -65,27 +86,6 @@ function verifiedTurnstile(action, hostname = "portal.cleanzi.pl") {
   return { ok: true, mode: "enforce", action, hostname };
 }
 
-const cleaningCompanyTestDouble = Object.freeze({
-  channel: REGISTRATION_CHANNEL.CLEANING_COMPANY,
-  action: REGISTRATION_ACTION.CLEANING_COMPANY,
-  candidateFromEvent({ event, hmacKey }) {
-    const identity = identityFromBeforeCreate(event);
-    return registrationGrantCandidate({
-      hmacKey,
-      channel: REGISTRATION_CHANNEL.CLEANING_COMPANY,
-      action: REGISTRATION_ACTION.CLEANING_COMPANY,
-      providerId: identity.providerId,
-      subject: identity.subject,
-    });
-  },
-  claimsForGrant() {
-    return {
-      cleanziInitialRegistrationChannel: REGISTRATION_CHANNEL.CLEANING_COMPANY,
-      cleanziRegistrationGrantVersion: 1,
-    };
-  },
-});
-
 test("activation preflight refuses a facility-manager-only gate", () => {
   assert.throws(
     () => assertCentralGateActivationReady([
@@ -98,7 +98,7 @@ test("activation preflight refuses a facility-manager-only gate", () => {
 
   const ready = assertCentralGateActivationReady([
     facilityManagerRegistrationAdapter,
-    cleaningCompanyTestDouble,
+    cleaningCompanyRegistrationAdapter,
   ]);
   assert.equal(ready.size, 2);
 });
@@ -110,7 +110,7 @@ test("a new account started from the login screen is rejected when no channel gr
     authorizeCentralBeforeCreate(emailBeforeCreate("new-from-login@example.test"), {
       adapters: [
         facilityManagerRegistrationAdapter,
-        cleaningCompanyTestDouble,
+        cleaningCompanyRegistrationAdapter,
       ],
       hmacKeysByChannel: {
         [REGISTRATION_CHANNEL.FACILITY_MANAGER]: MANAGER_KEY,
@@ -187,13 +187,87 @@ test("a facility-manager grant is action and hostname bound and privacy minimize
   );
 });
 
+test("password signup is rejected because Identity Platform requires a trusted broker", async () => {
+  let consumeCalls = 0;
+  await assert.rejects(
+    authorizeCentralBeforeCreate(passwordBeforeCreate(), {
+      adapters: [
+        facilityManagerRegistrationAdapter,
+        cleaningCompanyRegistrationAdapter,
+      ],
+      hmacKeysByChannel: {
+        [REGISTRATION_CHANNEL.FACILITY_MANAGER]: MANAGER_KEY,
+        [REGISTRATION_CHANNEL.CLEANING_COMPANY]: PROVIDER_KEY,
+      },
+      allowedResources: ALLOWED_RESOURCES,
+      nowMs: NOW,
+      grantStore: {
+        async consumeExactlyOne() {
+          consumeCalls += 1;
+          return null;
+        },
+      },
+    }),
+    (error) => error.code === "PASSWORD_BROKER_REQUIRED",
+  );
+  assert.equal(consumeCalls, 0);
+});
+
+test("a cleaning-company federated grant uses the reserved action and emits provenance-only claims", () => {
+  const event = emailBeforeCreate("firma-sprzatajaca@example.test");
+  const candidate = cleaningCompanyRegistrationAdapter.candidateFromEvent({
+    event,
+    hmacKey: PROVIDER_KEY,
+  });
+
+  assert.equal(candidate.channel, REGISTRATION_CHANNEL.CLEANING_COMPANY);
+  assert.equal(candidate.action, REGISTRATION_ACTION.CLEANING_COMPANY);
+  assert.equal(candidate.providerId, REGISTRATION_PROVIDER.EMAIL_LINK);
+  assert.equal("email" in candidate, false);
+  assert.deepEqual(cleaningCompanyRegistrationAdapter.claimsForGrant(), {
+    cleanziInitialRegistrationChannel: REGISTRATION_CHANNEL.CLEANING_COMPANY,
+    cleanziRegistrationGrantVersion: 1,
+  });
+
+  const grant = issueRegistrationGrant({
+    channel: REGISTRATION_CHANNEL.CLEANING_COMPANY,
+    action: REGISTRATION_ACTION.CLEANING_COMPANY,
+    providerId: REGISTRATION_PROVIDER.EMAIL_LINK,
+    subject: "firma-sprzatajaca@example.test",
+    hmacKey: PROVIDER_KEY,
+    turnstileVerification: verifiedTurnstile(
+      REGISTRATION_ACTION.CLEANING_COMPANY,
+    ),
+    allowedHostnames: ["portal.cleanzi.pl"],
+    nowMs: NOW,
+    randomUuid: () => "cleaning-company-grant-1",
+  });
+  assert.equal(grant.grantId, "cleaning-company-grant-1");
+
+  assert.throws(
+    () => issueRegistrationGrant({
+      channel: REGISTRATION_CHANNEL.CLEANING_COMPANY,
+      action: REGISTRATION_ACTION.CLEANING_COMPANY,
+      providerId: REGISTRATION_PROVIDER.EMAIL_LINK,
+      subject: "firma-sprzatajaca@example.test",
+      hmacKey: PROVIDER_KEY,
+      turnstileVerification: verifiedTurnstile(
+        REGISTRATION_ACTION.FACILITY_MANAGER,
+      ),
+      allowedHostnames: ["portal.cleanzi.pl"],
+      nowMs: NOW,
+    }),
+    (error) => error.code === "TURNSTILE_ENFORCEMENT_REQUIRED",
+  );
+});
+
 test("the central router selects the one channel whose grant was consumed", async () => {
   const event = emailBeforeCreate("owner@example.test");
   let observedCandidates;
   const response = await authorizeCentralBeforeCreate(event, {
     adapters: [
       facilityManagerRegistrationAdapter,
-      cleaningCompanyTestDouble,
+      cleaningCompanyRegistrationAdapter,
     ],
     hmacKeysByChannel: {
       [REGISTRATION_CHANNEL.FACILITY_MANAGER]: MANAGER_KEY,
@@ -222,11 +296,43 @@ test("the central router selects the one channel whose grant was consumed", asyn
   });
 });
 
+test("the central router returns cleaning-company provenance for its consumed grant", async () => {
+  const event = emailBeforeCreate("owner@firma-sprzatajaca.test");
+  const response = await authorizeCentralBeforeCreate(event, {
+    adapters: [
+      facilityManagerRegistrationAdapter,
+      cleaningCompanyRegistrationAdapter,
+    ],
+    hmacKeysByChannel: {
+      [REGISTRATION_CHANNEL.FACILITY_MANAGER]: MANAGER_KEY,
+      [REGISTRATION_CHANNEL.CLEANING_COMPANY]: PROVIDER_KEY,
+    },
+    allowedResources: ALLOWED_RESOURCES,
+    nowMs: NOW,
+    grantStore: {
+      async consumeExactlyOne({ candidates }) {
+        return {
+          ...candidates.find(
+            (candidate) =>
+              candidate.channel === REGISTRATION_CHANNEL.CLEANING_COMPANY,
+          ),
+          status: "CONSUMED",
+        };
+      },
+    },
+  });
+
+  assert.deepEqual(response.customClaims, {
+    cleanziInitialRegistrationChannel: REGISTRATION_CHANNEL.CLEANING_COMPANY,
+    cleanziRegistrationGrantVersion: 1,
+  });
+});
+
 test("the router rejects missing grants and propagates ambiguous-grant failures", async () => {
   const options = {
     adapters: [
       facilityManagerRegistrationAdapter,
-      cleaningCompanyTestDouble,
+      cleaningCompanyRegistrationAdapter,
     ],
     hmacKeysByChannel: {
       [REGISTRATION_CHANNEL.FACILITY_MANAGER]: MANAGER_KEY,
@@ -264,7 +370,7 @@ test("a real Firebase v2 resource object is required", async () => {
     authorizeCentralBeforeCreate(event, {
       adapters: [
         facilityManagerRegistrationAdapter,
-        cleaningCompanyTestDouble,
+        cleaningCompanyRegistrationAdapter,
       ],
       hmacKeysByChannel: {
         [REGISTRATION_CHANNEL.FACILITY_MANAGER]: MANAGER_KEY,
@@ -285,7 +391,7 @@ test("new Microsoft registration remains broker-only", async () => {
       {
         adapters: [
           facilityManagerRegistrationAdapter,
-          cleaningCompanyTestDouble,
+          cleaningCompanyRegistrationAdapter,
         ],
         hmacKeysByChannel: {
           [REGISTRATION_CHANNEL.FACILITY_MANAGER]: MANAGER_KEY,

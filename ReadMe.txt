@@ -4482,3 +4482,175 @@ Granice:
   nowego codebase. Kod nie moze zostac wdrozony przez obecne polecenia projektu.
 - Nie wlaczono Identity Platform, Blaze, App Check ani zadnych API i sekretow.
 - Nie wykonano migracji, commita, pusha, wdrozenia ani zmiany produkcji.
+
+Data: 2026-08-01
+Autor: AI Codex
+Temat: Lokalny broker rejestracji firmy sprzatajacej e-mail/haslo
+Dodano lokalnie:
+- Kanoniczny kontrakt kanalu `CLEANING_COMPANY` z obowiazkowym prywatnym tokenem
+  proby, dokladna akcja Turnstile, planami GO+/PLUS/PRO, cyklem miesiecznym/rocznym
+  i wersjonowanymi zgodami.
+- Broker Firebase Admin tworzacy deterministyczny UID dopiero po walidacji hasla,
+  Turnstile oraz autorytatywnej proby i zgod. Haslo nie trafia do snapshotu proby,
+  Firestore, organizacji, logow ani telemetrii.
+- Natychmiastowe idempotentne zlecenie utworzenia organizacji `cleaning_provider`,
+  ownera i triala `TRIAL/TRIALING` na dokladnie 14 x 24 godziny, bez karty i bez
+  automatycznej konwersji.
+- Transakcyjny magazyn prywatnych operacji Firestore bez surowego e-maila, hasla,
+  tokenu Turnstile, IP i User-Agent.
+- Stany ponowien i awarii: bezpieczna kompensacja tylko dla potwierdzonego bledu
+  sprzed commita, `RECOVERY_REQUIRED` przy nieznanym wyniku oraz idempotentna
+  ponowna wysylka e-maila bez przedluzania triala.
+- Polityke dostepu: brak wejscia przed potwierdzeniem e-maila, po potwierdzeniu tylko
+  onboarding, a operacyjne API dopiero po ukonczeniu profilu i przy aktywnym trialu.
+- Dokument `docs/password-registration-broker-contract.md` i serwerowy przyklad
+  konfiguracji `registration-functions/.env.example` bez wartosci sekretow.
+Zmieniono:
+- Kontrakt integracyjny teraz jednoznacznie tworzy organizacje od razu po
+  zarejestrowaniu administratora, ze statusem `IN_PROGRESS`, zamiast dopiero po
+  potwierdzeniu e-maila.
+- Warunek centralnej bramy opisuje broker zamiast niewykonalnego grantu haslowego
+  `beforeCreate` oraz zachowuje twarda regule 14-dniowego triala.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- `npm.cmd run check` - PASS.
+- `npm.cmd run test:unit` - 28/28 PASS: trial 14 dni, idempotencja sekwencyjna i
+  rownolegla, polskie znaki, brak hasla/tokenu w zapisach, zgody, Turnstile, konflikt
+  payloadu, awarie bazy i poczty, rekonsyliacja Firebase oraz bramki dostepu.
+- `npm.cmd run test:emulator` - 8/8 PASS: granty i operacje Firestore, rownolegla
+  rezerwacja, prywatnosc, idempotencja i konflikty stanow.
+Granice:
+- Nie dodano publicznego endpointu, adaptera zrodlowej polskiej bazy, provisionera
+  Cloud SQL/Data Connect ani prawdziwej wysylki e-mail.
+- Nie zmieniono repozytorium publicznej rejestracji ani ustawienia self-signup w
+  Firebase Authentication.
+- Nie dodano eksportu Functions i nie wykonano migracji, commita, pusha, wdrozenia
+  ani jakiejkolwiek zmiany produkcji.
+- Nastepny etap to podlaczenie zrodlowej proby i transakcyjnego provisionera w tym
+  izolowanym kontrakcie, a potem test projektu testowego przed kontrolowanym cutoverem.
+
+Korekta architektoniczna 2026-08-01:
+- Oficjalna dokumentacja Identity Platform potwierdza, ze `beforeCreate` nie obejmuje
+  e-mail/haslo ani custom auth.
+- Docelowa granica to jedna centralna warstwa: funkcja blokujaca dla wspieranych
+  zdarzen oraz broker Firebase Admin dla hasla i custom auth.
+- Self-signup uzytkownikow koncowych musi zostac wylaczony przed uruchomieniem
+  brokera; istniejace logowanie pozostaje dostepne.
+
+Data: 2026-08-01
+Autor: AI Codex
+Temat: Lokalny adapter centralnej bramy dla firmy sprzatajacej
+Dodano lokalnie:
+- Adapter `CLEANING_COMPANY` z zarezerwowana akcja Turnstile
+  `registration_cleaning_company`, osobnym HMAC i privacy-minimalnym kandydatem grantu.
+- Kontrakt odrzuca klientowe zdarzenie haslowe kodem `PASSWORD_BROKER_REQUIRED`,
+  poniewaz Identity Platform nie uruchamia `beforeCreate` dla e-mail/haslo.
+- Nowe konta haslowe musza powstawac w centralnym brokerze po wylaczeniu self-signup;
+  istniejace logowanie pozostaje dostepne, a onboarding i API wymagaja potwierdzenia
+  e-maila.
+- Claimy pochodzenia rejestracji, ktore nie sa rola, membershipem ani uprawnieniem.
+- Testy rzeczywistego adaptera zamiast atrapy oraz test wyboru kanalu firmy
+  sprzatajacej przez centralny router.
+Ustalenia integracyjne:
+- Zatwierdzony trial firmy sprzatajacej trwa 14 dni i nie wymaga karty.
+- Publiczne plany to GO+, PLUS i PRO; cykl miesieczny lub roczny z rabatem 20%.
+- ENTERPRISE pozostaje poza publicznym wyborem i wymaga oferty indywidualnej.
+- Galaz `Rejestracja-31-07-2026` nie moze byc scalona bez zmian: zawiera trial
+  7-dniowy i nie pobiera centralnego grantu przed utworzeniem konta.
+- Dodano `docs/cleaning-company-registration-integration-handoff.md` z dokladna
+  kolejnoscia e-mail/haslo i Google oraz granica odpowiedzialnosci trzech repozytoriow.
+Granice:
+- Nie dodano eksportu `beforeUserCreated`, endpointu wydajacego grant ani konfiguracji
+  Firebase/Identity Platform.
+- Nie wykonano migracji, commita, pusha, wdrozenia ani zmiany produkcji.
+
+Data: 2026-08-02
+Autor: AI Codex
+Temat: Lokalna transakcja Cloud SQL i projekcja firmy sprzatajacej do Firestore
+Dodano lokalnie:
+- Adapter autorytatywnej proby PostgreSQL, ktory sprawdza hash jednorazowego tokenu,
+  kanoniczne dane wlasciciela, plan, cykl i wersjonowane zgody przed utworzeniem Auth.
+- Provisioner `SERIALIZABLE`, ktory w jednej transakcji tworzy organizacje
+  `CLEANING_PROVIDER`, ownera, membership, szkic profilu, zgody, audyt i subskrypcje
+  `TRIAL/TRIALING` na dokladnie 14 x 24 godziny.
+- Jednorazowe `trial_redemption`, idempotencje po `broker_operation_id`, bezpieczna
+  rekonsyliacje nieznanego wyniku COMMIT oraz transakcyjny outbox SQL.
+- Idempotentna projekcje do `organizations`, podkolekcji `members` i
+  `cleaningProviderProfiles` w Firestore.
+- Celowy stan `onboarding`, ktory nie spelnia kontraktu backendu zaproszen, oraz
+  osobne zdarzenie aktywacji dopiero po ukonczeniu profilu i podaniu nazwy prawnej.
+- Migracje lokalna `registration-functions/sql/20260802_cleaning_company_password_registration.sql`
+  i dokument `docs/cleaning-company-sql-firestore-projection-contract.md`.
+- Serwerowy adapter Siteverify Turnstile z bezpiecznym retry tego samego tokenu,
+  polityke hasla 15+ bez sztucznych regul skladu, k-anonimowa kontrole Pwned
+  Passwords oraz atomowy limit naduzyc Firestore.
+- Adapter Resend z prywatnym magazynem dostarczenia: ten sam klucz idempotencji
+  moze byc ponawiany tylko w bezpiecznym oknie, a starszy nieznany wynik wymaga
+  recznej rekonsyliacji zamiast ryzyka drugiej wiadomosci.
+- Dokument `docs/registration-execution-adapters.md` z kontraktem prywatnosci,
+  konfiguracji i warunkami podlaczenia.
+Testy/sprawdzenia:
+- `npm.cmd run check` - PASS.
+- `npm.cmd run test:unit` - 47/47 PASS, w tym zrodlo proby, polskie znaki,
+  transakcja, 14-dniowy trial, awarie przed i podczas COMMIT, outbox, retry,
+  projekcja Firestore, wiele organizacji, blokada zaproszen, Turnstile, polityka
+  hasla i trwala idempotencja wiadomosci.
+- `npm.cmd run test:emulator` - 10/10 PASS: granty, operacje brokera, atomowe limity
+  naduzyc i granica ponowien dostarczenia wiadomosci.
+- Rzeczywista lokalna transakcja na schemacie zgodnym z testowym schematem galezi
+  `origin/rejestracja-31-07-2026` przez `pg-mem` - PASS: po jednym rekordzie grafu,
+  trzy zgody, idempotentny retry, dwa etapowe zdarzenia outboxa i katalogowy trial
+  14 dni.
+Granice:
+- Nie zmieniono publicznego repozytorium rejestracji ani portalu klienta.
+- Nie podlaczono publicznego endpointu, prawdziwych dostawcow, Cloud SQL ani workera
+  outboxa; nie zmieniono Firebase Authentication ani App Check i nie wyslano e-maila.
+- Migracja nie zostala wykonana. Nie wykonano commita, pusha ani wdrozenia.
+
+Data: 2026-08-02
+Autor: AI Codex
+Temat: Wdrazalny lokalnie codebase Functions brokera firmy sprzatajacej
+Dodano lokalnie:
+- Osobny plik `firebase.registration.json` z codebase `cleanzi-registration`, bez
+  hostingu, Firestore rules, Storage i Data Connect.
+- Eksport `registerCleaningCompany` w regionie `europe-west3`, wymagajacy dokladnego
+  originu, App Check z allowlista App ID, Turnstile, limitu naduzyc, polityki hasla
+  i zrodlowego tokenu rejestracji.
+- Prywatny przez IAM eksport `reconcileCleaningCompanyProjections` oraz harmonogram
+  `drainCleaningCompanyProjectionOutbox` z ograniczona wspolbieznoscia.
+- Kompozycje runtime Firebase Admin, Firestore, PostgreSQL, Pwned Passwords,
+  Turnstile i Resend z sekretami odczytywanymi dopiero podczas wykonania funkcji.
+- Ograniczony pool PostgreSQL oparty o istniejacy serwerowy sekret `DATABASE_URL`.
+- Dokumenty `docs/cleaning-company-public-registration-change-contract.md` oraz
+  `docs/cleaning-company-functions-deployment-runbook.md`.
+- Testy HTTP dla CORS, App Check, limitu body, bezpiecznych kodow bledow, prywatnej
+  rekonsyliacji i braku danych wrazliwych w diagnostyce.
+Zmieniono:
+- Turnstile i atomowy limit naduzyc sa sprawdzane przed zewnetrzna kontrola hasla;
+  awaria dostawcy Turnstile ma osobny, retryowalny kod serwerowy.
+- Opoznione zdarzenie rejestracji nie moze cofnac aktywnej projekcji providera ani
+  nadpisac jego nazwy; konflikt klucza idempotencji aktywacji konczy sie fail-closed.
+- Odrzucenie serwerowego sekretu Turnstile jest klasyfikowane jako niedostepnosc
+  konfiguracji/dostawcy, a nie jako blad uzytkownika.
+- `registration-functions` ma kompletny manifest Node.js 22, entrypoint Functions,
+  blokujacy predeploy oraz jawne peer dependencies wymagane przez izolowany
+  `firebase-admin`.
+Testy/sprawdzenia:
+- `node --check` na runtime Node 24 - PASS dla wszystkich plikow `src/*.js`.
+- Testy jednostkowe po finalnej korekcie kolejnosci zabezpieczen i projekcji -
+  67/67 PASS.
+- Emulator Firestore - 10/10 PASS.
+- Discovery Functions Emulator na projekcie `demo-cleanzi-registration` - PASS;
+  rozpoznano trzy eksporty, region, invokery, parametry i przypisanie sekretow.
+- `npm ls --depth=0` na runtime Node 24 - PASS; wszystkie bezposrednie zaleznosci
+  sa obecne bez bledow drzewa pakietow.
+- Po poprawnym odczytaniu manifestu wrapper `emulators:exec` nie zakonczyl procesu
+  samodzielnie; pozostawiony lokalny proces Firebase CLI zostal zatrzymany recznie.
+  Nie wywolano zadnego handlera ani uslugi chmurowej.
+Granice:
+- Repozytorium publicznego formularza pozostalo nietkniete; przygotowano tylko
+  kontrakt zmian dla jego opiekuna.
+- Nie ustawiono sekretow ani parametrow w Firebase, nie wlaczono App Check, nie
+  wykonano migracji, nie wywolano prawdziwych dostawcow i nie wyslano e-maila.
+- Nie wykonano commita, pusha ani wdrozenia.

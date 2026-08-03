@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "source": "registration-functions",
+    "codebase": "cleanzi-registration",
+    "runtime": "nodejs22",
+    "predeploy": [
+      "npm --prefix \"$RESOURCE_DIR\" run verify:deploy"
+    ]
+  }
+}

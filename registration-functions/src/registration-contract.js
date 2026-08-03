@@ -187,12 +187,7 @@ export function identityFromBeforeCreate(event) {
   const eventSignInMethod = String(event?.eventType || "").split(":").at(-1);
   const emailLinkEvent = signInMethod === REGISTRATION_PROVIDER.EMAIL_LINK
     || eventSignInMethod === REGISTRATION_PROVIDER.EMAIL_LINK;
-  const passwordEvent = signInMethod === "password"
-    || eventSignInMethod === "password";
-  if (
-    emailLinkEvent
-    || passwordEvent
-  ) {
+  if (emailLinkEvent) {
     if (user.emailVerified !== true) {
       throw new RegistrationGateError("EMAIL_LINK_NOT_VERIFIED");
     }
@@ -200,6 +195,12 @@ export function identityFromBeforeCreate(event) {
       providerId: REGISTRATION_PROVIDER.EMAIL_LINK,
       subject: normalizeRegistrationEmail(user.email),
     };
+  }
+
+  const passwordEvent = signInMethod === "password"
+    || eventSignInMethod === "password";
+  if (passwordEvent) {
+    throw new RegistrationGateError("PASSWORD_BROKER_REQUIRED");
   }
 
   throw new RegistrationGateError("UNSUPPORTED_PROVIDER");
