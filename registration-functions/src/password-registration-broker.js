@@ -38,6 +38,13 @@ function isAlreadyExists(error) {
   ].includes(errorCode(error));
 }
 
+function isDefinitiveAuthReconciliationFailure(error) {
+  return [
+    "auth/user-not-found",
+    "REGISTRATION_AUTH_IDENTITY_MISMATCH",
+  ].includes(errorCode(error));
+}
+
 function publicResult(operation) {
   const emailVerified = Number.isSafeInteger(operation.emailVerifiedObservedAtMs);
   return Object.freeze({
@@ -343,11 +350,14 @@ export function createCleaningCompanyPasswordRegistrationBroker({
             return publicResult(operation);
           }
         } catch (reconciliationError) {
-          return markRecoveryRequired({
-            operationStore,
-            operation,
-            cause: reconciliationError,
-          });
+          if (isDefinitiveAuthReconciliationFailure(reconciliationError)) {
+            return markRecoveryRequired({
+              operationStore,
+              operation,
+              cause: reconciliationError,
+            });
+          }
+          throw reconciliationError;
         }
       }
       if (operation.status === PASSWORD_REGISTRATION_STATUS.COMPLETED) {

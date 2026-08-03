@@ -41,6 +41,7 @@ const TIMEZONE_PATTERN = /^[A-Za-z0-9_+\-/]{1,80}$/;
 const LOCALE_PATTERN = /^[a-z]{2,3}(?:-[A-Z]{2})?$/;
 const MIN_HMAC_KEY_BYTES = 32;
 const MAX_SOURCE_EMAIL_LENGTH = 180;
+const MAX_VERIFICATION_DISPLAY_NAME_LENGTH = 200;
 
 function assertHmacKey(value) {
   const key = requiredText(value, "HMAC_KEY_REQUIRED", 4_096);
@@ -102,6 +103,10 @@ export function normalizeCleaningCompanyPasswordRequest(input = {}) {
 
   const firstName = requiredText(input.firstName, "FIRST_NAME_REQUIRED", 100);
   const lastName = requiredText(input.lastName, "LAST_NAME_REQUIRED", 100);
+  const displayName = `${firstName} ${lastName}`;
+  if (displayName.length > MAX_VERIFICATION_DISPLAY_NAME_LENGTH) {
+    throw new RegistrationGateError("INVALID_DISPLAY_NAME");
+  }
   const password = typeof input.password === "string"
     ? input.password.normalize("NFC")
     : "";
@@ -129,7 +134,7 @@ export function normalizeCleaningCompanyPasswordRequest(input = {}) {
     password,
     firstName,
     lastName,
-    displayName: `${firstName} ${lastName}`,
+    displayName,
     phone: optionalText(input.phone, 40) || null,
     selectedPlanCode: enumValue(
       input.selectedPlanCode,
@@ -182,9 +187,19 @@ export function passwordRegistrationPrivateSnapshot(request) {
 }
 
 export function passwordRegistrationRequestFingerprint(request, hmacKey) {
+  const key = assertHmacKey(hmacKey);
   const canonical = JSON.stringify(passwordRegistrationPrivateSnapshot(request));
-  return createHmac("sha256", assertHmacKey(hmacKey))
-    .update(canonical, "utf8")
+  const passwordHmac = createHmac("sha256", key)
+    .update(
+      ["cleanzi-password-registration-credential-v1", request.password].join("\u0000"),
+      "utf8",
+    )
+    .digest("base64url");
+  return createHmac("sha256", key)
+    .update(
+      ["cleanzi-password-registration-request-v2", canonical, passwordHmac].join("\u0000"),
+      "utf8",
+    )
     .digest("base64url");
 }
 

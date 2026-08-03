@@ -18,8 +18,13 @@ zmiany Firebase Authentication, pushu i wdrożenia.
 - hasło występuje tylko w pamięci żądania i wywołaniu Firebase Admin;
 - e-mail dłuższy niż 180 znaków jest odrzucany przed wywołaniem źródłowej bazy
   i Firebase Auth, zgodnie z limitem autorytatywnego schematu rejestracji;
+- złożone `displayName` jest walidowane względem limitu 200 znaków mailera przed
+  wywołaniem źródłowej bazy i Firebase Auth;
 - operacja Firestore nie zapisuje e-maila, hasła, tokenu Turnstile, IP ani User-Agent;
 - operacja Firestore nie zapisuje jawnego linku weryfikacyjnego ani kodu OOB;
+- fingerprint operacji wiąże hasło przez domenowo rozdzielony HMAC, więc retry ze
+  zmienionym hasłem kończy się `IDEMPOTENCY_CONFLICT`, ale hasło ani jego jawny hash
+  nie są zapisywane;
 - claim kanału jest pochodzeniem rejestracji, nie rolą ani membershipem.
 
 ## Kolejność
@@ -44,6 +49,9 @@ zmiany Firebase Authentication, pushu i wdrożenia.
   atomowo i tylko dopóki stan operacji nadal potwierdza, że rollback jest bezpieczny.
 - Nieznany wynik commita kończy się `RECOVERY_REQUIRED`; automatyczne usunięcie UID
   jest zakazane, ponieważ organizacja mogła już powstać.
+- Przejściowy błąd odczytu Firebase Auth podczas retry nie zmienia trwałego stanu
+  operacji i może być bezpiecznie ponowiony. `RECOVERY_REQUIRED` jest ustawiany
+  wyłącznie dla definitywnego braku oczekiwanego UID lub niezgodności tożsamości.
 - Awaria poczty zachowuje konto, organizację i pierwotny koniec triala. Kolejne
   wywołanie ponawia wyłącznie idempotentną wysyłkę dokładnie tego samego linku.
 - Link powstaje pod pojedynczą dzierżawą. Przed wysyłką jest zapisywany wyłącznie

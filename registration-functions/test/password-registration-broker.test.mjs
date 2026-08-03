@@ -433,6 +433,19 @@ test("same operation key with a changed business payload fails as an idempotency
   assert.equal(env.organizations.size, 1);
 });
 
+test("same operation key with a changed password fails without persisting the password", async () => {
+  const env = harness({ mailFailure: new Error("MAIL_PROVIDER_UNAVAILABLE") });
+  await env.broker.register(registrationInput());
+  await assert.rejects(
+    env.broker.register(registrationInput({ password: "Inne-Bardzo-Dlugie-Haslo-2026!" })),
+    /IDEMPOTENCY_CONFLICT/,
+  );
+  const serialized = JSON.stringify([...env.operationStore.operations.values()]);
+  assert.doesNotMatch(serialized, /Bardzo-Dlugie-Haslo|Inne-Bardzo-Dlugie/);
+  assert.equal(env.auth.createCount, 1);
+  assert.equal(env.organizations.size, 1);
+});
+
 test("source attempt, consents and Turnstile are checked before Firebase Auth creation", async () => {
   const env = harness({ rejectAttempt: true });
   await assert.rejects(
@@ -450,6 +463,19 @@ test("an email longer than the source schema limit is rejected before Auth", asy
   await assert.rejects(
     env.broker.register(registrationInput({ email })),
     (error) => error.code === "INVALID_EMAIL",
+  );
+  assert.equal(env.auth.createCount, 0);
+  assert.equal(env.attempts.length, 0);
+});
+
+test("an overlong composed display name is rejected before Auth", async () => {
+  const env = harness();
+  await assert.rejects(
+    env.broker.register(registrationInput({
+      firstName: "A".repeat(100),
+      lastName: "B".repeat(100),
+    })),
+    (error) => error.code === "INVALID_DISPLAY_NAME",
   );
   assert.equal(env.auth.createCount, 0);
   assert.equal(env.attempts.length, 0);
@@ -639,6 +665,39 @@ test("retry observes an already verified Firebase user and does not send another
   assert.equal(retry.operationalAccess, false);
   assert.equal(env.messages.size, 0);
   assert.equal(env.organizations.size, 1);
+});
+
+test("transient Auth reconciliation failures remain retryable without poisoning the operation", async () => {
+  const env = harness();
+  await env.broker.register(registrationInput());
+  const transientError = new Error("auth/internal-error");
+  transientError.code = "auth/internal-error";
+  env.auth.getUser = async () => { throw transientError; };
+
+  await assert.rejects(
+    env.broker.register(registrationInput()),
+    (error) => error === transientError,
+  );
+  assert.equal(
+    [...env.operationStore.operations.values()][0].status,
+    PASSWORD_REGISTRATION_STATUS.COMPLETED,
+  );
+  assert.equal(env.auth.deleteCount, 0);
+});
+
+test("a missing Auth user after reservation is a definitive recovery condition", async () => {
+  const env = harness();
+  await env.broker.register(registrationInput());
+  env.auth.users.clear();
+
+  await assert.rejects(
+    env.broker.register(registrationInput()),
+    (error) => error.code === "REGISTRATION_RECOVERY_REQUIRED",
+  );
+  assert.equal(
+    [...env.operationStore.operations.values()][0].status,
+    PASSWORD_REGISTRATION_STATUS.RECOVERY_REQUIRED,
+  );
 });
 
 test("recovery accepts the authoritative SQL trial window without extending it", async () => {

@@ -4681,3 +4681,30 @@ Granice:
 - Nie ustawiono sekretow, nie wywolano Firebase, Cloud SQL, Resend ani innych
   prawdziwych dostawcow.
 - Nie wykonano migracji, commita, pusha, odpowiedzi w review, scalenia ani wdrozenia.
+
+Data: 2026-08-03
+Autor: AI Codex
+Temat: Druga lokalna runda poprawek po review PR #4
+Zmieniono lokalnie:
+- Przejsciowy blad `auth.getUser` podczas retry nie ustawia juz trwale
+  `RECOVERY_REQUIRED`; stan operacji pozostaje niezmieniony i wywolanie mozna
+  bezpiecznie ponowic. Definitywny brak UID lub niezgodnosc e-maila nadal wymaga
+  rekonsyliacji.
+- Fingerprint operacji zawiera domenowo rozdzielony HMAC znormalizowanego hasla.
+  Retry z innym haslem konczy sie `IDEMPOTENCY_CONFLICT`, bez zapisywania hasla lub
+  jego jawnego hasha w Firestore, bazie zrodlowej, organizacji ani logach.
+- Zlozone `displayName` przekraczajace limit 200 znakow jest odrzucane przed
+  wywolaniem bazy zrodlowej, Firebase Auth i mailera.
+Testy regresji:
+- Przejsciowa awaria Auth nie zatruwa zakonczonej operacji.
+- Brak oczekiwanego UID nadal przechodzi do `RECOVERY_REQUIRED`.
+- Zmiana hasla pod tym samym kluczem idempotencji jest odrzucana.
+- Zbyt dlugie `displayName` nie tworzy konta ani proby zrodlowej.
+- `npm run check` na runtime Node 24 - PASS.
+- Pelny zestaw testow jednostkowych - 75/75 PASS.
+- Emulator Firestore - 12/12 PASS.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Zmiany sa lokalne. Nie wykonano kolejnego commita ani pusha.
+- Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
+  prawdziwych dostawcow.
