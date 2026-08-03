@@ -140,9 +140,18 @@ test("provisioner creates the graph, exact 14-day trial and pending outbox atomi
   }
   assert.match(sql, /BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE/);
   assert.match(sql, /COMMIT/);
+  assert.match(sql, /INSERT INTO organization_member[\s\S]*'ONBOARDING'/);
+  assert.match(sql, /INSERT INTO worker[\s\S]*false[\s\S]*'ONBOARDING'/);
   const serializedParams = JSON.stringify(pool.calls.map((call) => call.params));
   assert.doesNotMatch(serializedParams, /registration-token/);
   assert.match(serializedParams, /CLEANING_PROVIDER_REGISTERED/);
+  const projectionInsert = pool.calls.find((call) =>
+    call.sql.includes("INSERT INTO cleanzi_registration_projection_outbox")
+  );
+  assert.deepEqual(JSON.parse(projectionInsert.params[4]).membership, {
+    role: "owner",
+    status: "onboarding",
+  });
 });
 
 test("known pre-commit SQL failure is explicitly safe for Auth compensation", async () => {

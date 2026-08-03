@@ -223,8 +223,8 @@ async function insertOrganizationGraph(client, input) {
        employment_status, position, locale, timezone, invited_at,
        activated_at, created_by_uid, updated_by_uid, created_at, updated_at
      ) VALUES ($1, $2, $3, $4, $5, $6, $2, $7, $8, $7, $9,
-               'OWNER', true, 'ORGANIZATION_OWNER', $10, $10, true, $7, $11,
-               'OWNER', 'ACTIVE', 'ACTIVE', 'Owner', 'pl-PL', $12, $10, $10,
+               'OWNER', true, 'ORGANIZATION_OWNER', $10, $10, false, $7, $11,
+               'OWNER', 'ONBOARDING', 'ACTIVE', 'Owner', 'pl-PL', $12, $10, NULL,
                $9, $9, $10, $10)`,
     [
       input.orgId,
@@ -245,7 +245,7 @@ async function insertOrganizationGraph(client, input) {
     `INSERT INTO organization_member (
        org_id, uid, role, worker_id, status, consumes_seat, invited_at,
        joined_at, created_by_uid, updated_at, created_at
-     ) VALUES ($1, $2, 'OWNER', $3, 'ACTIVE', true, $4, $4, $2, $4, $4)`,
+     ) VALUES ($1, $2, 'OWNER', $3, 'ONBOARDING', true, $4, $4, $2, $4, $4)`,
     [input.orgId, input.uid, workerId, now],
   );
   await client.query(
@@ -337,7 +337,7 @@ async function insertOrganizationGraph(client, input) {
       kind: "cleaning_provider",
       status: "onboarding",
     },
-    membership: { role: "owner", status: "active" },
+    membership: { role: "owner", status: "onboarding" },
     profile: { status: "onboarding" },
   };
   await client.query(

@@ -13,6 +13,7 @@ export async function enqueueCleaningProviderActivation({
   client,
   organizationId,
   ownerUid,
+  decodedToken,
   activationOperationId,
   occurredAtMs = Date.now(),
 }) {
@@ -21,11 +22,23 @@ export async function enqueueCleaningProviderActivation({
   }
   const orgId = requiredText(organizationId, "INVALID_ORG_ID", 64);
   const uid = requiredText(ownerUid, "INVALID_UID", 128);
+  const tokenUid = requiredText(
+    decodedToken?.uid || decodedToken?.sub,
+    "REGISTRATION_IDENTITY_MISMATCH",
+    128,
+  );
+  if (tokenUid !== uid) {
+    throw new RegistrationGateError("REGISTRATION_IDENTITY_MISMATCH");
+  }
+  if (decodedToken?.email_verified !== true) {
+    throw new RegistrationGateError("EMAIL_VERIFICATION_REQUIRED");
+  }
   const operationId = requiredText(activationOperationId, "INVALID_OPERATION_ID", 160);
   const occurredAt = new Date(normalizedNow(occurredAtMs));
   const result = await client.query(
     `SELECT o.org_id, o.name, o.status, o.onboarding_status,
-            o.organization_kind, p.legal_name, m.role, m.status AS member_status
+            o.organization_kind, p.legal_name, m.role, m.worker_id,
+            m.status AS member_status
        FROM organizations o
        JOIN organization_company_profile p ON p.org_id = o.org_id
        JOIN organization_member m ON m.org_id = o.org_id AND m.uid = $2
@@ -40,10 +53,49 @@ export async function enqueueCleaningProviderActivation({
     String(row.organization_kind || "").toUpperCase() !== "CLEANING_PROVIDER" ||
     String(row.onboarding_status || "").toUpperCase() !== "COMPLETED" ||
     String(row.role || "").toUpperCase() !== "OWNER" ||
-    String(row.member_status || "").toUpperCase() !== "ACTIVE" ||
+    !["ONBOARDING", "ACTIVE"].includes(
+      String(row.member_status || "").toUpperCase(),
+    ) ||
     legalName.length < 2
   ) {
     throw new RegistrationGateError("PROVIDER_ONBOARDING_INCOMPLETE");
+  }
+  const organizationUpdate = await client.query(
+    `UPDATE organizations
+        SET status = 'ACTIVE', updated_by_uid = $2, updated_at = $3
+      WHERE org_id = $1
+        AND organization_kind = 'CLEANING_PROVIDER'
+        AND onboarding_status = 'COMPLETED'
+      RETURNING org_id`,
+    [orgId, uid, occurredAt],
+  );
+  if (organizationUpdate.rowCount !== 1) {
+    throw new RegistrationGateError("PROVIDER_ONBOARDING_INCOMPLETE");
+  }
+  const membershipUpdate = await client.query(
+    `UPDATE organization_member
+        SET status = 'ACTIVE', joined_at = COALESCE(joined_at, $3),
+            updated_at = $3
+      WHERE org_id = $1 AND uid = $2 AND role = 'OWNER'
+        AND status IN ('ONBOARDING', 'ACTIVE')
+      RETURNING status`,
+    [orgId, uid, occurredAt],
+  );
+  if (membershipUpdate.rowCount !== 1) {
+    throw new RegistrationGateError("PROVIDER_MEMBERSHIP_ACTIVATION_CONFLICT");
+  }
+  const workerUpdate = await client.query(
+    `UPDATE worker
+        SET active = true, status = 'ACTIVE',
+            activated_at = COALESCE(activated_at, $4),
+            updated_by_uid = $2, updated_at = $4
+      WHERE org_id = $1 AND auth_uid = $2 AND worker_id = $3
+        AND role = 'OWNER' AND status IN ('ONBOARDING', 'ACTIVE')
+      RETURNING worker_id`,
+    [orgId, uid, row.worker_id, occurredAt],
+  );
+  if (workerUpdate.rowCount !== 1) {
+    throw new RegistrationGateError("PROVIDER_OWNER_ACTIVATION_CONFLICT");
   }
   const eventId = stableEventId(operationId);
   const payload = {

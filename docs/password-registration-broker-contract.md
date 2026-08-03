@@ -1,7 +1,7 @@
 # Broker rejestracji e-mail/hasło — kontrakt v1
 
-Status: implementacja i endpoint gotowe lokalnie, bez wartości sekretów, migracji,
-zmiany Firebase Authentication, pushu i wdrożenia.
+Status: implementacja i endpoint znajdują się w PR #4, bez wartości sekretów,
+migracji, zmiany Firebase Authentication i wdrożenia.
 
 ## Niezmienniki
 
@@ -29,6 +29,9 @@ zmiany Firebase Authentication, pushu i wdrożenia.
   operacji najpierw potwierdza fingerprint i nie powtarza zmiennej w czasie kontroli
   hasła, dzięki czemu może wznowić oczekującą dostawę tego samego linku;
 - claim kanału jest pochodzeniem rejestracji, nie rolą ani membershipem.
+- początkowy owner i membership mają stan `ONBOARDING`, a nie operacyjny `ACTIVE`;
+  aktywacja wymaga późniejszej zaufanej transakcji z `email_verified=true` oraz
+  ukończonym onboardingiem.
 
 ## Kolejność
 

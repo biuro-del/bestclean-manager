@@ -1,6 +1,6 @@
 # Integracja rejestracji firmy sprzątającej z centralną bramką
 
-Status: broker i osobny codebase Functions gotowe lokalnie, bez zmian w
+Status: broker i osobny codebase Functions znajdują się w PR #4, bez zmian w
 repozytorium publicznej rejestracji, bez konfiguracji Firebase i bez wdrożenia.
 
 ## Potwierdzone źródła
@@ -51,13 +51,14 @@ zawiera również szeroki, niezależny zakres `Cleanzi-admin`.
    politykę hasła, a następnie przez Firebase Admin tworzy konto
    `emailVerified: false` oraz ustawia provenance kanału.
 5. Broker natychmiast tworzy deterministyczną organizację `kind: cleaning_provider`,
-   membership ownera, rekord właściciela, szkic profilu i subskrypcję
+   nieoperacyjny membership ownera `ONBOARDING`, rekord właściciela, szkic profilu i subskrypcję
    `TRIAL/TRIALING`. Trial rozpoczyna się w chwili utworzenia organizacji i kończy
    dokładnie po 14 × 24 godzinach; nie wymaga karty i nie konwertuje się automatycznie.
 6. Broker generuje wiadomość weryfikacyjną. Do potwierdzenia e-maila użytkownik nie
    może wejść do portalu ani korzystać z operacyjnego API. Po potwierdzeniu może
    ukończyć profil firmy; operacyjne API pozostaje zablokowane do zakończenia
-   obowiązkowego onboardingu.
+   obowiązkowego onboardingu. Zaufana transakcja kończąca onboarding sprawdza
+   zweryfikowany token Firebase i dopiero wtedy ustawia membership `ACTIVE`.
 
 ## Wymagana kolejność dla Google
 

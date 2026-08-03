@@ -15,6 +15,8 @@ function eventPayload(event) {
   if (![REGISTERED, ACTIVATED].includes(eventType)) {
     throw new RegistrationGateError("UNSUPPORTED_PROJECTION_EVENT");
   }
+  const active = eventType === ACTIVATED;
+  const membershipStatus = active ? "active" : "onboarding";
   const organizationId = text(payload.organizationId || event?.org_id, "INVALID_ORG_ID", 64);
   const ownerUid = text(payload.ownerUid || event?.uid, "INVALID_UID", 128);
   if (
@@ -22,11 +24,10 @@ function eventPayload(event) {
     event?.uid && event.uid !== ownerUid ||
     payload.organization?.kind !== "cleaning_provider" ||
     payload.membership?.role !== "owner" ||
-    payload.membership?.status !== "active"
+    payload.membership?.status !== membershipStatus
   ) {
     throw new RegistrationGateError("PROJECTION_EVENT_MISMATCH");
   }
-  const active = eventType === ACTIVATED;
   const legalName = typeof payload.organization?.legalName === "string"
     ? payload.organization.legalName.trim()
     : "";
@@ -42,6 +43,7 @@ function eventPayload(event) {
     legalName,
     displayName: text(payload.organization?.displayName || legalName, "INVALID_ORGANIZATION_NAME", 180),
     organizationStatus: active ? "active" : "onboarding",
+    membershipStatus,
     profileStatus: active ? "active" : "onboarding",
     occurredAtMs: Number.isSafeInteger(payload.occurredAtMs)
       ? payload.occurredAtMs
@@ -55,7 +57,10 @@ function assertCompatibleExisting({ organization, membership }) {
   }
   if (
     membership &&
-    (membership.role !== "owner" || membership.status !== "active")
+    (
+      membership.role !== "owner" ||
+      !["onboarding", "active"].includes(membership.status)
+    )
   ) {
     throw new RegistrationGateError("PROVIDER_MEMBERSHIP_CONFLICT");
   }
@@ -117,7 +122,7 @@ export function createFirestoreCleaningProviderProjector({ db }) {
           organizationId: projection.organizationId,
           userId: projection.ownerUid,
           role: "owner",
-          status: "active",
+          status: activationAlreadyApplied ? "active" : projection.membershipStatus,
         };
         if (!staleRegistrationProjection) {
           membershipPatch.projectionOperationId = projection.operationId;

@@ -4705,7 +4705,7 @@ Testy regresji:
 - Emulator Firestore - 12/12 PASS.
 - `npm ls --depth=0` na runtime Node 24 - PASS.
 Granice:
-- Zmiany sa lokalne. Nie wykonano kolejnego commita ani pusha.
+- Zmiany zostaly zapisane w commicie `dbe0706` i wypchniete do PR #4.
 - Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
   prawdziwych dostawcow.
 
@@ -4731,6 +4731,32 @@ Testy regresji:
 - Emulator sprawdza prywatny odczyt istniejacej operacji i konflikt fingerprintu.
 - `npm run check` na runtime Node 24 - PASS.
 - Pelny zestaw testow jednostkowych - 76/76 PASS.
+- Emulator Firestore - 12/12 PASS.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Zmiany zostaly zapisane w commicie `24bec9f` i wypchniete do PR #4.
+- Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
+  prawdziwych dostawcow.
+
+Data: 2026-08-03
+Autor: AI Codex
+Temat: Czwarta lokalna runda poprawek po review PR #4
+Zmieniono lokalnie:
+- Nowy owner i jego rekord `organization_member` maja stan `ONBOARDING`, a owner
+  w `worker` pozostaje nieaktywny. Istniejace operacyjne zapytania Data Connect,
+  ktore wymagaja membershipu `ACTIVE`, nie przepuszczaja konta przed aktywacja.
+- Poczatkowa projekcja Firestore zachowuje membership `onboarding`; dopiero
+  zdarzenie `CLEANING_PROVIDER_ACTIVATED` przechodzi do `active`.
+- Zaufana transakcja konczaca onboarding wymaga zgodnego UID oraz
+  `email_verified=true`, sprawdza ukonczony profil, a nastepnie atomowo aktywuje
+  organizacje, membership i ownera przed zapisaniem zdarzenia projekcji.
+Testy regresji:
+- Niezweryfikowany e-mail i obcy UID sa odrzucane przed pierwszym zapytaniem SQL.
+- Membership `ONBOARDING` nie spelnia kontraktu operacyjnego ani zaproszen.
+- Aktywacja po weryfikacji i ukonczeniu onboardingu przechodzi do `ACTIVE`, a
+  opozniona projekcja rejestracji nie cofa aktywnego stanu.
+- `npm run check` na runtime Node 24 - PASS.
+- Pelny zestaw testow jednostkowych - 77/77 PASS.
 - Emulator Firestore - 12/12 PASS.
 - `npm ls --depth=0` na runtime Node 24 - PASS.
 Granice:

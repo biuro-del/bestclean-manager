@@ -69,7 +69,10 @@ function event({
         kind: "cleaning_provider",
         status: eventType === "CLEANING_PROVIDER_ACTIVATED" ? "active" : "onboarding",
       },
-      membership: { role: "owner", status: "active" },
+      membership: {
+        role: "owner",
+        status: eventType === "CLEANING_PROVIDER_ACTIVATED" ? "active" : "onboarding",
+      },
       profile: { status: eventType === "CLEANING_PROVIDER_ACTIVATED" ? "active" : "onboarding" },
     },
   };
@@ -96,6 +99,7 @@ test("initial projection is idempotent but cannot authorize invitations before o
   assert.equal(organization.status, "onboarding");
   assert.equal(profile.status, "onboarding");
   assert.equal(membership.role, "owner");
+  assert.equal(membership.status, "onboarding");
   assert.equal(invitationContractSatisfied({ organization, membership, profile, uid: "reg_uid_1001" }), false);
 });
 
@@ -196,7 +200,8 @@ test("activation event can be enqueued only after authoritative onboarding is co
           organization_kind: "CLEANING_PROVIDER",
           legal_name: "Żółw Clean sp. z o.o.",
           role: "OWNER",
-          member_status: "ACTIVE",
+          worker_id: "worker_owner_1001",
+          member_status: "ONBOARDING",
         }] };
       }
       return { rowCount: 1, rows: [] };
@@ -206,6 +211,7 @@ test("activation event can be enqueued only after authoritative onboarding is co
     client,
     organizationId: "org_reg_1001",
     ownerUid: "reg_uid_1001",
+    decodedToken: { uid: "reg_uid_1001", email_verified: true },
     activationOperationId: "provider_activation_1001",
     occurredAtMs: Date.parse("2026-08-02T09:00:00.000Z"),
   });
@@ -214,6 +220,9 @@ test("activation event can be enqueued only after authoritative onboarding is co
   assert.match(insert.params[4], /CLEANING_PROVIDER_ACTIVATED/);
   assert.match(insert.params[4], /Żółw Clean sp\. z o\.o\./);
   assert.doesNotMatch(insert.params[4], /@/);
+  assert.equal(calls.some((call) => sqlText(call.sql).startsWith("UPDATE organizations")), true);
+  assert.equal(calls.some((call) => sqlText(call.sql).startsWith("UPDATE organization_member")), true);
+  assert.equal(calls.some((call) => sqlText(call.sql).startsWith("UPDATE worker")), true);
 
   const incompleteClient = {
     async query(sql) {
@@ -223,7 +232,8 @@ test("activation event can be enqueued only after authoritative onboarding is co
           onboarding_status: "IN_PROGRESS",
           legal_name: "",
           role: "OWNER",
-          member_status: "ACTIVE",
+          worker_id: "worker_owner_1001",
+          member_status: "ONBOARDING",
         }] };
       }
       return { rows: [] };
@@ -233,6 +243,7 @@ test("activation event can be enqueued only after authoritative onboarding is co
     client: incompleteClient,
     organizationId: "org_reg_1001",
     ownerUid: "reg_uid_1001",
+    decodedToken: { uid: "reg_uid_1001", email_verified: true },
     activationOperationId: "provider_activation_1002",
   }), (error) => error.code === "PROVIDER_ONBOARDING_INCOMPLETE");
 
@@ -246,16 +257,50 @@ test("activation event can be enqueued only after authoritative onboarding is co
           organization_kind: "CLEANING_PROVIDER",
           legal_name: "Żółw Clean sp. z o.o.",
           role: "OWNER",
-          member_status: "ACTIVE",
+          worker_id: "worker_owner_1001",
+          member_status: "ONBOARDING",
         }] };
       }
-      return { rowCount: 0, rows: [] };
+      if (sql.includes("INSERT INTO cleanzi_registration_projection_outbox")) {
+        return { rowCount: 0, rows: [] };
+      }
+      return { rowCount: 1, rows: [] };
     },
   };
   await assert.rejects(enqueueCleaningProviderActivation({
     client: conflictingClient,
     organizationId: "org_reg_1001",
     ownerUid: "reg_uid_1001",
+    decodedToken: { uid: "reg_uid_1001", email_verified: true },
     activationOperationId: "provider_activation_conflict",
   }), (error) => error.code === "ACTIVATION_IDEMPOTENCY_CONFLICT");
 });
+
+test("activation rejects an unverified owner before touching SQL", async () => {
+  let queries = 0;
+  const client = {
+    async query() {
+      queries += 1;
+      return { rows: [] };
+    },
+  };
+  await assert.rejects(enqueueCleaningProviderActivation({
+    client,
+    organizationId: "org_reg_1001",
+    ownerUid: "reg_uid_1001",
+    decodedToken: { uid: "reg_uid_1001", email_verified: false },
+    activationOperationId: "provider_activation_unverified",
+  }), (error) => error.code === "EMAIL_VERIFICATION_REQUIRED");
+  await assert.rejects(enqueueCleaningProviderActivation({
+    client,
+    organizationId: "org_reg_1001",
+    ownerUid: "reg_uid_1001",
+    decodedToken: { uid: "different_uid", email_verified: true },
+    activationOperationId: "provider_activation_wrong_identity",
+  }), (error) => error.code === "REGISTRATION_IDENTITY_MISMATCH");
+  assert.equal(queries, 0);
+});
+
+function sqlText(sql) {
+  return sql.replace(/\s+/g, " ").trim();
+}

@@ -1,7 +1,7 @@
 # Cloud SQL i projekcja Firestore firmy sprzątającej
 
-Status: implementacja lokalna, bez wykonania migracji, endpointu publicznego,
-eksportu Functions, sekretów, commita, pushu i wdrożenia.
+Status: implementacja znajduje się w PR #4, bez wykonania migracji, podłączenia
+publicznego formularza, ustawienia sekretów i wdrożenia.
 
 ## Źródło prawdy
 
@@ -31,7 +31,7 @@ jego SHA-256. Hasło nigdy nie trafia do tego adaptera ani do SQL.
 a następnie w jednej transakcji `SERIALIZABLE` tworzy:
 
 - organizację `CLEANING_PROVIDER` ze statusem onboardingu `IN_PROGRESS`;
-- ownera w `worker` i aktywny membership `OWNER`;
+- ownera w `worker` oraz nieoperacyjny membership `OWNER/ONBOARDING`;
 - pusty szkic `organization_company_profile` — prawdziwa nazwa prawna jest
   obowiązkowa dopiero przy końcu onboardingu;
 - subskrypcję `TRIAL/TRIALING` na dokładnie `14 × 24 h`, bez karty i bez
@@ -60,12 +60,15 @@ spełnia kontraktu backendu zaproszeń. Użytkownik nie może występować jako 
 firma sprzątająca, dopóki nie poda prawdziwej nazwy prawnej i nie ukończy
 obowiązkowego onboardingu.
 
-Po ukończeniu onboardingu portal musi, wewnątrz tej samej transakcji SQL, wywołać
-`enqueueCleaningProviderActivation(...)`. Funkcja blokuje organizację, profil i
-membership, wymaga `onboarding_status=COMPLETED`, roli `OWNER`, aktywnego membershipu
-i niepustej nazwy prawnej, a następnie zapisuje zdarzenie
-`CLEANING_PROVIDER_ACTIVATED`. Dopiero ta projekcja ustawia status `active` zgodny
-z backendem zaproszeń.
+Po ukończeniu onboardingu portal musi, wewnątrz tej samej zaufanej transakcji SQL,
+wywołać `enqueueCleaningProviderActivation(...)` z tokenem zweryfikowanym przez
+Firebase Admin. Funkcja wymaga zgodnego UID, `email_verified=true`,
+`onboarding_status=COMPLETED`, roli `OWNER`, membershipu `ONBOARDING` lub
+idempotentnego `ACTIVE` i niepustej nazwy prawnej. Następnie atomowo aktywuje
+organizację, ownera i membership oraz zapisuje zdarzenie
+`CLEANING_PROVIDER_ACTIVATED`. Do tej chwili istniejące zapytania Data Connect,
+które wymagają membershipu `ACTIVE`, nie udostępniają operacyjnego API. Dopiero
+projekcja aktywacji ustawia również status `active` zgodny z backendem zaproszeń.
 
 Jeżeli owner ma kilka organizacji, projekcja nie nadpisuje istniejącego
 `defaultOrganizationId`. Autoryzacja operacyjna nadal musi używać jawnego membershipu
