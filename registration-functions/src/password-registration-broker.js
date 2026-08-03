@@ -267,6 +267,7 @@ export function createCleaningCompanyPasswordRegistrationBroker({
   assertMethod(auth, "deleteUser", "AUTH_ADMIN_REQUIRED");
   assertMethod(auth, "setCustomUserClaims", "AUTH_ADMIN_REQUIRED");
   assertMethod(auth, "generateEmailVerificationLink", "AUTH_ADMIN_REQUIRED");
+  assertMethod(operationStore, "find", "OPERATION_STORE_REQUIRED");
   assertMethod(operationStore, "reserve", "OPERATION_STORE_REQUIRED");
   assertMethod(operationStore, "transition", "OPERATION_STORE_REQUIRED");
   assertMethod(operationStore, "beginCompensation", "OPERATION_STORE_REQUIRED");
@@ -302,21 +303,6 @@ export function createCleaningCompanyPasswordRegistrationBroker({
         registrationId: request.registrationId,
         emailHmac: identifiers.emailHmac,
       });
-      await passwordPolicy.assertAllowed(request.password, {
-        email: request.email,
-        firstName: request.firstName,
-        lastName: request.lastName,
-      });
-
-      const sourceAuthorization = await attemptAuthority.authorizePasswordRegistration(
-        passwordRegistrationPrivateSnapshot(request),
-        {
-          registrationToken: request.registrationToken,
-          operationId: identifiers.operationId,
-          uid: identifiers.uid,
-          orgId: identifiers.orgId,
-        },
-      );
 
       const requestFingerprint = passwordRegistrationRequestFingerprint(
         request,
@@ -329,11 +315,43 @@ export function createCleaningCompanyPasswordRegistrationBroker({
         channel: REGISTRATION_CHANNEL.CLEANING_COMPANY,
         createdAtMs: normalizedNow(now()),
       };
-      let operation = await operationStore.reserve(reservation);
+      let operation = await operationStore.find(reservation);
 
-      if (operation.status === PASSWORD_REGISTRATION_STATUS.RECOVERY_REQUIRED) {
+      if (operation?.status === PASSWORD_REGISTRATION_STATUS.RECOVERY_REQUIRED) {
         throw new RegistrationGateError("REGISTRATION_RECOVERY_REQUIRED");
       }
+
+      if (!operation) {
+        await passwordPolicy.assertAllowed(request.password, {
+          email: request.email,
+          firstName: request.firstName,
+          lastName: request.lastName,
+        });
+      }
+
+      let sourceAuthorization = null;
+      if (
+        !operation ||
+        [
+          PASSWORD_REGISTRATION_STATUS.RESERVED,
+          PASSWORD_REGISTRATION_STATUS.AUTH_CREATED,
+        ].includes(operation.status)
+      ) {
+        sourceAuthorization = await attemptAuthority.authorizePasswordRegistration(
+          passwordRegistrationPrivateSnapshot(request),
+          {
+            registrationToken: request.registrationToken,
+            operationId: identifiers.operationId,
+            uid: identifiers.uid,
+            orgId: identifiers.orgId,
+          },
+        );
+      }
+
+      if (!operation) {
+        operation = await operationStore.reserve(reservation);
+      }
+
       if (operation.status !== PASSWORD_REGISTRATION_STATUS.RESERVED) {
         try {
           const existing = await auth.getUser(operation.uid);

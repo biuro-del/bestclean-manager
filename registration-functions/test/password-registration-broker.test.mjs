@@ -46,6 +46,16 @@ function operationStoreFake() {
   const operations = new Map();
   return {
     operations,
+    async find(input) {
+      const current = operations.get(input.operationId);
+      if (!current) return null;
+      if (current.requestFingerprint !== input.requestFingerprint) {
+        const error = new Error("IDEMPOTENCY_CONFLICT");
+        error.code = "IDEMPOTENCY_CONFLICT";
+        throw error;
+      }
+      return clone(current);
+    },
     async reserve(input) {
       const current = operations.get(input.operationId);
       if (current) {
@@ -616,6 +626,30 @@ test("mail failure keeps the organization and retries delivery without extending
     [...env.operationStore.operations.values()][0].verificationLinkEnvelope,
     null,
   );
+});
+
+test("delivery retry skips mutable password screening after the operation exists", async () => {
+  let passwordChecks = 0;
+  let compromised = false;
+  const env = harness({
+    mailFailure: new Error("MAIL_PROVIDER_UNAVAILABLE"),
+    passwordPolicy: {
+      async assertAllowed() {
+        passwordChecks += 1;
+        if (compromised) throw new Error("PASSWORD_COMPROMISED");
+      },
+    },
+  });
+  const first = await env.broker.register(registrationInput());
+  compromised = true;
+  env.setMailFailure(null);
+
+  const retry = await env.broker.register(registrationInput());
+  assert.equal(first.status, "EMAIL_DELIVERY_PENDING");
+  assert.equal(retry.status, "EMAIL_VERIFICATION_REQUIRED");
+  assert.equal(passwordChecks, 1);
+  assert.equal(env.auth.linkCount, 1);
+  assert.equal(env.organizations.size, 1);
 });
 
 test("parallel mail retries converge after one caller completes the operation", async () => {

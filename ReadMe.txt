@@ -4708,3 +4708,32 @@ Granice:
 - Zmiany sa lokalne. Nie wykonano kolejnego commita ani pusha.
 - Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
   prawdziwych dostawcow.
+
+Data: 2026-08-03
+Autor: AI Codex
+Temat: Trzecia lokalna runda poprawek po review PR #4
+Zmieniono lokalnie:
+- Wyjscie z Pwned Passwords jest sprawdzane tylko przy przyjeciu nowej operacji.
+  Retry istniejacej operacji potwierdza fingerprint, ale nie powtarza zmiennej
+  kontroli hasla, ktora moglaby pozniej zablokowac ponowna wysylke tego samego linku.
+- Prywatny magazyn operacji ma odczyt `find`, ktory nie tworzy dokumentu i wymaga
+  zgodnosci fingerprintu, registrationId, HMAC e-maila, UID oraz orgId.
+- Termin waznosci proby zrodlowej jest egzekwowany przed pierwszym zwiazaniem.
+  Dokladny retry proby juz zwiazanej z tym samym UID, orgId i operationId pozostaje
+  dozwolony bez ponownego uzycia wyczyszczonego tokenu.
+- Brak rekordu `MARKETING` nie jest juz traktowany jak odmowa. Wymagany jest jawny
+  rekord decyzji negatywnej z wersja, locale, czasem utworzenia i bez accepted_at.
+Testy regresji:
+- Retry po awarii maila przechodzi mimo pozniejszego wyniku `PASSWORD_COMPROMISED`.
+- Zwiazana proba po terminie przechodzi tylko dla tych samych identyfikatorow;
+  niezwiazana wygasla proba nadal jest odrzucana.
+- Brak lub bledne locale odmownego rekordu `MARKETING` blokuje autoryzacje.
+- Emulator sprawdza prywatny odczyt istniejacej operacji i konflikt fingerprintu.
+- `npm run check` na runtime Node 24 - PASS.
+- Pelny zestaw testow jednostkowych - 76/76 PASS.
+- Emulator Firestore - 12/12 PASS.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Zmiany sa lokalne. Nie wykonano kolejnego commita ani pusha.
+- Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
+  prawdziwych dostawcow.

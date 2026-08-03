@@ -110,6 +110,15 @@ test("authority rejects a token, payload or newsletter decision that differs fro
     consentRows: consents({ MARKETING: { accepted: true, accepted_at: new Date(NOW) } }),
     snapshot: snapshot(), registrationToken: TOKEN, ...identifiers, nowMs: NOW,
   }), (error) => error.code === "SOURCE_NEWSLETTER_CONSENT_MISMATCH");
+  assert.throws(() => assertPasswordRegistrationAttempt({
+    attempt: attempt(), consentRows: consents().filter((row) => row.consent_type !== "MARKETING"),
+    snapshot: snapshot(), registrationToken: TOKEN, ...identifiers, nowMs: NOW,
+  }), (error) => error.code === "SOURCE_NEWSLETTER_CONSENT_INVALID");
+  assert.throws(() => assertPasswordRegistrationAttempt({
+    attempt: attempt(),
+    consentRows: consents({ MARKETING: { locale: "en-GB" } }),
+    snapshot: snapshot(), registrationToken: TOKEN, ...identifiers, nowMs: NOW,
+  }), (error) => error.code === "SOURCE_NEWSLETTER_CONSENT_INVALID");
 });
 
 test("already bound source attempt is accepted only for the same broker operation", () => {
@@ -126,10 +135,21 @@ test("already bound source attempt is accepted only for the same broker operatio
   });
   assert.equal(result.alreadyProvisioned, true);
   assert.equal(result.tokenHash, null);
+  const expiredRetry = assertPasswordRegistrationAttempt({
+    attempt: { ...bound, expires_at: new Date(NOW - 1) },
+    consentRows: consents(), snapshot: snapshot(),
+    registrationToken: TOKEN, ...identifiers, nowMs: NOW,
+  });
+  assert.equal(expiredRetry.alreadyProvisioned, true);
   assert.throws(() => assertPasswordRegistrationAttempt({
     attempt: bound, consentRows: consents(), snapshot: snapshot(),
     registrationToken: TOKEN, ...identifiers, operationId: "preg_other", nowMs: NOW,
   }), (error) => error.code === "SOURCE_ATTEMPT_ALREADY_BOUND");
+  assert.throws(() => assertPasswordRegistrationAttempt({
+    attempt: attempt({ expires_at: new Date(NOW - 1) }),
+    consentRows: consents(), snapshot: snapshot(),
+    registrationToken: TOKEN, ...identifiers, nowMs: NOW,
+  }), (error) => error.code === "SOURCE_ATTEMPT_EXPIRED");
 });
 
 test("Postgres adapter reads attempt and consents in one repeatable-read transaction", async () => {

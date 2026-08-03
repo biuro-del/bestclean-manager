@@ -54,6 +54,20 @@ function assertConsent(row, { version, accepted, locale, code }) {
   }
 }
 
+function assertRejectedMarketingConsent(row, locale) {
+  if (!row) fail("SOURCE_NEWSLETTER_CONSENT_INVALID");
+  if (row.accepted !== false) fail("SOURCE_NEWSLETTER_CONSENT_MISMATCH");
+  if (
+    !normalized(row.consent_version) ||
+    normalized(row.locale) !== locale ||
+    row.accepted_at ||
+    !row.created_at ||
+    !Number.isFinite(new Date(row.created_at).getTime())
+  ) {
+    fail("SOURCE_NEWSLETTER_CONSENT_INVALID");
+  }
+}
+
 function safeConsent(row) {
   return Object.freeze({
     type: normalized(row.consent_type),
@@ -82,10 +96,6 @@ export function assertPasswordRegistrationAttempt({
   if (!AUTHORIZABLE_STATUSES.has(normalized(attempt.status).toUpperCase())) {
     fail("SOURCE_ATTEMPT_STATE_INVALID");
   }
-  if (attempt.expires_at && new Date(attempt.expires_at).getTime() <= nowMs) {
-    fail("SOURCE_ATTEMPT_EXPIRED");
-  }
-
   const alreadyProvisioned = Boolean(attempt.uid || attempt.org_id);
   if (alreadyProvisioned) {
     if (
@@ -96,6 +106,9 @@ export function assertPasswordRegistrationAttempt({
       fail("SOURCE_ATTEMPT_ALREADY_BOUND");
     }
   } else {
+    if (attempt.expires_at && new Date(attempt.expires_at).getTime() <= nowMs) {
+      fail("SOURCE_ATTEMPT_EXPIRED");
+    }
     if (expectedTokenHash && !/^[a-f0-9]{64}$/.test(expectedTokenHash)) {
       fail("SOURCE_ATTEMPT_TOKEN_INVALID");
     }
@@ -142,8 +155,8 @@ export function assertPasswordRegistrationAttempt({
       locale: snapshot.locale,
       code: "SOURCE_NEWSLETTER_CONSENT_INVALID",
     });
-  } else if (marketing?.accepted === true) {
-    fail("SOURCE_NEWSLETTER_CONSENT_MISMATCH");
+  } else {
+    assertRejectedMarketingConsent(marketing, snapshot.locale);
   }
 
   const tokenHash = alreadyProvisioned

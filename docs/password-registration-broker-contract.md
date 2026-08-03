@@ -25,6 +25,9 @@ zmiany Firebase Authentication, pushu i wdrożenia.
 - fingerprint operacji wiąże hasło przez domenowo rozdzielony HMAC, więc retry ze
   zmienionym hasłem kończy się `IDEMPOTENCY_CONFLICT`, ale hasło ani jego jawny hash
   nie są zapisywane;
+- kontrola Pwned Passwords jest etapem przyjęcia nowej operacji. Retry istniejącej
+  operacji najpierw potwierdza fingerprint i nie powtarza zmiennej w czasie kontroli
+  hasła, dzięki czemu może wznowić oczekującą dostawę tego samego linku;
 - claim kanału jest pochodzeniem rejestracji, nie rolą ani membershipem.
 
 ## Kolejność
@@ -52,6 +55,11 @@ zmiany Firebase Authentication, pushu i wdrożenia.
 - Przejściowy błąd odczytu Firebase Auth podczas retry nie zmienia trwałego stanu
   operacji i może być bezpiecznie ponowiony. `RECOVERY_REQUIRED` jest ustawiany
   wyłącznie dla definitywnego braku oczekiwanego UID lub niezgodności tożsamości.
+- Wygaśnięcie próby źródłowej blokuje wyłącznie pierwsze związanie. Próba już
+  związana z dokładnie tym samym UID, `orgId` i `operationId` może być odczytana do
+  idempotentnego retry bez ponownego użycia wyczyszczonego tokenu.
+- Źródło musi zawierać jawny, wersjonowany rekord `MARKETING` także dla decyzji
+  odmownej; brak rekordu nie jest interpretowany jako odmowa.
 - Awaria poczty zachowuje konto, organizację i pierwotny koniec triala. Kolejne
   wywołanie ponawia wyłącznie idempotentną wysyłkę dokładnie tego samego linku.
 - Link powstaje pod pojedynczą dzierżawą. Przed wysyłką jest zapisywany wyłącznie

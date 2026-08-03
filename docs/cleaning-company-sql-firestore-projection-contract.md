@@ -13,10 +13,13 @@ nie może wycofać organizacji ani zmienić dat triala w Cloud SQL.
 Adapter `postgres-registration-attempt-authority.js` w jednej transakcji
 `REPEATABLE READ READ ONLY` sprawdza:
 
-- `registrationId`, hash jednorazowego tokenu i niewygasłą próbę;
+- `registrationId`, hash jednorazowego tokenu i niewygasłą próbę przed pierwszym
+  związaniem; po związaniu dopuszcza wyłącznie dokładny retry tego samego UID,
+  `orgId` i `broker_operation_id`, także po pierwotnym terminie ważności;
 - e-mail, właściciela, telefon, plan, cykl, locale i strefę czasową;
 - zaakceptowane, wersjonowane `TERMS` i `PRIVACY_POLICY`;
-- niezależną decyzję `MARKETING`, zgodną z wyborem newslettera;
+- jawny rekord niezależnej decyzji `MARKETING`, także dla odmowy, zgodny z wyborem
+  newslettera, locale i wymaganym pochodzeniem dowodu;
 - przy retry: ten sam deterministyczny UID, `orgId` i `broker_operation_id`.
 
 Surowy token występuje tylko w pamięci adaptera. Provisioner otrzymuje wyłącznie

@@ -88,6 +88,18 @@ function verificationEnvelope(value) {
   return envelope;
 }
 
+function assertMatchingReservation(current, input) {
+  if (
+    current.requestFingerprint !== input.requestFingerprint ||
+    current.registrationId !== input.registrationId ||
+    current.emailHmac !== input.emailHmac ||
+    current.uid !== input.uid ||
+    current.orgId !== input.orgId
+  ) {
+    throw new RegistrationGateError("IDEMPOTENCY_CONFLICT");
+  }
+}
+
 export function createFirestorePasswordRegistrationOperationStore({
   db,
   collectionName = "cleanziPasswordRegistrationOperations",
@@ -98,6 +110,15 @@ export function createFirestorePasswordRegistrationOperationStore({
   const operations = db.collection(assertCollectionName(collectionName));
 
   return Object.freeze({
+    async find(input) {
+      const operationId = requiredText(input.operationId, "INVALID_OPERATION_ID", 160);
+      const snapshot = await operations.doc(operationId).get();
+      if (!snapshot.exists) return null;
+      const current = snapshot.data();
+      assertMatchingReservation(current, input);
+      return { ...current };
+    },
+
     async reserve(input) {
       const operationId = requiredText(input.operationId, "INVALID_OPERATION_ID", 160);
       const ref = operations.doc(operationId);
@@ -105,15 +126,7 @@ export function createFirestorePasswordRegistrationOperationStore({
         const snapshot = await transaction.get(ref);
         if (snapshot.exists) {
           const current = snapshot.data();
-          if (
-            current.requestFingerprint !== input.requestFingerprint ||
-            current.registrationId !== input.registrationId ||
-            current.emailHmac !== input.emailHmac ||
-            current.uid !== input.uid ||
-            current.orgId !== input.orgId
-          ) {
-            throw new RegistrationGateError("IDEMPOTENCY_CONFLICT");
-          }
+          assertMatchingReservation(current, input);
           return { ...current };
         }
         const operation = {

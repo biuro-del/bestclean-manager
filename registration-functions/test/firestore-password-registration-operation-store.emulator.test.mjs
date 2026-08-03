@@ -44,7 +44,9 @@ function reservation(overrides = {}) {
 
 test("reservation persists privacy-minimal identifiers and is idempotent", async () => {
   const store = storeForTest();
+  assert.equal(await store.find(reservation()), null);
   const first = await store.reserve(reservation());
+  assert.deepEqual(await store.find(reservation()), first);
   const retry = await store.reserve(reservation());
 
   assert.deepEqual(retry, first);
@@ -53,6 +55,10 @@ test("reservation persists privacy-minimal identifiers and is idempotent", async
   assert.doesNotMatch(serialized, /@/);
   assert.doesNotMatch(serialized, /password/i);
   assert.doesNotMatch(serialized, /turnstile/i);
+  await assert.rejects(
+    store.find(reservation({ requestFingerprint: "different-fingerprint" })),
+    (error) => error.code === "IDEMPOTENCY_CONFLICT",
+  );
 });
 
 test("same operation id with a different request fingerprint fails closed", async () => {
