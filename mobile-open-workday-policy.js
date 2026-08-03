@@ -3,6 +3,7 @@
 const MOBILE_OPEN_WORKDAY_ERROR = Object.freeze({
   MULTIPLE_OPEN: 'MULTIPLE_OPEN_WORKDAYS',
   OTHER_DAY: 'OPEN_WORKDAY_FROM_ANOTHER_DAY',
+  INTEGRITY: 'OPEN_WORKDAY_INTEGRITY_CONFLICT',
 })
 
 function text(value) {
@@ -13,9 +14,23 @@ function workdayId(row = {}) {
   return text(row.workday_id ?? row.workdayId ?? row.id)
 }
 
-function isTodayWarsaw(row = {}) {
+function classifyWarsawDay(row = {}) {
+  const businessDayRelation = text(
+    row.business_day_relation ?? row.businessDayRelation,
+  ).toUpperCase()
+  if (['TODAY', 'PRIOR', 'FUTURE'].includes(businessDayRelation)) {
+    return businessDayRelation
+  }
+
   const value = row.is_today_warsaw ?? row.isTodayWarsaw
-  return value === true || value === 1 || text(value).toLowerCase() === 't'
+  const normalized = text(value).toLowerCase()
+  if (value === true || value === 1 || ['1', 't', 'true'].includes(normalized)) {
+    return 'TODAY'
+  }
+  if (value === false || value === 0 || ['0', 'f', 'false'].includes(normalized)) {
+    return 'PRIOR'
+  }
+  return 'UNKNOWN'
 }
 
 function uniqueOpenWorkdays(rows = []) {
@@ -35,8 +50,8 @@ function openWorkdayConflictError(code, rows = []) {
   error.publicCode = code
   error.publicMessage =
     code === MOBILE_OPEN_WORKDAY_ERROR.MULTIPLE_OPEN
-      ? 'Wykryto kilka otwartych dni pracy. Koordynator musi je sprawdzic przed kolejnym skanem.'
-      : 'Poprzedni dzien pracy nadal jest otwarty. Koordynator musi uzupelnic STOP przed rozpoczeciem kolejnego dnia.'
+      ? 'Wykryto kilka otwartych dni pracy z dzisiejsza data. Koordynator musi je sprawdzic przed kolejnym skanem.'
+      : 'Nie mozna jednoznacznie okreslic daty otwartego dnia pracy. Koordynator musi sprawdzic jego dane.'
   error.publicDetails = {
     openCount: rows.length,
     workdayIds: rows.map(workdayId).filter(Boolean),
@@ -45,25 +60,61 @@ function openWorkdayConflictError(code, rows = []) {
   return error
 }
 
-function resolveSingleOpenWorkday(rows = []) {
+function openWorkdayIntegrityError(issues = []) {
+  const rows = issues.map((issue) => issue.row)
+  const error = openWorkdayConflictError(MOBILE_OPEN_WORKDAY_ERROR.INTEGRITY, rows)
+  error.publicDetails.integrityIssues = issues.map((issue) => ({
+    workdayId: workdayId(issue.row) || null,
+    reason: issue.reason,
+  }))
+  return error
+}
+
+function resolveOpenWorkdayState(rows = []) {
   const openWorkdays = uniqueOpenWorkdays(rows)
-  if (openWorkdays.length > 1) {
-    throw openWorkdayConflictError(MOBILE_OPEN_WORKDAY_ERROR.MULTIPLE_OPEN, openWorkdays)
+  const todayWorkdays = []
+  const staleWorkdays = []
+  const integrityIssues = []
+
+  for (const row of openWorkdays) {
+    if (!text(row.start_at ?? row.startAt)) {
+      integrityIssues.push({ row, reason: 'MISSING_START_AT' })
+      continue
+    }
+
+    const classification = classifyWarsawDay(row)
+    if (classification === 'TODAY') {
+      todayWorkdays.push(row)
+    } else if (classification === 'PRIOR') {
+      staleWorkdays.push(row)
+    } else if (classification === 'FUTURE') {
+      integrityIssues.push({ row, reason: 'FUTURE_START_AT' })
+    } else {
+      integrityIssues.push({ row, reason: 'UNKNOWN_TODAY_FLAG' })
+    }
   }
 
-  const activeWorkday = openWorkdays[0] ?? null
-  if (!activeWorkday) {
-    return null
+  if (integrityIssues.length) {
+    throw openWorkdayIntegrityError(integrityIssues)
   }
 
-  if (!isTodayWarsaw(activeWorkday)) {
-    throw openWorkdayConflictError(MOBILE_OPEN_WORKDAY_ERROR.OTHER_DAY, openWorkdays)
+  if (todayWorkdays.length > 1) {
+    throw openWorkdayConflictError(MOBILE_OPEN_WORKDAY_ERROR.MULTIPLE_OPEN, todayWorkdays)
   }
-  return activeWorkday
+
+  return {
+    activeWorkday: todayWorkdays[0] ?? null,
+    staleWorkdays,
+  }
+}
+
+function resolveSingleOpenWorkday(rows = []) {
+  return resolveOpenWorkdayState(rows).activeWorkday
 }
 
 module.exports = {
   MOBILE_OPEN_WORKDAY_ERROR,
+  resolveOpenWorkdayState,
   resolveSingleOpenWorkday,
   uniqueOpenWorkdays,
 }

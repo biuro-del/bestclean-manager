@@ -4624,3 +4624,69 @@ Granice:
 - `artifacts/` i `design-qa-assets/` sa materialami roboczymi i nie moga trafic do commita wydaniowego.
 - Nie wykonano pusha, migracji, wdrozenia ani zmiany danych produkcyjnych.
 - Produkcyjny rollout wymaga osobnej dokladnej zgody.
+
+Data: 2026-07-31
+Autor: AI Codex
+Temat: Rozszerzenie backendowego canary korelacji CLEAN na W005
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-MOBILE-SABINA-W005-20260731`.
+Dodano:
+- Nic.
+Zmieniono:
+- W `apphosting.yaml` pozostawiono `MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED=true` i rozszerzono `MOBILE_SERVICE_EXECUTION_CORRELATION_CANARY_WORKER_IDS` z `W001` do `W001,W005`.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Potwierdzono przed zmiana, ze 100% ruchu backendu `cleanzi-01` obsluguje dokladny commit `fddc25dc9a844565f62494e63c40c624c980cb07`.
+- Testy polityki korelacji i guardow mobile: 12/12 OK.
+- Jawna kontrola polityki: `W001` i `W005` otrzymuja `CANARY_MATCH`, a pracownik spoza listy `CANARY_RESTRICTED`.
+- `git diff --check`: OK; wylacznie standardowe ostrzezenie LF/CRLF.
+Uwagi dla nastepnej osoby:
+- Zmiana rozszerza wylacznie backendowa allowliste tworzenia nowego `CLEAN`. Nie zmienia Data Connect, bazy, Eventow, Workday ani dzialania START/STOP.
+- Osobny canary klienta `mobile-web` musi rowniez kierowac `W005` przez `/api/mobile/scan`; sama zmiana backendu nie stanowi pelnego E2E canary W005.
+- W chwili przygotowania wpisu nie wykonano jeszcze pushu ani wdrozenia produkcyjnego.
+- Rollback polega na przywroceniu wartosci `W001` albo skierowaniu ruchu na poprzedni build oparty na `fddc25dc9a844565f62494e63c40c624c980cb07`.
+
+Data: 2026-07-31
+Autor: AI Codex
+Temat: Produkcyjny rollout backendowego canary W005
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-MOBILE-SABINA-W005-20260731`.
+Wydanie:
+- Commit: `2d18462880c98ae2175c3c71987915eb72c7e1e4`.
+- App Hosting backend `cleanzi-01`: `build-2026-07-31-001`, stan `READY`.
+- Rollout `build-2026-07-31-001`: stan `SUCCEEDED`, 100% ruchu.
+- Efektywna konfiguracja builda potwierdza `MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED=true` oraz dokladna liste `W001,W005`.
+Weryfikacja:
+- `https://portal.cleanzi.pl/`: HTTP 200.
+- `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`: HTTP 200.
+- `/api/mobile/scan` bez tokenu na obu domenach: kontrolowane HTTP 401 JSON.
+- Proxy `mobile-web` dopuszcza origin W005 dla skanu, statusu i planu dnia; obcy origin otrzymuje HTTP 403.
+- Nie wykonano logowania jako Sabina, skanu produkcyjnego ani zapisu testowego do bazy.
+Rollback:
+- Skierowac 100% ruchu na `build-2026-07-30-001` (`fddc25dc9a844565f62494e63c40c624c980cb07`) albo wdrozyc revert przywracajacy `W001`.
+- Nie usuwac ani nie modyfikowac historii Workday, Event ani `mobile_scan_command`.
+
+Data: 2026-08-01
+Autor: AI Codex
+Temat: Produkcyjna obsluga starego Workday i oczekujacego skanu W005
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-MOBILE-W005-WORKDAY-AND-PENDING-SCAN-20260801`.
+Wydanie:
+- Backend commit: `a4dfd9763bb52d84ee4112db247ed4679a884577`.
+- App Hosting `cleanzi-01`: `build-2026-08-01-001`, stan `SUCCEEDED`, `reconciling=false`, 100% ruchu.
+- Poprzedni build backendu: `build-2026-07-31-001`.
+- Frontend W005 commit: `66e55df560ae8f52a7efa9f110f7b8631f4d0c9b`.
+- Hosting: wylacznie `cleanzi-mobile-w005-20260731`; `mobile-web`, `app.cleanzi.pl` i ogolny pilot pozostaly bez zmian.
+Weryfikacja:
+- Backend: 344/344 testow; frontend: polityka 24/24 i klient API 14/14.
+- `GET /api/mobile/scan/status` przez `mobile-web`: kontrolowane HTTP 501 `MOBILE_SCAN_STATUS_UNAVAILABLE`.
+- `POST /api/mobile/scan` bez tokenu: kontrolowane HTTP 401 `UNAUTHENTICATED`.
+- Blad `UPSTREAM_FORBIDDEN_HOST` nie wystepuje po wdrozeniu.
+- Produkcyjny bundle W005: `assets/mobile-C8g3oJzH.js`, SHA-256 `DC2C11B8C059E8CB4ABC861D7A03E65D380AE72D523090998BD9C77B6D6129AF`.
+- Widok 390 x 844: brak poziomego przewijania; konsola: 0 bledow i 0 ostrzezen.
+- Trzy wpisy logow o poziomie ERROR byly celowymi probami statusu HTTP 501; brak innych bledow w oknie wydania.
+- Nie wykonano migracji, testowego skanu ani zapisu do bazy.
+Rollback:
+- Po utworzeniu nowego dnia pracy przy pozostawionym starym Workday nie wykonywac slepego rollbacku backendu, bo poprzednia regula moze ponownie zablokowac pracownika.
+- Preferowac roll-forward; jesli rollback jest konieczny, najpierw zamknac stary Workday przez autoryzowana korekte biurowa.

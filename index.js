@@ -72,9 +72,9 @@ const {
 } = require('./mobile-workflow-security-policy')
 const {
   assertNoUnresolvedOpenEvents,
-  resolveSingleOpenCycle,
+  resolveOpenCycleState,
 } = require('./mobile-open-cycle-policy')
-const { resolveSingleOpenWorkday } = require('./mobile-open-workday-policy')
+const { resolveOpenWorkdayState } = require('./mobile-open-workday-policy')
 const { mobileCorrelationRolloutDecision } = require('./mobile-correlation-rollout-policy')
 const {
   assertNoWorkerScheduleLocationConflicts,
@@ -143,6 +143,7 @@ const PORTAL_ZONE_QR_CODES_PATH = '/api/portal/zones/qr-codes'
 const PORTAL_PROFITABILITY_PATH = '/api/portal/profitability'
 const MOBILE_STATE_PATH = '/api/mobile/state'
 const MOBILE_SCAN_PATH = '/api/mobile/scan'
+const MOBILE_SCAN_STATUS_PATH = '/api/mobile/scan/status'
 const MOBILE_JOB_CARDS_PATH = '/api/mobile/job-cards'
 const DATACONNECT_LOCATION = String(process.env.FIREBASE_DATACONNECT_LOCATION || process.env.DATACONNECT_LOCATION || '').trim()
 const DATACONNECT_SERVICE = String(process.env.FIREBASE_DATACONNECT_SERVICE || process.env.DATACONNECT_SERVICE || '').trim()
@@ -2669,9 +2670,14 @@ async function findMobileZoneByQr(client, orgId, qrCode) {
   return mapMobileZoneRow(resolveMobileZoneQrRows(result.rows, code))
 }
 
-async function fetchActiveMobileWorkday(client, orgId, workerLogin) {
+async function fetchMobileOpenWorkdayState(client, orgId, workerLogin) {
   const result = await client.query(
     `select w.*,
+            case
+              when (w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date then 'TODAY'
+              when (w.start_at at time zone 'Europe/Warsaw')::date < (now() at time zone 'Europe/Warsaw')::date then 'PRIOR'
+              else 'FUTURE'
+            end as business_day_relation,
             ((w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date) as is_today_warsaw
        from public.workday w
       where org_id = $1
@@ -2679,11 +2685,10 @@ async function fetchActiveMobileWorkday(client, orgId, workerLogin) {
         and upper(btrim(coalesce(status, 'RUNNING'))) <> 'CLOSED'
         and end_at is null
       order by start_at desc nulls last, updated_at desc nulls last
-      limit 2
       for update`,
     [orgId, workerLogin],
   )
-  return resolveSingleOpenWorkday(result.rows)
+  return resolveOpenWorkdayState(result.rows)
 }
 
 async function fetchMobileWorkdays(client, orgId, workerLogin) {
@@ -2744,6 +2749,23 @@ async function fetchUnresolvedMobileCycles(client, orgId, workerLogin) {
     [orgId, workerLogin],
   )
   return Array.isArray(result.rows) ? result.rows : []
+}
+
+function partitionMobileUnresolvedCycles(rows = [], activeWorkdayId = '') {
+  const normalizedActiveWorkdayId = normalizeText(activeWorkdayId)
+  const blocking = []
+  const prior = []
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const rowWorkdayId = normalizeText(row?.workday_id ?? row?.workdayId)
+    if (!rowWorkdayId || (normalizedActiveWorkdayId && rowWorkdayId === normalizedActiveWorkdayId)) {
+      blocking.push(row)
+    } else {
+      prior.push(row)
+    }
+  }
+
+  return { blocking, prior }
 }
 
 async function fetchMobileCycleHistory(client, orgId, workerLogin) {
@@ -2886,7 +2908,8 @@ async function upsertMobileRuntimeState(client, orgId, worker, activeWorkday, ac
 
 async function buildMobileSnapshotFromDb(client, orgId, worker) {
   const zones = await fetchMobileZones(client, orgId)
-  const activeWorkdayRaw = await fetchActiveMobileWorkday(client, orgId, worker.login)
+  const openWorkdayState = await fetchMobileOpenWorkdayState(client, orgId, worker.login)
+  const activeWorkdayRaw = openWorkdayState.activeWorkday
   const workdays = await fetchMobileWorkdays(client, orgId, worker.login)
   const cycleHistory = await fetchMobileCycleHistory(client, orgId, worker.login)
   const availableEventColumns = await readPublicEventColumns(client)
@@ -2898,6 +2921,8 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
     ? await fetchUnresolvedMobileCycles(client, orgId, worker.login)
     : []
   let activeCycleRaw = null
+  let priorOpenCycleRows = []
+  let priorUnresolvedCycleRows = []
   let openCycleIntegrity = eventTypeReadable
     ? null
     : {
@@ -2906,8 +2931,15 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
       }
   if (eventTypeReadable) {
     try {
-      assertNoUnresolvedOpenEvents(unresolvedCycleRows)
-      activeCycleRaw = resolveSingleOpenCycle(openCycleRows, activeWorkdayRaw?.workday_id)
+      const unresolvedState = partitionMobileUnresolvedCycles(
+        unresolvedCycleRows,
+        activeWorkdayRaw?.workday_id,
+      )
+      priorUnresolvedCycleRows = unresolvedState.prior
+      assertNoUnresolvedOpenEvents(unresolvedState.blocking)
+      const openCycleState = resolveOpenCycleState(openCycleRows, activeWorkdayRaw?.workday_id)
+      activeCycleRaw = openCycleState.activeCycle
+      priorOpenCycleRows = openCycleState.staleCycles
     } catch (error) {
       if (Number(error?.statusCode) !== 409) {
         throw error
@@ -2924,6 +2956,25 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
 
   const activeWorkday = mapMobileWorkdayRow(activeWorkdayRaw)
   const activeCycle = mapMobileEventRow(activeCycleRaw)
+  const staleOpenWorkdays = openWorkdayState.staleWorkdays.map(mapMobileWorkdayRow).filter(Boolean)
+  const staleOpenCycles = priorOpenCycleRows.map(mapMobileEventRow).filter(Boolean)
+  const unresolvedPriorCycles = priorUnresolvedCycleRows.map(mapMobileEventRow).filter(Boolean)
+  const repairRequired = {
+    required: Boolean(
+      staleOpenWorkdays.length ||
+      staleOpenCycles.length ||
+      unresolvedPriorCycles.length ||
+      openCycleIntegrity
+    ),
+    blockStart: false,
+    workdayCount: staleOpenWorkdays.length,
+    cleanEventCount: staleOpenCycles.length,
+    unresolvedEventCount: unresolvedPriorCycles.length,
+    workdays: staleOpenWorkdays,
+    cleanEvents: staleOpenCycles,
+    unresolvedEvents: unresolvedPriorCycles,
+    integrity: openCycleIntegrity,
+  }
   return {
     orgId,
     worker,
@@ -2935,6 +2986,8 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
     })),
     startZone: zones.find((zone) => zone.kind === 'START') || null,
     activeWorkday,
+    staleOpenWorkday: staleOpenWorkdays[0] || null,
+    repairRequired,
     activePause,
     pauseTotalSec: Number(activeWorkday?.pauseTotalSec || 0),
     activeCycle,
@@ -3207,11 +3260,11 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
     throw error
   }
 
-  let activeWorkday = await fetchActiveMobileWorkday(client, orgId, worker.login)
+  const openWorkdayState = await fetchMobileOpenWorkdayState(client, orgId, worker.login)
+  let activeWorkday = openWorkdayState.activeWorkday
   let activeCycle = null
   let action = 'NOOP'
   let message = 'Brak zmian.'
-  const zoneIsSpecial = isMobileSpecialZone(zone)
   const scanGpsData = normalizeMobileGpsData(body?.gpsData ?? body?.clientGps ?? body?.gps ?? body?.location)
   const scanGpsNote = (actionLabel, allowed = true) => (allowed ? mobileGpsColumnValue(scanGpsData, actionLabel) : '')
   const requireScanGps = (actionLabel, required = true) => {
@@ -3239,7 +3292,6 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
       error.publicMessage = 'Brak aktywnego dnia pracy. Najpierw zeskanuj START.'
       throw error
     }
-    requireScanGps('STOP')
     await closeMobileOpenCycles(
       client,
       orgId,
@@ -3248,12 +3300,11 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
       'STOP_END_DAY',
       scannedAt,
       comment,
-      scanGpsNote('CLEAN_STOP'),
-      { gpsSpecialOnly: true },
+      '',
     )
     const graceMs = Math.max(0, Number(zone.stopGraceMin || 0)) * 60 * 1000
     const endAt = new Date(scannedAt.getTime() + graceMs)
-    await closeMobileWorkday(client, orgId, activeWorkday, zone, endAt, comment, scanGpsNote('STOP'))
+    await closeMobileWorkday(client, orgId, activeWorkday, zone, endAt, comment, '')
     action = 'STOP_WORKDAY'
     message = graceMs > 0
       ? `Zapisano na serwerze. Zakonczono dzien pracy. Doliczono ${zone.stopGraceMin} min.`
@@ -3268,21 +3319,30 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
         error.publicMessage = 'Brak aktywnego dnia pracy. Najpierw zeskanuj START.'
         throw error
       }
-      requireScanGps('CLEAN', zoneIsSpecial)
+      const startsIndividualOrder = zone.kind === 'INDIVIDUAL'
       assertMobileCorrelationEnabled(worker)
-      activeWorkday = await createMobileWorkday(client, orgId, worker, zone, scannedAt, '')
+      activeWorkday = await createMobileWorkday(
+        client,
+        orgId,
+        worker,
+        zone,
+        scannedAt,
+        scanGpsNote('CLEAN_START', startsIndividualOrder),
+      )
     }
 
     const unresolvedCycleRows = await fetchUnresolvedMobileCycles(client, orgId, worker.login)
-    assertNoUnresolvedOpenEvents(unresolvedCycleRows)
+    const unresolvedCycleState = partitionMobileUnresolvedCycles(
+      unresolvedCycleRows,
+      activeWorkday?.workday_id,
+    )
+    assertNoUnresolvedOpenEvents(unresolvedCycleState.blocking)
     const openCycleRows = await fetchOpenMobileCycles(client, orgId, worker.login)
-    activeCycle = resolveSingleOpenCycle(openCycleRows, activeWorkday?.workday_id)
+    activeCycle = resolveOpenCycleState(openCycleRows, activeWorkday?.workday_id).activeCycle
 
     if (activeCycle && isMobileEventOpen(activeCycle)) {
-      const activeCycleIsSpecial = isMobileSpecialEventRow(activeCycle)
       if (normalizeText(activeCycle.zone_id).toLowerCase() === normalizeText(zone.id).toLowerCase()) {
-        requireScanGps('CLEAN', activeCycleIsSpecial || zoneIsSpecial)
-        await closeMobileEvent(client, orgId, activeCycle, 'QR_SAME', scannedAt, comment, scanGpsNote('CLEAN_STOP', activeCycleIsSpecial || zoneIsSpecial))
+        await closeMobileEvent(client, orgId, activeCycle, 'QR_SAME', scannedAt, comment, '')
         action = 'CLOSE_ZONE'
         message = 'Zapisano na serwerze. Zakonczono sprzatanie tej strefy.'
         if (body?.closeWorkdayImmediately) {
@@ -3291,7 +3351,8 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
           message = 'Zapisano na serwerze. Zakonczono strefe i dzien pracy.'
         }
       } else {
-        requireScanGps('CLEAN', activeCycleIsSpecial || zoneIsSpecial)
+        const startsIndividualOrder = zone.kind === 'INDIVIDUAL'
+        requireScanGps('CLEAN_START', startsIndividualOrder)
         assertMobileCorrelationEnabled(worker)
         await closeMobileEvent(
           client,
@@ -3300,16 +3361,35 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
           'QR_SWITCH',
           scannedAt,
           comment,
-          scanGpsNote('CLEAN_STOP', activeCycleIsSpecial),
+          '',
         )
-        await createMobileCycle(client, orgId, worker, activeWorkday, zone, scannedAt, comment, scanGpsNote('CLEAN_START', zoneIsSpecial))
+        await createMobileCycle(
+          client,
+          orgId,
+          worker,
+          activeWorkday,
+          zone,
+          scannedAt,
+          comment,
+          scanGpsNote('CLEAN_START', startsIndividualOrder),
+        )
         action = 'SWITCH_ZONE'
         message = `Zapisano na serwerze. Zmiana strefy na: ${zone.name || zone.id}.`
       }
     } else {
-      requireScanGps('CLEAN', zoneIsSpecial)
+      const startsIndividualOrder = zone.kind === 'INDIVIDUAL'
+      requireScanGps('CLEAN_START', startsIndividualOrder)
       assertMobileCorrelationEnabled(worker)
-      await createMobileCycle(client, orgId, worker, activeWorkday, zone, scannedAt, comment, scanGpsNote('CLEAN_START', zoneIsSpecial))
+      await createMobileCycle(
+        client,
+        orgId,
+        worker,
+        activeWorkday,
+        zone,
+        scannedAt,
+        comment,
+        scanGpsNote('CLEAN_START', startsIndividualOrder),
+      )
       action = 'START_ZONE'
       message = `Zapisano na serwerze. Rozpoczeto sprzatanie: ${zone.name || zone.id}.`
     }
@@ -3334,7 +3414,11 @@ function mapMobileIntegrityDatabaseError(error) {
 
   if (
     dbCode === '23505' &&
-    (constraint === 'event_single_open_clean_per_worker' || message.includes('OPEN_CLEAN_EVENT_EXISTS'))
+    (
+      constraint === 'event_single_open_clean_per_worker' ||
+      constraint === 'event_single_open_clean_per_workday' ||
+      message.includes('OPEN_CLEAN_EVENT_EXISTS')
+    )
   ) {
     return {
       status: 409,
@@ -3345,7 +3429,11 @@ function mapMobileIntegrityDatabaseError(error) {
 
   if (
     dbCode === '23505' &&
-    (constraint === 'workday_single_open_per_worker' || message.includes('OPEN_WORKDAY_EXISTS'))
+    (
+      constraint === 'workday_single_open_per_worker' ||
+      constraint === 'workday_single_open_per_worker_day' ||
+      message.includes('OPEN_WORKDAY_EXISTS')
+    )
   ) {
     return {
       status: 409,
@@ -3379,6 +3467,46 @@ function mapMobileIntegrityDatabaseError(error) {
   }
 
   return null
+}
+
+function handleMobileScanStatusRequest(req, res) {
+  const headers = withSecurityHeaders({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  })
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, headers)
+    res.end()
+    return
+  }
+
+  if (req.method !== 'GET') {
+    res.writeHead(405, headers)
+    res.end(JSON.stringify({
+      ok: false,
+      error: {
+        code: 'METHOD_NOT_ALLOWED',
+        message: 'Dozwolona metoda to GET.',
+      },
+    }))
+    return
+  }
+
+  // The current mobile client treats 501 as an unavailable receipt endpoint
+  // and safely replays the exact idempotent POST with the same clientActionId.
+  // Owning this route prevents it from leaking into the generic /api proxy.
+  res.writeHead(501, headers)
+  res.end(JSON.stringify({
+    ok: false,
+    error: {
+      code: 'MOBILE_SCAN_STATUS_UNAVAILABLE',
+      message: 'Status skanu nie jest jeszcze udostepniony. Bezpiecznie ponow identyczny zapis.',
+    },
+  }))
 }
 
 async function handleMobileWorkflowRequest(req, res, requestUrl) {
@@ -9636,6 +9764,10 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
     handlePortalCompanyRegistryRequest(req, res).catch((error) => {
       sendApiError(res, 500, 'COMPANY_LOOKUP_FAILED', error?.message || 'Unexpected company lookup error.')
     })
+    return
+  }
+  if (requestUrl.pathname === MOBILE_SCAN_STATUS_PATH) {
+    handleMobileScanStatusRequest(req, res)
     return
   }
   if (
