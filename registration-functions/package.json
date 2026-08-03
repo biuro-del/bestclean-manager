@@ -1,0 +1,24 @@
+{
+  "name": "cleanzi-central-registration-functions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "check": "node --check src/registration-contract.js && node --check src/facility-manager-adapter.js && node --check src/central-router.js && node --check src/firestore-grant-store.js",
+    "test": "npm run test:unit",
+    "test:unit": "node --test test/registration-contract.test.mjs",
+    "test:emulator": "firebase --config firebase.test.json emulators:exec --project cleanzi-registration-gate-test --only firestore \"node --test test/firestore-grant-store.emulator.test.mjs\""
+  },
+  "dependencies": {
+    "firebase-admin": "14.2.0"
+  },
+  "devDependencies": {
+    "firebase-tools": "15.25.1"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  }
+}
