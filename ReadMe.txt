@@ -4750,16 +4750,25 @@ Zmieniono lokalnie:
 - Zaufana transakcja konczaca onboarding wymaga zgodnego UID oraz
   `email_verified=true`, sprawdza ukonczony profil, a nastepnie atomowo aktywuje
   organizacje, membership i ownera przed zapisaniem zdarzenia projekcji.
+- Aktywacja wymaga aktywnej transakcji PostgreSQL i zaklada savepoint. Blad
+  dowolnego UPDATE lub outboxa cofa wszystkie zmiany tej aktywacji.
+- Organizacja zawieszona, zablokowana, zarchiwizowana albo soft-deleted nie moze
+  zostac przywrocona do `ACTIVE` przez ponowne wywolanie aktywacji.
+- `joined_at` pozostaje pusty podczas `ONBOARDING` i jest ustawiany dopiero przy
+  skutecznej aktywacji membershipu.
+- Deterministyczny `INVALID_DISPLAY_NAME` jest zwracany jako blad klienta HTTP 400,
+  a nie maskowany jako awaria serwera 500.
 Testy regresji:
 - Niezweryfikowany e-mail i obcy UID sa odrzucane przed pierwszym zapytaniem SQL.
 - Membership `ONBOARDING` nie spelnia kontraktu operacyjnego ani zaproszen.
 - Aktywacja po weryfikacji i ukonczeniu onboardingu przechodzi do `ACTIVE`, a
   opozniona projekcja rejestracji nie cofa aktywnego stanu.
 - `npm run check` na runtime Node 24 - PASS.
-- Pelny zestaw testow jednostkowych - 77/77 PASS.
+- Pelny zestaw testow jednostkowych - 80/80 PASS.
 - Emulator Firestore - 12/12 PASS.
 - `npm ls --depth=0` na runtime Node 24 - PASS.
 Granice:
-- Zmiany sa lokalne. Nie wykonano kolejnego commita ani pusha.
+- Glowna poprawka zostala zapisana w `7096b0b`; zabezpieczenia fail-closed sa
+  przygotowane jako follow-up przed ponownym review PR #4.
 - Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
   prawdziwych dostawcow.

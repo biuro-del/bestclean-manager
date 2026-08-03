@@ -245,7 +245,7 @@ async function insertOrganizationGraph(client, input) {
     `INSERT INTO organization_member (
        org_id, uid, role, worker_id, status, consumes_seat, invited_at,
        joined_at, created_by_uid, updated_at, created_at
-     ) VALUES ($1, $2, 'OWNER', $3, 'ONBOARDING', true, $4, $4, $2, $4, $4)`,
+     ) VALUES ($1, $2, 'OWNER', $3, 'ONBOARDING', true, $4, NULL, $2, $4, $4)`,
     [input.orgId, input.uid, workerId, now],
   );
   await client.query(

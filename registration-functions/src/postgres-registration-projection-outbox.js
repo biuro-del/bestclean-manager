@@ -9,6 +9,24 @@ function stableEventId(source) {
   return `projection_${createHash("sha256").update(source, "utf8").digest("hex").slice(0, 32)}`;
 }
 
+const ACTIVATION_SAVEPOINT = "cleanzi_provider_activation";
+
+async function openActivationSavepoint(client) {
+  try {
+    await client.query(`SAVEPOINT ${ACTIVATION_SAVEPOINT}`);
+  } catch (error) {
+    if (error?.code === "25P01") {
+      throw new RegistrationGateError("POSTGRES_TRANSACTION_REQUIRED");
+    }
+    throw error;
+  }
+}
+
+async function rollbackActivationSavepoint(client) {
+  await client.query(`ROLLBACK TO SAVEPOINT ${ACTIVATION_SAVEPOINT}`);
+  await client.query(`RELEASE SAVEPOINT ${ACTIVATION_SAVEPOINT}`);
+}
+
 export async function enqueueCleaningProviderActivation({
   client,
   organizationId,
@@ -35,104 +53,119 @@ export async function enqueueCleaningProviderActivation({
   }
   const operationId = requiredText(activationOperationId, "INVALID_OPERATION_ID", 160);
   const occurredAt = new Date(normalizedNow(occurredAtMs));
-  const result = await client.query(
-    `SELECT o.org_id, o.name, o.status, o.onboarding_status,
-            o.organization_kind, p.legal_name, m.role, m.worker_id,
-            m.status AS member_status
-       FROM organizations o
-       JOIN organization_company_profile p ON p.org_id = o.org_id
-       JOIN organization_member m ON m.org_id = o.org_id AND m.uid = $2
-      WHERE o.org_id = $1
-      FOR UPDATE`,
-    [orgId, uid],
-  );
-  const row = result.rows[0];
-  if (!row) throw new RegistrationGateError("PROVIDER_ORGANIZATION_NOT_FOUND");
-  const legalName = String(row.legal_name || "").trim();
-  if (
-    String(row.organization_kind || "").toUpperCase() !== "CLEANING_PROVIDER" ||
-    String(row.onboarding_status || "").toUpperCase() !== "COMPLETED" ||
-    String(row.role || "").toUpperCase() !== "OWNER" ||
-    !["ONBOARDING", "ACTIVE"].includes(
-      String(row.member_status || "").toUpperCase(),
-    ) ||
-    legalName.length < 2
-  ) {
-    throw new RegistrationGateError("PROVIDER_ONBOARDING_INCOMPLETE");
+  await openActivationSavepoint(client);
+  try {
+    const result = await client.query(
+      `SELECT o.org_id, o.name, o.status, o.onboarding_status, o.deleted_at,
+              o.organization_kind, p.legal_name, m.role, m.worker_id,
+              m.status AS member_status
+         FROM organizations o
+         JOIN organization_company_profile p ON p.org_id = o.org_id
+         JOIN organization_member m ON m.org_id = o.org_id AND m.uid = $2
+        WHERE o.org_id = $1
+        FOR UPDATE`,
+      [orgId, uid],
+    );
+    const row = result.rows[0];
+    if (!row) throw new RegistrationGateError("PROVIDER_ORGANIZATION_NOT_FOUND");
+    const legalName = String(row.legal_name || "").trim();
+    if (
+      String(row.organization_kind || "").toUpperCase() !== "CLEANING_PROVIDER" ||
+      !["ONBOARDING", "ACTIVE"].includes(String(row.status || "").toUpperCase()) ||
+      row.deleted_at != null ||
+      String(row.onboarding_status || "").toUpperCase() !== "COMPLETED" ||
+      String(row.role || "").toUpperCase() !== "OWNER" ||
+      !["ONBOARDING", "ACTIVE"].includes(
+        String(row.member_status || "").toUpperCase(),
+      ) ||
+      legalName.length < 2
+    ) {
+      throw new RegistrationGateError("PROVIDER_ONBOARDING_INCOMPLETE");
+    }
+    const organizationUpdate = await client.query(
+      `UPDATE organizations
+          SET status = 'ACTIVE', updated_by_uid = $2, updated_at = $3
+        WHERE org_id = $1
+          AND organization_kind = 'CLEANING_PROVIDER'
+          AND status IN ('ONBOARDING', 'ACTIVE')
+          AND deleted_at IS NULL
+          AND onboarding_status = 'COMPLETED'
+        RETURNING org_id`,
+      [orgId, uid, occurredAt],
+    );
+    if (organizationUpdate.rowCount !== 1) {
+      throw new RegistrationGateError("PROVIDER_ONBOARDING_INCOMPLETE");
+    }
+    const membershipUpdate = await client.query(
+      `UPDATE organization_member
+          SET status = 'ACTIVE', joined_at = COALESCE(joined_at, $3),
+              updated_at = $3
+        WHERE org_id = $1 AND uid = $2 AND role = 'OWNER'
+          AND status IN ('ONBOARDING', 'ACTIVE')
+        RETURNING status`,
+      [orgId, uid, occurredAt],
+    );
+    if (membershipUpdate.rowCount !== 1) {
+      throw new RegistrationGateError("PROVIDER_MEMBERSHIP_ACTIVATION_CONFLICT");
+    }
+    const workerUpdate = await client.query(
+      `UPDATE worker
+          SET active = true, status = 'ACTIVE',
+              activated_at = COALESCE(activated_at, $4),
+              updated_by_uid = $2, updated_at = $4
+        WHERE org_id = $1 AND auth_uid = $2 AND worker_id = $3
+          AND role = 'OWNER' AND status IN ('ONBOARDING', 'ACTIVE')
+        RETURNING worker_id`,
+      [orgId, uid, row.worker_id, occurredAt],
+    );
+    if (workerUpdate.rowCount !== 1) {
+      throw new RegistrationGateError("PROVIDER_OWNER_ACTIVATION_CONFLICT");
+    }
+    const eventId = stableEventId(operationId);
+    const payload = {
+      schemaVersion: 1,
+      eventType: "CLEANING_PROVIDER_ACTIVATED",
+      operationId,
+      occurredAtMs: occurredAt.getTime(),
+      organizationId: orgId,
+      ownerUid: uid,
+      organization: {
+        legalName,
+        displayName: String(row.name || legalName).trim() || legalName,
+        kind: "cleaning_provider",
+        status: "active",
+      },
+      membership: { role: "owner", status: "active" },
+      profile: { status: "active" },
+    };
+    const insertResult = await client.query(
+      `INSERT INTO cleanzi_registration_projection_outbox (
+         event_id, operation_id, event_type, org_id, uid, state,
+         payload, attempts, available_at, created_at, updated_at
+       ) VALUES ($1, $2, 'CLEANING_PROVIDER_ACTIVATED', $3, $4,
+                 'PENDING', $5::jsonb, 0, $6, $6, $6)
+       ON CONFLICT (operation_id) DO UPDATE
+         SET updated_at = cleanzi_registration_projection_outbox.updated_at
+         WHERE cleanzi_registration_projection_outbox.event_id = EXCLUDED.event_id
+           AND cleanzi_registration_projection_outbox.event_type = EXCLUDED.event_type
+           AND cleanzi_registration_projection_outbox.org_id = EXCLUDED.org_id
+           AND cleanzi_registration_projection_outbox.uid = EXCLUDED.uid
+       RETURNING event_id`,
+      [eventId, operationId, orgId, uid, JSON.stringify(payload), occurredAt],
+    );
+    if (insertResult.rowCount !== 1) {
+      throw new RegistrationGateError("ACTIVATION_IDEMPOTENCY_CONFLICT");
+    }
+    await client.query(`RELEASE SAVEPOINT ${ACTIVATION_SAVEPOINT}`);
+    return Object.freeze({ eventId, operationId, organizationId: orgId, ownerUid: uid });
+  } catch (error) {
+    try {
+      await rollbackActivationSavepoint(client);
+    } catch {
+      throw new RegistrationGateError("PROVIDER_ACTIVATION_ROLLBACK_FAILED");
+    }
+    throw error;
   }
-  const organizationUpdate = await client.query(
-    `UPDATE organizations
-        SET status = 'ACTIVE', updated_by_uid = $2, updated_at = $3
-      WHERE org_id = $1
-        AND organization_kind = 'CLEANING_PROVIDER'
-        AND onboarding_status = 'COMPLETED'
-      RETURNING org_id`,
-    [orgId, uid, occurredAt],
-  );
-  if (organizationUpdate.rowCount !== 1) {
-    throw new RegistrationGateError("PROVIDER_ONBOARDING_INCOMPLETE");
-  }
-  const membershipUpdate = await client.query(
-    `UPDATE organization_member
-        SET status = 'ACTIVE', joined_at = COALESCE(joined_at, $3),
-            updated_at = $3
-      WHERE org_id = $1 AND uid = $2 AND role = 'OWNER'
-        AND status IN ('ONBOARDING', 'ACTIVE')
-      RETURNING status`,
-    [orgId, uid, occurredAt],
-  );
-  if (membershipUpdate.rowCount !== 1) {
-    throw new RegistrationGateError("PROVIDER_MEMBERSHIP_ACTIVATION_CONFLICT");
-  }
-  const workerUpdate = await client.query(
-    `UPDATE worker
-        SET active = true, status = 'ACTIVE',
-            activated_at = COALESCE(activated_at, $4),
-            updated_by_uid = $2, updated_at = $4
-      WHERE org_id = $1 AND auth_uid = $2 AND worker_id = $3
-        AND role = 'OWNER' AND status IN ('ONBOARDING', 'ACTIVE')
-      RETURNING worker_id`,
-    [orgId, uid, row.worker_id, occurredAt],
-  );
-  if (workerUpdate.rowCount !== 1) {
-    throw new RegistrationGateError("PROVIDER_OWNER_ACTIVATION_CONFLICT");
-  }
-  const eventId = stableEventId(operationId);
-  const payload = {
-    schemaVersion: 1,
-    eventType: "CLEANING_PROVIDER_ACTIVATED",
-    operationId,
-    occurredAtMs: occurredAt.getTime(),
-    organizationId: orgId,
-    ownerUid: uid,
-    organization: {
-      legalName,
-      displayName: String(row.name || legalName).trim() || legalName,
-      kind: "cleaning_provider",
-      status: "active",
-    },
-    membership: { role: "owner", status: "active" },
-    profile: { status: "active" },
-  };
-  const insertResult = await client.query(
-    `INSERT INTO cleanzi_registration_projection_outbox (
-       event_id, operation_id, event_type, org_id, uid, state,
-       payload, attempts, available_at, created_at, updated_at
-     ) VALUES ($1, $2, 'CLEANING_PROVIDER_ACTIVATED', $3, $4,
-               'PENDING', $5::jsonb, 0, $6, $6, $6)
-     ON CONFLICT (operation_id) DO UPDATE
-       SET updated_at = cleanzi_registration_projection_outbox.updated_at
-       WHERE cleanzi_registration_projection_outbox.event_id = EXCLUDED.event_id
-         AND cleanzi_registration_projection_outbox.event_type = EXCLUDED.event_type
-         AND cleanzi_registration_projection_outbox.org_id = EXCLUDED.org_id
-         AND cleanzi_registration_projection_outbox.uid = EXCLUDED.uid
-     RETURNING event_id`,
-    [eventId, operationId, orgId, uid, JSON.stringify(payload), occurredAt],
-  );
-  if (insertResult.rowCount !== 1) {
-    throw new RegistrationGateError("ACTIVATION_IDEMPOTENCY_CONFLICT");
-  }
-  return Object.freeze({ eventId, operationId, organizationId: orgId, ownerUid: uid });
 }
 
 export function createPostgresRegistrationProjectionOutbox({

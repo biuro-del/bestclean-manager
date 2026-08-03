@@ -195,8 +195,9 @@ test("activation event can be enqueued only after authoritative onboarding is co
         return { rows: [{
           org_id: "org_reg_1001",
           name: "Żółw Clean",
-          status: "TRIAL",
+          status: "ONBOARDING",
           onboarding_status: "COMPLETED",
+          deleted_at: null,
           organization_kind: "CLEANING_PROVIDER",
           legal_name: "Żółw Clean sp. z o.o.",
           role: "OWNER",
@@ -223,13 +224,17 @@ test("activation event can be enqueued only after authoritative onboarding is co
   assert.equal(calls.some((call) => sqlText(call.sql).startsWith("UPDATE organizations")), true);
   assert.equal(calls.some((call) => sqlText(call.sql).startsWith("UPDATE organization_member")), true);
   assert.equal(calls.some((call) => sqlText(call.sql).startsWith("UPDATE worker")), true);
+  assert.equal(sqlText(calls[0].sql), "SAVEPOINT cleanzi_provider_activation");
+  assert.equal(sqlText(calls.at(-1).sql), "RELEASE SAVEPOINT cleanzi_provider_activation");
 
   const incompleteClient = {
     async query(sql) {
       if (sql.includes("FROM organizations o")) {
         return { rows: [{
+          status: "ONBOARDING",
           organization_kind: "CLEANING_PROVIDER",
           onboarding_status: "IN_PROGRESS",
+          deleted_at: null,
           legal_name: "",
           role: "OWNER",
           worker_id: "worker_owner_1001",
@@ -247,13 +252,17 @@ test("activation event can be enqueued only after authoritative onboarding is co
     activationOperationId: "provider_activation_1002",
   }), (error) => error.code === "PROVIDER_ONBOARDING_INCOMPLETE");
 
+  const conflictingCalls = [];
   const conflictingClient = {
     async query(sql) {
+      conflictingCalls.push(sqlText(sql));
       if (sql.includes("FROM organizations o")) {
         return { rows: [{
           org_id: "org_reg_1001",
           name: "Żółw Clean",
+          status: "ONBOARDING",
           onboarding_status: "COMPLETED",
+          deleted_at: null,
           organization_kind: "CLEANING_PROVIDER",
           legal_name: "Żółw Clean sp. z o.o.",
           role: "OWNER",
@@ -274,6 +283,66 @@ test("activation event can be enqueued only after authoritative onboarding is co
     decodedToken: { uid: "reg_uid_1001", email_verified: true },
     activationOperationId: "provider_activation_conflict",
   }), (error) => error.code === "ACTIVATION_IDEMPOTENCY_CONFLICT");
+  assert.equal(conflictingCalls.includes("ROLLBACK TO SAVEPOINT cleanzi_provider_activation"), true);
+  assert.equal(conflictingCalls.at(-1), "RELEASE SAVEPOINT cleanzi_provider_activation");
+});
+
+test("activation requires a caller-owned PostgreSQL transaction", async () => {
+  const calls = [];
+  const client = {
+    async query(sql) {
+      calls.push(sqlText(sql));
+      const error = new Error("no active SQL transaction");
+      error.code = "25P01";
+      throw error;
+    },
+  };
+  await assert.rejects(enqueueCleaningProviderActivation({
+    client,
+    organizationId: "org_reg_1001",
+    ownerUid: "reg_uid_1001",
+    decodedToken: { uid: "reg_uid_1001", email_verified: true },
+    activationOperationId: "provider_activation_without_transaction",
+  }), (error) => error.code === "POSTGRES_TRANSACTION_REQUIRED");
+  assert.deepEqual(calls, ["SAVEPOINT cleanzi_provider_activation"]);
+});
+
+test("activation cannot revive a suspended or soft-deleted organization", async () => {
+  for (const organization of [
+    { status: "SUSPENDED", deleted_at: null },
+    { status: "ONBOARDING", deleted_at: new Date("2026-08-02T08:00:00.000Z") },
+  ]) {
+    const calls = [];
+    const client = {
+      async query(sql) {
+        calls.push(sqlText(sql));
+        if (sql.includes("FROM organizations o")) {
+          return { rows: [{
+            org_id: "org_reg_1001",
+            name: "Żółw Clean",
+            status: organization.status,
+            onboarding_status: "COMPLETED",
+            deleted_at: organization.deleted_at,
+            organization_kind: "CLEANING_PROVIDER",
+            legal_name: "Żółw Clean sp. z o.o.",
+            role: "OWNER",
+            worker_id: "worker_owner_1001",
+            member_status: "ACTIVE",
+          }] };
+        }
+        return { rowCount: 1, rows: [] };
+      },
+    };
+    await assert.rejects(enqueueCleaningProviderActivation({
+      client,
+      organizationId: "org_reg_1001",
+      ownerUid: "reg_uid_1001",
+      decodedToken: { uid: "reg_uid_1001", email_verified: true },
+      activationOperationId: `provider_activation_forbidden_${organization.status}`,
+    }), (error) => error.code === "PROVIDER_ONBOARDING_INCOMPLETE");
+    assert.equal(calls.some((sql) => sql.startsWith("UPDATE ")), false);
+    assert.equal(calls.includes("ROLLBACK TO SAVEPOINT cleanzi_provider_activation"), true);
+  }
 });
 
 test("activation rejects an unverified owner before touching SQL", async () => {

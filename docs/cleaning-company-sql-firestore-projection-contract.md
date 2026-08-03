@@ -64,8 +64,12 @@ Po ukończeniu onboardingu portal musi, wewnątrz tej samej zaufanej transakcji 
 wywołać `enqueueCleaningProviderActivation(...)` z tokenem zweryfikowanym przez
 Firebase Admin. Funkcja wymaga zgodnego UID, `email_verified=true`,
 `onboarding_status=COMPLETED`, roli `OWNER`, membershipu `ONBOARDING` lub
-idempotentnego `ACTIVE` i niepustej nazwy prawnej. Następnie atomowo aktywuje
-organizację, ownera i membership oraz zapisuje zdarzenie
+idempotentnego `ACTIVE`, niepustej nazwy prawnej, braku `deleted_at` oraz bieżącego
+statusu organizacji `ONBOARDING` albo `ACTIVE`. Nie może reaktywować organizacji
+zawieszonej, zablokowanej, zarchiwizowanej ani usuniętej. Funkcja zakłada savepoint
+i odrzuca wywołanie wykonane poza aktywną transakcją; każdy błąd aktualizacji lub
+outboxa cofa całą aktywację do tego savepointu. Następnie atomowo aktywuje
+organizację, ownera i membership, ustawia właściwy `joined_at` oraz zapisuje zdarzenie
 `CLEANING_PROVIDER_ACTIVATED`. Do tej chwili istniejące zapytania Data Connect,
 które wymagają membershipu `ACTIVE`, nie udostępniają operacyjnego API. Dopiero
 projekcja aktywacji ustawia również status `active` zgodny z backendem zaproszeń.

@@ -141,6 +141,7 @@ test("provisioner creates the graph, exact 14-day trial and pending outbox atomi
   assert.match(sql, /BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE/);
   assert.match(sql, /COMMIT/);
   assert.match(sql, /INSERT INTO organization_member[\s\S]*'ONBOARDING'/);
+  assert.match(sql, /'ONBOARDING', true, \$4, NULL/);
   assert.match(sql, /INSERT INTO worker[\s\S]*false[\s\S]*'ONBOARDING'/);
   const serializedParams = JSON.stringify(pool.calls.map((call) => call.params));
   assert.doesNotMatch(serializedParams, /registration-token/);

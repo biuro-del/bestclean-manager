@@ -147,6 +147,22 @@ test("registration exposes only classified public error codes", async () => {
   assert.equal(conflict.payload.error.code, "REGISTRATION_CONFLICT");
 });
 
+test("an overlong composed display name is exposed as a client error", async () => {
+  const diagnostics = [];
+  const res = response();
+  await handler({
+    broker: {
+      register: async () => {
+        throw new RegistrationGateError("INVALID_DISPLAY_NAME");
+      },
+    },
+    onUnexpectedError: (event) => diagnostics.push(event),
+  })(request(), res);
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.payload, { error: { code: "INVALID_DISPLAY_NAME" } });
+  assert.deepEqual(diagnostics, []);
+});
+
 test("registration rate limit returns Retry-After without request data", async () => {
   const res = response();
   await handler({

@@ -59,6 +59,8 @@ zawiera również szeroki, niezależny zakres `Cleanzi-admin`.
    ukończyć profil firmy; operacyjne API pozostaje zablokowane do zakończenia
    obowiązkowego onboardingu. Zaufana transakcja kończąca onboarding sprawdza
    zweryfikowany token Firebase i dopiero wtedy ustawia membership `ACTIVE`.
+   Helper aktywacji wymaga aktywnej transakcji, używa savepointu i nie może
+   reaktywować organizacji zawieszonej, zarchiwizowanej ani soft-deleted.
 
 ## Wymagana kolejność dla Google
 
