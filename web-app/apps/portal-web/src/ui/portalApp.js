@@ -3645,7 +3645,7 @@ function showLoginCredentials({ showResetAction = true } = {}) {
   if (loginCopy) {
     loginCopy.textContent = document.getElementById('loginAuthScope')?.value === 'platform'
       ? 'Zaloguj się do Panelu admina.'
-      : 'Zaloguj si\u0119, aby przej\u015b\u0107 do centrum dowodzenia Cleanzi.'
+      : 'Zaloguj si\u0119 do systemu, kt\u00f3ry upraszcza zarz\u0105dzanie ca\u0142\u0105 firm\u0105 sprz\u0105taj\u0105c\u0105.'
   }
 }
 

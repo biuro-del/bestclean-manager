@@ -2117,7 +2117,7 @@ export function createEventsFeature(ctx) {
     }
 
     const cleanziLogo = document.querySelector('.sidebar-brand-logo img, .sidebar .logo-block--cleanzi img')
-    const src = cleanziLogo?.getAttribute('src') || '/cleanzi-logo.svg'
+    const src = cleanziLogo?.getAttribute('src') || '/cleanzi-logo-primary.png'
     modalLogo.setAttribute('src', src)
   }
 

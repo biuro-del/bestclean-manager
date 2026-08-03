@@ -21249,23 +21249,27 @@ body.calendar-events-popup-dragging *{
 
 #loginScreen .login-visual-brand{
   position:absolute;
-  top:clamp(24px, 3.6vw, 52px);
-  left:clamp(24px, 3.6vw, 52px);
+  top:clamp(22px, 3.4vw, 48px);
+  left:clamp(22px, 3.4vw, 48px);
   z-index:2;
   display:flex;
   align-items:center;
-  gap:12px;
-  padding:7px 14px 7px 8px;
+  gap:10px;
+  padding:5px 13px 5px 6px;
+  overflow:hidden;
   border:1px solid rgba(255, 255, 255, .74);
-  border-radius:16px;
-  background:rgba(255, 255, 255, .94);
-  box-shadow:0 12px 30px rgba(3, 19, 45, .16);
+  border-radius:18px;
+  background:rgba(255, 255, 255, .96);
+  box-shadow:0 14px 34px rgba(3, 19, 45, .18);
 }
 
 #loginScreen .login-visual-brand img{
   display:block;
-  width:142px;
-  height:auto;
+  width:190px;
+  height:54px;
+  max-width:none;
+  object-fit:cover;
+  object-position:center;
 }
 
 #loginScreen .login-visual-brand span{
@@ -21283,46 +21287,49 @@ body.calendar-events-popup-dragging *{
 #loginScreen .login-visual-story{
   position:absolute;
   right:auto;
-  bottom:clamp(22px, 3vw, 38px);
-  left:clamp(22px, 3vw, 38px);
+  bottom:clamp(22px, 3.4vw, 48px);
+  left:clamp(22px, 3.4vw, 48px);
   z-index:2;
-  width:min(400px, calc(100% - 44px));
-  padding:17px 19px 16px;
-  border:1px solid rgba(255, 255, 255, .36);
-  border-radius:18px;
-  background:linear-gradient(135deg, rgba(4, 22, 52, .46), rgba(4, 22, 52, .28));
-  box-shadow:0 16px 36px rgba(3, 16, 39, .16);
+  width:min(620px, calc(100% - 96px));
+  padding:clamp(19px, 2vw, 26px) clamp(21px, 2.2vw, 29px);
+  border:1px solid rgba(255, 255, 255, .38);
+  border-radius:22px;
+  background:rgba(5, 19, 43, .62);
+  box-shadow:0 20px 48px rgba(3, 16, 39, .24);
   color:#fff;
-  backdrop-filter:blur(6px) saturate(112%);
-}
-
-#loginScreen .login-visual-kicker{
-  display:block;
-  margin-bottom:7px;
-  color:#70ebcf;
-  font-size:10px;
-  font-weight:850;
-  letter-spacing:.13em;
-  line-height:1.2;
+  backdrop-filter:blur(14px) saturate(118%);
 }
 
 #loginScreen .login-visual-story h2{
+  max-width:27ch;
   margin:0;
   color:#fff;
   font-family:"Inter", "Public Sans", "Manrope", "Segoe UI", system-ui, sans-serif;
-  font-size:clamp(30px, 2.7vw, 38px);
+  font-size:clamp(29px, min(2.55vw, 4.6vh), 40px);
   font-weight:850;
-  letter-spacing:-.045em;
+  letter-spacing:-.035em;
   line-height:1.01;
+  text-wrap:balance;
 }
 
-#loginScreen .login-visual-story p{
-  max-width:350px;
-  margin:9px 0 0;
-  color:rgba(255, 255, 255, .84);
-  font-size:12px;
+#loginScreen .login-visual-tagline{
+  max-width:38ch;
+  margin:13px 0 0;
+  color:#7ff3d8;
+  font-size:clamp(17px, 1.35vw, 21px);
+  font-weight:800;
+  letter-spacing:-.025em;
+  line-height:1.16;
+  text-wrap:balance;
+}
+
+#loginScreen .login-visual-support{
+  max-width:50ch;
+  margin:11px 0 0;
+  color:rgba(255, 255, 255, .76);
+  font-size:clamp(10.5px, .8vw, 12px);
   font-weight:550;
-  line-height:1.42;
+  line-height:1.48;
 }
 
 #loginScreen .login-panel{
@@ -21357,8 +21364,11 @@ body.calendar-events-popup-dragging *{
 
 #loginScreen .login-card-brand img{
   display:block;
-  width:132px;
-  height:auto;
+  width:170px;
+  height:48px;
+  max-width:none;
+  object-fit:cover;
+  object-position:center;
 }
 
 #loginScreen .login-card-brand span{
@@ -21486,7 +21496,7 @@ body.calendar-events-popup-dragging *{
   }
 
   #loginScreen .login-visual-story{
-    width:min(370px, calc(100% - 44px));
+    width:min(500px, calc(100% - 64px));
   }
 }
 
@@ -21498,9 +21508,9 @@ body.calendar-events-popup-dragging *{
   }
 
   #loginScreen .login-visual{
-    min-height:270px !important;
-    height:34vh !important;
-    max-height:360px !important;
+    min-height:290px !important;
+    height:38vh !important;
+    max-height:390px !important;
   }
 
   #loginScreen .login-hero-image{
@@ -21510,22 +21520,39 @@ body.calendar-events-popup-dragging *{
   #loginScreen .login-visual-brand{
     top:22px;
     left:22px;
+    padding:5px 10px 5px 6px;
+  }
+
+  #loginScreen .login-visual-brand img{
+    width:170px;
+    height:49px;
+  }
+
+  #loginScreen .login-visual-brand span{
+    display:none;
   }
 
   #loginScreen .login-visual-story{
     right:22px;
     bottom:20px;
     left:auto;
-    width:min(340px, calc(100% - 44px));
-    padding:15px 17px;
-    border-radius:16px;
+    width:min(480px, calc(100% - 44px));
+    padding:18px 20px;
+    border-radius:18px;
   }
 
   #loginScreen .login-visual-story h2{
-    font-size:29px;
+    max-width:27ch;
+    font-size:clamp(25px, 3.8vw, 32px);
   }
 
-  #loginScreen .login-visual-story p{
+  #loginScreen .login-visual-tagline{
+    max-width:36ch;
+    margin-top:9px;
+    font-size:clamp(14px, 2.2vw, 18px);
+  }
+
+  #loginScreen .login-visual-support{
     display:none;
   }
 
@@ -21541,19 +21568,20 @@ body.calendar-events-popup-dragging *{
 
 @media (max-width: 620px){
   #loginScreen .login-visual{
-    min-height:210px !important;
-    height:28vh !important;
+    min-height:250px !important;
+    height:31vh !important;
   }
 
   #loginScreen .login-visual-brand{
     top:16px;
     left:16px;
-    padding:5px 10px 5px 6px;
+    padding:4px 8px 4px 5px;
     border-radius:12px;
   }
 
   #loginScreen .login-visual-brand img{
-    width:112px;
+    width:145px;
+    height:42px;
   }
 
   #loginScreen .login-visual-brand span{
@@ -21563,18 +21591,22 @@ body.calendar-events-popup-dragging *{
   #loginScreen .login-visual-story{
     right:12px;
     bottom:12px;
-    width:min(250px, calc(100% - 24px));
-    padding:10px 12px;
-    border-radius:14px;
-  }
-
-  #loginScreen .login-visual-kicker{
-    display:none;
+    left:12px;
+    width:auto;
+    padding:13px 15px;
+    border-radius:15px;
   }
 
   #loginScreen .login-visual-story h2{
-    font-size:22px;
-    line-height:1.02;
+    max-width:27ch;
+    font-size:clamp(20px, 5.8vw, 24px);
+    line-height:1;
+  }
+
+  #loginScreen .login-visual-tagline{
+    margin-top:7px;
+    font-size:clamp(12px, 3.7vw, 15px);
+    line-height:1.15;
   }
 
   #loginScreen .login-panel{
@@ -27905,18 +27937,19 @@ body.calendar-events-popup-dragging *{
   box-shadow:none !important;
   display:flex !important;
   justify-content:center !important;
-  max-width:156px !important;
+  max-width:180px !important;
   padding:0 !important;
 }
 
 #portalRoot .sidebar-brand-logo img,
 #portalRoot .sidebar .logo-block--cleanzi img{
   display:block !important;
-  height:auto !important;
-  max-height:44px !important;
-  max-width:156px !important;
-  object-fit:contain !important;
-  width:100% !important;
+  height:52px !important;
+  max-height:52px !important;
+  max-width:180px !important;
+  object-fit:cover !important;
+  object-position:center !important;
+  width:180px !important;
 }
 
 #portalRoot .sidebar-head{
@@ -28120,8 +28153,11 @@ body.calendar-events-popup-dragging *{
 
 #portalRoot.sidebar-collapsed .sidebar-brand-logo img,
 #portalRoot.sidebar-collapsed .sidebar .logo-block--cleanzi img{
-  max-height:32px !important;
+  height:auto !important;
+  max-height:none !important;
   max-width:48px !important;
+  object-fit:contain !important;
+  width:48px !important;
 }
 
 #portalRoot.sidebar-collapsed .sidebar-head{

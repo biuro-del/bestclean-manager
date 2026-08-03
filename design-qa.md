@@ -352,3 +352,85 @@ final result: passed
 - Kontrola po poprawce: zdjęcie zaczyna się od górnej krawędzi, formularz pozostaje w całości dostępny, overflow X wynosi 0.
 
 final result: passed
+
+---
+
+# Design QA — logo i baner logowania Cleanzi
+
+## Zakres
+
+- Widok: ekran logowania portalu Cleanzi.
+- Stan: użytkownik niezalogowany, formularz pusty.
+- Źródła:
+  - `C:\Users\rafal\AppData\Local\Temp\codex-clipboard-0147107a-6048-436c-b9e5-afa56a8f1407.png` — logo wzorcowe, 309 × 120 px.
+  - `C:\Users\rafal\AppData\Local\Temp\codex-clipboard-af96d254-6249-4f51-a530-3eae59697b8d.png` — wcześniejszy baner, 565 × 303 px.
+- Implementacja: `http://127.0.0.1:5174/`.
+
+## Dowody implementacji
+
+- `design-qa-assets/login-desktop-1440x900.png`
+- `design-qa-assets/login-tablet-900x900.png`
+- `design-qa-assets/login-mobile-390x844.png`
+- `design-qa-assets/login-compact-760x650.png`
+
+Źródła i aktualne zrzuty zostały ocenione wspólnie w jednym porównaniu wizualnym.
+
+## Sprawdzone powierzchnie
+
+1. **Kompozycja:** baner ma stabilne położenie, nie zasłania twarzy ani formularza; na niskim ekranie część wizualna jest ukrywana.
+2. **Typografia:** nagłówek skaluje się płynnie i na dużym oraz tabletowym ekranie zajmuje dwa wiersze zamiast czterech.
+3. **Branding:** ten sam plik logo jest używany na ekranie logowania, w karcie logowania, w menu portalu, w eksporcie zdarzeń i jako ikona strony.
+4. **Responsywność:** zweryfikowano 1440 × 900, 900 × 900, 390 × 844 i 760 × 650.
+5. **Czytelność i kontrast:** półprzezroczyste ciemne tło, jasny tekst i ograniczona szerokość akapitu zachowują czytelność na zdjęciu.
+
+## Historia usterek
+
+- **P2 — nagłówek łamał się na cztery wiersze:** naprawiono przez zwiększenie szerokości karty, usunięcie sztywnego łamania oraz zastosowanie płynnej skali typografii i `text-wrap: balance`.
+- **P2 — znak marki nachodził na twarz w widoku tabletowym:** naprawiono przez ukrycie dodatkowej etykiety i zmniejszenie obszaru logo dla szerokości do 920 px.
+- **P2 — branding był niespójny:** widoczne użycia starego logo zostały zastąpione jednym źródłowym assetem.
+
+## Kontrole techniczne
+
+- Konsola przeglądarki: brak ostrzeżeń i błędów.
+- Lint: zakończony poprawnie.
+- Build produkcyjny portalu: zakończony poprawnie; pozostają wyłącznie istniejące ostrzeżenia o rozmiarze części paczek.
+
+## Wynik
+
+passed
+
+---
+
+# Design QA — główny komunikat banera logowania
+
+- Source visual truth: `C:\Users\rafal\AppData\Local\Temp\codex-clipboard-c2313690-618c-41d3-b395-169ab77b141c.png` (407 × 36 px).
+- Implementation URL: `http://127.0.0.1:5174/`.
+- Desktop evidence: `design-qa-assets/login-hierarchy-desktop-1440x900.png` (1440 × 900 px).
+- Mobile evidence: `design-qa-assets/login-hierarchy-mobile-390x844.png` (390 × 844 px).
+- State: publiczny ekran logowania, pusty formularz.
+- Density normalization: natywne zrzuty przy `devicePixelRatio = 1`; referencja była wycinkiem badanego nagłówka.
+
+## Findings
+
+- Brak aktywnych problemów P0, P1 lub P2.
+- Typografia: komunikat `SYSTEM DO ZARZĄDZANIA FIRMĄ SPRZĄTAJĄCĄ` ma 36,72 px na desktopie i 22,62 px na telefonie, przez co jednoznacznie dominuje nad pozostałą treścią.
+- Rytm i układ: główny komunikat mieści się w dwóch wierszach; wspierające hasło ma mniejszą skalę, a opis operacyjny znika na telefonie.
+- Kolory: biały komunikat główny ma najwyższy kontrast; miętowy tekst wspierający zachowuje identyfikację Cleanzi bez konkurowania z nagłówkiem.
+- Obraz: fotografia, logo i kadrowanie pozostały bez zmian i bez utraty ostrości.
+- Copy: hierarchia odpowiada intencji użytkownika — najpierw kategoria produktu, potem korzyść i dopiero na końcu szczegóły.
+- Mobile: brak poziomego przepełnienia.
+
+## Comparison history
+
+- P2 w referencji: nazwa kategorii produktu była najmniejszym elementem banera i nie pełniła roli głównego komunikatu.
+- Fix: przeniesiono ją do semantycznego nagłówka, zwiększono skalę i wagę; dotychczasowe hasło przeniesiono do roli wspierającej.
+- Kontrola po poprawce: desktop i telefon pokazują tę samą hierarchię bez obcięć, nakładania ani niekontrolowanego łamania.
+- Źródło i oba zrzuty implementacji oceniono wspólnie w jednym porównaniu wizualnym; dodatkowe zbliżenie nie było potrzebne, ponieważ główny tekst jest czytelny w pełnym widoku.
+
+## Kontrole techniczne
+
+- Konsola przeglądarki: 0 ostrzeżeń i 0 błędów.
+- Lint: zakończony poprawnie.
+- Build produkcyjny portalu: zakończony poprawnie; pozostały wyłącznie istniejące ostrzeżenia o rozmiarze części paczek.
+
+final result: passed

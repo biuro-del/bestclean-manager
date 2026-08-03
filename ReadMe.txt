@@ -4561,3 +4561,66 @@ Granice:
   nowego codebase. Kod nie moze zostac wdrozony przez obecne polecenia projektu.
 - Nie wlaczono Identity Platform, Blaze, App Check ani zadnych API i sekretow.
 - Nie wykonano migracji, commita, pusha, wdrozenia ani zmiany produkcji.
+
+Data: 2026-07-29 22:44 CEST
+Autor: AI Codex
+Temat: Lokalny kandydat niezawodnej i uporzadkowanej mapy operacyjnej oraz prostszego przekazu logowania
+Zakres:
+- Leaflet 1.9.4 jest teraz wersjonowana zaleznoscia lokalnego builda zamiast skryptu pobieranego w runtime z jsDelivr.
+- CSP dopuszcza kafelki OpenStreetMap jako obrazy, ale nie rozszerza `script-src` o zewnetrzny CDN.
+- Mapa w spoczynku pokazuje tylko markery; etykiety obiektow, osoby i szczegoly nie otwieraja sie automatycznie.
+- Alarm pozostaje widoczny jako czerwony pierscien i licznik, bez samoczynnego otwierania duzego dymka pracownika.
+- Klikniecie obiektu pokazuje jedna karte danych live i ukrywa orbite osob, a klikniecie pustej mapy zamyka aktywne szczegoly.
+- Przekaz logowania wskazuje wprost, ze Cleanzi jest systemem do zarzadzania firma sprzatajaca i upraszcza zarzadzanie pracownikami, obiektami, zleceniami oraz jakoscia.
+Pliki:
+- `index.js`
+- `web-app/package.json`
+- `web-app/package-lock.json`
+- `web-app/apps/portal-web/src/features/dashboard/index.js`
+- `web-app/apps/portal-web/src/ui/styles/commandCenter.css`
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `web-app/apps/portal-web/src/ui/portalApp.js`
+- `test/operational-map-delivery.test.js`
+- `ReadMe.txt`
+Weryfikacja:
+- `npm test`: 821/821 OK.
+- `npm --prefix web-app run lint`: OK.
+- `npm --prefix web-app run build`: OK.
+- Lokalna mapa: 33/37 osob, 17 markerow i 7 grup obiektow wyrenderowanych z danych firmy.
+- Stan spoczynkowy: 0 rozwinietych grup, 0 widocznych etykiet obiektow, 0 automatycznie pokazanych osob.
+- Klikniecie obiektu: dokladnie 1 aktywna karta danych live, 0 dodatkowych orbit i etykiet.
+- Klikniecie pustej mapy: 0 aktywnych kart, grup i zaznaczonych osob.
+- Widok logowania sprawdzono wizualnie na desktopie oraz przy 592 x 816 px; brak poziomego przewijania.
+Granice:
+- Zmiany sa lokalnym kandydatem i nie zostaly wdrozone na produkcje.
+- Katalog `artifacts/` pozostaje poza zakresem i nie moze trafic do commita.
+- Produkcyjny rollout wymaga osobnej dokladnej zgody.
+
+Data: 2026-07-31 CEST
+Autor: AI Codex
+Temat: Domkniecie spojnego logo i hierarchii komunikatu logowania
+Zakres:
+- Wszystkie widoczne uzycia marki na ekranie logowania, w menu portalu i w eksporcie zdarzen korzystaja z jednego assetu `cleanzi-logo-primary.png`.
+- Glownym komunikatem banera jest `SYSTEM DO ZARZADZANIA FIRMA SPRZATAJACA`.
+- Haslo wspierajace brzmi `Zarzadzanie procesami. Proste i zautomatyzowane.`.
+- Uklad, typografia i rozmiar planszy sa responsywne; na telefonie zachowana jest pelna czytelnosc bez poziomego przewijania.
+- Tytul strony i favicon zostaly ujednolicone z marka Cleanzi.
+Pliki wydaniowe:
+- `web-app/public/cleanzi-logo-primary.png`
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `web-app/apps/portal-web/src/index.css`
+- `web-app/apps/portal-web/src/features/events/index.js`
+- `web-app/index.html`
+- `design-qa.md`
+Weryfikacja:
+- `git fetch --all --prune --tags`: brak nowych zdalnych referencji; branch `Poprawki-zdarzenia-czas-prac-2026-07-30` jest juz przodkiem aktualnego HEAD.
+- `npm test`: 846/846 OK.
+- `npm --prefix web-app run lint`: OK.
+- `npm --prefix web-app run build`: OK; pozostaje informacyjne ostrzezenie Vite o duzych chunkach.
+- Lokalny ekran logowania: desktop i 390 x 844 px, oba logo zaladowane z poprawnym naturalnym rozmiarem, brak poziomego przewijania.
+- Konsola przegladarki: 0 bledow i 0 ostrzezen.
+- `git diff --check`: OK.
+Granice:
+- `artifacts/` i `design-qa-assets/` sa materialami roboczymi i nie moga trafic do commita wydaniowego.
+- Nie wykonano pusha, migracji, wdrozenia ani zmiany danych produkcyjnych.
+- Produkcyjny rollout wymaga osobnej dokladnej zgody.
