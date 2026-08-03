@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   REGISTRATION_CHANNEL,
   RegistrationGateError,
@@ -14,6 +15,10 @@ import {
   passwordRegistrationPrivateSnapshot,
   passwordRegistrationRequestFingerprint,
 } from "./password-registration-contract.js";
+import {
+  decryptVerificationLink,
+  encryptVerificationLink,
+} from "./verification-link-envelope.js";
 
 function assertMethod(target, method, code) {
   if (typeof target?.[method] !== "function") {
@@ -84,35 +89,145 @@ async function loadOrCreateAuthUser({ auth, operation, request }) {
   }
 }
 
-async function compensateAuthUser({ auth, operationStore, operation, cause }) {
+async function compensateAuthUser({ auth, operationStore, operation, cause, now }) {
+  const compensationId = randomUUID();
+  let claim;
+  try {
+    claim = await operationStore.beginCompensation({
+      operationId: operation.operationId,
+      expectedStatuses: [operation.status],
+      compensationId,
+      failureCode: errorCode(cause),
+      nowMs: normalizedNow(now()),
+    });
+  } catch {
+    throw new RegistrationGateError("REGISTRATION_RECOVERY_REQUIRED");
+  }
+  if (!claim.acquired) {
+    return Object.freeze({
+      compensated: false,
+      operation: claim.operation,
+    });
+  }
   try {
     await auth.deleteUser(operation.uid);
-    return operationStore.transition({
+    const compensatedOperation = await operationStore.transition({
       operationId: operation.operationId,
-      expectedStatuses: [
-        PASSWORD_REGISTRATION_STATUS.RESERVED,
-        PASSWORD_REGISTRATION_STATUS.AUTH_CREATED,
-      ],
+      expectedStatuses: [PASSWORD_REGISTRATION_STATUS.RECOVERY_REQUIRED],
       nextStatus: PASSWORD_REGISTRATION_STATUS.RESERVED,
       patch: {
         lastFailureCode: errorCode(cause),
-        authCompensatedAtMs: Date.now(),
+        authCompensatedAtMs: normalizedNow(now()),
+        compensationId: null,
+        compensationStartedAtMs: null,
       },
+    });
+    return Object.freeze({
+      compensated: true,
+      operation: compensatedOperation,
     });
   } catch (compensationError) {
-    await operationStore.transition({
-      operationId: operation.operationId,
-      expectedStatuses: [
-        PASSWORD_REGISTRATION_STATUS.RESERVED,
-        PASSWORD_REGISTRATION_STATUS.AUTH_CREATED,
-      ],
-      nextStatus: PASSWORD_REGISTRATION_STATUS.RECOVERY_REQUIRED,
-      patch: {
-        lastFailureCode: errorCode(cause),
-        compensationFailureCode: errorCode(compensationError),
-      },
-    });
+    try {
+      await operationStore.transition({
+        operationId: operation.operationId,
+        expectedStatuses: [PASSWORD_REGISTRATION_STATUS.RECOVERY_REQUIRED],
+        nextStatus: PASSWORD_REGISTRATION_STATUS.RECOVERY_REQUIRED,
+        patch: {
+          lastFailureCode: errorCode(cause),
+          compensationFailureCode: errorCode(compensationError),
+        },
+      });
+    } catch {
+      // The reset to RESERVED may already have committed before its response was lost.
+      // Never turn that safe outcome into another destructive compensation attempt.
+    }
     throw new RegistrationGateError("REGISTRATION_RECOVERY_REQUIRED");
+  }
+}
+
+async function prepareVerificationLink({
+  auth,
+  operationStore,
+  operation,
+  request,
+  verificationContinueUrl,
+  hmacKey,
+  now,
+}) {
+  const leaseId = randomUUID();
+  const preparation = await operationStore.beginVerificationLink({
+    operationId: operation.operationId,
+    leaseId,
+    nowMs: normalizedNow(now()),
+  });
+  if (preparation.action === "BUSY") {
+    return Object.freeze({ busy: true, operation: preparation.operation });
+  }
+  if (preparation.action === "USE_EXISTING") {
+    return Object.freeze({
+      busy: false,
+      operation: preparation.operation,
+      verificationUrl: decryptVerificationLink({
+        envelope: preparation.operation.verificationLinkEnvelope,
+        operationId: operation.operationId,
+        hmacKey,
+      }),
+    });
+  }
+
+  try {
+    const verificationUrl = await auth.generateEmailVerificationLink(
+      request.email,
+      { url: verificationContinueUrl },
+    );
+    const envelope = encryptVerificationLink({
+      verificationUrl,
+      operationId: operation.operationId,
+      hmacKey,
+    });
+    const stored = await operationStore.storeVerificationLink({
+      operationId: operation.operationId,
+      leaseId,
+      envelope,
+      nowMs: normalizedNow(now()),
+    });
+    return Object.freeze({
+      busy: false,
+      operation: stored,
+      verificationUrl,
+    });
+  } catch (linkError) {
+    let released;
+    try {
+      released = await operationStore.releaseVerificationLink({
+        operationId: operation.operationId,
+        leaseId,
+        nowMs: normalizedNow(now()),
+      });
+    } catch {
+      throw new RegistrationGateError("REGISTRATION_RECOVERY_REQUIRED");
+    }
+    if (!released.released && released.operation.verificationLinkEnvelope) {
+      return Object.freeze({
+        busy: false,
+        operation: released.operation,
+        verificationUrl: decryptVerificationLink({
+          envelope: released.operation.verificationLinkEnvelope,
+          operationId: operation.operationId,
+          hmacKey,
+        }),
+      });
+    }
+    if (!released.released) {
+      throw new RegistrationGateError("REGISTRATION_RECOVERY_REQUIRED");
+    }
+    const pending = await operationStore.transition({
+      operationId: operation.operationId,
+      expectedStatuses: [PASSWORD_REGISTRATION_STATUS.ORGANIZATION_CREATED],
+      nextStatus: PASSWORD_REGISTRATION_STATUS.VERIFICATION_PENDING,
+      patch: { verificationFailureCode: errorCode(linkError) },
+    });
+    return Object.freeze({ busy: true, operation: pending });
   }
 }
 
@@ -147,6 +262,10 @@ export function createCleaningCompanyPasswordRegistrationBroker({
   assertMethod(auth, "generateEmailVerificationLink", "AUTH_ADMIN_REQUIRED");
   assertMethod(operationStore, "reserve", "OPERATION_STORE_REQUIRED");
   assertMethod(operationStore, "transition", "OPERATION_STORE_REQUIRED");
+  assertMethod(operationStore, "beginCompensation", "OPERATION_STORE_REQUIRED");
+  assertMethod(operationStore, "beginVerificationLink", "OPERATION_STORE_REQUIRED");
+  assertMethod(operationStore, "storeVerificationLink", "OPERATION_STORE_REQUIRED");
+  assertMethod(operationStore, "releaseVerificationLink", "OPERATION_STORE_REQUIRED");
   assertMethod(attemptAuthority, "authorizePasswordRegistration", "ATTEMPT_AUTHORITY_REQUIRED");
   assertMethod(organizationProvisioner, "provisionCleaningCompany", "ORGANIZATION_PROVISIONER_REQUIRED");
   assertMethod(turnstileVerifier, "verify", "TURNSTILE_VERIFIER_REQUIRED");
@@ -196,13 +315,14 @@ export function createCleaningCompanyPasswordRegistrationBroker({
         request,
         hmacKey,
       );
-      let operation = await operationStore.reserve({
+      const reservation = {
         ...identifiers,
         registrationId: request.registrationId,
         requestFingerprint,
         channel: REGISTRATION_CHANNEL.CLEANING_COMPANY,
         createdAtMs: normalizedNow(now()),
-      });
+      };
+      let operation = await operationStore.reserve(reservation);
 
       if (operation.status === PASSWORD_REGISTRATION_STATUS.RECOVERY_REQUIRED) {
         throw new RegistrationGateError("REGISTRATION_RECOVERY_REQUIRED");
@@ -251,10 +371,31 @@ export function createCleaningCompanyPasswordRegistrationBroker({
           });
         } catch (authError) {
           if (createdAuthNow) {
-            await compensateAuthUser({ auth, operationStore, operation, cause: authError });
+            const compensation = await compensateAuthUser({
+              auth,
+              operationStore,
+              operation,
+              cause: authError,
+              now,
+            });
+            if (!compensation.compensated) {
+              operation = compensation.operation;
+            } else {
+              throw authError;
+            }
+          } else if (errorCode(authError) === "REGISTRATION_OPERATION_STATE_CONFLICT") {
+            operation = await operationStore.reserve(reservation);
+          } else {
+            throw authError;
           }
-          throw authError;
         }
+      }
+
+      if (operation.status === PASSWORD_REGISTRATION_STATUS.RECOVERY_REQUIRED) {
+        throw new RegistrationGateError("REGISTRATION_RECOVERY_REQUIRED");
+      }
+      if (operation.status === PASSWORD_REGISTRATION_STATUS.COMPLETED) {
+        return publicResult(operation);
       }
 
       if (operation.status === PASSWORD_REGISTRATION_STATUS.AUTH_CREATED) {
@@ -317,54 +458,111 @@ export function createCleaningCompanyPasswordRegistrationBroker({
             },
           });
         } catch (provisioningError) {
-          if (provisioningError?.safeToCompensateAuth === true) {
-            await compensateAuthUser({
+          if (errorCode(provisioningError) === "REGISTRATION_OPERATION_STATE_CONFLICT") {
+            operation = await operationStore.reserve(reservation);
+          } else if (provisioningError?.safeToCompensateAuth === true) {
+            const compensation = await compensateAuthUser({
               auth,
               operationStore,
               operation,
               cause: provisioningError,
+              now,
             });
-            throw provisioningError;
+            if (compensation.compensated) {
+              throw provisioningError;
+            }
+            operation = compensation.operation;
+          } else {
+            return markRecoveryRequired({
+              operationStore,
+              operation,
+              cause: provisioningError,
+            });
           }
-          return markRecoveryRequired({
-            operationStore,
-            operation,
-            cause: provisioningError,
-          });
         }
       }
 
+      if (operation.status === PASSWORD_REGISTRATION_STATUS.RECOVERY_REQUIRED) {
+        throw new RegistrationGateError("REGISTRATION_RECOVERY_REQUIRED");
+      }
+      if (operation.status === PASSWORD_REGISTRATION_STATUS.COMPLETED) {
+        return publicResult(operation);
+      }
+
+      let preparedLink;
       try {
-        const verificationUrl = await auth.generateEmailVerificationLink(
-          request.email,
-          { url: safeVerificationContinueUrl },
-        );
+        preparedLink = await prepareVerificationLink({
+          auth,
+          operationStore,
+          operation,
+          request,
+          verificationContinueUrl: safeVerificationContinueUrl,
+          hmacKey,
+          now,
+        });
+      } catch (linkError) {
+        return markRecoveryRequired({
+          operationStore,
+          operation,
+          cause: linkError,
+        });
+      }
+      operation = preparedLink.operation;
+      if (preparedLink.busy) return publicResult(operation);
+
+      let mailError = null;
+      try {
         await verificationMailer.sendVerification({
           idempotencyKey: operation.operationId,
           email: request.email,
           displayName: request.displayName,
-          verificationUrl,
+          verificationUrl: preparedLink.verificationUrl,
           locale: request.locale,
         });
+      } catch (error) {
+        mailError = error;
+      }
+
+      if (mailError) {
+        try {
+          operation = await operationStore.transition({
+            operationId: operation.operationId,
+            expectedStatuses: [PASSWORD_REGISTRATION_STATUS.VERIFICATION_PENDING],
+            nextStatus: PASSWORD_REGISTRATION_STATUS.VERIFICATION_PENDING,
+            patch: { verificationFailureCode: errorCode(mailError) },
+          });
+        } catch (transitionError) {
+          if (errorCode(transitionError) !== "REGISTRATION_OPERATION_STATE_CONFLICT") {
+            throw transitionError;
+          }
+          operation = await operationStore.reserve(reservation);
+          if (operation.status !== PASSWORD_REGISTRATION_STATUS.COMPLETED) {
+            throw transitionError;
+          }
+        }
+        return publicResult(operation);
+      }
+
+      try {
         operation = await operationStore.transition({
           operationId: operation.operationId,
-          expectedStatuses: [
-            PASSWORD_REGISTRATION_STATUS.ORGANIZATION_CREATED,
-            PASSWORD_REGISTRATION_STATUS.VERIFICATION_PENDING,
-          ],
+          expectedStatuses: [PASSWORD_REGISTRATION_STATUS.VERIFICATION_PENDING],
           nextStatus: PASSWORD_REGISTRATION_STATUS.COMPLETED,
-          patch: { verificationSentAtMs: normalizedNow(now()) },
+          patch: {
+            verificationSentAtMs: normalizedNow(now()),
+            verificationLinkEnvelope: null,
+            verificationLinkLeaseId: null,
+            verificationLinkLeaseUntilMs: null,
+          },
         });
-      } catch (mailError) {
-        operation = await operationStore.transition({
-          operationId: operation.operationId,
-          expectedStatuses: [
-            PASSWORD_REGISTRATION_STATUS.ORGANIZATION_CREATED,
-            PASSWORD_REGISTRATION_STATUS.VERIFICATION_PENDING,
-          ],
-          nextStatus: PASSWORD_REGISTRATION_STATUS.VERIFICATION_PENDING,
-          patch: { verificationFailureCode: errorCode(mailError) },
-        });
+      } catch (transitionError) {
+        if (errorCode(transitionError) !== "REGISTRATION_OPERATION_STATE_CONFLICT") {
+          throw transitionError;
+        }
+        operation = await operationStore.reserve(reservation);
+        if (operation.status !== PASSWORD_REGISTRATION_STATUS.COMPLETED) {
+          throw transitionError;
+        }
       }
 
       return publicResult(operation);

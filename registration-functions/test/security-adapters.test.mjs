@@ -14,6 +14,10 @@ import {
 import {
   createResendVerificationMailer,
 } from "../src/resend-verification-mailer.js";
+import {
+  decryptVerificationLink,
+  encryptVerificationLink,
+} from "../src/verification-link-envelope.js";
 
 const NOW = Date.parse("2026-08-02T10:00:00.000Z");
 const HMAC_KEY = "security-adapters-test-hmac-key-at-least-32-bytes";
@@ -25,6 +29,30 @@ function jsonResponse(body, { ok = true, status = 200 } = {}) {
     async json() { return structuredClone(body); },
   };
 }
+
+test("verification links are encrypted at rest and bound to one operation", () => {
+  const verificationUrl = "https://portal.cleanzi.pl/verify?oobCode=secret-code";
+  const envelope = encryptVerificationLink({
+    verificationUrl,
+    operationId: "preg_operation_1001",
+    hmacKey: HMAC_KEY,
+    randomBytes: () => Buffer.alloc(12, 7),
+  });
+  assert.doesNotMatch(JSON.stringify(envelope), /secret-code|portal\.cleanzi\.pl/);
+  assert.equal(decryptVerificationLink({
+    envelope,
+    operationId: "preg_operation_1001",
+    hmacKey: HMAC_KEY,
+  }), verificationUrl);
+  assert.throws(
+    () => decryptVerificationLink({
+      envelope,
+      operationId: "preg_operation_2002",
+      hmacKey: HMAC_KEY,
+    }),
+    (error) => error.code === "VERIFICATION_LINK_ENVELOPE_INVALID",
+  );
+});
 
 test("Turnstile retries a transient response with one deterministic idempotency UUID", async () => {
   const requests = [];

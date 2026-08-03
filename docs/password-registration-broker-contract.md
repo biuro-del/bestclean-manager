@@ -16,7 +16,10 @@ zmiany Firebase Authentication, pushu i wdrożenia.
   a nie sposobem klientowego nadania uprawnień;
 - ENTERPRISE nie jest przyjmowany przez publiczny kontrakt;
 - hasło występuje tylko w pamięci żądania i wywołaniu Firebase Admin;
+- e-mail dłuższy niż 180 znaków jest odrzucany przed wywołaniem źródłowej bazy
+  i Firebase Auth, zgodnie z limitem autorytatywnego schematu rejestracji;
 - operacja Firestore nie zapisuje e-maila, hasła, tokenu Turnstile, IP ani User-Agent;
+- operacja Firestore nie zapisuje jawnego linku weryfikacyjnego ani kodu OOB;
 - claim kanału jest pochodzeniem rejestracji, nie rolą ani membershipem.
 
 ## Kolejność
@@ -37,11 +40,15 @@ zmiany Firebase Authentication, pushu i wdrożenia.
 - Powtórzenie tej samej operacji zwraca te same UID, `orgId` i daty triala.
 - Inny payload pod tym samym kluczem kończy się `IDEMPOTENCY_CONFLICT`.
 - Znany błąd przed rozpoczęciem/commitem organizacji pozwala skompensować nowo
-  utworzony Firebase UID i ponowić operację.
+  utworzony Firebase UID i ponowić operację. Prawo do usunięcia UID jest nabywane
+  atomowo i tylko dopóki stan operacji nadal potwierdza, że rollback jest bezpieczny.
 - Nieznany wynik commita kończy się `RECOVERY_REQUIRED`; automatyczne usunięcie UID
   jest zakazane, ponieważ organizacja mogła już powstać.
 - Awaria poczty zachowuje konto, organizację i pierwotny koniec triala. Kolejne
-  wywołanie ponawia wyłącznie idempotentną wysyłkę.
+  wywołanie ponawia wyłącznie idempotentną wysyłkę dokładnie tego samego linku.
+- Link powstaje pod pojedynczą dzierżawą. Przed wysyłką jest zapisywany wyłącznie
+  jako prywatna koperta AES-256-GCM związana z `operationId`; po potwierdzonym
+  zakończeniu wysyłki koperta jest usuwana z operacji.
 
 ## Integracje przygotowane lokalnie
 

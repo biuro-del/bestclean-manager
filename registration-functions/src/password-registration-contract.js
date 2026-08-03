@@ -28,6 +28,7 @@ export const PASSWORD_REGISTRATION_STATUS = Object.freeze({
   RESERVED: "RESERVED",
   AUTH_CREATED: "AUTH_CREATED",
   ORGANIZATION_CREATED: "ORGANIZATION_CREATED",
+  VERIFICATION_LINK_CREATING: "VERIFICATION_LINK_CREATING",
   VERIFICATION_PENDING: "VERIFICATION_PENDING",
   COMPLETED: "COMPLETED",
   RECOVERY_REQUIRED: "RECOVERY_REQUIRED",
@@ -39,6 +40,7 @@ const REGISTRATION_TOKEN_PATTERN = /^[A-Za-z0-9._~-]{40,100}$/;
 const TIMEZONE_PATTERN = /^[A-Za-z0-9_+\-/]{1,80}$/;
 const LOCALE_PATTERN = /^[a-z]{2,3}(?:-[A-Z]{2})?$/;
 const MIN_HMAC_KEY_BYTES = 32;
+const MAX_SOURCE_EMAIL_LENGTH = 180;
 
 function assertHmacKey(value) {
   const key = requiredText(value, "HMAC_KEY_REQUIRED", 4_096);
@@ -112,13 +114,18 @@ export function normalizeCleaningCompanyPasswordRequest(input = {}) {
     throw new RegistrationGateError("INVALID_REGISTRATION_PAYLOAD");
   }
 
+  const email = normalizeRegistrationEmail(input.email);
+  if (email.length > MAX_SOURCE_EMAIL_LENGTH) {
+    throw new RegistrationGateError("INVALID_EMAIL");
+  }
+
   return Object.freeze({
     channel: REGISTRATION_CHANNEL.CLEANING_COMPANY,
     action: REGISTRATION_ACTION.CLEANING_COMPANY,
     registrationId,
     registrationToken,
     idempotencyKey,
-    email: normalizeRegistrationEmail(input.email),
+    email,
     password,
     firstName,
     lastName,

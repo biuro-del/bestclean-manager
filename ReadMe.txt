@@ -4654,3 +4654,30 @@ Granice:
 - Nie ustawiono sekretow ani parametrow w Firebase, nie wlaczono App Check, nie
   wykonano migracji, nie wywolano prawdziwych dostawcow i nie wyslano e-maila.
 - Nie wykonano commita, pusha ani wdrozenia.
+
+Data: 2026-08-03
+Autor: AI Codex
+Temat: Lokalne poprawki po review PR #4 - wspolbieznosc i idempotencja brokera
+Zmieniono lokalnie:
+- Kompensacja Firebase Auth najpierw atomowo nabywa prawo do rollbacku. Nie usuwa
+  konta, jezeli rownolegla operacja zdazyla juz utworzyc organizacje lub przejsc do
+  pozniejszego stanu.
+- Link weryfikacyjny powstaje pod pojedyncza dzierzawa i jest zapisywany przed
+  wysylka jako prywatna koperta AES-256-GCM zwiazana z `operationId`. Ponowienie po
+  awarii Resend uzywa dokladnie tego samego linku i fingerprintu payloadu.
+- Jawny link oraz kod OOB nie sa zapisywane w Firestore, a zaszyfrowana koperta jest
+  usuwana po potwierdzonym przejsciu operacji do `COMPLETED`.
+- Rownolegle ponowienia wysylki zbiegaja sie do jednego zakonczonego stanu zamiast
+  zwracac konflikt po udanej dostawie innego wywolania.
+- E-mail dluzszy niz 180 znakow jest odrzucany przed zrodlowa baza i Firebase Auth,
+  zgodnie z limitem autorytatywnego schematu rejestracji.
+Testy/sprawdzenia:
+- `npm run check` na runtime Node 24 - PASS dla wszystkich plikow `src/*.js`.
+- Pelny zestaw testow jednostkowych - 71/71 PASS.
+- Emulator Firestore - 12/12 PASS, w tym atomowa dzierzawa linku i bezpieczne
+  nabycie prawa do kompensacji Auth.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Nie ustawiono sekretow, nie wywolano Firebase, Cloud SQL, Resend ani innych
+  prawdziwych dostawcow.
+- Nie wykonano migracji, commita, pusha, odpowiedzi w review, scalenia ani wdrozenia.

@@ -71,6 +71,83 @@ function operationStoreFake() {
       }
       return clone(current);
     },
+    async beginCompensation({
+      operationId,
+      expectedStatuses,
+      compensationId,
+      failureCode,
+      nowMs,
+    }) {
+      const current = operations.get(operationId);
+      if (!current) throw new Error("REGISTRATION_OPERATION_NOT_FOUND");
+      if (
+        current.status === PASSWORD_REGISTRATION_STATUS.RECOVERY_REQUIRED &&
+        current.compensationId === compensationId
+      ) {
+        return { acquired: true, operation: clone(current) };
+      }
+      if (!expectedStatuses.includes(current.status)) {
+        return { acquired: false, operation: clone(current) };
+      }
+      Object.assign(current, {
+        status: PASSWORD_REGISTRATION_STATUS.RECOVERY_REQUIRED,
+        compensationId,
+        compensationStartedAtMs: nowMs,
+        lastFailureCode: failureCode,
+      });
+      return { acquired: true, operation: clone(current) };
+    },
+    async beginVerificationLink({ operationId, leaseId, nowMs, leaseMs = 60_000 }) {
+      const current = operations.get(operationId);
+      if (!current) throw new Error("REGISTRATION_OPERATION_NOT_FOUND");
+      if (current.verificationLinkEnvelope) {
+        return { action: "USE_EXISTING", operation: clone(current) };
+      }
+      if (
+        current.status === PASSWORD_REGISTRATION_STATUS.VERIFICATION_LINK_CREATING &&
+        current.verificationLinkLeaseId !== leaseId &&
+        current.verificationLinkLeaseUntilMs > nowMs
+      ) {
+        return { action: "BUSY", operation: clone(current) };
+      }
+      Object.assign(current, {
+        status: PASSWORD_REGISTRATION_STATUS.VERIFICATION_LINK_CREATING,
+        verificationLinkLeaseId: leaseId,
+        verificationLinkLeaseUntilMs: nowMs + leaseMs,
+      });
+      return { action: "GENERATE", operation: clone(current) };
+    },
+    async storeVerificationLink({ operationId, leaseId, envelope }) {
+      const current = operations.get(operationId);
+      if (
+        current?.status !== PASSWORD_REGISTRATION_STATUS.VERIFICATION_LINK_CREATING ||
+        current.verificationLinkLeaseId !== leaseId
+      ) {
+        throw new Error("VERIFICATION_LINK_LEASE_LOST");
+      }
+      Object.assign(current, {
+        status: PASSWORD_REGISTRATION_STATUS.VERIFICATION_PENDING,
+        verificationLinkEnvelope: clone(envelope),
+        verificationLinkLeaseId: null,
+        verificationLinkLeaseUntilMs: null,
+      });
+      return clone(current);
+    },
+    async releaseVerificationLink({ operationId, leaseId }) {
+      const current = operations.get(operationId);
+      if (
+        current?.status !== PASSWORD_REGISTRATION_STATUS.VERIFICATION_LINK_CREATING ||
+        current.verificationLinkLeaseId !== leaseId
+      ) {
+        return { released: false, operation: clone(current) };
+      }
+      Object.assign(current, {
+        status: PASSWORD_REGISTRATION_STATUS.ORGANIZATION_CREATED,
+        verificationLinkLeaseId: null,
+        verificationLinkLeaseUntilMs: null,
+      });
+      return { released: true, operation: clone(current) };
+    },
   };
 }
 
@@ -82,6 +159,7 @@ function authFake() {
     claims,
     createCount: 0,
     deleteCount: 0,
+    linkCount: 0,
     async getUser(uid) {
       const user = users.get(uid);
       if (!user) {
@@ -115,7 +193,8 @@ function authFake() {
       claims.set(uid, clone(value));
     },
     async generateEmailVerificationLink(email) {
-      return `https://portal.cleanzi.pl/verify?email=${encodeURIComponent(email)}`;
+      this.linkCount += 1;
+      return `https://portal.cleanzi.pl/verify?oobCode=link-${this.linkCount}&email=${encodeURIComponent(email)}`;
     },
   };
 }
@@ -123,10 +202,11 @@ function authFake() {
 function harness(options = {}) {
   let currentNow = NOW;
   const auth = options.auth || authFake();
-  const operationStore = operationStoreFake();
+  const operationStore = options.operationStore || operationStoreFake();
   const attempts = [];
   const organizations = new Map();
   const messages = new Map();
+  const deliveryAttempts = [];
   let provisionFailure = options.provisionFailure || null;
   let mailFailure = options.mailFailure || null;
 
@@ -218,6 +298,10 @@ function harness(options = {}) {
     },
     verificationMailer: {
       async sendVerification(input) {
+        deliveryAttempts.push(clone(input));
+        if (options.beforeMailSend) {
+          await options.beforeMailSend(input, deliveryAttempts.length);
+        }
         if (mailFailure) throw mailFailure;
         if (!messages.has(input.idempotencyKey)) {
           messages.set(input.idempotencyKey, clone(input));
@@ -233,6 +317,7 @@ function harness(options = {}) {
     attempts,
     organizations,
     messages,
+    deliveryAttempts,
     setNow(value) { currentNow = value; },
     setProvisionFailure(value) { provisionFailure = value; },
     setMailFailure(value) { mailFailure = value; },
@@ -307,6 +392,36 @@ test("parallel duplicate requests converge on one account and one organization",
   assert.equal(env.messages.size, 1);
 });
 
+test("a stale creator never deletes Auth after a duplicate advances the operation", async () => {
+  const auth = authFake();
+  const originalSetClaims = auth.setCustomUserClaims.bind(auth);
+  let claimsCalls = 0;
+  let releaseFirstClaims;
+  let signalFirstClaims;
+  const firstClaimsStarted = new Promise((resolve) => { signalFirstClaims = resolve; });
+  const firstClaimsRelease = new Promise((resolve) => { releaseFirstClaims = resolve; });
+  auth.setCustomUserClaims = async (uid, value) => {
+    claimsCalls += 1;
+    if (claimsCalls === 1) {
+      signalFirstClaims();
+      await firstClaimsRelease;
+    }
+    return originalSetClaims(uid, value);
+  };
+  const env = harness({ auth });
+  const firstRequest = env.broker.register(registrationInput());
+  await firstClaimsStarted;
+  const secondResult = await env.broker.register(registrationInput());
+  releaseFirstClaims();
+  const firstResult = await firstRequest;
+
+  assert.deepEqual(firstResult, secondResult);
+  assert.equal(auth.deleteCount, 0);
+  assert.equal(auth.users.size, 1);
+  assert.equal(env.organizations.size, 1);
+  assert.equal(env.messages.size, 1);
+});
+
 test("same operation key with a changed business payload fails as an idempotency conflict", async () => {
   const env = harness({ mailFailure: new Error("MAIL_PROVIDER_UNAVAILABLE") });
   await env.broker.register(registrationInput());
@@ -326,6 +441,18 @@ test("source attempt, consents and Turnstile are checked before Firebase Auth cr
   );
   assert.equal(env.auth.createCount, 0);
   assert.equal(env.organizations.size, 0);
+});
+
+test("an email longer than the source schema limit is rejected before Auth", async () => {
+  const env = harness();
+  const email = `${"a".repeat(169)}@example.com`;
+  assert.equal(email.length, 181);
+  await assert.rejects(
+    env.broker.register(registrationInput({ email })),
+    (error) => error.code === "INVALID_EMAIL",
+  );
+  assert.equal(env.auth.createCount, 0);
+  assert.equal(env.attempts.length, 0);
 });
 
 test("server abuse guard runs before the source attempt and Auth creation", async () => {
@@ -439,6 +566,13 @@ test("mail failure keeps the organization and retries delivery without extending
   assert.equal(first.status, "EMAIL_DELIVERY_PENDING");
   assert.equal(env.auth.users.size, 1);
   assert.equal(env.organizations.size, 1);
+  assert.equal(env.auth.linkCount, 1);
+  assert.equal(env.deliveryAttempts.length, 1);
+  const firstVerificationUrl = env.deliveryAttempts[0].verificationUrl;
+  const pendingOperation = [...env.operationStore.operations.values()][0];
+  assert.equal(pendingOperation.status, PASSWORD_REGISTRATION_STATUS.VERIFICATION_PENDING);
+  assert.equal(typeof pendingOperation.verificationLinkEnvelope?.ciphertext, "string");
+  assert.doesNotMatch(JSON.stringify(pendingOperation), /oobCode|portal\.cleanzi\.pl/);
 
   env.setMailFailure(null);
   env.setNow(NOW + 3_600_000);
@@ -447,6 +581,47 @@ test("mail failure keeps the organization and retries delivery without extending
   assert.equal(retry.trialStartedAtMs, first.trialStartedAtMs);
   assert.equal(retry.trialEndsAtMs, first.trialEndsAtMs);
   assert.equal(env.auth.createCount, 1);
+  assert.equal(env.auth.linkCount, 1);
+  assert.equal(env.organizations.size, 1);
+  assert.equal(env.messages.size, 1);
+  assert.equal(env.deliveryAttempts.length, 2);
+  assert.equal(env.deliveryAttempts[1].verificationUrl, firstVerificationUrl);
+  assert.equal(
+    [...env.operationStore.operations.values()][0].verificationLinkEnvelope,
+    null,
+  );
+});
+
+test("parallel mail retries converge after one caller completes the operation", async () => {
+  let retryCalls = 0;
+  let releaseFirstRetry;
+  let signalFirstRetry;
+  const firstRetryStarted = new Promise((resolve) => { signalFirstRetry = resolve; });
+  const firstRetryRelease = new Promise((resolve) => { releaseFirstRetry = resolve; });
+  const env = harness({
+    mailFailure: new Error("MAIL_PROVIDER_UNAVAILABLE"),
+    async beforeMailSend(_input, attemptNumber) {
+      if (attemptNumber === 1) return;
+      retryCalls += 1;
+      if (retryCalls === 1) {
+        signalFirstRetry();
+        await firstRetryRelease;
+      }
+    },
+  });
+  await env.broker.register(registrationInput());
+  env.setMailFailure(null);
+
+  const firstRetry = env.broker.register(registrationInput());
+  await firstRetryStarted;
+  const secondResult = await env.broker.register(registrationInput());
+  releaseFirstRetry();
+  const firstResult = await firstRetry;
+
+  assert.deepEqual(firstResult, secondResult);
+  assert.equal(firstResult.status, "EMAIL_VERIFICATION_REQUIRED");
+  assert.equal(env.auth.linkCount, 1);
+  assert.equal(env.auth.deleteCount, 0);
   assert.equal(env.organizations.size, 1);
   assert.equal(env.messages.size, 1);
 });

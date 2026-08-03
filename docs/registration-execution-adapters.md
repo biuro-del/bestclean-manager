@@ -60,6 +60,14 @@ kluczem tylko przez 23 godziny. Po tej granicy stan przechodzi do
 `RECOVERY_REQUIRED`; automatyczne użycie nowego klucza jest zabronione, aby nie
 wysłać duplikatu.
 
+Firebase może unieważnić wcześniejszy link po wygenerowaniu kolejnego. Broker
+dlatego tworzy link pod atomową dzierżawą i przed pierwszą próbą Resend zapisuje go
+w operacji jako kopertę AES-256-GCM z losowym IV i AAD równym `operationId`. Retry
+odszyfrowuje ten sam link, więc zachowuje również ten sam fingerprint payloadu
+Resend. Firestore nie otrzymuje jawnego URL ani kodu OOB, a koperta jest czyszczona
+po przejściu operacji do `COMPLETED`. Klucz koperty jest wyprowadzany domenowo z
+serwerowego sekretu HMAC; sekret musi pozostać stabilny dla oczekujących operacji.
+
 Oficjalny kontrakt Resend:
 https://resend.com/docs/dashboard/emails/idempotency-keys
 
