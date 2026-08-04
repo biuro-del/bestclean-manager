@@ -214,6 +214,7 @@ function harness(options = {}) {
   const auth = options.auth || authFake();
   const operationStore = options.operationStore || operationStoreFake();
   const attempts = [];
+  const authorizationCalls = [];
   const organizations = new Map();
   const messages = new Map();
   const deliveryAttempts = [];
@@ -250,9 +251,10 @@ function harness(options = {}) {
         };
       },
     },
-    attemptAuthority: {
+    attemptAuthority: options.attemptAuthority || {
       async authorizePasswordRegistration(snapshot, authorization) {
         attempts.push(clone(snapshot));
+        authorizationCalls.push(clone(authorization));
         assert.equal(
           authorization.registrationToken,
           "registration-token-20260801-0001-abcdefghijklmnopqrstuvwxyz",
@@ -285,7 +287,7 @@ function harness(options = {}) {
         });
       },
     },
-    organizationProvisioner: {
+    organizationProvisioner: options.organizationProvisioner || {
       async provisionCleaningCompany(input) {
         if (provisionFailure) throw provisionFailure;
         if (options.provisionedResult) {
@@ -325,6 +327,7 @@ function harness(options = {}) {
     broker,
     operationStore,
     attempts,
+    authorizationCalls,
     organizations,
     messages,
     deliveryAttempts,
@@ -562,7 +565,7 @@ test("verification email cannot be configured with an external redirect", () => 
   );
 });
 
-test("a known pre-commit provisioning failure removes Auth and permits a clean retry", async () => {
+test("a known pre-commit provisioning failure preserves Auth and permits a clean retry", async () => {
   const failure = new Error("DATABASE_UNAVAILABLE_BEFORE_TRANSACTION");
   failure.safeToCompensateAuth = true;
   const env = harness({ provisionFailure: failure });
@@ -570,15 +573,70 @@ test("a known pre-commit provisioning failure removes Auth and permits a clean r
     env.broker.register(registrationInput()),
     /DATABASE_UNAVAILABLE_BEFORE_TRANSACTION/,
   );
-  assert.equal(env.auth.users.size, 0);
-  assert.equal(env.auth.deleteCount, 1);
-  assert.equal([...env.operationStore.operations.values()][0].status, PASSWORD_REGISTRATION_STATUS.RESERVED);
+  assert.equal(env.auth.users.size, 1);
+  assert.equal(env.auth.deleteCount, 0);
+  assert.equal([...env.operationStore.operations.values()][0].status, PASSWORD_REGISTRATION_STATUS.AUTH_CREATED);
 
   env.setProvisionFailure(null);
   const result = await env.broker.register(registrationInput());
   assert.equal(result.status, "EMAIL_VERIFICATION_REQUIRED");
   assert.equal(env.auth.users.size, 1);
+  assert.equal(env.auth.createCount, 1);
   assert.equal(env.organizations.size, 1);
+  assert.deepEqual(
+    env.authorizationCalls.map((call) => call.allowExpiredUnboundRetry),
+    [false, true],
+  );
+});
+
+test("a concurrent pre-commit failure never deletes Auth while another request provisions SQL", async () => {
+  const failure = new Error("DATABASE_TRANSACTION_ROLLED_BACK");
+  failure.safeToCompensateAuth = true;
+  let provisionCalls = 0;
+  let signalFirstProvisioning;
+  let releaseFirstProvisioning;
+  const firstProvisioningStarted = new Promise((resolve) => {
+    signalFirstProvisioning = resolve;
+  });
+  const firstProvisioningRelease = new Promise((resolve) => {
+    releaseFirstProvisioning = resolve;
+  });
+  const env = harness({
+    organizationProvisioner: {
+      async provisionCleaningCompany(input) {
+        provisionCalls += 1;
+        if (provisionCalls === 1) {
+          signalFirstProvisioning();
+          await firstProvisioningRelease;
+          return {
+            orgId: input.orgId,
+            trialStartedAtMs: input.subscription.trialStartedAtMs,
+            trialEndsAtMs: input.subscription.trialEndsAtMs,
+          };
+        }
+        throw failure;
+      },
+    },
+  });
+
+  const successfulRequest = env.broker.register(registrationInput());
+  await firstProvisioningStarted;
+  await assert.rejects(
+    env.broker.register(registrationInput()),
+    (error) => error === failure,
+  );
+  assert.equal(env.auth.deleteCount, 0);
+  assert.equal(env.auth.users.size, 1);
+  assert.equal(
+    [...env.operationStore.operations.values()][0].status,
+    PASSWORD_REGISTRATION_STATUS.AUTH_CREATED,
+  );
+
+  releaseFirstProvisioning();
+  const result = await successfulRequest;
+  assert.equal(result.status, "EMAIL_VERIFICATION_REQUIRED");
+  assert.equal(env.auth.deleteCount, 0);
+  assert.equal(env.auth.users.size, 1);
 });
 
 test("an ambiguous provisioning failure is fail-closed and requires reconciliation", async () => {

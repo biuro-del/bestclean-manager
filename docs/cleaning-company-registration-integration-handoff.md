@@ -49,11 +49,16 @@ zawiera również szeroki, niezależny zakres `Cleanzi-admin`.
    telemetrii.
 4. Broker weryfikuje Turnstile, hostname, akcję, status próby, e-mail, zgody i
    politykę hasła, a następnie przez Firebase Admin tworzy konto
-   `emailVerified: false` oraz ustawia provenance kanału.
+   `emailVerified: false` oraz ustawia provenance kanału. Każde osobne wywołanie
+   Siteverify ma nowy losowy klucz idempotencji, zachowywany tylko dla jego
+   wewnętrznych ponowień.
 5. Broker natychmiast tworzy deterministyczną organizację `kind: cleaning_provider`,
    nieoperacyjny membership ownera `ONBOARDING`, rekord właściciela, szkic profilu i subskrypcję
    `TRIAL/TRIALING`. Trial rozpoczyna się w chwili utworzenia organizacji i kończy
    dokładnie po 14 × 24 godzinach; nie wymaga karty i nie konwertuje się automatycznie.
+   Po trwałym przejściu operacji do `AUTH_CREATED` broker nie usuwa już UID przy
+   błędzie SQL, ponieważ równoległa transakcja mogła zakończyć commit; zachowuje
+   nieoperacyjne konto i wznawia idempotentny provisioner.
 6. Broker generuje wiadomość weryfikacyjną. Do potwierdzenia e-maila użytkownik nie
    może wejść do portalu ani korzystać z operacyjnego API. Po potwierdzeniu może
    ukończyć profil firmy; operacyjne API pozostaje zablokowane do zakończenia

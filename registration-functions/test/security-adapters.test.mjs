@@ -54,7 +54,7 @@ test("verification links are encrypted at rest and bound to one operation", () =
   );
 });
 
-test("Turnstile retries a transient response with one deterministic idempotency UUID", async () => {
+test("Turnstile uses one random idempotency UUID per verifier invocation", async () => {
   const requests = [];
   const verifier = createCloudflareTurnstileVerifier({
     secret: "turnstile-test-secret",
@@ -79,10 +79,16 @@ test("Turnstile retries a transient response with one deterministic idempotency 
     hostname: "portal.cleanzi.pl",
     reason: null,
   });
-  assert.equal(requests.length, 2);
+  await verifier.verify({
+    token: "turnstile-token-0001",
+    expectedAction: "registration_cleaning_company",
+  });
+  assert.equal(requests.length, 3);
   const keys = requests.map((request) => new URLSearchParams(request.body).get("idempotency_key"));
   assert.equal(keys[0], keys[1]);
-  assert.match(keys[0], /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.notEqual(keys[0], keys[2]);
+  assert.match(keys[0], /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.match(keys[2], /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(new URLSearchParams(requests[0].body).get("secret"), "turnstile-test-secret");
 });
 

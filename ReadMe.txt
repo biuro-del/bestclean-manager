@@ -4768,7 +4768,36 @@ Testy regresji:
 - Emulator Firestore - 12/12 PASS.
 - `npm ls --depth=0` na runtime Node 24 - PASS.
 Granice:
-- Glowna poprawka zostala zapisana w `7096b0b`; zabezpieczenia fail-closed sa
-  przygotowane jako follow-up przed ponownym review PR #4.
+- Glowna poprawka zostala zapisana w `7096b0b`; zabezpieczenia fail-closed zostaly
+  zapisane w `a33bce7` i wypchniete do PR #4.
+- Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
+  prawdziwych dostawcow.
+
+Data: 2026-08-04
+Autor: AI Codex
+Temat: Piata lokalna runda poprawek po review PR #4
+Zmieniono lokalnie:
+- Po trwalym stanie `AUTH_CREATED` blad provisionera SQL nie uruchamia juz
+  automatycznego usuniecia Firebase UID. Konto pozostaje nieoperacyjne, a retry
+  idempotentnie dokancza organizacje, co wyklucza osierocenie rownoleglego commita.
+- Wygasla, jeszcze niezwiazana proba moze zostac wznowiona tylko dla istniejacej
+  operacji `AUTH_CREATED` oraz nadal zgodnego tokenu, payloadu i kompletu zgod.
+- Siteverify Turnstile otrzymuje losowy UUID dla kazdego osobnego wywolania;
+  wewnetrzne retry jednego wywolania zachowuje ten sam klucz idempotencji.
+- `DATABASE_TRANSACTION_ROLLED_BACK` jest publicznie klasyfikowany jako retryowalne
+  HTTP 503, bez ujawniania szczegolow bazy.
+Testy regresji:
+- Rownolegly sukces SQL i potwierdzony rollback drugiego wywolania nie usuwaja UID.
+- Retry po bledzie sprzed commita zachowuje jedno konto i konczy organizacje bez
+  duplikacji, rowniez po wygasnieciu zrodlowej proby.
+- Ten sam token Turnstile ma wspolny klucz tylko w ramach wewnetrznych ponowien;
+  kolejne wywolanie otrzymuje inny UUID.
+- `npm run check` na runtime Node 24 - PASS.
+- Pelny zestaw testow jednostkowych - 82/82 PASS.
+- Emulator Firestore - 12/12 PASS.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Piata runda pozostaje lokalna i nie jest jeszcze zapisana w commicie ani wyslana
+  do PR #4.
 - Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
   prawdziwych dostawcow.

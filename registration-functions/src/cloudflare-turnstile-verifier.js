@@ -1,20 +1,7 @@
-import { createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { RegistrationGateError, requiredText } from "./registration-contract.js";
 
 const SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
-
-function deterministicUuid(secret, token) {
-  const bytes = createHash("sha256")
-    .update(secret, "utf8")
-    .update("\0", "utf8")
-    .update(token, "utf8")
-    .digest()
-    .subarray(0, 16);
-  bytes[6] = (bytes[6] & 0x0f) | 0x50;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = bytes.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
 
 function failureCodes(value) {
   return Array.isArray(value)
@@ -67,7 +54,10 @@ export function createCloudflareTurnstileVerifier({
       if (!/^[A-Za-z0-9_-]+$/.test(action)) {
         throw new RegistrationGateError("TURNSTILE_ACTION_REQUIRED");
       }
-      const idempotencyKey = deterministicUuid(safeSecret, safeToken);
+      // Cloudflare idempotency is scoped to retries of this one verification.
+      // Reusing a token-derived key across broker requests could replay a cached
+      // success instead of letting Turnstile reject the consumed token.
+      const idempotencyKey = randomUUID();
       let lastResult = null;
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         const controller = new AbortController();
@@ -126,4 +116,4 @@ export function createCloudflareTurnstileVerifier({
   });
 }
 
-export const __test = Object.freeze({ deterministicUuid, providerUnavailable });
+export const __test = Object.freeze({ providerUnavailable });

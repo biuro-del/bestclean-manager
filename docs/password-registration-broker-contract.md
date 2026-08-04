@@ -50,15 +50,18 @@ migracji, zmiany Firebase Authentication i wdrożenia.
 
 - Powtórzenie tej samej operacji zwraca te same UID, `orgId` i daty triala.
 - Inny payload pod tym samym kluczem kończy się `IDEMPOTENCY_CONFLICT`.
-- Znany błąd przed rozpoczęciem/commitem organizacji pozwala skompensować nowo
-  utworzony Firebase UID i ponowić operację. Prawo do usunięcia UID jest nabywane
-  atomowo i tylko dopóki stan operacji nadal potwierdza, że rollback jest bezpieczny.
+- Automatyczna kompensacja Firebase UID jest dozwolona wyłącznie przed trwałym
+  przejściem operacji do `AUTH_CREATED`. Po tym stanie każdy błąd provisionera SQL
+  zachowuje nieoperacyjne konto i pozwala ponowić idempotentne tworzenie organizacji;
+  UID nie jest usuwany, ponieważ równoległa transakcja SQL mogła już wykonać commit.
 - Nieznany wynik commita kończy się `RECOVERY_REQUIRED`; automatyczne usunięcie UID
   jest zakazane, ponieważ organizacja mogła już powstać.
 - Przejściowy błąd odczytu Firebase Auth podczas retry nie zmienia trwałego stanu
   operacji i może być bezpiecznie ponowiony. `RECOVERY_REQUIRED` jest ustawiany
   wyłącznie dla definitywnego braku oczekiwanego UID lub niezgodności tożsamości.
-- Wygaśnięcie próby źródłowej blokuje wyłącznie pierwsze związanie. Próba już
+- Wygaśnięcie próby źródłowej blokuje pierwsze przyjęcie operacji. Jeżeli prywatna
+  operacja Firestore osiągnęła już `AUTH_CREATED`, retry może wznowić jeszcze
+  niezwiązaną próbę wyłącznie z nadal zgodnym tokenem, payloadem i zgodami. Próba już
   związana z dokładnie tym samym UID, `orgId` i `operationId` może być odczytana do
   idempotentnego retry bez ponownego użycia wyczyszczonego tokenu.
 - Źródło musi zawierać jawny, wersjonowany rekord `MARKETING` także dla decyzji
@@ -75,7 +78,8 @@ migracji, zmiany Firebase Authentication i wdrożenia.
 - transakcyjny provisioner Cloud SQL z jednorazowym trialem i outboxem;
 - idempotentna projekcja profilu Firestore wymaganego przez backend zaproszeń;
 - osobna aktywacja profilu dopiero po ukończeniu onboardingu i podaniu nazwy prawnej.
-- serwerowy Siteverify Turnstile z deterministycznym kluczem retry;
+- serwerowy Siteverify Turnstile z losowym kluczem dla każdego osobnego wywołania
+  oraz jednym kluczem zachowanym wyłącznie wewnątrz jego retry;
 - polityka hasła NIST + k-anonimowa kontrola Pwned Passwords;
 - atomowy limit nadużyć bez surowych danych użytkownika;
 - Resend z trwałym stanem dostarczenia wykraczającym poza 24-godzinne okno

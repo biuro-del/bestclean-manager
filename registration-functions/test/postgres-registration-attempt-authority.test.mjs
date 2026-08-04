@@ -145,8 +145,23 @@ test("already bound source attempt is accepted only for the same broker operatio
     attempt: bound, consentRows: consents(), snapshot: snapshot(),
     registrationToken: TOKEN, ...identifiers, operationId: "preg_other", nowMs: NOW,
   }), (error) => error.code === "SOURCE_ATTEMPT_ALREADY_BOUND");
+  const expiredUnbound = attempt({ expires_at: new Date(NOW - 1) });
+  const resumed = assertPasswordRegistrationAttempt({
+    attempt: expiredUnbound, consentRows: consents(), snapshot: snapshot(),
+    registrationToken: TOKEN, ...identifiers,
+    allowExpiredUnboundRetry: true,
+    nowMs: NOW,
+  });
+  assert.equal(resumed.alreadyProvisioned, false);
+  assert.equal(resumed.tokenHash, TOKEN_HASH);
   assert.throws(() => assertPasswordRegistrationAttempt({
-    attempt: attempt({ expires_at: new Date(NOW - 1) }),
+    attempt: expiredUnbound, consentRows: consents(), snapshot: snapshot(),
+    registrationToken: `${TOKEN}x`, ...identifiers,
+    allowExpiredUnboundRetry: true,
+    nowMs: NOW,
+  }), (error) => error.code === "SOURCE_ATTEMPT_TOKEN_INVALID");
+  assert.throws(() => assertPasswordRegistrationAttempt({
+    attempt: expiredUnbound,
     consentRows: consents(), snapshot: snapshot(),
     registrationToken: TOKEN, ...identifiers, nowMs: NOW,
   }), (error) => error.code === "SOURCE_ATTEMPT_EXPIRED");

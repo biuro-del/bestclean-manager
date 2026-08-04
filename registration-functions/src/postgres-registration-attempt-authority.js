@@ -90,6 +90,7 @@ export function assertPasswordRegistrationAttempt({
   operationId,
   uid,
   orgId,
+  allowExpiredUnboundRetry = false,
   nowMs = Date.now(),
 }) {
   if (!attempt) fail("SOURCE_ATTEMPT_NOT_FOUND");
@@ -106,7 +107,11 @@ export function assertPasswordRegistrationAttempt({
       fail("SOURCE_ATTEMPT_ALREADY_BOUND");
     }
   } else {
-    if (attempt.expires_at && new Date(attempt.expires_at).getTime() <= nowMs) {
+    if (
+      allowExpiredUnboundRetry !== true &&
+      attempt.expires_at &&
+      new Date(attempt.expires_at).getTime() <= nowMs
+    ) {
       fail("SOURCE_ATTEMPT_EXPIRED");
     }
     if (expectedTokenHash && !/^[a-f0-9]{64}$/.test(expectedTokenHash)) {
@@ -237,6 +242,8 @@ export function createPostgresRegistrationAttemptAuthority({
           ),
           uid: requiredText(authorization.uid, "INVALID_UID", 128),
           orgId: requiredText(authorization.orgId, "INVALID_ORG_ID", 128),
+          allowExpiredUnboundRetry:
+            authorization.allowExpiredUnboundRetry === true,
           nowMs: normalizedNow(now()),
         });
         await client.query("COMMIT");

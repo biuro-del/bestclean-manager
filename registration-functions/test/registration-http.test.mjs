@@ -188,6 +188,21 @@ test("Turnstile provider outage is exposed as temporary unavailability", async (
   });
 });
 
+test("a rolled-back provisioning transaction remains retryable", async () => {
+  const res = response();
+  await handler({
+    broker: {
+      register: async () => {
+        throw new RegistrationGateError("DATABASE_TRANSACTION_ROLLED_BACK");
+      },
+    },
+  })(request(), res);
+  assert.equal(res.statusCode, 503);
+  assert.deepEqual(res.payload, {
+    error: { code: "REGISTRATION_TEMPORARILY_UNAVAILABLE" },
+  });
+});
+
 test("unexpected failures are generic and diagnostics contain codes only", async () => {
   const diagnostics = [];
   const res = response();

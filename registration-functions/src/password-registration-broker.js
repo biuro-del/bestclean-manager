@@ -344,6 +344,8 @@ export function createCleaningCompanyPasswordRegistrationBroker({
             operationId: identifiers.operationId,
             uid: identifiers.uid,
             orgId: identifiers.orgId,
+            allowExpiredUnboundRetry:
+              operation?.status === PASSWORD_REGISTRATION_STATUS.AUTH_CREATED,
           },
         );
       }
@@ -489,17 +491,26 @@ export function createCleaningCompanyPasswordRegistrationBroker({
           if (errorCode(provisioningError) === "REGISTRATION_OPERATION_STATE_CONFLICT") {
             operation = await operationStore.reserve(reservation);
           } else if (provisioningError?.safeToCompensateAuth === true) {
-            const compensation = await compensateAuthUser({
-              auth,
-              operationStore,
-              operation,
-              cause: provisioningError,
-              now,
-            });
-            if (compensation.compensated) {
+            // Once AUTH_CREATED is durable, another request may already be
+            // committing the SQL graph. Deleting the shared Firebase user can
+            // therefore orphan a successfully committed organization. Keep the
+            // non-operational account and let the idempotent provisioner retry.
+            try {
+              operation = await operationStore.transition({
+                operationId: operation.operationId,
+                expectedStatuses: [PASSWORD_REGISTRATION_STATUS.AUTH_CREATED],
+                nextStatus: PASSWORD_REGISTRATION_STATUS.AUTH_CREATED,
+                patch: { lastFailureCode: errorCode(provisioningError) },
+              });
+            } catch (stateError) {
+              if (errorCode(stateError) !== "REGISTRATION_OPERATION_STATE_CONFLICT") {
+                throw stateError;
+              }
+              operation = await operationStore.reserve(reservation);
+            }
+            if (operation.status === PASSWORD_REGISTRATION_STATUS.AUTH_CREATED) {
               throw provisioningError;
             }
-            operation = compensation.operation;
           } else {
             return markRecoveryRequired({
               operationStore,
