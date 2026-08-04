@@ -220,3 +220,308 @@ passed
 - Build produkcyjny portalu: zakończony poprawnie; pozostały wyłącznie istniejące ostrzeżenia o rozmiarze części paczek.
 
 final result: passed
+
+---
+
+# Calendar Variant 3 — planowanie obsady i Dziś na żywo
+
+## Zakres
+
+- Branch: `codex/calendar-staffing-live-20260731`.
+- Widok: lokalny kalendarz portalu Cleanzi, domyślnie planowanie tygodniowe.
+- Źródło kierunku wizualnego: wybrany przez użytkownika wariant 3 — bufor nieobsadzonych, macierz pracowników i dni oraz przypięty panel bieżącej realizacji.
+- Implementacja lokalna: `http://127.0.0.1:5174/`.
+
+## Sprawdzone powierzchnie
+
+1. **Bufor nieobsadzonych:** osobny, czytelny obszar dla wystąpień bez pracownika; karta ma alternatywę kliknięcia/klawiatury poza przeciąganiem.
+2. **Macierz tygodnia:** pracownicy pozostają widoczni także wtedy, gdy nie mają jeszcze zlecenia, aby mogli być poprawnym celem DnD.
+3. **DnD:** przeniesienie zachowuje godzinę zlecenia i zmienia dzień zgodnie z wybraną komórką; komórka pozostaje celem również nad istniejącą kartą.
+4. **Dziś na żywo:** dane dnia bieżącego są niezależne od aktualnie oglądanego tygodnia; aktywne i wymagające uwagi operacje są nad zakończonymi, a pełna lista rozwija się na żądanie.
+5. **Korelacja:** potwierdzenie związku plan–realizacja wymaga stabilnych ID i zgodnej daty wystąpienia; podobna nazwa, opis lub godzina nie wystarczają.
+   Sprzeczny identyfikator tego samego typu (`task`, `block`, `allocation`, `workslot`) jest twardym veto dla korelacji.
+6. **Widoki klasyczne:** `Dzień` i `3 dni` nie otrzymują dodatkowych realnych pasków usług, więc nie dublują istniejących torów czasu pracy.
+7. **Publikacja:** kontrolka publikacji jest świadomie nieaktywna do czasu dostarczenia bezpiecznego, wersjonowanego endpointu z obsługą konfliktów; interfejs jawnie informuje o natychmiastowym zapisie przypisań i przyczynie blokady publikacji.
+8. **Puste i niepełne dane:** bufor rozróżnia brak planu od pełnej obsady, a panel live pokazuje ostrzeżenie, gdy część źródeł nie została pobrana.
+9. **Responsywność:** przy 1024 i 768 px nagłówek składa się pionowo, a macierz i live pozostają dostępne jeden pod drugim; szerokie tabele mają własne przewijanie.
+10. **Gęstość desktopowa:** od 1200 px kalendarz ma kompaktowe odstępy, kontrolki i wiersze odpowiadające w przybliżeniu pracy przy powiększeniu Chrome 80%, bez użycia `zoom`, `transform: scale()` ani skalowania pozostałych modułów portalu.
+
+## Ocena jakości
+
+- Hierarchia oddziela planowanie przyszłości od realizacji bieżącego dnia.
+- Kolory i statusy mają znaczenie operacyjne, a nie dekoracyjne.
+- Interakcje widoczne w interfejsie odpowiadają rzeczywistym funkcjom; nie dodano pozornej publikacji ani korelacji opartej na zgadywaniu.
+- Układ zachowuje dostęp do bufora, pracowników i operacji live bez konieczności zmiany modułu.
+- `artifacts/` i `design-qa-assets/` pozostają poza zakresem kandydata.
+
+## Stan kontroli
+
+- Kontrakt i kierunek interfejsu: passed.
+- Kontrola przeglądarkowa: render tygodnia bez ucięcia; macierz zawiera 57 pracowników, w tym wolnych 0h; pełna obsada zgłasza czytelny komunikat; publikacja pozostaje zablokowana i ma widoczny opis; panel live jest odrębny od planowanego tygodnia.
+- Pomiar 1885, 1024 i 768 px: przy 1024/768 nagłówek ma pełną szerokość, macierz i live układają się pionowo, a ich szerokie dane przewijają się wewnętrznie. Istniejący globalny nagłówek portalu (`header-right`) nadal powiększa dokument o 65 px przy 768 px; nie pochodzi to z kalendarza i pozostaje poza zakresem tego kandydata.
+- Pomiar gęstości przy 1885 i 1440 px: wiersz pracownika ma 56 px zamiast bazowych 70 px, panel `Dziś na żywo` 166 px zamiast 202/203 px, a w macierzy widać jednocześnie 6 pracowników. Przy 1024 i 768 px reguła desktopowa nie jest aktywna, więc dotychczasowe zachowanie responsywne pozostaje bez zmian.
+- Porównanie wzorca i implementacji na wspólnym obrazie: passed. Zachowano najważniejszą hierarchię wariantu 3 (bufor, macierz tygodnia, przypięte live), przy czym lokalny ekran świadomie pokazuje prawdziwe dane i stan pełnej obsady zamiast demonstracyjnych kart.
+- Walidacja techniczna: pełne `npm test` 860/860 po zmianach logiki i gęstości; finalne testy wariantu 3 14/14, lint, build i `git diff --check` zakończone poprawnie. Nieblokujące ostrzeżenia dotyczą rozmiaru istniejących paczek i LF -> CRLF.
+- Brak wdrożenia produkcyjnego, zmian bazy danych i zapisów backendowych.
+
+result: passed
+
+---
+
+# Calendar Variant 3 — finalne porównanie 1:1
+
+## Źródła
+
+- Referencja: `K:\Mój dysk\Aplikacja\DEMO - ekrany\exec-17b5e40d-92cb-40cf-84c6-42d01b7bf892.png` (1487 × 1058 px).
+- Implementacja: `http://127.0.0.1:5174/`.
+- Finalny render: `artifacts/calendar-reference-fidelity-final.png` (1487 × 1058 px).
+- Porównanie na jednej planszy: `artifacts/calendar-reference-comparison.png`.
+
+## Pomiary końcowe
+
+| Powierzchnia | Implementacja |
+|---|---:|
+| Sidebar | 235 px |
+| Główna treść | 1205 px |
+| Hero | 1205 × 83 px |
+| Bufor zadań | 311 × 532 px |
+| Macierz tygodnia | 878 × 532 px |
+| Toolbar macierzy | 39 px |
+| Kolumna pracownika | 161 px |
+| Wiersz pracownika | 64 px |
+| Panel `Dziś na żywo` | 1203 × 299 px |
+
+## Werdykt
+
+- Układ, proporcje, rytm, wysokości sekcji i gęstość informacji odpowiadają zatwierdzonemu projektowi w natywnym widoku 1487 × 1058 px.
+- Zachowano dane rzeczywiste Best Clean. Referencja zawiera dane demonstracyjne, dlatego nazwy zleceń, obsada, kolory kart i statusy live nie są kopiowane sztucznie.
+- Nie zmieniono bezpiecznej logiki korelacji, zachowania DnD ani blokady publikacji niewersjonowanego planu.
+- Wspólna plansza referencja/implementacja została oceniona bez aktywnych problemów P0, P1 ani P2.
+
+## Kontrole techniczne
+
+- Testy kontraktowe kalendarza: 14/14.
+- Pełny zestaw testów: 860/860.
+- Lint: passed.
+- Build portalu: passed; wyłącznie istniejące ostrzeżenie o rozmiarze części chunków.
+- `git diff --check`: passed; wyłącznie informacyjne ostrzeżenia LF → CRLF.
+- Brak wdrożenia produkcyjnego, zmian bazy, stage, commita i pusha.
+
+final result: passed
+
+---
+
+# Calendar Variant 3 - finalny szlif kluczowego modulu
+
+## Zakres kontroli
+
+- Zachowano zatwierdzony uklad 1:1: bufor zadan, macierz obsady i panel `Dzis na zywo`.
+- Nie zmieniono kontraktow danych, bezpiecznej korelacji po stabilnych ID, logiki DnD ani blokady niewersjonowanej publikacji.
+- Zmiany obejmuja wyłącznie czytelnosc stanow, zachowanie interfejsu po odswiezeniu, responsywnosc, dostepnosc i precyzje geometrii.
+
+## Poprawione detale
+
+- Stan filtrow, wyszukiwania, zwijania, przewijania i fokusu jest odtwarzany po ponownym renderze kalendarza.
+- Przycisk publikacji ma jednoznaczny stan nieaktywny, a przycisk wspomagania uczciwa etykiete `Pokaz braki obsady`.
+- Naglowek `Dzis na zywo` odzyskal dwuwierszowa hierarchie i miesci sie w wysokosci 40 px zgodnej ze wzorcem.
+- Macierz tygodnia przewija sie wewnetrznie; naglowki dni i kolumna pracownika pozostaja przyklejone.
+- Panel konfliktu pozostaje dostepny ponizej 1440 px zamiast znikac.
+- Widoki 1200, 1024, 768 i 390 px ukladaja sekcje pionowo, bez odbierania dostepu do danych lub dzialan naprawczych.
+- Sterowanie klawiatura obsluguje Escape, przywraca fokus, ma widoczny focus ring i respektuje ograniczenie animacji.
+- Cele dotykowe najwazniejszych kontrolek maja co najmniej 40 px na telefonie.
+- Pusty wynik filtrow i aktualny licznik widocznych zadan sa komunikowane w interfejsie.
+- Przelaczanie `Dzien` / `Tydzien` zachowuje wybrana date i nie cofa planisty do dzisiejszego dnia.
+- Przy 768 i 390 px dokument oraz toolbar kalendarza nie maja poziomego overflow; przy 390 px wszystkie widoczne kontrolki kalendarza przechodza prog 40 px.
+
+## Weryfikacja
+
+- Wspolna plansza wzorzec/implementacja: `artifacts/calendar-final-comparison.png`.
+- Finalne renderingi: `design-qa-assets/calendar-final-01-1487-full.png`, `calendar-final-02-1200-clip.png`, `calendar-final-03-1024.png`, `calendar-final-04-768.png` i `calendar-final-05-390.png`.
+- Kontrola przegladarkowa: 1487, 1200, 1024, 768 i 390 px; ustawienia zamykaja sie klawiszem Escape i oddaja fokus, bufor poprawnie sie zwija i rozwija, a wybrany tydzien pozostaje zachowany po zmianie widoku.
+- Testy kontraktowe kalendarza: 18/18 passed.
+- Lint aplikacji webowej: passed.
+- Build portalu: passed; pozostaje jedynie istniejace ostrzezenie Vite o rozmiarze czesci chunkow.
+- `git diff --check`: passed; wyłącznie informacyjne ostrzezenia LF -> CRLF.
+- Pelny `npm test` przekroczyl limit 120 s procesu kontrolnego; ukierunkowany zestaw kalendarza zakonczyl sie poprawnie.
+- Lokalny backend okresowo zwraca niepelne dane przez brak pelnej lokalnej konfiguracji bazy; nie jest to blad warstwy wizualnej kalendarza i nie zostal zamaskowany danymi demonstracyjnymi.
+- Brak stage, commita, pusha, wdrozenia, migracji i zmian danych produkcyjnych.
+
+final result: passed
+
+---
+
+# Kalendarz - kontrolki bez kolizji i 30 najświeższych operacji
+
+## Źródła prawdy wizualnej
+
+- Bufor zadań: `C:\Users\rafal\AppData\Local\Temp\codex-clipboard-ba6b74aa-1582-4b7f-b216-4d1245fcd732.png` (369 x 194 px).
+- Pasek tygodnia: `C:\Users\rafal\AppData\Local\Temp\codex-clipboard-f9ddfe7b-cb81-4803-8552-efb2a3b1a1c4.png` (1247 x 75 px).
+- Panel operacji: `C:\Users\rafal\AppData\Local\Temp\codex-clipboard-59b5206f-47fd-46a7-a9d2-644eb3f729b9.png` (285 x 99 px).
+- Implementacja po poprawkach: `design-qa-assets/calendar-controls-responsive-after.png` (1265 x 712 px).
+- Kontrola wykonana w zalogowanym widoku tygodniowym Best Clean przy viewport 1280 x 720 CSS px i DPR 1.
+
+## Wykryte problemy
+
+- Trzy filtry bufora konkurowały o szerokość w panelu 311 px i ich etykiety nachodziły na siebie.
+- Natywne przyciski przewijania paska tygodnia wyglądały jak dodatkowe strzałki przy ustawieniach.
+- Nawigacja, zakres tygodnia, przełącznik widoku i ustawienia nie miały stabilnych, niezależnych kolumn przy węższym desktopie.
+- Panel operacji ograniczał widok do 6 elementów i nie traktował czasu zakończenia jako świeżości zakończonej operacji.
+
+## Zastosowane poprawki
+
+- Filtry bufora otrzymały trzy mierzone kolumny siatki, kontrolowane odstępy, elipsę i pełną szerokość pól.
+- Pasek tygodnia rozdzielono na cztery stabilne obszary, ukryto niepotrzebne pole daty i natywne przyciski scrollbara.
+- Na starcie wyświetlanych jest maksymalnie 30 pozycji; aktywne sesje pozostają nad pozostałymi, a w każdej grupie najnowsze zdarzenia są wyżej.
+- Dla zakończonych operacji świeżość wyznacza STOP, dla aktywnych START, a dla oczekujących planowana godzina rozpoczęcia.
+- Przycisk `Pokaż wszystkie (X)` pojawia się tylko wtedy, gdy operacji jest więcej niż 30.
+
+## Porównanie i dowody po poprawkach
+
+- Pełny widok oraz oba wskazane wycinki zostały zestawione w jednym wejściu porównawczym; po poprawkach kontrolki nie nachodzą na siebie i zachowują hierarchię zatwierdzonego projektu.
+- W aktualnych danych widoku było 14 operacji: żadna nie była ukryta i przycisk rozwijania celowo się nie pojawił.
+- Typografia, kolory, obramowania i istniejące ikony pozostały zgodne z systemem wizualnym; zmieniono wyłącznie geometrię kontrolek i tekst akcji na `Pokaż wszystkie`.
+- Konsola przeglądarki nie zawierała błędów aplikacji.
+- Test kontraktowy obejmuje limit 30, reguły świeżości, etykietę rozwijania oraz zabezpieczenia geometrii obu problematycznych obszarów.
+
+## Kontrole techniczne
+
+- Testy kontraktowe kalendarza: 18/18 passed.
+- Build portalu: passed; wyłącznie istniejące ostrzeżenie Vite o rozmiarze części chunków.
+- Brak zmian produkcyjnych, migracji bazy, zapisu danych firmy, stage, commita i pusha.
+
+final result: passed
+
+---
+
+# Dodaj zlecenie - spojny proces planu zespolu i Karty Zlecenia
+
+## Zakres kontroli
+
+- Zachowano istniejacy system wizualny portalu i trzyetapowy model formularza.
+- Jeden formularz prowadzi przez: `Klient i obiekt`, `Termin i obsada` oraz `Zakres i publikacja`.
+- Karta Zlecenia powstaje z tych samych danych; uzytkownik nie przepisuje drugi raz klienta, obiektu, planu, obsady ani zakresu.
+- Zapis i publikacja sa rozdzielone komunikacyjnie: zapis tworzy plan oraz edytowalny szkic Karty, publikacja ma udostepnic pracownikom niezmienna rewizje.
+
+## Poprawione zachowania
+
+- Nowe zlecenie nie wybiera juz domyslnie klienta jednorazowego; decyzja o kliencie jest jawna.
+- Naglowek, kroki, podsumowanie i stopka pokazuja kontekst planowania, stan szkicu i nastepny skutek dzialania.
+- Brakujaca obsada jest opisana jako miejsce kierowane do BUFORA, z poprawna odmiana dla jednego miejsca.
+- Przejscie wstecz nie jest blokowane walidacja kolejnych krokow; walidacja dziala przy przejsciu naprzod.
+- Wszystkie zmiany pol, obsady, zmian, zadan, stref i wyposazenia oznaczaja formularz jako niezapisany.
+- Zamkniecie formularza, Escape i powrot do listy uruchamiaja wlasny dialog ochronny. Odrzucenie zmian usuwa nowy szkic albo odtwarza migawke edytowanego zlecenia.
+- Zapis ma stan zajetosci i blokade podwojnego wyslania.
+- Uklad zachowuje czytelnosc i priorytet glownej akcji na desktopie oraz sklada stopke i naglowek na mniejszych szerokosciach.
+
+## Porownanie i dowody
+
+- Wspolny obraz przed/po: `design-qa-assets/job-order-flow-20260801/05-before-after-comparison.png`.
+- Finalne stany: `01-new-step-client-object.png`, `02-new-step-schedule-buffer.png`, `03-new-step-scope-publish.png` oraz `04-unsaved-changes-guard.png` w tym samym katalogu.
+- Porownanie potwierdza prostszy start bez przypadkowego klienta, jasniejsza hierarchie, wyrazny BUFOR oraz czytelne rozdzielenie zapisu od publikacji.
+- Test przegladarkowy wykonano na `http://127.0.0.1:5174/` bez zapisu i bez publikacji danych.
+
+## Kontrole techniczne
+
+- Testy kontraktowe formularza i kalendarza: 29/29 passed.
+- Build portalu: passed; pozostaje jedynie istniejace ostrzezenie Vite o rozmiarze czesci chunkow.
+- `git diff --check`: passed; wylacznie informacyjne ostrzezenia LF -> CRLF.
+- Brak zmian produkcyjnych, migracji bazy, zapisu danych firmy, stage, commita i pusha.
+
+final result: passed
+
+---
+
+# Dodaj zlecenie V2 - kontrola finalnego kreatora
+
+## Zrodla porownania
+
+- Widok zrodlowy starego modalu: `C:\Users\rafal\AppData\Local\Temp\codex-clipboard-c77c4774-7139-4520-b09d-420c9d175f19.png`.
+- Aktualny kreator V2: `design-qa-assets/order-create-v2-20260801/order-create-v2-current.png`.
+- Wspolne porownanie przed/teraz: `design-qa-assets/order-create-v2-20260801/source-vs-v2.png`.
+- Kontrola wykonana w zalogowanym portalu Best Clean przy viewport 1504 x 872 CSS px.
+
+## Wynik kontroli wizualnej
+
+- Stary trzyetapowy modal zostal zastapiony pelnym obszarem roboczym w powloce portalu.
+- Piec krokow ma czytelna kolejnosc, jednoznaczny aktywny stan i nie konkuruje z trescia formularza.
+- Centralna kolumna zachowuje przestrzen na dane operacyjne, a stale podsumowanie po prawej pokazuje gotowosc bez zaslaniania pol.
+- Dolny pasek akcji pozostaje widoczny i wyraznie rozdziela zapis szkicu od przechodzenia do kolejnego kroku.
+- Typografia, kolory, promienie, obramowania i kontrolki sa zgodne z istniejacym systemem wizualnym portalu.
+- Na porownaniu nie stwierdzono nakladania kontrolek, przypadkowego kadrowania ani utraty waznych elementow.
+
+## Kontrola zachowania
+
+- Globalny przycisk `Dodaj zlecenie` otwiera kreator V2; stary modal nie pojawia sie w sciezce tworzenia.
+- Sprawdzono wybor obiektu oraz przejscia do `Zasady` i `Zakres prac`.
+- Proba przejscia do `Obsada` bez wymaganej nazwy uslugi zostala poprawnie zatrzymana komunikatem walidacyjnym.
+- Nie uzyto `Zapisz szkic` ani `Opublikuj`; test byl w calosci bez zapisu danych.
+- Konsola po otwarciu i przejsciu przez kreator: 0 bledow, 0 ostrzezen.
+
+## Kontrole techniczne
+
+- Pelny zestaw testow: 897/897 passed.
+- Lint aplikacji webowej: passed.
+- Build portalu: passed; pozostaje tylko istniejace ostrzezenie Vite o rozmiarze czesci chunkow.
+- `git diff --check`: passed; wylacznie informacyjne ostrzezenia LF -> CRLF.
+- Brak migracji, zmian produkcyjnych, zapisu danych firmy, stage, commita, pusha i wdrozenia.
+
+final result: passed
+
+---
+
+# Dodaj zlecenie V2 - widoczne wymagania krokow
+
+## Problem i cel
+
+- Poprzedni widok podawal laczna liczbe brakow z calego kreatora, ale nie wyjasnial, co blokuje aktualny krok.
+- Po kliknieciu `Dalej` uzytkownik otrzymywal jedynie maly komunikat w stopce bez wskazania pola.
+- Celem bylo pokazanie wymaganych danych przed proba przejscia oraz jednoznaczne prowadzenie do pierwszego braku.
+
+## Wynik kontroli
+
+- Nad zawartoscia kazdego kroku widoczna jest zwarta lista wymaganych elementow tylko dla tego kroku.
+- Pola obowiazkowe maja lokalne oznaczenia, a elementy alternatywne jasno komunikuja warunek, np. opis dostepu albo potwierdzenie braku zasad.
+- Podsumowanie pokazuje oddzielnie braki biezace i przyszle; pozycje biezace sa aktywnymi skrotami do kontrolek.
+- Po kliknieciu `Dalej` komunikat zmienia hierarchie na alarmowa, kontrolki otrzymuja stan bledu, a fokus trafia do pierwszego brakujacego potwierdzenia.
+- Po uzupelnieniu dwoch brakow kroku `Zakres prac` stan zmienia sie na kompletny i kreator przechodzi do `Obsada`.
+- Uklad zachowuje czytelnosc w waskim widoku: lista wymagan zawija sie, etykiety nie nakladaja sie na pola, a glowna akcja pozostaje widoczna.
+
+## Kontrole techniczne
+
+- Testy kontraktowe kreatora: 8/8 passed.
+- Lint aplikacji webowej: passed.
+- Build portalu: passed; jedynie istniejace ostrzezenie Vite o rozmiarze czesci chunkow.
+- Kontrola przegladarkowa wykorzystala wylacznie fikcyjne dane i nie zapisala ani nie opublikowala zlecenia.
+- Brak migracji, zmian produkcyjnych, stage, commita i pusha.
+
+final result: passed
+
+---
+
+# Dodaj zlecenie V2 - zapis roboczego zlecenia
+
+## Odtworzenie problemu
+
+- W kroku `Obiekt` mozna bylo wybrac `Best Clean`, ale proba zapisu konczyla sie komunikatem `Wybierz obiekt zapisany w organizacji.`.
+- Po usunieciu pierwszej niespojnosci backend ujawnil blad PostgreSQL `inconsistent types deduced for parameter $1` podczas zapisu odlaczonego szkicu.
+
+## Przyczyna i poprawka
+
+- Widok ponownie dodawal klienta bez adresu jako obiekt, lecz adapter zapisu odfiltrowywal ten sam rekord. Ujednolicono zrodlo obiektow: brak adresu nie usuwa obiektu, tylko pozostaje widocznym brakiem przed realizacja.
+- Parametry `org_id` i `source_order_id` sa teraz jawnie typowane w zapytaniu `job_card_draft`, lacznie z podzapytaniem numeru bazowej rewizji.
+- Dolne akcje maja rozlaczne nazwy: `Zapisz robocze zlecenie` oraz `Zatwierdz i wyslij do realizacji`.
+
+## Wynik kontroli
+
+- Przeklikano pelny proces: obiekt, zasady, zakres ze strefa i zadaniem, bufor obsady oraz zatwierdzenie.
+- Robocze zlecenie `Test zapisu roboczego zlecenia` zostalo zapisane o 20:49.
+- Nie kliknieto akcji wyslania do realizacji; szkic nie utworzyl aktywnego zadania ani wystapienia kalendarza.
+
+## Kontrole techniczne
+
+- Testy domeny, API i kreatora: 47/47 passed.
+- Lint aplikacji webowej: passed.
+- Build portalu: passed; jedynie istniejace ostrzezenie Vite o rozmiarze czesci chunkow.
+- Brak migracji, stage, commita, pusha i wdrozenia.
+
+final result: passed

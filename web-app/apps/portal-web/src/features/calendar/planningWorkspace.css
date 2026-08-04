@@ -1,0 +1,2272 @@
+#portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week {
+  --calendar-planning-border: #dce5f4;
+  --calendar-planning-muted: #6f7e97;
+  --calendar-planning-soft: #f7f9fd;
+  --calendar-planning-blue: #4f61f6;
+  --calendar-planning-live: #1d5cff;
+  --calendar-planning-done: #12a66d;
+  --calendar-planning-alert: #e64141;
+  --calendar-planning-unplanned: #ed8a24;
+}
+
+#portalRoot #view-calendar .calendar-planning-hero-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+  max-width: 520px;
+}
+
+#portalRoot #view-calendar .calendar-planning-hero-actions .btn2 {
+  align-items: center;
+  border-radius: 10px;
+  display: inline-flex;
+  font-weight: 800;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 18px;
+}
+
+#portalRoot #view-calendar .calendar-planning-assist-btn {
+  background: #fff;
+  border-color: #cbd6ff;
+  color: #4355e8;
+}
+
+#portalRoot #view-calendar .calendar-planning-publish-btn {
+  box-shadow: 0 10px 24px rgba(79, 97, 246, 0.2);
+}
+
+#portalRoot #view-calendar .calendar-planning-publish-btn:disabled {
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+#portalRoot #view-calendar .calendar-planning-publish-note {
+  color: #65738b;
+  flex: 1 0 100%;
+  font-size: 11px;
+  line-height: 1.4;
+  max-width: 520px;
+  text-align: right;
+}
+
+#portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-timeline-card {
+  display: grid;
+  grid-template-columns: minmax(274px, 312px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  height: auto;
+  min-height: calc(100vh - 170px);
+  overflow: hidden;
+}
+
+#portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-calendar-toolbar {
+  border-bottom: 1px solid var(--calendar-planning-border);
+  border-left: 1px solid var(--calendar-planning-border);
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 52px;
+  padding: 8px 12px;
+}
+
+#portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-toolbar-left {
+  display: none;
+}
+
+#portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-toolbar-right {
+  justify-content: flex-start;
+  min-width: 0;
+  width: 100%;
+}
+
+#portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-range-label {
+  margin-left: auto;
+}
+
+#portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week #calendarPrototypeTimeline {
+  display: flex;
+  flex-direction: column;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  height: clamp(430px, calc(100vh - 277px), 700px);
+  min-height: 430px;
+  overflow: hidden;
+}
+
+#portalRoot #view-calendar .calendar-planning-workspace {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(274px, 312px) minmax(0, 1fr);
+  height: auto;
+  min-height: 240px;
+  overflow: hidden;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer {
+  background: #fff;
+  border-right: 1px solid var(--calendar-planning-border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer__head,
+#portalRoot #view-calendar .calendar-planning-live__head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer__head {
+  min-height: 52px;
+  padding: 0 14px;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer__head strong,
+#portalRoot #view-calendar .calendar-planning-live__head strong {
+  color: #243148;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-calendar .calendar-planning-count {
+  align-items: center;
+  background: #eef1ff;
+  border-radius: 999px;
+  color: #4f61f6;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 900;
+  min-height: 24px;
+  padding: 0 8px;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer__filters {
+  border-bottom: 1px solid var(--calendar-planning-border);
+  border-top: 1px solid var(--calendar-planning-border);
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+#portalRoot #view-calendar .calendar-planning-search {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #d9e2f2;
+  border-radius: 9px;
+  display: flex;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+#portalRoot #view-calendar .calendar-planning-search i {
+  color: #7e8ba4;
+  font-size: 16px;
+}
+
+#portalRoot #view-calendar .calendar-planning-search input {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #243148;
+  font-size: 12px;
+  min-width: 0;
+  outline: 0;
+  padding: 0;
+  width: 100%;
+}
+
+#portalRoot #view-calendar .calendar-planning-search:focus-within {
+  border-color: #7081ff;
+  box-shadow: 0 0 0 3px rgba(79, 97, 246, 0.16);
+}
+
+#portalRoot #view-calendar .calendar-planning-filter-row {
+  display: flex;
+  gap: 7px;
+}
+
+#portalRoot #view-calendar .calendar-planning-filter-chip {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #dbe3f1;
+  border-radius: 8px;
+  color: #52617a;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  gap: 5px;
+  min-height: 31px;
+  padding: 0 9px;
+}
+
+#portalRoot #view-calendar .calendar-planning-filter-chip.is-active {
+  background: #edf2ff;
+  border-color: #c6d3ff;
+  color: #3f55da;
+  margin-left: auto;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 0;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card {
+  background: #fff;
+  border: 0;
+  border-bottom: 1px solid #e5ebf5;
+  border-left: 3px solid #6676ff;
+  color: #243148;
+  cursor: grab;
+  display: block;
+  padding: 10px 12px 10px 14px;
+  text-align: left;
+  width: 100%;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card:hover,
+#portalRoot #view-calendar .calendar-planning-buffer-card:focus-visible {
+  background: #f7f9ff;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card:focus-visible {
+  outline: 3px solid rgba(79, 97, 246, 0.34);
+  outline-offset: -3px;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card.is-assist-highlighted {
+  animation: calendarPlanningAttention 1.15s ease both;
+  background: #fff8e9;
+  border-left-color: #ed8a24;
+}
+
+@keyframes calendarPlanningAttention {
+  0%, 100% { box-shadow: none; }
+  45% { box-shadow: inset 0 0 0 2px rgba(237, 138, 36, 0.32); }
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card.is-hidden-by-search {
+  display: none;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card__top,
+#portalRoot #view-calendar .calendar-planning-buffer-card__meta,
+#portalRoot #view-calendar .calendar-planning-buffer-card__status {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  justify-content: space-between;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card__top strong {
+  font-size: 12px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card__badge {
+  background: #eef0ff;
+  border-radius: 999px;
+  color: #5968dc;
+  flex: 0 0 auto;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  padding: 4px 6px;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card__client {
+  color: #54627a;
+  display: block;
+  font-size: 11px;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card__meta,
+#portalRoot #view-calendar .calendar-planning-buffer-card__status {
+  color: #7a879d;
+  font-size: 10px;
+  justify-content: flex-start;
+  margin-top: 5px;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card__status {
+  color: #d63434;
+  font-weight: 900;
+  justify-content: space-between;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card__staff {
+  background: #f2f4ff;
+  border: 1px solid #d3d9ff;
+  border-radius: 7px;
+  color: #4251c9;
+  min-width: 45px;
+  padding: 4px 7px;
+  text-align: center;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer__foot {
+  align-items: center;
+  border-top: 1px solid var(--calendar-planning-border);
+  color: #6d7b91;
+  display: flex;
+  font-size: 11px;
+  font-weight: 800;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+#portalRoot #view-calendar .calendar-planning-week {
+  background: #fff;
+  min-width: 0;
+  overflow: auto;
+}
+
+#portalRoot #view-calendar .calendar-planning-matrix {
+  display: grid;
+  grid-template-columns: minmax(168px, 1.15fr) repeat(var(--planning-day-count), minmax(88px, 1fr));
+  min-width: 800px;
+}
+
+#portalRoot #view-calendar .calendar-planning-matrix__corner,
+#portalRoot #view-calendar .calendar-planning-day-head,
+#portalRoot #view-calendar .calendar-planning-worker,
+#portalRoot #view-calendar .calendar-planning-day-cell {
+  border-bottom: 1px solid var(--calendar-planning-border);
+  border-right: 1px solid var(--calendar-planning-border);
+  min-height: 70px;
+}
+
+#portalRoot #view-calendar .calendar-planning-matrix__corner,
+#portalRoot #view-calendar .calendar-planning-day-head {
+  align-items: center;
+  background: #fbfcff;
+  display: flex;
+  min-height: 54px;
+  padding: 8px 10px;
+}
+
+#portalRoot #view-calendar .calendar-planning-matrix__corner {
+  color: #33415a;
+  font-size: 11px;
+  font-weight: 900;
+  justify-content: space-between;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-calendar .calendar-planning-day-head {
+  color: #68758c;
+  flex-direction: column;
+  font-size: 10px;
+  justify-content: center;
+  text-align: center;
+}
+
+#portalRoot #view-calendar .calendar-planning-day-head strong {
+  color: #39465d;
+  font-size: 11px;
+  margin-top: 3px;
+}
+
+#portalRoot #view-calendar .calendar-planning-day-head.is-today {
+  background: #eff4ff;
+  box-shadow: inset 0 0 0 1px #9db6ff;
+  color: #2458ed;
+}
+
+#portalRoot #view-calendar .calendar-planning-day-head.is-today strong {
+  color: #2458ed;
+}
+
+#portalRoot #view-calendar .calendar-planning-worker {
+  align-items: center;
+  background: #fff;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  padding: 10px;
+}
+
+#portalRoot #view-calendar .calendar-planning-worker__avatar,
+#portalRoot #view-calendar .calendar-planning-live-worker__avatar {
+  align-items: center;
+  background: #6170ee;
+  border-radius: 50%;
+  color: #fff;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 900;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+#portalRoot #view-calendar .calendar-planning-worker__name {
+  color: #243148;
+  display: block;
+  font-size: 12px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-calendar .calendar-planning-worker__role {
+  color: #7c899f;
+  display: block;
+  font-size: 9px;
+  margin-top: 2px;
+}
+
+#portalRoot #view-calendar .calendar-planning-worker__hours {
+  background: #e8f8ef;
+  border-radius: 999px;
+  color: #15945f;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 4px 7px;
+}
+
+#portalRoot #view-calendar .calendar-planning-day-cell {
+  background: #fff;
+  min-width: 0;
+  padding: 7px;
+  position: relative;
+}
+
+#portalRoot #view-calendar .calendar-planning-day-cell.is-today {
+  background: #f4f7ff;
+  box-shadow: inset 1px 0 #a9bdff, inset -1px 0 #a9bdff;
+}
+
+#portalRoot #view-calendar .calendar-planning-day-cell.is-timeline-drop-target {
+  background: #eff8f4;
+  box-shadow: inset 0 0 0 2px #42b887;
+}
+
+#portalRoot #view-calendar .calendar-planning-day-cell.is-timeline-drop-invalid {
+  background: #fff2f2;
+  box-shadow: inset 0 0 0 2px #e25454;
+}
+
+#portalRoot #view-calendar .calendar-planning-card {
+  background: #f0f3fa;
+  border: 1px solid #d4ddeb;
+  border-left: 3px solid #7180a0;
+  border-radius: 7px;
+  color: #26344c;
+  cursor: pointer;
+  display: block;
+  margin: 0 0 5px;
+  min-height: 48px;
+  padding: 6px 7px;
+  text-align: left;
+  width: 100%;
+}
+
+#portalRoot #view-calendar .calendar-planning-card:hover,
+#portalRoot #view-calendar .calendar-planning-card:focus-visible {
+  border-color: #9cadce;
+  box-shadow: 0 5px 14px rgba(35, 50, 83, 0.1);
+  transform: translateY(-1px);
+}
+
+#portalRoot #view-calendar .calendar-planning-card:focus-visible {
+  outline: 3px solid rgba(79, 97, 246, 0.34);
+  outline-offset: 2px;
+}
+
+#portalRoot #view-calendar .calendar-planning-card__title {
+  color: #294ab4;
+  display: block;
+  font-size: 10px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-calendar .calendar-planning-card__time,
+#portalRoot #view-calendar .calendar-planning-card__staff {
+  color: #59677f;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+#portalRoot #view-calendar .calendar-planning-card__bottom {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+#portalRoot #view-calendar .calendar-planning-more {
+  color: #61708a;
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 4px;
+  text-align: center;
+}
+
+#portalRoot #view-calendar .calendar-planning-empty {
+  align-items: center;
+  color: #65738b;
+  display: flex;
+  font-size: 11px;
+  justify-content: center;
+  min-height: 180px;
+  padding: 20px;
+  text-align: center;
+}
+
+#portalRoot #view-calendar .calendar-planning-live {
+  background: #fff;
+  border-top: 1px solid var(--calendar-planning-border);
+  flex: 0 0 auto;
+  max-height: 202px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+#portalRoot #view-calendar .calendar-planning-live__head {
+  border-bottom: 1px solid var(--calendar-planning-border);
+  min-height: 48px;
+  padding: 8px 14px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live__title {
+  display: grid;
+  gap: 2px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live__title span {
+  color: #6f7d93;
+  font-size: 10px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live__status {
+  align-items: center;
+  color: #3c4a61;
+  display: flex;
+  font-size: 10px;
+  font-weight: 800;
+  gap: 7px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live__head-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live__more {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #d5def0;
+  border-radius: 8px;
+  color: #4355e8;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 900;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 9px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live__more:hover,
+#portalRoot #view-calendar .calendar-planning-live__more:focus-visible {
+  background: #f4f6ff;
+  border-color: #aebbf3;
+}
+
+#portalRoot #view-calendar .calendar-planning-live__more:focus-visible {
+  outline: 3px solid rgba(79, 97, 246, 0.28);
+  outline-offset: 2px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live__status i {
+  color: #24a66f;
+  font-size: 8px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live__warning {
+  align-items: center;
+  background: #fff6e8;
+  border: 1px solid #f3cf91;
+  border-radius: 999px;
+  color: #8a5410;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 900;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
+#portalRoot #view-calendar .calendar-planning-live__scroll {
+  max-height: 153px;
+  overflow: auto;
+}
+
+#portalRoot #view-calendar .calendar-planning-live [data-calendar-live-extra="true"] {
+  display: none;
+}
+
+#portalRoot #view-calendar .calendar-planning-live.is-expanded {
+  max-height: min(448px, calc(100vh - 180px));
+}
+
+#portalRoot #view-calendar .calendar-planning-live.is-expanded .calendar-planning-live__scroll {
+  max-height: min(399px, calc(100vh - 229px));
+}
+
+#portalRoot #view-calendar .calendar-planning-live.is-expanded [data-calendar-live-extra="true"] {
+  display: flex;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) minmax(145px, 0.75fr) minmax(280px, 2fr) minmax(130px, 0.7fr);
+  min-width: 0;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-grid__head {
+  align-items: center;
+  background: #fbfcff;
+  border-bottom: 1px solid var(--calendar-planning-border);
+  border-right: 1px solid var(--calendar-planning-border);
+  color: #64718a;
+  display: flex;
+  font-size: 9px;
+  font-weight: 900;
+  justify-content: center;
+  min-height: 28px;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-worker,
+#portalRoot #view-calendar .calendar-planning-live-plan,
+#portalRoot #view-calendar .calendar-planning-live-track,
+#portalRoot #view-calendar .calendar-planning-live-state {
+  align-items: center;
+  border-bottom: 1px solid var(--calendar-planning-border);
+  border-right: 1px solid var(--calendar-planning-border);
+  display: flex;
+  min-height: 42px;
+  padding: 5px 8px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-worker {
+  gap: 8px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-worker__avatar {
+  flex: 0 0 28px;
+  height: 28px;
+  width: 28px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-worker strong {
+  color: #27344a;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-plan {
+  color: #5f6d84;
+  flex-direction: column;
+  font-size: 9px;
+  justify-content: center;
+  text-align: center;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-plan strong {
+  color: #344159;
+  font-size: 10px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-track {
+  background-image: repeating-linear-gradient(90deg, transparent 0, transparent calc(4.166% - 1px), #e2e8f2 calc(4.166% - 1px), #e2e8f2 4.166%);
+  overflow: hidden;
+  padding: 6px 0;
+  position: relative;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-bar {
+  align-items: center;
+  border-radius: 6px;
+  color: #fff;
+  display: flex;
+  font-size: 9px;
+  font-weight: 900;
+  height: 24px;
+  left: var(--live-left);
+  max-width: calc(100% - var(--live-left));
+  overflow: hidden;
+  padding: 0 8px;
+  position: absolute;
+  text-overflow: ellipsis;
+  top: 9px;
+  white-space: nowrap;
+  width: var(--live-width);
+}
+
+#portalRoot #view-calendar .calendar-planning-live-bar.is-running {
+  background: var(--calendar-planning-live);
+}
+
+#portalRoot #view-calendar .calendar-planning-live-bar.is-completed {
+  background: var(--calendar-planning-done);
+}
+
+#portalRoot #view-calendar .calendar-planning-live-bar.is-unverified {
+  background: var(--calendar-planning-unplanned);
+}
+
+#portalRoot #view-calendar .calendar-planning-live-bar.is-alert {
+  background: var(--calendar-planning-alert);
+}
+
+#portalRoot #view-calendar .calendar-planning-live-now {
+  background: #ee3f3f;
+  bottom: 0;
+  left: var(--live-now-left);
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: 1px;
+  z-index: 3;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-state {
+  color: #536079;
+  font-size: 9px;
+  font-weight: 800;
+  gap: 7px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-state.is-running { color: var(--calendar-planning-live); }
+#portalRoot #view-calendar .calendar-planning-live-state.is-completed { color: var(--calendar-planning-done); }
+#portalRoot #view-calendar .calendar-planning-live-state.is-unverified { color: var(--calendar-planning-unplanned); }
+#portalRoot #view-calendar .calendar-planning-live-state.is-alert { color: var(--calendar-planning-alert); }
+
+#portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-timeline-loading {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1439px) {
+  #portalRoot #view-calendar {
+    overflow-x: hidden !important;
+    overflow-y: visible !important;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype > .portal-page-hero {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-hero-actions {
+    justify-content: stretch;
+    max-width: none;
+    width: 100%;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-publish-note {
+    max-width: none;
+    text-align: left;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-hero-actions .btn2 {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-timeline-card {
+    display: block;
+    max-height: none !important;
+    overflow: visible;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-calendar-toolbar {
+    border-left: 0;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-workspace {
+    display: block;
+    height: auto;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week #calendarPrototypeTimeline {
+    flex: 0 0 auto !important;
+    height: auto !important;
+    max-height: none !important;
+    max-width: 100%;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week,
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-timeline-card,
+  #portalRoot #view-calendar .calendar-planning-workspace,
+  #portalRoot #view-calendar .calendar-planning-week,
+  #portalRoot #view-calendar .calendar-planning-live,
+  #portalRoot #view-calendar .calendar-planning-live__scroll {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer {
+    border-bottom: 1px solid var(--calendar-planning-border);
+    border-right: 0;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer__list {
+    display: grid;
+    grid-auto-columns: minmax(250px, 300px);
+    grid-auto-flow: column;
+    overflow-x: auto;
+    padding: 6px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-week {
+    max-height: min(580px, 65vh);
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer-card {
+    border: 1px solid #e1e7f2;
+    border-left: 3px solid #6676ff;
+    border-radius: 9px;
+    margin-right: 7px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live,
+  #portalRoot #view-calendar .calendar-planning-live.is-expanded {
+    max-height: 420px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__scroll,
+  #portalRoot #view-calendar .calendar-planning-live.is-expanded .calendar-planning-live__scroll {
+    max-height: 330px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-grid {
+    min-width: 700px;
+  }
+}
+
+/* At tablet width the compact sidebar is already active, but the desktop
+   account header still keeps the package chip. Removing only that secondary
+   chip leaves search, alerts, user identity and logout fully usable without
+   forcing a document-level horizontal scrollbar. */
+@media (min-width: 641px) and (max-width: 820px) {
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) #subscriptionChip {
+    display: none !important;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-week-number {
+    display: none !important;
+  }
+
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .content-shell > .header,
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .content-shell > .header .header-right {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  #portalRoot #view-calendar .calendar-planning-hero-actions {
+    display: grid;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-hero-actions .btn2 {
+    width: 100%;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__head-actions {
+    flex-wrap: wrap;
+    gap: 7px;
+    width: 100%;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-filter-row {
+    overflow-x: auto;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-matrix {
+    grid-template-columns: 156px repeat(var(--planning-day-count), minmax(92px, 1fr));
+  }
+}
+
+@media (max-width: 1280px) {
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-range-label {
+    display: none;
+  }
+}
+
+/* Desktop density: mirrors the useful working area of Chrome at roughly 80%,
+   without scaling the rest of the portal or changing responsive layouts. */
+@media (min-width: 1440px) {
+  #portalRoot #view-calendar .calendar-timeline-prototype > .portal-page-hero {
+    gap: 14px;
+    margin-bottom: 10px;
+    min-height: 74px;
+    padding: 14px 18px;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype > .portal-page-hero h1 {
+    font-size: clamp(21px, 1.6vw, 27px);
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype > .portal-page-hero p {
+    font-size: 12px;
+    margin-top: 4px;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype > .portal-page-hero .portal-page-hero__title-row {
+    gap: 8px;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype > .portal-page-hero .portal-page-hero__badge {
+    font-size: 10px;
+    min-height: 22px;
+    padding: 3px 7px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-hero-actions {
+    gap: 8px;
+    max-width: 450px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-hero-actions .btn2 {
+    border-radius: 8px;
+    font-size: 11px;
+    gap: 6px;
+    min-height: 36px;
+    padding: 0 14px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-publish-note {
+    font-size: 10px;
+    max-width: 450px;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-timeline-card,
+  #portalRoot #view-calendar .calendar-planning-workspace {
+    grid-template-columns: minmax(232px, 260px) minmax(0, 1fr);
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer__head {
+    min-height: 42px;
+    padding: 0 10px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer__head strong,
+  #portalRoot #view-calendar .calendar-planning-live__head strong {
+    font-size: 10px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-count {
+    font-size: 9px;
+    min-height: 20px;
+    padding: 0 7px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer__filters {
+    gap: 6px;
+    padding: 7px 9px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-search {
+    border-radius: 7px;
+    gap: 5px;
+    min-height: 30px;
+    padding: 0 8px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-search i {
+    font-size: 14px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-search input {
+    font-size: 11px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer-card {
+    padding: 8px 9px 8px 11px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer-card__top strong {
+    font-size: 11px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer-card__badge {
+    font-size: 9px;
+    padding: 3px 5px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer-card__client {
+    font-size: 10px;
+    margin-top: 3px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer-card__meta,
+  #portalRoot #view-calendar .calendar-planning-buffer-card__status {
+    font-size: 10px;
+    margin-top: 4px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer-card__staff {
+    min-width: 38px;
+    padding: 3px 6px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer__foot {
+    font-size: 10px;
+    min-height: 34px;
+    padding: 0 10px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-matrix {
+    grid-template-columns: minmax(146px, 1.05fr) repeat(var(--planning-day-count), minmax(76px, 1fr));
+    min-width: 720px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-matrix__corner,
+  #portalRoot #view-calendar .calendar-planning-day-head,
+  #portalRoot #view-calendar .calendar-planning-worker,
+  #portalRoot #view-calendar .calendar-planning-day-cell {
+    min-height: 56px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-matrix__corner,
+  #portalRoot #view-calendar .calendar-planning-day-head {
+    min-height: 44px;
+    padding: 6px 8px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-worker {
+    gap: 7px;
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    padding: 7px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-worker__avatar {
+    font-size: 10px;
+    height: 28px;
+    width: 28px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-worker__name {
+    font-size: 11px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-worker__role {
+    font-size: 9px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-worker__hours {
+    font-size: 9px;
+    padding: 3px 6px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-day-cell {
+    padding: 5px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-card {
+    border-radius: 6px;
+    margin-bottom: 4px;
+    min-height: 38px;
+    padding: 5px 6px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-card__title,
+  #portalRoot #view-calendar .calendar-planning-more {
+    font-size: 10px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-card__time,
+  #portalRoot #view-calendar .calendar-planning-card__staff {
+    font-size: 9px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-card__bottom {
+    margin-top: 3px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live {
+    max-height: 166px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__head {
+    min-height: 40px;
+    padding: 6px 10px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__title span,
+  #portalRoot #view-calendar .calendar-planning-live__status,
+  #portalRoot #view-calendar .calendar-planning-live__warning,
+  #portalRoot #view-calendar .calendar-planning-live__more {
+    font-size: 10px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__warning {
+    min-height: 26px;
+    padding: 0 9px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__more {
+    min-height: 30px;
+    padding: 0 9px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__scroll {
+    max-height: 126px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-grid {
+    grid-template-columns: minmax(120px, 0.8fr) minmax(125px, 0.75fr) minmax(230px, 2fr) minmax(110px, 0.7fr);
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-grid__head {
+    font-size: 9px;
+    min-height: 24px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-worker,
+  #portalRoot #view-calendar .calendar-planning-live-plan,
+  #portalRoot #view-calendar .calendar-planning-live-track,
+  #portalRoot #view-calendar .calendar-planning-live-state {
+    min-height: 34px;
+    padding: 3px 6px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-worker {
+    gap: 6px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-worker__avatar {
+    flex-basis: 24px;
+    font-size: 9px;
+    height: 24px;
+    width: 24px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-worker strong,
+  #portalRoot #view-calendar .calendar-planning-live-plan strong {
+    font-size: 10px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-plan,
+  #portalRoot #view-calendar .calendar-planning-live-state,
+  #portalRoot #view-calendar .calendar-planning-live-bar {
+    font-size: 9px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-bar {
+    border-radius: 5px;
+    height: 20px;
+    padding: 0 6px;
+    top: 7px;
+  }
+}
+
+/* Reference fidelity: exec-17b5e40d, measured at 1487 × 1058. */
+#portalRoot #view-calendar .calendar-planning-toolbar-nav,
+#portalRoot #view-calendar .calendar-planning-toolbar-period,
+#portalRoot #view-calendar .calendar-planning-view-switch {
+  align-items: center;
+  display: inline-flex;
+}
+
+#portalRoot #view-calendar .calendar-planning-toolbar-nav,
+#portalRoot #view-calendar .calendar-planning-view-switch {
+  gap: 4px;
+}
+
+#portalRoot #view-calendar .calendar-planning-toolbar-period {
+  gap: 12px;
+  justify-content: center;
+  min-width: 0;
+}
+
+#portalRoot #view-calendar .calendar-planning-toolbar-period .fw-date-jump-btn {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #26344b;
+  display: inline-flex;
+  font-weight: 900;
+  gap: 5px;
+  min-width: 0;
+}
+
+#portalRoot #view-calendar .calendar-planning-toolbar-period .fw-date-jump-btn strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-calendar .calendar-planning-week-number {
+  color: #6e7b92;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+#portalRoot #view-calendar .calendar-planning-settings {
+  position: relative;
+}
+
+#portalRoot #view-calendar .calendar-planning-settings .fw-type-panel {
+  left: auto;
+  right: 0;
+}
+
+#portalRoot #view-calendar .calendar-planning-filter-select {
+  min-width: 0;
+  overflow: hidden;
+  padding-right: 6px;
+  position: relative;
+}
+
+#portalRoot #view-calendar .calendar-planning-filter-select > span {
+  display: none;
+}
+
+#portalRoot #view-calendar .calendar-planning-filter-select select {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  min-width: 0;
+  outline: 0;
+  padding: 0 14px 0 0;
+  width: 100%;
+}
+
+#portalRoot #view-calendar .calendar-planning-filter-select i {
+  pointer-events: none;
+  position: absolute;
+  right: 6px;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card__address {
+  color: #8390a5;
+  display: block;
+  font-size: 9px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer-card.tone-blue { border-left-color: #4d6cff; }
+#portalRoot #view-calendar .calendar-planning-buffer-card.tone-violet { border-left-color: #8664ed; }
+#portalRoot #view-calendar .calendar-planning-buffer-card.tone-green { border-left-color: #2eb174; }
+#portalRoot #view-calendar .calendar-planning-buffer-card.tone-orange { border-left-color: #ec8c2d; }
+
+#portalRoot #view-calendar .calendar-planning-buffer-card__badge.is-single {
+  background: #f0edff;
+  color: #6c51dc;
+}
+
+#portalRoot #view-calendar .calendar-planning-card.tone-blue {
+  background: #edf3ff;
+  border-color: #b8cdfd;
+  border-left-color: #4d7af0;
+}
+
+#portalRoot #view-calendar .calendar-planning-card.tone-blue .calendar-planning-card__title { color: #3265d6; }
+#portalRoot #view-calendar .calendar-planning-card.tone-violet {
+  background: #f3efff;
+  border-color: #d2c5fa;
+  border-left-color: #795de2;
+}
+
+#portalRoot #view-calendar .calendar-planning-card.tone-violet .calendar-planning-card__title { color: #6b4ed0; }
+#portalRoot #view-calendar .calendar-planning-card.tone-green {
+  background: #ebf9f1;
+  border-color: #b5e2c8;
+  border-left-color: #28a968;
+}
+
+#portalRoot #view-calendar .calendar-planning-card.tone-green .calendar-planning-card__title { color: #23865a; }
+#portalRoot #view-calendar .calendar-planning-card.tone-orange {
+  background: #fff4eb;
+  border-color: #f2c9a8;
+  border-left-color: #e98a35;
+}
+
+#portalRoot #view-calendar .calendar-planning-card.tone-orange .calendar-planning-card__title { color: #c66b1f; }
+
+#portalRoot #view-calendar .calendar-planning-worker-filter {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #dbe3f1;
+  border-radius: 7px;
+  color: #5e6d84;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 800;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 7px;
+  text-transform: none;
+}
+
+#portalRoot #view-calendar .calendar-planning-worker-filter.is-active {
+  background: #edf2ff;
+  border-color: #bfcdfc;
+  color: #315ee5;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer__foot button,
+#portalRoot #view-calendar .calendar-planning-live__collapse,
+#portalRoot #view-calendar .calendar-planning-live-conflict__close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #728097;
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer__foot button {
+  border: 1px solid #d9e1ee;
+  border-radius: 6px;
+  height: 26px;
+  width: 26px;
+}
+
+#portalRoot #view-calendar .calendar-planning-buffer.is-collapsed .calendar-planning-buffer__filters,
+#portalRoot #view-calendar .calendar-planning-buffer.is-collapsed .calendar-planning-buffer__list {
+  display: none;
+}
+
+#portalRoot #view-calendar .calendar-planning-live__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 176px;
+  min-height: 0;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-grid__head.is-timeline {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  overflow: visible;
+  padding: 3px 0 0;
+  position: relative;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-grid__head.is-timeline > span:first-child {
+  left: 8px;
+  position: absolute;
+  top: -18px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-scale {
+  align-items: center;
+  color: #748299;
+  display: grid;
+  font-size: 7px;
+  grid-template-columns: repeat(12, 1fr);
+  line-height: 1;
+  width: 100%;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-scale span {
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-now-label {
+  background: #f04444;
+  border-radius: 4px 4px 0 0;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 900;
+  left: var(--live-now-left);
+  padding: 3px 5px;
+  position: absolute;
+  top: -23px;
+  transform: translateX(-50%);
+  z-index: 5;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-plan-pill {
+  background: #f0f2f6;
+  border: 1px solid #dfe4ed;
+  border-radius: 6px;
+  display: grid;
+  line-height: 1.1;
+  padding: 3px 6px;
+  width: 100%;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-plan-track {
+  background: rgba(98, 118, 232, 0.12);
+  border: 1px solid rgba(98, 118, 232, 0.32);
+  border-radius: 6px;
+  height: 22px;
+  left: var(--live-left);
+  max-width: calc(100% - var(--live-left));
+  position: absolute;
+  top: 6px;
+  width: var(--live-width);
+}
+
+#portalRoot #view-calendar .calendar-planning-live-conflict {
+  background: #fff9f8;
+  border: 1px solid #ffaba5;
+  border-radius: 9px;
+  color: #3c4557;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 7px;
+  min-width: 0;
+  padding: 11px 10px;
+  position: relative;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-conflict.is-hidden {
+  display: none;
+}
+
+#portalRoot #view-calendar .calendar-planning-live__body:has(.calendar-planning-live-conflict.is-hidden) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#portalRoot #view-calendar .calendar-planning-live-conflict__close {
+  font-size: 17px;
+  height: 24px;
+  position: absolute;
+  right: 5px;
+  top: 4px;
+  width: 24px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-conflict__eyebrow {
+  color: #c52f2f;
+  font-size: 8px;
+  font-weight: 900;
+  padding-right: 19px;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-conflict > strong {
+  font-size: 10px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-conflict p,
+#portalRoot #view-calendar .calendar-planning-live-conflict__label,
+#portalRoot #view-calendar .calendar-planning-live-conflict > span:last-child {
+  font-size: 8px;
+  line-height: 1.35;
+  margin: 0;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-conflict__primary,
+#portalRoot #view-calendar .calendar-planning-live-conflict__secondary {
+  align-items: center;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 900;
+  gap: 5px;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 7px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-conflict__primary {
+  background: #5764ee;
+  border: 1px solid #5764ee;
+  color: #fff;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-conflict__secondary {
+  background: #fff;
+  border: 1px solid #d4ddeb;
+  color: #44516a;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-conflict__link {
+  align-self: flex-start;
+  background: transparent;
+  border: 0;
+  color: #405bea;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 900;
+  padding: 2px 0;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-conflict.is-clear {
+  align-items: center;
+  background: #f1fbf6;
+  border-color: #bee9d1;
+  color: #23865a;
+  justify-content: center;
+  text-align: center;
+}
+
+#portalRoot #view-calendar .calendar-planning-live-conflict.is-clear i {
+  font-size: 24px;
+}
+
+#portalRoot #view-calendar .calendar-planning-live.is-collapsed {
+  flex-basis: 41px !important;
+  max-height: 41px !important;
+}
+
+#portalRoot #view-calendar .calendar-planning-live.is-collapsed .calendar-planning-live__body {
+  display: none;
+}
+
+@media (min-width: 1440px) {
+  #portalRoot #view-calendar .calendar-timeline-prototype > .portal-page-hero {
+    height: 83px;
+    margin-bottom: 12px;
+    min-height: 83px;
+    padding: 13px 18px;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype > .portal-page-hero h1 {
+    font-size: 27px;
+    line-height: 1.05;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype > .portal-page-hero p {
+    font-size: 11px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-hero-actions {
+    display: grid;
+    gap: 5px 9px;
+    grid-template-columns: auto auto;
+    max-width: 470px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-hero-actions .btn2 {
+    min-height: 38px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-publish-btn:disabled {
+    background: #6065eb !important;
+    border-color: #6065eb !important;
+    box-shadow: 0 8px 18px rgba(79, 86, 230, 0.22);
+    color: #fff !important;
+    opacity: 0.82;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-publish-note {
+    font-size: 9px;
+    grid-column: 2;
+    max-width: none;
+    text-align: right;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-timeline-card {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    display: grid;
+    grid-template-columns: 311px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    min-height: 0;
+    overflow: visible;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-calendar-toolbar {
+    align-self: start;
+    background: #fff;
+    border: 1px solid var(--calendar-planning-border);
+    border-radius: 9px 9px 0 0;
+    grid-column: 2;
+    grid-row: 1;
+    height: 39px;
+    min-height: 39px;
+    padding: 4px 7px;
+    position: relative;
+    z-index: 4;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-toolbar-right {
+    box-sizing: border-box;
+    display: grid;
+    gap: 7px;
+    grid-template-columns: auto minmax(185px, 1fr) auto auto;
+    height: 100%;
+    justify-content: stretch;
+    padding-right: 14px;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-toolbar-icon,
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-view-btn {
+    border-radius: 6px;
+    font-size: 9px;
+    height: 29px;
+    min-height: 29px;
+    padding: 0 9px;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-toolbar-icon {
+    padding: 0;
+    width: 31px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-toolbar-period {
+    font-size: 10px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-view-switch {
+    background: #f6f8fc;
+    border: 1px solid #dbe3ef;
+    border-radius: 7px;
+    gap: 0;
+    padding: 2px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-view-switch .fw-view-btn {
+    background: transparent;
+    border: 0;
+    min-width: 54px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-view-switch .fw-view-btn.is-active {
+    background: #4766eb;
+    box-shadow: 0 4px 10px rgba(71, 102, 235, 0.24);
+    color: #fff;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week #calendarPrototypeTimeline {
+    display: flex;
+    flex-direction: column;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    height: clamp(700px, calc(100vh - 224px), 847px) !important;
+    max-height: 847px !important;
+    min-height: 700px;
+    overflow: visible;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-workspace {
+    display: grid;
+    flex: 1 1 auto;
+    gap: 14px;
+    grid-template-columns: 311px minmax(0, 1fr);
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer,
+  #portalRoot #view-calendar .calendar-planning-week {
+    border: 1px solid var(--calendar-planning-border);
+    border-radius: 9px;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer {
+    border-right: 1px solid var(--calendar-planning-border);
+  }
+
+  #portalRoot #view-calendar .calendar-planning-week {
+    padding-top: 39px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer__head {
+    height: 39px;
+    min-height: 39px;
+    padding: 0 10px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer__head strong {
+    font-size: 9px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer__filters {
+    gap: 6px;
+    padding: 6px 8px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-search {
+    min-height: 29px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-filter-row {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: minmax(72px, 0.82fr) minmax(80px, 1fr) minmax(112px, 1.35fr);
+  }
+
+  #portalRoot #view-calendar .calendar-planning-filter-chip {
+    box-sizing: border-box;
+    font-size: 8px;
+    min-height: 27px;
+    min-width: 0;
+    padding: 0 7px;
+    width: 100%;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-filter-select {
+    flex: none;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-filter-chip.is-active {
+    flex: none;
+    justify-content: space-between;
+    margin-left: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-filter-chip.is-active > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-search {
+    box-sizing: border-box;
+    width: 100%;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-settings {
+    justify-self: end;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-week::-webkit-scrollbar-button {
+    display: none;
+    height: 0;
+    width: 0;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer-card {
+    min-height: 94px;
+    padding: 7px 9px 7px 11px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer-card__top strong {
+    font-size: 10px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer-card__client {
+    font-size: 9px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer-card__meta,
+  #portalRoot #view-calendar .calendar-planning-buffer-card__status {
+    font-size: 8px;
+    margin-top: 3px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer__foot {
+    height: 34px;
+    min-height: 34px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-matrix {
+    grid-template-columns: 161px repeat(var(--planning-day-count), minmax(100px, 1fr));
+    min-width: 861px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-matrix__corner,
+  #portalRoot #view-calendar .calendar-planning-day-head {
+    height: 47px;
+    min-height: 47px;
+    padding: 5px 7px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-worker,
+  #portalRoot #view-calendar .calendar-planning-day-cell {
+    height: 64px;
+    min-height: 64px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-worker {
+    gap: 7px;
+    grid-template-columns: 31px minmax(0, 1fr) auto;
+    padding: 7px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-worker__avatar {
+    font-size: 10px;
+    height: 30px;
+    width: 30px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-worker__name {
+    font-size: 10px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-worker__hours {
+    font-size: 8px;
+    padding: 3px 5px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-day-cell {
+    padding: 5px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-day-head.is-today,
+  #portalRoot #view-calendar .calendar-planning-day-cell.is-today {
+    box-shadow: inset 1px 0 #8faaff, inset -1px 0 #8faaff;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-day-head.is-today {
+    border-top: 1px solid #8faaff;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-card {
+    margin-bottom: 3px;
+    min-height: 44px;
+    padding: 5px 6px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-day-cell.is-timeline-drop-target {
+    background: #f7f9ff;
+    box-shadow: inset 0 0 0 2px #7694ff;
+    outline: 1px dashed #5878ed;
+    outline-offset: -7px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-day-cell.is-timeline-drop-invalid {
+    background: #fffafa;
+    box-shadow: inset 0 0 0 1px #e46a6a;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live {
+    border: 1px solid var(--calendar-planning-border);
+    border-radius: 9px;
+    flex: 0 0 299px;
+    margin-top: 13px;
+    max-height: 299px;
+    overflow: hidden;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__head {
+    height: 40px;
+    min-height: 40px;
+    padding: 4px 10px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__head strong {
+    font-size: 9px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__title {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__title span {
+    font-size: 8px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__title span:last-child i {
+    background: #24a66f;
+    border-radius: 50%;
+    display: inline-block;
+    height: 5px;
+    margin-left: 3px;
+    width: 5px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__collapse {
+    font-size: 17px;
+    height: 28px;
+    width: 28px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__body {
+    height: 258px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__scroll {
+    max-height: 258px;
+    overflow: auto;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-grid {
+    grid-template-columns: minmax(105px, 0.72fr) minmax(135px, 0.9fr) minmax(330px, 2.7fr) minmax(100px, 0.72fr);
+    min-width: 0;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-grid__head {
+    font-size: 8px;
+    height: 24px;
+    min-height: 24px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-worker,
+  #portalRoot #view-calendar .calendar-planning-live-plan,
+  #portalRoot #view-calendar .calendar-planning-live-track,
+  #portalRoot #view-calendar .calendar-planning-live-state {
+    height: 36px;
+    min-height: 36px;
+    padding: 3px 6px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-worker__avatar {
+    flex-basis: 25px;
+    height: 25px;
+    width: 25px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-bar {
+    height: 20px;
+    top: 8px;
+  }
+}
+
+@media (max-width: 1439px) {
+  #portalRoot #view-calendar .calendar-planning-toolbar-period {
+    order: 4;
+    width: 100%;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__body {
+    display: block;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-conflict {
+    display: flex;
+  }
+}
+
+/* Final desktop calibration against exec-17b5e40d (1487 x 1058).
+   The shell rules are active only while the Calendar view is visible. */
+@media (min-width: 1440px) {
+  #portalRoot:has(#view-calendar:not([style*="display: none"])):not(.sidebar-collapsed) .sidebar {
+    max-width: 235px !important;
+    min-width: 235px !important;
+    padding: 16px 0 20px !important;
+    width: 235px !important;
+  }
+
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .sidebar-brand {
+    height: 36px !important;
+    margin: 0 18px 18px !important;
+    min-height: 36px !important;
+  }
+
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .sidebar-brand-logo,
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .sidebar .logo-block--cleanzi {
+    max-width: 180px !important;
+  }
+
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .sidebar-brand-logo img,
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .sidebar .logo-block--cleanzi img {
+    height: 36px !important;
+    max-height: 36px !important;
+    max-width: 180px !important;
+    object-fit: cover !important;
+    width: 180px !important;
+  }
+
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .menu-order-add,
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .sidebar > .menu-order-add {
+    border-radius: 8px !important;
+    font-size: 12px !important;
+    margin: 0 24px 21px !important;
+    min-height: 37px !important;
+    padding: 7px 10px !important;
+    width: calc(100% - 48px) !important;
+  }
+
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .sidebar-head {
+    margin: 0 24px 12px !important;
+    min-height: 30px !important;
+  }
+
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .sidebar-title,
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .menu-group-title,
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .kanban-menu-heading {
+    font-size: 11px !important;
+  }
+
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .sidebar .menu {
+    gap: 4px !important;
+    padding: 0 24px 20px !important;
+  }
+
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .menu-item,
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .menu-section,
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .submenu-item,
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) button.menu-item,
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) button.menu-section {
+    font-size: 13px !important;
+    gap: 12px !important;
+    min-height: 40px !important;
+    padding: 8px 14px !important;
+  }
+
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .content-shell {
+    padding: 12px 29px 32px 18px !important;
+  }
+
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .content-shell > .header {
+    height: 53px !important;
+    min-height: 53px !important;
+  }
+
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .content-shell > .header .topbar-search {
+    height: 51px !important;
+    min-height: 51px !important;
+  }
+
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .content-shell > .main {
+    padding-top: 17px !important;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype {
+    gap: 11px !important;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype > .portal-page-hero {
+    margin-bottom: 0 !important;
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-calendar-toolbar {
+    margin-left: 14px;
+    width: calc(100% - 14px);
+  }
+
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week #calendarPrototypeTimeline {
+    height: clamp(700px, calc(100vh - 214px), 844px) !important;
+    max-height: 844px !important;
+  }
+
+  #portalRoot #view-calendar #calendarTimelineDateInput {
+    display: none !important;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-publish-btn:disabled {
+    box-shadow: none !important;
+    filter: saturate(0.72);
+    opacity: 0.64;
+  }
+}
+
+/* Calendar polish: predictable state, clear hierarchy and usable responsive density. */
+#portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-toolbar-left {
+  display: none !important;
+}
+
+#portalRoot #view-calendar .calendar-planning-view-switch .fw-view-btn,
+#portalRoot #view-calendar .calendar-planning-hero-actions .btn2,
+#portalRoot #view-calendar .calendar-planning-toolbar-nav button {
+  text-transform: none !important;
+}
+
+#portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week #calendarTimelineDateInput {
+  display: none !important;
+}
+
+#portalRoot #view-calendar .calendar-planning-week::-webkit-scrollbar-button {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
+@media (min-width: 761px) {
+  #portalRoot #view-calendar .calendar-timeline-prototype.is-planning-week .fw-toolbar-right {
+    align-items: center;
+    box-sizing: border-box;
+    display: grid;
+    gap: 7px;
+    grid-template-columns: auto minmax(160px, 1fr) auto auto;
+    overflow: visible;
+    padding-right: 14px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-toolbar-period {
+    order: 0;
+    width: auto;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-settings {
+    justify-self: end;
+  }
+}
+
+#portalRoot:has(#view-calendar:not([style*="display: none"])) .menu-section[data-toggle="kanban"] .mi-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+#portalRoot #view-calendar .calendar-planning-week {
+  overflow: auto !important;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+}
+
+#portalRoot #view-calendar .calendar-planning-matrix__corner,
+#portalRoot #view-calendar .calendar-planning-day-head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+
+#portalRoot #view-calendar .calendar-planning-matrix__corner {
+  left: 0;
+  z-index: 6;
+}
+
+#portalRoot #view-calendar .calendar-planning-worker {
+  background: #fff;
+  left: 0;
+  position: sticky;
+  z-index: 3;
+}
+
+#portalRoot #view-calendar .calendar-planning-filter-empty {
+  grid-column: 1 / -1;
+  min-height: 82px;
+}
+
+#portalRoot #view-calendar .fw-timeline-render-error button {
+  align-items: center;
+  background: #315cf4;
+  border: 0;
+  border-radius: 9px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font: 800 12px/1 "Manrope", "Segoe UI", Arial, sans-serif;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 15px;
+}
+
+#portalRoot #view-calendar :is(button, input, select):focus-visible {
+  outline: 3px solid rgba(66, 96, 244, 0.3);
+  outline-offset: 2px;
+}
+
+@media (min-width: 1440px) {
+  #portalRoot:has(#view-calendar:not([style*="display: none"])) .content-shell > .header .topbar-search {
+    flex: 1 1 595px !important;
+    max-width: 595px !important;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-hero-actions {
+    grid-template-columns: 193px 226px;
+    max-width: 428px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__head {
+    height: 40px;
+    min-height: 40px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__title {
+    align-items: center;
+    column-gap: 9px;
+    display: grid;
+    grid-template-columns: auto auto;
+    row-gap: 2px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__title > strong {
+    grid-column: 1 / -1;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-grid {
+    grid-template-columns: 118px 230px minmax(0, 1fr) 112px;
+  }
+}
+
+@media (max-width: 1439px) {
+  #portalRoot #view-calendar .calendar-planning-buffer__list {
+    max-height: 220px;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live__body {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-live-conflict {
+    display: flex !important;
+    margin: 0 10px 10px;
+    min-height: 150px;
+  }
+}
+
+@media (max-width: 640px) {
+  #portalRoot #view-calendar .calendar-planning-hero-actions .btn2,
+  #portalRoot #view-calendar .calendar-planning-toolbar-period :is(button, input),
+  #portalRoot #view-calendar .calendar-planning-buffer :is(input, select),
+  #portalRoot #view-calendar .calendar-planning-worker-filter {
+    min-height: 40px !important;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-toolbar-nav button,
+  #portalRoot #view-calendar .calendar-planning-view-switch .fw-view-btn,
+  #portalRoot #view-calendar .calendar-planning-settings > button,
+  #portalRoot #view-calendar .calendar-planning-buffer__foot button,
+  #portalRoot #view-calendar .calendar-planning-live__collapse,
+  #portalRoot #view-calendar .calendar-planning-live__more {
+    min-height: 40px !important;
+    min-width: 40px !important;
+  }
+
+  #portalRoot #view-calendar .calendar-planning-buffer__list {
+    grid-auto-columns: minmax(238px, 84vw);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #portalRoot #view-calendar .calendar-planning-buffer-card.is-assist-highlighted {
+    animation: none !important;
+  }
+
+  #portalRoot #view-calendar * {
+    scroll-behavior: auto !important;
+  }
+}

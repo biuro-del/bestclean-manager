@@ -3,7 +3,13 @@ import {
   defaultJobCardRecurrenceUntil,
   validateJobCardDraft,
 } from './jobCardDraftModel.js'
-import { fetchJobCardState, publishJobCard } from '../../services/jobCardService.js'
+import {
+  fetchJobCardDraft,
+  fetchJobCardState,
+  listJobCardDrafts,
+  publishJobCard,
+  saveJobCardDraft,
+} from '../../services/jobCardService.js'
 
 export {
   deriveIssaProductivityM2PerHour,
@@ -58,9 +64,11 @@ export function createOrdersFeature(ctx) {
     formatTime,
     normalizeSearchText,
     openClientModal,
+    openOrderCreateWorkspace,
     ordersDeleteTimelineOrderFromList,
     ordersListSourceOrders,
     ordersSaveRemoteTimelineOrdersNow,
+    ordersSyncRemoteTimelineOrders,
     pad2,
     renderCalendarView,
     renderDashboardActivityCalendar,
@@ -97,10 +105,10 @@ export function createOrdersFeature(ctx) {
   const ORDERS_SERVICE_TEAM_KIND_PREFIX = 'team'
   const ORDERS_SERVICE_SLOT_PREFIX = 'slot'
   const ORDERS_LIST_MODELS = new Set(['all', 'cyclic', 'oneoff'])
-  const ORDERS_LIST_STATUSES = new Set(['', 'active', 'upcoming', 'completed', 'expired'])
+  const ORDERS_LIST_STATUSES = new Set(['', 'draft', 'active', 'upcoming', 'completed', 'expired'])
   const ORDERS_LIST_TYPES = new Set(['', 'individual', 'cyclic', 'renovation', 'windows', 'other'])
   const ORDERS_LIST_ASSIGNMENTS = new Set(['', 'assigned', 'buffer'])
-  const ORDERS_LIST_QUICK_FILTERS = new Set(['active_future', 'today', 'overdue', 'completed', 'all'])
+  const ORDERS_LIST_QUICK_FILTERS = new Set(['draft', 'active_future', 'today', 'overdue', 'completed', 'all'])
   const ORDERS_LIST_SORTS = new Set(['nextAsc', 'nextDesc', 'dateAsc', 'dateDesc', 'clientAsc', 'workerAsc', 'nameAsc'])
   const ORDERS_LOCATION_GOOGLE_MIN_QUERY = 5
   const ORDERS_LOCATION_GOOGLE_SUGGESTIONS_DEBOUNCE_MS = 520
@@ -124,6 +132,9 @@ export function createOrdersFeature(ctx) {
   let ordersWorkerResourcesLoadPromise = null
   let ordersEditorPreferredServiceBlockContext = null
   let ordersJobCardWarningAcknowledgements = new Set()
+  let ordersEditorDirty = false
+  let ordersEditorSaving = false
+  let ordersEditorInitialSnapshot = null
   const ordersJobCardPublicationState = new Map()
 
   function ordersDateTimeFromTimeline(dayKey = '', timeValue = '') {
@@ -5379,8 +5390,8 @@ export function createOrdersFeature(ctx) {
       clientId: '',
       clientLabel: '',
       clientName: '',
-      clientType: 'individual',
-      customerType: 'individual',
+      clientType: '',
+      customerType: '',
       addressLabel: '',
       type: 'individual',
       tone: ordersTimelineToneForType('individual'),
@@ -5419,41 +5430,113 @@ export function createOrdersFeature(ctx) {
     const draftId = String(appState.ordersEditingId)
     appState.calendarTimelineDemoOrders = ordersListSourceOrders().filter((order) => !(order?.isDraft && order?.id === draftId))
   }
-  
-  function ordersOpenAddEditor(targetDate = todayYmd(), options = {}) {
-    ordersClearEditorServiceBlockContext()
-    ordersJobCardWarningAcknowledgements = new Set()
-    const dayKey = ordersNormalizeDateField(targetDate, todayYmd())
-    void ordersWarmLocationSources().then(() => {
-      if (appState.currentRoute === 'orders' && appState.ordersEditorMode === 'add') {
-        renderOrdersView()
-      }
-    })
-    const draft = {
-      ...ordersCreateDraftOrder(dayKey),
-      dateYmd: dayKey,
-      endDateYmd: dayKey,
-      validUntil: dayKey,
-      nextDate: dayKey,
-      repeatWeekdays: [ordersWeekdayFromDateKey(dayKey)],
+
+  function ordersCloneEditorOrder(order = null) {
+    if (!order || typeof order !== 'object') {
+      return null
     }
-    ordersSetRepeatCalendarMonthFromDate(draft.dateYmd)
-    appState.ordersObjectPlanCalendarMonth = calendarMonthStart(draft.dateYmd || todayYmd())
-    appState.ordersObjectPlanSelectedZoneKeys = []
-    appState.ordersObjectPlanDayEditorDate = ''
-    appState.ordersObjectPlanZoneWindowOpen = false
-    appState.ordersObjectPlanTaskWindowOpen = false
-    appState.calendarTimelineDemoOrders = [draft, ...ordersListSourceOrders().filter((order) => !order?.isDraft)]
-    appState.ordersEditingId = draft.id
-    appState.ordersEditorMode = 'add'
-    appState.ordersEditorTab = 'basic'
-    appState.ordersEditorStep = 'client'
-    if (options?.navigateToOrders === true && appState.currentRoute !== 'orders') {
-      document.querySelector('[data-route="orders"]')?.click()
-      window.setTimeout(renderOrdersView, 0)
+    if (typeof structuredClone === 'function') {
+      try {
+        return structuredClone(order)
+      } catch {
+        // Dane zlecenia są serializowalne; fallback wspiera starsze przeglądarki.
+      }
+    }
+    try {
+      return JSON.parse(JSON.stringify(order))
+    } catch {
+      return { ...order }
+    }
+  }
+
+  function ordersRestoreEditorSnapshot() {
+    if (!ordersEditorInitialSnapshot || !appState.ordersEditingId) {
       return
     }
-    renderOrdersView()
+    const currentOrder = ordersFindTimelineOrder(appState.ordersEditingId)
+    if (!currentOrder || currentOrder.isDraft) {
+      return
+    }
+    Object.keys(currentOrder).forEach((key) => delete currentOrder[key])
+    Object.assign(currentOrder, ordersCloneEditorOrder(ordersEditorInitialSnapshot))
+  }
+
+  function ordersRenderEditorSaveState(order = ordersFindTimelineOrder(appState.ordersEditingId) || {}) {
+    const state = document.getElementById('ordersEditorSaveState')
+    if (!state) {
+      return
+    }
+    if (ordersEditorSaving) {
+      state.textContent = 'Zapisywanie…'
+      state.dataset.tone = 'saving'
+      return
+    }
+    if (ordersEditorDirty) {
+      state.textContent = 'Niezapisane zmiany'
+      state.dataset.tone = 'warning'
+      return
+    }
+    const isNewDraft = Boolean(order?.isDraft && ['add', 'single-override'].includes(String(appState.ordersEditorMode ?? '')))
+    state.textContent = isNewDraft ? 'Nowy szkic' : 'Zapisane'
+    state.dataset.tone = isNewDraft ? 'new' : 'saved'
+  }
+
+  function ordersSetEditorDirty(dirty = true) {
+    ordersEditorDirty = Boolean(dirty)
+    ordersRenderEditorSaveState()
+  }
+
+  function ordersSetEditorSaving(saving = true) {
+    ordersEditorSaving = Boolean(saving)
+    const editor = document.getElementById('ordersEditorPanel')
+    editor?.querySelectorAll('.orders-wizard-actions button, #ordersEditBack').forEach((button) => {
+      if (button instanceof HTMLButtonElement) {
+        button.disabled = ordersEditorSaving
+        button.setAttribute('aria-busy', ordersEditorSaving ? 'true' : 'false')
+      }
+    })
+    ordersRenderEditorSaveState()
+  }
+
+  function ordersEditorHasUnsavedChanges() {
+    return Boolean(ordersEditorDirty && appState.ordersEditingId && ordersEditorPanelIsVisible())
+  }
+
+  function ordersOpenDiscardConfirm() {
+    const dialog = document.getElementById('ordersDiscardConfirm')
+    if (!dialog) {
+      return
+    }
+    dialog.hidden = false
+    document.getElementById('ordersEditorPanel')?.classList.add('is-confirming-discard')
+    window.setTimeout(() => dialog.querySelector('[data-orders-discard-cancel]')?.focus?.(), 0)
+  }
+
+  function ordersCloseDiscardConfirm(options = {}) {
+    const dialog = document.getElementById('ordersDiscardConfirm')
+    if (dialog) {
+      dialog.hidden = true
+    }
+    document.getElementById('ordersEditorPanel')?.classList.remove('is-confirming-discard')
+    if (options.focus !== false) {
+      document.getElementById('ordersEditBack')?.focus?.()
+    }
+  }
+
+  function ordersOpenAddEditor(targetDate = todayYmd(), options = {}) {
+    const dayKey = ordersNormalizeDateField(targetDate, todayYmd())
+    if (typeof openOrderCreateWorkspace !== 'function') {
+      showTransientNotice('Kreator zlecenia jest chwilowo niedostÄ™pny.', 'error')
+      return Promise.resolve(false)
+    }
+    const sourceRoute = String(options?.sourceRoute ?? appState.currentRoute ?? 'orders').trim() || 'orders'
+    const returnRoute = String(options?.returnRoute ?? sourceRoute).trim() || 'orders'
+    return openOrderCreateWorkspace({
+      ...options,
+      sourceRoute,
+      returnRoute,
+      initialDate: dayKey,
+    })
   }
   
   function ordersCoworkerOptionsHtml(order = {}) {
@@ -6320,7 +6403,9 @@ export function createOrdersFeature(ctx) {
   function ordersSetEditorStep(stepId = 'client', options = {}) {
     const order = ordersFindTimelineOrder(appState.ordersEditingId) || {}
     const nextStep = ordersNormalizeEditorStep(stepId, order)
-    if (options.validate && !ordersValidateEditorStep(appState.ordersEditorStep, order)) {
+    const currentIndex = ordersEditorStepIndex(appState.ordersEditorStep, order)
+    const nextIndex = ordersEditorStepIndex(nextStep, order)
+    if (options.validate && nextIndex > currentIndex && !ordersValidateEditorStep(appState.ordersEditorStep, order)) {
       return
     }
     appState.ordersEditorStep = nextStep
@@ -6764,16 +6849,24 @@ export function createOrdersFeature(ctx) {
     const saveButton = root.querySelector('#ordersEditSave')
     const publishButton = root.querySelector('#ordersJobCardPublish')
     if (prevButton instanceof HTMLButtonElement) {
-      prevButton.disabled = activeIndex <= 0
+      prevButton.disabled = ordersEditorSaving || activeIndex <= 0
     }
     if (nextButton instanceof HTMLButtonElement) {
       nextButton.hidden = activeIndex >= steps.length - 1
+      nextButton.disabled = ordersEditorSaving
     }
     if (saveButton instanceof HTMLButtonElement) {
       saveButton.hidden = activeIndex < steps.length - 1
+      saveButton.disabled = ordersEditorSaving
+      saveButton.textContent = ordersEditorSaving
+        ? 'Zapisywanie…'
+        : appState.ordersEditorMode === 'add'
+          ? 'Zapisz zlecenie'
+          : 'Zapisz zmiany'
     }
     if (publishButton instanceof HTMLButtonElement) {
       publishButton.hidden = activeIndex < steps.length - 1 || !ordersJobCardPreviewEnabled()
+      publishButton.disabled = ordersEditorSaving
     }
 
     const client = ordersWizardSummaryText(ordersReadInputValue('ordersEditClientName') || ordersReadInputValue('ordersEditClient'))
@@ -6791,6 +6884,14 @@ export function createOrdersFeature(ctx) {
       : `Jednorazowe ${formatDatePl(`${startDate}T12:00:00`)} ${startTime}-${endTime}`
     const workerSummary = ordersWizardSummaryText(ordersServiceBlocksWorkerSummary(effectiveSummaryBlocks), 'BUFOR')
     const { totalWorkMinutes, totalPeople } = ordersServiceBlocksTotals(effectiveSummaryBlocks, order)
+    const assignedSlots = effectiveSummaryBlocks
+      .flatMap((block) => (Array.isArray(block?.slots) ? block.slots : []))
+      .filter((slot) => {
+        const row = Number(slot?.row)
+        return String(slot?.type ?? '') === 'worker' && Number.isInteger(row) && row >= 0
+      }).length
+    const missingSlots = Math.max(0, totalPeople - assignedSlots)
+    const missingPlacesLabel = missingSlots === 1 ? '1 miejsce' : `${missingSlots} miejsc`
     const workText = `${ordersHoursInputValue(totalWorkMinutes)} rbh, ${totalPeople} os.`
 
     const summaryClient = document.getElementById('ordersWizardSummaryClient')
@@ -6798,16 +6899,29 @@ export function createOrdersFeature(ctx) {
     const summarySchedule = document.getElementById('ordersWizardSummarySchedule')
     const summaryWorkers = document.getElementById('ordersWizardSummaryWorkers')
     const summaryWork = document.getElementById('ordersWizardSummaryWork')
+    const summaryStatus = document.getElementById('ordersWizardSummaryStatus')
+    const bufferStatus = document.getElementById('ordersWizardBufferStatus')
     if (summaryClient) summaryClient.textContent = client
     if (summaryAddress) summaryAddress.textContent = address
     if (summarySchedule) summarySchedule.textContent = scheduleText
     if (summaryWorkers) summaryWorkers.textContent = workerSummary
     if (summaryWork) summaryWork.textContent = workText
+    if (summaryStatus) summaryStatus.textContent = missingSlots ? `${missingPlacesLabel} do obsady` : 'Obsada kompletna'
+    if (bufferStatus) bufferStatus.textContent = missingSlots ? `${missingPlacesLabel} w BUFORZE` : 'Obsada kompletna'
 
     const validation = document.getElementById('ordersWizardValidation')
     if (validation) {
-      validation.textContent = activeIndex >= steps.length - 1 ? 'Sprawdź podsumowanie przed zapisem.' : '* Pola wymagane'
+      validation.textContent = activeIndex >= steps.length - 1
+        ? 'Sprawdź plan, Kartę Zlecenia i ostrzeżenia przed zapisem.'
+        : '* Pola wymagane'
     }
+    const actionHint = document.getElementById('ordersWizardActionHint')
+    if (actionHint) {
+      actionHint.textContent = activeIndex >= steps.length - 1
+        ? 'Zapis utworzy plan w kalendarzu i edytowalny szkic Karty. Publikacja udostępni pracownikom niezmienną rewizję.'
+        : 'Karta Zlecenia powstaje automatycznie z danych tego formularza.'
+    }
+    ordersRenderEditorSaveState(order)
     ordersRenderJobCardPreview(order)
   }
   
@@ -7706,21 +7820,26 @@ export function createOrdersFeature(ctx) {
   
     const title = document.getElementById('ordersEditTitle')
     if (title) {
-      title.textContent = appState.ordersEditorMode === 'add' ? 'Dodaj zlecenie' : 'Edycja zlecenia'
+      title.textContent = 'Edycja zlecenia'
     }
   
     const orderClientType = String(order.clientType ?? order.customerType ?? '').trim().toLowerCase()
+    const isUnselectedDraftClient = Boolean(
+      order.isDraft && !order.clientId && !order.clientLabel && !order.clientName && !orderClientType,
+    )
     const isOrderIndividualClient = orderClientType === 'individual'
-    const renderClientLabel = isOrderIndividualClient && order.isDraft
-      ? ORDERS_INDIVIDUAL_CLIENT_LABEL
-      : ordersTimelineClientLabel(order)
+    const renderClientLabel = isUnselectedDraftClient
+      ? ''
+      : isOrderIndividualClient && order.isDraft
+        ? ORDERS_INDIVIDUAL_CLIENT_LABEL
+        : ordersTimelineClientLabel(order)
     const selectedClientForRender = isOrderIndividualClient
       ? null
       : ordersFindClientBySelection(order.clientId || order.clientLabel || renderClientLabel)
-    const isIndividualOrder = isOrderIndividualClient || (
+    const isIndividualOrder = !isUnselectedDraftClient && (isOrderIndividualClient || (
       !selectedClientForRender &&
       ordersIsIndividualClientSelection(renderClientLabel)
-    )
+    ))
     const clientSelect = document.getElementById('ordersEditClient')
     if (clientSelect instanceof HTMLSelectElement) {
       clientSelect.innerHTML = ordersClientOptionsHtml(isIndividualOrder ? ORDERS_INDIVIDUAL_CLIENT_VALUE : renderClientLabel)
@@ -7831,6 +7950,9 @@ export function createOrdersFeature(ctx) {
     appState.ordersObjectPlanDayEditorDate = ''
     appState.ordersObjectPlanZoneWindowOpen = false
     appState.ordersObjectPlanTaskWindowOpen = false
+    ordersEditorDirty = false
+    ordersEditorSaving = false
+    ordersEditorInitialSnapshot = ordersCloneEditorOrder(order)
     renderOrdersView()
   }
   
@@ -7853,6 +7975,9 @@ export function createOrdersFeature(ctx) {
     appState.ordersObjectPlanDayEditorDate = ''
     appState.ordersObjectPlanZoneWindowOpen = false
     appState.ordersObjectPlanTaskWindowOpen = false
+    ordersEditorDirty = false
+    ordersEditorSaving = false
+    ordersEditorInitialSnapshot = ordersCloneEditorOrder(ordersFindTimelineOrder(id))
     document.querySelector('[data-route="orders"]')?.click()
     window.setTimeout(() => {
       renderOrdersView()
@@ -7944,6 +8069,11 @@ export function createOrdersFeature(ctx) {
     appState.ordersEditorMode = 'single-override'
     appState.ordersEditorTab = 'basic'
     appState.ordersEditorStep = 'client'
+    ordersEditorDirty = false
+    ordersEditorSaving = false
+    ordersEditorInitialSnapshot = existingOverride && !shouldReplaceExistingOverride
+      ? ordersCloneEditorOrder(existingOverride)
+      : null
     ordersSetRepeatCalendarMonthFromDate(occurrenceDay)
     document.querySelector('[data-route="orders"]')?.click()
     window.setTimeout(() => {
@@ -7952,8 +8082,16 @@ export function createOrdersFeature(ctx) {
     }, 0)
   }
   
-  function ordersShowList() {
+  function ordersShowList(options = {}) {
+    if (options.force !== true && ordersEditorHasUnsavedChanges()) {
+      ordersOpenDiscardConfirm()
+      return false
+    }
+    ordersCloseDiscardConfirm({ focus: false })
     ordersCloseDeviceNoteModal()
+    if (ordersEditorDirty) {
+      ordersRestoreEditorSnapshot()
+    }
     ordersDiscardDraftIfNeeded()
     ordersClearEditorServiceBlockContext()
     ordersJobCardWarningAcknowledgements = new Set()
@@ -7962,7 +8100,11 @@ export function createOrdersFeature(ctx) {
     appState.ordersEditorTab = 'basic'
     appState.ordersEditorStep = 'client'
     appState.ordersRepeatCalendarMonth = ''
+    ordersEditorDirty = false
+    ordersEditorSaving = false
+    ordersEditorInitialSnapshot = null
     renderOrdersView()
+    return true
   }
 
   function ordersUpsertLocalSavedOrder(order = {}) {
@@ -8011,11 +8153,14 @@ export function createOrdersFeature(ctx) {
     appState.ordersRefreshing = true
     ordersSetRefreshButtonState(true)
     try {
+      appState.ordersJobCardDraftsLoaded = false
+      const draftRefresh = ordersLoadJobCardDrafts({ force: true, silent: true })
       if (typeof deferRouteOrderDataRefresh === 'function') {
         await deferRouteOrderDataRefresh('orders', renderOrdersView, { force: true })
       } else {
         renderOrdersView()
       }
+      await draftRefresh
       if (appState.calendarTimelineOrdersRemoteLoaded || typeof deferRouteOrderDataRefresh !== 'function') {
         showTransientNotice('Lista zlece\u0144 od\u015bwie\u017cona.', 'success')
       }
@@ -8032,13 +8177,18 @@ export function createOrdersFeature(ctx) {
     const order = ordersFindTimelineOrder(appState.ordersEditingId)
     if (!order) {
       showTransientNotice('Nie znaleziono zlecenia do zapisu.', 'error')
-      ordersShowList()
+      ordersShowList({ force: true })
       return
     }
     const isAddMode = appState.ordersEditorMode === 'add'
     if (!ordersValidateAllEditorSteps(order)) {
       return
     }
+    if (ordersEditorSaving) {
+      return
+    }
+    ordersSetEditorSaving(true)
+    try {
   
     const selectedType = String(ordersReadInputValue('ordersEditType') || order.type || 'individual').trim()
     const scheduleMode =
@@ -8373,6 +8523,8 @@ export function createOrdersFeature(ctx) {
       appState.ordersListAssignment = ''
       appState.ordersListQuickFilter = 'all'
     }
+    ordersEditorDirty = false
+    ordersEditorInitialSnapshot = ordersCloneEditorOrder(nextOrder)
     appState.ordersEditorMode = 'edit'
     appState.ordersEditingId = options.keepEditorOpen === true ? nextOrder.id : ''
     ordersRenderActiveScheduleView()
@@ -8380,6 +8532,9 @@ export function createOrdersFeature(ctx) {
       showTransientNotice(isAddMode ? 'Zlecenie dodane i zapisane w bazie.' : 'Zlecenie zapisane w bazie.', 'success')
     }
     return nextOrder
+    } finally {
+      ordersSetEditorSaving(false)
+    }
   }
 
   async function ordersPublishJobCard() {
@@ -8453,6 +8608,216 @@ export function createOrdersFeature(ctx) {
     }
   }
   
+  function ordersCurrentOrganizationId() {
+    return String(appState.session?.activeOrgId ?? appState.session?.orgId ?? '').trim()
+  }
+
+  function ordersResetJobCardDraftsForOrganization(orgId = ordersCurrentOrganizationId()) {
+    const normalizedOrgId = String(orgId ?? '').trim()
+    if (String(appState.ordersJobCardDraftsOrgId ?? '') === normalizedOrgId) {
+      return
+    }
+    appState.ordersJobCardDrafts = []
+    appState.ordersJobCardDraftsLoading = false
+    appState.ordersJobCardDraftsLoaded = false
+    appState.ordersJobCardDraftsHasMore = false
+    appState.ordersJobCardDraftsNextCursor = ''
+    appState.ordersJobCardDraftsError = ''
+    appState.ordersJobCardDraftsOrgId = normalizedOrgId
+    appState.ordersJobCardDraftsRequestToken = Number(appState.ordersJobCardDraftsRequestToken || 0) + 1
+  }
+
+  function ordersIsCurrentJobCardDraftRequest(orgId, requestToken) {
+    return (
+      String(appState.ordersJobCardDraftsOrgId ?? '') === String(orgId ?? '').trim() &&
+      Number(appState.ordersJobCardDraftsRequestToken || 0) === Number(requestToken)
+    )
+  }
+
+  async function ordersLoadJobCardDrafts({ append = false, force = false, silent = false } = {}) {
+    const orgId = ordersCurrentOrganizationId()
+    ordersResetJobCardDraftsForOrganization(orgId)
+    if (!orgId || appState.ordersJobCardDraftsLoading) {
+      return false
+    }
+    if (!append && appState.ordersJobCardDraftsLoaded && !force) {
+      return true
+    }
+    if (append && (!appState.ordersJobCardDraftsHasMore || !appState.ordersJobCardDraftsNextCursor)) {
+      return true
+    }
+
+    const requestToken = Number(appState.ordersJobCardDraftsRequestToken || 0) + 1
+    appState.ordersJobCardDraftsRequestToken = requestToken
+    appState.ordersJobCardDraftsLoading = true
+    appState.ordersJobCardDraftsError = ''
+    try {
+      const result = await listJobCardDrafts(orgId, {
+        limit: 30,
+        cursor: append ? appState.ordersJobCardDraftsNextCursor : '',
+      })
+      if (!ordersIsCurrentJobCardDraftRequest(orgId, requestToken)) {
+        return false
+      }
+      const incoming = Array.isArray(result?.drafts) ? result.drafts : []
+      const current = append && Array.isArray(appState.ordersJobCardDrafts) ? appState.ordersJobCardDrafts : []
+      const byId = new Map()
+      ;[...current, ...incoming].forEach((draft) => {
+        const id = String(draft?.orderId ?? draft?.sourceOrderId ?? '').trim()
+        if (id) byId.set(id, draft)
+      })
+      appState.ordersJobCardDrafts = [...byId.values()].sort((left, right) =>
+        String(right?.updatedAt ?? '').localeCompare(String(left?.updatedAt ?? '')) ||
+        String(right?.orderId ?? right?.sourceOrderId ?? '').localeCompare(String(left?.orderId ?? left?.sourceOrderId ?? '')),
+      )
+      appState.ordersJobCardDraftsHasMore = result?.page?.hasMore === true
+      appState.ordersJobCardDraftsNextCursor = String(result?.page?.nextCursor ?? '').trim()
+      appState.ordersJobCardDraftsLoaded = true
+      return true
+    } catch (error) {
+      if (!ordersIsCurrentJobCardDraftRequest(orgId, requestToken)) {
+        return false
+      }
+      console.warn('[portal/orders] draft list failed', error)
+      appState.ordersJobCardDraftsError = String(error?.message ?? 'Nie udało się pobrać roboczych zleceń.')
+      appState.ordersJobCardDraftsLoaded = true
+      if (!silent) {
+        showPortalErrorNotice('Nie udało się pobrać roboczych zleceń.', error)
+      }
+      return false
+    } finally {
+      if (ordersIsCurrentJobCardDraftRequest(orgId, requestToken)) {
+        appState.ordersJobCardDraftsLoading = false
+        if (appState.currentRoute === 'orders' && document.getElementById('ordersRows')) {
+          renderOrdersView()
+        }
+      }
+    }
+  }
+
+  async function ordersLoadAllJobCardDrafts() {
+    while (appState.ordersJobCardDraftsHasMore && appState.ordersJobCardDraftsNextCursor) {
+      const loaded = await ordersLoadJobCardDrafts({ append: true })
+      if (!loaded) break
+    }
+  }
+
+  function ordersRowsFromJobCardDrafts() {
+    const drafts = Array.isArray(appState.ordersJobCardDrafts) ? appState.ordersJobCardDrafts : []
+    return drafts.map((draft) => {
+      const orderId = String(draft?.orderId ?? draft?.sourceOrderId ?? '').trim()
+      const schedule = draft?.schedule && typeof draft.schedule === 'object' ? draft.schedule : {}
+      const staffing = draft?.staffing && typeof draft.staffing === 'object' ? draft.staffing : {}
+      const site = draft?.site && typeof draft.site === 'object' ? draft.site : {}
+      const clientData = draft?.client && typeof draft.client === 'object' ? draft.client : {}
+      const startDay = ordersNormalizeDateField(schedule.startDateYmd ?? schedule.dateStart ?? draft?.dateStart, '')
+      const endDay = ordersNormalizeDateField(schedule.recurrenceUntilYmd ?? schedule.endDateYmd ?? draft?.dateEnd, startDay)
+      const scheduleMode = String(schedule.mode ?? draft?.scheduleMode ?? '').trim().toUpperCase()
+      const cyclic = ['RECURRING', 'REPEAT', 'CYCLIC'].includes(scheduleMode)
+      const model = cyclic ? 'cyclic' : 'oneoff'
+      const client = String(clientData.name ?? clientData.label ?? draft?.clientLabel ?? '').trim() || '-'
+      const address = String(site.address ?? draft?.address ?? '').trim() || '-'
+      const assignmentCount = Math.max(0, Math.floor(Number(staffing.assignmentCount) || 0))
+      const requiredPeople = Math.max(1, Math.floor(Number(staffing.requiredPeople) || 1))
+      const staffingMode = String(staffing.mode ?? '').trim().toUpperCase()
+      const worker = assignmentCount
+        ? `${assignmentCount} ${assignmentCount === 1 ? 'osoba przypisana' : 'osoby przypisane'}`
+        : staffingMode === 'BUFFER'
+          ? `BUFOR · ${requiredPeople} ${requiredPeople === 1 ? 'osoba' : 'osoby'}`
+          : 'Nie przypisano'
+      const workerOptions = assignmentCount ? [worker] : ['BUFOR']
+      const type = cyclic ? 'cyclic' : 'individual'
+      const title = String(draft?.title ?? site.name ?? site.label ?? '').trim() || 'Robocze zlecenie'
+      const updatedAt = String(draft?.updatedAt ?? '').trim()
+      const updatedDate = new Date(updatedAt)
+      const updatedLabel = updatedAt && Number.isFinite(updatedDate.getTime())
+        ? new Intl.DateTimeFormat('pl-PL', { dateStyle: 'short', timeStyle: 'short' }).format(updatedDate)
+        : '-'
+      const dateFrom = startDay
+        ? ordersDateTimeFromTimeline(startDay, schedule.startTime)
+        : 'Termin do uzupełnienia'
+      const dateTo = cyclic
+        ? (endDay ? `cyklicznie do ${endDay}` : 'cyklicznie')
+        : (endDay ? ordersDateTimeFromTimeline(endDay, schedule.endTime) : '-')
+      const typeLabel = ordersListTypeLabel(type)
+      const statusLabel = ordersListStatusLabel('draft')
+      return {
+        id: orderId,
+        sourceOrderId: orderId,
+        rawOrder: null,
+        rawDraft: draft,
+        isDraft: true,
+        startDay,
+        endDay: endDay || startDay,
+        filterEndDay: endDay || startDay,
+        nextDay: startDay || '9999-12-31',
+        dateFrom,
+        dateTo,
+        nextDate: `Zmieniono ${updatedLabel}`,
+        name: title,
+        client,
+        worker,
+        workerOptions,
+        address,
+        model,
+        typeLabel,
+        status: 'draft',
+        statusLabel,
+        assignment: assignmentCount ? 'assigned' : 'buffer',
+        cyclic,
+        completed: false,
+        type,
+        updatedAt,
+        searchText: normalizeSearchText([
+          title,
+          client,
+          site.name,
+          site.label,
+          address,
+          worker,
+          typeLabel,
+          statusLabel,
+          updatedLabel,
+        ].join(' ')),
+      }
+    })
+  }
+
+  function ordersAllListRows() {
+    return [...ordersRowsFromJobCardDrafts(), ...ordersRowsFromCalendarTimeline()]
+  }
+
+  async function ordersContinueJobCardDraft(orderId = '') {
+    const id = String(orderId ?? '').trim()
+    const orgId = ordersCurrentOrganizationId()
+    if (!id || !orgId || typeof openOrderCreateWorkspace !== 'function') {
+      showTransientNotice('Nie można teraz otworzyć roboczego zlecenia.', 'error')
+      return false
+    }
+    try {
+      const result = await fetchJobCardDraft(orgId, id)
+      const storedEditorDraft = result?.editorDraft && typeof result.editorDraft === 'object' ? result.editorDraft : null
+      if (!storedEditorDraft) {
+        throw new Error('Szkic nie zawiera danych potrzebnych do wznowienia edycji.')
+      }
+      const draftHash = String(result?.draft?.draftHash ?? '').trim()
+      if (!draftHash) {
+        throw new Error('Backend nie zwrócił wersji roboczego zlecenia potrzebnej do bezpiecznej edycji.')
+      }
+      const editorDraft = { ...storedEditorDraft, id, orderId: id }
+      await openOrderCreateWorkspace({
+        draft: editorDraft,
+        draftHash,
+        sourceRoute: 'orders',
+        returnRoute: 'orders',
+      })
+      return true
+    } catch (error) {
+      showPortalErrorNotice('Nie udało się otworzyć roboczego zlecenia.', error)
+      return false
+    }
+  }
+
   function ordersRowsFromCalendarTimeline() {
     const resources = calendarTimelineResources()
     return ordersListSourceOrders().map((order) => {
@@ -8605,6 +8970,7 @@ export function createOrdersFeature(ctx) {
 
   function ordersListStatusLabel(status = '') {
     switch (status) {
+      case "draft": return "Robocze"
       case 'active':
         return 'Aktywne'
       case 'upcoming':
@@ -8620,6 +8986,8 @@ export function createOrdersFeature(ctx) {
 
   function ordersListQuickFilterLabel(value = 'all') {
     switch (value) {
+      case 'draft':
+        return 'Robocze'
       case 'today':
         return 'Dzisiaj'
       case 'overdue':
@@ -8658,12 +9026,15 @@ export function createOrdersFeature(ctx) {
   }
 
   function ordersListRenderKpis(rows = []) {
-    const active = rows.filter((row) => row.status === 'active').length
-    const cyclic = rows.filter((row) => row.model === 'cyclic').length
+    const publishedRows = rows.filter((row) => !row.isDraft)
+    const drafts = rows.filter((row) => row.isDraft).length
+    const active = publishedRows.filter((row) => row.status === 'active').length
+    const cyclic = publishedRows.filter((row) => row.model === 'cyclic').length
     ordersListSetText('ordersKpiAll', rows.length)
+    ordersListSetText('ordersKpiDraft', appState.ordersJobCardDraftsHasMore ? `${drafts}+` : drafts)
     ordersListSetText('ordersKpiActive', active)
     ordersListSetText('ordersKpiCyclic', cyclic)
-    ordersListSetText('ordersKpiOneoff', Math.max(0, rows.length - cyclic))
+    ordersListSetText('ordersKpiOneoff', Math.max(0, publishedRows.length - cyclic))
   }
 
   function ordersListStatusFilterValue(value = '') {
@@ -8830,6 +9201,13 @@ export function createOrdersFeature(ctx) {
   }
 
   function ordersListCompareRows(left = {}, right = {}) {
+    if (left.isDraft || right.isDraft) {
+      if (left.isDraft && right.isDraft) {
+        return String(right.updatedAt ?? '').localeCompare(String(left.updatedAt ?? '')) ||
+          String(right.id ?? '').localeCompare(String(left.id ?? ''))
+      }
+      return left.isDraft ? -1 : 1
+    }
     const sort = ordersListSortValue()
     const compareText = (leftValue, rightValue) =>
       String(leftValue ?? '').localeCompare(String(rightValue ?? ''), 'pl', { sensitivity: 'base' })
@@ -8854,7 +9232,7 @@ export function createOrdersFeature(ctx) {
     }
   }
 
-  function ordersListVisibleRows(allRows = ordersRowsFromCalendarTimeline()) {
+  function ordersListVisibleRows(allRows = ordersAllListRows()) {
     const query = normalizeSearchText(appState.ordersSearch)
     const model = ordersListModelFilter()
     const status = ordersListStatusFilter()
@@ -8868,10 +9246,13 @@ export function createOrdersFeature(ctx) {
     const worker = normalizeSearchText(appState.ordersListWorker)
 
     return allRows.filter((row) => {
+      if (quickFilter === 'draft' && row.status !== 'draft') {
+        return false
+      }
       if (quickFilter === 'active_future' && !['active', 'upcoming'].includes(row.status)) {
         return false
       }
-      if (quickFilter === 'today' && !(row.startDay && row.filterEndDay && row.startDay <= today && row.filterEndDay >= today)) {
+      if (quickFilter === 'today' && (row.isDraft || !(row.startDay && row.filterEndDay && row.startDay <= today && row.filterEndDay >= today))) {
         return false
       }
       if (quickFilter === 'overdue' && row.status !== 'expired') {
@@ -8931,16 +9312,18 @@ export function createOrdersFeature(ctx) {
     return parts.join(' / ')
   }
   
-  function ordersListActionButtonHtml(kind, label, iconPath) {
+  function ordersListActionButtonHtml(kind, label, iconPath, { showLabel = false } = {}) {
     return `
       <button class="orders-action orders-action--${escapeHtml(kind)}" type="button" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}" data-orders-list-action="${escapeHtml(kind)}">
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">${iconPath}</svg>
+        ${showLabel ? `<span>${escapeHtml(label)}</span>` : ''}
       </button>
     `
   }
 
   function ordersListStatusBadgeTone(row = {}) {
     const status = String(row.statusId ?? row.status?.id ?? row.status ?? '').trim()
+    if (status === 'draft') return 'draft'
     if (status === 'expired') return 'overdue'
     if (status === 'upcoming') return 'planned'
     return String(row.status?.tone ?? status ?? 'planned').trim() || 'planned'
@@ -8960,12 +9343,14 @@ export function createOrdersFeature(ctx) {
       '<path d="M12 21s7-5.2 7-11a7 7 0 0 0-14 0c0 5.8 7 11 7 11Z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="10" r="2.4" stroke="currentColor" stroke-width="2"/>'
     const deleteIcon =
       '<path d="M5 7h14M9 7V5h6v2M8 10v8M12 10v8M16 10v8M7 7l1 13h8l1-13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+    const continueIcon =
+      '<path d="M5 12h12M13 7l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
     const statusTone = ordersListStatusBadgeTone(row)
     const statusLabel = ordersListStatusBadgeLabel(row)
     const typeTone = row.typeTone || ordersTimelineToneForType(row.type) || 'gray'
   
     return `
-      <div class="orders-row" data-order-id="${escapeHtml(row.id)}" data-order-source-id="${escapeHtml(row.sourceOrderId || row.id)}">
+      <div class="orders-row${row.isDraft ? ' is-draft' : ''}" data-order-id="${escapeHtml(row.id)}" data-order-source-id="${escapeHtml(row.sourceOrderId || row.id)}"${row.isDraft ? ' data-order-draft="true"' : ''}>
         <div><span class="orders-badge orders-badge--${escapeHtml(statusTone)}">${escapeHtml(statusLabel)}</span></div>
         <div class="orders-date-cell">
           <strong>${escapeHtml(row.dateFrom || '-')}</strong>
@@ -8978,9 +9363,13 @@ export function createOrdersFeature(ctx) {
         <div>${escapeHtml(row.address || '-')}</div>
         <div><span class="orders-badge orders-badge--type orders-badge--${escapeHtml(typeTone)}">${escapeHtml(row.typeLabel || '-')}</span></div>
         <div class="orders-actions">
-          ${ordersListActionButtonHtml('edit', 'Edytuj', editIcon)}
-          ${ordersListActionButtonHtml('pin', 'Poka\u017c adres', pinIcon)}
-          ${ordersListActionButtonHtml('delete', 'Usu\u0144', deleteIcon)}
+          ${row.isDraft
+            ? ordersListActionButtonHtml('continue', 'Kontynuuj edycję', continueIcon, { showLabel: true })
+            : `
+              ${ordersListActionButtonHtml('edit', 'Edytuj', editIcon)}
+              ${ordersListActionButtonHtml('pin', 'Poka\u017c adres', pinIcon)}
+              ${ordersListActionButtonHtml('delete', 'Usu\u0144', deleteIcon)}
+            `}
         </div>
       </div>
     `
@@ -8994,6 +9383,12 @@ export function createOrdersFeature(ctx) {
     const statusNode = document.getElementById('ordersStatus')
     const activeFiltersNode = document.getElementById('ordersActiveFilters')
     const refreshButton = document.getElementById('ordersRefreshBtn')
+    const draftsShowAllButton = document.getElementById('ordersDraftsShowAll')
+
+    ordersResetJobCardDraftsForOrganization()
+    if (!appState.ordersJobCardDraftsLoaded && !appState.ordersJobCardDraftsLoading) {
+      void ordersLoadJobCardDrafts({ silent: true })
+    }
   
     if (appState.ordersEditingId) {
       const order = ordersFindTimelineOrder(appState.ordersEditingId)
@@ -9021,7 +9416,7 @@ export function createOrdersFeature(ctx) {
       refreshButton.setAttribute('aria-busy', appState.ordersRefreshing ? 'true' : 'false')
     }
   
-    const allRows = ordersRowsFromCalendarTimeline()
+    const allRows = ordersAllListRows()
     ordersListRenderKpis(allRows)
     ordersListSyncFilterControls(allRows)
     ordersListRenderModelFilter()
@@ -9038,9 +9433,18 @@ export function createOrdersFeature(ctx) {
     if (countNode) {
       countNode.textContent = `${rows.length} / ${allRows.length} zlece\u0144`
     }
+    if (draftsShowAllButton instanceof HTMLButtonElement) {
+      draftsShowAllButton.hidden = !appState.ordersJobCardDraftsHasMore
+      draftsShowAllButton.disabled = Boolean(appState.ordersJobCardDraftsLoading)
+      draftsShowAllButton.textContent = appState.ordersJobCardDraftsLoading
+        ? 'Wczytywanie...'
+        : 'Pokaż wszystkie robocze'
+    }
     const summary = ordersListActiveFilterSummary()
     if (statusNode) {
-      statusNode.textContent = `Widok: ${summary}.`
+      statusNode.textContent = appState.ordersJobCardDraftsError
+        ? `Widok: ${summary}. Robocze chwilowo niedostępne: ${appState.ordersJobCardDraftsError}`
+        : `Widok: ${summary}.`
     }
     if (activeFiltersNode) {
       activeFiltersNode.textContent = summary
@@ -9383,6 +9787,9 @@ export function createOrdersFeature(ctx) {
     binding.add(root, 'input', (event) => {
       if (event.target?.closest?.('#ordersEditorPanel')) {
         ordersJobCardWarningAcknowledgements.clear()
+        if (event.target?.id !== 'ordersClientPickerInput') {
+          ordersSetEditorDirty(true)
+        }
       }
       if (event.target?.id === 'ordersClientPickerInput') {
         ordersSetClientPickerOpen(true)
@@ -9562,6 +9969,7 @@ export function createOrdersFeature(ctx) {
       }
       if (event.target?.closest?.('#ordersEditorPanel')) {
         ordersJobCardWarningAcknowledgements.clear()
+        ordersSetEditorDirty(true)
       }
 
       if (
@@ -9875,6 +10283,28 @@ export function createOrdersFeature(ctx) {
       if (!eventTargetClosest(event, '.orders-worker-picker')) {
         ordersCloseWorkerPicker()
       }
+
+      const editorMutation = eventTargetClosest(
+        event,
+        '[data-orders-client-pick], [data-orders-location-index], #ordersWeeklyPatternApplyAll, [data-orders-service-add], [data-orders-service-remove], [data-orders-service-slot-add], [data-orders-service-slot-remove], #ordersObjectTaskAdd, #ordersObjectDayTaskAdd, [data-orders-remove-object-task], #ordersSubtaskAdd, [data-orders-remove-subtask], #ordersSupplyAdd, [data-orders-remove-supply], #ordersCoworkerAdd, [data-orders-remove-coworker], #ordersDeviceNoteSave',
+      )
+      if (editorMutation) {
+        ordersSetEditorDirty(true)
+      }
+
+      const discardCancel = eventTargetClosest(event, '[data-orders-discard-cancel]')
+      if (discardCancel) {
+        event.preventDefault()
+        ordersCloseDiscardConfirm()
+        return
+      }
+
+      const discardConfirm = eventTargetClosest(event, '[data-orders-discard-confirm]')
+      if (discardConfirm) {
+        event.preventDefault()
+        ordersShowList({ force: true })
+        return
+      }
   
       const clientPick = eventTargetClosest(event, '[data-orders-client-pick]')
       if (clientPick) {
@@ -9942,7 +10372,15 @@ export function createOrdersFeature(ctx) {
       const addOrder = eventTargetClosest(event, '#ordersAddBtn')
       if (addOrder) {
         event.preventDefault()
-        ordersOpenAddEditor()
+        if (typeof openOrderCreateWorkspace === 'function') {
+          void openOrderCreateWorkspace({
+            sourceRoute: 'orders',
+            returnRoute: 'orders',
+            initialDate: todayYmd(),
+          })
+        } else {
+          showTransientNotice('Kreator zlecenia jest chwilowo niedostępny.', 'error')
+        }
         return
       }
 
@@ -10232,6 +10670,10 @@ export function createOrdersFeature(ctx) {
         const row = eventTargetClosest(event, '[data-order-id]')
         const orderId = row?.getAttribute('data-order-id') || row?.getAttribute('data-order-source-id') || ''
         const actionName = action.getAttribute('data-orders-list-action')
+        if (actionName === 'continue') {
+          void ordersContinueJobCardDraft(orderId)
+          return
+        }
         if (actionName === 'edit') {
           ordersOpenEditor(orderId)
           return
@@ -10250,6 +10692,13 @@ export function createOrdersFeature(ctx) {
       if (refresh) {
         event.preventDefault()
         void ordersRefreshListFromRemote()
+        return
+      }
+
+      const showAllDrafts = eventTargetClosest(event, '#ordersDraftsShowAll')
+      if (showAllDrafts) {
+        event.preventDefault()
+        void ordersLoadAllJobCardDrafts()
         return
       }
   
@@ -10283,6 +10732,12 @@ export function createOrdersFeature(ctx) {
     })
   
     binding.add(root, 'keydown', (event) => {
+      if (event.key === 'Escape' && !document.getElementById('ordersDiscardConfirm')?.hidden) {
+        event.preventDefault()
+        ordersCloseDiscardConfirm()
+        return
+      }
+
       if (event.target?.id === 'ordersClientPickerInput') {
         if (event.key === 'Escape') {
           ordersHideClientPicker()
@@ -10375,16 +10830,19 @@ export function createOrdersFeature(ctx) {
   
       if (event.key === 'Enter' && event.target?.id === 'ordersSubtaskName') {
         event.preventDefault()
+        ordersSetEditorDirty(true)
         ordersAddSubtaskToCurrentOrder()
         return
       }
       if (event.key === 'Enter' && event.target?.id === 'ordersObjectTaskName') {
         event.preventDefault()
+        ordersSetEditorDirty(true)
         ordersAddObjectPlanTaskToCurrentOrder()
         return
       }
       if (event.key === 'Enter' && event.target?.id === 'ordersObjectDayTaskName') {
         event.preventDefault()
+        ordersSetEditorDirty(true)
         ordersAddObjectPlanDayTaskToCurrentOrder()
         return
       }
@@ -10401,6 +10859,7 @@ export function createOrdersFeature(ctx) {
       }
       if (event.key === 'Enter' && ['ordersSupplyName', 'ordersSupplyQr'].includes(event.target?.id)) {
         event.preventDefault()
+        ordersSetEditorDirty(true)
         ordersAddSupplyToCurrentOrder()
         return
       }
@@ -10422,7 +10881,12 @@ export function createOrdersFeature(ctx) {
         return
       }
       if (event.key === 'Escape') {
-        ordersCloseMapModal()
+        if (ordersEditorPanelIsVisible()) {
+          event.preventDefault()
+          ordersShowList()
+        } else {
+          ordersCloseMapModal()
+        }
       }
     })
   
@@ -10486,6 +10950,7 @@ export function createOrdersFeature(ctx) {
       const serviceColumn = eventTargetClosest(event, '[data-orders-service-block]')
       if (serviceColumn && appState.ordersServiceBlockDraggingKind) {
         event.preventDefault()
+        ordersSetEditorDirty(true)
         const targetKind = String(serviceColumn.getAttribute('data-orders-service-block') || '').trim()
         const position = ordersServiceBlockDropPosition(serviceColumn, event)
         ordersMoveServiceBlockInCurrentOrder(appState.ordersServiceBlockDraggingKind, targetKind, position)
@@ -10497,6 +10962,7 @@ export function createOrdersFeature(ctx) {
         return
       }
       event.preventDefault()
+      ordersSetEditorDirty(true)
       const order = ordersFindTimelineOrder(appState.ordersEditingId) || {}
       const targetDay = ordersNormalizeDateField(day.getAttribute('data-orders-object-calendar-day'), '')
       if (!ordersObjectPlanDayIsActive(order, targetDay)) {
@@ -10506,6 +10972,14 @@ export function createOrdersFeature(ctx) {
       const id = String(event.dataTransfer?.getData('text/plain') || appState.ordersObjectPlanDraggingTaskId || '').trim()
       ordersMoveObjectPlanTaskDate(id, targetDay)
       appState.ordersObjectPlanDraggingTaskId = ''
+    })
+
+    binding.add(window, 'beforeunload', (event) => {
+      if (!ordersEditorHasUnsavedChanges()) {
+        return
+      }
+      event.preventDefault()
+      event.returnValue = ''
     })
   
     return binding.done
@@ -10549,6 +11023,352 @@ export function createOrdersFeature(ctx) {
     })
   
     return binding.done
+  }
+
+  function ordersCreateWorkspaceCustomerType(client = {}) {
+    const source = normalizeSearchText(client?.clientType ?? client?.customerType ?? client?.type ?? '')
+    return ['b2c', 'individual', 'retail', 'consumer', 'private', 'osoba prywatna'].includes(source) ? 'B2C' : 'B2B'
+  }
+
+  function ordersCreateWorkspaceObjectId(clientId = '', address = '', index = 0) {
+    const normalizedClientId = String(clientId ?? '').trim()
+    if (index === 0 || !address) {
+      return normalizedClientId
+    }
+    const suffix = normalizeSearchText(address)
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48)
+    return `${normalizedClientId}::${suffix || index + 1}`
+  }
+
+  function ordersCreateWorkspaceOptions() {
+    const clients = Array.isArray(appState.clients) ? appState.clients : []
+    const zones = Array.isArray(appState.zones) ? appState.zones : []
+    const resources = calendarTimelineResources()
+    const objects = clients.flatMap((client) => {
+      const data = ordersClientFormData(client)
+      const clientId = data.clientId
+      if (!clientId || !data.clientName) {
+        return []
+      }
+      const clientZones = zones
+        .filter((zone) => ordersZoneMatchesClient(zone, client))
+        .map((zone, zoneIndex) => ({
+          id: ordersFirstClientText(zone?.id, zone?.zoneId, zone?.qrCode, `zone-${zoneIndex + 1}`),
+          name: ordersFirstClientText(zone?.name, zone?.zoneName, zone?.label, zone?.qrCode, `Strefa ${zoneIndex + 1}`),
+          qrCode: ordersFirstClientText(zone?.qrCode, zone?.qr),
+        }))
+      const addresses = ordersClientExecutionAddresses(client)
+      const uniqueAddresses = addresses.length
+        ? addresses
+        : [{ label: ordersClientAddressLabel(data), meta: '' }]
+      return uniqueAddresses
+        .map((row, index) => ({
+          id: ordersCreateWorkspaceObjectId(clientId, row.label, index),
+          objectId: ordersCreateWorkspaceObjectId(clientId, row.label, index),
+          siteId: ordersCreateWorkspaceObjectId(clientId, row.label, index),
+          clientId,
+          clientName: data.clientName,
+          customerType: ordersCreateWorkspaceCustomerType(client),
+          name: index === 0 || !row.meta ? data.clientName : row.meta,
+          address: String(row.label ?? '').trim(),
+          city: data.city,
+          nip: data.nip,
+          email: data.email,
+          contact: data.contact,
+          zones: clientZones,
+        }))
+    })
+    const workers = resources
+      .map((resource, row) => {
+        const id = ordersFirstClientText(
+          resource?.workerId,
+          resource?.idWorker,
+          resource?.employeeId,
+          resource?.id,
+          resource?.email,
+        )
+        const name = ordersFirstClientText(resource?.name, resource?.workerName, resource?.label, id)
+        if (!id || !name || !workerIsAssignable(resource)) {
+          return null
+        }
+        return {
+          id,
+          workerId: id,
+          name,
+          row,
+          role: ordersFirstClientText(resource?.role, 'WORKER').toUpperCase(),
+        }
+      })
+      .filter(Boolean)
+      .sort((left, right) => left.name.localeCompare(right.name, 'pl', { sensitivity: 'base' }))
+    return { objects, workers, zones }
+  }
+
+  function ordersCreateWorkspaceSelectedObject(draft = {}) {
+    const objectId = String(draft?.objectId ?? draft?.selectedObjectId ?? draft?.siteId ?? '').trim()
+    const options = ordersCreateWorkspaceOptions()
+    return options.objects.find((item) => String(item.id) === objectId) || null
+  }
+
+  function ordersCreateWorkspaceTaskRows(draft = {}, selectedObject = {}) {
+    const zoneById = new Map((selectedObject?.zones || []).map((zone) => [String(zone.id), zone]))
+    const source = Array.isArray(draft?.tasks) ? draft.tasks : []
+    return source
+      .map((task, index) => {
+        const zoneId = String(task?.zoneId ?? '').trim()
+        const zone = zoneById.get(zoneId)
+        return {
+          id: String(task?.id ?? `scope-${index + 1}`).trim(),
+          zoneId,
+          zoneName: String(task?.zoneName ?? zone?.name ?? '').trim(),
+          title: String(task?.title ?? task?.name ?? '').trim(),
+          name: String(task?.title ?? task?.name ?? '').trim(),
+          instructions: [
+            String(task?.instructions ?? task?.instruction ?? task?.note ?? '').trim(),
+            String(task?.expectedResult ?? '').trim() ? `Oczekiwany rezultat: ${String(task.expectedResult).trim()}` : '',
+          ].filter(Boolean).join('\n'),
+          required: task?.required !== false,
+        }
+      })
+      .filter((task) => task.title || task.zoneId || task.zoneName)
+  }
+
+  function ordersCreateWorkspaceAssignmentRows(draft = {}) {
+    const selectedIds = new Set(
+      (Array.isArray(draft?.assignedWorkerIds)
+        ? draft.assignedWorkerIds
+        : Array.isArray(draft?.workerIds)
+          ? draft.workerIds
+          : [])
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean),
+    )
+    if (!selectedIds.size) {
+      return []
+    }
+    return ordersCreateWorkspaceOptions().workers
+      .filter((worker) => selectedIds.has(String(worker.id)))
+      .map((worker) => Number(worker.row))
+      .filter((row, index, rows) => Number.isInteger(row) && row >= 0 && rows.indexOf(row) === index)
+  }
+
+  function ordersCreateWorkspaceBuildOrder(draft = {}) {
+    const selectedObject = ordersCreateWorkspaceSelectedObject(draft)
+    if (!selectedObject) {
+      throw new Error('Wybierz obiekt zapisany w organizacji.')
+    }
+    const scheduleMode = String(draft?.scheduleMode ?? 'ONE_OFF').toUpperCase() === 'RECURRING' ? 'RECURRING' : 'ONE_OFF'
+    const staffingMode = ['FIXED', 'VARIABLE_WEEKLY', 'BUFFER'].includes(String(draft?.staffingMode ?? '').toUpperCase())
+      ? String(draft.staffingMode).toUpperCase()
+      : 'BUFFER'
+    const dateYmd = ordersNormalizeDateField(draft?.startDateYmd ?? draft?.dateStart ?? draft?.dateYmd, todayYmd())
+    const startTime = ordersNormalizeTimeField(draft?.startTime, '08:00')
+    const endTime = ordersNormalizeTimeField(draft?.endTime, ordersDefaultEndTime(startTime))
+    const repeatUntil = scheduleMode === 'RECURRING'
+      ? ordersNormalizeDateField(
+          draft?.recurrenceUntilYmd ?? draft?.recurrenceUntil ?? draft?.repeatUntil,
+          defaultJobCardRecurrenceUntil(dateYmd),
+        )
+      : ''
+    const repeatWeekdays = scheduleMode === 'RECURRING'
+      ? (Array.isArray(draft?.repeatWeekdays)
+          ? draft.repeatWeekdays
+          : Array.isArray(draft?.weekdays)
+            ? draft.weekdays
+            : [])
+          .map((value) => Number(value))
+          .filter((value, index, values) => Number.isInteger(value) && value >= 0 && value <= 6 && values.indexOf(value) === index)
+      : []
+    const assignmentRows = staffingMode === 'FIXED' ? ordersCreateWorkspaceAssignmentRows(draft) : []
+    const workerAssignments = assignmentRows.length ? ordersWorkerAssignmentsFromRows(assignmentRows, calendarTimelineResources()) : []
+    const requiredPeople = Math.max(1, Math.min(50, Math.floor(Number(draft?.requiredPeople) || assignmentRows.length || 1)))
+    const startMinutes = calendarTimelineTimeMinutes(startTime, 8 * 60)
+    const endMinutes = calendarTimelineTimeMinutes(endTime, startMinutes + 120)
+    const durationMinutes = Math.max(15, endMinutes > startMinutes ? endMinutes - startMinutes : 24 * 60 - startMinutes + endMinutes)
+    const tasks = ordersCreateWorkspaceTaskRows(draft, selectedObject)
+    const nowIso = new Date().toISOString()
+    const id = String(draft?.orderId ?? draft?.id ?? ordersNextOrderId()).trim()
+    const serviceType = String(draft?.serviceType ?? draft?.serviceName ?? '').trim()
+    const title = String(draft?.title ?? '').trim() || `${selectedObject.name} — ${serviceType || 'Sprzątanie'}`
+    const order = ordersAssignExtendedWorkFlags({
+      ...ordersCreateDraftOrder(dateYmd),
+      id,
+      createdAt: String(draft?.createdAt ?? '').trim() || nowIso,
+      updatedAt: nowIso,
+      isDraft: true,
+      title,
+      description: String(draft?.description ?? draft?.serviceGoal ?? '').trim(),
+      workerComment: String(draft?.workerInstructions ?? '').trim(),
+      clientId: selectedObject.clientId,
+      clientLabel: selectedObject.clientName,
+      clientName: selectedObject.clientName,
+      customerType: selectedObject.customerType,
+      clientType: selectedObject.customerType,
+      nip: selectedObject.nip,
+      clientNip: selectedObject.nip,
+      email: selectedObject.email,
+      contact: selectedObject.contact,
+      objectId: selectedObject.objectId,
+      siteId: selectedObject.siteId,
+      siteName: selectedObject.name,
+      siteMode: String(draft?.siteMode ?? 'FIXED_CONTRACT_SITE').toUpperCase(),
+      addressLabel: selectedObject.address,
+      executionAddressLabel: selectedObject.address,
+      customAddressLabel: selectedObject.address,
+      scheduleMode: scheduleMode === 'RECURRING' ? 'repeat' : 'once',
+      type: scheduleMode === 'RECURRING' ? 'cyclic' : 'individual',
+      tone: ordersTimelineToneForType(scheduleMode === 'RECURRING' ? 'cyclic' : 'individual'),
+      dateYmd,
+      nextDate: dateYmd,
+      startTime,
+      endTime,
+      endDateYmd: endMinutes <= startMinutes ? calendarAddDays(dateYmd, 1) : dateYmd,
+      validUntil: scheduleMode === 'ONE_OFF' ? dateYmd : '',
+      repeatUntil,
+      repeatEndDate: repeatUntil,
+      recurrenceEndDate: repeatUntil,
+      seriesEndDate: repeatUntil,
+      recurrenceHorizonConfirmed:
+        scheduleMode === 'ONE_OFF' ||
+        draft?.recurrenceHorizonConfirmed === true ||
+        draft?.recurrenceUntilConfirmed === true,
+      repeatPreset: scheduleMode === 'RECURRING' ? 'week' : 'none',
+      repeatEvery: Math.max(1, Math.floor(Number(draft?.repeatEvery) || 1)),
+      repeatUnit: scheduleMode === 'RECURRING' ? 'week' : 'day',
+      repeatWeekdays,
+      staffingMode,
+      crewSource: String(draft?.crewSource ?? 'DISPATCHED').toUpperCase(),
+      dispatchRequired: typeof draft?.dispatchRequired === 'boolean' ? draft.dispatchRequired : false,
+      row: assignmentRows[0] ?? ordersServiceBlockBufferRow(),
+      assignedRows: assignmentRows,
+      workerAssignments,
+      requiredPeople,
+      requiredWorkers: requiredPeople,
+      workerSlots: requiredPeople,
+      requiredWorkMinutes: durationMinutes * requiredPeople,
+      serviceWorkMinutes: durationMinutes * requiredPeople,
+      standardWorkMinutes: durationMinutes * requiredPeople,
+      serviceBlocks: [{
+        id: 'service-block-1',
+        label: String(draft?.serviceBlockLabel ?? 'Realizacja').trim(),
+        dateYmd,
+        startTime,
+        endTime,
+        weekdays: repeatWeekdays,
+        requiredPeople,
+        requiredWorkMinutes: durationMinutes * requiredPeople,
+        workerAssignments,
+      }],
+      serviceType,
+      taskName: tasks[0]?.title || '',
+      tasks,
+      subtasks: tasks,
+      activities: tasks,
+      objectPlanTasks: tasks,
+      zoneTaskPlan: tasks,
+      objectZoneTasks: tasks,
+      accessInstruction: String(draft?.accessInstruction ?? draft?.accessNotes ?? '').trim(),
+      accessInstructionConfirmedNone: draft?.accessInstructionConfirmedNone === true || draft?.accessConfirmedNone === true,
+      safetyInstruction: String(draft?.safetyInstruction ?? '').trim(),
+      safetyInstructionConfirmedNone: draft?.safetyInstructionConfirmedNone === true || draft?.safetyConfirmed === true,
+      packingRequired: typeof draft?.packingRequired === 'boolean'
+        ? draft.packingRequired
+        : draft?.suppliesConfirmed === true
+          ? false
+          : null,
+      supplies: Array.isArray(draft?.supplies) ? draft.supplies : [],
+      paymentMethod: String(draft?.paymentMethod ?? '').toUpperCase(),
+      pricingMode: String(draft?.pricingMode ?? '').toUpperCase(),
+      price: Math.max(0, Number(String(draft?.amount ?? draft?.price ?? '').replace(',', '.')) || 0),
+      contractId: String(draft?.contractId ?? '').trim(),
+      paymentDueDateYmd: String(draft?.paymentDueDateYmd ?? draft?.deferredDueDate ?? '').trim(),
+      paymentTermDays: Math.max(0, Math.floor(Number(draft?.paymentTermDays) || 0)),
+      leaderWorkerId: String(draft?.leaderWorkerId ?? draft?.leaderId ?? '').trim(),
+      driverWorkerId: String(draft?.driverWorkerId ?? draft?.driverId ?? '').trim(),
+      signatureRequired: typeof draft?.signatureRequired === 'boolean'
+        ? draft.signatureRequired
+        : selectedObject.customerType === 'B2C',
+    }, draft?.allowExtendedWork === true)
+    const jobCardDraft = compileOrderDraftToJobCardDraft(order)
+    const validation = validateJobCardDraft(jobCardDraft)
+    order.jobCardDraft = jobCardDraft
+    order.jobCardSchemaVersion = jobCardDraft.schemaVersion
+    order.jobCardDraftStatus = 'DRAFT'
+    order.jobCardDraftUpdatedAt = nowIso
+    order.jobCardValidation = {
+      validForPublication: validation.valid,
+      errors: validation.errors,
+      warnings: validation.warnings,
+    }
+    return { order, validation }
+  }
+
+  async function ordersSaveCreateWorkspaceDraft(draft = {}, options = {}) {
+    const result = ordersCreateWorkspaceBuildOrder(draft)
+    const orgId = String(appState.session?.activeOrgId ?? appState.session?.orgId ?? '').trim()
+    const saved = await saveJobCardDraft(orgId, {
+      editorDraft: draft,
+      expectedDraftHash: String(options?.expectedDraftHash ?? '').trim(),
+      jobCardDraft: result.order.jobCardDraft,
+      order: result.order,
+      orderId: String(draft?.orderId ?? draft?.id ?? '').trim(),
+    })
+    const persistedOrderId = String(saved?.orderId ?? saved?.draft?.sourceOrderId ?? '').trim()
+    if (!persistedOrderId || !saved?.draft?.draftHash || saved?.materialized !== false) {
+      throw new Error('Nie udało się potwierdzić zapisu roboczego zlecenia w bazie.')
+    }
+    appState.ordersJobCardDraftsLoaded = false
+    appState.ordersJobCardDraftsError = ''
+    return {
+      ...result,
+      validation: saved?.draft?.validation ?? result.validation,
+      order: {
+        ...draft,
+        id: persistedOrderId,
+        orderId: persistedOrderId,
+      },
+      materialized: false,
+      persistedDraft: saved.draft,
+    }
+  }
+
+  async function ordersPublishCreateWorkspaceJobCard(orderId = '', acknowledgements = [], expectedDraftHash = '') {
+    const id = String(orderId ?? '').trim()
+    const orgId = String(appState.session?.activeOrgId ?? appState.session?.orgId ?? '').trim()
+    const draftHash = String(expectedDraftHash ?? '').trim()
+    if (!draftHash) {
+      throw new Error('Brak zaakceptowanej wersji roboczego zlecenia do publikacji.')
+    }
+    const acceptedAcknowledgements = (Array.isArray(acknowledgements) ? acknowledgements : [])
+      .map((item) => typeof item === 'string' ? item : item?.accepted === true ? item?.code : '')
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean)
+      .map((code) => ({ accepted: true, code }))
+    const result = await publishJobCard(orgId, id, {
+      acknowledgements: acceptedAcknowledgements,
+      expectedDraftHash: draftHash,
+    })
+    let synchronizationWarning = ''
+    if (typeof ordersSyncRemoteTimelineOrders === 'function') {
+      try {
+        await ordersSyncRemoteTimelineOrders({ render: false })
+      } catch (error) {
+        console.warn('[portal/orders] publication succeeded, timeline synchronization failed', error)
+        synchronizationWarning = 'Karta Zlecenia została opublikowana, ale nie udało się odświeżyć listy. Użyj przycisku Odśwież, aby pobrać aktualne dane.'
+      }
+    }
+    appState.ordersJobCardDrafts = (Array.isArray(appState.ordersJobCardDrafts) ? appState.ordersJobCardDrafts : [])
+      .filter((draft) => String(draft?.orderId ?? draft?.sourceOrderId ?? '').trim() !== id)
+    appState.ordersJobCardDraftsLoaded = false
+    appState.ordersJobCardDraftsError = ''
+    return synchronizationWarning
+      ? {
+          ...(result && typeof result === 'object' ? result : {}),
+          synchronizationWarning,
+        }
+      : result
   }
 
   return {
@@ -10600,5 +11420,8 @@ export function createOrdersFeature(ctx) {
     ordersWeeklyPatternSources,
     ordersNormalizeWeeklyPatternRule,
     ordersStoreWeeklyPatternRules,
+    ordersCreateWorkspaceOptions,
+    ordersSaveCreateWorkspaceDraft,
+    ordersPublishCreateWorkspaceJobCard,
   }
 }

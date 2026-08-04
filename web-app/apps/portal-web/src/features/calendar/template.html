@@ -3,9 +3,22 @@
     <div class="portal-page-hero__copy">
       <div class="portal-page-hero__title-row">
         <h1>Kalendarz</h1>
-        <span class="portal-page-hero__badge">Plan i realizacja</span>
+        <span class="portal-page-hero__badge">Planowanie tygodnia</span>
       </div>
-      <p>Porównuj harmonogram z rzeczywistą pracą i szybko wychwytuj kolizje.</p>
+      <p>Przygotuj obsadę na przyszły tydzień i obserwuj realizację na żywo.</p>
+    </div>
+    <div class="calendar-planning-hero-actions" aria-label="Działania planu tygodnia">
+      <button class="btn2 calendar-planning-assist-btn" id="calendarPlanningAssistBtn" type="button">
+        <i class="ph ph-sparkle" aria-hidden="true"></i>
+        Pokaż braki obsady
+      </button>
+      <button class="btn2 primary calendar-planning-publish-btn" id="calendarPlanningPublishBtn" type="button" disabled aria-describedby="calendarPlanningPublishNote" title="Publikacja zostanie włączona po uruchomieniu wersjonowanego zapisu planu">
+        <i class="ph ph-calendar-check" aria-hidden="true"></i>
+        Opublikuj plan tygodnia
+      </button>
+      <span class="calendar-planning-publish-note" id="calendarPlanningPublishNote" role="status">
+        Publikacja wersjonowana jest w przygotowaniu.
+      </span>
     </div>
   </header>
 
@@ -14,11 +27,27 @@
       <div class="fw-calendar-toolbar" aria-label="Sterowanie kalendarzem">
         <div class="fw-toolbar-left">
           <button class="fw-toolbar-btn fw-toggle-btn is-active" id="calendarTimelineCompletedToggle" type="button" aria-pressed="true">Zako&#324;czone: poka&#380;</button>
-          <div class="fw-type-filter" id="calendarTimelineTypeFilter">
-            <button class="fw-toolbar-select-btn" id="calendarTimelineTypeBtn" type="button" aria-expanded="false" aria-controls="calendarTimelineTypePanel">
-              Typy zlece&#324;
-              <span aria-hidden="true">&#9662;</span>
-            </button>
+          <button class="fw-toolbar-icon" id="calendarTimelineRefreshBtn" type="button" aria-label="Od&#347;wie&#380;" title="Od&#347;wie&#380;"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></button>
+        </div>
+
+        <div class="fw-toolbar-right">
+          <span class="calendar-planning-toolbar-nav">
+            <button class="fw-toolbar-icon" id="calendarPrevBtn" type="button" aria-label="Poprzedni zakres"><i class="ph ph-caret-left" aria-hidden="true"></i></button>
+            <button class="fw-view-btn calendar-planning-today-btn" id="calendarTodayBtn" type="button">Dzisiaj <i class="ph ph-caret-down" aria-hidden="true"></i></button>
+            <button class="fw-toolbar-icon" id="calendarNextBtn" type="button" aria-label="Nast&#281;pny zakres"><i class="ph ph-caret-right" aria-hidden="true"></i></button>
+          </span>
+          <span class="calendar-planning-toolbar-period">
+            <button class="fw-date-jump-btn" id="calendarTimelineDateBtn" type="button" aria-label="Wybierz dat&#281;"><strong id="calendarRangeLabel">-</strong><i class="ph ph-caret-down" aria-hidden="true"></i></button>
+            <input id="calendarTimelineDateInput" type="date" aria-label="Data pocz&#261;tku zakresu" />
+            <span class="calendar-planning-week-number" id="calendarWeekNumberLabel">Tydzie&#324; -</span>
+          </span>
+          <span class="calendar-planning-view-switch" aria-label="Widok kalendarza">
+            <button class="fw-view-btn" type="button" data-calendar-view="day">Dzie&#324;</button>
+            <button class="fw-view-btn" type="button" data-calendar-view="week">Tydzie&#324;</button>
+            <button class="fw-view-btn" type="button" data-calendar-view="month">Miesi&#261;c</button>
+          </span>
+          <div class="fw-type-filter calendar-planning-settings" id="calendarTimelineTypeFilter">
+            <button class="fw-toolbar-icon" id="calendarTimelineTypeBtn" type="button" aria-label="Filtry i ustawienia" title="Filtry i ustawienia" aria-expanded="false" aria-controls="calendarTimelineTypePanel"><i class="ph ph-gear" aria-hidden="true"></i></button>
             <div class="fw-type-panel" id="calendarTimelineTypePanel" hidden>
               <label><input type="checkbox" data-calendar-timeline-type="individual" checked /><span></span>Zlecenia indywidualne</label>
               <label><input type="checkbox" data-calendar-timeline-type="cyclic" checked /><span></span>Zlecenie cykliczne</label>
@@ -27,28 +56,10 @@
               <label><input type="checkbox" data-calendar-timeline-type="other" checked /><span></span>Inne zlecenie</label>
             </div>
           </div>
-          <button class="fw-toolbar-icon" id="calendarTimelineRefreshBtn" type="button" aria-label="Od&#347;wie&#380;" title="Od&#347;wie&#380;">&#8635;</button>
-        </div>
-
-        <div class="fw-toolbar-right">
-          <button class="fw-view-btn" id="calendarTodayBtn" type="button">Dzisiaj</button>
-          <button class="fw-view-btn is-active" type="button" data-calendar-view="three">3 dni</button>
-          <button class="fw-view-btn" type="button" data-calendar-view="week">Tydzie&#324;</button>
-          <button class="fw-view-btn" type="button" data-calendar-view="month">Miesi&#261;c</button>
-          <button class="fw-toolbar-icon" id="calendarPrevBtn" type="button" aria-label="Poprzedni zakres">&lsaquo;</button>
-          <button class="fw-toolbar-icon" id="calendarNextBtn" type="button" aria-label="Nast&#281;pny zakres">&rsaquo;</button>
-          <span class="fw-date-jump">
-            <button class="fw-date-jump-btn" id="calendarTimelineDateBtn" type="button" aria-label="Wybierz dat&#281;">
-              <span aria-hidden="true">&#128197;</span>
-              <strong id="calendarTimelineDateLabel">-</strong>
-            </button>
-            <input id="calendarTimelineDateInput" type="date" aria-label="Data pocz&#261;tku zakresu" />
-          </span>
-          <span class="fw-range-label"><i aria-hidden="true"></i><strong id="calendarRangeLabel">-</strong></span>
         </div>
       </div>
 
-      <div class="fw-timeline-stage" id="calendarPrototypeTimeline" aria-live="polite"></div>
+      <div class="fw-timeline-stage" id="calendarPrototypeTimeline"></div>
     </section>
   </div>
 

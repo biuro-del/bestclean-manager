@@ -67,6 +67,8 @@ const {
   isScheduleOrderActive,
   normalizeScheduleOrderLifecycleStatus,
 } = require('./worker-schedule-conflict-policy')
+const { resolveScheduleOrderRequiredPeople } = require('./schedule-order-staffing-policy')
+const { validateDetachedDraftCorrelation } = require('./job-card/correlation')
 const { JobCardRepository } = require('./job-card/repository')
 
 function isTrue(value) {
@@ -118,6 +120,7 @@ const ADMIN_WORKERS_RESTORE_PATH = '/api/admin/workers/restore'
 const AUTH_SESSION_CONTEXT_PATH = '/api/auth/session-context'
 const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
+const PORTAL_JOB_CARD_DRAFTS_PATH = '/api/portal/job-card-drafts'
 const PORTAL_JOB_CARDS_PATH = '/api/portal/job-cards'
 const PORTAL_EVENTS_PATH = '/api/portal/events'
 const PORTAL_UI_STYLE_PATH = '/api/portal/ui-style'
@@ -7086,6 +7089,7 @@ const PORTAL_SCHEDULE_ORDER_COLUMNS = [
   'org_id',
   'id_task',
   'client_id',
+  'object_id',
   'zone_id',
   'access_end_time',
   'access_start_time',
@@ -7264,6 +7268,14 @@ function portalScheduleOrderServicePayloadFromOrder(order = {}) {
     recurrenceOriginalDateYmd: recurrenceOriginalDateYmd || null,
     serviceBlocks,
     objectAccessWindows: Array.isArray(objectAccessWindows) ? objectAccessWindows : [],
+    staffingMode: portalScheduleOrderNullableText(order.staffingMode ?? order.assignmentMode, 32),
+    paymentMethod: portalScheduleOrderNullableText(order.paymentMethod ?? order.commercial?.paymentMethod, 32),
+    pricingMode: portalScheduleOrderNullableText(order.pricingMode ?? order.commercial?.pricingMode, 40),
+    contractId: portalScheduleOrderNullableText(order.contractId ?? order.commercial?.contractId, 180),
+    paymentDueDateYmd: normalizePortalScheduleOrderDate(
+      order.paymentDueDateYmd ?? order.deferredDueDate ?? order.commercial?.paymentDueDateYmd,
+    ) || null,
+    paymentTermDays: portalScheduleOrderInteger(order.paymentTermDays ?? order.commercial?.paymentTermDays, 0),
   }
 }
 
@@ -7466,6 +7478,7 @@ function portalScheduleOrderDbRow(order = {}, orgId, requesterUid) {
   const allocations = portalScheduleOrderAllocationsFromOrder(order)
   const realAllocations = allocations.filter((item) => portalScheduleOrderWorkerId(item.workerId))
   const workerIds = portalScheduleOrderUniqueText(realAllocations.map((item) => portalScheduleOrderWorkerId(item.workerId)))
+  const requiredPeople = resolveScheduleOrderRequiredPeople(order, workerIds)
   const primaryAllocation = realAllocations[0] || null
   const workerLabel = realAllocations.length
     ? realAllocations.map((item) => item.name || item.workerId).filter(Boolean).join(', ')
@@ -7491,6 +7504,7 @@ function portalScheduleOrderDbRow(order = {}, orgId, requesterUid) {
     org_id: orgId,
     id_task: idTask,
     client_id: portalScheduleOrderNullableText(order.clientId ?? order.client_id, 64),
+    object_id: portalScheduleOrderNullableText(order.objectId ?? order.object_id ?? order.siteId, 64),
     zone_id: portalScheduleOrderNullableText(order.zoneId ?? order.zone_id, 64),
     access_end_time: portalScheduleOrderNullableText(normalizePortalScheduleOrderTime(order.accessEndTime ?? order.access_end_time, endTime), 5),
     access_start_time: portalScheduleOrderNullableText(normalizePortalScheduleOrderTime(order.accessStartTime ?? order.access_start_time, startTime), 5),
@@ -7522,7 +7536,7 @@ function portalScheduleOrderDbRow(order = {}, orgId, requesterUid) {
     repeat_preset: portalScheduleOrderNullableText(order.repeatPreset ?? order.repeat_preset, 32),
     repeat_unit: portalScheduleOrderNullableText(order.repeatUnit ?? order.repeat_unit, 16),
     repeat_weekdays: portalScheduleOrderJsonString(order.repeatWeekdays ?? order.repeat_weekdays, []),
-    required_people: workerIds.length,
+    required_people: requiredPeople,
     required_work_minutes: portalScheduleOrderDurationMinutes({ ...order, dateYmd, startTime, endDateYmd, endTime }),
     schedule_mode:
       portalScheduleOrderNullableText(order.scheduleMode ?? order.schedule_mode, 32) ||
@@ -7627,6 +7641,8 @@ function portalScheduleOrderFromDbRow(row = {}) {
     workerName,
     workerLogin,
     clientId: portalScheduleOrderNullableText(row.client_id ?? row.clientId, 64),
+    objectId: portalScheduleOrderNullableText(row.object_id ?? row.objectId ?? row.siteId, 64),
+    siteId: portalScheduleOrderNullableText(row.object_id ?? row.objectId ?? row.siteId, 64),
     clientLabel,
     clientName: clientName || clientLabel,
     nip: portalScheduleOrderNullableText(row.nip ?? row.joined_client_nip, 80),
@@ -7671,6 +7687,13 @@ function portalScheduleOrderFromDbRow(row = {}) {
     dayScheduleRules: Array.isArray(weeklyScheduleRules) ? weeklyScheduleRules : [],
     serviceModelVersion: portalScheduleOrderInteger(servicePayload?.version, serviceBlocks.length ? 2 : null),
     serviceBlocks,
+    staffingMode: portalScheduleOrderNullableText(servicePayload?.staffingMode, 32),
+    assignmentMode: portalScheduleOrderNullableText(servicePayload?.staffingMode, 32),
+    paymentMethod: portalScheduleOrderNullableText(servicePayload?.paymentMethod, 32),
+    pricingMode: portalScheduleOrderNullableText(servicePayload?.pricingMode, 40),
+    contractId: portalScheduleOrderNullableText(servicePayload?.contractId, 180),
+    paymentDueDateYmd: normalizePortalScheduleOrderDate(servicePayload?.paymentDueDateYmd),
+    paymentTermDays: portalScheduleOrderInteger(servicePayload?.paymentTermDays, 0),
     title: portalScheduleOrderNullableText(row.title, 500) || clientLabel || 'Zlecenie',
     type: portalScheduleOrderNullableText(row.type, 40) || 'other',
     price: portalScheduleOrderNumber(row.price, 0),
@@ -7759,6 +7782,7 @@ async function ensurePortalScheduleOrderTable(client) {
       org_id varchar(64) not null,
       id_task varchar(180) not null,
       client_id varchar(64),
+      object_id varchar(64),
       zone_id varchar(64),
       access_end_time varchar(5),
       access_start_time varchar(5),
@@ -8389,6 +8413,27 @@ async function upsertPortalScheduleOrderTask(client, dbRow) {
   )
 }
 
+async function insertPortalScheduleOrderTaskOnce(client, dbRow) {
+  const columns = PORTAL_SCHEDULE_ORDER_COLUMNS
+  const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ')
+  const values = columns.map((column) => dbRow[column] ?? null)
+  const result = await client.query(
+    `insert into public.task (${columns.join(', ')})
+     values (${placeholders})
+     on conflict (org_id, id_task) do nothing
+     returning id_task`,
+    values,
+  )
+  if (!result.rows[0]) {
+    const error = new Error('JOB_CARD_ORDER_ID_CONFLICT')
+    error.statusCode = 409
+    error.publicCode = 'JOB_CARD_ORDER_ID_CONFLICT'
+    error.publicMessage = 'Identyfikator szkicu jest już zajęty przez inne zlecenie. Odśwież kreator i zapisz nowy szkic.'
+    throw error
+  }
+  return result.rows[0]
+}
+
 function shouldUseLocalPortalScheduleOrderFileStorage() {
   const mode = normalizeText(process.env.PORTAL_SCHEDULE_ORDERS_MODE).toLowerCase()
   const explicitAllow = normalizeText(process.env.ALLOW_LOCAL_PORTAL_SCHEDULE_ORDERS_FILE_STORAGE) === '1'
@@ -8740,6 +8785,228 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
   }
 }
 
+async function handlePortalJobCardDraftsRequest(req, res, requestUrl) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+  const method = String(req.method || 'GET').toUpperCase()
+  if (!['GET', 'POST'].includes(method)) {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolone metody to GET i POST.')
+    return
+  }
+  if (shouldUseLocalPortalScheduleOrderFileStorage()) {
+    sendApiError(
+      res,
+      503,
+      'JOB_CARD_DURABLE_STORAGE_REQUIRED',
+      'Zapis szkicu Karty Zlecenia wymaga połączenia z trwałą bazą danych.',
+    )
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status, mapped.code, mapped.message)
+    return
+  }
+
+  if (method === 'GET') {
+    const orgId = normalizeOrgId(requestUrl.searchParams.get('orgId'))
+    const sourceOrderId = sanitizePortalScheduleOrderId(requestUrl.searchParams.get('orderId'))
+    const limit = requestUrl.searchParams.get('limit')
+    const cursor = requestUrl.searchParams.get('cursor')
+    if (!orgId) {
+      sendApiError(res, 400, 'JOB_CARD_SCOPE_REQUIRED', 'Brak poprawnego orgId.')
+      return
+    }
+
+    let client = null
+    try {
+      const requesterUid = normalizeText(decodedToken?.uid)
+      client = await connectDbClient()
+      const repository = new JobCardRepository(client)
+      await repository.assertActiveOrganizationMember({ orgId, uid: requesterUid })
+      const data = sourceOrderId
+        ? await repository.readDetachedDraftDetail({ orgId, sourceOrderId })
+        : await repository.listDetachedDrafts({ cursor, limit, orgId })
+      sendJson(res, 200, { ok: true, data })
+    } catch (error) {
+      logPortalStorageError('portal/job-card-drafts', error)
+      const mappedDb = mapDatabaseConnectionError(error)
+      if (mappedDb) {
+        sendApiError(res, mappedDb.status, mappedDb.code, mappedDb.message)
+        return
+      }
+      sendApiError(
+        res,
+        error?.statusCode || 500,
+        normalizeText(error?.publicCode) || 'PORTAL_JOB_CARD_DRAFT_ERROR',
+        normalizeText(error?.publicMessage) || error?.message || 'Nie udało się pobrać roboczych zleceń.',
+        error?.details,
+      )
+    } finally {
+      if (client) client.release()
+    }
+    return
+  }
+
+  let body = {}
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    sendApiError(
+      res,
+      error?.message === 'REQUEST_BODY_TOO_LARGE' ? 413 : 400,
+      error?.message === 'REQUEST_BODY_TOO_LARGE' ? 'REQUEST_TOO_LARGE' : 'INVALID_JSON',
+      error?.message === 'REQUEST_BODY_TOO_LARGE' ? 'Żądanie jest zbyt duże.' : 'Niepoprawny JSON w żądaniu.',
+    )
+    return
+  }
+
+  const orgId = normalizeOrgId(body?.orgId)
+  const requestedOrderId = sanitizePortalScheduleOrderId(body?.orderId)
+  const sourceOrderId = requestedOrderId || sanitizePortalScheduleOrderId(`TASK-${crypto.randomUUID()}`)
+  const expectedDraftHash = normalizeText(body?.expectedDraftHash)
+  const sourceOrder = body?.order
+  const sourceCard = body?.jobCardDraft ?? body?.card
+  const editorDraft = body?.editorDraft
+  if (!orgId || !sourceOrderId) {
+    sendApiError(res, 400, 'JOB_CARD_SCOPE_REQUIRED', 'Brak poprawnego orgId lub identyfikatora szkicu.')
+    return
+  }
+  if (!sourceOrder || typeof sourceOrder !== 'object' || Array.isArray(sourceOrder)) {
+    sendApiError(res, 400, 'JOB_CARD_ORDER_SNAPSHOT_REQUIRED', 'Brak danych przyszłego zlecenia dla szkicu.')
+    return
+  }
+  if (!sourceCard || typeof sourceCard !== 'object' || Array.isArray(sourceCard)) {
+    sendApiError(res, 400, 'JOB_CARD_DRAFT_REQUIRED', 'Brak kompletnego szkicu Karty Zlecenia.')
+    return
+  }
+  if (!editorDraft || typeof editorDraft !== 'object' || Array.isArray(editorDraft)) {
+    sendApiError(res, 400, 'JOB_CARD_EDITOR_DRAFT_REQUIRED', 'Brak danych kreatora potrzebnych do wznowienia edycji.')
+    return
+  }
+  if (requestedOrderId && !expectedDraftHash) {
+    sendApiError(
+      res,
+      409,
+      'JOB_CARD_DRAFT_VERSION_REQUIRED',
+      'Brak wersji roboczego zlecenia. Odśwież je przed ponownym zapisem.',
+    )
+    return
+  }
+
+  let client = null
+  try {
+    const requesterUid = normalizeText(decodedToken?.uid)
+    client = await connectDbClient()
+    const repository = new JobCardRepository(client)
+    const membership = await repository.assertActiveOrganizationMember({ orgId, uid: requesterUid })
+    const requesterRole = normalizeRequesterRole(membership?.role)
+    const tenantActorUid = requesterRole === 'ADMIN' && hasPlatformOwnerClaim(decodedToken) ? '' : requesterUid
+    const normalizedCard = {
+      ...sourceCard,
+      source: {
+        ...(sourceCard?.source && typeof sourceCard.source === 'object' ? sourceCard.source : {}),
+        orderId: sourceOrderId,
+      },
+      status: 'DRAFT',
+    }
+    const dbRow = portalScheduleOrderDbRow({
+      ...sourceOrder,
+      id: sourceOrderId,
+      idTask: sourceOrderId,
+      isDraft: false,
+      lifecycleStatus: 'ACTIVE',
+      cancelledAt: null,
+      archivedAt: null,
+    }, orgId, tenantActorUid)
+    const normalizedOrder = dbRow ? portalScheduleOrderFromDbRow(dbRow) : null
+    if (!dbRow || !normalizedOrder) {
+      sendApiError(res, 400, 'JOB_CARD_ORDER_SNAPSHOT_INVALID', 'Nie udało się znormalizować danych przyszłego zlecenia.')
+      return
+    }
+
+    const correlation = validateDetachedDraftCorrelation({
+      card: normalizedCard,
+      editorDraft,
+      order: normalizedOrder,
+      sourceOrderId,
+    })
+    if (!correlation.valid) {
+      sendApiError(
+        res,
+        422,
+        'JOB_CARD_DRAFT_CORRELATION_INVALID',
+        'Dane roboczego zlecenia są niespójne. Odśwież kreator i zapisz je ponownie.',
+        { mismatches: correlation.mismatches },
+      )
+      return
+    }
+
+    await repository.assertSchemaReady()
+    await client.query('begin')
+    await client.query(
+      `select pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+      [orgId, `job-card:${sourceOrderId}`],
+    )
+    const savedDraft = await repository.saveDetachedDraft({
+      actorUid: requesterUid,
+      card: normalizedCard,
+      expectedDraftHash,
+      orgId,
+      sourceOrderId,
+      sourceSnapshot: {
+        editorDraft,
+        persistenceMode: 'DRAFT_ONLY',
+        snapshotVersion: 2,
+        order: normalizedOrder,
+      },
+    })
+    await client.query('commit')
+    sendJson(res, requestedOrderId ? 200 : 201, {
+      ok: true,
+      data: {
+        draft: savedDraft,
+        materialized: false,
+        orderId: sourceOrderId,
+      },
+    })
+  } catch (error) {
+    logPortalStorageError('portal/job-card-drafts', error)
+    try {
+      if (client) await client.query('rollback')
+    } catch {
+      // Preserve the original draft error.
+    }
+    const mappedDb = mapDatabaseConnectionError(error)
+    if (mappedDb) {
+      sendApiError(res, mappedDb.status, mappedDb.code, mappedDb.message)
+      return
+    }
+    sendApiError(
+      res,
+      error?.statusCode || 500,
+      normalizeText(error?.publicCode) || 'PORTAL_JOB_CARD_DRAFT_ERROR',
+      normalizeText(error?.publicMessage) || error?.message || 'Nie udało się zapisać szkicu Karty Zlecenia.',
+      error?.details,
+    )
+  } finally {
+    if (client) client.release()
+  }
+}
+
 async function handlePortalJobCardsRequest(req, res, requestUrl) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
@@ -8820,6 +9087,55 @@ async function handlePortalJobCardsRequest(req, res, requestUrl) {
       acknowledgements: body?.acknowledgements,
       actorUid: requesterUid,
       expectedDraftHash: body?.expectedDraftHash,
+      materializeOrder: async ({ card, sourceOrderId: detachedOrderId, sourceSnapshot }) => {
+        const snapshotOrder = sourceSnapshot?.order
+        if (!snapshotOrder || typeof snapshotOrder !== 'object' || Array.isArray(snapshotOrder)) {
+          const error = new Error('JOB_CARD_ORDER_SNAPSHOT_REQUIRED')
+          error.statusCode = 422
+          error.publicCode = 'JOB_CARD_ORDER_SNAPSHOT_REQUIRED'
+          error.publicMessage = 'Szkic nie zawiera danych potrzebnych do utworzenia zlecenia.'
+          throw error
+        }
+        const serviceBlock = Array.isArray(card?.schedule?.serviceBlocks)
+          ? card.schedule.serviceBlocks[0]
+          : null
+        const materializationSource = {
+          ...snapshotOrder,
+          id: detachedOrderId,
+          idTask: detachedOrderId,
+          isDraft: false,
+          lifecycleStatus: 'ACTIVE',
+          cancelledAt: null,
+          archivedAt: null,
+          clientId: snapshotOrder.clientId || card?.customer?.clientId,
+          clientLabel: snapshotOrder.clientLabel || card?.customer?.name,
+          clientName: snapshotOrder.clientName || card?.customer?.name,
+          addressLabel: snapshotOrder.addressLabel || card?.site?.address,
+          executionAddressLabel: snapshotOrder.executionAddressLabel || card?.site?.address,
+          dateYmd: snapshotOrder.dateYmd || card?.schedule?.startDateYmd,
+          startTime: snapshotOrder.startTime || serviceBlock?.startTime,
+          endTime: snapshotOrder.endTime || serviceBlock?.endTime,
+          title: snapshotOrder.title || card?.service?.title || card?.service?.serviceType,
+        }
+        const dbRow = portalScheduleOrderDbRow(materializationSource, orgId, requesterUid)
+        const normalizedOrder = dbRow ? portalScheduleOrderFromDbRow(dbRow) : null
+        if (!dbRow || !normalizedOrder || !dbRow.date_ymd || !dbRow.start_time || !dbRow.end_time) {
+          const error = new Error('JOB_CARD_ORDER_SNAPSHOT_INVALID')
+          error.statusCode = 422
+          error.publicCode = 'JOB_CARD_ORDER_SNAPSHOT_INVALID'
+          error.publicMessage = 'Dane szkicu nie wystarczają do utworzenia aktywnego zlecenia.'
+          throw error
+        }
+        await client.query(
+          `select pg_advisory_xact_lock(hashtext($1), hashtext('portal_schedule_orders'))`,
+          [orgId],
+        )
+        const existingOrders = await readPortalScheduleOrders(client, orgId)
+        assertNoWorkerScheduleLocationConflicts(
+          mergePortalScheduleOrders(existingOrders, [normalizedOrder]),
+        )
+        await insertPortalScheduleOrderTaskOnce(client, dbRow)
+      },
       orgId,
       sourceOrderId,
     })
@@ -9280,6 +9596,13 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
 
     handlePortalScheduleOrdersRequest(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PORTAL_SCHEDULE_ORDERS_ERROR', error?.message || 'Unexpected portal schedule orders error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === PORTAL_JOB_CARD_DRAFTS_PATH) {
+    handlePortalJobCardDraftsRequest(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'PORTAL_JOB_CARD_DRAFT_ERROR', error?.message || 'Unexpected job-card draft error.')
     })
     return
   }

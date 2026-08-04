@@ -199,7 +199,7 @@ export const portalLayoutTemplate = `
           </span>
         </button>
 
-        <button class="menu-order-add" id="sidebarOrdersAddBtn" type="button">
+        <button class="menu-order-add" id="sidebarOrdersAddBtn" data-route="orderCreate" type="button">
           <span class="menu-order-add-icon" aria-hidden="true">+</span>
           <span class="mi-label">Dodaj zlecenie</span>
         </button>
@@ -1350,6 +1350,7 @@ export const portalLayoutTemplate = `
         <section id="view-contractProfitability" style="display:none;"></section>
         <section id="view-events" style="display:none;"></section>
         <section id="view-orders" style="display:none;"></section>
+        <section id="view-orderCreate" style="display:none;"></section>
         <section id="view-ordersMap" style="display:none;"></section>
         <section id="view-zones" style="display:none;"></section>
         <section id="view-workerProfile" style="display:none;"></section>
