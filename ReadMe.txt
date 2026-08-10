@@ -4832,3 +4832,36 @@ Weryfikacja:
 Granice:
 - Kontrola przegladarkowa byla tylko do odczytu; nie zapisano, nie opublikowano ani nie zmieniono danych firmy.
 - Nie wykonano migracji, stage, commita, pusha ani wdrozenia produkcyjnego.
+Data: 2026-08-01
+Autor: AI Codex
+Temat: Lokalny fundament centralnej bramy rejestracji Cleanzi
+Powod:
+- Rejestracja jest rozdzielona na kanal zarzadcy obiektu i kanal firmy sprzatajacej,
+  ale oba kanaly korzystaja z jednego projektu Firebase oraz wspolnego UID.
+- Samodzielne wdrozenie adaptera jednego kanalu mogloby zablokowac tworzenie kont w
+  drugim kanale, dlatego potrzebna jest jedna centralna funkcja `beforeUserCreated`.
+Dodano lokalnie:
+- Nowy, izolowany katalog `registration-functions` z czystym kontraktem grantu,
+  adapterem FACILITY_MANAGER, centralnym routerem i transakcyjnym magazynem Firestore.
+- Preflight centralnej bramy wymaga jednoczesnie adapterow FACILITY_MANAGER i
+  CLEANING_COMPANY; brak drugiego adaptera konczy sie `CENTRAL_GATE_INCOMPLETE`.
+- Deterministyczny prywatny identyfikator dokumentu grantu, HMAC tozsamosci,
+  dokladne powiazanie channel/action/provider, krotki TTL, jednokrotna konsumpcje,
+  idempotentny retry tego samego eventId i UID oraz odmowe przy dwoch grantach.
+- Dokument `docs/central-registration-gate.md` z granicami kanalow, warunkami
+  aktywacji, rollbackiem i lista brakujacych elementow onboardingu providera.
+Weryfikacja:
+- `npm.cmd run check` - PASS.
+- `node --test test/registration-contract.test.mjs` - 6/6 PASS.
+- Lokalny emulator Firestore - 4/4 PASS: jednokrotna konsumpcja, rownolegly wyscig,
+  fail-closed przy dwoch waznych grantach oraz idempotentny retry mimo pozniejszego
+  wydania grantu w drugim kanale.
+- `npm install --package-lock-only --offline` utworzyl powtarzalny lockfile.
+- Lokalny Node 20 zglosil oczekiwane ostrzezenie engine; docelowy codebase wymaga
+  Node 22 zgodnie z `registration-functions/package.json`.
+Granice:
+- Nie dodano adaptera CLEANING_COMPANY ani brokera Microsoft.
+- Nie istnieje eksport `beforeUserCreated`, a root `firebase.json` nie rejestruje
+  nowego codebase. Kod nie moze zostac wdrozony przez obecne polecenia projektu.
+- Nie wlaczono Identity Platform, Blaze, App Check ani zadnych API i sekretow.
+- Nie wykonano migracji, commita, pusha, wdrozenia ani zmiany produkcji.
