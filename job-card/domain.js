@@ -9,7 +9,6 @@ const JOB_CARD_CUSTOMER_TYPES = new Set(['B2B', 'B2C'])
 const JOB_CARD_SITE_MODES = new Set(['FIXED_CONTRACT_SITE', 'VISIT_SITE'])
 const JOB_CARD_SCHEDULE_MODES = new Set(['ONE_OFF', 'RECURRING'])
 const JOB_CARD_CREW_SOURCES = new Set(['SITE', 'DISPATCHED', 'MIXED'])
-const JOB_CARD_STAFFING_MODES = new Set(['FIXED', 'VARIABLE_WEEKLY', 'BUFFER'])
 const JOB_CARD_PAYMENT_METHODS = new Set(['PREPAID', 'CASH', 'CARD', 'DEFERRED'])
 const JOB_CARD_PRICING_MODES = new Set(['PER_JOB', 'HOURLY', 'PER_OCCURRENCE', 'MONTHLY_CONTRACT'])
 const JOB_CARD_MOBILE_ROLES = new Set(['WORKER', 'LEADER', 'DRIVER', 'COORDINATOR'])
@@ -60,15 +59,11 @@ function jobCardOutputHash(card = {}) {
   return sha256(jobCardContent(card))
 }
 
-function validateJobCardDraft(card = {}, options = {}) {
+function validateJobCardDraft(card = {}) {
   const errors = []
   const warnings = []
   const blocks = Array.isArray(card?.schedule?.serviceBlocks) ? card.schedule.serviceBlocks : []
   const assignments = Array.isArray(card?.fulfillment?.assignments) ? card.fulfillment.assignments : []
-  const staffingMode = JOB_CARD_STAFFING_MODES.has(text(card?.fulfillment?.staffingMode).toUpperCase())
-    ? text(card.fulfillment.staffingMode).toUpperCase()
-    : ''
-  const requiresConcreteAssignments = options?.requireConcreteAssignments === true
   const scopeItems = Array.isArray(card?.service?.scopeItems) ? card.service.scopeItems : []
   const supplies = Array.isArray(card?.resources?.supplies) ? card.resources.supplies : []
 
@@ -113,20 +108,7 @@ function validateJobCardDraft(card = {}, options = {}) {
   if (!scopeItems.length && !text(card?.service?.internalDescription)) {
     errors.push(issue('ERROR', 'SERVICE_SCOPE_REQUIRED', 'Dodaj strefę, checklistę albo jednoznaczny opis prac.', 'service.scopeItems'))
   }
-  if (
-    !assignments.length &&
-    !requiresConcreteAssignments &&
-    ['VARIABLE_WEEKLY', 'BUFFER'].includes(staffingMode)
-  ) {
-    warnings.push(issue(
-      'WARNING',
-      'ASSIGNEE_REQUIRED',
-      staffingMode === 'BUFFER'
-        ? 'Obsada zostanie uzupełniona w buforze planowania przed publikacją konkretnego wystąpienia.'
-        : 'Obsada jest ustalana co tydzień i musi zostać uzupełniona przed publikacją konkretnego wystąpienia.',
-      'fulfillment.assignments',
-    ))
-  } else if (!assignments.length) {
+  if (!assignments.length) {
     errors.push(issue('ERROR', 'ASSIGNEE_REQUIRED', 'Przypisz co najmniej jednego pracownika lub zespół obiektu.', 'fulfillment.assignments'))
   }
   if (!JOB_CARD_CREW_SOURCES.has(text(card?.fulfillment?.crewSource).toUpperCase())) {
@@ -198,10 +180,6 @@ function validateJobCardDraft(card = {}, options = {}) {
     warnings,
     issues: [...errors, ...warnings],
   }
-}
-
-function validateJobCardOccurrencePublication(card = {}) {
-  return validateJobCardDraft(card, { requireConcreteAssignments: true })
 }
 
 function generationStatus(validation = {}) {
@@ -337,5 +315,4 @@ module.exports = {
   sha256,
   stableSerialize,
   validateJobCardDraft,
-  validateJobCardOccurrencePublication,
 }

@@ -20,15 +20,6 @@
         <i class="orders-kpi-icon" aria-hidden="true"></i>
       </article>
 
-      <article class="orders-kpi-card orders-kpi-card--draft">
-        <div>
-          <p class="orders-kpi-label">Robocze</p>
-          <strong id="ordersKpiDraft">0</strong>
-          <span>Do doko&#324;czenia lub publikacji</span>
-        </div>
-        <i class="orders-kpi-icon" aria-hidden="true"></i>
-      </article>
-
       <article class="orders-kpi-card orders-kpi-card--active">
         <div>
           <p class="orders-kpi-label">Aktywne</p>
@@ -67,7 +58,6 @@
       </div>
 
       <div class="orders-quickbar" aria-label="Szybkie widoki listy zlece&#324;">
-        <button type="button" data-orders-quick-filter="draft">Robocze</button>
         <button type="button" data-orders-quick-filter="active_future">Aktywne i przysz&#322;e</button>
         <button type="button" data-orders-quick-filter="today">Dzisiaj</button>
         <button type="button" data-orders-quick-filter="overdue">Zaleg&#322;e</button>
@@ -90,7 +80,6 @@
           <label for="ordersListStatus">Status</label>
           <select id="ordersListStatus">
             <option value="">(wszystkie)</option>
-            <option value="draft">Robocze</option>
             <option value="active">Aktywne</option>
             <option value="upcoming">Nadchodz&#261;ce</option>
             <option value="completed">Zako&#324;czone</option>
@@ -226,25 +215,19 @@
       </div>
       <div class="orders-footer">
         <span id="ordersStatus">Widok: wszystkie zlecenia.</span>
-        <div class="orders-footer__actions">
-          <button class="orders-drafts-show-all" id="ordersDraftsShowAll" type="button" hidden>Poka&#380; wszystkie robocze</button>
-          <span id="ordersCount">0 zlece&#324;</span>
-        </div>
+        <span id="ordersCount">0 zlece&#324;</span>
       </div>
     </section>
   </div>
 
-  <section class="orders-modal-overlay" id="ordersEditorPanel" hidden aria-label="Edytuj istniejące zlecenie">
+  <section class="orders-modal-overlay" id="ordersEditorPanel" hidden aria-label="Dodaj lub edytuj zlecenie">
     <div class="orders-modal orders-modal--simple" role="dialog" aria-modal="true" aria-labelledby="ordersEditTitle">
       <div class="orders-modal-head">
         <div class="orders-modal-titlebar">
-          <span>Plan zespołu i Karta Zlecenia</span>
-          <h2 id="ordersEditTitle">Edycja zlecenia</h2>
-          <p id="ordersEditSubtitle">Zaplanuj obiekt, termin, zmiany i obsadę w jednym procesie.</p>
+          <h2 id="ordersEditTitle">Dodaj zlecenie</h2>
         </div>
         <div class="orders-modal-controls">
           <div class="orders-modal-head-actions">
-            <strong class="orders-editor-save-state" id="ordersEditorSaveState" data-tone="new">Nowy szkic</strong>
             <span>* Pola wymagane</span>
             <button class="orders-modal-close" id="ordersEditBack" type="button" aria-label="Zamknij">&times;</button>
           </div>
@@ -258,19 +241,19 @@
               <li>
                 <button type="button" data-orders-step-target="client">
                   <span>1</span>
-                  <strong>Klient i obiekt</strong>
+                  <strong>Klient i adres</strong>
                 </button>
               </li>
               <li>
                 <button type="button" data-orders-step-target="staffing">
                   <span>2</span>
-                  <strong>Termin i obsada</strong>
+                  <strong>Zmiany i osoby</strong>
                 </button>
               </li>
               <li>
                 <button type="button" data-orders-step-target="details">
                   <span>3</span>
-                  <strong>Zakres i publikacja</strong>
+                  <strong>Opis i podsumowanie</strong>
                 </button>
               </li>
             </ol>
@@ -294,10 +277,6 @@
                   <dd id="ordersWizardSummaryWorkers">BUFOR</dd>
                 </div>
                 <div>
-                  <dt>Status planu</dt>
-                  <dd id="ordersWizardSummaryStatus">W przygotowaniu</dd>
-                </div>
-                <div>
                   <dt>RBH</dt>
                   <dd id="ordersWizardSummaryWork">-</dd>
                 </div>
@@ -314,7 +293,7 @@
 
             <div class="orders-editor-table">
               <section class="orders-editor-section orders-editor-section--who" data-orders-step-panel="client">
-                <h3>Klient</h3>
+                <h3>Kto</h3>
                 <div class="orders-field orders-client-picker-field">
                   <span>Klient *</span>
                   <select id="ordersEditClient" hidden aria-hidden="true"></select>
@@ -354,7 +333,7 @@
               </section>
 
               <section class="orders-editor-section orders-editor-section--address" data-orders-step-panel="client">
-                <h3>Obiekt realizacji</h3>
+                <h3>Gdzie</h3>
                 <div class="orders-field orders-location-field">
                   <label for="ordersEditAddressSelect">Adres wykonania zlecenia *</label>
                   <select id="ordersEditAddressSelect"></select>
@@ -380,14 +359,6 @@
                 </div>
 
                 <h3 data-orders-step-panel="staffing">Kiedy i częstotliwość</h3>
-
-                <aside class="orders-staffing-buffer-note" data-orders-step-panel="staffing" aria-live="polite">
-                  <div>
-                    <strong>Obsada może zostać uzupełniona później</strong>
-                    <p>Każde wolne miejsce trafi do BUFORA zadań w kalendarzu. Koordynator przypisze je właściwej osobie przed publikacją planu tygodnia.</p>
-                  </div>
-                  <span id="ordersWizardBufferStatus">Obsada w BUFORZE</span>
-                </aside>
 
                 <div class="orders-form-two" data-orders-step-panel="staffing">
                   <label class="orders-field">
@@ -435,15 +406,7 @@
 
           <section class="orders-form-panel orders-detail-card" data-orders-step-panel="details">
             <div class="orders-panel-title">
-              <span>Zakres, wyposażenie i publikacja</span>
-            </div>
-
-            <div class="orders-final-step-intro">
-              <div>
-                <span>Ostatni krok</span>
-                <strong>Uzupełnij zakres, a system automatycznie przygotuje Kartę Zlecenia.</strong>
-              </div>
-              <p>Nie przepisujesz danych drugi raz. Zapis zachowuje zlecenie i edytowalny szkic Karty, a osobna publikacja udostępnia pracownikom niezmienną rewizję.</p>
+              <span>Opis i wyposażenie</span>
             </div>
 
             <div class="orders-detail-grid">
@@ -639,7 +602,7 @@
             <section class="orders-job-card-preview" id="ordersJobCardPreview" hidden aria-label="Podgląd Karty Zlecenia">
               <div class="orders-job-card-preview__head">
                 <div>
-                  <span>Karta operacyjna</span>
+                  <span>Funkcja testowa</span>
                   <strong>Karta Zlecenia widoczna w aplikacji</strong>
                 </div>
                 <b id="ordersJobCardPreviewStatus">Wymaga uzupełnienia</b>
@@ -712,30 +675,15 @@
         </div>
 
         <div class="orders-modal-footer orders-wizard-footer">
-          <div class="orders-wizard-footer-copy">
-            <strong id="ordersWizardValidation">* Pola wymagane</strong>
-            <span id="ordersWizardActionHint">Karta Zlecenia powstaje automatycznie z danych tego formularza.</span>
-          </div>
+          <span id="ordersWizardValidation">* Pola wymagane</span>
           <div class="orders-wizard-actions">
             <button class="orders-wizard-nav orders-wizard-nav--back" type="button" data-orders-step-prev>Wstecz</button>
             <button class="orders-wizard-nav orders-wizard-nav--next" type="button" data-orders-step-next>Dalej</button>
-            <button class="orders-save-btn" id="ordersEditSave" type="button">Zapisz zlecenie</button>
+            <button class="orders-save-btn" id="ordersEditSave" type="button">Zapisz</button>
             <button class="orders-publish-btn" id="ordersJobCardPublish" type="button" hidden>Publikuj Kartę</button>
           </div>
         </div>
       </div>
-
-      <section class="orders-discard-confirm" id="ordersDiscardConfirm" hidden role="alertdialog" aria-modal="true" aria-labelledby="ordersDiscardTitle" aria-describedby="ordersDiscardDescription">
-        <div class="orders-discard-confirm__card">
-          <span>Niezapisane zmiany</span>
-          <h3 id="ordersDiscardTitle">Zamknąć formularz?</h3>
-          <p id="ordersDiscardDescription">Wprowadzone zmiany nie zostały zapisane. Możesz wrócić do edycji albo świadomie je odrzucić.</p>
-          <div>
-            <button class="orders-discard-confirm__cancel" type="button" data-orders-discard-cancel>Wróć do edycji</button>
-            <button class="orders-discard-confirm__accept" type="button" data-orders-discard-confirm>Odrzuć zmiany</button>
-          </div>
-        </div>
-      </section>
     </div>
   </section>
 

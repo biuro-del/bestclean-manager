@@ -1,9 +1,8 @@
-import { summarizeWorkTimeRows } from './workIntervals.js'
+import { workIntervalsFromRow, workIntervalsTotalSeconds } from './workIntervals.js'
 
-export const WORK_TIME_EXPORT_DEFAULT_COLUMN_IDS = ['date', 'worker', 'start', 'stop', 'work', 'break', 'review']
+export const WORK_TIME_EXPORT_DEFAULT_COLUMN_IDS = ['date', 'worker', 'start', 'stop', 'work', 'break']
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/
-const WORK_TIME_EXPORT_MAX_ROWS = 20000
 
 function normalizeText(deps, value) {
   return deps.normalizeSearchText(String(value ?? '').trim())
@@ -43,40 +42,64 @@ function overlapGroupKey(deps, row = {}) {
 }
 
 function applyOverlapAccounting(deps, rows = []) {
-  const rowsByGroup = new Map()
-  ;(Array.isArray(rows) ? rows : []).forEach((row) => {
-    const groupKey = overlapGroupKey(deps, row)
-    const current = rowsByGroup.get(groupKey) ?? []
-    current.push(row)
-    rowsByGroup.set(groupKey, current)
-  })
+  const activeRowsByGroup = new Map()
+  const output = []
 
-  return [...rowsByGroup.values()].map((sourceRows) => {
-    const summary = summarizeWorkTimeRows(sourceRows)
-    const first = sourceRows[0] ?? {}
-    return {
-      ...first,
-      rawDurationSec: sourceRows.reduce(
-        (sum, row) => sum + Math.max(0, Math.floor(Number(row?.durationSec ?? 0) || 0)),
-        0,
-      ),
-      workIntervals: summary.workIntervals,
-      durationSec: summary.grossSec,
-      breakSec: summary.pauseSec,
-      netSec: summary.netSec,
-      reviewRequired: summary.reviewRequired,
-      reviewIssues: summary.issues,
-      startIso: summary.startAt || first.startIso || '',
-      endIso: summary.endAt || first.endIso || '',
-      status: summary.reviewRequired ? 'DO WERYFIKACJI' : first.status,
+  rows.forEach((row) => {
+    const next = { ...row }
+    if (Array.isArray(row?.workIntervals) && row.workIntervals.length) {
+      const workIntervals = workIntervalsFromRow(row)
+      const durationSec = workIntervalsTotalSeconds(workIntervals)
+      if (durationSec <= 0) return
+
+      next.workIntervals = workIntervals
+      next.rawDurationSec = Math.max(0, Math.floor(Number(row.durationSec ?? 0) || 0))
+      next.durationSec = durationSec
+      next.breakSec = Math.min(Math.max(0, Number(row.breakSec ?? 0) || 0), durationSec)
+      next.netSec = Math.max(0, durationSec - next.breakSec)
+      output.push(next)
+      return
     }
-  })
-}
+    const interval = deps.workStatusIntervalFromTimes(row.startIso, row.endIso, row.durationSec)
+    if (!interval) {
+      if (Math.max(0, Number(next.durationSec ?? 0) || 0) > 0) {
+        output.push(next)
+      }
+      return
+    }
 
-function reviewLabel(row = {}) {
-  if (!row?.reviewRequired) return 'NIE'
-  const codes = [...new Set((Array.isArray(row.reviewIssues) ? row.reviewIssues : []).map((issue) => issue?.code).filter(Boolean))]
-  return codes.length ? `TAK: ${codes.join(', ')}` : 'TAK'
+    const groupKey = overlapGroupKey(deps, row)
+    const originalDurationSec = Math.max(0, Math.floor(Number(row.durationSec ?? 0) || 0))
+    const originalBreakSec = Math.max(0, Math.floor(Number(row.breakSec ?? 0) || 0))
+    next.rawDurationSec = originalDurationSec
+    next.durationSec = Math.max(0, Math.floor((interval.endTs - interval.startTs) / 1000))
+    next.breakSec = Math.min(originalBreakSec, next.durationSec)
+    next.netSec = Math.max(0, next.durationSec - next.breakSec)
+    next.startIso = interval.startIso
+    next.endIso = interval.endIso
+
+    const active = activeRowsByGroup.get(groupKey)
+    if (!active || interval.startTs > active.interval.endTs) {
+      const entry = { row: next, interval: { startTs: interval.startTs, endTs: interval.endTs } }
+      activeRowsByGroup.set(groupKey, entry)
+      output.push(next)
+      return
+    }
+
+    active.interval.startTs = Math.min(active.interval.startTs, interval.startTs)
+    active.interval.endTs = Math.max(active.interval.endTs, interval.endTs)
+    active.row.startIso = new Date(active.interval.startTs).toISOString()
+    active.row.endIso = new Date(active.interval.endTs).toISOString()
+    active.row.rawDurationSec = Math.max(0, Number(active.row.rawDurationSec ?? 0) || 0) + originalDurationSec
+    active.row.durationSec = Math.max(0, Math.floor((active.interval.endTs - active.interval.startTs) / 1000))
+    active.row.breakSec = Math.min(
+      active.row.durationSec,
+      Math.max(0, Number(active.row.breakSec ?? 0) || 0) + originalBreakSec,
+    )
+    active.row.netSec = Math.max(0, active.row.durationSec - active.row.breakSec)
+  })
+
+  return output
 }
 
 export function createWorkTimeExportColumns(deps) {
@@ -127,19 +150,13 @@ export function createWorkTimeExportColumns(deps) {
       id: 'net',
       label: 'Realny czas pracy',
       weight: 1.2,
-      getValue: (row) => row.reviewRequired ? 'DO WERYFIKACJI' : deps.durationSecondsToHm(row.netSec),
+      getValue: (row) => deps.durationSecondsToHm(row.netSec),
     },
     {
       id: 'break',
       label: 'Przerwa',
       weight: 1.0,
       getValue: (row) => deps.durationSecondsToHm(row.breakSec),
-    },
-    {
-      id: 'review',
-      label: 'Weryfikacja',
-      weight: 1.7,
-      getValue: reviewLabel,
     },
     {
       id: 'status',
@@ -227,14 +244,8 @@ export async function buildWorkTimeExportRowsForWorkers({
     fromIso: deps.ymdToIsoRangeStart(fromYmd),
     toIso: deps.ymdToIsoRangeEnd(toYmd),
     page: 1,
-    pageSize: WORK_TIME_EXPORT_MAX_ROWS,
+    pageSize: 100000,
   })
-
-  if (response?.hasNext === true) {
-    throw new Error(
-      `Eksport przekracza bezpieczny limit ${WORK_TIME_EXPORT_MAX_ROWS} rekordów. Zawęź daty lub wybór pracowników.`,
-    )
-  }
 
   const rows = (response?.items ?? [])
     .filter((item) => {
@@ -342,7 +353,6 @@ export async function downloadWorkTimeEwidencjaPdf({
         totalWorkSec: 0,
         totalBreakSec: 0,
         totalNetSec: 0,
-        reviewRequired: false,
       })
     }
 
@@ -350,11 +360,7 @@ export async function downloadWorkTimeEwidencjaPdf({
     bucket.rows.push(row)
     bucket.totalWorkSec += Math.max(0, Number(row.durationSec ?? 0) || 0)
     bucket.totalBreakSec += Math.max(0, Number(row.breakSec ?? 0) || 0)
-    if (row.reviewRequired || row.netSec === null) {
-      bucket.reviewRequired = true
-    } else {
-      bucket.totalNetSec += Math.max(0, Number(row.netSec ?? 0) || 0)
-    }
+    bucket.totalNetSec += Math.max(0, Number(row.netSec ?? 0) || 0)
   })
 
   const groupedRows = [...groups.values()].sort((left, right) =>
@@ -414,8 +420,7 @@ export async function downloadWorkTimeEwidencjaPdf({
 
     const workerTitle = `${group.workerName} (${group.workerId})`
     const subtitle = `Typ: ${group.workerType} | Zakres: ${fromLabel} - ${toLabel}`
-    const netSummary = group.reviewRequired ? 'do weryfikacji' : deps.durationSecondsToHm(group.totalNetSec)
-    const summaryLine = `Wpisy: ${group.rows.length} | Czas pracy: ${deps.durationSecondsToHm(group.totalWorkSec)} | Przerwy: ${deps.durationSecondsToHm(group.totalBreakSec)} | Realny: ${netSummary}`
+    const summaryLine = `Wpisy: ${group.rows.length} | Czas pracy: ${deps.durationSecondsToHm(group.totalWorkSec)} | Przerwy: ${deps.durationSecondsToHm(group.totalBreakSec)} | Realny: ${deps.durationSecondsToHm(group.totalNetSec)}`
 
     deps.setPdfUnicodeFont(pdf, 'bold')
     pdf.setFontSize(12)

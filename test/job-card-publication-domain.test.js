@@ -11,7 +11,6 @@ const {
   normalizeWarningAcknowledgements,
   projectJobCardForMobile,
   validateJobCardDraft,
-  validateJobCardOccurrencePublication,
 } = require('../job-card/domain')
 
 function completeCard(overrides = {}) {
@@ -65,68 +64,6 @@ test('backend niezależnie waliduje gotowość publikacji', () => {
   assert.equal(validation.valid, true)
   assert.equal(validation.errors.length, 0)
   assert.equal(validation.warnings.some((warning) => warning.code === 'SITE_PHOTOS_MISSING'), true)
-})
-
-test('stała obsada wymaga pracownika przy publikacji Karty Zlecenia', () => {
-  const fulfillment = {
-    ...completeCard().fulfillment,
-    staffingMode: 'FIXED',
-    assignments: [],
-  }
-  const validation = validateJobCardDraft(completeCard({ fulfillment }))
-
-  assert.equal(validation.valid, false)
-  assert.equal(validation.errors.some((entry) => (
-    entry.code === 'ASSIGNEE_REQUIRED' && entry.severity === 'ERROR'
-  )), true)
-  assert.equal(validation.warnings.some((entry) => entry.code === 'ASSIGNEE_REQUIRED'), false)
-})
-
-test('BUFOR i zmienna obsada tygodniowa są jawnym ostrzeżeniem Karty Zlecenia', () => {
-  for (const staffingMode of ['BUFFER', 'VARIABLE_WEEKLY']) {
-    const fulfillment = {
-      ...completeCard().fulfillment,
-      staffingMode,
-      assignments: [],
-    }
-    const validation = validateJobCardDraft(completeCard({ fulfillment }))
-
-    assert.equal(validation.valid, true, staffingMode)
-    assert.equal(validation.errors.some((entry) => entry.code === 'ASSIGNEE_REQUIRED'), false, staffingMode)
-    assert.equal(validation.warnings.some((entry) => (
-      entry.code === 'ASSIGNEE_REQUIRED' && entry.severity === 'WARNING'
-    )), true, staffingMode)
-  }
-})
-
-test('publikacja konkretnego wystąpienia zawsze wymaga realnej obsady', () => {
-  for (const staffingMode of ['FIXED', 'BUFFER', 'VARIABLE_WEEKLY']) {
-    const fulfillment = {
-      ...completeCard().fulfillment,
-      staffingMode,
-      assignments: [],
-    }
-    const validation = validateJobCardOccurrencePublication(completeCard({ fulfillment }))
-
-    assert.equal(validation.valid, false, staffingMode)
-    assert.equal(validation.errors.some((entry) => (
-      entry.code === 'ASSIGNEE_REQUIRED' && entry.severity === 'ERROR'
-    )), true, staffingMode)
-    assert.equal(validation.warnings.some((entry) => entry.code === 'ASSIGNEE_REQUIRED'), false, staffingMode)
-  }
-})
-
-test('publikacja wystąpienia z realną obsadą pozostaje dozwolona', () => {
-  for (const staffingMode of ['FIXED', 'BUFFER', 'VARIABLE_WEEKLY']) {
-    const fulfillment = {
-      ...completeCard().fulfillment,
-      staffingMode,
-    }
-    const validation = validateJobCardOccurrencePublication(completeCard({ fulfillment }))
-
-    assert.equal(validation.valid, true, staffingMode)
-    assert.equal(validation.errors.some((entry) => entry.code === 'ASSIGNEE_REQUIRED'), false, staffingMode)
-  }
 })
 
 test('hash treści nie zmienia się wyłącznie przez techniczny znacznik zapisu', () => {

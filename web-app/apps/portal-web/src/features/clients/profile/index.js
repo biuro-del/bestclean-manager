@@ -2352,6 +2352,9 @@ export function createClientProfileFeature(ctx) {
       void saveClientProfileEdit()
     })
     binding.add(document.getElementById('cpdOrdersAddBtn'), 'click', () => {
+      if (typeof window.go === 'function') {
+        window.go('orders')
+      }
       ordersOpenAddEditor()
     })
     binding.add(document.getElementById('view-clientProfileDetails'), 'click', (event) => {

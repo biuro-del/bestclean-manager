@@ -183,10 +183,8 @@ export function createCalendarFeature(ctx) {
   const calendarTimelineEventsPopupRegistry = new Map()
   const calendarTimelineWorkerStateMapCache = { key: '', value: new Map() }
   const calendarTimelineResourcesCache = { key: '', value: [] }
-  const calendarTimelineModelCache = { values: new Map() }
+  const calendarTimelineModelCache = { key: '', value: null }
   const ORDERS_LOCAL_RETENTION_MS = 5 * 60 * 1000
-  const CALENDAR_PLANNING_LIVE_INITIAL_LIMIT = 30
-  const CALENDAR_TIMELINE_READ_MAX_ROWS = 2000
 
   function calendarPerformanceEnabled() {
     return typeof performance !== 'undefined' && Boolean(import.meta.env?.DEV)
@@ -230,7 +228,8 @@ export function createCalendarFeature(ctx) {
   function calendarInvalidateTimelineRenderCaches(options = {}) {
     calendarTimelineResourcesCache.key = ''
     calendarTimelineResourcesCache.value = []
-    calendarTimelineModelCache.values.clear()
+    calendarTimelineModelCache.key = ''
+    calendarTimelineModelCache.value = null
     if (options.workerState !== false) {
       calendarTimelineWorkerStateMapCache.key = ''
       calendarTimelineWorkerStateMapCache.value = new Map()
@@ -716,9 +715,7 @@ export function createCalendarFeature(ctx) {
   
   function calendarEnsureState() {
     if (!appState.calendarCursorDay) {
-      appState.calendarCursorDay = calendarNormalizeViewMode(appState.calendarViewMode) === 'week'
-        ? calendarAddDays(todayYmd(), 7)
-        : todayYmd()
+      appState.calendarCursorDay = todayYmd()
     }
     appState.calendarViewMode = calendarNormalizeViewMode(appState.calendarViewMode)
     appState.calendarToneFilters = calendarNormalizeToneFilters(appState.calendarToneFilters)
@@ -1252,9 +1249,9 @@ export function createCalendarFeature(ctx) {
                 <div class="fw-month-day${isMuted ? ' is-muted' : ''}${isToday ? ' is-today' : ''}${isSelected ? ' is-selected' : ''}" data-calendar-month-cell="${escapeHtml(dayKey)}">
                   <button class="fw-month-day-main" type="button" data-calendar-month-day="${escapeHtml(dayKey)}" aria-label="Pokaż dzień ${escapeHtml(formatDatePl(`${dayKey}T12:00:00.000Z`))}">
                     <span class="fw-month-day-number">${escapeHtml(calendarDayNumberLabel(dayKey))}</span>
-                     ${dayOrders.length ? `<span class="fw-month-day-count">${escapeHtml(calendarTimelineCountLabel(dayOrders.length))}</span>` : '<span class="fw-month-day-empty">Brak planu</span>'}
-                   </button>
-                   <button class="fw-month-add" type="button" data-calendar-month-add="${escapeHtml(dayKey)}" aria-label="Dodaj zlecenie na dzień ${escapeHtml(formatDatePl(`${dayKey}T12:00:00.000Z`))}">Dodaj zlecenie</button>
+                    ${dayOrders.length ? `<span class="fw-month-day-count">${escapeHtml(calendarTimelineCountLabel(dayOrders.length))}</span>` : '<span class="fw-month-day-empty">Brak zleceń</span>'}
+                  </button>
+                  <button class="fw-month-add" type="button" data-calendar-month-add="${escapeHtml(dayKey)}">Dodaj zlecenie</button>
                 </div>
               `
             })
@@ -1293,29 +1290,6 @@ export function createCalendarFeature(ctx) {
     const day = String(dayKey || todayYmd()).trim()
     return formatDatePl(`${/^\d{4}-\d{2}-\d{2}$/.test(day) ? day : todayYmd()}T12:00:00.000Z`)
   }
-
-  function calendarPlanningCompactRangeLabel(startDay = '', endDay = '') {
-    const start = calendarDateFromYmd(startDay || todayYmd())
-    const end = calendarDateFromYmd(endDay || startDay || todayYmd())
-    const startMonth = start.toLocaleDateString('pl-PL', { month: 'long' })
-    const endMonth = end.toLocaleDateString('pl-PL', { month: 'long' })
-    if (start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth()) {
-      return `${start.getDate()} – ${end.getDate()} ${endMonth} ${end.getFullYear()}`
-    }
-    if (start.getFullYear() === end.getFullYear()) {
-      return `${start.getDate()} ${startMonth} – ${end.getDate()} ${endMonth} ${end.getFullYear()}`
-    }
-    return `${start.getDate()} ${startMonth} ${start.getFullYear()} – ${end.getDate()} ${endMonth} ${end.getFullYear()}`
-  }
-
-  function calendarPlanningIsoWeekNumber(dayKey = '') {
-    const source = calendarDateFromYmd(dayKey || todayYmd())
-    const date = new Date(Date.UTC(source.getFullYear(), source.getMonth(), source.getDate()))
-    const weekDay = date.getUTCDay() || 7
-    date.setUTCDate(date.getUTCDate() + 4 - weekDay)
-    const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1))
-    return Math.ceil((((date - yearStart) / 86400000) + 1) / 7)
-  }
   
   function calendarTimelineSyncControls() {
     const completedButton = document.getElementById('calendarTimelineCompletedToggle')
@@ -1342,15 +1316,6 @@ export function createCalendarFeature(ctx) {
     const dateLabel = document.getElementById('calendarTimelineDateLabel')
     if (dateLabel) {
       dateLabel.textContent = calendarTimelineDateInputLabel(safeCursor)
-    }
-    const range = calendarTimelineRangeForView()
-    const rangeLabel = document.getElementById('calendarRangeLabel')
-    if (rangeLabel && range.mode === 'week') {
-      rangeLabel.textContent = calendarPlanningCompactRangeLabel(range.start, range.end)
-    }
-    const weekNumber = document.getElementById('calendarWeekNumberLabel')
-    if (weekNumber) {
-      weekNumber.textContent = `Tydzień ${calendarPlanningIsoWeekNumber(range.start || safeCursor)}`
     }
   }
   
@@ -1486,7 +1451,6 @@ export function createCalendarFeature(ctx) {
   
     calendarTimelineSetWorkerStateLoading(true)
     let didUpdate = false
-    let workerStateIncomplete = false
     let resolveWorkerStateLoad = null
     calendarTimelineWorkerStateLoadPromise = new Promise((resolve) => {
       resolveWorkerStateLoad = resolve
@@ -1495,7 +1459,6 @@ export function createCalendarFeature(ctx) {
       let statusRows = []
       let sourceRows = []
       let currentStatusRows = []
-      let todaySourceRows = []
       if (dayKey === todayYmd()) {
         const [{ todayRows, todayWorkdays }, eventsResponse] = await Promise.all([
           dashboardLoadFastRows(String(appState.session.orgId)),
@@ -1504,95 +1467,39 @@ export function createCalendarFeature(ctx) {
             fromIso: dayKey,
             toIso: rangeEndDay,
             page: 1,
-            pageSize: CALENDAR_TIMELINE_READ_MAX_ROWS,
-          }).catch(() => {
-            workerStateIncomplete = true
-            return { items: [] }
-          }),
+            pageSize: 8000,
+          }).catch(() => ({ items: [] })),
         ])
-        if (eventsResponse?.hasNext === true) {
-          workerStateIncomplete = true
-        }
         statusRows = Array.isArray(todayRows) ? todayRows : []
         currentStatusRows = statusRows
         sourceRows = [
           ...(Array.isArray(eventsResponse?.items) ? eventsResponse.items : []),
           ...(Array.isArray(todayWorkdays?.items) ? todayWorkdays.items : []),
         ]
-        todaySourceRows = sourceRows
         appState.dashboardTodayRows = statusRows
       } else {
-        const currentDayKey = todayYmd()
-        const rangeIncludesToday = currentDayKey >= dayKey && currentDayKey <= rangeEndDay
-        const [eventsResponse, workdaysResponse, currentStatusResponse, currentEventsResponse, currentWorkdaysResponse] = await Promise.all([
+        const [eventsResponse, workdaysResponse, currentStatusResponse] = await Promise.all([
           getWorkdays(appState.session.orgId, {
             source: 'events',
             fromIso: dayKey,
             toIso: rangeEndDay,
             page: 1,
-            pageSize: CALENDAR_TIMELINE_READ_MAX_ROWS,
-          }).catch(() => {
-            workerStateIncomplete = true
-            return { items: [] }
-          }),
+            pageSize: 8000,
+          }).catch(() => ({ items: [] })),
           getWorkdays(appState.session.orgId, {
             source: 'workdays',
             fromIso: dayKey,
             toIso: rangeEndDay,
             page: 1,
-            pageSize: CALENDAR_TIMELINE_READ_MAX_ROWS,
-          }).catch(() => {
-            workerStateIncomplete = true
-            return { items: [] }
-          }),
-          dashboardLoadFastRows(String(appState.session.orgId)).catch(() => {
-            workerStateIncomplete = true
-            return { todayRows: appState.dashboardTodayRows || [] }
-          }),
-          rangeIncludesToday
-            ? Promise.resolve({ items: [] })
-              : getWorkdays(appState.session.orgId, {
-                  source: 'events',
-                  fromIso: currentDayKey,
-                  toIso: currentDayKey,
-                  page: 1,
-                  pageSize: CALENDAR_TIMELINE_READ_MAX_ROWS,
-                }).catch(() => {
-                  workerStateIncomplete = true
-                  return { items: [] }
-                }),
-          rangeIncludesToday
-            ? Promise.resolve({ items: [] })
-              : getWorkdays(appState.session.orgId, {
-                  source: 'workdays',
-                  fromIso: currentDayKey,
-                  toIso: currentDayKey,
-                  page: 1,
-                  pageSize: CALENDAR_TIMELINE_READ_MAX_ROWS,
-                }).catch(() => {
-                  workerStateIncomplete = true
-                  return { items: [] }
-                }),
+            pageSize: 8000,
+          }).catch(() => ({ items: [] })),
+          dashboardLoadFastRows(String(appState.session.orgId)).catch(() => ({ todayRows: appState.dashboardTodayRows || [] })),
         ])
         sourceRows = [
           ...(Array.isArray(eventsResponse.items) ? eventsResponse.items : []),
           ...(Array.isArray(workdaysResponse.items) ? workdaysResponse.items : []),
         ]
-        if (
-          eventsResponse?.hasNext === true ||
-          workdaysResponse?.hasNext === true ||
-          currentEventsResponse?.hasNext === true ||
-          currentWorkdaysResponse?.hasNext === true
-        ) {
-          workerStateIncomplete = true
-        }
         currentStatusRows = Array.isArray(currentStatusResponse?.todayRows) ? currentStatusResponse.todayRows : []
-        todaySourceRows = rangeIncludesToday
-          ? sourceRows
-          : [
-              ...(Array.isArray(currentEventsResponse?.items) ? currentEventsResponse.items : []),
-              ...(Array.isArray(currentWorkdaysResponse?.items) ? currentWorkdaysResponse.items : []),
-            ]
         if (currentStatusRows.length) {
           appState.dashboardTodayRows = currentStatusRows
         }
@@ -1605,20 +1512,13 @@ export function createCalendarFeature(ctx) {
       appState.calendarTimelineWorkerStateSourceRows = sourceRows
       appState.calendarTimelineCurrentWorkerStatusDayKey = todayYmd()
       appState.calendarTimelineCurrentWorkerStatusRows = currentStatusRows
-      appState.calendarTimelineTodaySourceRows = todaySourceRows
-      appState.calendarTimelineWorkerStateIncomplete = workerStateIncomplete
       appState.calendarTimelineWorkerStateFetchedAt = Date.now()
       didUpdate = true
       calendarInvalidateTimelineRenderCaches({ workerState: true })
       if (shouldRender && appState.currentRoute === 'calendar' && calendarTimelineStatusDayKey() === dayKey) {
         calendarScheduleRender()
       }
-    } catch (error) {
-      appState.calendarTimelineWorkerStateIncomplete = true
-      console.warn('[portal/calendar] timeline worker state is incomplete', error)
-      if (shouldRender && appState.currentRoute === 'calendar') {
-        calendarScheduleRender()
-      }
+    } catch {
       // Status kropek pozostaje czerwony, jeśli nie uda się pobrać aktywnych startów.
     } finally {
       calendarTimelineSetWorkerStateLoading(false)
@@ -6852,10 +6752,6 @@ export function createCalendarFeature(ctx) {
       const target = node?.closest?.('[data-calendar-timeline-row]')
       return target instanceof HTMLElement && (!stage || stage.contains(target)) ? target : null
     }
-    const directPlanningTarget = event?.target?.closest?.('[data-calendar-timeline-row][data-calendar-planning-day-index]')
-    if (directPlanningTarget instanceof HTMLElement && (!stage || stage.contains(directPlanningTarget))) {
-      return directPlanningTarget
-    }
     const directSlotTarget = event?.target?.closest?.('[data-calendar-timeline-row][data-calendar-timeline-slot]')
     if (directSlotTarget instanceof HTMLElement && (!stage || stage.contains(directSlotTarget))) {
       return directSlotTarget
@@ -6863,12 +6759,6 @@ export function createCalendarFeature(ctx) {
   
     if (Number.isFinite(x) && Number.isFinite(y) && typeof document.elementsFromPoint === 'function') {
       const elements = document.elementsFromPoint(x, y)
-      const planningTarget = elements
-        .map((node) => node?.closest?.('[data-calendar-timeline-row][data-calendar-planning-day-index]'))
-        .find((node) => node instanceof HTMLElement && (!stage || stage.contains(node)))
-      if (planningTarget) {
-        return planningTarget
-      }
       const slotTarget = elements
         .map((node) => node?.closest?.('[data-calendar-timeline-row][data-calendar-timeline-slot]'))
         .find((node) => node instanceof HTMLElement && (!stage || stage.contains(node)))
@@ -6922,9 +6812,6 @@ export function createCalendarFeature(ctx) {
     if (!info) {
       return { target: null, info: null }
     }
-    if (target instanceof HTMLElement && target.hasAttribute('data-calendar-planning-day-index')) {
-      return { target, info }
-    }
     const slotIndex = calendarTimelineDropSlotFromClientX(event?.clientX)
     return {
       target,
@@ -6942,22 +6829,6 @@ export function createCalendarFeature(ctx) {
     const rowIndex = Number(target.getAttribute('data-calendar-timeline-row'))
     if (!Number.isInteger(rowIndex)) {
       return null
-    }
-    const planningDayValue = target.getAttribute('data-calendar-planning-day-index')
-    if (planningDayValue != null) {
-      const dayIndex = Number(planningDayValue)
-      const sourceStart = String(appState.calendarTimelineDragSourceStart || '').trim()
-      const sourceMinutes = calendarTimelineTimeMinutes(sourceStart)
-      const timelineStartMinutes = 4 * 60
-      const slotsPerDay = 20 * CALENDAR_TIMELINE_SLOTS_PER_HOUR
-      if (!Number.isInteger(dayIndex) || dayIndex < 0 || !Number.isFinite(sourceMinutes)) {
-        return null
-      }
-      const minuteOffset = Math.max(0, Math.min(20 * 60 - CALENDAR_TIMELINE_SLOT_MINUTES, sourceMinutes - timelineStartMinutes))
-      return {
-        rowIndex,
-        slotIndex: dayIndex * slotsPerDay + Math.floor(minuteOffset / CALENDAR_TIMELINE_SLOT_MINUTES),
-      }
     }
     const slotValue = target.getAttribute('data-calendar-timeline-slot')
     const slotIndex = slotValue == null ? null : Number(slotValue)
@@ -7009,7 +6880,6 @@ export function createCalendarFeature(ctx) {
     appState.calendarTimelineDragKind = ''
     appState.calendarTimelineDragSourceRow = null
     appState.calendarTimelineDragSourceOrderId = ''
-    appState.calendarTimelineDragSourceStart = ''
     appState.calendarTimelineDragOccurrenceDate = ''
     appState.calendarTimelineDragWorkSlotKey = ''
     appState.calendarTimelineDragWorkSlotId = ''
@@ -7590,8 +7460,8 @@ export function createCalendarFeature(ctx) {
     if (!assignedRows.length) {
       return null
     }
-    const range = calendarTimelineRangeForView(appState.calendarViewMode, appState.calendarCursorDay || todayYmd())
-    const days = Array.isArray(range?.days) && range.days.length ? range.days : [appState.calendarCursorDay || todayYmd()]
+    const cursor = appState.calendarCursorDay || todayYmd()
+    const days = Array.from({ length: 3 }, (_, index) => calendarAddDays(cursor, index))
     const hours = Array.from({ length: 20 }, (_, index) => index + 4)
     const slotTarget = slotIndex == null ? null : calendarTimelineSlotToDayTime(slotIndex, days, hours)
     const movedAllocation = calendarTimelineMovedWorkAllocation(order, sourceRowIndex, options)
@@ -8874,8 +8744,7 @@ export function createCalendarFeature(ctx) {
     knownOccupiedIntervals = null,
   ) {
     if (!context) return null
-    const range = calendarTimelineRangeForView(appState.calendarViewMode, appState.calendarCursorDay || todayYmd())
-    const days = Array.isArray(range?.days) && range.days.length ? range.days : [appState.calendarCursorDay || todayYmd()]
+    const days = Array.from({ length: 3 }, (_, index) => calendarAddDays(appState.calendarCursorDay || todayYmd(), index))
     const hours = Array.from({ length: 20 }, (_, index) => index + 4)
     const pointer = calendarTimelineSlotToDayTime(preferredSlotIndex, days, hours)
     if (!pointer || pointer.dayKey !== context.occurrenceDateYmd) {
@@ -9673,17 +9542,6 @@ export function createCalendarFeature(ctx) {
       return false
     }
     return source.every((day) => String(day ?? '') >= start && String(day ?? '') <= end)
-  }
-
-  function calendarTimelineSourceRowsForDays(days = []) {
-    const source = Array.isArray(days) ? days.map((day) => String(day ?? '').trim()).filter(Boolean) : []
-    if (calendarTimelineSourceRowsCoverDays(source) && Array.isArray(appState.calendarTimelineWorkerStateSourceRows)) {
-      return appState.calendarTimelineWorkerStateSourceRows
-    }
-    if (source.length && source.every((day) => day === todayYmd()) && Array.isArray(appState.calendarTimelineTodaySourceRows)) {
-      return appState.calendarTimelineTodaySourceRows
-    }
-    return []
   }
   
   function calendarTimelineRealEventHasPlace(row = {}) {
@@ -10496,9 +10354,16 @@ export function createCalendarFeature(ctx) {
     return result
   }
   
-  function calendarTimelineRealEventOrders(resources = [], days = []) {
+  function calendarTimelineRealEventOrders(resources = [], days = [], plannedOrders = []) {
     const visibleDays = new Set((Array.isArray(days) ? days : []).map((day) => String(day ?? '').trim()).filter(Boolean))
-    const sourceRows = calendarTimelineSourceRowsForDays(days)
+    const sourceRows = calendarTimelineSourceRowsCoverDays(days) && Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
+      ? appState.calendarTimelineWorkerStateSourceRows
+      : []
+    const plannedEventKeys = new Set(
+      (Array.isArray(plannedOrders) ? plannedOrders : [])
+        .flatMap((order) => calendarTimelineOrderSourceKeys(order))
+        .filter(Boolean),
+    )
     const seen = new Set()
   
     const workdayOrders = calendarTimelineRealWorkdayOrders(resources, days, sourceRows)
@@ -10520,6 +10385,10 @@ export function createCalendarFeature(ctx) {
           return null
         }
         const id = calendarTimelineRealEventId(row, index)
+        const rowKeys = calendarTimelineSourceRowKeys(row)
+        if (rowKeys.some((key) => plannedEventKeys.has(key))) {
+          return null
+        }
         if (seen.has(id)) {
           return null
         }
@@ -10531,15 +10400,6 @@ export function createCalendarFeature(ctx) {
           id,
           sourceEventId: String(row?.eventId ?? '').trim(),
           workdayId: String(row?.workdayId ?? '').trim(),
-          taskId: String(row?.taskId ?? row?.orderId ?? row?.calendarOrderId ?? '').trim(),
-          orderId: String(row?.orderId ?? row?.calendarOrderId ?? '').trim(),
-          sourceOrderId: String(row?.sourceOrderId ?? row?.taskId ?? row?.orderId ?? '').trim(),
-          serviceBlockId: String(row?.serviceBlockId ?? row?.service_block_id ?? '').trim(),
-          allocationId: String(row?.allocationId ?? row?.allocation_id ?? '').trim(),
-          workSlotId: String(row?.workSlotId ?? row?.work_slot_id ?? '').trim(),
-          workSlotKey: String(row?.workSlotKey ?? row?.work_slot_key ?? '').trim(),
-          occurrenceDateYmd: String(row?.occurrenceDateYmd ?? row?.occurrence_date_ymd ?? start.day).trim(),
-          workerId: dashboardResolveWorkerIdValue(row),
           row: rowIndex,
           assignedRows: [rowIndex],
           workerAssignments: ordersWorkerAssignmentsFromRows([rowIndex], resources),
@@ -10621,16 +10481,16 @@ export function createCalendarFeature(ctx) {
     ].map((value) => String(value ?? '').trim()).join(',')).join('|')}`
   }
 
-  function calendarTimelineBuildModel(days = [], hours = [], options = {}) {
+  function calendarTimelineBuildModel(days = [], hours = []) {
     const resources = calendarTimelineResources()
     const sourceOrders = ordersListSourceOrders()
     const selectedTypes = calendarTimelineSelectedTypes()
-    const sourceRows = calendarTimelineSourceRowsForDays(days)
-    const includeServiceEvents = options?.includeServiceEvents === true
+    const sourceRows = calendarTimelineSourceRowsCoverDays(days) && Array.isArray(appState.calendarTimelineWorkerStateSourceRows)
+      ? appState.calendarTimelineWorkerStateSourceRows
+      : []
     const cacheKey = [
       days.join(','),
       hours.join(','),
-      includeServiceEvents ? 'services:on' : 'services:off',
       appState.calendarTimelineShowCompleted !== false ? 'completed:on' : 'completed:off',
       [...selectedTypes].sort().join(','),
       calendarTimelineResourcesCacheSignature(resources),
@@ -10638,22 +10498,18 @@ export function createCalendarFeature(ctx) {
       calendarTimelineRowsCacheSignature(sourceRows),
       appState.calendarTimelineWorkerStateFetchedAt || 0,
     ].join('::')
-    if (calendarTimelineModelCache.values.has(cacheKey)) {
-      return calendarTimelineModelCache.values.get(cacheKey)
+    if (calendarTimelineModelCache.key === cacheKey && calendarTimelineModelCache.value) {
+      return calendarTimelineModelCache.value
     }
 
     const plannedOrders = calendarTimelineExpandRecurringOrdersForDays(sourceOrders, days)
-    const realOrders = includeServiceEvents
-      ? calendarTimelineRealEventOrders(resources, days)
-      : (() => {
-          const realWorkdayOrders = calendarTimelineRealWorkdayOrders(resources, days, sourceRows)
-          const realStatusOrders = calendarTimelineRealStatusOrders(resources, days, realWorkdayOrders)
-          return calendarTimelineEnsureActiveWorkerStatusOrders(
-            [...realWorkdayOrders, ...realStatusOrders],
-            resources,
-            days,
-          )
-        })()
+    const realWorkdayOrders = calendarTimelineRealWorkdayOrders(resources, days, sourceRows)
+    const realStatusOrders = calendarTimelineRealStatusOrders(resources, days, realWorkdayOrders)
+    const realOrders = calendarTimelineEnsureActiveWorkerStatusOrders(
+      [...realWorkdayOrders, ...realStatusOrders],
+      resources,
+      days,
+    )
     const bars = calendarTimelineVisualOrders([...plannedOrders, ...realOrders], resources)
     const layout = calendarTimelineLayoutEventBars(bars, days, hours, resources, selectedTypes)
     const deltaData = calendarTimelineDeltaData(layout.items, days, hours, resources)
@@ -10683,588 +10539,21 @@ export function createCalendarFeature(ctx) {
     const model = {
       cacheKey,
       resources,
-      plannedOrders,
-      realOrders,
-      bars,
       layout,
       deltaData,
       realTrackCounts,
       plannedLaneCounts,
       timelineLaneCounts,
     }
-    calendarTimelineModelCache.values.set(cacheKey, model)
-    while (calendarTimelineModelCache.values.size > 4) {
-      calendarTimelineModelCache.values.delete(calendarTimelineModelCache.values.keys().next().value)
-    }
+    calendarTimelineModelCache.key = cacheKey
+    calendarTimelineModelCache.value = model
     return model
-  }
-
-  function calendarPlanningWeekdayLabel(dayKey = '') {
-    const date = calendarDateFromYmd(dayKey)
-    const label = new Intl.DateTimeFormat('pl-PL', { weekday: 'long' }).format(date)
-    return label ? `${label.charAt(0).toUpperCase()}${label.slice(1)}` : ''
-  }
-
-  function calendarPlanningDateShortLabel(dayKey = '') {
-    const date = calendarDateFromYmd(dayKey)
-    return `${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}`
-  }
-
-  function calendarPlanningOrderTypeLabel(order = {}) {
-    return calendarTimelineOrderIsRecurring(order) ? 'Stałe' : 'Jednorazowe'
-  }
-
-  function calendarPlanningOrderDataAttributes(bar = {}, resources = []) {
-    const rowIndex = Number(bar?.row)
-    const isBuffer = resources[rowIndex]?.type === 'buffer'
-    const sourceOrderId = String(bar?.sourceOrderId || bar?.id || '').trim()
-    const sourceOrder = calendarTimelineSourceOrderById(sourceOrderId)
-    const canMoveOneOff = !bar?.isRealEvent && !isBuffer && calendarTimelineOrderCanBeMovedFreely(sourceOrder)
-    const dragKind = isBuffer && !bar?.isRealEvent ? 'buffer' : canMoveOneOff ? 'one-off' : ''
-    const sourceEventId = String(bar?.sourceEventId ?? '').trim()
-    const workdayId = String(bar?.workdayId ?? '').trim()
-    const sourceStartAt = toIso(bar?.sourceStartAt ?? bar?.actualStartAt ?? '')
-    const occurrenceDate = String(
-      bar?.recurrenceOriginalDateYmd ||
-      bar?.recurrenceOverrideDateYmd ||
-      bar?.occurrenceDateYmd ||
-      bar?.dateYmd ||
-      '',
-    ).trim()
-    const values = [
-      `data-calendar-timeline-order-id="${escapeHtml(String(bar?.id ?? ''))}"`,
-      `data-calendar-timeline-row="${Number.isInteger(rowIndex) ? rowIndex : 0}"`,
-      `data-calendar-timeline-date="${escapeHtml(String(bar?.dateYmd ?? ''))}"`,
-      `data-calendar-timeline-start="${escapeHtml(String(bar?.startTime ?? ''))}"`,
-      `draggable="${dragKind ? 'true' : 'false'}"`,
-      dragKind ? `data-calendar-timeline-drag-kind="${dragKind}"` : '',
-      sourceOrderId ? `data-calendar-timeline-source-order-id="${escapeHtml(sourceOrderId)}"` : '',
-      occurrenceDate ? `data-calendar-timeline-occurrence-date="${escapeHtml(occurrenceDate)}"` : '',
-      sourceEventId ? `data-calendar-timeline-source-event-id="${escapeHtml(sourceEventId)}"` : '',
-      workdayId ? `data-calendar-timeline-workday-id="${escapeHtml(workdayId)}"` : '',
-      sourceStartAt ? `data-calendar-timeline-source-start="${escapeHtml(sourceStartAt)}"` : '',
-      bar?.isRealEvent ? 'data-calendar-timeline-real-event="1"' : '',
-      bar?.isRecurringSeries ? 'data-calendar-timeline-recurring-series="1"' : '',
-      bar?.isRecurringInstance ? 'data-calendar-timeline-recurring-instance="1"' : '',
-      bar?.recurrenceOverride ? 'data-calendar-timeline-recurrence-override="1"' : '',
-      bar?.workSlotKey ? `data-calendar-timeline-work-slot-key="${escapeHtml(String(bar.workSlotKey))}"` : '',
-      bar?.workSlotIdentity ? `data-calendar-timeline-work-slot-identity="${escapeHtml(String(bar.workSlotIdentity))}"` : '',
-      bar?.allocationId ? `data-calendar-timeline-work-slot-id="${escapeHtml(String(bar.allocationId))}"` : '',
-      bar?.serviceBlockId ? `data-calendar-timeline-service-block-id="${escapeHtml(String(bar.serviceBlockId))}"` : '',
-      bar?.serviceBlockKind ? `data-calendar-timeline-service-block-kind="${escapeHtml(String(bar.serviceBlockKind))}"` : '',
-      bar?.serviceBlockLabel ? `data-calendar-timeline-service-block-label="${escapeHtml(String(bar.serviceBlockLabel))}"` : '',
-    ]
-    return values.filter(Boolean).join(' ')
-  }
-
-  function calendarPlanningAssignedCount(order = {}) {
-    const rows = Array.isArray(order?.assignedRows) ? order.assignedRows : []
-    const assignments = Array.isArray(order?.workerAssignments) ? order.workerAssignments : []
-    return Math.max(
-      assignments.filter((item) => String(item?.workerId ?? item?.workerLogin ?? '').trim()).length,
-      rows.filter((row) => Number(row) > 0).length,
-    )
-  }
-
-  function calendarPlanningRequiredCount(order = {}) {
-    const assigned = calendarPlanningAssignedCount(order)
-    const declared = [
-      order?.requiredPeople,
-      order?.requiredWorkers,
-      order?.workerSlots,
-      order?.peopleCount,
-    ].map(Number).filter((value) => Number.isFinite(value) && value > 0)
-    return Math.max(assigned, declared.length ? Math.max(...declared) : 1)
-  }
-
-  function calendarPlanningOrderAddress(order = {}) {
-    return String(
-      order?.executionAddressLabel ??
-      order?.execution_address_label ??
-      order?.addressLabel ??
-      order?.address_label ??
-      order?.address ??
-      '',
-    ).trim()
-  }
-
-  function calendarPlanningToneClass(order = {}) {
-    const seed = String(
-      order?.clientId ??
-      order?.sourceOrderId ??
-      order?.id ??
-      calendarTimelineOrderClientBarLabel(order) ??
-      '',
-    )
-    const tones = ['blue', 'violet', 'green', 'orange']
-    const hash = [...seed].reduce((total, character) => ((total * 31) + character.charCodeAt(0)) >>> 0, 0)
-    return `tone-${tones[hash % tones.length]}`
-  }
-
-  function calendarPlanningBufferCardHtml(item = {}, resources = []) {
-    const bar = item?.bar || item
-    const title = calendarTimelineOrderTitle(bar)
-    const client = calendarTimelineOrderClientBarLabel(bar)
-    const address = calendarPlanningOrderAddress(bar)
-    const time = calendarTimelineOrderTimeRangeLabel(bar)
-    const dateLabel = calendarTimelineDateLabel(bar?.dateYmd)
-    const assignedCount = calendarPlanningAssignedCount(bar)
-    const requiredCount = calendarPlanningRequiredCount(bar)
-    const missingCount = Math.max(0, requiredCount - assignedCount)
-    const orderType = calendarPlanningOrderTypeLabel(bar)
-    const serviceLabel = String(bar?.serviceBlockLabel ?? bar?.serviceLabel ?? title).trim()
-    const searchValue = normalizeSearchText([title, client, address, dateLabel, time, serviceLabel].filter(Boolean).join(' '))
-    return `
-      <button class="calendar-planning-buffer-card ${calendarPlanningToneClass(bar)}" type="button" ${calendarPlanningOrderDataAttributes(bar, resources)} data-calendar-planning-search="${escapeHtml(searchValue)}" data-calendar-planning-type="${calendarTimelineOrderIsRecurring(bar) ? 'recurring' : 'single'}" data-calendar-planning-object="${escapeHtml(normalizeSearchText(client))}" data-calendar-planning-missing="${missingCount}" title="Przeciągnij do osoby i dnia albo kliknij, aby przypisać w edytorze">
-        <span class="calendar-planning-buffer-card__top">
-          <strong>${escapeHtml(title)}</strong>
-          <span class="calendar-planning-buffer-card__badge${calendarTimelineOrderIsRecurring(bar) ? '' : ' is-single'}">${escapeHtml(orderType)}</span>
-        </span>
-        <span class="calendar-planning-buffer-card__client">${escapeHtml(client)}</span>
-        ${address && normalizeSearchText(address) !== normalizeSearchText(client) ? `<span class="calendar-planning-buffer-card__address">${escapeHtml(address)}</span>` : ''}
-        <span class="calendar-planning-buffer-card__meta"><i class="ph ph-calendar-blank" aria-hidden="true"></i>${escapeHtml(dateLabel)} · ${escapeHtml(time)}</span>
-        <span class="calendar-planning-buffer-card__meta"><i class="ph ph-sparkle" aria-hidden="true"></i>${escapeHtml(serviceLabel)}</span>
-        <span class="calendar-planning-buffer-card__status">
-          <span>${missingCount ? `brak ${missingCount}` : 'pełna obsada'}</span>
-          <span class="calendar-planning-buffer-card__staff">${assignedCount} / ${requiredCount}</span>
-        </span>
-      </button>
-    `
-  }
-
-  function calendarPlanningWorkerRole(resource = {}) {
-    const badge = calendarTimelineWorkerTypeBadge(resource?.worker)
-    return badge?.title || 'Pracownik'
-  }
-
-  function calendarPlanningWorkerHours(items = [], rowIndex = -1) {
-    const minutes = items
-      .filter((item) => Number(item?.bar?.row) === Number(rowIndex) && !item?.bar?.isRealEvent)
-      .reduce((sum, item) => sum + calendarTimelineOrderDurationMinutes(item.bar), 0)
-    const hours = Math.round((minutes / 60) * 10) / 10
-    return `${String(hours).replace('.', ',')}h`
-  }
-
-  function calendarPlanningWeekCardHtml(item = {}, resources = []) {
-    const bar = item?.bar || item
-    const client = calendarTimelineOrderClientBarLabel(bar)
-    const time = calendarTimelineOrderTimeRangeLabel(bar)
-    const staff = calendarPlanningAssignedCount(bar)
-    return `
-      <button class="calendar-planning-card ${calendarPlanningToneClass(bar)}" type="button" ${calendarPlanningOrderDataAttributes(bar, resources)} title="${escapeHtml([client, time, 'Kliknij: edytuj zlecenie'].filter(Boolean).join(' · '))}">
-        <span class="calendar-planning-card__title">${escapeHtml(client)}</span>
-        <span class="calendar-planning-card__bottom">
-          <span class="calendar-planning-card__time">${escapeHtml(time)}</span>
-          <span class="calendar-planning-card__staff"><i class="ph ph-users" aria-hidden="true"></i> ${staff || 1}</span>
-        </span>
-      </button>
-    `
-  }
-
-  function calendarPlanningMatrixHtml(days = [], model = {}) {
-    const resources = Array.isArray(model?.resources) ? model.resources : []
-    const workerFilter = ['planned', 'free'].includes(String(appState.calendarPlanningWorkerFilter || '')) ? String(appState.calendarPlanningWorkerFilter) : 'all'
-    const workerFilterTitle = workerFilter === 'planned' ? 'Tylko pracownicy z planem' : workerFilter === 'free' ? 'Tylko wolni pracownicy' : 'Wszyscy pracownicy'
-    const plannedItems = Array.isArray(model?.layout?.items)
-      ? model.layout.items.filter((item) => !item?.bar?.isRealEvent && resources[item?.bar?.row]?.type === 'worker')
-      : []
-    const workers = resources
-      .map((resource, rowIndex) => ({ resource, rowIndex }))
-      .filter(({ resource }) => resource?.type === 'worker')
-      .map((entry) => ({
-        ...entry,
-        hasPlan: plannedItems.some((item) => Number(item?.bar?.row) === entry.rowIndex),
-      }))
-      .sort((left, right) =>
-        Number(Boolean(right.resource?.started)) - Number(Boolean(left.resource?.started)) ||
-        Number(right.hasPlan) - Number(left.hasPlan) ||
-        String(left.resource?.name ?? '').localeCompare(String(right.resource?.name ?? ''), 'pl'),
-      )
-    const header = days.map((day) => `
-      <div class="calendar-planning-day-head${day === todayYmd() ? ' is-today' : ''}">
-        <span>${escapeHtml(calendarPlanningWeekdayLabel(day))}</span>
-        <strong>${escapeHtml(calendarPlanningDateShortLabel(day))}</strong>
-      </div>
-    `).join('')
-    const rows = workers.map(({ resource, rowIndex, hasPlan }, workerIndex) => {
-      const cells = days.map((day, dayIndex) => {
-        const cellItems = plannedItems.filter((item) => Number(item?.bar?.row) === rowIndex && String(item?.bar?.dateYmd ?? '') === day)
-        const visible = cellItems.slice(0, 3).map((item) => calendarPlanningWeekCardHtml(item, resources)).join('')
-        const more = cellItems.length > 3 ? `<span class="calendar-planning-more">+${cellItems.length - 3} kolejne</span>` : ''
-        return `
-          <div class="calendar-planning-day-cell${day === todayYmd() ? ' is-today' : ''}" data-calendar-timeline-row="${rowIndex}" data-calendar-planning-worker-group="${workerIndex}" data-calendar-planning-worker-plan="${hasPlan ? '1' : '0'}" data-calendar-planning-day-index="${dayIndex}" data-calendar-planning-day="${escapeHtml(day)}">
-            ${visible}${more}
-          </div>
-        `
-      }).join('')
-      return `
-        <div class="calendar-planning-worker" data-calendar-timeline-row="${rowIndex}" data-calendar-planning-worker-group="${workerIndex}" data-calendar-planning-worker-plan="${hasPlan ? '1' : '0'}">
-          <span class="calendar-planning-worker__avatar tone-${(workerIndex % 8) + 1}" aria-hidden="true">${escapeHtml(calendarSafeInitials(resource.name))}</span>
-          <span>
-            <span class="calendar-planning-worker__name">${escapeHtml(resource.name)}</span>
-            <span class="calendar-planning-worker__role">${escapeHtml(calendarPlanningWorkerRole(resource))}</span>
-          </span>
-          <span class="calendar-planning-worker__hours">${escapeHtml(calendarPlanningWorkerHours(plannedItems, rowIndex))}</span>
-        </div>
-        ${cells}
-      `
-    }).join('')
-    return `
-      <div class="calendar-planning-matrix" style="--planning-day-count:${days.length}">
-        <div class="calendar-planning-matrix__corner"><span>Pracownicy</span><button class="calendar-planning-worker-filter${workerFilter === 'all' ? '' : ' is-active'}" id="calendarPlanningWorkerFilterBtn" type="button" data-calendar-worker-filter="${escapeHtml(workerFilter)}" aria-label="Filtruj pracowników: ${escapeHtml(workerFilterTitle)}" aria-pressed="${workerFilter === 'all' ? 'false' : 'true'}" title="${escapeHtml(workerFilterTitle)}"><i class="ph ph-funnel${workerFilter === 'all' ? '' : ' ph-fill'}" aria-hidden="true"></i> Filtry</button></div>
-        ${header}
-        ${rows || `<div class="calendar-planning-empty" style="grid-column:1 / -1">Brak aktywnych pracowników do wyświetlenia.</div>`}
-      </div>
-    `
-  }
-
-  function calendarPlanningStableAnchorValues(entity = {}) {
-    const typed = [
-      ['task', entity?.taskId ?? entity?.sourceOrderId ?? entity?.orderId],
-      ['block', entity?.serviceBlockId ?? entity?.teamId],
-      ['allocation', entity?.allocationId ?? entity?.workSlotId],
-      ['workslot', entity?.workSlotKey],
-    ]
-    return new Set(
-      typed
-        .map(([kind, value]) => [kind, String(value ?? '').trim()])
-        .filter(([, value]) => value)
-        .map(([kind, value]) => `${kind}:${value}`),
-    )
-  }
-
-  function calendarPlanningHasStrictCorrelation(actual = {}, planned = {}) {
-    const actualAnchors = calendarPlanningStableAnchorValues(actual)
-    const plannedAnchors = calendarPlanningStableAnchorValues(planned)
-    const actualDay = String(actual?.occurrenceDateYmd ?? actual?.dateYmd ?? '').trim()
-    const plannedDay = String(
-      planned?.recurrenceOriginalDateYmd ??
-      planned?.recurrenceOverrideDateYmd ??
-      planned?.occurrenceDateYmd ??
-      planned?.dateYmd ??
-      '',
-    ).trim()
-    if (!actualAnchors.size || !plannedAnchors.size || !actualDay || !plannedDay || actualDay !== plannedDay) {
-      return false
-    }
-    const hasConflictingAnchor = ['task', 'block', 'allocation', 'workslot'].some((kind) => {
-      const prefix = `${kind}:`
-      const actualAnchor = [...actualAnchors].find((key) => key.startsWith(prefix))
-      const plannedAnchor = [...plannedAnchors].find((key) => key.startsWith(prefix))
-      return Boolean(actualAnchor && plannedAnchor && actualAnchor !== plannedAnchor)
-    })
-    if (hasConflictingAnchor) {
-      return false
-    }
-    const shared = [...actualAnchors].filter((key) => plannedAnchors.has(key))
-    const sameAllocation = shared.some((key) => key.startsWith('allocation:') || key.startsWith('workslot:'))
-    const sameTask = shared.some((key) => key.startsWith('task:'))
-    const sameBlock = shared.some((key) => key.startsWith('block:'))
-    return Boolean((sameAllocation && (sameTask || sameBlock)) || (sameTask && sameBlock))
-  }
-
-  function calendarPlanningFullDateLabel(dayKey = '') {
-    const date = calendarDateFromYmd(dayKey || todayYmd())
-    const label = date.toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-    return label ? `${label.charAt(0).toUpperCase()}${label.slice(1)}` : '-'
-  }
-
-  function calendarPlanningLiveBarPosition(order = {}) {
-    const start = calendarTimelineTimeMinutes(order?.startTime)
-    let end = calendarTimelineTimeMinutes(order?.endTime)
-    if (!Number.isFinite(start)) {
-      return null
-    }
-    if (!Number.isFinite(end) || end <= start) {
-      end = 1440
-    }
-    const safeStart = Math.max(0, Math.min(1440, start))
-    const safeEnd = Math.max(safeStart + 15, Math.min(1440, end))
-    return {
-      left: `${(safeStart / 1440) * 100}%`,
-      width: `${Math.max(1, ((safeEnd - safeStart) / 1440) * 100)}%`,
-    }
-  }
-
-  function calendarPlanningLiveState(actual = null, planned = null) {
-    if (!actual && planned) {
-      const bounds = calendarTimelineOrderPlannedBounds(planned)
-      const isLate = bounds?.startTs && Date.now() > bounds.startTs + SCHEDULE_START_GRACE_MINUTES * 60 * 1000
-      return isLate
-        ? { kind: 'alert', icon: 'ph-warning-circle', label: `Brak potwierdzenia +${SCHEDULE_START_GRACE_MINUTES} min` }
-        : { kind: 'planned', icon: 'ph-clock', label: 'Zaplanowane' }
-    }
-    if (!actual) {
-      return { kind: 'planned', icon: 'ph-minus', label: 'Brak aktywności' }
-    }
-    const isCompleted = Boolean(actual?.completed || toIso(actual?.actualEndAt) || String(actual?.status ?? '').toUpperCase() === 'CLOSED')
-    if (actual?.realTrack === 'workday') {
-      return isCompleted
-        ? { kind: 'completed', icon: 'ph-check-circle', label: 'Dzień zakończony' }
-        : { kind: 'unverified', icon: 'ph-user-focus', label: 'Obecny · brak QR usługi' }
-    }
-    if (planned && calendarPlanningHasStrictCorrelation(actual, planned)) {
-      return isCompleted
-        ? { kind: 'completed', icon: 'ph-check-circle', label: 'Zakończone' }
-        : { kind: 'running', icon: 'ph-broadcast', label: 'Na obiekcie' }
-    }
-    return { kind: 'unverified', icon: 'ph-question', label: isCompleted ? 'Zakończone · do weryfikacji' : 'Aktywne · do weryfikacji' }
-  }
-
-  function calendarPlanningLiveFreshnessTimestamp(actual = null, planned = null) {
-    const actualStartTimestamp = Date.parse(toIso(actual?.actualStartAt ?? actual?.sourceStartAt ?? '') || '') || 0
-    const actualEndTimestamp = Date.parse(toIso(actual?.actualEndAt ?? actual?.sourceEndAt ?? '') || '') || 0
-    const plannedStartTimestamp = calendarTimelineOrderPlannedBounds(planned)?.startTs || 0
-    const isCompleted = Boolean(
-      actual?.completed
-      || actualEndTimestamp
-      || String(actual?.status ?? '').toUpperCase() === 'CLOSED',
-    )
-
-    if (isCompleted) {
-      return actualEndTimestamp || actualStartTimestamp || plannedStartTimestamp
-    }
-    if (actual) {
-      return actualStartTimestamp || actualEndTimestamp || plannedStartTimestamp
-    }
-    return plannedStartTimestamp
-  }
-
-  function calendarPlanningLiveHtml(resources = []) {
-    const today = todayYmd()
-    const hours = Array.from({ length: 24 }, (_, index) => index)
-    const model = calendarTimelineBuildModel([today], hours, { includeServiceEvents: true })
-    const bars = Array.isArray(model?.bars) ? model.bars : []
-    const operations = resources
-      .map((resource, rowIndex) => ({ resource, rowIndex }))
-      .filter(({ resource, rowIndex }) => resource?.type === 'worker' && (resource?.started || bars.some((bar) => Number(bar?.row) === rowIndex)))
-      .flatMap(({ resource, rowIndex }) => {
-        const rowBars = bars.filter((bar) => Number(bar?.row) === rowIndex)
-        const plannedBars = rowBars.filter((bar) => !bar?.isRealEvent)
-        const actualBars = rowBars.filter((bar) => bar?.isRealEvent)
-        const serviceEvents = actualBars.filter((bar) => bar?.realTrack !== 'workday')
-        const displayedActuals = serviceEvents.length ? serviceEvents : actualBars.filter((bar) => bar?.realTrack === 'workday')
-        const matchedPlans = new Set()
-        const actualOperations = displayedActuals.map((actual) => {
-          const planned = plannedBars.find((candidate) => calendarPlanningHasStrictCorrelation(actual, candidate)) || null
-          if (planned) {
-            matchedPlans.add(planned)
-          }
-          return { resource, rowIndex, planned, actual }
-        })
-        const plannedOperations = plannedBars
-          .filter((planned) => !matchedPlans.has(planned))
-          .map((planned) => ({ resource, rowIndex, planned, actual: null }))
-        if (!actualOperations.length && !plannedOperations.length && resource?.started) {
-          return [{ resource, rowIndex, planned: null, actual: null }]
-        }
-        return [...actualOperations, ...plannedOperations]
-      })
-      .map((operation) => {
-        const { resource, planned, actual } = operation
-        const state = calendarPlanningLiveState(actual, planned)
-        const freshnessTimestamp = calendarPlanningLiveFreshnessTimestamp(actual, planned)
-        return { ...operation, state, freshnessTimestamp, workerName: String(resource?.name ?? '') }
-      })
-      .sort((left, right) => right.freshnessTimestamp - left.freshnessTimestamp || left.workerName.localeCompare(right.workerName, 'pl'))
-    const now = new Date()
-    const nowMinutes = now.getHours() * 60 + now.getMinutes()
-    const nowLeft = `${(Math.max(0, Math.min(1440, nowMinutes)) / 1440) * 100}%`
-    const nowLabel = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`
-    const scale = Array.from({ length: 12 }, (_, index) => `<span>${pad2(index * 2)}:00</span>`).join('')
-    const rows = operations.map(({ resource, planned, actual, state }, index) => {
-      const position = actual ? calendarPlanningLiveBarPosition(actual) : null
-      const plannedPosition = planned ? calendarPlanningLiveBarPosition(planned) : null
-      const actualLabel = actual ? calendarTimelineOrderClientBarLabel(actual) : ''
-      const actualTime = actual ? calendarTimelineOrderTimeRangeLabel(actual) : ''
-      const plannedLabel = planned ? calendarTimelineOrderClientBarLabel(planned) : actual ? 'Brak powiązanego planu' : 'Brak planu'
-      const plannedTime = planned ? calendarTimelineOrderTimeRangeLabel(planned) : '—'
-      const liveBar = position
-        ? `<span class="calendar-planning-live-bar is-${escapeHtml(state.kind)}" style="--live-left:${position.left};--live-width:${position.width}" title="${escapeHtml([actualLabel, actualTime].filter(Boolean).join(' · '))}">${escapeHtml(actualLabel || 'Aktywność')}</span>`
-        : ''
-      const planBar = plannedPosition
-        ? `<span class="calendar-planning-live-plan-track" style="--live-left:${plannedPosition.left};--live-width:${plannedPosition.width}" title="${escapeHtml([plannedLabel, plannedTime].filter(Boolean).join(' · '))}"></span>`
-        : ''
-      const extraAttribute = index >= CALENDAR_PLANNING_LIVE_INITIAL_LIMIT ? ' data-calendar-live-extra="true"' : ''
-      return `
-        <div class="calendar-planning-live-worker"${extraAttribute}>
-          <span class="calendar-planning-live-worker__avatar" aria-hidden="true">${escapeHtml(calendarSafeInitials(resource.name))}</span>
-          <strong>${escapeHtml(resource.name)}</strong>
-        </div>
-        <div class="calendar-planning-live-plan"${extraAttribute}><span class="calendar-planning-live-plan-pill"><strong>${escapeHtml(plannedLabel)}</strong><span>${escapeHtml(plannedTime)}</span></span></div>
-        <div class="calendar-planning-live-track"${extraAttribute}>${planBar}${liveBar}<span class="calendar-planning-live-now" style="--live-now-left:${nowLeft}" aria-hidden="true"></span></div>
-        <div class="calendar-planning-live-state is-${escapeHtml(state.kind)}"${extraAttribute}><i class="ph ${escapeHtml(state.icon)}" aria-hidden="true"></i>${escapeHtml(state.label)}</div>
-      `
-    }).join('')
-    const activeCount = operations.filter(({ actual }) => actual && !actual?.completed).length
-    const hiddenCount = Math.max(0, operations.length - CALENDAR_PLANNING_LIVE_INITIAL_LIMIT)
-    const conflict = operations.find(({ state }) => state.kind === 'alert' || state.kind === 'unverified') || null
-    const conflictBar = conflict?.planned || conflict?.actual || null
-    const conflictData = conflictBar ? calendarPlanningOrderDataAttributes(conflictBar, resources) : ''
-    const conflictKey = conflict ? [conflict.workerName, conflict.state.kind, conflictBar?.taskId ?? conflictBar?.sourceOrderId ?? conflictBar?.orderId ?? ''].join('|') : ''
-    const conflictHidden = Boolean(conflictKey && String(appState.calendarPlanningHiddenConflictKey || '') === conflictKey)
-    const conflictHtml = conflict
-      ? `
-        <aside class="calendar-planning-live-conflict${conflictHidden ? ' is-hidden' : ''}" aria-label="Konflikt wymagający uwagi" data-calendar-conflict-key="${escapeHtml(conflictKey)}">
-          <button class="calendar-planning-live-conflict__close" type="button" aria-label="Ukryj podpowiedź" data-calendar-conflict-close>&times;</button>
-          <span class="calendar-planning-live-conflict__eyebrow">Konflikt · ${escapeHtml(conflict.workerName)}</span>
-          <strong>${escapeHtml(conflict.state.label)}</strong>
-          <p>${conflict.planned ? 'Plan i wykonanie wymagają sprawdzenia.' : 'Nie znaleziono bezpiecznego powiązania z planem.'}</p>
-          <span class="calendar-planning-live-conflict__label">Sugerowane działanie:</span>
-          <button class="calendar-planning-live-conflict__primary" type="button" data-calendar-conflict-assist><i class="ph ph-arrows-left-right" aria-hidden="true"></i>Pokaż braki obsady</button>
-          ${conflictBar ? `<button class="calendar-planning-live-conflict__secondary" type="button" data-calendar-conflict-edit ${conflictData}><i class="ph ph-pencil-simple" aria-hidden="true"></i>Edytuj zlecenie</button>` : ''}
-          <button class="calendar-planning-live-conflict__link" type="button" data-calendar-conflict-details>Pokaż szczegóły</button>
-        </aside>
-      `
-      : '<aside class="calendar-planning-live-conflict is-clear" aria-label="Brak konfliktów"><i class="ph ph-check-circle" aria-hidden="true"></i><strong>Plan bez konfliktów</strong><span>Brak odchyleń wymagających reakcji.</span></aside>'
-    const incompleteWarning = appState.calendarTimelineWorkerStateIncomplete === true
-      ? '<span class="calendar-planning-live__warning" role="status"><i class="ph ph-warning-circle" aria-hidden="true"></i>Dane niepełne</span>'
-      : ''
-    const liveCollapsed = appState.calendarPlanningLiveCollapsed === true
-    const liveExpanded = appState.calendarPlanningLiveExpanded === true && hiddenCount > 0
-    const liveClasses = ['calendar-planning-live', liveCollapsed ? 'is-collapsed' : '', liveExpanded ? 'is-expanded' : ''].filter(Boolean).join(' ')
-    return `
-      <section class="${liveClasses}" aria-label="Dzisiejsze operacje na żywo">
-        <div class="calendar-planning-live__head">
-          <span class="calendar-planning-live__title"><strong>Dziś na żywo</strong><span>${escapeHtml(calendarPlanningFullDateLabel(today))}</span><span>Aktualizowano ${escapeHtml(nowLabel)} <i aria-hidden="true"></i></span></span>
-          <span class="calendar-planning-live__head-actions">
-            ${incompleteWarning}
-            <span class="calendar-planning-live__status"><i class="ph-fill ph-circle" aria-hidden="true"></i>${activeCount} ${activeCount === 1 ? 'aktywna' : 'aktywnych'}</span>
-            ${hiddenCount ? `<button class="calendar-planning-live__more" id="calendarPlanningLiveMoreBtn" type="button" aria-expanded="${liveExpanded ? 'true' : 'false'}" aria-controls="calendarPlanningLiveBody"><i class="ph ph-list" aria-hidden="true"></i><span>${liveExpanded ? 'Pokaż mniej' : `Pokaż wszystkie (${operations.length})`}</span></button>` : ''}
-            <button class="calendar-planning-live__collapse" id="calendarPlanningLiveCollapseBtn" type="button" aria-label="${liveCollapsed ? 'Rozwiń' : 'Zwiń'} panel Dziś na żywo" aria-expanded="${liveCollapsed ? 'false' : 'true'}" aria-controls="calendarPlanningLiveBody">&times;</button>
-          </span>
-        </div>
-        <div class="calendar-planning-live__body" id="calendarPlanningLiveBody">
-          <div class="calendar-planning-live__scroll">
-            <div class="calendar-planning-live-grid">
-              <div class="calendar-planning-live-grid__head">Pracownik</div>
-              <div class="calendar-planning-live-grid__head">Plan</div>
-              <div class="calendar-planning-live-grid__head is-timeline"><span>Wykonanie</span><span class="calendar-planning-live-scale">${scale}</span><span class="calendar-planning-live-now-label" style="--live-now-left:${nowLeft}">${escapeHtml(nowLabel)}</span></div>
-              <div class="calendar-planning-live-grid__head">Stan</div>
-              ${rows || `<div class="calendar-planning-empty" style="grid-column:1 / -1">Brak dzisiejszego planu i aktywności do wyświetlenia.</div>`}
-            </div>
-          </div>
-          ${conflictHtml}
-        </div>
-      </section>
-    `
-  }
-
-  function calendarPlanningWorkspaceHtml(range = {}) {
-    const days = Array.isArray(range?.days) ? range.days : []
-    const hours = Array.from({ length: 20 }, (_, index) => index + 4)
-    const model = calendarTimelineBuildModel(days, hours, { includeServiceEvents: true })
-    const resources = Array.isArray(model?.resources) ? model.resources : []
-    const layoutItems = Array.isArray(model?.layout?.items) ? model.layout.items : []
-    const bufferItems = layoutItems
-      .filter((item) => !item?.bar?.isRealEvent && resources[item?.bar?.row]?.type === 'buffer')
-    const plannedWorkerItems = layoutItems
-      .filter((item) => !item?.bar?.isRealEvent && resources[item?.bar?.row]?.type === 'worker')
-    const hasPlannedWork = plannedWorkerItems.length > 0 || bufferItems.length > 0
-    const bufferEmptyMessage = hasPlannedWork
-      ? 'Wszystkie zaplanowane zlecenia w tym tygodniu mają obsadę.'
-      : 'Brak zleceń wymagających obsady w tym tygodniu.'
-    const bufferCards = bufferItems.map((item) => calendarPlanningBufferCardHtml(item, resources)).join('')
-    const bufferSearch = String(appState.calendarPlanningBufferSearch || '')
-    const bufferTypeFilter = ['recurring', 'single'].includes(String(appState.calendarPlanningTypeFilter || '')) ? String(appState.calendarPlanningTypeFilter) : 'all'
-    const bufferObjectFilter = String(appState.calendarPlanningObjectFilter || 'all')
-    const bufferCollapsed = appState.calendarPlanningBufferCollapsed === true
-    const objectOptions = [...new Set(bufferItems
-      .map((item) => calendarTimelineOrderClientBarLabel(item?.bar || item))
-      .map((value) => String(value ?? '').trim())
-      .filter(Boolean))]
-      .sort((left, right) => left.localeCompare(right, 'pl'))
-      .map((label) => {
-        const value = normalizeSearchText(label)
-        return `<option value="${escapeHtml(value)}"${value === bufferObjectFilter ? ' selected' : ''}>${escapeHtml(label)}</option>`
-      })
-      .join('')
-    const missingPlaces = bufferItems.reduce((total, item) => {
-      const bar = item?.bar || item
-      return total + Math.max(0, calendarPlanningRequiredCount(bar) - calendarPlanningAssignedCount(bar))
-    }, 0)
-    appState.calendarTimelineVisibleConflictItems = calendarTimelineConflictItemsFromLayout(layoutItems, resources)
-    appState.calendarTimelineStatusAlerts = []
-    appState.calendarTimelineStageHeight = 0
-    const loadingHidden = appState.calendarTimelineWorkerStateLoading ? '' : ' hidden'
-    return `
-      <div class="calendar-planning-workspace">
-        <aside class="calendar-planning-buffer${bufferCollapsed ? ' is-collapsed' : ''}" aria-label="Bufor zadań bez pełnej obsady">
-          <div class="calendar-planning-buffer__head"><strong><i class="ph ph-caret-down" aria-hidden="true"></i> Bufor zadań do obsady</strong><i class="ph ph-caret-up" aria-hidden="true"></i></div>
-          <div class="calendar-planning-buffer__filters">
-            <label class="calendar-planning-search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><input id="calendarPlanningBufferSearch" type="search" aria-label="Szukaj zadań w buforze" placeholder="Szukaj zadań w buforze" autocomplete="off" value="${escapeHtml(bufferSearch)}" /></label>
-            <div class="calendar-planning-filter-row">
-              <label class="calendar-planning-filter-chip calendar-planning-filter-select"><span>Rola</span><select id="calendarPlanningTypeFilter" aria-label="Filtr typu zlecenia"><option value="all"${bufferTypeFilter === 'all' ? ' selected' : ''}>Rola</option><option value="recurring"${bufferTypeFilter === 'recurring' ? ' selected' : ''}>Stałe</option><option value="single"${bufferTypeFilter === 'single' ? ' selected' : ''}>Jednorazowe</option></select><i class="ph ph-caret-down" aria-hidden="true"></i></label>
-              <label class="calendar-planning-filter-chip calendar-planning-filter-select"><span>Obiekt</span><select id="calendarPlanningObjectFilter" aria-label="Filtr obiektu"><option value="all"${bufferObjectFilter === 'all' ? ' selected' : ''}>Obiekt</option>${objectOptions}</select><i class="ph ph-caret-down" aria-hidden="true"></i></label>
-              <span class="calendar-planning-filter-chip is-active"><span>Tylko nieobsadzone</span><i class="ph ph-funnel" aria-hidden="true"></i></span>
-            </div>
-          </div>
-          <div class="calendar-planning-buffer__list" id="calendarPlanningBufferList">${bufferCards || `<div class="calendar-planning-empty">${escapeHtml(bufferEmptyMessage)}</div>`}${bufferCards ? '<div class="calendar-planning-empty calendar-planning-filter-empty" id="calendarPlanningFilterEmpty" role="status" aria-live="polite" hidden>Brak zadań pasujących do filtrów.</div>' : ''}</div>
-          <div class="calendar-planning-buffer__foot"><span id="calendarPlanningBufferCount" aria-live="polite"><strong>${bufferItems.length}</strong> ${bufferItems.length === 1 ? 'zadanie' : 'zadań'} · <strong>${missingPlaces}</strong> ${missingPlaces === 1 ? 'miejsce' : 'miejsc'}</span><button id="calendarPlanningBufferCollapseBtn" type="button" aria-label="${bufferCollapsed ? 'Rozwiń' : 'Zwiń'} bufor" aria-expanded="${bufferCollapsed ? 'false' : 'true'}" aria-controls="calendarPlanningBufferList"><i class="ph ph-caret-double-down" aria-hidden="true"></i></button></div>
-        </aside>
-        <section class="calendar-planning-week" aria-label="Tygodniowy plan obsady">${calendarPlanningMatrixHtml(days, model)}</section>
-      </div>
-      ${calendarPlanningLiveHtml(resources)}
-      <div class="fw-timeline-loading${appState.calendarTimelineWorkerStateLoading ? '' : ' is-hidden'}" role="status" aria-live="polite"${loadingHidden}>
-        <div class="fw-timeline-loading-card"><span class="fw-timeline-spinner" aria-hidden="true"></span><strong>Ładowanie kalendarza...</strong><small>Pobieram plan i zdarzenia pracowników</small></div>
-      </div>
-    `
-  }
-
-  function calendarPlanningApplyUiState(stage, snapshot = {}) {
-    if (!(stage instanceof HTMLElement)) return
-    const search = stage.querySelector('#calendarPlanningBufferSearch')
-    const typeFilter = stage.querySelector('#calendarPlanningTypeFilter')
-    const objectFilter = stage.querySelector('#calendarPlanningObjectFilter')
-    const query = search instanceof HTMLInputElement ? normalizeSearchText(search.value) : ''
-    const type = typeFilter instanceof HTMLSelectElement ? String(typeFilter.value || 'all') : 'all'
-    const object = objectFilter instanceof HTMLSelectElement ? String(objectFilter.value || 'all') : 'all'
-    const cards = [...stage.querySelectorAll('#calendarPlanningBufferList .calendar-planning-buffer-card')]
-    let visibleCount = 0
-    let visibleMissing = 0
-    cards.forEach((card) => {
-      const haystack = normalizeSearchText(card.getAttribute('data-calendar-planning-search'))
-      const cardType = String(card.getAttribute('data-calendar-planning-type') || '')
-      const cardObject = String(card.getAttribute('data-calendar-planning-object') || '')
-      const hidden = (Boolean(query) && !haystack.includes(query)) || (type !== 'all' && cardType !== type) || (object !== 'all' && cardObject !== object)
-      card.classList.toggle('is-hidden-by-search', hidden)
-      card.classList.remove('is-assist-highlighted')
-      if (!hidden) {
-        visibleCount += 1
-        visibleMissing += Math.max(0, Number(card.getAttribute('data-calendar-planning-missing') || 0))
-      }
-    })
-    const filterEmpty = stage.querySelector('#calendarPlanningFilterEmpty')
-    if (filterEmpty instanceof HTMLElement) filterEmpty.hidden = cards.length === 0 || visibleCount > 0
-    const count = stage.querySelector('#calendarPlanningBufferCount')
-    if (count instanceof HTMLElement && cards.length) {
-      count.textContent = `${visibleCount}${visibleCount === cards.length ? '' : ` z ${cards.length}`} ${visibleCount === 1 ? 'zadanie' : 'zadań'} · ${visibleMissing} ${visibleMissing === 1 ? 'miejsce' : 'miejsc'}`
-    }
-    const workerFilter = ['planned', 'free'].includes(String(appState.calendarPlanningWorkerFilter || '')) ? String(appState.calendarPlanningWorkerFilter) : 'all'
-    stage.querySelectorAll('[data-calendar-planning-worker-group]').forEach((node) => {
-      const hasPlan = node.getAttribute('data-calendar-planning-worker-plan') === '1'
-      node.toggleAttribute('hidden', workerFilter === 'planned' ? !hasPlan : workerFilter === 'free' ? hasPlan : false)
-    })
-    window.requestAnimationFrame(() => {
-      const week = stage.querySelector('.calendar-planning-week')
-      const live = stage.querySelector('.calendar-planning-live__scroll')
-      const buffer = stage.querySelector('.calendar-planning-buffer__list')
-      if (week instanceof HTMLElement) week.scrollLeft = Number(snapshot.weekScrollLeft || 0)
-      if (live instanceof HTMLElement) live.scrollTop = Number(snapshot.liveScrollTop || 0)
-      if (buffer instanceof HTMLElement) buffer.scrollTop = Number(snapshot.bufferScrollTop || 0)
-      const focusId = String(snapshot.focusId || '')
-      const focusTarget = focusId ? stage.querySelector(`#${focusId}`) : null
-      if (focusTarget instanceof HTMLElement) focusTarget.focus({ preventScroll: true })
-    })
   }
   
   function calendarTimelinePrototypeHtml() {
     const range = calendarTimelineRangeForView()
     if (range.mode === 'month') {
       return calendarTimelineMonthHtml()
-    }
-    if (range.mode === 'week') {
-      return calendarPlanningWorkspaceHtml(range)
     }
     const days = range.days
     const hours = Array.from({ length: 20 }, (_, index) => index + 4)
@@ -11504,11 +10793,10 @@ export function createCalendarFeature(ctx) {
     appState.calendarTimelineVisibleConflictItems = []
     appState.calendarTimelineStageHeight = 220
     return `
-      <div class="fw-timeline-render-error" role="alert">
+      <div class="fw-timeline-render-error" role="status">
         <strong>Nie udało się wyświetlić kalendarza.</strong>
-        <span>Spróbuj ponownie. Jeśli problem wróci, odśwież portal.</span>
+        <span>Odśwież widok lub spróbuj ponownie za chwilę.</span>
         ${message ? `<small>${escapeHtml(message)}</small>` : ''}
-        <button id="calendarPlanningRetryBtn" type="button"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i>Spróbuj ponownie</button>
       </div>
     `
   }
@@ -11520,8 +10808,6 @@ export function createCalendarFeature(ctx) {
     }
     calendarMarkPerformance('calendar-render-start')
     const mode = calendarNormalizeViewMode(appState.calendarViewMode)
-    const page = document.getElementById('calendarTimelinePrototype')
-    page?.classList.toggle('is-planning-week', mode === 'week')
     if (mode === 'month') {
       calendarStopTimelineWorkerStatusRefresh()
       calendarClearTimelineHourRefresh()
@@ -11538,35 +10824,19 @@ export function createCalendarFeature(ctx) {
     calendarUpdateRangeLabel()
     const todayButton = document.getElementById('calendarTodayBtn')
     if (todayButton instanceof HTMLButtonElement) {
-      todayButton.classList.remove('is-active')
+      todayButton.classList.toggle('is-active', mode === 'day')
     }
     document.querySelectorAll('#view-calendar [data-calendar-view]').forEach((button) => {
-      const active = button.getAttribute('data-calendar-view') === mode
-      button.classList.toggle('is-active', active)
-      button.setAttribute('aria-pressed', active ? 'true' : 'false')
+      button.classList.toggle('is-active', button.getAttribute('data-calendar-view') === mode)
     })
-    const focusedElement = document.activeElement
-    const uiSnapshot = mode === 'week'
-      ? {
-          focusId: focusedElement instanceof HTMLElement && stage.contains(focusedElement) ? focusedElement.id : '',
-          weekScrollLeft: stage.querySelector('.calendar-planning-week')?.scrollLeft || 0,
-          liveScrollTop: stage.querySelector('.calendar-planning-live__scroll')?.scrollTop || 0,
-          bufferScrollTop: stage.querySelector('.calendar-planning-buffer__list')?.scrollTop || 0,
-        }
-      : {}
     const slideDirection = Number(appState.calendarTimelineSlideDirection || 0)
     stage.classList.remove('is-slide-next', 'is-slide-prev')
-    let renderSucceeded = true
     try {
       stage.innerHTML = calendarTimelinePrototypeHtml()
     } catch (error) {
-      renderSucceeded = false
       console.error('[portal/calendar] timeline render failed', error)
       calendarInvalidateTimelineRenderCaches()
       stage.innerHTML = calendarTimelineRenderErrorHtml(error)
-    }
-    if (renderSucceeded && mode === 'week') {
-      calendarPlanningApplyUiState(stage, uiSnapshot)
     }
     window.requestAnimationFrame(() => {
       stage.querySelectorAll('.fw-event-bar').forEach((bar) => {
@@ -12133,10 +11403,7 @@ export function createCalendarFeature(ctx) {
     binding.add(document.getElementById('calendarPrevBtn'), 'click', () => calendarMoveCursor(-1))
     binding.add(document.getElementById('calendarNextBtn'), 'click', () => calendarMoveCursor(1))
     binding.add(document.getElementById('calendarTodayBtn'), 'click', () => {
-      appState.calendarCursorDay = todayYmd()
-      appState.calendarTimelineSlideDirection = 0
-      appState.calendarTimelineResetScroll = true
-      renderCalendarView()
+      calendarSwitchTimelineMode('day', todayYmd())
       void calendarTimelineRefreshBars().catch(() => {})
     })
     binding.add(document.getElementById('calendarTimelineDateBtn'), 'click', () => {
@@ -12168,46 +11435,6 @@ export function createCalendarFeature(ctx) {
         showTransientNotice('Nie udało się odświeżyć pasków kalendarza.', 'error')
       })
     })
-    binding.add(document.getElementById('calendarPlanningAssistBtn'), 'click', () => {
-      const cards = [...document.querySelectorAll('#calendarPlanningBufferList .calendar-planning-buffer-card')]
-      appState.calendarPlanningBufferSearch = ''
-      appState.calendarPlanningTypeFilter = 'all'
-      appState.calendarPlanningObjectFilter = 'all'
-      const search = document.getElementById('calendarPlanningBufferSearch')
-      if (search instanceof HTMLInputElement) {
-        search.value = ''
-      }
-      const typeFilter = document.getElementById('calendarPlanningTypeFilter')
-      const objectFilter = document.getElementById('calendarPlanningObjectFilter')
-      if (typeFilter instanceof HTMLSelectElement) {
-        typeFilter.value = 'all'
-      }
-      if (objectFilter instanceof HTMLSelectElement) {
-        objectFilter.value = 'all'
-      }
-      calendarPlanningApplyUiState(document.getElementById('calendarPrototypeTimeline'))
-      const visibleCards = cards.filter((card) => !card.classList.contains('is-hidden-by-search'))
-      visibleCards.forEach((card) => {
-        card.classList.remove('is-hidden-by-search')
-        card.classList.add('is-assist-highlighted')
-      })
-      visibleCards[0]?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' })
-      const hasPlannedCards = Boolean(document.querySelector('.calendar-planning-week .calendar-planning-card'))
-      showTransientNotice(
-        cards.length
-          ? `Do uzupełnienia obsady: ${cards.length}. Przeciągnij zadania do właściwych osób.`
-          : hasPlannedCards
-            ? 'Wszystkie zaplanowane zlecenia w tym tygodniu mają obsadę.'
-            : 'Brak zaplanowanych zleceń w tym tygodniu.',
-        cards.length ? 'info' : hasPlannedCards ? 'success' : 'info',
-      )
-    })
-    binding.add(document.getElementById('calendarPlanningPublishBtn'), 'click', () => {
-      showTransientNotice(
-        'Plan pozostaje wersją roboczą. Publikację włączymy po dodaniu wersjonowanego, bezpiecznego zapisu planu tygodnia.',
-        'info',
-      )
-    })
     binding.add(document.getElementById('calendarTimelineTypeBtn'), 'click', (event) => {
       const button = event.currentTarget
       const panel = document.getElementById('calendarTimelineTypePanel')
@@ -12238,33 +11465,6 @@ export function createCalendarFeature(ctx) {
       renderCalendarView()
     })
     const timelineStage = document.getElementById('calendarPrototypeTimeline')
-    const applyPlanningBufferFilters = () => {
-      if (!(timelineStage instanceof HTMLElement)) return
-      const search = timelineStage.querySelector('#calendarPlanningBufferSearch')
-      const typeFilter = timelineStage.querySelector('#calendarPlanningTypeFilter')
-      const objectFilter = timelineStage.querySelector('#calendarPlanningObjectFilter')
-      appState.calendarPlanningBufferSearch = search instanceof HTMLInputElement ? search.value : ''
-      appState.calendarPlanningTypeFilter = typeFilter instanceof HTMLSelectElement ? String(typeFilter.value || 'all') : 'all'
-      appState.calendarPlanningObjectFilter = objectFilter instanceof HTMLSelectElement ? String(objectFilter.value || 'all') : 'all'
-      calendarPlanningApplyUiState(timelineStage)
-    }
-    binding.add(timelineStage, 'input', (event) => {
-      const input = event.target
-      if (!(input instanceof HTMLInputElement) || input.id !== 'calendarPlanningBufferSearch') {
-        return
-      }
-      appState.calendarPlanningBufferSearch = input.value
-      applyPlanningBufferFilters()
-    })
-    binding.add(timelineStage, 'change', (event) => {
-      const select = event.target
-      if (!(select instanceof HTMLSelectElement) || !['calendarPlanningTypeFilter', 'calendarPlanningObjectFilter'].includes(select.id)) {
-        return
-      }
-      if (select.id === 'calendarPlanningTypeFilter') appState.calendarPlanningTypeFilter = select.value
-      if (select.id === 'calendarPlanningObjectFilter') appState.calendarPlanningObjectFilter = select.value
-      applyPlanningBufferFilters()
-    })
     binding.add(timelineStage, 'contextmenu', (event) => {
       const bar = event.target?.closest?.('[data-calendar-timeline-order-id]')
       if (!(bar instanceof HTMLElement)) {
@@ -12325,97 +11525,6 @@ export function createCalendarFeature(ctx) {
       )
     })
     binding.add(timelineStage, 'click', (event) => {
-      const retryButton = event.target?.closest?.('#calendarPlanningRetryBtn')
-      if (retryButton instanceof HTMLButtonElement) {
-        event.preventDefault()
-        calendarInvalidateTimelineRenderCaches()
-        renderCalendarView()
-        return
-      }
-      const liveMoreButton = event.target?.closest?.('#calendarPlanningLiveMoreBtn')
-      if (liveMoreButton instanceof HTMLButtonElement) {
-        event.preventDefault()
-        event.stopPropagation()
-        const panel = liveMoreButton.closest('.calendar-planning-live')
-        if (!(panel instanceof HTMLElement)) {
-          return
-        }
-        const expanded = !panel.classList.contains('is-expanded')
-        panel.classList.toggle('is-expanded', expanded)
-        appState.calendarPlanningLiveExpanded = expanded
-        liveMoreButton.setAttribute('aria-expanded', expanded ? 'true' : 'false')
-        const label = liveMoreButton.querySelector('span')
-        if (label instanceof HTMLElement) {
-          label.textContent = expanded ? 'Pokaż mniej' : `Pokaż wszystkie (${panel.querySelectorAll('.calendar-planning-live-worker').length})`
-        }
-        return
-      }
-      const liveCollapseButton = event.target?.closest?.('#calendarPlanningLiveCollapseBtn')
-      if (liveCollapseButton instanceof HTMLButtonElement) {
-        const panel = liveCollapseButton.closest('.calendar-planning-live')
-        if (panel instanceof HTMLElement) {
-          const collapsed = !panel.classList.contains('is-collapsed')
-          panel.classList.toggle('is-collapsed', collapsed)
-          appState.calendarPlanningLiveCollapsed = collapsed
-          liveCollapseButton.setAttribute('aria-expanded', collapsed ? 'false' : 'true')
-          liveCollapseButton.setAttribute('aria-label', collapsed ? 'Rozwiń panel Dziś na żywo' : 'Zwiń panel Dziś na żywo')
-        }
-        return
-      }
-      const bufferCollapseButton = event.target?.closest?.('#calendarPlanningBufferCollapseBtn')
-      if (bufferCollapseButton instanceof HTMLButtonElement) {
-        const buffer = bufferCollapseButton.closest('.calendar-planning-buffer')
-        if (buffer instanceof HTMLElement) {
-          const collapsed = !buffer.classList.contains('is-collapsed')
-          buffer.classList.toggle('is-collapsed', collapsed)
-          appState.calendarPlanningBufferCollapsed = collapsed
-          bufferCollapseButton.setAttribute('aria-expanded', collapsed ? 'false' : 'true')
-          bufferCollapseButton.setAttribute('aria-label', collapsed ? 'Rozwiń bufor' : 'Zwiń bufor')
-        }
-        return
-      }
-      const workerFilterButton = event.target?.closest?.('#calendarPlanningWorkerFilterBtn')
-      if (workerFilterButton instanceof HTMLButtonElement) {
-        const current = String(workerFilterButton.getAttribute('data-calendar-worker-filter') || 'all')
-        const next = current === 'all' ? 'planned' : current === 'planned' ? 'free' : 'all'
-        workerFilterButton.setAttribute('data-calendar-worker-filter', next)
-        workerFilterButton.classList.toggle('is-active', next !== 'all')
-        appState.calendarPlanningWorkerFilter = next
-        const filterLabel = next === 'planned' ? 'Tylko pracownicy z planem' : next === 'free' ? 'Tylko wolni pracownicy' : 'Wszyscy pracownicy'
-        workerFilterButton.title = filterLabel
-        workerFilterButton.setAttribute('aria-label', `Filtruj pracowników: ${filterLabel}`)
-        workerFilterButton.setAttribute('aria-pressed', next === 'all' ? 'false' : 'true')
-        workerFilterButton.querySelector('i')?.classList.toggle('ph-fill', next !== 'all')
-        calendarPlanningApplyUiState(timelineStage)
-        return
-      }
-      const conflictClose = event.target?.closest?.('[data-calendar-conflict-close]')
-      if (conflictClose instanceof HTMLElement) {
-        const panel = conflictClose.closest('.calendar-planning-live-conflict')
-        appState.calendarPlanningHiddenConflictKey = panel?.getAttribute('data-calendar-conflict-key') || ''
-        panel?.classList.add('is-hidden')
-        return
-      }
-      const conflictAssist = event.target?.closest?.('[data-calendar-conflict-assist]')
-      if (conflictAssist instanceof HTMLElement) {
-        document.getElementById('calendarPlanningAssistBtn')?.click()
-        return
-      }
-      const conflictEdit = event.target?.closest?.('[data-calendar-conflict-edit]')
-      if (conflictEdit instanceof HTMLElement) {
-        const context = calendarTimelineContextFromBar(conflictEdit)
-        if (context) {
-          calendarTimelineEditOrderFromContext(context)
-        }
-        return
-      }
-      const conflictDetails = event.target?.closest?.('[data-calendar-conflict-details]')
-      if (conflictDetails instanceof HTMLElement) {
-        const panel = conflictDetails.closest('.calendar-planning-live-conflict')
-        const detail = panel?.querySelector('p')?.textContent?.trim() || 'Operacja wymaga ręcznej weryfikacji planu i wykonania.'
-        showTransientNotice(detail, 'warning')
-        return
-      }
       const monthAdd = event.target?.closest?.('[data-calendar-month-add]')
       if (monthAdd instanceof HTMLElement) {
         event.preventDefault()
@@ -12436,14 +11545,6 @@ export function createCalendarFeature(ctx) {
       if (bar instanceof HTMLElement) {
         event.preventDefault()
         event.stopPropagation()
-        const isPlannedOrder = bar.getAttribute('data-calendar-timeline-real-event') !== '1'
-        if (bar.classList.contains('calendar-planning-buffer-card') || isPlannedOrder) {
-          const context = calendarTimelineContextFromBar(bar)
-          if (context) {
-            calendarTimelineEditOrderFromContext(context)
-          }
-          return
-        }
         if (calendarTimelineBarClickTimer) {
           window.clearTimeout(calendarTimelineBarClickTimer)
         }
@@ -12473,15 +11574,8 @@ export function createCalendarFeature(ctx) {
       calendarHideTaskContextMenu()
     })
     binding.add(document, 'keydown', (event) => {
-      if (event.key !== 'Escape') return
-      calendarHideTaskContextMenu()
-      const panel = document.getElementById('calendarTimelineTypePanel')
-      const button = document.getElementById('calendarTimelineTypeBtn')
-      if (!(panel instanceof HTMLElement) || panel.hasAttribute('hidden')) return
-      panel.setAttribute('hidden', '')
-      if (button instanceof HTMLButtonElement) {
-        button.setAttribute('aria-expanded', 'false')
-        button.focus({ preventScroll: true })
+      if (event.key === 'Escape') {
+        calendarHideTaskContextMenu()
       }
     })
     binding.add(timelineStage, 'dragstart', (event) => {
@@ -12523,7 +11617,6 @@ export function createCalendarFeature(ctx) {
       appState.calendarTimelineDragKind = dragKind
       appState.calendarTimelineDragSourceRow = Number.isInteger(sourceRow) ? sourceRow : null
       appState.calendarTimelineDragSourceOrderId = sourceOrderId
-      appState.calendarTimelineDragSourceStart = String(bar.getAttribute('data-calendar-timeline-start') || '').trim()
       appState.calendarTimelineDragOccurrenceDate = recurringContext?.occurrenceDateYmd || ''
       appState.calendarTimelineDragWorkSlotKey = workSlotKey
       appState.calendarTimelineDragAllocationIdentity = workSlotIdentity
@@ -12823,10 +11916,7 @@ export function createCalendarFeature(ctx) {
   
     document.querySelectorAll('[data-calendar-view]').forEach((button) => {
       binding.add(button, 'click', () => {
-        calendarSwitchTimelineMode(
-          String(button.getAttribute('data-calendar-view') ?? 'three'),
-          appState.calendarCursorDay || todayYmd(),
-        )
+        calendarSwitchTimelineMode(String(button.getAttribute('data-calendar-view') ?? 'three'), todayYmd())
       })
     })
   

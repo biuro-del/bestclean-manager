@@ -36,11 +36,8 @@ test('aplikacja mobilna ma tylko odczyt opublikowanej rewizji przypisanej pracow
 })
 
 test('portal wysyła publikację przez autoryzowany endpoint bez payloadu karty', () => {
-  const publicationStart = service.indexOf('export async function publishJobCard')
-  assert.notEqual(publicationStart, -1)
-  const publication = service.slice(publicationStart)
   assert.match(service, /Authorization: `Bearer/)
-  assert.match(publication, /action: 'PUBLISH'/)
-  assert.match(publication, /expectedDraftHash/)
-  assert.doesNotMatch(publication, /jobCardDraft/)
+  assert.match(service, /action: 'PUBLISH'/)
+  assert.match(service, /expectedDraftHash/)
+  assert.doesNotMatch(service, /jobCardDraft/)
 })

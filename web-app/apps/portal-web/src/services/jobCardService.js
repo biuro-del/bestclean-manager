@@ -62,67 +62,6 @@ export async function fetchJobCardState(orgId, orderId) {
   return parseResponse(response, 'Nie udało się pobrać stanu Karty Zlecenia.')
 }
 
-export async function listJobCardDrafts(orgId, { cursor = '', limit = 30 } = {}) {
-  const normalizedOrgId = text(orgId)
-  const normalizedCursor = text(cursor)
-  const normalizedLimit = Math.max(1, Math.min(100, Number.parseInt(limit, 10) || 30))
-  if (!normalizedOrgId) {
-    throw new Error('Brak organizacji dla listy roboczych zleceń.')
-  }
-  const query = new URLSearchParams({ orgId: normalizedOrgId, limit: String(normalizedLimit) })
-  if (normalizedCursor) query.set('cursor', normalizedCursor)
-  const response = await fetch(`${getPortalApiBase()}/portal/job-card-drafts?${query.toString()}`, {
-    method: 'GET',
-    headers: await authHeaders('GET'),
-  })
-  return parseResponse(response, 'Nie udało się pobrać roboczych zleceń.')
-}
-
-export async function fetchJobCardDraft(orgId, orderId) {
-  const normalizedOrgId = text(orgId)
-  const normalizedOrderId = text(orderId)
-  if (!normalizedOrgId || !normalizedOrderId) {
-    throw new Error('Brak organizacji lub identyfikatora roboczego zlecenia.')
-  }
-  const query = new URLSearchParams({ orgId: normalizedOrgId, orderId: normalizedOrderId })
-  const response = await fetch(`${getPortalApiBase()}/portal/job-card-drafts?${query.toString()}`, {
-    method: 'GET',
-    headers: await authHeaders('GET'),
-  })
-  return parseResponse(response, 'Nie udało się pobrać roboczego zlecenia.')
-}
-
-export async function saveJobCardDraft(orgId, {
-  editorDraft,
-  expectedDraftHash = '',
-  jobCardDraft,
-  order,
-  orderId = '',
-} = {}) {
-  const normalizedOrgId = text(orgId)
-  const normalizedOrderId = text(orderId)
-  const normalizedExpectedDraftHash = text(expectedDraftHash)
-  if (!normalizedOrgId || !editorDraft || typeof editorDraft !== 'object' || !jobCardDraft || typeof jobCardDraft !== 'object') {
-    throw new Error('Brak organizacji lub danych szkicu Karty Zlecenia.')
-  }
-  if (!order || typeof order !== 'object') {
-    throw new Error('Brak danych planu potrzebnych do zapisania szkicu Karty Zlecenia.')
-  }
-  const response = await fetch(`${getPortalApiBase()}/portal/job-card-drafts`, {
-    method: 'POST',
-    headers: await authHeaders('POST'),
-    body: JSON.stringify({
-      editorDraft,
-      jobCardDraft,
-      order,
-      ...(normalizedOrderId ? { orderId: normalizedOrderId } : {}),
-      ...(normalizedExpectedDraftHash ? { expectedDraftHash: normalizedExpectedDraftHash } : {}),
-      orgId: normalizedOrgId,
-    }),
-  })
-  return parseResponse(response, 'Nie udało się zapisać szkicu Karty Zlecenia.')
-}
-
 export async function publishJobCard(orgId, orderId, { acknowledgements = [], expectedDraftHash } = {}) {
   const normalizedOrgId = text(orgId)
   const normalizedOrderId = text(orderId)

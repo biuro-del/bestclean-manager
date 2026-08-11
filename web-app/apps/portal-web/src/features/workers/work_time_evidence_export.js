@@ -1,9 +1,8 @@
-import { summarizeWorkTimeRows } from './workIntervals.js'
+import { workIntervalsFromRow, workIntervalsTotalSeconds } from './workIntervals.js'
 
-export const WORK_TIME_EVIDENCE_DEFAULT_COLUMN_IDS = ['date', 'worker', 'start', 'stop', 'work', 'net', 'break', 'review']
+export const WORK_TIME_EVIDENCE_DEFAULT_COLUMN_IDS = ['date', 'worker', 'start', 'stop', 'work', 'net', 'break']
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/
-const WORK_TIME_EVIDENCE_EXPORT_MAX_ROWS = 20000
 
 function fallbackFormatSeconds(seconds) {
   const value = Math.max(0, Number(seconds) || 0)
@@ -207,23 +206,13 @@ export function createWorkTimeEvidenceColumns(deps = {}, worker = {}) {
       id: 'net',
       label: 'Realny czas pracy',
       weight: 1.25,
-      getValue: (row) => row.reviewRequired ? 'DO WERYFIKACJI' : formatSeconds(deps, row.netSec),
+      getValue: (row) => formatSeconds(deps, row.netSec),
     },
     {
       id: 'break',
       label: 'Przerwa',
       weight: 0.95,
       getValue: (row) => formatSeconds(deps, row.breakSec),
-    },
-    {
-      id: 'review',
-      label: 'Weryfikacja',
-      weight: 1.75,
-      getValue: (row) => {
-        if (!row.reviewRequired) return 'NIE'
-        const codes = [...new Set((Array.isArray(row.reviewIssues) ? row.reviewIssues : []).map((issue) => issue?.code).filter(Boolean))]
-        return codes.length ? `TAK: ${codes.join(', ')}` : 'TAK'
-      },
     },
     {
       id: 'editedBy',
@@ -538,33 +527,64 @@ function overlapGroupKey(deps = {}, row = {}) {
 }
 
 function applyOverlapAccounting(deps = {}, rows = []) {
-  const rowsByGroup = new Map()
-  ;(Array.isArray(rows) ? rows : []).forEach((row) => {
+  const activeRowsByGroup = new Map()
+  const output = []
+
+  rows.forEach((row) => {
+    const next = { ...row }
+    if (Array.isArray(row?.workIntervals) && row.workIntervals.length) {
+      const workIntervals = workIntervalsFromRow(row)
+      const workSec = workIntervalsTotalSeconds(workIntervals)
+      if (workSec <= 0) return
+
+      next.workIntervals = workIntervals
+      next.rawWorkSec = Math.max(0, Math.floor(Number(row.workSec ?? 0) || 0))
+      next.workSec = workSec
+      next.breakSec = Math.min(Math.max(0, Number(row.breakSec ?? 0) || 0), workSec)
+      next.netSec = Math.max(0, workSec - next.breakSec)
+      output.push(next)
+      return
+    }
+    const interval = typeof deps.workStatusIntervalFromTimes === 'function'
+      ? deps.workStatusIntervalFromTimes(row.startAt, row.endAt, row.workSec)
+      : null
+    if (!interval) {
+      if (Math.max(0, Number(next.workSec ?? 0) || 0) > 0) output.push(next)
+      return
+    }
+
     const groupKey = overlapGroupKey(deps, row)
-    const current = rowsByGroup.get(groupKey) ?? []
-    current.push(row)
-    rowsByGroup.set(groupKey, current)
+    const originalWorkSec = Math.max(0, Math.floor(Number(row.workSec ?? 0) || 0))
+    const originalBreakSec = Math.max(0, Math.floor(Number(row.breakSec ?? 0) || 0))
+    next.rawWorkSec = originalWorkSec
+    next.workSec = Math.max(0, Math.floor((interval.endTs - interval.startTs) / 1000))
+    next.breakSec = Math.min(originalBreakSec, next.workSec)
+    next.netSec = Math.max(0, next.workSec - next.breakSec)
+    next.startAt = interval.startIso
+    next.endAt = interval.endIso
+
+    const active = activeRowsByGroup.get(groupKey)
+    if (!active || interval.startTs > active.interval.endTs) {
+      const entry = { row: next, interval: { startTs: interval.startTs, endTs: interval.endTs } }
+      activeRowsByGroup.set(groupKey, entry)
+      output.push(next)
+      return
+    }
+
+    active.interval.startTs = Math.min(active.interval.startTs, interval.startTs)
+    active.interval.endTs = Math.max(active.interval.endTs, interval.endTs)
+    active.row.startAt = new Date(active.interval.startTs).toISOString()
+    active.row.endAt = new Date(active.interval.endTs).toISOString()
+    active.row.rawWorkSec = Math.max(0, Number(active.row.rawWorkSec ?? 0) || 0) + originalWorkSec
+    active.row.workSec = Math.max(0, Math.floor((active.interval.endTs - active.interval.startTs) / 1000))
+    active.row.breakSec = Math.min(
+      active.row.workSec,
+      Math.max(0, Number(active.row.breakSec ?? 0) || 0) + originalBreakSec,
+    )
+    active.row.netSec = Math.max(0, active.row.workSec - active.row.breakSec)
   })
 
-  return [...rowsByGroup.values()].map((sourceRows) => {
-    const summary = summarizeWorkTimeRows(sourceRows)
-    const first = sourceRows[0] ?? {}
-    return {
-      ...first,
-      rawWorkSec: sourceRows.reduce(
-        (sum, row) => sum + Math.max(0, Math.floor(Number(row?.workSec ?? 0) || 0)),
-        0,
-      ),
-      workIntervals: summary.workIntervals,
-      workSec: summary.grossSec,
-      breakSec: summary.pauseSec,
-      netSec: summary.netSec,
-      reviewRequired: summary.reviewRequired,
-      reviewIssues: summary.issues,
-      startAt: summary.startAt || first.startAt || '',
-      endAt: summary.endAt || first.endAt || '',
-    }
-  })
+  return output
 }
 
 export async function buildWorkTimeEvidenceRowsForWorkers({
@@ -597,14 +617,8 @@ export async function buildWorkTimeEvidenceRowsForWorkers({
     fromIso: deps.ymdToIsoRangeStart(fromYmd),
     toIso: deps.ymdToIsoRangeEnd(toYmd),
     page: 1,
-    pageSize: WORK_TIME_EVIDENCE_EXPORT_MAX_ROWS,
+    pageSize: 100000,
   })
-
-  if (response?.hasNext === true) {
-    throw new Error(
-      `Eksport przekracza bezpieczny limit ${WORK_TIME_EVIDENCE_EXPORT_MAX_ROWS} rekordów. Zawęź daty lub wybór pracowników.`,
-    )
-  }
 
   const rows = (response?.items ?? [])
     .filter((item) => {

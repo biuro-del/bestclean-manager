@@ -40,7 +40,7 @@ test('podglad ogranicza liczbe pozycji bez zmiany kolejnosci', async () => {
   )
 })
 
-test('nakladajace sie zapisy czasu dziennego wymagaja weryfikacji', async () => {
+test('czas dzienny pracownika nie jest zawyzany przez nakladajace sie zapisy', async () => {
   const { buildWorkerDayDurationIndex } = await modelModule
   const index = buildWorkerDayDurationIndex({
     nowTs: new Date('2026-07-27T12:00:00+02:00').getTime(),
@@ -68,8 +68,7 @@ test('nakladajace sie zapisy czasu dziennego wymagaja weryfikacji', async () => 
   })
 
   assert.equal(index['jan kowalski'].ambiguous, false)
-  assert.equal(index['jan kowalski'].reviewRequired, true)
-  assert.equal(index['jan kowalski'].seconds, null)
+  assert.equal(index['jan kowalski'].seconds, 3.5 * 60 * 60)
 })
 
 test('ten sam podpis dla roznych identyfikatorow nie udaje jednego czasu dziennego', async () => {

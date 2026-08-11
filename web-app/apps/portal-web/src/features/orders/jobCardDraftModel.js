@@ -4,7 +4,6 @@ export const JOB_CARD_CUSTOMER_TYPES = Object.freeze(['B2B', 'B2C'])
 export const JOB_CARD_SITE_MODES = Object.freeze(['FIXED_CONTRACT_SITE', 'VISIT_SITE'])
 export const JOB_CARD_SCHEDULE_MODES = Object.freeze(['ONE_OFF', 'RECURRING'])
 export const JOB_CARD_CREW_SOURCES = Object.freeze(['SITE', 'DISPATCHED', 'MIXED'])
-export const JOB_CARD_STAFFING_MODES = Object.freeze(['FIXED', 'VARIABLE_WEEKLY', 'BUFFER'])
 export const JOB_CARD_PAYMENT_METHODS = Object.freeze(['PREPAID', 'CASH', 'CARD', 'DEFERRED'])
 export const JOB_CARD_PRICING_MODES = Object.freeze(['PER_JOB', 'HOURLY', 'PER_OCCURRENCE', 'MONTHLY_CONTRACT'])
 
@@ -58,28 +57,6 @@ function normalizeScheduleMode(order = {}) {
     return 'ONE_OFF'
   }
   return ''
-}
-
-function normalizeStaffingMode(order = {}, assignments = []) {
-  const source = upper(
-    order.staffingMode ||
-    order.assignmentMode ||
-    order.fulfillment?.staffingMode,
-  )
-  if (['FIXED', 'PERMANENT', 'STALA', 'STALY', 'STAŁA', 'STAŁY'].includes(source)) {
-    return 'FIXED'
-  }
-  if (['VARIABLE_WEEKLY', 'VARIABLE', 'WEEKLY', 'ZMIENNA', 'TYGODNIOWA'].includes(source)) {
-    return 'VARIABLE_WEEKLY'
-  }
-  if (['BUFFER', 'BUFOR', 'UNASSIGNED'].includes(source)) {
-    return 'BUFFER'
-  }
-
-  // Backward compatibility: an already staffed legacy order is fixed unless
-  // the creator explicitly selected another staffing policy. Empty legacy
-  // orders stay unresolved and must not silently become buffer assignments.
-  return assignments.length ? 'FIXED' : ''
 }
 
 function normalizeWeekdays(values = []) {
@@ -217,7 +194,6 @@ export function compileOrderDraftToJobCardDraft(order = {}) {
   const pricingMode = normalizedEnum(order.pricingMode || order.commercial?.pricingMode, JOB_CARD_PRICING_MODES)
   const serviceBlocks = normalizeServiceBlocks(order)
   const assignments = normalizeAssignments(order)
-  const staffingMode = normalizeStaffingMode(order, assignments)
   const scopeItems = normalizeScopeItems(order)
   const supplies = normalizeSupplies(order)
 
@@ -270,7 +246,6 @@ export function compileOrderDraftToJobCardDraft(order = {}) {
     fulfillment: {
       dispatchRequired,
       crewSource,
-      staffingMode,
       leaderWorkerId: text(order.leaderWorkerId || order.fulfillment?.leaderWorkerId),
       driverWorkerId: text(order.driverWorkerId || order.fulfillment?.driverWorkerId),
       assignments,
@@ -297,13 +272,11 @@ export function compileOrderDraftToJobCardDraft(order = {}) {
   }
 }
 
-export function validateJobCardDraft(card = {}, options = {}) {
+export function validateJobCardDraft(card = {}) {
   const errors = []
   const warnings = []
   const blocks = Array.isArray(card?.schedule?.serviceBlocks) ? card.schedule.serviceBlocks : []
   const assignments = Array.isArray(card?.fulfillment?.assignments) ? card.fulfillment.assignments : []
-  const staffingMode = normalizedEnum(card?.fulfillment?.staffingMode, JOB_CARD_STAFFING_MODES)
-  const requiresConcreteAssignments = options?.requireConcreteAssignments === true
   const scopeItems = Array.isArray(card?.service?.scopeItems) ? card.service.scopeItems : []
   const supplies = Array.isArray(card?.resources?.supplies) ? card.resources.supplies : []
 
@@ -345,20 +318,7 @@ export function validateJobCardDraft(card = {}, options = {}) {
   if (!scopeItems.length && !text(card?.service?.internalDescription)) {
     errors.push(issue('ERROR', 'SERVICE_SCOPE_REQUIRED', 'Dodaj strefę, checklistę albo jednoznaczny opis prac.', 'service.scopeItems'))
   }
-  if (
-    !assignments.length &&
-    !requiresConcreteAssignments &&
-    ['VARIABLE_WEEKLY', 'BUFFER'].includes(staffingMode)
-  ) {
-    warnings.push(issue(
-      'WARNING',
-      'ASSIGNEE_REQUIRED',
-      staffingMode === 'BUFFER'
-        ? 'Obsada zostanie uzupełniona w buforze planowania przed publikacją konkretnego wystąpienia.'
-        : 'Obsada jest ustalana co tydzień i musi zostać uzupełniona przed publikacją konkretnego wystąpienia.',
-      'fulfillment.assignments',
-    ))
-  } else if (!assignments.length) {
+  if (!assignments.length) {
     errors.push(issue('ERROR', 'ASSIGNEE_REQUIRED', 'Przypisz co najmniej jednego pracownika lub zespół obiektu.', 'fulfillment.assignments'))
   }
   if (!JOB_CARD_CREW_SOURCES.includes(card?.fulfillment?.crewSource)) {
@@ -430,10 +390,6 @@ export function validateJobCardDraft(card = {}, options = {}) {
     warnings,
     issues: [...errors, ...warnings],
   }
-}
-
-export function validateJobCardOccurrencePublication(card = {}) {
-  return validateJobCardDraft(card, { requireConcreteAssignments: true })
 }
 
 function canonicalValue(value) {

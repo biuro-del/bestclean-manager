@@ -168,31 +168,14 @@ export const startWorkdayPause = wrap('mutation', 'StartWorkdayPause', generated
 export const stopWorkdayPause = wrap('mutation', 'StopWorkdayPause', generated.stopWorkdayPause)
 
 export const workersForOrg = wrap('query', 'WorkersForOrg', generated.workersForOrg)
-export const workersPageForOrg = wrap('query', 'WorkersPageForOrg', generated.workersPageForOrg)
-export const workerForOrgByLogin = wrap('query', 'WorkerForOrgByLogin', generated.workerForOrgByLogin)
 export const clientsForOrg = wrap('query', 'ClientsForOrg', generated.clientsForOrg)
-export const clientsPageForOrg = wrap('query', 'ClientsPageForOrg', generated.clientsPageForOrg)
 export const individualJobsForOrg = wrap('query', 'IndividualJobsForOrg', generated.individualJobsForOrg)
-export const individualJobsPageForOrg = wrap('query', 'IndividualJobsPageForOrg', generated.individualJobsPageForOrg)
 export const tasksForOrg = wrap('query', 'TasksForOrg', generated.tasksForOrg)
 export const zonesForOrg = wrap('query', 'ZonesForOrg', generated.zonesForOrg)
-export const zonesPageForOrg = wrap('query', 'ZonesPageForOrg', generated.zonesPageForOrg)
 export const workdaysForOrg = wrap('query', 'WorkdaysForOrg', generated.workdaysForOrg)
-export const workdaysIntegrityPageForOrg = wrap(
-  'query',
-  'WorkdaysIntegrityPageForOrg',
-  generated.workdaysIntegrityPageForOrg,
-)
 export const workerWorkdaysForOrg = wrap('query', 'WorkerWorkdaysForOrg', generated.workerWorkdaysForOrg)
 export const backupCyclesForOrg = wrap('query', 'BackupCyclesForOrg', generated.backupCyclesForOrg)
-export const backupCyclesPageForOrg = wrap('query', 'BackupCyclesPageForOrg', generated.backupCyclesPageForOrg)
 export const eventsForOrg = wrap('query', 'EventsForOrg', generated.eventsForOrg)
-export const eventsIntegrityPageForOrg = wrap('query', 'EventsIntegrityPageForOrg', generated.eventsIntegrityPageForOrg)
 export const storageForOrg = wrap('query', 'StorageForOrg', generated.storageForOrg)
 export const clientStorageForOrg = wrap('query', 'ClientStorageForOrg', generated.clientStorageForOrg)
 export const workdayPausesForOrg = wrap('query', 'WorkdayPausesForOrg', generated.workdayPausesForOrg)
-export const workdayPausesPageForOrg = wrap(
-  'query',
-  'WorkdayPausesPageForOrg',
-  generated.workdayPausesPageForOrg,
-)

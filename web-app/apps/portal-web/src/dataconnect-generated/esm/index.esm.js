@@ -446,28 +446,6 @@ export function workersForOrg(dcOrVars, vars) {
   return executeQuery(workersForOrgRef(dcOrVars, vars));
 }
 
-export const workersPageForOrgRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return queryRef(dcInstance, 'WorkersPageForOrg', inputVars);
-}
-workersPageForOrgRef.operationName = 'WorkersPageForOrg';
-
-export function workersPageForOrg(dcOrVars, vars) {
-  return executeQuery(workersPageForOrgRef(dcOrVars, vars));
-}
-
-export const workerForOrgByLoginRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return queryRef(dcInstance, 'WorkerForOrgByLogin', inputVars);
-}
-workerForOrgByLoginRef.operationName = 'WorkerForOrgByLogin';
-
-export function workerForOrgByLogin(dcOrVars, vars) {
-  return executeQuery(workerForOrgByLoginRef(dcOrVars, vars));
-}
-
 export const clientsForOrgRef = (dcOrVars, vars) => {
   const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
   dcInstance._useGeneratedSdk();
@@ -479,17 +457,6 @@ export function clientsForOrg(dcOrVars, vars) {
   return executeQuery(clientsForOrgRef(dcOrVars, vars));
 }
 
-export const clientsPageForOrgRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return queryRef(dcInstance, 'ClientsPageForOrg', inputVars);
-}
-clientsPageForOrgRef.operationName = 'ClientsPageForOrg';
-
-export function clientsPageForOrg(dcOrVars, vars) {
-  return executeQuery(clientsPageForOrgRef(dcOrVars, vars));
-}
-
 export const individualJobsForOrgRef = (dcOrVars, vars) => {
   const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
   dcInstance._useGeneratedSdk();
@@ -499,17 +466,6 @@ individualJobsForOrgRef.operationName = 'IndividualJobsForOrg';
 
 export function individualJobsForOrg(dcOrVars, vars) {
   return executeQuery(individualJobsForOrgRef(dcOrVars, vars));
-}
-
-export const individualJobsPageForOrgRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return queryRef(dcInstance, 'IndividualJobsPageForOrg', inputVars);
-}
-individualJobsPageForOrgRef.operationName = 'IndividualJobsPageForOrg';
-
-export function individualJobsPageForOrg(dcOrVars, vars) {
-  return executeQuery(individualJobsPageForOrgRef(dcOrVars, vars));
 }
 
 export const tasksForOrgRef = (dcOrVars, vars) => {
@@ -532,17 +488,6 @@ zonesForOrgRef.operationName = 'ZonesForOrg';
 
 export function zonesForOrg(dcOrVars, vars) {
   return executeQuery(zonesForOrgRef(dcOrVars, vars));
-}
-
-export const zonesPageForOrgRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return queryRef(dcInstance, 'ZonesPageForOrg', inputVars);
-}
-zonesPageForOrgRef.operationName = 'ZonesPageForOrg';
-
-export function zonesPageForOrg(dcOrVars, vars) {
-  return executeQuery(zonesPageForOrgRef(dcOrVars, vars));
 }
 
 export const workdaysForOrgRef = (dcOrVars, vars) => {
@@ -631,17 +576,6 @@ backupCyclesForOrgRef.operationName = 'BackupCyclesForOrg';
 
 export function backupCyclesForOrg(dcOrVars, vars) {
   return executeQuery(backupCyclesForOrgRef(dcOrVars, vars));
-}
-
-export const backupCyclesPageForOrgRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return queryRef(dcInstance, 'BackupCyclesPageForOrg', inputVars);
-}
-backupCyclesPageForOrgRef.operationName = 'BackupCyclesPageForOrg';
-
-export function backupCyclesPageForOrg(dcOrVars, vars) {
-  return executeQuery(backupCyclesPageForOrgRef(dcOrVars, vars));
 }
 
 export const eventsForOrgRef = (dcOrVars, vars) => {
@@ -796,17 +730,6 @@ workdayPausesForOrgRef.operationName = 'WorkdayPausesForOrg';
 
 export function workdayPausesForOrg(dcOrVars, vars) {
   return executeQuery(workdayPausesForOrgRef(dcOrVars, vars));
-}
-
-export const workdayPausesPageForOrgRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return queryRef(dcInstance, 'WorkdayPausesPageForOrg', inputVars);
-}
-workdayPausesPageForOrgRef.operationName = 'WorkdayPausesPageForOrg';
-
-export function workdayPausesPageForOrg(dcOrVars, vars) {
-  return executeQuery(workdayPausesPageForOrgRef(dcOrVars, vars));
 }
 
 export const activeWorkdayPauseForWorkerRef = (dcOrVars, vars) => {

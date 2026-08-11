@@ -200,7 +200,6 @@ const PORTAL_ROUTE_VIEW_IDS = {
   contractProfitability: 'view-contractProfitability',
   events: 'view-events',
   orders: 'view-orders',
-  orderCreate: 'view-orderCreate',
   ordersMap: 'view-ordersMap',
   zones: 'view-zones',
   workerProfile: 'view-workerProfile',
@@ -226,7 +225,6 @@ const PORTAL_ROUTE_FEATURE_KEYS = {
   contractProfitability: ['contractProfitability'],
   events: ['dashboard', 'reports', 'zones', 'clientProfile', 'workerTime', 'events'],
   orders: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar'],
-  orderCreate: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar', 'orderCreate'],
   ordersMap: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar'],
   zones: ['zones'],
   workerProfile: ['dashboard', 'workerProfile'],
@@ -247,7 +245,6 @@ const PORTAL_ROUTE_BIND_KEYS = {
   contractProfitability: 'contractProfitability',
   events: 'events',
   orders: 'orders:list',
-  orderCreate: 'orders:create',
   ordersMap: 'orders:map',
   zones: 'zones',
   workerProfile: 'workerProfile',
@@ -1563,13 +1560,6 @@ function routeHasUsableData(route) {
     case 'orders':
     case 'ordersMap':
       return appState.calendarTimelineOrdersRemoteLoaded === true || (Array.isArray(appState.calendarTimelineDemoOrders) && appState.calendarTimelineDemoOrders.length > 0)
-    case 'orderCreate':
-      return (
-        appState.calendarTimelineOrdersRemoteLoaded === true &&
-        appState.clientsLoaded === true &&
-        appState.zonesLoaded === true &&
-        appState.workersLoaded === true
-      )
     case 'clientsList':
     case 'clientProfile':
       return appState.clientsLoaded === true || (Array.isArray(appState.clientProfileRows) && appState.clientProfileRows.length > 0) || (Array.isArray(appState.clients) && appState.clients.length > 0)
@@ -3111,8 +3101,6 @@ function loadPortalTemplateModule(route) {
       return import('../features/profitability/index.js')
     case 'orders':
       return import('../features/orders/list/index.js')
-    case 'orderCreate':
-      return import('../features/orders/create/index.js')
     case 'ordersMap':
       return import('../features/orders/map/index.js')
     case 'reports':
@@ -3150,8 +3138,6 @@ function loadPortalFeatureModule(featureKey) {
       return import('../features/profitability/index.js')
     case 'orders':
       return import('../features/orders/index.js')
-    case 'orderCreate':
-      return import('../features/orders/create/index.js')
     case 'reports':
       return import('../features/reports/index.js')
     case 'settings':
@@ -3187,8 +3173,6 @@ function portalFeatureIsReady(featureKey) {
       return Boolean(contractProfitabilityFeature)
     case 'orders':
       return Boolean(ordersFeature)
-    case 'orderCreate':
-      return Boolean(orderCreateFeature)
     case 'reports':
       return Boolean(reportsFeature)
     case 'settings':
@@ -3236,9 +3220,6 @@ function assignPortalFeature(featureKey, module) {
     case 'orders':
       ordersFeature = ordersFeature || module.createOrdersFeature(portalFeatureContext)
       return ordersFeature
-    case 'orderCreate':
-      orderCreateFeature = orderCreateFeature || module.createOrderCreateFeature(portalFeatureContext)
-      return orderCreateFeature
     case 'reports':
       reportsFeature = reportsFeature || module.createReportsFeature(portalFeatureContext)
       return reportsFeature
@@ -3409,9 +3390,6 @@ function bindPortalRouteOnce(route, navigation = portalNavigation) {
       break
     case 'orders':
       cleanup = bindOrdersViewFunctions()
-      break
-    case 'orderCreate':
-      cleanup = bindOrderCreateViewFunctions(navigation)
       break
     case 'ordersMap':
       cleanup = bindOrdersMapViewFunctions()
@@ -3592,8 +3570,7 @@ function showLoginCredentials({ showResetAction = false } = {}) {
     loginTitle.textContent = 'Witaj ponownie'
   }
   if (loginCopy) {
-    loginCopy.textContent =
-      'Zaloguj si\u0119 do systemu, kt\u00f3ry upraszcza zarz\u0105dzanie ca\u0142\u0105 firm\u0105 sprz\u0105taj\u0105c\u0105.'
+    loginCopy.textContent = 'Zaloguj si\u0119, aby przej\u015b\u0107 do centrum dowodzenia Cleanzi.'
   }
 }
 
@@ -3984,66 +3961,12 @@ function clientProfileFindById(clientId) {
 }
 
 let ordersFeature = null
-let orderCreateFeature = null
-let pendingOrderCreateOpenOptions = null
 
 function getOrdersFeature() {
   if (!ordersFeature) {
     throw new Error('Orders feature is not initialized.')
   }
   return ordersFeature
-}
-
-function getOrderCreateFeature() {
-  if (!orderCreateFeature) {
-    throw new Error('Order create feature is not initialized.')
-  }
-  return orderCreateFeature
-}
-
-function renderOrderCreateView(...args) {
-  return getOrderCreateFeature().render?.(...args)
-}
-
-function bindOrderCreateViewFunctions(navigation) {
-  return getOrderCreateFeature().bind?.(navigation)
-}
-
-function orderCreateOpen(options = {}) {
-  const feature = getOrderCreateFeature()
-  if (typeof feature.open === 'function') {
-    return feature.open(options)
-  }
-  return feature.render?.(options)
-}
-
-function openOrderCreateWorkspace(router = portalNavigation, options = {}) {
-  if (!router || typeof router.go !== 'function') {
-    showTransientNotice('Kreator zlecenia jest chwilowo niedostepny.', 'error')
-    return Promise.resolve(false)
-  }
-
-  const requestedReturnRoute = String(options.returnRoute ?? options.sourceRoute ?? '').trim()
-  const currentRoute = normalizeNavigationRoute(router.getCurrentRoute?.() || appState.currentRoute)
-  const fallbackRoute = currentRoute && currentRoute !== 'orderCreate' ? currentRoute : 'orders'
-  const returnRoute =
-    requestedReturnRoute && requestedReturnRoute !== 'orderCreate' && portalRouteExists(requestedReturnRoute)
-      ? normalizeNavigationRoute(requestedReturnRoute)
-      : fallbackRoute
-
-  const openOptions = {
-    ...options,
-    returnRoute,
-    sourceRoute: returnRoute,
-  }
-  pendingOrderCreateOpenOptions = openOptions
-
-  return Promise.resolve(router.go('orderCreate')).then((ready) => {
-    if (!ready && pendingOrderCreateOpenOptions === openOptions) {
-      pendingOrderCreateOpenOptions = null
-    }
-    return Boolean(ready)
-  })
 }
 
 function ordersTimelineClientLabel(order = {}) {
@@ -4111,9 +4034,6 @@ function ordersWorkAllocationsForSubjects(order = {}, subjects = [], totalMinute
 }
 
 function ordersSelectCreatedClientInEditor(payload = {}, orderId = '') {
-  if (String(orderId ?? '').trim() === '__orderCreate__' && orderCreateFeature) {
-    return orderCreateFeature.selectCreatedObject?.(payload)
-  }
   return getOrdersFeature().ordersSelectCreatedClientInEditor(payload, orderId)
 }
 
@@ -4129,38 +4049,8 @@ function ordersDefaultEndTime(startTime = '08:00', durationMinutes = 120) {
   return getOrdersFeature().ordersDefaultEndTime(startTime, durationMinutes)
 }
 
-function ordersOpenAddEditor(targetDate = todayYmd(), options = {}) {
-  return openOrderCreateWorkspace(portalNavigation, {
-    ...options,
-    initialDate: String(targetDate ?? '').trim() || todayYmd(),
-  })
-}
-
-function ordersCreateWorkspaceOptions(...args) {
-  return getOrdersFeature().ordersCreateWorkspaceOptions(...args)
-}
-
-function ordersSaveCreateWorkspaceDraft(...args) {
-  return getOrdersFeature().ordersSaveCreateWorkspaceDraft(...args)
-}
-
-function ordersPublishCreateWorkspaceJobCard(...args) {
-  return getOrdersFeature().ordersPublishCreateWorkspaceJobCard(...args)
-}
-
-function onOrderCreateNewObject(options = {}) {
-  appState.ordersClientCreateReturnOrderId = '__orderCreate__'
-  openClientModal('add', '', {
-    name: String(options?.name ?? '').trim(),
-    address: String(options?.address ?? '').trim(),
-    clientType: 'B2B',
-    status: 'Aktywny',
-  })
-  return null
-}
-
-function openOrderCreateFromFeature(options = {}) {
-  return openOrderCreateWorkspace(portalNavigation, options)
+function ordersOpenAddEditor(...args) {
+  return getOrdersFeature().openAddEditor(...args)
 }
 
 function ordersWarmLocationSources() {
@@ -5325,15 +5215,11 @@ function bindRouteButtons(router) {
       return
     }
 
-    const orderCreateButton = eventTargetClosest(event, '#sidebarOrdersAddBtn, #ordersAddBtn')
-    if (orderCreateButton) {
+    const sidebarOrdersAddButton = eventTargetClosest(event, '#sidebarOrdersAddBtn')
+    if (sidebarOrdersAddButton) {
       event.preventDefault()
-      event.stopImmediatePropagation()
-      const sourceRoute = normalizeNavigationRoute(router.getCurrentRoute?.() || appState.currentRoute)
-      void openOrderCreateWorkspace(router, {
-        sourceRoute,
-        returnRoute: sourceRoute,
-        initialDate: todayYmd(),
+      void router.go('orders').then((ready) => {
+        if (ready) ordersOpenAddEditor()
       })
       return
     }
@@ -5838,11 +5724,6 @@ function createPortalFeatureContext() {
     ordersTimelineClientLabel,
     ordersTimelineAddressLabel,
     ordersOpenAddEditor,
-    openOrderCreateWorkspace: openOrderCreateFromFeature,
-    ordersCreateWorkspaceOptions,
-    ordersSaveCreateWorkspaceDraft,
-    ordersPublishCreateWorkspaceJobCard,
-    onOrderCreateNewObject,
     ordersNormalizeOrderRows,
     ordersOrderHasInactiveOnlyWorkerAssignments,
     kanbanTaskIsCompleted,
@@ -6976,20 +6857,6 @@ async function syncRouteDataNow(normalizedRoute, options = {}) {
     return
   }
 
-  if (normalizedRoute === 'orderCreate') {
-    await Promise.allSettled([
-      ordersSyncRemoteTimelineOrders({ render: false }),
-      ordersWarmLocationSources(force),
-      fetchClientsForCurrentSession(force),
-      fetchWorkersForCurrentSession(force),
-      fetchZonesForCurrentSession(force),
-    ])
-    if (appState.currentRoute === 'orderCreate') {
-      renderOrderCreateView()
-    }
-    return
-  }
-
   if (normalizedRoute === 'ordersMap') {
     await Promise.allSettled([
       ordersSyncRemoteTimelineOrders({ render: true }),
@@ -7164,23 +7031,6 @@ export function mountPortalApp() {
     if (routeName === 'orders') {
       renderOrdersView()
       await syncRouteData(routeName)
-      return
-    }
-
-    if (routeName === 'orderCreate') {
-      renderOrderCreateView()
-      const openOptions = pendingOrderCreateOpenOptions || {
-        returnRoute: 'orders',
-        sourceRoute: 'orders',
-        initialDate: todayYmd(),
-      }
-      pendingOrderCreateOpenOptions = null
-      await orderCreateOpen(openOptions)
-      void Promise.resolve(syncRouteData(routeName, {
-        policy: ROUTE_SYNC_POLICY_BACKGROUND,
-        showOverlay: false,
-        noticeOnError: false,
-      })).then(() => orderCreateFeature?.reloadSourcesAndSelect?.()).catch(() => {})
       return
     }
 
@@ -7441,7 +7291,6 @@ export function mountPortalApp() {
     try {
       dashboardFeature?.cleanup?.()
       ordersFeature?.cleanup?.()
-      orderCreateFeature?.cleanup?.()
       kanbanFeature?.cleanup?.()
       calendarFeature?.cleanup?.()
     } catch {
@@ -7451,8 +7300,6 @@ export function mountPortalApp() {
     dashboardFeature = null
     clientProfileFeature = null
     ordersFeature = null
-    orderCreateFeature = null
-    pendingOrderCreateOpenOptions = null
     kanbanFeature = null
     calendarFeature = null
     zonesFeature = null

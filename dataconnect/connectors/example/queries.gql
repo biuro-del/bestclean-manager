@@ -107,65 +107,6 @@ query WorkersForOrg($orgId: String!) @auth(level: USER) {
   }
 }
 
-query WorkersPageForOrg($orgId: String!, $limit: Int, $offset: Int) @auth(level: USER) {
-  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
-    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAĹ»YSTA']", message: "Brak roli w organizacji.")
-    }
-
-  organization(key: { orgId: $orgId }) {
-    ownerWorkerId
-  }
-
-  workers(
-    limit: $limit
-    offset: $offset
-    where: { orgId: { eq: $orgId } }
-    orderBy: [{ login: ASC }]
-  ) {
-    login
-    workerId
-    workerName
-    loginEmail
-    authUid
-    role
-    active
-    email
-    phone
-    photoUrl
-    workerType
-    edit
-    createdAt
-    updatedAt
-  }
-}
-
-query WorkerForOrgByLogin($orgId: String!, $workerLogin: String!) @auth(level: USER) {
-  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
-    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAĹ»YSTA']", message: "Brak roli w organizacji.")
-    }
-
-  worker(key: { orgId: $orgId, login: $workerLogin }) {
-    login
-    workerId
-    workerName
-    loginEmail
-    authUid
-    role
-    active
-    email
-    phone
-    photoUrl
-    workerType
-    edit
-    createdAt
-    updatedAt
-  }
-}
-
 query ClientsForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
@@ -225,70 +166,6 @@ query ClientsForOrg($orgId: String!) @auth(level: USER) {
   }
 }
 
-query ClientsPageForOrg($orgId: String!, $limit: Int, $offset: Int) @auth(level: USER) {
-  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
-    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAĹ»YSTA']", message: "Brak roli w organizacji.")
-    }
-
-  clients(
-    limit: $limit
-    offset: $offset
-    where: { orgId: { eq: $orgId } }
-    orderBy: [{ clientId: ASC }]
-  ) {
-    clientId
-    name
-    nip
-    city
-    address
-    contact
-    coordinator
-    status
-    clientType
-    serviceFrequency
-    assignees
-    chemistry
-    equipment
-    clientInfo
-    objectType
-    cooperationStartAt
-    cooperationEndAt
-    contactPerson
-    phone
-    email
-    emergencyContact
-    contactPosition
-    postalCode
-    accessHours
-    accessMethod
-    serviceEntry
-    serviceType
-    serviceDays
-    preferredHours
-    workMode
-    sla
-    rbhAmount
-    requiredPermissions
-    bhpRequirements
-    workRestrictions
-    excludedZones
-    operationalRisks
-    specialInstructions
-    specialEquipment
-    storagePlace
-    backroomAccess
-    technicalNotes
-    internalNotes
-    coordinatorChangedAt
-    lastExecutionAt
-    lastWorkerAssignmentAt
-    createdAt
-    updatedAt
-  }
-}
-
 query IndividualJobsForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
@@ -297,31 +174,6 @@ query IndividualJobsForOrg($orgId: String!) @auth(level: USER) {
     }
 
   individualClientJobs(where: { orgId: { eq: $orgId } }, orderBy: [{ date: DESC }, { clientIndId: ASC }]) {
-    clientIndId
-    date
-    name
-    nip
-    city
-    address
-    contact
-    clientInfo
-    qrCode
-  }
-}
-
-query IndividualJobsPageForOrg($orgId: String!, $limit: Int, $offset: Int) @auth(level: USER) {
-  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
-    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR']", message: "Brak uprawnien do backupu organizacji.")
-    }
-
-  individualClientJobs(
-    where: { orgId: { eq: $orgId } }
-    orderBy: [{ date: DESC }, { clientIndId: ASC }]
-    limit: $limit
-    offset: $offset
-  ) {
     clientIndId
     date
     name
@@ -408,29 +260,6 @@ query ZonesForOrg($orgId: String!) @auth(level: USER) {
     }
 
   zones(limit: 5000, where: { orgId: { eq: $orgId } }, orderBy: [{ zone: ASC }]) {
-    zoneId
-    clientId
-    zone
-    function
-    editedBy
-    date
-    location
-  }
-}
-
-query ZonesPageForOrg($orgId: String!, $limit: Int, $offset: Int) @auth(level: USER) {
-  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
-    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAĹ»YSTA']", message: "Brak roli w organizacji.")
-    }
-
-  zones(
-    limit: $limit
-    offset: $offset
-    where: { orgId: { eq: $orgId } }
-    orderBy: [{ zoneId: ASC }]
-  ) {
     zoneId
     clientId
     zone
@@ -674,34 +503,6 @@ query BackupCyclesForOrg($orgId: String!) @auth(level: USER) {
     }
 
   backupCycles(limit: 5000, where: { orgId: { eq: $orgId } }, orderBy: [{ startAt: DESC }]) {
-    workdayId: cycleId
-    workerLogin
-    workerName
-    utilityRoomId: roomId
-    strefa
-    pomieszczenie
-    startAt
-    endAt
-    durationSec
-    status
-    comment
-    updatedAt: editedAt
-  }
-}
-
-query BackupCyclesPageForOrg($orgId: String!, $limit: Int, $offset: Int) @auth(level: USER) {
-  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
-    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR']", message: "Brak uprawnien do backupu organizacji.")
-    }
-
-  backupCycles(
-    limit: $limit
-    offset: $offset
-    where: { orgId: { eq: $orgId } }
-    orderBy: [{ editedAt: DESC }, { cycleId: DESC }]
-  ) {
     workdayId: cycleId
     workerLogin
     workerName
@@ -1350,34 +1151,6 @@ query WorkdayPausesForOrg($orgId: String!) @auth(level: USER) {
     where: { orgId: { eq: $orgId } }
     orderBy: [{ startAt: DESC }]
     limit: 5000
-  ) {
-    pauseId
-    workdayId
-    workerLogin
-    workerName
-    deviceId
-    pauseEventId
-    startAt
-    stopAt
-    durationSec
-    status
-    createdAt
-    updatedAt
-  }
-}
-
-query WorkdayPausesPageForOrg($orgId: String!, $limit: Int, $offset: Int) @auth(level: USER) {
-  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
-    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR']", message: "Brak uprawnien do backupu organizacji.")
-    }
-
-  workdayPauses(
-    where: { orgId: { eq: $orgId } }
-    orderBy: [{ updatedAt: DESC }, { pauseId: DESC }]
-    limit: $limit
-    offset: $offset
   ) {
     pauseId
     workdayId

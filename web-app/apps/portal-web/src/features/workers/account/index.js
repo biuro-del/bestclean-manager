@@ -17,14 +17,12 @@ import {
   workIntervalGpsCoordinates,
   workIntervalsFromRow,
   workIntervalsTotalSeconds,
-  summarizeWorkTimeRows,
 } from '../workIntervals.js'
 import {
   findPendingTimeEditorItem,
   preciseTimeInputValue,
   timeEditorSourceRows,
 } from './workdayTimeEditorModel.js'
-import { assertCompletePagedResponse } from '../../../services/workdayReadCostPolicy.js'
 
 export const route = 'workerAccount'
 export const viewId = 'view-workerAccount'
@@ -781,7 +779,6 @@ export function createWorkerAccountFeature(ctx) {
   function resetWorkerAccountRuntimeState({ clearLoadedKey = true, clearLoadingKeys = false } = {}) {
     appState.workerAccountOrderRows = []
     appState.workerAccountEventsRows = []
-    appState.workerAccountEventsHasMore = false
     appState.workerAccountDaysRows = []
     appState.workerAccountAllTimeRows = []
     appState.workerAccountTimeRows = []
@@ -803,16 +800,11 @@ export function createWorkerAccountFeature(ctx) {
     const timeRows = Array.isArray(appState.workerAccountAllTimeRows) ? appState.workerAccountAllTimeRows : []
     const eventRows = Array.isArray(appState.workerAccountEventsRows) ? appState.workerAccountEventsRows : []
     const orderRows = Array.isArray(appState.workerAccountOrderRows) ? appState.workerAccountOrderRows : []
-    const eventCount = countEventsInRange(eventRows, monthRange)
-    const monthEventCountMayBeIncomplete = appState.workerAccountEventsHasMore === true && eventRows.every((row) => {
-      const dayKey = eventDayKey(row)
-      return !dayKey || dayKey >= monthRange.from
-    })
     renderKpis({
       completedOrders: orderRows.filter((order) => orderCompleted(order)).length,
       monthSeconds: sumRowsInRange(timeRows, monthRange),
       weekSeconds: sumRowsInRange(timeRows, weekRange),
-      eventCount: monthEventCountMayBeIncomplete ? `${eventCount}+` : eventCount,
+      eventCount: countEventsInRange(eventRows, monthRange),
     })
   }
 
@@ -1736,6 +1728,55 @@ export function createWorkerAccountFeature(ctx) {
     }, 0)
   }
 
+  function timeIntervalFromRow(row = {}) {
+    const startIso = rowStartIso(row)
+    const endIso = rowEndIso(row)
+    const durationSec = Number(row.durationSec ?? row.closedSec ?? row.workSec ?? 0)
+    let startTs = startIso ? new Date(startIso).getTime() : 0
+    let endTs = endIso ? new Date(endIso).getTime() : 0
+
+    if (!Number.isFinite(startTs)) startTs = 0
+    if (!Number.isFinite(endTs)) endTs = 0
+    if (endTs <= startTs && startTs > 0 && Number.isFinite(durationSec) && durationSec > 0) {
+      endTs = startTs + Math.floor(durationSec) * 1000
+    }
+    if (!startTs || !endTs || endTs <= startTs) return null
+    return { startTs, endTs }
+  }
+
+  function mergeTimeIntervals(intervals = []) {
+    const sorted = intervals
+      .filter(Boolean)
+      .map((interval) => ({ startTs: Number(interval.startTs), endTs: Number(interval.endTs) }))
+      .filter((interval) => Number.isFinite(interval.startTs) && Number.isFinite(interval.endTs) && interval.endTs > interval.startTs)
+      .sort((left, right) => left.startTs - right.startTs || left.endTs - right.endTs)
+    const merged = []
+    sorted.forEach((interval) => {
+      const last = merged[merged.length - 1]
+      if (!last || interval.startTs > last.endTs) {
+        merged.push({ ...interval })
+        return
+      }
+      last.endTs = Math.max(last.endTs, interval.endTs)
+    })
+    return merged
+  }
+
+  function timeRowsTotalSeconds(rows = []) {
+    const intervals = rows.flatMap((row) => {
+      if (Array.isArray(row?.workIntervals) && row.workIntervals.length) {
+        return workIntervalsFromRow(row)
+      }
+      const interval = timeIntervalFromRow(row)
+      return interval ? [interval] : []
+    })
+    const totalMs = mergeTimeIntervals(intervals).reduce(
+      (sum, interval) => sum + Math.max(0, interval.endTs - interval.startTs),
+      0,
+    )
+    return Math.floor(totalMs / 1000)
+  }
+
   function aggregateTimeRows(rows = [], worker = {}) {
     const groups = new Map()
     ;(Array.isArray(rows) ? rows : []).forEach((row) => {
@@ -1774,21 +1815,19 @@ export function createWorkerAccountFeature(ctx) {
 
     return [...groups.values()]
       .map((bucket) => {
-        const summary = summarizeWorkTimeRows(bucket.sourceRows)
-        const workSec = summary.grossSec
-        const breakSec = summary.pauseSec
-        const netSec = summary.netSec
+        const mergedWorkSec = timeRowsTotalSeconds(bucket.sourceRows)
+        const workSec = mergedWorkSec || timeRangeSeconds(bucket.startAt, bucket.endAt)
+        const breakSec = Math.min(workSec, Math.max(0, Math.floor(Number(bucket.breakSec ?? 0))))
+        const netSec = Math.max(0, workSec - breakSec)
         return {
           dayKey: bucket.dayKey,
           workerName: bucket.workerName || workerName(worker) || workerLogin(worker) || '-',
           workerType: bucket.workerType || roleLabel(workerRole(worker)) || '-',
-          startAt: summary.startAt || bucket.startAt,
-          endAt: summary.endAt || bucket.endAt,
+          startAt: bucket.startAt,
+          endAt: bucket.endAt,
           workSec,
           breakSec,
           netSec,
-          reviewRequired: summary.reviewRequired,
-          reviewIssues: summary.issues,
           updatedBy: bucket.updatedBy || '-',
           comment: bucket.comment || '',
           sourceRows: bucket.sourceRows,
@@ -1851,11 +1890,6 @@ export function createWorkerAccountFeature(ctx) {
 
   function responseItems(response) {
     return Array.isArray(response?.items) ? response.items : []
-  }
-
-  function completeWorkerResponseItems(response, sourceLabel) {
-    assertCompletePagedResponse(response, sourceLabel)
-    return responseItems(response)
   }
 
   function hasMeaningfulTimePayload(row = {}) {
@@ -1938,24 +1972,22 @@ export function createWorkerAccountFeature(ctx) {
     const pageSize = Number(range.pageSize) || WORKER_ACCOUNT_TIME_FETCH_PAGE_SIZE
     const responses = await Promise.all(
       candidates.flatMap((candidate) => [
-        getWorkerTime(orgId, candidate, { ...range, page: 1, pageSize }),
+        getWorkerTime(orgId, candidate, { ...range, page: 1, pageSize }).catch(() => ({ items: [] })),
         getWorkdays(orgId, {
           source: 'workdays',
           workerLogin: candidate,
           ...range,
           page: 1,
           pageSize,
-        }),
+        }).catch(() => ({ items: [] })),
       ]),
     )
-    return mergeUniqueRows(
-      responses.map((response, index) => completeWorkerResponseItems(response, `ewidencji czasu pracownika (${index + 1})`)),
-    )
+    return mergeUniqueRows(responses.map(responseItems))
       .filter(hasMeaningfulTimePayload)
       .filter((row) => !rowHasWorkerIdentity(row) || rowMatchesRelatedWorker(row, worker))
   }
 
-  async function fetchWorkerTimeRows(orgId, worker, range = {}) {
+  async function fetchWorkerTimeRows(orgId, worker, range = {}, options = {}) {
     const candidates = prioritizedWorkerFetchCandidates(worker)
     const pageSize = Number(range.pageSize) || WORKER_ACCOUNT_TIME_FETCH_PAGE_SIZE
     const primaryRows = await fetchWorkerTimeCandidateRows(orgId, worker, candidates.slice(0, 1), { ...range, pageSize })
@@ -1971,16 +2003,30 @@ export function createWorkerAccountFeature(ctx) {
             ...range,
             page: 1,
             pageSize,
-          })
-          : Promise.resolve({ items: [], hasNext: false }),
+          }).catch(() => ({ items: [] }))
+          : Promise.resolve({ items: [] }),
       ])
-      const nameRows = completeWorkerResponseItems(fallbackResponses[1], 'ewidencji czasu pracownika po nazwie')
+      const nameRows = responseItems(fallbackResponses[1])
         .filter(hasMeaningfulTimePayload)
         .filter((row) => !rowHasWorkerIdentity(row) || rowMatchesRelatedWorker(row, worker, { allowLooseName: true }))
       directRows = mergeUniqueRows([fallbackResponses[0], nameRows])
     }
 
-    return directRows
+    if (directRows.length || options.allowBroadFallback === false) {
+      return directRows
+    }
+
+    const broadResponse = await getWorkdays(orgId, {
+      source: 'workdays',
+      ...range,
+      page: 1,
+      pageSize,
+    }).catch(() => ({ items: [] }))
+    const broadRows = responseItems(broadResponse)
+      .filter(hasMeaningfulTimePayload)
+      .filter((row) => rowHasWorkerIdentity(row) && rowMatchesRelatedWorker(row, worker))
+
+    return mergeUniqueRows([directRows, broadRows])
   }
 
   async function fetchWorkerEventCandidateRows(orgId, worker, candidates = [], options = {}) {
@@ -1992,23 +2038,19 @@ export function createWorkerAccountFeature(ctx) {
         workerLogin: candidate,
         page: 1,
         pageSize,
-      })),
+      }).catch(() => ({ items: [] }))),
     )
-    const rows = mergeUniqueRows(responses.map(responseItems))
+    return mergeUniqueRows(responses.map(responseItems))
       .filter(hasMeaningfulEventPayload)
       .filter((row) => eventRowBelongsToQueriedWorker(row, worker, { allowLooseName: true }))
-    return {
-      rows,
-      hasMore: responses.some((response) => response?.hasNext === true),
-    }
   }
 
   async function fetchWorkerEventRows(orgId, worker, options = {}) {
     const pageSize = Number(options.pageSize) || 100
     const candidates = prioritizedWorkerFetchCandidates(worker)
-    let directResult = await fetchWorkerEventCandidateRows(orgId, worker, candidates.slice(0, 1), { source: 'workdays', pageSize })
+    let directRows = await fetchWorkerEventCandidateRows(orgId, worker, candidates.slice(0, 1), { source: 'workdays', pageSize })
 
-    if (!directResult.rows.length) {
+    if (!directRows.length) {
       const fallbackResponses = await Promise.all([
         fetchWorkerEventCandidateRows(orgId, worker, candidates.slice(0, 1), { source: 'events', pageSize }),
         fetchWorkerEventCandidateRows(orgId, worker, candidates.slice(1), { source: 'workdays', pageSize }),
@@ -2018,22 +2060,36 @@ export function createWorkerAccountFeature(ctx) {
             worker: workerName(worker),
             page: 1,
             pageSize,
-          })
-          : Promise.resolve({ items: [], hasNext: false }),
+          }).catch(() => ({ items: [] }))
+          : Promise.resolve({ items: [] }),
       ])
       const nameRows = responseItems(fallbackResponses[2])
         .filter(hasMeaningfulEventPayload)
         .filter((row) => eventRowBelongsToQueriedWorker(row, worker, { allowLooseName: true }))
-      directResult = {
-        rows: mergeUniqueRows([fallbackResponses[0].rows, fallbackResponses[1].rows, nameRows]),
-        hasMore:
-          fallbackResponses[0].hasMore === true ||
-          fallbackResponses[1].hasMore === true ||
-          fallbackResponses[2]?.hasNext === true,
-      }
+      directRows = mergeUniqueRows([fallbackResponses[0], fallbackResponses[1], nameRows])
     }
 
-    return directResult
+    if (directRows.length || options.allowBroadFallback === false) {
+      return directRows
+    }
+
+    const broadResponses = await Promise.all([
+      getWorkdays(orgId, {
+        source: 'events',
+        page: 1,
+        pageSize,
+      }).catch(() => ({ items: [] })),
+      getWorkdays(orgId, {
+        source: 'workdays',
+        page: 1,
+        pageSize,
+      }).catch(() => ({ items: [] })),
+    ])
+    const broadRows = mergeUniqueRows(broadResponses.map(responseItems))
+      .filter(hasMeaningfulEventPayload)
+      .filter((row) => rowHasWorkerIdentity(row) && rowMatchesRelatedWorker(row, worker))
+
+    return mergeUniqueRows([directRows, broadRows])
   }
 
   function renderKpis({ completedOrders = 0, monthSeconds = 0, weekSeconds = 0, eventCount = 0 } = {}) {
@@ -2093,7 +2149,6 @@ export function createWorkerAccountFeature(ctx) {
     const sourceRows = Array.isArray(rows) ? rows : []
     const totalWorkSec = sourceRows.reduce((sum, row) => sum + Math.max(0, Number(row.workSec ?? 0) || 0), 0)
     const totalBreakSec = sourceRows.reduce((sum, row) => sum + Math.max(0, Number(row.breakSec ?? 0) || 0), 0)
-    const reviewRequired = sourceRows.some((row) => row.reviewRequired || row.netSec === null)
     const totalNetSec = sourceRows.reduce((sum, row) => sum + Math.max(0, Number(row.netSec ?? 0) || 0), 0)
     const fallbackRange = currentMonthRange()
     const from = String(document.getElementById('waTimeFrom')?.value ?? '').trim() || fallbackRange.from
@@ -2106,7 +2161,7 @@ export function createWorkerAccountFeature(ctx) {
     setText('waTimeMonthRange', from && to ? `${dateKeyToLabel(from)} - ${dateKeyToLabel(to)}` : '-')
     setText('waTimeMonthWork', formatSeconds(totalWorkSec))
     setText('waTimeMonthBreak', formatSeconds(totalBreakSec))
-    setText('waTimeMonthNet', reviewRequired ? 'do weryfikacji' : formatSeconds(totalNetSec))
+    setText('waTimeMonthNet', formatSeconds(totalNetSec || Math.max(0, totalWorkSec - totalBreakSec)))
   }
 
   function applyTimeMonthPick(monthValue) {
@@ -2759,8 +2814,7 @@ export function createWorkerAccountFeature(ctx) {
         ? paged.items.map((row, index) => renderer(row, index, paged)).join('')
         : tableEmptyRow(columns, 'Brak rekordów', 'worker-account-muted', options)
     }
-    const totalLabel = options.hasMore === true ? `${paged.total}+ (najnowsze)` : paged.total
-    setText(labelId, `Wyswietlono: ${paged.items.length} / ${totalLabel} | Strona ${paged.page} z ${paged.totalPages}`)
+    setText(labelId, `Wyswietlono: ${paged.items.length} / ${paged.total} | Strona ${paged.page} z ${paged.totalPages}`)
     const prev = document.getElementById(prevId)
     const next = document.getElementById(nextId)
     if (prev) prev.disabled = paged.page <= 1
@@ -2785,7 +2839,7 @@ export function createWorkerAccountFeature(ctx) {
         return `<div class="events-row worker-account-event-row"><div>${escapeHtml(client)}</div><div>${escapeHtml(zone)}</div><div>${escapeHtml(location)}</div><div class="mono">${escapeHtml(date)}</div><div>${eventTimePill(start, 'start')}</div><div>${eventTimePill(stop, 'stop')}</div><div>${eventTimePill(duration, 'duration')}</div><div>${eventCommentButton(sourceIndex, Boolean(comment))}</div><div>${escapeHtml(editor)}</div><div>${eventMenuButton(sourceIndex, 'Edytuj zdarzenie')}</div></div>`
       },
       10,
-      { withoutSelect: true, hasMore: appState.workerAccountEventsHasMore === true },
+      { withoutSelect: true },
     )
   }
 
@@ -2824,7 +2878,7 @@ export function createWorkerAccountFeature(ctx) {
                 <div class="mono time-start">${escapeHtml(isoToHm(row.startAt))}</div>
                 <div class="mono time-stop">${escapeHtml(isoToHm(row.endAt))}</div>
                 <div class="wa-time-work-cell"><span class="mono work-brutto">${escapeHtml(formatSeconds(row.workSec))}</span>${workerAccountTimeCodesButton(row)}</div>
-                <div class="mono work-bold">${escapeHtml(row.reviewRequired ? 'DO WERYFIKACJI' : formatSeconds(row.netSec))}</div>
+                <div class="mono work-bold">${escapeHtml(formatSeconds(row.netSec))}</div>
                 <div class="mono time-break">${escapeHtml(formatSeconds(row.breakSec))}</div>
                 <div>${escapeHtml(row.updatedBy || '-')}</div>
               </div>
@@ -2999,7 +3053,7 @@ export function createWorkerAccountFeature(ctx) {
     setTimeLoading()
     try {
       const sourceRows = sortRowsByLatest(
-        await fetchWorkerTimeRows(appState.session.orgId, worker, range),
+        await fetchWorkerTimeRows(appState.session.orgId, worker, range, { allowBroadFallback: options.allowBroadFallback }),
       ).map((row) => stampWorkerIdentity(row, worker))
       if (!isWorkerAccountLoadContextCurrent(context) || appState.workerAccountTimeLoadingKey !== loadKey) return false
 
@@ -3038,15 +3092,11 @@ export function createWorkerAccountFeature(ctx) {
     appState.workerAccountActivityLoadingKey = context.accountKey
     setActivityLoading()
     try {
-      const eventResult = await fetchWorkerEventRows(
-        appState.session.orgId,
-        worker,
-        { pageSize: options.pageSize ?? WORKER_ACCOUNT_ACTIVITY_FETCH_PAGE_SIZE },
-      )
-      const eventRows = sortRowsByLatest(eventResult.rows).map((row) => stampWorkerIdentity(row, worker))
+      const eventRows = sortRowsByLatest(
+        await fetchWorkerEventRows(appState.session.orgId, worker, { pageSize: options.pageSize ?? WORKER_ACCOUNT_ACTIVITY_FETCH_PAGE_SIZE }),
+      ).map((row) => stampWorkerIdentity(row, worker))
       if (!isWorkerAccountLoadContextCurrent(context) || appState.workerAccountActivityLoadingKey !== context.accountKey) return false
       appState.workerAccountEventsRows = eventRows
-      appState.workerAccountEventsHasMore = eventResult.hasMore === true
       appState.workerAccountActivityLoadedKey = context.accountKey
       appState.workerAccountLoadedWorkerKey = context.accountKey
       renderEventsTable()
@@ -3675,6 +3725,7 @@ export function createWorkerAccountFeature(ctx) {
       const refreshed = await loadWorkerAccountTime(worker, {
         force: true,
         range: buildTimeFetchRange(),
+        allowBroadFallback: true,
       })
       if (refreshed) openWorkerAccountTimeCodes(item.dayKey)
       else closeWorkerAccountTimeCodes()
