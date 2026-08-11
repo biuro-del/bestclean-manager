@@ -2,6 +2,7 @@ import { buildServiceExecutionModel } from './serviceExecutionModel.js'
 import { isHistoricalOpenWorkday } from './historicalOpenWorkdayModel.js'
 import { isScheduleOrderActive } from '../../services/scheduleOrderLifecycle'
 import { isScheduleStartOverdue } from '../../services/scheduleStartStatusPolicy'
+import { assertCompletePagedResponse } from '../../services/workdayReadCostPolicy'
 import {
   buildOperationalMapObjectLiveSummary,
   groupOperationalMapLocations,
@@ -59,7 +60,10 @@ export function createDashboardFeature(ctx) {
   const DASHBOARD_DUE_TASKS_PREVIEW_LIMIT = 10
   const DASHBOARD_OVERVIEW_PLANNED_PREVIEW_LIMIT = 1
   const DASHBOARD_SERVICE_OPERATIONS_PREVIEW_LIMIT = 3
-  const DASHBOARD_OPEN_WORKDAYS_PAGE_SIZE = 12000
+  const DASHBOARD_OPEN_WORKDAYS_PAGE_SIZE = 2000
+  const DASHBOARD_RANGE_READ_MAX_ROWS = 4000
+  const DASHBOARD_DAY_READ_MAX_ROWS = 2000
+  const DASHBOARD_HISTORY_FROM_YMD = '2000-01-01'
   const DASHBOARD_LOADING_STAGES = ['overview', 'active']
   const DASHBOARD_POST_LOAD_DELAY_MS = 900
   const DASHBOARD_SERVICE_EXECUTION_MODEL_VERSION = 'persisted-plan-v1'
@@ -75,6 +79,12 @@ export function createDashboardFeature(ctx) {
   const DASHBOARD_COMMENT_SYNC_LOOKBACK_DAYS = 3
   const DATA_SYNC_OVERLAY_DELAY_MS = 420
   const DASHBOARD_CONTRACT_PROFITABILITY_SAMPLE_TREND = [18.4, 21.2, 20.6, 23.8]
+
+  function dashboardAssertCompleteReadResponses(entries = []) {
+    entries.forEach((entry) => {
+      assertCompletePagedResponse(entry?.response, String(entry?.label ?? '').trim() || 'danych pulpitu')
+    })
+  }
   const DASHBOARD_INSIGHT_PANEL_CONFIG = Object.freeze({
     objects: Object.freeze({
       cardId: 'dashActiveWorkersPanel',
@@ -708,18 +718,23 @@ export function createDashboardFeature(ctx) {
           fromIso: normalizedDay,
           toIso: rangeEndDay,
           page: 1,
-          pageSize: 8000,
+          pageSize: DASHBOARD_DAY_READ_MAX_ROWS,
           forceRefresh,
-        }).catch(() => ({ items: [] })),
+        }),
         getWorkdays(orgId, {
           source: 'workdays',
           fromIso: normalizedDay,
           toIso: rangeEndDay,
           page: 1,
-          pageSize: 8000,
+          pageSize: DASHBOARD_DAY_READ_MAX_ROWS,
           forceRefresh,
-        }).catch(() => ({ items: [] })),
+        }),
         dashboardSyncCalendarTimelineInputs({ forceRefresh }),
+      ])
+
+      dashboardAssertCompleteReadResponses([
+        { label: 'zdarzenia wybranego dnia', response: eventsResponse },
+        { label: 'dni pracy wybranego dnia', response: workdaysResponse },
       ])
 
       if (appState.dashboardActivityDayRequestKey !== requestKey || appState.dashboardActivityDay !== normalizedDay) {
@@ -8554,13 +8569,11 @@ export function createDashboardFeature(ctx) {
     return getWorkdays(activeOrgId, {
       source: 'workdays',
       status: 'RUNNING',
+      fromIso: DASHBOARD_HISTORY_FROM_YMD,
       toIso: daysAgoYmd(1),
       page: 1,
       pageSize: DASHBOARD_OPEN_WORKDAYS_PAGE_SIZE,
       forceRefresh: options.forceRefresh === true,
-    }).catch((error) => {
-      console.warn('[portal/dashboard] historical open workdays fetch failed', error)
-      return { items: [] }
     })
   }
 
@@ -8577,34 +8590,42 @@ export function createDashboardFeature(ctx) {
         fromIso: systemIssueEventsFrom,
         toIso: eventsRangeTo,
         page: 1,
-        pageSize: 12000,
+        pageSize: DASHBOARD_RANGE_READ_MAX_ROWS,
         forceRefresh,
-      }).catch(() => ({ items: [] })),
+      }),
       getWorkdays(orgId, {
         source: 'events',
         fromIso: fastEventsFrom,
         toIso: eventsRangeTo,
         page: 1,
-        pageSize: 5000,
+        pageSize: DASHBOARD_DAY_READ_MAX_ROWS,
         forceRefresh,
-      }).catch(() => ({ items: [] })),
+      }),
       getWorkdays(orgId, {
         source: 'events',
         fromIso: rangeTo,
         toIso: eventsRangeTo,
         page: 1,
-        pageSize: 8000,
+        pageSize: DASHBOARD_DAY_READ_MAX_ROWS,
         forceRefresh,
-      }).catch(() => ({ items: [] })),
+      }),
       getWorkdays(orgId, {
         source: 'workdays',
         fromIso: rangeTo,
         toIso: rangeTo,
         page: 1,
-        pageSize: 5000,
+        pageSize: DASHBOARD_DAY_READ_MAX_ROWS,
         forceRefresh,
-      }).catch(() => ({ items: [] })),
+      }),
       dashboardLoadHistoricalOpenWorkdays(orgId, { forceRefresh }),
+    ])
+
+    dashboardAssertCompleteReadResponses([
+      { label: 'zdarzenia wymagajace reakcji', response: systemIssueEvents },
+      { label: 'ostatnie zdarzenia', response: recentEvents },
+      { label: 'dzisiejsze zdarzenia', response: todayEvents },
+      { label: 'dzisiejsze dni pracy', response: todayWorkdays },
+      { label: 'historyczne otwarte dni pracy', response: openHistoricalWorkdays },
     ])
 
     const todayEventIds = new Set(
@@ -8718,7 +8739,7 @@ export function createDashboardFeature(ctx) {
         fromIso: rangeFrom,
         toIso: eventsRangeTo,
         page: 1,
-        pageSize: 12000,
+        pageSize: DASHBOARD_RANGE_READ_MAX_ROWS,
       }).catch((error) => {
         fetchFailed = true
         console.warn('[portal/dashboard] comment sync fetch failed', error)
@@ -8729,7 +8750,7 @@ export function createDashboardFeature(ctx) {
         fromIso: systemIssueRangeFrom,
         toIso: eventsRangeTo,
         page: 1,
-        pageSize: 12000,
+        pageSize: DASHBOARD_RANGE_READ_MAX_ROWS,
         forceRefresh: options.forceRefresh === true,
       }).catch((error) => {
         fetchFailed = true
@@ -8738,6 +8759,17 @@ export function createDashboardFeature(ctx) {
       }),
       dashboardLoadHistoricalOpenWorkdays(orgId, { forceRefresh: options.forceRefresh === true }),
     ])
+
+    try {
+      dashboardAssertCompleteReadResponses([
+        { label: 'komentarze', response: recentEvents },
+        { label: 'zdarzenia wymagajace reakcji', response: systemIssueEvents },
+        { label: 'historyczne otwarte dni pracy', response: openHistoricalWorkdays },
+      ])
+    } catch (error) {
+      fetchFailed = true
+      console.warn('[portal/dashboard] incomplete background data ignored', error)
+    }
 
     if (String(appState.session?.orgId ?? '').trim() !== orgId) {
       return

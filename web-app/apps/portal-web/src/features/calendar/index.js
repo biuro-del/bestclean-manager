@@ -4,6 +4,7 @@ import {
   SCHEDULE_START_GRACE_MINUTES,
   isScheduleStartOverdue,
 } from '../../services/scheduleStartStatusPolicy'
+import { assertCompletePagedResponse } from '../../services/workdayReadCostPolicy'
 
 export const route = 'calendar'
 export const viewId = 'view-calendar'
@@ -1417,6 +1418,7 @@ export function createCalendarFeature(ctx) {
       return false
     }
     const forceRequested = options?.force === true
+    const workerStatePageSize = 2000
     const shouldRender = options?.render !== false
     if (appState.calendarTimelineWorkerStateLoading) {
       if (forceRequested) {
@@ -1467,9 +1469,10 @@ export function createCalendarFeature(ctx) {
             fromIso: dayKey,
             toIso: rangeEndDay,
             page: 1,
-            pageSize: 8000,
-          }).catch(() => ({ items: [] })),
+            pageSize: workerStatePageSize,
+          }),
         ])
+        assertCompletePagedResponse(eventsResponse, 'zdarzen osi kalendarza')
         statusRows = Array.isArray(todayRows) ? todayRows : []
         currentStatusRows = statusRows
         sourceRows = [
@@ -1484,17 +1487,19 @@ export function createCalendarFeature(ctx) {
             fromIso: dayKey,
             toIso: rangeEndDay,
             page: 1,
-            pageSize: 8000,
-          }).catch(() => ({ items: [] })),
+            pageSize: workerStatePageSize,
+          }),
           getWorkdays(appState.session.orgId, {
             source: 'workdays',
             fromIso: dayKey,
             toIso: rangeEndDay,
             page: 1,
-            pageSize: 8000,
-          }).catch(() => ({ items: [] })),
+            pageSize: workerStatePageSize,
+          }),
           dashboardLoadFastRows(String(appState.session.orgId)).catch(() => ({ todayRows: appState.dashboardTodayRows || [] })),
         ])
+        assertCompletePagedResponse(eventsResponse, 'zdarzen osi kalendarza')
+        assertCompletePagedResponse(workdaysResponse, 'dni pracy osi kalendarza')
         sourceRows = [
           ...(Array.isArray(eventsResponse.items) ? eventsResponse.items : []),
           ...(Array.isArray(workdaysResponse.items) ? workdaysResponse.items : []),
@@ -5233,6 +5238,7 @@ export function createCalendarFeature(ctx) {
   
     for (const query of queryAttempts) {
       const response = await getWorkdays(appState.session.orgId, query)
+      assertCompletePagedResponse(response, 'zdarzen pracownika w kalendarzu')
       const rows = (Array.isArray(response?.items) ? response.items : [])
         .filter((row) => calendarTimelineRealEventRowDay(row) === day)
         .sort((left, right) =>

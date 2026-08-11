@@ -1,5 +1,4 @@
 ﻿import {
-  backupCyclesForOrg,
   deleteWorkdayForOrg,
   insertEventForOrg,
   insertWorkdayForOrg,
@@ -7,7 +6,6 @@
   updateEventForOrg,
   updateWorkdayForOrg,
   workdaysForOrg,
-  workerWorkdaysForOrg,
 } from './platformDataConnectService'
 import { executeMutation, executeQuery, mutationRef, queryRef } from 'firebase/data-connect'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
@@ -28,6 +26,8 @@ import { eventCorrelationIdentityChanged } from './eventCorrelationIdentityPolic
 import {
   WORKDAY_READ_MAX_CHUNK_SIZE,
   WORKDAY_READ_MAX_RECORDS,
+  assertCompletePagedResponse,
+  assertWorkdayReadWindow,
   createPagedReadLimitError,
   createPagedReadUnavailableError,
   isPagedReadSafetyError,
@@ -36,14 +36,20 @@ import {
 const NINE_HOURS_SECONDS = 9 * 60 * 60
 let eventsForOrgUnavailable = false
 let eventsPageForOrgUnavailable = false
+let workdaysPageForOrgUnavailable = false
+let backupCyclesPageForOrgUnavailable = false
 let eventsFingerprintForOrgUnavailable = false
 const EVENTS_FINGERPRINT_FOR_ORG_ENABLED =
   String(import.meta.env?.VITE_ENABLE_DATACONNECT_FINGERPRINT ?? '').trim().toLowerCase() === 'true'
 const READ_CACHE_MS = 30000
 const EVENTS_FAST_PAGE_MAX_SIZE = WORKDAY_READ_MAX_CHUNK_SIZE
 const EVENTS_FAST_PAGE_CHUNK_SIZE = 150
-const EVENTS_FAST_PAGE_MAX_SCAN = 1200
+const EVENTS_FAST_PAGE_INITIAL_SCAN = 1200
+const EVENTS_FAST_PAGE_MAX_SCAN = WORKDAY_READ_MAX_RECORDS
 const WORKDAY_DAILY_READ_MAX_ROWS = 5000
+const WORKDAY_SUMMARY_READ_MAX_ROWS = 5000
+const PAGED_HISTORY_FROM_START_AT = '2000-01-01T00:00:00.000Z'
+const PAGED_HISTORY_TO_START_AT = '2100-01-01T00:00:00.000Z'
 const workdayCache = new Map()
 const DEPLOY_HINT =
   'Brak wdro\u017conej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean-room.'
@@ -826,13 +832,6 @@ async function getRawEventsForOrg(orgId) {
   })
 }
 
-async function getRawBackupCyclesForOrg(orgId) {
-  return readWorkdayCached(orgId, 'raw-backup-cycles', async () => {
-    const response = await backupCyclesForOrg({ orgId })
-    return response?.data?.backupCycles ?? []
-  })
-}
-
 function clampPositiveInteger(value, fallback, maxValue = Number.POSITIVE_INFINITY) {
   const parsed = Number(value)
   const normalized = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback
@@ -854,16 +853,25 @@ function normalizeEventsFastRangeBoundary(value, endOfDay = false) {
   return toIso(value)
 }
 
-function normalizeEventsFastRange(filters = {}) {
+function normalizeEventsFastRange(filters = {}, context = {}) {
   const fromStartAt = normalizeEventsFastRangeBoundary(filters.fromIso)
   const toStartAt = normalizeEventsFastRangeBoundary(filters.toIso, true)
-  if (!fromStartAt || !toStartAt) {
+  if (fromStartAt && toStartAt) {
+    return {
+      fromStartAt,
+      toStartAt,
+    }
+  }
+
+  const workerLogin = String(context.workerLogin ?? '').trim()
+  const status = normalizeEventsStatusFilter(context.status ?? filters.status)
+  if (!workerLogin && status !== 'RUNNING') {
     return null
   }
 
   return {
-    fromStartAt,
-    toStartAt,
+    fromStartAt: PAGED_HISTORY_FROM_START_AT,
+    toStartAt: PAGED_HISTORY_TO_START_AT,
   }
 }
 
@@ -875,13 +883,24 @@ function normalizeEventsStatusFilter(value) {
   return normalized === 'OPEN' ? 'RUNNING' : normalized
 }
 
-function eventsFastPageShouldFallback(filters = {}) {
-  const pageSize = clampPositiveInteger(filters.pageSize, 50, 100000)
-  if (pageSize > EVENTS_FAST_PAGE_MAX_SIZE) {
-    return true
-  }
+function eventsFastPageShouldFallback(filters = {}, context = {}) {
+  return !normalizeEventsFastRange(filters, context)
+}
 
-  return !normalizeEventsFastRange(filters)
+function fastPageScanLimit(pageOffset, pageSize) {
+  const desiredCount = pageOffset + pageSize + 1
+  return Math.min(
+    EVENTS_FAST_PAGE_MAX_SCAN,
+    Math.max(EVENTS_FAST_PAGE_INITIAL_SCAN, desiredCount + EVENTS_FAST_PAGE_MAX_SIZE),
+  )
+}
+
+function pagedReadLimitError(sourceLabel) {
+  return createPagedReadLimitError(sourceLabel)
+}
+
+function pagedReadUnavailableError(sourceLabel) {
+  return createPagedReadUnavailableError(sourceLabel)
 }
 
 function eventFastPageOperationNames(mode) {
@@ -910,7 +929,7 @@ function eventFastPageOperationNames(mode) {
 }
 
 function buildEventsFastVariables(orgId, filters, mode, extra = {}) {
-  const range = normalizeEventsFastRange(filters)
+  const range = normalizeEventsFastRange(filters, extra)
   if (!range) {
     return null
   }
@@ -953,6 +972,14 @@ function chooseEventsFastMode(filters = {}, workerLoginHint = '') {
     return {
       mode: 'room',
       roomId,
+    }
+  }
+
+  const status = normalizeEventsStatusFilter(filters.status)
+  if (status) {
+    return {
+      mode: 'status',
+      status,
     }
   }
 
@@ -1871,34 +1898,10 @@ async function fetchMappedWorkdays(orgId, rowsPromise, operationName) {
   return rows.map((row) => mapWorkday(orgId, row, lookupMaps))
 }
 
-async function fetchMappedBackupCycles(orgId) {
-  if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
-  }
-
-  ensureFirebase()
-  let response
-  try {
-    response = await getRawBackupCyclesForOrg(orgId)
-  } catch (error) {
-    throw withOperationNotFoundHint(error, 'BackupCyclesForOrg')
-  }
-
-  const lookupMaps = await fetchLookupMaps(orgId, { includeWorkdays: true })
-  const rows = Array.isArray(response) ? response : response?.data?.backupCycles ?? []
-  return rows
-    .map((row) => mapWorkday(orgId, row, lookupMaps))
-    .filter((item) => isDisplayableMappedItem(item))
-}
-
 async function getMappedWorkdaysForOrg(orgId) {
   return readWorkdayCached(orgId, 'mapped-workdays', () =>
     fetchMappedWorkdays(orgId, getRawWorkdaysForOrg(orgId), 'WorkdaysForOrg'),
   )
-}
-
-async function getMappedBackupCyclesForOrg(orgId) {
-  return readWorkdayCached(orgId, 'mapped-backup-cycles', () => fetchMappedBackupCycles(orgId))
 }
 
 function mappedItemIdentity(item, fallback = '') {
@@ -2310,19 +2313,37 @@ async function getMappedOpenEventIntegrityRows(orgId) {
     fetchMappedOpenEventIntegrityRows(orgId))
 }
 
-async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '') {
-  if (eventsPageForOrgUnavailable || eventsFastPageShouldFallback(filters)) {
+function buildFastPageResponse(orgId, filters, filteredRows, page, pageSize, hasMoreSourceRows) {
+  const pageOffset = normalizedPageOffset(page, pageSize)
+  const hasNext = filteredRows.length > pageOffset + pageSize || hasMoreSourceRows
+  const items = filteredRows.slice(pageOffset, pageOffset + pageSize)
+  const visibleTotal = pageOffset + items.length + (hasNext ? 1 : 0)
+
+  return {
+    orgId,
+    filters,
+    items,
+    page,
+    pageSize,
+    total: visibleTotal,
+    totalPages: hasNext ? page + 1 : Math.max(1, Math.ceil(Math.max(visibleTotal, 1) / pageSize)),
+    hasNext,
+    estimatedTotal: hasNext,
+  }
+}
+
+async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '', options = {}) {
+  const modeConfig = chooseEventsFastMode(filters, workerLoginHint)
+  if (eventsPageForOrgUnavailable || eventsFastPageShouldFallback(filters, modeConfig)) {
     return null
   }
 
-  const pageSize = clampPositiveInteger(filters.pageSize, 50, EVENTS_FAST_PAGE_MAX_SIZE)
-  const page = clampPositiveInteger(filters.page, 1)
-  const pageOffset = normalizedPageOffset(page, pageSize)
+  const includeWorkdays = options.includeWorkdays !== false
+  const { page, pageSize, pageOffset } = assertWorkdayReadWindow(filters, 'zdarzeń')
   const desiredCount = pageOffset + pageSize + 1
   const chunkLimit = Math.min(Math.max(pageSize * 3, EVENTS_FAST_PAGE_CHUNK_SIZE), EVENTS_FAST_PAGE_MAX_SIZE)
-  const modeConfig = chooseEventsFastMode(filters, workerLoginHint)
   const operations = eventFastPageOperationNames(modeConfig.mode)
-  const scanLimit = EVENTS_FAST_PAGE_MAX_SCAN
+  const scanLimit = fastPageScanLimit(pageOffset, pageSize)
   const eventRows = []
   const workdayRows = []
   const [clients, zones, workers] = await Promise.all([
@@ -2332,7 +2353,7 @@ async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '') {
   ])
   let nextOffset = 0
   let eventsExhausted = false
-  let workdaysExhausted = false
+  let workdaysExhausted = !includeWorkdays
   let filteredRows = []
 
   try {
@@ -2352,7 +2373,7 @@ async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '') {
           : runEventsPageQuery(operations.events, variables, 'events', {
               forceRefresh: filters.forceRefresh === true,
             }),
-        workdaysExhausted
+        workdaysExhausted || !includeWorkdays
           ? Promise.resolve([])
           : runEventsPageQuery(operations.workdays, variables, 'workdays', {
               forceRefresh: filters.forceRefresh === true,
@@ -2388,8 +2409,8 @@ async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '') {
     }
   } catch (error) {
     if (
-      isOperationNotFoundError(error, operations.events) ||
-      isOperationNotFoundError(error, operations.workdays)
+        isOperationNotFoundError(error, operations.events) ||
+        (includeWorkdays && isOperationNotFoundError(error, operations.workdays))
     ) {
       eventsPageForOrgUnavailable = true
       return null
@@ -2399,24 +2420,129 @@ async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '') {
 
   const hasMoreSourceRows = !eventsExhausted || !workdaysExhausted
   if (hasMoreSourceRows && filteredRows.length < desiredCount) {
+    throw pagedReadLimitError('zdarzeń')
+  }
+
+  return buildFastPageResponse(orgId, filters, filteredRows, page, pageSize, hasMoreSourceRows)
+}
+
+async function fetchFastWorkdaysPage(orgId, filters = {}, workerLoginHint = '') {
+  const modeConfig = chooseEventsFastMode(filters, workerLoginHint)
+  if (workdaysPageForOrgUnavailable || eventsFastPageShouldFallback(filters, modeConfig)) {
     return null
   }
 
-  const hasNext = filteredRows.length > pageOffset + pageSize || hasMoreSourceRows
-  const items = filteredRows.slice(pageOffset, pageOffset + pageSize)
-  const visibleTotal = pageOffset + items.length + (hasNext ? 1 : 0)
+  const { page, pageSize, pageOffset } = assertWorkdayReadWindow(filters, 'dni pracy')
+  const desiredCount = pageOffset + pageSize + 1
+  const chunkLimit = Math.min(Math.max(pageSize * 3, EVENTS_FAST_PAGE_CHUNK_SIZE), EVENTS_FAST_PAGE_MAX_SIZE)
+  const operationName = eventFastPageOperationNames(modeConfig.mode).workdays
+  const scanLimit = fastPageScanLimit(pageOffset, pageSize)
+  const workdayRows = []
+  const [clients, zones, workers] = await Promise.all([
+    getClients(orgId),
+    getZones(orgId),
+    getWorkers(orgId),
+  ])
+  let nextOffset = 0
+  let sourceExhausted = false
+  let filteredRows = []
 
-  return {
-    orgId,
-    filters,
-    items,
-    page,
-    pageSize,
-    total: visibleTotal,
-    totalPages: hasNext ? page + 1 : Math.max(1, Math.ceil(Math.max(visibleTotal, 1) / pageSize)),
-    hasNext,
-    estimatedTotal: hasNext,
+  try {
+    while (nextOffset < scanLimit && filteredRows.length < desiredCount && !sourceExhausted) {
+      const variables = buildEventsFastVariables(orgId, filters, modeConfig.mode, {
+        ...modeConfig,
+        limit: Math.min(chunkLimit, scanLimit - nextOffset),
+        offset: nextOffset,
+      })
+      if (!variables) {
+        return null
+      }
+
+      const nextWorkdays = await runEventsPageQuery(operationName, variables, 'workdays', {
+        forceRefresh: filters.forceRefresh === true,
+      })
+      if (nextWorkdays.length < variables.limit) {
+        sourceExhausted = true
+      }
+      workdayRows.push(...nextWorkdays)
+
+      const lookupMaps = buildLookupMaps(clients, zones, workers, workdayRows)
+      const mappedWorkdays = workdayRows
+        .map((row) => mapWorkday(orgId, row, lookupMaps))
+        .filter((item) => isDisplayableMappedItem(item))
+      filteredRows = applyWorkdayFilters(sortByLatest(mappedWorkdays), filters)
+      nextOffset += variables.limit
+    }
+  } catch (error) {
+    if (isOperationNotFoundError(error, operationName)) {
+      workdaysPageForOrgUnavailable = true
+      return null
+    }
+    throw error
   }
+
+  const hasMoreSourceRows = !sourceExhausted
+  if (hasMoreSourceRows && filteredRows.length < desiredCount) {
+    throw pagedReadLimitError('dni pracy')
+  }
+
+  return buildFastPageResponse(orgId, filters, filteredRows, page, pageSize, hasMoreSourceRows)
+}
+
+async function fetchFastBackupCyclesPage(orgId, filters = {}) {
+  if (backupCyclesPageForOrgUnavailable) {
+    return null
+  }
+
+  const { page, pageSize, pageOffset } = assertWorkdayReadWindow(filters, 'kopii cykli')
+  const desiredCount = pageOffset + pageSize + 1
+  const chunkLimit = Math.min(Math.max(pageSize * 3, EVENTS_FAST_PAGE_CHUNK_SIZE), EVENTS_FAST_PAGE_MAX_SIZE)
+  const scanLimit = fastPageScanLimit(pageOffset, pageSize)
+  const backupCycleRows = []
+  const [clients, zones, workers] = await Promise.all([
+    getClients(orgId),
+    getZones(orgId),
+    getWorkers(orgId),
+  ])
+  let nextOffset = 0
+  let sourceExhausted = false
+  let filteredRows = []
+
+  try {
+    while (nextOffset < scanLimit && filteredRows.length < desiredCount && !sourceExhausted) {
+      const limit = Math.min(chunkLimit, scanLimit - nextOffset)
+      const nextRows = await runEventsPageQuery(
+        'BackupCyclesPageForOrg',
+        { orgId, limit, offset: nextOffset },
+        'backupCycles',
+        { forceRefresh: filters.forceRefresh === true },
+      )
+      if (nextRows.length < limit) {
+        sourceExhausted = true
+      }
+      backupCycleRows.push(...nextRows)
+
+      const lookupMaps = buildLookupMaps(clients, zones, workers, [])
+      const mappedRows = backupCycleRows
+        .map((row) => mapWorkday(orgId, row, lookupMaps))
+        .filter((item) => isDisplayableMappedItem(item))
+      filteredRows = applyWorkdayFilters(sortByLatest(mappedRows), filters)
+      nextOffset += limit
+    }
+  } catch (error) {
+    if (isOperationNotFoundError(error, 'BackupCyclesPageForOrg')) {
+      backupCyclesPageForOrgUnavailable = true
+      return null
+    }
+    throw error
+  }
+
+  const hasMoreSourceRows = !sourceExhausted
+  if (hasMoreSourceRows && filteredRows.length < desiredCount) {
+    throw pagedReadLimitError('kopii cykli')
+  }
+
+  return buildFastPageResponse(orgId, filters, filteredRows, page, pageSize, hasMoreSourceRows)
 }
 
 async function resolveWorkerLoginHint(orgId, filters = {}) {
@@ -2474,6 +2600,15 @@ export async function getWorkdays(orgId, filters = {}) {
   }
 
   const source = String(filters.source ?? '').trim().toLowerCase()
+  const sourceLabel =
+    source === 'events' || source === 'event'
+      ? 'zdarzeń'
+      : source === 'worktime' || source === 'work_time'
+        ? 'ewidencji czasu pracy'
+        : source === 'backupcycle' || source === 'backup_cycle'
+          ? 'kopii cykli'
+          : 'dni pracy'
+  const readWindow = assertWorkdayReadWindow(filters, sourceLabel)
   let mapped
   if (source === 'events-integrity' || source === 'event-integrity') {
     mapped = await getMappedOpenEventIntegrityRows(orgId)
@@ -2490,26 +2625,48 @@ export async function getWorkdays(orgId, filters = {}) {
       error.code = 'INTEGRITY_CHECK_INCOMPLETE'
       throw error
     }
+    if (filters.allowLegacyFullOrgFallback !== true) {
+      throw pagedReadUnavailableError('zdarzeń')
+    }
 
     mapped = await getMappedEventsForOrg(orgId)
-    if (workerLoginHint) {
-      try {
-        const mappedWorkerRows = await fetchMappedWorkdays(
+  } else if (source === 'worktime' || source === 'work_time') {
+    const workerLoginHint = await resolveWorkerLoginHint(orgId, filters)
+    const modeContext = chooseEventsFastMode(filters, workerLoginHint)
+    const fastWorktimeUnavailable = eventsFastPageShouldFallback(filters, modeContext) || readWindow.page !== 1
+    if (!fastWorktimeUnavailable) {
+      const [workdayResponse, eventResponse] = await Promise.all([
+        fetchFastWorkdaysPage(orgId, filters, workerLoginHint),
+        fetchFastEventsPage(orgId, filters, workerLoginHint, { includeWorkdays: false }),
+      ])
+      if (workdayResponse && eventResponse) {
+        const fastPageSize = Math.min(workdayResponse.pageSize, eventResponse.pageSize)
+        const fastMapped = enrichWorkdaysWithEventIntervals(workdayResponse.items, eventResponse.items)
+          .map((item) => ({
+            ...item,
+            duration: durationToHms(item?.durationSec),
+          }))
+        const fastFiltered = applyWorkdayFilters(sortByLatest(fastMapped), filters)
+        const hasNext = workdayResponse.hasNext === true || eventResponse.hasNext === true
+        const items = fastFiltered.slice(0, fastPageSize)
+        return {
           orgId,
-          workerWorkdaysForOrg({ orgId, workerLogin: workerLoginHint }),
-          'WorkerWorkdaysForOrg',
-        )
-        if (mappedWorkerRows.length) {
-          mapped = dedupeMappedEventIntervals(mergeMappedEventCollections(mapped, mappedWorkerRows))
-            .filter((item) => isDisplayableMappedItem(item))
-        }
-      } catch (error) {
-        if (!isOperationNotFoundError(error, 'WorkerWorkdaysForOrg')) {
-          throw error
+          filters,
+          items,
+          page: 1,
+          pageSize: fastPageSize,
+          total: items.length + (hasNext ? 1 : 0),
+          totalPages: hasNext ? 2 : 1,
+          hasNext,
+          estimatedTotal: hasNext,
         }
       }
     }
-  } else if (source === 'worktime' || source === 'work_time') {
+
+    if (filters.allowLegacyFullOrgFallback !== true) {
+      throw pagedReadUnavailableError('ewidencji czasu pracy')
+    }
+
     const [mappedWorkdays, mappedEvents] = await Promise.all([
       getMappedWorkdaysForOrg(orgId),
       getMappedEventsForOrg(orgId).catch(() => []),
@@ -2520,8 +2677,27 @@ export async function getWorkdays(orgId, filters = {}) {
         duration: durationToHms(item?.durationSec),
       }))
   } else if (source === 'backupcycle' || source === 'backup_cycle') {
-    mapped = await getMappedBackupCyclesForOrg(orgId)
+    const fastResponse = await fetchFastBackupCyclesPage(orgId, filters)
+    if (fastResponse) {
+      return fastResponse
+    }
+    throw pagedReadUnavailableError('kopii cykli')
   } else {
+    const workerLoginHint = await resolveWorkerLoginHint(orgId, filters)
+    const fastResponse = await fetchFastWorkdaysPage(orgId, filters, workerLoginHint)
+    if (fastResponse) {
+      return fastResponse
+    }
+    if (filters.requireCompletePagedSource === true) {
+      const error = new Error(
+        'Nie można potwierdzić kompletnego stanu otwartych dni pracy. Wymagana paginowana operacja Data Connect jest niedostępna albo zakres przekracza bezpieczny limit.',
+      )
+      error.code = 'INTEGRITY_CHECK_INCOMPLETE'
+      throw error
+    }
+    if (filters.allowLegacyFullOrgFallback !== true) {
+      throw pagedReadUnavailableError('dni pracy')
+    }
     mapped = await getMappedWorkdaysForOrg(orgId)
   }
 
@@ -2537,6 +2713,7 @@ export async function getWorkdays(orgId, filters = {}) {
 }
 
 export async function getWorkerTime(orgId, workerId, range = {}) {
+  const requestedRead = assertWorkdayReadWindow(range, 'ewidencji czasu pracy pracownika')
   const workerLogin = String(workerId ?? range.workerLogin ?? '').trim()
   if (!workerLogin) {
     return {
@@ -2544,49 +2721,68 @@ export async function getWorkerTime(orgId, workerId, range = {}) {
       workerId,
       range,
       items: [],
-      page: 1,
-      pageSize: Number(range.pageSize) || 50,
+      page: requestedRead.page,
+      pageSize: requestedRead.pageSize,
       total: 0,
       totalPages: 1,
     }
   }
 
-  const [mappedWorkdays, eventResponse] = await Promise.all([
-    fetchMappedWorkdays(
-      orgId,
-      workerWorkdaysForOrg({ orgId, workerLogin }),
-      'WorkerWorkdaysForOrg',
-    ),
+  const sourcePageSize = Math.min(WORKDAY_READ_MAX_RECORDS, requestedRead.windowEnd)
+  const [workdayResponse, eventResponse] = await Promise.all([
+    getWorkdays(orgId, {
+      source: 'workdays',
+      workerLogin,
+      fromIso: range.fromIso,
+      toIso: range.toIso,
+      page: 1,
+      pageSize: sourcePageSize,
+      forceRefresh: range.forceRefresh === true,
+    }),
     getWorkdays(orgId, {
       source: 'events',
       workerLogin,
       fromIso: range.fromIso,
       toIso: range.toIso,
       page: 1,
-      pageSize: 100000,
+      pageSize: sourcePageSize,
       forceRefresh: range.forceRefresh === true,
-    }).catch(() => ({ items: [] })),
+    }).catch((error) => {
+      if (isPagedReadSafetyError(error)) {
+        throw error
+      }
+      return { items: [] }
+    }),
   ])
-  const mapped = enrichWorkdaysWithEventIntervals(mappedWorkdays, eventResponse.items)
+  const mapped = enrichWorkdaysWithEventIntervals(workdayResponse.items, eventResponse.items)
     .map((item) => ({
       ...item,
       duration: durationToHms(item?.durationSec),
     }))
   const sorted = sortByLatest(mapped)
   const filtered = applyWorkdayFilters(sorted, range)
-  const paged = paginate(filtered, range.page, range.pageSize)
+  const paged = paginate(filtered, requestedRead.page, requestedRead.pageSize)
+  const sourceHasNext = workdayResponse.hasNext === true || eventResponse.hasNext === true
 
   return {
     orgId,
     workerId: workerLogin,
     range,
     ...paged,
+    hasNext: paged.hasNext === true || sourceHasNext,
+    estimatedTotal: sourceHasNext,
   }
 }
 
 export async function getRecentEvents(orgId, limit = 5) {
-  const pageSize = Math.max(Number(limit) || 5, 1)
-  const response = await getWorkdays(orgId, { page: 1, pageSize })
+  const pageSize = Math.min(Math.max(Number(limit) || 5, 1), WORKDAY_READ_MAX_RECORDS)
+  const response = await getWorkdays(orgId, {
+    source: 'workdays',
+    fromIso: PAGED_HISTORY_FROM_START_AT,
+    toIso: PAGED_HISTORY_TO_START_AT,
+    page: 1,
+    pageSize,
+  })
 
   return response.items.map((item) => ({
     id: item.workdayId,
@@ -2877,9 +3073,17 @@ export async function getEventsFingerprintForOrg(orgId, filters = {}) {
 async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
   const day = currentDayYmd()
   const [workdayResponse, workerDirectory] = await Promise.all([
-    getWorkdays(orgId, { source: 'worktime', fromIso: day, toIso: day, page: 1, pageSize: 100000, forceRefresh: options.forceRefresh === true }),
+    getWorkdays(orgId, {
+      source: 'worktime',
+      fromIso: day,
+      toIso: day,
+      page: 1,
+      pageSize: WORKDAY_DAILY_READ_MAX_ROWS,
+      forceRefresh: options.forceRefresh === true,
+    }),
     getWorkers(orgId).catch(() => []),
   ])
+  assertCompletePagedResponse(workdayResponse, 'aktywnych dni pracy')
   const nowTs = Date.now()
   const workers = new Map()
   const workerAliases = new Map()
@@ -3275,8 +3479,22 @@ export async function getTodayActiveWorkers(orgId, options = {}) {
 
   const day = currentDayYmd()
   const [workdayResponse, eventsResponse, workerDirectory] = await Promise.all([
-    getWorkdays(orgId, { fromIso: day, toIso: day, page: 1, pageSize: 100000, forceRefresh: options.forceRefresh === true }),
-    getWorkdays(orgId, { source: 'events', fromIso: day, toIso: day, page: 1, pageSize: 100000, forceRefresh: options.forceRefresh === true }).catch(() => ({
+    getWorkdays(orgId, {
+      source: 'workdays',
+      fromIso: day,
+      toIso: day,
+      page: 1,
+      pageSize: WORKDAY_DAILY_READ_MAX_ROWS,
+      forceRefresh: options.forceRefresh === true,
+    }),
+    getWorkdays(orgId, {
+      source: 'events',
+      fromIso: day,
+      toIso: day,
+      page: 1,
+      pageSize: WORKDAY_DAILY_READ_MAX_ROWS,
+      forceRefresh: options.forceRefresh === true,
+    }).catch(() => ({
       items: [],
     })),
     getWorkers(orgId).catch(() => []),
@@ -3791,9 +4009,18 @@ export async function getTodayActiveWorkers(orgId, options = {}) {
 
 export async function getDashboardSummary(orgId) {
   const [response, workerDirectory] = await Promise.all([
-    getWorkdays(orgId, { page: 1, pageSize: 5000 }),
+    getWorkdays(orgId, {
+      source: 'workdays',
+      fromIso: PAGED_HISTORY_FROM_START_AT,
+      toIso: PAGED_HISTORY_TO_START_AT,
+      page: 1,
+      pageSize: WORKDAY_SUMMARY_READ_MAX_ROWS,
+    }),
     getWorkers(orgId).catch(() => []),
   ])
+  if (response?.hasNext === true) {
+    throw pagedReadLimitError('podsumowania dni pracy')
+  }
   const resolveDisplayName = createWorkerDisplayNameResolver(workerDirectory)
   const items = response.items
 

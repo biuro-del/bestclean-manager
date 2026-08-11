@@ -3,6 +3,7 @@ import { workIntervalsFromRow, workIntervalsTotalSeconds } from './workIntervals
 export const WORK_TIME_EXPORT_DEFAULT_COLUMN_IDS = ['date', 'worker', 'start', 'stop', 'work', 'break']
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/
+const WORK_TIME_EXPORT_MAX_ROWS = 20000
 
 function normalizeText(deps, value) {
   return deps.normalizeSearchText(String(value ?? '').trim())
@@ -244,8 +245,14 @@ export async function buildWorkTimeExportRowsForWorkers({
     fromIso: deps.ymdToIsoRangeStart(fromYmd),
     toIso: deps.ymdToIsoRangeEnd(toYmd),
     page: 1,
-    pageSize: 100000,
+    pageSize: WORK_TIME_EXPORT_MAX_ROWS,
   })
+
+  if (response?.hasNext === true) {
+    throw new Error(
+      `Eksport przekracza bezpieczny limit ${WORK_TIME_EXPORT_MAX_ROWS} rekordów. Zawęź daty lub wybór pracowników.`,
+    )
+  }
 
   const rows = (response?.items ?? [])
     .filter((item) => {

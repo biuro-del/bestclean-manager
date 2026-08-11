@@ -4,6 +4,7 @@ import {
   isOwnWorkdayEditBlocked,
 } from '../workdayEditAccess.js'
 import { workIntervalsFromRow } from '../workIntervals.js'
+import { assertCompletePagedResponse } from '../../../services/workdayReadCostPolicy'
 
 export const route = 'workerTimeDetail'
 export const viewId = 'view-workerTimeDetail'
@@ -38,6 +39,7 @@ export function createWorkerTimeDetailFeature(ctx) {
   const WORKER_DETAIL_COLUMN_MAX_WIDTH = 520
   const WORKER_DETAIL_RESIZABLE_COLUMN_INDEXES = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
   const WORKER_DETAIL_COLUMN_RESIZE_CLASS = 'wtd-col-resize-active'
+  const WORKER_DETAIL_READ_MAX_ROWS = 2000
 
   let workerDetailColumnDragState = null
 
@@ -1394,9 +1396,11 @@ export function createWorkerTimeDetailFeature(ctx) {
         fromIso: ymdToIsoRangeStart(document.getElementById('wtdFrom')?.value),
         toIso: ymdToIsoRangeEnd(document.getElementById('wtdTo')?.value),
         page: 1,
-        pageSize: 5000,
+        pageSize: WORKER_DETAIL_READ_MAX_ROWS,
         forceRefresh,
       })
+
+      assertCompletePagedResponse(response, 'ewidencji czasu pracownika')
 
       appState.workerDetailSourceRows = response.items ?? []
       appState.workerDetailViewRows = workerDetailAggregateRows(appState.workerDetailSourceRows)
