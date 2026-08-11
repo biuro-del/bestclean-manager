@@ -405,6 +405,41 @@ query WorkdaysPageForOrgByWorker($orgId: String!, $workerLogin: String!, $fromSt
   }
 }
 
+query WorkdaysPageForOrgByWorkerAndStatus($orgId: String!, $workerLogin: String!, $status: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
+    }
+
+  workdays(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $workerLogin }, status: { eq: $status }, startAt: { ge: $fromStartAt, le: $toStartAt } }
+    orderBy: [{ startAt: DESC }]
+  ) {
+    workdayId
+    workerLogin
+    workerName
+    utilityRoomId
+    startAt
+    endScanAt
+    autoCloseAt
+    endAt
+    durationSec
+    status
+    deviceId
+    gps
+    startEventId
+    endEventId
+    startObject
+    stopObject
+    comment
+    updatedBy
+    updatedAt
+  }
+}
+
 query WorkdaysPageForOrgByRoom($orgId: String!, $utilityRoomId: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
