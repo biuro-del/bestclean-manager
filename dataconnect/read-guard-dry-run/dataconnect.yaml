@@ -10,4 +10,4 @@ schema:
       cloudSql:
         instanceId: iclean-room-instance
 connectorDirs:
-  - connectors/example
+  - connectors/read-guard

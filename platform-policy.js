@@ -3,6 +3,15 @@
 const PLATFORM_ROLE = 'PLATFORM_OWNER'
 const PLATFORM_ROLE_LEVEL = 4
 const FRESH_AUTH_MAX_AGE_SECONDS = 5 * 60
+const READ_GUARD_CONNECTOR_ID = 'read-guard'
+const READ_GUARD_QUERY_OPERATIONS = new Set([
+  'WorkersPageForOrg',
+  'WorkerForOrgByLogin',
+  'ClientsPageForOrg',
+  'ZonesPageForOrg',
+  'BackupCyclesPageForOrg',
+  'WorkdayPausesPageForOrg',
+])
 
 const PLATFORM_QUERY_ALLOWLIST = new Set([
   'OrgUiStyleForOrg',
@@ -35,6 +44,7 @@ const PLATFORM_QUERY_ALLOWLIST = new Set([
   'ClientStorageForOrg',
   'WorkdayPausesForOrg',
   'ActiveWorkdayPauseForWorker',
+  ...READ_GUARD_QUERY_OPERATIONS,
 ])
 
 const PLATFORM_MUTATION_ALLOWLIST = new Set([
@@ -132,6 +142,15 @@ function isAllowedPlatformOperation(kind, operationName) {
   return false
 }
 
+function resolvePlatformDataConnectConnector(kind, operationName, defaultConnector) {
+  const normalizedKind = text(kind).toLowerCase()
+  const name = text(operationName)
+  if (normalizedKind === 'query' && READ_GUARD_QUERY_OPERATIONS.has(name)) {
+    return READ_GUARD_CONNECTOR_ID
+  }
+  return text(defaultConnector)
+}
+
 function sanitizeAuditValue(value, key = '', depth = 0) {
   if (SECRET_KEY_PATTERN.test(key)) return '[REDACTED]'
   if (depth > 6) return '[TRUNCATED]'
@@ -160,6 +179,8 @@ function sanitizeTenantMutationVariables(variables) {
 
 module.exports = {
   FRESH_AUTH_MAX_AGE_SECONDS,
+  READ_GUARD_CONNECTOR_ID,
+  READ_GUARD_QUERY_OPERATIONS,
   PLATFORM_MUTATION_ALLOWLIST,
   PLATFORM_QUERY_ALLOWLIST,
   PLATFORM_ROLE,
@@ -172,6 +193,7 @@ module.exports = {
   isAllowedPlatformOperation,
   isSensitivePlatformOperation,
   normalizePlatformRole,
+  resolvePlatformDataConnectConnector,
   sanitizeAuditValue,
   sanitizeTenantMutationVariables,
   secondFactorId,

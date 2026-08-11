@@ -39,6 +39,7 @@ const {
 const {
   PLATFORM_ROLE,
   hasPlatformOwnerClaim,
+  resolvePlatformDataConnectConnector,
 } = require('./platform-policy')
 const { buildFirebaseRestDecodedToken } = require('./firebase-rest-token-policy')
 const { createProfitabilityApi } = require('./profitability-api')
@@ -1593,10 +1594,11 @@ async function executeAdminDataConnectOperation(kind, operationName, variables, 
     throw error
   }
   ensureFirebaseAdmin()
+  const connector = resolvePlatformDataConnectConnector(kind, operationName, DATACONNECT_CONNECTOR)
   const dataConnect = getAdminDataConnect({
     location: DATACONNECT_LOCATION,
     serviceId: DATACONNECT_SERVICE,
-    connector: DATACONNECT_CONNECTOR,
+    connector,
   })
   return kind === 'mutation'
     ? dataConnect.executeMutation(operationName, variables || {}, operationOptions)

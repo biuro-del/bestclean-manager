@@ -1,4 +1,5 @@
 import * as generated from '@dataconnect/generated'
+import * as readGuardGenerated from '@dataconnect/read-guard-generated'
 import { getSession, platformEmailMfaHeaders } from '../auth/authService'
 import { ensureFirebase, isFirebaseConfigured, waitForFirebaseAuthReady } from '../firebase/firebaseClient'
 
@@ -168,14 +169,20 @@ export const startWorkdayPause = wrap('mutation', 'StartWorkdayPause', generated
 export const stopWorkdayPause = wrap('mutation', 'StopWorkdayPause', generated.stopWorkdayPause)
 
 export const workersForOrg = wrap('query', 'WorkersForOrg', generated.workersForOrg)
+export const workersPageForOrg = wrap('query', 'WorkersPageForOrg', readGuardGenerated.workersPageForOrg)
+export const workerForOrgByLogin = wrap('query', 'WorkerForOrgByLogin', readGuardGenerated.workerForOrgByLogin)
 export const clientsForOrg = wrap('query', 'ClientsForOrg', generated.clientsForOrg)
+export const clientsPageForOrg = wrap('query', 'ClientsPageForOrg', readGuardGenerated.clientsPageForOrg)
 export const individualJobsForOrg = wrap('query', 'IndividualJobsForOrg', generated.individualJobsForOrg)
 export const tasksForOrg = wrap('query', 'TasksForOrg', generated.tasksForOrg)
 export const zonesForOrg = wrap('query', 'ZonesForOrg', generated.zonesForOrg)
+export const zonesPageForOrg = wrap('query', 'ZonesPageForOrg', readGuardGenerated.zonesPageForOrg)
 export const workdaysForOrg = wrap('query', 'WorkdaysForOrg', generated.workdaysForOrg)
 export const workerWorkdaysForOrg = wrap('query', 'WorkerWorkdaysForOrg', generated.workerWorkdaysForOrg)
 export const backupCyclesForOrg = wrap('query', 'BackupCyclesForOrg', generated.backupCyclesForOrg)
+export const backupCyclesPageForOrg = wrap('query', 'BackupCyclesPageForOrg', readGuardGenerated.backupCyclesPageForOrg)
 export const eventsForOrg = wrap('query', 'EventsForOrg', generated.eventsForOrg)
 export const storageForOrg = wrap('query', 'StorageForOrg', generated.storageForOrg)
 export const clientStorageForOrg = wrap('query', 'ClientStorageForOrg', generated.clientStorageForOrg)
 export const workdayPausesForOrg = wrap('query', 'WorkdayPausesForOrg', generated.workdayPausesForOrg)
+export const workdayPausesPageForOrg = wrap('query', 'WorkdayPausesPageForOrg', readGuardGenerated.workdayPausesPageForOrg)
