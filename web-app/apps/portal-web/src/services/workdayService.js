@@ -2193,7 +2193,6 @@ async function fetchMappedEvents(orgId) {
   ensureFirebase()
   let mappedEvents = []
   let mappedWorkdays = []
-  let mappedBackupCycles = []
   if (!eventsForOrgUnavailable) {
     try {
       const rows = await getRawEventsForOrg(orgId)
@@ -2219,22 +2218,7 @@ async function fetchMappedEvents(orgId) {
     }
   }
 
-  // Fallback to backup cycles only when events source is unavailable/empty.
-  const shouldUseBackupFallback = eventsForOrgUnavailable || !mappedEvents.length
-  if (shouldUseBackupFallback) {
-    try {
-      mappedBackupCycles = await getMappedBackupCyclesForOrg(orgId)
-    } catch (error) {
-      if (!isOperationNotFoundError(error, 'BackupCyclesForOrg')) {
-        throw error
-      }
-    }
-  }
-
   const collections = [mappedEvents, mappedWorkdays]
-  if (!mappedEvents.length && mappedBackupCycles.length) {
-    collections.push(mappedBackupCycles)
-  }
   const nonEmptyCollections = collections.filter((items) => Array.isArray(items) && items.length)
   if (!nonEmptyCollections.length) {
     return []

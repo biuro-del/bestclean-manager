@@ -110,3 +110,14 @@ test('klienci i strefy używają stron, a lista pracowników zachowuje bezpośre
   assert.match(workerService, /const response = await workersList\(orgId\)/)
   assert.doesNotMatch(workerService, /workersPageForOrg/)
 })
+
+test('normal event view does not fetch backup cycles as a hidden fallback', () => {
+  const workdayService = read('web-app', 'apps', 'portal-web', 'src', 'services', 'workdayService.js')
+  const start = workdayService.indexOf('async function fetchMappedEvents(orgId)')
+  const end = workdayService.indexOf('export async function getWorkdays(orgId, filters = {})')
+
+  assert.ok(start >= 0 && end > start)
+  const normalEventsReader = workdayService.slice(start, end)
+  assert.doesNotMatch(normalEventsReader, /getMappedBackupCyclesForOrg|BackupCyclesForOrg|mappedBackupCycles/)
+  assert.match(workdayService, /source === 'backupcycle'[\s\S]*?getMappedBackupCyclesForOrg\(orgId\)/)
+})
