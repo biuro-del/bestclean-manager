@@ -47,8 +47,6 @@ export function createDashboardFeature(ctx) {
   let dashboardActiveWorkersMapLiveGroupKey = ''
   let dashboardServiceOperationStream = []
   let dashboardOperationsDialogRestoreFocus = null
-  let dashboardContractProfitabilityResizeObserver = null
-  let dashboardContractProfitabilityObservedCanvas = null
 
   const DASHBOARD_ACTIVITY_SIMULATION_INTERVAL_MS = 60 * 1000
   const DASHBOARD_CHANGE_POLL_INTERVAL_MS = 60 * 1000
@@ -72,13 +70,10 @@ export function createDashboardFeature(ctx) {
   const DASHBOARD_LOCAL_CACHE_PREFIX = 'portal.dashboard.snapshot'
   const DASHBOARD_COMMENT_READ_STORAGE_PREFIX = 'portal.dashboardComments.read'
   const DASHBOARD_COMMENT_SYNC_STORAGE_PREFIX = 'portal.dashboardComments.sync'
-  const DASHBOARD_CONTRACT_PROFITABILITY_COLLAPSE_STORAGE_PREFIX =
-    'portal.dashboard.contractProfitabilityCollapsed.v1'
   const DASHBOARD_INSIGHT_PANEL_COLLAPSE_STORAGE_PREFIX =
     'portal.dashboard.insightPanelCollapsed.v1'
   const DASHBOARD_COMMENT_SYNC_LOOKBACK_DAYS = 3
   const DATA_SYNC_OVERLAY_DELAY_MS = 420
-  const DASHBOARD_CONTRACT_PROFITABILITY_SAMPLE_TREND = [18.4, 21.2, 20.6, 23.8]
 
   function dashboardAssertCompleteReadResponses(entries = []) {
     entries.forEach((entry) => {
@@ -479,117 +474,6 @@ export function createDashboardFeature(ctx) {
 
     if (normalizedPanelKey === 'objects' && !nextCollapsed) {
       dashboardResizeActiveWorkerMap()
-    }
-  }
-
-  function dashboardContractProfitabilityCollapseStorageKey() {
-    const orgPart = dashboardLocalCachePart(appState.session?.orgId, 'org')
-    const userPart = dashboardLocalCachePart(
-      appState.session?.uid ??
-        appState.session?.userId ??
-        appState.session?.email ??
-        appState.session?.login ??
-        appState.session?.name,
-      'user',
-    )
-    return `${DASHBOARD_CONTRACT_PROFITABILITY_COLLAPSE_STORAGE_PREFIX}.${orgPart}.${userPart}`
-  }
-
-  function dashboardReadContractProfitabilityCollapsed() {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return false
-    }
-
-    try {
-      return window.localStorage.getItem(dashboardContractProfitabilityCollapseStorageKey()) === '1'
-    } catch {
-      return false
-    }
-  }
-
-  function dashboardWriteContractProfitabilityCollapsed(collapsed) {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return
-    }
-
-    try {
-      window.localStorage.setItem(
-        dashboardContractProfitabilityCollapseStorageKey(),
-        collapsed ? '1' : '0',
-      )
-    } catch {
-      // The panel still works when localStorage is unavailable.
-    }
-  }
-
-  function dashboardSyncContractProfitabilityCompactSummary() {
-    const sourceAverage = document.getElementById('dashContractProfitabilityAverage')
-    const compactAverage = document.getElementById('dashContractProfitabilityCompactAverage')
-    const commandAverage = document.getElementById('dashCommandMarginValue')
-    const sourceDelta = document.getElementById('dashContractProfitabilityDelta')
-    const compactDelta = document.getElementById('dashContractProfitabilityCompactDelta')
-    const firstContract = document.querySelector('#dashContractProfitabilityList li')
-    const compactContractName = document.getElementById('dashContractProfitabilityCompactContractName')
-    const compactContractValue = document.getElementById('dashContractProfitabilityCompactContractValue')
-
-    if (compactAverage) {
-      compactAverage.textContent = sourceAverage?.textContent?.trim() || '—'
-    }
-    if (commandAverage) {
-      commandAverage.textContent = sourceAverage?.textContent?.trim() || '—'
-    }
-    if (compactDelta) {
-      const deltaText = sourceDelta?.textContent?.trim() || 'Brak porównania'
-      compactDelta.textContent = deltaText.replace('w porównaniu z poprzednim miesiącem', 'miesiąc do miesiąca')
-      compactDelta.classList.toggle('is-positive', sourceDelta?.classList.contains('is-positive') === true)
-      compactDelta.classList.toggle('is-negative', sourceDelta?.classList.contains('is-negative') === true)
-      compactDelta.classList.toggle('is-neutral', sourceDelta?.classList.contains('is-neutral') === true)
-    }
-    if (compactContractName) {
-      compactContractName.textContent = firstContract?.querySelector('span')?.textContent?.trim() || 'Brak danych'
-    }
-    if (compactContractValue) {
-      compactContractValue.textContent = firstContract?.querySelector('strong')?.textContent?.trim() || '—'
-    }
-  }
-
-  function dashboardSetContractProfitabilityCollapsed(collapsed, { persist = true } = {}) {
-    const card = document.getElementById('dashContractProfitabilityCard')
-    const button = document.getElementById('dashContractProfitabilityToggle')
-    const body = document.getElementById('dashContractProfitabilityBody')
-    const compactSummary = document.getElementById('dashContractProfitabilityCompact')
-    const nextCollapsed = Boolean(collapsed)
-
-    dashboardSyncContractProfitabilityCompactSummary()
-
-    if (card instanceof HTMLElement) {
-      card.classList.toggle('is-collapsed', nextCollapsed)
-      card.dataset.collapsed = nextCollapsed ? '1' : '0'
-    }
-
-    if (body instanceof HTMLElement) {
-      body.hidden = nextCollapsed
-    }
-    if (compactSummary instanceof HTMLElement) {
-      compactSummary.hidden = !nextCollapsed
-    }
-
-    if (button instanceof HTMLButtonElement) {
-      const label = nextCollapsed
-        ? 'Rozwiń panel rentowności kontraktów'
-        : 'Zwiń panel rentowności kontraktów'
-      button.textContent = nextCollapsed ? 'Rozwiń' : 'Zwiń'
-      button.setAttribute('aria-expanded', nextCollapsed ? 'false' : 'true')
-      button.setAttribute('aria-label', label)
-      button.setAttribute('title', label)
-    }
-
-    if (persist) {
-      dashboardWriteContractProfitabilityCollapsed(nextCollapsed)
-    }
-
-    if (!nextCollapsed) {
-      window.requestAnimationFrame(() => dashboardDrawContractProfitabilitySampleChart())
     }
   }
 
@@ -7636,107 +7520,8 @@ export function createDashboardFeature(ctx) {
     }
   }
 
-  function dashboardRenderContractProfitabilityMonths(referenceDate = new Date()) {
-    const formatter = new Intl.DateTimeFormat('pl-PL', { month: 'short' })
-    document.querySelectorAll('[data-dash-contract-profitability-month-offset]').forEach((node) => {
-      const offset = Math.max(0, Number(node.getAttribute('data-dash-contract-profitability-month-offset')) || 0)
-      const monthDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth() - offset, 1)
-      const rawLabel = formatter.format(monthDate).replace('.', '').trim()
-      node.textContent = rawLabel ? `${rawLabel.charAt(0).toUpperCase()}${rawLabel.slice(1)}` : '—'
-    })
-  }
-
-  function dashboardDrawContractProfitabilitySampleChart() {
-    const canvas = document.getElementById('dashContractProfitabilityCanvas')
-    if (!(canvas instanceof HTMLCanvasElement)) {
-      return
-    }
-
-    const width = Math.max(1, Math.round(canvas.getBoundingClientRect().width))
-    const height = Math.max(1, Math.round(canvas.getBoundingClientRect().height))
-    if (width <= 1 || height <= 1) {
-      return
-    }
-
-    const pixelRatio = Math.max(1, Math.min(2, Number(window.devicePixelRatio) || 1))
-    canvas.width = Math.round(width * pixelRatio)
-    canvas.height = Math.round(height * pixelRatio)
-
-    const context = canvas.getContext('2d')
-    if (!context) {
-      return
-    }
-
-    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
-    context.clearRect(0, 0, width, height)
-
-    const chartPadding = { top: 8, right: 8, bottom: 8, left: 8 }
-    const plotWidth = Math.max(1, width - chartPadding.left - chartPadding.right)
-    const plotHeight = Math.max(1, height - chartPadding.top - chartPadding.bottom)
-    const maximumValue = 30
-    const coordinates = DASHBOARD_CONTRACT_PROFITABILITY_SAMPLE_TREND.map((value, index, values) => ({
-      x: chartPadding.left + (plotWidth * index) / Math.max(1, values.length - 1),
-      y: chartPadding.top + plotHeight - (plotHeight * value) / maximumValue,
-    }))
-
-    context.strokeStyle = '#e8ecf3'
-    context.lineWidth = 1
-    ;[0, 10, 20, 30].forEach((value) => {
-      const y = chartPadding.top + plotHeight - (plotHeight * value) / maximumValue
-      context.beginPath()
-      context.moveTo(chartPadding.left, y)
-      context.lineTo(width - chartPadding.right, y)
-      context.stroke()
-    })
-
-    const drawTrendPath = () => {
-      context.beginPath()
-      context.moveTo(coordinates[0].x, coordinates[0].y)
-      coordinates.slice(1).forEach((point, index) => {
-        const previous = coordinates[index]
-        const midpoint = (previous.x + point.x) / 2
-        context.bezierCurveTo(midpoint, previous.y, midpoint, point.y, point.x, point.y)
-      })
-    }
-
-    drawTrendPath()
-    context.lineTo(coordinates[coordinates.length - 1].x, chartPadding.top + plotHeight)
-    context.lineTo(coordinates[0].x, chartPadding.top + plotHeight)
-    context.closePath()
-    context.fillStyle = 'rgba(105, 97, 242, 0.09)'
-    context.fill()
-
-    drawTrendPath()
-    context.strokeStyle = '#6961f2'
-    context.lineWidth = 3
-    context.lineCap = 'round'
-    context.lineJoin = 'round'
-    context.stroke()
-  }
-
-  function dashboardRenderContractProfitabilitySample() {
-    dashboardRenderContractProfitabilityMonths()
-    dashboardSyncContractProfitabilityCompactSummary()
-    window.requestAnimationFrame(() => dashboardDrawContractProfitabilitySampleChart())
-
-    const canvas = document.getElementById('dashContractProfitabilityCanvas')
-    if (!(canvas instanceof HTMLCanvasElement) || canvas === dashboardContractProfitabilityObservedCanvas) {
-      return
-    }
-
-    dashboardContractProfitabilityResizeObserver?.disconnect?.()
-    dashboardContractProfitabilityObservedCanvas = canvas
-    if (typeof ResizeObserver === 'function') {
-      dashboardContractProfitabilityResizeObserver = new ResizeObserver(() => {
-        window.requestAnimationFrame(() => dashboardDrawContractProfitabilitySampleChart())
-      })
-      dashboardContractProfitabilityResizeObserver.observe(canvas)
-    }
-  }
-
   function renderDashboardSummary(summary, todayRows = appState.dashboardTodayRows) {
     dashboardMountCommandCenterPanels()
-    dashboardRenderContractProfitabilitySample()
     const values = summary?.values ?? {}
     const operationalServices =
       summary?.operationalServices?.correlation?.modelVersion === DASHBOARD_SERVICE_EXECUTION_MODEL_VERSION
@@ -9497,15 +9282,6 @@ export function createDashboardFeature(ctx) {
         dashboardSetInsightPanelCollapsed(panelKey, !card?.classList.contains('is-collapsed'))
       })
     })
-    dashboardSetContractProfitabilityCollapsed(dashboardReadContractProfitabilityCollapsed(), {
-      persist: false,
-    })
-
-    binding.add(document.getElementById('dashContractProfitabilityToggle'), 'click', () => {
-      const card = document.getElementById('dashContractProfitabilityCard')
-      dashboardSetContractProfitabilityCollapsed(!card?.classList.contains('is-collapsed'))
-    })
-
     binding.add(document.getElementById('dashActiveWorkersLocationList'), 'click', (event) => {
       const button = event.target?.closest?.('[data-dash-active-worker-map-key]')
       if (!button) {
@@ -10072,9 +9848,6 @@ export function createDashboardFeature(ctx) {
     dashboardBackgroundRefreshPromise = null
     dashboardReferencePreloadPromise = null
     dashboardWidgetsRefreshPromise = null
-    dashboardContractProfitabilityResizeObserver?.disconnect?.()
-    dashboardContractProfitabilityResizeObserver = null
-    dashboardContractProfitabilityObservedCanvas = null
   }
 
   const helpers = {
