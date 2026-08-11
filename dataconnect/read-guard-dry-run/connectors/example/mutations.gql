@@ -1,0 +1,926 @@
+# dataconnect/example/mutations.gql
+# Membership-checked mutations (console + app)
+# Uses auth.uid (UID).
+# In Firebase Console -> Authentication -> Claims:
+# { "sub": "<USER_UID>" }
+
+mutation InsertClientForOrg(
+  $orgId: String!
+  $clientId: String!
+  $name: String
+  $nip: String
+  $city: String
+  $address: String
+  $contact: String
+  $status: String
+  $clientType: String
+  $coordinator: String
+  $serviceFrequency: String
+  $assignees: String
+  $chemistry: String
+  $equipment: String
+  $clientInfo: String
+  $objectType: String
+  $cooperationStartAt: Timestamp
+  $cooperationEndAt: Timestamp
+  $contactPerson: String
+  $phone: String
+  $email: String
+  $emergencyContact: String
+  $contactPosition: String
+  $postalCode: String
+  $accessHours: String
+  $accessMethod: String
+  $serviceEntry: String
+  $serviceType: String
+  $serviceDays: String
+  $preferredHours: String
+  $workMode: String
+  $sla: String
+  $rbhAmount: Float
+  $requiredPermissions: String
+  $bhpRequirements: String
+  $workRestrictions: String
+  $excludedZones: String
+  $operationalRisks: String
+  $specialInstructions: String
+  $specialEquipment: String
+  $storagePlace: String
+  $backroomAccess: String
+  $technicalNotes: String
+  $internalNotes: String
+  $coordinatorChangedAt: Timestamp
+  $lastExecutionAt: Timestamp
+  $lastWorkerAssignmentAt: Timestamp
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER']", message: "Brak uprawnien do dodawania klient w.")
+      }
+  }
+
+  client_insert(data: {
+    orgId: $orgId
+    clientId: $clientId
+    name: $name
+    nip: $nip
+    city: $city
+    address: $address
+    contact: $contact
+    status: $status
+    clientType: $clientType
+    coordinator: $coordinator
+    serviceFrequency: $serviceFrequency
+    assignees: $assignees
+    chemistry: $chemistry
+    equipment: $equipment
+    clientInfo: $clientInfo
+    objectType: $objectType
+    cooperationStartAt: $cooperationStartAt
+    cooperationEndAt: $cooperationEndAt
+    contactPerson: $contactPerson
+    phone: $phone
+    email: $email
+    emergencyContact: $emergencyContact
+    contactPosition: $contactPosition
+    postalCode: $postalCode
+    accessHours: $accessHours
+    accessMethod: $accessMethod
+    serviceEntry: $serviceEntry
+    serviceType: $serviceType
+    serviceDays: $serviceDays
+    preferredHours: $preferredHours
+    workMode: $workMode
+    sla: $sla
+    rbhAmount: $rbhAmount
+    requiredPermissions: $requiredPermissions
+    bhpRequirements: $bhpRequirements
+    workRestrictions: $workRestrictions
+    excludedZones: $excludedZones
+    operationalRisks: $operationalRisks
+    specialInstructions: $specialInstructions
+    specialEquipment: $specialEquipment
+    storagePlace: $storagePlace
+    backroomAccess: $backroomAccess
+    technicalNotes: $technicalNotes
+    internalNotes: $internalNotes
+    coordinatorChangedAt: $coordinatorChangedAt
+    lastExecutionAt: $lastExecutionAt
+    lastWorkerAssignmentAt: $lastWorkerAssignmentAt
+    createdAt_expr: "request.time"
+    updatedAt_expr: "request.time"
+  })
+}
+
+mutation UpdateClientForOrg(
+  $orgId: String!
+  $clientId: String!
+  $name: String
+  $nip: String
+  $city: String
+  $address: String
+  $contact: String
+  $status: String
+  $clientType: String
+  $coordinator: String
+  $serviceFrequency: String
+  $assignees: String
+  $chemistry: String
+  $equipment: String
+  $clientInfo: String
+  $objectType: String
+  $cooperationStartAt: Timestamp
+  $cooperationEndAt: Timestamp
+  $contactPerson: String
+  $phone: String
+  $email: String
+  $emergencyContact: String
+  $contactPosition: String
+  $postalCode: String
+  $accessHours: String
+  $accessMethod: String
+  $serviceEntry: String
+  $serviceType: String
+  $serviceDays: String
+  $preferredHours: String
+  $workMode: String
+  $sla: String
+  $rbhAmount: Float
+  $requiredPermissions: String
+  $bhpRequirements: String
+  $workRestrictions: String
+  $excludedZones: String
+  $operationalRisks: String
+  $specialInstructions: String
+  $specialEquipment: String
+  $storagePlace: String
+  $backroomAccess: String
+  $technicalNotes: String
+  $internalNotes: String
+  $coordinatorChangedAt: Timestamp
+  $lastExecutionAt: Timestamp
+  $lastWorkerAssignmentAt: Timestamp
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER']", message: "Brak uprawnien do edycji klient w.")
+      }
+  }
+
+  client_update(
+    key: { orgId: $orgId, clientId: $clientId }
+    data: {
+      name: $name
+      nip: $nip
+      city: $city
+      address: $address
+      contact: $contact
+      status: $status
+      clientType: $clientType
+      coordinator: $coordinator
+      serviceFrequency: $serviceFrequency
+      assignees: $assignees
+      chemistry: $chemistry
+      equipment: $equipment
+      clientInfo: $clientInfo
+      objectType: $objectType
+      cooperationStartAt: $cooperationStartAt
+      cooperationEndAt: $cooperationEndAt
+      contactPerson: $contactPerson
+      phone: $phone
+      email: $email
+      emergencyContact: $emergencyContact
+      contactPosition: $contactPosition
+      postalCode: $postalCode
+      accessHours: $accessHours
+      accessMethod: $accessMethod
+      serviceEntry: $serviceEntry
+      serviceType: $serviceType
+      serviceDays: $serviceDays
+      preferredHours: $preferredHours
+      workMode: $workMode
+      sla: $sla
+      rbhAmount: $rbhAmount
+      requiredPermissions: $requiredPermissions
+      bhpRequirements: $bhpRequirements
+      workRestrictions: $workRestrictions
+      excludedZones: $excludedZones
+      operationalRisks: $operationalRisks
+      specialInstructions: $specialInstructions
+      specialEquipment: $specialEquipment
+      storagePlace: $storagePlace
+      backroomAccess: $backroomAccess
+      technicalNotes: $technicalNotes
+      internalNotes: $internalNotes
+      coordinatorChangedAt: $coordinatorChangedAt
+      lastExecutionAt: $lastExecutionAt
+      lastWorkerAssignmentAt: $lastWorkerAssignmentAt
+      updatedAt_expr: "request.time"
+    }
+  )
+}
+
+mutation DeleteClientForOrg(
+  $orgId: String!
+  $clientId: String!
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER']", message: "Klienta moze usunac tylko Admin.")
+      }
+
+    currentClient: client(key: { orgId: $orgId, clientId: $clientId })
+      @check(expr: "this != null", message: "Nie znaleziono klienta w tej organizacji.") {
+        clientId
+      }
+  }
+
+  event_deleteMany(
+    where: { orgId: { eq: $orgId }, zone: { clientId: { eq: $clientId } } }
+  )
+
+  task_deleteMany(
+    where: { orgId: { eq: $orgId }, clientId: { eq: $clientId } }
+  )
+
+  zone_deleteMany(
+    where: { orgId: { eq: $orgId }, clientId: { eq: $clientId } }
+  )
+
+  client_delete(key: { orgId: $orgId, clientId: $clientId })
+}
+
+mutation UpsertTaskForOrg(
+  $orgId: String!
+  $idTask: String!
+  $dateYmd: String
+  $startTime: String
+  $endDateYmd: String
+  $endTime: String
+  $scheduleMode: String
+  $accessStartTime: String
+  $accessEndTime: String
+  $accessWindows: String
+  $requiredWorkMinutes: Int
+  $requiredPeople: Int
+  $workAllocations: String
+  $workerId: String
+  $workerIds: String
+  $workerLabel: String
+  $workerName: String
+  $workerLogin: String
+  $clientId: String
+  $clientLabel: String
+  $clientName: String
+  $nip: String
+  $street: String
+  $city: String
+  $postCode: String
+  $addressLabel: String
+  $executionAddressLabel: String
+  $lat: Float
+  $lng: Float
+  $zoneId: String
+  $zoneLabel: String
+  $repeatPreset: String
+  $repeatEvery: Int
+  $repeatUnit: String
+  $repeatWeekdays: String
+  $weeklyScheduleRules: String
+  $title: String
+  $type: String
+  $price: Float
+  $description: String
+  $workerComment: String
+  $supplies: String
+  $objectPlanTasks: String
+  $allowExtendedWork: Boolean
+  $createdByUid: String
+  $updatedByUid: String
+  $createdAt: Timestamp
+  $updatedAt: Timestamp
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER','COORDINATOR']", message: "Brak uprawnien do zapisu zlecen grafiku.")
+      }
+  }
+
+  task_upsert(data: {
+    orgId: $orgId
+    idTask: $idTask
+    dateYmd: $dateYmd
+    startTime: $startTime
+    endDateYmd: $endDateYmd
+    endTime: $endTime
+    scheduleMode: $scheduleMode
+    accessStartTime: $accessStartTime
+    accessEndTime: $accessEndTime
+    accessWindows: $accessWindows
+    requiredWorkMinutes: $requiredWorkMinutes
+    requiredPeople: $requiredPeople
+    workAllocations: $workAllocations
+    workerId: $workerId
+    workerIds: $workerIds
+    workerLabel: $workerLabel
+    workerName: $workerName
+    workerLogin: $workerLogin
+    clientId: $clientId
+    clientLabel: $clientLabel
+    clientName: $clientName
+    nip: $nip
+    street: $street
+    city: $city
+    postCode: $postCode
+    addressLabel: $addressLabel
+    executionAddressLabel: $executionAddressLabel
+    lat: $lat
+    lng: $lng
+    zoneId: $zoneId
+    zoneLabel: $zoneLabel
+    repeatPreset: $repeatPreset
+    repeatEvery: $repeatEvery
+    repeatUnit: $repeatUnit
+    repeatWeekdays: $repeatWeekdays
+    weeklyScheduleRules: $weeklyScheduleRules
+    title: $title
+    type: $type
+    price: $price
+    description: $description
+    workerComment: $workerComment
+    supplies: $supplies
+    objectPlanTasks: $objectPlanTasks
+    allowExtendedWork: $allowExtendedWork
+    createdByUid: $createdByUid
+    updatedByUid: $updatedByUid
+    createdAt: $createdAt
+    updatedAt: $updatedAt
+  })
+}
+
+mutation DeleteTaskForOrg(
+  $orgId: String!
+  $idTask: String!
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER','COORDINATOR']", message: "Brak uprawnien do usuwania zlecen grafiku.")
+      }
+  }
+
+  task_delete(key: { orgId: $orgId, idTask: $idTask })
+}
+
+mutation InsertZoneForOrg(
+  $orgId: String!
+  $zoneId: String!
+  $clientId: String!
+  $zone: String
+  $function: String
+  $editedBy: String
+  $date: Timestamp
+  $location: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER']", message: "Brak uprawnien do dodawania stref.")
+      }
+  }
+
+  zone_insert(data: {
+    orgId: $orgId
+    zoneId: $zoneId
+    clientId: $clientId
+    zone: $zone
+    function: $function
+    editedBy: $editedBy
+    date: $date
+    location: $location
+  })
+}
+
+mutation UpdateZoneForOrg(
+  $orgId: String!
+  $zoneId: String!
+  $clientId: String!
+  $zone: String
+  $function: String
+  $editedBy: String
+  $date: Timestamp
+  $location: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER']", message: "Brak uprawnien do edycji stref.")
+      }
+  }
+
+  zone_update(
+    key: { orgId: $orgId, zoneId: $zoneId }
+    data: {
+      clientId: $clientId
+      zone: $zone
+      function: $function
+      editedBy: $editedBy
+      date: $date
+      location: $location
+    }
+  )
+}
+
+mutation DeleteZoneForOrg(
+  $orgId: String!
+  $zoneId: String!
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER']", message: "Brak uprawnien do usuwania stref.")
+      }
+  }
+
+  zone_delete(key: { orgId: $orgId, zoneId: $zoneId })
+}
+
+mutation InsertWorkdayForOrg(
+  $orgId: String!
+  $workdayId: String!
+  $workerLogin: String!
+  $workerName: String
+  $utilityRoomId: String
+  $startAt: Timestamp
+  $endAt: Timestamp
+  $durationSec: Int
+  $status: String
+  $gps: String
+  $comment: String
+  $updatedBy: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do dodawania zdarzen.")
+      }
+    targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
+      authUid
+    }
+  }
+
+  workday_insert(data: {
+    orgId: $orgId
+    workdayId: $workdayId
+    workerLogin: $workerLogin
+    workerName: $workerName
+    utilityRoomId: $utilityRoomId
+    startAt: $startAt
+    endAt: $endAt
+    durationSec: $durationSec
+    status: $status
+    gps: $gps
+    comment: $comment
+    updatedBy: $updatedBy
+    updatedAt_expr: "request.time"
+  })
+}
+
+mutation UpdateWorkdayForOrg(
+  $orgId: String!
+  $workdayId: String!
+  $workerLogin: String!
+  $workerName: String
+  $utilityRoomId: String
+  $startAt: Timestamp
+  $endAt: Timestamp
+  $durationSec: Int
+  $status: String
+  $gps: String
+  $comment: String
+  $updatedBy: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do edycji zdarzen.")
+      }
+    targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
+      authUid
+    }
+  }
+
+  workday_update(
+    key: { orgId: $orgId, workdayId: $workdayId }
+    data: {
+      workerLogin: $workerLogin
+      workerName: $workerName
+      utilityRoomId: $utilityRoomId
+      startAt: $startAt
+      endAt: $endAt
+      durationSec: $durationSec
+      status: $status
+      gps: $gps
+      comment: $comment
+      updatedBy: $updatedBy
+      updatedAt_expr: "request.time"
+    }
+  )
+}
+
+mutation DeleteWorkdayForOrg(
+  $orgId: String!
+  $workdayId: String!
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER']", message: "Brak uprawnien do usuwania zdarzen.")
+      }
+  }
+
+  workday_delete(key: { orgId: $orgId, workdayId: $workdayId })
+}
+
+mutation InsertEventForOrg(
+  $orgId: String!
+  $eventId: String!
+  $workdayId: String
+  $zoneId: String
+  $workerLogin: String
+  $workerName: String
+  $startAt: Timestamp
+  $endAt: Timestamp
+  $durationSec: Int
+  $status: String
+  $closeMarkedAt: Timestamp
+  $endReason: String
+  $comment: String
+  $deviceId: String
+  $startEventId: String
+  $endEventId: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do dodawania zdarzen stref.")
+      }
+    targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
+      authUid
+    }
+  }
+
+  event_insert(data: {
+    orgId: $orgId
+    eventId: $eventId
+    workdayId: $workdayId
+    zoneId: $zoneId
+    workerLogin: $workerLogin
+    workerName: $workerName
+    startAt: $startAt
+    endAt: $endAt
+    durationSec: $durationSec
+    status: $status
+    closeMarkedAt: $closeMarkedAt
+    endReason: $endReason
+    comment: $comment
+    deviceId: $deviceId
+    startEventId: $startEventId
+    endEventId: $endEventId
+    createdAt_expr: "request.time"
+    updatedAt_expr: "request.time"
+  })
+}
+
+mutation UpdateEventForOrg(
+  $orgId: String!
+  $eventId: String!
+  $workdayId: String
+  $zoneId: String
+  $workerLogin: String
+  $workerName: String
+  $startAt: Timestamp
+  $endAt: Timestamp
+  $durationSec: Int
+  $status: String
+  $closeMarkedAt: Timestamp
+  $endReason: String
+  $comment: String
+  $deviceId: String
+  $startEventId: String
+  $endEventId: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do edycji zdarzen stref.")
+      }
+    targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
+      authUid
+    }
+  }
+
+  event_update(
+    key: { orgId: $orgId, eventId: $eventId }
+    data: {
+      workdayId: $workdayId
+      zoneId: $zoneId
+      workerLogin: $workerLogin
+      workerName: $workerName
+      startAt: $startAt
+      endAt: $endAt
+      durationSec: $durationSec
+      status: $status
+      closeMarkedAt: $closeMarkedAt
+      endReason: $endReason
+      comment: $comment
+      deviceId: $deviceId
+      startEventId: $startEventId
+      endEventId: $endEventId
+      updatedAt_expr: "request.time"
+    }
+  )
+}
+
+mutation ReidentifyEventForOrg(
+  $orgId: String!
+  $eventId: String!
+  $workdayId: String
+  $zoneId: String
+  $workerLogin: String
+  $workerName: String
+  $startAt: Timestamp
+  $endAt: Timestamp
+  $durationSec: Int
+  $status: String
+  $closeMarkedAt: Timestamp
+  $endReason: String
+  $comment: String
+  $deviceId: String
+  $startEventId: String
+  $endEventId: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do zmiany tozsamosci zdarzenia.")
+      }
+  }
+
+  event_update(
+    key: { orgId: $orgId, eventId: $eventId }
+    data: {
+      workdayId: $workdayId
+      zoneId: $zoneId
+      workerLogin: $workerLogin
+      workerName: $workerName
+      startAt: $startAt
+      endAt: $endAt
+      durationSec: $durationSec
+      status: $status
+      closeMarkedAt: $closeMarkedAt
+      endReason: $endReason
+      comment: $comment
+      deviceId: $deviceId
+      startEventId: $startEventId
+      endEventId: $endEventId
+      matchStatus: "UNMATCHED"
+      matchMethod: null
+      matchReason: "EVENT_IDENTITY_CHANGED_REQUIRES_RECORRELATION"
+      taskId: null
+      occurrenceDateYmd: null
+      serviceBlockId: null
+      allocationId: null
+      workSlotKey: null
+      matchedAt: null
+      planSnapshotVersion: null
+      plannedStartAt: null
+      plannedEndAt: null
+      plannedDurationMinutes: null
+      taskUpdatedAtSnapshot: null
+      updatedAt_expr: "request.time"
+    }
+  )
+}
+
+mutation DeleteEventForOrg(
+  $orgId: String!
+  $eventId: String!
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER','COORDINATOR']", message: "Brak uprawnien do usuwania zdarzen stref.")
+      }
+  }
+
+  event_delete(key: { orgId: $orgId, eventId: $eventId })
+}
+
+mutation InsertBackupCycleForOrg(
+  $orgId: String!
+  $cycleId: String!
+  $workerLogin: String
+  $workerName: String
+  $roomId: String
+  $strefa: String
+  $pomieszczenie: String
+  $startAt: Timestamp
+  $endAt: Timestamp
+  $durationSec: Int
+  $endReason: String
+  $comment: String
+  $status: String
+  $closeMarkedAt: Timestamp
+  $deviceId: String
+  $startEventId: String
+  $endEventId: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do zapisu backup cyklu.")
+      }
+    targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
+      authUid
+    }
+  }
+
+  backupCycle_insert(data: {
+    orgId: $orgId
+    cycleId: $cycleId
+    workerLogin: $workerLogin
+    workerName: $workerName
+    roomId: $roomId
+    strefa: $strefa
+    pomieszczenie: $pomieszczenie
+    startAt: $startAt
+    endAt: $endAt
+    durationSec: $durationSec
+    endReason: $endReason
+    comment: $comment
+    status: $status
+    closeMarkedAt: $closeMarkedAt
+    deviceId: $deviceId
+    startEventId: $startEventId
+    endEventId: $endEventId
+    createdAt_expr: "request.time"
+    editedAt_expr: "request.time"
+  })
+}
+
+mutation UpdateBackupCycleForOrg(
+  $orgId: String!
+  $cycleId: String!
+  $workerLogin: String
+  $workerName: String
+  $roomId: String
+  $strefa: String
+  $pomieszczenie: String
+  $startAt: Timestamp
+  $endAt: Timestamp
+  $durationSec: Int
+  $endReason: String
+  $comment: String
+  $status: String
+  $closeMarkedAt: Timestamp
+  $deviceId: String
+  $startEventId: String
+  $endEventId: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do aktualizacji backup cyklu.")
+      }
+    targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
+      authUid
+    }
+  }
+
+  backupCycle_update(
+    key: { orgId: $orgId, cycleId: $cycleId }
+    data: {
+      workerLogin: $workerLogin
+      workerName: $workerName
+      roomId: $roomId
+      strefa: $strefa
+      pomieszczenie: $pomieszczenie
+      startAt: $startAt
+      endAt: $endAt
+      durationSec: $durationSec
+      endReason: $endReason
+      comment: $comment
+      status: $status
+      closeMarkedAt: $closeMarkedAt
+      deviceId: $deviceId
+      startEventId: $startEventId
+      endEventId: $endEventId
+      editedAt_expr: "request.time"
+    }
+  )
+}
+
+mutation StartWorkdayPause(
+  $orgId: String!
+  $pauseId: String!
+  $workdayId: String!
+  $workerLogin: String!
+  $workerName: String
+  $startAt: Timestamp
+  $stopAt: Timestamp
+  $durationSec: Int
+  $status: String
+  $pauseEventId: String
+  $deviceId: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do zapisu pauzy.")
+      }
+    targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
+      authUid
+    }
+
+    workday(key: { orgId: $orgId, workdayId: $workdayId })
+      @check(expr: "this != null", message: "Brak aktywnego dnia pracy.") {
+        status @check(expr: "this == 'RUNNING'", message: "Pauza jest dostepna tylko dla dnia RUNNING.")
+        pauseOpenId @check(expr: "this == null", message: "Masz juz aktywna pauze.")
+      }
+  }
+
+  workdayPause_insert(data: {
+    orgId: $orgId
+    pauseId: $pauseId
+    workdayId: $workdayId
+    workerLogin: $workerLogin
+    workerName: $workerName
+    startAt: $startAt
+    stopAt: $stopAt
+    durationSec: $durationSec
+    status: $status
+    pauseEventId: $pauseEventId
+    deviceId: $deviceId
+    createdAt_expr: "request.time"
+    updatedAt_expr: "request.time"
+  })
+
+  workday_update(
+    key: { orgId: $orgId, workdayId: $workdayId }
+    data: {
+      pauseOpenId: $pauseId
+      pauseOpenAt: $startAt
+      updatedAt_expr: "request.time"
+    }
+  )
+}
+
+mutation StopWorkdayPause(
+  $orgId: String!
+  $pauseId: String!
+  $workdayId: String!
+  $workerLogin: String
+  $stopAt: Timestamp
+  $durationSec: Int
+  $status: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        role @check(expr: "this in ['ADMIN','OWNER','MANAGER','COORDINATOR'] || (this == 'WORKER' && (response.query.targetWorker.authUid == auth.uid || response.query.targetWorker.authUid == null || response.query.targetWorker.authUid == ''))", message: "Brak uprawnien do zapisu pauzy.")
+      }
+    targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
+      authUid
+    }
+
+    workdayPause(key: { orgId: $orgId, pauseId: $pauseId })
+      @check(expr: "this != null", message: "Nie znaleziono aktywnej pauzy.") {
+        status @check(expr: "this == 'RUNNING'", message: "Pauza jest juz zakonczona.")
+      }
+  }
+
+  workdayPause_update(
+    key: { orgId: $orgId, pauseId: $pauseId }
+    data: {
+      stopAt: $stopAt
+      durationSec: $durationSec
+      status: $status
+      updatedAt_expr: "request.time"
+    }
+  )
+
+  workday_update(
+    key: { orgId: $orgId, workdayId: $workdayId }
+    data: {
+      pauseOpenId: null
+      pauseOpenAt: null
+      updatedAt_expr: "request.time"
+    }
+  )
+}

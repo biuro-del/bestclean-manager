@@ -1,0 +1,13 @@
+specVersion: "v1"
+serviceId: iclean-room-service
+location: europe-west3
+schema:
+  source: "./schema"
+  datasource:
+    postgresql:
+      database: iclean-room-database
+      schemaValidation: "COMPATIBLE"
+      cloudSql:
+        instanceId: iclean-room-instance
+connectorDirs:
+  - connectors/example
