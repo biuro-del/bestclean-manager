@@ -144,3 +144,19 @@ test('linked event deletion uses bounded integrity pages and fails closed', asyn
   assert.doesNotMatch(linkedEventReader, /EventsForOrg/)
   assert.match(workdayService, /if \(isPagedReadSafetyError\(error\)\) \{\s*throw error/)
 })
+
+test('daily polling fingerprint uses complete bounded pages for the current day', () => {
+  const workdayService = read('web-app', 'apps', 'portal-web', 'src', 'services', 'workdayService.js')
+  const start = workdayService.indexOf('async function fetchCompleteDailyFingerprintRows')
+  const end = workdayService.indexOf('export async function getEventsFingerprintForOrg', start)
+
+  assert.ok(start >= 0 && end > start)
+  const fingerprintReader = workdayService.slice(start, end)
+  assert.match(workdayService, /WORKDAY_DAILY_READ_MAX_ROWS = 5000/)
+  assert.match(fingerprintReader, /WorkdaysPageForOrg/)
+  assert.match(fingerprintReader, /EventsPageForOrg/)
+  assert.match(fingerprintReader, /WORKDAY_READ_MAX_CHUNK_SIZE/)
+  assert.match(fingerprintReader, /createPagedReadLimitError/)
+  assert.doesNotMatch(fingerprintReader, /getRawWorkdaysForOrg|getRawEventsForOrg|WorkdaysForOrg|EventsForOrg/)
+  assert.match(workdayService, /23:59:59\.999/)
+})

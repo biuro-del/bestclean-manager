@@ -43,6 +43,7 @@ const READ_CACHE_MS = 30000
 const EVENTS_FAST_PAGE_MAX_SIZE = WORKDAY_READ_MAX_CHUNK_SIZE
 const EVENTS_FAST_PAGE_CHUNK_SIZE = 150
 const EVENTS_FAST_PAGE_MAX_SCAN = 1200
+const WORKDAY_DAILY_READ_MAX_ROWS = 5000
 const workdayCache = new Map()
 const DEPLOY_HINT =
   'Brak wdro\u017conej operacji Data Connect. Wykonaj: firebase login --reauth, potem firebase deploy --only dataconnect --project iclean-room.'
@@ -843,9 +844,19 @@ function normalizedPageOffset(page, pageSize) {
   return (normalizedPage - 1) * pageSize
 }
 
+function normalizeEventsFastRangeBoundary(value, endOfDay = false) {
+  const raw = String(value ?? '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const localDate = new Date(`${raw}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}`)
+    return Number.isFinite(localDate.getTime()) ? localDate.toISOString() : ''
+  }
+
+  return toIso(value)
+}
+
 function normalizeEventsFastRange(filters = {}) {
-  const fromStartAt = toIso(filters.fromIso)
-  const toStartAt = toIso(filters.toIso)
+  const fromStartAt = normalizeEventsFastRangeBoundary(filters.fromIso)
+  const toStartAt = normalizeEventsFastRangeBoundary(filters.toIso, true)
   if (!fromStartAt || !toStartAt) {
     return null
   }
@@ -2722,6 +2733,44 @@ function buildTodayFingerprint(dayKey, recordsMap) {
   }
 }
 
+async function fetchCompleteDailyFingerprintRows(orgId, operationName, collectionName, day, sourceLabel) {
+  const range = normalizeEventsFastRange({ fromIso: day, toIso: day })
+  if (!range) {
+    throw createPagedReadUnavailableError(sourceLabel)
+  }
+
+  const rows = []
+  let offset = 0
+  try {
+    while (offset < WORKDAY_DAILY_READ_MAX_ROWS) {
+      const limit = Math.min(WORKDAY_READ_MAX_CHUNK_SIZE, WORKDAY_DAILY_READ_MAX_ROWS - offset)
+      const nextRows = await runEventsPageQuery(
+        operationName,
+        {
+          orgId,
+          ...range,
+          limit,
+          offset,
+        },
+        collectionName,
+        { forceRefresh: true },
+      )
+      rows.push(...nextRows)
+      if (nextRows.length < limit) {
+        return rows
+      }
+      offset += limit
+    }
+  } catch (error) {
+    if (isOperationNotFoundError(error, operationName)) {
+      throw createPagedReadUnavailableError(sourceLabel)
+    }
+    throw error
+  }
+
+  throw createPagedReadLimitError(sourceLabel)
+}
+
 export async function getTodayWorktimeFingerprint(orgId) {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
@@ -2729,26 +2778,22 @@ export async function getTodayWorktimeFingerprint(orgId) {
 
   ensureFirebase()
   const day = currentDayYmd()
-
-  let workdayRows = []
-  try {
-    workdayRows = await getRawWorkdaysForOrg(orgId)
-  } catch (error) {
-    throw withOperationNotFoundHint(error, 'WorkdaysForOrg')
-  }
-
-  let eventRows = []
-  if (!eventsForOrgUnavailable) {
-    try {
-      eventRows = await getRawEventsForOrg(orgId)
-    } catch (error) {
-      if (!isOperationNotFoundError(error, 'EventsForOrg')) {
-        throw error
-      }
-
-      eventsForOrgUnavailable = true
-    }
-  }
+  const [workdayRows, eventRows] = await Promise.all([
+    fetchCompleteDailyFingerprintRows(
+      orgId,
+      'WorkdaysPageForOrg',
+      'workdays',
+      day,
+      'dzisiejszych dni pracy',
+    ),
+    fetchCompleteDailyFingerprintRows(
+      orgId,
+      'EventsPageForOrg',
+      'events',
+      day,
+      'dzisiejszych zdarzeń',
+    ),
+  ])
 
   const recordsMap = new Map()
   workdayRows.forEach((row, index) => {
