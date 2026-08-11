@@ -15,6 +15,11 @@ async function readPolicy() {
   return import(`${pathToFileURL(file).href}?test=${Date.now()}-${Math.random()}`)
 }
 
+async function readWorkdayPolicy() {
+  const file = path.join(portalRoot, 'services', 'workdayReadCostPolicy.js')
+  return import(`${pathToFileURL(file).href}?test=${Date.now()}-${Math.random()}`)
+}
+
 test('reader referencyjny pobiera deterministyczne strony i odrzuca katalog powyżej limitu', async () => {
   const { fetchAllReferenceRows } = await readPolicy()
   const source = Array.from({ length: 620 }, (_, index) => ({ clientId: `C${String(index).padStart(4, '0')}` }))
@@ -120,4 +125,22 @@ test('normal event view does not fetch backup cycles as a hidden fallback', () =
   const normalEventsReader = workdayService.slice(start, end)
   assert.doesNotMatch(normalEventsReader, /getMappedBackupCyclesForOrg|BackupCyclesForOrg|mappedBackupCycles/)
   assert.match(workdayService, /source === 'backupcycle'[\s\S]*?getMappedBackupCyclesForOrg\(orgId\)/)
+})
+
+test('linked event deletion uses bounded integrity pages and fails closed', async () => {
+  const { WORKDAY_READ_MAX_CHUNK_SIZE, WORKDAY_READ_MAX_RECORDS, isPagedReadSafetyError } = await readWorkdayPolicy()
+  const workdayService = read('web-app', 'apps', 'portal-web', 'src', 'services', 'workdayService.js')
+  const start = workdayService.indexOf('async function findEventIdsLinkedToWorkday')
+  const end = workdayService.indexOf('export async function deleteEvent', start)
+
+  assert.equal(WORKDAY_READ_MAX_CHUNK_SIZE, 250)
+  assert.equal(WORKDAY_READ_MAX_RECORDS, 20000)
+  assert.equal(isPagedReadSafetyError({ code: 'PAGED_READ_LIMIT_EXCEEDED' }), true)
+  assert.ok(start >= 0 && end > start)
+  const linkedEventReader = workdayService.slice(start, end)
+  assert.match(linkedEventReader, /EventsIntegrityPageForOrg/)
+  assert.match(linkedEventReader, /WORKDAY_READ_MAX_CHUNK_SIZE/)
+  assert.match(linkedEventReader, /WORKDAY_READ_MAX_RECORDS/)
+  assert.doesNotMatch(linkedEventReader, /EventsForOrg/)
+  assert.match(workdayService, /if \(isPagedReadSafetyError\(error\)\) \{\s*throw error/)
 })

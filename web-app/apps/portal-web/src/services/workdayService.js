@@ -25,6 +25,13 @@ import {
   openWorkdayRecordKey,
 } from './openWorkdayIntegrity'
 import { eventCorrelationIdentityChanged } from './eventCorrelationIdentityPolicy'
+import {
+  WORKDAY_READ_MAX_CHUNK_SIZE,
+  WORKDAY_READ_MAX_RECORDS,
+  createPagedReadLimitError,
+  createPagedReadUnavailableError,
+  isPagedReadSafetyError,
+} from './workdayReadCostPolicy'
 
 const NINE_HOURS_SECONDS = 9 * 60 * 60
 let eventsForOrgUnavailable = false
@@ -33,7 +40,7 @@ let eventsFingerprintForOrgUnavailable = false
 const EVENTS_FINGERPRINT_FOR_ORG_ENABLED =
   String(import.meta.env?.VITE_ENABLE_DATACONNECT_FINGERPRINT ?? '').trim().toLowerCase() === 'true'
 const READ_CACHE_MS = 30000
-const EVENTS_FAST_PAGE_MAX_SIZE = 250
+const EVENTS_FAST_PAGE_MAX_SIZE = WORKDAY_READ_MAX_CHUNK_SIZE
 const EVENTS_FAST_PAGE_CHUNK_SIZE = 150
 const EVENTS_FAST_PAGE_MAX_SCAN = 1200
 const workdayCache = new Map()
@@ -4322,25 +4329,42 @@ async function findEventIdsLinkedToWorkday(orgId, workdayId) {
     return []
   }
 
+  const linkedEventIds = new Set()
+  let offset = 0
+
   try {
-    const response = await runQueryOperation('EventsForOrg', { orgId })
-    const rows = Array.isArray(response?.data?.events) ? response.data.events : []
-    return [
-      ...new Set(
-        rows
-          .filter((row) => {
-            const ids = [row?.eventId, row?.workdayId, row?.startEventId, row?.endEventId]
-              .map((value) => String(value ?? '').trim())
-              .filter(Boolean)
-            return ids.includes(normalizedWorkdayId)
-          })
-          .map((row) => String(row?.eventId ?? '').trim())
-          .filter(Boolean),
-      ),
-    ]
+    while (offset < WORKDAY_READ_MAX_RECORDS) {
+      const rows = await runEventsPageQuery(
+        'EventsIntegrityPageForOrg',
+        {
+          orgId,
+          limit: WORKDAY_READ_MAX_CHUNK_SIZE,
+          offset,
+        },
+        'events',
+        { forceRefresh: true },
+      )
+
+      rows.forEach((row) => {
+        const ids = [row?.eventId, row?.workdayId, row?.startEventId, row?.endEventId]
+          .map((value) => String(value ?? '').trim())
+          .filter(Boolean)
+        if (ids.includes(normalizedWorkdayId)) {
+          const eventId = String(row?.eventId ?? '').trim()
+          if (eventId) linkedEventIds.add(eventId)
+        }
+      })
+
+      if (rows.length < WORKDAY_READ_MAX_CHUNK_SIZE) {
+        return [...linkedEventIds]
+      }
+      offset += WORKDAY_READ_MAX_CHUNK_SIZE
+    }
+
+    throw createPagedReadLimitError('zdarzeń powiązanych z dniem pracy')
   } catch (error) {
-    if (isOperationNotFoundError(error, 'EventsForOrg')) {
-      return []
+    if (isOperationNotFoundError(error, 'EventsIntegrityPageForOrg')) {
+      throw createPagedReadUnavailableError('zdarzeń powiązanych z dniem pracy')
     }
     throw error
   }
@@ -4368,6 +4392,9 @@ export async function deleteEvent(orgId, eventId, options = {}) {
     try {
       linkedEventIds = await findEventIdsLinkedToWorkday(orgId, normalizedEventId)
     } catch (error) {
+      if (isPagedReadSafetyError(error)) {
+        throw error
+      }
       deleteErrors.push(error)
     }
 
