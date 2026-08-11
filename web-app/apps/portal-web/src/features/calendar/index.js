@@ -186,6 +186,7 @@ export function createCalendarFeature(ctx) {
   const calendarTimelineModelCache = { values: new Map() }
   const ORDERS_LOCAL_RETENTION_MS = 5 * 60 * 1000
   const CALENDAR_PLANNING_LIVE_INITIAL_LIMIT = 30
+  const CALENDAR_TIMELINE_READ_MAX_ROWS = 2000
 
   function calendarPerformanceEnabled() {
     return typeof performance !== 'undefined' && Boolean(import.meta.env?.DEV)
@@ -1503,12 +1504,15 @@ export function createCalendarFeature(ctx) {
             fromIso: dayKey,
             toIso: rangeEndDay,
             page: 1,
-            pageSize: 8000,
+            pageSize: CALENDAR_TIMELINE_READ_MAX_ROWS,
           }).catch(() => {
             workerStateIncomplete = true
             return { items: [] }
           }),
         ])
+        if (eventsResponse?.hasNext === true) {
+          workerStateIncomplete = true
+        }
         statusRows = Array.isArray(todayRows) ? todayRows : []
         currentStatusRows = statusRows
         sourceRows = [
@@ -1526,7 +1530,7 @@ export function createCalendarFeature(ctx) {
             fromIso: dayKey,
             toIso: rangeEndDay,
             page: 1,
-            pageSize: 8000,
+            pageSize: CALENDAR_TIMELINE_READ_MAX_ROWS,
           }).catch(() => {
             workerStateIncomplete = true
             return { items: [] }
@@ -1536,7 +1540,7 @@ export function createCalendarFeature(ctx) {
             fromIso: dayKey,
             toIso: rangeEndDay,
             page: 1,
-            pageSize: 8000,
+            pageSize: CALENDAR_TIMELINE_READ_MAX_ROWS,
           }).catch(() => {
             workerStateIncomplete = true
             return { items: [] }
@@ -1552,7 +1556,7 @@ export function createCalendarFeature(ctx) {
                   fromIso: currentDayKey,
                   toIso: currentDayKey,
                   page: 1,
-                  pageSize: 8000,
+                  pageSize: CALENDAR_TIMELINE_READ_MAX_ROWS,
                 }).catch(() => {
                   workerStateIncomplete = true
                   return { items: [] }
@@ -1564,7 +1568,7 @@ export function createCalendarFeature(ctx) {
                   fromIso: currentDayKey,
                   toIso: currentDayKey,
                   page: 1,
-                  pageSize: 8000,
+                  pageSize: CALENDAR_TIMELINE_READ_MAX_ROWS,
                 }).catch(() => {
                   workerStateIncomplete = true
                   return { items: [] }
@@ -1574,6 +1578,14 @@ export function createCalendarFeature(ctx) {
           ...(Array.isArray(eventsResponse.items) ? eventsResponse.items : []),
           ...(Array.isArray(workdaysResponse.items) ? workdaysResponse.items : []),
         ]
+        if (
+          eventsResponse?.hasNext === true ||
+          workdaysResponse?.hasNext === true ||
+          currentEventsResponse?.hasNext === true ||
+          currentWorkdaysResponse?.hasNext === true
+        ) {
+          workerStateIncomplete = true
+        }
         currentStatusRows = Array.isArray(currentStatusResponse?.todayRows) ? currentStatusResponse.todayRows : []
         todaySourceRows = rangeIncludesToday
           ? sourceRows

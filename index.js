@@ -1580,6 +1580,27 @@ async function queryWorkersForOrgViaDataConnect(orgId, firebaseIdToken) {
   return Array.isArray(response?.data?.workers) ? response.data.workers : []
 }
 
+async function queryWorkerForOrgByLoginViaDataConnect(orgId, workerLogin, firebaseIdToken) {
+  const response = await executeDataConnectOperation(
+    'query',
+    'WorkerForOrgByLogin',
+    { orgId, workerLogin },
+    firebaseIdToken,
+  )
+  return response?.data?.worker ?? null
+}
+
+function isDataConnectOperationNotFoundError(error, operationName) {
+  const message = normalizeText(error?.message || error).toLowerCase()
+  const operation = normalizeText(operationName).toLowerCase()
+  return Boolean(
+    operation &&
+      message.includes(operation) &&
+      message.includes('operation') &&
+      (message.includes('not found') || message.includes('not_found')),
+  )
+}
+
 async function executeAdminDataConnectOperation(kind, operationName, variables, operationOptions = {}) {
   const missingConfig = [
     ['FIREBASE_PROJECT_ID', FIREBASE_PROJECT_ID],
@@ -5365,9 +5386,23 @@ async function verifyDataConnectWorkerProfilePersistence(
       await workerProfilePersistenceDelay(250 * attempt)
     }
 
-    const rows = await queryWorkersForOrgViaDataConnect(payload.orgId, firebaseIdToken)
-    const persisted = findDataConnectWorkerByLogin(rows, expectedLogin)
-    const oldLoginStillExists = loginChanged ? findDataConnectWorkerByLogin(rows, payload.login) : null
+    let persisted = null
+    let oldLoginStillExists = null
+    try {
+      ;[persisted, oldLoginStillExists] = await Promise.all([
+        queryWorkerForOrgByLoginViaDataConnect(payload.orgId, expectedLogin, firebaseIdToken),
+        loginChanged
+          ? queryWorkerForOrgByLoginViaDataConnect(payload.orgId, payload.login, firebaseIdToken)
+          : Promise.resolve(null),
+      ])
+    } catch (error) {
+      if (!isDataConnectOperationNotFoundError(error, 'WorkerForOrgByLogin')) {
+        throw error
+      }
+      const rows = await queryWorkersForOrgViaDataConnect(payload.orgId, firebaseIdToken)
+      persisted = findDataConnectWorkerByLogin(rows, expectedLogin)
+      oldLoginStillExists = loginChanged ? findDataConnectWorkerByLogin(rows, payload.login) : null
+    }
     const mismatches = []
 
     if (!persisted) {

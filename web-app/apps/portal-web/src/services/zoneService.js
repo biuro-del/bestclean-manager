@@ -3,12 +3,18 @@ import {
   insertZoneForOrg,
   platformAuthHeaders,
   updateZoneForOrg,
+  zonesPageForOrg,
   zonesForOrg,
 } from './platformDataConnectService'
+import {
+  fetchAllReferenceRows,
+  isDataConnectOperationNotFound,
+} from './referenceDataReadPolicy'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
-const READ_CACHE_MS = 30000
+const READ_CACHE_MS = 5 * 60 * 1000
 const zonesCache = new Map()
+let zonesPageForOrgUnavailable = false
 
 function cachedZonesKey(orgId) {
   return String(orgId ?? '').trim()
@@ -128,6 +134,41 @@ function mapZone(orgId, row) {
   }
 }
 
+async function fetchZoneRows(orgId) {
+  if (!zonesPageForOrgUnavailable) {
+    try {
+      return await fetchAllReferenceRows({
+        loadPage: ({ limit, offset }) => zonesPageForOrg({ orgId, limit, offset }),
+        listKey: 'zones',
+        keyFields: 'zoneId',
+        label: 'stref',
+      })
+    } catch (error) {
+      if (!isDataConnectOperationNotFound(error, 'ZonesPageForOrg')) {
+        throw error
+      }
+      zonesPageForOrgUnavailable = true
+    }
+  }
+
+  const response = await zonesForOrg({ orgId })
+  return Array.isArray(response?.data?.zones) ? response.data.zones : []
+}
+
+function sortZonesForDisplay(items = []) {
+  return [...items].sort((left, right) => {
+    const nameOrder = String(left?.name ?? left?.zone ?? '').localeCompare(
+      String(right?.name ?? right?.zone ?? ''),
+      'pl',
+      { sensitivity: 'base' },
+    )
+    if (nameOrder) return nameOrder
+    return String(left?.zoneId ?? '').localeCompare(String(right?.zoneId ?? ''), 'pl', {
+      sensitivity: 'base',
+    })
+  })
+}
+
 export async function getZones(orgId, options = {}) {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
@@ -138,9 +179,8 @@ export async function getZones(orgId, options = {}) {
     invalidateZonesCache(orgId)
   }
   return readZonesCached(orgId, async () => {
-    const response = await zonesForOrg({ orgId })
-    const rows = response?.data?.zones ?? []
-    return rows.map((row) => mapZone(orgId, row))
+    const rows = await fetchZoneRows(orgId)
+    return sortZonesForDisplay(rows.map((row) => mapZone(orgId, row)))
   })
 }
 

@@ -1,15 +1,15 @@
 import JSZip from 'jszip'
 import {
   clientStorageForOrg,
-  clientsForOrg,
+  clientsPageForOrg,
   deleteClientStorageForOrg,
   deleteClientForOrg,
   deleteIndividualJobForOrg,
   deleteStorageForOrg,
   deleteWorkdayForOrg,
   deleteZoneForOrg,
-  eventsForOrg,
-  individualJobsForOrg,
+  eventsIntegrityPageForOrg,
+  individualJobsPageForOrg,
   insertClientStorageForOrg,
   insertClientForOrg,
   insertIndividualJobForOrg,
@@ -25,11 +25,12 @@ import {
   updateStorageForOrg,
   updateWorkdayForOrg,
   updateZoneForOrg,
-  workersForOrg,
-  workdayPausesForOrg,
-  workdaysForOrg,
-  zonesForOrg,
+  workersPageForOrg,
+  workdayPausesPageForOrg,
+  workdaysIntegrityPageForOrg,
+  zonesPageForOrg,
 } from './platformDataConnectService'
+import { fetchAllReferenceRows } from './referenceDataReadPolicy'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 import {
   deleteOrgStyleForBackup,
@@ -49,7 +50,6 @@ const BACKUP_DB_VERSION = 1
 const BACKUP_STORE_NAME = 'archives'
 const RETENTION_DAYS = 5
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
-const PAGED_QUERY_LIMIT = 500
 const CALENDAR_STORAGE_PREFIX = 'portal.calendar.tasks'
 const KANBAN_COLUMNS_STORAGE_PREFIX = 'portal.kanban.columns'
 const DASHBOARD_ACTIVITY_VIEW_STORAGE_KEY = 'portal.dashboard.activityView.v2'
@@ -596,34 +596,123 @@ function buildStylesBackupRows(snapshot = {}) {
   return rows
 }
 
-async function fetchPagedRows(loadPage, listKey) {
-  const collected = []
-  let offset = 0
-
-  while (true) {
-    const response = await loadPage(offset)
-    const pageRows = Array.isArray(response?.data?.[listKey]) ? response.data[listKey] : []
-    collected.push(...pageRows)
-
-    if (pageRows.length < PAGED_QUERY_LIMIT) {
-      break
-    }
-
-    offset += pageRows.length
+async function fetchBackupRows({
+  orgId,
+  pagedOperation,
+  operationName,
+  listKey,
+  keyFields,
+  label,
+}) {
+  try {
+    return await fetchAllReferenceRows({
+      loadPage: ({ limit, offset }) => pagedOperation({ orgId, limit, offset }),
+      listKey,
+      keyFields,
+      label,
+    })
+  } catch (error) {
+    throw withOperationNotFoundHint(error, operationName, label)
   }
+}
 
-  return deepClone(collected)
+async function fetchWorkerRows(orgId) {
+  return fetchBackupRows({
+    orgId,
+    pagedOperation: workersPageForOrg,
+    operationName: 'WorkersPageForOrg',
+    listKey: 'workers',
+    keyFields: 'login',
+    label: 'pracowników',
+  })
+}
+
+async function fetchClientRows(orgId) {
+  return fetchBackupRows({
+    orgId,
+    pagedOperation: clientsPageForOrg,
+    operationName: 'ClientsPageForOrg',
+    listKey: 'clients',
+    keyFields: 'clientId',
+    label: 'klientów',
+  })
+}
+
+async function fetchZoneRows(orgId) {
+  return fetchBackupRows({
+    orgId,
+    pagedOperation: zonesPageForOrg,
+    operationName: 'ZonesPageForOrg',
+    listKey: 'zones',
+    keyFields: 'zoneId',
+    label: 'stref',
+  })
 }
 
 async function fetchStorageRows(orgId) {
-  return fetchPagedRows((offset) => storageForOrg({ orgId, limit: PAGED_QUERY_LIMIT, offset }), 'storages')
+  return fetchBackupRows({
+    orgId,
+    pagedOperation: storageForOrg,
+    operationName: 'StorageForOrg',
+    listKey: 'storages',
+    keyFields: 'productId',
+    label: 'magazynu',
+  })
 }
 
 async function fetchClientStorageRows(orgId) {
-  return fetchPagedRows(
-    (offset) => clientStorageForOrg({ orgId, limit: PAGED_QUERY_LIMIT, offset }),
-    'clientStorages',
-  )
+  return fetchBackupRows({
+    orgId,
+    pagedOperation: clientStorageForOrg,
+    operationName: 'ClientStorageForOrg',
+    listKey: 'clientStorages',
+    keyFields: ['clientId', 'productIndex'],
+    label: 'magazynu klientow',
+  })
+}
+
+async function fetchIndividualJobRows(orgId) {
+  return fetchBackupRows({
+    orgId,
+    pagedOperation: individualJobsPageForOrg,
+    operationName: 'IndividualJobsPageForOrg',
+    listKey: 'individualClientJobs',
+    keyFields: 'clientIndId',
+    label: 'zlecen indywidualnych',
+  })
+}
+
+async function fetchEventRows(orgId) {
+  return fetchBackupRows({
+    orgId,
+    pagedOperation: eventsIntegrityPageForOrg,
+    operationName: 'EventsIntegrityPageForOrg',
+    listKey: 'events',
+    keyFields: 'eventId',
+    label: 'zdarzen backupu',
+  })
+}
+
+async function fetchWorkdayRows(orgId) {
+  return fetchBackupRows({
+    orgId,
+    pagedOperation: workdaysIntegrityPageForOrg,
+    operationName: 'WorkdaysIntegrityPageForOrg',
+    listKey: 'workdays',
+    keyFields: 'workdayId',
+    label: 'dni pracy backupu',
+  })
+}
+
+async function fetchWorkdayPauseRows(orgId) {
+  return fetchBackupRows({
+    orgId,
+    pagedOperation: workdayPausesPageForOrg,
+    operationName: 'WorkdayPausesPageForOrg',
+    listKey: 'workdayPauses',
+    keyFields: 'pauseId',
+    label: 'przerw pracy backupu',
+  })
 }
 
 async function fetchOptionalBackupRows(loadRows, options = {}) {
@@ -658,21 +747,21 @@ async function fetchRawDataset(orgId) {
   ensureFirebaseOrThrow()
 
   const [
-    workersResponse,
-    clientsResponse,
-    zonesResponse,
-    individualResponse,
-    eventsResponse,
-    workdaysResponse,
+    workerRows,
+    clientRows,
+    zoneRows,
+    individualRows,
+    eventRows,
+    workdayRows,
     styleSnapshot,
   ] =
     await Promise.all([
-      workersForOrg({ orgId }),
-      clientsForOrg({ orgId }),
-      zonesForOrg({ orgId }),
-      individualJobsForOrg({ orgId }),
-      eventsForOrg({ orgId }),
-      workdaysForOrg({ orgId }),
+      fetchWorkerRows(orgId),
+      fetchClientRows(orgId),
+      fetchZoneRows(orgId),
+      fetchIndividualJobRows(orgId),
+      fetchEventRows(orgId),
+      fetchWorkdayRows(orgId),
       getOrgAndUserStylesForBackup(orgId),
     ])
 
@@ -686,9 +775,9 @@ async function fetchRawDataset(orgId) {
       moduleLabel: 'Magazyn klientow',
     }),
     fetchOptionalBackupRows(
-      async () => deepClone((await workdayPausesForOrg({ orgId }))?.data?.workdayPauses ?? []),
+      () => fetchWorkdayPauseRows(orgId),
       {
-        operationName: 'WorkdayPausesForOrg',
+        operationName: 'WorkdayPausesPageForOrg',
         moduleLabel: 'Przerwy pracy',
       },
     ),
@@ -726,16 +815,16 @@ async function fetchRawDataset(orgId) {
 
   return {
     data: {
-      workers: deepClone(workersResponse?.data?.workers ?? []),
+      workers: deepClone(workerRows),
       styles: deepClone(buildStylesBackupRows(styleSnapshot)),
-      clients: deepClone(clientsResponse?.data?.clients ?? []),
-      zones: deepClone(zonesResponse?.data?.zones ?? []),
-      individualOrders: deepClone(individualResponse?.data?.individualClientJobs ?? []),
+      clients: deepClone(clientRows),
+      zones: deepClone(zoneRows),
+      individualOrders: deepClone(individualRows),
       storage: storageModule.rows,
       clientStorage: clientStorageModule.rows,
-      events: deepClone(eventsResponse?.data?.events ?? []),
+      events: deepClone(eventRows),
       workdayPauses: workdayPausesModule.rows,
-      workdays: deepClone(workdaysResponse?.data?.workdays ?? []),
+      workdays: deepClone(workdayRows),
       portalTasks: portalTasksModule.rows,
       calendarTasks: readLocalStorageArray(calendarStorageKey(orgId)),
       kanbanColumns: readLocalStorageArray(kanbanColumnsStorageKey(orgId)),
@@ -1376,8 +1465,7 @@ async function restoreStylesModule(orgId, rows) {
 
 async function restoreClientsModule(orgId, rows) {
   const importedRows = Array.isArray(rows) ? rows : []
-  const currentResponse = await clientsForOrg({ orgId })
-  const currentRows = currentResponse?.data?.clients ?? []
+  const currentRows = await fetchClientRows(orgId)
   const currentMap = mapRowsByKey(currentRows, 'clientId')
   const importedMap = mapRowsByKey(importedRows, 'clientId')
 
@@ -1596,8 +1684,7 @@ async function restoreClientStorageModule(orgId, rows) {
 
 async function restoreZonesModule(orgId, rows) {
   const importedRows = Array.isArray(rows) ? rows : []
-  const currentResponse = await zonesForOrg({ orgId })
-  const currentRows = currentResponse?.data?.zones ?? []
+  const currentRows = await fetchZoneRows(orgId)
   const currentMap = mapRowsByKey(currentRows, 'zoneId')
   const importedMap = mapRowsByKey(importedRows, 'zoneId')
 
@@ -1654,8 +1741,7 @@ async function restoreZonesModule(orgId, rows) {
 
 async function restoreIndividualOrdersModule(orgId, rows) {
   const importedRows = Array.isArray(rows) ? rows : []
-  const currentResponse = await individualJobsForOrg({ orgId })
-  const currentRows = currentResponse?.data?.individualClientJobs ?? []
+  const currentRows = await fetchIndividualJobRows(orgId)
   const currentMap = mapRowsByKey(currentRows, 'clientIndId')
   const importedMap = mapRowsByKey(importedRows, 'clientIndId')
 
@@ -1713,8 +1799,7 @@ async function restoreIndividualOrdersModule(orgId, rows) {
 
 async function restoreWorkdaysModule(orgId, rows) {
   const importedRows = Array.isArray(rows) ? rows : []
-  const currentResponse = await workdaysForOrg({ orgId })
-  const currentRows = currentResponse?.data?.workdays ?? []
+  const currentRows = await fetchWorkdayRows(orgId)
   const currentMap = mapRowsByKey(currentRows, 'workdayId')
   const importedMap = mapRowsByKey(importedRows, 'workdayId')
 

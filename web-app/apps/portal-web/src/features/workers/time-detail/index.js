@@ -3,7 +3,7 @@ import {
   OWN_WORKDAY_EDIT_DENIED_MESSAGE,
   isOwnWorkdayEditBlocked,
 } from '../workdayEditAccess.js'
-import { workIntervalsFromRow } from '../workIntervals.js'
+import { summarizeWorkTimeRows } from '../workIntervals.js'
 
 export const route = 'workerTimeDetail'
 export const viewId = 'view-workerTimeDetail'
@@ -38,6 +38,7 @@ export function createWorkerTimeDetailFeature(ctx) {
   const WORKER_DETAIL_COLUMN_MAX_WIDTH = 520
   const WORKER_DETAIL_RESIZABLE_COLUMN_INDEXES = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
   const WORKER_DETAIL_COLUMN_RESIZE_CLASS = 'wtd-col-resize-active'
+  const WORKER_DETAIL_READ_MAX_ROWS = 2000
 
   let workerDetailColumnDragState = null
 
@@ -250,17 +251,6 @@ export function createWorkerTimeDetailFeature(ctx) {
     return Math.floor(totalMs / 1000)
   }
 
-  function workStatusRowsTotalSeconds(rows = []) {
-    const intervals = rows.flatMap((row) => {
-      if (Array.isArray(row?.workIntervals) && row.workIntervals.length) {
-        return workIntervalsFromRow(row)
-      }
-      const interval = workStatusIntervalFromRow(row)
-      return interval ? [interval] : []
-    })
-    return workStatusIntervalsTotalSeconds(intervals)
-  }
-
     function workerDetailAlertLevelFromWorkSec(workSec) {
     const seconds = Number(workSec ?? 0)
     if (!Number.isFinite(seconds) || seconds <= 0) {
@@ -357,7 +347,8 @@ export function createWorkerTimeDetailFeature(ctx) {
 
     const totalWorkSec = items.reduce((sum, row) => sum + Math.max(0, Number(row.workSec ?? 0) || 0), 0)
     const totalBreakSec = items.reduce((sum, row) => sum + Math.max(0, Number(row.breakSec ?? 0) || 0), 0)
-    const totalNetSec = Math.max(0, totalWorkSec - totalBreakSec)
+    const reviewRequired = items.some((row) => row.reviewRequired || row.netSec === null)
+    const totalNetSec = items.reduce((sum, row) => sum + Math.max(0, Number(row.netSec ?? 0) || 0), 0)
 
     const pickedOption = monthPick?.selectedOptions?.[0]?.textContent?.trim()
     const fallbackMonth = from ? from.slice(0, 7) : '—'
@@ -366,7 +357,7 @@ export function createWorkerTimeDetailFeature(ctx) {
     if (monthRange) monthRange.textContent = from && to ? `${workerDetailDateKeyToLabel(from)} - ${workerDetailDateKeyToLabel(to)}` : '—'
     if (monthWork) monthWork.textContent = durationSecondsToHm(totalWorkSec)
     if (monthBreak) monthBreak.textContent = durationSecondsToHm(totalBreakSec)
-    if (monthNet) monthNet.textContent = durationSecondsToHm(totalNetSec)
+    if (monthNet) monthNet.textContent = reviewRequired ? 'do weryfikacji' : durationSecondsToHm(totalNetSec)
   }
 
   function workerDetailAggregateRows(rows) {
@@ -433,10 +424,10 @@ export function createWorkerTimeDetailFeature(ctx) {
 
     return [...groups.values()]
       .map((bucket) => {
-        const mergedWorkSec = workStatusRowsTotalSeconds(bucket.sourceRows)
-        const workSec = mergedWorkSec || workerDetailComputeRangeSeconds(bucket.startAt, bucket.endAt)
-        const breakSec = Math.min(workSec, Math.max(0, Math.floor(Number(bucket.breakSec ?? 0))))
-        const netSec = Math.max(0, workSec - breakSec)
+        const summary = summarizeWorkTimeRows(bucket.sourceRows)
+        const workSec = summary.grossSec
+        const breakSec = summary.pauseSec
+        const netSec = summary.netSec
         const alertLevel = workerDetailAlertLevelFromWorkSec(workSec)
         const alertAck = workerDetailIsAcked(bucket.dayKey)
 
@@ -445,11 +436,13 @@ export function createWorkerTimeDetailFeature(ctx) {
           workdayId: bucket.workdayId,
           workerName: bucket.workerName || appState.selectedWorkerName || appState.selectedWorkerLogin || '-',
           workerType: bucket.workerType || String(selectedWorker?.type ?? '').trim(),
-          startAt: bucket.startAt,
-          endAt: bucket.endAt,
+          startAt: summary.startAt || bucket.startAt,
+          endAt: summary.endAt || bucket.endAt,
           workSec,
           breakSec,
           netSec,
+          reviewRequired: summary.reviewRequired,
+          reviewIssues: summary.issues,
           updatedBy: bucket.updatedBy || '-',
           comment: bucket.comment || '',
           alertLevel,
@@ -716,7 +709,7 @@ export function createWorkerTimeDetailFeature(ctx) {
             <div class="mono time-start">${escapeHtml(workerDetailIsoToHm(row.startAt))}</div>
             <div class="mono time-stop">${escapeHtml(workerDetailIsoToHm(row.endAt))}</div>
             <div class="mono work-brutto time-duration">${escapeHtml(durationSecondsToHm(row.workSec))}</div>
-            <div class="mono work-bold time-duration">${escapeHtml(durationSecondsToHm(row.netSec))}</div>
+            <div class="mono work-bold time-duration">${escapeHtml(row.reviewRequired ? 'DO WERYFIKACJI' : durationSecondsToHm(row.netSec))}</div>
             <div class="mono time-break">${escapeHtml(durationSecondsToHm(row.breakSec))}</div>
             <div>${escapeHtml(row.updatedBy || '-')}</div>
             <div>${actionCell}</div>
@@ -1101,13 +1094,23 @@ export function createWorkerTimeDetailFeature(ctx) {
       id: 'net',
       label: 'Realny czas pracy',
       weight: 1.2,
-      getValue: (row) => durationSecondsToHm(row.netSec),
+      getValue: (row) => row.reviewRequired ? 'DO WERYFIKACJI' : durationSecondsToHm(row.netSec),
     },
     {
       id: 'break',
       label: 'Przerwa',
       weight: 1.0,
       getValue: (row) => durationSecondsToHm(row.breakSec),
+    },
+    {
+      id: 'review',
+      label: 'Weryfikacja',
+      weight: 1.7,
+      getValue: (row) => {
+        if (!row.reviewRequired) return 'NIE'
+        const codes = [...new Set((Array.isArray(row.reviewIssues) ? row.reviewIssues : []).map((issue) => issue?.code).filter(Boolean))]
+        return codes.length ? `TAK: ${codes.join(', ')}` : 'TAK'
+      },
     },
     {
       id: 'editedBy',
@@ -1394,9 +1397,13 @@ export function createWorkerTimeDetailFeature(ctx) {
         fromIso: ymdToIsoRangeStart(document.getElementById('wtdFrom')?.value),
         toIso: ymdToIsoRangeEnd(document.getElementById('wtdTo')?.value),
         page: 1,
-        pageSize: 5000,
+        pageSize: WORKER_DETAIL_READ_MAX_ROWS,
         forceRefresh,
       })
+
+      if (response.hasNext === true) {
+        throw new Error('Zakres zawiera ponad 2000 rekordów. Zawęź daty, aby zachować kompletną ewidencję.')
+      }
 
       appState.workerDetailSourceRows = response.items ?? []
       appState.workerDetailViewRows = workerDetailAggregateRows(appState.workerDetailSourceRows)

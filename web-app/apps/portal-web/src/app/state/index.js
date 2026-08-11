@@ -191,6 +191,7 @@ export function createAppState(overrides = {}) {
   workerAccountTimeLoadedKey: '',
   workerAccountOrderRows: [],
   workerAccountEventsRows: [],
+  workerAccountEventsHasMore: false,
   workerAccountDaysRows: [],
   workerAccountAllTimeRows: [],
   workerAccountTimeRows: [],

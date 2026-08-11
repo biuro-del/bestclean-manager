@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   enrichWorkdaysWithEventIntervals,
   mergeWorkIntervals,
+  summarizeWorkTimeRows,
   workIntervalCodes,
   workIntervalGpsCoordinates,
   workIntervalsTotalSeconds,
@@ -110,6 +111,108 @@ test('does not double count overlapping work sessions', () => {
   assert.equal(workIntervalsTotalSeconds(intervals), 4 * 3600)
 })
 
+test('uses one canonical net-time calculation for separate sessions and recorded pauses', () => {
+  const summary = summarizeWorkTimeRows([{
+    workdayId: 'WD-SSOT-1',
+    workIntervals: [
+      { startAt: '2026-07-22T05:00:00.000Z', endAt: '2026-07-22T08:00:00.000Z' },
+      { startAt: '2026-07-22T15:00:00.000Z', endAt: '2026-07-22T18:00:00.000Z' },
+    ],
+    pauseIntervals: [
+      { startAt: '2026-07-22T06:00:00.000Z', endAt: '2026-07-22T06:30:00.000Z' },
+      { startAt: '2026-07-22T16:00:00.000Z', endAt: '2026-07-22T16:15:00.000Z' },
+    ],
+  }])
+
+  assert.equal(summary.grossSec, 6 * 3600)
+  assert.equal(summary.pauseSec, 45 * 60)
+  assert.equal(summary.netSec, 5 * 3600 + 15 * 60)
+  assert.equal(summary.reviewRequired, false)
+  assert.equal(summary.pauseSource, 'recorded-intervals')
+})
+
+test('keeps only the newest revision of one persisted work record', () => {
+  const summary = summarizeWorkTimeRows([
+    {
+      eventId: 'EV-REVISION',
+      startAt: '2026-07-22T07:00:00.000Z',
+      endAt: '2026-07-22T09:00:00.000Z',
+      updatedAt: '2026-07-22T09:05:00.000Z',
+    },
+    {
+      eventId: 'EV-REVISION',
+      startAt: '2026-07-22T07:00:00.000Z',
+      endAt: '2026-07-22T10:00:00.000Z',
+      updatedAt: '2026-07-22T10:05:00.000Z',
+    },
+  ])
+
+  assert.equal(summary.grossSec, 3 * 3600)
+  assert.equal(summary.netSec, 3 * 3600)
+  assert.equal(summary.reviewRequired, false)
+})
+
+test('marks overlapping distinct work records for review and withholds net time', () => {
+  const summary = summarizeWorkTimeRows([
+    { eventId: 'EV-OVERLAP-1', startAt: '2026-07-22T07:00:00.000Z', endAt: '2026-07-22T10:00:00.000Z' },
+    { eventId: 'EV-OVERLAP-2', startAt: '2026-07-22T09:00:00.000Z', endAt: '2026-07-22T11:00:00.000Z' },
+  ])
+
+  assert.equal(summary.grossSec, 4 * 3600)
+  assert.equal(summary.netSec, null)
+  assert.equal(summary.reviewRequired, true)
+  assert.ok(summary.issues.some((issue) => issue.code === 'OVERLAPPING_WORK_INTERVALS'))
+})
+
+test('unions recorded pause intervals and does not multiply duplicate scalar pauses', () => {
+  const intervalPauseSummary = summarizeWorkTimeRows([{
+    workdayId: 'WD-PAUSE-1',
+    startAt: '2026-07-22T08:00:00.000Z',
+    endAt: '2026-07-22T12:00:00.000Z',
+    pauseIntervals: [
+      { startAt: '2026-07-22T09:00:00.000Z', endAt: '2026-07-22T10:00:00.000Z' },
+      { startAt: '2026-07-22T09:30:00.000Z', endAt: '2026-07-22T10:30:00.000Z' },
+    ],
+  }])
+  const scalarPauseSummary = summarizeWorkTimeRows([
+    {
+      workdayId: 'WD-PAUSE-2',
+      startAt: '2026-07-22T08:00:00.000Z',
+      endAt: '2026-07-22T12:00:00.000Z',
+      breakSec: 10 * 60,
+      updatedAt: '2026-07-22T12:01:00.000Z',
+    },
+    {
+      workdayId: 'WD-PAUSE-2',
+      startAt: '2026-07-22T08:00:00.000Z',
+      endAt: '2026-07-22T12:00:00.000Z',
+      breakSec: 30 * 60,
+      updatedAt: '2026-07-22T12:02:00.000Z',
+    },
+  ])
+
+  assert.equal(intervalPauseSummary.pauseSec, 90 * 60)
+  assert.equal(intervalPauseSummary.netSec, 2 * 3600 + 30 * 60)
+  assert.equal(scalarPauseSummary.pauseSec, 30 * 60)
+  assert.equal(scalarPauseSummary.netSec, 3 * 3600 + 30 * 60)
+})
+
+test('requires review for malformed intervals and supports an explicitly open session', () => {
+  const invalid = summarizeWorkTimeRows([
+    { eventId: 'EV-BAD', startAt: '2026-07-22T10:00:00.000Z', endAt: '2026-07-22T09:00:00.000Z' },
+  ])
+  const open = summarizeWorkTimeRows([
+    { eventId: 'EV-OPEN', startAt: '2026-07-22T15:00:00.000Z', status: 'RUNNING' },
+  ], { allowOpen: true, nowMs: new Date('2026-07-22T18:00:00.000Z').getTime() })
+
+  assert.equal(invalid.reviewRequired, true)
+  assert.equal(invalid.netSec, null)
+  assert.ok(invalid.issues.some((issue) => issue.code === 'INVALID_WORK_INTERVAL'))
+  assert.equal(open.grossSec, 3 * 3600)
+  assert.equal(open.netSec, 3 * 3600)
+  assert.equal(open.hasOpenInterval, true)
+})
+
 test('adds only the active event time for an open workday', () => {
   const workdays = [{ workdayId: 'WD-2', startAt: '2026-07-22T05:00:00.000Z', status: 'RUNNING', durationSec: 0 }]
   const events = [
@@ -181,4 +284,53 @@ test('uses exact event intervals in worker profile and evidence exports', async 
   assert.equal(requestedSource, 'worktime')
   assert.equal(evidenceRow.workSec, 6 * 3600)
   assert.equal(profileExportRow.durationSec, 6 * 3600)
+})
+
+test('carries a time-review requirement through both work-time exports', async () => {
+  const getWorkdays = async () => ({
+    items: [
+      {
+        eventId: 'EV-EXPORT-1',
+        workdayId: 'WD-EXPORT',
+        workerLogin: 'anna',
+        workerName: 'Anna Testowa',
+        startAt: '2026-07-22T07:00:00.000Z',
+        endAt: '2026-07-22T10:00:00.000Z',
+      },
+      {
+        eventId: 'EV-EXPORT-2',
+        workdayId: 'WD-EXPORT',
+        workerLogin: 'anna',
+        workerName: 'Anna Testowa',
+        startAt: '2026-07-22T09:00:00.000Z',
+        endAt: '2026-07-22T11:00:00.000Z',
+      },
+    ],
+  })
+  const deps = exportDeps(getWorkdays)
+  const workers = [{ login: 'anna', workerId: 'W002', name: 'Anna Testowa' }]
+
+  const [evidenceRow] = await buildWorkTimeEvidenceRowsForWorkers({
+    deps,
+    orgId: 'ORG-1',
+    workers,
+    workerRows: workers,
+    fromYmd: '2026-07-01',
+    toYmd: '2026-07-31',
+  })
+  const [profileExportRow] = await buildWorkTimeExportRowsForWorkers({
+    deps,
+    orgId: 'ORG-1',
+    workers,
+    workerRows: workers,
+    fromYmd: '2026-07-01',
+    toYmd: '2026-07-31',
+  })
+
+  for (const row of [evidenceRow, profileExportRow]) {
+    assert.equal(row.reviewRequired, true)
+    assert.equal(row.netSec, null)
+    assert.equal(row.workSec ?? row.durationSec, 4 * 3600)
+    assert.ok(row.reviewIssues.some((issue) => issue.code === 'OVERLAPPING_WORK_INTERVALS'))
+  }
 })

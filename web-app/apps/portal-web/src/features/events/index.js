@@ -78,8 +78,11 @@ export function createEventsFeature(ctx) {
     ymdToIsoRangeStart,
     zoneQrCodeFromRow,
   } = ctx
-  const EVENTS_REFRESH_POLL_MS = 10000
+  const EVENTS_REFRESH_POLL_MS = 60000
+  const EVENTS_OVERLAP_READ_MAX_ROWS = 2000
   const EVENTS_DEFAULT_PAGE_SIZE = 25
+  const EVENTS_SUMMARY_READ_MAX_ROWS = 2000
+  const EVENTS_EXPORT_READ_MAX_ROWS = 20000
   const EVENTS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
   const EVENT_EDITOR_PICKER_MAX_OPTIONS = 36
   const EVENT_EDITOR_PICKER_EMPTY_MAX_OPTIONS = 18
@@ -1324,7 +1327,7 @@ export function createEventsFeature(ctx) {
     }
   }
 
-  function renderEventsSummary(rangeRows = [], todayRows = []) {
+  function renderEventsSummary(rangeRows = [], todayRows = [], options = {}) {
     const normalizedRangeRows = eventSuppressDeletedRows(Array.isArray(rangeRows) ? rangeRows : [])
     const normalizedTodayRows = eventSuppressDeletedRows(Array.isArray(todayRows) ? todayRows : [])
     let closedCount = 0
@@ -1339,10 +1342,12 @@ export function createEventsFeature(ctx) {
       }
     })
 
-    setEventsSummaryValue('evSummaryTotal', normalizedRangeRows.length)
-    setEventsSummaryValue('evSummaryClosed', closedCount)
-    setEventsSummaryValue('evSummaryOpen', openCount)
-    setEventsSummaryValue('evSummaryToday', normalizedTodayRows.length)
+    const rangeSuffix = options.rangeIncomplete === true ? '+' : ''
+    const todaySuffix = options.todayIncomplete === true ? '+' : ''
+    setEventsSummaryValue('evSummaryTotal', `${normalizedRangeRows.length}${rangeSuffix}`)
+    setEventsSummaryValue('evSummaryClosed', `${closedCount}${rangeSuffix}`)
+    setEventsSummaryValue('evSummaryOpen', `${openCount}${rangeSuffix}`)
+    setEventsSummaryValue('evSummaryToday', `${normalizedTodayRows.length}${todaySuffix}`)
     const todayMeta = document.getElementById('evSummaryTodayMeta')
     if (todayMeta) {
       todayMeta.textContent = `Dzisiaj, ${eventSummaryDateLabel(todayYmd())}`
@@ -1361,7 +1366,7 @@ export function createEventsFeature(ctx) {
       ...filters,
       status: '',
       page: 1,
-      pageSize: 100000,
+      pageSize: EVENTS_SUMMARY_READ_MAX_ROWS,
       forceRefresh: filters.forceRefresh === true,
     }
     const todayFilters = {
@@ -1379,7 +1384,10 @@ export function createEventsFeature(ctx) {
       if (requestId !== eventsSummaryRequestId) {
         return
       }
-      renderEventsSummary(rangeResponse?.items, todayResponse?.items)
+      renderEventsSummary(rangeResponse?.items, todayResponse?.items, {
+        rangeIncomplete: rangeResponse?.hasNext === true,
+        todayIncomplete: todayResponse?.hasNext === true,
+      })
     } catch (error) {
       if (requestId !== eventsSummaryRequestId) {
         return
@@ -3536,11 +3544,18 @@ export function createEventsFeature(ctx) {
 
     const response = await getWorkdays(appState.session.orgId, {
       source: 'events',
+      workerLogin: String(payload?.workerLogin ?? '').trim(),
       fromIso: ymdToIsoRangeStart(fromYmd),
       toIso: ymdToIsoRangeEnd(toYmd),
       page: 1,
-      pageSize: 10000,
+      pageSize: EVENTS_OVERLAP_READ_MAX_ROWS,
     })
+
+    if (response?.hasNext === true) {
+      throw new Error(
+        'Nie można bezpiecznie sprawdzić kolizji: pracownik ma ponad 2000 zdarzeń w wybranym zakresie. Zawęź daty.',
+      )
+    }
 
     const rows = Array.isArray(response?.items) ? response.items : []
     for (const row of rows) {
@@ -4426,12 +4441,24 @@ export function createEventsFeature(ctx) {
     appState.eventsFilters = readEventsFilterInputs()
     await ensureEventReferenceDataLoaded()
 
-    const pageSize = Math.max(Number(appState.eventsTotal ?? 0) || 0, 100000)
+    const estimatedTotal = Math.max(Number(appState.eventsTotal ?? 0) || 0, 0)
+    if (estimatedTotal > EVENTS_EXPORT_READ_MAX_ROWS) {
+      throw new Error(
+        `Eksport przekracza bezpieczny limit ${EVENTS_EXPORT_READ_MAX_ROWS} rekordów. Zawęź daty lub filtry.`,
+      )
+    }
+    const pageSize = EVENTS_EXPORT_READ_MAX_ROWS
     const response = await getWorkdays(appState.session.orgId, {
       ...readEventsFilters(),
       page: 1,
       pageSize,
     })
+
+    if (response?.hasNext === true) {
+      throw new Error(
+        `Eksport przekracza bezpieczny limit ${EVENTS_EXPORT_READ_MAX_ROWS} rekordów. Zawęź daty lub filtry.`,
+      )
+    }
 
     return normalizeEventsExportRows(response?.items ?? [])
   }
@@ -4736,15 +4763,6 @@ export function createEventsFeature(ctx) {
       return
     }
 
-    if (eventsOpenIntegrityFocus) {
-      try {
-        await refreshOpenEventIntegrity({ forceRefresh: true, rerenderRows: true })
-      } catch (error) {
-        console.warn('[events] focused open status refresh failed', error)
-      }
-      return
-    }
-
     let token = ''
     try {
       token = await readEventsFingerprintTokenForCurrentFilters()
@@ -4757,7 +4775,9 @@ export function createEventsFeature(ctx) {
     }
 
     if (!token) {
-      await fetchEventsForCurrentSession({ forceRefresh: true, silent: true })
+      if (!eventsOpenIntegrityFocus) {
+        await fetchEventsForCurrentSession({ forceRefresh: true, silent: true })
+      }
       return
     }
 
@@ -4768,7 +4788,11 @@ export function createEventsFeature(ctx) {
 
     if (eventsLastFingerprintToken !== token) {
       eventsLastFingerprintToken = token
-      await fetchEventsForCurrentSession({ forceRefresh: true, silent: true })
+      if (eventsOpenIntegrityFocus) {
+        await refreshOpenEventIntegrity({ forceRefresh: true, rerenderRows: true })
+      } else {
+        await fetchEventsForCurrentSession({ forceRefresh: true, silent: true })
+      }
     }
   }
 
@@ -4777,10 +4801,12 @@ export function createEventsFeature(ctx) {
       return
     }
     eventsPollingTimer = window.setInterval(() => {
-      if (!document.getElementById('evRows')) {
+      if (!document.getElementById('evRows') || document.visibilityState === 'hidden') {
         return
       }
-      void refreshEventsIfFingerprintChanged()
+      void refreshEventsIfFingerprintChanged().catch((error) => {
+        console.warn('[events] focused open status refresh failed', error)
+      })
     }, EVENTS_REFRESH_POLL_MS)
   }
 

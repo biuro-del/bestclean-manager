@@ -7,7 +7,9 @@ const test = require('node:test')
 
 const repoRoot = path.join(__dirname, '..')
 const backend = fs.readFileSync(path.join(repoRoot, 'index.js'), 'utf8')
-const repository = fs.readFileSync(path.join(repoRoot, 'job-card', 'repository.js'), 'utf8')
+const repository = fs
+  .readFileSync(path.join(repoRoot, 'job-card', 'repository.js'), 'utf8')
+  .replace(/\r\n/g, '\n')
 const migration = fs.readFileSync(
   path.join(repoRoot, 'dataconnect', 'migrations', '20260728_job_card_publication_additive.sql'),
   'utf8',

@@ -1,3 +1,5 @@
+import { summarizeWorkTimeRows } from '../workers/workIntervals.js'
+
 export const SERVICE_OPERATION_STATE = Object.freeze({
   ACTIVE: 'active',
   COMPLETED: 'completed',
@@ -124,41 +126,9 @@ function workdayDurationIdentity(row = {}) {
   return workerName ? `name:${workerName}` : ''
 }
 
-function mergedIntervalSeconds(intervals = []) {
-  const sorted = (Array.isArray(intervals) ? intervals : [])
-    .map((interval) => ({
-      startTs: timestamp(interval?.startTs),
-      stopTs: timestamp(interval?.stopTs),
-    }))
-    .filter((interval) => interval.startTs > 0 && interval.stopTs >= interval.startTs)
-    .sort((left, right) => left.startTs - right.startTs || left.stopTs - right.stopTs)
-
-  let totalMilliseconds = 0
-  let currentStart = 0
-  let currentStop = 0
-  sorted.forEach((interval) => {
-    if (!currentStart) {
-      currentStart = interval.startTs
-      currentStop = interval.stopTs
-      return
-    }
-    if (interval.startTs <= currentStop) {
-      currentStop = Math.max(currentStop, interval.stopTs)
-      return
-    }
-    totalMilliseconds += Math.max(0, currentStop - currentStart)
-    currentStart = interval.startTs
-    currentStop = interval.stopTs
-  })
-  if (currentStart) {
-    totalMilliseconds += Math.max(0, currentStop - currentStart)
-  }
-  return Math.max(0, Math.floor(totalMilliseconds / 1000))
-}
-
 /**
- * Builds factual work time totals for the current day. Intervals that overlap
- * are merged so duplicate revisions never increase a worker's displayed time.
+ * Builds factual work time totals for the current day. A distinct overlapping
+ * record is held for review and is not presented as confirmed worker time.
  * A duplicated display name that points at different persisted identities is
  * marked ambiguous and must not be presented as one person's total.
  */
@@ -197,27 +167,39 @@ export function buildWorkerDayDurationIndex({
     if (!entry.identities.has(identity)) {
       entry.identities.set(identity, [])
     }
-    entry.identities.get(identity).push({ startTs, stopTs })
+    entry.identities.get(identity).push({
+      startTs,
+      endTs: stopTs,
+      workdayId: String(row?.workdayId ?? row?.id ?? '').trim(),
+      eventId: String(row?.eventId ?? '').trim(),
+      updatedAt: row?.updatedAt,
+    })
   })
 
   const index = {}
   workersByName.forEach((entry, normalizedName) => {
     const identityDurations = [...entry.identities.entries()].map(
-      ([identity, intervals]) => ({
-        identity,
-        seconds: mergedIntervalSeconds(intervals),
-      }),
+      ([identity, intervals]) => {
+        const summary = summarizeWorkTimeRows(intervals)
+        return {
+          identity,
+          seconds: summary.reviewRequired ? null : summary.grossSec,
+          reviewRequired: summary.reviewRequired,
+        }
+      },
     )
     index[normalizedName] = identityDurations.length === 1
       ? {
           workerName: entry.workerName,
           seconds: identityDurations[0].seconds,
           ambiguous: false,
+          reviewRequired: identityDurations[0].reviewRequired,
         }
       : {
           workerName: entry.workerName,
           seconds: null,
           ambiguous: true,
+          reviewRequired: false,
         }
   })
   return index

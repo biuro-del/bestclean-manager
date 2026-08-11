@@ -1,13 +1,19 @@
 import {
+  clientsPageForOrg,
   clientsForOrg,
   deleteClientForOrg,
   insertClientForOrg,
   updateClientForOrg,
 } from './platformDataConnectService'
+import {
+  fetchAllReferenceRows,
+  isDataConnectOperationNotFound,
+} from './referenceDataReadPolicy'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
-const READ_CACHE_MS = 30000
+const READ_CACHE_MS = 5 * 60 * 1000
 const clientsCache = new Map()
+let clientsPageForOrgUnavailable = false
 const CLIENT_TYPE_RETAIL = 'DETALICZNY'
 const CLIENT_TYPE_RECURRING = 'CYKLICZNY'
 
@@ -407,6 +413,39 @@ function mapClient(orgId, row) {
   }
 }
 
+async function fetchClientRows(orgId) {
+  if (!clientsPageForOrgUnavailable) {
+    try {
+      return await fetchAllReferenceRows({
+        loadPage: ({ limit, offset }) => clientsPageForOrg({ orgId, limit, offset }),
+        listKey: 'clients',
+        keyFields: 'clientId',
+        label: 'klientów',
+      })
+    } catch (error) {
+      if (!isDataConnectOperationNotFound(error, 'ClientsPageForOrg')) {
+        throw error
+      }
+      clientsPageForOrgUnavailable = true
+    }
+  }
+
+  const response = await clientsForOrg({ orgId })
+  return Array.isArray(response?.data?.clients) ? response.data.clients : []
+}
+
+function sortClientsForDisplay(items = []) {
+  return [...items].sort((left, right) => {
+    const nameOrder = String(left?.name ?? '').localeCompare(String(right?.name ?? ''), 'pl', {
+      sensitivity: 'base',
+    })
+    if (nameOrder) return nameOrder
+    return String(left?.clientId ?? '').localeCompare(String(right?.clientId ?? ''), 'pl', {
+      sensitivity: 'base',
+    })
+  })
+}
+
 export async function getClients(orgId, options = {}) {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase. Uzupelnij web-app/.env.')
@@ -414,9 +453,8 @@ export async function getClients(orgId, options = {}) {
 
   ensureFirebase()
   return readClientsCached(orgId, async () => {
-    const response = await clientsForOrg({ orgId })
-    const rows = response?.data?.clients ?? []
-    return rows.map((row) => mapClient(orgId, row))
+    const rows = await fetchClientRows(orgId)
+    return sortClientsForDisplay(rows.map((row) => mapClient(orgId, row)))
   }, options)
 }
 
@@ -435,8 +473,7 @@ export async function createClient(orgId, payload, options = {}) {
     invalidateClientsCache(orgId)
   }
   const source = buildClientSource(payload)
-  const response = await clientsForOrg({ orgId })
-  const rows = response?.data?.clients ?? []
+  const rows = await fetchClientRows(orgId)
   assertClientNameAvailable(rows, source.name)
 
   const requestedClientId = String(payload?.clientId ?? payload?.id ?? '').trim()
@@ -469,12 +506,12 @@ export async function updateClient(orgId, clientId, payload) {
   }
 
   ensureFirebase()
-  const clientsResponse = await clientsForOrg({ orgId })
-  const currentRow = (clientsResponse?.data?.clients ?? []).find(
+  const currentRows = await fetchClientRows(orgId)
+  const currentRow = currentRows.find(
     (row) => String(row?.clientId ?? '').trim() === String(clientId ?? '').trim(),
   )
   const mergedSource = buildMergedClientSource(currentRow ?? {}, payload)
-  assertClientNameAvailable(clientsResponse?.data?.clients ?? [], mergedSource.name, clientId)
+  assertClientNameAvailable(currentRows, mergedSource.name, clientId)
   const mutationResult = await runClientMutationWithDeployCompatibility(
     updateClientForOrg,
     buildClientMutationPayload(orgId, clientId, mergedSource),
