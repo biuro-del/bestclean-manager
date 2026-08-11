@@ -289,7 +289,12 @@ function sendFile(res, filePath) {
 }
 
 function sendJson(res, statusCode, payload) {
-  res.writeHead(statusCode, withSecurityHeaders({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }))
+  const requestId = normalizeText(getPlatformRequestContext()?.requestId)
+  res.writeHead(statusCode, withSecurityHeaders({
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    ...(requestId ? { 'X-Request-ID': requestId } : {}),
+  }))
   res.end(JSON.stringify(payload))
 }
 
@@ -356,7 +361,8 @@ function logPortalStorageError(context, error) {
   const message = normalizeText(
     error?.publicMessage || error?.message || error?.response?.data?.error_description || 'Unknown portal storage error',
   ).slice(0, 800)
-  console.error(`[${context}] ${code}: ${message}`)
+  const requestId = normalizeText(getPlatformRequestContext()?.requestId)
+  console.error(`[${context}]${requestId ? ` request=${requestId}` : ''} ${code}: ${message}`)
 }
 
 function isDatabaseSslBadCertificateError(error) {
@@ -7755,65 +7761,113 @@ function portalScheduleOrderWithLifecycleStatus(order = {}, lifecycleStatus, cha
   }
 }
 
-async function ensurePortalScheduleOrderTable(client) {
-  await client.query(`
-    create table if not exists public.task (
-      org_id varchar(64) not null,
-      id_task varchar(180) not null,
-      client_id varchar(64),
-      zone_id varchar(64),
-      access_end_time varchar(5),
-      access_start_time varchar(5),
-      access_windows text,
-      address_label text,
-      allow_extended_work boolean,
-      city text,
-      client_label text,
-      client_name text,
-      created_at timestamptz,
-      created_by_uid varchar(128),
-      lifecycle_status varchar(20) not null default 'ACTIVE',
-      cancelled_at timestamptz,
-      archived_at timestamptz,
-      date_ymd varchar(10),
-      description text,
-      end_date_ymd varchar(10),
-      end_time varchar(5),
-      execution_address_label text,
-      lat double precision,
-      lng double precision,
-      nip text,
-      object_plan_tasks text,
-      post_code text,
-      price double precision,
-      repeat_every integer,
-      repeat_preset varchar(32),
-      repeat_unit varchar(16),
-      repeat_weekdays text,
-      required_people integer,
-      required_work_minutes integer,
-      schedule_mode varchar(32),
-      start_time varchar(5),
-      street text,
-      supplies text,
-      title text,
-      type varchar(40),
-      updated_at timestamptz,
-      updated_by_uid varchar(128),
-      weekly_schedule_rules text,
-      work_allocations text,
-      worker_comment text,
-      worker_id varchar(128),
-      worker_ids text,
-      worker_label text,
-      worker_login varchar(80),
-      worker_name text,
-      zone_label text,
-      constraint task_lifecycle_status_check
-        check (lifecycle_status in ('ACTIVE', 'CANCELLED', 'ARCHIVED')),
-      primary key (org_id, id_task)
-    )
-  `)
+async function assertPortalScheduleOrderSchemaReady(client) {
+  const result = await client.query(
+    `with target as (
+       select to_regclass('public.task') as task_oid
+     )
+     select
+       target.task_oid is not null as task_ready,
+       exists (
+         select 1
+           from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'task'
+            and column_name = 'lifecycle_status'
+            and data_type = 'character varying'
+            and character_maximum_length = 20
+            and is_nullable = 'NO'
+            and position('ACTIVE' in upper(coalesce(column_default, ''))) > 0
+       ) as lifecycle_status_ready,
+       exists (
+         select 1
+           from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'task'
+            and column_name = 'cancelled_at'
+            and data_type = 'timestamp with time zone'
+       ) as cancelled_at_ready,
+       exists (
+         select 1
+           from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'task'
+            and column_name = 'archived_at'
+            and data_type = 'timestamp with time zone'
+       ) as archived_at_ready,
+       exists (
+         select 1
+           from pg_constraint constraint_row
+          where constraint_row.conrelid = target.task_oid
+            and constraint_row.conname = 'task_lifecycle_status_check'
+            and constraint_row.convalidated
+       ) as lifecycle_constraint_ready,
+       exists (
+         select 1
+           from pg_indexes
+          where schemaname = 'public'
+            and tablename = 'task'
+            and indexname = 'task_org_lifecycle_date_idx'
+       ) as lifecycle_index_ready
+     from target`,
+  )
+  const schema = result.rows[0] || {}
+  const required = [
+    'task_ready',
+    'lifecycle_status_ready',
+    'cancelled_at_ready',
+    'archived_at_ready',
+    'lifecycle_constraint_ready',
+    'lifecycle_index_ready',
+  ]
+  const missing = required.filter((key) => schema[key] !== true)
+  if (!missing.length) return
+
+  const error = new Error('TASK_LIFECYCLE_SCHEMA_MISSING')
+  error.statusCode = 503
+  error.publicCode = 'TASK_LIFECYCLE_SCHEMA_MISSING'
+  error.publicMessage = 'Moduł cyklu życia zleceń wymaga migracji bazy danych przed zapisem.'
+  error.publicDetails = { missing }
+  throw error
+}
+
+function mapPortalScheduleOrdersError(error) {
+  const publicCode = normalizeText(error?.publicCode)
+  const publicMessage = normalizeText(error?.publicMessage)
+  const publicStatus = Number(error?.statusCode)
+  if (publicCode && publicMessage && Number.isFinite(publicStatus) && publicStatus >= 400 && publicStatus < 600) {
+    return {
+      status: publicStatus,
+      code: publicCode,
+      message: publicMessage,
+      details: error?.publicDetails,
+    }
+  }
+
+  const databaseCode = normalizeText(error?.code).toUpperCase()
+  const databaseMessage = normalizeText(error?.message).toLowerCase()
+  if (databaseCode === '42703' && databaseMessage.includes('lifecycle_status')) {
+    return {
+      status: 503,
+      code: 'TASK_LIFECYCLE_SCHEMA_MISSING',
+      message: 'Moduł cyklu życia zleceń wymaga migracji bazy danych przed zapisem.',
+    }
+  }
+  if (
+    ['42P08', '42P18'].includes(databaseCode) ||
+    databaseMessage.includes('inconsistent types deduced for parameter')
+  ) {
+    return {
+      status: 503,
+      code: 'SCHEDULE_ORDER_SQL_PARAMETER_MISMATCH',
+      message: 'Backend zleceń wymaga zgodnej wersji zapytania SQL. Zapis nie został wykonany.',
+    }
+  }
+  return {
+    status: 500,
+    code: 'PORTAL_SCHEDULE_ORDERS_FAILED',
+    message: 'Nie udało się bezpiecznie obsłużyć zlecenia. Spróbuj ponownie później.',
+  }
 }
 
 async function requirePortalScheduleOrderAccess(client, orgId, uid, { write = false, remove = false } = {}) {
@@ -8570,7 +8624,7 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
     }
 
     client = await connectDbClient()
-    await ensurePortalScheduleOrderTable(client)
+    await assertPortalScheduleOrderSchemaReady(client)
     const requesterRole = await requirePortalScheduleOrderAccess(client, orgId, requesterUid, {
       write: method === 'POST' || method === 'PATCH',
       remove: method === 'DELETE',
@@ -8730,12 +8784,13 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
       sendApiError(res, mappedDb.status, mappedDb.code, mappedDb.message)
       return
     }
+    const mappedScheduleError = mapPortalScheduleOrdersError(error)
     sendApiError(
       res,
-      error?.statusCode || 500,
-      normalizeText(error?.publicCode) || 'PORTAL_SCHEDULE_ORDERS_ERROR',
-      normalizeText(error?.publicMessage) || error?.message || 'Nie udalo sie obsluzyc zlecen.',
-      error?.details,
+      mappedScheduleError.status,
+      mappedScheduleError.code,
+      mappedScheduleError.message,
+      mappedScheduleError.details,
     )
   } finally {
     if (client) client.release()

@@ -4482,3 +4482,28 @@ Granice:
   nowego codebase. Kod nie moze zostac wdrozony przez obecne polecenia projektu.
 - Nie wlaczono Identity Platform, Blaze, App Check ani zadnych API i sekretow.
 - Nie wykonano migracji, commita, pusha, wdrozenia ani zmiany produkcji.
+
+Data: 2026-08-11
+Autor: AI Codex
+Temat: Lokalny runner brakujacej migracji Task lifecycle
+Powod:
+- Produkcyjny `POST /api/portal/schedule-orders` zwracal 500, poniewaz kod zapisywal
+  `task.lifecycle_status`, a produkcyjna tabela nie miala jeszcze tej kolumny.
+- Addytywna migracja `20260727_task_lifecycle_additive.sql` byla juz w kanonicznym
+  zrodle, ale brakowalo kontrolowanego runnera i jednoznacznej kolejnosci wdrozenia.
+Dodano lokalnie:
+- Domyslnie tylko audytujacy runner `scripts/migrate-task-lifecycle.js`.
+- Dokladna bramke produkcyjna, sprawdzenie projektu i nazwy bazy oraz postflight.
+- Odporny audyt brakujacej tabeli, typu i dlugosci kolumny, domyslnego `ACTIVE`,
+  zwalidowanego constraintu, indeksu oraz backfillu wszystkich rekordow.
+- Test kontraktu laczacy endpoint `POST /api/portal/schedule-orders` z migracja.
+Weryfikacja:
+- Zdalny `cleanzi01/main` i lokalny punkt bazowy wskazuja commit `f57cb3e`.
+- Testy celowane runnera, lifecycle i kontraktu endpointu: PASS.
+- Pelny `npm test`: 338/341 PASS; trzy testy spoza zakresu nie uruchomily sie przez
+  brak lokalnych pakietow `firebase-admin`, `google-auth-library` i `nodemailer`.
+Granice:
+- Nie polaczono sie z produkcyjna baza i nie wykonano migracji.
+- Nie wykonano pusha ani wdrozenia. Zapis wymaga osobnej dokladnej zgody
+  `OK PRODUKCJA CLZ-DB-20260811-TASK-LIFECYCLE-01`.
+- Rownolegle zmiany kalendarza w tym worktree pozostaly nietkniete.

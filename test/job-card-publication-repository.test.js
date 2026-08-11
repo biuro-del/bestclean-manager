@@ -69,6 +69,38 @@ function draftRow(payload) {
   }
 }
 
+test('zapis szkicu Karty Zlecenia rozdziela parametry SQL dla upsertu i rewizji', async () => {
+  const payload = card()
+  const calls = []
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params })
+      if (sql.includes('to_regclass')) return { rows: [{ draft_ready: true, revision_ready: true }] }
+      if (sql.includes('from public.task')) return { rows: [{ id_task: 'TASK-001' }] }
+      if (sql.includes('insert into public.job_card_draft')) return { rows: [draftRow(payload)] }
+      return { rows: [] }
+    },
+  }
+
+  const repository = new JobCardRepository(client)
+  const result = await repository.saveDraft({
+    actorUid: 'uid-1',
+    card: payload,
+    orgId: 'ORG1',
+    sourceOrderId: 'TASK-001',
+    sourceSnapshot: { id: 'TASK-001' },
+  })
+
+  const insert = calls.find((call) => call.sql.includes('insert into public.job_card_draft'))
+  assert.ok(insert)
+  assert.match(insert.sql, /\$1::varchar, \$2::varchar, \$3::uuid/)
+  assert.match(insert.sql, /where org_id = \$15::varchar and source_order_id = \$16::varchar/)
+  assert.match(insert.sql, /\$13::varchar, \$14::varchar, now\(\), now\(\)/)
+  assert.equal((insert.sql.match(/\$1\b/g) ?? []).length, 1)
+  assert.deepEqual(insert.params.slice(12), ['uid-1', 'uid-1', 'ORG1', 'TASK-001'])
+  assert.equal(result.sourceOrderId, 'TASK-001')
+})
+
 test('publikacja blokuje wyścig, zapisuje niezmienną rewizję i projekcję mobilną', async () => {
   const payload = card()
   const calls = []
