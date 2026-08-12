@@ -15,7 +15,25 @@ function workdayId(row = {}) {
 
 function isTodayWarsaw(row = {}) {
   const value = row.is_today_warsaw ?? row.isTodayWarsaw
-  return value === true || value === 1 || text(value).toLowerCase() === 't'
+  const normalized = text(value).toLowerCase()
+  return value === true || value === 1 || normalized === 'true' || normalized === 't' || normalized === '1'
+}
+
+function hasConfirmedWarsawDay(row = {}) {
+  const value = row.is_today_warsaw ?? row.isTodayWarsaw
+  const normalized = text(value).toLowerCase()
+  return (
+    value === true ||
+    value === false ||
+    value === 1 ||
+    value === 0 ||
+    normalized === 'true' ||
+    normalized === 'false' ||
+    normalized === 't' ||
+    normalized === 'f' ||
+    normalized === '1' ||
+    normalized === '0'
+  )
 }
 
 function uniqueOpenWorkdays(rows = []) {
@@ -36,7 +54,7 @@ function openWorkdayConflictError(code, rows = []) {
   error.publicMessage =
     code === MOBILE_OPEN_WORKDAY_ERROR.MULTIPLE_OPEN
       ? 'Wykryto kilka otwartych dni pracy. Koordynator musi je sprawdzic przed kolejnym skanem.'
-      : 'Poprzedni dzien pracy nadal jest otwarty. Koordynator musi uzupelnic STOP przed rozpoczeciem kolejnego dnia.'
+      : 'Nie mozna jednoznacznie ustalic daty otwartego dnia pracy w Warszawie. Koordynator musi go sprawdzic przed kolejnym skanem.'
   error.publicDetails = {
     openCount: rows.length,
     workdayIds: rows.map(workdayId).filter(Boolean),
@@ -47,19 +65,24 @@ function openWorkdayConflictError(code, rows = []) {
 
 function resolveSingleOpenWorkday(rows = []) {
   const openWorkdays = uniqueOpenWorkdays(rows)
-  if (openWorkdays.length > 1) {
-    throw openWorkdayConflictError(MOBILE_OPEN_WORKDAY_ERROR.MULTIPLE_OPEN, openWorkdays)
+  const currentWarsawWorkdays = openWorkdays.filter(isTodayWarsaw)
+  const ambiguousWarsawWorkdays = openWorkdays.filter((row) => !hasConfirmedWarsawDay(row))
+
+  // Records explicitly marked as not today in Warsaw are historical. They stay
+  // untouched and cannot block a QR START for the current Warsaw day. Missing
+  // or ambiguous Warsaw-day state remains fail-closed to prevent a duplicate.
+  if (ambiguousWarsawWorkdays.length > 0) {
+    throw openWorkdayConflictError(
+      MOBILE_OPEN_WORKDAY_ERROR.OTHER_DAY,
+      [...currentWarsawWorkdays, ...ambiguousWarsawWorkdays],
+    )
   }
 
-  const activeWorkday = openWorkdays[0] ?? null
-  if (!activeWorkday) {
-    return null
+  if (currentWarsawWorkdays.length > 1) {
+    throw openWorkdayConflictError(MOBILE_OPEN_WORKDAY_ERROR.MULTIPLE_OPEN, currentWarsawWorkdays)
   }
 
-  if (!isTodayWarsaw(activeWorkday)) {
-    throw openWorkdayConflictError(MOBILE_OPEN_WORKDAY_ERROR.OTHER_DAY, openWorkdays)
-  }
-  return activeWorkday
+  return currentWarsawWorkdays[0] ?? null
 }
 
 module.exports = {

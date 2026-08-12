@@ -27,19 +27,29 @@ test('jeden dzisiejszy Workday jest aktywnym dniem', () => {
   assert.equal(resolveSingleOpenWorkday([row]), row)
 })
 
-test('stary otwarty Workday blokuje nowy skan bez automatycznego domkniecia', () => {
-  assert.throws(
-    () => resolveSingleOpenWorkday([workday({ is_today_warsaw: false })]),
-    (error) => {
-      assert.equal(error.statusCode, 409)
-      assert.equal(error.publicCode, MOBILE_OPEN_WORKDAY_ERROR.OTHER_DAY)
-      assert.deepEqual(error.publicDetails.workdayIds, ['WD-1'])
-      return true
-    },
+test('dwa historyczne otwarte Workday nie blokuja START i pozostaja niezmienione', () => {
+  const historical = [
+    workday({ workday_id: 'WD-OLD-1', is_today_warsaw: false }),
+    workday({ workday_id: 'WD-OLD-2', is_today_warsaw: 'f' }),
+  ]
+  const before = JSON.parse(JSON.stringify(historical))
+
+  assert.equal(resolveSingleOpenWorkday(historical), null)
+  assert.deepEqual(historical, before)
+})
+
+test('historyczny i jeden dzisiejszy Workday zwraca dzisiejszy', () => {
+  const current = workday({ workday_id: 'WD-TODAY' })
+  assert.equal(
+    resolveSingleOpenWorkday([
+      workday({ workday_id: 'WD-OLD', is_today_warsaw: false }),
+      current,
+    ]),
+    current,
   )
 })
 
-test('kilka otwartych Workday daje konflikt zamiast wyboru najnowszego', () => {
+test('dwa dzisiejsze Workday daja konflikt zamiast wyboru najnowszego', () => {
   assert.throws(
     () =>
       resolveSingleOpenWorkday([
@@ -55,11 +65,16 @@ test('kilka otwartych Workday daje konflikt zamiast wyboru najnowszego', () => {
   )
 })
 
-test('Workday bez potwierdzonej daty dzisiejszej jest konfliktem, a duplikat odczytu nie zawyza licznika', () => {
+test('biezacy Workday i rekord start_at null nadal blokuja utworzenie drugiego dnia', () => {
   const unresolved = workday({ is_today_warsaw: null, start_at: null })
   assert.deepEqual(uniqueOpenWorkdays([unresolved, { ...unresolved }]), [unresolved])
   assert.throws(
-    () => resolveSingleOpenWorkday([unresolved]),
-    (error) => error.publicCode === MOBILE_OPEN_WORKDAY_ERROR.OTHER_DAY,
+    () => resolveSingleOpenWorkday([workday({ workday_id: 'WD-TODAY' }), unresolved]),
+    (error) => {
+      assert.equal(error.statusCode, 409)
+      assert.equal(error.publicCode, MOBILE_OPEN_WORKDAY_ERROR.OTHER_DAY)
+      assert.deepEqual(error.publicDetails.workdayIds, ['WD-TODAY', 'WD-1'])
+      return true
+    },
   )
 })
