@@ -5119,6 +5119,7 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
   const client = await connectDbClient()
   let createdAuthUser = null
   let transactionStarted = false
+  let databaseCommitted = false
   let uploadedPhoto = null
 
   try {
@@ -5212,14 +5213,7 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
 
     await client.query('commit')
     transactionStarted = false
-    if (
-      normalizeText(currentWorker?.photo_url) &&
-      normalizeText(currentWorker.photo_url) !== normalizeText(updatedRow?.photo_url)
-    ) {
-      await deleteWorkerProfilePhotoObject(
-        workerProfilePhotoObjectFromUrl(currentWorker.photo_url, payload.orgId),
-      )
-    }
+    databaseCommitted = true
 
     return {
       uid: createdAuthUser.uid,
@@ -5249,10 +5243,12 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
         // Ignore rollback failure; the original error remains authoritative.
       }
     }
-    if (createdAuthUser?.uid) {
+    if (createdAuthUser?.uid && !databaseCommitted) {
       await deleteFirebaseUserQuietly(createdAuthUser)
     }
-    await deleteWorkerProfilePhotoObject(uploadedPhoto)
+    if (!databaseCommitted) {
+      await deleteWorkerProfilePhotoObject(uploadedPhoto)
+    }
     throw error
   } finally {
     client.release()

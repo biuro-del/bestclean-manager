@@ -4566,10 +4566,12 @@ function getWorkerTimeDetailFeature() {
 }
 
 async function fetchWorkerProfilesForCurrentSession(force = false, options = {}) {
+  await ensurePortalFeatureReady('workerProfile')
   return getWorkerProfileFeature().fetch(force, options)
 }
 
 async function fetchWorkerAccountForCurrentSession(force = false) {
+  await ensurePortalFeatureReady('workerAccount')
   return getWorkerAccountFeature().fetch(force)
 }
 
@@ -4590,6 +4592,7 @@ function workerTimeSyncSelectionUi() {
 }
 
 async function fetchWorkerDetailForCurrentSession(options = {}) {
+  await ensurePortalFeatureReady('workerTimeDetail')
   return getWorkerTimeDetailFeature().fetch(options)
 }
 
