@@ -15,6 +15,7 @@
     },
     "dependencies": {
         "@dataconnect/generated": "file:apps/portal-web/src/dataconnect-generated",
+        "@dataconnect/read-guard-generated": "file:apps/portal-web/src/dataconnect-read-guard-generated",
         "@fullcalendar/core": "^6.1.19",
         "@fullcalendar/daygrid": "^6.1.19",
         "@fullcalendar/interaction": "^6.1.19",
@@ -25,7 +26,6 @@
         "firebase": "^12.11.0",
         "jspdf": "^4.2.1",
         "jszip": "^3.10.1",
-        "leaflet": "1.9.4",
         "pdfjs-dist": "^6.1.200",
         "pdfmake": "^0.3.7",
         "react": "^19.2.0",

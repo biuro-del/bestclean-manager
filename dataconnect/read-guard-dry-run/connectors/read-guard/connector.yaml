@@ -1,0 +1,7 @@
+connectorId: read-guard
+generate:
+  javascriptSdk:
+    - outputDir: ../../../../web-app/apps/portal-web/src/dataconnect-read-guard-generated
+      package: "@dataconnect/read-guard-generated"
+      packageJsonDir: ../../../../web-app
+      react: true

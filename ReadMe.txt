@@ -4690,3 +4690,17 @@ Weryfikacja:
 Rollback:
 - Po utworzeniu nowego dnia pracy przy pozostawionym starym Workday nie wykonywac slepego rollbacku backendu, bo poprzednia regula moze ponownie zablokowac pracownika.
 - Preferowac roll-forward; jesli rollback jest konieczny, najpierw zamknac stary Workday przez autoryzowana korekte biurowa.
+- `npm.cmd run check` - PASS.
+- `node --test test/registration-contract.test.mjs` - 6/6 PASS.
+- Lokalny emulator Firestore - 4/4 PASS: jednokrotna konsumpcja, rownolegly wyscig,
+  fail-closed przy dwoch waznych grantach oraz idempotentny retry mimo pozniejszego
+  wydania grantu w drugim kanale.
+- `npm install --package-lock-only --offline` utworzyl powtarzalny lockfile.
+- Lokalny Node 20 zglosil oczekiwane ostrzezenie engine; docelowy codebase wymaga
+  Node 22 zgodnie z `registration-functions/package.json`.
+Granice:
+- Nie dodano adaptera CLEANING_COMPANY ani brokera Microsoft.
+- Nie istnieje eksport `beforeUserCreated`, a root `firebase.json` nie rejestruje
+  nowego codebase. Kod nie moze zostac wdrozony przez obecne polecenia projektu.
+- Nie wlaczono Identity Platform, Blaze, App Check ani zadnych API i sekretow.
+- Nie wykonano migracji, commita, pusha, wdrozenia ani zmiany produkcji.

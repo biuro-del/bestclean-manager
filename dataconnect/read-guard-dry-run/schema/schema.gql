@@ -1,0 +1,770 @@
+# dataconnect/schema/schema.gql
+# Best Clean — Multi-tenant schema (organizations) + membership access
+# Change: Zone field `id` renamed to `ZoneId` (DB column still `id`)
+# Includes: active core tables + registration and SaaS
+
+type Organization @table(
+  name: "organizations",
+  singular: "organization",
+  plural: "organizations",
+  key: "orgId"
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  name: String! @col(name: "name", dataType: "varchar(120)")
+  # ONBOARDING / TRIAL / ACTIVE / PAST_DUE / SUSPENDED /
+  # DELETION_SCHEDULED / DELETED
+  status: String @col(name: "status", dataType: "varchar(30)")
+  createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
+
+  # Owner identity is anchored in Firebase Auth and the organization's Worker.
+  # The registration flow must keep ownerUid aligned with
+  # OrganizationSubscription.billingOwnerUid.
+  ownerUid: String @col(name: "owner_uid", dataType: "varchar(128)")
+  ownerWorkerId: String @col(name: "owner_worker_id", dataType: "varchar(128)")
+
+  # ISO 3166-1 alpha-2 country, BCP 47 locale, IANA timezone and ISO 4217 currency.
+  countryCode: String @col(name: "country_code", dataType: "varchar(2)")
+  locale: String @col(name: "locale", dataType: "varchar(10)")
+  timezone: String @col(name: "timezone", dataType: "varchar(60)")
+  currencyCode: String @col(name: "currency_code", dataType: "varchar(3)")
+  dataRegion: String @col(name: "data_region", dataType: "varchar(20)")
+
+  # STARTED / COMPANY_COMPLETED / USER_COMPLETED / COMPLETED
+  onboardingStatus: String @col(name: "onboarding_status", dataType: "varchar(30)")
+  # WEB / ADMIN / PARTNER / IMPORT
+  registrationSource: String @col(name: "registration_source", dataType: "varchar(30)")
+
+  createdByUid: String @col(name: "created_by_uid", dataType: "varchar(128)")
+  updatedByUid: String @col(name: "updated_by_uid", dataType: "varchar(128)")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
+  activatedAt: Timestamp @col(name: "activated_at")
+  suspendedAt: Timestamp @col(name: "suspended_at")
+  deletionScheduledAt: Timestamp @col(name: "deletion_scheduled_at")
+  purgeAfter: Timestamp @col(name: "purge_after")
+  deletedAt: Timestamp @col(name: "deleted_at")
+}
+type OrganizationMember @table(
+  name: "organization_member",
+  singular: "organizationMember",
+  plural: "organizationMembers",
+  key: ["orgId", "uid"]
+)
+@index(name: "organization_member_uid_org_lookup_idx", fields: ["uid", "orgId"])
+@index(name: "organization_member_org_worker_idx", fields: ["orgId", "workerId"]) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  uid: String! @col(name: "uid", dataType: "varchar(128)")
+  # Legacy compatibility field. New modules should treat Worker.role as the
+  # target source of truth. New OWNER records may temporarily set both fields.
+  role: String! @col(name: "role", dataType: "varchar(30)")
+
+  # Nullable during migration. Backfill before adding the target uniqueness.
+  workerId: String @col(name: "worker_id", dataType: "varchar(128)")
+  # INVITED / ACTIVE / SUSPENDED / REMOVED
+  status: String @col(name: "status", dataType: "varchar(30)")
+  consumesSeat: Boolean @col(name: "consumes_seat") @default(value: true)
+  invitedAt: Timestamp @col(name: "invited_at")
+  joinedAt: Timestamp @col(name: "joined_at")
+  lastSeenAt: Timestamp @col(name: "last_seen_at")
+  createdByUid: String @col(name: "created_by_uid", dataType: "varchar(128)")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
+  removedAt: Timestamp @col(name: "removed_at")
+  removedByUid: String @col(name: "removed_by_uid", dataType: "varchar(128)")
+
+  createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
+}
+
+type Worker @table(
+  name: "worker",
+  singular: "worker",
+  plural: "workers",
+  key: ["orgId", "login"]
+)
+@index(name: "worker_org_worker_id_idx", fields: ["orgId", "workerId"])
+@index(name: "worker_auth_uid_idx", fields: ["authUid"])
+@index(name: "worker_org_login_normalized_idx", fields: ["orgId", "loginNormalized"])
+@index(name: "worker_org_email_normalized_idx", fields: ["orgId", "emailNormalized"])
+@unique(indexName: "worker_org_login_normalized_uidx", fields: ["orgId", "loginNormalized"])
+@unique(indexName: "worker_org_worker_id_normalized_uidx", fields: ["orgId", "workerIdNormalized"]) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  login: String! @col(name: "login", dataType: "varchar(80)")
+  workerId: String @col(name: "worker_id", dataType: "varchar(128)")
+  workerName: String @col(name: "full_name")
+
+  firstName: String @col(name: "first_name", dataType: "varchar(80)")
+  lastName: String @col(name: "last_name", dataType: "varchar(80)")
+  loginNormalized: String @col(name: "login_normalized", dataType: "varchar(80)")
+  workerIdNormalized: String @col(name: "worker_id_normalized", dataType: "varchar(128)")
+  emailNormalized: String @col(name: "email_normalized", dataType: "varchar(180)")
+  phoneNormalized: String @col(name: "phone_normalized", dataType: "varchar(40)")
+
+  # Login email do aplikacji: np. franosz@bestclean.pl
+  loginEmail: String @col(name: "login_email", dataType: "varchar(160)")
+
+  # UID z Firebase Auth
+  authUid: String @col(name: "auth_uid", dataType: "varchar(128)")
+
+  # OWNER / ADMIN / MANAGER / COORDINATOR / WORKER.
+  # OWNER cannot be downgraded through the regular UI. Ownership transfer must
+  # use a support-controlled, audited process.
+  role: String @col(name: "role", dataType: "varchar(32)")
+  roleLocked: Boolean @col(name: "role_locked") @default(value: false)
+  # ORGANIZATION_OWNER for the founding owner.
+  roleLockedReason: String @col(name: "role_locked_reason", dataType: "varchar(60)")
+  roleAssignedAt: Timestamp @col(name: "role_assigned_at")
+  roleLockedAt: Timestamp @col(name: "role_locked_at")
+
+  active: Boolean @col(name: "active")
+  email: String @col(name: "email")
+  phone: String @col(name: "phone")
+  # Operational type, for example CLEANER / SUPERVISOR / OFFICE / OTHER.
+  # This is not a source of system permissions.
+  workerType: String @col(name: "worker_type", dataType: "varchar(40)")
+
+  # INVITED / ACTIVE / BLOCKED / REMOVED
+  status: String @col(name: "status", dataType: "varchar(30)")
+  # ACTIVE / INACTIVE / TERMINATED / ARCHIVED
+  employmentStatus: String @col(name: "employment_status", dataType: "varchar(30)")
+  position: String @col(name: "position", dataType: "varchar(100)")
+  locale: String @col(name: "locale", dataType: "varchar(10)")
+  timezone: String @col(name: "timezone", dataType: "varchar(60)")
+  invitedAt: Timestamp @col(name: "invited_at")
+  activatedAt: Timestamp @col(name: "activated_at")
+  lastLoginAt: Timestamp @col(name: "last_login_at")
+  createdByUid: String @col(name: "created_by_uid", dataType: "varchar(128)")
+  updatedByUid: String @col(name: "updated_by_uid", dataType: "varchar(128)")
+  deletedAt: Timestamp @col(name: "deleted_at")
+  deletedByUid: String @col(name: "deleted_by_uid", dataType: "varchar(128)")
+  externalRef: String @col(name: "external_ref", dataType: "varchar(120)")
+
+  createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
+  edit: String @col(name: "edit")
+}
+
+# =========================
+# REGISTRATION AND SAAS (ADDITIVE)
+# =========================
+
+type OrganizationCompanyProfile @table(
+  name: "organization_company_profile",
+  singular: "organizationCompanyProfile",
+  plural: "organizationCompanyProfiles",
+  key: "orgId"
+)
+@index(name: "organization_company_profile_registration_tax_idx", fields: ["registrationCountryCode", "taxIdNormalized"])
+@index(name: "organization_company_profile_vat_idx", fields: ["vatIdNormalized"])
+@index(name: "organization_company_profile_registry_idx", fields: ["businessRegistryId"]) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  legalName: String! @col(name: "legal_name", dataType: "varchar(180)")
+  brandName: String @col(name: "brand_name", dataType: "varchar(180)")
+  registrationCountryCode: String! @col(name: "registration_country_code", dataType: "varchar(2)")
+  # NIP / TIN / EIN / TAX_ID / OTHER
+  taxIdType: String @col(name: "tax_id_type", dataType: "varchar(30)")
+  taxIdValue: String @col(name: "tax_id_value", dataType: "varchar(64)")
+  taxIdNormalized: String @col(name: "tax_id_normalized", dataType: "varchar(64)")
+  vatIdValue: String @col(name: "vat_id_value", dataType: "varchar(64)")
+  vatIdNormalized: String @col(name: "vat_id_normalized", dataType: "varchar(64)")
+  businessRegistryId: String @col(name: "business_registry_id", dataType: "varchar(64)")
+
+  # Global address model suitable for Poland, the EU and the US.
+  addressLine1: String @col(name: "address_line_1", dataType: "varchar(180)")
+  addressLine2: String @col(name: "address_line_2", dataType: "varchar(180)")
+  locality: String @col(name: "locality", dataType: "varchar(100)")
+  administrativeArea: String @col(name: "administrative_area", dataType: "varchar(100)")
+  postalCode: String @col(name: "postal_code", dataType: "varchar(20)")
+  countryCode: String! @col(name: "country_code", dataType: "varchar(2)")
+
+  billingEmail: String @col(name: "billing_email", dataType: "varchar(180)")
+  billingPhone: String @col(name: "billing_phone", dataType: "varchar(40)")
+  invoiceEmail: String @col(name: "invoice_email", dataType: "varchar(180)")
+  websiteUrl: String @col(name: "website_url", dataType: "varchar(200)")
+  createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
+}
+
+type OrganizationSubscription @table(
+  name: "organization_subscription",
+  singular: "organizationSubscription",
+  plural: "organizationSubscriptions",
+  key: "orgId"
+)
+@index(name: "organization_subscription_status_billing_idx", fields: ["status", "nextBillingAt"])
+@index(name: "organization_subscription_status_purge_idx", fields: ["status", "purgeAfter"])
+@index(name: "organization_subscription_provider_idx", fields: ["providerSubscriptionId"])
+@index(name: "organization_subscription_billing_owner_idx", fields: ["billingOwnerUid"]) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  # Must match Organization.ownerUid for the founding owner. Only OWNER may
+  # manage or renew the subscription through the regular product flow.
+  billingOwnerUid: String! @col(name: "billing_owner_uid", dataType: "varchar(128)")
+  billingOwnerWorkerId: String! @col(name: "billing_owner_worker_id", dataType: "varchar(64)")
+  # DEMO / START / PRO
+  planCode: String! @col(name: "plan_code", dataType: "varchar(30)")
+  # TRIALING / ACTIVE / PAST_DUE / SUSPENDED / CANCELED / EXPIRED /
+  # DELETION_SCHEDULED
+  status: String! @col(name: "status", dataType: "varchar(30)")
+  # MONTHLY / YEARLY
+  billingCycle: String @col(name: "billing_cycle", dataType: "varchar(20)")
+  currencyCode: String! @col(name: "currency_code", dataType: "varchar(3)")
+  unitAmountMinor: Int64 @col(name: "unit_amount_minor")
+  totalAmountMinor: Int64 @col(name: "total_amount_minor")
+  seatLimit: Int @col(name: "seat_limit")
+
+  trialStartedAt: Timestamp @col(name: "trial_started_at")
+  trialEndsAt: Timestamp @col(name: "trial_ends_at")
+  activatedAt: Timestamp @col(name: "activated_at")
+  currentPeriodStartedAt: Timestamp @col(name: "current_period_started_at")
+  currentPeriodEndsAt: Timestamp @col(name: "current_period_ends_at")
+  nextBillingAt: Timestamp @col(name: "next_billing_at")
+  nextPaymentAttemptAt: Timestamp @col(name: "next_payment_attempt_at")
+  lastPaymentAt: Timestamp @col(name: "last_payment_at")
+  pastDueAt: Timestamp @col(name: "past_due_at")
+  gracePeriodEndsAt: Timestamp @col(name: "grace_period_ends_at")
+  suspendedAt: Timestamp @col(name: "suspended_at")
+  expiredAt: Timestamp @col(name: "expired_at")
+
+  cancelAtPeriodEnd: Boolean! @col(name: "cancel_at_period_end") @default(value: false)
+  canceledAt: Timestamp @col(name: "canceled_at")
+  canceledByUid: String @col(name: "canceled_by_uid", dataType: "varchar(128)")
+  cancellationReason: String @col(name: "cancellation_reason", dataType: "varchar(160)")
+  deletionScheduledAt: Timestamp @col(name: "deletion_scheduled_at")
+  # Planned permanent deletion or anonymization time after the retention period.
+  purgeAfter: Timestamp @col(name: "purge_after")
+
+  # STRIPE / PAYU / PRZELEWY24 / MANUAL
+  provider: String @col(name: "provider", dataType: "varchar(40)")
+  providerCustomerId: String @col(name: "provider_customer_id", dataType: "varchar(160)")
+  providerSubscriptionId: String @col(name: "provider_subscription_id", dataType: "varchar(160)")
+  discountCode: String @col(name: "discount_code", dataType: "varchar(80)")
+  createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
+}
+
+type SubscriptionPayment @table(
+  name: "subscription_payment",
+  singular: "subscriptionPayment",
+  plural: "subscriptionPayments",
+  key: ["orgId", "paymentId"]
+)
+@index(name: "subscription_payment_org_created_idx", fields: ["orgId", "createdAt"])
+@index(name: "subscription_payment_org_status_idx", fields: ["orgId", "status"])
+@index(name: "subscription_payment_provider_payment_idx", fields: ["providerPaymentId"])
+@index(name: "subscription_payment_provider_transaction_idx", fields: ["providerTransactionId"])
+@index(name: "subscription_payment_idempotency_idx", fields: ["idempotencyKey"]) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+  paymentId: String! @col(name: "payment_id", dataType: "varchar(64)")
+
+  billingOwnerUid: String @col(name: "billing_owner_uid", dataType: "varchar(128)")
+  # INITIAL / RENEWAL / PLAN_CHANGE / RETRY / MANUAL
+  paymentType: String! @col(name: "payment_type", dataType: "varchar(30)")
+  # CREATED / PENDING / AUTHORIZED / PAID / FAILED / CANCELED / REFUNDED /
+  # PARTIALLY_REFUNDED
+  status: String! @col(name: "status", dataType: "varchar(30)")
+  currencyCode: String! @col(name: "currency_code", dataType: "varchar(3)")
+  amountNetMinor: Int64 @col(name: "amount_net_minor")
+  taxMinor: Int64 @col(name: "tax_minor")
+  amountGrossMinor: Int64! @col(name: "amount_gross_minor")
+  refundedAmountMinor: Int64 @col(name: "refunded_amount_minor")
+
+  periodStartedAt: Timestamp @col(name: "period_started_at")
+  periodEndsAt: Timestamp @col(name: "period_ends_at")
+  paymentProvider: String @col(name: "payment_provider", dataType: "varchar(40)")
+  providerPaymentId: String @col(name: "provider_payment_id", dataType: "varchar(160)")
+  providerInvoiceId: String @col(name: "provider_invoice_id", dataType: "varchar(160)")
+  providerTransactionId: String @col(name: "provider_transaction_id", dataType: "varchar(160)")
+  idempotencyKey: String @col(name: "idempotency_key", dataType: "varchar(160)")
+
+  paymentStartedAt: Timestamp @col(name: "payment_started_at")
+  paidAt: Timestamp @col(name: "paid_at")
+  failedAt: Timestamp @col(name: "failed_at")
+  canceledAt: Timestamp @col(name: "canceled_at")
+  refundedAt: Timestamp @col(name: "refunded_at")
+  failureCode: String @col(name: "failure_code", dataType: "varchar(80)")
+  failureReason: String @col(name: "failure_reason")
+  createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
+}
+
+type SubscriptionEvent @table(
+  name: "subscription_event",
+  singular: "subscriptionEvent",
+  plural: "subscriptionEvents",
+  key: ["orgId", "subscriptionEventId"]
+)
+@index(name: "subscription_event_org_occurred_idx", fields: ["orgId", "occurredAt"])
+@index(name: "subscription_event_org_type_idx", fields: ["orgId", "eventType"])
+@index(name: "subscription_event_provider_idx", fields: ["providerEventId"])
+@index(name: "subscription_event_payment_idx", fields: ["paymentId"]) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+  subscriptionEventId: String! @col(name: "subscription_event_id", dataType: "varchar(64)")
+
+  # SUBSCRIPTION_CREATED / TRIAL_STARTED / TRIAL_ENDED / PAYMENT_PAID /
+  # PAYMENT_FAILED / SUBSCRIPTION_RENEWED / PLAN_CHANGED /
+  # SUBSCRIPTION_CANCELED / ORGANIZATION_SUSPENDED /
+  # ORGANIZATION_REACTIVATED / DELETION_SCHEDULED / DATA_PURGED
+  eventType: String! @col(name: "event_type", dataType: "varchar(60)")
+  previousStatus: String @col(name: "previous_status", dataType: "varchar(30)")
+  newStatus: String @col(name: "new_status", dataType: "varchar(30)")
+  previousPlanCode: String @col(name: "previous_plan_code", dataType: "varchar(30)")
+  newPlanCode: String @col(name: "new_plan_code", dataType: "varchar(30)")
+  actorUid: String @col(name: "actor_uid", dataType: "varchar(128)")
+  actorWorkerId: String @col(name: "actor_worker_id", dataType: "varchar(64)")
+  # USER / SYSTEM / PAYMENT_PROVIDER / SUPPORT
+  source: String @col(name: "source", dataType: "varchar(30)")
+  paymentId: String @col(name: "payment_id", dataType: "varchar(64)")
+  providerEventId: String @col(name: "provider_event_id", dataType: "varchar(160)")
+  reason: String @col(name: "reason")
+  metadata: Any @col(name: "metadata")
+  occurredAt: Timestamp! @col(name: "occurred_at") @default(expr: "request.time")
+  createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
+}
+
+type UserConsent @table(
+  name: "user_consent",
+  singular: "userConsent",
+  plural: "userConsents",
+  key: "consentId"
+)
+@index(name: "user_consent_uid_type_version_idx", fields: ["uid", "consentType", "consentVersion"])
+@index(name: "user_consent_org_uid_idx", fields: ["orgId", "uid"])
+@index(name: "user_consent_org_created_idx", fields: ["orgId", "createdAt"]) {
+  consentId: String! @col(name: "consent_id", dataType: "varchar(64)")
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+  uid: String! @col(name: "uid", dataType: "varchar(128)")
+  # TERMS / PRIVACY_POLICY / MARKETING / DATA_PROCESSING
+  consentType: String! @col(name: "consent_type", dataType: "varchar(40)")
+  consentVersion: String! @col(name: "consent_version", dataType: "varchar(40)")
+  accepted: Boolean! @col(name: "accepted")
+  acceptedAt: Timestamp @col(name: "accepted_at")
+  revokedAt: Timestamp @col(name: "revoked_at")
+  locale: String @col(name: "locale", dataType: "varchar(10)")
+  # Never store the raw IP address.
+  ipHash: String @col(name: "ip_hash", dataType: "varchar(128)")
+  userAgent: String @col(name: "user_agent")
+  createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
+}
+
+type RegistrationAttempt @table(
+  name: "registration_attempt",
+  singular: "registrationAttempt",
+  plural: "registrationAttempts",
+  key: "registrationId"
+)
+@index(name: "registration_attempt_status_updated_idx", fields: ["status", "updatedAt"])
+@index(name: "registration_attempt_email_idx", fields: ["emailNormalized"])
+@index(name: "registration_attempt_uid_idx", fields: ["uid"])
+@index(name: "registration_attempt_source_started_idx", fields: ["source", "startedAt"]) {
+  registrationId: String! @col(name: "registration_id", dataType: "varchar(64)")
+  # STARTED / COMPLETED / FAILED / ABANDONED / EXPIRED
+  status: String! @col(name: "status", dataType: "varchar(30)")
+  # PLAN / ORGANIZATION / USER / SUMMARY
+  currentStep: String @col(name: "current_step", dataType: "varchar(30)")
+  selectedPlanCode: String @col(name: "selected_plan_code", dataType: "varchar(30)")
+  emailNormalized: String @col(name: "email_normalized", dataType: "varchar(180)")
+  countryCode: String @col(name: "country_code", dataType: "varchar(2)")
+  locale: String @col(name: "locale", dataType: "varchar(10)")
+  uid: String @col(name: "uid", dataType: "varchar(128)")
+  orgId: String @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization @ref(fields: "orgId", references: "orgId")
+  source: String @col(name: "source", dataType: "varchar(40)")
+  utmSource: String @col(name: "utm_source", dataType: "varchar(120)")
+  utmMedium: String @col(name: "utm_medium", dataType: "varchar(120)")
+  utmCampaign: String @col(name: "utm_campaign", dataType: "varchar(120)")
+  # Never store the raw IP address or a full copy of the company form.
+  ipHash: String @col(name: "ip_hash", dataType: "varchar(128)")
+  errorCode: String @col(name: "error_code", dataType: "varchar(80)")
+  errorMessage: String @col(name: "error_message")
+  startedAt: Timestamp! @col(name: "started_at") @default(expr: "request.time")
+  emailVerificationSentAt: Timestamp @col(name: "email_verification_sent_at")
+  emailVerifiedAt: Timestamp @col(name: "email_verified_at")
+  companyStepCompletedAt: Timestamp @col(name: "company_step_completed_at")
+  userStepCompletedAt: Timestamp @col(name: "user_step_completed_at")
+  completedAt: Timestamp @col(name: "completed_at")
+  failedAt: Timestamp @col(name: "failed_at")
+  abandonedAt: Timestamp @col(name: "abandoned_at")
+  expiresAt: Timestamp @col(name: "expires_at")
+  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
+}
+
+type AuditLog @table(
+  name: "audit_log",
+  singular: "auditLog",
+  plural: "auditLogs",
+  key: "auditId"
+)
+@index(name: "audit_log_org_occurred_idx", fields: ["orgId", "occurredAt"])
+@index(name: "audit_log_entity_idx", fields: ["entityType", "entityId"])
+@index(name: "audit_log_actor_occurred_idx", fields: ["actorUid", "occurredAt"])
+@index(name: "audit_log_action_occurred_idx", fields: ["action", "occurredAt"]) {
+  auditId: String! @col(name: "audit_id", dataType: "varchar(64)")
+  orgId: String @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization @ref(fields: "orgId", references: "orgId")
+  actorUid: String @col(name: "actor_uid", dataType: "varchar(128)")
+  actorWorkerId: String @col(name: "actor_worker_id", dataType: "varchar(64)")
+  # ORGANIZATION / WORKER / SUBSCRIPTION / PAYMENT / CONSENT
+  entityType: String! @col(name: "entity_type", dataType: "varchar(60)")
+  entityId: String! @col(name: "entity_id", dataType: "varchar(128)")
+  # ORGANIZATION_CREATED / OWNER_ASSIGNED / ROLE_CHANGED /
+  # SUBSCRIPTION_RENEWED / PAYMENT_FAILED
+  action: String! @col(name: "action", dataType: "varchar(80)")
+  # Never store the raw IP address.
+  ipHash: String @col(name: "ip_hash", dataType: "varchar(128)")
+  userAgent: String @col(name: "user_agent")
+  metadata: Any @col(name: "metadata")
+  occurredAt: Timestamp! @col(name: "occurred_at") @default(expr: "request.time")
+}
+type Client @table(
+  name: "client",
+  singular: "client",
+  plural: "clients",
+  key: ["orgId", "clientId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  clientId: String! @col(name: "client_id", dataType: "varchar(64)")
+  name: String @col(name: "name")
+  nip: String @col(name: "nip")
+  city: String @col(name: "city")
+  address: String @col(name: "address")
+  contact: String @col(name: "contact")
+  status: String @col(name: "status")
+  clientType: String @col(name: "client_type", dataType: "varchar(24)")
+  coordinator: String @col(name: "coordinator")
+  serviceFrequency: String @col(name: "service_frequency")
+  assignees: String @col(name: "assignees")
+  chemistry: String @col(name: "chemistry")
+  equipment: String @col(name: "equipment")
+  clientInfo: String @col(name: "client_info")
+
+  # Dane podstawowe profilu klienta
+  objectType: String @col(name: "object_type")
+  cooperationStartAt: Timestamp @col(name: "cooperation_start_at")
+  cooperationEndAt: Timestamp @col(name: "cooperation_end_at")
+
+  # Koordynacja i kontakt
+  contactPerson: String @col(name: "contact_person")
+  phone: String @col(name: "phone")
+  email: String @col(name: "email")
+  emergencyContact: String @col(name: "emergency_contact")
+  contactPosition: String @col(name: "contact_position")
+
+  # Lokalizacja i dostep
+  postalCode: String @col(name: "postal_code")
+  accessHours: String @col(name: "access_hours")
+  accessMethod: String @col(name: "access_method")
+  serviceEntry: String @col(name: "service_entry")
+
+  # Warunki obslugi
+  serviceType: String @col(name: "service_type")
+  serviceDays: String @col(name: "service_days")
+  preferredHours: String @col(name: "preferred_hours")
+  workMode: String @col(name: "work_mode")
+  sla: String @col(name: "sla")
+  rbhAmount: Float @col(name: "rbh_amount")
+
+  # Informacje operacyjne
+  requiredPermissions: String @col(name: "required_permissions")
+  bhpRequirements: String @col(name: "bhp_requirements")
+  workRestrictions: String @col(name: "work_restrictions")
+  excludedZones: String @col(name: "excluded_zones")
+  operationalRisks: String @col(name: "operational_risks")
+  specialInstructions: String @col(name: "special_instructions")
+
+  # Chemia i sprzet
+  specialEquipment: String @col(name: "special_equipment")
+  storagePlace: String @col(name: "storage_place")
+  backroomAccess: String @col(name: "backroom_access")
+  technicalNotes: String @col(name: "technical_notes")
+
+  # Notatki i timeline
+  internalNotes: String @col(name: "internal_notes")
+  coordinatorChangedAt: Timestamp @col(name: "coordinator_changed_at")
+  lastExecutionAt: Timestamp @col(name: "last_execution_at")
+  lastWorkerAssignmentAt: Timestamp @col(name: "last_worker_assignment_at")
+  createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
+}
+
+type Zone @table(
+  name: "zone",
+  singular: "zone",
+  plural: "zones",
+  key: ["orgId", "zoneId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  # RENAMED FIELD: was `id`, now `ZoneId` (DB column stays `id`)
+  zoneId: String! @col(name: "id", dataType: "varchar(64)")
+
+  clientId: String @col(name: "client_id", dataType: "varchar(64)")
+  client: Client @ref(fields: ["orgId", "clientId"], references: ["orgId", "clientId"])
+
+  zone: String @col(name: "zone")
+  function: String @col(name: "function")
+  editedBy: String @col(name: "edited_by")
+  date: Timestamp @col(name: "date")
+  location: String @col(name: "location")
+}
+
+type Task @table(
+  name: "task",
+  singular: "task",
+  plural: "tasks",
+  key: ["orgId", "idTask"]
+)
+@index(name: "task_org_date_idx", fields: ["orgId", "dateYmd", "startTime", "idTask"])
+@index(name: "task_org_updated_idx", fields: ["orgId", "updatedAt"], order: [ASC, DESC])
+@index(name: "task_org_worker_idx", fields: ["orgId", "workerId"]) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  idTask: String! @col(name: "id_task", dataType: "varchar(180)")
+
+  dateYmd: String @col(name: "date_ymd", dataType: "varchar(10)")
+  startTime: String @col(name: "start_time", dataType: "varchar(5)")
+  endDateYmd: String @col(name: "end_date_ymd", dataType: "varchar(10)")
+  endTime: String @col(name: "end_time", dataType: "varchar(5)")
+  scheduleMode: String @col(name: "schedule_mode", dataType: "varchar(32)")
+
+  accessStartTime: String @col(name: "access_start_time", dataType: "varchar(5)")
+  accessEndTime: String @col(name: "access_end_time", dataType: "varchar(5)")
+  accessWindows: String @col(name: "access_windows")
+
+  requiredWorkMinutes: Int @col(name: "required_work_minutes")
+  requiredPeople: Int @col(name: "required_people")
+  workAllocations: String @col(name: "work_allocations")
+
+  workerId: String @col(name: "worker_id", dataType: "varchar(128)")
+  workerIds: String @col(name: "worker_ids")
+  workerLabel: String @col(name: "worker_label")
+  workerName: String @col(name: "worker_name")
+  workerLogin: String @col(name: "worker_login", dataType: "varchar(80)")
+
+  clientId: String @col(name: "client_id", dataType: "varchar(64)")
+  client: Client @ref(fields: ["orgId", "clientId"], references: ["orgId", "clientId"])
+  clientLabel: String @col(name: "client_label")
+  clientName: String @col(name: "client_name")
+  nip: String @col(name: "nip")
+  street: String @col(name: "street")
+  city: String @col(name: "city")
+  postCode: String @col(name: "post_code")
+  addressLabel: String @col(name: "address_label")
+  executionAddressLabel: String @col(name: "execution_address_label")
+  lat: Float @col(name: "lat")
+  lng: Float @col(name: "lng")
+
+  zoneId: String @col(name: "zone_id", dataType: "varchar(64)")
+  zone: Zone @ref(fields: ["orgId", "zoneId"], references: ["orgId", "zoneId"])
+  zoneLabel: String @col(name: "zone_label")
+
+  repeatPreset: String @col(name: "repeat_preset", dataType: "varchar(32)")
+  repeatEvery: Int @col(name: "repeat_every")
+  repeatUnit: String @col(name: "repeat_unit", dataType: "varchar(16)")
+  repeatWeekdays: String @col(name: "repeat_weekdays")
+  weeklyScheduleRules: String @col(name: "weekly_schedule_rules")
+
+  title: String @col(name: "title")
+  type: String @col(name: "type", dataType: "varchar(40)")
+  price: Float @col(name: "price")
+  description: String @col(name: "description")
+  workerComment: String @col(name: "worker_comment")
+  supplies: String @col(name: "supplies")
+  objectPlanTasks: String @col(name: "object_plan_tasks")
+  allowExtendedWork: Boolean @col(name: "allow_extended_work")
+
+  createdByUid: String @col(name: "created_by_uid", dataType: "varchar(128)")
+  updatedByUid: String @col(name: "updated_by_uid", dataType: "varchar(128)")
+  createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
+}
+
+type Workday @table(
+  name: "workday",
+  singular: "workday",
+  plural: "workdays",
+  key: ["orgId", "workdayId"]
+)
+@index(name: "workday_org_start_idx", fields: ["orgId", "startAt"], order: [ASC, DESC])
+@index(name: "workday_org_updated_idx", fields: ["orgId", "updatedAt"], order: [ASC, DESC])
+@index(name: "workday_org_worker_start_idx", fields: ["orgId", "workerLogin", "startAt"])
+@index(name: "workday_org_room_start_idx", fields: ["orgId", "utilityRoomId", "startAt"])
+@index(name: "workday_org_status_start_idx", fields: ["orgId", "status", "startAt"]) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  workdayId: String! @col(name: "workday_id", dataType: "varchar(64)")
+
+  workerLogin: String! @col(name: "worker_login", dataType: "varchar(80)")
+  workerName: String @col(name: "worker_name")
+  worker: Worker! @ref(fields: ["orgId", "workerLogin"], references: ["orgId", "login"])
+
+  utilityRoomId: String @col(name: "utility_room_id")
+
+  startAt: Timestamp @col(name: "start_at")
+  endScanAt: Timestamp @col(name: "end_scan_at")
+  autoCloseAt: Timestamp @col(name: "auto_close_at")
+  endAt: Timestamp @col(name: "end_at")
+
+  durationSec: Int @col(name: "duration_sec")
+  status: String @col(name: "status")
+  deviceId: String @col(name: "device_id")
+
+  gps: String @col(name: "gps", dataType: "varchar(255)")
+
+  startEventId: String @col(name: "start_event_id")
+  endEventId: String @col(name: "end_event_id")
+
+  createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
+
+  pauseTotalSec: Int @col(name: "pause_total_sec")
+  pauseOpenId: String @col(name: "pause_open_id")
+  pauseOpenAt: Timestamp @col(name: "pause_open_at")
+
+  startObject: String @col(name: "start_object")
+  stopObject: String @col(name: "stop_object")
+
+  wtAlertAck: Boolean @col(name: "wt_alert_ack")
+  wtAlertAckAt: Timestamp @col(name: "wt_alert_ack_at")
+  wtAlertAckBy: String @col(name: "wt_alert_ack_by")
+
+  updatedBy: String @col(name: "updated_by")
+  comment: String @col(name: "comment")
+}
+
+type WorkdayPause @table(
+  name: "workday_pause",
+  singular: "workdayPause",
+  plural: "workdayPauses",
+  key: ["orgId", "pauseId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  pauseId: String! @col(name: "pause_id", dataType: "varchar(64)")
+
+  workdayId: String! @col(name: "workday_id", dataType: "varchar(64)")
+  workday: Workday! @ref(fields: ["orgId", "workdayId"], references: ["orgId", "workdayId"])
+
+  workerLogin: String @col(name: "worker_login", dataType: "varchar(80)")
+  workerName: String @col(name: "worker_name")
+  deviceId: String @col(name: "device_id")
+  pauseEventId: String @col(name: "pause_event_id")
+
+  startAt: Timestamp @col(name: "start_at")
+  stopAt: Timestamp @col(name: "stop_at")
+  durationSec: Int @col(name: "duration_sec")
+  status: String @col(name: "status")
+
+  createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
+}
+
+type BackupCycle @table(
+  name: "backup_cycle",
+  singular: "backupCycle",
+  plural: "backupCycles",
+  key: ["orgId", "cycleId"]
+)
+@index(name: "backup_cycle_org_start_idx", fields: ["orgId", "startAt"], order: [ASC, DESC])
+@index(name: "backup_cycle_org_edited_idx", fields: ["orgId", "editedAt"], order: [ASC, DESC]) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  cycleId: String! @col(name: "cycle_id", dataType: "varchar(64)")
+
+  workerLogin: String @col(name: "worker_login", dataType: "varchar(80)")
+  workerName: String @col(name: "worker_name")
+  roomId: String @col(name: "room_id")
+  strefa: String @col(name: "strefa")
+  pomieszczenie: String @col(name: "pomieszczenie")
+
+  startAt: Timestamp @col(name: "start_at")
+  endAt: Timestamp @col(name: "end_at")
+  durationSec: Int @col(name: "duration_sec")
+  endReason: String @col(name: "end_reason")
+  comment: String @col(name: "comment")
+  status: String @col(name: "status")
+  closeMarkedAt: Timestamp @col(name: "close_marked_at")
+
+  deviceId: String @col(name: "device_id")
+  startEventId: String @col(name: "start_event_id")
+  endEventId: String @col(name: "end_event_id")
+
+  createdAt: Timestamp @col(name: "created_at")
+  editedAt: Timestamp @col(name: "edited_at")
+}
+
+type Event @table(
+  name: "event",
+  singular: "event",
+  plural: "events",
+  key: ["orgId", "eventId"]
+)
+@index(name: "event_org_start_idx", fields: ["orgId", "startAt"], order: [ASC, DESC])
+@index(name: "event_org_updated_idx", fields: ["orgId", "updatedAt"], order: [ASC, DESC])
+@index(name: "event_org_worker_start_idx", fields: ["orgId", "workerLogin", "startAt"])
+@index(name: "event_org_zone_start_idx", fields: ["orgId", "zoneId", "startAt"])
+@index(name: "event_org_status_start_idx", fields: ["orgId", "status", "startAt"])
+@index(name: "event_org_task_occurrence_idx", fields: ["orgId", "taskId", "occurrenceDateYmd", "startAt"], order: [ASC, ASC, ASC, DESC])
+@index(name: "event_org_plan_slot_idx", fields: ["orgId", "taskId", "occurrenceDateYmd", "serviceBlockId", "allocationId", "workSlotKey"])
+@index(name: "event_org_match_status_updated_idx", fields: ["orgId", "matchStatus", "updatedAt"], order: [ASC, ASC, DESC]) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  eventId: String! @col(name: "event_id", dataType: "varchar(64)")
+
+  workdayId: String @col(name: "workday_id", dataType: "varchar(64)")
+  workday: Workday @ref(fields: ["orgId", "workdayId"], references: ["orgId", "workdayId"])
+
+  zoneId: String @col(name: "zone_id", dataType: "varchar(64)")
+  zone: Zone @ref(fields: ["orgId", "zoneId"], references: ["orgId", "zoneId"])
+
+  taskId: String @col(name: "task_id", dataType: "varchar(180)")
+  occurrenceDateYmd: String @col(name: "occurrence_date_ymd", dataType: "varchar(10)")
+  serviceBlockId: String @col(name: "service_block_id", dataType: "varchar(180)")
+  allocationId: String @col(name: "allocation_id", dataType: "varchar(180)")
+  workSlotKey: String @col(name: "work_slot_key", dataType: "varchar(255)")
+  eventType: String @col(name: "event_type", dataType: "varchar(32)")
+
+  matchStatus: String @col(name: "match_status", dataType: "varchar(16)")
+  matchMethod: String @col(name: "match_method", dataType: "varchar(64)")
+  matchReason: String @col(name: "match_reason")
+  matchedAt: Timestamp @col(name: "matched_at")
+  planSnapshotVersion: Int @col(name: "plan_snapshot_version")
+  plannedStartAt: Timestamp @col(name: "planned_start_at")
+  plannedEndAt: Timestamp @col(name: "planned_end_at")
+  plannedDurationMinutes: Int @col(name: "planned_duration_minutes")
+  taskUpdatedAtSnapshot: Timestamp @col(name: "task_updated_at_snapshot")
+
+  workerLogin: String @col(name: "worker_login", dataType: "varchar(80)")
+  workerName: String @col(name: "worker_name")
+  worker: Worker @ref(fields: ["orgId", "workerLogin"], references: ["orgId", "login"])
+
+  startAt: Timestamp @col(name: "start_at")
+  endAt: Timestamp @col(name: "end_at")
+  durationSec: Int @col(name: "duration_sec")
+  status: String @col(name: "status")
+  closeMarkedAt: Timestamp @col(name: "close_marked_at")
+  endReason: String @col(name: "end_reason")
+  comment: String @col(name: "comment")
+
+  deviceId: String @col(name: "device_id")
+  startEventId: String @col(name: "start_event_id")
+  endEventId: String @col(name: "end_event_id")
+
+  createdAt: Timestamp @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp @col(name: "updated_at") @default(expr: "request.time")
+}

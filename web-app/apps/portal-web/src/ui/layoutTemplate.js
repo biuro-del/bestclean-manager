@@ -13,13 +13,13 @@ export const portalLayoutTemplate = `
     />
     <div class="login-visual-overlay" aria-hidden="true"></div>
     <div class="login-visual-brand">
-      <img src="/cleanzi-logo-primary.png" alt="Cleanzi" width="309" height="120" />
+      <img src="/cleanzi-logo.svg" alt="Cleanzi" width="180" height="50" />
       <span>Portal operacyjny</span>
     </div>
     <div class="login-visual-story">
-      <h2 id="loginHeroTitle">SYSTEM DO ZARZ&#260;DZANIA FIRM&#260; SPRZ&#260;TAJ&#260;C&#260;</h2>
-      <p class="login-visual-tagline">Zarz&#261;dzanie procesami. Proste i zautomatyzowane.</p>
-      <p class="login-visual-support">Pracownicy, obiekty, zlecenia i kontrola jako&#347;ci &mdash; wszystko w jednym, prostym systemie.</p>
+      <span class="login-visual-kicker">SYSTEM DO ZARZ&#260;DZANIA PROCESEM SPRZ&#260;TANIA</span>
+      <h2 id="loginHeroTitle">Sprz&#261;tanie.<br />Pod kontrol&#261;.</h2>
+      <p>Planuj zlecenia, monitoruj realizacj&#281; i kontroluj jako&#347;&#263; &mdash; wszystko w jednym miejscu.</p>
     </div>
   </section>
   <section class="login-panel">
@@ -36,7 +36,7 @@ export const portalLayoutTemplate = `
       <div class="login-brand">
         <span class="login-card-kicker">PORTAL OPERACYJNY</span>
         <h1 class="login-title" id="loginTitle">Witaj ponownie</h1>
-        <p class="login-copy" id="loginCopy">Zaloguj si&#281; do systemu, kt&#243;ry upraszcza zarz&#261;dzanie ca&#322;&#261; firm&#261; sprz&#261;taj&#261;c&#261;.</p>
+        <p class="login-copy" id="loginCopy">Zaloguj si&#281; do systemu zarz&#261;dzania procesem sprz&#261;tania Cleanzi.</p>
       </div>
 
       <div id="loginCredentialsPanel">
@@ -309,7 +309,7 @@ export const portalLayoutTemplate = `
           aria-label="Przejdź do strony głównej"
         >
           <span class="sidebar-brand-logo logo-block logo-block--cleanzi">
-            <img src="/cleanzi-logo-primary.png" alt="Cleanzi" />
+            <img src="/cleanzi-logo.svg" alt="Cleanzi" />
           </span>
         </button>
 
@@ -1274,103 +1274,6 @@ export const portalLayoutTemplate = `
                 </div>
               </div>
             </section>
-
-            <article
-              class="card dash-contract-profitability"
-              id="dashContractProfitabilityCard"
-              data-dashboard-section="active"
-              data-profitability-entry
-              aria-labelledby="dashContractProfitabilityTitle"
-            >
-              <div class="dash-contract-profitability-head">
-                <div>
-                  <div class="dash-contract-profitability-title-row">
-                    <h2 id="dashContractProfitabilityTitle">Rentowność kontraktów</h2>
-                    <span class="dash-contract-profitability-demo-badge">Przykładowe dane</span>
-                  </div>
-                  <p>Dane demonstracyjne — nie pochodzą z danych firmy.</p>
-                </div>
-                <button
-                  class="dash-contract-profitability-toggle dash-panel-collapse-toggle"
-                  id="dashContractProfitabilityToggle"
-                  type="button"
-                  aria-controls="dashContractProfitabilityBody"
-                  aria-expanded="true"
-                  aria-label="Zwiń panel rentowności kontraktów"
-                  title="Zwiń panel rentowności kontraktów"
-                >
-                  Zwiń
-                </button>
-              </div>
-
-              <div
-                class="dash-contract-profitability-compact"
-                id="dashContractProfitabilityCompact"
-                aria-label="Najważniejsze dane o rentowności kontraktów"
-                hidden
-              >
-                <div class="dash-contract-profitability-compact-metric">
-                  <span>Marża średnia</span>
-                  <strong id="dashContractProfitabilityCompactAverage">23,8%</strong>
-                  <small class="is-positive" id="dashContractProfitabilityCompactDelta">+3,2 p.p. miesiąc do miesiąca</small>
-                </div>
-                <div class="dash-contract-profitability-compact-contract">
-                  <span>Najlepszy kontrakt</span>
-                  <strong id="dashContractProfitabilityCompactContractName">Kontrakt demonstracyjny A</strong>
-                  <small id="dashContractProfitabilityCompactContractValue">28,5%</small>
-                </div>
-                <button class="dash-contract-profitability-compact-link" data-route="contractProfitability" type="button">
-                  Otwórz analizę
-                </button>
-              </div>
-
-              <div class="dash-contract-profitability-body" id="dashContractProfitabilityBody">
-                <section class="dash-contract-profitability-summary" aria-labelledby="dashContractProfitabilityAverageLabel">
-                  <span class="dash-contract-profitability-label" id="dashContractProfitabilityAverageLabel">Marża średnia</span>
-                  <strong class="dash-contract-profitability-value" id="dashContractProfitabilityAverage">23,8%</strong>
-                  <span class="dash-contract-profitability-change is-positive" id="dashContractProfitabilityDelta">
-                    +3,2 p.p. w porównaniu z poprzednim miesiącem
-                  </span>
-
-                  <div
-                    class="dash-contract-profitability-chart"
-                    id="dashContractProfitabilityChart"
-                    role="img"
-                    aria-label="Przykładowy trend marży kontraktów: 18,4 procent, 21,2 procent, 20,6 procent i 23,8 procent w ciągu czterech miesięcy"
-                  >
-                    <div class="dash-contract-profitability-chart-stage" aria-hidden="true">
-                      <div class="dash-contract-profitability-chart-scale">
-                        <span>30%</span>
-                        <span>20%</span>
-                        <span>10%</span>
-                        <span>0%</span>
-                      </div>
-                      <canvas id="dashContractProfitabilityCanvas"></canvas>
-                    </div>
-                    <div class="dash-contract-profitability-months" aria-hidden="true">
-                      <span data-dash-contract-profitability-month-offset="3">Kwi</span>
-                      <span data-dash-contract-profitability-month-offset="2">Maj</span>
-                      <span data-dash-contract-profitability-month-offset="1">Cze</span>
-                      <span data-dash-contract-profitability-month-offset="0">Lip</span>
-                    </div>
-                  </div>
-                </section>
-
-                <section class="dash-contract-profitability-ranking" aria-labelledby="dashContractProfitabilityRankingTitle">
-                  <h3 id="dashContractProfitabilityRankingTitle">Top kontrakty</h3>
-                  <ol class="dash-contract-profitability-list" id="dashContractProfitabilityList" aria-label="Przykładowy ranking kontraktów">
-                    <li><span>Kontrakt demonstracyjny A</span><strong>28,5%</strong></li>
-                    <li><span>Kontrakt demonstracyjny B</span><strong>25,4%</strong></li>
-                    <li><span>Kontrakt demonstracyjny C</span><strong>23,9%</strong></li>
-                    <li><span>Kontrakt demonstracyjny D</span><strong>21,8%</strong></li>
-                    <li><span>Kontrakt demonstracyjny E</span><strong>19,4%</strong></li>
-                  </ol>
-                  <button class="dash-contract-profitability-link" data-route="contractProfitability" type="button">
-                    Zobacz wszystkie kontrakty <span aria-hidden="true">→</span>
-                  </button>
-                </section>
-              </div>
-            </article>
 
             <div class="card dash-feedback dash-activity-panel" data-dashboard-section="active">
               <div class="card-title-row">

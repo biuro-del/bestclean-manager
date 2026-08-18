@@ -5,7 +5,11 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist*/**', 'apps/portal-web/src/dataconnect-generated/**']),
+  globalIgnores([
+    'dist*/**',
+    'apps/portal-web/src/dataconnect-generated/**',
+    'apps/portal-web/src/dataconnect-read-guard-generated/**',
+  ]),
   {
     files: ['vite.config.js'],
     languageOptions: {

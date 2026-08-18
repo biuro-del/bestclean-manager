@@ -1987,7 +1987,7 @@ export function createWorkerAccountFeature(ctx) {
       .filter((row) => !rowHasWorkerIdentity(row) || rowMatchesRelatedWorker(row, worker))
   }
 
-  async function fetchWorkerTimeRows(orgId, worker, range = {}, options = {}) {
+  async function fetchWorkerTimeRows(orgId, worker, range = {}) {
     const candidates = prioritizedWorkerFetchCandidates(worker)
     const pageSize = Number(range.pageSize) || WORKER_ACCOUNT_TIME_FETCH_PAGE_SIZE
     const primaryRows = await fetchWorkerTimeCandidateRows(orgId, worker, candidates.slice(0, 1), { ...range, pageSize })
@@ -2012,21 +2012,7 @@ export function createWorkerAccountFeature(ctx) {
       directRows = mergeUniqueRows([fallbackResponses[0], nameRows])
     }
 
-    if (directRows.length || options.allowBroadFallback === false) {
-      return directRows
-    }
-
-    const broadResponse = await getWorkdays(orgId, {
-      source: 'workdays',
-      ...range,
-      page: 1,
-      pageSize,
-    }).catch(() => ({ items: [] }))
-    const broadRows = responseItems(broadResponse)
-      .filter(hasMeaningfulTimePayload)
-      .filter((row) => rowHasWorkerIdentity(row) && rowMatchesRelatedWorker(row, worker))
-
-    return mergeUniqueRows([directRows, broadRows])
+    return directRows
   }
 
   async function fetchWorkerEventCandidateRows(orgId, worker, candidates = [], options = {}) {
@@ -2069,27 +2055,7 @@ export function createWorkerAccountFeature(ctx) {
       directRows = mergeUniqueRows([fallbackResponses[0], fallbackResponses[1], nameRows])
     }
 
-    if (directRows.length || options.allowBroadFallback === false) {
-      return directRows
-    }
-
-    const broadResponses = await Promise.all([
-      getWorkdays(orgId, {
-        source: 'events',
-        page: 1,
-        pageSize,
-      }).catch(() => ({ items: [] })),
-      getWorkdays(orgId, {
-        source: 'workdays',
-        page: 1,
-        pageSize,
-      }).catch(() => ({ items: [] })),
-    ])
-    const broadRows = mergeUniqueRows(broadResponses.map(responseItems))
-      .filter(hasMeaningfulEventPayload)
-      .filter((row) => rowHasWorkerIdentity(row) && rowMatchesRelatedWorker(row, worker))
-
-    return mergeUniqueRows([directRows, broadRows])
+    return directRows
   }
 
   function renderKpis({ completedOrders = 0, monthSeconds = 0, weekSeconds = 0, eventCount = 0 } = {}) {

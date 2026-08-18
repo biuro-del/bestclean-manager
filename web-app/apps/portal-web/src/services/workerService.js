@@ -5,7 +5,9 @@ import {
 } from './platformDataConnectService'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
-const READ_CACHE_MS = 30000
+const READ_CACHE_MS = 5 * 60 * 1000
+const DEFAULT_FUNCTIONS_REGION = 'europe-west3'
+const DEFAULT_FUNCTIONS_PROJECT = 'iclean-room'
 const workersCache = new Map()
 
 function cachedWorkersKey(orgId) {

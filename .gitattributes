@@ -1,0 +1,3 @@
+# Firebase Data Connect SDK output is owned by the generator; do not rewrite it
+# solely to satisfy repository whitespace checks.
+web-app/apps/portal-web/src/dataconnect-read-guard-generated/** -whitespace

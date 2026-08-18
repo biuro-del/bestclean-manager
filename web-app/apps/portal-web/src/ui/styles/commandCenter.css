@@ -822,7 +822,6 @@
   display: grid;
   justify-items: center;
   width: 74px;
-  height: 58px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -873,14 +872,9 @@
 
 #portalRoot #view-dashboard .dash-command-map-object__label,
 #portalRoot #view-dashboard .dash-command-map-object__zones {
-  position: absolute;
-  left: 50%;
-  visibility: hidden;
   max-width: 160px;
   overflow: hidden;
   padding: 3px 7px;
-  opacity: 0;
-  pointer-events: none;
   border: 1px solid rgba(221, 228, 238, 0.95);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.96);
@@ -889,30 +883,16 @@
   font-weight: 850;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transform: translate(-50%, -4px);
-  transition:
-    opacity 120ms ease,
-    transform 140ms ease,
-    visibility 0s linear 140ms;
 }
 
 #portalRoot #view-dashboard .dash-command-map-object__label {
-  top: 65px;
+  margin-top: 7px;
 }
 
 #portalRoot #view-dashboard .dash-command-map-object__zones {
-  top: 88px;
+  margin-top: 3px;
   color: #66738b;
   font-size: 8px;
-}
-
-#portalRoot #view-dashboard
-  .dash-command-map-object:is(:hover, :focus-within, .is-expanded):not(.is-live-open)
-  :is(.dash-command-map-object__label, .dash-command-map-object__zones) {
-  visibility: visible;
-  opacity: 1;
-  transform: translate(-50%, 0);
-  transition-delay: 0s;
 }
 
 #portalRoot #view-dashboard .dash-command-map-object__alert,
@@ -953,6 +933,12 @@
   top: 0;
   left: 0;
   z-index: 4;
+}
+
+#portalRoot #view-dashboard
+  .dash-command-map-object:is(:hover, :focus-within, .is-expanded)
+  .dash-command-map-person__name {
+  display: block;
 }
 
 #portalRoot #view-dashboard
@@ -1133,14 +1119,12 @@
   scale: 1;
 }
 
-#portalRoot #view-dashboard
-  .dash-command-map-object.is-live-open
-  .dash-command-map-object__people
-  .dash-command-map-person {
-  visibility: hidden;
-  opacity: 0;
-  pointer-events: none;
-  scale: 0.72;
+#portalRoot #view-dashboard .dash-command-map-object.has-late:not(:hover, :focus-within, .is-expanded)
+  .dash-command-map-person.is-late {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  scale: 1;
 }
 
 #portalRoot #view-dashboard .dash-command-map-person.is-late .dash-command-map-person__bubble,
