@@ -4704,3 +4704,321 @@ Granice:
   nowego codebase. Kod nie moze zostac wdrozony przez obecne polecenia projektu.
 - Nie wlaczono Identity Platform, Blaze, App Check ani zadnych API i sekretow.
 - Nie wykonano migracji, commita, pusha, wdrozenia ani zmiany produkcji.
+Data: 2026-08-01
+Autor: AI Codex
+Temat: Lokalny broker rejestracji firmy sprzatajacej e-mail/haslo
+Dodano lokalnie:
+- Kanoniczny kontrakt kanalu `CLEANING_COMPANY` z obowiazkowym prywatnym tokenem
+  proby, dokladna akcja Turnstile, planami GO+/PLUS/PRO, cyklem miesiecznym/rocznym
+  i wersjonowanymi zgodami.
+- Broker Firebase Admin tworzacy deterministyczny UID dopiero po walidacji hasla,
+  Turnstile oraz autorytatywnej proby i zgod. Haslo nie trafia do snapshotu proby,
+  Firestore, organizacji, logow ani telemetrii.
+- Natychmiastowe idempotentne zlecenie utworzenia organizacji `cleaning_provider`,
+  ownera i triala `TRIAL/TRIALING` na dokladnie 14 x 24 godziny, bez karty i bez
+  automatycznej konwersji.
+- Transakcyjny magazyn prywatnych operacji Firestore bez surowego e-maila, hasla,
+  tokenu Turnstile, IP i User-Agent.
+- Stany ponowien i awarii: bezpieczna kompensacja tylko dla potwierdzonego bledu
+  sprzed commita, `RECOVERY_REQUIRED` przy nieznanym wyniku oraz idempotentna
+  ponowna wysylka e-maila bez przedluzania triala.
+- Polityke dostepu: brak wejscia przed potwierdzeniem e-maila, po potwierdzeniu tylko
+  onboarding, a operacyjne API dopiero po ukonczeniu profilu i przy aktywnym trialu.
+- Dokument `docs/password-registration-broker-contract.md` i serwerowy przyklad
+  konfiguracji `registration-functions/.env.example` bez wartosci sekretow.
+Zmieniono:
+- Kontrakt integracyjny teraz jednoznacznie tworzy organizacje od razu po
+  zarejestrowaniu administratora, ze statusem `IN_PROGRESS`, zamiast dopiero po
+  potwierdzeniu e-maila.
+- Warunek centralnej bramy opisuje broker zamiast niewykonalnego grantu haslowego
+  `beforeCreate` oraz zachowuje twarda regule 14-dniowego triala.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- `npm.cmd run check` - PASS.
+- `npm.cmd run test:unit` - 28/28 PASS: trial 14 dni, idempotencja sekwencyjna i
+  rownolegla, polskie znaki, brak hasla/tokenu w zapisach, zgody, Turnstile, konflikt
+  payloadu, awarie bazy i poczty, rekonsyliacja Firebase oraz bramki dostepu.
+- `npm.cmd run test:emulator` - 8/8 PASS: granty i operacje Firestore, rownolegla
+  rezerwacja, prywatnosc, idempotencja i konflikty stanow.
+Granice:
+- Nie dodano publicznego endpointu, adaptera zrodlowej polskiej bazy, provisionera
+  Cloud SQL/Data Connect ani prawdziwej wysylki e-mail.
+- Nie zmieniono repozytorium publicznej rejestracji ani ustawienia self-signup w
+  Firebase Authentication.
+- Nie dodano eksportu Functions i nie wykonano migracji, commita, pusha, wdrozenia
+  ani jakiejkolwiek zmiany produkcji.
+- Nastepny etap to podlaczenie zrodlowej proby i transakcyjnego provisionera w tym
+  izolowanym kontrakcie, a potem test projektu testowego przed kontrolowanym cutoverem.
+
+Korekta architektoniczna 2026-08-01:
+- Oficjalna dokumentacja Identity Platform potwierdza, ze `beforeCreate` nie obejmuje
+  e-mail/haslo ani custom auth.
+- Docelowa granica to jedna centralna warstwa: funkcja blokujaca dla wspieranych
+  zdarzen oraz broker Firebase Admin dla hasla i custom auth.
+- Self-signup uzytkownikow koncowych musi zostac wylaczony przed uruchomieniem
+  brokera; istniejace logowanie pozostaje dostepne.
+
+Data: 2026-08-01
+Autor: AI Codex
+Temat: Lokalny adapter centralnej bramy dla firmy sprzatajacej
+Dodano lokalnie:
+- Adapter `CLEANING_COMPANY` z zarezerwowana akcja Turnstile
+  `registration_cleaning_company`, osobnym HMAC i privacy-minimalnym kandydatem grantu.
+- Kontrakt odrzuca klientowe zdarzenie haslowe kodem `PASSWORD_BROKER_REQUIRED`,
+  poniewaz Identity Platform nie uruchamia `beforeCreate` dla e-mail/haslo.
+- Nowe konta haslowe musza powstawac w centralnym brokerze po wylaczeniu self-signup;
+  istniejace logowanie pozostaje dostepne, a onboarding i API wymagaja potwierdzenia
+  e-maila.
+- Claimy pochodzenia rejestracji, ktore nie sa rola, membershipem ani uprawnieniem.
+- Testy rzeczywistego adaptera zamiast atrapy oraz test wyboru kanalu firmy
+  sprzatajacej przez centralny router.
+Ustalenia integracyjne:
+- Zatwierdzony trial firmy sprzatajacej trwa 14 dni i nie wymaga karty.
+- Publiczne plany to GO+, PLUS i PRO; cykl miesieczny lub roczny z rabatem 20%.
+- ENTERPRISE pozostaje poza publicznym wyborem i wymaga oferty indywidualnej.
+- Galaz `Rejestracja-31-07-2026` nie moze byc scalona bez zmian: zawiera trial
+  7-dniowy i nie pobiera centralnego grantu przed utworzeniem konta.
+- Dodano `docs/cleaning-company-registration-integration-handoff.md` z dokladna
+  kolejnoscia e-mail/haslo i Google oraz granica odpowiedzialnosci trzech repozytoriow.
+Granice:
+- Nie dodano eksportu `beforeUserCreated`, endpointu wydajacego grant ani konfiguracji
+  Firebase/Identity Platform.
+- Nie wykonano migracji, commita, pusha, wdrozenia ani zmiany produkcji.
+
+Data: 2026-08-02
+Autor: AI Codex
+Temat: Lokalna transakcja Cloud SQL i projekcja firmy sprzatajacej do Firestore
+Dodano lokalnie:
+- Adapter autorytatywnej proby PostgreSQL, ktory sprawdza hash jednorazowego tokenu,
+  kanoniczne dane wlasciciela, plan, cykl i wersjonowane zgody przed utworzeniem Auth.
+- Provisioner `SERIALIZABLE`, ktory w jednej transakcji tworzy organizacje
+  `CLEANING_PROVIDER`, ownera, membership, szkic profilu, zgody, audyt i subskrypcje
+  `TRIAL/TRIALING` na dokladnie 14 x 24 godziny.
+- Jednorazowe `trial_redemption`, idempotencje po `broker_operation_id`, bezpieczna
+  rekonsyliacje nieznanego wyniku COMMIT oraz transakcyjny outbox SQL.
+- Idempotentna projekcje do `organizations`, podkolekcji `members` i
+  `cleaningProviderProfiles` w Firestore.
+- Celowy stan `onboarding`, ktory nie spelnia kontraktu backendu zaproszen, oraz
+  osobne zdarzenie aktywacji dopiero po ukonczeniu profilu i podaniu nazwy prawnej.
+- Migracje lokalna `registration-functions/sql/20260802_cleaning_company_password_registration.sql`
+  i dokument `docs/cleaning-company-sql-firestore-projection-contract.md`.
+- Serwerowy adapter Siteverify Turnstile z bezpiecznym retry tego samego tokenu,
+  polityke hasla 15+ bez sztucznych regul skladu, k-anonimowa kontrole Pwned
+  Passwords oraz atomowy limit naduzyc Firestore.
+- Adapter Resend z prywatnym magazynem dostarczenia: ten sam klucz idempotencji
+  moze byc ponawiany tylko w bezpiecznym oknie, a starszy nieznany wynik wymaga
+  recznej rekonsyliacji zamiast ryzyka drugiej wiadomosci.
+- Dokument `docs/registration-execution-adapters.md` z kontraktem prywatnosci,
+  konfiguracji i warunkami podlaczenia.
+Testy/sprawdzenia:
+- `npm.cmd run check` - PASS.
+- `npm.cmd run test:unit` - 47/47 PASS, w tym zrodlo proby, polskie znaki,
+  transakcja, 14-dniowy trial, awarie przed i podczas COMMIT, outbox, retry,
+  projekcja Firestore, wiele organizacji, blokada zaproszen, Turnstile, polityka
+  hasla i trwala idempotencja wiadomosci.
+- `npm.cmd run test:emulator` - 10/10 PASS: granty, operacje brokera, atomowe limity
+  naduzyc i granica ponowien dostarczenia wiadomosci.
+- Rzeczywista lokalna transakcja na schemacie zgodnym z testowym schematem galezi
+  `origin/rejestracja-31-07-2026` przez `pg-mem` - PASS: po jednym rekordzie grafu,
+  trzy zgody, idempotentny retry, dwa etapowe zdarzenia outboxa i katalogowy trial
+  14 dni.
+Granice:
+- Nie zmieniono publicznego repozytorium rejestracji ani portalu klienta.
+- Nie podlaczono publicznego endpointu, prawdziwych dostawcow, Cloud SQL ani workera
+  outboxa; nie zmieniono Firebase Authentication ani App Check i nie wyslano e-maila.
+- Migracja nie zostala wykonana. Nie wykonano commita, pusha ani wdrozenia.
+
+Data: 2026-08-02
+Autor: AI Codex
+Temat: Wdrazalny lokalnie codebase Functions brokera firmy sprzatajacej
+Dodano lokalnie:
+- Osobny plik `firebase.registration.json` z codebase `cleanzi-registration`, bez
+  hostingu, Firestore rules, Storage i Data Connect.
+- Eksport `registerCleaningCompany` w regionie `europe-west3`, wymagajacy dokladnego
+  originu, App Check z allowlista App ID, Turnstile, limitu naduzyc, polityki hasla
+  i zrodlowego tokenu rejestracji.
+- Prywatny przez IAM eksport `reconcileCleaningCompanyProjections` oraz harmonogram
+  `drainCleaningCompanyProjectionOutbox` z ograniczona wspolbieznoscia.
+- Kompozycje runtime Firebase Admin, Firestore, PostgreSQL, Pwned Passwords,
+  Turnstile i Resend z sekretami odczytywanymi dopiero podczas wykonania funkcji.
+- Ograniczony pool PostgreSQL oparty o istniejacy serwerowy sekret `DATABASE_URL`.
+- Dokumenty `docs/cleaning-company-public-registration-change-contract.md` oraz
+  `docs/cleaning-company-functions-deployment-runbook.md`.
+- Testy HTTP dla CORS, App Check, limitu body, bezpiecznych kodow bledow, prywatnej
+  rekonsyliacji i braku danych wrazliwych w diagnostyce.
+Zmieniono:
+- Turnstile i atomowy limit naduzyc sa sprawdzane przed zewnetrzna kontrola hasla;
+  awaria dostawcy Turnstile ma osobny, retryowalny kod serwerowy.
+- Opoznione zdarzenie rejestracji nie moze cofnac aktywnej projekcji providera ani
+  nadpisac jego nazwy; konflikt klucza idempotencji aktywacji konczy sie fail-closed.
+- Odrzucenie serwerowego sekretu Turnstile jest klasyfikowane jako niedostepnosc
+  konfiguracji/dostawcy, a nie jako blad uzytkownika.
+- `registration-functions` ma kompletny manifest Node.js 22, entrypoint Functions,
+  blokujacy predeploy oraz jawne peer dependencies wymagane przez izolowany
+  `firebase-admin`.
+Testy/sprawdzenia:
+- `node --check` na runtime Node 24 - PASS dla wszystkich plikow `src/*.js`.
+- Testy jednostkowe po finalnej korekcie kolejnosci zabezpieczen i projekcji -
+  67/67 PASS.
+- Emulator Firestore - 10/10 PASS.
+- Discovery Functions Emulator na projekcie `demo-cleanzi-registration` - PASS;
+  rozpoznano trzy eksporty, region, invokery, parametry i przypisanie sekretow.
+- `npm ls --depth=0` na runtime Node 24 - PASS; wszystkie bezposrednie zaleznosci
+  sa obecne bez bledow drzewa pakietow.
+- Po poprawnym odczytaniu manifestu wrapper `emulators:exec` nie zakonczyl procesu
+  samodzielnie; pozostawiony lokalny proces Firebase CLI zostal zatrzymany recznie.
+  Nie wywolano zadnego handlera ani uslugi chmurowej.
+Granice:
+- Repozytorium publicznego formularza pozostalo nietkniete; przygotowano tylko
+  kontrakt zmian dla jego opiekuna.
+- Nie ustawiono sekretow ani parametrow w Firebase, nie wlaczono App Check, nie
+  wykonano migracji, nie wywolano prawdziwych dostawcow i nie wyslano e-maila.
+- Nie wykonano commita, pusha ani wdrozenia.
+
+Data: 2026-08-03
+Autor: AI Codex
+Temat: Lokalne poprawki po review PR #4 - wspolbieznosc i idempotencja brokera
+Zmieniono lokalnie:
+- Kompensacja Firebase Auth najpierw atomowo nabywa prawo do rollbacku. Nie usuwa
+  konta, jezeli rownolegla operacja zdazyla juz utworzyc organizacje lub przejsc do
+  pozniejszego stanu.
+- Link weryfikacyjny powstaje pod pojedyncza dzierzawa i jest zapisywany przed
+  wysylka jako prywatna koperta AES-256-GCM zwiazana z `operationId`. Ponowienie po
+  awarii Resend uzywa dokladnie tego samego linku i fingerprintu payloadu.
+- Jawny link oraz kod OOB nie sa zapisywane w Firestore, a zaszyfrowana koperta jest
+  usuwana po potwierdzonym przejsciu operacji do `COMPLETED`.
+- Rownolegle ponowienia wysylki zbiegaja sie do jednego zakonczonego stanu zamiast
+  zwracac konflikt po udanej dostawie innego wywolania.
+- E-mail dluzszy niz 180 znakow jest odrzucany przed zrodlowa baza i Firebase Auth,
+  zgodnie z limitem autorytatywnego schematu rejestracji.
+Testy/sprawdzenia:
+- `npm run check` na runtime Node 24 - PASS dla wszystkich plikow `src/*.js`.
+- Pelny zestaw testow jednostkowych - 71/71 PASS.
+- Emulator Firestore - 12/12 PASS, w tym atomowa dzierzawa linku i bezpieczne
+  nabycie prawa do kompensacji Auth.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Nie ustawiono sekretow, nie wywolano Firebase, Cloud SQL, Resend ani innych
+  prawdziwych dostawcow.
+- Nie wykonano migracji, commita, pusha, odpowiedzi w review, scalenia ani wdrozenia.
+
+Data: 2026-08-03
+Autor: AI Codex
+Temat: Druga lokalna runda poprawek po review PR #4
+Zmieniono lokalnie:
+- Przejsciowy blad `auth.getUser` podczas retry nie ustawia juz trwale
+  `RECOVERY_REQUIRED`; stan operacji pozostaje niezmieniony i wywolanie mozna
+  bezpiecznie ponowic. Definitywny brak UID lub niezgodnosc e-maila nadal wymaga
+  rekonsyliacji.
+- Fingerprint operacji zawiera domenowo rozdzielony HMAC znormalizowanego hasla.
+  Retry z innym haslem konczy sie `IDEMPOTENCY_CONFLICT`, bez zapisywania hasla lub
+  jego jawnego hasha w Firestore, bazie zrodlowej, organizacji ani logach.
+- Zlozone `displayName` przekraczajace limit 200 znakow jest odrzucane przed
+  wywolaniem bazy zrodlowej, Firebase Auth i mailera.
+Testy regresji:
+- Przejsciowa awaria Auth nie zatruwa zakonczonej operacji.
+- Brak oczekiwanego UID nadal przechodzi do `RECOVERY_REQUIRED`.
+- Zmiana hasla pod tym samym kluczem idempotencji jest odrzucana.
+- Zbyt dlugie `displayName` nie tworzy konta ani proby zrodlowej.
+- `npm run check` na runtime Node 24 - PASS.
+- Pelny zestaw testow jednostkowych - 75/75 PASS.
+- Emulator Firestore - 12/12 PASS.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Zmiany zostaly zapisane w commicie `dbe0706` i wypchniete do PR #4.
+- Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
+  prawdziwych dostawcow.
+
+Data: 2026-08-03
+Autor: AI Codex
+Temat: Trzecia lokalna runda poprawek po review PR #4
+Zmieniono lokalnie:
+- Wyjscie z Pwned Passwords jest sprawdzane tylko przy przyjeciu nowej operacji.
+  Retry istniejacej operacji potwierdza fingerprint, ale nie powtarza zmiennej
+  kontroli hasla, ktora moglaby pozniej zablokowac ponowna wysylke tego samego linku.
+- Prywatny magazyn operacji ma odczyt `find`, ktory nie tworzy dokumentu i wymaga
+  zgodnosci fingerprintu, registrationId, HMAC e-maila, UID oraz orgId.
+- Termin waznosci proby zrodlowej jest egzekwowany przed pierwszym zwiazaniem.
+  Dokladny retry proby juz zwiazanej z tym samym UID, orgId i operationId pozostaje
+  dozwolony bez ponownego uzycia wyczyszczonego tokenu.
+- Brak rekordu `MARKETING` nie jest juz traktowany jak odmowa. Wymagany jest jawny
+  rekord decyzji negatywnej z wersja, locale, czasem utworzenia i bez accepted_at.
+Testy regresji:
+- Retry po awarii maila przechodzi mimo pozniejszego wyniku `PASSWORD_COMPROMISED`.
+- Zwiazana proba po terminie przechodzi tylko dla tych samych identyfikatorow;
+  niezwiazana wygasla proba nadal jest odrzucana.
+- Brak lub bledne locale odmownego rekordu `MARKETING` blokuje autoryzacje.
+- Emulator sprawdza prywatny odczyt istniejacej operacji i konflikt fingerprintu.
+- `npm run check` na runtime Node 24 - PASS.
+- Pelny zestaw testow jednostkowych - 76/76 PASS.
+- Emulator Firestore - 12/12 PASS.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Zmiany zostaly zapisane w commicie `24bec9f` i wypchniete do PR #4.
+- Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
+  prawdziwych dostawcow.
+
+Data: 2026-08-03
+Autor: AI Codex
+Temat: Czwarta lokalna runda poprawek po review PR #4
+Zmieniono lokalnie:
+- Nowy owner i jego rekord `organization_member` maja stan `ONBOARDING`, a owner
+  w `worker` pozostaje nieaktywny. Istniejace operacyjne zapytania Data Connect,
+  ktore wymagaja membershipu `ACTIVE`, nie przepuszczaja konta przed aktywacja.
+- Poczatkowa projekcja Firestore zachowuje membership `onboarding`; dopiero
+  zdarzenie `CLEANING_PROVIDER_ACTIVATED` przechodzi do `active`.
+- Zaufana transakcja konczaca onboarding wymaga zgodnego UID oraz
+  `email_verified=true`, sprawdza ukonczony profil, a nastepnie atomowo aktywuje
+  organizacje, membership i ownera przed zapisaniem zdarzenia projekcji.
+- Aktywacja wymaga aktywnej transakcji PostgreSQL i zaklada savepoint. Blad
+  dowolnego UPDATE lub outboxa cofa wszystkie zmiany tej aktywacji.
+- Organizacja zawieszona, zablokowana, zarchiwizowana albo soft-deleted nie moze
+  zostac przywrocona do `ACTIVE` przez ponowne wywolanie aktywacji.
+- `joined_at` pozostaje pusty podczas `ONBOARDING` i jest ustawiany dopiero przy
+  skutecznej aktywacji membershipu.
+- Deterministyczny `INVALID_DISPLAY_NAME` jest zwracany jako blad klienta HTTP 400,
+  a nie maskowany jako awaria serwera 500.
+Testy regresji:
+- Niezweryfikowany e-mail i obcy UID sa odrzucane przed pierwszym zapytaniem SQL.
+- Membership `ONBOARDING` nie spelnia kontraktu operacyjnego ani zaproszen.
+- Aktywacja po weryfikacji i ukonczeniu onboardingu przechodzi do `ACTIVE`, a
+  opozniona projekcja rejestracji nie cofa aktywnego stanu.
+- `npm run check` na runtime Node 24 - PASS.
+- Pelny zestaw testow jednostkowych - 80/80 PASS.
+- Emulator Firestore - 12/12 PASS.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Glowna poprawka zostala zapisana w `7096b0b`; zabezpieczenia fail-closed zostaly
+  zapisane w `a33bce7` i wypchniete do PR #4.
+- Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
+  prawdziwych dostawcow.
+
+Data: 2026-08-04
+Autor: AI Codex
+Temat: Piata lokalna runda poprawek po review PR #4
+Zmieniono lokalnie:
+- Po trwalym stanie `AUTH_CREATED` blad provisionera SQL nie uruchamia juz
+  automatycznego usuniecia Firebase UID. Konto pozostaje nieoperacyjne, a retry
+  idempotentnie dokancza organizacje, co wyklucza osierocenie rownoleglego commita.
+- Wygasla, jeszcze niezwiazana proba moze zostac wznowiona tylko dla istniejacej
+  operacji `AUTH_CREATED` oraz nadal zgodnego tokenu, payloadu i kompletu zgod.
+- Siteverify Turnstile otrzymuje losowy UUID dla kazdego osobnego wywolania;
+  wewnetrzne retry jednego wywolania zachowuje ten sam klucz idempotencji.
+- `DATABASE_TRANSACTION_ROLLED_BACK` jest publicznie klasyfikowany jako retryowalne
+  HTTP 503, bez ujawniania szczegolow bazy.
+Testy regresji:
+- Rownolegly sukces SQL i potwierdzony rollback drugiego wywolania nie usuwaja UID.
+- Retry po bledzie sprzed commita zachowuje jedno konto i konczy organizacje bez
+  duplikacji, rowniez po wygasnieciu zrodlowej proby.
+- Ten sam token Turnstile ma wspolny klucz tylko w ramach wewnetrznych ponowien;
+  kolejne wywolanie otrzymuje inny UUID.
+- `npm run check` na runtime Node 24 - PASS.
+- Pelny zestaw testow jednostkowych - 82/82 PASS.
+- Emulator Firestore - 12/12 PASS.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Piata runda pozostaje lokalna i nie jest jeszcze zapisana w commicie ani wyslana
+  do PR #4.
+- Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
+  prawdziwych dostawcow.
