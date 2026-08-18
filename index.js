@@ -45,6 +45,7 @@ const {
 const { buildFirebaseRestDecodedToken } = require('./firebase-rest-token-policy')
 const { createProfitabilityApi } = require('./profitability-api')
 const { createWorkdayStopProposalApi } = require('./workday-stop-proposal-api')
+const { mapProposal } = require('./workday-stop-proposal-repository')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
 const {
@@ -2381,6 +2382,23 @@ function mapMobileWorkdayRow(row) {
   }
 }
 
+function mapMobileWorkdayStopProposal(row) {
+  const proposal = mapProposal(row)
+  if (!proposal?.proposalId || !proposal?.workdayId) return null
+  return {
+    proposalId: proposal.proposalId,
+    status: proposal.status,
+    proposedStopAt: proposal.proposedStopAt,
+    proposedStopLocal: proposal.proposedStopLocal,
+    timeZone: proposal.timeZone,
+    employeeNote: proposal.employeeNote,
+    decisionNote: proposal.decisionNote,
+    officialStopAt: proposal.officialStopAt,
+    submittedAt: proposal.submittedAt,
+    reviewedAt: proposal.reviewedAt,
+  }
+}
+
 function mapMobileEventRow(row) {
   if (!row) return null
   const classified = classifyMobileZone(row.function_name)
@@ -2733,6 +2751,29 @@ async function fetchActiveMobileWorkday(client, orgId, workerLogin) {
   return resolveSingleOpenWorkday(result.rows)
 }
 
+// A state read must never reuse the QR guard: historical open records belong
+// in the worker's history and are not a reason to reject the whole snapshot.
+async function fetchMobileStateActiveWorkday(client, orgId, workerLogin) {
+  const result = await client.query(
+    `select w.*,
+            ((w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date) as is_today_warsaw
+       from public.workday w
+      where org_id = $1
+        and lower(btrim(worker_login)) = lower(btrim($2))
+        and upper(btrim(coalesce(status, 'RUNNING'))) <> 'CLOSED'
+        and end_at is null
+        and (
+          ((w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date)
+          or w.start_at is null
+        )
+      order by start_at desc nulls last, updated_at desc nulls last
+      limit 2`,
+    [orgId, workerLogin],
+  )
+  const currentRows = (Array.isArray(result.rows) ? result.rows : []).filter((row) => row?.is_today_warsaw === true)
+  return currentRows.length === 1 ? currentRows[0] : null
+}
+
 async function fetchMobileWorkdays(client, orgId, workerLogin) {
   const result = await client.query(
     `select *
@@ -2744,6 +2785,28 @@ async function fetchMobileWorkdays(client, orgId, workerLogin) {
     [orgId, workerLogin],
   )
   return result.rows.map(mapMobileWorkdayRow).filter(Boolean)
+}
+
+async function fetchMobileWorkdayStopProposals(client, orgId, workerId, workdays) {
+  const workdayIds = [...new Set((Array.isArray(workdays) ? workdays : []).map((workday) => normalizeText(workday?.workdayId)).filter(Boolean))]
+  if (!normalizeText(workerId) || !workdayIds.length || !(await databaseRelationExists(client, 'public.workday_stop_proposal'))) {
+    return new Map()
+  }
+  const result = await client.query(
+    `select distinct on (p.workday_id) p.*
+       from public.workday_stop_proposal p
+      where p.org_id = $1::text
+        and p.worker_id = $2::text
+        and p.workday_id = any($3::text[])
+      order by p.workday_id, p.submitted_at desc nulls last, p.proposal_id desc`,
+    [orgId, workerId, workdayIds],
+  )
+  const proposals = new Map()
+  for (const row of Array.isArray(result.rows) ? result.rows : []) {
+    const proposal = mapMobileWorkdayStopProposal(row)
+    if (proposal) proposals.set(normalizeText(row.workday_id), proposal)
+  }
+  return proposals
 }
 
 async function fetchOpenMobileCycles(client, orgId, workerLogin) {
@@ -2933,8 +2996,22 @@ async function upsertMobileRuntimeState(client, orgId, worker, activeWorkday, ac
 
 async function buildMobileSnapshotFromDb(client, orgId, worker, { persistRuntimeState = false } = {}) {
   const zones = await fetchMobileZones(client, orgId)
-  const activeWorkdayRaw = await fetchActiveMobileWorkday(client, orgId, worker.login)
-  const workdays = await fetchMobileWorkdays(client, orgId, worker.login)
+  const activeWorkdayRaw = persistRuntimeState
+    ? await fetchActiveMobileWorkday(client, orgId, worker.login)
+    : await fetchMobileStateActiveWorkday(client, orgId, worker.login)
+  const mobileWorkdays = await fetchMobileWorkdays(client, orgId, worker.login)
+  const workdays = persistRuntimeState
+    ? mobileWorkdays
+    : mobileWorkdays.map((workday) => ({
+        ...workday,
+        stopProposal: null,
+      }))
+  if (!persistRuntimeState) {
+    const stopProposalsByWorkdayId = await fetchMobileWorkdayStopProposals(client, orgId, worker.workerId, mobileWorkdays)
+    for (const workday of workdays) {
+      workday.stopProposal = stopProposalsByWorkdayId.get(workday.workdayId) || null
+    }
+  }
   const cycleHistory = await fetchMobileCycleHistory(client, orgId, worker.login)
   const availableEventColumns = await readPublicEventColumns(client)
   const eventTypeReadable = availableEventColumns.has('event_type')
