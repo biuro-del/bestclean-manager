@@ -5,6 +5,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 const test = require('node:test')
 
+const { resolveSingleOpenWorkday } = require('../mobile-open-workday-policy')
+
 const indexPath = path.join(__dirname, '..', 'index.js')
 const source = fs.readFileSync(indexPath, 'utf8')
 
@@ -16,7 +18,7 @@ function functionSource(name, nextName) {
   return source.slice(start, end)
 }
 
-test('otwarte Workday sa dzielone na dzisiejszy aktywny i starsze do naprawy', () => {
+test('odczyt QR START blokuje tylko dzisiejsze lub niejednoznaczne Workday pod LIMIT 2 i FOR UPDATE', () => {
   const body = functionSource('fetchMobileOpenWorkdayState', 'fetchMobileWorkdays')
   assert.match(body, /start_at at time zone 'Europe\/Warsaw'/i)
   assert.match(body, /business_day_relation/i)
@@ -24,9 +26,35 @@ test('otwarte Workday sa dzielone na dzisiejszy aktywny i starsze do naprawy', (
   assert.match(body, /then 'PRIOR'/i)
   assert.match(body, /else 'FUTURE'/i)
   assert.match(body, /now\(\) at time zone 'Europe\/Warsaw'/i)
+  assert.match(
+    body,
+    /and\s*\(\s*\(\(w\.start_at at time zone 'Europe\/Warsaw'\)::date\s*=\s*\(now\(\) at time zone 'Europe\/Warsaw'\)::date\)\s*or w\.start_at is null\s*\)/i,
+  )
+  assert.match(body, /limit 2\s*for update/i)
   assert.match(body, /for update/i)
   assert.match(body, /resolveOpenWorkdayState\(result\.rows\)/)
   assert.doesNotMatch(body, /limit\s+1/i)
+})
+
+test('kontrakt QR START tworzy Workday przy samych historycznych rekordach bez ich modyfikacji', () => {
+  const historicalOpenWorkdays = [
+    { workday_id: 'WD-OLD-1', start_at: '2026-07-21T05:00:00.000Z', is_today_warsaw: false },
+    { workday_id: 'WD-OLD-2', start_at: '2026-07-22T05:00:00.000Z', is_today_warsaw: false },
+  ]
+  const before = JSON.parse(JSON.stringify(historicalOpenWorkdays))
+  const workflow = functionSource('processMobileWorkflowScan', 'handleMobileWorkflowRequest')
+  const startBranch = workflow.slice(
+    workflow.indexOf("if (zone.kind === 'START')"),
+    workflow.indexOf("} else if (zone.kind === 'STOP')"),
+  )
+
+  assert.equal(resolveSingleOpenWorkday(historicalOpenWorkdays), null)
+  assert.deepEqual(historicalOpenWorkdays, before)
+  assert.match(
+    startBranch,
+    /if \(!activeWorkday\)\s*\{\s*requireScanGps\('START'\)\s*activeWorkday = await createMobileWorkday/,
+  )
+  assert.doesNotMatch(startBranch, /closeMobileWorkday|closeMobileOpenCycles/)
 })
 
 test('jawny otwarty CLEAN jest globalnym blockerem niezaleznie od stanu Workday', () => {
