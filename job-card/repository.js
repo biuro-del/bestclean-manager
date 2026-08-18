@@ -160,13 +160,13 @@ class JobCardRepository {
          base_revision, created_by_uid, updated_by_uid, created_at, updated_at
        )
        values (
-         $1, $2, $3, $4, $5, $6,
-         $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb,
+         $1::varchar, $2::varchar, $3::uuid, $4::varchar, $5::varchar, $6::varchar,
+         $7::varchar, $8::varchar, $9::varchar, $10::jsonb, $11::jsonb, $12::jsonb,
          coalesce((
            select max(revision) from public.job_card_revision
-            where org_id = $1 and source_order_id = $2
+            where org_id = $15::varchar and source_order_id = $16::varchar
          ), 0),
-         $13, $13, now(), now()
+         $13::varchar, $14::varchar, now(), now()
        )
        on conflict (org_id, source_order_id) do update set
          draft_id = excluded.draft_id,
@@ -197,6 +197,9 @@ class JobCardRepository {
         json(card),
         json(validation),
         normalizedActorUid,
+        normalizedActorUid,
+        normalizedOrgId,
+        normalizedOrderId,
       ],
     )
     return mapDraft(result.rows[0])

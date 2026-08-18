@@ -1,5 +1,7 @@
 import template from './template.html?raw'
 import { isScheduleOrderActive } from '../../services/scheduleOrderLifecycle'
+import { scheduleConflictPreflightCandidates } from '../../services/scheduleConflictPreflight'
+import { scheduleOrderSaveRetryDelay } from '../../services/scheduleOrderSaveRetry'
 import {
   SCHEDULE_START_GRACE_MINUTES,
   isScheduleStartOverdue,
@@ -181,6 +183,11 @@ export function createCalendarFeature(ctx) {
   let calendarTimelineOrdersRemotePromise = null
   let calendarTimelineOrdersRemotePromiseKey = ''
   let calendarTimelineOrdersRemoteGeneration = 0
+  let calendarTimelineOrdersRemoteSavePromise = null
+  let calendarTimelineOrdersRemoteSavePromiseKey = ''
+  let calendarTimelineOrdersRemoteSaveSignature = ''
+  let calendarTimelineOrdersQueuedSave = null
+  let calendarTimelineOrdersRemoteRetryCount = 0
   const calendarTimelineEventsPopupRegistry = new Map()
   const calendarTimelineWorkerStateMapCache = { key: '', value: new Map() }
   const calendarTimelineResourcesCache = { key: '', value: [] }
@@ -3096,25 +3103,32 @@ export function createCalendarFeature(ctx) {
     calendarTimelineOrdersRemoteGeneration += 1
     calendarTimelineOrdersRemotePromise = null
     calendarTimelineOrdersRemotePromiseKey = ''
+    calendarTimelineOrdersQueuedSave = null
+    calendarTimelineOrdersRemoteRetryCount = 0
+    ordersClearRemoteTimelineOrderSaveTimer()
+    ordersClearRemoteTimelineOrderRetryTimer()
     appState.calendarTimelineOrdersRemoteLoading = false
   }
   
-  function ordersScheduleRemoteTimelineOrderRetry(delayMs = 15000) {
-    if (ordersRemoteRetryTimer || typeof window === 'undefined') {
+  function ordersScheduleRemoteTimelineOrderRetry(orders, error) {
+    const delayMs = scheduleOrderSaveRetryDelay(error, calendarTimelineOrdersRemoteRetryCount)
+    if (!delayMs || ordersRemoteRetryTimer || typeof window === 'undefined') {
       return
     }
-    const orgId = ordersActiveOrganizationId()
-    if (!orgId) {
+    const sessionKey = ordersRemoteSessionKey()
+    if (!sessionKey) {
       return
     }
   
+    const snapshot = ordersMergeTimelineOrderLists(orders)
+    calendarTimelineOrdersRemoteRetryCount += 1
     ordersRemoteRetryTimer = window.setTimeout(() => {
       ordersRemoteRetryTimer = 0
-      if (ordersActiveOrganizationId() !== orgId) {
+      if (sessionKey !== ordersRemoteSessionKey()) {
         return
       }
-      ordersQueueRemoteTimelineOrderSave(ordersListSourceOrders())
-    }, Math.max(3000, Number(delayMs) || 15000))
+      ordersQueueRemoteTimelineOrderSave(snapshot, { retry: true })
+    }, delayMs)
   }
   
   function ordersCancelRemoteTimelineOrderSave() {
@@ -3124,10 +3138,15 @@ export function createCalendarFeature(ctx) {
     }
   }
   
-  function ordersQueueRemoteTimelineOrderSave(orders = ordersListSourceOrders()) {
+  function ordersQueueRemoteTimelineOrderSave(orders = ordersListSourceOrders(), options = {}) {
     const orgId = ordersActiveOrganizationId()
     if (!orgId) {
       return
+    }
+
+    if (!options.retry) {
+      ordersClearRemoteTimelineOrderRetryTimer()
+      calendarTimelineOrdersRemoteRetryCount = 0
     }
   
     ordersClearRemoteTimelineOrderSaveTimer()
@@ -3135,7 +3154,7 @@ export function createCalendarFeature(ctx) {
     const snapshot = ordersMergeTimelineOrderLists(orders)
     ordersRemoteSaveTimer = window.setTimeout(() => {
       ordersRemoteSaveTimer = 0
-      void ordersSaveRemoteTimelineOrdersNow(snapshot)
+      void ordersSaveRemoteTimelineOrdersNow(snapshot, { retry: options.retry === true })
     }, 350)
   }
   
@@ -3159,6 +3178,10 @@ export function createCalendarFeature(ctx) {
     if (appState.currentRoute === 'orders') renderOrdersView()
     if (appState.currentRoute === 'ordersMap') renderOrdersMapView()
   }
+
+  function ordersRemoteSaveSignature(orders = []) {
+    return JSON.stringify(ordersMergeTimelineOrderLists(orders))
+  }
   
   async function ordersSaveRemoteTimelineOrdersNow(orders = ordersListSourceOrders(), options = {}) {
     const orgId = ordersActiveOrganizationId()
@@ -3169,54 +3192,86 @@ export function createCalendarFeature(ctx) {
     }
   
     ordersClearRemoteTimelineOrderSaveTimer()
-  
+
     const snapshot = ordersMergeTimelineOrderLists(orders)
-    const scheduleConflicts = calendarTimelineFindAllOrderConflicts(snapshot, calendarTimelineResources())
-    if (scheduleConflicts.length) {
-      calendarTimelineShowConflictDialog(scheduleConflicts)
-      return false
+    const snapshotSignature = ordersRemoteSaveSignature(snapshot)
+    if (calendarTimelineOrdersRemoteSavePromise && calendarTimelineOrdersRemoteSavePromiseKey === sessionKey) {
+      if (calendarTimelineOrdersRemoteSaveSignature !== snapshotSignature) {
+        calendarTimelineOrdersQueuedSave = {
+          options: { ...options, retry: false },
+          orders: snapshot,
+        }
+      }
+      return calendarTimelineOrdersRemoteSavePromise
     }
-    if (options.retainLocalOrders) {
-      ordersRememberPendingLocalOrders(options.retainLocalOrders)
+
+    const save = async () => {
+      const conflictCandidates = scheduleConflictPreflightCandidates(options)
+      const scheduleConflicts = conflictCandidates.flatMap((candidate) => (
+        calendarTimelineFindOrderConflicts(candidate, snapshot, calendarTimelineResources())
+      ))
+      if (scheduleConflicts.length) {
+        calendarTimelineShowConflictDialog(scheduleConflicts)
+        return false
+      }
+      if (options.retainLocalOrders) {
+        ordersRememberPendingLocalOrders(options.retainLocalOrders)
+      }
+      try {
+        const savedOrders = await upsertScheduleTasks(orgId, snapshot)
+        if (!ordersRemoteRequestIsCurrent(sessionKey, generation)) {
+          return false
+        }
+        appState.calendarTimelineOrdersRemoteLoaded = true
+        ordersClearRemoteTimelineOrderRetryTimer()
+        calendarTimelineOrdersRemoteRetryCount = 0
+        if (Array.isArray(savedOrders)) {
+          ordersSaveTimelineOrders(ordersMergeWithPendingLocalOrders(savedOrders, { confirmPending: false }), {
+            syncRemote: false,
+            preserveDrafts: false,
+          })
+        } else {
+          ordersSaveTimelineOrders(ordersMergeWithPendingLocalOrders(snapshot, { confirmPending: false }), {
+            syncRemote: false,
+            preserveDrafts: false,
+          })
+        }
+        if (options.render) {
+          ordersRenderScheduleOrderViews()
+        }
+        return true
+      } catch (error) {
+        if (!ordersRemoteRequestIsCurrent(sessionKey, generation) || error?.code === 'STALE_ORG_CONTEXT') {
+          return false
+        }
+        console.warn('[portal/schedule-orders] remote save failed', error)
+        if (options.retry !== false && !calendarTimelineOrdersQueuedSave) {
+          ordersScheduleRemoteTimelineOrderRetry(snapshot, error)
+        }
+        if (options.showError !== false) {
+          showPortalErrorNotice('Nie udało się zapisać zlecenia w Firebase Data Connect. Zlecenie nie zostało zapisane.', error)
+        }
+        return false
+      }
     }
+
+    const request = save()
+    calendarTimelineOrdersRemoteSavePromise = request
+    calendarTimelineOrdersRemoteSavePromiseKey = sessionKey
+    calendarTimelineOrdersRemoteSaveSignature = snapshotSignature
     try {
-      const savedOrders = await upsertScheduleTasks(orgId, snapshot)
-      if (!ordersRemoteRequestIsCurrent(sessionKey, generation)) {
-        return false
+      return await request
+    } finally {
+      if (calendarTimelineOrdersRemoteSavePromise === request) {
+        calendarTimelineOrdersRemoteSavePromise = null
+        calendarTimelineOrdersRemoteSavePromiseKey = ''
+        calendarTimelineOrdersRemoteSaveSignature = ''
+        const queuedSave = calendarTimelineOrdersQueuedSave
+        calendarTimelineOrdersQueuedSave = null
+        if (queuedSave && ordersRemoteRequestIsCurrent(sessionKey, generation)) {
+          ordersQueueRemoteTimelineOrderSave(queuedSave.orders, queuedSave.options)
+        }
       }
-      appState.calendarTimelineOrdersRemoteLoaded = true
-      ordersClearRemoteTimelineOrderRetryTimer()
-      if (Array.isArray(savedOrders)) {
-        ordersSaveTimelineOrders(ordersMergeWithPendingLocalOrders(savedOrders, { confirmPending: false }), {
-          syncRemote: false,
-          preserveDrafts: false,
-        })
-      } else {
-        ordersSaveTimelineOrders(ordersMergeWithPendingLocalOrders(snapshot, { confirmPending: false }), {
-          syncRemote: false,
-          preserveDrafts: false,
-        })
-      }
-      if (options.render) {
-        ordersRenderScheduleOrderViews()
-      }
-      return true
-    } catch (error) {
-      if (!ordersRemoteRequestIsCurrent(sessionKey, generation) || error?.code === 'STALE_ORG_CONTEXT') {
-        return false
-      }
-      console.warn('[portal/schedule-orders] remote save failed', error)
-      if (
-        options.retry !== false &&
-        Number(error?.status) !== 409 &&
-        String(error?.code ?? '').trim() !== 'WORKER_SCHEDULE_LOCATION_CONFLICT'
-      ) {
-        ordersScheduleRemoteTimelineOrderRetry()
-      }
-      if (options.showError !== false) {
-        showPortalErrorNotice('Nie udało się zapisać zlecenia w Firebase Data Connect. Zlecenie nie zostało zapisane.', error)
-      }
-      return false
     }
   }
   
@@ -3352,7 +3407,6 @@ export function createCalendarFeature(ctx) {
       }
       console.warn('[portal/schedule-orders] remote delete failed', error)
       showPortalErrorNotice('Nie udało się usunąć zlecenia z Firebase', error)
-      ordersScheduleRemoteTimelineOrderRetry()
       return false
     }
   }
@@ -7597,28 +7651,6 @@ export function createCalendarFeature(ctx) {
   
   function calendarTimelineFindOrderConflict(candidate = {}, orders = [], resources = calendarTimelineResources()) {
     return calendarTimelineFindOrderConflicts(candidate, orders, resources)[0]?.order ?? null
-  }
-
-  function calendarTimelineFindAllOrderConflicts(orders = [], resources = calendarTimelineResources()) {
-    const sourceOrders = Array.isArray(orders)
-      ? orders.filter((order) => order && isScheduleOrderActive(order))
-      : []
-    const conflicts = []
-    const seen = new Set()
-    sourceOrders.forEach((candidate) => {
-      calendarTimelineFindOrderConflicts(candidate, sourceOrders, resources).forEach((conflict) => {
-        const candidateKey = calendarTimelineOrderSourceKeys(candidate)[0] || String(candidate?.id ?? '').trim()
-        const conflictKey = calendarTimelineOrderSourceKeys(conflict?.order)[0] || String(conflict?.order?.id ?? '').trim()
-        const pair = [candidateKey, conflictKey].filter(Boolean).sort().join('::')
-        const key = `${pair}::${Number(conflict?.row ?? -1)}::${String(conflict?.time ?? '')}`
-        if (!pair || seen.has(key)) {
-          return
-        }
-        seen.add(key)
-        conflicts.push(conflict)
-      })
-    })
-    return conflicts
   }
 
   function calendarTimelineConflictItemsFromLayout(layoutItems = [], resources = calendarTimelineResources()) {
