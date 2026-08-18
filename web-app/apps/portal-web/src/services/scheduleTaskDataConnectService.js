@@ -1,4 +1,4 @@
-import { deleteTaskForOrg, platformContextHeaders, tasksForOrg } from './platformDataConnectService'
+import { platformContextHeaders } from './platformDataConnectService'
 import { getSession } from '../auth/authService'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 import {
@@ -184,13 +184,6 @@ function allocationFromItem(item, index = 0) {
   }
 }
 
-function requireFirebaseDataConnect() {
-  if (!isFirebaseConfigured()) {
-    throw new Error('Brak konfiguracji Firebase Data Connect.')
-  }
-  ensureFirebase()
-}
-
 function normalizeApiBase(value) {
   const raw = normalizeText(value)
   if (!raw) return '/api'
@@ -206,10 +199,9 @@ function getPortalApiBase() {
   return normalizeApiBase(import.meta.env.VITE_ADMIN_API_BASE || '/api')
 }
 
-let scheduleOrdersEndpointUnavailableKey = ''
 const SCHEDULE_ORDERS_LOAD_TIMEOUT_MS = 12_000
 
-const SCHEDULE_ORDERS_FALLBACK_CODES = new Set([
+const SCHEDULE_ORDERS_UNAVAILABLE_CODES = new Set([
   'DB_CONFIG_MISSING',
   'PORTAL_SCHEDULE_ORDERS_ERROR',
   'PORTAL_SCHEDULE_ORDERS_PROXY_ERROR',
@@ -230,10 +222,6 @@ async function fetchScheduleOrdersWithTimeout(url, options = {}) {
   } finally {
     globalThis.clearTimeout(timeoutId)
   }
-}
-
-function isLocalDevScheduleOrdersRemoteDisabled() {
-  return import.meta.env.DEV && normalizeText(import.meta.env.VITE_DISABLE_PORTAL_SCHEDULE_ORDERS_REMOTE) === '1'
 }
 
 function currentScheduleSession(orgId = '') {
@@ -267,14 +255,6 @@ function requireCurrentScheduleOrganization(orgId) {
   return state
 }
 
-function shouldSkipScheduleOrdersEndpoint(orgId) {
-  const key = currentScheduleSession(orgId).key
-  return (
-    isLocalDevScheduleOrdersRemoteDisabled() ||
-    Boolean(key && scheduleOrdersEndpointUnavailableKey === key)
-  )
-}
-
 function isScheduleOrdersRouteUnavailable(message, status) {
   const lowered = normalizeText(message).toLowerCase()
   return (
@@ -298,12 +278,7 @@ function isScheduleOrdersBackendUnavailable({ code = '', isHtml = false, message
   if (isHtml) {
     return true
   }
-  return SCHEDULE_ORDERS_FALLBACK_CODES.has(normalizeText(code).toUpperCase())
-}
-
-function disableScheduleOrdersEndpoint(action, message, orgId = '') {
-  scheduleOrdersEndpointUnavailableKey = currentScheduleSession(orgId).key
-  console.warn(`[portal/schedule-orders] ${action} uses DataConnect fallback; backend unavailable`, message)
+  return SCHEDULE_ORDERS_UNAVAILABLE_CODES.has(normalizeText(code).toUpperCase())
 }
 
 function isScheduleOrdersLocalFileResponse(body) {
@@ -311,9 +286,11 @@ function isScheduleOrdersLocalFileResponse(body) {
   return storage === 'local-file'
 }
 
-function disableScheduleOrdersInvalidPayload(action, message, orgId = '') {
-  disableScheduleOrdersEndpoint(action, message, orgId)
-  return null
+function scheduleOrdersUnavailableError(message = '') {
+  const error = new Error('Grafik zleceń jest chwilowo niedostępny. Spróbuj ponownie później.')
+  error.code = 'SCHEDULE_ORDERS_UNAVAILABLE'
+  error.details = normalizeText(message).slice(0, 500)
+  return error
 }
 
 async function parseScheduleOrdersApiError(response, fallbackMessage) {
@@ -428,8 +405,7 @@ async function fetchScheduleTasksViaBackend(orgId) {
         },
       )
     } catch (error) {
-      disableScheduleOrdersEndpoint('load', error?.message || error, orgId)
-      return null
+      throw scheduleOrdersUnavailableError(error?.message || error)
     }
 
     if (!response.ok) {
@@ -441,12 +417,10 @@ async function fetchScheduleTasksViaBackend(orgId) {
         }
       }
       if (attempt > 0 && membershipConfirmed && isMissingScheduleMembership(error)) {
-        disableScheduleOrdersEndpoint('load', error.message, orgId)
-        return null
+        throw scheduleOrdersUnavailableError(error.message)
       }
       if (error.backendUnavailable) {
-        disableScheduleOrdersEndpoint('load', error.message, orgId)
-        return null
+        throw scheduleOrdersUnavailableError(error.message)
       }
       const requestError = new Error(error.message)
       requestError.code = error.code
@@ -456,14 +430,12 @@ async function fetchScheduleTasksViaBackend(orgId) {
 
     const body = await response.json().catch(() => ({}))
     if (isScheduleOrdersLocalFileResponse(body)) {
-      return disableScheduleOrdersInvalidPayload(
-        'load',
+      throw scheduleOrdersUnavailableError(
         'Backend zlecen zwrocil lokalny plik zamiast danych z bazy.',
-        orgId,
       )
     }
     if (!Array.isArray(body?.data?.orders)) {
-      return disableScheduleOrdersInvalidPayload('load', 'Endpoint zlecen nie zwrocil data.orders.', orgId)
+      throw scheduleOrdersUnavailableError('Endpoint zlecen nie zwrocil data.orders.')
     }
     return sortScheduleOrders(filterActiveScheduleOrders(body.data.orders))
   }
@@ -510,13 +482,11 @@ async function upsertScheduleTasksViaBackend(orgId, orders = []) {
   }
   const body = await response.json().catch(() => ({}))
   if (isScheduleOrdersLocalFileResponse(body)) {
-    return disableScheduleOrdersInvalidPayload('save', 'Backend zlecen zapisal lokalny plik zamiast bazy.', orgId)
+    throw scheduleOrdersUnavailableError('Backend zlecen zapisal lokalny plik zamiast bazy.')
   }
   if (!Array.isArray(body?.data?.orders)) {
-    return disableScheduleOrdersInvalidPayload(
-      'save',
+    throw scheduleOrdersUnavailableError(
       'Endpoint zlecen nie zwrocil potwierdzenia data.orders.',
-      orgId,
     )
   }
   return sortScheduleOrders(filterActiveScheduleOrders(body.data.orders))
@@ -597,27 +567,23 @@ async function deleteScheduleTasksViaBackend(orgId, orderIds = []) {
       }),
     })
   } catch (error) {
-    disableScheduleOrdersEndpoint('delete', error?.message || error, orgId)
-    return null
+    throw scheduleOrdersUnavailableError(error?.message || error)
   }
   if (!response.ok) {
     const error = await parseScheduleOrdersApiError(response, 'Nie udalo sie usunac zlecenia.')
     if (error.backendUnavailable) {
-      disableScheduleOrdersEndpoint('delete', error.message, orgId)
-      return null
+      throw scheduleOrdersUnavailableError(error.message)
     }
     throw new Error(error.message)
   }
   const body = await response.json().catch(() => ({}))
   if (isScheduleOrdersLocalFileResponse(body)) {
-    return disableScheduleOrdersInvalidPayload(
-      'delete',
+    throw scheduleOrdersUnavailableError(
       'Backend zlecen usunal lokalny plik zamiast rekordu z bazy.',
-      orgId,
     )
   }
   if (!Array.isArray(body?.data?.deletedOrderIds)) {
-    return disableScheduleOrdersInvalidPayload('delete', 'Endpoint zlecen nie zwrocil potwierdzenia data.deletedOrderIds.')
+    throw scheduleOrdersUnavailableError('Endpoint zlecen nie zwrocil data.deletedOrderIds.')
   }
   return body.data.deletedOrderIds
 }
@@ -862,36 +828,6 @@ function mapTaskRowsToScheduleOrders(rows = [], context = 'fetch') {
   return sortScheduleOrders(filterActiveScheduleOrders(mapped))
 }
 
-async function fetchScheduleTasksViaDataConnect(orgId) {
-  const normalizedOrgId = normalizeText(orgId)
-  if (!normalizedOrgId) return []
-
-  requireFirebaseDataConnect()
-  const response = await tasksForOrg({ orgId: normalizedOrgId }, { fetchPolicy: 'SERVER_ONLY' })
-  const rows = Array.isArray(response?.data?.tasks) ? response.data.tasks : []
-  if (!Array.isArray(response?.data?.tasks)) {
-    console.warn('[portal/schedule-tasks] Data Connect TasksForOrg returned no tasks array', {
-      keys: Object.keys(response?.data || {}),
-    })
-  }
-  return mapTaskRowsToScheduleOrders(rows, 'fetch')
-}
-
-async function deleteScheduleTasksViaDataConnect(orgId, orderIds = []) {
-  const normalizedOrgId = normalizeText(orgId)
-  const ids = (Array.isArray(orderIds) ? orderIds : [])
-    .map((value) => nullableText(value, 180))
-    .filter(Boolean)
-  if (!normalizedOrgId || !ids.length) return []
-
-  requireFirebaseDataConnect()
-  for (const idTask of ids) {
-    await deleteTaskForOrg({ orgId: normalizedOrgId, idTask })
-  }
-
-  return ids
-}
-
 export async function fetchScheduleTasks(orgId) {
   const normalizedOrgId = normalizeText(orgId)
   if (!normalizedOrgId) return []
@@ -905,12 +841,7 @@ export async function fetchScheduleTasks(orgId) {
     throw error
   }
 
-  if (!shouldSkipScheduleOrdersEndpoint(normalizedOrgId)) {
-    const backendOrders = await fetchScheduleTasksViaBackend(normalizedOrgId)
-    if (backendOrders) return backendOrders
-  }
-
-  return fetchScheduleTasksViaDataConnect(normalizedOrgId)
+  return fetchScheduleTasksViaBackend(normalizedOrgId)
 }
 
 export async function upsertScheduleTasks(orgId, orders = []) {
@@ -941,10 +872,5 @@ export async function deleteScheduleTasks(orgId, orderIds = []) {
 
   requireCurrentScheduleOrganization(normalizedOrgId)
 
-  if (!shouldSkipScheduleOrdersEndpoint(normalizedOrgId)) {
-    const deletedIds = await deleteScheduleTasksViaBackend(normalizedOrgId, ids)
-    if (deletedIds) return deletedIds
-  }
-
-  return deleteScheduleTasksViaDataConnect(normalizedOrgId, ids)
+  return deleteScheduleTasksViaBackend(normalizedOrgId, ids)
 }

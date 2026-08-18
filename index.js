@@ -8,6 +8,7 @@ const admin = require('firebase-admin')
 const { getDataConnect: getAdminDataConnect } = require('firebase-admin/data-connect')
 const { Pool } = require('pg')
 const { AuthTypes, Connector, IpAddressTypes } = require('@google-cloud/cloud-sql-connector')
+const { resolvePgPassword } = require('./cloud-sql-pg-auth')
 const { Compute, GoogleAuth, OAuth2Client } = require('google-auth-library')
 const {
   buildOrganizationSummary,
@@ -43,6 +44,7 @@ const {
 } = require('./platform-policy')
 const { buildFirebaseRestDecodedToken } = require('./firebase-rest-token-policy')
 const { createProfitabilityApi } = require('./profitability-api')
+const { createWorkdayStopProposalApi } = require('./workday-stop-proposal-api')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
 const {
@@ -124,9 +126,11 @@ const PORTAL_EVENTS_PATH = '/api/portal/events'
 const PORTAL_UI_STYLE_PATH = '/api/portal/ui-style'
 const PORTAL_ZONE_QR_CODES_PATH = '/api/portal/zones/qr-codes'
 const PORTAL_PROFITABILITY_PATH = '/api/portal/profitability'
+const PORTAL_WORKDAY_STOP_PROPOSALS_PATH = '/api/portal/workday-stop-proposals'
 const MOBILE_STATE_PATH = '/api/mobile/state'
 const MOBILE_SCAN_PATH = '/api/mobile/scan'
 const MOBILE_JOB_CARDS_PATH = '/api/mobile/job-cards'
+const MOBILE_WORKDAY_STOP_PROPOSALS_PATH = '/api/mobile/workday-stop-proposals'
 const DATACONNECT_LOCATION = String(process.env.FIREBASE_DATACONNECT_LOCATION || process.env.DATACONNECT_LOCATION || '').trim()
 const DATACONNECT_SERVICE = String(process.env.FIREBASE_DATACONNECT_SERVICE || process.env.DATACONNECT_SERVICE || '').trim()
 const DATACONNECT_CONNECTOR = String(process.env.FIREBASE_DATACONNECT_CONNECTOR || process.env.DATACONNECT_CONNECTOR || '').trim()
@@ -2006,7 +2010,7 @@ async function getDbPool() {
       ...connectorOptions,
       database,
       user,
-      ...(useIamDatabaseAuth ? {} : { password }),
+      password: resolvePgPassword({ useIamDatabaseAuth, password }),
       max: Number(process.env.DB_POOL_MAX || 5),
       connectionTimeoutMillis: getDbConnectTimeoutMillis(),
     })
@@ -2509,6 +2513,65 @@ async function assertMobileRequester(client, orgId, decodedToken) {
   return membership
 }
 
+function mobileTokenOrganizationIds(decodedToken) {
+  const candidates = [decodedToken?.org_id, decodedToken?.orgId]
+  const orgs = decodedToken?.orgs
+  if (orgs && typeof orgs === 'object' && !Array.isArray(orgs)) {
+    for (const [orgId, enabled] of Object.entries(orgs)) {
+      if (enabled === true || enabled === 1 || String(enabled).toLowerCase() === 'true') {
+        candidates.push(orgId)
+      }
+    }
+  }
+  return [...new Set(candidates.map(normalizeOrgId).filter(Boolean))]
+}
+
+function mobileOrganizationScopeError(statusCode, code, message) {
+  const error = new Error(code)
+  error.statusCode = statusCode
+  error.publicCode = code
+  error.publicMessage = message
+  return error
+}
+
+async function resolveMobileOrganizationFromToken(client, decodedToken, requestedOrgId = '') {
+  const uid = normalizeText(decodedToken?.uid)
+  const bodyOrgId = normalizeOrgId(requestedOrgId)
+  const claimedOrgIds = mobileTokenOrganizationIds(decodedToken)
+  if (claimedOrgIds.length > 1) {
+    throw mobileOrganizationScopeError(409, 'MOBILE_ORG_CONTEXT_AMBIGUOUS', 'Token zawiera wi?cej ni? jeden kontekst organizacji.')
+  }
+  if (claimedOrgIds.length === 1) {
+    const orgId = claimedOrgIds[0]
+    if (bodyOrgId && bodyOrgId !== orgId) {
+      throw mobileOrganizationScopeError(403, 'MOBILE_ORG_SCOPE_MISMATCH', 'orgId z ??dania nie zgadza si? z organizacj? tokenu.')
+    }
+    return { orgId, membership: await assertMobileRequester(client, orgId, decodedToken) }
+  }
+
+  const memberships = await client.query(
+    `select org_id
+       from public.organization_member
+      where uid = $1::text
+        and status = 'ACTIVE'
+      order by org_id asc
+      limit 2`,
+    [uid],
+  )
+  const orgIds = [...new Set((memberships.rows || []).map((row) => normalizeOrgId(row.org_id)).filter(Boolean))]
+  if (!orgIds.length) {
+    throw mobileOrganizationScopeError(403, 'MOBILE_ORG_FORBIDDEN', 'Token nie ma aktywnego dost?pu do organizacji.')
+  }
+  if (orgIds.length > 1) {
+    throw mobileOrganizationScopeError(409, 'MOBILE_ORG_CONTEXT_REQUIRED', 'Dla tokenu z wieloma organizacjami wymagany jest jednoznaczny claim organizacji.')
+  }
+  const orgId = orgIds[0]
+  if (bodyOrgId && bodyOrgId !== orgId) {
+    throw mobileOrganizationScopeError(403, 'MOBILE_ORG_SCOPE_MISMATCH', 'orgId z ??dania nie zgadza si? z organizacj? wyprowadzon? z tokenu.')
+  }
+  return { orgId, membership: await assertMobileRequester(client, orgId, decodedToken) }
+}
+
 async function resolveMobileWorker(client, orgId, body, decodedToken, membership) {
   const uid = normalizeText(decodedToken?.uid)
   const email = normalizeEmail(decodedToken?.email)
@@ -2868,7 +2931,7 @@ async function upsertMobileRuntimeState(client, orgId, worker, activeWorkday, ac
   }
 }
 
-async function buildMobileSnapshotFromDb(client, orgId, worker) {
+async function buildMobileSnapshotFromDb(client, orgId, worker, { persistRuntimeState = false } = {}) {
   const zones = await fetchMobileZones(client, orgId)
   const activeWorkdayRaw = await fetchActiveMobileWorkday(client, orgId, worker.login)
   const workdays = await fetchMobileWorkdays(client, orgId, worker.login)
@@ -2904,7 +2967,9 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
     }
   }
   const activePause = await fetchActiveMobilePause(client, orgId, worker.login, activeWorkdayRaw?.workday_id)
-  await upsertMobileRuntimeState(client, orgId, worker, activeWorkdayRaw, activeCycleRaw)
+  if (persistRuntimeState) {
+    await upsertMobileRuntimeState(client, orgId, worker, activeWorkdayRaw, activeCycleRaw)
+  }
 
   const activeWorkday = mapMobileWorkdayRow(activeWorkdayRaw)
   const activeCycle = mapMobileEventRow(activeCycleRaw)
@@ -3299,7 +3364,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
     }
   }
 
-  const snapshot = await buildMobileSnapshotFromDb(client, orgId, worker)
+  const snapshot = await buildMobileSnapshotFromDb(client, orgId, worker, { persistRuntimeState: true })
   const resultPayload = {
     ok: true,
     action,
@@ -3399,18 +3464,33 @@ async function handleMobileWorkflowRequest(req, res, requestUrl) {
     return
   }
 
-  const orgId = normalizeOrgId(body?.orgId)
-  if (!orgId) {
+  const isMobileStateRequest = requestUrl.pathname === MOBILE_STATE_PATH
+  const requestedOrgId = isMobileStateRequest ? '' : normalizeOrgId(body?.orgId)
+  if (!isMobileStateRequest && !requestedOrgId) {
     sendMobileApiError(res, 400, 'ORG_ID_MISSING', 'Brak poprawnego orgId.')
     return
   }
 
   const client = await connectDbClient()
+  let transactionStarted = false
   try {
-    await client.query('begin')
-    const membership = await assertMobileRequester(client, orgId, decodedToken)
+    const isMobileScanRequest = requestUrl.pathname === MOBILE_SCAN_PATH
+    if (isMobileScanRequest) {
+      await client.query('begin')
+      transactionStarted = true
+    }
+    const organization = isMobileStateRequest
+      ? await resolveMobileOrganizationFromToken(client, decodedToken, requestedOrgId)
+      : {
+          orgId: requestedOrgId,
+          membership: await assertMobileRequester(client, requestedOrgId, decodedToken),
+        }
+    const orgId = organization.orgId
+    const membership = organization.membership
     const worker = await resolveMobileWorker(client, orgId, body, decodedToken, membership)
-    await client.query('select pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))', [orgId, worker.login])
+    if (isMobileScanRequest) {
+      await client.query('select pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))', [orgId, worker.login])
+    }
 
     let payload
     if (requestUrl.pathname === MOBILE_SCAN_PATH) {
@@ -3426,13 +3506,18 @@ async function handleMobileWorkflowRequest(req, res, requestUrl) {
       payload = { ok: true, snapshot, serverAt: new Date().toISOString() }
     }
 
-    await client.query('commit')
+    if (transactionStarted) {
+      await client.query('commit')
+      transactionStarted = false
+    }
     sendMobileJson(res, 200, payload)
   } catch (error) {
-    try {
-      await client.query('rollback')
-    } catch {
-      // Ignore rollback errors.
+    if (transactionStarted) {
+      try {
+        await client.query('rollback')
+      } catch {
+        // Ignore rollback errors.
+      }
     }
     const dbMapped = mapDatabaseConnectionError(error)
     const integrityMapped = mapMobileIntegrityDatabaseError(error)
@@ -7755,65 +7840,28 @@ function portalScheduleOrderWithLifecycleStatus(order = {}, lifecycleStatus, cha
   }
 }
 
-async function ensurePortalScheduleOrderTable(client) {
-  await client.query(`
-    create table if not exists public.task (
-      org_id varchar(64) not null,
-      id_task varchar(180) not null,
-      client_id varchar(64),
-      zone_id varchar(64),
-      access_end_time varchar(5),
-      access_start_time varchar(5),
-      access_windows text,
-      address_label text,
-      allow_extended_work boolean,
-      city text,
-      client_label text,
-      client_name text,
-      created_at timestamptz,
-      created_by_uid varchar(128),
-      lifecycle_status varchar(20) not null default 'ACTIVE',
-      cancelled_at timestamptz,
-      archived_at timestamptz,
-      date_ymd varchar(10),
-      description text,
-      end_date_ymd varchar(10),
-      end_time varchar(5),
-      execution_address_label text,
-      lat double precision,
-      lng double precision,
-      nip text,
-      object_plan_tasks text,
-      post_code text,
-      price double precision,
-      repeat_every integer,
-      repeat_preset varchar(32),
-      repeat_unit varchar(16),
-      repeat_weekdays text,
-      required_people integer,
-      required_work_minutes integer,
-      schedule_mode varchar(32),
-      start_time varchar(5),
-      street text,
-      supplies text,
-      title text,
-      type varchar(40),
-      updated_at timestamptz,
-      updated_by_uid varchar(128),
-      weekly_schedule_rules text,
-      work_allocations text,
-      worker_comment text,
-      worker_id varchar(128),
-      worker_ids text,
-      worker_label text,
-      worker_login varchar(80),
-      worker_name text,
-      zone_label text,
-      constraint task_lifecycle_status_check
-        check (lifecycle_status in ('ACTIVE', 'CANCELLED', 'ARCHIVED')),
-      primary key (org_id, id_task)
-    )
+async function assertPortalScheduleOrderSchemaReady(client) {
+  const result = await client.query(`
+    select
+      to_regclass('public.task') as task_table,
+      exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'task'
+          and column_name = 'lifecycle_status'
+      ) as has_lifecycle_status
   `)
+  const row = result.rows?.[0] ?? {}
+  if (row.task_table && row.has_lifecycle_status) {
+    return
+  }
+
+  const error = new Error('PORTAL_SCHEDULE_ORDERS_SCHEMA_UNAVAILABLE')
+  error.statusCode = 503
+  error.publicCode = 'PORTAL_SCHEDULE_ORDERS_SCHEMA_UNAVAILABLE'
+  error.publicMessage = 'Grafik zleceń jest chwilowo niedostępny. Skontaktuj się z administratorem.'
+  throw error
 }
 
 async function requirePortalScheduleOrderAccess(client, orgId, uid, { write = false, remove = false } = {}) {
@@ -8298,11 +8346,11 @@ async function readPortalScheduleOrders(client, orgId) {
   const result = await client.query(
     `select
         t.*,
-        c.name as joined_client_name,
-        c.nip as joined_client_nip,
-        c.city as joined_client_city,
-        c.postal_code as joined_client_post_code,
-        c.address as joined_client_street,
+        to_jsonb(c) ->> 'name' as joined_client_name,
+        to_jsonb(c) ->> 'nip' as joined_client_nip,
+        to_jsonb(c) ->> 'city' as joined_client_city,
+        to_jsonb(c) ->> 'postal_code' as joined_client_post_code,
+        to_jsonb(c) ->> 'address' as joined_client_street,
         w.full_name as joined_worker_name,
         w.login as joined_worker_login
        from public.task t
@@ -8570,7 +8618,7 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
     }
 
     client = await connectDbClient()
-    await ensurePortalScheduleOrderTable(client)
+    await assertPortalScheduleOrderSchemaReady(client)
     const requesterRole = await requirePortalScheduleOrderAccess(client, orgId, requesterUid, {
       write: method === 'POST' || method === 'PATCH',
       remove: method === 'DELETE',
@@ -9194,6 +9242,20 @@ const profitabilityApi = createProfitabilityApi({
   verifyFirebaseIdToken,
 })
 
+const workdayStopProposalApi = createWorkdayStopProposalApi({
+  connectDbClient,
+  getRequesterMembership,
+  parseBearerToken,
+  readJsonBody,
+  resolveMobileOrganization: resolveMobileOrganizationFromToken,
+  resolveMobileWorker,
+  sendApiError,
+  sendJson,
+  sendMobileApiError,
+  sendMobileJson,
+  verifyFirebaseIdToken,
+})
+
 const server = http.createServer((req, res) => runWithPlatformRequest(req, () => {
   const scopedRequest = getPlatformRequestContext()
   res.once('finish', () => {
@@ -9241,11 +9303,24 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
     })
     return
   }
+  if (requestUrl.pathname === PORTAL_WORKDAY_STOP_PROPOSALS_PATH) {
+    workdayStopProposalApi.handlePortal(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'WORKDAY_STOP_PROPOSAL_PORTAL_ERROR', error?.message || 'Unexpected workday stop proposal error.')
+    })
+    return
+  }
   if (
     requestUrl.pathname === MOBILE_STATE_PATH ||
     requestUrl.pathname === MOBILE_SCAN_PATH ||
-    requestUrl.pathname === MOBILE_JOB_CARDS_PATH
+    requestUrl.pathname === MOBILE_JOB_CARDS_PATH ||
+    requestUrl.pathname === MOBILE_WORKDAY_STOP_PROPOSALS_PATH
   ) {
+    if (requestUrl.pathname === MOBILE_WORKDAY_STOP_PROPOSALS_PATH) {
+      workdayStopProposalApi.handleMobile(req, res, requestUrl).catch((error) => {
+        sendMobileApiError(res, 500, 'WORKDAY_STOP_PROPOSAL_MOBILE_ERROR', error?.message || 'Unexpected mobile workday stop proposal error.')
+      })
+      return
+    }
     handleMobileWorkflowRequest(req, res, requestUrl).catch((error) => {
       sendMobileApiError(res, 500, 'MOBILE_WORKFLOW_ERROR', error?.message || 'Unexpected mobile workflow error.')
     })

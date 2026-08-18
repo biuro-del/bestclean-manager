@@ -146,6 +146,7 @@ const SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS = [
   { id: 'sub-objects-audits', kind: 'subsection', label: 'Audyty', meta: 'Podsekcja dział "Obiekty"', route: 'audits' },
   { id: 'section-workers', kind: 'section', label: 'Pracownicy', meta: 'Sekcja', route: 'workerProfile' },
   { id: 'sub-worker-profile', kind: 'subsection', label: 'Lista pracowników', meta: 'Podsekcja dział "Pracownicy"', route: 'workerProfile' },
+  { id: 'sub-workday-stop-proposals', kind: 'subsection', label: 'Godziny do weryfikacji', meta: 'Podsekcja dział "Pracownicy"', route: 'workdayStopProposals' },
   { id: 'section-reports', kind: 'section', label: 'Raporty', meta: 'Sekcja', route: 'reports' },
   { id: 'sub-reports-summary', kind: 'subsection', label: 'Zestawienia', meta: 'Podsekcja dział "Raporty"', route: 'reports' },
   { id: 'section-settings', kind: 'section', label: 'Ustawienia', meta: 'Sekcja', route: 'settingsStyles' },
@@ -206,6 +207,7 @@ const PORTAL_ROUTE_VIEW_IDS = {
   workerAccount: 'view-workerAccount',
   workerTime: 'view-workerTime',
   workerTimeDetail: 'view-workerTimeDetail',
+  workdayStopProposals: 'view-workdayStopProposals',
   audits: 'view-audits',
   clientProfile: 'view-clientProfile',
   clientProfileDetails: 'view-clientProfileDetails',
@@ -231,6 +233,7 @@ const PORTAL_ROUTE_FEATURE_KEYS = {
   workerAccount: ['dashboard', 'workerAccount'],
   workerTime: ['dashboard', 'workerTime'],
   workerTimeDetail: ['dashboard', 'workerTimeDetail'],
+  workdayStopProposals: ['workdayStopProposals'],
   clientProfile: ['dashboard', 'clientProfile'],
   clientProfileDetails: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar'],
   reports: ['dashboard', 'events', 'zones', 'clientProfile', 'workerTime', 'reports'],
@@ -251,6 +254,7 @@ const PORTAL_ROUTE_BIND_KEYS = {
   workerAccount: 'workerAccount',
   workerTime: 'workerTime',
   workerTimeDetail: 'workerTimeDetail',
+  workdayStopProposals: 'workdayStopProposals',
   clientProfile: 'clientProfile',
   clientProfileDetails: 'clientProfile:details',
   reports: 'reports',
@@ -1573,6 +1577,8 @@ function routeHasUsableData(route) {
       return appState.workersLoaded === true || (Array.isArray(appState.workers) && appState.workers.length > 0) || (Array.isArray(appState.workerTimeRows) && appState.workerTimeRows.length > 0) || (Array.isArray(appState.workerProfileRows) && appState.workerProfileRows.length > 0)
     case 'workerTimeDetail':
       return (Array.isArray(appState.workerDetailRows) && appState.workerDetailRows.length > 0) || (Array.isArray(appState.workerDetailSourceRows) && appState.workerDetailSourceRows.length > 0)
+    case 'workdayStopProposals':
+      return Boolean(workdayStopProposalsFeature)
     case 'reports':
     case 'settings':
     case 'settingsStyles':
@@ -3115,6 +3121,8 @@ function loadPortalTemplateModule(route) {
       return import('../features/workers/time/index.js')
     case 'workerTimeDetail':
       return import('../features/workers/time-detail/index.js')
+    case 'workdayStopProposals':
+      return import('../features/workers/workday-stop-proposals/index.js')
     case 'zones':
       return import('../features/objects/zones/index.js')
     default:
@@ -3150,6 +3158,8 @@ function loadPortalFeatureModule(featureKey) {
       return import('../features/workers/time/index.js')
     case 'workerTimeDetail':
       return import('../features/workers/time-detail/index.js')
+    case 'workdayStopProposals':
+      return import('../features/workers/workday-stop-proposals/index.js')
     case 'zones':
       return import('../features/objects/zones/index.js')
     default:
@@ -3185,6 +3195,8 @@ function portalFeatureIsReady(featureKey) {
       return Boolean(workerTimeFeature)
     case 'workerTimeDetail':
       return Boolean(workerTimeDetailFeature)
+    case 'workdayStopProposals':
+      return Boolean(workdayStopProposalsFeature)
     case 'zones':
       return Boolean(zonesFeature)
     default:
@@ -3238,6 +3250,9 @@ function assignPortalFeature(featureKey, module) {
     case 'workerTimeDetail':
       workerTimeDetailFeature = workerTimeDetailFeature || module.createWorkerTimeDetailFeature(portalFeatureContext)
       return workerTimeDetailFeature
+    case 'workdayStopProposals':
+      workdayStopProposalsFeature = workdayStopProposalsFeature || module.createWorkdayStopProposalsFeature(portalFeatureContext)
+      return workdayStopProposalsFeature
     case 'zones':
       zonesFeature = zonesFeature || module.createZonesFeature(portalFeatureContext)
       return zonesFeature
@@ -3408,6 +3423,9 @@ function bindPortalRouteOnce(route, navigation = portalNavigation) {
       break
     case 'workerTimeDetail':
       cleanup = bindWorkerTimeDetailViewFunctions()
+      break
+    case 'workdayStopProposals':
+      cleanup = bindWorkdayStopProposalsViewFunctions()
       break
     case 'clientProfile':
       cleanup = bindClientProfileViewFunctions()
@@ -4264,6 +4282,7 @@ let workerProfileFeature = null
 let workerAccountFeature = null
 let workerTimeFeature = null
 let workerTimeDetailFeature = null
+let workdayStopProposalsFeature = null
 
 function getWorkerProfileFeature() {
   if (!workerProfileFeature) {
@@ -4293,6 +4312,13 @@ function getWorkerTimeDetailFeature() {
   return workerTimeDetailFeature
 }
 
+function getWorkdayStopProposalsFeature() {
+  if (!workdayStopProposalsFeature) {
+    throw new Error('Workday stop proposals feature is not initialized.')
+  }
+  return workdayStopProposalsFeature
+}
+
 async function fetchWorkerProfilesForCurrentSession(force = false, options = {}) {
   return getWorkerProfileFeature().fetch(force, options)
 }
@@ -4319,6 +4345,15 @@ function workerTimeSyncSelectionUi() {
 
 async function fetchWorkerDetailForCurrentSession(options = {}) {
   return getWorkerTimeDetailFeature().fetch(options)
+}
+
+async function refreshWorkdayStopProposals() {
+  await ensurePortalFeatureReady('workdayStopProposals')
+  return getWorkdayStopProposalsFeature().refresh()
+}
+
+function bindWorkdayStopProposalsViewFunctions() {
+  return getWorkdayStopProposalsFeature().bind()
 }
 
 function workerDetailDateKeyFromIso(value) {
@@ -6907,6 +6942,11 @@ async function syncRouteDataNow(normalizedRoute, options = {}) {
     return
   }
 
+  if (normalizedRoute === 'workdayStopProposals') {
+    await refreshWorkdayStopProposals()
+    return
+  }
+
   if (normalizedRoute === 'reports') {
     await ensureReportsViewReady()
     return
@@ -7072,6 +7112,11 @@ export function mountPortalApp() {
     }
 
     if (routeName === 'workerTimeDetail') {
+      await syncRouteData(routeName)
+      return
+    }
+
+    if (routeName === 'workdayStopProposals') {
       await syncRouteData(routeName)
       return
     }
@@ -7310,6 +7355,7 @@ export function mountPortalApp() {
     workerAccountFeature = null
     workerTimeFeature = null
     workerTimeDetailFeature = null
+    workdayStopProposalsFeature = null
 
     if (portalNoticeTimer) {
       window.clearTimeout(portalNoticeTimer)
