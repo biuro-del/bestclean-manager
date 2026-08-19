@@ -25,6 +25,7 @@ function loadWorkdayHistoryReader() {
   return new Function('mapMobileWorkdayRow', `${body}\nreturn fetchMobileWorkdays;`)((row) => ({
     workdayId: row.workday_id,
     workerLogin: row.worker_login,
+    startAt: row.start_at,
     status: row.status,
     endAt: row.end_at,
   }))
@@ -122,13 +123,13 @@ test('POST /api/mobile/state nie używa blokady QR dla historii i nie blokuje wi
   assert.deepEqual(queries[0].params, ['ORG-ONE', 'worker.one'])
 })
 
-test('snapshot.workdays zwraca wszystkie historyczne RUNNING wyłącznie dla tokenowego orgId i pracownika', async () => {
+test('snapshot.workdays zwraca historyczny dzień bez STOP nawet przy statusie CLOSED, wyłącznie dla tokenowego orgId i pracownika', async () => {
   const reader = loadWorkdayHistoryReader()
   const rows = [
-    { org_id: 'ORG-ONE', workday_id: 'WD-HISTORY-1', worker_login: 'worker.one', status: 'RUNNING', end_at: null },
-    { org_id: 'ORG-ONE', workday_id: 'WD-HISTORY-2', worker_login: 'worker.one', status: 'RUNNING', end_at: null },
-    { org_id: 'ORG-TWO', workday_id: 'WD-OTHER-ORG', worker_login: 'worker.one', status: 'RUNNING', end_at: null },
-    { org_id: 'ORG-ONE', workday_id: 'WD-OTHER-WORKER', worker_login: 'worker.two', status: 'RUNNING', end_at: null },
+    { org_id: 'ORG-ONE', workday_id: 'WD-HISTORY-CLOSED-NO-STOP', worker_login: 'worker.one', start_at: '2026-08-05T09:15:00.000Z', status: 'CLOSED', end_at: null },
+    { org_id: 'ORG-ONE', workday_id: 'WD-HISTORY-RUNNING-NO-STOP', worker_login: 'worker.one', start_at: '2026-08-04T17:12:00.000Z', status: 'RUNNING', end_at: null },
+    { org_id: 'ORG-TWO', workday_id: 'WD-OTHER-ORG', worker_login: 'worker.one', start_at: '2026-08-05T09:15:00.000Z', status: 'CLOSED', end_at: null },
+    { org_id: 'ORG-ONE', workday_id: 'WD-OTHER-WORKER', worker_login: 'worker.two', start_at: '2026-08-05T09:15:00.000Z', status: 'CLOSED', end_at: null },
   ]
   let observedQuery = null
   const snapshotWorkdays = await reader(
@@ -144,10 +145,26 @@ test('snapshot.workdays zwraca wszystkie historyczne RUNNING wyłącznie dla tok
     'worker.one',
   )
 
-  assert.deepEqual(snapshotWorkdays.map((workday) => workday.workdayId), ['WD-HISTORY-1', 'WD-HISTORY-2'])
-  assert.ok(snapshotWorkdays.every((workday) => workday.status === 'RUNNING' && workday.endAt === null))
+  assert.deepEqual(snapshotWorkdays, [
+    {
+      workdayId: 'WD-HISTORY-CLOSED-NO-STOP',
+      workerLogin: 'worker.one',
+      startAt: '2026-08-05T09:15:00.000Z',
+      status: 'CLOSED',
+      endAt: null,
+    },
+    {
+      workdayId: 'WD-HISTORY-RUNNING-NO-STOP',
+      workerLogin: 'worker.one',
+      startAt: '2026-08-04T17:12:00.000Z',
+      status: 'RUNNING',
+      endAt: null,
+    },
+  ])
   assert.match(observedQuery, /where org_id = \$1/i)
   assert.match(observedQuery, /lower\(worker_login\) = lower\(\$2\)/i)
+  assert.doesNotMatch(observedQuery, /\bstatus\s*(?:=|<>|!=|is)\b/i)
+  assert.doesNotMatch(observedQuery, /\bend_at\s*(?:=|<>|!=|is)\b/i)
 })
 
 test('snapshot dołącza tylko własną, zawężoną stopProposal do zwróconego Workday', () => {
