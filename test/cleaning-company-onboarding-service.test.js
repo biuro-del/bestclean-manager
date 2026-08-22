@@ -5,6 +5,8 @@ const test = require('node:test')
 
 const { LEGAL_DOCUMENT_ALLOWLIST } = require('../cleaning-company-onboarding-domain')
 const {
+  CLEANING_COMPANY_REGISTRATION_CHANNEL,
+  CLEANING_COMPANY_REGISTRATION_GRANT_VERSION,
   CLEANING_COMPANY_TRIAL_DAYS,
   CleaningCompanyOnboardingError,
   getCleaningCompanyLegalDocuments,
@@ -37,6 +39,8 @@ function verifiedToken(overrides = {}) {
     uid: 'firebase-owner-1',
     email: 'owner@example.test',
     email_verified: true,
+    cleanziInitialRegistrationChannel: 'registration_cleaning_company',
+    cleanziRegistrationGrantVersion: 1,
     name: 'Anna Właścicielka',
     ...overrides,
   }
@@ -196,6 +200,22 @@ test('requires a verified e-mail before it can open a database transaction', asy
     (error) => error instanceof CleaningCompanyOnboardingError && error.code === 'EMAIL_VERIFICATION_REQUIRED',
   )
   assert.deepEqual(client.calls, [])
+})
+
+test('refuses a verified identity that was not issued through the cleaning-company registration gate', async () => {
+  const client = createClient()
+  await assert.rejects(
+    provisionCleaningCompany(client, {
+      decodedToken: verifiedToken({
+        cleanziInitialRegistrationChannel: 'registration_facility_manager',
+        cleanziRegistrationGrantVersion: CLEANING_COMPANY_REGISTRATION_GRANT_VERSION,
+      }),
+      payload: validPayload(),
+    }),
+    (error) => error instanceof CleaningCompanyOnboardingError && error.code === 'REGISTRATION_PROVENANCE_REQUIRED',
+  )
+  assert.deepEqual(client.calls, [])
+  assert.equal(CLEANING_COMPANY_REGISTRATION_CHANNEL, 'registration_cleaning_company')
 })
 
 test('publishes fixed legal documents and requires App Check unless explicitly disabled', () => {

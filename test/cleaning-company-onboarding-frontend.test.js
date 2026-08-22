@@ -16,6 +16,7 @@ const layout = readPortalSource('ui', 'layoutTemplate.js')
 const auth = readPortalSource('auth', 'authService.js')
 const app = readPortalSource('ui', 'portalApp.js')
 const firebase = readPortalSource('firebase', 'firebaseClient.js')
+const server = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8')
 
 test('portal exposes a separate company-registration path without nesting the onboarding form in login', () => {
   for (const id of [
@@ -49,19 +50,37 @@ test('registration uses server-published, exact legal documents and a trusted on
   assert.match(app, /result\?\.status === 'CLEANING_COMPANY_ONBOARDING_REQUIRED'/)
 })
 
-test('company registration is checked before OAuth/e-mail authentication and reuses the existing App Check provider', () => {
+test('company registration obtains the central gate grant before Firebase Auth and reuses the existing App Check provider', () => {
   const googleStart = auth.indexOf('export async function startCleaningCompanyGoogleSignIn')
-  const googlePopup = auth.indexOf('signInWithPopup', googleStart)
+  const googleGrant = auth.indexOf('await issueCleaningCompanyRegistrationGrant(firebase, {', googleStart)
+  const googleCredential = auth.indexOf('signInWithCredential(firebase.auth, GoogleAuthProvider.credential(idToken))', googleStart)
   const googleAvailability = auth.indexOf('await assertCleaningCompanyRegistrationAvailable()', googleStart)
   const emailStart = auth.indexOf('export async function requestCleaningCompanyEmailLink')
+  const emailGrant = auth.indexOf('await issueCleaningCompanyRegistrationGrant(firebase, {', emailStart)
   const emailLink = auth.indexOf('sendSignInLinkToEmail', emailStart)
   const emailAvailability = auth.indexOf('await assertCleaningCompanyRegistrationAvailable()', emailStart)
 
-  assert.ok(googleStart >= 0 && googleAvailability > googleStart && googleAvailability < googlePopup)
-  assert.ok(emailStart >= 0 && emailAvailability > emailStart && emailAvailability < emailLink)
+  assert.ok(googleStart >= 0 && googleAvailability > googleStart && googleAvailability < googleGrant)
+  assert.ok(googleGrant > googleStart && googleGrant < googleCredential)
+  assert.ok(emailStart >= 0 && emailAvailability > emailStart && emailAvailability < emailGrant)
+  assert.ok(emailGrant > emailStart && emailGrant < emailLink)
+  assert.match(auth, /httpsCallable/)
+  assert.match(auth, /getFunctions\(firebase\.app, CENTRAL_REGISTRATION_FUNCTIONS_REGION\)/)
+  assert.match(auth, /providerId: 'google\.com'/)
+  assert.match(auth, /providerId: 'emailLink'/)
+  assert.match(auth, /VITE_CENTRAL_REGISTRATION_ISSUER_READY/)
+  assert.match(auth, /VITE_CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID/)
+  assert.match(auth, /requireCleaningCompanyAppCheckToken\(\)/)
   assert.match(auth, /X-Firebase-AppCheck/)
   assert.equal((firebase.match(/initializeAppCheck\(/g) || []).length, 1)
   assert.match(firebase, /getFirebaseAppCheckToken/)
+  assert.match(server, /https:\/\/accounts\.google\.com/)
+})
+
+test('company bootstrap requires the central registration provenance claim', () => {
+  assert.match(server, /hasCleaningCompanyRegistrationProvenance/)
+  assert.match(server, /REGISTRATION_PROVENANCE_REQUIRED/)
+  assert.match(auth, /getIdToken\(true\)/)
 })
 
 test('public company-registration entry is fail-closed until the server enables it', () => {

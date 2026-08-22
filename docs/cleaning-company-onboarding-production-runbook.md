@@ -1,12 +1,16 @@
 # Cleanzi — rejestracja firmy sprzątającej: wydanie produkcyjne
 
-**Id wydania:** `CLZ-ONBOARDING-20260822-01`
-**Stan:** kandydat do wydania — nie wdrożony, nieaktywowany.
+**Fundament produkcyjny:** `CLZ-ONBOARDING-20260822-01` — wdrożony z wyłączoną rejestracją.
+**Id bieżącego kandydata:** `CLZ-ONBOARDING-20260822-02`
+**Stan:** kandydat do wydania — nieaktywny publicznie.
 
 ## Zakres wydania
 
 - pierwszy ekran portalu umożliwia istniejącemu użytkownikowi logowanie jak dotychczas;
 - nowa firma może rozpocząć przez Google albo link potwierdzający wysłany e-mailem;
+- każde nowe konto przechodzi przez istniejącą centralną bramę Firebase: przed utworzeniem
+  konta portal pobiera jednorazowy grant `CLEANING_COMPANY`, a serwer wymaga pochodzenia
+  `registration_cleaning_company` w tokenie;
 - po zweryfikowaniu adresu e-mail właściciel uzupełnia NIP, pełną nazwę firmy,
   deklarowaną liczbę pracowników oraz wymagane potwierdzenia dokumentów;
 - zgody marketingowe (e-mail, SMS i telefon) są niezależne, dobrowolne i domyślnie
@@ -32,45 +36,49 @@ z obecnym brzmieniem Regulaminu bez zatwierdzenia pierwszej polityki albo zmiany
 
 Przed wdrożeniem administrator sprawdza w projekcie Firebase używanym przez portal:
 
+- aktywną globalną bramę `beforeCreate` oraz callable
+  `issueCleaningCompanyRegistrationGrant` w `europe-west1`; nie wdraża drugiej bramy i nie
+  zmienia kanału rejestracji zarządców;
 - włączony dostawca Google;
 - włączony dostawca e-mail link oraz dozwolony adres URL powrotu `portal.cleanzi.pl`;
 - `portal.cleanzi.pl` na liście autoryzowanych domen;
 - App Check dla aplikacji WWW, klucz reCAPTCHA Enterprise przekazany do frontendu i
   egzekwowanie tokenu dla tej ścieżki;
+- w App Hosting, wyłącznie dla kompilacji, ustawione: `VITE_CENTRAL_REGISTRATION_ISSUER_READY=true`
+  oraz `VITE_CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID` identyczny z publicznym client ID aktywnego
+  issuera. Client ID może pozostać poza Gitem, lecz nigdy nie wolno dodawać do frontendu
+  client secreta Google;
 - kontrolowana sekretami zmienna `CLEANING_COMPANY_ONBOARDING_IP_HASH_SECRET`
   (opcjonalna; brak sekretu oznacza brak zapisu IP, nigdy zapis surowego IP).
 
-W konfiguracji App Hosting oba przełączniki muszą pozostać `false` do czasu pełnego
-odbioru. Dopiero po zatwierdzeniu opisanej polityki można ustawić:
+W konfiguracji App Hosting oba przełączniki rejestracji oraz build-time flaga issuera muszą
+pozostać `false` do czasu pełnego odbioru. Dopiero po zatwierdzeniu opisanej polityki i
+technicznego preflightu można ustawić:
 
 ```text
 CLEANING_COMPANY_ONBOARDING_ENABLED=true
 CLEANING_COMPANY_ONBOARDING_AUTO_CONFIRMATION_ENABLED=true
 CLEANING_COMPANY_ONBOARDING_REQUIRE_APP_CHECK=true
+VITE_CENTRAL_REGISTRATION_ISSUER_READY=true
 ```
 
 ## Kolejność wydania
 
-1. Uruchomić wyłącznie odczytowy audyt migracji i zweryfikować zgodność produkcyjnego
-   schematu z migracją:
+1. Migracja `CLZ-DB-20260822-CLEANING-COMPANY-ONBOARDING-V2-01` została wykonana wraz z
+   fundamentem `-01`; dla tego kandydata nie wykonuje się jej drugi raz. Zweryfikować jedynie
+   odczytowy postflight:
 
    ```text
    npm run migrate:cleaning-company-onboarding -- --audit
    ```
 
-2. Wykonać migrację raz, z wymaganym potwierdzeniem produkcyjnym skryptu migracyjnego.
-   Migracja jest addytywna; nie wykonuje się down-migration.
-
-   ```text
-   npm run migrate:cleaning-company-onboarding -- --apply --confirm-production=CLZ-DB-20260822-CLEANING-COMPANY-ONBOARDING-V2-01
-   ```
-
-   Token techniczny skryptu nie jest akceptacją właściciela produktu; uruchamia się go
-   dopiero po bramce wydania opisanej niżej.
+2. Ustawić i niezależnie odczytać konfigurację Firebase Auth, App Check oraz build-time
+   App Hosting wymienioną wyżej; przełączniki runtime rejestracji pozostają `false`.
 3. Wdrożyć kandydat App Hosting przy wyłączonych przełącznikach rejestracji.
-4. Zweryfikować na środowisku podglądowym: Google, link e-mailowy (przed i po kliknięciu),
+4. Zweryfikować w kontrolowanym przebiegu: Google, link e-mailowy (przed i po kliknięciu),
    niepoprawny NIP, NIP istniejącej firmy, wartość `0` pracowników, brak zgód marketingowych,
-   ponowienie tego samego żądania oraz niezmienione logowanie dotychczasowego użytkownika.
+   ponowienie tego samego żądania, odrzucenie tokenu bez provenance oraz niezmienione logowanie
+   dotychczasowego użytkownika.
 5. Dopiero po odbiorze włączyć przełączniki i powtórzyć krótki test dymny z odizolowanym
    kontem testowym.
 
@@ -86,7 +94,7 @@ użytkownikom danych w ramach procedury rollbacku.
 Wdrożenie na produkcję wymaga dokładnego komunikatu właściciela produktu:
 
 ```text
-OK PRODUKCJA CLZ-ONBOARDING-20260822-01
+OK PRODUKCJA CLZ-ONBOARDING-20260822-02
 ```
 
 Jeżeli wybierana jest automatyczna polityka potwierdzania, zgoda musi to wyraźnie obejmować.

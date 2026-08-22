@@ -16,6 +16,13 @@ env:
     value: "1"
     availability:
       - BUILD
+  # A separate build-time gate for the central Firebase registration issuer.
+  # Keep false until its App Check, Auth and Google configuration has passed
+  # the release preflight for portal.cleanzi.pl.
+  - variable: VITE_CENTRAL_REGISTRATION_ISSUER_READY
+    value: "false"
+    availability:
+      - BUILD
   # Kept fail-closed until the Firebase registration gate and App Check are
   # configured for portal.cleanzi.pl.
   - variable: CLEANING_COMPANY_ONBOARDING_ENABLED

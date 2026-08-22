@@ -11,9 +11,10 @@ import {
   sendPasswordResetEmail,
   signInWithEmailLink,
   signInWithEmailAndPassword,
-  signInWithPopup,
+  signInWithCredential,
   signOut,
 } from 'firebase/auth'
+import { getFunctions, httpsCallable } from 'firebase/functions'
 import {
   ensureFirebase,
   ensureFirebaseAuthPersistence,
@@ -30,6 +31,13 @@ const PLATFORM_EMAIL_MFA_TOKEN_KEY = 'iclean.portal.platformEmailMfaToken'
 const CLEANING_COMPANY_EMAIL_LINK_EMAIL_KEY = 'iclean.portal.cleaningCompanyEmailLinkEmail'
 const AUTH_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const AUTH_EMAIL_MAX_LENGTH = 160
+const CENTRAL_REGISTRATION_FUNCTIONS_REGION = 'europe-west1'
+const CENTRAL_REGISTRATION_ISSUER_NAME = 'issueCleaningCompanyRegistrationGrant'
+const GOOGLE_IDENTITY_SCRIPT_URL = 'https://accounts.google.com/gsi/client'
+const CENTRAL_REGISTRATION_ISSUER_READY = String(import.meta.env.VITE_CENTRAL_REGISTRATION_ISSUER_READY ?? '')
+  .trim()
+  .toLowerCase() === 'true'
+const CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID = String(import.meta.env.VITE_CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID ?? '').trim()
 export const CLEANING_COMPANY_LEGAL_DOCUMENTS = Object.freeze({
   terms: Object.freeze({
     documentId: 'terms',
@@ -45,6 +53,7 @@ export const CLEANING_COMPANY_LEGAL_DOCUMENTS = Object.freeze({
 let pendingMfaResolver = null
 let pendingMfaEnrollment = null
 let pendingRecaptchaVerifier = null
+let googleIdentityScriptPromise = null
 
 function toText(value) {
   return String(value ?? '').trim()
@@ -405,6 +414,183 @@ export async function login({ login: loginValue, password }) {
   }
 }
 
+function assertCentralRegistrationIssuerReady({ requiresGoogle = false } = {}) {
+  if (!CENTRAL_REGISTRATION_ISSUER_READY) {
+    throw createPublicAuthError(
+      'REGISTRATION_ISSUER_NOT_READY',
+      'Bezpieczna rejestracja firmy nie jest jeszcze gotowa. Spróbuj ponownie później.',
+    )
+  }
+  if (requiresGoogle && !CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID) {
+    throw createPublicAuthError(
+      'GOOGLE_REGISTRATION_NOT_READY',
+      'Rejestracja przez Google nie jest jeszcze poprawnie skonfigurowana.',
+    )
+  }
+}
+
+async function requireCleaningCompanyAppCheckToken() {
+  const appCheckToken = await getFirebaseAppCheckToken()
+  if (!appCheckToken) {
+    throw createPublicAuthError(
+      'APP_CHECK_NOT_READY',
+      'Nie udało się potwierdzić bezpieczeństwa rejestracji. Odśwież stronę i spróbuj ponownie.',
+    )
+  }
+  return appCheckToken
+}
+
+function issuerErrorText(error) {
+  return [error?.details?.code, error?.message, error?.code]
+    .map((value) => toText(value).toUpperCase())
+    .filter(Boolean)
+    .join(' ')
+}
+
+function mapCentralRegistrationIssuerError(error) {
+  const code = issuerErrorText(error)
+  if (code.includes('REGISTRATION_GRANT_ALREADY_ISSUED')) {
+    return createPublicAuthError(
+      'REGISTRATION_GRANT_ALREADY_ISSUED',
+      'Link rejestracyjny został już przygotowany. Użyj najnowszego linku z wiadomości e-mail albo spróbuj ponownie po jego wygaśnięciu.',
+    )
+  }
+  if (code.includes('APP_CHECK') || code.includes('UNAUTHENTICATED')) {
+    return createPublicAuthError(
+      'APP_CHECK_NOT_READY',
+      'Nie udało się potwierdzić bezpieczeństwa rejestracji. Odśwież stronę i spróbuj ponownie.',
+    )
+  }
+  return createPublicAuthError(
+    'REGISTRATION_ISSUER_UNAVAILABLE',
+    'Nie udało się bezpiecznie rozpocząć rejestracji. Spróbuj ponownie za chwilę.',
+  )
+}
+
+async function issueCleaningCompanyRegistrationGrant(firebase, payload) {
+  assertCentralRegistrationIssuerReady()
+  await requireCleaningCompanyAppCheckToken()
+  if (!firebase?.app) {
+    throw createPublicAuthError('FIREBASE_AUTH_UNAVAILABLE', 'Rejestracja firmy jest chwilowo niedostępna.')
+  }
+
+  try {
+    const issuer = httpsCallable(
+      getFunctions(firebase.app, CENTRAL_REGISTRATION_FUNCTIONS_REGION),
+      CENTRAL_REGISTRATION_ISSUER_NAME,
+    )
+    await issuer(payload)
+  } catch (error) {
+    throw mapCentralRegistrationIssuerError(error)
+  }
+}
+
+function createGoogleRegistrationNonce() {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID()
+  }
+  if (typeof globalThis.crypto?.getRandomValues !== 'function') {
+    throw createPublicAuthError('GOOGLE_IDENTITY_UNAVAILABLE', 'Rejestracja przez Google jest chwilowo niedostępna.')
+  }
+  const bytes = new Uint8Array(20)
+  globalThis.crypto.getRandomValues(bytes)
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+async function loadGoogleIdentityLibrary() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    throw createPublicAuthError('GOOGLE_IDENTITY_UNAVAILABLE', 'Rejestracja przez Google wymaga przeglądarki.')
+  }
+  if (window.google?.accounts?.id) {
+    return window.google.accounts.id
+  }
+  if (!googleIdentityScriptPromise) {
+    googleIdentityScriptPromise = new Promise((resolve, reject) => {
+      const finish = () => {
+        const identity = window.google?.accounts?.id
+        if (identity?.initialize && identity?.prompt) {
+          resolve(identity)
+          return
+        }
+        reject(createPublicAuthError('GOOGLE_IDENTITY_UNAVAILABLE', 'Rejestracja przez Google jest chwilowo niedostępna.'))
+      }
+      const existing = document.querySelector(`script[src="${GOOGLE_IDENTITY_SCRIPT_URL}"]`)
+      if (existing) {
+        existing.addEventListener('load', finish, { once: true })
+        existing.addEventListener(
+          'error',
+          () => reject(createPublicAuthError('GOOGLE_IDENTITY_UNAVAILABLE', 'Rejestracja przez Google jest chwilowo niedostępna.')),
+          { once: true },
+        )
+        return
+      }
+
+      const script = document.createElement('script')
+      script.src = GOOGLE_IDENTITY_SCRIPT_URL
+      script.async = true
+      script.defer = true
+      script.addEventListener('load', finish, { once: true })
+      script.addEventListener(
+        'error',
+        () => reject(createPublicAuthError('GOOGLE_IDENTITY_UNAVAILABLE', 'Rejestracja przez Google jest chwilowo niedostępna.')),
+        { once: true },
+      )
+      document.head.appendChild(script)
+    })
+  }
+  return googleIdentityScriptPromise
+}
+
+async function requestGoogleRegistrationCredential() {
+  assertCentralRegistrationIssuerReady({ requiresGoogle: true })
+  const googleIdentity = await loadGoogleIdentityLibrary()
+  const nonce = createGoogleRegistrationNonce()
+
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const settle = (callback, value) => {
+      if (settled) return
+      settled = true
+      callback(value)
+    }
+
+    try {
+      googleIdentity.initialize({
+        client_id: CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID,
+        nonce,
+        auto_select: false,
+        cancel_on_tap_outside: true,
+        callback: (response) => {
+          const idToken = toText(response?.credential)
+          if (!idToken) {
+            settle(
+              reject,
+              createPublicAuthError('GOOGLE_ID_TOKEN_REQUIRED', 'Google nie zwrócił potwierdzenia tożsamości. Spróbuj ponownie.'),
+            )
+            return
+          }
+          settle(resolve, { idToken, nonce })
+        },
+      })
+      googleIdentity.prompt((notification) => {
+        const cancelled = notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()
+        const dismissed = notification?.isDismissedMoment?.() && notification?.getDismissedReason?.() !== 'credential_returned'
+        if (cancelled || dismissed) {
+          settle(
+            reject,
+            createPublicAuthError('GOOGLE_ACCOUNT_SELECTION_CANCELLED', 'Wybór konta Google został anulowany. Spróbuj ponownie lub zarejestruj się e-mailem.'),
+          )
+        }
+      })
+    } catch {
+      settle(
+        reject,
+        createPublicAuthError('GOOGLE_IDENTITY_UNAVAILABLE', 'Rejestracja przez Google jest chwilowo niedostępna.'),
+      )
+    }
+  })
+}
+
 async function resolveFreshAuthenticatedUser(user) {
   localStorage.removeItem(AUTH_STORAGE_KEY)
   sessionStorage.removeItem(PLATFORM_EMAIL_MFA_TOKEN_KEY)
@@ -466,9 +652,16 @@ export async function startCleaningCompanyGoogleSignIn() {
 
   await assertCleaningCompanyRegistrationAvailable()
   await ensureFirebaseAuthPersistence()
-  const provider = new GoogleAuthProvider()
-  provider.setCustomParameters({ prompt: 'select_account' })
-  const credential = await signInWithPopup(firebase.auth, provider)
+  const { idToken, nonce } = await requestGoogleRegistrationCredential()
+  // The global Firebase beforeCreate gate consumes this grant during the next
+  // operation. Do not replace this credential flow with a direct Firebase
+  // popup: it would try to create the user before the issuer can grant it.
+  await issueCleaningCompanyRegistrationGrant(firebase, {
+    providerId: 'google.com',
+    googleIdToken: idToken,
+    googleNonce: nonce,
+  })
+  const credential = await signInWithCredential(firebase.auth, GoogleAuthProvider.credential(idToken))
   return resolveFreshAuthenticatedUser(credential.user)
 }
 
@@ -488,6 +681,12 @@ export async function requestCleaningCompanyEmailLink(emailValue) {
 
   await assertCleaningCompanyRegistrationAvailable()
   await ensureFirebaseAuthPersistence()
+  // A valid grant must exist before the Firebase e-mail link can create a
+  // first account. The issuer and the blocking gate keep the grant private.
+  await issueCleaningCompanyRegistrationGrant(firebase, {
+    providerId: 'emailLink',
+    email,
+  })
   try {
     await sendSignInLinkToEmail(firebase.auth, email, {
       url: cleaningCompanyEmailLinkContinueUrl(),
@@ -499,7 +698,11 @@ export async function requestCleaningCompanyEmailLink(emailValue) {
     return { email }
   } catch (error) {
     const code = toText(error?.code).toLowerCase()
-    if (code === 'auth/unauthorized-continue-uri' || code === 'auth/unauthorized-domain') {
+    if (
+      code === 'auth/unauthorized-continue-uri' ||
+      code === 'auth/unauthorized-domain' ||
+      code === 'auth/operation-not-allowed'
+    ) {
       throw createPublicAuthError(
         'COMPANY_EMAIL_LINK_NOT_CONFIGURED',
         'Rejestracja e-mailem nie jest jeszcze poprawnie skonfigurowana dla tej domeny.',

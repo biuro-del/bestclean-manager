@@ -17,6 +17,11 @@ const CLEANING_COMPANY_ONBOARDING_READY = 'READY'
 const CLEANING_COMPANY_ORGANIZATION_KIND = 'CLEANING_PROVIDER'
 const CLEANING_COMPANY_TRIAL_DAYS = 14
 const MARKETING_CONSENT_COPY_VERSION = '2026-08-22'
+// These claims are written only by the central Firebase beforeCreate gate
+// after it has consumed a single-use cleaning-company registration grant.
+// They are provenance, not organization roles or permissions.
+const CLEANING_COMPANY_REGISTRATION_CHANNEL = 'registration_cleaning_company'
+const CLEANING_COMPANY_REGISTRATION_GRANT_VERSION = 1
 
 class CleaningCompanyOnboardingError extends Error {
   constructor(code, message, statusCode = 400, details = undefined) {
@@ -54,6 +59,11 @@ function requiresCleaningCompanyAppCheck(environment = process.env) {
 
 function hasVerifiedCompanyEmail(decodedToken) {
   return decodedToken?.email_verified === true && Boolean(normalizeEmail(decodedToken?.email))
+}
+
+function hasCleaningCompanyRegistrationProvenance(decodedToken) {
+  return text(decodedToken?.cleanziInitialRegistrationChannel) === CLEANING_COMPANY_REGISTRATION_CHANNEL &&
+    Number(decodedToken?.cleanziRegistrationGrantVersion) === CLEANING_COMPANY_REGISTRATION_GRANT_VERSION
 }
 
 function normalizeEmail(value) {
@@ -194,6 +204,13 @@ function assertAuthenticatedVerifiedOwner(decodedToken) {
     throw new CleaningCompanyOnboardingError(
       'EMAIL_VERIFICATION_REQUIRED',
       'Najpierw potwierdź adres e-mail, a potem uzupełnij dane firmy.',
+      403,
+    )
+  }
+  if (!hasCleaningCompanyRegistrationProvenance(decodedToken)) {
+    throw new CleaningCompanyOnboardingError(
+      'REGISTRATION_PROVENANCE_REQUIRED',
+      'To konto nie zostało utworzone przez bezpieczną rejestrację firmy sprzątającej.',
       403,
     )
   }
@@ -575,6 +592,8 @@ module.exports = Object.freeze({
   CLEANING_COMPANY_ONBOARDING_REQUIRED,
   CLEANING_COMPANY_ONBOARDING_READY,
   CLEANING_COMPANY_ORGANIZATION_KIND,
+  CLEANING_COMPANY_REGISTRATION_CHANNEL,
+  CLEANING_COMPANY_REGISTRATION_GRANT_VERSION,
   CLEANING_COMPANY_TRIAL_DAYS,
   MARKETING_CONSENT_COPY_VERSION,
   CleaningCompanyOnboardingError,
@@ -582,6 +601,7 @@ module.exports = Object.freeze({
   assertAuthenticatedVerifiedOwner,
   createOrganizationId,
   getCleaningCompanyLegalDocuments,
+  hasCleaningCompanyRegistrationProvenance,
   hasVerifiedCompanyEmail,
   hashOnboardingPayload,
   isCleaningCompanyOnboardingEnabled,
