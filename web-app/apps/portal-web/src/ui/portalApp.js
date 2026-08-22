@@ -1,20 +1,28 @@
 import {
+  CLEANING_COMPANY_LEGAL_DOCUMENTS,
   acceptPlatformContext,
   beginMfaSignInChallenge,
   beginPhoneMfaEnrollment,
   beginTotpEnrollment,
   clearPlatformContextSession,
+  completeCleaningCompanyEmailLinkSignIn,
+  completeCleaningCompanyOnboarding,
   completeMfaSignIn,
   completePhoneMfaEnrollment,
   completeTotpEnrollment,
   ensureSessionContext,
+  getCleaningCompanyLegalDocuments,
   getSession,
+  getStoredCleaningCompanyEmailLinkEmail,
+  isCleaningCompanyEmailLink,
   login,
   logout,
+  requestCleaningCompanyEmailLink,
   requestPasswordReset,
   requestPlatformEmailMfaCode,
   requireAuth,
   selectOrganization,
+  startCleaningCompanyGoogleSignIn,
   verifyPlatformEmailMfaCode,
 } from '../auth/authService'
 import { getDataSourceLabel, waitForFirebaseAuthReady } from '../firebase/firebaseClient'
@@ -100,6 +108,11 @@ let platformSelectedOrganization = null
 let pendingMfaChallenge = null
 let pendingMfaEnrollmentType = ''
 let pendingEmailMfaChallengeId = ''
+let cleaningCompanyLegalDocuments = null
+let cleaningCompanyOnboardingCommandId = ''
+let cleaningCompanyRegistrationAvailable = false
+let cleaningCompanyRegistrationAvailabilityRequest = 0
+let loginControlsBusy = false
 let calendarRemoteSaveTimer = 0
 let sidebarGlobalSearchResults = []
 let sidebarGlobalSearchActiveIndex = -1
@@ -3500,7 +3513,116 @@ function setUserChip(session) {
   }
 }
 
+function companyBasicsElements() {
+  return {
+    overlay: document.getElementById('companyBasicsOverlay'),
+    form: document.getElementById('companyBasicsForm'),
+    nip: document.getElementById('companyBasicsNip'),
+    legalName: document.getElementById('companyBasicsLegalName'),
+    declaredEmployeeCount: document.getElementById('companyBasicsEmployeeCount'),
+    terms: document.getElementById('companyBasicsTerms'),
+    privacy: document.getElementById('companyBasicsPrivacy'),
+    marketingEmail: document.getElementById('companyBasicsMarketingEmail'),
+    marketingSms: document.getElementById('companyBasicsMarketingSms'),
+    marketingPhone: document.getElementById('companyBasicsMarketingPhone'),
+    termsLink: document.getElementById('companyBasicsTermsLink'),
+    termsVersion: document.getElementById('companyBasicsTermsVersion'),
+    privacyLink: document.getElementById('companyBasicsPrivacyLink'),
+    privacyVersion: document.getElementById('companyBasicsPrivacyVersion'),
+    submit: document.getElementById('companyBasicsSubmit'),
+    signOut: document.getElementById('companyBasicsSignOut'),
+    error: document.getElementById('companyBasicsError'),
+  }
+}
+
+function setCompanyBasicsError(message = '', tone = 'error') {
+  const { error } = companyBasicsElements()
+  if (!error) return
+  error.textContent = message
+  error.dataset.tone = message ? tone : ''
+  error.hidden = !message
+}
+
+function setCompanyBasicsBusy(isBusy, label = '') {
+  const elements = companyBasicsElements()
+  const controls = [
+    elements.nip,
+    elements.legalName,
+    elements.declaredEmployeeCount,
+    elements.terms,
+    elements.privacy,
+    elements.marketingEmail,
+    elements.marketingSms,
+    elements.marketingPhone,
+  ]
+  controls.forEach((control) => {
+    if (control) control.disabled = isBusy
+  })
+  if (elements.submit) {
+    elements.submit.disabled = isBusy || !cleaningCompanyLegalDocuments
+    elements.submit.textContent = isBusy ? label || 'Zapisywanie...' : 'Zapisz i uruchom portal'
+  }
+}
+
+function applyCleaningCompanyLegalDocuments(documents = CLEANING_COMPANY_LEGAL_DOCUMENTS) {
+  const elements = companyBasicsElements()
+  if (elements.termsLink) elements.termsLink.href = documents.terms.url
+  if (elements.termsVersion) elements.termsVersion.textContent = `(wersja ${documents.terms.version})`
+  if (elements.privacyLink) elements.privacyLink.href = documents.privacy.url
+  if (elements.privacyVersion) elements.privacyVersion.textContent = `(wersja ${documents.privacy.version})`
+}
+
+function hideCleaningCompanyBasicsOverlay({ reset = false } = {}) {
+  const { overlay, form } = companyBasicsElements()
+  if (overlay) overlay.hidden = true
+  document.body.classList.remove('company-basics-open')
+  if (reset && form) form.reset()
+  if (reset) {
+    cleaningCompanyLegalDocuments = null
+    cleaningCompanyOnboardingCommandId = ''
+    setCompanyBasicsError('')
+  }
+}
+
+async function showCleaningCompanyBasicsOverlay() {
+  const elements = companyBasicsElements()
+  const loginScreen = document.getElementById('loginScreen')
+  const portalRoot = document.getElementById('portalRoot')
+  if (!elements.overlay || !elements.form) {
+    throw new Error('Nie udało się wyświetlić formularza danych firmy.')
+  }
+
+  if (portalRoot) portalRoot.style.display = 'none'
+  if (loginScreen) loginScreen.style.display = 'none'
+  elements.form.reset()
+  cleaningCompanyLegalDocuments = null
+  cleaningCompanyOnboardingCommandId = ''
+  applyCleaningCompanyLegalDocuments(CLEANING_COMPANY_LEGAL_DOCUMENTS)
+  setCompanyBasicsError('')
+  elements.overlay.hidden = false
+  document.body.classList.add('company-basics-open')
+  setCompanyBasicsBusy(true, 'Pobieranie dokumentów...')
+
+  try {
+    // The server publishes the exact legal-document version accepted by the
+    // provisioning endpoint. The UI does not invent an acceptance locally.
+    const publishedDocuments = await getCleaningCompanyLegalDocuments()
+    if (!publishedDocuments.enabled) {
+      throw new Error('Rejestracja firmy nie jest obecnie dostępna. Wyloguj się i spróbuj ponownie później.')
+    }
+    cleaningCompanyLegalDocuments = publishedDocuments
+    applyCleaningCompanyLegalDocuments(cleaningCompanyLegalDocuments)
+  } catch (error) {
+    setCompanyBasicsError(error instanceof Error ? error.message : 'Nie udało się pobrać dokumentów prawnych. Spróbuj ponownie później.')
+  } finally {
+    setCompanyBasicsBusy(false)
+  }
+
+  window.setTimeout(() => elements.nip?.focus(), 0)
+}
+
 function showLoginScreen() {
+  hideCleaningCompanyBasicsOverlay()
   const loginScreen = document.getElementById('loginScreen')
   const portalRoot = document.getElementById('portalRoot')
 
@@ -3514,6 +3636,7 @@ function showLoginScreen() {
 }
 
 function showPortal() {
+  hideCleaningCompanyBasicsOverlay()
   const loginScreen = document.getElementById('loginScreen')
   const portalRoot = document.getElementById('portalRoot')
 
@@ -3545,6 +3668,95 @@ function setLoginResetActionVisible(isVisible) {
   }
 }
 
+function setCleaningCompanyRegistrationEntryAvailable(isAvailable) {
+  cleaningCompanyRegistrationAvailable = isAvailable === true
+  const entry = document.getElementById('loginCompanyEntry')
+  const start = document.getElementById('loginCompanyStart')
+  if (entry) entry.hidden = !cleaningCompanyRegistrationAvailable
+  if (start) start.disabled = loginControlsBusy || !cleaningCompanyRegistrationAvailable
+}
+
+async function refreshCleaningCompanyRegistrationAvailability() {
+  const requestId = ++cleaningCompanyRegistrationAvailabilityRequest
+  setCleaningCompanyRegistrationEntryAvailable(false)
+
+  try {
+    const registration = await getCleaningCompanyLegalDocuments()
+    if (requestId !== cleaningCompanyRegistrationAvailabilityRequest) return
+    setCleaningCompanyRegistrationEntryAvailable(registration?.enabled === true)
+  } catch {
+    // The public entry is intentionally fail-closed: unavailable or
+    // unverifiable registration is never advertised as an actionable path.
+    if (requestId === cleaningCompanyRegistrationAvailabilityRequest) {
+      setCleaningCompanyRegistrationEntryAvailable(false)
+    }
+  }
+}
+
+function hideLoginCompanyPanels() {
+  ;[
+    'loginCompanyPanel',
+    'loginCompanyEmailPanel',
+    'loginCompanyEmailLinkPanel',
+  ].forEach((id) => {
+    const panel = document.getElementById(id)
+    if (panel) panel.hidden = true
+  })
+}
+
+function hideLoginStandardPanels() {
+  ;[
+    'loginCredentialsPanel',
+    'loginResetPanel',
+    'loginOrganizationPanel',
+    'loginMfaChallengePanel',
+    'loginMfaEnrollmentPanel',
+  ].forEach((id) => {
+    const panel = document.getElementById(id)
+    if (panel) panel.hidden = true
+  })
+}
+
+function showLoginCompanyStart() {
+  hideLoginStandardPanels()
+  hideLoginCompanyPanels()
+  const panel = document.getElementById('loginCompanyPanel')
+  const title = document.getElementById('loginTitle')
+  const copy = document.getElementById('loginCopy')
+  if (panel) panel.hidden = false
+  setLoginResetActionVisible(false)
+  if (title) title.textContent = 'Załóż firmę'
+  if (copy) copy.textContent = 'Wybierz bezpieczny sposób rozpoczęcia rejestracji.'
+}
+
+function showLoginCompanyEmailRegistration(email = '') {
+  hideLoginStandardPanels()
+  hideLoginCompanyPanels()
+  const panel = document.getElementById('loginCompanyEmailPanel')
+  const input = document.getElementById('loginCompanyEmail')
+  const title = document.getElementById('loginTitle')
+  const copy = document.getElementById('loginCopy')
+  if (panel) panel.hidden = false
+  if (input) input.value = String(email ?? '').trim().toLowerCase()
+  setLoginResetActionVisible(false)
+  if (title) title.textContent = 'Potwierdź e-mail'
+  if (copy) copy.textContent = 'Wyślemy link, który potwierdzi adres e-mail przed utworzeniem firmy.'
+}
+
+function showLoginCompanyEmailLinkConfirmation(email = '') {
+  hideLoginStandardPanels()
+  hideLoginCompanyPanels()
+  const panel = document.getElementById('loginCompanyEmailLinkPanel')
+  const input = document.getElementById('loginCompanyEmailLink')
+  const title = document.getElementById('loginTitle')
+  const copy = document.getElementById('loginCopy')
+  if (panel) panel.hidden = false
+  if (input) input.value = String(email ?? '').trim().toLowerCase()
+  setLoginResetActionVisible(false)
+  if (title) title.textContent = 'Potwierdź e-mail'
+  if (copy) copy.textContent = 'Dokończ bezpieczne potwierdzenie linku, aby przejść do danych firmy.'
+}
+
 function showLoginCredentials({ showResetAction = false } = {}) {
   const credentialsPanel = document.getElementById('loginCredentialsPanel')
   const resetPanel = document.getElementById('loginResetPanel')
@@ -3553,6 +3765,8 @@ function showLoginCredentials({ showResetAction = false } = {}) {
   const mfaEnrollmentPanel = document.getElementById('loginMfaEnrollmentPanel')
   const loginTitle = document.getElementById('loginTitle')
   const loginCopy = document.getElementById('loginCopy')
+
+  hideLoginCompanyPanels()
 
   if (credentialsPanel) {
     credentialsPanel.hidden = false
@@ -3583,6 +3797,8 @@ function showLoginPasswordReset(email = '') {
   const resetEmail = document.getElementById('loginResetEmail')
   const loginTitle = document.getElementById('loginTitle')
   const loginCopy = document.getElementById('loginCopy')
+
+  hideLoginCompanyPanels()
 
   if (credentialsPanel) {
     credentialsPanel.hidden = true
@@ -3616,6 +3832,8 @@ function showLoginOrganizationSelection(organizations = []) {
   const mfaEnrollmentPanel = document.getElementById('loginMfaEnrollmentPanel')
   const loginTitle = document.getElementById('loginTitle')
   const loginCopy = document.getElementById('loginCopy')
+
+  hideLoginCompanyPanels()
 
   if (credentialsPanel) {
     credentialsPanel.hidden = true
@@ -3685,6 +3903,7 @@ function showLoginMfaChallenge(factors = []) {
   const sendCode = document.getElementById('loginMfaSendCode')
   const title = document.getElementById('loginTitle')
   const copy = document.getElementById('loginCopy')
+  hideLoginCompanyPanels()
   if (credentialsPanel) credentialsPanel.hidden = true
   if (resetPanel) resetPanel.hidden = true
   if (organizationPanel) organizationPanel.hidden = true
@@ -3720,6 +3939,7 @@ function showLoginMfaEnrollment() {
   const totpSetup = document.getElementById('loginMfaTotpSetup')
   const phoneSetup = document.getElementById('loginMfaPhoneSetup')
   const emailSetup = document.getElementById('loginMfaEmailSetup')
+  hideLoginCompanyPanels()
   if (credentialsPanel) credentialsPanel.hidden = true
   if (resetPanel) resetPanel.hidden = true
   if (organizationPanel) organizationPanel.hidden = true
@@ -3736,6 +3956,7 @@ function showLoginMfaEnrollment() {
 }
 
 function setLoginControlsBusy(isBusy, label = '') {
+  loginControlsBusy = isBusy === true
   const loginButton = document.getElementById('loginBtn')
   const resetSend = document.getElementById('loginResetSend')
   const resetBack = document.getElementById('loginResetBack')
@@ -3745,6 +3966,8 @@ function setLoginControlsBusy(isBusy, label = '') {
   const resetEmail = document.getElementById('loginResetEmail')
   const organizationCancel = document.getElementById('loginOrganizationCancel')
   const organizationButtons = document.querySelectorAll('.login-organization-option')
+  const companyEmailSend = document.getElementById('loginCompanyEmailSend')
+  const companyEmailLinkConfirm = document.getElementById('loginCompanyEmailLinkConfirm')
 
   if (loginButton) {
     loginButton.disabled = isBusy
@@ -3771,6 +3994,21 @@ function setLoginControlsBusy(isBusy, label = '') {
   }
   if (organizationCancel) {
     organizationCancel.disabled = isBusy
+  }
+  ;[
+    'loginCompanyStart', 'loginCompanyGoogle', 'loginCompanyEmailOpen', 'loginCompanyBack',
+    'loginCompanyEmail', 'loginCompanyEmailBack', 'loginCompanyEmailLink',
+  ].forEach((id) => {
+    const control = document.getElementById(id)
+    if (control) control.disabled = isBusy || (id === 'loginCompanyStart' && !cleaningCompanyRegistrationAvailable)
+  })
+  if (companyEmailSend) {
+    companyEmailSend.disabled = isBusy
+    companyEmailSend.textContent = isBusy ? label || 'Wysyłanie...' : 'Wyślij link potwierdzający'
+  }
+  if (companyEmailLinkConfirm) {
+    companyEmailLinkConfirm.disabled = isBusy
+    companyEmailLinkConfirm.textContent = isBusy ? label || 'Potwierdzanie...' : 'Potwierdź email'
   }
   organizationButtons.forEach((button) => {
     button.disabled = isBusy
@@ -6516,6 +6754,17 @@ function bindPlatformLogin(router) {
   const enrollCode = byId('loginMfaEnrollCode')
   const confirmEnrollment = byId('loginMfaEnrollConfirm')
   const cancelEnrollment = byId('loginMfaEnrollCancel')
+  const companyStart = byId('loginCompanyStart')
+  const companyGoogle = byId('loginCompanyGoogle')
+  const companyEmailOpen = byId('loginCompanyEmailOpen')
+  const companyBack = byId('loginCompanyBack')
+  const companyEmail = byId('loginCompanyEmail')
+  const companyEmailBack = byId('loginCompanyEmailBack')
+  const companyEmailLink = byId('loginCompanyEmailLink')
+  const companyEmailPanel = byId('loginCompanyEmailPanel')
+  const companyEmailLinkPanel = byId('loginCompanyEmailLinkPanel')
+  const companyBasicsForm = byId('companyBasicsForm')
+  const companyBasicsSignOut = byId('companyBasicsSignOut')
   if (!loginButton || !loginInput || !passwordInput || !resetPanel || !resetEmail || !resetSend || !resetBack || !resetOpen) return () => {}
 
   const continueResult = async (result) => {
@@ -6535,6 +6784,11 @@ function bindPlatformLogin(router) {
     }
     if (result?.status === 'ORG_SELECTION_REQUIRED') {
       showLoginOrganizationSelection(result.organizations)
+      return
+    }
+    if (result?.status === 'CLEANING_COMPANY_ONBOARDING_REQUIRED') {
+      resetPortalState()
+      await showCleaningCompanyBasicsOverlay()
       return
     }
     if (result?.status !== 'READY' || !result.session) throw new Error('Nie udało się utworzyć bezpiecznej sesji aplikacji.')
@@ -6579,6 +6833,105 @@ function bindPlatformLogin(router) {
     } finally {
       setLoginControlsBusy(false)
     }
+  }
+  const handleCompanyGoogle = async () => {
+    setLoginControlsBusy(true, 'Łączenie z Google...')
+    setLoginError('')
+    try {
+      await continueResult(await startCleaningCompanyGoogleSignIn())
+    } catch (error) {
+      logout()
+      resetPortalState()
+      clearStoredCurrentRoute()
+      showLoginScreen()
+      showLoginCompanyStart()
+      setLoginError(formatLoginError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const handleCompanyEmailSend = async (event) => {
+    event?.preventDefault?.()
+    setLoginControlsBusy(true, 'Wysyłanie...')
+    setLoginError('')
+    try {
+      const result = await requestCleaningCompanyEmailLink(companyEmail?.value)
+      if (companyEmail && result?.email) companyEmail.value = result.email
+      setLoginError('Link potwierdzający został wysłany. Sprawdź skrzynkę e-mail, także folder spam.', 'success')
+    } catch (error) {
+      setLoginError(formatLoginError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const handleCompanyEmailLinkConfirm = async (event) => {
+    event?.preventDefault?.()
+    setLoginControlsBusy(true, 'Potwierdzanie...')
+    setLoginError('')
+    try {
+      await continueResult(await completeCleaningCompanyEmailLinkSignIn(companyEmailLink?.value))
+    } catch (error) {
+      // A failed link never becomes a locally accepted registration. Keep the
+      // confirmation form visible so the user can correct the e-mail address.
+      showLoginScreen()
+      showLoginCompanyEmailLinkConfirmation(companyEmailLink?.value || getStoredCleaningCompanyEmailLinkEmail())
+      setLoginError(formatLoginError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const companyCommandId = () => {
+    if (cleaningCompanyOnboardingCommandId) return cleaningCompanyOnboardingCommandId
+    const commandId = globalThis.crypto?.randomUUID?.()
+    if (!commandId) throw new Error('Twoja przeglądarka nie obsługuje bezpiecznego identyfikatora zapisu. Zaktualizuj ją i spróbuj ponownie.')
+    cleaningCompanyOnboardingCommandId = commandId
+    return commandId
+  }
+  const handleCompanyBasicsSubmit = async (event) => {
+    event.preventDefault()
+    const elements = companyBasicsElements()
+    if (!cleaningCompanyLegalDocuments) {
+      setCompanyBasicsError('Nie udało się pobrać aktualnych dokumentów. Odśwież stronę i spróbuj ponownie.')
+      return
+    }
+    if (!elements.form?.reportValidity()) return
+
+    setCompanyBasicsBusy(true, 'Zapisywanie...')
+    setCompanyBasicsError('')
+    try {
+      const result = await completeCleaningCompanyOnboarding({
+        commandId: companyCommandId(),
+        nip: elements.nip?.value,
+        legalName: elements.legalName?.value,
+        declaredEmployeeCount: elements.declaredEmployeeCount?.value,
+        legalDocuments: {
+          terms: { ...cleaningCompanyLegalDocuments.terms, accepted: elements.terms?.checked === true },
+          privacy: { ...cleaningCompanyLegalDocuments.privacy, acknowledged: elements.privacy?.checked === true },
+        },
+        marketing: {
+          email: elements.marketingEmail?.checked === true,
+          sms: elements.marketingSms?.checked === true,
+          phone: elements.marketingPhone?.checked === true,
+        },
+      })
+      if (result?.status !== 'READY' || !result.session) {
+        throw new Error('Serwer nie potwierdził utworzenia firmy.')
+      }
+      await activatePortalSession(result.session, router)
+    } catch (error) {
+      setCompanyBasicsError(error instanceof Error ? error.message : 'Nie udało się zapisać danych firmy. Spróbuj ponownie.')
+    } finally {
+      setCompanyBasicsBusy(false)
+    }
+  }
+  const handleCompanyBasicsSignOut = () => {
+    logout()
+    resetPortalState()
+    clearStoredCurrentRoute()
+    hideCleaningCompanyBasicsOverlay({ reset: true })
+    showLoginScreen()
+    showLoginCredentials()
+    setUserChip(null)
   }
   const handleOrganization = async (event) => {
     const button = event.target?.closest?.('.login-organization-option')
@@ -6713,6 +7066,8 @@ function bindPlatformLogin(router) {
   }
   const submit = (event) => {
     if (!resetPanel.hidden) return void handleReset(event)
+    if (companyEmailLinkPanel && !companyEmailLinkPanel.hidden) return void handleCompanyEmailLinkConfirm(event)
+    if (companyEmailPanel && !companyEmailPanel.hidden) return void handleCompanyEmailSend(event)
     if (challengePanel && !challengePanel.hidden) return void resolveMfa(event)
     if (enrollmentPanel && !enrollmentPanel.hidden) return void finishEnrollment(event)
     void handleLogin(event)
@@ -6724,6 +7079,25 @@ function bindPlatformLogin(router) {
   }
   const closeReset = () => {
     loginInput.value = resetEmail.value
+    showLoginCredentials()
+    loginInput.focus()
+  }
+  const openCompanyStart = () => {
+    if (!cleaningCompanyRegistrationAvailable) return
+    setLoginError('')
+    showLoginCompanyStart()
+  }
+  const openCompanyEmail = () => {
+    setLoginError('')
+    showLoginCompanyEmailRegistration(loginInput.value)
+    companyEmail?.focus()
+  }
+  const returnToCompanyStart = () => {
+    setLoginError('')
+    showLoginCompanyStart()
+  }
+  const returnToLogin = () => {
+    setLoginError('')
     showLoginCredentials()
     loginInput.focus()
   }
@@ -6744,6 +7118,13 @@ function bindPlatformLogin(router) {
   sendEmailCode?.addEventListener('click', requestEnrollmentEmail)
   confirmEnrollment?.addEventListener('click', finishEnrollment)
   cancelEnrollment?.addEventListener('click', cancelFlow)
+  companyStart?.addEventListener('click', openCompanyStart)
+  companyGoogle?.addEventListener('click', handleCompanyGoogle)
+  companyEmailOpen?.addEventListener('click', openCompanyEmail)
+  companyBack?.addEventListener('click', returnToLogin)
+  companyEmailBack?.addEventListener('click', returnToCompanyStart)
+  companyBasicsForm?.addEventListener('submit', handleCompanyBasicsSubmit)
+  companyBasicsSignOut?.addEventListener('click', handleCompanyBasicsSignOut)
   return () => {
     loginForm?.removeEventListener('submit', submit)
     resetOpen.removeEventListener('click', openReset)
@@ -6761,6 +7142,13 @@ function bindPlatformLogin(router) {
     sendEmailCode?.removeEventListener('click', requestEnrollmentEmail)
     confirmEnrollment?.removeEventListener('click', finishEnrollment)
     cancelEnrollment?.removeEventListener('click', cancelFlow)
+    companyStart?.removeEventListener('click', openCompanyStart)
+    companyGoogle?.removeEventListener('click', handleCompanyGoogle)
+    companyEmailOpen?.removeEventListener('click', openCompanyEmail)
+    companyBack?.removeEventListener('click', returnToLogin)
+    companyEmailBack?.removeEventListener('click', returnToCompanyStart)
+    companyBasicsForm?.removeEventListener('submit', handleCompanyBasicsSubmit)
+    companyBasicsSignOut?.removeEventListener('click', handleCompanyBasicsSignOut)
   }
 }
 
@@ -7210,6 +7598,12 @@ export function mountPortalApp() {
     showLoginScreen()
     showLoginCredentials()
     setUserChip(null)
+    void refreshCleaningCompanyRegistrationAvailability()
+    if (isCleaningCompanyEmailLink()) {
+      showLoginCompanyEmailLinkConfirmation(getStoredCleaningCompanyEmailLinkEmail())
+      setLoginControlsBusy(false)
+      return
+    }
     setLoginControlsBusy(true, 'Sprawdzanie sesji...')
     const firebaseUser = await waitForFirebaseAuthReady()
     if (portalDisposed) {
@@ -7236,6 +7630,12 @@ export function mountPortalApp() {
         if (result?.status === 'ORG_SELECTION_REQUIRED') {
           resetPortalState()
           showLoginOrganizationSelection(result.organizations)
+          setLoginControlsBusy(false)
+          return
+        }
+        if (result?.status === 'CLEANING_COMPANY_ONBOARDING_REQUIRED') {
+          resetPortalState()
+          await showCleaningCompanyBasicsOverlay()
           setLoginControlsBusy(false)
           return
         }

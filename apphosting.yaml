@@ -16,6 +16,20 @@ env:
     value: "1"
     availability:
       - BUILD
+  # Kept fail-closed until the Firebase registration gate and App Check are
+  # configured for portal.cleanzi.pl.
+  - variable: CLEANING_COMPANY_ONBOARDING_ENABLED
+    value: "false"
+    availability:
+      - RUNTIME
+  - variable: CLEANING_COMPANY_ONBOARDING_AUTO_CONFIRMATION_ENABLED
+    value: "false"
+    availability:
+      - RUNTIME
+  - variable: CLEANING_COMPANY_ONBOARDING_REQUIRE_APP_CHECK
+    value: "true"
+    availability:
+      - RUNTIME
   - variable: API_PROXY_TARGET
     value: https://cleanzi-01.web.app
     availability:

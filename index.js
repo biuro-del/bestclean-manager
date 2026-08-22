@@ -42,6 +42,16 @@ const {
   resolvePlatformDataConnectConnector,
 } = require('./platform-policy')
 const { buildFirebaseRestDecodedToken } = require('./firebase-rest-token-policy')
+const { getAppCheck } = require('firebase-admin/app-check')
+const {
+  CLEANING_COMPANY_ONBOARDING_REQUIRED,
+  CleaningCompanyOnboardingError,
+  getCleaningCompanyLegalDocuments,
+  hasVerifiedCompanyEmail,
+  isCleaningCompanyOnboardingEnabled,
+  provisionCleaningCompany,
+  requiresCleaningCompanyAppCheck,
+} = require('./cleaning-company-onboarding-service')
 const { createProfitabilityApi } = require('./profitability-api')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
@@ -117,6 +127,8 @@ const ADMIN_WORKER_ID_NEXT_PATH = '/api/admin/worker-id/next'
 const ADMIN_WORKERS_PATH = '/api/admin/workers'
 const ADMIN_WORKERS_RESTORE_PATH = '/api/admin/workers/restore'
 const AUTH_SESSION_CONTEXT_PATH = '/api/auth/session-context'
+const CLEANING_COMPANY_ONBOARDING_LEGAL_DOCUMENTS_PATH = '/api/registration/cleaning-company/legal-documents'
+const CLEANING_COMPANY_ONBOARDING_PROVISION_PATH = '/api/registration/cleaning-company/provision'
 const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
 const PORTAL_JOB_CARDS_PATH = '/api/portal/job-cards'
@@ -1277,6 +1289,59 @@ async function verifySessionContextFirebaseIdToken(token) {
     if (!PLATFORM_FIREBASE_PROJECT_ID) throw organizationError
     return verifyPlatformFirebaseIdToken(token)
   }
+}
+
+function firstHeaderValue(value) {
+  return Array.isArray(value) ? value[0] : value
+}
+
+function onboardingAppCheckToken(req) {
+  return normalizeText(firstHeaderValue(req?.headers?.['x-firebase-appcheck']))
+}
+
+async function verifyCleaningCompanyAppCheckToken(token) {
+  const normalizedToken = normalizeText(token)
+  if (!normalizedToken) {
+    const error = new Error('APP_CHECK_REQUIRED')
+    error.statusCode = 401
+    error.publicCode = 'APP_CHECK_REQUIRED'
+    error.publicMessage = 'Nie udało się potwierdzić bezpieczeństwa formularza. Odśwież stronę i spróbuj ponownie.'
+    throw error
+  }
+
+  try {
+    await getAppCheck(ensureFirebaseAdmin().app()).verifyToken(normalizedToken)
+  } catch (cause) {
+    const error = new Error('APP_CHECK_INVALID')
+    error.statusCode = 401
+    error.publicCode = 'APP_CHECK_INVALID'
+    error.publicMessage = 'Nie udało się potwierdzić bezpieczeństwa formularza. Odśwież stronę i spróbuj ponownie.'
+    error.cause = cause
+    throw error
+  }
+}
+
+function hashCleaningCompanyOnboardingIp(rawIp) {
+  const ip = normalizeText(rawIp)
+  const secret = normalizeText(process.env.CLEANING_COMPANY_ONBOARDING_IP_HASH_SECRET)
+  if (!ip || !secret) return ''
+  return crypto.createHmac('sha256', secret).update(ip).digest('hex')
+}
+
+function isCustomerFirebaseToken(decodedToken) {
+  const expectedProjectId = normalizeText(FIREBASE_PROJECT_ID)
+  if (!expectedProjectId) return false
+  const audiences = Array.isArray(decodedToken?.aud) ? decodedToken.aud : [decodedToken?.aud]
+  return audiences.some((audience) => normalizeText(audience) === expectedProjectId)
+}
+
+function canStartCleaningCompanyOnboarding(decodedToken) {
+  // Session context accepts the separate platform Firebase project for existing
+  // operational users. Self-service onboarding is deliberately narrower: it
+  // may be offered only to an account issued by the customer Firebase project.
+  return isCleaningCompanyOnboardingEnabled() &&
+    isCustomerFirebaseToken(decodedToken) &&
+    hasVerifiedCompanyEmail(decodedToken)
 }
 
 async function assertFirebaseEmailAvailable(email) {
@@ -6498,6 +6563,159 @@ async function handleAdminUsersRequest(req, res) {
   }
 }
 
+async function handleCleaningCompanyLegalDocumentsRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  if (String(req.method || 'GET').toUpperCase() !== 'GET') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to GET.')
+    return
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    status: isCleaningCompanyOnboardingEnabled() ? 'REGISTRATION_AVAILABLE' : 'REGISTRATION_DISABLED',
+    enabled: isCleaningCompanyOnboardingEnabled(),
+    legalDocuments: getCleaningCompanyLegalDocuments(),
+    requiredFields: ['nip', 'legalName', 'declaredEmployeeCount'],
+  })
+}
+
+async function handleCleaningCompanyProvisionRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  if (String(req.method || '').toUpperCase() !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  if (!isCleaningCompanyOnboardingEnabled()) {
+    sendApiError(res, 404, 'REGISTRATION_NOT_AVAILABLE', 'Rejestracja firmy nie jest obecnie dostępna.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    // This must not fall back to a platform-admin Firebase project. A platform
+    // account is never a source for self-service company registration.
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status, mapped.code, mapped.message)
+    return
+  }
+
+  if (!hasVerifiedCompanyEmail(decodedToken)) {
+    sendApiError(
+      res,
+      403,
+      'EMAIL_VERIFICATION_REQUIRED',
+      'Najpierw potwierdź adres e-mail, a potem uzupełnij dane firmy.',
+    )
+    return
+  }
+
+  if (requiresCleaningCompanyAppCheck()) {
+    try {
+      await verifyCleaningCompanyAppCheckToken(onboardingAppCheckToken(req))
+    } catch (error) {
+      sendApiError(
+        res,
+        Number(error?.statusCode) || 401,
+        normalizeText(error?.publicCode) || 'APP_CHECK_INVALID',
+        normalizeText(error?.publicMessage) || 'Nie udało się potwierdzić bezpieczeństwa formularza.',
+      )
+      return
+    }
+  }
+
+  let body
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
+      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Żądanie jest zbyt duże.')
+      return
+    }
+    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w żądaniu.')
+    return
+  }
+
+  const ownerUid = normalizeText(decodedToken?.uid || decodedToken?.user_id || decodedToken?.sub)
+  let client = null
+  try {
+    client = await connectDbClient()
+    const existingMemberships = await getRequesterMemberships(client, ownerUid)
+    if (existingMemberships.length) {
+      sendApiError(
+        res,
+        409,
+        'ACCOUNT_ALREADY_LINKED',
+        'To konto jest już połączone z organizacją. Zaloguj się do istniejącego panelu lub użyj innego konta.',
+      )
+      return
+    }
+
+    const requestContext = getPlatformRequestContext()
+    const result = await provisionCleaningCompany(client, {
+      decodedToken,
+      payload: body,
+      request: {
+        locale: normalizeText(req.headers['accept-language']).split(',')[0] || 'pl-PL',
+        ipHash: hashCleaningCompanyOnboardingIp(requestContext?.ipAddress),
+        userAgent: requestContext?.userAgent,
+      },
+    })
+
+    const memberships = await getRequesterMemberships(client, ownerUid, result.orgId)
+    const selected = resolveAccessibleOrganizations(memberships, new Date())
+      .find((row) => normalizeOrgId(row.org_id) === result.orgId)
+    if (!selected) {
+      throw new Error('ONBOARDING_SESSION_CONTEXT_UNAVAILABLE')
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      status: 'READY',
+      context: await buildOrganizationSessionContext(client, ownerUid, selected),
+      onboarding: {
+        orgId: result.orgId,
+        replayed: result.replayed,
+        trialEndsAt: result.trialEndsAt || null,
+      },
+    })
+  } catch (error) {
+    if (error instanceof CleaningCompanyOnboardingError) {
+      sendApiError(res, error.statusCode, error.code, error.message, error.details)
+      return
+    }
+
+    const databaseError = mapDatabaseConnectionError(error)
+    if (databaseError) {
+      sendApiError(res, databaseError.status, databaseError.code, databaseError.message)
+      return
+    }
+
+    console.error('[cleaning-company-onboarding] provisioning failed', error)
+    sendApiError(res, 500, 'CLEANING_COMPANY_ONBOARDING_FAILED', 'Nie udało się utworzyć firmy. Spróbuj ponownie za chwilę.')
+  } finally {
+    client?.release()
+  }
+}
+
 async function handleAuthSessionContextRequest(req, res, requestUrl) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
@@ -6675,6 +6893,14 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
     }
 
     if (!accessibleOrganizations.length) {
+      if (canStartCleaningCompanyOnboarding(decodedToken)) {
+        sendJson(res, 200, {
+          ok: true,
+          status: CLEANING_COMPANY_ONBOARDING_REQUIRED,
+          legalDocuments: getCleaningCompanyLegalDocuments(),
+        })
+        return
+      }
       sendApiError(res, 403, 'ORG_ACCESS_DENIED', 'Brak uprawnie\u0144 do portalu dla tego konta.')
       return
     }
@@ -9416,6 +9642,20 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
         'WORKER_RESTORE_ERROR',
         error?.message || 'Unexpected worker restore error.',
       )
+    })
+    return
+  }
+
+  if (requestUrl.pathname === CLEANING_COMPANY_ONBOARDING_LEGAL_DOCUMENTS_PATH) {
+    handleCleaningCompanyLegalDocumentsRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'CLEANING_COMPANY_LEGAL_DOCUMENTS_ERROR', error?.message || 'Unexpected legal documents error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === CLEANING_COMPANY_ONBOARDING_PROVISION_PATH) {
+    handleCleaningCompanyProvisionRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'CLEANING_COMPANY_ONBOARDING_ERROR', error?.message || 'Unexpected onboarding error.')
     })
     return
   }

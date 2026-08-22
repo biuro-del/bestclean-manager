@@ -1,17 +1,23 @@
 import {
+  GoogleAuthProvider,
   PhoneAuthProvider,
   PhoneMultiFactorGenerator,
   RecaptchaVerifier,
   TotpMultiFactorGenerator,
   getMultiFactorResolver,
+  isSignInWithEmailLink,
   multiFactor,
+  sendSignInLinkToEmail,
   sendPasswordResetEmail,
+  signInWithEmailLink,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
 } from 'firebase/auth'
 import {
   ensureFirebase,
   ensureFirebaseAuthPersistence,
+  getFirebaseAppCheckToken,
   isFirebaseConfigured,
   waitForFirebaseAuthReady,
 } from '../firebase/firebaseClient'
@@ -21,8 +27,21 @@ const AUTH_STORAGE_KEY = 'iclean.portal.auth'
 const LAST_ORG_STORAGE_KEY = 'iclean.portal.lastOrgId'
 const PLATFORM_CONTEXT_STORAGE_KEY = 'iclean.portal.platformContextId'
 const PLATFORM_EMAIL_MFA_TOKEN_KEY = 'iclean.portal.platformEmailMfaToken'
+const CLEANING_COMPANY_EMAIL_LINK_EMAIL_KEY = 'iclean.portal.cleaningCompanyEmailLinkEmail'
 const AUTH_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const AUTH_EMAIL_MAX_LENGTH = 160
+export const CLEANING_COMPANY_LEGAL_DOCUMENTS = Object.freeze({
+  terms: Object.freeze({
+    documentId: 'terms',
+    version: '2026-07-16',
+    url: 'https://cleanzi.pl/regulamin',
+  }),
+  privacy: Object.freeze({
+    documentId: 'privacy',
+    version: '2026-07-30',
+    url: 'https://cleanzi.pl/polityka-prywatnosci',
+  }),
+})
 let pendingMfaResolver = null
 let pendingMfaEnrollment = null
 let pendingRecaptchaVerifier = null
@@ -196,6 +215,15 @@ async function requestSessionContext(firebaseUser, { orgId = '', method = 'GET' 
     }
   }
 
+  if (status === 'CLEANING_COMPANY_ONBOARDING_REQUIRED') {
+    // This status comes only from the session-context endpoint. The browser
+    // must not synthesize it from local storage or an OAuth callback.
+    return {
+      status,
+      onboarding: payload?.onboarding && typeof payload.onboarding === 'object' ? payload.onboarding : {},
+    }
+  }
+
   if (status === 'ORG_SELECTION_REQUIRED') {
     const organizations = (Array.isArray(payload?.organizations) ? payload.organizations : [])
       .map((organization) => ({
@@ -261,7 +289,10 @@ async function resolveAuthenticatedContext(firebaseUser, options = {}) {
   }
 
   localStorage.removeItem(AUTH_STORAGE_KEY)
-  if (result.status === 'PLATFORM_SELECTION_REQUIRED') {
+  if (
+    result.status === 'PLATFORM_SELECTION_REQUIRED' ||
+    result.status === 'CLEANING_COMPANY_ONBOARDING_REQUIRED'
+  ) {
     localStorage.removeItem(LAST_ORG_STORAGE_KEY)
     localStorage.removeItem(PLATFORM_CONTEXT_STORAGE_KEY)
   }
@@ -371,6 +402,255 @@ export async function login({ login: loginValue, password }) {
     localStorage.removeItem(AUTH_STORAGE_KEY)
     localStorage.removeItem(LAST_ORG_STORAGE_KEY)
     throw error
+  }
+}
+
+async function resolveFreshAuthenticatedUser(user) {
+  localStorage.removeItem(AUTH_STORAGE_KEY)
+  sessionStorage.removeItem(PLATFORM_EMAIL_MFA_TOKEN_KEY)
+
+  try {
+    // Google and e-mail-link sign-in can update the email-verification claim.
+    // The server is still authoritative, but it must see the newest token.
+    await user.getIdToken(true)
+    return await resolveAuthenticatedContext(user)
+  } catch (error) {
+    const auth = ensureFirebase()?.auth
+    if (auth) {
+      await signOut(auth).catch(() => {})
+    }
+    localStorage.removeItem(AUTH_STORAGE_KEY)
+    localStorage.removeItem(LAST_ORG_STORAGE_KEY)
+    throw error
+  }
+}
+
+function cleaningCompanyEmailLinkContinueUrl() {
+  if (typeof window === 'undefined') {
+    throw createPublicAuthError('EMAIL_LINK_BROWSER_REQUIRED', 'Otwórz link potwierdzający w przeglądarce.')
+  }
+
+  const current = new URL(window.location.href)
+  current.search = ''
+  current.hash = ''
+  current.searchParams.set('cleanziCompanyEmailLink', '1')
+  return current.toString()
+}
+
+export function isCleaningCompanyEmailLink() {
+  if (typeof window === 'undefined' || !isFirebaseConfigured()) {
+    return false
+  }
+
+  const firebase = ensureFirebase()
+  try {
+    return Boolean(firebase?.auth && isSignInWithEmailLink(firebase.auth, window.location.href))
+  } catch {
+    return false
+  }
+}
+
+export function getStoredCleaningCompanyEmailLinkEmail() {
+  return normalizeAuthEmail(localStorage.getItem(CLEANING_COMPANY_EMAIL_LINK_EMAIL_KEY))
+}
+
+export async function startCleaningCompanyGoogleSignIn() {
+  if (!isFirebaseConfigured()) {
+    throw createPublicAuthError('FIREBASE_NOT_CONFIGURED', 'Rejestracja przez Google jest chwilowo niedostępna.')
+  }
+
+  const firebase = ensureFirebase()
+  if (!firebase?.auth) {
+    throw createPublicAuthError('FIREBASE_AUTH_UNAVAILABLE', 'Rejestracja przez Google jest chwilowo niedostępna.')
+  }
+
+  await assertCleaningCompanyRegistrationAvailable()
+  await ensureFirebaseAuthPersistence()
+  const provider = new GoogleAuthProvider()
+  provider.setCustomParameters({ prompt: 'select_account' })
+  const credential = await signInWithPopup(firebase.auth, provider)
+  return resolveFreshAuthenticatedUser(credential.user)
+}
+
+export async function requestCleaningCompanyEmailLink(emailValue) {
+  const email = normalizeAuthEmail(emailValue)
+  if (!email) {
+    throw createPublicAuthError('INVALID_COMPANY_EMAIL', 'Podaj poprawny adres email.')
+  }
+  if (!isFirebaseConfigured()) {
+    throw createPublicAuthError('FIREBASE_NOT_CONFIGURED', 'Rejestracja e-mailem jest chwilowo niedostępna.')
+  }
+
+  const firebase = ensureFirebase()
+  if (!firebase?.auth) {
+    throw createPublicAuthError('FIREBASE_AUTH_UNAVAILABLE', 'Rejestracja e-mailem jest chwilowo niedostępna.')
+  }
+
+  await assertCleaningCompanyRegistrationAvailable()
+  await ensureFirebaseAuthPersistence()
+  try {
+    await sendSignInLinkToEmail(firebase.auth, email, {
+      url: cleaningCompanyEmailLinkContinueUrl(),
+      handleCodeInApp: true,
+    })
+    // This only remembers where to finish the cryptographic Firebase link. It
+    // never marks a company, consent, or portal session as created.
+    localStorage.setItem(CLEANING_COMPANY_EMAIL_LINK_EMAIL_KEY, email)
+    return { email }
+  } catch (error) {
+    const code = toText(error?.code).toLowerCase()
+    if (code === 'auth/unauthorized-continue-uri' || code === 'auth/unauthorized-domain') {
+      throw createPublicAuthError(
+        'COMPANY_EMAIL_LINK_NOT_CONFIGURED',
+        'Rejestracja e-mailem nie jest jeszcze poprawnie skonfigurowana dla tej domeny.',
+      )
+    }
+    if (code === 'auth/too-many-requests') {
+      throw createPublicAuthError('COMPANY_EMAIL_LINK_RATE_LIMITED', 'Wysłano zbyt wiele linków. Spróbuj ponownie później.')
+    }
+    throw error
+  }
+}
+
+export async function completeCleaningCompanyEmailLinkSignIn(emailValue) {
+  if (!isCleaningCompanyEmailLink()) {
+    throw createPublicAuthError('INVALID_COMPANY_EMAIL_LINK', 'Ten link potwierdzający jest nieprawidłowy lub wygasł.')
+  }
+
+  const email = normalizeAuthEmail(emailValue) || getStoredCleaningCompanyEmailLinkEmail()
+  if (!email) {
+    throw createPublicAuthError(
+      'COMPANY_EMAIL_LINK_EMAIL_REQUIRED',
+      'Wpisz adres email, na który został wysłany link potwierdzający.',
+    )
+  }
+
+  const firebase = ensureFirebase()
+  const credential = await signInWithEmailLink(firebase.auth, email, window.location.href)
+  localStorage.removeItem(CLEANING_COMPANY_EMAIL_LINK_EMAIL_KEY)
+  return resolveFreshAuthenticatedUser(credential.user)
+}
+
+function unwrapApiData(body) {
+  return body?.data && typeof body.data === 'object' ? body.data : body
+}
+
+function normalizePublishedLegalDocument(candidate, kind) {
+  const expected = CLEANING_COMPANY_LEGAL_DOCUMENTS[kind]
+  const documentId = toText(candidate?.documentId)
+  const version = toText(candidate?.version)
+  const url = toText(candidate?.url)
+  if (!documentId || !version || !url) {
+    throw new Error('Serwer nie zwrócił kompletnej wersji dokumentów prawnych.')
+  }
+
+  let parsedUrl
+  try {
+    parsedUrl = new URL(url)
+  } catch {
+    throw new Error('Serwer zwrócił nieprawidłowy adres dokumentu prawnego.')
+  }
+
+  if (
+    parsedUrl.protocol !== 'https:' ||
+    parsedUrl.hostname !== 'cleanzi.pl' ||
+    documentId !== expected.documentId ||
+    version !== expected.version ||
+    url !== expected.url
+  ) {
+    throw new Error('Serwer zwrócił nieprawidłowy dokument prawny.')
+  }
+
+  return Object.freeze({ documentId, version, url })
+}
+
+export async function getCleaningCompanyLegalDocuments() {
+  const response = await fetch(`${getAuthApiBase()}/registration/cleaning-company/legal-documents`, {
+    headers: { Accept: 'application/json' },
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw createBackendError(response, body)
+  }
+
+  const payload = unwrapApiData(body)
+  const documents = payload?.legalDocuments ?? payload?.documents ?? payload
+  return Object.freeze({
+    enabled: payload?.enabled === true && toText(payload?.status).toUpperCase() === 'REGISTRATION_AVAILABLE',
+    terms: normalizePublishedLegalDocument(documents?.terms, 'terms'),
+    privacy: normalizePublishedLegalDocument(documents?.privacy, 'privacy'),
+  })
+}
+
+async function assertCleaningCompanyRegistrationAvailable() {
+  const registration = await getCleaningCompanyLegalDocuments()
+  if (!registration.enabled) {
+    throw createPublicAuthError(
+      'REGISTRATION_NOT_AVAILABLE',
+      'Rejestracja firmy nie jest obecnie dostępna. Zaloguj się do istniejącego konta lub spróbuj ponownie później.',
+    )
+  }
+  return registration
+}
+
+function normalizeCompanyOnboardingPayload(input = {}) {
+  const documents = input?.legalDocuments && typeof input.legalDocuments === 'object'
+    ? input.legalDocuments
+    : {}
+  return {
+    commandId: toText(input?.commandId),
+    nip: toText(input?.nip),
+    legalName: toText(input?.legalName),
+    declaredEmployeeCount: input?.declaredEmployeeCount,
+    legalDocuments: {
+      terms: {
+        documentId: toText(documents?.terms?.documentId),
+        version: toText(documents?.terms?.version),
+        url: toText(documents?.terms?.url),
+        accepted: documents?.terms?.accepted === true,
+      },
+      privacy: {
+        documentId: toText(documents?.privacy?.documentId),
+        version: toText(documents?.privacy?.version),
+        url: toText(documents?.privacy?.url),
+        acknowledged: documents?.privacy?.acknowledged === true,
+      },
+    },
+    marketing: {
+      email: input?.marketing?.email === true,
+      sms: input?.marketing?.sms === true,
+      phone: input?.marketing?.phone === true,
+    },
+  }
+}
+
+export async function completeCleaningCompanyOnboarding(input = {}) {
+  const { user } = await currentFirebaseUserWithToken()
+  const idToken = await user.getIdToken(true)
+  const appCheckToken = await getFirebaseAppCheckToken()
+  const response = await fetch(`${getAuthApiBase()}/registration/cleaning-company/provision`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...(appCheckToken ? { 'X-Firebase-AppCheck': appCheckToken } : {}),
+    },
+    body: JSON.stringify(normalizeCompanyOnboardingPayload(input)),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw createBackendError(response, body)
+  }
+
+  const payload = unwrapApiData(body)
+  if (payload?.ok === false || toText(payload?.status).toUpperCase() !== 'READY' || !payload?.context) {
+    throw new Error('Serwer nie potwierdził utworzenia firmy.')
+  }
+
+  return {
+    ...storeReadySession(user, payload.context),
+    onboarding: payload?.onboarding && typeof payload.onboarding === 'object' ? payload.onboarding : {},
   }
 }
 
@@ -624,6 +904,7 @@ export function logout() {
   localStorage.removeItem(AUTH_STORAGE_KEY)
   localStorage.removeItem(LAST_ORG_STORAGE_KEY)
   localStorage.removeItem(PLATFORM_CONTEXT_STORAGE_KEY)
+  localStorage.removeItem(CLEANING_COMPANY_EMAIL_LINK_EMAIL_KEY)
   sessionStorage.removeItem(PLATFORM_EMAIL_MFA_TOKEN_KEY)
   pendingMfaResolver = null
   pendingMfaEnrollment = null
