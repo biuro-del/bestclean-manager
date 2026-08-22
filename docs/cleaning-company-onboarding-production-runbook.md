@@ -1,8 +1,8 @@
 # Cleanzi — rejestracja firmy sprzątającej: wydanie produkcyjne
 
 **Fundament produkcyjny:** `CLZ-ONBOARDING-20260822-01` — wdrożony z wyłączoną rejestracją.
-**Id bieżącego kandydata:** `CLZ-ONBOARDING-20260822-02`
-**Stan:** kandydat do wydania — nieaktywny publicznie.
+**Id aktywacji produkcyjnej:** `CLZ-ONBOARDING-20260822-03`
+**Stan:** zatwierdzona aktywacja publicznej rejestracji po wdrożeniu bezpiecznego kanału `-02`.
 
 ## Zakres wydania
 
@@ -94,7 +94,7 @@ użytkownikom danych w ramach procedury rollbacku.
 Wdrożenie na produkcję wymaga dokładnego komunikatu właściciela produktu:
 
 ```text
-OK PRODUKCJA CLZ-ONBOARDING-20260822-02
+OK PRODUKCJA CLZ-ONBOARDING-20260822-03
 ```
 
 Jeżeli wybierana jest automatyczna polityka potwierdzania, zgoda musi to wyraźnie obejmować.
