@@ -35,6 +35,18 @@ test('pulpit wykonuje wyłącznie zawężony odczyt PENDING z limitem jednego re
   assert.match(dashboard, /dashboardRefreshStopProposalAttention\(orgId, \{\s*forceRefresh: options\.forceRefresh === true,\s*\}\)/s)
 })
 
+test('alert Brak QR STOP otwiera wyłącznie listę dni z brakującym STOP', () => {
+  const dashboard = fs.readFileSync(
+    path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'features', 'dashboard', 'index.js'),
+    'utf8',
+  )
+
+  assert.match(dashboard, /title: `Brak QR STOP: \$\{openQrStopCount\}`,[\s\S]*metric: 'openStartStopYesterday'/)
+  assert.doesNotMatch(dashboard, /title: `Brak QR STOP: \$\{openQrStopCount\}`,[\s\S]*route: 'events'/)
+  assert.match(dashboard, /data-dash-alert-metric=/)
+  assert.match(dashboard, /dashboardTogglePinnedMetricPopover\(metricKey, button\)/)
+})
+
 test('kandydat zachowuje produkcyjną kolejność: pracownik, potem miejsce realizacji', () => {
   const dashboard = fs.readFileSync(
     path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'features', 'dashboard', 'index.js'),

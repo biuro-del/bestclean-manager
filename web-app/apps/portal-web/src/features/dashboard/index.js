@@ -6599,7 +6599,7 @@ export function createDashboardFeature(ctx) {
         icon: 'ph-warning-circle',
         title: `Brak QR STOP: ${openQrStopCount}`,
         meta: 'Niezamknięte dni pracy sprzed dzisiaj',
-        route: 'events',
+        metric: 'openStartStopYesterday',
       })
     }
 
@@ -6616,8 +6616,15 @@ export function createDashboardFeature(ctx) {
       host.innerHTML = '<p>Brak bieżących alertów operacyjnych.</p>'
       return alerts
     }
-    host.innerHTML = alerts.slice(0, 3).map((alert) => `
-      <button class="dash-command-alert is-${escapeHtml(alert.tone)}" type="button" data-route="${escapeHtml(alert.route)}">
+    host.innerHTML = alerts.slice(0, 3).map((alert) => {
+      const route = String(alert?.route ?? '').trim()
+      const metric = String(alert?.metric ?? '').trim()
+      const routeAttribute = route ? ` data-route="${escapeHtml(route)}"` : ''
+      const metricAttributes = metric
+        ? ` data-dash-alert-metric="${escapeHtml(metric)}" aria-expanded="false" aria-haspopup="dialog"`
+        : ''
+      return `
+      <button class="dash-command-alert is-${escapeHtml(alert.tone)}" type="button"${routeAttribute}${metricAttributes}>
         <span class="dash-command-alert__icon"><i class="ph ${escapeHtml(alert.icon)}" aria-hidden="true"></i></span>
         <span class="dash-command-alert__copy">
           <strong>${escapeHtml(alert.title)}</strong>
@@ -6628,7 +6635,8 @@ export function createDashboardFeature(ctx) {
           <i class="ph ph-caret-right" aria-hidden="true"></i>
         </span>
       </button>
-    `).join('')
+    `
+    }).join('')
     return alerts
   }
 
@@ -8067,7 +8075,7 @@ export function createDashboardFeature(ctx) {
     }
 
     const anchorId = String(popover.getAttribute('data-anchor-id') ?? '').trim()
-    document.querySelectorAll('[data-dash-metric][aria-expanded]').forEach((button) => {
+    document.querySelectorAll('[data-dash-metric][aria-expanded], [data-dash-alert-metric][aria-expanded]').forEach((button) => {
       button.setAttribute('aria-expanded', 'false')
     })
     popover.style.display = 'none'
@@ -8207,7 +8215,7 @@ export function createDashboardFeature(ctx) {
     } else {
       popover.removeAttribute('data-anchor-id')
     }
-    document.querySelectorAll('[data-dash-metric][aria-expanded]').forEach((button) => {
+    document.querySelectorAll('[data-dash-metric][aria-expanded], [data-dash-alert-metric][aria-expanded]').forEach((button) => {
       button.setAttribute('aria-expanded', button === anchorButton ? 'true' : 'false')
     })
 
@@ -8225,6 +8233,36 @@ export function createDashboardFeature(ctx) {
     popover.style.top = `${Math.round(top)}px`
     popover.style.visibility = 'visible'
     return popover
+  }
+
+  function dashboardTogglePinnedMetricPopover(metricKey, anchorButton) {
+    const popover = document.getElementById('dashMetricPopover')
+    const isOpen =
+      popover?.style.display !== 'none' &&
+      popover?.getAttribute('data-metric') === metricKey &&
+      popover?.getAttribute('data-pinned') === 'true'
+    if (isOpen) {
+      dashboardHideMetricPopover()
+      return
+    }
+
+    const openedPopover = dashboardShowMetricPopover(metricKey, anchorButton, { pinned: true })
+    window.setTimeout(() => {
+      const firstItem = openedPopover?.querySelector?.('[data-dash-metric-detail]')
+      if (firstItem instanceof HTMLElement) {
+        firstItem.focus()
+        return
+      }
+      const closeButton = openedPopover?.querySelector?.('#dashMetricPopoverClose')
+      if (closeButton instanceof HTMLElement) {
+        closeButton.focus()
+        return
+      }
+      if (openedPopover instanceof HTMLElement) {
+        openedPopover.tabIndex = -1
+        openedPopover.focus()
+      }
+    }, 0)
   }
 
   function dashboardMetricWorkerSearchKeys(detail = {}) {
@@ -9611,6 +9649,16 @@ export function createDashboardFeature(ctx) {
       kanbanOpenCalendarTask(button.getAttribute('data-dash-kanban-task-id'))
     })
 
+    binding.add(document.getElementById('dashCommandAlertsList'), 'click', (event) => {
+      const button = event.target?.closest?.('[data-dash-alert-metric]')
+      const metricKey = String(button?.getAttribute?.('data-dash-alert-metric') ?? '').trim()
+      if (!metricKey || !(button instanceof HTMLElement)) {
+        return
+      }
+      event.preventDefault()
+      dashboardTogglePinnedMetricPopover(metricKey, button)
+    })
+
 
     const metricButtons = [...document.querySelectorAll('[data-dash-metric]')]
     metricButtons.forEach((button) => {
@@ -9651,33 +9699,7 @@ export function createDashboardFeature(ctx) {
       binding.add(button, 'click', (event) => {
         if (opensList) {
           event.preventDefault()
-          const popover = document.getElementById('dashMetricPopover')
-          const isOpen =
-            popover?.style.display !== 'none' &&
-            popover?.getAttribute('data-metric') === metricKey &&
-            popover?.getAttribute('data-pinned') === 'true'
-          if (isOpen) {
-            dashboardHideMetricPopover()
-            return
-          }
-
-          const openedPopover = dashboardShowMetricPopover(metricKey, button, { pinned: true })
-          window.setTimeout(() => {
-            const firstItem = openedPopover?.querySelector?.('[data-dash-metric-detail]')
-            if (firstItem instanceof HTMLElement) {
-              firstItem.focus()
-              return
-            }
-            const closeButton = openedPopover?.querySelector?.('#dashMetricPopoverClose')
-            if (closeButton instanceof HTMLElement) {
-              closeButton.focus()
-              return
-            }
-            if (openedPopover instanceof HTMLElement) {
-              openedPopover.tabIndex = -1
-              openedPopover.focus()
-            }
-          }, 0)
+          dashboardTogglePinnedMetricPopover(metricKey, button)
           return
         }
 
