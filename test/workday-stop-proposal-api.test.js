@@ -32,6 +32,33 @@ function pendingProposal(overrides = {}) {
   }
 }
 
+test('portalowa lista zgłoszeń zwraca tokenowo zawężony total obok limitowanej strony', async () => {
+  const sent = []
+  const calls = []
+  const api = createApi({
+    connectDbClient: async () => ({ query: async () => {}, release: () => {} }),
+    getRequesterMembership: async () => ({ status: 'ACTIVE', role: 'COORDINATOR' }),
+    createRepository: () => ({
+      schemaReady: async () => true,
+      listForReview: async (filters) => { calls.push(['list', filters]); return [pendingProposal()] },
+      countForReview: async (filters) => { calls.push(['count', filters]); return 7 },
+    }),
+    sendJson: (_res, status, body) => sent.push({ status, body }),
+  })
+
+  await api.handlePortal(
+    { method: 'GET', headers: {} },
+    {},
+    new URL('https://portal.cleanzi.pl/api/portal/workday-stop-proposals?orgId=best-clean&status=PENDING&limit=1'),
+  )
+
+  assert.equal(sent[0].status, 200)
+  assert.equal(sent[0].body.data.total, 7)
+  assert.equal(sent[0].body.data.proposals.length, 1)
+  assert.deepEqual(calls[0][1], calls[1][1])
+  assert.equal(calls[0][1].limit, 1)
+})
+
 test('decyzja APPROVE zapisuje kanoniczny Workday STOP, a nie Event', async () => {
   const calls = []
   const repository = {

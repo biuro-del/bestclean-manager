@@ -364,16 +364,18 @@ function createWorkdayStopProposalApi(dependencies = {}) {
           sendJson(res, 200, { ok: true, data: { ...detail, capability: { canApprove: permission || testSelfApproval, testSelfApproval } } })
           return
         }
-        const proposals = await repository.listForReview({
+        const filters = {
           orgId,
           workerId: text(requestUrl.searchParams.get('workerId')),
           from: dateFilter(requestUrl.searchParams.get('from'), 'from'),
           to: dateFilter(requestUrl.searchParams.get('to'), 'to'),
           status: text(requestUrl.searchParams.get('status')).toUpperCase() || 'PENDING',
           limit: Math.min(Math.max(Number(requestUrl.searchParams.get('limit')) || 100, 1), 100),
-        })
+        }
+        const proposals = await repository.listForReview(filters)
+        const total = await repository.countForReview(filters)
         await client.query('commit')
-        sendJson(res, 200, { ok: true, data: { proposals, capability: { canApprove: permission, testSelfApproval: false } } })
+        sendJson(res, 200, { ok: true, data: { proposals, total, capability: { canApprove: permission, testSelfApproval: false } } })
         return
       }
       const result = await handlePortalDecision(repository, { orgId, uid, body, membership })

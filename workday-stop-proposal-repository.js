@@ -43,6 +43,24 @@ function mapProposal(row = {}) {
   }
 }
 
+const REVIEW_FILTER_SQL = `
+  from public.workday_stop_proposal p
+  join public.workday w on w.org_id = p.org_id and w.workday_id = p.workday_id
+ where p.org_id = $1::text
+   and (nullif($2::text, '') is null or p.worker_id = $2::text)
+   and ($3::date is null or w.start_at >= $3::date)
+   and ($4::date is null or w.start_at < ($4::date + interval '1 day'))
+   and (nullif($5::text, '') is null or p.status = $5::text)`
+
+function reviewFilterParams({ orgId, workerId = '', from = '', to = '', status = 'PENDING' }) {
+  return [orgId, workerId, from || null, to || null, status]
+}
+
+function nonNegativeInteger(value) {
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0
+}
+
 function createWorkdayStopProposalRepository(client) {
   if (!client || typeof client.query !== 'function') {
     throw new TypeError('WorkdayStopProposal repository requires a PostgreSQL client.')
@@ -235,18 +253,21 @@ function createWorkdayStopProposalRepository(client) {
       const result = await client.query(
         `select p.*, w.worker_login, w.worker_name, w.start_at,
                 extract(epoch from (p.proposed_stop_at - w.start_at))::integer as proposed_duration_sec
-           from public.workday_stop_proposal p
-           join public.workday w on w.org_id = p.org_id and w.workday_id = p.workday_id
-          where p.org_id = $1::text
-            and (nullif($2::text, '') is null or p.worker_id = $2::text)
-            and ($3::date is null or w.start_at >= $3::date)
-            and ($4::date is null or w.start_at < ($4::date + interval '1 day'))
-            and (nullif($5::text, '') is null or p.status = $5::text)
+           ${REVIEW_FILTER_SQL}
           order by p.submitted_at asc, p.proposal_id asc
           limit $6::integer`,
-        [orgId, workerId, from || null, to || null, status, limit],
+        [...reviewFilterParams({ orgId, workerId, from, to, status }), limit],
       )
       return result.rows.map((row) => ({ ...mapProposal(row), proposedDurationSec: Number(row.proposed_duration_sec ?? 0) }))
+    },
+
+    async countForReview({ orgId, workerId = '', from = '', to = '', status = 'PENDING' }) {
+      const result = await client.query(
+        `select count(*)::bigint as total
+           ${REVIEW_FILTER_SQL}`,
+        reviewFilterParams({ orgId, workerId, from, to, status }),
+      )
+      return nonNegativeInteger(result.rows?.[0]?.total)
     },
 
     async getReviewDetail({ orgId, proposalId }) {

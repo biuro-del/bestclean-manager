@@ -51,7 +51,7 @@ export function createDashboardFeature(ctx) {
   let dashboardOperationsDialogRestoreFocus = null
   let dashboardStopProposalAttention = {
     orgId: '',
-    hasPending: false,
+    pendingCount: 0,
     loadedAt: 0,
     request: null,
   }
@@ -6447,17 +6447,17 @@ export function createDashboardFeature(ctx) {
     if (!activeOrgId) {
       dashboardStopProposalAttention = {
         orgId: '',
-        hasPending: false,
+        pendingCount: 0,
         loadedAt: 0,
         request: null,
       }
-      return false
+      return 0
     }
 
     if (dashboardStopProposalAttention.orgId !== activeOrgId) {
       dashboardStopProposalAttention = {
         orgId: activeOrgId,
-        hasPending: false,
+        pendingCount: 0,
         loadedAt: 0,
         request: null,
       }
@@ -6467,7 +6467,7 @@ export function createDashboardFeature(ctx) {
       Date.now() - dashboardStopProposalAttention.loadedAt < DASHBOARD_STOP_PROPOSAL_ATTENTION_CACHE_TTL_MS
     )
     if (options.forceRefresh !== true && isFresh) {
-      return dashboardStopProposalAttention.hasPending
+      return dashboardStopProposalAttention.pendingCount
     }
     if (dashboardStopProposalAttention.request) {
       return dashboardStopProposalAttention.request
@@ -6479,15 +6479,16 @@ export function createDashboardFeature(ctx) {
     })
       .then((payload) => {
         if (dashboardStopProposalAttention.orgId !== activeOrgId) {
-          return dashboardStopProposalAttention.hasPending
+          return dashboardStopProposalAttention.pendingCount
         }
-        dashboardStopProposalAttention.hasPending = Array.isArray(payload?.proposals) && payload.proposals.length > 0
+        const total = Math.max(0, Math.trunc(Number(payload?.total) || 0))
+        dashboardStopProposalAttention.pendingCount = total || (Array.isArray(payload?.proposals) ? payload.proposals.length : 0)
         dashboardStopProposalAttention.loadedAt = Date.now()
-        return dashboardStopProposalAttention.hasPending
+        return dashboardStopProposalAttention.pendingCount
       })
       .catch((error) => {
         console.warn('[portal/dashboard] stop proposal attention read failed', error)
-        return dashboardStopProposalAttention.hasPending
+        return dashboardStopProposalAttention.pendingCount
       })
       .finally(() => {
         if (dashboardStopProposalAttention.orgId === activeOrgId) {
@@ -6503,10 +6504,10 @@ export function createDashboardFeature(ctx) {
     operationalServices = {},
     locations = [],
     activeRows = [],
-    hasPendingStopProposals = false,
+    pendingStopProposalCount = 0,
   } = {}) {
     const alerts = []
-    const stopProposalAttentionAlert = buildDashboardStopProposalAttentionAlert(hasPendingStopProposals)
+    const stopProposalAttentionAlert = buildDashboardStopProposalAttentionAlert(pendingStopProposalCount)
     if (stopProposalAttentionAlert) {
       alerts.push(stopProposalAttentionAlert)
     }
@@ -7660,7 +7661,7 @@ export function createDashboardFeature(ctx) {
       operationalServices,
       locations,
       activeRows: mapRows,
-      hasPendingStopProposals: dashboardStopProposalAttention.hasPending,
+      pendingStopProposalCount: dashboardStopProposalAttention.pendingCount,
     })
     void dashboardRenderActiveWorkersMap(locations, mapRows.length + plannedOnlyMapRows.length)
   }
