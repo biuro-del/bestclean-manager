@@ -300,6 +300,89 @@ export function createEventsFeature(ctx) {
     }
   }
 
+  function dashboardMissingQrStopFocus() {
+    const focus = appState.eventsDashboardMissingQrStopFocus
+    if (
+      !focus ||
+      focus.kind !== 'historical-missing-qr-stop' ||
+      String(focus.orgId ?? '').trim() !== String(appState.session?.orgId ?? '').trim()
+    ) {
+      return null
+    }
+
+    const items = Array.isArray(focus.items) ? focus.items : []
+    return items.length ? { ...focus, items } : null
+  }
+
+  function clearDashboardMissingQrStopFocus() {
+    delete appState.eventsDashboardMissingQrStopFocus
+  }
+
+  function dashboardMissingQrStopFocusRows() {
+    const focus = dashboardMissingQrStopFocus()
+    if (!focus) {
+      return []
+    }
+
+    return focus.items.map((item) => {
+      const row = item?.row ?? {}
+      const dayKey = String(item?.dayKey ?? row?.dayKey ?? '').trim()
+      const startAt = String(row?.startAt ?? row?.start ?? '').trim()
+      return {
+        ...row,
+        id: String(row?.id ?? item?.workdayId ?? '').trim(),
+        workdayId: String(item?.workdayId ?? row?.workdayId ?? row?.id ?? '').trim(),
+        workerLogin: String(item?.workerLogin ?? row?.workerLogin ?? '').trim(),
+        workerName: String(item?.workerName ?? row?.workerName ?? item?.title ?? '').trim(),
+        dayKey,
+        date: String(row?.date ?? dayKey).trim(),
+        start: String(row?.start ?? startAt).trim(),
+        stop: '',
+        startAt,
+        endAt: '',
+        status: 'RUNNING',
+        missingQrStop: true,
+      }
+    })
+  }
+
+  function renderDashboardMissingQrStopFocusPage() {
+    const rows = dashboardMissingQrStopFocusRows()
+    const pageSize = normalizeEventsPageSize(appState.eventsPageSize)
+    const totalPages = Math.max(1, Math.ceil(rows.length / pageSize))
+    appState.eventsPage = Math.min(Math.max(1, Number(appState.eventsPage) || 1), totalPages)
+    appState.eventsPageSize = pageSize
+    appState.eventsHasNext = appState.eventsPage < totalPages
+    appState.eventsEstimatedTotal = false
+    appState.eventsTotal = rows.length
+    appState.eventsTotalPages = totalPages
+
+    const startIndex = (appState.eventsPage - 1) * pageSize
+    const pageRows = rows.slice(startIndex, startIndex + pageSize)
+    renderEventsRows(pageRows)
+    updateEventsPager(pageRows.length)
+    syncEventsPageSizeControl()
+    setSubwelcomeMetric('#view-events .subwelcome', rows.length)
+  }
+
+  function renderDashboardMissingQrStopFocusAlert(root, focus) {
+    root.hidden = false
+    root.className = 'events-integrity-alert events-integrity-alert--compact'
+    root.innerHTML = `
+      <div class="events-integrity-focus" role="status">
+        <span class="events-integrity-focus-icon" aria-hidden="true"><i class="ph ph-funnel"></i></span>
+        <span>
+          <small>Filtr z pulpitu</small>
+          <strong>Brak QR STOP · ${escapeHtml(focus.items.length)} ${focus.items.length === 1 ? 'dzień' : 'dni'} do uzupełnienia</strong>
+        </span>
+        <button class="btn2" type="button" data-event-missing-stop-back>
+          <i class="ph ph-arrow-left" aria-hidden="true"></i>
+          <span>Wróć do wszystkich zdarzeń</span>
+        </button>
+      </div>
+    `
+  }
+
   function renderOpenIntegrityFocusPage() {
     const group = eventOpenIntegrityFocusedGroup()
     if (!group) {
@@ -506,6 +589,13 @@ export function createEventsFeature(ctx) {
   function renderOpenEventIntegrity(error = null) {
     const root = document.getElementById('evOpenStatusIntegrity')
     if (!root) {
+      return
+    }
+
+    const missingQrStopFocus = dashboardMissingQrStopFocus()
+    if (missingQrStopFocus) {
+      closeEventIntegrityModal({ restoreFocus: false })
+      renderDashboardMissingQrStopFocusAlert(root, missingQrStopFocus)
       return
     }
 
@@ -4203,6 +4293,7 @@ export function createEventsFeature(ctx) {
       eventsFilterComboClose(kind)
     })
     clearOpenEventIntegrityFocus()
+    clearDashboardMissingQrStopFocus()
     applyEventsFilterInputs({
       from: firstDayOfCurrentMonthYmd(),
       to: todayYmd(),
@@ -4651,6 +4742,16 @@ export function createEventsFeature(ctx) {
       return
     }
 
+    if (dashboardMissingQrStopFocus()) {
+      if (resetPage) {
+        appState.eventsPage = 1
+      }
+      appState.eventsSelectedKeys = new Set()
+      renderOpenEventIntegrity()
+      renderDashboardMissingQrStopFocusPage()
+      return
+    }
+
     if (applyStoredFilters && appState.eventsFilters) {
       applyEventsFilterInputs(appState.eventsFilters)
     }
@@ -4899,6 +5000,7 @@ export function createEventsFeature(ctx) {
     binding.add(document.getElementById('evSearchBtn'), 'click', () => {
       ;['worker', 'zone', 'client'].forEach((kind) => eventsFilterComboClose(kind, { restoreSelection: true }))
       clearOpenEventIntegrityFocus()
+      clearDashboardMissingQrStopFocus()
       appState.eventsPage = 1
       void fetchEventsForCurrentSession({ resetPage: false })
     })
@@ -4911,11 +5013,16 @@ export function createEventsFeature(ctx) {
         renderOpenIntegrityFocusPage()
         return
       }
+      if (dashboardMissingQrStopFocus()) {
+        renderDashboardMissingQrStopFocusPage()
+        return
+      }
       void fetchEventsForCurrentSession({ resetPage: false })
     })
 
     binding.add(document.getElementById('evResetBtn'), 'click', () => {
       clearOpenEventIntegrityFocus()
+      clearDashboardMissingQrStopFocus()
       void fetchEventsForCurrentSession({ resetPage: true, forceRefresh: true })
     })
     binding.add(document.getElementById('evClearFiltersBtn'), 'click', resetEventsFilters)
@@ -4933,6 +5040,10 @@ export function createEventsFeature(ctx) {
         renderOpenIntegrityFocusPage()
         return
       }
+      if (dashboardMissingQrStopFocus()) {
+        renderDashboardMissingQrStopFocusPage()
+        return
+      }
       void fetchEventsForCurrentSession()
     })
 
@@ -4943,16 +5054,22 @@ export function createEventsFeature(ctx) {
         renderOpenIntegrityFocusPage()
         return
       }
+      if (dashboardMissingQrStopFocus()) {
+        renderDashboardMissingQrStopFocusPage()
+        return
+      }
       void fetchEventsForCurrentSession()
     })
 
     binding.add(document.getElementById('evStatus'), 'change', () => {
       clearOpenEventIntegrityFocus()
+      clearDashboardMissingQrStopFocus()
       appState.eventsPage = 1
       void fetchEventsForCurrentSession({ resetPage: false })
     })
     binding.add(document.getElementById('evMonth'), 'change', () => {
       if (!applyEventsMonthControl()) return
+      clearDashboardMissingQrStopFocus()
       appState.eventsPage = 1
       void fetchEventsForCurrentSession({ resetPage: false })
     })
@@ -4972,6 +5089,13 @@ export function createEventsFeature(ctx) {
       void openCreateEventEditor()
     })
     binding.add(document.getElementById('evOpenStatusIntegrity'), 'click', (event) => {
+      const missingStopBackButton = event.target?.closest?.('[data-event-missing-stop-back]')
+      if (missingStopBackButton) {
+        clearDashboardMissingQrStopFocus()
+        void fetchEventsForCurrentSession({ resetPage: true, forceRefresh: true })
+        return
+      }
+
       const backButton = event.target?.closest?.('[data-event-open-back]')
       if (backButton) {
         clearOpenEventIntegrityFocus()
@@ -5051,6 +5175,7 @@ export function createEventsFeature(ctx) {
         if (event.key !== 'Enter') return
         clearOpenEventIntegrityFocus()
         appState.eventsPage = 1
+        clearDashboardMissingQrStopFocus()
         void fetchEventsForCurrentSession({ resetPage: false })
       })
     })

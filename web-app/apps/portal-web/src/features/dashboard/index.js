@@ -6599,7 +6599,7 @@ export function createDashboardFeature(ctx) {
         icon: 'ph-warning-circle',
         title: `Brak QR STOP: ${openQrStopCount}`,
         meta: 'Niezamknięte dni pracy sprzed dzisiaj',
-        metric: 'openStartStopYesterday',
+        action: 'open-missing-qr-stop-list',
       })
     }
 
@@ -6619,12 +6619,14 @@ export function createDashboardFeature(ctx) {
     host.innerHTML = alerts.slice(0, 3).map((alert) => {
       const route = String(alert?.route ?? '').trim()
       const metric = String(alert?.metric ?? '').trim()
+      const action = String(alert?.action ?? '').trim()
       const routeAttribute = route ? ` data-route="${escapeHtml(route)}"` : ''
       const metricAttributes = metric
         ? ` data-dash-alert-metric="${escapeHtml(metric)}" aria-expanded="false" aria-haspopup="dialog"`
         : ''
+      const actionAttribute = action ? ` data-dash-alert-action="${escapeHtml(action)}"` : ''
       return `
-      <button class="dash-command-alert is-${escapeHtml(alert.tone)}" type="button"${routeAttribute}${metricAttributes}>
+      <button class="dash-command-alert is-${escapeHtml(alert.tone)}" type="button"${routeAttribute}${metricAttributes}${actionAttribute}>
         <span class="dash-command-alert__icon"><i class="ph ${escapeHtml(alert.icon)}" aria-hidden="true"></i></span>
         <span class="dash-command-alert__copy">
           <strong>${escapeHtml(alert.title)}</strong>
@@ -8446,6 +8448,41 @@ export function createDashboardFeature(ctx) {
     await openEventHistoryFromRow(row, tab)
   }
 
+  async function openDashboardMissingQrStopList() {
+    const orgId = String(appState.session?.orgId ?? '').trim()
+    const items = dashboardMetricDetailsOrEmpty('openStartStopYesterday')
+      .map((detail) => ({
+        action: 'workday-day-editor',
+        dayKey: String(detail?.dayKey ?? '').trim(),
+        workerLogin: String(detail?.workerLogin ?? '').trim(),
+        workerName: String(detail?.workerName ?? detail?.title ?? '').trim(),
+        workdayId: String(detail?.workdayId ?? detail?.row?.workdayId ?? detail?.row?.id ?? '').trim(),
+        title: String(detail?.title ?? '').trim(),
+        subtitle: String(detail?.subtitle ?? '').trim(),
+        row: { ...(detail?.row ?? {}) },
+      }))
+      .filter((detail) => detail.dayKey && (detail.workdayId || detail.workerLogin))
+
+    if (!orgId || !items.length) {
+      showTransientNotice('Brak aktualnych dni z brakującym QR STOP.', 'error')
+      return false
+    }
+
+    appState.eventsDashboardMissingQrStopFocus = {
+      kind: 'historical-missing-qr-stop',
+      orgId,
+      items,
+    }
+
+    if (typeof window !== 'undefined' && typeof window.go === 'function') {
+      await Promise.resolve(window.go('events'))
+      return true
+    }
+
+    showTransientNotice('Nie udało się otworzyć listy brakujących QR STOP.', 'error')
+    return false
+  }
+
   function dashboardLateMinutesToHm(value) {
     const minutes = Number(value ?? 0)
     const normalizedMinutes = Number.isFinite(minutes) && minutes > 0 ? Math.floor(minutes) : 0
@@ -9650,12 +9687,20 @@ export function createDashboardFeature(ctx) {
     })
 
     binding.add(document.getElementById('dashCommandAlertsList'), 'click', (event) => {
-      const button = event.target?.closest?.('[data-dash-alert-metric]')
-      const metricKey = String(button?.getAttribute?.('data-dash-alert-metric') ?? '').trim()
-      if (!metricKey || !(button instanceof HTMLElement)) {
+      const button = event.target?.closest?.('[data-dash-alert-action], [data-dash-alert-metric]')
+      if (!(button instanceof HTMLElement)) {
         return
       }
       event.preventDefault()
+      const action = String(button.getAttribute('data-dash-alert-action') ?? '').trim()
+      if (action === 'open-missing-qr-stop-list') {
+        void openDashboardMissingQrStopList()
+        return
+      }
+      const metricKey = String(button.getAttribute('data-dash-alert-metric') ?? '').trim()
+      if (!metricKey) {
+        return
+      }
       dashboardTogglePinnedMetricPopover(metricKey, button)
     })
 

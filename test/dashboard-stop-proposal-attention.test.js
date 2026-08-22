@@ -41,10 +41,19 @@ test('alert Brak QR STOP otwiera wyłącznie listę dni z brakującym STOP', () 
     'utf8',
   )
 
-  assert.match(dashboard, /title: `Brak QR STOP: \$\{openQrStopCount\}`,[\s\S]*metric: 'openStartStopYesterday'/)
-  assert.doesNotMatch(dashboard, /title: `Brak QR STOP: \$\{openQrStopCount\}`,[\s\S]*route: 'events'/)
-  assert.match(dashboard, /data-dash-alert-metric=/)
-  assert.match(dashboard, /dashboardTogglePinnedMetricPopover\(metricKey, button\)/)
+  const events = fs.readFileSync(
+    path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'features', 'events', 'index.js'),
+    'utf8',
+  )
+
+  assert.match(dashboard, /title: `Brak QR STOP: \$\{openQrStopCount\}`,[\s\S]*action: 'open-missing-qr-stop-list'/)
+  assert.match(dashboard, /data-dash-alert-action=/)
+  assert.match(dashboard, /appState\.eventsDashboardMissingQrStopFocus = \{[\s\S]*kind: 'historical-missing-qr-stop'/)
+  assert.match(dashboard, /await Promise\.resolve\(window\.go\('events'\)\)/)
+  assert.match(events, /function dashboardMissingQrStopFocus\(\)/)
+  assert.match(events, /renderDashboardMissingQrStopFocusPage\(\)/)
+  assert.match(events, /data-event-missing-stop-back/)
+  assert.match(events, /if \(dashboardMissingQrStopFocus\(\)\) \{[\s\S]*renderDashboardMissingQrStopFocusPage\(\)[\s\S]*return/s)
 })
 
 test('kandydat zachowuje produkcyjną kolejność: pracownik, potem miejsce realizacji', () => {
