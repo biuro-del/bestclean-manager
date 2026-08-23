@@ -138,3 +138,50 @@ final result: passed
 - Kontrola po poprawce: zdjęcie zaczyna się od górnej krawędzi, formularz pozostaje w całości dostępny, overflow X wynosi 0.
 
 final result: passed
+
+---
+
+# Design QA — Cleanzi cleaning-company login
+
+## Reference and implementation
+
+- Selected direction: option 1, “Spokojna precyzja”.
+- Source visual: `C:\Users\rafal\.codex\generated_images\01a02950-61b9-7e22-b381-efc6e1d1030d\exec-2a3d7509-beac-4545-b215-509e9cf34d3b.png`.
+- Final implementation capture: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-option1-desktop-final-verified-20260823.png`.
+- Source size: 1488 × 1058, normalized for comparison to 1440 × 1024.
+- Implementation viewport: 1440 × 1024 CSS px, device scale factor 1.
+- Tested state: default login, no focus, no autofill, no validation error. Public registration was enabled only by a read-only local legal-document fixture.
+
+## Comparison evidence
+
+- Full view: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-option1-comparison-full-final-20260823.png`.
+- Focused form: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-option1-comparison-form-final-20260823.png`.
+- Focused hero caption: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-option1-comparison-caption-final-20260823.png`.
+- Mobile: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-option1-mobile-final-verified-390x844-20260823.png`.
+- Laptop: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-option1-laptop-final-verified-1280x720-20260823.png`.
+- Tablet: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-option1-tablet-final-verified-768x1024-20260823.png`.
+
+## Interaction and responsive verification
+
+- Password reveal toggles `password` ↔ `text`, updates the eye icon, `aria-pressed`, and the accessible label.
+- “Załóż firmę” opens the existing company-registration choices; Google and e-mail paths remain available; “Mam już konto” returns to login.
+- No real authentication or external registration submission was made during visual QA.
+- At 390 × 844 the page has no horizontal or vertical overflow in the default state (`390 × 844` document size).
+- At 1280 × 720 the page has no horizontal or vertical overflow in the default state (`1280 × 720` document size).
+- At 768 px the 480 px form card is centered within the available content width.
+- Browser inspection showed no application error in the verified default state.
+
+## Iteration log
+
+1. Pass 1 found P2 drift in card width, vertical rhythm, caption wrapping, and typography. Mobile also had P1 clipping and a P2 stacked registration row. The layout, spacing, type scale, and mobile breakpoints were corrected.
+2. Passes 2–4 refined the split ratio, hero crop, logo scale, field geometry, divider, security note, and caption position against the reference.
+3. Final code review found a P0 cascade issue: `display: grid !important` on the login screen would have overridden the authenticated portal transition. It was removed and protected with a regression assertion.
+4. Final responsive review found a P2 tablet alignment issue at 621–920 px. The form panel is now centered in that range.
+5. Final review reports no remaining P0, P1, or P2 defects.
+
+## Accepted residual differences
+
+- The generated reference re-rendered the Cleanzi logo and photo content. The implementation intentionally uses the canonical production SVG logo and the existing optimized production photo instead of rasterizing generated brand or photographic details.
+- Minor font rasterization and anti-aliasing differences are platform-dependent.
+
+Result: passed

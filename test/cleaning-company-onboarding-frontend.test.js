@@ -15,6 +15,8 @@ function readPortalSource(...parts) {
 const layout = readPortalSource('ui', 'layoutTemplate.js')
 const auth = readPortalSource('auth', 'authService.js')
 const app = readPortalSource('ui', 'portalApp.js')
+const appEntry = readPortalSource('App.jsx')
+const loginStyles = readPortalSource('ui', 'styles', 'login.css')
 const firebase = readPortalSource('firebase', 'firebaseClient.js')
 const server = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8')
 
@@ -45,6 +47,27 @@ test('standard login clearly identifies the cleaning-company panel', () => {
   assert.match(layout, /Logowanie do panelu firmy sprz&#261;taj&#261;cej Cleanzi\./)
   assert.match(app, /loginTitle\.textContent = 'Zaloguj się'/)
   assert.match(app, /loginCopy\.textContent = 'Logowanie do panelu firmy sprz\\u0105taj\\u0105cej Cleanzi\.'/)
+})
+
+test('selected cleaning-company login composition stays isolated and interactive', () => {
+  assert.match(appEntry, /import '\.\/ui\/styles\/login\.css'/)
+  assert.ok(appEntry.indexOf("import './ui/styles/login.css'") > appEntry.indexOf("import './ui/styles/commandCenter.css'"))
+  assert.match(layout, /id="loginPasswordToggle"/)
+  assert.match(layout, /class="ph ph-eye"/)
+  assert.match(layout, /class="ph ph-lock-key"/)
+  assert.match(app, /const setPasswordVisibility = \(isVisible\) =>/)
+  assert.match(app, /passwordInput\.type = isVisible \? 'text' : 'password'/)
+  assert.match(app, /passwordToggle\.setAttribute\('aria-pressed', String\(isVisible\)\)/)
+  assert.match(app, /passwordToggle\?\.addEventListener\('click', togglePasswordVisibility\)/)
+  assert.match(app, /passwordToggle\?\.removeEventListener\('click', togglePasswordVisibility\)/)
+  assert.match(loginStyles, /grid-template-columns: minmax\(0, 53\.7%\) minmax\(0, 46\.3%\)/)
+  assert.doesNotMatch(
+    loginStyles,
+    /#loginScreen\.login-screen\s*\{[^}]*display:\s*grid\s*!important/,
+    'the login screen must remain hideable after successful authentication',
+  )
+  assert.match(loginStyles, /#loginScreen \.login-card \{[\s\S]*background: transparent !important/)
+  assert.match(loginStyles, /@media \(max-width: 620px\)/)
 })
 
 test('registration uses server-published, exact legal documents and a trusted onboarding status', () => {

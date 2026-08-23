@@ -21,10 +21,9 @@ export const portalLayoutTemplate = `
     </div>
   </section>
   <section class="login-panel">
-    <form class="login-card" id="loginForm" role="dialog" aria-labelledby="loginTitle" novalidate>
-      <div class="login-card-brand" aria-hidden="true">
-        <img src="/cleanzi-logo.svg" alt="" width="156" height="44" />
-        <span>Panel firmy sprz&#261;taj&#261;cej</span>
+    <form class="login-card" id="loginForm" aria-labelledby="loginTitle" novalidate>
+      <div class="login-card-brand">
+        <img src="/cleanzi-logo.svg" alt="Cleanzi" width="252" height="70" />
       </div>
       <div class="login-brand">
         <span class="login-card-kicker">PANEL FIRMY SPRZ&#260;TAJ&#260;CEJ</span>
@@ -40,7 +39,12 @@ export const portalLayoutTemplate = `
 
         <div class="login-field">
           <label for="loginPass">Hasło</label>
-          <input id="loginPass" type="password" autocomplete="current-password" placeholder="Wpisz hasło" />
+          <div class="login-password-control">
+            <input id="loginPass" type="password" autocomplete="current-password" placeholder="Wpisz hasło" />
+            <button class="login-password-toggle" id="loginPasswordToggle" type="button" aria-label="Pokaż hasło" aria-pressed="false">
+              <i class="ph ph-eye" aria-hidden="true"></i>
+            </button>
+          </div>
         </div>
 
         <button class="btn primary login-submit" id="loginBtn" type="submit">Zaloguj</button>
@@ -53,7 +57,7 @@ export const portalLayoutTemplate = `
 
       <div class="login-company-panel" id="loginCompanyPanel" hidden>
         <p class="login-company-lead">Za&#322;&#243;&#380; konto dla firmy sprz&#261;taj&#261;cej i od razu zacznij prac&#281; w Cleanzi.</p>
-        <button class="login-company-google" id="loginCompanyGoogle" type="button">Kontynuuj z Google</button>
+        <button class="login-company-google" id="loginCompanyGoogle" type="button"><i class="ph ph-google-logo" aria-hidden="true"></i><span>Kontynuuj z Google</span></button>
         <div class="login-company-divider" aria-hidden="true"><span>lub</span></div>
         <button class="login-company-email-open" id="loginCompanyEmailOpen" type="button">Zarejestruj si&#281; e-mailem</button>
         <p class="login-company-note">Przy rejestracji e-mailem wy&#347;lemy link. Konto zostanie potwierdzone dopiero po jego otwarciu.</p>
@@ -145,7 +149,7 @@ export const portalLayoutTemplate = `
 
       <div class="login-error" id="loginErr" aria-live="polite" aria-atomic="true" style="display:none;"></div>
       <button class="login-reset-open" id="loginResetOpen" type="button" hidden>Zresetuj hasło</button>
-      <p class="login-security-note">Bezpieczne logowanie do chronionego środowiska Cleanzi.</p>
+      <p class="login-security-note"><i class="ph ph-lock-key" aria-hidden="true"></i><span>Bezpieczne logowanie do chronionego środowiska Cleanzi.</span></p>
     </form>
   </section>
 </div>

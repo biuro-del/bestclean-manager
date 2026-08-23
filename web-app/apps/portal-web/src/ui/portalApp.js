@@ -6761,6 +6761,7 @@ function bindPlatformLogin(router) {
   const loginButton = byId('loginBtn')
   const loginInput = byId('loginLogin')
   const passwordInput = byId('loginPass')
+  const passwordToggle = byId('loginPasswordToggle')
   const resetPanel = byId('loginResetPanel')
   const resetEmail = byId('loginResetEmail')
   const resetSend = byId('loginResetSend')
@@ -7136,8 +7137,22 @@ function bindPlatformLogin(router) {
     showLoginCredentials()
     loginInput.focus()
   }
+  const setPasswordVisibility = (isVisible) => {
+    passwordInput.type = isVisible ? 'text' : 'password'
+    if (!passwordToggle) return
+    passwordToggle.setAttribute('aria-pressed', String(isVisible))
+    passwordToggle.setAttribute('aria-label', isVisible ? 'Ukryj hasło' : 'Pokaż hasło')
+    const icon = passwordToggle.querySelector('i')
+    icon?.classList.toggle('ph-eye', !isVisible)
+    icon?.classList.toggle('ph-eye-slash', isVisible)
+  }
+  const togglePasswordVisibility = () => {
+    setPasswordVisibility(passwordInput.type === 'password')
+    passwordInput.focus({ preventScroll: true })
+  }
 
   loginForm?.addEventListener('submit', submit)
+  passwordToggle?.addEventListener('click', togglePasswordVisibility)
   resetOpen.addEventListener('click', openReset)
   resetBack.addEventListener('click', closeReset)
   organizationList?.addEventListener('click', handleOrganization)
@@ -7162,6 +7177,7 @@ function bindPlatformLogin(router) {
   companyBasicsSignOut?.addEventListener('click', handleCompanyBasicsSignOut)
   return () => {
     loginForm?.removeEventListener('submit', submit)
+    passwordToggle?.removeEventListener('click', togglePasswordVisibility)
     resetOpen.removeEventListener('click', openReset)
     resetBack.removeEventListener('click', closeReset)
     organizationList?.removeEventListener('click', handleOrganization)
