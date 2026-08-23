@@ -185,3 +185,62 @@ final result: passed
 - Minor font rasterization and anti-aliasing differences are platform-dependent.
 
 Result: passed
+
+---
+
+# Design QA — compact 80% login composition
+
+## Source and state
+
+- Source visual truth: `C:\Users\rafal\.codex\generated_images\01a02950-61b9-7e22-b381-efc6e1d1030d\exec-2a3d7509-beac-4545-b215-509e9cf34d3b.png`.
+- Product constraint added after the selected visual: retain the option 1 composition while reducing its real layout dimensions to about 80% and reserving space for subsequent messages.
+- Browser-rendered implementation: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-compact80-desktop-1440x1024-20260823.png`.
+- Source pixels: 1488 × 1058, normalized to 1440 × 1024.
+- Implementation pixels and CSS viewport: 1440 × 1024 at density 1.
+- State: public cleaning-company login, no autofill and no focus. Error and registration states were verified separately.
+
+## Comparison evidence
+
+- Full view: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-compact80-comparison-1440x1024-20260823.png`.
+- Focused form: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-compact80-comparison-form-focus-20260823.png`.
+- Laptop with login message: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-compact80-laptop-error-1280x720-20260823.png`.
+- Mobile default: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-compact80-mobile-390x844-20260823.png`.
+- Small mobile with login message: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-compact80-mobile-error-viewport-320x568-20260823.png`.
+
+## Findings
+
+- No actionable P0, P1, or P2 issue remains.
+- Typography and spacing: the form card is 384 px instead of 480 px; the title, logo, fields, CTA, dividers, caption, margins, and padding follow the requested compact scale without `transform: scale()` or CSS `zoom`.
+- Responsive layout: mobile inputs retain a 16 px font and interactive controls remain at least 44 px high. The short-screen branch removes only the photographic hero, preserving all login information and controls.
+- Colors and assets: the option 1 palette, canonical Cleanzi SVG, canonical optimized hero photo, borders, focus treatment, and Phosphor icons are unchanged.
+- Copy and content: login, company-registration, confirmation, reset, organization, and MFA panels retain their existing content and IDs. Longer organization and MFA collections are bounded inside their own panel on very short phones so they cannot expand the page.
+- Browser console: no errors or warnings in the verified states.
+- Residual test gap: organization selection and authenticated MFA require dedicated test-session fixtures, so their visual content was source-reviewed and constrained but not opened through a real authenticated browser session. This does not affect the tested public login and registration path.
+
+## Responsive and interaction evidence
+
+- 1280 × 720: default form 503 px high; form with login error 559 px high; page height remains 720 px.
+- 768 × 1024: form with login error ends at 916 px; page height remains 1024 px.
+- 768 × 900: form with login error ends at 787 px; page height remains 900 px.
+- 390 × 844: default form 460 px high; form with error 508 px high; registration 454 px high; email registration with error 499 px high; page height remains 844 px.
+- 390 × 667: form with error ends at 528 px; page height remains 667 px.
+- 360 × 640: form with error ends at 540 px; page height remains 640 px.
+- 320 × 568: form with error ends at 438 px; page height remains 568 px.
+- Every height check used `max(document.documentElement.scrollHeight, document.body.scrollHeight)` and verified that the full form stayed within the viewport.
+- Tested browser interactions: empty login displays its validation message; company registration opens; e-mail registration opens; empty e-mail registration displays its validation message; no external authentication or registration submission was made.
+
+## Comparison history
+
+1. Baseline P0: login errors caused 53 px of page scroll at 1280 × 720 and 89 px at 390 × 844. Small phones already scrolled without an error.
+2. Fix: all physical dimensions were reduced around the requested 80% ratio. Mobile hero, spacing, and short-height branches were compacted further while retaining 44 px touch targets and 16 px input text.
+3. Baseline P0: arbitrary organization or MFA content could grow the whole page. Fix: their short-phone content regions now have bounded internal height and overscroll containment.
+4. Post-fix browser evidence: login and registration messages fit without page scroll at every recorded viewport, including 320 × 568.
+
+## Technical QA
+
+- Focused onboarding tests: 7/7 passed.
+- ESLint: passed.
+- Production build: passed.
+- `git diff --check`: passed apart from expected Windows line-ending notices.
+
+final result: passed

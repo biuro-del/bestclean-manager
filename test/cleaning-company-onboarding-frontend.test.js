@@ -61,11 +61,32 @@ test('selected cleaning-company login composition stays isolated and interactive
   assert.match(app, /passwordToggle\?\.addEventListener\('click', togglePasswordVisibility\)/)
   assert.match(app, /passwordToggle\?\.removeEventListener\('click', togglePasswordVisibility\)/)
   assert.match(loginStyles, /grid-template-columns: minmax\(0, 53\.7%\) minmax\(0, 46\.3%\)/)
+  assert.match(loginStyles, /width: min\(384px, 100%\) !important/)
+  assert.match(loginStyles, /font-size: clamp\(39px, 3\.05vw, 44px\) !important/)
+  assert.match(loginStyles, /min-height: 56px !important/)
+  assert.match(loginStyles, /@media \(max-width: 620px\)[\s\S]*height: 128px !important/)
+  assert.match(loginStyles, /@media \(max-width: 620px\) and \(max-height: 620px\)[\s\S]*min-height: 44px !important/)
   assert.doesNotMatch(
     loginStyles,
-    /#loginScreen\.login-screen\s*\{[^}]*display:\s*grid\s*!important/,
-    'the login screen must remain hideable after successful authentication',
+    /#loginScreen\.login-screen\s*\{[^}]*display:\s*[^;}]+!important/,
+    'no login-screen rule may override the authenticated inline display state',
   )
+  assert.doesNotMatch(loginStyles, /transform:\s*scale\(/)
+  assert.doesNotMatch(loginStyles, /(?:^|[;{\s])zoom\s*:/)
+  assert.doesNotMatch(
+    loginStyles,
+    /#loginScreen(?:\.login-screen| \.login-panel| \.login-card)\s*\{[^}]*overflow:\s*hidden/,
+    'compact sizing must not hide overflowing login content',
+  )
+  for (const selector of [
+    'login-company-panel',
+    'login-company-email-panel',
+    'login-reset-panel',
+    'login-organization-panel',
+    'login-mfa-panel',
+  ]) {
+    assert.match(loginStyles, new RegExp(`#loginScreen \\.${selector}\\[hidden\\]`))
+  }
   assert.match(loginStyles, /#loginScreen \.login-card \{[\s\S]*background: transparent !important/)
   assert.match(loginStyles, /@media \(max-width: 620px\)/)
 })
