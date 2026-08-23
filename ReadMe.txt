@@ -4482,3 +4482,28 @@ Granice:
   nowego codebase. Kod nie moze zostac wdrozony przez obecne polecenia projektu.
 - Nie wlaczono Identity Platform, Blaze, App Check ani zadnych API i sekretow.
 - Nie wykonano migracji, commita, pusha, wdrozenia ani zmiany produkcji.
+
+Data: 2026-08-23
+Autor: AI Codex
+Temat: Lokalny kandydat przywrócenia „Godzin do weryfikacji” w portalu
+Powod:
+- Produkcyjny backend App Hosting `cleanzi-01` buduje portal z `Cleanzi-01/main`;
+  wskazany commit nie zawierał ani pozycji menu, ani widoku, API, serwisu i migracji
+  wymaganych przez proces weryfikacji godzin.
+Dodano lokalnie:
+- Pełny, zgodny z bazą `main` moduł propozycji zakończenia dnia pracy: pozycję menu
+  „Godziny do weryfikacji”, widok, trasę, serwis frontendu, API, politykę dostępu,
+  repozytorium oraz testy kontraktu i routingu.
+- Addytywną, nieuruchomioną migrację `dataconnect/migrations/20260813_workday_stop_proposals_additive.sql`
+  i kontrakt funkcji `docs/contracts/workday-stop-proposals-v1.md`.
+Weryfikacja:
+- `node --check` dla modułów backendu - PASS.
+- `node --test` dla czterech plików testów modułu - 26/26 PASS.
+- `npm.cmd --prefix web-app run lint` - PASS.
+- `npm.cmd run build` - PASS; zbudowany asset zawiera `workdayStopProposals`,
+  „Godziny do weryfikacji” i `workday-stop-proposals`.
+- `git diff --check` - PASS.
+Granice:
+- Nie wykonano migracji bazy, pusha, wdrożenia ani zmiany produkcji.
+- Przed wdrożeniem wymagany jest preflight schematu i uprawnień bazy; bez tabel
+  endpoint celowo pozostaje niedostępny zamiast zwracać niepełne dane.

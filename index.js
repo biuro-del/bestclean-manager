@@ -54,6 +54,7 @@ const {
   requiresCleaningCompanyAppCheck,
 } = require('./cleaning-company-onboarding-service')
 const { createProfitabilityApi } = require('./profitability-api')
+const { createWorkdayStopProposalApi } = require('./workday-stop-proposal-api')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
 const {
@@ -137,9 +138,11 @@ const PORTAL_EVENTS_PATH = '/api/portal/events'
 const PORTAL_UI_STYLE_PATH = '/api/portal/ui-style'
 const PORTAL_ZONE_QR_CODES_PATH = '/api/portal/zones/qr-codes'
 const PORTAL_PROFITABILITY_PATH = '/api/portal/profitability'
+const PORTAL_WORKDAY_STOP_PROPOSALS_PATH = '/api/portal/workday-stop-proposals'
 const MOBILE_STATE_PATH = '/api/mobile/state'
 const MOBILE_SCAN_PATH = '/api/mobile/scan'
 const MOBILE_JOB_CARDS_PATH = '/api/mobile/job-cards'
+const MOBILE_WORKDAY_STOP_PROPOSALS_PATH = '/api/mobile/workday-stop-proposals'
 const DATACONNECT_LOCATION = String(process.env.FIREBASE_DATACONNECT_LOCATION || process.env.DATACONNECT_LOCATION || '').trim()
 const DATACONNECT_SERVICE = String(process.env.FIREBASE_DATACONNECT_SERVICE || process.env.DATACONNECT_SERVICE || '').trim()
 const DATACONNECT_CONNECTOR = String(process.env.FIREBASE_DATACONNECT_CONNECTOR || process.env.DATACONNECT_CONNECTOR || '').trim()
@@ -2574,6 +2577,65 @@ async function assertMobileRequester(client, orgId, decodedToken) {
     throw error
   }
   return membership
+}
+
+function mobileTokenOrganizationIds(decodedToken) {
+  const candidates = [decodedToken?.org_id, decodedToken?.orgId]
+  const orgs = decodedToken?.orgs
+  if (orgs && typeof orgs === 'object' && !Array.isArray(orgs)) {
+    for (const [orgId, enabled] of Object.entries(orgs)) {
+      if (enabled === true || enabled === 1 || String(enabled).toLowerCase() === 'true') {
+        candidates.push(orgId)
+      }
+    }
+  }
+  return [...new Set(candidates.map(normalizeOrgId).filter(Boolean))]
+}
+
+function mobileOrganizationScopeError(statusCode, code, message) {
+  const error = new Error(code)
+  error.statusCode = statusCode
+  error.publicCode = code
+  error.publicMessage = message
+  return error
+}
+
+async function resolveMobileOrganizationFromToken(client, decodedToken, requestedOrgId = '') {
+  const uid = normalizeText(decodedToken?.uid)
+  const bodyOrgId = normalizeOrgId(requestedOrgId)
+  const claimedOrgIds = mobileTokenOrganizationIds(decodedToken)
+  if (claimedOrgIds.length > 1) {
+    throw mobileOrganizationScopeError(409, 'MOBILE_ORG_CONTEXT_AMBIGUOUS', 'Token zawiera wi?cej ni? jeden kontekst organizacji.')
+  }
+  if (claimedOrgIds.length === 1) {
+    const orgId = claimedOrgIds[0]
+    if (bodyOrgId && bodyOrgId !== orgId) {
+      throw mobileOrganizationScopeError(403, 'MOBILE_ORG_SCOPE_MISMATCH', 'orgId z ??dania nie zgadza si? z organizacj? tokenu.')
+    }
+    return { orgId, membership: await assertMobileRequester(client, orgId, decodedToken) }
+  }
+
+  const memberships = await client.query(
+    `select org_id
+       from public.organization_member
+      where uid = $1::text
+        and status = 'ACTIVE'
+      order by org_id asc
+      limit 2`,
+    [uid],
+  )
+  const orgIds = [...new Set((memberships.rows || []).map((row) => normalizeOrgId(row.org_id)).filter(Boolean))]
+  if (!orgIds.length) {
+    throw mobileOrganizationScopeError(403, 'MOBILE_ORG_FORBIDDEN', 'Token nie ma aktywnego dost?pu do organizacji.')
+  }
+  if (orgIds.length > 1) {
+    throw mobileOrganizationScopeError(409, 'MOBILE_ORG_CONTEXT_REQUIRED', 'Dla tokenu z wieloma organizacjami wymagany jest jednoznaczny claim organizacji.')
+  }
+  const orgId = orgIds[0]
+  if (bodyOrgId && bodyOrgId !== orgId) {
+    throw mobileOrganizationScopeError(403, 'MOBILE_ORG_SCOPE_MISMATCH', 'orgId z ??dania nie zgadza si? z organizacj? wyprowadzon? z tokenu.')
+  }
+  return { orgId, membership: await assertMobileRequester(client, orgId, decodedToken) }
 }
 
 async function resolveMobileWorker(client, orgId, body, decodedToken, membership) {
@@ -9432,6 +9494,20 @@ const profitabilityApi = createProfitabilityApi({
   verifyFirebaseIdToken,
 })
 
+const workdayStopProposalApi = createWorkdayStopProposalApi({
+  connectDbClient,
+  getRequesterMembership,
+  parseBearerToken,
+  readJsonBody,
+  resolveMobileOrganization: resolveMobileOrganizationFromToken,
+  resolveMobileWorker,
+  sendApiError,
+  sendJson,
+  sendMobileApiError,
+  sendMobileJson,
+  verifyFirebaseIdToken,
+})
+
 const server = http.createServer((req, res) => runWithPlatformRequest(req, () => {
   const scopedRequest = getPlatformRequestContext()
   res.once('finish', () => {
@@ -9476,6 +9552,18 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   if (requestUrl.pathname === PORTAL_PROFITABILITY_PATH) {
     profitabilityApi.handle(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PROFITABILITY_API_ERROR', error?.message || 'Unexpected profitability API error.')
+    })
+    return
+  }
+  if (requestUrl.pathname === PORTAL_WORKDAY_STOP_PROPOSALS_PATH) {
+    workdayStopProposalApi.handlePortal(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'WORKDAY_STOP_PROPOSAL_PORTAL_ERROR', error?.message || 'Unexpected workday stop proposal error.')
+    })
+    return
+  }
+  if (requestUrl.pathname === MOBILE_WORKDAY_STOP_PROPOSALS_PATH) {
+    workdayStopProposalApi.handleMobile(req, res, requestUrl).catch((error) => {
+      sendMobileApiError(res, 500, 'WORKDAY_STOP_PROPOSAL_MOBILE_ERROR', error?.message || 'Unexpected mobile workday stop proposal error.')
     })
     return
   }

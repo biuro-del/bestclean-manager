@@ -447,6 +447,12 @@ export const portalLayoutTemplate = `
               </span>
               <span class="mi-label">Lista pracowników</span>
             </button>
+            <button class="submenu-item" data-route="workdayStopProposals" type="button">
+              <span class="mi-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="17" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 9h8M8 14l2 2 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="mi-label">Godziny do weryfikacji</span>
+            </button>
           </div>
 
           <div class="menu-group-title">RAPORTY</div>
@@ -1349,6 +1355,7 @@ export const portalLayoutTemplate = `
         <section id="view-workerAccount" style="display:none;"></section>
         <section id="view-workerTime" style="display:none;"></section>
         <section id="view-workerTimeDetail" style="display:none;"></section>
+        <section id="view-workdayStopProposals" style="display:none;"></section>
         <section id="view-audits" style="display:none;"></section>
         <section id="view-clientProfile" style="display:none;"></section>
         <section id="view-clientProfileDetails" style="display:none;"></section>
