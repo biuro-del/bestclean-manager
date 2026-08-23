@@ -39,6 +39,14 @@ test('portal exposes a separate company-registration path without nesting the on
   assert.match(layout, /href="https:\/\/cleanzi\.pl\/polityka-prywatnosci"/)
 })
 
+test('standard login clearly identifies the cleaning-company panel', () => {
+  assert.match(layout, /PANEL FIRMY SPRZ&#260;TAJ&#260;CEJ/)
+  assert.match(layout, /<h1 class="login-title" id="loginTitle">Zaloguj si&#281;<\/h1>/)
+  assert.match(layout, /Logowanie do panelu firmy sprz&#261;taj&#261;cej Cleanzi\./)
+  assert.match(app, /loginTitle\.textContent = 'Zaloguj się'/)
+  assert.match(app, /loginCopy\.textContent = 'Logowanie do panelu firmy sprz\\u0105taj\\u0105cej Cleanzi\.'/)
+})
+
 test('registration uses server-published, exact legal documents and a trusted onboarding status', () => {
   assert.match(auth, /CLEANING_COMPANY_ONBOARDING_REQUIRED/)
   assert.match(auth, /registration\/cleaning-company\/legal-documents/)

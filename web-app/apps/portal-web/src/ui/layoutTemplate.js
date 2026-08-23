@@ -12,7 +12,7 @@ export const portalLayoutTemplate = `
     <div class="login-visual-overlay" aria-hidden="true"></div>
     <div class="login-visual-brand">
       <img src="/cleanzi-logo.svg" alt="Cleanzi" width="180" height="50" />
-      <span>Portal operacyjny</span>
+      <span>Panel firmy sprz&#261;taj&#261;cej</span>
     </div>
     <div class="login-visual-story">
       <span class="login-visual-kicker">SYSTEM DO ZARZ&#260;DZANIA PROCESEM SPRZ&#260;TANIA</span>
@@ -24,12 +24,12 @@ export const portalLayoutTemplate = `
     <form class="login-card" id="loginForm" role="dialog" aria-labelledby="loginTitle" novalidate>
       <div class="login-card-brand" aria-hidden="true">
         <img src="/cleanzi-logo.svg" alt="" width="156" height="44" />
-        <span>Portal operacyjny</span>
+        <span>Panel firmy sprz&#261;taj&#261;cej</span>
       </div>
       <div class="login-brand">
-        <span class="login-card-kicker">PORTAL OPERACYJNY</span>
-        <h1 class="login-title" id="loginTitle">Witaj ponownie</h1>
-        <p class="login-copy" id="loginCopy">Zaloguj si&#281; do systemu zarz&#261;dzania procesem sprz&#261;tania Cleanzi.</p>
+        <span class="login-card-kicker">PANEL FIRMY SPRZ&#260;TAJ&#260;CEJ</span>
+        <h1 class="login-title" id="loginTitle">Zaloguj si&#281;</h1>
+        <p class="login-copy" id="loginCopy">Logowanie do panelu firmy sprz&#261;taj&#261;cej Cleanzi.</p>
       </div>
 
       <div id="loginCredentialsPanel">

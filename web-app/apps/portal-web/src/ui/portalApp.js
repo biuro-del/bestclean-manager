@@ -3799,10 +3799,10 @@ function showLoginCredentials({ showResetAction = false } = {}) {
   if (mfaEnrollmentPanel) mfaEnrollmentPanel.hidden = true
   setLoginResetActionVisible(showResetAction)
   if (loginTitle) {
-    loginTitle.textContent = 'Witaj ponownie'
+    loginTitle.textContent = 'Zaloguj się'
   }
   if (loginCopy) {
-    loginCopy.textContent = 'Zaloguj si\u0119, aby przej\u015b\u0107 do centrum dowodzenia Cleanzi.'
+    loginCopy.textContent = 'Logowanie do panelu firmy sprz\u0105taj\u0105cej Cleanzi.'
   }
 }
 
