@@ -23,6 +23,7 @@ import {
   waitForFirebaseAuthReady,
 } from '../firebase/firebaseClient'
 import { renderSubscriptionBadge } from '../ui/subscriptionBadge'
+import { resolveAuthEmailDeliveryPolicy } from './authEmailDeliveryPolicy'
 
 const AUTH_STORAGE_KEY = 'iclean.portal.auth'
 const LAST_ORG_STORAGE_KEY = 'iclean.portal.lastOrgId'
@@ -33,6 +34,9 @@ const AUTH_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const AUTH_EMAIL_MAX_LENGTH = 160
 const CENTRAL_REGISTRATION_FUNCTIONS_REGION = 'europe-west1'
 const CENTRAL_REGISTRATION_ISSUER_NAME = 'issueCleaningCompanyRegistrationGrant'
+const AUTH_EMAIL_DELIVERY_MODE = String(import.meta.env.VITE_AUTH_EMAIL_DELIVERY_MODE ?? '')
+  .trim()
+  .toLowerCase()
 const GOOGLE_IDENTITY_SCRIPT_URL = 'https://accounts.google.com/gsi/client'
 const CENTRAL_REGISTRATION_ISSUER_READY = String(import.meta.env.VITE_CENTRAL_REGISTRATION_ISSUER_READY ?? '')
   .trim()
@@ -68,6 +72,24 @@ function createPublicAuthError(code, message) {
 function normalizeAuthEmail(value) {
   const email = toText(value).toLowerCase()
   return email.length <= AUTH_EMAIL_MAX_LENGTH && AUTH_EMAIL_PATTERN.test(email) ? email : ''
+}
+
+function assertCleaningCompanyEmailDeliveryAllowed(firebase) {
+  const policy = resolveAuthEmailDeliveryPolicy({
+    projectId: firebase?.app?.options?.projectId,
+    mode: AUTH_EMAIL_DELIVERY_MODE,
+  })
+  if (policy.allowed) return
+  if (policy.code === 'AUTH_EMAIL_DELIVERY_DISABLED') {
+    throw createPublicAuthError(
+      'AUTH_EMAIL_DELIVERY_DISABLED',
+      'Wysyłka wiadomości rejestracyjnych jest wyłączona w tym środowisku.',
+    )
+  }
+  throw createPublicAuthError(
+    'AUTH_EMAIL_TEST_DELIVERY_BLOCKED',
+    'W środowisku testowym prawdziwe wiadomości są zablokowane. Użyj emulatora Firebase Auth.',
+  )
 }
 
 function parseSession(raw) {
@@ -681,6 +703,7 @@ export async function requestCleaningCompanyEmailLink(emailValue) {
 
   await assertCleaningCompanyRegistrationAvailable()
   await ensureFirebaseAuthPersistence()
+  assertCleaningCompanyEmailDeliveryAllowed(firebase)
   // A valid grant must exist before the Firebase e-mail link can create a
   // first account. The issuer and the blocking gate keep the grant private.
   await issueCleaningCompanyRegistrationGrant(firebase, {

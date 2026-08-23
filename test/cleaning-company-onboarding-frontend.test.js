@@ -19,6 +19,14 @@ const appEntry = readPortalSource('App.jsx')
 const loginStyles = readPortalSource('ui', 'styles', 'login.css')
 const firebase = readPortalSource('firebase', 'firebaseClient.js')
 const server = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8')
+const emailTemplateConfig = JSON.parse(fs.readFileSync(
+  path.join(__dirname, '..', 'ops', 'firebase-auth', 'email-signin-template.pl.json'),
+  'utf8',
+))
+const emailTemplateHtml = fs.readFileSync(
+  path.join(__dirname, '..', 'ops', 'firebase-auth', 'email-signin.pl.html'),
+  'utf8',
+)
 
 test('portal exposes a separate company-registration path without nesting the onboarding form in login', () => {
   for (const id of [
@@ -135,6 +143,41 @@ test('company registration obtains the central gate grant before Firebase Auth a
   assert.equal((firebase.match(/initializeAppCheck\(/g) || []).length, 1)
   assert.match(firebase, /getFirebaseAppCheckToken/)
   assert.match(server, /https:\/\/accounts\.google\.com/)
+})
+
+test('real registration emails fail closed outside the canonical production Firebase project', () => {
+  const emailStart = auth.indexOf('export async function requestCleaningCompanyEmailLink')
+  const deliveryGuard = auth.indexOf('assertCleaningCompanyEmailDeliveryAllowed(firebase)', emailStart)
+  const emailGrant = auth.indexOf('await issueCleaningCompanyRegistrationGrant(firebase, {', emailStart)
+  const emailSend = auth.indexOf('await sendSignInLinkToEmail', emailStart)
+
+  assert.match(auth, /resolveAuthEmailDeliveryPolicy/)
+  assert.match(auth, /AUTH_EMAIL_TEST_DELIVERY_BLOCKED/)
+  assert.match(auth, /AUTH_EMAIL_DELIVERY_DISABLED/)
+  assert.ok(deliveryGuard > emailStart && deliveryGuard < emailGrant)
+  assert.ok(emailGrant < emailSend)
+})
+
+test('email registration explains validity and rate-limits a retry without claiming delivery', () => {
+  assert.match(layout, /Link rejestracyjny jest wa&#380;ny 30 minut\./)
+  assert.match(app, /const COMPANY_EMAIL_RETRY_COOLDOWN_MS = 60_000/)
+  assert.match(app, /Odczekaj \$\{remaining\} s/)
+  assert.match(app, /Zleciliśmy wysyłkę\./)
+  assert.doesNotMatch(app, /Link potwierdzający został wysłany\./)
+})
+
+test('production email template is branded, Polish, self-contained and keeps Firebase placeholders', () => {
+  assert.equal(emailTemplateConfig.customDomain, 'auth.cleanzi.pl')
+  assert.equal(emailTemplateConfig.senderDisplayName, 'Cleanzi')
+  assert.equal(emailTemplateConfig.senderLocalPart, 'rejestracja')
+  assert.equal(emailTemplateConfig.replyTo, 'kontakt@cleanzi.pl')
+  assert.equal(emailTemplateConfig.subject, 'Potwierdź rejestrację firmy w Cleanzi')
+  assert.match(emailTemplateHtml, /lang="pl"/)
+  assert.match(emailTemplateHtml, /href="%LINK%"/)
+  assert.match(emailTemplateHtml, /%EMAIL%/)
+  assert.match(emailTemplateHtml, /Link rejestracyjny jest ważny 30 minut/)
+  assert.doesNotMatch(emailTemplateHtml, /<img\b/i)
+  assert.doesNotMatch(emailTemplateHtml, /https?:\/\//i)
 })
 
 test('company bootstrap requires the central registration provenance claim', () => {

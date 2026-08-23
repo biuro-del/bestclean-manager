@@ -1,0 +1,9 @@
+{
+  "customDomain": "auth.cleanzi.pl",
+  "senderDisplayName": "Cleanzi",
+  "senderLocalPart": "rejestracja",
+  "replyTo": "kontakt@cleanzi.pl",
+  "subject": "Potwierdź rejestrację firmy w Cleanzi",
+  "bodyFormat": "HTML",
+  "bodyFile": "email-signin.pl.html"
+}
