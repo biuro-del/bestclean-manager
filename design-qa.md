@@ -45,6 +45,57 @@ final result: passed
 
 ---
 
+# Design QA — short-height responsive release gate
+
+## Source, implementation and normalization
+
+- Source visual truth: `C:\Users\rafal\.codex\generated_images\01a02950-61b9-7e22-b381-efc6e1d1030d\exec-2a3d7509-beac-4545-b215-509e9cf34d3b.png`.
+- Latest browser-rendered desktop: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-compact80-final-desktop-1440x1024-20260823.png`.
+- Full-view combined comparison: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-compact80-final-comparison-1440x1024-20260823.png`.
+- Focused responsive evidence, login error: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-compact80-landscape-error-844x390-20260823.png`.
+- Focused responsive evidence, e-mail registration error: `C:\Users\rafal\.codex\visualizations\2026\08\22\01a02950-61b9-7e22-b381-efc6e1d1030d\cleanzi-login-compact80-landscape-email-error-844x390-20260823.png`.
+- Source pixels: 1488 × 1058, normalized to 1440 × 1024. Desktop implementation: 1440 × 1024 CSS px and pixels at density 1. Focused short-height implementation: 844 × 390 CSS px and pixels at density 1.
+- States: default desktop; landscape login with local validation error; company-registration choice; landscape e-mail registration with local validation error. No real authentication, OAuth, e-mail send or company creation was performed.
+
+## Findings and fidelity surfaces
+
+- The release audit found one P1 after the earlier pass: the short-screen branch was limited to widths up to 620 px. At 844 × 390 the login error state measured a 817 px document, scrolled to `y=370`, with the 634.75 px card extending from `y=-218` to `y=416.75`. A boundary review then found the same discontinuity immediately above the first 700 px and 620 px height cut-offs.
+- Fix: the hero-removal branch now covers widths up to 920 px at heights up to 820 px; the 680 px high compact branch is independent of width; a 480 px high branch further tightens non-interactive spacing and hides only the repeated security note.
+- Typography and accessibility: the very-short layout retains the existing font family and hierarchy, uses a 26 px title, preserves 44 px fields and primary/secondary controls, and keeps the 16 px mobile input text from the mobile-width rule.
+- Spacing and layout rhythm: the 844 × 390 error-state card now measures 350.45 px and sits fully inside the viewport at `y=19.77–370.22`. Registration choice measures 347.80 px; e-mail registration with error measures 346.05 px. No horizontal or vertical page overflow remains.
+- Colors and tokens: navy, blue, borders, validation red, focus treatment and shadows remain unchanged from the accepted option 1 composition.
+- Image quality and assets: canonical Cleanzi SVG and optimized hero photo remain unchanged. The photo is intentionally omitted only where short height would otherwise displace the core task.
+- Copy and content: login and registration copy is unchanged. On viewports at most 480 px high the repeated security note is omitted; the action, fields, registration entry and validation message remain visible.
+- Icons and interactions: the existing Phosphor eye and lock treatments remain. Password visibility, login validation, registration choice and e-mail validation continue to use the existing functional controls.
+- Longer organization and MFA states retain bounded internal overflow on short screens; the core public login and registration states do not require page or internal scrolling.
+- Browser console: no error or warning was recorded in the verified public states.
+
+## Post-fix viewport evidence with a visible validation message
+
+- 768 × 700: document 768 × 700, card `y=20–654.75`, no page scroll.
+- 768 × 701 and 768 × 800: document exactly matches the viewport, card `y=20–654.75`, no page scroll.
+- 920 × 700: document 920 × 700, card `y=20–654.75`, no page scroll.
+- 920 × 820: document 920 × 820, card `y=20–654.75`; at 920 × 821 the hero returns and the card remains within `y=152–786.75`. Neither boundary scrolls.
+- 921 × 700: document 921 × 700, card `y=37–596.28`, no page scroll.
+- 1280 × 600: document 1280 × 600, card `y=12–426.36`, no page scroll.
+- 1280 × 621, 1280 × 632 and 1280 × 680: document exactly matches the viewport, card `y=12–426.36`; at 1280 × 681 the standard card returns within `y=37–596.28`. None of these boundaries scrolls.
+- 320 × 568: document 320 × 568, card `y=12–437.64`, no page scroll.
+- 390 × 844: document 390 × 844, card `y=146–653.95`, no page scroll.
+- 921 × 480, 920 × 480 and 1280 × 480: document height 480, e-mail error card `y=66.97–413.02`, no page scroll.
+- Every measurement used `max(document.documentElement.scrollHeight, document.body.scrollHeight)` and also verified card top, card bottom, `scrollY=0` and document width equal to viewport width.
+
+## Comparison history
+
+1. Earlier pass: portrait phone and normal laptop states passed, but the 621–920 px wide short-height range was not exercised.
+2. Independent release review found the P1 at 844 × 390 and identified the same risk at 768 × 700 and 1280 × 600.
+3. A second boundary review found discontinuities just above 700 px and 620 px; the final limits were therefore moved to 820 px for the narrow hero branch and 680 px for the width-independent compact branch.
+4. The height-aware responsive rules were generalized without using `transform: scale()`, CSS `zoom` or root overflow clipping.
+5. Post-fix browser verification passed all listed exact boundary sizes and the login, registration-choice and e-mail-error states. The standard 1440 × 1024 comparison remains visually unchanged. No P0, P1 or P2 finding remains open.
+
+final result: passed
+
+---
+
 # Design QA — kompaktowa karta logowania Cleanzi
 
 - Source visual truth: `C:\Users\rafal\Desktop\app to react\artifacts\login-card-qa\production-before-1280x720.jpg`

@@ -65,7 +65,15 @@ test('selected cleaning-company login composition stays isolated and interactive
   assert.match(loginStyles, /font-size: clamp\(39px, 3\.05vw, 44px\) !important/)
   assert.match(loginStyles, /min-height: 56px !important/)
   assert.match(loginStyles, /@media \(max-width: 620px\)[\s\S]*height: 128px !important/)
-  assert.match(loginStyles, /@media \(max-width: 620px\) and \(max-height: 620px\)[\s\S]*min-height: 44px !important/)
+  assert.match(
+    loginStyles,
+    /@media \(max-width: 920px\) and \(max-height: 820px\)[\s\S]*\.login-visual \{[\s\S]*display: none !important/,
+  )
+  assert.match(loginStyles, /@media \(max-height: 680px\)[\s\S]*min-height: 44px !important/)
+  assert.match(
+    loginStyles,
+    /@media \(max-height: 480px\)[\s\S]*\.login-security-note \{[\s\S]*display: none !important/,
+  )
   assert.doesNotMatch(
     loginStyles,
     /#loginScreen\.login-screen\s*\{[^}]*display:\s*[^;}]+!important/,
