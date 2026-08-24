@@ -2717,7 +2717,7 @@
     padding:10px 12px;
   }
 
-  #portalRoot #view-events .events-table-toolbar > div span{
+  #portalRoot #view-events .events-table-toolbar > div:first-child span{
     display:none;
   }
 
@@ -2761,5 +2761,101 @@
 
   #portalRoot #view-events .events-summary-card{
     min-height:78px !important;
+  }
+}
+
+/* Attendance periods are visually distinct from operational zone activities. */
+#portalRoot #view-events .events-record-legend{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:7px 15px;
+  min-height:39px;
+  padding:6px 14px;
+  border-bottom:1px solid #e7eaf1;
+  background:#fbfcff;
+  color:#657188;
+  font-size:9px;
+  font-weight:700;
+}
+
+#portalRoot #view-events .events-record-legend strong{
+  color:#2f3a50;
+  font-size:9.5px;
+  font-weight:850;
+}
+
+#portalRoot #view-events .events-record-legend > span{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  white-space:nowrap;
+}
+
+#portalRoot #view-events .events-record-legend-dot{
+  display:inline-block;
+  width:8px;
+  height:8px;
+  flex:0 0 8px;
+  border-radius:50%;
+}
+
+#portalRoot #view-events .events-record-legend-dot.is-blue{
+  background:#5b7ecf;
+}
+
+#portalRoot #view-events .events-record-legend-dot.is-green{
+  background:#16a36a;
+}
+
+#portalRoot #view-events .events-record-legend-dot.is-red{
+  background:#d63b35;
+}
+
+#portalRoot #view-events .events-record-legend-row{
+  display:inline-block;
+  width:4px;
+  height:13px;
+  flex:0 0 4px;
+  border-radius:2px;
+  background:#7257e8;
+}
+
+#evEditorOverlay .ev-editor-activity-note{
+  display:flex;
+  align-items:flex-start;
+  gap:7px;
+  margin:0 0 12px;
+  padding:9px 10px;
+  border:1px solid #d8d6fb;
+  border-radius:9px;
+  background:#f7f6ff;
+  color:#5149a8;
+  font-size:10px;
+  font-weight:700;
+  line-height:1.4;
+}
+
+#evEditorOverlay .ev-editor-activity-note i{
+  flex:0 0 auto;
+  margin-top:1px;
+  font-size:14px;
+}
+
+#portalRoot #view-events .events-table.resizable-grid-table .events-row.events-row--workday::before,
+#portalRoot #view-events .events-row.events-row--workday::before{
+  width:4px !important;
+  background:#7257e8 !important;
+}
+
+#portalRoot #view-events .events-table.resizable-grid-table .events-row::before,
+#portalRoot #view-events #evRows .events-row::before{
+  width:4px !important;
+}
+
+@media (max-width:900px){
+  #portalRoot #view-events .events-record-legend{
+    gap:6px 11px;
+    padding:7px 10px;
   }
 }

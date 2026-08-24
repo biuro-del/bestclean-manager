@@ -9,7 +9,7 @@
     "dev:web": "npm --prefix web-app run dev -- --host localhost",
     "build": "node build-webapp.js",
     "start": "node index.js",
-    "test": "node --test",
+    "test": "node --test test/*.test.js test/*.test.mjs",
     "migrate:cleanzi-admin:audit": "node Cleanzi-admin/scripts/migrate.js --audit",
     "migrate:cleanzi-admin:apply": "node Cleanzi-admin/scripts/migrate.js --apply",
     "migrate:workers": "node scripts/migrate-worker-model.js",

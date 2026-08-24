@@ -200,6 +200,13 @@
     </div>
     <span class="events-table-scroll-hint"><i class="ph ph-arrows-left-right" aria-hidden="true"></i> Przesuń tabelę, aby zobaczyć wszystkie dane</span>
   </div>
+  <aside class="events-record-legend" aria-label="Legenda oznaczeń rekordów">
+    <strong>Legenda</strong>
+    <span><i class="events-record-legend-dot is-blue" aria-hidden="true"></i> Zakończone zdarzenie w strefie</span>
+    <span><i class="events-record-legend-dot is-green" aria-hidden="true"></i> Aktywne zdarzenie — brak STOP</span>
+    <span><i class="events-record-legend-dot is-red" aria-hidden="true"></i> Rekord wymaga sprawdzenia</span>
+    <span><i class="events-record-legend-row" aria-hidden="true"></i> Fioletowy pasek — cały czas pracy pracownika</span>
+  </aside>
   <div class="events-head">
     <div class="events-select-col"><input id="evSelectAll" type="checkbox" aria-label="Zaznacz wszystko na stronie" /></div>
     <div><i class="ph ph-user" aria-hidden="true"></i><span>Pracownik</span></div>
@@ -310,6 +317,11 @@
           </div>
         </div>
 
+        <p class="ev-editor-activity-note">
+          <i class="ph ph-info" aria-hidden="true"></i>
+          Ten formularz dodaje czynność w obiekcie lub strefie. Nie zmienia okresu pracy pracownika.
+        </p>
+
         <div class="ev-editor-context-grid">
           <div class="field">
             <label for="evEditWorkerSearch"><i class="ph ph-user" aria-hidden="true"></i> Pracownik <span aria-hidden="true">*</span></label>
@@ -378,7 +390,7 @@
               <span class="ev-editor-time-icon" aria-hidden="true"><i class="ph ph-play-circle"></i></span>
               <div>
                 <label for="evEditStart">START</label>
-                <small>Początek pracy</small>
+                <small>Początek czynności</small>
               </div>
             </div>
             <input class="mono" id="evEditStart" type="datetime-local" aria-describedby="evTimeHelp" />
@@ -389,7 +401,7 @@
               <span class="ev-editor-time-icon" aria-hidden="true"><i class="ph ph-stop-circle"></i></span>
               <div>
                 <label for="evEditStop">STOP <em>opcjonalnie</em></label>
-                <small>Koniec pracy</small>
+                <small>Koniec czynności</small>
               </div>
               <button class="ev-stop-now-btn" id="evStopNowBtn" type="button" title="Ustaw STOP na aktualną godzinę">
                 <i class="ph ph-clock" aria-hidden="true"></i> Teraz
@@ -399,7 +411,7 @@
           </div>
         </div>
 
-        <p class="ev-editor-time-help" id="evTimeHelp"><i class="ph ph-info" aria-hidden="true"></i> Pozostaw STOP pusty, jeśli pracownik nadal pracuje.</p>
+        <p class="ev-editor-time-help" id="evTimeHelp"><i class="ph ph-info" aria-hidden="true"></i> Pozostaw STOP pusty, jeśli pracownik nadal wykonuje tę czynność.</p>
 
         <div class="ev-editor-time-summary" id="evEditorTimeSummary" data-state="empty" aria-live="polite">
           <span class="ev-editor-summary-icon" aria-hidden="true"><i class="ph ph-timer"></i></span>

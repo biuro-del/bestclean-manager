@@ -1,3 +1,5 @@
+'use strict'
+
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -5,21 +7,35 @@ const test = require('node:test')
 
 const backend = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8')
 
-function functionBody(startName, nextName) {
-  const start = backend.indexOf(`async function ${startName}`)
+function functionBody(name, nextName) {
+  const start = backend.indexOf(`async function ${name}`)
   const end = backend.indexOf(`async function ${nextName}`, start + 1)
-  assert.notEqual(start, -1, `${startName} should exist`)
-  assert.notEqual(end, -1, `${nextName} should exist after ${startName}`)
+  assert.ok(start >= 0, `Nie znaleziono funkcji ${name}.`)
+  assert.ok(end > start, `Nie znaleziono konca funkcji ${name}.`)
   return backend.slice(start, end)
 }
 
-test('worker creation does not delete Firebase identity after SQL commit', () => {
+test('utworzenie pracownika nie wykonuje zawodnego cleanupu po zatwierdzeniu SQL', () => {
   const source = functionBody('createAdminManagedUserDatabase', 'handleAuthProvisionWorkerRequest')
+  const createAuthIndex = source.indexOf('createdAuthUser = await createFirebaseAuthUser(payload)')
+  const insertIndex = source.indexOf('await workerRepository.insertWorkerAndMembership')
+  const commitIndex = source.indexOf("await client.query('commit')")
+  const committedIndex = source.indexOf('transactionStarted = false', commitIndex)
+  const databaseCommittedIndex = source.indexOf('databaseCommitted = true', committedIndex)
+  const returnIndex = source.indexOf('return {', databaseCommittedIndex)
 
-  assert.match(source, /let databaseCommitted = false/)
-  assert.match(source, /await client\.query\('commit'\)[\s\S]*databaseCommitted = true/)
-  assert.match(source, /createdAuthUser\?\.uid && !databaseCommitted/)
-  assert.match(source, /if \(!databaseCommitted\) \{\s*await deleteWorkerProfilePhotoObject\(uploadedPhoto\)/)
-  assert.doesNotMatch(source, /currentWorker\?\.photo_url/)
-  assert.doesNotMatch(source, /updatedRow\?\.photo_url/)
+  assert.ok(createAuthIndex >= 0)
+  assert.ok(insertIndex > createAuthIndex)
+  assert.ok(commitIndex > insertIndex)
+  assert.ok(committedIndex > commitIndex)
+  assert.ok(databaseCommittedIndex > committedIndex)
+  assert.ok(returnIndex > databaseCommittedIndex)
+
+  const afterCommitBeforeReturn = source.slice(databaseCommittedIndex + 'databaseCommitted = true'.length, returnIndex)
+  assert.equal(afterCommitBeforeReturn.trim(), '')
+  assert.doesNotMatch(source, /currentWorker|updatedRow/)
+
+  assert.match(source, /if \(transactionStarted\)[\s\S]*await client\.query\('rollback'\)/)
+  assert.match(source, /if \(createdAuthUser\?\.uid && !databaseCommitted\)[\s\S]*await deleteFirebaseUserQuietly\(createdAuthUser\)/)
+  assert.match(source, /if \(!databaseCommitted\)[\s\S]*await deleteWorkerProfilePhotoObject\(uploadedPhoto\)/)
 })

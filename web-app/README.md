@@ -2,6 +2,8 @@
 
 Portal tenantowy Cleanzi jest budowany przez Vite. Kontrakt planów, logowania Google, weryfikacji e-mail, onboardingu organizacji oraz konfigurację GUS/Stripe opisuje [`../docs/portal-plans-onboarding.md`](../docs/portal-plans-onboarding.md).
 
+Kontrakt czasu pracy (`Workday` jako sesja obecności, `Event` jako czynność operacyjna), endpointy korekt i ręczną procedurę migracji opisuje [`../docs/workday-reconciliation.md`](../docs/workday-reconciliation.md).
+
 Podstawowe sprawdzenia:
 
 ```text

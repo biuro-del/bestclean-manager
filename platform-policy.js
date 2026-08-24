@@ -14,9 +14,6 @@ const READ_GUARD_QUERY_OPERATIONS = new Set([
 ])
 
 const PLATFORM_QUERY_ALLOWLIST = new Set([
-  'OrgUiStyleForOrg',
-  'MyUiStylePreference',
-  'UserUiStylePreferencesForOrg',
   'CanManageWorkersForOrg',
   'WorkersForOrg',
   'ClientsForOrg',
@@ -25,6 +22,7 @@ const PLATFORM_QUERY_ALLOWLIST = new Set([
   'ZonesForOrg',
   'WorkdaysForOrg',
   'WorkdaysPageForOrg',
+  'WorkdaysPageForOrgByBusinessDate',
   'WorkdaysIntegrityPageForOrg',
   'WorkdaysPageForOrgByWorker',
   'WorkdaysPageForOrgByRoom',
@@ -48,10 +46,6 @@ const PLATFORM_QUERY_ALLOWLIST = new Set([
 ])
 
 const PLATFORM_MUTATION_ALLOWLIST = new Set([
-  'UpsertOrgUiStyleForOrg',
-  'DeleteOrgUiStyleForOrg',
-  'UpsertUserUiStylePreferenceForOrg',
-  'DeleteUserUiStylePreferenceForOrg',
   'InsertClientForOrg',
   'UpdateClientForOrg',
   'DeleteClientForOrg',

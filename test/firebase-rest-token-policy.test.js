@@ -34,6 +34,7 @@ test('REST fallback preserves verified platform and MFA claims', () => {
       email: 'Cleanzi@Admin.com',
       emailVerified: true,
       displayName: 'Cleanzi Platform Owner',
+      createdAt: '1721200000000',
     },
     projectId: PROJECT_ID,
   })
@@ -41,6 +42,7 @@ test('REST fallback preserves verified platform and MFA claims', () => {
   assert.equal(decoded.uid, 'platform-uid')
   assert.equal(decoded.email, 'cleanzi@admin.com')
   assert.equal(decoded.email_verified, true)
+  assert.equal(decoded.account_created_at, new Date(1721200000000).toISOString())
   assert.equal(decoded.platformRole, 'PLATFORM_OWNER')
   assert.equal(decoded.firebase.sign_in_second_factor, 'totp')
 })

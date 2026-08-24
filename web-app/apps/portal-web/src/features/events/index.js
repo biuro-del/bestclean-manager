@@ -15,6 +15,10 @@ import {
   isOwnWorkdayEditBlocked,
   OWN_WORKDAY_EDIT_DENIED_MESSAGE,
 } from '../workers/workdayEditAccess.js'
+import {
+  EVENT_RECORD_KINDS,
+  eventRecordKind,
+} from '../../services/eventRecordModel.js'
 
 export const route = 'events'
 export const viewId = 'view-events'
@@ -88,6 +92,8 @@ export function createEventsFeature(ctx) {
   const EVENT_EDITOR_PICKER_EMPTY_MAX_OPTIONS = 18
   const EVENT_FILTER_COMBO_MAX_OPTIONS = 60
   const EVENT_DELETION_TOMBSTONE_TTL_MS = 5 * 60 * 1000
+  const EVENT_RECONCILIATION_REQUIRED_MESSAGE =
+    'Ta sesja jest powiazana z dniem pracy. Zmieniaj ja tylko w dialogu „Przeglad i naprawa dnia”, aby zachowac walidacje, transakcje i audyt.'
   const EVENT_INTEGRITY_CATEGORY_META = Object.freeze({
     conflict: {
       title: 'Równoległe otwarte CLEAN',
@@ -835,6 +841,99 @@ export function createEventsFeature(ctx) {
     return [...new Set(candidates.map((value) => String(value ?? '').trim()).filter(Boolean))]
   }
 
+  function eventReconciliationWorkdayId(row = {}) {
+    const linkedWorkdayId = String(row?.linkedWorkdayId ?? '').trim()
+    if (linkedWorkdayId) return linkedWorkdayId
+
+    const sourceKind = String(row?.historySourceKind ?? '').trim().toLowerCase()
+    const eventId = String(row?.eventId ?? row?.id ?? '').trim()
+    const workdayId = String(row?.workdayId ?? '').trim()
+    if (!workdayId) return ''
+    if (sourceKind === 'workday' || row?.hasExplicitEventId === false || row?.linkedWorkdayFound === true) {
+      return workdayId
+    }
+    if (sourceKind === 'event' && workdayId !== eventId) {
+      return workdayId
+    }
+    return ''
+  }
+
+  async function openEventWorkdayReconciliation(row = {}) {
+    const workdayId = eventReconciliationWorkdayId(row)
+    const dayKey = String(row?.businessDateYmd ?? row?.dayKey ?? '').trim()
+      || workStatusYmdFromTimestamp(row?.startAt ?? row?.dayStartAt ?? row?.endAt ?? row?.dayEndAt)
+    if (!workdayId || !dayKey || !appState.session?.orgId) {
+      showTransientNotice('Nie mozna otworzyc bezpiecznej korekty: brakuje dnia pracy lub daty biznesowej.', 'error')
+      return false
+    }
+
+    const workerLoginValue = String(row?.workerLogin ?? row?.workerId ?? '').trim()
+    const workerNameValue = String(row?.workerName ?? row?.name ?? '').trim()
+    const workerKeys = new Set(
+      [workerLoginValue, workerNameValue]
+        .map((value) => normalizeSearchText(value))
+        .filter(Boolean),
+    )
+    const workerMatches = (worker = {}) => [
+      worker.login,
+      worker.workerLogin,
+      worker.id,
+      worker.workerId,
+      worker.email,
+      worker.loginEmail,
+      worker.name,
+      worker.workerName,
+      worker.fullName,
+      worker.displayName,
+    ].some((value) => workerKeys.has(normalizeSearchText(value)))
+
+    let workers = Array.isArray(appState.workers) ? appState.workers : []
+    let worker = workers.find(workerMatches) ?? null
+    if (!worker && typeof getWorkers === 'function') {
+      const fetchedWorkers = await getWorkers(appState.session.orgId, { forceRefresh: false }).catch(() => [])
+      if (Array.isArray(fetchedWorkers)) {
+        workers = fetchedWorkers
+        appState.workers = fetchedWorkers
+        appState.workersLoaded = true
+        worker = workers.find(workerMatches) ?? null
+      }
+    }
+    if (!worker) {
+      showTransientNotice('Nie znaleziono pracownika przypisanego do tego dnia pracy.', 'error')
+      return false
+    }
+
+    closeEventEditor()
+    appState.workerAccountCurrent = worker
+    appState.workerAccountActiveTab = 'time'
+    appState.workerAccountTargetKey = String(
+      worker.login ?? worker.workerLogin ?? worker.id ?? worker.workerId ?? '',
+    ).trim()
+    appState.selectedWorkerLogin = String(worker.login ?? worker.workerLogin ?? workerLoginValue).trim()
+    appState.selectedWorkerName = String(worker.name ?? worker.workerName ?? workerNameValue).trim()
+    appState.workerAccountPendingTimeEditor = {
+      dayKey,
+      workdayId,
+      source: 'events-workday-reconciliation',
+    }
+
+    if (typeof window !== 'undefined' && typeof window.go === 'function') {
+      window.go('workerAccount')
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('worker-account-select', {
+          detail: {
+            worker,
+            tab: 'time',
+            timeEditorIntent: appState.workerAccountPendingTimeEditor,
+          },
+        }),
+      )
+    }
+    return true
+  }
+
   function eventMirrorWorkdayId(row) {
     const eventId = String(row?.eventId ?? row?.id ?? '').trim()
     const workdayId = String(row?.workdayId ?? '').trim()
@@ -917,7 +1016,7 @@ export function createEventsFeature(ctx) {
   }
 
   function eventCanDelete(row) {
-    return eventDeletionCandidateIds(row).length > 0
+    return !eventReconciliationWorkdayId(row) && eventDeletionCandidateIds(row).length > 0
   }
 
   function eventRowFingerprintKey(row) {
@@ -1068,7 +1167,7 @@ export function createEventsFeature(ctx) {
       savedEvent?.zoneFunction ?? savedEvent?.functionName ?? payload?.zoneFunction ?? zoneView?.function ?? zone?.function ?? '',
     ).trim()
     const status = normalizeEventStatus(savedEvent?.status ?? payload?.status, Boolean(endAt))
-    const workdayId = String(savedEvent?.workdayId ?? savedEvent?.linkedWorkdayId ?? rowId ?? eventId ?? '').trim()
+    const workdayId = String(savedEvent?.workdayId ?? savedEvent?.linkedWorkdayId ?? payload?.workdayId ?? payload?.linkedWorkdayId ?? '').trim()
     const editedBy = String(
       savedEvent?.editedBy ?? savedEvent?.updatedBy ?? payload?.editedBy ?? payload?.updatedBy ?? appState.session?.name ?? '',
     ).trim()
@@ -1077,8 +1176,8 @@ export function createEventsFeature(ctx) {
     return {
       id: rowId || eventId || `saved-${Date.now()}`,
       eventId: eventId || rowId,
-      workdayId: workdayId || eventId || rowId,
-      linkedWorkdayId: workdayId || eventId || rowId,
+      workdayId,
+      linkedWorkdayId: workdayId,
       historySourceKind: 'event',
       hasExplicitEventId: true,
       orgId: String(savedEvent?.orgId ?? payload?.orgId ?? appState.session?.orgId ?? '').trim(),
@@ -1570,6 +1669,9 @@ export function createEventsFeature(ctx) {
   }
 
   async function deleteEventByCandidateIds(orgId, row) {
+    if (eventReconciliationWorkdayId(row)) {
+      throw new Error(EVENT_RECONCILIATION_REQUIRED_MESSAGE)
+    }
     const candidateIds = eventDeletionCandidateIds(row)
     if (!candidateIds.length) {
       throw new Error('Brak identyfikatora zdarzenia do usuniecia.')
@@ -1986,6 +2088,8 @@ export function createEventsFeature(ctx) {
         const workerName = resolveWorkerNameFromWorkers(workerLogin, row.workerName)
         const workerPrimary = workerName || workerLogin || '-'
         const workerIdentifier = String(row?.workerId ?? workerLogin).trim()
+        const recordKind = eventRecordKind(row)
+        const isWorkdayRecord = recordKind === EVENT_RECORD_KINDS.WORKDAY
         const integrityKind = String(openIntegrityGroup?.integrityKind ?? '').trim()
         const integrityBadgeLabel =
           integrityKind === 'legacy'
@@ -2057,7 +2161,7 @@ export function createEventsFeature(ctx) {
         const rowVisualState = eventRowVisualState(row, eventStatus, editedByLabel)
 
         return `
-          <div class="events-row ${rowVisualState.className}${integrityKind === 'conflict' || integrityKind === 'orphan' || integrityKind === 'unresolved' ? ' events-row--open-conflict' : ''}${integrityKind === 'legacy' ? ' events-row--legacy-open' : ''}${isSelected ? ' is-selected' : ''}">
+          <div class="events-row ${rowVisualState.className}${isWorkdayRecord ? ' events-row--workday' : ' events-row--activity'}${integrityKind === 'conflict' || integrityKind === 'orphan' || integrityKind === 'unresolved' ? ' events-row--open-conflict' : ''}${integrityKind === 'legacy' ? ' events-row--legacy-open' : ''}${isSelected ? ' is-selected' : ''}">
             <div class="events-select-col">
               <input type="checkbox" data-event-select-index="${index}" aria-label="${escapeHtml(selectTitle)}" title="${escapeHtml(selectTitle)}" ${isSelected ? 'checked' : ''} ${canSelect ? '' : 'disabled'} />
               <span class="events-visually-hidden">${escapeHtml(rowVisualState.label)}</span>
@@ -3178,6 +3282,12 @@ export function createEventsFeature(ctx) {
   }
 
   async function openEventEditor(item) {
+    if (eventReconciliationWorkdayId(item)) {
+      showTransientNotice(EVENT_RECONCILIATION_REQUIRED_MESSAGE)
+      await openEventWorkdayReconciliation(item)
+      return
+    }
+
     ensureEventOverlaysMountedToBody()
     const overlay = document.getElementById('evEditorOverlay')
     if (!overlay) {
@@ -3563,6 +3673,12 @@ export function createEventsFeature(ctx) {
         continue
       }
 
+      // A client/zone activity is expected to sit inside the attendance
+      // Workday. Only another operational activity can be an overlap conflict.
+      if (eventRecordKind(row) === EVENT_RECORD_KINDS.WORKDAY) {
+        continue
+      }
+
       const rowInterval = workStatusIntervalFromRow(row)
       if (workStatusIntervalsOverlap(candidateInterval, rowInterval)) {
         return { row, interval: rowInterval }
@@ -3656,6 +3772,13 @@ export function createEventsFeature(ctx) {
     }
 
     const isCreateMode = appState.eventEditorMode === 'add'
+    if (eventReconciliationWorkdayId(appState.eventEditorItem)) {
+      const reconciliationRow = appState.eventEditorItem
+      showTransientNotice(EVENT_RECONCILIATION_REQUIRED_MESSAGE)
+      await openEventWorkdayReconciliation(reconciliationRow)
+      return
+    }
+
     if (isCreateMode && !canManageEvents()) {
       alert('Brak uprawnień do dodawania zdarzeń.')
       return
@@ -3930,6 +4053,11 @@ export function createEventsFeature(ctx) {
 
     const editedRow = appState.eventEditorItem ?? null
     if (!editedRow) {
+      return
+    }
+    if (eventReconciliationWorkdayId(editedRow)) {
+      showTransientNotice(EVENT_RECONCILIATION_REQUIRED_MESSAGE)
+      await openEventWorkdayReconciliation(editedRow)
       return
     }
     if (!eventCanDelete(editedRow)) {

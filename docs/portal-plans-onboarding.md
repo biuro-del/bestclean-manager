@@ -21,7 +21,7 @@ W abonamencie jest 10 aktywnych stanowisk pracowniczych. PRO zawiera jeden aktyw
 1. W projekcie tenantowym Firebase włącz dostawców Email/Password oraz Google.
 2. Dodaj domeny portalu do listy autoryzowanych domen Firebase Auth.
 3. Skonfiguruj zmienne `VITE_FIREBASE_*` frontendu i serwerowe `FIREBASE_PROJECT_ID` / `FIREBASE_WEB_API_KEY` zgodnie z istniejącą konfiguracją środowiska.
-4. Konto tenantowe musi mieć `email_verified=true`. Portal pozwala wysłać wiadomość ponownie i odświeżyć token po potwierdzeniu.
+4. Nowe konto tenantowe musi mieć `email_verified=true`. Konto istniejące przed `TENANT_EMAIL_VERIFICATION_REQUIRED_FROM` zachowuje dostęp do swoich członkostw po UID bez historycznego potwierdzenia. Domyślna granica to `2026-08-01T00:00:00.000Z`; backend preferuje datę utworzenia konta Firebase, a datę członkostwa/pracownika wykorzystuje wyłącznie jako fallback zgodności. Konto bez daty i konto bez członkostwa są blokowane. Portal pozwala wysłać wiadomość ponownie i odświeżyć token po potwierdzeniu.
 
 UID Firebase jest jedynym kluczem członkostwa. Backend nie dopasowuje dostępu po adresie e-mail. Reset hasła pozostaje ogólnym mechanizmem Firebase; interfejs nie ujawnia, jaki dostawca jest przypisany do podanego adresu. Logowanie administratora platformy pozostaje oddzielne.
 

@@ -346,7 +346,8 @@
               <button class="btn2" id="waDownloadTimeBtn" type="button">Pobierz ewidencje pracy</button>
             </div>
             <div class="worker-account-time-month-kpis">
-              <div class="wa-time-summary-kpi is-work"><i aria-hidden="true">T</i><span>Czas pracy</span><strong class="mono" id="waTimeMonthWork">00:00</strong></div>
+              <div class="wa-time-summary-kpi is-work"><i aria-hidden="true">Z</i><span>Czas zatwierdzony</span><strong class="mono" id="waTimeMonthWork">00:00</strong></div>
+              <div class="wa-time-summary-kpi is-provisional"><i aria-hidden="true">R</i><span>Czas roboczy</span><strong class="mono" id="waTimeMonthProvisional">00:00</strong></div>
               <div class="wa-time-summary-kpi is-break"><i aria-hidden="true">P</i><span>Przerwy</span><strong class="mono time-break" id="waTimeMonthBreak">00:00</strong></div>
               <div class="wa-time-summary-kpi is-net"><i aria-hidden="true">R</i><span>Realny czas pracy</span><strong class="mono" id="waTimeMonthNet">00:00</strong></div>
             </div>
@@ -355,7 +356,7 @@
           <div class="worker-account-time-list-card">
             <div class="worker-account-table events-table worker-account-time-table" aria-label="Czas pracy - podsumowanie dzienne">
               <div class="events-head">
-                <div class="events-select-col"><input id="waTimeSelectAll" type="checkbox" aria-label="Zaznacz wszystkie rekordy na stronie" /></div><div>Data</div><div>Typ</div><div>Start pracy</div><div>Koniec pracy</div><div>Czas pracy</div><div>Realny czas pracy</div><div>Przerwa</div><div>Edytowal</div>
+                <div class="events-select-col"><input id="waTimeSelectAll" type="checkbox" aria-label="Zaznacz wszystkie rekordy na stronie" /></div><div>Data</div><div>Typ</div><div>Start dnia</div><div>Koniec dnia</div><div>Czas sesji</div><div>Realny czas pracy</div><div>Przerwa</div><div>Edytował</div>
               </div>
               <div id="waTimeRows"><div class="events-row worker-account-muted"><div class="events-select-col"></div><div>Brak rekordow</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div></div>
             </div>
@@ -393,43 +394,8 @@
   </div>
 </div>
 
-<div class="overlay wa-day-editor-overlay" id="waDayEditorOverlay" aria-label="Edycja dnia pracy" role="dialog" aria-modal="true" hidden>
-  <div class="modal wa-day-editor-modal">
-    <button class="wa-day-editor-close" id="waDayEditorClose" type="button" aria-label="Zamknij">&times;</button>
-    <h3>Edycja dnia pracy</h3>
-
-    <div class="wa-day-editor-grid">
-      <label>
-        Data
-        <input id="waDayDateInput" type="date" />
-      </label>
-      <label>
-        Start pracy (czas)
-        <input id="waDayStartTime" type="time" step="1" />
-      </label>
-      <label>
-        Koniec pracy (czas)
-        <input id="waDayEndTime" type="time" step="1" />
-      </label>
-      <label class="wa-day-editor-wide">
-        Przepracowano (HH:MM)
-        <input id="waDayWork" type="text" value="00:00" readonly />
-      </label>
-      <label class="wa-day-editor-wide">
-        Komentarz
-        <textarea id="waDayComment" rows="4" placeholder="Opcjonalnie..."></textarea>
-      </label>
-    </div>
-
-    <div class="row-actions wa-day-editor-actions">
-      <button class="btn2 danger" id="waDayCancelBtn" type="button">Zamknij</button>
-      <button class="btn2 primary" id="waDaySaveBtn" type="button">Zapisz</button>
-    </div>
-  </div>
-</div>
-
-<div class="overlay wa-time-codes-overlay" id="waTimeCodesOverlay" aria-labelledby="waTimeCodesTitle" role="dialog" aria-modal="true" hidden>
-  <div class="modal wa-time-codes-modal">
+<div class="overlay wa-time-codes-overlay" id="waTimeCodesOverlay" aria-labelledby="waTimeCodesTitle" aria-describedby="waTimeCodesMeta" role="dialog" aria-modal="true" hidden>
+  <div class="modal wa-time-codes-modal wa-reconciliation-modal" tabindex="-1">
     <button class="wa-time-codes-close" id="waTimeCodesClose" type="button" aria-label="Zamknij">&times;</button>
     <div class="wa-time-codes-heading">
       <span class="wa-time-codes-heading-icon" aria-hidden="true">
@@ -437,28 +403,26 @@
       </span>
       <div>
         <h3 id="waTimeCodesTitle">Start i stop</h3>
-        <p id="waTimeCodesMeta">Kody START/STOP z wybranego dnia</p>
+        <p id="waTimeCodesMeta">Kody START/STOP</p>
       </div>
     </div>
+    <div class="wa-reconciliation-status-row" id="waReconciliationStatusRow" hidden>
+      <span class="wa-reconciliation-status" id="waReconciliationStatus" data-state="OPEN_SESSION">Wczytywanie stanu dnia…</span>
+      <span class="wa-reconciliation-worker" id="waReconciliationWorker">-</span>
+    </div>
+    <div class="wa-reconciliation-live" id="waReconciliationLive" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div class="wa-reconciliation-problems" id="waReconciliationProblems" role="alert" hidden></div>
     <div class="wa-time-codes-list" id="waTimeCodesList"></div>
-    <div class="wa-time-code-editor" id="waTimeCodeEditor" hidden>
-      <div>
-        <strong id="waTimeCodeEditorTitle">Edytuj godzinę</strong>
-        <small id="waTimeCodeEditorContext">Klient / strefa</small>
-      </div>
-      <label>Nowa godzina<input class="mono" id="waTimeCodeTimeInput" type="time" required /></label>
-      <div class="wa-time-code-editor-actions">
-        <button class="btn2" id="waTimeCodeCancel" type="button">Anuluj</button>
-        <button class="btn2 primary" id="waTimeCodeSave" type="button">Zapisz godzinę</button>
-      </div>
-    </div>
-    <div class="wa-time-codes-total" aria-live="polite">
+
+    <div class="wa-time-codes-total" aria-label="Podsumowanie czasu pracy">
       <span>
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Łączny czas pracy
       </span>
-      <strong class="mono" id="waTimeCodesTotal">00:00</strong>
+      <strong class="mono" id="waTimeCodesTotal">00:00:00</strong>
+      <span id="waReconciliationProvisional" hidden>00:00:00</span>
     </div>
+
     <div class="wa-time-codes-actions">
       <button class="btn2 primary" id="waTimeCodesDone" type="button">Gotowe</button>
     </div>
@@ -470,6 +434,7 @@
     <button class="wa-export-close" id="waExportCloseBtn" type="button" aria-label="Zamknij">&times;</button>
     <h3>Pobierz ewidencj&#281; pracy</h3>
     <p class="meta">Wybierz zakres dat, kolumny i format pliku do pobrania.</p>
+    <div class="wa-export-integrity" id="waExportIntegrityProblems" role="alert" hidden></div>
 
     <div class="wa-export-range">
       <label>

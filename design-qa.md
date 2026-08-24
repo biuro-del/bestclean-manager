@@ -45,6 +45,81 @@ final result: passed
 
 ---
 
+# Design QA — punktowa edycja zdarzeń czasu pracy
+
+- Source visual truth: `C:\Users\dosta\AppData\Local\Temp\codex-clipboard-97370a8b-0bd5-49da-97a8-058bc87225b4.png` (850 × 809 px).
+- Implementation URL: `http://localhost:5174/`.
+- Implementation screenshot: `C:\Users\dosta\.codex\visualizations\2026\07\31\019fb74a-1278-7c20-b857-753058ada7e4\work-time-editor-implementation.png` (1280 × 720 px).
+- Combined comparison: `C:\Users\dosta\.codex\visualizations\2026\07\31\019fb74a-1278-7c20-b857-753058ada7e4\work-time-editor-comparison.png`.
+- State: modal dnia 23.07.2026 z rozwiniętą edycją pojedynczego zdarzenia CLEAN.
+- Density: natywny zrzut przeglądarki przy `devicePixelRatio = 1`.
+
+## Findings
+
+- Brak aktywnych problemów P0, P1 lub P2.
+- Modal został poszerzony do maksymalnie 820 px i nie ma poziomego przewijania.
+- Usunięto zbiorcze akcje „Edytuj START, STOP i strefy”, „Edytuj sesję” oraz sekcję „Naprawa i dane dnia”.
+- Każdy START, STOP i wpis operacyjny ma własne menu trzech pionowych kropek umieszczone bezpośrednio obok wskaźnika GPS.
+- Formularz rozwija się pod wybranym wpisem, zachowuje kontekst klienta i strefy oraz nie przesuwa pozostałych pól poza modal.
+- Hierarchia, kolory, promienie i znaczniki START/STOP pozostają zgodne z dotychczasowym wyglądem Cleanzi.
+- Na wąskich ekranach pola edycji przechodzą do jednej kolumny bez poziomego overflow.
+
+## Interaction and technical QA
+
+- Kliknięcie menu zamyka inny otwarty edytor i otwiera wyłącznie formularz wskazanego wpisu.
+- `Anuluj`, przycisk zamknięcia i `Escape` zamykają lokalny formularz bez zapisu.
+- `Zapisz zmianę` waliduje wybrany wpis i od razu wysyła jego korektę; nie wymaga drugiego globalnego zapisu.
+- Automatyczny powód audytu pozostaje po stronie aplikacji, więc użytkownik nie musi uzupełniać dodatkowej sekcji naprawy.
+- Konsola renderowanego podglądu: 0 błędów.
+- ESLint: passed.
+- Pełny zestaw testów: 522/522 passed.
+- Production build: passed; wyłącznie istniejące ostrzeżenia o rozmiarze części paczek.
+
+## Comparison history
+
+- P2 w referencji: trzy równoległe sposoby edycji powodowały nakładanie pól, poziomy scrollbar i niejasny proces zapisu.
+- Fix: edycję sprowadzono do jednego punktowego menu przy rekordzie, a modal poszerzono bez zmiany stylu kart.
+- Kontrola po poprawce: pełny i zbliżony widok potwierdzają czytelny układ, poprawne odstępy, brak nachodzenia oraz jednoznaczny przycisk „Zapisz zmianę”.
+
+final result: passed
+
+---
+
+# Design QA — modal START/STOP pracownika (03.08.2026)
+
+- Source visual truth: `C:\Users\dosta\AppData\Local\Temp\codex-clipboard-f6ffe7cf-bc05-4b93-9c2e-92959b167c37.png` (567 × 387 px).
+- Implementation: modal `#waTimeCodesOverlay` w portalu lokalnym `http://localhost:5174/`.
+- Implementation screenshot: niedostępny — przeglądarka poprawnie wyrenderowała DOM, lecz każda próba `Page.captureScreenshot` przekroczyła limit czasu.
+- Viewport pomiarowy: 1280 × 720 px, `devicePixelRatio = 1`; kontrola responsywna: 375 × 667 px.
+- Stan: jedna zamknięta sesja, dwa kody START/STOP, bez problemów integralności.
+
+## Dowody z renderu
+
+- Modal: 560 × 403 px; nagłówek: 510 × 44 px.
+- Każdy wiersz START/STOP: 510 × 76 px.
+- Pasek łącznego czasu: 510 × 58 px; obszar akcji: 510 × 38 px.
+- Przy szerokości 375 px dokument, modal i oba wiersze miały `scrollWidth === clientWidth`; brak poziomego przepełnienia.
+- DOM potwierdził kolejno: tytuł, liczbę kodów, osobny START, osobny STOP, jeden łączny czas i przycisk `Gotowe`.
+
+## Findings
+
+- Typografia i copy: tytuł oraz etykiety odpowiadają wzorcowi; czas pozostaje dokładny w `HH:MM:SS`, zgodnie z kontraktem rozliczeń.
+- Rytm i układ: wysokości wierszy oraz paska czasu odpowiadają proporcjom źródła; naprawa dnia jest schowana w zwijanym panelu i pojawia się tylko wtedy, gdy zapis jest dostępny i potrzebny.
+- Kolory: zachowane semantyczne zielone START, czerwone STOP, niebieski pasek sumy i fioletowa akcja `Gotowe`.
+- Obrazy i assety: wzorzec nie zawiera obrazów rastrowych; ikony pochodzą z istniejącego systemu komponentów portalu.
+- Responsywność: pomiary nie wykazały poziomego przepełnienia na telefonie.
+- Bloker: brak zrzutu implementacji uniemożliwia wymagane wspólne porównanie pikselowe źródła i renderu.
+
+## Comparison history
+
+- P1 przed poprawką: modal pokazywał połączone karty sesji, dwa konkurencyjne podsumowania i stale widoczne narzędzia naprawy.
+- Fix: przywrócono osobne wiersze kodów START/STOP, jeden pasek `Łączny czas pracy`, kompaktową szerokość 560 px oraz pojedynczy przycisk `Gotowe` w zwykłym podglądzie.
+- Kontrola po poprawce: kontrakt DOM i pomiary układu przeszły; pikselowe porównanie pozostaje zablokowane przez błąd przechwytywania zrzutu.
+
+final result: blocked
+
+---
+
 # Design QA — przycisk „Zaloguj się przez Google” (2026-07-31)
 
 - Source visual truth: `C:\Users\dosta\AppData\Local\Temp\codex-clipboard-66cdba5f-29d0-4165-adf5-961e21d74d4f.png`.

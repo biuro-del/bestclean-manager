@@ -7,12 +7,62 @@ const {
   resolvePlanEntitlements,
 } = require('./plan-policy')
 
+const TENANT_EMAIL_VERIFICATION_POLICY = Object.freeze({
+  requiredFrom: '2026-08-01T00:00:00.000Z',
+})
+
 function toText(value) {
   return String(value ?? '').trim()
 }
 
 function toStatus(value) {
   return toText(value).toUpperCase()
+}
+
+function toTimestamp(value) {
+  if (!value) return null
+  const date = value instanceof Date ? value : new Date(value)
+  const timestamp = date.getTime()
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+/**
+ * Keeps pre-rollout tenant accounts usable while requiring verified email for
+ * every new account. Firebase account creation time is authoritative; database
+ * timestamps are a compatibility fallback for legacy tokens without metadata.
+ */
+function evaluateTenantEmailVerification(decodedToken, row = {}, requiredFromValue = '') {
+  const email = toText(decodedToken?.email).toLowerCase()
+  if (!email) {
+    return { allowed: false, code: 'EMAIL_VERIFICATION_REQUIRED', exempt: false }
+  }
+  if (decodedToken?.email_verified === true) {
+    return { allowed: true, code: 'EMAIL_VERIFIED', exempt: false }
+  }
+
+  const requiredFrom = toTimestamp(requiredFromValue)
+    ?? toTimestamp(TENANT_EMAIL_VERIFICATION_POLICY.requiredFrom)
+  const accountCreatedAt = toTimestamp(
+    decodedToken?.account_created_at ?? decodedToken?.accountCreatedAt,
+  )
+  const fallbackCreatedAt = [
+    toTimestamp(row?.membership_created_at),
+    toTimestamp(row?.worker_created_at),
+  ].filter((value) => value !== null)
+  const createdAt = accountCreatedAt ?? (
+    fallbackCreatedAt.length ? Math.min(...fallbackCreatedAt) : null
+  )
+
+  if (createdAt !== null && requiredFrom !== null && createdAt < requiredFrom) {
+    return {
+      allowed: true,
+      code: 'LEGACY_EMAIL_VERIFICATION_EXEMPT',
+      exempt: true,
+      accountCreatedAt: new Date(createdAt).toISOString(),
+    }
+  }
+
+  return { allowed: false, code: 'EMAIL_VERIFICATION_REQUIRED', exempt: false }
 }
 
 function normalizeOrganizationId(value) {
@@ -201,8 +251,10 @@ function resolveAccessibleOrganizations(rows, now = new Date()) {
 }
 
 module.exports = {
+  TENANT_EMAIL_VERIFICATION_POLICY,
   buildOrganizationSummary,
   buildSessionContext,
+  evaluateTenantEmailVerification,
   evaluateOrganizationAccess,
   isPortalWorkerRole,
   normalizeOrganizationId,

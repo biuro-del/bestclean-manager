@@ -35,18 +35,6 @@ const eventFeature = fs.readFileSync(
   ),
   'utf8',
 )
-const backupService = fs.readFileSync(
-  path.join(
-    root,
-    'web-app',
-    'apps',
-    'portal-web',
-    'src',
-    'services',
-    'backupService.js',
-  ),
-  'utf8',
-)
 const reportsFeature = fs.readFileSync(
   path.join(
     root,
@@ -132,25 +120,11 @@ test('portal rozdziela zwykłe zamknięcie od jawnej zmiany tożsamości', () =>
     /runMutationOperation\('UpdateEventForOrg', \{\s+orgId,\s+eventId: normalizedEventId,\s+workerLogin,/s,
   )
   assert.match(eventFeature, /correlationIdentityBaseline:\s*appState\.eventEditorItem/)
-  assert.match(reportsFeature, /correlationIdentityBaseline:\s*source/)
+  assert.match(reportsFeature, /source:\s*'reports-workday-reconciliation'/)
+  assert.match(reportsFeature, /new CustomEvent\('worker-account-select'/)
+  assert.doesNotMatch(reportsFeature, /correlationIdentityBaseline:\s*source/)
+  assert.doesNotMatch(reportsFeature, /await updateEvent/)
   assert.match(workdayService, /payload\.forceReidentify === true \|\|\s*!identityBaseline \|\|/)
-  assert.match(
-    backupService,
-    /Odtwarzanie modułu Zdarzenia jest chwilowo zablokowane\./,
-  )
-  assert.match(
-    backupService,
-    /const preRestore = await createPreRestoreSnapshot/,
-  )
-  assert.ok(
-    backupService.indexOf('Odtwarzanie modułu Zdarzenia jest chwilowo zablokowane.') <
-      backupService.indexOf('const preRestore = await createPreRestoreSnapshot'),
-    'blokada restore zdarzeń musi zadziałać przed pierwszym zapisem i snapshotem',
-  )
-  assert.doesNotMatch(backupService, /await restoreEventForOrg\(payload\)/)
-  assert.doesNotMatch(backupService, /await deleteEventForOrg\(\{ orgId, eventId \}\)/)
-  assert.doesNotMatch(backupService, /await reidentifyEventForOrg\(payload\)/)
-  assert.doesNotMatch(backupService, /await updateEventForOrg\(payload\)/)
 })
 
 test('zwykły insert Eventu wymusza CLEAN także dla klienta z rolą WORKER', () => {
@@ -164,7 +138,6 @@ test('zwykły insert Eventu wymusza CLEAN także dla klienta z rolą WORKER', ()
 
 test('connector nie wystawia klientowi operacji odtwarzającej skorelowane Eventy', () => {
   assert.doesNotMatch(mutations, /mutation RestoreEventForOrg\(/)
-  assert.doesNotMatch(backupService, /\brestoreEventForOrg\b/)
 })
 
 test('sesja platformowa dopuszcza reidentify, ale blokuje niezweryfikowany restore Eventu', () => {

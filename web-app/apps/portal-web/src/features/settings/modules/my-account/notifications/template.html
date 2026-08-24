@@ -1,0 +1,32 @@
+<section class="settings-module" aria-labelledby="settingsNotificationsTitle">
+  <header class="settings-module-header">
+    <div><p class="settings-eyebrow">Moje konto</p><h2 id="settingsNotificationsTitle">Powiadomienia</h2><p>Wybierz kanały, zakres komunikatów i godziny ciszy.</p></div>
+    <span class="settings-status">W przygotowaniu</span>
+  </header>
+  <div class="settings-permission-note"><i class="ph ph-info" aria-hidden="true"></i><span data-settings-permission>Edycja będzie dostępna dla ról OWNER i ADMIN.</span></div>
+  <fieldset class="settings-fieldset" disabled>
+    <legend>Kanały powiadomień</legend>
+    <div class="settings-choice-list">
+      <label class="settings-choice"><span><i class="ph ph-envelope-simple" aria-hidden="true"></i><span><strong>E-mail</strong><small>Podsumowania i ważne komunikaty.</small></span></span><input type="checkbox" checked></label>
+      <label class="settings-choice"><span><i class="ph ph-device-mobile" aria-hidden="true"></i><span><strong>Powiadomienia push</strong><small>Aktualizacje w aplikacji mobilnej.</small></span></span><input type="checkbox"></label>
+      <label class="settings-choice"><span><i class="ph ph-browsers" aria-hidden="true"></i><span><strong>Powiadomienia w portalu</strong><small>Komunikaty widoczne podczas pracy.</small></span></span><input type="checkbox" checked></label>
+    </div>
+  </fieldset>
+  <fieldset class="settings-fieldset" disabled>
+    <legend>Typy powiadomień</legend>
+    <div class="settings-form-grid">
+      <label><span>Zdarzenia operacyjne</span><select><option>Wszystkie</option></select></label>
+      <label><span>Zadania i terminy</span><select><option>Ważne i przypisane do mnie</option></select></label>
+      <label><span>Raporty</span><select><option>Tygodniowe podsumowanie</option></select></label>
+      <label><span>Komunikaty systemowe</span><select><option>Tylko krytyczne</option></select></label>
+    </div>
+  </fieldset>
+  <fieldset class="settings-fieldset" disabled>
+    <legend>Godziny ciszy</legend>
+    <div class="settings-inline-fields">
+      <label><span>Od</span><input type="time" value="22:00"></label>
+      <label><span>Do</span><input type="time" value="07:00"></label>
+      <label><span>Strefa czasowa</span><select><option>Europe/Warsaw</option></select></label>
+    </div>
+  </fieldset>
+</section>

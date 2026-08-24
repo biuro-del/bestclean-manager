@@ -18,9 +18,6 @@ You can also follow the instructions from the [Data Connect documentation](https
   - [*Connecting to the local Emulator*](#connecting-to-the-local-emulator)
 - [**Queries**](#queries)
   - [*MyOrganizations*](#myorganizations)
-  - [*OrgUiStyleForOrg*](#orguistylefororg)
-  - [*MyUiStylePreference*](#myuistylepreference)
-  - [*UserUiStylePreferencesForOrg*](#useruistylepreferencesfororg)
   - [*CanManageWorkersForOrg*](#canmanageworkersfororg)
   - [*WorkersForOrg*](#workersfororg)
   - [*ClientsForOrg*](#clientsfororg)
@@ -29,8 +26,10 @@ You can also follow the instructions from the [Data Connect documentation](https
   - [*ZonesForOrg*](#zonesfororg)
   - [*WorkdaysForOrg*](#workdaysfororg)
   - [*WorkdaysPageForOrg*](#workdayspagefororg)
+  - [*WorkdaysPageForOrgByBusinessDate*](#workdayspagefororgbybusinessdate)
   - [*WorkdaysIntegrityPageForOrg*](#workdaysintegritypagefororg)
   - [*WorkdaysPageForOrgByWorker*](#workdayspagefororgbyworker)
+  - [*WorkdaysPageForOrgByWorkerAndStatus*](#workdayspagefororgbyworkerandstatus)
   - [*WorkdaysPageForOrgByRoom*](#workdayspagefororgbyroom)
   - [*WorkdaysPageForOrgByStatus*](#workdayspagefororgbystatus)
   - [*WorkdaysFingerprintForOrg*](#workdaysfingerprintfororg)
@@ -51,12 +50,6 @@ You can also follow the instructions from the [Data Connect documentation](https
   - [*WorkdayPausesForOrg*](#workdaypausesfororg)
   - [*ActiveWorkdayPauseForWorker*](#activeworkdaypauseforworker)
 - [**Mutations**](#mutations)
-  - [*UpsertOrgUiStyleForOrg*](#upsertorguistylefororg)
-  - [*DeleteOrgUiStyleForOrg*](#deleteorguistylefororg)
-  - [*UpsertMyUiStylePreference*](#upsertmyuistylepreference)
-  - [*DeleteMyUiStylePreference*](#deletemyuistylepreference)
-  - [*UpsertUserUiStylePreferenceForOrg*](#upsertuseruistylepreferencefororg)
-  - [*DeleteUserUiStylePreferenceForOrg*](#deleteuseruistylepreferencefororg)
   - [*InsertClientForOrg*](#insertclientfororg)
   - [*UpdateClientForOrg*](#updateclientfororg)
   - [*DeleteClientForOrg*](#deleteclientfororg)
@@ -255,269 +248,6 @@ export default function MyOrganizationsComponent() {
 }
 ```
 
-## OrgUiStyleForOrg
-You can execute the `OrgUiStyleForOrg` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
-
-```javascript
-useOrgUiStyleForOrg(dc: DataConnect, vars: OrgUiStyleForOrgVariables, options?: useDataConnectQueryOptions<OrgUiStyleForOrgData>): UseDataConnectQueryResult<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
-```
-You can also pass in a `DataConnect` instance to the Query hook function.
-```javascript
-useOrgUiStyleForOrg(vars: OrgUiStyleForOrgVariables, options?: useDataConnectQueryOptions<OrgUiStyleForOrgData>): UseDataConnectQueryResult<OrgUiStyleForOrgData, OrgUiStyleForOrgVariables>;
-```
-
-### Variables
-The `OrgUiStyleForOrg` Query requires an argument of type `OrgUiStyleForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-
-```javascript
-export interface OrgUiStyleForOrgVariables {
-  orgId: string;
-}
-```
-### Return Type
-Recall that calling the `OrgUiStyleForOrg` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
-
-To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
-
-To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `OrgUiStyleForOrg` Query is of type `OrgUiStyleForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-```javascript
-export interface OrgUiStyleForOrgData {
-  orgUiStyle?: {
-    orgId: string;
-    defaultStyleId: string;
-    updatedAt: TimestampString;
-    updatedBy?: string | null;
-  } & OrgUiStyle_Key;
-}
-```
-
-To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
-
-### Using `OrgUiStyleForOrg`'s Query hook function
-
-```javascript
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, OrgUiStyleForOrgVariables } from '@dataconnect/generated';
-import { useOrgUiStyleForOrg } from '@dataconnect/generated/react'
-
-export default function OrgUiStyleForOrgComponent() {
-  // The `useOrgUiStyleForOrg` Query hook requires an argument of type `OrgUiStyleForOrgVariables`:
-  const orgUiStyleForOrgVars: OrgUiStyleForOrgVariables = {
-    orgId: ...,
-  };
-
-  // You don't have to do anything to "execute" the Query.
-  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
-  const query = useOrgUiStyleForOrg(orgUiStyleForOrgVars);
-  // Variables can be defined inline as well.
-  const query = useOrgUiStyleForOrg({ orgId: ..., });
-
-  // You can also pass in a `DataConnect` instance to the Query hook function.
-  const dataConnect = getDataConnect(connectorConfig);
-  const query = useOrgUiStyleForOrg(dataConnect, orgUiStyleForOrgVars);
-
-  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
-  const options = { staleTime: 5 * 1000 };
-  const query = useOrgUiStyleForOrg(orgUiStyleForOrgVars, options);
-
-  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
-  const dataConnect = getDataConnect(connectorConfig);
-  const options = { staleTime: 5 * 1000 };
-  const query = useOrgUiStyleForOrg(dataConnect, orgUiStyleForOrgVars, options);
-
-  // Then, you can render your component dynamically based on the status of the Query.
-  if (query.isPending) {
-    return <div>Loading...</div>;
-  }
-
-  if (query.isError) {
-    return <div>Error: {query.error.message}</div>;
-  }
-
-  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
-  if (query.isSuccess) {
-    console.log(query.data.orgUiStyle);
-  }
-  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
-}
-```
-
-## MyUiStylePreference
-You can execute the `MyUiStylePreference` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
-
-```javascript
-useMyUiStylePreference(dc: DataConnect, vars: MyUiStylePreferenceVariables, options?: useDataConnectQueryOptions<MyUiStylePreferenceData>): UseDataConnectQueryResult<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
-```
-You can also pass in a `DataConnect` instance to the Query hook function.
-```javascript
-useMyUiStylePreference(vars: MyUiStylePreferenceVariables, options?: useDataConnectQueryOptions<MyUiStylePreferenceData>): UseDataConnectQueryResult<MyUiStylePreferenceData, MyUiStylePreferenceVariables>;
-```
-
-### Variables
-The `MyUiStylePreference` Query requires an argument of type `MyUiStylePreferenceVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-
-```javascript
-export interface MyUiStylePreferenceVariables {
-  orgId: string;
-}
-```
-### Return Type
-Recall that calling the `MyUiStylePreference` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
-
-To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
-
-To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `MyUiStylePreference` Query is of type `MyUiStylePreferenceData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-```javascript
-export interface MyUiStylePreferenceData {
-  userUiStylePreference?: {
-    orgId: string;
-    uid: string;
-    styleId: string;
-    updatedAt: TimestampString;
-    updatedBy?: string | null;
-  } & UserUiStylePreference_Key;
-}
-```
-
-To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
-
-### Using `MyUiStylePreference`'s Query hook function
-
-```javascript
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, MyUiStylePreferenceVariables } from '@dataconnect/generated';
-import { useMyUiStylePreference } from '@dataconnect/generated/react'
-
-export default function MyUiStylePreferenceComponent() {
-  // The `useMyUiStylePreference` Query hook requires an argument of type `MyUiStylePreferenceVariables`:
-  const myUiStylePreferenceVars: MyUiStylePreferenceVariables = {
-    orgId: ...,
-  };
-
-  // You don't have to do anything to "execute" the Query.
-  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
-  const query = useMyUiStylePreference(myUiStylePreferenceVars);
-  // Variables can be defined inline as well.
-  const query = useMyUiStylePreference({ orgId: ..., });
-
-  // You can also pass in a `DataConnect` instance to the Query hook function.
-  const dataConnect = getDataConnect(connectorConfig);
-  const query = useMyUiStylePreference(dataConnect, myUiStylePreferenceVars);
-
-  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
-  const options = { staleTime: 5 * 1000 };
-  const query = useMyUiStylePreference(myUiStylePreferenceVars, options);
-
-  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
-  const dataConnect = getDataConnect(connectorConfig);
-  const options = { staleTime: 5 * 1000 };
-  const query = useMyUiStylePreference(dataConnect, myUiStylePreferenceVars, options);
-
-  // Then, you can render your component dynamically based on the status of the Query.
-  if (query.isPending) {
-    return <div>Loading...</div>;
-  }
-
-  if (query.isError) {
-    return <div>Error: {query.error.message}</div>;
-  }
-
-  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
-  if (query.isSuccess) {
-    console.log(query.data.userUiStylePreference);
-  }
-  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
-}
-```
-
-## UserUiStylePreferencesForOrg
-You can execute the `UserUiStylePreferencesForOrg` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
-
-```javascript
-useUserUiStylePreferencesForOrg(dc: DataConnect, vars: UserUiStylePreferencesForOrgVariables, options?: useDataConnectQueryOptions<UserUiStylePreferencesForOrgData>): UseDataConnectQueryResult<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
-```
-You can also pass in a `DataConnect` instance to the Query hook function.
-```javascript
-useUserUiStylePreferencesForOrg(vars: UserUiStylePreferencesForOrgVariables, options?: useDataConnectQueryOptions<UserUiStylePreferencesForOrgData>): UseDataConnectQueryResult<UserUiStylePreferencesForOrgData, UserUiStylePreferencesForOrgVariables>;
-```
-
-### Variables
-The `UserUiStylePreferencesForOrg` Query requires an argument of type `UserUiStylePreferencesForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-
-```javascript
-export interface UserUiStylePreferencesForOrgVariables {
-  orgId: string;
-}
-```
-### Return Type
-Recall that calling the `UserUiStylePreferencesForOrg` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
-
-To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
-
-To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `UserUiStylePreferencesForOrg` Query is of type `UserUiStylePreferencesForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-```javascript
-export interface UserUiStylePreferencesForOrgData {
-  userUiStylePreferences: ({
-    orgId: string;
-    uid: string;
-    styleId: string;
-    updatedAt: TimestampString;
-    updatedBy?: string | null;
-  } & UserUiStylePreference_Key)[];
-}
-```
-
-To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
-
-### Using `UserUiStylePreferencesForOrg`'s Query hook function
-
-```javascript
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, UserUiStylePreferencesForOrgVariables } from '@dataconnect/generated';
-import { useUserUiStylePreferencesForOrg } from '@dataconnect/generated/react'
-
-export default function UserUiStylePreferencesForOrgComponent() {
-  // The `useUserUiStylePreferencesForOrg` Query hook requires an argument of type `UserUiStylePreferencesForOrgVariables`:
-  const userUiStylePreferencesForOrgVars: UserUiStylePreferencesForOrgVariables = {
-    orgId: ...,
-  };
-
-  // You don't have to do anything to "execute" the Query.
-  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
-  const query = useUserUiStylePreferencesForOrg(userUiStylePreferencesForOrgVars);
-  // Variables can be defined inline as well.
-  const query = useUserUiStylePreferencesForOrg({ orgId: ..., });
-
-  // You can also pass in a `DataConnect` instance to the Query hook function.
-  const dataConnect = getDataConnect(connectorConfig);
-  const query = useUserUiStylePreferencesForOrg(dataConnect, userUiStylePreferencesForOrgVars);
-
-  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
-  const options = { staleTime: 5 * 1000 };
-  const query = useUserUiStylePreferencesForOrg(userUiStylePreferencesForOrgVars, options);
-
-  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
-  const dataConnect = getDataConnect(connectorConfig);
-  const options = { staleTime: 5 * 1000 };
-  const query = useUserUiStylePreferencesForOrg(dataConnect, userUiStylePreferencesForOrgVars, options);
-
-  // Then, you can render your component dynamically based on the status of the Query.
-  if (query.isPending) {
-    return <div>Loading...</div>;
-  }
-
-  if (query.isError) {
-    return <div>Error: {query.error.message}</div>;
-  }
-
-  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
-  if (query.isSuccess) {
-    console.log(query.data.userUiStylePreferences);
-  }
-  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
-}
-```
-
 ## CanManageWorkersForOrg
 You can execute the `CanManageWorkersForOrg` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
 
@@ -564,7 +294,7 @@ import { useCanManageWorkersForOrg } from '@dataconnect/generated/react'
 export default function CanManageWorkersForOrgComponent() {
   // The `useCanManageWorkersForOrg` Query hook requires an argument of type `CanManageWorkersForOrgVariables`:
   const canManageWorkersForOrgVars: CanManageWorkersForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -633,22 +363,22 @@ export interface WorkersForOrgData {
   organization?: {
     ownerWorkerId?: string | null;
   };
-    workers: ({
-      login: string;
-      workerId?: string | null;
-      workerName?: string | null;
-      loginEmail?: string | null;
-      authUid?: string | null;
-      role?: string | null;
-      active?: boolean | null;
-      email?: string | null;
-      phone?: string | null;
-      photoUrl?: string | null;
-      workerType?: string | null;
-      edit?: string | null;
-      createdAt?: TimestampString | null;
-      updatedAt?: TimestampString | null;
-    })[];
+  workers: ({
+    login: string;
+    workerId?: string | null;
+    workerName?: string | null;
+    loginEmail?: string | null;
+    authUid?: string | null;
+    role?: string | null;
+    active?: boolean | null;
+    email?: string | null;
+    phone?: string | null;
+    photoUrl?: string | null;
+    workerType?: string | null;
+    edit?: string | null;
+    createdAt?: TimestampString | null;
+    updatedAt?: TimestampString | null;
+  })[];
 }
 ```
 
@@ -664,7 +394,7 @@ import { useWorkersForOrg } from '@dataconnect/generated/react'
 export default function WorkersForOrgComponent() {
   // The `useWorkersForOrg` Query hook requires an argument of type `WorkersForOrgVariables`:
   const workersForOrgVars: WorkersForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -796,7 +526,7 @@ import { useClientsForOrg } from '@dataconnect/generated/react'
 export default function ClientsForOrgComponent() {
   // The `useClientsForOrg` Query hook requires an argument of type `ClientsForOrgVariables`:
   const clientsForOrgVars: ClientsForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -888,7 +618,7 @@ import { useIndividualJobsForOrg } from '@dataconnect/generated/react'
 export default function IndividualJobsForOrgComponent() {
   // The `useIndividualJobsForOrg` Query hook requires an argument of type `IndividualJobsForOrgVariables`:
   const individualJobsForOrgVars: IndividualJobsForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1022,7 +752,7 @@ import { useTasksForOrg } from '@dataconnect/generated/react'
 export default function TasksForOrgComponent() {
   // The `useTasksForOrg` Query hook requires an argument of type `TasksForOrgVariables`:
   const tasksForOrgVars: TasksForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1112,7 +842,7 @@ import { useZonesForOrg } from '@dataconnect/generated/react'
 export default function ZonesForOrgComponent() {
   // The `useZonesForOrg` Query hook requires an argument of type `ZonesForOrgVariables`:
   const zonesForOrgVars: ZonesForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1187,6 +917,7 @@ export interface WorkdaysForOrgData {
     endScanAt?: TimestampString | null;
     autoCloseAt?: TimestampString | null;
     endAt?: TimestampString | null;
+    businessDateYmd?: string | null;
     durationSec?: number | null;
     status?: string | null;
     deviceId?: string | null;
@@ -1214,7 +945,7 @@ import { useWorkdaysForOrg } from '@dataconnect/generated/react'
 export default function WorkdaysForOrgComponent() {
   // The `useWorkdaysForOrg` Query hook requires an argument of type `WorkdaysForOrgVariables`:
   const workdaysForOrgVars: WorkdaysForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1293,6 +1024,7 @@ export interface WorkdaysPageForOrgData {
     endScanAt?: TimestampString | null;
     autoCloseAt?: TimestampString | null;
     endAt?: TimestampString | null;
+    businessDateYmd?: string | null;
     durationSec?: number | null;
     status?: string | null;
     deviceId?: string | null;
@@ -1320,9 +1052,9 @@ import { useWorkdaysPageForOrg } from '@dataconnect/generated/react'
 export default function WorkdaysPageForOrgComponent() {
   // The `useWorkdaysPageForOrg` Query hook requires an argument of type `WorkdaysPageForOrgVariables`:
   const workdaysPageForOrgVars: WorkdaysPageForOrgVariables = {
-    orgId: ...,
-    fromStartAt: ...,
-    toStartAt: ...,
+    orgId: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -1345,6 +1077,117 @@ export default function WorkdaysPageForOrgComponent() {
   const dataConnect = getDataConnect(connectorConfig);
   const options = { staleTime: 5 * 1000 };
   const query = useWorkdaysPageForOrg(dataConnect, workdaysPageForOrgVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.workdays);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## WorkdaysPageForOrgByBusinessDate
+You can execute the `WorkdaysPageForOrgByBusinessDate` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useWorkdaysPageForOrgByBusinessDate(dc: DataConnect, vars: WorkdaysPageForOrgByBusinessDateVariables, options?: useDataConnectQueryOptions<WorkdaysPageForOrgByBusinessDateData>): UseDataConnectQueryResult<WorkdaysPageForOrgByBusinessDateData, WorkdaysPageForOrgByBusinessDateVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useWorkdaysPageForOrgByBusinessDate(vars: WorkdaysPageForOrgByBusinessDateVariables, options?: useDataConnectQueryOptions<WorkdaysPageForOrgByBusinessDateData>): UseDataConnectQueryResult<WorkdaysPageForOrgByBusinessDateData, WorkdaysPageForOrgByBusinessDateVariables>;
+```
+
+### Variables
+The `WorkdaysPageForOrgByBusinessDate` Query requires an argument of type `WorkdaysPageForOrgByBusinessDateVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface WorkdaysPageForOrgByBusinessDateVariables {
+  orgId: string;
+  fromBusinessDateYmd: string;
+  toBusinessDateYmd: string;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `WorkdaysPageForOrgByBusinessDate` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `WorkdaysPageForOrgByBusinessDate` Query is of type `WorkdaysPageForOrgByBusinessDateData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface WorkdaysPageForOrgByBusinessDateData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    businessDateYmd?: string | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `WorkdaysPageForOrgByBusinessDate`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, WorkdaysPageForOrgByBusinessDateVariables } from '@dataconnect/generated';
+import { useWorkdaysPageForOrgByBusinessDate } from '@dataconnect/generated/react'
+
+export default function WorkdaysPageForOrgByBusinessDateComponent() {
+  // The `useWorkdaysPageForOrgByBusinessDate` Query hook requires an argument of type `WorkdaysPageForOrgByBusinessDateVariables`:
+  const workdaysPageForOrgByBusinessDateVars: WorkdaysPageForOrgByBusinessDateVariables = {
+    orgId: ..., 
+    fromBusinessDateYmd: ..., 
+    toBusinessDateYmd: ..., 
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useWorkdaysPageForOrgByBusinessDate(workdaysPageForOrgByBusinessDateVars);
+  // Variables can be defined inline as well.
+  const query = useWorkdaysPageForOrgByBusinessDate({ orgId: ..., fromBusinessDateYmd: ..., toBusinessDateYmd: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useWorkdaysPageForOrgByBusinessDate(dataConnect, workdaysPageForOrgByBusinessDateVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysPageForOrgByBusinessDate(workdaysPageForOrgByBusinessDateVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysPageForOrgByBusinessDate(dataConnect, workdaysPageForOrgByBusinessDateVars, options);
 
   // Then, you can render your component dynamically based on the status of the Query.
   if (query.isPending) {
@@ -1401,6 +1244,7 @@ export interface WorkdaysIntegrityPageForOrgData {
     endScanAt?: TimestampString | null;
     autoCloseAt?: TimestampString | null;
     endAt?: TimestampString | null;
+    businessDateYmd?: string | null;
     durationSec?: number | null;
     status?: string | null;
     deviceId?: string | null;
@@ -1428,7 +1272,7 @@ import { useWorkdaysIntegrityPageForOrg } from '@dataconnect/generated/react'
 export default function WorkdaysIntegrityPageForOrgComponent() {
   // The `useWorkdaysIntegrityPageForOrg` Query hook requires an argument of type `WorkdaysIntegrityPageForOrgVariables`:
   const workdaysIntegrityPageForOrgVars: WorkdaysIntegrityPageForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -1510,6 +1354,7 @@ export interface WorkdaysPageForOrgByWorkerData {
     endScanAt?: TimestampString | null;
     autoCloseAt?: TimestampString | null;
     endAt?: TimestampString | null;
+    businessDateYmd?: string | null;
     durationSec?: number | null;
     status?: string | null;
     deviceId?: string | null;
@@ -1537,10 +1382,10 @@ import { useWorkdaysPageForOrgByWorker } from '@dataconnect/generated/react'
 export default function WorkdaysPageForOrgByWorkerComponent() {
   // The `useWorkdaysPageForOrgByWorker` Query hook requires an argument of type `WorkdaysPageForOrgByWorkerVariables`:
   const workdaysPageForOrgByWorkerVars: WorkdaysPageForOrgByWorkerVariables = {
-    orgId: ...,
-    workerLogin: ...,
-    fromStartAt: ...,
-    toStartAt: ...,
+    orgId: ..., 
+    workerLogin: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -1563,6 +1408,121 @@ export default function WorkdaysPageForOrgByWorkerComponent() {
   const dataConnect = getDataConnect(connectorConfig);
   const options = { staleTime: 5 * 1000 };
   const query = useWorkdaysPageForOrgByWorker(dataConnect, workdaysPageForOrgByWorkerVars, options);
+
+  // Then, you can render your component dynamically based on the status of the Query.
+  if (query.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (query.isError) {
+    return <div>Error: {query.error.message}</div>;
+  }
+
+  // If the Query is successful, you can access the data returned using the `UseQueryResult.data` field.
+  if (query.isSuccess) {
+    console.log(query.data.workdays);
+  }
+  return <div>Query execution {query.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## WorkdaysPageForOrgByWorkerAndStatus
+You can execute the `WorkdaysPageForOrgByWorkerAndStatus` Query using the following Query hook function, which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts):
+
+```javascript
+useWorkdaysPageForOrgByWorkerAndStatus(dc: DataConnect, vars: WorkdaysPageForOrgByWorkerAndStatusVariables, options?: useDataConnectQueryOptions<WorkdaysPageForOrgByWorkerAndStatusData>): UseDataConnectQueryResult<WorkdaysPageForOrgByWorkerAndStatusData, WorkdaysPageForOrgByWorkerAndStatusVariables>;
+```
+You can also pass in a `DataConnect` instance to the Query hook function.
+```javascript
+useWorkdaysPageForOrgByWorkerAndStatus(vars: WorkdaysPageForOrgByWorkerAndStatusVariables, options?: useDataConnectQueryOptions<WorkdaysPageForOrgByWorkerAndStatusData>): UseDataConnectQueryResult<WorkdaysPageForOrgByWorkerAndStatusData, WorkdaysPageForOrgByWorkerAndStatusVariables>;
+```
+
+### Variables
+The `WorkdaysPageForOrgByWorkerAndStatus` Query requires an argument of type `WorkdaysPageForOrgByWorkerAndStatusVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+
+```javascript
+export interface WorkdaysPageForOrgByWorkerAndStatusVariables {
+  orgId: string;
+  workerLogin: string;
+  status: string;
+  fromStartAt: TimestampString;
+  toStartAt: TimestampString;
+  limit?: number | null;
+  offset?: number | null;
+}
+```
+### Return Type
+Recall that calling the `WorkdaysPageForOrgByWorkerAndStatus` Query hook function returns a `UseQueryResult` object. This object holds the state of your Query, including whether the Query is loading, has completed, or has succeeded/failed, and any data returned by the Query, among other things.
+
+To check the status of a Query, use the `UseQueryResult.status` field. You can also check for pending / success / error status using the `UseQueryResult.isPending`, `UseQueryResult.isSuccess`, and `UseQueryResult.isError` fields.
+
+To access the data returned by a Query, use the `UseQueryResult.data` field. The data for the `WorkdaysPageForOrgByWorkerAndStatus` Query is of type `WorkdaysPageForOrgByWorkerAndStatusData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface WorkdaysPageForOrgByWorkerAndStatusData {
+  workdays: ({
+    workdayId: string;
+    workerLogin: string;
+    workerName?: string | null;
+    utilityRoomId?: string | null;
+    startAt?: TimestampString | null;
+    endScanAt?: TimestampString | null;
+    autoCloseAt?: TimestampString | null;
+    endAt?: TimestampString | null;
+    businessDateYmd?: string | null;
+    durationSec?: number | null;
+    status?: string | null;
+    deviceId?: string | null;
+    gps?: string | null;
+    startEventId?: string | null;
+    endEventId?: string | null;
+    startObject?: string | null;
+    stopObject?: string | null;
+    comment?: string | null;
+    updatedBy?: string | null;
+    updatedAt?: TimestampString | null;
+  })[];
+}
+```
+
+To learn more about the `UseQueryResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useQuery).
+
+### Using `WorkdaysPageForOrgByWorkerAndStatus`'s Query hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, WorkdaysPageForOrgByWorkerAndStatusVariables } from '@dataconnect/generated';
+import { useWorkdaysPageForOrgByWorkerAndStatus } from '@dataconnect/generated/react'
+
+export default function WorkdaysPageForOrgByWorkerAndStatusComponent() {
+  // The `useWorkdaysPageForOrgByWorkerAndStatus` Query hook requires an argument of type `WorkdaysPageForOrgByWorkerAndStatusVariables`:
+  const workdaysPageForOrgByWorkerAndStatusVars: WorkdaysPageForOrgByWorkerAndStatusVariables = {
+    orgId: ..., 
+    workerLogin: ..., 
+    status: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
+    limit: ..., // optional
+    offset: ..., // optional
+  };
+
+  // You don't have to do anything to "execute" the Query.
+  // Call the Query hook function to get a `UseQueryResult` object which holds the state of your Query.
+  const query = useWorkdaysPageForOrgByWorkerAndStatus(workdaysPageForOrgByWorkerAndStatusVars);
+  // Variables can be defined inline as well.
+  const query = useWorkdaysPageForOrgByWorkerAndStatus({ orgId: ..., workerLogin: ..., status: ..., fromStartAt: ..., toStartAt: ..., limit: ..., offset: ..., });
+
+  // You can also pass in a `DataConnect` instance to the Query hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const query = useWorkdaysPageForOrgByWorkerAndStatus(dataConnect, workdaysPageForOrgByWorkerAndStatusVars);
+
+  // You can also pass in a `useDataConnectQueryOptions` object to the Query hook function.
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysPageForOrgByWorkerAndStatus(workdaysPageForOrgByWorkerAndStatusVars, options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectQueryOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = { staleTime: 5 * 1000 };
+  const query = useWorkdaysPageForOrgByWorkerAndStatus(dataConnect, workdaysPageForOrgByWorkerAndStatusVars, options);
 
   // Then, you can render your component dynamically based on the status of the Query.
   if (query.isPending) {
@@ -1622,6 +1582,7 @@ export interface WorkdaysPageForOrgByRoomData {
     endScanAt?: TimestampString | null;
     autoCloseAt?: TimestampString | null;
     endAt?: TimestampString | null;
+    businessDateYmd?: string | null;
     durationSec?: number | null;
     status?: string | null;
     deviceId?: string | null;
@@ -1649,10 +1610,10 @@ import { useWorkdaysPageForOrgByRoom } from '@dataconnect/generated/react'
 export default function WorkdaysPageForOrgByRoomComponent() {
   // The `useWorkdaysPageForOrgByRoom` Query hook requires an argument of type `WorkdaysPageForOrgByRoomVariables`:
   const workdaysPageForOrgByRoomVars: WorkdaysPageForOrgByRoomVariables = {
-    orgId: ...,
-    utilityRoomId: ...,
-    fromStartAt: ...,
-    toStartAt: ...,
+    orgId: ..., 
+    utilityRoomId: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -1734,6 +1695,7 @@ export interface WorkdaysPageForOrgByStatusData {
     endScanAt?: TimestampString | null;
     autoCloseAt?: TimestampString | null;
     endAt?: TimestampString | null;
+    businessDateYmd?: string | null;
     durationSec?: number | null;
     status?: string | null;
     deviceId?: string | null;
@@ -1761,10 +1723,10 @@ import { useWorkdaysPageForOrgByStatus } from '@dataconnect/generated/react'
 export default function WorkdaysPageForOrgByStatusComponent() {
   // The `useWorkdaysPageForOrgByStatus` Query hook requires an argument of type `WorkdaysPageForOrgByStatusVariables`:
   const workdaysPageForOrgByStatusVars: WorkdaysPageForOrgByStatusVariables = {
-    orgId: ...,
-    status: ...,
-    fromStartAt: ...,
-    toStartAt: ...,
+    orgId: ..., 
+    status: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -1838,6 +1800,7 @@ export interface WorkdaysFingerprintForOrgData {
     workdayId: string;
     startAt?: TimestampString | null;
     endAt?: TimestampString | null;
+    businessDateYmd?: string | null;
     status?: string | null;
     updatedAt?: TimestampString | null;
   })[];
@@ -1856,9 +1819,9 @@ import { useWorkdaysFingerprintForOrg } from '@dataconnect/generated/react'
 export default function WorkdaysFingerprintForOrgComponent() {
   // The `useWorkdaysFingerprintForOrg` Query hook requires an argument of type `WorkdaysFingerprintForOrgVariables`:
   const workdaysFingerprintForOrgVars: WorkdaysFingerprintForOrgVariables = {
-    orgId: ...,
-    fromStartAt: ...,
-    toStartAt: ...,
+    orgId: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -1953,7 +1916,7 @@ import { useBackupCyclesForOrg } from '@dataconnect/generated/react'
 export default function BackupCyclesForOrgComponent() {
   // The `useBackupCyclesForOrg` Query hook requires an argument of type `BackupCyclesForOrgVariables`:
   const backupCyclesForOrgVars: BackupCyclesForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -2078,7 +2041,7 @@ import { useEventsForOrg } from '@dataconnect/generated/react'
 export default function EventsForOrgComponent() {
   // The `useEventsForOrg` Query hook requires an argument of type `EventsForOrgVariables`:
   const eventsForOrgVars: EventsForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -2205,7 +2168,7 @@ import { useEventsIntegrityPageForOrg } from '@dataconnect/generated/react'
 export default function EventsIntegrityPageForOrgComponent() {
   // The `useEventsIntegrityPageForOrg` Query hook requires an argument of type `EventsIntegrityPageForOrgVariables`:
   const eventsIntegrityPageForOrgVars: EventsIntegrityPageForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -2336,9 +2299,9 @@ import { useEventsPageForOrg } from '@dataconnect/generated/react'
 export default function EventsPageForOrgComponent() {
   // The `useEventsPageForOrg` Query hook requires an argument of type `EventsPageForOrgVariables`:
   const eventsPageForOrgVars: EventsPageForOrgVariables = {
-    orgId: ...,
-    fromStartAt: ...,
-    toStartAt: ...,
+    orgId: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -2470,10 +2433,10 @@ import { useEventsPageForOrgByWorker } from '@dataconnect/generated/react'
 export default function EventsPageForOrgByWorkerComponent() {
   // The `useEventsPageForOrgByWorker` Query hook requires an argument of type `EventsPageForOrgByWorkerVariables`:
   const eventsPageForOrgByWorkerVars: EventsPageForOrgByWorkerVariables = {
-    orgId: ...,
-    workerLogin: ...,
-    fromStartAt: ...,
-    toStartAt: ...,
+    orgId: ..., 
+    workerLogin: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -2605,10 +2568,10 @@ import { useEventsPageForOrgByZone } from '@dataconnect/generated/react'
 export default function EventsPageForOrgByZoneComponent() {
   // The `useEventsPageForOrgByZone` Query hook requires an argument of type `EventsPageForOrgByZoneVariables`:
   const eventsPageForOrgByZoneVars: EventsPageForOrgByZoneVariables = {
-    orgId: ...,
-    zoneId: ...,
-    fromStartAt: ...,
-    toStartAt: ...,
+    orgId: ..., 
+    zoneId: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -2740,10 +2703,10 @@ import { useEventsPageForOrgByStatus } from '@dataconnect/generated/react'
 export default function EventsPageForOrgByStatusComponent() {
   // The `useEventsPageForOrgByStatus` Query hook requires an argument of type `EventsPageForOrgByStatusVariables`:
   const eventsPageForOrgByStatusVars: EventsPageForOrgByStatusVariables = {
-    orgId: ...,
-    status: ...,
-    fromStartAt: ...,
-    toStartAt: ...,
+    orgId: ..., 
+    status: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -2874,9 +2837,9 @@ import { useEventsPageForOrgByTaskOccurrence } from '@dataconnect/generated/reac
 export default function EventsPageForOrgByTaskOccurrenceComponent() {
   // The `useEventsPageForOrgByTaskOccurrence` Query hook requires an argument of type `EventsPageForOrgByTaskOccurrenceVariables`:
   const eventsPageForOrgByTaskOccurrenceVars: EventsPageForOrgByTaskOccurrenceVariables = {
-    orgId: ...,
-    taskId: ...,
-    occurrenceDateYmd: ...,
+    orgId: ..., 
+    taskId: ..., 
+    occurrenceDateYmd: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -3006,8 +2969,8 @@ import { useEventsPageForOrgByPlanMatchStatus } from '@dataconnect/generated/rea
 export default function EventsPageForOrgByPlanMatchStatusComponent() {
   // The `useEventsPageForOrgByPlanMatchStatus` Query hook requires an argument of type `EventsPageForOrgByPlanMatchStatusVariables`:
   const eventsPageForOrgByPlanMatchStatusVars: EventsPageForOrgByPlanMatchStatusVariables = {
-    orgId: ...,
-    matchStatus: ...,
+    orgId: ..., 
+    matchStatus: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -3115,9 +3078,9 @@ import { useEventsFingerprintForOrg } from '@dataconnect/generated/react'
 export default function EventsFingerprintForOrgComponent() {
   // The `useEventsFingerprintForOrg` Query hook requires an argument of type `EventsFingerprintForOrgVariables`:
   const eventsFingerprintForOrgVars: EventsFingerprintForOrgVariables = {
-    orgId: ...,
-    fromStartAt: ...,
-    toStartAt: ...,
+    orgId: ..., 
+    fromStartAt: ..., 
+    toStartAt: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -3193,6 +3156,7 @@ export interface WorkerWorkdaysForOrgData {
     endScanAt?: TimestampString | null;
     autoCloseAt?: TimestampString | null;
     endAt?: TimestampString | null;
+    businessDateYmd?: string | null;
     durationSec?: number | null;
     status?: string | null;
     deviceId?: string | null;
@@ -3220,8 +3184,8 @@ import { useWorkerWorkdaysForOrg } from '@dataconnect/generated/react'
 export default function WorkerWorkdaysForOrgComponent() {
   // The `useWorkerWorkdaysForOrg` Query hook requires an argument of type `WorkerWorkdaysForOrgVariables`:
   const workerWorkdaysForOrgVars: WorkerWorkdaysForOrgVariables = {
-    orgId: ...,
-    workerLogin: ...,
+    orgId: ..., 
+    workerLogin: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -3316,7 +3280,7 @@ import { useStorageForOrg } from '@dataconnect/generated/react'
 export default function StorageForOrgComponent() {
   // The `useStorageForOrg` Query hook requires an argument of type `StorageForOrgVariables`:
   const storageForOrgVars: StorageForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -3403,10 +3367,10 @@ export interface ClientStorageForClientData {
       quantityMin: number;
       quantityMax?: number | null;
     };
-      client: {
-        name?: string | null;
-        status?: string | null;
-      };
+    client: {
+      name?: string | null;
+      status?: string | null;
+    };
   } & ClientStorage_Key)[];
 }
 ```
@@ -3423,8 +3387,8 @@ import { useClientStorageForClient } from '@dataconnect/generated/react'
 export default function ClientStorageForClientComponent() {
   // The `useClientStorageForClient` Query hook requires an argument of type `ClientStorageForClientVariables`:
   const clientStorageForClientVars: ClientStorageForClientVariables = {
-    orgId: ...,
-    clientId: ...,
+    orgId: ..., 
+    clientId: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -3520,7 +3484,7 @@ import { useClientStorageForOrg } from '@dataconnect/generated/react'
 export default function ClientStorageForOrgComponent() {
   // The `useClientStorageForOrg` Query hook requires an argument of type `ClientStorageForOrgVariables`:
   const clientStorageForOrgVars: ClientStorageForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -3617,7 +3581,7 @@ import { useWorkdayPausesForOrg } from '@dataconnect/generated/react'
 export default function WorkdayPausesForOrgComponent() {
   // The `useWorkdayPausesForOrg` Query hook requires an argument of type `WorkdayPausesForOrgVariables`:
   const workdayPausesForOrgVars: WorkdayPausesForOrgVariables = {
-    orgId: ...,
+    orgId: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -3713,8 +3677,8 @@ import { useActiveWorkdayPauseForWorker } from '@dataconnect/generated/react'
 export default function ActiveWorkdayPauseForWorkerComponent() {
   // The `useActiveWorkdayPauseForWorker` Query hook requires an argument of type `ActiveWorkdayPauseForWorkerVariables`:
   const activeWorkdayPauseForWorkerVars: ActiveWorkdayPauseForWorkerVariables = {
-    orgId: ...,
-    workerLogin: ...,
+    orgId: ..., 
+    workerLogin: ..., 
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -3777,586 +3741,6 @@ Here's a general overview of how to use the generated Mutation hooks in your cod
   - ***Special case:*** If the Mutation has no arguments (or all optional arguments and you wish to provide none), and you want to pass `options` to `UseMutationResult.mutate()`, you must pass `undefined` where you would normally pass the Mutation's arguments, and then may provide the options argument.
 
 Below are examples of how to use the `example` connector's generated Mutation hook functions to execute each Mutation. You can also follow the examples from the [Data Connect documentation](https://firebase.google.com/docs/data-connect/web-sdk#operations-react-angular).
-
-## UpsertOrgUiStyleForOrg
-You can execute the `UpsertOrgUiStyleForOrg` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
-```javascript
-useUpsertOrgUiStyleForOrg(options?: useDataConnectMutationOptions<UpsertOrgUiStyleForOrgData, FirebaseError, UpsertOrgUiStyleForOrgVariables>): UseDataConnectMutationResult<UpsertOrgUiStyleForOrgData, UpsertOrgUiStyleForOrgVariables>;
-```
-You can also pass in a `DataConnect` instance to the Mutation hook function.
-```javascript
-useUpsertOrgUiStyleForOrg(dc: DataConnect, options?: useDataConnectMutationOptions<UpsertOrgUiStyleForOrgData, FirebaseError, UpsertOrgUiStyleForOrgVariables>): UseDataConnectMutationResult<UpsertOrgUiStyleForOrgData, UpsertOrgUiStyleForOrgVariables>;
-```
-
-### Variables
-The `UpsertOrgUiStyleForOrg` Mutation requires an argument of type `UpsertOrgUiStyleForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-
-```javascript
-export interface UpsertOrgUiStyleForOrgVariables {
-  orgId: string;
-  styleId: string;
-  updatedBy?: string | null;
-}
-```
-### Return Type
-Recall that calling the `UpsertOrgUiStyleForOrg` Mutation hook function returns a `UseMutationResult` object. This object holds the state of your Mutation, including whether the Mutation is loading, has completed, or has succeeded/failed, among other things.
-
-To check the status of a Mutation, use the `UseMutationResult.status` field. You can also check for pending / success / error status using the `UseMutationResult.isPending`, `UseMutationResult.isSuccess`, and `UseMutationResult.isError` fields.
-
-To execute the Mutation, call `UseMutationResult.mutate()`. This function executes the Mutation, but does not return the data from the Mutation.
-
-To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `UpsertOrgUiStyleForOrg` Mutation is of type `UpsertOrgUiStyleForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-```javascript
-export interface UpsertOrgUiStyleForOrgData {
-  orgUiStyle_upsert: OrgUiStyle_Key;
-}
-```
-
-To learn more about the `UseMutationResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useMutation).
-
-### Using `UpsertOrgUiStyleForOrg`'s Mutation hook function
-
-```javascript
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, UpsertOrgUiStyleForOrgVariables } from '@dataconnect/generated';
-import { useUpsertOrgUiStyleForOrg } from '@dataconnect/generated/react'
-
-export default function UpsertOrgUiStyleForOrgComponent() {
-  // Call the Mutation hook function to get a `UseMutationResult` object which holds the state of your Mutation.
-  const mutation = useUpsertOrgUiStyleForOrg();
-
-  // You can also pass in a `DataConnect` instance to the Mutation hook function.
-  const dataConnect = getDataConnect(connectorConfig);
-  const mutation = useUpsertOrgUiStyleForOrg(dataConnect);
-
-  // You can also pass in a `useDataConnectMutationOptions` object to the Mutation hook function.
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  const mutation = useUpsertOrgUiStyleForOrg(options);
-
-  // You can also pass both a `DataConnect` instance and a `useDataConnectMutationOptions` object.
-  const dataConnect = getDataConnect(connectorConfig);
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  const mutation = useUpsertOrgUiStyleForOrg(dataConnect, options);
-
-  // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
-  // The `useUpsertOrgUiStyleForOrg` Mutation requires an argument of type `UpsertOrgUiStyleForOrgVariables`:
-  const upsertOrgUiStyleForOrgVars: UpsertOrgUiStyleForOrgVariables = {
-    orgId: ...,
-    styleId: ...,
-    updatedBy: ..., // optional
-  };
-  mutation.mutate(upsertOrgUiStyleForOrgVars);
-  // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., styleId: ..., updatedBy: ..., });
-
-  // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  mutation.mutate(upsertOrgUiStyleForOrgVars, options);
-
-  // Then, you can render your component dynamically based on the status of the Mutation.
-  if (mutation.isPending) {
-    return <div>Loading...</div>;
-  }
-
-  if (mutation.isError) {
-    return <div>Error: {mutation.error.message}</div>;
-  }
-
-  // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
-  if (mutation.isSuccess) {
-    console.log(mutation.data.orgUiStyle_upsert);
-  }
-  return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
-}
-```
-
-## DeleteOrgUiStyleForOrg
-You can execute the `DeleteOrgUiStyleForOrg` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
-```javascript
-useDeleteOrgUiStyleForOrg(options?: useDataConnectMutationOptions<DeleteOrgUiStyleForOrgData, FirebaseError, DeleteOrgUiStyleForOrgVariables>): UseDataConnectMutationResult<DeleteOrgUiStyleForOrgData, DeleteOrgUiStyleForOrgVariables>;
-```
-You can also pass in a `DataConnect` instance to the Mutation hook function.
-```javascript
-useDeleteOrgUiStyleForOrg(dc: DataConnect, options?: useDataConnectMutationOptions<DeleteOrgUiStyleForOrgData, FirebaseError, DeleteOrgUiStyleForOrgVariables>): UseDataConnectMutationResult<DeleteOrgUiStyleForOrgData, DeleteOrgUiStyleForOrgVariables>;
-```
-
-### Variables
-The `DeleteOrgUiStyleForOrg` Mutation requires an argument of type `DeleteOrgUiStyleForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-
-```javascript
-export interface DeleteOrgUiStyleForOrgVariables {
-  orgId: string;
-}
-```
-### Return Type
-Recall that calling the `DeleteOrgUiStyleForOrg` Mutation hook function returns a `UseMutationResult` object. This object holds the state of your Mutation, including whether the Mutation is loading, has completed, or has succeeded/failed, among other things.
-
-To check the status of a Mutation, use the `UseMutationResult.status` field. You can also check for pending / success / error status using the `UseMutationResult.isPending`, `UseMutationResult.isSuccess`, and `UseMutationResult.isError` fields.
-
-To execute the Mutation, call `UseMutationResult.mutate()`. This function executes the Mutation, but does not return the data from the Mutation.
-
-To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `DeleteOrgUiStyleForOrg` Mutation is of type `DeleteOrgUiStyleForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-```javascript
-export interface DeleteOrgUiStyleForOrgData {
-  orgUiStyle_delete?: OrgUiStyle_Key | null;
-}
-```
-
-To learn more about the `UseMutationResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useMutation).
-
-### Using `DeleteOrgUiStyleForOrg`'s Mutation hook function
-
-```javascript
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, DeleteOrgUiStyleForOrgVariables } from '@dataconnect/generated';
-import { useDeleteOrgUiStyleForOrg } from '@dataconnect/generated/react'
-
-export default function DeleteOrgUiStyleForOrgComponent() {
-  // Call the Mutation hook function to get a `UseMutationResult` object which holds the state of your Mutation.
-  const mutation = useDeleteOrgUiStyleForOrg();
-
-  // You can also pass in a `DataConnect` instance to the Mutation hook function.
-  const dataConnect = getDataConnect(connectorConfig);
-  const mutation = useDeleteOrgUiStyleForOrg(dataConnect);
-
-  // You can also pass in a `useDataConnectMutationOptions` object to the Mutation hook function.
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  const mutation = useDeleteOrgUiStyleForOrg(options);
-
-  // You can also pass both a `DataConnect` instance and a `useDataConnectMutationOptions` object.
-  const dataConnect = getDataConnect(connectorConfig);
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  const mutation = useDeleteOrgUiStyleForOrg(dataConnect, options);
-
-  // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
-  // The `useDeleteOrgUiStyleForOrg` Mutation requires an argument of type `DeleteOrgUiStyleForOrgVariables`:
-  const deleteOrgUiStyleForOrgVars: DeleteOrgUiStyleForOrgVariables = {
-    orgId: ...,
-  };
-  mutation.mutate(deleteOrgUiStyleForOrgVars);
-  // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., });
-
-  // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  mutation.mutate(deleteOrgUiStyleForOrgVars, options);
-
-  // Then, you can render your component dynamically based on the status of the Mutation.
-  if (mutation.isPending) {
-    return <div>Loading...</div>;
-  }
-
-  if (mutation.isError) {
-    return <div>Error: {mutation.error.message}</div>;
-  }
-
-  // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
-  if (mutation.isSuccess) {
-    console.log(mutation.data.orgUiStyle_delete);
-  }
-  return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
-}
-```
-
-## UpsertMyUiStylePreference
-You can execute the `UpsertMyUiStylePreference` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
-```javascript
-useUpsertMyUiStylePreference(options?: useDataConnectMutationOptions<UpsertMyUiStylePreferenceData, FirebaseError, UpsertMyUiStylePreferenceVariables>): UseDataConnectMutationResult<UpsertMyUiStylePreferenceData, UpsertMyUiStylePreferenceVariables>;
-```
-You can also pass in a `DataConnect` instance to the Mutation hook function.
-```javascript
-useUpsertMyUiStylePreference(dc: DataConnect, options?: useDataConnectMutationOptions<UpsertMyUiStylePreferenceData, FirebaseError, UpsertMyUiStylePreferenceVariables>): UseDataConnectMutationResult<UpsertMyUiStylePreferenceData, UpsertMyUiStylePreferenceVariables>;
-```
-
-### Variables
-The `UpsertMyUiStylePreference` Mutation requires an argument of type `UpsertMyUiStylePreferenceVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-
-```javascript
-export interface UpsertMyUiStylePreferenceVariables {
-  orgId: string;
-  styleId: string;
-  updatedBy?: string | null;
-}
-```
-### Return Type
-Recall that calling the `UpsertMyUiStylePreference` Mutation hook function returns a `UseMutationResult` object. This object holds the state of your Mutation, including whether the Mutation is loading, has completed, or has succeeded/failed, among other things.
-
-To check the status of a Mutation, use the `UseMutationResult.status` field. You can also check for pending / success / error status using the `UseMutationResult.isPending`, `UseMutationResult.isSuccess`, and `UseMutationResult.isError` fields.
-
-To execute the Mutation, call `UseMutationResult.mutate()`. This function executes the Mutation, but does not return the data from the Mutation.
-
-To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `UpsertMyUiStylePreference` Mutation is of type `UpsertMyUiStylePreferenceData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-```javascript
-export interface UpsertMyUiStylePreferenceData {
-  userUiStylePreference_upsert: UserUiStylePreference_Key;
-}
-```
-
-To learn more about the `UseMutationResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useMutation).
-
-### Using `UpsertMyUiStylePreference`'s Mutation hook function
-
-```javascript
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, UpsertMyUiStylePreferenceVariables } from '@dataconnect/generated';
-import { useUpsertMyUiStylePreference } from '@dataconnect/generated/react'
-
-export default function UpsertMyUiStylePreferenceComponent() {
-  // Call the Mutation hook function to get a `UseMutationResult` object which holds the state of your Mutation.
-  const mutation = useUpsertMyUiStylePreference();
-
-  // You can also pass in a `DataConnect` instance to the Mutation hook function.
-  const dataConnect = getDataConnect(connectorConfig);
-  const mutation = useUpsertMyUiStylePreference(dataConnect);
-
-  // You can also pass in a `useDataConnectMutationOptions` object to the Mutation hook function.
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  const mutation = useUpsertMyUiStylePreference(options);
-
-  // You can also pass both a `DataConnect` instance and a `useDataConnectMutationOptions` object.
-  const dataConnect = getDataConnect(connectorConfig);
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  const mutation = useUpsertMyUiStylePreference(dataConnect, options);
-
-  // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
-  // The `useUpsertMyUiStylePreference` Mutation requires an argument of type `UpsertMyUiStylePreferenceVariables`:
-  const upsertMyUiStylePreferenceVars: UpsertMyUiStylePreferenceVariables = {
-    orgId: ...,
-    styleId: ...,
-    updatedBy: ..., // optional
-  };
-  mutation.mutate(upsertMyUiStylePreferenceVars);
-  // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., styleId: ..., updatedBy: ..., });
-
-  // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  mutation.mutate(upsertMyUiStylePreferenceVars, options);
-
-  // Then, you can render your component dynamically based on the status of the Mutation.
-  if (mutation.isPending) {
-    return <div>Loading...</div>;
-  }
-
-  if (mutation.isError) {
-    return <div>Error: {mutation.error.message}</div>;
-  }
-
-  // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
-  if (mutation.isSuccess) {
-    console.log(mutation.data.userUiStylePreference_upsert);
-  }
-  return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
-}
-```
-
-## DeleteMyUiStylePreference
-You can execute the `DeleteMyUiStylePreference` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
-```javascript
-useDeleteMyUiStylePreference(options?: useDataConnectMutationOptions<DeleteMyUiStylePreferenceData, FirebaseError, DeleteMyUiStylePreferenceVariables>): UseDataConnectMutationResult<DeleteMyUiStylePreferenceData, DeleteMyUiStylePreferenceVariables>;
-```
-You can also pass in a `DataConnect` instance to the Mutation hook function.
-```javascript
-useDeleteMyUiStylePreference(dc: DataConnect, options?: useDataConnectMutationOptions<DeleteMyUiStylePreferenceData, FirebaseError, DeleteMyUiStylePreferenceVariables>): UseDataConnectMutationResult<DeleteMyUiStylePreferenceData, DeleteMyUiStylePreferenceVariables>;
-```
-
-### Variables
-The `DeleteMyUiStylePreference` Mutation requires an argument of type `DeleteMyUiStylePreferenceVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-
-```javascript
-export interface DeleteMyUiStylePreferenceVariables {
-  orgId: string;
-}
-```
-### Return Type
-Recall that calling the `DeleteMyUiStylePreference` Mutation hook function returns a `UseMutationResult` object. This object holds the state of your Mutation, including whether the Mutation is loading, has completed, or has succeeded/failed, among other things.
-
-To check the status of a Mutation, use the `UseMutationResult.status` field. You can also check for pending / success / error status using the `UseMutationResult.isPending`, `UseMutationResult.isSuccess`, and `UseMutationResult.isError` fields.
-
-To execute the Mutation, call `UseMutationResult.mutate()`. This function executes the Mutation, but does not return the data from the Mutation.
-
-To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `DeleteMyUiStylePreference` Mutation is of type `DeleteMyUiStylePreferenceData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-```javascript
-export interface DeleteMyUiStylePreferenceData {
-  userUiStylePreference_delete?: UserUiStylePreference_Key | null;
-}
-```
-
-To learn more about the `UseMutationResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useMutation).
-
-### Using `DeleteMyUiStylePreference`'s Mutation hook function
-
-```javascript
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, DeleteMyUiStylePreferenceVariables } from '@dataconnect/generated';
-import { useDeleteMyUiStylePreference } from '@dataconnect/generated/react'
-
-export default function DeleteMyUiStylePreferenceComponent() {
-  // Call the Mutation hook function to get a `UseMutationResult` object which holds the state of your Mutation.
-  const mutation = useDeleteMyUiStylePreference();
-
-  // You can also pass in a `DataConnect` instance to the Mutation hook function.
-  const dataConnect = getDataConnect(connectorConfig);
-  const mutation = useDeleteMyUiStylePreference(dataConnect);
-
-  // You can also pass in a `useDataConnectMutationOptions` object to the Mutation hook function.
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  const mutation = useDeleteMyUiStylePreference(options);
-
-  // You can also pass both a `DataConnect` instance and a `useDataConnectMutationOptions` object.
-  const dataConnect = getDataConnect(connectorConfig);
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  const mutation = useDeleteMyUiStylePreference(dataConnect, options);
-
-  // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
-  // The `useDeleteMyUiStylePreference` Mutation requires an argument of type `DeleteMyUiStylePreferenceVariables`:
-  const deleteMyUiStylePreferenceVars: DeleteMyUiStylePreferenceVariables = {
-    orgId: ...,
-  };
-  mutation.mutate(deleteMyUiStylePreferenceVars);
-  // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., });
-
-  // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  mutation.mutate(deleteMyUiStylePreferenceVars, options);
-
-  // Then, you can render your component dynamically based on the status of the Mutation.
-  if (mutation.isPending) {
-    return <div>Loading...</div>;
-  }
-
-  if (mutation.isError) {
-    return <div>Error: {mutation.error.message}</div>;
-  }
-
-  // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
-  if (mutation.isSuccess) {
-    console.log(mutation.data.userUiStylePreference_delete);
-  }
-  return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
-}
-```
-
-## UpsertUserUiStylePreferenceForOrg
-You can execute the `UpsertUserUiStylePreferenceForOrg` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
-```javascript
-useUpsertUserUiStylePreferenceForOrg(options?: useDataConnectMutationOptions<UpsertUserUiStylePreferenceForOrgData, FirebaseError, UpsertUserUiStylePreferenceForOrgVariables>): UseDataConnectMutationResult<UpsertUserUiStylePreferenceForOrgData, UpsertUserUiStylePreferenceForOrgVariables>;
-```
-You can also pass in a `DataConnect` instance to the Mutation hook function.
-```javascript
-useUpsertUserUiStylePreferenceForOrg(dc: DataConnect, options?: useDataConnectMutationOptions<UpsertUserUiStylePreferenceForOrgData, FirebaseError, UpsertUserUiStylePreferenceForOrgVariables>): UseDataConnectMutationResult<UpsertUserUiStylePreferenceForOrgData, UpsertUserUiStylePreferenceForOrgVariables>;
-```
-
-### Variables
-The `UpsertUserUiStylePreferenceForOrg` Mutation requires an argument of type `UpsertUserUiStylePreferenceForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-
-```javascript
-export interface UpsertUserUiStylePreferenceForOrgVariables {
-  orgId: string;
-  uid: string;
-  styleId: string;
-  updatedBy?: string | null;
-}
-```
-### Return Type
-Recall that calling the `UpsertUserUiStylePreferenceForOrg` Mutation hook function returns a `UseMutationResult` object. This object holds the state of your Mutation, including whether the Mutation is loading, has completed, or has succeeded/failed, among other things.
-
-To check the status of a Mutation, use the `UseMutationResult.status` field. You can also check for pending / success / error status using the `UseMutationResult.isPending`, `UseMutationResult.isSuccess`, and `UseMutationResult.isError` fields.
-
-To execute the Mutation, call `UseMutationResult.mutate()`. This function executes the Mutation, but does not return the data from the Mutation.
-
-To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `UpsertUserUiStylePreferenceForOrg` Mutation is of type `UpsertUserUiStylePreferenceForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-```javascript
-export interface UpsertUserUiStylePreferenceForOrgData {
-  userUiStylePreference_upsert: UserUiStylePreference_Key;
-}
-```
-
-To learn more about the `UseMutationResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useMutation).
-
-### Using `UpsertUserUiStylePreferenceForOrg`'s Mutation hook function
-
-```javascript
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, UpsertUserUiStylePreferenceForOrgVariables } from '@dataconnect/generated';
-import { useUpsertUserUiStylePreferenceForOrg } from '@dataconnect/generated/react'
-
-export default function UpsertUserUiStylePreferenceForOrgComponent() {
-  // Call the Mutation hook function to get a `UseMutationResult` object which holds the state of your Mutation.
-  const mutation = useUpsertUserUiStylePreferenceForOrg();
-
-  // You can also pass in a `DataConnect` instance to the Mutation hook function.
-  const dataConnect = getDataConnect(connectorConfig);
-  const mutation = useUpsertUserUiStylePreferenceForOrg(dataConnect);
-
-  // You can also pass in a `useDataConnectMutationOptions` object to the Mutation hook function.
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  const mutation = useUpsertUserUiStylePreferenceForOrg(options);
-
-  // You can also pass both a `DataConnect` instance and a `useDataConnectMutationOptions` object.
-  const dataConnect = getDataConnect(connectorConfig);
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  const mutation = useUpsertUserUiStylePreferenceForOrg(dataConnect, options);
-
-  // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
-  // The `useUpsertUserUiStylePreferenceForOrg` Mutation requires an argument of type `UpsertUserUiStylePreferenceForOrgVariables`:
-  const upsertUserUiStylePreferenceForOrgVars: UpsertUserUiStylePreferenceForOrgVariables = {
-    orgId: ...,
-    uid: ...,
-    styleId: ...,
-    updatedBy: ..., // optional
-  };
-  mutation.mutate(upsertUserUiStylePreferenceForOrgVars);
-  // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., uid: ..., styleId: ..., updatedBy: ..., });
-
-  // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  mutation.mutate(upsertUserUiStylePreferenceForOrgVars, options);
-
-  // Then, you can render your component dynamically based on the status of the Mutation.
-  if (mutation.isPending) {
-    return <div>Loading...</div>;
-  }
-
-  if (mutation.isError) {
-    return <div>Error: {mutation.error.message}</div>;
-  }
-
-  // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
-  if (mutation.isSuccess) {
-    console.log(mutation.data.userUiStylePreference_upsert);
-  }
-  return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
-}
-```
-
-## DeleteUserUiStylePreferenceForOrg
-You can execute the `DeleteUserUiStylePreferenceForOrg` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
-```javascript
-useDeleteUserUiStylePreferenceForOrg(options?: useDataConnectMutationOptions<DeleteUserUiStylePreferenceForOrgData, FirebaseError, DeleteUserUiStylePreferenceForOrgVariables>): UseDataConnectMutationResult<DeleteUserUiStylePreferenceForOrgData, DeleteUserUiStylePreferenceForOrgVariables>;
-```
-You can also pass in a `DataConnect` instance to the Mutation hook function.
-```javascript
-useDeleteUserUiStylePreferenceForOrg(dc: DataConnect, options?: useDataConnectMutationOptions<DeleteUserUiStylePreferenceForOrgData, FirebaseError, DeleteUserUiStylePreferenceForOrgVariables>): UseDataConnectMutationResult<DeleteUserUiStylePreferenceForOrgData, DeleteUserUiStylePreferenceForOrgVariables>;
-```
-
-### Variables
-The `DeleteUserUiStylePreferenceForOrg` Mutation requires an argument of type `DeleteUserUiStylePreferenceForOrgVariables`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-
-```javascript
-export interface DeleteUserUiStylePreferenceForOrgVariables {
-  orgId: string;
-  uid: string;
-}
-```
-### Return Type
-Recall that calling the `DeleteUserUiStylePreferenceForOrg` Mutation hook function returns a `UseMutationResult` object. This object holds the state of your Mutation, including whether the Mutation is loading, has completed, or has succeeded/failed, among other things.
-
-To check the status of a Mutation, use the `UseMutationResult.status` field. You can also check for pending / success / error status using the `UseMutationResult.isPending`, `UseMutationResult.isSuccess`, and `UseMutationResult.isError` fields.
-
-To execute the Mutation, call `UseMutationResult.mutate()`. This function executes the Mutation, but does not return the data from the Mutation.
-
-To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `DeleteUserUiStylePreferenceForOrg` Mutation is of type `DeleteUserUiStylePreferenceForOrgData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
-```javascript
-export interface DeleteUserUiStylePreferenceForOrgData {
-  userUiStylePreference_delete?: UserUiStylePreference_Key | null;
-}
-```
-
-To learn more about the `UseMutationResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useMutation).
-
-### Using `DeleteUserUiStylePreferenceForOrg`'s Mutation hook function
-
-```javascript
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, DeleteUserUiStylePreferenceForOrgVariables } from '@dataconnect/generated';
-import { useDeleteUserUiStylePreferenceForOrg } from '@dataconnect/generated/react'
-
-export default function DeleteUserUiStylePreferenceForOrgComponent() {
-  // Call the Mutation hook function to get a `UseMutationResult` object which holds the state of your Mutation.
-  const mutation = useDeleteUserUiStylePreferenceForOrg();
-
-  // You can also pass in a `DataConnect` instance to the Mutation hook function.
-  const dataConnect = getDataConnect(connectorConfig);
-  const mutation = useDeleteUserUiStylePreferenceForOrg(dataConnect);
-
-  // You can also pass in a `useDataConnectMutationOptions` object to the Mutation hook function.
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  const mutation = useDeleteUserUiStylePreferenceForOrg(options);
-
-  // You can also pass both a `DataConnect` instance and a `useDataConnectMutationOptions` object.
-  const dataConnect = getDataConnect(connectorConfig);
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  const mutation = useDeleteUserUiStylePreferenceForOrg(dataConnect, options);
-
-  // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
-  // The `useDeleteUserUiStylePreferenceForOrg` Mutation requires an argument of type `DeleteUserUiStylePreferenceForOrgVariables`:
-  const deleteUserUiStylePreferenceForOrgVars: DeleteUserUiStylePreferenceForOrgVariables = {
-    orgId: ...,
-    uid: ...,
-  };
-  mutation.mutate(deleteUserUiStylePreferenceForOrgVars);
-  // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., uid: ..., });
-
-  // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
-  const options = {
-    onSuccess: () => { console.log('Mutation succeeded!'); }
-  };
-  mutation.mutate(deleteUserUiStylePreferenceForOrgVars, options);
-
-  // Then, you can render your component dynamically based on the status of the Mutation.
-  if (mutation.isPending) {
-    return <div>Loading...</div>;
-  }
-
-  if (mutation.isError) {
-    return <div>Error: {mutation.error.message}</div>;
-  }
-
-  // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
-  if (mutation.isSuccess) {
-    console.log(mutation.data.userUiStylePreference_delete);
-  }
-  return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
-}
-```
 
 ## InsertClientForOrg
 You can execute the `InsertClientForOrg` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
@@ -4469,8 +3853,8 @@ export default function InsertClientForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertClientForOrg` Mutation requires an argument of type `InsertClientForOrgVariables`:
   const insertClientForOrgVars: InsertClientForOrgVariables = {
-    orgId: ...,
-    clientId: ...,
+    orgId: ..., 
+    clientId: ..., 
     name: ..., // optional
     nip: ..., // optional
     city: ..., // optional
@@ -4655,8 +4039,8 @@ export default function UpdateClientForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateClientForOrg` Mutation requires an argument of type `UpdateClientForOrgVariables`:
   const updateClientForOrgVars: UpdateClientForOrgVariables = {
-    orgId: ...,
-    clientId: ...,
+    orgId: ..., 
+    clientId: ..., 
     name: ..., // optional
     nip: ..., // optional
     city: ..., // optional
@@ -4803,8 +4187,8 @@ export default function DeleteClientForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteClientForOrg` Mutation requires an argument of type `DeleteClientForOrgVariables`:
   const deleteClientForOrgVars: DeleteClientForOrgVariables = {
-    orgId: ...,
-    clientId: ...,
+    orgId: ..., 
+    clientId: ..., 
   };
   mutation.mutate(deleteClientForOrgVars);
   // Variables can be defined inline as well.
@@ -4914,8 +4298,8 @@ export default function InsertIndividualJobForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertIndividualJobForOrg` Mutation requires an argument of type `InsertIndividualJobForOrgVariables`:
   const insertIndividualJobForOrgVars: InsertIndividualJobForOrgVariables = {
-    orgId: ...,
-    clientIndId: ...,
+    orgId: ..., 
+    clientIndId: ..., 
     date: ..., // optional
     name: ..., // optional
     nip: ..., // optional
@@ -5026,8 +4410,8 @@ export default function UpdateIndividualJobForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateIndividualJobForOrg` Mutation requires an argument of type `UpdateIndividualJobForOrgVariables`:
   const updateIndividualJobForOrgVars: UpdateIndividualJobForOrgVariables = {
-    orgId: ...,
-    clientIndId: ...,
+    orgId: ..., 
+    clientIndId: ..., 
     date: ..., // optional
     name: ..., // optional
     nip: ..., // optional
@@ -5130,8 +4514,8 @@ export default function DeleteIndividualJobForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteIndividualJobForOrg` Mutation requires an argument of type `DeleteIndividualJobForOrgVariables`:
   const deleteIndividualJobForOrgVars: DeleteIndividualJobForOrgVariables = {
-    orgId: ...,
-    clientIndId: ...,
+    orgId: ..., 
+    clientIndId: ..., 
   };
   mutation.mutate(deleteIndividualJobForOrgVars);
   // Variables can be defined inline as well.
@@ -5275,8 +4659,8 @@ export default function UpsertTaskForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpsertTaskForOrg` Mutation requires an argument of type `UpsertTaskForOrgVariables`:
   const upsertTaskForOrgVars: UpsertTaskForOrgVariables = {
-    orgId: ...,
-    idTask: ...,
+    orgId: ..., 
+    idTask: ..., 
     lifecycleStatus: ..., // optional
     cancelledAt: ..., // optional
     archivedAt: ..., // optional
@@ -5420,8 +4804,8 @@ export default function DeleteTaskForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteTaskForOrg` Mutation requires an argument of type `DeleteTaskForOrgVariables`:
   const deleteTaskForOrgVars: DeleteTaskForOrgVariables = {
-    orgId: ...,
-    idTask: ...,
+    orgId: ..., 
+    idTask: ..., 
   };
   mutation.mutate(deleteTaskForOrgVars);
   // Variables can be defined inline as well.
@@ -5522,8 +4906,8 @@ export default function InsertZoneForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertZoneForOrg` Mutation requires an argument of type `InsertZoneForOrgVariables`:
   const insertZoneForOrgVars: InsertZoneForOrgVariables = {
-    orgId: ...,
-    zoneId: ...,
+    orgId: ..., 
+    zoneId: ..., 
     clientId: ..., // optional
     zone: ..., // optional
     function: ..., // optional
@@ -5630,8 +5014,8 @@ export default function UpdateZoneForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateZoneForOrg` Mutation requires an argument of type `UpdateZoneForOrgVariables`:
   const updateZoneForOrgVars: UpdateZoneForOrgVariables = {
-    orgId: ...,
-    zoneId: ...,
+    orgId: ..., 
+    zoneId: ..., 
     clientId: ..., // optional
     zone: ..., // optional
     function: ..., // optional
@@ -5732,8 +5116,8 @@ export default function DeleteZoneForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteZoneForOrg` Mutation requires an argument of type `DeleteZoneForOrgVariables`:
   const deleteZoneForOrgVars: DeleteZoneForOrgVariables = {
-    orgId: ...,
-    zoneId: ...,
+    orgId: ..., 
+    zoneId: ..., 
   };
   mutation.mutate(deleteZoneForOrgVars);
   // Variables can be defined inline as well.
@@ -5838,9 +5222,9 @@ export default function InsertWorkdayForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertWorkdayForOrg` Mutation requires an argument of type `InsertWorkdayForOrgVariables`:
   const insertWorkdayForOrgVars: InsertWorkdayForOrgVariables = {
-    orgId: ...,
-    workdayId: ...,
-    workerLogin: ...,
+    orgId: ..., 
+    workdayId: ..., 
+    workerLogin: ..., 
     workerName: ..., // optional
     utilityRoomId: ..., // optional
     startAt: ..., // optional
@@ -5954,9 +5338,9 @@ export default function UpdateWorkdayForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateWorkdayForOrg` Mutation requires an argument of type `UpdateWorkdayForOrgVariables`:
   const updateWorkdayForOrgVars: UpdateWorkdayForOrgVariables = {
-    orgId: ...,
-    workdayId: ...,
-    workerLogin: ...,
+    orgId: ..., 
+    workdayId: ..., 
+    workerLogin: ..., 
     workerName: ..., // optional
     utilityRoomId: ..., // optional
     startAt: ..., // optional
@@ -6060,8 +5444,8 @@ export default function DeleteWorkdayForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteWorkdayForOrg` Mutation requires an argument of type `DeleteWorkdayForOrgVariables`:
   const deleteWorkdayForOrgVars: DeleteWorkdayForOrgVariables = {
-    orgId: ...,
-    workdayId: ...,
+    orgId: ..., 
+    workdayId: ..., 
   };
   mutation.mutate(deleteWorkdayForOrgVars);
   // Variables can be defined inline as well.
@@ -6107,7 +5491,6 @@ The `InsertEventForOrg` Mutation requires an argument of type `InsertEventForOrg
 export interface InsertEventForOrgVariables {
   orgId: string;
   eventId: string;
-  workdayId?: string | null;
   zoneId?: string | null;
   workerLogin?: string | null;
   workerName?: string | null;
@@ -6170,9 +5553,8 @@ export default function InsertEventForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertEventForOrg` Mutation requires an argument of type `InsertEventForOrgVariables`:
   const insertEventForOrgVars: InsertEventForOrgVariables = {
-    orgId: ...,
-    eventId: ...,
-    workdayId: ..., // optional
+    orgId: ..., 
+    eventId: ..., 
     zoneId: ..., // optional
     workerLogin: ..., // optional
     workerName: ..., // optional
@@ -6189,7 +5571,7 @@ export default function InsertEventForOrgComponent() {
   };
   mutation.mutate(insertEventForOrgVars);
   // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., eventId: ..., workdayId: ..., zoneId: ..., workerLogin: ..., workerName: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
+  mutation.mutate({ orgId: ..., eventId: ..., zoneId: ..., workerLogin: ..., workerName: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
 
   // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
   const options = {
@@ -6290,8 +5672,8 @@ export default function UpdateEventForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateEventForOrg` Mutation requires an argument of type `UpdateEventForOrgVariables`:
   const updateEventForOrgVars: UpdateEventForOrgVariables = {
-    orgId: ...,
-    eventId: ...,
+    orgId: ..., 
+    eventId: ..., 
     workerName: ..., // optional
     endAt: ..., // optional
     durationSec: ..., // optional
@@ -6347,7 +5729,6 @@ The `ReidentifyEventForOrg` Mutation requires an argument of type `ReidentifyEve
 export interface ReidentifyEventForOrgVariables {
   orgId: string;
   eventId: string;
-  workdayId?: string | null;
   zoneId?: string | null;
   workerLogin?: string | null;
   workerName?: string | null;
@@ -6410,9 +5791,8 @@ export default function ReidentifyEventForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useReidentifyEventForOrg` Mutation requires an argument of type `ReidentifyEventForOrgVariables`:
   const reidentifyEventForOrgVars: ReidentifyEventForOrgVariables = {
-    orgId: ...,
-    eventId: ...,
-    workdayId: ..., // optional
+    orgId: ..., 
+    eventId: ..., 
     zoneId: ..., // optional
     workerLogin: ..., // optional
     workerName: ..., // optional
@@ -6429,7 +5809,7 @@ export default function ReidentifyEventForOrgComponent() {
   };
   mutation.mutate(reidentifyEventForOrgVars);
   // Variables can be defined inline as well.
-  mutation.mutate({ orgId: ..., eventId: ..., workdayId: ..., zoneId: ..., workerLogin: ..., workerName: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
+  mutation.mutate({ orgId: ..., eventId: ..., zoneId: ..., workerLogin: ..., workerName: ..., startAt: ..., endAt: ..., durationSec: ..., status: ..., closeMarkedAt: ..., endReason: ..., comment: ..., deviceId: ..., startEventId: ..., endEventId: ..., });
 
   // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
   const options = {
@@ -6520,8 +5900,8 @@ export default function DeleteEventForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteEventForOrg` Mutation requires an argument of type `DeleteEventForOrgVariables`:
   const deleteEventForOrgVars: DeleteEventForOrgVariables = {
-    orgId: ...,
-    eventId: ...,
+    orgId: ..., 
+    eventId: ..., 
   };
   mutation.mutate(deleteEventForOrgVars);
   // Variables can be defined inline as well.
@@ -6631,8 +6011,8 @@ export default function InsertBackupCycleForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertBackupCycleForOrg` Mutation requires an argument of type `InsertBackupCycleForOrgVariables`:
   const insertBackupCycleForOrgVars: InsertBackupCycleForOrgVariables = {
-    orgId: ...,
-    cycleId: ...,
+    orgId: ..., 
+    cycleId: ..., 
     workerLogin: ..., // optional
     workerName: ..., // optional
     roomId: ..., // optional
@@ -6757,8 +6137,8 @@ export default function UpdateBackupCycleForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateBackupCycleForOrg` Mutation requires an argument of type `UpdateBackupCycleForOrgVariables`:
   const updateBackupCycleForOrgVars: UpdateBackupCycleForOrgVariables = {
-    orgId: ...,
-    cycleId: ...,
+    orgId: ..., 
+    cycleId: ..., 
     workerLogin: ..., // optional
     workerName: ..., // optional
     roomId: ..., // optional
@@ -6876,11 +6256,11 @@ export default function InsertStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertStorageForOrg` Mutation requires an argument of type `InsertStorageForOrgVariables`:
   const insertStorageForOrgVars: InsertStorageForOrgVariables = {
-    orgId: ...,
-    productIndex: ...,
-    productId: ...,
-    name: ...,
-    productType: ...,
+    orgId: ..., 
+    productIndex: ..., 
+    productId: ..., 
+    name: ..., 
+    productType: ..., 
     quantity: ..., // optional
     quantityMin: ..., // optional
     quantityMax: ..., // optional
@@ -6988,8 +6368,8 @@ export default function UpdateStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateStorageForOrg` Mutation requires an argument of type `UpdateStorageForOrgVariables`:
   const updateStorageForOrgVars: UpdateStorageForOrgVariables = {
-    orgId: ...,
-    productIndex: ...,
+    orgId: ..., 
+    productIndex: ..., 
     productId: ..., // optional
     name: ..., // optional
     productType: ..., // optional
@@ -7092,8 +6472,8 @@ export default function DeleteStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteStorageForOrg` Mutation requires an argument of type `DeleteStorageForOrgVariables`:
   const deleteStorageForOrgVars: DeleteStorageForOrgVariables = {
-    orgId: ...,
-    productIndex: ...,
+    orgId: ..., 
+    productIndex: ..., 
   };
   mutation.mutate(deleteStorageForOrgVars);
   // Variables can be defined inline as well.
@@ -7195,11 +6575,11 @@ export default function InsertClientStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useInsertClientStorageForOrg` Mutation requires an argument of type `InsertClientStorageForOrgVariables`:
   const insertClientStorageForOrgVars: InsertClientStorageForOrgVariables = {
-    orgId: ...,
-    clientId: ...,
-    productIndex: ...,
-    name: ...,
-    productType: ...,
+    orgId: ..., 
+    clientId: ..., 
+    productIndex: ..., 
+    name: ..., 
+    productType: ..., 
     quantity: ..., // optional
     quantityMin: ..., // optional
     quantityMax: ..., // optional
@@ -7305,9 +6685,9 @@ export default function UpdateClientStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useUpdateClientStorageForOrg` Mutation requires an argument of type `UpdateClientStorageForOrgVariables`:
   const updateClientStorageForOrgVars: UpdateClientStorageForOrgVariables = {
-    orgId: ...,
-    clientId: ...,
-    productIndex: ...,
+    orgId: ..., 
+    clientId: ..., 
+    productIndex: ..., 
     name: ..., // optional
     productType: ..., // optional
     quantity: ..., // optional
@@ -7409,9 +6789,9 @@ export default function DeleteClientStorageForOrgComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useDeleteClientStorageForOrg` Mutation requires an argument of type `DeleteClientStorageForOrgVariables`:
   const deleteClientStorageForOrgVars: DeleteClientStorageForOrgVariables = {
-    orgId: ...,
-    clientId: ...,
-    productIndex: ...,
+    orgId: ..., 
+    clientId: ..., 
+    productIndex: ..., 
   };
   mutation.mutate(deleteClientStorageForOrgVars);
   // Variables can be defined inline as well.
@@ -7516,10 +6896,10 @@ export default function StartWorkdayPauseComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useStartWorkdayPause` Mutation requires an argument of type `StartWorkdayPauseVariables`:
   const startWorkdayPauseVars: StartWorkdayPauseVariables = {
-    orgId: ...,
-    pauseId: ...,
-    workdayId: ...,
-    workerLogin: ...,
+    orgId: ..., 
+    pauseId: ..., 
+    workdayId: ..., 
+    workerLogin: ..., 
     workerName: ..., // optional
     startAt: ..., // optional
     stopAt: ..., // optional
@@ -7628,9 +7008,9 @@ export default function StopWorkdayPauseComponent() {
   // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
   // The `useStopWorkdayPause` Mutation requires an argument of type `StopWorkdayPauseVariables`:
   const stopWorkdayPauseVars: StopWorkdayPauseVariables = {
-    orgId: ...,
-    pauseId: ...,
-    workdayId: ...,
+    orgId: ..., 
+    pauseId: ..., 
+    workdayId: ..., 
     workerLogin: ..., // optional
     stopAt: ..., // optional
     durationSec: ..., // optional

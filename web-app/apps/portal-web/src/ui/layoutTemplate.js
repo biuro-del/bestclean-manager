@@ -492,26 +492,12 @@ export const portalLayoutTemplate = `
 
           <div class="menu-group-title">USTAWIENIA</div>
 
-          <button class="menu-section" type="button" data-toggle="settings">
+          <button class="menu-item" type="button" data-route="settings">
             <span class="mi-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15l1.2 2.1-2.1 2.1-2.1-1.2a8 8 0 0 1-2 .8L14 21h-4l-.4-2.2a8 8 0 0 1-2-.8l-2.1 1.2-2.1-2.1L4.6 15a8 8 0 0 1-.8-2L1.6 12l2.2-1a8 8 0 0 1 .8-2L3.4 6.9l2.1-2.1 2.1 1.2a8 8 0 0 1 2-.8L10 3h4l.4 2.2a8 8 0 0 1 2 .8l2.1-1.2 2.1 2.1-1.2 2.1a8 8 0 0 1 .8 2l2.2 1-2.2 1a8 8 0 0 1-.8 2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
             </span>
-            <span class="mi-label">Ustawienia</span><span class="chev">▼</span>
+            <span class="mi-label">Ustawienia</span>
           </button>
-          <div class="submenu" id="submenu-settings">
-            <button class="submenu-item" data-route="settingsStyles" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l2.3 4.7 5.2.8-3.8 3.7.9 5.2L12 15.8l-4.6 2.5.9-5.2-3.8-3.7 5.2-.8L12 3z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-              </span>
-              <span class="mi-label">Style</span>
-            </button>
-            <button class="submenu-item" data-route="settingsBackup" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 7a2 2 0 0 1 2-2h9l5 5v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 5v5h5M8 14h8M8 17h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-              </span>
-              <span class="mi-label">Kopia zapasowa</span>
-            </button>
-          </div>
         </div>
       </aside>
 

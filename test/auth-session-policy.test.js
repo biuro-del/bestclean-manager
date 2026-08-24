@@ -3,7 +3,9 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const {
+  TENANT_EMAIL_VERIFICATION_POLICY,
   buildSessionContext,
+  evaluateTenantEmailVerification,
   evaluateOrganizationAccess,
   normalizeOrganizationId,
   resolveAccessibleOrganizations,
@@ -188,4 +190,54 @@ test('lista organizacji zawiera tylko organizacje z pelnym aktywnym dostepem', (
     resolveAccessibleOrganizations(rows, NOW).map((row) => row.org_id),
     ['orgID_1'],
   )
+})
+
+test('stare konto tenantowe może logować się bez historycznego potwierdzenia emaila', () => {
+  const decision = evaluateTenantEmailVerification({
+    uid: 'legacy-uid',
+    email: 'legacy@example.com',
+    email_verified: false,
+    account_created_at: '2026-07-20T10:00:00.000Z',
+  }, activeTrialRow())
+
+  assert.equal(TENANT_EMAIL_VERIFICATION_POLICY.requiredFrom, '2026-08-01T00:00:00.000Z')
+  assert.deepEqual(decision, {
+    allowed: true,
+    code: 'LEGACY_EMAIL_VERIFICATION_EXEMPT',
+    exempt: true,
+    accountCreatedAt: '2026-07-20T10:00:00.000Z',
+  })
+})
+
+test('nowe konto tenantowe nadal wymaga potwierdzenia emaila', () => {
+  assert.deepEqual(evaluateTenantEmailVerification({
+    uid: 'new-uid',
+    email: 'new@example.com',
+    email_verified: false,
+    account_created_at: '2026-08-01T00:00:00.000Z',
+  }, activeTrialRow()), {
+    allowed: false,
+    code: 'EMAIL_VERIFICATION_REQUIRED',
+    exempt: false,
+  })
+})
+
+test('zweryfikowany email działa niezależnie od daty, a stare członkostwo jest fallbackiem', () => {
+  assert.equal(evaluateTenantEmailVerification({
+    email: 'verified@example.com',
+    email_verified: true,
+  }, {}).code, 'EMAIL_VERIFIED')
+
+  assert.equal(evaluateTenantEmailVerification({
+    email: 'legacy@example.com',
+    email_verified: false,
+  }, activeTrialRow({
+    membership_created_at: '2026-07-15T09:00:00.000Z',
+    worker_created_at: null,
+  })).code, 'LEGACY_EMAIL_VERIFICATION_EXEMPT')
+
+  assert.equal(evaluateTenantEmailVerification({
+    email: 'unknown@example.com',
+    email_verified: false,
+  }, activeTrialRow()).code, 'EMAIL_VERIFICATION_REQUIRED')
 })

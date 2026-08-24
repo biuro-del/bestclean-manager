@@ -1,0 +1,22 @@
+<section class="settings-module" aria-labelledby="settingsAlertsTitle">
+  <header class="settings-module-header">
+    <div><p class="settings-eyebrow">Organizacja</p><h2 id="settingsAlertsTitle">Alerty</h2><p>Skonfiguruj alerty operacyjne oraz sposób ich dostarczania.</p></div>
+    <span class="settings-status">W przygotowaniu</span>
+  </header>
+  <div class="settings-permission-note"><i class="ph ph-info" aria-hidden="true"></i><span data-settings-permission>Edycja będzie dostępna dla ról OWNER i ADMIN.</span></div>
+  <fieldset class="settings-fieldset" disabled>
+    <legend>Rodzaje alertów operacyjnych</legend>
+    <div class="settings-choice-list">
+      <label class="settings-choice"><span><i class="ph ph-clock-countdown" aria-hidden="true"></i><span><strong>Opóźnienie rozpoczęcia pracy</strong><small>Alert po przekroczeniu zaplanowanej godziny.</small></span></span><input type="checkbox" checked></label>
+      <label class="settings-choice"><span><i class="ph ph-map-pin-line" aria-hidden="true"></i><span><strong>Zdarzenie poza strefą</strong><small>Rejestracja aktywności poza przypisanym obiektem.</small></span></span><input type="checkbox" checked></label>
+      <label class="settings-choice"><span><i class="ph ph-warning" aria-hidden="true"></i><span><strong>Przekroczenie SLA</strong><small>Brak realizacji zadania w wymaganym czasie.</small></span></span><input type="checkbox"></label>
+    </div>
+  </fieldset>
+  <fieldset class="settings-fieldset" disabled>
+    <legend>Dostarczenie alertów</legend>
+    <div class="settings-form-grid">
+      <label><span>Odbiorcy</span><select multiple size="3"><option selected>Właściciele organizacji</option><option>Administratorzy</option><option>Koordynatorzy</option></select></label>
+      <label><span>Kanały</span><select multiple size="3"><option selected>Portal</option><option>E-mail</option><option>Powiadomienie push</option></select></label>
+    </div>
+  </fieldset>
+</section>

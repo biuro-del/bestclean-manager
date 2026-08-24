@@ -139,12 +139,6 @@ export async function updatePlatformOrganization(orgId, action = '', payload = {
   return parseResponse(response)
 }
 
-export const upsertOrgUiStyleForOrg = wrap('mutation', 'UpsertOrgUiStyleForOrg', generated.upsertOrgUiStyleForOrg)
-export const deleteOrgUiStyleForOrg = wrap('mutation', 'DeleteOrgUiStyleForOrg', generated.deleteOrgUiStyleForOrg)
-export const upsertMyUiStylePreference = wrap('mutation', 'UpsertMyUiStylePreference', generated.upsertMyUiStylePreference)
-export const deleteMyUiStylePreference = wrap('mutation', 'DeleteMyUiStylePreference', generated.deleteMyUiStylePreference)
-export const upsertUserUiStylePreferenceForOrg = wrap('mutation', 'UpsertUserUiStylePreferenceForOrg', generated.upsertUserUiStylePreferenceForOrg)
-export const deleteUserUiStylePreferenceForOrg = wrap('mutation', 'DeleteUserUiStylePreferenceForOrg', generated.deleteUserUiStylePreferenceForOrg)
 export const insertClientForOrg = wrap('mutation', 'InsertClientForOrg', generated.insertClientForOrg)
 export const updateClientForOrg = wrap('mutation', 'UpdateClientForOrg', generated.updateClientForOrg)
 export const deleteClientForOrg = wrap('mutation', 'DeleteClientForOrg', generated.deleteClientForOrg)

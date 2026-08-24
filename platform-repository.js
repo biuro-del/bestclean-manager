@@ -538,16 +538,7 @@ async function preserveTenantMutationAuthors(client, operationName, variables) {
   let query = ''
   let params = []
   let assignments = null
-  if (operationName === 'UpsertOrgUiStyleForOrg') {
-    query = 'select updated_by from public.org_ui_style where org_id = $1::text limit 1'
-    params = [orgId]
-    assignments = { updatedBy: 'updated_by' }
-  } else if (operationName === 'UpsertUserUiStylePreferenceForOrg' && text(result.uid)) {
-    query = `select updated_by from public.user_ui_style_preference
-              where org_id = $1::text and uid = $2::text limit 1`
-    params = [orgId, text(result.uid)]
-    assignments = { updatedBy: 'updated_by' }
-  } else if (operationName === 'UpsertTaskForOrg' && text(result.idTask)) {
+  if (operationName === 'UpsertTaskForOrg' && text(result.idTask)) {
     query = `select created_by_uid, updated_by_uid from public.task
               where org_id = $1::text and id_task = $2::text limit 1`
     params = [orgId, text(result.idTask)]

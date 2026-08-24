@@ -1293,7 +1293,7 @@
   font-size: 12.5px;
 }
 
-#portalRoot #view-dashboard .dash-command-live .dash-command-operation__workers {
+#portalRoot #view-dashboard .dash-command-live .dash-command-operation__client {
   color: #475467;
   font-size: 10px;
   font-weight: 750;
@@ -1308,11 +1308,17 @@
 }
 
 #portalRoot #view-dashboard .dash-command-operation {
+  position: relative;
   min-width: 0;
   border-left: 3px solid transparent;
   border-bottom: 1px solid #edf0f5;
   background: #ffffff;
   list-style: none;
+}
+
+#portalRoot #view-dashboard .dash-command-operation:hover,
+#portalRoot #view-dashboard .dash-command-operation:focus-within {
+  z-index: 4;
 }
 
 #portalRoot #view-dashboard .dash-command-operation.is-active {
@@ -1325,6 +1331,7 @@
 }
 
 #portalRoot #view-dashboard .dash-command-operation__button {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 10px;
@@ -1401,7 +1408,7 @@
 
 #portalRoot #view-dashboard .dash-command-operation__copy strong,
 #portalRoot #view-dashboard .dash-command-operation__copy small,
-#portalRoot #view-dashboard .dash-command-operation__workers {
+#portalRoot #view-dashboard .dash-command-operation__client {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1421,7 +1428,10 @@
   line-height: 1.25;
 }
 
-#portalRoot #view-dashboard .dash-command-operation__workers {
+#portalRoot #view-dashboard .dash-command-operation__client {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
   color: #667085;
   font-size: 8.5px;
   font-weight: 700;
@@ -1473,30 +1483,153 @@
 }
 
 #portalRoot #view-dashboard .dash-command-operation__progress {
+  position: relative;
   grid-column: 1 / -1;
-  height: 5px;
+  height: 18px;
   margin-left: 46px;
   overflow: hidden;
   border-radius: 999px;
   background: #e7ebf3;
 }
 
-#portalRoot #view-dashboard .dash-command-operation__progress > span {
+#portalRoot #view-dashboard .dash-command-operation__progress-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #5850e6, #736bff);
+  background: linear-gradient(90deg, #2563eb, #3b82f6);
   transition: width 220ms ease;
 }
 
-#portalRoot #view-dashboard .dash-command-operation__progress.is-indeterminate > span {
-  width: 42%;
-  background: linear-gradient(90deg, transparent, #736bff, transparent);
-  animation: dash-command-operation-progress 1.8s ease-in-out infinite;
+#portalRoot #view-dashboard .dash-command-operation__progress-late {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  display: block;
+  min-width: 3px;
+  overflow: hidden;
+  border-right: 1px solid rgba(220, 38, 38, 0.34);
+  border-radius: 999px 0 0 999px;
+  background-color: #e4e7ec;
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(220, 38, 38, 0.78) 0,
+    rgba(220, 38, 38, 0.78) 2px,
+    transparent 2px,
+    transparent 7px
+  );
+  box-shadow: inset 0 0 0 1px rgba(152, 162, 179, 0.22);
 }
 
-#portalRoot #view-dashboard .dash-command-operation__progress.is-complete > span {
-  width: 100%;
+#portalRoot #view-dashboard .dash-command-operation__progress.has-late-segment .dash-command-operation__progress-fill {
+  border-radius: 0 999px 999px 0;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress-value {
+  position: absolute;
+  inset: 0 7px 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: #16233f;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress.is-unmeasured {
+  background: #eef1f6;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress.is-unmeasured .dash-command-operation__progress-value {
+  color: #667085;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress-tooltip {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  z-index: 12;
+  display: grid;
+  gap: 5px;
+  width: min(226px, calc(100% - 66px));
+  padding: 9px 10px;
+  visibility: hidden;
+  border: 1px solid #d7deea;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 12px 28px rgba(23, 35, 58, 0.18);
+  color: #344054;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-46%) scale(0.98);
+  transition: opacity 130ms ease, transform 130ms ease, visibility 130ms ease;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress:hover + .dash-command-operation__progress-tooltip,
+#portalRoot #view-dashboard .dash-command-operation__button:focus-visible .dash-command-operation__progress-tooltip {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress-tooltip-title {
+  padding-bottom: 5px;
+  border-bottom: 1px solid #edf0f5;
+  color: #17233a;
+  font-size: 10.5px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress-tooltip-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress-tooltip-row > span {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  color: #667085;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress-tooltip-row i {
+  flex: 0 0 auto;
+  color: #8090a8;
+  font-size: 11px;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress-tooltip-row b {
+  overflow: hidden;
+  color: #253149;
+  font-size: 9px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress-tooltip-row.is-late {
+  margin: 1px -3px -2px;
+  padding: 4px 5px;
+  border-radius: 6px;
+  background: #fff1f2;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress-tooltip-row.is-late > span,
+#portalRoot #view-dashboard .dash-command-operation__progress-tooltip-row.is-late i,
+#portalRoot #view-dashboard .dash-command-operation__progress-tooltip-row.is-late b {
+  color: #b42318;
 }
 
 #portalRoot #view-dashboard .dash-command-operation.is-completed {
@@ -1508,7 +1641,7 @@
   color: #16865b;
 }
 
-#portalRoot #view-dashboard .dash-command-operation.is-completed .dash-command-operation__progress > span {
+#portalRoot #view-dashboard .dash-command-operation.is-completed .dash-command-operation__progress-fill {
   background: linear-gradient(90deg, #20a66f, #35bd82);
 }
 
@@ -1651,7 +1784,7 @@ body.is-dashboard-operations-modal-open {
 }
 
 #portalRoot #view-dashboard .dash-command-operations-dialog__list .dash-command-operation__copy small,
-#portalRoot #view-dashboard .dash-command-operations-dialog__list .dash-command-operation__workers,
+#portalRoot #view-dashboard .dash-command-operations-dialog__list .dash-command-operation__client,
 #portalRoot #view-dashboard .dash-command-operations-dialog__list .dash-command-operation__timeline {
   font-size: 9px;
 }
@@ -2781,5 +2914,545 @@ body.is-dashboard-operations-modal-open {
   #portalRoot #view-dashboard .dash-command-upcoming__go,
   #portalRoot #view-dashboard .dash-command-alert__go {
     display: none;
+  }
+}
+
+/* Dashboard UI cohesion: command toolbar, live progress and daily timeline. */
+#portalRoot #view-dashboard .dash-command-center__header {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  min-height: 72px;
+  padding: 12px 14px 12px 18px;
+  border: 1px solid #dfe5ef;
+  border-radius: 17px;
+  background: #ffffff;
+  box-shadow: 0 7px 22px rgba(29, 43, 74, 0.055);
+}
+
+#portalRoot #view-dashboard .dash-command-center__heading {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 16px;
+  align-items: center;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-center__heading h1 {
+  flex: 0 1 auto;
+  font-size: clamp(20px, 2vw, 25px);
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-center__heading p {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 32px;
+  margin: 0;
+  padding: 7px 11px 7px 26px;
+  border: 1px solid #dcefe5;
+  border-radius: 999px;
+  background: #f2fbf6;
+  color: #267054;
+  font-size: 10.5px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+#portalRoot #view-dashboard .dash-command-center__heading p::before {
+  left: 11px;
+  width: 7px;
+  height: 7px;
+  background: #16a36a;
+  box-shadow: 0 0 0 3px #ddf4e9;
+}
+
+#portalRoot #view-dashboard .dash-command-center__actions {
+  gap: 7px;
+  margin-left: auto;
+  padding-left: 16px;
+  border-left: 1px solid #edf0f5;
+}
+
+#portalRoot #view-dashboard .dash-command-center__action,
+#portalRoot #view-dashboard .dash-command-center__notification {
+  min-height: 40px;
+  border-color: #dfe5ef;
+  background: #f8fafc;
+  box-shadow: none;
+}
+
+#portalRoot #view-dashboard .dash-command-center__action--primary {
+  border-color: #dfe5ef;
+  background: #f8fafc;
+  color: #394761;
+}
+
+#portalRoot #view-dashboard .dash-command-center__action--primary:hover {
+  border-color: #c8cdfd;
+  background: #f2f1ff;
+  color: #5148e8;
+}
+
+#portalRoot #view-dashboard .dash-command-center__notification {
+  width: 40px;
+  background: #f8fafc;
+  font-size: 19px;
+}
+
+#portalRoot #view-dashboard .dash-command-center__filters {
+  top: 82px;
+}
+
+#portalRoot #view-dashboard .dash-command-operation.is-active {
+  border-left-color: #2563eb;
+  background: linear-gradient(90deg, #eef5ff 0%, #ffffff 72%);
+}
+
+#portalRoot #view-dashboard .dash-command-operation__client i {
+  flex: 0 0 auto;
+  color: #8090a8;
+  font-size: 11px;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__result strong {
+  color: #1d4ed8;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress {
+  border: 1px solid #dfe5ef;
+  background: #eef2f7;
+  box-shadow: inset 0 1px 2px rgba(31, 45, 72, 0.08);
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress-fill {
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress:not(.is-unmeasured) .dash-command-operation__progress-value {
+  color: #17233a;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+#portalRoot #view-dashboard .dash-command-operation.is-indeterminate .dash-command-operation__result strong {
+  font-size: 10px;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress.is-indeterminate {
+  background: #e8edf5;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress.is-indeterminate .dash-command-operation__progress-fill {
+  width: 42% !important;
+  min-width: 96px;
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0), #60a5fa 24%, #2563eb 56%, rgba(37, 99, 235, 0));
+  animation: dash-command-operation-progress 1.55s ease-in-out infinite;
+  will-change: transform;
+}
+
+#portalRoot #view-dashboard .dash-command-operation__progress.is-indeterminate .dash-command-operation__progress-value {
+  inset: 0;
+  justify-content: center;
+  color: #344054;
+  font-size: 9px;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-activity-panel {
+  min-width: 0;
+  padding: 16px !important;
+  overflow: visible !important;
+  border: 1px solid #dfe5ef !important;
+  border-radius: 17px !important;
+  background: #ffffff !important;
+  box-shadow: 0 7px 22px rgba(29, 43, 74, 0.055) !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-panel > .card-title-row {
+  align-items: center;
+  margin-bottom: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #edf0f5;
+}
+
+#portalRoot #view-dashboard .dash-command-live__header h2,
+#portalRoot #view-dashboard .dash-activity-panel > .card-title-row .card-title {
+  font-family: Manrope, "Segoe UI", Arial, sans-serif !important;
+  color: #19243d !important;
+  font-size: 16px !important;
+  font-weight: 850 !important;
+  line-height: 1.2 !important;
+  letter-spacing: -0.02em !important;
+}
+
+#portalRoot #view-dashboard #dashActivityTitle {
+  color: #19243d !important;
+}
+
+#portalRoot #view-dashboard .dash-last-refresh {
+  display: inline-flex;
+  width: fit-content;
+  margin: 6px 0 2px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f3f6fa;
+  color: #6b778c;
+  font-size: 9px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+#portalRoot #view-dashboard .dash-activity-calendar {
+  margin-top: 8px !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-axis,
+#portalRoot #view-dashboard .dash-activity-timeline-row {
+  grid-template-columns: minmax(190px, 220px) minmax(360px, 1fr) minmax(112px, 132px) !important;
+  gap: 12px !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-axis {
+  align-items: end;
+  padding: 0 12px 8px !important;
+  color: #7b879b !important;
+  font-size: 9px !important;
+  font-weight: 850 !important;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-axis-status {
+  text-align: center;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline {
+  gap: 8px !important;
+  padding: 0 !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-row {
+  position: relative;
+  min-height: max(62px, var(--dash-row-height, 62px)) !important;
+  padding: 9px 12px;
+  border: 1px solid #e5eaf1;
+  border-radius: 13px;
+  background: #ffffff;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-row:hover,
+#portalRoot #view-dashboard .dash-activity-timeline-row:focus-within {
+  border-color: #cfd8e6;
+  box-shadow: 0 6px 18px rgba(30, 45, 72, 0.07);
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-row.is-danger {
+  border-color: #fecaca;
+  background: linear-gradient(90deg, #fff8f8 0%, #ffffff 34%);
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-person {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  overflow: visible !important;
+  white-space: normal !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-avatar {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  overflow: hidden;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #e8edff;
+  box-shadow: 0 3px 9px rgba(52, 70, 116, 0.16);
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-person-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-person-copy > :is(button, span) {
+  overflow: hidden;
+  color: #17233a;
+  font-size: 11.5px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-person-copy small {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  color: #667085;
+  font-size: 9px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-person-copy small i {
+  flex: 0 0 auto;
+  color: #8090a8;
+  font-size: 10px;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-track {
+  border-color: #e3e8ef !important;
+  border-radius: 9px !important;
+  background:
+    repeating-linear-gradient(90deg, transparent 0, transparent 23px, rgba(100, 116, 139, 0.09) 24px),
+    linear-gradient(180deg, #fbfcfe 0%, #f5f7fa 100%) !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-track::after {
+  background: #ef4444 !important;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.1) !important;
+}
+
+/* Green is reserved for completed work, blue for work in progress and indigo for plan. */
+#portalRoot #view-dashboard .dash-activity-timeline-bar {
+  overflow: visible !important;
+  background: #16a36a !important;
+  color: #ffffff !important;
+  box-shadow: 0 5px 12px rgba(22, 163, 106, 0.2) !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-bar.is-running {
+  background: #2563eb !important;
+  color: #ffffff !important;
+  box-shadow: 0 5px 12px rgba(37, 99, 235, 0.2) !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-bar.is-planned {
+  border-color: #7c8cdb !important;
+  background: #dbe4ff !important;
+  color: #293b80 !important;
+  box-shadow: 0 4px 10px rgba(79, 70, 229, 0.16) !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-bar.is-planned.is-plan-conflict,
+#portalRoot #view-dashboard .dash-activity-timeline-bar.is-planned.is-missing-start {
+  animation: none !important;
+  border: 1px solid #dc2626 !important;
+  background: #dc2626 !important;
+  color: #ffffff !important;
+  outline: 0 !important;
+  box-shadow: 0 5px 14px rgba(220, 38, 38, 0.24) !important;
+  transform: none !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-meta {
+  position: relative;
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+  justify-self: stretch;
+  min-height: 32px;
+  padding: 6px 10px;
+  overflow: visible !important;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b !important;
+  font-size: 10.5px !important;
+  font-weight: 850 !important;
+  text-align: center !important;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-meta i {
+  flex: 0 0 auto;
+  font-size: 13px;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-meta.is-active {
+  background: #e8f0ff;
+  color: #1d4ed8 !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-meta.is-finished {
+  background: #e8f8f0;
+  color: #08734a !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-meta.is-danger {
+  background: #fff0f0;
+  color: #b91c1c !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-timeline-meta.is-planned {
+  background: #f1f5f9;
+  color: #64748b !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-delta-marker {
+  top: calc(4px + var(--dash-lane-count, 2) * 22px) !important;
+  bottom: auto !important;
+  gap: 4px;
+  justify-content: flex-start !important;
+  max-width: 168px !important;
+  min-height: 20px !important;
+  padding: 2px 8px !important;
+  overflow: hidden !important;
+  border-color: #fca5a5 !important;
+  border-radius: 6px !important;
+  background: #ffe4e6 !important;
+  box-shadow: 0 4px 10px rgba(190, 24, 93, 0.14) !important;
+  color: #b91c1c !important;
+  font-size: 10px !important;
+  line-height: 1 !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-delta-marker i {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+#portalRoot #view-dashboard .dash-activity-delta-marker--phase-start,
+#portalRoot #view-dashboard .dash-activity-delta-marker--phase-end {
+  justify-content: flex-start !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-delta-marker--early {
+  border-color: #93c5fd !important;
+  background: #dbeafe !important;
+  color: #1d4ed8 !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-delta-marker--end-early {
+  border-color: #fbbf24 !important;
+  background: #fef3c7 !important;
+  color: #92400e !important;
+}
+
+#portalRoot #view-dashboard .dash-activity-delta-marker--end-late {
+  border-color: #fca5a5 !important;
+  background: #ffe4e6 !important;
+  color: #b91c1c !important;
+}
+
+#portalRoot #view-dashboard [data-dash-tooltip] {
+  position: relative;
+}
+
+#portalRoot #view-dashboard [data-dash-tooltip]::after {
+  position: absolute;
+  right: auto;
+  bottom: calc(100% + 9px);
+  left: 50%;
+  z-index: 80;
+  width: max-content;
+  max-width: min(320px, 70vw);
+  padding: 8px 10px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #172033;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.22);
+  color: #ffffff;
+  content: attr(data-dash-tooltip);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  white-space: normal;
+  transform: translate(-50%, 4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+#portalRoot #view-dashboard [data-dash-tooltip]:is(:hover, :focus-visible)::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@media (max-width: 1220px) {
+  #portalRoot #view-dashboard .dash-activity-timeline-axis,
+  #portalRoot #view-dashboard .dash-activity-timeline-row {
+    grid-template-columns: minmax(170px, 205px) minmax(320px, 1fr) minmax(104px, 122px) !important;
+    gap: 9px !important;
+  }
+}
+
+@media (max-width: 900px) {
+  #portalRoot #view-dashboard .dash-command-center__header {
+    flex-wrap: wrap;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__actions {
+    width: 100%;
+    margin-left: 0;
+    padding-top: 10px;
+    padding-left: 0;
+    border-top: 1px solid #edf0f5;
+    border-left: 0;
+  }
+
+  #portalRoot #view-dashboard .dash-activity-calendar {
+    overflow-x: auto !important;
+    padding-bottom: 6px;
+  }
+
+  #portalRoot #view-dashboard .dash-activity-timeline-axis,
+  #portalRoot #view-dashboard .dash-activity-timeline {
+    min-width: 780px;
+  }
+}
+
+@media (max-width: 760px) {
+  #portalRoot #view-dashboard .dash-command-center__header {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__heading {
+    display: grid;
+    gap: 7px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__heading p {
+    width: fit-content;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) 40px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-center__notification {
+    width: 40px;
+  }
+
+  #portalRoot #view-dashboard .dash-command-operation__button {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 }

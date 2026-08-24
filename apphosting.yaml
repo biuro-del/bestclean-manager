@@ -70,6 +70,10 @@ env:
     value: NONE
     availability:
       - RUNTIME
+  - variable: TENANT_EMAIL_VERIFICATION_REQUIRED_FROM
+    value: "2026-08-01T00:00:00.000Z"
+    availability:
+      - RUNTIME
   - variable: GUS_BIR1_API_KEY
     secret: CLEANZI_GUS_BIR1_API_KEY
     availability:

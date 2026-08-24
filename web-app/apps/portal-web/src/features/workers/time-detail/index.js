@@ -3,7 +3,15 @@ import {
   OWN_WORKDAY_EDIT_DENIED_MESSAGE,
   isOwnWorkdayEditBlocked,
 } from '../workdayEditAccess.js'
-import { workIntervalsFromRow } from '../workIntervals.js'
+import {
+  aggregateWorkTimeDay,
+  formatWorkDurationHms,
+  incompleteWorkTimeRows,
+  workIntervalsTotalSeconds,
+  workSessionConfirmedTotalSeconds,
+  workSessionProvisionalTotalSeconds,
+  warsawBusinessDateKey,
+} from '../workIntervals.js'
 import { assertCompletePagedResponse } from '../../../services/workdayReadCostPolicy'
 
 export const route = 'workerTimeDetail'
@@ -15,8 +23,6 @@ export function createWorkerTimeDetailFeature(ctx) {
     appState,
     canManageWorkers,
     createBindingHelpers,
-    createWorkday,
-    durationSecondsToHm,
     ensureJsPdfLoaded,
     ensurePdfUnicodeFont,
     escapeHtml,
@@ -24,11 +30,9 @@ export function createWorkerTimeDetailFeature(ctx) {
     getWorkerTime,
     pad2,
     paginate,
-    refreshWorkerAccountTimeAfterWorkdaySave,
     setPdfUnicodeFont,
     todayYmd,
     toIso,
-    updateWorkday,
     ymdToIsoRangeEnd,
     ymdToIsoRangeStart,
   } = ctx
@@ -73,7 +77,7 @@ export function createWorkerTimeDetailFeature(ctx) {
 
   function workerDetailDateKeyFromIso(value) {
     const iso = toIso(value)
-    return iso ? iso.slice(0, 10) : ''
+    return iso ? warsawBusinessDateKey(iso) : ''
   }
 
   function workerDetailDateKeyToLabel(dayKey) {
@@ -99,25 +103,6 @@ export function createWorkerTimeDetailFeature(ctx) {
     const iso = toIso(isoValue)
     if (!iso) {
       return '-'
-    }
-
-    const date = new Date(iso)
-    return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
-  }
-
-  function workerDetailIsoToDateInput(isoValue) {
-    const iso = toIso(isoValue)
-    if (!iso) {
-      return ''
-    }
-
-    return iso.slice(0, 10)
-  }
-
-  function workerDetailIsoToTimeInput(isoValue) {
-    const iso = toIso(isoValue)
-    if (!iso) {
-      return ''
     }
 
     const date = new Date(iso)
@@ -220,49 +205,6 @@ export function createWorkerTimeDetailFeature(ctx) {
     return Boolean(left && right && left.startTs < right.endTs && right.startTs < left.endTs)
   }
 
-  function workStatusIntervalsMerge(intervals = []) {
-    const sorted = intervals
-      .filter(Boolean)
-      .map((interval) => ({
-        startTs: Number(interval.startTs ?? 0),
-        endTs: Number(interval.endTs ?? 0),
-      }))
-      .filter((interval) => Number.isFinite(interval.startTs) && Number.isFinite(interval.endTs) && interval.endTs > interval.startTs)
-      .sort((left, right) => left.startTs - right.startTs || left.endTs - right.endTs)
-
-    const merged = []
-    sorted.forEach((interval) => {
-      const last = merged[merged.length - 1]
-      if (!last || interval.startTs > last.endTs) {
-        merged.push({ ...interval })
-        return
-      }
-
-      last.endTs = Math.max(last.endTs, interval.endTs)
-    })
-
-    return merged
-  }
-
-  function workStatusIntervalsTotalSeconds(intervals = []) {
-    const totalMs = workStatusIntervalsMerge(intervals).reduce(
-      (sum, interval) => sum + Math.max(0, interval.endTs - interval.startTs),
-      0,
-    )
-    return Math.floor(totalMs / 1000)
-  }
-
-  function workStatusRowsTotalSeconds(rows = []) {
-    const intervals = rows.flatMap((row) => {
-      if (Array.isArray(row?.workIntervals) && row.workIntervals.length) {
-        return workIntervalsFromRow(row)
-      }
-      const interval = workStatusIntervalFromRow(row)
-      return interval ? [interval] : []
-    })
-    return workStatusIntervalsTotalSeconds(intervals)
-  }
-
     function workerDetailAlertLevelFromWorkSec(workSec) {
     const seconds = Number(workSec ?? 0)
     if (!Number.isFinite(seconds) || seconds <= 0) {
@@ -292,10 +234,6 @@ export function createWorkerTimeDetailFeature(ctx) {
   function workerDetailSetAck(dayKey, ack = true) {
     const key = workerDetailAckKey(dayKey)
     appState.workerDetailAckMap[key] = Boolean(ack)
-  }
-
-  function workerDetailCurrentUserName() {
-    return String(appState.session?.name ?? appState.session?.login ?? '').trim()
   }
 
   function workerDetailFindSelectedWorker() {
@@ -357,18 +295,24 @@ export function createWorkerTimeDetailFeature(ctx) {
     const from = String(document.getElementById('wtdFrom')?.value ?? '').trim()
     const to = String(document.getElementById('wtdTo')?.value ?? '').trim()
 
-    const totalWorkSec = items.reduce((sum, row) => sum + Math.max(0, Number(row.workSec ?? 0) || 0), 0)
-    const totalBreakSec = items.reduce((sum, row) => sum + Math.max(0, Number(row.breakSec ?? 0) || 0), 0)
-    const totalNetSec = Math.max(0, totalWorkSec - totalBreakSec)
+    const totalConfirmedSec = workSessionConfirmedTotalSeconds(items)
+    const totalProvisionalSec = workSessionProvisionalTotalSeconds(items)
+    const totalBreakSec = items.reduce((sum, row) => {
+      if (String(row?.integrityState ?? '').trim().toUpperCase() !== 'COMPLETE') return sum
+      return sum + Math.max(0, Number(row.breakSec ?? 0) || 0)
+    }, 0)
+    const totalNetSec = Math.max(0, totalConfirmedSec - totalBreakSec)
 
     const pickedOption = monthPick?.selectedOptions?.[0]?.textContent?.trim()
     const fallbackMonth = from ? from.slice(0, 7) : '—'
 
     if (monthLabel) monthLabel.textContent = pickedOption || fallbackMonth
     if (monthRange) monthRange.textContent = from && to ? `${workerDetailDateKeyToLabel(from)} - ${workerDetailDateKeyToLabel(to)}` : '—'
-    if (monthWork) monthWork.textContent = durationSecondsToHm(totalWorkSec)
-    if (monthBreak) monthBreak.textContent = durationSecondsToHm(totalBreakSec)
-    if (monthNet) monthNet.textContent = durationSecondsToHm(totalNetSec)
+    if (monthWork) monthWork.textContent = formatWorkDurationHms(totalConfirmedSec)
+    const monthProvisional = document.getElementById('wtdMonthProvisional')
+    if (monthProvisional) monthProvisional.textContent = formatWorkDurationHms(totalProvisionalSec)
+    if (monthBreak) monthBreak.textContent = formatWorkDurationHms(totalBreakSec)
+    if (monthNet) monthNet.textContent = formatWorkDurationHms(totalNetSec)
   }
 
   function workerDetailAggregateRows(rows) {
@@ -376,7 +320,10 @@ export function createWorkerTimeDetailFeature(ctx) {
     const selectedWorker = workerDetailFindSelectedWorker()
 
     rows.forEach((row) => {
-      const dayKey = String(row.dayKey ?? '').trim() || workerDetailDateKeyFromIso(row.startAt || row.endAt)
+      const canonicalDayKey = String(row.businessDateYmd ?? row.business_date_ymd ?? row.dayKey ?? '').trim()
+      const dayKey = /^\d{4}-\d{2}-\d{2}$/.test(canonicalDayKey)
+        ? canonicalDayKey
+        : workerDetailDateKeyFromIso(row.startAt || row.endAt)
       if (!dayKey) {
         return
       }
@@ -398,12 +345,27 @@ export function createWorkerTimeDetailFeature(ctx) {
           updatedBy: String(row.editedBy ?? '').trim(),
           comment: String(row.comment ?? '').trim(),
           latestUpdatedAt: updatedAtIso || '',
+          integrityIssues: [],
+          integrityStates: [],
+          openSessions: [],
+          sessionSourceAvailable: false,
           sourceRows: [],
         })
       }
 
       const bucket = groups.get(dayKey)
       bucket.sourceRows.push(row)
+      if (row?.sessionSourceAvailable === true) bucket.sessionSourceAvailable = true
+      if (String(row?.integrityState ?? '').trim()) bucket.integrityStates.push(String(row.integrityState).trim().toUpperCase())
+      const rowIssues = Array.isArray(row?.integrityIssues)
+        ? row.integrityIssues
+        : Array.isArray(row?.issues)
+          ? row.issues
+          : Array.isArray(row?.problems)
+            ? row.problems
+            : []
+      bucket.integrityIssues.push(...rowIssues)
+      if (Array.isArray(row?.openSessions)) bucket.openSessions.push(...row.openSessions)
       if (bucket.sourceRows.length > 1) {
         bucket.breakSec += breakSec
       }
@@ -435,11 +397,12 @@ export function createWorkerTimeDetailFeature(ctx) {
 
     return [...groups.values()]
       .map((bucket) => {
-        const mergedWorkSec = workStatusRowsTotalSeconds(bucket.sourceRows)
-        const workSec = mergedWorkSec || workerDetailComputeRangeSeconds(bucket.startAt, bucket.endAt)
-        const breakSec = Math.min(workSec, Math.max(0, Math.floor(Number(bucket.breakSec ?? 0))))
-        const netSec = Math.max(0, workSec - breakSec)
-        const alertLevel = workerDetailAlertLevelFromWorkSec(workSec)
+        const dayAccounting = aggregateWorkTimeDay(bucket.sourceRows)
+        const sessionSec = dayAccounting.workedSec
+        const realWorkSec = sessionSec
+        const breakSec = Math.max(0, Math.floor(Number(bucket.breakSec ?? dayAccounting.pauseSec ?? 0)))
+        const netSec = realWorkSec
+        const alertLevel = workerDetailAlertLevelFromWorkSec(realWorkSec)
         const alertAck = workerDetailIsAcked(bucket.dayKey)
 
         return {
@@ -447,11 +410,24 @@ export function createWorkerTimeDetailFeature(ctx) {
           workdayId: bucket.workdayId,
           workerName: bucket.workerName || appState.selectedWorkerName || appState.selectedWorkerLogin || '-',
           workerType: bucket.workerType || String(selectedWorker?.type ?? '').trim(),
-          startAt: bucket.startAt,
-          endAt: bucket.endAt,
-          workSec,
+          startAt: dayAccounting.firstStartAt || bucket.startAt,
+          endAt: dayAccounting.lastStopAt,
+          lastClosedStopAt: dayAccounting.lastClosedStopAt,
+          workSec: sessionSec,
+          realWorkSec,
           breakSec,
           netSec,
+          closedSessionsSec: sessionSec,
+          confirmedSec: realWorkSec,
+          provisionalSec: 0,
+          integrityState: dayAccounting.integrityState,
+          integrityIssues: dayAccounting.integrityIssues,
+          issues: dayAccounting.integrityIssues,
+          openSessionCount: dayAccounting.openSessionCount,
+          openSessions: dayAccounting.openSessions,
+          sessions: dayAccounting.sessions,
+          activities: dayAccounting.activities,
+          sessionSourceAvailable: bucket.sessionSourceAvailable,
           updatedBy: bucket.updatedBy || '-',
           comment: bucket.comment || '',
           alertLevel,
@@ -704,6 +680,15 @@ export function createWorkerTimeDetailFeature(ctx) {
       .map((row) => {
         const rowKey = workerDetailSelectionKey(row)
         const isSelected = workerDetailIsSelectedKey(rowKey)
+        const integrityState = String(row?.integrityState ?? 'INVALID').trim().toUpperCase()
+        const hasOpenSession = Array.isArray(row?.openSessions) && row.openSessions.length > 0
+        const integrityLabel = integrityState === 'OPEN_SESSION' || (integrityState === 'INCONSISTENT' && hasOpenSession)
+          ? 'brak STOP'
+          : integrityState === 'INCONSISTENT'
+            ? ''
+            : integrityState === 'INVALID'
+              ? 'błędne sesje'
+              : 'zatwierdzony'
         const alertClass = !row.alertAck && row.alertLevel === 2 ? ' wt-alert-level-2' : !row.alertAck && row.alertLevel === 1 ? ' wt-alert-level-1' : ''
         const actionCell = canEdit
           ? `<button class="btn2 wtd-edit-btn" type="button" data-worker-detail-edit="${escapeHtml(row.dayKey)}">Edytuj</button>`
@@ -716,10 +701,10 @@ export function createWorkerTimeDetailFeature(ctx) {
             <div>${escapeHtml(row.workerName || appState.selectedWorkerName || appState.selectedWorkerLogin || '-')}</div>
             <div>${escapeHtml(row.workerType || '-')}</div>
             <div class="mono time-start">${escapeHtml(workerDetailIsoToHm(row.startAt))}</div>
-            <div class="mono time-stop">${escapeHtml(workerDetailIsoToHm(row.endAt))}</div>
-            <div class="mono work-brutto time-duration">${escapeHtml(durationSecondsToHm(row.workSec))}</div>
-            <div class="mono work-bold time-duration">${escapeHtml(durationSecondsToHm(row.netSec))}</div>
-            <div class="mono time-break">${escapeHtml(durationSecondsToHm(row.breakSec))}</div>
+            <div class="mono time-stop">${escapeHtml(hasOpenSession ? 'Brak STOP' : workerDetailIsoToHm(row.endAt))}</div>
+            <div class="wtd-work-integrity"><span class="mono work-brutto time-duration">${escapeHtml(formatWorkDurationHms(row.workSec))}</span>${integrityLabel ? `<small data-state="${escapeHtml(integrityState)}">${escapeHtml(integrityLabel)}</small>` : ''}</div>
+            <div class="mono work-bold time-duration">${escapeHtml(formatWorkDurationHms(row.netSec))}</div>
+            <div class="mono time-break">${escapeHtml(formatWorkDurationHms(row.breakSec))}</div>
             <div>${escapeHtml(row.updatedBy || '-')}</div>
             <div>${actionCell}</div>
           </div>
@@ -764,7 +749,8 @@ export function createWorkerTimeDetailFeature(ctx) {
       monthPick.appendChild(option)
     }
 
-    const fallback = `${year}-${pad2(new Date().getMonth() + 1)}`
+    const businessToday = todayYmd()
+    const fallback = businessToday.startsWith(`${year}-`) ? businessToday.slice(0, 7) : `${year}-01`
     monthPick.value = selectedValue && monthPick.querySelector(`option[value="${selectedValue}"]`) ? selectedValue : fallback
   }
 
@@ -776,10 +762,13 @@ export function createWorkerTimeDetailFeature(ctx) {
     if (to && !String(to.value ?? '').trim()) to.value = todayYmd()
 
     const toValue = String(to?.value ?? '').trim()
-    const year = /^\d{4}-\d{2}-\d{2}$/.test(toValue) ? Number(toValue.slice(0, 4)) : new Date().getFullYear()
+    const businessToday = todayYmd()
+    const year = /^\d{4}-\d{2}-\d{2}$/.test(toValue)
+      ? Number(toValue.slice(0, 4))
+      : Number(businessToday.slice(0, 4))
     const selectedMonth = /^\d{4}-\d{2}-\d{2}$/.test(toValue)
       ? toValue.slice(0, 7)
-      : `${new Date().getFullYear()}-${pad2(new Date().getMonth() + 1)}`
+      : businessToday.slice(0, 7)
     fillWorkerDetailMonthPickForYear(year, selectedMonth)
   }
 
@@ -794,32 +783,14 @@ export function createWorkerTimeDetailFeature(ctx) {
 
     const year = Number(value.slice(0, 4))
     const month = Number(value.slice(5, 7))
-    const now = new Date()
-    const isCurrentMonth = now.getFullYear() === year && now.getMonth() + 1 === month
-    const lastDay = isCurrentMonth ? now.getDate() : new Date(year, month, 0).getDate()
+    const businessToday = todayYmd()
+    const isCurrentMonth = businessToday.slice(0, 7) === value
+    const lastDay = isCurrentMonth
+      ? Number(businessToday.slice(8, 10))
+      : new Date(Date.UTC(year, month, 0)).getUTCDate()
 
     from.value = `${value}-01`
     to.value = `${value}-${pad2(lastDay)}`
-  }
-
-  function ensureWorkerDetailModalLogo() {
-    const logo = document.getElementById('wtdLogo')
-    if (!logo) {
-      return
-    }
-
-    if (String(logo.getAttribute('src') ?? '').trim()) {
-      return
-    }
-
-    const source = document.querySelector('.header .logo-block img')
-    const src = String(source?.getAttribute('src') ?? '').trim()
-    if (src) {
-      logo.setAttribute('src', src)
-      return
-    }
-
-    logo.style.display = 'none'
   }
 
   function openWorkerDetailDayEditor(item) {
@@ -829,38 +800,32 @@ export function createWorkerTimeDetailFeature(ctx) {
     }
     if (!guardWorkerDetailOwnTimeEdit()) return
 
-    ensureWorkerDetailModalLogo()
+    const dayItem = item ? { ...item } : null
+    const worker = workerDetailFindSelectedWorker()
+    const dayKey = String(dayItem?.dayKey ?? '').trim()
+    if (!dayItem || !worker || !dayKey) return
 
-    const dayItem = item ? { ...item, mode: 'edit' } : null
-    if (!dayItem) {
-      return
+    appState.workerAccountCurrent = worker
+    appState.workerAccountActiveTab = 'time'
+    appState.workerAccountTargetKey = String(
+      worker.login ?? worker.workerLogin ?? worker.id ?? worker.workerId ?? appState.selectedWorkerLogin ?? '',
+    ).trim()
+    appState.workerAccountPendingTimeEditor = {
+      dayKey,
+      workdayId: String(dayItem.workdayId ?? dayItem.sourceRows?.[0]?.workdayId ?? '').trim(),
+      source: 'worker-time-detail-reconciliation',
     }
 
-    appState.workerDetailDayEditorItem = dayItem
-
-    const dateInput = document.getElementById('wtdDayDateInput')
-    const startInput = document.getElementById('wtdDayStartTime')
-    const endInput = document.getElementById('wtdDayEndTime')
-    const commentInput = document.getElementById('wtdDayComment')
-    const title = document.getElementById('wtdDayTitle')
-    const ackButton = document.getElementById('wtdDayAckBtn')
-    const overlay = document.getElementById('wtdDayEditorOverlay')
-
-    if (title) title.textContent = 'Edycja dnia pracy'
-    if (dateInput) dateInput.value = dayItem.dayKey || workerDetailIsoToDateInput(dayItem.startAt || dayItem.endAt)
-    if (startInput) startInput.value = workerDetailIsoToTimeInput(dayItem.startAt)
-    if (endInput) endInput.value = workerDetailIsoToTimeInput(dayItem.endAt)
-    if (commentInput) commentInput.value = String(dayItem.comment ?? '')
-
-    if (ackButton) {
-      const showAck = Number(dayItem.alertLevel ?? 0) > 0 && !dayItem.alertAck
-      ackButton.style.display = showAck ? '' : 'none'
-      ackButton.disabled = false
-      ackButton.textContent = 'Zatwierdź przekroczenie normy'
+    if (typeof window !== 'undefined' && typeof window.go === 'function') {
+      window.go('workerAccount')
+      window.dispatchEvent(new CustomEvent('worker-account-select', {
+        detail: {
+          worker,
+          tab: 'time',
+          timeEditorIntent: appState.workerAccountPendingTimeEditor,
+        },
+      }))
     }
-
-    updateWorkerDetailDayPreview()
-    if (overlay) overlay.style.display = 'flex'
   }
 
   function openWorkerDetailDayEditorNew() {
@@ -870,27 +835,7 @@ export function createWorkerTimeDetailFeature(ctx) {
     }
     if (!guardWorkerDetailOwnTimeEdit()) return
 
-    ensureWorkerDetailModalLogo()
-
-    const dateInput = document.getElementById('wtdDayDateInput')
-    const startInput = document.getElementById('wtdDayStartTime')
-    const endInput = document.getElementById('wtdDayEndTime')
-    const commentInput = document.getElementById('wtdDayComment')
-    const title = document.getElementById('wtdDayTitle')
-    const ackButton = document.getElementById('wtdDayAckBtn')
-    const overlay = document.getElementById('wtdDayEditorOverlay')
-
-    appState.workerDetailDayEditorItem = { mode: 'add' }
-
-    if (title) title.textContent = 'Dodaj dzień pracy'
-    if (dateInput) dateInput.value = String(document.getElementById('wtdTo')?.value ?? '').trim() || todayYmd()
-    if (startInput) startInput.value = ''
-    if (endInput) endInput.value = ''
-    if (commentInput) commentInput.value = ''
-    if (ackButton) ackButton.style.display = 'none'
-
-    updateWorkerDetailDayPreview()
-    if (overlay) overlay.style.display = 'flex'
+    alert('Ręczne tworzenie zamkniętego dnia bez sesji START/STOP jest wyłączone. Zarejestruj sesję, a następnie użyj „Przegląd i naprawa dnia”.')
   }
 
   function closeWorkerDetailDayEditor() {
@@ -916,7 +861,7 @@ export function createWorkerTimeDetailFeature(ctx) {
     const endAt = workerDetailLocalDateAndTimeToIso(dateValue, endValue)
     const seconds = workerDetailComputeRangeSeconds(startAt, endAt)
 
-    workInput.value = durationSecondsToHm(seconds)
+    workInput.value = formatWorkDurationHms(seconds)
   }
 
   async function saveWorkerDetailDayEditor() {
@@ -929,7 +874,6 @@ export function createWorkerTimeDetailFeature(ctx) {
     const dateValue = String(document.getElementById('wtdDayDateInput')?.value ?? '').trim()
     const startValue = String(document.getElementById('wtdDayStartTime')?.value ?? '').trim()
     const endValue = String(document.getElementById('wtdDayEndTime')?.value ?? '').trim()
-    const comment = String(document.getElementById('wtdDayComment')?.value ?? '').trim()
 
     if (!dateValue || !startValue || !endValue) {
       alert('Uzupełnij datę, start i koniec.')
@@ -961,68 +905,18 @@ export function createWorkerTimeDetailFeature(ctx) {
     }
 
     try {
-      const editorName = workerDetailCurrentUserName()
-
       if (mode === 'add') {
         const dayAlreadyExists = appState.workerDetailRows.some((row) => row.dayKey === dateValue)
         if (dayAlreadyExists) {
           throw new Error(`Dzień ${dateValue} już istnieje. Użyj edycji.`)
         }
 
-        await createWorkday(appState.session.orgId, {
-          workerLogin: appState.selectedWorkerLogin,
-          workerName: appState.selectedWorkerName || appState.selectedWorkerLogin,
-          startAt,
-          endAt,
-          durationSec,
-          status: 'CLOSED',
-          comment,
-          updatedBy: editorName,
-        })
+        throw new Error('Ręczne tworzenie zamkniętego dnia bez sesji START/STOP jest wyłączone.')
       } else {
-        const dayKey = String(appState.workerDetailDayEditorItem?.dayKey ?? '').trim()
-        const sourceRows =
-          appState.workerDetailDayEditorItem?.sourceRows?.length > 0
-            ? appState.workerDetailDayEditorItem.sourceRows
-            : appState.workerDetailSourceRows.filter((row) => {
-                const rowDayKey = String(row.dayKey ?? '').trim() || workerDetailDateKeyFromIso(row.startAt || row.endAt)
-                return rowDayKey === dayKey
-              })
-
-        if (!sourceRows.length) {
-          throw new Error('Nie znaleziono rekordów do aktualizacji dnia.')
-        }
-
-        let updatedCount = 0
-        for (const source of sourceRows) {
-          const workdayId = String(source.workdayId ?? source.id ?? '').trim()
-          if (!workdayId) {
-            continue
-          }
-
-          await updateWorkday(appState.session.orgId, workdayId, {
-            workerLogin: appState.selectedWorkerLogin,
-            workerName: appState.selectedWorkerName || appState.selectedWorkerLogin,
-            utilityRoomId: source.utilityRoomId || source.roomId || null,
-            startAt,
-            endAt,
-            durationSec,
-            status: 'CLOSED',
-            comment,
-            updatedBy: editorName,
-          })
-          updatedCount += 1
-        }
-
-        if (!updatedCount) {
-          throw new Error('Nie znaleziono poprawnego WorkdayID do aktualizacji.')
-        }
-      }
-
-      closeWorkerDetailDayEditor()
-      await fetchWorkerDetailForCurrentSession({ forceRefresh: true })
-      if (typeof refreshWorkerAccountTimeAfterWorkdaySave === 'function') {
-        await refreshWorkerAccountTimeAfterWorkdaySave(appState.selectedWorkerLogin)
+        const reconciliationItem = appState.workerDetailDayEditorItem
+        closeWorkerDetailDayEditor()
+        openWorkerDetailDayEditor(reconciliationItem)
+        return
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Błąd zapisu dnia pracy.'
@@ -1097,19 +991,19 @@ export function createWorkerTimeDetailFeature(ctx) {
       id: 'work',
       label: 'Czas pracy',
       weight: 1.1,
-      getValue: (row) => durationSecondsToHm(row.workSec),
+      getValue: (row) => formatWorkDurationHms(row.workSec),
     },
     {
       id: 'net',
       label: 'Realny czas pracy',
       weight: 1.2,
-      getValue: (row) => durationSecondsToHm(row.netSec),
+      getValue: (row) => formatWorkDurationHms(row.netSec),
     },
     {
       id: 'break',
       label: 'Przerwa',
       weight: 1.0,
-      getValue: (row) => durationSecondsToHm(row.breakSec),
+      getValue: (row) => formatWorkDurationHms(row.breakSec),
     },
     {
       id: 'editedBy',
@@ -1197,6 +1091,15 @@ export function createWorkerTimeDetailFeature(ctx) {
     return lines.join('\n')
   }
 
+  function workerDetailWarnAboutIncompleteRows(rows) {
+    const incompleteRows = incompleteWorkTimeRows(rows)
+    if (!incompleteRows.length) return
+    alert(
+      `Uwaga: ${incompleteRows.length} ${incompleteRows.length === 1 ? 'wpis ma' : 'wpisow ma'} niepelne dane. ` +
+      'Eksport zostanie pobrany. Otwarte sesje bez STOP nie sa doliczane do czasu pracy.',
+    )
+  }
+
   function downloadWorkerDetailEwidencjaCsv(options) {
     if (!appState.workerDetailRows.length) {
       alert('Brak danych do eksportu.')
@@ -1210,6 +1113,7 @@ export function createWorkerTimeDetailFeature(ctx) {
     }
 
     const rows = workerDetailExportRows()
+    workerDetailWarnAboutIncompleteRows(rows)
     const csv = workerDetailExportCsvContent(rows, exportOptions.columns)
     const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
@@ -1237,6 +1141,7 @@ export function createWorkerTimeDetailFeature(ctx) {
     }
 
     const rows = workerDetailExportRows()
+    workerDetailWarnAboutIncompleteRows(rows)
     const JsPdf = await ensureJsPdfLoaded()
     const pdf = new JsPdf({ orientation: exportOptions.orientation, unit: 'mm', format: 'a4' })
     await ensurePdfUnicodeFont(pdf)
@@ -1593,6 +1498,6 @@ export function createWorkerTimeDetailFeature(ctx) {
     workStatusIntervalFromTimes,
     workStatusIntervalFromRow,
     workStatusIntervalsOverlap,
-    workStatusIntervalsTotalSeconds,
+    workStatusIntervalsTotalSeconds: workIntervalsTotalSeconds,
   }
 }

@@ -8,6 +8,16 @@ function normalizeEmail(value) {
   return text(value).toLowerCase()
 }
 
+function normalizeFirebaseAccountCreatedAt(value) {
+  const raw = text(value)
+  if (!raw) return ''
+  const numericValue = Number(raw)
+  const date = Number.isFinite(numericValue) && numericValue > 0
+    ? new Date(numericValue)
+    : new Date(raw)
+  return Number.isFinite(date.getTime()) ? date.toISOString() : ''
+}
+
 function invalidIdToken() {
   const error = new Error('INVALID_ID_TOKEN')
   error.firebaseRestMessage = 'INVALID_ID_TOKEN'
@@ -60,10 +70,12 @@ function buildFirebaseRestDecodedToken({ token, lookupUser, projectId }) {
     email: lookupEmail || tokenEmail,
     email_verified: lookupUser?.emailVerified === true,
     name: text(lookupUser?.displayName) || text(payload.name),
+    account_created_at: normalizeFirebaseAccountCreatedAt(lookupUser?.createdAt),
   }
 }
 
 module.exports = {
   buildFirebaseRestDecodedToken,
   decodeJwtPayload,
+  normalizeFirebaseAccountCreatedAt,
 }

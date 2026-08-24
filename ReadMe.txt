@@ -328,8 +328,6 @@ Najważniejsze serwisy:
 - `scheduleService.js` - board grafiku.
 - `portalTaskService.js` - `/api/portal/tasks`.
 - `scheduleTaskDataConnectService.js` - taski grafiku przez Data Connect.
-- `backupService.js` - backup/restore/download/automatyzacja.
-- `styleService.js` - style UI organizacji i użytkowników.
 - `orgService.js` - organizacje.
 - `registrationOnboardingService.js` - portalowe wznowienie próby Registration API: bezpieczny bind Firebase, zgody, weryfikacja, lookup polskiego NIP, `complete-company`, idempotencja oraz walidacja Stripe Checkout.
 - `platformDataConnectService.js` - bezpośrednia komunikacja sesji PLATFORM_OWNER z backendowym gatewayem; bez fallbacku do klientowego Data Connect.
@@ -356,7 +354,6 @@ Wygenerowany SDK:
 Główne encje w schemacie:
 - `Organization`, `OrganizationMember`
 - `OrganizationSubscription`
-- `OrgUiStyle`, `UserUiStylePreference`
 - `Worker`, `WorkerIdReservation`
 - `Client`, `ClientInd`, `IndividualClientJob`
 - `Zone`
@@ -5046,3 +5043,60 @@ Granice:
 - Nie wykonano pusha ani wdrozenia. Zapis wymaga osobnej dokladnej zgody
   `OK PRODUKCJA CLZ-DB-20260811-TASK-LIFECYCLE-01`.
 - Rownolegle zmiany kalendarza w tym worktree pozostaly nietkniete.
+
+Data: 2026-08-03 CEST
+Autor: AI Codex
+Temat: Dostęp starych kont bez historycznej weryfikacji email
+Zakres:
+- Dodano kontrolowany wyjątek dla tenantowych kont utworzonych przed `2026-08-01T00:00:00.000Z`.
+- Backend preferuje datę utworzenia konta Firebase; datę członkostwa i pracownika wykorzystuje tylko jako fallback zgodności.
+- Wyjątek wymaga istniejącego członkostwa powiązanego po Firebase UID. Nowe konta, konta bez członkostwa i konta bez wiarygodnej daty nadal wymagają `email_verified=true`.
+- Wymóg administratorów platformy pozostał bez zmian.
+- Datę graniczną można ustawić przez `TENANT_EMAIL_VERIFICATION_REQUIRED_FROM`.
+Weryfikacja:
+- Testy polityki i kontraktów logowania - 26/26 OK.
+- Pełne `npm test` - 430/430 OK.
+- `npm run build` - OK; pozostały zastane ostrzeżenia Vite o dużych chunkach i Node DEP0190.
+- `node --check` i `git diff --check` - OK.
+Granice:
+- Zmiana jest lokalna; nie wykonano wdrożenia ani migracji.
+
+Data: 2026-08-03 CEST
+Autor: AI Codex
+Temat: Integracja branchy centralnej rejestracji, portalu i W005
+Zakres:
+- Do `Rejestracja-31-07-2026` włączono bezpośrednio branche `codex/central-registration-gate-2026-08-01`, `codex/portal-integration-20260730` oraz `codex/w005-stale-workday-backend-20260801`.
+- Branch `codex/pilot-sabina-w005-backend-20260731` nie był scalany drugi raz, ponieważ jest w całości zawarty w branchu W005.
+- Nie scalono ani nie rebazowano `main`; zachowano lokalną poprawkę logowania starych kont bez historycznej weryfikacji email.
+- Zainstalowano lokalną zależność Leaflet wymaganą przez mapę portalu oraz ograniczono główny `npm test` do `test/*.test.js`, aby izolowany test Firestore działał wyłącznie przez własny skrypt emulatorowy.
+Weryfikacja:
+- Główne testy repozytorium: 384/384 OK.
+- Centralna rejestracja: check składni oraz testy jednostkowe 8/8 OK.
+- `npm --prefix web-app run lint` - OK.
+- `npm run build` - OK; pozostały informacyjne ostrzeżenia o dużych chunkach i Node DEP0190.
+- `GET http://localhost:5174/` i `GET http://localhost:8080/healthz` - HTTP 200 po restarcie.
+Granice:
+- Nie uruchomiono testu Firestore wymagającego emulatora, migracji, wdrożenia ani pusha.
+
+Data: 2026-08-03 CEST
+Autor: AI Codex
+Temat: Naprawa rozliczania sesji i zamykania dnia pracy
+Zakres:
+- Oficjalny czas jest liczony wyłącznie jako unia poprawnych, zamkniętych sesji Event. Otwarta sesja nie jest domykana przez Date.now.
+- Dashboard, raporty, ewidencja, profil pracownika oraz eksporty PDF/CSV korzystają ze wspólnego kontraktu sekund i daty biznesowej Europe/Warsaw.
+- Czas zatwierdzony, czas roboczy niepełnych dni oraz licznik aktywnej sesji są prezentowane oddzielnie.
+- Dodano wspólny dialog „Przegląd i naprawa dnia”, transakcyjne API reconciliation, optimistic lock Workday i sesji, idempotencję oraz niezmienny audyt korekt.
+- Zamknięty Workday z otwartym Eventem nadal jest problemem. Nakładanie, duplikaty, błędne daty, sesje przyszłe i ponad 24 godziny blokują finalizację.
+- Stary edytor i publiczne mutacje Data Connect nie mogą omijać reconciliation dla powiązanych Event/Workday.
+- Przygotowano addytywną, idempotentną migrację oraz raport historyczny READ ONLY; żaden rekord historyczny nie jest poprawiany automatycznie.
+Regresje:
+- 23.07 przed korektą: 03:51 roboczo i jedna otwarta sesja; po STOP 21:36: 05:45 i możliwość finalizacji.
+- 31.07: tabela, dialog, PDF i CSV korzystają z tych samych sekund i formatu HH:MM:SS.
+Weryfikacja:
+- Pełne `npm test`: 482/482 OK.
+- `npm --prefix web-app run lint`: OK.
+- `npm run build`: OK; pozostały informacyjne ostrzeżenia Vite o dużych chunkach i Node DEP0190.
+- `node --check` dla backendu oraz `git diff --check`: OK.
+Granice:
+- Nie uruchomiono migracji, raportu na rzeczywistej bazie, generowania SDK Data Connect, wdrożenia, automatycznej korekty danych, commita ani pusha.
+- Migrację i każdą historyczną korektę musi osobno zatwierdzić administrator po backupie/PITR i audycie read-only.

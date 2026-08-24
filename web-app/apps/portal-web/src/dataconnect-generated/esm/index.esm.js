@@ -1,77 +1,10 @@
-import { queryRef, executeQuery, mutationRef, executeMutation, validateArgs } from 'firebase/data-connect';
+import { queryRef, executeQuery, validateArgsWithOptions, mutationRef, executeMutation, validateArgs } from 'firebase/data-connect';
 
 export const connectorConfig = {
   connector: 'example',
   service: 'iclean-room-service',
   location: 'europe-west3'
 };
-
-export const upsertOrgUiStyleForOrgRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return mutationRef(dcInstance, 'UpsertOrgUiStyleForOrg', inputVars);
-}
-upsertOrgUiStyleForOrgRef.operationName = 'UpsertOrgUiStyleForOrg';
-
-export function upsertOrgUiStyleForOrg(dcOrVars, vars) {
-  return executeMutation(upsertOrgUiStyleForOrgRef(dcOrVars, vars));
-}
-
-export const deleteOrgUiStyleForOrgRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return mutationRef(dcInstance, 'DeleteOrgUiStyleForOrg', inputVars);
-}
-deleteOrgUiStyleForOrgRef.operationName = 'DeleteOrgUiStyleForOrg';
-
-export function deleteOrgUiStyleForOrg(dcOrVars, vars) {
-  return executeMutation(deleteOrgUiStyleForOrgRef(dcOrVars, vars));
-}
-
-export const upsertMyUiStylePreferenceRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return mutationRef(dcInstance, 'UpsertMyUiStylePreference', inputVars);
-}
-upsertMyUiStylePreferenceRef.operationName = 'UpsertMyUiStylePreference';
-
-export function upsertMyUiStylePreference(dcOrVars, vars) {
-  return executeMutation(upsertMyUiStylePreferenceRef(dcOrVars, vars));
-}
-
-export const deleteMyUiStylePreferenceRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return mutationRef(dcInstance, 'DeleteMyUiStylePreference', inputVars);
-}
-deleteMyUiStylePreferenceRef.operationName = 'DeleteMyUiStylePreference';
-
-export function deleteMyUiStylePreference(dcOrVars, vars) {
-  return executeMutation(deleteMyUiStylePreferenceRef(dcOrVars, vars));
-}
-
-export const upsertUserUiStylePreferenceForOrgRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return mutationRef(dcInstance, 'UpsertUserUiStylePreferenceForOrg', inputVars);
-}
-upsertUserUiStylePreferenceForOrgRef.operationName = 'UpsertUserUiStylePreferenceForOrg';
-
-export function upsertUserUiStylePreferenceForOrg(dcOrVars, vars) {
-  return executeMutation(upsertUserUiStylePreferenceForOrgRef(dcOrVars, vars));
-}
-
-export const deleteUserUiStylePreferenceForOrgRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return mutationRef(dcInstance, 'DeleteUserUiStylePreferenceForOrg', inputVars);
-}
-deleteUserUiStylePreferenceForOrgRef.operationName = 'DeleteUserUiStylePreferenceForOrg';
-
-export function deleteUserUiStylePreferenceForOrg(dcOrVars, vars) {
-  return executeMutation(deleteUserUiStylePreferenceForOrgRef(dcOrVars, vars));
-}
-
 export const insertClientForOrgRef = (dcOrVars, vars) => {
   const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
   dcInstance._useGeneratedSdk();
@@ -80,7 +13,8 @@ export const insertClientForOrgRef = (dcOrVars, vars) => {
 insertClientForOrgRef.operationName = 'InsertClientForOrg';
 
 export function insertClientForOrg(dcOrVars, vars) {
-  return executeMutation(insertClientForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(insertClientForOrgRef(dcInstance, inputVars));
 }
 
 export const updateClientForOrgRef = (dcOrVars, vars) => {
@@ -91,7 +25,8 @@ export const updateClientForOrgRef = (dcOrVars, vars) => {
 updateClientForOrgRef.operationName = 'UpdateClientForOrg';
 
 export function updateClientForOrg(dcOrVars, vars) {
-  return executeMutation(updateClientForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(updateClientForOrgRef(dcInstance, inputVars));
 }
 
 export const deleteClientForOrgRef = (dcOrVars, vars) => {
@@ -102,7 +37,8 @@ export const deleteClientForOrgRef = (dcOrVars, vars) => {
 deleteClientForOrgRef.operationName = 'DeleteClientForOrg';
 
 export function deleteClientForOrg(dcOrVars, vars) {
-  return executeMutation(deleteClientForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(deleteClientForOrgRef(dcInstance, inputVars));
 }
 
 export const insertIndividualJobForOrgRef = (dcOrVars, vars) => {
@@ -113,7 +49,8 @@ export const insertIndividualJobForOrgRef = (dcOrVars, vars) => {
 insertIndividualJobForOrgRef.operationName = 'InsertIndividualJobForOrg';
 
 export function insertIndividualJobForOrg(dcOrVars, vars) {
-  return executeMutation(insertIndividualJobForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(insertIndividualJobForOrgRef(dcInstance, inputVars));
 }
 
 export const updateIndividualJobForOrgRef = (dcOrVars, vars) => {
@@ -124,7 +61,8 @@ export const updateIndividualJobForOrgRef = (dcOrVars, vars) => {
 updateIndividualJobForOrgRef.operationName = 'UpdateIndividualJobForOrg';
 
 export function updateIndividualJobForOrg(dcOrVars, vars) {
-  return executeMutation(updateIndividualJobForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(updateIndividualJobForOrgRef(dcInstance, inputVars));
 }
 
 export const deleteIndividualJobForOrgRef = (dcOrVars, vars) => {
@@ -135,7 +73,8 @@ export const deleteIndividualJobForOrgRef = (dcOrVars, vars) => {
 deleteIndividualJobForOrgRef.operationName = 'DeleteIndividualJobForOrg';
 
 export function deleteIndividualJobForOrg(dcOrVars, vars) {
-  return executeMutation(deleteIndividualJobForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(deleteIndividualJobForOrgRef(dcInstance, inputVars));
 }
 
 export const upsertTaskForOrgRef = (dcOrVars, vars) => {
@@ -146,7 +85,8 @@ export const upsertTaskForOrgRef = (dcOrVars, vars) => {
 upsertTaskForOrgRef.operationName = 'UpsertTaskForOrg';
 
 export function upsertTaskForOrg(dcOrVars, vars) {
-  return executeMutation(upsertTaskForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(upsertTaskForOrgRef(dcInstance, inputVars));
 }
 
 export const deleteTaskForOrgRef = (dcOrVars, vars) => {
@@ -157,7 +97,8 @@ export const deleteTaskForOrgRef = (dcOrVars, vars) => {
 deleteTaskForOrgRef.operationName = 'DeleteTaskForOrg';
 
 export function deleteTaskForOrg(dcOrVars, vars) {
-  return executeMutation(deleteTaskForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(deleteTaskForOrgRef(dcInstance, inputVars));
 }
 
 export const insertZoneForOrgRef = (dcOrVars, vars) => {
@@ -168,7 +109,8 @@ export const insertZoneForOrgRef = (dcOrVars, vars) => {
 insertZoneForOrgRef.operationName = 'InsertZoneForOrg';
 
 export function insertZoneForOrg(dcOrVars, vars) {
-  return executeMutation(insertZoneForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(insertZoneForOrgRef(dcInstance, inputVars));
 }
 
 export const updateZoneForOrgRef = (dcOrVars, vars) => {
@@ -179,7 +121,8 @@ export const updateZoneForOrgRef = (dcOrVars, vars) => {
 updateZoneForOrgRef.operationName = 'UpdateZoneForOrg';
 
 export function updateZoneForOrg(dcOrVars, vars) {
-  return executeMutation(updateZoneForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(updateZoneForOrgRef(dcInstance, inputVars));
 }
 
 export const deleteZoneForOrgRef = (dcOrVars, vars) => {
@@ -190,7 +133,8 @@ export const deleteZoneForOrgRef = (dcOrVars, vars) => {
 deleteZoneForOrgRef.operationName = 'DeleteZoneForOrg';
 
 export function deleteZoneForOrg(dcOrVars, vars) {
-  return executeMutation(deleteZoneForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(deleteZoneForOrgRef(dcInstance, inputVars));
 }
 
 export const insertWorkdayForOrgRef = (dcOrVars, vars) => {
@@ -201,7 +145,8 @@ export const insertWorkdayForOrgRef = (dcOrVars, vars) => {
 insertWorkdayForOrgRef.operationName = 'InsertWorkdayForOrg';
 
 export function insertWorkdayForOrg(dcOrVars, vars) {
-  return executeMutation(insertWorkdayForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(insertWorkdayForOrgRef(dcInstance, inputVars));
 }
 
 export const updateWorkdayForOrgRef = (dcOrVars, vars) => {
@@ -212,7 +157,8 @@ export const updateWorkdayForOrgRef = (dcOrVars, vars) => {
 updateWorkdayForOrgRef.operationName = 'UpdateWorkdayForOrg';
 
 export function updateWorkdayForOrg(dcOrVars, vars) {
-  return executeMutation(updateWorkdayForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(updateWorkdayForOrgRef(dcInstance, inputVars));
 }
 
 export const deleteWorkdayForOrgRef = (dcOrVars, vars) => {
@@ -223,7 +169,8 @@ export const deleteWorkdayForOrgRef = (dcOrVars, vars) => {
 deleteWorkdayForOrgRef.operationName = 'DeleteWorkdayForOrg';
 
 export function deleteWorkdayForOrg(dcOrVars, vars) {
-  return executeMutation(deleteWorkdayForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(deleteWorkdayForOrgRef(dcInstance, inputVars));
 }
 
 export const insertEventForOrgRef = (dcOrVars, vars) => {
@@ -234,7 +181,8 @@ export const insertEventForOrgRef = (dcOrVars, vars) => {
 insertEventForOrgRef.operationName = 'InsertEventForOrg';
 
 export function insertEventForOrg(dcOrVars, vars) {
-  return executeMutation(insertEventForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(insertEventForOrgRef(dcInstance, inputVars));
 }
 
 export const updateEventForOrgRef = (dcOrVars, vars) => {
@@ -245,7 +193,8 @@ export const updateEventForOrgRef = (dcOrVars, vars) => {
 updateEventForOrgRef.operationName = 'UpdateEventForOrg';
 
 export function updateEventForOrg(dcOrVars, vars) {
-  return executeMutation(updateEventForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(updateEventForOrgRef(dcInstance, inputVars));
 }
 
 export const reidentifyEventForOrgRef = (dcOrVars, vars) => {
@@ -256,7 +205,8 @@ export const reidentifyEventForOrgRef = (dcOrVars, vars) => {
 reidentifyEventForOrgRef.operationName = 'ReidentifyEventForOrg';
 
 export function reidentifyEventForOrg(dcOrVars, vars) {
-  return executeMutation(reidentifyEventForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(reidentifyEventForOrgRef(dcInstance, inputVars));
 }
 
 export const deleteEventForOrgRef = (dcOrVars, vars) => {
@@ -267,7 +217,8 @@ export const deleteEventForOrgRef = (dcOrVars, vars) => {
 deleteEventForOrgRef.operationName = 'DeleteEventForOrg';
 
 export function deleteEventForOrg(dcOrVars, vars) {
-  return executeMutation(deleteEventForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(deleteEventForOrgRef(dcInstance, inputVars));
 }
 
 export const insertBackupCycleForOrgRef = (dcOrVars, vars) => {
@@ -278,7 +229,8 @@ export const insertBackupCycleForOrgRef = (dcOrVars, vars) => {
 insertBackupCycleForOrgRef.operationName = 'InsertBackupCycleForOrg';
 
 export function insertBackupCycleForOrg(dcOrVars, vars) {
-  return executeMutation(insertBackupCycleForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(insertBackupCycleForOrgRef(dcInstance, inputVars));
 }
 
 export const updateBackupCycleForOrgRef = (dcOrVars, vars) => {
@@ -289,7 +241,8 @@ export const updateBackupCycleForOrgRef = (dcOrVars, vars) => {
 updateBackupCycleForOrgRef.operationName = 'UpdateBackupCycleForOrg';
 
 export function updateBackupCycleForOrg(dcOrVars, vars) {
-  return executeMutation(updateBackupCycleForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(updateBackupCycleForOrgRef(dcInstance, inputVars));
 }
 
 export const insertStorageForOrgRef = (dcOrVars, vars) => {
@@ -300,7 +253,8 @@ export const insertStorageForOrgRef = (dcOrVars, vars) => {
 insertStorageForOrgRef.operationName = 'InsertStorageForOrg';
 
 export function insertStorageForOrg(dcOrVars, vars) {
-  return executeMutation(insertStorageForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(insertStorageForOrgRef(dcInstance, inputVars));
 }
 
 export const updateStorageForOrgRef = (dcOrVars, vars) => {
@@ -311,7 +265,8 @@ export const updateStorageForOrgRef = (dcOrVars, vars) => {
 updateStorageForOrgRef.operationName = 'UpdateStorageForOrg';
 
 export function updateStorageForOrg(dcOrVars, vars) {
-  return executeMutation(updateStorageForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(updateStorageForOrgRef(dcInstance, inputVars));
 }
 
 export const deleteStorageForOrgRef = (dcOrVars, vars) => {
@@ -322,7 +277,8 @@ export const deleteStorageForOrgRef = (dcOrVars, vars) => {
 deleteStorageForOrgRef.operationName = 'DeleteStorageForOrg';
 
 export function deleteStorageForOrg(dcOrVars, vars) {
-  return executeMutation(deleteStorageForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(deleteStorageForOrgRef(dcInstance, inputVars));
 }
 
 export const insertClientStorageForOrgRef = (dcOrVars, vars) => {
@@ -333,7 +289,8 @@ export const insertClientStorageForOrgRef = (dcOrVars, vars) => {
 insertClientStorageForOrgRef.operationName = 'InsertClientStorageForOrg';
 
 export function insertClientStorageForOrg(dcOrVars, vars) {
-  return executeMutation(insertClientStorageForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(insertClientStorageForOrgRef(dcInstance, inputVars));
 }
 
 export const updateClientStorageForOrgRef = (dcOrVars, vars) => {
@@ -344,7 +301,8 @@ export const updateClientStorageForOrgRef = (dcOrVars, vars) => {
 updateClientStorageForOrgRef.operationName = 'UpdateClientStorageForOrg';
 
 export function updateClientStorageForOrg(dcOrVars, vars) {
-  return executeMutation(updateClientStorageForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(updateClientStorageForOrgRef(dcInstance, inputVars));
 }
 
 export const deleteClientStorageForOrgRef = (dcOrVars, vars) => {
@@ -355,7 +313,8 @@ export const deleteClientStorageForOrgRef = (dcOrVars, vars) => {
 deleteClientStorageForOrgRef.operationName = 'DeleteClientStorageForOrg';
 
 export function deleteClientStorageForOrg(dcOrVars, vars) {
-  return executeMutation(deleteClientStorageForOrgRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(deleteClientStorageForOrgRef(dcInstance, inputVars));
 }
 
 export const startWorkdayPauseRef = (dcOrVars, vars) => {
@@ -366,7 +325,8 @@ export const startWorkdayPauseRef = (dcOrVars, vars) => {
 startWorkdayPauseRef.operationName = 'StartWorkdayPause';
 
 export function startWorkdayPause(dcOrVars, vars) {
-  return executeMutation(startWorkdayPauseRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(startWorkdayPauseRef(dcInstance, inputVars));
 }
 
 export const stopWorkdayPauseRef = (dcOrVars, vars) => {
@@ -377,7 +337,8 @@ export const stopWorkdayPauseRef = (dcOrVars, vars) => {
 stopWorkdayPauseRef.operationName = 'StopWorkdayPause';
 
 export function stopWorkdayPause(dcOrVars, vars) {
-  return executeMutation(stopWorkdayPauseRef(dcOrVars, vars));
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dcOrVars, vars, true);
+  return executeMutation(stopWorkdayPauseRef(dcInstance, inputVars));
 }
 
 export const myOrganizationsRef = (dc) => {
@@ -387,41 +348,10 @@ export const myOrganizationsRef = (dc) => {
 }
 myOrganizationsRef.operationName = 'MyOrganizations';
 
-export function myOrganizations(dc) {
-  return executeQuery(myOrganizationsRef(dc));
-}
-
-export const orgUiStyleForOrgRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return queryRef(dcInstance, 'OrgUiStyleForOrg', inputVars);
-}
-orgUiStyleForOrgRef.operationName = 'OrgUiStyleForOrg';
-
-export function orgUiStyleForOrg(dcOrVars, vars) {
-  return executeQuery(orgUiStyleForOrgRef(dcOrVars, vars));
-}
-
-export const myUiStylePreferenceRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return queryRef(dcInstance, 'MyUiStylePreference', inputVars);
-}
-myUiStylePreferenceRef.operationName = 'MyUiStylePreference';
-
-export function myUiStylePreference(dcOrVars, vars) {
-  return executeQuery(myUiStylePreferenceRef(dcOrVars, vars));
-}
-
-export const userUiStylePreferencesForOrgRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return queryRef(dcInstance, 'UserUiStylePreferencesForOrg', inputVars);
-}
-userUiStylePreferencesForOrgRef.operationName = 'UserUiStylePreferencesForOrg';
-
-export function userUiStylePreferencesForOrg(dcOrVars, vars) {
-  return executeQuery(userUiStylePreferencesForOrgRef(dcOrVars, vars));
+export function myOrganizations(dcOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrOptions, options, undefined,false, false);
+  return executeQuery(myOrganizationsRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const canManageWorkersForOrgRef = (dcOrVars, vars) => {
@@ -431,8 +361,10 @@ export const canManageWorkersForOrgRef = (dcOrVars, vars) => {
 }
 canManageWorkersForOrgRef.operationName = 'CanManageWorkersForOrg';
 
-export function canManageWorkersForOrg(dcOrVars, vars) {
-  return executeQuery(canManageWorkersForOrgRef(dcOrVars, vars));
+export function canManageWorkersForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(canManageWorkersForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const workersForOrgRef = (dcOrVars, vars) => {
@@ -442,8 +374,10 @@ export const workersForOrgRef = (dcOrVars, vars) => {
 }
 workersForOrgRef.operationName = 'WorkersForOrg';
 
-export function workersForOrg(dcOrVars, vars) {
-  return executeQuery(workersForOrgRef(dcOrVars, vars));
+export function workersForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workersForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const clientsForOrgRef = (dcOrVars, vars) => {
@@ -453,8 +387,10 @@ export const clientsForOrgRef = (dcOrVars, vars) => {
 }
 clientsForOrgRef.operationName = 'ClientsForOrg';
 
-export function clientsForOrg(dcOrVars, vars) {
-  return executeQuery(clientsForOrgRef(dcOrVars, vars));
+export function clientsForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(clientsForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const individualJobsForOrgRef = (dcOrVars, vars) => {
@@ -464,8 +400,10 @@ export const individualJobsForOrgRef = (dcOrVars, vars) => {
 }
 individualJobsForOrgRef.operationName = 'IndividualJobsForOrg';
 
-export function individualJobsForOrg(dcOrVars, vars) {
-  return executeQuery(individualJobsForOrgRef(dcOrVars, vars));
+export function individualJobsForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(individualJobsForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const tasksForOrgRef = (dcOrVars, vars) => {
@@ -475,8 +413,10 @@ export const tasksForOrgRef = (dcOrVars, vars) => {
 }
 tasksForOrgRef.operationName = 'TasksForOrg';
 
-export function tasksForOrg(dcOrVars, vars) {
-  return executeQuery(tasksForOrgRef(dcOrVars, vars));
+export function tasksForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(tasksForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const zonesForOrgRef = (dcOrVars, vars) => {
@@ -486,8 +426,10 @@ export const zonesForOrgRef = (dcOrVars, vars) => {
 }
 zonesForOrgRef.operationName = 'ZonesForOrg';
 
-export function zonesForOrg(dcOrVars, vars) {
-  return executeQuery(zonesForOrgRef(dcOrVars, vars));
+export function zonesForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(zonesForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const workdaysForOrgRef = (dcOrVars, vars) => {
@@ -497,8 +439,10 @@ export const workdaysForOrgRef = (dcOrVars, vars) => {
 }
 workdaysForOrgRef.operationName = 'WorkdaysForOrg';
 
-export function workdaysForOrg(dcOrVars, vars) {
-  return executeQuery(workdaysForOrgRef(dcOrVars, vars));
+export function workdaysForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const workdaysPageForOrgRef = (dcOrVars, vars) => {
@@ -508,8 +452,23 @@ export const workdaysPageForOrgRef = (dcOrVars, vars) => {
 }
 workdaysPageForOrgRef.operationName = 'WorkdaysPageForOrg';
 
-export function workdaysPageForOrg(dcOrVars, vars) {
-  return executeQuery(workdaysPageForOrgRef(dcOrVars, vars));
+export function workdaysPageForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysPageForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
+}
+
+export const workdaysPageForOrgByBusinessDateRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'WorkdaysPageForOrgByBusinessDate', inputVars);
+}
+workdaysPageForOrgByBusinessDateRef.operationName = 'WorkdaysPageForOrgByBusinessDate';
+
+export function workdaysPageForOrgByBusinessDate(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysPageForOrgByBusinessDateRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const workdaysIntegrityPageForOrgRef = (dcOrVars, vars) => {
@@ -519,8 +478,10 @@ export const workdaysIntegrityPageForOrgRef = (dcOrVars, vars) => {
 }
 workdaysIntegrityPageForOrgRef.operationName = 'WorkdaysIntegrityPageForOrg';
 
-export function workdaysIntegrityPageForOrg(dcOrVars, vars) {
-  return executeQuery(workdaysIntegrityPageForOrgRef(dcOrVars, vars));
+export function workdaysIntegrityPageForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysIntegrityPageForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const workdaysPageForOrgByWorkerRef = (dcOrVars, vars) => {
@@ -530,8 +491,23 @@ export const workdaysPageForOrgByWorkerRef = (dcOrVars, vars) => {
 }
 workdaysPageForOrgByWorkerRef.operationName = 'WorkdaysPageForOrgByWorker';
 
-export function workdaysPageForOrgByWorker(dcOrVars, vars) {
-  return executeQuery(workdaysPageForOrgByWorkerRef(dcOrVars, vars));
+export function workdaysPageForOrgByWorker(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysPageForOrgByWorkerRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
+}
+
+export const workdaysPageForOrgByWorkerAndStatusRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'WorkdaysPageForOrgByWorkerAndStatus', inputVars);
+}
+workdaysPageForOrgByWorkerAndStatusRef.operationName = 'WorkdaysPageForOrgByWorkerAndStatus';
+
+export function workdaysPageForOrgByWorkerAndStatus(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysPageForOrgByWorkerAndStatusRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const workdaysPageForOrgByRoomRef = (dcOrVars, vars) => {
@@ -541,8 +517,10 @@ export const workdaysPageForOrgByRoomRef = (dcOrVars, vars) => {
 }
 workdaysPageForOrgByRoomRef.operationName = 'WorkdaysPageForOrgByRoom';
 
-export function workdaysPageForOrgByRoom(dcOrVars, vars) {
-  return executeQuery(workdaysPageForOrgByRoomRef(dcOrVars, vars));
+export function workdaysPageForOrgByRoom(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysPageForOrgByRoomRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const workdaysPageForOrgByStatusRef = (dcOrVars, vars) => {
@@ -552,8 +530,10 @@ export const workdaysPageForOrgByStatusRef = (dcOrVars, vars) => {
 }
 workdaysPageForOrgByStatusRef.operationName = 'WorkdaysPageForOrgByStatus';
 
-export function workdaysPageForOrgByStatus(dcOrVars, vars) {
-  return executeQuery(workdaysPageForOrgByStatusRef(dcOrVars, vars));
+export function workdaysPageForOrgByStatus(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysPageForOrgByStatusRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const workdaysFingerprintForOrgRef = (dcOrVars, vars) => {
@@ -563,8 +543,10 @@ export const workdaysFingerprintForOrgRef = (dcOrVars, vars) => {
 }
 workdaysFingerprintForOrgRef.operationName = 'WorkdaysFingerprintForOrg';
 
-export function workdaysFingerprintForOrg(dcOrVars, vars) {
-  return executeQuery(workdaysFingerprintForOrgRef(dcOrVars, vars));
+export function workdaysFingerprintForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdaysFingerprintForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const backupCyclesForOrgRef = (dcOrVars, vars) => {
@@ -574,8 +556,10 @@ export const backupCyclesForOrgRef = (dcOrVars, vars) => {
 }
 backupCyclesForOrgRef.operationName = 'BackupCyclesForOrg';
 
-export function backupCyclesForOrg(dcOrVars, vars) {
-  return executeQuery(backupCyclesForOrgRef(dcOrVars, vars));
+export function backupCyclesForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(backupCyclesForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const eventsForOrgRef = (dcOrVars, vars) => {
@@ -585,8 +569,10 @@ export const eventsForOrgRef = (dcOrVars, vars) => {
 }
 eventsForOrgRef.operationName = 'EventsForOrg';
 
-export function eventsForOrg(dcOrVars, vars) {
-  return executeQuery(eventsForOrgRef(dcOrVars, vars));
+export function eventsForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const eventsIntegrityPageForOrgRef = (dcOrVars, vars) => {
@@ -596,8 +582,10 @@ export const eventsIntegrityPageForOrgRef = (dcOrVars, vars) => {
 }
 eventsIntegrityPageForOrgRef.operationName = 'EventsIntegrityPageForOrg';
 
-export function eventsIntegrityPageForOrg(dcOrVars, vars) {
-  return executeQuery(eventsIntegrityPageForOrgRef(dcOrVars, vars));
+export function eventsIntegrityPageForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsIntegrityPageForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const eventsPageForOrgRef = (dcOrVars, vars) => {
@@ -607,8 +595,10 @@ export const eventsPageForOrgRef = (dcOrVars, vars) => {
 }
 eventsPageForOrgRef.operationName = 'EventsPageForOrg';
 
-export function eventsPageForOrg(dcOrVars, vars) {
-  return executeQuery(eventsPageForOrgRef(dcOrVars, vars));
+export function eventsPageForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsPageForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const eventsPageForOrgByWorkerRef = (dcOrVars, vars) => {
@@ -618,8 +608,10 @@ export const eventsPageForOrgByWorkerRef = (dcOrVars, vars) => {
 }
 eventsPageForOrgByWorkerRef.operationName = 'EventsPageForOrgByWorker';
 
-export function eventsPageForOrgByWorker(dcOrVars, vars) {
-  return executeQuery(eventsPageForOrgByWorkerRef(dcOrVars, vars));
+export function eventsPageForOrgByWorker(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsPageForOrgByWorkerRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const eventsPageForOrgByZoneRef = (dcOrVars, vars) => {
@@ -629,8 +621,10 @@ export const eventsPageForOrgByZoneRef = (dcOrVars, vars) => {
 }
 eventsPageForOrgByZoneRef.operationName = 'EventsPageForOrgByZone';
 
-export function eventsPageForOrgByZone(dcOrVars, vars) {
-  return executeQuery(eventsPageForOrgByZoneRef(dcOrVars, vars));
+export function eventsPageForOrgByZone(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsPageForOrgByZoneRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const eventsPageForOrgByStatusRef = (dcOrVars, vars) => {
@@ -640,8 +634,10 @@ export const eventsPageForOrgByStatusRef = (dcOrVars, vars) => {
 }
 eventsPageForOrgByStatusRef.operationName = 'EventsPageForOrgByStatus';
 
-export function eventsPageForOrgByStatus(dcOrVars, vars) {
-  return executeQuery(eventsPageForOrgByStatusRef(dcOrVars, vars));
+export function eventsPageForOrgByStatus(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsPageForOrgByStatusRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const eventsPageForOrgByTaskOccurrenceRef = (dcOrVars, vars) => {
@@ -651,8 +647,10 @@ export const eventsPageForOrgByTaskOccurrenceRef = (dcOrVars, vars) => {
 }
 eventsPageForOrgByTaskOccurrenceRef.operationName = 'EventsPageForOrgByTaskOccurrence';
 
-export function eventsPageForOrgByTaskOccurrence(dcOrVars, vars) {
-  return executeQuery(eventsPageForOrgByTaskOccurrenceRef(dcOrVars, vars));
+export function eventsPageForOrgByTaskOccurrence(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsPageForOrgByTaskOccurrenceRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const eventsPageForOrgByPlanMatchStatusRef = (dcOrVars, vars) => {
@@ -662,8 +660,10 @@ export const eventsPageForOrgByPlanMatchStatusRef = (dcOrVars, vars) => {
 }
 eventsPageForOrgByPlanMatchStatusRef.operationName = 'EventsPageForOrgByPlanMatchStatus';
 
-export function eventsPageForOrgByPlanMatchStatus(dcOrVars, vars) {
-  return executeQuery(eventsPageForOrgByPlanMatchStatusRef(dcOrVars, vars));
+export function eventsPageForOrgByPlanMatchStatus(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsPageForOrgByPlanMatchStatusRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const eventsFingerprintForOrgRef = (dcOrVars, vars) => {
@@ -673,8 +673,10 @@ export const eventsFingerprintForOrgRef = (dcOrVars, vars) => {
 }
 eventsFingerprintForOrgRef.operationName = 'EventsFingerprintForOrg';
 
-export function eventsFingerprintForOrg(dcOrVars, vars) {
-  return executeQuery(eventsFingerprintForOrgRef(dcOrVars, vars));
+export function eventsFingerprintForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(eventsFingerprintForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const workerWorkdaysForOrgRef = (dcOrVars, vars) => {
@@ -684,8 +686,10 @@ export const workerWorkdaysForOrgRef = (dcOrVars, vars) => {
 }
 workerWorkdaysForOrgRef.operationName = 'WorkerWorkdaysForOrg';
 
-export function workerWorkdaysForOrg(dcOrVars, vars) {
-  return executeQuery(workerWorkdaysForOrgRef(dcOrVars, vars));
+export function workerWorkdaysForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workerWorkdaysForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const storageForOrgRef = (dcOrVars, vars) => {
@@ -695,8 +699,10 @@ export const storageForOrgRef = (dcOrVars, vars) => {
 }
 storageForOrgRef.operationName = 'StorageForOrg';
 
-export function storageForOrg(dcOrVars, vars) {
-  return executeQuery(storageForOrgRef(dcOrVars, vars));
+export function storageForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(storageForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const clientStorageForClientRef = (dcOrVars, vars) => {
@@ -706,8 +712,10 @@ export const clientStorageForClientRef = (dcOrVars, vars) => {
 }
 clientStorageForClientRef.operationName = 'ClientStorageForClient';
 
-export function clientStorageForClient(dcOrVars, vars) {
-  return executeQuery(clientStorageForClientRef(dcOrVars, vars));
+export function clientStorageForClient(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(clientStorageForClientRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const clientStorageForOrgRef = (dcOrVars, vars) => {
@@ -717,8 +725,10 @@ export const clientStorageForOrgRef = (dcOrVars, vars) => {
 }
 clientStorageForOrgRef.operationName = 'ClientStorageForOrg';
 
-export function clientStorageForOrg(dcOrVars, vars) {
-  return executeQuery(clientStorageForOrgRef(dcOrVars, vars));
+export function clientStorageForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(clientStorageForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const workdayPausesForOrgRef = (dcOrVars, vars) => {
@@ -728,8 +738,10 @@ export const workdayPausesForOrgRef = (dcOrVars, vars) => {
 }
 workdayPausesForOrgRef.operationName = 'WorkdayPausesForOrg';
 
-export function workdayPausesForOrg(dcOrVars, vars) {
-  return executeQuery(workdayPausesForOrgRef(dcOrVars, vars));
+export function workdayPausesForOrg(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(workdayPausesForOrgRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 
 export const activeWorkdayPauseForWorkerRef = (dcOrVars, vars) => {
@@ -739,7 +751,9 @@ export const activeWorkdayPauseForWorkerRef = (dcOrVars, vars) => {
 }
 activeWorkdayPauseForWorkerRef.operationName = 'ActiveWorkdayPauseForWorker';
 
-export function activeWorkdayPauseForWorker(dcOrVars, vars) {
-  return executeQuery(activeWorkdayPauseForWorkerRef(dcOrVars, vars));
+export function activeWorkdayPauseForWorker(dcOrVars, varsOrOptions, options) {
+  
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(activeWorkdayPauseForWorkerRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 

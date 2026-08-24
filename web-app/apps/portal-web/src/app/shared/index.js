@@ -11,6 +11,106 @@ export function pad2(value) {
   return String(value).padStart(2, '0')
 }
 
+export const BUSINESS_TIME_ZONE = 'Europe/Warsaw'
+
+const BUSINESS_DATE_YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+function validYmdParts(value) {
+  const match = String(value ?? '').trim().match(BUSINESS_DATE_YMD_RE)
+  if (!match) return null
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const date = new Date(Date.UTC(year, month - 1, day))
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) return null
+  return { day, month, year }
+}
+
+function businessDateParts(value) {
+  const date = value instanceof Date ? value : new Date(value)
+  if (!Number.isFinite(date.getTime())) return null
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+  }).formatToParts(date)
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return {
+    day: Number(byType.day),
+    month: Number(byType.month),
+    year: Number(byType.year),
+  }
+}
+
+function businessTimeZoneOffsetMs(value) {
+  const date = value instanceof Date ? value : new Date(value)
+  if (!Number.isFinite(date.getTime())) return 0
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+    minute: '2-digit',
+    month: '2-digit',
+    second: '2-digit',
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+  }).formatToParts(date)
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  const representedAsUtc = Date.UTC(
+    Number(byType.year),
+    Number(byType.month) - 1,
+    Number(byType.day),
+    Number(byType.hour),
+    Number(byType.minute),
+    Number(byType.second),
+  )
+  return representedAsUtc - Math.floor(date.getTime() / 1000) * 1000
+}
+
+function businessMidnightUtcMs(parts) {
+  const wallClockUtc = Date.UTC(parts.year, parts.month - 1, parts.day)
+  let utcMs = wallClockUtc
+  for (let iteration = 0; iteration < 3; iteration += 1) {
+    utcMs = wallClockUtc - businessTimeZoneOffsetMs(new Date(utcMs))
+  }
+  return utcMs
+}
+
+function addCalendarDays(parts, days) {
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days))
+  return {
+    day: date.getUTCDate(),
+    month: date.getUTCMonth() + 1,
+    year: date.getUTCFullYear(),
+  }
+}
+
+function partsToYmd(parts) {
+  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`
+}
+
+export function businessDateYmd(value = new Date()) {
+  const parts = businessDateParts(value)
+  return parts ? partsToYmd(parts) : ''
+}
+
+export function ymdToWarsawIsoRangeStart(value) {
+  const parts = validYmdParts(value)
+  return parts ? new Date(businessMidnightUtcMs(parts)).toISOString() : ''
+}
+
+export function ymdToWarsawIsoRangeEnd(value) {
+  const parts = validYmdParts(value)
+  if (!parts) return ''
+  const nextDay = addCalendarDays(parts, 1)
+  return new Date(businessMidnightUtcMs(nextDay) - 1).toISOString()
+}
+
 export function toIso(value) {
   const raw = String(value ?? '').trim()
   if (!raw) {
@@ -45,18 +145,15 @@ export function formatTime(value) {
   return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
 }
 
-export function todayYmd() {
-  const now = new Date()
-  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
+export function todayYmd(now = new Date()) {
+  return businessDateYmd(now)
 }
 
-export function daysAgoYmd(days) {
+export function daysAgoYmd(days, now = new Date()) {
   const offset = Number(days)
   const normalized = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0
-  const date = new Date()
-  date.setHours(0, 0, 0, 0)
-  date.setDate(date.getDate() - normalized)
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+  const current = businessDateParts(now)
+  return current ? partsToYmd(addCalendarDays(current, -normalized)) : ''
 }
 
 export function durationSecondsToHms(value) {

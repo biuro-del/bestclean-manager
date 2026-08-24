@@ -1,4 +1,5 @@
 import {
+  clientsForOrg,
   clientsPageForOrg,
   deleteClientForOrg,
   insertClientForOrg,
@@ -8,6 +9,7 @@ import {
   createReferenceReadUnavailableError,
   fetchAllReferenceRows,
   isDataConnectOperationNotFound,
+  isLocalReferenceReadFallbackEnabled,
 } from './referenceDataReadPolicy'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
@@ -413,6 +415,22 @@ function mapClient(orgId, row) {
 }
 
 async function fetchClientRows(orgId) {
+  if (
+    isLocalReferenceReadFallbackEnabled({
+      dev: import.meta.env.DEV,
+      enabled: import.meta.env.VITE_ALLOW_LOCAL_REFERENCE_READ_FALLBACK,
+    })
+  ) {
+    const response = await clientsForOrg({ orgId })
+    const rows = response?.data?.clients
+    if (!Array.isArray(rows)) {
+      const error = new Error('Katalog klientow zwrocil nieprawidlowa odpowiedz.')
+      error.code = 'REFERENCE_DATA_RESPONSE_INVALID'
+      throw error
+    }
+    return rows
+  }
+
   try {
     return await fetchAllReferenceRows({
       loadPage: ({ limit, offset }) => clientsPageForOrg({ orgId, limit, offset }),

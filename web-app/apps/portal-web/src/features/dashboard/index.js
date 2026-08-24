@@ -1,5 +1,5 @@
 import { buildServiceExecutionModel } from './serviceExecutionModel.js'
-import { isHistoricalOpenWorkday } from './historicalOpenWorkdayModel.js'
+import { isHistoricalOpenWorkday, isOpenWorkEvent } from './historicalOpenWorkdayModel.js'
 import { isScheduleOrderActive } from '../../services/scheduleOrderLifecycle'
 import { isScheduleStartOverdue } from '../../services/scheduleStartStatusPolicy'
 import { assertCompletePagedResponse } from '../../services/workdayReadCostPolicy'
@@ -19,6 +19,10 @@ import {
   SERVICE_OPERATION_STATE,
 } from './serviceOperationStreamModel.js'
 import { buildCommandCenterPlanModel } from './commandCenterPlanModel.js'
+import {
+  workSessionConfirmedTotalSeconds,
+  workSessionSummarySeconds,
+} from '../workers/workIntervals.js'
 
 export const route = 'dashboard'
 export const viewId = 'view-dashboard'
@@ -2093,12 +2097,20 @@ export function createDashboardFeature(ctx) {
             const plannedLabel = hourLabel(delta.phase === 'end' ? delta.plannedStopTs : delta.plannedStartTs)
             const actualLabel = hourLabel(delta.phase === 'end' ? delta.actualStopTs : delta.actualStartTs)
             const title = `Plan ${phaseLabel}: ${plannedLabel} · Realny ${phaseLabel}: ${actualLabel} · Różnica: ${delta.label}`
+            const iconClass = ['late', 'end-late'].includes(delta.kind)
+              ? 'ph-warning-circle'
+              : delta.kind === 'end-early'
+                ? 'ph-clock-countdown'
+                : 'ph-info'
             return `
               <span
                 class="dash-activity-delta-marker dash-activity-delta-marker--${escapeHtml(delta.kind)} dash-activity-delta-marker--phase-${escapeHtml(delta.phase === 'end' ? 'end' : 'start')}"
                 style="--dash-marker-anchor:${left.toFixed(3)}%;--dash-marker-group-start:${groupStart.toFixed(3)}%;--dash-marker-group-end:${groupEnd.toFixed(3)}%;--dash-marker-group-center:${groupCenter.toFixed(3)}%;--dash-marker-left:${markerLeft}%;--dash-marker-right:${markerRight}%;--dash-lane:${lane};"
                 title="${escapeHtml(title)}"
-              >${escapeHtml(delta.label)}</span>
+                data-dash-tooltip="${escapeHtml(title)}"
+                aria-label="${escapeHtml(title)}"
+                tabindex="0"
+              ><i class="ph ${iconClass}" aria-hidden="true"></i>${escapeHtml(delta.label)}</span>
             `
           })
           .join('')
@@ -2181,6 +2193,7 @@ export function createDashboardFeature(ctx) {
                 class="${classes.join(' ')}"
                 style="--dash-left:${left.toFixed(3)}%;--dash-width:${width.toFixed(3)}%;--dash-lane:${Number(bar.lane) || 0};"
                 title="${escapeHtml(title)}"
+                data-dash-tooltip="${escapeHtml(title)}"
                 ${plannedAttrs || workdayAttrs}
               >
                 <span class="dash-activity-timeline-bar-label">${escapeHtml(barLabel || timeRange)}</span>
@@ -2194,24 +2207,50 @@ export function createDashboardFeature(ctx) {
         const companyMetaTitle = hasPlanConflict
           ? `Kolidujące obiekty: ${planConflictLabels.join(' · ')}`
           : companyLabel
+        const hasRunningActivity = runningWorkdayBars.length > 0
+        const hasWorkdayActivity = workdayBars.length > 0
+        const rowState = missingStartBars.length > 0
+          ? { className: 'is-danger', icon: 'ph-warning-circle', label: 'Brak START' }
+          : hasPlanConflict
+            ? { className: 'is-danger', icon: 'ph-intersect-three', label: 'Kolizja planu' }
+            : hasRunningActivity
+              ? { className: 'is-active', icon: 'ph-play-circle', label: 'W toku' }
+              : hasWorkdayActivity
+                ? { className: 'is-finished', icon: 'ph-check-circle', label: 'Zakończono' }
+                : { className: 'is-planned', icon: 'ph-calendar-blank', label: 'Zaplanowano' }
+        const workerIdentityHtml = `
+          <span class="dash-activity-timeline-avatar" aria-hidden="true">
+            ${dashboardServiceOperationAvatarHtml(group.workerName || group.workerDisplayName)}
+          </span>
+          <span class="dash-activity-timeline-person-copy">
+            ${workerButton}
+            <small title="${escapeHtml(companyMetaTitle || '')}">
+              <i class="ph ph-buildings" aria-hidden="true"></i>
+              ${escapeHtml(companyLabel || 'Klient nieprzypisany')}
+            </small>
+          </span>
+        `
         return {
           startTs: bars.length ? Math.min(...bars.map((bar) => bar.startTs)) : Number.MAX_SAFE_INTEGER,
           hasMissingStart: missingStartBars.length > 0,
           missingStartTs: Number.isFinite(missingStartTs) ? missingStartTs : Number.MAX_SAFE_INTEGER,
-          hasRunningActivity: runningWorkdayBars.length > 0,
+          hasRunningActivity,
           latestRunningActivityTs,
-          hasWorkdayActivity: workdayBars.length > 0,
+          hasWorkdayActivity,
           latestActivityTs,
           companyLabel,
           workerSortKey: group.workerSortKey,
           html: `
-            <div class="dash-activity-timeline-row${hasPlanConflict ? ' has-plan-conflict' : ''}" style="--dash-lane-count:${laneCount};--dash-row-height:${laneCount * 22 + (hasDeltaMarkers ? 36 : 14)}px;--dash-track-height:${laneCount * 22 + (hasDeltaMarkers ? 28 : 6)}px;">
-              <div class="dash-activity-timeline-person">${workerButton}</div>
+            <div class="dash-activity-timeline-row ${rowState.className}${hasPlanConflict ? ' has-plan-conflict' : ''}" style="--dash-lane-count:${laneCount};--dash-row-height:${laneCount * 22 + (hasDeltaMarkers ? 38 : 14)}px;--dash-track-height:${laneCount * 22 + (hasDeltaMarkers ? 30 : 6)}px;">
+              <div class="dash-activity-timeline-person">${workerIdentityHtml}</div>
               <div class="dash-activity-timeline-track">
                 ${deltaMarkersHtml}
                 ${barsHtml}
               </div>
-              <div class="dash-activity-timeline-meta" title="${escapeHtml(companyMetaTitle || '')}">${escapeHtml(companyLabel || '')}</div>
+              <div class="dash-activity-timeline-meta ${rowState.className}" title="${escapeHtml(companyMetaTitle || rowState.label)}" data-dash-tooltip="${escapeHtml(companyMetaTitle || rowState.label)}">
+                <i class="ph ${rowState.icon}" aria-hidden="true"></i>
+                <span>${escapeHtml(rowState.label)}</span>
+              </div>
             </div>
           `,
         }
@@ -2251,9 +2290,9 @@ export function createDashboardFeature(ctx) {
 
     root.innerHTML = `
       <div class="dash-activity-timeline-axis" aria-hidden="true">
-        <div class="dash-activity-timeline-axis-spacer"></div>
+        <div class="dash-activity-timeline-axis-spacer">Pracownik / klient</div>
         <div class="dash-activity-timeline-ticks">${tickLabels.join('')}</div>
-        <div></div>
+        <div class="dash-activity-timeline-axis-status">Status</div>
       </div>
       <div class="dash-activity-timeline" style="--dash-now-left:${nowLeft.toFixed(3)}%;" aria-label="Oś aktywności dnia">
         ${items.map((item) => item.html).join('')}
@@ -2312,7 +2351,10 @@ export function createDashboardFeature(ctx) {
         ({ row, sourceIndex }) => {
           const startValue = dashboardClockLabelToHm(row.qrStart, '--:--')
           const stopValue = row?.isRunning ? '--:--' : dashboardClockLabelToHm(row.qrStop, '--:--')
-          const workValue = dashboardDurationLabelToHm(row.duration, '00:00')
+          const accounting = workSessionSummarySeconds(row)
+          const workValue = durationSecondsToHm(accounting.confirmedSec)
+          const provisionalValue = durationSecondsToHm(accounting.provisionalSec)
+          const activeValue = durationSecondsToHm(accounting.activeElapsedSec)
           const workerName = String(row.workerName ?? '').trim() || '-'
           const workerDisplayName = dashboardWorkerSurnameDisplayName(workerName)
           const workerLogin = String(row.workerLogin ?? row.id ?? '').trim()
@@ -2346,10 +2388,22 @@ export function createDashboardFeature(ctx) {
                 <span class="dash-time-value">${escapeHtml(stopValue)}</span>
               </div>
               <div class="dash-time-line dash-time-line--work">
-                <span class="dash-time-label">Czas pracy</span>
+                <span class="dash-time-label">Czas zatwierdzony</span>
                 <span class="dash-time-colon">:</span>
                 <span class="dash-time-value time-duration">${escapeHtml(workValue)}</span>
               </div>
+              ${accounting.provisionalSec > 0 ? `
+              <div class="dash-time-line dash-time-line--work">
+                <span class="dash-time-label">Czas roboczy</span>
+                <span class="dash-time-colon">:</span>
+                <span class="dash-time-value time-duration">${escapeHtml(provisionalValue)}</span>
+              </div>` : ''}
+              ${row?.isRunning ? `
+              <div class="dash-time-line dash-time-line--active">
+                <span class="dash-time-label">Aktywna od</span>
+                <span class="dash-time-colon">:</span>
+                <span class="dash-time-value time-duration">${escapeHtml(activeValue)}</span>
+              </div>` : ''}
             </div>
           </div>
         </div>
@@ -2456,7 +2510,7 @@ export function createDashboardFeature(ctx) {
   }
 
   function dashboardResolveDayKey(row, fallback = '') {
-    const direct = String(row?.dayKey ?? '').trim()
+    const direct = String(row?.businessDateYmd ?? row?.business_date_ymd ?? row?.dayKey ?? '').trim()
     if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) {
       return direct
     }
@@ -3520,10 +3574,7 @@ export function createDashboardFeature(ctx) {
     previousMonthRows = [],
   ) {
     const today = todayYmd()
-    const totalTodaySec = (Array.isArray(todayRows) ? todayRows : []).reduce(
-      (sum, row) => sum + dashboardParseDurationLabelToSeconds(row?.duration),
-      0,
-    )
+    const totalTodaySec = workSessionConfirmedTotalSeconds(todayRows)
     const currentWeekSec = totalTodaySec + dashboardSumDurationSeconds(currentWeekRows, { excludeDay: today })
     const previousWeekSec = dashboardSumDurationSeconds(previousWeekRows)
     const currentMonthSec = totalTodaySec + dashboardSumDurationSeconds(currentMonthRows, { excludeDay: today })
@@ -3570,12 +3621,13 @@ export function createDashboardFeature(ctx) {
       const datePrefix = rowDay && rowDay !== dayKey ? `Data: ${formatDatePl(`${rowDay}T00:00:00.000Z`)} · ` : ''
       const workerLogin = String(row?.workerLogin ?? row?.login ?? '').trim()
       const workerName = dashboardResolveWorkerLabel(row)
+      const activeElapsedLabel = durationSecondsToHm(workSessionSummarySeconds(row).activeElapsedSec)
       return {
         action: 'worker-history',
         workerLogin,
         workerName,
         title: workerName,
-        subtitle: `${datePrefix}START: ${dashboardClockLabelToHm(row?.qrStart, '--:--')} · Klient: ${dashboardResolveClientLabel(row)} · Strefa: ${dashboardResolveZoneLabel(row)}`,
+        subtitle: `${datePrefix}START: ${dashboardClockLabelToHm(row?.qrStart, '--:--')} · Aktywna od: ${activeElapsedLabel} · Klient: ${dashboardResolveClientLabel(row)} · Strefa: ${dashboardResolveZoneLabel(row)}`,
         tab: 'workers',
         row: dashboardBuildHistoryRow(row, rowDay || dayKey),
       }
@@ -5737,12 +5789,18 @@ export function createDashboardFeature(ctx) {
             .map((value) => String(value ?? '').trim())
             .filter(Boolean),
         )
-        const plannedStopTsValues = (Array.isArray(plan?.allocations) ? plan.allocations : [])
+        const activePlannedAllocations = (Array.isArray(plan?.allocations) ? plan.allocations : [])
           .filter((allocation) => activeAllocationIds.has(String(allocation?.allocationId ?? '').trim()))
+        const plannedStartTsValues = activePlannedAllocations
+          .map((allocation) => new Date(String(allocation?.plannedStartAt ?? '')).getTime())
+          .filter((value) => Number.isFinite(value) && value > 0)
+        const plannedStopTsValues = activePlannedAllocations
           .map((allocation) => new Date(String(allocation?.plannedEndAt ?? '')).getTime())
           .filter((value) => Number.isFinite(value) && value > 0)
+        const plannedStartTs = plannedStartTsValues.length ? Math.min(...plannedStartTsValues) : 0
+        const plannedStopTs = plannedStopTsValues.length ? Math.max(...plannedStopTsValues) : 0
         const expectedStopTs = plannedStopTsValues.length
-          ? Math.max(...plannedStopTsValues)
+          ? plannedStopTs
           : startTs > 0 && plannedDurationMinutes > 0
             ? startTs + plannedDurationMinutes * 60 * 1000
             : 0
@@ -5766,6 +5824,8 @@ export function createDashboardFeature(ctx) {
           workerNames: dashboardServiceExecutionWorkerNames(block, plan),
           startTs,
           startIso: startTs > 0 ? new Date(startTs).toISOString() : '',
+          plannedStartTs,
+          plannedStopTs,
           plannedDurationMinutes,
           actualDurationMinutes: Math.max(0, Number(block?.actualDurationMinutes) || 0),
           expectedStopTs,
@@ -5823,6 +5883,7 @@ export function createDashboardFeature(ctx) {
     events = [],
     strictActive = [],
     strictCompleted = [],
+    plannedItems = [],
     dayKey = todayYmd(),
     nowTs = Date.now(),
   ) {
@@ -5851,40 +5912,110 @@ export function createDashboardFeature(ctx) {
       const startTs = Math.max(0, Number(candidate?.startTs) || 0)
       const stopTs = Math.max(0, Number(candidate?.stopTs) || 0)
       const isCompleted = candidate?.operationState === SERVICE_OPERATION_STATE.COMPLETED
+      const actualStopTs = isCompleted ? stopTs : nowTs
       const durationMinutes = startTs > 0
-        ? Math.max(0, Math.round((((isCompleted ? stopTs : nowTs) - startTs) / 60000) * 10) / 10)
+        ? Math.max(0, Math.round(((actualStopTs - startTs) / 60000) * 10) / 10)
         : 0
+      const observedClientId = String(row?.clientId ?? row?.client_id ?? '').trim()
+      const observedClientKey = normalizeSearchText(clientLabel)
+      const plan = (Array.isArray(plannedItems) ? plannedItems : [])
+        .filter((plannedItem) => {
+          const plannedStartTs = Math.max(0, Number(plannedItem?.startTs) || 0)
+          const plannedStopTs = Math.max(0, Number(plannedItem?.stopTs) || 0)
+          if (
+            !(plannedStartTs > 0) ||
+            plannedStopTs <= plannedStartTs ||
+            startTs > plannedStopTs ||
+            actualStopTs < plannedStartTs
+          ) {
+            return false
+          }
+          const observedWorkerKey = normalizeSearchText(
+            dashboardWorkerSurnameDisplayName(workerName),
+          )
+          const plannedWorkerKey = normalizeSearchText(
+            plannedItem?.workerDisplayName ??
+              dashboardWorkerSurnameDisplayName(plannedItem?.workerName ?? ''),
+          )
+          const sameWorkerLabel = Boolean(
+            observedWorkerKey && plannedWorkerKey && observedWorkerKey === plannedWorkerKey,
+          )
+          if (
+            !sameWorkerLabel &&
+            !dashboardActiveWorkerMapRecordsMatch(plannedItem, { ...row, workerName })
+          ) {
+            return false
+          }
+
+          const plannedClientId = String(plannedItem?.clientId ?? '').trim()
+          const plannedClientKey = normalizeSearchText(
+            dashboardActivityCleanCompanyLabel(
+              plannedItem?.companyLabel ?? plannedItem?.locationLabel ?? plannedItem?.addressLabel,
+            ),
+          )
+          const sameClientId = Boolean(
+            observedClientId && plannedClientId && observedClientId === plannedClientId,
+          )
+          const sameClientLabel = Boolean(
+            observedClientKey && plannedClientKey && observedClientKey === plannedClientKey,
+          )
+          return sameClientId || sameClientLabel
+        })
+        .sort((left, right) => (
+          Math.abs(startTs - Number(left?.startTs ?? 0)) -
+          Math.abs(startTs - Number(right?.startTs ?? 0))
+        ))[0] ?? null
+      const plannedStartTs = Math.max(0, Number(plan?.startTs) || 0)
+      const plannedStopTs = Math.max(0, Number(plan?.stopTs) || 0)
+      const plannedDurationMinutes = plannedStopTs > plannedStartTs
+        ? Math.max(0, Math.round(((plannedStopTs - plannedStartTs) / 60000) * 10) / 10)
+        : null
+      const planTitle = String(
+        plan?.serviceBlockLabel ??
+          plan?.label ??
+          plan?.taskLabel ??
+          '',
+      ).trim()
 
       return {
         key: candidate.key,
         eventIds: candidate.eventIds,
-        taskId: '',
-        clientId: String(row?.clientId ?? row?.client_id ?? '').trim(),
-        serviceBlockId: '',
-        title: hasPlanReference
-          ? 'Plan wymaga weryfikacji'
-          : 'Praca bez zaplanowanego zadania',
+        taskId: String(plan?.taskId ?? '').trim(),
+        clientId: observedClientId,
+        serviceBlockId: String(plan?.serviceBlockId ?? '').trim(),
+        title: plan
+          ? planTitle || 'Praca według zaplanowanego zadania'
+          : hasPlanReference
+            ? 'Plan wymaga weryfikacji'
+            : 'Praca bez zaplanowanego zadania',
         clientLabel,
         progress: null,
         measured: false,
         isPlanUsed: false,
         note: isCompleted
-          ? hasPlanReference
-            ? 'Zakończono · powiązanie z planem wymaga weryfikacji'
-            : 'Zakończono bez zaplanowanego zadania'
-          : hasPlanReference
-            ? 'Brak potwierdzonej godziny końca'
-            : 'Brak planowanej godziny końca',
+          ? plan
+            ? 'Zakończono · ukończenie zadania wymaga potwierdzenia CLEAN'
+            : hasPlanReference
+              ? 'Zakończono · powiązanie z planem wymaga weryfikacji'
+              : 'Zakończono bez zaplanowanego zadania'
+          : plan
+            ? `${Math.round(durationMinutes)} z ${Math.round(plannedDurationMinutes)} min planu`
+            : hasPlanReference
+              ? 'Brak potwierdzonej godziny końca'
+              : 'Brak planowanej godziny końca',
         workerNames: [workerName].filter(Boolean),
         startTs,
         startIso: startTs > 0 ? new Date(startTs).toISOString() : '',
         stopTs,
         stopIso: stopTs > 0 ? new Date(stopTs).toISOString() : '',
+        plannedStartTs,
+        plannedStopTs,
+        plannedDurationMinutes,
         actualDurationMinutes: durationMinutes,
-        expectedStopTs: 0,
-        expectedStopIso: '',
-        planned: false,
-        planningState: hasPlanReference ? 'unverified' : 'unplanned',
+        expectedStopTs: plannedStopTs,
+        expectedStopIso: plannedStopTs > 0 ? new Date(plannedStopTs).toISOString() : '',
+        planned: Boolean(plan),
+        planningState: plan ? 'matched-presentation' : hasPlanReference ? 'unverified' : 'unplanned',
         completionConfirmed: false,
       }
     }
@@ -5920,6 +6051,74 @@ export function createDashboardFeature(ctx) {
     })
   }
 
+  function dashboardObservedWorkdayPresentationPlan(
+    candidate = {},
+    plannedItems = [],
+    nowTs = Date.now(),
+  ) {
+    const workerName = String(candidate?.workerName ?? '').trim()
+    const observedWorkerKey = normalizeSearchText(
+      dashboardWorkerSurnameDisplayName(workerName),
+    )
+    const observedClientId = String(candidate?.clientId ?? '').trim()
+    const observedClientKey = normalizeSearchText(
+      dashboardActivityCleanCompanyLabel(candidate?.clientLabel),
+    )
+    const startTs = Math.max(0, Number(candidate?.startTs) || 0)
+    const stopTs = Math.max(0, Number(candidate?.stopTs) || 0)
+    const actualStopTs = stopTs > 0 ? stopTs : nowTs
+    const sourceRow = candidate?.sourceWorkday?.sourceRow ?? candidate?.sourceWorkday ?? {}
+
+    return (Array.isArray(plannedItems) ? plannedItems : [])
+      .filter((plannedItem) => {
+        const plannedStartTs = Math.max(0, Number(plannedItem?.startTs) || 0)
+        const plannedStopTs = Math.max(0, Number(plannedItem?.stopTs) || 0)
+        if (
+          !(plannedStartTs > 0) ||
+          plannedStopTs <= plannedStartTs ||
+          startTs > plannedStopTs ||
+          actualStopTs < plannedStartTs
+        ) {
+          return false
+        }
+
+        const plannedWorkerKey = normalizeSearchText(
+          plannedItem?.workerDisplayName ??
+            dashboardWorkerSurnameDisplayName(plannedItem?.workerName ?? ''),
+        )
+        const sameWorkerLabel = Boolean(
+          observedWorkerKey && plannedWorkerKey && observedWorkerKey === plannedWorkerKey,
+        )
+        if (
+          !sameWorkerLabel &&
+          !dashboardActiveWorkerMapRecordsMatch(
+            plannedItem,
+            { ...sourceRow, ...candidate, workerName },
+          )
+        ) {
+          return false
+        }
+
+        const plannedClientId = String(plannedItem?.clientId ?? '').trim()
+        const plannedClientKey = normalizeSearchText(
+          dashboardActivityCleanCompanyLabel(
+            plannedItem?.companyLabel ?? plannedItem?.locationLabel ?? plannedItem?.addressLabel,
+          ),
+        )
+        const sameClientId = Boolean(
+          observedClientId && plannedClientId && observedClientId === plannedClientId,
+        )
+        const sameClientLabel = Boolean(
+          observedClientKey && plannedClientKey && observedClientKey === plannedClientKey,
+        )
+        return sameClientId || sameClientLabel
+      })
+      .sort((left, right) => (
+        Math.abs(startTs - Number(left?.startTs ?? 0)) -
+        Math.abs(startTs - Number(right?.startTs ?? 0))
+      ))[0] ?? null
+  }
+
   function dashboardBuildObservedWorkdayOperationItems(
     workdayItems = [],
     plannedItems = [],
@@ -5935,7 +6134,12 @@ export function createDashboardFeature(ctx) {
 
     const toVisibleItem = (candidate = {}) => {
       const isCompleted = candidate?.operationState === SERVICE_OPERATION_STATE.COMPLETED
-      const plan = matchObservedWorkdayToPlan(candidate, plannedItems)
+      const exactPlan = matchObservedWorkdayToPlan(candidate, plannedItems)
+      const plan = exactPlan ?? dashboardObservedWorkdayPresentationPlan(
+        candidate,
+        plannedItems,
+        nowTs,
+      )
       const startTs = Math.max(0, Number(candidate?.startTs) || 0)
       const stopTs = Math.max(0, Number(candidate?.stopTs) || 0)
       const actualStopTs = isCompleted ? stopTs : nowTs
@@ -5994,12 +6198,14 @@ export function createDashboardFeature(ctx) {
         startIso: startTs > 0 ? new Date(startTs).toISOString() : '',
         stopTs,
         stopIso: stopTs > 0 ? new Date(stopTs).toISOString() : '',
+        plannedStartTs,
+        plannedStopTs,
         plannedDurationMinutes: plan ? plannedDurationMinutes : null,
         actualDurationMinutes,
         expectedStopTs: measured ? plannedStopTs : 0,
         expectedStopIso: measured ? new Date(plannedStopTs).toISOString() : '',
         planned: Boolean(plan),
-        planningState: plan ? 'matched' : 'unplanned',
+        planningState: plan ? exactPlan ? 'matched' : 'matched-presentation' : 'unplanned',
         completionConfirmed: false,
         operationKind: 'workday',
       }
@@ -6071,6 +6277,7 @@ export function createDashboardFeature(ctx) {
         eventRows,
         strictActive,
         strictCompleted,
+        plannedItems,
         dayKey,
         nowTs,
       )
@@ -6686,18 +6893,23 @@ export function createDashboardFeature(ctx) {
 
   function dashboardServiceOperationMarkup(item = {}, options = {}) {
     const isCompleted = item.operationState === SERVICE_OPERATION_STATE.COMPLETED
-    const isPlanned = item.planned !== false
-    const completionConfirmed = item.completionConfirmed === true
     const workers = Array.isArray(item.workerNames) && item.workerNames.length
       ? item.workerNames
       : ['Brak rozpoznanego pracownika']
-    const primaryLabel = String(item.clientLabel ?? '').trim() || String(item.title ?? '').trim() || 'Operacja'
-    const secondaryLabel = normalizeSearchText(primaryLabel) === normalizeSearchText(item.title)
+    const clientLabel = String(item.clientLabel ?? '').trim() || 'Klient nieprzypisany'
+    const operationLabel = String(item.clientLabel ?? '').trim() || String(item.title ?? '').trim() || 'Operacja'
+    const workerLabel = workers.join(', ')
+    const secondaryLabel = normalizeSearchText(operationLabel) === normalizeSearchText(item.title)
       ? (isCompleted ? 'Sprzątanie zakończone' : 'Sprzątanie w toku')
       : String(item.title ?? '').trim()
     const startLabel = dashboardOverviewTimeLabel(item.startTs)
     const stopLabel = dashboardOverviewTimeLabel(item.stopTs)
     const expectedStopLabel = dashboardOverviewTimeLabel(item.expectedStopTs)
+    const plannedStartTs = Math.max(0, Number(item.plannedStartTs) || 0)
+    const plannedStopTs = Math.max(0, Number(item.plannedStopTs) || 0)
+    const hasPlannedWindow = plannedStartTs > 0 && plannedStopTs > plannedStartTs
+    const plannedStartLabel = hasPlannedWindow ? dashboardOverviewTimeLabel(plannedStartTs) : ''
+    const plannedStopLabel = hasPlannedWindow ? dashboardOverviewTimeLabel(plannedStopTs) : ''
     const statusLabel = isCompleted ? 'Zakończone' : 'W toku'
     const startTs = Math.max(0, Number(item.startTs) || 0)
     const stopTs = Math.max(0, Number(item.stopTs) || 0)
@@ -6718,13 +6930,39 @@ export function createDashboardFeature(ctx) {
     const todayDurationLabel = hasTodayDuration
       ? durationSecondsToHm(todayDurationSeconds)
       : ''
-    const progress = isCompleted
-      ? completionConfirmed
+    const plannedWindowDurationMs = hasPlannedWindow ? plannedStopTs - plannedStartTs : 0
+    const plannedLateDurationMs = hasPlannedWindow && startTs > plannedStartTs
+      ? Math.max(0, Math.min(startTs, plannedStopTs) - plannedStartTs)
+      : 0
+    const plannedWorkStartTs = hasPlannedWindow && startTs > 0
+      ? Math.max(startTs, plannedStartTs)
+      : 0
+    const plannedWorkStopTs = plannedWorkStartTs > 0
+      ? Math.max(plannedWorkStartTs, Math.min(actualStopTs, plannedStopTs))
+      : 0
+    const plannedWorkDurationMs = Math.max(0, plannedWorkStopTs - plannedWorkStartTs)
+    const plannedLatePercent = plannedWindowDurationMs > 0
+      ? Math.max(0, Math.min(100, (plannedLateDurationMs / plannedWindowDurationMs) * 100))
+      : 0
+    const plannedWorkPercent = plannedWindowDurationMs > 0
+      ? Math.max(0, Math.min(100 - plannedLatePercent, (plannedWorkDurationMs / plannedWindowDurationMs) * 100))
+      : 0
+    const plannedWorkProgress = hasPlannedWindow ? Math.round(plannedWorkPercent) : null
+    const progressIsIndeterminate = !isCompleted && !hasPlannedWindow
+    const progress = hasPlannedWindow
+      ? plannedWorkProgress
+      : isCompleted
         ? 100
-        : null
-      : item.measured
-        ? Math.max(0, Math.min(100, Math.round(Number(item.progress) || 0)))
-        : null
+        : progressIsIndeterminate
+          ? null
+          : (
+              item.measured
+                ? Math.max(0, Math.min(100, Math.round(Number(item.progress) || 0)))
+                : null
+            )
+    const progressUsesPlannedWindow = hasPlannedWindow && plannedWorkProgress != null
+    const hasLateSegment = plannedLateDurationMs > 0
+    const plannedLateDurationLabel = durationSecondsToHm(Math.floor(plannedLateDurationMs / 1000))
     const timeLabel = isCompleted
       ? hasTodayDuration
         ? `Dzisiaj ${todayDurationLabel}`
@@ -6741,7 +6979,9 @@ export function createDashboardFeature(ctx) {
         timelineParts.push(`łącznie dziś ${todayDurationLabel}`)
       }
     } else {
-      if (item.expectedStopTs > 0) {
+      if (hasPlannedWindow) {
+        timelineParts.push(`plan ${plannedStartLabel}–${plannedStopLabel}`)
+      } else if (item.expectedStopTs > 0) {
         timelineParts.push(`plan do ${expectedStopLabel}`)
       }
       if (hasTodayDuration) {
@@ -6749,59 +6989,90 @@ export function createDashboardFeature(ctx) {
       }
     }
     const stateDetail = timelineParts.join(' · ') || String(item.note ?? '').trim()
-    const progressMarkup = isCompleted && progress == null
-      ? `
-        <div
-          class="dash-command-operation__progress is-complete"
-          aria-label="${escapeHtml(
-            isPlanned
-              ? `Operacja ${primaryLabel} została zakończona, ale zakończenie obecności nie potwierdza ukończenia zadania.`
-              : `Operacja ${primaryLabel} została zakończona. Nie wyliczono procentu bez planu.`,
-          )}"
-        >
-          <span></span>
-        </div>
-      `
+    const progressLabel = progressIsIndeterminate ? 'W trakcie pracy' : progress == null ? '—%' : `${progress}%`
+    const progressAriaLabel = progressIsIndeterminate
+      ? `Operacja ${operationLabel} trwa bez ustalonego zakresu czasu.`
       : progress == null
-      ? `
-        <div
-          class="dash-command-operation__progress is-indeterminate"
-          aria-label="${escapeHtml(`Operacja ${primaryLabel} trwa. Brak pełnego planu czasu.`)}"
-        >
-          <span></span>
-        </div>
-      `
-      : `
-        <div
-          class="dash-command-operation__progress"
-          role="progressbar"
-          aria-label="${escapeHtml(`Postęp operacji ${primaryLabel}`)}"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          aria-valuenow="${progress}"
-        >
-          <span style="width:${progress}%"></span>
-        </div>
-      `
+        ? `Operacja ${operationLabel} trwa. Brak pełnego planu czasu do wyliczenia procentu.`
+      : progressUsesPlannedWindow
+        ? `Pokrycie planu operacji ${operationLabel} ${plannedStartLabel}–${plannedStopLabel}: ${progress}%.${hasLateSegment ? ` Spóźnienie: ${plannedLateDurationLabel}.` : ''}`
+        : `Postęp operacji ${operationLabel}: ${progress}%`
+    const progressTooltipKey = String(item.key ?? `${startTs}-${workerLabel}`)
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || `operation-${startTs}`
+    const progressTooltipId = `dash-operation-progress-tooltip-${progressTooltipKey}`
+    const progressAttributes = progressIsIndeterminate
+      ? `role="progressbar" aria-busy="true" aria-label="${escapeHtml(progressAriaLabel)}" aria-describedby="${escapeHtml(progressTooltipId)}"`
+      : progress == null
+        ? `aria-label="${escapeHtml(progressAriaLabel)}" aria-describedby="${escapeHtml(progressTooltipId)}"`
+      : `role="progressbar" aria-label="${escapeHtml(progressAriaLabel)}" aria-describedby="${escapeHtml(progressTooltipId)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"`
+    const progressFillLeft = hasPlannedWindow ? plannedLatePercent : 0
+    const progressFillWidth = hasPlannedWindow ? plannedWorkPercent : progress ?? 0
+    const workRangeEndLabel = isCompleted
+      ? stopTs > 0
+        ? stopLabel
+        : 'brak STOP'
+      : 'teraz'
+    const workRangeLabel = startTs > 0 ? `${startLabel}–${workRangeEndLabel}` : 'Brak START'
+    const tooltipPlanLabel = hasPlannedWindow
+      ? `${plannedStartLabel}–${plannedStopLabel}`
+      : 'Brak ustalonego zakresu'
+    const progressTooltipMarkup = `
+      <span class="dash-command-operation__progress-tooltip" id="${escapeHtml(progressTooltipId)}" role="tooltip">
+        <strong class="dash-command-operation__progress-tooltip-title">Podsumowanie czasu</strong>
+        <span class="dash-command-operation__progress-tooltip-row">
+          <span><i class="ph ph-calendar-blank" aria-hidden="true"></i>Plan</span>
+          <b>${escapeHtml(tooltipPlanLabel)}</b>
+        </span>
+        <span class="dash-command-operation__progress-tooltip-row">
+          <span><i class="ph ph-play-circle" aria-hidden="true"></i>Praca</span>
+          <b>${escapeHtml(workRangeLabel)}</b>
+        </span>
+        <span class="dash-command-operation__progress-tooltip-row">
+          <span><i class="ph ph-timer" aria-hidden="true"></i>Czas pracy</span>
+          <b>${escapeHtml(operationDurationLabel)}</b>
+        </span>
+        ${hasPlannedWindow ? `
+          <span class="dash-command-operation__progress-tooltip-row${hasLateSegment ? ' is-late' : ''}">
+            <span><i class="ph ${hasLateSegment ? 'ph-warning-circle' : 'ph-check-circle'}" aria-hidden="true"></i>Spóźnienie</span>
+            <b>${escapeHtml(hasLateSegment ? plannedLateDurationLabel : 'brak')}</b>
+          </span>
+        ` : ''}
+      </span>
+    `
+    const progressMarkup = `
+      <div
+        class="dash-command-operation__progress${progress == null ? ' is-unmeasured' : ''}${progressIsIndeterminate ? ' is-indeterminate' : ''}${hasLateSegment ? ' has-late-segment' : ''}"
+        ${progressAttributes}
+      >
+        ${hasLateSegment ? `<span class="dash-command-operation__progress-late" style="width:${plannedLatePercent.toFixed(3)}%" aria-hidden="true"></span>` : ''}
+        <span class="dash-command-operation__progress-fill" style="left:${progressFillLeft.toFixed(3)}%;width:${progressFillWidth.toFixed(3)}%"></span>
+        <span class="dash-command-operation__progress-value">${escapeHtml(progressLabel)}</span>
+      </div>
+      ${progressTooltipMarkup}
+    `
     const taskId = String(item.taskId ?? '').trim()
     const interactiveAttributes = taskId
-      ? `data-dashboard-operation-task-id="${escapeHtml(taskId)}" aria-label="${escapeHtml(`Otwórz zadanie: ${primaryLabel}`)}"`
+      ? `data-dashboard-operation-task-id="${escapeHtml(taskId)}" aria-label="${escapeHtml(`Otwórz zadanie: ${operationLabel}`)}"`
       : 'aria-label="Szczegóły operacji niedostępne"'
     const compactClass = options?.full ? ' is-full' : ''
 
     return `
-      <li class="dash-command-operation is-${isCompleted ? 'completed' : 'active'}${compactClass}">
-        <button class="dash-command-operation__button" type="button" ${interactiveAttributes}${taskId ? '' : ' disabled'}>
+      <li class="dash-command-operation is-${isCompleted ? 'completed' : 'active'}${progressIsIndeterminate ? ' is-indeterminate' : ''}${compactClass}">
+        <button class="dash-command-operation__button" type="button" ${interactiveAttributes} aria-describedby="${escapeHtml(progressTooltipId)}"${taskId ? '' : ' disabled'}>
           <span class="dash-command-operation__main">
             ${dashboardServiceOperationWorkersHtml(workers)}
             <span class="dash-command-operation__copy">
-              <strong>${escapeHtml(primaryLabel)}</strong>
+              <strong>${escapeHtml(workerLabel)}</strong>
+              <span class="dash-command-operation__client">
+                <i class="ph ph-buildings" aria-hidden="true"></i>
+                ${escapeHtml(clientLabel)}
+              </span>
               <small>${escapeHtml(secondaryLabel || statusLabel)}</small>
-              <span class="dash-command-operation__workers">${escapeHtml(workers.join(', '))}</span>
             </span>
           </span>
           <span class="dash-command-operation__result">
-            <strong>${escapeHtml(progress == null ? statusLabel : `${progress}%`)}</strong>
+            <strong>${escapeHtml(progressLabel)}</strong>
             <time datetime="${escapeHtml(isCompleted ? item.stopIso : item.startIso)}">${escapeHtml(timeLabel)}</time>
           </span>
           <span class="dash-command-operation__timeline">
@@ -7289,19 +7560,19 @@ export function createDashboardFeature(ctx) {
       const hasStop = Boolean(stopValue) && stopValue !== '--:--:--' && stopValue !== '-:-:-' && stopValue !== '-'
       return !row?.isRunning && hasStop
     })
-    const totalTodaySec = normalizedTodayRows.reduce((sum, row) => sum + dashboardParseDurationLabelToSeconds(row?.duration), 0)
+    const totalTodaySec = workSessionConfirmedTotalSeconds(normalizedTodayRows)
 
     const table1Details = {
       activeNow: activeWorkerDetails,
       finishedToday: finishedRows.map((row) => ({
         title: dashboardResolveWorkerLabel(row),
-        subtitle: `START: ${dashboardClockLabelToHm(row?.qrStart, '--:--')} · STOP: ${dashboardClockLabelToHm(row?.qrStop, '--:--')} · Czas: ${dashboardDurationLabelToHm(row?.duration, '00:00')}`,
+        subtitle: `START: ${dashboardClockLabelToHm(row?.qrStart, '--:--')} · STOP: ${dashboardClockLabelToHm(row?.qrStop, '--:--')} · Czas zatwierdzony: ${durationSecondsToHm(workSessionSummarySeconds(row).confirmedSec)}`,
         tab: 'workers',
         row: dashboardBuildHistoryRow(row, today),
       })),
       totalHoursToday: normalizedTodayRows
         .map((row) => {
-          const seconds = dashboardParseDurationLabelToSeconds(row?.duration)
+          const seconds = workSessionSummarySeconds(row).confirmedSec
           return { row, seconds }
         })
         .filter((item) => item.seconds > 0)
@@ -7358,7 +7629,7 @@ export function createDashboardFeature(ctx) {
         const rows = Array.isArray(bucket.rows) ? bucket.rows : []
         const probe = rows[0] ?? {}
         return {
-          action: 'workday-day-editor',
+          action: 'workday-reconciliation',
           dayKey: bucket.dayKey,
           workerLogin: bucket.workerLogin || probe?.workerLogin,
           workerName: bucket.workerName || probe?.workerName,
@@ -7420,22 +7691,8 @@ export function createDashboardFeature(ctx) {
     const openCleanYesterdayIssues = []
     historicalBuckets.forEach((bucket) => {
       const rows = Array.isArray(bucket.rows) ? bucket.rows : []
-      const hasQrStop = rows.some((row) => {
-        const endReason = String(row?.endReason ?? '').trim().toUpperCase()
-        const status = String(row?.status ?? '').trim().toUpperCase()
-        return eventTypeInfo(row).label === 'QR STOP' || endReason === 'WORKDAY_STOP' || endReason === 'STOP_END_DAY' || status === 'WORKDAY_CLOSED'
-      })
-      const runningRows = rows.filter(
-        (row) =>
-          normalizeEventStatus(row?.status, Boolean(toIso(row?.endAt) || toIso(row?.dayEndAt))) === 'RUNNING' &&
-          !toIso(row?.endAt) &&
-          !toIso(row?.dayEndAt),
-      )
+      const runningRows = rows.filter((row) => isOpenWorkEvent(row))
       if (!runningRows.length) {
-        return
-      }
-
-      if (!hasQrStop) {
         return
       }
 
@@ -7447,6 +7704,11 @@ export function createDashboardFeature(ctx) {
       })
       if (openCleanRow) {
         openCleanYesterdayIssues.push({
+          action: 'workday-reconciliation',
+          dayKey: bucket.dayKey,
+          workerLogin: bucket.workerLogin || openCleanRow?.workerLogin,
+          workerName: bucket.workerName || openCleanRow?.workerName,
+          workdayId: String(openCleanRow?.linkedWorkdayId ?? openCleanRow?.workdayId ?? '').trim(),
           title: bucket.workerName || dashboardResolveWorkerLabel(openCleanRow),
           subtitle: `Data: ${formatDatePl(`${bucket.dayKey}T00:00:00.000Z`)} · Klient: ${dashboardResolveClientLabel(openCleanRow)} · Strefa: ${dashboardResolveZoneLabel(openCleanRow)}`,
           tab: 'workers',
@@ -8252,7 +8514,7 @@ export function createDashboardFeature(ctx) {
     appState.workerAccountPendingTimeEditor = {
       dayKey,
       workdayId: String(detail?.workdayId ?? row?.workdayId ?? row?.id ?? '').trim(),
-      source: 'dashboard-open-start-stop',
+      source: 'dashboard-workday-reconciliation',
     }
 
     if (typeof window !== 'undefined' && typeof window.go === 'function') {
@@ -8280,7 +8542,11 @@ export function createDashboardFeature(ctx) {
     }
 
     dashboardHideMetricPopover()
-    if (metricKey === 'openStartStopYesterday' || detail?.action === 'workday-day-editor') {
+    if (
+      metricKey === 'openStartStopYesterday' ||
+      detail?.action === 'workday-reconciliation' ||
+      detail?.action === 'workday-day-editor'
+    ) {
       const opened = await openDashboardWorkdayDayEditor(detail)
       if (opened) return
     }

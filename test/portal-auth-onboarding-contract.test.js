@@ -93,10 +93,16 @@ test('produkcyjny build portalu ma jawnie konfigurowalny publiczny Registration 
   assert.match(envExample, /VITE_REGISTRATION_API_BASE_URL=https:\/\/registration-cleanzi\.web\.app/)
 })
 
-test('backend sprawdza zweryfikowany email przed odczytem członkostw tenantowych', () => {
+test('backend dopuszcza wyłącznie stare niezweryfikowane konta po odczycie członkostw UID', () => {
   const backend = fs.readFileSync(path.join(root, 'index.js'), 'utf8')
-  const verificationIndex = backend.indexOf("status: 'EMAIL_VERIFICATION_REQUIRED'", backend.indexOf('async function handleAuthSessionContextRequest'))
-  const membershipIndex = backend.indexOf('const rows = await getRequesterMemberships', verificationIndex)
-  assert.ok(verificationIndex > 0)
-  assert.ok(membershipIndex > verificationIndex)
+  const handlerIndex = backend.indexOf('async function handleAuthSessionContextRequest')
+  const membershipIndex = backend.indexOf('const rows = await getRequesterMemberships', handlerIndex)
+  const policyIndex = backend.indexOf('evaluateTenantEmailVerification(', membershipIndex)
+  const verificationIndex = backend.indexOf("status: 'EMAIL_VERIFICATION_REQUIRED'", policyIndex)
+  assert.ok(handlerIndex > 0)
+  assert.ok(membershipIndex > handlerIndex)
+  assert.ok(policyIndex > membershipIndex)
+  assert.ok(verificationIndex > policyIndex)
+  assert.match(backend, /m\.created_at as membership_created_at/)
+  assert.match(backend, /w\.created_at as worker_created_at/)
 })

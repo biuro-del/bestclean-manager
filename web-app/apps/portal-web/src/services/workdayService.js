@@ -13,7 +13,13 @@ import { executePlatformDataConnect, isPlatformSession, platformContextHeaders }
 import { getClients } from './clientService'
 import { getZones } from './zoneService'
 import { getWorkers } from './workerService'
-import { enrichWorkdaysWithEventIntervals } from '../features/workers/workIntervals.js'
+import {
+  enrichWorkdaysWithEventIntervals,
+  formatWorkDurationHms,
+  workIntervalsTotalSeconds,
+  workSessionSummarySeconds,
+  warsawBusinessDateKey,
+} from '../features/workers/workIntervals.js'
 import {
   findBlockingOpenEventForWorker,
   openEventRecordKey,
@@ -32,13 +38,17 @@ import {
   createPagedReadUnavailableError,
   isPagedReadSafetyError,
 } from './workdayReadCostPolicy'
+import { resolveContainingWorkdayId } from './eventRecordModel.js'
 
 const NINE_HOURS_SECONDS = 9 * 60 * 60
 let eventsForOrgUnavailable = false
 let eventsPageForOrgUnavailable = false
 let workdaysPageForOrgUnavailable = false
 let backupCyclesPageForOrgUnavailable = false
+let workdaysBusinessDatePageUnavailable = false
 let eventsFingerprintForOrgUnavailable = false
+const WORKDAYS_BUSINESS_DATE_PAGE_ENABLED =
+  String(import.meta.env?.VITE_ENABLE_WORKDAY_BUSINESS_DATE_PAGE ?? '').trim().toLowerCase() === 'true'
 const EVENTS_FINGERPRINT_FOR_ORG_ENABLED =
   String(import.meta.env?.VITE_ENABLE_DATACONNECT_FINGERPRINT ?? '').trim().toLowerCase() === 'true'
 const READ_CACHE_MS = 30000
@@ -406,7 +416,7 @@ function normalizeFilterDate(rawDate) {
   }
 
   const iso = toIso(trimmed)
-  return iso ? iso.slice(0, 10) : ''
+  return iso ? warsawBusinessDateKey(iso) : ''
 }
 
 function normalizeHaystack(values) {
@@ -1201,6 +1211,7 @@ function buildLookupMaps(clients, zones, workers, workdayRows = []) {
             workerName: String(row?.workerName ?? '').trim(),
             startAt: toIso(row?.startAt),
             endAt: toIso(row?.endAt),
+            businessDateYmd: sanitizeTextValue(row?.businessDateYmd),
             status: normalizeStatus(row?.status, Boolean(row?.endAt)),
             utilityRoomId: String(row?.utilityRoomId ?? row?.roomId ?? '').trim(),
             gps: String(row?.gps ?? '').trim(),
@@ -1228,12 +1239,14 @@ function buildLookupMaps(clients, zones, workers, workdayRows = []) {
     const startAt = toIso(row?.startAt)
     const endAt = toIso(row?.endAt)
     const updatedAt = toIso(row?.updatedAt)
-    const dayKey = toLocalDayKey(startAt || endAt)
+    const businessDateYmd = sanitizeTextValue(row?.businessDateYmd)
+    const dayKey = businessDateYmd || toLocalDayKey(startAt || endAt)
     const candidate = {
       workerLogin,
       workerName: String(row?.workerName ?? '').trim(),
       startAt,
       endAt,
+      businessDateYmd,
       updatedAt,
     }
 
@@ -1495,6 +1508,9 @@ function mapWorkday(orgId, row, lookupMaps) {
   const dayStartAt = toIso(row?.workday?.startAt ?? linkedWorkday?.startAt ?? row?.startAt)
   const dayEndScanAt = toIso(row?.workday?.endScanAt ?? linkedWorkday?.endScanAt ?? row?.endScanAt)
   const dayEndAt = toIso(row?.workday?.endAt ?? linkedWorkday?.endAt ?? row?.endAt ?? dayEndScanAt)
+  const businessDateYmd = sanitizeTextValue(
+    row?.workday?.businessDateYmd ?? linkedWorkday?.businessDateYmd ?? row?.businessDateYmd,
+  )
   const dayGps = sanitizeTextValue(row?.workday?.gps ?? linkedWorkday?.gps ?? row?.gps)
   const dayStartObjectRaw = sanitizeTextValue(
     row?.workday?.startObject ?? linkedWorkday?.startObject ?? rawStartObject,
@@ -1768,6 +1784,7 @@ function mapWorkday(orgId, row, lookupMaps) {
     dayStartAt,
     dayEndAt,
     dayEndScanAt,
+    businessDateYmd,
     dayGps,
     dayStartObject,
     dayStopObject,
@@ -1791,7 +1808,7 @@ function mapWorkday(orgId, row, lookupMaps) {
     endEventId: sanitizeTextValue(row.endEventId),
     editedBy: sanitizeTextValue(row.updatedBy),
     updatedAt: toIso(row.updatedAt),
-    dayKey: toLocalDayKey(startAt || endAt || dayStartAt || dayEndAt),
+    dayKey: businessDateYmd || toLocalDayKey(startAt || endAt || dayStartAt || dayEndAt),
   }
 }
 
@@ -2346,6 +2363,7 @@ async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '', op
   const scanLimit = fastPageScanLimit(pageOffset, pageSize)
   const eventRows = []
   const workdayRows = []
+  const businessDateWorkdayRows = []
   const [clients, zones, workers] = await Promise.all([
     getClients(orgId),
     getZones(orgId),
@@ -2354,10 +2372,17 @@ async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '', op
   let nextOffset = 0
   let eventsExhausted = false
   let workdaysExhausted = !includeWorkdays
+  const useBusinessDatePage =
+    includeWorkdays && WORKDAYS_BUSINESS_DATE_PAGE_ENABLED && !workdaysBusinessDatePageUnavailable
+  let businessDateWorkdaysExhausted = !useBusinessDatePage
   let filteredRows = []
 
   try {
-    while (nextOffset < scanLimit && filteredRows.length < desiredCount && (!eventsExhausted || !workdaysExhausted)) {
+    while (
+      nextOffset < scanLimit &&
+      filteredRows.length < desiredCount &&
+      (!eventsExhausted || !workdaysExhausted || !businessDateWorkdaysExhausted)
+    ) {
       const variables = buildEventsFastVariables(orgId, filters, modeConfig.mode, {
         ...modeConfig,
         limit: Math.min(chunkLimit, scanLimit - nextOffset),
@@ -2367,7 +2392,18 @@ async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '', op
         return null
       }
 
-      const [nextEvents, nextWorkdays] = await Promise.all([
+      const businessDateVariables = {
+        orgId,
+        fromBusinessDateYmd: normalizeFilterDate(filters.fromIso),
+        toBusinessDateYmd: normalizeFilterDate(filters.toIso),
+        limit: variables.limit,
+        offset: nextOffset,
+      }
+      if (!businessDateVariables.fromBusinessDateYmd || !businessDateVariables.toBusinessDateYmd) {
+        return null
+      }
+
+      const [nextEvents, nextWorkdays, nextBusinessDateWorkdays] = await Promise.all([
         eventsExhausted
           ? Promise.resolve([])
           : runEventsPageQuery(operations.events, variables, 'events', {
@@ -2378,6 +2414,14 @@ async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '', op
           : runEventsPageQuery(operations.workdays, variables, 'workdays', {
               forceRefresh: filters.forceRefresh === true,
             }),
+        businessDateWorkdaysExhausted
+          ? Promise.resolve([])
+          : runEventsPageQuery(
+              'WorkdaysPageForOrgByBusinessDate',
+              businessDateVariables,
+              'workdays',
+              { forceRefresh: filters.forceRefresh === true },
+            ),
       ])
 
       if (nextEvents.length < variables.limit) {
@@ -2386,15 +2430,20 @@ async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '', op
       if (nextWorkdays.length < variables.limit) {
         workdaysExhausted = true
       }
+      if (nextBusinessDateWorkdays.length < variables.limit) {
+        businessDateWorkdaysExhausted = true
+      }
 
       eventRows.push(...nextEvents)
       workdayRows.push(...nextWorkdays)
+      businessDateWorkdayRows.push(...nextBusinessDateWorkdays)
 
-      const lookupMaps = buildLookupMaps(clients, zones, workers, workdayRows)
+      const combinedWorkdayRows = [...workdayRows, ...businessDateWorkdayRows]
+      const lookupMaps = buildLookupMaps(clients, zones, workers, combinedWorkdayRows)
       const mappedEvents = eventRows
         .map((row) => mapWorkday(orgId, row, lookupMaps))
         .filter((item) => isDisplayableMappedItem(item))
-      const mappedWorkdays = workdayRows
+      const mappedWorkdays = combinedWorkdayRows
         .map((row) => mapWorkday(orgId, row, lookupMaps))
         .filter((item) => isDisplayableMappedItem(item))
       const merged = mappedEvents.length
@@ -2415,10 +2464,14 @@ async function fetchFastEventsPage(orgId, filters = {}, workerLoginHint = '', op
       eventsPageForOrgUnavailable = true
       return null
     }
+    if (isOperationNotFoundError(error, 'WorkdaysPageForOrgByBusinessDate')) {
+      workdaysBusinessDatePageUnavailable = true
+      return null
+    }
     throw error
   }
 
-  const hasMoreSourceRows = !eventsExhausted || !workdaysExhausted
+  const hasMoreSourceRows = !eventsExhausted || !workdaysExhausted || !businessDateWorkdaysExhausted
   if (hasMoreSourceRows && filteredRows.length < desiredCount) {
     throw pagedReadLimitError('zdarzeń')
   }
@@ -2669,7 +2722,10 @@ export async function getWorkdays(orgId, filters = {}) {
 
     const [mappedWorkdays, mappedEvents] = await Promise.all([
       getMappedWorkdaysForOrg(orgId),
-      getMappedEventsForOrg(orgId).catch(() => []),
+      // A Workday-only fallback can silently restore the legacy envelope sum
+      // (including an open Event). Reports must fail closed when the canonical
+      // session source cannot be read.
+      getMappedEventsForOrg(orgId),
     ])
     mapped = enrichWorkdaysWithEventIntervals(mappedWorkdays, mappedEvents)
       .map((item) => ({
@@ -2797,8 +2853,7 @@ export async function getRecentEvents(orgId, limit = 5) {
 }
 
 function currentDayYmd() {
-  const now = new Date()
-  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
+  return warsawBusinessDateKey(new Date())
 }
 
 function toTimestamp(value) {
@@ -2816,16 +2871,16 @@ function toLocalDayKey(value) {
   if (!iso) {
     return ''
   }
-
-  const date = new Date(iso)
-  if (!Number.isFinite(date.getTime())) {
-    return ''
-  }
-
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+  return warsawBusinessDateKey(iso)
 }
 
 function isItemFromLocalDay(item, dayKey) {
+  const canonicalBusinessDate = String(
+    item?.businessDateYmd ?? item?.business_date_ymd ?? item?.workday?.businessDateYmd ?? '',
+  ).trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(canonicalBusinessDate)) {
+    return canonicalBusinessDate === dayKey
+  }
   const keys = [
     toLocalDayKey(item?.startAt),
     toLocalDayKey(item?.endAt),
@@ -3232,6 +3287,9 @@ async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
         latestStopIso: '',
         latestStopTs: 0,
         closedSec: 0,
+        closedSessionsSec: 0,
+        confirmedSec: 0,
+        provisionalSec: 0,
         closedIntervals: new Set(),
         runningCandidates: [],
       })
@@ -3290,6 +3348,10 @@ async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
     }
 
     bucket.entriesCount += 1
+    const accounting = workSessionSummarySeconds(item)
+    bucket.closedSessionsSec += accounting.closedSessionsSec
+    bucket.confirmedSec += accounting.confirmedSec
+    bucket.provisionalSec += accounting.provisionalSec
     const startIso = toIso(item?.dayStartAt || item?.startAt)
     const endIso = toIso(item?.dayEndAt || item?.endAt || item?.dayEndScanAt)
     const startTs = toTimestamp(startIso)
@@ -3347,7 +3409,6 @@ async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
       bucket.runningCandidates.push({
         startTs,
         startIso,
-        workSec: Math.max(0, Math.floor(Number(item?.durationSec ?? 0) || 0)),
         clientLabel,
         zoneLabel,
         zoneId: zoneCode,
@@ -3383,17 +3444,13 @@ async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
       const isRunning = Boolean(activeCandidate)
       const startIso = bucket.firstStartIso || activeCandidate?.startIso || ''
       const stopIso = isRunning ? '' : bucket.latestStopIso || ''
-      const activeSec =
-        isRunning && Number(activeCandidate?.workSec) > 0
-          ? Math.floor(Number(activeCandidate.workSec))
-          : isRunning && activeCandidate?.startTs > 0 && nowTs > activeCandidate.startTs
-            ? Math.floor((nowTs - activeCandidate.startTs) / 1000)
-          : 0
-      const totalSec = Math.max(0, bucket.closedSec + activeSec)
-      let duration = durationToHms(totalSec)
-      if (duration === '-' && (isRunning || bucket.firstStartTs > 0)) {
-        duration = '00:00:00'
-      }
+      const activeElapsedSec = isRunning && activeCandidate?.startTs > 0 && nowTs > activeCandidate.startTs
+        ? Math.floor((nowTs - activeCandidate.startTs) / 1000)
+        : 0
+      const closedSessionsSec = Math.max(0, Math.floor(Number(bucket.closedSessionsSec) || 0))
+      const confirmedSec = Math.max(0, Math.floor(Number(bucket.confirmedSec) || 0))
+      const provisionalSec = Math.max(0, Math.floor(Number(bucket.provisionalSec) || 0))
+      const duration = formatWorkDurationHms(closedSessionsSec)
 
       const resolvedClient = isRunning
         ? activeCandidate?.clientLabel ?? bucket.firstStartClient ?? '-'
@@ -3417,6 +3474,8 @@ async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
 
       return {
         id: bucket.workerId || bucket.id,
+        businessDateYmd: day,
+        dayKey: day,
         workerId: bucket.workerId || '',
         workerLogin: bucket.workerLogin || bucket.workerId || bucket.id,
         workerName: bucket.workerName,
@@ -3432,7 +3491,12 @@ async function getTodayActiveWorkersFromWorkdays(orgId, options = {}) {
         qrStart: formatTime(startIso),
         qrStop: stopIso ? formatTime(stopIso) : '-',
         duration,
-        durationSec: totalSec,
+        activeDuration: formatWorkDurationHms(activeElapsedSec),
+        activeElapsedSec,
+        closedSessionsSec,
+        confirmedSec,
+        provisionalSec,
+        durationSec: closedSessionsSec,
         isRunning,
         status: isRunning ? 'RUNNING' : 'CLOSED',
         sourceOfTruth: 'workday',
@@ -3477,6 +3541,9 @@ export async function getTodayActiveWorkers(orgId, options = {}) {
     return getTodayActiveWorkersFromWorkdays(orgId, options)
   }
 
+  // Explicit diagnostic compatibility path only. Official dashboard callers
+  // use the canonical Workday/Event reconciliation path above; legacy rows
+  // never become confirmed time without reconciliation.
   const day = currentDayYmd()
   const [workdayResponse, eventsResponse, workerDirectory] = await Promise.all([
     getWorkdays(orgId, {
@@ -3653,6 +3720,7 @@ export async function getTodayActiveWorkers(orgId, options = {}) {
         latestDayStopTs: 0,
         closedSec: 0,
         closedIntervals: new Set(),
+        closedSessionIntervals: [],
         runningCandidates: [],
         runningCandidateKeys: new Set(),
       })
@@ -3911,7 +3979,7 @@ export async function getTodayActiveWorkers(orgId, options = {}) {
         const intervalKey = `${startTs}|${endTs}`
         if (!bucket.closedIntervals.has(intervalKey)) {
           bucket.closedIntervals.add(intervalKey)
-          bucket.closedSec += Math.floor((endTs - startTs) / 1000)
+          bucket.closedSessionIntervals.push({ startTs, endTs })
         }
       }
     })
@@ -3926,16 +3994,13 @@ export async function getTodayActiveWorkers(orgId, options = {}) {
       // Dashboard rule: always show the first QR START from the current day.
       const startIso = bucket.firstStartIso || (isRunning ? activeCandidate?.startIso : '')
       const stopIso = !isRunning ? bucket.latestDayStopIso || bucket.latestRelevantStopIso || '' : ''
-      const startTs = toTimestamp(startIso)
-      const stopReferenceTs = isRunning ? nowTs : toTimestamp(stopIso)
-      const totalSec =
-        startTs > 0 && stopReferenceTs > startTs
-          ? Math.max(0, Math.floor((stopReferenceTs - startTs) / 1000))
-          : 0
-      let duration = durationToHms(totalSec)
-      if (duration === '-' && (isRunning || bucket.firstStartTs > 0)) {
-        duration = '00:00:00'
-      }
+      const activeElapsedSec = isRunning && activeCandidate?.startTs > 0 && nowTs > activeCandidate.startTs
+        ? Math.floor((nowTs - activeCandidate.startTs) / 1000)
+        : 0
+      const closedSessionsSec = workIntervalsTotalSeconds(bucket.closedSessionIntervals)
+      const confirmedSec = 0
+      const provisionalSec = closedSessionsSec
+      const duration = formatWorkDurationHms(closedSessionsSec)
 
       const resolvedClient = isRunning
         ? activeCandidate?.clientLabel ?? bucket.firstStartClient ?? '-'
@@ -3959,6 +4024,8 @@ export async function getTodayActiveWorkers(orgId, options = {}) {
 
       return {
         id: bucket.workerId || bucket.id,
+        businessDateYmd: day,
+        dayKey: day,
         workerId: bucket.workerId || '',
         workerLogin: bucket.workerLogin || bucket.workerId || bucket.id,
         workerName: bucket.workerName,
@@ -3974,6 +4041,12 @@ export async function getTodayActiveWorkers(orgId, options = {}) {
         qrStart: formatTime(startIso),
         qrStop: stopIso ? formatTime(stopIso) : '-',
         duration,
+        activeDuration: formatWorkDurationHms(activeElapsedSec),
+        activeElapsedSec,
+        closedSessionsSec,
+        confirmedSec,
+        provisionalSec,
+        durationSec: closedSessionsSec,
         isRunning,
         activeSortTs: isRunning ? activeCandidate?.startTs ?? 0 : 0,
         latestEventTs: bucket.latestEventTs,
@@ -4345,7 +4418,6 @@ export async function createEvent(orgId, payload = {}) {
   ensureFirebase()
   const mutationPayload = buildEventMutationPayload(payload)
   mutationPayload.workerLogin = workerLogin
-  const canonicalWorkdayId = String(payload.workdayId ?? payload.linkedWorkdayId ?? eventId).trim() || eventId
   const integrityPayload = {
     workerLogin,
     status: mutationPayload.status,
@@ -4353,21 +4425,19 @@ export async function createEvent(orgId, payload = {}) {
   }
   const [, integritySnapshot] = await Promise.all([
     assertManualEventZoneBelongsToClient(orgId, manualClientId, manualZoneId),
-    requiresOpenIntegrityCheck(integrityPayload)
-      ? readWorkerIntegritySnapshot(orgId, integrityPayload.workerLogin)
-      : Promise.resolve(null),
+    readWorkerIntegritySnapshot(orgId, integrityPayload.workerLogin),
   ])
-  await Promise.all([
-    assertNoOtherOpenCleanEvent(orgId, integrityPayload, {
-      rows: integritySnapshot?.events,
-      // Ręczny zapis zarządczy może współistnieć z nierozstrzygniętym wpisem
-      // historycznym. Jawny aktywny CLEAN nadal pozostaje blockerem.
-      blockUnresolvedLegacy: false,
-    }),
-    assertNoOtherOpenWorkday(orgId, integrityPayload, {
-      rows: integritySnapshot?.workdays,
-    }),
-  ])
+  await assertNoOtherOpenCleanEvent(orgId, integrityPayload, {
+    rows: integritySnapshot?.events,
+    // Ręczny zapis zarządczy może współistnieć z nierozstrzygniętym wpisem
+    // historycznym. Jawny aktywny CLEAN nadal pozostaje blockerem.
+    blockUnresolvedLegacy: false,
+  })
+  const linkedWorkdayId = resolveContainingWorkdayId(integritySnapshot?.workdays, {
+    ...mutationPayload,
+    workerLogin,
+    workdayId: payload.workdayId ?? payload.linkedWorkdayId,
+  })
   const eventMutationPayload = {
     zoneId: mutationPayload.zoneId,
     workerLogin,
@@ -4383,63 +4453,37 @@ export async function createEvent(orgId, payload = {}) {
     startEventId: mutationPayload.startEventId,
     endEventId: mutationPayload.endEventId,
   }
-  // Event jest rekordem kanonicznym dla ochrony pojedynczego otwartego CLEAN.
-  // Nie zapisuj lustrzanego Workday, gdy Event nie zostal jednoznacznie potwierdzony.
+  // Ręczny wpis w zakładce Zdarzenia jest czynnością operacyjną. Nie tworzy
+  // lustrzanego Workday i dlatego nigdy nie zwiększa czasu obecności. Gdy
+  // dokładnie jedna sesja pracy zawiera wpis, zapisujemy tylko bezpieczny link.
   await insertEventForOrg({
     orgId,
-    eventId: canonicalWorkdayId,
-    // Workday jeszcze nie istnieje, więc przedwczesne powiązanie narusza FK
-    // event(org_id, workday_id) -> workday(org_id, workday_id).
-    workdayId: null,
-    ...eventMutationPayload,
+    eventId,
+    workdayId: linkedWorkdayId || null,
+    zoneId: eventMutationPayload.zoneId,
+    workerLogin: eventMutationPayload.workerLogin,
+    workerName: payload.workerName ?? null,
+    startAt: eventMutationPayload.startAt,
+    endAt: eventMutationPayload.endAt,
+    durationSec: eventMutationPayload.durationSec,
+    status: eventMutationPayload.status,
+    closeMarkedAt: eventMutationPayload.closeMarkedAt,
+    endReason: eventMutationPayload.endReason,
+    comment: eventMutationPayload.comment,
+    deviceId: eventMutationPayload.deviceId,
+    startEventId: eventMutationPayload.startEventId,
+    endEventId: eventMutationPayload.endEventId,
   })
-
-  try {
-    await createWorkday(orgId, {
-      workdayId: canonicalWorkdayId,
-      workerLogin,
-      workerName: payload.workerName ?? null,
-      utilityRoomId: mutationPayload.zoneId ?? payload.utilityRoomId ?? payload.roomId ?? null,
-      startAt: mutationPayload.startAt,
-      endAt: mutationPayload.endAt,
-      durationSec: mutationPayload.durationSec,
-      status: mutationPayload.status,
-      comment: mutationPayload.comment,
-      updatedBy: payload.updatedBy ?? payload.editedBy ?? null,
-    })
-  } catch (error) {
-    const partialError = new Error(
-      'Zapis Event został potwierdzony, ale wynik zapisu powiązanego dnia pracy jest niepewny. Odśwież dane i zweryfikuj rekord przed ponowieniem.',
-    )
-    partialError.code = 'PARTIAL_EVENT_WORKDAY_WRITE_UNKNOWN'
-    partialError.eventId = canonicalWorkdayId
-    partialError.cause = error
-    throw partialError
-  }
-
-  try {
-    await reidentifyEventForOrg({
-      orgId,
-      eventId: canonicalWorkdayId,
-      workdayId: canonicalWorkdayId,
-      ...eventMutationPayload,
-    })
-  } catch (error) {
-    const partialError = new Error(
-      'Event i dzień pracy zostały zapisane, ale ich powiązanie nie zostało potwierdzone. Odśwież dane i zweryfikuj rekord przed ponowieniem.',
-    )
-    partialError.code = 'PARTIAL_EVENT_WORKDAY_LINK_UNKNOWN'
-    partialError.eventId = canonicalWorkdayId
-    partialError.workdayId = canonicalWorkdayId
-    partialError.cause = error
-    throw partialError
-  }
 
   invalidateWorkdayCache(orgId)
 
   return {
-    id: canonicalWorkdayId,
-    eventId: canonicalWorkdayId,
+    id: eventId,
+    eventId,
+    workdayId: linkedWorkdayId,
+    linkedWorkdayId,
+    historySourceKind: 'event',
+    hasExplicitEventId: true,
     orgId,
     workerLogin: String(payload.workerLogin ?? '').trim(),
     workerName: String(payload.workerName ?? '').trim(),
@@ -4463,6 +4507,22 @@ export async function updateEvent(orgId, eventId, payload = {}) {
   const normalizedEventId = String(eventId ?? payload.eventId ?? payload.workdayId ?? '').trim()
   if (!normalizedEventId) {
     throw new Error('Pole eventId jest wymagane dla updateEvent(orgId, eventId).')
+  }
+  const linkedWorkdayId = String(payload.linkedWorkdayId ?? '').trim()
+  const payloadWorkdayId = String(payload.workdayId ?? '').trim()
+  const historySourceKind = String(payload.historySourceKind ?? '').trim().toLowerCase()
+  const requiresReconciliation = Boolean(
+    linkedWorkdayId ||
+    payload.linkedWorkdayFound === true ||
+    historySourceKind === 'workday' ||
+    (historySourceKind === 'event' && payloadWorkdayId && payloadWorkdayId !== normalizedEventId),
+  )
+  if (requiresReconciliation) {
+    const error = new Error(
+      'Ta sesja jest powiazana z dniem pracy i wymaga korekty przez dialog „Przeglad i naprawa dnia”.',
+    )
+    error.code = 'WORKDAY_RECONCILIATION_REQUIRED'
+    throw error
   }
   const workerLogin = String(payload.workerLogin ?? '').trim()
   if (!workerLogin) {
@@ -4553,33 +4613,16 @@ export async function updateEvent(orgId, eventId, payload = {}) {
     }
   }
 
-  try {
-    await updateWorkday(orgId, canonicalWorkdayId, {
-      workerLogin: mutationPayload.workerLogin ?? payload.workerLogin ?? null,
-      workerName: payload.workerName ?? null,
-      utilityRoomId: mutationPayload.zoneId ?? payload.utilityRoomId ?? payload.roomId ?? null,
-      startAt: mutationPayload.startAt,
-      endAt: mutationPayload.endAt,
-      durationSec: mutationPayload.durationSec,
-      status: mutationPayload.status,
-      comment: mutationPayload.comment,
-      updatedBy: payload.updatedBy ?? payload.editedBy ?? null,
-    })
-  } catch (error) {
-    const partialError = new Error(
-      'Event został zaktualizowany, ale wynik aktualizacji powiązanego dnia pracy jest niepewny. Odśwież dane i zweryfikuj rekord przed ponowieniem.',
-    )
-    partialError.code = 'PARTIAL_EVENT_WORKDAY_UPDATE_UNKNOWN'
-    partialError.eventId = normalizedEventId
-    partialError.workdayId = canonicalWorkdayId
-    partialError.cause = error
-    throw partialError
-  }
+  // Event is the canonical session record. Editing a single START/STOP pair must
+  // not overwrite the linked Workday envelope or its total. Workday reconciliation
+  // is performed separately after all sessions have passed integrity validation.
   invalidateWorkdayCache(orgId)
 
   return {
-    id: canonicalWorkdayId,
-    eventId: canonicalWorkdayId,
+    id: normalizedEventId,
+    eventId: normalizedEventId,
+    workdayId: canonicalWorkdayId,
+    linkedWorkdayId: canonicalWorkdayId,
     orgId,
     workerLogin: String(payload.workerLogin ?? '').trim(),
     workerName: String(payload.workerName ?? '').trim(),
@@ -4650,6 +4693,13 @@ export async function deleteEvent(orgId, eventId, options = {}) {
   const normalizedEventId = String(eventId ?? '').trim()
   if (!normalizedEventId) {
     throw new Error('Pole eventId jest wymagane dla deleteEvent(orgId, eventId).')
+  }
+  if (String(options?.linkedWorkdayId ?? options?.reconciliationWorkdayId ?? '').trim()) {
+    const error = new Error(
+      'Ta sesja jest powiazana z dniem pracy i nie moze zostac usunieta poza bezpiecznym uzgadnianiem dnia.',
+    )
+    error.code = 'WORKDAY_RECONCILIATION_REQUIRED'
+    throw error
   }
 
   ensureFirebase()

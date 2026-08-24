@@ -94,35 +94,6 @@ type OrganizationSubscription @table(
   version: Int! @col(name: "version") @default(value: 0)
 }
 
-type OrgUiStyle @table(
-  name: "org_ui_style",
-  singular: "orgUiStyle",
-  plural: "orgUiStyles",
-  key: "orgId"
-) {
-  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
-  organization: Organization! @ref(fields: "orgId", references: "orgId")
-
-  defaultStyleId: String! @col(name: "default_style_id", dataType: "varchar(64)")
-  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
-  updatedBy: String @col(name: "updated_by", dataType: "varchar(120)")
-}
-
-type UserUiStylePreference @table(
-  name: "user_ui_style_preference",
-  singular: "userUiStylePreference",
-  plural: "userUiStylePreferences",
-  key: ["orgId", "uid"]
-) {
-  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
-  organization: Organization! @ref(fields: "orgId", references: "orgId")
-
-  uid: String! @col(name: "uid", dataType: "varchar(128)")
-  styleId: String! @col(name: "style_id", dataType: "varchar(64)")
-  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
-  updatedBy: String @col(name: "updated_by", dataType: "varchar(120)")
-}
-
 type Worker @table(
   name: "worker",
   singular: "worker",
@@ -439,6 +410,7 @@ type Workday @table(
   endScanAt: Timestamp @col(name: "end_scan_at")
   autoCloseAt: Timestamp @col(name: "auto_close_at")
   endAt: Timestamp @col(name: "end_at")
+  businessDateYmd: String @col(name: "business_date_ymd", dataType: "varchar(10)")
 
   durationSec: Int @col(name: "duration_sec")
   status: String @col(name: "status")
@@ -465,6 +437,28 @@ type Workday @table(
 
   updatedBy: String @col(name: "updated_by")
   comment: String @col(name: "comment")
+}
+
+type WorkdayReconciliationAudit @table(
+  name: "workday_reconciliation_audit",
+  singular: "workdayReconciliationAudit",
+  plural: "workdayReconciliationAudits",
+  key: ["orgId", "auditId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  auditId: String! @col(name: "audit_id", dataType: "varchar(64)")
+  workdayId: String! @col(name: "workday_id", dataType: "varchar(64)")
+  idempotencyKey: String! @col(name: "idempotency_key", dataType: "varchar(128)")
+  requestHash: String! @col(name: "request_hash", dataType: "varchar(64)")
+  action: String! @col(name: "action", dataType: "varchar(32)")
+  reason: String! @col(name: "reason")
+  actorUid: String! @col(name: "actor_uid", dataType: "varchar(128)")
+  beforeSnapshot: String! @col(name: "before_snapshot")
+  afterSnapshot: String! @col(name: "after_snapshot")
+  responseSnapshot: String! @col(name: "response_snapshot")
+  createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
 }
 
 type WorkdayPause @table(

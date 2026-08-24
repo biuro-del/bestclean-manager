@@ -1,5 +1,3 @@
-import { STYLE_FALLBACK_ID } from '../../services/styleService'
-
 export function createAppState(overrides = {}) {
   return {
 
@@ -175,6 +173,12 @@ export function createAppState(overrides = {}) {
   workerAccountDaysRows: [],
   workerAccountAllTimeRows: [],
   workerAccountTimeRows: [],
+  workerAccountReconciliationModel: null,
+  workerAccountReconciliationRow: null,
+  workerAccountReconciliationCorrections: [],
+  workerAccountReconciliationIdempotency: null,
+  workerAccountReconciliationSaving: false,
+  workerAccountReconciliationRestoreFocus: null,
   workerAccountTimeSelectedKeys: new Set(),
   workerAccountTimeCurrentPageKeys: [],
   workerAccountEventsPage: 1,
@@ -212,7 +216,6 @@ export function createAppState(overrides = {}) {
   reportHistoryRows: [],
   reportHistoryExpanded: {},
   reportHistoryEditableMap: {},
-  reportHistoryClosingDayKey: '',
   reportHistoryClientOptions: [],
   reportHistoryWorkerOptions: [],
   reportHistoryZoneOptions: [],
@@ -233,14 +236,6 @@ export function createAppState(overrides = {}) {
   dashboardBackgroundDataLoaded: false,
   dashboardForceRefreshOnNextOpen: false,
   dashboardLoadingCount: 0,
-  settingsActiveTab: 'styles',
-  settingsEffectiveStyleId: STYLE_FALLBACK_ID,
-  settingsEffectiveStyleSource: 'fallback',
-  settingsOrgStyleId: '',
-  settingsUserStyleId: '',
-  settingsBackups: [],
-  settingsImportInspection: null,
-  settingsAutomationDayKey: '',
   currentRoute: '',
 
     ...overrides,

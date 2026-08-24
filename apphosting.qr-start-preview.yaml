@@ -1,0 +1,66 @@
+env:
+  - variable: NODE_ENV
+    value: production
+    availability:
+      - RUNTIME
+  - variable: APP_TARGET
+    value: portal
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: FIREBASE_PROJECT_ID
+    value: cleanzi-portal-klienta-test
+    availability:
+      - RUNTIME
+  - variable: VITE_FIREBASE_API_KEY
+    value: AIzaSyCKNwVi9MhruMdTUWLo8YBwmBM44Kg2YHs
+    availability:
+      - BUILD
+  - variable: VITE_FIREBASE_AUTH_DOMAIN
+    value: cleanzi-portal-klienta-test.firebaseapp.com
+    availability:
+      - BUILD
+  - variable: VITE_FIREBASE_PROJECT_ID
+    value: cleanzi-portal-klienta-test
+    availability:
+      - BUILD
+  - variable: VITE_FIREBASE_APP_ID
+    value: 1:53660692673:web:c42a0132fd2a0694516440
+    availability:
+      - BUILD
+  - variable: VITE_ENABLE_JOB_CARD_PREVIEW
+    value: "1"
+    availability:
+      - BUILD
+  - variable: PORTAL_DB_ROUTES_MODE
+    value: direct
+    availability:
+      - RUNTIME
+  - variable: PORTAL_SCHEDULE_ORDERS_MODE
+    value: direct
+    availability:
+      - RUNTIME
+  - variable: CLOUD_SQL_CONNECTION_NAME
+    value: cleanzi-portal-klienta-test:europe-west4:clz-schedule-preview-260812-db
+    availability:
+      - RUNTIME
+  - variable: DB_NAME
+    value: clz-schedule-preview-260812
+    availability:
+      - RUNTIME
+  - variable: DB_CONNECTOR
+    value: cloudsql
+    availability:
+      - RUNTIME
+  - variable: CLOUD_SQL_AUTH_TYPE
+    value: IAM
+    availability:
+      - RUNTIME
+  - variable: DB_IAM_USER
+    value: firebase-app-hosting-compute@cleanzi-portal-klienta-test.iam.gserviceaccount.com
+    availability:
+      - RUNTIME
+  - variable: DB_POOL_MAX
+    value: "5"
+    availability:
+      - RUNTIME

@@ -64,25 +64,6 @@ import {
   updateEvent,
   updateWorkday,
 } from '../services/workdayService'
-import {
-  createBackup,
-  deleteBackup,
-  ensureBackupAutomation,
-  getBackupDownload,
-  inspectBackupFile,
-  listBackups,
-  restoreBackupById,
-  restoreBackupFromFile,
-  restoreLatestPreRestore,
-} from '../services/backupService'
-import {
-  STYLE_FALLBACK_ID,
-  clearUserStyle,
-  getEffectiveStyle,
-  listAvailableStyles,
-  setOrgDefaultStyle,
-  setUserStyle,
-} from '../services/styleService'
 import { deletePortalTasks, fetchPortalTasks, upsertPortalTasks } from '../services/portalTaskService'
 import {
   deleteScheduleTasks,
@@ -110,6 +91,8 @@ import {
   setSelectOptions,
   todayYmd,
   toIso,
+  ymdToWarsawIsoRangeEnd,
+  ymdToWarsawIsoRangeStart,
 } from '../app/shared/index.js'
 
 let portalNoticeTimer = null
@@ -144,9 +127,6 @@ const ROUTE_SYNC_POLICY_STALE_FIRST = 'stale-first'
 const ROUTE_SYNC_POLICY_FORCE = 'force'
 const ROUTE_SYNC_POLICY_BACKGROUND = 'background'
 const routeSyncMeta = new Map()
-const SETTINGS_TAB_STYLES = 'styles'
-const SETTINGS_TAB_BACKUP = 'backup'
-const SETTINGS_TAB_STORAGE_KEY = 'portal.settings.activeTab'
 const CURRENT_ROUTE_STORAGE_KEY = 'portal.currentRoute'
 const SIDEBAR_COLLAPSE_STORAGE_KEY = 'portal.sidebarCollapsed'
 const SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS = [
@@ -170,9 +150,16 @@ const SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS = [
   { id: 'sub-worker-profile', kind: 'subsection', label: 'Lista pracowników', meta: 'Podsekcja dział "Pracownicy"', route: 'workerProfile' },
   { id: 'section-reports', kind: 'section', label: 'Raporty', meta: 'Sekcja', route: 'reports' },
   { id: 'sub-reports-summary', kind: 'subsection', label: 'Zestawienia', meta: 'Podsekcja dział "Raporty"', route: 'reports' },
-  { id: 'section-settings', kind: 'section', label: 'Ustawienia', meta: 'Sekcja', route: 'settingsStyles' },
-  { id: 'sub-settings-styles', kind: 'subsection', label: 'Style', meta: 'Podsekcja dział "Ustawienia"', route: 'settingsStyles' },
-  { id: 'sub-settings-backup', kind: 'subsection', label: 'Kopia zapasowa', meta: 'Podsekcja dział "Ustawienia"', route: 'settingsBackup' },
+  { id: 'section-settings', kind: 'section', label: 'Ustawienia', meta: 'Sekcja', route: 'settings' },
+  { id: 'sub-settings-profile', kind: 'subsection', label: 'Profil', meta: 'Ustawienia · Moje konto', route: 'settingsProfile' },
+  { id: 'sub-settings-notifications', kind: 'subsection', label: 'Powiadomienia', meta: 'Ustawienia · Moje konto', route: 'settingsNotifications' },
+  { id: 'sub-settings-language-app', kind: 'subsection', label: 'Język i aplikacja', meta: 'Ustawienia · Moje konto', route: 'settingsLanguageApp' },
+  { id: 'sub-settings-account-security', kind: 'subsection', label: 'Bezpieczeństwo konta', meta: 'Ustawienia · Moje konto', route: 'settingsAccountSecurity' },
+  { id: 'sub-settings-organization-data', kind: 'subsection', label: 'Dane organizacji', meta: 'Ustawienia · Organizacja', route: 'settingsOrganizationData' },
+  { id: 'sub-settings-alerts', kind: 'subsection', label: 'Alerty', meta: 'Ustawienia · Organizacja', route: 'settingsAlerts' },
+  { id: 'sub-settings-integrations', kind: 'subsection', label: 'Integracje', meta: 'Ustawienia · Organizacja', route: 'settingsIntegrations' },
+  { id: 'sub-settings-billing', kind: 'subsection', label: 'Subskrypcja i rozliczenia', meta: 'Ustawienia · Organizacja', route: 'settingsBilling' },
+  { id: 'sub-settings-data-security', kind: 'subsection', label: 'Bezpieczeństwo i dane', meta: 'Ustawienia · Organizacja', route: 'settingsDataSecurity' },
 ]
 const WORKER_DETAIL_COLUMN_WIDTHS_STORAGE_KEY = 'portal.workerDetailColumnWidths'
 const GRID_COLUMN_RESIZE_CLASS = 'grid-col-resize-active'
@@ -193,9 +180,9 @@ const CALENDAR_TONE_OPTIONS = [
   { value: 'message', label: 'Wiadomość pracownika', css: 'message' },
 ]
 const FLOATING_TABLE_SCROLL_SELECTOR =
-  '#portalRoot :is(.events-table, .workers-table, .zones-table, .rep-tablewrap, .backup-table-wrap)'
+  '#portalRoot :is(.events-table, .workers-table, .zones-table, .rep-tablewrap)'
 const FLOATING_TABLE_SCROLL_CLOSEST_SELECTOR =
-  '.events-table, .workers-table, .zones-table, .rep-tablewrap, .backup-table-wrap'
+  '.events-table, .workers-table, .zones-table, .rep-tablewrap'
 const BLOCKING_MODAL_SELECTORS = [
   '#evEditorOverlay',
   '#evCommentOverlay',
@@ -215,6 +202,18 @@ const PORTAL_NOTIFICATION_ALERT_SELECTORS = [
 ]
 const PORTAL_INTERACTION_FIELD_SELECTOR =
   'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [contenteditable="true"]'
+const PORTAL_SETTINGS_ROUTES = new Set([
+  'settings',
+  'settingsProfile',
+  'settingsNotifications',
+  'settingsLanguageApp',
+  'settingsAccountSecurity',
+  'settingsOrganizationData',
+  'settingsAlerts',
+  'settingsIntegrations',
+  'settingsBilling',
+  'settingsDataSecurity',
+])
 const PORTAL_ROUTE_VIEW_IDS = {
   dashboard: 'view-dashboard',
   calendar: 'view-calendar',
@@ -233,12 +232,15 @@ const PORTAL_ROUTE_VIEW_IDS = {
   clientProfileDetails: 'view-clientProfileDetails',
   reports: 'view-reports',
   settings: 'view-settings',
-  settingsStyles: 'view-settings',
-  settingsBackup: 'view-settings',
-}
-const PORTAL_TEMPLATE_ROUTE_ALIASES = {
-  settingsStyles: 'settings',
-  settingsBackup: 'settings',
+  settingsProfile: 'view-settings',
+  settingsNotifications: 'view-settings',
+  settingsLanguageApp: 'view-settings',
+  settingsAccountSecurity: 'view-settings',
+  settingsOrganizationData: 'view-settings',
+  settingsAlerts: 'view-settings',
+  settingsIntegrations: 'view-settings',
+  settingsBilling: 'view-settings',
+  settingsDataSecurity: 'view-settings',
 }
 const PORTAL_ROUTE_FEATURE_KEYS = {
   dashboard: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'workerProfile', 'orders', 'kanban', 'calendar'],
@@ -257,8 +259,15 @@ const PORTAL_ROUTE_FEATURE_KEYS = {
   clientProfileDetails: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar'],
   reports: ['dashboard', 'events', 'zones', 'clientProfile', 'workerTime', 'reports'],
   settings: ['settings'],
-  settingsStyles: ['settings'],
-  settingsBackup: ['settings'],
+  settingsProfile: ['settings'],
+  settingsNotifications: ['settings'],
+  settingsLanguageApp: ['settings'],
+  settingsAccountSecurity: ['settings'],
+  settingsOrganizationData: ['settings'],
+  settingsAlerts: ['settings'],
+  settingsIntegrations: ['settings'],
+  settingsBilling: ['settings'],
+  settingsDataSecurity: ['settings'],
 }
 const PORTAL_ROUTE_CAPABILITIES = Object.freeze({
   calendar: 'scheduling',
@@ -284,8 +293,15 @@ const PORTAL_ROUTE_BIND_KEYS = {
   clientProfileDetails: 'clientProfile:details',
   reports: 'reports',
   settings: 'settings',
-  settingsStyles: 'settings',
-  settingsBackup: 'settings',
+  settingsProfile: 'settings',
+  settingsNotifications: 'settings',
+  settingsLanguageApp: 'settings',
+  settingsAccountSecurity: 'settings',
+  settingsOrganizationData: 'settings',
+  settingsAlerts: 'settings',
+  settingsIntegrations: 'settings',
+  settingsBilling: 'settings',
+  settingsDataSecurity: 'settings',
 }
 const PORTAL_ROUTE_LOADING_HTML = `
   <div class="portal-section-loading" role="status" aria-live="polite" aria-busy="true" style="min-height:240px;display:grid;place-items:center;padding:32px;">
@@ -322,7 +338,8 @@ function portalRouteExists(route) {
     return false
   }
 
-  return [...document.querySelectorAll('[data-route]')].some((node) => node?.dataset?.route === normalizedRoute)
+  return PORTAL_SETTINGS_ROUTES.has(normalizedRoute)
+    || [...document.querySelectorAll('[data-route]')].some((node) => node?.dataset?.route === normalizedRoute)
 }
 
 function readStoredCurrentRoute() {
@@ -525,10 +542,26 @@ function resetPortalState(overrides = {}) {
   routeSyncActiveCount = 0
   routeSyncMeta.clear()
   setRouteSyncOverlayVisible(false)
-  return resetSessionState({
-    settingsActiveTab: readStoredSettingsTab(),
-    ...overrides,
-  })
+  return resetSessionState(overrides)
+}
+
+function cleanupRetiredSettingsStorage() {
+  try {
+    window.sessionStorage.removeItem('portal.settings.activeTab')
+  } catch {
+    // Retired storage cleanup must not block portal startup.
+  }
+
+  try {
+    if (!window.indexedDB) {
+      return
+    }
+    const request = window.indexedDB.deleteDatabase('portal-backups')
+    request.onerror = () => {}
+    request.onblocked = () => {}
+  } catch {
+    // Retired storage cleanup must not block portal startup.
+  }
 }
 
 function parseGridPixelWidths(rawValue) {
@@ -1579,6 +1612,9 @@ function routeHasUsableData(route) {
   if (meta?.loadedAt) {
     return true
   }
+  if (PORTAL_SETTINGS_ROUTES.has(normalizedRoute)) {
+    return true
+  }
 
   switch (normalizedRoute) {
     case 'dashboard':
@@ -1607,9 +1643,6 @@ function routeHasUsableData(route) {
     case 'workerTimeDetail':
       return (Array.isArray(appState.workerDetailRows) && appState.workerDetailRows.length > 0) || (Array.isArray(appState.workerDetailSourceRows) && appState.workerDetailSourceRows.length > 0)
     case 'reports':
-    case 'settings':
-    case 'settingsStyles':
-    case 'settingsBackup':
       return true
     default:
       return false
@@ -1687,26 +1720,15 @@ function ymdToDayTimestamp(value) {
 }
 
 function firstDayOfCurrentMonthYmd() {
-  const now = new Date()
-  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-01`
+  return `${todayYmd().slice(0, 7)}-01`
 }
 
 function ymdToIsoRangeStart(ymd) {
-  const value = String(ymd ?? '').trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return ''
-  }
-
-  return `${value}T00:00:00.000Z`
+  return ymdToWarsawIsoRangeStart(ymd)
 }
 
 function ymdToIsoRangeEnd(ymd) {
-  const value = String(ymd ?? '').trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return ''
-  }
-
-  return `${value}T23:59:59.999Z`
+  return ymdToWarsawIsoRangeEnd(ymd)
 }
 
 function calendarDateFromYmd(ymd) {
@@ -2578,12 +2600,21 @@ function roleLevel(role) {
   return 1
 }
 
+function currentSessionRoleLevel() {
+  const declaredLevel = Number(appState.session?.roleLevel)
+  return Math.max(
+    roleLevel(appState.session?.role),
+    roleLevel(appState.session?.roleCode),
+    Number.isFinite(declaredLevel) ? declaredLevel : 0,
+  )
+}
+
 function canManageWorkers() {
-  return roleLevel(appState.session?.role) >= 2
+  return currentSessionRoleLevel() >= 2
 }
 
 function canAdministerWorkers() {
-  return roleLevel(appState.session?.role) >= 3
+  return currentSessionRoleLevel() >= 3
 }
 
 function canDeleteWorkers() {
@@ -2668,42 +2699,6 @@ function canDeleteEvents() {
   return canDeleteOrganizationRecords()
 }
 
-function canManageBackupSettings() {
-  return roleLevel(appState.session?.role) >= 3
-}
-
-function normalizeSettingsTab(value) {
-  const normalized = String(value ?? '').trim().toLowerCase()
-  if (normalized === SETTINGS_TAB_BACKUP) {
-    return SETTINGS_TAB_BACKUP
-  }
-  return SETTINGS_TAB_STYLES
-}
-
-function readStoredSettingsTab() {
-  try {
-    return normalizeSettingsTab(window.sessionStorage.getItem(SETTINGS_TAB_STORAGE_KEY))
-  } catch {
-    return SETTINGS_TAB_STYLES
-  }
-}
-
-function resolveStyleMeta(styleId) {
-  const normalized = String(styleId ?? '').trim()
-  const styles = listAvailableStyles()
-  return styles.find((item) => String(item?.id ?? '').trim() === normalized) ?? null
-}
-
-function applyPortalTheme(styleId) {
-  const root = document.getElementById('portalRoot')
-  if (!(root instanceof HTMLElement)) {
-    return
-  }
-
-  const normalized = resolveStyleMeta(styleId)?.id ?? STYLE_FALLBACK_ID
-  root.setAttribute('data-theme', normalized)
-}
-
 function formatBytes(bytes) {
   const value = Number(bytes)
   if (!Number.isFinite(value) || value <= 0) {
@@ -2747,37 +2742,6 @@ function loadFullCalendar() {
   }
 
   return fullCalendarBundlePromise
-}
-let settingsFeature = null
-
-function getSettingsFeature() {
-  if (!settingsFeature) {
-    throw new Error('Settings feature is not initialized.')
-  }
-  return settingsFeature
-}
-
-function settingsSetActiveTab(tab, options = {}) {
-  return getSettingsFeature().setActiveTab(tab, options)
-}
-
-async function settingsRefreshStyleState(options = {}) {
-  return getSettingsFeature().refreshStyleState(options)
-}
-
-function settingsSetAccessState() {
-  return getSettingsFeature().setAccessState()
-}
-
-function syncSettingsPermissions() {
-  if (!settingsFeature) {
-    return undefined
-  }
-  return getSettingsFeature().syncPermissions()
-}
-
-async function settingsLoadBackups(options = {}) {
-  return getSettingsFeature().loadBackups(options)
 }
 
 let dashboardFeature = null
@@ -3120,9 +3084,26 @@ function bindContractProfitabilityViewFunctions(...args) {
   return getContractProfitabilityFeature().bind(...args)
 }
 
+let settingsFeature = null
+
+function getSettingsFeature() {
+  if (!settingsFeature) {
+    throw new Error('Settings feature is not initialized.')
+  }
+  return settingsFeature
+}
+
+function renderSettingsView(...args) {
+  return getSettingsFeature().render(...args)
+}
+
+function bindSettingsViewFunctions(...args) {
+  return getSettingsFeature().bind(...args)
+}
+
 function portalRouteTemplateKey(route) {
   const normalizedRoute = normalizeNavigationRoute(route)
-  return PORTAL_TEMPLATE_ROUTE_ALIASES[normalizedRoute] || normalizedRoute
+  return PORTAL_SETTINGS_ROUTES.has(normalizedRoute) ? 'settings' : normalizedRoute
 }
 
 function portalRouteViewId(route) {
@@ -3334,10 +3315,6 @@ async function ensurePortalFeatureListReady(featureKeys = []) {
   }
 }
 
-async function ensurePortalSessionCoreReady() {
-  await ensurePortalFeatureReady('settings')
-}
-
 function portalRouteTemplateIsMounted(route) {
   const templateKey = portalRouteTemplateKey(route)
   if (templateKey === 'dashboard') {
@@ -3424,7 +3401,7 @@ function bindPortalRouteOnce(route, navigation = portalNavigation) {
   }
 
   let cleanup = null
-  switch (normalizedRoute) {
+  switch (PORTAL_SETTINGS_ROUTES.has(normalizedRoute) ? 'settings' : normalizedRoute) {
     case 'dashboard':
       cleanup = bindDashboardViewFunctions()
       break
@@ -3471,9 +3448,7 @@ function bindPortalRouteOnce(route, navigation = portalNavigation) {
       cleanup = bindReportsViewFunctions()
       break
     case 'settings':
-    case 'settingsStyles':
-    case 'settingsBackup':
-      cleanup = bindSettingsViewFunctions()
+      cleanup = bindSettingsViewFunctions(navigation)
       break
     default:
       cleanup = () => {}
@@ -5647,7 +5622,10 @@ function deferRouteOrderDataRefresh(...args) {
 }
 
 function ordersListSourceOrders(...args) {
-  return getCalendarFeature().listSourceOrders(...args)
+  // Worker/client summaries can start loading before the lazily loaded
+  // calendar bundle is ready. An empty cache is a valid state at that point;
+  // throwing here aborts the whole route synchronization.
+  return calendarFeature?.listSourceOrders?.(...args) ?? []
 }
 
 function calendarTimelineOrderDurationMinutes(...args) {
@@ -5827,10 +5805,6 @@ function bindWorkerAccountViewFunctions(router) {
 
 function bindReportsViewFunctions() {
   return getReportsFeature().bind()
-}
-
-function bindSettingsViewFunctions() {
-  return getSettingsFeature().bind()
 }
 
 function createPortalFeatureContext() {
@@ -6017,24 +5991,16 @@ function createPortalFeatureContext() {
     ordersListSourceOrders,
     ordersLoadGoogleMaps,
     ordersSyncRemoteTimelineOrders,
-    SETTINGS_TAB_BACKUP,
-    SETTINGS_TAB_STORAGE_KEY,
-    SETTINGS_TAB_STYLES,
-    STYLE_FALLBACK_ID,
-    applyPortalTheme,
     canAdministerWorkers,
     canDeleteWorkers,
     canDeleteClients,
     canDeleteEvents,
     canEditProfitability,
-    canManageBackupSettings,
     canManageClients,
     canManageEvents,
     canManageWorkers,
     canReadProfitability,
     canResetWorkerPasswords,
-    clearUserStyle,
-    createBackup,
     createBindingHelpers,
     createClient,
     createEvent,
@@ -6046,7 +6012,6 @@ function createPortalFeatureContext() {
     dashboardLateMinutesToHm,
     dashboardWorkerSurnameDisplayName,
     dashboardWorkerSurnameSortKey,
-    deleteBackup,
     deleteClient,
     deleteEvent,
     forceDeletePortalEvents,
@@ -6054,7 +6019,6 @@ function createPortalFeatureContext() {
     deleteZone,
     durationSecondsToHm,
     durationSecondsToHms,
-    ensureBackupAutomation,
     ensureJsPdfLoaded,
     ensurePdfMakeLoaded,
     ensurePdfUnicodeFont,
@@ -6065,45 +6029,32 @@ function createPortalFeatureContext() {
     firstDayOfCurrentMonthYmd,
     formatDatePl,
     formatTime,
-    getBackupDownload,
     getClients,
-    getEffectiveStyle,
     getEventsFingerprintForOrg,
     getNextWorkerIdPreview,
     getWorkdays,
     getWorkers,
     getWorkerTime,
     getZones,
-    inspectBackupFile,
     isUnassignedCleanZone,
     isoToLocalDateTimeInput,
-    listAvailableStyles,
-    listBackups,
     localDateTimeInputToIso,
     mapZoneForView,
     normalizeClientStatus,
     normalizeSearchText,
-    normalizeSettingsTab,
     openEventHistoryFromRow,
     ordersSelectCreatedClientInEditor,
     pad2,
     paginate,
-    readStoredSettingsTab,
     refreshDashboardAfterEventSave,
     refreshDashboardWidgets,
     refreshWorkerAccountTimeAfterWorkdaySave,
     reportHistoryFilterOptions,
     reportHistoryRefreshAfterEventSave,
     resolveClientLabelWithQrFallback,
-    resolveStyleMeta,
-    restoreBackupById,
-    restoreBackupFromFile,
-    restoreLatestPreRestore,
-    setOrgDefaultStyle,
     setPdfUnicodeFont,
     setSelectOptions,
     setSubwelcomeMetric,
-    setUserStyle,
     setWorkerPassword,
     setupResizableGridTable,
     showTransientNotice,
@@ -6783,10 +6734,7 @@ async function activatePortalSession(session, router, { restoreRoute = false } =
   showPortal()
   setUserChip(session)
   await showRequiredCompanyProfile(session)
-  await ensurePortalSessionCoreReady()
-  syncSettingsPermissions()
   syncProfitabilityEntryPermissions()
-  await settingsRefreshStyleState({ silent: true })
 
   if (restoreRoute) {
     await router.go(readStoredCurrentRoute())
@@ -7832,9 +7780,7 @@ function bindLogout() {
 
     logout()
     setUserChip(null)
-    syncSettingsPermissions()
     syncProfitabilityEntryPermissions()
-    applyPortalTheme(STYLE_FALLBACK_ID)
     showLoginScreen()
     showLoginCredentials()
     setLoginError('')
@@ -7964,12 +7910,6 @@ async function syncRouteDataNow(normalizedRoute, options = {}) {
     return
   }
 
-  if (normalizedRoute === 'settings' || normalizedRoute === 'settingsStyles' || normalizedRoute === 'settingsBackup') {
-    await settingsRefreshStyleState({ silent: true })
-    if (appState.settingsActiveTab === SETTINGS_TAB_BACKUP && canManageBackupSettings()) {
-      await settingsLoadBackups({ runAutomation: true })
-    }
-  }
 }
 
 async function syncRouteData(route, options = {}) {
@@ -8024,12 +7964,12 @@ export function mountPortalApp() {
     return () => {}
   }
 
+  cleanupRetiredSettingsStorage()
   host.innerHTML = portalLayoutTemplate
   pendingRegistration = capturePendingRegistrationEntry()
   if (pendingRegistration?.registrationId) setOrganizationAuthScope()
   activeRegistrationAttempt = null
   pendingRegistrationNeedsVerification = false
-  applyPortalTheme(STYLE_FALLBACK_ID)
   portalFeatureContext = createPortalFeatureContext()
 
   const handleRouteShellChange = (route) => {
@@ -8137,20 +8077,9 @@ export function mountPortalApp() {
       return
     }
 
-    if (routeName === 'settings' || routeName === 'settingsStyles' || routeName === 'settingsBackup') {
-      const requestedTab =
-        routeName === 'settingsStyles'
-          ? SETTINGS_TAB_STYLES
-          : routeName === 'settingsBackup'
-            ? SETTINGS_TAB_BACKUP
-            : normalizeSettingsTab(appState.settingsActiveTab || readStoredSettingsTab())
-      settingsSetAccessState()
-      if (requestedTab === SETTINGS_TAB_BACKUP && !canManageBackupSettings()) {
-        settingsSetActiveTab(SETTINGS_TAB_STYLES, { persist: false })
-      } else {
-        settingsSetActiveTab(requestedTab, { persist: false })
-      }
-      await syncRouteData(routeName)
+    if (PORTAL_SETTINGS_ROUTES.has(routeName)) {
+      renderSettingsView(routeName)
+      return
     }
   }
 
@@ -8329,8 +8258,6 @@ export function mountPortalApp() {
         clearStoredCurrentRoute()
         showLoginScreen()
         setUserChip(null)
-        applyPortalTheme(STYLE_FALLBACK_ID)
-        syncSettingsPermissions()
         syncProfitabilityEntryPermissions()
         setLoginError(pendingRegistration?.registrationId ? formatRegistrationError(error) : formatLoginError(error))
       }
@@ -8341,8 +8268,6 @@ export function mountPortalApp() {
       showLoginScreen()
       showLoginCredentials()
       setUserChip(null)
-      applyPortalTheme(STYLE_FALLBACK_ID)
-      syncSettingsPermissions()
       syncProfitabilityEntryPermissions()
       if (pendingRegistration?.googleRequested) {
         try {
@@ -8398,8 +8323,8 @@ export function mountPortalApp() {
     calendarFeature = null
     zonesFeature = null
     eventsFeature = null
-    settingsFeature = null
     reportsFeature = null
+    settingsFeature = null
     workerProfileFeature = null
     workerAccountFeature = null
     workerTimeFeature = null

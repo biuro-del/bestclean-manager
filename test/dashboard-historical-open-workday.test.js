@@ -86,3 +86,20 @@ test('otwarty dzień dzisiejszy nie trafia do zaległych braków STOP', async ()
     false,
   )
 })
+
+test('otwarty Event pozostaje otwarty mimo zamknietego powiazanego Workday i statusu CLOSED', async () => {
+  const { isOpenWorkEvent } = await modelModule
+
+  assert.equal(
+    isOpenWorkEvent({
+      historySourceKind: 'event',
+      eventId: 'EV-OPEN',
+      linkedWorkdayId: 'WD-CLOSED',
+      startAt: '2026-07-23T17:42:00.000Z',
+      endAt: null,
+      dayEndAt: '2026-07-23T19:36:00.000Z',
+      status: 'CLOSED',
+    }),
+    true,
+  )
+})

@@ -1,129 +1,81 @@
-<header class="portal-page-hero">
+<header class="portal-page-hero settings-hero">
   <div class="portal-page-hero__copy">
     <div class="portal-page-hero__title-row">
       <h1>Ustawienia</h1>
-      <span class="portal-page-hero__badge">Organizacja</span>
+      <span class="portal-page-hero__badge">W przygotowaniu</span>
     </div>
-    <p>Zarządzaj wyglądem portalu i bezpiecznymi kopiami danych organizacji.</p>
+    <p>Zarządzaj kontem, organizacją i sposobem działania portalu.</p>
   </div>
 </header>
 
-<div class="settings-tabs" id="settingsTabs" role="tablist" aria-label="Zakladki ustawien">
-  <button class="settings-tab active" id="settingsTabStyles" data-settings-tab="styles" role="tab" aria-selected="true" type="button">
-    Style
-  </button>
-  <button class="settings-tab" id="settingsTabBackup" data-settings-tab="backup" role="tab" aria-selected="false" type="button">
-    Kopia zapasowa
-  </button>
+<div class="settings-mobile-navigation">
+  <label for="settingsModuleSelect">Obszar ustawień</label>
+  <div class="settings-select-wrap">
+    <i class="ph ph-sliders-horizontal" aria-hidden="true"></i>
+    <select id="settingsModuleSelect" aria-label="Wybierz obszar ustawień">
+      <option value="settings">Przegląd ustawień</option>
+      <optgroup label="Moje konto">
+        <option value="settingsProfile">Profil</option>
+        <option value="settingsNotifications">Powiadomienia</option>
+        <option value="settingsLanguageApp">Język i aplikacja</option>
+        <option value="settingsAccountSecurity">Bezpieczeństwo konta</option>
+      </optgroup>
+      <optgroup label="Organizacja">
+        <option value="settingsOrganizationData">Dane organizacji</option>
+        <option value="settingsAlerts">Alerty</option>
+        <option value="settingsIntegrations">Integracje</option>
+        <option value="settingsBilling">Subskrypcja i rozliczenia</option>
+        <option value="settingsDataSecurity">Bezpieczeństwo i dane</option>
+      </optgroup>
+    </select>
+    <i class="ph ph-caret-down settings-select-caret" aria-hidden="true"></i>
+  </div>
 </div>
 
-<section id="settingsStylesSection" class="settings-section" data-settings-panel="styles" role="tabpanel">
-  <div class="fido-card settings-style-status" id="settingsStyleStatus">
-    <div class="settings-style-status-label">Aktywny styl</div>
-    <div class="settings-style-status-value">Classic Blue</div>
-    <div class="settings-style-status-meta">Zrodlo: fallback</div>
-  </div>
+<div class="settings-shell" data-settings-shell data-can-edit="false">
+  <aside class="settings-sidebar">
+    <nav class="settings-navigation" aria-label="Nawigacja ustawień">
+      <button class="settings-nav-item" type="button" data-route="settings" data-settings-route="settings">
+        <i class="ph ph-squares-four" aria-hidden="true"></i>
+        <span>Przegląd</span>
+      </button>
 
-  <div class="settings-style-grid" id="settingsStyleCards">
-    <div class="fido-card settings-style-card">
-      <div class="settings-style-card-header">
-        <h3>Classic Blue</h3>
-      </div>
-      <p>Aktualny wyglad portalu: neutralny, znany i bezpieczny.</p>
-    </div>
-  </div>
-</section>
-
-<section id="settingsBackupSection" class="settings-section" data-settings-panel="backup" role="tabpanel" style="display:none;">
-  <div id="backupAccessDenied" class="fido-card backup-access-denied" style="display:none;">
-    <h3>Brak dostepu</h3>
-    <p>Ten modul jest dostepny wylacznie dla roli Admin.</p>
-  </div>
-
-  <div id="backupAdminPanel">
-    <div class="backup-layout">
-      <section class="fido-card backup-panel">
-        <h3>Eksport ZIP</h3>
-        <p class="backup-panel-hint">Utworz kopie i zapisz ja na liscie backupow.</p>
-
-        <div class="toolbar backup-toolbar">
-          <div class="tool" style="min-width:280px;">
-            <label for="bkTitle">Czego to kopia?</label>
-            <input id="bkTitle" type="text" maxlength="120" placeholder="np. Przed aktualizacja marzec" />
-          </div>
-
-          <div class="tool">
-            <label for="bkType">Typ kopii</label>
-            <select id="bkType">
-              <option value="full">Pelna kopia</option>
-              <option value="workers">Pracownicy</option>
-              <option value="objects">Obiekty</option>
-            </select>
-          </div>
-
-          <div class="tool-actions">
-            <button class="btn2 primary" id="bkCreateBtn" type="button">Utworz backup ZIP</button>
-          </div>
-        </div>
-
-        <div class="backup-create-note" id="bkCreateNote"></div>
+      <section class="settings-nav-group" aria-labelledby="settingsGroupAccount">
+        <h2 id="settingsGroupAccount">Moje konto</h2>
+        <button class="settings-nav-item" type="button" data-route="settingsProfile" data-settings-route="settingsProfile">
+          <i class="ph ph-user-circle" aria-hidden="true"></i><span>Profil</span>
+        </button>
+        <button class="settings-nav-item" type="button" data-route="settingsNotifications" data-settings-route="settingsNotifications">
+          <i class="ph ph-bell" aria-hidden="true"></i><span>Powiadomienia</span>
+        </button>
+        <button class="settings-nav-item" type="button" data-route="settingsLanguageApp" data-settings-route="settingsLanguageApp">
+          <i class="ph ph-globe-hemisphere-west" aria-hidden="true"></i><span>Język i aplikacja</span>
+        </button>
+        <button class="settings-nav-item" type="button" data-route="settingsAccountSecurity" data-settings-route="settingsAccountSecurity">
+          <i class="ph ph-lock-key" aria-hidden="true"></i><span>Bezpieczeństwo konta</span>
+        </button>
       </section>
 
-      <section class="fido-card backup-panel">
-        <h3>Import / Przywrocenie</h3>
-        <p class="backup-panel-hint">Wgraj plik ZIP, sprawdz zakres i uruchom przywracanie.</p>
-
-        <div class="toolbar backup-toolbar">
-          <div class="tool" style="min-width:340px;">
-            <label for="bkImportFile">Plik ZIP</label>
-            <input id="bkImportFile" type="file" accept=".zip,application/zip" />
-          </div>
-
-          <div class="tool-actions">
-            <button class="btn2" id="bkInspectBtn" type="button">Sprawdz plik</button>
-            <button class="btn2 primary" id="bkImportRestoreBtn" type="button" disabled>Przywroc z pliku</button>
-          </div>
-        </div>
-
-        <div class="backup-import-summary" id="bkImportSummary">
-          Wybierz plik ZIP, aby zobaczyc podsumowanie i zakres nadpisania.
-        </div>
+      <section class="settings-nav-group" aria-labelledby="settingsGroupOrganization">
+        <h2 id="settingsGroupOrganization">Organizacja</h2>
+        <button class="settings-nav-item" type="button" data-route="settingsOrganizationData" data-settings-route="settingsOrganizationData">
+          <i class="ph ph-buildings" aria-hidden="true"></i><span>Dane organizacji</span>
+        </button>
+        <button class="settings-nav-item" type="button" data-route="settingsAlerts" data-settings-route="settingsAlerts">
+          <i class="ph ph-warning-circle" aria-hidden="true"></i><span>Alerty</span>
+        </button>
+        <button class="settings-nav-item" type="button" data-route="settingsIntegrations" data-settings-route="settingsIntegrations">
+          <i class="ph ph-plugs-connected" aria-hidden="true"></i><span>Integracje</span>
+        </button>
+        <button class="settings-nav-item" type="button" data-route="settingsBilling" data-settings-route="settingsBilling">
+          <i class="ph ph-credit-card" aria-hidden="true"></i><span>Subskrypcja i rozliczenia</span>
+        </button>
+        <button class="settings-nav-item" type="button" data-route="settingsDataSecurity" data-settings-route="settingsDataSecurity">
+          <i class="ph ph-shield-check" aria-hidden="true"></i><span>Bezpieczeństwo i dane</span>
+        </button>
       </section>
-    </div>
+    </nav>
+  </aside>
 
-    <section class="fido-card backup-list-panel">
-      <div class="backup-list-header">
-        <div>
-          <h3>Lista kopii</h3>
-          <p class="backup-panel-hint">Pobierz, przywroc, usun lub wroc do poprzedniej wersji.</p>
-        </div>
-        <div class="backup-list-actions">
-          <button class="btn2" id="bkRollbackBtn" type="button">Wroc do poprzedniej wersji</button>
-          <button class="btn2" id="bkRefreshBtn" type="button">Odswiez liste</button>
-        </div>
-      </div>
-
-      <div class="backup-table-wrap">
-        <table class="fido-table backup-table" aria-label="Lista backupow">
-          <thead>
-            <tr>
-              <th>Data</th>
-              <th>Typ</th>
-              <th>Tytul</th>
-              <th>Rozmiar</th>
-              <th>Autor</th>
-              <th>Integralnosc</th>
-              <th>Zrodlo</th>
-              <th>Akcje</th>
-            </tr>
-          </thead>
-          <tbody id="bkRows">
-            <tr>
-              <td colspan="8" class="muted">Brak danych</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-  </div>
-</section>
+  <div id="settingsModuleContent" class="settings-content" role="region" aria-label="Zawartość ustawień" aria-live="polite"></div>
+</div>

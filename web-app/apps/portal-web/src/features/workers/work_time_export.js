@@ -1,4 +1,10 @@
-import { workIntervalsFromRow, workIntervalsTotalSeconds } from './workIntervals.js'
+import {
+  aggregateWorkTimeDay,
+  markMultipleWorkdaysForBusinessDate,
+  formatWorkDurationHms,
+  workSessionAccountingFromRow,
+  workdayPresenceFromRows,
+} from './workIntervals.js'
 
 export const WORK_TIME_EXPORT_DEFAULT_COLUMN_IDS = ['date', 'worker', 'start', 'stop', 'work', 'break']
 
@@ -34,73 +40,101 @@ function rowDayKey(deps, row = {}) {
   return deps.workerDetailDateKeyFromIso(row.startAt || row.endAt)
 }
 
-function overlapGroupKey(deps, row = {}) {
-  const loginKey = normalizeText(deps, row.workerLogin)
-  const nameKey = normalizeText(deps, row.workerName)
-  const workerKey = loginKey && loginKey !== '-' ? loginKey : nameKey || '-'
-  const dayKey = String(row.dayKey ?? '').trim() || deps.workerDetailDateKeyFromIso(row.startIso || row.endIso)
-  return `${workerKey}|${dayKey || '-'}`
+function applySessionAccounting(rows = []) {
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const next = { ...row }
+    const accounting = workSessionAccountingFromRow({
+      ...row,
+      workIntervals: Array.isArray(row?.workIntervals) ? row.workIntervals : [],
+    })
+    const durationSec = accounting.closedSessionsSec
+    const presence = workdayPresenceFromRows([row])
+    const realWorkSec = durationSec
+    Object.assign(next, accounting)
+    next.startIso = presence.startAt || row.startIso
+    next.endIso = presence.endAt || row.endIso
+    next.rawDurationSec = Math.max(0, Math.floor(Number(row.durationSec ?? 0) || 0))
+    next.durationSec = durationSec
+    next.realWorkSec = realWorkSec
+    next.breakSec = Math.max(0, Number(row.breakSec ?? 0) || 0)
+    next.netSec = realWorkSec
+    return next
+  })
 }
 
-function applyOverlapAccounting(deps, rows = []) {
-  const activeRowsByGroup = new Map()
-  const output = []
-
-  rows.forEach((row) => {
-    const next = { ...row }
-    if (Array.isArray(row?.workIntervals) && row.workIntervals.length) {
-      const workIntervals = workIntervalsFromRow(row)
-      const durationSec = workIntervalsTotalSeconds(workIntervals)
-      if (durationSec <= 0) return
-
-      next.workIntervals = workIntervals
-      next.rawDurationSec = Math.max(0, Math.floor(Number(row.durationSec ?? 0) || 0))
-      next.durationSec = durationSec
-      next.breakSec = Math.min(Math.max(0, Number(row.breakSec ?? 0) || 0), durationSec)
-      next.netSec = Math.max(0, durationSec - next.breakSec)
-      output.push(next)
-      return
-    }
-    const interval = deps.workStatusIntervalFromTimes(row.startIso, row.endIso, row.durationSec)
-    if (!interval) {
-      if (Math.max(0, Number(next.durationSec ?? 0) || 0) > 0) {
-        output.push(next)
-      }
-      return
-    }
-
-    const groupKey = overlapGroupKey(deps, row)
-    const originalDurationSec = Math.max(0, Math.floor(Number(row.durationSec ?? 0) || 0))
-    const originalBreakSec = Math.max(0, Math.floor(Number(row.breakSec ?? 0) || 0))
-    next.rawDurationSec = originalDurationSec
-    next.durationSec = Math.max(0, Math.floor((interval.endTs - interval.startTs) / 1000))
-    next.breakSec = Math.min(originalBreakSec, next.durationSec)
-    next.netSec = Math.max(0, next.durationSec - next.breakSec)
-    next.startIso = interval.startIso
-    next.endIso = interval.endIso
-
-    const active = activeRowsByGroup.get(groupKey)
-    if (!active || interval.startTs > active.interval.endTs) {
-      const entry = { row: next, interval: { startTs: interval.startTs, endTs: interval.endTs } }
-      activeRowsByGroup.set(groupKey, entry)
-      output.push(next)
-      return
-    }
-
-    active.interval.startTs = Math.min(active.interval.startTs, interval.startTs)
-    active.interval.endTs = Math.max(active.interval.endTs, interval.endTs)
-    active.row.startIso = new Date(active.interval.startTs).toISOString()
-    active.row.endIso = new Date(active.interval.endTs).toISOString()
-    active.row.rawDurationSec = Math.max(0, Number(active.row.rawDurationSec ?? 0) || 0) + originalDurationSec
-    active.row.durationSec = Math.max(0, Math.floor((active.interval.endTs - active.interval.startTs) / 1000))
-    active.row.breakSec = Math.min(
-      active.row.durationSec,
-      Math.max(0, Number(active.row.breakSec ?? 0) || 0) + originalBreakSec,
-    )
-    active.row.netSec = Math.max(0, active.row.durationSec - active.row.breakSec)
+function groupSessionAccountingByWorkerDay(rows = []) {
+  const groups = new Map()
+  ;(Array.isArray(rows) ? rows : []).forEach((row) => {
+    const key = `${String(row?.workerLogin ?? row?.workerId ?? row?.workerName ?? '').trim().toLowerCase()}|${String(row?.dayKey ?? '').trim()}`
+    const bucket = groups.get(key) ?? []
+    bucket.push(row)
+    groups.set(key, bucket)
   })
+  return [...groups.values()].flatMap((sourceRows) => {
+    const first = sourceRows[0] ?? {}
+    const day = aggregateWorkTimeDay(sourceRows)
+    const sessions = Array.isArray(day.sessions) ? day.sessions : []
+    if (!sessions.length) {
+      return [{
+        ...first,
+        activities: day.activities,
+        breakSec: 0,
+        closedSessionsSec: 0,
+        confirmedSec: 0,
+        durationSec: 0,
+        endIso: '',
+        integrityIssues: day.integrityIssues,
+        integrityState: day.integrityState,
+        netSec: 0,
+        openSessionCount: day.openSessionCount,
+        openSessions: day.openSessions,
+        provisionalSec: 0,
+        realWorkSec: 0,
+        sessions: [],
+        sourceRows,
+        startIso: '',
+        workIntervals: [],
+      }]
+    }
 
-  return output
+    return sessions.map((session, sessionIndex) => {
+      const sourceIds = new Set([
+        ...(Array.isArray(session?.sourceWorkdayIds) ? session.sourceWorkdayIds : []),
+        session?.workdayId,
+      ].map((value) => String(value ?? '').trim()).filter(Boolean))
+      const sessionSourceRows = sourceRows.filter((row) => sourceIds.has(String(row?.workdayId ?? row?.id ?? '').trim()))
+      const sessionSource = sessionSourceRows[0] ?? first
+      const sessionSec = session?.isValid && !session?.isOpen
+        ? Math.max(0, Math.floor(Number(session?.durationSec ?? 0) || 0))
+        : 0
+      const breakSec = Math.max(0, Math.floor(Number(
+        session?.breakSec ?? session?.pauseTotalSec ?? session?.pauseSec ?? sessionSource?.breakSec ?? 0,
+      ) || 0))
+      return {
+        ...first,
+        ...sessionSource,
+        activities: Array.isArray(session?.activities) ? session.activities : [],
+        breakSec,
+        closedSessionsSec: sessionSec,
+        confirmedSec: sessionSec,
+        durationSec: sessionSec,
+        endIso: session?.endAt ?? '',
+        integrityIssues: day.integrityIssues,
+        integrityState: day.integrityState,
+        netSec: sessionSec,
+        openSessionCount: session?.isOpen ? 1 : 0,
+        openSessions: session?.isOpen ? [session] : [],
+        provisionalSec: 0,
+        realWorkSec: sessionSec,
+        sessionNumber: Math.max(1, Number(session?.sessionNumber ?? sessionIndex + 1) || sessionIndex + 1),
+        sessions: [session],
+        sourceRows: sessionSourceRows.length ? sessionSourceRows : [sessionSource],
+        startIso: session?.startAt ?? '',
+        workIntervals: [session],
+        workdayId: String(session?.workdayId ?? sessionSource?.workdayId ?? '').trim(),
+      }
+    })
+  })
 }
 
 export function createWorkTimeExportColumns(deps) {
@@ -131,33 +165,33 @@ export function createWorkTimeExportColumns(deps) {
     },
     {
       id: 'start',
-      label: 'Start pracy',
+      label: 'Start dnia',
       weight: 1.0,
       getValue: (row) => deps.workerDetailIsoToHm(row.startIso),
     },
     {
       id: 'stop',
-      label: 'Koniec pracy',
+      label: 'Koniec dnia',
       weight: 1.0,
       getValue: (row) => deps.workerDetailIsoToHm(row.endIso),
     },
     {
       id: 'work',
-      label: 'Czas pracy',
+      label: 'Czas sesji',
       weight: 1.1,
-      getValue: (row) => deps.durationSecondsToHm(row.durationSec),
+      getValue: (row) => formatWorkDurationHms(row.durationSec),
     },
     {
       id: 'net',
       label: 'Realny czas pracy',
       weight: 1.2,
-      getValue: (row) => deps.durationSecondsToHm(row.netSec),
+      getValue: (row) => formatWorkDurationHms(row.netSec),
     },
     {
       id: 'break',
       label: 'Przerwa',
       weight: 1.0,
-      getValue: (row) => deps.durationSecondsToHm(row.breakSec),
+      getValue: (row) => formatWorkDurationHms(row.breakSec),
     },
     {
       id: 'status',
@@ -273,13 +307,13 @@ export async function buildWorkTimeExportRowsForWorkers({
       const startIso = deps.toIso(item?.startAt)
       const endIso = deps.toIso(item?.endAt)
       const durationRaw = Number(item?.durationSec)
-      const rangeSec = deps.workerDetailComputeRangeSeconds(startIso, endIso)
       const computedSec =
         Number.isFinite(durationRaw) && durationRaw > 0
           ? Math.floor(durationRaw)
-          : rangeSec
+          : 0
       const breakSec = Math.max(0, Number(item?.breakSec ?? item?.pauseTotalSec ?? 0) || 0)
       return {
+        workdayId: String(item?.workdayId ?? item?.id ?? '').trim(),
         workerId:
           String(resolvedWorker?.workerId ?? item?.workerId ?? item?.id ?? '').trim() ||
           '-',
@@ -289,12 +323,23 @@ export async function buildWorkTimeExportRowsForWorkers({
           String(resolvedWorker?.workerLogin ?? item?.workerLogin ?? item?.workerId ?? '').trim() || '-',
         workerType: String(resolvedWorker?.workerType ?? item?.workerType ?? item?.role ?? '').trim() || '-',
         dayKey,
+        businessDateYmd: String(item?.businessDateYmd ?? dayKey).trim(),
         startIso,
         endIso,
         durationSec: Math.max(0, computedSec),
+        recordedDurationSec: Math.max(0, Number(item?.recordedDurationSec ?? 0) || 0),
+        durationSource: String(item?.durationSource ?? '').trim(),
+        activities: Array.isArray(item?.activities) ? item.activities : [],
         workIntervals: Array.isArray(item?.workIntervals) ? item.workIntervals : [],
+        closedSessionsSec: Math.max(0, Number(item?.closedSessionsSec ?? 0) || 0),
+        openSessions: Array.isArray(item?.openSessions) ? item.openSessions : [],
+        confirmedSec: Math.max(0, Number(item?.confirmedSec ?? 0) || 0),
+        provisionalSec: Math.max(0, Number(item?.provisionalSec ?? 0) || 0),
+        integrityState: String(item?.integrityState ?? '').trim(),
+        integrityIssues: Array.isArray(item?.integrityIssues) ? item.integrityIssues : [],
+        sessionSourceAvailable: item?.sessionSourceAvailable === true,
         breakSec,
-        netSec: Math.max(0, computedSec - breakSec),
+        netSec: Math.max(0, computedSec),
         status: String(item?.status ?? '').trim() || '-',
       }
     })
@@ -315,7 +360,11 @@ export async function buildWorkTimeExportRowsForWorkers({
       return leftStart - rightStart
     })
 
-  return applyOverlapAccounting(deps, rows).filter((row) => Math.max(0, Number(row?.durationSec ?? 0) || 0) > 0)
+  const accountedRows = groupSessionAccountingByWorkerDay(applySessionAccounting(rows)).filter((row) =>
+    Math.max(0, Number(row?.durationSec ?? 0) || 0) > 0 ||
+    (row?.integrityState && row.integrityState !== 'COMPLETE'),
+  )
+  return markMultipleWorkdaysForBusinessDate(accountedRows)
 }
 
 export async function downloadWorkTimeEwidencjaPdf({
@@ -427,7 +476,7 @@ export async function downloadWorkTimeEwidencjaPdf({
 
     const workerTitle = `${group.workerName} (${group.workerId})`
     const subtitle = `Typ: ${group.workerType} | Zakres: ${fromLabel} - ${toLabel}`
-    const summaryLine = `Wpisy: ${group.rows.length} | Czas pracy: ${deps.durationSecondsToHm(group.totalWorkSec)} | Przerwy: ${deps.durationSecondsToHm(group.totalBreakSec)} | Realny: ${deps.durationSecondsToHm(group.totalNetSec)}`
+    const summaryLine = `Wpisy: ${group.rows.length} | Czas pracy: ${formatWorkDurationHms(group.totalWorkSec)} | Przerwy: ${formatWorkDurationHms(group.totalBreakSec)} | Realny: ${formatWorkDurationHms(group.totalNetSec)}`
 
     deps.setPdfUnicodeFont(pdf, 'bold')
     pdf.setFontSize(12)

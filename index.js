@@ -12,6 +12,7 @@ const { Compute, GoogleAuth, OAuth2Client } = require('google-auth-library')
 const {
   buildOrganizationSummary,
   buildSessionContext,
+  evaluateTenantEmailVerification,
   normalizeOrganizationId,
   resolveAccessibleOrganizations,
 } = require('./auth-session-policy')
@@ -41,8 +42,13 @@ const {
   hasPlatformOwnerClaim,
   resolvePlatformDataConnectConnector,
 } = require('./platform-policy')
-const { buildFirebaseRestDecodedToken } = require('./firebase-rest-token-policy')
+const {
+  buildFirebaseRestDecodedToken,
+  normalizeFirebaseAccountCreatedAt,
+} = require('./firebase-rest-token-policy')
 const { createProfitabilityApi } = require('./profitability-api')
+const { createWorkdayReconciliationApi } = require('./workday-reconciliation-api')
+const { createWorkTimeDaysApi } = require('./work-time-days-api')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
 const {
@@ -139,7 +145,6 @@ const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
 const PORTAL_JOB_CARDS_PATH = '/api/portal/job-cards'
 const PORTAL_EVENTS_PATH = '/api/portal/events'
-const PORTAL_UI_STYLE_PATH = '/api/portal/ui-style'
 const PORTAL_ZONE_QR_CODES_PATH = '/api/portal/zones/qr-codes'
 const PORTAL_PROFITABILITY_PATH = '/api/portal/profitability'
 const MOBILE_STATE_PATH = '/api/mobile/state'
@@ -1236,9 +1241,27 @@ async function callPlatformFirebaseIdentityToolkit(method, payload) {
   return body
 }
 
+async function withFirebaseAccountCreatedAt(decodedToken, firebaseAuth) {
+  if (decodedToken?.email_verified === true || !normalizeText(decodedToken?.uid)) {
+    return decodedToken
+  }
+  try {
+    const user = await firebaseAuth.getUser(decodedToken.uid)
+    const accountCreatedAt = normalizeFirebaseAccountCreatedAt(user?.metadata?.creationTime)
+    return accountCreatedAt
+      ? { ...decodedToken, account_created_at: accountCreatedAt }
+      : decodedToken
+  } catch {
+    // Membership timestamps remain the fail-closed legacy fallback.
+    return decodedToken
+  }
+}
+
 async function verifyFirebaseIdToken(token) {
   try {
-    const decodedToken = await ensureFirebaseAdmin().auth().verifyIdToken(token)
+    const firebaseAuth = ensureFirebaseAdmin().auth()
+    const verifiedToken = await firebaseAuth.verifyIdToken(token)
+    const decodedToken = await withFirebaseAccountCreatedAt(verifiedToken, firebaseAuth)
     setVerifiedFirebaseToken(decodedToken)
     return decodedToken
   } catch (adminError) {
@@ -3781,6 +3804,28 @@ async function getRequesterMembership(client, orgId, uid, options = {}) {
   return membership
 }
 
+async function authorizeWorkdayReconciliation(client, { orgId, uid, write = false }) {
+  const membership = await getRequesterMembership(client, orgId, uid)
+  assertMembershipPlanCapability(membership, 'timeTracking')
+  const role = normalizeRequesterRole(membership?.role)
+  if (['ADMIN', 'MANAGER'].includes(role)) {
+    return { role, scope: 'ALL', uid }
+  }
+  if (role === 'COORDINATOR' && write !== true) {
+    return { role, scope: 'ALL', uid }
+  }
+  if (role === 'WORKER' && write !== true) {
+    return { role, scope: 'OWN', uid }
+  }
+  const error = new Error('WORKDAY_RECONCILIATION_FORBIDDEN')
+  error.statusCode = membership ? 403 : 404
+  error.publicCode = membership ? 'WORKDAY_RECONCILIATION_FORBIDDEN' : 'ORG_ACCESS_MISSING'
+  error.publicMessage = membership
+    ? 'Brak uprawnien do przegladu lub korekty tego dnia pracy.'
+    : 'Brak dostepu do tej organizacji.'
+  throw error
+}
+
 function assertMembershipPlanCapability(membership, capability) {
   if (!membership) {
     const error = new Error('ORG_ACCESS_MISSING')
@@ -3834,6 +3879,7 @@ async function getRequesterMemberships(client, uid, orgId = '') {
        end as role,
        m.worker_id as membership_worker_id,
        m.status as membership_status,
+       m.created_at as membership_created_at,
        o.name as organization_name,
        o.status as organization_status,
        o.onboarding_status,
@@ -3843,6 +3889,7 @@ async function getRequesterMemberships(client, uid, orgId = '') {
        w.full_name,
        w.active as worker_active,
        w.status as worker_status,
+       w.created_at as worker_created_at,
        s.plan_code,
        s.status as subscription_status,
        s.trial_ends_at,
@@ -7025,19 +7072,6 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
   const requesterUid = normalizeText(decodedToken?.uid)
   let client = null
 
-  if (!hasPlatformOwnerClaim(decodedToken) && decodedToken?.email_verified !== true) {
-    sendJson(res, 200, {
-      ok: true,
-      status: 'EMAIL_VERIFICATION_REQUIRED',
-      context: {
-        uid: requesterUid,
-        email: normalizeEmail(decodedToken?.email),
-        actorType: 'ORGANIZATION',
-      },
-    })
-    return
-  }
-
   try {
     client = await connectDbClient()
     if (hasPlatformOwnerClaim(decodedToken)) {
@@ -7149,7 +7183,25 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
     }
 
     const rows = await getRequesterMemberships(client, requesterUid)
-    const accessibleOrganizations = resolveAccessibleOrganizations(rows, new Date())
+    const emailEligibleRows = rows.filter((row) => evaluateTenantEmailVerification(
+      decodedToken,
+      row,
+      process.env.TENANT_EMAIL_VERIFICATION_REQUIRED_FROM,
+    ).allowed)
+    if (decodedToken?.email_verified !== true && !emailEligibleRows.length) {
+      sendJson(res, 200, {
+        ok: true,
+        status: 'EMAIL_VERIFICATION_REQUIRED',
+        context: {
+          uid: requesterUid,
+          email: normalizeEmail(decodedToken?.email),
+          actorType: 'ORGANIZATION',
+        },
+      })
+      return
+    }
+
+    const accessibleOrganizations = resolveAccessibleOrganizations(emailEligibleRows, new Date())
     const organizationSummaries = accessibleOrganizations.map(buildOrganizationSummary)
 
     if (requestedOrgId) {
@@ -8475,6 +8527,59 @@ async function deletePortalEventsFromTableByColumns(client, orgId, relationName,
   return result.rowCount || 0
 }
 
+async function assertPortalEventDeleteOutsideReconciliation(client, orgId, ids) {
+  if (!ids.length) return
+
+  // Share the organization-level reconciliation lock before taking row locks.
+  // This keeps the lock order compatible with the transactional repair API.
+  await client.query(
+    'select pg_advisory_xact_lock(hashtextextended($1::text, 0))',
+    [`workday-business-date:${orgId}`],
+  )
+  const lockedEventResult = await client.query(
+    `select event_id, workday_id, start_event_id, end_event_id
+       from public.event
+      where org_id = $1
+        and (
+          event_id = any($2::varchar[])
+          or workday_id = any($2::varchar[])
+          or start_event_id = any($2::varchar[])
+          or end_event_id = any($2::varchar[])
+        )
+      order by event_id asc
+      for update`,
+    [orgId, ids],
+  )
+  const lockedEvents = lockedEventResult.rows || []
+  const linkedWorkdayIds = lockedEvents
+    .map((row) => normalizeText(row?.workday_id))
+    .filter(Boolean)
+  const workdayLookupIds = [...new Set([...ids, ...linkedWorkdayIds])]
+  const lockedWorkdayResult = await client.query(
+    `select workday_id
+       from public.workday
+      where org_id = $1
+        and (
+          workday_id = any($2::varchar[])
+          or start_event_id = any($2::varchar[])
+          or end_event_id = any($2::varchar[])
+        )
+      order by workday_id asc
+      for update`,
+    [orgId, workdayLookupIds],
+  )
+  const hasLinkedEvent = lockedEvents.some((row) => normalizeText(row?.workday_id))
+  if (!hasLinkedEvent && !lockedWorkdayResult.rows?.[0]) return
+
+  const error = new Error(
+    'Sesja powiazana z dniem pracy nie moze zostac usunieta przez stary edytor. Uzyj dialogu „Przeglad i naprawa dnia”.',
+  )
+  error.statusCode = 409
+  error.publicCode = 'WORKDAY_RECONCILIATION_REQUIRED'
+  error.publicMessage = error.message
+  throw error
+}
+
 async function deletePortalEventsByIds(client, orgId, ids) {
   const counts = {
     workdayPause: 0,
@@ -8488,6 +8593,7 @@ async function deletePortalEventsByIds(client, orgId, ids) {
   }
 
   await client.query('begin')
+  await assertPortalEventDeleteOutsideReconciliation(client, orgId, ids)
   counts.workdayPause = await deletePortalEventsFromTableByColumns(
     client,
     orgId,
@@ -8604,246 +8710,6 @@ async function handlePortalEventsRequest(req, res) {
       error?.statusCode || 500,
       normalizeText(error?.publicCode) || 'PORTAL_EVENTS_ERROR',
       normalizeText(error?.publicMessage) || error?.message || 'Nie udalo sie usunac zdarzen.',
-    )
-  } finally {
-    if (client) client.release()
-  }
-}
-
-async function ensurePortalUiStyleTables(client) {
-  await client.query(
-    `create table if not exists public.org_ui_style (
-       org_id varchar(64) primary key references public.organizations(org_id) on delete cascade,
-       default_style_id varchar(64) not null,
-       updated_at timestamptz not null default now(),
-       updated_by varchar(120)
-     )`,
-  )
-  await client.query(
-    `create table if not exists public.user_ui_style_preference (
-       org_id varchar(64) not null references public.organizations(org_id) on delete cascade,
-       uid varchar(128) not null,
-       style_id varchar(64) not null,
-       updated_at timestamptz not null default now(),
-       updated_by varchar(120),
-       primary key (org_id, uid)
-     )`,
-  )
-}
-
-function portalOrgUiStyleFromRow(row) {
-  if (!row) return null
-  return {
-    orgId: normalizeText(row.org_id),
-    defaultStyleId: normalizeText(row.default_style_id),
-    updatedAt: row.updated_at || null,
-    updatedBy: normalizeText(row.updated_by),
-  }
-}
-
-function portalUserUiStyleFromRow(row) {
-  if (!row) return null
-  return {
-    orgId: normalizeText(row.org_id),
-    uid: normalizeText(row.uid),
-    styleId: normalizeText(row.style_id),
-    updatedAt: row.updated_at || null,
-    updatedBy: normalizeText(row.updated_by),
-  }
-}
-
-function normalizePortalStyleScope(value) {
-  const scope = normalizeText(value).toLowerCase()
-  return scope === 'organization' || scope === 'org' ? 'organization' : 'user'
-}
-
-function normalizePortalStyleId(value) {
-  const styleId = normalizeText(value)
-  return /^[a-z0-9_-]{1,64}$/i.test(styleId) ? styleId : ''
-}
-
-async function readPortalUiStyleState(client, orgId, requesterUid, includeUsers) {
-  const [orgResult, userResult] = await Promise.all([
-    client.query(
-      `select org_id, default_style_id, updated_at, updated_by
-         from public.org_ui_style
-        where org_id = $1::text
-        limit 1`,
-      [orgId],
-    ),
-    client.query(
-      `select org_id, uid, style_id, updated_at, updated_by
-         from public.user_ui_style_preference
-        where org_id = $1::text
-          and uid = $2::text
-        limit 1`,
-      [orgId, requesterUid],
-    ),
-  ])
-
-  let userPreferences = []
-  if (includeUsers) {
-    const allUsersResult = await client.query(
-      `select org_id, uid, style_id, updated_at, updated_by
-         from public.user_ui_style_preference
-        where org_id = $1::text
-        order by uid asc`,
-      [orgId],
-    )
-    userPreferences = allUsersResult.rows.map(portalUserUiStyleFromRow).filter(Boolean)
-  }
-
-  return {
-    orgDefault: portalOrgUiStyleFromRow(orgResult.rows[0]),
-    userPreference: portalUserUiStyleFromRow(userResult.rows[0]),
-    userPreferences,
-    storage: 'database',
-  }
-}
-
-async function handlePortalUiStyleRequest(req, res, requestUrl) {
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204)
-    res.end()
-    return
-  }
-
-  const method = String(req.method || 'GET').toUpperCase()
-  if (!['GET', 'POST', 'DELETE'].includes(method)) {
-    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolone metody to GET, POST i DELETE.')
-    return
-  }
-
-  let body = {}
-  if (method !== 'GET') {
-    try {
-      body = await readJsonBody(req)
-    } catch (error) {
-      if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
-        sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
-        return
-      }
-      sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
-      return
-    }
-  }
-
-  const orgId = normalizeOrgId(method === 'GET' ? requestUrl.searchParams.get('orgId') : body?.orgId)
-  if (!orgId) {
-    sendApiError(res, 400, 'INVALID_ORG_ID', 'Brak poprawnego orgId.')
-    return
-  }
-
-  const token = parseBearerToken(req)
-  if (!token) {
-    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
-    return
-  }
-
-  let decodedToken
-  try {
-    decodedToken = await verifyFirebaseIdToken(token)
-  } catch (error) {
-    const mapped = mapFirebaseAdminError(error)
-    sendApiError(res, mapped.status, mapped.code, mapped.message)
-    return
-  }
-
-  const requesterUid = normalizeText(decodedToken?.uid)
-  let client = null
-  try {
-    client = await connectDbClient()
-    await ensurePortalUiStyleTables(client)
-
-    const membership = await getRequesterMembership(client, orgId, requesterUid)
-    if (!membership) {
-      throw workerProfileAccessError(null, 'ustawien wygladu organizacji')
-    }
-    const requesterRole = normalizeRequesterRole(membership.role)
-    const isAdmin = requesterRole === 'ADMIN'
-    const isPlatformActor = normalizeRoleCode(membership.role) === PLATFORM_ROLE
-
-    if (method === 'GET') {
-      const includeUsers = requestUrl.searchParams.get('includeUsers') === '1'
-      if (includeUsers && !isAdmin) {
-        throw workerProfileAccessError(membership, 'odczytu preferencji wygladu uzytkownikow')
-      }
-      const state = await readPortalUiStyleState(client, orgId, isPlatformActor ? '' : requesterUid, includeUsers)
-      sendJson(res, 200, { ok: true, data: state })
-      return
-    }
-
-    const scope = isPlatformActor ? 'organization' : normalizePortalStyleScope(body?.scope)
-    const requestedUid = normalizeText(body?.uid).slice(0, 128)
-    const targetUid = requestedUid || requesterUid
-    if (scope === 'organization' && !isAdmin) {
-      throw workerProfileAccessError(membership, 'zmiany domyslnego wygladu organizacji')
-    }
-    if (scope === 'user' && targetUid !== requesterUid && !isAdmin) {
-      throw workerProfileAccessError(membership, 'zmiany wygladu innego uzytkownika')
-    }
-
-    if (method === 'DELETE') {
-      if (scope === 'organization') {
-        await client.query('delete from public.org_ui_style where org_id = $1::text', [orgId])
-      } else {
-        await client.query(
-          'delete from public.user_ui_style_preference where org_id = $1::text and uid = $2::text',
-          [orgId, targetUid],
-        )
-      }
-      sendJson(res, 200, { ok: true, data: { deleted: true, orgId, scope, uid: targetUid } })
-      return
-    }
-
-    const styleId = normalizePortalStyleId(body?.styleId)
-    if (!styleId) {
-      sendApiError(res, 400, 'INVALID_STYLE_ID', 'Brak poprawnego identyfikatora stylu.')
-      return
-    }
-    const updatedBy = isPlatformActor
-      ? ''
-      : normalizeText(body?.updatedBy || decodedToken?.email || requesterUid).slice(0, 120)
-
-    if (scope === 'organization') {
-      await client.query(
-        `insert into public.org_ui_style (org_id, default_style_id, updated_at, updated_by)
-         values ($1::text, $2::text, now(), nullif($3::text, ''))
-         on conflict (org_id)
-         do update set
-           default_style_id = excluded.default_style_id,
-           updated_at = now(),
-           updated_by = coalesce(excluded.updated_by, org_ui_style.updated_by)`,
-        [orgId, styleId, updatedBy],
-      )
-    } else {
-      await client.query(
-        `insert into public.user_ui_style_preference (org_id, uid, style_id, updated_at, updated_by)
-         values ($1::text, $2::text, $3::text, now(), nullif($4::text, ''))
-         on conflict (org_id, uid)
-         do update set
-           style_id = excluded.style_id,
-           updated_at = now(),
-           updated_by = excluded.updated_by`,
-        [orgId, targetUid, styleId, updatedBy],
-      )
-    }
-
-    sendJson(res, 200, {
-      ok: true,
-      data: { saved: true, orgId, scope, uid: targetUid, styleId, storage: 'database' },
-    })
-  } catch (error) {
-    const mappedDb = mapDatabaseConnectionError(error)
-    if (mappedDb) {
-      sendApiError(res, mappedDb.status, mappedDb.code, mappedDb.message)
-      return
-    }
-    sendApiError(
-      res,
-      error?.statusCode || 500,
-      normalizeText(error?.publicCode) || 'PORTAL_UI_STYLE_ERROR',
-      normalizeText(error?.publicMessage) || error?.message || 'Nie udalo sie obsluzyc ustawien wygladu.',
     )
   } finally {
     if (client) client.release()
@@ -9753,6 +9619,26 @@ const profitabilityApi = createProfitabilityApi({
   verifyFirebaseIdToken,
 })
 
+const workdayReconciliationApi = createWorkdayReconciliationApi({
+  authorize: authorizeWorkdayReconciliation,
+  connectDbClient,
+  parseBearerToken,
+  readJsonBody,
+  sendApiError,
+  sendJson,
+  verifyFirebaseIdToken,
+})
+
+const workTimeDaysApi = createWorkTimeDaysApi({
+  authorize: authorizeWorkdayReconciliation,
+  connectDbClient,
+  parseBearerToken,
+  readJsonBody,
+  sendApiError,
+  sendJson,
+  verifyFirebaseIdToken,
+})
+
 const server = http.createServer((req, res) => runWithPlatformRequest(req, () => {
   const scopedRequest = getPlatformRequestContext()
   res.once('finish', () => {
@@ -9806,6 +9692,18 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
     })
     return
   }
+  if (workdayReconciliationApi.matches(requestUrl.pathname)) {
+    workdayReconciliationApi.handle(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'WORKDAY_RECONCILIATION_ERROR', error?.message || 'Unexpected workday reconciliation error.')
+    })
+    return
+  }
+  if (workTimeDaysApi.matches(requestUrl.pathname)) {
+    workTimeDaysApi.handle(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'WORK_TIME_DAY_ERROR', error?.message || 'Unexpected work time day error.')
+    })
+    return
+  }
   if (requestUrl.pathname === PORTAL_ORGANIZATIONS_PATH) {
     handlePortalOrganizationsRequest(req, res).catch((error) => {
       sendApiError(res, 500, 'ORGANIZATION_CREATE_FAILED', error?.message || 'Unexpected organization error.')
@@ -9835,13 +9733,6 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   ) {
     handleMobileWorkflowRequest(req, res, requestUrl).catch((error) => {
       sendMobileApiError(res, 500, 'MOBILE_WORKFLOW_ERROR', error?.message || 'Unexpected mobile workflow error.')
-    })
-    return
-  }
-
-  if (requestUrl.pathname === PORTAL_UI_STYLE_PATH) {
-    handlePortalUiStyleRequest(req, res, requestUrl).catch((error) => {
-      sendApiError(res, 500, 'PORTAL_UI_STYLE_ERROR', error?.message || 'Unexpected portal UI style error.')
     })
     return
   }

@@ -16,9 +16,29 @@
   clientProfileDetails: 'view-clientProfileDetails',
   reports: 'view-reports',
   settings: 'view-settings',
-  settingsStyles: 'view-settings',
-  settingsBackup: 'view-settings',
+  settingsProfile: 'view-settings',
+  settingsNotifications: 'view-settings',
+  settingsLanguageApp: 'view-settings',
+  settingsAccountSecurity: 'view-settings',
+  settingsOrganizationData: 'view-settings',
+  settingsAlerts: 'view-settings',
+  settingsIntegrations: 'view-settings',
+  settingsBilling: 'view-settings',
+  settingsDataSecurity: 'view-settings',
 }
+
+const settingsRoutes = new Set([
+  'settings',
+  'settingsProfile',
+  'settingsNotifications',
+  'settingsLanguageApp',
+  'settingsAccountSecurity',
+  'settingsOrganizationData',
+  'settingsAlerts',
+  'settingsIntegrations',
+  'settingsBilling',
+  'settingsDataSecurity',
+])
 
 const routeGroups = {
   zones: 'objects',
@@ -33,9 +53,6 @@ const routeGroups = {
   workerProfile: 'workers',
   workerAccount: 'workers',
   reports: 'reports',
-  settings: 'settings',
-  settingsStyles: 'settings',
-  settingsBackup: 'settings',
 }
 
 let activeRoute = ''
@@ -47,9 +64,14 @@ function normalizeRoute(route) {
   return nextRoute === 'clientsList' ? 'clientProfile' : nextRoute
 }
 
+function sidebarRouteFor(route) {
+  return settingsRoutes.has(route) ? 'settings' : route
+}
+
 function setActiveRoute(route) {
+  const sidebarRoute = sidebarRouteFor(route)
   const currentActive = document.querySelector(
-    `.menu-item.active[data-route="${route}"], .submenu-item.active[data-route="${route}"], .mini-link.active[data-route="${route}"]`
+    `.menu-item.active[data-route="${sidebarRoute}"], .submenu-item.active[data-route="${sidebarRoute}"], .mini-link.active[data-route="${sidebarRoute}"]`
   )
   if (activeRoute === route && currentActive) {
     return
@@ -58,7 +80,7 @@ function setActiveRoute(route) {
   document.querySelectorAll('.menu-item.active, .submenu-item.active, .mini-link.active').forEach((button) => {
     button.classList.remove('active')
   })
-  document.querySelectorAll(`[data-route="${route}"]`).forEach((button) => {
+  document.querySelectorAll(`[data-route="${sidebarRoute}"]`).forEach((button) => {
     if (button.matches('.menu-item, .submenu-item, .mini-link')) {
       button.classList.add('active')
     }
@@ -73,7 +95,7 @@ function keepActiveSidebarItemVisible(route) {
   }
   activeSidebarScrollRaf = window.requestAnimationFrame(() => {
     activeSidebarScrollRaf = 0
-    const activeItem = document.querySelector(`#portalSidebar [data-route="${route}"].active`)
+    const activeItem = document.querySelector(`#portalSidebar [data-route="${sidebarRouteFor(route)}"].active`)
     const menu = activeItem?.closest?.('.menu')
     if (!(activeItem instanceof HTMLElement) || !(menu instanceof HTMLElement)) {
       return

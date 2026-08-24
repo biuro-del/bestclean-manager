@@ -13,16 +13,36 @@ import {
   isOwnWorkdayEditBlocked,
 } from '../workdayEditAccess.js'
 import {
+  aggregateWorkTimeDay,
+  formatWorkDurationHms,
+  incompleteWorkTimeRows,
   workIntervalCodes,
   workIntervalGpsCoordinates,
+  workIntervalVisibleComment,
   workIntervalsFromRow,
   workIntervalsTotalSeconds,
+  workSessionAccountingFromRow,
+  warsawBusinessDateKey,
 } from '../workIntervals.js'
 import {
   findPendingTimeEditorItem,
-  preciseTimeInputValue,
-  timeEditorSourceRows,
 } from './workdayTimeEditorModel.js'
+import {
+  formatReconciliationDuration,
+  isoToWarsawDateTimeInput,
+  normalizeWorkdayReconciliation,
+  reconciliationHasBlockingProblems,
+  warsawDateTimeInputToIso,
+} from './workdayReconciliationModel.js'
+import {
+  getWorkdayReconciliation,
+  saveWorkdayReconciliation,
+} from '../../../services/workdayReconciliationService.js'
+import {
+  getWorkTimeDay,
+  getWorkTimeDays,
+  saveWorkTimeDay,
+} from '../../../services/workTimeDayService.js'
 
 export const route = 'workerAccount'
 export const viewId = 'view-workerAccount'
@@ -129,8 +149,6 @@ export function createWorkerAccountFeature(ctx) {
     showTransientNotice,
     todayYmd,
     toIso,
-    updateEvent,
-    updateWorkday,
     updateWorker,
     ymdToIsoRangeEnd,
     ymdToIsoRangeStart,
@@ -787,8 +805,12 @@ export function createWorkerAccountFeature(ctx) {
     appState.workerAccountTimePage = 1
     appState.workerAccountTimeSelectedKeys = new Set()
     appState.workerAccountTimeCurrentPageKeys = []
-    appState.workerAccountDayEditorItem = null
     appState.workerAccountTimeCodeEditorItem = null
+    appState.workerAccountReconciliationModel = null
+    appState.workerAccountReconciliationRow = null
+    appState.workerAccountReconciliationCorrections = []
+    appState.workerAccountActivityCorrections = []
+    appState.workerAccountReconciliationIdempotency = null
     appState.workerAccountEditTab = ''
     if (clearLoadedKey) clearWorkerAccountLoadedKeys()
     if (clearLoadingKeys) clearWorkerAccountLoadKeys()
@@ -1527,11 +1549,7 @@ export function createWorkerAccountFeature(ctx) {
   function toDayKey(value) {
     const iso = typeof toIso === 'function' ? toIso(value) : String(value ?? '')
     if (!iso) return ''
-    const date = new Date(iso)
-    if (!Number.isFinite(date.getTime())) return String(iso).slice(0, 10)
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
-    return `${date.getFullYear()}-${month}-${day}`
+    return warsawBusinessDateKey(iso)
   }
 
   function dayKeyFromValue(value) {
@@ -1545,7 +1563,10 @@ export function createWorkerAccountFeature(ctx) {
   }
 
   function eventDayKey(row = {}) {
-    return dayKeyFromValue(row.dayKey ?? row.dateYmd ?? row.date ?? row.startAt ?? row.endAt ?? row.createdAt ?? row.updatedAt)
+    return dayKeyFromValue(
+      row.businessDateYmd ?? row.business_date_ymd ?? row.dayKey ?? row.dateYmd ?? row.date ??
+      row.startAt ?? row.endAt ?? row.createdAt ?? row.updatedAt,
+    )
   }
 
   function rowStartIso(row = {}) {
@@ -1557,17 +1578,15 @@ export function createWorkerAccountFeature(ctx) {
   }
 
   function secondsFromRow(row = {}) {
-    const value = Number(row.netSec ?? row.workSec ?? row.durationSec ?? row.durationSeconds ?? 0)
-    if (Number.isFinite(value) && value > 0) return Math.floor(value)
-    return timeRangeSeconds(rowStartIso(row), rowEndIso(row))
+    if (Array.isArray(row?.workIntervals)) {
+      return timeRowsTotalSeconds([row])
+    }
+    const value = Number(row.closedSessionsSec ?? 0)
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
   }
 
   function formatSeconds(seconds) {
-    const value = Number(seconds) || 0
-    if (typeof durationSecondsToHm === 'function') return durationSecondsToHm(value)
-    const hours = Math.floor(value / 3600)
-    const minutes = Math.floor((value % 3600) / 60)
-    return `${hours}h ${String(minutes).padStart(2, '0')}m`
+    return formatWorkDurationHms(seconds)
   }
 
   function _formatHms(seconds) {
@@ -1620,34 +1639,6 @@ export function createWorkerAccountFeature(ctx) {
     return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
   }
 
-  function isoToDateInput(value) {
-    const raw = String(value ?? '').trim()
-    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
-    const iso = typeof toIso === 'function' ? toIso(raw) : raw
-    if (!iso) return ''
-    const date = new Date(iso)
-    if (!Number.isFinite(date.getTime())) return ''
-    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
-  }
-
-  function isoToTimeInput(value) {
-    const iso = typeof toIso === 'function' ? toIso(value) : String(value ?? '')
-    return iso ? preciseTimeInputValue(iso) : ''
-  }
-
-  function localDateTimeToIso(dateValue, timeValue) {
-    const dateText = String(dateValue ?? '').trim()
-    const timeText = String(timeValue ?? '').trim()
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !/^\d{2}:\d{2}(?::\d{2})?$/.test(timeText)) return ''
-    const [year, month, day] = dateText.split('-').map(Number)
-    const [hour, minute, second = 0] = timeText.split(':').map(Number)
-    if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) return ''
-    const date = new Date(year, month - 1, day, hour, minute, second, 0)
-    if (!Number.isFinite(date.getTime())) return ''
-    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return ''
-    return date.toISOString()
-  }
-
   function timeRangeSeconds(startAt, endAt) {
     const startIso = typeof toIso === 'function' ? toIso(startAt) : String(startAt ?? '')
     const endIso = typeof toIso === 'function' ? toIso(endAt) : String(endAt ?? '')
@@ -1660,28 +1651,38 @@ export function createWorkerAccountFeature(ctx) {
 
   function monthValueFromDate(value) {
     const raw = String(value ?? '').trim()
-    return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw.slice(0, 7) : `${new Date().getFullYear()}-${pad2(new Date().getMonth() + 1)}`
+    const businessToday = typeof todayYmd === 'function' ? todayYmd() : ''
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw)
+      ? raw.slice(0, 7)
+      : /^\d{4}-\d{2}-\d{2}$/.test(businessToday)
+        ? businessToday.slice(0, 7)
+        : ''
   }
 
   function currentWeekRange() {
-    const now = new Date()
-    const day = now.getDay() || 7
-    const start = new Date(now)
-    start.setDate(now.getDate() - day + 1)
-    const ymd = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-    return { from: ymd(start), to: ymd(now) }
+    const businessToday = typeof todayYmd === 'function' ? todayYmd() : ''
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(businessToday)) return { from: '', to: '' }
+    const [year, month, dayOfMonth] = businessToday.split('-').map(Number)
+    const todayUtc = new Date(Date.UTC(year, month - 1, dayOfMonth))
+    const weekday = todayUtc.getUTCDay() || 7
+    todayUtc.setUTCDate(todayUtc.getUTCDate() - weekday + 1)
+    const from = `${todayUtc.getUTCFullYear()}-${pad2(todayUtc.getUTCMonth() + 1)}-${pad2(todayUtc.getUTCDate())}`
+    return { from, to: businessToday }
   }
 
   function currentMonthRange() {
-    const now = new Date()
+    const businessToday = typeof todayYmd === 'function' ? todayYmd() : ''
     return {
-      from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`,
-      to: typeof todayYmd === 'function' ? todayYmd() : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+      from: /^\d{4}-\d{2}-\d{2}$/.test(businessToday) ? `${businessToday.slice(0, 7)}-01` : '',
+      to: businessToday,
     }
   }
 
   function timeRowDayKey(row = {}) {
-    return dayKeyFromValue(row.dayKey ?? row.dateYmd ?? row.date ?? row.startAt ?? row.endAt ?? row.createdAt ?? row.updatedAt)
+    return dayKeyFromValue(
+      row.businessDateYmd ?? row.business_date_ymd ?? row.dayKey ?? row.dateYmd ?? row.date ??
+      row.startAt ?? row.endAt ?? row.createdAt ?? row.updatedAt,
+    )
   }
 
   function timeFilterRangeFromControls() {
@@ -1728,53 +1729,14 @@ export function createWorkerAccountFeature(ctx) {
     }, 0)
   }
 
-  function timeIntervalFromRow(row = {}) {
-    const startIso = rowStartIso(row)
-    const endIso = rowEndIso(row)
-    const durationSec = Number(row.durationSec ?? row.closedSec ?? row.workSec ?? 0)
-    let startTs = startIso ? new Date(startIso).getTime() : 0
-    let endTs = endIso ? new Date(endIso).getTime() : 0
-
-    if (!Number.isFinite(startTs)) startTs = 0
-    if (!Number.isFinite(endTs)) endTs = 0
-    if (endTs <= startTs && startTs > 0 && Number.isFinite(durationSec) && durationSec > 0) {
-      endTs = startTs + Math.floor(durationSec) * 1000
-    }
-    if (!startTs || !endTs || endTs <= startTs) return null
-    return { startTs, endTs }
-  }
-
-  function mergeTimeIntervals(intervals = []) {
-    const sorted = intervals
-      .filter(Boolean)
-      .map((interval) => ({ startTs: Number(interval.startTs), endTs: Number(interval.endTs) }))
-      .filter((interval) => Number.isFinite(interval.startTs) && Number.isFinite(interval.endTs) && interval.endTs > interval.startTs)
-      .sort((left, right) => left.startTs - right.startTs || left.endTs - right.endTs)
-    const merged = []
-    sorted.forEach((interval) => {
-      const last = merged[merged.length - 1]
-      if (!last || interval.startTs > last.endTs) {
-        merged.push({ ...interval })
-        return
-      }
-      last.endTs = Math.max(last.endTs, interval.endTs)
-    })
-    return merged
-  }
-
   function timeRowsTotalSeconds(rows = []) {
     const intervals = rows.flatMap((row) => {
-      if (Array.isArray(row?.workIntervals) && row.workIntervals.length) {
-        return workIntervalsFromRow(row)
+      if (Array.isArray(row?.workIntervals)) {
+        return workSessionAccountingFromRow(row).mergedWorkIntervals
       }
-      const interval = timeIntervalFromRow(row)
-      return interval ? [interval] : []
+      return []
     })
-    const totalMs = mergeTimeIntervals(intervals).reduce(
-      (sum, interval) => sum + Math.max(0, interval.endTs - interval.startTs),
-      0,
-    )
-    return Math.floor(totalMs / 1000)
+    return workIntervalsTotalSeconds(intervals)
   }
 
   function aggregateTimeRows(rows = [], worker = {}) {
@@ -1788,6 +1750,7 @@ export function createWorkerAccountFeature(ctx) {
       const breakSec = Math.max(0, Number(row.breakSec ?? row.pauseTotalSec ?? 0) || 0)
       const bucket = groups.get(dayKey) ?? {
         dayKey,
+        workerLogin: String(row.workerLogin ?? row.worker_login ?? row.login ?? '').trim(),
         workerName: String(row.workerName ?? workerName(worker) ?? '').trim(),
         workerType: String(row.workerType ?? row.type ?? roleLabel(workerRole(worker)) ?? '').trim(),
         startAt: '',
@@ -1796,9 +1759,16 @@ export function createWorkerAccountFeature(ctx) {
         updatedBy: '',
         comment: '',
         latestUpdatedAt: '',
+        integrityStates: [],
+        integrityIssues: [],
+        openSessions: [],
         sourceRows: [],
       }
       bucket.sourceRows.push(row)
+      bucket.workerLogin = bucket.workerLogin || String(row.workerLogin ?? row.worker_login ?? row.login ?? '').trim()
+      if (row?.integrityState) bucket.integrityStates.push(String(row.integrityState).trim().toUpperCase())
+      if (Array.isArray(row?.integrityIssues)) bucket.integrityIssues.push(...row.integrityIssues)
+      if (Array.isArray(row?.openSessions)) bucket.openSessions.push(...row.openSessions)
       bucket.breakSec += breakSec
       if (startIso && (!bucket.startAt || new Date(startIso).getTime() < new Date(bucket.startAt).getTime())) bucket.startAt = startIso
       if (endIso && (!bucket.endAt || new Date(endIso).getTime() > new Date(bucket.endAt).getTime())) bucket.endAt = endIso
@@ -1815,25 +1785,126 @@ export function createWorkerAccountFeature(ctx) {
 
     return [...groups.values()]
       .map((bucket) => {
-        const mergedWorkSec = timeRowsTotalSeconds(bucket.sourceRows)
-        const workSec = mergedWorkSec || timeRangeSeconds(bucket.startAt, bucket.endAt)
-        const breakSec = Math.min(workSec, Math.max(0, Math.floor(Number(bucket.breakSec ?? 0))))
-        const netSec = Math.max(0, workSec - breakSec)
+        const dayAccounting = aggregateWorkTimeDay(bucket.sourceRows)
+        const sessionSec = dayAccounting.workedSec
+        const realWorkSec = sessionSec
+        const breakSec = Math.max(0, Math.floor(Number(bucket.breakSec ?? dayAccounting.pauseSec ?? 0)))
+        const netSec = realWorkSec
         return {
           dayKey: bucket.dayKey,
+          workerLogin: bucket.workerLogin || workerLogin(worker),
           workerName: bucket.workerName || workerName(worker) || workerLogin(worker) || '-',
           workerType: bucket.workerType || roleLabel(workerRole(worker)) || '-',
-          startAt: bucket.startAt,
-          endAt: bucket.endAt,
-          workSec,
+          startAt: dayAccounting.firstStartAt || bucket.startAt,
+          endAt: dayAccounting.lastStopAt,
+          lastClosedStopAt: dayAccounting.lastClosedStopAt,
+          workSec: sessionSec,
+          realWorkSec,
+          closedSessionsSec: sessionSec,
+          confirmedSec: realWorkSec,
+          provisionalSec: 0,
           breakSec,
           netSec,
+          integrityState: dayAccounting.integrityState,
+          integrityIssues: dayAccounting.integrityIssues,
+          issues: dayAccounting.integrityIssues,
+          openSessionCount: dayAccounting.openSessionCount,
+          openSessions: dayAccounting.openSessions,
+          sessions: dayAccounting.sessions,
+          activities: dayAccounting.activities,
           updatedBy: bucket.updatedBy || '-',
           comment: bucket.comment || '',
           sourceRows: bucket.sourceRows,
         }
       })
       .sort((left, right) => String(right.dayKey).localeCompare(String(left.dayKey)))
+  }
+
+  function openActivityCountForDay(day = {}) {
+    const activities = [
+      ...(Array.isArray(day?.activities) ? day.activities : []),
+      ...(Array.isArray(day?.sessions)
+        ? day.sessions.flatMap((session) => Array.isArray(session?.activities) ? session.activities : [])
+        : []),
+    ]
+    const seen = new Set()
+    let count = 0
+    activities.forEach((activity, index) => {
+      const isOpen = activity?.isOpen === true || Boolean(activity?.startAt && !activity?.endAt)
+      if (!isOpen) return
+      const key = String(activity?.eventId ?? activity?.id ?? '').trim() || `activity-${index}`
+      if (seen.has(key)) return
+      seen.add(key)
+      count += 1
+    })
+    if (count) return count
+
+    const issues = Array.isArray(day?.integrityIssues)
+      ? day.integrityIssues
+      : Array.isArray(day?.issues)
+        ? day.issues
+        : []
+    return issues.some((entry) => [
+      'OPEN_ACTIVITY',
+      'CLOSED_SESSION_WITH_OPEN_ACTIVITY',
+      'CLOSED_WORKDAY_WITH_OPEN_ACTIVITY',
+    ].includes(String(entry?.code ?? entry ?? '').trim().toUpperCase())) ? 1 : 0
+  }
+
+  function canonicalWorkTimeSessionRows(day = {}) {
+    return (Array.isArray(day?.sessions) ? day.sessions : []).map((session) => ({
+      ...session,
+      businessDateYmd: day.businessDateYmd,
+      dayKey: day.businessDateYmd,
+      durationSource: 'workday-session',
+      integrityIssues: Array.isArray(session?.issues) ? session.issues : [],
+      workerLogin: session?.workerLogin || day.workerLogin,
+      workerName: session?.workerName || day.workerName,
+    }))
+  }
+
+  function applyCanonicalWorkTimeDays(rows = [], days = [], worker = {}) {
+    const byDay = new Map((Array.isArray(rows) ? rows : []).map((row) => [String(row?.dayKey ?? '').trim(), row]))
+    ;(Array.isArray(days) ? days : []).forEach((day) => {
+      const dayKey = String(day?.businessDateYmd ?? day?.dayKey ?? '').trim()
+      if (!dayKey) return
+      const previous = byDay.get(dayKey) ?? {}
+      const sessions = Array.isArray(day?.sessions) ? day.sessions : []
+      const issues = Array.isArray(day?.issues) ? day.issues : []
+      const workedSec = Math.max(0, Math.floor(Number(day?.workedSec ?? day?.closedSessionsSec ?? 0) || 0))
+      const pauseSec = Math.max(0, Math.floor(Number(day?.pauseSec ?? 0) || 0))
+      const sourceRows = canonicalWorkTimeSessionRows(day)
+      byDay.set(dayKey, {
+        ...previous,
+        dayKey,
+        workerLogin: String(day?.workerLogin ?? previous.workerLogin ?? workerLogin(worker)).trim(),
+        workerName: String(day?.workerName ?? previous.workerName ?? workerName(worker) ?? '').trim(),
+        workerType: previous.workerType || roleLabel(workerRole(worker)) || '-',
+        startAt: String(day?.firstStartAt ?? previous.startAt ?? '').trim(),
+        endAt: String(day?.lastStopAt ?? '').trim(),
+        lastClosedStopAt: String(day?.lastClosedStopAt ?? previous.lastClosedStopAt ?? '').trim(),
+        workSec: workedSec,
+        realWorkSec: Math.max(0, Math.floor(Number(day?.realWorkSec ?? workedSec) || 0)),
+        closedSessionsSec: Math.max(0, Math.floor(Number(day?.closedSessionsSec ?? workedSec) || 0)),
+        confirmedSec: Math.max(0, Math.floor(Number(day?.confirmedSec ?? workedSec) || 0)),
+        provisionalSec: Math.max(0, Math.floor(Number(day?.provisionalSec ?? 0) || 0)),
+        breakSec: pauseSec,
+        netSec: Math.max(0, Math.floor(Number(day?.realWorkSec ?? workedSec) || 0)),
+        integrityState: String(day?.integrityState ?? previous.integrityState ?? 'INVALID').trim().toUpperCase(),
+        integrityIssues: issues,
+        issues,
+        openSessionCount: Math.max(0, Math.floor(Number(day?.openSessionCount ?? 0) || 0)),
+        openSessions: Array.isArray(day?.openSessions) ? day.openSessions : sessions.filter((session) => session?.isOpen),
+        openActivityCount: openActivityCountForDay(day),
+        sessions,
+        activities: Array.isArray(day?.activities) ? day.activities : sessions.flatMap((session) => session?.activities ?? []),
+        workdayId: String(day?.workdayId ?? sessions[0]?.workdayId ?? previous.workdayId ?? '').trim(),
+        version: String(day?.version ?? '').trim(),
+        schemaReady: day?.schemaReady,
+        sourceRows: sourceRows.length ? sourceRows : (Array.isArray(previous.sourceRows) ? previous.sourceRows : []),
+      })
+    })
+    return [...byDay.values()].sort((left, right) => String(right.dayKey).localeCompare(String(left.dayKey)))
   }
 
   function sortRowsByLatest(rows = []) {
@@ -2080,7 +2151,8 @@ export function createWorkerAccountFeature(ctx) {
       option.textContent = `${WORKER_ACCOUNT_MONTH_NAMES_PL[month - 1]} ${year}`
       select.appendChild(option)
     }
-    const fallback = `${year}-${pad2(new Date().getMonth() + 1)}`
+    const businessToday = typeof todayYmd === 'function' ? todayYmd() : ''
+    const fallback = businessToday.startsWith(`${year}-`) ? businessToday.slice(0, 7) : `${year}-01`
     select.value = selectedValue && select.querySelector(`option[value="${selectedValue}"]`) ? selectedValue : fallback
   }
 
@@ -2088,7 +2160,8 @@ export function createWorkerAccountFeature(ctx) {
     const to = String(document.getElementById('waTimeTo')?.value ?? '').trim()
     const from = String(document.getElementById('waTimeFrom')?.value ?? '').trim()
     const selectedMonth = monthValueFromDate(to || from)
-    const year = Number(selectedMonth.slice(0, 4)) || new Date().getFullYear()
+    const businessToday = typeof todayYmd === 'function' ? todayYmd() : ''
+    const year = Number(selectedMonth.slice(0, 4)) || Number(businessToday.slice(0, 4))
     fillTimeMonthPick(year, selectedMonth)
   }
 
@@ -2113,9 +2186,13 @@ export function createWorkerAccountFeature(ctx) {
 
   function setTimeMonthCard(rows = appState.workerAccountTimeRows) {
     const sourceRows = Array.isArray(rows) ? rows : []
-    const totalWorkSec = sourceRows.reduce((sum, row) => sum + Math.max(0, Number(row.workSec ?? 0) || 0), 0)
-    const totalBreakSec = sourceRows.reduce((sum, row) => sum + Math.max(0, Number(row.breakSec ?? 0) || 0), 0)
-    const totalNetSec = sourceRows.reduce((sum, row) => sum + Math.max(0, Number(row.netSec ?? 0) || 0), 0)
+    const totalConfirmedSec = sourceRows.reduce((sum, row) => sum + Math.max(0, Number(row.confirmedSec ?? (row.integrityState === 'COMPLETE' ? row.workSec : 0)) || 0), 0)
+    const totalProvisionalSec = sourceRows.reduce((sum, row) => sum + Math.max(0, Number(row.provisionalSec ?? (row.integrityState !== 'COMPLETE' ? row.workSec : 0)) || 0), 0)
+    const totalBreakSec = sourceRows.reduce((sum, row) => {
+      if (String(row?.integrityState ?? 'COMPLETE').toUpperCase() !== 'COMPLETE') return sum
+      return sum + Math.max(0, Number(row.breakSec ?? 0) || 0)
+    }, 0)
+    const totalNetSec = Math.max(0, totalConfirmedSec - totalBreakSec)
     const fallbackRange = currentMonthRange()
     const from = String(document.getElementById('waTimeFrom')?.value ?? '').trim() || fallbackRange.from
     const to = String(document.getElementById('waTimeTo')?.value ?? '').trim() || fallbackRange.to
@@ -2125,9 +2202,10 @@ export function createWorkerAccountFeature(ctx) {
 
     setText('waTimeMonthLabel', selectedLabel || monthLabelFromValue(selectedMonth))
     setText('waTimeMonthRange', from && to ? `${dateKeyToLabel(from)} - ${dateKeyToLabel(to)}` : '-')
-    setText('waTimeMonthWork', formatSeconds(totalWorkSec))
+    setText('waTimeMonthWork', formatSeconds(totalConfirmedSec))
+    setText('waTimeMonthProvisional', formatSeconds(totalProvisionalSec))
     setText('waTimeMonthBreak', formatSeconds(totalBreakSec))
-    setText('waTimeMonthNet', formatSeconds(totalNetSec || Math.max(0, totalWorkSec - totalBreakSec)))
+    setText('waTimeMonthNet', formatSeconds(totalNetSec))
   }
 
   function applyTimeMonthPick(monthValue) {
@@ -2137,9 +2215,11 @@ export function createWorkerAccountFeature(ctx) {
     if (!from || !to || !/^\d{4}-\d{2}$/.test(value)) return
     const year = Number(value.slice(0, 4))
     const month = Number(value.slice(5, 7))
-    const now = new Date()
-    const isCurrentMonth = now.getFullYear() === year && now.getMonth() + 1 === month
-    const lastDay = isCurrentMonth ? now.getDate() : new Date(year, month, 0).getDate()
+    const businessToday = typeof todayYmd === 'function' ? todayYmd() : ''
+    const isCurrentMonth = businessToday.slice(0, 7) === value
+    const lastDay = isCurrentMonth
+      ? Number(businessToday.slice(8, 10))
+      : new Date(Date.UTC(year, month, 0)).getUTCDate()
     from.value = `${value}-01`
     to.value = `${value}-${pad2(lastDay)}`
   }
@@ -2265,6 +2345,21 @@ export function createWorkerAccountFeature(ctx) {
     return [...rows].sort(compareTimeEvidenceRows)
   }
 
+  function timeEvidenceIntegrityBlockers(rows = timeEvidenceRowsForExport()) {
+    return incompleteWorkTimeRows(rows)
+  }
+
+  function syncTimeEvidenceIntegrityMessage(rows = timeEvidenceRowsForExport()) {
+    const root = document.getElementById('waExportIntegrityProblems')
+    const blockers = timeEvidenceIntegrityBlockers(rows)
+    if (!root) return blockers
+    root.hidden = !blockers.length
+    root.innerHTML = blockers.length
+      ? `<strong>Uwaga: ewidencja zawiera niepełne dane.</strong><br>Eksport nadal jest dostępny. Otwarte sesje bez STOP nie są doliczane do czasu pracy. Sprawdź dni: ${[...new Set(blockers.map((row) => dateKeyToLabel(row?.dayKey ?? row?.businessDateYmd ?? row?.dateYmd)))].map(escapeHtml).join(', ')}.`
+      : ''
+    return blockers
+  }
+
   function timeEvidenceFilenameBase() {
     const worker = resolveCurrentWorker() || {}
     const from = String(document.getElementById('waExportFrom')?.value ?? document.getElementById('waTimeFrom')?.value ?? '').trim()
@@ -2344,14 +2439,15 @@ export function createWorkerAccountFeature(ctx) {
     appState.workerAccountTimePreviewUrl = ''
   }
 
-  function syncTimeEvidenceExportButtons(rows = timeEvidenceRowsForExport(), columns = readTimeEvidenceExportOptions().columns) {
+  function syncTimeEvidenceExportButtons(rows = timeEvidenceRowsForExport(), columns = readTimeEvidenceExportOptions({ validate: false })?.columns ?? []) {
+    syncTimeEvidenceIntegrityMessage(rows)
     const canDownload = rows.length > 0 && columns.length > 0
     const csvButton = document.getElementById('waExportCsvBtn')
     const pdfButton = document.getElementById('waExportPdfBtn')
     const previewButton = document.getElementById('waExportPreviewBtn')
-    if (csvButton) csvButton.disabled = false
-    if (pdfButton) pdfButton.disabled = false
-    if (previewButton) previewButton.disabled = false
+    if (csvButton) csvButton.disabled = !canDownload
+    if (pdfButton) pdfButton.disabled = !canDownload
+    if (previewButton) previewButton.disabled = !canDownload
     return canDownload
   }
 
@@ -2427,7 +2523,6 @@ export function createWorkerAccountFeature(ctx) {
       }
       return
     }
-
     preview.innerHTML = '<div class="wa-export-empty">Generowanie podgladu PDF...</div>'
     try {
       const pdf = await buildTimeEvidencePdf(exportOptions, rows)
@@ -2529,14 +2624,21 @@ export function createWorkerAccountFeature(ctx) {
       setTimeEvidencePreviewPlaceholder('Brak danych ewidencji do pobrania')
       return
     }
+    const integrityBlockers = syncTimeEvidenceIntegrityMessage(rows)
 
     closeTimeEvidenceExportModal()
     try {
       if (format === 'pdf') {
         await downloadTimeEvidencePdf(exportOptions)
+        if (integrityBlockers.length) {
+          showTransientNotice(`Pobrano ewidencję z ostrzeżeniami: ${integrityBlockers.length} niepełnych wpisów.`, 'warning')
+        }
         return
       }
       downloadTimeEvidenceCsv(exportOptions)
+      if (integrityBlockers.length) {
+        showTransientNotice(`Pobrano ewidencję z ostrzeżeniami: ${integrityBlockers.length} niepełnych wpisów.`, 'warning')
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Nie udalo sie pobrac ewidencji pracy.'
       alert(message)
@@ -2666,16 +2768,6 @@ export function createWorkerAccountFeature(ctx) {
     `
   }
 
-  function workerAccountTimeCodeEditButton(code = {}, index = 0, dayKey = '') {
-    if (!canAdministerWorkers()) return ''
-    const label = `Edytuj godzinę ${code.type} sesji ${code.session}`
-    return `
-      <button class="wa-time-code-edit-btn" type="button" data-wa-time-code-edit="${index}" data-wa-time-code-day="${escapeHtml(dayKey)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6.5h9M17 6.5h3M4 12h3M11 12h9M4 17.5h8M16 17.5h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="15" cy="6.5" r="2" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="12" r="2" stroke="currentColor" stroke-width="1.8"/><circle cx="14" cy="17.5" r="2" stroke="currentColor" stroke-width="1.8"/></svg>
-      </button>
-    `
-  }
-
   function workerAccountTimeCodeGpsIndicator(code = {}) {
     const interval = code?.interval ?? {}
     const coords = workIntervalGpsCoordinates(interval, code.type)
@@ -2710,23 +2802,20 @@ export function createWorkerAccountFeature(ctx) {
     `
   }
 
-  function workerAccountTimeCodeCountLabel(count) {
-    const value = Math.max(0, Number(count) || 0)
-    const lastTwo = value % 100
-    const last = value % 10
-    if (value === 1) return '1 kod'
-    if (last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14)) return `${value} kody`
-    return `${value} kodów`
-  }
-
   function workerAccountTimeCodesButton(row = {}) {
     const codes = workerAccountTimeCodes(row)
-    if (!codes.length) return ''
     const dayKey = String(row?.dayKey ?? '').trim()
+    const sources = Array.isArray(row?.sourceRows) ? row.sourceRows : []
+    const preferredSource = sources.find((source) =>
+      String(source?.integrityState ?? '').trim().toUpperCase() !== 'COMPLETE' ||
+      (Array.isArray(source?.openSessions) && source.openSessions.length),
+    ) ?? sources[0] ?? row
+    const workdayId = String(preferredSource?.workdayId ?? preferredSource?.id ?? '').trim()
+    if (!codes.length && !workdayId && String(row?.integrityState ?? 'COMPLETE').trim().toUpperCase() === 'COMPLETE') return ''
     const dayLabel = dateKeyToLabel(dayKey)
-    const label = `Pokaż kody START i STOP z dnia ${dayLabel}`
+    const label = `Przejrzyj sesje i rozliczenie dnia ${dayLabel}`
     return `
-      <button class="wa-time-codes-btn" type="button" data-wa-time-codes="${escapeHtml(dayKey)}" aria-haspopup="dialog" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+      <button class="wa-time-codes-btn" type="button" data-wa-time-codes="${escapeHtml(dayKey)}" data-wa-time-codes-id="${escapeHtml(workdayId)}" aria-haspopup="dialog" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M7 5h10M7 12h10M7 19h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
           <circle cx="4" cy="5" r="1.2" fill="currentColor"/><circle cx="4" cy="12" r="1.2" fill="currentColor"/><circle cx="4" cy="19" r="1.2" fill="currentColor"/>
@@ -2836,14 +2925,35 @@ export function createWorkerAccountFeature(ctx) {
         ? paged.items.map((row) => {
             const key = timeSelectionKey(row)
             const selected = key && appState.workerAccountTimeSelectedKeys.has(key)
+            const integrityState = String(row?.integrityState ?? 'COMPLETE').trim().toUpperCase()
+            const businessToday = warsawBusinessDateKey(Date.now())
+            const isCurrentBusinessDay = timeRowDayKey(row) === businessToday
+            const hasOpenSession = Array.isArray(row?.openSessions) && row.openSessions.length > 0
+            const isCurrentOpenDay = isCurrentBusinessDay && integrityState === 'OPEN_SESSION' && hasOpenSession
+            const hasIntegrityProblem = integrityState !== 'COMPLETE' && !isCurrentOpenDay
+            const openSessionCount = Math.max(
+              Number(row?.openSessionCount) || 0,
+              Array.isArray(row?.openSessions) ? row.openSessions.length : 0,
+            )
+            const openActivityCount = Math.max(Number(row?.openActivityCount) || 0, openActivityCountForDay(row))
+            const stateLabel = openSessionCount > 0 && !isCurrentOpenDay
+              ? `Brak STOP sesji${openSessionCount > 1 ? ` (${openSessionCount})` : ''}`
+              : openActivityCount > 0
+                ? `Brak STOP zdarzenia${openActivityCount > 1 ? ` (${openActivityCount})` : ''}`
+              : integrityState === 'INCONSISTENT'
+                ? 'Dzień wymaga korekty'
+              : integrityState === 'INVALID'
+                ? 'Błędne dane'
+                : ''
+            const stateClass = (openSessionCount > 0 && !isCurrentOpenDay) || openActivityCount > 0 ? ' is-missing-stop' : ''
             return `
-              <div class="events-row worker-account-time-row${selected ? ' is-selected' : ''}">
+              <div class="events-row worker-account-time-row${selected ? ' is-selected' : ''}${hasIntegrityProblem ? ' has-integrity-problem' : ''}">
                 <div class="events-select-col"><input type="checkbox" data-wa-time-select="${escapeHtml(key)}" ${selected ? 'checked' : ''} aria-label="Zaznacz rekord dnia ${escapeHtml(dateKeyToLabel(row.dayKey))}" /></div>
                 <div class="mono">${escapeHtml(dateKeyToLabel(row.dayKey))}</div>
                 <div>${escapeHtml(row.workerType || '-')}</div>
                 <div class="mono time-start">${escapeHtml(isoToHm(row.startAt))}</div>
-                <div class="mono time-stop">${escapeHtml(isoToHm(row.endAt))}</div>
-                <div class="wa-time-work-cell"><span class="mono work-brutto">${escapeHtml(formatSeconds(row.workSec))}</span>${workerAccountTimeCodesButton(row)}</div>
+                <div class="mono time-stop">${escapeHtml(hasOpenSession ? (isCurrentOpenDay ? 'W trakcie' : 'Brak STOP') : isoToHm(row.endAt))}</div>
+                <div class="wa-time-work-cell"><span><span class="mono work-brutto">${escapeHtml(formatSeconds(row.workSec))}</span>${stateLabel ? `<small class="wa-time-work-state${stateClass}" role="status"><span aria-hidden="true">!</span>${escapeHtml(stateLabel)}</small>` : ''}</span>${workerAccountTimeCodesButton(row)}</div>
                 <div class="mono work-bold">${escapeHtml(formatSeconds(row.netSec))}</div>
                 <div class="mono time-break">${escapeHtml(formatSeconds(row.breakSec))}</div>
                 <div>${escapeHtml(row.updatedBy || '-')}</div>
@@ -2914,9 +3024,8 @@ export function createWorkerAccountFeature(ctx) {
   }
 
   function workerOrdersFromCache(worker) {
-    const orders = typeof ordersListSourceOrders === 'function' && Array.isArray(ordersListSourceOrders())
-      ? ordersListSourceOrders()
-      : []
+    const cachedOrders = typeof ordersListSourceOrders === 'function' ? ordersListSourceOrders() : []
+    const orders = Array.isArray(cachedOrders) ? cachedOrders : []
     return sortOrdersByLatest(orders.filter((order) => orderMatchesWorker(order, worker)))
   }
 
@@ -3018,14 +3127,33 @@ export function createWorkerAccountFeature(ctx) {
     appState.workerAccountTimeLoadingKey = loadKey
     setTimeLoading()
     try {
-      const sourceRows = sortRowsByLatest(
-        await fetchWorkerTimeRows(appState.session.orgId, worker, range, { allowBroadFallback: options.allowBroadFallback }),
-      ).map((row) => stampWorkerIdentity(row, worker))
+      const canonicalWorkerLogin = String(workerLogin(worker) ?? '').trim()
+      const canonicalDaysPromise = canonicalWorkerLogin && range.from && range.to
+        ? getWorkTimeDays(appState.session.orgId, {
+            workerLogin: canonicalWorkerLogin,
+            fromYmd: range.from,
+            toYmd: range.to,
+            page: 1,
+            pageSize: 200,
+          }).catch((error) => {
+            console.warn('[worker-account/time] canonical day summaries unavailable, using compatibility data', error)
+            return { items: [] }
+          })
+        : Promise.resolve({ items: [] })
+      const [compatibilityRows, canonicalDaysResponse] = await Promise.all([
+        fetchWorkerTimeRows(appState.session.orgId, worker, range, { allowBroadFallback: options.allowBroadFallback }),
+        canonicalDaysPromise,
+      ])
+      const sourceRows = sortRowsByLatest(compatibilityRows).map((row) => stampWorkerIdentity(row, worker))
       if (!isWorkerAccountLoadContextCurrent(context) || appState.workerAccountTimeLoadingKey !== loadKey) return false
 
       const filteredRows = filterTimeRowsForRange(sourceRows, { from: range.from, to: range.to })
       appState.workerAccountAllTimeRows = filteredRows
-      appState.workerAccountTimeRows = aggregateTimeRows(filteredRows, worker)
+      appState.workerAccountTimeRows = applyCanonicalWorkTimeDays(
+        aggregateTimeRows(filteredRows, worker),
+        responseItems(canonicalDaysResponse),
+        worker,
+      )
       appState.workerAccountTimeSelectedKeys = new Set()
       appState.workerAccountTimeCurrentPageKeys = []
       appState.workerAccountTimePage = 1
@@ -3436,10 +3564,6 @@ export function createWorkerAccountFeature(ctx) {
     return updated
   }
 
-  function workerAccountCurrentUserName() {
-    return String(appState.session?.name ?? appState.session?.login ?? appState.session?.email ?? '').trim()
-  }
-
   function findWorkerAccountTimeRow(dayKey) {
     const key = String(dayKey ?? '').trim()
     if (!key) return null
@@ -3447,11 +3571,82 @@ export function createWorkerAccountFeature(ctx) {
     return rows.find((row) => String(row.dayKey ?? '').trim() === key) ?? null
   }
 
+  function workerAccountReconciliationSourceRow(row = {}, requestedWorkdayId = '') {
+    const sources = Array.isArray(row?.sourceRows) && row.sourceRows.length ? row.sourceRows : [row]
+    const normalizedId = String(requestedWorkdayId ?? '').trim()
+    if (normalizedId) {
+      return sources.find((source) => String(source?.workdayId ?? source?.id ?? '').trim() === normalizedId) ?? null
+    }
+    return sources.find((source) =>
+      String(source?.integrityState ?? '').trim().toUpperCase() !== 'COMPLETE' ||
+      (Array.isArray(source?.openSessions) && source.openSessions.length),
+    ) ?? sources[0] ?? null
+  }
+
+  function reconciliationWorkdayId(row = {}, requestedWorkdayId = '') {
+    const source = workerAccountReconciliationSourceRow(row, requestedWorkdayId)
+    return String(source?.workdayId ?? source?.id ?? requestedWorkdayId).trim()
+  }
+
+  function isReconciliationEndpointUnavailable(error) {
+    const status = Number(error?.status)
+    const code = String(error?.code ?? '').trim().toUpperCase()
+    return [404, 405, 501, 503].includes(status) || code === 'WORKDAY_RECONCILIATION_SCHEMA_MISSING'
+  }
+
+  function isoToDateTimeInput(value) {
+    return isoToWarsawDateTimeInput(value)
+  }
+
+  function reconciliationTimeInput(value) {
+    const timeValue = isoToDateTimeInput(value).split('T')[1] || ''
+    return timeValue ? timeValue.slice(0, 5) : '-'
+  }
+
   function setWorkerAccountTimeCodesOpen(open) {
     const overlay = document.getElementById('waTimeCodesOverlay')
     if (!overlay) return
+    if (open && overlay.hidden) {
+      appState.workerAccountReconciliationRestoreFocus = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
+    }
     overlay.hidden = !open
     overlay.style.display = open ? 'flex' : 'none'
+    if (!open) {
+      const restoreFocus = appState.workerAccountReconciliationRestoreFocus
+      appState.workerAccountReconciliationRestoreFocus = null
+      if (restoreFocus instanceof HTMLElement && restoreFocus.isConnected) {
+        window.requestAnimationFrame(() => restoreFocus.focus())
+      }
+    }
+  }
+
+  function trapWorkerAccountReconciliationFocus(event) {
+    if (event?.key !== 'Tab') return false
+    const modal = document.querySelector('#waTimeCodesOverlay .wa-reconciliation-modal')
+    if (!(modal instanceof HTMLElement)) return false
+    const focusable = [...modal.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), a[href], summary, [tabindex]:not([tabindex="-1"])',
+    )].filter((node) => node instanceof HTMLElement && !node.hidden && node.getClientRects().length > 0)
+    if (!focusable.length) {
+      event.preventDefault()
+      modal.focus()
+      return true
+    }
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === modal)) {
+      event.preventDefault()
+      last.focus()
+      return true
+    }
+    if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+      return true
+    }
+    return false
   }
 
   function positionWorkerAccountTimeCodeTooltip(trigger) {
@@ -3502,269 +3697,806 @@ export function createWorkerAccountFeature(ctx) {
     tooltip.style.removeProperty('visibility')
   }
 
-  function setWorkerAccountTimeCodeEditorOpen(open) {
-    const editor = document.getElementById('waTimeCodeEditor')
-    if (!editor) return
-    editor.hidden = !open
+  function closeWorkerAccountInlineEditors() {
+    let closed = false
+    document.querySelectorAll('#waTimeCodesList .wa-time-entry-editor:not([hidden])').forEach((editor) => {
+      editor.hidden = true
+      closed = true
+    })
+    document.querySelectorAll('#waTimeCodesList [aria-expanded="true"]').forEach((trigger) => {
+      trigger.setAttribute('aria-expanded', 'false')
+    })
+    return closed
   }
 
-  function closeWorkerAccountTimeCodeEditor() {
-    appState.workerAccountTimeCodeEditorItem = null
-    setWorkerAccountTimeCodeEditorOpen(false)
-    const saveButton = document.getElementById('waTimeCodeSave')
-    if (saveButton) {
-      saveButton.disabled = false
-      saveButton.textContent = 'Zapisz godzinę'
-    }
+  function toggleWorkerAccountInlineEditor(trigger, editor) {
+    if (!editor) return
+    const shouldOpen = editor.hidden
+    closeWorkerAccountInlineEditors()
+    editor.hidden = !shouldOpen
+    trigger?.setAttribute?.('aria-expanded', shouldOpen ? 'true' : 'false')
+    if (shouldOpen) window.requestAnimationFrame(() => editor.querySelector('input, select')?.focus?.())
   }
 
   function closeWorkerAccountTimeCodes() {
-    closeWorkerAccountTimeCodeEditor()
+    closeWorkerAccountInlineEditors()
+    appState.workerAccountReconciliationModel = null
+    appState.workerAccountReconciliationRow = null
+    appState.workerAccountReconciliationCorrections = []
+    appState.workerAccountReconciliationIdempotency = null
+    appState.workerAccountReconciliationSaving = false
     setWorkerAccountTimeCodesOpen(false)
   }
 
-  function openWorkerAccountTimeCodes(dayKey) {
-    const row = findWorkerAccountTimeRow(dayKey)
-    const intervals = workerAccountTimeIntervals(row)
-    const codes = workIntervalCodes(intervals)
-    if (!row || !codes.length) {
-      showTransientNotice('Brak kodów START/STOP dla wybranego dnia.', 'error')
-      return
+  function reconciliationIssueMessage(issue = {}) {
+    const labels = {
+      DUPLICATE_EVENT_ID: 'Wykryto zduplikowany zapis sesji.',
+      CLOSED_WORKDAY_WITH_OPEN_SESSION: 'Dzień jest zamknięty, ale jedna z sesji nadal nie ma STOP.',
+      EMPTY_SESSION_SET: 'Ten rekord dnia nie ma żadnej sesji START/STOP.',
+      INVALID_START: 'Sesja nie ma poprawnej godziny START.',
+      INVALID_SESSION: 'Sesja zawiera nieprawidłowe dane.',
+      OVERLAPPING_SESSIONS: 'Sesje nakładają się na siebie.',
+      SESSION_OVERLAP: 'Sesje nakładają się na siebie.',
+      SESSION_OVER_24_HOURS: 'Sesja przekracza maksymalny czas 24 godzin.',
+      STOP_NOT_AFTER_START: 'Godzina STOP musi być późniejsza niż START.',
+      WORKDAY_DURATION_MISMATCH: 'Zapisana suma dnia różni się od sumy zamkniętych sesji.',
+      WORKDAY_NOT_CLOSED: 'Wszystkie sesje są poprawne, ale dzień wymaga finalizacji.',
     }
+    const direct = String(typeof issue === 'string' ? issue : issue?.message ?? '').trim()
+    const directCode = /^[A-Z][A-Z0-9_]*$/.test(direct) ? direct : ''
+    const code = String(
+      typeof issue === 'string'
+        ? issue
+        : directCode || issue?.code,
+    ).trim().toUpperCase()
+    return labels[code] || direct || 'Dzień wymaga sprawdzenia.'
+  }
 
-    closeWorkerAccountTimeCodeEditor()
+  function reconciliationCorrectionForSession(session = {}) {
+    const eventId = String(session?.eventId ?? '').trim()
+    const corrections = Array.isArray(appState.workerAccountReconciliationCorrections)
+      ? appState.workerAccountReconciliationCorrections
+      : []
+    return corrections.find((correction) => String(correction?.eventId ?? '').trim() === eventId) ?? null
+  }
 
-    const dateLabel = dateKeyToLabel(row.dayKey)
+  function reconciliationZoneRows() {
+    return (Array.isArray(appState.zones) ? appState.zones : [])
+      .map((zone) => ({
+        source: zone,
+        id: String(zone?.id ?? zone?.zoneId ?? '').trim(),
+        label: String(zone?.name ?? zone?.zone ?? zone?.id ?? zone?.zoneId ?? '').trim(),
+      }))
+      .filter((zone) => zone.id)
+      .sort((left, right) => left.label.localeCompare(right.label, 'pl', { sensitivity: 'base' }))
+  }
+
+  function reconciliationZoneById(zoneId) {
+    const normalized = String(zoneId ?? '').trim()
+    return reconciliationZoneRows().find((zone) => zone.id === normalized)?.source ?? null
+  }
+
+  function reconciliationZoneOptions(item = {}, { emptyLabel = 'Brak strefy' } = {}) {
+    const selectedZoneId = String(item?.zoneId ?? item?.utilityRoomId ?? '').trim()
+    const rows = reconciliationZoneRows()
+    if (selectedZoneId && !rows.some((zone) => zone.id === selectedZoneId)) {
+      rows.unshift({ id: selectedZoneId, label: item.zoneName || selectedZoneId })
+    }
+    return [
+      `<option value="">${escapeHtml(emptyLabel)}</option>`,
+      ...rows.map((zone) => `<option value="${escapeHtml(zone.id)}" ${zone.id === selectedZoneId ? 'selected' : ''}>${escapeHtml(zone.label || zone.id)}</option>`),
+    ].join('')
+  }
+
+  function reconciliationSessionWithDraft(session = {}) {
+    const correction = reconciliationCorrectionForSession(session)
+    const activityCorrections = Array.isArray(appState.workerAccountActivityCorrections)
+      ? appState.workerAccountActivityCorrections
+      : []
+    const activities = (Array.isArray(session?.activities) ? session.activities : []).map((activity) => {
+      const activityCorrection = activityCorrections.find((entry) => String(entry?.eventId ?? '').trim() === String(activity?.eventId ?? '').trim())
+      if (!activityCorrection) return activity
+      const correctedStartAt = String(activityCorrection.startAt ?? activity.startAt ?? '').trim()
+      const correctedEndAt = String(activityCorrection.endAt ?? activity.endAt ?? '').trim()
+      return {
+        ...activity,
+        ...activityCorrection,
+        startAt: correctedStartAt,
+        endAt: correctedEndAt,
+        isOpen: Boolean(correctedStartAt && !correctedEndAt),
+        isValid: Boolean(correctedStartAt && correctedEndAt && timeRangeSeconds(correctedStartAt, correctedEndAt) > 0),
+        issues: [],
+        hasDraftCorrection: true,
+      }
+    })
+    if (!correction) return { ...session, activities }
+    const startAt = String(correction.startAt ?? session.startAt ?? '').trim()
+    const endAt = String(correction.endAt ?? session.endAt ?? '').trim()
+    const durationSec = timeRangeSeconds(startAt, endAt)
+    const selectedZone = Object.prototype.hasOwnProperty.call(correction, 'zoneId')
+      ? reconciliationZoneById(correction.zoneId)
+      : null
+    return {
+      ...session,
+      ...correction,
+      startAt,
+      endAt,
+      durationSec,
+      isOpen: !endAt,
+      isValid: Boolean(startAt && (!endAt || (durationSec > 0 && durationSec <= 24 * 60 * 60))),
+      issues: [],
+      hasDraftCorrection: true,
+      activities,
+      ...(selectedZone
+        ? {
+            zoneId: String(selectedZone?.id ?? selectedZone?.zoneId ?? correction.zoneId).trim(),
+            utilityRoomId: String(selectedZone?.id ?? selectedZone?.zoneId ?? correction.zoneId).trim(),
+            zoneName: String(selectedZone?.name ?? selectedZone?.zone ?? correction.zoneId).trim(),
+            clientId: String(selectedZone?.clientId ?? selectedZone?.client?.clientId ?? '').trim(),
+            location: String(selectedZone?.location ?? selectedZone?.lokalizacja ?? '').trim(),
+          }
+        : {}),
+    }
+  }
+
+  function reconciliationDraftSessions() {
+    const sessions = Array.isArray(appState.workerAccountReconciliationModel?.sessions)
+      ? appState.workerAccountReconciliationModel.sessions
+      : []
+    return sessions.map(reconciliationSessionWithDraft)
+  }
+
+  function reconciliationSessionsOverlap(sessions = []) {
+    const ranges = sessions
+      .filter((session) => session?.isValid && !session?.isOpen)
+      .map((session) => ({
+        start: new Date(session.startAt).getTime(),
+        end: new Date(session.endAt).getTime(),
+      }))
+      .filter((range) => Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start)
+      .sort((left, right) => left.start - right.start || left.end - right.end)
+    let furthestEnd = 0
+    return ranges.some((range) => {
+      const overlaps = furthestEnd > 0 && range.start < furthestEnd
+      furthestEnd = Math.max(furthestEnd, range.end)
+      return overlaps
+    })
+  }
+
+  function workerAccountReconciliationHasBlockingProblems() {
+    const model = appState.workerAccountReconciliationModel ?? {}
+    const corrections = appState.workerAccountReconciliationCorrections ?? []
+    const activityCorrections = appState.workerAccountActivityCorrections ?? []
+    return reconciliationHasBlockingProblems(model, corrections, activityCorrections)
+  }
+
+  function reconciliationEditButton(sessionIndex, phase, sessionNumber, sessionWorkdayId = '') {
+    if (!canManageWorkers() || appState.workerAccountReconciliationModel?.isFallback) return ''
+    const activeWorkdayId = String(appState.workerAccountReconciliationModel?.workdayId ?? '').trim()
+    const normalizedSessionWorkdayId = String(sessionWorkdayId ?? '').trim()
+    if (!appState.workerAccountReconciliationModel?.isWorkTimeDay && activeWorkdayId && normalizedSessionWorkdayId && activeWorkdayId !== normalizedSessionWorkdayId) return ''
+    const label = `Edytuj ${phase} sesji ${sessionNumber}`
+    const editorId = `wa-session-editor-${sessionIndex}-${String(phase).toLowerCase()}`
+    return `
+      <button class="wa-time-code-edit-btn wa-time-code-menu-btn" type="button" data-wa-session-toggle="${sessionIndex}" data-wa-session-phase="${phase}" aria-controls="${editorId}" aria-expanded="false" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+        <i class="ph ph-dots-three-vertical" aria-hidden="true"></i>
+      </button>
+    `
+  }
+
+  function reconciliationSessionEditorMarkup(session = {}, sessionIndex = 0, phase = 'START') {
+    const normalizedPhase = String(phase).toUpperCase() === 'STOP' ? 'STOP' : 'START'
+    const number = Math.max(1, Number(session.sessionNumber ?? sessionIndex + 1) || sessionIndex + 1)
+    const value = normalizedPhase === 'START' ? session.startAt : session.endAt
+    const editorId = `wa-session-editor-${sessionIndex}-${normalizedPhase.toLowerCase()}`
+    return `
+      <div class="wa-time-entry-editor wa-time-session-editor" id="${editorId}" data-wa-session-editor="${sessionIndex}" data-wa-session-phase="${normalizedPhase}" hidden>
+        <div class="wa-time-entry-editor-heading">
+          <div><strong>Edytuj ${normalizedPhase}</strong><small>Sesja ${number}</small></div>
+          <button class="wa-time-entry-editor-close" type="button" data-wa-entry-cancel aria-label="Anuluj edycję"><i class="ph ph-x" aria-hidden="true"></i></button>
+        </div>
+        <div class="wa-time-entry-editor-fields">
+          <label>Godzina ${normalizedPhase}<input class="mono" type="datetime-local" step="60" data-wa-session-time value="${escapeHtml(isoToWarsawDateTimeInput(value))}" required /></label>
+          <label>Strefa<select data-wa-session-zone>${reconciliationZoneOptions(session)}</select></label>
+        </div>
+        <div class="wa-time-entry-editor-actions">
+          <button class="btn2" type="button" data-wa-entry-cancel>Anuluj</button>
+          <button class="btn2 primary" type="button" data-wa-session-apply="${sessionIndex}" data-wa-session-phase="${normalizedPhase}">Zapisz zmianę</button>
+        </div>
+      </div>
+    `
+  }
+
+  function reconciliationActivityZoneOptions(activity = {}) {
+    return reconciliationZoneOptions(activity, { emptyLabel: 'Wybierz strefę' })
+  }
+
+  function reconciliationActivityMarkup(activity = {}, sessionIndex = 0, activityIndex = 0) {
+    const activityId = String(activity.eventId ?? '').trim()
+    const isOpen = activity.isOpen === true || Boolean(activity.startAt && !activity.endAt)
+    const issueLabel = isOpen
+      ? 'Brak zakończenia zdarzenia'
+      : (Array.isArray(activity.issues) && activity.issues.length ? String(activity.issues[0]?.message ?? activity.issues[0]?.code ?? '') : '')
+    const canEdit = sessionIndex >= 0 && canManageWorkers() && !appState.workerAccountReconciliationModel?.isFallback && Boolean(activityId)
+    const startLabel = reconciliationTimeInput(activity.startAt)
+    const endLabel = isOpen ? 'Brak zakończenia' : reconciliationTimeInput(activity.endAt)
+    const client = String(activity.clientName ?? activity.clientId ?? '-').trim() || '-'
+    const zone = String(activity.zoneName ?? activity.zoneId ?? '-').trim() || '-'
+    const location = String(activity.location ?? '-').trim() || '-'
+    const visibleComment = workIntervalVisibleComment(activity.comment)
+    const code = { type: 'START', interval: activity }
+    const editAriaLabel = isOpen
+      ? 'Uzupełnij STOP oraz edytuj strefę zdarzenia'
+      : 'Edytuj godziny i strefę zdarzenia'
+    return `
+      <div class="wa-time-activity" data-wa-activity-row="${escapeHtml(activityId)}">
+        <span class="wa-time-activity-branch" aria-hidden="true">↳</span>
+        <span class="wa-time-activity-copy">
+          <strong>${escapeHtml(activity.eventType || 'ZDARZENIE')}</strong>
+          <small>${escapeHtml(client)} · ${escapeHtml(zone)} · ${escapeHtml(location)}</small>
+          ${visibleComment ? `<span class="wa-time-activity-comment">${escapeHtml(visibleComment)}</span>` : ''}
+          ${issueLabel ? `<span class="wa-time-activity-warning">${escapeHtml(issueLabel)}</span>` : ''}
+        </span>
+        <span class="wa-time-activity-time mono">${escapeHtml(startLabel)}–${escapeHtml(endLabel)}</span>
+        <span class="wa-time-activity-controls">
+          ${workerAccountTimeCodeGpsIndicator(code)}
+          ${canEdit ? `<button class="wa-time-code-edit-btn wa-time-code-menu-btn" type="button" data-wa-activity-toggle="${escapeHtml(activityId)}" aria-controls="wa-activity-editor-${escapeHtml(activityId)}" aria-expanded="false" aria-label="${escapeHtml(editAriaLabel)}" title="${escapeHtml(editAriaLabel)}"><i class="ph ph-dots-three-vertical" aria-hidden="true"></i></button>` : ''}
+        </span>
+        <div class="wa-time-entry-editor wa-time-activity-editor" id="wa-activity-editor-${escapeHtml(activityId)}" data-wa-activity-editor="${escapeHtml(activityId)}" hidden>
+          <div class="wa-time-entry-editor-heading">
+            <div><strong>Edytuj ${escapeHtml(activity.eventType || 'ZDARZENIE')}</strong><small>${escapeHtml(client)} · ${escapeHtml(zone)}</small></div>
+            <button class="wa-time-entry-editor-close" type="button" data-wa-entry-cancel aria-label="Anuluj edycję"><i class="ph ph-x" aria-hidden="true"></i></button>
+          </div>
+          <div class="wa-time-entry-editor-fields">
+            <label>START<input type="datetime-local" step="60" data-wa-activity-start value="${escapeHtml(isoToWarsawDateTimeInput(activity.startAt))}" /></label>
+            <label>STOP<input type="datetime-local" step="60" data-wa-activity-end value="${escapeHtml(isoToWarsawDateTimeInput(activity.endAt))}" /></label>
+            <label>Strefa<select data-wa-activity-zone>${reconciliationActivityZoneOptions(activity)}</select></label>
+          </div>
+          <div class="wa-time-entry-editor-actions">
+            <button class="btn2" type="button" data-wa-entry-cancel>Anuluj</button>
+            <button class="btn2 primary" type="button" data-wa-activity-apply="${escapeHtml(activityId)}" data-wa-session-index="${sessionIndex}" data-wa-activity-index="${activityIndex}">Zapisz zmianę</button>
+          </div>
+        </div>
+      </div>
+    `
+  }
+
+  function reconciliationSessionMarkup(session = {}, index = 0) {
+    const number = Math.max(1, Number(session.sessionNumber ?? index + 1) || index + 1)
+    const sourceRecordCount = Math.max(1, Number(session?.sourceWorkdayIds?.length ?? 1) || 1)
+    const collapsedCopy = sourceRecordCount > 1
+      ? ` · scalono ${sourceRecordCount} ${sourceRecordCount >= 2 && sourceRecordCount <= 4 ? 'rekordy' : 'rekordów'}`
+      : ''
+    const clientLabel = workerAccountTimeIntervalClient(session)
+    const activeWorkdayId = String(appState.workerAccountReconciliationModel?.workdayId ?? '').trim()
+    const sessionWorkdayId = String(session.workdayId ?? '').trim()
+    const sessionBelongsToActiveWorkday = appState.workerAccountReconciliationModel?.isWorkTimeDay || !activeWorkdayId || !sessionWorkdayId || activeWorkdayId === sessionWorkdayId
+    const reconciliationDay = String(appState.workerAccountReconciliationModel?.businessDateYmd ?? '').trim()
+    const businessToday = warsawBusinessDateKey(Date.now())
+    const isCurrentOpenDay = reconciliationDay === businessToday && String(appState.workerAccountReconciliationModel?.integrityState ?? '').trim().toUpperCase() === 'OPEN_SESSION'
+    const phases = [
+      { type: 'START', value: session.startAt, codeNumber: index * 2 + 1 },
+      { type: 'STOP', value: session.endAt, codeNumber: index * 2 + 2 },
+    ]
+
+    const phaseMarkup = ({ type, value, codeNumber }) => {
+      const isStart = type === 'START'
+      const isMissingStop = !isStart && !value
+      const showMissingStop = isMissingStop && !isCurrentOpenDay
+      const isInvalid = !isMissingStop && session.isValid === false
+      const code = { type, session: number, interval: session }
+      const markerPath = isStart ? 'M7 12h10M13 8l4 4-4 4' : 'M17 12H7m4-4-4 4 4 4'
+      const stateClasses = [
+        isStart ? 'is-start' : 'is-stop',
+        showMissingStop ? 'is-open' : '',
+        isInvalid ? 'is-invalid' : '',
+        session.hasDraftCorrection ? 'has-draft' : '',
+      ].filter(Boolean).join(' ')
+      const timeMarkup = value
+        ? `<time class="mono" datetime="${escapeHtml(value)}">${escapeHtml(reconciliationTimeInput(value))}</time>`
+        : `<span class="wa-time-code-missing${isCurrentOpenDay ? ' is-current' : ''}">${isCurrentOpenDay ? 'W trakcie' : 'Brak STOP'}</span>`
+      const editMarkup = sessionBelongsToActiveWorkday
+        ? reconciliationEditButton(index, type, number, session.workdayId)
+        : ''
+      const editorMarkup = editMarkup
+        ? reconciliationSessionEditorMarkup(session, index, type)
+        : ''
+
+      return `
+        <div class="wa-time-code-item ${stateClasses}">
+          <span class="wa-time-code-index" aria-hidden="true">${codeNumber}</span>
+          <span class="wa-time-code-marker" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="${markerPath}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="wa-time-code-copy">
+            <strong>${type}</strong>
+            <small>Sesja ${number}${collapsedCopy}${showMissingStop ? ' · brak zakończenia' : ''}</small>
+            <span class="wa-time-code-location"><span><b>Klient:</b> ${escapeHtml(clientLabel)}</span><span><b>Strefa:</b> ${workerAccountTimeCodeZoneIndicator(code, codeNumber)}</span></span>
+          </span>
+          <span class="wa-time-code-controls">
+            ${timeMarkup}
+            ${workerAccountTimeCodeGpsIndicator(code)}
+            ${editMarkup}
+          </span>
+          ${editorMarkup}
+        </div>
+      `
+    }
+    const activities = (Array.isArray(session.activities) ? session.activities : [])
+      .map((activity, activityIndex) => reconciliationActivityMarkup(activity, index, activityIndex))
+      .join('')
+    return `${phaseMarkup(phases[0])}${activities}${phaseMarkup(phases[1])}`
+  }
+
+  function refreshWorkerAccountReconciliationControls() {
+    const model = appState.workerAccountReconciliationModel
+    if (!model) return
+    const corrections = Array.isArray(appState.workerAccountReconciliationCorrections)
+      ? appState.workerAccountReconciliationCorrections
+      : []
+    const activityCorrections = Array.isArray(appState.workerAccountActivityCorrections)
+      ? appState.workerAccountActivityCorrections
+      : []
+    const hasChanges = corrections.length > 0 || activityCorrections.length > 0
+    const blocked = workerAccountReconciliationHasBlockingProblems()
+    const hasOptimisticLock = model.isWorkTimeDay
+      ? /^[0-9a-f]{64}$/i.test(String(model.version ?? '').trim())
+      : Boolean(Number.isFinite(new Date(model.version).getTime()) && /^[0-9a-f]{64}$/i.test(String(model.sessionVersion ?? '').trim()))
+    const writable = canManageWorkers() && !model.isFallback && Boolean(model.workdayId) && hasOptimisticLock && !appState.workerAccountReconciliationSaving
+    const saveDraft = document.getElementById('waReconciliationSaveDraft')
+    if (saveDraft) saveDraft.disabled = !writable || !hasChanges
+    const live = document.getElementById('waReconciliationLive')
+    if (live) {
+      live.textContent = model.isFallback
+        ? 'Podgląd tylko do odczytu. Nie udało się wczytać danych wymaganych do zapisu.'
+        : appState.workerAccountReconciliationSaving
+          ? 'Zapisywanie zmiany…'
+        : !hasOptimisticLock
+          ? 'Brak aktualnej wersji dnia lub sesji. Odśwież dane przed zapisem.'
+        : blocked
+          ? 'Uzupełnij lub popraw wszystkie sesje, aby zamknąć dzień.'
+          : hasChanges
+            ? 'Korekta jest gotowa do zapisania.'
+            : 'Wybierz menu trzech kropek przy wpisie, który chcesz zmienić.'
+    }
+  }
+
+  function renderWorkerAccountReconciliation() {
+    const model = appState.workerAccountReconciliationModel
+    const row = appState.workerAccountReconciliationRow
+    if (!model || !row) return
+    const sessions = reconciliationDraftSessions()
+    const dateLabel = dateKeyToLabel(model.businessDateYmd || row.dayKey)
     const title = document.getElementById('waTimeCodesTitle')
     const meta = document.getElementById('waTimeCodesMeta')
     const list = document.getElementById('waTimeCodesList')
     const total = document.getElementById('waTimeCodesTotal')
-    if (title) title.textContent = `Start i stop - ${dateLabel}`
-    if (meta) meta.textContent = `${workerAccountTimeCodeCountLabel(codes.length)} START/STOP`
-    if (total) total.textContent = formatSeconds(workIntervalsTotalSeconds(intervals))
-    if (list) {
-      list.innerHTML = codes.map((code, index) => {
-        const isStart = code.type === 'START'
-        const typeClass = isStart ? 'is-start' : 'is-stop'
-        const timeLabel = isoToHm(code.at)
-        const clientLabel = workerAccountTimeIntervalClient(code.interval)
-        return `
-          <div class="wa-time-code-item ${typeClass}">
-            <span class="wa-time-code-index" aria-hidden="true">${index + 1}</span>
-            <span class="wa-time-code-marker" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <path d="${isStart ? 'M7 12h10M13 8l4 4-4 4' : 'M17 12H7m4-4-4 4 4 4'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </span>
-            <span class="wa-time-code-copy">
-              <strong>${code.type}</strong>
-              <small>Sesja ${code.session}</small>
-              <span class="wa-time-code-location"><span><b>Klient:</b> ${escapeHtml(clientLabel)}</span><span><b>Strefa:</b> ${workerAccountTimeCodeZoneIndicator(code, index)}</span></span>
-            </span>
-            <span class="wa-time-code-controls">
-              <time class="mono" datetime="${escapeHtml(code.at)}">${escapeHtml(timeLabel)}</time>
-              ${workerAccountTimeCodeGpsIndicator(code)}
-              ${workerAccountTimeCodeEditButton(code, index, row.dayKey)}
-            </span>
-          </div>
-        `
-      }).join('')
-    }
-
-    setWorkerAccountTimeCodesOpen(true)
-    window.requestAnimationFrame(() => document.getElementById('waTimeCodesClose')?.focus?.())
-  }
-
-  function openWorkerAccountTimeCodeEditor(dayKey, codeIndex) {
-    if (!canAdministerWorkers()) return
-    const worker = resolveCurrentWorker()
-    if (!worker || !guardWorkerAccountOwnTimeEdit(worker)) return
-
-    const row = findWorkerAccountTimeRow(dayKey)
-    const codes = workerAccountTimeCodes(row)
-    const index = Number(codeIndex)
-    const code = Number.isInteger(index) ? codes[index] : null
-    const interval = code?.interval ?? null
-    const workdayId = String(interval?.linkedWorkdayId ?? interval?.workdayId ?? interval?.id ?? '').trim()
-    if (!row || !code || !interval || !workdayId) {
-      showTransientNotice('Nie znaleziono zapisu, który można edytować.', 'error')
-      return
-    }
-
-    appState.workerAccountTimeCodeEditorItem = {
-      dayKey: String(row.dayKey ?? dayKey ?? '').trim(),
-      code,
-      interval,
-      workdayId,
-    }
-    setText('waTimeCodeEditorTitle', `Edytuj ${code.type} - sesja ${code.session}`)
-    setText(
-      'waTimeCodeEditorContext',
-      `${workerAccountTimeIntervalClient(interval)} / ${workerAccountTimeIntervalZone(interval)}`,
+    const provisional = document.getElementById('waReconciliationProvisional')
+    const state = String(model.integrityState ?? 'INVALID').trim().toUpperCase()
+    const businessToday = warsawBusinessDateKey(Date.now())
+    const isCurrentOpenDay = String(model.businessDateYmd ?? '').trim() === businessToday && state === 'OPEN_SESSION'
+    const stateStatus = document.getElementById('waReconciliationStatus')
+    const closedDraftSec = workIntervalsTotalSeconds(
+      sessions.filter((session) => !session.isOpen && session.isValid),
     )
-    setInputValue('waTimeCodeTimeInput', isoToTimeInput(code.at))
-    setWorkerAccountTimeCodeEditorOpen(true)
-    window.requestAnimationFrame(() => document.getElementById('waTimeCodeTimeInput')?.focus?.())
+    const codeCount = sessions.reduce((count, session) => count + 1 + (session.endAt ? 1 : 0), 0)
+    if (title) title.textContent = `Start i stop - ${dateLabel}`
+    if (meta) {
+      const codeLabel = codeCount === 1 ? 'kod' : codeCount >= 2 && codeCount <= 4 ? 'kody' : 'kodów'
+      meta.textContent = `${codeCount} ${codeLabel} START/STOP`
+    }
+    if (stateStatus) {
+      stateStatus.dataset.state = state
+      stateStatus.textContent = model.stateCopy?.label || state
+    }
+    setText('waReconciliationWorker', model.workday?.workerName || row.workerName || workerName(resolveCurrentWorker()) || '-')
+    if (total) total.textContent = formatReconciliationDuration(closedDraftSec)
+    if (provisional) provisional.textContent = formatReconciliationDuration(closedDraftSec)
+    if (list) {
+      const sessionsMarkup = sessions.length
+        ? sessions.map(reconciliationSessionMarkup).join('')
+        : '<div class="wa-reconciliation-problems"><strong>Brak sesji START/STOP dla tego dnia.</strong></div>'
+      const unassigned = Array.isArray(model.unassignedActivities) ? model.unassignedActivities : []
+      const unassignedMarkup = unassigned.length
+        ? `<section class="wa-time-unassigned"><h4>Nieprzypisane zdarzenia</h4><p>Te czynności nie mają poprawnego powiązania z sesją i nie wpływają na czas pracy.</p>${unassigned.map((activity, index) => reconciliationActivityMarkup(activity, -1, index)).join('')}</section>`
+        : ''
+      list.innerHTML = sessionsMarkup + unassignedMarkup
+    }
+
+    const correctedEventIds = new Set([
+      ...(Array.isArray(appState.workerAccountReconciliationCorrections) ? appState.workerAccountReconciliationCorrections : []),
+      ...(Array.isArray(appState.workerAccountActivityCorrections) ? appState.workerAccountActivityCorrections : []),
+    ].map((correction) => String(correction?.eventId ?? '').trim()).filter(Boolean))
+    const sessionsOverlap = reconciliationSessionsOverlap(sessions)
+    const hasOpenDraftSession = sessions.some((session) => session.isOpen)
+    const remainingIssues = (Array.isArray(model.issues) ? model.issues : []).filter((issue) => {
+      const direct = String(typeof issue === 'string' ? issue : issue?.message ?? '').trim()
+      const directCode = /^[A-Z][A-Z0-9_]*$/.test(direct) ? direct : ''
+      const code = String(
+        typeof issue === 'string'
+          ? issue
+          : directCode || issue?.code,
+      ).trim().toUpperCase()
+      if (code === 'MULTIPLE_WORKDAYS_FOR_BUSINESS_DATE') return false
+      if (['OVERLAPPING_WORK_SESSIONS', 'OVERLAPPING_SESSIONS', 'SESSION_OVERLAP'].includes(code) && !sessionsOverlap) return false
+      if (code === 'EMPTY_SESSION_SET' && sessions.length > 0) return false
+      if (code === 'WORKDAY_DURATION_MISMATCH' || code === 'WORKDAY_NOT_CLOSED') return false
+      if (code === 'CLOSED_WORKDAY_WITH_OPEN_SESSION' && !hasOpenDraftSession) return false
+      if (code === 'OPEN_SESSION' && isCurrentOpenDay) return false
+      const eventId = String(issue?.eventId ?? '').trim()
+      return !eventId || !correctedEventIds.has(eventId)
+    })
+    const dynamicProblems = [
+      ...remainingIssues.map(reconciliationIssueMessage),
+      ...sessions.filter((session) => session.isOpen && !isCurrentOpenDay).map((session) => `Brak STOP — sesja ${session.sessionNumber}`),
+      ...sessions.filter((session) => !session.isValid && !session.isOpen).map((session) => `Nieprawidłowe dane — sesja ${session.sessionNumber}`),
+    ]
+    if (sessionsOverlap) dynamicProblems.push('Sesje nakładają się na siebie.')
+    const uniqueProblems = [...new Set(dynamicProblems.filter(Boolean))]
+    const problems = document.getElementById('waReconciliationProblems')
+    if (problems) {
+      problems.hidden = !uniqueProblems.length
+      problems.innerHTML = uniqueProblems.length
+        ? `<strong>Przed zamknięciem dnia popraw:</strong><ul>${uniqueProblems.map((problem) => `<li>${escapeHtml(problem)}</li>`).join('')}</ul>`
+        : ''
+    }
+
+    const corrections = Array.isArray(appState.workerAccountReconciliationCorrections)
+      ? appState.workerAccountReconciliationCorrections
+      : []
+    const activityCorrections = Array.isArray(appState.workerAccountActivityCorrections)
+      ? appState.workerAccountActivityCorrections
+      : []
+    const hasDraftChanges = corrections.length > 0 || activityCorrections.length > 0
+    const needsRepair = (state !== 'COMPLETE' && !isCurrentOpenDay) || uniqueProblems.length > 0 || hasDraftChanges
+    const statusRow = document.getElementById('waReconciliationStatusRow')
+    const saveDraft = document.getElementById('waReconciliationSaveDraft')
+    const done = document.getElementById('waTimeCodesDone')
+    const live = document.getElementById('waReconciliationLive')
+    if (statusRow) statusRow.hidden = !needsRepair
+    if (saveDraft) saveDraft.hidden = !hasDraftChanges
+    if (done) {
+      done.textContent = 'Gotowe'
+      done.classList.toggle('primary', !hasDraftChanges)
+    }
+    if (live) live.hidden = model.isFallback || !needsRepair
+    refreshWorkerAccountReconciliationControls()
   }
 
-  async function saveWorkerAccountTimeCodeEditor() {
-    const item = appState.workerAccountTimeCodeEditorItem
+  async function openWorkerAccountTimeCodes(dayKey, options = {}) {
+    const row = findWorkerAccountTimeRow(dayKey)
+    const requestedWorkdayId = String(options?.workdayId ?? '').trim()
+    const workdayId = reconciliationWorkdayId(row, requestedWorkdayId)
+    if (!row) {
+      showTransientNotice('Nie znaleziono dnia pracy do przeglądu.', 'error')
+      return false
+    }
+
+    closeWorkerAccountInlineEditors()
+    appState.workerAccountReconciliationRow = row
+    appState.workerAccountReconciliationCorrections = []
+    appState.workerAccountActivityCorrections = []
+    appState.workerAccountReconciliationIdempotency = null
+    appState.workerAccountReconciliationModel = normalizeWorkdayReconciliation({}, row, workdayId)
+    appState.workerAccountReconciliationModel.isFallback = true
+    setWorkerAccountTimeCodesOpen(true)
+    renderWorkerAccountReconciliation()
+    window.requestAnimationFrame(() => document.querySelector('#waTimeCodesOverlay .wa-reconciliation-modal')?.focus?.())
+    const live = document.getElementById('waReconciliationLive')
+    if (live) live.textContent = 'Wczytywanie pełnego rozliczenia dnia…'
+
+    if (appState.session?.orgId) {
+      try {
+        const selectedWorker = resolveCurrentWorker() || {}
+        const selectedWorkerLogin = String(row.workerLogin || workerLogin(selectedWorker) || '').trim()
+        const reconciliation = selectedWorkerLogin
+          ? await getWorkTimeDay(appState.session.orgId, selectedWorkerLogin, dayKey)
+          : await getWorkdayReconciliation(appState.session.orgId, workdayId)
+        if (appState.workerAccountReconciliationRow !== row) return false
+        appState.workerAccountReconciliationModel = normalizeWorkdayReconciliation(reconciliation, row, workdayId)
+        appState.workerAccountReconciliationModel.isFallback = selectedWorkerLogin
+          ? reconciliation?.editable === false
+          : reconciliation?.schemaReady === false
+        appState.workerAccountReconciliationModel.isWorkTimeDay = Boolean(selectedWorkerLogin && reconciliation?.businessDateYmd)
+      } catch (error) {
+        if (!isReconciliationEndpointUnavailable(error)) {
+          showTransientNotice(error instanceof Error ? error.message : 'Nie udało się pobrać rozliczenia dnia.', 'error')
+        }
+        appState.workerAccountReconciliationModel = normalizeWorkdayReconciliation({}, row, workdayId)
+        appState.workerAccountReconciliationModel.isFallback = true
+      }
+    }
+
+    renderWorkerAccountReconciliation()
+    return true
+  }
+
+  function addWorkerAccountSessionCorrection(button) {
     const worker = resolveCurrentWorker()
-    if (!item || !worker || !appState.session?.orgId) return
+    if (!worker) return
     if (!guardWorkerAccountOwnTimeEdit(worker)) return
 
-    const timeValue = String(document.getElementById('waTimeCodeTimeInput')?.value ?? '').trim()
-    const dateValue = isoToDateInput(item.code.at)
-    const editedAt = localDateTimeToIso(dateValue, timeValue)
-    if (!timeValue || !editedAt) {
-      showTransientNotice('Podaj poprawną godzinę.', 'error')
+    const sessionIndex = Number(button?.getAttribute?.('data-wa-session-apply'))
+    const phase = String(button?.getAttribute?.('data-wa-session-phase') ?? '').trim().toUpperCase() === 'STOP' ? 'STOP' : 'START'
+    const editor = button?.closest?.('[data-wa-session-editor]')
+    const session = Number.isInteger(sessionIndex) ? reconciliationDraftSessions()[sessionIndex] : null
+    if (!editor || !session?.eventId) {
+      showTransientNotice('Nie znaleziono wpisu START/STOP do korekty.', 'error')
       return
     }
-
-    const interval = item.interval
-    const originalStartAt = typeof toIso === 'function' ? toIso(interval.startAt) : String(interval.startAt ?? '')
-    const originalEndAt = interval.isOpen
-      ? ''
-      : (typeof toIso === 'function' ? toIso(interval.endAt) : String(interval.endAt ?? ''))
-    const startAt = item.code.type === 'START' ? editedAt : originalStartAt
-    const endAt = item.code.type === 'STOP' ? editedAt : originalEndAt
-    if (!startAt || (endAt && timeRangeSeconds(startAt, endAt) <= 0)) {
+    const timeInputValue = String(editor.querySelector('[data-wa-session-time]')?.value ?? '').trim()
+    const correctedTime = warsawDateTimeInputToIso(timeInputValue)
+    const startAt = phase === 'START' ? correctedTime : session.startAt
+    const endAt = phase === 'STOP' ? correctedTime : session.endAt
+    if (!correctedTime || !startAt || (phase === 'STOP' && !endAt)) {
+      showTransientNotice(`Podaj poprawną godzinę ${phase}.`, 'error')
+      return
+    }
+    if (new Date(startAt).getTime() > Date.now() + 60_000 || (endAt && new Date(endAt).getTime() > Date.now() + 60_000)) {
+      showTransientNotice('Data i godzina nie mogą być w przyszłości.', 'error')
+      return
+    }
+    const durationSec = timeRangeSeconds(startAt, endAt)
+    if (endAt && durationSec <= 0) {
       showTransientNotice('Godzina STOP musi być późniejsza niż godzina START.', 'error')
       return
     }
+    if (endAt && durationSec > 24 * 60 * 60) {
+      showTransientNotice('Sesja nie może przekraczać 24 godzin.', 'error')
+      return
+    }
 
-    const durationSec = endAt ? timeRangeSeconds(startAt, endAt) : 0
-    const eventId = String(interval.eventId ?? '').trim()
-    const workdayId = String(item.workdayId ?? '').trim()
-    const editorName = workerAccountCurrentUserName()
-    const payload = {
-      workdayId,
-      linkedWorkdayId: String(interval.linkedWorkdayId ?? '').trim() || workdayId,
-      zoneId: interval.zoneId ?? interval.utilityRoomId ?? interval.roomId ?? null,
-      clientId: interval.clientId ?? null,
-      workerLogin: String(interval.workerLogin ?? workerLogin(worker)).trim(),
-      workerName: String(interval.workerName ?? workerName(worker) ?? workerLogin(worker)).trim(),
+    const corrections = Array.isArray(appState.workerAccountReconciliationCorrections)
+      ? [...appState.workerAccountReconciliationCorrections]
+      : []
+    const existingIndex = corrections.findIndex((correction) => String(correction?.eventId ?? '').trim() === session.eventId)
+    const originalSession = appState.workerAccountReconciliationModel?.sessions?.[sessionIndex] ?? session
+    const originalZoneId = String(originalSession?.zoneId ?? originalSession?.utilityRoomId ?? '').trim()
+    const selectedZoneId = String(editor.querySelector('[data-wa-session-zone]')?.value ?? '').trim()
+    if (originalZoneId && !selectedZoneId) {
+      showTransientNotice('Wybierz strefę albo pozostaw obecną.', 'error')
+      return
+    }
+    const selectedZone = selectedZoneId ? reconciliationZoneById(selectedZoneId) : null
+    const correction = {
+      ...(existingIndex >= 0 ? corrections[existingIndex] : {}),
+      eventId: session.eventId,
+      workdayId: session.workdayId || session.eventId,
+      sourceWorkdayIds: [...new Set([
+        ...(Array.isArray(session.sourceWorkdayIds) ? session.sourceWorkdayIds : []),
+        session.workdayId || session.eventId,
+      ].map((value) => String(value ?? '').trim()).filter(Boolean))],
       startAt,
       endAt: endAt || null,
-      durationSec,
-      status: endAt ? 'CLOSED' : (String(interval.status ?? 'RUNNING').trim() || 'RUNNING'),
-      closeMarkedAt: endAt
-        ? (item.code.type === 'STOP' ? endAt : (interval.closeMarkedAt ?? endAt))
-        : null,
-      endReason: interval.endReason ?? null,
-      comment: interval.comment ?? null,
-      deviceId: interval.deviceId ?? null,
-      startEventId: interval.startEventId ?? null,
-      endEventId: interval.endEventId ?? null,
-      updatedBy: editorName,
-      editedBy: editorName,
+    }
+    if (selectedZoneId && selectedZoneId !== originalZoneId) {
+      correction.zoneId = selectedZoneId
+      correction.clientId = String(selectedZone?.clientId ?? selectedZone?.client?.clientId ?? '').trim()
+      correction.location = String(selectedZone?.location ?? selectedZone?.lokalizacja ?? '').trim()
+    } else {
+      delete correction.zoneId
+      delete correction.clientId
+      delete correction.location
+    }
+    if (existingIndex >= 0) corrections[existingIndex] = correction
+    else corrections.push(correction)
+    const previous = appState.workerAccountReconciliationCorrections
+    appState.workerAccountReconciliationCorrections = corrections
+    if (reconciliationSessionsOverlap(reconciliationDraftSessions())) {
+      appState.workerAccountReconciliationCorrections = previous
+      showTransientNotice('Sesje nie mogą nakładać się na siebie.', 'error')
+      return
     }
 
-    const saveButton = document.getElementById('waTimeCodeSave')
-    if (saveButton) {
-      saveButton.disabled = true
-      saveButton.textContent = 'Zapisywanie...'
+    closeWorkerAccountInlineEditors()
+    renderWorkerAccountReconciliation()
+    void saveWorkerAccountReconciliationChanges(false)
+  }
+
+  function addWorkerAccountActivityCorrection(button) {
+    const eventId = String(button?.getAttribute?.('data-wa-activity-apply') ?? '').trim()
+    const sessionIndex = Number(button?.getAttribute?.('data-wa-session-index'))
+    const sessions = reconciliationDraftSessions()
+    const session = Number.isInteger(sessionIndex) ? sessions[sessionIndex] : null
+    const editor = button?.closest?.('[data-wa-activity-editor]')
+    const activity = session?.activities?.find((entry) => String(entry?.eventId ?? '').trim() === eventId)
+    if (!editor || !activity || !session) {
+      showTransientNotice('Nie znaleziono zdarzenia do korekty.', 'error')
+      return
     }
+    const startAt = warsawDateTimeInputToIso(editor.querySelector('[data-wa-activity-start]')?.value)
+    const endRaw = String(editor.querySelector('[data-wa-activity-end]')?.value ?? '').trim()
+    const endAt = endRaw ? warsawDateTimeInputToIso(endRaw) : null
+    const zoneId = String(editor.querySelector('[data-wa-activity-zone]')?.value ?? '').trim()
+    const startMs = new Date(startAt || 0).getTime()
+    const endMs = endAt ? new Date(endAt).getTime() : 0
+    const sessionStart = new Date(session.startAt || 0).getTime()
+    const sessionEnd = session.endAt ? new Date(session.endAt).getTime() : 0
+    if (!startAt || (endAt && (!Number.isFinite(endMs) || endMs <= startMs))) {
+      showTransientNotice('Koniec zdarzenia musi być późniejszy niż jego początek.', 'error')
+      return
+    }
+    if (startMs > Date.now() + 60_000 || endMs > Date.now() + 60_000) {
+      showTransientNotice('Zdarzenie nie może mieć czasu w przyszłości.', 'error')
+      return
+    }
+    if (startMs < sessionStart || (sessionEnd && (startMs > sessionEnd || endMs > sessionEnd))) {
+      showTransientNotice('Zdarzenie musi mieścić się wewnątrz wybranej sesji START–STOP.', 'error')
+      return
+    }
+    const selectedZone = zoneId ? reconciliationZoneById(zoneId) : null
+    const correction = {
+      eventId,
+      startAt,
+      endAt,
+      ...(zoneId
+        ? {
+            zoneId,
+            clientId: String(selectedZone?.clientId ?? selectedZone?.client?.clientId ?? '').trim(),
+            location: String(selectedZone?.location ?? selectedZone?.lokalizacja ?? '').trim(),
+          }
+        : {}),
+    }
+    const corrections = Array.isArray(appState.workerAccountActivityCorrections)
+      ? [...appState.workerAccountActivityCorrections]
+      : []
+    const existingIndex = corrections.findIndex((entry) => String(entry?.eventId ?? '').trim() === eventId)
+    if (existingIndex >= 0) corrections[existingIndex] = correction
+    else corrections.push(correction)
+    appState.workerAccountActivityCorrections = corrections
+    closeWorkerAccountInlineEditors()
+    renderWorkerAccountReconciliation()
+    void saveWorkerAccountReconciliationChanges(false)
+  }
+
+  function workerAccountReconciliationIdempotencyKey(payload = {}) {
+    const signature = JSON.stringify({
+      workdayId: appState.workerAccountReconciliationModel?.workdayId,
+      expectedUpdatedAt: payload.expectedUpdatedAt,
+      expectedSessionVersion: payload.expectedSessionVersion,
+      expectedVersion: payload.expectedVersion,
+      sessionCorrections: payload.sessionCorrections,
+      attendanceCorrections: payload.attendanceCorrections,
+      activityCorrections: payload.activityCorrections,
+      workdayEndAt: payload.workdayEndAt,
+      businessDateYmd: payload.businessDateYmd,
+      reason: payload.reason,
+      finalize: payload.finalize,
+    })
+    const cached = appState.workerAccountReconciliationIdempotency
+    if (cached?.signature === signature && cached?.key) return cached.key
+    const key = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `workday-reconciliation-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    appState.workerAccountReconciliationIdempotency = { signature, key }
+    return key
+  }
+
+  async function saveWorkerAccountReconciliationChanges(finalize = false) {
+    const model = appState.workerAccountReconciliationModel
+    const row = appState.workerAccountReconciliationRow
+    const worker = resolveCurrentWorker()
+    const orgId = String(appState.session?.orgId ?? '').trim()
+    if (!model || !row || !worker || !orgId || !model.workdayId) return
+    if (!canManageWorkers()) {
+      showTransientNotice('Brak uprawnień do zatwierdzania korekt dnia pracy.', 'error')
+      return
+    }
+    if (!guardWorkerAccountOwnTimeEdit(worker)) return
+    if (model.isFallback || model.editable === false) {
+      showTransientNotice('Zapis korekty jest teraz niedostępny. Odśwież dane i spróbuj ponownie.', 'error')
+      return
+    }
+
+    const reason = 'Korekta z panelu czasu pracy'
+    const usesWorkTimeDayApi = model.isWorkTimeDay === true
+    const hasCurrentVersion = usesWorkTimeDayApi
+      ? /^[0-9a-f]{64}$/i.test(String(model.version ?? '').trim())
+      : Boolean(model.version && Number.isFinite(new Date(model.version).getTime()))
+    if (!hasCurrentVersion) {
+      showTransientNotice('Brak aktualnej wersji dnia. Odśwież dane i spróbuj ponownie.', 'error')
+      return
+    }
+    if (!usesWorkTimeDayApi && !/^[0-9a-f]{64}$/i.test(String(model.sessionVersion ?? '').trim())) {
+      showTransientNotice('Brak aktualnej wersji sesji. Odśwież dane i spróbuj ponownie.', 'error')
+      return
+    }
+    if (finalize && workerAccountReconciliationHasBlockingProblems()) {
+      showTransientNotice('Najpierw popraw wszystkie niezamknięte lub błędne sesje.', 'error')
+      return
+    }
+
+    const sessions = reconciliationDraftSessions()
+    const workdayEndAt = finalize
+      ? sessions.map((session) => String(session?.endAt ?? '').trim()).filter(Boolean).sort().at(-1) || undefined
+      : undefined
+    const attendanceDrafts = Array.isArray(appState.workerAccountReconciliationCorrections)
+      ? appState.workerAccountReconciliationCorrections
+      : []
+    const activityDrafts = Array.isArray(appState.workerAccountActivityCorrections)
+      ? appState.workerAccountActivityCorrections
+      : []
+    const payload = usesWorkTimeDayApi
+      ? {
+          expectedVersion: model.version,
+          attendanceCorrections: attendanceDrafts.flatMap((correction) => {
+            const sourceWorkdayIds = [...new Set([
+              ...(Array.isArray(correction.sourceWorkdayIds) ? correction.sourceWorkdayIds : []),
+              correction.workdayId || correction.eventId,
+            ].map((value) => String(value ?? '').trim()).filter(Boolean))]
+            return sourceWorkdayIds.map((workdayId) => ({
+              workdayId,
+              startAt: correction.startAt,
+              endAt: correction.endAt,
+              ...(Object.prototype.hasOwnProperty.call(correction, 'zoneId')
+                ? {
+                    zoneId: correction.zoneId,
+                    clientId: correction.clientId,
+                    location: correction.location,
+                  }
+                : {}),
+            }))
+          }),
+          activityCorrections: activityDrafts,
+          reason,
+          finalize: Boolean(finalize),
+        }
+      : {
+          expectedUpdatedAt: model.version,
+          expectedSessionVersion: model.sessionVersion,
+          sessionCorrections: attendanceDrafts,
+          workdayEndAt,
+          reason,
+          finalize: Boolean(finalize),
+        }
+    payload.idempotencyKey = workerAccountReconciliationIdempotencyKey(payload)
+    const draftButton = document.getElementById('waReconciliationSaveDraft')
+    appState.workerAccountReconciliationSaving = true
+    if (draftButton) draftButton.textContent = 'Zapisywanie…'
+    refreshWorkerAccountReconciliationControls()
 
     try {
-      let updated
-      if (eventId && typeof updateEvent === 'function') {
-        updated = await updateEvent(appState.session.orgId, eventId, payload)
-      } else if (typeof updateWorkday === 'function') {
-        updated = await updateWorkday(appState.session.orgId, workdayId, {
-          workerLogin: payload.workerLogin,
-          workerName: payload.workerName,
-          utilityRoomId: payload.zoneId,
-          startAt,
-          endAt: endAt || null,
-          durationSec,
-          status: payload.status,
-          comment: payload.comment,
-          updatedBy: editorName,
-        })
-      } else {
-        throw new Error('Brak funkcji zapisu czasu pracy.')
-      }
-
-      closeWorkerAccountTimeCodeEditor()
-      notifyWorkerAccountWorkdayChanged([updated ?? { workdayId, startAt, endAt }], worker)
-      const refreshed = await loadWorkerAccountTime(worker, {
+      const selectedWorkerLogin = String(row.workerLogin || workerLogin(worker) || '').trim()
+      const selectedBusinessDate = String(model.businessDateYmd || row.dayKey || '').trim()
+      const reconciliation = usesWorkTimeDayApi
+        ? await saveWorkTimeDay(orgId, selectedWorkerLogin, selectedBusinessDate, payload)
+        : await saveWorkdayReconciliation(orgId, model.workdayId, payload)
+      appState.workerAccountReconciliationIdempotency = null
+      appState.workerAccountReconciliationCorrections = []
+      appState.workerAccountActivityCorrections = []
+      appState.workerAccountReconciliationModel = normalizeWorkdayReconciliation(reconciliation, row, model.workdayId)
+      appState.workerAccountReconciliationModel.isWorkTimeDay = usesWorkTimeDayApi
+      appState.workerAccountReconciliationModel.isFallback = usesWorkTimeDayApi
+        ? reconciliation?.editable === false
+        : reconciliation?.schemaReady === false
+      notifyWorkerAccountWorkdayChanged([reconciliation?.workday ?? { workdayId: model.workdayId }], worker)
+      renderWorkerAccountReconciliation()
+      showTransientNotice(finalize ? 'Dzień pracy został poprawnie zamknięty.' : 'Korekty sesji zostały zapisane.', 'success')
+      await loadWorkerAccountTime(worker, {
         force: true,
         range: buildTimeFetchRange(),
         allowBroadFallback: true,
       })
-      if (refreshed) openWorkerAccountTimeCodes(item.dayKey)
-      else closeWorkerAccountTimeCodes()
-      showTransientNotice(`Zapisano godzinę ${item.code.type}.`, 'success')
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error ?? 'Nie udało się zapisać godziny.')
-      showTransientNotice(message, 'error')
-    } finally {
-      if (saveButton) {
-        saveButton.disabled = false
-        saveButton.textContent = 'Zapisz godzinę'
+      if (document.getElementById('waTimeCodesOverlay')?.hidden === false) {
+        await openWorkerAccountTimeCodes(
+          appState.workerAccountReconciliationModel?.businessDateYmd || row.dayKey,
+          { workdayId: model.workdayId },
+        )
       }
+    } catch (error) {
+      const conflictCode = String(error?.code ?? '').trim().toUpperCase()
+      if (Number(error?.status) === 409 && ['WORKDAY_VERSION_CONFLICT', 'WORK_TIME_DAY_CONFLICT'].includes(conflictCode)) {
+        showTransientNotice('Dane dnia zmieniły się w innym oknie. Wczytano aktualny stan.', 'error')
+        await openWorkerAccountTimeCodes(row.dayKey, { workdayId: model.workdayId })
+      } else {
+        const message = error instanceof Error ? error.message : 'Nie udało się zapisać rozliczenia dnia.'
+        showTransientNotice(message, 'error')
+      }
+    } finally {
+      appState.workerAccountReconciliationSaving = false
+      if (draftButton) draftButton.textContent = 'Zapisz zmiany'
+      refreshWorkerAccountReconciliationControls()
     }
-  }
-
-  function setWorkerAccountDayEditorOpen(open) {
-    const overlay = document.getElementById('waDayEditorOverlay')
-    if (!overlay) return
-    overlay.hidden = !open
-    overlay.style.display = open ? 'flex' : 'none'
-  }
-
-  function updateWorkerAccountDayPreview() {
-    const dateValue = String(document.getElementById('waDayDateInput')?.value ?? '').trim()
-    const startValue = String(document.getElementById('waDayStartTime')?.value ?? '').trim()
-    const endValue = String(document.getElementById('waDayEndTime')?.value ?? '').trim()
-    const workInput = document.getElementById('waDayWork')
-    const startAt = localDateTimeToIso(dateValue, startValue)
-    const endAt = localDateTimeToIso(dateValue, endValue)
-    const durationSec = startAt && endAt ? timeRangeSeconds(startAt, endAt) : 0
-    if (workInput) workInput.value = durationSec > 0 ? formatEventDuration(durationSec) : '00:00'
-    return { dateValue, startValue, endValue, startAt, endAt, durationSec }
-  }
-
-  function closeWorkerAccountDayEditor() {
-    appState.workerAccountDayEditorItem = null
-    setWorkerAccountDayEditorOpen(false)
-    const saveButton = document.getElementById('waDaySaveBtn')
-    if (saveButton) {
-      saveButton.disabled = false
-      saveButton.textContent = 'Zapisz'
-    }
-  }
-
-  function openWorkerAccountDayEditor(dayKey, options = {}) {
-    if (!canAdministerWorkers()) return
-    const worker = resolveCurrentWorker()
-    if (!worker) return
-    if (!guardWorkerAccountOwnTimeEdit(worker)) return
-    const item = findWorkerAccountTimeRow(dayKey)
-    const requestedWorkdayId = String(options?.workdayId ?? '').trim()
-    const sourceRows = timeEditorSourceRows(item, requestedWorkdayId)
-    if (!item || !sourceRows.length) {
-      showTransientNotice('Nie znaleziono rekordow Workday dla tego dnia.', 'error')
-      return
-    }
-
-    const editorItem = requestedWorkdayId
-      ? aggregateTimeRows(sourceRows, worker)[0] ?? item
-      : item
-    appState.workerAccountDayEditorItem = {
-      ...editorItem,
-      mode: 'edit',
-      requestedWorkdayId,
-      sourceRows,
-    }
-    setInputValue('waDayDateInput', isoToDateInput(editorItem.dayKey || editorItem.startAt || editorItem.endAt))
-    setInputValue('waDayStartTime', isoToTimeInput(editorItem.startAt) || '00:00')
-    setInputValue('waDayEndTime', isoToTimeInput(editorItem.endAt))
-    setInputValue('waDayComment', editorItem.comment || '')
-    updateWorkerAccountDayPreview()
-    setWorkerAccountDayEditorOpen(true)
-    setTimeout(() => document.getElementById('waDayDateInput')?.focus?.(), 0)
   }
 
   function maybeOpenWorkerAccountPendingTimeEditor() {
@@ -3780,178 +4512,8 @@ export function createWorkerAccountFeature(ctx) {
       return false
     }
 
-    openWorkerAccountDayEditor(item.dayKey, { workdayId: intent.workdayId })
+    void openWorkerAccountTimeCodes(item.dayKey, { workdayId: intent.workdayId })
     return true
-  }
-
-  function workerAccountWorkdayId(row = {}) {
-    return String(row?.workdayId ?? row?.id ?? '').trim()
-  }
-
-  function workerAccountUpdatedWorkdayRow(source = {}, updated = {}, worker = {}) {
-    const startAt = typeof toIso === 'function'
-      ? toIso(updated?.startAt ?? source?.startAt ?? source?.dayStartAt ?? source?.startIso)
-      : String(updated?.startAt ?? source?.startAt ?? source?.dayStartAt ?? source?.startIso ?? '')
-    const endAt = typeof toIso === 'function'
-      ? toIso(updated?.endAt ?? source?.endAt ?? source?.dayEndAt ?? source?.endIso ?? source?.stopAt)
-      : String(updated?.endAt ?? source?.endAt ?? source?.dayEndAt ?? source?.endIso ?? source?.stopAt ?? '')
-    const dayKey = dayKeyFromValue(updated?.dayKey || updated?.dateYmd || updated?.date || startAt || endAt || source?.dayKey || source?.dateYmd || source?.date)
-    const workdayId = String(updated?.workdayId ?? source?.workdayId ?? source?.id ?? '').trim()
-    const durationSec = Math.max(
-      0,
-      Number(updated?.durationSec ?? updated?.durationSeconds ?? source?.durationSec ?? source?.durationSeconds ?? timeRangeSeconds(startAt, endAt)) || 0,
-    )
-    const updatedBy = String(updated?.editedBy ?? updated?.updatedBy ?? source?.editedBy ?? source?.updatedBy ?? workerAccountCurrentUserName()).trim()
-    return stampWorkerIdentity({
-      ...source,
-      ...updated,
-      id: String(source?.id ?? updated?.id ?? workdayId).trim(),
-      workdayId,
-      dayKey,
-      dateYmd: dayKey,
-      date: dayKey,
-      startAt,
-      dayStartAt: startAt,
-      startIso: startAt,
-      endAt,
-      dayEndAt: endAt,
-      endIso: endAt,
-      durationSec,
-      durationSeconds: durationSec,
-      status: String(updated?.status ?? source?.status ?? 'CLOSED').trim() || 'CLOSED',
-      comment: String(updated?.comment ?? source?.comment ?? '').trim(),
-      editedBy: updatedBy,
-      updatedBy,
-      updatedAt: new Date().toISOString(),
-      workerType: String(source?.workerType ?? source?.type ?? roleLabel(workerRole(worker)) ?? '').trim(),
-    }, worker)
-  }
-
-  function applyWorkerAccountLocalWorkdayUpdates(updatedRows = [], worker = resolveCurrentWorker()) {
-    const cleanUpdates = (Array.isArray(updatedRows) ? updatedRows : []).filter((row) => row && typeof row === 'object')
-    if (!cleanUpdates.length || !worker) return false
-
-    const baseRows = Array.isArray(appState.workerAccountAllTimeRows) && appState.workerAccountAllTimeRows.length
-      ? appState.workerAccountAllTimeRows
-      : (Array.isArray(appState.workerAccountTimeRows) ? appState.workerAccountTimeRows : [])
-        .flatMap((row) => (Array.isArray(row?.sourceRows) ? row.sourceRows : []))
-
-    const updatesById = new Map()
-    cleanUpdates.forEach((row) => {
-      const id = workerAccountWorkdayId(row)
-      if (id) updatesById.set(id, row)
-    })
-
-    const appliedIds = new Set()
-    const nextRows = baseRows.map((row) => {
-      const id = workerAccountWorkdayId(row)
-      if (id && updatesById.has(id)) {
-        appliedIds.add(id)
-        return updatesById.get(id)
-      }
-      return row
-    })
-
-    cleanUpdates.forEach((row) => {
-      const id = workerAccountWorkdayId(row)
-      if (id && appliedIds.has(id)) return
-      nextRows.push(row)
-    })
-
-    const range = buildTimeFetchRange()
-    const filteredRows = filterTimeRowsForRange(sortRowsByLatest(nextRows), { from: range.from, to: range.to })
-    appState.workerAccountAllTimeRows = filteredRows
-    appState.workerAccountTimeRows = aggregateTimeRows(filteredRows, worker)
-    appState.workerAccountTimeSelectedKeys = new Set()
-    appState.workerAccountTimeCurrentPageKeys = []
-    appState.workerAccountTimePage = 1
-    appState.workerAccountTimeLoadedKey = ''
-    appState.workerAccountTimeLoadingKey = ''
-    setTimeMonthCard(appState.workerAccountTimeRows)
-    renderTimeTable()
-    renderWorkerAccountSummaryFromState()
-    return true
-  }
-
-  async function saveWorkerAccountDayEditor() {
-    const item = appState.workerAccountDayEditorItem
-    const worker = resolveCurrentWorker()
-    if (!item || !worker || !appState.session?.orgId) {
-      showTransientNotice('Brak aktywnego dnia pracy do zapisania.', 'error')
-      return
-    }
-    if (!guardWorkerAccountOwnTimeEdit(worker)) return
-    if (typeof updateWorkday !== 'function') {
-      showTransientNotice('Brak funkcji zapisu Workday w kontekscie portalu.', 'error')
-      return
-    }
-
-    const sourceRows = Array.isArray(item.sourceRows) ? item.sourceRows : []
-    if (!sourceRows.length) {
-      showTransientNotice('Nie znaleziono rekordow Workday do aktualizacji.', 'error')
-      return
-    }
-
-    const rowsWithIds = sourceRows.map((source) => ({
-      source,
-      workdayId: String(source?.workdayId ?? source?.id ?? '').trim(),
-    }))
-    if (rowsWithIds.some((entry) => !entry.workdayId)) {
-      showTransientNotice('Nie znaleziono poprawnego WorkdayID do aktualizacji.', 'error')
-      return
-    }
-
-    const { dateValue, startAt, endAt, durationSec } = updateWorkerAccountDayPreview()
-    if (!dateValue || !startAt || !endAt) {
-      showTransientNotice('Uzupelnij date oraz godzine startu i konca pracy.', 'error')
-      return
-    }
-    if (durationSec <= 0) {
-      showTransientNotice('Koniec pracy musi byc pozniejszy niz start pracy.', 'error')
-      return
-    }
-    if (durationSec > 24 * 60 * 60) {
-      showTransientNotice('Zakres dnia pracy nie moze przekraczac 24 godzin.', 'error')
-      return
-    }
-
-    const comment = String(document.getElementById('waDayComment')?.value ?? '').trim()
-    const saveButton = document.getElementById('waDaySaveBtn')
-    if (saveButton) {
-      saveButton.disabled = true
-      saveButton.textContent = 'Zapisywanie...'
-    }
-
-    try {
-      const editorName = workerAccountCurrentUserName()
-      const updatedRows = []
-      for (const { source, workdayId } of rowsWithIds) {
-        const updated = await updateWorkday(appState.session.orgId, workdayId, {
-          workerLogin: workerLogin(worker),
-          workerName: workerName(worker) || workerLogin(worker),
-          utilityRoomId: source.utilityRoomId || source.roomId || null,
-          startAt,
-          endAt,
-          durationSec,
-          status: 'CLOSED',
-          comment,
-          updatedBy: editorName,
-        })
-        updatedRows.push(workerAccountUpdatedWorkdayRow(source, updated, worker))
-      }
-      closeWorkerAccountDayEditor()
-      applyWorkerAccountLocalWorkdayUpdates(updatedRows, worker)
-      notifyWorkerAccountWorkdayChanged(updatedRows, worker)
-      showTransientNotice('Zapisano dzien pracy. Widok zaktualizowany.', 'success')
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error ?? 'Nie udalo sie zapisac dnia pracy.')
-      showTransientNotice(message, 'error')
-    } finally {
-      if (saveButton) {
-        saveButton.disabled = false
-        saveButton.textContent = 'Zapisz'
-      }
-    }
   }
 
   function startWorkerAccountSectionLoads(worker, sessionContext, options = {}) {
@@ -4188,22 +4750,18 @@ export function createWorkerAccountFeature(ctx) {
       setTrainingDropdownOpen(false)
     })
     binding.add(document, 'keydown', (event) => {
-      if (event.key !== 'Escape') return
       const timeCodesOverlay = document.getElementById('waTimeCodesOverlay')
       if (timeCodesOverlay && !timeCodesOverlay.hidden) {
-        const timeCodeEditor = document.getElementById('waTimeCodeEditor')
-        if (timeCodeEditor && !timeCodeEditor.hidden) {
-          closeWorkerAccountTimeCodeEditor()
+        if (event.key === 'Tab') {
+          trapWorkerAccountReconciliationFocus(event)
           return
         }
+        if (event.key !== 'Escape') return
+        if (closeWorkerAccountInlineEditors()) return
         closeWorkerAccountTimeCodes()
         return
       }
-      const dayOverlay = document.getElementById('waDayEditorOverlay')
-      if (dayOverlay && !dayOverlay.hidden) {
-        closeWorkerAccountDayEditor()
-        return
-      }
+      if (event.key !== 'Escape') return
       setTrainingDropdownOpen(false)
     })
     binding.add(document.getElementById('waRefreshTimeBtn'), 'click', () => {
@@ -4233,36 +4791,41 @@ export function createWorkerAccountFeature(ctx) {
       if (!target?.matches?.('[data-wa-export-col], input[name="waExportOrientation"], #waExportFrom, #waExportTo')) return
       setTimeEvidencePreviewPlaceholder('Zmieniono ustawienia. Kliknij "Podgląd pliku", aby odswiezyc podglad PDF.')
     })
-    binding.add(document.getElementById('waDayEditorOverlay'), 'click', (event) => {
-      if (event.target === event.currentTarget) closeWorkerAccountDayEditor()
-    })
-    binding.add(document.getElementById('waDayEditorClose'), 'click', closeWorkerAccountDayEditor)
-    binding.add(document.getElementById('waDayCancelBtn'), 'click', closeWorkerAccountDayEditor)
-    binding.add(document.getElementById('waDaySaveBtn'), 'click', () => {
-      void saveWorkerAccountDayEditor()
-    })
     binding.add(document.getElementById('waTimeCodesOverlay'), 'click', (event) => {
       if (event.target === event.currentTarget) closeWorkerAccountTimeCodes()
     })
     binding.add(document.getElementById('waTimeCodesClose'), 'click', closeWorkerAccountTimeCodes)
     binding.add(document.getElementById('waTimeCodesDone'), 'click', closeWorkerAccountTimeCodes)
-    binding.add(document.getElementById('waTimeCodeCancel'), 'click', closeWorkerAccountTimeCodeEditor)
-    binding.add(document.getElementById('waTimeCodeSave'), 'click', () => {
-      void saveWorkerAccountTimeCodeEditor()
-    })
-    binding.add(document.getElementById('waTimeCodeTimeInput'), 'keydown', (event) => {
-      if (event.key !== 'Enter') return
-      event.preventDefault()
-      void saveWorkerAccountTimeCodeEditor()
-    })
     binding.add(document.getElementById('waTimeCodesList'), 'click', (event) => {
       const target = event.target instanceof Element ? event.target : null
-      const editButton = target?.closest('[data-wa-time-code-edit]')
-      if (!editButton) return
-      openWorkerAccountTimeCodeEditor(
-        editButton.getAttribute('data-wa-time-code-day'),
-        editButton.getAttribute('data-wa-time-code-edit'),
-      )
+      const cancelEdit = target?.closest('[data-wa-entry-cancel]')
+      if (cancelEdit) {
+        closeWorkerAccountInlineEditors()
+        return
+      }
+      const sessionApply = target?.closest('[data-wa-session-apply]')
+      if (sessionApply) {
+        addWorkerAccountSessionCorrection(sessionApply)
+        return
+      }
+      const activityApply = target?.closest('[data-wa-activity-apply]')
+      if (activityApply) {
+        addWorkerAccountActivityCorrection(activityApply)
+        return
+      }
+      const activityToggle = target?.closest('[data-wa-activity-toggle]')
+      if (activityToggle) {
+        const eventId = String(activityToggle.getAttribute('data-wa-activity-toggle') ?? '').trim()
+        const editor = document.querySelector(`[data-wa-activity-editor="${CSS.escape(eventId)}"]`)
+        toggleWorkerAccountInlineEditor(activityToggle, editor)
+        return
+      }
+      const sessionToggle = target?.closest('[data-wa-session-toggle]')
+      if (!sessionToggle) return
+      const sessionIndex = String(sessionToggle.getAttribute('data-wa-session-toggle') ?? '').trim()
+      const phase = String(sessionToggle.getAttribute('data-wa-session-phase') ?? '').trim().toLowerCase()
+      const editor = document.getElementById(`wa-session-editor-${sessionIndex}-${phase}`)
+      toggleWorkerAccountInlineEditor(sessionToggle, editor)
     })
     binding.add(document.getElementById('waTimeCodesList'), 'pointerover', (event) => {
       const target = event.target instanceof Element ? event.target : null
@@ -4274,10 +4837,6 @@ export function createWorkerAccountFeature(ctx) {
       const target = event.target instanceof Element ? event.target : null
       const trigger = target?.closest('.wa-time-code-gps-wrap, .wa-time-code-zone-wrap')
       if (trigger) positionWorkerAccountTimeCodeTooltip(trigger)
-    })
-    ;['waDayDateInput', 'waDayStartTime', 'waDayEndTime'].forEach((id) => {
-      binding.add(document.getElementById(id), 'input', updateWorkerAccountDayPreview)
-      binding.add(document.getElementById(id), 'change', updateWorkerAccountDayPreview)
     })
     binding.add(document.getElementById('waTimeMonthPick'), 'change', (event) => {
       applyTimeMonthPick(event.target?.value)
@@ -4326,7 +4885,10 @@ export function createWorkerAccountFeature(ctx) {
       const target = event.target instanceof Element ? event.target : null
       const codesButton = target?.closest('[data-wa-time-codes]')
       if (codesButton) {
-        openWorkerAccountTimeCodes(codesButton.getAttribute('data-wa-time-codes'))
+        void openWorkerAccountTimeCodes(
+          codesButton.getAttribute('data-wa-time-codes'),
+          { workdayId: codesButton.getAttribute('data-wa-time-codes-id') },
+        )
       }
     })
     ;[

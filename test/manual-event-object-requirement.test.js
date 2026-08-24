@@ -92,3 +92,11 @@ test('formularz pozwala wybrac lokalizacje pochodzaca ze strefy', () => {
   assert.match(eventFeature, /location:\s*location \|\| null/)
   assert.match(eventFeature, /lokalizacja:\s*location \|\| null/)
 })
+
+test('ręczne dodawanie START STOP jest dostępne i nie koliduje z obejmującym Workday', () => {
+  assert.doesNotMatch(eventFeature, /legacyEventCreationIsDisabled/)
+  assert.doesNotMatch(eventFeature, /Reczne tworzenie sesji START\/STOP w starym edytorze jest wylaczone/)
+  assert.match(eventFeature, /eventRecordKind\(row\) === EVENT_RECORD_KINDS\.WORKDAY/)
+  assert.match(eventFeature, /events-row--workday/)
+  assert.doesNotMatch(eventFeature, /Okres pracy/)
+})
