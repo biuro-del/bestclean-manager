@@ -1,0 +1,40 @@
+<section class="workday-stop-proposals" aria-labelledby="workdayStopProposalsTitle">
+  <header class="workday-stop-proposals__hero">
+    <div>
+      <p class="workday-stop-proposals__eyebrow">WERYFIKACJA CZASU PRACY</p>
+      <h1 id="workdayStopProposalsTitle">Godziny do weryfikacji</h1>
+      <p>Decyzja biura zapisze oficjalny STOP w ewidencji czasu pracy. Propozycja pracownika nie zmienia czasu samodzielnie.</p>
+    </div>
+    <button class="workday-stop-proposals__refresh" id="wspRefresh" type="button">Odśwież</button>
+  </header>
+
+  <div class="workday-stop-proposals__access" id="wspAccess" role="status" aria-live="polite"></div>
+
+  <section class="workday-stop-proposals__filters" aria-label="Filtry zgłoszeń godzin pracy">
+    <label><span>Organizacja</span><input id="wspOrganization" disabled aria-label="Organizacja z aktywnej sesji" /></label>
+    <label><span>Pracownik (ID)</span><input id="wspWorkerId" autocomplete="off" placeholder="Wszyscy" /></label>
+    <label><span>Od daty</span><input id="wspFrom" type="date" /></label>
+    <label><span>Do daty</span><input id="wspTo" type="date" /></label>
+    <label><span>Status</span>
+      <select id="wspStatus">
+        <option value="PENDING">Oczekujące</option>
+        <option value="APPROVED">Zatwierdzone</option>
+        <option value="CORRECTED">Poprawione</option>
+        <option value="REJECTED">Odrzucone</option>
+        <option value="SUPERSEDED">Nieaktualne</option>
+      </select>
+    </label>
+    <button id="wspApplyFilters" type="button">Zastosuj</button>
+  </section>
+
+  <div class="workday-stop-proposals__grid">
+    <section class="workday-stop-proposals__panel" aria-labelledby="wspQueueTitle">
+      <header><h2 id="wspQueueTitle">Zgłoszenia</h2><span id="wspCount"></span></header>
+      <div id="wspQueue" class="workday-stop-proposals__queue" aria-live="polite"></div>
+    </section>
+    <section class="workday-stop-proposals__panel" aria-labelledby="wspDetailTitle">
+      <header><h2 id="wspDetailTitle">Szczegóły decyzji</h2></header>
+      <div id="wspDetail" class="workday-stop-proposals__detail" aria-live="polite">Wybierz zgłoszenie z listy.</div>
+    </section>
+  </div>
+</section>

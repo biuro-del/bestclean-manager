@@ -20878,6 +20878,391 @@ body.calendar-events-popup-dragging *{
   }
 }
 
+/* Cleaning-company account creation. Scoped selectors avoid the legacy login
+   cascade that appears elsewhere in this stylesheet. */
+#loginScreen .login-company-entry{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-top:22px;
+  padding-top:20px;
+  border-top:1px solid #e6edf6;
+  color:#61708a;
+  font-size:13px;
+  line-height:1.4;
+}
+
+#loginScreen .login-company-start,
+#loginScreen .login-company-email-open,
+#loginScreen .login-company-google{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:46px;
+  width:100%;
+  padding:11px 15px;
+  border:1px solid #ccd8e8;
+  border-radius:13px;
+  background:#fff;
+  color:#19365f;
+  cursor:pointer;
+  font:inherit;
+  font-weight:750;
+  transition:border-color .16s ease, background .16s ease, box-shadow .16s ease;
+}
+
+#loginScreen .login-company-start{
+  min-height:auto;
+  width:auto;
+  padding:7px 0;
+  border:0;
+  border-radius:0;
+  color:#1752ff;
+  background:transparent;
+  font-size:13px;
+}
+
+#loginScreen .login-company-google{
+  border-color:#c8d5e7;
+  box-shadow:0 3px 10px rgba(26, 55, 96, .07);
+}
+
+#loginScreen .login-company-google::before{
+  content:"G";
+  display:grid;
+  place-items:center;
+  width:21px;
+  height:21px;
+  margin-right:10px;
+  border-radius:50%;
+  color:#fff;
+  background:linear-gradient(135deg, #4285f4 0 48%, #34a853 48% 68%, #fbbc05 68% 82%, #ea4335 82%);
+  font-size:12px;
+  font-weight:850;
+}
+
+#loginScreen .login-company-start:hover,
+#loginScreen .login-company-email-open:hover,
+#loginScreen .login-company-google:hover{
+  border-color:#91b1ec;
+  background:#f6f9ff;
+}
+
+#loginScreen .login-company-panel,
+#loginScreen .login-company-email-panel{
+  display:grid;
+  gap:14px;
+}
+
+#loginScreen .login-company-panel[hidden],
+#loginScreen .login-company-email-panel[hidden]{
+  display:none !important;
+}
+
+#loginScreen .login-company-lead{
+  margin:0;
+  color:#344968;
+  font-size:15px;
+  line-height:1.55;
+}
+
+#loginScreen .login-company-divider{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  color:#8392a7;
+  font-size:12px;
+}
+
+#loginScreen .login-company-divider::before,
+#loginScreen .login-company-divider::after{
+  content:"";
+  flex:1;
+  height:1px;
+  background:#e6edf6;
+}
+
+#loginScreen .login-company-note{
+  margin:0;
+  color:#718098;
+  font-size:12px;
+  line-height:1.55;
+}
+
+#loginScreen .login-company-panel .login-reset-back,
+#loginScreen .login-company-email-panel .login-reset-back{
+  justify-self:start;
+  margin:1px 0 0;
+}
+
+.company-basics-overlay{
+  position:fixed;
+  z-index:22000;
+  inset:0;
+  display:grid;
+  place-items:center;
+  overflow:auto;
+  padding:28px 18px;
+}
+
+.company-basics-overlay[hidden]{
+  display:none !important;
+}
+
+.company-basics-backdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(9, 27, 57, .58);
+  backdrop-filter:blur(5px);
+}
+
+.company-basics-card{
+  position:relative;
+  z-index:1;
+  width:min(680px, 100%);
+  max-height:min(900px, calc(100dvh - 56px));
+  overflow:auto;
+  padding:clamp(26px, 4vw, 42px);
+  border:1px solid rgba(225, 235, 249, .9);
+  border-radius:26px;
+  background:#fff;
+  box-shadow:0 30px 90px rgba(5, 22, 48, .35);
+  color:#172b4d;
+}
+
+.company-basics-brand{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding-bottom:22px;
+  border-bottom:1px solid #e7edf6;
+}
+
+.company-basics-brand img{
+  display:block;
+  width:132px;
+  height:auto;
+}
+
+.company-basics-brand span{
+  color:#73829a;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+
+.company-basics-heading{
+  margin:26px 0 24px;
+}
+
+.company-basics-kicker{
+  color:#1752ff;
+  font-size:11px;
+  font-weight:850;
+  letter-spacing:.12em;
+}
+
+.company-basics-heading h1{
+  margin:8px 0 9px;
+  color:#122b50;
+  font-size:clamp(26px, 4vw, 35px);
+  letter-spacing:-.035em;
+  line-height:1.05;
+}
+
+.company-basics-heading p{
+  margin:0;
+  color:#5d6d85;
+  font-size:14px;
+  line-height:1.55;
+}
+
+.company-basics-grid{
+  display:grid;
+  grid-template-columns:minmax(0, .78fr) minmax(0, 1.22fr);
+  gap:16px;
+}
+
+.company-basics-field{
+  display:grid;
+  gap:8px;
+}
+
+.company-basics-field-wide{
+  grid-column:auto;
+}
+
+.company-basics-field label,
+.company-basics-consents legend{
+  color:#203958;
+  font-size:13px;
+  font-weight:760;
+}
+
+.company-basics-field input{
+  width:100%;
+  min-height:48px;
+  box-sizing:border-box;
+  padding:0 14px;
+  border:1px solid #cbd8e8;
+  border-radius:12px;
+  outline:0;
+  background:#f9fbfe;
+  color:#19365f;
+  font:inherit;
+}
+
+.company-basics-field input:focus{
+  border-color:#4c80ff;
+  box-shadow:0 0 0 4px rgba(23, 82, 255, .12);
+}
+
+.company-basics-field small{
+  color:#74839a;
+  font-size:11px;
+  line-height:1.4;
+}
+
+.company-basics-consents{
+  display:grid;
+  gap:12px;
+  margin:25px 0 0;
+  padding:17px;
+  border:1px solid #e1e9f4;
+  border-radius:16px;
+  background:#fbfcff;
+}
+
+.company-basics-consents legend{
+  padding:0 5px;
+}
+
+.company-basics-consents legend span{
+  color:#76869e;
+  font-weight:600;
+}
+
+.company-basics-check{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  color:#40536f;
+  font-size:13px;
+  line-height:1.48;
+  cursor:pointer;
+}
+
+.company-basics-check input{
+  flex:0 0 auto;
+  width:17px;
+  height:17px;
+  margin:1px 0 0;
+  accent-color:#1752ff;
+}
+
+.company-basics-check a{
+  color:#1752ff;
+  font-weight:700;
+  text-decoration:underline;
+  text-underline-offset:2px;
+}
+
+.company-basics-marketing{
+  background:#fff;
+}
+
+.company-basics-marketing p{
+  margin:0 0 2px;
+  color:#74839a;
+  font-size:12px;
+  line-height:1.5;
+}
+
+.company-basics-error{
+  margin-top:18px;
+  padding:12px 14px;
+  border:1px solid #f1c8c8;
+  border-radius:12px;
+  background:#fff6f6;
+  color:#a32929;
+  font-size:13px;
+  line-height:1.45;
+}
+
+.company-basics-error[data-tone="success"]{
+  border-color:#b8e4cf;
+  background:#f1fbf5;
+  color:#137044;
+}
+
+.company-basics-actions{
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  gap:13px;
+  margin-top:24px;
+}
+
+.company-basics-submit{
+  min-height:52px;
+  border-radius:14px;
+}
+
+.company-basics-signout{
+  align-self:center;
+  padding:5px 8px;
+  border:0;
+  background:transparent;
+  color:#5d6d85;
+  cursor:pointer;
+  font:inherit;
+  font-size:13px;
+  text-decoration:underline;
+  text-underline-offset:3px;
+}
+
+.company-basics-signout:focus-visible,
+.company-basics-check a:focus-visible{
+  outline:3px solid rgba(23, 82, 255, .23);
+  outline-offset:3px;
+}
+
+body.company-basics-open{
+  overflow:hidden;
+}
+
+@media (max-width: 620px){
+  .company-basics-overlay{
+    align-items:start;
+    padding:0;
+  }
+
+  .company-basics-card{
+    width:100%;
+    min-height:100dvh;
+    max-height:none;
+    border:0;
+    border-radius:0;
+    padding:27px 20px 30px;
+  }
+
+  .company-basics-grid{
+    grid-template-columns:1fr;
+  }
+
+  #loginScreen .login-company-entry{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+
+  #loginScreen .login-company-start{
+    padding:0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce){
   #loginScreen .login-card .login-submit{
     transition:none !important;

@@ -5,7 +5,7 @@ export const portalLayoutTemplate = `
   <section class="login-visual" aria-labelledby="loginHeroTitle">
     <img
       class="login-hero-image"
-      src="/login-hero-beach-v2.webp"
+      src="/login-hero-operations-v1.webp"
       alt=""
       width="1536"
       height="1024"
@@ -14,7 +14,7 @@ export const portalLayoutTemplate = `
     <div class="login-visual-overlay" aria-hidden="true"></div>
     <div class="login-visual-brand">
       <img src="/cleanzi-logo.svg" alt="Cleanzi" width="180" height="50" />
-      <span>Portal operacyjny</span>
+      <span>Panel firmy sprz&#261;taj&#261;cej</span>
     </div>
     <div class="login-visual-story">
       <span class="login-visual-kicker">SYSTEM DO ZARZ&#260;DZANIA PROCESEM SPRZ&#260;TANIA</span>
@@ -34,9 +34,9 @@ export const portalLayoutTemplate = `
           <span>Portal operacyjny</span>
         </div>
       <div class="login-brand">
-        <span class="login-card-kicker">PORTAL OPERACYJNY</span>
-        <h1 class="login-title" id="loginTitle">Witaj ponownie</h1>
-        <p class="login-copy" id="loginCopy">Zaloguj si&#281; do systemu zarz&#261;dzania procesem sprz&#261;tania Cleanzi.</p>
+        <span class="login-card-kicker">PANEL FIRMY SPRZ&#260;TAJ&#260;CEJ</span>
+        <h1 class="login-title" id="loginTitle">Zaloguj si&#281;</h1>
+        <p class="login-copy" id="loginCopy">Logowanie do panelu firmy sprz&#261;taj&#261;cej Cleanzi.</p>
       </div>
 
       <div id="loginCredentialsPanel">
@@ -55,7 +55,12 @@ export const portalLayoutTemplate = `
 
         <div class="login-field">
           <label for="loginPass">Hasło</label>
-          <input id="loginPass" type="password" autocomplete="current-password" placeholder="Wpisz hasło" />
+          <div class="login-password-control">
+            <input id="loginPass" type="password" autocomplete="current-password" placeholder="Wpisz hasło" />
+            <button class="login-password-toggle" id="loginPasswordToggle" type="button" aria-label="Pokaż hasło" aria-pressed="false">
+              <i class="ph ph-eye" aria-hidden="true"></i>
+            </button>
+          </div>
         </div>
 
         <button class="btn primary login-submit" id="loginBtn" type="submit">Zaloguj</button>
@@ -71,6 +76,39 @@ export const portalLayoutTemplate = `
           />
           <span class="login-google-label">Zaloguj się przez Google</span>
         </button>
+
+        <div class="login-company-entry" id="loginCompanyEntry" hidden>
+          <span>Nie masz jeszcze konta?</span>
+          <button class="login-company-start" id="loginCompanyStart" type="button">Za&#322;&#243;&#380; firm&#281;</button>
+        </div>
+      </div>
+
+      <div class="login-company-panel" id="loginCompanyPanel" hidden>
+        <p class="login-company-lead">Za&#322;&#243;&#380; konto dla firmy sprz&#261;taj&#261;cej i od razu zacznij prac&#281; w Cleanzi.</p>
+        <button class="login-company-google" id="loginCompanyGoogle" type="button"><i class="ph ph-google-logo" aria-hidden="true"></i><span>Kontynuuj z Google</span></button>
+        <div class="login-company-divider" aria-hidden="true"><span>lub</span></div>
+        <button class="login-company-email-open" id="loginCompanyEmailOpen" type="button">Zarejestruj si&#281; e-mailem</button>
+        <p class="login-company-note">Przy rejestracji e-mailem wy&#347;lemy link. Konto zostanie potwierdzone dopiero po jego otwarciu.</p>
+        <button class="login-reset-back" id="loginCompanyBack" type="button">Mam ju&#380; konto &mdash; zaloguj si&#281;</button>
+      </div>
+
+      <div class="login-company-email-panel" id="loginCompanyEmailPanel" hidden>
+        <div class="login-field">
+          <label for="loginCompanyEmail">Email firmowy</label>
+          <input id="loginCompanyEmail" type="email" maxlength="160" autocomplete="email" inputmode="email" spellcheck="false" placeholder="np. biuro@firma.pl" />
+        </div>
+        <button class="btn primary login-submit" id="loginCompanyEmailSend" type="submit">Wy&#347;lij link potwierdzaj&#261;cy</button>
+        <p class="login-company-note">Link wysy&#322;amy na podany adres. Otw&#243;rz go, aby potwierdzi&#263; email i przej&#347;&#263; dalej.</p>
+        <button class="login-reset-back" id="loginCompanyEmailBack" type="button">Wr&#243;&#263; do sposob&#243;w rejestracji</button>
+      </div>
+
+      <div class="login-company-email-panel" id="loginCompanyEmailLinkPanel" hidden>
+        <div class="login-field">
+          <label for="loginCompanyEmailLink">Potwierd&#378; adres email</label>
+          <input id="loginCompanyEmailLink" type="email" maxlength="160" autocomplete="email" inputmode="email" spellcheck="false" placeholder="Adres, na kt&#243;ry wys&#322;ano link" />
+        </div>
+        <button class="btn primary login-submit" id="loginCompanyEmailLinkConfirm" type="submit">Potwierd&#378; email</button>
+        <p class="login-company-note">U&#380;ywamy tego adresu wy&#322;&#261;cznie do bezpiecznego doko&#324;czenia linku potwierdzaj&#261;cego.</p>
       </div>
 
       <div class="login-reset-panel" id="loginResetPanel" hidden>
@@ -261,10 +299,68 @@ export const portalLayoutTemplate = `
 
       <div class="login-error" id="loginErr" aria-live="polite" aria-atomic="true" style="display:none;"></div>
       <button class="login-reset-open" id="loginResetOpen" type="button" hidden>Zresetuj hasło</button>
+      <p class="login-security-note"><i class="ph ph-lock-key" aria-hidden="true"></i><span>Bezpieczne logowanie do chronionego środowiska Cleanzi.</span></p>
       </form>
     </div>
   </section>
 </div>
+
+<section class="company-basics-overlay" id="companyBasicsOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="companyBasicsTitle" aria-describedby="companyBasicsCopy">
+  <div class="company-basics-backdrop" aria-hidden="true"></div>
+  <form class="company-basics-card" id="companyBasicsForm" novalidate>
+    <div class="company-basics-brand">
+      <img src="/cleanzi-logo.svg" alt="Cleanzi" width="132" height="38" />
+      <span>Zak&#322;adanie firmy</span>
+    </div>
+    <div class="company-basics-heading">
+      <span class="company-basics-kicker">PRAWIE GOTOWE</span>
+      <h1 id="companyBasicsTitle">Podstawowe dane firmy</h1>
+      <p id="companyBasicsCopy">Zapisz dane potrzebne do uruchomienia Twojej firmy sprz&#261;taj&#261;cej w Cleanzi.</p>
+    </div>
+
+    <div class="company-basics-grid">
+      <div class="company-basics-field">
+        <label for="companyBasicsNip">NIP</label>
+        <input id="companyBasicsNip" name="nip" type="text" required maxlength="13" inputmode="numeric" autocomplete="off" placeholder="np. 856-734-62-15" pattern="[0-9 -]{10,13}" />
+      </div>
+      <div class="company-basics-field company-basics-field-wide">
+        <label for="companyBasicsLegalName">Pe&#322;na nazwa firmy</label>
+        <input id="companyBasicsLegalName" name="legalName" type="text" required minlength="2" maxlength="160" autocomplete="organization" placeholder="np. Cleanzi sp. z o.o." />
+      </div>
+      <div class="company-basics-field">
+        <label for="companyBasicsEmployeeCount">Deklarowana liczba pracownik&#243;w</label>
+        <input id="companyBasicsEmployeeCount" name="declaredEmployeeCount" type="number" required min="0" max="100000" step="1" inputmode="numeric" placeholder="np. 12" />
+        <small>Mo&#380;esz wpisa&#263; 0, je&#347;li zaczynasz samodzielnie.</small>
+      </div>
+    </div>
+
+    <fieldset class="company-basics-consents">
+      <legend>Wymagane potwierdzenia</legend>
+      <label class="company-basics-check">
+        <input id="companyBasicsTerms" type="checkbox" required />
+        <span>Akceptuj&#281; <a id="companyBasicsTermsLink" href="https://cleanzi.pl/regulamin" target="_blank" rel="noopener noreferrer">Regulamin Cleanzi <span id="companyBasicsTermsVersion">(wersja 2026-07-16)</span></a>.</span>
+      </label>
+      <label class="company-basics-check">
+        <input id="companyBasicsPrivacy" type="checkbox" required />
+        <span>Potwierdzam zapoznanie si&#281; z <a id="companyBasicsPrivacyLink" href="https://cleanzi.pl/polityka-prywatnosci" target="_blank" rel="noopener noreferrer">Polityk&#261; prywatno&#347;ci <span id="companyBasicsPrivacyVersion">(wersja 2026-07-30)</span></a>.</span>
+      </label>
+    </fieldset>
+
+    <fieldset class="company-basics-consents company-basics-marketing">
+      <legend>Zgody marketingowe <span>(opcjonalne)</span></legend>
+      <p>Mo&#380;esz je zmieni&#263; p&#243;&#378;niej. Brak zgody nie ogranicza dost&#281;pu do Cleanzi.</p>
+      <label class="company-basics-check"><input id="companyBasicsMarketingEmail" type="checkbox" /> <span>Chc&#281; otrzymywa&#263; informacje marketingowe e-mailem.</span></label>
+      <label class="company-basics-check"><input id="companyBasicsMarketingSms" type="checkbox" /> <span>Chc&#281; otrzymywa&#263; informacje marketingowe SMS.</span></label>
+      <label class="company-basics-check"><input id="companyBasicsMarketingPhone" type="checkbox" /> <span>Wyra&#380;am zgod&#281; na kontakt marketingowy telefonicznie.</span></label>
+    </fieldset>
+
+    <div class="company-basics-error" id="companyBasicsError" aria-live="polite" aria-atomic="true" hidden></div>
+    <div class="company-basics-actions">
+      <button class="btn primary company-basics-submit" id="companyBasicsSubmit" type="submit">Zapisz i uruchom portal</button>
+      <button class="company-basics-signout" id="companyBasicsSignOut" type="button">Wyloguj</button>
+    </div>
+  </form>
+</section>
 
 <div class="app-bg" id="portalRoot" style="display:none;">
   <div class="company-profile-overlay" id="companyProfileOverlay" role="dialog" aria-modal="true" aria-labelledby="companyProfileTitle" hidden>
@@ -470,6 +566,12 @@ export const portalLayoutTemplate = `
                 <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M4 20a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
               </span>
               <span class="mi-label">Lista pracowników</span>
+            </button>
+            <button class="submenu-item" data-route="workdayStopProposals" type="button">
+              <span class="mi-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="17" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 9h8M8 14l2 2 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="mi-label">Godziny do weryfikacji</span>
             </button>
           </div>
 
@@ -1360,6 +1462,7 @@ export const portalLayoutTemplate = `
         <section id="view-workerAccount" style="display:none;"></section>
         <section id="view-workerTime" style="display:none;"></section>
         <section id="view-workerTimeDetail" style="display:none;"></section>
+        <section id="view-workdayStopProposals" style="display:none;"></section>
         <section id="view-audits" style="display:none;"></section>
         <section id="view-clientProfile" style="display:none;"></section>
         <section id="view-clientProfileDetails" style="display:none;"></section>

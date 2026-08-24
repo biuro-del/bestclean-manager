@@ -46,8 +46,20 @@ const {
   buildFirebaseRestDecodedToken,
   normalizeFirebaseAccountCreatedAt,
 } = require('./firebase-rest-token-policy')
+const { getAppCheck } = require('firebase-admin/app-check')
+const {
+  CLEANING_COMPANY_ONBOARDING_REQUIRED,
+  CleaningCompanyOnboardingError,
+  getCleaningCompanyLegalDocuments,
+  hasCleaningCompanyRegistrationProvenance,
+  hasVerifiedCompanyEmail,
+  isCleaningCompanyOnboardingEnabled,
+  provisionCleaningCompany,
+  requiresCleaningCompanyAppCheck,
+} = require('./cleaning-company-onboarding-service')
 const { createProfitabilityApi } = require('./profitability-api')
 const { createWorkdayReconciliationApi } = require('./workday-reconciliation-api')
+const { createWorkdayStopProposalApi } = require('./workday-stop-proposal-api')
 const { createWorkTimeDaysApi } = require('./work-time-days-api')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
@@ -141,16 +153,20 @@ const PORTAL_ORGANIZATIONS_PATH = '/api/portal/organizations'
 const PORTAL_ORGANIZATION_PROFILE_PATH = '/api/portal/organization-profile'
 const PORTAL_COMPANY_REGISTRY_PATH = '/api/portal/company-registry/lookup'
 const STRIPE_WEBHOOK_PATH = '/api/billing/stripe/webhook'
+const CLEANING_COMPANY_ONBOARDING_LEGAL_DOCUMENTS_PATH = '/api/registration/cleaning-company/legal-documents'
+const CLEANING_COMPANY_ONBOARDING_PROVISION_PATH = '/api/registration/cleaning-company/provision'
 const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
 const PORTAL_JOB_CARDS_PATH = '/api/portal/job-cards'
 const PORTAL_EVENTS_PATH = '/api/portal/events'
 const PORTAL_ZONE_QR_CODES_PATH = '/api/portal/zones/qr-codes'
 const PORTAL_PROFITABILITY_PATH = '/api/portal/profitability'
+const PORTAL_WORKDAY_STOP_PROPOSALS_PATH = '/api/portal/workday-stop-proposals'
 const MOBILE_STATE_PATH = '/api/mobile/state'
 const MOBILE_SCAN_PATH = '/api/mobile/scan'
 const MOBILE_SCAN_STATUS_PATH = '/api/mobile/scan/status'
 const MOBILE_JOB_CARDS_PATH = '/api/mobile/job-cards'
+const MOBILE_WORKDAY_STOP_PROPOSALS_PATH = '/api/mobile/workday-stop-proposals'
 const DATACONNECT_LOCATION = String(process.env.FIREBASE_DATACONNECT_LOCATION || process.env.DATACONNECT_LOCATION || '').trim()
 const DATACONNECT_SERVICE = String(process.env.FIREBASE_DATACONNECT_SERVICE || process.env.DATACONNECT_SERVICE || '').trim()
 const DATACONNECT_CONNECTOR = String(process.env.FIREBASE_DATACONNECT_CONNECTOR || process.env.DATACONNECT_CONNECTOR || '').trim()
@@ -216,12 +232,12 @@ const SECURITY_HEADERS = {
     "base-uri 'self'",
     "object-src 'none'",
     "frame-ancestors 'self'",
-    "script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://www.gstatic.com https://www.google.com https://www.recaptcha.net https://cdn.jsdelivr.net",
+    "script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://www.gstatic.com https://www.google.com https://accounts.google.com https://www.recaptcha.net https://cdn.jsdelivr.net",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
     "font-src 'self' data: https://fonts.gstatic.com",
     "img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com https://*.googleusercontent.com https://cdn.jsdelivr.net https://*.tile.openstreetmap.org",
-    "connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.cloudfunctions.net https://*.firebasedataconnect.googleapis.com https://firebasestorage.googleapis.com wss://*.firebaseio.com",
-    "frame-src 'self' blob: https://*.google.com https://*.googleapis.com https://www.recaptcha.net",
+    "connect-src 'self' https://*.googleapis.com https://accounts.google.com https://*.firebaseapp.com https://*.cloudfunctions.net https://*.firebasedataconnect.googleapis.com https://firebasestorage.googleapis.com wss://*.firebaseio.com",
+    "frame-src 'self' blob: https://*.google.com https://accounts.google.com https://*.googleapis.com https://www.recaptcha.net",
   ].join('; '),
 }
 
@@ -1325,6 +1341,60 @@ async function verifySessionContextFirebaseIdToken(token) {
     if (!PLATFORM_FIREBASE_PROJECT_ID) throw organizationError
     return verifyPlatformFirebaseIdToken(token)
   }
+}
+
+function firstHeaderValue(value) {
+  return Array.isArray(value) ? value[0] : value
+}
+
+function onboardingAppCheckToken(req) {
+  return normalizeText(firstHeaderValue(req?.headers?.['x-firebase-appcheck']))
+}
+
+async function verifyCleaningCompanyAppCheckToken(token) {
+  const normalizedToken = normalizeText(token)
+  if (!normalizedToken) {
+    const error = new Error('APP_CHECK_REQUIRED')
+    error.statusCode = 401
+    error.publicCode = 'APP_CHECK_REQUIRED'
+    error.publicMessage = 'Nie udało się potwierdzić bezpieczeństwa formularza. Odśwież stronę i spróbuj ponownie.'
+    throw error
+  }
+
+  try {
+    await getAppCheck(ensureFirebaseAdmin().app()).verifyToken(normalizedToken)
+  } catch (cause) {
+    const error = new Error('APP_CHECK_INVALID')
+    error.statusCode = 401
+    error.publicCode = 'APP_CHECK_INVALID'
+    error.publicMessage = 'Nie udało się potwierdzić bezpieczeństwa formularza. Odśwież stronę i spróbuj ponownie.'
+    error.cause = cause
+    throw error
+  }
+}
+
+function hashCleaningCompanyOnboardingIp(rawIp) {
+  const ip = normalizeText(rawIp)
+  const secret = normalizeText(process.env.CLEANING_COMPANY_ONBOARDING_IP_HASH_SECRET)
+  if (!ip || !secret) return ''
+  return crypto.createHmac('sha256', secret).update(ip).digest('hex')
+}
+
+function isCustomerFirebaseToken(decodedToken) {
+  const expectedProjectId = normalizeText(FIREBASE_PROJECT_ID)
+  if (!expectedProjectId) return false
+  const audiences = Array.isArray(decodedToken?.aud) ? decodedToken.aud : [decodedToken?.aud]
+  return audiences.some((audience) => normalizeText(audience) === expectedProjectId)
+}
+
+function canStartCleaningCompanyOnboarding(decodedToken) {
+  // Session context accepts the separate platform Firebase project for existing
+  // operational users. Self-service onboarding is deliberately narrower: it
+  // may be offered only to an account issued by the customer Firebase project.
+  return isCleaningCompanyOnboardingEnabled() &&
+    isCustomerFirebaseToken(decodedToken) &&
+    hasVerifiedCompanyEmail(decodedToken) &&
+    hasCleaningCompanyRegistrationProvenance(decodedToken)
 }
 
 async function assertFirebaseEmailAvailable(email) {
@@ -2555,6 +2625,65 @@ async function assertMobileRequester(client, orgId, decodedToken) {
     throw error
   }
   return membership
+}
+
+function mobileTokenOrganizationIds(decodedToken) {
+  const candidates = [decodedToken?.org_id, decodedToken?.orgId]
+  const orgs = decodedToken?.orgs
+  if (orgs && typeof orgs === 'object' && !Array.isArray(orgs)) {
+    for (const [orgId, enabled] of Object.entries(orgs)) {
+      if (enabled === true || enabled === 1 || String(enabled).toLowerCase() === 'true') {
+        candidates.push(orgId)
+      }
+    }
+  }
+  return [...new Set(candidates.map(normalizeOrgId).filter(Boolean))]
+}
+
+function mobileOrganizationScopeError(statusCode, code, message) {
+  const error = new Error(code)
+  error.statusCode = statusCode
+  error.publicCode = code
+  error.publicMessage = message
+  return error
+}
+
+async function resolveMobileOrganizationFromToken(client, decodedToken, requestedOrgId = '') {
+  const uid = normalizeText(decodedToken?.uid)
+  const bodyOrgId = normalizeOrgId(requestedOrgId)
+  const claimedOrgIds = mobileTokenOrganizationIds(decodedToken)
+  if (claimedOrgIds.length > 1) {
+    throw mobileOrganizationScopeError(409, 'MOBILE_ORG_CONTEXT_AMBIGUOUS', 'Token zawiera wi?cej ni? jeden kontekst organizacji.')
+  }
+  if (claimedOrgIds.length === 1) {
+    const orgId = claimedOrgIds[0]
+    if (bodyOrgId && bodyOrgId !== orgId) {
+      throw mobileOrganizationScopeError(403, 'MOBILE_ORG_SCOPE_MISMATCH', 'orgId z ??dania nie zgadza si? z organizacj? tokenu.')
+    }
+    return { orgId, membership: await assertMobileRequester(client, orgId, decodedToken) }
+  }
+
+  const memberships = await client.query(
+    `select org_id
+       from public.organization_member
+      where uid = $1::text
+        and status = 'ACTIVE'
+      order by org_id asc
+      limit 2`,
+    [uid],
+  )
+  const orgIds = [...new Set((memberships.rows || []).map((row) => normalizeOrgId(row.org_id)).filter(Boolean))]
+  if (!orgIds.length) {
+    throw mobileOrganizationScopeError(403, 'MOBILE_ORG_FORBIDDEN', 'Token nie ma aktywnego dost?pu do organizacji.')
+  }
+  if (orgIds.length > 1) {
+    throw mobileOrganizationScopeError(409, 'MOBILE_ORG_CONTEXT_REQUIRED', 'Dla tokenu z wieloma organizacjami wymagany jest jednoznaczny claim organizacji.')
+  }
+  const orgId = orgIds[0]
+  if (bodyOrgId && bodyOrgId !== orgId) {
+    throw mobileOrganizationScopeError(403, 'MOBILE_ORG_SCOPE_MISMATCH', 'orgId z ??dania nie zgadza si? z organizacj? wyprowadzon? z tokenu.')
+  }
+  return { orgId, membership: await assertMobileRequester(client, orgId, decodedToken) }
 }
 
 async function resolveMobileWorker(client, orgId, body, decodedToken, membership) {
@@ -7016,6 +7145,169 @@ async function handleStripeWebhookRequest(req, res) {
   }
 }
 
+async function handleCleaningCompanyLegalDocumentsRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  if (String(req.method || 'GET').toUpperCase() !== 'GET') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to GET.')
+    return
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    status: isCleaningCompanyOnboardingEnabled() ? 'REGISTRATION_AVAILABLE' : 'REGISTRATION_DISABLED',
+    enabled: isCleaningCompanyOnboardingEnabled(),
+    legalDocuments: getCleaningCompanyLegalDocuments(),
+    requiredFields: ['nip', 'legalName', 'declaredEmployeeCount'],
+  })
+}
+
+async function handleCleaningCompanyProvisionRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  if (String(req.method || '').toUpperCase() !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  if (!isCleaningCompanyOnboardingEnabled()) {
+    sendApiError(res, 404, 'REGISTRATION_NOT_AVAILABLE', 'Rejestracja firmy nie jest obecnie dostępna.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    // This must not fall back to a platform-admin Firebase project. A platform
+    // account is never a source for self-service company registration.
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status, mapped.code, mapped.message)
+    return
+  }
+
+  if (!hasVerifiedCompanyEmail(decodedToken)) {
+    sendApiError(
+      res,
+      403,
+      'EMAIL_VERIFICATION_REQUIRED',
+      'Najpierw potwierdź adres e-mail, a potem uzupełnij dane firmy.',
+    )
+    return
+  }
+
+  if (!hasCleaningCompanyRegistrationProvenance(decodedToken)) {
+    sendApiError(
+      res,
+      403,
+      'REGISTRATION_PROVENANCE_REQUIRED',
+      'To konto nie zostało utworzone przez bezpieczną rejestrację firmy sprzątającej.',
+    )
+    return
+  }
+
+  if (requiresCleaningCompanyAppCheck()) {
+    try {
+      await verifyCleaningCompanyAppCheckToken(onboardingAppCheckToken(req))
+    } catch (error) {
+      sendApiError(
+        res,
+        Number(error?.statusCode) || 401,
+        normalizeText(error?.publicCode) || 'APP_CHECK_INVALID',
+        normalizeText(error?.publicMessage) || 'Nie udało się potwierdzić bezpieczeństwa formularza.',
+      )
+      return
+    }
+  }
+
+  let body
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
+      sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Żądanie jest zbyt duże.')
+      return
+    }
+    sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w żądaniu.')
+    return
+  }
+
+  const ownerUid = normalizeText(decodedToken?.uid || decodedToken?.user_id || decodedToken?.sub)
+  let client = null
+  try {
+    client = await connectDbClient()
+    const existingMemberships = await getRequesterMemberships(client, ownerUid)
+    if (existingMemberships.length) {
+      sendApiError(
+        res,
+        409,
+        'ACCOUNT_ALREADY_LINKED',
+        'To konto jest już połączone z organizacją. Zaloguj się do istniejącego panelu lub użyj innego konta.',
+      )
+      return
+    }
+
+    const requestContext = getPlatformRequestContext()
+    const result = await provisionCleaningCompany(client, {
+      decodedToken,
+      payload: body,
+      request: {
+        locale: normalizeText(req.headers['accept-language']).split(',')[0] || 'pl-PL',
+        ipHash: hashCleaningCompanyOnboardingIp(requestContext?.ipAddress),
+        userAgent: requestContext?.userAgent,
+      },
+    })
+
+    const memberships = await getRequesterMemberships(client, ownerUid, result.orgId)
+    const selected = resolveAccessibleOrganizations(memberships, new Date())
+      .find((row) => normalizeOrgId(row.org_id) === result.orgId)
+    if (!selected) {
+      throw new Error('ONBOARDING_SESSION_CONTEXT_UNAVAILABLE')
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      status: 'READY',
+      context: await buildOrganizationSessionContext(client, ownerUid, selected),
+      onboarding: {
+        orgId: result.orgId,
+        replayed: result.replayed,
+        trialEndsAt: result.trialEndsAt || null,
+      },
+    })
+  } catch (error) {
+    if (error instanceof CleaningCompanyOnboardingError) {
+      sendApiError(res, error.statusCode, error.code, error.message, error.details)
+      return
+    }
+
+    const databaseError = mapDatabaseConnectionError(error)
+    if (databaseError) {
+      sendApiError(res, databaseError.status, databaseError.code, databaseError.message)
+      return
+    }
+
+    console.error('[cleaning-company-onboarding] provisioning failed', error)
+    sendApiError(res, 500, 'CLEANING_COMPANY_ONBOARDING_FAILED', 'Nie udało się utworzyć firmy. Spróbuj ponownie za chwilę.')
+  } finally {
+    client?.release()
+  }
+}
+
 async function handleAuthSessionContextRequest(req, res, requestUrl) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
@@ -7222,6 +7514,14 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
     }
 
     if (!accessibleOrganizations.length) {
+      if (canStartCleaningCompanyOnboarding(decodedToken)) {
+        sendJson(res, 200, {
+          ok: true,
+          status: CLEANING_COMPANY_ONBOARDING_REQUIRED,
+          legalDocuments: getCleaningCompanyLegalDocuments(),
+        })
+        return
+      }
       sendJson(res, 200, {
         ok: true,
         status: 'ORGANIZATION_ONBOARDING_REQUIRED',
@@ -9639,6 +9939,20 @@ const workTimeDaysApi = createWorkTimeDaysApi({
   verifyFirebaseIdToken,
 })
 
+const workdayStopProposalApi = createWorkdayStopProposalApi({
+  connectDbClient,
+  getRequesterMembership,
+  parseBearerToken,
+  readJsonBody,
+  resolveMobileOrganization: resolveMobileOrganizationFromToken,
+  resolveMobileWorker,
+  sendApiError,
+  sendJson,
+  sendMobileApiError,
+  sendMobileJson,
+  verifyFirebaseIdToken,
+})
+
 const server = http.createServer((req, res) => runWithPlatformRequest(req, () => {
   const scopedRequest = getPlatformRequestContext()
   res.once('finish', () => {
@@ -9724,6 +10038,18 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   }
   if (requestUrl.pathname === MOBILE_SCAN_STATUS_PATH) {
     handleMobileScanStatusRequest(req, res)
+    return
+  }
+  if (requestUrl.pathname === PORTAL_WORKDAY_STOP_PROPOSALS_PATH) {
+    workdayStopProposalApi.handlePortal(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'WORKDAY_STOP_PROPOSAL_PORTAL_ERROR', error?.message || 'Unexpected workday stop proposal error.')
+    })
+    return
+  }
+  if (requestUrl.pathname === MOBILE_WORKDAY_STOP_PROPOSALS_PATH) {
+    workdayStopProposalApi.handleMobile(req, res, requestUrl).catch((error) => {
+      sendMobileApiError(res, 500, 'WORKDAY_STOP_PROPOSAL_MOBILE_ERROR', error?.message || 'Unexpected mobile workday stop proposal error.')
+    })
     return
   }
   if (
@@ -9894,6 +10220,20 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
         'WORKER_RESTORE_ERROR',
         error?.message || 'Unexpected worker restore error.',
       )
+    })
+    return
+  }
+
+  if (requestUrl.pathname === CLEANING_COMPANY_ONBOARDING_LEGAL_DOCUMENTS_PATH) {
+    handleCleaningCompanyLegalDocumentsRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'CLEANING_COMPANY_LEGAL_DOCUMENTS_ERROR', error?.message || 'Unexpected legal documents error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === CLEANING_COMPANY_ONBOARDING_PROVISION_PATH) {
+    handleCleaningCompanyProvisionRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'CLEANING_COMPANY_ONBOARDING_ERROR', error?.message || 'Unexpected onboarding error.')
     })
     return
   }

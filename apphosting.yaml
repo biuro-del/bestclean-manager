@@ -24,6 +24,34 @@ env:
     value: https://registration-cleanzi.web.app/rejestracja/
     availability:
       - BUILD
+  # Public build inputs for the central Firebase registration issuer. Runtime
+  # registration flags remain fail-closed below until the controlled smoke test.
+  - variable: VITE_FIREBASE_APPCHECK_SITE_KEY
+    value: "6Le-l5MtAAAAAEavTh3EWw5NOW0VPOH7sqtpUthk"
+    availability:
+      - BUILD
+  - variable: VITE_CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID
+    value: "1080573912983-n4lpp41j8s7iff16s2ddadjvdjss3t95.apps.googleusercontent.com"
+    availability:
+      - BUILD
+  - variable: VITE_CENTRAL_REGISTRATION_ISSUER_READY
+    value: "true"
+    availability:
+      - BUILD
+  # Enabled only after the central gate, Firebase Auth and App Check preflight
+  # for portal.cleanzi.pl completed successfully.
+  - variable: CLEANING_COMPANY_ONBOARDING_ENABLED
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: CLEANING_COMPANY_ONBOARDING_AUTO_CONFIRMATION_ENABLED
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: CLEANING_COMPANY_ONBOARDING_REQUIRE_APP_CHECK
+    value: "true"
+    availability:
+      - RUNTIME
   - variable: API_PROXY_TARGET
     secret: CLEANZI_API_PROXY_TARGET
   - variable: VITE_FIREBASE_API_KEY
@@ -66,6 +94,10 @@ env:
     secret: CLEANZI_DATACONNECT_CONNECTOR
     availability:
       - RUNTIME
+  - variable: FIREBASE_PROJECT_ID
+    value: iclean-room
+    availability:
+      - RUNTIME
   - variable: BILLING_PROVIDER
     value: NONE
     availability:
@@ -99,7 +131,7 @@ env:
     availability:
       - RUNTIME
   - variable: CLOUD_SQL_CONNECTION_NAME
-    secret: CLEANZI_CLOUD_SQL_CONNECTION_NAME
+    value: iclean-room:europe-west3:iclean-room-instance
     availability:
       - RUNTIME
   - variable: DB_CONNECTOR
@@ -115,7 +147,7 @@ env:
     availability:
       - RUNTIME
   - variable: DB_NAME
-    secret: CLEANZI_DB_NAME
+    value: iclean-room-database
     availability:
       - RUNTIME
   - variable: DB_USER

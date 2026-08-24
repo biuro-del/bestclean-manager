@@ -11,6 +11,7 @@
   workerAccount: 'view-workerAccount',
   workerTime: 'view-workerTime',
   workerTimeDetail: 'view-workerTimeDetail',
+  workdayStopProposals: 'view-workdayStopProposals',
   audits: 'view-audits',
   clientProfile: 'view-clientProfile',
   clientProfileDetails: 'view-clientProfileDetails',
@@ -52,6 +53,7 @@ const routeGroups = {
   workerTimeDetail: 'workers',
   workerProfile: 'workers',
   workerAccount: 'workers',
+  workdayStopProposals: 'workers',
   reports: 'reports',
 }
 

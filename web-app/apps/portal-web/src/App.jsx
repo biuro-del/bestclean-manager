@@ -6,6 +6,7 @@ import { mountPortalApp } from './ui/portalApp'
 import '@phosphor-icons/web/regular'
 import './ui/styles/portalQuality.css'
 import './ui/styles/commandCenter.css'
+import './ui/styles/login.css'
 
 function App() {
   useEffect(() => {

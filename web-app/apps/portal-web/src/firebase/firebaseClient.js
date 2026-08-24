@@ -1,6 +1,6 @@
 ﻿import { initializeApp, getApp, getApps } from 'firebase/app'
 import { browserLocalPersistence, getAuth, onAuthStateChanged, setPersistence } from 'firebase/auth'
-import { ReCaptchaEnterpriseProvider, initializeAppCheck } from 'firebase/app-check'
+import { ReCaptchaEnterpriseProvider, getToken, initializeAppCheck } from 'firebase/app-check'
 import { connectDataConnectEmulator, getDataConnect } from 'firebase/data-connect'
 import { connectorConfig } from '@dataconnect/generated'
 
@@ -21,6 +21,7 @@ const requiredConfigKeys = ['apiKey', 'authDomain', 'projectId', 'appId']
 
 let emulatorConnected = false
 let appCheckInitialized = false
+let appCheck = null
 let authPersistencePromise = null
 let authReadyPromise = null
 
@@ -54,7 +55,9 @@ export function ensureFirebase() {
   const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig)
   const appCheckSiteKey = String(import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY ?? '').trim()
   if (!appCheckInitialized && appCheckSiteKey && typeof window !== 'undefined') {
-    initializeAppCheck(app, {
+    // Keep one App Check instance for every browser request. Auth/onboarding code
+    // may request its token, but must never initialize a second provider.
+    appCheck = initializeAppCheck(app, {
       provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
       isTokenAutoRefreshEnabled: true,
     })
@@ -76,7 +79,25 @@ export function ensureFirebase() {
   return {
     app,
     auth,
+    appCheck,
     dataConnect,
+  }
+}
+
+export async function getFirebaseAppCheckToken() {
+  const firebase = ensureFirebase()
+  if (!firebase?.appCheck) {
+    return ''
+  }
+
+  try {
+    const result = await getToken(firebase.appCheck)
+    return String(result?.token ?? '').trim()
+  } catch (error) {
+    // The protected endpoint remains the authority. We intentionally do not
+    // turn an App Check refresh failure into a locally trusted state.
+    console.warn('[firebase] App Check token unavailable', error)
+    return ''
   }
 }
 
