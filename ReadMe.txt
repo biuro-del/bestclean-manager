@@ -1,6 +1,22 @@
 Cleanzi version 4.0 - dokument techniczny dla programistów i AI
 ===============================================================
 
+Nadrzedny kontrakt QR START / Workday (Europe/Warsaw)
+------------------------------------------------------
+- Historyczny Workday bez STOP (`end_at IS NULL`, START przed dzisiejsza data
+  Europe/Warsaw) jest zalegloscia do uzupelnienia w Historii i NIGDY nie blokuje
+  QR START ani rozpoczecia nowego dnia.
+- Odczyt blokujacy obejmuje tylko rekordy z biezacej daty Europe/Warsaw albo
+  rekordy bez `start_at`.
+- Kontrolowany blad 409 dotyczy tylko wielu kandydatow z biezacego dnia albo
+  rekordu bez daty START. System nie wybiera rekordu arbitralnie i nie domyka
+  historii automatycznie.
+- Ten sam predykat musi obowiazywac backend, guard SQL i testy regresji.
+
+Status: zasada jest odzwierciedlona w lokalnym kandydacie z 2026-08-24. Dopoki
+nie zostanie zweryfikowana po wdrozeniu razem z triggerem SQL, nie jest dowodem
+stanu produkcji.
+
 Data utworzenia dokumentu: 2026-06-24
 Projekt: Cleanzi / Best Clean Portal
 
@@ -512,6 +528,28 @@ Uwagi dla następnej osoby:
 
 Historia zmian dokumentacji i projektu
 --------------------------------------
+Data: 2026-08-24
+Autor: AI Codex
+Temat: KANDYDAT lokalny P0 - QR START po historycznym braku STOP
+Dodano:
+- Nadrzedny kontrakt: historyczny otwarty Workday jest zalegloscia w Historii,
+  ale nie blokuje QR START ani rozpoczecia nowego dnia.
+Zmieniono:
+- Odczyt blokujacy QR START ograniczono do biezacego dnia Europe/Warsaw lub
+  rekordu bez daty START; zachowano `LIMIT 2 FOR UPDATE`.
+- Polityka ignoruje historyczne otwarte dni bez ich zamykania lub modyfikacji.
+- Dodano regresje dla wielu historycznych dni, mieszanego dnia historycznego i
+  biezacego oraz kontrolowanych konfliktow dla wielu dni biezacych i braku daty.
+Sprawdzenia:
+- `node --test test/mobile-open-workday-policy.test.js test/mobile-workflow-index-guard.test.js` - 15/15 PASS.
+- `node --check index.js`, `node --check mobile-open-workday-policy.js` oraz
+  `git diff --check` - PASS.
+Granice:
+- Nie wykonano migracji, zapisu do bazy, deployu, pushu ani zmiany produkcji.
+- Przed wydaniem wymagany jest odczytowy preflight triggera `single_open_workday`.
+  Legacy trigger moze blokowac nowy START mimo poprawnego kodu; jego naprawa
+  wymaga osobnej, jawnie zatwierdzonej migracji SQL.
+
 Data: 2026-07-20
 Autor: AI Codex
 Dodano:
