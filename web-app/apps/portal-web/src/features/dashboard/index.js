@@ -19,6 +19,8 @@ import {
   SERVICE_OPERATION_STATE,
 } from './serviceOperationStreamModel.js'
 import { buildCommandCenterPlanModel } from './commandCenterPlanModel.js'
+import { buildDashboardStopProposalAttentionAlert } from './dashboardStopProposalAttentionModel.js'
+import { fetchWorkdayStopProposals } from '../../services/workdayStopProposalService'
 
 export const route = 'dashboard'
 export const viewId = 'view-dashboard'
@@ -47,6 +49,13 @@ export function createDashboardFeature(ctx) {
   let dashboardActiveWorkersMapLiveGroupKey = ''
   let dashboardServiceOperationStream = []
   let dashboardOperationsDialogRestoreFocus = null
+  let dashboardCommandCenterAlertContext = null
+  let dashboardStopProposalAttention = {
+    orgId: '',
+    pendingCount: 0,
+    loadedAt: 0,
+    request: null,
+  }
 
   const DASHBOARD_ACTIVITY_SIMULATION_INTERVAL_MS = 60 * 1000
   const DASHBOARD_CHANGE_POLL_INTERVAL_MS = 60 * 1000
@@ -74,6 +83,7 @@ export function createDashboardFeature(ctx) {
     'portal.dashboard.insightPanelCollapsed.v1'
   const DASHBOARD_COMMENT_SYNC_LOOKBACK_DAYS = 3
   const DATA_SYNC_OVERLAY_DELAY_MS = 420
+  const DASHBOARD_STOP_PROPOSAL_ATTENTION_CACHE_TTL_MS = DASHBOARD_CHANGE_POLL_INTERVAL_MS
 
   function dashboardAssertCompleteReadResponses(entries = []) {
     entries.forEach((entry) => {
@@ -6433,13 +6443,83 @@ export function createDashboardFeature(ctx) {
     return model
   }
 
+  async function dashboardRefreshStopProposalAttention(orgId, options = {}) {
+    const activeOrgId = String(orgId ?? appState.session?.orgId ?? '').trim()
+    if (!activeOrgId) {
+      dashboardStopProposalAttention = {
+        orgId: '',
+        pendingCount: 0,
+        loadedAt: 0,
+        request: null,
+      }
+      return 0
+    }
+
+    if (dashboardStopProposalAttention.orgId !== activeOrgId) {
+      dashboardStopProposalAttention = {
+        orgId: activeOrgId,
+        pendingCount: 0,
+        loadedAt: 0,
+        request: null,
+      }
+    }
+
+    const isFresh = dashboardStopProposalAttention.loadedAt > 0 && (
+      Date.now() - dashboardStopProposalAttention.loadedAt < DASHBOARD_STOP_PROPOSAL_ATTENTION_CACHE_TTL_MS
+    )
+    if (options.forceRefresh !== true && isFresh) {
+      return dashboardStopProposalAttention.pendingCount
+    }
+    if (dashboardStopProposalAttention.request) {
+      return dashboardStopProposalAttention.request
+    }
+
+    dashboardStopProposalAttention.request = fetchWorkdayStopProposals(activeOrgId, {
+      status: 'PENDING',
+      limit: 1,
+    })
+      .then((payload) => {
+        if (dashboardStopProposalAttention.orgId !== activeOrgId) {
+          return dashboardStopProposalAttention.pendingCount
+        }
+        const total = Math.max(0, Math.trunc(Number(payload?.total) || 0))
+        dashboardStopProposalAttention.pendingCount = payload?.capability?.canApprove === true
+          ? total || (Array.isArray(payload?.proposals) ? payload.proposals.length : 0)
+          : 0
+        dashboardStopProposalAttention.loadedAt = Date.now()
+        return dashboardStopProposalAttention.pendingCount
+      })
+      .catch((error) => {
+        console.warn('[portal/dashboard] stop proposal attention read failed', error)
+        return dashboardStopProposalAttention.pendingCount
+      })
+      .finally(() => {
+        if (dashboardStopProposalAttention.orgId === activeOrgId) {
+          dashboardStopProposalAttention.request = null
+        }
+      })
+
+    return dashboardStopProposalAttention.request
+  }
+
   function dashboardRenderCommandCenterAlerts({
     values = {},
     operationalServices = {},
     locations = [],
     activeRows = [],
+    pendingStopProposalCount = 0,
   } = {}) {
+    dashboardCommandCenterAlertContext = {
+      values,
+      operationalServices,
+      locations,
+      activeRows,
+    }
     const alerts = []
+    const stopProposalAttentionAlert = buildDashboardStopProposalAttentionAlert(pendingStopProposalCount)
+    if (stopProposalAttentionAlert) {
+      alerts.push(stopProposalAttentionAlert)
+    }
     const normalizedLocations = Array.isArray(locations) ? locations : []
     const lateLocations = normalizedLocations.filter((item) => item?.workStatus === 'late')
     if (lateLocations.length > 0) {
@@ -7593,6 +7673,7 @@ export function createDashboardFeature(ctx) {
       operationalServices,
       locations,
       activeRows: mapRows,
+      pendingStopProposalCount: dashboardStopProposalAttention.pendingCount,
     })
     void dashboardRenderActiveWorkersMap(locations, mapRows.length + plannedOnlyMapRows.length)
   }
@@ -8847,9 +8928,15 @@ export function createDashboardFeature(ctx) {
         dashboardBeginLoading()
       }
       try {
-        fastRows = await dashboardLoadFastRows(orgId, {
-          forceRefresh: options.forceRefresh === true,
-        })
+        const [loadedFastRows] = await Promise.all([
+          dashboardLoadFastRows(orgId, {
+            forceRefresh: options.forceRefresh === true,
+          }),
+          dashboardRefreshStopProposalAttention(orgId, {
+            forceRefresh: options.forceRefresh === true,
+          }),
+        ])
+        fastRows = loadedFastRows
         const { todayRows, recentEvents, systemIssueEvents, openHistoricalWorkdays } = fastRows
         const summary = dashboardBuildSummary(
           todayRows,
@@ -8922,6 +9009,27 @@ export function createDashboardFeature(ctx) {
     }
 
     void refreshDashboardWidgets().catch(() => {})
+  }
+
+  function dashboardRerenderStopProposalAttention() {
+    if (!dashboardCommandCenterAlertContext) {
+      return
+    }
+    dashboardRenderCommandCenterAlerts({
+      ...dashboardCommandCenterAlertContext,
+      pendingStopProposalCount: dashboardStopProposalAttention.pendingCount,
+    })
+  }
+
+  async function dashboardRefreshStopProposalAttentionPoll() {
+    if (!canAutoRefreshDashboard()) {
+      return
+    }
+    const previousPendingCount = dashboardStopProposalAttention.pendingCount
+    await dashboardRefreshStopProposalAttention(appState.session?.orgId, { forceRefresh: true })
+    if (dashboardStopProposalAttention.pendingCount !== previousPendingCount) {
+      dashboardRerenderStopProposalAttention()
+    }
   }
 
   function dashboardTimelineFingerprintRange(dayKey = todayYmd()) {
@@ -9244,6 +9352,7 @@ export function createDashboardFeature(ctx) {
     stopDashboardAutoRefresh()
     scheduleDashboardActivitySimulationTick()
     dashboardChangePollTimer = window.setInterval(() => {
+      void dashboardRefreshStopProposalAttentionPoll().catch(() => {})
       void refreshDashboardTimelineIfChanged().catch(() => {})
     }, DASHBOARD_CHANGE_POLL_INTERVAL_MS)
   }

@@ -4507,3 +4507,24 @@ Granice:
 - Nie wykonano migracji bazy, pusha, wdrożenia ani zmiany produkcji.
 - Przed wdrożeniem wymagany jest preflight schematu i uprawnień bazy; bez tabel
   endpoint celowo pozostaje niedostępny zamiast zwracać niepełne dane.
+
+Data: 2026-08-24
+Autor: AI Codex
+Temat: Lokalny kandydat alertu „Godziny do weryfikacji” na pulpicie
+Powód:
+- Kolejka godzin zawierała zgłoszenia \`PENDING\`, ale karta „Wymaga reakcji” nie
+  informowała o nich ani nie prowadziła do podjęcia decyzji.
+Dodano lokalnie:
+- Alert \`Godziny do weryfikacji (N)\` z liczbą zwróconą przez istniejące API dla
+  \`status=PENDING\`; kliknięcie prowadzi do istniejącej kolejki decyzji.
+- Zawężony odczyt z \`limit=1\`, używający tylko pola \`total\`, bez prezentowania nazw,
+  komentarzy ani innych danych pracowników na pulpicie.
+- Widoczność alertu wyłącznie dla roli z \`capability.canApprove\`; licznik jest
+  odświeżany co minutę oraz natychmiast po podjęciu decyzji w kolejce.
+Weryfikacja:
+- \`node --test test/dashboard-stop-proposal-attention.test.js\` — 3/3 PASS.
+- \`npm --prefix web-app run lint\` — PASS.
+- \`npm run build\` (Node 22) — PASS.
+Granice:
+- Nie zmieniono backendu, API, Firebase/App Hosting configu, migracji ani marketingu.
+- Nie wykonano pusha, wdrożenia, migracji ani zapisu do bazy produkcyjnej.
