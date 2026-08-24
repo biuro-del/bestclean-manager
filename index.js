@@ -8,6 +8,7 @@ const admin = require('firebase-admin')
 const { getDataConnect: getAdminDataConnect } = require('firebase-admin/data-connect')
 const { Pool } = require('pg')
 const { AuthTypes, Connector, IpAddressTypes } = require('@google-cloud/cloud-sql-connector')
+const { resolvePgPassword } = require('./cloud-sql-pg-auth')
 const { Compute, GoogleAuth, OAuth2Client } = require('google-auth-library')
 const {
   buildOrganizationSummary,
@@ -61,6 +62,7 @@ const { createProfitabilityApi } = require('./profitability-api')
 const { createWorkdayReconciliationApi } = require('./workday-reconciliation-api')
 const { createWorkdayStopProposalApi } = require('./workday-stop-proposal-api')
 const { createWorkTimeDaysApi } = require('./work-time-days-api')
+const { mapProposal } = require('./workday-stop-proposal-repository')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
 const {
@@ -2124,7 +2126,7 @@ async function getDbPool() {
       ...connectorOptions,
       database,
       user,
-      ...(useIamDatabaseAuth ? {} : { password }),
+      password: resolvePgPassword({ useIamDatabaseAuth, password }),
       max: Number(process.env.DB_POOL_MAX || 5),
       connectionTimeoutMillis: getDbConnectTimeoutMillis(),
     })
@@ -2495,6 +2497,23 @@ function mapMobileWorkdayRow(row) {
   }
 }
 
+function mapMobileWorkdayStopProposal(row) {
+  const proposal = mapProposal(row)
+  if (!proposal?.proposalId || !proposal?.workdayId) return null
+  return {
+    proposalId: proposal.proposalId,
+    status: proposal.status,
+    proposedStopAt: proposal.proposedStopAt,
+    proposedStopLocal: proposal.proposedStopLocal,
+    timeZone: proposal.timeZone,
+    employeeNote: proposal.employeeNote,
+    decisionNote: proposal.decisionNote,
+    officialStopAt: proposal.officialStopAt,
+    submittedAt: proposal.submittedAt,
+    reviewedAt: proposal.reviewedAt,
+  }
+}
+
 function mapMobileEventRow(row) {
   if (!row) return null
   const classified = classifyMobileZone(row.function_name)
@@ -2856,6 +2875,29 @@ async function fetchMobileOpenWorkdayState(client, orgId, workerLogin) {
   return resolveOpenWorkdayState(result.rows)
 }
 
+// A state read must never reuse the QR guard: historical open records belong
+// in the worker's history and are not a reason to reject the whole snapshot.
+async function fetchMobileStateActiveWorkday(client, orgId, workerLogin) {
+  const result = await client.query(
+    `select w.*,
+            ((w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date) as is_today_warsaw
+       from public.workday w
+      where org_id = $1
+        and lower(btrim(worker_login)) = lower(btrim($2))
+        and upper(btrim(coalesce(status, 'RUNNING'))) <> 'CLOSED'
+        and end_at is null
+        and (
+          ((w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date)
+          or w.start_at is null
+        )
+      order by start_at desc nulls last, updated_at desc nulls last
+      limit 2`,
+    [orgId, workerLogin],
+  )
+  const currentRows = (Array.isArray(result.rows) ? result.rows : []).filter((row) => row?.is_today_warsaw === true)
+  return currentRows.length === 1 ? currentRows[0] : null
+}
+
 async function fetchMobileWorkdays(client, orgId, workerLogin) {
   const result = await client.query(
     `select *
@@ -2867,6 +2909,28 @@ async function fetchMobileWorkdays(client, orgId, workerLogin) {
     [orgId, workerLogin],
   )
   return result.rows.map(mapMobileWorkdayRow).filter(Boolean)
+}
+
+async function fetchMobileWorkdayStopProposals(client, orgId, workerId, workdays) {
+  const workdayIds = [...new Set((Array.isArray(workdays) ? workdays : []).map((workday) => normalizeText(workday?.workdayId)).filter(Boolean))]
+  if (!normalizeText(workerId) || !workdayIds.length || !(await databaseRelationExists(client, 'public.workday_stop_proposal'))) {
+    return new Map()
+  }
+  const result = await client.query(
+    `select distinct on (p.workday_id) p.*
+       from public.workday_stop_proposal p
+      where p.org_id = $1::text
+        and p.worker_id = $2::text
+        and p.workday_id = any($3::text[])
+      order by p.workday_id, p.submitted_at desc nulls last, p.proposal_id desc`,
+    [orgId, workerId, workdayIds],
+  )
+  const proposals = new Map()
+  for (const row of Array.isArray(result.rows) ? result.rows : []) {
+    const proposal = mapMobileWorkdayStopProposal(row)
+    if (proposal) proposals.set(normalizeText(row.workday_id), proposal)
+  }
+  return proposals
 }
 
 async function fetchOpenMobileCycles(client, orgId, workerLogin) {
@@ -3071,11 +3135,28 @@ async function upsertMobileRuntimeState(client, orgId, worker, activeWorkday, ac
   }
 }
 
-async function buildMobileSnapshotFromDb(client, orgId, worker) {
+async function buildMobileSnapshotFromDb(client, orgId, worker, { persistRuntimeState = false } = {}) {
   const zones = await fetchMobileZones(client, orgId)
-  const openWorkdayState = await fetchMobileOpenWorkdayState(client, orgId, worker.login)
+  const openWorkdayState = persistRuntimeState
+    ? await fetchMobileOpenWorkdayState(client, orgId, worker.login)
+    : {
+        activeWorkday: await fetchMobileStateActiveWorkday(client, orgId, worker.login),
+        staleWorkdays: [],
+      }
   const activeWorkdayRaw = openWorkdayState.activeWorkday
-  const workdays = await fetchMobileWorkdays(client, orgId, worker.login)
+  const mobileWorkdays = await fetchMobileWorkdays(client, orgId, worker.login)
+  const workdays = persistRuntimeState
+    ? mobileWorkdays
+    : mobileWorkdays.map((workday) => ({
+        ...workday,
+        stopProposal: null,
+      }))
+  if (!persistRuntimeState) {
+    const stopProposalsByWorkdayId = await fetchMobileWorkdayStopProposals(client, orgId, worker.workerId, mobileWorkdays)
+    for (const workday of workdays) {
+      workday.stopProposal = stopProposalsByWorkdayId.get(workday.workdayId) || null
+    }
+  }
   const cycleHistory = await fetchMobileCycleHistory(client, orgId, worker.login)
   const availableEventColumns = await readPublicEventColumns(client)
   const eventTypeReadable = availableEventColumns.has('event_type')
@@ -3117,7 +3198,9 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
     }
   }
   const activePause = await fetchActiveMobilePause(client, orgId, worker.login, activeWorkdayRaw?.workday_id)
-  await upsertMobileRuntimeState(client, orgId, worker, activeWorkdayRaw, activeCycleRaw)
+  if (persistRuntimeState) {
+    await upsertMobileRuntimeState(client, orgId, worker, activeWorkdayRaw, activeCycleRaw)
+  }
 
   const activeWorkday = mapMobileWorkdayRow(activeWorkdayRaw)
   const activeCycle = mapMobileEventRow(activeCycleRaw)
@@ -3560,7 +3643,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
     }
   }
 
-  const snapshot = await buildMobileSnapshotFromDb(client, orgId, worker)
+  const snapshot = await buildMobileSnapshotFromDb(client, orgId, worker, { persistRuntimeState: true })
   const resultPayload = {
     ok: true,
     action,
@@ -3708,18 +3791,33 @@ async function handleMobileWorkflowRequest(req, res, requestUrl) {
     return
   }
 
-  const orgId = normalizeOrgId(body?.orgId)
-  if (!orgId) {
+  const isMobileStateRequest = requestUrl.pathname === MOBILE_STATE_PATH
+  const requestedOrgId = isMobileStateRequest ? '' : normalizeOrgId(body?.orgId)
+  if (!isMobileStateRequest && !requestedOrgId) {
     sendMobileApiError(res, 400, 'ORG_ID_MISSING', 'Brak poprawnego orgId.')
     return
   }
 
   const client = await connectDbClient()
+  let transactionStarted = false
   try {
-    await client.query('begin')
-    const membership = await assertMobileRequester(client, orgId, decodedToken)
+    const isMobileScanRequest = requestUrl.pathname === MOBILE_SCAN_PATH
+    if (isMobileScanRequest) {
+      await client.query('begin')
+      transactionStarted = true
+    }
+    const organization = isMobileStateRequest
+      ? await resolveMobileOrganizationFromToken(client, decodedToken, requestedOrgId)
+      : {
+          orgId: requestedOrgId,
+          membership: await assertMobileRequester(client, requestedOrgId, decodedToken),
+        }
+    const orgId = organization.orgId
+    const membership = organization.membership
     const worker = await resolveMobileWorker(client, orgId, body, decodedToken, membership)
-    await client.query('select pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))', [orgId, worker.login])
+    if (isMobileScanRequest) {
+      await client.query('select pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))', [orgId, worker.login])
+    }
 
     let payload
     if (requestUrl.pathname === MOBILE_SCAN_PATH) {
@@ -3735,13 +3833,18 @@ async function handleMobileWorkflowRequest(req, res, requestUrl) {
       payload = { ok: true, snapshot, serverAt: new Date().toISOString() }
     }
 
-    await client.query('commit')
+    if (transactionStarted) {
+      await client.query('commit')
+      transactionStarted = false
+    }
     sendMobileJson(res, 200, payload)
   } catch (error) {
-    try {
-      await client.query('rollback')
-    } catch {
-      // Ignore rollback errors.
+    if (transactionStarted) {
+      try {
+        await client.query('rollback')
+      } catch {
+        // Ignore rollback errors.
+      }
     }
     const dbMapped = mapDatabaseConnectionError(error)
     const integrityMapped = mapMobileIntegrityDatabaseError(error)
@@ -8675,11 +8778,11 @@ async function assertPortalScheduleOrderSchemaReady(client) {
   const missing = required.filter((key) => schema[key] !== true)
   if (!missing.length) return
 
-  const error = new Error('TASK_LIFECYCLE_SCHEMA_MISSING')
+  const error = new Error('PORTAL_SCHEDULE_ORDERS_SCHEMA_UNAVAILABLE')
   error.statusCode = 503
-  error.publicCode = 'TASK_LIFECYCLE_SCHEMA_MISSING'
-  error.publicMessage = 'Moduł cyklu życia zleceń wymaga migracji bazy danych przed zapisem.'
-  error.publicDetails = { missing }
+  error.publicCode = 'PORTAL_SCHEDULE_ORDERS_SCHEMA_UNAVAILABLE'
+  error.publicMessage = 'Grafik zleceń jest chwilowo niedostępny. Skontaktuj się z administratorem.'
+  error.publicDetails = { missing, legacyCode: 'TASK_LIFECYCLE_SCHEMA_MISSING' }
   throw error
 }
 
@@ -9020,11 +9123,11 @@ async function readPortalScheduleOrders(client, orgId) {
   const result = await client.query(
     `select
         t.*,
-        c.name as joined_client_name,
-        c.nip as joined_client_nip,
-        c.city as joined_client_city,
-        c.postal_code as joined_client_post_code,
-        c.address as joined_client_street,
+        to_jsonb(c) ->> 'name' as joined_client_name,
+        to_jsonb(c) ->> 'nip' as joined_client_nip,
+        to_jsonb(c) ->> 'city' as joined_client_city,
+        to_jsonb(c) ->> 'postal_code' as joined_client_post_code,
+        to_jsonb(c) ->> 'address' as joined_client_street,
         w.full_name as joined_worker_name,
         w.login as joined_worker_login
        from public.task t

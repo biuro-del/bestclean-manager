@@ -23,6 +23,8 @@ import {
   workSessionConfirmedTotalSeconds,
   workSessionSummarySeconds,
 } from '../workers/workIntervals.js'
+import { buildDashboardStopProposalAttentionAlert } from './dashboardStopProposalAttentionModel.js'
+import { fetchWorkdayStopProposals } from '../../services/workdayStopProposalService'
 
 export const route = 'dashboard'
 export const viewId = 'view-dashboard'
@@ -51,6 +53,12 @@ export function createDashboardFeature(ctx) {
   let dashboardActiveWorkersMapLiveGroupKey = ''
   let dashboardServiceOperationStream = []
   let dashboardOperationsDialogRestoreFocus = null
+  let dashboardStopProposalAttention = {
+    orgId: '',
+    pendingCount: 0,
+    loadedAt: 0,
+    request: null,
+  }
 
   const DASHBOARD_ACTIVITY_SIMULATION_INTERVAL_MS = 60 * 1000
   const DASHBOARD_CHANGE_POLL_INTERVAL_MS = 60 * 1000
@@ -78,6 +86,7 @@ export function createDashboardFeature(ctx) {
     'portal.dashboard.insightPanelCollapsed.v1'
   const DASHBOARD_COMMENT_SYNC_LOOKBACK_DAYS = 3
   const DATA_SYNC_OVERLAY_DELAY_MS = 420
+  const DASHBOARD_STOP_PROPOSAL_ATTENTION_CACHE_TTL_MS = 5 * 60 * 1000
 
   function dashboardAssertCompleteReadResponses(entries = []) {
     entries.forEach((entry) => {
@@ -6640,13 +6649,75 @@ export function createDashboardFeature(ctx) {
     return model
   }
 
+  async function dashboardRefreshStopProposalAttention(orgId, options = {}) {
+    const activeOrgId = String(orgId ?? appState.session?.orgId ?? '').trim()
+    if (!activeOrgId) {
+      dashboardStopProposalAttention = {
+        orgId: '',
+        pendingCount: 0,
+        loadedAt: 0,
+        request: null,
+      }
+      return 0
+    }
+
+    if (dashboardStopProposalAttention.orgId !== activeOrgId) {
+      dashboardStopProposalAttention = {
+        orgId: activeOrgId,
+        pendingCount: 0,
+        loadedAt: 0,
+        request: null,
+      }
+    }
+
+    const isFresh = dashboardStopProposalAttention.loadedAt > 0 && (
+      Date.now() - dashboardStopProposalAttention.loadedAt < DASHBOARD_STOP_PROPOSAL_ATTENTION_CACHE_TTL_MS
+    )
+    if (options.forceRefresh !== true && isFresh) {
+      return dashboardStopProposalAttention.pendingCount
+    }
+    if (dashboardStopProposalAttention.request) {
+      return dashboardStopProposalAttention.request
+    }
+
+    dashboardStopProposalAttention.request = fetchWorkdayStopProposals(activeOrgId, {
+      status: 'PENDING',
+      limit: 1,
+    })
+      .then((payload) => {
+        if (dashboardStopProposalAttention.orgId !== activeOrgId) {
+          return dashboardStopProposalAttention.pendingCount
+        }
+        const total = Math.max(0, Math.trunc(Number(payload?.total) || 0))
+        dashboardStopProposalAttention.pendingCount = total || (Array.isArray(payload?.proposals) ? payload.proposals.length : 0)
+        dashboardStopProposalAttention.loadedAt = Date.now()
+        return dashboardStopProposalAttention.pendingCount
+      })
+      .catch((error) => {
+        console.warn('[portal/dashboard] stop proposal attention read failed', error)
+        return dashboardStopProposalAttention.pendingCount
+      })
+      .finally(() => {
+        if (dashboardStopProposalAttention.orgId === activeOrgId) {
+          dashboardStopProposalAttention.request = null
+        }
+      })
+
+    return dashboardStopProposalAttention.request
+  }
+
   function dashboardRenderCommandCenterAlerts({
     values = {},
     operationalServices = {},
     locations = [],
     activeRows = [],
+    pendingStopProposalCount = 0,
   } = {}) {
     const alerts = []
+    const stopProposalAttentionAlert = buildDashboardStopProposalAttentionAlert(pendingStopProposalCount)
+    if (stopProposalAttentionAlert) {
+      alerts.push(stopProposalAttentionAlert)
+    }
     const normalizedLocations = Array.isArray(locations) ? locations : []
     const lateLocations = normalizedLocations.filter((item) => item?.workStatus === 'late')
     if (lateLocations.length > 0) {
@@ -6735,7 +6806,7 @@ export function createDashboardFeature(ctx) {
         icon: 'ph-warning-circle',
         title: `Brak QR STOP: ${openQrStopCount}`,
         meta: 'Niezamknięte dni pracy sprzed dzisiaj',
-        route: 'events',
+        action: 'open-missing-qr-stop-list',
       })
     }
 
@@ -6752,8 +6823,17 @@ export function createDashboardFeature(ctx) {
       host.innerHTML = '<p>Brak bieżących alertów operacyjnych.</p>'
       return alerts
     }
-    host.innerHTML = alerts.slice(0, 3).map((alert) => `
-      <button class="dash-command-alert is-${escapeHtml(alert.tone)}" type="button" data-route="${escapeHtml(alert.route)}">
+    host.innerHTML = alerts.slice(0, 3).map((alert) => {
+      const route = String(alert?.route ?? '').trim()
+      const metric = String(alert?.metric ?? '').trim()
+      const action = String(alert?.action ?? '').trim()
+      const routeAttribute = route ? ` data-route="${escapeHtml(route)}"` : ''
+      const metricAttributes = metric
+        ? ` data-dash-alert-metric="${escapeHtml(metric)}" aria-expanded="false" aria-haspopup="dialog"`
+        : ''
+      const actionAttribute = action ? ` data-dash-alert-action="${escapeHtml(action)}"` : ''
+      return `
+      <button class="dash-command-alert is-${escapeHtml(alert.tone)}" type="button"${routeAttribute}${metricAttributes}${actionAttribute}>
         <span class="dash-command-alert__icon"><i class="ph ${escapeHtml(alert.icon)}" aria-hidden="true"></i></span>
         <span class="dash-command-alert__copy">
           <strong>${escapeHtml(alert.title)}</strong>
@@ -6764,7 +6844,8 @@ export function createDashboardFeature(ctx) {
           <i class="ph ph-caret-right" aria-hidden="true"></i>
         </span>
       </button>
-    `).join('')
+    `
+    }).join('')
     return alerts
   }
 
@@ -6896,12 +6977,9 @@ export function createDashboardFeature(ctx) {
     const workers = Array.isArray(item.workerNames) && item.workerNames.length
       ? item.workerNames
       : ['Brak rozpoznanego pracownika']
-    const clientLabel = String(item.clientLabel ?? '').trim() || 'Klient nieprzypisany'
-    const operationLabel = String(item.clientLabel ?? '').trim() || String(item.title ?? '').trim() || 'Operacja'
     const workerLabel = workers.join(', ')
-    const secondaryLabel = normalizeSearchText(operationLabel) === normalizeSearchText(item.title)
-      ? (isCompleted ? 'Sprzątanie zakończone' : 'Sprzątanie w toku')
-      : String(item.title ?? '').trim()
+    const primaryLabel = String(item.clientLabel ?? '').trim() || String(item.title ?? '').trim() || 'Operacja'
+    const operationLabel = primaryLabel
     const startLabel = dashboardOverviewTimeLabel(item.startTs)
     const stopLabel = dashboardOverviewTimeLabel(item.stopTs)
     const expectedStopLabel = dashboardOverviewTimeLabel(item.expectedStopTs)
@@ -6910,7 +6988,6 @@ export function createDashboardFeature(ctx) {
     const hasPlannedWindow = plannedStartTs > 0 && plannedStopTs > plannedStartTs
     const plannedStartLabel = hasPlannedWindow ? dashboardOverviewTimeLabel(plannedStartTs) : ''
     const plannedStopLabel = hasPlannedWindow ? dashboardOverviewTimeLabel(plannedStopTs) : ''
-    const statusLabel = isCompleted ? 'Zakończone' : 'W toku'
     const startTs = Math.max(0, Number(item.startTs) || 0)
     const stopTs = Math.max(0, Number(item.stopTs) || 0)
     const actualStopTs = isCompleted ? stopTs : Date.now()
@@ -7064,11 +7141,7 @@ export function createDashboardFeature(ctx) {
             ${dashboardServiceOperationWorkersHtml(workers)}
             <span class="dash-command-operation__copy">
               <strong>${escapeHtml(workerLabel)}</strong>
-              <span class="dash-command-operation__client">
-                <i class="ph ph-buildings" aria-hidden="true"></i>
-                ${escapeHtml(clientLabel)}
-              </span>
-              <small>${escapeHtml(secondaryLabel || statusLabel)}</small>
+              <small>${escapeHtml(primaryLabel)}</small>
             </span>
           </span>
           <span class="dash-command-operation__result">
@@ -7855,6 +7928,7 @@ export function createDashboardFeature(ctx) {
       operationalServices,
       locations,
       activeRows: mapRows,
+      pendingStopProposalCount: dashboardStopProposalAttention.pendingCount,
     })
     void dashboardRenderActiveWorkersMap(locations, mapRows.length + plannedOnlyMapRows.length)
   }
@@ -8260,7 +8334,7 @@ export function createDashboardFeature(ctx) {
     }
 
     const anchorId = String(popover.getAttribute('data-anchor-id') ?? '').trim()
-    document.querySelectorAll('[data-dash-metric][aria-expanded]').forEach((button) => {
+    document.querySelectorAll('[data-dash-metric][aria-expanded], [data-dash-alert-metric][aria-expanded]').forEach((button) => {
       button.setAttribute('aria-expanded', 'false')
     })
     popover.style.display = 'none'
@@ -8400,7 +8474,7 @@ export function createDashboardFeature(ctx) {
     } else {
       popover.removeAttribute('data-anchor-id')
     }
-    document.querySelectorAll('[data-dash-metric][aria-expanded]').forEach((button) => {
+    document.querySelectorAll('[data-dash-metric][aria-expanded], [data-dash-alert-metric][aria-expanded]').forEach((button) => {
       button.setAttribute('aria-expanded', button === anchorButton ? 'true' : 'false')
     })
 
@@ -8418,6 +8492,36 @@ export function createDashboardFeature(ctx) {
     popover.style.top = `${Math.round(top)}px`
     popover.style.visibility = 'visible'
     return popover
+  }
+
+  function dashboardTogglePinnedMetricPopover(metricKey, anchorButton) {
+    const popover = document.getElementById('dashMetricPopover')
+    const isOpen =
+      popover?.style.display !== 'none' &&
+      popover?.getAttribute('data-metric') === metricKey &&
+      popover?.getAttribute('data-pinned') === 'true'
+    if (isOpen) {
+      dashboardHideMetricPopover()
+      return
+    }
+
+    const openedPopover = dashboardShowMetricPopover(metricKey, anchorButton, { pinned: true })
+    window.setTimeout(() => {
+      const firstItem = openedPopover?.querySelector?.('[data-dash-metric-detail]')
+      if (firstItem instanceof HTMLElement) {
+        firstItem.focus()
+        return
+      }
+      const closeButton = openedPopover?.querySelector?.('#dashMetricPopoverClose')
+      if (closeButton instanceof HTMLElement) {
+        closeButton.focus()
+        return
+      }
+      if (openedPopover instanceof HTMLElement) {
+        openedPopover.tabIndex = -1
+        openedPopover.focus()
+      }
+    }, 0)
   }
 
   function dashboardMetricWorkerSearchKeys(detail = {}) {
@@ -8603,6 +8707,41 @@ export function createDashboardFeature(ctx) {
 
     const tab = String(detail?.tab ?? '').trim() || 'workers'
     await openEventHistoryFromRow(row, tab)
+  }
+
+  async function openDashboardMissingQrStopList() {
+    const orgId = String(appState.session?.orgId ?? '').trim()
+    const items = dashboardMetricDetailsOrEmpty('openStartStopYesterday')
+      .map((detail) => ({
+        action: 'workday-day-editor',
+        dayKey: String(detail?.dayKey ?? '').trim(),
+        workerLogin: String(detail?.workerLogin ?? '').trim(),
+        workerName: String(detail?.workerName ?? detail?.title ?? '').trim(),
+        workdayId: String(detail?.workdayId ?? detail?.row?.workdayId ?? detail?.row?.id ?? '').trim(),
+        title: String(detail?.title ?? '').trim(),
+        subtitle: String(detail?.subtitle ?? '').trim(),
+        row: { ...(detail?.row ?? {}) },
+      }))
+      .filter((detail) => detail.dayKey && (detail.workdayId || detail.workerLogin))
+
+    if (!orgId || !items.length) {
+      showTransientNotice('Brak aktualnych dni z brakującym QR STOP.', 'error')
+      return false
+    }
+
+    appState.eventsDashboardMissingQrStopFocus = {
+      kind: 'historical-missing-qr-stop',
+      orgId,
+      items,
+    }
+
+    if (typeof window !== 'undefined' && typeof window.go === 'function') {
+      await Promise.resolve(window.go('events'))
+      return true
+    }
+
+    showTransientNotice('Nie udało się otworzyć listy brakujących QR STOP.', 'error')
+    return false
   }
 
   function dashboardLateMinutesToHm(value) {
@@ -9113,9 +9252,15 @@ export function createDashboardFeature(ctx) {
         dashboardBeginLoading()
       }
       try {
-        fastRows = await dashboardLoadFastRows(orgId, {
-          forceRefresh: options.forceRefresh === true,
-        })
+        const [loadedFastRows] = await Promise.all([
+          dashboardLoadFastRows(orgId, {
+            forceRefresh: options.forceRefresh === true,
+          }),
+          dashboardRefreshStopProposalAttention(orgId, {
+            forceRefresh: options.forceRefresh === true,
+          }),
+        ])
+        fastRows = loadedFastRows
         const { todayRows, recentEvents, systemIssueEvents, openHistoricalWorkdays } = fastRows
         const summary = dashboardBuildSummary(
           todayRows,
@@ -9802,6 +9947,24 @@ export function createDashboardFeature(ctx) {
       kanbanOpenCalendarTask(button.getAttribute('data-dash-kanban-task-id'))
     })
 
+    binding.add(document.getElementById('dashCommandAlertsList'), 'click', (event) => {
+      const button = event.target?.closest?.('[data-dash-alert-action], [data-dash-alert-metric]')
+      if (!(button instanceof HTMLElement)) {
+        return
+      }
+      event.preventDefault()
+      const action = String(button.getAttribute('data-dash-alert-action') ?? '').trim()
+      if (action === 'open-missing-qr-stop-list') {
+        void openDashboardMissingQrStopList()
+        return
+      }
+      const metricKey = String(button.getAttribute('data-dash-alert-metric') ?? '').trim()
+      if (!metricKey) {
+        return
+      }
+      dashboardTogglePinnedMetricPopover(metricKey, button)
+    })
+
 
     const metricButtons = [...document.querySelectorAll('[data-dash-metric]')]
     metricButtons.forEach((button) => {
@@ -9842,33 +10005,7 @@ export function createDashboardFeature(ctx) {
       binding.add(button, 'click', (event) => {
         if (opensList) {
           event.preventDefault()
-          const popover = document.getElementById('dashMetricPopover')
-          const isOpen =
-            popover?.style.display !== 'none' &&
-            popover?.getAttribute('data-metric') === metricKey &&
-            popover?.getAttribute('data-pinned') === 'true'
-          if (isOpen) {
-            dashboardHideMetricPopover()
-            return
-          }
-
-          const openedPopover = dashboardShowMetricPopover(metricKey, button, { pinned: true })
-          window.setTimeout(() => {
-            const firstItem = openedPopover?.querySelector?.('[data-dash-metric-detail]')
-            if (firstItem instanceof HTMLElement) {
-              firstItem.focus()
-              return
-            }
-            const closeButton = openedPopover?.querySelector?.('#dashMetricPopoverClose')
-            if (closeButton instanceof HTMLElement) {
-              closeButton.focus()
-              return
-            }
-            if (openedPopover instanceof HTMLElement) {
-              openedPopover.tabIndex = -1
-              openedPopover.focus()
-            }
-          }, 0)
+          dashboardTogglePinnedMetricPopover(metricKey, button)
           return
         }
 

@@ -3331,7 +3331,7 @@ export function createCalendarFeature(ctx) {
         }
         appState.calendarTimelineOrdersRemoteLoaded = false
         console.warn('[portal/schedule-orders] remote load failed', error)
-        showPortalErrorNotice('Nie udało się pobrać zleceń z Firebase', error)
+        showPortalErrorNotice('Nie udało się pobrać zleceń z serwera', error)
         return ordersListSourceOrders()
       } finally {
         if (calendarTimelineOrdersRemotePromise === request) {
