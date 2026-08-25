@@ -2791,6 +2791,10 @@ async function fetchActiveMobileWorkday(client, orgId, workerLogin) {
         and lower(btrim(worker_login)) = lower(btrim($2))
         and upper(btrim(coalesce(status, 'RUNNING'))) <> 'CLOSED'
         and end_at is null
+        and (
+          ((w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date)
+          or w.start_at is null
+        )
       order by start_at desc nulls last, updated_at desc nulls last
       limit 2
       for update`,
