@@ -232,7 +232,7 @@ test('uprawnienia edycji czasu uwzgledniaja kod i poziom roli sesji', () => {
   assert.match(accessBlock, /function canAdministerWorkers\(\)[\s\S]*currentSessionRoleLevel\(\) >= 3/)
 })
 
-test('tabela dnia pokazuje osobny alert o brakujacym STOP sesji lub zdarzenia', () => {
+test('tabela dnia pokazuje brak STOP przez etykiete i zolte tlo rekordu', () => {
   const source = read('web-app/apps/portal-web/src/features/workers/account/index.js')
   const style = read('web-app/apps/portal-web/src/features/workers/account/style.css')
   const tableBlock = source.slice(
@@ -240,12 +240,12 @@ test('tabela dnia pokazuje osobny alert o brakujacym STOP sesji lub zdarzenia', 
     source.indexOf('function renderAllTables'),
   )
 
-  assert.match(tableBlock, /Brak STOP sesji/)
-  assert.match(tableBlock, /Brak STOP zdarzenia/)
+  assert.doesNotMatch(tableBlock, /Brak STOP sesji|Brak STOP zdarzenia/)
   assert.match(tableBlock, /openActivityCountForDay\(row\)/)
   assert.match(tableBlock, /isCurrentOpenDay/)
-  assert.match(tableBlock, /W trakcie/)
-  assert.match(style, /\.wa-time-work-state\.is-missing-stop/)
+  assert.match(tableBlock, /hasOpenSession \? 'BRAK'/)
+  assert.match(tableBlock, /has-missing-stop/)
+  assert.match(style, /\.worker-account-time-row\.has-missing-stop\s*\{[\s\S]*background:\s*#fff8df/)
 })
 
 test('tabela czasu wzbogaca dane zgodnie z kanonicznym endpointem dni', () => {
@@ -254,6 +254,21 @@ test('tabela czasu wzbogaca dane zgodnie z kanonicznym endpointem dni', () => {
   assert.match(source, /getWorkTimeDays\(appState\.session\.orgId/)
   assert.match(source, /applyCanonicalWorkTimeDays\(/)
   assert.match(source, /openActivityCount:/)
+})
+
+test('tabela czasu pokazuje osobny wiersz dla kazdego cyklu START STOP dnia', () => {
+  const source = read('web-app/apps/portal-web/src/features/workers/account/index.js')
+  const renderBlock = source.slice(
+    source.indexOf('function renderTimeTable'),
+    source.indexOf('function renderAllTables'),
+  )
+  const historyButtonBlock = source.slice(
+    source.indexOf('function workerAccountTimeCodesButton'),
+    source.indexOf('function _editIconButton'),
+  )
+
+  assert.match(renderBlock, /workTimeCycleRowsFromDays\(appState\.workerAccountTimeRows\)/)
+  assert.match(historyButtonBlock, /row\?\.workdayId \?\? preferredSource\?\.workdayId/)
 })
 
 test('dialog scala dokladne duplikaty i wysyla korekte do kazdego rekordu zrodlowego', () => {
@@ -347,9 +362,15 @@ test('tabela konta liczy czas z wielu sesji Workday i nie z Event', () => {
   assert.match(aggregateBlock, /workerLogin:\s*bucket\.workerLogin \|\| workerLogin\(worker\)/)
   assert.match(source, /selectedWorkerLogin = String\(row\.workerLogin \|\| workerLogin\(selectedWorker\)/)
   assert.doesNotMatch(source, /roboczo · wymaga finalizacji/)
-  assert.match(template, /Start dnia/)
-  assert.match(template, /Koniec dnia/)
-  assert.match(template, /Czas sesji/)
+  const timeHeader = template.slice(
+    template.indexOf('worker-account-time-table"'),
+    template.indexOf('id="waTimeRows"'),
+  )
+  assert.match(timeHeader, /U&#380;ytkownik[\s\S]*Data[\s\S]*Start/)
+  assert.doesNotMatch(timeHeader, /Klient/)
+  assert.doesNotMatch(timeHeader, /checkbox|waTimeSelectAll/)
+  assert.match(template, /<div>Start<\/div><div>Stop<\/div><div>Czas<\/div><div>Historia<\/div>/)
+  assert.match(template, /<div>Przerwa<\/div><div>Edytowa&#322;<\/div>/)
 })
 
 test('podglad draftu liczy unie sesji wspolnym agregatorem', () => {
@@ -375,21 +396,25 @@ test('account i time-detail grupuja po canonical businessDateYmd w Europe\/Warsa
   assert.match(detail, /const businessToday = todayYmd\(\)/)
 })
 
-test('tabela czasu rezerwuje miejsce na HH:MM:SS, status i przycisk sesji', () => {
+test('tabela czasu rezerwuje miejsce na pracownika, HH:MM:SS, status i osobna historie dnia', () => {
   const source = read('web-app/apps/portal-web/src/features/workers/account/index.js')
   const style = read('web-app/apps/portal-web/src/features/workers/account/style.css')
 
-  assert.match(style, /worker-account-time-table\s*\{[\s\S]*minmax\(144px, 1\.15fr\)/)
-  assert.match(style, /worker-account-time-table \.events-head,[\s\S]*min-width:\s*0/)
-  assert.match(style, /\.wa-time-work-cell\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) 29px/)
-  assert.match(style, /\.wa-time-work-cell\s*\{[\s\S]*padding-right:\s*7px/)
+  assert.match(style, /worker-account-time-table\s*\{[\s\S]*minmax\(160px, 1\.5fr\)/)
+  assert.match(style, /worker-account-time-table \.events-head,[\s\S]*min-width:\s*860px !important/)
+  assert.match(style, /\.wa-time-history-cell\s*\{[\s\S]*place-items:\s*center/)
+  assert.match(source, /<div class="wa-time-history-cell">\$\{workerAccountTimeCodesButton\(row\)\}<\/div>/)
   assert.match(style, /worker-account-time-row \.time-start,[\s\S]*min-width:\s*78px/)
   assert.match(style, /\.wa-time-summary-kpi\s*\{[\s\S]*"value value"/)
   assert.match(style, /\.wa-time-summary-kpi strong\s*\{[\s\S]*white-space:\s*nowrap/)
   assert.match(style, /\.wa-time-summary-kpi strong\s*\{[\s\S]*text-align:\s*center/)
-  assert.match(style, /\.wa-time-work-state\s*\{[\s\S]*white-space:\s*normal/)
+  assert.match(style, /worker-account-time-table \.wa-time-work-cell\s*\{[\s\S]*place-items:\s*center/)
   assert.match(style, /#view-workerAccount\s*\{[\s\S]*overflow-x:\s*clip/)
-  assert.match(style, /worker-account-table\.worker-account-time-table\s*\{[\s\S]*overflow-x:\s*hidden !important/)
+  assert.match(style, /worker-account-table\.worker-account-time-table\s*\{[\s\S]*overflow-x:\s*auto !important/)
+  assert.match(style, /worker-account-time-list-card\s*\{[\s\S]*padding:\s*0/)
+  assert.match(style, /worker-account-time-list-card \.worker-account-time-table\s*\{[\s\S]*overflow-y:\s*hidden !important[\s\S]*border:\s*0 !important[\s\S]*scrollbar-gutter:\s*auto/)
+  assert.match(style, /wa-time-codes-total > \[hidden\]\s*\{[\s\S]*display:\s*none !important/)
+  assert.match(style, /wa-time-codes-total > strong\s*\{[\s\S]*justify-self:\s*end[\s\S]*text-align:\s*right/)
   assert.doesNotMatch(source, /'duplikat dnia'/)
 })
 
@@ -405,7 +430,7 @@ test('wczesny odczyt cache zlecen nie wymaga gotowego modulu kalendarza', () => 
   assert.doesNotMatch(block, /getCalendarFeature\(\)/)
 })
 
-test('edytor pozwala dodac czynność, ale nie omija reconciliation przy edycji dnia', () => {
+test('edytor zdarzen zapisuje powiazany rekord lokalnie przez audytowany endpoint dnia', () => {
   const events = read('web-app/apps/portal-web/src/features/events/index.js')
   const service = read('web-app/apps/portal-web/src/services/workdayService.js')
   const backend = read('index.js')
@@ -421,13 +446,17 @@ test('edytor pozwala dodac czynność, ale nie omija reconciliation przy edycji 
   )
 
   assert.match(events, /function eventReconciliationWorkdayId/)
-  assert.match(events, /source:\s*'events-workday-reconciliation'/)
-  assert.match(events, /new CustomEvent\('worker-account-select'/)
-  assert.match(openBlock, /eventReconciliationWorkdayId\(item\)/)
-  assert.match(openBlock, /openEventWorkdayReconciliation\(item\)/)
+  assert.match(events, /function eventEditorLoadCorrectionContext/)
+  assert.match(openBlock, /usesDayCorrection/)
+  assert.match(openBlock, /eventEditorLoadCorrectionContext\(item\)/)
+  assert.doesNotMatch(openBlock, /openEventWorkdayReconciliation\(item\)/)
   assert.match(events, /return !eventReconciliationWorkdayId\(row\) && eventDeletionCandidateIds\(row\)\.length > 0/)
   assert.doesNotMatch(saveBlock, /legacyEventCreationIsDisabled/)
   assert.match(saveBlock, /eventReconciliationWorkdayId\(appState\.eventEditorItem\)/)
+  assert.match(saveBlock, /saveWorkTimeDay\(/)
+  assert.match(saveBlock, /attendanceCorrections:\s*isWorkdayRecord \? \[correction\] : \[\]/)
+  assert.match(saveBlock, /activityCorrections:\s*isWorkdayRecord \? \[\] : \[correction\]/)
+  assert.doesNotMatch(saveBlock, /openEventWorkdayReconciliation\(reconciliationRow\)/)
   assert.match(service, /WORKDAY_RECONCILIATION_REQUIRED/)
   assert.match(backend, /assertPortalEventDeleteOutsideReconciliation/)
   assert.match(backend, /publicCode = 'WORKDAY_RECONCILIATION_REQUIRED'/)

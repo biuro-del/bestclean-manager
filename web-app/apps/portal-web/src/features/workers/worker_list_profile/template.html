@@ -15,7 +15,7 @@
       <strong id="wkKpiAll">0</strong>
       <span>Liczba profili</span>
     </div>
-    <i class="worker-profile-kpi-icon" aria-hidden="true"></i>
+    <i class="worker-profile-kpi-icon ph ph-users-three" aria-hidden="true"></i>
   </article>
 
   <article class="worker-profile-kpi-card worker-profile-kpi-card--active">
@@ -24,7 +24,7 @@
       <strong id="wkKpiActive">0</strong>
       <span>Status aktywny</span>
     </div>
-    <i class="worker-profile-kpi-icon" aria-hidden="true"></i>
+    <i class="worker-profile-kpi-icon ph ph-user-check" aria-hidden="true"></i>
   </article>
 
   <article class="worker-profile-kpi-card worker-profile-kpi-card--online">
@@ -33,7 +33,7 @@
       <strong id="wkKpiOnline">0</strong>
       <span>Zalogowani teraz</span>
     </div>
-    <i class="worker-profile-kpi-icon" aria-hidden="true"></i>
+    <i class="worker-profile-kpi-icon ph ph-broadcast" aria-hidden="true"></i>
   </article>
 
   <article class="worker-profile-kpi-card worker-profile-kpi-card--inactive">
@@ -42,7 +42,7 @@
       <strong id="wkKpiInactive">0</strong>
       <span>Status nieaktywny</span>
     </div>
-    <i class="worker-profile-kpi-icon" aria-hidden="true"></i>
+    <i class="worker-profile-kpi-icon ph ph-user-minus" aria-hidden="true"></i>
   </article>
 </div>
 
@@ -64,77 +64,100 @@
 </div>
 
 <div class="toolbar worker-profile-filter-panel" aria-label="Filtry pracowników">
-  <h2>Filtry wyszukiwania</h2>
+  <div class="worker-profile-filter-layout">
+    <section class="worker-profile-filter-workspace" aria-labelledby="wkFiltersTitle">
+      <header class="worker-profile-panel-heading">
+        <span class="worker-profile-panel-heading__icon" aria-hidden="true"><i class="ph ph-faders-horizontal"></i></span>
+        <div>
+          <h2 id="wkFiltersTitle">Filtry i wyszukiwanie</h2>
+          <p>Zawęż listę według typu, statusu lub dostępności pracownika.</p>
+        </div>
+      </header>
 
-  <div class="worker-profile-filter-grid">
-    <div class="tool">
-      <label for="wkType">Typ pracownika</label>
-      <select id="wkType">
-        <option value="">(wszystkie)</option>
-        <option value="Administrator">Administrator</option>
-        <option value="Pracownik Biurowy">Pracownik Biurowy</option>
-        <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
-        <option value="Zespół Mobilny">Zespół Mobilny</option>
-      </select>
-    </div>
+      <div class="worker-profile-filter-grid">
+        <div class="tool">
+          <label for="wkType">Typ pracownika</label>
+          <select id="wkType">
+            <option value="">(wszystkie)</option>
+            <option value="Administrator">Administrator</option>
+            <option value="Pracownik Biurowy">Pracownik Biurowy</option>
+            <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
+            <option value="Zespół Mobilny">Zespół Mobilny</option>
+          </select>
+        </div>
 
-    <div class="tool">
-      <label for="wkActive">Status</label>
-      <select id="wkActive">
-        <option value="">(wszyscy)</option>
-        <option value="1">Aktywni</option>
-        <option value="0">Nieaktywni</option>
-      </select>
-    </div>
+        <div class="tool">
+          <label for="wkActive">Status</label>
+          <select id="wkActive">
+            <option value="">(wszyscy)</option>
+            <option value="1">Aktywni</option>
+            <option value="0">Nieaktywni</option>
+          </select>
+        </div>
 
-    <div class="tool">
-      <label for="wkOnline">Online</label>
-      <select id="wkOnline">
-        <option value="">(wszyscy)</option>
-        <option value="1">Online</option>
-        <option value="0">Offline</option>
-      </select>
-    </div>
+        <div class="tool">
+          <label for="wkOnline">Online</label>
+          <select id="wkOnline">
+            <option value="">(wszyscy)</option>
+            <option value="1">Online</option>
+            <option value="0">Offline</option>
+          </select>
+        </div>
 
-    <div class="tool">
-      <label for="wkSort">Sortuj wg</label>
-      <select id="wkSort">
-        <option value="nameAsc">Imię i nazwisko A-Z</option>
-        <option value="nameDesc">Imię i nazwisko Z-A</option>
-        <option value="surnameAsc">Nazwisko i imię A-Z</option>
-        <option value="surnameDesc">Nazwisko i imię Z-A</option>
-      </select>
-    </div>
-  </div>
+        <div class="tool">
+          <label for="wkSort">Sortuj wg</label>
+          <select id="wkSort">
+            <option value="nameAsc">Imię i nazwisko A-Z</option>
+            <option value="nameDesc">Imię i nazwisko Z-A</option>
+            <option value="surnameAsc">Nazwisko i imię A-Z</option>
+            <option value="surnameDesc">Nazwisko i imię Z-A</option>
+          </select>
+        </div>
+      </div>
 
-  <div class="worker-profile-filter-actions">
-    <select id="wkPageSize" aria-label="Liczba rekordów na stronie">
-      <option value="50">50</option>
-      <option value="100">100</option>
-      <option value="200">200</option>
-    </select>
+      <div class="worker-profile-filter-actions">
+        <select id="wkPageSize" aria-label="Liczba rekordów na stronie">
+          <option value="50">50</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+        </select>
 
-    <div class="tool worker-profile-search-tool">
-      <label for="wkQ">Szukaj</label>
-      <input id="wkQ" type="text" placeholder="Szukaj pracownika..." />
-    </div>
+        <div class="tool worker-profile-search-tool">
+          <label for="wkQ">Szukaj</label>
+          <input id="wkQ" type="text" placeholder="Szukaj pracownika..." />
+        </div>
 
-    <button class="btn2 worker-profile-filter-btn" id="wkResetBtn" type="button">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.7"></path><path d="M18 3v5h-5"></path><path d="M20 12a8 8 0 0 1-13.7 5.7"></path><path d="M6 21v-5h5"></path></svg>
-      <span>Od&#347;wie&#380;</span>
-    </button>
-    <button class="btn2 worker-profile-filter-btn worker-profile-evidence-btn" id="wkOpenExportBtn" type="button" aria-haspopup="dialog" aria-controls="wkExportOverlay" aria-expanded="false">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"></path><path d="m7 10 5 5 5-5"></path><path d="M5 20h14"></path></svg>
-      <span>Pobierz ewidencj&#281; pracy</span>
-    </button>
-    <button class="btn2 worker-profile-filter-btn" id="wkAddBtn" type="button">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
-      <span>Dodaj pracownika</span>
-    </button>
-    <button class="btn2 primary worker-profile-filter-btn" id="wkSearchBtn" type="button">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg>
-      <span>Szukaj</span>
-    </button>
+        <button class="btn2 worker-profile-filter-btn" id="wkResetBtn" type="button">
+          <i class="ph ph-arrow-clockwise" aria-hidden="true"></i>
+          <span>Od&#347;wie&#380;</span>
+        </button>
+        <button class="btn2 primary worker-profile-filter-btn" id="wkSearchBtn" type="button">
+          <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
+          <span>Szukaj</span>
+        </button>
+      </div>
+    </section>
+
+    <aside class="worker-profile-quick-actions" aria-labelledby="wkQuickActionsTitle">
+      <header class="worker-profile-panel-heading worker-profile-quick-actions__heading">
+        <span class="worker-profile-panel-heading__icon" aria-hidden="true"><i class="ph ph-lightning"></i></span>
+        <div>
+          <h2 id="wkQuickActionsTitle">Szybkie działania</h2>
+          <p>Zarządzaj zespołem i dokumentacją czasu pracy.</p>
+        </div>
+      </header>
+
+      <div class="worker-profile-quick-actions__buttons">
+        <button class="btn2 worker-profile-filter-btn worker-profile-quick-action" id="wkOpenExportBtn" type="button" aria-haspopup="dialog" aria-controls="wkExportOverlay" aria-expanded="false">
+          <i class="ph ph-download-simple" aria-hidden="true"></i>
+          <span>Pobierz ewidencj&#281; pracy</span>
+        </button>
+        <button class="btn2 worker-profile-filter-btn worker-profile-quick-action" id="wkAddBtn" type="button">
+          <i class="ph ph-user-plus" aria-hidden="true"></i>
+          <span>Dodaj pracownika</span>
+        </button>
+      </div>
+    </aside>
   </div>
 </div>
 
@@ -230,6 +253,14 @@
 </div>
 
 <div class="workers-table" aria-label="Tabela pracowników">
+  <header class="worker-profile-list-header">
+    <span class="worker-profile-list-header__icon" aria-hidden="true"><i class="ph ph-identification-card"></i></span>
+    <div>
+      <h2>Lista pracowników</h2>
+      <p>Profile zespołu, dostęp do aplikacji i bieżąca aktywność.</p>
+    </div>
+  </header>
+
   <div class="workers-head">
     <div class="worker-profile-select-cell">
       <input id="wkSelectAll" type="checkbox" aria-label="Zaznacz widoczne wiersze" />
@@ -237,10 +268,8 @@
     <div>Użytkownik</div>
     <div>Typ pracownika</div>
     <div>Rola</div>
-    <div>Kontakt</div>
     <div>Status</div>
     <div>Online</div>
-    <div class="worker-profile-actions-spacer" aria-hidden="true"></div>
     <div>Akcje</div>
   </div>
 
@@ -256,6 +285,21 @@
       <button class="btn2 pager-btn" id="wkNextBtn" type="button" aria-label="Następna strona">→</button>
     </div>
   </div>
+</div>
+
+<div class="worker-profile-row-action-menu" id="wkRowActionMenu" role="menu" aria-label="Akcje pracownika" hidden>
+  <button type="button" role="menuitem" data-worker-row-action="account">
+    <i class="ph ph-eye" aria-hidden="true"></i>
+    <span>Zobacz</span>
+  </button>
+  <button type="button" role="menuitem" data-worker-row-action="edit">
+    <i class="ph ph-pencil-simple" aria-hidden="true"></i>
+    <span>Edycja</span>
+  </button>
+  <button class="is-danger" type="button" role="menuitem" data-worker-row-action="delete">
+    <i class="ph ph-trash" aria-hidden="true"></i>
+    <span>Usuń użytkownika</span>
+  </button>
 </div>
 
 <div class="overlay" id="wkEditorOverlay" aria-label="Profil pracownika" role="dialog" aria-modal="true">

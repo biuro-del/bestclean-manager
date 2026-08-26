@@ -4775,8 +4775,10 @@ export async function createWorkday(orgId, payload = {}) {
   const startAt = toNullableIso(payload.startAt)
   const endAt = toNullableIso(payload.endAt)
   const durationSec = normalizeDurationSeconds(payload.durationSec, startAt, endAt)
+  const status = normalizeStatus(payload.status, Boolean(endAt))
 
   ensureFirebase()
+  await assertNoOtherOpenWorkday(orgId, { workerLogin, status, endAt })
   const mutationResult = await insertWorkdayForOrg({
     orgId,
     workdayId,
@@ -4786,7 +4788,7 @@ export async function createWorkday(orgId, payload = {}) {
     startAt,
     endAt,
     durationSec,
-    status: payload.status ?? null,
+    status: status || null,
     comment: payload.comment ?? null,
     updatedBy: payload.updatedBy ?? null,
   })
@@ -4805,7 +4807,7 @@ export async function createWorkday(orgId, payload = {}) {
     startAt,
     endAt,
     durationSec,
-    status: String(payload.status ?? ''),
+    status: String(status ?? ''),
     comment: String(payload.comment ?? ''),
     editedBy: String(payload.updatedBy ?? ''),
   }

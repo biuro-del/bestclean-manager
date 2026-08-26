@@ -104,12 +104,14 @@ export function workIntervalGpsCoordinates(interval = {}, codeType = 'START') {
  */
 export function workIntervalVisibleComment(value) {
   return String(value ?? '')
+    .replace(/\[\[\s*GPS\b[\s\S]*?(?:\]\]|$)/gi, ' ')
     .split(/\s*\|\s*|\r?\n+/)
     .map((part) => String(part ?? '')
-      .replace(/\[\[\s*GPS\b[\s\S]*?(?:\]\]|$)/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim())
-    .filter((part) => part && !/^(?:CLEAN_)?(?:START_GPS|STOP_GPS)\b/i.test(part))
+    .filter((part) => part &&
+      !/^(?:CLEAN_)?(?:START_GPS|STOP_GPS)\b/i.test(part) &&
+      !/^(?:START|STOP)\s+[A-Z]{1,12}\d{2,}$/i.test(part))
     .join(' | ')
 }
 
@@ -805,6 +807,81 @@ export function aggregateWorkTimeDay(rows = [], options = {}) {
     workIntervals: sessions,
     workedSec,
   }
+}
+
+/**
+ * Projects day-level accounting rows into table rows representing exact
+ * attendance START/STOP cycles. The original day sources stay attached so
+ * the history dialog and exports can continue to operate on the complete day.
+ */
+export function workTimeCycleRowsFromDays(rows = []) {
+  return (Array.isArray(rows) ? rows : []).flatMap((day) => {
+    const sessions = (Array.isArray(day?.sessions) ? day.sessions : [])
+      .filter((session) => session && typeof session === 'object')
+      .sort((left, right) => {
+        const startDiff = intervalTimestamp(right?.startAt) - intervalTimestamp(left?.startAt)
+        if (startDiff) return startDiff
+        return String(right?.workdayId ?? '').localeCompare(String(left?.workdayId ?? ''))
+      })
+    if (!sessions.length) return [day]
+
+    return sessions.map((session, index) => {
+      const startTs = intervalTimestamp(session?.startAt)
+      const endTs = intervalTimestamp(session?.endAt)
+      const isOpen = session?.isOpen === true || Boolean(startTs && !endTs)
+      const isValid = session?.isValid !== false && Boolean(startTs) && (isOpen || endTs > startTs)
+      const workSec = isValid && !isOpen && endTs > startTs
+        ? Math.floor((endTs - startTs) / 1000)
+        : 0
+      const sessionIntegrityState = String(session?.integrityState ?? '').trim().toUpperCase()
+      const integrityState = !isValid
+        ? WORKDAY_INTEGRITY_STATES.INVALID
+        : isOpen
+          ? WORKDAY_INTEGRITY_STATES.OPEN_SESSION
+          : sessionIntegrityState || WORKDAY_INTEGRITY_STATES.COMPLETE
+      const integrityIssues = Array.isArray(session?.integrityIssues)
+        ? session.integrityIssues
+        : Array.isArray(session?.issues)
+          ? session.issues
+          : []
+      const breakSec = Math.max(0, Math.floor(Number(
+        session?.pauseTotalSec ?? session?.pauseSec ?? session?.breakSec ?? 0,
+      ) || 0))
+      const dayKey = String(day?.dayKey ?? day?.businessDateYmd ?? '').trim()
+
+      return {
+        ...day,
+        dayKey,
+        businessDateYmd: String(day?.businessDateYmd ?? dayKey).trim(),
+        startAt: startTs ? new Date(startTs).toISOString() : '',
+        endAt: !isOpen && endTs ? new Date(endTs).toISOString() : '',
+        lastClosedStopAt: !isOpen && endTs ? new Date(endTs).toISOString() : '',
+        workSec,
+        realWorkSec: workSec,
+        closedSessionsSec: workSec,
+        confirmedSec: integrityState === WORKDAY_INTEGRITY_STATES.COMPLETE ? workSec : 0,
+        provisionalSec: 0,
+        breakSec,
+        netSec: workSec,
+        integrityState,
+        integrityIssues,
+        issues: integrityIssues,
+        openSessionCount: isOpen ? 1 : 0,
+        openSessions: isOpen ? [session] : [],
+        sessions: [session],
+        activities: Array.isArray(session?.activities) ? session.activities : [],
+        workdayId: String(session?.workdayId ?? day?.workdayId ?? '').trim(),
+        version: String(session?.version ?? day?.version ?? '').trim(),
+        updatedBy: String(session?.editedBy ?? session?.updatedBy ?? day?.updatedBy ?? '').trim() || '-',
+        comment: String(session?.comment ?? day?.comment ?? '').trim(),
+        cycleIndex: index,
+        cycleNumber: index + 1,
+        cycleCount: sessions.length,
+        isCycleRow: true,
+        sourceRows: Array.isArray(day?.sourceRows) ? day.sourceRows : [],
+      }
+    })
+  })
 }
 
 /**

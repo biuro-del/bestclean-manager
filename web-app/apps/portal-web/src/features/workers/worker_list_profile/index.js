@@ -30,6 +30,8 @@ import {
   workTimeEvidencePreviewPlaceholderHtml,
   workTimeEvidenceSummaryText,
 } from '../work_time_evidence_export.js'
+import { resolveOperationalMapAvatarKind } from '../../dashboard/operationalMapModel.js'
+import { applyCurrentMonthMissingStopStatus } from './missingStopModel.js'
 
 export const route = 'workerProfile'
 export const viewId = 'view-workerProfile'
@@ -81,6 +83,7 @@ const WORKER_ACTION_ICONS = {
 const OPTIMISTIC_WORKER_PROFILE_TTL_MS = 15000
 const OPTIMISTIC_WORKER_PROFILE_DELETE_TTL_MS = 60000
 const DASHBOARD_LOCAL_CACHE_PREFIX = 'portal.dashboard.snapshot.'
+const WORKER_PROFILE_MISSING_STOP_PAGE_SIZE = 2000
 
 export function createWorkerProfileFeature(ctx) {
   const {
@@ -133,6 +136,8 @@ export function createWorkerProfileFeature(ctx) {
   const clearWorkerProfileBasicError = workerFormView.clearBasicError
   const clearWorkerProfilePasswordError = workerFormView.clearPasswordError
   const setWorkerProfileBasicError = workerFormView.setBasicError
+  let workerProfileActionMenuIndex = -1
+  let workerProfileActionMenuTrigger = null
   const setWorkerProfilePasswordError = workerFormView.setPasswordError
 
   const selectedWorkerProfileKeys = new Set()
@@ -415,20 +420,6 @@ export function createWorkerProfileFeature(ctx) {
     }, 7)
   }
 
-  function workerProfileInitials(worker) {
-    const source = String(worker?.name ?? worker?.login ?? worker?.workerLogin ?? '').trim()
-    if (!source) {
-      return 'U'
-    }
-
-    const parts = source.split(/\s+/).filter(Boolean)
-    if (parts.length >= 2) {
-      return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
-    }
-
-    return source.slice(0, 2).toUpperCase()
-  }
-
   function workerAvatarTone(worker) {
     const key = workerProfileKey(worker) || worker?.name || ''
     return WORKER_AVATAR_TONES[workerProfileHash(key) % WORKER_AVATAR_TONES.length]
@@ -448,10 +439,13 @@ export function createWorkerProfileFeature(ctx) {
   function workerProfileAvatarHtml(worker, className = '') {
     const photoUrl = workerProfilePhotoUrl(worker)
     const classes = ['worker-profile-avatar', workerAvatarTone(worker), className].filter(Boolean).join(' ')
-    if (photoUrl) {
-      return `<span class="${escapeHtml(classes)} is-photo"><img src="${escapeHtml(photoUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" /></span>`
-    }
-    return `<span class="${escapeHtml(classes)}">${escapeHtml(workerProfileInitials(worker))}</span>`
+    const avatarKind = resolveOperationalMapAvatarKind({
+      ...worker,
+      workerName: worker?.name ?? worker?.displayName ?? worker?.fullName ?? '',
+    })
+    const avatarUrl = photoUrl || `/assets/avatars/default-${avatarKind}.webp`
+    const defaultClass = photoUrl ? '' : ' is-default-avatar'
+    return `<span class="${escapeHtml(classes)} is-photo${defaultClass}"><img src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" /></span>`
   }
 
   function setWorkerProfilePhotoState({ photoUrl = '', photoDataUrl = '', removePhoto = false } = {}) {
@@ -1195,19 +1189,19 @@ export function createWorkerProfileFeature(ctx) {
       return
     }
 
+    closeWorkerProfileActionMenu()
     appState.workerProfileViewRows = rows
 
     if (!rows.length) {
       root.innerHTML = `
         <div class="workers-row worker-profile-empty-row">
-          <div></div><div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div><div class="worker-profile-actions-spacer" aria-hidden="true"></div><div></div>
+          <div></div><div>Brak wyników</div><div></div><div></div><div></div><div></div><div></div>
         </div>
       `
       syncWorkerProfileSelectionUi()
       return
     }
 
-    const actionLabel = canManageWorkers() ? 'Edytuj' : 'Podgląd'
     root.innerHTML = rows
       .map(
         (worker, index) => {
@@ -1218,15 +1212,12 @@ export function createWorkerProfileFeature(ctx) {
           const workerTypeVisual = workerRoleVisualMeta(workerType)
           const role = workerProfileRoleLabel(worker)
           const roleVisual = workerRoleVisualMeta(role)
-          const phone = worker.phone || '-'
           const active = workerProfileBoolean(worker, 'active')
           const online = workerProfileBoolean(worker, 'online')
-          const deleteAction = canDeleteWorkers() && !workerProfileIsOwner(worker)
-            ? `<button class="worker-profile-action-icon worker-profile-action-delete" type="button" data-worker-profile-delete-index="${index}" title="Usuń" aria-label="Usuń pracownika">${WORKER_ACTION_ICONS.delete}</button>`
-            : ''
+          const hasMissingStop = worker?.hasCurrentMonthMissingStop === true
 
           return `
-        <div class="workers-row ${selected ? 'is-selected' : ''}">
+        <div class="workers-row${selected ? ' is-selected' : ''}${hasMissingStop ? ' has-missing-stop' : ''}"${hasMissingStop ? ' title="Brak STOP w bieżącym miesiącu"' : ''}>
           <div class="worker-profile-select-cell">
             <input type="checkbox" data-worker-profile-select="${index}" ${selected ? 'checked' : ''} aria-label="Zaznacz ${escapeHtml(name)}" />
           </div>
@@ -1250,14 +1241,13 @@ export function createWorkerProfileFeature(ctx) {
               <strong>${escapeHtml(role)}</strong>
             </div>
           </div>
-          <div><span class="worker-profile-contact-cell">${escapeHtml(phone)}</span></div>
           <div><span class="worker-profile-status ${active ? 'is-active' : 'is-inactive'}">${active ? 'Active' : 'Inactive'}</span></div>
           <div><span class="worker-profile-online ${online ? 'is-online' : 'is-offline'}">${online ? 'Online' : 'Offline'}</span></div>
-          <div class="worker-profile-actions-spacer" aria-hidden="true"></div>
           <div class="workers-actions">
-            <button class="worker-profile-action-icon worker-profile-action-view" type="button" data-worker-account-index="${index}" title="Widok konta" aria-label="Widok konta pracownika">${WORKER_ACTION_ICONS.view}</button>
-            <button class="worker-profile-action-icon worker-profile-action-edit" type="button" data-worker-profile-index="${index}" title="${actionLabel}" aria-label="${actionLabel} pracownika">${WORKER_ACTION_ICONS.edit}</button>
-            ${deleteAction}
+            <button class="worker-profile-action-menu-trigger" type="button" data-worker-profile-actions-index="${index}" aria-haspopup="menu" aria-expanded="false" aria-controls="wkRowActionMenu" title="Akcje pracownika" aria-label="Otwórz akcje pracownika ${escapeHtml(name)}">
+              <i class="ph ph-gear-six" aria-hidden="true"></i>
+              <i class="ph ph-caret-down" aria-hidden="true"></i>
+            </button>
           </div>
         </div>
       `
@@ -1265,6 +1255,94 @@ export function createWorkerProfileFeature(ctx) {
       )
       .join('')
     syncWorkerProfileSelectionUi()
+  }
+
+  function closeWorkerProfileActionMenu({ restoreFocus = false } = {}) {
+    const menu = document.getElementById('wkRowActionMenu')
+    const trigger = workerProfileActionMenuTrigger
+    if (menu) {
+      menu.hidden = true
+      menu.removeAttribute('style')
+      delete menu.dataset.workerIndex
+    }
+    if (trigger instanceof HTMLButtonElement) {
+      trigger.setAttribute('aria-expanded', 'false')
+      if (restoreFocus && trigger.isConnected) {
+        trigger.focus({ preventScroll: true })
+      }
+    }
+    workerProfileActionMenuIndex = -1
+    workerProfileActionMenuTrigger = null
+  }
+
+  function openWorkerProfileActionMenu(trigger, index) {
+    const menu = document.getElementById('wkRowActionMenu')
+    const worker = Number.isInteger(index) ? appState.workerProfileViewRows[index] : null
+    if (!(trigger instanceof HTMLButtonElement) || !menu || !worker) {
+      return
+    }
+
+    if (!menu.hidden && workerProfileActionMenuIndex === index) {
+      closeWorkerProfileActionMenu({ restoreFocus: true })
+      return
+    }
+
+    closeWorkerProfileActionMenu()
+    const deleteButton = menu.querySelector('[data-worker-row-action="delete"]')
+    if (deleteButton instanceof HTMLButtonElement) {
+      deleteButton.hidden = !(canDeleteWorkers() && !workerProfileIsOwner(worker))
+    }
+
+    workerProfileActionMenuIndex = index
+    workerProfileActionMenuTrigger = trigger
+    menu.dataset.workerIndex = String(index)
+    menu.style.visibility = 'hidden'
+    menu.hidden = false
+
+    const triggerRect = trigger.getBoundingClientRect()
+    const menuWidth = menu.offsetWidth || 210
+    const menuHeight = menu.offsetHeight || 144
+    const viewportPadding = 12
+    const left = Math.max(
+      viewportPadding,
+      Math.min(triggerRect.right - menuWidth, window.innerWidth - menuWidth - viewportPadding),
+    )
+    const belowTop = triggerRect.bottom + 7
+    const top = belowTop + menuHeight <= window.innerHeight - viewportPadding
+      ? belowTop
+      : Math.max(viewportPadding, triggerRect.top - menuHeight - 7)
+
+    menu.style.left = `${Math.round(left)}px`
+    menu.style.top = `${Math.round(top)}px`
+    menu.style.visibility = ''
+    trigger.setAttribute('aria-expanded', 'true')
+    menu.querySelector('button:not([hidden])')?.focus({ preventScroll: true })
+  }
+
+  function openWorkerAccount(worker, router) {
+    if (!worker) {
+      return
+    }
+
+    const workerAccountLogin = String(worker.login || worker.workerLogin || '').trim()
+    const workerAccountName = String(worker.name || worker.workerName || worker.fullName || '').trim()
+    const workerAccountId = String(worker.workerId || worker.id || workerAccountLogin).trim()
+    const workerAccountTargetKey = [workerAccountLogin, workerAccountId, workerAccountName]
+      .map((value) => normalizeSearchText(value).toLowerCase())
+      .find(Boolean) || ''
+
+    appState.workerAccountCurrent = worker
+    appState.workerAccountActiveTab = 'account'
+    appState.workerAccountTargetKey = workerAccountTargetKey
+    appState.selectedWorkerLogin = workerAccountLogin
+    appState.selectedWorkerName = workerAccountName
+    router?.go?.('workerAccount')
+    window.dispatchEvent(new CustomEvent('worker-account-select', {
+      detail: {
+        worker,
+        tab: 'account',
+      },
+    }))
   }
 
   function setWorkerProfileModalReadOnly(readOnly) {
@@ -1776,7 +1854,7 @@ export function createWorkerProfileFeature(ctx) {
       if (root) {
         root.innerHTML = `
           <div class="workers-row worker-profile-empty-row">
-            <div></div><div style="color:#ef4444;">Brak aktywnej sesji.</div><div></div><div></div><div></div><div></div><div class="worker-profile-actions-spacer" aria-hidden="true"></div><div></div>
+            <div></div><div style="color:#ef4444;">Brak aktywnej sesji.</div><div></div><div></div><div></div><div></div><div></div>
           </div>
         `
       }
@@ -1791,14 +1869,16 @@ export function createWorkerProfileFeature(ctx) {
     if (root && !(silent && appState.workerProfileRows.length)) {
       root.innerHTML = `
         <div class="workers-row worker-profile-empty-row">
-          <div></div><div>Ładowanie danych...</div><div></div><div></div><div></div><div></div><div class="worker-profile-actions-spacer" aria-hidden="true"></div><div></div>
+          <div></div><div>Ładowanie danych...</div><div></div><div></div><div></div><div></div><div></div>
         </div>
       `
     }
 
     try {
       const workerOptions = force ? { force: true, fetchPolicy: 'SERVER_ONLY' } : {}
-      const [workers, activeWorkers] = await Promise.all([
+      const monthStart = firstDayOfCurrentMonthYmd()
+      const today = todayYmd()
+      const [workers, activeWorkers, missingStopWorkdays] = await Promise.all([
         getWorkers(appState.session.orgId, workerOptions),
         typeof getTodayActiveWorkers === 'function'
           ? getTodayActiveWorkers(appState.session.orgId).catch((error) => {
@@ -1806,11 +1886,28 @@ export function createWorkerProfileFeature(ctx) {
               return { items: [] }
             })
           : Promise.resolve({ items: [] }),
+        getWorkdays(appState.session.orgId, {
+          source: 'workdays',
+          status: 'RUNNING',
+          fromIso: monthStart,
+          toIso: today,
+          page: 1,
+          pageSize: WORKER_PROFILE_MISSING_STOP_PAGE_SIZE,
+          forceRefresh: force,
+        }).catch((error) => {
+          console.warn('[worker-profile] missing STOP refresh failed', error)
+          return { items: [] }
+        }),
       ])
 
       const visibleWorkers = applyOptimisticWorkerProfileDeletes(workers)
       const patchedWorkers = options?.skipOptimisticPatches ? visibleWorkers : applyOptimisticWorkerProfilePatches(visibleWorkers)
-      const rows = applyWorkerProfileOnlineStatus(patchedWorkers, activeWorkers)
+      const onlineWorkers = applyWorkerProfileOnlineStatus(patchedWorkers, activeWorkers)
+      const rows = applyCurrentMonthMissingStopStatus(onlineWorkers, missingStopWorkdays?.items, {
+        today,
+        monthStart,
+        resolveDateKey: workerDetailDateKeyFromIso,
+      })
       applyWorkerProfileRows(rows, { clearSelection, resetPage })
     } catch (error) {
       if (silent && appState.workerProfileRows.length) {
@@ -1824,7 +1921,7 @@ export function createWorkerProfileFeature(ctx) {
       if (root && !(silent && appState.workerProfileRows.length)) {
         root.innerHTML = `
           <div class="workers-row worker-profile-empty-row">
-            <div></div><div style="color:#ef4444;">${escapeHtml(message)}</div><div></div><div></div><div></div><div></div><div class="worker-profile-actions-spacer" aria-hidden="true"></div><div></div>
+            <div></div><div style="color:#ef4444;">${escapeHtml(message)}</div><div></div><div></div><div></div><div></div><div></div>
           </div>
         `
       }
@@ -2028,6 +2125,12 @@ export function createWorkerProfileFeature(ctx) {
 
     binding.add(document, 'keydown', (event) => {
       if (event.key !== 'Escape') return
+      const actionMenu = document.getElementById('wkRowActionMenu')
+      if (actionMenu && !actionMenu.hidden) {
+        event.preventDefault()
+        closeWorkerProfileActionMenu({ restoreFocus: true })
+        return
+      }
       const overlay = document.getElementById('wkExportOverlay')
       if (overlay && !overlay.hidden) closeWorkerProfileEvidenceExportModal()
     })
@@ -2081,6 +2184,13 @@ export function createWorkerProfileFeature(ctx) {
 
     binding.add(document.getElementById('wkRows'), 'click', (event) => {
       const target = event.target instanceof Element ? event.target : null
+      const actionMenuButton = target?.closest('[data-worker-profile-actions-index]')
+      if (actionMenuButton) {
+        const index = Number(actionMenuButton.getAttribute('data-worker-profile-actions-index'))
+        openWorkerProfileActionMenu(actionMenuButton, index)
+        return
+      }
+
       const deleteButton = target?.closest('[data-worker-profile-delete-index]')
       if (deleteButton) {
         const index = Number(deleteButton.getAttribute('data-worker-profile-delete-index'))
@@ -2097,25 +2207,7 @@ export function createWorkerProfileFeature(ctx) {
           return
         }
 
-        const workerAccountLogin = String(worker.login || worker.workerLogin || '').trim()
-        const workerAccountName = String(worker.name || worker.workerName || worker.fullName || '').trim()
-        const workerAccountId = String(worker.workerId || worker.id || workerAccountLogin).trim()
-        const workerAccountTargetKey = [workerAccountLogin, workerAccountId, workerAccountName]
-          .map((value) => normalizeSearchText(value).toLowerCase())
-          .find(Boolean) || ''
-
-        appState.workerAccountCurrent = worker
-        appState.workerAccountActiveTab = 'account'
-        appState.workerAccountTargetKey = workerAccountTargetKey
-        appState.selectedWorkerLogin = workerAccountLogin
-        appState.selectedWorkerName = workerAccountName
-        router?.go?.('workerAccount')
-        window.dispatchEvent(new CustomEvent('worker-account-select', {
-          detail: {
-            worker,
-            tab: 'account',
-          },
-        }))
+        openWorkerAccount(worker, router)
         return
       }
 
@@ -2132,6 +2224,44 @@ export function createWorkerProfileFeature(ctx) {
 
       openWorkerProfileModal(worker, canManageWorkers() ? 'edit' : 'view')
     })
+
+    binding.add(document.getElementById('wkRowActionMenu'), 'click', (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      const actionButton = target?.closest('[data-worker-row-action]')
+      const action = actionButton?.getAttribute('data-worker-row-action') || ''
+      const index = workerProfileActionMenuIndex
+      const worker = Number.isInteger(index) ? appState.workerProfileViewRows[index] : null
+      if (!actionButton || !worker) {
+        return
+      }
+
+      closeWorkerProfileActionMenu()
+      if (action === 'account') {
+        openWorkerAccount(worker, router)
+        return
+      }
+      if (action === 'edit') {
+        openWorkerProfileModal(worker, canManageWorkers() ? 'edit' : 'view')
+        return
+      }
+      if (action === 'delete') {
+        void deleteWorkerProfileData(worker)
+      }
+    })
+
+    binding.add(document, 'click', (event) => {
+      const menu = document.getElementById('wkRowActionMenu')
+      if (!menu || menu.hidden) {
+        return
+      }
+      const target = event.target instanceof Element ? event.target : null
+      if (menu.contains(target) || target?.closest('[data-worker-profile-actions-index]')) {
+        return
+      }
+      closeWorkerProfileActionMenu()
+    })
+    binding.add(document, 'scroll', closeWorkerProfileActionMenu)
+    binding.add(window, 'resize', closeWorkerProfileActionMenu)
 
     binding.add(document.getElementById('wkRows'), 'change', (event) => {
       const target = event.target instanceof Element ? event.target : null

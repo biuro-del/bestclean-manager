@@ -45,13 +45,7 @@ const eventTemplate = fs.readFileSync(
   'utf8',
 )
 
-test('ręczne dodanie zdarzenia wymaga obiektu i należącej do niego strefy', () => {
-  assert.match(eventFeature, /function eventEditorManualObjectValidationMessage\(payload = \{\}\)/)
-  assert.match(eventFeature, /if \(!payload\.clientId\)/)
-  assert.match(eventFeature, /if \(!payload\.zoneId\)/)
-  assert.match(eventFeature, /zoneClientId !== String\(payload\.clientId\)\.trim\(\)/)
-  assert.match(eventFeature, /if \(isCreateMode\) \{\s+const objectValidationMessage/s)
-
+test('serwis operacyjnych zdarzeń nadal chroni powiązanie obiektu i strefy', () => {
   assert.match(workdayService, /Ręczne zdarzenie wymaga wskazania obiektu\./)
   assert.match(
     workdayService,
@@ -63,16 +57,32 @@ test('ręczne dodanie zdarzenia wymaga obiektu i należącej do niego strefy', (
     /const \[, integritySnapshot\] = await Promise\.all\(\[\s+assertManualEventZoneBelongsToClient\(orgId, manualClientId, manualZoneId\),/s,
   )
   assert.match(workdayService, /mutationPayload\.workerLogin = workerLogin/)
-  assert.match(
-    eventFeature,
-    /eventPayload\.workerLogin = String\(\s+targetWorker\.login \?\? targetWorker\.workerLogin \?\? targetWorker\.id \?\? payload\.workerLogin,/s,
-  )
 })
 
-test('formularz komunikuje obowiązkowy obiekt zamiast nieprecyzyjnego klienta', () => {
+test('formularz dodaje jedno zdarzenie bez wyboru czasu pracy lub sprzątania', () => {
+  assert.doesNotMatch(eventTemplate, /name="evEditRecordKind"/)
+  assert.doesNotMatch(eventTemplate, /Czas pracy pracownika/)
+  assert.doesNotMatch(eventTemplate, /Sprzątanie strefy/)
+  assert.doesNotMatch(eventTemplate, /Rodzaj zdarzenia/)
   assert.match(eventTemplate, /Obiekt <span aria-hidden="true">\*<\/span>/)
-  assert.match(eventTemplate, /Strefa obiektu <span aria-hidden="true">\*<\/span>/)
+  assert.match(eventTemplate, /id="evEditPomSearch"[^>]*aria-required="true"/)
+  assert.match(eventTemplate, /Strefa <em>opcjonalnie<\/em>/)
   assert.match(eventTemplate, /aria-label="Lista obiektów"/)
+  assert.doesNotMatch(eventTemplate, /Nie zmienia okresu pracy pracownika/)
+  assert.doesNotMatch(eventFeature, /eventEditorSelectedRecordKind/)
+  assert.doesNotMatch(eventFeature, /eventEditorSyncRecordKindUi/)
+  assert.match(eventFeature, /if \(isCreateMode && !payload\.clientId\) \{\s+alert\('Wybierz obiekt\.'\)/s)
+})
+
+test('nowe zdarzenie tworzy jeden okres pracownika z opcjonalną strefą', () => {
+  assert.match(eventFeature, /createWorkday,/)
+  assert.doesNotMatch(eventFeature, /createEvent,/)
+  assert.match(eventFeature, /const recordKind = isCreateMode\s+\? EVENT_RECORD_KINDS\.WORKDAY/s)
+  assert.match(eventFeature, /const recordId = `WD-\$\{Date\.now\(\)\}/)
+  assert.match(eventFeature, /savedEvent = await createWorkday\(appState\.session\.orgId, savedEventPayload\)/)
+  assert.match(eventFeature, /Nowe zdarzenie musi mieć godzinę START/)
+  assert.doesNotMatch(eventFeature, /eventEditorManualObjectValidationMessage/)
+  assert.match(workdayService, /await assertNoOtherOpenWorkday\(orgId, \{ workerLogin, status, endAt \}\)/)
 })
 
 test('zakładka zdarzeń respektuje wspólną blokadę edycji własnego czasu', () => {
@@ -93,10 +103,11 @@ test('formularz pozwala wybrac lokalizacje pochodzaca ze strefy', () => {
   assert.match(eventFeature, /lokalizacja:\s*location \|\| null/)
 })
 
-test('ręczne dodawanie START STOP jest dostępne i nie koliduje z obejmującym Workday', () => {
+test('kolizje nowego zdarzenia są porównywane z okresami pracownika', () => {
   assert.doesNotMatch(eventFeature, /legacyEventCreationIsDisabled/)
   assert.doesNotMatch(eventFeature, /Reczne tworzenie sesji START\/STOP w starym edytorze jest wylaczone/)
-  assert.match(eventFeature, /eventRecordKind\(row\) === EVENT_RECORD_KINDS\.WORKDAY/)
+  assert.match(eventFeature, /const rowRecordKind = eventRecordKind\(row\)/)
+  assert.match(eventFeature, /const candidateRecordKind = appState\.eventEditorMode === 'add'\s+\? EVENT_RECORD_KINDS\.WORKDAY/s)
+  assert.match(eventFeature, /if \(rowRecordKind !== candidateRecordKind\)/)
   assert.match(eventFeature, /events-row--workday/)
-  assert.doesNotMatch(eventFeature, /Okres pracy/)
 })

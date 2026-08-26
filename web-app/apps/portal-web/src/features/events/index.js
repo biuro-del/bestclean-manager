@@ -19,6 +19,11 @@ import {
   EVENT_RECORD_KINDS,
   eventRecordKind,
 } from '../../services/eventRecordModel.js'
+import {
+  getWorkTimeDay,
+  saveWorkTimeDay,
+} from '../../services/workTimeDayService.js'
+import { resolveOperationalMapAvatarKind } from '../dashboard/operationalMapModel.js'
 
 export const route = 'events'
 export const viewId = 'view-events'
@@ -30,7 +35,7 @@ export function createEventsFeature(ctx) {
     canDeleteEvents,
     canManageEvents,
     createBindingHelpers,
-    createEvent,
+    createWorkday,
     dashboardClockLabelToHm,
     dashboardDurationLabelToHm,
     deleteEvent,
@@ -151,6 +156,162 @@ export function createEventsFeature(ctx) {
   let eventsOpenIntegrityFocus = null
   let eventsIntegrityModalKind = ''
   let eventsIntegrityModalTrigger = null
+
+  function eventWorkerDisplayName(worker = {}) {
+    return String(
+      worker?.workerName ??
+        worker?.workername ??
+        worker?.worker_name ??
+        worker?.name ??
+        worker?.displayName ??
+        worker?.fullName ??
+        '',
+    ).trim()
+  }
+
+  function eventNormalizeWorkerIdentity(value) {
+    const raw = String(value ?? '').trim()
+    if (!raw) {
+      return ''
+    }
+    try {
+      return raw
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim()
+    } catch {
+      return raw.toLowerCase().replace(/\s+/g, ' ').trim()
+    }
+  }
+
+  function eventWorkerRecordForRow(row = {}, workerLabel = '') {
+    const workerKey = String(openEventWorkerKey(row) ?? '').trim()
+    const login = String(row?.workerLogin ?? row?.worker_login ?? row?.login ?? '').trim()
+    const workerId = String(row?.workerId ?? row?.worker_id ?? '').trim()
+    const name = String(workerLabel || row?.workerName || row?.worker_name || '').trim()
+    const normalizedLogin = eventNormalizeWorkerIdentity(login)
+    const normalizedId = eventNormalizeWorkerIdentity(workerId)
+    const normalizedName = eventNormalizeWorkerIdentity(name)
+
+    return (Array.isArray(appState.workers) ? appState.workers : []).find((worker) => {
+      const workerLogin = String(
+        worker?.login ?? worker?.workerLogin ?? worker?.email ?? worker?.loginEmail ?? '',
+      ).trim()
+      const workerIdValue = String(worker?.workerId ?? worker?.id ?? '').trim()
+      const candidateKey = openEventWorkerKey({ workerLogin, workerId: workerIdValue })
+      if (workerKey && candidateKey === workerKey) {
+        return true
+      }
+      if (normalizedLogin && eventNormalizeWorkerIdentity(workerLogin) === normalizedLogin) {
+        return true
+      }
+      if (normalizedId && eventNormalizeWorkerIdentity(workerIdValue) === normalizedId) {
+        return true
+      }
+      return normalizedName && eventNormalizeWorkerIdentity(eventWorkerDisplayName(worker)) === normalizedName
+    }) ?? null
+  }
+
+  function eventEditedByDisplayName(row = {}) {
+    const providedName = String(
+      row?.editedByName ??
+        row?.updatedByName ??
+        row?.modifiedByName ??
+        row?.authorName ??
+        '',
+    ).trim()
+    const rawIdentity = String(
+      row?.editedBy ??
+        row?.updatedBy ??
+        row?.modifiedBy ??
+        row?.authorLogin ??
+        row?.author ??
+        '',
+    ).trim()
+    if (!rawIdentity) {
+      return providedName || '-'
+    }
+
+    const matchedWorker = eventWorkerRecordForRow(
+      {
+        workerLogin: rawIdentity,
+        workerId: rawIdentity,
+        workerName: providedName,
+      },
+      providedName,
+    )
+    const matchedWorkerName = eventWorkerDisplayName(matchedWorker)
+    if (matchedWorkerName) {
+      return matchedWorkerName
+    }
+
+    const session = appState.session ?? {}
+    const normalizedIdentity = eventNormalizeWorkerIdentity(rawIdentity)
+    const sessionMatches = [
+      session.login,
+      session.workerLogin,
+      session.email,
+      session.loginEmail,
+      session.id,
+      session.workerId,
+      session.uid,
+      session.authUid,
+      session.firebaseUid,
+    ].some((value) => eventNormalizeWorkerIdentity(value) === normalizedIdentity)
+    const sessionName = String(session.name ?? session.displayName ?? session.workerName ?? '').trim()
+    if (sessionMatches && sessionName) {
+      return sessionName
+    }
+
+    return providedName || rawIdentity
+  }
+
+  function eventWorkerAvatarHtml(workerLabel = '', worker = null, row = {}) {
+    const rawPhotoUrl = String(
+      worker?.photoUrl ??
+        worker?.profilePhotoUrl ??
+        worker?.avatarUrl ??
+        worker?.imageUrl ??
+        row?.photoUrl ??
+        row?.profilePhotoUrl ??
+        row?.avatarUrl ??
+        row?.imageUrl ??
+        '',
+    ).trim()
+    const photoUrl = /^(https?:\/\/|data:image\/(?:png|jpe?g|webp);base64,)/i.test(rawPhotoUrl)
+      ? rawPhotoUrl
+      : ''
+    if (photoUrl) {
+      return `<img src="${escapeHtml(photoUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+    }
+
+    const avatarKind = resolveOperationalMapAvatarKind({
+      ...row,
+      ...worker,
+      workerName: eventWorkerDisplayName(worker) || String(workerLabel ?? '').trim(),
+    })
+    return `<img src="/assets/avatars/default-${avatarKind === 'female' ? 'female' : 'male'}.webp" alt="" loading="lazy" />`
+  }
+
+  function eventIntegrityGroupAvatarHtml(group = {}) {
+    const row = Array.isArray(group?.rows) ? group.rows[0] ?? {} : {}
+    const worker = eventWorkerRecordForRow(row, group?.workerLabel)
+    return eventWorkerAvatarHtml(group?.workerLabel, worker, row)
+  }
+
+  function eventIntegrityCategoryAvatarsHtml(groups = []) {
+    const safeGroups = Array.isArray(groups) ? groups : []
+    const visibleGroups = safeGroups.slice(0, 3)
+    const overflowCount = Math.max(0, safeGroups.length - visibleGroups.length)
+    return `
+      <span class="events-integrity-card-avatars" aria-hidden="true">
+        ${visibleGroups.map((group) => `<span>${eventIntegrityGroupAvatarHtml(group)}</span>`).join('')}
+        ${overflowCount > 0 ? `<span class="is-overflow">+${escapeHtml(overflowCount)}</span>` : ''}
+      </span>
+    `
+  }
 
   function mergeEventsRefreshOptions(base = {}, incoming = {}) {
     const merged = {
@@ -526,8 +687,8 @@ export function createEventsFeature(ctx) {
         const placeSummary = eventOpenIntegrityPlaceSummary(group)
         return `
           <li class="ev-integrity-modal-item">
-            <span class="ev-integrity-modal-worker-icon" aria-hidden="true">
-              <i class="ph ph-user"></i>
+            <span class="ev-integrity-modal-worker-avatar" aria-hidden="true">
+              ${eventIntegrityGroupAvatarHtml(group)}
             </span>
             <span class="ev-integrity-modal-worker">
               <strong>${escapeHtml(group.workerLabel)}</strong>
@@ -542,7 +703,7 @@ export function createEventsFeature(ctx) {
               aria-label="${escapeHtml(`Pokaż zdarzenia: ${group.workerLabel} — ${category.countLabel}`)}"
             >
               <span>Pokaż zdarzenia</span>
-              <i class="ph ph-arrow-right" aria-hidden="true"></i>
+              <i class="ph ph-caret-right" aria-hidden="true"></i>
             </button>
           </li>
         `
@@ -655,6 +816,7 @@ export function createEventsFeature(ctx) {
               <strong>${escapeHtml(category.title)}</strong>
               <small>${escapeHtml(category.workerCount)} pracowników</small>
             </span>
+            ${eventIntegrityCategoryAvatarsHtml(category.groups)}
             <span class="events-integrity-card-count">
               <strong>${escapeHtml(category.recordCount)}</strong>
               <small>rekordów</small>
@@ -667,7 +829,7 @@ export function createEventsFeature(ctx) {
     const focusedBar = focusedGroup && focusedCategory
       ? `
         <div class="events-integrity-focus" role="status">
-          <span class="events-integrity-focus-icon" aria-hidden="true"><i class="ph ph-funnel"></i></span>
+          <span class="events-integrity-focus-avatar" aria-hidden="true">${eventIntegrityGroupAvatarHtml(focusedGroup)}</span>
           <span>
             <small>Widok problemu</small>
             <strong>${escapeHtml(focusedCategory.title)} · ${escapeHtml(focusedGroup.workerLabel)} · ${escapeHtml(focusedGroup.count)} rekordów</strong>
@@ -948,10 +1110,79 @@ export function createEventsFeature(ctx) {
     return ''
   }
 
+  function eventReconciliationDayKey(row = {}) {
+    const directDayKey = [
+      row?.businessDateYmd,
+      row?.dayKey,
+      row?.dateYmd,
+      row?.workdayBusinessDateYmd,
+    ]
+      .map((value) => String(value ?? '').trim())
+      .find((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+    if (directDayKey) {
+      return directDayKey
+    }
+
+    const timestampValue = [row?.startAt, row?.dayStartAt, row?.endAt, row?.dayEndAt]
+      .map((value) => toIso(value))
+      .find(Boolean)
+    if (timestampValue) {
+      const dayKeyFromTimestamp = workStatusYmdFromTimestamp(new Date(timestampValue).getTime())
+      if (dayKeyFromTimestamp) {
+        return dayKeyFromTimestamp
+      }
+    }
+
+    const visibleDate = String(row?.date ?? row?.dateLabel ?? '').trim()
+    const visibleDateMatch = visibleDate.match(/^(\d{2})[./-](\d{2})[./-](\d{4})$/)
+    if (visibleDateMatch) {
+      return `${visibleDateMatch[3]}-${visibleDateMatch[2]}-${visibleDateMatch[1]}`
+    }
+
+    return ''
+  }
+
+  function eventEditorCorrectionIdempotencyKey(row = {}) {
+    const recordId = String(
+      row?.eventId ?? row?.workdayId ?? row?.linkedWorkdayId ?? row?.id ?? 'record',
+    ).trim()
+    const randomPart = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    return `events-edit-${recordId}-${randomPart}`.slice(0, 128)
+  }
+
+  async function eventEditorLoadCorrectionContext(row = {}) {
+    const workdayId = eventReconciliationWorkdayId(row)
+    if (!workdayId) {
+      return null
+    }
+
+    const orgId = String(appState.session?.orgId ?? '').trim()
+    const workerLogin = String(row?.workerLogin ?? row?.workerId ?? '').trim()
+    const businessDateYmd = eventReconciliationDayKey(row)
+    if (!orgId || !workerLogin || !businessDateYmd) {
+      throw new Error('Nie udało się ustalić pracownika lub daty edytowanego zdarzenia.')
+    }
+
+    const day = await getWorkTimeDay(orgId, workerLogin, businessDateYmd)
+    const version = String(day?.version ?? '').trim()
+    if (!/^[0-9a-f]{64}$/i.test(version)) {
+      throw new Error('Nie udało się pobrać aktualnej wersji zdarzenia. Odśwież dane i spróbuj ponownie.')
+    }
+
+    return {
+      businessDateYmd,
+      day,
+      version,
+      workerLogin,
+      workdayId,
+    }
+  }
+
   async function openEventWorkdayReconciliation(row = {}) {
     const workdayId = eventReconciliationWorkdayId(row)
-    const dayKey = String(row?.businessDateYmd ?? row?.dayKey ?? '').trim()
-      || workStatusYmdFromTimestamp(row?.startAt ?? row?.dayStartAt ?? row?.endAt ?? row?.dayEndAt)
+    const dayKey = eventReconciliationDayKey(row)
     if (!workdayId || !dayKey || !appState.session?.orgId) {
       showTransientNotice('Nie mozna otworzyc bezpiecznej korekty: brakuje dnia pracy lub daty biznesowej.', 'error')
       return false
@@ -1258,6 +1489,13 @@ export function createEventsFeature(ctx) {
     ).trim()
     const status = normalizeEventStatus(savedEvent?.status ?? payload?.status, Boolean(endAt))
     const workdayId = String(savedEvent?.workdayId ?? savedEvent?.linkedWorkdayId ?? payload?.workdayId ?? payload?.linkedWorkdayId ?? '').trim()
+    const recordKind = savedEvent?.recordKind === EVENT_RECORD_KINDS.WORKDAY || payload?.recordKind === EVENT_RECORD_KINDS.WORKDAY
+      ? EVENT_RECORD_KINDS.WORKDAY
+      : EVENT_RECORD_KINDS.ACTIVITY
+    const historySourceKind = String(
+      savedEvent?.historySourceKind ?? payload?.historySourceKind ?? (recordKind === EVENT_RECORD_KINDS.WORKDAY ? 'workday' : 'event'),
+    ).trim()
+    const hasExplicitEventId = savedEvent?.hasExplicitEventId ?? payload?.hasExplicitEventId ?? recordKind !== EVENT_RECORD_KINDS.WORKDAY
     const editedBy = String(
       savedEvent?.editedBy ?? savedEvent?.updatedBy ?? payload?.editedBy ?? payload?.updatedBy ?? appState.session?.name ?? '',
     ).trim()
@@ -1268,8 +1506,9 @@ export function createEventsFeature(ctx) {
       eventId: eventId || rowId,
       workdayId,
       linkedWorkdayId: workdayId,
-      historySourceKind: 'event',
-      hasExplicitEventId: true,
+      recordKind,
+      historySourceKind,
+      hasExplicitEventId,
       orgId: String(savedEvent?.orgId ?? payload?.orgId ?? appState.session?.orgId ?? '').trim(),
       workerLogin: String(savedEvent?.workerLogin ?? payload?.workerLogin ?? '').trim(),
       workerName: String(savedEvent?.workerName ?? payload?.workerName ?? '').trim(),
@@ -1924,15 +2163,6 @@ export function createEventsFeature(ctx) {
     }
   }
 
-  function eventWorkerInitials(value = '') {
-    const parts = String(value ?? '')
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
-    if (!parts.length) return '?'
-    return (parts.length === 1 ? parts[0].slice(0, 2) : `${parts[0][0]}${parts[parts.length - 1][0]}`).toUpperCase()
-  }
-
   function eventDateWeekdayLabel(row = {}) {
     const dayKey = String(row?.dayKey ?? '').trim()
     const source = dayKey ? `${dayKey}T12:00:00` : row?.startAt || row?.endAt || ''
@@ -2177,6 +2407,7 @@ export function createEventsFeature(ctx) {
         const workerLogin = String(row.workerLogin ?? '').trim()
         const workerName = resolveWorkerNameFromWorkers(workerLogin, row.workerName)
         const workerPrimary = workerName || workerLogin || '-'
+        const workerRecord = findWorkerByLogin(workerLogin) ?? findWorkerByName(workerName)
         const workerIdentifier = String(row?.workerId ?? workerLogin).trim()
         const recordKind = eventRecordKind(row)
         const isWorkdayRecord = recordKind === EVENT_RECORD_KINDS.WORKDAY
@@ -2191,7 +2422,7 @@ export function createEventsFeature(ctx) {
                 : `${Number(openIntegrityGroup?.count ?? 0)} otwarte CLEAN`
         const workerCard = `
           <div class="events-worker-cell">
-            <span class="events-worker-avatar" aria-hidden="true">${escapeHtml(eventWorkerInitials(workerPrimary))}</span>
+            <span class="events-worker-avatar" aria-hidden="true">${eventWorkerAvatarHtml(workerPrimary, workerRecord, row)}</span>
             <span class="events-worker-copy">
               <strong class="events-worker-name">${escapeHtml(workerPrimary)}</strong>
               ${workerIdentifier ? `<small>ID: ${escapeHtml(workerIdentifier)}</small>` : ''}
@@ -2233,7 +2464,7 @@ export function createEventsFeature(ctx) {
         const stopLabel = dashboardClockLabelToHm(row.stop, '-')
         const durationLabel = dashboardDurationLabelToHm(row.duration, '00:00')
         const locationLabel = String(row.lokalizacja || '-').trim() || '-'
-        const editedByLabel = String(row.editedBy || '-').trim() || '-'
+        const editedByLabel = eventEditedByDisplayName(row)
         const editedAtLabel = eventEditedAtLabel(row?.updatedAt)
         const weekdayLabel = eventDateWeekdayLabel(row)
         const timePill = (label, type) =>
@@ -2359,25 +2590,38 @@ export function createEventsFeature(ctx) {
 
     const startValue = String(startInput.value ?? '').trim()
     const stopValue = eventEditorReadStopValue(stopInput)
+    const startCard = startInput.closest('.ev-editor-time-card')
+    const stopCard = stopInput.closest('.ev-editor-time-card')
+    startCard?.classList.toggle('has-value', Boolean(startValue))
+    stopCard?.classList.toggle('has-value', Boolean(stopValue))
     const startAt = localDateTimeInputToIso(startValue)
     const endAt = localDateTimeInputToIso(stopValue)
     const eventKind = resolveEventKindFromTimes(startAt, endAt)
+    const isWorkday = appState.eventEditorMode === 'add' || eventRecordKind(appState.eventEditorItem) === EVENT_RECORD_KINDS.WORKDAY
     let state = eventKind === 'start_stop' ? 'complete' : eventKind
     let labelText = 'Status zdarzenia'
-    let description = 'Uzupełnij START, STOP lub oba pola.'
+    let description = 'Uzupełnij godzinę START.'
     let durationText = '--:--'
     let iconClass = 'ph ph-clock'
 
     if (eventKind === 'start') {
       labelText = 'Zdarzenie START'
-      description = 'Praca pozostanie otwarta do czasu dodania STOP.'
+      description = 'Zdarzenie pozostanie otwarte do uzupełnienia STOP.'
       durationText = eventEditorClockLabel(startValue)
-      iconClass = 'ph ph-play'
+      iconClass = 'ph ph-clock-countdown'
     } else if (eventKind === 'stop') {
-      labelText = 'Zdarzenie STOP'
-      description = 'Zapis zostanie dodany jako sam koniec pracy.'
-      durationText = eventEditorClockLabel(stopValue)
-      iconClass = 'ph ph-stop'
+      if (isWorkday) {
+        state = 'invalid'
+        labelText = 'Brakuje START'
+        description = 'Nowy okres pracy musi mieć godzinę rozpoczęcia.'
+        durationText = 'Błąd'
+        iconClass = 'ph ph-warning-circle'
+      } else {
+        labelText = 'Zdarzenie STOP'
+        description = 'Zapis pozostanie pojedynczym zdarzeniem kończącym.'
+        durationText = eventEditorClockLabel(stopValue)
+        iconClass = 'ph ph-check-circle'
+      }
     } else if (eventKind === 'start_stop') {
       const startTs = new Date(startAt).getTime()
       const endTs = new Date(endAt).getTime()
@@ -2388,7 +2632,7 @@ export function createEventsFeature(ctx) {
         durationText = 'Błąd'
         iconClass = 'ph ph-warning-circle'
       } else {
-        labelText = 'Łączny czas pracy'
+        labelText = 'Łączny czas zdarzenia'
         description = `${eventEditorClockLabel(startValue)} → ${eventEditorClockLabel(stopValue)}`
         durationText = eventEditorDurationLabel(startAt, endAt)
         iconClass = 'ph ph-timer'
@@ -2400,6 +2644,11 @@ export function createEventsFeature(ctx) {
     if (text) text.textContent = description
     if (duration) duration.textContent = durationText
     if (icon) icon.className = iconClass
+    startCard?.classList.toggle('is-invalid', state === 'invalid' && !startValue)
+    stopCard?.classList.toggle(
+      'is-invalid',
+      state === 'invalid' && Boolean(startValue) && Boolean(stopValue),
+    )
   }
 
   function eventEditorGetPickerConfig(kind) {
@@ -2629,7 +2878,7 @@ export function createEventsFeature(ctx) {
       return [...options]
     }
 
-    const label = fallbackLabel ? `${fallbackLabel} (spoza listy)` : `${normalizedValue} (spoza listy)`
+    const label = String(fallbackLabel || normalizedValue).trim()
     return [...options, { value: normalizedValue, label }]
   }
 
@@ -3239,17 +3488,6 @@ export function createEventsFeature(ctx) {
     })
   }
 
-  function setEventStopNow() {
-    const endInput = document.getElementById('evEditStop')
-    if (!endInput) {
-      return
-    }
-
-    eventEditorClearStopHint(endInput)
-    endInput.value = isoToLocalDateTimeInput(new Date().toISOString())
-    eventEditorSyncTimeSummary()
-  }
-
   function eventEditorClearStopHint(input = document.getElementById('evEditStop')) {
     if (!(input instanceof HTMLInputElement)) {
       return
@@ -3372,12 +3610,6 @@ export function createEventsFeature(ctx) {
   }
 
   async function openEventEditor(item) {
-    if (eventReconciliationWorkdayId(item)) {
-      showTransientNotice(EVENT_RECONCILIATION_REQUIRED_MESSAGE)
-      await openEventWorkdayReconciliation(item)
-      return
-    }
-
     ensureEventOverlaysMountedToBody()
     const overlay = document.getElementById('evEditorOverlay')
     if (!overlay) {
@@ -3388,6 +3620,8 @@ export function createEventsFeature(ctx) {
 
     appState.eventEditorMode = 'edit'
     appState.eventEditorItem = item
+    appState.eventEditorCorrectionContext = null
+    const usesDayCorrection = Boolean(eventReconciliationWorkdayId(item))
 
     const title = document.getElementById('evEditorTitle')
     const modeIcon = document.getElementById('evEditorModeIcon')
@@ -3398,7 +3632,6 @@ export function createEventsFeature(ctx) {
     const editedBy = document.getElementById('evEditedBy')
     const startInput = document.getElementById('evEditStart')
     const stopInput = document.getElementById('evEditStop')
-    const stopNowButton = document.getElementById('evStopNowBtn')
     const commentInput = document.getElementById('evEditComment')
     const scannedQrInput = document.getElementById('evScannedQr')
     const deleteButton = document.getElementById('evDeleteBtn')
@@ -3406,7 +3639,7 @@ export function createEventsFeature(ctx) {
 
     eventEditorResetSearchInputs()
     if (eventEditorReferencesReady()) {
-      const zone = eventEditorSelectedZone(item.roomId || item.utilityRoomId)
+      const zone = eventEditorSelectedZone(item.zoneId || item.roomId || item.utilityRoomId)
       const selectedClientId = zone?.clientId ?? item.clientId
       const selectedZoneId = zone?.id ?? item.roomId ?? item.utilityRoomId
       const selectedLocation =
@@ -3430,7 +3663,7 @@ export function createEventsFeature(ctx) {
     if (cycleMeta) cycleMeta.hidden = false
     if (cycleId) cycleId.textContent = String(item.eventId ?? item.workdayId ?? '-')
     if (rowNumber) rowNumber.textContent = '-'
-    if (editedBy) editedBy.textContent = item.editedBy || appState.session?.name || '-'
+    if (editedBy) editedBy.textContent = eventEditedByDisplayName(item)
     const eventType = eventTypeInfo(item).label
     let startValue = isoToLocalDateTimeInput(item.startAt)
     let stopValue = isoToLocalDateTimeInput(item.endAt)
@@ -3442,7 +3675,6 @@ export function createEventsFeature(ctx) {
     }
     if (startInput) startInput.value = startValue
     eventEditorSetStopValue(stopInput, stopValue)
-    if (stopNowButton instanceof HTMLButtonElement) stopNowButton.disabled = false
     if (startInput) startInput.disabled = false
     if (stopInput) stopInput.disabled = false
     if (commentInput) {
@@ -3453,7 +3685,7 @@ export function createEventsFeature(ctx) {
       scannedQrInput.value = eventEditorSafeScannedQrLabel(item)
     }
     if (saveButton) {
-      saveButton.disabled = !eventEditorReferencesReady()
+      saveButton.disabled = !eventEditorReferencesReady() || usesDayCorrection
       setEventEditorButtonLabel(saveButton, 'Zapisz zmiany')
     }
     if (deleteButton) {
@@ -3472,7 +3704,7 @@ export function createEventsFeature(ctx) {
         if (appState.eventEditorMode !== 'edit' || appState.eventEditorItem !== item) {
           return
         }
-        const zone = eventEditorSelectedZone(item.roomId || item.utilityRoomId)
+        const zone = eventEditorSelectedZone(item.zoneId || item.roomId || item.utilityRoomId)
         const selectedClientId = zone?.clientId ?? item.clientId
         const selectedZoneId = zone?.id ?? item.roomId ?? item.utilityRoomId
         const selectedLocation =
@@ -3486,13 +3718,35 @@ export function createEventsFeature(ctx) {
           selectedLocation,
         )
         if (saveButton) {
-          saveButton.disabled = false
+          saveButton.disabled = usesDayCorrection
         }
       } catch (error) {
         console.warn('[events] editor references failed', error)
         if (saveButton) {
           saveButton.disabled = true
         }
+      }
+    }
+
+    if (usesDayCorrection) {
+      try {
+        const correctionContext = await eventEditorLoadCorrectionContext(item)
+        if (appState.eventEditorMode !== 'edit' || appState.eventEditorItem !== item) {
+          return
+        }
+        appState.eventEditorCorrectionContext = correctionContext
+        if (saveButton) {
+          saveButton.disabled = !eventEditorReferencesReady()
+        }
+      } catch (error) {
+        console.warn('[events] correction context failed', error)
+        if (saveButton) {
+          saveButton.disabled = true
+        }
+        showTransientNotice(
+          error instanceof Error ? error.message : 'Nie udało się przygotować edycji zdarzenia.',
+          'error',
+        )
       }
     }
   }
@@ -3513,6 +3767,7 @@ export function createEventsFeature(ctx) {
 
     appState.eventEditorMode = 'add'
     appState.eventEditorItem = null
+    appState.eventEditorCorrectionContext = null
 
     const title = document.getElementById('evEditorTitle')
     const modeIcon = document.getElementById('evEditorModeIcon')
@@ -3537,9 +3792,9 @@ export function createEventsFeature(ctx) {
     }
 
     overlay.dataset.mode = 'add'
-    if (modeIcon) modeIcon.className = 'ph ph-plus-circle'
+    if (modeIcon) modeIcon.className = 'ph ph-calendar-check'
     if (title) title.textContent = 'Dodaj zdarzenie'
-    if (subtitle) subtitle.textContent = 'Dodaj START, STOP albo pełne zdarzenie pracownika.'
+    if (subtitle) subtitle.textContent = 'Wybierz pracownika, miejsce i czas zdarzenia.'
     if (cycleMeta) cycleMeta.hidden = true
     if (cycleId) cycleId.textContent = '-'
     if (rowNumber) rowNumber.textContent = '-'
@@ -3600,6 +3855,7 @@ export function createEventsFeature(ctx) {
     if (overlay) delete overlay.dataset.mode
     appState.eventEditorMode = 'add'
     appState.eventEditorItem = null
+    appState.eventEditorCorrectionContext = null
   }
 
   function resolveEventKindFromTimes(startAt, endAt) {
@@ -3689,7 +3945,7 @@ export function createEventsFeature(ctx) {
 
   function eventEndReasonFromKind(eventKind) {
     if (eventKind === 'stop') {
-      return 'WORKDAY_STOP'
+      return 'QR_SAME'
     }
     if (eventKind === 'start_stop') {
       return 'QR_START_STOP'
@@ -3763,9 +4019,13 @@ export function createEventsFeature(ctx) {
         continue
       }
 
-      // A client/zone activity is expected to sit inside the attendance
-      // Workday. Only another operational activity can be an overlap conflict.
-      if (eventRecordKind(row) === EVENT_RECORD_KINDS.WORKDAY) {
+      const rowRecordKind = eventRecordKind(row)
+      const candidateRecordKind = appState.eventEditorMode === 'add'
+        ? EVENT_RECORD_KINDS.WORKDAY
+        : eventRecordKind(appState.eventEditorItem)
+      // Work periods can contain zone activities. A conflict exists only
+      // between records of the same kind.
+      if (rowRecordKind !== candidateRecordKind) {
         continue
       }
 
@@ -3804,33 +4064,6 @@ export function createEventsFeature(ctx) {
     )
   }
 
-  function eventEditorManualObjectValidationMessage(payload = {}) {
-    if (!payload.clientId) {
-      return 'Wybierz obiekt. Ręczne zdarzenie nie może zostać zapisane bez obiektu.'
-    }
-    if (!payload.zoneId) {
-      return 'Wybierz strefę należącą do obiektu. To ona zapisuje powiązanie zdarzenia z obiektem.'
-    }
-
-    const selectedZone = eventEditorSelectedZone(payload.zoneId)
-    if (!selectedZone) {
-      return 'Wybrana strefa nie istnieje lub nie została załadowana. Odśwież dane i wybierz ją ponownie.'
-    }
-
-    const zoneClientId = String(selectedZone?.clientId ?? '').trim()
-    if (!zoneClientId || zoneClientId !== String(payload.clientId).trim()) {
-      return 'Wybrana strefa nie należy do wskazanego obiektu. Wybierz właściwą strefę.'
-    }
-
-    const selectedLocation = normalizeSearchText(payload.location ?? payload.lokalizacja)
-    const zoneLocation = normalizeSearchText(eventEditorReadableZoneLocation(selectedZone))
-    if (selectedLocation && selectedLocation !== zoneLocation) {
-      return 'Wybrana lokalizacja nie należy do wskazanej strefy. Wybierz lokalizację i strefę ponownie.'
-    }
-
-    return ''
-  }
-
   function eventEditorOverlapMessage(payload, overlap) {
     const workerLabel = String(payload?.workerName || payload?.workerLogin || 'Pracownik').trim()
     const startLabel = workerDetailIsoToHm(overlap?.interval?.startIso)
@@ -3862,12 +4095,10 @@ export function createEventsFeature(ctx) {
     }
 
     const isCreateMode = appState.eventEditorMode === 'add'
-    if (eventReconciliationWorkdayId(appState.eventEditorItem)) {
-      const reconciliationRow = appState.eventEditorItem
-      showTransientNotice(EVENT_RECONCILIATION_REQUIRED_MESSAGE)
-      await openEventWorkdayReconciliation(reconciliationRow)
-      return
-    }
+    const correctionWorkdayId = isCreateMode
+      ? ''
+      : eventReconciliationWorkdayId(appState.eventEditorItem)
+    const usesDayCorrection = Boolean(correctionWorkdayId)
 
     if (isCreateMode && !canManageEvents()) {
       alert('Brak uprawnień do dodawania zdarzeń.')
@@ -3875,10 +4106,18 @@ export function createEventsFeature(ctx) {
     }
 
     const payload = readEventEditorPayload()
+    const recordKind = isCreateMode
+      ? EVENT_RECORD_KINDS.WORKDAY
+      : eventRecordKind(appState.eventEditorItem)
+    const isWorkdayRecord = recordKind === EVENT_RECORD_KINDS.WORKDAY
     const eventPayload = { ...payload }
     delete eventPayload.eventKind
     if (!payload.workerLogin) {
       alert('Wybierz pracownika.')
+      return
+    }
+    if (isCreateMode && !payload.clientId) {
+      alert('Wybierz obiekt.')
       return
     }
     const targetWorker = eventEditorSelectedWorker(payload.workerLogin)
@@ -3889,6 +4128,18 @@ export function createEventsFeature(ctx) {
       eventPayload.workerName = String(
         targetWorker.name ?? targetWorker.workerName ?? payload.workerName ?? eventPayload.workerLogin,
       ).trim()
+    }
+    if (usesDayCorrection) {
+      const sourceWorkerLogin = String(
+        appState.eventEditorCorrectionContext?.workerLogin ??
+          appState.eventEditorItem?.workerLogin ??
+          appState.eventEditorItem?.workerId ??
+          '',
+      ).trim()
+      if (normalizeSearchText(eventPayload.workerLogin) !== normalizeSearchText(sourceWorkerLogin)) {
+        alert('W tej edycji można zmienić dane zdarzenia, ale nie przypisanego pracownika.')
+        return
+      }
     }
     if (
       targetWorker &&
@@ -3901,15 +4152,12 @@ export function createEventsFeature(ctx) {
       alert(OWN_WORKDAY_EDIT_DENIED_MESSAGE)
       return
     }
-    if (isCreateMode) {
-      const objectValidationMessage = eventEditorManualObjectValidationMessage(payload)
-      if (objectValidationMessage) {
-        alert(objectValidationMessage)
-        return
-      }
-    }
     if (payload.eventKind === 'none') {
-      alert('Podaj Start, Stop albo oba pola jednoczesnie.')
+      alert('Podaj godzinę START zdarzenia.')
+      return
+    }
+    if (isCreateMode && payload.eventKind === 'stop') {
+      alert('Nowe zdarzenie musi mieć godzinę START. STOP możesz dodać razem ze START-em.')
       return
     }
     if (payload.startAt && payload.endAt) {
@@ -3941,7 +4189,7 @@ export function createEventsFeature(ctx) {
       const derivedDurationSec = payload.eventKind === 'start_stop' ? Number(payload.durationSec ?? 0) : 0
       const derivedStatus = payload.eventKind === 'start' ? 'RUNNING' : 'CLOSED'
       const derivedCloseMarkedAt = payload.eventKind === 'start' ? null : derivedEndAt || null
-      const derivedEndReason = eventEndReasonFromKind(payload.eventKind)
+      const derivedEndReason = isWorkdayRecord ? null : eventEndReasonFromKind(payload.eventKind)
 
       if (payload.eventKind === 'start_stop') {
         const overlap = await eventEditorFindOverlappingStatus(payload, derivedStartAt, derivedEndAt)
@@ -3951,9 +4199,75 @@ export function createEventsFeature(ctx) {
       }
 
       if (isCreateMode) {
-        const newEventId = `EV-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+        const recordId = `WD-${Date.now()}-${Math.floor(Math.random() * 1000)}`
         savedEventPayload = {
-          eventId: newEventId,
+          workdayId: recordId,
+          ...eventPayload,
+          recordKind: EVENT_RECORD_KINDS.WORKDAY,
+          historySourceKind: 'workday',
+          hasExplicitEventId: false,
+          startAt: derivedStartAt,
+          endAt: derivedEndAt,
+          durationSec: derivedDurationSec,
+          status: derivedStatus,
+          closeMarkedAt: derivedCloseMarkedAt,
+          endReason: derivedEndReason,
+        }
+        savedEvent = await createWorkday(appState.session.orgId, savedEventPayload)
+        savedEvent = {
+          ...savedEvent,
+          recordKind: EVENT_RECORD_KINDS.WORKDAY,
+          historySourceKind: 'workday',
+          hasExplicitEventId: false,
+        }
+      } else if (usesDayCorrection) {
+        let correctionContext = appState.eventEditorCorrectionContext
+        if (
+          !correctionContext ||
+          correctionContext.workdayId !== correctionWorkdayId ||
+          correctionContext.workerLogin !== String(appState.eventEditorItem?.workerLogin ?? '').trim()
+        ) {
+          correctionContext = await eventEditorLoadCorrectionContext(appState.eventEditorItem)
+        }
+        if (!correctionContext) {
+          throw new Error('Nie udało się przygotować edycji tego zdarzenia.')
+        }
+
+        const correctionRecordId = isWorkdayRecord
+          ? correctionWorkdayId
+          : String(appState.eventEditorItem?.eventId ?? appState.eventEditorItem?.id ?? '').trim()
+        if (!correctionRecordId) {
+          throw new Error('Brak identyfikatora edytowanego zdarzenia.')
+        }
+
+        const correction = {
+          ...(isWorkdayRecord ? { workdayId: correctionRecordId } : { eventId: correctionRecordId }),
+          startAt: derivedStartAt,
+          endAt: derivedEndAt,
+          zoneId: String(eventPayload.zoneId ?? '').trim(),
+          clientId: String(eventPayload.clientId ?? '').trim(),
+          location: String(eventPayload.location ?? '').trim(),
+        }
+        const correctedDay = await saveWorkTimeDay(
+          appState.session.orgId,
+          correctionContext.workerLogin,
+          correctionContext.businessDateYmd,
+          {
+            expectedVersion: correctionContext.version,
+            attendanceCorrections: isWorkdayRecord ? [correction] : [],
+            activityCorrections: isWorkdayRecord ? [] : [correction],
+            reason: 'Korekta z panelu Zdarzenia',
+            idempotencyKey: eventEditorCorrectionIdempotencyKey(appState.eventEditorItem),
+            finalize: false,
+          },
+        )
+        appState.eventEditorCorrectionContext = {
+          ...correctionContext,
+          day: correctedDay,
+          version: String(correctedDay?.version ?? correctionContext.version).trim(),
+        }
+        savedEventPayload = {
+          ...appState.eventEditorItem,
           ...eventPayload,
           startAt: derivedStartAt,
           endAt: derivedEndAt,
@@ -3962,7 +4276,10 @@ export function createEventsFeature(ctx) {
           closeMarkedAt: derivedCloseMarkedAt,
           endReason: derivedEndReason,
         }
-        savedEvent = await createEvent(appState.session.orgId, savedEventPayload)
+        savedEvent = {
+          ...savedEventPayload,
+          editedBy: appState.session?.name ?? appState.session?.login ?? '',
+        }
       } else {
         const eventId = String(appState.eventEditorItem?.eventId ?? appState.eventEditorItem?.workdayId ?? '').trim()
         if (!eventId) {
@@ -4009,6 +4326,9 @@ export function createEventsFeature(ctx) {
       const savedHistoryItem = {
         ...(editedHistorySource || {}),
         ...eventPayload,
+        recordKind,
+        historySourceKind: isWorkdayRecord ? 'workday' : 'event',
+        hasExplicitEventId: !isWorkdayRecord,
         startAt: derivedStartAt,
         endAt: derivedEndAt,
       }
@@ -4563,7 +4883,7 @@ export function createEventsFeature(ctx) {
     {
       label: 'Edytował',
       width: 46,
-      getValue: (row) => String(row?.editedBy ?? '-').trim() || '-',
+      getValue: (row) => eventEditedByDisplayName(row),
     },
   ]
 
@@ -4602,6 +4922,39 @@ export function createEventsFeature(ctx) {
     return normalizeEventsExportRows(rows).map((row) =>
       EVENTS_EXPORT_COLUMNS.map((column) => String(column.getValue(row) ?? '').trim() || '-'),
     )
+  }
+
+  function setEventsDownloadMenuOpen(isOpen, { focusFirst = false, restoreFocus = false } = {}) {
+    const trigger = document.getElementById('evDownloadBtn')
+    const menu = document.getElementById('evDownloadMenu')
+    if (!trigger || !menu) {
+      return
+    }
+
+    const shouldOpen = isOpen === true && !trigger.disabled
+    menu.hidden = !shouldOpen
+    trigger.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false')
+    trigger.closest('[data-events-download-menu]')?.classList.toggle('is-open', shouldOpen)
+
+    if (shouldOpen && focusFirst) {
+      window.requestAnimationFrame(() => menu.querySelector('[role="menuitem"]')?.focus?.())
+    } else if (!shouldOpen && restoreFocus) {
+      window.requestAnimationFrame(() => trigger.focus?.())
+    }
+  }
+
+  function openEventsNativePicker(input) {
+    if (!(input instanceof HTMLInputElement) || input.disabled || input.readOnly) {
+      return
+    }
+    input.focus({ preventScroll: true })
+    if (typeof input.showPicker === 'function') {
+      try {
+        input.showPicker()
+      } catch {
+        // Some browsers expose showPicker without allowing it outside a direct user gesture.
+      }
+    }
   }
 
   function eventsExportFilenameBase() {
@@ -4721,6 +5074,24 @@ export function createEventsFeature(ctx) {
     URL.revokeObjectURL(url)
   }
 
+  function downloadEventsCsv(rows = []) {
+    const headers = EVENTS_EXPORT_COLUMNS.map((column) => column.label)
+    const matrix = eventsExportRowsToMatrix(rows)
+    const csvCell = (value) => `"${String(value ?? '').replace(/\r?\n/g, ' ').replaceAll('"', '""')}"`
+    const csv = [headers, ...matrix]
+      .map((row) => row.map(csvCell).join(';'))
+      .join('\r\n')
+    const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${eventsExportFilenameBase()}.csv`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
   async function downloadEventsPdf(rows = []) {
     const matrix = eventsExportRowsToMatrix(rows)
     const pdfMake = await ensurePdfMakeLoaded()
@@ -4769,21 +5140,20 @@ export function createEventsFeature(ctx) {
     pdfMake.createPdf(docDefinition).download(`${eventsExportFilenameBase()}.pdf`)
   }
 
-  async function downloadEventsExport(format = 'excel') {
-    const normalized = String(format ?? '').trim().toLowerCase() === 'pdf' ? 'pdf' : 'excel'
-    const buttons = [
-      document.getElementById('evExportPdfBtn'),
-      document.getElementById('evExportExcelBtn'),
-    ].filter((button) => button instanceof HTMLButtonElement)
-    const trigger = document.getElementById(normalized === 'pdf' ? 'evExportPdfBtn' : 'evExportExcelBtn')
-    const previousText = trigger?.textContent ?? ''
+  async function downloadEventsExport(format = 'xls') {
+    const requestedFormat = String(format ?? '').trim().toLowerCase()
+    const normalized = ['pdf', 'csv', 'xls'].includes(requestedFormat) ? requestedFormat : 'xls'
+    const trigger = document.getElementById('evDownloadBtn')
+    const label = trigger?.querySelector?.('[data-events-download-label]')
+    const previousText = label?.textContent ?? 'Pobierz'
 
-    buttons.forEach((button) => {
-      button.disabled = true
-      button.setAttribute('aria-busy', 'true')
-    })
-    if (trigger) {
-      trigger.textContent = 'Eksport...'
+    setEventsDownloadMenuOpen(false)
+    if (trigger instanceof HTMLButtonElement) {
+      trigger.disabled = true
+      trigger.setAttribute('aria-busy', 'true')
+    }
+    if (label) {
+      label.textContent = 'Przygotowuję...'
     }
 
     try {
@@ -4795,6 +5165,8 @@ export function createEventsFeature(ctx) {
 
       if (normalized === 'pdf') {
         await downloadEventsPdf(rows)
+      } else if (normalized === 'csv') {
+        downloadEventsCsv(rows)
       } else {
         downloadEventsExcel(rows)
       }
@@ -4804,12 +5176,12 @@ export function createEventsFeature(ctx) {
       const message = error instanceof Error ? error.message : 'Nie udało się wyeksportować zdarzeń.'
       showTransientNotice(message, 'error')
     } finally {
-      buttons.forEach((button) => {
-        button.disabled = false
-        button.setAttribute('aria-busy', 'false')
-      })
-      if (trigger) {
-        trigger.textContent = previousText || (normalized === 'pdf' ? 'PDF' : 'Excel')
+      if (trigger instanceof HTMLButtonElement) {
+        trigger.disabled = false
+        trigger.setAttribute('aria-busy', 'false')
+      }
+      if (label) {
+        label.textContent = previousText || 'Pobierz'
       }
     }
   }
@@ -5154,11 +5526,40 @@ export function createEventsFeature(ctx) {
       void fetchEventsForCurrentSession({ resetPage: true, forceRefresh: true })
     })
     binding.add(document.getElementById('evClearFiltersBtn'), 'click', resetEventsFilters)
-    binding.add(document.getElementById('evExportPdfBtn'), 'click', () => {
-      void downloadEventsExport('pdf')
+    binding.add(document.getElementById('evDownloadBtn'), 'click', () => {
+      const menu = document.getElementById('evDownloadMenu')
+      setEventsDownloadMenuOpen(Boolean(menu?.hidden), { focusFirst: Boolean(menu?.hidden) })
     })
-    binding.add(document.getElementById('evExportExcelBtn'), 'click', () => {
-      void downloadEventsExport('excel')
+    binding.add(document.getElementById('evDownloadMenu'), 'click', (event) => {
+      const option = event.target?.closest?.('[data-events-export-format]')
+      if (!(option instanceof HTMLButtonElement)) {
+        return
+      }
+      void downloadEventsExport(option.dataset.eventsExportFormat)
+    })
+    binding.add(document.getElementById('evDownloadMenu'), 'keydown', (event) => {
+      const items = [...document.querySelectorAll('#evDownloadMenu [role="menuitem"]')]
+      if (!items.length) {
+        return
+      }
+      const currentIndex = items.indexOf(document.activeElement)
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setEventsDownloadMenuOpen(false, { restoreFocus: true })
+        return
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+        return
+      }
+      event.preventDefault()
+      const nextIndex = event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : event.key === 'ArrowUp'
+            ? (currentIndex - 1 + items.length) % items.length
+            : (currentIndex + 1) % items.length
+      items[nextIndex]?.focus?.()
     })
 
     binding.add(document.getElementById('evPrevBtn'), 'click', () => {
@@ -5203,6 +5604,24 @@ export function createEventsFeature(ctx) {
     })
     ;['evFrom', 'evTo'].forEach((id) => {
       binding.add(document.getElementById(id), 'change', syncEventsMonthControl)
+    })
+    document.querySelectorAll('[data-events-date-picker]').forEach((field) => {
+      const input = field.querySelector('input[type="date"], input[type="month"]')
+      binding.add(field, 'click', (event) => {
+        if (event.target !== input) {
+          event.preventDefault()
+        }
+        openEventsNativePicker(input)
+      })
+    })
+    document.querySelectorAll('[data-event-time-picker]').forEach((card) => {
+      const input = card.querySelector('input[type="datetime-local"]')
+      binding.add(card, 'click', (event) => {
+        if (event.target !== input) {
+          event.preventDefault()
+        }
+        openEventsNativePicker(input)
+      })
     })
     binding.add(document.getElementById('evWorker'), 'change', (event) => {
       const control = event.currentTarget
@@ -5309,6 +5728,9 @@ export function createEventsFeature(ctx) {
     })
 
     binding.add(document, 'pointerdown', (event) => {
+      if (!event.target?.closest?.('[data-events-download-menu]')) {
+        setEventsDownloadMenuOpen(false)
+      }
       const insideCombo = event.target?.closest?.('[data-events-filter-combo]')
       if (insideCombo) return
       ;['worker', 'zone', 'client'].forEach((kind) => eventsFilterComboClose(kind, { restoreSelection: true }))
@@ -5502,7 +5924,6 @@ export function createEventsFeature(ctx) {
     binding.add(document.getElementById('evDeleteBtn'), 'click', () => {
       void deleteEventEditorItem()
     })
-    binding.add(document.getElementById('evStopNowBtn'), 'click', setEventStopNow)
     binding.add(document.getElementById('evEditStart'), 'input', () => {
       eventEditorSyncStopHintFromStart()
       eventEditorSyncTimeSummary()

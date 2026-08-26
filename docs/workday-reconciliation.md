@@ -66,7 +66,7 @@ Stary endpoint `GET /api/portal/workdays/:id/reconciliation` jest wyłącznie ad
 
 Odczyt i zapis są ograniczone do aktywnej organizacji. Backend korzysta z UID Firebase i istniejących ról. Zapis wymaga uprawnienia administracyjnego; obowiązująca blokada edycji własnej ewidencji pozostaje aktywna.
 
-Stary edytor Zdarzeń nie może zmieniać `Eventu` powiązanego z `Workday`, ponieważ ominąłby transakcję, optimistic lock i audyt. Taki rekord otwiera wspólny dialog dnia.
+Edytor w sekcji Zdarzenia otwiera ten sam formularz dla dodawania i edycji. Rekord powiązany z `Workday` jest zapisywany z tego formularza przez transakcyjny endpoint dnia, z optimistic lockiem i audytem; formularz nie przekierowuje użytkownika do profilu pracownika.
 
 Uzgadnianie dnia pozostaje jedynym kontrolowanym procesem korekt czasu pracy; pozostałe moduły nie mogą omijać transakcji, optimistic locka ani audytu.
 

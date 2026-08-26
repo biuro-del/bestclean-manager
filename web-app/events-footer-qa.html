@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Events footer QA</title>
+    <link rel="stylesheet" href="/node_modules/@phosphor-icons/web/src/regular/style.css" />
+    <link rel="stylesheet" href="/apps/portal-web/src/index.css" />
+    <link rel="stylesheet" href="/apps/portal-web/src/features/events/style.css" />
+    <style>
+      html, body { width: 100%; min-height: 100%; margin: 0; }
+      body { background: #9ca3af; }
+      #evEditorOverlay { position: static !important; display: flex !important; min-height: 126px; padding: 0 14px 8px; }
+      #evEditorOverlay .ev-editor-modal { width: 940px !important; height: 118px; min-height: 0; margin: 0 auto; overflow: hidden; }
+      #evEditorOverlay .ev-editor-body { min-height: 47px; padding: 0 20px; }
+      #evEditorOverlay .qa-summary { height: 27px; margin-top: -1px; border: 1px solid #b7eccb; border-radius: 0 0 14px 14px; background: #f0fdf4; }
+      #evEditorOverlay .ev-editor-footer { margin-top: auto; }
+    </style>
+  </head>
+  <body>
+    <div class="overlay ev-editor-overlay" id="evEditorOverlay" data-mode="edit">
+      <div class="modal ev-editor-modal">
+        <div class="ev-editor-body"><div class="qa-summary"></div></div>
+        <footer class="ev-editor-footer">
+          <button class="btn2 danger ev-editor-delete" id="evDeleteBtn" type="button">
+            <i class="ph ph-trash-simple" aria-hidden="true"></i><span>Usuń zdarzenie</span>
+          </button>
+          <div class="ev-editor-footer-actions">
+            <button class="btn2" id="evCancelBtn" type="button"><i class="ph ph-x-circle" aria-hidden="true"></i><span>Anuluj</span></button>
+            <button class="btn2 primary" id="evSaveBtn" type="button">
+              <i class="ph ph-check" aria-hidden="true"></i><span>Zapisz zmiany</span>
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  </body>
+</html>

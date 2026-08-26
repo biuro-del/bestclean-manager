@@ -22,6 +22,7 @@ import {
   workIntervalsFromRow,
   workIntervalsTotalSeconds,
   workSessionAccountingFromRow,
+  workTimeCycleRowsFromDays,
   warsawBusinessDateKey,
 } from '../workIntervals.js'
 import {
@@ -43,6 +44,9 @@ import {
   getWorkTimeDays,
   saveWorkTimeDay,
 } from '../../../services/workTimeDayService.js'
+import {
+  resolveOperationalMapAvatarKind,
+} from '../../dashboard/operationalMapModel.js'
 
 export const route = 'workerAccount'
 export const viewId = 'view-workerAccount'
@@ -106,23 +110,9 @@ const WORKER_TRAINING_OPTIONS = [
   'Praca na wysokosci',
   'Ochrona danych',
 ]
-const PASSWORD_EYE_OPEN_ICON = `
-  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"></path>
-    <circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.8"></circle>
-  </svg>`
-const PASSWORD_EYE_CLOSED_ICON = `
-  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <path d="M3 3l18 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
-    <path d="M10.6 5.2A9.5 9.5 0 0 1 12 5c6 0 9.5 7 9.5 7a15.4 15.4 0 0 1-3.2 3.9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
-    <path d="M6.7 6.8A16.4 16.4 0 0 0 2.5 12s3.5 7 9.5 7c1.7 0 3.2-.4 4.5-1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
-    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
-  </svg>`
-const WORKER_ACCOUNT_AVATAR_ICON = `
-  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <path d="M12 12a4.4 4.4 0 1 0 0-8.8 4.4 4.4 0 0 0 0 8.8Z" stroke="currentColor" stroke-width="1.8"></path>
-    <path d="M4 21a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
-  </svg>`
+const PASSWORD_EYE_OPEN_ICON = '<i class="ph ph-eye" aria-hidden="true"></i>'
+const PASSWORD_EYE_CLOSED_ICON = '<i class="ph ph-eye-slash" aria-hidden="true"></i>'
+const WORKER_ACCOUNT_AVATAR_ICON = '<i class="ph ph-user" aria-hidden="true"></i>'
 
 export function createWorkerAccountFeature(ctx) {
   const {
@@ -140,7 +130,6 @@ export function createWorkerAccountFeature(ctx) {
     getWorkers,
     getWorkerTime,
     normalizeSearchText,
-    openEventEditor,
     ordersListSourceOrders,
     ordersSyncRemoteTimelineOrders,
     paginate,
@@ -153,6 +142,7 @@ export function createWorkerAccountFeature(ctx) {
     ymdToIsoRangeEnd,
     ymdToIsoRangeStart,
   } = ctx
+  let workerAccountEventCommentRestoreFocus = null
 
   function setText(id, value) {
     const node = document.getElementById(id)
@@ -179,6 +169,31 @@ export function createWorkerAccountFeature(ctx) {
     const safeUrl = String(photoUrl ?? '').trim()
     if (!safeUrl) return WORKER_ACCOUNT_AVATAR_ICON
     return `<img src="${escapeHtml(safeUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+  }
+
+  function workerTablePersonMarkup(row = {}) {
+    const worker = resolveCurrentWorker() ?? {}
+    const name = String(
+      workerName(worker) ?? row.workerName ?? row.workername ?? row.worker_name ?? row.workerDisplayName ?? '',
+    ).trim() || '-'
+    const photoUrl = workerPhotoUrl({
+      photoUrl: row.workerPhotoUrl ?? row.worker_photo_url ?? worker.photoUrl,
+      profilePhotoUrl: row.workerProfilePhotoUrl ?? row.profile_photo_url ?? worker.profilePhotoUrl,
+      avatarUrl: row.workerAvatarUrl ?? worker.avatarUrl,
+      imageUrl: worker.imageUrl,
+    })
+    const avatarKind = resolveOperationalMapAvatarKind({ ...worker, ...row, workerName: name })
+    const avatarSrc = photoUrl || `/assets/avatars/default-${avatarKind}.webp`
+    return `
+      <div class="worker-account-person-cell">
+        <span class="worker-account-person-avatar" aria-hidden="true">
+          <img src="${escapeHtml(avatarSrc)}" alt="" loading="lazy" referrerpolicy="no-referrer" />
+        </span>
+        <span class="worker-account-person-copy">
+          <strong>${escapeHtml(name)}</strong>
+        </span>
+      </div>
+    `
   }
 
   function renderWorkerAvatar(worker = {}, overridePhotoUrl) {
@@ -358,6 +373,62 @@ export function createWorkerAccountFeature(ctx) {
 
   function workerName(worker = {}) {
     return String(worker.name ?? worker.workerName ?? worker.fullName ?? workerLogin(worker) ?? '').trim()
+  }
+
+  function workerExplicitName(worker = {}) {
+    return String(
+      worker.name ??
+      worker.workerName ??
+      worker.workername ??
+      worker.worker_name ??
+      worker.fullName ??
+      worker.displayName ??
+      '',
+    ).trim()
+  }
+
+  function editorDisplayName(row = {}) {
+    const providedName = String(
+      row.editedByName ??
+      row.updatedByName ??
+      row.modifiedByName ??
+      row.authorName ??
+      '',
+    ).trim()
+    const rawIdentity = String(
+      row.editedBy ??
+      row.updatedBy ??
+      row.createdBy ??
+      row.modifiedBy ??
+      row.authorLogin ??
+      row.author ??
+      providedName ??
+      '',
+    ).trim()
+    if (!rawIdentity) return providedName || '-'
+
+    const identityKeys = new Set()
+    addIdentityKey(identityKeys, rawIdentity)
+    const session = appState.session ?? {}
+    const candidates = [
+      {
+        ...session,
+        login: session.login ?? session.email,
+        workerLogin: session.workerLogin ?? session.email,
+        name: session.name ?? session.displayName,
+      },
+      resolveCurrentWorker(),
+      ...(Array.isArray(appState.workerProfileRows) ? appState.workerProfileRows : []),
+      ...(Array.isArray(appState.workerProfileViewRows) ? appState.workerProfileViewRows : []),
+      ...(Array.isArray(appState.workers) ? appState.workers : []),
+    ].filter(Boolean)
+
+    const matched = candidates.find((candidate) => {
+      const candidateKeys = workerIdentityKeys(candidate)
+      ;[candidate.authUid, candidate.uid, candidate.firebaseUid].forEach((value) => addIdentityKey(candidateKeys, value))
+      return [...candidateKeys].some((key) => identityKeys.has(key))
+    })
+    return workerExplicitName(matched) || providedName || rawIdentity
   }
 
   function workerRelatedRows(worker = {}) {
@@ -674,9 +745,7 @@ export function createWorkerAccountFeature(ctx) {
     const copy = WORKER_ROLE_COPY[key] ?? WORKER_ROLE_COPY.WORKER
     return `
       <div class="worker-account-role-item">
-        <i aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v5c0 4.6-2.8 8.2-7 10-4.2-1.8-7-5.4-7-10V6l7-3Z" stroke="currentColor" stroke-width="1.8"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </i>
+        <i class="ph ph-shield-check" aria-hidden="true"></i>
         <div>
           <strong>${escapeHtml(copy.title)}</strong>
           <span>${escapeHtml(copy.description)}</span>
@@ -716,7 +785,7 @@ export function createWorkerAccountFeature(ctx) {
       const object = [row.clientName, row.zoneName, row.roomName, row.utilityRoomId].filter(Boolean).join(' / ') || 'Brak obiektu'
       return `
         <div class="worker-account-timeline-item">
-          <span class="worker-account-timeline-icon" aria-hidden="true">A</span>
+          <span class="worker-account-timeline-icon" aria-hidden="true"><i class="ph ph-activity"></i></span>
           <div>
             <strong>${escapeHtml(title)}</strong>
             <span>${escapeHtml(date)} - ${escapeHtml(object)}</span>
@@ -803,8 +872,6 @@ export function createWorkerAccountFeature(ctx) {
     appState.workerAccountEventsPage = 1
     appState.workerAccountOrdersPage = 1
     appState.workerAccountTimePage = 1
-    appState.workerAccountTimeSelectedKeys = new Set()
-    appState.workerAccountTimeCurrentPageKeys = []
     appState.workerAccountTimeCodeEditorItem = null
     appState.workerAccountReconciliationModel = null
     appState.workerAccountReconciliationRow = null
@@ -820,13 +887,11 @@ export function createWorkerAccountFeature(ctx) {
     const monthRange = currentMonthRange()
     const weekRange = currentWeekRange()
     const timeRows = Array.isArray(appState.workerAccountAllTimeRows) ? appState.workerAccountAllTimeRows : []
-    const eventRows = Array.isArray(appState.workerAccountEventsRows) ? appState.workerAccountEventsRows : []
     const orderRows = Array.isArray(appState.workerAccountOrderRows) ? appState.workerAccountOrderRows : []
     renderKpis({
       completedOrders: orderRows.filter((order) => orderCompleted(order)).length,
       monthSeconds: sumRowsInRange(timeRows, monthRange),
       weekSeconds: sumRowsInRange(timeRows, weekRange),
-      eventCount: countEventsInRange(eventRows, monthRange),
     })
   }
 
@@ -1055,7 +1120,6 @@ export function createWorkerAccountFeature(ctx) {
     const role = workerRole(worker)
     const active = isWorkerActive(worker)
     const online = isWorkerOnline(worker)
-    setText('waTitle', name)
     setText('waCardName', name)
     setText('waCardRole', roleLabel(role))
     setText('waCardId', workerId(worker) || '-')
@@ -1375,19 +1439,6 @@ export function createWorkerAccountFeature(ctx) {
       order.klient ??
       order.client?.name ??
       objectLabel ??
-      '',
-    ).trim() || '-'
-  }
-
-  function orderZoneLabel(order = {}) {
-    return String(
-      order.zoneName ??
-      order.zoneLabel ??
-      order.strefa ??
-      order.zone?.label ??
-      order.zone?.name ??
-      order.zone?.zone ??
-      order.place ??
       '',
     ).trim() || '-'
   }
@@ -1718,14 +1769,6 @@ export function createWorkerAccountFeature(ctx) {
       const day = timeRowDayKey(row)
       if (!day || day < range.from || day > range.to) return sum
       return sum + secondsFromRow(row)
-    }, 0)
-  }
-
-  function countEventsInRange(rows, range) {
-    return (Array.isArray(rows) ? rows : []).reduce((sum, row) => {
-      const day = eventDayKey(row)
-      if (!day || day < range.from || day > range.to) return sum
-      return sum + 1
     }, 0)
   }
 
@@ -2129,16 +2172,12 @@ export function createWorkerAccountFeature(ctx) {
     return directRows
   }
 
-  function renderKpis({ completedOrders = 0, monthSeconds = 0, weekSeconds = 0, eventCount = 0 } = {}) {
+  function renderKpis({ completedOrders = 0, monthSeconds = 0, weekSeconds = 0 } = {}) {
     const month = formatSeconds(monthSeconds)
     const week = formatSeconds(weekSeconds)
     setText('waKpiOrders', completedOrders)
     setText('waKpiMonth', month)
     setText('waKpiWeek', week)
-    setText('waActivityOrders', completedOrders)
-    setText('waActivityMonth', month)
-    setText('waActivityWeek', week)
-    setText('waActivityEvents', eventCount)
   }
 
   function fillTimeMonthPick(year, selectedValue) {
@@ -2222,39 +2261,6 @@ export function createWorkerAccountFeature(ctx) {
       : new Date(Date.UTC(year, month, 0)).getUTCDate()
     from.value = `${value}-01`
     to.value = `${value}-${pad2(lastDay)}`
-  }
-
-  function timeSelectionKey(row = {}) {
-    return String(row.dayKey ?? row.workdayId ?? '').trim()
-  }
-
-  function ensureTimeSelectionState() {
-    if (!(appState.workerAccountTimeSelectedKeys instanceof Set)) appState.workerAccountTimeSelectedKeys = new Set()
-    if (!Array.isArray(appState.workerAccountTimeCurrentPageKeys)) appState.workerAccountTimeCurrentPageKeys = []
-  }
-
-  function syncTimeSelectionUi() {
-    ensureTimeSelectionState()
-    const selectAll = document.getElementById('waTimeSelectAll')
-    if (!(selectAll instanceof HTMLInputElement)) return
-    const pageKeys = appState.workerAccountTimeCurrentPageKeys
-    if (!pageKeys.length) {
-      selectAll.checked = false
-      selectAll.indeterminate = false
-      return
-    }
-    const selected = pageKeys.filter((key) => appState.workerAccountTimeSelectedKeys.has(key)).length
-    selectAll.checked = selected > 0 && selected === pageKeys.length
-    selectAll.indeterminate = selected > 0 && selected < pageKeys.length
-  }
-
-  function setTimeRowsSelected(checked) {
-    ensureTimeSelectionState()
-    appState.workerAccountTimeCurrentPageKeys.forEach((key) => {
-      if (checked) appState.workerAccountTimeSelectedKeys.add(key)
-      else appState.workerAccountTimeSelectedKeys.delete(key)
-    })
-    syncTimeSelectionUi()
   }
 
   function _escapeCsvCell(value) {
@@ -2659,19 +2665,80 @@ export function createWorkerAccountFeature(ctx) {
   }
 
   function eventCommentText(row = {}) {
-    return String(row.comment ?? row.comments ?? row.commentText ?? row.note ?? row.endReason ?? '').trim()
+    const rawComment = row.comment ?? row.comments ?? row.commentText ?? row.note ?? row.endReason ?? ''
+    return workIntervalVisibleComment(rawComment)
   }
 
   function eventCommentButton(index, hasComment) {
-    const label = hasComment ? 'Pokaz komentarz' : 'Brak komentarza'
+    const label = hasComment ? 'Pokaz komentarz pracownika' : 'Brak komentarza pracownika'
     return `
       <button class="event-comment-icon-btn${hasComment ? '' : ' is-empty'}" type="button" data-wa-event-comment="${index}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M5 6.8A3.8 3.8 0 0 1 8.8 3h6.4A3.8 3.8 0 0 1 19 6.8v4.4a3.8 3.8 0 0 1-3.8 3.8h-3.7L7 19v-4.1a3.8 3.8 0 0 1-2-3.3V6.8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-          <path d="M8.5 8.5h7M8.5 11.5h4.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-        </svg>
+        <i class="ph ph-chat-text" aria-hidden="true"></i>
       </button>
     `
+  }
+
+  function setWorkerAccountEventCommentOpen(open, options = {}) {
+    const overlay = document.getElementById('waEventCommentOverlay')
+    if (!overlay) return
+    if (open) {
+      const comment = String(options.comment ?? '').trim()
+      const text = document.getElementById('waEventCommentText')
+      const empty = document.getElementById('waEventCommentEmpty')
+      workerAccountEventCommentRestoreFocus = options.opener instanceof HTMLElement
+        ? options.opener
+        : (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+      if (text) {
+        text.textContent = comment
+        text.hidden = !comment
+      }
+      if (empty) empty.hidden = Boolean(comment)
+      overlay.hidden = false
+      overlay.style.display = 'flex'
+      window.requestAnimationFrame(() => document.getElementById('waEventCommentClose')?.focus())
+      return
+    }
+    overlay.hidden = true
+    overlay.style.display = 'none'
+    const restoreFocus = workerAccountEventCommentRestoreFocus
+    workerAccountEventCommentRestoreFocus = null
+    if (options.restoreFocus !== false && restoreFocus instanceof HTMLElement && restoreFocus.isConnected) {
+      window.requestAnimationFrame(() => restoreFocus.focus())
+    }
+  }
+
+  function openWorkerAccountEventComment(row = {}, opener = null) {
+    setWorkerAccountEventCommentOpen(true, { comment: eventCommentText(row), opener })
+  }
+
+  function closeWorkerAccountEventComment(options = {}) {
+    setWorkerAccountEventCommentOpen(false, options)
+  }
+
+  function trapWorkerAccountEventCommentFocus(event) {
+    if (event?.key !== 'Tab') return false
+    const dialog = document.getElementById('waEventCommentDialog')
+    if (!(dialog instanceof HTMLElement)) return false
+    const focusable = [...dialog.querySelectorAll('button:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      .filter((node) => node instanceof HTMLElement && !node.hidden && node.getClientRects().length > 0)
+    if (!focusable.length) {
+      event.preventDefault()
+      dialog.focus()
+      return true
+    }
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+      event.preventDefault()
+      last.focus()
+      return true
+    }
+    if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+      return true
+    }
+    return false
   }
 
   function workerAccountTimeIntervals(row = {}) {
@@ -2749,11 +2816,11 @@ export function createWorkerAccountFeature(ctx) {
       <span class="wa-time-code-zone-wrap">
         <button class="wa-time-code-zone-trigger" type="button" aria-label="${escapeHtml(label)}" aria-describedby="${escapeHtml(tooltipId)}">
           <span>${escapeHtml(zoneLabel)}</span>
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 10.7v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="7.6" r="1" fill="currentColor"/></svg>
+          <i class="ph ph-info" aria-hidden="true"></i>
         </button>
         <span class="wa-time-code-zone-tooltip" id="${escapeHtml(tooltipId)}" role="tooltip">
           <span class="wa-time-code-zone-tooltip-heading">
-            <span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 21s6-5.1 6-11a6 6 0 0 0-12 0c0 5.9 6 11 6 11Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.2" stroke="currentColor" stroke-width="1.8"/></svg></span>
+            <span class="ph ph-map-pin" aria-hidden="true"></span>
             <strong>Informacje o strefie</strong>
           </span>
           <span class="wa-time-code-zone-details">
@@ -2785,7 +2852,7 @@ export function createWorkerAccountFeature(ctx) {
     const ariaLabel = hasGps
       ? `Lokalizacja GPS ${code.type}: ${locationLabel || `${coords.lat}, ${coords.lon}`}`
       : `Brak lokalizacji GPS dla ${code.type}`
-    const icon = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s6-5.1 6-11a6 6 0 0 0-12 0c0 5.9 6 11 6 11Z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.2" stroke="currentColor" stroke-width="1.9"/></svg>`
+    const icon = '<i class="ph ph-map-pin" aria-hidden="true"></i>'
     return `
       <span class="wa-time-code-gps-wrap ${stateClass}">
         ${hasGps
@@ -2796,7 +2863,7 @@ export function createWorkerAccountFeature(ctx) {
           ${hasGps && locationLabel ? `<span>${escapeHtml(locationLabel)}</span>` : ''}
           ${hasGps ? `<iframe class="wa-time-code-gps-map" src="${escapeHtml(googleMapsEmbedUrl)}" title="${escapeHtml(`Mapa lokalizacji ${code.type}`)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>` : ''}
           <small>${hasGps ? `${escapeHtml(coords.lat)}, ${escapeHtml(coords.lon)}` : 'Zdarzenie nie zawiera współrzędnych.'}</small>
-          ${hasGps ? `<a class="wa-time-code-gps-map-link" href="${escapeHtml(googleMapsUrl)}" target="_blank" rel="noopener noreferrer">Otwórz w Google Maps <span aria-hidden="true">↗</span></a>` : ''}
+          ${hasGps ? `<a class="wa-time-code-gps-map-link" href="${escapeHtml(googleMapsUrl)}" target="_blank" rel="noopener noreferrer">Otwórz w Google Maps <i class="ph ph-arrow-square-out" aria-hidden="true"></i></a>` : ''}
         </span>
       </span>
     `
@@ -2810,30 +2877,14 @@ export function createWorkerAccountFeature(ctx) {
       String(source?.integrityState ?? '').trim().toUpperCase() !== 'COMPLETE' ||
       (Array.isArray(source?.openSessions) && source.openSessions.length),
     ) ?? sources[0] ?? row
-    const workdayId = String(preferredSource?.workdayId ?? preferredSource?.id ?? '').trim()
+    const workdayId = String(row?.workdayId ?? preferredSource?.workdayId ?? preferredSource?.id ?? '').trim()
     if (!codes.length && !workdayId && String(row?.integrityState ?? 'COMPLETE').trim().toUpperCase() === 'COMPLETE') return ''
     const dayLabel = dateKeyToLabel(dayKey)
     const label = `Przejrzyj sesje i rozliczenie dnia ${dayLabel}`
     return `
       <button class="wa-time-codes-btn" type="button" data-wa-time-codes="${escapeHtml(dayKey)}" data-wa-time-codes-id="${escapeHtml(workdayId)}" aria-haspopup="dialog" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M7 5h10M7 12h10M7 19h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-          <circle cx="4" cy="5" r="1.2" fill="currentColor"/><circle cx="4" cy="12" r="1.2" fill="currentColor"/><circle cx="4" cy="19" r="1.2" fill="currentColor"/>
-        </svg>
+        <i class="ph ph-list-checks" aria-hidden="true"></i>
         <span aria-hidden="true">${codes.length}</span>
-      </button>
-    `
-  }
-
-  function eventMenuButton(index, label) {
-    const disabled = canAdministerWorkers() ? '' : ' disabled'
-    return `
-      <button class="event-menu-icon-btn" type="button" data-wa-event-edit="${index}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"${disabled}>
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle cx="12" cy="5" r="1.7" fill="currentColor"/>
-          <circle cx="12" cy="12" r="1.7" fill="currentColor"/>
-          <circle cx="12" cy="19" r="1.7" fill="currentColor"/>
-        </svg>
       </button>
     `
   }
@@ -2842,10 +2893,7 @@ export function createWorkerAccountFeature(ctx) {
     const disabled = canAdministerWorkers() ? '' : ' disabled'
     return `
       <button class="event-edit-icon-btn" type="button" ${attribute}="${index}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"${disabled}>
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M4 20h4l10-10-4-4L4 16v4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-          <path d="M13 7l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-        </svg>
+        <i class="ph ph-pencil-simple" aria-hidden="true"></i>
       </button>
     `
   }
@@ -2882,7 +2930,8 @@ export function createWorkerAccountFeature(ctx) {
       appState.workerAccountEventsRows,
       (row, index, paged) => {
         const sourceIndex = (paged.page - 1) * paged.pageSize + index
-        const date = row.date || toDayKey(row.startAt ?? row.createdAt ?? row.updatedAt) || '-'
+        const dayKey = eventDayKey(row)
+        const date = dayKey ? dateKeyToLabel(dayKey) : (row.date || '-')
         const client = row.clientName || row.klient || row.clientLabel || row.clientId || '-'
         const zone = row.zoneName || row.strefa || row.zoneLabel || row.zoneId || '-'
         const location = row.location || row.lokalizacja || row.roomName || row.roomId || row.utilityRoomId || '-'
@@ -2890,8 +2939,8 @@ export function createWorkerAccountFeature(ctx) {
         const stop = row.stop || row.stopTime || row.endTime || formatTimeFromIso(row.endAt)
         const duration = row.durationLabel || row.timeLabel || formatEventDuration(row.durationSec ?? row.netSec ?? row.workSec ?? 0)
         const comment = eventCommentText(row)
-        const editor = row.editedBy || row.updatedBy || row.createdBy || row.authorName || row.modifiedBy || '-'
-        return `<div class="events-row worker-account-event-row"><div>${escapeHtml(client)}</div><div>${escapeHtml(zone)}</div><div>${escapeHtml(location)}</div><div class="mono">${escapeHtml(date)}</div><div>${eventTimePill(start, 'start')}</div><div>${eventTimePill(stop, 'stop')}</div><div>${eventTimePill(duration, 'duration')}</div><div>${eventCommentButton(sourceIndex, Boolean(comment))}</div><div>${escapeHtml(editor)}</div><div>${eventMenuButton(sourceIndex, 'Edytuj zdarzenie')}</div></div>`
+        const editor = editorDisplayName(row)
+        return `<div class="events-row worker-account-event-row"><div>${workerTablePersonMarkup(row)}</div><div class="mono">${escapeHtml(date)}</div><div>${escapeHtml(client)}</div><div>${escapeHtml(zone)}</div><div>${escapeHtml(location)}</div><div>${eventTimePill(start, 'start')}</div><div>${eventTimePill(stop, 'stop')}</div><div>${eventTimePill(duration, 'duration')}</div><div>${eventCommentButton(sourceIndex, Boolean(comment))}</div><div>${escapeHtml(editor)}</div></div>`
       },
       10,
       { withoutSelect: true },
@@ -2903,28 +2952,26 @@ export function createWorkerAccountFeature(ctx) {
       'Orders',
       appState.workerAccountOrderRows,
       (order) => {
-        const date = orderDateLabel(order)
+        const rawDate = orderDateLabel(order)
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? dateKeyToLabel(rawDate) : rawDate
         const status = orderStatusLabel(order)
-        return `<div class="events-row"><div class="events-select-col"><input type="checkbox" disabled aria-label="Zlecenie ${escapeHtml(date)}" /></div><div class="mono">${escapeHtml(date)}</div><div>${escapeHtml(orderClientLabel(order))}</div><div>${escapeHtml(orderTitle(order))}</div><div>${escapeHtml(orderZoneLabel(order))}</div><div>${eventTimePill(status, orderCompleted(order) ? 'start' : 'duration')}</div><div>-</div></div>`
+        return `<div class="events-row"><div>${workerTablePersonMarkup(order)}</div><div class="mono">${escapeHtml(date)}</div><div>${escapeHtml(orderClientLabel(order))}</div><div>${escapeHtml(orderTitle(order))}</div><div>${eventTimePill(status, orderCompleted(order) ? 'start' : 'duration')}</div></div>`
       },
-      7,
+      5,
+      { withoutSelect: true },
     )
   }
 
   function renderTimeTable() {
-    ensureTimeSelectionState()
     const root = document.getElementById('waTimeRows')
-    const rows = Array.isArray(appState.workerAccountTimeRows) ? appState.workerAccountTimeRows : []
+    const rows = workTimeCycleRowsFromDays(appState.workerAccountTimeRows)
     const paged = paginate(rows, appState.workerAccountTimePage, WORKER_ACCOUNT_TIME_PAGE_SIZE)
     appState.workerAccountTimePage = paged.page
     appState.workerAccountTimePageSize = paged.pageSize
-    appState.workerAccountTimeCurrentPageKeys = paged.items.map((row) => timeSelectionKey(row)).filter(Boolean)
 
     if (root) {
       root.innerHTML = paged.items.length
         ? paged.items.map((row) => {
-            const key = timeSelectionKey(row)
-            const selected = key && appState.workerAccountTimeSelectedKeys.has(key)
             const integrityState = String(row?.integrityState ?? 'COMPLETE').trim().toUpperCase()
             const businessToday = warsawBusinessDateKey(Date.now())
             const isCurrentBusinessDay = timeRowDayKey(row) === businessToday
@@ -2936,31 +2983,21 @@ export function createWorkerAccountFeature(ctx) {
               Array.isArray(row?.openSessions) ? row.openSessions.length : 0,
             )
             const openActivityCount = Math.max(Number(row?.openActivityCount) || 0, openActivityCountForDay(row))
-            const stateLabel = openSessionCount > 0 && !isCurrentOpenDay
-              ? `Brak STOP sesji${openSessionCount > 1 ? ` (${openSessionCount})` : ''}`
-              : openActivityCount > 0
-                ? `Brak STOP zdarzenia${openActivityCount > 1 ? ` (${openActivityCount})` : ''}`
-              : integrityState === 'INCONSISTENT'
-                ? 'Dzień wymaga korekty'
-              : integrityState === 'INVALID'
-                ? 'Błędne dane'
-                : ''
-            const stateClass = (openSessionCount > 0 && !isCurrentOpenDay) || openActivityCount > 0 ? ' is-missing-stop' : ''
+            const hasMissingStop = !isCurrentBusinessDay && (openSessionCount > 0 || openActivityCount > 0)
             return `
-              <div class="events-row worker-account-time-row${selected ? ' is-selected' : ''}${hasIntegrityProblem ? ' has-integrity-problem' : ''}">
-                <div class="events-select-col"><input type="checkbox" data-wa-time-select="${escapeHtml(key)}" ${selected ? 'checked' : ''} aria-label="Zaznacz rekord dnia ${escapeHtml(dateKeyToLabel(row.dayKey))}" /></div>
+              <div class="events-row worker-account-time-row${hasMissingStop ? ' has-missing-stop' : ''}${hasIntegrityProblem ? ' has-integrity-problem' : ''}">
+                <div>${workerTablePersonMarkup(row)}</div>
                 <div class="mono">${escapeHtml(dateKeyToLabel(row.dayKey))}</div>
-                <div>${escapeHtml(row.workerType || '-')}</div>
                 <div class="mono time-start">${escapeHtml(isoToHm(row.startAt))}</div>
-                <div class="mono time-stop">${escapeHtml(hasOpenSession ? (isCurrentOpenDay ? 'W trakcie' : 'Brak STOP') : isoToHm(row.endAt))}</div>
-                <div class="wa-time-work-cell"><span><span class="mono work-brutto">${escapeHtml(formatSeconds(row.workSec))}</span>${stateLabel ? `<small class="wa-time-work-state${stateClass}" role="status"><span aria-hidden="true">!</span>${escapeHtml(stateLabel)}</small>` : ''}</span>${workerAccountTimeCodesButton(row)}</div>
-                <div class="mono work-bold">${escapeHtml(formatSeconds(row.netSec))}</div>
+                <div class="mono time-stop">${escapeHtml(hasOpenSession ? 'BRAK' : isoToHm(row.endAt))}</div>
+                <div class="wa-time-work-cell"><span class="mono work-bold">${escapeHtml(formatSeconds(row.workSec))}</span></div>
+                <div class="wa-time-history-cell">${workerAccountTimeCodesButton(row)}</div>
                 <div class="mono time-break">${escapeHtml(formatSeconds(row.breakSec))}</div>
-                <div>${escapeHtml(row.updatedBy || '-')}</div>
+                <div>${escapeHtml(editorDisplayName(row))}</div>
               </div>
             `
           }).join('')
-        : tableEmptyRow(9, 'Brak rekordów')
+        : tableEmptyRow(8, 'Brak rekordów', 'worker-account-muted', { withoutSelect: true })
     }
 
     setText('waTimePageLabel', `Strona ${paged.page} / ${paged.totalPages}`)
@@ -2969,7 +3006,6 @@ export function createWorkerAccountFeature(ctx) {
     const next = document.getElementById('waTimeNext')
     if (prev) prev.disabled = paged.page <= 1
     if (next) next.disabled = paged.page >= paged.totalPages
-    syncTimeSelectionUi()
   }
 
   function renderAllTables() {
@@ -2980,7 +3016,7 @@ export function createWorkerAccountFeature(ctx) {
 
   function setOrdersLoading() {
     const orders = document.getElementById('waOrderRows')
-    if (orders) orders.innerHTML = tableEmptyRow(7, 'Ladowanie danych...', 'worker-account-loading')
+    if (orders) orders.innerHTML = tableEmptyRow(5, 'Ladowanie danych...', 'worker-account-loading', { withoutSelect: true })
     setText('waOrdersLabel', 'Ladowanie danych...')
     ;['waOrdersPrev', 'waOrdersNext'].forEach((id) => {
       const button = document.getElementById(id)
@@ -3000,7 +3036,7 @@ export function createWorkerAccountFeature(ctx) {
 
   function setTimeLoading() {
     const time = document.getElementById('waTimeRows')
-    if (time) time.innerHTML = tableEmptyRow(9, 'Ladowanie danych...', 'worker-account-loading')
+    if (time) time.innerHTML = tableEmptyRow(8, 'Ladowanie danych...', 'worker-account-loading', { withoutSelect: true })
     setText('waTimePageLabel', 'Ladowanie danych...')
     setText('waTimeShownLabel', `Wyswietlono: 0 - Wszystkie: 0 - Na strone: ${WORKER_ACCOUNT_TIME_PAGE_SIZE}`)
     ;['waTimePrev', 'waTimeNext'].forEach((id) => {
@@ -3044,7 +3080,7 @@ export function createWorkerAccountFeature(ctx) {
     const message = error instanceof Error ? error.message : String(error ?? 'Nie udalo sie pobrac danych konta.')
     if (section === 'orders') {
       const orders = document.getElementById('waOrderRows')
-      if (orders) orders.innerHTML = tableEmptyRow(7, message, 'worker-account-error')
+      if (orders) orders.innerHTML = tableEmptyRow(5, message, 'worker-account-error', { withoutSelect: true })
       setText('waOrdersLabel', 'Blad pobierania danych')
     } else if (section === 'activity') {
       const events = document.getElementById('waEventRows')
@@ -3053,15 +3089,12 @@ export function createWorkerAccountFeature(ctx) {
       renderRecentActivityPreview()
     } else if (section === 'time') {
       const time = document.getElementById('waTimeRows')
-      if (time) time.innerHTML = tableEmptyRow(9, message, 'worker-account-error')
+      if (time) time.innerHTML = tableEmptyRow(8, message, 'worker-account-error', { withoutSelect: true })
       appState.workerAccountTimeRows = []
-      appState.workerAccountTimeSelectedKeys = new Set()
-      appState.workerAccountTimeCurrentPageKeys = []
       appState.workerAccountTimePage = 1
       setTimeMonthCard([])
       setText('waTimePageLabel', 'Strona 1 / 1')
       setText('waTimeShownLabel', `Wyswietlono: 0 - Wszystkie: 0 - Na strone: ${WORKER_ACCOUNT_TIME_PAGE_SIZE}`)
-      syncTimeSelectionUi()
     }
     showTransientNotice(message, 'error')
   }
@@ -3154,8 +3187,6 @@ export function createWorkerAccountFeature(ctx) {
         responseItems(canonicalDaysResponse),
         worker,
       )
-      appState.workerAccountTimeSelectedKeys = new Set()
-      appState.workerAccountTimeCurrentPageKeys = []
       appState.workerAccountTimePage = 1
       appState.workerAccountTimeLoadedKey = loadKey
       appState.workerAccountLoadedWorkerKey = context.accountKey
@@ -3285,15 +3316,14 @@ export function createWorkerAccountFeature(ctx) {
     const orders = document.getElementById('waOrderRows')
     const time = document.getElementById('waTimeRows')
     if (events) events.innerHTML = tableEmptyRow(10, message, 'worker-account-error', { withoutSelect: true })
-    if (orders) orders.innerHTML = tableEmptyRow(7, message, 'worker-account-error')
-    if (time) time.innerHTML = tableEmptyRow(9, message, 'worker-account-error')
+    if (orders) orders.innerHTML = tableEmptyRow(5, message, 'worker-account-error', { withoutSelect: true })
+    if (time) time.innerHTML = tableEmptyRow(8, message, 'worker-account-error', { withoutSelect: true })
     setText('waEventsLabel', 'Blad pobierania danych')
     setText('waOrdersLabel', 'Blad pobierania danych')
     setText('waTimePageLabel', 'Strona 1 / 1')
     setText('waTimeShownLabel', `Wyswietlono: 0 - Wszystkie: 0 - Na strone: ${WORKER_ACCOUNT_TIME_PAGE_SIZE}`)
     setTimeMonthCard([])
     renderRecentActivityPreview()
-    syncTimeSelectionUi()
     showTransientNotice(message, 'error')
   }
 
@@ -3930,7 +3960,7 @@ export function createWorkerAccountFeature(ctx) {
       : 'Edytuj godziny i strefę zdarzenia'
     return `
       <div class="wa-time-activity" data-wa-activity-row="${escapeHtml(activityId)}">
-        <span class="wa-time-activity-branch" aria-hidden="true">↳</span>
+        <span class="wa-time-activity-branch" aria-hidden="true"><i class="ph ph-arrow-bend-down-right"></i></span>
         <span class="wa-time-activity-copy">
           <strong>${escapeHtml(activity.eventType || 'ZDARZENIE')}</strong>
           <small>${escapeHtml(client)} · ${escapeHtml(zone)} · ${escapeHtml(location)}</small>
@@ -3985,7 +4015,7 @@ export function createWorkerAccountFeature(ctx) {
       const showMissingStop = isMissingStop && !isCurrentOpenDay
       const isInvalid = !isMissingStop && session.isValid === false
       const code = { type, session: number, interval: session }
-      const markerPath = isStart ? 'M7 12h10M13 8l4 4-4 4' : 'M17 12H7m4-4-4 4 4 4'
+      const markerIcon = isStart ? 'ph-sign-in' : 'ph-sign-out'
       const stateClasses = [
         isStart ? 'is-start' : 'is-stop',
         showMissingStop ? 'is-open' : '',
@@ -4006,7 +4036,7 @@ export function createWorkerAccountFeature(ctx) {
         <div class="wa-time-code-item ${stateClasses}">
           <span class="wa-time-code-index" aria-hidden="true">${codeNumber}</span>
           <span class="wa-time-code-marker" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><path d="${markerPath}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <i class="ph ${markerIcon}"></i>
           </span>
           <span class="wa-time-code-copy">
             <strong>${type}</strong>
@@ -4750,6 +4780,15 @@ export function createWorkerAccountFeature(ctx) {
       setTrainingDropdownOpen(false)
     })
     binding.add(document, 'keydown', (event) => {
+      const eventCommentOverlay = document.getElementById('waEventCommentOverlay')
+      if (eventCommentOverlay && !eventCommentOverlay.hidden) {
+        if (event.key === 'Tab') {
+          trapWorkerAccountEventCommentFocus(event)
+          return
+        }
+        if (event.key === 'Escape') closeWorkerAccountEventComment()
+        return
+      }
       const timeCodesOverlay = document.getElementById('waTimeCodesOverlay')
       if (timeCodesOverlay && !timeCodesOverlay.hidden) {
         if (event.key === 'Tab') {
@@ -4796,6 +4835,11 @@ export function createWorkerAccountFeature(ctx) {
     })
     binding.add(document.getElementById('waTimeCodesClose'), 'click', closeWorkerAccountTimeCodes)
     binding.add(document.getElementById('waTimeCodesDone'), 'click', closeWorkerAccountTimeCodes)
+    binding.add(document.getElementById('waEventCommentOverlay'), 'click', (event) => {
+      if (event.target === event.currentTarget) closeWorkerAccountEventComment()
+    })
+    binding.add(document.getElementById('waEventCommentClose'), 'click', () => closeWorkerAccountEventComment())
+    binding.add(document.getElementById('waEventCommentDone'), 'click', () => closeWorkerAccountEventComment())
     binding.add(document.getElementById('waTimeCodesList'), 'click', (event) => {
       const target = event.target instanceof Element ? event.target : null
       const cancelEdit = target?.closest('[data-wa-entry-cancel]')
@@ -4843,10 +4887,6 @@ export function createWorkerAccountFeature(ctx) {
       appState.workerAccountTimePage = 1
       void refreshTimeTab()
     })
-    binding.add(document.getElementById('waTimeSelectAll'), 'change', (event) => {
-      setTimeRowsSelected(Boolean(event.target?.checked))
-      renderTimeTable()
-    })
     binding.add(document.getElementById('waShell'), 'click', (event) => {
       const target = event.target instanceof Element ? event.target : null
       const button = target?.closest('[data-wa-tab-shortcut]')
@@ -4859,27 +4899,9 @@ export function createWorkerAccountFeature(ctx) {
       if (commentButton) {
         const index = Number(commentButton.getAttribute('data-wa-event-comment'))
         const row = Number.isInteger(index) ? appState.workerAccountEventsRows[index] : null
-        const comment = eventCommentText(row)
-        alert(comment || 'Brak komentarza dla tego zdarzenia.')
+        openWorkerAccountEventComment(row, commentButton)
         return
       }
-      const button = target?.closest('[data-wa-event-edit]')
-      if (!button || !canAdministerWorkers()) return
-      const index = Number(button.getAttribute('data-wa-event-edit'))
-      const row = Number.isInteger(index) ? appState.workerAccountEventsRows[index] : null
-      if (row && typeof openEventEditor === 'function') {
-        void openEventEditor(row)
-      }
-    })
-    binding.add(document.getElementById('waTimeRows'), 'change', (event) => {
-      const checkbox = event.target?.closest?.('[data-wa-time-select]')
-      if (!(checkbox instanceof HTMLInputElement)) return
-      ensureTimeSelectionState()
-      const key = String(checkbox.getAttribute('data-wa-time-select') ?? '').trim()
-      if (!key) return
-      if (checkbox.checked) appState.workerAccountTimeSelectedKeys.add(key)
-      else appState.workerAccountTimeSelectedKeys.delete(key)
-      syncTimeSelectionUi()
     })
     binding.add(document.getElementById('waTimeRows'), 'click', (event) => {
       const target = event.target instanceof Element ? event.target : null
@@ -4923,7 +4945,10 @@ export function createWorkerAccountFeature(ctx) {
       })
     })
 
-    return () => binding.done()
+    return () => {
+      closeWorkerAccountEventComment({ restoreFocus: false })
+      binding.done()
+    }
   }
 
   return {

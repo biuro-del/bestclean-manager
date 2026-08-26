@@ -16,6 +16,7 @@ import {
   workIntervalsFromRow,
   workIntervalsTotalSeconds,
   workSessionAccountingFromRow,
+  workTimeCycleRowsFromDays,
   workdayPresenceFromRows,
   workSessionConfirmedTotalSeconds,
   workSessionProvisionalTotalSeconds,
@@ -243,6 +244,18 @@ test('hides technical GPS payloads without removing a user comment', () => {
   )
   assert.equal(workIntervalVisibleComment('[[GPS lat=49.917776 lng=18.48361 acc=15'), '')
   assert.equal(workIntervalVisibleComment('START_GPS lat=49.9 lon=18.4'), '')
+  assert.equal(
+    workIntervalVisibleComment(`[[GPS lat=50.028311 lng=18.685924 acc=20
+ts=2026-08-19T13:48:36.304Z src=SPECIAL_START]]
+STOP BC0823
+[[GPS lat=50.028017 lng=18.686104 acc=16
+ts=2026-08-19T16:50:27.268Z src=STOP]]`),
+    '',
+  )
+  assert.equal(
+    workIntervalVisibleComment('Komentarz pracownika | [[GPS lat=50.028311 lng=18.685924]] | STOP BC0823'),
+    'Komentarz pracownika',
+  )
   assert.equal(workIntervalVisibleComment('Sprawdź GPS w samochodzie'), 'Sprawdź GPS w samochodzie')
 })
 
@@ -369,6 +382,49 @@ test('an open third Workday keeps the two closed session total stable until STOP
   assert.equal(corrected.provisionalSec, 0)
   assert.equal(corrected.integrityState, WORKDAY_INTEGRITY_STATES.COMPLETE)
   assert.equal(assertWorkTimeRowsExportable([{ ...corrected }]), true)
+})
+
+test('table projection splits two START STOP cycles and shows the latest cycle first', () => {
+  const sourceRows = [{ workdayId: 'WD-1' }, { workdayId: 'WD-2' }]
+  const [day] = [{
+    dayKey: '2026-08-21',
+    businessDateYmd: '2026-08-21',
+    workerName: 'Agata Zalewska',
+    workerLogin: 'zalewska.agata',
+    workSec: 4 * 3600,
+    breakSec: 2 * 3600,
+    sourceRows,
+    sessions: [
+      {
+        workdayId: 'WD-2',
+        startAt: '2026-08-21T12:00:00.000Z',
+        endAt: '2026-08-21T14:00:00.000Z',
+        isValid: true,
+        integrityState: WORKDAY_INTEGRITY_STATES.COMPLETE,
+      },
+      {
+        workdayId: 'WD-1',
+        startAt: '2026-08-21T08:00:00.000Z',
+        endAt: '2026-08-21T10:00:00.000Z',
+        isValid: true,
+        integrityState: WORKDAY_INTEGRITY_STATES.COMPLETE,
+      },
+    ],
+  }]
+
+  const rows = workTimeCycleRowsFromDays([day])
+
+  assert.equal(rows.length, 2)
+  assert.deepEqual(rows.map((row) => row.dayKey), ['2026-08-21', '2026-08-21'])
+  assert.deepEqual(rows.map((row) => row.workdayId), ['WD-2', 'WD-1'])
+  assert.deepEqual(rows.map((row) => [row.startAt, row.endAt]), [
+    ['2026-08-21T12:00:00.000Z', '2026-08-21T14:00:00.000Z'],
+    ['2026-08-21T08:00:00.000Z', '2026-08-21T10:00:00.000Z'],
+  ])
+  assert.deepEqual(rows.map((row) => row.workSec), [2 * 3600, 2 * 3600])
+  assert.deepEqual(rows.map((row) => row.breakSec), [0, 0])
+  assert.equal(rows[0].sourceRows, sourceRows)
+  assert.equal(rows[1].sourceRows, sourceRows)
 })
 
 test('deduplicates operational eventId without treating activities as attendance sessions', () => {
