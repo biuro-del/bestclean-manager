@@ -3790,7 +3790,7 @@ function showLoginCompanyStart() {
   const copy = document.getElementById('loginCopy')
   if (panel) panel.hidden = false
   setLoginResetActionVisible(false)
-  if (title) title.textContent = 'Załóż firmę'
+  if (title) title.textContent = 'Rejestracja firmy'
   if (copy) copy.textContent = 'Wybierz bezpieczny sposób rozpoczęcia rejestracji.'
 }
 

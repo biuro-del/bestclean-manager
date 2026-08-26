@@ -111,8 +111,8 @@
 #loginScreen .login-panel {
   position: relative !important;
   display: flex !important;
-  align-items: flex-start !important;
-  justify-content: flex-start !important;
+  align-items: center !important;
+  justify-content: center !important;
   width: 100% !important;
   min-width: 0 !important;
   min-height: 100vh !important;

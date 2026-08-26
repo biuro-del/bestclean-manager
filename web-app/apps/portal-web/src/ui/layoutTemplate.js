@@ -72,7 +72,7 @@ export const portalLayoutTemplate = `
 
         <div class="login-company-entry" id="loginCompanyEntry" hidden>
           <span>Nie masz jeszcze konta?</span>
-          <button class="login-company-start" id="loginCompanyStart" type="button">Za&#322;&#243;&#380; firm&#281;</button>
+          <button class="login-company-start" id="loginCompanyStart" type="button">Rejestracja firmy</button>
         </div>
       </div>
 

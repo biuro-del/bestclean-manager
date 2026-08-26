@@ -45,7 +45,9 @@ test('standard login clearly identifies the cleaning-company panel', () => {
   assert.match(layout, /PANEL FIRMY SPRZ&#260;TAJ&#260;CEJ/)
   assert.match(layout, /<h1 class="login-title" id="loginTitle">Zaloguj si&#281;<\/h1>/)
   assert.match(layout, /Logowanie do panelu firmy sprz&#261;taj&#261;cej Cleanzi\./)
+  assert.match(layout, /id="loginCompanyStart" type="button">Rejestracja firmy<\/button>/)
   assert.match(app, /loginTitle\.textContent = 'Zaloguj się'/)
+  assert.match(app, /if \(title\) title\.textContent = 'Rejestracja firmy'/)
   assert.match(app, /loginCopy\.textContent = 'Logowanie do panelu firmy sprz\\u0105taj\\u0105cej Cleanzi\.'/)
 })
 
@@ -61,6 +63,10 @@ test('selected cleaning-company login composition stays isolated and interactive
   assert.match(app, /passwordToggle\?\.addEventListener\('click', togglePasswordVisibility\)/)
   assert.match(app, /passwordToggle\?\.removeEventListener\('click', togglePasswordVisibility\)/)
   assert.match(loginStyles, /grid-template-columns: minmax\(0, 53\.7%\) minmax\(0, 46\.3%\)/)
+  assert.match(
+    loginStyles,
+    /#loginScreen \.login-panel \{[\s\S]*?align-items: center !important;[\s\S]*?justify-content: center !important;/,
+  )
   assert.match(loginStyles, /width: min\(384px, 100%\) !important/)
   assert.match(loginStyles, /font-size: clamp\(39px, 3\.05vw, 44px\) !important/)
   assert.match(loginStyles, /min-height: 56px !important/)
